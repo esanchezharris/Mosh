@@ -172,11 +172,14 @@ Stage 2.** This is the documented JUCE-8 WebView `// VERIFY`; it does not block 
 
 ## Continuation roadmap (Stage 2 → 6)
 
-- **Stage 2 (WebView arrangement + swappability)** — *next; blocked on the WebView render above*. Once
-  the WebView serves the bundle: wire the bridge's `executeCommand`/`getSnapshot`/`mosh_event` to the
-  C++ `WebViewHost` (already coded), build the React arrangement (TrackList/Timeline/Clips/Transport/
-  Mixer) over the existing snapshot+events contract, then prove swappability (rebuild the bundle, zero
-  backend change). The backend half is done; this stage is mostly frontend + confirming the seam.
+- **Stage 2 (WebView arrangement + swappability)** — **React arrangement BUILT + browser-verified**
+  (`ui/src/components/` TransportBar/TrackList/Timeline/Mixer over the bridge contract; headless
+  Playwright drove create-track/add-clip/move/trim/split/transport/loop/meters/plugins against an
+  enriched contract-faithful mock; `npm run build` green). The C++ `WebViewHost` native-fn/event
+  wiring is already coded. **Only remaining:** run the bundle in the **JUCE WebView against the real
+  C++ backend** — which needs the WebView render (Windows-WebView2 blocked → macOS WKWebView) and is
+  also the live swappability proof. The seam held throughout (every mutation via `executeCommand`,
+  every visual from snapshot+events).
 - **Stage 3 (VST3 hosting via commands)** — **command surface DONE + verified on Windows with a
   Tracktion built-in** (`src/engine/PluginCommands` + `test_plugin_commands`, `[plugins]`):
   `load_plugin`/`bypass_plugin`/`remove_plugin`/`reorder_plugin` + undo, snapshot surfaces `plugins[]`.
