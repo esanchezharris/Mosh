@@ -25,7 +25,10 @@ namespace mosh
             .withWinWebView2Options (WBC::Options::WinWebView2{}
                                          .withUserDataFolder (wv2DataDir)
                                          .withBackgroundColour (juce::Colours::black))
-            .withResourceProvider ([this] (const auto& url) { return provideResource (url); })
+            // Pass the resource-provider root origin as the allowed origin (matches
+            // JUCE's WebViewPluginDemo) so the served page's CORS origin is accepted.
+            .withResourceProvider ([this] (const auto& url) { return provideResource (url); },
+                                   juce::URL (WBC::getResourceProviderRoot()).getOrigin())
             // executeCommand(name, argsJson) → MoshResult envelope (02 §1).
             .withNativeFunction ("executeCommand",
                 [this] (const juce::Array<juce::var>& args, WBC::NativeFunctionCompletion complete)
@@ -98,7 +101,24 @@ namespace mosh
 
         auto file = stagedUiDir().getChildFile (path.trimCharactersAtStart ("/"));
         if (! file.existsAsFile())
+        {
+            // Diagnostic fallback: if the provider is reached but the file is missing,
+            // render a visible page (proves the provider path works vs. a canceled
+            // navigation). Only for the document request, so missing assets still 404.
+            if (path == "/index.html")
+            {
+                const auto html = "<html><body style='background:#111;color:#eee;font-family:sans-serif;padding:24px'>"
+                                  "<h1>Mosh</h1><p>WebView resource provider reached, but the UI bundle was not found.</p>"
+                                  "<p>Looked in: " + stagedUiDir().getFullPathName() + "</p>"
+                                  "<p>Build with MOSH_BUILD_UI=ON to stage ui/dist next to the executable.</p>"
+                                  "</body></html>";
+                const auto utf8 = html.toRawUTF8();
+                std::vector<std::byte> data (html.getNumBytesAsUTF8());
+                std::memcpy (data.data(), utf8, data.size());
+                return juce::WebBrowserComponent::Resource { std::move (data), "text/html" };
+            }
             return std::nullopt;
+        }
 
         juce::MemoryBlock mb;
         if (! file.loadFileAsData (mb))

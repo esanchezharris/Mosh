@@ -42,7 +42,7 @@
 - [x] **Smoke test green over real Tracktion** (`mosh_engine_tests`, 23 assertions): `create_track`+`import_clip`(real WAV) via MoshOps; **undo/redo via MoshOps reverts/restores** (one undo system confirmed); `save()` round-trips `.tracktionedit`; tempo/transport reflected; JSONL records commands.
 - [~] **GATE:** WebView renders a snapshot cold *(blocked on Stage-2 WebView resource render)*; audio loops + scrub *(needs a run; transport commands execute)*. **Backend half of the gate (commands/undo/JSONL/save) ✅ verified.**
 
-### Stage 2 — WebView arrangement (`03`)
+### Stage 2 — WebView arrangement (`03`) — *BLOCKED on the WebView render (Windows WebView2 cancels the resource-root nav; needs the macOS WKWebView run / a WebView2 fix — see STATUS "OPEN ISSUE"). Backend seam is ready.*
 - [ ] Conventional layout: track headers, timeline lanes, clips, transport bar, mixer stub.
 - [ ] Playhead + meters via **decimated** events (30–60 Hz); waveforms from backend peaks/thumbnail (no audio on web thread).
 - [ ] All mutation via MoshOps; clip drag/trim/split → `move_clip`/`trim_clip`/`split_clip`.

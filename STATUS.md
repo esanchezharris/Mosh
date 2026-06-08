@@ -110,6 +110,90 @@ Still open (resolve when reached):
   (C++ authored with `withNativeFunction`/`emitEventIfBrowserIsVisible`; JS flagged in `ui/src/bridge.ts`) — reconcile at first WebView run.
 - `ExternalPlugin` editor accessor; `LatencyPlugin` source; anira `process`/`prepare`; bypassed-plugin PDC — **04**
 
-## Next concrete step
-Finish the Stage 0 spine build + green test run on Windows, commit Stage 0, then begin Stage 1
-(Tracktion engine bootstrap + the first real command handlers).
+## Build & test quickstart (verified commands)
+
+```powershell
+$cm = "C:\Program Files\CMake\bin\cmake.exe"   # CMake 4.x; Ninja not on PATH → VS generator
+
+# Spine + tests only (fast, any OS) — 158 assertions green:
+& $cm -S . -B build -G "Visual Studio 17 2022" -A x64 -DMOSH_BUILD_APP=OFF -DMOSH_BUILD_UI=OFF
+& $cm --build build --config Debug --target mosh_tests --parallel
+& (gci -r build -Filter mosh_tests.exe)[0].FullName --reporter compact
+
+# Full app + engine (heavy; fetches Tracktion). Engine smoke test = 23 assertions green:
+& $cm -S . -B build -DMOSH_BUILD_APP=ON -DMOSH_BUILD_UI=ON
+& $cm --build build --config Debug --target Mosh mosh_engine_tests --parallel
+& (gci -r build -Filter mosh_engine_tests.exe)[0].FullName --reporter compact
+```
+Windows-only: WebView2 SDK is fetched to `.refclone/webview2` (one-time, see `src/app/CMakeLists.txt`);
+macOS needs none of that (WKWebView). `.refclone/tracktion_engine` holds the read-only v3.2.0 clone.
+
+## Key learnings / decisions (don't relitigate)
+
+- **`namespace te = tracktion`** (NOT `tracktion::engine`): engine symbols are in the inline
+  `engine` namespace and the strong time types (`TimePosition`/`TimeDuration`/`TimeRange`) live in
+  `tracktion::core` — both surface as `tracktion::*`.
+- **`te::Engine("Mosh")`** 1-arg ctor (default UI/Engine behaviour) — `ExtendedUIBehaviour` is an
+  examples-only helper, not in the engine module. Headless/WebView app wants no native dialogs anyway.
+- **One undo system works**: the executor calls `undo.beginNewTransaction(cmd)`; Tracktion model ops
+  (`insertNewAudioTrack`/`insertWaveClip`/etc.) record into `edit.getUndoManager()` within that txn;
+  `undo`/`redo` revert/restore correctly (proven by `mosh_engine_tests`). On failure the executor calls
+  `undoCurrentTransactionOnly()` to abandon partial mutations.
+- **Save** = `EditFileOperations(edit).save(false,true,false)` (no `edit.save()`).
+- **Spine/app split**: `mosh_spine` is Tracktion-free (unit-testable anywhere); `mosh_engine` is the
+  Tracktion-bound layer. JUCE config defs on the spine are PRIVATE (so `JUCE_WEB_BROWSER=0` can't leak
+  into the app, which needs the WebView). Cache key uses FNV-1a (juce_core has no MD5/SHA — those are
+  juce_cryptography).
+- **Tracktion CMake**: add JUCE 8.0.8 first, then CPM `DOWNLOAD_ONLY` tracktion + `add_subdirectory(
+  ${src}/modules)` (that file is just `juce_add_modules(...)`) — never the repo root (it pulls JUCE
+  `develop`). Link `tracktion::tracktion_engine/core/graph`. Each consuming target recompiles the
+  Tracktion module units (≈15 min for the app) — a known JUCE cost; consider a pimpl in `mosh_engine`
+  to stop the app recompiling Tracktion if iteration speed matters.
+
+## OPEN ISSUE — WebView render (the Stage 1 cold-render + all of Stage 2)
+
+Windows WebView2 shows "Navigation to the webpage was canceled" instead of the React bundle. Verified:
+the `https://juce.backend/*` request filter is registered; `getResourceProviderRoot()` =
+`https://juce.backend/`; the provider receives `/`→ maps to a staged `index.html` that exists; base
+`pageAboutToLoad` returns true; user-data folder + dark bg + allowed-origin + a not-found inline-HTML
+fallback are all wired. WebView2 itself works (it renders its own error page). The top-level document
+just isn't served/painted on **WebView2 specifically**. This is the JUCE-8 WebView `// VERIFY` and is
+Windows-WebView2-specific — **macOS uses WKWebView (a different backend) and is the primary target**.
+**DIAGNOSED (2026-06-08):** added an inline-HTML fallback that renders when the provider is reached
+but the file is missing — it did **NOT** appear. So `provideResource` is **never called**: WebView2
+cancels the top-level navigation to `https://juce.backend/` *before* the `WebResourceRequested` filter
+can serve it. This is a WebView2 **environment/runtime** behavior (or a JUCE-8.0.8 WebView2 quirk) on
+this Windows box — **not** a code-logic/path issue (the `WebViewHost` matches JUCE's canonical
+`examples/Plugins/WebViewPluginDemo.h`). Remaining probes: (a) `goToURL("data:text/html,...")` to
+confirm WebView2 paints anything; (b) check the Evergreen WebView2 Runtime version / try
+`.withDLLLocation`; (c) **run on macOS WKWebView (the primary target) — a different backend that does
+not use the `https://juce.backend` interception the same way, and likely just works, unblocking
+Stage 2.** This is the documented JUCE-8 WebView `// VERIFY`; it does not block the macOS gate.
+
+## Continuation roadmap (Stage 2 → 6)
+
+- **Stage 2 (WebView arrangement + swappability)** — *next; blocked on the WebView render above*. Once
+  the WebView serves the bundle: wire the bridge's `executeCommand`/`getSnapshot`/`mosh_event` to the
+  C++ `WebViewHost` (already coded), build the React arrangement (TrackList/Timeline/Clips/Transport/
+  Mixer) over the existing snapshot+events contract, then prove swappability (rebuild the bundle, zero
+  backend change). The backend half is done; this stage is mostly frontend + confirming the seam.
+- **Stage 3 (VST3 hosting via commands)** — add `load_plugin`/`remove_plugin`/`reorder_plugin`/
+  `set_plugin_param`/`bypass_plugin`/`open_plugin_editor` handlers in `mosh_engine` over Tracktion's
+  `ExternalPlugin` + `PluginManager`. Resolve the `// VERIFY` ExternalPlugin editor accessor against
+  the clone. Snapshot already has a `plugins:[]` slot per track.
+- **Stage 4 (Tier-A neural)** — anira-backed `NeuralInsertPlugin` (custom `tracktion::Plugin` via
+  `createBuiltInType<>()`); NAM/Proteus ship, RAVE gated; `getLatencySeconds()` true delay + PDC null
+  test; ASTD clamps (the spine's `Astd` is ready) + Lab mode. macOS-primary (anira backends); the
+  bypass inverted-logic bug is called out in `04`.
+- **Stage 5 (generative)** — **FakeAdapter first** (no external deps → Windows/CI-testable!): the job
+  service (submit/status/progress/cancel + lifecycle over the Python `service/`), the RenderLayer
+  render→accept-as-take flow (spine `RenderLayer` + full `Fingerprint` are ready + tested), commands
+  `create_render_layer`/`render_layer`/`accept_render`/`reject_render`/`bypass_layer`/`freeze_layer`/
+  `bounce_layer_to_clip`. Then the `StableAudio3Adapter` (MLX, macOS-only; env-var the two hardcoded
+  paths). Takes API resolved in `docs/TRACKTION_API_NOTES.md` §9 (with the new-clip/new-track fallback).
+- **Stage 6 (consolidation)** — mixer polish, two-theme tokens, reserved B-5 slot; the full producer
+  loop end-to-end from the UI with correct undo/redo.
+
+**Highest-value Windows-testable next work (if continuing here, not on macOS):** Stage 5's FakeAdapter
+orchestration (job service + RenderLayer flow + cache fingerprint) — it needs no MLX and the cache/
+fingerprint/ASTD spine is already green. Otherwise, Stage 2 onward is best done on macOS arm64.
