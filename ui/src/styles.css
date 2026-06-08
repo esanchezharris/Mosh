@@ -1,0 +1,90 @@
+:root {
+  --bg: #0e0e11;
+  --panel: #17171c;
+  --panel-2: #1e1e25;
+  --line: #2a2a33;
+  --text: #e7e7ea;
+  --muted: #9a9aa6;
+  --accent: #6c5cff;
+  --ok: #38d39f;
+  --off: #4a4a55;
+  font-synthesis: none;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root {
+  margin: 0;
+  height: 100%;
+  width: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, "SF Pro Text", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+.shell {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+  padding: 3rem clamp(2rem, 6vw, 6rem);
+  background:
+    radial-gradient(1200px 600px at 80% -10%, rgba(108, 92, 255, 0.12), transparent),
+    var(--bg);
+}
+
+.brand { display: flex; align-items: center; gap: 1rem; }
+.logo {
+  width: 56px; height: 56px; border-radius: 14px;
+  display: grid; place-items: center;
+  font-weight: 800; font-size: 28px; color: white;
+  background: linear-gradient(140deg, var(--accent), #b06cff);
+  box-shadow: 0 10px 30px rgba(108, 92, 255, 0.35);
+}
+.brand h1 { margin: 0; font-size: 1.9rem; letter-spacing: -0.02em; }
+.tagline { margin: 0.15rem 0 0; color: var(--muted); font-size: 0.9rem; }
+
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+  max-width: 880px;
+}
+.status {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 1rem 1.1rem;
+}
+.status-head { display: flex; align-items: center; gap: 0.5rem; }
+.status-label { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+.status-value { margin-top: 0.5rem; font-size: 0.95rem; }
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--off); }
+.dot.on { background: var(--ok); box-shadow: 0 0 10px var(--ok); }
+
+.stage-rail {
+  display: flex; flex-wrap: wrap; gap: 0.5rem;
+  margin-top: auto;
+}
+.stage {
+  display: flex; align-items: center; gap: 0.5rem;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.4rem 0.85rem 0.4rem 0.4rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.stage.active { color: var(--text); border-color: var(--accent); }
+.stage .n {
+  width: 22px; height: 22px; border-radius: 50%;
+  display: grid; place-items: center;
+  background: var(--line); color: var(--text);
+  font-size: 0.75rem; font-weight: 700;
+}
+.stage.active .n { background: var(--accent); color: white; }

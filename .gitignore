@@ -1,0 +1,37 @@
+# Build output
+build/
+cmake-build-*/
+out/
+
+# CPM / fetched deps cache (kept out of repo; pinned by commit in CMake)
+.deps-inspect/
+libs/_deps/
+.cpm-cache/
+
+# Node / Vite
+node_modules/
+ui/node_modules/
+ui/dist/
+ui/.vite/
+
+# Python service
+service/.venv/
+service/__pycache__/
+**/__pycache__/
+*.pyc
+
+# Runtime / data
+*.tracktionedit
+*.log
+mosh-sessions/
+service/jobs/
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.xcodeproj
+*.xcworkspace
+compile_commands.json

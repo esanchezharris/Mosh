@@ -1,0 +1,25 @@
+{
+  "name": "mosh-ui",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "description": "Mosh arrangement UI — React/Vite in a JUCE 8 WebView. Swappable frontend (03).",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "zustand": "^4.5.5"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.11"
+  }
+}
