@@ -464,9 +464,19 @@ function LayerBadges({
             {l.status === "ready" && q && (
               <span
                 className="layer-quality"
-                title={(q.flags && q.flags.length ? q.flags : ["no DSP flags"]).join("\n") + "\n(heuristic DSP readout)"}
+                title={
+                  (q.flags && q.flags.length ? q.flags : ["no flags"]).join("\n") +
+                  (q.judge === "audiobox"
+                    ? "\n(Audiobox-Aesthetics — learned PQ)"
+                    : "\n(DSP heuristic readout)")
+                }
               >
-                {typeof q.pq === "number" && <span className="pq">pq {q.pq.toFixed(1)}</span>}
+                {typeof q.pq === "number" && (
+                  <span className={`pq ${q.judge === "audiobox" ? "learned" : ""}`}>
+                    pq {q.pq.toFixed(1)}
+                    {q.judge === "audiobox" ? "★" : ""}
+                  </span>
+                )}
                 {typeof q.pqDelta === "number" && (
                   <span className={`pqd ${q.pqDelta >= 0 ? "up" : "down"}`}>
                     {q.pqDelta >= 0 ? "▲" : "▼"}

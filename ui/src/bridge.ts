@@ -61,12 +61,14 @@ export interface ColorSetting {
 // The judge readout carried on a rendered layer (05 §7). All optional — a learned
 // judge or no judge leaves fields absent.
 export interface LayerQuality {
-  pq?: number; // production quality 0–10 (heuristic DSP proxy v0)
+  pq?: number; // production quality 0–10 (DSP proxy, or learned Audiobox PQ)
   pqBase?: number; // the reimagine source's pq (for a delta)
   pqDelta?: number; // pq - pqBase
   flags?: string[]; // human-readable signal-hygiene flags
   initLatentCache?: "hit" | "miss";
   steering?: { layer: number; alpha: number }[];
+  judge?: string; // "dsp" (heuristic) | "audiobox" (learned)
+  aesthetics?: { PQ?: number; PC?: number; CE?: number; CU?: number };
 }
 
 // A Color Rack color's descriptor from the service (05 §6): the ASTD ceiling + meta.

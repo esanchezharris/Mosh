@@ -195,7 +195,7 @@ namespace mosh
     {
         auto* q = new juce::DynamicObject();
         for (auto* k : { "pq", "pqBase", "pqDelta", "flags", "initLatentCache",
-                         "steering", "mode", "renderSec" })
+                         "steering", "mode", "renderSec", "judge", "aesthetics" })
             if (manifest.hasProperty (k)) q->setProperty (k, manifest[k]);
         return juce::var (q);
     }

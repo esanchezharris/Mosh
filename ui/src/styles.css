@@ -970,6 +970,10 @@ button:hover {
 .layer-quality .pq {
   opacity: 0.9;
 }
+.layer-quality .pq.learned {
+  color: var(--accent);
+  opacity: 1;
+}
 .layer-quality .pqd.up {
   color: var(--ok);
 }

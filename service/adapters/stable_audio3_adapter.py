@@ -59,7 +59,8 @@ except Exception:  # noqa: BLE001
 
 
 # ── config (env-overridable; the C++ host sets these in the child process env) ──
-MODEL_DIR = os.environ.get("MOSH_SA3_MODEL_DIR", "E:/comfy4_models/unet")
+#: Default on the SSD (cuts the ~228 s HDD cold load). Override with MOSH_SA3_MODEL_DIR.
+MODEL_DIR = os.environ.get("MOSH_SA3_MODEL_DIR", "C:/mosh-models/sa3")
 USE_HALF = os.environ.get("MOSH_SA3_HALF", "1") != "0"
 SAMPLER = os.environ.get("MOSH_SA3_SAMPLER", "pingpong")
 MAX_DURATION = float(os.environ.get("MOSH_SA3_MAX_DURATION", "12.0"))
@@ -257,21 +258,65 @@ def _write_wav(path: str, audio: torch.Tensor, sr: int):
     return int(wav.shape[1]), wav
 
 
-def _quality(wav_out, sr, src_2d, in_sr):
-    """pq/flags for the output (+ pqBase for a reimagine source). Best-effort."""
+def _score_source_learned(lj, src_2d, in_sr):
+    """Write the reimagine source region to a temp WAV and learned-score its PQ."""
+    import tempfile
+    tmp = os.path.join(tempfile.gettempdir(), f"mosh_judge_src_{os.getpid()}.wav")
+    try:
+        sf.write(tmp, src_2d, in_sr, subtype="PCM_24")
+        learned = lj.score(tmp)
+        return float(learned["PQ"]) if learned and "PQ" in learned else None
+    except Exception:  # noqa: BLE001
+        return None
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+
+
+def _quality(wav_out, sr, src_2d, in_sr, out_path):
+    """pq/flags for the output (+ pqBase for a reimagine source). Best-effort.
+
+    The DSP readout (flags + a fallback pq) is ALWAYS computed. When MOSH_JUDGE=learned,
+    Meta's Audiobox-Aesthetics PQ (via the producer-lab sidecar) OVERRIDES the pq while
+    the DSP flags are kept — a learned aesthetic score plus signal-hygiene flags. Any
+    sidecar failure silently leaves the DSP pq (graceful degrade)."""
     if JUDGE == "none" or judge is None:
         return {}
     try:
-        out = judge.analyze_array(wav_out, sr)
-        q = {"pq": out["pq"], "flags": out["flags"], "metrics": out["metrics"], "judge": "dsp"}
-        if src_2d is not None:
-            base = judge.analyze_array(src_2d, in_sr)
-            q["pqBase"] = base["pq"]
-            q["pqDelta"] = round(out["pq"] - base["pq"], 2)
-        return q
+        dsp = judge.analyze_array(wav_out, sr)
     except Exception as exc:  # noqa: BLE001 — QA must never fail a render
-        _log(f"quality readout failed: {exc!r}")
+        _log(f"dsp readout failed: {exc!r}")
         return {}
+
+    q = {"pq": dsp["pq"], "flags": dsp["flags"], "metrics": dsp["metrics"], "judge": "dsp"}
+    pq_base = None
+    if src_2d is not None:
+        try:
+            pq_base = judge.analyze_array(src_2d, in_sr)["pq"]
+        except Exception:  # noqa: BLE001
+            pq_base = None
+
+    if JUDGE == "learned":
+        lj = judge.learned_judge()
+        learned = lj.score(out_path)
+        if learned and "PQ" in learned:
+            q["pq"] = round(float(learned["PQ"]), 2)
+            q["judge"] = "audiobox"
+            q["aesthetics"] = {k: round(float(learned[k]), 2)
+                               for k in ("PQ", "PC", "CE", "CU") if k in learned}
+            if src_2d is not None:
+                base = _score_source_learned(lj, src_2d, in_sr)
+                if base is not None:
+                    pq_base = base
+        else:
+            _log("learned judge unavailable → DSP pq")
+
+    if pq_base is not None and q["pq"] is not None:
+        q["pqBase"] = round(float(pq_base), 2)
+        q["pqDelta"] = round(q["pq"] - q["pqBase"], 2)
+    return q
 
 
 class StableAudio3Adapter:
@@ -298,6 +343,13 @@ class StableAudio3Adapter:
             _load_model()
         except Exception as exc:  # noqa: BLE001 - warmup is best-effort
             _log(f"warmup failed (will retry on first render): {exc!r}")
+        # Preload the learned judge sidecar (its model load is also slow) so the first
+        # scored render isn't a stall. Best-effort — falls back to DSP if it fails.
+        if JUDGE == "learned" and judge is not None:
+            try:
+                judge.learned_judge().warmup()
+            except Exception as exc:  # noqa: BLE001
+                _log(f"learned judge warmup failed (will fall back to DSP): {exc!r}")
 
     def render(self, request: dict, on_progress, is_canceled):
         job_id = request["jobId"]
@@ -376,7 +428,7 @@ class StableAudio3Adapter:
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
-        quality = _quality(wav_out, sr, src_2d, in_sr)
+        quality = _quality(wav_out, sr, src_2d, in_sr, wav_path)
 
         manifest = {
             "wavPath": wav_path,

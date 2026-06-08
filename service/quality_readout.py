@@ -155,6 +155,119 @@ def compare(pq, pq_base):
     return {"pq": pq, "pq_base": pq_base, "delta": delta, "improved": delta >= 0}
 
 
+# ── learned judge (MOSH_JUDGE=learned) — Meta Audiobox-Aesthetics via a sidecar ──
+# The producer-lab repo already has the Audiobox-Aesthetics PQ model installed and
+# wrapped. We spawn its persistent sidecar (`mosh_judge_server.py`) with the producer-
+# lab venv ONCE (model loaded once), then score rendered WAVs over a stdin/stdout pipe.
+# Any failure → score() returns None and the caller falls back to the DSP `pq`.
+import json as _json
+import os as _os
+import subprocess as _sp
+import threading as _th
+
+_PRODUCER_LAB = _os.environ.get("MOSH_JUDGE_PRODUCER_LAB", r"C:\Users\dawha\MonsterDAWW\producer-lab")
+#: Run the sidecar with producer-lab's venv (it has audiobox_aesthetics + torch)...
+_JUDGE_PYTHON = _os.environ.get(
+    "MOSH_JUDGE_PYTHON", _os.path.join(_PRODUCER_LAB, ".venv", "Scripts", "python.exe"))
+#: ...but the sidecar itself lives in THIS repo (it adds producer-lab/src to sys.path).
+_JUDGE_SCRIPT = _os.environ.get(
+    "MOSH_JUDGE_SCRIPT",
+    _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "scripts", "mosh_judge_server.py"))
+
+
+class LearnedJudge:
+    """Client for the persistent Audiobox sidecar. Lazily spawns it, scores WAV paths,
+    and degrades to None on any problem (sidecar missing, model-load failure, crash)."""
+
+    def __init__(self):
+        self._proc = None
+        self._lock = _th.Lock()
+        self._ready = False
+        self._dead = False
+
+    def available(self) -> bool:
+        return _os.path.isfile(_JUDGE_PYTHON) and _os.path.isfile(_JUDGE_SCRIPT)
+
+    def start(self) -> bool:
+        """Spawn the sidecar and block on its handshake (the model load). Idempotent."""
+        with self._lock:
+            if self._ready:
+                return True
+            if self._dead or self._proc is not None:
+                return self._ready
+            if not self.available():
+                self._dead = True
+                return False
+            try:
+                self._proc = _sp.Popen(
+                    [_JUDGE_PYTHON, _JUDGE_SCRIPT],
+                    stdin=_sp.PIPE, stdout=_sp.PIPE, stderr=_sp.DEVNULL,
+                    text=True, bufsize=1, cwd=_PRODUCER_LAB,
+                )
+                line = self._proc.stdout.readline()  # blocks until model loaded (~6-8 s)
+                obj = _json.loads(line) if line else {}
+                self._ready = bool(obj.get("ready"))
+                if not self._ready:
+                    self._dead = True
+            except Exception:  # noqa: BLE001
+                self._dead = True
+                self._ready = False
+            return self._ready
+
+    def warmup(self) -> None:
+        try:
+            self.start()
+        except Exception:  # noqa: BLE001
+            pass
+
+    def score(self, wav_path: str):
+        """Return {PQ, PC, CE, CU} for a WAV, or None on any failure (→ DSP fallback)."""
+        if self._dead:
+            return None
+        if not self._ready and not self.start():
+            return None
+        with self._lock:
+            try:
+                if self._proc is None or self._proc.poll() is not None:
+                    self._dead = True
+                    return None
+                self._proc.stdin.write(str(wav_path) + "\n")
+                self._proc.stdin.flush()
+                line = self._proc.stdout.readline()
+                if not line:
+                    self._dead = True
+                    return None
+                obj = _json.loads(line)
+                return None if "error" in obj else obj
+            except Exception:  # noqa: BLE001
+                self._dead = True
+                return None
+
+    def close(self) -> None:
+        with self._lock:
+            if self._proc is not None and self._proc.poll() is None:
+                try:
+                    self._proc.stdin.write("__quit__\n")
+                    self._proc.stdin.flush()
+                except Exception:  # noqa: BLE001
+                    pass
+                try:
+                    self._proc.terminate()
+                except Exception:  # noqa: BLE001
+                    pass
+
+
+_LEARNED = None
+
+
+def learned_judge() -> LearnedJudge:
+    """Process-wide singleton sidecar client."""
+    global _LEARNED
+    if _LEARNED is None:
+        _LEARNED = LearnedJudge()
+    return _LEARNED
+
+
 if __name__ == "__main__":
     import json
     import sys

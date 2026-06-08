@@ -31,6 +31,17 @@ the model dir, launches Mosh; UI opens in the browser). Env reference: `.env.exa
 limitation; macOS WKWebView is the path), and a *learned* judge (audiobox-aesthetics in a separate venv).
 Note: the ~228 s model load is from an HDD (`E:`); copying the model to the SSD would cut it sharply.
 
+## FOLLOW-UPS (2026-06-08): SSD model, app-mode UI window, learned judge — DONE + verified
+
+| Item | What | Verified |
+|---|---|---|
+| **SA3 model on SSD** | `model.safetensors` + `model_config.json` copied to `C:\mosh-models\sa3` (the only config path ref is an unused training-discriminator placeholder). Default `MOSH_SA3_MODEL_DIR` repointed (`run-mosh-pc.ps1`, `.env.example`, adapter `MODEL_DIR`); the HDD original stays as a backup. | ✅ load **228 s (HDD) → 145.9 s (SSD cold-read) → 84.1 s (OS-cache warm)**. The residual is safetensors deserialize + fp16 + GPU upload + weight-norm (compute, not disk). |
+| **App-mode UI window** | `MOSH_UI_MODE=app` (new Windows default): a frameless Edge/Chrome `--app=http://localhost:<port>` window with its own user-data-dir, owned by the host (`WebViewHost::launchAppWindow`, closed in the dtor); falls back to `browser` if no Chromium. No frontend change. | ✅ Edge launched `--app=`; backend **`uiConnected=True`** (the app window loaded the React UI + drove the real backend — no browser tab). |
+| **Embedded WebView2 retry (2b)** | Time-boxed: deferred the first `goToURL` until the component is realized/sized + re-nav, and made `webview` mode fall back to the **app-mode window** (not a bare browser tab) when blank. | ⚠️ **Still blank on JUCE-8.0.8/Windows even with the fix** — the app-mode fallback fires (confirmed dead here; app-mode is the answer). The deferred-nav + app-mode fallback are kept (correct, and macOS `webview` benefits). |
+| **Learned judge** | `MOSH_JUDGE=learned`: a persistent sidecar (`producer-lab\scripts\mosh_judge_server.py`, producer-lab `.venv`) loads Meta **Audiobox-Aesthetics** once and scores rendered WAVs over a stdin/stdout pipe. `service/quality_readout.py` `LearnedJudge` spawns it; the adapter uses the learned **PQ as `pq`** + the four axes, KEEPS the DSP flags, and falls back to the DSP `pq` if the sidecar is absent. Runs on **CPU by default** (no VRAM contention with SA3; `MOSH_JUDGE_GPU=1` to use the GPU). DSP stays the default. | ✅ live app manifest: `judge=audiobox`, `pq=5.82` (Audiobox PQ), `aesthetics={PQ,PC,CE,CU}`, `pqBase=6.92`/`pqDelta=-1.1`, DSP flags kept, real steering intact. Standalone `test_learned_judge.py` PASS. |
+
+Knobs (`.env.example`): `MOSH_SA3_MODEL_DIR` (SSD), `MOSH_UI_MODE=app|browser|webview|none`, `MOSH_JUDGE=dsp|learned|none`, `MOSH_JUDGE_PYTHON`/`MOSH_JUDGE_SCRIPT`/`MOSH_JUDGE_PRODUCER_LAB`, `MOSH_JUDGE_GPU`. Suite still **338/47 green** (DSP + Fake defaults keep CI untouched). Note: hard-killing Mosh orphans its generative service on :8765 (the dtor that kills it is skipped) — graceful close is clean; a crash leaves an orphan the next launch may reuse.
+
 ## DEFERRED GENERATIVE ITEMS — COMPLETED (2026-06-08): real colors, init-latent cache, judge
 
 The COLORRACK calibration (`colors-…zip`, now bundled at `service/colors/`) unblocked the three SA3

@@ -11,8 +11,13 @@
 // entirely (a normal http navigation just works; for that origin JUCE does not
 // inject window.__JUCE__, so ui/bridge.ts selects the HTTP transport).
 //
-// On a persistent WebView2 load failure — or when MOSH_UI_MODE=browser — it falls
-// back to launching the system default browser at the same URL and shows a note.
+// MOSH_UI_MODE selects the shell:
+//   "app"     (default on Windows) — a frameless Edge/Chrome --app window owned by
+//             the host (closes with Mosh); falls back to "browser" if none found.
+//   "browser" — the system default browser at the URL (a normal tab).
+//   "webview" — the embedded JUCE WebView2 (works on macOS WKWebView; on this
+//             Windows machine it renders blank, a JUCE-8.0.8 limitation).
+//   "none"    — headless backend only.
 // ──────────────────────────────────────────────────────────────────────────────
 namespace mosh
 {
@@ -29,11 +34,18 @@ namespace mosh
 
     private:
         void launchInBrowser();
+        // Launch a frameless app-mode Chromium window (Edge, then Chrome) at the URL,
+        // owned by this host. Returns false (→ caller falls back to the browser) if no
+        // Chromium is found or it won't start.
+        bool launchAppWindow();
+        // Locate msedge.exe / chrome.exe (standard install dirs + App Paths registry).
+        static juce::File findChromiumExe();
 
         juce::String url;
         juce::Label  status;
         std::function<bool()> uiConnected;
         std::unique_ptr<juce::WebBrowserComponent> webView;
+        std::unique_ptr<juce::ChildProcess> appProc;   // the owned app-mode window
         bool browserLaunched = false;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (WebViewHost)
