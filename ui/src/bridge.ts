@@ -206,8 +206,17 @@ function makeJuceBridge(backend: JuceBackend): Bridge {
 }
 
 // ---------------------------------------------------------------------------
-// In-memory mock bridge (dev / standalone browser). Returns plausible
-// envelopes and a tiny seeded session so the placeholder renders without C++.
+// In-memory mock bridge (dev / standalone browser).
+//
+// This is a CONTRACT-FAITHFUL backend: it maintains a real session model,
+// applies every command in the Stage-2 catalog, emits the matching typed
+// events, and returns correct MoshResult envelopes + snapshots. It exists so
+// the entire arrangement UI is exercisable in a plain browser with no C++.
+// It is isolated to the mock path; the JUCE path (makeJuceBridge) is untouched.
+//
+// Discipline note: the mock plays the role of C++. It is therefore ALLOWED to
+// hold domain state and decide outcomes — that is exactly what the real backend
+// does. The UI still only ever sees this seam (executeCommand + snapshot/events).
 // ---------------------------------------------------------------------------
 
 function makeMockBridge(): Bridge {
@@ -231,22 +240,138 @@ function makeMockBridge(): Bridge {
     error_code: null,
     data,
   });
+  const fail = (
+    error_code: string,
+    message: string,
+    data: Record<string, unknown> = {}
+  ): MoshResult => ({
+    ok: false,
+    message,
+    changed_entities: [],
+    error_code,
+    data,
+  });
 
   let trackSeq = 0;
+  let clipSeq = 0;
+  let pluginSeq = 0;
+  let layerSeq = 0;
+
+  // --- helpers over the session model -------------------------------------
+  const findTrack = (id: unknown): TrackState | undefined =>
+    snapshot.tracks.find((t) => t.id === id);
+
+  const findClip = (
+    id: unknown
+  ): { track: TrackState; clip: ClipState } | undefined => {
+    for (const track of snapshot.tracks) {
+      const clip = track.clips.find((c) => c.id === id);
+      if (clip) return { track, clip };
+    }
+    return undefined;
+  };
+
+  const findPlugin = (
+    id: unknown
+  ): { track: TrackState; plugin: PluginState } | undefined => {
+    for (const track of snapshot.tracks) {
+      const plugin = track.plugins.find((p) => p.id === id);
+      if (plugin) return { track, plugin };
+    }
+    return undefined;
+  };
+
+  const num = (v: unknown, fallback: number): number =>
+    typeof v === "number" && Number.isFinite(v) ? v : fallback;
+  const str = (v: unknown, fallback: string): string =>
+    typeof v === "string" ? v : fallback;
+  const bool = (v: unknown, fallback: boolean): boolean =>
+    typeof v === "boolean" ? v : fallback;
+
+  // --- decimated playhead timer (emulates the C++ transport_position tap) ---
+  // Real backend decimates audio-thread position to 30-60 Hz before it crosses
+  // the seam. We tick at 60 Hz and advance position by wall-clock delta, looping
+  // when a loop range is set. Meters are faked off the same tick (decimated).
+  let timer: number | null = null;
+  let lastTick = 0;
+
+  const stopTimer = () => {
+    if (timer !== null) {
+      clearInterval(timer);
+      timer = null;
+    }
+  };
+
+  const startTimer = () => {
+    if (timer !== null) return;
+    lastTick = performance.now();
+    timer = setInterval(() => {
+      const now = performance.now();
+      const dt = (now - lastTick) / 1000;
+      lastTick = now;
+
+      let pos = snapshot.transport.position + dt;
+      const loop = snapshot.transport.loop;
+      if (loop && pos >= loop[1]) {
+        const span = loop[1] - loop[0];
+        pos = span > 0 ? loop[0] + ((pos - loop[0]) % span) : loop[0];
+      }
+      snapshot.transport.position = pos;
+      emit({ type: "transport_position", pos });
+
+      // Fake decimated meters: only tracks with a clip under the playhead are
+      // "hot". RMS/peak are plausible non-audio values derived from the clock.
+      for (const track of snapshot.tracks) {
+        const live =
+          !track.mute &&
+          track.clips.some((c) => pos >= c.range[0] && pos < c.range[1]);
+        const base = live ? 0.35 + 0.45 * Math.abs(Math.sin(now / 140 + pos)) : 0;
+        const g = track.gain;
+        emit({
+          type: "meter_update",
+          trackId: track.id,
+          rms: base * g * 0.8,
+          peak: base * g,
+        });
+      }
+    }, 1000 / 60) as unknown as number;
+  };
+
+  // --- fake render-layer progress (emulates the generative job service) -----
+  const runFakeRender = (layerId: string) => {
+    emit({ type: "layer_status", id: layerId, status: "rendering" });
+    let pct = 0;
+    const iv = setInterval(() => {
+      pct += 12 + Math.random() * 10;
+      if (pct >= 100) {
+        clearInterval(iv);
+        emit({ type: "layer_render_progress", id: layerId, pct: 100, etaSec: 0 });
+        emit({ type: "layer_status", id: layerId, status: "ready" });
+        emit({
+          type: "layer_rendered",
+          id: layerId,
+          takeId: `take:${layerId}_0`,
+        });
+      } else {
+        const etaSec = Math.max(0, ((100 - pct) / 22) * 0.4);
+        emit({ type: "layer_render_progress", id: layerId, pct, etaSec });
+      }
+    }, 400);
+  };
 
   return {
     kind: "mock",
 
     async executeCommand(name, args) {
-      // Just enough behavior to make the seam observable in dev. Stage 1+ adds
-      // real command handling on the C++ side; this mock is intentionally thin.
+      const a = args ?? {};
       switch (name) {
+        // --- tracks --------------------------------------------------------
         case "create_track": {
           trackSeq += 1;
           const id = `track:mock_${trackSeq}`;
           const track: TrackState = {
             id,
-            name: (args?.name as string) ?? `Track ${trackSeq}`,
+            name: str(a.name, `Track ${trackSeq}`),
             gain: 0.8,
             mute: false,
             solo: false,
@@ -259,24 +384,258 @@ function makeMockBridge(): Bridge {
           emit({ type: "track_added", track });
           return ok(`Created ${track.name}`, [id], { id });
         }
-        case "set_transport": {
-          if (typeof args?.playing === "boolean") {
-            snapshot.transport.playing = args.playing as boolean;
-          }
-          if (typeof args?.position === "number") {
-            snapshot.transport.position = args.position as number;
-            emit({ type: "transport_position", pos: args.position as number });
-          }
-          return ok("Transport updated", [], {});
+        case "delete_track": {
+          const t = findTrack(a.track ?? a.id);
+          if (!t) return fail("no_such_track", "Track not found");
+          snapshot.tracks = snapshot.tracks.filter((x) => x.id !== t.id);
+          emit({ type: "track_removed", id: t.id });
+          return ok(`Deleted ${t.name}`, [t.id], {});
         }
+        case "rename_track": {
+          const t = findTrack(a.track ?? a.id);
+          if (!t) return fail("no_such_track", "Track not found");
+          t.name = str(a.name, t.name);
+          emit({ type: "track_changed", id: t.id, fields: { name: t.name } });
+          return ok(`Renamed to ${t.name}`, [t.id], {});
+        }
+        case "set_track_gain": {
+          const t = findTrack(a.track ?? a.id);
+          if (!t) return fail("no_such_track", "Track not found");
+          t.gain = Math.max(0, Math.min(1.5, num(a.gain, t.gain)));
+          emit({ type: "track_changed", id: t.id, fields: { gain: t.gain } });
+          return ok("Gain set", [t.id], { gain: t.gain });
+        }
+        case "set_track_mute": {
+          const t = findTrack(a.track ?? a.id);
+          if (!t) return fail("no_such_track", "Track not found");
+          t.mute = bool(a.mute, !t.mute);
+          emit({ type: "track_changed", id: t.id, fields: { mute: t.mute } });
+          return ok("Mute set", [t.id], { mute: t.mute });
+        }
+        case "set_track_solo": {
+          const t = findTrack(a.track ?? a.id);
+          if (!t) return fail("no_such_track", "Track not found");
+          t.solo = bool(a.solo, !t.solo);
+          emit({ type: "track_changed", id: t.id, fields: { solo: t.solo } });
+          return ok("Solo set", [t.id], { solo: t.solo });
+        }
+        case "arm_track": {
+          const t = findTrack(a.track ?? a.id);
+          if (!t) return fail("no_such_track", "Track not found");
+          t.armed = bool(a.armed, !t.armed);
+          emit({ type: "track_changed", id: t.id, fields: { armed: t.armed } });
+          return ok("Arm set", [t.id], { armed: t.armed });
+        }
+
+        // --- clips ---------------------------------------------------------
+        case "import_clip": {
+          const t = findTrack(a.track ?? a.trackId);
+          if (!t) return fail("no_such_track", "Track not found");
+          clipSeq += 1;
+          const start = num(a.start, 0);
+          const length = num(a.length, 4);
+          const clip: ClipState = {
+            id: `clip:mock_${clipSeq}`,
+            range: [start, start + length],
+          };
+          t.clips.push(clip);
+          emit({ type: "clip_added", trackId: t.id, clip });
+          return ok(`Imported clip`, [t.id, clip.id], { id: clip.id });
+        }
+        case "move_clip": {
+          const found = findClip(a.clip ?? a.id);
+          if (!found) return fail("no_such_clip", "Clip not found");
+          const { clip } = found;
+          const len = clip.range[1] - clip.range[0];
+          const start = Math.max(0, num(a.start, clip.range[0]));
+          clip.range = [start, start + len];
+          emit({ type: "clip_moved", id: clip.id, range: clip.range });
+          return ok("Moved clip", [clip.id], { range: clip.range });
+        }
+        case "trim_clip": {
+          const found = findClip(a.clip ?? a.id);
+          if (!found) return fail("no_such_clip", "Clip not found");
+          const { clip } = found;
+          let [s, e] = clip.range;
+          if (typeof a.start === "number") s = Math.max(0, a.start as number);
+          if (typeof a.end === "number") e = a.end as number;
+          // Keep a minimum length so clips stay grabbable.
+          if (e - s < 0.05) {
+            if (typeof a.start === "number") s = e - 0.05;
+            else e = s + 0.05;
+          }
+          clip.range = [s, e];
+          emit({ type: "clip_moved", id: clip.id, range: clip.range });
+          return ok("Trimmed clip", [clip.id], { range: clip.range });
+        }
+        case "split_clip": {
+          const found = findClip(a.clip ?? a.id);
+          if (!found) return fail("no_such_clip", "Clip not found");
+          const { track, clip } = found;
+          const at = num(a.at, (clip.range[0] + clip.range[1]) / 2);
+          if (at <= clip.range[0] || at >= clip.range[1]) {
+            return fail("bad_split", "Split point outside clip");
+          }
+          clipSeq += 1;
+          const left: ClipState = {
+            id: clip.id,
+            range: [clip.range[0], at],
+          };
+          clipSeq += 1;
+          const right: ClipState = {
+            id: `clip:mock_${clipSeq}`,
+            range: [at, clip.range[1]],
+          };
+          const idx = track.clips.findIndex((c) => c.id === clip.id);
+          track.clips.splice(idx, 1, left, right);
+          emit({ type: "clip_split", trackId: track.id, clips: [left, right] });
+          return ok("Split clip", [track.id, left.id, right.id], {
+            clips: [left.id, right.id],
+          });
+        }
+        case "delete_clip":
+        case "remove_clip": {
+          const found = findClip(a.clip ?? a.id);
+          if (!found) return fail("no_such_clip", "Clip not found");
+          const { track, clip } = found;
+          track.clips = track.clips.filter((c) => c.id !== clip.id);
+          emit({ type: "clip_removed", id: clip.id });
+          return ok("Removed clip", [clip.id], {});
+        }
+
+        // --- transport / tempo --------------------------------------------
+        case "set_transport": {
+          const tr = snapshot.transport;
+          if (typeof a.position === "number") {
+            tr.position = a.position as number;
+            emit({ type: "transport_position", pos: tr.position });
+          }
+          if (
+            typeof a.loopStart === "number" ||
+            typeof a.loopEnd === "number" ||
+            typeof a.looping === "boolean"
+          ) {
+            if (a.looping === false) {
+              tr.loop = null;
+            } else {
+              const cur = tr.loop ?? [0, 8];
+              const ls = num(a.loopStart, cur[0]);
+              const le = num(a.loopEnd, cur[1]);
+              tr.loop = a.looping === false ? null : [ls, le];
+            }
+          }
+          if (typeof a.playing === "boolean") {
+            tr.playing = a.playing as boolean;
+            if (tr.playing) startTimer();
+            else stopTimer();
+          }
+          // `record` is accepted but, like a real transport, just flips playing
+          // with armed semantics handled track-side; we surface it in data.
+          return ok("Transport updated", [], {
+            playing: tr.playing,
+            position: tr.position,
+            loop: tr.loop,
+            record: bool(a.record, false),
+          });
+        }
+        case "set_tempo": {
+          snapshot.tempo.bpm = Math.max(20, Math.min(300, num(a.bpm, snapshot.tempo.bpm)));
+          if (typeof a.sig === "string") snapshot.tempo.sig = a.sig as string;
+          // Tempo lives in the snapshot; signal a resync so the ruler refits.
+          emit({ type: "snapshot_invalidated" });
+          return ok("Tempo set", [], { bpm: snapshot.tempo.bpm });
+        }
+
+        // --- plugins -------------------------------------------------------
+        case "load_plugin": {
+          const t = findTrack(a.track ?? a.trackId);
+          if (!t) return fail("no_such_track", "Track not found");
+          pluginSeq += 1;
+          const plugin: PluginState = {
+            id: `plugin:mock_${pluginSeq}`,
+            type: str(a.type, "vst3"),
+            name: str(a.name, `Plugin ${pluginSeq}`),
+            bypassed: false,
+          };
+          t.plugins.push(plugin);
+          emit({ type: "plugin_added", trackId: t.id, plugin });
+          return ok(`Loaded ${plugin.name}`, [t.id, plugin.id], { id: plugin.id });
+        }
+        case "add_neural_insert": {
+          const t = findTrack(a.track ?? a.trackId);
+          if (!t) return fail("no_such_track", "Track not found");
+          pluginSeq += 1;
+          const plugin: PluginState = {
+            id: `plugin:mock_${pluginSeq}`,
+            type: "neural",
+            name: str(a.model, str(a.name, `Neural ${pluginSeq}`)),
+            bypassed: false,
+          };
+          t.plugins.push(plugin);
+          emit({ type: "plugin_added", trackId: t.id, plugin });
+          return ok(`Added ${plugin.name}`, [t.id, plugin.id], { id: plugin.id });
+        }
+        case "remove_plugin": {
+          const found = findPlugin(a.plugin ?? a.id);
+          if (!found) return fail("no_such_plugin", "Plugin not found");
+          const { track, plugin } = found;
+          track.plugins = track.plugins.filter((p) => p.id !== plugin.id);
+          // No dedicated plugin_removed event in the union; resync is correct.
+          emit({ type: "snapshot_invalidated" });
+          return ok(`Removed ${plugin.name}`, [track.id, plugin.id], {});
+        }
+        case "bypass_plugin": {
+          const found = findPlugin(a.plugin ?? a.id);
+          if (!found) return fail("no_such_plugin", "Plugin not found");
+          const { plugin } = found;
+          plugin.bypassed = bool(a.bypassed, !plugin.bypassed);
+          emit({
+            type: "plugin_bypassed",
+            pluginId: plugin.id,
+            bypassed: plugin.bypassed,
+          });
+          return ok("Bypass set", [plugin.id], { bypassed: plugin.bypassed });
+        }
+        case "set_plugin_param": {
+          const found = findPlugin(a.plugin ?? a.id);
+          if (!found) return fail("no_such_plugin", "Plugin not found");
+          const { plugin } = found;
+          const param = str(a.param, "param");
+          const value = num(a.value, 0);
+          emit({ type: "plugin_param_changed", pluginId: plugin.id, param, value });
+          return ok("Param set", [plugin.id], { param, value });
+        }
+
+        // --- render layers (fake generative job) --------------------------
+        case "create_render_layer": {
+          const t = findTrack(a.track ?? a.trackId);
+          if (!t) return fail("no_such_track", "Track not found");
+          layerSeq += 1;
+          const layer: RenderLayerState = {
+            id: `layer:mock_${layerSeq}`,
+            status: "idle",
+            mode: str(a.mode, "generate"),
+          };
+          t.renderLayers.push(layer);
+          emit({ type: "snapshot_invalidated" });
+          return ok("Created render layer", [t.id, layer.id], { id: layer.id });
+        }
+        case "render_layer": {
+          const id = str(a.layer ?? a.id, "");
+          if (!id) return fail("no_such_layer", "Layer not found");
+          runFakeRender(id);
+          return ok("Render started", [id], { id });
+        }
+
         default:
-          // Unknown-but-harmless: report success with a note (mock is permissive).
-          return ok(`(mock) ${name}`, [], { mock: true, args: args ?? {} });
+          // Unknown-but-harmless: report success with a note (mock is permissive
+          // toward commands not yet exercised by the Stage-2 UI).
+          return ok(`(mock) ${name}`, [], { mock: true, args: a });
       }
     },
 
     async getSnapshot() {
-      // Return a deep-ish copy so callers can't mutate mock internal state.
+      // Return a deep copy so callers can't mutate mock internal state.
       return JSON.parse(JSON.stringify(snapshot)) as Snapshot;
     },
 

@@ -1,14 +1,24 @@
 /**
- * App.tsx — Stage 0 placeholder.
+ * App.tsx — Stage 2 conventional DAW arrangement.
  *
- * Proves the WebView host works: shows the "Mosh" title and a status line that
- * reflects getSnapshot() called on mount (via the store's feed) and reports
- * whether the live backend is the JUCE bridge or the dev mock. No real DAW UI
- * yet — that is Stage 2.
+ * Layout (03 §3):
+ *   topbar       — brand + backend badge
+ *   TransportBar — play/stop/record/loop, tempo, position
+ *   body         — TrackList (left) | Timeline (center)
+ *   Mixer        — bottom strip
+ *   statusbar    — connection readout
+ *
+ * Every mutation goes through executeCommand (inside the components); every
+ * visual reflects the snapshot + applied events from the store. Selection,
+ * zoom, and scroll are UI-local view state. No Tracktion/audio concepts here.
  */
 
 import { useEffect } from "react";
 import { connectFeed, useStore } from "./store";
+import TransportBar from "./components/TransportBar";
+import TrackList from "./components/TrackList";
+import Timeline from "./components/Timeline";
+import Mixer from "./components/Mixer";
 
 export default function App() {
   const backend = useStore((s) => s.backend);
@@ -20,7 +30,6 @@ export default function App() {
   useEffect(() => connectFeed(), []);
 
   const isJuce = backend === "juce";
-  const dotClass = error ? "err" : isJuce ? "" : "mock";
 
   let stateLabel: string;
   if (loading) stateLabel = "connecting…";
@@ -28,57 +37,39 @@ export default function App() {
   else stateLabel = "ready";
 
   return (
-    <div className="shell">
+    <div className="shell daw">
       <header className="topbar">
         <span className="brand">
           Mosh<span className="dot">.</span>
         </span>
+        <span className="topbar-sub">arrangement</span>
         <span className="spacer" />
         <span className={`badge ${isJuce ? "live" : "mock"}`}>
           backend: {backend}
         </span>
       </header>
 
-      <main className="stage">
-        <div className="card">
-          <h1 className="title">Mosh</h1>
-          <p className="subtitle">native hybrid DAW — WebView shell</p>
+      <TransportBar />
 
-          <div className="status">
-            <span className={`dotpulse ${dotClass}`} />
-            <span className="key">backend</span>
-            <span className="val">{backend}</span>
-            <span className="key">·</span>
-            <span className="key">state</span>
-            <span className="val">{stateLabel}</span>
-          </div>
-
-          <div className="meta">
-            {error ? (
-              <span className="pill">snapshot error: {error}</span>
-            ) : snapshot ? (
-              <>
-                <span className="pill">tracks: {snapshot.tracks.length}</span>
-                {"  ·  "}
-                <span className="pill">tempo: {snapshot.tempo.bpm} bpm</span>
-                {"  ·  "}
-                <span className="pill">sig: {snapshot.tempo.sig}</span>
-              </>
-            ) : (
-              <span className="pill">awaiting snapshot…</span>
-            )}
-            <br />
-            Stage 0 skeleton · seam = executeCommand + snapshot/events
-          </div>
-        </div>
+      <main className="daw-body">
+        <TrackList />
+        <Timeline />
       </main>
+
+      <Mixer />
 
       <footer className="statusbar">
         <span>
           bridge <span className="ok">{isJuce ? "JUCE" : "mock"}</span>
         </span>
-        <span>snapshot {snapshot ? "loaded" : loading ? "…" : "—"}</span>
-        <span>events subscribed</span>
+        <span>state {stateLabel}</span>
+        <span>tracks {snapshot?.tracks.length ?? 0}</span>
+        <span>
+          {snapshot
+            ? `${snapshot.tempo.bpm.toFixed(0)} bpm · ${snapshot.tempo.sig}`
+            : "—"}
+        </span>
+        {error && <span className="err-text">{error}</span>}
       </footer>
     </div>
   );

@@ -43,11 +43,12 @@
 - [x] **Persistence verified** (`test_persistence`, `[persist]`): tracks/clips/plugins/**neural insert** survive a save → **fresh-session reload** (`saveAs`/`loadEditFromFile`; the custom plugin deserializes via its `createBuiltInType` registration). Covers Stage 1 "save/reload restores" + Stage 3 "persists".
 - [~] **GATE:** WebView renders a snapshot cold *(blocked on Stage-2 WebView resource render)*; audio loops + scrub *(needs a run; transport commands execute)*. **Backend half (commands/undo/JSONL/save-reload) ✅ verified.**
 
-### Stage 2 — WebView arrangement (`03`) — *BLOCKED on the WebView render (Windows WebView2 cancels the resource-root nav; needs the macOS WKWebView run / a WebView2 fix — see STATUS "OPEN ISSUE"). Backend seam is ready.*
-- [ ] Conventional layout: track headers, timeline lanes, clips, transport bar, mixer stub.
-- [ ] Playhead + meters via **decimated** events (30–60 Hz); waveforms from backend peaks/thumbnail (no audio on web thread).
-- [ ] All mutation via MoshOps; clip drag/trim/split → `move_clip`/`trim_clip`/`split_clip`.
-- [ ] **GATE:** arrange entirely from the UI (move/trim/split, transport, loop), responsive; **rebuild the React bundle with zero backend change and it still works** (swappability).
+### Stage 2 — WebView arrangement (`03`) — *React arrangement built + browser-verified against the contract; only the WebView render is macOS-blocked*
+- [x] Conventional layout built (`ui/src/components/`): `TransportBar`, `TrackList` (headers: rename/gain/M/S/arm/delete + plugin chips), `Timeline` (Ruler/Lanes/ClipViews/Playhead/loop overlay/zoom), `Mixer` strips.
+- [x] Playhead + meters via **decimated** events (60 Hz `transport_position`/`meter_update`); per-clip faked waveforms (no audio on the web thread, 03 §5).
+- [x] All mutation via MoshOps; clip drag/trim/split → `move_clip`/`trim_clip`/`split_clip`; transport/tempo/track/plugin/neural/render-layer commands wired. View state (selection/zoom/scroll) is UI-local.
+- [x] **Browser-verified** (headless Playwright, enriched contract-faithful mock): create tracks → add clips → **move/trim/split** → transport playhead advances + loop + meters → plugin chips. `npm run build` green. Fixed a `clip_split` idempotency bug + hardened drag-commit.
+- [~] **GATE:** arrange entirely from the UI (move/trim/split, transport, loop) ✅ (in-browser vs the bridge contract — the swappable seam: same UI, `backend:mock` ↔ `backend:juce`). **Remaining:** run it **in the JUCE WebView against the real C++ backend** (the WebView2 render is Windows-blocked → macOS WKWebView), which is also the swappability proof against the live backend.
 
 ### Stage 3 — VST3 hosting via commands (`04`) — *command surface verified with built-ins; real VST3 + native editor need macOS*
 - [x] `load_plugin`/`remove_plugin`/`reorder_plugin`/`bypass_plugin` over Tracktion's plugin model (`src/engine/PluginCommands`), snapshot surfaces each track's `plugins[]` ({id,type,name,bypassed}). `test_plugin_commands` (`[plugins]`, 16 assertions): load a built-in (`createNewPlugin`+`insertPlugin`) → snapshot reflects → bypass (`setEnabled`) → remove → **undo restores** → unknown type/plugin → stable errors.
