@@ -17,7 +17,16 @@ if (NOT NPM_EXECUTABLE)
     return()
 endif()
 
-# Vite build → ui/dist. Re-runs when sources change (tracked via a stamp).
+# Track the actual React sources so a UI change triggers a rebuild (not just
+# package.json/vite.config.ts). CONFIGURE_DEPENDS re-globs at build time.
+file(GLOB_RECURSE MOSH_UI_SOURCES CONFIGURE_DEPENDS
+     "${MOSH_UI_DIR}/src/*.ts"
+     "${MOSH_UI_DIR}/src/*.tsx"
+     "${MOSH_UI_DIR}/src/*.css")
+
+# Vite build → ui/dist (single-file: vite-plugin-singlefile inlines JS+CSS into
+# one index.html — required so the JUCE WebView's resource-provider scheme runs
+# the bundle; external module scripts silently don't execute there).
 add_custom_command(
     OUTPUT  "${MOSH_UI_DIST}/index.html"
     COMMAND ${NPM_EXECUTABLE} install --no-audit --no-fund
@@ -25,6 +34,8 @@ add_custom_command(
     WORKING_DIRECTORY "${MOSH_UI_DIR}"
     DEPENDS "${MOSH_UI_DIR}/package.json"
             "${MOSH_UI_DIR}/vite.config.ts"
+            "${MOSH_UI_DIR}/index.html"
+            ${MOSH_UI_SOURCES}
     COMMENT "Building Mosh UI (Vite) → ui/dist"
     VERBATIM)
 

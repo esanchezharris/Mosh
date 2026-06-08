@@ -17,9 +17,11 @@ public:
 
     WebBridge& bridge() { return webBridge; }
 
+    void load();
     void resized() override;
 
 private:
+    bool loaded = false;
     WebBridge webBridge;
     std::unique_ptr<juce::WebBrowserComponent> webView;
 

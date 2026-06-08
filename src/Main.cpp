@@ -48,6 +48,7 @@ public:
         bridge.setSnapshotProvider([this] { return moshOps->snapshot(); });
         moshOps->setEventSink ([&bridge] (const juce::var& e)
                                { bridge.emitEvent (juce::Identifier ("mosh_event"), e); });
+        mainWindow->shell().load();
 
         // Scripted Stage 3 demo: build a hosted-plugin session + open a native
         // editor, then leave the GUI running for visual verification.

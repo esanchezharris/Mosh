@@ -1183,20 +1183,20 @@ juce::var MoshOps::clipToVar (te::Clip& c)
         r->setProperty ("status", rl[ids::status]);
         r->setProperty ("adapter", rl[ids::modelAdapter]);
         r->setProperty ("mode", rl[ids::mode]);
-        r->setProperty ("seed", rl[ids::seed]);
+        r->setProperty ("seed", (int) rl[ids::seed]);
         r->setProperty ("userKept", rl[ids::userKept]);
         r->setProperty ("hasArtifact", juce::File (rl[ids::cacheArtifact].toString()).existsAsFile());
         if (auto params = rl.getChildWithName (ids::PARAMS); params.isValid())
         {
             r->setProperty ("prompt", params[ids::prompt]);
-            r->setProperty ("nl", params[ids::nl]);
+            r->setProperty ("nl", (double) params[ids::nl]);
             Array<var> colors;
             if (auto cs = params.getChildWithName (ids::COLORS); cs.isValid())
                 for (int i = 0; i < cs.getNumChildren(); ++i)
                 {
                     auto* co = new DynamicObject();
                     co->setProperty ("name", cs.getChild (i)[ids::name]);
-                    co->setProperty ("value", cs.getChild (i)[ids::value]);
+                    co->setProperty ("value", (double) cs.getChild (i)[ids::value]);
                     colors.add (var (co));
                 }
             r->setProperty ("colors", colors);

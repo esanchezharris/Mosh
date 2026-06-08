@@ -120,11 +120,11 @@ function GenBody({
         <span className="nlabel">nl</span>
         <span className="nslider">
           <input
-            type="range" min={0} max={50} step={1} value={Math.round((rl.nl ?? 0.45) * 100)}
+            type="range" min={0} max={50} step={1} value={Math.round(Number(rl.nl ?? 0.45) * 100)}
             onChange={(e) => exec("set_render_param", { clipId: clip.id, nl: Number(e.target.value) / 100 })}
           />
         </span>
-        <span className="nval">{(rl.nl ?? 0.45).toFixed(2)}</span>
+        <span className="nval">{Number(rl.nl ?? 0.45).toFixed(2)}</span>
       </label>
 
       <div className="gen-status">
@@ -152,7 +152,7 @@ function GenBody({
         {rendering && <button onClick={() => exec("cancel_render", { clipId: clip.id })}>Cancel</button>}
         <button disabled={!rl.hasArtifact} onClick={() => exec("accept_render", { clipId: clip.id })}>Accept</button>
         <button disabled={!rl.hasArtifact} onClick={() => exec("reject_render", { clipId: clip.id })}>Reject</button>
-        <button onClick={() => exec("set_render_param", { clipId: clip.id, seed: rl.seed + 1 })} title="new take">⟳ seed</button>
+        <button onClick={() => exec("set_render_param", { clipId: clip.id, seed: Number(rl.seed) + 1 })} title="new take">⟳ seed</button>
       </div>
     </div>
   );

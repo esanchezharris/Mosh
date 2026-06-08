@@ -7,6 +7,14 @@ WebViewShell::WebViewShell()
     webView = std::make_unique<juce::WebBrowserComponent> (webBridge.buildOptions());
     webBridge.attach (*webView);
     addAndMakeVisible (*webView);
+}
+
+void WebViewShell::load()
+{
+    if (loaded || webView == nullptr)
+        return;
+
+    loaded = true;
 
     if (auto dev = juce::SystemStats::getEnvironmentVariable ("MOSH_UI_DEV_SERVER", {});
         dev.isNotEmpty())

@@ -23,25 +23,30 @@ namespace
         return it != types.end() ? it->second : juce::String ("application/octet-stream");
     }
 
-    /** Locate the staged UI bundle: env override → app bundle Resources → exe dir. */
-    juce::File locateUiDir()
+    /** Locate the staged UI bundle: env override -> app bundle Resources -> exe dir. */
+    const juce::File& getUiDir()
     {
-        if (auto env = juce::SystemStats::getEnvironmentVariable ("MOSH_UI_DIR", {});
-            env.isNotEmpty())
+        static const auto uiDir = []
         {
-            juce::File f (env);
-            if (f.isDirectory())
-                return f;
-        }
+            if (auto env = juce::SystemStats::getEnvironmentVariable ("MOSH_UI_DIR", {});
+                env.isNotEmpty())
+            {
+                juce::File f (env);
+                if (f.isDirectory())
+                    return f;
+            }
 
-        auto appFile = juce::File::getSpecialLocation (juce::File::currentApplicationFile);
-        auto bundled = appFile.getChildFile ("Contents/Resources/ui");
-        if (bundled.isDirectory())
-            return bundled;
+            auto appFile = juce::File::getSpecialLocation (juce::File::currentApplicationFile);
+            auto bundled = appFile.getChildFile ("Contents/Resources/ui");
+            if (bundled.isDirectory())
+                return bundled;
 
-        auto exeDir = juce::File::getSpecialLocation (juce::File::currentExecutableFile)
-                          .getParentDirectory();
-        return exeDir.getChildFile ("ui");
+            auto exeDir = juce::File::getSpecialLocation (juce::File::currentExecutableFile)
+                              .getParentDirectory();
+            return exeDir.getChildFile ("ui");
+        }();
+
+        return uiDir;
     }
 
     std::vector<std::byte> toBytes (const juce::MemoryBlock& mb)
@@ -63,7 +68,7 @@ namespace
 
 Resource WebBridge::serveUiResource (const juce::String& url)
 {
-    static const auto uiDir = locateUiDir();
+    const auto& uiDir = getUiDir();
 
     // Strip query/fragment; map "/" → index.html (SPA).
     auto path = url.upToFirstOccurrenceOf ("?", false, false)
@@ -81,6 +86,10 @@ Resource WebBridge::serveUiResource (const juce::String& url)
             file = uiDir.getChildFile ("index.html");
     }
 
+    // The Vite single-file build (vite-plugin-singlefile) inlines all JS+CSS into
+    // index.html, so there are no external sub-resources to rewrite — serve files
+    // verbatim. (External <script type=module>/<link> would not load under JUCE's
+    // resource-provider scheme; single-file sidesteps that entirely.)
     if (file.existsAsFile())
     {
         juce::MemoryBlock mb;
