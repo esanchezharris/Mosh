@@ -1,0 +1,1 @@
+{"ok": true, "adapter": "stable_audio3", "mode": "audio_to_audio", "duration_s": 8.0, "sample_rate": 44100, "channels": 2, "seconds_pinned": 8.0, "init_cache": "hit", "steers": [{"layer": 14, "alpha": 0.3}], "pq": 6.361, "pq_base": 7.311, "flags": ["quality_degraded"]}
