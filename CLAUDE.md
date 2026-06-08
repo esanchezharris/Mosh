@@ -70,9 +70,10 @@
 - [~] **GATE (Fake):** **entire backend loop VERIFIED on Windows** at five levels (spine / Python service / C++↔service e2e / command-surface / real-Tracktion engine with non-destructive landing + undo + JSONL taste labels). **Only remaining:** the audition / A-B-vs-source UI (Stage 2 WebView) and "no playback stall" (needs an interactive run).
 - [ ] **GATE (SA3):** real `grit` + real re-imagine commit as auditionable take + quality readout; `/colors` drives knobs+clamps; Lab unlocks; init-latent cache `hit` on seed-only change.
 
-### Stage 6 — Consolidation (`03`,`04`,`05`)
-- [ ] Mixer polish; two-theme system (shared tokens); reserved B-5 slot (empty); optional prompt-concision rewriter + quality readout.
-- [ ] **GATE:** full producer loop from the UI (import/record → arrange → host VST3 → Tier-A insert → generative transform → mix → export); undo/redo correct throughout.
+### Stage 6 — Consolidation (`03`,`04`,`05`) — *producer COMMAND loop verified end-to-end over real Tracktion+service; "from the UI" render + audio export need macOS*
+- [x] **Full producer command loop VERIFIED** (`test_producer_loop`, `[producer]`, 25 assertions, over real Tracktion + the real Python service): import (`create_track`+`import_clip`) → arrange (`move_clip`) → host plugin (`load_plugin`) → Tier-A neural (`add_neural_insert`+`set_neural_param` ASTD) → generative transform (`create_render_layer`+`render_layer` via service) → **accept (non-destructive landing, source untouched)** → mix (`set_track_gain`) → **undo/redo correct throughout** (undo mix, undo accept→reverts, redo→restores; full unwind→initial, full rebuild) → **export/persist** (saveAs→fresh reload→restored) → JSONL taste label. Uses the EXACT commands the (browser-verified) UI emits.
+- [ ] Mixer polish; two-theme system; reserved B-5 slot; optional prompt-concision rewriter + quality readout (cosmetic v0 adds).
+- [~] **GATE:** producer loop + **undo/redo correct throughout** ✅ via the command surface (real Tracktion+service). **Remaining (macOS):** drive it literally **from the UI** in the JUCE WebView (WKWebView render) + **audio export** (audio device). Suite total: **326 assertions / 44 cases** across 3 test exes.
 
 Build the arrangement incrementally within Stage 2/6: static clips → drag/move → trim/split → zoom/snap → marquee.
 
