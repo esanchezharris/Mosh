@@ -195,11 +195,14 @@ Stage 2.** This is the documented JUCE-8 WebView `// VERIFY`; it does not block 
   (`mosh_service_tests`, 16). The **command-surface loop** (`create_render_layer`/`set_render_param`/
   `render_layer`/`accept_render`/`reject_render`/`cancel_render` + `layer_*` events + **JSONL taste
   labels**) — DONE + verified (`src/spine/GenerativeCommands`, `test_generative_commands`, 22). **So the
-  whole Stage-5 Fake orchestration is proven on Windows EXCEPT** the audition/A-B **UI** (Stage 2
-  WebView) and landing `accept_render` as a **Tracktion take** (move the handlers into `mosh_engine`;
-  API in `docs/TRACKTION_API_NOTES.md` §9 + new-clip/new-track fallback). Then `bypass_layer`/
-  `freeze_layer`/`bounce_layer_to_clip`, service lifecycle hardening, and the `StableAudio3Adapter`
-  (MLX, macOS-only; env-var the two hardcoded paths) swap in last.
+  whole Stage-5 Fake orchestration is proven on Windows** at FIVE levels — incl. the **engine
+  landing on real Tracktion** (`mosh_engine` `GenerativeEngine` + `test_generative_engine`, `[gengine]`):
+  RenderLayer under the source clip → render via the service → `accept_render` lands the result
+  NON-DESTRUCTIVELY as a new clip on a Neural lane (source untouched) → undo reverts → JSONL taste
+  label. **Only remaining for the Fake gate:** the audition/A-B-vs-source **UI** (Stage 2 WebView).
+  Then `bypass_layer`/`freeze_layer`/`bounce_layer_to_clip`, the take-based landing variant (per
+  `neural_render_landing`; semantics in docs §9), service lifecycle hardening, and the
+  `StableAudio3Adapter` (MLX, macOS-only; env-var the two hardcoded paths) swap in last.
 - **Stage 6 (consolidation)** — mixer polish, two-theme tokens, reserved B-5 slot; the full producer
   loop end-to-end from the UI with correct undo/redo.
 

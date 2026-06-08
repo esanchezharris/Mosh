@@ -7,9 +7,11 @@ add_library(mosh_engine STATIC
     MoshEngine.cpp
     EngineSnapshot.cpp
     EngineHandlers.cpp
+    GenerativeEngine.cpp
     MoshEngine.h
     EngineSnapshot.h
     EngineHandlers.h
+    GenerativeEngine.h
 )
 
 target_include_directories(mosh_engine PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
@@ -36,9 +38,12 @@ set_target_properties(mosh_engine PROPERTIES FOLDER "mosh")
 # The real command path over Tracktion (no WebView). Separate from mosh_tests so the
 # spine suite stays OS-agnostic / Tracktion-free.
 if(MOSH_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
-    add_executable(mosh_engine_tests "${CMAKE_SOURCE_DIR}/tests/test_engine_smoke.cpp")
+    add_executable(mosh_engine_tests
+        "${CMAKE_SOURCE_DIR}/tests/test_engine_smoke.cpp"
+        "${CMAKE_SOURCE_DIR}/tests/test_generative_engine.cpp")
     target_link_libraries(mosh_engine_tests PRIVATE mosh_engine juce::juce_gui_basics Catch2::Catch2WithMain)
     target_compile_features(mosh_engine_tests PRIVATE cxx_std_20)
+    target_compile_definitions(mosh_engine_tests PRIVATE MOSH_SERVICE_DIR="${CMAKE_SOURCE_DIR}/service")
     set_target_properties(mosh_engine_tests PROPERTIES FOLDER "mosh")
 
     list(APPEND CMAKE_MODULE_PATH "${Catch2_SOURCE_DIR}/extras")
