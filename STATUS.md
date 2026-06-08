@@ -21,6 +21,17 @@ clearly isolated:
 Gates that assert "window opens on macOS arm64" / audio / PDC null / MLX cannot be *run* on
 this Windows box; they are authored cross-platform-clean and flagged for a macOS pass.
 
+## Capstone: the Stage-6 producer loop is verified end-to-end on Windows
+
+`test_producer_loop` (`[producer]`, 25 assertions, green) drives the WHOLE producer loop over **real
+Tracktion + the real Python service**, via the exact MoshOps commands the (browser-verified) UI emits:
+import → arrange (`move_clip`) → host plugin → Tier-A neural insert + ASTD param → generative transform
+(`render_layer` via the service) → **accept (non-destructive landing, source untouched)** → mix →
+**undo/redo correct throughout** (undo mix, undo accept reverts, redo restores; full unwind→initial,
+full rebuild) → **export/persist** (saveAs → fresh reload → restored) → JSONL taste label. Only the
+literal "from the UI" WebView render + audio export need macOS. **Totals: 326 assertions / 44 cases**
+across `mosh_tests` (205/36) + `mosh_engine_tests` (105/7) + `mosh_service_tests` (16/1).
+
 ## Dependency pins (resolved 2026-06-08 via `git ls-remote`)
 
 JUCE `8.0.8` · tracktion_engine `v3.2.0` · anira `v2.0.3` · RTNeural `1fb1f075` ·
