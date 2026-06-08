@@ -48,9 +48,10 @@
 - [ ] All mutation via MoshOps; clip drag/trim/split → `move_clip`/`trim_clip`/`split_clip`.
 - [ ] **GATE:** arrange entirely from the UI (move/trim/split, transport, loop), responsive; **rebuild the React bundle with zero backend change and it still works** (swappability).
 
-### Stage 3 — VST3 hosting via commands (`04`)
-- [ ] `load_plugin`/`remove_plugin`/`reorder_plugin`/`set_plugin_param`/`bypass_plugin`/`open_plugin_editor`; native editor pop-out.
-- [ ] **GATE:** VST3 synth from MIDI + effect on wave, all via commands; native editor opens; persists.
+### Stage 3 — VST3 hosting via commands (`04`) — *command surface verified with built-ins; real VST3 + native editor need macOS*
+- [x] `load_plugin`/`remove_plugin`/`reorder_plugin`/`bypass_plugin` over Tracktion's plugin model (`src/engine/PluginCommands`), snapshot surfaces each track's `plugins[]` ({id,type,name,bypassed}). `test_plugin_commands` (`[plugins]`, 16 assertions): load a built-in (`createNewPlugin`+`insertPlugin`) → snapshot reflects → bypass (`setEnabled`) → remove → **undo restores** → unknown type/plugin → stable errors.
+- [ ] `set_plugin_param` (AutomatableParameter API) + `open_plugin_editor` (native pop-out; the `ExternalPlugin` editor `// VERIFY`) — land on macOS where editors + scanned VST3s run.
+- [ ] **GATE (macOS):** VST3 synth from MIDI + effect on wave via commands; native editor opens; persists. *(Command surface ✅ on Windows with built-ins; real VST3 hosting + editor + audio = macOS.)*
 
 ### Stage 4 — Tier-A real-time neural (`04`)
 - [ ] `NeuralInsertPlugin` (custom `Plugin`) registered via `createBuiltInType<>()`; anira; RT-safe `applyToBuffer`; warm-up.

@@ -7,8 +7,9 @@ namespace mosh
     // Shared serializers (the snapshot source AND command handlers build event
     // payloads from these, so a track/clip looks identical in a snapshot and in a
     // track_added/clip_added event).
-    juce::var trackToVar (te::AudioTrack*);
-    juce::var clipToVar  (te::Clip*);
+    juce::var trackToVar  (te::AudioTrack*);
+    juce::var clipToVar   (te::Clip*);
+    juce::var pluginToVar (te::Plugin*);
 
     // Walks the Tracktion Edit into the snapshot schema the UI renders (02 §4.1,
     // ui/src/bridge.ts). The ONLY place engine internals are projected to the

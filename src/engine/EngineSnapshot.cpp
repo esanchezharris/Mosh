@@ -6,6 +6,17 @@ namespace mosh
 {
     namespace te = tracktion;
 
+    juce::var pluginToVar (te::Plugin* p)
+    {
+        auto* o = new juce::DynamicObject();
+        o->setProperty ("id", ids::pluginRef (p->itemID.toString()));
+        // ExternalPlugin = a hosted VST3/AU; everything else is a built-in/neural insert.
+        o->setProperty ("type", dynamic_cast<te::ExternalPlugin*> (p) != nullptr ? "vst3" : "builtin");
+        o->setProperty ("name", p->getName());
+        o->setProperty ("bypassed", ! p->isEnabled());
+        return juce::var (o);
+    }
+
     juce::var clipToVar (te::Clip* clip)
     {
         auto* o = new juce::DynamicObject();
@@ -37,8 +48,12 @@ namespace mosh
             clips.add (clipToVar (clip));
         o->setProperty ("clips", clips);
 
-        o->setProperty ("plugins", juce::Array<juce::var>());        // Stage 3
-        o->setProperty ("renderLayers", juce::Array<juce::var>());   // Stage 5
+        juce::Array<juce::var> plugins;
+        for (auto* p : track->pluginList.getPlugins())               // Plugin* each (raw ptrs)
+            if (p != nullptr)
+                plugins.add (pluginToVar (p));
+        o->setProperty ("plugins", plugins);
+        o->setProperty ("renderLayers", juce::Array<juce::var>());   // Stage 5 (per-clip; surfaced later)
         return juce::var (o);
     }
 

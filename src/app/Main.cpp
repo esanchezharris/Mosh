@@ -5,6 +5,7 @@
 #include "MoshEngine.h"
 #include "EngineSnapshot.h"
 #include "EngineHandlers.h"
+#include "PluginCommands.h"
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Mosh — application entry point. Bootstraps the Tracktion Engine (01), the MoshOps
@@ -34,6 +35,7 @@ namespace mosh
             snapshotSource = std::make_unique<EngineSnapshotSource> (*engine);
             executor->setSnapshotSource (snapshotSource.get());
             registerEngineHandlers (*executor, *engine);
+            registerPluginCommands (*executor, *engine);
 
             mainWindow = std::make_unique<MainWindow> ("Mosh", *executor);
         }
