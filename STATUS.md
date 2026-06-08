@@ -42,11 +42,23 @@ chowdsp_utils `e97b826e` · Catch2 `v3.9.1` · CPM `v0.42.3`.
 - [x] `tests/` Catch2 suite incl. the **command-surface harness** (results/events/JSONL/
       snapshot/undo-redo/transaction-abandon over a fake model — no Tracktion).
 - [x] CMake **configures clean** on Windows (MSVC 19.44, JUCE 8.0.8 + Catch2 fetched).
-- [ ] `mosh_tests` **builds + passes** on Windows  ← currently building.
-- [x] Stage 0 app target authored (JUCE GUI app + WebView host serving the staged UI; no
-      Tracktion yet — that's Stage 1). Window/placeholder gate is a macOS pass.
-- **GATE (macOS):** window + placeholder on macOS arm64; service health ok. *(authored;
-  needs a Mac to run. Service health verified here.)*
+- [x] `mosh_tests` **builds + passes** on Windows — 158 assertions / 30 cases (incl. ClipMath).
+- [x] Stage 0 app **builds + links + launches** on Windows (MSVC + WebView2 SDK wired);
+      native window titled "Mosh" opens, process stable. (No Tracktion yet — Stage 1.)
+- [~] **WebView placeholder render:** the WebView2 backend currently shows its
+      "Navigation to the webpage was canceled" page instead of the React placeholder. The
+      resource provider, path mapping, staged bundle, user-data folder, and dark bg are all
+      wired and the `https://juce.backend` request filter is registered — but the top-level
+      document isn't served/painted on the **Windows WebView2** backend. This is the JUCE-8
+      WebView `// VERIFY` (module 03) and is Windows-WebView2-specific (macOS uses WKWebView,
+      no SDK). **Deferred to Stage 2**, where the bridge native-fn/event API is reconciled and
+      the swappability gate runs. Repro: launch `Mosh.exe`; window opens, WebView shows the
+      cancel page. Next probes: try a `data:`/inline-HTML navigation to isolate
+      WebView2-runtime vs resource-provider; verify `pageAboutToLoad`/navigation-starting isn't
+      cancelling; confirm Evergreen WebView2 Runtime present.
+- **GATE (macOS):** window + placeholder on macOS arm64; service health ok. *(Windows proxy:
+  build+window ✅, service health ✅; placeholder render pending Stage-2 WebView reconciliation /
+  a macOS WKWebView run.)*
 
 ### Stages 1–6 — NOT STARTED
 Stage 1 next: Tracktion bootstrap (Engine/Edit/transport/device), swap the standalone
@@ -56,16 +68,23 @@ Stage 1 next: Tracktion bootstrap (Engine/Edit/transport/device), swap the stand
 
 ## // VERIFY ledger (resolve against the pinned tracktion_engine v3.2.0 clone)
 
-Not yet resolved (Stage 1+ work; require reading the clone / a macOS build):
-- `createEmptyEdit` / `Edit` ctor / `insertNewAudioTrack` signatures (strong time types) — **01**
-- Edit save call (`EditFileOperations` vs `edit.save()`) — **01**
-- `MOSH_RENDERLAYER` parent (clip default vs track) — **01** (modelled clip-parented)
+**RESOLVED** against the pinned clone (cited in `docs/TRACKTION_API_NOTES.md`):
+- ✅ Engine ctor `Engine("Mosh", make_unique<ExtendedUIBehaviour>(), nullptr)` (device auto-inits) — **01/06**
+- ✅ `createEmptyEdit(engine, file)` → `unique_ptr<Edit>`; `Edit::Options`/`Edit::createEdit` — **01**
+- ✅ Save = `EditFileOperations(edit).save(warn, force, discard)` — there is **no** `edit.save()` — **01**
+- ✅ `edit.getUndoManager()` returns **`juce::UndoManager&`** — confirms the spine's undo design — **01/02**
+- ✅ `insertNewAudioTrack(TrackInsertPoint::getEndOfTracks(edit), nullptr)`; `getAudioTracks(edit)` — **01**
+- ✅ `track->insertWaveClip(name, file, {{start,dur},offset}, false)`; `splitClip(clip, TimePosition)`; strong time types — **01**
+- ✅ Transport `getTransport()` + `play/stop/setPosition/setLoopRange` + `transport.looping`; render-exclusivity → wrap in `Edit::ScopedRenderStatus` — **01/05**
+- ✅ CMake: add JUCE 8.0.8 **first**, then `add_subdirectory(.../tracktion_engine/modules)`, link `tracktion::tracktion_core/engine/graph`; guard tracktion's `develop` JUCE — **06**
+- ✅ `Renderer::Parameters{edit}` + `renderToFile` (file-based; no buffer API) — **05**
+- ✅ Takes: `addTake(File)`/`setCurrentTake`/`unpackTakes`; new-clip/new-track fallback for A/B + freeze — **05**
+
+Still open (resolve when reached):
+- `MOSH_RENDERLAYER` parent (clip default vs track) — **01** (modelled clip-parented; revisit for track-wide transforms)
 - JUCE 8 WebView native-fn registration + `window.__JUCE__.backend` emit API — **03**
-  (C++ side authored with `withNativeFunction`/`emitEventIfBrowserIsVisible`; JS side flagged
-  in `ui/src/bridge.ts`) — reconcile at Stage 2 run.
-- `ExternalPlugin` editor accessor; `LatencyPlugin` source; anira `process`/`prepare`;
-  bypassed-plugin PDC — **04**
-- Takes/comp add+promote API; `Renderer::Parameters` fields; render-to-file overload — **05**
+  (C++ authored with `withNativeFunction`/`emitEventIfBrowserIsVisible`; JS flagged in `ui/src/bridge.ts`) — reconcile at first WebView run.
+- `ExternalPlugin` editor accessor; `LatencyPlugin` source; anira `process`/`prepare`; bypassed-plugin PDC — **04**
 
 ## Next concrete step
 Finish the Stage 0 spine build + green test run on Windows, commit Stage 0, then begin Stage 1

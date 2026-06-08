@@ -8,6 +8,7 @@ add_executable(mosh_tests
     test_fingerprint.cpp
     test_renderlayer.cpp
     test_events.cpp
+    test_clipmath.cpp
     test_command_surface.cpp
 )
 

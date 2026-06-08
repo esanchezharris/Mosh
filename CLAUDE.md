@@ -27,12 +27,12 @@
 
 ### Stage 0 — Skeleton (`06`)  — *spine+scaffold verified on Windows; window gate needs macOS*
 - [x] Repo scaffold (`00 §5`), git init, `.gitignore`, README, STATUS.
-- [~] Standalone-app target **authored** (JUCE GUI app + WebView host; no Tracktion until Stage 1). App build attempt: see STATUS. Spine lib + tests **build clean** (MSVC 19.44).
+- [x] Standalone-app target **builds + links + launches** on Windows (MSVC 19.44 + WebView2 SDK); native "Mosh" window opens. No Tracktion until Stage 1.
 - [x] CPM deps **pinned** (JUCE 8.0.8, tracktion v3.2.0, anira v2.0.3, RTNeural, chowdsp, Catch2 v3.9.1, CPM v0.42.3). JUCE+Catch2 **resolved & built**; Tracktion fetched at Stage 1.
-- [x] Vite builds `ui/` → `dist/` (verified green). WebView host serves it via resource provider; **loads in WebView** = pending app run.
+- [x] Vite builds `ui/` → `dist/` (verified green); staged next to the exe by the build.
 - [x] Generative service stub answers `/health` (verified: 200 + ok JSON; `/capabilities`; 404).
-- [x] **Spine verified:** `mosh_tests` = 130 assertions / 23 cases **green** — MoshResult envelope, ASTD clamp+Lab+skew, full-fingerprint cache key, RenderLayer round-trip/dirty/≤3-color cap, event shape+decimation, **command-surface harness** (results/events/JSONL/snapshot/undo-redo/abandon).
-- [ ] **GATE:** window + placeholder on macOS arm64; service health ok. *(service health ✅ here; window/WebView needs a run — attempting Windows/WebView2 proxy, true gate is macOS)*
+- [x] **Spine verified:** `mosh_tests` = **158 assertions / 30 cases green** — MoshResult envelope, ASTD clamp+Lab+skew, full-fingerprint cache key, RenderLayer round-trip/dirty/≤3-color cap, event shape+decimation, **command-surface harness** (results/events/JSONL/snapshot/undo-redo/abandon), ClipMath move/trim/split.
+- [~] **GATE:** window + placeholder on macOS arm64; service health ok. *(Windows proxy: build+links+window ✅, service health ✅; WebView **placeholder render** shows WebView2 "navigation canceled" — the JUCE-8 WebView resource `// VERIFY`, deferred to Stage 2 / a macOS WKWebView run. See STATUS.)*
 
 ### Stage 1 — Engine + MoshOps + state feed (`01`,`02`)
 - [ ] `Engine` constructed once; device auto-init; `Edit` created; `edit.getUndoManager()` is the undo impl under MoshOps.

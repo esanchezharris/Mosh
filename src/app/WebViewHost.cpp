@@ -13,12 +13,22 @@ namespace mosh
     {
         using WBC = juce::WebBrowserComponent;
 
+        // Windows WebView2 wants an explicit, writable user-data folder + a dark
+        // background (avoids a white flash before first paint). Ignored on macOS
+        // (WKWebView). VERIFY (JUCE 8.0.8): WinWebView2 builder names.
+        const auto wv2DataDir = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                                    .getChildFile ("MoshWebView2");
+        wv2DataDir.createDirectory();
+
         auto options = WBC::Options{}
             .withNativeIntegrationEnabled()
+            .withWinWebView2Options (WBC::Options::WinWebView2{}
+                                         .withUserDataFolder (wv2DataDir)
+                                         .withBackgroundColour (juce::Colours::black))
             .withResourceProvider ([this] (const auto& url) { return provideResource (url); })
             // executeCommand(name, argsJson) → MoshResult envelope (02 §1).
             .withNativeFunction ("executeCommand",
-                [this] (const juce::Array<juce::var>& args, WBC::NativeFunction::CompletionHandler complete)
+                [this] (const juce::Array<juce::var>& args, WBC::NativeFunctionCompletion complete)
                 {
                     const auto name = args.size() > 0 ? args[0].toString() : juce::String();
                     const auto argsJson = args.size() > 1 ? args[1].toString() : juce::String ("{}");
@@ -29,7 +39,7 @@ namespace mosh
                 })
             // getSnapshot() → the full session as plain data (02 §4.1).
             .withNativeFunction ("getSnapshot",
-                [this] (const juce::Array<juce::var>&, WBC::NativeFunction::CompletionHandler complete)
+                [this] (const juce::Array<juce::var>&, WBC::NativeFunctionCompletion complete)
                 {
                     complete (exec.getSnapshot());
                 });
@@ -74,8 +84,15 @@ namespace mosh
     std::optional<juce::WebBrowserComponent::Resource>
     WebViewHost::provideResource (const juce::String& url) const
     {
-        // Normalize: "/" → index.html; strip leading slash + any query string.
-        auto path = url.upToFirstOccurrenceOf ("?", false, false);
+        // The provider may receive a bare path ("/assets/x.js") or, defensively, a
+        // full URL — normalize both. Strip the resource root / scheme+host, the
+        // query string, then map "/" → index.html.
+        auto path = url;
+        for (auto* prefix : { "https://juce.backend", "juce://juce.backend" })
+            if (path.startsWith (prefix))
+                path = path.fromFirstOccurrenceOf (prefix, false, false);
+        path = path.upToFirstOccurrenceOf ("?", false, false)
+                   .upToFirstOccurrenceOf ("#", false, false);
         if (path.isEmpty() || path == "/")
             path = "/index.html";
 

@@ -16,8 +16,10 @@ juce_add_gui_app(Mosh
 
 target_sources(Mosh PRIVATE
     Main.cpp
-    MainWindow.cpp
     WebViewHost.cpp
+    # header-only units (IDE registration):
+    MainWindow.h
+    WebViewHost.h
 )
 
 target_compile_features(Mosh PRIVATE cxx_std_20)
@@ -44,6 +46,22 @@ target_compile_definitions(Mosh PRIVATE
 )
 
 set_target_properties(Mosh PROPERTIES FOLDER "mosh")
+
+# ── Windows: WebView2 SDK for the WebBrowserComponent backend ──────────────────
+# macOS (the primary target) uses WKWebView and needs NO SDK. On Windows JUCE's
+# WebView2 backend needs the Microsoft.Web.WebView2 NuGet headers/loader. Fetch via
+# (one-time): Invoke-WebRequest https://www.nuget.org/api/v2/package/Microsoft.Web.WebView2
+# → extract to .refclone/webview2 (gitignored). Guarded so absence is non-fatal.
+if(WIN32)
+    set(MOSH_WEBVIEW2_DIR "${CMAKE_SOURCE_DIR}/.refclone/webview2" CACHE PATH "WebView2 SDK (NuGet) extract dir")
+    if(EXISTS "${MOSH_WEBVIEW2_DIR}/build/native/include/WebView2.h")
+        target_include_directories(Mosh PRIVATE "${MOSH_WEBVIEW2_DIR}/build/native/include")
+        target_link_libraries(Mosh PRIVATE "${MOSH_WEBVIEW2_DIR}/build/native/x64/WebView2LoaderStatic.lib")
+        message(STATUS "Mosh: WebView2 SDK at ${MOSH_WEBVIEW2_DIR}")
+    else()
+        message(WARNING "Mosh: WebView2 SDK not found at ${MOSH_WEBVIEW2_DIR}; the Windows WebView backend won't compile. macOS (WKWebView) is unaffected.")
+    endif()
+endif()
 
 # ── Frontend (Vite) build + staging ────────────────────────────────────────────
 # Build ui/ → ui/dist, then copy the bundle next to the executable so the WebView

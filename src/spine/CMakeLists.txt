@@ -16,6 +16,7 @@ add_library(mosh_spine STATIC
     Astd.h
     Fingerprint.h
     RenderLayer.h
+    ClipMath.h
 )
 
 target_include_directories(mosh_spine PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
@@ -32,9 +33,10 @@ target_link_libraries(mosh_spine
         $<TARGET_NAME_IF_EXISTS:juce::juce_recommended_warning_flags>
 )
 
-# Keep juce_core lean & cross-platform-clean when consumed by the spine: no web
-# browser / curl pull-in here (those belong to the app target only).
-target_compile_definitions(mosh_spine PUBLIC
+# Keep the spine's OWN juce_core compile lean & cross-platform-clean (no web
+# browser / curl). These are PRIVATE so they do NOT leak through the link into the
+# app target — the app needs JUCE_WEB_BROWSER=1 for WebBrowserComponent.
+target_compile_definitions(mosh_spine PRIVATE
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
     JUCE_STANDALONE_APPLICATION=1
