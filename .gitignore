@@ -51,3 +51,7 @@ Thumbs.db
 # Headless-browser QA artifacts (Playwright snapshots/screenshots; throwaway)
 .playwright-mcp/
 /mosh-*.png
+
+# SA3 standalone-smoke output (generated WAVs) + local env
+service/scripts/_sa3_smoke_out/
+.env

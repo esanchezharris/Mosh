@@ -30,6 +30,17 @@ namespace mosh
         double            nl = 0.0;   // re-noise level (reimagine; ≤0.5)
         FingerprintInputs fingerprint;
 
+        // Sampling hyperparameters (the SA3 "advanced/engine" cluster, 05 §6).
+        double cfg = 1.0;
+        int    steps = 8;
+        double durationSec = 4.0;
+
+        // Reimagine source audio: the C++ side renders/locates the source clip's
+        // audio and points the adapter at it (audio-to-audio). Empty for generate.
+        juce::String inputWavPath;
+        double       inputStartSec = 0.0;
+        double       inputLengthSec = 0.0;
+
         juce::String cacheKey() const { return fingerprint.cacheKey(); }
     };
 

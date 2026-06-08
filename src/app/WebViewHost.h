@@ -3,48 +3,38 @@
 #include "DslExecutor.h"
 
 // ──────────────────────────────────────────────────────────────────────────────
-// WebViewHost — the JUCE 8 WebView shell + the C++ side of the swappable seam (03).
+// WebViewHost — the PC UI shell. A single native window hosting a WebView2 that
+// navigates to the in-process HTTP server (the HttpBridge) at
+// http://localhost:<MOSH_HTTP_PORT>. The React UI loads over HTTP and drives the
+// backend via `fetch` (the swappable seam — identical to a plain browser). This
+// sidesteps the broken-on-Windows JUCE WebView2 resource-provider/native-fn path
+// entirely (a normal http navigation just works; for that origin JUCE does not
+// inject window.__JUCE__, so ui/bridge.ts selects the HTTP transport).
 //
-// It is the ONLY place the backend touches the frontend. It:
-//   • serves the bundled React/Vite UI (staged next to the exe) via a resource
-//     provider, OR points at the Vite dev server when MOSH_DEV_SERVER is set;
-//   • registers the native functions the bridge calls: executeCommand(name,args),
-//     getSnapshot();
-//   • pushes typed events to JS on the "mosh_event" channel by listening to the
-//     DslExecutor and forwarding MoshEvent::toVar().
-//
-// No Tracktion/audio concepts cross here — only the command catalog + snapshot
-// schema. That is what makes the frontend disposable.
-//
-// VERIFY (JUCE 8.0.8): the exact WebBrowserComponent::Options builder names
-// (withResourceProvider / withNativeIntegrationEnabled / withNativeFunction /
-// emitEventIfBrowserIsVisible) and getResourceProviderRoot() — confirm against
-// the JUCE 8 WebBrowserComponent example when first building on macOS. The JS-side
-// accessor (window.__JUCE__.backend.*) is the matching // VERIFY in ui/bridge.ts.
+// On a persistent WebView2 load failure — or when MOSH_UI_MODE=browser — it falls
+// back to launching the system default browser at the same URL and shows a note.
 // ──────────────────────────────────────────────────────────────────────────────
 namespace mosh
 {
-    class WebViewHost : public juce::Component,
-                        private MoshEventListener,
-                        private juce::Timer
+    class WebViewHost : public juce::Component
     {
     public:
-        explicit WebViewHost (DslExecutor& executor);
+        // uiConnected() returns true once the frontend has fetched the snapshot (i.e.
+        // it actually initialized). A blank in-app WebView never connects → we fall
+        // back to the system browser. Pass {} to skip the check (always trust load).
+        WebViewHost (DslExecutor& executor, std::function<bool()> uiConnected = {});
         ~WebViewHost() override;
 
         void resized() override;
 
     private:
-        void onMoshEvent (const MoshEvent& e) override;
-        void timerCallback() override;   // one-shot re-navigate once the peer/env is ready
+        void launchInBrowser();
 
-        // Resource provider: map a request path to a staged UI file.
-        std::optional<juce::WebBrowserComponent::Resource> provideResource (const juce::String& url) const;
-        static juce::File stagedUiDir();
-        static juce::String mimeTypeFor (const juce::String& path);
-
-        DslExecutor& exec;
+        juce::String url;
+        juce::Label  status;
+        std::function<bool()> uiConnected;
         std::unique_ptr<juce::WebBrowserComponent> webView;
+        bool browserLaunched = false;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (WebViewHost)
     };

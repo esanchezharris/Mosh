@@ -21,21 +21,38 @@ in later without touching the HTTP layer.
 
 import argparse
 import json
+import os
 import signal
 import sys
 import threading
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from adapters import FakeAdapter
+from adapters import load_adapter
 
 SERVICE_NAME = "mosh-generative"
 VERSION = "0.0.0"
 
-# Module-level adapter selection. This stage ships the dependency-free FakeAdapter.
-# Later stages swap in StableAudio3Adapter (MLX, Apple Silicon only) behind the
-# same interface — the HTTP layer below should not need to change.
-ADAPTER = FakeAdapter()
+# When spawned by the C++ host (a GUI app), our stdout/stderr handles may be invalid
+# or an undrained pipe — and torch/Stable-Audio-3 log heavily, which would error or
+# block. Redirect both to a log file BEFORE importing any heavy adapter. Standalone:
+# set MOSH_SERVICE_CONSOLE=1 to keep console output. The log path is printed nowhere
+# (no console), so: %TEMP%\mosh-service.log.
+if os.environ.get("MOSH_SERVICE_CONSOLE", "") != "1":
+    try:
+        import tempfile
+        _logfh = open(os.path.join(tempfile.gettempdir(), "mosh-service.log"),
+                      "a", buffering=1, encoding="utf-8", errors="replace")
+        sys.stdout = _logfh
+        sys.stderr = _logfh
+    except OSError:
+        pass
+
+# Adapter selection via env (MOSH_ADAPTER), default the dependency-free FakeAdapter.
+# The real CUDA StableAudio3Adapter is selected with MOSH_ADAPTER=stable_audio_3 and
+# is imported lazily (load_adapter) so the Fake/CI path never pulls in torch. The
+# HTTP layer below is model-agnostic and does not change between adapters.
+ADAPTER = load_adapter(os.environ.get("MOSH_ADAPTER", "fake"))
 
 # In-memory job store, owned by the JobManager below. Jobs do not survive a
 # restart — the C++ host treats this process as disposable and re-submits.
@@ -310,6 +327,11 @@ def main(argv=None) -> int:
 
     global JOBS
     JOBS = JobManager(ADAPTER)
+
+    # Preload heavy models in the background (the SA3 weights are ~9 GB and slow to
+    # load from an HDD) so the first render isn't a multi-minute stall. Best-effort.
+    if hasattr(ADAPTER, "warmup"):
+        threading.Thread(target=ADAPTER.warmup, name="mosh-warmup", daemon=True).start()
 
     server = _make_server(args.host, args.port)
 

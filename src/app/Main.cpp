@@ -8,6 +8,7 @@
 #include "PluginCommands.h"
 #include "NeuralCommands.h"
 #include "GenerativeEngine.h"
+#include "AsyncRenderPool.h"
 #include "HttpBridge.h"
 
 #ifndef MOSH_SERVICE_DIR
@@ -33,6 +34,16 @@ namespace mosh
         {
             engine = std::make_unique<MoshEngine>();
 
+            // PC build: open a default audio OUTPUT so transport playback is audible
+            // on Windows (WASAPI/DirectSound via JUCE). App-only (tests never open a
+            // real device). Guarded; MOSH_NO_AUDIO=1 skips it.
+            if (juce::SystemStats::getEnvironmentVariable ("MOSH_NO_AUDIO", {}).isEmpty())
+            {
+                auto& dm = engine->getEngine().getDeviceManager();
+                if (dm.deviceManager.getCurrentAudioDevice() == nullptr)
+                    dm.initialise (0, 2);   // 0 inputs, stereo out — playback-focused
+            }
+
             // The JSONL semantic log lives next to the edit file.
             log = std::make_unique<JsonlLog>();
             log->setFile (engine->getEditFile().getParentDirectory().getChildFile ("mosh-session.jsonl"));
@@ -54,7 +65,10 @@ namespace mosh
                     serviceDir = juce::File::getSpecialLocation (juce::File::currentExecutableFile)
                                      .getParentDirectory().getChildFile ("service");
                 jobs = std::make_unique<GenerativeJobManager> (serviceDir);
-                registerGenerativeEngineCommands (*executor, *engine, *jobs, renderCache);
+                // The async pool runs renders OFF the message thread so the real model
+                // (seconds-to-minutes) never freezes the UI / wedges the HttpBridge.
+                renderPool = std::make_unique<AsyncRenderPool> (*executor, *jobs, renderCache);
+                registerGenerativeEngineCommands (*executor, *engine, *jobs, renderCache, renderPool.get());
             }
 
             // HTTP transport for the MoshOps seam — lets a PLAIN BROWSER drive the
@@ -67,13 +81,15 @@ namespace mosh
                 httpBridge = std::make_unique<HttpBridge> (*executor, uiStaged, httpPort);
             }
 
-            mainWindow = std::make_unique<MainWindow> ("Mosh", *executor);
+            mainWindow = std::make_unique<MainWindow> ("Mosh", *executor,
+                [this] { return httpBridge != nullptr && httpBridge->isUiConnected(); });
         }
 
         void shutdown() override
         {
             mainWindow.reset();
-            httpBridge.reset();        // stop the server before tearing down the executor
+            httpBridge.reset();        // stop accepting new commands
+            renderPool.reset();        // JOIN the worker BEFORE its collaborators die
             executor.reset();          // drops command lambdas (which ref jobs/renderCache)
             jobs.reset();              // kill the generative service if we started it
             snapshotSource.reset();
@@ -90,6 +106,7 @@ namespace mosh
         std::unique_ptr<EngineSnapshotSource> snapshotSource;
         RenderCache renderCache;                          // Tier-B reuse by full fingerprint
         std::unique_ptr<GenerativeJobManager> jobs;       // out-of-process render service
+        std::unique_ptr<AsyncRenderPool> renderPool;      // off-thread render worker
         std::unique_ptr<HttpBridge> httpBridge;
         std::unique_ptr<MainWindow> mainWindow;
     };

@@ -18,6 +18,11 @@
 // ──────────────────────────────────────────────────────────────────────────────
 namespace mosh
 {
+    class AsyncRenderPool;
+
+    // pool == nullptr → render_layer runs SYNCHRONOUSLY (tests/CI). With a pool the
+    // app renders ASYNCHRONOUSLY off the message thread (required for the real model).
     void registerGenerativeEngineCommands (DslExecutor&, MoshEngine&,
-                                           GenerativeJobManager&, RenderCache&);
+                                           GenerativeJobManager&, RenderCache&,
+                                           AsyncRenderPool* pool = nullptr);
 }

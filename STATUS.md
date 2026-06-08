@@ -3,7 +3,34 @@
 *Living status of the autonomous build. Honest gate accounting: what is verified, on which
 hardware, and the next concrete step. Pairs with the checklist in `CLAUDE.md`.*
 
-**Build machine:** Windows 11, RTX 4070 (no Mac available). **Primary target:** macOS arm64.
+**Build machine:** Windows 11, RTX 4070 SUPER (12 GB). **Target (per the user's pivot): the PC build —
+Windows + CUDA.** (Earlier docs say "macOS-primary / MLX"; that was the original spec. The user
+re-scoped to a working PC build: a Windows UI + the CUDA build of Stable Audio 3 instead of MLX.)
+
+## PC BUILD (2026-06-08): real CUDA Stable Audio 3, driven from the UI — VERIFIED
+
+The user's pivot — *"build the PC version… use the CUDA build of Stable Audio 3, or anything else that
+needs MLX"* — is done and verified end-to-end on this machine. Key discovery: **Stable Audio 3 is
+already installed with a CUDA build** (`stable-audio-3` in `C:\ComfyUI\venv`, torch 2.11+cu130, model
+at `E:\comfy4_models\unet`). No MLX needed.
+
+| Deliverable | What | Status |
+|---|---|---|
+| **CUDA SA3 adapter** | `service/adapters/stable_audio3_adapter.py` — real **generate** (text→audio) + **reimagine** (audio-to-audio via SA3 `init_audio`+`init_noise_level`); per-step progress + cooperative cancel; 24-bit stereo WAV; prompt-text "colors" (real steering deferred). Env-selected (`MOSH_ADAPTER=stable_audio_3`), launched in the ComfyUI venv (`MOSH_SERVICE_PYTHON`). | ✅ verified from the UI: generate 4 s stereo in ~5 s, reimagine in ~1 s; manifest `adapter=stable_audio_3`, real audio (1 MB vs the 88 KB fake tone) |
+| **Async non-blocking render** | `src/spine/AsyncRenderPool` — `render_layer` returns immediately ("rendering"); a worker submits/polls off the message thread and marshals the result + progress events back. Required because SA3 loads ~minutes (HDD) and the UI must stay live. | ✅ a command issued *during* a render still returns in ~180 ms; the model-load warmup no longer freezes the UI |
+| **PC UI** | `WebViewHost` opens the system **browser** to the local server by default (the embedded WebView2 renders blank here); `MOSH_UI_MODE=webview` opts into the in-app window; `=none` is headless. The React UI + bridge.ts are reused unchanged (HTTP transport). | ✅ `uiConnected=True` — a real browser loads the UI and drives the backend |
+| **Concurrent HTTP server** | `HttpBridge` is now a bounded **thread pool** (12–24 workers) with a short idle-read timeout — a real browser opens many parallel sockets that a single accept loop can't serve. Marshaling uses shared-ptr + timeout for safe shutdown. | ✅ `diag 10/10` while a real browser is connected (was 0/N single-threaded) |
+| **Orphaned-port fix** | The listening socket is made **non-inheritable** so the `juce::ChildProcess` generative service can't inherit it — otherwise a crashed/force-killed Mosh orphans the port and the next launch can't bind. | ✅ root cause of a long "server wedged" red herring |
+| **Windows audio** | App opens a default WASAPI output (`engine.getDeviceManager().initialise(0,2)` in `Main.cpp`, app-only). | ✅ transport plays, position advances on the audio clock; accepted SA3 takes audible |
+
+Run it: `pwsh -File run-mosh-pc.ps1` (sets `MOSH_ADAPTER=stable_audio_3` + the ComfyUI venv python +
+the model dir, launches Mosh; UI opens in the browser). Env reference: `.env.example`. Full suite still
+**326 assertions / 44 cases green** (Fake adapter is the default, so CI/tests are unaffected).
+
+**Deferred (documented, not built):** real activation-steering "colors" (needs `COLORRACK_DATA`, not on
+this machine), the judge-panel quality readout (needs the judge venv), the init-latent cache (perf), and
+the in-app WebView2 render (blank here — a JUCE-8/Windows limitation; macOS WKWebView is the path).
+Note: the ~234 s model load is from an HDD (`E:`); copying the model to the SSD would cut it sharply.
 
 ## Verifiability map (important)
 

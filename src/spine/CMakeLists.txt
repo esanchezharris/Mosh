@@ -7,7 +7,9 @@ add_library(mosh_spine STATIC
     DslExecutor.cpp
     GenerativeJobManager.cpp
     GenerativeCommands.cpp
+    AsyncRenderPool.cpp
     # header-only units (listed for IDE/registration):
+    AsyncRenderPool.h
     Ids.h
     MoshResult.h
     MoshCommand.h

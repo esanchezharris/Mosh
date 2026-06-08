@@ -1,8 +1,13 @@
 #pragma once
 #include <juce_core/juce_core.h>
 #include "DslExecutor.h"
+#include <atomic>
+#include <condition_variable>
 #include <deque>
+#include <memory>
 #include <mutex>
+#include <thread>
+#include <vector>
 
 // ──────────────────────────────────────────────────────────────────────────────
 // HttpBridge — a minimal HTTP transport for the MoshOps seam, so a PLAIN BROWSER
@@ -40,8 +45,13 @@ namespace mosh
         bool isListening() const { return listening; }
         int  getPort() const     { return port; }
 
+        // True once a UI client has fetched the snapshot — i.e. the frontend actually
+        // initialized against this backend (a blank in-app WebView never does this).
+        bool isUiConnected() const { return uiConnected.load(); }
+
     private:
-        void run() override;                                  // accept loop
+        void run() override;                                  // accept loop (this Thread)
+        void workerLoop();                                    // N of these drain connQueue
         void onMoshEvent (const MoshEvent&) override;         // queue events for /api/events
         void handleConnection (juce::StreamingSocket&);
 
@@ -54,6 +64,17 @@ namespace mosh
         juce::File uiDir;
         int port;
         std::atomic<bool> listening { false };
+        std::atomic<bool> uiConnected { false };
+
+        // Connection thread pool. A real browser opens many parallel sockets; a single
+        // accept-and-serve loop would serialize them (each up to a read timeout) and
+        // starve other requests. Workers handle connections concurrently; command/
+        // snapshot work is still marshalled to (and serialized on) the message thread.
+        std::atomic<bool>       shuttingDown { false };
+        std::vector<std::thread> workers;
+        std::deque<std::unique_ptr<juce::StreamingSocket>> connQueue;
+        std::mutex              connMutex;
+        std::condition_variable connCv;
 
         // Sequence-cursor event log (non-destructive reads; see header comment).
         struct SeqEvent { juce::int64 seq; juce::var data; };

@@ -1,5 +1,6 @@
 #include "GenerativeEngine.h"
 #include "EngineSnapshot.h"   // clipToVar
+#include "AsyncRenderPool.h"
 #include "Ids.h"
 #include <memory>
 
@@ -45,6 +46,15 @@ namespace mosh
         return t.get();
     }
 
+    // The source clip's backing audio file (for reimagine input + a content hash in
+    // the fingerprint). // VERIFY AudioClipBase::getSourceFileReference() on the clone.
+    static juce::File sourceFileFor (te::Clip* clip)
+    {
+        if (auto* ac = dynamic_cast<te::AudioClipBase*> (clip))
+            return ac->getSourceFileReference().getFile();
+        return {};
+    }
+
     static FingerprintInputs fingerprintFor (te::Clip* clip, juce::ValueTree layerTree, const juce::String& adapterName)
     {
         FingerprintInputs fp;
@@ -53,7 +63,13 @@ namespace mosh
         fp.colors = RenderLayer (layerTree).getColors();
         fp.seed = (juce::int64) layerTree[ids::seed];
         fp.modelAdapter = adapterName;
-        fp.upstreamHash = clip->itemID.toString();
+        // Upstream hash = clip identity + a content signature of its source audio,
+        // so re-recording/replacing the source invalidates the cache (05 §5).
+        juce::String upstream = clip->itemID.toString();
+        if (const auto src = sourceFileFor (clip); src.existsAsFile())
+            upstream << "|" << juce::String (src.getSize())
+                     << "|" << juce::String (src.getLastModificationTime().toMilliseconds());
+        fp.upstreamHash = upstream;
         const auto pos = clip->getPosition();
         fp.clipRangeStart = pos.getStart().inSeconds();
         fp.clipRangeEnd = pos.getEnd().inSeconds();
@@ -63,9 +79,26 @@ namespace mosh
     }
 
     void registerGenerativeEngineCommands (DslExecutor& exec, MoshEngine& engine,
-                                           GenerativeJobManager& jobs, RenderCache& cache)
+                                           GenerativeJobManager& jobs, RenderCache& cache,
+                                           AsyncRenderPool* pool)
     {
         auto layerSeq = std::make_shared<int> (0);
+
+        // The active adapter (matches the service's MOSH_ADAPTER) is part of the cache
+        // key so Fake and SA3 renders never collide. Read once at registration.
+        const auto adapterName = juce::SystemStats::getEnvironmentVariable ("MOSH_ADAPTER", "fake");
+
+        // The pool runs render jobs off the message thread and calls this back ON the
+        // message thread to land the terminal status/artifact on the (re-found) layer.
+        if (pool != nullptr)
+            pool->setFinalize ([&engine] (const juce::String& layerId, RenderStatus st, const juce::String& artifact)
+            {
+                auto found = findLayer (engine.getEdit(), layerId);
+                if (! found.valid()) return;                       // deleted mid-render
+                RenderLayer layer (found.tree);
+                if (artifact.isNotEmpty()) layer.setCacheArtifact (artifact);
+                layer.setStatus (st);
+            });
 
         // create_render_layer {clip, prompt?, seed?, mode?} → MOSH_RENDERLAYER under the clip
         exec.registerCommand ("create_render_layer", [&engine, layerSeq] (const MoshCommand& cmd, DslExecutor::Context& ctx) -> MoshResult
@@ -96,8 +129,13 @@ namespace mosh
             return MoshResult::success ("Created render layer", changed, juce::var (data));
         });
 
-        // render_layer {layer} → render through the job service (TIER WALL)
-        exec.registerCommand ("render_layer", [&engine, &jobs, &cache] (const MoshCommand& cmd, DslExecutor::Context& ctx) -> MoshResult
+        // render_layer {layer} → render through the job service (TIER WALL). NON-
+        // transactional: the artifact is a re-derivable cache result, and in the app
+        // it lands ASYNCHRONOUSLY (seconds-to-minutes for the real model) so it must
+        // not sit inside an undo transaction. With a pool → async (returns "rendering"
+        // immediately, progress/ready arrive as events); without one (tests/CI) →
+        // synchronous via renderLayerViaService.
+        exec.registerCommand ("render_layer", [&engine, &jobs, &cache, pool, adapterName] (const MoshCommand& cmd, DslExecutor::Context& ctx) -> MoshResult
         {
             auto found = findLayer (engine.getEdit(), cmd.argString ("layer"));
             if (! found.valid())
@@ -105,36 +143,96 @@ namespace mosh
 
             RenderLayer layer (found.tree);
             const auto ref = ids::layerRef (layer.getId());
+            const auto pos = found.clip->getPosition();
 
             RenderRequest req;
             req.mode = layer.getMode();
-            req.fingerprint = fingerprintFor (found.clip, found.tree, "fake");
+            req.fingerprint = fingerprintFor (found.clip, found.tree, adapterName);
             req.prompt = req.fingerprint.prompt;
             req.colors = req.fingerprint.colors;
             req.seed = req.fingerprint.seed;
+            req.durationSec = juce::jmax (1.0, pos.getLength().inSeconds());
+            if (req.mode == "reimagine")
+            {
+                if (const auto src = sourceFileFor (found.clip); src.existsAsFile())
+                {
+                    req.inputWavPath = src.getFullPathName();
+                    req.inputStartSec = pos.getOffset().inSeconds();
+                    req.inputLengthSec = pos.getLength().inSeconds();
+                }
+            }
 
-            if (! jobs.ensureServiceRunning())
-                return MoshResult::failure (error::modelBusy, "generative service unavailable");
-
+            layer.setFingerprint (req.fingerprint);   // durable cache identity (no undo)
+            const auto cacheKey = req.cacheKey();
             const auto outDir = engine.getEditFile().getParentDirectory().getChildFile ("renders");
+
+            // CACHE HIT — complete now. Materialize the cached bytes to a file if this
+            // layer has no artifact yet, so accept_render can land it.
+            if (cache.has (cacheKey))
+            {
+                if (! layer.getCacheArtifact().startsWith ("file:"))
+                {
+                    outDir.createDirectory();
+                    auto f = outDir.getChildFile (cacheKey + ".wav");
+                    if (const auto* bytes = cache.get (cacheKey))
+                        f.replaceWithData (bytes->getData(), bytes->getSize());
+                    layer.setCacheArtifact ("file:" + f.getFullPathName());
+                }
+                layer.setStatus (RenderStatus::ready);
+                ctx.emit (events::layerRendered (ref, "render:" + cacheKey));
+                ctx.emit (events::layerStatus (ref, "ready"));
+                auto* data = new juce::DynamicObject();
+                data->setProperty ("fromCache", true);
+                data->setProperty ("cacheKey", cacheKey);
+                return MoshResult::success ("Render (cache hit)", juce::StringArray { ref }, juce::var (data));
+            }
+
+            layer.setStatus (RenderStatus::rendering);
             ctx.emit (events::layerStatus (ref, "rendering"));
+
+            if (pool != nullptr)
+            {
+                // ASYNC (app) — enqueue and return; the worker emits progress + ready.
+                pool->enqueue ({ ref, req, outDir, cacheKey });
+                auto* data = new juce::DynamicObject();
+                data->setProperty ("status", "rendering");
+                data->setProperty ("cacheKey", cacheKey);
+                return MoshResult::success ("Rendering", juce::StringArray { ref }, juce::var (data));
+            }
+
+            // SYNC (tests/CI) — block on the service (the FakeAdapter is fast).
+            if (! jobs.ensureServiceRunning())
+            {
+                layer.setStatus (RenderStatus::error);
+                ctx.emit (events::layerStatus (ref, "error"));
+                return MoshResult::failure (error::modelBusy, "generative service unavailable");
+            }
             auto out = renderLayerViaService (layer, req, jobs, cache, outDir,
                 [&] (double pct) { ctx.emit (events::layerRenderProgress (ref, pct * 100.0, 0.0)); });
-
             if (! out.ok)
             {
                 ctx.emit (events::layerStatus (ref, "error"));
                 return MoshResult::failure (error::internalError, out.error);
             }
-
             ctx.emit (events::layerRendered (ref, "render:" + out.cacheKey));
             ctx.emit (events::layerStatus (ref, "ready"));
             auto* data = new juce::DynamicObject();
             data->setProperty ("fromCache", out.fromCache);
             data->setProperty ("cacheKey", out.cacheKey);
-            juce::StringArray changed; changed.add (ref);
-            return MoshResult::success (out.fromCache ? "Render (cache hit)" : "Rendered", changed, juce::var (data));
-        });
+            return MoshResult::success (out.fromCache ? "Render (cache hit)" : "Rendered", juce::StringArray { ref }, juce::var (data));
+        }, /*transactional*/ false);
+
+        // cancel_render {layer} → flag the pool to abort + DELETE the service job.
+        exec.registerCommand ("cancel_render", [&engine, pool] (const MoshCommand& cmd, DslExecutor::Context& ctx) -> MoshResult
+        {
+            const auto layerArg = cmd.argString ("layer");
+            auto found = findLayer (engine.getEdit(), layerArg);
+            const auto ref = found.valid() ? ids::layerRef (found.tree[ids::id].toString()) : layerArg;
+            if (pool != nullptr) pool->cancel (ref);
+            if (found.valid()) RenderLayer (found.tree).setStatus (RenderStatus::dirty);
+            ctx.emit (events::layerStatus (ref, "idle"));
+            return MoshResult::success ("Canceled render", juce::StringArray { ref });
+        }, /*transactional*/ false);
 
         // accept_render {layer} → land NON-DESTRUCTIVELY as a new clip on the Neural lane
         exec.registerCommand ("accept_render", [&engine] (const MoshCommand& cmd, DslExecutor::Context& ctx) -> MoshResult

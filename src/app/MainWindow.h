@@ -10,13 +10,13 @@ namespace mosh
     class MainWindow : public juce::DocumentWindow
     {
     public:
-        explicit MainWindow (juce::String name, DslExecutor& executor)
+        MainWindow (juce::String name, DslExecutor& executor, std::function<bool()> uiConnected = {})
             : juce::DocumentWindow (std::move (name),
                                     juce::Colours::black,
                                     juce::DocumentWindow::allButtons)
         {
             setUsingNativeTitleBar (true);
-            setContentOwned (new WebViewHost (executor), true);
+            setContentOwned (new WebViewHost (executor, std::move (uiConnected)), true);
             setResizable (true, true);
             centreWithSize (1280, 800);
             setVisible (true);

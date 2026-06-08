@@ -7,10 +7,25 @@ protocol. This is **not** built by CMake — it ships and runs alongside the app
 The service answers a **health check** and runs the generative **job protocol**:
 submit a render job, poll its status/progress, and cancel it. Audio is returned over
 **files + manifests** (a WAV plus a sidecar manifest JSON), never inline in the HTTP
-body. This stage ships the deterministic **FakeAdapter** so the whole orchestration is
-proven *before* the real model exists ("FakeAdapter before SA3"). The heavy generative
-work (StableAudio3 / MLX, Apple Silicon only) lands much later behind the same
-interface and stays **external/optional**.
+body. The deterministic **FakeAdapter** (the default) proves the whole orchestration
+without a model; the real **`StableAudio3Adapter`** (CUDA, the PC build) plugs in
+behind the same interface.
+
+## Adapter selection (`MOSH_ADAPTER`)
+
+`ADAPTER = load_adapter(os.environ["MOSH_ADAPTER"])` — chosen by env, default `fake`:
+
+| `MOSH_ADAPTER`   | Adapter                | Deps                                   |
+| ---------------- | ---------------------- | -------------------------------------- |
+| `fake` (default) | `FakeAdapter`          | **none** (stdlib only — CI/tests)      |
+| `stable_audio_3` | `StableAudio3Adapter`  | torch (CUDA) + `stable_audio_3` + soundfile |
+
+The SA3 adapter is imported **lazily**, so the Fake path never pulls in torch. Launch
+the service with a python that has the heavy stack (set `MOSH_SERVICE_PYTHON` to that
+venv); the C++ host passes `MOSH_ADAPTER` / `MOSH_SA3_MODEL_DIR` through to the child.
+SA3 env: `MOSH_SA3_MODEL_DIR` (model_config.json + model.safetensors), `MOSH_SA3_HALF`
+(fp16), `MOSH_SA3_MAX_DURATION` (OOM cap). On startup the SA3 adapter `warmup()`s the
+model on a background thread so the first render isn't a multi-minute stall.
 
 ## Zero-dependency constraint (load-bearing)
 
@@ -114,7 +129,14 @@ Request body (JSON):
 | `seed`        | int        | no       | Recorded in the manifest.                              |
 | `cacheKey`    | str        | yes      | Full fingerprint. **The audio is a stable function of this.** |
 | `outDir`      | str        | yes      | Directory for `<jobId>.wav` + `<jobId>.manifest.json` (created if missing). |
-| `durationSec` | float      | no       | Render length. Default `1.0`.                          |
+| `durationSec` | float      | no       | Render length. Default `1.0` (Fake) / `4.0` (SA3).     |
+| `cfg`         | float      | no       | (SA3) classifier-free guidance scale. Default `1.0`.   |
+| `steps`       | int        | no       | (SA3) diffusion steps. Default `8` (distilled).        |
+| `nl`          | float      | no       | (SA3, reimagine) `init_noise_level` ≤ 0.5.             |
+| `inputWavPath`| str        | no       | (SA3, reimagine) source audio file (audio-to-audio).   |
+| `inputStartSec` / `inputLengthSec` | float | no | (SA3, reimagine) source region to use. |
+
+(The FakeAdapter ignores the SA3-only extras.)
 
 `200` with:
 
@@ -209,8 +231,15 @@ $s.manifest.wavPath   # -> the rendered WAV on disk
   implements `render(request, on_progress, is_canceled)`: deterministic mono 16-bit
   PCM keyed by `cacheKey`, written via the stdlib `wave` module, plus a sidecar
   manifest. Cooperative cancellation deletes any partial WAV.
-- **Next increments** (owned by the C++ Stage-5 *Generative Job Manager*, specified in
-  **module 05**): the full process lifecycle — warmup / heartbeat / crash-restart /
-  cancel-on-project-close — and the real `StableAudio3Adapter` (MLX). See the
-  `# VERIFY` note in `fake_adapter.py`. The SA3 path stays external/optional behind
-  the same interface so this service keeps **zero external dependencies**.
+- `adapters/stable_audio3_adapter.py` — `StableAudio3Adapter`, the real CUDA model.
+  Same `render(...)` contract: **generate** (text→audio) and **reimagine**
+  (audio-to-audio via SA3's `init_audio` + `init_noise_level`); per-step progress +
+  cooperative cancel via the sampler `callback`; 24-bit stereo WAV via `soundfile`;
+  prompt-text "colors" approximation (real activation-steering is deferred — needs the
+  COLORRACK calibration data). Imported lazily; the model is cached for the process
+  lifetime and preloaded by `warmup()`.
+- `scripts/sa3_smoke.py` — standalone CUDA validation (load + generate + reimagine).
+- **Deferred** (documented, not built): real color steering (COLORRACK_DATA), the
+  judge-panel quality readout (pq/flags), and the init-latent cache (skip VAE
+  re-encode on seed-only change). Correctness comes from the C++ full-fingerprint
+  cache; these are quality/perf refinements.
