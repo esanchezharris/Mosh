@@ -115,11 +115,15 @@ chowdsp_utils `e97b826e` · Catch2 `v3.9.1` · CPM `v0.42.3`.
 - ✅ `Renderer::Parameters{edit}` + `renderToFile` (file-based; no buffer API) — **05**
 - ✅ Takes: `addTake(File)`/`setCurrentTake`/`unpackTakes`; new-clip/new-track fallback for A/B + freeze — **05**
 
+- ✅ JUCE-8 WebView native-fn protocol — **03**: NOT `backend.getNativeFunction`; a native function is
+  invoked via `backend.emitEvent("__juce__invoke", {name, params, resultId})` + a `"__juce__complete"`
+  `{promiseId, result}` event (`juce_gui_extra/native/javascript/index.js`). `ui/src/bridge.ts` fixed to
+  this; C++ `withNativeFunction`/`emitEventIfBrowserIsVisible` was already correct. Events on the
+  `mosh_event` channel via `backend.addEventListener`. (Required for macOS WKWebView to connect.)
+
 Still open (resolve when reached):
 - `MOSH_RENDERLAYER` parent (clip default vs track) — **01** (modelled clip-parented; revisit for track-wide transforms)
-- JUCE 8 WebView native-fn registration + `window.__JUCE__.backend` emit API — **03**
-  (C++ authored with `withNativeFunction`/`emitEventIfBrowserIsVisible`; JS flagged in `ui/src/bridge.ts`) — reconcile at first WebView run.
-- `ExternalPlugin` editor accessor; `LatencyPlugin` source; anira `process`/`prepare`; bypassed-plugin PDC — **04**
+- `ExternalPlugin` editor accessor; `LatencyPlugin` source; anira `process`/`prepare`; bypassed-plugin PDC — **04** (macOS, with real plugins/anira)
 
 ## Build & test quickstart (verified commands)
 
