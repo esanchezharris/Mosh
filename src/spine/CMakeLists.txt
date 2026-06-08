@@ -6,6 +6,7 @@
 add_library(mosh_spine STATIC
     DslExecutor.cpp
     GenerativeJobManager.cpp
+    GenerativeCommands.cpp
     # header-only units (listed for IDE/registration):
     Ids.h
     MoshResult.h
@@ -20,6 +21,7 @@ add_library(mosh_spine STATIC
     ClipMath.h
     Generative.h
     GenerativeJobManager.h
+    GenerativeCommands.h
 )
 
 target_include_directories(mosh_spine PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

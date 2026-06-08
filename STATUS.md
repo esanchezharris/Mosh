@@ -190,12 +190,16 @@ Stage 2.** This is the documented JUCE-8 WebView `// VERIFY`; it does not block 
   `FakeAdapter` + `RenderCache` + `renderLayer()` (`src/spine/Generative.h`, 25 assertions): cache
   HIT/MISS by FULL fingerprint, dirty-on-change re-render, deterministic output, accept/reject taste
   labels. The Python **job service** (submit/status/progress/cancel + deterministic placeholder-WAV +
-  manifest, stdlib-only) is being added under `service/`. **Remaining:** the C++ `GenerativeJobManager`
-  (spawn/handshake/heartbeat/poll the service over HTTP+files/manifests), the `mosh_engine`
-  RenderLayer command handlers (`create_render_layer`/`set_render_param`/`render_layer`/`cancel_render`/
-  `accept_render`/`reject_render`/`bypass_layer`/`freeze_layer`/`bounce_layer_to_clip`) landing renders
-  as Tracktion takes (API in `docs/TRACKTION_API_NOTES.md` §9; new-clip/new-track fallback), and the
-  `StableAudio3Adapter` (MLX, macOS-only; env-var the two hardcoded paths).
+  manifest, stdlib-only) — DONE + verified. The C++ **`GenerativeJobManager`** + `renderLayerViaService()`
+  (spawn/`/health`/submit/poll/cancel over HTTP+manifests) — DONE + verified C++↔service e2e
+  (`mosh_service_tests`, 16). The **command-surface loop** (`create_render_layer`/`set_render_param`/
+  `render_layer`/`accept_render`/`reject_render`/`cancel_render` + `layer_*` events + **JSONL taste
+  labels**) — DONE + verified (`src/spine/GenerativeCommands`, `test_generative_commands`, 22). **So the
+  whole Stage-5 Fake orchestration is proven on Windows EXCEPT** the audition/A-B **UI** (Stage 2
+  WebView) and landing `accept_render` as a **Tracktion take** (move the handlers into `mosh_engine`;
+  API in `docs/TRACKTION_API_NOTES.md` §9 + new-clip/new-track fallback). Then `bypass_layer`/
+  `freeze_layer`/`bounce_layer_to_clip`, service lifecycle hardening, and the `StableAudio3Adapter`
+  (MLX, macOS-only; env-var the two hardcoded paths) swap in last.
 - **Stage 6 (consolidation)** — mixer polish, two-theme tokens, reserved B-5 slot; the full producer
   loop end-to-end from the UI with correct undo/redo.
 

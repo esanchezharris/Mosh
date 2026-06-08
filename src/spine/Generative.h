@@ -166,6 +166,6 @@ namespace mosh
 
     // accept/reject = the taste labels (02 §5). accept keeps the render; reject
     // discards the kept flag (and the layer can be re-rendered/cleared upstream).
-    inline void acceptRender (RenderLayer& layer) { layer.setUserKept (true); }
-    inline void rejectRender (RenderLayer& layer) { layer.setUserKept (false); }
+    inline void acceptRender (RenderLayer& layer, juce::UndoManager* um = nullptr) { layer.setUserKept (true, um); }
+    inline void rejectRender (RenderLayer& layer, juce::UndoManager* um = nullptr) { layer.setUserKept (false, um); }
 }
