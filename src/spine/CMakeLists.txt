@@ -17,6 +17,7 @@ add_library(mosh_spine STATIC
     Fingerprint.h
     RenderLayer.h
     ClipMath.h
+    Generative.h
 )
 
 target_include_directories(mosh_spine PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

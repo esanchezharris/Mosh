@@ -58,8 +58,8 @@
 - [ ] `getLatencySeconds()` returns the **true** delay; knobs via `add_neural_insert`/`set_neural_param`; ASTD-clamped; `set_neural_lab_mode`.
 - [ ] **GATE:** NAM tone + RAVE morph audible; **PDC null test passes (no drift)**; bypass correct (test the known inverted-logic bug); no dropouts; ASTD clamps + Lab unlock — all via commands.
 
-### Stage 5 — Generative layer (`05`) — Fake first, then SA3
-- [ ] `GenerativeModelAdapter` interface; **`FakeAdapter`** returns deterministic placeholder audio.
+### Stage 5 — Generative layer (`05`) — Fake first, then SA3 — *orchestration spine proven (out of order, since Stage 2/4 are platform-blocked here)*
+- [x] `GenerativeModelAdapter` interface + **`FakeAdapter`** (deterministic placeholder) + `RenderCache` + the `renderLayer` orchestrator (`src/spine/Generative.h`). **Tested (25 assertions): cache HIT/MISS keyed by the FULL fingerprint, any-input-change → dirty → re-render, deterministic-per-fingerprint output, accept/reject taste labels.** Pure spine — no MLX/service/UI. Job service (Python submit/status/progress/cancel) + Tracktion-take landing are the next increment.
 - [ ] Job service: submit/status/progress/cancel + lifecycle (warmup/heartbeat/crash-restart/cancel-on-close); audio over files+manifests.
 - [ ] RenderLayer flow + full cache fingerprint; commands: `create_render_layer`/`set_render_param`/`render_layer`/`cancel_render`/`accept_render`/`reject_render`/`bypass_layer`/`freeze_layer`/`bounce_layer_to_clip`.
 - [ ] Then **`StableAudio3Adapter`** (carve per App. B; env-var the two hardcoded paths): colors + ASTD/Lab, two control vocabularies, generate + re-imagine (`nl ≤ 0.5`), init-latent cache, judge-panel QA, ≤3-color cap.
