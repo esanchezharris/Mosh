@@ -177,10 +177,12 @@ Stage 2.** This is the documented JUCE-8 WebView `// VERIFY`; it does not block 
   C++ `WebViewHost` (already coded), build the React arrangement (TrackList/Timeline/Clips/Transport/
   Mixer) over the existing snapshot+events contract, then prove swappability (rebuild the bundle, zero
   backend change). The backend half is done; this stage is mostly frontend + confirming the seam.
-- **Stage 3 (VST3 hosting via commands)** — add `load_plugin`/`remove_plugin`/`reorder_plugin`/
-  `set_plugin_param`/`bypass_plugin`/`open_plugin_editor` handlers in `mosh_engine` over Tracktion's
-  `ExternalPlugin` + `PluginManager`. Resolve the `// VERIFY` ExternalPlugin editor accessor against
-  the clone. Snapshot already has a `plugins:[]` slot per track.
+- **Stage 3 (VST3 hosting via commands)** — **command surface DONE + verified on Windows with a
+  Tracktion built-in** (`src/engine/PluginCommands` + `test_plugin_commands`, `[plugins]`):
+  `load_plugin`/`bypass_plugin`/`remove_plugin`/`reorder_plugin` + undo, snapshot surfaces `plugins[]`.
+  **Remaining:** `set_plugin_param` (AutomatableParameter API — small, Windows-doable on a built-in) and
+  `open_plugin_editor` (native pop-out; the `ExternalPlugin` editor `// VERIFY`), plus real VST3 scan +
+  audio = the macOS half of the gate.
 - **Stage 4 (Tier-A neural)** — anira-backed `NeuralInsertPlugin` (custom `tracktion::Plugin` via
   `createBuiltInType<>()`); NAM/Proteus ship, RAVE gated; `getLatencySeconds()` true delay + PDC null
   test; ASTD clamps (the spine's `Astd` is ready) + Lab mode. macOS-primary (anira backends); the
