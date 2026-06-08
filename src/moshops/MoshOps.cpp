@@ -81,6 +81,7 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "bypass_layer")      return cmdBypassLayer (args);
     if (name == "freeze_layer")      return cmdFreezeLayer (args);
     if (name == "bounce_layer_to_clip") return cmdBounceLayerToClip (args);
+    if (name == "export_audio")      return cmdExportAudio (args);
 
     return errResult (name, "unknown command: " + name);
 }
@@ -1006,6 +1007,42 @@ juce::var MoshOps::cmdBounceLayerToClip (const juce::var& args)
     logLine ("bounce_layer_to_clip", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("bounce_layer_to_clip");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Stage 6 — export (the full producer loop ends here)
+// ─────────────────────────────────────────────────────────────────────────────
+juce::var MoshOps::cmdExportAudio (const juce::var& args)
+{
+    auto& edit = eng.edit();
+    auto file = args.getProperty ("file", var()).toString().isNotEmpty()
+                    ? juce::File (args.getProperty ("file", var()).toString())
+                    : eng.sessionDir().getChildFile ("exports")
+                          .getChildFile ("mix-" + String (Time::getCurrentTime().toMilliseconds()))
+                          .withFileExtension ("wav");
+    file.getParentDirectory().createDirectory();
+    file.deleteFile();
+
+    // Render exclusivity (01 §5): detach the Edit from the device before an
+    // offline render (asserts otherwise). No-op when no device is attached.
+    edit.getTransport().stop (false, false);
+    edit.getTransport().freePlaybackContext();
+
+    const double len = juce::jmax (0.1, edit.getLength().inSeconds());
+
+    // Synchronous whole-edit render (useThread=false blocks until the file is
+    // written; the Parameters overload starts a BACKGROUND job and returns early).
+    const bool ok = te::Renderer::renderToFile (edit, file, false)
+                    && file.existsAsFile() && file.getSize() > 0;
+
+    logLine ("export_audio", args, ok, ok ? String() : String ("render produced no file"), false);
+    if (! ok) return errResult ("export_audio", "export render failed");
+
+    auto* data = new DynamicObject();
+    data->setProperty ("file", file.getFullPathName());
+    data->setProperty ("bytes", (juce::int64) file.getSize());
+    data->setProperty ("seconds", len);
+    return okResult ("export_audio", var (data));
 }
 
 juce::var MoshOps::pluginToVar (te::Plugin& p, int index)

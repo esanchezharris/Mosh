@@ -17,6 +17,19 @@
   --lane-h: 84px;
   font-synthesis: none;
 }
+/* Two-theme system — shared design tokens (Stage 6). Dark is default; light
+   overrides the same token names so every component re-themes for free. */
+[data-theme="light"] {
+  --bg: #f4f4f7;
+  --panel: #ffffff;
+  --panel-2: #ececf2;
+  --line: #d7d7e0;
+  --text: #1a1a22;
+  --muted: #6a6a78;
+  --clip: #3b6fe0;
+  --clip-2: #2a52b8;
+}
+
 * { box-sizing: border-box; }
 html, body, #root { margin: 0; height: 100%; width: 100%; }
 body {
@@ -42,6 +55,13 @@ button.on { border-color: var(--accent); color: var(--accent); background: #2120
   width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center;
   font-weight: 800; color: white; background: linear-gradient(140deg, var(--accent), var(--accent-2));
 }
+.topbar-right { display: flex; align-items: center; gap: 0.5rem; }
+.b5-slot {
+  font-size: 0.66rem; letter-spacing: 0.1em; color: var(--muted);
+  border: 1px dashed var(--line); border-radius: 6px; padding: 0.2rem 0.5rem; opacity: 0.6;
+}
+.tool-btn { padding: 0.35rem 0.6rem; border-radius: 7px; }
+
 .transport { display: flex; align-items: center; gap: 0.4rem; }
 .tbtn { width: 34px; height: 34px; display: grid; place-items: center; font-size: 0.95rem; border-radius: 8px; }
 .tbtn.play { color: var(--ok); }

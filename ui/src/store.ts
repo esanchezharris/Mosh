@@ -40,6 +40,9 @@ type State = {
   setSelectedTrack: (id: string | null) => void;
   openBrowser: () => void;
   closeBrowser: () => void;
+
+  theme: "dark" | "light";
+  toggleTheme: () => void;
 };
 
 export const useStore = create<State>((set, get) => ({
@@ -139,4 +142,12 @@ export const useStore = create<State>((set, get) => ({
       });
   },
   closeBrowser: () => set({ browserOpen: false }),
+
+  theme: "dark",
+  toggleTheme: () =>
+    set((s) => {
+      const next = s.theme === "dark" ? "light" : "dark";
+      document.documentElement.setAttribute("data-theme", next);
+      return { theme: next };
+    }),
 }));

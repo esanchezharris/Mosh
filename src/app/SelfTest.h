@@ -25,4 +25,9 @@ void runNeuralDemo (MoshOps&);
     the generative drawer (audition/accept/reject). */
 void runGenerativeDemo (MoshOps&);
 
+/** Scripted Stage 6 demo (`Mosh --demo6`): a consolidated session — a track with
+    a Tier-A neural insert AND a Tier-B generative RenderLayer — for the final
+    full-loop screenshot. (Does not render; that needs the service.) */
+void runConsolidationDemo (MoshOps&);
+
 } // namespace mosh

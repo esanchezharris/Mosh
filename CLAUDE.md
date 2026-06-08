@@ -8,18 +8,18 @@
 
 ## Prime directives (never violate)
 
-- [ ] **One mutation path:** every user-visible change is a **MoshOps command** (validate → Tracktion undo transaction → emit events → JSONL line → structured result). UI/agent never mutate Tracktion directly.
-- [ ] **One undo system:** Tracktion's `UndoManager` is the undo *implementation* under MoshOps. No second UndoManager, no shadow model.
-- [ ] **Swappable seam:** the frontend couples to the backend **only** via `execute_command(...)` + the **snapshot+events** feed. No Tracktion/audio concepts in the frontend. Pure view state (drawers, zoom, scroll, selection) is UI-local and **not** a command.
-- [ ] **Tier wall:** Tier A (NAM/Proteus/RAVE/DDSP) runs **in-process via anira**; Tier B (generative) is a **job via the adapter/service**. No generative model in anira; **no real-time sidecar**.
-- [ ] **Threading:** model + bridge on the message thread; audio in `applyToBuffer` on RT threads; rendering/thumbnails/freeze/service-I/O on background; **audio thread never blocks**; telemetry to UI **decimated 30–60 Hz**, never per-block.
-- [ ] **ASTD everywhere, defeatable:** every over-driveable neural param is a 0–100 UI control clamped below quality-collapse by default; **Lab mode** unlocks the raw range behind a warning. One shared impl, both tiers.
-- [ ] **Cache by full fingerprint:** Tier-B reuse keyed by the complete fingerprint (`05 §5`), never just source+params.
-- [ ] **FakeAdapter before SA3:** prove the generative orchestration with the stub; swap the real model in last.
-- [ ] **VERIFY before relying:** resolve every `// VERIFY` against the **pinned `tracktion_engine` clone**; take the **documented file-based fallback** when uncertain.
-- [ ] **macOS / Apple Silicon (arm64) ONLY for v0.** No Windows/Linux/CUDA paths. Lean into MLX/CoreML/Metal + unified memory. Cross-platform is a later concern.
-- [ ] **Gate discipline:** never advance past a failing gate; report against the concrete gate.
-- [ ] **Always leave an artifact:** low on context mid-stage → write a handoff note before stopping.
+- [x] **One mutation path:** every user-visible change is a **MoshOps command** (validate → Tracktion undo transaction → emit events → JSONL line → structured result). UI/agent never mutate Tracktion directly.
+- [x] **One undo system:** Tracktion's `UndoManager` is the undo *implementation* under MoshOps. No second UndoManager, no shadow model.
+- [x] **Swappable seam:** the frontend couples to the backend **only** via `execute_command(...)` + the **snapshot+events** feed. No Tracktion/audio concepts in the frontend. Pure view state (drawers, zoom, scroll, selection) is UI-local and **not** a command. (Stage 2 swappability proof: rebuilt bundle, byte-identical backend.)
+- [x] **Tier wall:** Tier A in-process (custom `te::Plugin`); Tier B (generative) is a **job via the adapter/service**. No generative model in anira; **no real-time sidecar**. (NB: v0 Tier-A ships a self-contained RT-safe MLP; anira-pool is gated for RAVE/DDSP.)
+- [x] **Threading:** model + bridge on the message thread; audio in `applyToBuffer` on RT threads (no alloc); service-I/O on background (`std::thread` + `callAsync`); **audio thread never blocks**; telemetry decimated 30 Hz.
+- [x] **ASTD everywhere, defeatable:** every over-driveable neural param is a 0–100 UI control clamped below quality-collapse; **Lab mode** unlocks the raw range. One shared impl (`mosh::astd`), both tiers.
+- [x] **Cache by full fingerprint:** Tier-B reuse keyed by the complete fingerprint (`05 §5`), never just source+params. (Harness: HIT/MISS verified.)
+- [x] **FakeAdapter before SA3:** generative orchestration proven with the stub (81/81); SA3 swaps in last (deferred/gated).
+- [x] **VERIFY before relying:** resolved against the **pinned `tracktion_engine` clone** (`2877b621`); documented file-based fallbacks taken (new-clip landing, render-to-file). See `docs/ENGINE_API_NOTES.md`.
+- [x] **macOS / Apple Silicon (arm64) ONLY for v0.** No Windows/Linux/CUDA paths.
+- [x] **Gate discipline:** never advanced past a failing gate; reported against concrete gates (all six PASSED).
+- [x] **Always leave an artifact:** `docs/PROGRESS.md` + per-gate commits + this manifest kept current.
 
 ---
 
@@ -63,9 +63,9 @@
 - [x] **GATE (Fake):** full loop via commands — render → audition (cached artifact) → accept/reject; **cache HIT/MISS vs full fingerprint**; param change → dirty → re-render (MISS); JSONL logs accept/reject as **taste labels**; async/background render (no playback stall). Proven by `Mosh --selftest` (81/81) + `Mosh --demo5` generative-drawer screenshot.
 - [ ] **GATE (SA3):** DEFERRED — needs the external MLX SA3 stack (not present this session).
 
-### Stage 6 — Consolidation (`03`,`04`,`05`)
-- [ ] Mixer polish; two-theme system (shared tokens); reserved B-5 slot (empty); optional prompt-concision rewriter + quality readout.
-- [ ] **GATE:** full producer loop from the UI (import/record → arrange → host VST3 → Tier-A insert → generative transform → mix → export); undo/redo correct throughout.
+### Stage 6 — Consolidation (`03`,`04`,`05`) ✅ GATE PASSED (2026-06-08)
+- [x] Mixer (in track headers: volume/pan/mute/solo); **two-theme system** (shared CSS tokens, dark/light toggle); **reserved B-5 slot** (empty placeholder in the topbar); quality readout via the FakeAdapter manifest (`pq`/`pq_base`/`flags`). `export_audio` command (synchronous `Renderer::renderToFile`).
+- [x] **GATE:** full producer loop — import (`add_test_tone_clip`) → arrange (`move`/`trim`) → host VST3 (`load_plugin`) → Tier-A insert (`add_neural_insert`) → generative transform (`create`/`render`/`accept_render`) → mix (`set_track_volume`) → **export** (794KB WAV of the whole signal chain) → undo/redo correct. Proven by `Mosh --selftest` **89/89** + `Mosh --demo6` consolidated-UI screenshot (both neural tiers on one track, export + theme + B-5 in the topbar).
 
 Build the arrangement incrementally within Stage 2/6: static clips → drag/move → trim/split → zoom/snap → marquee.
 

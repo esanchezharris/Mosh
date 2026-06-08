@@ -14,6 +14,9 @@ export function App() {
   const init = useStore((s) => s.init);
   const snapshot = useStore((s) => s.snapshot);
   const lastError = useStore((s) => s.lastError);
+  const exec = useStore((s) => s.exec);
+  const theme = useStore((s) => s.theme);
+  const toggleTheme = useStore((s) => s.toggleTheme);
 
   useEffect(() => {
     init();
@@ -36,6 +39,16 @@ export function App() {
           <span className="logo-min">M</span> Mosh
         </div>
         <Transport />
+        <div className="topbar-right">
+          {/* Reserved B-5 / Monster operator slot (deferred — empty in v0). */}
+          <span className="b5-slot" title="B-5 / Monster — reserved (deferred)">B-5</span>
+          <button className="tool-btn" onClick={() => exec("export_audio", {})} title="Export the mix to WAV">
+            ⤓ Export
+          </button>
+          <button className="tool-btn" onClick={toggleTheme} title="Toggle theme">
+            {theme === "dark" ? "☾" : "☀"}
+          </button>
+        </div>
       </header>
 
       {lastError && <div className="error-bar">⚠ {lastError}</div>}

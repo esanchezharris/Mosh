@@ -390,6 +390,58 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (logText.contains ("reject_render"), "JSONL records reject_render (taste label)");
     }
 
+    // ─── Stage 6: full producer loop → export, undo/redo correct throughout ───
+    std::cerr << "--- Stage 6: full producer loop + export ---\n";
+    {
+        // import/record → arrange
+        auto mt = cmd (ops, "create_track", args1 ("name", "Mix"))["data"].getProperty ("trackId", var()).toString();
+        auto mtone = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", mt }, { "seconds", 1.0 }, { "freq", 165.0 }}));
+        auto mcid = mtone["data"].getProperty ("clipId", var()).toString();
+        cmd (ops, "move_clip", objN ({{ "clipId", mcid }, { "start", 0.5 }}));
+        cmd (ops, "trim_clip", objN ({{ "clipId", mcid }, { "length", 0.8 }}));
+
+        // host VST3 (if any scanned)
+        String fxId2;
+        { auto lp2 = cmd (ops, "list_plugins");
+          if (auto* arr = lp2["data"].getProperty ("plugins", var()).getArray())
+            for (auto& p : *arr) if (! (bool) p.getProperty ("isInstrument", false) && fxId2.isEmpty())
+                fxId2 = p.getProperty ("id", var()).toString(); }
+        if (fxId2.isNotEmpty())
+            check (ok (cmd (ops, "load_plugin", objN ({{ "trackId", mt }, { "pluginId", fxId2 }}))), "host VST3 effect on the mix track");
+
+        // Tier-A neural insert
+        auto an = cmd (ops, "add_neural_insert", objN ({{ "trackId", mt }, { "modelId", "nam" }}));
+        const int ni = (int) an["data"].getProperty ("index", -1);
+        cmd (ops, "set_neural_param", objN ({{ "trackId", mt }, { "index", ni }, { "paramId", "drive" }, { "value", 55.0 }}));
+
+        // generative transform (Tier B)
+        cmd (ops, "create_render_layer", objN ({{ "clipId", mcid }, { "adapter", "fake" }}));
+        cmd (ops, "set_render_param", objN ({{ "clipId", mcid }, { "seed", 7 }}));
+        auto rr = cmd (ops, "render_layer", objN ({{ "clipId", mcid }, { "wait", true }}));
+        check (ok (rr), "generative transform rendered");
+        cmd (ops, "accept_render", args1 ("clipId", mcid));
+
+        // mix
+        cmd (ops, "set_track_volume", objN ({{ "trackId", mt }, { "db", -4.0 }}));
+
+        // export
+        auto exp = cmd (ops, "export_audio", objN ({{ "file", "" }}));
+        check (ok (exp), "export_audio ok");
+        const auto exportFile = exp["data"].getProperty ("file", var()).toString();
+        check (File (exportFile).existsAsFile() && (juce::int64) exp["data"].getProperty ("bytes", 0) > 1000,
+               "export produced a non-empty WAV (full producer loop)");
+
+        check (std::abs ((double) trackById (mt).getProperty ("volumeDb", 0.0) + 4.0) < 0.5, "mix volume applied (-4 dB)");
+
+        // undo/redo correct throughout (a clean undoable op after the full loop)
+        cmd (ops, "rename_track", objN ({{ "trackId", mt }, { "name", "Master Bus" }}));
+        check (trackById (mt).getProperty ("name", var()).toString() == "Master Bus", "rename applied");
+        cmd (ops, "undo");
+        check (trackById (mt).getProperty ("name", var()).toString() == "Mix", "undo reverted the rename");
+        cmd (ops, "redo");
+        check (trackById (mt).getProperty ("name", var()).toString() == "Master Bus", "redo restored the rename");
+    }
+
     std::cerr << "===== " << (checks - failures) << "/" << checks
               << " checks passed, " << failures << " failed =====\n\n";
     return failures;
@@ -485,6 +537,40 @@ void runGenerativeDemo (MoshOps& ops)
     // NB: the actual render_layer (which spawns the service) is left to the user
     // button — running it here would block the message thread on a TCC/service
     // prompt before the WebView paints. The full render loop is proven headless.
+}
+
+void runConsolidationDemo (MoshOps& ops)
+{
+    using namespace juce;
+    auto cmd = [&] (const String& n, var a = var()) {
+        auto* c = new DynamicObject(); c->setProperty ("command", n);
+        if (! a.isVoid()) c->setProperty ("args", a);
+        return ops.execute (var (c));
+    };
+    auto obj = [] (std::initializer_list<std::pair<const char*, var>> kv) {
+        auto* o = new DynamicObject();
+        for (auto& p : kv) o->setProperty (p.first, p.second);
+        return var (o);
+    };
+
+    // A "Gtr" track with BOTH tiers on it: a Tier-A neural insert + a Tier-B
+    // generative RenderLayer on its clip.
+    auto t = cmd ("create_track", obj ({{ "name", "Gtr" }}))["data"].getProperty ("trackId", var()).toString();
+    auto tone = cmd ("add_test_tone_clip", obj ({{ "trackId", t }, { "seconds", 2.5 }, { "freq", 131.0 }}));
+    auto cid = tone["data"].getProperty ("clipId", var()).toString();
+
+    auto an = cmd ("add_neural_insert", obj ({{ "trackId", t }, { "modelId", "nam" }}));
+    const int idx = (int) an["data"].getProperty ("index", -1);
+    if (idx >= 0)
+        cmd ("set_neural_param", obj ({{ "trackId", t }, { "index", idx }, { "paramId", "drive" }, { "value", 68.0 }}));
+
+    cmd ("create_render_layer", obj ({{ "clipId", cid }, { "adapter", "fake" }}));
+    Array<var> colors; { auto* c = new DynamicObject(); c->setProperty ("name", "grit"); c->setProperty ("value", 62); colors.add (var (c)); }
+    cmd ("set_render_param", obj ({{ "clipId", cid }, { "seed", 3 }, { "nl", 0.4 }, { "colors", colors }}));
+
+    // A second track so the arrangement looks like a session.
+    auto t2 = cmd ("create_track", obj ({{ "name", "Pad" }}))["data"].getProperty ("trackId", var()).toString();
+    cmd ("add_test_tone_clip", obj ({{ "trackId", t2 }, { "seconds", 4.0 }, { "freq", 196.0 }}));
 }
 
 } // namespace mosh

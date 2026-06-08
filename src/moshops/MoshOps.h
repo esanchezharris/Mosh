@@ -84,6 +84,8 @@ private:
     juce::var cmdBypassLayer      (const juce::var& args);
     juce::var cmdFreezeLayer      (const juce::var& args);
     juce::var cmdBounceLayerToClip(const juce::var& args);
+    // Stage 6 — consolidation
+    juce::var cmdExportAudio      (const juce::var& args);
 
     juce::ValueTree findRenderLayer (const juce::String& clipId);
     juce::String    computeFingerprint (const juce::ValueTree& node, const juce::File& inputWav);
