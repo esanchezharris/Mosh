@@ -66,6 +66,35 @@ real browser against real Tracktion:
 limitation:** track-header rows are fixed-height to stay aligned with the timeline lanes, so >2 plugin
 chips overflow the header visually; functionally correct.)
 
+### Stage-5 generative (Tier-B) — the FULL Fake loop driven from the UI (Windows-verified)
+
+The Tier-B generative commands are now wired into the app (`Main.cpp`: `GenerativeJobManager` +
+`RenderCache` + `registerGenerativeEngineCommands`; `MOSH_SERVICE_DIR` compile-def), render layers are
+surfaced in the snapshot (`EngineSnapshot` walks `MOSH_RENDERLAYER` children → `track.renderLayers[]`),
+and the UI exposes the loop (a per-clip **✦** generate button + **✓/✕** accept/reject on the badge).
+Verified live from the browser against real Tracktion + the **real Python job service** (FakeAdapter):
+
+| From the UI | Command | Result |
+|---|---|---|
+| **✦** on a clip | `create_render_layer` + `render_layer` | service spawns + renders (FakeAdapter); badge → **"reimagine · ready"**; cache MISS ~3.3 s, **HIT ~0.3 s** |
+| **✓** on the badge | `accept_render` | **new clip on a "Neural" lane; the source clip is UNTOUCHED** (non-destructive landing) |
+| **✕** on the badge | `reject_render` | layer un-kept |
+
+So the **Stage-5 Fake gate's stated "only remaining" item — the audition / A-B-vs-source / accept UI —
+is satisfied on Windows.** The whole loop (submit → progress → audition → accept/reject → cache
+hit/miss vs full fingerprint → non-destructive landing) runs through the same HTTP seam the UI uses.
+Screenshots: `mosh-generative-from-ui.png`. The `StableAudio3Adapter` (MLX) swap-in is the macOS leg.
+
+**Known limitations surfaced by driving this live (worth a hardening pass; documented honestly):**
+1. **`render_layer` blocks synchronously** on the message thread (submit+poll the job), so the
+   single-threaded HttpBridge is wedged for the render duration (~3 s for FakeAdapter) and the UI shows
+   no intermediate progress — the badge jumps idle→ready. Spec intent is a true background job; the
+   current command is synchronous (as in `test_generative_engine`). Fine for Fake; revisit for SA3.
+2. **Single-threaded HttpBridge** can wedge if one connection stalls (a timed-out browser navigate
+   wedged it once); a thread-per-connection / small pool would harden it. Self-heals on restart.
+3. **Force-killing Mosh orphans the Python service** (no clean C++ shutdown) — orphaned `server.py`
+   holds port 8765 until killed. Graceful quit (the app's `shutdown()` → `jobs.reset()`) does clean up.
+
 **UI/backend stayed byte-for-byte in sync across the whole sequence** (snapshot clip/track counts ==
 rendered `.clip`/`.lane` counts at every step). Screenshot: `mosh-producer-loop-from-ui.png`.
 

@@ -90,6 +90,7 @@ namespace mosh
 
             const auto ref = ids::layerRef (id);
             ctx.emit (events::layerStatus (ref, "idle"));
+            ctx.emit (events::snapshotInvalidated());   // structural: surface the new layer
             auto* data = new juce::DynamicObject(); data->setProperty ("id", ref);
             juce::StringArray changed; changed.add (ref);
             return MoshResult::success ("Created render layer", changed, juce::var (data));
@@ -170,6 +171,7 @@ namespace mosh
             const auto clipRef = ids::clipRef (clip->itemID.toString());
             ctx.emit (events::clipAdded (ids::trackRef (neural->itemID.toString()), clipToVar (clip.get())));
             ctx.emit (events::layerStatus (ids::layerRef (layer.getId()), "ready"));
+            ctx.emit (events::snapshotInvalidated());   // the Neural lane may be brand-new
             juce::StringArray changed; changed.add (clipRef); changed.add (ids::layerRef (layer.getId()));
             auto* data = new juce::DynamicObject(); data->setProperty ("clipId", clipRef);
             return MoshResult::success ("Accepted render (new clip on Neural lane)", changed, juce::var (data));

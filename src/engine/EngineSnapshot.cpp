@@ -53,7 +53,28 @@ namespace mosh
             if (p != nullptr)
                 plugins.add (pluginToVar (p));
         o->setProperty ("plugins", plugins);
-        o->setProperty ("renderLayers", juce::Array<juce::var>());   // Stage 5 (per-clip; surfaced later)
+
+        // Tier-B render layers live as MOSH_RENDERLAYER children UNDER each clip (they
+        // travel with the source); surface them at the track level for the UI badges.
+        // Status is derived: a rendered artifact ⇒ "ready"; else "empty"→"idle" (the UI
+        // RenderLayerStatus vocabulary), else the stored status verbatim.
+        juce::Array<juce::var> renderLayers;
+        for (auto* clip : track->getClips())
+            for (auto child : clip->state)
+                if (child.hasType (ids::MOSH_RENDERLAYER))
+                {
+                    auto* lo = new juce::DynamicObject();
+                    lo->setProperty ("id", ids::layerRef (child[ids::id].toString()));
+                    const auto artifact = child[ids::cacheArtifact].toString();
+                    const auto stored   = child[ids::status].toString();
+                    juce::String status = artifact.isNotEmpty() ? juce::String ("ready")
+                                        : (stored.isEmpty() || stored == "empty") ? juce::String ("idle")
+                                        : stored;
+                    lo->setProperty ("status", status);
+                    lo->setProperty ("mode", child[ids::mode].toString());
+                    renderLayers.add (juce::var (lo));
+                }
+        o->setProperty ("renderLayers", renderLayers);
         return juce::var (o);
     }
 

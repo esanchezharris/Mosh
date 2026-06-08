@@ -7,7 +7,12 @@
 #include "EngineHandlers.h"
 #include "PluginCommands.h"
 #include "NeuralCommands.h"
+#include "GenerativeEngine.h"
 #include "HttpBridge.h"
+
+#ifndef MOSH_SERVICE_DIR
+ #define MOSH_SERVICE_DIR ""   // set by CMake; empty → resolve next to the exe
+#endif
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Mosh — application entry point. Bootstraps the Tracktion Engine (01), the MoshOps
@@ -40,6 +45,18 @@ namespace mosh
             registerPluginCommands (*executor, *engine);
             registerNeuralCommands (*executor, *engine);
 
+            // Tier-B generative (05) — out-of-process job service (TIER WALL: Tier B is
+            // a job, never an in-process insert). The manager spawns service/server.py
+            // (FakeAdapter by default) on the first render; renders land NON-DESTRUCTIVELY.
+            {
+                juce::File serviceDir { juce::String (MOSH_SERVICE_DIR) };
+                if (! serviceDir.isDirectory())
+                    serviceDir = juce::File::getSpecialLocation (juce::File::currentExecutableFile)
+                                     .getParentDirectory().getChildFile ("service");
+                jobs = std::make_unique<GenerativeJobManager> (serviceDir);
+                registerGenerativeEngineCommands (*executor, *engine, *jobs, renderCache);
+            }
+
             // HTTP transport for the MoshOps seam — lets a PLAIN BROWSER drive the
             // real backend (the WebView2 backend is broken on Windows; see STATUS).
             // Serves the staged UI bundle + /api/* on MOSH_HTTP_PORT (default 8080).
@@ -57,7 +74,8 @@ namespace mosh
         {
             mainWindow.reset();
             httpBridge.reset();        // stop the server before tearing down the executor
-            executor.reset();
+            executor.reset();          // drops command lambdas (which ref jobs/renderCache)
+            jobs.reset();              // kill the generative service if we started it
             snapshotSource.reset();
             log.reset();
             engine.reset();
@@ -70,6 +88,8 @@ namespace mosh
         std::unique_ptr<JsonlLog> log;
         std::unique_ptr<DslExecutor> executor;
         std::unique_ptr<EngineSnapshotSource> snapshotSource;
+        RenderCache renderCache;                          // Tier-B reuse by full fingerprint
+        std::unique_ptr<GenerativeJobManager> jobs;       // out-of-process render service
         std::unique_ptr<HttpBridge> httpBridge;
         std::unique_ptr<MainWindow> mainWindow;
     };

@@ -46,6 +46,9 @@ target_compile_definitions(Mosh PRIVATE
     JUCE_APPLICATION_VERSION_STRING="${PROJECT_VERSION}"
     # Where the WebView looks for the staged UI bundle, relative to the executable.
     MOSH_UI_STAGE_DIRNAME="ui"
+    # Tier-B generative job service (Python). Dev: point at the source tree; a
+    # packaged build would stage service/ next to the exe (resolved at runtime too).
+    MOSH_SERVICE_DIR="${CMAKE_SOURCE_DIR}/service"
 )
 
 set_target_properties(Mosh PROPERTIES FOLDER "mosh")

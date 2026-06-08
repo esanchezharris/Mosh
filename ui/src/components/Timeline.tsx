@@ -181,6 +181,27 @@ function ClipView({
     void executeCommand("split_clip", { clip: clip.id, at });
   };
 
+  // Tier-B generate: create a RenderLayer on this clip and render it through the
+  // out-of-process job service (TIER WALL). The result lands non-destructively
+  // via accept (badge buttons). Blocks ~a few seconds on a cache miss (FakeAdapter).
+  const [generating, setGenerating] = useState(false);
+  const generate = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (generating) return;
+    setGenerating(true);
+    try {
+      const res = await executeCommand("create_render_layer", {
+        clip: clip.id,
+        prompt: "reimagine",
+        mode: "reimagine",
+      });
+      const layerId = res.data?.id as string | undefined;
+      if (layerId) await executeCommand("render_layer", { layer: layerId });
+    } finally {
+      setGenerating(false);
+    }
+  };
+
   // Simple deterministic fake waveform bars (no audio on the web thread; real
   // build supplies peaks/thumbnail via the backend — see 03 §5).
   const bars = makeFakeWave(clip.id, Math.max(4, Math.floor(width / 4)));
@@ -200,6 +221,14 @@ function ClipView({
         ))}
       </div>
       <div className="clip-label">{clip.id.replace(/^clip:/, "")}</div>
+      <button
+        className="clip-gen"
+        title="Generate (Tier-B render layer)"
+        onMouseDown={(e) => e.stopPropagation()}
+        onClick={generate}
+      >
+        {generating ? "…" : "✦"}
+      </button>
       <div className="clip-trim right" onMouseDown={(e) => beginDrag("trim-r", e)} />
     </div>
   );
@@ -242,6 +271,30 @@ function LayerBadges({
             {l.status === "rendering" && p
               ? ` ${Math.round(p.pct)}% · ${p.etaSec.toFixed(1)}s`
               : ` · ${l.status}`}
+            {l.status === "ready" && (
+              <span className="layer-actions">
+                <button
+                  className="layer-accept"
+                  title="Accept (land on Neural lane, source untouched)"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void executeCommand("accept_render", { layer: l.id });
+                  }}
+                >
+                  ✓
+                </button>
+                <button
+                  className="layer-reject"
+                  title="Reject"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void executeCommand("reject_render", { layer: l.id });
+                  }}
+                >
+                  ✕
+                </button>
+              </span>
+            )}
           </span>
         );
       })}
