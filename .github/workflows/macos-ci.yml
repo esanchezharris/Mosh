@@ -81,6 +81,8 @@ jobs:
       - ARM64
       - mosh-local
     timeout-minutes: 180
+    env:
+      MOSH_LEGACY_SA3_BUNDLE: /Users/emiliosanchez-harris/Documents/ClaudeMosh/_preserved_artifacts/2026-06-08-consolidation/mosh/sa3-colors-steering-data-20260608
 
     steps:
       - name: Checkout

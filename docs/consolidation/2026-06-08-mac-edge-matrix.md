@@ -44,6 +44,7 @@ status; the local gate evidence remains the authority.
 | Command-surface regression | `Mosh --selftest-undo` or `Mosh --selftest` fails | Hosted smoke CI, strict local gate | Blocking |
 | Command-log schema drift | `scripts/validate-command-log-contract.sh` fails | Hosted smoke CI, strict local gate | Blocking |
 | SA3 unavailable | `SA3_MLX_DIR` or color rack missing; SA3 selftest fails | `scripts/macos-local-preflight.sh` + `scripts/strict-local-v0-gate.sh` | Local release blocker; not hosted blocker |
+| Self-hosted checkout lacks archived proof assets | `MOSH_LEGACY_SA3_BUNDLE` is missing; SA3 color compare cannot find legacy steering data | `scripts/macos-local-preflight.sh` + `scripts/compare-sa3-colors.sh` | Local release blocker; workflow points at the canonical local archive |
 | BlackHole missing | `system_profiler SPAudioDataType` lacks `BlackHole 2ch` | `scripts/macos-local-preflight.sh` + `scripts/blackhole-live-audio-gate.sh` | Local release blocker |
 | `ffmpeg` missing or AVFoundation cannot see BlackHole | `ffmpeg -f avfoundation -list_devices true` has no BlackHole input | `scripts/macos-local-preflight.sh` + BlackHole gate | Local release blocker |
 | Silent live capture | WAV duration/RMS/peak below threshold | BlackHole gate Python analyzer | Local release blocker |
