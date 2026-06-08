@@ -368,6 +368,8 @@ class WaveCompManager : public CompManager { juce::ValueTree addNewComp() overri
 
 **Mosh usage:** Tier-B audition/accept maps naturally to takes — render the generative result to a file, `clip.addTake(renderedFile)`, audition via `setCurrentTake`, "accept" = keep that take / `unpackTakes` if you want it as its own clip; "reject" = `setCurrentTake(original)`. The **"new clip on a new track" fallback** (`unpackTakes(true)` or a fresh `insertWaveClip` on a new `insertNewAudioTrack`) remains the more robust path for A/B against source and for non-Wave sources, since the take API is Wave-clip-specific. Recommend: use takes for same-track auditioning, fall back to new-clip/new-track for cross-source A/B and freeze/bounce commits.
 
+> **SEMANTIC GOTCHA (verified `tracktion_WaveAudioClip.cpp:177-198`):** `addTake(const File&)` appends a NEW `TAKE` node (a `SourceFileReference` to the file) to the clip's `TAKES` tree — it does **NOT** auto-add the clip's original main source as take 0. A freshly imported clip has `getNumTakes(true)==0` / `hasAnyTakes()==false`; after one `addTake` it's 1 (the new take only). So to land a render non-destructively AND keep the source auditionable as a take, either (a) `addTake(originalSourceFile)` first, then `addTake(generatedFile)` and `setCurrentTake(1)`; or (b) take the **new-clip-on-neural-lane fallback** (cleaner A/B, no take bookkeeping). Stage-5 engine continuation: prefer the spine `GenerativeCommands` flow already proven, and choose the landing per the per-project `neural_render_landing` setting (default `"take"`).
+
 ---
 
 ## Resolution status
