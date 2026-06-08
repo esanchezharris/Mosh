@@ -6,8 +6,18 @@ APP="${MOSH_APP_BIN:-$REPO/build/Mosh_artefacts/Debug/Mosh.app/Contents/MacOS/Mo
 DEVICE="${MOSH_AUDIO_OUTPUT_DEVICE:-BlackHole 2ch}"
 FFMPEG="${FFMPEG:-ffmpeg}"
 EVID="${MOSH_EVID:-$REPO/_preserved_artifacts/2026-06-08-consolidation/claudemosh/blackhole-live-audio-$(date +%Y%m%d-%H%M%S)}"
+MAX_ATTEMPTS="${MOSH_BLACKHOLE_ATTEMPTS:-3}"
+CAPTURE_SECONDS="${MOSH_BLACKHOLE_CAPTURE_SECONDS:-8}"
 
 mkdir -p "$EVID"
+
+if ! [[ "$MAX_ATTEMPTS" =~ ^[0-9]+$ ]] || [[ "$MAX_ATTEMPTS" -lt 1 ]]; then
+  MAX_ATTEMPTS=1
+fi
+
+if ! [[ "$CAPTURE_SECONDS" =~ ^[0-9]+$ ]] || [[ "$CAPTURE_SECONDS" -lt 5 ]]; then
+  CAPTURE_SECONDS=8
+fi
 
 if [[ ! -x "$APP" ]]; then
   echo "[blackhole-live-audio] FAIL: missing app binary: $APP" >&2
@@ -39,31 +49,86 @@ if [[ -z "$INDEX" ]]; then
   exit 2
 fi
 
-CAPTURE="$EVID/blackhole-capture.wav"
-"$FFMPEG" -hide_banner -y -f avfoundation -i ":$INDEX" -t 5 -ac 2 -ar 48000 "$CAPTURE" > "$EVID/ffmpeg-capture.log" 2>&1 &
-FFMPEG_PID=$!
-sleep 1
-
 set +e
-MOSH_AUDIO_OUTPUT_DEVICE="$DEVICE" "$APP" --live-audio-smoke > "$EVID/live-audio-smoke.log" 2>&1
-MOSH_STATUS=$?
-wait "$FFMPEG_PID"
-FFMPEG_STATUS=$?
+MOSH_AUDIO_OUTPUT_DEVICE="$DEVICE" \
+MOSH_AUDIO_INPUT_DEVICE="$DEVICE" \
+  "$APP" --live-audio-smoke > "$EVID/live-audio-loopback-smoke.log" 2>&1
+LOOPBACK_STATUS=$?
 set -e
 
-if [[ "$MOSH_STATUS" -ne 0 ]]; then
-  echo "[blackhole-live-audio] FAIL: Mosh live audio smoke failed" >&2
-  tail -80 "$EVID/live-audio-smoke.log" >&2
+if [[ "$LOOPBACK_STATUS" -ne 0 ]]; then
+  cat > "$EVID/REPORT.md" <<EOF
+# ClaudeMosh BlackHole Live Audio Gate
+
+Result: FAIL
+Device: $DEVICE
+Reason: Mosh could open and write to BlackHole, but BlackHole input did not receive non-silent loopback audio
+Evidence: $EVID
+
+The app-side output callback is not enough for this gate. This failure means the
+local CoreAudio HAL/BlackHole loopback path is currently not delivering output
+audio back to the BlackHole input, so the independent ffmpeg capture proof would
+also be expected to fail or capture silence.
+EOF
+  echo "[blackhole-live-audio] FAIL: BlackHole input did not receive Mosh output" >&2
+  tail -100 "$EVID/live-audio-loopback-smoke.log" >&2
   exit 1
 fi
 
-if [[ "$FFMPEG_STATUS" -ne 0 ]]; then
-  echo "[blackhole-live-audio] FAIL: ffmpeg capture failed" >&2
-  tail -80 "$EVID/ffmpeg-capture.log" >&2
-  exit 1
-fi
+copy_attempt_logs() {
+  local attempt="$1"
+  cp "$EVID/blackhole-capture-attempt-${attempt}.wav" "$EVID/blackhole-capture.wav" 2>/dev/null || true
+  cp "$EVID/ffmpeg-capture-attempt-${attempt}.log" "$EVID/ffmpeg-capture.log" 2>/dev/null || true
+  cp "$EVID/live-audio-smoke-attempt-${attempt}.log" "$EVID/live-audio-smoke.log" 2>/dev/null || true
+  cp "$EVID/analysis-attempt-${attempt}.json" "$EVID/analysis.json" 2>/dev/null || true
+}
 
-python3 - "$CAPTURE" "$EVID/analysis.json" <<'PY'
+LAST_ATTEMPT=0
+LAST_REASON=""
+
+for attempt in $(seq 1 "$MAX_ATTEMPTS"); do
+  LAST_ATTEMPT="$attempt"
+  echo "[blackhole-live-audio] attempt ${attempt}/${MAX_ATTEMPTS}"
+
+  CAPTURE="$EVID/blackhole-capture-attempt-${attempt}.wav"
+  "$FFMPEG" -hide_banner -y -f avfoundation -i ":$INDEX" -t "$CAPTURE_SECONDS" -ac 2 -ar 48000 "$CAPTURE" > "$EVID/ffmpeg-capture-attempt-${attempt}.log" 2>&1 &
+  FFMPEG_PID=$!
+  sleep 1
+
+  set +e
+  MOSH_AUDIO_OUTPUT_DEVICE="$DEVICE" "$APP" --live-audio-smoke > "$EVID/live-audio-smoke-attempt-${attempt}.log" 2>&1
+  MOSH_STATUS=$?
+  wait "$FFMPEG_PID"
+  FFMPEG_STATUS=$?
+  set -e
+
+  if [[ "$MOSH_STATUS" -ne 0 ]]; then
+    copy_attempt_logs "$attempt"
+    cat > "$EVID/REPORT.md" <<EOF
+# ClaudeMosh BlackHole Live Audio Gate
+
+Result: FAIL
+Device: $DEVICE
+Attempts: $attempt/$MAX_ATTEMPTS
+Capture seconds: $CAPTURE_SECONDS
+Reason: Mosh live audio smoke failed
+Evidence: $EVID
+EOF
+    echo "[blackhole-live-audio] FAIL: Mosh live audio smoke failed" >&2
+    tail -80 "$EVID/live-audio-smoke-attempt-${attempt}.log" >&2
+    exit 1
+  fi
+
+  if [[ "$FFMPEG_STATUS" -ne 0 ]]; then
+    LAST_REASON="ffmpeg capture failed"
+    echo "[blackhole-live-audio] WARN: $LAST_REASON on attempt ${attempt}" >&2
+    tail -40 "$EVID/ffmpeg-capture-attempt-${attempt}.log" >&2
+    sleep 2
+    continue
+  fi
+
+  set +e
+  python3 - "$CAPTURE" "$EVID/analysis-attempt-${attempt}.json" <<'PY' > "$EVID/analysis-attempt-${attempt}.log" 2>&1
 import json
 import math
 import struct
@@ -112,12 +177,21 @@ if rms < 0.001 or peak < 0.01:
 
 print(f"PASS: duration={duration:.3f}s rms={rms:.6f} peak={peak:.6f}")
 PY
+  ANALYSIS_STATUS=$?
+  set -e
 
-cat > "$EVID/REPORT.md" <<EOF
+  if [[ "$ANALYSIS_STATUS" -eq 0 ]]; then
+    cat "$EVID/analysis-attempt-${attempt}.log"
+    copy_attempt_logs "$attempt"
+
+    cat > "$EVID/REPORT.md" <<EOF
 # ClaudeMosh BlackHole Live Audio Gate
 
 Result: PASS
 Device: $DEVICE
+Attempts: $attempt/$MAX_ATTEMPTS
+Capture seconds: $CAPTURE_SECONDS
+Internal loopback smoke: $EVID/live-audio-loopback-smoke.log
 Capture: $CAPTURE
 Analysis: $EVID/analysis.json
 
@@ -126,4 +200,34 @@ real CoreAudio device path into BlackHole capture, not physical speaker or
 microphone behavior.
 EOF
 
-echo "[blackhole-live-audio] PASS evidence=$EVID"
+    echo "[blackhole-live-audio] PASS evidence=$EVID"
+    exit 0
+  fi
+
+  LAST_REASON="$(tail -1 "$EVID/analysis-attempt-${attempt}.log" 2>/dev/null || true)"
+  echo "[blackhole-live-audio] WARN: attempt ${attempt} did not capture live audio: ${LAST_REASON}" >&2
+  sleep 2
+done
+
+copy_attempt_logs "$LAST_ATTEMPT"
+cat > "$EVID/REPORT.md" <<EOF
+# ClaudeMosh BlackHole Live Audio Gate
+
+Result: FAIL
+Device: $DEVICE
+Attempts: $LAST_ATTEMPT/$MAX_ATTEMPTS
+Capture seconds: $CAPTURE_SECONDS
+Reason: ${LAST_REASON:-capture did not pass analyzer}
+Capture: $EVID/blackhole-capture.wav
+Analysis: $EVID/analysis.json
+
+Mosh's live-audio smoke may still report writable CoreAudio output callbacks.
+This gate requires the virtual BlackHole input capture to contain non-silent
+audio, proving the CoreAudio HAL loopback path rather than only app-side output.
+EOF
+
+echo "[blackhole-live-audio] FAIL: no attempt produced non-silent BlackHole capture" >&2
+if [[ -n "$LAST_REASON" ]]; then
+  echo "[blackhole-live-audio] last reason: $LAST_REASON" >&2
+fi
+exit 1
