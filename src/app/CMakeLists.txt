@@ -17,9 +17,11 @@ juce_add_gui_app(Mosh
 target_sources(Mosh PRIVATE
     Main.cpp
     WebViewHost.cpp
+    HttpBridge.cpp
     # header-only units (IDE registration):
     MainWindow.h
     WebViewHost.h
+    HttpBridge.h
 )
 
 target_compile_features(Mosh PRIVATE cxx_std_20)
@@ -91,4 +93,20 @@ if(MOSH_BUILD_UI)
         COMMENT "Mosh: staging UI bundle next to the executable"
         VERBATIM
     )
+endif()
+
+# ── Diagnostic: minimal WebView2 probe (isolates the resource-provider mechanism
+# from all of Mosh's code — serves trivial inline HTML for any url). Windows-only.
+if(WIN32 AND EXISTS "${MOSH_WEBVIEW2_DIR}/build/native/include/WebView2.h")
+    juce_add_gui_app(wv_probe PRODUCT_NAME "WVProbe" NEEDS_WEB_BROWSER TRUE)
+    target_sources(wv_probe PRIVATE wv_probe.cpp)
+    target_compile_features(wv_probe PRIVATE cxx_std_20)
+    target_link_libraries(wv_probe PRIVATE
+        juce::juce_gui_extra juce::juce_gui_basics
+        $<TARGET_NAME_IF_EXISTS:juce::juce_recommended_config_flags>)
+    target_compile_definitions(wv_probe PRIVATE
+        JUCE_WEB_BROWSER=1 JUCE_USE_WIN_WEBVIEW2=1 JUCE_USE_CURL=0)
+    target_include_directories(wv_probe PRIVATE "${MOSH_WEBVIEW2_DIR}/build/native/include")
+    target_link_libraries(wv_probe PRIVATE "${MOSH_WEBVIEW2_DIR}/build/native/x64/WebView2LoaderStatic.lib")
+    set_target_properties(wv_probe PROPERTIES FOLDER "mosh")
 endif()

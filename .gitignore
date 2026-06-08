@@ -47,3 +47,7 @@ Thumbs.db
 # Logs (the JSONL semantic log is written at runtime, not committed)
 *.log
 /sessions/
+
+# Headless-browser QA artifacts (Playwright snapshots/screenshots; throwaway)
+.playwright-mcp/
+/mosh-*.png

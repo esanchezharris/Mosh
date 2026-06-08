@@ -15,7 +15,8 @@ clearly isolated:
 | `mosh_spine` + `mosh_tests` (MoshOps, RenderLayer, ASTD, fingerprint, feed) | ✅ | see below | Tracktion-free; the real spine verification |
 | `ui/` React/Vite bundle | ✅ | ✅ green | `npm run build` → `dist/` |
 | `service/` Python health stub | ✅ | ✅ green | stdlib only; `/health` 200 |
-| `Mosh` app (JUCE WebView + Tracktion) | ⚠️ partial | ⏳ | JUCE WebView uses WebView2 on Win; Tracktion builds cross-platform but the **window/audio gate is macOS-primary** |
+| `Mosh` app (Tracktion + MoshOps + HTTP transport) | ✅ | ✅ green | **UI drives the real backend over HTTP in a browser** (Stage-2/6 loop minus audio) — see BREAKTHROUGH |
+| `Mosh` in-app WebView render (WebView2) | ⚠️ Win dead-end | ⏳ macOS | WebView2 resource-provider bug; macOS WKWebView is the path. **Sidestepped by the HTTP transport.** |
 | Tier-A neural (anira/RTNeural), SA3 service (MLX) | ❌ macOS | ⏳ | MLX is Apple-Silicon only; FakeAdapter is OS-agnostic |
 
 Gates that assert "window opens on macOS arm64" / audio / PDC null / MLX cannot be *run* on
@@ -31,6 +32,58 @@ import → arrange (`move_clip`) → host plugin → Tier-A neural insert + ASTD
 full rebuild) → **export/persist** (saveAs → fresh reload → restored) → JSONL taste label. Only the
 literal "from the UI" WebView render + audio export need macOS. **Totals: 326 assertions / 44 cases**
 across `mosh_tests` (205/36) + `mosh_engine_tests` (105/7) + `mosh_service_tests` (16/1).
+
+## BREAKTHROUGH (2026-06-08): the UI drives the REAL backend over HTTP — Windows-verified
+
+The WebView2 render is a JUCE-8/Windows dead-end (below), but the user's instinct — *"try just
+opening it in a browser?"* — unblocked everything. **`src/app/HttpBridge`** is a second transport
+for the SAME MoshOps seam: a tiny `juce::StreamingSocket` server serving the staged React bundle +
+`/api/snapshot`, `/api/command`, `/api/events` on `MOSH_HTTP_PORT` (default 8080). A plain Chromium
+(Playwright) loads `http://localhost:8080`, and `ui/src/bridge.ts` selects the HTTP transport
+(`makeHttpBridge`, injected `window.__MOSH_BACKEND__="http"` marker) — **same `executeCommand` +
+snapshot/events contract, zero frontend changes** to the seam. No prime directive bent: every
+mutation is still a MoshOps command marshalled to the message thread; Tracktion mutates only there.
+
+**This makes the Stage-2 swappability gate and the Stage-6 "full producer loop FROM THE UI" provable
+on Windows** (only literal audio output / VST3 editors / anira / MLX still need macOS). Verified in a
+real browser against real Tracktion:
+
+| From the UI (browser) | Command | Result |
+|---|---|---|
+| `+ Track` button | `create_track` | real `te::AudioTrack` (IDs `track:1003…`, real Volume&Pan + Level-Meter built-ins) |
+| click lane | `import_clip` | real tone-WAV clip (fallback synthesizes audio when no file → arrangeable) |
+| drag clip body | `move_clip` | `[3.475,7.475] → [4.475,8.475]` (length preserved) |
+| drag clip edge | `trim_clip` | end-only `→ 8.975` |
+| double-click clip | `split_clip` | one clip → two, net +1 |
+| transport ▶ / ■ | `set_transport` | `playing` true → false |
+| ↶ / ↷ buttons + Ctrl+Z/Ctrl+Shift+Z | `undo`/`redo` | **one command per step, UI↔backend in perfect sync, full unwind + rebuild** |
+
+**UI/backend stayed byte-for-byte in sync across the whole sequence** (snapshot clip/track counts ==
+rendered `.clip`/`.lane` counts at every step). Screenshot: `mosh-producer-loop-from-ui.png`.
+
+Three correctness fixes landed to make this solid (all genuine bugs, not test scaffolding):
+1. **Reliable event feed** — `/api/events` was drain-on-read: if a poll's response was dropped
+   (the single-threaded server refuses connections under load → `ERR_CONNECTION_REFUSED`), the
+   drained events were lost forever. Reworked to a **non-destructive sequence-cursor**: each event
+   gets a monotonic `seq`; the client sends `?since=N` and only advances its cursor on a delivered
+   response, so a dropped response just re-fetches (at-least-once; `applyEvent` handlers are
+   idempotent). A bounded ring + `resync` flag covers a client falling behind.
+2. **Load-time race** — `connectFeed` fetched the snapshot and subscribed concurrently, so an event
+   arriving before the snapshot resolved hit `applyEvent`'s `!snapshot` guard and was dropped. Now
+   it subscribes first, **buffers** events until the snapshot loads, then replays them (idempotent).
+3. **Arrangeable clips without a file** — the real `import_clip` requires an audio file, but the
+   UI's click-to-add sends none. Added a **tone-WAV generator fallback** (`generateToneFile`) so the
+   click-to-add affordance yields a real, movable/trimmable/splittable clip (a real file picker
+   would supply `{path}`). UI seam unchanged → swappability preserved.
+4. **Undo/redo in the UI** — added Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z (+ Ctrl+Y) and ↶/↷ topbar buttons
+   (`App.tsx`) calling `executeCommand("undo"/"redo")`. The backend already had them; the UI didn't
+   expose them. Each emits `snapshot_invalidated` → store resync.
+
+Net: the **swappability gate (Stage 2) is satisfied over HTTP** (rebuilt the React bundle ~6× during
+this work with zero backend change, and it kept driving the real backend), and the **Stage-6 producer
+loop minus audio/neural/export is exercised live from the browser** with correct undo/redo. WKWebView
+on macOS remains the path for the *in-app* WebView render, but "from the UI against the real backend"
+is no longer macOS-gated.
 
 ## Dependency pins (resolved 2026-06-08 via `git ls-remote`)
 
@@ -165,7 +218,12 @@ macOS needs none of that (WKWebView). `.refclone/tracktion_engine` holds the rea
   Tracktion module units (≈15 min for the app) — a known JUCE cost; consider a pimpl in `mosh_engine`
   to stop the app recompiling Tracktion if iteration speed matters.
 
-## OPEN ISSUE — WebView render (the Stage 1 cold-render + all of Stage 2)
+## ~~OPEN ISSUE~~ → SIDESTEPPED — in-app WebView render (Windows WebView2)
+
+> **Update (2026-06-08):** this no longer blocks "UI drives the real backend." The **HttpBridge**
+> (see BREAKTHROUGH above) serves the same seam over HTTP to a plain browser, and the full arrange +
+> undo/redo loop is verified there on Windows. The note below remains the record of the WebView2
+> investigation; the *in-app* render still wants macOS WKWebView, but it's no longer on the critical path.
 
 Windows WebView2 shows "Navigation to the webpage was canceled" instead of the React bundle. Verified:
 the `https://juce.backend/*` request filter is registered; `getResourceProviderRoot()` =

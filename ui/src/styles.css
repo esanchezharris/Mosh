@@ -94,6 +94,22 @@ body {
   border-color: rgba(224, 179, 65, 0.35);
 }
 
+.undo-group {
+  display: flex;
+  gap: 4px;
+}
+.undo-btn {
+  width: 26px;
+  height: 22px;
+  padding: 0;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--text-1);
+}
+.undo-btn:hover {
+  color: var(--text-0);
+}
+
 /* center stage ------------------------------------------------------------ */
 .stage {
   flex: 1;

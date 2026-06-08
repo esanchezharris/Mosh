@@ -1,7 +1,9 @@
 #include "EngineHandlers.h"
 #include "EngineSnapshot.h"
 #include "Ids.h"
-#include <juce_audio_basics/juce_audio_basics.h>   // juce::Decibels
+#include <juce_audio_basics/juce_audio_basics.h>     // juce::Decibels
+#include <juce_audio_formats/juce_audio_formats.h>   // juce::WavAudioFormat (tone fallback)
+#include <cmath>
 
 namespace mosh
 {
@@ -40,6 +42,46 @@ namespace mosh
         return MoshResult::success (msg, changed, data);
     }
 
+    // Generate a real WAV tone file of `lengthSec` seconds. Used as the import_clip
+    // fallback when the UI's click-to-add affordance supplies no source file: a real
+    // import passes {path} from a file picker, but for arranging we want an actual
+    // audio clip (real samples → real peaks, plays on a device) rather than a stub.
+    static juce::File generateToneFile (const juce::File& dir, double lengthSec)
+    {
+        static int counter = 0;
+        const int n = ++counter;
+
+        auto clipsDir = dir.getChildFile ("mosh-clips");
+        clipsDir.createDirectory();
+        auto file = clipsDir.getChildFile ("tone_" + juce::String (n) + ".wav");
+
+        const double sampleRate = 44100.0;
+        const double freqHz = 110.0 * std::pow (2.0, (double) ((n - 1) % 12) / 12.0); // walk the scale
+        const int numSamples = juce::jmax (1, (int) (juce::jmax (0.1, lengthSec) * sampleRate));
+
+        juce::AudioBuffer<float> buffer (1, numSamples);
+        auto* d = buffer.getWritePointer (0);
+        for (int i = 0; i < numSamples; ++i)
+        {
+            const double t = (double) i / sampleRate;
+            const double env = 0.6 * std::exp (-1.5 * std::fmod (t, 1.0));   // per-beat decay
+            d[i] = (float) (env * std::sin (2.0 * juce::MathConstants<double>::pi * freqHz * t));
+        }
+
+        file.deleteFile();
+        juce::WavAudioFormat wav;
+        if (auto os = std::unique_ptr<juce::FileOutputStream> (file.createOutputStream()))
+        {
+            if (auto* writer = wav.createWriterFor (os.get(), sampleRate, 1, 16, {}, 0))
+            {
+                os.release();                 // writer owns the stream now
+                std::unique_ptr<juce::AudioFormatWriter> w (writer);
+                w->writeFromAudioSampleBuffer (buffer, 0, numSamples);
+            }
+        }
+        return file;
+    }
+
     void registerEngineHandlers (DslExecutor& exec, MoshEngine& eng)
     {
         // create_track {name?}
@@ -67,9 +109,16 @@ namespace mosh
                 return MoshResult::failure (error::noSuchTrack, "No such track: " + cmd.argString ("track"));
 
             const auto path = cmd.argString ("path");
-            const juce::File file (path);
+            juce::File file (path);
             if (path.isEmpty() || ! file.existsAsFile())
-                return MoshResult::failure (error::invalidArgs, "audio file not found: " + path);
+            {
+                // No source file (the UI's click-to-add affordance / headless arrange):
+                // synthesize a real tone clip so arranging is exercisable end-to-end.
+                file = generateToneFile (eng.getEditFile().getParentDirectory(),
+                                         cmd.argDouble ("length", 4.0));
+                if (! file.existsAsFile())
+                    return MoshResult::failure (error::internalError, "could not generate clip audio");
+            }
 
             te::AudioFile af (edit.engine, file);
             const double len = af.getLength();

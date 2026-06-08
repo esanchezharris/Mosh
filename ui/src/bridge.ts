@@ -151,6 +151,9 @@ interface JuceGlobal {
 declare global {
   interface Window {
     __JUCE__?: JuceGlobal;
+    // Injected by the C++ HttpBridge when the UI is served by the real backend over
+    // HTTP (used when the JUCE WebView2 backend is unavailable, e.g. on Windows).
+    __MOSH_BACKEND__?: string;
   }
 }
 
@@ -708,6 +711,66 @@ function normalizeSnapshot(raw: unknown): Snapshot {
 // Singleton selection + public API.
 // ---------------------------------------------------------------------------
 
+// --- HTTP transport: the REAL C++ backend over HTTP (C++ HttpBridge) ---------
+// Same MoshOps seam, different transport: executeCommand -> POST /api/command,
+// getSnapshot -> GET /api/snapshot, events long-polled from GET /api/events. Lets a
+// plain browser drive the real Tracktion backend when the WebView is unavailable.
+function makeHttpBridge(): Bridge {
+  return {
+    kind: "juce", // it IS the real C++ backend (just reached over HTTP)
+
+    async executeCommand(name, args) {
+      const r = await fetch("/api/command", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, args: args ?? {} }),
+      });
+      return normalizeResult(await r.json());
+    },
+
+    async getSnapshot() {
+      const r = await fetch("/api/snapshot");
+      return normalizeSnapshot(await r.json());
+    },
+
+    subscribe(listener) {
+      // Non-destructive sequence-cursor feed: send our last-seen seq, apply the
+      // events the server returns, and advance `since` ONLY on a delivered
+      // response. A dropped/refused response leaves `since` unchanged, so the next
+      // poll re-fetches the same events — at-least-once delivery with no loss
+      // window (applyEvent handlers are idempotent). `resync` means we fell behind
+      // the server's retained window; refetch the snapshot to catch up.
+      let stopped = false;
+      let since = 0;
+      const poll = async () => {
+        if (stopped) return;
+        try {
+          const r = await fetch(`/api/events?since=${since}`);
+          const body = (await r.json()) as {
+            events?: MoshEvent[];
+            seq?: number;
+            resync?: boolean;
+          };
+          if (body && Array.isArray(body.events)) {
+            if (body.resync) listener({ type: "snapshot_invalidated" });
+            for (const ev of body.events)
+              if (ev && typeof (ev as { type?: unknown }).type === "string")
+                listener(ev);
+            if (typeof body.seq === "number") since = body.seq;
+          }
+        } catch {
+          /* backend momentarily unreachable — keep `since`, retry (no loss) */
+        }
+        if (!stopped) window.setTimeout(poll, 150);
+      };
+      void poll();
+      return () => {
+        stopped = true;
+      };
+    },
+  };
+}
+
 function selectBridge(): Bridge {
   const juce = typeof window !== "undefined" ? window.__JUCE__ : undefined;
   if (juce && juce.backend) {
@@ -718,6 +781,10 @@ function selectBridge(): Bridge {
     } catch (e) {
       console.error("Mosh: JUCE bridge init failed, using mock", e);
     }
+  }
+  // Real C++ backend over HTTP (injected marker), else the in-browser mock.
+  if (typeof window !== "undefined" && window.__MOSH_BACKEND__ === "http") {
+    return makeHttpBridge();
   }
   return makeMockBridge();
 }

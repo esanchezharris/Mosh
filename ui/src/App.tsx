@@ -15,6 +15,7 @@
 
 import { useEffect } from "react";
 import { connectFeed, useStore } from "./store";
+import { executeCommand } from "./bridge";
 import TransportBar from "./components/TransportBar";
 import TrackList from "./components/TrackList";
 import Timeline from "./components/Timeline";
@@ -28,6 +29,28 @@ export default function App() {
 
   // Start the snapshot+events feed once.
   useEffect(() => connectFeed(), []);
+
+  // Global undo/redo — the ONE undo system (Tracktion's UndoManager under
+  // MoshOps). These are commands like any other; the backend emits
+  // snapshot_invalidated, so the store resyncs the mirror. Ctrl/Cmd+Z = undo,
+  // Ctrl/Cmd+Shift+Z or Ctrl+Y = redo. Ignored while typing in a field.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const target = e.target as HTMLElement | null;
+      if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+      const k = e.key.toLowerCase();
+      if (k === "z" && !e.shiftKey) {
+        e.preventDefault();
+        void executeCommand("undo");
+      } else if ((k === "z" && e.shiftKey) || k === "y") {
+        e.preventDefault();
+        void executeCommand("redo");
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   const isJuce = backend === "juce";
 
@@ -44,6 +67,22 @@ export default function App() {
         </span>
         <span className="topbar-sub">arrangement</span>
         <span className="spacer" />
+        <div className="undo-group">
+          <button
+            className="undo-btn"
+            title="Undo (Ctrl+Z)"
+            onClick={() => void executeCommand("undo")}
+          >
+            ↶
+          </button>
+          <button
+            className="undo-btn"
+            title="Redo (Ctrl+Shift+Z)"
+            onClick={() => void executeCommand("redo")}
+          >
+            ↷
+          </button>
+        </div>
         <span className={`badge ${isJuce ? "live" : "mock"}`}>
           backend: {backend}
         </span>

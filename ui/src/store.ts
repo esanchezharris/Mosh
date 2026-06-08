@@ -341,9 +341,40 @@ export const useStore = create<MoshStore>((set, get) => ({
   },
 }));
 
-/** Start the snapshot+events feed. Call once on app mount. */
+/** Start the snapshot+events feed. Call once on app mount.
+ *
+ * Ordering matters: we SUBSCRIBE first, then fetch the initial snapshot. Any
+ * events that arrive in the gap before the snapshot resolves are BUFFERED and
+ * replayed once the mirror exists — otherwise applyEvent's `!snapshot` guard
+ * would silently drop them (a real load-time race: a command issued in that
+ * window would never appear). Replay is safe because every applyEvent handler
+ * is idempotent (track_added/clip_added/clip_split ignore ids they already
+ * mirror), so a delta the fresh snapshot already includes is a harmless no-op.
+ */
 export function connectFeed(): () => void {
-  const { refresh, applyEvent } = useStore.getState();
-  void refresh();
-  return subscribe(applyEvent);
+  const { applyEvent } = useStore.getState();
+  let ready = false;
+  const buffered: MoshEvent[] = [];
+
+  const onEvent = (event: MoshEvent) => {
+    if (ready) {
+      applyEvent(event);
+    } else {
+      buffered.push(event);
+    }
+  };
+
+  const unsubscribe = subscribe(onEvent);
+
+  void useStore
+    .getState()
+    .refresh()
+    .then(() => {
+      ready = true;
+      // Replay anything that arrived while the snapshot was loading, in order.
+      for (const event of buffered) applyEvent(event);
+      buffered.length = 0;
+    });
+
+  return unsubscribe;
 }

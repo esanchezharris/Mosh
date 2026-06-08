@@ -7,6 +7,7 @@
 #include "EngineHandlers.h"
 #include "PluginCommands.h"
 #include "NeuralCommands.h"
+#include "HttpBridge.h"
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Mosh — application entry point. Bootstraps the Tracktion Engine (01), the MoshOps
@@ -39,12 +40,23 @@ namespace mosh
             registerPluginCommands (*executor, *engine);
             registerNeuralCommands (*executor, *engine);
 
+            // HTTP transport for the MoshOps seam — lets a PLAIN BROWSER drive the
+            // real backend (the WebView2 backend is broken on Windows; see STATUS).
+            // Serves the staged UI bundle + /api/* on MOSH_HTTP_PORT (default 8080).
+            {
+                const int httpPort = juce::SystemStats::getEnvironmentVariable ("MOSH_HTTP_PORT", "8080").getIntValue();
+                auto uiStaged = juce::File::getSpecialLocation (juce::File::currentExecutableFile)
+                                    .getParentDirectory().getChildFile ("ui");
+                httpBridge = std::make_unique<HttpBridge> (*executor, uiStaged, httpPort);
+            }
+
             mainWindow = std::make_unique<MainWindow> ("Mosh", *executor);
         }
 
         void shutdown() override
         {
             mainWindow.reset();
+            httpBridge.reset();        // stop the server before tearing down the executor
             executor.reset();
             snapshotSource.reset();
             log.reset();
@@ -58,6 +70,7 @@ namespace mosh
         std::unique_ptr<JsonlLog> log;
         std::unique_ptr<DslExecutor> executor;
         std::unique_ptr<EngineSnapshotSource> snapshotSource;
+        std::unique_ptr<HttpBridge> httpBridge;
         std::unique_ptr<MainWindow> mainWindow;
     };
 }
