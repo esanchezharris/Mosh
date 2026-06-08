@@ -49,7 +49,11 @@ if [[ -z "$INDEX" ]]; then
   exit 2
 fi
 
+# GitHub Actions exports CI=true; on this macOS runner the JUCE/Tracktion live
+# smoke opens output-only under that env. Keep CI for the workflow, but not for
+# the app subprocess whose purpose is to prove real CoreAudio input loopback.
 set +e
+env -u CI \
 MOSH_AUDIO_OUTPUT_DEVICE="$DEVICE" \
 MOSH_AUDIO_INPUT_DEVICE="$DEVICE" \
   "$APP" --live-audio-smoke > "$EVID/live-audio-loopback-smoke.log" 2>&1
@@ -96,7 +100,9 @@ for attempt in $(seq 1 "$MAX_ATTEMPTS"); do
   sleep 1
 
   set +e
-  MOSH_AUDIO_OUTPUT_DEVICE="$DEVICE" "$APP" --live-audio-smoke > "$EVID/live-audio-smoke-attempt-${attempt}.log" 2>&1
+  env -u CI \
+    MOSH_AUDIO_OUTPUT_DEVICE="$DEVICE" \
+    "$APP" --live-audio-smoke > "$EVID/live-audio-smoke-attempt-${attempt}.log" 2>&1
   MOSH_STATUS=$?
   wait "$FFMPEG_PID"
   FFMPEG_STATUS=$?
