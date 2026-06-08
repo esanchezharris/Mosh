@@ -34,12 +34,13 @@
 - [x] **Spine verified:** `mosh_tests` = **158 assertions / 30 cases green** — MoshResult envelope, ASTD clamp+Lab+skew, full-fingerprint cache key, RenderLayer round-trip/dirty/≤3-color cap, event shape+decimation, **command-surface harness** (results/events/JSONL/snapshot/undo-redo/abandon), ClipMath move/trim/split.
 - [~] **GATE:** window + placeholder on macOS arm64; service health ok. *(Windows proxy: build+links+window ✅, service health ✅; WebView **placeholder render** shows WebView2 "navigation canceled" — the JUCE-8 WebView resource `// VERIFY`, deferred to Stage 2 / a macOS WKWebView run. See STATUS.)*
 
-### Stage 1 — Engine + MoshOps + state feed (`01`,`02`)
-- [ ] `Engine` constructed once; device auto-init; `Edit` created; `edit.getUndoManager()` is the undo impl under MoshOps.
-- [ ] MoshOps `execute()` with result envelope + validation + per-command Tracktion transaction + JSONL log.
-- [ ] `getSnapshot()` + typed event stream (snapshot+events, "c"); first commands: `create_track`, `import_clip`, `set_transport`.
-- [ ] `MOSH_RENDERLAYER` schema defined; test node round-trips save/load.
-- [ ] **GATE:** WebView renders a snapshot cold; `create_track`+`import_clip` via MoshOps; audio loops; scrub; undo/redo via MoshOps; JSONL records the commands; save/reload restores.
+### Stage 1 — Engine + MoshOps + state feed (`01`,`02`) — *backend verified over real Tracktion; WebView-render + audio-loop need Stage 2 / a run*
+- [x] `Engine` constructed once (1-arg ctor; device auto-init); `Edit` via `createEmptyEdit`; `edit.getUndoManager()` is the undo impl under MoshOps. **Compiles + links against real Tracktion v3.2.0 on Windows.**
+- [x] MoshOps `execute()` result envelope + validation + per-command Tracktion transaction + JSONL log (spine; now driving Tracktion handlers).
+- [x] `getSnapshot()` walks the Edit + typed events; commands: `create_track`, `import_clip`, `set_transport`, `set_tempo`, `rename_track`, `set_track_gain/mute/solo`, `delete_track`, `move_clip`, `trim_clip`, `split_clip`.
+- [x] `MOSH_RENDERLAYER` schema defined; node round-trips save/load (spine `mosh_tests`).
+- [x] **Smoke test green over real Tracktion** (`mosh_engine_tests`, 23 assertions): `create_track`+`import_clip`(real WAV) via MoshOps; **undo/redo via MoshOps reverts/restores** (one undo system confirmed); `save()` round-trips `.tracktionedit`; tempo/transport reflected; JSONL records commands.
+- [~] **GATE:** WebView renders a snapshot cold *(blocked on Stage-2 WebView resource render)*; audio loops + scrub *(needs a run; transport commands execute)*. **Backend half of the gate (commands/undo/JSONL/save) ✅ verified.**
 
 ### Stage 2 — WebView arrangement (`03`)
 - [ ] Conventional layout: track headers, timeline lanes, clips, transport bar, mixer stub.

@@ -26,6 +26,7 @@ target_compile_features(Mosh PRIVATE cxx_std_20)
 
 target_link_libraries(Mosh PRIVATE
     mosh_spine
+    mosh_engine                 # Tracktion bootstrap + engine-bound command handlers
     juce::juce_gui_extra        # WebBrowserComponent lives here
     juce::juce_gui_basics
     juce::juce_events

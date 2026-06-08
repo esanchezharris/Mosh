@@ -2,16 +2,15 @@
 #include "MainWindow.h"
 #include "DslExecutor.h"
 #include "JsonlLog.h"
+#include "MoshEngine.h"
+#include "EngineSnapshot.h"
+#include "EngineHandlers.h"
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Mosh — application entry point. Bootstraps the MoshOps spine and the WebView
-// shell. Stage 0: the executor is backed by a standalone juce::UndoManager + an
-// empty snapshot (the placeholder UI renders "backend: juce" and a cold snapshot).
-//
-// Stage 1 replaces this with the Tracktion Engine bootstrap (01): one Engine for
-// the app lifetime, an Edit, edit.getUndoManager() as the undo implementation, and
-// Tracktion-bound command handlers + a snapshot source that walks the Edit. The
-// WebView/UI do not change — they couple only to the command surface + feed.
+// Mosh — application entry point. Bootstraps the Tracktion Engine (01), the MoshOps
+// spine (02) wired to edit.getUndoManager() as the single undo implementation, the
+// Tracktion-bound command handlers + a snapshot source that walks the Edit, and the
+// WebView shell (03). The WebView/UI couple only to the command surface + feed.
 // ──────────────────────────────────────────────────────────────────────────────
 namespace mosh
 {
@@ -24,10 +23,17 @@ namespace mosh
 
         void initialise (const juce::String&) override
         {
-            // The MoshOps spine. (Stage 1: swap `undo` for edit.getUndoManager()
-            // and register the Tracktion-bound handlers + snapshot source.)
+            engine = std::make_unique<MoshEngine>();
+
+            // The JSONL semantic log lives next to the edit file.
             log = std::make_unique<JsonlLog>();
-            executor = std::make_unique<DslExecutor> (undo, log.get());
+            log->setFile (engine->getEditFile().getParentDirectory().getChildFile ("mosh-session.jsonl"));
+
+            // MoshOps over THE engine's UndoManager — one undo system (02).
+            executor = std::make_unique<DslExecutor> (engine->getUndoManager(), log.get());
+            snapshotSource = std::make_unique<EngineSnapshotSource> (*engine);
+            executor->setSnapshotSource (snapshotSource.get());
+            registerEngineHandlers (*executor, *engine);
 
             mainWindow = std::make_unique<MainWindow> ("Mosh", *executor);
         }
@@ -36,15 +42,18 @@ namespace mosh
         {
             mainWindow.reset();
             executor.reset();
+            snapshotSource.reset();
             log.reset();
+            engine.reset();
         }
 
         void systemRequestedQuit() override { quit(); }
 
     private:
-        juce::UndoManager undo;                        // Stage 1 → edit.getUndoManager()
+        std::unique_ptr<MoshEngine> engine;
         std::unique_ptr<JsonlLog> log;
         std::unique_ptr<DslExecutor> executor;
+        std::unique_ptr<EngineSnapshotSource> snapshotSource;
         std::unique_ptr<MainWindow> mainWindow;
     };
 }

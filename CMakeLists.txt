@@ -83,6 +83,24 @@ endif()
 
 # ── The full app (heavy; macOS-primary) ───────────────────────────────────────
 if(MOSH_BUILD_APP)
+  # Tracktion Engine. Add JUCE FIRST (done above) so its juce:: targets exist, then
+  # add ONLY tracktion's modules dir (DOWNLOAD_ONLY) — NOT the repo root, which would
+  # pull tracktion's own `develop` JUCE. This guarantees exactly one JUCE (8.0.8).
+  # (Resolved against the pinned clone — see docs/TRACKTION_API_NOTES.md §7.)
+  CPMAddPackage(
+    NAME tracktion_engine
+    GITHUB_REPOSITORY Tracktion/tracktion_engine
+    GIT_TAG ${MOSH_TRACKTION_TAG}
+    GIT_SHALLOW TRUE
+    DOWNLOAD_ONLY YES
+  )
+  if(tracktion_engine_ADDED)
+    add_subdirectory(${tracktion_engine_SOURCE_DIR}/modules ${CMAKE_BINARY_DIR}/tracktion_modules)
+  else()
+    message(FATAL_ERROR "Mosh: tracktion_engine source not available")
+  endif()
+
+  add_subdirectory(src/engine)
   add_subdirectory(src/app)
 endif()
 

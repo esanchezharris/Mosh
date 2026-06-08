@@ -60,11 +60,35 @@ chowdsp_utils `e97b826e` · Catch2 `v3.9.1` · CPM `v0.42.3`.
   build+window ✅, service health ✅; placeholder render pending Stage-2 WebView reconciliation /
   a macOS WKWebView run.)*
 
-### Stages 1–6 — NOT STARTED
-Stage 1 next: Tracktion bootstrap (Engine/Edit/transport/device), swap the standalone
-`UndoManager` for `edit.getUndoManager()`, register Tracktion-bound handlers
-(`create_track`/`import_clip`/`set_transport`), a snapshot source walking the Edit, and the
-`MOSH_RENDERLAYER` save/load round-trip. The UI/spine do not change.
+### Stage 1 — Engine + MoshOps + feed — IN PROGRESS (engine layer authored)
+- [x] `src/engine/MoshEngine` — one `Engine` for the app lifetime (device auto-inits),
+      `createEmptyEdit`, load via `loadEditFromFile`, save via `EditFileOperations::save`,
+      transport accessor, `getUndoManager()` → the edit's `juce::UndoManager`.
+- [x] `src/engine/EngineSnapshot` — walks the Edit into the snapshot schema (tracks → gain
+      from the volume plugin, clips → range; transport; tempo/sig). Shared `trackToVar`/
+      `clipToVar` reused by handlers so snapshot and events agree.
+- [x] `src/engine/EngineHandlers` — Tracktion-bound handlers registered into the executor:
+      `create_track`, `import_clip`, `set_transport`, `set_tempo`, `rename_track`,
+      `set_track_gain/mute/solo`, `delete_track`, + Stage-2 `move_clip`/`trim_clip`/`split_clip`.
+      All signatures verified against the clone.
+- [x] `Main.cpp` wired: `MoshEngine` → `DslExecutor(engine.getUndoManager(), log)` →
+      register handlers → `EngineSnapshotSource`. JSONL log written next to the edit file.
+- [x] CMake: Tracktion integrated per the resolved approach (JUCE 8.0.8 first → CPM
+      `DOWNLOAD_ONLY` tracktion → `add_subdirectory(modules)` → link `tracktion::*`).
+- [x] **Builds with Tracktion** — `mosh_engine` compiles + links against tracktion_engine v3.2.0
+      on Windows (MSVC). The JUCE-first → `add_subdirectory(modules)` → `tracktion::*` integration works.
+- [x] **Stage-1 command path verified** — `mosh_engine_tests` (Tracktion-linked, 23 assertions, 2 cases,
+      **green**): `create_track`, `import_clip` (real generated WAV), snapshot reflects both, events fire,
+      **undo reverts clip→track, redo restores** (one undo system through `edit.getUndoManager()`),
+      `save()` writes a `.tracktionedit`, `set_tempo`/`set_transport` reflected. Engine uses the 1-arg
+      `Engine("Mosh")` ctor (default UI/Engine behaviour — correct for a headless/WebView app;
+      `ExtendedUIBehaviour` is an examples-only helper, not in the engine module). `namespace te =
+      tracktion` (NOT `::engine`) — strong time types live in `tracktion::core`, surfaced via `tracktion::`.
+- [x] `MOSH_RENDERLAYER` save/load round-trip covered by `mosh_tests` (spine).
+- [~] Remaining Stage-1 gate aspects: **WebView cold-render** (blocked on the Stage-2 WebView resource
+      fix) and **audio loop/scrub** (needs an interactive run; the transport *commands* execute + reflect).
+
+### Stages 2–6 — NOT STARTED
 
 ## // VERIFY ledger (resolve against the pinned tracktion_engine v3.2.0 clone)
 
