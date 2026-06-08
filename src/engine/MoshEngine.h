@@ -19,8 +19,11 @@ public:
     /** @param openAudioDevice  open the real CoreAudio device for playback.
         Headless runs (--selftest) and screenshots during a wedged audio HAL pass
         false (also forced off by the MOSH_NO_AUDIO env var) — the command surface
-        and direct DSP need no device, and device init can block on CoreAudio. */
-    explicit MoshEngine (bool openAudioDevice = true);
+        and direct DSP need no device, and device init can block on CoreAudio.
+        @param freshSession  use an isolated session dir and always start from a
+        cold empty Edit. The --selftest harness passes true so it is idempotent
+        (it saves/reloads internally) and never collides with the GUI session. */
+    explicit MoshEngine (bool openAudioDevice = true, bool freshSession = false);
     ~MoshEngine();
 
     te::Engine& engine() { return *enginePtr; }

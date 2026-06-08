@@ -33,7 +33,7 @@ from sa3.engine import engine_available  # noqa: E402  (path-only check; no MLX 
 
 SERVICE_VERSION = "0.2.0"
 START_TIME = time.time()
-SA3_ENABLED = os.environ.get("MOSH_ENABLE_SA3", "0") == "1" and engine_available()
+SA3_ENABLED = os.environ.get("MOSH_ENABLE_SA3", "1") == "1" and engine_available()
 
 
 def _colorrack_hash() -> str:
@@ -237,6 +237,11 @@ def main() -> int:
     host = os.environ.get("MOSH_SERVICE_HOST", "127.0.0.1")
     port = int(os.environ.get("MOSH_SERVICE_PORT", "8770"))
     threading.Thread(target=_worker_loop, daemon=True).start()
+    if SA3_ENABLED:
+        # Pre-load the judge model off the worker thread so the first render's QA
+        # is ~1–2s, not ~25s. Background + best-effort: never blocks /health.
+        from sa3 import qa  # noqa: PLC0415
+        threading.Thread(target=qa.warm, daemon=True).start()
     httpd = ThreadingHTTPServer((host, port), Handler)
     mode = "FakeAdapter + StableAudio3" if SA3_ENABLED else "FakeAdapter"
     sys.stderr.write(f"[service] Mosh generative service v{SERVICE_VERSION} "

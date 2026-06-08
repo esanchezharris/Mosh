@@ -442,8 +442,10 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (trackById (mt).getProperty ("name", var()).toString() == "Master Bus", "redo restored the rename");
     }
 
-    // ─── Stage 5 (SA3): the real StableAudio3Adapter — GATED on MOSH_ENABLE_SA3 ───
-    if (SystemStats::getEnvironmentVariable ("MOSH_ENABLE_SA3", "0") == "1")
+    // ─── Stage 5 (SA3): the real StableAudio3Adapter — GATED on MOSH_SELFTEST_SA3 ───
+    // (separate from MOSH_ENABLE_SA3, which now defaults on: real model + judge QA is
+    //  ~30s, too heavy for the default --selftest. Opt in explicitly to exercise it.)
+    if (SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SA3", "0") == "1")
     {
         std::cerr << "--- Stage 5 (SA3): real Stable Audio 3 backend ---\n";
         // /colors handshake
@@ -482,7 +484,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (cmd (ops, "accept_render", args1 ("clipId", scid))), "accept SA3 render → lands on the neural lane");
     }
     else
-        std::cerr << "  ..   (SA3 disabled — set MOSH_ENABLE_SA3=1 to exercise the real model)\n";
+        std::cerr << "  ..   (SA3 self-test skipped — set MOSH_SELFTEST_SA3=1 to exercise the real model)\n";
 
     std::cerr << "===== " << (checks - failures) << "/" << checks
               << " checks passed, " << failures << " failed =====\n\n";

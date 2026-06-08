@@ -26,7 +26,9 @@ public:
             return;
 
         const bool headless = commandLine.contains ("--selftest");
-        engine  = std::make_unique<MoshEngine> (! headless);   // no audio device in headless runs
+        // Headless: no audio device, and an isolated cold session so the harness is
+        // idempotent (it saves/reloads itself) and never touches the GUI session.
+        engine  = std::make_unique<MoshEngine> (! headless, /*freshSession=*/ headless);
         moshOps = std::make_unique<MoshOps> (*engine);
 
         // Headless command-surface harness (06 §4): `Mosh --selftest`.

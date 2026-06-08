@@ -19,7 +19,7 @@ namespace
     };
 }
 
-MoshEngine::MoshEngine (bool openAudioDevice)
+MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession)
 {
     audioOpen = openAudioDevice
                 && ! juce::SystemStats::getEnvironmentVariable ("MOSH_NO_AUDIO", {}).isNotEmpty();
@@ -32,12 +32,19 @@ MoshEngine::MoshEngine (bool openAudioDevice)
         std::make_unique<MoshEngineBehaviour> (audioOpen));
 
     // Session directory: a stable per-app-data folder so save/reload round-trips.
+    // The harness gets an isolated "session-selftest" dir so it can't be polluted
+    // by (or clobber) a real GUI session — see freshSession below.
     session = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
                   .getChildFile ("Mosh")
-                  .getChildFile ("session");
+                  .getChildFile (freshSession ? "session-selftest" : "session");
     session.createDirectory();
     session.getChildFile ("audio").createDirectory();
     editPath = session.getChildFile ("session.tracktionedit");
+
+    // The harness saves + reloads internally; wipe any prior run's persisted edit
+    // so it always starts cold and is idempotent across repeated --selftest runs.
+    if (freshSession)
+        editPath.deleteFile();
 
     if (editPath.existsAsFile())
     {
