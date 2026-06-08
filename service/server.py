@@ -6,16 +6,21 @@ HTTP/JSON; audio over files + manifests (never giant JSON). The native Generativ
 Job Manager (src/generative/) spawns/detects it, does a capability handshake +
 warmup, monitors heartbeat, and cancels jobs on project close.
 
-Stage 5 (FakeAdapter): submit_job / get_job_status / progress / cancel +
-capabilities/health. The StableAudio3Adapter swaps in later behind the same API
-(external deps via env vars; not built here). Dependency-free (stdlib only).
+Adapters: `fake` (stdlib stub) and `stable_audio3` (the carved MLX SA3 model — full
+carve: re-imagine/generate, ASTD colour rack, init-latent cache, judge QA). One
+SINGLE serialized worker owns the SA3 model (MLX is not concurrent). SA3 is
+advertised only when its model is present, so FakeAdapter-only runs are unaffected.
 
-Run:  python3 service/server.py        # 127.0.0.1:8770
+Run:  service/run.sh         # picks the MLX venv python when MOSH_ENABLE_SA3=1
+      python3 service/server.py
 """
 from __future__ import annotations
 
+import hashlib
+import itertools
 import json
 import os
+import queue
 import sys
 import threading
 import time
@@ -24,10 +29,27 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from adapters import fake_adapter  # noqa: E402
+from sa3.engine import engine_available  # noqa: E402  (path-only check; no MLX import)
 
-SERVICE_VERSION = "0.1.0"
-SERVICE_BUILD = "fake-0.1.0"
+SERVICE_VERSION = "0.2.0"
 START_TIME = time.time()
+SA3_ENABLED = os.environ.get("MOSH_ENABLE_SA3", "0") == "1" and engine_available()
+
+
+def _colorrack_hash() -> str:
+    try:
+        from colors import runtime as CR
+        return hashlib.md5(json.dumps(CR.registry(), sort_keys=True).encode()).hexdigest()[:8]
+    except Exception:  # noqa: BLE001
+        return "none"
+
+
+# service_build feeds the native render-cache fingerprint: changing the engine/colors
+# must invalidate cached renders, so it encodes the carve identity.
+if SA3_ENABLED:
+    SERVICE_BUILD = f"sa3-1.0.0+colors{_colorrack_hash()}+sec{os.environ.get('SA3_SECONDS', '8.0')}"
+else:
+    SERVICE_BUILD = "fake-0.1.0"
 
 FAKE_ADAPTER = {
     "id": "fake", "version": "0.0.1",
@@ -40,25 +62,57 @@ FAKE_ADAPTER = {
     "service_build": SERVICE_BUILD,
 }
 
+
+def _sa3_descriptor() -> dict:
+    return {
+        "id": "stable_audio3", "version": "1.0.0", "available": SA3_ENABLED,
+        "generation_modes": ["text_to_audio", "audio_to_audio"],
+        "conditioning_inputs": ["prompt", "init_audio", "negative_prompt", "colors"],
+        "duration_limits": {"min": 0.5, "max": float(os.environ.get("SA3_SECONDS", "8.0"))},
+        "sample_rates": [44100], "channel_modes": ["stereo"],
+        "runtime_requirements": ["apple_mlx"], "packaging_mode": "python_service",
+        "supports_seed": True, "supports_semantic_controls": True,
+        "semantic_controls": "colors", "service_build": SERVICE_BUILD,
+    }
+
+
 _jobs: dict[str, dict] = {}
 _lock = threading.Lock()
+_job_q: "queue.PriorityQueue" = queue.PriorityQueue()
+_seq = itertools.count()
+
+
+def _adapter_for(adapter_id: str):
+    if adapter_id in ("stable_audio3", "sa3"):
+        from adapters import stable_audio3_adapter as ad
+        return ad
+    return fake_adapter
 
 
 def _run_job(job_id: str) -> None:
     with _lock:
         job = _jobs[job_id]
+        if job.get("cancel"):
+            job["status"] = "cancelled"
+            return
         job["status"] = "rendering"
+        adapter_id = job.get("adapter", "fake")
     try:
-        # Simulate render time with progress (debounced renders are slow IRL).
-        for step in range(1, 6):
+        if adapter_id == "fake":
+            # Stepped progress for the cheap stub (debounced renders are slow IRL).
+            for step in range(1, 6):
+                with _lock:
+                    if _jobs[job_id].get("cancel"):
+                        _jobs[job_id]["status"] = "cancelled"
+                        return
+                    _jobs[job_id]["progress"] = step / 6.0
+                time.sleep(0.05)
+        else:
             with _lock:
-                if _jobs[job_id].get("cancel"):
-                    _jobs[job_id]["status"] = "cancelled"
-                    return
-                _jobs[job_id]["progress"] = step / 6.0
-            time.sleep(0.05)
+                _jobs[job_id]["progress"] = 0.3   # coarse: real model render is one shot
 
-        manifest = fake_adapter.render(job["input_wav"], job["output_wav"], job["params"])
+        ad = _adapter_for(adapter_id)
+        manifest = ad.render(job["input_wav"], job["output_wav"], job["params"])
         with open(job["manifest"], "w") as f:
             json.dump(manifest, f)
         with _lock:
@@ -69,6 +123,17 @@ def _run_job(job_id: str) -> None:
         with _lock:
             _jobs[job_id]["status"] = "error"
             _jobs[job_id]["error"] = str(e)
+
+
+def _worker_loop() -> None:
+    """The ONE thread that ever runs an adapter — serializes inference so the
+    process-global MLX model is never touched concurrently (05 §6 priority queue)."""
+    while True:
+        _prio, _seq_n, job_id = _job_q.get()
+        try:
+            _run_job(job_id)
+        finally:
+            _job_q.task_done()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -101,12 +166,21 @@ class Handler(BaseHTTPRequestHandler):
                     query[k] = v
 
         if path == "/health":
+            adapters = ["fake"] + (["stable_audio3"] if SA3_ENABLED else [])
             self._send(200, {"ok": True, "service": "mosh-generative",
                              "version": SERVICE_VERSION, "build": SERVICE_BUILD,
                              "uptime_s": round(time.time() - START_TIME, 1),
-                             "adapters": ["fake"]})
+                             "adapters": adapters})
         elif path == "/capabilities":
-            self._send(200, {"ok": True, "adapters": [FAKE_ADAPTER], "service_build": SERVICE_BUILD})
+            adapters = [FAKE_ADAPTER] + ([_sa3_descriptor()] if SA3_ENABLED else [])
+            self._send(200, {"ok": True, "adapters": adapters, "service_build": SERVICE_BUILD})
+        elif path == "/colors":
+            try:
+                from colors import runtime as CR
+                self._send(200, {"ok": True, "colors": CR.descriptor(),
+                                 "lab_alpha_max": CR._meta().get("lab_alpha_max", 0.4)})
+            except Exception as e:  # noqa: BLE001
+                self._send(503, {"ok": False, "error": f"colors unavailable: {e}", "colors": []})
         elif path == "/status":
             jid = query.get("jobId", "")
             with _lock:
@@ -117,6 +191,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, {"ok": True, "jobId": jid, "status": job["status"],
                                  "progress": job.get("progress", 0.0),
                                  "outputWav": job["output_wav"],
+                                 "error": job.get("error"),
                                  "manifest": job.get("result")})
         else:
             self._send(404, {"ok": False, "error": f"unknown path: {path}"})
@@ -125,6 +200,11 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0].rstrip("/") or "/"
         data = self._read_json()
         if path == "/submit":
+            adapter_id = data.get("adapter", "fake")
+            if adapter_id in ("stable_audio3", "sa3") and not SA3_ENABLED:
+                self._send(503, {"ok": False, "error": "stable_audio3 unavailable "
+                                 "(model/venv absent or MOSH_ENABLE_SA3 not set)"})
+                return
             input_wav = data.get("inputWav", "")
             output_wav = data.get("outputWav", "")
             if not input_wav or not os.path.exists(input_wav):
@@ -133,12 +213,12 @@ class Handler(BaseHTTPRequestHandler):
             job_id = uuid.uuid4().hex[:12]
             with _lock:
                 _jobs[job_id] = {
-                    "status": "queued", "progress": 0.0,
+                    "status": "queued", "progress": 0.0, "adapter": adapter_id,
                     "input_wav": input_wav, "output_wav": output_wav,
                     "manifest": data.get("manifest", output_wav + ".manifest.json"),
                     "params": data.get("params", {}), "cancel": False,
                 }
-            threading.Thread(target=_run_job, args=(job_id,), daemon=True).start()
+            _job_q.put((int(data.get("priority", 5)), next(_seq), job_id))
             self._send(200, {"ok": True, "jobId": job_id})
         elif path == "/cancel":
             jid = data.get("jobId", "")
@@ -156,9 +236,11 @@ class Handler(BaseHTTPRequestHandler):
 def main() -> int:
     host = os.environ.get("MOSH_SERVICE_HOST", "127.0.0.1")
     port = int(os.environ.get("MOSH_SERVICE_PORT", "8770"))
+    threading.Thread(target=_worker_loop, daemon=True).start()
     httpd = ThreadingHTTPServer((host, port), Handler)
+    mode = "FakeAdapter + StableAudio3" if SA3_ENABLED else "FakeAdapter"
     sys.stderr.write(f"[service] Mosh generative service v{SERVICE_VERSION} "
-                     f"on http://{host}:{port} (FakeAdapter)\n")
+                     f"on http://{host}:{port} ({mode}) build={SERVICE_BUILD}\n")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

@@ -23,8 +23,13 @@ public:
 
     juce::var capabilities();
 
-    /** Submit a render job. Returns the jobId (empty on failure). Non-blocking. */
-    juce::String submitJob (const juce::File& inputWav, const juce::File& outputWav,
+    /** The available SA3 colours + their ASTD ceilings (GET /colors), for the UI. */
+    juce::var listColors();
+
+    /** Submit a render job to a named adapter ("fake" | "stable_audio3").
+        Returns the jobId (empty on failure). Non-blocking. */
+    juce::String submitJob (const juce::String& adapter,
+                            const juce::File& inputWav, const juce::File& outputWav,
                             const juce::File& manifest, const juce::var& params);
 
     /** Poll a job's status: { ok, status, progress, outputWav, manifest }. */

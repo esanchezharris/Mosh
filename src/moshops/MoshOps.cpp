@@ -81,6 +81,7 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "bypass_layer")      return cmdBypassLayer (args);
     if (name == "freeze_layer")      return cmdFreezeLayer (args);
     if (name == "bounce_layer_to_clip") return cmdBounceLayerToClip (args);
+    if (name == "list_colors")       return cmdListColors (args);
     if (name == "export_audio")      return cmdExportAudio (args);
 
     return errResult (name, "unknown command: " + name);
@@ -719,6 +720,8 @@ juce::var MoshOps::cmdCreateRenderLayer (const juce::var& args)
     auto node = RenderLayer::create ("rl-" + String (Time::getCurrentTime().toMilliseconds()),
         clipId, pos.getStart().inSeconds(), pos.getEnd().inSeconds(),
         args.getProperty ("adapter", "fake").toString());
+    if (args.hasProperty ("mode"))         node.setProperty (ids::mode, args.getProperty ("mode", "reimagine"), nullptr);
+    if (args.hasProperty ("modelVariant")) node.setProperty (ids::modelVariant, args.getProperty ("modelVariant", ""), nullptr);
     clip->state.appendChild (node, &undoManager());
 
     auto* data = new DynamicObject();
@@ -741,6 +744,8 @@ juce::var MoshOps::cmdSetRenderParam (const juce::var& args)
     if (args.hasProperty ("nl"))     params.setProperty (ids::nl, args.getProperty ("nl", 0.4), &undoManager());
     if (args.hasProperty ("seed"))   node.setProperty (ids::seed, args.getProperty ("seed", 0), &undoManager());
     if (args.hasProperty ("mode"))   node.setProperty (ids::mode, args.getProperty ("mode", "reimagine"), &undoManager());
+    if (args.hasProperty ("modelVariant")) node.setProperty (ids::modelVariant, args.getProperty ("modelVariant", ""), &undoManager());
+    if (args.hasProperty ("lab"))    params.setProperty (juce::Identifier ("lab"), args.getProperty ("lab", false), &undoManager());
 
     if (args.hasProperty ("colors"))   // ≤3, ordered (01 §4.4)
     {
@@ -823,8 +828,10 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
             colors.add (var (co));
         }
     p->setProperty ("colors", colors);
+    p->setProperty ("lab", (bool) params.getProperty (juce::Identifier ("lab"), false));
 
-    const auto jobId = jobManager.submitJob (input, output, manifest, var (p));
+    const auto jobId = jobManager.submitJob (node[ids::modelAdapter].toString(),
+                                             input, output, manifest, var (p));
     if (jobId.isEmpty()) return errResult ("render_layer", "job submit failed");
 
     node.setProperty (ids::cacheKey, fp, nullptr);
@@ -839,7 +846,7 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
     const bool wait = (bool) args.getProperty ("wait", false);
     if (wait)
     {
-        for (int i = 0; i < 100; ++i)
+        for (int i = 0; i < 2400; ++i)   // up to ~120s — generative renders are slow (model load + diffusion + QA)
         {
             auto st = jobManager.jobStatus (jobId);
             const auto status = st.getProperty ("status", var()).toString();
@@ -860,7 +867,7 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
     // message thread (service I/O off the message thread; tree on it).
     std::thread ([this, clipId, jobId, output, manifest, fp]
     {
-        for (int i = 0; i < 600; ++i)
+        for (int i = 0; i < 1800; ++i)   // up to ~180s for a slow generative render
         {
             auto st = jobManager.jobStatus (jobId);
             const auto status = st.getProperty ("status", juce::var()).toString();
@@ -903,6 +910,17 @@ void MoshOps::finalizeRender (const juce::String& clipId, const juce::File& outp
         o->setProperty ("status", "ready"); o->setProperty ("cache", "miss");
         o->setProperty ("qa", qa); return var (o); }());
     emitSnapshotInvalidated();
+}
+
+juce::var MoshOps::cmdListColors (const juce::var&)
+{
+    // The SA3 colour rack (name + ASTD ceiling per color) for the generative UI.
+    if (! jobManager.ensureServiceRunning())
+        return errResult ("list_colors", "generative service unavailable");
+    auto r = jobManager.listColors();
+    if (! (bool) r.getProperty ("ok", false))
+        return okResult ("list_colors", [] { auto* o = new DynamicObject(); o->setProperty ("colors", Array<var>{}); return var (o); }());
+    return okResult ("list_colors", r);
 }
 
 juce::var MoshOps::cmdCancelRender (const juce::var& args)

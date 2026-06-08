@@ -442,6 +442,48 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (trackById (mt).getProperty ("name", var()).toString() == "Master Bus", "redo restored the rename");
     }
 
+    // ─── Stage 5 (SA3): the real StableAudio3Adapter — GATED on MOSH_ENABLE_SA3 ───
+    if (SystemStats::getEnvironmentVariable ("MOSH_ENABLE_SA3", "0") == "1")
+    {
+        std::cerr << "--- Stage 5 (SA3): real Stable Audio 3 backend ---\n";
+        // /colors handshake
+        auto lc = cmd (ops, "list_colors");
+        const int nColors = lc["data"].getProperty ("colors", var()).size();
+        check (ok (lc) && nColors > 0, "list_colors returns the SA3 colour rack");
+
+        auto st = cmd (ops, "create_track", args1 ("name", "SA3"))["data"].getProperty ("trackId", var()).toString();
+        auto tn = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", st }, { "seconds", 2.0 }, { "freq", 110.0 }}));
+        const auto scid = tn["data"].getProperty ("clipId", var()).toString();
+
+        auto crl = cmd (ops, "create_render_layer", objN ({{ "clipId", scid },
+            { "adapter", "stable_audio3" }, { "mode", "reimagine" }, { "modelVariant", "sa3-medium" }}));
+        const auto layerId = crl["data"].getProperty ("layerId", var()).toString();
+        check (ok (crl), "create_render_layer (stable_audio3) ok");
+
+        Array<var> gcolors; { auto* c = new DynamicObject(); c->setProperty ("name", "grit"); c->setProperty ("value", 70); gcolors.add (var (c)); }
+        cmd (ops, "set_render_param", objN ({{ "clipId", scid }, { "seed", 5 }, { "nl", 0.45 }, { "colors", gcolors }}));
+
+        std::cerr << "  ..   rendering with SA3 (model load + inference; ~10s first time)…\n";
+        auto r1 = cmd (ops, "render_layer", objN ({{ "clipId", scid }, { "wait", true }}));
+        check (ok (r1) && r1["data"].getProperty ("cache", var()).toString() == "miss", "SA3 render ran (cache MISS)");
+        check (r1["data"].getProperty ("status", var()).toString() == "ready", "SA3 render completed → ready");
+
+        // The real artifact + its manifest.
+        auto manifestFile = eng.sessionDir().getChildFile ("renders").getChildFile (layerId).getChildFile ("output_manifest.json");
+        var mf = manifestFile.existsAsFile() ? JSON::parse (manifestFile.loadFileAsString()) : var();
+        check (mf.getProperty ("adapter", var()).toString() == "stable_audio3", "manifest from the real SA3 adapter");
+        check (mf.getProperty ("mode", var()).toString() == "audio_to_audio", "SA3 ran the re-imagine path");
+        check (mf.getProperty ("steers", var()).size() > 0, "grit colour applied as a steering vector");
+
+        // Cache HIT on identical re-render (full fingerprint incl. SA3 service build).
+        auto r2 = cmd (ops, "render_layer", objN ({{ "clipId", scid }, { "wait", true }}));
+        check (r2["data"].getProperty ("cache", var()).toString() == "hit", "identical SA3 re-render is a cache HIT");
+
+        check (ok (cmd (ops, "accept_render", args1 ("clipId", scid))), "accept SA3 render → lands on the neural lane");
+    }
+    else
+        std::cerr << "  ..   (SA3 disabled — set MOSH_ENABLE_SA3=1 to exercise the real model)\n";
+
     std::cerr << "===== " << (checks - failures) << "/" << checks
               << " checks passed, " << failures << " failed =====\n\n";
     return failures;
@@ -531,9 +573,15 @@ void runGenerativeDemo (MoshOps& ops)
     auto t = cmd ("create_track", obj ({{ "name", "Vox" }}))["data"].getProperty ("trackId", var()).toString();
     auto tone = cmd ("add_test_tone_clip", obj ({{ "trackId", t }, { "seconds", 2.0 }, { "freq", 147.0 }}));
     auto cid = tone["data"].getProperty ("clipId", var()).toString();
-    cmd ("create_render_layer", obj ({{ "clipId", cid }, { "adapter", "fake" }}));
-    Array<var> colors; { auto* c = new DynamicObject(); c->setProperty ("name", "grit"); c->setProperty ("value", 55); colors.add (var (c)); }
-    cmd ("set_render_param", obj ({{ "clipId", cid }, { "seed", 1 }, { "nl", 0.35 }, { "colors", colors }}));
+    // SA3 render layer with a 2-colour rack (falls back to the fake render if SA3 is off).
+    const bool sa3 = juce::SystemStats::getEnvironmentVariable ("MOSH_ENABLE_SA3", "0") == "1";
+    cmd ("create_render_layer", obj ({{ "clipId", cid },
+        { "adapter", sa3 ? "stable_audio3" : "fake" }, { "mode", "reimagine" },
+        { "modelVariant", sa3 ? "sa3-medium" : "" }}));
+    Array<var> colors;
+    { auto* c = new DynamicObject(); c->setProperty ("name", "grit"); c->setProperty ("value", 68); colors.add (var (c)); }
+    { auto* c = new DynamicObject(); c->setProperty ("name", "air");  c->setProperty ("value", 60); colors.add (var (c)); }
+    cmd ("set_render_param", obj ({{ "clipId", cid }, { "seed", 1 }, { "nl", 0.42 }, { "colors", colors }}));
     // NB: the actual render_layer (which spawns the service) is left to the user
     // button — running it here would block the message thread on a TCC/service
     // prompt before the WebView paints. The full render loop is proven headless.

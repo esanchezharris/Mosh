@@ -15,6 +15,19 @@ export type RenderLayer = {
   colors?: RenderColor[];
 };
 
+// SA3 colour-rack metadata from GET /colors (via list_colors).
+export type AvailableColor = {
+  name: string;
+  astd_max: number;
+  peak_layer: number;
+  more_sign: number;
+  verdict: string;
+  no_stack_with: string[];
+};
+
+// Quality readout from a completed render's manifest (judge panel, 05 §7).
+export type RenderQA = { pq?: number | null; pq_base?: number | null; flags?: string[]; adapter?: string };
+
 export type Clip = {
   id: string;
   name: string;

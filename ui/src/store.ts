@@ -1,6 +1,9 @@
 import { create } from "zustand";
 import { executeCommand, getSnapshot, onEvent, isNative } from "./bridge";
-import type { Snapshot, Transport, MoshEvent, CommandResult, AvailablePlugin } from "./types";
+import type {
+  Snapshot, Transport, MoshEvent, CommandResult, AvailablePlugin,
+  AvailableColor, RenderQA,
+} from "./types";
 
 export type Tool = "move" | "split";
 export type Peaks = [number, number][];
@@ -24,6 +27,9 @@ type State = {
   availablePlugins: AvailablePlugin[];
   browserOpen: boolean;
   renderProgress: Record<string, number>; // clipId → 0..1 (Tier-B render)
+  availableColors: AvailableColor[];       // SA3 colour rack (from list_colors)
+  labMode: boolean;                        // ASTD unlock for generative colours
+  qaByClip: Record<string, RenderQA>;      // last render's quality readout
 
   refresh: () => Promise<void>;
   exec: (command: string, args?: Record<string, unknown>) => Promise<CommandResult>;
@@ -40,6 +46,8 @@ type State = {
   setSelectedTrack: (id: string | null) => void;
   openBrowser: () => void;
   closeBrowser: () => void;
+  loadColors: () => void;
+  setLab: (b: boolean) => void;
 
   theme: "dark" | "light";
   toggleTheme: () => void;
@@ -60,6 +68,9 @@ export const useStore = create<State>((set, get) => ({
   availablePlugins: [],
   browserOpen: false,
   renderProgress: {},
+  availableColors: [],
+  labMode: false,
+  qaByClip: {},
 
   refresh: async () => {
     if (!isNative()) return;
@@ -98,6 +109,9 @@ export const useStore = create<State>((set, get) => ({
         const p = ev.payload as { clipId: string; progress: number };
         set((s) => ({ renderProgress: { ...s.renderProgress, [p.clipId]: p.progress } }));
       } else if (ev.type === "layer_status") {
+        const p = ev.payload as { clipId?: string; qa?: RenderQA };
+        if (p?.clipId && p.qa)
+          set((s) => ({ qaByClip: { ...s.qaByClip, [p.clipId!]: p.qa as RenderQA } }));
         void get().refresh();
       }
     });
@@ -142,6 +156,17 @@ export const useStore = create<State>((set, get) => ({
       });
   },
   closeBrowser: () => set({ browserOpen: false }),
+
+  loadColors: () => {
+    if (get().availableColors.length > 0) return;
+    void executeCommand<CommandResult<{ colors: AvailableColor[] }>>({
+      command: "list_colors",
+      args: {},
+    }).then((res) => {
+      if (res.ok && res.data?.colors) set({ availableColors: res.data.colors });
+    });
+  },
+  setLab: (b) => set({ labMode: b }),
 
   theme: "dark",
   toggleTheme: () =>

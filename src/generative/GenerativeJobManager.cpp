@@ -75,7 +75,21 @@ bool GenerativeJobManager::ensureServiceRunning()
     auto script = locateServiceScript();
     if (! script.existsAsFile()) return false;
 
-    StringArray cmd { "python3", script.getFullPathName() };
+    // Launch via run.sh (it selects the MLX venv python when MOSH_ENABLE_SA3=1),
+    // forwarding the SA3 env so the carved engine can find the model + colours
+    // (App. B). Falls back to system python3 (FakeAdapter) when SA3 is off.
+    auto runSh = script.getParentDirectory().getChildFile ("run.sh");
+    String env;
+    for (auto* key : { "MOSH_ENABLE_SA3", "SA3_MLX_DIR", "COLORRACK_DATA", "SA3_SECONDS",
+                       "SA3_STEPS", "MOSH_SA3_QA", "MOSH_JUDGES_PY", "MOSH_QA_TIMEOUT",
+                       "MOSH_SERVICE_HOST", "MOSH_SERVICE_PORT" })
+        if (auto v = SystemStats::getEnvironmentVariable (key, {}); v.isNotEmpty())
+            env << key << "=" << v.quoted() << " ";
+
+    String shell = runSh.existsAsFile()
+        ? (env + "exec /bin/bash " + runSh.getFullPathName().quoted())
+        : (env + "exec python3 " + script.getFullPathName().quoted());
+    StringArray cmd { "/bin/sh", "-c", shell };
     if (serviceProcess.start (cmd))
     {
         spawnedByUs = true;
@@ -93,11 +107,17 @@ juce::var GenerativeJobManager::capabilities()
     return httpGet ("/capabilities");
 }
 
-juce::String GenerativeJobManager::submitJob (const juce::File& inputWav, const juce::File& outputWav,
+juce::var GenerativeJobManager::listColors()
+{
+    return httpGet ("/colors");
+}
+
+juce::String GenerativeJobManager::submitJob (const juce::String& adapter,
+                                              const juce::File& inputWav, const juce::File& outputWav,
                                               const juce::File& manifest, const juce::var& params)
 {
     auto* body = new DynamicObject();
-    body->setProperty ("adapter", "fake");
+    body->setProperty ("adapter", adapter.isNotEmpty() ? adapter : juce::String ("fake"));
     body->setProperty ("inputWav", inputWav.getFullPathName());
     body->setProperty ("outputWav", outputWav.getFullPathName());
     body->setProperty ("manifest", manifest.getFullPathName());
