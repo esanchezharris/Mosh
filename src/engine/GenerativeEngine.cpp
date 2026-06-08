@@ -58,9 +58,12 @@ namespace mosh
     static FingerprintInputs fingerprintFor (te::Clip* clip, juce::ValueTree layerTree, const juce::String& adapterName)
     {
         FingerprintInputs fp;
+        RenderLayer rl (layerTree);
         auto params = layerTree.getChildWithName (ids::params);
         fp.prompt = params[ids::prompt].toString();
-        fp.colors = RenderLayer (layerTree).getColors();
+        fp.colors = rl.getColors();
+        { auto v = rl.getColorValues(); fp.colorValues.assign (v.begin(), v.end()); }
+        fp.lab = rl.getLab();
         fp.seed = (juce::int64) layerTree[ids::seed];
         fp.modelAdapter = adapterName;
         // Upstream hash = clip identity + a content signature of its source audio,
@@ -78,6 +81,31 @@ namespace mosh
         return fp;
     }
 
+    // Parse a `colors` arg as either ["name", ...] or [{name, value 0–100}, ...] plus an
+    // optional `lab` flag, applying them to the layer (≤3, ordered — 05 §6). Mirrors the
+    // spine command path so the UI Color Rack drives the same model in the app.
+    static void applyColorArgs (RenderLayer& layer, const MoshCommand& cmd, juce::UndoManager* um)
+    {
+        if (cmd.hasArg ("colors"))
+        {
+            juce::StringArray names;
+            juce::Array<int> values;
+            if (auto* arr = cmd.arg ("colors").getArray())
+                for (auto& c : *arr)
+                {
+                    if (auto* o = c.getDynamicObject())
+                    {
+                        names.add (o->getProperty ("name").toString());
+                        values.add (o->hasProperty ("value") ? (int) o->getProperty ("value") : 100);
+                    }
+                    else { names.add (c.toString()); values.add (100); }
+                }
+            layer.setColors (names, values, um);
+        }
+        if (cmd.hasArg ("lab"))
+            layer.setLab (cmd.argBool ("lab"), um);
+    }
+
     void registerGenerativeEngineCommands (DslExecutor& exec, MoshEngine& engine,
                                            GenerativeJobManager& jobs, RenderCache& cache,
                                            AsyncRenderPool* pool)
@@ -91,14 +119,28 @@ namespace mosh
         // The pool runs render jobs off the message thread and calls this back ON the
         // message thread to land the terminal status/artifact on the (re-found) layer.
         if (pool != nullptr)
-            pool->setFinalize ([&engine] (const juce::String& layerId, RenderStatus st, const juce::String& artifact)
+            pool->setFinalize ([&engine] (const juce::String& layerId, RenderStatus st,
+                                          const juce::String& artifact, const juce::var& quality)
             {
                 auto found = findLayer (engine.getEdit(), layerId);
                 if (! found.valid()) return;                       // deleted mid-render
                 RenderLayer layer (found.tree);
                 if (artifact.isNotEmpty()) layer.setCacheArtifact (artifact);
+                if (quality.isObject())                            // judge readout for the UI
+                    found.tree.setProperty (ids::quality, juce::JSON::toString (quality, true), nullptr);
                 layer.setStatus (st);
             });
+
+        // get_colors {} → the Color Rack descriptor (each color's ASTD ceiling — 05 §6)
+        // so the UI can build clamped sliders. Non-blocking; returns [] until the service
+        // is up (the UI retries). Couples the UI to the seam, not the service HTTP.
+        exec.registerCommand ("get_colors", [&jobs] (const MoshCommand&, DslExecutor::Context&) -> MoshResult
+        {
+            auto colors = jobs.getColors();
+            auto* data = new juce::DynamicObject();
+            data->setProperty ("colors", colors.isArray() ? colors : juce::var (juce::Array<juce::var>{}));
+            return MoshResult::success ("colors", juce::StringArray {}, juce::var (data));
+        }, /*transactional*/ false);
 
         // create_render_layer {clip, prompt?, seed?, mode?} → MOSH_RENDERLAYER under the clip
         exec.registerCommand ("create_render_layer", [&engine, layerSeq] (const MoshCommand& cmd, DslExecutor::Context& ctx) -> MoshResult
@@ -117,6 +159,7 @@ namespace mosh
                 rl.getState().setProperty (ids::seed, (juce::int64) cmd.argInt ("seed"), nullptr);
             if (cmd.hasArg ("mode"))
                 rl.setMode (cmd.argString ("mode"));
+            applyColorArgs (rl, cmd, nullptr);   // colors/lab at creation (Color Rack)
             rl.getState().setProperty (ids::inputRef, ids::clipRef (clip->itemID.toString()), nullptr);
 
             clip->state.appendChild (rl.getState(), um);   // travels with the clip; undoable
@@ -127,6 +170,31 @@ namespace mosh
             auto* data = new juce::DynamicObject(); data->setProperty ("id", ref);
             juce::StringArray changed; changed.add (ref);
             return MoshResult::success ("Created render layer", changed, juce::var (data));
+        });
+
+        // set_render_param {layer, prompt?|seed?|mode?|colors?|lab?} → edit the layer's
+        // params (the Color Rack drives this). A change to any fingerprint input marks
+        // the cache dirty so the next render_layer re-renders. Undoable.
+        exec.registerCommand ("set_render_param", [&engine, adapterName] (const MoshCommand& cmd, DslExecutor::Context& ctx) -> MoshResult
+        {
+            auto found = findLayer (engine.getEdit(), cmd.argString ("layer"));
+            if (! found.valid())
+                return MoshResult::failure (error::noSuchLayer, "No such render layer");
+
+            RenderLayer layer (found.tree);
+            auto* um = &ctx.undoManager();
+            if (cmd.hasArg ("prompt")) layer.getState().getOrCreateChildWithName (ids::params, um)
+                                            .setProperty (ids::prompt, cmd.argString ("prompt"), um);
+            if (cmd.hasArg ("seed"))   layer.getState().setProperty (ids::seed, (juce::int64) cmd.argInt ("seed"), um);
+            if (cmd.hasArg ("mode"))   layer.setMode (cmd.argString ("mode"), um);
+            applyColorArgs (layer, cmd, um);
+
+            const auto ref = ids::layerRef (layer.getId());
+            const auto fp = fingerprintFor (found.clip, found.tree, adapterName);
+            if (layer.markDirtyIfChanged (fp, um))
+                ctx.emit (events::layerStatus (ref, "idle"));   // params changed → needs re-render
+            juce::StringArray changed; changed.add (ref);
+            return MoshResult::success ("Set render param", juce::StringArray { ref });
         });
 
         // render_layer {layer} → render through the job service (TIER WALL). NON-
@@ -150,6 +218,8 @@ namespace mosh
             req.fingerprint = fingerprintFor (found.clip, found.tree, adapterName);
             req.prompt = req.fingerprint.prompt;
             req.colors = req.fingerprint.colors;
+            req.colorValues = req.fingerprint.colorValues;
+            req.lab = req.fingerprint.lab;
             req.seed = req.fingerprint.seed;
             req.durationSec = juce::jmax (1.0, pos.getLength().inSeconds());
             if (req.mode == "reimagine")

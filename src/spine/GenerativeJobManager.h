@@ -37,6 +37,11 @@ namespace mosh
         bool ensureServiceRunning (int timeoutMs = 10000);
         bool isHealthy();
 
+        // The adapter's Color Rack descriptor (each color's ASTD ceiling + metadata —
+        // 05 §6). Empty array if the service is down or the adapter has no colors. Does
+        // NOT spawn/block on model load (relies on the pool's startup warmup).
+        juce::var getColors() { return httpGet ("/colors")["colors"]; }
+
         // Submit a render job → jobId ("" on failure). Audio + manifest land in outDir.
         juce::String submit (const RenderRequest&, const juce::File& outDir);
         ServiceJobStatus poll (const juce::String& jobId);

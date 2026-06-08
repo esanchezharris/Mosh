@@ -35,7 +35,8 @@ namespace mosh
         // over the Edit). Must no-op if the layer was deleted mid-render.
         using FinalizeFn = std::function<void (const juce::String& layerId,
                                                RenderStatus status,
-                                               const juce::String& cacheArtifact)>;
+                                               const juce::String& cacheArtifact,
+                                               const juce::var& quality)>;
 
         AsyncRenderPool (DslExecutor& executor, GenerativeJobManager& jobs, RenderCache& cache);
         ~AsyncRenderPool() override;
@@ -60,9 +61,11 @@ namespace mosh
         bool isCancelRequested (const juce::String& layerId);
         void marshalProgress (const juce::String& layerId, double pct01);
         void marshalDone (const juce::String& layerId, const juce::String& cacheKey,
-                          juce::MemoryBlock bytes, const juce::String& wavPath);
+                          juce::MemoryBlock bytes, const juce::String& wavPath,
+                          juce::var quality);
         void marshalTerminal (const juce::String& layerId, RenderStatus status,
                               const juce::String& uiStatus);
+        static juce::var extractQuality (const juce::var& manifest);
 
         DslExecutor&          exec;
         GenerativeJobManager& jobs;

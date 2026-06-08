@@ -822,9 +822,165 @@ button:hover {
   border-radius: 3px;
   z-index: 2;
 }
-.clip-gen:hover {
+.clip-gen:hover,
+.clip-gen.open {
   background: var(--accent);
   color: #0b0f1a;
+}
+
+/* --- Color Rack popover (05 §6) --- */
+.color-rack {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  width: 232px;
+  padding: 8px;
+  background: rgba(11, 15, 26, 0.97);
+  border: 1px solid var(--accent-dim);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  cursor: default;
+}
+.cr-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.cr-modes {
+  display: inline-flex;
+  gap: 4px;
+}
+.cr-mode {
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  color: var(--text-1);
+}
+.cr-mode.on {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.cr-close {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  font-size: 9px;
+  border-radius: 3px;
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--text-1);
+}
+.cr-prompt {
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 11px;
+  padding: 4px 6px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--text-1);
+}
+.cr-colors {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 184px;
+  overflow-y: auto;
+}
+.cr-empty {
+  font-size: 10px;
+  color: var(--text-1);
+  opacity: 0.6;
+  padding: 6px 2px;
+}
+.cr-color {
+  display: grid;
+  grid-template-columns: 70px 1fr 20px;
+  align-items: center;
+  gap: 6px;
+  opacity: 0.72;
+}
+.cr-color.on {
+  opacity: 1;
+}
+.cr-name {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cr-color.on .cr-name {
+  color: var(--accent);
+}
+.cr-color input[type="range"] {
+  width: 100%;
+  accent-color: var(--accent);
+}
+.cr-val {
+  font-family: var(--mono);
+  font-size: 9px;
+  text-align: right;
+  color: var(--text-1);
+}
+.cr-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 2px;
+}
+.cr-lab {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: var(--text-1);
+}
+.cr-render {
+  font-size: 10px;
+  padding: 3px 10px;
+  border-radius: 4px;
+  background: var(--accent);
+  color: #0b0f1a;
+  border: none;
+}
+.cr-render:disabled {
+  opacity: 0.6;
+}
+
+/* --- layer badge: applied colors + judge readout (05 §6/§7) --- */
+.layer-colors {
+  margin-left: 5px;
+  font-size: 8px;
+  opacity: 0.8;
+}
+.layer-quality {
+  margin-left: 5px;
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+.layer-quality .pq {
+  opacity: 0.9;
+}
+.layer-quality .pqd.up {
+  color: var(--ok);
+}
+.layer-quality .pqd.down {
+  color: var(--warn);
+}
+.layer-quality .cache {
+  color: var(--accent);
+}
+.layer-quality .flags {
+  color: var(--warn);
 }
 
 /* playhead + loop */

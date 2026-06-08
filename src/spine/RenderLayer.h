@@ -117,25 +117,37 @@ namespace mosh
             return false;
         }
 
-        // ── Colors (≤3, ordered) — 01 §4.4 ───────────────────────────────────
+        // ── Colors (≤3, ordered) — 01 §4.4 / 05 §6 ───────────────────────────
+        // Each color carries a 0–100 ASTD value (ids::amount). The COLORRACK runtime
+        // maps value→steering α (clamped below quality-collapse; Lab unlocks it). The
+        // names-only overload defaults each value to 100 (explicitly added = full-on).
         // Returns the colors actually stored (capped at maxColors, order preserved).
         juce::StringArray setColors (const juce::StringArray& requested, juce::UndoManager* um = nullptr)
+        {
+            juce::Array<int> values;
+            for (int i = 0; i < requested.size(); ++i) values.add (100);
+            return setColors (requested, values, um);
+        }
+
+        juce::StringArray setColors (const juce::StringArray& requested,
+                                     const juce::Array<int>& values, juce::UndoManager* um = nullptr)
         {
             auto params = state.getOrCreateChildWithName (ids::params, um);
             auto colorsTree = params.getOrCreateChildWithName (ids::colors, um);
             colorsTree.removeAllChildren (um);
 
             juce::StringArray accepted;
-            for (const auto& c : requested)
+            for (int i = 0; i < requested.size(); ++i)
             {
                 if (accepted.size() >= maxColors)
                     break;
-                if (c.isEmpty())
+                if (requested[i].isEmpty())
                     continue;
                 juce::ValueTree col (ids::color);
-                col.setProperty (ids::name, c, um);
+                col.setProperty (ids::name, requested[i], um);
+                col.setProperty (ids::amount, i < values.size() ? values[i] : 100, um);
                 colorsTree.appendChild (col, um);
-                accepted.add (c);
+                accepted.add (requested[i]);
             }
             return accepted;
         }
@@ -148,6 +160,27 @@ namespace mosh
             for (auto c : colorsTree)
                 out.add (c[ids::name].toString());
             return out;
+        }
+
+        // Per-color 0–100 values, parallel to getColors() (defaults to 100 if absent).
+        juce::Array<int> getColorValues() const
+        {
+            juce::Array<int> out;
+            auto params = state.getChildWithName (ids::params);
+            auto colorsTree = params.getChildWithName (ids::colors);
+            for (auto c : colorsTree)
+                out.add ((int) c.getProperty (ids::amount, 100));
+            return out;
+        }
+
+        // Lab mode (unlocks color α past the ASTD clamp — 05 §6). Stored on params.
+        bool getLab() const
+        {
+            return (bool) state.getChildWithName (ids::params).getProperty (ids::lab, false);
+        }
+        void setLab (bool lab, juce::UndoManager* um = nullptr)
+        {
+            state.getOrCreateChildWithName (ids::params, um).setProperty (ids::lab, lab, um);
         }
 
     private:

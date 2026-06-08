@@ -72,6 +72,27 @@ namespace mosh
                                         : stored;
                     lo->setProperty ("status", status);
                     lo->setProperty ("mode", child[ids::mode].toString());
+
+                    // Color Rack state (name + 0–100 value), Lab flag, prompt — so the
+                    // UI reflects the steering params (05 §6).
+                    auto params = child.getChildWithName (ids::params);
+                    juce::Array<juce::var> colors;
+                    for (auto col : params.getChildWithName (ids::colors))
+                    {
+                        auto* co = new juce::DynamicObject();
+                        co->setProperty ("name", col[ids::name].toString());
+                        co->setProperty ("value", (int) col.getProperty (ids::amount, 100));
+                        colors.add (juce::var (co));
+                    }
+                    lo->setProperty ("colors", colors);
+                    lo->setProperty ("lab", (bool) params.getProperty (ids::lab, false));
+                    lo->setProperty ("prompt", params[ids::prompt].toString());
+
+                    // Judge readout (pq/pqBase/flags/initLatentCache) stored at render
+                    // time — surfaced as a subtle quality signal (05 §7).
+                    if (child.hasProperty (ids::quality))
+                        lo->setProperty ("quality", juce::JSON::parse (child[ids::quality].toString()));
+
                     renderLayers.add (juce::var (lo));
                 }
         o->setProperty ("renderLayers", renderLayers);

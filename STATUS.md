@@ -16,7 +16,7 @@ at `E:\comfy4_models\unet`). No MLX needed.
 
 | Deliverable | What | Status |
 |---|---|---|
-| **CUDA SA3 adapter** | `service/adapters/stable_audio3_adapter.py` — real **generate** (text→audio) + **reimagine** (audio-to-audio via SA3 `init_audio`+`init_noise_level`); per-step progress + cooperative cancel; 24-bit stereo WAV; prompt-text "colors" (real steering deferred). Env-selected (`MOSH_ADAPTER=stable_audio_3`), launched in the ComfyUI venv (`MOSH_SERVICE_PYTHON`). | ✅ verified from the UI: generate 4 s stereo in ~5 s, reimagine in ~1 s; manifest `adapter=stable_audio_3`, real audio (1 MB vs the 88 KB fake tone) |
+| **CUDA SA3 adapter** | `service/adapters/stable_audio3_adapter.py` — real **generate** (text→audio) + **reimagine** (audio-to-audio via SA3 `init_audio`+`init_noise_level`); per-step progress + cooperative cancel; 24-bit stereo WAV (peak-normalized); **real activation-steering colors + init-latent cache + judge readout** (see the section below); env-selected (`MOSH_ADAPTER=stable_audio_3`), launched in the ComfyUI venv (`MOSH_SERVICE_PYTHON`). | ✅ verified from the UI: generate 4 s stereo in ~5 s, reimagine in ~1 s; manifest `adapter=stable_audio_3`, real audio (1 MB vs the 88 KB fake tone) |
 | **Async non-blocking render** | `src/spine/AsyncRenderPool` — `render_layer` returns immediately ("rendering"); a worker submits/polls off the message thread and marshals the result + progress events back. Required because SA3 loads ~minutes (HDD) and the UI must stay live. | ✅ a command issued *during* a render still returns in ~180 ms; the model-load warmup no longer freezes the UI |
 | **PC UI** | `WebViewHost` opens the system **browser** to the local server by default (the embedded WebView2 renders blank here); `MOSH_UI_MODE=webview` opts into the in-app window; `=none` is headless. The React UI + bridge.ts are reused unchanged (HTTP transport). | ✅ `uiConnected=True` — a real browser loads the UI and drives the backend |
 | **Concurrent HTTP server** | `HttpBridge` is now a bounded **thread pool** (12–24 workers) with a short idle-read timeout — a real browser opens many parallel sockets that a single accept loop can't serve. Marshaling uses shared-ptr + timeout for safe shutdown. | ✅ `diag 10/10` while a real browser is connected (was 0/N single-threaded) |
@@ -24,13 +24,33 @@ at `E:\comfy4_models\unet`). No MLX needed.
 | **Windows audio** | App opens a default WASAPI output (`engine.getDeviceManager().initialise(0,2)` in `Main.cpp`, app-only). | ✅ transport plays, position advances on the audio clock; accepted SA3 takes audible |
 
 Run it: `pwsh -File run-mosh-pc.ps1` (sets `MOSH_ADAPTER=stable_audio_3` + the ComfyUI venv python +
-the model dir, launches Mosh; UI opens in the browser). Env reference: `.env.example`. Full suite still
-**326 assertions / 44 cases green** (Fake adapter is the default, so CI/tests are unaffected).
+the model dir, launches Mosh; UI opens in the browser). Env reference: `.env.example`. Full suite now
+**338 assertions / 47 cases green** (Fake adapter is the default, so CI/tests are unaffected).
 
-**Deferred (documented, not built):** real activation-steering "colors" (needs `COLORRACK_DATA`, not on
-this machine), the judge-panel quality readout (needs the judge venv), the init-latent cache (perf), and
-the in-app WebView2 render (blank here — a JUCE-8/Windows limitation; macOS WKWebView is the path).
-Note: the ~234 s model load is from an HDD (`E:`); copying the model to the SSD would cut it sharply.
+**Deferred (documented, not built):** the in-app WebView2 render (blank here — a JUCE-8/Windows
+limitation; macOS WKWebView is the path), and a *learned* judge (audiobox-aesthetics in a separate venv).
+Note: the ~228 s model load is from an HDD (`E:`); copying the model to the SSD would cut it sharply.
+
+## DEFERRED GENERATIVE ITEMS — COMPLETED (2026-06-08): real colors, init-latent cache, judge
+
+The COLORRACK calibration (`colors-…zip`, now bundled at `service/colors/`) unblocked the three SA3
+items the PC build had deferred. All three are wired through the adapter and proven against the REAL
+CUDA model (`service/scripts/sa3_e2e.py`, 7/7 groups) plus a CPU glue test and 3 new C++ tests.
+
+| Item | What | Verified |
+|---|---|---|
+| **Real "colors" (steering)** | COLORRACK `resolve_steers(colors, lab)` → `[(peak_layer, α, vec[1536])]` (ASTD-clamped; Lab unlocks). The adapter injects `α·vec` into the DiT's `transformer.layers[peak_layer]` output via a forward hook for one `generate()` (recon-verified chain `sm.model.model.model.transformer.layers`, 24 blocks @ 1536). Replaces the prompt-text approximation. `≤3` colors, `no_stack_with` rejected, polarity respected — all by COLORRACK. | ✅ smoke: hook fires per-step, `grit@100` decorrelates output (corr 1.0→0.03), no collapse. e2e: `grit@80`→α 0.18, `air@70`→α 0.032 (exact ASTD math); no-colors→empty steering; `no_stack_with`→rejected. |
+| **Init-latent cache** | Caches the source VAE-encode keyed by source-content+region+size+dtype (intercepts `_encode_audio_input`, no library patch). Changing only seed/colors/nl reuses latents; manifest reports `initLatentCache: hit|miss`. | ✅ e2e: reimagine seed-only change → **HIT**; different source → MISS. |
+| **Judge / quality readout** | `service/quality_readout.py` — heuristic DSP proxy (numpy+soundfile): loudness/clipping/dynamics/spectral/phase/silence → `pq` ∈ [0,10] + `flags`; reimagine also scores the source (`pqBase`) for a delta. In the manifest, surfaced on the layer (snapshot `quality`), shown on the UI badge. A learned audiobox judge is the deferred upgrade (separate venv, `MOSH_JUDGE`). | ✅ e2e: generate pq 6.0; reimagine pq 7.59 / pqBase 6.28 / Δ +1.31; correctly flags SA3 hard-clip → added peak-normalization. |
+
+**Plumbing:** per-color value (0–100) + Lab now flow through `RenderLayer` → the **full fingerprint**
+(a slider move or Lab toggle re-renders — locked by 2 new `[fingerprint]` tests) → `submit` as
+`[{name,value}]` + `lab` → the adapter. New seam commands: **`get_colors`** (Color Rack descriptor with
+ASTD ceilings) + an engine **`set_render_param`**. The snapshot surfaces each layer's colors/lab/prompt +
+the judge `quality`. **UI Color Rack** (`ui/src/components/Timeline.tsx`): the clip ✦ opens a popover —
+mode toggle, prompt, a 0–100 slider per color, Lab toggle; the layer badge shows the colors + `pq`/Δ/flags
++ a ⚡ on a cache hit. Knobs: `MOSH_SA3_STEERING`, `MOSH_JUDGE`, `MOSH_SA3_PEAK_DBFS`, `MOSH_SA3_LATENT_CACHE`
+(see `.env.example`).
 
 ## Verifiability map (important)
 

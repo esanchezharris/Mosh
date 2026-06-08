@@ -95,9 +95,20 @@ namespace mosh
         auto* b = new juce::DynamicObject();
         b->setProperty ("mode", req.mode);
         b->setProperty ("prompt", req.prompt);
+        // Colors as ordered {name, value 0–100} objects so the SA3 adapter's COLORRACK
+        // runtime can map them to steering α (the FakeAdapter ignores them). The `lab`
+        // flag unlocks α past the ASTD clamp. (Older string-list form is still accepted
+        // by the adapter for back-compat.)
         juce::Array<juce::var> colours;
-        for (auto& c : req.colors) colours.add (c);
+        for (int i = 0; i < req.colors.size(); ++i)
+        {
+            auto* co = new juce::DynamicObject();
+            co->setProperty ("name", req.colors[i]);
+            co->setProperty ("value", i < (int) req.colorValues.size() ? req.colorValues[(size_t) i] : 100);
+            colours.add (juce::var (co));
+        }
         b->setProperty ("colors", colours);
+        b->setProperty ("lab", req.lab);
         b->setProperty ("seed", (juce::int64) req.seed);
         b->setProperty ("cacheKey", req.cacheKey());
         b->setProperty ("outDir", outDir.getFullPathName());

@@ -29,6 +29,8 @@ namespace mosh
         auto params = layer.getState().getChildWithName (ids::params);
         fp.prompt = params[ids::prompt].toString();
         fp.colors = layer.getColors();
+        { auto v = layer.getColorValues(); fp.colorValues.assign (v.begin(), v.end()); }
+        fp.lab = layer.getLab();
         fp.seed = (juce::int64) layer.getState()[ids::seed];
         fp.modelAdapter = adapterName;
         fp.modelVersion = cmd.argString ("modelVersion", "0");
@@ -48,6 +50,30 @@ namespace mosh
         return fp;
     }
 
+    // Parse a `colors` arg as either ["name", ...] or [{name, value 0–100}, ...] plus
+    // an optional `lab` flag, applying them to the layer (≤3, ordered — 05 §6).
+    static void applyColorArgs (RenderLayer& layer, const MoshCommand& cmd, juce::UndoManager* um)
+    {
+        if (cmd.hasArg ("colors"))
+        {
+            juce::StringArray names;
+            juce::Array<int> values;
+            if (auto* arr = cmd.arg ("colors").getArray())
+                for (auto& c : *arr)
+                {
+                    if (auto* o = c.getDynamicObject())
+                    {
+                        names.add (o->getProperty ("name").toString());
+                        values.add (o->hasProperty ("value") ? (int) o->getProperty ("value") : 100);
+                    }
+                    else { names.add (c.toString()); values.add (100); }
+                }
+            layer.setColors (names, values, um);
+        }
+        if (cmd.hasArg ("lab"))
+            layer.setLab (cmd.argBool ("lab"), um);
+    }
+
     void registerGenerativeCommands (DslExecutor& exec, RenderLayerStore& store,
                                      GenerativeModelAdapter& adapter, RenderCache& cache)
     {
@@ -60,14 +86,7 @@ namespace mosh
             if (cmd.hasArg ("prompt")) layer.getState().getOrCreateChildWithName (ids::params, um)
                                             .setProperty (ids::prompt, cmd.argString ("prompt"), um);
             if (cmd.hasArg ("seed"))   layer.getState().setProperty (ids::seed, (juce::int64) cmd.argInt ("seed"), um);
-            if (cmd.hasArg ("colors"))
-            {
-                juce::StringArray cols;
-                const auto colorsVar = cmd.arg ("colors");
-                if (auto* arr = colorsVar.getArray())
-                    for (auto& c : *arr) cols.add (c.toString());
-                layer.setColors (cols, um);
-            }
+            applyColorArgs (layer, cmd, um);
             const auto ref = ids::layerRef (layer.getId());
             ctx.emit (events::layerStatus (ref, "idle"));
             auto* data = new juce::DynamicObject(); data->setProperty ("id", ref);
@@ -86,14 +105,7 @@ namespace mosh
                                              .setProperty (ids::prompt, cmd.argString ("prompt"), um);
             if (cmd.hasArg ("seed"))   layer->getState().setProperty (ids::seed, (juce::int64) cmd.argInt ("seed"), um);
             if (cmd.hasArg ("mode"))   layer->setMode (cmd.argString ("mode"), um);
-            if (cmd.hasArg ("colors"))
-            {
-                juce::StringArray cols;
-                const auto colorsVar = cmd.arg ("colors");
-                if (auto* arr = colorsVar.getArray())
-                    for (auto& c : *arr) cols.add (c.toString());
-                layer->setColors (cols, um);
-            }
+            applyColorArgs (*layer, cmd, um);
             // A param change may invalidate the cache → mark dirty if so.
             const auto fp = fingerprintFor (*layer, cmd, adapter.name());
             const bool dirtied = layer->markDirtyIfChanged (fp, um);
@@ -117,6 +129,8 @@ namespace mosh
             req.fingerprint = fingerprintFor (*layer, cmd, adapter.name());
             req.prompt = req.fingerprint.prompt;
             req.colors = req.fingerprint.colors;
+            req.colorValues = req.fingerprint.colorValues;
+            req.lab = req.fingerprint.lab;
             req.seed = req.fingerprint.seed;
 
             ctx.emit (events::layerStatus (ref, "rendering"));

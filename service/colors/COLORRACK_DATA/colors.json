@@ -1,0 +1,95 @@
+{
+  "schema": 1,
+  "lab_alpha_max": 0.4,
+  "compose": {
+    "a2": 0.25,
+    "a3": 0.2
+  },
+  "colors": {
+    "brightness": {
+      "vec_path": "vecs/brightness.npy",
+      "peak_layer": 4,
+      "astd_max": 0.3,
+      "more_sign": 1.0,
+      "verdict": "CLEAN",
+      "no_stack_with": [],
+      "source": "axis_brightness"
+    },
+    "epic": {
+      "vec_path": "vecs/epic.npy",
+      "peak_layer": 17,
+      "astd_max": 0.3,
+      "more_sign": 1.0,
+      "verdict": "CLEAN",
+      "no_stack_with": [],
+      "source": "axis_epic"
+    },
+    "distortion": {
+      "vec_path": "vecs/distortion.npy",
+      "peak_layer": 17,
+      "astd_max": 0.3,
+      "more_sign": 1.0,
+      "verdict": "WEAK",
+      "no_stack_with": [],
+      "source": "axis_distortion"
+    },
+    "futuristic": {
+      "vec_path": "vecs/futuristic.npy",
+      "peak_layer": 4,
+      "astd_max": 0.3,
+      "more_sign": 1.0,
+      "verdict": "CLEAN",
+      "no_stack_with": [],
+      "source": "axis_futuristic"
+    },
+    "tension": {
+      "vec_path": "vecs/tension.npy",
+      "peak_layer": 4,
+      "astd_max": 0.3,
+      "more_sign": -1.0,
+      "verdict": "CLEAN",
+      "no_stack_with": [],
+      "source": "axis_tension"
+    },
+    "grit": {
+      "vec_path": "vecs/grit.npy",
+      "peak_layer": 14,
+      "astd_max": 0.3,
+      "more_sign": 1.0,
+      "verdict": "REAL",
+      "no_stack_with": [],
+      "source": "myaxis_grit"
+    },
+    "air": {
+      "vec_path": "vecs/air.npy",
+      "peak_layer": 17,
+      "astd_max": 0.08,
+      "more_sign": 1.0,
+      "verdict": "REAL",
+      "no_stack_with": [],
+      "source": "myaxis_air"
+    },
+    "drum_aggression": {
+      "vec_path": "vecs/drum_aggression.npy",
+      "peak_layer": 8,
+      "astd_max": 0.4,
+      "more_sign": 1.0,
+      "verdict": "CLEAN",
+      "no_stack_with": [
+        "grid_tightness"
+      ],
+      "source": "loc2_drum_aggression"
+    },
+    "grid_tightness": {
+      "vec_path": "vecs/grid_tightness.npy",
+      "peak_layer": 17,
+      "astd_max": 0.4,
+      "more_sign": 1.0,
+      "verdict": "CLEAN",
+      "no_stack_with": [
+        "drum_aggression"
+      ],
+      "source": "loc2_grid_tightness"
+    }
+  }
+}

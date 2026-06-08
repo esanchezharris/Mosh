@@ -53,10 +53,40 @@ export type RenderLayerStatus =
   | "error"
   | "frozen";
 
+export interface ColorSetting {
+  name: string;
+  value: number; // 0–100 ASTD slider (50 = neutral)
+}
+
+// The judge readout carried on a rendered layer (05 §7). All optional — a learned
+// judge or no judge leaves fields absent.
+export interface LayerQuality {
+  pq?: number; // production quality 0–10 (heuristic DSP proxy v0)
+  pqBase?: number; // the reimagine source's pq (for a delta)
+  pqDelta?: number; // pq - pqBase
+  flags?: string[]; // human-readable signal-hygiene flags
+  initLatentCache?: "hit" | "miss";
+  steering?: { layer: number; alpha: number }[];
+}
+
+// A Color Rack color's descriptor from the service (05 §6): the ASTD ceiling + meta.
+export interface ColorDescriptor {
+  name: string;
+  astd_max: number;
+  peak_layer: number;
+  more_sign: number;
+  verdict: string;
+  no_stack_with: string[];
+}
+
 export interface RenderLayerState {
   id: string;
   status: RenderLayerStatus;
   mode?: string; // e.g. "reimagine", "generate"
+  prompt?: string;
+  colors?: ColorSetting[];
+  lab?: boolean;
+  quality?: LayerQuality;
 }
 
 export interface TrackState {

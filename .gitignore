@@ -52,6 +52,8 @@ Thumbs.db
 .playwright-mcp/
 /mosh-*.png
 
-# SA3 standalone-smoke output (generated WAVs) + local env
+# SA3 standalone smoke / e2e output (generated WAVs) + local env
 service/scripts/_sa3_smoke_out/
+service/scripts/_sa3_e2e_out/
 .env
+.gstack/

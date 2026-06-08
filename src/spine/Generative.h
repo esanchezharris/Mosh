@@ -25,7 +25,9 @@ namespace mosh
     {
         juce::String      mode;       // "generate" | "reimagine"
         juce::String      prompt;
-        juce::StringArray colors;     // ordered, ≤3
+        juce::StringArray colors;     // ordered, ≤3 (names)
+        std::vector<int>  colorValues; // 0–100 per color, parallel to colors (05 §6)
+        bool              lab = false; // Lab mode unlocks color α past the ASTD clamp
         juce::int64       seed = 0;
         double            nl = 0.0;   // re-noise level (reimagine; ≤0.5)
         FingerprintInputs fingerprint;

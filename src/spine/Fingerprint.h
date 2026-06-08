@@ -101,6 +101,8 @@ namespace mosh
         // Semantic controls
         juce::String prompt;
         juce::StringArray colors;         // ordered, ≤3 (01 §4.4)
+        std::vector<int>  colorValues;    // 0–100 per color, parallel to colors (05 §6)
+        bool         lab = false;         // Lab mode unlocks color α past the ASTD clamp
         juce::int64  seed = 0;
 
         // Sampling hyperparameters
@@ -112,6 +114,13 @@ namespace mosh
         juce::String safetyMappingVersion;
 
         juce::String cacheKey() const { return build().cacheKey(); }
+
+        static juce::StringArray intList (const std::vector<int>& xs)
+        {
+            juce::StringArray s;
+            for (int x : xs) s.add (juce::String (x));
+            return s;
+        }
 
         FingerprintBuilder build() const
         {
@@ -129,6 +138,8 @@ namespace mosh
              .add ("serviceBuild", serviceBuild)
              .add ("prompt", prompt)
              .addList ("colors", colors)
+             .addList ("colorValues", intList (colorValues))
+             .add ("lab", lab ? 1 : 0)
              .add ("seed", (juce::int64) seed)
              .add ("cfg", cfg)
              .add ("steps", steps)

@@ -73,6 +73,26 @@ TEST_CASE ("Fingerprint is order-sensitive for colors (earlier dominates)", "[fi
     REQUIRE (a.cacheKey() != b.cacheKey());
 }
 
+TEST_CASE ("Fingerprint includes per-color VALUES (a slider move re-renders)", "[fingerprint]")
+{
+    // Same colors, different ASTD slider values → DIFFERENT cache key. A real steering
+    // alpha depends on the value, so reusing the cache across values would be wrong.
+    auto base = baseInputs();
+    auto a = base; a.colorValues = { 80, 50 };
+    auto b = base; b.colorValues = { 40, 50 };
+    REQUIRE (a.cacheKey() != b.cacheKey());
+    REQUIRE (a.cacheKey() != base.cacheKey());            // base has no values
+    auto c = base; c.colorValues = { 80, 50 };
+    REQUIRE (a.cacheKey() == c.cacheKey());               // identical values → identical key
+}
+
+TEST_CASE ("Fingerprint includes the Lab flag (unlocked α re-renders)", "[fingerprint]")
+{
+    auto a = baseInputs(); a.lab = false;
+    auto b = baseInputs(); b.lab = true;
+    REQUIRE (a.cacheKey() != b.cacheKey());
+}
+
 TEST_CASE ("Fingerprint numeric canonicalization treats 1 and 1.0 identically", "[fingerprint]")
 {
     FingerprintBuilder x; x.add ("v", 1.0);

@@ -28,7 +28,8 @@ namespace mosh::ids
     MOSH_DECLARE_ID (colors)               // COLORS child tree (≤3, ordered — 01 §4.4)
     MOSH_DECLARE_ID (color)                // a single COLOR child
     MOSH_DECLARE_ID (name)
-    MOSH_DECLARE_ID (amount)
+    MOSH_DECLARE_ID (amount)               // per-color value (0–100 ASTD slider — 05 §6)
+    MOSH_DECLARE_ID (lab)                  // Lab mode: unlock color α past the ASTD clamp
     MOSH_DECLARE_ID (cfg)
     MOSH_DECLARE_ID (steps)
     MOSH_DECLARE_ID (nl)                   // re-imagine re-noise level (≤0.5 — 05)
@@ -40,6 +41,7 @@ namespace mosh::ids
     MOSH_DECLARE_ID (status)               // empty|queued|rendering|ready|error|dirty
     MOSH_DECLARE_ID (createdBy)            // "user" | (future) "monster"
     MOSH_DECLARE_ID (userKept)
+    MOSH_DECLARE_ID (quality)              // judge readout JSON (pq/pqBase/flags — 05 §7)
 
 #undef MOSH_DECLARE_ID
 

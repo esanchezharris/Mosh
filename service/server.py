@@ -235,6 +235,13 @@ class MoshServiceHandler(BaseHTTPRequestHandler):
             self._send_json(200, {"capabilities": ADAPTER.health()})
             return
 
+        # The Color Rack descriptor: each color's ASTD ceiling + metadata so the UI can
+        # clamp its 0–100 sliders (05 §6). Adapters without semantic colors return [].
+        if path == "/colors":
+            colors = ADAPTER.colors() if hasattr(ADAPTER, "colors") else []
+            self._send_json(200, {"colors": colors})
+            return
+
         job_id = self._job_id_from_path(path)
         if job_id is not None:
             record = JOBS.get(job_id)

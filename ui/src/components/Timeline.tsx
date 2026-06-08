@@ -22,6 +22,7 @@ import {
   executeCommand,
   subscribe,
   type ClipState,
+  type ColorDescriptor,
   type RenderLayerState,
   type TrackState,
 } from "../bridge";
@@ -30,6 +31,50 @@ import { beatsPerBar, secPerBar, secPerBeat } from "../timeutil";
 
 const LANE_HEIGHT = 92; // must match .lane height in CSS
 const RULER_HEIGHT = 28;
+
+// --- Color Rack descriptor (05 §6) ------------------------------------------
+// Fetched ONCE through the seam (the `get_colors` command → service `/colors`),
+// shared by every clip's rack. The SA3 service warms up for a few seconds at launch,
+// so retry until the descriptor is non-empty. (A non-SA3 backend returns [] and the
+// rack simply shows no colors.) The UI never talks to the service directly.
+let _colorCache: ColorDescriptor[] | null = null;
+let _colorFetching = false;
+const _colorSubs = new Set<() => void>();
+
+function fetchColorsOnce() {
+  if (_colorFetching || _colorCache) return;
+  _colorFetching = true;
+  const attempt = async (n: number) => {
+    try {
+      const res = await executeCommand("get_colors", {});
+      const cols = (res.data?.colors as ColorDescriptor[] | undefined) ?? [];
+      if (cols.length > 0) {
+        _colorCache = cols;
+        _colorSubs.forEach((f) => f());
+        return;
+      }
+    } catch {
+      /* service not up yet — retry below */
+    }
+    if (n < 30) window.setTimeout(() => void attempt(n + 1), 1500);
+    else _colorFetching = false;
+  };
+  void attempt(0);
+}
+
+function useColorRack(): ColorDescriptor[] {
+  const [, force] = useState(0);
+  useEffect(() => {
+    if (_colorCache) return;
+    fetchColorsOnce();
+    const sub = () => force((x) => x + 1);
+    _colorSubs.add(sub);
+    return () => {
+      _colorSubs.delete(sub);
+    };
+  }, []);
+  return _colorCache ?? [];
+}
 
 // --- Ruler ------------------------------------------------------------------
 
@@ -181,22 +226,38 @@ function ClipView({
     void executeCommand("split_clip", { clip: clip.id, at });
   };
 
-  // Tier-B generate: create a RenderLayer on this clip and render it through the
-  // out-of-process job service (TIER WALL). The result lands non-destructively
-  // via accept (badge buttons). Blocks ~a few seconds on a cache miss (FakeAdapter).
+  // Tier-B generate via the COLOR RACK (05 §6): pick a prompt + ASTD-clamped colors
+  // (+ Lab) on this clip, then create a RenderLayer and render it through the out-of-
+  // process job service (TIER WALL). Colors map to real SA3 activation steering in the
+  // adapter. The result lands non-destructively via accept (badge buttons).
+  const colorDescriptors = useColorRack();
+  const [rackOpen, setRackOpen] = useState(false);
   const [generating, setGenerating] = useState(false);
-  const generate = async (e: React.MouseEvent) => {
-    e.stopPropagation();
+  const [mode, setMode] = useState<"reimagine" | "generate">("reimagine");
+  const [prompt, setPrompt] = useState("");
+  const [lab, setLab] = useState(false);
+  const [vals, setVals] = useState<Record<string, number>>({}); // name → 0..100 (50 = neutral)
+
+  const valFor = (n: string) => vals[n] ?? 50;
+  const activeColors = colorDescriptors
+    .map((c) => ({ name: c.name, value: valFor(c.name) }))
+    .filter((c) => c.value !== 50)
+    .slice(0, 3); // composition cap (05 §6)
+
+  const render = async () => {
     if (generating) return;
     setGenerating(true);
     try {
       const res = await executeCommand("create_render_layer", {
         clip: clip.id,
-        prompt: "reimagine",
-        mode: "reimagine",
+        mode,
+        prompt: prompt || mode,
+        colors: activeColors,
+        lab,
       });
       const layerId = res.data?.id as string | undefined;
       if (layerId) await executeCommand("render_layer", { layer: layerId });
+      setRackOpen(false);
     } finally {
       setGenerating(false);
     }
@@ -222,14 +283,136 @@ function ClipView({
       </div>
       <div className="clip-label">{clip.id.replace(/^clip:/, "")}</div>
       <button
-        className="clip-gen"
-        title="Generate (Tier-B render layer)"
+        className={`clip-gen ${rackOpen ? "open" : ""}`}
+        title="Color Rack (Tier-B generate / reimagine with steering)"
         onMouseDown={(e) => e.stopPropagation()}
-        onClick={generate}
+        onClick={(e) => {
+          e.stopPropagation();
+          setRackOpen((o) => !o);
+        }}
       >
         {generating ? "…" : "✦"}
       </button>
+      {rackOpen && (
+        <ColorRack
+          descriptors={colorDescriptors}
+          mode={mode}
+          setMode={setMode}
+          prompt={prompt}
+          setPrompt={setPrompt}
+          lab={lab}
+          setLab={setLab}
+          valFor={valFor}
+          setVals={setVals}
+          activeCount={activeColors.length}
+          generating={generating}
+          onRender={render}
+          onClose={() => setRackOpen(false)}
+        />
+      )}
       <div className="clip-trim right" onMouseDown={(e) => beginDrag("trim-r", e)} />
+    </div>
+  );
+}
+
+// --- Color Rack popover -----------------------------------------------------
+
+function ColorRack({
+  descriptors,
+  mode,
+  setMode,
+  prompt,
+  setPrompt,
+  lab,
+  setLab,
+  valFor,
+  setVals,
+  activeCount,
+  generating,
+  onRender,
+  onClose,
+}: {
+  descriptors: ColorDescriptor[];
+  mode: "reimagine" | "generate";
+  setMode: (m: "reimagine" | "generate") => void;
+  prompt: string;
+  setPrompt: (p: string) => void;
+  lab: boolean;
+  setLab: (b: boolean) => void;
+  valFor: (n: string) => number;
+  setVals: (f: (s: Record<string, number>) => Record<string, number>) => void;
+  activeCount: number;
+  generating: boolean;
+  onRender: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      className="color-rack"
+      onMouseDown={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => e.stopPropagation()}
+    >
+      <div className="cr-head">
+        <div className="cr-modes">
+          {(["reimagine", "generate"] as const).map((m) => (
+            <button
+              key={m}
+              className={`cr-mode ${mode === m ? "on" : ""}`}
+              onClick={() => setMode(m)}
+            >
+              {m}
+            </button>
+          ))}
+        </div>
+        <button className="cr-close" title="Close" onClick={onClose}>
+          ✕
+        </button>
+      </div>
+      <input
+        className="cr-prompt"
+        placeholder="prompt…"
+        value={prompt}
+        onChange={(e) => setPrompt(e.target.value)}
+      />
+      <div className="cr-colors">
+        {descriptors.length === 0 && (
+          <div className="cr-empty">colors loading… (model service warming up)</div>
+        )}
+        {descriptors.map((c) => {
+          const v = valFor(c.name);
+          const active = v !== 50;
+          const atCap = !active && activeCount >= 3;
+          return (
+            <div key={c.name} className={`cr-color ${active ? "on" : ""}`}>
+              <span className="cr-name" title={`${c.verdict} · peak L${c.peak_layer} · ASTD≤${c.astd_max}`}>
+                {c.name}
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={v}
+                disabled={atCap}
+                onChange={(e) =>
+                  setVals((s) => ({ ...s, [c.name]: Number(e.target.value) }))
+                }
+              />
+              <span className="cr-val">{active ? v : "·"}</span>
+            </div>
+          );
+        })}
+      </div>
+      <div className="cr-foot">
+        <label className="cr-lab" title="Unlock color strength past the quality-safe clamp">
+          <input type="checkbox" checked={lab} onChange={(e) => setLab(e.target.checked)} />
+          Lab
+        </label>
+        <button className="cr-render" onClick={onRender} disabled={generating}>
+          {generating
+            ? "rendering…"
+            : `render${activeCount ? ` · ${activeCount} color${activeCount > 1 ? "s" : ""}` : ""}`}
+        </button>
+      </div>
     </div>
   );
 }
@@ -265,12 +448,35 @@ function LayerBadges({
     <div className="layer-badges">
       {layers.map((l) => {
         const p = progress[l.id];
+        const q = l.quality;
         return (
           <span key={l.id} className={`layer-badge ${l.status}`}>
             {l.mode ?? "layer"}
             {l.status === "rendering" && p
               ? ` ${Math.round(p.pct)}% · ${p.etaSec.toFixed(1)}s`
               : ` · ${l.status}`}
+            {l.colors && l.colors.length > 0 && (
+              <span className="layer-colors">
+                {l.colors.map((c) => `${c.name} ${c.value}`).join(" · ")}
+                {l.lab ? " · lab" : ""}
+              </span>
+            )}
+            {l.status === "ready" && q && (
+              <span
+                className="layer-quality"
+                title={(q.flags && q.flags.length ? q.flags : ["no DSP flags"]).join("\n") + "\n(heuristic DSP readout)"}
+              >
+                {typeof q.pq === "number" && <span className="pq">pq {q.pq.toFixed(1)}</span>}
+                {typeof q.pqDelta === "number" && (
+                  <span className={`pqd ${q.pqDelta >= 0 ? "up" : "down"}`}>
+                    {q.pqDelta >= 0 ? "▲" : "▼"}
+                    {Math.abs(q.pqDelta).toFixed(1)}
+                  </span>
+                )}
+                {q.initLatentCache === "hit" && <span className="cache" title="init-latent cache hit">⚡</span>}
+                {q.flags && q.flags.length > 0 && <span className="flags">⚠{q.flags.length}</span>}
+              </span>
+            )}
             {l.status === "ready" && (
               <span className="layer-actions">
                 <button

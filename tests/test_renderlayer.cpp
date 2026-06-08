@@ -78,3 +78,25 @@ TEST_CASE ("RenderLayer enforces the ≤3 ordered color cap (01 §4.4)", "[rende
     REQUIRE (again.size() == 2);
     REQUIRE (rl.getColors().size() == 2);
 }
+
+TEST_CASE ("RenderLayer stores per-color values + the Lab flag (05 §6)", "[renderlayer]")
+{
+    auto rl = RenderLayer::create ("c");
+
+    // Names-only overload defaults each value to 100 (explicitly added = full-on).
+    rl.setColors ({ "grit", "air" });
+    REQUIRE (rl.getColorValues().size() == 2);
+    REQUIRE (rl.getColorValues()[0] == 100);
+
+    // Values overload stores them parallel to the names.
+    rl.setColors ({ "grit", "air", "epic" }, { 80, 30, 65 });
+    REQUIRE (rl.getColors().size() == 3);
+    REQUIRE (rl.getColorValues()[0] == 80);
+    REQUIRE (rl.getColorValues()[1] == 30);
+    REQUIRE (rl.getColorValues()[2] == 65);
+
+    // Lab flag defaults false, round-trips.
+    REQUIRE_FALSE (rl.getLab());
+    rl.setLab (true);
+    REQUIRE (rl.getLab());
+}

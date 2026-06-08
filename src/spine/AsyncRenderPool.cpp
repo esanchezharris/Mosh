@@ -162,7 +162,8 @@ namespace mosh
                         juce::File wav (wavPath);
                         if (wav.existsAsFile())
                             wav.loadFileAsData (bytes);
-                        marshalDone (job.layerId, job.cacheKey, std::move (bytes), wavPath);
+                        marshalDone (job.layerId, job.cacheKey, std::move (bytes), wavPath,
+                                     extractQuality (st.manifest));
                     }
                     else
                     {
@@ -188,16 +189,28 @@ namespace mosh
         });
     }
 
+    // Pull the judge readout + provenance from the manifest into a compact var the
+    // engine stores on the layer (surfaced in the snapshot for the UI). 05 §6/§7.
+    juce::var AsyncRenderPool::extractQuality (const juce::var& manifest)
+    {
+        auto* q = new juce::DynamicObject();
+        for (auto* k : { "pq", "pqBase", "pqDelta", "flags", "initLatentCache",
+                         "steering", "mode", "renderSec" })
+            if (manifest.hasProperty (k)) q->setProperty (k, manifest[k]);
+        return juce::var (q);
+    }
+
     void AsyncRenderPool::marshalDone (const juce::String& layerId, const juce::String& cacheKey,
-                                       juce::MemoryBlock bytes, const juce::String& wavPath)
+                                       juce::MemoryBlock bytes, const juce::String& wavPath,
+                                       juce::var quality)
     {
         auto a = alive;
         juce::MessageManager::callAsync (
-            [this, a, layerId, cacheKey, b = std::move (bytes), wavPath]() mutable
+            [this, a, layerId, cacheKey, b = std::move (bytes), wavPath, quality]() mutable
         {
             if (! *a) return;
             cache.put (cacheKey, std::move (b));
-            if (finalize) finalize (layerId, RenderStatus::ready, "file:" + wavPath);
+            if (finalize) finalize (layerId, RenderStatus::ready, "file:" + wavPath, quality);
             exec.emit (events::layerRendered (layerId, "render:" + cacheKey));
             exec.emit (events::layerStatus (layerId, "ready"));
             exec.emit (events::snapshotInvalidated());
@@ -211,7 +224,7 @@ namespace mosh
         juce::MessageManager::callAsync ([this, a, layerId, status, uiStatus]
         {
             if (! *a) return;
-            if (finalize) finalize (layerId, status, {});
+            if (finalize) finalize (layerId, status, {}, {});
             exec.emit (events::layerStatus (layerId, uiStatus));
             exec.emit (events::snapshotInvalidated());
         });
