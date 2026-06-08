@@ -9,6 +9,7 @@ export type Clip = {
   length: number;
   offset: number;
   sourceFile?: string;
+  sourceLength?: number;
   hasRenderLayer: boolean;
 };
 
@@ -18,6 +19,10 @@ export type Track = {
   name: string;
   type: string;
   clips: Clip[];
+  volumeDb?: number;
+  pan?: number;
+  mute?: boolean;
+  solo?: boolean;
 };
 
 export type Transport = {

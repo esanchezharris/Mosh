@@ -48,6 +48,15 @@ private:
     juce::var cmdSave           (const juce::var& args);
     juce::var cmdReload         (const juce::var& args);
     juce::var cmdAddRenderLayer (const juce::var& args);
+    // Stage 2 — arrangement editing + mixer stub
+    juce::var cmdMoveClip       (const juce::var& args);
+    juce::var cmdTrimClip       (const juce::var& args);
+    juce::var cmdSplitClip      (const juce::var& args);
+    juce::var cmdSetTrackVolume (const juce::var& args);
+    juce::var cmdSetTrackPan    (const juce::var& args);
+    juce::var cmdSetTrackMute   (const juce::var& args);
+    juce::var cmdSetTrackSolo   (const juce::var& args);
+    juce::var cmdGetClipPeaks   (const juce::var& args);
 
     // ── helpers ──
     te::AudioTrack* findTrack (const juce::String& id);

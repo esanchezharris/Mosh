@@ -127,6 +127,47 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     check (logsCommand ("set_transport"),"JSONL records set_transport");
     check (logsCommand ("undo"),         "JSONL records undo");
 
+    // ─── Stage 2: arrangement editing + mixer stub ───
+    std::cout << "--- Stage 2: arrangement + mixer ---\n";
+    const auto cid = firstTrack (ops)["clips"][0].getProperty ("id", var()).toString();
+    const auto tid = firstTrack (ops).getProperty ("id", var()).toString();
+
+    // move_clip → start 2.0s
+    { auto* a = new DynamicObject(); a->setProperty ("clipId", cid); a->setProperty ("start", 2.0);
+      check (ok (cmd (ops, "move_clip", var (a))), "move_clip ok"); }
+    check (std::abs ((double) firstTrack (ops)["clips"][0].getProperty ("start", 0.0) - 2.0) < 0.05, "clip moved to 2.0s");
+
+    // trim_clip → length 1.0s
+    { auto* a = new DynamicObject(); a->setProperty ("clipId", cid); a->setProperty ("length", 1.0);
+      check (ok (cmd (ops, "trim_clip", var (a))), "trim_clip ok"); }
+    check (std::abs ((double) firstTrack (ops)["clips"][0].getProperty ("length", 0.0) - 1.0) < 0.05, "clip trimmed to 1.0s");
+
+    // split_clip → 2 clips
+    { auto* a = new DynamicObject(); a->setProperty ("clipId", cid); a->setProperty ("time", 2.5);
+      check (ok (cmd (ops, "split_clip", var (a))), "split_clip ok"); }
+    check (trackClips (firstTrack (ops)) == 2, "split produced 2 clips");
+
+    // mixer: volume / pan / mute / solo
+    { auto* a = new DynamicObject(); a->setProperty ("trackId", tid); a->setProperty ("db", -6.0);
+      check (ok (cmd (ops, "set_track_volume", var (a))), "set_track_volume ok"); }
+    check (std::abs ((double) firstTrack (ops).getProperty ("volumeDb", 0.0) + 6.0) < 0.5, "track volume ~= -6 dB");
+    { auto* a = new DynamicObject(); a->setProperty ("trackId", tid); a->setProperty ("pan", 0.5);
+      cmd (ops, "set_track_pan", var (a)); }
+    check (std::abs ((double) firstTrack (ops).getProperty ("pan", 0.0) - 0.5) < 0.05, "track pan ~= 0.5");
+    { auto* a = new DynamicObject(); a->setProperty ("trackId", tid); a->setProperty ("mute", true);
+      cmd (ops, "set_track_mute", var (a)); }
+    check ((bool) firstTrack (ops).getProperty ("mute", false), "track muted");
+    { auto* a = new DynamicObject(); a->setProperty ("trackId", tid); a->setProperty ("solo", true);
+      cmd (ops, "set_track_solo", var (a)); }
+    check ((bool) firstTrack (ops).getProperty ("solo", false), "track soloed");
+
+    // get_clip_peaks → non-empty peak array (waveform from backend)
+    { auto* a = new DynamicObject(); a->setProperty ("clipId", firstTrack (ops)["clips"][0].getProperty ("id", var()));
+      a->setProperty ("buckets", 200);
+      auto pk = cmd (ops, "get_clip_peaks", var (a));
+      check (ok (pk), "get_clip_peaks ok");
+      check ((int) pk["data"].getProperty ("buckets", 0) > 0, "peaks array non-empty"); }
+
     std::cout << "===== " << (checks - failures) << "/" << checks
               << " checks passed, " << failures << " failed =====\n\n";
     return failures;

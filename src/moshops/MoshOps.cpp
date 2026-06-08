@@ -47,6 +47,14 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "save")              return cmdSave (args);
     if (name == "reload")            return cmdReload (args);
     if (name == "add_render_layer")  return cmdAddRenderLayer (args);
+    if (name == "move_clip")         return cmdMoveClip (args);
+    if (name == "trim_clip")         return cmdTrimClip (args);
+    if (name == "split_clip")        return cmdSplitClip (args);
+    if (name == "set_track_volume")  return cmdSetTrackVolume (args);
+    if (name == "set_track_pan")     return cmdSetTrackPan (args);
+    if (name == "set_track_mute")    return cmdSetTrackMute (args);
+    if (name == "set_track_solo")    return cmdSetTrackSolo (args);
+    if (name == "get_clip_peaks")    return cmdGetClipPeaks (args);
 
     return errResult (name, "unknown command: " + name);
 }
@@ -255,6 +263,166 @@ juce::var MoshOps::cmdAddRenderLayer (const juce::var& args)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Stage 2 — arrangement editing
+// ─────────────────────────────────────────────────────────────────────────────
+juce::var MoshOps::cmdMoveClip (const juce::var& args)
+{
+    const auto id = args.getProperty ("clipId", var()).toString();
+    auto* clip = findClip (id);
+    if (clip == nullptr) return errResult ("move_clip", "no clip: " + id);
+
+    undoManager().beginNewTransaction ("move_clip");
+    const double newStart = juce::jmax (0.0, (double) args.getProperty ("start", clip->getPosition().getStart().inSeconds()));
+    clip->setStart (tracktion::TimePosition::fromSeconds (newStart), false, true);   // keep length
+
+    // Optional move to another track.
+    if (args.hasProperty ("trackId"))
+        if (auto* dest = findTrack (args.getProperty ("trackId", var()).toString()))
+            if (dest != clip->getTrack())
+                clip->moveTo (*dest);
+
+    logLine ("move_clip", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("move_clip");
+}
+
+juce::var MoshOps::cmdTrimClip (const juce::var& args)
+{
+    const auto id = args.getProperty ("clipId", var()).toString();
+    auto* clip = findClip (id);
+    if (clip == nullptr) return errResult ("trim_clip", "no clip: " + id);
+
+    auto pos = clip->getPosition();
+    const double start  = (double) args.getProperty ("start",  pos.getStart().inSeconds());
+    const double length = juce::jmax (0.01, (double) args.getProperty ("length", pos.getLength().inSeconds()));
+    const double offset = (double) args.getProperty ("offset", pos.getOffset().inSeconds());
+
+    undoManager().beginNewTransaction ("trim_clip");
+    clip->setPosition ({ { tracktion::TimePosition::fromSeconds (start),
+                           tracktion::TimeDuration::fromSeconds (length) },
+                         tracktion::TimeDuration::fromSeconds (offset) });
+    logLine ("trim_clip", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("trim_clip");
+}
+
+juce::var MoshOps::cmdSplitClip (const juce::var& args)
+{
+    const auto id = args.getProperty ("clipId", var()).toString();
+    auto* clip = findClip (id);
+    if (clip == nullptr) return errResult ("split_clip", "no clip: " + id);
+    auto* clipTrack = dynamic_cast<te::ClipTrack*> (clip->getTrack());
+    if (clipTrack == nullptr) return errResult ("split_clip", "clip not on a clip track");
+
+    const double at = (double) args.getProperty ("time", 0.0);
+    undoManager().beginNewTransaction ("split_clip");
+    auto* newClip = clipTrack->splitClip (*clip, tracktion::TimePosition::fromSeconds (at));
+
+    auto* data = new DynamicObject();
+    if (newClip != nullptr) data->setProperty ("newClipId", newClip->itemID.toString());
+    logLine ("split_clip", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("split_clip", var (data));
+}
+
+juce::var MoshOps::cmdSetTrackVolume (const juce::var& args)
+{
+    auto* track = findTrack (args.getProperty ("trackId", var()).toString());
+    if (track == nullptr) return errResult ("set_track_volume", "no track");
+    auto* vp = track->getVolumePlugin();
+    if (vp == nullptr) return errResult ("set_track_volume", "no volume plugin");
+
+    undoManager().beginNewTransaction ("set_track_volume");
+    vp->setVolumeDb ((float) (double) args.getProperty ("db", 0.0));
+    logLine ("set_track_volume", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("set_track_volume");
+}
+
+juce::var MoshOps::cmdSetTrackPan (const juce::var& args)
+{
+    auto* track = findTrack (args.getProperty ("trackId", var()).toString());
+    if (track == nullptr) return errResult ("set_track_pan", "no track");
+    auto* vp = track->getVolumePlugin();
+    if (vp == nullptr) return errResult ("set_track_pan", "no volume plugin");
+
+    undoManager().beginNewTransaction ("set_track_pan");
+    vp->setPan (juce::jlimit (-1.0f, 1.0f, (float) (double) args.getProperty ("pan", 0.0)));
+    logLine ("set_track_pan", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("set_track_pan");
+}
+
+juce::var MoshOps::cmdSetTrackMute (const juce::var& args)
+{
+    auto* track = findTrack (args.getProperty ("trackId", var()).toString());
+    if (track == nullptr) return errResult ("set_track_mute", "no track");
+    undoManager().beginNewTransaction ("set_track_mute");
+    track->setMute ((bool) args.getProperty ("mute", false));
+    logLine ("set_track_mute", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("set_track_mute");
+}
+
+juce::var MoshOps::cmdSetTrackSolo (const juce::var& args)
+{
+    auto* track = findTrack (args.getProperty ("trackId", var()).toString());
+    if (track == nullptr) return errResult ("set_track_solo", "no track");
+    undoManager().beginNewTransaction ("set_track_solo");
+    track->setSolo ((bool) args.getProperty ("solo", false));
+    logLine ("set_track_solo", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("set_track_solo");
+}
+
+juce::var MoshOps::cmdGetClipPeaks (const juce::var& args)
+{
+    // Backend-computed waveform peaks (peak array per clip; no audio on the web
+    // thread, 03 // VERIFY). Read-only — not a mutation, no undo/log.
+    const auto id = args.getProperty ("clipId", var()).toString();
+    auto* clip = findClip (id);
+    auto* wave = dynamic_cast<te::WaveAudioClip*> (clip);
+    if (wave == nullptr) return errResult ("get_clip_peaks", "no wave clip: " + id);
+
+    const int buckets = juce::jlimit (16, 4000, (int) args.getProperty ("buckets", 600));
+    auto file = wave->getCurrentSourceFile();
+
+    juce::AudioFormatManager fm; fm.registerBasicFormats();
+    std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (file));
+    if (reader == nullptr) return errResult ("get_clip_peaks", "cannot read source");
+
+    const auto total = (juce::int64) reader->lengthInSamples;
+    const int chans = (int) reader->numChannels;
+    const juce::int64 perBucket = juce::jmax ((juce::int64) 1, total / buckets);
+
+    juce::Array<var> peaks;
+    juce::AudioBuffer<float> buf (juce::jmax (1, chans), (int) juce::jmin (perBucket, (juce::int64) 65536));
+    for (int b = 0; b < buckets; ++b)
+    {
+        const juce::int64 startSample = (juce::int64) b * perBucket;
+        if (startSample >= total) break;
+        const int n = (int) juce::jmin (perBucket, total - startSample, (juce::int64) buf.getNumSamples());
+        buf.clear();
+        reader->read (&buf, 0, n, startSample, true, chans > 1);
+        float mn = 0.0f, mx = 0.0f;
+        for (int c = 0; c < buf.getNumChannels(); ++c)
+        {
+            auto r = juce::FloatVectorOperations::findMinAndMax (buf.getReadPointer (c), n);
+            mn = juce::jmin (mn, r.getStart());
+            mx = juce::jmax (mx, r.getEnd());
+        }
+        juce::Array<var> pair; pair.add (mn); pair.add (mx);
+        peaks.add (var (pair));
+    }
+
+    auto* data = new DynamicObject();
+    data->setProperty ("clipId", id);
+    data->setProperty ("buckets", peaks.size());
+    data->setProperty ("peaks", peaks);
+    return okResult ("get_clip_peaks", var (data));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Snapshot
 // ─────────────────────────────────────────────────────────────────────────────
 juce::var MoshOps::snapshot()
@@ -293,6 +461,15 @@ juce::var MoshOps::trackToVar (te::AudioTrack& t, int index)
     o->setProperty ("name", t.getName());
     o->setProperty ("type", "audio");
     o->setProperty ("clips", clips);
+
+    // Mixer state (Stage 2 mixer stub).
+    if (auto* vp = t.getVolumePlugin())
+    {
+        o->setProperty ("volumeDb", vp->getVolumeDb());
+        o->setProperty ("pan", vp->getPan());
+    }
+    o->setProperty ("mute", t.isMuted (false));
+    o->setProperty ("solo", t.isSolo (false));
     return var (o);
 }
 
@@ -310,6 +487,7 @@ juce::var MoshOps::clipToVar (te::Clip& c)
     {
         o->setProperty ("type", "wave");
         o->setProperty ("sourceFile", w->getCurrentSourceFile().getFullPathName());
+        o->setProperty ("sourceLength", w->getSourceLength().inSeconds());
     }
     else if (dynamic_cast<te::MidiClip*> (&c) != nullptr)
         o->setProperty ("type", "midi");
