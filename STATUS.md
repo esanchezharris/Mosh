@@ -185,12 +185,17 @@ Stage 2.** This is the documented JUCE-8 WebView `// VERIFY`; it does not block 
   `createBuiltInType<>()`); NAM/Proteus ship, RAVE gated; `getLatencySeconds()` true delay + PDC null
   test; ASTD clamps (the spine's `Astd` is ready) + Lab mode. macOS-primary (anira backends); the
   bypass inverted-logic bug is called out in `04`.
-- **Stage 5 (generative)** — **FakeAdapter first** (no external deps → Windows/CI-testable!): the job
-  service (submit/status/progress/cancel + lifecycle over the Python `service/`), the RenderLayer
-  render→accept-as-take flow (spine `RenderLayer` + full `Fingerprint` are ready + tested), commands
-  `create_render_layer`/`render_layer`/`accept_render`/`reject_render`/`bypass_layer`/`freeze_layer`/
-  `bounce_layer_to_clip`. Then the `StableAudio3Adapter` (MLX, macOS-only; env-var the two hardcoded
-  paths). Takes API resolved in `docs/TRACKTION_API_NOTES.md` §9 (with the new-clip/new-track fallback).
+- **Stage 5 (generative)** — **FakeAdapter first** (no external deps → Windows/CI-testable!).
+  **DONE + tested (Windows):** the in-process orchestration spine — `GenerativeModelAdapter` seam +
+  `FakeAdapter` + `RenderCache` + `renderLayer()` (`src/spine/Generative.h`, 25 assertions): cache
+  HIT/MISS by FULL fingerprint, dirty-on-change re-render, deterministic output, accept/reject taste
+  labels. The Python **job service** (submit/status/progress/cancel + deterministic placeholder-WAV +
+  manifest, stdlib-only) is being added under `service/`. **Remaining:** the C++ `GenerativeJobManager`
+  (spawn/handshake/heartbeat/poll the service over HTTP+files/manifests), the `mosh_engine`
+  RenderLayer command handlers (`create_render_layer`/`set_render_param`/`render_layer`/`cancel_render`/
+  `accept_render`/`reject_render`/`bypass_layer`/`freeze_layer`/`bounce_layer_to_clip`) landing renders
+  as Tracktion takes (API in `docs/TRACKTION_API_NOTES.md` §9; new-clip/new-track fallback), and the
+  `StableAudio3Adapter` (MLX, macOS-only; env-var the two hardcoded paths).
 - **Stage 6 (consolidation)** — mixer polish, two-theme tokens, reserved B-5 slot; the full producer
   loop end-to-end from the UI with correct undo/redo.
 
