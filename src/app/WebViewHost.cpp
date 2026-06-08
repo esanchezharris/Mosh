@@ -9,6 +9,18 @@ namespace mosh
     // The WebView event channel the frontend subscribes on (ui/src/bridge.ts).
     static const juce::Identifier kEventChannel { "mosh_event" };
 
+    // Diagnostic: when MOSH_WV_DEBUG is set, append resource-request + native-fn
+    // activity to temp/mosh_wv_log.txt — ground truth for debugging the WebView load
+    // (esp. the Windows-WebView2 resource-interception issue; see STATUS "OPEN ISSUE").
+    static void wvLog (const juce::String& line)
+    {
+        static const bool on = juce::SystemStats::getEnvironmentVariable ("MOSH_WV_DEBUG", {}).isNotEmpty();
+        if (! on)
+            return;
+        juce::File::getSpecialLocation (juce::File::tempDirectory)
+            .getChildFile ("mosh_wv_log.txt").appendText (line + "\n");
+    }
+
     WebViewHost::WebViewHost (DslExecutor& executor) : exec (executor)
     {
         using WBC = juce::WebBrowserComponent;
@@ -21,6 +33,9 @@ namespace mosh
         wv2DataDir.createDirectory();
 
         auto options = WBC::Options{}
+           #if JUCE_WINDOWS
+            .withBackend (WBC::Options::Backend::webview2)   // matches JUCE's WebViewPluginDemo
+           #endif
             .withNativeIntegrationEnabled()
             .withWinWebView2Options (WBC::Options::WinWebView2{}
                                          .withUserDataFolder (wv2DataDir)
@@ -35,6 +50,7 @@ namespace mosh
                 {
                     const auto name = args.size() > 0 ? args[0].toString() : juce::String();
                     const auto argsJson = args.size() > 1 ? args[1].toString() : juce::String ("{}");
+                    wvLog ("NATIVE executeCommand " + name + " args=" + argsJson);
                     // execute() mutates the model → must run on the message thread.
                     // JUCE invokes native functions on the message thread already.
                     const auto result = exec.execute (MoshCommand::fromJsonArgs (name, argsJson));
@@ -44,6 +60,7 @@ namespace mosh
             .withNativeFunction ("getSnapshot",
                 [this] (const juce::Array<juce::var>&, WBC::NativeFunctionCompletion complete)
                 {
+                    wvLog ("NATIVE getSnapshot called (UI connected to real backend)");
                     complete (exec.getSnapshot());
                 });
 
@@ -53,16 +70,40 @@ namespace mosh
         // Forward backend events → JS.
         exec.addListener (this);
 
+        // Reset the diagnostic log + record the navigation target.
+        juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("mosh_wv_log.txt").deleteFile();
+        wvLog ("HOST ctor; stagedUiDir=" + stagedUiDir().getFullPathName()
+               + " exists=" + juce::String (stagedUiDir().getChildFile ("index.html").existsAsFile() ? 1 : 0)
+               + " root=" + WBC::getResourceProviderRoot());
+
         // Dev override: point at the running Vite dev server for hot-reload UI work.
         if (auto devUrl = juce::SystemStats::getEnvironmentVariable ("MOSH_DEV_SERVER", {}); devUrl.isNotEmpty())
             webView->goToURL (devUrl);
         else
             webView->goToURL (WBC::getResourceProviderRoot());
+
+        // Re-navigate once after the window/peer + WebView2 env are surely ready, in
+        // case the ctor-time navigation was issued before the resource filter existed.
+        startTimer (1500);
     }
 
     WebViewHost::~WebViewHost()
     {
+        stopTimer();
         exec.removeListener (this);
+    }
+
+    void WebViewHost::timerCallback()
+    {
+        stopTimer();   // one-shot
+        if (webView != nullptr)
+        {
+            if (auto devUrl = juce::SystemStats::getEnvironmentVariable ("MOSH_DEV_SERVER", {}); devUrl.isNotEmpty())
+                webView->goToURL (devUrl);
+            else
+                webView->goToURL (juce::WebBrowserComponent::getResourceProviderRoot());
+            wvLog ("RENAV to root");
+        }
     }
 
     void WebViewHost::resized()
@@ -87,6 +128,7 @@ namespace mosh
     std::optional<juce::WebBrowserComponent::Resource>
     WebViewHost::provideResource (const juce::String& url) const
     {
+        wvLog ("REQ url=" + url);
         // The provider may receive a bare path ("/assets/x.js") or, defensively, a
         // full URL — normalize both. Strip the resource root / scheme+host, the
         // query string, then map "/" → index.html.
@@ -122,8 +164,12 @@ namespace mosh
 
         juce::MemoryBlock mb;
         if (! file.loadFileAsData (mb))
+        {
+            wvLog ("FAIL-READ " + file.getFullPathName());
             return std::nullopt;
+        }
 
+        wvLog ("SERVE " + file.getFullPathName() + " (" + juce::String (mb.getSize()) + "B) mime=" + mimeTypeFor (file.getFileName()));
         std::vector<std::byte> data (mb.getSize());
         std::memcpy (data.data(), mb.getData(), mb.getSize());
         return juce::WebBrowserComponent::Resource { std::move (data),

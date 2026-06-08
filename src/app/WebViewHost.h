@@ -25,7 +25,8 @@
 namespace mosh
 {
     class WebViewHost : public juce::Component,
-                        private MoshEventListener
+                        private MoshEventListener,
+                        private juce::Timer
     {
     public:
         explicit WebViewHost (DslExecutor& executor);
@@ -35,6 +36,7 @@ namespace mosh
 
     private:
         void onMoshEvent (const MoshEvent& e) override;
+        void timerCallback() override;   // one-shot re-navigate once the peer/env is ready
 
         // Resource provider: map a request path to a staged UI file.
         std::optional<juce::WebBrowserComponent::Resource> provideResource (const juce::String& url) const;

@@ -159,16 +159,31 @@ the `https://juce.backend/*` request filter is registered; `getResourceProviderR
 fallback are all wired. WebView2 itself works (it renders its own error page). The top-level document
 just isn't served/painted on **WebView2 specifically**. This is the JUCE-8 WebView `// VERIFY` and is
 Windows-WebView2-specific — **macOS uses WKWebView (a different backend) and is the primary target**.
-**DIAGNOSED (2026-06-08):** added an inline-HTML fallback that renders when the provider is reached
-but the file is missing — it did **NOT** appear. So `provideResource` is **never called**: WebView2
-cancels the top-level navigation to `https://juce.backend/` *before* the `WebResourceRequested` filter
-can serve it. This is a WebView2 **environment/runtime** behavior (or a JUCE-8.0.8 WebView2 quirk) on
-this Windows box — **not** a code-logic/path issue (the `WebViewHost` matches JUCE's canonical
-`examples/Plugins/WebViewPluginDemo.h`). Remaining probes: (a) `goToURL("data:text/html,...")` to
-confirm WebView2 paints anything; (b) check the Evergreen WebView2 Runtime version / try
-`.withDLLLocation`; (c) **run on macOS WKWebView (the primary target) — a different backend that does
-not use the `https://juce.backend` interception the same way, and likely just works, unblocking
-Stage 2.** This is the documented JUCE-8 WebView `// VERIFY`; it does not block the macOS gate.
+**FULLY INVESTIGATED (2026-06-08) — confirmed a JUCE-8.0.8 + Windows-WebView2 limitation in JUCE's
+internals; NOT a Mosh bug.** Set `MOSH_WV_DEBUG=1` to log resource/native-fn activity to
+`%TEMP%\mosh_wv_log.txt`. Ground truth: WebView2 Runtime **148.0.3967.96** present; WebView2 inits (it
+renders its own error pages); the `AddWebResourceRequestedFilter(L"*", ALL)` is registered (read in
+`juce_WebBrowserComponent_windows.cpp:841`); yet `provideResource` is **NEVER called** — the log shows
+only the HOST-ctor + re-nav lines, never a `REQ`. WebView2 shows **"Can't reach this page —
+https://juce.backend"**: the top-level navigation to the synthetic resource origin is **not intercepted
+by the WebResourceRequested filter**, so it escapes to the network and DNS-fails.
+Tried (all → no `REQ`, page not served): default config; user-data folder; allowed-origin arg;
+not-found inline-HTML fallback; **re-navigate after a 1.5 s timer** (so peer/env are surely ready —
+rules out a timing race); **explicit `.withBackend(Options::Backend::webview2)`** (the one config
+difference vs JUCE's working `WebViewPluginDemo`). Also tried the **dev-server bypass** (serve `ui/dist`
+over `http://localhost` via `vite preview`, point the WebView there with `MOSH_DEV_SERVER`): WebView2
+**loads** the http page (no cancel) but the React app stays blank and **`window.__JUCE__` is not
+injected for the external origin** (the bridge falls back to its mock — no `NATIVE getSnapshot` logged),
+so it's not connected to the C++ backend. Net: on this JUCE/WebView2/Windows combo, neither path yields
+"UI rendered against the real backend." This requires patching JUCE's WebView2 resource handling — out
+of scope for a non-target platform.
+**RESOLUTION PATH:** run on **macOS arm64 (the primary target)**. There `getResourceProviderRoot()` is
+`juce://juce.backend/` served by a **WKURLSchemeHandler** (custom URL scheme) — a fundamentally
+different, robust mechanism that does NOT depend on WebView2's `WebResourceRequested` interception. The
+`WebViewHost` (native fns + event channel + resource provider) is already coded to JUCE's canonical
+pattern, so it should serve the bundle on WKWebView, immediately connecting the already-verified
+frontend to the already-verified backend. Secondary option on Windows: upgrade/patch JUCE's WebView2
+backend, or vendor a `SetVirtualHostNameToFolderMapping`-based loader.
 
 ## Continuation roadmap (Stage 2 → 6)
 
