@@ -56,7 +56,15 @@ real browser against real Tracktion:
 | drag clip edge | `trim_clip` | end-only `→ 8.975` |
 | double-click clip | `split_clip` | one clip → two, net +1 |
 | transport ▶ / ■ | `set_transport` | `playing` true → false |
+| + insert → + EQ/Reverb/Delay/Compressor | `load_plugin` | real Tracktion built-in DSP effect (e.g. "4-Band Equaliser") on the track |
+| + insert → + Neural | `add_neural_insert` | real `NeuralInsertPlugin` (Tier-A insert; anira inference is the macOS leg) |
+| click plugin chip | `bypass_plugin` | effect `bypassed: true` |
 | ↶ / ↷ buttons + Ctrl+Z/Ctrl+Shift+Z | `undo`/`redo` | **one command per step, UI↔backend in perfect sync, full unwind + rebuild** |
+
+(The "+ insert" menu offers real built-in effects — `4bandEq`/`reverb`/`delay`/`compressor` all load via
+`createNewPlugin` here — as the Windows proxy for the macOS-only scanned-VST3/AU leg. **Known cosmetic
+limitation:** track-header rows are fixed-height to stay aligned with the timeline lanes, so >2 plugin
+chips overflow the header visually; functionally correct.)
 
 **UI/backend stayed byte-for-byte in sync across the whole sequence** (snapshot clip/track counts ==
 rendered `.clip`/`.lane` counts at every step). Screenshot: `mosh-producer-loop-from-ui.png`.

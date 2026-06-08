@@ -10,15 +10,21 @@ import { useState } from "react";
 import { executeCommand, type TrackState } from "../bridge";
 import { useStore } from "../store";
 
+// Built-in DSP effects hostable via load_plugin on every platform (Tracktion
+// xmlTypeNames). Real scanned VST3/AU hosting is the macOS leg; these prove the
+// "host an effect on a track via commands" path here. (label shown, type sent.)
+const BUILTIN_EFFECTS: { label: string; type: string }[] = [
+  { label: "EQ", type: "4bandEq" },
+  { label: "Reverb", type: "reverb" },
+  { label: "Delay", type: "delay" },
+  { label: "Compressor", type: "compressor" },
+];
+
 function PluginSlots({ track }: { track: TrackState }) {
   const [adding, setAdding] = useState(false);
 
-  const addVst = () => {
-    void executeCommand("load_plugin", {
-      track: track.id,
-      type: "vst3",
-      name: "VST3 FX",
-    });
+  const addEffect = (type: string) => {
+    void executeCommand("load_plugin", { track: track.id, type });
     setAdding(false);
   };
   const addNeural = () => {
@@ -61,7 +67,11 @@ function PluginSlots({ track }: { track: TrackState }) {
       ))}
       {adding ? (
         <div className="plugin-add-menu">
-          <button onClick={addVst}>+ VST3</button>
+          {BUILTIN_EFFECTS.map((fx) => (
+            <button key={fx.type} onClick={() => addEffect(fx.type)}>
+              + {fx.label}
+            </button>
+          ))}
           <button onClick={addNeural}>+ Neural</button>
           <button className="cancel" onClick={() => setAdding(false)}>
             ×
