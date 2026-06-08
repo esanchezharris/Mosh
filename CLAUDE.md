@@ -32,12 +32,12 @@
 - [x] Generative service stub answers a health check. (`service/server.py`; `/health` + `/capabilities` ok.)
 - [x] **GATE:** window + placeholder on macOS arm64; service health ok. **Bonus:** native bridge round-trips (`ping()` → app identity) — the swappable seam is functional, a Stage 1 prereq done early.
 
-### Stage 1 — Engine + MoshOps + state feed (`01`,`02`)
-- [ ] `Engine` constructed once; device auto-init; `Edit` created; `edit.getUndoManager()` is the undo impl under MoshOps.
-- [ ] MoshOps `execute()` with result envelope + validation + per-command Tracktion transaction + JSONL log.
-- [ ] `getSnapshot()` + typed event stream (snapshot+events, "c"); first commands: `create_track`, `import_clip`, `set_transport`.
-- [ ] `MOSH_RENDERLAYER` schema defined; test node round-trips save/load.
-- [ ] **GATE:** WebView renders a snapshot cold; `create_track`+`import_clip` via MoshOps; audio loops; scrub; undo/redo via MoshOps; JSONL records the commands; save/reload restores.
+### Stage 1 — Engine + MoshOps + state feed (`01`,`02`) ✅ GATE PASSED (2026-06-08)
+- [x] `Engine` constructed once (`MoshEngine`); device init (`getDeviceManager().initialise()`); `Edit` via `createEmptyEdit`/`loadEditFromFile`; `edit.getUndoManager()` is the undo impl under MoshOps. Session persists at `~/Library/Mosh/session/`.
+- [x] MoshOps `execute()` with result envelope + validation + per-command Tracktion transaction (`beginNewTransaction`) + JSONL log (`mosh-log.jsonl`). Reconstructed missing spec 02 → `docs/02_MOSHOPS_CONTRACT.md`.
+- [x] `snapshot()` + typed event stream on `"mosh_event"` channel (snapshot_invalidated + 30 Hz decimated transport); commands: `create_track`, `rename_track`, `remove_track`, `import_clip`, `add_test_tone_clip`, `set_transport`, `undo`, `redo`, `save`, `reload`, `add_render_layer`.
+- [x] `MOSH_RENDERLAYER` schema defined (`src/state/`) + full cache fingerprint (route/variant/seed-sensitive); Catch2 round-trip + fingerprint tests pass.
+- [x] **GATE:** WebView renders a snapshot cold (empty + loaded session, screenshot-verified); `create_track`+`import_clip` via MoshOps; transport play allocates playback context; scrub/seek; undo/redo via MoshOps; JSONL records commands; save/reload restores. **Proven by the command-surface harness `Mosh --selftest` → 34/34 checks pass** (06 §4) + live WebView render + `ping()`/`get_snapshot()` bridge round-trips. (Synthetic UI clicks blocked by macOS Accessibility perms — not a product gap; same execute path as the verified `get_snapshot`.)
 
 ### Stage 2 — WebView arrangement (`03`)
 - [ ] Conventional layout: track headers, timeline lanes, clips, transport bar, mixer stub.

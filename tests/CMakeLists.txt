@@ -1,15 +1,27 @@
-# Catch2 test target + the MoshOps command-surface harness (06 §4).
-# Stage 0: a sanity test proving the toolchain links Catch2.
-# Stage 1+: the command-surface harness (drive MoshOps, assert results / events /
-# JSONL / snapshot) is the key test and is added here.
+# Catch2 tests + the MoshOps spine units (06 §4).
+# A JUCE console app so tests can use juce::ValueTree / SHA256 (the RenderLayer
+# round-trip + full-fingerprint cache key). The live command-surface harness
+# (driving a real engine) is exercised through the running app at the gate; these
+# units cover the pure, engine-free logic.
 
-add_executable(MoshTests
-    test_sanity.cpp)
+juce_add_console_app(MoshTests PRODUCT_NAME "MoshTests")
+
+target_sources(MoshTests PRIVATE
+    test_sanity.cpp
+    test_renderlayer.cpp)
 
 target_include_directories(MoshTests PRIVATE ${CMAKE_SOURCE_DIR}/src)
 
-# Catch2WithMain supplies main(); no custom entry point needed.
-target_link_libraries(MoshTests PRIVATE Catch2::Catch2WithMain)
-target_compile_features(MoshTests PRIVATE cxx_std_20)
+target_compile_definitions(MoshTests PRIVATE
+    JUCE_USE_CURL=0
+    JUCE_WEB_BROWSER=0
+    JUCE_STANDALONE_APPLICATION=1)
 
-add_test(NAME MoshTests COMMAND MoshTests)
+target_link_libraries(MoshTests PRIVATE
+    Catch2::Catch2WithMain
+    juce::juce_core
+    juce::juce_data_structures
+    juce::juce_cryptography
+    juce::juce_recommended_config_flags)
+
+add_test(NAME MoshTests COMMAND $<TARGET_FILE:MoshTests>)

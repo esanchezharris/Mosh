@@ -1,77 +1,48 @@
-import { useEffect, useState } from "react";
-import { ping, isNative, type AppInfo } from "./bridge";
+import { useEffect } from "react";
+import { useStore } from "./store";
+import { isNative } from "./bridge";
+import { Arrangement } from "./components/Arrangement";
+import { Transport } from "./components/Transport";
 
-// Stage 0 placeholder. Proves: (1) the JUCE WebView loads the bundled React app,
-// (2) native integration is present, (3) the bridge round-trips `ping`.
-// Stage 2 replaces this with the conventional arrangement (track list · timeline
-// lanes · transport · mixer), rendered from a snapshot + typed events.
+// Stage 1 UI: renders the MoshOps snapshot cold, drives every mutation through
+// execute_command, and reacts to the snapshot+events feed. Deliberately thin and
+// conventional — Stage 2 grows this into the full arrangement (drag/trim/split,
+// zoom/snap, marquee). The backend has zero knowledge of any of it (swappable seam).
 export function App() {
-  const [info, setInfo] = useState<AppInfo | null>(null);
+  const init = useStore((s) => s.init);
+  const snapshot = useStore((s) => s.snapshot);
+  const lastError = useStore((s) => s.lastError);
 
   useEffect(() => {
-    ping().then(setInfo);
-  }, []);
+    init();
+  }, [init]);
 
-  const native = isNative();
+  if (!isNative()) {
+    return (
+      <div className="boot">
+        <h2>Mosh</h2>
+        <p>Running outside the JUCE WebView (pure-web dev). Launch the Mosh app
+        to drive the engine.</p>
+      </div>
+    );
+  }
 
   return (
-    <div className="shell">
-      <div className="brand">
-        <div className="logo">M</div>
-        <div>
-          <h1>Mosh</h1>
-          <p className="tagline">native hybrid DAW · v0 skeleton</p>
+    <div className="daw">
+      <header className="topbar">
+        <div className="brand-min">
+          <span className="logo-min">M</span> Mosh
         </div>
-      </div>
+        <Transport />
+      </header>
 
-      <div className="status-grid">
-        <Status label="WebView" ok value="React + Vite mounted" />
-        <Status
-          label="Native bridge"
-          ok={native}
-          value={native ? "window.__JUCE__ present" : "web dev (no JUCE)"}
-        />
-        <Status
-          label="ping()"
-          ok={!!info?.ok}
-          value={
-            info
-              ? `${info.app} ${info.version} · stage ${info.stage} · ${info.backend}`
-              : "calling…"
-          }
-        />
-      </div>
+      {lastError && <div className="error-bar">⚠ {lastError}</div>}
 
-      <div className="stage-rail">
-        {STAGES.map((s) => (
-          <div className={`stage ${s.n === 0 ? "active" : ""}`} key={s.n}>
-            <span className="n">{s.n}</span>
-            <span className="t">{s.t}</span>
-          </div>
-        ))}
-      </div>
+      {snapshot ? (
+        <Arrangement snapshot={snapshot} />
+      ) : (
+        <div className="boot"><p>Loading snapshot…</p></div>
+      )}
     </div>
   );
 }
-
-function Status({ label, ok, value }: { label: string; ok?: boolean; value: string }) {
-  return (
-    <div className="status">
-      <div className="status-head">
-        <span className={`dot ${ok ? "on" : "off"}`} />
-        <span className="status-label">{label}</span>
-      </div>
-      <div className="status-value">{value}</div>
-    </div>
-  );
-}
-
-const STAGES = [
-  { n: 0, t: "Skeleton" },
-  { n: 1, t: "Engine + MoshOps" },
-  { n: 2, t: "Arrangement" },
-  { n: 3, t: "VST3 hosting" },
-  { n: 4, t: "Tier-A neural" },
-  { n: 5, t: "Generative" },
-  { n: 6, t: "Consolidation" },
-];

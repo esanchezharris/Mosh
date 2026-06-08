@@ -37,7 +37,11 @@ target_sources(Mosh PRIVATE
     src/Main.cpp
     src/app/MainWindow.cpp
     src/app/WebViewShell.cpp
-    src/webview/WebBridge.cpp)
+    src/app/SelfTest.cpp
+    src/webview/WebBridge.cpp
+    # Stage 1 — Engine + MoshOps spine + state feed (01, 02)
+    src/engine/MoshEngine.cpp
+    src/moshops/MoshOps.cpp)
 
 target_include_directories(Mosh PRIVATE src)
 
@@ -55,6 +59,7 @@ target_link_libraries(Mosh PRIVATE
     tracktion::tracktion_engine
     juce::juce_gui_extra
     juce::juce_audio_utils
+    juce::juce_cryptography
     juce::juce_recommended_config_flags
     juce::juce_recommended_lto_flags
     juce::juce_recommended_warning_flags)
