@@ -53,11 +53,11 @@
 - [ ] `set_plugin_param` (AutomatableParameter API) + `open_plugin_editor` (native pop-out; the `ExternalPlugin` editor `// VERIFY`) — land on macOS where editors + scanned VST3s run.
 - [ ] **GATE (macOS):** VST3 synth from MIDI + effect on wave via commands; native editor opens; persists. *(Command surface ✅ on Windows with built-ins; real VST3 hosting + editor + audio = macOS.)*
 
-### Stage 4 — Tier-A real-time neural (`04`)
-- [ ] `NeuralInsertPlugin` (custom `Plugin`) registered via `createBuiltInType<>()`; anira; RT-safe `applyToBuffer`; warm-up.
-- [ ] **NAM/Proteus ship**; **RAVE behind a gate**; DDSP in set; model-agnostic host + per-model param maps.
-- [ ] `getLatencySeconds()` returns the **true** delay; knobs via `add_neural_insert`/`set_neural_param`; ASTD-clamped; `set_neural_lab_mode`.
-- [ ] **GATE:** NAM tone + RAVE morph audible; **PDC null test passes (no drift)**; bypass correct (test the known inverted-logic bug); no dropouts; ASTD clamps + Lab unlock — all via commands.
+### Stage 4 — Tier-A real-time neural (`04`) — *insert architecture + ASTD command surface verified; anira inference + PDC null test need macOS*
+- [x] `NeuralInsertPlugin` (custom `te::Plugin`) **registered via `createBuiltInType<>()`**, lives in the track's `pluginList`; RT-safe passthrough `applyToBuffer` (allocates nothing); `getLatencySeconds()` returns a stored true-delay (0 for passthrough). anira warm-up/inference drop into `initialise()`/`applyToBuffer()` on macOS.
+- [ ] **NAM/Proteus ship**; **RAVE gated**; DDSP — the anira model host + per-model param maps (macOS; the // VERIFY anira `process`/`prepare`).
+- [x] `getLatencySeconds()` true-delay hook; knobs via `add_neural_insert`/`set_neural_param` (**ASTD-clamped, one shared spine impl**) / `set_neural_lab_mode` / `bypass_neural_insert`. `test_neural_commands` (`[neural]`, 20 assertions): UI 100 → clamp 0.7, UI 50 → 0.35, **Lab unlock → 1.0**, re-lock → 0.7, bypass.
+- [~] **GATE:** ASTD clamps + Lab unlock via commands ✅ (Windows). **Remaining (macOS):** NAM tone + RAVE morph audible; **PDC null test (no drift)** with a latency-introducing model; bypass-correct (the known inverted-logic bug); no dropouts.
 
 ### Stage 5 — Generative layer (`05`) — Fake first, then SA3 — *orchestration spine proven (out of order, since Stage 2/4 are platform-blocked here)*
 - [x] `GenerativeModelAdapter` interface + **`FakeAdapter`** (deterministic placeholder) + `RenderCache` + the `renderLayer` orchestrator (`src/spine/Generative.h`). **Tested (25 assertions): cache HIT/MISS keyed by the FULL fingerprint, any-input-change → dirty → re-render, deterministic-per-fingerprint output, accept/reject taste labels.** Pure spine — no MLX/service/UI. Job service (Python submit/status/progress/cancel) + Tracktion-take landing are the next increment.

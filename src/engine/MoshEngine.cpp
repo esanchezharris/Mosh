@@ -1,4 +1,5 @@
 #include "MoshEngine.h"
+#include "NeuralInsertPlugin.h"
 
 namespace mosh
 {
@@ -18,6 +19,8 @@ namespace mosh
         // examples/common helper, not part of the engine module.) A custom
         // EngineBehaviour can be slotted in later via the 3-arg ctor if needed.
         engine = std::make_unique<te::Engine> ("Mosh");
+        // Register Mosh's Tier-A neural insert as a built-in plugin type (04).
+        engine->getPluginManager().createBuiltInType<NeuralInsertPlugin>();
         newEdit (defaultEditFile());
     }
 
