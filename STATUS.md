@@ -90,8 +90,13 @@ Screenshots: `mosh-generative-from-ui.png`. The `StableAudio3Adapter` (MLX) swap
    single-threaded HttpBridge is wedged for the render duration (~3 s for FakeAdapter) and the UI shows
    no intermediate progress — the badge jumps idle→ready. Spec intent is a true background job; the
    current command is synchronous (as in `test_generative_engine`). Fine for Fake; revisit for SA3.
-2. **Single-threaded HttpBridge** can wedge if one connection stalls (a timed-out browser navigate
-   wedged it once); a thread-per-connection / small pool would harden it. Self-heals on restart.
+2. **Single-threaded HttpBridge** is a DEV transport and is fragile under heavy *concurrent* load: it
+   can wedge if one connection stalls (a timed-out browser navigate wedged it once) and was seen to
+   crash once under a burst of simultaneous UI-poll + command + ad-hoc fetch traffic. The same full
+   loop run **sequentially** over HTTP is rock-solid (import → create/render/accept → EQ → neural →
+   gain → undo×4 → redo×2, all ok, process stable). A thread-per-connection / small pool would harden
+   it. It exists only as the Windows workaround for the WebView2 bug; the real path (macOS WKWebView)
+   is in-process with no socket server, so this fragility doesn't apply there. Self-heals on restart.
 3. **Force-killing Mosh orphans the Python service** (no clean C++ shutdown) — orphaned `server.py`
    holds port 8765 until killed. Graceful quit (the app's `shutdown()` → `jobs.reset()`) does clean up.
 
