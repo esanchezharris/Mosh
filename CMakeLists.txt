@@ -41,13 +41,18 @@ target_sources(Mosh PRIVATE
     src/webview/WebBridge.cpp
     # Stage 1 — Engine + MoshOps spine + state feed (01, 02)
     src/engine/MoshEngine.cpp
-    src/moshops/MoshOps.cpp)
+    src/moshops/MoshOps.cpp
+    # Stage 3 — VST3 hosting (04 PART 1)
+    src/plugins/hosting/PluginHost.cpp)
 
 target_include_directories(Mosh PRIVATE src)
 
 target_compile_definitions(Mosh PRIVATE
     JUCE_WEB_BROWSER=1
     JUCE_USE_CURL=0
+    # VST3/AU hosting (04 PART 1) — compiles JUCE's hosting format classes.
+    JUCE_PLUGINHOST_VST3=1
+    JUCE_PLUGINHOST_AU=1
     JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:Mosh,JUCE_PRODUCT_NAME>"
     JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:Mosh,JUCE_VERSION>"
     JUCE_MODAL_LOOPS_PERMITTED=1

@@ -109,4 +109,45 @@ button.on { border-color: var(--accent); color: var(--accent); background: #2120
 .tl-head .playhead { height: 30px; }
 .marquee { position: absolute; border: 1px solid var(--accent); background: rgba(108,92,255,0.12); z-index: 4; pointer-events: none; }
 
+.track-head.sel { background: #20202c; box-shadow: inset 3px 0 0 var(--accent); }
+.fx-count { font-size: 0.6rem; color: var(--accent); background: #21203a; border-radius: 4px; padding: 0 4px; }
+
+/* Plugin rack (Stage 3) */
+.rack {
+  height: 118px; min-height: 118px; border-top: 1px solid var(--line);
+  background: var(--panel); display: flex; flex-direction: column; padding: 0.5rem 0.8rem; gap: 0.4rem;
+}
+.rack-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.rack-label b { color: var(--text); }
+.rack-chain { display: flex; gap: 0.5rem; align-items: stretch; overflow-x: auto; flex: 1; }
+.rack-empty { color: var(--muted); font-size: 0.8rem; align-self: center; }
+.rack-add { align-self: center; white-space: nowrap; border-style: dashed; }
+.pcard {
+  min-width: 150px; background: var(--panel-2); border: 1px solid var(--line);
+  border-radius: 8px; padding: 6px 8px; display: flex; flex-direction: column; justify-content: space-between; gap: 6px;
+}
+.pcard.bypassed { opacity: 0.5; }
+.pcard-head { display: flex; align-items: center; gap: 6px; }
+.pname { flex: 1; font-size: 0.82rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ibadge { font-size: 0.55rem; background: var(--accent-2); color: white; border-radius: 4px; padding: 0 4px; }
+.pdot { width: 12px; height: 12px; border-radius: 50%; padding: 0; background: var(--off); border: 1px solid var(--line); }
+.pdot.on { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
+.pcard-actions { display: flex; gap: 4px; }
+.pcard-actions button { padding: 0.15rem 0.4rem; font-size: 0.72rem; }
+.pcard-actions .x { color: var(--muted); }
+.pcard-actions .x:hover { color: var(--playhead); }
+
+/* Plugin browser modal */
+.modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.55); display: grid; place-items: center; z-index: 50; }
+.modal { width: min(640px, 86vw); max-height: 76vh; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; display: flex; flex-direction: column; box-shadow: 0 24px 60px rgba(0,0,0,0.5); }
+.modal-head { display: flex; align-items: center; justify-content: space-between; padding: 0.8rem 1rem; border-bottom: 1px solid var(--line); }
+.modal-head .x { background: transparent; border-color: transparent; color: var(--muted); }
+.modal-filters { display: flex; gap: 0.4rem; padding: 0.7rem 1rem; border-bottom: 1px solid var(--line); }
+.modal-filters input { flex: 1; background: var(--panel-2); border: 1px solid var(--line); border-radius: 7px; color: var(--text); padding: 0.35rem 0.6rem; }
+.modal-list { overflow-y: auto; padding: 0.5rem; display: flex; flex-direction: column; gap: 2px; }
+.plugin-row { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; background: transparent; border-color: transparent; padding: 0.5rem 0.7rem; border-radius: 7px; }
+.plugin-row:hover { background: var(--panel-2); border-color: var(--line); }
+.pr-name { font-size: 0.9rem; }
+.pr-meta { font-size: 0.72rem; color: var(--muted); }
+
 .boot { padding: 3rem; color: var(--muted); }

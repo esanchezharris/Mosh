@@ -6,9 +6,11 @@ namespace mosh
 {
 using namespace juce;
 
-MoshOps::MoshOps (MoshEngine& engineToUse) : eng (engineToUse)
+MoshOps::MoshOps (MoshEngine& engineToUse)
+    : eng (engineToUse), pluginHost (engineToUse.engine())
 {
     logFile = eng.sessionDir().getChildFile ("mosh-log.jsonl");
+    pluginHost.initialise();                 // formats + curated VST3 scan
     startTimerHz (30);                       // telemetry decimated to 30 Hz, never per-block
 }
 
@@ -55,6 +57,14 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "set_track_mute")    return cmdSetTrackMute (args);
     if (name == "set_track_solo")    return cmdSetTrackSolo (args);
     if (name == "get_clip_peaks")    return cmdGetClipPeaks (args);
+    if (name == "list_plugins")      return cmdListPlugins (args);
+    if (name == "load_plugin")       return cmdLoadPlugin (args);
+    if (name == "remove_plugin")     return cmdRemovePlugin (args);
+    if (name == "reorder_plugin")    return cmdReorderPlugin (args);
+    if (name == "set_plugin_param")  return cmdSetPluginParam (args);
+    if (name == "bypass_plugin")     return cmdBypassPlugin (args);
+    if (name == "open_plugin_editor")return cmdOpenPluginEditor (args);
+    if (name == "add_midi_clip")     return cmdAddMidiClip (args);
 
     return errResult (name, "unknown command: " + name);
 }
@@ -423,6 +433,195 @@ juce::var MoshOps::cmdGetClipPeaks (const juce::var& args)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Stage 3 — VST3 hosting + MIDI
+// ─────────────────────────────────────────────────────────────────────────────
+juce::var MoshOps::cmdListPlugins (const juce::var&)
+{
+    juce::Array<var> plugins;
+    for (auto& d : pluginHost.available())
+    {
+        auto* o = new DynamicObject();
+        o->setProperty ("id", PluginHost::idFor (d));
+        o->setProperty ("name", d.name);
+        o->setProperty ("format", d.pluginFormatName);
+        o->setProperty ("manufacturer", d.manufacturerName);
+        o->setProperty ("isInstrument", d.isInstrument);
+        plugins.add (var (o));
+    }
+    auto* data = new DynamicObject();
+    data->setProperty ("plugins", plugins);
+    return okResult ("list_plugins", var (data));
+}
+
+juce::var MoshOps::cmdLoadPlugin (const juce::var& args)
+{
+    auto* track = findTrack (args.getProperty ("trackId", var()).toString());
+    if (track == nullptr) return errResult ("load_plugin", "no track");
+
+    const auto pluginId = args.getProperty ("pluginId", var()).toString();
+    juce::PluginDescription desc;
+    if (! pluginHost.findDescription (pluginId, desc))
+        return errResult ("load_plugin", "unknown plugin: " + pluginId);
+
+    undoManager().beginNewTransaction ("load_plugin");
+    // MUST use the Edit's PluginCache so the inserted plugin IS the one we hold
+    // (PluginManager::createNewPlugin yields a different instance → insertPlugin
+    // re-creates from state, indexOf fails, and it asserts — engine's own note).
+    auto plugin = eng.edit().getPluginCache().createNewPlugin (te::ExternalPlugin::xmlTypeName, desc);
+    if (plugin == nullptr) return errResult ("load_plugin", "create failed");
+
+    int index = (int) args.getProperty ("index", -1);
+    if (index < 0) index = track->pluginList.getPlugins().size();   // append (−1 does not append)
+    track->pluginList.insertPlugin (plugin, index, nullptr);
+
+    auto* data = new DynamicObject();
+    data->setProperty ("index", track->pluginList.indexOf (plugin.get()));
+    data->setProperty ("name", plugin->getName());
+    logLine ("load_plugin", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("load_plugin", var (data));
+}
+
+juce::var MoshOps::cmdRemovePlugin (const juce::var& args)
+{
+    auto* plugin = findPlugin (args.getProperty ("trackId", var()).toString(),
+                               (int) args.getProperty ("index", -1));
+    if (plugin == nullptr) return errResult ("remove_plugin", "no plugin");
+    pluginHost.closeEditor (*plugin);
+    undoManager().beginNewTransaction ("remove_plugin");
+    plugin->deleteFromParent();
+    logLine ("remove_plugin", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("remove_plugin");
+}
+
+juce::var MoshOps::cmdReorderPlugin (const juce::var& args)
+{
+    auto* track = findTrack (args.getProperty ("trackId", var()).toString());
+    if (track == nullptr) return errResult ("reorder_plugin", "no track");
+    const int from = (int) args.getProperty ("index", -1);
+    const int to   = (int) args.getProperty ("toIndex", -1);
+    auto plugins = track->pluginList.getPlugins();
+    if (from < 0 || from >= plugins.size()) return errResult ("reorder_plugin", "bad index");
+
+    te::Plugin::Ptr p = plugins[from];
+    undoManager().beginNewTransaction ("reorder_plugin");
+    p->removeFromParent();
+    track->pluginList.insertPlugin (p, to, nullptr);
+    logLine ("reorder_plugin", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("reorder_plugin");
+}
+
+juce::var MoshOps::cmdSetPluginParam (const juce::var& args)
+{
+    auto* plugin = findPlugin (args.getProperty ("trackId", var()).toString(),
+                               (int) args.getProperty ("index", -1));
+    if (plugin == nullptr) return errResult ("set_plugin_param", "no plugin");
+    const int pi = (int) args.getProperty ("paramIndex", -1);
+    if (pi < 0 || pi >= plugin->getNumAutomatableParameters())
+        return errResult ("set_plugin_param", "bad paramIndex");
+
+    auto param = plugin->getAutomatableParameter (pi);
+    const float norm = juce::jlimit (0.0f, 1.0f, (float) (double) args.getProperty ("value", 0.0));
+    undoManager().beginNewTransaction ("set_plugin_param");
+    param->setParameter (param->valueRange.convertFrom0to1 (norm), juce::sendNotification);
+    logLine ("set_plugin_param", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("set_plugin_param");
+}
+
+juce::var MoshOps::cmdBypassPlugin (const juce::var& args)
+{
+    auto* plugin = findPlugin (args.getProperty ("trackId", var()).toString(),
+                               (int) args.getProperty ("index", -1));
+    if (plugin == nullptr) return errResult ("bypass_plugin", "no plugin");
+    const bool bypassed = (bool) args.getProperty ("bypassed", false);
+    undoManager().beginNewTransaction ("bypass_plugin");
+    plugin->setEnabled (! bypassed);          // enabled == not bypassed
+    logLine ("bypass_plugin", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("bypass_plugin");
+}
+
+juce::var MoshOps::cmdOpenPluginEditor (const juce::var& args)
+{
+    auto* plugin = findPlugin (args.getProperty ("trackId", var()).toString(),
+                               (int) args.getProperty ("index", -1));
+    if (plugin == nullptr) return errResult ("open_plugin_editor", "no plugin");
+    pluginHost.openEditor (*plugin);          // native pop-out (not undoable)
+    logLine ("open_plugin_editor", args, true, {}, false);
+    return okResult ("open_plugin_editor");
+}
+
+juce::var MoshOps::cmdAddMidiClip (const juce::var& args)
+{
+    auto& edit = eng.edit();
+    auto* track = findTrack (args.getProperty ("trackId", var()).toString());
+    undoManager().beginNewTransaction ("add_midi_clip");
+    if (track == nullptr)
+        track = edit.insertNewAudioTrack (te::TrackInsertPoint::getEndOfTracks (edit), nullptr).get();
+    if (track == nullptr) return errResult ("add_midi_clip", "no track");
+
+    const double start = (double) args.getProperty ("start", 0.0);
+    const double length = (double) args.getProperty ("length", 2.0);
+    auto clip = track->insertMIDIClip (args.getProperty ("name", "MIDI").toString(),
+        { tracktion::TimePosition::fromSeconds (start), tracktion::TimePosition::fromSeconds (start + length) }, nullptr);
+    if (clip == nullptr) return errResult ("add_midi_clip", "insertMIDIClip failed");
+
+    auto& seq = clip->getSequence();
+    if (auto notes = args.getProperty ("notes", var()); notes.isArray())
+    {
+        for (auto& n : *notes.getArray())
+            seq.addNote ((int) n.getProperty ("pitch", 60),
+                         tracktion::BeatPosition::fromBeats ((double) n.getProperty ("start", 0.0)),
+                         tracktion::BeatDuration::fromBeats ((double) n.getProperty ("length", 1.0)),
+                         (int) n.getProperty ("velocity", 100), 0, &undoManager());
+    }
+    else
+    {
+        // Default: a C-major arpeggio so a synth has something to play (gate).
+        const int pattern[] = { 60, 64, 67, 72 };
+        for (int i = 0; i < 4; ++i)
+            seq.addNote (pattern[i], tracktion::BeatPosition::fromBeats ((double) i),
+                         tracktion::BeatDuration::fromBeats (1.0), 100, 0, &undoManager());
+    }
+
+    auto* data = new DynamicObject();
+    data->setProperty ("clipId", clip->itemID.toString());
+    data->setProperty ("trackId", track->itemID.toString());
+    logLine ("add_midi_clip", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("add_midi_clip", var (data));
+}
+
+juce::var MoshOps::pluginToVar (te::Plugin& p, int index)
+{
+    auto* o = new DynamicObject();
+    o->setProperty ("index", index);
+    o->setProperty ("name", p.getName());
+    o->setProperty ("type", p.getPluginType());
+    o->setProperty ("enabled", p.isEnabled());
+    auto* ext = dynamic_cast<te::ExternalPlugin*> (&p);
+    o->setProperty ("external", ext != nullptr);
+    o->setProperty ("isInstrument", ext != nullptr && ext->isSynth());
+
+    juce::Array<var> params;
+    const int n = juce::jmin (16, p.getNumAutomatableParameters());
+    for (int i = 0; i < n; ++i)
+    {
+        auto param = p.getAutomatableParameter (i);
+        auto* po = new DynamicObject();
+        po->setProperty ("index", i);
+        po->setProperty ("name", param->getParameterName());
+        po->setProperty ("value", param->getCurrentNormalisedValue());
+        params.add (var (po));
+    }
+    o->setProperty ("params", params);
+    return var (o);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Snapshot
 // ─────────────────────────────────────────────────────────────────────────────
 juce::var MoshOps::snapshot()
@@ -461,6 +660,14 @@ juce::var MoshOps::trackToVar (te::AudioTrack& t, int index)
     o->setProperty ("name", t.getName());
     o->setProperty ("type", "audio");
     o->setProperty ("clips", clips);
+
+    // Plugin chain (Stage 3). Indexed within pluginList (built-ins included).
+    juce::Array<var> plugins;
+    auto pl = t.pluginList.getPlugins();
+    for (int i = 0; i < pl.size(); ++i)
+        if (pl[i] != nullptr)
+            plugins.add (pluginToVar (*pl[i], i));
+    o->setProperty ("plugins", plugins);
 
     // Mixer state (Stage 2 mixer stub).
     if (auto* vp = t.getVolumePlugin())
@@ -529,6 +736,14 @@ te::Clip* MoshOps::findClip (const juce::String& id)
                 if (c != nullptr && c->itemID == target)
                     return c;
     return nullptr;
+}
+
+te::Plugin* MoshOps::findPlugin (const juce::String& trackId, int index)
+{
+    auto* track = findTrack (trackId);
+    if (track == nullptr) return nullptr;
+    auto plugins = track->pluginList.getPlugins();
+    return (index >= 0 && index < plugins.size()) ? plugins[index].get() : nullptr;
 }
 
 void MoshOps::emit (const juce::String& type, juce::var payload)

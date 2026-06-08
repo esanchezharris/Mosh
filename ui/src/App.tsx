@@ -3,6 +3,8 @@ import { useStore } from "./store";
 import { isNative } from "./bridge";
 import { Arrangement } from "./components/Arrangement";
 import { Transport } from "./components/Transport";
+import { Rack } from "./components/Rack";
+import { PluginBrowser } from "./components/PluginBrowser";
 
 // Stage 1 UI: renders the MoshOps snapshot cold, drives every mutation through
 // execute_command, and reacts to the snapshot+events feed. Deliberately thin and
@@ -39,10 +41,15 @@ export function App() {
       {lastError && <div className="error-bar">⚠ {lastError}</div>}
 
       {snapshot ? (
-        <Arrangement snapshot={snapshot} />
+        <>
+          <Arrangement snapshot={snapshot} />
+          <Rack snapshot={snapshot} />
+        </>
       ) : (
         <div className="boot"><p>Loading snapshot…</p></div>
       )}
+
+      <PluginBrowser />
     </div>
   );
 }

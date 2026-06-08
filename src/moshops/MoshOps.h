@@ -3,6 +3,7 @@
 #include <tracktion_engine/tracktion_engine.h>
 #include <functional>
 #include "engine/MoshEngine.h"
+#include "plugins/hosting/PluginHost.h"
 
 namespace mosh
 {
@@ -57,10 +58,21 @@ private:
     juce::var cmdSetTrackMute   (const juce::var& args);
     juce::var cmdSetTrackSolo   (const juce::var& args);
     juce::var cmdGetClipPeaks   (const juce::var& args);
+    // Stage 3 — VST3 hosting + MIDI
+    juce::var cmdListPlugins    (const juce::var& args);
+    juce::var cmdLoadPlugin     (const juce::var& args);
+    juce::var cmdRemovePlugin   (const juce::var& args);
+    juce::var cmdReorderPlugin  (const juce::var& args);
+    juce::var cmdSetPluginParam (const juce::var& args);
+    juce::var cmdBypassPlugin   (const juce::var& args);
+    juce::var cmdOpenPluginEditor (const juce::var& args);
+    juce::var cmdAddMidiClip    (const juce::var& args);
 
     // ── helpers ──
     te::AudioTrack* findTrack (const juce::String& id);
     te::Clip*       findClip  (const juce::String& id);
+    te::Plugin*     findPlugin (const juce::String& trackId, int index);
+    juce::var       pluginToVar (te::Plugin&, int index);
     juce::var       trackToVar (te::AudioTrack&, int index);
     juce::var       clipToVar  (te::Clip&);
     juce::var       transportToVar();
@@ -78,6 +90,7 @@ private:
     juce::UndoManager& undoManager() { return eng.edit().getUndoManager(); }
 
     MoshEngine& eng;
+    PluginHost  pluginHost;
     EventSink   eventSink;
     juce::int64 seq = 0;
     juce::File  logFile;

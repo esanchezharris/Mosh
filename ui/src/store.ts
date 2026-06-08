@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { executeCommand, getSnapshot, onEvent, isNative } from "./bridge";
-import type { Snapshot, Transport, MoshEvent, CommandResult } from "./types";
+import type { Snapshot, Transport, MoshEvent, CommandResult, AvailablePlugin } from "./types";
 
 export type Tool = "move" | "split";
 export type Peaks = [number, number][];
@@ -19,6 +19,11 @@ type State = {
   selection: Set<string>;
   peaks: Record<string, Peaks>;
 
+  // Stage 3: plugin browser
+  selectedTrackId: string | null;
+  availablePlugins: AvailablePlugin[];
+  browserOpen: boolean;
+
   refresh: () => Promise<void>;
   exec: (command: string, args?: Record<string, unknown>) => Promise<CommandResult>;
   init: () => void;
@@ -30,6 +35,10 @@ type State = {
   clearSelection: () => void;
   snapTime: (t: number) => number;
   ensurePeaks: (clipId: string) => void;
+
+  setSelectedTrack: (id: string | null) => void;
+  openBrowser: () => void;
+  closeBrowser: () => void;
 };
 
 export const useStore = create<State>((set, get) => ({
@@ -43,6 +52,9 @@ export const useStore = create<State>((set, get) => ({
   snapGrid: 0.25,
   selection: new Set<string>(),
   peaks: {},
+  selectedTrackId: null,
+  availablePlugins: [],
+  browserOpen: false,
 
   refresh: async () => {
     if (!isNative()) return;
@@ -102,4 +114,17 @@ export const useStore = create<State>((set, get) => ({
         set((s) => ({ peaks: { ...s.peaks, [clipId]: res.data!.peaks } }));
     });
   },
+
+  setSelectedTrack: (id) => set({ selectedTrackId: id }),
+  openBrowser: () => {
+    set({ browserOpen: true });
+    if (get().availablePlugins.length === 0)
+      void executeCommand<CommandResult<{ plugins: AvailablePlugin[] }>>({
+        command: "list_plugins",
+        args: {},
+      }).then((res) => {
+        if (res.ok && res.data) set({ availablePlugins: res.data.plugins });
+      });
+  },
+  closeBrowser: () => set({ browserOpen: false }),
 }));

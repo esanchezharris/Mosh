@@ -160,6 +160,7 @@ function Toolbar() {
     <div className="toolbar">
       <button onClick={() => exec("create_track", {})}>+ Track</button>
       <button onClick={() => exec("add_test_tone_clip", { seconds: 2, freq: 220 })}>+ Test Tone</button>
+      <button onClick={() => exec("add_midi_clip", {})}>+ MIDI</button>
       <span className="sep" />
       <button className={tool === "move" ? "on" : ""} onClick={() => setTool("move")}>Move</button>
       <button className={tool === "split" ? "on" : ""} onClick={() => setTool("split")}>Split</button>
@@ -179,11 +180,19 @@ function Toolbar() {
 
 function TrackHeader({ track }: { track: Track }) {
   const exec = useStore((s) => s.exec);
+  const selectedTrackId = useStore((s) => s.selectedTrackId);
+  const setSelectedTrack = useStore((s) => s.setSelectedTrack);
+  const fxCount = (track.plugins ?? []).filter((p) => p.external).length;
   return (
-    <div className="track-head" style={{ height: LANE_H }}>
+    <div
+      className={`track-head ${selectedTrackId === track.id ? "sel" : ""}`}
+      style={{ height: LANE_H }}
+      onPointerDown={() => setSelectedTrack(track.id)}
+    >
       <div className="th-row">
         <span className="track-name">{track.name || `Track ${track.index + 1}`}</span>
-        <button className="mini" title="Remove" onClick={() => exec("remove_track", { trackId: track.id })}>✕</button>
+        {fxCount > 0 && <span className="fx-count">{fxCount} fx</span>}
+        <button className="mini" title="Remove" onClick={(e) => { e.stopPropagation(); exec("remove_track", { trackId: track.id }); }}>✕</button>
       </div>
       <div className="th-row">
         <button

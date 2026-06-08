@@ -11,4 +11,9 @@ class MoshOps;
     the UI. Returns 0 on success, the number of failed checks otherwise. */
 int runSelfTest (MoshEngine&, MoshOps&);
 
+/** Scripted Stage 3 demo (`Mosh --demo3`): builds a session with a VST3 effect on
+    a wave track and a VST3 synth on a MIDI track, and opens the synth's native
+    editor — then leaves the GUI running (for visual verification of the gate). */
+void runPluginDemo (MoshOps&);
+
 } // namespace mosh

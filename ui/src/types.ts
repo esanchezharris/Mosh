@@ -13,12 +13,33 @@ export type Clip = {
   hasRenderLayer: boolean;
 };
 
+export type PluginParam = { index: number; name: string; value: number };
+
+export type Plugin = {
+  index: number;
+  name: string;
+  type: string;
+  enabled: boolean;
+  external: boolean;
+  isInstrument: boolean;
+  params: PluginParam[];
+};
+
+export type AvailablePlugin = {
+  id: string;
+  name: string;
+  format: string;
+  manufacturer: string;
+  isInstrument: boolean;
+};
+
 export type Track = {
   id: string;
   index: number;
   name: string;
   type: string;
   clips: Clip[];
+  plugins?: Plugin[];
   volumeDb?: number;
   pan?: number;
   mute?: boolean;

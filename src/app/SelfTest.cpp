@@ -14,7 +14,7 @@ namespace
     void check (bool cond, const juce::String& what)
     {
         ++checks;
-        std::cout << (cond ? "  ok   " : "  FAIL ") << what << "\n";
+        std::cout << (cond ? "  ok   " : "  FAIL ") << what << std::endl;  // flush each line
         if (! cond) ++failures;
     }
 
@@ -168,9 +168,138 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
       check (ok (pk), "get_clip_peaks ok");
       check ((int) pk["data"].getProperty ("buckets", 0) > 0, "peaks array non-empty"); }
 
+    // ─── Stage 3: VST3 hosting + MIDI ───
+    std::cout << "--- Stage 3: VST3 hosting + MIDI ---\n";
+    auto trackById = [&] (const String& id) -> var {
+        auto snap = ops.snapshot();                 // keep the temporary alive (no dangling array)
+        if (auto* arr = snap["tracks"].getArray())
+            for (auto& tr : *arr)
+                if (tr.getProperty ("id", var()).toString() == id) return tr;
+        return {};
+    };
+    auto externalPluginIndex = [&] (const var& track) -> int {
+        if (auto* arr = track.getProperty ("plugins", var()).getArray())
+            for (auto& p : *arr)
+                if ((bool) p.getProperty ("external", false)) return (int) p.getProperty ("index", -1);
+        return -1;
+    };
+
+    auto lp = cmd (ops, "list_plugins");
+    check (ok (lp), "list_plugins ok");
+    const int nPlugins = lp["data"].getProperty ("plugins", var()).size();
+    std::cout << "  ..    " << nPlugins << " VST3 plugin(s) scanned\n";
+
+    String fxId, instId;
+    if (auto* arr = lp["data"].getProperty ("plugins", var()).getArray())
+        for (auto& p : *arr)
+        {
+            const bool inst = (bool) p.getProperty ("isInstrument", false);
+            if (inst && instId.isEmpty()) instId = p.getProperty ("id", var()).toString();
+            if (! inst && fxId.isEmpty()) fxId = p.getProperty ("id", var()).toString();
+        }
+
+    if (nPlugins == 0)
+    {
+        std::cout << "  (no VST3s available — skipping host checks; commands compiled+dispatch ok)\n";
+    }
+    else
+    {
+        // Effect on the existing wave track (tid).
+        if (fxId.isNotEmpty())
+        {
+            { auto* a = new DynamicObject(); a->setProperty ("trackId", tid); a->setProperty ("pluginId", fxId);
+              check (ok (cmd (ops, "load_plugin", var (a))), "load_plugin (effect) on wave track ok"); }
+            int idx = externalPluginIndex (trackById (tid));
+            check (idx >= 0, "effect appears in the plugin chain");
+            if (idx >= 0)
+            {
+                { auto* a = new DynamicObject(); a->setProperty ("trackId", tid); a->setProperty ("index", idx);
+                  a->setProperty ("paramIndex", 0); a->setProperty ("value", 0.5);
+                  check (ok (cmd (ops, "set_plugin_param", var (a))), "set_plugin_param ok"); }
+                { auto* a = new DynamicObject(); a->setProperty ("trackId", tid); a->setProperty ("index", idx);
+                  a->setProperty ("bypassed", true);
+                  cmd (ops, "bypass_plugin", var (a)); }
+                // enabled==false reflected
+                bool bypassed = false;
+                { auto trk = trackById (tid);   // bind to a local (no dangling temporary)
+                  if (auto* arr = trk.getProperty ("plugins", var()).getArray())
+                    for (auto& p : *arr) if ((int) p.getProperty ("index", -1) == idx) bypassed = ! (bool) p.getProperty ("enabled", true); }
+                check (bypassed, "bypass_plugin disabled the plugin");
+                // persists across save/reload
+                cmd (ops, "save"); cmd (ops, "reload");
+                check (externalPluginIndex (trackById (tid)) >= 0, "hosted plugin persists across save/reload");
+                { auto* a = new DynamicObject(); a->setProperty ("trackId", tid);
+                  a->setProperty ("index", externalPluginIndex (trackById (tid)));
+                  check (ok (cmd (ops, "remove_plugin", var (a))), "remove_plugin ok"); }
+                check (externalPluginIndex (trackById (tid)) < 0, "plugin removed from chain");
+            }
+        }
+
+        // MIDI synth: new track + MIDI clip + instrument.
+        auto ct = cmd (ops, "create_track", args1 ("name", "Synth"));
+        const auto synthTid = ct["data"].getProperty ("trackId", var()).toString();
+        { auto* a = new DynamicObject(); a->setProperty ("trackId", synthTid);
+          check (ok (cmd (ops, "add_midi_clip", var (a))), "add_midi_clip ok"); }
+        check (trackClips (trackById (synthTid)) == 1, "MIDI clip on synth track");
+        auto synthClips = trackById (synthTid).getProperty ("clips", var());
+        check (synthClips.size() > 0 && synthClips[0].getProperty ("type", var()).toString() == "midi", "clip type == midi");
+        if (instId.isNotEmpty())
+        {
+            { auto* a = new DynamicObject(); a->setProperty ("trackId", synthTid); a->setProperty ("pluginId", instId);
+              check (ok (cmd (ops, "load_plugin", var (a))), "load_plugin (instrument) on MIDI track ok"); }
+            bool hasInst = false;
+            { auto trk = trackById (synthTid);   // bind to a local (no dangling temporary)
+              if (auto* arr = trk.getProperty ("plugins", var()).getArray())
+                for (auto& p : *arr) if ((bool) p.getProperty ("isInstrument", false)) hasInst = true; }
+            check (hasInst, "instrument appears in the synth track chain");
+        }
+    }
+
     std::cout << "===== " << (checks - failures) << "/" << checks
               << " checks passed, " << failures << " failed =====\n\n";
     return failures;
+}
+
+void runPluginDemo (MoshOps& ops)
+{
+    using namespace juce;
+    auto cmd = [&] (const String& n, var a = var()) {
+        auto* c = new DynamicObject(); c->setProperty ("command", n);
+        if (! a.isVoid()) c->setProperty ("args", a);
+        return ops.execute (var (c));
+    };
+    auto obj = [] (std::initializer_list<std::pair<const char*, var>> kv) {
+        auto* o = new DynamicObject();
+        for (auto& p : kv) o->setProperty (p.first, p.second);
+        return var (o);
+    };
+
+    // Find an effect + an instrument from the scan.
+    String fxId, instId;
+    auto lp = cmd ("list_plugins");
+    if (auto* arr = lp["data"].getProperty ("plugins", var()).getArray())
+        for (auto& p : *arr)
+        {
+            if ((bool) p.getProperty ("isInstrument", false) && instId.isEmpty()) instId = p.getProperty ("id", var()).toString();
+            if (! (bool) p.getProperty ("isInstrument", false) && fxId.isEmpty()) fxId = p.getProperty ("id", var()).toString();
+        }
+
+    // Wave track + tone + effect.
+    auto t1 = cmd ("create_track", obj ({{ "name", "Drums" }}))["data"].getProperty ("trackId", var()).toString();
+    cmd ("add_test_tone_clip", obj ({{ "trackId", t1 }, { "seconds", 2.0 }, { "freq", 110.0 }}));
+    if (fxId.isNotEmpty())
+        cmd ("load_plugin", obj ({{ "trackId", t1 }, { "pluginId", fxId }}));
+
+    // Synth track + MIDI + instrument, then open its native editor.
+    auto t2 = cmd ("create_track", obj ({{ "name", "Synth" }}))["data"].getProperty ("trackId", var()).toString();
+    cmd ("add_midi_clip", obj ({{ "trackId", t2 }}));
+    if (instId.isNotEmpty())
+    {
+        auto r = cmd ("load_plugin", obj ({{ "trackId", t2 }, { "pluginId", instId }}));
+        const int idx = (int) r["data"].getProperty ("index", -1);
+        if (idx >= 0)
+            cmd ("open_plugin_editor", obj ({{ "trackId", t2 }, { "index", idx }}));
+    }
 }
 
 } // namespace mosh
