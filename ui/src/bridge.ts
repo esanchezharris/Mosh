@@ -127,23 +127,16 @@ interface Bridge {
   subscribe(listener: MoshEventListener): () => void;
 }
 
-// --- JUCE shape (minimal; we only touch what we use) -----------------------
-// VERIFY: JUCE 8 WebView native-fn registration + window.__JUCE__.backend emit
-// API (resolve against JUCE 8 when wiring the C++ bridge in module 03). The
-// exact accessor names below (getNativeFunction, addEventListener / emit
-// channel) must be confirmed against the JUCE 8 WebBrowserComponent example;
-// JUCE's JS layer typically exposes registered native functions via
-// `window.__JUCE__.backend.getNativeFunction("name")(...args) -> Promise` and
-// C++->JS events via an emit/event-listener channel on the same backend object.
+// --- JUCE 8 native-integration shape -----------------------------------------
+// RESOLVED against juce_gui_extra/native/javascript/index.js (JUCE 8.0.8). A native
+// function registered C++-side via WebBrowserComponent::Options::withNativeFunction
+// is NOT exposed as backend.getNativeFunction(); instead the frontend invokes it by
+// emitting "__juce__invoke" {name, params, resultId} and awaiting a matching
+// "__juce__complete" {promiseId, result} event. C++->JS events arrive via
+// backend.addEventListener(eventId, handler).
 interface JuceBackend {
-  getNativeFunction?: (
-    name: string
-  ) => (...args: unknown[]) => Promise<unknown>;
-  // C++ -> JS event push. VERIFY exact API name/signature on JUCE 8.
-  addEventListener?: (
-    eventId: string,
-    handler: (payload: unknown) => void
-  ) => void;
+  emitEvent: (eventId: string, payload: unknown) => void;
+  addEventListener: (eventId: string, handler: (payload: unknown) => void) => void;
   removeEventListener?: (
     eventId: string,
     handler: (payload: unknown) => void
@@ -152,6 +145,7 @@ interface JuceBackend {
 
 interface JuceGlobal {
   backend?: JuceBackend;
+  initialisationData?: { __juce__functions?: string[] };
 }
 
 declare global {
@@ -167,39 +161,53 @@ declare global {
 const JUCE_EVENT_CHANNEL = "mosh_event";
 
 function makeJuceBridge(backend: JuceBackend): Bridge {
-  const call = (name: string) => {
-    if (!backend.getNativeFunction) {
-      throw new Error("JUCE backend missing getNativeFunction");
+  // Replicate JUCE's getNativeFunction protocol (index.js PromiseHandler): emit
+  // "__juce__invoke" and resolve when the matching "__juce__complete" arrives.
+  const pending = new Map<number, (result: unknown) => void>();
+  let nextId = 0;
+  backend.addEventListener("__juce__complete", (payload) => {
+    const { promiseId, result } = (payload ?? {}) as {
+      promiseId?: number;
+      result?: unknown;
+    };
+    if (typeof promiseId === "number" && pending.has(promiseId)) {
+      pending.get(promiseId)!(result);
+      pending.delete(promiseId);
     }
-    return backend.getNativeFunction(name);
+  });
+
+  const invoke = (name: string, params: unknown[]): Promise<unknown> => {
+    const promiseId = nextId++;
+    const result = new Promise<unknown>((resolve) =>
+      pending.set(promiseId, resolve)
+    );
+    backend.emitEvent("__juce__invoke", { name, params, resultId: promiseId });
+    return result;
   };
 
   return {
     kind: "juce",
 
     async executeCommand(name, args) {
-      // C++ side registers `executeCommand(name, argsJson)`; it marshals to the
-      // message thread, runs DslExecutor::execute, and resolves the envelope.
-      const raw = await call("executeCommand")(name, JSON.stringify(args ?? {}));
+      // C++ withNativeFunction("executeCommand", [name, argsJson]) → MoshResult var.
+      const raw = await invoke("executeCommand", [name, JSON.stringify(args ?? {})]);
       return normalizeResult(raw);
     },
 
     async getSnapshot() {
-      const raw = await call("getSnapshot")();
+      const raw = await invoke("getSnapshot", []);
       return normalizeSnapshot(raw);
     },
 
     subscribe(listener) {
-      // VERIFY: JUCE 8 WebView native-fn registration + window.__JUCE__.backend
-      // emit API (resolve against JUCE 8 when wiring the C++ bridge in module
-      // 03). If the real emit API differs, only this block changes.
+      // C++ emits typed events on the "mosh_event" channel (emitEventIfBrowserIsVisible).
       const handler = (payload: unknown) => {
         const ev = payload as MoshEvent;
         if (ev && typeof (ev as { type?: unknown }).type === "string") {
           listener(ev);
         }
       };
-      backend.addEventListener?.(JUCE_EVENT_CHANNEL, handler);
+      backend.addEventListener(JUCE_EVENT_CHANNEL, handler);
       return () => backend.removeEventListener?.(JUCE_EVENT_CHANNEL, handler);
     },
   };
@@ -703,7 +711,13 @@ function normalizeSnapshot(raw: unknown): Snapshot {
 function selectBridge(): Bridge {
   const juce = typeof window !== "undefined" ? window.__JUCE__ : undefined;
   if (juce && juce.backend) {
-    return makeJuceBridge(juce.backend);
+    // Use the real JUCE backend; fall back to the mock if native init throws (so the
+    // app always renders rather than white-screening on a partial __JUCE__ object).
+    try {
+      return makeJuceBridge(juce.backend);
+    } catch (e) {
+      console.error("Mosh: JUCE bridge init failed, using mock", e);
+    }
   }
   return makeMockBridge();
 }
