@@ -35,6 +35,14 @@ That folder is intentionally gitignored. The tracked manifest is:
 - `mosh_v1_final_build_pack`, excluding its generated `build/` folder.
 - ClaudeMosh `assets/grit_demo/` copied into the preservation area and ignored in git.
 
+## Archived-Only Policy
+
+`assets/grit_demo/` remains archived-only by default. The original tracked proof
+assets were copied into `_preserved_artifacts/2026-06-08-consolidation/` and
+then untracked so they do not ship as source. Do not recreate or re-track
+`assets/grit_demo/` unless a later task explicitly asks for local inspection or
+asset restoration.
+
 ## Verification
 
 Run:
@@ -48,5 +56,6 @@ The verifier recomputes size and SHA256 for each preserved file listed in the ma
 ## Boundaries
 
 - Preserved artifacts are not runtime imports.
+- `assets/grit_demo/` is a preserved proof bundle, not a runtime dependency.
 - Old browser-Mosh/JamPilot code remains reference-only unless a later change explicitly ports a behavior through MoshOps.
 - Destructive cleanup remains blocked until the archive/delete candidate report is reviewed.
