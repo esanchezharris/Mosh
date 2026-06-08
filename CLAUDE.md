@@ -40,7 +40,8 @@
 - [x] `getSnapshot()` walks the Edit + typed events; commands: `create_track`, `import_clip`, `set_transport`, `set_tempo`, `rename_track`, `set_track_gain/mute/solo`, `delete_track`, `move_clip`, `trim_clip`, `split_clip`.
 - [x] `MOSH_RENDERLAYER` schema defined; node round-trips save/load (spine `mosh_tests`).
 - [x] **Smoke test green over real Tracktion** (`mosh_engine_tests`, 23 assertions): `create_track`+`import_clip`(real WAV) via MoshOps; **undo/redo via MoshOps reverts/restores** (one undo system confirmed); `save()` round-trips `.tracktionedit`; tempo/transport reflected; JSONL records commands.
-- [~] **GATE:** WebView renders a snapshot cold *(blocked on Stage-2 WebView resource render)*; audio loops + scrub *(needs a run; transport commands execute)*. **Backend half of the gate (commands/undo/JSONL/save) ✅ verified.**
+- [x] **Persistence verified** (`test_persistence`, `[persist]`): tracks/clips/plugins/**neural insert** survive a save → **fresh-session reload** (`saveAs`/`loadEditFromFile`; the custom plugin deserializes via its `createBuiltInType` registration). Covers Stage 1 "save/reload restores" + Stage 3 "persists".
+- [~] **GATE:** WebView renders a snapshot cold *(blocked on Stage-2 WebView resource render)*; audio loops + scrub *(needs a run; transport commands execute)*. **Backend half (commands/undo/JSONL/save-reload) ✅ verified.**
 
 ### Stage 2 — WebView arrangement (`03`) — *BLOCKED on the WebView render (Windows WebView2 cancels the resource-root nav; needs the macOS WKWebView run / a WebView2 fix — see STATUS "OPEN ISSUE"). Backend seam is ready.*
 - [ ] Conventional layout: track headers, timeline lanes, clips, transport bar, mixer stub.
