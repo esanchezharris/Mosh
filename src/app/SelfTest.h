@@ -16,4 +16,8 @@ int runSelfTest (MoshEngine&, MoshOps&);
     editor — then leaves the GUI running (for visual verification of the gate). */
 void runPluginDemo (MoshOps&);
 
+/** Scripted Stage 4 demo (`Mosh --demo4`): a track + tone + a Tier-A neural
+    insert with the drive driven up — for visual verification of the neural rack. */
+void runNeuralDemo (MoshOps&);
+
 } // namespace mosh

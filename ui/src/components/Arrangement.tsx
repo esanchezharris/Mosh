@@ -182,7 +182,7 @@ function TrackHeader({ track }: { track: Track }) {
   const exec = useStore((s) => s.exec);
   const selectedTrackId = useStore((s) => s.selectedTrackId);
   const setSelectedTrack = useStore((s) => s.setSelectedTrack);
-  const fxCount = (track.plugins ?? []).filter((p) => p.external).length;
+  const fxCount = (track.plugins ?? []).filter((p) => p.external || p.neural).length;
   return (
     <div
       className={`track-head ${selectedTrackId === track.id ? "sel" : ""}`}

@@ -33,28 +33,30 @@ if (MOSH_BUILD_TESTS)
     CPMAddPackage("gh:catchorg/Catch2@3.7.1")
 endif()
 
-# ── Tier-A neural backends (Stage 4; fetched only when enabled) ─────────────
-if (MOSH_ENABLE_NEURAL)
-    # RTNeural — small-model inference (NAM/Proteus).
+# ── Tier-A neural backends ──────────────────────────────────────────────────
+# Split by weight: RTNeural is light (Eigen/XSIMD, header-heavy) and carries the
+# SHIPPING models (NAM/Proteus run inline, RT-safe — 04 §2.3). anira pulls a heavy
+# runtime (LibTorch/ONNX) and only the GATED RAVE/DDSP path needs it, so it sits
+# behind a second opt-in to keep the default neural build tractable.
+option(MOSH_ENABLE_ANIRA "Also fetch anira + LibTorch/ONNX (RAVE/DDSP, heavy)" OFF)
+
+if (MOSH_ENABLE_RTNEURAL)
+    # RTNeural — small-model inference (NAM/Proteus, inline RT-safe).
     CPMAddPackage(
-        NAME         RTNeural
+        NAME              RTNeural
         GITHUB_REPOSITORY jatinchowdhury18/RTNeural
-        GIT_TAG      main)        # TODO Stage 4: pin to a commit once measured
+        GIT_TAG           1fb1f075a5d66e85bfc8f488c3f3626840cb3a1d
+        OPTIONS           "RTNEURAL_EIGEN ON")
 
-    # chowdsp_utils — DSP blocks + plugin state/param helpers.
-    CPMAddPackage(
-        NAME         chowdsp_utils
-        GITHUB_REPOSITORY Chowdhury-DSP/chowdsp_utils
-        GIT_TAG      main)        # TODO Stage 4: pin to a commit
-
-    # anira — RT-safe neural inference host (chooses backend per model).
-    CPMAddPackage(
-        NAME         anira
-        GITHUB_REPOSITORY anira-project/anira
-        GIT_TAG      main)        # TODO Stage 4: pin to a commit
-
-    # Aggregate link target for the app (filled in at Stage 4).
     add_library(mosh_neural_backends INTERFACE)
-    target_link_libraries(mosh_neural_backends INTERFACE
-        anira RTNeural)
+    target_link_libraries(mosh_neural_backends INTERFACE RTNeural)
+
+    if (MOSH_ENABLE_ANIRA)
+        CPMAddPackage(
+            NAME              anira
+            GITHUB_REPOSITORY anira-project/anira
+            GIT_TAG           main)
+        target_link_libraries(mosh_neural_backends INTERFACE anira)
+        target_compile_definitions(mosh_neural_backends INTERFACE MOSH_HAVE_ANIRA=1)
+    endif()
 endif()

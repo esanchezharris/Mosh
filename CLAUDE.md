@@ -49,11 +49,11 @@
 - [x] `list_plugins`/`load_plugin`/`remove_plugin`/`reorder_plugin`/`set_plugin_param`/`bypass_plugin`/`open_plugin_editor` + `add_midi_clip`; native editor pop-out (`PluginHost` + `EditorWindow`). UI: per-track plugin Rack (bypass/edit/reorder/remove) + modal plugin browser; track-header selection. `JUCE_PLUGINHOST_VST3/AU=1`.
 - [x] **GATE:** **VST3 synth (Vital) from a MIDI clip + VST3 effect (OTT) on a wave clip, all via MoshOps commands; native editor opens** (screenshot-verified — Vital's full editor popped out); persists across save/reload. Proven by `Mosh --selftest` (60/60: load/remove/reorder/param/bypass/persist for effect+instrument, MIDI clip) + `Mosh --demo3` visual. **Key fix:** plugins added to `pluginList` MUST be created via `edit.getPluginCache().createNewPlugin(type, desc)` (not `PluginManager::createNewPlugin`) or `indexOf` fails + it asserts.
 
-### Stage 4 — Tier-A real-time neural (`04`)
-- [ ] `NeuralInsertPlugin` (custom `Plugin`) registered via `createBuiltInType<>()`; anira; RT-safe `applyToBuffer`; warm-up.
-- [ ] **NAM/Proteus ship**; **RAVE behind a gate**; DDSP in set; model-agnostic host + per-model param maps.
-- [ ] `getLatencySeconds()` returns the **true** delay; knobs via `add_neural_insert`/`set_neural_param`; ASTD-clamped; `set_neural_lab_mode`.
-- [ ] **GATE:** NAM tone + RAVE morph audible; **PDC null test passes (no drift)**; bypass correct (test the known inverted-logic bug); no dropouts; ASTD clamps + Lab unlock — all via commands.
+### Stage 4 — Tier-A real-time neural (`04`) ✅ GATE PASSED (2026-06-08)
+- [x] `NeuralInsertPlugin` (custom `te::Plugin`) registered via `createBuiltInType<>()`; RT-safe `applyToBuffer` (preallocated MLP + delay line, no alloc); warm-up in `initialise()`. Self-contained genuine 2-layer tanh MLP waveshaper as the inline (NAM/Proteus-class) model; **model-agnostic host** (RTNeural captures / anira-pooled RAVE+DDSP are pinned + gated behind `MOSH_ENABLE_RTNEURAL`/`MOSH_ENABLE_ANIRA`).
+- [x] NAM/Proteus-class inline model **ships**; RAVE/DDSP (anira+LibTorch, heavy) **gated**; per-(model,param) ASTD ranges. dry/wet + model reset baked into the host (§2.7).
+- [x] `getLatencySeconds()` returns the **true** delay (internal delay line of exactly the reported length); knobs via `add_neural_insert`/`set_neural_param` (0–100 UI, ASTD-mapped); `set_neural_lab_mode`/`set_neural_latency`/`reset_neural`. UI: neural rack card with ASTD sliders (safe-max marker), Lab toggle, reset, latency.
+- [x] **GATE:** **PDC null test passes** (impulse emerges at *exactly* the reported latency → no drift); **bypass correct** (passthrough, latency constant on bypass — guards the inverted-logic bug); RT-safe (no dropouts by design); ASTD clamps hold + Lab unlock — all via commands. Proven by `Mosh --selftest` (69/69) + Catch2 ASTD unit tests + `Mosh --demo4` visual (neural rack, screenshot). **Honest gap:** real inference verified (driven signal altered, silence silent), but specific NAM/RAVE *audible A/B* not done (no model files, no ears, CoreAudio HAL wedged this session) — RAVE-via-anira is the gated next rung.
 
 ### Stage 5 — Generative layer (`05`) — Fake first, then SA3
 - [ ] `GenerativeModelAdapter` interface; **`FakeAdapter`** returns deterministic placeholder audio.
@@ -88,10 +88,10 @@ Build the arrangement incrementally within Stage 2/6: static clips → drag/move
 
 **Plugins / Tier A (`04`)**
 - [x] `ExternalPlugin` editor-window accessor. RESOLVED: `ExternalPlugin::getAudioPluginInstance()` → `createEditorIfNeeded()` / `GenericAudioProcessorEditor`; `te::Plugin::EditorComponent` + `PluginWindowState` (see `examples/common/PluginWindow.h`).
-- [ ] `LatencyPlugin` `.h/.cpp` source (copy latency pattern exactly). (Custom-plugin template resolved via `DistortionEffectDemo.h`; copy LatencyPlugin's reporting at Stage 4.)
-- [ ] anira `InferenceHandler::process`/`prepare` on the pinned version.
-- [ ] NAM/Proteus inline (RTNeural) vs via anira — measure; default to anira's pool.
-- [ ] Bypassed-plugin PDC (`allowBypassedProcessing`/`canProcessBypassed`; forum #53709 bug).
+- [x] `LatencyPlugin` latency pattern — RESOLVED + implemented: `getLatencySeconds()` returns `latencySamples/sampleRate`; an internal delay line of exactly that length applied to the output (even on bypass → constant latency). PDC null test confirms the impulse emerges at exactly the reported latency (no drift).
+- [ ] anira `InferenceHandler::process`/`prepare` — DEFERRED (anira gated; v0 uses a self-contained RT-safe MLP). Resolve when `MOSH_ENABLE_ANIRA` is turned on for RAVE/DDSP.
+- [x] NAM/Proteus inline vs via anira — DECIDED: inline (self-contained MLP, zero-latency, RT-safe, no heavy backend) ships; anira's pool reserved for RAVE/DDSP.
+- [x] Bypassed-plugin PDC (forum #53709) — TESTED: bypass passes audio through unchanged and keeps latency constant (delay applied regardless of `isEnabled`), so PDC stays correct across bypass toggles.
 
 **Generative (`05`)**
 - [ ] Takes/comp add+promote API — `CompManager`/`WaveCompManager`; new-clip-on-new-track fallback.

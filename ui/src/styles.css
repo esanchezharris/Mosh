@@ -150,4 +150,18 @@ button.on { border-color: var(--accent); color: var(--accent); background: #2120
 .pr-name { font-size: 0.9rem; }
 .pr-meta { font-size: 0.72rem; color: var(--muted); }
 
+/* Neural insert (Stage 4) */
+.pcard.neural { min-width: 220px; border-color: #3a3a6a; background: linear-gradient(180deg, #1c1c2c, var(--panel-2)); }
+.nbadge { background: var(--accent); }
+.neural-body { display: flex; flex-direction: column; gap: 5px; }
+.nparam { display: grid; grid-template-columns: 42px 1fr 26px; align-items: center; gap: 6px; }
+.nlabel { font-size: 0.68rem; color: var(--muted); text-transform: uppercase; }
+.nslider { position: relative; display: flex; align-items: center; }
+.nslider input { width: 100%; accent-color: var(--accent); height: 4px; }
+.astd-mark { position: absolute; top: -2px; width: 2px; height: 16px; background: var(--warn); box-shadow: 0 0 4px var(--warn); pointer-events: none; }
+.nval { font-size: 0.7rem; color: var(--text); font-variant-numeric: tabular-nums; text-align: right; }
+.neural-row { display: flex; align-items: center; gap: 5px; margin-top: 2px; }
+.mixbtn.lab-on { background: #5a3a12; color: var(--warn); border-color: #7a5a2a; }
+.nlat { margin-left: auto; font-size: 0.66rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+
 .boot { padding: 3rem; color: var(--muted); }

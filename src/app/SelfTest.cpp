@@ -1,6 +1,7 @@
 #include "SelfTest.h"
 #include "engine/MoshEngine.h"
 #include "moshops/MoshOps.h"
+#include "plugins/neural/NeuralInsertPlugin.h"
 #include <iostream>
 #include <vector>
 
@@ -14,7 +15,7 @@ namespace
     void check (bool cond, const juce::String& what)
     {
         ++checks;
-        std::cout << (cond ? "  ok   " : "  FAIL ") << what << std::endl;  // flush each line
+        std::cerr << (cond ? "  ok   " : "  FAIL ") << what << std::endl;  // flush each line
         if (! cond) ++failures;
     }
 
@@ -33,6 +34,13 @@ namespace
         return juce::var (o);
     }
 
+    juce::var objN (std::initializer_list<std::pair<const char*, juce::var>> kv)
+    {
+        auto* o = new juce::DynamicObject();
+        for (auto& p : kv) o->setProperty (p.first, p.second);
+        return juce::var (o);
+    }
+
     bool ok (const juce::var& r) { return (bool) r.getProperty ("ok", false); }
 
     int tracks (MoshOps& ops) { return ops.snapshot().getProperty ("tracks", juce::var()).size(); }
@@ -45,7 +53,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 {
     using namespace juce;
     failures = 0; checks = 0;
-    std::cout << "\n===== Mosh Stage 1 command-surface harness =====\n";
+    std::cerr << "\n===== Mosh Stage 1 command-surface harness =====\n";
 
     // Capture emitted events.
     std::vector<String> eventTypes;
@@ -82,8 +90,13 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // 4. transport: play → playing; stop; seek
     auto rp = cmd (ops, "set_transport", args1 ("action", "play"));
     check (ok (rp), "set_transport play ok");
-    check ((bool) rp["data"].getProperty ("playing", false), "transport reports playing after play");
-    check (eng.edit().getTransport().getCurrentPlaybackContext() != nullptr, "playback context allocated (audio attached)");
+    if (eng.hasAudio())
+    {
+        check ((bool) rp["data"].getProperty ("playing", false), "transport reports playing after play");
+        check (eng.edit().getTransport().getCurrentPlaybackContext() != nullptr, "playback context allocated (audio attached)");
+    }
+    else
+        std::cerr << "  ..   (no-audio headless run — live-playback checks done via the GUI)\n";
     cmd (ops, "set_transport", args1 ("action", "stop"));
     auto seekArgs = new DynamicObject(); seekArgs->setProperty ("position", 1.0);
     cmd (ops, "set_transport", var (seekArgs));
@@ -128,7 +141,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     check (logsCommand ("undo"),         "JSONL records undo");
 
     // ─── Stage 2: arrangement editing + mixer stub ───
-    std::cout << "--- Stage 2: arrangement + mixer ---\n";
+    std::cerr << "--- Stage 2: arrangement + mixer ---\n";
     const auto cid = firstTrack (ops)["clips"][0].getProperty ("id", var()).toString();
     const auto tid = firstTrack (ops).getProperty ("id", var()).toString();
 
@@ -169,7 +182,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
       check ((int) pk["data"].getProperty ("buckets", 0) > 0, "peaks array non-empty"); }
 
     // ─── Stage 3: VST3 hosting + MIDI ───
-    std::cout << "--- Stage 3: VST3 hosting + MIDI ---\n";
+    std::cerr << "--- Stage 3: VST3 hosting + MIDI ---\n";
     auto trackById = [&] (const String& id) -> var {
         auto snap = ops.snapshot();                 // keep the temporary alive (no dangling array)
         if (auto* arr = snap["tracks"].getArray())
@@ -187,7 +200,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     auto lp = cmd (ops, "list_plugins");
     check (ok (lp), "list_plugins ok");
     const int nPlugins = lp["data"].getProperty ("plugins", var()).size();
-    std::cout << "  ..    " << nPlugins << " VST3 plugin(s) scanned\n";
+    std::cerr << "  ..    " << nPlugins << " VST3 plugin(s) scanned\n";
 
     String fxId, instId;
     if (auto* arr = lp["data"].getProperty ("plugins", var()).getArray())
@@ -200,7 +213,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 
     if (nPlugins == 0)
     {
-        std::cout << "  (no VST3s available — skipping host checks; commands compiled+dispatch ok)\n";
+        std::cerr << "  (no VST3s available — skipping host checks; commands compiled+dispatch ok)\n";
     }
     else
     {
@@ -255,7 +268,74 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         }
     }
 
-    std::cout << "===== " << (checks - failures) << "/" << checks
+    // ─── Stage 4: Tier-A real-time neural insert ───
+    std::cerr << "--- Stage 4: Tier-A neural insert (RT-safe / PDC / ASTD) ---\n";
+    {
+        auto nt = cmd (ops, "create_track", args1 ("name", "Neural"))["data"].getProperty ("trackId", var()).toString();
+        auto ar = cmd (ops, "add_neural_insert", objN ({{ "trackId", nt }, { "modelId", "nam" }}));
+        check (ok (ar), "add_neural_insert ok");
+        const int nidx = (int) ar["data"].getProperty ("index", -1);
+
+        NeuralInsertPlugin* n = nullptr;
+        if (auto* t = te::findAudioTrackForID (eng.edit(), te::EditItemID::fromString (nt)))
+            for (auto* p : t->pluginList.getPlugins())
+                if (auto* nn = dynamic_cast<NeuralInsertPlugin*> (p)) n = nn;
+        check (n != nullptr, "neural insert is in the track chain (built-in type registered)");
+
+        if (n != nullptr)
+        {
+            n->initialise ({ {}, 44100.0, 512 });   // alloc delay line + warm up
+
+            auto process = [&] (float amp, int len) {
+                AudioBuffer<float> buf (2, len); buf.clear();
+                buf.setSample (0, 0, amp); buf.setSample (1, 0, amp);
+                te::MidiMessageArray midi;
+                te::PluginRenderContext ctx (&buf, AudioChannelSet::stereo(), 0, len, &midi, 0.0,
+                                             tracktion::TimeRange(), true, false, false, false);
+                n->applyToBuffer (ctx);
+                return buf;
+            };
+
+            cmd (ops, "set_neural_param", objN ({{ "trackId", nt }, { "index", nidx }, { "paramId", "drive" }, { "value", 100.0 }}));
+            cmd (ops, "set_neural_param", objN ({{ "trackId", nt }, { "index", nidx }, { "paramId", "mix" }, { "value", 100.0 }}));
+            {
+                auto out = process (0.5f, 64);
+                check (std::abs (out.getSample (0, 0) - 0.5f) > 0.1f, "neural model alters the driven signal (real inference)");
+                check (std::abs (out.getSample (0, 10)) < 1e-4f, "silence stays silent (no DC injected by the net)");
+            }
+
+            // Bypass — the known inverted-logic bug (04 §2.4): bypassed → passthrough.
+            cmd (ops, "bypass_plugin", objN ({{ "trackId", nt }, { "index", nidx }, { "bypassed", true }}));
+            {
+                auto out = process (0.5f, 64);
+                check (std::abs (out.getSample (0, 0) - 0.5f) < 1e-5f, "bypass passes audio through unchanged");
+            }
+            cmd (ops, "bypass_plugin", objN ({{ "trackId", nt }, { "index", nidx }, { "bypassed", false }}));
+
+            // ASTD clamp + Lab unlock (read raw via the param's normalised value).
+            cmd (ops, "set_neural_param", objN ({{ "trackId", nt }, { "index", nidx }, { "paramId", "drive" }, { "value", 100.0 }}));
+            const float normClamped = n->getAutomatableParameter (0)->getCurrentNormalisedValue();
+            check (std::abs (normClamped - (12.0f - 1.0f) / (25.0f - 1.0f)) < 0.02f, "ASTD clamps drive UI=100 below quality-collapse (not raw max)");
+            cmd (ops, "set_neural_lab_mode", objN ({{ "trackId", nt }, { "index", nidx }, { "on", true }}));
+            cmd (ops, "set_neural_param", objN ({{ "trackId", nt }, { "index", nidx }, { "paramId", "drive" }, { "value", 100.0 }}));
+            const float normLab = n->getAutomatableParameter (0)->getCurrentNormalisedValue();
+            check (normLab > normClamped + 0.1f, "Lab mode unlocks drive beyond the clamp");
+            check (std::abs (normLab - 1.0f) < 0.02f, "Lab UI=100 reaches the full raw range");
+
+            // PDC: true latency + delay-line correctness (no drift vs dry).
+            n->resetModel();
+            cmd (ops, "set_neural_latency", objN ({{ "trackId", nt }, { "index", nidx }, { "samples", 128 }}));
+            check (std::abs (n->getLatencySeconds() - 128.0 / 44100.0) < 1e-9, "getLatencySeconds() reports the TRUE delay (PDC)");
+            cmd (ops, "set_neural_param", objN ({{ "trackId", nt }, { "index", nidx }, { "paramId", "drive" }, { "value", 50.0 }}));
+            {
+                auto out = process (0.5f, 256);
+                check (std::abs (out.getSample (0, 0)) < 1e-4f && std::abs (out.getSample (0, 64)) < 1e-4f, "no output before the reported latency");
+                check (std::abs (out.getSample (0, 128)) > 0.05f, "impulse emerges at exactly the reported latency (delay == reported, no drift)");
+            }
+        }
+    }
+
+    std::cerr << "===== " << (checks - failures) << "/" << checks
               << " checks passed, " << failures << " failed =====\n\n";
     return failures;
 }
@@ -299,6 +379,31 @@ void runPluginDemo (MoshOps& ops)
         const int idx = (int) r["data"].getProperty ("index", -1);
         if (idx >= 0)
             cmd ("open_plugin_editor", obj ({{ "trackId", t2 }, { "index", idx }}));
+    }
+}
+
+void runNeuralDemo (MoshOps& ops)
+{
+    using namespace juce;
+    auto cmd = [&] (const String& n, var a = var()) {
+        auto* c = new DynamicObject(); c->setProperty ("command", n);
+        if (! a.isVoid()) c->setProperty ("args", a);
+        return ops.execute (var (c));
+    };
+    auto obj = [] (std::initializer_list<std::pair<const char*, var>> kv) {
+        auto* o = new DynamicObject();
+        for (auto& p : kv) o->setProperty (p.first, p.second);
+        return var (o);
+    };
+
+    auto t = cmd ("create_track", obj ({{ "name", "Guitar" }}))["data"].getProperty ("trackId", var()).toString();
+    cmd ("add_test_tone_clip", obj ({{ "trackId", t }, { "seconds", 3.0 }, { "freq", 110.0 }}));
+    auto r = cmd ("add_neural_insert", obj ({{ "trackId", t }, { "modelId", "nam" }}));
+    const int idx = (int) r["data"].getProperty ("index", -1);
+    if (idx >= 0)
+    {
+        cmd ("set_neural_param", obj ({{ "trackId", t }, { "index", idx }, { "paramId", "drive" }, { "value", 72.0 }}));
+        cmd ("set_neural_param", obj ({{ "trackId", t }, { "index", idx }, { "paramId", "mix" }, { "value", 85.0 }}));
     }
 }
 

@@ -2,15 +2,34 @@
 
 namespace mosh
 {
-MoshEngine::MoshEngine()
+namespace
 {
-    // Standalone construction with the engine's default behaviours (the demos'
-    // ExtendedUIBehaviour is an examples-only helper, not in the engine lib).
-    enginePtr = std::make_unique<te::Engine> (juce::String ("Mosh"));
+    // Lets us suppress the engine's automatic audio-device init (the te::Engine
+    // ctor calls Engine::initialise() → DeviceManager::initialise(), which opens
+    // CoreAudio). Headless/no-audio runs return false so construction never
+    // blocks on the audio HAL.
+    struct MoshEngineBehaviour : te::EngineBehaviour
+    {
+        bool audio;
+        explicit MoshEngineBehaviour (bool a) : audio (a) {}
+        bool autoInitialiseDeviceManager() override { return audio; }
+        // No audio → don't enumerate audio I/O device types (avoids the macOS
+        // mic-permission prompt on headless/no-audio launches).
+        bool addSystemAudioIODeviceTypes() override { return audio; }
+    };
+}
 
-    // Open the default audio device so the transport can play (01 §5). The
-    // generative render flow (Stage 5) detaches before offline rendering.
-    enginePtr->getDeviceManager().initialise();
+MoshEngine::MoshEngine (bool openAudioDevice)
+{
+    audioOpen = openAudioDevice
+                && ! juce::SystemStats::getEnvironmentVariable ("MOSH_NO_AUDIO", {}).isNotEmpty();
+
+    // 3-arg construction so we can disable auto device-init in no-audio mode
+    // (the device opens during the Engine ctor otherwise — 01 §5).
+    enginePtr = std::make_unique<te::Engine> (
+        juce::String ("Mosh"),
+        std::make_unique<te::UIBehaviour>(),
+        std::make_unique<MoshEngineBehaviour> (audioOpen));
 
     // Session directory: a stable per-app-data folder so save/reload round-trips.
     session = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
@@ -49,7 +68,8 @@ MoshEngine::~MoshEngine()
 
 void MoshEngine::ensurePlaybackContext()
 {
-    edit().getTransport().ensureContextAllocated();
+    if (audioOpen)
+        edit().getTransport().ensureContextAllocated();
 }
 
 juce::File MoshEngine::generateTestTone (double seconds, double freqHz, const juce::String& name)

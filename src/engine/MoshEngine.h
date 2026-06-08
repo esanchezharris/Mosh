@@ -16,11 +16,16 @@ namespace te = tracktion::engine;
 class MoshEngine
 {
 public:
-    MoshEngine();
+    /** @param openAudioDevice  open the real CoreAudio device for playback.
+        Headless runs (--selftest) and screenshots during a wedged audio HAL pass
+        false (also forced off by the MOSH_NO_AUDIO env var) — the command surface
+        and direct DSP need no device, and device init can block on CoreAudio. */
+    explicit MoshEngine (bool openAudioDevice = true);
     ~MoshEngine();
 
     te::Engine& engine() { return *enginePtr; }
     te::Edit&   edit()   { return *editPtr; }            // always fetch fresh (survives reload)
+    bool        hasAudio() const { return audioOpen; }
 
     juce::File sessionDir() const { return session; }
     juce::File editFile()   const { return editPath; }
@@ -45,6 +50,7 @@ private:
     std::unique_ptr<te::Edit>   editPtr;
     juce::File session;
     juce::File editPath;
+    bool       audioOpen = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MoshEngine)
 };

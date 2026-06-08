@@ -16,10 +16,11 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CPM_SOURCE_CACHE "${CMAKE_SOURCE_DIR}/.cpm-cache" CACHE PATH "CPM dep cache")
 set(FETCHCONTENT_BASE_DIR "${CMAKE_SOURCE_DIR}/.cpm-cache/_fc" CACHE PATH "")
 
-# Stage gating: heavy neural inference backends (anira/RTNeural/chowdsp) are
-# pinned below but only fetched/linked when this is ON (Stage 4+). Keeps the
-# Stage 0–3 skeleton build fast. The pins are recorded either way.
-option(MOSH_ENABLE_NEURAL "Fetch+link Tier-A neural deps (anira/RTNeural/chowdsp)" OFF)
+# The Tier-A neural insert (Stage 4) is self-contained (a real RT-safe MLP) and
+# ALWAYS built. The heavy external inference backends used to load standard model
+# captures (RTNeural for NAM/Proteus, anira+LibTorch for RAVE/DDSP) are pinned in
+# cmake/Dependencies.cmake and fetched only behind their own opt-in flags.
+option(MOSH_ENABLE_RTNEURAL "Fetch RTNeural (load real NAM/Proteus captures)" OFF)
 option(MOSH_BUILD_UI "Build the React/Vite UI bundle as part of CMake" ON)
 option(MOSH_BUILD_TESTS "Build the Catch2 + command-surface test target" ON)
 
@@ -43,7 +44,9 @@ target_sources(Mosh PRIVATE
     src/engine/MoshEngine.cpp
     src/moshops/MoshOps.cpp
     # Stage 3 — VST3 hosting (04 PART 1)
-    src/plugins/hosting/PluginHost.cpp)
+    src/plugins/hosting/PluginHost.cpp
+    # Stage 4 — Tier-A real-time neural insert (04 PART 2)
+    src/plugins/neural/NeuralInsertPlugin.cpp)
 
 target_include_directories(Mosh PRIVATE src)
 
@@ -57,8 +60,7 @@ target_compile_definitions(Mosh PRIVATE
     JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:Mosh,JUCE_VERSION>"
     JUCE_MODAL_LOOPS_PERMITTED=1
     # Mosh build identity / stage flags
-    MOSH_VERSION_STRING="${PROJECT_VERSION}"
-    $<$<BOOL:${MOSH_ENABLE_NEURAL}>:MOSH_ENABLE_NEURAL=1>)
+    MOSH_VERSION_STRING="${PROJECT_VERSION}")
 
 target_link_libraries(Mosh PRIVATE
     tracktion::tracktion_engine
@@ -69,11 +71,8 @@ target_link_libraries(Mosh PRIVATE
     juce::juce_recommended_lto_flags
     juce::juce_recommended_warning_flags)
 
-if (MOSH_ENABLE_NEURAL)
+if (MOSH_ENABLE_RTNEURAL AND TARGET mosh_neural_backends)
     target_link_libraries(Mosh PRIVATE mosh_neural_backends)
-    target_sources(Mosh PRIVATE
-        src/plugins/neural/NeuralInsertPlugin.cpp
-        src/plugins/neural/Astd.cpp)
 endif()
 
 # ── UI bundle (Vite) ─────────────────────────────────────────────────────────

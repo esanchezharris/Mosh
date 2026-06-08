@@ -1,6 +1,7 @@
 #include "MoshOps.h"
 #include "state/Ids.h"
 #include "state/RenderLayer.h"
+#include "plugins/neural/NeuralInsertPlugin.h"
 
 namespace mosh
 {
@@ -65,6 +66,11 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "bypass_plugin")     return cmdBypassPlugin (args);
     if (name == "open_plugin_editor")return cmdOpenPluginEditor (args);
     if (name == "add_midi_clip")     return cmdAddMidiClip (args);
+    if (name == "add_neural_insert") return cmdAddNeuralInsert (args);
+    if (name == "set_neural_param")  return cmdSetNeuralParam (args);
+    if (name == "set_neural_lab_mode") return cmdSetNeuralLabMode (args);
+    if (name == "set_neural_latency")return cmdSetNeuralLatency (args);
+    if (name == "reset_neural")      return cmdResetNeural (args);
 
     return errResult (name, "unknown command: " + name);
 }
@@ -188,7 +194,8 @@ juce::var MoshOps::cmdSetTransport (const juce::var& args)
     auto& transport = eng.edit().getTransport();
     const auto action = args.getProperty ("action", var()).toString();
 
-    if (action == "play" || (action == "toggle" && ! transport.isPlaying()))
+    // Play/record touch the audio device; skip them in no-audio (headless) mode.
+    if ((action == "play" || (action == "toggle" && ! transport.isPlaying())) && eng.hasAudio())
     {
         eng.ensurePlaybackContext();
         transport.play (false);
@@ -197,7 +204,7 @@ juce::var MoshOps::cmdSetTransport (const juce::var& args)
     {
         transport.stop (false, false);
     }
-    else if (action == "record")
+    else if (action == "record" && eng.hasAudio())
     {
         eng.ensurePlaybackContext();
         transport.record (false);
@@ -595,6 +602,82 @@ juce::var MoshOps::cmdAddMidiClip (const juce::var& args)
     return okResult ("add_midi_clip", var (data));
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Stage 4 — Tier-A real-time neural insert
+// ─────────────────────────────────────────────────────────────────────────────
+namespace
+{
+    NeuralInsertPlugin* asNeural (te::Plugin* p) { return dynamic_cast<NeuralInsertPlugin*> (p); }
+}
+
+juce::var MoshOps::cmdAddNeuralInsert (const juce::var& args)
+{
+    auto* track = findTrack (args.getProperty ("trackId", var()).toString());
+    if (track == nullptr) return errResult ("add_neural_insert", "no track");
+
+    undoManager().beginNewTransaction ("add_neural_insert");
+    auto plugin = eng.edit().getPluginCache().createNewPlugin (NeuralInsertPlugin::xmlTypeName, {});
+    if (plugin == nullptr) return errResult ("add_neural_insert", "create failed");
+    if (auto* n = asNeural (plugin.get()))
+        n->selectModel (args.getProperty ("modelId", "nam").toString());
+
+    int index = (int) args.getProperty ("index", -1);
+    if (index < 0) index = track->pluginList.getPlugins().size();
+    track->pluginList.insertPlugin (plugin, index, nullptr);
+
+    auto* data = new DynamicObject();
+    data->setProperty ("index", track->pluginList.indexOf (plugin.get()));
+    logLine ("add_neural_insert", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("add_neural_insert", var (data));
+}
+
+juce::var MoshOps::cmdSetNeuralParam (const juce::var& args)
+{
+    auto* n = asNeural (findPlugin (args.getProperty ("trackId", var()).toString(),
+                                    (int) args.getProperty ("index", -1)));
+    if (n == nullptr) return errResult ("set_neural_param", "no neural insert");
+    undoManager().beginNewTransaction ("set_neural_param");
+    n->setNeuralParamUi (args.getProperty ("paramId", "drive").toString(),
+                         (float) (double) args.getProperty ("value", 0.0));   // 0–100 UI
+    logLine ("set_neural_param", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("set_neural_param");
+}
+
+juce::var MoshOps::cmdSetNeuralLabMode (const juce::var& args)
+{
+    auto* n = asNeural (findPlugin (args.getProperty ("trackId", var()).toString(),
+                                    (int) args.getProperty ("index", -1)));
+    if (n == nullptr) return errResult ("set_neural_lab_mode", "no neural insert");
+    undoManager().beginNewTransaction ("set_neural_lab_mode");
+    n->setLabMode ((bool) args.getProperty ("on", false));
+    logLine ("set_neural_lab_mode", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("set_neural_lab_mode", n->describe());
+}
+
+juce::var MoshOps::cmdSetNeuralLatency (const juce::var& args)
+{
+    auto* n = asNeural (findPlugin (args.getProperty ("trackId", var()).toString(),
+                                    (int) args.getProperty ("index", -1)));
+    if (n == nullptr) return errResult ("set_neural_latency", "no neural insert");
+    n->setLatencySamples ((int) args.getProperty ("samples", 0));
+    logLine ("set_neural_latency", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("set_neural_latency", n->describe());
+}
+
+juce::var MoshOps::cmdResetNeural (const juce::var& args)
+{
+    auto* n = asNeural (findPlugin (args.getProperty ("trackId", var()).toString(),
+                                    (int) args.getProperty ("index", -1)));
+    if (n == nullptr) return errResult ("reset_neural", "no neural insert");
+    n->resetModel();
+    logLine ("reset_neural", args, true, {}, false);
+    return okResult ("reset_neural");
+}
+
 juce::var MoshOps::pluginToVar (te::Plugin& p, int index)
 {
     auto* o = new DynamicObject();
@@ -605,6 +688,11 @@ juce::var MoshOps::pluginToVar (te::Plugin& p, int index)
     auto* ext = dynamic_cast<te::ExternalPlugin*> (&p);
     o->setProperty ("external", ext != nullptr);
     o->setProperty ("isInstrument", ext != nullptr && ext->isSynth());
+    if (auto* n = asNeural (&p))
+    {
+        o->setProperty ("neural", n->describe());
+        o->setProperty ("labMode", n->isLabMode());
+    }
 
     juce::Array<var> params;
     const int n = juce::jmin (16, p.getNumAutomatableParameters());

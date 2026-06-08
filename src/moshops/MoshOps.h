@@ -67,6 +67,12 @@ private:
     juce::var cmdBypassPlugin   (const juce::var& args);
     juce::var cmdOpenPluginEditor (const juce::var& args);
     juce::var cmdAddMidiClip    (const juce::var& args);
+    // Stage 4 — Tier-A real-time neural insert
+    juce::var cmdAddNeuralInsert (const juce::var& args);
+    juce::var cmdSetNeuralParam  (const juce::var& args);
+    juce::var cmdSetNeuralLabMode(const juce::var& args);
+    juce::var cmdSetNeuralLatency(const juce::var& args);
+    juce::var cmdResetNeural     (const juce::var& args);
 
     // ── helpers ──
     te::AudioTrack* findTrack (const juce::String& id);

@@ -8,7 +8,8 @@ juce_add_console_app(MoshTests PRODUCT_NAME "MoshTests")
 
 target_sources(MoshTests PRIVATE
     test_sanity.cpp
-    test_renderlayer.cpp)
+    test_renderlayer.cpp
+    test_astd.cpp)
 
 target_include_directories(MoshTests PRIVATE ${CMAKE_SOURCE_DIR}/src)
 

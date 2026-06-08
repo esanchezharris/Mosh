@@ -1,4 +1,5 @@
 #include "PluginHost.h"
+#include "plugins/neural/NeuralInsertPlugin.h"
 
 namespace mosh
 {
@@ -31,7 +32,14 @@ String PluginHost::idFor (const PluginDescription& d)
 
 void PluginHost::initialise()
 {
+    // Scan in-process only (our curated scanFile() path) — avoid the engine
+    // spawning a child Mosh for out-of-process scanning, which deadlocks against
+    // the single-instance lock in headless --selftest/--demo runs.
+    engine.getPluginManager().setUsesSeparateProcessForScanning (false);
     engine.getPluginManager().initialise();
+
+    // Register Mosh's built-in Tier-A neural insert (04 §2.2) once.
+    engine.getPluginManager().createBuiltInType<NeuralInsertPlugin>();
 
     // Curated in-process scan (avoids a slow/crashy full blind scan; any other
     // file is scanned lazily by findDescription()).

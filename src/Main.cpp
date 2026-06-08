@@ -16,7 +16,7 @@ public:
 
     const juce::String getApplicationName() override    { return "Mosh"; }
     const juce::String getApplicationVersion() override { return MOSH_VERSION_STRING; }
-    bool moreThanOneInstanceAllowed() override          { return false; }
+    bool moreThanOneInstanceAllowed() override          { return true; }   // allow scan children + headless runs
 
     void initialise (const juce::String& commandLine) override
     {
@@ -25,11 +25,12 @@ public:
         if (te::PluginManager::startChildProcessPluginScan (commandLine))
             return;
 
-        engine  = std::make_unique<MoshEngine>();
+        const bool headless = commandLine.contains ("--selftest");
+        engine  = std::make_unique<MoshEngine> (! headless);   // no audio device in headless runs
         moshOps = std::make_unique<MoshOps> (*engine);
 
         // Headless command-surface harness (06 §4): `Mosh --selftest`.
-        if (commandLine.contains ("--selftest"))
+        if (headless)
         {
             const int fails = runSelfTest (*engine, *moshOps);
             setApplicationReturnValue (fails);
@@ -50,6 +51,8 @@ public:
         // editor, then leave the GUI running for visual verification.
         if (commandLine.contains ("--demo3"))
             juce::MessageManager::callAsync ([this] { runPluginDemo (*moshOps); });
+        if (commandLine.contains ("--demo4"))
+            juce::MessageManager::callAsync ([this] { runNeuralDemo (*moshOps); });
     }
 
     void shutdown() override

@@ -64,6 +64,11 @@ export const useStore = create<State>((set, get) => ({
       // Prune selection / fetch peaks for current clips.
       const ids = new Set(snap.tracks.flatMap((t) => t.clips.map((c) => c.id)));
       set((s) => ({ selection: new Set([...s.selection].filter((id) => ids.has(id))) }));
+      // Auto-select a track for the rack if none is selected.
+      set((s) => {
+        const exists = snap.tracks.some((t) => t.id === s.selectedTrackId);
+        return exists ? {} : { selectedTrackId: snap.tracks[0]?.id ?? null };
+      });
       for (const t of snap.tracks) for (const c of t.clips) get().ensurePeaks(c.id);
     } catch (e) {
       set({ lastError: String(e) });

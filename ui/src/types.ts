@@ -15,6 +15,15 @@ export type Clip = {
 
 export type PluginParam = { index: number; name: string; value: number };
 
+export type NeuralParam = { id: string; ui: number; safeMaxUi: number };
+export type NeuralInsert = {
+  model: string;
+  labMode: boolean;
+  latencySamples: number;
+  latencySeconds: number;
+  params: NeuralParam[];
+};
+
 export type Plugin = {
   index: number;
   name: string;
@@ -23,6 +32,8 @@ export type Plugin = {
   external: boolean;
   isInstrument: boolean;
   params: PluginParam[];
+  neural?: NeuralInsert;
+  labMode?: boolean;
 };
 
 export type AvailablePlugin = {
