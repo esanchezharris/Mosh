@@ -2,6 +2,7 @@
 #include "engine/MoshEngine.h"
 #include "moshops/MoshOps.h"
 #include "plugins/neural/NeuralInsertPlugin.h"
+#include <atomic>
 #include <iostream>
 #include <vector>
 
@@ -40,6 +41,59 @@ namespace
         for (auto& p : kv) o->setProperty (p.first, p.second);
         return juce::var (o);
     }
+
+    class LiveAudioProbe final : public juce::AudioIODeviceCallback
+    {
+    public:
+        void audioDeviceAboutToStart (juce::AudioIODevice* device) override
+        {
+            sampleRate = device != nullptr ? device->getCurrentSampleRate() : 48000.0;
+            if (sampleRate <= 0.0)
+                sampleRate = 48000.0;
+            phase = 0.0;
+        }
+
+        void audioDeviceStopped() override {}
+
+        void audioDeviceIOCallbackWithContext (const float* const*, int,
+                                               float* const* outputChannelData,
+                                               int numOutputChannels,
+                                               int numSamples,
+                                               const juce::AudioIODeviceCallbackContext&) override
+        {
+            callbacks.fetch_add (1, std::memory_order_relaxed);
+            samples.fetch_add (numSamples, std::memory_order_relaxed);
+
+            const auto inc = juce::MathConstants<double>::twoPi * 440.0 / sampleRate;
+            int writtenThisBlock = 0;
+            for (int i = 0; i < numSamples; ++i)
+            {
+                const auto s = (float) (std::sin (phase) * 0.18);
+                for (int ch = 0; ch < numOutputChannels; ++ch)
+                    if (auto* out = outputChannelData[ch])
+                    {
+                        out[i] += s;
+                        ++writtenThisBlock;
+                    }
+
+                phase += inc;
+                if (phase >= juce::MathConstants<double>::twoPi)
+                    phase -= juce::MathConstants<double>::twoPi;
+            }
+            writtenSamples.fetch_add (writtenThisBlock, std::memory_order_relaxed);
+        }
+
+        int getCallbackCount() const { return callbacks.load (std::memory_order_relaxed); }
+        int getSampleCount() const { return samples.load (std::memory_order_relaxed); }
+        int getWrittenSampleCount() const { return writtenSamples.load (std::memory_order_relaxed); }
+
+    private:
+        double phase = 0.0;
+        double sampleRate = 48000.0;
+        std::atomic<int> callbacks { 0 };
+        std::atomic<int> samples { 0 };
+        std::atomic<int> writtenSamples { 0 };
+    };
 
     bool ok (const juce::var& r) { return (bool) r.getProperty ("ok", false); }
 
@@ -571,6 +625,9 @@ int runLiveAudioSmoke (MoshEngine& eng, MoshOps& ops)
     check (ok (cmd (ops, "set_transport", args1 ("action", "play"))), "transport play ok");
     check (eng.edit().getTransport().getCurrentPlaybackContext() != nullptr, "playback context allocated");
 
+    LiveAudioProbe probe;
+    deviceManager.addAudioCallback (&probe);
+
     auto* mm = MessageManager::getInstanceWithoutCreating();
     const auto end = Time::getMillisecondCounter() + 1500u;
     while (Time::getMillisecondCounter() < end)
@@ -579,6 +636,10 @@ int runLiveAudioSmoke (MoshEngine& eng, MoshOps& ops)
         else Thread::sleep (50);
     }
 
+    deviceManager.removeAudioCallback (&probe);
+    check (probe.getCallbackCount() > 0, "live-audio probe callback ran");
+    check (probe.getSampleCount() > 0, "live-audio probe observed audio frames");
+    check (probe.getWrittenSampleCount() > 0, "live-audio probe had writable output channels");
     check (ok (cmd (ops, "set_transport", args1 ("action", "stop"))), "transport stop ok");
 
     std::cerr << "===== " << checks - failures << "/" << checks

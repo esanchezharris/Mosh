@@ -47,7 +47,7 @@ status; the local gate evidence remains the authority.
 | Self-hosted checkout lacks archived proof assets | `MOSH_LEGACY_SA3_BUNDLE` is missing; SA3 color compare cannot find legacy steering data | `scripts/macos-local-preflight.sh` + `scripts/compare-sa3-colors.sh` | Local release blocker; workflow points at the canonical local archive |
 | BlackHole missing | `system_profiler SPAudioDataType` lacks `BlackHole 2ch` | `scripts/macos-local-preflight.sh` + `scripts/blackhole-live-audio-gate.sh` | Local release blocker |
 | `ffmpeg` missing or AVFoundation cannot see BlackHole | `ffmpeg -f avfoundation -list_devices true` has no BlackHole input | `scripts/macos-local-preflight.sh` + BlackHole gate | Local release blocker |
-| Silent live capture | WAV duration/RMS/peak below threshold | BlackHole gate Python analyzer | Local release blocker |
+| Silent live capture | WAV duration/RMS/peak below threshold, even when the Mosh live-audio probe has writable output channels | BlackHole gate Python analyzer | Local CoreAudio/BlackHole routing blocker |
 | GUI `open` loses repo cwd/env | Render click shows service unavailable when service was not prestarted | `scripts/macos-ui-automation-gate.py` starts FakeAdapter service explicitly | Automated fallback, not product failure |
 | Service port conflict | `http://127.0.0.1:8770/health` points at stale or incompatible service | `scripts/macos-local-preflight.sh` + UI gate service logs | Investigate before release if behavior mismatches |
 | CUA action session flake | Computer Use says app is inactive after `get_app_state(app="Mosh")` | CUA evidence doc + AX/Quartz fallback gate | CUA is inspection evidence; AX/Quartz is action authority |
