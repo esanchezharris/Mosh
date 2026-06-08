@@ -183,10 +183,14 @@ Stage 2.** This is the documented JUCE-8 WebView `// VERIFY`; it does not block 
   **Remaining:** `set_plugin_param` (AutomatableParameter API — small, Windows-doable on a built-in) and
   `open_plugin_editor` (native pop-out; the `ExternalPlugin` editor `// VERIFY`), plus real VST3 scan +
   audio = the macOS half of the gate.
-- **Stage 4 (Tier-A neural)** — anira-backed `NeuralInsertPlugin` (custom `tracktion::Plugin` via
-  `createBuiltInType<>()`); NAM/Proteus ship, RAVE gated; `getLatencySeconds()` true delay + PDC null
-  test; ASTD clamps (the spine's `Astd` is ready) + Lab mode. macOS-primary (anira backends); the
-  bypass inverted-logic bug is called out in `04`.
+- **Stage 4 (Tier-A neural)** — **insert architecture + ASTD command surface DONE + verified on
+  Windows**: `NeuralInsertPlugin` (custom `te::Plugin`) registered via `createBuiltInType<>()`,
+  RT-safe passthrough `applyToBuffer`, true `getLatencySeconds()`; `add_neural_insert`/`set_neural_param`
+  (**ASTD-clamped, shared spine impl**)/`set_neural_lab_mode`/`bypass_neural_insert`
+  (`src/engine/NeuralInsertPlugin.h` + `NeuralCommands` + `test_neural_commands`: clamp 0.7, Lab→1.0).
+  Survives save/reload (`test_persistence`). **Remaining (macOS):** anira inference (NAM/Proteus ship,
+  RAVE gated, DDSP) in `initialise()`/`applyToBuffer()` — the // VERIFY anira `process`/`prepare` — and
+  the real **PDC null test** with a latency-introducing model + the bypass inverted-logic check (`04`).
 - **Stage 5 (generative)** — **FakeAdapter first** (no external deps → Windows/CI-testable!).
   **DONE + tested (Windows):** the in-process orchestration spine — `GenerativeModelAdapter` seam +
   `FakeAdapter` + `RenderCache` + `renderLayer()` (`src/spine/Generative.h`, 25 assertions): cache
