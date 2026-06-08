@@ -27,20 +27,30 @@ plugin-provided window; it does not prove license-specific interaction.
 
 ## Action Automation
 
-Post-reboot CUA inspection works, but CUA action calls did not execute in this
-tool session. `get_app_state(app="Mosh")` reliably identified the demo6
-arrangement and demo3 native editor window, but `click(app="Mosh", ...)`,
-coordinate click, and secondary action calls returned:
+Post-reboot CUA inspection works. CUA action calls initially returned the
+inactive-session error after `get_app_state(app="Mosh")`:
 
 `Computer Use is not active for 'Mosh'. You first must call get_app_state...`
 
-Earlier in the same branch, after the macOS developer-tool permission prompt was
-cleared, basic Play/Stop clicks worked when addressed as `app="Mosh"`; addressing
-the window as `studio.mosh.app` or by bundle path returned the inactive-session
-error. After reboot, even `app="Mosh"` no longer executed action calls.
+Refreshing the Computer Use app registry with `list_apps`, then calling
+`get_app_state(app="Mosh")`, made actions execute again. Addressing the same
+window as `studio.mosh.app` or by bundle path still returned the inactive-session
+error, so action calls should use display name `Mosh`.
 
-Result: post-reboot CUA inspection evidence is accepted; post-reboot click/drag
-automation is not marked as passing. Behavioral coverage remains the
-command-surface gates, strict plugin-host evidence, and BlackHole live-audio
-proof. Drag automation and full edit workflows still need a future CUA session
-where action calls execute.
+Verified action paths:
+- Play/Stop: `click(app="Mosh", element_index="5")` changed Play to Stop,
+  advanced the playhead, then returned Stop to Play on the second click.
+- Theme: `click(app="Mosh", element_index="10")` switched the app to the light
+  theme and changed the icon from moon to sun.
+- Zoom: Zoom + and Zoom - clicks changed the timeline scale and then restored it.
+- Tool mode: Split and Move clicks visibly changed the active tool state.
+- Arrangement drag: `drag(app="Mosh", from_x=270, from_y=331, to_x=350,
+  to_y=331)` moved the `tone-196` clip right on the Pad lane.
+- Generative Render: Render click executed and displayed the visible
+  `generative service unavailable` banner; Accept/Reject remained disabled, so
+  those actions were not marked passing.
+
+Result: CUA inspection, click, and one drag path are accepted for the built app
+when the app registry is refreshed and actions are addressed as `Mosh`.
+Behavioral coverage remains backed by the command-surface gates, strict
+plugin-host evidence, and BlackHole live-audio proof.
