@@ -1,0 +1,49 @@
+# Reference clones (read-only, for resolving // VERIFY items against pinned deps)
+/.refclone/
+
+# Build output
+/build/
+/cmake-build-*/
+/out/
+
+# CPM / dependency cache
+/.cpm-cache/
+/libs/_deps/
+
+# JUCE / native build artifacts
+*.o
+*.obj
+*.lib
+*.a
+*.exp
+*.ilk
+*.pdb
+*.exe
+*.dll
+*.dylib
+*.so
+
+# UI (frontend manages its own; staged bundle is generated)
+/ui/node_modules/
+/ui/dist/
+
+# Python service
+__pycache__/
+*.pyc
+.venv/
+service/.venv/
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.user
+
+# Local env / secrets (external model paths live here)
+.env
+.env.local
+
+# Logs (the JSONL semantic log is written at runtime, not committed)
+*.log
+/sessions/

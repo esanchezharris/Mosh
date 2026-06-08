@@ -1,0 +1,10 @@
+node_modules
+dist
+.tsbuild-node
+*.tsbuildinfo
+
+# build/editor noise
+*.local
+.vite
+.DS_Store
+*.log
