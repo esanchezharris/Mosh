@@ -97,22 +97,7 @@ jobs:
           cache-dependency-path: ui/package-lock.json
 
       - name: Preflight local-only dependencies
-        shell: bash
-        run: |
-          set -euo pipefail
-          command -v cmake
-          command -v npm
-          command -v rg
-          command -v ffmpeg
-          system_profiler SPAudioDataType | rg -q "BlackHole 2ch"
-          python3 - <<'PY'
-          import Quartz
-          import PIL
-          print("python-ui-deps-ok")
-          PY
-          test -d "${SA3_MLX_DIR:-$HOME/AI/stable-audio-3/optimized/mlx}"
-          test -d "${COLORRACK_DATA:-$PWD/service/colors/COLORRACK_DATA}"
-          test -d "/Library/Audio/Plug-Ins/VST3" -o -d "$HOME/Library/Audio/Plug-Ins/VST3"
+        run: scripts/macos-local-preflight.sh
 
       - name: Configure/build if needed
         shell: bash

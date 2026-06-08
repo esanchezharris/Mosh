@@ -13,6 +13,25 @@ system-management state. It is not expected to affect Mosh CI or local release
 gates, but App Management remains separate from Accessibility, Screen Recording,
 Microphone, and Local Network permissions.
 
+## Automation Priority
+
+1. Portable smoke gates run on GitHub-hosted `macos-15`: UI build, native build,
+   `ctest`, headless command selftests, and command-log validation.
+2. Local deterministic preflight runs on self-hosted/local Macs:
+   `scripts/macos-local-preflight.sh`.
+3. Local full release gates run only after the preflight is green:
+   `scripts/strict-local-v0-gate.sh`,
+   `scripts/blackhole-live-audio-gate.sh`, and
+   `scripts/macos-ui-automation-gate.py`.
+4. Manual/CUA evidence remains additive for native-window inspection and is not
+   allowed to override a deterministic gate failure.
+
+The self-hosted GitHub Actions job is intentionally manual and non-required until
+a runner with labels `self-hosted`, `macOS`, `ARM64`, and `mosh-local` is online
+and has produced one clean full-gate artifact set. If no matching runner is
+registered, the workflow_dispatch run can be cancelled without changing release
+status; the local gate evidence remains the authority.
+
 ## Edge Matrix
 
 | Edge | Deterministic signal | Gate / preflight | Current policy |
@@ -24,18 +43,18 @@ Microphone, and Local Network permissions.
 | Unit regression | `ctest --test-dir build --output-on-failure` fails | Hosted smoke CI, strict local gate | Blocking |
 | Command-surface regression | `Mosh --selftest-undo` or `Mosh --selftest` fails | Hosted smoke CI, strict local gate | Blocking |
 | Command-log schema drift | `scripts/validate-command-log-contract.sh` fails | Hosted smoke CI, strict local gate | Blocking |
-| SA3 unavailable | `SA3_MLX_DIR` or color rack missing; SA3 selftest fails | Self-hosted preflight + `scripts/strict-local-v0-gate.sh` | Local release blocker; not hosted blocker |
-| BlackHole missing | `system_profiler SPAudioDataType` lacks `BlackHole 2ch` | Self-hosted preflight + `scripts/blackhole-live-audio-gate.sh` | Local release blocker |
-| `ffmpeg` missing or AVFoundation cannot see BlackHole | `ffmpeg -f avfoundation -list_devices true` has no BlackHole input | BlackHole gate | Local release blocker |
+| SA3 unavailable | `SA3_MLX_DIR` or color rack missing; SA3 selftest fails | `scripts/macos-local-preflight.sh` + `scripts/strict-local-v0-gate.sh` | Local release blocker; not hosted blocker |
+| BlackHole missing | `system_profiler SPAudioDataType` lacks `BlackHole 2ch` | `scripts/macos-local-preflight.sh` + `scripts/blackhole-live-audio-gate.sh` | Local release blocker |
+| `ffmpeg` missing or AVFoundation cannot see BlackHole | `ffmpeg -f avfoundation -list_devices true` has no BlackHole input | `scripts/macos-local-preflight.sh` + BlackHole gate | Local release blocker |
 | Silent live capture | WAV duration/RMS/peak below threshold | BlackHole gate Python analyzer | Local release blocker |
 | GUI `open` loses repo cwd/env | Render click shows service unavailable when service was not prestarted | `scripts/macos-ui-automation-gate.py` starts FakeAdapter service explicitly | Automated fallback, not product failure |
-| Service port conflict | `http://127.0.0.1:8770/health` points at stale or incompatible service | UI gate records existing vs started service; service logs captured | Investigate before release if behavior mismatches |
+| Service port conflict | `http://127.0.0.1:8770/health` points at stale or incompatible service | `scripts/macos-local-preflight.sh` + UI gate service logs | Investigate before release if behavior mismatches |
 | CUA action session flake | Computer Use says app is inactive after `get_app_state(app="Mosh")` | CUA evidence doc + AX/Quartz fallback gate | CUA is inspection evidence; AX/Quartz is action authority |
-| Accessibility / Screen Recording missing | AX/Quartz or `screencapture -l` cannot inspect/capture windows | `scripts/macos-ui-automation-gate.py` fails early | Local permission blocker |
+| Accessibility / Screen Recording missing | AX/Quartz or `screencapture -l` cannot inspect/capture windows | `scripts/macos-local-preflight.sh` + `scripts/macos-ui-automation-gate.py` | Local permission blocker |
 | Native plugin license dialog | Serum editor opens license/auth dialog instead of full UI | CUA evidence + `scripts/macos-ui-automation-gate.py` Serum tab switch | Local release blocker until authorized |
 | Native plugin internals not exposed through AX | AX tree only sees plugin window/container | UI gate uses Quartz window-relative Serum tab click | Accepted local fallback |
 | Plugin scan assertion/leak noise | Logs contain `JUCE Assertion failure` or `Leaked objects detected` | `MOSH_STRICT_ASSERTIONS=1 scripts/plugin-host-evidence-gate.sh` inside strict gate | Blocking |
-| Strict gates run in parallel | Lock directory already exists | `scripts/strict-local-v0-gate.sh` lock preflight | Blocking until prior run exits or stale lock is investigated |
+| Strict gates run in parallel | Lock directory already exists | `scripts/macos-local-preflight.sh` + `scripts/strict-local-v0-gate.sh` lock preflight | Blocking until prior run exits or stale lock is investigated |
 | Stale persisted session | Old `~/Library/Mosh/session` state changes GUI/demo behavior | Headless selftests use fresh session; GUI gates launch deterministic demos | Accepted, but debug with preserved evidence path |
 | Local proof assets accidentally tracked | `assets/grit_demo` reappears in git status | Preservation manifest + git status review | Blocking |
 | App Management confusion | System Settings App Management shows updater/dev tools | Human/system observation only | Not a Mosh release gate unless it blocks a tool update |
@@ -46,6 +65,7 @@ Before Mac v0 is called finished:
 
 - Hosted smoke CI must pass on the CI PR and on `main`.
 - Self-hosted/local full gates must pass at least once on this Mac:
+  - `scripts/macos-local-preflight.sh`
   - `scripts/strict-local-v0-gate.sh`
   - `scripts/blackhole-live-audio-gate.sh`
   - `scripts/macos-ui-automation-gate.py`
