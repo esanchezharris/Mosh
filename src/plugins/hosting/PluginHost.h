@@ -16,16 +16,17 @@ public:
     ~PluginHost();
 
     /** Initialise formats + scan VST3s into the KnownPluginList. Scanning is
-        in-process and curated (a known-good allow-list by default) to avoid the
-        cost/crash risk of a full blind scan; any file can still be scanned
-        on demand via ensureScanned(). */
+        in-process and curated to avoid the cost/crash risk of a full blind
+        scan; bundles without VST3 moduleinfo use the slow scan only when
+        MOSH_SCAN_SLOW_VST3=1 is set. */
     void initialise();
 
     /** Available plugin descriptions (from the KnownPluginList). */
     juce::Array<juce::PluginDescription> available() const;
 
     /** Find a description by Tracktion identifier string; scans the file lazily
-        if the id looks like a path we haven't seen. Returns false if unknown. */
+        if the id looks like a path we haven't seen. Slow VST3 scanning is
+        opt-in via MOSH_SCAN_SLOW_VST3=1. Returns false if unknown. */
     bool findDescription (const juce::String& pluginId, juce::PluginDescription& out);
 
     /** Open (or focus) the native editor window for a hosted plugin (03 §4). */
@@ -41,6 +42,7 @@ private:
     te::Engine& engine;
     juce::OwnedArray<juce::DocumentWindow> editorWindows;
     juce::HashMap<juce::String, juce::DocumentWindow*> windowByPlugin;
+    bool initialised = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PluginHost)
 };

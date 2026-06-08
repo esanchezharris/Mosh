@@ -30,6 +30,7 @@ MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession)
         juce::String ("Mosh"),
         std::make_unique<te::UIBehaviour>(),
         std::make_unique<MoshEngineBehaviour> (audioOpen));
+    applyRequestedAudioOutputDevice();
 
     // Session directory: a stable per-app-data folder so save/reload round-trips.
     // The harness gets an isolated "session-selftest" dir so it can't be polluted
@@ -60,6 +61,12 @@ MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession)
         juce::Array<te::AudioTrack*> defaults (te::getAudioTracks (*editPtr));
         for (auto* t : defaults)
             editPtr->deleteTrack (t);
+
+        editPtr->getSceneList();
+
+        if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
+            mm->runDispatchLoopUntil (1);
+
         editPtr->getUndoManager().clearUndoHistory();
     }
     editPtr->editFileRetriever = [this] { return editPath; };
@@ -77,6 +84,69 @@ void MoshEngine::ensurePlaybackContext()
 {
     if (audioOpen)
         edit().getTransport().ensureContextAllocated();
+}
+
+void MoshEngine::applyRequestedAudioOutputDevice()
+{
+    if (! audioOpen)
+        return;
+
+    const auto requested = juce::SystemStats::getEnvironmentVariable ("MOSH_AUDIO_OUTPUT_DEVICE", {}).trim();
+    if (requested.isEmpty())
+        return;
+
+    auto& tracktionDevices = enginePtr->getDeviceManager();
+    auto& devices = tracktionDevices.deviceManager;
+
+    juce::String matchedType;
+    juce::String matchedOutput;
+    for (auto* type : devices.getAvailableDeviceTypes())
+    {
+        type->scanForDevices();
+        auto outputs = type->getDeviceNames (false);
+        auto index = outputs.indexOf (requested);
+        if (index < 0)
+        {
+            for (int i = 0; i < outputs.size(); ++i)
+                if (outputs[i].equalsIgnoreCase (requested))
+                {
+                    index = i;
+                    break;
+                }
+        }
+        if (index >= 0)
+        {
+            matchedType = type->getTypeName();
+            matchedOutput = outputs[index];
+            break;
+        }
+    }
+
+    if (matchedOutput.isEmpty())
+    {
+        audioError = "Requested audio output device not found: " + requested;
+        DBG (audioError);
+        return;
+    }
+
+    auto setup = devices.getAudioDeviceSetup();
+    devices.setCurrentAudioDeviceType (matchedType, true);
+    setup.outputDeviceName = matchedOutput;
+    setup.inputDeviceName.clear();
+    setup.inputChannels.clear();
+    setup.useDefaultInputChannels = true;
+    setup.useDefaultOutputChannels = true;
+
+    if (auto error = devices.setAudioDeviceSetup (setup, true); error.isNotEmpty())
+    {
+        audioError = "Could not open requested audio output device '" + matchedOutput + "': " + error;
+        DBG (audioError);
+        return;
+    }
+
+    tracktionDevices.rescanWaveDeviceList();
+    if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
+        mm->runDispatchLoopUntil (50);
 }
 
 juce::File MoshEngine::generateTestTone (double seconds, double freqHz, const juce::String& name)
