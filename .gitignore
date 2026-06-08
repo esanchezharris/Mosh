@@ -25,6 +25,8 @@ service/__pycache__/
 *.log
 mosh-sessions/
 service/jobs/
+_preserved_artifacts/
+assets/grit_demo/
 
 # macOS
 .DS_Store

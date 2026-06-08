@@ -20,10 +20,25 @@ namespace
     };
 
     String keyFor (te::Plugin& p) { return String ((pointer_sized_int) &p); }
+
+    bool hasModuleInfo (const File& vst3)
+    {
+        return vst3.getChildFile ("Contents")
+                   .getChildFile ("Resources")
+                   .getChildFile ("moduleinfo.json")
+                   .existsAsFile()
+            || vst3.getChildFile ("Contents")
+                   .getChildFile ("moduleinfo.json")
+                   .existsAsFile();
+    }
 }
 
 PluginHost::PluginHost (te::Engine& e) : engine (e) {}
-PluginHost::~PluginHost() = default;
+PluginHost::~PluginHost()
+{
+    windowByPlugin.clear();
+    editorWindows.clear();
+}
 
 String PluginHost::idFor (const PluginDescription& d)
 {
@@ -32,17 +47,22 @@ String PluginHost::idFor (const PluginDescription& d)
 
 void PluginHost::initialise()
 {
+    if (initialised)
+        return;
+
     // Scan in-process only (our curated scanFile() path) — avoid the engine
     // spawning a child Mosh for out-of-process scanning, which deadlocks against
     // the single-instance lock in headless --selftest/--demo runs.
     engine.getPluginManager().setUsesSeparateProcessForScanning (false);
-    engine.getPluginManager().initialise();
+    if (engine.getPluginManager().pluginFormatManager.getNumFormats() == 0)
+        engine.getPluginManager().initialise();
 
     // Register Mosh's built-in Tier-A neural insert (04 §2.2) once.
     engine.getPluginManager().createBuiltInType<NeuralInsertPlugin>();
 
-    // Curated in-process scan (avoids a slow/crashy full blind scan; any other
-    // file is scanned lazily by findDescription()).
+    // Curated fast in-process scan. Bundles without VST3 moduleinfo require
+    // MOSH_SCAN_SLOW_VST3=1 because JUCE's slow scan leaves Debug shutdown
+    // assertion/leak noise in headless gates.
     static const char* curated[] = {
         "Vital.vst3", "OTT.vst3", "TAL-Chorus-LX.vst3",
         "JamPilotTestGain.vst3", "ValhallaDelay.vst3", "Serum2.vst3"
@@ -57,10 +77,16 @@ void PluginHost::initialise()
         if (sys.exists())      scanFile (sys);
         else if (usr.exists()) scanFile (usr);
     }
+
+    initialised = true;
 }
 
 void PluginHost::scanFile (const File& file)
 {
+    const bool allowSlowScan = SystemStats::getEnvironmentVariable ("MOSH_SCAN_SLOW_VST3", {}) == "1";
+    if (! allowSlowScan && ! hasModuleInfo (file))
+        return;
+
     VST3PluginFormat vst3;
     OwnedArray<PluginDescription> found;
     vst3.findAllTypesForFile (found, file.getFullPathName());

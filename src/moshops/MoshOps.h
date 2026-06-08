@@ -94,6 +94,8 @@ private:
                                     const juce::File& manifestFile, const juce::String& cacheKey);
 
     // ── helpers ──
+    te::AudioTrack* createAudioTrack (const juce::String& name);
+    te::VolumeAndPanPlugin* ensureVolumePlugin (te::AudioTrack&);
     te::AudioTrack* findTrack (const juce::String& id);
     te::Clip*       findClip  (const juce::String& id);
     te::Plugin*     findPlugin (const juce::String& trackId, int index);

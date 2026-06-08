@@ -73,7 +73,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     check (firstTrack (ops).getProperty ("name", var()).toString() == "Drums", "track name == Drums");
     check (hadEvent ("snapshot_invalidated"), "create_track emitted snapshot_invalidated");
 
-    // 3. add_test_tone_clip → wave clip on the track
+    // 3. add_test_tone_clip -> wave clip on the track
     auto toneArgs = new DynamicObject();
     toneArgs->setProperty ("seconds", 2.0);
     toneArgs->setProperty ("freq", 220.0);
@@ -87,7 +87,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     const auto clipId = clip0.getProperty ("id", var()).toString();
     check (File (clip0.getProperty ("sourceFile", var()).toString()).existsAsFile(), "clip source WAV exists on disk");
 
-    // 4. transport: play → playing; stop; seek
+    // 4. transport: play -> playing; stop; seek
     auto rp = cmd (ops, "set_transport", args1 ("action", "play"));
     check (ok (rp), "set_transport play ok");
     if (eng.hasAudio())
@@ -120,7 +120,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     cmd (ops, "redo");   // redo import_clip
     check (trackClips (firstTrack (ops)) == 1, "redo restored the clip");
 
-    // 7. save → reload restores state (incl. MOSH_RENDERLAYER survives once redone)
+    // 7. save -> reload restores state (incl. MOSH_RENDERLAYER survives once redone)
     cmd (ops, "redo");   // redo add_render_layer so it's part of saved state
     check ((bool) firstTrack (ops)["clips"][0].getProperty ("hasRenderLayer", false), "render layer restored by redo");
     check (ok (cmd (ops, "save")), "save ok");
@@ -145,17 +145,17 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     const auto cid = firstTrack (ops)["clips"][0].getProperty ("id", var()).toString();
     const auto tid = firstTrack (ops).getProperty ("id", var()).toString();
 
-    // move_clip → start 2.0s
+    // move_clip -> start 2.0s
     { auto* a = new DynamicObject(); a->setProperty ("clipId", cid); a->setProperty ("start", 2.0);
       check (ok (cmd (ops, "move_clip", var (a))), "move_clip ok"); }
     check (std::abs ((double) firstTrack (ops)["clips"][0].getProperty ("start", 0.0) - 2.0) < 0.05, "clip moved to 2.0s");
 
-    // trim_clip → length 1.0s
+    // trim_clip -> length 1.0s
     { auto* a = new DynamicObject(); a->setProperty ("clipId", cid); a->setProperty ("length", 1.0);
       check (ok (cmd (ops, "trim_clip", var (a))), "trim_clip ok"); }
     check (std::abs ((double) firstTrack (ops)["clips"][0].getProperty ("length", 0.0) - 1.0) < 0.05, "clip trimmed to 1.0s");
 
-    // split_clip → 2 clips
+    // split_clip -> 2 clips
     { auto* a = new DynamicObject(); a->setProperty ("clipId", cid); a->setProperty ("time", 2.5);
       check (ok (cmd (ops, "split_clip", var (a))), "split_clip ok"); }
     check (trackClips (firstTrack (ops)) == 2, "split produced 2 clips");
@@ -174,7 +174,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
       cmd (ops, "set_track_solo", var (a)); }
     check ((bool) firstTrack (ops).getProperty ("solo", false), "track soloed");
 
-    // get_clip_peaks → non-empty peak array (waveform from backend)
+    // get_clip_peaks -> non-empty peak array (waveform from backend)
     { auto* a = new DynamicObject(); a->setProperty ("clipId", firstTrack (ops)["clips"][0].getProperty ("id", var()));
       a->setProperty ("buckets", 200);
       auto pk = cmd (ops, "get_clip_peaks", var (a));
@@ -304,7 +304,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                 check (std::abs (out.getSample (0, 10)) < 1e-4f, "silence stays silent (no DC injected by the net)");
             }
 
-            // Bypass — the known inverted-logic bug (04 §2.4): bypassed → passthrough.
+            // Bypass: the known inverted-logic bug (04 §2.4): bypassed -> passthrough.
             cmd (ops, "bypass_plugin", objN ({{ "trackId", nt }, { "index", nidx }, { "bypassed", true }}));
             {
                 auto out = process (0.5f, 64);
@@ -353,7 +353,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         auto r1 = cmd (ops, "render_layer", objN ({{ "clipId", gcid }, { "wait", true }}));
         check (ok (r1), "render_layer ok (service spawned, job ran)");
         check (r1["data"].getProperty ("cache", var()).toString() == "miss", "first render is a cache MISS");
-        check (r1["data"].getProperty ("status", var()).toString() == "ready", "render completed → status ready");
+        check (r1["data"].getProperty ("status", var()).toString() == "ready", "render completed -> status ready");
         // snapshot reflects the rendered layer
         bool hasArtifact = false;
         { auto trk = trackById (gt);
@@ -362,16 +362,16 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                 hasArtifact = (bool) c.getProperty ("renderLayer", var()).getProperty ("hasArtifact", false); }
         check (hasArtifact, "render produced a cached artifact (output.wav)");
 
-        // Re-render with identical fingerprint → cache HIT.
+        // Re-render with identical fingerprint -> cache HIT.
         auto r2 = cmd (ops, "render_layer", objN ({{ "clipId", gcid }, { "wait", true }}));
         check (r2["data"].getProperty ("cache", var()).toString() == "hit", "identical re-render is a cache HIT (full fingerprint)");
 
-        // Change a param → fingerprint changes → cache MISS (re-render).
+        // Change a param -> fingerprint changes -> cache MISS (re-render).
         cmd (ops, "set_render_param", objN ({{ "clipId", gcid }, { "seed", 2 }}));
         auto r3 = cmd (ops, "render_layer", objN ({{ "clipId", gcid }, { "wait", true }}));
-        check (r3["data"].getProperty ("cache", var()).toString() == "miss", "param change → dirty → re-render (cache MISS)");
+        check (r3["data"].getProperty ("cache", var()).toString() == "miss", "param change -> dirty -> re-render (cache MISS)");
 
-        // Accept → lands as a new clip on the "Neural Renders" lane.
+        // Accept -> lands as a new clip on the "Neural Renders" lane.
         const int tracksBefore = tracks (ops);
         check (ok (cmd (ops, "accept_render", args1 ("clipId", gcid))), "accept_render ok");
         check (tracks (ops) == tracksBefore + 1, "accept landed a new clip on a neural lane");
@@ -383,17 +383,17 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (laneHasClip, "neural lane carries the accepted render");
 
         // JSONL records accept/reject as TASTE LABELS (05 §9).
-        auto logText = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
-        check (logText.contains ("accept_render"), "JSONL records accept_render (taste label)");
+        auto renderLogText = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
+        check (renderLogText.contains ("accept_render"), "JSONL records accept_render (taste label)");
         cmd (ops, "reject_render", args1 ("clipId", gcid));
-        logText = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
-        check (logText.contains ("reject_render"), "JSONL records reject_render (taste label)");
+        renderLogText = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
+        check (renderLogText.contains ("reject_render"), "JSONL records reject_render (taste label)");
     }
 
-    // ─── Stage 6: full producer loop → export, undo/redo correct throughout ───
+    // --- Stage 6: full producer loop -> export, undo/redo correct throughout ---
     std::cerr << "--- Stage 6: full producer loop + export ---\n";
     {
-        // import/record → arrange
+        // import/record -> arrange
         auto mt = cmd (ops, "create_track", args1 ("name", "Mix"))["data"].getProperty ("trackId", var()).toString();
         auto mtone = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", mt }, { "seconds", 1.0 }, { "freq", 165.0 }}));
         auto mcid = mtone["data"].getProperty ("clipId", var()).toString();
@@ -442,7 +442,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (trackById (mt).getProperty ("name", var()).toString() == "Master Bus", "redo restored the rename");
     }
 
-    // ─── Stage 5 (SA3): the real StableAudio3Adapter — GATED on MOSH_SELFTEST_SA3 ───
+    // --- Stage 5 (SA3): the real StableAudio3Adapter - GATED on MOSH_SELFTEST_SA3 ---
     // (separate from MOSH_ENABLE_SA3, which now defaults on: real model + judge QA is
     //  ~30s, too heavy for the default --selftest. Opt in explicitly to exercise it.)
     if (SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SA3", "0") == "1")
@@ -465,10 +465,10 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         Array<var> gcolors; { auto* c = new DynamicObject(); c->setProperty ("name", "grit"); c->setProperty ("value", 70); gcolors.add (var (c)); }
         cmd (ops, "set_render_param", objN ({{ "clipId", scid }, { "seed", 5 }, { "nl", 0.45 }, { "colors", gcolors }}));
 
-        std::cerr << "  ..   rendering with SA3 (model load + inference; ~10s first time)…\n";
+        std::cerr << "  ..   rendering with SA3 (model load + inference; ~10s first time)...\n";
         auto r1 = cmd (ops, "render_layer", objN ({{ "clipId", scid }, { "wait", true }}));
         check (ok (r1) && r1["data"].getProperty ("cache", var()).toString() == "miss", "SA3 render ran (cache MISS)");
-        check (r1["data"].getProperty ("status", var()).toString() == "ready", "SA3 render completed → ready");
+        check (r1["data"].getProperty ("status", var()).toString() == "ready", "SA3 render completed -> ready");
 
         // The real artifact + its manifest.
         auto manifestFile = eng.sessionDir().getChildFile ("renders").getChildFile (layerId).getChildFile ("output_manifest.json");
@@ -481,13 +481,108 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         auto r2 = cmd (ops, "render_layer", objN ({{ "clipId", scid }, { "wait", true }}));
         check (r2["data"].getProperty ("cache", var()).toString() == "hit", "identical SA3 re-render is a cache HIT");
 
-        check (ok (cmd (ops, "accept_render", args1 ("clipId", scid))), "accept SA3 render → lands on the neural lane");
+        check (ok (cmd (ops, "accept_render", args1 ("clipId", scid))), "accept SA3 render -> lands on the neural lane");
     }
     else
         std::cerr << "  ..   (SA3 self-test skipped — set MOSH_SELFTEST_SA3=1 to exercise the real model)\n";
 
     std::cerr << "===== " << (checks - failures) << "/" << checks
               << " checks passed, " << failures << " failed =====\n\n";
+    return failures;
+}
+
+int runUndoSelfTest (MoshEngine&, MoshOps& ops)
+{
+    using namespace juce;
+    failures = 0;
+    checks = 0;
+
+    std::cerr << "\n===== Mosh focused undo harness =====\n";
+
+    auto r = cmd (ops, "create_track", args1 ("name", "Undo Probe"));
+    check (ok (r), "create_track ok");
+    check (tracks (ops) == 1, "track exists after create_track");
+
+    auto toneArgs = new DynamicObject();
+    toneArgs->setProperty ("seconds", 0.25);
+    toneArgs->setProperty ("freq", 220.0);
+    auto rt = cmd (ops, "add_test_tone_clip", var (toneArgs));
+    check (ok (rt), "add_test_tone_clip ok");
+    check (trackClips (firstTrack (ops)) == 1, "clip exists after add_test_tone_clip");
+
+    const auto clipId = firstTrack (ops)["clips"][0].getProperty ("id", var()).toString();
+    check (ok (cmd (ops, "add_render_layer", args1 ("clipId", clipId))), "add_render_layer ok");
+    check ((bool) firstTrack (ops)["clips"][0].getProperty ("hasRenderLayer", false), "render layer exists");
+
+    check (ok (cmd (ops, "undo")), "undo render layer command ok");
+    check (! (bool) firstTrack (ops)["clips"][0].getProperty ("hasRenderLayer", true), "undo removed render layer");
+    check (ok (cmd (ops, "undo")), "undo clip command ok");
+    check (trackClips (firstTrack (ops)) == 0, "undo removed clip");
+    check (ok (cmd (ops, "undo")), "undo track command ok");
+    check (tracks (ops) == 0, "undo removed track");
+
+    check (ok (cmd (ops, "redo")), "redo track command ok");
+    check (tracks (ops) == 1, "redo restored track");
+    check (ok (cmd (ops, "redo")), "redo clip command ok");
+    check (trackClips (firstTrack (ops)) == 1, "redo restored clip");
+    check (ok (cmd (ops, "redo")), "redo render layer command ok");
+    check ((bool) firstTrack (ops)["clips"][0].getProperty ("hasRenderLayer", false), "redo restored render layer");
+
+    std::cerr << "===== " << checks - failures << "/" << checks
+              << " focused undo checks passed, " << failures << " failed =====\n";
+    return failures;
+}
+
+int runLiveAudioSmoke (MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+    failures = 0;
+    checks = 0;
+
+    std::cerr << "\n===== Mosh live-audio smoke =====\n";
+
+    auto& deviceManager = eng.engine().getDeviceManager().deviceManager;
+    auto* device = deviceManager.getCurrentAudioDevice();
+    check (eng.hasAudio(), "audio mode is enabled");
+    check (eng.audioDeviceError().isEmpty(), "requested audio device opened");
+    check (device != nullptr, "JUCE audio device is open");
+
+    const auto requested = SystemStats::getEnvironmentVariable ("MOSH_AUDIO_OUTPUT_DEVICE", {}).trim();
+    if (device != nullptr)
+    {
+        std::cerr << "  ..   device=" << device->getName()
+                  << " type=" << device->getTypeName()
+                  << " rate=" << device->getCurrentSampleRate()
+                  << " block=" << device->getCurrentBufferSizeSamples() << "\n";
+
+        if (requested.isNotEmpty())
+            check (device->getName().equalsIgnoreCase (requested), "current output matches MOSH_AUDIO_OUTPUT_DEVICE");
+    }
+
+    auto track = cmd (ops, "create_track", args1 ("name", "Live Smoke"));
+    check (ok (track), "create_track ok");
+    const auto trackId = track["data"].getProperty ("trackId", var()).toString();
+
+    check (ok (cmd (ops, "add_test_tone_clip",
+                   objN ({{ "trackId", trackId }, { "seconds", 2.0 }, { "freq", 440.0 }}))),
+           "add_test_tone_clip ok");
+
+    check (ok (cmd (ops, "set_transport", args1 ("position", 0.0))), "transport seek ok");
+    check (ok (cmd (ops, "set_transport", args1 ("action", "play"))), "transport play ok");
+    check (eng.edit().getTransport().getCurrentPlaybackContext() != nullptr, "playback context allocated");
+
+    auto* mm = MessageManager::getInstanceWithoutCreating();
+    const auto end = Time::getMillisecondCounter() + 1500u;
+    while (Time::getMillisecondCounter() < end)
+    {
+        if (mm != nullptr) mm->runDispatchLoopUntil (50);
+        else Thread::sleep (50);
+    }
+
+    check (ok (cmd (ops, "set_transport", args1 ("action", "stop"))), "transport stop ok");
+
+    std::cerr << "===== " << checks - failures << "/" << checks
+              << " live-audio checks passed, " << failures << " failed =====\n";
     return failures;
 }
 
@@ -585,7 +680,7 @@ void runGenerativeDemo (MoshOps& ops)
     { auto* c = new DynamicObject(); c->setProperty ("name", "air");  c->setProperty ("value", 60); colors.add (var (c)); }
     cmd ("set_render_param", obj ({{ "clipId", cid }, { "seed", 1 }, { "nl", 0.42 }, { "colors", colors }}));
     // NB: the actual render_layer (which spawns the service) is left to the user
-    // button — running it here would block the message thread on a TCC/service
+    // button - running it here would block the message thread on a TCC/service
     // prompt before the WebView paints. The full render loop is proven headless.
 }
 

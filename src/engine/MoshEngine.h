@@ -29,6 +29,7 @@ public:
     te::Engine& engine() { return *enginePtr; }
     te::Edit&   edit()   { return *editPtr; }            // always fetch fresh (survives reload)
     bool        hasAudio() const { return audioOpen; }
+    juce::String audioDeviceError() const { return audioError; }
 
     juce::File sessionDir() const { return session; }
     juce::File editFile()   const { return editPath; }
@@ -53,7 +54,9 @@ private:
     std::unique_ptr<te::Edit>   editPtr;
     juce::File session;
     juce::File editPath;
+    void applyRequestedAudioOutputDevice();
     bool       audioOpen = false;
+    juce::String audioError;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MoshEngine)
 };

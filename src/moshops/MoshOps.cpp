@@ -21,7 +21,7 @@ MoshOps::~MoshOps() { stopTimer(); }
 void MoshOps::timerCallback()
 {
     // Push a decimated transport delta while playing (and once on the
-    // play→stop edge) so the UI playhead animates without polling (02 §4.2).
+    // play-to-stop edge) so the UI playhead animates without polling (02 §4.2).
     auto& transport = eng.edit().getTransport();
     const bool playing = transport.isPlaying();
     if (playing || wasPlaying)
@@ -93,17 +93,12 @@ juce::var MoshOps::execute (const juce::var& command)
 juce::var MoshOps::cmdCreateTrack (const juce::var& args)
 {
     undoManager().beginNewTransaction ("create_track");
-    auto& edit = eng.edit();
-    auto track = edit.insertNewAudioTrack (te::TrackInsertPoint::getEndOfTracks (edit), nullptr);
+    auto* track = createAudioTrack (args.getProperty ("name", var()).toString());
     if (track == nullptr)
     {
         logLine ("create_track", args, false, "insert failed", true);
         return errResult ("create_track", "insert failed");
     }
-
-    const auto name = args.getProperty ("name", var()).toString();
-    if (name.isNotEmpty())
-        track->setName (name);
 
     auto* data = new DynamicObject();
     data->setProperty ("trackId", track->itemID.toString());
@@ -157,7 +152,7 @@ juce::var MoshOps::cmdImportClip (const juce::var& args)
 
     undoManager().beginNewTransaction ("import_clip");
     if (track == nullptr)
-        track = edit.insertNewAudioTrack (te::TrackInsertPoint::getEndOfTracks (edit), nullptr).get();
+        track = createAudioTrack ({});
     if (track == nullptr) return errResult ("import_clip", "no track");
 
     te::AudioFile audioFile (edit.engine, file);
@@ -358,7 +353,7 @@ juce::var MoshOps::cmdSetTrackVolume (const juce::var& args)
 {
     auto* track = findTrack (args.getProperty ("trackId", var()).toString());
     if (track == nullptr) return errResult ("set_track_volume", "no track");
-    auto* vp = track->getVolumePlugin();
+    auto* vp = ensureVolumePlugin (*track);
     if (vp == nullptr) return errResult ("set_track_volume", "no volume plugin");
 
     undoManager().beginNewTransaction ("set_track_volume");
@@ -372,7 +367,7 @@ juce::var MoshOps::cmdSetTrackPan (const juce::var& args)
 {
     auto* track = findTrack (args.getProperty ("trackId", var()).toString());
     if (track == nullptr) return errResult ("set_track_pan", "no track");
-    auto* vp = track->getVolumePlugin();
+    auto* vp = ensureVolumePlugin (*track);
     if (vp == nullptr) return errResult ("set_track_pan", "no volume plugin");
 
     undoManager().beginNewTransaction ("set_track_pan");
@@ -575,11 +570,10 @@ juce::var MoshOps::cmdOpenPluginEditor (const juce::var& args)
 
 juce::var MoshOps::cmdAddMidiClip (const juce::var& args)
 {
-    auto& edit = eng.edit();
     auto* track = findTrack (args.getProperty ("trackId", var()).toString());
     undoManager().beginNewTransaction ("add_midi_clip");
     if (track == nullptr)
-        track = edit.insertNewAudioTrack (te::TrackInsertPoint::getEndOfTracks (edit), nullptr).get();
+        track = createAudioTrack ({});
     if (track == nullptr) return errResult ("add_midi_clip", "no track");
 
     const double start = (double) args.getProperty ("start", 0.0);
@@ -588,22 +582,22 @@ juce::var MoshOps::cmdAddMidiClip (const juce::var& args)
         { tracktion::TimePosition::fromSeconds (start), tracktion::TimePosition::fromSeconds (start + length) }, nullptr);
     if (clip == nullptr) return errResult ("add_midi_clip", "insertMIDIClip failed");
 
-    auto& seq = clip->getSequence();
+    auto& sequence = clip->getSequence();
     if (auto notes = args.getProperty ("notes", var()); notes.isArray())
     {
         for (auto& n : *notes.getArray())
-            seq.addNote ((int) n.getProperty ("pitch", 60),
-                         tracktion::BeatPosition::fromBeats ((double) n.getProperty ("start", 0.0)),
-                         tracktion::BeatDuration::fromBeats ((double) n.getProperty ("length", 1.0)),
-                         (int) n.getProperty ("velocity", 100), 0, &undoManager());
+            sequence.addNote ((int) n.getProperty ("pitch", 60),
+                              tracktion::BeatPosition::fromBeats ((double) n.getProperty ("start", 0.0)),
+                              tracktion::BeatDuration::fromBeats ((double) n.getProperty ("length", 1.0)),
+                              (int) n.getProperty ("velocity", 100), 0, &undoManager());
     }
     else
     {
         // Default: a C-major arpeggio so a synth has something to play (gate).
         const int pattern[] = { 60, 64, 67, 72 };
         for (int i = 0; i < 4; ++i)
-            seq.addNote (pattern[i], tracktion::BeatPosition::fromBeats ((double) i),
-                         tracktion::BeatDuration::fromBeats (1.0), 100, 0, &undoManager());
+            sequence.addNote (pattern[i], tracktion::BeatPosition::fromBeats ((double) i),
+                              tracktion::BeatDuration::fromBeats (1.0), 100, 0, &undoManager());
     }
 
     auto* data = new DynamicObject();
@@ -951,8 +945,7 @@ juce::var MoshOps::cmdAcceptRender (const juce::var& args)
         if (t != nullptr && t->getName() == "Neural Renders") lane = t;
     if (lane == nullptr)
     {
-        lane = edit.insertNewAudioTrack (te::TrackInsertPoint::getEndOfTracks (edit), nullptr).get();
-        if (lane != nullptr) lane->setName ("Neural Renders");
+        lane = createAudioTrack ("Neural Renders");
     }
     if (lane == nullptr) return errResult ("accept_render", "no lane");
 
@@ -1063,6 +1056,40 @@ juce::var MoshOps::cmdExportAudio (const juce::var& args)
     return okResult ("export_audio", var (data));
 }
 
+te::AudioTrack* MoshOps::createAudioTrack (const juce::String& name)
+{
+    auto& edit = eng.edit();
+    auto track = edit.insertNewAudioTrack (te::TrackInsertPoint::getEndOfTracks (edit), nullptr, false);
+    if (track == nullptr)
+        return nullptr;
+
+    if (name.isNotEmpty())
+        track->setName (name);
+
+    // Tracktion queues a track-order AsyncUpdater after insertion. In headless
+    // command runs there is no normal GUI dispatch between commands, so drain it
+    // here before the next undo transaction is opened.
+    if (! eng.hasAudio())
+        if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
+            mm->runDispatchLoopUntil (1);
+
+    return track.get();
+}
+
+te::VolumeAndPanPlugin* MoshOps::ensureVolumePlugin (te::AudioTrack& track)
+{
+    if (auto* existing = track.getVolumePlugin())
+        return existing;
+
+    if (auto plugin = eng.edit().getPluginCache().createNewPlugin (te::VolumeAndPanPlugin::xmlTypeName, {}))
+    {
+        track.pluginList.insertPlugin (plugin, -1, nullptr);
+        return dynamic_cast<te::VolumeAndPanPlugin*> (plugin.get());
+    }
+
+    return nullptr;
+}
+
 juce::var MoshOps::pluginToVar (te::Plugin& p, int index)
 {
     auto* o = new DynamicObject();
@@ -1147,6 +1174,11 @@ juce::var MoshOps::trackToVar (te::AudioTrack& t, int index)
     {
         o->setProperty ("volumeDb", vp->getVolumeDb());
         o->setProperty ("pan", vp->getPan());
+    }
+    else
+    {
+        o->setProperty ("volumeDb", 0.0);
+        o->setProperty ("pan", 0.0);
     }
     o->setProperty ("mute", t.isMuted (false));
     o->setProperty ("solo", t.isSolo (false));

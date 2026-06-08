@@ -25,16 +25,35 @@ public:
         if (te::PluginManager::startChildProcessPluginScan (commandLine))
             return;
 
-        const bool headless = commandLine.contains ("--selftest");
+        const bool undoSelfTest = commandLine.contains ("--selftest-undo");
+        const bool liveAudioSmoke = commandLine.contains ("--live-audio-smoke");
+        const bool headless = undoSelfTest || commandLine.contains ("--selftest");
         // Headless: no audio device, and an isolated cold session so the harness is
         // idempotent (it saves/reloads itself) and never touches the GUI session.
-        engine  = std::make_unique<MoshEngine> (! headless, /*freshSession=*/ headless);
+        engine  = std::make_unique<MoshEngine> ((! headless) || liveAudioSmoke,
+                                                /*freshSession=*/ headless || liveAudioSmoke);
         moshOps = std::make_unique<MoshOps> (*engine);
 
         // Headless command-surface harness (06 §4): `Mosh --selftest`.
+        if (undoSelfTest)
+        {
+            const int fails = runUndoSelfTest (*engine, *moshOps);
+            setApplicationReturnValue (fails);
+            quit();
+            return;
+        }
+
         if (headless)
         {
             const int fails = runSelfTest (*engine, *moshOps);
+            setApplicationReturnValue (fails);
+            quit();
+            return;
+        }
+
+        if (liveAudioSmoke)
+        {
+            const int fails = runLiveAudioSmoke (*engine, *moshOps);
             setApplicationReturnValue (fails);
             quit();
             return;

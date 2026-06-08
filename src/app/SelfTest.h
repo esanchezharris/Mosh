@@ -11,6 +11,14 @@ class MoshOps;
     the UI. Returns 0 on success, the number of failed checks otherwise. */
 int runSelfTest (MoshEngine&, MoshOps&);
 
+/** Focused strict-mode probe for the Tracktion undo chain used by Stage 1.
+    Keeps assertion debugging separate from plugin hosting and generative jobs. */
+int runUndoSelfTest (MoshEngine&, MoshOps&);
+
+/** Opens the real audio device path, plays a deterministic tone briefly, and
+    exits. Used by the BlackHole virtual loopback gate. */
+int runLiveAudioSmoke (MoshEngine&, MoshOps&);
+
 /** Scripted Stage 3 demo (`Mosh --demo3`): builds a session with a VST3 effect on
     a wave track and a VST3 synth on a MIDI track, and opens the synth's native
     editor — then leaves the GUI running (for visual verification of the gate). */
