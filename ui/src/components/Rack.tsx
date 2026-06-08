@@ -1,5 +1,6 @@
 import { useStore } from "../store";
 import type { Snapshot, Plugin } from "../types";
+import { GenPanel } from "./GenPanel";
 
 // The plugin rack for the selected track (Stage 3). Every action is a MoshOps
 // command: load/remove/reorder/bypass/open_plugin_editor.
@@ -14,6 +15,7 @@ export function Rack({ snapshot }: { snapshot: Snapshot }) {
 
   return (
     <div className="rack">
+      <div className="rack-left">
       <div className="rack-label">
         {track ? (
           <>
@@ -53,6 +55,8 @@ export function Rack({ snapshot }: { snapshot: Snapshot }) {
           </button>
         )}
       </div>
+      </div>
+      {track && <GenPanel track={track} />}
     </div>
   );
 }

@@ -4,6 +4,7 @@
 #include <functional>
 #include "engine/MoshEngine.h"
 #include "plugins/hosting/PluginHost.h"
+#include "generative/GenerativeJobManager.h"
 
 namespace mosh
 {
@@ -73,6 +74,21 @@ private:
     juce::var cmdSetNeuralLabMode(const juce::var& args);
     juce::var cmdSetNeuralLatency(const juce::var& args);
     juce::var cmdResetNeural     (const juce::var& args);
+    // Stage 5 — Tier-B generative layer (RenderLayer flow)
+    juce::var cmdCreateRenderLayer (const juce::var& args);
+    juce::var cmdSetRenderParam   (const juce::var& args);
+    juce::var cmdRenderLayer      (const juce::var& args);
+    juce::var cmdCancelRender     (const juce::var& args);
+    juce::var cmdAcceptRender     (const juce::var& args);
+    juce::var cmdRejectRender     (const juce::var& args);
+    juce::var cmdBypassLayer      (const juce::var& args);
+    juce::var cmdFreezeLayer      (const juce::var& args);
+    juce::var cmdBounceLayerToClip(const juce::var& args);
+
+    juce::ValueTree findRenderLayer (const juce::String& clipId);
+    juce::String    computeFingerprint (const juce::ValueTree& node, const juce::File& inputWav);
+    void            finalizeRender (const juce::String& clipId, const juce::File& outputWav,
+                                    const juce::File& manifestFile, const juce::String& cacheKey);
 
     // ── helpers ──
     te::AudioTrack* findTrack (const juce::String& id);
@@ -97,6 +113,7 @@ private:
 
     MoshEngine& eng;
     PluginHost  pluginHost;
+    GenerativeJobManager jobManager;
     EventSink   eventSink;
     juce::int64 seq = 0;
     juce::File  logFile;

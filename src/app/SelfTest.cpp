@@ -335,6 +335,61 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         }
     }
 
+    // ─── Stage 5: Tier-B generative layer (FakeAdapter) ───
+    std::cerr << "--- Stage 5: generative layer (FakeAdapter, full loop) ---\n";
+    {
+        // Fresh track + source clip for the generative flow.
+        auto gt = cmd (ops, "create_track", args1 ("name", "Gen"))["data"].getProperty ("trackId", var()).toString();
+        auto tone = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", gt }, { "seconds", 1.5 }, { "freq", 196.0 }}));
+        const auto gcid = tone["data"].getProperty ("clipId", var()).toString();
+
+        auto crl = cmd (ops, "create_render_layer", objN ({{ "clipId", gcid }, { "adapter", "fake" }}));
+        check (ok (crl), "create_render_layer ok");
+
+        Array<var> colors; { auto* c = new DynamicObject(); c->setProperty ("name", "grit"); c->setProperty ("value", 60); colors.add (var (c)); }
+        cmd (ops, "set_render_param", objN ({{ "clipId", gcid }, { "seed", 1 }, { "nl", 0.4 }, { "colors", colors }}));
+
+        // Render (wait inline — spawns the Python service via the job manager).
+        auto r1 = cmd (ops, "render_layer", objN ({{ "clipId", gcid }, { "wait", true }}));
+        check (ok (r1), "render_layer ok (service spawned, job ran)");
+        check (r1["data"].getProperty ("cache", var()).toString() == "miss", "first render is a cache MISS");
+        check (r1["data"].getProperty ("status", var()).toString() == "ready", "render completed → status ready");
+        // snapshot reflects the rendered layer
+        bool hasArtifact = false;
+        { auto trk = trackById (gt);
+          if (auto* arr = trk.getProperty ("clips", var()).getArray())
+            for (auto& c : *arr) if (c.getProperty ("id", var()).toString() == gcid)
+                hasArtifact = (bool) c.getProperty ("renderLayer", var()).getProperty ("hasArtifact", false); }
+        check (hasArtifact, "render produced a cached artifact (output.wav)");
+
+        // Re-render with identical fingerprint → cache HIT.
+        auto r2 = cmd (ops, "render_layer", objN ({{ "clipId", gcid }, { "wait", true }}));
+        check (r2["data"].getProperty ("cache", var()).toString() == "hit", "identical re-render is a cache HIT (full fingerprint)");
+
+        // Change a param → fingerprint changes → cache MISS (re-render).
+        cmd (ops, "set_render_param", objN ({{ "clipId", gcid }, { "seed", 2 }}));
+        auto r3 = cmd (ops, "render_layer", objN ({{ "clipId", gcid }, { "wait", true }}));
+        check (r3["data"].getProperty ("cache", var()).toString() == "miss", "param change → dirty → re-render (cache MISS)");
+
+        // Accept → lands as a new clip on the "Neural Renders" lane.
+        const int tracksBefore = tracks (ops);
+        check (ok (cmd (ops, "accept_render", args1 ("clipId", gcid))), "accept_render ok");
+        check (tracks (ops) == tracksBefore + 1, "accept landed a new clip on a neural lane");
+        bool laneHasClip = false;
+        { auto snap = ops.snapshot();
+          if (auto* arr = snap["tracks"].getArray())
+            for (auto& t : *arr) if (t.getProperty ("name", var()).toString() == "Neural Renders")
+                laneHasClip = trackClips (t) >= 1; }
+        check (laneHasClip, "neural lane carries the accepted render");
+
+        // JSONL records accept/reject as TASTE LABELS (05 §9).
+        auto logText = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
+        check (logText.contains ("accept_render"), "JSONL records accept_render (taste label)");
+        cmd (ops, "reject_render", args1 ("clipId", gcid));
+        logText = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
+        check (logText.contains ("reject_render"), "JSONL records reject_render (taste label)");
+    }
+
     std::cerr << "===== " << (checks - failures) << "/" << checks
               << " checks passed, " << failures << " failed =====\n\n";
     return failures;
@@ -405,6 +460,31 @@ void runNeuralDemo (MoshOps& ops)
         cmd ("set_neural_param", obj ({{ "trackId", t }, { "index", idx }, { "paramId", "drive" }, { "value", 72.0 }}));
         cmd ("set_neural_param", obj ({{ "trackId", t }, { "index", idx }, { "paramId", "mix" }, { "value", 85.0 }}));
     }
+}
+
+void runGenerativeDemo (MoshOps& ops)
+{
+    using namespace juce;
+    auto cmd = [&] (const String& n, var a = var()) {
+        auto* c = new DynamicObject(); c->setProperty ("command", n);
+        if (! a.isVoid()) c->setProperty ("args", a);
+        return ops.execute (var (c));
+    };
+    auto obj = [] (std::initializer_list<std::pair<const char*, var>> kv) {
+        auto* o = new DynamicObject();
+        for (auto& p : kv) o->setProperty (p.first, p.second);
+        return var (o);
+    };
+
+    auto t = cmd ("create_track", obj ({{ "name", "Vox" }}))["data"].getProperty ("trackId", var()).toString();
+    auto tone = cmd ("add_test_tone_clip", obj ({{ "trackId", t }, { "seconds", 2.0 }, { "freq", 147.0 }}));
+    auto cid = tone["data"].getProperty ("clipId", var()).toString();
+    cmd ("create_render_layer", obj ({{ "clipId", cid }, { "adapter", "fake" }}));
+    Array<var> colors; { auto* c = new DynamicObject(); c->setProperty ("name", "grit"); c->setProperty ("value", 55); colors.add (var (c)); }
+    cmd ("set_render_param", obj ({{ "clipId", cid }, { "seed", 1 }, { "nl", 0.35 }, { "colors", colors }}));
+    // NB: the actual render_layer (which spawns the service) is left to the user
+    // button — running it here would block the message thread on a TCC/service
+    // prompt before the WebView paints. The full render loop is proven headless.
 }
 
 } // namespace mosh

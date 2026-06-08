@@ -2,6 +2,7 @@
 #include "state/Ids.h"
 #include "state/RenderLayer.h"
 #include "plugins/neural/NeuralInsertPlugin.h"
+#include <thread>
 
 namespace mosh
 {
@@ -71,6 +72,15 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "set_neural_lab_mode") return cmdSetNeuralLabMode (args);
     if (name == "set_neural_latency")return cmdSetNeuralLatency (args);
     if (name == "reset_neural")      return cmdResetNeural (args);
+    if (name == "create_render_layer") return cmdCreateRenderLayer (args);
+    if (name == "set_render_param")  return cmdSetRenderParam (args);
+    if (name == "render_layer")      return cmdRenderLayer (args);
+    if (name == "cancel_render")     return cmdCancelRender (args);
+    if (name == "accept_render")     return cmdAcceptRender (args);
+    if (name == "reject_render")     return cmdRejectRender (args);
+    if (name == "bypass_layer")      return cmdBypassLayer (args);
+    if (name == "freeze_layer")      return cmdFreezeLayer (args);
+    if (name == "bounce_layer_to_clip") return cmdBounceLayerToClip (args);
 
     return errResult (name, "unknown command: " + name);
 }
@@ -678,6 +688,326 @@ juce::var MoshOps::cmdResetNeural (const juce::var& args)
     return okResult ("reset_neural");
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Stage 5 — Tier-B generative layer (RenderLayer flow)
+// ─────────────────────────────────────────────────────────────────────────────
+juce::ValueTree MoshOps::findRenderLayer (const juce::String& clipId)
+{
+    if (auto* clip = findClip (clipId))
+        return clip->state.getChildWithName (ids::MOSH_RENDERLAYER);
+    return {};
+}
+
+juce::String MoshOps::computeFingerprint (const juce::ValueTree& node, const juce::File& inputWav)
+{
+    const auto upstreamHash = juce::MD5 (inputWav).toHexString();   // full upstream audio hash
+    return RenderLayer::fingerprint (node, upstreamHash, "120bpm/Cmaj", 44100, 2,
+                                     jobManager.serviceBuild());
+}
+
+juce::var MoshOps::cmdCreateRenderLayer (const juce::var& args)
+{
+    const auto clipId = args.getProperty ("clipId", var()).toString();
+    auto* clip = findClip (clipId);
+    if (clip == nullptr) return errResult ("create_render_layer", "no clip: " + clipId);
+    if (clip->state.getChildWithName (ids::MOSH_RENDERLAYER).isValid())
+        return errResult ("create_render_layer", "clip already has a render layer");
+
+    undoManager().beginNewTransaction ("create_render_layer");
+    auto pos = clip->getPosition();
+    auto node = RenderLayer::create ("rl-" + String (Time::getCurrentTime().toMilliseconds()),
+        clipId, pos.getStart().inSeconds(), pos.getEnd().inSeconds(),
+        args.getProperty ("adapter", "fake").toString());
+    clip->state.appendChild (node, &undoManager());
+
+    auto* data = new DynamicObject();
+    data->setProperty ("layerId", node[ids::id].toString());
+    logLine ("create_render_layer", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("create_render_layer", var (data));
+}
+
+juce::var MoshOps::cmdSetRenderParam (const juce::var& args)
+{
+    auto node = findRenderLayer (args.getProperty ("clipId", var()).toString());
+    if (! node.isValid()) return errResult ("set_render_param", "no render layer");
+
+    undoManager().beginNewTransaction ("set_render_param");
+    auto params = node.getChildWithName (ids::PARAMS);
+    if (args.hasProperty ("prompt")) params.setProperty (ids::prompt, args.getProperty ("prompt", ""), &undoManager());
+    if (args.hasProperty ("cfg"))    params.setProperty (ids::cfg, args.getProperty ("cfg", 7.0), &undoManager());
+    if (args.hasProperty ("steps"))  params.setProperty (ids::steps, args.getProperty ("steps", 30), &undoManager());
+    if (args.hasProperty ("nl"))     params.setProperty (ids::nl, args.getProperty ("nl", 0.4), &undoManager());
+    if (args.hasProperty ("seed"))   node.setProperty (ids::seed, args.getProperty ("seed", 0), &undoManager());
+    if (args.hasProperty ("mode"))   node.setProperty (ids::mode, args.getProperty ("mode", "reimagine"), &undoManager());
+
+    if (args.hasProperty ("colors"))   // ≤3, ordered (01 §4.4)
+    {
+        auto colors = params.getChildWithName (ids::COLORS);
+        colors.removeAllChildren (&undoManager());
+        if (auto* arr = args.getProperty ("colors", var()).getArray())
+            for (int i = 0; i < juce::jmin (3, arr->size()); ++i)
+            {
+                auto& c = arr->getReference (i);
+                juce::ValueTree col (ids::COLOR);
+                col.setProperty (ids::name, c.getProperty ("name", ""), nullptr);
+                col.setProperty (ids::value, c.getProperty ("value", 0), nullptr);
+                colors.appendChild (col, &undoManager());
+            }
+    }
+
+    node.setProperty (ids::status, "dirty", nullptr);   // params changed → re-render
+    logLine ("set_render_param", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("set_render_param");
+}
+
+juce::var MoshOps::cmdRenderLayer (const juce::var& args)
+{
+    const auto clipId = args.getProperty ("clipId", var()).toString();
+    auto* clip = findClip (clipId);
+    auto node = findRenderLayer (clipId);
+    if (clip == nullptr || ! node.isValid()) return errResult ("render_layer", "no render layer");
+
+    auto* wave = dynamic_cast<te::WaveAudioClip*> (clip);
+    if (wave == nullptr) return errResult ("render_layer", "only wave clips renderable in v0");
+
+    // Prepare the job dir + render the source region to input.wav. For a wave
+    // clip with no upstream FX this is the source audio; the general path is
+    // te::Renderer::renderToFile (render-to-file preferred, 05 §3 // VERIFY).
+    auto jobDir = eng.sessionDir().getChildFile ("renders").getChildFile (node[ids::id].toString());
+    jobDir.createDirectory();
+    auto input = jobDir.getChildFile ("input.wav");
+    auto output = jobDir.getChildFile ("output.wav");
+    auto manifest = jobDir.getChildFile ("output_manifest.json");
+    input.deleteFile();
+    if (! wave->getCurrentSourceFile().copyFileTo (input))
+        return errResult ("render_layer", "could not stage source region");
+
+    // Ensure the service first so its build/version is part of EVERY fingerprint
+    // (else the first render hashes an empty build and the cache never hits).
+    if (! jobManager.ensureServiceRunning())
+        return errResult ("render_layer", "generative service unavailable");
+
+    const auto fp = computeFingerprint (node, input);
+
+    // Cache by FULL fingerprint (05 §5) — reuse only on an exact match.
+    if (node[ids::cacheKey].toString() == fp
+        && juce::File (node[ids::cacheArtifact].toString()).existsAsFile())
+    {
+        node.setProperty (ids::status, "ready", nullptr);
+        emit ("layer_status", [&] { auto* o = new DynamicObject();
+            o->setProperty ("clipId", clipId); o->setProperty ("layerId", node[ids::id]);
+            o->setProperty ("status", "ready"); o->setProperty ("cache", "hit"); return var (o); }());
+        logLine ("render_layer", args, true, {}, false);
+        auto* d = new DynamicObject(); d->setProperty ("cache", "hit"); d->setProperty ("status", "ready");
+        return okResult ("render_layer", var (d));
+    }
+
+    // Build the job params from the node.
+    auto params = node.getChildWithName (ids::PARAMS);
+    auto* p = new DynamicObject();
+    p->setProperty ("prompt", params[ids::prompt]);
+    p->setProperty ("seed", node[ids::seed]);
+    p->setProperty ("nl", params[ids::nl]);
+    p->setProperty ("cfg", params[ids::cfg]);
+    p->setProperty ("steps", params[ids::steps]);
+    Array<var> colors;
+    if (auto cs = params.getChildWithName (ids::COLORS); cs.isValid())
+        for (int i = 0; i < cs.getNumChildren(); ++i)
+        {
+            auto* co = new DynamicObject();
+            co->setProperty ("name", cs.getChild (i)[ids::name]);
+            co->setProperty ("value", cs.getChild (i)[ids::value]);
+            colors.add (var (co));
+        }
+    p->setProperty ("colors", colors);
+
+    const auto jobId = jobManager.submitJob (input, output, manifest, var (p));
+    if (jobId.isEmpty()) return errResult ("render_layer", "job submit failed");
+
+    node.setProperty (ids::cacheKey, fp, nullptr);
+    node.setProperty (ids::status, "rendering", nullptr);
+    emit ("layer_status", [&] { auto* o = new DynamicObject();
+        o->setProperty ("clipId", clipId); o->setProperty ("layerId", node[ids::id]);
+        o->setProperty ("status", "rendering"); o->setProperty ("cache", "miss");
+        o->setProperty ("jobId", jobId); return var (o); }());
+
+    // Poll. Headless harness uses wait:true (inline); the GUI polls async on a
+    // background thread so playback never stalls (05 §4) — see below.
+    const bool wait = (bool) args.getProperty ("wait", false);
+    if (wait)
+    {
+        for (int i = 0; i < 100; ++i)
+        {
+            auto st = jobManager.jobStatus (jobId);
+            const auto status = st.getProperty ("status", var()).toString();
+            emit ("layer_render_progress", [&] { auto* o = new DynamicObject();
+                o->setProperty ("clipId", clipId); o->setProperty ("jobId", jobId);
+                o->setProperty ("progress", st.getProperty ("progress", 0.0)); return var (o); }());
+            if (status == "ready" || status == "error" || status == "cancelled") break;
+            juce::Thread::sleep (50);
+        }
+        finalizeRender (clipId, output, manifest, fp);
+        logLine ("render_layer", args, true, {}, false);
+        auto* d = new DynamicObject(); d->setProperty ("cache", "miss");
+        d->setProperty ("status", node[ids::status]); d->setProperty ("jobId", jobId);
+        return okResult ("render_layer", var (d));
+    }
+
+    // Async: poll on a background thread, marshal node updates + events to the
+    // message thread (service I/O off the message thread; tree on it).
+    std::thread ([this, clipId, jobId, output, manifest, fp]
+    {
+        for (int i = 0; i < 600; ++i)
+        {
+            auto st = jobManager.jobStatus (jobId);
+            const auto status = st.getProperty ("status", juce::var()).toString();
+            const auto progress = st.getProperty ("progress", 0.0);
+            juce::MessageManager::callAsync ([this, clipId, jobId, progress]
+            {
+                emit ("layer_render_progress", [&] { auto* o = new juce::DynamicObject();
+                    o->setProperty ("clipId", clipId); o->setProperty ("jobId", jobId);
+                    o->setProperty ("progress", progress); return juce::var (o); }());
+            });
+            if (status == "ready" || status == "error" || status == "cancelled") break;
+            juce::Thread::sleep (100);
+        }
+        juce::MessageManager::callAsync ([this, clipId, output, manifest, fp]
+        {
+            finalizeRender (clipId, output, manifest, fp);
+        });
+    }).detach();
+
+    logLine ("render_layer", args, true, {}, false);
+    auto* d = new DynamicObject(); d->setProperty ("cache", "miss");
+    d->setProperty ("status", "rendering"); d->setProperty ("jobId", jobId);
+    return okResult ("render_layer", var (d));
+}
+
+void MoshOps::finalizeRender (const juce::String& clipId, const juce::File& outputWav,
+                              const juce::File& manifestFile, const juce::String& cacheKey)
+{
+    auto node = findRenderLayer (clipId);
+    if (! node.isValid()) return;
+    if (! outputWav.existsAsFile()) { node.setProperty (ids::status, "error", nullptr); emitSnapshotInvalidated(); return; }
+
+    node.setProperty (ids::cacheArtifact, outputWav.getFullPathName(), nullptr);
+    node.setProperty (ids::cacheKey, cacheKey, nullptr);
+    node.setProperty (ids::status, "ready", nullptr);
+
+    var qa = manifestFile.existsAsFile() ? JSON::parse (manifestFile.loadFileAsString()) : var();
+    emit ("layer_status", [&] { auto* o = new DynamicObject();
+        o->setProperty ("clipId", clipId); o->setProperty ("layerId", node[ids::id]);
+        o->setProperty ("status", "ready"); o->setProperty ("cache", "miss");
+        o->setProperty ("qa", qa); return var (o); }());
+    emitSnapshotInvalidated();
+}
+
+juce::var MoshOps::cmdCancelRender (const juce::var& args)
+{
+    jobManager.cancelJob (args.getProperty ("jobId", var()).toString());
+    if (auto node = findRenderLayer (args.getProperty ("clipId", var()).toString()); node.isValid())
+        node.setProperty (ids::status, "dirty", nullptr);
+    logLine ("cancel_render", args, true, {}, false);
+    emitSnapshotInvalidated();
+    return okResult ("cancel_render");
+}
+
+juce::var MoshOps::cmdAcceptRender (const juce::var& args)
+{
+    const auto clipId = args.getProperty ("clipId", var()).toString();
+    auto* clip = findClip (clipId);
+    auto node = findRenderLayer (clipId);
+    if (clip == nullptr || ! node.isValid()) return errResult ("accept_render", "no render layer");
+    juce::File artifact (node[ids::cacheArtifact].toString());
+    if (! artifact.existsAsFile()) return errResult ("accept_render", "nothing rendered to accept");
+
+    // Landing: new clip on a dedicated "neural" lane (the documented guaranteed
+    // fallback, 05 §3.1 — ships as a user-selectable mode, not a defeat).
+    undoManager().beginNewTransaction ("accept_render");
+    auto& edit = eng.edit();
+    te::AudioTrack* lane = nullptr;
+    for (auto* t : te::getAudioTracks (edit))
+        if (t != nullptr && t->getName() == "Neural Renders") lane = t;
+    if (lane == nullptr)
+    {
+        lane = edit.insertNewAudioTrack (te::TrackInsertPoint::getEndOfTracks (edit), nullptr).get();
+        if (lane != nullptr) lane->setName ("Neural Renders");
+    }
+    if (lane == nullptr) return errResult ("accept_render", "no lane");
+
+    auto dest = eng.sessionDir().getChildFile ("audio")
+                    .getChildFile (node[ids::id].toString()).withFileExtension ("wav");
+    dest.deleteFile();
+    artifact.copyFileTo (dest);
+
+    auto pos = clip->getPosition();
+    lane->insertWaveClip ("neural-" + clip->getName(), dest,
+        { { pos.getStart(), pos.getLength() }, {} }, false);
+
+    node.setProperty (ids::userKept, true, &undoManager());
+    node.setProperty (ids::status, "ready", &undoManager());
+
+    // JSONL TASTE LABEL (05 §9): accept feeds the taste flywheel.
+    auto* tl = new DynamicObject();
+    tl->setProperty ("clipId", clipId); tl->setProperty ("layerId", node[ids::id]);
+    tl->setProperty ("landing", "new_clip");
+    logLine ("accept_render", var (tl), true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("accept_render");
+}
+
+juce::var MoshOps::cmdRejectRender (const juce::var& args)
+{
+    auto node = findRenderLayer (args.getProperty ("clipId", var()).toString());
+    if (! node.isValid()) return errResult ("reject_render", "no render layer");
+    undoManager().beginNewTransaction ("reject_render");
+    node.setProperty (ids::userKept, false, &undoManager());
+    node.setProperty (ids::status, "dirty", &undoManager());
+    logLine ("reject_render", args, true, {}, true);   // TASTE LABEL (reject)
+    emitSnapshotInvalidated();
+    return okResult ("reject_render");
+}
+
+juce::var MoshOps::cmdBypassLayer (const juce::var& args)
+{
+    auto node = findRenderLayer (args.getProperty ("clipId", var()).toString());
+    if (! node.isValid()) return errResult ("bypass_layer", "no render layer");
+    undoManager().beginNewTransaction ("bypass_layer");
+    node.setProperty (ids::status, (bool) args.getProperty ("bypassed", false) ? "bypassed" : "ready", &undoManager());
+    logLine ("bypass_layer", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("bypass_layer");
+}
+
+juce::var MoshOps::cmdFreezeLayer (const juce::var& args)
+{
+    // Freeze = commit the cached render as the durable audio (already a file).
+    auto node = findRenderLayer (args.getProperty ("clipId", var()).toString());
+    if (! node.isValid()) return errResult ("freeze_layer", "no render layer");
+    if (! juce::File (node[ids::cacheArtifact].toString()).existsAsFile())
+        return errResult ("freeze_layer", "nothing rendered to freeze");
+    undoManager().beginNewTransaction ("freeze_layer");
+    node.setProperty (ids::status, "frozen", &undoManager());
+    logLine ("freeze_layer", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("freeze_layer");
+}
+
+juce::var MoshOps::cmdBounceLayerToClip (const juce::var& args)
+{
+    // Bounce = accept_render then mark the layer bounced (the render becomes a
+    // plain clip on the neural lane; lineage stays in the RenderLayer link).
+    auto r = cmdAcceptRender (args);
+    if (! (bool) r.getProperty ("ok", false)) return r;
+    if (auto node = findRenderLayer (args.getProperty ("clipId", var()).toString()); node.isValid())
+        node.setProperty (ids::status, "bounced", nullptr);
+    logLine ("bounce_layer_to_clip", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("bounce_layer_to_clip");
+}
+
 juce::var MoshOps::pluginToVar (te::Plugin& p, int index)
 {
     auto* o = new DynamicObject();
@@ -789,7 +1119,35 @@ juce::var MoshOps::clipToVar (te::Clip& c)
     else
         o->setProperty ("type", "clip");
 
-    o->setProperty ("hasRenderLayer", c.state.getChildWithName (ids::MOSH_RENDERLAYER).isValid());
+    auto rl = c.state.getChildWithName (ids::MOSH_RENDERLAYER);
+    o->setProperty ("hasRenderLayer", rl.isValid());
+    if (rl.isValid())
+    {
+        auto* r = new DynamicObject();
+        r->setProperty ("id", rl[ids::id]);
+        r->setProperty ("status", rl[ids::status]);
+        r->setProperty ("adapter", rl[ids::modelAdapter]);
+        r->setProperty ("mode", rl[ids::mode]);
+        r->setProperty ("seed", rl[ids::seed]);
+        r->setProperty ("userKept", rl[ids::userKept]);
+        r->setProperty ("hasArtifact", juce::File (rl[ids::cacheArtifact].toString()).existsAsFile());
+        if (auto params = rl.getChildWithName (ids::PARAMS); params.isValid())
+        {
+            r->setProperty ("prompt", params[ids::prompt]);
+            r->setProperty ("nl", params[ids::nl]);
+            Array<var> colors;
+            if (auto cs = params.getChildWithName (ids::COLORS); cs.isValid())
+                for (int i = 0; i < cs.getNumChildren(); ++i)
+                {
+                    auto* co = new DynamicObject();
+                    co->setProperty ("name", cs.getChild (i)[ids::name]);
+                    co->setProperty ("value", cs.getChild (i)[ids::value]);
+                    colors.add (var (co));
+                }
+            r->setProperty ("colors", colors);
+        }
+        o->setProperty ("renderLayer", var (r));
+    }
     return var (o);
 }
 

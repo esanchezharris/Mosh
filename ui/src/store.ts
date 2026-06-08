@@ -23,6 +23,7 @@ type State = {
   selectedTrackId: string | null;
   availablePlugins: AvailablePlugin[];
   browserOpen: boolean;
+  renderProgress: Record<string, number>; // clipId → 0..1 (Tier-B render)
 
   refresh: () => Promise<void>;
   exec: (command: string, args?: Record<string, unknown>) => Promise<CommandResult>;
@@ -55,6 +56,7 @@ export const useStore = create<State>((set, get) => ({
   selectedTrackId: null,
   availablePlugins: [],
   browserOpen: false,
+  renderProgress: {},
 
   refresh: async () => {
     if (!isNative()) return;
@@ -89,6 +91,11 @@ export const useStore = create<State>((set, get) => ({
       } else if (ev.type === "transport") {
         const t = ev.payload as Transport;
         set((s) => (s.snapshot ? { snapshot: { ...s.snapshot, transport: t } } : {}));
+      } else if (ev.type === "layer_render_progress") {
+        const p = ev.payload as { clipId: string; progress: number };
+        set((s) => ({ renderProgress: { ...s.renderProgress, [p.clipId]: p.progress } }));
+      } else if (ev.type === "layer_status") {
+        void get().refresh();
       }
     });
     void get().refresh();

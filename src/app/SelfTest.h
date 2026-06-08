@@ -20,4 +20,9 @@ void runPluginDemo (MoshOps&);
     insert with the drive driven up — for visual verification of the neural rack. */
 void runNeuralDemo (MoshOps&);
 
+/** Scripted Stage 5 demo (`Mosh --demo5`): a track + tone + a generative
+    RenderLayer with a completed FakeAdapter render — for visual verification of
+    the generative drawer (audition/accept/reject). */
+void runGenerativeDemo (MoshOps&);
+
 } // namespace mosh

@@ -46,7 +46,9 @@ target_sources(Mosh PRIVATE
     # Stage 3 — VST3 hosting (04 PART 1)
     src/plugins/hosting/PluginHost.cpp
     # Stage 4 — Tier-A real-time neural insert (04 PART 2)
-    src/plugins/neural/NeuralInsertPlugin.cpp)
+    src/plugins/neural/NeuralInsertPlugin.cpp
+    # Stage 5 — Tier-B generative layer (05)
+    src/generative/GenerativeJobManager.cpp)
 
 target_include_directories(Mosh PRIVATE src)
 

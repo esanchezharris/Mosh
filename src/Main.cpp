@@ -53,6 +53,8 @@ public:
             juce::MessageManager::callAsync ([this] { runPluginDemo (*moshOps); });
         if (commandLine.contains ("--demo4"))
             juce::MessageManager::callAsync ([this] { runNeuralDemo (*moshOps); });
+        if (commandLine.contains ("--demo5"))
+            juce::MessageManager::callAsync ([this] { runGenerativeDemo (*moshOps); });
     }
 
     void shutdown() override

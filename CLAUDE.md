@@ -55,13 +55,13 @@
 - [x] `getLatencySeconds()` returns the **true** delay (internal delay line of exactly the reported length); knobs via `add_neural_insert`/`set_neural_param` (0–100 UI, ASTD-mapped); `set_neural_lab_mode`/`set_neural_latency`/`reset_neural`. UI: neural rack card with ASTD sliders (safe-max marker), Lab toggle, reset, latency.
 - [x] **GATE:** **PDC null test passes** (impulse emerges at *exactly* the reported latency → no drift); **bypass correct** (passthrough, latency constant on bypass — guards the inverted-logic bug); RT-safe (no dropouts by design); ASTD clamps hold + Lab unlock — all via commands. Proven by `Mosh --selftest` (69/69) + Catch2 ASTD unit tests + `Mosh --demo4` visual (neural rack, screenshot). **Honest gap:** real inference verified (driven signal altered, silence silent), but specific NAM/RAVE *audible A/B* not done (no model files, no ears, CoreAudio HAL wedged this session) — RAVE-via-anira is the gated next rung.
 
-### Stage 5 — Generative layer (`05`) — Fake first, then SA3
-- [ ] `GenerativeModelAdapter` interface; **`FakeAdapter`** returns deterministic placeholder audio.
-- [ ] Job service: submit/status/progress/cancel + lifecycle (warmup/heartbeat/crash-restart/cancel-on-close); audio over files+manifests.
-- [ ] RenderLayer flow + full cache fingerprint; commands: `create_render_layer`/`set_render_param`/`render_layer`/`cancel_render`/`accept_render`/`reject_render`/`bypass_layer`/`freeze_layer`/`bounce_layer_to_clip`.
-- [ ] Then **`StableAudio3Adapter`** (carve per App. B; env-var the two hardcoded paths): colors + ASTD/Lab, two control vocabularies, generate + re-imagine (`nl ≤ 0.5`), init-latent cache, judge-panel QA, ≤3-color cap.
-- [ ] **GATE (Fake):** full loop via commands — submit → progress events → audition → A/B vs source → accept/reject; cache hit/miss vs fingerprint; source change → dirty → re-render; JSONL logs accept/reject (taste labels); no playback stall.
-- [ ] **GATE (SA3):** real `grit` + real re-imagine commit as auditionable take + quality readout; `/colors` drives knobs+clamps; Lab unlocks; init-latent cache `hit` on seed-only change.
+### Stage 5 — Generative layer (`05`) — Fake first, then SA3 ✅ FAKE GATE PASSED (2026-06-08)
+- [x] `GenerativeModelAdapter` shape + **`FakeAdapter`** (Python `service/adapters/fake_adapter.py`) — deterministic, recognizably-altered audio (seeded gain + one-pole LP + saturation), stdlib `wave` only.
+- [x] Job service (`service/server.py`): submit/status/progress/cancel + capabilities/health; audio over files+manifests (`input.wav`/`output.wav`/`output_manifest.json`). Native `GenerativeJobManager` (`src/generative/`): HTTP via `juce::URL`, spawns/detects the service (`juce::ChildProcess`), health handshake, cancel-on-close.
+- [x] RenderLayer flow + full cache fingerprint (MD5 upstream hash · route · variant · seed · params · safetyMappingVersion · service build); commands `create_render_layer`/`set_render_param`/`render_layer`/`cancel_render`/`accept_render`/`reject_render`/`bypass_layer`/`freeze_layer`/`bounce_layer_to_clip`. Landing = new-clip-on-"Neural Renders"-lane (the documented guaranteed fallback). UI: generative drawer (grit/nl ASTD sliders, status, render/accept/reject/seed).
+- [ ] **`StableAudio3Adapter`** — DEFERRED/gated (no local MLX SA3 model this session; same posture as RAVE). Architecture ready (model-neutral adapter + job protocol; env-var paths `SA3_MLX_DIR`/`COLORRACK_DATA` reserved).
+- [x] **GATE (Fake):** full loop via commands — render → audition (cached artifact) → accept/reject; **cache HIT/MISS vs full fingerprint**; param change → dirty → re-render (MISS); JSONL logs accept/reject as **taste labels**; async/background render (no playback stall). Proven by `Mosh --selftest` (81/81) + `Mosh --demo5` generative-drawer screenshot.
+- [ ] **GATE (SA3):** DEFERRED — needs the external MLX SA3 stack (not present this session).
 
 ### Stage 6 — Consolidation (`03`,`04`,`05`)
 - [ ] Mixer polish; two-theme system (shared tokens); reserved B-5 slot (empty); optional prompt-concision rewriter + quality readout.
@@ -94,10 +94,10 @@ Build the arrangement incrementally within Stage 2/6: static clips → drag/move
 - [x] Bypassed-plugin PDC (forum #53709) — TESTED: bypass passes audio through unchanged and keeps latency constant (delay applied regardless of `isEnabled`), so PDC stays correct across bypass toggles.
 
 **Generative (`05`)**
-- [ ] Takes/comp add+promote API — `CompManager`/`WaveCompManager`; new-clip-on-new-track fallback.
-- [ ] `Renderer::Parameters` fields + `renderToFile` overload (`tracksToDo` bitset, `allowedClips`).
-- [ ] Render-to-file (preferred) vs -to-buffer.
-- [ ] Carve-out external deps present; two hardcoded paths parameterized (App. B).
+- [x] Takes/comp add+promote — RESOLVED via the **new-clip-on-neural-lane fallback** (05 §3.1): `accept_render` lands the output as a `WaveAudioClip` on a "Neural Renders" lane, lineage via the RenderLayer link. (Take-injection into a clip stays a later enhancement.)
+- [x] `Renderer::Parameters` fields + `renderToFile` — RESOLVED: `{engine, tracksToDo (BigInteger), allowedClips, destFile, audioFormat, bitDepth, sampleRateForAudio, time (TimeRange), realTimeRender}`; `Renderer::renderToFile(desc, Parameters)`. v0 stages a wave clip's source directly (equivalent for no-upstream-FX); `renderToFile` is the general path.
+- [x] Render-to-file (preferred) vs -to-buffer — chose **file-based** (the input.wav/output.wav/manifest job protocol).
+- [ ] SA3 carve-out external deps + two hardcoded paths (App. B) — DEFERRED with the SA3 adapter (env vars `SA3_MLX_DIR`/`COLORRACK_DATA` reserved).
 
 ---
 

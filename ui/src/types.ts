@@ -1,6 +1,20 @@
 // Snapshot shape from MoshOps.snapshot() (docs/02_MOSHOPS_CONTRACT.md). The UI
 // renders this; no Tracktion/audio concepts leak across the seam.
 
+export type RenderColor = { name: string; value: number };
+export type RenderLayer = {
+  id: string;
+  status: "empty" | "dirty" | "queued" | "rendering" | "ready" | "error" | "bypassed" | "frozen" | "bounced";
+  adapter: string;
+  mode: string;
+  seed: number;
+  userKept: boolean;
+  hasArtifact: boolean;
+  prompt?: string;
+  nl?: number;
+  colors?: RenderColor[];
+};
+
 export type Clip = {
   id: string;
   name: string;
@@ -11,6 +25,7 @@ export type Clip = {
   sourceFile?: string;
   sourceLength?: number;
   hasRenderLayer: boolean;
+  renderLayer?: RenderLayer;
 };
 
 export type PluginParam = { index: number; name: string; value: number };
