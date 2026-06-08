@@ -21,9 +21,12 @@ Visible/accessibility-backed surfaces:
 Launch: `open -n build/Mosh_artefacts/Debug/Mosh.app --args --demo3`
 
 CUA identified the native plugin editor window `Serum 2`. The plugin window
-rendered a license dialog: "This machine is not yet authorized for Serum 2" with
-OK and Help buttons. This confirms the native editor pop-out path opens a real
-plugin-provided window; it does not prove license-specific interaction.
+first rendered a license dialog: "This machine is not yet authorized for Serum
+2" with OK and Help buttons. After user authorization, CUA identified the same
+native editor window rendering the full Serum UI with OSC/MIX/FX/MATRIX/GLOBAL
+tabs, the `-Init-` preset header, oscillator panels, modulation controls, and
+keyboard. This confirms the native editor pop-out path opens a real
+plugin-provided editor after authorization.
 
 ## Action Automation
 
@@ -49,6 +52,10 @@ Verified action paths:
 - Generative Render: Render click executed and displayed the visible
   `generative service unavailable` banner; Accept/Reject remained disabled, so
   those actions were not marked passing.
+- Native Serum editor: after authorization, CUA inspection saw the full native
+  Serum UI. Pixel clicks on the FX tab still returned the inactive-session error
+  for both `app="Mosh"` and the exact bundle path, so native-editor click
+  automation is not marked passing.
 
 Result: CUA inspection, click, and one drag path are accepted for the built app
 when the app registry is refreshed and actions are addressed as `Mosh`.
