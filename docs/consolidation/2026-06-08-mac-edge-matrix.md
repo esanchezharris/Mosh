@@ -86,3 +86,5 @@ non-portable assumptions are explicit:
 
 The next cross-platform plan should replace each Mac-only proof with either a
 portable equivalent, a platform-specific gate, or an explicit out-of-scope note.
+The tracked follow-up is
+`docs/consolidation/2026-06-08-pc-cross-platform-gate-plan.md`.
