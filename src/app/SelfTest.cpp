@@ -1003,6 +1003,127 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (monPref, "set_input_monitor logged undoable:false (monitoring preference)");
     }
 
+    // ─── Wave: settings — audio device gate + project lifecycle ───
+    // Headless (--selftest, no audio) eng.hasAudio()==false: the audio-engine gate
+    // reports honestly, device commands return graceful errors (never crash), and
+    // device enumeration content + a successful device round-trip + the FileChooser
+    // dialog are hardware/GUI-gated (verified manually in the GUI — see the plan).
+    std::cerr << "--- Wave: settings (audio gate / device / project lifecycle) ---\n";
+    {
+        auto sess = [&] { return ops.snapshot().getProperty ("session", var()); };
+
+        // Audio-engine gate (MON-007 / FLY-004): honest false with no device.
+        check (sess().hasProperty ("audioEnabled"), "snapshot session has audioEnabled gate field");
+        check (! (bool) sess().getProperty ("audioEnabled", true), "audioEnabled is false headless (no device)");
+        check (sess().hasProperty ("bitDepth"), "snapshot session has bitDepth readout");
+        check (sess().hasProperty ("bufferSize"), "snapshot session has bufferSize readout");
+        check (sess().hasProperty ("outputLatencyMs"), "snapshot session has outputLatencyMs readout");
+        check (sess().hasProperty ("audioDeviceName"), "snapshot session has audioDeviceName readout");
+        check (ops.snapshot().getProperty ("audio", var()).isObject(), "snapshot exposes the audio selection block");
+
+        // list_audio_devices: read-only, ok + audioEnabled:false + well-formed types array.
+        auto ld = cmd (ops, "list_audio_devices");
+        check (ok (ld), "list_audio_devices ok");
+        check (! (bool) ld["data"].getProperty ("audioEnabled", true), "list_audio_devices audioEnabled:false headless");
+        {
+            auto typesVar = ld["data"].getProperty ("types", var());   // bind temporary before getArray
+            check (typesVar.isArray(), "list_audio_devices types is an array (shape, possibly empty headless)");
+            auto srVar = ld["data"].getProperty ("sampleRates", var());
+            check (srVar.isArray(), "list_audio_devices sampleRates is an array (empty with no open device)");
+        }
+
+        // set_audio_device / set_buffer_size: graceful no-device errResult, not a crash.
+        auto sd = cmd (ops, "set_audio_device", objN ({{ "bufferSize", 256 }}));
+        check (! ok (sd), "set_audio_device returns graceful error with no device");
+        check (sd.getProperty ("error", var()).toString().contains ("no audio device"), "set_audio_device error mentions no audio device");
+        auto sb = cmd (ops, "set_buffer_size", args1 ("bufferSize", 512));
+        check (! ok (sb), "set_buffer_size returns graceful error with no device");
+
+        // Project lifecycle — run entirely on TEMP files so the persistent session
+        // the prior checks rely on is never corrupted. Restore it at the end.
+        const auto sessionEdit = eng.editFile();
+        const int tracksBefore = tracks (ops);
+        check (tracksBefore > 0, "session has tracks before new_project (sanity)");
+
+        // new_project -> ok, empty tracks, editFile path changed, fresh file on disk.
+        auto npFile = eng.sessionDir().getChildFile ("projects").getChildFile ("selftest-new.tracktionedit");
+        npFile.deleteFile();
+        auto np = cmd (ops, "new_project", args1 ("name", "selftest-new"));
+        check (ok (np), "new_project ok");
+        check (tracks (ops) == 0, "new_project starts with zero tracks");
+        const auto newEdit = sess().getProperty ("editFile", var()).toString();
+        check (newEdit != sessionEdit.getFullPathName(), "new_project changed session.editFile path");
+        check (File (newEdit).existsAsFile() && File (newEdit).getSize() > 0, "new_project wrote a fresh non-empty .tracktionedit");
+
+        // create_track + save + open_project round-trips the track count.
+        check (ok (cmd (ops, "create_track", args1 ("name", "RoundTrip"))), "create_track in new project ok");
+        check (tracks (ops) == 1, "new project has 1 track after create_track");
+        check (ok (cmd (ops, "save")), "save new project ok");
+        // Swap to ANOTHER project, then open the saved one back.
+        auto npFile2 = eng.sessionDir().getChildFile ("projects").getChildFile ("selftest-new2.tracktionedit");
+        npFile2.deleteFile();
+        check (ok (cmd (ops, "new_project", args1 ("name", "selftest-new2"))), "second new_project ok");
+        check (tracks (ops) == 0, "second new project is empty");
+        auto op = cmd (ops, "open_project", args1 ("file", newEdit));
+        check (ok (op), "open_project ok");
+        check (tracks (ops) == 1, "open_project round-trips the saved track count");
+
+        // save_as(tmp) -> ok, file exists non-empty, subsequent save targets the new path.
+        auto saFile = eng.sessionDir().getChildFile ("projects").getChildFile ("selftest-saveas.tracktionedit");
+        saFile.deleteFile();
+        auto sa = cmd (ops, "save_as", args1 ("file", saFile.getFullPathName()));
+        check (ok (sa), "save_as ok");
+        check (saFile.existsAsFile() && saFile.getSize() > 0, "save_as wrote a non-empty file");
+        check (sess().getProperty ("editFile", var()).toString() == saFile.getFullPathName(), "save_as re-points session.editFile to the new path");
+        check (ok (cmd (ops, "save")), "subsequent save (after save_as) ok");
+
+        // open_project / new_project with bad args -> graceful validation errors.
+        check (! ok (cmd (ops, "open_project", args1 ("file", "/no/such/file.tracktionedit"))), "open_project missing file errors");
+
+        // Undo correctness + isolation. editFile is engine state (never on the Edit undo
+        // stack), so we do NOT use it as the probe — that would pass even if undo were
+        // broken. Instead: (1) prove undo genuinely works — a create_track is a real
+        // transaction, so an undo must drop the track count by exactly one; (2) prove the
+        // whole-Edit project commands leave NO stray transaction — immediately after
+        // open_project (a fresh Edit with an empty undo stack) an undo must be a no-op
+        // (count unchanged). A leaked empty transaction would instead walk back into the
+        // freshly-opened Edit and the count check would fail.
+        const int nBefore = tracks (ops);
+        check (ok (cmd (ops, "create_track", args1 ("name", "UndoProbe"))), "create_track undo probe ok");
+        check (tracks (ops) == nBefore + 1, "create_track added a track");
+        check (ok (cmd (ops, "undo")), "undo ok");
+        check (tracks (ops) == nBefore, "undo reverted the create_track (count dropped by 1)");
+        // Re-open the saved project: its undo stack is empty, so an immediate undo must be
+        // a no-op, proving new/open/save_as pushed no stray transaction.
+        check (ok (cmd (ops, "open_project", args1 ("file", newEdit))), "re-open saved project ok");
+        const int nFresh = tracks (ops);
+        check (ok (cmd (ops, "undo")), "undo on freshly-opened project ok");
+        check (tracks (ops) == nFresh, "undo is a no-op after open_project (no stray transaction leaked)");
+        check (ops.snapshot().hasProperty ("tracks"), "snapshot still well-formed after project-undo isolation");
+
+        // JSONL: device + project commands logged undoable:false.
+        auto slog = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
+        check (slog.contains ("set_audio_device"), "JSONL records set_audio_device");
+        check (slog.contains ("new_project"), "JSONL records new_project");
+        check (slog.contains ("save_as"), "JSONL records save_as");
+        bool devPref = false, newPref = false, saPref = false;
+        for (auto& ln : juce::StringArray::fromLines (slog))
+        {
+            if (ln.contains ("\"command\": \"set_audio_device\"") && ln.contains ("\"undoable\": false")) devPref = true;
+            if (ln.contains ("\"command\": \"new_project\"") && ln.contains ("\"undoable\": false")) newPref = true;
+            if (ln.contains ("\"command\": \"save_as\"") && ln.contains ("\"undoable\": false")) saPref = true;
+        }
+        check (devPref, "set_audio_device logged undoable:false (machine preference)");
+        check (newPref, "new_project logged undoable:false (whole-Edit replacement)");
+        check (saPref, "save_as logged undoable:false (whole-Edit persist)");
+
+        // Restore the in-memory Edit to the harness session edit so in-process state is
+        // consistent after the temp-file project swaps. (The session-selftest dir is wiped
+        // at startup, so idempotency across runs does not depend on this.)
+        check (ok (cmd (ops, "open_project", args1 ("file", sessionEdit.getFullPathName()))), "restored the session edit (clean teardown)");
+        npFile.deleteFile(); npFile2.deleteFile(); saFile.deleteFile();
+    }
+
     std::cerr << "===== " << (checks - failures) << "/" << checks
               << " checks passed, " << failures << " failed =====\n\n";
     return failures;

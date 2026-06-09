@@ -136,6 +136,25 @@ export type Transport = {
   loopEnd: number;
 };
 
+// Current audio-device selection summary (snapshot.audio) — the settings edit form.
+export type AudioSelection = {
+  type: string;
+  outputDevice: string;
+  inputDevice: string;
+  sampleRate: number;
+  bufferSize: number;
+};
+
+// Full device enumeration from list_audio_devices (on-demand, NOT in the snapshot).
+export type AudioDevices = {
+  types: { name: string; outputs: string[]; inputs: string[] }[];
+  current: AudioSelection;
+  sampleRates: number[];
+  bufferSizes: number[];
+  defaultBufferSize: number;
+  audioEnabled: boolean;
+};
+
 export type Snapshot = {
   schemaVersion: number;
   session: {
@@ -146,11 +165,20 @@ export type Snapshot = {
     metronome?: boolean;
     length?: number;
     editFile: string;
+    projectExtension?: string; // backend-owned project container extension (no leading dot)
+    // Audio-engine gate + readout (wave: settings — MON-007 / FLY-004).
+    audioEnabled?: boolean;
+    bitDepth?: number;
+    bufferSize?: number;
+    outputLatencyMs?: number;
+    audioDeviceName?: string;
+    audioDeviceError?: string;
   };
   tracks: Track[];
   transport: Transport;
   master?: { volumeDb: number; pan: number };
   buses?: Bus[];
+  audio?: AudioSelection;
 };
 
 export type CommandResult<T = unknown> = {

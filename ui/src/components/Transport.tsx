@@ -18,6 +18,9 @@ export function Transport() {
   const playing = t?.playing ?? false;
   const recording = t?.recording ?? false;
   const looping = t?.looping ?? false;
+  // Audio-engine gate (MON-007 / FLY-004): no device → play/record disabled. Pure
+  // view logic, no command.
+  const audioEnabled = session?.audioEnabled ?? false;
   const metronome = session?.metronome ?? false;
   const tempo = session?.tempo ?? 120;
   const num = session?.timeSigNumerator ?? 4;
@@ -28,14 +31,16 @@ export function Transport() {
       <button
         className={`tbtn ${playing ? "stop" : "play"}`}
         onClick={() => exec("set_transport", { action: "toggle" })}
-        title={playing ? "Stop" : "Play"}
+        disabled={!audioEnabled && !playing}
+        title={audioEnabled ? (playing ? "Stop" : "Play") : "No audio device — playback disabled"}
       >
         {playing ? "■" : "▶"}
       </button>
       <button
         className={`tbtn rec ${recording ? "on" : ""}`}
         onClick={() => exec("set_transport", { action: recording ? "stop" : "record" })}
-        title={recording ? "Stop recording" : "Record"}
+        disabled={!audioEnabled && !recording}
+        title={audioEnabled ? (recording ? "Stop recording" : "Record") : "No audio device — record disabled"}
       >
         ●
       </button>

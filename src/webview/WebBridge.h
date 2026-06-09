@@ -63,6 +63,15 @@ private:
     RemoteStatusProvider remoteStatusProvider;
     juce::WebBrowserComponent* webView = nullptr;
 
+    // The native file dialog (wave: settings). launchAsync's callback must outlive
+    // the dialog, so the FileChooser is held here, not in a local. Only one dialog at
+    // a time: pickerBusy guards re-entry so a second request can't replace a live
+    // FileChooser (which would drop its in-flight completion and hang that Promise).
+    // The flag is cleared in the callback — we never destroy the chooser from inside
+    // its own callback (that would be a use-after-free); it is replaced on next launch.
+    std::unique_ptr<juce::FileChooser> fileChooser;
+    bool pickerBusy = false;
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (WebBridge)
 };
 

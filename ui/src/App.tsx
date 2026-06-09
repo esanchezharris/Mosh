@@ -9,6 +9,7 @@ import { Rack } from "./components/Rack";
 import { PluginBrowser } from "./components/PluginBrowser";
 import { PianoRoll } from "./components/PianoRoll";
 import { AutomationPanel } from "./components/AutomationPanel";
+import { Settings } from "./components/Settings";
 
 // Stage 1 UI: renders the MoshOps snapshot cold, drives every mutation through
 // execute_command, and reacts to the snapshot+events feed. Deliberately thin and
@@ -23,6 +24,10 @@ export function App() {
   const setView = useStore((s) => s.setView);
   const theme = useStore((s) => s.theme);
   const toggleTheme = useStore((s) => s.toggleTheme);
+
+  // Audio-engine gate (MON-007 / FLY-004): pure view logic, no command. Disables
+  // Export + drives the banner; Transport reads the same field to gate play/record.
+  const audioEnabled = snapshot?.session.audioEnabled ?? false;
 
   useEffect(() => {
     init();
@@ -50,10 +55,16 @@ export function App() {
           <button className={view === "mixer" ? "on" : ""} onClick={() => setView("mixer")}>Mixer</button>
         </div>
         <div className="topbar-right">
+          <Settings />
           <RemoteCompanion />
           {/* Reserved B-5 / Monster operator slot (deferred — empty in v0). */}
           <span className="b5-slot" title="B-5 / Monster — reserved (deferred)">B-5</span>
-          <button className="tool-btn" onClick={() => exec("export_audio", {})} title="Export the mix to WAV">
+          <button
+            className="tool-btn"
+            onClick={() => exec("export_audio", {})}
+            disabled={!audioEnabled}
+            title={audioEnabled ? "Export the mix to WAV" : "No audio device — export disabled"}
+          >
             ⤓ Export
           </button>
           <button className="tool-btn" onClick={toggleTheme} title="Toggle theme">
@@ -62,6 +73,11 @@ export function App() {
         </div>
       </header>
 
+      {!audioEnabled && (
+        <div className="error-bar">
+          ⚠ No audio device — playback, record and export are disabled. Open Settings (⚙) to choose a device.
+        </div>
+      )}
       {lastError && <div className="error-bar">⚠ {lastError}</div>}
 
       {snapshot ? (

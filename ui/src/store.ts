@@ -5,7 +5,7 @@ import {
 } from "./bridge";
 import type {
   Snapshot, Transport, MoshEvent, CommandResult, AvailablePlugin,
-  BuiltinPlugin, AvailableColor, RenderQA, Level,
+  BuiltinPlugin, AvailableColor, RenderQA, Level, AudioDevices,
 } from "./types";
 import type { RemoteStatus } from "./bridge";
 import { type SnapDiv, snapStep, meterFrom } from "./time";
@@ -39,6 +39,7 @@ type State = {
   labMode: boolean;                        // ASTD unlock for generative colours
   qaByClip: Record<string, RenderQA>;      // last render's quality readout
   remoteStatus: RemoteStatus | null;       // iPhone companion server state
+  audioDevices: AudioDevices | null;       // full device enumeration (on-demand, lazy)
   // Live level meters (Wave 9) — fed by the 30Hz "levels" event, NOT the snapshot.
   levels: { tracks: Record<string, Level>; master: Level };
 
@@ -69,6 +70,7 @@ type State = {
   openBrowser: () => void;
   closeBrowser: () => void;
   loadColors: () => void;
+  loadAudioDevices: () => Promise<void>;   // lazy + on-demand (force re-fetch after a device change)
   setLab: (b: boolean) => void;
 
   view: View;
@@ -99,6 +101,7 @@ export const useStore = create<State>((set, get) => ({
   labMode: false,
   qaByClip: {},
   remoteStatus: null,
+  audioDevices: null,
   levels: { tracks: {}, master: { l: -100, r: -100 } },
 
   refresh: async () => {
@@ -237,6 +240,17 @@ export const useStore = create<State>((set, get) => ({
     }).then((res) => {
       if (res.ok && res.data?.colors) set({ availableColors: res.data.colors });
     });
+  },
+
+  // Full device enumeration — fetched on Settings open and re-fetched after a
+  // device change (always overwrites; the list is small and selection-dependent).
+  loadAudioDevices: async () => {
+    if (!isNative()) return;
+    const res = await executeCommand<CommandResult<AudioDevices>>({
+      command: "list_audio_devices",
+      args: {},
+    });
+    if (res.ok && res.data) set({ audioDevices: res.data });
   },
   setLab: (b) => set({ labMode: b }),
 

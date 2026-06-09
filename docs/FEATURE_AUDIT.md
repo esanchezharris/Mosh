@@ -159,6 +159,25 @@ The "no recording" gap (built from `docs/plans/wave-recording.md`, which caught 
 
 **Shipped-on-both-axes: 60 → 62** (must-tier 46 → 48). The transport's record button (Wave 2) now has the arm + monitor preconditions behind it; live capture is one mic away.
 
+### 2026-06-09 · Wave: Settings — device picker / project lifecycle / engine gate / import ✅
+
+The "no settings/device-picker" + "no New/Open project" + "audioEnabled never reaches the UI" gaps (built from `docs/plans/wave-settings.md`, verified against clone 2877b621). **6 commands** — `list_audio_devices` (read-only enumerate), `set_audio_device` / `set_buffer_size` (machine preferences, `undoable:false`), `new_project` / `open_project` / `save_as` (whole-Edit lifecycle, `undoable:false`) — plus **2 native bridge fns** `pick_files` / `pick_save_file` (async `FileChooser`, held in a member, resolved exactly once incl. cancel, re-entry-guarded). The snapshot `session` gained the audio-engine **gate** (`audioEnabled`) + readout (`bitDepth`/`bufferSize`/`outputLatencyMs`/`audioDeviceName`/`audioDeviceError`) + a backend-owned `projectExtension` (so the storage format stays out of the UI) and a small top-level `audio{}` selection block. `MoshEngine` gained `newProject`/`openProject`/`saveProjectAs`/`adoptEditFile` following the `reloadFromFile` swap pattern — **transport stopped + playback context freed before the swap**, `editPath`+`editFileRetriever` re-pointed after, meter clients unregistered + `lastSeenContext` reset so the master meter re-attaches to the new context. UI: a `Settings.tsx` gear popover (modeled on RemoteCompanion — device-type/output/input/sample-rate/buffer-size selects, engine readout, a no-audio gate banner, and a File menu New/Open…/Save/Save As…/Import…); Play/Record disabled in `Transport.tsx` and Export in `App.tsx` when `!audioEnabled`. **Device + project commands are non-undoable preferences** (no empty transaction — same correctness the Recording wave established); each logs exactly one JSONL line. Verified: `Mosh --selftest` **261/261**, 0 assertions — incl. a *genuine* undo-isolation check (create_track→undo drops the count by 1; an immediate undo after open_project is a no-op, proving no stray transaction leaked) and project round-trips on temp files with clean teardown.
+
+| ID | Tier | Feature | Before → After |
+|---|---|---|---|
+| `MON-007` | must | Audio-engine / device gate | ◐/✗ → ✓/✓ |
+| `FLY-004` | must | Device / audio gate before processing | ◐/✗ → ✓/✓ |
+| `PRJ-001` | must | New project | ◐/✗ → ✓/✓ |
+| `PRJ-002` | must | Open project | ◐/✗ → ✓/✓ * |
+| `PRJ-003` | must | Save / Save As | ✓/◐ → ✓/✓ |
+| `MON-001` | must | Audio device selection | ◐/✗ → ✓/✓ * |
+| `MON-002` | must | Buffer & sample-rate config | ◐/✗ → ✓/✓ * |
+| `IOX-001` | must | Import audio (common formats) | ◐/◐ → ✓/✓ * |
+
+\* Command surface + UI + snapshot complete and headless-verified (enumerate shape, graceful no-device errors, gate field, `undoable:false`, project round-trips). **Live CoreAudio device enumeration content, a device round-trip changing the real buffer size, and the modal `FileChooser` dialog need the GUI + hardware** — the same honest gate the project documents for recording/metering. `import_clip` itself is headless-proven; only the file dialog that feeds it is GUI-gated. Also nudged `PRJ-008` (project settings — rate/depth readout) and `PRE-001` (audio prefs) toward partial.
+
+**Shipped-on-both-axes: 62 → 70** (must-tier 48 → 56). The app now opens/creates/saves projects, picks an audio device, gates play/record/export on a real engine-ready signal, and imports user audio — the conventional-DAW shell around the neural spine is closed.
+
 ## Coverage by category
 
 Per axis the three counts are **present ✓ / partial ◐ / missing ✗** (missing also folds in the one `not_applicable`).

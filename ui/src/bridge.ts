@@ -98,6 +98,28 @@ export async function getRemoteStatus(): Promise<RemoteResult<RemoteStatus>> {
   return (await native("remote_status")()) as RemoteResult<RemoteStatus>;
 }
 
+// Native file pickers (wave: settings). These are async message-thread dialogs, so
+// they are dedicated native functions (not commands) returning a Promise. The actual
+// import/open/save still happens via import_clip / open_project / save_as commands —
+// the mutation seam is preserved; the dialog only resolves paths.
+export async function pickFiles(opts?: {
+  multiple?: boolean;
+  filters?: string;
+  title?: string;
+}): Promise<{ ok: boolean; files: string[] }> {
+  if (!isNative()) return { ok: false, files: [] };
+  return (await native("pick_files")(opts ?? {})) as { ok: boolean; files: string[] };
+}
+
+export async function pickSaveFile(opts?: {
+  filters?: string;
+  title?: string;
+  defaultName?: string;
+}): Promise<{ ok: boolean; file: string }> {
+  if (!isNative()) return { ok: false, file: "" };
+  return (await native("pick_save_file")(opts ?? {})) as { ok: boolean; file: string };
+}
+
 /** Subscribe to a typed backend event (snapshot+events feed, 02 §4).
  *  Returns an unsubscribe fn. No-op in pure-web dev. */
 export function onEvent(eventId: string, fn: (payload: unknown) => void): () => void {

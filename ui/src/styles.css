@@ -84,6 +84,22 @@ button.on { border-color: var(--accent); color: var(--accent); background: #2120
 .remote-stop, .remote-start, .remote-copy { align-self: flex-start; }
 .remote-copy { font-size: 0.74rem; padding: 0.25rem 0.45rem; }
 
+/* Settings popover (wave: settings) — reuses .remote-pop, adds device/project rows. */
+.settings-pop { width: 340px; max-height: 78vh; overflow-y: auto; }
+.settings-gate { display: flex; align-items: center; gap: 0.5rem; border-radius: 6px; border-bottom: none; }
+.settings-gate .mini-action { font-size: 0.7rem; padding: 0.15rem 0.4rem; margin-left: auto; }
+.settings-group { display: flex; flex-direction: column; gap: 0.35rem; padding-top: 0.4rem; border-top: 1px solid var(--line); }
+.settings-label { font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.settings-row { display: grid; grid-template-columns: 84px 1fr; align-items: center; gap: 0.4rem; font-size: 0.78rem; color: var(--muted); }
+.settings-row select { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; color: var(--text); padding: 0.25rem 0.3rem; width: 100%; }
+.settings-row select:disabled { opacity: 0.5; }
+.settings-readout { display: grid; grid-template-columns: 84px 1fr; gap: 0.2rem 0.4rem; font-size: 0.78rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.settings-readout span:nth-child(even) { color: var(--text); }
+.settings-deverr { color: var(--warn); font-size: 0.74rem; }
+.settings-files { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.settings-files .tool-btn { font-size: 0.76rem; padding: 0.28rem 0.5rem; }
+.settings-editfile { font-size: 0.68rem; color: var(--muted); word-break: break-all; opacity: 0.8; }
+
 .transport { display: flex; align-items: center; gap: 0.4rem; }
 .tbtn { width: 34px; height: 34px; display: grid; place-items: center; font-size: 0.95rem; border-radius: 8px; }
 .tbtn.play { color: var(--ok); }

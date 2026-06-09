@@ -124,6 +124,13 @@ private:
     juce::var cmdListColors       (const juce::var& args);
     // Stage 6 — consolidation
     juce::var cmdExportAudio      (const juce::var& args);
+    // Wave: settings — audio device picker + project lifecycle (both NON-undoable)
+    juce::var cmdListAudioDevices (const juce::var& args);   // read-only (no log/transaction)
+    juce::var cmdSetAudioDevice   (const juce::var& args);   // machine preference (undoable:false)
+    juce::var cmdSetBufferSize    (const juce::var& args);   // thin wrapper over set_audio_device
+    juce::var cmdNewProject       (const juce::var& args);   // replaces the Edit (undoable:false)
+    juce::var cmdOpenProject      (const juce::var& args);   // replaces the Edit (undoable:false)
+    juce::var cmdSaveAs           (const juce::var& args);   // persists + re-points (undoable:false)
 
     juce::ValueTree findRenderLayer (const juce::String& clipId);
     juce::String    computeFingerprint (const juce::ValueTree& node, const juce::File& inputWav);
@@ -166,6 +173,15 @@ private:
     static juce::var errResult (const juce::String& command, const juce::String& message);
 
     juce::UndoManager& undoManager() { return eng.edit().getUndoManager(); }
+
+    /** The JUCE device manager under Tracktion's wrapper — the object the device
+        picker drives (the same one MoshEngine::applyRequestedAudioOutputDevice
+        uses). */
+    juce::AudioDeviceManager& adm() { return eng.engine().getDeviceManager().deviceManager; }
+    juce::var currentAudioSelection();   // small {type,outputDevice,...} summary block
+    // Applies a device-setup patch; returns the error string (empty == success). No
+    // logging — callers log once under their own command name (one JSONL line / action).
+    juce::String applyAudioDeviceSetup (const juce::var& args);
 
     MoshEngine& eng;
     PluginHost  pluginHost;

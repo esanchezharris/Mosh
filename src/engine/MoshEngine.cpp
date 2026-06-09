@@ -256,4 +256,61 @@ void MoshEngine::reloadFromFile()
     editPtr->editFileRetriever = [this] { return editPath; };
 }
 
+void MoshEngine::adoptEditFile (const juce::File& file)
+{
+    editPath = file;
+    editPtr->editFileRetriever = [this] { return editPath; };
+}
+
+void MoshEngine::newProject (const juce::File& file)
+{
+    // Persist the outgoing Edit, then detach it from the device before swapping
+    // (a live playback context bound to the old Edit asserts on destruction —
+    // mirrors the export render-exclusivity dance).
+    save();
+    editPtr->getTransport().stop (false, false);
+    editPtr->getTransport().freePlaybackContext();
+    editPtr.reset();
+
+    file.getParentDirectory().createDirectory();
+
+    // Fresh empty Edit — strip createEmptyEdit's default audio track so Mosh
+    // starts empty (every track is an explicit create_track command), matching
+    // the cold-session seeding in the ctor.
+    editPtr = te::createEmptyEdit (*enginePtr, file);
+    juce::Array<te::AudioTrack*> defaults (te::getAudioTracks (*editPtr));
+    for (auto* t : defaults)
+        editPtr->deleteTrack (t);
+
+    editPtr->getSceneList();
+    if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
+        mm->runDispatchLoopUntil (1);
+
+    editPtr->getUndoManager().clearUndoHistory();
+    adoptEditFile (file);
+    save();                                  // write the new empty .tracktionedit to disk
+}
+
+void MoshEngine::openProject (const juce::File& file)
+{
+    save();
+    editPtr->getTransport().stop (false, false);
+    editPtr->getTransport().freePlaybackContext();
+    editPtr.reset();
+    editPtr = te::loadEditFromFile (*enginePtr, file);
+    adoptEditFile (file);
+}
+
+bool MoshEngine::saveProjectAs (const juce::File& file)
+{
+    editPtr->getTransport().stop (false, false);
+    file.getParentDirectory().createDirectory();
+    // saveAs re-points the Edit's backing file; force-overwrite is safe because
+    // the native save dialog (the only caller path) has already confirmed it.
+    const bool ok = te::EditFileOperations (*editPtr).saveAs (file, true);
+    if (ok)
+        adoptEditFile (file);
+    return ok;
+}
+
 } // namespace mosh

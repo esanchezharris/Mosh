@@ -284,6 +284,12 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "bounce_layer_to_clip") return cmdBounceLayerToClip (args);
     if (name == "list_colors")       return cmdListColors (args);
     if (name == "export_audio")      return cmdExportAudio (args);
+    if (name == "list_audio_devices")return cmdListAudioDevices (args);
+    if (name == "set_audio_device")  return cmdSetAudioDevice (args);
+    if (name == "set_buffer_size")   return cmdSetBufferSize (args);
+    if (name == "new_project")       return cmdNewProject (args);
+    if (name == "open_project")      return cmdOpenProject (args);
+    if (name == "save_as")           return cmdSaveAs (args);
 
     return errResult (name, "unknown command: " + name);
 }
@@ -2031,6 +2037,232 @@ juce::var MoshOps::cmdExportAudio (const juce::var& args)
     return okResult ("export_audio", var (data));
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Wave: settings — audio device picker + project lifecycle
+//
+// Device + project commands are NON-undoable by design (no beginNewTransaction):
+// a device change is a machine preference (like set_metronome) and new/open/save-as
+// replace or persist the whole Edit — there is nothing to put on the Edit's own
+// undo stack, and pushing an empty transaction would silently undo an unrelated
+// prior edit. All log undoable:false. list_audio_devices is read-only (no log).
+// ─────────────────────────────────────────────────────────────────────────────
+
+juce::var MoshOps::currentAudioSelection()
+{
+    // Lightweight current-selection summary for the snapshot's audio{} block + the
+    // set_audio_device result. NO full device lists here (those stay behind the
+    // on-demand list_audio_devices so the snapshot stays small).
+    auto& dm = adm();
+    auto setup = dm.getAudioDeviceSetup();
+    auto* o = new DynamicObject();
+    o->setProperty ("type", dm.getCurrentAudioDeviceType());
+    o->setProperty ("outputDevice", setup.outputDeviceName);
+    o->setProperty ("inputDevice", setup.inputDeviceName);
+    o->setProperty ("sampleRate", setup.sampleRate);
+    o->setProperty ("bufferSize", setup.bufferSize);
+    return var (o);
+}
+
+juce::var MoshOps::cmdListAudioDevices (const juce::var&)
+{
+    // Read-only enumeration — no transaction, no log line. Headless (no audio) the
+    // engine never adds system device types (MoshEngine addSystemAudioIODeviceTypes
+    // returns false), so `types` is a well-formed empty array and audioEnabled:false.
+    auto& dm = adm();
+
+    Array<var> types;
+    for (auto* type : dm.getAvailableDeviceTypes())
+    {
+        if (type == nullptr) continue;
+        type->scanForDevices();                          // required before getDeviceNames
+
+        Array<var> outputs, inputs;
+        for (auto& n : type->getDeviceNames (false)) outputs.add (n);
+        for (auto& n : type->getDeviceNames (true))  inputs.add (n);
+
+        auto* to = new DynamicObject();
+        to->setProperty ("name", type->getTypeName());
+        to->setProperty ("outputs", outputs);
+        to->setProperty ("inputs", inputs);
+        types.add (var (to));
+    }
+
+    // Valid sample-rate / buffer-size lists are only meaningful when a device is
+    // open (null headless → empty arrays).
+    Array<var> sampleRates, bufferSizes;
+    int defaultBufferSize = 0;
+    if (auto* dev = dm.getCurrentAudioDevice())
+    {
+        for (auto sr : dev->getAvailableSampleRates()) sampleRates.add (sr);
+        for (auto bs : dev->getAvailableBufferSizes()) bufferSizes.add (bs);
+        defaultBufferSize = dev->getDefaultBufferSize();
+    }
+
+    auto* data = new DynamicObject();
+    data->setProperty ("types", types);
+    data->setProperty ("current", currentAudioSelection());
+    data->setProperty ("sampleRates", sampleRates);
+    data->setProperty ("bufferSizes", bufferSizes);
+    data->setProperty ("defaultBufferSize", defaultBufferSize);
+    data->setProperty ("audioEnabled", eng.hasAudio());
+    return okResult ("list_audio_devices", var (data));
+}
+
+// Applies a device-setup patch (type/output/input/sampleRate/bufferSize) to the
+// AudioDeviceManager. Returns the error string (empty == success). NO logging / no
+// snapshot emit — the callers (set_audio_device / set_buffer_size) log exactly once
+// under their own command name so the JSONL has one line per user action.
+juce::String MoshOps::applyAudioDeviceSetup (const juce::var& args)
+{
+    auto& dm = adm();
+
+    // Device type switch (optional).
+    const auto type = args.getProperty ("type", var()).toString();
+    if (type.isNotEmpty() && type != dm.getCurrentAudioDeviceType())
+        dm.setCurrentAudioDeviceType (type, true);
+
+    auto setup = dm.getAudioDeviceSetup();
+    if (args.hasProperty ("outputDevice"))
+        setup.outputDeviceName = args.getProperty ("outputDevice", var()).toString();
+    if (args.hasProperty ("inputDevice"))
+    {
+        setup.inputDeviceName = args.getProperty ("inputDevice", var()).toString();
+        // Match the existing working rule (MoshEngine applyRequestedAudioOutputDevice):
+        // only request default input channels when an input device is selected.
+        setup.inputChannels.clear();
+        setup.useDefaultInputChannels = setup.inputDeviceName.isNotEmpty();
+    }
+    if (args.hasProperty ("sampleRate"))
+        setup.sampleRate = (double) args.getProperty ("sampleRate", 0.0);
+    if (args.hasProperty ("bufferSize"))
+        setup.bufferSize = (int) args.getProperty ("bufferSize", 0);
+    setup.useDefaultOutputChannels = true;
+
+    // setAudioDeviceSetup returns an ERROR STRING (empty == success) — do not invert.
+    const auto err = dm.setAudioDeviceSetup (setup, true);
+    if (err.isNotEmpty())
+        return err;
+
+    // Rebuild Tracktion's wave-device wrappers + flush the async device update
+    // before the next snapshot (mirrors MoshEngine.cpp applyRequestedAudioOutputDevice).
+    eng.engine().getDeviceManager().rescanWaveDeviceList();
+    if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
+        mm->runDispatchLoopUntil (50);
+    return {};
+}
+
+juce::var MoshOps::cmdSetAudioDevice (const juce::var& args)
+{
+    // Graceful degradation: headless / no-audio session has no device to drive.
+    // Log the failed attempt (undoable:false) so the JSONL trail records it, then
+    // return a real, honest error (NOT a crash).
+    if (! eng.hasAudio())
+    {
+        logLine ("set_audio_device", args, false, "no audio device in this session", false);
+        return errResult ("set_audio_device", "no audio device in this session");
+    }
+
+    const auto err = applyAudioDeviceSetup (args);
+    if (err.isNotEmpty())
+    {
+        logLine ("set_audio_device", args, false, err, false);
+        return errResult ("set_audio_device", err);
+    }
+
+    logLine ("set_audio_device", args, true, {}, false);   // machine preference — not undoable
+    emitSnapshotInvalidated();
+    return okResult ("set_audio_device", currentAudioSelection());
+}
+
+juce::var MoshOps::cmdSetBufferSize (const juce::var& args)
+{
+    // Thin convenience wrapper = a bufferSize-only device-setup. Maps 1:1 to a UI
+    // control; shares the no-device guard + non-undoable logging. Logs exactly ONE
+    // JSONL line under set_buffer_size (it applies the setup directly, not via
+    // cmdSetAudioDevice, so there is no phantom set_audio_device line).
+    if (! args.hasProperty ("bufferSize"))
+        return errResult ("set_buffer_size", "missing 'bufferSize'");
+    if (! eng.hasAudio())
+    {
+        logLine ("set_buffer_size", args, false, "no audio device in this session", false);
+        return errResult ("set_buffer_size", "no audio device in this session");
+    }
+
+    auto* patch = new DynamicObject();
+    patch->setProperty ("bufferSize", args.getProperty ("bufferSize", var()));
+    const auto err = applyAudioDeviceSetup (var (patch));
+    if (err.isNotEmpty())
+    {
+        logLine ("set_buffer_size", args, false, err, false);
+        return errResult ("set_buffer_size", err);
+    }
+
+    logLine ("set_buffer_size", args, true, {}, false);   // machine preference — not undoable
+    emitSnapshotInvalidated();
+    return okResult ("set_buffer_size", currentAudioSelection());
+}
+
+juce::var MoshOps::cmdNewProject (const juce::var& args)
+{
+    unregisterAllMeterClients();           // old measurers valid here; dead after the swap
+    auto name = args.getProperty ("name", var()).toString().trim();
+    if (name.isEmpty())
+        name = "untitled-" + String (Time::getCurrentTime().toMilliseconds());
+
+    auto file = eng.sessionDir().getChildFile ("projects")
+                    .getChildFile (File::createLegalFileName (name))
+                    .withFileExtension ("tracktionedit");
+
+    eng.newProject (file);                 // stops transport + frees ctx before swap, re-points retriever
+    lastSeenContext = nullptr;             // old ctx freed; force master-meter re-attach to the new ctx
+    logFile = eng.sessionDir().getChildFile ("mosh-log.jsonl");
+    logLine ("new_project", args, true, {}, false);   // replaces the Edit — not undoable
+    emitSnapshotInvalidated();
+
+    auto* data = new DynamicObject();
+    data->setProperty ("editFile", eng.editFile().getFullPathName());
+    return okResult ("new_project", var (data));
+}
+
+juce::var MoshOps::cmdOpenProject (const juce::var& args)
+{
+    const auto path = args.getProperty ("file", var()).toString();
+    if (path.isEmpty()) return errResult ("open_project", "missing 'file'");
+
+    File file (path);
+    if (! file.existsAsFile()) return errResult ("open_project", "file not found: " + path);
+
+    unregisterAllMeterClients();           // old measurers valid here; dead after the swap
+    eng.openProject (file);                // stops transport + frees ctx before swap, re-points retriever
+    lastSeenContext = nullptr;             // old ctx freed; force master-meter re-attach to the new ctx
+    logFile = eng.sessionDir().getChildFile ("mosh-log.jsonl");
+    logLine ("open_project", args, true, {}, false);  // replaces the Edit — not undoable
+    emitSnapshotInvalidated();
+
+    auto* data = new DynamicObject();
+    data->setProperty ("editFile", eng.editFile().getFullPathName());
+    return okResult ("open_project", var (data));
+}
+
+juce::var MoshOps::cmdSaveAs (const juce::var& args)
+{
+    const auto path = args.getProperty ("file", var()).toString();
+    if (path.isEmpty()) return errResult ("save_as", "missing 'file'");
+
+    File file (path);
+    if (file.getFileExtension().isEmpty())
+        file = file.withFileExtension ("tracktionedit");
+
+    const bool didSave = eng.saveProjectAs (file);   // saveAs + adopt the new backing file
+    logLine ("save_as", args, didSave, didSave ? String() : String ("saveAs failed"), false);
+    if (! didSave) return errResult ("save_as", "saveAs failed");
+    emitSnapshotInvalidated();
+
+    auto* data = new DynamicObject();
+    data->setProperty ("file", eng.editFile().getFullPathName());
+    return okResult ("save_as", var (data));
+}
+
 te::AudioTrack* MoshOps::createAudioTrack (const juce::String& name)
 {
     auto& edit = eng.edit();
@@ -2136,6 +2368,24 @@ juce::var MoshOps::snapshot()
     session->setProperty ("metronome", edit.clickTrackEnabled.get());
     session->setProperty ("length", edit.getLength().inSeconds());
     session->setProperty ("editFile", eng.editFile().getFullPathName());
+    // Project container extension, backend-owned (keeps the storage format out of the
+    // UI — the file-dialog filter is built from this, not a hard-coded constant).
+    session->setProperty ("projectExtension", eng.editFile().getFileExtension().substring (1));
+
+    // Audio-engine gate + readout (wave: settings — MON-007 / FLY-004). audioEnabled
+    // is the gate field the UI reads to disable play/record/export + show the
+    // "No audio device" banner. The rest is a small read-only readout; full device
+    // lists stay behind on-demand list_audio_devices (keeps this refetched-often
+    // snapshot small).
+    auto& dm = eng.engine().getDeviceManager();
+    session->setProperty ("audioEnabled", eng.hasAudio());
+    session->setProperty ("bitDepth", dm.getBitDepth());
+    session->setProperty ("bufferSize", dm.getBlockSize());
+    session->setProperty ("outputLatencyMs", dm.getOutputLatencySeconds() * 1000.0);
+    session->setProperty ("audioDeviceName",
+        dm.deviceManager.getCurrentAudioDevice() != nullptr
+            ? dm.deviceManager.getCurrentAudioDevice()->getName() : String());
+    session->setProperty ("audioDeviceError", eng.audioDeviceError());
 
     Array<var> tracks;
     int index = 0;
@@ -2148,6 +2398,10 @@ juce::var MoshOps::snapshot()
     root->setProperty ("session", var (session));
     root->setProperty ("tracks", tracks);
     root->setProperty ("transport", transportToVar());
+
+    // Lightweight current audio-device selection summary for the settings edit form
+    // (duplicates session.sampleRate intentionally). Full lists stay on-demand.
+    root->setProperty ("audio", currentAudioSelection());
 
     // Aux buses (Wave 8) — one entry per AuxReturn-carrying track.
     Array<var> buses;

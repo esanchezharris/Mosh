@@ -49,6 +49,20 @@ public:
         Edit object; callers must re-read edit() afterwards. */
     void reloadFromFile();
 
+    /** Project lifecycle (wave: settings). Each replaces the live Edit object, so
+        callers must re-read edit() and refetch any cached track/clip pointers
+        afterwards. They are machine/whole-Edit operations — NOT undoable. The
+        transport is stopped + the playback context freed before the swap to avoid
+        device/Edit-mismatch asserts (matches the export render-exclusivity dance).
+        editPath + editFileRetriever are re-pointed to the new file. */
+    void newProject (const juce::File& file);   // save current, then a fresh empty Edit at file
+    void openProject (const juce::File& file);  // save current, then load the Edit at file
+    bool saveProjectAs (const juce::File& file); // saveAs to file + adopt it as the backing file
+
+    /** Re-point editPath + editFileRetriever to file (after a saveAs that changed
+        the Edit's backing file). Does NOT replace the Edit object. */
+    void adoptEditFile (const juce::File& file);
+
 private:
     std::unique_ptr<te::Engine> enginePtr;
     std::unique_ptr<te::Edit>   editPtr;
