@@ -714,6 +714,56 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     else
         std::cerr << "  ..   (SA3 self-test skipped — set MOSH_SELFTEST_SA3=1 to exercise the real model)\n";
 
+    // ─── Wave 4: MIDI note editing (piano-roll command surface) ───
+    std::cerr << "--- Wave 4: MIDI note editing ---\n";
+    {
+        auto clipNotes = [&] (const String& cid) -> var {
+            auto snap = ops.snapshot();
+            if (auto* tracks = snap["tracks"].getArray())
+                for (auto& tr : *tracks)
+                    if (auto* clips = tr.getProperty ("clips", var()).getArray())
+                        for (auto& c : *clips)
+                            if (c.getProperty ("id", var()).toString() == cid)
+                                return c.getProperty ("notes", var());
+            return {};
+        };
+
+        auto mt = cmd (ops, "create_track", args1 ("name", "Notes"))["data"].getProperty ("trackId", var()).toString();
+        Array<var> seed;
+        for (int k = 0; k < 3; ++k)
+        {
+            auto* n = new DynamicObject();
+            n->setProperty ("pitch", 60 + k); n->setProperty ("start", (double) k);
+            n->setProperty ("length", 1.0); n->setProperty ("velocity", 90);
+            seed.add (var (n));
+        }
+        auto* ca = new DynamicObject(); ca->setProperty ("trackId", mt); ca->setProperty ("notes", var (seed));
+        const auto mClip = cmd (ops, "add_midi_clip", var (ca))["data"].getProperty ("clipId", var()).toString();
+        check (clipNotes (mClip).size() == 3, "MIDI clip serialises its 3 notes into the snapshot");
+
+        check (ok (cmd (ops, "add_note", objN ({{ "clipId", mClip }, { "pitch", 72 }, { "start", 1.4 }, { "length", 1.0 }, { "velocity", 100 }}))), "add_note ok");
+        check (clipNotes (mClip).size() == 4, "add_note adds a note");
+
+        check (ok (cmd (ops, "set_note", objN ({{ "clipId", mClip }, { "noteIndex", 0 }, { "pitch", 48 }, { "velocity", 127 }}))), "set_note ok");
+        { auto ns = clipNotes (mClip);
+          check (ns.size() > 0 && (int) ns[0].getProperty ("pitch", -1) == 48 && (int) ns[0].getProperty ("velocity", -1) == 127, "set_note edits pitch + velocity"); }
+
+        check (ok (cmd (ops, "quantize_notes", objN ({{ "clipId", mClip }, { "division", 1.0 }}))), "quantize_notes ok");
+        { auto ns = clipNotes (mClip); bool allOnGrid = ns.size() > 0;
+          if (auto* arr = ns.getArray()) for (auto& n : *arr) {
+              const double s = (double) n.getProperty ("start", 0.0);
+              if (std::abs (s - std::round (s)) > 0.02) allOnGrid = false; }
+          check (allOnGrid, "quantize_notes snaps every note onto the beat grid"); }
+
+        const int before = clipNotes (mClip).size();
+        check (ok (cmd (ops, "remove_note", objN ({{ "clipId", mClip }, { "noteIndex", 0 }}))), "remove_note ok");
+        check (clipNotes (mClip).size() == before - 1, "remove_note removes a note");
+
+        cmd (ops, "save"); cmd (ops, "reload");
+        check (clipNotes (mClip).size() == before - 1, "notes persist across save/reload");
+        check (! ok (cmd (ops, "set_note", objN ({{ "clipId", mClip }, { "noteIndex", 999 }}))), "set_note rejects an out-of-range noteIndex");
+    }
+
     std::cerr << "===== " << (checks - failures) << "/" << checks
               << " checks passed, " << failures << " failed =====\n\n";
     return failures;

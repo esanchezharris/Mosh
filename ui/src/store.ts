@@ -57,6 +57,9 @@ type State = {
   ensurePeaks: (clipId: string) => void;
 
   setSelectedTrack: (id: string | null) => void;
+  editingClipId: string | null;            // MIDI clip open in the piano-roll
+  openPianoRoll: (clipId: string) => void;
+  closePianoRoll: () => void;
   openBrowser: () => void;
   closeBrowser: () => void;
   loadColors: () => void;
@@ -184,6 +187,9 @@ export const useStore = create<State>((set, get) => ({
   },
 
   setSelectedTrack: (id) => set({ selectedTrackId: id }),
+  editingClipId: null,
+  openPianoRoll: (clipId) => set({ editingClipId: clipId }),
+  closePianoRoll: () => set({ editingClipId: null }),
   openBrowser: () => {
     set({ browserOpen: true });
     if (get().availablePlugins.length === 0)

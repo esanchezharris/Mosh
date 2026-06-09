@@ -42,6 +42,11 @@ export function snapStep(m: Meter, division: SnapDiv): number {
   return QUARTERS[division] * secPerQuarter(m.tempo);
 }
 
+/** Grid step in beats (denominator-notes) for a snap resolution. */
+export function snapStepBeats(m: Meter, division: SnapDiv): number {
+  return snapStep(m, division) / beatSeconds(m);
+}
+
 /** Format a time (seconds) as bars.beats.sixteenths (1-based). */
 export function secondsToBBS(sec: number, m: Meter): string {
   const beats = Math.max(0, sec) / beatSeconds(m);

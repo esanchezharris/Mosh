@@ -138,6 +138,10 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "bypass_plugin")     return cmdBypassPlugin (args);
     if (name == "open_plugin_editor")return cmdOpenPluginEditor (args);
     if (name == "add_midi_clip")     return cmdAddMidiClip (args);
+    if (name == "add_note")          return cmdAddNote (args);
+    if (name == "remove_note")       return cmdRemoveNote (args);
+    if (name == "set_note")          return cmdSetNote (args);
+    if (name == "quantize_notes")    return cmdQuantizeNotes (args);
     if (name == "add_neural_insert") return cmdAddNeuralInsert (args);
     if (name == "set_neural_param")  return cmdSetNeuralParam (args);
     if (name == "set_neural_lab_mode") return cmdSetNeuralLabMode (args);
@@ -791,6 +795,103 @@ juce::var MoshOps::cmdAddMidiClip (const juce::var& args)
     logLine ("add_midi_clip", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("add_midi_clip", var (data));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Wave 4 — MIDI note editing (piano-roll). Notes are addressed in BEATS within
+// the clip's sequence; the index is the position in getNotes() for the current
+// snapshot (the UI refetches after every edit, so indices stay valid).
+// ─────────────────────────────────────────────────────────────────────────────
+juce::var MoshOps::cmdAddNote (const juce::var& args)
+{
+    auto* mc = dynamic_cast<te::MidiClip*> (findClip (args.getProperty ("clipId", var()).toString()));
+    if (mc == nullptr) return errResult ("add_note", "no midi clip");
+
+    const int pitch = juce::jlimit (0, 127, (int) args.getProperty ("pitch", 60));
+    const double start = juce::jmax (0.0, (double) args.getProperty ("start", 0.0));
+    const double length = juce::jmax (0.0625, (double) args.getProperty ("length", 1.0));
+    const int vel = juce::jlimit (1, 127, (int) args.getProperty ("velocity", 100));
+
+    undoManager().beginNewTransaction ("add_note");
+    mc->getSequence().addNote (pitch, tracktion::BeatPosition::fromBeats (start),
+                               tracktion::BeatDuration::fromBeats (length), vel, 0, &undoManager());
+    logLine ("add_note", args, true, {}, true);
+    emitSnapshotInvalidated();
+    auto* data = new DynamicObject();
+    data->setProperty ("noteCount", mc->getSequence().getNumNotes());
+    return okResult ("add_note", var (data));
+}
+
+juce::var MoshOps::cmdRemoveNote (const juce::var& args)
+{
+    auto* mc = dynamic_cast<te::MidiClip*> (findClip (args.getProperty ("clipId", var()).toString()));
+    if (mc == nullptr) return errResult ("remove_note", "no midi clip");
+    auto& seq = mc->getSequence();
+    const int idx = (int) args.getProperty ("noteIndex", -1);
+    if (idx < 0 || idx >= seq.getNumNotes()) return errResult ("remove_note", "bad noteIndex");
+
+    undoManager().beginNewTransaction ("remove_note");
+    seq.removeNote (*seq.getNote (idx), &undoManager());
+    logLine ("remove_note", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("remove_note");
+}
+
+juce::var MoshOps::cmdSetNote (const juce::var& args)
+{
+    auto* mc = dynamic_cast<te::MidiClip*> (findClip (args.getProperty ("clipId", var()).toString()));
+    if (mc == nullptr) return errResult ("set_note", "no midi clip");
+    auto& seq = mc->getSequence();
+    const int idx = (int) args.getProperty ("noteIndex", -1);
+    if (idx < 0 || idx >= seq.getNumNotes()) return errResult ("set_note", "bad noteIndex");
+    auto* note = seq.getNote (idx);
+
+    undoManager().beginNewTransaction ("set_note");
+    if (args.hasProperty ("pitch"))
+        note->setNoteNumber (juce::jlimit (0, 127, (int) args.getProperty ("pitch", note->getNoteNumber())), &undoManager());
+    if (args.hasProperty ("start") || args.hasProperty ("length"))
+    {
+        const double start  = juce::jmax (0.0, (double) args.getProperty ("start",  note->getStartBeat().inBeats()));
+        const double length = juce::jmax (0.0625, (double) args.getProperty ("length", note->getLengthBeats().inBeats()));
+        note->setStartAndLength (tracktion::BeatPosition::fromBeats (start),
+                                 tracktion::BeatDuration::fromBeats (length), &undoManager());
+    }
+    if (args.hasProperty ("velocity"))
+        note->setVelocity (juce::jlimit (1, 127, (int) args.getProperty ("velocity", note->getVelocity())), &undoManager());
+
+    logLine ("set_note", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("set_note");
+}
+
+juce::var MoshOps::cmdQuantizeNotes (const juce::var& args)
+{
+    auto* mc = dynamic_cast<te::MidiClip*> (findClip (args.getProperty ("clipId", var()).toString()));
+    if (mc == nullptr) return errResult ("quantize_notes", "no midi clip");
+    auto& seq = mc->getSequence();
+
+    const double division = juce::jmax (0.03125, (double) args.getProperty ("division", 1.0));   // beats
+    const double strength = juce::jlimit (0.0, 1.0, (double) args.getProperty ("strength", 1.0));
+
+    undoManager().beginNewTransaction ("quantize_notes");
+    int moved = 0;
+    for (int i = 0; i < seq.getNumNotes(); ++i)
+    {
+        auto* note = seq.getNote (i);
+        const double start = note->getStartBeat().inBeats();
+        const double q = std::round (start / division) * division;
+        const double next = start + (q - start) * strength;
+        if (std::abs (next - start) > 1.0e-6)
+        {
+            note->setStartAndLength (tracktion::BeatPosition::fromBeats (juce::jmax (0.0, next)),
+                                     note->getLengthBeats(), &undoManager());
+            ++moved;
+        }
+    }
+    logLine ("quantize_notes", args, true, {}, true);
+    emitSnapshotInvalidated();
+    auto* data = new DynamicObject(); data->setProperty ("moved", moved);
+    return okResult ("quantize_notes", var (data));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1467,8 +1568,24 @@ juce::var MoshOps::clipToVar (te::Clip& c)
         o->setProperty ("sourceFile", w->getCurrentSourceFile().getFullPathName());
         o->setProperty ("sourceLength", w->getSourceLength().inSeconds());
     }
-    else if (dynamic_cast<te::MidiClip*> (&c) != nullptr)
+    else if (auto* mc = dynamic_cast<te::MidiClip*> (&c))
+    {
         o->setProperty ("type", "midi");
+        Array<var> notes;
+        auto& seq = mc->getSequence();
+        for (int i = 0; i < seq.getNumNotes(); ++i)
+            if (auto* n = seq.getNote (i))
+            {
+                auto* no = new DynamicObject();
+                no->setProperty ("i", i);
+                no->setProperty ("pitch", n->getNoteNumber());
+                no->setProperty ("start", n->getStartBeat().inBeats());     // beats within the clip sequence
+                no->setProperty ("length", n->getLengthBeats().inBeats());
+                no->setProperty ("velocity", n->getVelocity());
+                notes.add (var (no));
+            }
+        o->setProperty ("notes", notes);
+    }
     else
         o->setProperty ("type", "clip");
 

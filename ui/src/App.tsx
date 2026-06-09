@@ -6,6 +6,7 @@ import { Arrangement } from "./components/Arrangement";
 import { Transport } from "./components/Transport";
 import { Rack } from "./components/Rack";
 import { PluginBrowser } from "./components/PluginBrowser";
+import { PianoRoll } from "./components/PianoRoll";
 
 // Stage 1 UI: renders the MoshOps snapshot cold, drives every mutation through
 // execute_command, and reacts to the snapshot+events feed. Deliberately thin and
@@ -65,6 +66,7 @@ export function App() {
       )}
 
       <PluginBrowser />
+      <PianoRoll />
     </div>
   );
 }

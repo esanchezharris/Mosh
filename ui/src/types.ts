@@ -28,6 +28,15 @@ export type AvailableColor = {
 // Quality readout from a completed render's manifest (judge panel, 05 §7).
 export type RenderQA = { pq?: number | null; pq_base?: number | null; flags?: string[]; adapter?: string };
 
+// A MIDI note as serialised in the snapshot — beats within the clip sequence.
+export type MidiNote = {
+  i: number;        // index into the clip's note list (the command handle)
+  pitch: number;    // 0..127
+  start: number;    // beats
+  length: number;   // beats
+  velocity: number; // 1..127
+};
+
 export type Clip = {
   id: string;
   name: string;
@@ -37,6 +46,7 @@ export type Clip = {
   offset: number;
   sourceFile?: string;
   sourceLength?: number;
+  notes?: MidiNote[];
   hasRenderLayer: boolean;
   renderLayer?: RenderLayer;
 };

@@ -73,6 +73,10 @@ private:
     juce::var cmdBypassPlugin   (const juce::var& args);
     juce::var cmdOpenPluginEditor (const juce::var& args);
     juce::var cmdAddMidiClip    (const juce::var& args);
+    juce::var cmdAddNote        (const juce::var& args);
+    juce::var cmdRemoveNote     (const juce::var& args);
+    juce::var cmdSetNote        (const juce::var& args);
+    juce::var cmdQuantizeNotes  (const juce::var& args);
     // Stage 4 — Tier-A real-time neural insert
     juce::var cmdAddNeuralInsert (const juce::var& args);
     juce::var cmdSetNeuralParam  (const juce::var& args);

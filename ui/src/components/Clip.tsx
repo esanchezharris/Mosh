@@ -16,6 +16,7 @@ export function Clip({ clip, laneH }: { clip: ClipT; laneH: number }) {
   const exec = useStore((s) => s.exec);
   const selected = useStore((s) => s.selection.has(clip.id));
   const select = useStore((s) => s.select);
+  const openPianoRoll = useStore((s) => s.openPianoRoll);
   const peaks = useStore((s) => s.peaks[clip.id]);
 
   // Optimistic preview while dragging; cleared when committed props arrive.
@@ -95,7 +96,8 @@ export function Clip({ clip, laneH }: { clip: ClipT; laneH: number }) {
       onPointerDown={onPointerDown("move")}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
-      title={`${clip.name} · ${pos.length.toFixed(2)}s`}
+      onDoubleClick={(e) => { if (clip.type === "midi") { e.stopPropagation(); openPianoRoll(clip.id); } }}
+      title={clip.type === "midi" ? `${clip.name} · double-click to edit notes` : `${clip.name} · ${pos.length.toFixed(2)}s`}
     >
       <div className="clip-wave">
         <Waveform

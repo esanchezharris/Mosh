@@ -263,3 +263,26 @@ button.on { border-color: var(--accent); color: var(--accent); background: #2120
 .gen-actions button:disabled { opacity: 0.4; cursor: default; }
 
 .boot { padding: 3rem; color: var(--muted); }
+
+/* Piano roll (Wave 4) */
+.pr { width: min(960px, 94vw); height: min(70vh, 640px); background: var(--panel); border: 1px solid var(--line); border-radius: 12px; display: flex; flex-direction: column; box-shadow: 0 24px 60px rgba(0,0,0,0.5); overflow: hidden; }
+.pr-head { display: flex; align-items: center; gap: 0.6rem; padding: 0.6rem 0.9rem; border-bottom: 1px solid var(--line); }
+.pr-head .pr-meta { color: var(--muted); font-size: 0.76rem; }
+.pr-spacer { flex: 1; }
+.pr-vel { display: flex; align-items: center; gap: 5px; font-size: 0.76rem; color: var(--muted); }
+.pr-vel input { width: 90px; accent-color: var(--accent); }
+.pr-head .x { background: transparent; border-color: transparent; color: var(--muted); }
+.pr-body { flex: 1; display: flex; min-height: 0; }
+.pr-keys { width: 52px; min-width: 52px; overflow: hidden; border-right: 1px solid var(--line); background: var(--panel-2); }
+.pr-key { display: flex; align-items: center; justify-content: flex-end; padding-right: 4px; font-size: 0.6rem; color: var(--muted); box-sizing: border-box; border-bottom: 1px solid rgba(255,255,255,0.04); }
+.pr-key.black { background: rgba(0,0,0,0.28); }
+.pr-scroll { flex: 1; overflow: auto; }
+.pr-grid { position: relative; background: var(--panel); }
+.pr-row { position: absolute; left: 0; right: 0; }
+.pr-row.black { background: rgba(255,255,255,0.03); }
+.pr-gl { position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(255,255,255,0.05); }
+.pr-gl.bar { background: rgba(255,255,255,0.16); }
+.pr-note { position: absolute; background: linear-gradient(180deg, #8f7bff, #6c5cff); border: 1px solid rgba(255,255,255,0.3); border-radius: 3px; cursor: grab; }
+.pr-note.sel { outline: 1px solid #fff; z-index: 2; }
+.pr-note-grip { position: absolute; right: 0; top: 0; bottom: 0; width: 6px; cursor: ew-resize; }
+.pr-foot { padding: 0.4rem 0.9rem; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.7rem; }

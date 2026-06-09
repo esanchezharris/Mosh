@@ -65,6 +65,20 @@ The SES-001 "one canonical time model" promise. A single shared mapping module (
 
 **Shipped-on-both-axes: 37 → 41** (must-tier 26 → 30). The musical grid that MIDI editing, automation, and warp all depend on is now in place.
 
+### 2026-06-09 · Wave 4 — MIDI piano-roll & note editing ✅
+
+A whole must-tier category. MIDI notes now serialise into the snapshot (beats within the clip); new commands `add_note`, `remove_note`, `set_note` (pitch/start/length/velocity), `quantize_notes`. A piano-roll editor opens on double-clicking a MIDI clip: pitch×beats grid (same canonical mapping as the arrangement), notes as blocks, click-to-add, drag-move, edge-resize, double-click-delete, per-note velocity slider, and Quantize. Combined with Wave 1's built-in 4OSC synth, the compose loop is real. Verified: `Mosh --selftest` **133/133**, 0 assertions + screenshot.
+
+| ID | Tier | Feature | Before → After |
+|---|---|---|---|
+| `MID-002` | must | Piano-roll editor | ✗/✗ → ✓/✓ |
+| `MID-003` | must | Note create / move / resize / delete | ◐/✗ → ✓/✓ |
+| `MID-004` | must | Velocity editing | ◐/✗ → ✓/✓ |
+| `MID-006` | must | Quantize MIDI | ✗/✗ → ✓/✓ |
+| `ARR-003` | must | MIDI clips (render + open into editor) | ✓/◐ → ✓/✓ |
+
+**Shipped-on-both-axes: 41 → 46** (must-tier 30 → 35). With built-in instruments (Wave 1) + the musical grid (Wave 3) + the piano roll, you can write and hear a part end to end.
+
 ## Coverage by category
 
 Per axis the three counts are **present ✓ / partial ◐ / missing ✗** (missing also folds in the one `not_applicable`).
