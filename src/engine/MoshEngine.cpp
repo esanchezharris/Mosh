@@ -92,7 +92,8 @@ void MoshEngine::applyRequestedAudioOutputDevice()
         return;
 
     const auto requested = juce::SystemStats::getEnvironmentVariable ("MOSH_AUDIO_OUTPUT_DEVICE", {}).trim();
-    if (requested.isEmpty())
+    const auto requestedInput = juce::SystemStats::getEnvironmentVariable ("MOSH_AUDIO_INPUT_DEVICE", {}).trim();
+    if (requested.isEmpty() && requestedInput.isEmpty())
         return;
 
     auto& tracktionDevices = enginePtr->getDeviceManager();
@@ -100,41 +101,77 @@ void MoshEngine::applyRequestedAudioOutputDevice()
 
     juce::String matchedType;
     juce::String matchedOutput;
+    juce::String matchedInput;
     for (auto* type : devices.getAvailableDeviceTypes())
     {
         type->scanForDevices();
-        auto outputs = type->getDeviceNames (false);
-        auto index = outputs.indexOf (requested);
-        if (index < 0)
+        if (requested.isNotEmpty())
         {
-            for (int i = 0; i < outputs.size(); ++i)
-                if (outputs[i].equalsIgnoreCase (requested))
-                {
-                    index = i;
-                    break;
-                }
+            auto outputs = type->getDeviceNames (false);
+            auto index = outputs.indexOf (requested);
+            if (index < 0)
+            {
+                for (int i = 0; i < outputs.size(); ++i)
+                    if (outputs[i].equalsIgnoreCase (requested))
+                    {
+                        index = i;
+                        break;
+                    }
+            }
+            if (index >= 0)
+            {
+                matchedType = type->getTypeName();
+                matchedOutput = outputs[index];
+            }
         }
-        if (index >= 0)
+
+        if (requestedInput.isNotEmpty())
         {
-            matchedType = type->getTypeName();
-            matchedOutput = outputs[index];
+            auto inputs = type->getDeviceNames (true);
+            auto index = inputs.indexOf (requestedInput);
+            if (index < 0)
+            {
+                for (int i = 0; i < inputs.size(); ++i)
+                    if (inputs[i].equalsIgnoreCase (requestedInput))
+                    {
+                        index = i;
+                        break;
+                    }
+            }
+            if (index >= 0)
+            {
+                if (matchedType.isEmpty())
+                    matchedType = type->getTypeName();
+                if (matchedType == type->getTypeName())
+                    matchedInput = inputs[index];
+            }
+        }
+
+        if ((requested.isEmpty() || matchedOutput.isNotEmpty())
+            && (requestedInput.isEmpty() || matchedInput.isNotEmpty()))
             break;
-        }
     }
 
-    if (matchedOutput.isEmpty())
+    if (requested.isNotEmpty() && matchedOutput.isEmpty())
     {
         audioError = "Requested audio output device not found: " + requested;
+        DBG (audioError);
+        return;
+    }
+    if (requestedInput.isNotEmpty() && matchedInput.isEmpty())
+    {
+        audioError = "Requested audio input device not found: " + requestedInput;
         DBG (audioError);
         return;
     }
 
     auto setup = devices.getAudioDeviceSetup();
     devices.setCurrentAudioDeviceType (matchedType, true);
-    setup.outputDeviceName = matchedOutput;
-    setup.inputDeviceName.clear();
+    if (matchedOutput.isNotEmpty())
+        setup.outputDeviceName = matchedOutput;
+    setup.inputDeviceName = matchedInput;
     setup.inputChannels.clear();
-    setup.useDefaultInputChannels = true;
+    setup.useDefaultInputChannels = matchedInput.isNotEmpty();
     setup.useDefaultOutputChannels = true;
 
     if (auto error = devices.setAudioDeviceSetup (setup, true); error.isNotEmpty())

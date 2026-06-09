@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-LEGACY="${1:-$REPO/_preserved_artifacts/2026-06-08-consolidation/mosh/sa3-colors-steering-data-20260608}"
+LEGACY="${1:-${MOSH_LEGACY_SA3_BUNDLE:-$REPO/_preserved_artifacts/2026-06-08-consolidation/mosh/sa3-colors-steering-data-20260608}}"
 CURRENT="${2:-$REPO/service/colors/COLORRACK_DATA}"
 
 python3 - "$LEGACY" "$CURRENT" <<'PY'

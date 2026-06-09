@@ -2,6 +2,7 @@
 #include "engine/MoshEngine.h"
 #include "moshops/MoshOps.h"
 #include "plugins/neural/NeuralInsertPlugin.h"
+#include <atomic>
 #include <iostream>
 #include <vector>
 
@@ -40,6 +41,71 @@ namespace
         for (auto& p : kv) o->setProperty (p.first, p.second);
         return juce::var (o);
     }
+
+    class LiveAudioProbe final : public juce::AudioIODeviceCallback
+    {
+    public:
+        void audioDeviceAboutToStart (juce::AudioIODevice* device) override
+        {
+            sampleRate = device != nullptr ? device->getCurrentSampleRate() : 48000.0;
+            if (sampleRate <= 0.0)
+                sampleRate = 48000.0;
+            phase = 0.0;
+        }
+
+        void audioDeviceStopped() override {}
+
+        void audioDeviceIOCallbackWithContext (const float* const* inputChannelData,
+                                               int numInputChannels,
+                                               float* const* outputChannelData,
+                                               int numOutputChannels,
+                                               int numSamples,
+                                               const juce::AudioIODeviceCallbackContext&) override
+        {
+            callbacks.fetch_add (1, std::memory_order_relaxed);
+            samples.fetch_add (numSamples, std::memory_order_relaxed);
+            inputSamples.fetch_add (numSamples * juce::jmax (0, numInputChannels), std::memory_order_relaxed);
+
+            for (int ch = 0; ch < numInputChannels; ++ch)
+                if (auto* in = inputChannelData[ch])
+                    for (int i = 0; i < numSamples; ++i)
+                        if (std::abs (in[i]) > 0.01f)
+                            inputNonSilentSamples.fetch_add (1, std::memory_order_relaxed);
+
+            const auto inc = juce::MathConstants<double>::twoPi * 440.0 / sampleRate;
+            int writtenThisBlock = 0;
+            for (int i = 0; i < numSamples; ++i)
+            {
+                const auto s = (float) (std::sin (phase) * 0.35);
+                for (int ch = 0; ch < numOutputChannels; ++ch)
+                    if (auto* out = outputChannelData[ch])
+                    {
+                        out[i] = s;
+                        ++writtenThisBlock;
+                    }
+
+                phase += inc;
+                if (phase >= juce::MathConstants<double>::twoPi)
+                    phase -= juce::MathConstants<double>::twoPi;
+            }
+            writtenSamples.fetch_add (writtenThisBlock, std::memory_order_relaxed);
+        }
+
+        int getCallbackCount() const { return callbacks.load (std::memory_order_relaxed); }
+        int getSampleCount() const { return samples.load (std::memory_order_relaxed); }
+        int getWrittenSampleCount() const { return writtenSamples.load (std::memory_order_relaxed); }
+        int getInputSampleCount() const { return inputSamples.load (std::memory_order_relaxed); }
+        int getInputNonSilentSampleCount() const { return inputNonSilentSamples.load (std::memory_order_relaxed); }
+
+    private:
+        double phase = 0.0;
+        double sampleRate = 48000.0;
+        std::atomic<int> callbacks { 0 };
+        std::atomic<int> samples { 0 };
+        std::atomic<int> writtenSamples { 0 };
+        std::atomic<int> inputSamples { 0 };
+        std::atomic<int> inputNonSilentSamples { 0 };
+    };
 
     bool ok (const juce::var& r) { return (bool) r.getProperty ("ok", false); }
 
@@ -548,6 +614,7 @@ int runLiveAudioSmoke (MoshEngine& eng, MoshOps& ops)
     check (device != nullptr, "JUCE audio device is open");
 
     const auto requested = SystemStats::getEnvironmentVariable ("MOSH_AUDIO_OUTPUT_DEVICE", {}).trim();
+    const auto requestedInput = SystemStats::getEnvironmentVariable ("MOSH_AUDIO_INPUT_DEVICE", {}).trim();
     if (device != nullptr)
     {
         std::cerr << "  ..   device=" << device->getName()
@@ -571,14 +638,28 @@ int runLiveAudioSmoke (MoshEngine& eng, MoshOps& ops)
     check (ok (cmd (ops, "set_transport", args1 ("action", "play"))), "transport play ok");
     check (eng.edit().getTransport().getCurrentPlaybackContext() != nullptr, "playback context allocated");
 
+    LiveAudioProbe probe;
+    deviceManager.addAudioCallback (&probe);
+
     auto* mm = MessageManager::getInstanceWithoutCreating();
-    const auto end = Time::getMillisecondCounter() + 1500u;
+    auto smokeMs = SystemStats::getEnvironmentVariable ("MOSH_LIVE_AUDIO_SMOKE_MS", "3500").getIntValue();
+    smokeMs = jlimit (500, 15000, smokeMs);
+    const auto end = Time::getMillisecondCounter() + (uint32) smokeMs;
     while (Time::getMillisecondCounter() < end)
     {
         if (mm != nullptr) mm->runDispatchLoopUntil (50);
         else Thread::sleep (50);
     }
 
+    deviceManager.removeAudioCallback (&probe);
+    check (probe.getCallbackCount() > 0, "live-audio probe callback ran");
+    check (probe.getSampleCount() > 0, "live-audio probe observed audio frames");
+    check (probe.getWrittenSampleCount() > 0, "live-audio probe had writable output channels");
+    if (requestedInput.isNotEmpty())
+    {
+        check (probe.getInputSampleCount() > 0, "live-audio probe observed input frames");
+        check (probe.getInputNonSilentSampleCount() > 0, "live-audio probe captured loopback input");
+    }
     check (ok (cmd (ops, "set_transport", args1 ("action", "stop"))), "transport stop ok");
 
     std::cerr << "===== " << checks - failures << "/" << checks

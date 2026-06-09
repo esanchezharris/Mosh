@@ -7,6 +7,7 @@ SERVICE_HOST="${MOSH_SERVICE_HOST:-127.0.0.1}"
 SERVICE_PORT="${MOSH_SERVICE_PORT:-8770}"
 SA3_DIR="${SA3_MLX_DIR:-$HOME/AI/stable-audio-3/optimized/mlx}"
 COLOR_DIR="${COLORRACK_DATA:-$REPO/service/colors/COLORRACK_DATA}"
+LEGACY_SA3_BUNDLE="${MOSH_LEGACY_SA3_BUNDLE:-$REPO/_preserved_artifacts/2026-06-08-consolidation/mosh/sa3-colors-steering-data-20260608}"
 EVID="${MOSH_EVID:-$REPO/_preserved_artifacts/2026-06-08-consolidation/claudemosh/macos-local-preflight-$(date +%Y%m%d-%H%M%S)}"
 
 mkdir -p "$EVID"
@@ -150,6 +151,7 @@ esac
 
 check_dir "$SA3_DIR" "SA3_MLX_DIR"
 check_dir "$COLOR_DIR" "COLORRACK_DATA"
+check_dir "$LEGACY_SA3_BUNDLE" "MOSH_LEGACY_SA3_BUNDLE"
 
 if [[ -d "/Library/Audio/Plug-Ins/VST3" || -d "$HOME/Library/Audio/Plug-Ins/VST3" ]]; then
   pass "at least one VST3 plugin directory exists"
@@ -199,6 +201,7 @@ Checked:
 - BlackHole CoreAudio and ffmpeg AVFoundation visibility
 - Mosh service port ownership
 - SA3 and color-rack local assets
+- Legacy SA3 color bundle for strict comparison
 - VST3 plugin directory presence
 - Strict gate lock contention
 - Local preservation state for \`assets/grit_demo\`
