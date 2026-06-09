@@ -3,6 +3,7 @@ import * as QRCode from "qrcode";
 import { useStore } from "./store";
 import { isNative } from "./bridge";
 import { Arrangement } from "./components/Arrangement";
+import { Mixer } from "./components/Mixer";
 import { Transport } from "./components/Transport";
 import { Rack } from "./components/Rack";
 import { PluginBrowser } from "./components/PluginBrowser";
@@ -17,6 +18,8 @@ export function App() {
   const snapshot = useStore((s) => s.snapshot);
   const lastError = useStore((s) => s.lastError);
   const exec = useStore((s) => s.exec);
+  const view = useStore((s) => s.view);
+  const setView = useStore((s) => s.setView);
   const theme = useStore((s) => s.theme);
   const toggleTheme = useStore((s) => s.toggleTheme);
 
@@ -41,6 +44,10 @@ export function App() {
           <span className="logo-min">M</span> Mosh
         </div>
         <Transport />
+        <div className="view-toggle" role="group" aria-label="View">
+          <button className={view === "arrange" ? "on" : ""} onClick={() => setView("arrange")}>Arrange</button>
+          <button className={view === "mixer" ? "on" : ""} onClick={() => setView("mixer")}>Mixer</button>
+        </div>
         <div className="topbar-right">
           <RemoteCompanion />
           {/* Reserved B-5 / Monster operator slot (deferred — empty in v0). */}
@@ -58,7 +65,7 @@ export function App() {
 
       {snapshot ? (
         <>
-          <Arrangement snapshot={snapshot} />
+          {view === "mixer" ? <Mixer snapshot={snapshot} /> : <Arrangement snapshot={snapshot} />}
           <Rack snapshot={snapshot} />
         </>
       ) : (

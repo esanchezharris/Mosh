@@ -127,6 +127,8 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "set_track_pan")     return cmdSetTrackPan (args);
     if (name == "set_track_mute")    return cmdSetTrackMute (args);
     if (name == "set_track_solo")    return cmdSetTrackSolo (args);
+    if (name == "set_master_volume") return cmdSetMasterVolume (args);
+    if (name == "set_master_pan")    return cmdSetMasterPan (args);
     if (name == "get_clip_peaks")    return cmdGetClipPeaks (args);
     if (name == "list_plugins")      return cmdListPlugins (args);
     if (name == "list_builtins")     return cmdListBuiltins (args);
@@ -527,6 +529,28 @@ juce::var MoshOps::cmdSetTrackSolo (const juce::var& args)
     logLine ("set_track_solo", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("set_track_solo");
+}
+
+juce::var MoshOps::cmdSetMasterVolume (const juce::var& args)
+{
+    auto mvp = eng.edit().getMasterVolumePlugin();
+    if (mvp == nullptr) return errResult ("set_master_volume", "no master plugin");
+    undoManager().beginNewTransaction ("set_master_volume");
+    mvp->setVolumeDb (juce::jlimit (-48.0f, 6.0f, (float) (double) args.getProperty ("db", 0.0)));
+    logLine ("set_master_volume", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("set_master_volume");
+}
+
+juce::var MoshOps::cmdSetMasterPan (const juce::var& args)
+{
+    auto mvp = eng.edit().getMasterVolumePlugin();
+    if (mvp == nullptr) return errResult ("set_master_pan", "no master plugin");
+    undoManager().beginNewTransaction ("set_master_pan");
+    mvp->setPan (juce::jlimit (-1.0f, 1.0f, (float) (double) args.getProperty ("pan", 0.0)));
+    logLine ("set_master_pan", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("set_master_pan");
 }
 
 juce::var MoshOps::cmdGetClipPeaks (const juce::var& args)
@@ -1511,6 +1535,15 @@ juce::var MoshOps::snapshot()
     root->setProperty ("session", var (session));
     root->setProperty ("tracks", tracks);
     root->setProperty ("transport", transportToVar());
+
+    // Master bus (Wave 5) — the edit's master VolumeAndPan, always present.
+    if (auto mvp = edit.getMasterVolumePlugin())
+    {
+        auto* master = new DynamicObject();
+        master->setProperty ("volumeDb", mvp->getVolumeDb());
+        master->setProperty ("pan", mvp->getPan());
+        root->setProperty ("master", var (master));
+    }
     return var (root);
 }
 

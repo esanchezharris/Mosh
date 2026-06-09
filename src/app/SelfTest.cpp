@@ -370,6 +370,24 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         cmd (ops, "set_time_signature", objN ({{ "numerator", 4 }, { "denominator", 4 }}));
     }
 
+    // ─── Wave 5: mixer — master bus + pan ───
+    std::cerr << "--- Wave 5: mixer / master / pan ---\n";
+    {
+        auto master = [&] { return ops.snapshot().getProperty ("master", var()); };
+        check (master().isObject(), "snapshot exposes a master bus");
+
+        check (ok (cmd (ops, "set_master_volume", args1 ("db", -6.0))), "set_master_volume ok");
+        check (std::abs ((double) master().getProperty ("volumeDb", 0.0) - (-6.0)) < 0.5, "master volume reflects in snapshot");
+        check (ok (cmd (ops, "set_master_pan", args1 ("pan", -0.5))), "set_master_pan ok");
+        check (std::abs ((double) master().getProperty ("pan", 0.0) - (-0.5)) < 0.02, "master pan reflects in snapshot");
+
+        // Per-track pan (set_track_pan existed but was never covered).
+        check (ok (cmd (ops, "set_track_pan", objN ({{ "trackId", tid }, { "pan", 0.4 }}))), "set_track_pan ok");
+        check (std::abs ((double) trackById (tid).getProperty ("pan", 0.0) - 0.4) < 0.02, "track pan reflects in snapshot");
+
+        cmd (ops, "set_master_volume", args1 ("db", -3.0));   // restore a sane default
+    }
+
     // ─── Wave 1: engine built-in plugin palette (effects + instruments) ───
     std::cerr << "--- Wave 1: built-in plugin palette ---\n";
     {

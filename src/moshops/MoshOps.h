@@ -61,6 +61,8 @@ private:
     juce::var cmdSetTrackPan    (const juce::var& args);
     juce::var cmdSetTrackMute   (const juce::var& args);
     juce::var cmdSetTrackSolo   (const juce::var& args);
+    juce::var cmdSetMasterVolume (const juce::var& args);
+    juce::var cmdSetMasterPan    (const juce::var& args);
     juce::var cmdGetClipPeaks   (const juce::var& args);
     // Stage 3 — VST3 hosting + MIDI
     juce::var cmdListPlugins    (const juce::var& args);

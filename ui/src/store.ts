@@ -11,6 +11,7 @@ import type { RemoteStatus } from "./bridge";
 import { type SnapDiv, snapStep, meterFrom } from "./time";
 
 export type Tool = "move" | "split";
+export type View = "arrange" | "mixer";
 export type Peaks = [number, number][];
 
 type State = {
@@ -64,6 +65,9 @@ type State = {
   closeBrowser: () => void;
   loadColors: () => void;
   setLab: (b: boolean) => void;
+
+  view: View;
+  setView: (v: View) => void;
 
   theme: "dark" | "light";
   toggleTheme: () => void;
@@ -220,6 +224,9 @@ export const useStore = create<State>((set, get) => ({
     });
   },
   setLab: (b) => set({ labMode: b }),
+
+  view: "arrange",
+  setView: (v) => set({ view: v }),
 
   theme: "dark",
   toggleTheme: () =>

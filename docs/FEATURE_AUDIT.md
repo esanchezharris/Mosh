@@ -79,6 +79,18 @@ A whole must-tier category. MIDI notes now serialise into the snapshot (beats wi
 
 **Shipped-on-both-axes: 41 → 46** (must-tier 30 → 35). With built-in instruments (Wave 1) + the musical grid (Wave 3) + the piano roll, you can write and hear a part end to end.
 
+### 2026-06-09 · Wave 5 — Mixer view + pan + master bus ✅
+
+Backend: snapshot now carries the `master` bus (the edit's master VolumeAndPan) with `set_master_volume`/`set_master_pan`; pan was already in the snapshot. UI: a dedicated **Mixer view** (toggle in the topbar) with a channel strip per track — pan, vertical fader, dB readout, mute/solo, fx count — plus a distinct **Master** strip; a compact pan slider added to each arrangement track header. Verified: `Mosh --selftest` **140/140**, 0 assertions + screenshot.
+
+| ID | Tier | Feature | Before → After |
+|---|---|---|---|
+| `MIX-001` | must | Mixer view | ◐/◐ → ✓/✓ |
+| `MIX-003` | must | Pan | ✓/✗ → ✓/✓ |
+| `MIX-010` | must | Master bus | ◐/✗ → ✓/✓ |
+
+**Shipped-on-both-axes: 46 → 49** (must-tier 35 → 38). Channel metering (live level taps via `LevelMeterPlugin`) and buses/sends are the next mixer rungs.
+
 ## Coverage by category
 
 Per axis the three counts are **present ✓ / partial ◐ / missing ✗** (missing also folds in the one `not_applicable`).

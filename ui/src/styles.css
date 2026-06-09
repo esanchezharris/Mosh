@@ -264,6 +264,27 @@ button.on { border-color: var(--accent); color: var(--accent); background: #2120
 
 .boot { padding: 3rem; color: var(--muted); }
 
+/* View toggle (Wave 5) */
+.view-toggle { display: flex; gap: 2px; margin-left: 0.4rem; }
+.view-toggle button { font-size: 0.76rem; padding: 0.3rem 0.6rem; color: var(--muted); }
+.view-toggle button.on { border-color: var(--accent); color: var(--accent); background: #21203a; }
+.pan-mini { width: 38px; accent-color: var(--warn); height: 4px; }
+
+/* Mixer (Wave 5) */
+.mixer { flex: 1; display: flex; min-height: 0; overflow: hidden; }
+.mix-strips { flex: 1; display: flex; gap: 6px; padding: 12px; overflow-x: auto; align-items: stretch; }
+.mix-master { border-left: 1px solid var(--line); padding: 12px; background: var(--panel); }
+.strip { width: 74px; min-width: 74px; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px 6px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; }
+.strip.sel { border-color: var(--accent); }
+.strip.master { background: linear-gradient(180deg, #20202f, var(--panel-2)); border-color: #3a3a6a; }
+.strip-name { font-size: 0.72rem; font-weight: 600; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.strip-fx { font-size: 0.6rem; color: var(--muted); }
+.strip .pan { width: 56px; accent-color: var(--warn); height: 4px; }
+.fader-wrap { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 140px; }
+.fader { -webkit-appearance: slider-vertical; appearance: slider-vertical; width: 8px; height: 100%; accent-color: var(--accent); }
+.strip-db { font-size: 0.66rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.strip-ms { display: flex; gap: 4px; }
+
 /* Piano roll (Wave 4) */
 .pr { width: min(960px, 94vw); height: min(70vh, 640px); background: var(--panel); border: 1px solid var(--line); border-radius: 12px; display: flex; flex-direction: column; box-shadow: 0 24px 60px rgba(0,0,0,0.5); overflow: hidden; }
 .pr-head { display: flex; align-items: center; gap: 0.6rem; padding: 0.6rem 0.9rem; border-bottom: 1px solid var(--line); }

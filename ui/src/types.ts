@@ -128,6 +128,7 @@ export type Snapshot = {
   };
   tracks: Track[];
   transport: Transport;
+  master?: { volumeDb: number; pan: number };
 };
 
 export type CommandResult<T = unknown> = {

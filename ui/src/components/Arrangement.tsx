@@ -248,6 +248,16 @@ function TrackHeader({ track, laneH }: { track: Track; laneH: number }) {
           onClick={() => exec("set_track_solo", { trackId: track.id, solo: !track.solo })}
         >S</button>
         <input
+          className="pan-mini"
+          type="range"
+          min={-1}
+          max={1}
+          step={0.01}
+          value={track.pan ?? 0}
+          onChange={(e) => exec("set_track_pan", { trackId: track.id, pan: Number(e.target.value) })}
+          title={`Pan ${(track.pan ?? 0).toFixed(2)}`}
+        />
+        <input
           className="vol"
           type="range"
           min={-48}
