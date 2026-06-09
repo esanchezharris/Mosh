@@ -46,6 +46,25 @@ The audit's #1 leverage wave: musical-time controls that unblock the grid. New c
 
 **Shipped-on-both-axes: 32 → 37** (must-tier 21 → 26). The musical-time foundation for the bars&beats grid (next wave) is now in place.
 
+### 2026-06-09 · Wave 3 — Bars & beats musical time + grid ✅
+
+The SES-001 "one canonical time model" promise. A single shared mapping module (`ui/src/time.ts`, derived from the snapshot's tempo + time signature) drives a bars&beats ruler, musical gridlines behind the clips, a selectable snap resolution (Bar / 1/4 / 1/8 / 1/16 / 1/32), vertical (track-height) zoom, and a bars.beats.sixteenths position readout in the transport. **Pure UI wave — zero backend change** (a swappability demonstration; the command surface stays seconds-based). Verified: `Mosh --selftest` 122/122 (unchanged) + screenshot.
+
+**Build fix:** UI-only iterations rebuilt the bundle but never restaged it into the `.app` (staging was a POST_BUILD of the Mosh target, which only fires on a C++ relink). Added an always-on `MoshStageUI` target so UI-only waves ship a fresh bundle.
+
+| ID | Tier | Feature | Before → After |
+|---|---|---|---|
+| `ARR-004` | must | Timeline ruler (bars & beats) | ◐/◐ → ✓/✓ |
+| `ARR-006` | must | Grid & snap (musical) | ◐/◐ → ✓/✓ |
+| `ARR-007` | must | Adjustable snap resolution | ✗/✗ → ✓/✓ |
+| `ARR-008` | must | Zoom (horizontal & vertical) | ◐/◐ → ✓/✓ |
+| `SES-001` | must | Single canonical time model | ◐/✗ → ◐/✓ * |
+| `ARR-005` | should | Multiple time formats | ✗/✗ → ◐/◐ |
+
+\* SES-001: one shared mapping now drives every view (ruler/grid/snap/readout) and is surfaced; capability is constant-tempo canonical — a tempo map is a later wave.
+
+**Shipped-on-both-axes: 37 → 41** (must-tier 26 → 30). The musical grid that MIDI editing, automation, and warp all depend on is now in place.
+
 ## Coverage by category
 
 Per axis the three counts are **present ✓ / partial ◐ / missing ✗** (missing also folds in the one `not_applicable`).

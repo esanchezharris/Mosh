@@ -92,6 +92,7 @@ button.on { border-color: var(--accent); color: var(--accent); background: #2120
 .tbtn.rec { color: var(--muted); }
 .tbtn.rec.on { color: #fff; border-color: var(--playhead); background: var(--playhead); box-shadow: 0 0 8px var(--playhead); }
 .pos { margin-left: 0.5rem; font-variant-numeric: tabular-nums; font-size: 1rem; color: var(--muted); min-width: 76px; text-align: right; }
+.pos.bbs { margin-left: 0.25rem; min-width: 60px; font-size: 0.9rem; color: var(--accent); }
 
 /* Tempo + time-signature (Wave 2) */
 .tempo, .timesig { display: flex; align-items: center; gap: 3px; font-size: 0.8rem; color: var(--muted); }
@@ -119,8 +120,15 @@ button.on { border-color: var(--accent); color: var(--accent); background: #2120
   color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; background: var(--panel);
 }
 .ruler { position: relative; height: 30px; cursor: text; }
-.tick { position: absolute; top: 0; height: 100%; border-left: 1px solid var(--line); }
+.tick { position: absolute; top: 0; height: 100%; }
+.tick.bar { border-left: 1px solid var(--line); }
+.tick.beat { border-left: 1px solid var(--line); opacity: 0.32; height: 40%; top: 60%; }
 .tick span { position: absolute; left: 4px; top: 2px; font-size: 0.68rem; color: var(--muted); }
+/* Musical gridlines behind the clips (bar lines, same mapping as the ruler) */
+.gridlines { position: absolute; top: 0; left: 0; right: 0; pointer-events: none; z-index: 0; }
+.gl { position: absolute; top: 0; bottom: 0; width: 1px; }
+.gl.bar { background: var(--line); opacity: 0.55; }
+.grid-sel { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; color: var(--text); padding: 0.2rem 0.3rem; font-size: 0.76rem; }
 .loopregion { position: absolute; top: 0; height: 100%; background: rgba(108,92,255,0.22); border-left: 2px solid var(--accent); border-right: 2px solid var(--accent); }
 
 .tl-body { display: flex; min-height: 0; }

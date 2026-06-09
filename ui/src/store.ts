@@ -8,6 +8,7 @@ import type {
   BuiltinPlugin, AvailableColor, RenderQA,
 } from "./types";
 import type { RemoteStatus } from "./bridge";
+import { type SnapDiv, snapStep, meterFrom } from "./time";
 
 export type Tool = "move" | "split";
 export type Peaks = [number, number][];
@@ -22,7 +23,8 @@ type State = {
   pxPerSec: number;
   tool: Tool;
   snap: boolean;
-  snapGrid: number; // seconds
+  snapDivision: SnapDiv; // musical grid resolution (bar, 1/4, 1/8, …)
+  laneHeight: number;    // track-lane height in px (vertical zoom)
   selection: Set<string>;
   peaks: Record<string, Peaks>;
 
@@ -47,6 +49,8 @@ type State = {
   setPxPerSec: (v: number) => void;
   setTool: (t: Tool) => void;
   setSnap: (b: boolean) => void;
+  setSnapDivision: (d: SnapDiv) => void;
+  setLaneHeight: (h: number) => void;
   select: (ids: string[], additive?: boolean) => void;
   clearSelection: () => void;
   snapTime: (t: number) => number;
@@ -70,7 +74,8 @@ export const useStore = create<State>((set, get) => ({
   pxPerSec: 80,
   tool: "move",
   snap: true,
-  snapGrid: 0.25,
+  snapDivision: "1/4",
+  laneHeight: 84,
   selection: new Set<string>(),
   peaks: {},
   selectedTrackId: null,
@@ -151,6 +156,8 @@ export const useStore = create<State>((set, get) => ({
   setPxPerSec: (v) => set({ pxPerSec: Math.max(20, Math.min(400, v)) }),
   setTool: (t) => set({ tool: t }),
   setSnap: (b) => set({ snap: b }),
+  setSnapDivision: (d) => set({ snapDivision: d }),
+  setLaneHeight: (h) => set({ laneHeight: Math.max(48, Math.min(220, h)) }),
   select: (ids, additive = false) =>
     set((s) => {
       const next = new Set(additive ? s.selection : []);
@@ -159,8 +166,10 @@ export const useStore = create<State>((set, get) => ({
     }),
   clearSelection: () => set({ selection: new Set<string>() }),
   snapTime: (t) => {
-    const { snap, snapGrid } = get();
-    return snap ? Math.round(t / snapGrid) * snapGrid : t;
+    const { snap, snapDivision, snapshot } = get();
+    if (!snap) return t;
+    const step = snapStep(meterFrom(snapshot?.session), snapDivision);
+    return step > 0 ? Math.round(t / step) * step : t;
   },
 
   ensurePeaks: (clipId) => {

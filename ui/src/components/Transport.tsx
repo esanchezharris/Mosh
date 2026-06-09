@@ -1,4 +1,5 @@
 import { useStore } from "../store";
+import { meterFrom, secondsToBBS } from "../time";
 
 function fmt(t: number): string {
   const s = Math.max(0, t);
@@ -67,7 +68,10 @@ export function Transport() {
         ♩
       </button>
 
-      <span className="pos">{fmt(t?.position ?? 0)}</span>
+      <span className="pos" title="Position (min:sec)">{fmt(t?.position ?? 0)}</span>
+      <span className="pos bbs" title="Position (bars.beats.sixteenths)">
+        {secondsToBBS(t?.position ?? 0, meterFrom(session))}
+      </span>
 
       <label className="tempo" title="Tempo (BPM)">
         <input

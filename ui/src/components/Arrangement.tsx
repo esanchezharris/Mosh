@@ -2,12 +2,13 @@ import { useRef, useState } from "react";
 import { useStore } from "../store";
 import type { Snapshot, Track } from "../types";
 import { Clip } from "./Clip";
+import { meterFrom, barSeconds, beatSeconds, SNAP_DIVISIONS } from "../time";
 
-const LANE_H = 84;
 const RULER_SECONDS = 48;
 
 export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
   const pxPerSec = useStore((s) => s.pxPerSec);
+  const laneHeight = useStore((s) => s.laneHeight);
   const exec = useStore((s) => s.exec);
   const clearSelection = useStore((s) => s.clearSelection);
   const select = useStore((s) => s.select);
@@ -15,6 +16,12 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
   const lanesRef = useRef<HTMLDivElement>(null);
   const [marquee, setMarquee] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const loopDrag = useRef<number | null>(null);
+
+  const LANE_H = laneHeight;
+  const m = meterFrom(snapshot.session);
+  const barSec = barSeconds(m);
+  const beatSec = beatSeconds(m);
+  const numBars = Math.max(1, Math.ceil(RULER_SECONDS / barSec) + 1);
 
   const seekRuler = (e: React.MouseEvent, el: Element) => {
     const rect = el.getBoundingClientRect();
@@ -75,6 +82,9 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
     setMarquee(null);
   };
 
+  const rulerWidth = RULER_SECONDS * pxPerSec;
+  const lanesHeight = Math.max(LANE_H, snapshot.tracks.length * LANE_H);
+
   return (
     <div className="arrange">
       <Toolbar />
@@ -83,17 +93,29 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
           <div className="lane-gutter">tracks</div>
           <div
             className="ruler"
-            style={{ width: RULER_SECONDS * pxPerSec }}
+            style={{ width: rulerWidth }}
             onClick={(e) => !e.shiftKey && seekRuler(e, e.currentTarget)}
             onPointerDown={onRulerDown}
             onPointerMove={onRulerMove}
             onPointerUp={onRulerUp}
           >
-            {Array.from({ length: RULER_SECONDS }, (_, i) => (
-              <div className="tick" key={i} style={{ left: i * pxPerSec }}>
-                <span>{i}</span>
+            {Array.from({ length: numBars }, (_, b) => (
+              <div className="tick bar" key={`bar-${b}`} style={{ left: b * barSec * pxPerSec }}>
+                <span>{b + 1}</span>
               </div>
             ))}
+            {numBars * m.num < 400 &&
+              Array.from({ length: numBars }, (_, b) =>
+                Array.from({ length: m.num }, (_, beat) =>
+                  beat === 0 ? null : (
+                    <div
+                      className="tick beat"
+                      key={`beat-${b}-${beat}`}
+                      style={{ left: (b * m.num + beat) * beatSec * pxPerSec }}
+                    />
+                  )
+                )
+              )}
             {t.looping && t.loopEnd > t.loopStart && (
               <div
                 className="loopregion"
@@ -107,28 +129,34 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
         <div className="tl-body">
           <div className="heads">
             {snapshot.tracks.map((tr) => (
-              <TrackHeader key={tr.id} track={tr} />
+              <TrackHeader key={tr.id} track={tr} laneH={LANE_H} />
             ))}
           </div>
           <div
             className="lanes"
             ref={lanesRef}
-            style={{ width: RULER_SECONDS * pxPerSec, height: Math.max(LANE_H, snapshot.tracks.length * LANE_H) }}
+            style={{ width: rulerWidth, height: lanesHeight, ["--lane-h" as string]: `${LANE_H}px` } as React.CSSProperties}
             onPointerDown={onLanesDown}
             onPointerMove={onLanesMove}
             onPointerUp={onLanesUp}
           >
+            {/* Musical gridlines (bar lines bright, beats faint) — same mapping as the ruler. */}
+            <div className="gridlines" style={{ height: lanesHeight }}>
+              {Array.from({ length: numBars }, (_, b) => (
+                <div className="gl bar" key={`glb-${b}`} style={{ left: b * barSec * pxPerSec }} />
+              ))}
+            </div>
             {snapshot.tracks.length === 0 && (
               <div className="empty-hint">No tracks yet — add a track or drop in a test tone.</div>
             )}
             {snapshot.tracks.map((tr, row) => (
               <div className="lane" key={tr.id} style={{ top: row * LANE_H, height: LANE_H }}>
                 {tr.clips.map((c) => (
-                  <Clip key={c.id} clip={c} />
+                  <Clip key={c.id} clip={c} laneH={LANE_H} />
                 ))}
               </div>
             ))}
-            <div className="playhead lane-ph" style={{ left: t.position * pxPerSec, height: Math.max(LANE_H, snapshot.tracks.length * LANE_H) }} />
+            <div className="playhead lane-ph" style={{ left: t.position * pxPerSec, height: lanesHeight }} />
             {marquee && (
               <div
                 className="marquee"
@@ -153,8 +181,12 @@ function Toolbar() {
   const setTool = useStore((s) => s.setTool);
   const snap = useStore((s) => s.snap);
   const setSnap = useStore((s) => s.setSnap);
+  const snapDivision = useStore((s) => s.snapDivision);
+  const setSnapDivision = useStore((s) => s.setSnapDivision);
   const pxPerSec = useStore((s) => s.pxPerSec);
   const setPxPerSec = useStore((s) => s.setPxPerSec);
+  const laneHeight = useStore((s) => s.laneHeight);
+  const setLaneHeight = useStore((s) => s.setLaneHeight);
 
   return (
     <div className="toolbar">
@@ -164,10 +196,22 @@ function Toolbar() {
       <span className="sep" />
       <button className={tool === "move" ? "on" : ""} onClick={() => setTool("move")}>Move</button>
       <button className={tool === "split" ? "on" : ""} onClick={() => setTool("split")}>Split</button>
-      <button className={snap ? "on" : ""} onClick={() => setSnap(!snap)}>Snap</button>
+      <button className={snap ? "on" : ""} onClick={() => setSnap(!snap)} title="Snap to grid">Snap</button>
+      <select
+        className="grid-sel"
+        value={snapDivision}
+        onChange={(e) => setSnapDivision(e.target.value as typeof snapDivision)}
+        title="Grid resolution"
+      >
+        {SNAP_DIVISIONS.map((d) => (
+          <option key={d} value={d}>{d === "bar" ? "Bar" : d}</option>
+        ))}
+      </select>
       <span className="sep" />
-      <button onClick={() => setPxPerSec(pxPerSec / 1.4)}>Zoom −</button>
-      <button onClick={() => setPxPerSec(pxPerSec * 1.4)}>Zoom +</button>
+      <button onClick={() => setPxPerSec(pxPerSec / 1.4)} title="Zoom out (time)">⇤⇥</button>
+      <button onClick={() => setPxPerSec(pxPerSec * 1.4)} title="Zoom in (time)">⇥⇤</button>
+      <button onClick={() => setLaneHeight(laneHeight - 18)} title="Shorter tracks">⇟</button>
+      <button onClick={() => setLaneHeight(laneHeight + 18)} title="Taller tracks">⇞</button>
       <span className="sep" />
       <button onClick={() => exec("undo", {})}>↶ Undo</button>
       <button onClick={() => exec("redo", {})}>↷ Redo</button>
@@ -178,15 +222,15 @@ function Toolbar() {
   );
 }
 
-function TrackHeader({ track }: { track: Track }) {
+function TrackHeader({ track, laneH }: { track: Track; laneH: number }) {
   const exec = useStore((s) => s.exec);
   const selectedTrackId = useStore((s) => s.selectedTrackId);
   const setSelectedTrack = useStore((s) => s.setSelectedTrack);
-  const fxCount = (track.plugins ?? []).filter((p) => p.external || p.neural).length;
+  const fxCount = (track.plugins ?? []).filter((p) => p.external || p.neural || p.builtin).length;
   return (
     <div
       className={`track-head ${selectedTrackId === track.id ? "sel" : ""}`}
-      style={{ height: LANE_H }}
+      style={{ height: laneH }}
       onPointerDown={() => setSelectedTrack(track.id)}
     >
       <div className="th-row">

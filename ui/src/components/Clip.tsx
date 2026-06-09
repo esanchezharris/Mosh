@@ -6,10 +6,10 @@ import { Waveform } from "./Waveform";
 type Pos = { start: number; length: number; offset: number };
 type DragKind = "move" | "trim-l" | "trim-r" | null;
 
-const LANE_H = 84;
 const CLIP_PAD = 8;
 
-export function Clip({ clip }: { clip: ClipT }) {
+export function Clip({ clip, laneH }: { clip: ClipT; laneH: number }) {
+  const LANE_H = laneH;
   const pxPerSec = useStore((s) => s.pxPerSec);
   const tool = useStore((s) => s.tool);
   const snapTime = useStore((s) => s.snapTime);
