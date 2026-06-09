@@ -275,6 +275,20 @@ Research confirmed the **hosting** half already works — `JUCE_PLUGINHOST_AU=1`
 
 **Shipped-on-both-axes: 83 → 85** (must-tier 69 → 71). The audio thread count is a real, live-applied setting and users can browse the filesystem for audio — closing the last of the requested polish / hardware / advanced waves.
 
+### 2026-06-09 · Engine patch — itemID allocator (the last known assertion) ✅
+
+Root-caused and fixed the one non-fatal `jassert` (`tracktion_EditItem.h:133`) that surfaced
+in the Stage-3 plugin-load path: `Edit::createNewItemID()` scanned only the track + clip
+caches, so a plugin ID held only in `automatableEditItemCache` (reconstructed on reload, or
+outliving removal via the undo stack) could be reused → a duplicate `addItem` (and, in a
+*release* build, a silently overwritten `itemID → item` map — a real latent correctness bug,
+not just a debug nuisance). Fixed at the root: a 9-line additive patch making the allocator
+scan **all** `EditItem` caches, shipped reproducibly as `patches/0001-…patch` applied via a
+`PATCH_COMMAND` in `cmake/Dependencies.cmake` (not a fragile `.cpm-cache` hand-edit). Added a
+load→save→reload→remove→load regression guard to `--selftest`. Verified: **`--selftest`
+assertion count 1 → 0**, 451/451 checks, 0 failed. The DAW now self-tests with **zero**
+assertions.
+
 ## Coverage by category
 
 Per axis the three counts are **present ✓ / partial ◐ / missing ✗** (missing also folds in the one `not_applicable`).

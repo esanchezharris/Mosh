@@ -1973,6 +1973,39 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                "mosh-log.jsonl contains NO get_command_log token (read-only confirmed at the file)");
     }
 
+    // ─── itemID-allocator regression (engine patch: createNewItemID scans ALL caches) ───
+    // Before the patch, this load -> save -> reload -> remove -> load sequence could hand
+    // the second plugin an itemID still held by the first in automatableEditItemCache ->
+    // EditItemCache::addItem jassert (and a silently overwritten itemID->item map in
+    // release). The BINDING proof is the run-wide JUCE-Assertion count being 0
+    // (Mosh --selftest 2>&1 | grep -c 'JUCE Assertion'); here we assert the sequence runs
+    // clean as a regression guard.
+    std::cerr << "--- itemID allocator regression (engine patch) ---\n";
+    {
+        auto findIdByName = [&] (const juce::String& nm) -> juce::String {
+            auto snap = ops.snapshot();
+            auto tv = snap.getProperty ("tracks", var());
+            if (auto* arr = tv.getArray())
+                for (auto& tr : *arr)
+                    if (tr.getProperty ("name", var()).toString() == nm)
+                        return tr.getProperty ("id", var()).toString();
+            return {};
+        };
+        check (ok (cmd (ops, "create_track", args1 ("name", "IdProbe"))), "id-probe: create_track ok");
+        const auto pid = findIdByName ("IdProbe");
+        check (pid.isNotEmpty(), "id-probe: found the probe track");
+        check (ok (cmd (ops, "load_builtin", objN ({{ "trackId", pid }, { "type", "4bandEq" }}))),
+               "id-probe: load built-in effect ok");
+        check (ok (cmd (ops, "save")),   "id-probe: save ok");
+        check (ok (cmd (ops, "reload")), "id-probe: reload ok");
+        const auto pid2 = findIdByName ("IdProbe");   // track itemID persists across reload
+        check (pid2.isNotEmpty(), "id-probe: probe track survived reload");
+        check (ok (cmd (ops, "remove_plugin", objN ({{ "trackId", pid2 }, { "index", 0 }}))),
+               "id-probe: remove_plugin ok");
+        check (ok (cmd (ops, "load_builtin", objN ({{ "trackId", pid2 }, { "type", "compressor" }}))),
+               "id-probe: load a second plugin after remove (no duplicate-itemID assert)");
+    }
+
     std::cerr << "===== " << (checks - failures) << "/" << checks
               << " checks passed, " << failures << " failed =====\n\n";
     return failures;
