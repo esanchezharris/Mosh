@@ -112,6 +112,9 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "import_clip")       return cmdImportClip (args);
     if (name == "add_test_tone_clip")return cmdAddTestTone (args);
     if (name == "set_transport")     return cmdSetTransport (args);
+    if (name == "set_tempo")         return cmdSetTempo (args);
+    if (name == "set_time_signature")return cmdSetTimeSignature (args);
+    if (name == "set_metronome")     return cmdSetMetronome (args);
     if (name == "undo")              return cmdUndo (args);
     if (name == "redo")              return cmdRedo (args);
     if (name == "save")              return cmdSave (args);
@@ -285,6 +288,11 @@ juce::var MoshOps::cmdSetTransport (const juce::var& args)
         transport.record (false);
     }
 
+    if (action == "to_end")
+        transport.setPosition (tracktion::TimePosition::fromSeconds (eng.edit().getLength().inSeconds()));
+    else if (action == "to_start")
+        transport.setPosition (tracktion::TimePosition());
+
     if (args.hasProperty ("position"))
         transport.setPosition (tracktion::TimePosition::fromSeconds ((double) args.getProperty ("position", 0.0)));
 
@@ -298,6 +306,56 @@ juce::var MoshOps::cmdSetTransport (const juce::var& args)
     logLine ("set_transport", args, true, {}, false);          // transport is NOT undoable
     emit ("transport", transportToVar());
     return okResult ("set_transport", transportToVar());
+}
+
+juce::var MoshOps::cmdSetTempo (const juce::var& args)
+{
+    auto& edit = eng.edit();
+    auto* tempo = edit.tempoSequence.getNumTempos() > 0 ? edit.tempoSequence.getTempo (0) : nullptr;
+    if (tempo == nullptr) return errResult ("set_tempo", "no tempo setting");
+
+    const double bpm = juce::jlimit (20.0, 999.0, (double) args.getProperty ("bpm", 120.0));
+    undoManager().beginNewTransaction ("set_tempo");
+    tempo->setBpm (bpm);
+    logLine ("set_tempo", args, true, {}, true);
+    emitSnapshotInvalidated();
+    auto* data = new DynamicObject(); data->setProperty ("bpm", tempo->getBpm());
+    return okResult ("set_tempo", var (data));
+}
+
+juce::var MoshOps::cmdSetTimeSignature (const juce::var& args)
+{
+    auto& edit = eng.edit();
+    auto* ts = edit.tempoSequence.getTimeSig (0);
+    if (ts == nullptr) return errResult ("set_time_signature", "no time signature");
+
+    const int num = juce::jlimit (1, 32, (int) args.getProperty ("numerator", 4));
+    const int den = (int) args.getProperty ("denominator", 4);
+    static const int validDen[] = { 1, 2, 4, 8, 16, 32 };
+    bool denOk = false;
+    for (int d : validDen) if (d == den) denOk = true;
+    if (! denOk) return errResult ("set_time_signature", "denominator must be a power of two (1..32)");
+
+    undoManager().beginNewTransaction ("set_time_signature");
+    ts->setStringTimeSig (juce::String (num) + "/" + juce::String (den));
+    logLine ("set_time_signature", args, true, {}, true);
+    emitSnapshotInvalidated();
+    auto* data = new DynamicObject();
+    data->setProperty ("numerator", ts->numerator.get());
+    data->setProperty ("denominator", ts->denominator.get());
+    return okResult ("set_time_signature", var (data));
+}
+
+juce::var MoshOps::cmdSetMetronome (const juce::var& args)
+{
+    // The click track is a transport/monitoring preference (like loop), not a
+    // session edit — not undoable.
+    const bool on = (bool) args.getProperty ("enabled", false);
+    eng.edit().clickTrackEnabled = on;
+    logLine ("set_metronome", args, true, {}, false);
+    emitSnapshotInvalidated();
+    auto* data = new DynamicObject(); data->setProperty ("metronome", on);
+    return okResult ("set_metronome", var (data));
 }
 
 juce::var MoshOps::cmdUndo (const juce::var& args)
@@ -1332,6 +1390,13 @@ juce::var MoshOps::snapshot()
     auto* session = new DynamicObject();
     session->setProperty ("sampleRate", eng.engine().getDeviceManager().getSampleRate());
     session->setProperty ("tempo", edit.tempoSequence.getBpmAt (tracktion::TimePosition()));
+    if (auto* ts = edit.tempoSequence.getTimeSig (0))
+    {
+        session->setProperty ("timeSigNumerator", ts->numerator.get());
+        session->setProperty ("timeSigDenominator", ts->denominator.get());
+    }
+    session->setProperty ("metronome", edit.clickTrackEnabled.get());
+    session->setProperty ("length", edit.getLength().inSeconds());
     session->setProperty ("editFile", eng.editFile().getFullPathName());
 
     Array<var> tracks;

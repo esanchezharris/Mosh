@@ -334,6 +334,42 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         }
     }
 
+    // ─── Wave 2: tempo / time-signature / metronome / record / navigation ───
+    std::cerr << "--- Wave 2: tempo / meter / metronome / nav ---\n";
+    {
+        auto sess = [&] { return ops.snapshot().getProperty ("session", var()); };
+
+        // Tempo control.
+        check (ok (cmd (ops, "set_tempo", args1 ("bpm", 140.0))), "set_tempo ok");
+        check (std::abs ((double) sess().getProperty ("tempo", 0.0) - 140.0) < 0.5, "snapshot tempo reflects set_tempo");
+        cmd (ops, "set_tempo", args1 ("bpm", 99999.0));
+        check ((double) sess().getProperty ("tempo", 0.0) <= 999.0, "set_tempo clamps absurd BPM to <= 999");
+
+        // Time signature.
+        check (ok (cmd (ops, "set_time_signature", objN ({{ "numerator", 3 }, { "denominator", 4 }}))), "set_time_signature ok");
+        check ((int) sess().getProperty ("timeSigNumerator", 0) == 3, "snapshot numerator == 3");
+        check ((int) sess().getProperty ("timeSigDenominator", 0) == 4, "snapshot denominator == 4");
+        check (! ok (cmd (ops, "set_time_signature", objN ({{ "numerator", 4 }, { "denominator", 5 }}))), "set_time_signature rejects non-power-of-two denominator");
+
+        // Metronome toggle.
+        cmd (ops, "set_metronome", args1 ("enabled", true));
+        check ((bool) sess().getProperty ("metronome", false), "metronome enabled in snapshot");
+        cmd (ops, "set_metronome", args1 ("enabled", false));
+        check (! (bool) sess().getProperty ("metronome", true), "metronome disabled in snapshot");
+
+        // Navigation: go-to-end / go-to-start.
+        const double len = (double) sess().getProperty ("length", 0.0);
+        cmd (ops, "set_transport", args1 ("action", "to_end"));
+        const double endPos = (double) ops.snapshot()["transport"].getProperty ("position", -1.0);
+        check (len > 0.0 && std::abs (endPos - len) < 0.05, "to_end moves the playhead to the edit length");
+        cmd (ops, "set_transport", args1 ("action", "to_start"));
+        check ((double) ops.snapshot()["transport"].getProperty ("position", -1.0) < 0.01, "to_start returns the playhead to 0");
+
+        // Leave a clean musical default for later stages.
+        cmd (ops, "set_tempo", args1 ("bpm", 120.0));
+        cmd (ops, "set_time_signature", objN ({{ "numerator", 4 }, { "denominator", 4 }}));
+    }
+
     // ─── Wave 1: engine built-in plugin palette (effects + instruments) ───
     std::cerr << "--- Wave 1: built-in plugin palette ---\n";
     {

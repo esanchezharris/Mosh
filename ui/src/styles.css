@@ -89,7 +89,17 @@ button.on { border-color: var(--accent); color: var(--accent); background: #2120
 .tbtn.play { color: var(--ok); }
 .tbtn.stop { color: var(--playhead); }
 .tbtn.toggle.on { border-color: var(--accent); color: var(--accent); background: #21203a; }
+.tbtn.rec { color: var(--muted); }
+.tbtn.rec.on { color: #fff; border-color: var(--playhead); background: var(--playhead); box-shadow: 0 0 8px var(--playhead); }
 .pos { margin-left: 0.5rem; font-variant-numeric: tabular-nums; font-size: 1rem; color: var(--muted); min-width: 76px; text-align: right; }
+
+/* Tempo + time-signature (Wave 2) */
+.tempo, .timesig { display: flex; align-items: center; gap: 3px; font-size: 0.8rem; color: var(--muted); }
+.tempo input, .timesig input { width: 44px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; color: var(--text); padding: 0.25rem 0.3rem; font-variant-numeric: tabular-nums; }
+.timesig input { width: 34px; }
+.timesig select { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; color: var(--text); padding: 0.25rem 0.2rem; }
+.tempo .unit { letter-spacing: 0.04em; }
+.timesig .slash { opacity: 0.7; }
 
 .error-bar { background: #3a1320; color: var(--warn); padding: 0.4rem 1rem; border-bottom: 1px solid var(--line); font-size: 0.85rem; }
 

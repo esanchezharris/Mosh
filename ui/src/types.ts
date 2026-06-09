@@ -107,7 +107,15 @@ export type Transport = {
 
 export type Snapshot = {
   schemaVersion: number;
-  session: { sampleRate: number; tempo: number; editFile: string };
+  session: {
+    sampleRate: number;
+    tempo: number;
+    timeSigNumerator?: number;
+    timeSigDenominator?: number;
+    metronome?: boolean;
+    length?: number;
+    editFile: string;
+  };
   tracks: Track[];
   transport: Transport;
 };

@@ -45,6 +45,9 @@ private:
     juce::var cmdImportClip     (const juce::var& args);
     juce::var cmdAddTestTone    (const juce::var& args);
     juce::var cmdSetTransport   (const juce::var& args);
+    juce::var cmdSetTempo       (const juce::var& args);
+    juce::var cmdSetTimeSignature (const juce::var& args);
+    juce::var cmdSetMetronome   (const juce::var& args);
     juce::var cmdUndo           (const juce::var& args);
     juce::var cmdRedo           (const juce::var& args);
     juce::var cmdSave           (const juce::var& args);

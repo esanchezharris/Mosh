@@ -29,6 +29,23 @@ _Features moved since the baseline audit. The tables below still show the origin
 
 **Shipped-on-both-axes: 24 → 32** (must-tier 18 → 21). Also nudged `INS-005` (plugin management — palette now listed), `AED-008` (pitch-shift available as an insert), `FX-009` (utility filter) toward partial. **Product fix along the way:** none required — `load_builtin`/`remove_track` reuse proven paths.
 
+### 2026-06-09 · Wave 2 — Transport / tempo / meter / metronome / record surface ✅
+
+The audit's #1 leverage wave: musical-time controls that unblock the grid. New commands `set_tempo`, `set_time_signature`, `set_metronome` + a `to_end`/`to_start` transport action; snapshot `session` now carries `timeSigNumerator`/`timeSigDenominator`/`metronome`/`length`. Transport bar gains an editable BPM field, a time-signature control, a metronome toggle, a record button (red while recording), and go-to-end. Verified: `Mosh --selftest` **122/122**, 0 assertions.
+
+| ID | Tier | Feature | Before → After |
+|---|---|---|---|
+| `TRA-006` | must | Tempo control | ◐/✗ → ✓/✓ |
+| `TMP-001` | must | Fixed project tempo | ◐/✗ → ✓/✓ |
+| `TRA-007` | must | Time signature | ✗/✗ → ✓/✓ |
+| `TRA-008` | must | Metronome / click | ✗/✗ → ✓/✓ |
+| `TRA-004` | must | Return to start / go to end | ✓/◐ → ✓/✓ |
+| `TRA-002` | must | Record (button + indicator) | ✓/✗ → ◐/✓ * |
+
+\* TRA-002: the record transport control + recording indicator are now present; full capture (record-arm + input monitoring + take landing) is Wave 3.
+
+**Shipped-on-both-axes: 32 → 37** (must-tier 21 → 26). The musical-time foundation for the bars&beats grid (next wave) is now in place.
+
 ## Coverage by category
 
 Per axis the three counts are **present ✓ / partial ◐ / missing ✗** (missing also folds in the one `not_applicable`).
