@@ -2028,13 +2028,92 @@ juce::var MoshOps::cmdBounceLayerToClip (const juce::var& args)
 juce::var MoshOps::cmdExportAudio (const juce::var& args)
 {
     auto& edit = eng.edit();
+
+    // ── Format / extension resolution ────────────────────────────────────────
+    // The UI speaks generic media-format names ("wav"/"aiff"/"flac"), never engine
+    // type names. Resolve them through the Engine's AudioFileFormatManager (the
+    // robust path: per-format getters + getFormatFromFileName), and FALL BACK to
+    // the default WAV format on anything unknown. An explicitly-requested-but-
+    // unsupported format is a hard error (caught before any render).
+    auto& afm = edit.engine.getAudioFileFormatManager();
+
+    const auto requestedFormat = args.getProperty ("format", var()).toString().trim().toLowerCase();
+
+    // Map a format keyword -> (juce::AudioFormat*, canonical extension). Empty
+    // keyword means "infer from the destination file extension" below.
+    struct FormatChoice { juce::AudioFormat* format = nullptr; juce::String extension; };
+    auto formatForKeyword = [&afm] (const juce::String& kw) -> FormatChoice
+    {
+        if (kw == "wav")  return { afm.getWavFormat(),  ".wav" };
+        if (kw == "aiff" || kw == "aif") return { afm.getAiffFormat(), ".aiff" };
+        if (kw == "flac") return { afm.getFlacFormat(), ".flac" };
+        return {};
+    };
+
+    if (requestedFormat.isNotEmpty() && formatForKeyword (requestedFormat).format == nullptr)
+        return errResult ("export_audio", "unsupported format: " + requestedFormat
+                          + " (supported: wav, aiff, flac)");
+
     auto file = args.getProperty ("file", var()).toString().isNotEmpty()
                     ? juce::File (args.getProperty ("file", var()).toString())
                     : eng.sessionDir().getChildFile ("exports")
                           .getChildFile ("mix-" + String (Time::getCurrentTime().toMilliseconds()))
                           .withFileExtension ("wav");
+
+    // Choose the format: explicit keyword wins; otherwise infer from the file
+    // extension; otherwise the default WAV. Then force the destination extension
+    // to match the chosen format so the bytes and the name agree.
+    juce::AudioFormat* audioFormat = nullptr;
+    juce::String formatName = "wav";
+    if (requestedFormat.isNotEmpty())
+    {
+        auto choice = formatForKeyword (requestedFormat);
+        audioFormat = choice.format;
+        formatName = requestedFormat == "aif" ? "aiff" : requestedFormat;
+        file = file.withFileExtension (choice.extension);
+    }
+    else
+    {
+        const auto ext = file.getFileExtension().toLowerCase();
+        if (ext == ".wav")       { audioFormat = afm.getWavFormat();  formatName = "wav"; }
+        else if (ext == ".aiff" || ext == ".aif") { audioFormat = afm.getAiffFormat(); formatName = "aiff"; file = file.withFileExtension (".aiff"); }
+        else if (ext == ".flac") { audioFormat = afm.getFlacFormat(); formatName = "flac"; }
+        else if (ext == ".mid")  { audioFormat = afm.getDefaultFormat(); formatName = "mid"; }
+        else { audioFormat = afm.getDefaultFormat(); formatName = "wav"; file = file.withFileExtension (".wav"); }
+    }
+    if (audioFormat == nullptr)   // belt-and-braces: never render with a null format
+        audioFormat = afm.getDefaultFormat();
+
     file.getParentDirectory().createDirectory();
     file.deleteFile();
+
+    // ── Bit depth ────────────────────────────────────────────────────────────
+    // Validate the requested depth against what this format can actually write
+    // (getPossibleBitDepths). Reject an unsupported depth rather than silently
+    // writing the wrong one. Absent -> 24 (or the format's nearest supported).
+    int bitDepth = 24;
+    {
+        auto depths = audioFormat->getPossibleBitDepths();   // local copy of the Array<int>
+        const bool depthRequested = args.hasProperty ("bitDepth");
+        if (depthRequested)
+        {
+            bitDepth = (int) args.getProperty ("bitDepth", 24);
+            if (! depths.contains (bitDepth))
+            {
+                juce::StringArray supported;
+                for (auto d : depths) supported.add (String (d));
+                return errResult ("export_audio", "format " + formatName + " does not support bit depth "
+                                  + String (bitDepth) + " (supported: " + supported.joinIntoString (", ") + ")");
+            }
+        }
+        else if (! depths.isEmpty() && ! depths.contains (bitDepth))
+        {
+            // Nearest supported to the 24-bit default.
+            int best = depths[0];
+            for (auto d : depths) if (std::abs (d - 24) < std::abs (best - 24)) best = d;
+            bitDepth = best;
+        }
+    }
 
     const auto requestedMode = args.getProperty ("renderMode", "auto").toString().toLowerCase();
     if (requestedMode != "auto" && requestedMode != "fast" && requestedMode != "realtime")
@@ -2060,19 +2139,34 @@ juce::var MoshOps::cmdExportAudio (const juce::var& args)
 
     // Render exclusivity (01 §5): detach the Edit from the device before an
     // offline/realtime export render (asserts otherwise). No-op when no device
-    // is attached.
+    // is attached. Tear down our level-meter taps first (the master tap lives on
+    // the playback context we are about to free) and clear lastSeenContext so the
+    // master meter re-attaches to the *next* context rather than an ABA-reused
+    // address — same swap guard cmdNewProject/cmdOpenProject use.
+    unregisterAllMeterClients();           // master tap follows the context being freed
     edit.getTransport().stop (false, false);
     edit.getTransport().freePlaybackContext();
+    lastSeenContext = nullptr;             // old ctx freed; force master-meter re-attach to the next ctx
 
     const double len = juce::jmax (0.1, edit.getLength().inSeconds());
 
+    // Sample rate: honor a valid explicit request (>= 7000), else the device rate
+    // with the existing 44100 fallback.
+    double sampleRate = edit.engine.getDeviceManager().getSampleRate();
+    if (sampleRate < 7000.0)
+        sampleRate = 44100.0;
+    if (args.hasProperty ("sampleRate"))
+    {
+        const double reqSr = (double) args.getProperty ("sampleRate", sampleRate);
+        if (reqSr >= 7000.0)
+            sampleRate = reqSr;
+    }
+
     te::Renderer::Parameters params (edit);
     params.destFile = file;
-    params.audioFormat = edit.engine.getAudioFileFormatManager().getDefaultFormat();
-    params.bitDepth = 24;
-    params.sampleRateForAudio = edit.engine.getDeviceManager().getSampleRate();
-    if (params.sampleRateForAudio < 7000.0)
-        params.sampleRateForAudio = 44100.0;
+    params.audioFormat = audioFormat;
+    params.bitDepth = bitDepth;
+    params.sampleRateForAudio = sampleRate;
     params.blockSizeForAudio = edit.engine.getDeviceManager().getBlockSize();
     if (params.blockSizeForAudio <= 0)
         params.blockSizeForAudio = 512;
@@ -2118,6 +2212,12 @@ juce::var MoshOps::cmdExportAudio (const juce::var& args)
 
     auto* data = new DynamicObject();
     data->setProperty ("file", file.getFullPathName());
+    data->setProperty ("format", formatName);
+    if (formatName != "mid")   // bit depth / sample rate are meaningless for a MIDI export
+    {
+        data->setProperty ("bitDepth", bitDepth);
+        data->setProperty ("sampleRate", sampleRate);
+    }
     data->setProperty ("bytes", (juce::int64) file.getSize());
     data->setProperty ("seconds", len);
     data->setProperty ("renderModeRequested", requestedMode);

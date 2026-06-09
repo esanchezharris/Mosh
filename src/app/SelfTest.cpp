@@ -696,6 +696,53 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (trackById (mt).getProperty ("name", var()).toString() == "Mix", "undo reverted the rename");
         cmd (ops, "redo");
         check (trackById (mt).getProperty ("name", var()).toString() == "Master Bus", "redo restored the rename");
+
+        // --- IOX-002 / IOX-007: export format / bit-depth / sample-rate options ---
+        // Renders headless (no device) like the export above. Each check exercises the
+        // format-resolution + bit-depth-validation path, not just the happy WAV case.
+        std::cerr << "--- Export format / depth options (IOX-002, IOX-007) ---\n";
+        auto wavFile  = eng.sessionDir().getChildFile ("exports").getChildFile ("opt-test.wav");
+        auto aiffFile = eng.sessionDir().getChildFile ("exports").getChildFile ("opt-test.aiff");
+
+        auto expWav = cmd (ops, "export_audio", objN ({{ "file", wavFile.getFullPathName() },
+                                                       { "format", "wav" }, { "bitDepth", 16 }}));
+        check (ok (expWav), "export_audio wav 16-bit ok");
+        {
+            const auto outName = expWav["data"].getProperty ("file", var()).toString();
+            File out (outName);
+            check (out.existsAsFile() && out.getSize() > 0 && out.getFileExtension().toLowerCase() == ".wav",
+                   "wav export produced a non-empty .wav file");
+            check (expWav["data"].getProperty ("format", var()).toString() == "wav",
+                   "wav export reports format wav");
+            check ((int) expWav["data"].getProperty ("bitDepth", 0) == 16,
+                   "wav export reports bitDepth 16");
+        }
+
+        auto expAiff = cmd (ops, "export_audio", objN ({{ "file", aiffFile.getFullPathName() },
+                                                        { "format", "aiff" }, { "bitDepth", 24 }}));
+        check (ok (expAiff), "export_audio aiff 24-bit ok");
+        {
+            const auto outName = expAiff["data"].getProperty ("file", var()).toString();
+            File out (outName);
+            check (out.existsAsFile() && out.getSize() > 0 && out.getFileExtension().toLowerCase() == ".aiff",
+                   "aiff export produced a non-empty .aiff file");
+            check (expAiff["data"].getProperty ("format", var()).toString() == "aiff",
+                   "aiff export reports format aiff");
+            check ((int) expAiff["data"].getProperty ("bitDepth", 0) == 24,
+                   "aiff export reports bitDepth 24 (depth arg honored for non-wav)");
+        }
+
+        auto expBadFormat = cmd (ops, "export_audio", objN ({{ "file", wavFile.getFullPathName() },
+                                                             { "format", "mp3" }}));
+        check (! ok (expBadFormat), "export_audio rejects an unsupported format (mp3)");
+
+        auto expBadDepth = cmd (ops, "export_audio", objN ({{ "file", wavFile.getFullPathName() },
+                                                            { "format", "wav" }, { "bitDepth", 7 }}));
+        check (! ok (expBadDepth), "export_audio rejects an unsupported bit depth (wav 7)");
+
+        // Clean up the temp export files.
+        wavFile.deleteFile();
+        aiffFile.deleteFile();
     }
 
     std::cerr << "--- Serum render compatibility (optional local plugin gate) ---\n";

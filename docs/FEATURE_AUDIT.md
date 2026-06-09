@@ -191,6 +191,19 @@ The "feels like a real DAW" gap. One new backend command **`paste_clip`** (undoa
 
 **Shipped-on-both-axes: 70 → 72** (must-tier 56 → 58). Clip editing is now fast and conventional: select, copy/cut/paste/duplicate/delete by keyboard, transport and undo/redo without reaching for the mouse.
 
+### 2026-06-09 · Wave: Export dialog + format / bit-depth / sample-rate ✅
+
+`export_audio` rendered the whole mix but the button sent `{}`. It now honors **format** (wav/aiff/flac), **bitDepth**, and **sampleRate** (all optional; absent = WAV/24/device-rate). Format resolves through the engine's `AudioFileFormatManager` (per-format getters + destination-extension inference + WAV fallback), the destination extension is forced to match, and an unknown format **errors before any render** (no half-written file). Bit depth is validated against that format's `getPossibleBitDepths()` — an unsupported depth errors rather than writing a corrupt file. Export stays non-undoable (output op, no transaction). While here, closed the pre-existing master-meter ABA gap in export (`unregisterAllMeterClients()` + `lastSeenContext = nullptr` after `freePlaybackContext()`, matching the project-swap commands). UI: a new `ExportDialog` popover (modeled on Settings) — Choose… (reuses the existing `pickSaveFile` native fn), Format / Bit depth / Sample-rate selects, changing format updates the filename extension; replaces the bare Export button and keeps the `audioEnabled` gate. Verified: `Mosh --selftest` **299/299**, 0 assertions — wav@16 and aiff@24 each render a real non-empty file with the echoed format+depth (proves the args are honored, not hardcoded), and unsupported format/depth both error.
+
+| ID | Tier | Feature | Before → After |
+|---|---|---|---|
+| `IOX-002` | must | Export / bounce mixdown (dialog) | ✓/◐ → ✓/✓ |
+| `IOX-007` | must | Format / rate / depth options | ◐/✗ → ✓/✓ |
+
+The render path is headless-proven (`renderToFile` writes real wav/aiff files in the selftest); only the modal save-file dialog that picks the destination is GUI-gated (it reuses the same `pickSaveFile` already shipped in the settings wave). `export_audio` was extended, not added — command surface stays 81.
+
+**Shipped-on-both-axes: 72 → 74** (must-tier 58 → 60). The full producer loop now ends in a real bounce dialog: pick destination, format, depth, rate, export.
+
 ## Coverage by category
 
 Per axis the three counts are **present ✓ / partial ◐ / missing ✗** (missing also folds in the one `not_applicable`).

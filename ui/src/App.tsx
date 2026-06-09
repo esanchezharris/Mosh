@@ -10,6 +10,7 @@ import { PluginBrowser } from "./components/PluginBrowser";
 import { PianoRoll } from "./components/PianoRoll";
 import { AutomationPanel } from "./components/AutomationPanel";
 import { Settings } from "./components/Settings";
+import { ExportDialog } from "./components/ExportDialog";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 
 // Stage 1 UI: renders the MoshOps snapshot cold, drives every mutation through
@@ -20,7 +21,6 @@ export function App() {
   const init = useStore((s) => s.init);
   const snapshot = useStore((s) => s.snapshot);
   const lastError = useStore((s) => s.lastError);
-  const exec = useStore((s) => s.exec);
   const view = useStore((s) => s.view);
   const setView = useStore((s) => s.setView);
   const theme = useStore((s) => s.theme);
@@ -63,14 +63,7 @@ export function App() {
           <RemoteCompanion />
           {/* Reserved B-5 / Monster operator slot (deferred — empty in v0). */}
           <span className="b5-slot" title="B-5 / Monster — reserved (deferred)">B-5</span>
-          <button
-            className="tool-btn"
-            onClick={() => exec("export_audio", {})}
-            disabled={!audioEnabled}
-            title={audioEnabled ? "Export the mix to WAV" : "No audio device — export disabled"}
-          >
-            ⤓ Export
-          </button>
+          <ExportDialog audioEnabled={audioEnabled} />
           <button className="tool-btn" onClick={toggleTheme} title="Toggle theme">
             {theme === "dark" ? "☾" : "☀"}
           </button>

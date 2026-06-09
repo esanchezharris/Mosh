@@ -189,3 +189,15 @@ export type CommandResult<T = unknown> = {
 };
 
 export type MoshEvent = { type: string; payload?: unknown };
+
+// export_audio result data (IOX-002 / IOX-007). file/format/bitDepth/sampleRate
+// echo the resolved render settings; format is a generic media format keyword.
+export type ExportFormat = "wav" | "aiff" | "flac";
+export type ExportResult = {
+  file: string;
+  format: ExportFormat;
+  bitDepth: number;
+  sampleRate: number;
+  bytes: number;
+  renderMode: string;
+};
