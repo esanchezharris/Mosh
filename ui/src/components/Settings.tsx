@@ -169,8 +169,10 @@ export function Settings() {
             <div className="settings-readout">
               <span>Device</span><span>{session?.audioDeviceName || "—"}</span>
               <span>Bit depth</span><span>{session?.bitDepth ?? "—"}</span>
-              <span>Latency</span><span>{session?.outputLatencyMs != null ? `${session.outputLatencyMs.toFixed(1)} ms` : "—"}</span>
+              <span>Output latency</span><span>{session?.outputLatencyMs != null ? `${session.outputLatencyMs.toFixed(1)} ms` : "—"}</span>
+              <span>Round-trip</span><span>{session?.roundTripLatencyMs ? `${session.roundTripLatencyMs.toFixed(1)} ms` : "—"}</span>
             </div>
+            <div className="settings-hint">Monitoring is software (buffer-bounded); a smaller buffer size lowers the round-trip delay.</div>
             {session?.audioDeviceError ? (
               <div className="settings-deverr">{session.audioDeviceError}</div>
             ) : null}

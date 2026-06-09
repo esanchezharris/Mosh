@@ -117,6 +117,9 @@ export type Track = {
   armed?: boolean;
   monitor?: "off" | "automatic" | "on";
   hasInput?: boolean;
+  inputType?: "wave" | "midi";  // kind of the routed input (CTL-001)
+  midiInputName?: string;       // name of the routed MIDI input device, when inputType=="midi"
+  isInstrument?: boolean;       // hosts a synth/builtin instrument -> live MIDI armable (CTL-001)
   sends?: Send[];
   isReturn?: boolean;
   returnBus?: number;
@@ -177,6 +180,11 @@ export type Snapshot = {
     totalLatencySamples?: number;
     totalLatencyMs?: number;
     latencyContextReady?: boolean;
+    // Monitoring round-trip latency (MON-003): hardware input + output latency, i.e. the
+    // delay a performer hears through software input monitoring. 0 with no open device
+    // (show "—"). Smaller buffer size lowers it; monitoring is software-only.
+    roundTripLatencyMs?: number;
+    roundTripLatencySamples?: number;
     audioDeviceName?: string;
     audioDeviceError?: string;
   };

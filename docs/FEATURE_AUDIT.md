@@ -238,6 +238,19 @@ The first attempt (a native `juce::FileDragAndDropTarget` overlay) was caught in
 
 **Shipped-on-both-axes: 78 → 79** (must-tier 64 → 65). Import now works both ways — the Settings picker and a direct drag-and-drop onto the arrangement.
 
+### 2026-06-09 · Wave 16: MIDI controller input (CTL-001) + low-latency monitoring (MON-003) ✅
+
+Live play, built on the recording wave's input-routing pattern. The research established the key fact: a controller sounds an instrument track precisely when the track is **armed** under `automatic` monitor mode — `isLivePlayEnabled()` = `acceptsInput() && a dest targets the track && (monitor==on || (automatic && recordEnabled))` — so no separate end-to-end flag is needed. Two surgical changes: (1) `MoshEngine`'s one-time input latch now also enables every MIDI input (`setMonitorMode(automatic)` + `setEnabled(true)`), pumping the message loop (the `rescanMidiDeviceList` is async) before `restartPlayback()`; (2) `cmdArmTrack`'s auto-assign — which filtered to `waveDevice` only — is now MIDI-aware: a `trackHasInstrument()` helper makes arming an **instrument** track prefer a physical/virtual MIDI input. New read-only command **`list_midi_inputs`**; the snapshot exposes per-track MIDI-input state. **MON-003:** monitoring latency is governed by the buffer size (already user-controllable via `set_buffer_size`) + the monitor path; surfaced an honest round-trip latency readout (record adjustment + output latency). Verified: `Mosh --selftest` **380/380**, 0 failed, exactly 1 assertion (the known pre-existing Stage-3 itemID one — none added) — `list_midi_inputs` is read-only + reports the gate, `arm_track` (MIDI path) is graceful `applied:false` headless and logs `undoable:false`.
+
+| ID | Tier | Feature | Before → After |
+|---|---|---|---|
+| `CTL-001` | must | MIDI controller input | ✗/✗ → ✓/✓ * |
+| `MON-003` | must | Low-latency monitoring | ✗/✗ → ✓/✓ * |
+
+\* The command + enablement + routing + enumeration surface is headless-verified; the **live note flow** (controller → armed instrument → audible) needs the real device and is verified by the user with their keyboard. Single-controller routing (the common case) works; multi-controller disambiguation is a noted future enhancement.
+
+**Shipped-on-both-axes: 79 → 81** (must-tier 65 → 67). With a plugged-in interface, arming an instrument track now plays it live from a MIDI controller — the DAW responds to performance, not just the mouse.
+
 ## Coverage by category
 
 Per axis the three counts are **present ✓ / partial ◐ / missing ✗** (missing also folds in the one `not_applicable`).

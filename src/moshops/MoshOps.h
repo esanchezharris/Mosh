@@ -129,6 +129,7 @@ private:
     juce::var cmdExportAudio      (const juce::var& args);
     // Wave: settings — audio device picker + project lifecycle (both NON-undoable)
     juce::var cmdListAudioDevices (const juce::var& args);   // read-only (no log/transaction)
+    juce::var cmdListMidiInputs   (const juce::var& args);   // read-only MIDI-input enumeration (CTL-001)
     juce::var cmdGetCommandLog    (const juce::var& args);   // read-only (reads mosh-log.jsonl; NOT logged)
     juce::var cmdSetAudioDevice   (const juce::var& args);   // machine preference (undoable:false)
     juce::var cmdSetBufferSize    (const juce::var& args);   // thin wrapper over set_audio_device
@@ -153,6 +154,10 @@ private:
     te::VolumeAndPanPlugin* ensureVolumePlugin (te::AudioTrack&);
     te::AudioTrack* findTrack (const juce::String& id);
     te::Clip*       findClip  (const juce::String& id);
+    // True when the track hosts an instrument plugin (external synth or a builtin
+    // instrument) — the same test pluginToVar uses for the "isInstrument" flag.
+    // arm_track routes live MIDI (not wave) to such tracks (CTL-001).
+    bool            trackHasInstrument (te::AudioTrack&);
     te::Plugin*     findPlugin (const juce::String& trackId, int index);
     te::AutomatableParameter* findParam (const juce::var& args);
     te::AuxReturnPlugin* firstAuxReturnOn (te::AudioTrack&);

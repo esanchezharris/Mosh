@@ -101,6 +101,32 @@ void MoshEngine::ensurePlaybackContext()
                 wip->setMonitorMode (te::InputDevice::MonitorMode::automatic);
                 wip->setEnabled (true);
             }
+
+        // ── Live MIDI inputs (CTL-001) ──────────────────────────────────────
+        // Enable every physical/virtual MIDI input so a controller can drive an
+        // ARMED instrument track live (exactly the wave path, just the MIDI device
+        // family). Monitor=automatic matches the wave default: the synth only sounds
+        // when the track is armed (isLivePlayEnabled() == acceptsInput AND a dest
+        // targets the track AND (monitor==on OR (automatic AND recordEnabled))).
+        // setEnabled defaults true on the device ctor but loadMidiProps can override
+        // it from saved per-device engine props, so we set it unconditionally (a
+        // global engine pref via saveProps — correctly NON-undoable, like the wave
+        // path). This is the canonical MidiRecordingDemo enable-then-target sequence.
+        for (auto& mi : dm.getMidiInDevices())
+            if (mi != nullptr)
+            {
+                mi->setMonitorMode (te::InputDevice::MonitorMode::automatic);
+                mi->setEnabled (true);
+            }
+
+        // setEnabled(true) on a MIDI device calls dm.rescanMidiDeviceList() which is
+        // ASYNC (startTimer(5) -> timerCallback -> applyNewMidiDeviceList). Pump the
+        // message loop briefly so the rescan applies and EditPlaybackContext rebuilds
+        // its device list BEFORE restartPlayback(), otherwise the new MIDI instances
+        // would not yet appear in getAllInputDevices() and the route would race.
+        if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
+            mm->runDispatchLoopUntil (30);
+
         edit().restartPlayback();
     }
 }

@@ -1219,6 +1219,86 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         }
         check (armPref, "arm_track logged undoable:false (monitoring preference)");
         check (monPref, "set_input_monitor logged undoable:false (monitoring preference)");
+
+        // ── CTL-001: live MIDI controller -> armed instrument track ──
+        // Headless there is no MIDI input device enumerated (the engine only adds them
+        // once CoreAudio/MIDI is up + ensurePlaybackContext enables them, both audio-
+        // gated), so list_midi_inputs is a well-formed empty array and arming an
+        // instrument track is a graceful applied:false no-op. The actual note flow
+        // (controller -> armed synth -> audible audio) is HARDWARE-GATED (live verify).
+
+        // list_midi_inputs: read-only, ok, well-formed (possibly empty) array; NOT logged.
+        auto lmi = cmd (ops, "list_midi_inputs");
+        check (ok (lmi), "list_midi_inputs ok");
+        check (lmi["data"].getProperty ("inputs", var()).isArray(), "list_midi_inputs returns an inputs array");
+        check (lmi["data"].hasProperty ("audioEnabled"), "list_midi_inputs reports audioEnabled gate");
+        {
+            // Read-only: must not pollute the command log (mirrors list_audio_devices).
+            auto lg = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
+            check (! lg.contains ("list_midi_inputs"), "list_midi_inputs is not logged (read-only)");
+        }
+
+        // Build an INSTRUMENT track (4OSC builtin) — arm_track should target a MIDI
+        // input on it (vs a wave input on a plain track). Snapshot must report it.
+        auto it = cmd (ops, "create_track", args1 ("name", "Instrument"))["data"].getProperty ("trackId", var()).toString();
+        check (ok (cmd (ops, "load_builtin", objN ({{ "trackId", it }, { "type", "4osc" }}))), "load 4OSC instrument ok");
+        auto itv = trackById (it);
+        check ((bool) itv.getProperty ("isInstrument", false), "instrument track reports isInstrument:true");
+        check (itv.hasProperty ("inputType"), "snapshot track has inputType field");
+        check (itv.getProperty ("inputType", var()).toString() == "wave", "inputType defaults wave (no routed input headless)");
+
+        // A plain track (no synth) is NOT an instrument track. Use a freshly-created
+        // bare track (the earlier `rt` may have been undone away by an arm_track+undo
+        // probe above — arm is non-undoable so undo walks back to its create_track).
+        auto pt = cmd (ops, "create_track", args1 ("name", "Plain"))["data"].getProperty ("trackId", var()).toString();
+        check (! (bool) trackById (pt).getProperty ("isInstrument", true), "plain track reports isInstrument:false");
+
+        // arm_track on the instrument track: graceful no-op headless (no MIDI device).
+        eventTypes.clear();
+        auto ari = cmd (ops, "arm_track", objN ({{ "trackId", it }, { "armed", true }}));
+        check (ok (ari), "arm_track on instrument track ok (graceful)");
+        check (! (bool) ari["data"].getProperty ("applied", true), "arm_track instrument applied:false headless (no MIDI device)");
+        check (hadEvent ("snapshot_invalidated"), "arm_track (instrument) emitted snapshot_invalidated");
+        check (! (bool) trackById (it).getProperty ("armed", true), "instrument track still not armed headless (no MIDI instance)");
+
+        // Still a non-undoable preference on the MIDI path (no transaction pushed).
+        check (ok (cmd (ops, "arm_track", objN ({{ "trackId", it }, { "armed", false }}))), "arm_track (instrument) disarm ok");
+        check (ok (cmd (ops, "undo")), "undo after instrument arm_track ok (no crash)");
+        {
+            auto ilog = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
+            bool armInstPref = false;
+            for (auto& ln : juce::StringArray::fromLines (ilog))
+                if (ln.contains ("\"command\": \"arm_track\"") && ln.contains ("\"undoable\": false")) armInstPref = true;
+            check (armInstPref, "arm_track (MIDI path) logged undoable:false (preference)");
+        }
+    }
+
+    // ─── MON-003: monitoring round-trip latency readout ───
+    // Hardware input+output latency (getRecordAdjustment*) — the delay a performer
+    // hears via software input monitoring. Needs only an open device (NOT a prepared
+    // graph), so it is 0 headless. Read-only state, not a command. The real numbers +
+    // audible low-latency monitoring are HARDWARE-GATED (verified live).
+    std::cerr << "--- MON-003: monitoring round-trip latency readout ---\n";
+    {
+        auto sess = ops.snapshot().getProperty ("session", var());
+        check (sess.hasProperty ("roundTripLatencyMs"), "session.roundTripLatencyMs present");
+        check (sess.hasProperty ("roundTripLatencySamples"), "session.roundTripLatencySamples present");
+        const double rtMs      = (double) sess.getProperty ("roundTripLatencyMs", -1.0);
+        const int    rtSamples = (int) sess.getProperty ("roundTripLatencySamples", -1);
+        check (rtMs >= 0.0, "roundTripLatencyMs is non-negative");
+        check (rtSamples >= 0, "roundTripLatencySamples is non-negative");
+
+        // Honest headless posture: no open device -> getRecordAdjustment* return 0
+        // (NOT a false real value); the real figure is GUI / live-audio verified.
+        if (! eng.hasAudio())
+        {
+            check (rtMs == 0.0, "no-audio headless -> roundTripLatencyMs=0 (honest, not a false value)");
+            check (rtSamples == 0, "no-audio headless -> roundTripLatencySamples=0");
+        }
+
+        // No regression to the existing readout fields the UI also reads.
+        check (sess.hasProperty ("bufferSize"), "session.bufferSize still present (no regression)");
+        check (sess.hasProperty ("outputLatencyMs"), "session.outputLatencyMs still present (no regression)");
     }
 
     // ─── Wave: settings — audio device gate + project lifecycle ───

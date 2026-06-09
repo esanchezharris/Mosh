@@ -288,6 +288,7 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "list_colors")       return cmdListColors (args);
     if (name == "export_audio")      return cmdExportAudio (args);
     if (name == "list_audio_devices")return cmdListAudioDevices (args);
+    if (name == "list_midi_inputs")  return cmdListMidiInputs (args);
     if (name == "get_command_log")   return cmdGetCommandLog (args);
     if (name == "set_audio_device")  return cmdSetAudioDevice (args);
     if (name == "set_buffer_size")   return cmdSetBufferSize (args);
@@ -939,21 +940,53 @@ juce::var MoshOps::cmdArmTrack (const juce::var& args)
             break;
         }
 
-    // Arming a virgin track: assign the first available wave input first, then enable
+    // Arming a virgin track: assign an available input first, then enable
     // (RecordingDemo does setTarget + setRecordingEnabled together). Disarming a track
     // with no instance is a harmless no-op.
+    //
+    // CTL-001 — route MIDI to instrument tracks: an instrument track (one hosting a
+    // synth) should receive live MIDI from a controller, not a wave input, so a played
+    // note turns into audio. We therefore prefer a MIDI input instance when the track
+    // has an instrument, and a wave input otherwise. setTarget + setRecordingEnabled
+    // are identical calls for either device family. There is NO Tracktion "all MIDI
+    // inputs auto-route to the armed track" behaviour — each input must be explicitly
+    // targeted; we pick the FIRST matching input (multi-controller disambiguation is a
+    // later enhancement). Wave-only tracks are unchanged from the recording wave.
     if (target == nullptr && armed)
     {
-        for (auto* inst : inputs)
-            if (inst != nullptr
-                && inst->getInputDevice().getDeviceType() == te::InputDevice::waveDevice)
+        const bool wantMidi = trackHasInstrument (*track);
+
+        auto matchesPreferred = [wantMidi] (te::InputDeviceInstance* inst)
+        {
+            const auto type = inst->getInputDevice().getDeviceType();
+            return wantMidi ? (type == te::InputDevice::physicalMidiDevice
+                                   || type == te::InputDevice::virtualMidiDevice)
+                            : (type == te::InputDevice::waveDevice);
+        };
+
+        // First pass: the preferred device family (MIDI for instrument tracks, wave
+        // otherwise). Fallback pass: the other family, so arming still does something
+        // sensible if e.g. only a wave input is present (or only MIDI, no synth yet).
+        for (int pass = 0; pass < 2 && target == nullptr; ++pass)
+            for (auto* inst : inputs)
             {
+                if (inst == nullptr) continue;
+                const bool preferred = matchesPreferred (inst);
+                if (pass == 0 ? ! preferred : preferred)
+                    continue;     // pass 0: preferred only; pass 1: the other family only
+                if (! (inst->getInputDevice().getDeviceType() == te::InputDevice::waveDevice
+                       || inst->getInputDevice().isMidi()))
+                    continue;     // ignore track-wave/track-midi internal device types
+
                 // setTarget returns tl::expected — check the error, never blind-deref.
                 // Pass nullptr (no UndoManager): arming is a non-undoable preference, so
                 // the target assignment stays off the Edit undo stack too (it still
                 // persists in the input-device ValueTree and saves with the Edit).
                 if (auto r = inst->setTarget (track->itemID, true, nullptr, 0))
+                {
                     target = inst;
+                    break;
+                }
                 else
                 {
                     // Genuine assignment failure (a live device rejected the target):
@@ -961,7 +994,6 @@ juce::var MoshOps::cmdArmTrack (const juce::var& args)
                     logLine ("arm_track", args, false, r.error(), false);
                     return errResult ("arm_track", r.error());
                 }
-                break;
             }
     }
 
@@ -2389,6 +2421,41 @@ juce::var MoshOps::cmdListAudioDevices (const juce::var&)
     return okResult ("list_audio_devices", var (data));
 }
 
+juce::var MoshOps::cmdListMidiInputs (const juce::var&)
+{
+    // Read-only MIDI-input enumeration (CTL-001) — modelled on cmdListAudioDevices:
+    // no transaction, no log line, no event. Headless (no audio device) the engine's
+    // MIDI device list is empty (devices are only enumerated once CoreAudio/MIDI is
+    // up), so `inputs` is a well-formed empty array. The live note flow (controller ->
+    // armed instrument track -> audible synth) is hardware-gated and verified live.
+    auto& dm = eng.engine().getDeviceManager();
+
+    Array<var> inputs;
+    for (auto& mi : dm.getMidiInDevices())
+    {
+        if (mi == nullptr) continue;
+
+        auto* o = new DynamicObject();
+        o->setProperty ("name", mi->getName());
+        o->setProperty ("alias", mi->getAlias());
+        o->setProperty ("deviceID", mi->getDeviceID());
+        o->setProperty ("enabled", mi->isEnabled());
+        switch (mi->getMonitorMode())
+        {
+            case te::InputDevice::MonitorMode::off:       o->setProperty ("monitor", "off"); break;
+            case te::InputDevice::MonitorMode::on:        o->setProperty ("monitor", "on"); break;
+            case te::InputDevice::MonitorMode::automatic: o->setProperty ("monitor", "automatic"); break;
+            default:                                      o->setProperty ("monitor", "automatic"); break;
+        }
+        inputs.add (var (o));
+    }
+
+    auto* data = new DynamicObject();
+    data->setProperty ("inputs", inputs);
+    data->setProperty ("audioEnabled", eng.hasAudio());
+    return okResult ("list_midi_inputs", var (data));
+}
+
 juce::var MoshOps::cmdGetCommandLog (const juce::var& args)
 {
     // READ-ONLY inspector over the canonical command log (mosh-log.jsonl). This is
@@ -2719,6 +2786,18 @@ juce::var MoshOps::snapshot()
     session->setProperty ("bufferSize", dm.getBlockSize());
     session->setProperty ("outputLatencyMs", dm.getOutputLatencySeconds() * 1000.0);
 
+    // Monitoring round-trip latency (MON-003). The performer-felt input-monitoring
+    // delay is the hardware input + output latency (getRecordAdjustment*), distinct
+    // from outputLatencyMs (output only) and totalLatencyMs (whole-graph PDC). Unlike
+    // getLatencySamples() this needs only an OPEN device, not a prepared playback
+    // graph — so it is valid the moment an interface is present. Read-only state, not
+    // a command. Headless / no device -> 0 (surface as "-" in the UI, mirroring how
+    // outputLatencyMs is handled). Monitoring is SOFTWARE-ONLY in the pinned engine
+    // (no direct/hardware/zero-latency mode); the buffer size is the user's lever.
+    // getRecordAdjustment* are non-const, and `dm` here is a non-const reference.
+    session->setProperty ("roundTripLatencySamples", dm.getRecordAdjustmentSamples());
+    session->setProperty ("roundTripLatencyMs", dm.getRecordAdjustmentMs());
+
     // Plugin delay compensation readout (MON-004). This is the WHOLE-GRAPH reported
     // latency Tracktion itself compensates — the single authoritative total from the
     // prepared playback graph (te::EditPlaybackContext::getLatencySamples()), which
@@ -2832,24 +2911,40 @@ juce::var MoshOps::trackToVar (te::AudioTrack& t, int index)
     // InputDevice behind the instance (per-device, surfaced per-track).
     {
         bool armed = false; juce::String monitor = "automatic"; bool hasInput = false;
+        juce::String inputType = "wave"; juce::String midiInputName;
         for (auto* inst : eng.edit().getAllInputDevices())
             if (inst != nullptr && te::isOnTargetTrack (*inst, t, 0))
             {
                 hasInput = true;
                 armed    = inst->isRecordingEnabled (t.itemID);
-                switch (inst->getInputDevice().getMonitorMode())
+                auto& dev = inst->getInputDevice();
+                switch (dev.getMonitorMode())
                 {
                     case te::InputDevice::MonitorMode::off:       monitor = "off"; break;
                     case te::InputDevice::MonitorMode::on:        monitor = "on"; break;
                     case te::InputDevice::MonitorMode::automatic: monitor = "automatic"; break;
                     default:                                      monitor = "automatic"; break;
                 }
+                // CTL-001 — let the UI label a MIDI-driven instrument track vs a wave
+                // recording track (the routed input device family + its name).
+                if (dev.isMidi())
+                {
+                    inputType     = "midi";
+                    midiInputName = dev.getName();
+                }
                 break;
             }
-        o->setProperty ("armed",    armed);     // bool
-        o->setProperty ("monitor",  monitor);   // "off" | "automatic" | "on"
-        o->setProperty ("hasInput", hasInput);  // bool — false headless; UI can show "no input"
+        o->setProperty ("armed",     armed);     // bool
+        o->setProperty ("monitor",   monitor);   // "off" | "automatic" | "on"
+        o->setProperty ("hasInput",  hasInput);  // bool — false headless; UI can show "no input"
+        o->setProperty ("inputType", inputType); // "wave" | "midi" — kind of the routed input
+        if (midiInputName.isNotEmpty())
+            o->setProperty ("midiInputName", midiInputName);
     }
+
+    // CTL-001 — does this track host an instrument plugin? The UI shows a "MIDI armed"
+    // affordance only on instrument tracks (and arm_track routes live MIDI to them).
+    o->setProperty ("isInstrument", trackHasInstrument (t));
 
     // Sends (post-fader aux sends) owned by this track (Wave 8).
     juce::Array<var> sends;
@@ -2962,6 +3057,25 @@ juce::var MoshOps::transportToVar()
 te::AudioTrack* MoshOps::findTrack (const juce::String& id)
 {
     return te::findAudioTrackForID (eng.edit(), te::EditItemID::fromString (id));
+}
+
+bool MoshOps::trackHasInstrument (te::AudioTrack& t)
+{
+    // Same predicate pluginToVar uses for the "isInstrument" flag: an external
+    // synth (ExternalPlugin::isSynth) or a builtin instrument (e.g. 4OSC/sampler).
+    auto plugins = t.pluginList.getPlugins();
+    for (int i = 0; i < plugins.size(); ++i)
+    {
+        auto* p = plugins[i].get();
+        if (p == nullptr) continue;
+        if (auto* ext = dynamic_cast<te::ExternalPlugin*> (p))
+            if (ext->isSynth())
+                return true;
+        if (const auto* bspec = findBuiltin (p->getPluginType()))
+            if (bspec->isInstrument)
+                return true;
+    }
+    return false;
 }
 
 te::Clip* MoshOps::findClip (const juce::String& id)

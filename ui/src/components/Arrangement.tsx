@@ -292,7 +292,15 @@ function TrackHeader({ track, laneH }: { track: Track; laneH: number }) {
       <div className="th-row">
         <button
           className={`mixbtn ${track.armed ? "arm-on" : ""}`}
-          title={track.hasInput ? "Record-arm" : "Record-arm (no input device)"}
+          title={
+            track.hasInput
+              ? track.inputType === "midi"
+                ? `Armed for live MIDI${track.midiInputName ? ` (${track.midiInputName})` : ""}`
+                : "Record-arm"
+              : track.isInstrument
+                ? "Arm for live MIDI (no input device)"
+                : "Record-arm (no input device)"
+          }
           onClick={() => exec("arm_track", { trackId: track.id, armed: !track.armed })}
         >R</button>
         <button
