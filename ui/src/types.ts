@@ -102,6 +102,7 @@ export type BuiltinPlugin = {
   builtin: true;
 };
 
+export type Send = { bus: number; db: number; mute: boolean };
 export type Track = {
   id: string;
   index: number;
@@ -113,7 +114,12 @@ export type Track = {
   pan?: number;
   mute?: boolean;
   solo?: boolean;
+  sends?: Send[];
+  isReturn?: boolean;
+  returnBus?: number;
 };
+
+export type Bus = { bus: number; name: string; trackId: string };
 
 export type Transport = {
   playing: boolean;
@@ -138,6 +144,7 @@ export type Snapshot = {
   tracks: Track[];
   transport: Transport;
   master?: { volumeDb: number; pan: number };
+  buses?: Bus[];
 };
 
 export type CommandResult<T = unknown> = {

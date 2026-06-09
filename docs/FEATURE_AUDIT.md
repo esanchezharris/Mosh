@@ -120,6 +120,18 @@ A whole empty must-tier category. Backend: `add_automation_point` / `set_automat
 
 **Shipped-on-both-axes: 52 → 56** (must-tier 38 → 42). Automation was zero on both axes across the whole category before this.
 
+### 2026-06-09 · Wave 8 — Sends / returns / aux buses ✅
+
+Routing to shared effect buses (built from the researched plan, `docs/plans/wave-sends.md`). A bus is an integer; the return is a normal `AudioTrack` carrying an `AuxReturnPlugin` (audible with no input). New commands `create_bus` / `add_send` / `set_send_level` / `remove_send` / `remove_bus` / `rename_bus`; bus numbers allocated lowest-unused; orphan sends swept on `remove_bus`; names persist via `Edit::setAuxBusName`. Snapshot: per-track `sends[]` + `isReturn`/`returnBus`, top-level `buses[]`. Mixer UI: `+ Bus`, return strips (R badge, × Bus), per-channel send sliders + add-chips. Verified: `Mosh --selftest` **181/181**, 0 assertions + screenshot. (Found + fixed a dangling-`var`-temporary bug in my own test along the way.)
+
+| ID | Tier | Feature | Before → After |
+|---|---|---|---|
+| `MIX-006` | must | Sends / returns / aux | ✗/✗ → ✓/✓ |
+| `RTG-003` | must | Bus / aux routing | ✗/✗ → ✓/✓ |
+| `MIX-008` | must | Group / bus tracks | ✗/✗ → ✓/◐ (aux return buses; summing submix groups later) |
+
+**Shipped-on-both-axes: 56 → 58** (must-tier 42 → 44). The wet-signal audibility (send→return graph edge) needs a live device — a bounce-based Catch2 test is the recommended way to close that headless, per the plan.
+
 ## Coverage by category
 
 Per axis the three counts are **present ✓ / partial ◐ / missing ✗** (missing also folds in the one `not_applicable`).

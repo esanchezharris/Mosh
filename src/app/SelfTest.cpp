@@ -857,6 +857,56 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (! ok (cmd (ops, "set_note", objN ({{ "clipId", mClip }, { "noteIndex", 999 }}))), "set_note rejects an out-of-range noteIndex");
     }
 
+    // ─── Wave 8: sends / returns / aux buses ───
+    std::cerr << "--- Wave 8: sends / returns / aux buses ---\n";
+    {
+        auto buses  = [&] { return ops.snapshot().getProperty ("buses", var()); };
+        auto sendsOf = [&] (const String& tid) -> var { return trackById (tid).getProperty ("sends", var()); };
+
+        const int busesBefore = buses().size();
+        auto cb = cmd (ops, "create_bus", args1 ("name", "Reverb"));
+        check (ok (cb), "create_bus ok");
+        const int bus0 = (int) cb["data"].getProperty ("busNumber", -1);
+        const auto rtid = cb["data"].getProperty ("trackId", var()).toString();
+        check (buses().size() == busesBefore + 1, "snapshot lists the new bus");
+        check ((bool) trackById (rtid).getProperty ("isReturn", false), "return track flagged isReturn");
+        check ((int) trackById (rtid).getProperty ("returnBus", -1) == bus0, "return track carries the bus number");
+        { bool hasReturn = false;
+          auto rt = trackById (rtid);                          // bind to a local (no dangling temporary)
+          auto pv = rt.getProperty ("plugins", var());
+          if (auto* plugins = pv.getArray())
+            for (auto& p : *plugins) if (p.getProperty ("type", var()).toString() == "auxreturn") hasReturn = true;
+          check (hasReturn, "return track carries an auxreturn plugin"); }
+
+        auto cb2 = cmd (ops, "create_bus", args1 ("name", "Delay"));
+        check ((int) cb2["data"].getProperty ("busNumber", -1) == bus0 + 1, "second bus gets the next number");
+
+        auto gt = cmd (ops, "create_track", args1 ("name", "Gtr"))["data"].getProperty ("trackId", var()).toString();
+        check (ok (cmd (ops, "add_send", objN ({{ "trackId", gt }, { "bus", bus0 }, { "db", -6.0 }}))), "add_send ok");
+        { auto s = sendsOf (gt);
+          check (s.size() == 1 && (int) s[0].getProperty ("bus", -1) == bus0
+                 && std::abs ((double) s[0].getProperty ("db", 0.0) - (-6.0)) < 0.6, "send appears with the right bus + dB"); }
+        check (! ok (cmd (ops, "add_send", objN ({{ "trackId", gt }, { "bus", bus0 }}))), "duplicate send to a bus rejected");
+        check (! ok (cmd (ops, "add_send", objN ({{ "trackId", gt }, { "bus", 99 }}))), "send to a nonexistent bus rejected");
+
+        check (ok (cmd (ops, "set_send_level", objN ({{ "trackId", gt }, { "bus", bus0 }, { "db", -3.0 }}))), "set_send_level ok");
+        check (std::abs ((double) sendsOf (gt)[0].getProperty ("db", 0.0) - (-3.0)) < 0.6, "send level reflects the new dB");
+        cmd (ops, "set_send_level", objN ({{ "trackId", gt }, { "bus", bus0 }, { "db", -100.0 }}));
+        check ((bool) sendsOf (gt)[0].getProperty ("mute", false), "send mutes at -100 dB");
+        cmd (ops, "set_send_level", objN ({{ "trackId", gt }, { "bus", bus0 }, { "db", -6.0 }}));
+
+        cmd (ops, "save"); cmd (ops, "reload");
+        { bool found = false; auto bv = buses();              // bind to a local (no dangling temporary)
+          if (auto* arr = bv.getArray()) for (auto& b : *arr) if (b.getProperty ("name", var()).toString() == "Reverb") found = true;
+          check (found, "bus name persists across save/reload"); }
+        check (sendsOf (gt).size() == 1, "send persists across save/reload");
+
+        const int busesNow = buses().size();
+        check (ok (cmd (ops, "remove_bus", args1 ("bus", bus0))), "remove_bus ok");
+        check (buses().size() == busesNow - 1, "remove_bus drops the bus");
+        check (sendsOf (gt).size() == 0, "remove_bus sweeps orphan sends");
+    }
+
     std::cerr << "===== " << (checks - failures) << "/" << checks
               << " checks passed, " << failures << " failed =====\n\n";
     return failures;

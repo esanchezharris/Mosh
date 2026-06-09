@@ -68,6 +68,13 @@ private:
     juce::var cmdSetTrackSolo   (const juce::var& args);
     juce::var cmdSetMasterVolume (const juce::var& args);
     juce::var cmdSetMasterPan    (const juce::var& args);
+    // Wave 8 — sends / returns / aux buses
+    juce::var cmdCreateBus      (const juce::var& args);
+    juce::var cmdAddSend        (const juce::var& args);
+    juce::var cmdSetSendLevel   (const juce::var& args);
+    juce::var cmdRemoveSend     (const juce::var& args);
+    juce::var cmdRemoveBus      (const juce::var& args);
+    juce::var cmdRenameBus      (const juce::var& args);
     juce::var cmdGetClipPeaks   (const juce::var& args);
     // Stage 3 — VST3 hosting + MIDI
     juce::var cmdListPlugins    (const juce::var& args);
@@ -121,6 +128,9 @@ private:
     te::Clip*       findClip  (const juce::String& id);
     te::Plugin*     findPlugin (const juce::String& trackId, int index);
     te::AutomatableParameter* findParam (const juce::var& args);
+    te::AuxReturnPlugin* firstAuxReturnOn (te::AudioTrack&);
+    te::AudioTrack*      findReturnTrackForBus (int bus);
+    int                  allocateBusNumber();
     juce::var       pluginToVar (te::Plugin&, int index);
     juce::var       trackToVar (te::AudioTrack&, int index);
     juce::var       clipToVar  (te::Clip&);

@@ -134,6 +134,12 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "set_track_solo")    return cmdSetTrackSolo (args);
     if (name == "set_master_volume") return cmdSetMasterVolume (args);
     if (name == "set_master_pan")    return cmdSetMasterPan (args);
+    if (name == "create_bus")        return cmdCreateBus (args);
+    if (name == "add_send")          return cmdAddSend (args);
+    if (name == "set_send_level")    return cmdSetSendLevel (args);
+    if (name == "remove_send")       return cmdRemoveSend (args);
+    if (name == "remove_bus")        return cmdRemoveBus (args);
+    if (name == "rename_bus")        return cmdRenameBus (args);
     if (name == "get_clip_peaks")    return cmdGetClipPeaks (args);
     if (name == "list_plugins")      return cmdListPlugins (args);
     if (name == "list_builtins")     return cmdListBuiltins (args);
@@ -649,6 +655,154 @@ juce::var MoshOps::cmdSetMasterPan (const juce::var& args)
     logLine ("set_master_pan", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("set_master_pan");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Wave 8 — sends / returns / aux buses. A "bus" is an integer busNumber; the
+// return is a normal AudioTrack carrying an AuxReturnPlugin (which renders even
+// with no input). Sends are post-fader AuxSendPlugins appended to a track's
+// chain, routed purely by matching busNumber. (Plan: docs/plans/wave-sends.md.)
+// ─────────────────────────────────────────────────────────────────────────────
+te::AuxReturnPlugin* MoshOps::firstAuxReturnOn (te::AudioTrack& t)
+{
+    for (auto* p : t.pluginList.getPlugins())
+        if (auto* r = dynamic_cast<te::AuxReturnPlugin*> (p))
+            return r;
+    return nullptr;
+}
+
+te::AudioTrack* MoshOps::findReturnTrackForBus (int bus)
+{
+    for (auto* t : te::getAudioTracks (eng.edit()))
+        if (t != nullptr)
+            if (auto* r = firstAuxReturnOn (*t))
+                if (r->busNumber.get() == bus)
+                    return t;
+    return nullptr;
+}
+
+int MoshOps::allocateBusNumber()
+{
+    juce::Array<int> used;
+    for (auto* t : te::getAudioTracks (eng.edit()))
+        if (t != nullptr)
+            for (auto* p : t->pluginList.getPlugins())
+                if (auto* r = dynamic_cast<te::AuxReturnPlugin*> (p))
+                    used.add (r->busNumber.get());
+    int n = 0;
+    while (used.contains (n)) ++n;
+    return n;
+}
+
+juce::var MoshOps::cmdCreateBus (const juce::var& args)
+{
+    auto& edit = eng.edit();
+    const int bus = allocateBusNumber();
+    auto name = args.getProperty ("name", var()).toString();
+    if (name.isEmpty()) name = "Bus " + String (bus + 1);
+
+    undoManager().beginNewTransaction ("create_bus");
+    auto* track = createAudioTrack (name);
+    if (track == nullptr) return errResult ("create_bus", "could not create return track");
+
+    auto plugin = edit.getPluginCache().createNewPlugin (te::AuxReturnPlugin::xmlTypeName, {});
+    if (plugin == nullptr) return errResult ("create_bus", "could not create aux return");
+    if (auto* r = dynamic_cast<te::AuxReturnPlugin*> (plugin.get()))
+        r->busNumber = bus;
+    track->pluginList.insertPlugin (plugin, 0, nullptr);
+    ensureVolumePlugin (*track);
+    edit.setAuxBusName (bus, name);
+
+    auto* data = new DynamicObject();
+    data->setProperty ("busNumber", bus);
+    data->setProperty ("trackId", track->itemID.toString());
+    data->setProperty ("name", name);
+    logLine ("create_bus", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("create_bus", var (data));
+}
+
+juce::var MoshOps::cmdAddSend (const juce::var& args)
+{
+    auto* track = findTrack (args.getProperty ("trackId", var()).toString());
+    if (track == nullptr) return errResult ("add_send", "no track");
+    const int bus = (int) args.getProperty ("bus", -1);
+    if (findReturnTrackForBus (bus) == nullptr) return errResult ("add_send", "no such bus");
+    if (track->getAuxSendPlugin (bus) != nullptr) return errResult ("add_send", "send already exists");
+
+    undoManager().beginNewTransaction ("add_send");
+    auto plugin = eng.edit().getPluginCache().createNewPlugin (te::AuxSendPlugin::xmlTypeName, {});
+    if (plugin == nullptr) return errResult ("add_send", "could not create aux send");
+    if (auto* s = dynamic_cast<te::AuxSendPlugin*> (plugin.get()))
+    {
+        s->busNumber = bus;
+        track->pluginList.insertPlugin (plugin, track->pluginList.getPlugins().size(), nullptr);  // append → post-fader
+        s->setGainDb (juce::jlimit (-60.0f, 6.0f, (float) (double) args.getProperty ("db", 0.0)));
+    }
+    logLine ("add_send", args, true, {}, true);
+    emitSnapshotInvalidated();
+    auto* data = new DynamicObject(); data->setProperty ("bus", bus);
+    return okResult ("add_send", var (data));
+}
+
+juce::var MoshOps::cmdSetSendLevel (const juce::var& args)
+{
+    auto* track = findTrack (args.getProperty ("trackId", var()).toString());
+    if (track == nullptr) return errResult ("set_send_level", "no track");
+    auto* s = track->getAuxSendPlugin ((int) args.getProperty ("bus", -1));
+    if (s == nullptr) return errResult ("set_send_level", "no send to that bus");
+    undoManager().beginNewTransaction ("set_send_level");
+    s->setGainDb (juce::jlimit (-100.0f, 6.0f, (float) (double) args.getProperty ("db", 0.0)));
+    logLine ("set_send_level", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("set_send_level");
+}
+
+juce::var MoshOps::cmdRemoveSend (const juce::var& args)
+{
+    auto* track = findTrack (args.getProperty ("trackId", var()).toString());
+    if (track == nullptr) return errResult ("remove_send", "no track");
+    auto* s = track->getAuxSendPlugin ((int) args.getProperty ("bus", -1));
+    if (s == nullptr) return errResult ("remove_send", "no send to that bus");
+    undoManager().beginNewTransaction ("remove_send");
+    s->deleteFromParent();
+    logLine ("remove_send", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("remove_send");
+}
+
+juce::var MoshOps::cmdRemoveBus (const juce::var& args)
+{
+    const int bus = (int) args.getProperty ("bus", -1);
+    if (bus < 0) return errResult ("remove_bus", "bad bus");
+    auto* returnTrack = findReturnTrackForBus (bus);
+    if (returnTrack == nullptr) return errResult ("remove_bus", "no such bus");
+
+    undoManager().beginNewTransaction ("remove_bus");
+    // Sweep orphan sends pointing at this bus, then drop the name + the return track.
+    for (auto* t : te::getAudioTracks (eng.edit()))
+        if (t != nullptr)
+            if (auto* s = t->getAuxSendPlugin (bus))
+                s->deleteFromParent();
+    eng.edit().setAuxBusName (bus, {});
+    eng.edit().deleteTrack (returnTrack);
+    logLine ("remove_bus", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("remove_bus");
+}
+
+juce::var MoshOps::cmdRenameBus (const juce::var& args)
+{
+    const int bus = (int) args.getProperty ("bus", -1);
+    auto* returnTrack = findReturnTrackForBus (bus);
+    if (returnTrack == nullptr) return errResult ("rename_bus", "no such bus");
+    undoManager().beginNewTransaction ("rename_bus");
+    const auto name = args.getProperty ("name", var()).toString();
+    eng.edit().setAuxBusName (bus, name);
+    returnTrack->setName (name);
+    logLine ("rename_bus", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("rename_bus");
 }
 
 juce::var MoshOps::cmdGetClipPeaks (const juce::var& args)
@@ -1726,6 +1880,22 @@ juce::var MoshOps::snapshot()
     root->setProperty ("tracks", tracks);
     root->setProperty ("transport", transportToVar());
 
+    // Aux buses (Wave 8) — one entry per AuxReturn-carrying track.
+    Array<var> buses;
+    for (auto* t : te::getAudioTracks (edit))
+        if (t != nullptr)
+            if (auto* r = firstAuxReturnOn (*t))
+            {
+                const int bus = r->busNumber.get();
+                auto* bo = new DynamicObject();
+                bo->setProperty ("bus", bus);
+                bo->setProperty ("name", edit.getAuxBusName (bus).isNotEmpty()
+                                             ? edit.getAuxBusName (bus) : ("Bus " + String (bus + 1)));
+                bo->setProperty ("trackId", t->itemID.toString());
+                buses.add (var (bo));
+            }
+    root->setProperty ("buses", buses);
+
     // Master bus (Wave 5) — the edit's master VolumeAndPan, always present.
     if (auto mvp = edit.getMasterVolumePlugin())
     {
@@ -1772,6 +1942,24 @@ juce::var MoshOps::trackToVar (te::AudioTrack& t, int index)
     }
     o->setProperty ("mute", t.isMuted (false));
     o->setProperty ("solo", t.isSolo (false));
+
+    // Sends (post-fader aux sends) owned by this track (Wave 8).
+    juce::Array<var> sends;
+    for (auto* p : t.pluginList.getPlugins())
+        if (auto* s = dynamic_cast<te::AuxSendPlugin*> (p))
+        {
+            auto* so = new DynamicObject();
+            so->setProperty ("bus", s->getBusNumber());
+            so->setProperty ("db", s->getGainDb());
+            so->setProperty ("mute", s->isMute());
+            sends.add (var (so));
+        }
+    o->setProperty ("sends", sends);
+    if (auto* r = firstAuxReturnOn (t))
+    {
+        o->setProperty ("isReturn", true);
+        o->setProperty ("returnBus", r->busNumber.get());
+    }
     return var (o);
 }
 

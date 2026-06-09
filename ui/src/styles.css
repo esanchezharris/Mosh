@@ -310,6 +310,20 @@ button.on { border-color: var(--accent); color: var(--accent); background: #2120
 .fader { -webkit-appearance: slider-vertical; appearance: slider-vertical; width: 8px; height: 100%; accent-color: var(--accent); }
 .strip-db { font-size: 0.66rem; color: var(--muted); font-variant-numeric: tabular-nums; }
 .strip-ms { display: flex; gap: 4px; }
+/* Sends + return buses (Wave 8) */
+.mix-toolbar { display: flex; align-items: flex-start; padding-right: 4px; }
+.mix-toolbar button { font-size: 0.74rem; padding: 0.3rem 0.5rem; }
+.mix-divider { width: 1px; background: var(--line); align-self: stretch; margin: 0 4px; }
+.strip.return { border-color: #5a4d12; background: linear-gradient(180deg, #24220f, var(--panel-2)); }
+.rbadge { background: var(--warn); color: #1a1a1a; border-radius: 3px; padding: 0 3px; font-size: 0.6rem; font-weight: 700; }
+.strip-sends { display: flex; flex-direction: column; gap: 3px; width: 100%; border-top: 1px solid var(--line); padding-top: 4px; }
+.send-row { display: flex; align-items: center; gap: 3px; }
+.send-name { font-size: 0.58rem; color: var(--muted); width: 30px; overflow: hidden; }
+.send-row input { flex: 1; accent-color: var(--warn); height: 3px; }
+.send-x { font-size: 0.7rem; padding: 0 4px; color: var(--muted); background: transparent; border-color: transparent; }
+.send-x:hover { color: var(--playhead); }
+.send-add { font-size: 0.58rem; padding: 0.1rem 0.3rem; color: var(--muted); }
+.bus-x { border: 1px solid #7a2a2a; color: var(--playhead); border-radius: 6px; margin-top: 4px; font-size: 0.62rem; }
 
 /* Piano roll (Wave 4) */
 .pr { width: min(960px, 94vw); height: min(70vh, 640px); background: var(--panel); border: 1px solid var(--line); border-radius: 12px; display: flex; flex-direction: column; box-shadow: 0 24px 60px rgba(0,0,0,0.5); overflow: hidden; }
