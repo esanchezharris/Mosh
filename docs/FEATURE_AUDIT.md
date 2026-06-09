@@ -251,6 +251,19 @@ Live play, built on the recording wave's input-routing pattern. The research est
 
 **Shipped-on-both-axes: 79 → 81** (must-tier 65 → 67). With a plugged-in interface, arming an instrument track now plays it live from a MIDI controller — the DAW responds to performance, not just the mouse.
 
+### 2026-06-09 · Wave 17: AU hosting (INS-002) + plugin scan / blocklist / management (INS-005) ✅
+
+Research confirmed the **hosting** half already works — `JUCE_PLUGINHOST_AU=1` registers `AudioUnitPluginFormat`, and `te::ExternalPlugin` dispatches purely on `PluginDescription.pluginFormatName`, so `load_plugin` instantiates an AU identically to a VST3 with **no per-format branching**. The gap was **cataloging**. AU scanning is genuinely dangerous (JUCE's `findAllTypesForFile` *loads* each component and marshals instantiation back to the message thread — a misbehaving AU can hang the UI, with no per-component timeout), so it ships as an **opt-in experimental** path (`MOSH_SCAN_AU=1`, off by default and in `--selftest`): cheap enumeration + per-component cataloging guarded by a **dead-mans-pedal + blacklist** (a crasher is quarantined on the next launch; `rescan` recovers the pedal first so repeated in-session rescans converge), run off the message thread. VST3 (the primary format here) is always scanned and safe. The catalog now **persists** to `~/Library/Mosh/plugin-catalog.xml`. **INS-005:** new commands `rescan_plugins` (async + progress), `get_plugin_blocklist` (read-only), `block_plugin`, `clear_plugin_blocklist` — and the review caught two real bugs that were fixed: the blocklist was ignored on VST3 scans (`addType` bypasses it) and `block_plugin` keyed the wrong namespace (Tracktion `idFor` vs JUCE `fileOrIdentifier`), so blocking silently failed; both now work (`block_plugin` resolves the UI id → `fileOrIdentifier`, and blocked plugins vanish from `list_plugins`). The PluginBrowser gained a Rescan button + format counts + blocklist view. Verified: `Mosh --selftest` **397/397**, 0 failed, exactly 1 assertion (the known Stage-3 one — none added) — `block_plugin` round-trips a real catalog entry through the blocklist and back, bad ids error, and every `list_plugins` entry carries a `format` field.
+
+| ID | Tier | Feature | Before → After |
+|---|---|---|---|
+| `INS-002` | must | AU hosting | ◐/✗ → ✓/✓ * |
+| `INS-005` | must | Plugin scan & management | ◐/◐ → ✓/✓ |
+
+\* AU **hosting** works (an AU loads + runs once cataloged, via `ExternalPlugin`); AU **scanning/cataloging** is an opt-in (`MOSH_SCAN_AU=1`) experimental feature with an honestly-documented hang risk on misbehaving components (crash-recovery via the dead-mans-pedal; a real fix is out-of-process scanning, deferred). Which AUs exist is machine-specific, so the selftest asserts the command/catalog surface, not AU content.
+
+**Shipped-on-both-axes: 81 → 83** (must-tier 67 → 69). Plugin hosting now spans both Mac formats with a persisted catalog, a working blocklist, and rescan — not just a curated VST3 list.
+
 ## Coverage by category
 
 Per axis the three counts are **present ✓ / partial ◐ / missing ✗** (missing also folds in the one `not_applicable`).

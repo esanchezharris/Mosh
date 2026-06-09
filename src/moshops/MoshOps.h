@@ -96,6 +96,13 @@ private:
     juce::var cmdReorderPlugin  (const juce::var& args);
     juce::var cmdSetPluginParam (const juce::var& args);
     juce::var cmdBypassPlugin   (const juce::var& args);
+    // INS-005 — plugin scan / blocklist / management (NON-undoable: catalog ops,
+    // not Edit mutations). rescan persists the catalog; the rest are read-only or
+    // catalog-only, so none take a Tracktion transaction.
+    juce::var cmdRescanPlugins      (const juce::var& args);   // async catalog re-enumeration (persists)
+    juce::var cmdGetPluginBlocklist (const juce::var& args);   // read-only (no log/transaction)
+    juce::var cmdClearPluginBlocklist (const juce::var& args); // catalog-only (undoable:false)
+    juce::var cmdBlockPlugin        (const juce::var& args);   // catalog-only (undoable:false)
     // Wave 7 — parameter automation
     juce::var cmdAddAutomationPoint    (const juce::var& args);
     juce::var cmdRemoveAutomationPoint (const juce::var& args);

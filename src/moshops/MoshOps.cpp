@@ -260,6 +260,10 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "reorder_plugin")    return cmdReorderPlugin (args);
     if (name == "set_plugin_param")  return cmdSetPluginParam (args);
     if (name == "bypass_plugin")     return cmdBypassPlugin (args);
+    if (name == "rescan_plugins")        return cmdRescanPlugins (args);
+    if (name == "get_plugin_blocklist")  return cmdGetPluginBlocklist (args);
+    if (name == "clear_plugin_blocklist")return cmdClearPluginBlocklist (args);
+    if (name == "block_plugin")          return cmdBlockPlugin (args);
     if (name == "add_automation_point")    return cmdAddAutomationPoint (args);
     if (name == "remove_automation_point") return cmdRemoveAutomationPoint (args);
     if (name == "set_automation_point")    return cmdSetAutomationPoint (args);
@@ -1327,18 +1331,30 @@ juce::var MoshOps::cmdGetClipPeaks (const juce::var& args)
 juce::var MoshOps::cmdListPlugins (const juce::var&)
 {
     juce::Array<var> plugins;
+    int nVst3 = 0, nAu = 0;
     for (auto& d : pluginHost.available())
     {
         auto* o = new DynamicObject();
         o->setProperty ("id", PluginHost::idFor (d));
         o->setProperty ("name", d.name);
-        o->setProperty ("format", d.pluginFormatName);
+        o->setProperty ("format", d.pluginFormatName);   // "VST3" / "AudioUnit"
         o->setProperty ("manufacturer", d.manufacturerName);
         o->setProperty ("isInstrument", d.isInstrument);
         plugins.add (var (o));
+
+        if (d.pluginFormatName == "AudioUnit") ++nAu;
+        else if (d.pluginFormatName == "VST3") ++nVst3;
     }
+    // Per-format counts for the manager UI (INS-005). Plain numbers, not Tracktion
+    // concepts — VST3/AudioUnit are standard plugin formats.
+    auto* counts = new DynamicObject();
+    counts->setProperty ("vst3", nVst3);
+    counts->setProperty ("au", nAu);
+    counts->setProperty ("total", plugins.size());
+
     auto* data = new DynamicObject();
     data->setProperty ("plugins", plugins);
+    data->setProperty ("counts", var (counts));
     return okResult ("list_plugins", var (data));
 }
 
@@ -1481,6 +1497,161 @@ juce::var MoshOps::cmdBypassPlugin (const juce::var& args)
     logLine ("bypass_plugin", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("bypass_plugin");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// INS-005 — plugin scan & management. These mutate the plugin CATALOG, not the
+// Edit, so they are NON-undoable (no Tracktion transaction); get_plugin_blocklist
+// is read-only (no log). The catalog is a query (list_plugins) outside snapshot()
+// — scan progress rides on transient 'plugin_scan_progress' events, never the
+// snapshot (swappable-seam discipline).
+// ─────────────────────────────────────────────────────────────────────────────
+juce::var MoshOps::cmdRescanPlugins (const juce::var& args)
+{
+    const auto format = args.getProperty ("format", "all").toString();   // "vst3" | "au" | "all"
+    const bool clearFirst = (bool) args.getProperty ("clearFirst", false);
+    const bool includeVST3 = (format == "vst3" || format == "all");
+    // AU is the slow/risky path: only when requested AND opted in (so --selftest,
+    // which never sets MOSH_SCAN_AU, performs no AU sweep). VST3-only rescans are
+    // always allowed.
+    const bool auOptedIn = SystemStats::getEnvironmentVariable ("MOSH_SCAN_AU", {}) == "1";
+    const bool includeAU = (format == "au" || format == "all") && auOptedIn;
+
+    // wait:true forces a synchronous VST3 sweep (cheap + safe on the message thread).
+    // AU cataloging ALWAYS runs on a background thread, even when wait:true, because
+    // JUCE's AudioPluginFormat::createInstanceFromDescription marshals component
+    // instantiation back to the message thread — a hanging AU stalls the UI with no
+    // per-component timeout.  Only CRASHes are recovered via the dead-mans-pedal;
+    // a HANG requires a forced app restart.  Never call the AU sweep synchronously
+    // on the message thread.
+    const bool wait = (bool) args.getProperty ("wait", false);
+    if (! includeAU)
+    {
+        // VST3-only (or no formats): fast + safe, run synchronously.
+        const int total = pluginHost.rescan (clearFirst, includeVST3, false);
+        logLine ("rescan_plugins", args, true, {}, false);   // non-undoable catalog op
+        emitSnapshotInvalidated();
+        auto* d = new DynamicObject();
+        d->setProperty ("status", "done");
+        d->setProperty ("count", total);
+        return okResult ("rescan_plugins", var (d));
+    }
+    if (wait)
+    {
+        // wait:true with AU requested: do the VST3 part inline, THEN kick off the
+        // AU sweep on a background thread and return "scanning" to the caller.
+        // (Keeping the message-thread VST3 result gives the caller a useful count
+        // while the AU sweep is in progress.)
+        if (includeVST3)
+            pluginHost.rescan (clearFirst, includeVST3, false);
+    }
+
+    // Async AU rescan — mirror cmdRenderLayer: do the slow work on a background
+    // std::thread, marshal the result back to the message thread.
+    emit ("plugin_scan_progress", [&] { auto* o = new DynamicObject();
+        o->setProperty ("format", format); o->setProperty ("done", false); return var (o); }());
+    // NOTE: clearFirst and the VST3 sweep have already run inline (if wait:true) or
+    // will run together below (async path).  Pass clearFirst=false and includeVST3 in
+    // the async lambda only if we didn't already do them above.
+    const bool asyncClearFirst  = clearFirst && ! wait;
+    const bool asyncIncludeVST3 = includeVST3 && ! wait;
+    std::thread ([this, asyncClearFirst, asyncIncludeVST3, format]
+    {
+        const int total = pluginHost.rescan (asyncClearFirst, asyncIncludeVST3, true);
+        juce::MessageManager::callAsync ([this, total, format]
+        {
+            emit ("plugin_scan_progress", [&] { auto* o = new juce::DynamicObject();
+                o->setProperty ("format", format); o->setProperty ("count", total);
+                o->setProperty ("done", true); return juce::var (o); }());
+            emitSnapshotInvalidated();
+        });
+    }).detach();
+
+    logLine ("rescan_plugins", args, true, {}, false);
+    auto* d = new DynamicObject();
+    d->setProperty ("status", "scanning");
+    return okResult ("rescan_plugins", var (d));
+}
+
+juce::var MoshOps::cmdGetPluginBlocklist (const juce::var&)
+{
+    // READ-ONLY (no log/transaction) — modelled on cmdListAudioDevices.
+    // The blacklist stores fileOrIdentifier strings (file paths for VST3,
+    // "AudioUnit:..." for AU).  For each entry we try to present the UI-facing
+    // idFor() form if the entry is still resolvable via the catalog; otherwise we
+    // fall back to the raw fileOrIdentifier so the caller can see what was blocked.
+    juce::Array<var> entries;
+    auto rawIds = pluginHost.blocklist();
+    // Use the unfiltered type list for the reverse-mapping: available() now filters
+    // blocked entries, so blocked plugins would be invisible to the lookup.
+    const auto allTypes = eng.engine().getPluginManager().knownPluginList.getTypes();
+
+    for (auto& rawId : rawIds)
+    {
+        // Try to find a matching description in the full type catalog (including
+        // blocked entries) to map rawId -> UI-facing idFor() form.
+        String uiId = rawId;   // default: show the raw key
+        for (auto& d : allTypes)
+        {
+            if (d.fileOrIdentifier == rawId)
+            {
+                uiId = PluginHost::idFor (d);
+                break;
+            }
+        }
+        auto* o = new DynamicObject();
+        o->setProperty ("id",    uiId);
+        o->setProperty ("rawId", rawId);   // the actual blacklist key, for debugging
+        o->setProperty ("reason", "blocked");   // crashed-scan vs manual not tracked separately
+        entries.add (var (o));
+    }
+    auto* data = new DynamicObject();
+    data->setProperty ("blocklist", entries);
+    return okResult ("get_plugin_blocklist", var (data));
+}
+
+juce::var MoshOps::cmdClearPluginBlocklist (const juce::var& args)
+{
+    pluginHost.clearBlocklist();
+    logLine ("clear_plugin_blocklist", args, true, {}, false);   // catalog op, not undoable
+    emitSnapshotInvalidated();
+    return okResult ("clear_plugin_blocklist");
+}
+
+juce::var MoshOps::cmdBlockPlugin (const juce::var& args)
+{
+    const auto id = args.getProperty ("pluginId", var()).toString();
+    if (id.isEmpty()) return errResult ("block_plugin", "missing pluginId");
+
+    // The incoming pluginId is the UI-facing identifier (e.g. "VST3-Serum") produced
+    // by idFor()/te::createIdentifierString.  The JUCE blacklist is keyed on
+    // PluginDescription.fileOrIdentifier (a file path for VST3, an "AudioUnit:..."
+    // string for AU).  We must resolve the UI id -> fileOrIdentifier before blocking,
+    // otherwise the key is wrong and the block has no effect on future scans.
+    juce::PluginDescription desc;
+    if (pluginHost.findDescription (id, desc))
+    {
+        // Found in the live catalog: block by the format-native key (fileOrIdentifier).
+        // available() filters blocked entries, so this plugin disappears from
+        // list_plugins immediately without needing to remove it from the type list
+        // (the type list is the persistent catalog; the blacklist is the gate).
+        pluginHost.blockPlugin (desc.fileOrIdentifier);
+    }
+    else
+    {
+        // Not in the catalog. The caller may be passing a raw fileOrIdentifier or
+        // an "AudioUnit:..." id directly.  Accept it as-is so AU crash-recovery and
+        // pre-emptive blocks still work, but a bogus id is harmless (empty blacklist
+        // entries do nothing).
+        if (id.contains ("/") || id.startsWith ("AudioUnit:") || id.startsWith ("VST3:"))
+            pluginHost.blockPlugin (id);
+        else
+            return errResult ("block_plugin", "pluginId not found in catalog and does not look like a raw identifier");
+    }
+
+    logLine ("block_plugin", args, true, {}, false);             // catalog op, not undoable
+    emitSnapshotInvalidated();
+    return okResult ("block_plugin");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

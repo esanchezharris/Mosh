@@ -45,12 +45,59 @@ String PluginHost::idFor (const PluginDescription& d)
     return te::createIdentifierString (d);
 }
 
+// The persisted catalog + dead-mans-pedal live BESIDE the per-session dir (under
+// .../Mosh/), so one catalog is shared across the GUI session and the isolated
+// --selftest session and survives both.
+File PluginHost::catalogFile() const
+{
+    return File::getSpecialLocation (File::userApplicationDataDirectory)
+               .getChildFile ("Mosh").getChildFile ("plugin-catalog.xml");
+}
+
+File PluginHost::deadMansPedal() const
+{
+    return File::getSpecialLocation (File::userApplicationDataDirectory)
+               .getChildFile ("Mosh").getChildFile ("plugin-scan-inflight.txt");
+}
+
+void PluginHost::loadCatalog()
+{
+    auto f = catalogFile();
+    if (! f.existsAsFile()) return;
+    if (auto xml = parseXML (f))                     // restores BOTH types and the blocklist
+        engine.getPluginManager().knownPluginList.recreateFromXml (*xml);
+}
+
+void PluginHost::saveCatalog()
+{
+    auto f = catalogFile();
+    f.getParentDirectory().createDirectory();
+    if (auto xml = engine.getPluginManager().knownPluginList.createXml())
+        xml->writeTo (f);
+}
+
+// If the pedal file survived from the last run, the plugin named in it crashed
+// (or hung) mid-scan -> blocklist it so it is skipped from now on, then clear the
+// pedal. This is the safety net that makes AU cataloging non-fatal.
+void PluginHost::recoverFromDeadMansPedal()
+{
+    auto f = deadMansPedal();
+    if (! f.existsAsFile()) return;
+    const auto crasherId = f.loadFileAsString().trim();
+    if (crasherId.isNotEmpty())
+    {
+        engine.getPluginManager().knownPluginList.addToBlacklist (crasherId);
+        saveCatalog();
+    }
+    f.deleteFile();
+}
+
 void PluginHost::initialise()
 {
     if (initialised)
         return;
 
-    // Scan in-process only (our curated scanFile() path) — avoid the engine
+    // Scan in-process only (our curated scanFile() path) -- avoid the engine
     // spawning a child Mosh for out-of-process scanning, which deadlocks against
     // the single-instance lock in headless --selftest/--demo runs.
     engine.getPluginManager().setUsesSeparateProcessForScanning (false);
@@ -60,6 +107,32 @@ void PluginHost::initialise()
     // Register Mosh's built-in Tier-A neural insert (04 §2.2) once.
     engine.getPluginManager().createBuiltInType<NeuralInsertPlugin>();
 
+    // A pedal left from the previous run means a component crashed mid-scan ->
+    // quarantine it before we scan anything (INS-005 crash recovery).
+    recoverFromDeadMansPedal();
+
+    // Restore the persisted catalog. recreateFromXml brings back both the types
+    // and the blocklist in one shot, so launch 2+ is instant and quarantines stick.
+    loadCatalog();
+
+    // Cold catalog -> populate it. The curated VST3 sweep is cheap + safe and
+    // always runs on the message thread. AU is the slow/risky path: only when
+    // explicitly opted in (MOSH_SCAN_AU=1), and we run it inline here ONLY for the
+    // opt-in interactive case -- the dead-mans-pedal makes a crasher recoverable.
+    // --selftest never sets MOSH_SCAN_AU, so the harness performs NO AU sweep.
+    if (engine.getPluginManager().knownPluginList.getNumTypes() == 0)
+    {
+        scanCuratedVST3();
+        if (SystemStats::getEnvironmentVariable ("MOSH_SCAN_AU", {}) == "1")
+            scanAUComponents();
+        saveCatalog();
+    }
+
+    initialised = true;
+}
+
+void PluginHost::scanCuratedVST3()
+{
     // Curated fast in-process scan. Bundles without VST3 moduleinfo require
     // MOSH_SCAN_SLOW_VST3=1 because JUCE's slow scan leaves Debug shutdown
     // assertion/leak noise in headless gates.
@@ -77,8 +150,80 @@ void PluginHost::initialise()
         if (sys.exists())      scanFile (sys);
         else if (usr.exists()) scanFile (usr);
     }
+}
 
-    initialised = true;
+// AudioUnit cataloging (INS-002). UNLIKE VST3 there is no moduleinfo.json
+// fast-path: findAllTypesForFile (via scanAndAddFile) ALWAYS instantiates the
+// component, so a bad one can hang or hard-crash.
+//
+// HONEST CAVEAT: JUCE's AudioPluginFormat::createInstanceFromDescription marshals
+// component instantiation BACK to the message thread, so a HANGING AU will still
+// freeze the UI even though this function is called from a background thread.  There
+// is NO per-component timeout -- a hang requires a forced app restart.  Only a CRASH
+// is recoverable: the dead-mans-pedal names the current id; on the next launch
+// recoverFromDeadMansPedal() quarantines it so it is never loaded again.
+//
+// Summary of mitigations (all that are practically achievable with stock JUCE):
+//   * a dead-mans-pedal naming the id we are about to load, deleted on clean
+//     return -> a crasher is blocklisted on the NEXT launch.
+//   * repeated in-session rescans call recoverFromDeadMansPedal() first (rescan()).
+//   * already-blocklisted ids are skipped.
+//   * this function MUST be called from a background thread (MoshOps enforces this).
+//   * only ONE Mosh process should run this at a time (shared pedal file, no lock).
+// v0 scope: AUv2 .component only (allowAsync=false). AUv3 (.appex) is a later rung.
+void PluginHost::scanAUComponents()
+{
+   #if JUCE_PLUGINHOST_AU && JUCE_MAC
+    AudioUnitPluginFormat au;
+
+    // Cheap enumeration -- AudioComponentFindNext, no component load. Returns
+    // 'AudioUnit:...' identifier strings (NOT file paths).
+    const auto ids = au.searchPathsForPlugins (FileSearchPath(), false, false);
+
+    auto& list = engine.getPluginManager().knownPluginList;
+    // Snapshot the blocklist by value. Holding a const-ref across the scan loop
+    // is a data race: the message thread can call addToBlacklist() at any time and
+    // getBlacklistedFiles() takes no lock in this JUCE build.
+    const juce::StringArray blocked = list.getBlacklistedFiles();
+    auto pedal = deadMansPedal();
+
+    for (auto& id : ids)
+    {
+        if (blocked.contains (id))
+            continue;   // a prior crasher -- never load it again
+
+        // Arm the pedal: if loading this id crashes/hangs, the file survives and
+        // names the culprit so the next launch quarantines it.
+        pedal.replaceWithText (id);
+
+        OwnedArray<PluginDescription> found;
+        list.scanAndAddFile (id, true /*dontRescanIfAlreadyInList*/, found, au);
+
+        pedal.deleteFile();   // clean return -> disarm
+    }
+   #endif
+}
+
+int PluginHost::rescan (bool clearFirst, bool includeVST3, bool includeAU)
+{
+    // Re-arm crash recovery BEFORE sweeping AUs.  recoverFromDeadMansPedal() runs
+    // once in initialise() for the launch-time case; repeated in-session rescans
+    // (e.g. user-triggered rescan_plugins) need the same protection so a crasher
+    // detected by a previous in-session scan is quarantined before the next sweep.
+    if (includeAU)
+        recoverFromDeadMansPedal();
+
+    auto& list = engine.getPluginManager().knownPluginList;
+    if (clearFirst)
+        list.clear();          // drops types; blocklist is preserved by createXml/recreateFromXml
+
+    if (includeVST3)
+        scanCuratedVST3();
+    if (includeAU)
+        scanAUComponents();    // may run on a background thread (MoshOps drives it there)
+
+    saveCatalog();
+    return list.getNumTypes();
 }
 
 void PluginHost::scanFile (const File& file)
@@ -90,13 +235,46 @@ void PluginHost::scanFile (const File& file)
     VST3PluginFormat vst3;
     OwnedArray<PluginDescription> found;
     vst3.findAllTypesForFile (found, file.getFullPathName());
+    auto& list = engine.getPluginManager().knownPluginList;
     for (auto* d : found)
-        engine.getPluginManager().knownPluginList.addType (*d);
+    {
+        // Honor the blocklist: a manually blocked or crash-recovered plugin must
+        // NOT be re-added on the next scan (the blocklist is keyed on fileOrIdentifier).
+        if (list.getBlacklistedFiles().contains (d->fileOrIdentifier))
+            continue;
+        list.addType (*d);
+    }
 }
 
 Array<PluginDescription> PluginHost::available() const
 {
-    return engine.getPluginManager().knownPluginList.getTypes();
+    // Filter out blocklisted entries: JUCE's getTypes() returns ALL known types
+    // without consulting the blacklist, so we must exclude them here to ensure
+    // list_plugins and the plugin browser never surface a blocked plugin.
+    const auto& list = engine.getPluginManager().knownPluginList;
+    const auto blocked = list.getBlacklistedFiles();
+    Array<PluginDescription> result;
+    for (auto& d : list.getTypes())
+        if (! blocked.contains (d.fileOrIdentifier))
+            result.add (d);
+    return result;
+}
+
+StringArray PluginHost::blocklist() const
+{
+    return engine.getPluginManager().knownPluginList.getBlacklistedFiles();
+}
+
+void PluginHost::blockPlugin (const String& pluginId)
+{
+    engine.getPluginManager().knownPluginList.addToBlacklist (pluginId);
+    saveCatalog();
+}
+
+void PluginHost::clearBlocklist()
+{
+    engine.getPluginManager().knownPluginList.clearBlacklistedFiles();
+    saveCatalog();
 }
 
 bool PluginHost::findDescription (const String& pluginId, PluginDescription& out)
@@ -105,14 +283,19 @@ bool PluginHost::findDescription (const String& pluginId, PluginDescription& out
         if (idFor (d) == pluginId || d.name == pluginId)
             { out = d; return true; }
 
-    // Lazily scan if the id is a VST3 path we haven't indexed yet.
-    File f (pluginId);
-    if (f.existsAsFile() || f.exists())
+    // Lazily scan if the id is an absolute VST3 path we haven't indexed yet.
+    // Guard with an absolute-path check to avoid a JUCE assertion (juce_File.cpp)
+    // which fires when File() is constructed from a non-absolute/non-relative string.
+    if (pluginId.startsWithChar ('/'))
     {
-        scanFile (f);
-        for (auto& d : available())
-            if (idFor (d) == pluginId || d.fileOrIdentifier == pluginId)
-                { out = d; return true; }
+        File f (pluginId);
+        if (f.existsAsFile() || f.exists())
+        {
+            scanFile (f);
+            for (auto& d : available())
+                if (idFor (d) == pluginId || d.fileOrIdentifier == pluginId)
+                    { out = d; return true; }
+        }
     }
     return false;
 }

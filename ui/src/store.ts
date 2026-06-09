@@ -6,6 +6,7 @@ import {
 import type {
   Snapshot, Transport, MoshEvent, CommandResult, AvailablePlugin,
   BuiltinPlugin, AvailableColor, RenderQA, Level, AudioDevices, Clip,
+  PluginCounts, PluginBlockEntry,
 } from "./types";
 import type { RemoteStatus } from "./bridge";
 import { type SnapDiv, snapStep, meterFrom } from "./time";
@@ -33,6 +34,9 @@ type State = {
   selectedTrackId: string | null;
   availablePlugins: AvailablePlugin[];
   availableBuiltins: BuiltinPlugin[];
+  pluginCounts: PluginCounts | null;          // per-format catalog counts (INS-005)
+  pluginBlocklist: PluginBlockEntry[];        // quarantined plugins (INS-005)
+  scanProgress: { format: string; done: boolean } | null; // transient rescan state
   browserOpen: boolean;
   renderProgress: Record<string, number>; // clipId → 0..1 (Tier-B render)
   availableColors: AvailableColor[];       // SA3 colour rack (from list_colors)
@@ -80,6 +84,11 @@ type State = {
   closeAutomation: () => void;
   openBrowser: () => void;
   closeBrowser: () => void;
+  // INS-005 — plugin scan / blocklist management (all via exec; UI-local view state otherwise).
+  rescanPlugins: (format?: "vst3" | "au" | "all") => Promise<void>;
+  loadBlocklist: () => Promise<void>;
+  clearBlocklist: () => Promise<void>;
+  refreshPluginList: () => Promise<void>;
   loadColors: () => void;
   loadAudioDevices: () => Promise<void>;   // lazy + on-demand (force re-fetch after a device change)
   setLab: (b: boolean) => void;
@@ -111,6 +120,9 @@ export const useStore = create<State>((set, get) => ({
   selectedTrackId: null,
   availablePlugins: [],
   availableBuiltins: [],
+  pluginCounts: null,
+  pluginBlocklist: [],
+  scanProgress: null,
   browserOpen: false,
   renderProgress: {},
   availableColors: [],
@@ -160,6 +172,15 @@ export const useStore = create<State>((set, get) => ({
         const tracks: Record<string, Level> = {};
         for (const t of p.tracks ?? []) tracks[t.id] = { l: t.l, r: t.r };
         set({ levels: { tracks, master: p.master ?? { l: -100, r: -100 } } });
+      } else if (ev.type === "plugin_scan_progress") {
+        // INS-005 — async (AU) rescan lifecycle. On done, refresh the catalog list.
+        const p = ev.payload as { format: string; done: boolean };
+        if (p.done) {
+          set({ scanProgress: null });
+          void get().refreshPluginList();
+        } else {
+          set({ scanProgress: { format: p.format, done: false } });
+        }
       } else if (ev.type === "layer_render_progress") {
         const p = ev.payload as { clipId: string; progress: number };
         set((s) => ({ renderProgress: { ...s.renderProgress, [p.clipId]: p.progress } }));
@@ -266,13 +287,7 @@ export const useStore = create<State>((set, get) => ({
   closeAutomation: () => set({ automationTrackId: null }),
   openBrowser: () => {
     set({ browserOpen: true });
-    if (get().availablePlugins.length === 0)
-      void executeCommand<CommandResult<{ plugins: AvailablePlugin[] }>>({
-        command: "list_plugins",
-        args: {},
-      }).then((res) => {
-        if (res.ok && res.data) set({ availablePlugins: res.data.plugins });
-      });
+    if (get().availablePlugins.length === 0) void get().refreshPluginList();
     // Built-in palette (instruments + effects shipped inside the engine).
     if (get().availableBuiltins.length === 0)
       void executeCommand<CommandResult<{ plugins: BuiltinPlugin[] }>>({
@@ -283,6 +298,44 @@ export const useStore = create<State>((set, get) => ({
       });
   },
   closeBrowser: () => set({ browserOpen: false }),
+
+  // Fetch the scanned catalog + per-format counts (INS-005). Always overwrites —
+  // small list, and a rescan can grow/shrink it.
+  refreshPluginList: async () => {
+    const res = await executeCommand<
+      CommandResult<{ plugins: AvailablePlugin[]; counts: PluginCounts }>
+    >({ command: "list_plugins", args: {} });
+    if (res.ok && res.data)
+      set({ availablePlugins: res.data.plugins, pluginCounts: res.data.counts ?? null });
+  },
+
+  // INS-005 — re-enumerate the catalog. AU is the slow/risky path (the backend
+  // runs it off the message thread); we refresh the list when the scan reports done.
+  rescanPlugins: async (format = "all") => {
+    set({ scanProgress: { format, done: false } });
+    const res = await get().exec("rescan_plugins", { format });
+    // Inline/VST3 rescans return done immediately; AU rescans complete via the
+    // 'plugin_scan_progress' event (see init()).
+    const status = (res.data as { status?: string } | undefined)?.status;
+    if (status !== "scanning") {
+      set({ scanProgress: null });
+      await get().refreshPluginList();
+    }
+  },
+
+  loadBlocklist: async () => {
+    const res = await executeCommand<CommandResult<{ blocklist: PluginBlockEntry[] }>>({
+      command: "get_plugin_blocklist",
+      args: {},
+    });
+    if (res.ok && res.data) set({ pluginBlocklist: res.data.blocklist });
+  },
+
+  clearBlocklist: async () => {
+    await get().exec("clear_plugin_blocklist");
+    await get().loadBlocklist();
+    await get().refreshPluginList();
+  },
 
   loadColors: () => {
     if (get().availableColors.length > 0) return;

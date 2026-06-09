@@ -407,6 +407,127 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         }
     }
 
+    // ─── INS-002 / INS-005: AU hosting + plugin scan / blocklist / management ───
+    // Headless-verifiable COMMAND SURFACE only. We do NOT trigger a real AU sweep
+    // (MOSH_SCAN_AU is unset here, so rescan_plugins stays VST3-only + inline) and
+    // we do NOT assert any machine-specific AU content -- only shape/ok, so the
+    // gate stays green on a box with zero .component files.
+    std::cerr << "--- INS-002/INS-005: AU hosting + scan / blocklist ---\n";
+    {
+        // The AudioUnit format is registered (proves the JUCE_PLUGINHOST_AU flag is
+        // live) -- machine-independent; the format object exists even with no AUs.
+        bool auFormatRegistered = false;
+        auto& pfm = eng.engine().getPluginManager().pluginFormatManager;
+        for (int i = 0; i < pfm.getNumFormats(); ++i)
+            if (pfm.getFormat (i)->getName() == "AudioUnit") auFormatRegistered = true;
+       #if JUCE_PLUGINHOST_AU
+        check (auFormatRegistered, "AudioUnit format registered in the format manager");
+       #else
+        std::cerr << "  (JUCE_PLUGINHOST_AU off in this build -- skipping AU format check)\n";
+       #endif
+
+        // list_plugins now carries a per-format counts object + a format field per entry.
+        auto lp2 = cmd (ops, "list_plugins");
+        check (ok (lp2), "list_plugins ok (INS-005)");
+        auto counts = lp2["data"].getProperty ("counts", var());
+        check (counts.isObject(), "list_plugins payload carries a counts object");
+        const int total  = (int) counts.getProperty ("total", -1);
+        const int nList  = lp2["data"].getProperty ("plugins", var()).size();
+        check (total == nList, "counts.total == plugins array size");
+        check ((int) counts.getProperty ("vst3", -1) >= 0
+            && (int) counts.getProperty ("au", -1) >= 0, "counts.vst3 and counts.au are present");
+        // Every entry carries a format field (VST3 / AudioUnit).
+        bool allHaveFormat = true;
+        { auto pv = lp2["data"].getProperty ("plugins", var());
+          if (auto* arr = pv.getArray())
+            for (auto& p : *arr)
+                if (p.getProperty ("format", var()).toString().isEmpty()) allHaveFormat = false; }
+        check (allHaveFormat, "every list_plugins entry has a non-empty format field");
+
+        // rescan_plugins (VST3-only, inline) dispatches + returns ok with a count.
+        // Idempotent: the catalog must not shrink across a rescan.
+        auto rs = cmd (ops, "rescan_plugins", objN ({{ "format", "vst3" }, { "wait", true }}));
+        check (ok (rs), "rescan_plugins (vst3) ok");
+        check ((int) rs["data"].getProperty ("count", -1) >= total, "rescan_plugins reports a count (>= prior total)");
+
+        // get_plugin_blocklist returns a well-formed (possibly empty) array.
+        auto gb = cmd (ops, "get_plugin_blocklist");
+        check (ok (gb), "get_plugin_blocklist ok");
+        check (gb["data"].getProperty ("blocklist", var()).isArray(), "get_plugin_blocklist returns an array");
+
+        // block_plugin real round-trip: prefer a VST3 actually in the catalog so
+        // we exercise the resolve-to-fileOrIdentifier path (fix for INS-005 id-namespace
+        // mismatch).  Fall back to a raw "AudioUnit:..." id if the catalog is empty
+        // (e.g. on a box with no VST3 bundles present), which is accepted as a
+        // raw-identifier direct block.  Never assert machine-specific content.
+        {
+            // Snapshot the catalog before we touch it.
+            auto lp3 = cmd (ops, "list_plugins");
+            auto pv  = lp3["data"].getProperty ("plugins", var());
+            String blockTarget;   // the UI-facing id we will pass to block_plugin
+            bool   useRealEntry = false;
+            if (auto* arr = pv.getArray())
+            {
+                for (auto& p : *arr)
+                {
+                    if (p.getProperty ("format", var()).toString() == "VST3")
+                    {
+                        blockTarget  = p.getProperty ("id", var()).toString();
+                        useRealEntry = true;
+                        break;
+                    }
+                }
+            }
+            // Fall back: a raw "AudioUnit:..." string is accepted as a direct block
+            // (no catalog lookup required, as per cmdBlockPlugin implementation).
+            const String fallbackId = "AudioUnit:Effect/aufx,fake,MOSH";
+            if (blockTarget.isEmpty())
+                blockTarget = fallbackId;
+
+            // Calling block_plugin with a bogus (non-path, non-AU, non-VST3-id)
+            // string must produce errResult (validates the bad-id path).
+            check (! ok (cmd (ops, "block_plugin", args1 ("pluginId", "not-a-real-plugin-id"))),
+                   "block_plugin rejects an unresolvable id with errResult");
+
+            // block_plugin with a valid target must succeed.
+            check (ok (cmd (ops, "block_plugin", args1 ("pluginId", blockTarget))),
+                   "block_plugin ok (real catalog entry or raw AU id)");
+
+            // The blocked entry must appear in get_plugin_blocklist.
+            // For a real catalog entry the 'id' field is the UI-facing id (idFor form).
+            // For the raw AU fallback the 'id' field equals the raw string (no catalog match).
+            bool inBlock = false;
+            { auto bl = cmd (ops, "get_plugin_blocklist")["data"].getProperty ("blocklist", var());
+              if (auto* arr = bl.getArray())
+                for (auto& e : *arr)
+                    if (e.getProperty ("id",    var()).toString() == blockTarget ||
+                        e.getProperty ("rawId", var()).toString() == blockTarget) inBlock = true; }
+            check (inBlock, "blocked id appears in get_plugin_blocklist");
+
+            // If we blocked a real catalog entry it must have disappeared from list_plugins.
+            if (useRealEntry)
+            {
+                auto lp4 = cmd (ops, "list_plugins");
+                auto pv4 = lp4["data"].getProperty ("plugins", var());
+                bool stillPresent = false;
+                if (auto* arr = pv4.getArray())
+                    for (auto& p : *arr)
+                        if (p.getProperty ("id", var()).toString() == blockTarget) stillPresent = true;
+                check (! stillPresent, "blocked VST3 removed from list_plugins immediately");
+            }
+        }
+
+        // clear_plugin_blocklist empties it again.
+        check (ok (cmd (ops, "clear_plugin_blocklist")), "clear_plugin_blocklist ok");
+        { auto bl = cmd (ops, "get_plugin_blocklist")["data"].getProperty ("blocklist", var());
+          check (bl.isArray() && bl.size() == 0, "blocklist empty after clear_plugin_blocklist"); }
+
+        // READ-ONLY proof: get_plugin_blocklist must NOT be logged (would pollute
+        // nothing here, but the contract is read-only).
+        auto plog = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
+        check (! plog.contains ("get_plugin_blocklist"), "get_plugin_blocklist is READ-ONLY (not logged)");
+    }
+
     // ─── Wave 2: tempo / time-signature / metronome / record / navigation ───
     std::cerr << "--- Wave 2: tempo / meter / metronome / nav ---\n";
     {

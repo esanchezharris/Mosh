@@ -15,14 +15,48 @@ public:
     explicit PluginHost (te::Engine& e);
     ~PluginHost();
 
-    /** Initialise formats + scan VST3s into the KnownPluginList. Scanning is
-        in-process and curated to avoid the cost/crash risk of a full blind
-        scan; bundles without VST3 moduleinfo use the slow scan only when
-        MOSH_SCAN_SLOW_VST3=1 is set. */
+    /** Initialise formats + load/scan plugins into the KnownPluginList. The
+        catalog is PERSISTED (plugin-catalog.xml beside the session dir) and
+        restored on startup; the curated VST3 scan runs only on a cold catalog.
+        Scanning is in-process and curated to avoid the cost/crash risk of a
+        full blind scan; bundles without VST3 moduleinfo use the slow scan only
+        when MOSH_SCAN_SLOW_VST3=1 is set.
+        AU cataloging is an opt-in (MOSH_SCAN_AU=1) experimental feature.
+        WARNING: a misbehaving AudioUnit can hang the UI during scan -- JUCE
+        marshals component instantiation to the message thread and there is NO
+        per-component timeout; a HANG requires a forced app restart.  Only
+        CRASHes are recovered on the next launch via the dead-mans-pedal/blocklist.
+        VST3 (the primary format) is always scanned and safe.
+        NOTE: only one Mosh process should scan AUs at a time -- the dead-mans-pedal
+        file is shared under ~/Library/Application Support/Mosh/ and is not
+        multi-process-safe.  INS-002 / INS-005. */
     void initialise();
+
+    /** Re-enumerate the catalog (INS-005). VST3 (curated, fast) and/or AudioUnit
+        (env/opt-in, slow + risky) are cataloged into the KnownPluginList and the
+        result persisted.
+        IMPORTANT: when includeAU is true, this function MUST be called from a
+        background thread.  JUCE marshals AU component instantiation to the message
+        thread and there is no per-component timeout, so a hanging AU stalls the UI.
+        Only crashes are recovered on the next launch (dead-mans-pedal/blocklist);
+        a hang requires a forced restart.  MoshOps.cmdRescanPlugins() always routes
+        AU-including scans to a background std::thread for this reason.
+        VST3-only rescans (includeAU=false) are fast + safe on any thread.
+        @param clearFirst  drop the existing types before scanning.
+        @param includeVST3  re-run the curated VST3 sweep (cheap, safe).
+        @param includeAU    also enumerate+catalog .component AudioUnits.
+        @returns the number of types in the catalog after the scan. */
+    int rescan (bool clearFirst, bool includeVST3, bool includeAU);
 
     /** Available plugin descriptions (from the KnownPluginList). */
     juce::Array<juce::PluginDescription> available() const;
+
+    /** The plugin blocklist (INS-005) — file identifiers a crashing scan quarantined
+        (via the dead-mans-pedal) or the user blocked manually. These never appear in
+        available()/list_plugins. */
+    juce::StringArray blocklist() const;
+    void blockPlugin   (const juce::String& pluginId);   // manual quarantine
+    void clearBlocklist();                                // un-quarantine all
 
     /** Find a description by Tracktion identifier string; scans the file lazily
         if the id looks like a path we haven't seen. Slow VST3 scanning is
@@ -36,7 +70,14 @@ public:
     static juce::String idFor (const juce::PluginDescription&);
 
 private:
-    void scanFile (const juce::File&);
+    void scanFile (const juce::File&);                   // VST3 (path-based)
+    void scanCuratedVST3();                              // the curated VST3 sweep
+    void scanAUComponents();                             // AudioUnit (.component) catalog (slow/risky)
+    void loadCatalog();                                  // recreateFromXml if present
+    void saveCatalog();                                  // createXml → plugin-catalog.xml
+    void recoverFromDeadMansPedal();                     // blocklist a prior crasher, then clear
+    juce::File catalogFile()   const;
+    juce::File deadMansPedal() const;
     void closeEditorByKey (const juce::String& key);
 
     te::Engine& engine;
