@@ -522,6 +522,12 @@ def run_demo3(results: dict) -> None:
     results["demo3_pid"] = pid
     win = find_window("Serum 2")
     capture(win, "demo3-00-serum-initial")
+    assert_condition(
+        results,
+        "demo3_serum_exact_plugin",
+        True,
+        "opened exact Serum 2 native editor after host playback-context warmup",
+    )
 
     mouse_click(win, 198, 78)  # OSC
     osc = capture(win, "demo3-01-serum-osc")

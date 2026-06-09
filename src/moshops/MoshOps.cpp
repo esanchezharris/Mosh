@@ -8,6 +8,72 @@ namespace mosh
 {
 using namespace juce;
 
+namespace
+{
+    NeuralInsertPlugin* asNeural (te::Plugin* p) { return dynamic_cast<NeuralInsertPlugin*> (p); }
+
+    // Tracktion's compiled-in built-in plugin palette (registered unconditionally
+    // by PluginManager). These ship inside the engine — no scan, no third-party
+    // dependency — so the FX palette and built-in instruments are pure surface
+    // work over the existing plugin command path. xmlTypeName strings are the
+    // stable serialization ids createNewPlugin(type, {}) dispatches on.
+    struct BuiltinSpec { const char* type; const char* name; const char* category; bool isInstrument; };
+    static const BuiltinSpec kBuiltins[] = {
+        { "4osc",         "4OSC Synth",            "Instrument", true  },
+        { "sampler",      "Sampler",               "Instrument", true  },
+        { "4bandEq",      "4-Band EQ",             "EQ",         false },
+        { "compressor",   "Compressor",            "Dynamics",   false },
+        { "reverb",       "Reverb",                "Reverb",     false },
+        { "delay",        "Delay",                 "Delay",      false },
+        { "chorus",       "Chorus",                "Modulation", false },
+        { "phaser",       "Phaser",                "Modulation", false },
+        { "lowpass",      "Low / High-Pass Filter","Filter",     false },
+        { "pitchShifter", "Pitch Shifter",         "Pitch",      false },
+    };
+
+    const BuiltinSpec* findBuiltin (const juce::String& type)
+    {
+        for (auto& b : kBuiltins)
+            if (type == b.type)
+                return &b;
+        return nullptr;
+    }
+
+    bool isSerumPlugin (te::ExternalPlugin& plugin)
+    {
+        const auto name = plugin.getName();
+        const auto vendor = plugin.getVendor();
+        const auto file = plugin.desc.fileOrIdentifier;
+        return vendor == "Xfer Records"
+               && (name == "Serum 2"
+                   || name == "Serum 2 FX"
+                   || file.containsIgnoreCase ("Serum2.vst3"));
+    }
+
+    void addExternalPluginMetadata (DynamicObject& o, te::ExternalPlugin& plugin)
+    {
+        o.setProperty ("manufacturer", plugin.getVendor());
+        o.setProperty ("file", plugin.desc.fileOrIdentifier);
+        o.setProperty ("identifier", te::createIdentifierString (plugin.desc));
+        o.setProperty ("numInputs", plugin.getNumInputs());
+        o.setProperty ("numOutputs", plugin.getNumOutputs());
+        o.setProperty ("pluginInstanceLoaded", plugin.getAudioPluginInstance() != nullptr);
+        o.setProperty ("isNonRealtime", plugin.getAudioPluginInstance() != nullptr
+                                            && plugin.getAudioPluginInstance()->isNonRealtime());
+    }
+
+    String findSerumRealtimeRenderReason (te::Edit& edit)
+    {
+        for (auto* track : te::getAudioTracks (edit))
+            for (auto* plugin : track->pluginList.getPlugins())
+                if (auto* ext = dynamic_cast<te::ExternalPlugin*> (plugin))
+                    if (ext->isEnabled() && isSerumPlugin (*ext))
+                        return "Serum compatibility: " + ext->getName();
+
+        return {};
+    }
+}
+
 MoshOps::MoshOps (MoshEngine& engineToUse)
     : eng (engineToUse), pluginHost (engineToUse.engine())
 {
@@ -60,7 +126,9 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "set_track_solo")    return cmdSetTrackSolo (args);
     if (name == "get_clip_peaks")    return cmdGetClipPeaks (args);
     if (name == "list_plugins")      return cmdListPlugins (args);
+    if (name == "list_builtins")     return cmdListBuiltins (args);
     if (name == "load_plugin")       return cmdLoadPlugin (args);
+    if (name == "load_builtin")      return cmdLoadBuiltin (args);
     if (name == "remove_plugin")     return cmdRemovePlugin (args);
     if (name == "reorder_plugin")    return cmdReorderPlugin (args);
     if (name == "set_plugin_param")  return cmdSetPluginParam (args);
@@ -467,6 +535,54 @@ juce::var MoshOps::cmdListPlugins (const juce::var&)
     return okResult ("list_plugins", var (data));
 }
 
+juce::var MoshOps::cmdListBuiltins (const juce::var&)
+{
+    // The engine's compiled-in plugin palette (instruments + effects). Static —
+    // no scan needed; the UI groups these by category alongside scanned VST3/AUs.
+    juce::Array<var> plugins;
+    for (auto& b : kBuiltins)
+    {
+        auto* o = new DynamicObject();
+        o->setProperty ("type", b.type);
+        o->setProperty ("name", b.name);
+        o->setProperty ("category", b.category);
+        o->setProperty ("isInstrument", b.isInstrument);
+        o->setProperty ("builtin", true);
+        plugins.add (var (o));
+    }
+    auto* data = new DynamicObject();
+    data->setProperty ("plugins", plugins);
+    return okResult ("list_builtins", var (data));
+}
+
+juce::var MoshOps::cmdLoadBuiltin (const juce::var& args)
+{
+    auto* track = findTrack (args.getProperty ("trackId", var()).toString());
+    if (track == nullptr) return errResult ("load_builtin", "no track");
+
+    const auto type = args.getProperty ("type", var()).toString();
+    const auto* spec = findBuiltin (type);
+    if (spec == nullptr) return errResult ("load_builtin", "unknown builtin: " + type);
+
+    undoManager().beginNewTransaction ("load_builtin");
+    // Same cache path as load_plugin — the inserted plugin IS the one we hold.
+    auto plugin = eng.edit().getPluginCache().createNewPlugin (type, {});
+    if (plugin == nullptr) return errResult ("load_builtin", "create failed: " + type);
+
+    int index = (int) args.getProperty ("index", -1);
+    if (index < 0) index = track->pluginList.getPlugins().size();   // append
+    track->pluginList.insertPlugin (plugin, index, nullptr);
+
+    auto* data = new DynamicObject();
+    data->setProperty ("index", track->pluginList.indexOf (plugin.get()));
+    data->setProperty ("name", plugin->getName());
+    data->setProperty ("type", type);
+    data->setProperty ("isInstrument", spec->isInstrument);
+    logLine ("load_builtin", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("load_builtin", var (data));
+}
+
 juce::var MoshOps::cmdLoadPlugin (const juce::var& args)
 {
     auto* track = findTrack (args.getProperty ("trackId", var()).toString());
@@ -491,6 +607,8 @@ juce::var MoshOps::cmdLoadPlugin (const juce::var& args)
     auto* data = new DynamicObject();
     data->setProperty ("index", track->pluginList.indexOf (plugin.get()));
     data->setProperty ("name", plugin->getName());
+    if (auto* ext = dynamic_cast<te::ExternalPlugin*> (plugin.get()))
+        addExternalPluginMetadata (*data, *ext);
     logLine ("load_plugin", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("load_plugin", var (data));
@@ -563,9 +681,18 @@ juce::var MoshOps::cmdOpenPluginEditor (const juce::var& args)
     auto* plugin = findPlugin (args.getProperty ("trackId", var()).toString(),
                                (int) args.getProperty ("index", -1));
     if (plugin == nullptr) return errResult ("open_plugin_editor", "no plugin");
+    const bool contextActiveBefore = eng.edit().getTransport().getCurrentPlaybackContext() != nullptr;
+    if (eng.hasAudio())
+        eng.ensurePlaybackContext();
+    const bool contextActiveAfter = eng.edit().getTransport().getCurrentPlaybackContext() != nullptr;
     pluginHost.openEditor (*plugin);          // native pop-out (not undoable)
     logLine ("open_plugin_editor", args, true, {}, false);
-    return okResult ("open_plugin_editor");
+    auto* data = new DynamicObject();
+    data->setProperty ("audioEnabled", eng.hasAudio());
+    data->setProperty ("playbackContextActiveBefore", contextActiveBefore);
+    data->setProperty ("playbackContextActive", contextActiveAfter);
+    data->setProperty ("plugin", plugin->getName());
+    return okResult ("open_plugin_editor", var (data));
 }
 
 juce::var MoshOps::cmdAddMidiClip (const juce::var& args)
@@ -611,11 +738,6 @@ juce::var MoshOps::cmdAddMidiClip (const juce::var& args)
 // ─────────────────────────────────────────────────────────────────────────────
 // Stage 4 — Tier-A real-time neural insert
 // ─────────────────────────────────────────────────────────────────────────────
-namespace
-{
-    NeuralInsertPlugin* asNeural (te::Plugin* p) { return dynamic_cast<NeuralInsertPlugin*> (p); }
-}
-
 juce::var MoshOps::cmdAddNeuralInsert (const juce::var& args)
 {
     auto* track = findTrack (args.getProperty ("trackId", var()).toString());
@@ -1037,25 +1159,94 @@ juce::var MoshOps::cmdExportAudio (const juce::var& args)
     file.getParentDirectory().createDirectory();
     file.deleteFile();
 
+    const auto requestedMode = args.getProperty ("renderMode", "auto").toString().toLowerCase();
+    if (requestedMode != "auto" && requestedMode != "fast" && requestedMode != "realtime")
+        return errResult ("export_audio", "renderMode must be 'auto', 'fast', or 'realtime'");
+
+    String renderMode = requestedMode;
+    String renderModeReason;
+    if (requestedMode == "auto")
+    {
+        renderModeReason = findSerumRealtimeRenderReason (edit);
+        renderMode = renderModeReason.isNotEmpty() ? "realtime" : "fast";
+        if (renderModeReason.isEmpty())
+            renderModeReason = "no realtime-only hosted plugin detected";
+    }
+    else if (requestedMode == "realtime")
+    {
+        renderModeReason = "requested realtime render";
+    }
+    else
+    {
+        renderModeReason = "requested fast render";
+    }
+
     // Render exclusivity (01 §5): detach the Edit from the device before an
-    // offline render (asserts otherwise). No-op when no device is attached.
+    // offline/realtime export render (asserts otherwise). No-op when no device
+    // is attached.
     edit.getTransport().stop (false, false);
     edit.getTransport().freePlaybackContext();
 
     const double len = juce::jmax (0.1, edit.getLength().inSeconds());
 
-    // Synchronous whole-edit render (useThread=false blocks until the file is
-    // written; the Parameters overload starts a BACKGROUND job and returns early).
-    const bool ok = te::Renderer::renderToFile (edit, file, false)
-                    && file.existsAsFile() && file.getSize() > 0;
+    te::Renderer::Parameters params (edit);
+    params.destFile = file;
+    params.audioFormat = edit.engine.getAudioFileFormatManager().getDefaultFormat();
+    params.bitDepth = 24;
+    params.sampleRateForAudio = edit.engine.getDeviceManager().getSampleRate();
+    if (params.sampleRateForAudio < 7000.0)
+        params.sampleRateForAudio = 44100.0;
+    params.blockSizeForAudio = edit.engine.getDeviceManager().getBlockSize();
+    if (params.blockSizeForAudio <= 0)
+        params.blockSizeForAudio = 512;
+    params.time = { tracktion::TimePosition(), edit.getLength() };
+    params.tracksToDo = te::toBitSet (te::getAllTracks (edit));
+    params.usePlugins = true;
+    params.useMasterPlugins = true;
+    params.createMidiFile = file.hasFileExtension (".mid");
+    params.realTimeRender = renderMode == "realtime";
 
-    logLine ("export_audio", args, ok, ok ? String() : String ("render produced no file"), false);
-    if (! ok) return errResult ("export_audio", "export render failed");
+    String renderError;
+    {
+        const te::Edit::ScopedRenderStatus srs (edit, true);
+        te::TransportControl::stopAllTransports (edit.engine, false, true);
+        te::Renderer::turnOffAllPlugins (edit);
+
+        if (params.tracksToDo.countNumberOfSetBits() > 0
+            && params.destFile.hasWriteAccess()
+            && ! params.destFile.isDirectory())
+        {
+            te::Renderer::RenderTask task ("Mosh export", params, nullptr, nullptr);
+            while (task.runJob() == juce::ThreadPoolJob::jobNeedsRunningAgain)
+            {}
+
+            te::Renderer::turnOffAllPlugins (edit);
+
+            if (task.errorMessage.isNotEmpty())
+            {
+                renderError = task.errorMessage;
+                file.deleteFile();
+            }
+        }
+        else
+        {
+            renderError = "render target is not writable or no tracks are renderable";
+        }
+    }
+
+    const bool ok = renderError.isEmpty() && file.existsAsFile() && file.getSize() > 0;
+
+    logLine ("export_audio", args, ok, ok ? String() : (renderError.isNotEmpty() ? renderError : String ("render produced no file")), false);
+    if (! ok) return errResult ("export_audio", renderError.isNotEmpty() ? renderError : String ("export render failed"));
 
     auto* data = new DynamicObject();
     data->setProperty ("file", file.getFullPathName());
     data->setProperty ("bytes", (juce::int64) file.getSize());
     data->setProperty ("seconds", len);
+    data->setProperty ("renderModeRequested", requestedMode);
+    data->setProperty ("renderMode", renderMode);
+    data->setProperty ("renderModeReason", renderModeReason);
+    data->setProperty ("realTimeRender", params.realTimeRender);
     return okResult ("export_audio", var (data));
 }
 
@@ -1101,8 +1292,15 @@ juce::var MoshOps::pluginToVar (te::Plugin& p, int index)
     o->setProperty ("type", p.getPluginType());
     o->setProperty ("enabled", p.isEnabled());
     auto* ext = dynamic_cast<te::ExternalPlugin*> (&p);
+    const auto* bspec = findBuiltin (p.getPluginType());
     o->setProperty ("external", ext != nullptr);
-    o->setProperty ("isInstrument", ext != nullptr && ext->isSynth());
+    o->setProperty ("builtin", bspec != nullptr);
+    o->setProperty ("isInstrument", (ext != nullptr && ext->isSynth())
+                                        || (bspec != nullptr && bspec->isInstrument));
+    if (bspec != nullptr)
+        o->setProperty ("category", bspec->category);
+    if (ext != nullptr)
+        addExternalPluginMetadata (*o, *ext);
     if (auto* n = asNeural (&p))
     {
         o->setProperty ("neural", n->describe());

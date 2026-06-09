@@ -1,4 +1,5 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import * as QRCode from "qrcode";
 import { useStore } from "./store";
 import { isNative } from "./bridge";
 import { Arrangement } from "./components/Arrangement";
@@ -40,6 +41,7 @@ export function App() {
         </div>
         <Transport />
         <div className="topbar-right">
+          <RemoteCompanion />
           {/* Reserved B-5 / Monster operator slot (deferred — empty in v0). */}
           <span className="b5-slot" title="B-5 / Monster — reserved (deferred)">B-5</span>
           <button className="tool-btn" onClick={() => exec("export_audio", {})} title="Export the mix to WAV">
@@ -65,4 +67,85 @@ export function App() {
       <PluginBrowser />
     </div>
   );
+}
+
+function RemoteCompanion() {
+  const remote = useStore((s) => s.remoteStatus);
+  const start = useStore((s) => s.startRemotePairing);
+  const stop = useStore((s) => s.stopRemote);
+  const [open, setOpen] = useState(false);
+  const [pairingMode, setPairingMode] = useState<"native" | "web">("native");
+
+  const pairing = remote?.pairing;
+  const isRunning = remote?.running ?? false;
+  const code = pairing?.token.slice(0, 6).toUpperCase() ?? "";
+  const expires = pairing ? new Date(pairing.expiresAtMs).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "";
+  const pairingTarget = pairingMode === "web" ? pairing?.webUrl : pairing?.pairingUrl;
+  const [copied, setCopied] = useState(false);
+
+  return (
+    <div className="remote-companion">
+      <button
+        className={`tool-btn remote-btn ${isRunning ? "on" : ""}`}
+        onClick={async () => {
+          if (!isRunning) await start();
+          setOpen((v) => !v);
+        }}
+        title="Pair iPhone companion"
+      >
+        iPhone
+      </button>
+      {open && (
+        <div className="remote-pop">
+          <div className="remote-head">
+            <strong>iPhone Companion</strong>
+            <button className="mini" onClick={() => setOpen(false)}>x</button>
+          </div>
+          {pairing ? (
+            <>
+              <div className="remote-mode" role="group" aria-label="iPhone pairing mode">
+                <button className={pairingMode === "native" ? "active" : ""} onClick={() => setPairingMode("native")}>Native</button>
+                <button className={pairingMode === "web" ? "active" : ""} onClick={() => setPairingMode("web")}>Safari</button>
+              </div>
+              {pairingTarget && <PairingQRCode url={pairingTarget} />}
+              <div className="remote-code">{code}</div>
+              <div className="remote-meta">{pairing.host}:{pairing.port} · expires {expires}</div>
+              <button
+                className="remote-copy"
+                onClick={async () => {
+                  if (!pairingTarget) return;
+                  await navigator.clipboard.writeText(pairingTarget);
+                  setCopied(true);
+                  window.setTimeout(() => setCopied(false), 1400);
+                }}
+              >
+                {copied ? "Copied" : `Copy ${pairingMode === "web" ? "Safari" : "native"} link`}
+              </button>
+              <button className="remote-stop" onClick={stop}>Stop remote</button>
+            </>
+          ) : (
+            <button className="remote-start" onClick={start}>Start pairing</button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PairingQRCode({ url }: { url: string }) {
+  const [dataUrl, setDataUrl] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    void QRCode.toDataURL(url, {
+      margin: 1,
+      width: 180,
+      color: { dark: "#111318", light: "#ffffff" },
+    }).then((next) => {
+      if (!cancelled) setDataUrl(next);
+    });
+    return () => { cancelled = true; };
+  }, [url]);
+
+  return dataUrl ? <img className="remote-qr" src={dataUrl} alt="MOSH iPhone pairing QR code" /> : null;
 }

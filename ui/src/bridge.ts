@@ -44,6 +44,27 @@ export type AppInfo = {
   backend: string;
 };
 
+export type RemotePairingInfo = {
+  host: string;
+  port: number;
+  token: string;
+  expiresAtMs: number;
+  pairingUrl: string;
+  webUrl: string;
+};
+
+export type RemoteStatus = {
+  running: boolean;
+  port: number;
+  pairing?: RemotePairingInfo;
+};
+
+export type RemoteResult<T = unknown> = {
+  ok: boolean;
+  data?: T;
+  error?: string;
+};
+
 export async function ping(): Promise<AppInfo> {
   if (!isNative())
     return { ok: false, app: "Mosh", version: "dev", stage: 0, backend: "web" };
@@ -60,6 +81,21 @@ export async function executeCommand<T = unknown>(command: unknown): Promise<T> 
 export async function getSnapshot<T = unknown>(): Promise<T> {
   if (!isNative()) throw new Error("get_snapshot: not running in JUCE WebView");
   return (await native("get_snapshot")()) as T;
+}
+
+export async function startRemotePairing(): Promise<RemoteResult<RemoteStatus>> {
+  if (!isNative()) throw new Error("remote_start_pairing: not running in JUCE WebView");
+  return (await native("remote_start_pairing")({})) as RemoteResult<RemoteStatus>;
+}
+
+export async function stopRemoteCompanion(): Promise<RemoteResult> {
+  if (!isNative()) throw new Error("remote_stop: not running in JUCE WebView");
+  return (await native("remote_stop")({})) as RemoteResult;
+}
+
+export async function getRemoteStatus(): Promise<RemoteResult<RemoteStatus>> {
+  if (!isNative()) throw new Error("remote_status: not running in JUCE WebView");
+  return (await native("remote_status")()) as RemoteResult<RemoteStatus>;
 }
 
 /** Subscribe to a typed backend event (snapshot+events feed, 02 §4).

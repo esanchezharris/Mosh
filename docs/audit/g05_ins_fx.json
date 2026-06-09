@@ -1,0 +1,208 @@
+{
+  "group": "INS, FX",
+  "features": [
+    {
+      "id": "INS-001",
+      "capability": "present",
+      "capabilityEvidence": "cmdLoadPlugin MoshOps.cpp:509 creates te::ExternalPlugin via getPluginCache; VST3 scanned in PluginHost.cpp:90; state persists via Edit tree",
+      "surface": "present",
+      "surfaceEvidence": "PluginBrowser.tsx load_plugin; Rack.tsx PluginCard open_plugin_editor/remove/reorder; '+ Plugin' button opens browser"
+    },
+    {
+      "id": "INS-002",
+      "capability": "partial",
+      "capabilityEvidence": "JUCE_PLUGINHOST_AU=1 (CMakeLists.txt:90) compiles AU hosting, but PluginHost::scanFile only uses VST3PluginFormat (PluginHost.cpp:90); no AU scan path so no AU is cataloged/loadable",
+      "surface": "missing",
+      "surfaceEvidence": "PluginBrowser only lists list_plugins results (all VST3); curated scan list is all .vst3 (PluginHost.cpp:67); no AU ever appears"
+    },
+    {
+      "id": "INS-003",
+      "capability": "missing",
+      "capabilityEvidence": "No CLAP format anywhere; only VST3PluginFormat scanned and JUCE_PLUGINHOST_VST3/AU set in CMake. none found",
+      "surface": "missing",
+      "surfaceEvidence": "No CLAP affordance in ui/src. none found"
+    },
+    {
+      "id": "INS-004",
+      "capability": "missing",
+      "capabilityEvidence": "JUCE_VST3_CAN_REPLACE_VST2=0 (plugin_fixtures); no VST2 hosting format. none found",
+      "surface": "missing",
+      "surfaceEvidence": "No VST2 affordance in ui/src. none found"
+    },
+    {
+      "id": "INS-005",
+      "capability": "partial",
+      "capabilityEvidence": "PluginHost::initialise scans a hardcoded curated VST3 list (PluginHost.cpp:66-79) into knownPluginList; no rescan/block/validate-isolate; AU/CLAP not scanned",
+      "surface": "partial",
+      "surfaceEvidence": "list_plugins feeds PluginBrowser.tsx (filter, inst/fx tabs) but no rescan, blocklist, or plugin-manager view; just a load picker"
+    },
+    {
+      "id": "INS-006",
+      "capability": "present",
+      "capabilityEvidence": "add_midi_clip MoshOps.cpp:621 adds MIDI; hosting a synth VST3 (isSynth) on the track drives audio; SelfTest.cpp:317-333 verifies instrument plays MIDI",
+      "surface": "partial",
+      "surfaceEvidence": "No dedicated 'instrument track' type; user adds '+ MIDI' (Rack.tsx:51) then loads a synth via browser; isInstrument badge shown but flow is manual two-step"
+    },
+    {
+      "id": "INS-007",
+      "capability": "present",
+      "capabilityEvidence": "Ordered pluginList per track; load/reorder/remove via cmdLoadPlugin/cmdReorderPlugin (MoshOps.cpp:509,553); snapshot lists plugins[] ordered (trackToVar:1284)",
+      "surface": "present",
+      "surfaceEvidence": "Rack.tsx renders chain of PluginCards with reorder '‹/›' buttons (lines 85-86), remove, bypass; per selected track"
+    },
+    {
+      "id": "INS-008",
+      "capability": "missing",
+      "capabilityEvidence": "No preset save/recall command; no getStateInformation/preset handling in PluginHost or MoshOps. none found",
+      "surface": "missing",
+      "surfaceEvidence": "No preset control in Rack.tsx/PluginBrowser.tsx; only native plugin editor's own presets via open_plugin_editor. none found"
+    },
+    {
+      "id": "INS-009",
+      "capability": "partial",
+      "capabilityEvidence": "set_plugin_param (MoshOps.cpp:571) sets automatable params on hosted plugins; params exposed via getAutomatableParameter, but no time-varying automation curve read by engine (one-shot value only)",
+      "surface": "missing",
+      "surfaceEvidence": "No UI calls set_plugin_param (grep ui/src: none); external plugin params[] in snapshot are never rendered as controls or automation targets"
+    },
+    {
+      "id": "INS-010",
+      "capability": "missing",
+      "capabilityEvidence": "setUsesSeparateProcessForScanning(false) (PluginHost.cpp:56); plugins run in-process; no crash isolation/sandbox. none found",
+      "surface": "missing",
+      "surfaceEvidence": "No crashed-plugin reporting in ui/src. none found"
+    },
+    {
+      "id": "INS-011",
+      "capability": "partial",
+      "capabilityEvidence": "Hosted ExternalPlugin latency feeds Tracktion graph PDC implicitly; NeuralInsert reports getLatencySeconds (NeuralInsertPlugin.cpp:102); no explicit per-plugin latency readout aggregation for external plugins",
+      "surface": "missing",
+      "surfaceEvidence": "Only the neural insert shows latency (Rack.tsx:128 'ms'); external plugins expose no latency value in snapshot pluginToVar (MoshOps.cpp:1210) or UI"
+    },
+    {
+      "id": "INS-012",
+      "capability": "missing",
+      "capabilityEvidence": "addExternalPluginMetadata reports numOutputs (MoshOps.cpp:32) but no multi-out routing; instruments feed single track output only. none found",
+      "surface": "missing",
+      "surfaceEvidence": "No output-assignment control in ui/src. none found"
+    },
+    {
+      "id": "INS-013",
+      "capability": "missing",
+      "capabilityEvidence": "No built-in sampler; only NeuralInsertPlugin registered via createBuiltInType (PluginHost.cpp:61). none found",
+      "surface": "missing",
+      "surfaceEvidence": "No sampler in ui/src. none found"
+    },
+    {
+      "id": "INS-014",
+      "capability": "missing",
+      "capabilityEvidence": "No built-in synth (no FourOscPlugin etc.); only the neural insert built-in. Synths come only via hosted VST3 (Vital/Serum) which are third-party. none found",
+      "surface": "missing",
+      "surfaceEvidence": "No built-in synth instrument in ui/src; only hosted VST3 via browser. none found"
+    },
+    {
+      "id": "INS-015",
+      "capability": "missing",
+      "capabilityEvidence": "No built-in drum instrument; no pad/sample mapping code. none found",
+      "surface": "missing",
+      "surfaceEvidence": "No drum instrument in ui/src. none found"
+    },
+    {
+      "id": "INS-016",
+      "capability": "partial",
+      "capabilityEvidence": "PluginHost tracks open editor windows (windowByPlugin map, openEditor/closeEditor, PluginHost.cpp:120-160); single open-at-a-time per plugin, no open/close-all or session restore of windows",
+      "surface": "partial",
+      "surfaceEvidence": "Rack.tsx 'Edit' button opens one editor (open_plugin_editor); no manage-many / close-all / restore-windows affordance in ui/src"
+    },
+    {
+      "id": "FX-001",
+      "capability": "missing",
+      "capabilityEvidence": "No built-in EQ device; only NeuralInsertPlugin built-in (PluginHost.cpp:61). EQ only via hosted third-party VST3/AU. none found",
+      "surface": "missing",
+      "surfaceEvidence": "No EQ device or response curve in ui/src. none found"
+    },
+    {
+      "id": "FX-002",
+      "capability": "missing",
+      "capabilityEvidence": "No built-in compressor; only neural insert built-in. Dynamics only via hosted VST3 (e.g. OTT in curated list, third-party). none found",
+      "surface": "missing",
+      "surfaceEvidence": "No compressor device / gain-reduction meter in ui/src. none found"
+    },
+    {
+      "id": "FX-003",
+      "capability": "missing",
+      "capabilityEvidence": "No built-in reverb device registered. none found",
+      "surface": "missing",
+      "surfaceEvidence": "No reverb device in ui/src. none found"
+    },
+    {
+      "id": "FX-004",
+      "capability": "missing",
+      "capabilityEvidence": "No built-in delay; ValhallaDelay in curated scan list is a third-party hosted VST3, not a built-in Mosh device. none found",
+      "surface": "missing",
+      "surfaceEvidence": "No delay device in ui/src. none found"
+    },
+    {
+      "id": "FX-005",
+      "capability": "missing",
+      "capabilityEvidence": "No built-in chorus/flanger/phaser; TAL-Chorus-LX in curated list is a third-party hosted VST3. none found",
+      "surface": "missing",
+      "surfaceEvidence": "No modulation device in ui/src. none found"
+    },
+    {
+      "id": "FX-006",
+      "capability": "partial",
+      "capabilityEvidence": "NeuralInsertPlugin is a drive-conditioned neural saturator/waveshaper (tanh, applyToBuffer NeuralInsertPlugin.cpp:135-167) adding harmonic content; not a conventional distortion device but does saturate",
+      "surface": "present",
+      "surfaceEvidence": "Rack.tsx '+ Neural' adds it; NeuralBody exposes drive/mix ASTD sliders (Rack.tsx:94-132). It is the only built-in harmonic/drive device exposed"
+    },
+    {
+      "id": "FX-007",
+      "capability": "missing",
+      "capabilityEvidence": "No built-in gate/expander device. none found",
+      "surface": "missing",
+      "surfaceEvidence": "No gate device in ui/src. none found"
+    },
+    {
+      "id": "FX-008",
+      "capability": "missing",
+      "capabilityEvidence": "No built-in limiter device. none found",
+      "surface": "missing",
+      "surfaceEvidence": "No limiter device in ui/src. none found"
+    },
+    {
+      "id": "FX-009",
+      "capability": "partial",
+      "capabilityEvidence": "VolumeAndPanPlugin provides gain+pan per track (ensureVolumePlugin MoshOps.cpp:1196; setVolumeDb/setPan); no width or mono-fold utility device",
+      "surface": "partial",
+      "surfaceEvidence": "Track-header volume/pan via set_track_volume/pan exist, but no standalone utility device (gain/pan/width/mono) in the rack UI"
+    },
+    {
+      "id": "FX-010",
+      "capability": "missing",
+      "capabilityEvidence": "No sidechain input routing for effects; no external sidechain source plumbing. none found",
+      "surface": "missing",
+      "surfaceEvidence": "No sidechain source selector in ui/src. none found"
+    },
+    {
+      "id": "FX-011",
+      "capability": "present",
+      "capabilityEvidence": "bypass_plugin sets setEnabled(!bypassed) (MoshOps.cpp:589); neural insert has dry/wet 'mix' param (NeuralInsertPlugin.cpp:62,167). Bypass applies to any hosted device",
+      "surface": "present",
+      "surfaceEvidence": "Rack.tsx PluginCard pdot toggles bypass_plugin (line 73); neural 'mix' slider is wet/dry (Rack.tsx:99). External-plugin wet/dry not surfaced (no mix), only bypass"
+    },
+    {
+      "id": "FX-012",
+      "capability": "missing",
+      "capabilityEvidence": "No built-in multiband device (OTT is third-party VST3 in curated list, not built-in). none found",
+      "surface": "missing",
+      "surfaceEvidence": "No multiband device in ui/src. none found"
+    },
+    {
+      "id": "FX-013",
+      "capability": "missing",
+      "capabilityEvidence": "No mid/side encode/decode processing in any device. none found",
+      "surface": "missing",
+      "surfaceEvidence": "No mid/side mode in ui/src. none found"
+    }
+  ]
+}

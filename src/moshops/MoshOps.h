@@ -61,7 +61,9 @@ private:
     juce::var cmdGetClipPeaks   (const juce::var& args);
     // Stage 3 — VST3 hosting + MIDI
     juce::var cmdListPlugins    (const juce::var& args);
+    juce::var cmdListBuiltins   (const juce::var& args);
     juce::var cmdLoadPlugin     (const juce::var& args);
+    juce::var cmdLoadBuiltin    (const juce::var& args);
     juce::var cmdRemovePlugin   (const juce::var& args);
     juce::var cmdReorderPlugin  (const juce::var& args);
     juce::var cmdSetPluginParam (const juce::var& args);

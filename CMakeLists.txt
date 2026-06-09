@@ -45,11 +45,19 @@ endif()
 
 # ── The app target ───────────────────────────────────────────────────────────
 if (MOSH_BUILD_APP)
+    set(MOSH_APP_EXTRA_ARGS NEEDS_WEBVIEW2 TRUE)
+    if (APPLE)
+        list(APPEND MOSH_APP_EXTRA_ARGS
+            LOCAL_NETWORK_PERMISSION_ENABLED TRUE
+            LOCAL_NETWORK_PERMISSION_TEXT "Mosh uses the local network to pair with the iPhone companion while you are near this Mac."
+            PLIST_TO_MERGE "${CMAKE_SOURCE_DIR}/cmake/MoshRemoteInfo.plist")
+    endif()
+
     juce_add_gui_app(Mosh
         PRODUCT_NAME "Mosh"
         BUNDLE_ID    "studio.mosh.app"
         COMPANY_NAME "Mosh"
-        NEEDS_WEBVIEW2 TRUE)
+        ${MOSH_APP_EXTRA_ARGS})
 
 # Source modules (00 §5). Added incrementally per build stage.
     target_sources(Mosh PRIVATE
@@ -66,7 +74,10 @@ if (MOSH_BUILD_APP)
         # Stage 4 — Tier-A real-time neural insert (04 PART 2)
         src/plugins/neural/NeuralInsertPlugin.cpp
         # Stage 5 — Tier-B generative layer (05)
-        src/generative/GenerativeJobManager.cpp)
+        src/generative/GenerativeJobManager.cpp
+        # iPhone companion remote control + phone-take ingest
+        src/remote/RemoteCompanionProtocol.cpp
+        src/remote/RemoteCompanionServer.cpp)
 
     target_include_directories(Mosh PRIVATE src)
 

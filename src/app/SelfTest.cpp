@@ -334,6 +334,67 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         }
     }
 
+    // ─── Wave 1: engine built-in plugin palette (effects + instruments) ───
+    std::cerr << "--- Wave 1: built-in plugin palette ---\n";
+    {
+        auto builtinIndex = [&] (const var& track, const char* type) -> int {
+            if (auto* arr = track.getProperty ("plugins", var()).getArray())
+                for (auto& p : *arr)
+                    if (p.getProperty ("type", var()).toString() == type) return (int) p.getProperty ("index", -1);
+            return -1;
+        };
+
+        auto lb = cmd (ops, "list_builtins");
+        check (ok (lb), "list_builtins ok");
+        const int nB = lb["data"].getProperty ("plugins", var()).size();
+        check (nB >= 10, "built-in palette has the full catalog");
+        bool sawComp = false, sawSynth = false;
+        if (auto* arr = lb["data"].getProperty ("plugins", var()).getArray())
+            for (auto& p : *arr)
+            {
+                if (p.getProperty ("type", var()).toString() == "compressor") sawComp = true;
+                if (p.getProperty ("type", var()).toString() == "4osc"
+                    && (bool) p.getProperty ("isInstrument", false)) sawSynth = true;
+            }
+        check (sawComp, "catalog includes compressor (effect)");
+        check (sawSynth, "catalog includes 4osc (instrument)");
+
+        auto bt = cmd (ops, "create_track", args1 ("name", "Built-ins"))["data"].getProperty ("trackId", var()).toString();
+
+        // Effect: a built-in compressor lands in the chain, flagged + categorised.
+        check (ok (cmd (ops, "load_builtin", objN ({{ "trackId", bt }, { "type", "compressor" }}))), "load_builtin (compressor) ok");
+        int cidx = builtinIndex (trackById (bt), "compressor");
+        check (cidx >= 0, "compressor appears in the chain");
+        bool compFlagged = false, compCategorised = false;
+        { auto trk = trackById (bt);
+          if (auto* arr = trk.getProperty ("plugins", var()).getArray())
+            for (auto& p : *arr) if ((int) p.getProperty ("index", -1) == cidx)
+            { compFlagged = (bool) p.getProperty ("builtin", false);
+              compCategorised = p.getProperty ("category", var()).toString() == "Dynamics"; } }
+        check (compFlagged, "built-in plugin flagged builtin=true in snapshot");
+        check (compCategorised, "built-in plugin carries its category");
+        if (cidx >= 0)
+            check (ok (cmd (ops, "set_plugin_param", objN ({{ "trackId", bt }, { "index", cidx }, { "paramIndex", 0 }, { "value", 0.5 }}))),
+                   "set_plugin_param on a built-in ok");
+
+        // Instrument: a built-in synth on the same track is flagged isInstrument.
+        check (ok (cmd (ops, "load_builtin", objN ({{ "trackId", bt }, { "type", "4osc" }}))), "load_builtin (4osc synth) ok");
+        bool hasBuiltinInst = false;
+        { auto trk = trackById (bt);
+          if (auto* arr = trk.getProperty ("plugins", var()).getArray())
+            for (auto& p : *arr) if (p.getProperty ("type", var()).toString() == "4osc")
+                hasBuiltinInst = (bool) p.getProperty ("isInstrument", false); }
+        check (hasBuiltinInst, "built-in 4osc flagged as an instrument");
+
+        // Persistence + validation.
+        cmd (ops, "save"); cmd (ops, "reload");
+        check (builtinIndex (trackById (bt), "compressor") >= 0, "built-in plugin persists across save/reload");
+        check (! ok (cmd (ops, "load_builtin", objN ({{ "trackId", bt }, { "type", "no_such_plugin" }}))), "load_builtin rejects unknown type");
+        // The scratch "Built-ins" track is left in place: the only later count
+        // check in this run is relative (tracksBefore+1), and absolute-count
+        // checks live in the separate runUndoSelfTest with its own fresh engine.
+    }
+
     // ─── Stage 4: Tier-A real-time neural insert ───
     std::cerr << "--- Stage 4: Tier-A neural insert (RT-safe / PDC / ASTD) ---\n";
     {
@@ -506,6 +567,71 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (trackById (mt).getProperty ("name", var()).toString() == "Mix", "undo reverted the rename");
         cmd (ops, "redo");
         check (trackById (mt).getProperty ("name", var()).toString() == "Master Bus", "redo restored the rename");
+    }
+
+    std::cerr << "--- Serum render compatibility (optional local plugin gate) ---\n";
+    if (File ("/Library/Audio/Plug-Ins/VST3/Serum2.vst3").exists())
+    {
+        String serumId;
+        {
+            auto lpSerum = cmd (ops, "list_plugins");
+            if (auto* arr = lpSerum["data"].getProperty ("plugins", var()).getArray())
+                for (auto& p : *arr)
+                    if (p.getProperty ("name", var()).toString() == "Serum 2"
+                        && p.getProperty ("manufacturer", var()).toString() == "Xfer Records"
+                        && (bool) p.getProperty ("isInstrument", false))
+                    {
+                        serumId = p.getProperty ("id", var()).toString();
+                        break;
+                    }
+        }
+        check (serumId.isNotEmpty(), "Serum 2 VST3 is discoverable by exact name/manufacturer");
+
+        if (serumId.isNotEmpty())
+        {
+            auto serumTrack = cmd (ops, "create_track", args1 ("name", "Serum Probe"))["data"].getProperty ("trackId", var()).toString();
+            check (ok (cmd (ops, "add_midi_clip", objN ({{ "trackId", serumTrack }, { "length", 1.0 }}))), "Serum probe MIDI clip added");
+            auto loadSerum = cmd (ops, "load_plugin", objN ({{ "trackId", serumTrack }, { "pluginId", serumId }}));
+            check (ok (loadSerum), "Serum 2 loaded by exact plugin id");
+            const int serumIndex = (int) loadSerum["data"].getProperty ("index", -1);
+
+            bool hasMetadata = false;
+            {
+                auto trk = trackById (serumTrack);
+                if (auto* arr = trk.getProperty ("plugins", var()).getArray())
+                    for (auto& p : *arr)
+                        if ((int) p.getProperty ("index", -1) == serumIndex)
+                        {
+                            hasMetadata = p.hasProperty ("manufacturer")
+                                          && p.hasProperty ("file")
+                                          && p.hasProperty ("identifier")
+                                          && p.hasProperty ("numInputs")
+                                          && p.hasProperty ("numOutputs")
+                                          && p.hasProperty ("isNonRealtime")
+                                          && p.getProperty ("manufacturer", var()).toString() == "Xfer Records"
+                                          && p.getProperty ("file", var()).toString().contains ("Serum2.vst3");
+                        }
+            }
+            check (hasMetadata, "snapshot exposes hosted Serum metadata and realtime diagnostics");
+
+            auto autoFile = eng.sessionDir().getChildFile ("exports").getChildFile ("serum-auto.wav");
+            auto fastFile = eng.sessionDir().getChildFile ("exports").getChildFile ("serum-fast.wav");
+            auto autoExport = cmd (ops, "export_audio", objN ({{ "file", autoFile.getFullPathName() }, { "renderMode", "auto" }}));
+            check (ok (autoExport), "Serum auto export ok");
+            check (autoExport["data"].getProperty ("renderMode", var()).toString() == "realtime",
+                   "Serum auto export selects realtime render mode");
+            check (autoExport["data"].getProperty ("renderModeReason", var()).toString().contains ("Serum"),
+                   "Serum auto export reports the compatibility reason");
+
+            auto fastExport = cmd (ops, "export_audio", objN ({{ "file", fastFile.getFullPathName() }, { "renderMode", "fast" }}));
+            check (ok (fastExport), "explicit fast export remains available with Serum");
+            check (fastExport["data"].getProperty ("renderMode", var()).toString() == "fast",
+                   "explicit fast export reports fast render mode");
+        }
+    }
+    else
+    {
+        std::cerr << "  ..   (Serum2.vst3 not installed — skipping Serum-specific local gate)\n";
     }
 
     // --- Stage 5 (SA3): the real StableAudio3Adapter - GATED on MOSH_SELFTEST_SA3 ---
@@ -681,15 +807,31 @@ void runPluginDemo (MoshOps& ops)
         return var (o);
     };
 
-    // Find an effect + an instrument from the scan.
-    String fxId, instId;
+    // Find an effect + an instrument from the scan. Prefer Serum 2 for demo3
+    // when present because the UI gate verifies its native editor specifically.
+    String fxId, instId, fallbackInstId;
     auto lp = cmd ("list_plugins");
     if (auto* arr = lp["data"].getProperty ("plugins", var()).getArray())
         for (auto& p : *arr)
         {
-            if ((bool) p.getProperty ("isInstrument", false) && instId.isEmpty()) instId = p.getProperty ("id", var()).toString();
-            if (! (bool) p.getProperty ("isInstrument", false) && fxId.isEmpty()) fxId = p.getProperty ("id", var()).toString();
+            const bool isInstrument = (bool) p.getProperty ("isInstrument", false);
+            const auto id = p.getProperty ("id", var()).toString();
+            if (isInstrument)
+            {
+                if (fallbackInstId.isEmpty())
+                    fallbackInstId = id;
+
+                if (p.getProperty ("name", var()).toString() == "Serum 2"
+                    && p.getProperty ("manufacturer", var()).toString() == "Xfer Records")
+                    instId = id;
+            }
+            else if (fxId.isEmpty())
+            {
+                fxId = id;
+            }
         }
+    if (instId.isEmpty())
+        instId = fallbackInstId;
 
     // Wave track + tone + effect.
     auto t1 = cmd ("create_track", obj ({{ "name", "Drums" }}))["data"].getProperty ("trackId", var()).toString();

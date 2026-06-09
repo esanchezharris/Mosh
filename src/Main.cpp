@@ -4,6 +4,7 @@
 #include "app/SelfTest.h"
 #include "engine/MoshEngine.h"
 #include "moshops/MoshOps.h"
+#include "remote/RemoteCompanionServer.h"
 
 namespace mosh
 {
@@ -33,6 +34,10 @@ public:
         engine  = std::make_unique<MoshEngine> ((! headless) || liveAudioSmoke,
                                                 /*freshSession=*/ headless || liveAudioSmoke);
         moshOps = std::make_unique<MoshOps> (*engine);
+        remoteServer = std::make_unique<RemoteCompanionServer> (
+            engine->sessionDir().getChildFile ("phone-takes"));
+        remoteServer->setCommandHandler ([this] (const juce::var& cmd) { return moshOps->execute (cmd); });
+        remoteServer->setSnapshotProvider ([this] { return moshOps->snapshot(); });
 
         // Headless command-surface harness (06 §4): `Mosh --selftest`.
         if (undoSelfTest)
@@ -65,8 +70,15 @@ public:
         auto& bridge = mainWindow->shell().bridge();
         bridge.setCommandHandler  ([this] (const juce::var& cmd) { return moshOps->execute (cmd); });
         bridge.setSnapshotProvider([this] { return moshOps->snapshot(); });
-        moshOps->setEventSink ([&bridge] (const juce::var& e)
-                               { bridge.emitEvent (juce::Identifier ("mosh_event"), e); });
+        bridge.setRemoteStartHandler ([this] (const juce::var& args) { return remoteServer->startPairing (args); });
+        bridge.setRemoteStopHandler  ([this] (const juce::var&) { return remoteServer->stopServer(); });
+        bridge.setRemoteStatusProvider ([this] { return remoteServer->status(); });
+        moshOps->setEventSink ([&bridge, this] (const juce::var& e)
+                               {
+                                   bridge.emitEvent (juce::Identifier ("mosh_event"), e);
+                                   if (remoteServer != nullptr)
+                                       remoteServer->pushEvent (e);
+                               });
         mainWindow->shell().load();
 
         // Scripted Stage 3 demo: build a hosted-plugin session + open a native
@@ -84,6 +96,7 @@ public:
     void shutdown() override
     {
         mainWindow.reset();
+        remoteServer.reset();
         moshOps.reset();
         engine.reset();
     }
@@ -93,6 +106,7 @@ public:
 private:
     std::unique_ptr<MoshEngine> engine;
     std::unique_ptr<MoshOps>    moshOps;
+    std::unique_ptr<RemoteCompanionServer> remoteServer;
     std::unique_ptr<MainWindow> mainWindow;
 };
 

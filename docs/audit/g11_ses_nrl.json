@@ -1,0 +1,103 @@
+{
+  "group": "SES, NRL",
+  "features": [
+    {
+      "id": "SES-001",
+      "capability": "partial",
+      "capabilityEvidence": "Tracktion has an internal tempo/tick model, but Mosh stores/emits every position in SECONDS (clipToVar start/length/offset + transportToVar position, MoshOps.cpp:1313,1367); no shared ticks-based mapping surfaced.",
+      "surface": "missing",
+      "surfaceEvidence": "Arrangement ruler ticks are integer SECONDS ({i}, i*pxPerSec Arrangement.tsx:92-94); snap grid is 0.25s (store.ts:71). No bars.beats.sixteenths readout anywhere."
+    },
+    {
+      "id": "SES-002",
+      "capability": "present",
+      "capabilityEvidence": "Clips reference source files; move/trim/split adjust start/length/offset without touching source (cmdMoveClip/cmdTrimClip/cmdSplitClip MoshOps.cpp:331-389); Tracktion UndoManager makes all reversible.",
+      "surface": "present",
+      "surfaceEvidence": "Undo/Redo buttons (Arrangement.tsx:172-173), drag-move/trim/split tools in Arrangement; original sourceFile retained in clipToVar (MoshOps.cpp:1320)."
+    },
+    {
+      "id": "SES-003",
+      "capability": "present",
+      "capabilityEvidence": "Session persists as a .tracktionedit ValueTree document; MoshEngine.save() via EditFileOperations and loadEditFromFile round-trip (MoshEngine.cpp:43,53,228,236).",
+      "surface": "present",
+      "surfaceEvidence": "Save and Reload buttons in the toolbar (Arrangement.tsx:175-176) call save/reload commands; on-disk format is human-inspectable XML."
+    },
+    {
+      "id": "SES-004",
+      "capability": "missing",
+      "capabilityEvidence": "No SessionPlan / ResolvedSession two-IR model; grep for SessionPlan|ResolvedSession|tokeniz across src/ui/service returns none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No developer/inspector surface exposing a plan vs resolved representation; none found in ui/src."
+    },
+    {
+      "id": "SES-005",
+      "capability": "partial",
+      "capabilityEvidence": "Insert plugin chain is reorderable/toggleable/removable (reorder_plugin/bypass_plugin/remove_plugin MoshOps.cpp:553-600); RenderLayer is bypass/freeze-able (cmdBypassLayer/cmdFreezeLayer:1033-1056). But only ONE RenderLayer per clip (create_render_layer rejects a second, MoshOps.cpp:754) — not a true reorderable transform stack.",
+      "surface": "partial",
+      "surfaceEvidence": "Rack shows reorder (‹›) / bypass / remove for plugin chain (Rack.tsx:84-87); GenPanel has a single render layer with no reorder. No unified add/reorder/toggle transform-stack UI."
+    },
+    {
+      "id": "SES-006",
+      "capability": "missing",
+      "capabilityEvidence": "No grid-coherence self-check verifying ruler==grid==clip==note==automation==playhead; grep coheren|grid.check|invariant in SelfTest.cpp returns none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No coherence indicator/diagnostic in the UI; none found in ui/src."
+    },
+    {
+      "id": "NRL-001",
+      "capability": "present",
+      "capabilityEvidence": "render_layer stages the captured clip source to input.wav and submits an SA3 job that produces output.wav as a new render layer (cmdRenderLayer MoshOps.cpp:810-936); SA3 adapter does real audio->audio reimagine (stable_audio3_adapter.py:87).",
+      "surface": "present",
+      "surfaceEvidence": "GenPanel 'Render'/'Re-render' button (GenPanel.tsx:149) drives render_layer; render layer status/badge shown; accept lands on a 'Neural Renders' lane."
+    },
+    {
+      "id": "NRL-002",
+      "capability": "present",
+      "capabilityEvidence": "ColorRack with 9 named axes (grit, air, brightness, distortion, epic, tension, futuristic, drum_aggression, grid_tightness) in colors.json; resolve_steers maps 0-100 to steering tuples (colors/runtime.py:68-91).",
+      "surface": "present",
+      "surfaceEvidence": "GenPanel colour rack: ≤3 ASTD sliders per active colour + '+ colour' picker, loaded from list_colors (GenPanel.tsx:84-116)."
+    },
+    {
+      "id": "NRL-003",
+      "capability": "present",
+      "capabilityEvidence": "Tier-A light model runs in-process (NeuralInsertPlugin custom te::Plugin, RT MLP NeuralInsertPlugin.h:10-15); Tier-B SA3 heavy model runs in the Python sidecar via GenerativeJobManager HTTP (/health,/status GenerativeJobManager.cpp:62,143).",
+      "surface": "present",
+      "surfaceEvidence": "GenPanel labels engine as 'stable audio 3' vs 'fake' (GenPanel.tsx:29); Rack shows 'Tier A' badge + latency on neural inserts (Rack.tsx:77,128). Render status/progress visible."
+    },
+    {
+      "id": "NRL-004",
+      "capability": "present",
+      "capabilityEvidence": "Each transform is a MOSH_RENDERLAYER node auditioned/accepted/rejected/bypassed/frozen without losing source (cmdAcceptRender/Reject/BypassLayer/FreezeLayer MoshOps.cpp:978-1056); full-fingerprint cache HIT/MISS (RenderLayer.h:66).",
+      "surface": "partial",
+      "surfaceEvidence": "GenPanel exposes Render/Accept/Reject/Cancel/seed + status badge (GenPanel.tsx:148-156), but only ONE layer per clip and no bypass/freeze/remove buttons or a layer list in the UI."
+    },
+    {
+      "id": "NRL-005",
+      "capability": "missing",
+      "capabilityEvidence": "No stem separation (Demucs) or source models (RVC/RAVE/NAM-file/DDSP/AFTER) integrated; only SA3 prompt+colour steering + a self-contained inline MLP. grep demucs|stem|separat|rvc returns none found in code paths.",
+      "surface": "missing",
+      "surfaceEvidence": "No stem-separation action or model picker in the UI; GenPanel offers only the SA3 colour rack + nl/seed. None found in ui/src."
+    },
+    {
+      "id": "NRL-006",
+      "capability": "missing",
+      "capabilityEvidence": "No DoRA/LoRA adapter or training pipeline; grep lora|dora|fine.tun across src/ui/service returns none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No adapter/training management surface in the UI; none found in ui/src."
+    },
+    {
+      "id": "NRL-007",
+      "capability": "present",
+      "capabilityEvidence": "Judge panel scores renders: Audiobox PQ for output (pq) and source (pq_base) via a persistent judge sidecar, sets quality_degraded flag (sa3/qa.py:156-169; judge_sidecar.py).",
+      "surface": "present",
+      "surfaceEvidence": "GenPanel renders a quality readout 'pq X / Y' plus QA flags from the layer_status manifest (GenPanel.tsx:141-146)."
+    },
+    {
+      "id": "NRL-008",
+      "capability": "partial",
+      "capabilityEvidence": "Diff-in-means-style activation steering is real: per-layer steering vectors applied in the SA3 decode path (sa3/engine.py:99-131; colors/runtime.py resolve_steers). But NO paraphrase gate — grep paraphrase returns none found.",
+      "surface": "partial",
+      "surfaceEvidence": "Lab toggle unlocks the ASTD alpha clamp (GenPanel.tsx:135) and no_stack_with pairs are rejected (GenPanel.tsx:73-76); but no dedicated steering/safety-state controls beyond the Lab button."
+    }
+  ]
+}

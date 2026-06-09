@@ -1,0 +1,173 @@
+{
+  "group": "MIX, RTG",
+  "features": [
+    {
+      "id": "MIX-001",
+      "capability": "partial",
+      "capabilityEvidence": "Per-track VolumeAndPanPlugin gives strip-like state, but no master/bus/aux channel objects; trackToVar only emits audio tracks (MoshOps.cpp:1257,1269).",
+      "surface": "partial",
+      "surfaceEvidence": "No dedicated mixer view; 'strips' are track headers in Arrangement.tsx TrackHeader (181-217); no master/bus strips rendered."
+    },
+    {
+      "id": "MIX-002",
+      "capability": "present",
+      "capabilityEvidence": "cmdSetTrackVolume -> ensureVolumePlugin -> VolumeAndPanPlugin::setVolumeDb (MoshOps.cpp:391-403,1196). volumeDb in snapshot (1294).",
+      "surface": "present",
+      "surfaceEvidence": "Per-track volume range input in Arrangement.tsx TrackHeader calls set_track_volume (206-214)."
+    },
+    {
+      "id": "MIX-003",
+      "capability": "present",
+      "capabilityEvidence": "cmdSetTrackPan -> VolumeAndPanPlugin::setPan, jlimit -1..1 (MoshOps.cpp:405-417); pan emitted in trackToVar (1295).",
+      "surface": "missing",
+      "surfaceEvidence": "set_track_pan is never called in ui/src (grep: no matches). No pan control rendered in TrackHeader; pan only a type field (types.ts:83)."
+    },
+    {
+      "id": "MIX-004",
+      "capability": "present",
+      "capabilityEvidence": "cmdSetTrackMute/Solo -> track->setMute/setSolo (MoshOps.cpp:419-439); mute/solo in snapshot via isMuted/isSolo (1302-1303).",
+      "surface": "present",
+      "surfaceEvidence": "M and S buttons per track in Arrangement.tsx TrackHeader call set_track_mute/set_track_solo (198-205)."
+    },
+    {
+      "id": "MIX-005",
+      "capability": "missing",
+      "capabilityEvidence": "No solo-mode (AFL/PFL/SIP) logic; setSolo is plain in-place only; no solo-mode field or command. none found in src.",
+      "surface": "missing",
+      "surfaceEvidence": "No solo-mode setting anywhere in ui/src. none found."
+    },
+    {
+      "id": "MIX-006",
+      "capability": "missing",
+      "capabilityEvidence": "No sends/returns/aux: no AuxSend/AuxReturn usage, no send-level command (grep none found in src).",
+      "surface": "missing",
+      "surfaceEvidence": "No send controls or return channels in ui/src. none found."
+    },
+    {
+      "id": "MIX-007",
+      "capability": "missing",
+      "capabilityEvidence": "No sends at all, so no pre/post-fader tap point exists in code. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No pre/post send toggle in ui/src. none found."
+    },
+    {
+      "id": "MIX-008",
+      "capability": "missing",
+      "capabilityEvidence": "No group/bus tracks: no FolderTrack/output-track routing; createAudioTrack only inserts plain audio tracks (MoshOps.cpp:1176-1194). none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No create-group/bus affordance in ui/src; only +Track (create_track) in Toolbar (Arrangement.tsx:161). none found."
+    },
+    {
+      "id": "MIX-009",
+      "capability": "missing",
+      "capabilityEvidence": "No VCA/control-group fader scaling logic; no VCA construct in src. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No VCA/control-group fader in ui/src. none found."
+    },
+    {
+      "id": "MIX-010",
+      "capability": "partial",
+      "capabilityEvidence": "export_audio sets params.useMasterPlugins=true (MoshOps.cpp:1128) so Tracktion's internal master sums on render, but no master channel is modeled or exposed in snapshot. No getMasterVolumePlugin usage.",
+      "surface": "missing",
+      "surfaceEvidence": "Snapshot emits only audio tracks (no master entry); no master strip in ui/src. 'Master Bus' in SelfTest.cpp:503 is just a track-rename test string."
+    },
+    {
+      "id": "MIX-011",
+      "capability": "missing",
+      "capabilityEvidence": "No level meters: no LevelMeasurer/getLevel tap; PROGRESS notes 'real audio level meters deferred', no public level-tap on VolumeAndPanPlugin. none found in src.",
+      "surface": "missing",
+      "surfaceEvidence": "No channel meter element in ui/src (meter matches are only get_clip_peaks waveform, not live level). none found."
+    },
+    {
+      "id": "MIX-012",
+      "capability": "missing",
+      "capabilityEvidence": "No per-channel input/trim gain stage; only the single VolumeAndPanPlugin fader exists. none found in src.",
+      "surface": "missing",
+      "surfaceEvidence": "No input-trim control in ui/src. none found."
+    },
+    {
+      "id": "MIX-013",
+      "capability": "missing",
+      "capabilityEvidence": "No per-channel polarity/phase invert in engine; grep phase only hits sine-tone generation (MoshEngine.cpp:202, SelfTest.cpp:53). none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No phase-invert control in ui/src. none found."
+    },
+    {
+      "id": "MIX-014",
+      "capability": "missing",
+      "capabilityEvidence": "No configurable pan law; setPan uses VolumeAndPanPlugin default, no pan-law field/command. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No pan-law setting in ui/src. none found."
+    },
+    {
+      "id": "MIX-015",
+      "capability": "missing",
+      "capabilityEvidence": "No monitor/control-room section (dim/mono/speaker outputs); none found in src.",
+      "surface": "missing",
+      "surfaceEvidence": "No control-room/monitor section in ui/src. none found."
+    },
+    {
+      "id": "MIX-016",
+      "capability": "missing",
+      "capabilityEvidence": "No cue/headphone mixes (depends on sends, which are absent). none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No cue-mix management in ui/src. none found."
+    },
+    {
+      "id": "RTG-001",
+      "capability": "partial",
+      "capabilityEvidence": "Engine can set a whole-app input device (MoshEngine applyRequestedAudioOutputDevice, inputDeviceName 89-187) but only via MOSH_AUDIO_INPUT_DEVICE env var; no per-track input assignment.",
+      "surface": "missing",
+      "surfaceEvidence": "No per-track input-source selector in ui/src; device selection is env-var only, never a UI control. none found."
+    },
+    {
+      "id": "RTG-002",
+      "capability": "partial",
+      "capabilityEvidence": "Whole-app output device set via MOSH_AUDIO_OUTPUT_DEVICE (MoshEngine.cpp:89-187); no per-channel output-destination routing in the graph.",
+      "surface": "missing",
+      "surfaceEvidence": "No output-destination selector per channel in ui/src; output is env-var driven only. none found."
+    },
+    {
+      "id": "RTG-003",
+      "capability": "missing",
+      "capabilityEvidence": "No internal bus/aux routing graph: no output-track assignment, no FolderTrack/bus, no send routing in src. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No routing-destination selector in ui/src. none found."
+    },
+    {
+      "id": "RTG-004",
+      "capability": "missing",
+      "capabilityEvidence": "No sidechain tap/source routing in engine or plugin host (grep sidechain: none found in src).",
+      "surface": "missing",
+      "surfaceEvidence": "No sidechain source selector in ui/src. none found."
+    },
+    {
+      "id": "RTG-005",
+      "capability": "missing",
+      "capabilityEvidence": "No external hardware-insert (send-out/return-in with compensation) path in src. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No hardware-insert device in ui/src. none found."
+    },
+    {
+      "id": "RTG-006",
+      "capability": "missing",
+      "capabilityEvidence": "No external-instrument routing (MIDI out + audio in linked) in src. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No external-instrument device in ui/src. none found."
+    },
+    {
+      "id": "RTG-007",
+      "capability": "missing",
+      "capabilityEvidence": "No multi-output routing; tracks have a single signal path through pluginList only (MoshOps.cpp:1284-1289). none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No multi-output assignment in ui/src. none found."
+    },
+    {
+      "id": "RTG-008",
+      "capability": "missing",
+      "capabilityEvidence": "No flexible track-to-track routing: no output-track/destination assignment, cycle-safe graph code absent. none found in src.",
+      "surface": "missing",
+      "surfaceEvidence": "No track-to-track routing selector in ui/src. none found."
+    }
+  ]
+}

@@ -146,6 +146,29 @@ juce::WebBrowserComponent::Options WebBridge::buildOptions()
                     juce::WebBrowserComponent::NativeFunctionCompletion completion)
             {
                 completion (snapshotProvider ? snapshotProvider() : juce::var());
+            })
+        .withNativeFunction (
+            juce::Identifier ("remote_start_pairing"),
+            [this] (const juce::Array<juce::var>& args,
+                    juce::WebBrowserComponent::NativeFunctionCompletion completion)
+            {
+                completion (remoteStartHandler ? remoteStartHandler (args.size() > 0 ? args[0] : juce::var())
+                                               : juce::var());
+            })
+        .withNativeFunction (
+            juce::Identifier ("remote_stop"),
+            [this] (const juce::Array<juce::var>& args,
+                    juce::WebBrowserComponent::NativeFunctionCompletion completion)
+            {
+                completion (remoteStopHandler ? remoteStopHandler (args.size() > 0 ? args[0] : juce::var())
+                                              : juce::var());
+            })
+        .withNativeFunction (
+            juce::Identifier ("remote_status"),
+            [this] (const juce::Array<juce::var>&,
+                    juce::WebBrowserComponent::NativeFunctionCompletion completion)
+            {
+                completion (remoteStatusProvider ? remoteStatusProvider() : juce::var());
             });
 }
 

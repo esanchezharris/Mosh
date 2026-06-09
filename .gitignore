@@ -60,3 +60,9 @@ mosh-*.png
 *.xcodeproj
 *.xcworkspace
 compile_commands.json
+ios/MoshCompanion/build/
+!ios/MoshCompanion/MoshCompanion.xcodeproj/
+!ios/MoshCompanion/MoshCompanion.xcodeproj/project.pbxproj
+!ios/MoshCompanion/MoshCompanion.xcodeproj/xcshareddata/
+!ios/MoshCompanion/MoshCompanion.xcodeproj/xcshareddata/xcschemes/
+!ios/MoshCompanion/MoshCompanion.xcodeproj/xcshareddata/xcschemes/MoshCompanion.xcscheme

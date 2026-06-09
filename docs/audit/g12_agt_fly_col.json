@@ -1,0 +1,110 @@
+{
+  "group": "AGT_FLY_COL",
+  "features": [
+    {
+      "id": "AGT-001",
+      "capability": "partial",
+      "capabilityEvidence": "MoshOps.cpp:82-126 dispatch: 43 stable ID-based commands w/ result envelope + JSONL log (logLine). But spec-named ops (set_midi_note, set_automation_point, set_track_send, set_master_*) absent.",
+      "surface": "missing",
+      "surfaceEvidence": "JSONL log written to mosh-log.jsonl (MoshOps.cpp:1415) but never read/shown in UI; no command-log/inspectable action surface in ui/src. none found"
+    },
+    {
+      "id": "AGT-002",
+      "capability": "missing",
+      "capabilityEvidence": "No intent/NL->command translator anywhere; grep for intent/natural-language/agent in src yields only a comment in MoshOps.h:16. none found",
+      "surface": "missing",
+      "surfaceEvidence": "No agent/NL input affordance in ui/src; only text input is PluginBrowser.tsx:40 filter. none found"
+    },
+    {
+      "id": "AGT-003",
+      "capability": "partial",
+      "capabilityEvidence": "Commands ARE undoable via Tracktion UndoManager (beginNewTransaction per cmd, e.g. MoshOps.cpp:134) so an agent would share the manual path, but no agent exists to issue them.",
+      "surface": "missing",
+      "surfaceEvidence": "Undo/redo buttons exist (Arrangement.tsx:172-173) but no command log / agent-action visibility; agent actions are not surfaced. none found"
+    },
+    {
+      "id": "AGT-004",
+      "capability": "missing",
+      "capabilityEvidence": "No NL-to-edit mapping; nothing translates a described change into commands. Depends on AGT-002 which is absent. none found",
+      "surface": "missing",
+      "surfaceEvidence": "No NL editing affordance in ui/src (App.tsx, components). none found"
+    },
+    {
+      "id": "AGT-005",
+      "capability": "partial",
+      "capabilityEvidence": "DAW is fully usable with no agent because no agent layer exists at all (App.tsx renders arrangement/rack/transport without any agent dependency).",
+      "surface": "not_applicable",
+      "surfaceEvidence": "No agent affordance exists to be discreet or dominant; the 'agent subordinate' requirement is vacuously met by absence. none found"
+    },
+    {
+      "id": "FLY-001",
+      "capability": "present",
+      "capabilityEvidence": "cmdAcceptRender (MoshOps.cpp:978) lands render on neural lane + sets userKept; cmdRejectRender (MoshOps.cpp:1021) sets userKept=false/status dirty.",
+      "surface": "present",
+      "surfaceEvidence": "GenPanel.tsx:153-154 Accept/Reject buttons calling exec('accept_render')/exec('reject_render'), enabled on rl.hasArtifact."
+    },
+    {
+      "id": "FLY-002",
+      "capability": "present",
+      "capabilityEvidence": "Accept/reject logged as taste labels to JSONL (MoshOps.cpp:1012-1016, 1028) with clipId/layerId/landing; userKept persisted on RenderLayer (RenderLayer.h:44).",
+      "surface": "missing",
+      "surfaceEvidence": "Acceptance history/provenance is never displayed in ui/src; JSONL is disk-only, no labels/history view. none found"
+    },
+    {
+      "id": "FLY-003",
+      "capability": "partial",
+      "capabilityEvidence": "RenderLayer carries model/adapter/version/seed/mode/params (RenderLayer.h:32-50); QA pq/flags from manifest emitted via layer_status (MoshOps.cpp:949-953). No source-audio hash or judge model id exposed.",
+      "surface": "partial",
+      "surfaceEvidence": "GenPanel.tsx:130-146 shows status badge, seed, and pq/pq_base/flags readout, but no dedicated provenance/evidence panel listing model/params/source for a layer."
+    },
+    {
+      "id": "FLY-004",
+      "capability": "partial",
+      "capabilityEvidence": "eng.hasAudio() gates play/record (MoshOps.cpp:244,253) and editor open (608); but generative render_layer gates only on service availability (834), not on audio device or model state.",
+      "surface": "missing",
+      "surfaceEvidence": "audioEnabled is NOT in snapshot() (MoshOps.cpp:1246-1267) — only inside open_plugin_editor data (614). No device/audio gate indicator or block/warn in ui/src; only generic lastError bar. none found"
+    },
+    {
+      "id": "FLY-005",
+      "capability": "partial",
+      "capabilityEvidence": "Labelled accept/reject events accumulate in mosh-log.jsonl (MoshOps.cpp:1415-1426), but there is no read/inspect/export command or dataset assembly beyond the raw append-only log.",
+      "surface": "missing",
+      "surfaceEvidence": "No data/labels management surface in ui/src; no get_log/export-labels command path. none found"
+    },
+    {
+      "id": "COL-001",
+      "capability": "partial",
+      "capabilityEvidence": "RemoteCompanionServer serves the live session over HTTP: POST /snapshot -> snapshotProvider, web companion HTML (RemoteCompanionServer.cpp:175,205-206); wired in Main.cpp:37-40. Single in-memory session shared to a 2nd device, not a persisted cloud/multi-user store.",
+      "surface": "present",
+      "surfaceEvidence": "App.tsx:72-133 RemoteCompanion: Start pairing, QR code, native/Safari link, copy/stop; store.ts startRemotePairing/stopRemote (137-147)."
+    },
+    {
+      "id": "COL-002",
+      "capability": "partial",
+      "capabilityEvidence": "2nd device drives same MoshOps command path (POST /command -> moshOps->execute, RemoteCompanionServer.cpp:208-213; Main.cpp:39) and receives live events via /events long-poll + pushEvent (Main.cpp:80). Same single edit; no multi-user merge or per-user identity.",
+      "surface": "partial",
+      "surfaceEvidence": "Companion can edit and gets live events, but the desktop UI shows no live indication of remote edits beyond the shared snapshot refresh; no co-editing affordance in ui/src."
+    },
+    {
+      "id": "COL-003",
+      "capability": "missing",
+      "capabilityEvidence": "No presence/cursor/selection propagation between collaborators; companion server has no per-user/presence concept. grep presence/cursor in src yields none. none found",
+      "surface": "missing",
+      "surfaceEvidence": "No presence avatars/cursors in ui/src. none found"
+    },
+    {
+      "id": "COL-004",
+      "capability": "missing",
+      "capabilityEvidence": "Single shared in-memory edit serialized on the message thread (callOnMessageThread, RemoteCompanionServer.cpp:206,213); no defined merge/conflict policy, no CRDT/op-log. none found",
+      "surface": "missing",
+      "surfaceEvidence": "No conflict UI or resolution prompt in ui/src. none found"
+    },
+    {
+      "id": "COL-005",
+      "capability": "missing",
+      "capabilityEvidence": "No comment/annotation model; no command to anchor notes to time/track; grep comment/annotation yields none in src. none found",
+      "surface": "missing",
+      "surfaceEvidence": "No comment markers/threads in ui/src timeline. none found"
+    }
+  ]
+}

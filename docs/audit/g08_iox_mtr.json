@@ -1,0 +1,167 @@
+{
+  "group": "IOX, MTR",
+  "features": [
+    {
+      "id": "IOX-001",
+      "capability": "partial",
+      "capabilityEvidence": "import_clip uses te::AudioFile (MoshOps.cpp:197) decoded by Tracktion's AudioFileFormatManager (WAV/AIFF/FLAC/Ogg/MP3); peaks path only registerBasicFormats (453). No format-policy/rate-conform check.",
+      "surface": "partial",
+      "surfaceEvidence": "No UI calls import_clip; no file picker or drag-drop in App.tsx/Arrangement.tsx. Only add_test_tone_clip (Arrangement.tsx:162). 'drop in a test tone' hint exists but no onDrop handler.",
+      "surfaceEvidence_note": "user cannot import a real audio file"
+    },
+    {
+      "id": "IOX-002",
+      "capability": "present",
+      "capabilityEvidence": "cmdExportAudio (MoshOps.cpp:1074) renders all tracks via te::Renderer::RenderTask, usePlugins/useMasterPlugins, to a WAV file; verified by SelfTest export_audio (SelfTest.cpp:494).",
+      "surface": "partial",
+      "surfaceEvidence": "Single 'Export' button calls exec('export_audio', {}) with empty args (App.tsx:47). No export/bounce dialog, no destination chooser, no options."
+    },
+    {
+      "id": "IOX-003",
+      "capability": "present",
+      "capabilityEvidence": "Default 'fast' (offline) render: params.realTimeRender = (renderMode=='realtime') (MoshOps.cpp:1130); auto/fast/realtime modes parsed (1085-1105), fast is offline render-to-file.",
+      "surface": "missing",
+      "surfaceEvidence": "UI Export button passes no renderMode (App.tsx:47), so it defaults server-side to 'auto'. No control to select offline/fast render in ui/src. none found."
+    },
+    {
+      "id": "IOX-004",
+      "capability": "present",
+      "capabilityEvidence": "renderMode 'realtime' sets params.realTimeRender=true (MoshOps.cpp:1130); auto-selects realtime when a Serum plugin is hosted (findSerumRealtimeRenderReason, 38-47, 1093).",
+      "surface": "missing",
+      "surfaceEvidence": "No real-time render option exposed; Export button sends no renderMode (App.tsx:47). none found in ui/src."
+    },
+    {
+      "id": "IOX-005",
+      "capability": "missing",
+      "capabilityEvidence": "cmdExportAudio renders all tracks summed in one pass (tracksToDo = toBitSet(getAllTracks), MoshOps.cpp:1126); no per-track/per-bus stem export path. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No stem-export option or track-selection UI in ui/src. none found."
+    },
+    {
+      "id": "IOX-006",
+      "capability": "partial",
+      "capabilityEvidence": "Renderer.Parameters.time supports a TimeRange but cmdExportAudio hardcodes the full edit: params.time = {0, edit.getLength()} (MoshOps.cpp:1125); no args for selection/loop range.",
+      "surface": "missing",
+      "surfaceEvidence": "No range/selection export control; Export button sends empty args (App.tsx:47). UI has a loop region but it is not wired to export. none found."
+    },
+    {
+      "id": "IOX-007",
+      "capability": "partial",
+      "capabilityEvidence": "bitDepth hardcoded to 24, audioFormat = default WAV, sampleRate from device (MoshOps.cpp:1116-1122); createMidiFile keyed off '.mid' extension (1129). No format/rate/depth args honoured.",
+      "surface": "missing",
+      "surfaceEvidence": "No export options dialog exposing format/rate/depth in ui/src; Export button sends {} (App.tsx:47). none found."
+    },
+    {
+      "id": "IOX-008",
+      "capability": "missing",
+      "capabilityEvidence": "No dither applied or configured in cmdExportAudio; bitDepth fixed at 24 (MoshOps.cpp:1116). grep dither in src: none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No dither option in ui/src. none found."
+    },
+    {
+      "id": "IOX-009",
+      "capability": "missing",
+      "capabilityEvidence": "cmdExportAudio performs no normalization/loudness-target pass (MoshOps.cpp:1074-1173). grep normalize/normalise in src: none (only neural normalised-value, unrelated).",
+      "surface": "missing",
+      "surfaceEvidence": "No normalize-on-export option in ui/src. none found."
+    },
+    {
+      "id": "IOX-010",
+      "capability": "partial",
+      "capabilityEvidence": "MIDI export only as a side-effect: params.createMidiFile = file.hasFileExtension('.mid') (MoshOps.cpp:1129). No MIDI import command; add_midi_clip builds notes from JSON/default arp (621-659), not from a .mid file.",
+      "surface": "missing",
+      "surfaceEvidence": "No MIDI import/export affordance in ui/src; Export always targets WAV (App.tsx:47); add_midi_clip adds a default arpeggio, not a file. none found."
+    },
+    {
+      "id": "IOX-011",
+      "capability": "missing",
+      "capabilityEvidence": "No video import path in engine or MoshOps; no commands for video. grep video in src: none found. (nice tier, but no trace.)",
+      "surface": "missing",
+      "surfaceEvidence": "No video import control in ui/src. none found."
+    },
+    {
+      "id": "IOX-012",
+      "capability": "missing",
+      "capabilityEvidence": "No AAF/OMF interchange import or export in engine/MoshOps. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No interchange export/import control in ui/src. none found."
+    },
+    {
+      "id": "IOX-013",
+      "capability": "missing",
+      "capabilityEvidence": "No MusicXML/notation export; no score model exists. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No MusicXML export control in ui/src. none found."
+    },
+    {
+      "id": "MTR-001",
+      "capability": "missing",
+      "capabilityEvidence": "No real-time level/peak metering in engine. snapshot()/trackToVar (MoshOps.cpp:1269) expose volumeDb/pan/mute/solo but no level/meter. No LevelMeasurer/getLevel anywhere in src. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No meter view; types.ts Track has no level field (types.ts:75-86); no meter component in ui/src. Mixer is in track headers (volume slider only). none found."
+    },
+    {
+      "id": "MTR-002",
+      "capability": "partial",
+      "capabilityEvidence": "RMS computed only offline on generative render artifacts: rms_dbfs (service/quality_readout.py:54-55). Not a real-time engine meter; only runs on SA3/Fake render output, not live channels.",
+      "surface": "missing",
+      "surfaceEvidence": "RMS not shown anywhere; only the derived 'pq' score and flags surface in GenPanel (GenPanel.tsx:141-146). No RMS readout. none found."
+    },
+    {
+      "id": "MTR-003",
+      "capability": "missing",
+      "capabilityEvidence": "No true ITU-R LUFS (I/S/M). service/quality_readout.py:102 emits 'lufs_approx' = rms_dbfs (a plain RMS aliased as LUFS, offline, on render artifacts only). No integrated/short/momentary gating.",
+      "surface": "missing",
+      "surfaceEvidence": "No LUFS meter in ui/src; lufs_approx is not surfaced (only pq/flags in GenPanel.tsx:141). none found."
+    },
+    {
+      "id": "MTR-004",
+      "capability": "missing",
+      "capabilityEvidence": "Only sample-peak (np.max(abs)) computed offline on render artifacts (service/quality_readout.py:52); no oversampled/inter-sample true-peak detection. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No true-peak readout in ui/src. none found."
+    },
+    {
+      "id": "MTR-005",
+      "capability": "partial",
+      "capabilityEvidence": "Offline single-frame FFT (spectral centroid/rolloff) on render artifacts only (service/quality_readout.py:67-75). No real-time spectrum analyzer in the audio engine. none found in src/.",
+      "surface": "missing",
+      "surfaceEvidence": "No spectrum view in ui/src; centroid/rolloff not surfaced (only pq/flags in GenPanel). none found."
+    },
+    {
+      "id": "MTR-006",
+      "capability": "partial",
+      "capabilityEvidence": "Offline stereo correlation computed on render artifacts: corr (service/quality_readout.py:78-82), flagged out_of_phase if <0 (124). Not a live correlation meter; render-output only.",
+      "surface": "missing",
+      "surfaceEvidence": "No correlation/phase meter in ui/src; corr value not shown (only out_of_phase may appear as a qa flag in GenPanel.tsx:144). none found as a meter."
+    },
+    {
+      "id": "MTR-007",
+      "capability": "missing",
+      "capabilityEvidence": "No real-time oscilloscope/scope. Backend computes static peak arrays per clip (get_clip_peaks, MoshOps.cpp:441) for waveform drawing, not a live scope. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "Waveform.tsx draws static clip peaks (Waveform.tsx:6-49); no real-time oscilloscope view. none found."
+    },
+    {
+      "id": "MTR-008",
+      "capability": "missing",
+      "capabilityEvidence": "No pitch tuner / input-pitch detection in engine or MoshOps. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No tuner device in ui/src. none found."
+    },
+    {
+      "id": "MTR-009",
+      "capability": "missing",
+      "capabilityEvidence": "No spectrogram (time-frequency) computation; only a single-frame FFT offline (service/quality_readout.py:67). none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No spectrogram view in ui/src. none found."
+    },
+    {
+      "id": "MTR-010",
+      "capability": "missing",
+      "capabilityEvidence": "No gain-reduction reporting. Built-in dynamics are only the neural MLP insert and external VST3s; no GR metering plumbed. pluginToVar (MoshOps.cpp:1210) exposes param values, not GR. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No gain-reduction meter on any device in ui/src (Rack.tsx shows params/bypass only). none found."
+    }
+  ]
+}

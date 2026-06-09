@@ -1,0 +1,2684 @@
+{
+  "generated": "2026-06-09",
+  "summary": {
+    "total": 266,
+    "capabilityCounts": {
+      "partial": 60,
+      "present": 39,
+      "missing": 167
+    },
+    "surfaceCounts": {
+      "missing": 208,
+      "partial": 30,
+      "present": 27,
+      "not_applicable": 1
+    },
+    "byTier": {
+      "must": 82,
+      "should": 127,
+      "nice": 57
+    }
+  },
+  "features": [
+    {
+      "id": "PRJ-001",
+      "name": "New project",
+      "category": "Project & Session Management",
+      "tier": "must",
+      "capability": "partial",
+      "capabilityEvidence": "MoshEngine.cpp:60 createEmptyEdit on cold start (default audio/time settings), but no new-project command and single fixed session dir; no templates.",
+      "surface": "missing",
+      "surfaceEvidence": "No New / New-from-template action in App.tsx or any component; fresh Edit only happens at process launch."
+    },
+    {
+      "id": "PRJ-002",
+      "name": "Open project",
+      "category": "Project & Session Management",
+      "tier": "must",
+      "capability": "partial",
+      "capabilityEvidence": "MoshEngine.cpp:50-53 loads the single fixed ~/Library/Mosh/session/session.tracktionedit at startup; no open-by-path, no recent files.",
+      "surface": "missing",
+      "surfaceEvidence": "No Open action or recent-files affordance in ui/src; only a 'Reload' button (re-reads the one fixed file) in Arrangement.tsx:176."
+    },
+    {
+      "id": "PRJ-003",
+      "name": "Save / Save As",
+      "category": "Project & Session Management",
+      "tier": "must",
+      "capability": "present",
+      "capabilityEvidence": "cmdSave -> MoshEngine::save() EditFileOperations.save (MoshEngine.cpp:228); SelfTest.cpp:192-197/308 verifies tracks/clips/plugins/renderLayer round-trip. Single fixed path, no Save As.",
+      "surface": "partial",
+      "surfaceEvidence": "Save button in Arrangement.tsx:175 calls exec('save'); no Save As, no file name shown in title/window (App.tsx topbar shows only 'Mosh')."
+    },
+    {
+      "id": "PRJ-004",
+      "name": "Auto-save",
+      "category": "Project & Session Management",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No interval/threshold checkpointing; save only happens on explicit save command. grep autosave/auto-save: none in src.",
+      "surface": "missing",
+      "surfaceEvidence": "No auto-save config or last-saved indicator in ui/src."
+    },
+    {
+      "id": "PRJ-005",
+      "name": "Version history / snapshots",
+      "category": "Project & Session Management",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "Single .tracktionedit file overwritten in place; no multi-version store. grep version history/snapshot history: none.",
+      "surface": "missing",
+      "surfaceEvidence": "No history/snapshots panel in ui/src."
+    },
+    {
+      "id": "PRJ-006",
+      "name": "Crash recovery",
+      "category": "Project & Session Management",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No crash-recovery record written; no recovery reconstruction path in MoshEngine.cpp. grep recovery: none.",
+      "surface": "missing",
+      "surfaceEvidence": "No recovery prompt on relaunch in App.tsx/init flow (store.ts init just refreshes snapshot)."
+    },
+    {
+      "id": "PRJ-007",
+      "name": "Project templates",
+      "category": "Project & Session Management",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No template capture/instantiation in engine; grep template (non-CSS/plugin) finds nothing functional.",
+      "surface": "missing",
+      "surfaceEvidence": "No template create/choose/manage UI in ui/src."
+    },
+    {
+      "id": "PRJ-008",
+      "name": "Project settings (rate / depth / time base)",
+      "category": "Project & Session Management",
+      "tier": "must",
+      "capability": "partial",
+      "capabilityEvidence": "Sample rate read from device (MoshOps.cpp:1251); export bitDepth hardcoded 24 (MoshOps.cpp:1118); no per-project stored rate/depth/time-base honoured by a settings store.",
+      "surface": "missing",
+      "surfaceEvidence": "No project-settings dialog for sample rate/bit depth/time base in ui/src; sampleRate appears only as a read-only snapshot field."
+    },
+    {
+      "id": "PRJ-009",
+      "name": "Consolidate / collect & save",
+      "category": "Project & Session Management",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No copy-external-media-into-project or re-path logic; grep consolidate/collect finds only an unrelated SelfTest demo comment.",
+      "surface": "missing",
+      "surfaceEvidence": "No consolidate/collect action in ui/src."
+    },
+    {
+      "id": "TRA-001",
+      "name": "Play / Stop",
+      "category": "Transport & Playback",
+      "tier": "must",
+      "capability": "present",
+      "capabilityEvidence": "cmdSetTransport play/stop -> transport.play/stop with ensurePlaybackContext (MoshOps.cpp:244-252); deterministic from current position.",
+      "surface": "present",
+      "surfaceEvidence": "Transport.tsx:21-27 play/stop toggle button reflects t.playing; position readout at :42."
+    },
+    {
+      "id": "TRA-002",
+      "name": "Record",
+      "category": "Transport & Playback",
+      "tier": "must",
+      "capability": "present",
+      "capabilityEvidence": "cmdSetTransport action 'record' -> transport.record(false) (MoshOps.cpp:253-256); recording exposed in transportToVar (:1366). No record-arm per track.",
+      "surface": "missing",
+      "surfaceEvidence": "Transport.tsx has only play/stop/return/loop buttons; no Record control and no command path in ui/src ever sends action:'record'."
+    },
+    {
+      "id": "TRA-003",
+      "name": "Loop / cycle playback",
+      "category": "Transport & Playback",
+      "tier": "must",
+      "capability": "present",
+      "capabilityEvidence": "cmdSetTransport sets transport.looping and setLoopRange (MoshOps.cpp:262-267); Tracktion loops over the region during play (and record).",
+      "surface": "present",
+      "surfaceEvidence": "Loop toggle in Transport.tsx:35-41; editable loop region via shift-drag on ruler in Arrangement.tsx:41 + rendered loopregion :97-102."
+    },
+    {
+      "id": "TRA-004",
+      "name": "Return to start / go to end",
+      "category": "Transport & Playback",
+      "tier": "must",
+      "capability": "present",
+      "capabilityEvidence": "transport.setPosition for any position incl. 0 (MoshOps.cpp:259-260); could seek to edit length but no end helper wired.",
+      "surface": "partial",
+      "surfaceEvidence": "Transport.tsx:28-34 'Return to start' (stop, position:0) and ruler-click seek; no go-to-end control."
+    },
+    {
+      "id": "TRA-005",
+      "name": "Locators / cue points",
+      "category": "Transport & Playback",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No named time-location store/recall; grep locator/cue finds nothing in src.",
+      "surface": "missing",
+      "surfaceEvidence": "No locator add-on-ruler or list in ui/src."
+    },
+    {
+      "id": "TRA-006",
+      "name": "Tempo control",
+      "category": "Transport & Playback",
+      "tier": "must",
+      "capability": "partial",
+      "capabilityEvidence": "Tempo exists as default from createEmptyEdit and is read via tempoSequence.getBpmAt into snapshot (MoshOps.cpp:1252); no set_tempo/setBpm command exists to change it.",
+      "surface": "missing",
+      "surfaceEvidence": "tempo is in the Snapshot.session type (types.ts:99) but not displayed or editable in Transport.tsx or any component."
+    },
+    {
+      "id": "TRA-007",
+      "name": "Time signature",
+      "category": "Transport & Playback",
+      "tier": "must",
+      "capability": "missing",
+      "capabilityEvidence": "No time-signature read or set; grep timeSig/setNumerator/setDenominator: none in src. Not in snapshot.",
+      "surface": "missing",
+      "surfaceEvidence": "No time-signature display or editor in ui/src."
+    },
+    {
+      "id": "TRA-008",
+      "name": "Metronome / click",
+      "category": "Transport & Playback",
+      "tier": "must",
+      "capability": "missing",
+      "capabilityEvidence": "No click track / metronome; grep metronome/click track/getClickTrack: none in src.",
+      "surface": "missing",
+      "surfaceEvidence": "No metronome toggle in Transport.tsx or anywhere in ui/src."
+    },
+    {
+      "id": "TRA-009",
+      "name": "Count-in / pre-roll",
+      "category": "Transport & Playback",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No count-in/pre-roll before record; grep count-in/preroll: none.",
+      "surface": "missing",
+      "surfaceEvidence": "No count-in config or indicator in ui/src."
+    },
+    {
+      "id": "TRA-010",
+      "name": "Punch in / out",
+      "category": "Transport & Playback",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No punch-in/out arming range; grep punch: none in src.",
+      "surface": "missing",
+      "surfaceEvidence": "No punch-range control on the timeline in ui/src."
+    },
+    {
+      "id": "TRA-011",
+      "name": "Scrub / jog",
+      "category": "Transport & Playback",
+      "tier": "should",
+      "capability": "partial",
+      "capabilityEvidence": "Ruler click sets transport position (seek) (Arrangement.tsx:19-22) but there is no audio-while-dragging scrub; transport just repositions, no proportional playback.",
+      "surface": "partial",
+      "surfaceEvidence": "Ruler click/seek exists in Arrangement.tsx but produces no audible scrub feedback; no dedicated scrub/jog affordance."
+    },
+    {
+      "id": "TRA-012",
+      "name": "Follow playhead / auto-scroll",
+      "category": "Transport & Playback",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No view-follows-playhead logic; lanes use fixed scroll, playhead just positioned by left offset (Arrangement.tsx:103,131).",
+      "surface": "missing",
+      "surfaceEvidence": "No auto-scroll/follow toggle in ui/src."
+    },
+    {
+      "id": "TRA-013",
+      "name": "Playback markers",
+      "category": "Transport & Playback",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No markers persisted at positions; no MarkerTrack/insertMarker usage in src.",
+      "surface": "missing",
+      "surfaceEvidence": "No add/name/click markers on the ruler in Arrangement.tsx; ruler only renders second ticks, playhead and loop region."
+    },
+    {
+      "id": "TRA-014",
+      "name": "Varispeed / playback rate",
+      "category": "Transport & Playback",
+      "tier": "nice",
+      "capability": "missing",
+      "capabilityEvidence": "No global playback-rate/varispeed control; grep varispeed/playback rate: none in src.",
+      "surface": "missing",
+      "surfaceEvidence": "No varispeed control in ui/src."
+    },
+    {
+      "id": "ARR-001",
+      "name": "Tracks",
+      "category": "Arrangement & Timeline",
+      "tier": "must",
+      "capability": "present",
+      "capabilityEvidence": "createAudioTrack->insertNewAudioTrack MoshOps.cpp:1176; cmdCreateTrack:132; unbounded; snapshot iterates getAudioTracks:1257",
+      "surface": "present",
+      "surfaceEvidence": "Arrangement.tsx:161 '+ Track'; TrackHeader:181 name/remove/mute/solo/vol; tracks rendered:109 (audio+MIDI share one type)"
+    },
+    {
+      "id": "ARR-002",
+      "name": "Audio clips / regions",
+      "category": "Arrangement & Timeline",
+      "tier": "must",
+      "capability": "present",
+      "capabilityEvidence": "cmdImportClip insertWaveClip MoshOps.cpp:205; clipToVar gives start/length/offset/sourceFile/sourceLength:1313-1321",
+      "surface": "present",
+      "surfaceEvidence": "Clip.tsx renders name + Waveform from get_clip_peaks (store ensurePeaks:164); Arrangement lanes:124-129"
+    },
+    {
+      "id": "ARR-003",
+      "name": "MIDI clips",
+      "category": "Arrangement & Timeline",
+      "tier": "must",
+      "capability": "present",
+      "capabilityEvidence": "cmdAddMidiClip insertMIDIClip + sequence.addNote MoshOps.cpp:621-651; clipToVar tags type 'midi':1323",
+      "surface": "partial",
+      "surfaceEvidence": "add_midi_clip wired (Arrangement.tsx:163, Rack.tsx:51), midi clip styled (styles.css:141); but NO piano-roll/note editor in ui/src"
+    },
+    {
+      "id": "ARR-004",
+      "name": "Timeline ruler (bars & beats)",
+      "category": "Arrangement & Timeline",
+      "tier": "must",
+      "capability": "partial",
+      "capabilityEvidence": "tempoSequence exists (getBpmAt MoshOps.cpp:1252) but backend exposes no bars/beats; ruler derives from seconds not the musical model",
+      "surface": "partial",
+      "surfaceEvidence": "Arrangement.tsx:92-96 ruler ticks are integer SECONDS ('<span>{i}</span>'), not bars:beats; no musical ruler"
+    },
+    {
+      "id": "ARR-005",
+      "name": "Multiple time formats",
+      "category": "Arrangement & Timeline",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "snapshot/transport carry only seconds (transportToVar position.inSeconds MoshOps.cpp:1367); no samples/timecode/bars conversion",
+      "surface": "missing",
+      "surfaceEvidence": "Transport.tsx fmt() shows only mm:ss.cs:3-9; no time-format switch; ruler is seconds-only"
+    },
+    {
+      "id": "ARR-006",
+      "name": "Grid & snap",
+      "category": "Arrangement & Timeline",
+      "tier": "must",
+      "capability": "partial",
+      "capabilityEvidence": "snapping is UI-only (store.snapTime:159 rounds to snapGrid seconds); backend move/trim/split take raw times, engine has no grid",
+      "surface": "partial",
+      "surfaceEvidence": "Snap toggle Arrangement.tsx:167; grid fixed 0.25 SECONDS (store.ts:72), not musical, and no visible grid lines"
+    },
+    {
+      "id": "ARR-007",
+      "name": "Adjustable snap resolution",
+      "category": "Arrangement & Timeline",
+      "tier": "must",
+      "capability": "missing",
+      "capabilityEvidence": "snapGrid hardcoded 0.25s store.ts:72; no resolution setter; engine has no grid concept",
+      "surface": "missing",
+      "surfaceEvidence": "Toolbar exposes only on/off Snap (Arrangement.tsx:167); no resolution selector (1/4..1/16/bar) in ui/src"
+    },
+    {
+      "id": "ARR-008",
+      "name": "Zoom (horizontal & vertical)",
+      "category": "Arrangement & Timeline",
+      "tier": "must",
+      "capability": "partial",
+      "capabilityEvidence": "horizontal zoom is pure UI scale (pxPerSec store.ts:69,149); vertical/track-height not adjustable (LANE_H const 84 Arrangement.tsx:6)",
+      "surface": "partial",
+      "surfaceEvidence": "Zoom -/+ buttons (horizontal) Arrangement.tsx:169-170; NO vertical/track-height zoom control"
+    },
+    {
+      "id": "ARR-009",
+      "name": "Arrangement markers",
+      "category": "Arrangement & Timeline",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "no marker command in the 43-command set; grep 'marker' in src = none found",
+      "surface": "missing",
+      "surfaceEvidence": "no marker UI; grep 'marker' in ui/src = none found"
+    },
+    {
+      "id": "ARR-010",
+      "name": "Time / range selection",
+      "category": "Arrangement & Timeline",
+      "tier": "must",
+      "capability": "partial",
+      "capabilityEvidence": "no backend time-range selection; closest is loop range (transport.setLoopRange MoshOps.cpp:266), which is the loop region not an edit target",
+      "surface": "partial",
+      "surfaceEvidence": "marquee selects CLIPS not a time span (Arrangement.tsx:58-76); shift-drag ruler sets loop region:35-42; no time-range edit target"
+    },
+    {
+      "id": "ARR-011",
+      "name": "Move clips",
+      "category": "Arrangement & Timeline",
+      "tier": "must",
+      "capability": "present",
+      "capabilityEvidence": "cmdMoveClip clip->setStart + optional moveTo(track) MoshOps.cpp:331-350; source unchanged, undo transaction",
+      "surface": "present",
+      "surfaceEvidence": "Clip.tsx drag move->exec('move_clip'):77-79 with optimistic preview, snaps:60; readout is title tooltip only; cross-track trackId not wired"
+    },
+    {
+      "id": "ARR-012",
+      "name": "Trim clip edges",
+      "category": "Arrangement & Timeline",
+      "tier": "must",
+      "capability": "present",
+      "capabilityEvidence": "cmdTrimClip sets {start,length,offset} MoshOps.cpp:352-370; start/end/offset independent + reversible",
+      "surface": "present",
+      "surfaceEvidence": "Clip.tsx trim-l/trim-r handles->exec('trim_clip'):82-88; left-trim adjusts offset:65-68; handles when tool==='move':112-116"
+    },
+    {
+      "id": "ARR-013",
+      "name": "Split / cut clips",
+      "category": "Arrangement & Timeline",
+      "tier": "must",
+      "capability": "present",
+      "capabilityEvidence": "cmdSplitClip ClipTrack::splitClip MoshOps.cpp:372-388; returns newClipId",
+      "surface": "present",
+      "surfaceEvidence": "Split tool button Arrangement.tsx:166; Clip.tsx click in split tool->exec('split_clip') at snapped time:39-43"
+    },
+    {
+      "id": "ARR-014",
+      "name": "Fades & crossfades",
+      "category": "Arrangement & Timeline",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "no fade/crossfade command or attribute; clipToVar carries no fade fields MoshOps.cpp:1307-1357; grep 'fade' in src = none found",
+      "surface": "missing",
+      "surfaceEvidence": "no fade handles/crossfade in ui/src; grep 'fade'/'crossfade' = none found"
+    },
+    {
+      "id": "ARR-015",
+      "name": "Duplicate / loop clips",
+      "category": "Arrangement & Timeline",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "no duplicate or loop-clip command in the 43-command set",
+      "surface": "missing",
+      "surfaceEvidence": "no Duplicate/Loop action in ui/src; grep 'duplicate' = none found"
+    },
+    {
+      "id": "ARR-016",
+      "name": "Clip gain",
+      "category": "Arrangement & Timeline",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "no clip-gain command; clipToVar has no gain field MoshOps.cpp:1307-1357; only per-track set_track_volume exists",
+      "surface": "missing",
+      "surfaceEvidence": "no clip-gain control/inspector in ui/src; grep 'clipgain' = none found"
+    },
+    {
+      "id": "ARR-017",
+      "name": "Track folders / groups",
+      "category": "Arrangement & Timeline",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "all tracks are flat AudioTracks (createAudioTrack MoshOps.cpp:1176); no FolderTrack/group; grep 'foldertrack'/'grouptrack' = none found",
+      "surface": "missing",
+      "surfaceEvidence": "no folder/group affordance in ui/src; tracks render as a flat list (Arrangement.tsx:109)"
+    },
+    {
+      "id": "ARR-018",
+      "name": "Track freeze / flatten",
+      "category": "Arrangement & Timeline",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "no track freeze/flatten; freeze_layer MoshOps.cpp:1044 is a Tier-B render-LAYER op (marks generative layer 'frozen'), not a track-chain bounce",
+      "surface": "missing",
+      "surfaceEvidence": "no track freeze/flatten control in ui/src; grep 'freeze' in ui/src = none found"
+    },
+    {
+      "id": "ARR-019",
+      "name": "Color coding",
+      "category": "Arrangement & Timeline",
+      "tier": "nice",
+      "capability": "missing",
+      "capabilityEvidence": "no color attribute for tracks/clips; trackToVar/clipToVar carry no color field MoshOps.cpp:1269-1357",
+      "surface": "missing",
+      "surfaceEvidence": "no color-assign control; clip color is type-derived CSS only (styles.css:141), not per-item"
+    },
+    {
+      "id": "ARR-020",
+      "name": "Ripple / shift edits",
+      "category": "Arrangement & Timeline",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "no ripple/insert-time op in the 43-command set; edits affect only the targeted clip",
+      "surface": "missing",
+      "surfaceEvidence": "no ripple/insert-time mode in ui/src; grep 'ripple' = none found"
+    },
+    {
+      "id": "ARR-021",
+      "name": "Track height resize",
+      "category": "Arrangement & Timeline",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "track height is hardcoded const LANE_H=84 (Arrangement.tsx:6); no per-track height in engine or snapshot",
+      "surface": "missing",
+      "surfaceEvidence": "no track-height resize handle in ui/src; all lanes fixed LANE_H (Arrangement.tsx:125,189)"
+    },
+    {
+      "id": "ARR-022",
+      "name": "Sections / scenes / navigator",
+      "category": "Arrangement & Timeline",
+      "tier": "nice",
+      "capability": "missing",
+      "capabilityEvidence": "no section/scene model (depends on absent markers ARR-009); none found in src",
+      "surface": "missing",
+      "surfaceEvidence": "no section navigator in ui/src; none found"
+    },
+    {
+      "id": "ARR-023",
+      "name": "Clip mute / disable",
+      "category": "Arrangement & Timeline",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "no clip mute/disable command or flag; set_track_mute mutes the whole TRACK (MoshOps.cpp:419-428); clipToVar has no mute field",
+      "surface": "missing",
+      "surfaceEvidence": "only track-level M button (Arrangement.tsx:198-201); no per-clip mute in ui/src"
+    },
+    {
+      "id": "ARR-024",
+      "name": "Clip rename",
+      "category": "Arrangement & Timeline",
+      "tier": "should",
+      "capability": "partial",
+      "capabilityEvidence": "clips store a name (insertWaveClip name MoshOps.cpp:205; clipToVar c.getName():1311) but NO rename_clip command - name only set at creation",
+      "surface": "missing",
+      "surfaceEvidence": "clip name read-only (Clip.tsx:110); no rename-in-place/inspector; rename in ui/src is only the rename_track path, not clips"
+    },
+    {
+      "id": "TMP-001",
+      "name": "Fixed project tempo",
+      "category": "Tempo & Time Signature",
+      "tier": "must",
+      "capability": "partial",
+      "capabilityEvidence": "Tracktion edit.tempoSequence drives timing; snapshot reads getBpmAt at MoshOps.cpp:1252. No set-tempo command; default tempo only, never user-settable.",
+      "surface": "missing",
+      "surfaceEvidence": "tempo is in types.ts:99 snapshot type but never rendered. Transport.tsx shows only play/loop/pos; no tempo field anywhere in ui/src."
+    },
+    {
+      "id": "TMP-002",
+      "name": "Tempo automation / tempo track",
+      "category": "Tempo & Time Signature",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No tempo map / tempo-automation code; tempoSequence is read once via getBpmAt(t=0) only (MoshOps.cpp:1252). No command to add tempo changes.",
+      "surface": "missing",
+      "surfaceEvidence": "No tempo track or curve in Arrangement.tsx; ruler ticks are seconds (Arrangement.tsx:92-96). none found."
+    },
+    {
+      "id": "TMP-003",
+      "name": "Time-signature changes",
+      "category": "Tempo & Time Signature",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No time-signature handling; grep for timeSignature/numerator/denominator across src returns none. Snapshot has no meter field.",
+      "surface": "missing",
+      "surfaceEvidence": "No time-signature control in Transport.tsx or anywhere in ui/src. none found."
+    },
+    {
+      "id": "TMP-004",
+      "name": "Tap tempo",
+      "category": "Tempo & Time Signature",
+      "tier": "nice",
+      "capability": "missing",
+      "capabilityEvidence": "No tap-tempo logic anywhere in src/. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No tap-tempo control in ui/src. none found."
+    },
+    {
+      "id": "TMP-005",
+      "name": "Tempo detection from audio",
+      "category": "Tempo & Time Signature",
+      "tier": "nice",
+      "capability": "missing",
+      "capabilityEvidence": "No audio tempo/beat detection in src or service; get_clip_peaks only computes min/max buckets (MoshOps.cpp:441-486). none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No detect-tempo action in ui/src. none found."
+    },
+    {
+      "id": "TMP-006",
+      "name": "Groove / swing templates",
+      "category": "Tempo & Time Signature",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No groove/swing offset logic; no quantize anywhere in src/. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No groove/swing selector in ui/src. none found."
+    },
+    {
+      "id": "ARE-001",
+      "name": "Input monitoring",
+      "category": "Audio Recording",
+      "tier": "must",
+      "capability": "missing",
+      "capabilityEvidence": "MoshEngine.cpp:172 assigns an input device, but no per-track input-monitor path; no armForRecording/WaveInputDevice usage in src. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No input-monitor control per track; TrackHeader (Arrangement.tsx:181) has only mute/solo/volume. none found."
+    },
+    {
+      "id": "ARE-002",
+      "name": "Record arm",
+      "category": "Audio Recording",
+      "tier": "must",
+      "capability": "missing",
+      "capabilityEvidence": "No record-arm: grep for armForRecording/setRecordEnabled/recordEnabled in src returns none. Tracks cannot be armed.",
+      "surface": "missing",
+      "surfaceEvidence": "No record-arm control per track in ui/src; TrackHeader has only M/S/volume (Arrangement.tsx:197-214). none found."
+    },
+    {
+      "id": "ARE-003",
+      "name": "Latency-compensated recording",
+      "category": "Audio Recording",
+      "tier": "must",
+      "capability": "missing",
+      "capabilityEvidence": "No latency compensation for recording; no plugin-latency or round-trip comp wiring. transport.record(false) at MoshOps.cpp:256 with no armed input. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No recorded-take landing in ui/src; no record button (Transport.tsx has no record action, set_transport never called with action:'record'). none found."
+    },
+    {
+      "id": "ARE-004",
+      "name": "Multitrack simultaneous record",
+      "category": "Audio Recording",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No multitrack record; no per-track input assignment or arming exists (see ARE-002). none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No multi-arm UI in ui/src. none found."
+    },
+    {
+      "id": "ARE-005",
+      "name": "Loop recording / takes",
+      "category": "Audio Recording",
+      "tier": "should",
+      "capability": "partial",
+      "capabilityEvidence": "Engine transport.record() exists (MoshOps.cpp:256) but no loop-record/takes. Out-of-band: iPhone companion records PCM takes, lands via import_clip (RemoteCompanionServer.cpp:313-330) \u2014 single take, not loop passes.",
+      "surface": "missing",
+      "surfaceEvidence": "Take recorder UI is iOS companion (TakeRecorderView.swift), not ui/src. No take/loop-record affordance in ui/src. none found."
+    },
+    {
+      "id": "ARE-006",
+      "name": "Input gain / level",
+      "category": "Audio Recording",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No pre-record input gain/trim; engine input setup at MoshEngine.cpp:168-176 applies no gain. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No input-trim control in ui/src. none found."
+    },
+    {
+      "id": "AED-001",
+      "name": "Cut / copy / paste / delete",
+      "category": "Audio Editing",
+      "tier": "must",
+      "capability": "missing",
+      "capabilityEvidence": "No clip cut/copy/paste/delete: no remove_clip command in MoshOps dispatch (lines 82-125); clips only removable by deleting their whole track (cmdRemoveTrack). split exists, copy/paste/delete do not.",
+      "surface": "missing",
+      "surfaceEvidence": "No clip delete/cut/copy/paste in ui/src; no keyboard/Backspace handler; only 'copy' is the pairing-link copy (App.tsx:122). none found."
+    },
+    {
+      "id": "AED-002",
+      "name": "Trim / slip",
+      "category": "Audio Editing",
+      "tier": "must",
+      "capability": "present",
+      "capabilityEvidence": "cmdTrimClip (MoshOps.cpp:352-370) sets start/length/offset via clip->setPosition, adjusting source offset (slip) independently and reversibly (undo transaction).",
+      "surface": "present",
+      "surfaceEvidence": "Clip.tsx trim handles (left/right, lines 114-115) call trim_clip; left-trim adjusts offset for slip (Clip.tsx:65-68)."
+    },
+    {
+      "id": "AED-003",
+      "name": "Split",
+      "category": "Audio Editing",
+      "tier": "must",
+      "capability": "present",
+      "capabilityEvidence": "cmdSplitClip (MoshOps.cpp:372-389) calls ClipTrack::splitClip at a time position, producing an independent new clip; undoable.",
+      "surface": "present",
+      "surfaceEvidence": "Split tool in Toolbar (Arrangement.tsx:166); Clip.tsx:39-44 invokes split_clip at the pointer position when tool=='split'."
+    },
+    {
+      "id": "AED-004",
+      "name": "Fade / crossfade editing",
+      "category": "Audio Editing",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No fade/crossfade: grep for fadeIn/fadeOut/crossfade/setFade in src returns none. clipToVar (MoshOps.cpp:1307) carries no fade fields.",
+      "surface": "missing",
+      "surfaceEvidence": "No fade handles or crossfade editing in Clip.tsx. none found."
+    },
+    {
+      "id": "AED-005",
+      "name": "Clip gain / normalize",
+      "category": "Audio Editing",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No per-clip gain or normalize: no clipGain/setGainDb/normalize for audio in src (only color-normalize in service). none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No clip-gain or normalize control on clips in ui/src. none found."
+    },
+    {
+      "id": "AED-006",
+      "name": "Reverse",
+      "category": "Audio Editing",
+      "tier": "nice",
+      "capability": "missing",
+      "capabilityEvidence": "No reverse operation anywhere in src/. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No reverse action on clips in ui/src. none found."
+    },
+    {
+      "id": "AED-007",
+      "name": "Time-stretch",
+      "category": "Audio Editing",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No time-stretch: no TimeStretcher/elastique/warp usage in src. trim_clip changes bounds only, not stretch ratio. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No time-stretch control/handle in ui/src. none found."
+    },
+    {
+      "id": "AED-008",
+      "name": "Pitch-shift",
+      "category": "Audio Editing",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No pitch-shift (audio) in src; only the generative SA3 re-imagine path, which is not semitone/cent clip pitch. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No pitch-shift control on clips in ui/src. none found."
+    },
+    {
+      "id": "AED-009",
+      "name": "Transient detection",
+      "category": "Audio Editing",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No transient/onset detection; get_clip_peaks computes only min/max buckets (MoshOps.cpp:441-486). none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No transient markers shown on clips in Clip.tsx/Waveform.tsx. none found."
+    },
+    {
+      "id": "AED-010",
+      "name": "Slice to MIDI / to clips",
+      "category": "Audio Editing",
+      "tier": "nice",
+      "capability": "missing",
+      "capabilityEvidence": "No slice-to-MIDI/clips; no transient detection to slice on (see AED-009). none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No slice action in ui/src. none found."
+    },
+    {
+      "id": "AED-011",
+      "name": "Snap to zero crossing",
+      "category": "Audio Editing",
+      "tier": "nice",
+      "capability": "missing",
+      "capabilityEvidence": "No zero-crossing snap; snapTime rounds to a fixed time grid (store.ts:159-162), no audio sample inspection. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No zero-crossing-snap option in ui/src. none found."
+    },
+    {
+      "id": "AED-012",
+      "name": "Spectral edit / repair",
+      "category": "Audio Editing",
+      "tier": "nice",
+      "capability": "missing",
+      "capabilityEvidence": "No spectral edit/repair; no frequency-domain editing in src. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No spectral edit view in ui/src. none found."
+    },
+    {
+      "id": "AED-013",
+      "name": "Audio quantize",
+      "category": "Audio Editing",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No audio quantize; no transient detection (AED-009) and no stretch (AED-007) to drive it. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No audio-quantize action in ui/src. none found."
+    },
+    {
+      "id": "MID-001",
+      "name": "MIDI record",
+      "category": "MIDI Recording & Editing",
+      "tier": "must",
+      "capability": "partial",
+      "capabilityEvidence": "set_transport action 'record' calls transport.record() (MoshOps.cpp:253-256) but no MIDI input device assigned, no track arm; grep for midiInput/recordEnabled in src/ = none found. Cannot capture live MIDI to clips.",
+      "surface": "missing",
+      "surfaceEvidence": "Transport.tsx has only play/stop/loop/return-to-start buttons; no record control. No track record-arm in any UI component. 'add_midi_clip' inserts preset notes, not a recorded performance."
+    },
+    {
+      "id": "MID-002",
+      "name": "Piano-roll editor",
+      "category": "MIDI Recording & Editing",
+      "tier": "must",
+      "capability": "missing",
+      "capabilityEvidence": "No piano-roll/pitch-vs-time model. clipToVar for MIDI sets only type:'midi' (MoshOps.cpp:1323-1324); notes never serialized. get_clip_peaks errors on non-wave clips (MoshOps.cpp:447-448).",
+      "surface": "missing",
+      "surfaceEvidence": "No piano-roll view exists. MIDI clips render via Clip.tsx as an empty colored block (styles.css:141) with name only. No editor opens for MIDI clips; grep for piano/note-editor in ui/src = none found."
+    },
+    {
+      "id": "MID-003",
+      "name": "Note create / move / resize / delete",
+      "category": "MIDI Recording & Editing",
+      "tier": "must",
+      "capability": "partial",
+      "capabilityEvidence": "cmdAddMidiClip can add notes via te sequence.addNote(pitch,start,length,velocity) (MoshOps.cpp:639-642), but only at clip creation from args; no command to move/resize/delete individual notes after creation.",
+      "surface": "missing",
+      "surfaceEvidence": "No note-editing surface. The '+ MIDI' button (Rack.tsx:51, Arrangement.tsx:163) inserts a fixed C-major arpeggio with no args; user cannot create/move/resize/delete notes anywhere in ui/src."
+    },
+    {
+      "id": "MID-004",
+      "name": "Velocity editing",
+      "category": "MIDI Recording & Editing",
+      "tier": "must",
+      "capability": "partial",
+      "capabilityEvidence": "sequence.addNote takes a velocity param, default 100 (MoshOps.cpp:642); stored in the Tracktion MIDI sequence. No command to edit an existing note's velocity.",
+      "surface": "missing",
+      "surfaceEvidence": "No velocity lane or per-note velocity control in ui/src. clipToVar does not expose velocity, so UI cannot even display it. None found."
+    },
+    {
+      "id": "MID-005",
+      "name": "CC / controller editing",
+      "category": "MIDI Recording & Editing",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No CC / pitch-bend / aftertouch handling. grep for controller/aftertouch/pitchBend/CC in src/ = none found beyond the unrelated JUCE controlParameterIndexAnnotation helper.",
+      "surface": "missing",
+      "surfaceEvidence": "No controller lanes in ui/src. None found."
+    },
+    {
+      "id": "MID-006",
+      "name": "Quantize MIDI",
+      "category": "MIDI Recording & Editing",
+      "tier": "must",
+      "capability": "missing",
+      "capabilityEvidence": "No quantize command or note-timing snap. grep for quantize/Quantize in src/ = none found. The 43-command spine has no quantize_midi.",
+      "surface": "missing",
+      "surfaceEvidence": "No quantize control (value+strength) in ui/src. None found."
+    },
+    {
+      "id": "MID-007",
+      "name": "Humanize / randomize",
+      "category": "MIDI Recording & Editing",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No humanize/randomize logic. grep humanize/randomize in src/ = none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No humanize/randomize control in ui/src. None found."
+    },
+    {
+      "id": "MID-008",
+      "name": "Scale / key constraint",
+      "category": "MIDI Recording & Editing",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No scale/key constraint model. grep scale/key-constraint in src/ = none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No scale/key selector in ui/src. None found."
+    },
+    {
+      "id": "MID-009",
+      "name": "Chord tools",
+      "category": "MIDI Recording & Editing",
+      "tier": "nice",
+      "capability": "missing",
+      "capabilityEvidence": "No chord generation/editing. grep chord in src/ = none found. The hardcoded arpeggio (MoshOps.cpp:647) is a fixed note list, not a chord tool.",
+      "surface": "missing",
+      "surfaceEvidence": "No chord entry/assist in ui/src. None found."
+    },
+    {
+      "id": "MID-010",
+      "name": "Arpeggiator",
+      "category": "MIDI Recording & Editing",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No arpeggiator device. The only 'arpeggio' is a fixed C-major note pattern inserted by cmdAddMidiClip (MoshOps.cpp:646-650); not a real-time arpeggiator transforming held notes.",
+      "surface": "missing",
+      "surfaceEvidence": "No arpeggiator device on MIDI in ui/src; the '+ MIDI' tooltip says 'default arpeggio' (Rack.tsx:52) but it is a static clip. None found."
+    },
+    {
+      "id": "MID-011",
+      "name": "Step input",
+      "category": "MIDI Recording & Editing",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No step-input mode. grep step.input in src/ = none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No step-input mode in ui/src. None found."
+    },
+    {
+      "id": "MID-012",
+      "name": "MPE support",
+      "category": "MIDI Recording & Editing",
+      "tier": "nice",
+      "capability": "missing",
+      "capabilityEvidence": "No MPE handling (per-note pitch/pressure/timbre). grep MPE in src/ = none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No MPE tracks/instruments or per-note editing in ui/src. None found."
+    },
+    {
+      "id": "MID-013",
+      "name": "Retrospective / MIDI capture",
+      "category": "MIDI Recording & Editing",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No retrospective MIDI capture buffer. grep retrospect/capture-last in src/ = none found; no live MIDI input path at all.",
+      "surface": "missing",
+      "surfaceEvidence": "No capture-last action in ui/src. None found."
+    },
+    {
+      "id": "MID-014",
+      "name": "Note expression / per-note mod",
+      "category": "MIDI Recording & Editing",
+      "tier": "nice",
+      "capability": "missing",
+      "capabilityEvidence": "No per-note expression curves. grep note.expression in src/ = none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No per-note expression editing in ui/src. None found."
+    },
+    {
+      "id": "MID-015",
+      "name": "Transform / logical edit",
+      "category": "MIDI Recording & Editing",
+      "tier": "nice",
+      "capability": "missing",
+      "capabilityEvidence": "No transform/logical-edit rules engine. grep transform/logical.edit in src/ = none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No transform/logical-edit tool in ui/src. None found."
+    },
+    {
+      "id": "MID-016",
+      "name": "Legato / length tools",
+      "category": "MIDI Recording & Editing",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No bulk legato/length tools. grep legato in src/ = none found; no command operates on existing note lengths.",
+      "surface": "missing",
+      "surfaceEvidence": "No length/legato tools in ui/src. None found."
+    },
+    {
+      "id": "MID-017",
+      "name": "Drum / step-sequencer view",
+      "category": "MIDI Recording & Editing",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No step/drum-grid pattern model. grep drum.grid/step-sequencer in src/ = none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No drum/step view for MIDI clips in ui/src. None found."
+    },
+    {
+      "id": "MID-018",
+      "name": "MIDI effects",
+      "category": "MIDI Recording & Editing",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No MIDI-domain effect slots before instruments. PluginHost hosts audio VST3/AU only; no MIDI-effect insert path. grep midi effect in src/ = none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No MIDI effect slots on instrument tracks in ui/src; Rack.tsx shows audio plugin rack + neural cards only. None found."
+    },
+    {
+      "id": "INS-001",
+      "name": "VST3 hosting",
+      "category": "Instruments & Plugin Hosting",
+      "tier": "must",
+      "capability": "present",
+      "capabilityEvidence": "cmdLoadPlugin MoshOps.cpp:509 creates te::ExternalPlugin via getPluginCache; VST3 scanned in PluginHost.cpp:90; state persists via Edit tree",
+      "surface": "present",
+      "surfaceEvidence": "PluginBrowser.tsx load_plugin; Rack.tsx PluginCard open_plugin_editor/remove/reorder; '+ Plugin' button opens browser"
+    },
+    {
+      "id": "INS-002",
+      "name": "AU hosting",
+      "category": "Instruments & Plugin Hosting",
+      "tier": "must",
+      "capability": "partial",
+      "capabilityEvidence": "JUCE_PLUGINHOST_AU=1 (CMakeLists.txt:90) compiles AU hosting, but PluginHost::scanFile only uses VST3PluginFormat (PluginHost.cpp:90); no AU scan path so no AU is cataloged/loadable",
+      "surface": "missing",
+      "surfaceEvidence": "PluginBrowser only lists list_plugins results (all VST3); curated scan list is all .vst3 (PluginHost.cpp:67); no AU ever appears"
+    },
+    {
+      "id": "INS-003",
+      "name": "CLAP hosting",
+      "category": "Instruments & Plugin Hosting",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No CLAP format anywhere; only VST3PluginFormat scanned and JUCE_PLUGINHOST_VST3/AU set in CMake. none found",
+      "surface": "missing",
+      "surfaceEvidence": "No CLAP affordance in ui/src. none found"
+    },
+    {
+      "id": "INS-004",
+      "name": "VST2 hosting (legacy)",
+      "category": "Instruments & Plugin Hosting",
+      "tier": "nice",
+      "capability": "missing",
+      "capabilityEvidence": "JUCE_VST3_CAN_REPLACE_VST2=0 (plugin_fixtures); no VST2 hosting format. none found",
+      "surface": "missing",
+      "surfaceEvidence": "No VST2 affordance in ui/src. none found"
+    },
+    {
+      "id": "INS-005",
+      "name": "Plugin scan & management",
+      "category": "Instruments & Plugin Hosting",
+      "tier": "must",
+      "capability": "partial",
+      "capabilityEvidence": "PluginHost::initialise scans a hardcoded curated VST3 list (PluginHost.cpp:66-79) into knownPluginList; no rescan/block/validate-isolate; AU/CLAP not scanned",
+      "surface": "partial",
+      "surfaceEvidence": "list_plugins feeds PluginBrowser.tsx (filter, inst/fx tabs) but no rescan, blocklist, or plugin-manager view; just a load picker"
+    },
+    {
+      "id": "INS-006",
+      "name": "Instrument tracks",
+      "category": "Instruments & Plugin Hosting",
+      "tier": "must",
+      "capability": "present",
+      "capabilityEvidence": "add_midi_clip MoshOps.cpp:621 adds MIDI; hosting a synth VST3 (isSynth) on the track drives audio; SelfTest.cpp:317-333 verifies instrument plays MIDI",
+      "surface": "partial",
+      "surfaceEvidence": "No dedicated 'instrument track' type; user adds '+ MIDI' (Rack.tsx:51) then loads a synth via browser; isInstrument badge shown but flow is manual two-step"
+    },
+    {
+      "id": "INS-007",
+      "name": "Insert effect chains",
+      "category": "Instruments & Plugin Hosting",
+      "tier": "must",
+      "capability": "present",
+      "capabilityEvidence": "Ordered pluginList per track; load/reorder/remove via cmdLoadPlugin/cmdReorderPlugin (MoshOps.cpp:509,553); snapshot lists plugins[] ordered (trackToVar:1284)",
+      "surface": "present",
+      "surfaceEvidence": "Rack.tsx renders chain of PluginCards with reorder '\u2039/\u203a' buttons (lines 85-86), remove, bypass; per selected track"
+    },
+    {
+      "id": "INS-008",
+      "name": "Plugin preset management",
+      "category": "Instruments & Plugin Hosting",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No preset save/recall command; no getStateInformation/preset handling in PluginHost or MoshOps. none found",
+      "surface": "missing",
+      "surfaceEvidence": "No preset control in Rack.tsx/PluginBrowser.tsx; only native plugin editor's own presets via open_plugin_editor. none found"
+    },
+    {
+      "id": "INS-009",
+      "name": "Plugin parameter automation",
+      "category": "Instruments & Plugin Hosting",
+      "tier": "must",
+      "capability": "partial",
+      "capabilityEvidence": "set_plugin_param (MoshOps.cpp:571) sets automatable params on hosted plugins; params exposed via getAutomatableParameter, but no time-varying automation curve read by engine (one-shot value only)",
+      "surface": "missing",
+      "surfaceEvidence": "No UI calls set_plugin_param (grep ui/src: none); external plugin params[] in snapshot are never rendered as controls or automation targets"
+    },
+    {
+      "id": "INS-010",
+      "name": "Plugin sandboxing / crash isolation",
+      "category": "Instruments & Plugin Hosting",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "setUsesSeparateProcessForScanning(false) (PluginHost.cpp:56); plugins run in-process; no crash isolation/sandbox. none found",
+      "surface": "missing",
+      "surfaceEvidence": "No crashed-plugin reporting in ui/src. none found"
+    },
+    {
+      "id": "INS-011",
+      "name": "Plugin delay compensation reporting",
+      "category": "Instruments & Plugin Hosting",
+      "tier": "should",
+      "capability": "partial",
+      "capabilityEvidence": "Hosted ExternalPlugin latency feeds Tracktion graph PDC implicitly; NeuralInsert reports getLatencySeconds (NeuralInsertPlugin.cpp:102); no explicit per-plugin latency readout aggregation for external plugins",
+      "surface": "missing",
+      "surfaceEvidence": "Only the neural insert shows latency (Rack.tsx:128 'ms'); external plugins expose no latency value in snapshot pluginToVar (MoshOps.cpp:1210) or UI"
+    },
+    {
+      "id": "INS-012",
+      "name": "Multi-output instruments",
+      "category": "Instruments & Plugin Hosting",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "addExternalPluginMetadata reports numOutputs (MoshOps.cpp:32) but no multi-out routing; instruments feed single track output only. none found",
+      "surface": "missing",
+      "surfaceEvidence": "No output-assignment control in ui/src. none found"
+    },
+    {
+      "id": "INS-013",
+      "name": "Built-in sampler",
+      "category": "Instruments & Plugin Hosting",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No built-in sampler; only NeuralInsertPlugin registered via createBuiltInType (PluginHost.cpp:61). none found",
+      "surface": "missing",
+      "surfaceEvidence": "No sampler in ui/src. none found"
+    },
+    {
+      "id": "INS-014",
+      "name": "Built-in synthesizer",
+      "category": "Instruments & Plugin Hosting",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No built-in synth (no FourOscPlugin etc.); only the neural insert built-in. Synths come only via hosted VST3 (Vital/Serum) which are third-party. none found",
+      "surface": "missing",
+      "surfaceEvidence": "No built-in synth instrument in ui/src; only hosted VST3 via browser. none found"
+    },
+    {
+      "id": "INS-015",
+      "name": "Built-in drum instrument",
+      "category": "Instruments & Plugin Hosting",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No built-in drum instrument; no pad/sample mapping code. none found",
+      "surface": "missing",
+      "surfaceEvidence": "No drum instrument in ui/src. none found"
+    },
+    {
+      "id": "INS-016",
+      "name": "Plugin window management",
+      "category": "Instruments & Plugin Hosting",
+      "tier": "should",
+      "capability": "partial",
+      "capabilityEvidence": "PluginHost tracks open editor windows (windowByPlugin map, openEditor/closeEditor, PluginHost.cpp:120-160); single open-at-a-time per plugin, no open/close-all or session restore of windows",
+      "surface": "partial",
+      "surfaceEvidence": "Rack.tsx 'Edit' button opens one editor (open_plugin_editor); no manage-many / close-all / restore-windows affordance in ui/src"
+    },
+    {
+      "id": "FX-001",
+      "name": "Equalizer",
+      "category": "Audio Effects & Processing",
+      "tier": "must",
+      "capability": "missing",
+      "capabilityEvidence": "No built-in EQ device; only NeuralInsertPlugin built-in (PluginHost.cpp:61). EQ only via hosted third-party VST3/AU. none found",
+      "surface": "missing",
+      "surfaceEvidence": "No EQ device or response curve in ui/src. none found"
+    },
+    {
+      "id": "FX-002",
+      "name": "Compressor / dynamics",
+      "category": "Audio Effects & Processing",
+      "tier": "must",
+      "capability": "missing",
+      "capabilityEvidence": "No built-in compressor; only neural insert built-in. Dynamics only via hosted VST3 (e.g. OTT in curated list, third-party). none found",
+      "surface": "missing",
+      "surfaceEvidence": "No compressor device / gain-reduction meter in ui/src. none found"
+    },
+    {
+      "id": "FX-003",
+      "name": "Reverb",
+      "category": "Audio Effects & Processing",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No built-in reverb device registered. none found",
+      "surface": "missing",
+      "surfaceEvidence": "No reverb device in ui/src. none found"
+    },
+    {
+      "id": "FX-004",
+      "name": "Delay",
+      "category": "Audio Effects & Processing",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No built-in delay; ValhallaDelay in curated scan list is a third-party hosted VST3, not a built-in Mosh device. none found",
+      "surface": "missing",
+      "surfaceEvidence": "No delay device in ui/src. none found"
+    },
+    {
+      "id": "FX-005",
+      "name": "Modulation (chorus/flanger/phaser)",
+      "category": "Audio Effects & Processing",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No built-in chorus/flanger/phaser; TAL-Chorus-LX in curated list is a third-party hosted VST3. none found",
+      "surface": "missing",
+      "surfaceEvidence": "No modulation device in ui/src. none found"
+    },
+    {
+      "id": "FX-006",
+      "name": "Distortion / saturation",
+      "category": "Audio Effects & Processing",
+      "tier": "should",
+      "capability": "partial",
+      "capabilityEvidence": "NeuralInsertPlugin is a drive-conditioned neural saturator/waveshaper (tanh, applyToBuffer NeuralInsertPlugin.cpp:135-167) adding harmonic content; not a conventional distortion device but does saturate",
+      "surface": "present",
+      "surfaceEvidence": "Rack.tsx '+ Neural' adds it; NeuralBody exposes drive/mix ASTD sliders (Rack.tsx:94-132). It is the only built-in harmonic/drive device exposed"
+    },
+    {
+      "id": "FX-007",
+      "name": "Gate / expander",
+      "category": "Audio Effects & Processing",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No built-in gate/expander device. none found",
+      "surface": "missing",
+      "surfaceEvidence": "No gate device in ui/src. none found"
+    },
+    {
+      "id": "FX-008",
+      "name": "Limiter",
+      "category": "Audio Effects & Processing",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No built-in limiter device. none found",
+      "surface": "missing",
+      "surfaceEvidence": "No limiter device in ui/src. none found"
+    },
+    {
+      "id": "FX-009",
+      "name": "Utility (gain / pan / width / mono)",
+      "category": "Audio Effects & Processing",
+      "tier": "should",
+      "capability": "partial",
+      "capabilityEvidence": "VolumeAndPanPlugin provides gain+pan per track (ensureVolumePlugin MoshOps.cpp:1196; setVolumeDb/setPan); no width or mono-fold utility device",
+      "surface": "partial",
+      "surfaceEvidence": "Track-header volume/pan via set_track_volume/pan exist, but no standalone utility device (gain/pan/width/mono) in the rack UI"
+    },
+    {
+      "id": "FX-010",
+      "name": "Sidechain input to effects",
+      "category": "Audio Effects & Processing",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No sidechain input routing for effects; no external sidechain source plumbing. none found",
+      "surface": "missing",
+      "surfaceEvidence": "No sidechain source selector in ui/src. none found"
+    },
+    {
+      "id": "FX-011",
+      "name": "Effect bypass / wet-dry",
+      "category": "Audio Effects & Processing",
+      "tier": "should",
+      "capability": "present",
+      "capabilityEvidence": "bypass_plugin sets setEnabled(!bypassed) (MoshOps.cpp:589); neural insert has dry/wet 'mix' param (NeuralInsertPlugin.cpp:62,167). Bypass applies to any hosted device",
+      "surface": "present",
+      "surfaceEvidence": "Rack.tsx PluginCard pdot toggles bypass_plugin (line 73); neural 'mix' slider is wet/dry (Rack.tsx:99). External-plugin wet/dry not surfaced (no mix), only bypass"
+    },
+    {
+      "id": "FX-012",
+      "name": "Multiband processing",
+      "category": "Audio Effects & Processing",
+      "tier": "nice",
+      "capability": "missing",
+      "capabilityEvidence": "No built-in multiband device (OTT is third-party VST3 in curated list, not built-in). none found",
+      "surface": "missing",
+      "surfaceEvidence": "No multiband device in ui/src. none found"
+    },
+    {
+      "id": "FX-013",
+      "name": "Mid/side processing",
+      "category": "Audio Effects & Processing",
+      "tier": "nice",
+      "capability": "missing",
+      "capabilityEvidence": "No mid/side encode/decode processing in any device. none found",
+      "surface": "missing",
+      "surfaceEvidence": "No mid/side mode in ui/src. none found"
+    },
+    {
+      "id": "MIX-001",
+      "name": "Mixer view",
+      "category": "Mixing & Mixer",
+      "tier": "must",
+      "capability": "partial",
+      "capabilityEvidence": "Per-track VolumeAndPanPlugin gives strip-like state, but no master/bus/aux channel objects; trackToVar only emits audio tracks (MoshOps.cpp:1257,1269).",
+      "surface": "partial",
+      "surfaceEvidence": "No dedicated mixer view; 'strips' are track headers in Arrangement.tsx TrackHeader (181-217); no master/bus strips rendered."
+    },
+    {
+      "id": "MIX-002",
+      "name": "Volume fader per channel",
+      "category": "Mixing & Mixer",
+      "tier": "must",
+      "capability": "present",
+      "capabilityEvidence": "cmdSetTrackVolume -> ensureVolumePlugin -> VolumeAndPanPlugin::setVolumeDb (MoshOps.cpp:391-403,1196). volumeDb in snapshot (1294).",
+      "surface": "present",
+      "surfaceEvidence": "Per-track volume range input in Arrangement.tsx TrackHeader calls set_track_volume (206-214)."
+    },
+    {
+      "id": "MIX-003",
+      "name": "Pan",
+      "category": "Mixing & Mixer",
+      "tier": "must",
+      "capability": "present",
+      "capabilityEvidence": "cmdSetTrackPan -> VolumeAndPanPlugin::setPan, jlimit -1..1 (MoshOps.cpp:405-417); pan emitted in trackToVar (1295).",
+      "surface": "missing",
+      "surfaceEvidence": "set_track_pan is never called in ui/src (grep: no matches). No pan control rendered in TrackHeader; pan only a type field (types.ts:83)."
+    },
+    {
+      "id": "MIX-004",
+      "name": "Mute / solo",
+      "category": "Mixing & Mixer",
+      "tier": "must",
+      "capability": "present",
+      "capabilityEvidence": "cmdSetTrackMute/Solo -> track->setMute/setSolo (MoshOps.cpp:419-439); mute/solo in snapshot via isMuted/isSolo (1302-1303).",
+      "surface": "present",
+      "surfaceEvidence": "M and S buttons per track in Arrangement.tsx TrackHeader call set_track_mute/set_track_solo (198-205)."
+    },
+    {
+      "id": "MIX-005",
+      "name": "Solo modes (AFL / PFL / SIP)",
+      "category": "Mixing & Mixer",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No solo-mode (AFL/PFL/SIP) logic; setSolo is plain in-place only; no solo-mode field or command. none found in src.",
+      "surface": "missing",
+      "surfaceEvidence": "No solo-mode setting anywhere in ui/src. none found."
+    },
+    {
+      "id": "MIX-006",
+      "name": "Sends / returns / aux",
+      "category": "Mixing & Mixer",
+      "tier": "must",
+      "capability": "missing",
+      "capabilityEvidence": "No sends/returns/aux: no AuxSend/AuxReturn usage, no send-level command (grep none found in src).",
+      "surface": "missing",
+      "surfaceEvidence": "No send controls or return channels in ui/src. none found."
+    },
+    {
+      "id": "MIX-007",
+      "name": "Pre / post-fader sends",
+      "category": "Mixing & Mixer",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No sends at all, so no pre/post-fader tap point exists in code. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No pre/post send toggle in ui/src. none found."
+    },
+    {
+      "id": "MIX-008",
+      "name": "Group / bus tracks",
+      "category": "Mixing & Mixer",
+      "tier": "must",
+      "capability": "missing",
+      "capabilityEvidence": "No group/bus tracks: no FolderTrack/output-track routing; createAudioTrack only inserts plain audio tracks (MoshOps.cpp:1176-1194). none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No create-group/bus affordance in ui/src; only +Track (create_track) in Toolbar (Arrangement.tsx:161). none found."
+    },
+    {
+      "id": "MIX-009",
+      "name": "VCA / control groups",
+      "category": "Mixing & Mixer",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No VCA/control-group fader scaling logic; no VCA construct in src. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No VCA/control-group fader in ui/src. none found."
+    },
+    {
+      "id": "MIX-010",
+      "name": "Master bus",
+      "category": "Mixing & Mixer",
+      "tier": "must",
+      "capability": "partial",
+      "capabilityEvidence": "export_audio sets params.useMasterPlugins=true (MoshOps.cpp:1128) so Tracktion's internal master sums on render, but no master channel is modeled or exposed in snapshot. No getMasterVolumePlugin usage.",
+      "surface": "missing",
+      "surfaceEvidence": "Snapshot emits only audio tracks (no master entry); no master strip in ui/src. 'Master Bus' in SelfTest.cpp:503 is just a track-rename test string."
+    },
+    {
+      "id": "MIX-011",
+      "name": "Channel metering",
+      "category": "Mixing & Mixer",
+      "tier": "must",
+      "capability": "missing",
+      "capabilityEvidence": "No level meters: no LevelMeasurer/getLevel tap; PROGRESS notes 'real audio level meters deferred', no public level-tap on VolumeAndPanPlugin. none found in src.",
+      "surface": "missing",
+      "surfaceEvidence": "No channel meter element in ui/src (meter matches are only get_clip_peaks waveform, not live level). none found."
+    },
+    {
+      "id": "MIX-012",
+      "name": "Input gain / trim",
+      "category": "Mixing & Mixer",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No per-channel input/trim gain stage; only the single VolumeAndPanPlugin fader exists. none found in src.",
+      "surface": "missing",
+      "surfaceEvidence": "No input-trim control in ui/src. none found."
+    },
+    {
+      "id": "MIX-013",
+      "name": "Phase invert",
+      "category": "Mixing & Mixer",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No per-channel polarity/phase invert in engine; grep phase only hits sine-tone generation (MoshEngine.cpp:202, SelfTest.cpp:53). none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No phase-invert control in ui/src. none found."
+    },
+    {
+      "id": "MIX-014",
+      "name": "Pan law setting",
+      "category": "Mixing & Mixer",
+      "tier": "nice",
+      "capability": "missing",
+      "capabilityEvidence": "No configurable pan law; setPan uses VolumeAndPanPlugin default, no pan-law field/command. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No pan-law setting in ui/src. none found."
+    },
+    {
+      "id": "MIX-015",
+      "name": "Monitor / control-room section",
+      "category": "Mixing & Mixer",
+      "tier": "nice",
+      "capability": "missing",
+      "capabilityEvidence": "No monitor/control-room section (dim/mono/speaker outputs); none found in src.",
+      "surface": "missing",
+      "surfaceEvidence": "No control-room/monitor section in ui/src. none found."
+    },
+    {
+      "id": "MIX-016",
+      "name": "Cue / headphone mixes",
+      "category": "Mixing & Mixer",
+      "tier": "nice",
+      "capability": "missing",
+      "capabilityEvidence": "No cue/headphone mixes (depends on sends, which are absent). none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No cue-mix management in ui/src. none found."
+    },
+    {
+      "id": "RTG-001",
+      "name": "Configurable inputs",
+      "category": "Routing & Signal Flow",
+      "tier": "must",
+      "capability": "partial",
+      "capabilityEvidence": "Engine can set a whole-app input device (MoshEngine applyRequestedAudioOutputDevice, inputDeviceName 89-187) but only via MOSH_AUDIO_INPUT_DEVICE env var; no per-track input assignment.",
+      "surface": "missing",
+      "surfaceEvidence": "No per-track input-source selector in ui/src; device selection is env-var only, never a UI control. none found."
+    },
+    {
+      "id": "RTG-002",
+      "name": "Configurable outputs",
+      "category": "Routing & Signal Flow",
+      "tier": "must",
+      "capability": "partial",
+      "capabilityEvidence": "Whole-app output device set via MOSH_AUDIO_OUTPUT_DEVICE (MoshEngine.cpp:89-187); no per-channel output-destination routing in the graph.",
+      "surface": "missing",
+      "surfaceEvidence": "No output-destination selector per channel in ui/src; output is env-var driven only. none found."
+    },
+    {
+      "id": "RTG-003",
+      "name": "Bus / aux routing",
+      "category": "Routing & Signal Flow",
+      "tier": "must",
+      "capability": "missing",
+      "capabilityEvidence": "No internal bus/aux routing graph: no output-track assignment, no FolderTrack/bus, no send routing in src. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No routing-destination selector in ui/src. none found."
+    },
+    {
+      "id": "RTG-004",
+      "name": "Sidechain routing",
+      "category": "Routing & Signal Flow",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No sidechain tap/source routing in engine or plugin host (grep sidechain: none found in src).",
+      "surface": "missing",
+      "surfaceEvidence": "No sidechain source selector in ui/src. none found."
+    },
+    {
+      "id": "RTG-005",
+      "name": "External hardware insert",
+      "category": "Routing & Signal Flow",
+      "tier": "nice",
+      "capability": "missing",
+      "capabilityEvidence": "No external hardware-insert (send-out/return-in with compensation) path in src. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No hardware-insert device in ui/src. none found."
+    },
+    {
+      "id": "RTG-006",
+      "name": "External instrument routing",
+      "category": "Routing & Signal Flow",
+      "tier": "nice",
+      "capability": "missing",
+      "capabilityEvidence": "No external-instrument routing (MIDI out + audio in linked) in src. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No external-instrument device in ui/src. none found."
+    },
+    {
+      "id": "RTG-007",
+      "name": "Multi-output routing",
+      "category": "Routing & Signal Flow",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No multi-output routing; tracks have a single signal path through pluginList only (MoshOps.cpp:1284-1289). none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No multi-output assignment in ui/src. none found."
+    },
+    {
+      "id": "RTG-008",
+      "name": "Flexible track-to-track routing",
+      "category": "Routing & Signal Flow",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No flexible track-to-track routing: no output-track/destination assignment, cycle-safe graph code absent. none found in src.",
+      "surface": "missing",
+      "surfaceEvidence": "No track-to-track routing selector in ui/src. none found."
+    },
+    {
+      "id": "AUT-001",
+      "name": "Parameter automation",
+      "category": "Automation",
+      "tier": "must",
+      "capability": "missing",
+      "capabilityEvidence": "Plugins expose te::AutomatableParameter but no code creates/reads any time-varying curve; grep AutomationCurve/addPoint = NONE FOUND in src/. set_plugin_param just calls param->setParameter (static).",
+      "surface": "missing",
+      "surfaceEvidence": "No automation enable/arm control in ui/src; no automation field in snapshot() (MoshOps.cpp:1246) or clipToVar/trackToVar. UI mounts only Transport/Arrangement/Rack/PluginBrowser."
+    },
+    {
+      "id": "AUT-002",
+      "name": "Volume / pan automation",
+      "category": "Automation",
+      "tier": "must",
+      "capability": "missing",
+      "capabilityEvidence": "set_track_volume/set_track_pan set a single static value on VolumeAndPanPlugin; no volume/pan automation curve is written or read. snapshot exposes only static volumeDb/pan (MoshOps.cpp:1294).",
+      "surface": "missing",
+      "surfaceEvidence": "Track header has static volume/pan sliders only; no volume/pan automation lane in any ui/src component. none found."
+    },
+    {
+      "id": "AUT-003",
+      "name": "Automation lanes",
+      "category": "Automation",
+      "tier": "must",
+      "capability": "missing",
+      "capabilityEvidence": "No per-parameter automation storage/edit path. No AutomationCurve usage anywhere in src/. Snapshot has no automation lane data.",
+      "surface": "missing",
+      "surfaceEvidence": "No automation lane UI under tracks; 'lane' tokens in styles.css/Arrangement.tsx refer to track lanes, not automation. none found."
+    },
+    {
+      "id": "AUT-004",
+      "name": "Draw / pencil automation",
+      "category": "Automation",
+      "tier": "must",
+      "capability": "missing",
+      "capabilityEvidence": "No draw/pencil automation point creation. grep pencil/bezier/addPoint/AutomationCurve = NONE FOUND in src/.",
+      "surface": "missing",
+      "surfaceEvidence": "No draw tool / automation pencil in ui/src; grep pencil/bezier/curve in ui/src = none (only CSS lane gradients). none found."
+    },
+    {
+      "id": "AUT-005",
+      "name": "Automation modes (read/write/touch/latch/trim)",
+      "category": "Automation",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No automation modes (read/write/touch/latch/trim); no automation record/capture path. grep automationMode/writeAutomation = NONE FOUND.",
+      "surface": "missing",
+      "surfaceEvidence": "No automation-mode selector per track/channel in ui/src. none found."
+    },
+    {
+      "id": "AUT-006",
+      "name": "Curve shapes / bezier",
+      "category": "Automation",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No automation segments at all, hence no curve/bezier shapes. NONE FOUND for AutomationCurve in src/.",
+      "surface": "missing",
+      "surfaceEvidence": "No segment-curvature editing in ui/src. none found."
+    },
+    {
+      "id": "AUT-007",
+      "name": "MIDI CC automation lanes",
+      "category": "Automation",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No MIDI CC editing or CC-as-automation. add_midi_clip exists but no CC data model; grep CC/controller lanes = none in src/.",
+      "surface": "missing",
+      "surfaceEvidence": "No CC automation lane in ui/src; no piano-roll/CC editor component exists at all. none found."
+    },
+    {
+      "id": "AUT-008",
+      "name": "Modulation sources / modulators",
+      "category": "Automation",
+      "tier": "nice",
+      "capability": "missing",
+      "capabilityEvidence": "No modulator/LFO/envelope/macro sources mappable to parameters. grep modulator/LFO/macro = none in src/.",
+      "surface": "missing",
+      "surfaceEvidence": "No modulator create/map UI in ui/src. none found."
+    },
+    {
+      "id": "AUT-009",
+      "name": "Automation follows clip",
+      "category": "Automation",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No per-clip automation; clipToVar (MoshOps.cpp:1307) carries only start/length/offset/name/type/renderLayer. No clip-scoped automation that could move with a clip.",
+      "surface": "missing",
+      "surfaceEvidence": "No clip-scoped automation editing in ui/src (Clip.tsx handles move/trim only). none found."
+    },
+    {
+      "id": "WRP-001",
+      "name": "Time-stretch algorithm choice",
+      "category": "Warp & Audio-to-Tempo",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No time-stretch algorithm selection or stretch at all. grep TimeStretch/elastique/setSpeedRatio/WarpTime = NONE FOUND in src/. Clips reference source untouched (move/trim/split only).",
+      "surface": "missing",
+      "surfaceEvidence": "No stretch-algorithm selector in ui/src; no time-stretch handle on clips (Clip.tsx is move/trim-l/trim-r). none found."
+    },
+    {
+      "id": "WRP-002",
+      "name": "Warp markers / elastic audio",
+      "category": "Warp & Audio-to-Tempo",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No warp markers / elastic audio. grep WarpTime/warp/elastic = NONE FOUND in src/. No source-time to musical-time mapping exists.",
+      "surface": "missing",
+      "surfaceEvidence": "No warp markers addable/draggable on audio in ui/src. none found."
+    },
+    {
+      "id": "WRP-003",
+      "name": "Auto-warp / beat detection",
+      "category": "Warp & Audio-to-Tempo",
+      "tier": "nice",
+      "capability": "missing",
+      "capabilityEvidence": "No beat/transient detection or auto-warp. grep beatDetect/transient/autoTempo = NONE FOUND in src/.",
+      "surface": "missing",
+      "surfaceEvidence": "No auto-warp action in ui/src. none found."
+    },
+    {
+      "id": "WRP-004",
+      "name": "Tempo follows audio / audio follows tempo",
+      "category": "Warp & Audio-to-Tempo",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No follow-tempo / audio-follows-tempo. grep setAutoTempo/setLoopInfo/getLoopInfo = NONE FOUND in src/; clips are not tempo-linked.",
+      "surface": "missing",
+      "surfaceEvidence": "No follow-tempo toggle per clip in ui/src. none found."
+    },
+    {
+      "id": "BRW-001",
+      "name": "Browser",
+      "category": "Browser & Asset Management",
+      "tier": "must",
+      "capability": "missing",
+      "capabilityEvidence": "No content/file/sample/preset browser that enumerates locations. Only list_plugins enumerates scanned VST3/AU (MoshOps.cpp cmdListPlugins). No filesystem/sample/preset index.",
+      "surface": "partial",
+      "surfaceEvidence": "The only 'browser' (store.openBrowser -> PluginBrowser.tsx) is a modal listing scanned plugins; no files/samples/presets panel. Not a content browser."
+    },
+    {
+      "id": "BRW-002",
+      "name": "Audition / preview",
+      "category": "Browser & Asset Management",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No audition/preview engine path for browsed items. grep audition/preview through engine = none. No preview transport.",
+      "surface": "missing",
+      "surfaceEvidence": "No preview playback control in PluginBrowser.tsx or anywhere in ui/src. none found."
+    },
+    {
+      "id": "BRW-003",
+      "name": "Tempo/key-synced preview",
+      "category": "Browser & Asset Management",
+      "tier": "nice",
+      "capability": "missing",
+      "capabilityEvidence": "No tempo/key-synced preview; depends on preview + stretch, both absent. NONE FOUND.",
+      "surface": "missing",
+      "surfaceEvidence": "No sync-preview option in ui/src. none found."
+    },
+    {
+      "id": "BRW-004",
+      "name": "Tagging / favorites",
+      "category": "Browser & Asset Management",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No tagging/favorites model. grep favorite/favourite/tag = none in src/ (no content store to tag).",
+      "surface": "missing",
+      "surfaceEvidence": "No tag/favourite controls in ui/src. none found."
+    },
+    {
+      "id": "BRW-005",
+      "name": "Search",
+      "category": "Browser & Asset Management",
+      "tier": "should",
+      "capability": "partial",
+      "capabilityEvidence": "Only the plugin list is filterable; no general content search. list_plugins returns names/manufacturer; filtering is client-side name match in PluginBrowser.tsx:17-22.",
+      "surface": "partial",
+      "surfaceEvidence": "PluginBrowser.tsx:40 has a name 'Filter\u2026' input for plugins only (and All/Inst/FX). No search across samples/presets/files. Plugin-only."
+    },
+    {
+      "id": "BRW-006",
+      "name": "Preset browser",
+      "category": "Browser & Asset Management",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No device/plugin preset browse or load. grep preset = none in src/ (only plugin instances loaded fresh; no preset save/recall).",
+      "surface": "missing",
+      "surfaceEvidence": "No preset browser in ui/src. none found."
+    },
+    {
+      "id": "BRW-007",
+      "name": "Drag-and-drop import",
+      "category": "Browser & Asset Management",
+      "tier": "must",
+      "capability": "partial",
+      "capabilityEvidence": "import_clip imports a file at an explicit path/position (cmdImportClip, MoshOps.cpp:230-235) but there is no drop-position handling tied to a UI drop event; engine takes a file path, not a drop.",
+      "surface": "missing",
+      "surfaceEvidence": "No onDrop/onDragOver/file-drop handler in ui/src (Arrangement.tsx, Clip.tsx, App.tsx). Drag in UI is internal clip move only. No file drag-drop import affordance."
+    },
+    {
+      "id": "BRW-008",
+      "name": "Sound-pack management",
+      "category": "Browser & Asset Management",
+      "tier": "nice",
+      "capability": "missing",
+      "capabilityEvidence": "No content/sound-pack install or index. grep soundpack/pack = none in src/.",
+      "surface": "missing",
+      "surfaceEvidence": "No pack management UI in ui/src. none found."
+    },
+    {
+      "id": "IOX-001",
+      "name": "Import audio (common formats)",
+      "category": "Import / Export / Render",
+      "tier": "must",
+      "capability": "partial",
+      "capabilityEvidence": "import_clip uses te::AudioFile (MoshOps.cpp:197) decoded by Tracktion's AudioFileFormatManager (WAV/AIFF/FLAC/Ogg/MP3); peaks path only registerBasicFormats (453). No format-policy/rate-conform check.",
+      "surface": "partial",
+      "surfaceEvidence": "No UI calls import_clip; no file picker or drag-drop in App.tsx/Arrangement.tsx. Only add_test_tone_clip (Arrangement.tsx:162). 'drop in a test tone' hint exists but no onDrop handler."
+    },
+    {
+      "id": "IOX-002",
+      "name": "Export / bounce mixdown",
+      "category": "Import / Export / Render",
+      "tier": "must",
+      "capability": "present",
+      "capabilityEvidence": "cmdExportAudio (MoshOps.cpp:1074) renders all tracks via te::Renderer::RenderTask, usePlugins/useMasterPlugins, to a WAV file; verified by SelfTest export_audio (SelfTest.cpp:494).",
+      "surface": "partial",
+      "surfaceEvidence": "Single 'Export' button calls exec('export_audio', {}) with empty args (App.tsx:47). No export/bounce dialog, no destination chooser, no options."
+    },
+    {
+      "id": "IOX-003",
+      "name": "Offline (faster-than-real-time) render",
+      "category": "Import / Export / Render",
+      "tier": "should",
+      "capability": "present",
+      "capabilityEvidence": "Default 'fast' (offline) render: params.realTimeRender = (renderMode=='realtime') (MoshOps.cpp:1130); auto/fast/realtime modes parsed (1085-1105), fast is offline render-to-file.",
+      "surface": "missing",
+      "surfaceEvidence": "UI Export button passes no renderMode (App.tsx:47), so it defaults server-side to 'auto'. No control to select offline/fast render in ui/src. none found."
+    },
+    {
+      "id": "IOX-004",
+      "name": "Real-time render",
+      "category": "Import / Export / Render",
+      "tier": "should",
+      "capability": "present",
+      "capabilityEvidence": "renderMode 'realtime' sets params.realTimeRender=true (MoshOps.cpp:1130); auto-selects realtime when a Serum plugin is hosted (findSerumRealtimeRenderReason, 38-47, 1093).",
+      "surface": "missing",
+      "surfaceEvidence": "No real-time render option exposed; Export button sends no renderMode (App.tsx:47). none found in ui/src."
+    },
+    {
+      "id": "IOX-005",
+      "name": "Stem / multitrack export",
+      "category": "Import / Export / Render",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "cmdExportAudio renders all tracks summed in one pass (tracksToDo = toBitSet(getAllTracks), MoshOps.cpp:1126); no per-track/per-bus stem export path. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No stem-export option or track-selection UI in ui/src. none found."
+    },
+    {
+      "id": "IOX-006",
+      "name": "Export selection / loop range",
+      "category": "Import / Export / Render",
+      "tier": "should",
+      "capability": "partial",
+      "capabilityEvidence": "Renderer.Parameters.time supports a TimeRange but cmdExportAudio hardcodes the full edit: params.time = {0, edit.getLength()} (MoshOps.cpp:1125); no args for selection/loop range.",
+      "surface": "missing",
+      "surfaceEvidence": "No range/selection export control; Export button sends empty args (App.tsx:47). UI has a loop region but it is not wired to export. none found."
+    },
+    {
+      "id": "IOX-007",
+      "name": "Format / rate / depth options",
+      "category": "Import / Export / Render",
+      "tier": "must",
+      "capability": "partial",
+      "capabilityEvidence": "bitDepth hardcoded to 24, audioFormat = default WAV, sampleRate from device (MoshOps.cpp:1116-1122); createMidiFile keyed off '.mid' extension (1129). No format/rate/depth args honoured.",
+      "surface": "missing",
+      "surfaceEvidence": "No export options dialog exposing format/rate/depth in ui/src; Export button sends {} (App.tsx:47). none found."
+    },
+    {
+      "id": "IOX-008",
+      "name": "Dithering on export",
+      "category": "Import / Export / Render",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No dither applied or configured in cmdExportAudio; bitDepth fixed at 24 (MoshOps.cpp:1116). grep dither in src: none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No dither option in ui/src. none found."
+    },
+    {
+      "id": "IOX-009",
+      "name": "Normalize on export",
+      "category": "Import / Export / Render",
+      "tier": "nice",
+      "capability": "missing",
+      "capabilityEvidence": "cmdExportAudio performs no normalization/loudness-target pass (MoshOps.cpp:1074-1173). grep normalize/normalise in src: none (only neural normalised-value, unrelated).",
+      "surface": "missing",
+      "surfaceEvidence": "No normalize-on-export option in ui/src. none found."
+    },
+    {
+      "id": "IOX-010",
+      "name": "MIDI file import / export",
+      "category": "Import / Export / Render",
+      "tier": "should",
+      "capability": "partial",
+      "capabilityEvidence": "MIDI export only as a side-effect: params.createMidiFile = file.hasFileExtension('.mid') (MoshOps.cpp:1129). No MIDI import command; add_midi_clip builds notes from JSON/default arp (621-659), not from a .mid file.",
+      "surface": "missing",
+      "surfaceEvidence": "No MIDI import/export affordance in ui/src; Export always targets WAV (App.tsx:47); add_midi_clip adds a default arpeggio, not a file. none found."
+    },
+    {
+      "id": "IOX-011",
+      "name": "Video import",
+      "category": "Import / Export / Render",
+      "tier": "nice",
+      "capability": "missing",
+      "capabilityEvidence": "No video import path in engine or MoshOps; no commands for video. grep video in src: none found. (nice tier, but no trace.)",
+      "surface": "missing",
+      "surfaceEvidence": "No video import control in ui/src. none found."
+    },
+    {
+      "id": "IOX-012",
+      "name": "Interchange (AAF / OMF)",
+      "category": "Import / Export / Render",
+      "tier": "nice",
+      "capability": "missing",
+      "capabilityEvidence": "No AAF/OMF interchange import or export in engine/MoshOps. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No interchange export/import control in ui/src. none found."
+    },
+    {
+      "id": "IOX-013",
+      "name": "MusicXML export",
+      "category": "Import / Export / Render",
+      "tier": "nice",
+      "capability": "missing",
+      "capabilityEvidence": "No MusicXML/notation export; no score model exists. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No MusicXML export control in ui/src. none found."
+    },
+    {
+      "id": "MTR-001",
+      "name": "Peak level meters",
+      "category": "Metering & Analysis",
+      "tier": "must",
+      "capability": "missing",
+      "capabilityEvidence": "No real-time level/peak metering in engine. snapshot()/trackToVar (MoshOps.cpp:1269) expose volumeDb/pan/mute/solo but no level/meter. No LevelMeasurer/getLevel anywhere in src. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No meter view; types.ts Track has no level field (types.ts:75-86); no meter component in ui/src. Mixer is in track headers (volume slider only). none found."
+    },
+    {
+      "id": "MTR-002",
+      "name": "RMS / loudness metering",
+      "category": "Metering & Analysis",
+      "tier": "should",
+      "capability": "partial",
+      "capabilityEvidence": "RMS computed only offline on generative render artifacts: rms_dbfs (service/quality_readout.py:54-55). Not a real-time engine meter; only runs on SA3/Fake render output, not live channels.",
+      "surface": "missing",
+      "surfaceEvidence": "RMS not shown anywhere; only the derived 'pq' score and flags surface in GenPanel (GenPanel.tsx:141-146). No RMS readout. none found."
+    },
+    {
+      "id": "MTR-003",
+      "name": "LUFS metering (I/S/M)",
+      "category": "Metering & Analysis",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No true ITU-R LUFS (I/S/M). service/quality_readout.py:102 emits 'lufs_approx' = rms_dbfs (a plain RMS aliased as LUFS, offline, on render artifacts only). No integrated/short/momentary gating.",
+      "surface": "missing",
+      "surfaceEvidence": "No LUFS meter in ui/src; lufs_approx is not surfaced (only pq/flags in GenPanel.tsx:141). none found."
+    },
+    {
+      "id": "MTR-004",
+      "name": "True-peak metering",
+      "category": "Metering & Analysis",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "Only sample-peak (np.max(abs)) computed offline on render artifacts (service/quality_readout.py:52); no oversampled/inter-sample true-peak detection. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No true-peak readout in ui/src. none found."
+    },
+    {
+      "id": "MTR-005",
+      "name": "Spectrum analyzer",
+      "category": "Metering & Analysis",
+      "tier": "should",
+      "capability": "partial",
+      "capabilityEvidence": "Offline single-frame FFT (spectral centroid/rolloff) on render artifacts only (service/quality_readout.py:67-75). No real-time spectrum analyzer in the audio engine. none found in src/.",
+      "surface": "missing",
+      "surfaceEvidence": "No spectrum view in ui/src; centroid/rolloff not surfaced (only pq/flags in GenPanel). none found."
+    },
+    {
+      "id": "MTR-006",
+      "name": "Phase / correlation meter",
+      "category": "Metering & Analysis",
+      "tier": "nice",
+      "capability": "partial",
+      "capabilityEvidence": "Offline stereo correlation computed on render artifacts: corr (service/quality_readout.py:78-82), flagged out_of_phase if <0 (124). Not a live correlation meter; render-output only.",
+      "surface": "missing",
+      "surfaceEvidence": "No correlation/phase meter in ui/src; corr value not shown (only out_of_phase may appear as a qa flag in GenPanel.tsx:144). none found as a meter."
+    },
+    {
+      "id": "MTR-007",
+      "name": "Oscilloscope",
+      "category": "Metering & Analysis",
+      "tier": "nice",
+      "capability": "missing",
+      "capabilityEvidence": "No real-time oscilloscope/scope. Backend computes static peak arrays per clip (get_clip_peaks, MoshOps.cpp:441) for waveform drawing, not a live scope. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "Waveform.tsx draws static clip peaks (Waveform.tsx:6-49); no real-time oscilloscope view. none found."
+    },
+    {
+      "id": "MTR-008",
+      "name": "Tuner",
+      "category": "Metering & Analysis",
+      "tier": "nice",
+      "capability": "missing",
+      "capabilityEvidence": "No pitch tuner / input-pitch detection in engine or MoshOps. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No tuner device in ui/src. none found."
+    },
+    {
+      "id": "MTR-009",
+      "name": "Spectrogram",
+      "category": "Metering & Analysis",
+      "tier": "nice",
+      "capability": "missing",
+      "capabilityEvidence": "No spectrogram (time-frequency) computation; only a single-frame FFT offline (service/quality_readout.py:67). none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No spectrogram view in ui/src. none found."
+    },
+    {
+      "id": "MTR-010",
+      "name": "Gain-reduction metering",
+      "category": "Metering & Analysis",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No gain-reduction reporting. Built-in dynamics are only the neural MLP insert and external VST3s; no GR metering plumbed. pluginToVar (MoshOps.cpp:1210) exposes param values, not GR. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No gain-reduction meter on any device in ui/src (Rack.tsx shows params/bypass only). none found."
+    },
+    {
+      "id": "MON-001",
+      "name": "Audio device selection",
+      "category": "Monitoring, Latency & Audio Engine",
+      "tier": "must",
+      "capability": "partial",
+      "capabilityEvidence": "MoshEngine.cpp:89 applyRequestedAudioOutputDevice() binds a CoreAudio device, but only via MOSH_AUDIO_OUTPUT_DEVICE env var; no runtime selection API.",
+      "surface": "missing",
+      "surfaceEvidence": "No settings/device-picker in ui/src; grep for settings/device/preferences in ui returns none. Snapshot has sampleRate but no device list."
+    },
+    {
+      "id": "MON-002",
+      "name": "Buffer & sample-rate config",
+      "category": "Monitoring, Latency & Audio Engine",
+      "tier": "must",
+      "capability": "partial",
+      "capabilityEvidence": "Engine reads getSampleRate()/getBlockSize() (MoshOps.cpp:1122,1251); setAudioDeviceSetup (MoshEngine.cpp:177) uses defaults only - no buffer/rate config path.",
+      "surface": "missing",
+      "surfaceEvidence": "No buffer/sample-rate control in ui/src; session.sampleRate exists in types.ts:99 but is never rendered. No settings panel."
+    },
+    {
+      "id": "MON-003",
+      "name": "Low-latency monitoring",
+      "category": "Monitoring, Latency & Audio Engine",
+      "tier": "must",
+      "capability": "missing",
+      "capabilityEvidence": "No input-monitoring path in src/. ensurePlaybackContext (MoshEngine.cpp:83) only allocates playback; no live-input monitor routing. No record-arm/monitor in MoshOps.",
+      "surface": "missing",
+      "surfaceEvidence": "No input-monitor control in ui/src; only the iPhone take-capture (RemoteCompanionServer) exists, which is unrelated to local low-latency monitoring."
+    },
+    {
+      "id": "MON-004",
+      "name": "Plugin delay compensation (engine)",
+      "category": "Monitoring, Latency & Audio Engine",
+      "tier": "must",
+      "capability": "present",
+      "capabilityEvidence": "Tracktion engine PDC active; NeuralInsertPlugin.cpp:102 getLatencySeconds() reports true delay-line length so PDC compensates (SelfTest.cpp:394-399 null test).",
+      "surface": "partial",
+      "surfaceEvidence": "No engine-wide compensation status/toggle in UI; only the per-neural-insert latency ms is shown (Rack.tsx:128). Compensation is implicit, not indicated."
+    },
+    {
+      "id": "MON-005",
+      "name": "Latency reporting",
+      "category": "Monitoring, Latency & Audio Engine",
+      "tier": "should",
+      "capability": "partial",
+      "capabilityEvidence": "Only the neural insert reports latency (NeuralInsertPlugin.cpp:232 latencySamples/Seconds). No engine round-trip / input-output latency reporting anywhere in src/.",
+      "surface": "partial",
+      "surfaceEvidence": "Rack.tsx:128 shows neural insert latency in ms ('(n.latencySeconds*1000).toFixed(1) ms'); no session/round-trip latency figure shown to the user."
+    },
+    {
+      "id": "MON-006",
+      "name": "Direct / hardware monitoring",
+      "category": "Monitoring, Latency & Audio Engine",
+      "tier": "nice",
+      "capability": "missing",
+      "capabilityEvidence": "No direct/hardware-monitoring path in src/; no interface-direct-monitor option in MoshEngine or MoshOps.",
+      "surface": "missing",
+      "surfaceEvidence": "No direct-monitor option in ui/src; none found."
+    },
+    {
+      "id": "MON-007",
+      "name": "Audio-engine / device gate",
+      "category": "Monitoring, Latency & Audio Engine",
+      "tier": "must",
+      "capability": "partial",
+      "capabilityEvidence": "Play/record silently guarded by 'if (eng.hasAudio())' (MoshOps.cpp:244,253); export gated at MoshOps.cpp:1189. Guard skips silently rather than gating/erroring on invalid device.",
+      "surface": "missing",
+      "surfaceEvidence": "No device/audio status gate or warning in ui/src; audioEnabled is returned only in add_neural_insert data (MoshOps.cpp:614), never in snapshot, never rendered. Nothing warns/blocks the user."
+    },
+    {
+      "id": "MON-008",
+      "name": "CPU load meter",
+      "category": "Monitoring, Latency & Audio Engine",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No DSP/CPU load reporting; grep getCpuUsage/getProportionOfCpu/dsp.load across src/ returns none.",
+      "surface": "missing",
+      "surfaceEvidence": "No CPU/DSP meter in ui/src; grep cpu in ui returns none."
+    },
+    {
+      "id": "MON-009",
+      "name": "Aggregate / multi-device",
+      "category": "Monitoring, Latency & Audio Engine",
+      "tier": "nice",
+      "capability": "missing",
+      "capabilityEvidence": "No aggregate/multi-device support in src/; engine binds a single device via setAudioDeviceSetup (MoshEngine.cpp:177).",
+      "surface": "missing",
+      "surfaceEvidence": "No aggregate-device setup in ui/src; none found."
+    },
+    {
+      "id": "CTL-001",
+      "name": "MIDI controller input",
+      "category": "Control, Keys & Hardware",
+      "tier": "must",
+      "capability": "missing",
+      "capabilityEvidence": "No MIDI input device handling in src/ (no MidiInput/MidiMessageCollector/getMidiInDevices). MIDI clips are created synthetically by add_midi_clip (MoshOps.cpp:646 default arpeggio), not from a device.",
+      "surface": "missing",
+      "surfaceEvidence": "No MIDI-input device selector in ui/src; grep midi input device returns none. Only '+ MIDI' button (Rack.tsx:51) which inserts a hardcoded clip."
+    },
+    {
+      "id": "CTL-002",
+      "name": "Keyboard shortcuts",
+      "category": "Control, Keys & Hardware",
+      "tier": "must",
+      "capability": "missing",
+      "capabilityEvidence": "No keyboard-shortcut binding for transport/edit actions; no keydown/KeyboardEvent handlers (grep in ui/src finds only bridge addEventListener for native events). No accelerator table in src/.",
+      "surface": "missing",
+      "surfaceEvidence": "No documented/active keyboard shortcuts in ui/src; transport/edit are click-only (Transport.tsx, Arrangement.tsx). None found."
+    },
+    {
+      "id": "CTL-003",
+      "name": "Customizable key commands",
+      "category": "Control, Keys & Hardware",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No key-binding model at all (CTL-002 missing), so nothing to remap or persist. None found in src/ or ui/src.",
+      "surface": "missing",
+      "surfaceEvidence": "No key-command editor in ui/src; none found."
+    },
+    {
+      "id": "CTL-004",
+      "name": "MIDI mapping / learn",
+      "category": "Control, Keys & Hardware",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No MIDI-learn/mapping in src/; no incoming MIDI handling exists to map (CTL-001 missing). grep MidiInput/midi learn returns none.",
+      "surface": "missing",
+      "surfaceEvidence": "No MIDI-learn/map UI in ui/src; none found."
+    },
+    {
+      "id": "CTL-005",
+      "name": "Control-surface protocols (Mackie/HUI/OSC)",
+      "category": "Control, Keys & Hardware",
+      "tier": "nice",
+      "capability": "missing",
+      "capabilityEvidence": "No control-surface protocol (Mackie/HUI/OSC) support in src/; none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No control-surface setup in ui/src; none found."
+    },
+    {
+      "id": "CTL-006",
+      "name": "Command palette / action search",
+      "category": "Control, Keys & Hardware",
+      "tier": "should",
+      "capability": "partial",
+      "capabilityEvidence": "All edits funnel through MoshOps::execute (MoshOps.cpp:74) dispatching 43 named commands - a searchable command index could be built on this, but no palette/index exists today.",
+      "surface": "missing",
+      "surfaceEvidence": "No command palette / action-search UI in ui/src; commands are reachable only via dedicated buttons. None found."
+    },
+    {
+      "id": "CTL-007",
+      "name": "Audio I/O naming / labels",
+      "category": "Control, Keys & Hardware",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No I/O labelling; device names come from CoreAudio enumeration only (MoshEngine.cpp:105-152), no custom labels persisted.",
+      "surface": "missing",
+      "surfaceEvidence": "No I/O setup/labels screen in ui/src; none found."
+    },
+    {
+      "id": "CTL-008",
+      "name": "Computer-keyboard MIDI",
+      "category": "Control, Keys & Hardware",
+      "tier": "nice",
+      "capability": "missing",
+      "capabilityEvidence": "No computer-keyboard-to-MIDI generation in src/ (no MidiKeyboardComponent / qwerty-to-note). grep typing/qwerty/MidiKeyboard returns none.",
+      "surface": "missing",
+      "surfaceEvidence": "No typing-keyboard MIDI mode in ui/src; none found."
+    },
+    {
+      "id": "SYN-001",
+      "name": "MIDI clock out/in",
+      "category": "Sync & External",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No MIDI clock send/receive in src/ or service/; grep midiClock/MidiBuffer for clock returns none.",
+      "surface": "missing",
+      "surfaceEvidence": "No MIDI-clock sync config in ui/src; none found."
+    },
+    {
+      "id": "SYN-002",
+      "name": "MTC (MIDI Time Code)",
+      "category": "Sync & External",
+      "tier": "nice",
+      "capability": "missing",
+      "capabilityEvidence": "No MTC generate/chase in src/; grep mtc/timecode returns none.",
+      "surface": "missing",
+      "surfaceEvidence": "No MTC sync config in ui/src; none found."
+    },
+    {
+      "id": "SYN-003",
+      "name": "Ableton Link",
+      "category": "Sync & External",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No Ableton Link integration in src/ or service/; grep ableton/link (sync sense) returns none.",
+      "surface": "missing",
+      "surfaceEvidence": "No Link toggle/peer-count in ui/src; none found."
+    },
+    {
+      "id": "SYN-004",
+      "name": "Transport sync to external",
+      "category": "Sync & External",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No external transport master/slave in src/; transport is local-only via te::TransportControl (MoshOps.cpp:240). No sync source.",
+      "surface": "missing",
+      "surfaceEvidence": "No sync master/slave setting in ui/src; none found."
+    },
+    {
+      "id": "SYN-005",
+      "name": "Word clock",
+      "category": "Sync & External",
+      "tier": "nice",
+      "capability": "missing",
+      "capabilityEvidence": "No external word-clock source handling in src/; engine uses internal CoreAudio clock only (MoshEngine.cpp:177). grep wordclock returns none.",
+      "surface": "missing",
+      "surfaceEvidence": "No word-clock source selector in ui/src; none found."
+    },
+    {
+      "id": "SCR-001",
+      "name": "Notation view",
+      "category": "Score & Notation",
+      "tier": "nice",
+      "capability": "missing",
+      "capabilityEvidence": "No staff-notation rendering of MIDI. grep notation/staff/musicxml across src+ui+service = none found (only unrelated JUCE/py annotation matches).",
+      "surface": "missing",
+      "surfaceEvidence": "No notation view in ui/src. None found."
+    },
+    {
+      "id": "SCR-002",
+      "name": "Score editing",
+      "category": "Score & Notation",
+      "tier": "nice",
+      "capability": "missing",
+      "capabilityEvidence": "No notation-based editing (depends on absent SCR-001). grep score editing/notation in src/ = none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No notation editing tools in ui/src. None found."
+    },
+    {
+      "id": "SCR-003",
+      "name": "Chord symbols / lead sheet",
+      "category": "Score & Notation",
+      "tier": "nice",
+      "capability": "missing",
+      "capabilityEvidence": "No chord-symbol/lead-sheet model. grep chord/leadsheet in src/ = none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No lead-sheet/chord display in ui/src. None found."
+    },
+    {
+      "id": "VID-001",
+      "name": "Video track / playback",
+      "category": "Video",
+      "tier": "nice",
+      "capability": "missing",
+      "capabilityEvidence": "No video stream/playback code; only 'framerate' hits are audio WAV sample rates in service/adapters. No te video support wired.",
+      "surface": "missing",
+      "surfaceEvidence": "No video track/window in ui/src; Arrangement.tsx has only audio/MIDI lanes. none found"
+    },
+    {
+      "id": "VID-002",
+      "name": "Sync audio to video",
+      "category": "Video",
+      "tier": "nice",
+      "capability": "missing",
+      "capabilityEvidence": "No video timeline or frame-locking; audio events have no video reference frame. none found in src/.",
+      "surface": "missing",
+      "surfaceEvidence": "No synced video+audio timeline view in ui/src. none found"
+    },
+    {
+      "id": "VID-003",
+      "name": "Video scrub with playhead",
+      "category": "Video",
+      "tier": "nice",
+      "capability": "missing",
+      "capabilityEvidence": "Scrub (set_transport position) exists but no video frame fetch on scrub. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No video display updates on ruler seek in Arrangement.tsx. none found"
+    },
+    {
+      "id": "VID-004",
+      "name": "Frame-rate / timecode support",
+      "category": "Video",
+      "tier": "nice",
+      "capability": "missing",
+      "capabilityEvidence": "No SMPTE/timecode/frame-rate model; transport position is plain seconds (Transport.tsx fmt mm:ss.cs). none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No timecode/frame-rate settings in ui/src; readout is mm:ss only. none found"
+    },
+    {
+      "id": "ACC-001",
+      "name": "Undo / redo",
+      "category": "Accessibility & UX Foundations",
+      "tier": "must",
+      "capability": "present",
+      "capabilityEvidence": "Tracktion UndoManager under MoshOps; cmdUndo/cmdRedo at MoshOps.cpp:274-287; per-command beginNewTransaction wrapping all mutations.",
+      "surface": "present",
+      "surfaceEvidence": "Toolbar Undo/Redo buttons exec 'undo'/'redo' at Arrangement.tsx:172-173. No keyboard shortcut though."
+    },
+    {
+      "id": "ACC-002",
+      "name": "Undo history",
+      "category": "Accessibility & UX Foundations",
+      "tier": "should",
+      "capability": "partial",
+      "capabilityEvidence": "UndoManager supports stack but only undo()/redo() exposed; no getTransactionNames/jump-to-point surfaced in MoshOps. JSONL log exists but not a navigable history.",
+      "surface": "missing",
+      "surfaceEvidence": "No undo-history view/panel in ui/src; only single-step Undo/Redo buttons. none found"
+    },
+    {
+      "id": "ACC-003",
+      "name": "Keyboard navigation",
+      "category": "Accessibility & UX Foundations",
+      "tier": "should",
+      "capability": "partial",
+      "capabilityEvidence": "DOM controls are natively focusable, but no managed focus/keyboard handlers in C++ or React; WebViewShell.h has no key handling.",
+      "surface": "missing",
+      "surfaceEvidence": "No onKeyDown/tabIndex/key bindings in ui/src; no :focus/:focus-visible styles in styles.css; grid edits are pointer-only. none found"
+    },
+    {
+      "id": "ACC-004",
+      "name": "Screen-reader support",
+      "category": "Accessibility & UX Foundations",
+      "tier": "should",
+      "capability": "partial",
+      "capabilityEvidence": "Controls are mostly icon buttons; WebView exposes DOM a11y tree to VoiceOver but names rely on glyphs+title; only one aria-label (App.tsx:106 remote-mode).",
+      "surface": "partial",
+      "surfaceEvidence": "Sparse accessible names: title= on many buttons, one role='group'/aria-label in App.tsx:106; no systematic roles/labels across Arrangement/Rack."
+    },
+    {
+      "id": "ACC-005",
+      "name": "Hi-DPI / scalable UI",
+      "category": "Accessibility & UX Foundations",
+      "tier": "must",
+      "capability": "present",
+      "capabilityEvidence": "JUCE DocumentWindow + JUCE8 WebView render at native retina DPI on macOS; CSS uses rem/system-ui with font-synthesis:none (styles.css:18,37).",
+      "surface": "partial",
+      "surfaceEvidence": "Crisp on retina (native), rem units scale with browser font; but no user-configurable UI-scale control and no @media DPI rules in styles.css."
+    },
+    {
+      "id": "ACC-006",
+      "name": "Multi-monitor / detachable windows",
+      "category": "Accessibility & UX Foundations",
+      "tier": "should",
+      "capability": "partial",
+      "capabilityEvidence": "Plugin editors open as separate native DocumentWindows (PluginHost.cpp:11-144) draggable to any monitor; main app is one window, no detachable internal views.",
+      "surface": "partial",
+      "surfaceEvidence": "open_plugin_editor pops out a native window (Rack 'edit'); no detach/arrange controls for arrangement/mixer panels in ui/src."
+    },
+    {
+      "id": "ACC-007",
+      "name": "Tooltips / contextual help",
+      "category": "Accessibility & UX Foundations",
+      "tier": "should",
+      "capability": "present",
+      "capabilityEvidence": "Controls carry concise help text via HTML title attributes throughout (Transport.tsx:24,31,38; Rack.tsx; App.tsx:47-50).",
+      "surface": "present",
+      "surfaceEvidence": "Native browser tooltips on hover via title= on nearly every button/slider across all components (~24 title attrs in ui/src)."
+    },
+    {
+      "id": "ACC-008",
+      "name": "High-contrast / themes",
+      "category": "Accessibility & UX Foundations",
+      "tier": "nice",
+      "capability": "present",
+      "capabilityEvidence": "Two-theme token system: [data-theme='light'] overrides shared CSS vars (styles.css:20-31); toggleTheme sets document data-theme (store.ts:200-205).",
+      "surface": "present",
+      "surfaceEvidence": "Theme toggle button in topbar (App.tsx:50-52). No dedicated high-contrast mode, but light/dark themes are switchable."
+    },
+    {
+      "id": "ACC-009",
+      "name": "Touch / trackpad gestures",
+      "category": "Accessibility & UX Foundations",
+      "tier": "nice",
+      "capability": "missing",
+      "capabilityEvidence": "Zoom is button-only (setPxPerSec via Zoom +/- buttons, Arrangement.tsx:169-170); no wheel/pinch/gesture handlers in any component.",
+      "surface": "missing",
+      "surfaceEvidence": "No onWheel/touch/gesture support in ui/src; zoom only via toolbar buttons. none found"
+    },
+    {
+      "id": "PRF-001",
+      "name": "Multicore audio processing",
+      "category": "Performance & Reliability",
+      "tier": "must",
+      "capability": "partial",
+      "capabilityEvidence": "Relies on Tracktion engine's internal audio threading; no explicit multicore config/distribution in Mosh src. MoshOps uses one ThreadPoolJob loop (1143) for render only.",
+      "surface": "missing",
+      "surfaceEvidence": "No multicore/thread setting or indicator in ui/src or settings. none found"
+    },
+    {
+      "id": "PRF-002",
+      "name": "Disk streaming",
+      "category": "Performance & Reliability",
+      "tier": "should",
+      "capability": "present",
+      "capabilityEvidence": "Audio clips are Tracktion WaveAudioClips referencing source files (cmdImportClip MoshOps.cpp:~192) which the engine streams from disk; no full preload in Mosh.",
+      "surface": "partial",
+      "surfaceEvidence": "Works transparently (large files play via engine); no explicit streaming indicator/control in ui/src."
+    },
+    {
+      "id": "PRF-003",
+      "name": "Large-project handling",
+      "category": "Performance & Reliability",
+      "tier": "should",
+      "capability": "partial",
+      "capabilityEvidence": "Single te::Edit + snapshot rebuild on every snapshot_invalidated (store.refresh re-fetches all tracks/clips/peaks); no virtualization/large-session optimization in code.",
+      "surface": "missing",
+      "surfaceEvidence": "No large-project status/handling surface; full snapshot+peaks refetch on each change (store.ts:84-101) could degrade on big sessions. none found"
+    },
+    {
+      "id": "PRF-004",
+      "name": "CPU / RAM usage display",
+      "category": "Performance & Reliability",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No CPU/DSP/RAM usage measurement anywhere; only grep hit is an unrelated ThreadPoolJob loop (MoshOps.cpp:1143). none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No CPU/RAM meter in ui/src. none found"
+    },
+    {
+      "id": "PRF-005",
+      "name": "Glitch-free UI/audio separation",
+      "category": "Performance & Reliability",
+      "tier": "should",
+      "capability": "present",
+      "capabilityEvidence": "Audio isolated by design: RT-safe applyToBuffer (NeuralInsertPlugin.cpp:138, no alloc), service I/O on std::thread + MessageManager::callAsync (MoshOps.cpp:910-926), telemetry decimated to 30 Hz (MoshOps.cpp:55).",
+      "surface": "partial",
+      "surfaceEvidence": "Separation is structural and invisible to user; no dropout/xrun indicator surfaced in ui/src, but heavy gen renders run async without playback stall."
+    },
+    {
+      "id": "PRE-001",
+      "name": "Audio / MIDI preferences",
+      "category": "Settings & Preferences",
+      "tier": "must",
+      "capability": "partial",
+      "capabilityEvidence": "Engine binds a chosen device only via env vars MOSH_AUDIO_OUTPUT_DEVICE/INPUT_DEVICE (MoshEngine.cpp:94-177); no in-app device/port selection or persisted MIDI prefs.",
+      "surface": "missing",
+      "surfaceEvidence": "No audio/MIDI preferences screen in ui/src; no device-selection command in the 43-command dispatch (MoshOps.cpp:82-124). none found"
+    },
+    {
+      "id": "PRE-002",
+      "name": "File-location settings",
+      "category": "Settings & Preferences",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "Session/recording paths are hardcoded (~/Library/Mosh/session); no configurable default folders for recordings/samples/presets in src. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No file-location settings in ui/src. none found"
+    },
+    {
+      "id": "PRE-003",
+      "name": "Appearance settings",
+      "category": "Settings & Preferences",
+      "tier": "nice",
+      "capability": "partial",
+      "capabilityEvidence": "Appearance = dark/light theme toggle (store.ts:199-205), but theme is in-memory zustand state, not persisted across app restarts; no density/color prefs.",
+      "surface": "present",
+      "surfaceEvidence": "Theme toggle button in topbar (App.tsx:50-52); no separate appearance/settings screen but the one appearance control is exposed."
+    },
+    {
+      "id": "PRE-004",
+      "name": "Default new-project settings",
+      "category": "Settings & Preferences",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "New session always starts empty (MoshEngine.cpp:58 comment: every track explicit); no configurable new-project defaults (rate/tracks/layout). none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No default-project settings in ui/src. none found"
+    },
+    {
+      "id": "HLP-001",
+      "name": "In-app help / manual link",
+      "category": "Help & Onboarding",
+      "tier": "nice",
+      "capability": "missing",
+      "capabilityEvidence": "No documentation/manual reachable from the app; no help command or link in src or service. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No help/manual entry point in ui/src (grep help/manual/docs = none in components). none found"
+    },
+    {
+      "id": "HLP-002",
+      "name": "Tutorials / onboarding",
+      "category": "Help & Onboarding",
+      "tier": "nice",
+      "capability": "missing",
+      "capabilityEvidence": "No first-run guidance/lessons/onboarding logic in src or ui. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No onboarding/tutorial/welcome flow in ui/src; empty state is a one-line hint (Arrangement.tsx:122). none found"
+    },
+    {
+      "id": "HLP-003",
+      "name": "Parameter / what's-this info",
+      "category": "Help & Onboarding",
+      "tier": "nice",
+      "capability": "partial",
+      "capabilityEvidence": "Controls expose only brief static help via HTML title text (e.g. Rack.tsx:113 'ASTD safe limit'); no on-demand detailed parameter-info system.",
+      "surface": "partial",
+      "surfaceEvidence": "Hover title= tooltips give terse descriptions across ui/src; no dedicated what's-this/info affordance or parameter help panel. none found beyond title="
+    },
+    {
+      "id": "SES-001",
+      "name": "Single canonical time model",
+      "category": "Mosh \u00b7 Structured Session Model & Time Coherence",
+      "tier": "must",
+      "capability": "partial",
+      "capabilityEvidence": "Tracktion has an internal tempo/tick model, but Mosh stores/emits every position in SECONDS (clipToVar start/length/offset + transportToVar position, MoshOps.cpp:1313,1367); no shared ticks-based mapping surfaced.",
+      "surface": "missing",
+      "surfaceEvidence": "Arrangement ruler ticks are integer SECONDS ({i}, i*pxPerSec Arrangement.tsx:92-94); snap grid is 0.25s (store.ts:71). No bars.beats.sixteenths readout anywhere."
+    },
+    {
+      "id": "SES-002",
+      "name": "Non-destructive source-graph architecture",
+      "category": "Mosh \u00b7 Structured Session Model & Time Coherence",
+      "tier": "must",
+      "capability": "present",
+      "capabilityEvidence": "Clips reference source files; move/trim/split adjust start/length/offset without touching source (cmdMoveClip/cmdTrimClip/cmdSplitClip MoshOps.cpp:331-389); Tracktion UndoManager makes all reversible.",
+      "surface": "present",
+      "surfaceEvidence": "Undo/Redo buttons (Arrangement.tsx:172-173), drag-move/trim/split tools in Arrangement; original sourceFile retained in clipToVar (MoshOps.cpp:1320)."
+    },
+    {
+      "id": "SES-003",
+      "name": "Structured-document session format",
+      "category": "Mosh \u00b7 Structured Session Model & Time Coherence",
+      "tier": "must",
+      "capability": "present",
+      "capabilityEvidence": "Session persists as a .tracktionedit ValueTree document; MoshEngine.save() via EditFileOperations and loadEditFromFile round-trip (MoshEngine.cpp:43,53,228,236).",
+      "surface": "present",
+      "surfaceEvidence": "Save and Reload buttons in the toolbar (Arrangement.tsx:175-176) call save/reload commands; on-disk format is human-inspectable XML."
+    },
+    {
+      "id": "SES-004",
+      "name": "Two-IR model (SessionPlan & ResolvedSession)",
+      "category": "Mosh \u00b7 Structured Session Model & Time Coherence",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No SessionPlan / ResolvedSession two-IR model; grep for SessionPlan|ResolvedSession|tokeniz across src/ui/service returns none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No developer/inspector surface exposing a plan vs resolved representation; none found in ui/src."
+    },
+    {
+      "id": "SES-005",
+      "name": "Adjustment-layer transform model",
+      "category": "Mosh \u00b7 Structured Session Model & Time Coherence",
+      "tier": "should",
+      "capability": "partial",
+      "capabilityEvidence": "Insert plugin chain is reorderable/toggleable/removable (reorder_plugin/bypass_plugin/remove_plugin MoshOps.cpp:553-600); RenderLayer is bypass/freeze-able (cmdBypassLayer/cmdFreezeLayer:1033-1056). But only ONE RenderLayer per clip (create_render_layer rejects a second, MoshOps.cpp:754) \u2014 not a true reorderable transform stack.",
+      "surface": "partial",
+      "surfaceEvidence": "Rack shows reorder (\u2039\u203a) / bypass / remove for plugin chain (Rack.tsx:84-87); GenPanel has a single render layer with no reorder. No unified add/reorder/toggle transform-stack UI."
+    },
+    {
+      "id": "SES-006",
+      "name": "Grid-coherence self-check",
+      "category": "Mosh \u00b7 Structured Session Model & Time Coherence",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No grid-coherence self-check verifying ruler==grid==clip==note==automation==playhead; grep coheren|grid.check|invariant in SelfTest.cpp returns none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No coherence indicator/diagnostic in the UI; none found in ui/src."
+    },
+    {
+      "id": "NRL-001",
+      "name": "SA3 freeze-and-render workflow",
+      "category": "Mosh \u00b7 Neural Transform Layer",
+      "tier": "must",
+      "capability": "present",
+      "capabilityEvidence": "render_layer stages the captured clip source to input.wav and submits an SA3 job that produces output.wav as a new render layer (cmdRenderLayer MoshOps.cpp:810-936); SA3 adapter does real audio->audio reimagine (stable_audio3_adapter.py:87).",
+      "surface": "present",
+      "surfaceEvidence": "GenPanel 'Render'/'Re-render' button (GenPanel.tsx:149) drives render_layer; render layer status/badge shown; accept lands on a 'Neural Renders' lane."
+    },
+    {
+      "id": "NRL-002",
+      "name": "Color Rack with steerable axes",
+      "category": "Mosh \u00b7 Neural Transform Layer",
+      "tier": "should",
+      "capability": "present",
+      "capabilityEvidence": "ColorRack with 9 named axes (grit, air, brightness, distortion, epic, tension, futuristic, drum_aggression, grid_tightness) in colors.json; resolve_steers maps 0-100 to steering tuples (colors/runtime.py:68-91).",
+      "surface": "present",
+      "surfaceEvidence": "GenPanel colour rack: \u22643 ASTD sliders per active colour + '+ colour' picker, loaded from list_colors (GenPanel.tsx:84-116)."
+    },
+    {
+      "id": "NRL-003",
+      "name": "Two-tier inference architecture",
+      "category": "Mosh \u00b7 Neural Transform Layer",
+      "tier": "should",
+      "capability": "present",
+      "capabilityEvidence": "Tier-A light model runs in-process (NeuralInsertPlugin custom te::Plugin, RT MLP NeuralInsertPlugin.h:10-15); Tier-B SA3 heavy model runs in the Python sidecar via GenerativeJobManager HTTP (/health,/status GenerativeJobManager.cpp:62,143).",
+      "surface": "present",
+      "surfaceEvidence": "GenPanel labels engine as 'stable audio 3' vs 'fake' (GenPanel.tsx:29); Rack shows 'Tier A' badge + latency on neural inserts (Rack.tsx:77,128). Render status/progress visible."
+    },
+    {
+      "id": "NRL-004",
+      "name": "Render-layer management",
+      "category": "Mosh \u00b7 Neural Transform Layer",
+      "tier": "must",
+      "capability": "present",
+      "capabilityEvidence": "Each transform is a MOSH_RENDERLAYER node auditioned/accepted/rejected/bypassed/frozen without losing source (cmdAcceptRender/Reject/BypassLayer/FreezeLayer MoshOps.cpp:978-1056); full-fingerprint cache HIT/MISS (RenderLayer.h:66).",
+      "surface": "partial",
+      "surfaceEvidence": "GenPanel exposes Render/Accept/Reject/Cancel/seed + status badge (GenPanel.tsx:148-156), but only ONE layer per clip and no bypass/freeze/remove buttons or a layer list in the UI."
+    },
+    {
+      "id": "NRL-005",
+      "name": "Stem separation & source models",
+      "category": "Mosh \u00b7 Neural Transform Layer",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No stem separation (Demucs) or source models (RVC/RAVE/NAM-file/DDSP/AFTER) integrated; only SA3 prompt+colour steering + a self-contained inline MLP. grep demucs|stem|separat|rvc returns none found in code paths.",
+      "surface": "missing",
+      "surfaceEvidence": "No stem-separation action or model picker in the UI; GenPanel offers only the SA3 colour rack + nl/seed. None found in ui/src."
+    },
+    {
+      "id": "NRL-006",
+      "name": "DoRA / LoRA adaptation pipeline",
+      "category": "Mosh \u00b7 Neural Transform Layer",
+      "tier": "nice",
+      "capability": "missing",
+      "capabilityEvidence": "No DoRA/LoRA adapter or training pipeline; grep lora|dora|fine.tun across src/ui/service returns none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No adapter/training management surface in the UI; none found in ui/src."
+    },
+    {
+      "id": "NRL-007",
+      "name": "Judge-panel quality gating",
+      "category": "Mosh \u00b7 Neural Transform Layer",
+      "tier": "nice",
+      "capability": "present",
+      "capabilityEvidence": "Judge panel scores renders: Audiobox PQ for output (pq) and source (pq_base) via a persistent judge sidecar, sets quality_degraded flag (sa3/qa.py:156-169; judge_sidecar.py).",
+      "surface": "present",
+      "surfaceEvidence": "GenPanel renders a quality readout 'pq X / Y' plus QA flags from the layer_status manifest (GenPanel.tsx:141-146)."
+    },
+    {
+      "id": "NRL-008",
+      "name": "Activation steering & paraphrase gate",
+      "category": "Mosh \u00b7 Neural Transform Layer",
+      "tier": "nice",
+      "capability": "partial",
+      "capabilityEvidence": "Diff-in-means-style activation steering is real: per-layer steering vectors applied in the SA3 decode path (sa3/engine.py:99-131; colors/runtime.py resolve_steers). But NO paraphrase gate \u2014 grep paraphrase returns none found.",
+      "surface": "partial",
+      "surfaceEvidence": "Lab toggle unlocks the ASTD alpha clamp (GenPanel.tsx:135) and no_stack_with pairs are rejected (GenPanel.tsx:73-76); but no dedicated steering/safety-state controls beyond the Lab button."
+    },
+    {
+      "id": "AGT-001",
+      "name": "Canonical command contract",
+      "category": "Mosh \u00b7 Agent / Operator Layer",
+      "tier": "must",
+      "capability": "partial",
+      "capabilityEvidence": "MoshOps.cpp:82-126 dispatch: 43 stable ID-based commands w/ result envelope + JSONL log (logLine). But spec-named ops (set_midi_note, set_automation_point, set_track_send, set_master_*) absent.",
+      "surface": "missing",
+      "surfaceEvidence": "JSONL log written to mosh-log.jsonl (MoshOps.cpp:1415) but never read/shown in UI; no command-log/inspectable action surface in ui/src. none found"
+    },
+    {
+      "id": "AGT-002",
+      "name": "Intent-to-operator layer",
+      "category": "Mosh \u00b7 Agent / Operator Layer",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No intent/NL->command translator anywhere; grep for intent/natural-language/agent in src yields only a comment in MoshOps.h:16. none found",
+      "surface": "missing",
+      "surfaceEvidence": "No agent/NL input affordance in ui/src; only text input is PluginBrowser.tsx:40 filter. none found"
+    },
+    {
+      "id": "AGT-003",
+      "name": "Operator actions as first-class edits",
+      "category": "Mosh \u00b7 Agent / Operator Layer",
+      "tier": "should",
+      "capability": "partial",
+      "capabilityEvidence": "Commands ARE undoable via Tracktion UndoManager (beginNewTransaction per cmd, e.g. MoshOps.cpp:134) so an agent would share the manual path, but no agent exists to issue them.",
+      "surface": "missing",
+      "surfaceEvidence": "Undo/redo buttons exist (Arrangement.tsx:172-173) but no command log / agent-action visibility; agent actions are not surfaced. none found"
+    },
+    {
+      "id": "AGT-004",
+      "name": "Natural-language session editing",
+      "category": "Mosh \u00b7 Agent / Operator Layer",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No NL-to-edit mapping; nothing translates a described change into commands. Depends on AGT-002 which is absent. none found",
+      "surface": "missing",
+      "surfaceEvidence": "No NL editing affordance in ui/src (App.tsx, components). none found"
+    },
+    {
+      "id": "AGT-005",
+      "name": "Agent presence, subordinate to the DAW",
+      "category": "Mosh \u00b7 Agent / Operator Layer",
+      "tier": "should",
+      "capability": "partial",
+      "capabilityEvidence": "DAW is fully usable with no agent because no agent layer exists at all (App.tsx renders arrangement/rack/transport without any agent dependency).",
+      "surface": "not_applicable",
+      "surfaceEvidence": "No agent affordance exists to be discreet or dominant; the 'agent subordinate' requirement is vacuously met by absence. none found"
+    },
+    {
+      "id": "FLY-001",
+      "name": "Render accept / reject surface",
+      "category": "Mosh \u00b7 Acceptance-Signal Data Flywheel",
+      "tier": "must",
+      "capability": "present",
+      "capabilityEvidence": "cmdAcceptRender (MoshOps.cpp:978) lands render on neural lane + sets userKept; cmdRejectRender (MoshOps.cpp:1021) sets userKept=false/status dirty.",
+      "surface": "present",
+      "surfaceEvidence": "GenPanel.tsx:153-154 Accept/Reject buttons calling exec('accept_render')/exec('reject_render'), enabled on rl.hasArtifact."
+    },
+    {
+      "id": "FLY-002",
+      "name": "Acceptance-signal capture",
+      "category": "Mosh \u00b7 Acceptance-Signal Data Flywheel",
+      "tier": "should",
+      "capability": "present",
+      "capabilityEvidence": "Accept/reject logged as taste labels to JSONL (MoshOps.cpp:1012-1016, 1028) with clipId/layerId/landing; userKept persisted on RenderLayer (RenderLayer.h:44).",
+      "surface": "missing",
+      "surfaceEvidence": "Acceptance history/provenance is never displayed in ui/src; JSONL is disk-only, no labels/history view. none found"
+    },
+    {
+      "id": "FLY-003",
+      "name": "Transform provenance / evidence",
+      "category": "Mosh \u00b7 Acceptance-Signal Data Flywheel",
+      "tier": "should",
+      "capability": "partial",
+      "capabilityEvidence": "RenderLayer carries model/adapter/version/seed/mode/params (RenderLayer.h:32-50); QA pq/flags from manifest emitted via layer_status (MoshOps.cpp:949-953). No source-audio hash or judge model id exposed.",
+      "surface": "partial",
+      "surfaceEvidence": "GenPanel.tsx:130-146 shows status badge, seed, and pq/pq_base/flags readout, but no dedicated provenance/evidence panel listing model/params/source for a layer."
+    },
+    {
+      "id": "FLY-004",
+      "name": "Device / audio gate before processing",
+      "category": "Mosh \u00b7 Acceptance-Signal Data Flywheel",
+      "tier": "must",
+      "capability": "partial",
+      "capabilityEvidence": "eng.hasAudio() gates play/record (MoshOps.cpp:244,253) and editor open (608); but generative render_layer gates only on service availability (834), not on audio device or model state.",
+      "surface": "missing",
+      "surfaceEvidence": "audioEnabled is NOT in snapshot() (MoshOps.cpp:1246-1267) \u2014 only inside open_plugin_editor data (614). No device/audio gate indicator or block/warn in ui/src; only generic lastError bar. none found"
+    },
+    {
+      "id": "FLY-005",
+      "name": "Label dataset accumulation / export",
+      "category": "Mosh \u00b7 Acceptance-Signal Data Flywheel",
+      "tier": "nice",
+      "capability": "partial",
+      "capabilityEvidence": "Labelled accept/reject events accumulate in mosh-log.jsonl (MoshOps.cpp:1415-1426), but there is no read/inspect/export command or dataset assembly beyond the raw append-only log.",
+      "surface": "missing",
+      "surfaceEvidence": "No data/labels management surface in ui/src; no get_log/export-labels command path. none found"
+    },
+    {
+      "id": "COL-001",
+      "name": "Shared / cloud session",
+      "category": "Mosh \u00b7 Real-time Collaboration",
+      "tier": "should",
+      "capability": "partial",
+      "capabilityEvidence": "RemoteCompanionServer serves the live session over HTTP: POST /snapshot -> snapshotProvider, web companion HTML (RemoteCompanionServer.cpp:175,205-206); wired in Main.cpp:37-40. Single in-memory session shared to a 2nd device, not a persisted cloud/multi-user store.",
+      "surface": "present",
+      "surfaceEvidence": "App.tsx:72-133 RemoteCompanion: Start pairing, QR code, native/Safari link, copy/stop; store.ts startRemotePairing/stopRemote (137-147)."
+    },
+    {
+      "id": "COL-002",
+      "name": "Real-time co-editing",
+      "category": "Mosh \u00b7 Real-time Collaboration",
+      "tier": "should",
+      "capability": "partial",
+      "capabilityEvidence": "2nd device drives same MoshOps command path (POST /command -> moshOps->execute, RemoteCompanionServer.cpp:208-213; Main.cpp:39) and receives live events via /events long-poll + pushEvent (Main.cpp:80). Same single edit; no multi-user merge or per-user identity.",
+      "surface": "partial",
+      "surfaceEvidence": "Companion can edit and gets live events, but the desktop UI shows no live indication of remote edits beyond the shared snapshot refresh; no co-editing affordance in ui/src."
+    },
+    {
+      "id": "COL-003",
+      "name": "Presence indicators",
+      "category": "Mosh \u00b7 Real-time Collaboration",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "No presence/cursor/selection propagation between collaborators; companion server has no per-user/presence concept. grep presence/cursor in src yields none. none found",
+      "surface": "missing",
+      "surfaceEvidence": "No presence avatars/cursors in ui/src. none found"
+    },
+    {
+      "id": "COL-004",
+      "name": "Conflict resolution",
+      "category": "Mosh \u00b7 Real-time Collaboration",
+      "tier": "should",
+      "capability": "missing",
+      "capabilityEvidence": "Single shared in-memory edit serialized on the message thread (callOnMessageThread, RemoteCompanionServer.cpp:206,213); no defined merge/conflict policy, no CRDT/op-log. none found",
+      "surface": "missing",
+      "surfaceEvidence": "No conflict UI or resolution prompt in ui/src. none found"
+    },
+    {
+      "id": "COL-005",
+      "name": "Comments / annotations",
+      "category": "Mosh \u00b7 Real-time Collaboration",
+      "tier": "nice",
+      "capability": "missing",
+      "capabilityEvidence": "No comment/annotation model; no command to anchor notes to time/track; grep comment/annotation yields none in src. none found",
+      "surface": "missing",
+      "surfaceEvidence": "No comment markers/threads in ui/src timeline. none found"
+    }
+  ]
+}

@@ -1,9 +1,13 @@
 import { create } from "zustand";
-import { executeCommand, getSnapshot, onEvent, isNative } from "./bridge";
+import {
+  executeCommand, getSnapshot, onEvent, isNative,
+  getRemoteStatus, startRemotePairing, stopRemoteCompanion,
+} from "./bridge";
 import type {
   Snapshot, Transport, MoshEvent, CommandResult, AvailablePlugin,
-  AvailableColor, RenderQA,
+  BuiltinPlugin, AvailableColor, RenderQA,
 } from "./types";
+import type { RemoteStatus } from "./bridge";
 
 export type Tool = "move" | "split";
 export type Peaks = [number, number][];
@@ -25,15 +29,20 @@ type State = {
   // Stage 3: plugin browser
   selectedTrackId: string | null;
   availablePlugins: AvailablePlugin[];
+  availableBuiltins: BuiltinPlugin[];
   browserOpen: boolean;
   renderProgress: Record<string, number>; // clipId → 0..1 (Tier-B render)
   availableColors: AvailableColor[];       // SA3 colour rack (from list_colors)
   labMode: boolean;                        // ASTD unlock for generative colours
   qaByClip: Record<string, RenderQA>;      // last render's quality readout
+  remoteStatus: RemoteStatus | null;       // iPhone companion server state
 
   refresh: () => Promise<void>;
   exec: (command: string, args?: Record<string, unknown>) => Promise<CommandResult>;
   init: () => void;
+  refreshRemote: () => Promise<void>;
+  startRemotePairing: () => Promise<void>;
+  stopRemote: () => Promise<void>;
 
   setPxPerSec: (v: number) => void;
   setTool: (t: Tool) => void;
@@ -66,11 +75,13 @@ export const useStore = create<State>((set, get) => ({
   peaks: {},
   selectedTrackId: null,
   availablePlugins: [],
+  availableBuiltins: [],
   browserOpen: false,
   renderProgress: {},
   availableColors: [],
   labMode: false,
   qaByClip: {},
+  remoteStatus: null,
 
   refresh: async () => {
     if (!isNative()) return;
@@ -116,6 +127,25 @@ export const useStore = create<State>((set, get) => ({
       }
     });
     void get().refresh();
+    void get().refreshRemote();
+  },
+
+  refreshRemote: async () => {
+    if (!isNative()) return;
+    const res = await getRemoteStatus();
+    if (res.ok && res.data) set({ remoteStatus: res.data });
+  },
+
+  startRemotePairing: async () => {
+    const res = await startRemotePairing();
+    if (res.ok && res.data) set({ remoteStatus: res.data });
+    else set({ lastError: res.error ?? "remote pairing failed" });
+  },
+
+  stopRemote: async () => {
+    const res = await stopRemoteCompanion();
+    if (!res.ok) set({ lastError: res.error ?? "remote stop failed" });
+    await get().refreshRemote();
   },
 
   setPxPerSec: (v) => set({ pxPerSec: Math.max(20, Math.min(400, v)) }),
@@ -153,6 +183,14 @@ export const useStore = create<State>((set, get) => ({
         args: {},
       }).then((res) => {
         if (res.ok && res.data) set({ availablePlugins: res.data.plugins });
+      });
+    // Built-in palette (instruments + effects shipped inside the engine).
+    if (get().availableBuiltins.length === 0)
+      void executeCommand<CommandResult<{ plugins: BuiltinPlugin[] }>>({
+        command: "list_builtins",
+        args: {},
+      }).then((res) => {
+        if (res.ok && res.data) set({ availableBuiltins: res.data.plugins });
       });
   },
   closeBrowser: () => set({ browserOpen: false }),

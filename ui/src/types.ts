@@ -58,6 +58,8 @@ export type Plugin = {
   type: string;
   enabled: boolean;
   external: boolean;
+  builtin?: boolean;
+  category?: string;
   isInstrument: boolean;
   params: PluginParam[];
   neural?: NeuralInsert;
@@ -70,6 +72,15 @@ export type AvailablePlugin = {
   format: string;
   manufacturer: string;
   isInstrument: boolean;
+};
+
+// Engine built-in plugin (from list_builtins) — loaded via load_builtin by type.
+export type BuiltinPlugin = {
+  type: string;
+  name: string;
+  category: string;
+  isInstrument: boolean;
+  builtin: true;
 };
 
 export type Track = {

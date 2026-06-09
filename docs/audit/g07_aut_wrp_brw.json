@@ -1,0 +1,152 @@
+{
+  "group": "AUT, WRP, BRW (Automation; Warp/Audio-to-Tempo; Browser & Asset Management)",
+  "features": [
+    {
+      "id": "AUT-001",
+      "capability": "missing",
+      "capabilityEvidence": "Plugins expose te::AutomatableParameter but no code creates/reads any time-varying curve; grep AutomationCurve/addPoint = NONE FOUND in src/. set_plugin_param just calls param->setParameter (static).",
+      "surface": "missing",
+      "surfaceEvidence": "No automation enable/arm control in ui/src; no automation field in snapshot() (MoshOps.cpp:1246) or clipToVar/trackToVar. UI mounts only Transport/Arrangement/Rack/PluginBrowser."
+    },
+    {
+      "id": "AUT-002",
+      "capability": "missing",
+      "capabilityEvidence": "set_track_volume/set_track_pan set a single static value on VolumeAndPanPlugin; no volume/pan automation curve is written or read. snapshot exposes only static volumeDb/pan (MoshOps.cpp:1294).",
+      "surface": "missing",
+      "surfaceEvidence": "Track header has static volume/pan sliders only; no volume/pan automation lane in any ui/src component. none found."
+    },
+    {
+      "id": "AUT-003",
+      "capability": "missing",
+      "capabilityEvidence": "No per-parameter automation storage/edit path. No AutomationCurve usage anywhere in src/. Snapshot has no automation lane data.",
+      "surface": "missing",
+      "surfaceEvidence": "No automation lane UI under tracks; 'lane' tokens in styles.css/Arrangement.tsx refer to track lanes, not automation. none found."
+    },
+    {
+      "id": "AUT-004",
+      "capability": "missing",
+      "capabilityEvidence": "No draw/pencil automation point creation. grep pencil/bezier/addPoint/AutomationCurve = NONE FOUND in src/.",
+      "surface": "missing",
+      "surfaceEvidence": "No draw tool / automation pencil in ui/src; grep pencil/bezier/curve in ui/src = none (only CSS lane gradients). none found."
+    },
+    {
+      "id": "AUT-005",
+      "capability": "missing",
+      "capabilityEvidence": "No automation modes (read/write/touch/latch/trim); no automation record/capture path. grep automationMode/writeAutomation = NONE FOUND.",
+      "surface": "missing",
+      "surfaceEvidence": "No automation-mode selector per track/channel in ui/src. none found."
+    },
+    {
+      "id": "AUT-006",
+      "capability": "missing",
+      "capabilityEvidence": "No automation segments at all, hence no curve/bezier shapes. NONE FOUND for AutomationCurve in src/.",
+      "surface": "missing",
+      "surfaceEvidence": "No segment-curvature editing in ui/src. none found."
+    },
+    {
+      "id": "AUT-007",
+      "capability": "missing",
+      "capabilityEvidence": "No MIDI CC editing or CC-as-automation. add_midi_clip exists but no CC data model; grep CC/controller lanes = none in src/.",
+      "surface": "missing",
+      "surfaceEvidence": "No CC automation lane in ui/src; no piano-roll/CC editor component exists at all. none found."
+    },
+    {
+      "id": "AUT-008",
+      "capability": "missing",
+      "capabilityEvidence": "No modulator/LFO/envelope/macro sources mappable to parameters. grep modulator/LFO/macro = none in src/.",
+      "surface": "missing",
+      "surfaceEvidence": "No modulator create/map UI in ui/src. none found."
+    },
+    {
+      "id": "AUT-009",
+      "capability": "missing",
+      "capabilityEvidence": "No per-clip automation; clipToVar (MoshOps.cpp:1307) carries only start/length/offset/name/type/renderLayer. No clip-scoped automation that could move with a clip.",
+      "surface": "missing",
+      "surfaceEvidence": "No clip-scoped automation editing in ui/src (Clip.tsx handles move/trim only). none found."
+    },
+    {
+      "id": "WRP-001",
+      "capability": "missing",
+      "capabilityEvidence": "No time-stretch algorithm selection or stretch at all. grep TimeStretch/elastique/setSpeedRatio/WarpTime = NONE FOUND in src/. Clips reference source untouched (move/trim/split only).",
+      "surface": "missing",
+      "surfaceEvidence": "No stretch-algorithm selector in ui/src; no time-stretch handle on clips (Clip.tsx is move/trim-l/trim-r). none found."
+    },
+    {
+      "id": "WRP-002",
+      "capability": "missing",
+      "capabilityEvidence": "No warp markers / elastic audio. grep WarpTime/warp/elastic = NONE FOUND in src/. No source-time to musical-time mapping exists.",
+      "surface": "missing",
+      "surfaceEvidence": "No warp markers addable/draggable on audio in ui/src. none found."
+    },
+    {
+      "id": "WRP-003",
+      "capability": "missing",
+      "capabilityEvidence": "No beat/transient detection or auto-warp. grep beatDetect/transient/autoTempo = NONE FOUND in src/.",
+      "surface": "missing",
+      "surfaceEvidence": "No auto-warp action in ui/src. none found."
+    },
+    {
+      "id": "WRP-004",
+      "capability": "missing",
+      "capabilityEvidence": "No follow-tempo / audio-follows-tempo. grep setAutoTempo/setLoopInfo/getLoopInfo = NONE FOUND in src/; clips are not tempo-linked.",
+      "surface": "missing",
+      "surfaceEvidence": "No follow-tempo toggle per clip in ui/src. none found."
+    },
+    {
+      "id": "BRW-001",
+      "capability": "missing",
+      "capabilityEvidence": "No content/file/sample/preset browser that enumerates locations. Only list_plugins enumerates scanned VST3/AU (MoshOps.cpp cmdListPlugins). No filesystem/sample/preset index.",
+      "surface": "partial",
+      "surfaceEvidence": "The only 'browser' (store.openBrowser -> PluginBrowser.tsx) is a modal listing scanned plugins; no files/samples/presets panel. Not a content browser."
+    },
+    {
+      "id": "BRW-002",
+      "capability": "missing",
+      "capabilityEvidence": "No audition/preview engine path for browsed items. grep audition/preview through engine = none. No preview transport.",
+      "surface": "missing",
+      "surfaceEvidence": "No preview playback control in PluginBrowser.tsx or anywhere in ui/src. none found."
+    },
+    {
+      "id": "BRW-003",
+      "capability": "missing",
+      "capabilityEvidence": "No tempo/key-synced preview; depends on preview + stretch, both absent. NONE FOUND.",
+      "surface": "missing",
+      "surfaceEvidence": "No sync-preview option in ui/src. none found."
+    },
+    {
+      "id": "BRW-004",
+      "capability": "missing",
+      "capabilityEvidence": "No tagging/favorites model. grep favorite/favourite/tag = none in src/ (no content store to tag).",
+      "surface": "missing",
+      "surfaceEvidence": "No tag/favourite controls in ui/src. none found."
+    },
+    {
+      "id": "BRW-005",
+      "capability": "partial",
+      "capabilityEvidence": "Only the plugin list is filterable; no general content search. list_plugins returns names/manufacturer; filtering is client-side name match in PluginBrowser.tsx:17-22.",
+      "surface": "partial",
+      "surfaceEvidence": "PluginBrowser.tsx:40 has a name 'Filter…' input for plugins only (and All/Inst/FX). No search across samples/presets/files. Plugin-only."
+    },
+    {
+      "id": "BRW-006",
+      "capability": "missing",
+      "capabilityEvidence": "No device/plugin preset browse or load. grep preset = none in src/ (only plugin instances loaded fresh; no preset save/recall).",
+      "surface": "missing",
+      "surfaceEvidence": "No preset browser in ui/src. none found."
+    },
+    {
+      "id": "BRW-007",
+      "capability": "partial",
+      "capabilityEvidence": "import_clip imports a file at an explicit path/position (cmdImportClip, MoshOps.cpp:230-235) but there is no drop-position handling tied to a UI drop event; engine takes a file path, not a drop.",
+      "surface": "missing",
+      "surfaceEvidence": "No onDrop/onDragOver/file-drop handler in ui/src (Arrangement.tsx, Clip.tsx, App.tsx). Drag in UI is internal clip move only. No file drag-drop import affordance."
+    },
+    {
+      "id": "BRW-008",
+      "capability": "missing",
+      "capabilityEvidence": "No content/sound-pack install or index. grep soundpack/pack = none in src/.",
+      "surface": "missing",
+      "surfaceEvidence": "No pack management UI in ui/src. none found."
+    }
+  ]
+}

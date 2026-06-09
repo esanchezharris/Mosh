@@ -10,8 +10,9 @@ export function Rack({ snapshot }: { snapshot: Snapshot }) {
   const exec = useStore((s) => s.exec);
 
   const track = snapshot.tracks.find((t) => t.id === selectedTrackId) ?? null;
-  // Show user-facing inserts: hosted VST3s (external) + Tier-A neural inserts.
-  const plugins = (track?.plugins ?? []).filter((p) => p.external || p.neural);
+  // Show user-facing inserts: hosted VST3/AU (external), engine built-ins, and
+  // Tier-A neural inserts. The auto track-fader (VolumeAndPan) stays hidden.
+  const plugins = (track?.plugins ?? []).filter((p) => p.external || p.neural || p.builtin);
 
   return (
     <div className="rack">
@@ -64,8 +65,9 @@ export function Rack({ snapshot }: { snapshot: Snapshot }) {
 function PluginCard({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
   const exec = useStore((s) => s.exec);
   const isNeural = !!plugin.neural;
+  const isBuiltin = !!plugin.builtin;
   return (
-    <div className={`pcard ${plugin.enabled ? "" : "bypassed"} ${isNeural ? "neural" : ""}`}>
+    <div className={`pcard ${plugin.enabled ? "" : "bypassed"} ${isNeural ? "neural" : ""} ${isBuiltin ? "builtin" : ""}`}>
       <div className="pcard-head">
         <button
           className={`pdot ${plugin.enabled ? "on" : ""}`}
@@ -74,11 +76,14 @@ function PluginCard({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
         />
         <span className="pname">{isNeural ? `Neural · ${plugin.neural!.model}` : plugin.name}</span>
         {plugin.isInstrument && <span className="ibadge">inst</span>}
+        {isBuiltin && !plugin.isInstrument && <span className="ibadge bbadge">{plugin.category}</span>}
         {isNeural && <span className="ibadge nbadge">Tier A</span>}
       </div>
 
       {isNeural ? (
         <NeuralBody plugin={plugin} trackId={trackId} />
+      ) : isBuiltin ? (
+        <BuiltinBody plugin={plugin} trackId={trackId} />
       ) : (
         <div className="pcard-actions">
           <button onClick={() => exec("open_plugin_editor", { trackId, index: plugin.index })}>Edit</button>
@@ -87,6 +92,40 @@ function PluginCard({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
           <button className="x" onClick={() => exec("remove_plugin", { trackId, index: plugin.index })}>✕</button>
         </div>
       )}
+    </div>
+  );
+}
+
+// Built-in plugins have no native editor window (openEditor only pops out hosted
+// VST3/AUs), so the rack drives them through their automatable params directly
+// (set_plugin_param, normalised 0–1). Shows the first handful of params.
+function BuiltinBody({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
+  const exec = useStore((s) => s.exec);
+  const params = (plugin.params ?? []).slice(0, 8);
+  return (
+    <div className="neural-body">
+      {params.map((p) => (
+        <label key={p.index} className="nparam">
+          <span className="nlabel" title={p.name}>{p.name}</span>
+          <span className="nslider">
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.01}
+              value={p.value}
+              onChange={(e) => exec("set_plugin_param", { trackId, index: plugin.index, paramIndex: p.index, value: Number(e.target.value) })}
+            />
+          </span>
+          <span className="nval">{Math.round(p.value * 100)}</span>
+        </label>
+      ))}
+      {params.length === 0 && <span className="rack-empty">no params</span>}
+      <div className="neural-row">
+        <button onClick={() => exec("reorder_plugin", { trackId, index: plugin.index, toIndex: plugin.index - 1 })} title="Move left">‹</button>
+        <button onClick={() => exec("reorder_plugin", { trackId, index: plugin.index, toIndex: plugin.index + 1 })} title="Move right">›</button>
+        <button className="x" onClick={() => exec("remove_plugin", { trackId, index: plugin.index })}>✕</button>
+      </div>
     </div>
   );
 }

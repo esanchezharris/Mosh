@@ -61,6 +61,28 @@ button.on { border-color: var(--accent); color: var(--accent); background: #2120
   border: 1px dashed var(--line); border-radius: 6px; padding: 0.2rem 0.5rem; opacity: 0.6;
 }
 .tool-btn { padding: 0.35rem 0.6rem; border-radius: 7px; }
+.remote-companion { position: relative; }
+.remote-btn.on { border-color: var(--ok); color: var(--ok); background: rgba(56, 211, 159, 0.12); }
+.remote-pop {
+  position: absolute; right: 0; top: calc(100% + 8px); width: 310px; z-index: 20;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  box-shadow: 0 18px 40px rgba(0,0,0,0.45); padding: 0.7rem; display: flex; flex-direction: column; gap: 0.55rem;
+}
+.remote-head { display: flex; align-items: center; justify-content: space-between; font-size: 0.85rem; }
+.remote-mode { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.remote-mode button { font-size: 0.74rem; padding: 0.28rem 0.45rem; }
+.remote-mode button.active { border-color: var(--ok); color: var(--ok); background: rgba(56, 211, 159, 0.12); }
+.remote-code {
+  font-size: 1.45rem; font-weight: 800; letter-spacing: 0.16em; color: var(--ok);
+  font-variant-numeric: tabular-nums; line-height: 1.2;
+}
+.remote-meta { color: var(--muted); font-size: 0.78rem; font-variant-numeric: tabular-nums; }
+.remote-qr {
+  width: 180px; height: 180px; align-self: center; border-radius: 6px;
+  border: 1px solid var(--line); background: #fff; padding: 6px;
+}
+.remote-stop, .remote-start, .remote-copy { align-self: flex-start; }
+.remote-copy { font-size: 0.74rem; padding: 0.25rem 0.45rem; }
 
 .transport { display: flex; align-items: center; gap: 0.4rem; }
 .tbtn { width: 34px; height: 34px; display: grid; place-items: center; font-size: 0.95rem; border-radius: 8px; }
@@ -170,6 +192,12 @@ button.on { border-color: var(--accent); color: var(--accent); background: #2120
 .plugin-row:hover { background: var(--panel-2); border-color: var(--line); }
 .pr-name { font-size: 0.9rem; }
 .pr-meta { font-size: 0.72rem; color: var(--muted); }
+.plugin-group { display: flex; flex-direction: column; gap: 1px; margin-bottom: 0.4rem; }
+.pg-label { font-size: 0.62rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); padding: 0.4rem 0.7rem 0.2rem; }
+
+/* Built-in plugin card (Wave 1 — engine effects/instruments, inline params) */
+.pcard.builtin { min-width: 200px; border-color: #2c4a3a; background: linear-gradient(180deg, #16241c, var(--panel-2)); }
+.bbadge { background: #2f8f6a; }
 
 /* Neural insert (Stage 4) */
 .pcard.neural { min-width: 220px; border-color: #3a3a6a; background: linear-gradient(180deg, #1c1c2c, var(--panel-2)); }

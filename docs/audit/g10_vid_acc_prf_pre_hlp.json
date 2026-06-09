@@ -1,0 +1,180 @@
+{
+  "group": "VID_ACC_PRF_PRE_HLP",
+  "features": [
+    {
+      "id": "VID-001",
+      "capability": "missing",
+      "capabilityEvidence": "No video stream/playback code; only 'framerate' hits are audio WAV sample rates in service/adapters. No te video support wired.",
+      "surface": "missing",
+      "surfaceEvidence": "No video track/window in ui/src; Arrangement.tsx has only audio/MIDI lanes. none found"
+    },
+    {
+      "id": "VID-002",
+      "capability": "missing",
+      "capabilityEvidence": "No video timeline or frame-locking; audio events have no video reference frame. none found in src/.",
+      "surface": "missing",
+      "surfaceEvidence": "No synced video+audio timeline view in ui/src. none found"
+    },
+    {
+      "id": "VID-003",
+      "capability": "missing",
+      "capabilityEvidence": "Scrub (set_transport position) exists but no video frame fetch on scrub. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No video display updates on ruler seek in Arrangement.tsx. none found"
+    },
+    {
+      "id": "VID-004",
+      "capability": "missing",
+      "capabilityEvidence": "No SMPTE/timecode/frame-rate model; transport position is plain seconds (Transport.tsx fmt mm:ss.cs). none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No timecode/frame-rate settings in ui/src; readout is mm:ss only. none found"
+    },
+    {
+      "id": "ACC-001",
+      "capability": "present",
+      "capabilityEvidence": "Tracktion UndoManager under MoshOps; cmdUndo/cmdRedo at MoshOps.cpp:274-287; per-command beginNewTransaction wrapping all mutations.",
+      "surface": "present",
+      "surfaceEvidence": "Toolbar Undo/Redo buttons exec 'undo'/'redo' at Arrangement.tsx:172-173. No keyboard shortcut though."
+    },
+    {
+      "id": "ACC-002",
+      "capability": "partial",
+      "capabilityEvidence": "UndoManager supports stack but only undo()/redo() exposed; no getTransactionNames/jump-to-point surfaced in MoshOps. JSONL log exists but not a navigable history.",
+      "surface": "missing",
+      "surfaceEvidence": "No undo-history view/panel in ui/src; only single-step Undo/Redo buttons. none found"
+    },
+    {
+      "id": "ACC-003",
+      "capability": "partial",
+      "capabilityEvidence": "DOM controls are natively focusable, but no managed focus/keyboard handlers in C++ or React; WebViewShell.h has no key handling.",
+      "surface": "missing",
+      "surfaceEvidence": "No onKeyDown/tabIndex/key bindings in ui/src; no :focus/:focus-visible styles in styles.css; grid edits are pointer-only. none found"
+    },
+    {
+      "id": "ACC-004",
+      "capability": "partial",
+      "capabilityEvidence": "Controls are mostly icon buttons; WebView exposes DOM a11y tree to VoiceOver but names rely on glyphs+title; only one aria-label (App.tsx:106 remote-mode).",
+      "surface": "partial",
+      "surfaceEvidence": "Sparse accessible names: title= on many buttons, one role='group'/aria-label in App.tsx:106; no systematic roles/labels across Arrangement/Rack."
+    },
+    {
+      "id": "ACC-005",
+      "capability": "present",
+      "capabilityEvidence": "JUCE DocumentWindow + JUCE8 WebView render at native retina DPI on macOS; CSS uses rem/system-ui with font-synthesis:none (styles.css:18,37).",
+      "surface": "partial",
+      "surfaceEvidence": "Crisp on retina (native), rem units scale with browser font; but no user-configurable UI-scale control and no @media DPI rules in styles.css."
+    },
+    {
+      "id": "ACC-006",
+      "capability": "partial",
+      "capabilityEvidence": "Plugin editors open as separate native DocumentWindows (PluginHost.cpp:11-144) draggable to any monitor; main app is one window, no detachable internal views.",
+      "surface": "partial",
+      "surfaceEvidence": "open_plugin_editor pops out a native window (Rack 'edit'); no detach/arrange controls for arrangement/mixer panels in ui/src."
+    },
+    {
+      "id": "ACC-007",
+      "capability": "present",
+      "capabilityEvidence": "Controls carry concise help text via HTML title attributes throughout (Transport.tsx:24,31,38; Rack.tsx; App.tsx:47-50).",
+      "surface": "present",
+      "surfaceEvidence": "Native browser tooltips on hover via title= on nearly every button/slider across all components (~24 title attrs in ui/src)."
+    },
+    {
+      "id": "ACC-008",
+      "capability": "present",
+      "capabilityEvidence": "Two-theme token system: [data-theme='light'] overrides shared CSS vars (styles.css:20-31); toggleTheme sets document data-theme (store.ts:200-205).",
+      "surface": "present",
+      "surfaceEvidence": "Theme toggle button in topbar (App.tsx:50-52). No dedicated high-contrast mode, but light/dark themes are switchable."
+    },
+    {
+      "id": "ACC-009",
+      "capability": "missing",
+      "capabilityEvidence": "Zoom is button-only (setPxPerSec via Zoom +/- buttons, Arrangement.tsx:169-170); no wheel/pinch/gesture handlers in any component.",
+      "surface": "missing",
+      "surfaceEvidence": "No onWheel/touch/gesture support in ui/src; zoom only via toolbar buttons. none found"
+    },
+    {
+      "id": "PRF-001",
+      "capability": "partial",
+      "capabilityEvidence": "Relies on Tracktion engine's internal audio threading; no explicit multicore config/distribution in Mosh src. MoshOps uses one ThreadPoolJob loop (1143) for render only.",
+      "surface": "missing",
+      "surfaceEvidence": "No multicore/thread setting or indicator in ui/src or settings. none found"
+    },
+    {
+      "id": "PRF-002",
+      "capability": "present",
+      "capabilityEvidence": "Audio clips are Tracktion WaveAudioClips referencing source files (cmdImportClip MoshOps.cpp:~192) which the engine streams from disk; no full preload in Mosh.",
+      "surface": "partial",
+      "surfaceEvidence": "Works transparently (large files play via engine); no explicit streaming indicator/control in ui/src."
+    },
+    {
+      "id": "PRF-003",
+      "capability": "partial",
+      "capabilityEvidence": "Single te::Edit + snapshot rebuild on every snapshot_invalidated (store.refresh re-fetches all tracks/clips/peaks); no virtualization/large-session optimization in code.",
+      "surface": "missing",
+      "surfaceEvidence": "No large-project status/handling surface; full snapshot+peaks refetch on each change (store.ts:84-101) could degrade on big sessions. none found"
+    },
+    {
+      "id": "PRF-004",
+      "capability": "missing",
+      "capabilityEvidence": "No CPU/DSP/RAM usage measurement anywhere; only grep hit is an unrelated ThreadPoolJob loop (MoshOps.cpp:1143). none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No CPU/RAM meter in ui/src. none found"
+    },
+    {
+      "id": "PRF-005",
+      "capability": "present",
+      "capabilityEvidence": "Audio isolated by design: RT-safe applyToBuffer (NeuralInsertPlugin.cpp:138, no alloc), service I/O on std::thread + MessageManager::callAsync (MoshOps.cpp:910-926), telemetry decimated to 30 Hz (MoshOps.cpp:55).",
+      "surface": "partial",
+      "surfaceEvidence": "Separation is structural and invisible to user; no dropout/xrun indicator surfaced in ui/src, but heavy gen renders run async without playback stall."
+    },
+    {
+      "id": "PRE-001",
+      "capability": "partial",
+      "capabilityEvidence": "Engine binds a chosen device only via env vars MOSH_AUDIO_OUTPUT_DEVICE/INPUT_DEVICE (MoshEngine.cpp:94-177); no in-app device/port selection or persisted MIDI prefs.",
+      "surface": "missing",
+      "surfaceEvidence": "No audio/MIDI preferences screen in ui/src; no device-selection command in the 43-command dispatch (MoshOps.cpp:82-124). none found"
+    },
+    {
+      "id": "PRE-002",
+      "capability": "missing",
+      "capabilityEvidence": "Session/recording paths are hardcoded (~/Library/Mosh/session); no configurable default folders for recordings/samples/presets in src. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No file-location settings in ui/src. none found"
+    },
+    {
+      "id": "PRE-003",
+      "capability": "partial",
+      "capabilityEvidence": "Appearance = dark/light theme toggle (store.ts:199-205), but theme is in-memory zustand state, not persisted across app restarts; no density/color prefs.",
+      "surface": "present",
+      "surfaceEvidence": "Theme toggle button in topbar (App.tsx:50-52); no separate appearance/settings screen but the one appearance control is exposed."
+    },
+    {
+      "id": "PRE-004",
+      "capability": "missing",
+      "capabilityEvidence": "New session always starts empty (MoshEngine.cpp:58 comment: every track explicit); no configurable new-project defaults (rate/tracks/layout). none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No default-project settings in ui/src. none found"
+    },
+    {
+      "id": "HLP-001",
+      "capability": "missing",
+      "capabilityEvidence": "No documentation/manual reachable from the app; no help command or link in src or service. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No help/manual entry point in ui/src (grep help/manual/docs = none in components). none found"
+    },
+    {
+      "id": "HLP-002",
+      "capability": "missing",
+      "capabilityEvidence": "No first-run guidance/lessons/onboarding logic in src or ui. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No onboarding/tutorial/welcome flow in ui/src; empty state is a one-line hint (Arrangement.tsx:122). none found"
+    },
+    {
+      "id": "HLP-003",
+      "capability": "partial",
+      "capabilityEvidence": "Controls expose only brief static help via HTML title text (e.g. Rack.tsx:113 'ASTD safe limit'); no on-demand detailed parameter-info system.",
+      "surface": "partial",
+      "surfaceEvidence": "Hover title= tooltips give terse descriptions across ui/src; no dedicated what's-this/info affordance or parameter help panel. none found beyond title="
+    }
+  ]
+}
