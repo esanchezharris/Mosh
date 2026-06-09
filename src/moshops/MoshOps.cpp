@@ -232,6 +232,7 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "set_clip_mute")     return cmdSetClipMute (args);
     if (name == "set_clip_gain")     return cmdSetClipGain (args);
     if (name == "duplicate_clip")    return cmdDuplicateClip (args);
+    if (name == "paste_clip")        return cmdPasteClip (args);
     if (name == "set_track_volume")  return cmdSetTrackVolume (args);
     if (name == "set_track_pan")     return cmdSetTrackPan (args);
     if (name == "set_track_mute")    return cmdSetTrackMute (args);
@@ -699,6 +700,95 @@ juce::var MoshOps::cmdDuplicateClip (const juce::var& args)
     logLine ("duplicate_clip", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("duplicate_clip", var (data));
+}
+
+// Recreate a clip from a clipToVar-shaped descriptor on a target track at a
+// target time. This is the paste half of the UI-local copy/cut/paste clipboard
+// (the clipboard itself is view state and never crosses the bridge until here).
+// A genuine undoable edit: open a transaction and log undoable:true.
+juce::var MoshOps::cmdPasteClip (const juce::var& args)
+{
+    const auto trackId = args.getProperty ("trackId", var()).toString();
+    if (trackId.isEmpty()) return errResult ("paste_clip", "missing 'trackId'");
+
+    const auto clipVar = args.getProperty ("clip", var());
+    if (! clipVar.isObject()) return errResult ("paste_clip", "missing 'clip'");
+
+    const auto type = clipVar.getProperty ("type", var()).toString();
+    if (type != "wave" && type != "midi")
+        return errResult ("paste_clip", "unsupported clip type: " + type);
+
+    // Validate cheap per-type preconditions BEFORE any side effect (transaction /
+    // track auto-create) so a malformed descriptor errors out with zero side effects
+    // (no orphan track left behind, no empty transaction opened).
+    File waveSource;
+    if (type == "wave")
+    {
+        const auto sourcePath = clipVar.getProperty ("sourceFile", var()).toString();
+        if (sourcePath.isEmpty()) return errResult ("paste_clip", "wave clip missing 'sourceFile'");
+        waveSource = File (sourcePath);
+        if (! waveSource.existsAsFile()) return errResult ("paste_clip", "source file not found: " + sourcePath);
+    }
+
+    auto* track = findTrack (trackId);
+
+    undoManager().beginNewTransaction ("paste_clip");
+    // Match cmdImportClip/cmdAddMidiClip: create the track if it's missing.
+    if (track == nullptr)
+        track = createAudioTrack ({});
+    if (track == nullptr) return errResult ("paste_clip", "no track");
+
+    const double start  = (double) args.getProperty ("start", 0.0);
+    const double length = juce::jmax (0.0, (double) clipVar.getProperty ("length", 0.0));
+    const double offset = (double) clipVar.getProperty ("offset", 0.0);
+    auto name = clipVar.getProperty ("name", var()).toString();
+    if (name.isEmpty()) name = (type == "midi") ? "MIDI" : "clip";
+
+    te::Clip* pasted = nullptr;
+    if (type == "wave")
+    {
+        auto nc = track->insertWaveClip (name, waveSource,
+            { { tracktion::TimePosition::fromSeconds (start), tracktion::TimeDuration::fromSeconds (length) },
+              tracktion::TimeDuration::fromSeconds (offset) }, false);
+        if (nc == nullptr) return errResult ("paste_clip", "insertWaveClip failed");
+        nc->setGainDB ((float) (double) clipVar.getProperty ("gainDb", 0.0));
+        pasted = nc.get();
+    }
+    else // midi
+    {
+        auto nc = track->insertMIDIClip (name,
+            { tracktion::TimePosition::fromSeconds (start),
+              tracktion::TimePosition::fromSeconds (start + length) }, nullptr);
+        if (nc == nullptr) return errResult ("paste_clip", "insertMIDIClip failed");
+
+        auto& sequence = nc->getSequence();
+        // Bind the notes array to a local before getArray(): a pointer into a
+        // temporary var dangles (has bitten prior waves).
+        const auto notesVar = clipVar.getProperty ("notes", var());
+        if (notesVar.isArray())
+            for (auto& n : *notesVar.getArray())
+                sequence.addNote (juce::jlimit (0, 127, (int) n.getProperty ("pitch", 60)),
+                                  tracktion::BeatPosition::fromBeats ((double) n.getProperty ("start", 0.0)),
+                                  tracktion::BeatDuration::fromBeats (juce::jmax (0.0625, (double) n.getProperty ("length", 1.0))),
+                                  juce::jlimit (1, 127, (int) n.getProperty ("velocity", 100)), 0, &undoManager());
+        pasted = nc.get();
+    }
+
+    if (pasted == nullptr) return errResult ("paste_clip", "could not paste this clip type");
+    pasted->setMuted ((bool) clipVar.getProperty ("mute", false));
+
+    // Tracktion queues a track/clip AsyncUpdater after a headless insert; drain
+    // it before returning so itemIDs settle (mirrors createAudioTrack).
+    if (! eng.hasAudio())
+        if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
+            mm->runDispatchLoopUntil (1);
+
+    auto* data = new DynamicObject();
+    data->setProperty ("clipId", pasted->itemID.toString());
+    data->setProperty ("trackId", track->itemID.toString());
+    logLine ("paste_clip", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("paste_clip", var (data));
 }
 
 juce::var MoshOps::cmdSetTrackVolume (const juce::var& args)

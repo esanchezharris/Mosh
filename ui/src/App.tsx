@@ -10,6 +10,7 @@ import { PluginBrowser } from "./components/PluginBrowser";
 import { PianoRoll } from "./components/PianoRoll";
 import { AutomationPanel } from "./components/AutomationPanel";
 import { Settings } from "./components/Settings";
+import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 
 // Stage 1 UI: renders the MoshOps snapshot cold, drives every mutation through
 // execute_command, and reacts to the snapshot+events feed. Deliberately thin and
@@ -28,6 +29,9 @@ export function App() {
   // Audio-engine gate (MON-007 / FLY-004): pure view logic, no command. Disables
   // Export + drives the banner; Transport reads the same field to gate play/record.
   const audioEnabled = snapshot?.session.audioEnabled ?? false;
+
+  // Global keyboard-shortcut layer (CTL-002) — window keydown, ignores text inputs.
+  useKeyboardShortcuts();
 
   useEffect(() => {
     init();

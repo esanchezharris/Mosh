@@ -5,7 +5,7 @@ import {
 } from "./bridge";
 import type {
   Snapshot, Transport, MoshEvent, CommandResult, AvailablePlugin,
-  BuiltinPlugin, AvailableColor, RenderQA, Level, AudioDevices,
+  BuiltinPlugin, AvailableColor, RenderQA, Level, AudioDevices, Clip,
 } from "./types";
 import type { RemoteStatus } from "./bridge";
 import { type SnapDiv, snapStep, meterFrom } from "./time";
@@ -43,6 +43,11 @@ type State = {
   // Live level meters (Wave 9) — fed by the 30Hz "levels" event, NOT the snapshot.
   levels: { tracks: Record<string, Level>; master: Level };
 
+  // Clip clipboard — pure UI-local view state. The captured clip descriptor only
+  // crosses the bridge on paste (paste_clip); copy/cut never touch the backend
+  // (swappable-seam rule). v1 holds a single clip; multi-clip copy is optional.
+  clipboard: { clip: Clip; sourceTrackId: string } | null;
+
   refresh: () => Promise<void>;
   exec: (command: string, args?: Record<string, unknown>) => Promise<CommandResult>;
   init: () => void;
@@ -59,6 +64,12 @@ type State = {
   clearSelection: () => void;
   snapTime: (t: number) => number;
   ensurePeaks: (clipId: string) => void;
+
+  // Clipboard actions (UI-local until paste). copy/cut capture a snapshot clip;
+  // paste reconstructs it on the backend via the paste_clip command.
+  copySelection: () => void;
+  cutSelection: () => Promise<void>;
+  pasteClipboard: () => Promise<void>;
 
   setSelectedTrack: (id: string | null) => void;
   editingClipId: string | null;            // MIDI clip open in the piano-roll
@@ -103,6 +114,7 @@ export const useStore = create<State>((set, get) => ({
   remoteStatus: null,
   audioDevices: null,
   levels: { tracks: {}, master: { l: -100, r: -100 } },
+  clipboard: null,
 
   refresh: async () => {
     if (!isNative()) return;
@@ -203,6 +215,41 @@ export const useStore = create<State>((set, get) => ({
       if (res.ok && res.data)
         set((s) => ({ peaks: { ...s.peaks, [clipId]: res.data!.peaks } }));
     });
+  },
+
+  // Find the first selected clip + its owning track in the current snapshot.
+  copySelection: () => {
+    const { snapshot, selection } = get();
+    if (!snapshot) return;
+    for (const t of snapshot.tracks)
+      for (const c of t.clips)
+        if (selection.has(c.id)) {
+          set({ clipboard: { clip: c, sourceTrackId: t.id } });
+          return;
+        }
+  },
+
+  cutSelection: async () => {
+    if (!get().snapshot) return;
+    // Cut is a faithful inverse of paste: capture the primary (first-selected) clip,
+    // then remove exactly that clip. Multi-clip removal stays on the Delete key — the
+    // single-clip clipboard (v1) must not delete more than it can restore.
+    get().copySelection();
+    const cb = get().clipboard;
+    if (!cb) return;
+    await get().exec("remove_clip", { clipId: cb.clip.id });
+    await get().refresh();
+  },
+
+  pasteClipboard: async () => {
+    const { clipboard, selectedTrackId, snapshot } = get();
+    if (!clipboard) return;
+    await get().exec("paste_clip", {
+      trackId: selectedTrackId ?? clipboard.sourceTrackId,
+      start: snapshot?.transport.position ?? 0,
+      clip: clipboard.clip,
+    });
+    await get().refresh();
   },
 
   setSelectedTrack: (id) => set({ selectedTrackId: id }),

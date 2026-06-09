@@ -64,6 +64,7 @@ private:
     juce::var cmdSetClipMute    (const juce::var& args);
     juce::var cmdSetClipGain    (const juce::var& args);
     juce::var cmdDuplicateClip  (const juce::var& args);
+    juce::var cmdPasteClip      (const juce::var& args);
     juce::var cmdSetTrackVolume (const juce::var& args);
     juce::var cmdSetTrackPan    (const juce::var& args);
     juce::var cmdSetTrackMute   (const juce::var& args);

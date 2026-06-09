@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { useStore } from "../store";
 import type { Snapshot, Track } from "../types";
 import { Clip } from "./Clip";
@@ -85,21 +85,8 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
   const rulerWidth = RULER_SECONDS * pxPerSec;
   const lanesHeight = Math.max(LANE_H, snapshot.tracks.length * LANE_H);
 
-  // Delete / Backspace removes the selected clips (unless typing in a field).
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const el = e.target as HTMLElement;
-      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT")) return;
-      if (e.key !== "Delete" && e.key !== "Backspace") return;
-      const st = useStore.getState();
-      if (st.selection.size === 0) return;
-      e.preventDefault();
-      [...st.selection].forEach((id) => void st.exec("remove_clip", { clipId: id }));
-      st.clearSelection();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  // (Delete / clip-keyboard handling lives in the single global useKeyboardShortcuts
+  // hook mounted by App — see ui/src/hooks/useKeyboardShortcuts.ts.)
 
   return (
     <div className="arrange">

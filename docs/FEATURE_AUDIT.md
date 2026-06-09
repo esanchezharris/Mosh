@@ -178,6 +178,19 @@ The "no settings/device-picker" + "no New/Open project" + "audioEnabled never re
 
 **Shipped-on-both-axes: 62 → 70** (must-tier 48 → 56). The app now opens/creates/saves projects, picks an audio device, gates play/record/export on a real engine-ready signal, and imports user audio — the conventional-DAW shell around the neural spine is closed.
 
+### 2026-06-09 · Wave: Keyboard shortcuts + clip clipboard ✅
+
+The "feels like a real DAW" gap. One new backend command **`paste_clip`** (undoable — reconstructs a clip from a `clipToVar`-shaped descriptor on a target track: wave via `insertWaveClip`+`setGainDB`, midi via `insertMIDIClip`+note re-add, mirroring `cmdImportClip`/`cmdAddNote` exactly + the `createAudioTrack` AsyncUpdater drain so no itemID assert fires headless). Cheap per-type preconditions (wave `sourceFile` exists) are validated **before** the transaction/track-create, so a malformed descriptor errors with zero side effects. UI: a single global **keyboard layer** (`useKeyboardShortcuts`) — Space play/stop, R record, Mod+Z/Shift+Z undo/redo, Mod+S save, Delete remove, Mod+C/X/V copy/cut/paste, Mod+D duplicate, Home/End transport, 1/2 tool — that ignores INPUT/TEXTAREA/SELECT/contentEditable focus and `preventDefault`s the browser-conflicting combos. The clip clipboard is UI-local state (`copySelection`/`cutSelection`/`pasteClipboard`); the descriptor crosses the bridge only inside `paste_clip` (seam preserved). Delete handling was **consolidated** out of `Arrangement.tsx` into the one hook (was firing twice). Verified: `Mosh --selftest` **289/289**, 0 assertions — paste round-trips a wave clip (length/name/start match, source untouched = copy not move), undo removes it, midi notes carry across, and a failed wave paste leaves no orphan clip.
+
+| ID | Tier | Feature | Before → After |
+|---|---|---|---|
+| `CTL-002` | must | Keyboard shortcuts | ✗/✗ → ✓/✓ * |
+| `AED-001` | must | Cut / copy / paste / delete | ✗/✗ → ✓/✓ |
+
+\* The shortcut bindings are a window-keydown layer (not headless-scriptable, like any key-event UI), but every action they invoke is a proven command (`paste_clip` and the rest are selftest-covered). `paste_clip`, delete (`remove_clip`), and duplicate (`duplicate_clip`) are all headless-verified.
+
+**Shipped-on-both-axes: 70 → 72** (must-tier 56 → 58). Clip editing is now fast and conventional: select, copy/cut/paste/duplicate/delete by keyboard, transport and undo/redo without reaching for the mouse.
+
 ## Coverage by category
 
 Per axis the three counts are **present ✓ / partial ◐ / missing ✗** (missing also folds in the one `not_applicable`).

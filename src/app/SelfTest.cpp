@@ -1124,6 +1124,152 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         npFile.deleteFile(); npFile2.deleteFile(); saFile.deleteFile();
     }
 
+    // ─── Wave: keyboard shortcuts + clip clipboard (CTL-002 / AED-001) ───
+    // The keyboard layer is window 'keydown' handlers in the React UI (App mounts
+    // useKeyboardShortcuts) — pure view code, NOT headless-testable, so it is NOT
+    // asserted here (no synthetic key events). What IS headless-verifiable, and is
+    // proven below, is the one backend half: paste_clip reconstructs a clip from a
+    // clipToVar-shaped descriptor (the UI clipboard's payload) on a target track.
+    std::cerr << "--- Wave: clip clipboard / paste_clip (AED-001) ---\n";
+    {
+        // Track A with a wave clip; read A's clip descriptor from the snapshot
+        // (this is exactly the object the UI clipboard captures via clipToVar).
+        auto a = cmd (ops, "create_track", args1 ("name", "PasteSrc"));
+        const auto trackA = a["data"].getProperty ("trackId", var()).toString();
+        check (ok (a), "create track A ok");
+        auto toneA = cmd (ops, "add_test_tone_clip",
+                          objN ({{ "trackId", trackA }, { "seconds", 1.5 }, { "freq", 196.0 }}));
+        check (ok (toneA), "add_test_tone_clip on A ok");
+
+        // Locate track A in the snapshot + grab its first clip descriptor. Bind the
+        // snapshot var to a local before getArray() (a pointer into a temporary var
+        // dangles — has bitten prior waves).
+        const auto snapA = ops.snapshot();
+        var clipDesc;
+        String sourceName;
+        if (auto* trackArr = snapA.getProperty ("tracks", var()).getArray())
+            for (auto& t : *trackArr)
+                if (t.getProperty ("id", var()).toString() == trackA)
+                    if (auto* clipArr = t.getProperty ("clips", var()).getArray())
+                        if (! clipArr->isEmpty())
+                        {
+                            clipDesc = clipArr->getReference (0);
+                            sourceName = clipDesc.getProperty ("name", var()).toString();
+                        }
+        check (clipDesc.isObject(), "captured A's clip descriptor from the snapshot");
+        check (clipDesc.getProperty ("type", var()).toString() == "wave", "captured descriptor is a wave clip");
+        const double srcLen = (double) clipDesc.getProperty ("length", 0.0);
+
+        // Track B; paste the descriptor onto B at start S.
+        auto b = cmd (ops, "create_track", args1 ("name", "PasteDst"));
+        const auto trackB = b["data"].getProperty ("trackId", var()).toString();
+        check (ok (b), "create track B ok");
+
+        const double pasteStart = 3.0;
+        auto pasted = cmd (ops, "paste_clip",
+                           objN ({{ "trackId", trackB }, { "start", pasteStart }, { "clip", clipDesc }}));
+        check (ok (pasted), "paste_clip onto B ok");
+
+        // B now has one clip; its length matches the source and it has a name.
+        auto findTrackVar = [&] (const String& id) -> var {
+            const auto snap = ops.snapshot();
+            if (auto* arr = snap.getProperty ("tracks", var()).getArray())
+                for (auto& t : *arr)
+                    if (t.getProperty ("id", var()).toString() == id) return t;
+            return {};
+        };
+        const auto bTrack = findTrackVar (trackB);
+        const auto bClips = bTrack.getProperty ("clips", var());
+        check (bClips.size() == 1, "B has exactly one clip after paste_clip");
+        const auto bClip = bClips[0];
+        check (std::abs ((double) bClip.getProperty ("length", 0.0) - srcLen) < 1.0e-6,
+               "pasted clip length matches the source clip");
+        check (bClip.getProperty ("name", var()).toString().isNotEmpty(), "pasted clip has a name");
+        check (std::abs ((double) bClip.getProperty ("start", 0.0) - pasteStart) < 1.0e-6,
+               "pasted clip starts at the requested time");
+
+        // Copy/paste, not move: the source clip on A is untouched.
+        const auto aTrack = findTrackVar (trackA);
+        check (aTrack.getProperty ("clips", var()).size() == 1, "source clip on A untouched (copy, not move)");
+
+        // paste_clip is genuinely undoable: undo removes the pasted clip from B.
+        check (ok (cmd (ops, "undo")), "undo after paste_clip ok");
+        check (findTrackVar (trackB).getProperty ("clips", var()).size() == 0,
+               "undo removed the pasted clip from B (paste_clip is undoable)");
+
+        // MIDI: paste carries the notes across.
+        auto mt = cmd (ops, "create_track", args1 ("name", "MidiSrc"));
+        const auto midiTrack = mt["data"].getProperty ("trackId", var()).toString();
+        // Pass an EMPTY notes array so cmdAddMidiClip does NOT seed its default
+        // 4-note arpeggio — we add exactly 2 notes below so the count is known.
+        auto mClip = cmd (ops, "add_midi_clip", objN ({{ "trackId", midiTrack }, { "notes", var (Array<var>()) }}));
+        const auto midiClipId = mClip["data"].getProperty ("clipId", var()).toString();
+        check (ok (mClip), "add_midi_clip ok");
+        check (ok (cmd (ops, "add_note", objN ({{ "clipId", midiClipId }, { "pitch", 64 }, { "start", 0.0 }, { "length", 1.0 }, { "velocity", 100 }}))), "add_note 1 ok");
+        check (ok (cmd (ops, "add_note", objN ({{ "clipId", midiClipId }, { "pitch", 67 }, { "start", 1.0 }, { "length", 1.0 }, { "velocity", 90 }}))), "add_note 2 ok");
+
+        // Read the MIDI clip's descriptor (with its notes[]) from the snapshot.
+        var midiDesc;
+        int srcNoteCount = 0;
+        {
+            const auto mTrackVar = findTrackVar (midiTrack);
+            if (auto* clipArr = mTrackVar.getProperty ("clips", var()).getArray())
+                if (! clipArr->isEmpty())
+                {
+                    midiDesc = clipArr->getReference (0);
+                    auto notesVar = midiDesc.getProperty ("notes", var());  // bind before getArray
+                    srcNoteCount = notesVar.isArray() ? notesVar.size() : 0;
+                }
+        }
+        check (midiDesc.isObject(), "captured the MIDI clip descriptor");
+        check (srcNoteCount == 2, "source MIDI clip carries 2 notes");
+
+        auto mDst = cmd (ops, "create_track", args1 ("name", "MidiDst"));
+        const auto midiDst = mDst["data"].getProperty ("trackId", var()).toString();
+        auto mPaste = cmd (ops, "paste_clip", objN ({{ "trackId", midiDst }, { "start", 0.0 }, { "clip", midiDesc }}));
+        check (ok (mPaste), "paste_clip (midi) onto another track ok");
+        {
+            const auto dstTrackVar = findTrackVar (midiDst);
+            const auto dstClips = dstTrackVar.getProperty ("clips", var());
+            check (dstClips.size() == 1, "MIDI destination has one pasted clip");
+            auto notesVar = dstClips[0].getProperty ("notes", var());  // bind before size
+            check (notesVar.isArray() && notesVar.size() == srcNoteCount,
+                   "pasted MIDI clip carries the same note count");
+        }
+
+        // Bad args -> graceful errResult (no crash).
+        check (! ok (cmd (ops, "paste_clip", objN ({{ "start", 0.0 }, { "clip", clipDesc }}))),
+               "paste_clip with missing trackId errors");
+        check (! ok (cmd (ops, "paste_clip", objN ({{ "trackId", trackB }, { "start", 0.0 }}))),
+               "paste_clip with missing clip errors");
+        check (! ok (cmd (ops, "paste_clip", objN ({{ "trackId", trackB }, { "start", 0.0 },
+                                                    { "clip", objN ({{ "type", "bogus" }, { "length", 1.0 }}) }}))),
+               "paste_clip with unknown clip type errors");
+
+        // Zero-side-effect validation: a wave descriptor with a non-existent sourceFile
+        // on a VALID track must error WITHOUT creating an orphan clip (the source check
+        // is hoisted above the transaction / track auto-create).
+        auto bBefore = trackById (trackB);
+        auto bBeforeClips = bBefore.getProperty ("clips", var());
+        const int bCountBefore = bBeforeClips.isArray() ? bBeforeClips.getArray()->size() : 0;
+        check (! ok (cmd (ops, "paste_clip", objN ({{ "trackId", trackB }, { "start", 0.0 },
+                   { "clip", objN ({{ "type", "wave" }, { "length", 1.0 }, { "sourceFile", "/no/such/file.wav" }}) }}))),
+               "paste_clip wave with missing source errors");
+        auto bAfter = trackById (trackB);
+        auto bAfterClips = bAfter.getProperty ("clips", var());
+        const int bCountAfter = bAfterClips.isArray() ? bAfterClips.getArray()->size() : 0;
+        check (bCountAfter == bCountBefore, "failed wave paste left no orphan clip (zero side effects)");
+
+        // JSONL records paste_clip with undoable:true.
+        auto plog = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
+        check (plog.contains ("paste_clip"), "JSONL records paste_clip");
+        bool pasteUndoable = false;
+        for (auto& ln : juce::StringArray::fromLines (plog))
+            if (ln.contains ("\"command\": \"paste_clip\"") && ln.contains ("\"undoable\": true"))
+                pasteUndoable = true;
+        check (pasteUndoable, "paste_clip logged undoable:true (genuine edit)");
+    }
+
     std::cerr << "===== " << (checks - failures) << "/" << checks
               << " checks passed, " << failures << " failed =====\n\n";
     return failures;
