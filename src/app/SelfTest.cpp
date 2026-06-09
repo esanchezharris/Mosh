@@ -2270,6 +2270,84 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         }
     }
 
+    // ─── Wave D: MIX-008 group (submix) tracks ───
+    // A FolderTrack created asSubmix=true genuinely sums its children (the graph
+    // builder routes them through a SummingNode + the folder's plugin chain — the
+    // engine's own nested-submix test proves the audio). Headless we verify the
+    // command surface, the snapshot structure, the group fader, and undo/redo.
+    std::cerr << "--- Wave D: group / submix tracks (MIX-008) ---\n";
+    {
+        auto ga = cmd (ops, "create_track", args1 ("name", "GrpA"))["data"].getProperty ("trackId", var()).toString();
+        auto gb = cmd (ops, "create_track", args1 ("name", "GrpB"))["data"].getProperty ("trackId", var()).toString();
+        check (ga.isNotEmpty() && gb.isNotEmpty(), "group: two member tracks created");
+
+        // Create a group over both members (ONE undoable transaction).
+        auto gr = cmd (ops, "create_group_track",
+                       objN ({{ "name", "Drums" },
+                              { "trackIds", var (juce::Array<var> { var (ga), var (gb) }) }}));
+        check (ok (gr), "group: create_group_track ok");
+        const auto gid = gr["data"].getProperty ("groupId", var()).toString();
+        check (gid.isNotEmpty(), "group: returned a groupId");
+        check ((int) gr["data"].getProperty ("moved", 0) == 2, "group: moved both member tracks");
+
+        auto gv = trackById (gid);
+        check (gv.getProperty ("type", var()).toString() == "group", "group: snapshot entry has type group");
+        check ((bool) gv.getProperty ("isGroup", false), "group: snapshot entry flagged isGroup");
+        check (gv.getProperty ("name", var()).toString() == "Drums", "group: snapshot entry carries the name");
+        check (gv.hasProperty ("volumeDb"), "group: snapshot entry has a real fader (submix VolumeAndPan)");
+        check (trackById (ga).getProperty ("parentId", var()).toString() == gid, "group: member A carries parentId");
+        check (trackById (gb).getProperty ("parentId", var()).toString() == gid, "group: member B carries parentId");
+
+        // The group fader + rename drive the FolderTrack via the EXISTING commands.
+        check (ok (cmd (ops, "set_track_volume", objN ({{ "trackId", gid }, { "db", -6.0 }}))),
+               "group: set_track_volume on the group ok");
+        check (std::abs ((double) trackById (gid).getProperty ("volumeDb", 0.0) - (-6.0)) < 0.25,
+               "group: group fader reflects -6 dB");
+        check (ok (cmd (ops, "rename_track", objN ({{ "trackId", gid }, { "name", "DrumBus" }}))),
+               "group: rename_track on the group ok");
+        check (trackById (gid).getProperty ("name", var()).toString() == "DrumBus", "group: rename reflects");
+
+        // One undo step per command: undo(rename) -> undo(volume) -> undo(create+move).
+        cmd (ops, "undo"); cmd (ops, "undo");
+        check (ok (cmd (ops, "undo")), "group: undo (create_group_track) ok");
+        check (! trackById (gid).isObject() || trackById (gid).getProperty ("type", var()).toString() != "group",
+               "group: undo removed the group entry");
+        check (trackById (ga).getProperty ("parentId", var()).toString().isEmpty(), "group: undo restored A to top level");
+        check (ok (cmd (ops, "redo")), "group: redo ok");
+        check (trackById (ga).getProperty ("parentId", var()).toString() == gid, "group: redo re-grouped A");
+
+        // Ungroup: hoists the members back to top level + deletes the group.
+        auto ug = cmd (ops, "ungroup_track", args1 ("trackId", gid));
+        check (ok (ug), "group: ungroup_track ok");
+        check ((int) ug["data"].getProperty ("hoisted", 0) == 2, "group: ungroup hoisted both members");
+        check (trackById (ga).getProperty ("parentId", var()).toString().isEmpty(), "group: A back at top level");
+        check (trackById (ga).isObject() && trackById (gb).isObject(), "group: both members survived the ungroup");
+        check (! trackById (gid).isObject(), "group: group entry gone after ungroup");
+        check (ok (cmd (ops, "undo")), "group: undo (ungroup) ok");
+        check (trackById (ga).getProperty ("parentId", var()).toString() == gid, "group: undo restored the grouping");
+        cmd (ops, "redo");   // leave the edit flat (group removed) for hygiene
+
+        // Graceful bad args.
+        check (! ok (cmd (ops, "ungroup_track", args1 ("trackId", "no-such-group"))), "group: ungroup bad id errors");
+        auto gunk = cmd (ops, "create_group_track",
+                         objN ({{ "trackIds", var (juce::Array<var> { var ("bogus-id") }) }}));
+        check (ok (gunk), "group: unknown member ids are skipped, not fatal");
+        check ((int) gunk["data"].getProperty ("moved", -1) == 0, "group: nothing moved for unknown ids");
+        check ((int) gunk["data"].getProperty ("unknownTrackIds", 0) == 1, "group: unknown ids reported");
+        cmd (ops, "ungroup_track", args1 ("trackId", gunk["data"].getProperty ("groupId", var()).toString()));
+
+        // JSONL records both commands as undoable Edit mutations.
+        auto glog = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
+        bool gUndoable = false, ugUndoable = false;
+        for (auto& ln : juce::StringArray::fromLines (glog))
+        {
+            if (ln.contains ("\"command\": \"create_group_track\"") && ln.contains ("\"undoable\": true")) gUndoable = true;
+            if (ln.contains ("\"command\": \"ungroup_track\"") && ln.contains ("\"undoable\": true")) ugUndoable = true;
+        }
+        check (gUndoable, "group: create_group_track logged undoable:true");
+        check (ugUndoable, "group: ungroup_track logged undoable:true");
+    }
+
     std::cerr << "===== " << (checks - failures) << "/" << checks
               << " checks passed, " << failures << " failed =====\n\n";
     return failures;

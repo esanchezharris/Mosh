@@ -155,6 +155,10 @@ private:
     // PRJ-008 — per-project format / time-base intent (undoable:false preference,
     // stored on a MOSH_PROJECT child of the Edit tree; saves/reloads with the edit).
     juce::var cmdSetProjectSettings (const juce::var& args);
+    // MIX-008 — group (submix) tracks: a te::FolderTrack created asSubmix=true sums
+    // its children through a SummingNode + its own plugin chain (engine-proven).
+    juce::var cmdCreateGroupTrack (const juce::var& args);   // undoable (one transaction)
+    juce::var cmdUngroupTrack     (const juce::var& args);   // undoable (hoists children, deletes group)
 
     // The MOSH_PROJECT child of eng.edit().state, created (empty) on first read so
     // callers always get a valid tree. Pure storage accessor — no logging/transaction.
@@ -180,6 +184,7 @@ private:
                                            const juce::var& logArgs);
     te::VolumeAndPanPlugin* ensureVolumePlugin (te::AudioTrack&);
     te::AudioTrack* findTrack (const juce::String& id);
+    te::FolderTrack* findGroupTrack (const juce::String& id);   // MIX-008 submix folder lookup
     te::Clip*       findClip  (const juce::String& id);
     // True when the track hosts an instrument plugin (external synth or a builtin
     // instrument) — the same test pluginToVar uses for the "isInstrument" flag.

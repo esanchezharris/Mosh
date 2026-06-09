@@ -15,6 +15,7 @@ import { useStore } from "../store";
 //   Delete/Backspace remove selected clip(s)
 //   Mod+C/X/V        copy / cut / paste clip
 //   Mod+D            duplicate selected clip(s)
+//   Mod+G            group the selected clips' tracks (submix)
 //   Home / End       transport to start / end
 //   1 / 2            move tool / split tool (pure-view)
 export function useKeyboardShortcuts() {
@@ -63,6 +64,17 @@ export function useKeyboardShortcuts() {
             e.preventDefault(); // stop the browser bookmark dialog
             for (const id of selected()) void s.exec("duplicate_clip", { clipId: id });
             return;
+          case "g": {
+            // MIX-008 — group the tracks of the selected clips into a submix.
+            e.preventDefault();
+            const sel = new Set(selected());
+            const trackIds =
+              s.snapshot?.tracks
+                .filter((t) => !t.isGroup && t.clips.some((c) => sel.has(c.id)))
+                .map((t) => t.id) ?? [];
+            if (trackIds.length > 0) void s.exec("create_group_track", { trackIds });
+            return;
+          }
           default:
             return; // leave other Mod combos to the browser
         }

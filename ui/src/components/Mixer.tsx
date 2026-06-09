@@ -14,20 +14,37 @@ export function Mixer({ snapshot }: { snapshot: Snapshot }) {
   // command surface / headless runs clean).
   useEffect(() => { void exec("enable_all_meters", {}); }, [exec]);
   const buses = snapshot.buses ?? [];
-  const sources = snapshot.tracks.filter((t) => !t.isReturn);
+  const selectedTrackId = useStore((s) => s.selectedTrackId);
+  const sources = snapshot.tracks.filter((t) => !t.isReturn && !t.isGroup);
   const returns = snapshot.tracks.filter((t) => t.isReturn);
+  const groups = snapshot.tracks.filter((t) => t.isGroup);
 
   return (
     <div className="mixer">
       <div className="mix-strips">
         <div className="mix-toolbar">
           <button onClick={() => exec("create_bus", { name: `Bus ${buses.length + 1}` })} title="Add a return bus">+ Bus</button>
+          <button
+            title={selectedTrackId ? "Group the selected track (submix)" : "Select a track first"}
+            disabled={!selectedTrackId}
+            onClick={() =>
+              exec("create_group_track", {
+                name: `Group ${groups.length + 1}`,
+                trackIds: selectedTrackId ? [selectedTrackId] : [],
+              })
+            }
+          >
+            + Group
+          </button>
         </div>
         {sources.map((t) => (
           <ChannelStrip key={t.id} track={t} buses={buses} />
         ))}
         {sources.length === 0 && <div className="rack-empty">no tracks</div>}
-        {returns.length > 0 && <div className="mix-divider" />}
+        {(returns.length > 0 || groups.length > 0) && <div className="mix-divider" />}
+        {groups.map((t) => (
+          <GroupStrip key={t.id} track={t} />
+        ))}
         {returns.map((t) => (
           <ReturnStrip key={t.id} track={t} />
         ))}
@@ -117,6 +134,27 @@ function ReturnStrip({ track }: { track: Track }) {
       <div className="strip-name" title={track.name}><span className="rbadge">R</span> {track.name}</div>
       <StripCore track={track} />
       <button className="send-x bus-x" title="Remove bus" onClick={() => exec("remove_bus", { bus: track.returnBus })}>× Bus</button>
+    </div>
+  );
+}
+
+// MIX-008 — a group (submix) strip. The fader is the FolderTrack's real
+// VolumeAndPan (the engine sums the children through it); set_track_volume /
+// rename_track resolve group ids, so the existing commands drive it.
+function GroupStrip({ track }: { track: Track }) {
+  const exec = useStore((s) => s.exec);
+  const setSelectedTrack = useStore((s) => s.setSelectedTrack);
+  const selectedTrackId = useStore((s) => s.selectedTrackId);
+  return (
+    <div className={`strip group ${selectedTrackId === track.id ? "sel" : ""}`} onPointerDown={() => setSelectedTrack(track.id)}>
+      <div className="strip-name" title={track.name}><span className="gbadge">G</span> {track.name}</div>
+      <div className="fader-wrap">
+        <input className="fader" type="range" min={-48} max={6} step={0.5} value={track.volumeDb ?? 0}
+          onChange={(e) => exec("set_track_volume", { trackId: track.id, db: Number(e.target.value) })} title="Group volume" />
+      </div>
+      <div className="strip-db">{(track.volumeDb ?? 0).toFixed(1)} dB</div>
+      <button className="send-x bus-x" title="Ungroup (hoist members, remove the group)"
+        onClick={() => exec("ungroup_track", { trackId: track.id })}>× Group</button>
     </div>
   );
 }

@@ -304,6 +304,8 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "open_project")      return cmdOpenProject (args);
     if (name == "save_as")           return cmdSaveAs (args);
     if (name == "set_project_settings") return cmdSetProjectSettings (args);
+    if (name == "create_group_track") return cmdCreateGroupTrack (args);
+    if (name == "ungroup_track")      return cmdUngroupTrack (args);
 
     return errResult (name, "unknown command: " + name);
 }
@@ -331,7 +333,8 @@ juce::var MoshOps::cmdCreateTrack (const juce::var& args)
 juce::var MoshOps::cmdRenameTrack (const juce::var& args)
 {
     const auto id = args.getProperty ("trackId", var()).toString();
-    auto* track = findTrack (id);
+    te::Track* track = findTrack (id);
+    if (track == nullptr) track = findGroupTrack (id);   // MIX-008: groups rename too
     if (track == nullptr) return errResult ("rename_track", "no track: " + id);
 
     undoManager().beginNewTransaction ("rename_track");
@@ -665,6 +668,118 @@ juce::var MoshOps::cmdSetProjectSettings (const juce::var& args)
     logLine ("set_project_settings", args, true, {}, false);   // preference — NOT undoable
     emitSnapshotInvalidated();
     return okResult ("set_project_settings", projectSettingsToVar());
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MIX-008 — group (submix) tracks
+//
+// A te::FolderTrack created with asSubmix=true GENUINELY sums its children: the
+// graph builder routes every child through a SummingNode wrapped by the folder's
+// own plugin chain (createNodeForSubmixTrack; proven by the engine's nested-submix
+// test). insertNewFolderTrack(asSubmix=true) adds the default VolumeAndPan +
+// LevelMeter plugins, which is exactly what keeps isSubmixFolder() true — so the
+// group has a real fader and the summing is engine-owned, not a Mosh claim.
+// ─────────────────────────────────────────────────────────────────────────────
+te::FolderTrack* MoshOps::findGroupTrack (const juce::String& id)
+{
+    const auto itemId = te::EditItemID::fromString (id);
+    for (auto* t : te::getAllTracks (eng.edit()))
+        if (auto* ft = dynamic_cast<te::FolderTrack*> (t))
+            if (ft->itemID == itemId)
+                return ft;
+    return nullptr;
+}
+
+juce::var MoshOps::cmdCreateGroupTrack (const juce::var& args)
+{
+    auto& edit = eng.edit();
+
+    // Resolve the member tracks FIRST (cheap precondition, zero side effects on
+    // a malformed request). Unknown ids are skipped + reported, not fatal — an
+    // empty trackIds (or none) creates an empty group, which is valid.
+    juce::Array<te::AudioTrack*> members;
+    int unknown = 0;
+    const auto idsVar = args.getProperty ("trackIds", var());   // bind before getArray
+    if (auto* ids = idsVar.getArray())
+        for (auto& idv : *ids)
+        {
+            if (auto* t = findTrack (idv.toString()))
+            {
+                if (! members.contains (t))
+                    members.add (t);
+            }
+            else
+                ++unknown;
+        }
+
+    undoManager().beginNewTransaction ("create_group_track");
+
+    auto folder = edit.insertNewFolderTrack (te::TrackInsertPoint::getEndOfTracks (edit),
+                                             nullptr, /*asSubmix*/ true);
+    if (folder == nullptr)
+        return errResult ("create_group_track", "insertNewFolderTrack failed");
+
+    const auto name = args.getProperty ("name", var()).toString();
+    folder->setName (name.isNotEmpty() ? name : juce::String ("Group"));
+
+    // Move each member under the folder, preserving their relative order: the
+    // first child goes to the start of the folder, each next one after the last.
+    te::Track* preceding = nullptr;
+    for (auto* m : members)
+    {
+        edit.moveTrack (m, te::TrackInsertPoint (folder.get(), preceding));
+        preceding = m;
+    }
+
+    // Structural edits queue Tracktion async settling; drain headless so itemIDs
+    // and parent links are stable before the snapshot (mirrors createAudioTrack).
+    if (! eng.hasAudio())
+        if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
+            mm->runDispatchLoopUntil (1);
+
+    auto* data = new DynamicObject();
+    data->setProperty ("groupId", folder->itemID.toString());
+    data->setProperty ("moved", members.size());
+    if (unknown > 0) data->setProperty ("unknownTrackIds", unknown);
+    logLine ("create_group_track", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("create_group_track", var (data));
+}
+
+juce::var MoshOps::cmdUngroupTrack (const juce::var& args)
+{
+    auto& edit = eng.edit();
+    const auto id = args.getProperty ("trackId", var()).toString();
+    auto* folder = findGroupTrack (id);
+    if (folder == nullptr) return errResult ("ungroup_track", "no group track: " + id);
+
+    // Collect the folder's direct children before mutating.
+    juce::Array<te::Track*> children;
+    for (auto* t : te::getAllTracks (edit))
+        if (t != nullptr && t->getParentTrack() == folder)
+            children.add (t);
+
+    undoManager().beginNewTransaction ("ungroup_track");
+
+    // Hoist each child to the top level right after the folder (order preserved),
+    // then delete the now-empty folder. One transaction = one undo step.
+    te::Track* preceding = folder;
+    for (auto* c : children)
+    {
+        edit.moveTrack (c, te::TrackInsertPoint (nullptr, preceding));
+        preceding = c;
+    }
+    edit.deleteTrack (folder);
+
+    if (! eng.hasAudio())
+        if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
+            mm->runDispatchLoopUntil (1);
+
+    auto* data = new DynamicObject();
+    data->setProperty ("hoisted", children.size());
+    logLine ("ungroup_track", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("ungroup_track", var (data));
 }
 
 juce::var MoshOps::cmdUndo (const juce::var& args)
@@ -1087,10 +1202,13 @@ juce::var MoshOps::cmdPasteClip (const juce::var& args)
 
 juce::var MoshOps::cmdSetTrackVolume (const juce::var& args)
 {
-    auto* track = findTrack (args.getProperty ("trackId", var()).toString());
-    if (track == nullptr) return errResult ("set_track_volume", "no track");
-    auto* vp = ensureVolumePlugin (*track);
-    if (vp == nullptr) return errResult ("set_track_volume", "no volume plugin");
+    const auto id = args.getProperty ("trackId", var()).toString();
+    te::VolumeAndPanPlugin* vp = nullptr;
+    if (auto* track = findTrack (id))
+        vp = ensureVolumePlugin (*track);
+    else if (auto* group = findGroupTrack (id))   // MIX-008: group fader (submix VolumeAndPan)
+        vp = group->getVolumePlugin();
+    if (vp == nullptr) return errResult ("set_track_volume", "no track");
 
     undoManager().beginNewTransaction ("set_track_volume");
     vp->setVolumeDb ((float) (double) args.getProperty ("db", 0.0));
@@ -3514,6 +3632,30 @@ juce::var MoshOps::snapshot()
         if (t != nullptr)
             tracks.add (trackToVar (*t, index++));
 
+    // MIX-008 — group (submix) tracks, appended AFTER the audio tracks so every
+    // existing flat consumer (lanes, mixer strips, selftest firstTrack) is
+    // unbroken. A group entry carries isGroup + its real fader (the submix
+    // VolumeAndPan the engine added) and an empty clips array.
+    for (auto* t : te::getAllTracks (edit))
+        if (auto* ft = dynamic_cast<te::FolderTrack*> (t))
+        {
+            auto* g = new DynamicObject();
+            g->setProperty ("id", ft->itemID.toString());
+            g->setProperty ("index", index++);
+            g->setProperty ("name", ft->getName());
+            g->setProperty ("type", "group");
+            g->setProperty ("isGroup", true);
+            g->setProperty ("clips", Array<var>());
+            if (auto* vp = ft->getVolumePlugin())
+            {
+                g->setProperty ("volumeDb", vp->getVolumeDb());
+                g->setProperty ("pan", vp->getPan());
+            }
+            if (auto* parent = ft->getParentFolderTrack())   // nested groups
+                g->setProperty ("parentId", parent->itemID.toString());
+            tracks.add (var (g));
+        }
+
     auto* root = new DynamicObject();
     root->setProperty ("schemaVersion", 1);
     root->setProperty ("session", var (session));
@@ -3564,6 +3706,11 @@ juce::var MoshOps::trackToVar (te::AudioTrack& t, int index)
     o->setProperty ("name", t.getName());
     o->setProperty ("type", "audio");
     o->setProperty ("clips", clips);
+    // MIX-008 — a track nested under a group (submix folder) carries its parent's
+    // id so the UI can indent it / show membership. Additive: flat consumers see
+    // the same array, ungrouped tracks have no parentId.
+    if (auto* parent = t.getParentFolderTrack())
+        o->setProperty ("parentId", parent->itemID.toString());
 
     // Plugin chain (Stage 3). Indexed within pluginList (built-ins included). The
     // metering tap (Wave 9) is hidden from the rack but keeps its real index so

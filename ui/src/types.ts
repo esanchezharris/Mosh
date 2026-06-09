@@ -130,6 +130,10 @@ export type Track = {
   isReturn?: boolean;
   returnBus?: number;
   meterEnabled?: boolean;
+  // MIX-008 — group (submix) tracks. A group entry has isGroup + type "group" and
+  // an empty clips array; a track nested under a group carries parentId.
+  isGroup?: boolean;
+  parentId?: string;
 };
 
 export type Level = { l: number; r: number };           // peak dBFS, -100 floor

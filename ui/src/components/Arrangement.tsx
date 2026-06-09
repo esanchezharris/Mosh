@@ -25,6 +25,9 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
   const loopDrag = useRef<number | null>(null);
 
   const LANE_H = laneHeight;
+  // MIX-008 — group (submix) entries live in the Mixer, not as arrangement lanes;
+  // their member tracks render here indented (via parentId).
+  const laneTracks = snapshot.tracks.filter((tr) => !tr.isGroup);
   const m = meterFrom(snapshot.session);
   const barSec = barSeconds(m);
   const beatSec = beatSeconds(m);
@@ -99,7 +102,7 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
     const yMin = Math.min(marquee.y0, marquee.y1);
     const yMax = Math.max(marquee.y0, marquee.y1);
     const hit: string[] = [];
-    snapshot.tracks.forEach((tr, row) => {
+    laneTracks.forEach((tr, row) => {
       const top = row * LANE_H;
       if (top + LANE_H < yMin || top > yMax) return;
       for (const c of tr.clips) {
@@ -113,7 +116,7 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
   };
 
   const rulerWidth = RULER_SECONDS * pxPerSec;
-  const lanesHeight = Math.max(LANE_H, snapshot.tracks.length * LANE_H);
+  const lanesHeight = Math.max(LANE_H, laneTracks.length * LANE_H);
 
   // (Delete / clip-keyboard handling lives in the single global useKeyboardShortcuts
   // hook mounted by App — see ui/src/hooks/useKeyboardShortcuts.ts.)
@@ -162,7 +165,7 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
 
         <div className="tl-body">
           <div className="heads">
-            {snapshot.tracks.map((tr) => (
+            {laneTracks.map((tr) => (
               <TrackHeader key={tr.id} track={tr} laneH={LANE_H} />
             ))}
           </div>
@@ -180,10 +183,10 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
                 <div className="gl bar" key={`glb-${b}`} style={{ left: b * barSec * pxPerSec }} />
               ))}
             </div>
-            {snapshot.tracks.length === 0 && (
+            {laneTracks.length === 0 && (
               <div className="empty-hint">No tracks yet — add a track or drop in a test tone.</div>
             )}
-            {snapshot.tracks.map((tr, row) => (
+            {laneTracks.map((tr, row) => (
               <div className="lane" key={tr.id} style={{ top: row * LANE_H, height: LANE_H }}>
                 {tr.clips.map((c) => (
                   <Clip key={c.id} clip={c} laneH={LANE_H} />
@@ -350,11 +353,12 @@ function TrackHeader({ track, laneH }: { track: Track; laneH: number }) {
   const fxCount = (track.plugins ?? []).filter((p) => p.external || p.neural || p.builtin).length;
   return (
     <div
-      className={`track-head ${selectedTrackId === track.id ? "sel" : ""}`}
+      className={`track-head ${selectedTrackId === track.id ? "sel" : ""} ${track.parentId ? "grouped" : ""}`}
       style={{ height: laneH }}
       onPointerDown={() => setSelectedTrack(track.id)}
     >
       <div className="th-row">
+        {track.parentId && <span className="grp-badge" title="In a group (submix)">▸</span>}
         <span className="track-name">{track.name || `Track ${track.index + 1}`}</span>
         {fxCount > 0 && <span className="fx-count">{fxCount} fx</span>}
         <button className="mini" title="Remove" onClick={(e) => { e.stopPropagation(); exec("remove_track", { trackId: track.id }); }}>✕</button>

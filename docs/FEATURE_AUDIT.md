@@ -371,6 +371,39 @@ an enclosed clip is removed whole.
 **Shipped-on-both-axes: 90 → 92** (must-tier 76 → 78). A time-range is now a real edit target and
 automation reads in-context under every track.
 
+### 2026-06-09 · Wave D: group / submix tracks (MIX-008) ✅
+
+The last closeable must-tier. Research confirmed the load-bearing engine fact: a `te::FolderTrack`
+created `asSubmix=true` **genuinely sums** its children — the graph builder routes every child
+through a `SummingNode` wrapped by the folder's own plugin chain (proven by the engine's own
+nested-submix test), and `insertNewFolderTrack(asSubmix=true)` adds the default VolumeAndPan +
+LevelMeter, which is exactly what keeps `isSubmixFolder()` true. So the group has a **real fader**
+and the summing is engine-owned, not a Mosh claim. Two new undoable commands:
+**`create_group_track`** `{name?, trackIds?}` (inserts the submix folder + moves the members under
+it, one transaction; unknown ids skipped + reported) and **`ungroup_track`** `{trackId}` (hoists the
+members back to top level in order + deletes the folder, one transaction). The existing
+`set_track_volume` / `rename_track` resolve group ids (the fader is the folder's own VolumeAndPan).
+Snapshot: additive — group entries appended after the audio tracks (`type:"group"`, `isGroup`,
+fader fields, empty clips) and grouped members carry `parentId`, so every flat consumer is
+unbroken. UI: a `GroupStrip` in the Mixer (fader + ungroup) + "+ Group" toolbar action, grouped
+tracks indent with a badge in the arrangement, and **Mod+G** groups the selected clips' tracks.
+Verified: `Mosh --selftest` **554/554 across 3 runs, 0 failed, 0 assertions** — 32 checks covering
+create/move, snapshot structure, the group fader at -6 dB, rename, single-step undo/redo of the
+whole group operation, ungroup round-trip, graceful unknown-id handling, and JSONL `undoable:true`.
+
+| ID | Tier | Feature | Before → After |
+|---|---|---|---|
+| `MIX-008` | must | Group / bus tracks (summing submix) | ◐/✗ → ✓/✓ |
+
+*(Implementation note: the Wave D workflow's implement/review agents hit a harness/model
+incompatibility, so this wave was implemented and reviewed directly from the workflow's verified
+research plan.)*
+
+**Shipped-on-both-axes: 92 → 93** (must-tier 78 → **79 of 82**). The mixer now has true submix
+groups. The only remaining must-tier are the three deferred-with-rationale infra items:
+`RTG-001`/`RTG-002` (per-channel input/output routing — needs a graph routing matrix) and
+`SES-001`'s full tempo-map (tempo automation — a warp/groove subsystem).
+
 ## Coverage by category
 
 Per axis the three counts are **present ✓ / partial ◐ / missing ✗** (missing also folds in the one `not_applicable`).
