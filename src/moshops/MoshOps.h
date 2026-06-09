@@ -66,6 +66,10 @@ private:
     juce::var cmdSetClipGain    (const juce::var& args);
     juce::var cmdDuplicateClip  (const juce::var& args);
     juce::var cmdPasteClip      (const juce::var& args);
+    // Wave C — ARR-010: time-range as a true delete target. One undoable
+    // transaction: per targeted track, split overlapping clips at the range
+    // bounds and remove the fully-inside segment(s).
+    juce::var cmdDeleteTimeRange (const juce::var& args);
     juce::var cmdSetTrackVolume (const juce::var& args);
     juce::var cmdSetTrackPan    (const juce::var& args);
     juce::var cmdSetTrackMute   (const juce::var& args);

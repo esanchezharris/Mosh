@@ -233,6 +233,7 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "set_clip_mute")     return cmdSetClipMute (args);
     if (name == "set_clip_gain")     return cmdSetClipGain (args);
     if (name == "duplicate_clip")    return cmdDuplicateClip (args);
+    if (name == "delete_time_range") return cmdDeleteTimeRange (args);
     if (name == "paste_clip")        return cmdPasteClip (args);
     if (name == "set_track_volume")  return cmdSetTrackVolume (args);
     if (name == "set_track_pan")     return cmdSetTrackPan (args);
@@ -871,6 +872,128 @@ juce::var MoshOps::cmdDuplicateClip (const juce::var& args)
     logLine ("duplicate_clip", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("duplicate_clip", var (data));
+}
+
+// ARR-010: delete a time range [start, end] across one or more tracks as a
+// SINGLE undoable transaction. For each targeted track we split every clip that
+// straddles a bound (reusing ClipTrack::splitClip, the same primitive as
+// split_clip) and then remove every clip segment that ends up fully inside the
+// range (removeFromParent, the same primitive as remove_clip). Edge cases fall
+// out of the geometry: a clip entirely inside is removed whole; a clip
+// straddling only one bound is split once and the inside half removed (trim); a
+// clip fully outside is never touched; an empty track / no-overlap range is a
+// graceful no-op. trackIds defaults to every audio track.
+juce::var MoshOps::cmdDeleteTimeRange (const juce::var& args)
+{
+    const double start = (double) args.getProperty ("start", 0.0);
+    const double end   = (double) args.getProperty ("end",   0.0);
+    if (! (start < end))
+        return errResult ("delete_time_range", "start must be less than end");
+
+    auto& edit = eng.edit();
+
+    // Resolve the target tracks. Bind the var array to a local before getArray()
+    // so the temporary stays alive while we read it.
+    juce::Array<te::AudioTrack*> targets;
+    const auto trackIdsVar = args.getProperty ("trackIds", var());
+    if (auto* ids = trackIdsVar.getArray())
+    {
+        for (auto& idv : *ids)
+            if (auto* t = findTrack (idv.toString()))
+                if (! targets.contains (t))
+                    targets.add (t);
+    }
+    else
+    {
+        for (auto* t : te::getAudioTracks (edit))
+            if (t != nullptr)
+                targets.add (t);
+    }
+
+    const auto rStart = tracktion::TimePosition::fromSeconds (start);
+    const auto rEnd   = tracktion::TimePosition::fromSeconds (end);
+
+    undoManager().beginNewTransaction ("delete_time_range");
+
+    int removed = 0, splits = 0;
+    bool structurallyChanged = false;
+
+    for (auto* track : targets)
+    {
+        if (track == nullptr) continue;
+        auto* clipTrack = dynamic_cast<te::ClipTrack*> (track);
+        if (clipTrack == nullptr) continue;
+
+        // Phase 1 — split at the range bounds so every clip aligns to start/end.
+        // Iterate a stable copy (split inserts a clip into the live list). Split at
+        // the LATER bound (end) first so splitting at start doesn't shift which
+        // clip the end falls inside; both splits use the same primitive as
+        // split_clip (ClipTrack::splitClip). We re-read each clip's live position
+        // before deciding (the bound must be strictly inside, mirroring split's own
+        // reduced(0.001s).contains guard).
+        for (const auto& bound : { rEnd, rStart })
+        {
+            juce::Array<te::Clip*> snap;
+            for (auto* c : clipTrack->getClips())
+                if (c != nullptr)
+                    snap.add (c);
+
+            for (auto* c : snap)
+            {
+                if (c == nullptr) continue;
+                const auto p = c->getPosition();
+                if (p.getStart() < bound && bound < p.getEnd())
+                {
+                    clipTrack->splitClip (*c, bound);
+                    ++splits;
+                    structurallyChanged = true;
+                }
+            }
+
+            // Drain the queued ValueTree/AsyncUpdater settle so the new clip's
+            // start/end are committed before we read them in the next pass.
+            if (structurallyChanged && ! eng.hasAudio())
+                if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
+                    mm->runDispatchLoopUntil (1);
+        }
+
+        // Phase 2 — every clip now begins/ends on the range bounds. Remove the
+        // segment(s) lying fully inside [start, end] (removeFromParent, the same
+        // primitive as remove_clip). A clip entirely inside is caught here whole; a
+        // clip straddling only one bound has been split and its inside half lands
+        // fully inside; a clip fully outside never matches.
+        juce::Array<te::Clip*> toRemove;
+        for (auto* c : clipTrack->getClips())
+            if (c != nullptr)
+            {
+                const auto p = c->getPosition();
+                if (p.getStart() >= rStart - tracktion::TimeDuration::fromSeconds (0.0005)
+                    && p.getEnd() <= rEnd + tracktion::TimeDuration::fromSeconds (0.0005))
+                    toRemove.add (c);
+            }
+        for (auto* c : toRemove)
+            if (c != nullptr)
+            {
+                c->removeFromParent();
+                ++removed;
+                structurallyChanged = true;
+            }
+    }
+
+    // After structural edits Tracktion queues an AsyncUpdater for track/clip
+    // settling; drain it here (mirrors createAudioTrack) so itemIDs/positions
+    // are stable before the snapshot is read.
+    if (structurallyChanged && ! eng.hasAudio())
+        if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
+            mm->runDispatchLoopUntil (1);
+
+    auto* data = new DynamicObject();
+    data->setProperty ("removed", removed);
+    data->setProperty ("splits", splits);
+    data->setProperty ("tracks", targets.size());
+    logLine ("delete_time_range", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("delete_time_range", var (data));
 }
 
 // Recreate a clip from a clipToVar-shaped descriptor on a target track at a

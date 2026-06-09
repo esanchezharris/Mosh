@@ -227,6 +227,14 @@ button.on { border-color: var(--accent); color: var(--accent); background: #2120
 .playhead { position: absolute; top: 0; width: 2px; background: var(--playhead); pointer-events: none; z-index: 3; }
 .tl-head .playhead { height: 30px; }
 .marquee { position: absolute; border: 1px solid var(--accent); background: rgba(108,92,255,0.12); z-index: 4; pointer-events: none; }
+/* ARR-010 — the edit time-range band over the lanes (warmer than the loop region). */
+.loopregion.rangeband { z-index: 2; background: rgba(227,70,63,0.16); border-left: 2px solid var(--rec, #e3463f); border-right: 2px solid var(--rec, #e3463f); pointer-events: none; }
+/* AUT-003 — inline automation strip pinned to the bottom of each lane. */
+.inline-auto-wrap { position: absolute; left: 0; bottom: 0; right: 0; z-index: 2; pointer-events: none; }
+.inline-auto { display: block; touch-action: none; pointer-events: auto; opacity: 0.85; }
+.inline-auto .auto-dot { r: 4; }
+.ia-picker { display: flex; gap: 4px; margin-top: 2px; }
+.ia-sel { flex: 1; min-width: 0; background: var(--panel-2); border: 1px solid var(--line); border-radius: 5px; color: var(--text); padding: 0.1rem 0.2rem; font-size: 0.66rem; }
 
 .track-head.sel { background: #20202c; box-shadow: inset 3px 0 0 var(--accent); }
 .fx-count { font-size: 0.6rem; color: var(--accent); background: #21203a; border-radius: 4px; padding: 0 4px; }

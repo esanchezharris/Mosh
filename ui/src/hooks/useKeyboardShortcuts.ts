@@ -99,6 +99,9 @@ export function useKeyboardShortcuts() {
         case "2":
           s.setTool("split");
           return;
+        case "3":
+          s.setTool("range");
+          return;
         default:
           return;
       }

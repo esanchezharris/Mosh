@@ -11,9 +11,15 @@ import type {
 import type { RemoteStatus } from "./bridge";
 import { type SnapDiv, snapStep, meterFrom } from "./time";
 
-export type Tool = "move" | "split";
+export type Tool = "move" | "split" | "range";
 export type View = "arrange" | "mixer";
 export type Peaks = [number, number][];
+// ARR-010 — a UI-local edit time-range [start,end] in seconds. Never a command;
+// only delete_time_range sends {start,end} across the bridge when invoked.
+export type TimeRange = { start: number; end: number };
+// AUT-003 — per-track inline-automation-lane param selection (which
+// AutomatableParameter the strip under each track draws). UI-local view state.
+export type InlineAutoSel = { pluginIndex: number; paramIndex: number };
 
 type State = {
   snapshot: Snapshot | null;
@@ -29,6 +35,12 @@ type State = {
   laneHeight: number;    // track-lane height in px (vertical zoom)
   selection: Set<string>;
   peaks: Record<string, Peaks>;
+
+  // ARR-010 — the active edit time-range (UI-local; set by the Range tool, sent
+  // to the backend only via delete_time_range). null when no range is drawn.
+  timeRange: TimeRange | null;
+  // AUT-003 — per-track inline-lane param selection (trackId → which param).
+  inlineAuto: Record<string, InlineAutoSel>;
 
   // Stage 3: plugin browser
   selectedTrackId: string | null;
@@ -68,6 +80,12 @@ type State = {
   clearSelection: () => void;
   snapTime: (t: number) => number;
   ensurePeaks: (clipId: string) => void;
+
+  // ARR-010 — time-range view-state actions (never cross the bridge).
+  setTimeRange: (r: TimeRange | null) => void;
+  clearTimeRange: () => void;
+  // AUT-003 — set which param the inline lane under a track draws.
+  setInlineAuto: (trackId: string, sel: InlineAutoSel) => void;
 
   // Clipboard actions (UI-local until paste). copy/cut capture a snapshot clip;
   // paste reconstructs it on the backend via the paste_clip command.
@@ -117,6 +135,8 @@ export const useStore = create<State>((set, get) => ({
   laneHeight: 84,
   selection: new Set<string>(),
   peaks: {},
+  timeRange: null,
+  inlineAuto: {},
   selectedTrackId: null,
   availablePlugins: [],
   availableBuiltins: [],
@@ -225,6 +245,10 @@ export const useStore = create<State>((set, get) => ({
       return { selection: next };
     }),
   clearSelection: () => set({ selection: new Set<string>() }),
+  setTimeRange: (r) => set({ timeRange: r }),
+  clearTimeRange: () => set({ timeRange: null }),
+  setInlineAuto: (trackId, sel) =>
+    set((s) => ({ inlineAuto: { ...s.inlineAuto, [trackId]: sel } })),
   snapTime: (t) => {
     const { snap, snapDivision, snapshot } = get();
     if (!snap) return t;

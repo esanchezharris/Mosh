@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { useStore } from "../store";
 import type { Snapshot, Track } from "../types";
 import { Clip } from "./Clip";
+import { InlineAutomationLane, InlineAutoPicker } from "./InlineAutomationLane";
 import { meterFrom, barSeconds, beatSeconds, SNAP_DIVISIONS } from "../time";
 
 const RULER_SECONDS = 48;
@@ -12,9 +13,15 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
   const exec = useStore((s) => s.exec);
   const clearSelection = useStore((s) => s.clearSelection);
   const select = useStore((s) => s.select);
+  const tool = useStore((s) => s.tool);
+  const snapTime = useStore((s) => s.snapTime);
+  const timeRange = useStore((s) => s.timeRange);
+  const setTimeRange = useStore((s) => s.setTimeRange);
   const t = snapshot.transport;
   const lanesRef = useRef<HTMLDivElement>(null);
   const [marquee, setMarquee] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
+  // ARR-010 — anchor (seconds) for an in-progress Range drag; null when idle.
+  const rangeDrag = useRef<number | null>(null);
   const loopDrag = useRef<number | null>(null);
 
   const LANE_H = laneHeight;
@@ -49,20 +56,43 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
   };
   const onRulerUp = () => (loopDrag.current = null);
 
-  // Marquee selection on the lanes background.
+  // Lanes-background drag. Two modes, gated by the active tool:
+  //  • Range tool → a second marquee mode that sets the UI-local edit time-range
+  //    (ARR-010), rendered as a translucent band; never a command until "Delete
+  //    range" is pressed.
+  //  • otherwise → marquee selection of overlapping clips.
   const onLanesDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.target !== lanesRef.current) return; // only empty background
-    clearSelection();
     const rect = lanesRef.current!.getBoundingClientRect();
+    if (tool === "range") {
+      const sec = snapTime(Math.max(0, (e.clientX - rect.left) / pxPerSec));
+      rangeDrag.current = sec;
+      setTimeRange({ start: sec, end: sec });
+      lanesRef.current!.setPointerCapture(e.pointerId);
+      return;
+    }
+    clearSelection();
     setMarquee({ x0: e.clientX - rect.left, y0: e.clientY - rect.top, x1: e.clientX - rect.left, y1: e.clientY - rect.top });
     lanesRef.current!.setPointerCapture(e.pointerId);
   };
   const onLanesMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!marquee) return;
     const rect = lanesRef.current!.getBoundingClientRect();
+    if (rangeDrag.current != null) {
+      const sec = snapTime(Math.max(0, (e.clientX - rect.left) / pxPerSec));
+      setTimeRange({ start: Math.min(rangeDrag.current, sec), end: Math.max(rangeDrag.current, sec) });
+      return;
+    }
+    if (!marquee) return;
     setMarquee({ ...marquee, x1: e.clientX - rect.left, y1: e.clientY - rect.top });
   };
   const onLanesUp = () => {
+    if (rangeDrag.current != null) {
+      rangeDrag.current = null;
+      // A zero-width drag is not a usable range; clear it back out.
+      const r = useStore.getState().timeRange;
+      if (r && r.end - r.start < 1e-6) setTimeRange(null);
+      return;
+    }
     if (!marquee) return;
     const xMin = Math.min(marquee.x0, marquee.x1);
     const xMax = Math.max(marquee.x0, marquee.x1);
@@ -158,8 +188,21 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
                 {tr.clips.map((c) => (
                   <Clip key={c.id} clip={c} laneH={LANE_H} />
                 ))}
+                {/* AUT-003 — inline automation strip under the clips, same time
+                    mapping as the ruler so points line up with the clips above. */}
+                <div className="inline-auto-wrap" style={{ height: Math.max(28, LANE_H * 0.42) }}>
+                  <InlineAutomationLane track={tr} width={rulerWidth} height={Math.max(28, LANE_H * 0.42)} />
+                </div>
               </div>
             ))}
+            {/* ARR-010 — the active edit time-range as a translucent band over the
+                lanes (reuses the loop-region styling). Pure view state. */}
+            {timeRange && timeRange.end > timeRange.start && (
+              <div
+                className="loopregion rangeband"
+                style={{ left: timeRange.start * pxPerSec, width: (timeRange.end - timeRange.start) * pxPerSec, height: lanesHeight }}
+              />
+            )}
             <div className="playhead lane-ph" style={{ left: t.position * pxPerSec, height: lanesHeight }} />
             {marquee && (
               <div
@@ -200,6 +243,7 @@ function Toolbar() {
       <span className="sep" />
       <button className={tool === "move" ? "on" : ""} onClick={() => setTool("move")}>Move</button>
       <button className={tool === "split" ? "on" : ""} onClick={() => setTool("split")}>Split</button>
+      <button className={tool === "range" ? "on" : ""} onClick={() => setTool("range")} title="Drag a time-range on the lanes to select it as a delete target">Range</button>
       <button className={snap ? "on" : ""} onClick={() => setSnap(!snap)} title="Snap to grid">Snap</button>
       <select
         className="grid-sel"
@@ -232,16 +276,40 @@ function ClipActions({ snapshot }: { snapshot: Snapshot }) {
   const selection = useStore((s) => s.selection);
   const exec = useStore((s) => s.exec);
   const clearSelection = useStore((s) => s.clearSelection);
+  const timeRange = useStore((s) => s.timeRange);
+  const clearTimeRange = useStore((s) => s.clearTimeRange);
   const ids = [...selection];
-  if (ids.length === 0) return null;
 
   const clips = snapshot.tracks.flatMap((t) => t.clips).filter((c) => selection.has(c.id));
-  if (clips.length === 0) return null;
+  const hasRange = !!timeRange && timeRange.end > timeRange.start;
+  // The bar appears for a clip selection OR an active time-range (ARR-010).
+  if (clips.length === 0 && !hasRange) return null;
   const single = clips.length === 1 ? clips[0] : null;
   const anyMuted = clips.some((c) => c.mute);
 
+  // ARR-010 — delete the active time-range across all audio tracks (trackIds
+  // omitted → all), then clear the range. delete_time_range is the only thing
+  // that crosses the bridge; the range itself stays UI-local.
+  const deleteRange = () => {
+    if (!timeRange) return;
+    void exec("delete_time_range", { start: timeRange.start, end: timeRange.end });
+    clearTimeRange();
+  };
+
   return (
     <div className="clip-actions">
+      {hasRange && (
+        <>
+          <span className="ca-label">
+            range {timeRange!.start.toFixed(2)}–{timeRange!.end.toFixed(2)}s
+          </span>
+          <button className="danger" onClick={deleteRange}>Delete range</button>
+          <button onClick={clearTimeRange}>Clear range</button>
+          {clips.length > 0 && <span className="sep" />}
+        </>
+      )}
+      {clips.length === 0 ? null : (
+      <>
       <span className="ca-label">{ids.length} clip{ids.length > 1 ? "s" : ""} selected</span>
       {single && (
         <input
@@ -269,6 +337,8 @@ function ClipActions({ snapshot }: { snapshot: Snapshot }) {
       )}
       <button onClick={() => clips.forEach((c) => exec("duplicate_clip", { clipId: c.id }))}>Duplicate</button>
       <button className="danger" onClick={() => { clips.forEach((c) => exec("remove_clip", { clipId: c.id })); clearSelection(); }}>Delete</button>
+      </>
+      )}
     </div>
   );
 }
@@ -339,6 +409,8 @@ function TrackHeader({ track, laneH }: { track: Track; laneH: number }) {
           onChange={(e) => exec("set_track_volume", { trackId: track.id, db: Number(e.target.value) })}
         />
       </div>
+      {/* AUT-003 — compact picker choosing which param the inline lane draws. */}
+      <InlineAutoPicker track={track} />
     </div>
   );
 }

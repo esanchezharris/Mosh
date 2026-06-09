@@ -346,6 +346,31 @@ keyboard (arm a track → record → play → stop → the take appears).
 **Shipped-on-both-axes: 87 → 90** (must-tier 73 → 76). The record loop is closed end to end:
 arm, monitor, record, and the take lands on the track (audio or MIDI).
 
+### 2026-06-09 · Wave C: time-range edit target (ARR-010) + inline automation lanes (AUT-003) ✅
+
+**ARR-010:** new undoable **`delete_time_range`** `{start, end, trackIds?}` — phase 1 splits every
+overlapping clip at the range bounds (stable-copy iteration, splitting at the *later* bound first so
+the earlier split can't shift which clip the end falls inside; same `splitClip` primitive as
+`split_clip`), phase 2 removes every segment lying fully inside the range (collect-then-remove, no
+mutate-while-iterating), all in **one** transaction with AsyncUpdater drains between phases. The
+range itself is **UI-local view state**: a new "Range" tool draws a translucent band on the lanes,
+and a Delete-range action sends `{start,end}` across the bridge only when invoked. **AUT-003:**
+**zero new backend** — a new `InlineAutomationLane` strip under each track reuses the
+AutomationPanel draw math at `laneHeight` + the same `pxPerSec` mapping (points align with clips),
+exec'ing only the existing `add/set/remove_automation_point`; a compact per-track param picker is
+UI-local. Verified: `Mosh --selftest` **522/522 across 3 runs, 0 failed, 0 assertions** — the range
+delete asserts actual segment positions (0..1s + 2..4s with the 1..2s gap), undo restores the single
+0..4s clip, start>=end errors leave the clip untouched, no-overlap and empty-track are no-ops, and
+an enclosed clip is removed whole.
+
+| ID | Tier | Feature | Before → After |
+|---|---|---|---|
+| `ARR-010` | must | Time / range selection (edit target) | ◐/◐ → ✓/✓ |
+| `AUT-003` | must | Automation lanes (inline under-track) | ◐/◐ → ✓/✓ |
+
+**Shipped-on-both-axes: 90 → 92** (must-tier 76 → 78). A time-range is now a real edit target and
+automation reads in-context under every track.
+
 ## Coverage by category
 
 Per axis the three counts are **present ✓ / partial ◐ / missing ✗** (missing also folds in the one `not_applicable`).

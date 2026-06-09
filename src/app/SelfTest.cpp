@@ -2183,6 +2183,93 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                "id-probe: load a second plugin after remove (no duplicate-itemID assert)");
     }
 
+    // ─── Wave C: ARR-010 time-range as a true delete target ───
+    std::cerr << "--- Wave C: delete_time_range (ARR-010) ---\n";
+    {
+        // A single clip spanning 0..4s; delete [1,2] -> two clips with a 1..2s gap.
+        auto dt = cmd (ops, "create_track", args1 ("name", "RangeDel"))["data"].getProperty ("trackId", var()).toString();
+        check (dt.isNotEmpty(), "range: track created");
+        auto rc = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", dt }, { "seconds", 4.0 }, { "freq", 217.0 }}));
+        check (ok (rc), "range: 0..4s tone clip created");
+        check (trackById (dt).getProperty ("clips", var()).size() == 1, "range: track has 1 clip before delete");
+
+        // start >= end errors (graceful, no mutation).
+        check (! ok (cmd (ops, "delete_time_range", objN ({{ "start", 2.0 }, { "end", 1.0 }}))), "range: start>end errors");
+        check (! ok (cmd (ops, "delete_time_range", objN ({{ "start", 1.0 }, { "end", 1.0 }}))), "range: start==end errors");
+        check (trackById (dt).getProperty ("clips", var()).size() == 1, "range: errored delete left the clip untouched");
+
+        // The real delete: [1,2] on this track only.
+        auto del = cmd (ops, "delete_time_range", objN ({{ "start", 1.0 }, { "end", 2.0 },
+                                                         { "trackIds", var (juce::Array<var> { var (dt) }) }}));
+        check (ok (del), "range: delete_time_range [1,2] ok");
+        {
+            auto trk = trackById (dt);
+            check (trk.getProperty ("clips", var()).size() == 2, "range: clip split into 2 segments");
+            // Collect the segment time spans and assert the 1..2s gap.
+            double seg0Start = 1e9, seg0End = 0.0, seg1Start = 1e9, seg1End = 0.0;
+            if (auto* clips = trk.getProperty ("clips", var()).getArray())
+            {
+                juce::Array<double> starts, ends;
+                for (auto& c : *clips)
+                {
+                    const double s = (double) c.getProperty ("start", 0.0);
+                    const double e = s + (double) c.getProperty ("length", 0.0);
+                    starts.add (s); ends.add (e);
+                }
+                // sort by start
+                if (starts.size() == 2)
+                {
+                    int lo = starts[0] <= starts[1] ? 0 : 1, hi = 1 - lo;
+                    seg0Start = starts[lo]; seg0End = ends[lo];
+                    seg1Start = starts[hi]; seg1End = ends[hi];
+                }
+            }
+            check (std::abs (seg0Start - 0.0) < 0.05 && std::abs (seg0End - 1.0) < 0.05, "range: left segment is 0..1s");
+            check (std::abs (seg1Start - 2.0) < 0.05 && std::abs (seg1End - 4.0) < 0.05, "range: right segment is 2..4s (1..2s gap)");
+        }
+
+        // Undo restores the single clip.
+        check (ok (cmd (ops, "undo")), "range: undo ok");
+        {
+            auto trk = trackById (dt);
+            check (trk.getProperty ("clips", var()).size() == 1, "range: undo restored a single clip");
+            auto c0 = trk["clips"][0];
+            check (std::abs ((double) c0.getProperty ("start", 1.0) - 0.0) < 0.05
+                   && std::abs ((double) c0.getProperty ("length", 0.0) - 4.0) < 0.05,
+                   "range: restored clip spans 0..4s");
+        }
+
+        // A no-overlap range is a graceful no-op (clip stays whole, command ok).
+        auto noop = cmd (ops, "delete_time_range", objN ({{ "start", 10.0 }, { "end", 12.0 },
+                                                          { "trackIds", var (juce::Array<var> { var (dt) }) }}));
+        check (ok (noop), "range: no-overlap range is ok (no-op)");
+        check ((int) noop["data"].getProperty ("removed", -1) == 0, "range: no-overlap removed nothing");
+        check (trackById (dt).getProperty ("clips", var()).size() == 1, "range: no-overlap left the clip whole");
+
+        // An empty track in the target set is a graceful no-op too.
+        auto et2 = cmd (ops, "create_track", args1 ("name", "RangeEmpty"))["data"].getProperty ("trackId", var()).toString();
+        auto emptyDel = cmd (ops, "delete_time_range", objN ({{ "start", 0.0 }, { "end", 4.0 },
+                                                             { "trackIds", var (juce::Array<var> { var (et2) }) }}));
+        check (ok (emptyDel), "range: empty-track delete is ok (no-op)");
+        check ((int) emptyDel["data"].getProperty ("removed", -1) == 0, "range: empty track removed nothing");
+
+        // Clip ENTIRELY inside the range is removed whole. Fresh track, single
+        // 1s clip moved to start at 1.5s, then delete the enclosing [1,3].
+        auto wt = cmd (ops, "create_track", args1 ("name", "RangeWhole"))["data"].getProperty ("trackId", var()).toString();
+        auto wc = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", wt }, { "seconds", 1.0 }, { "freq", 213.0 }}));
+        if (ok (wc))
+        {
+            const auto wcid = wc["data"].getProperty ("clipId", var()).toString();
+            cmd (ops, "move_clip", objN ({{ "clipId", wcid }, { "start", 1.5 }}));
+            check (trackById (wt).getProperty ("clips", var()).size() == 1, "range: enclosed clip present before delete");
+            auto wholeDel = cmd (ops, "delete_time_range", objN ({{ "start", 1.0 }, { "end", 3.0 },
+                                                                 { "trackIds", var (juce::Array<var> { var (wt) }) }}));
+            check (ok (wholeDel), "range: enclosing-range delete ok");
+            check ((int) wholeDel["data"].getProperty ("removed", 0) == 1, "range: clip fully inside was removed whole");
+            check (trackById (wt).getProperty ("clips", var()).size() == 0, "range: track empty after enclosing delete");
+        }
+    }
+
     std::cerr << "===== " << (checks - failures) << "/" << checks
               << " checks passed, " << failures << " failed =====\n\n";
     return failures;
