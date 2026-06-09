@@ -6,7 +6,7 @@ using namespace mosh;
 
 TEST_CASE ("MOSH_RENDERLAYER round-trips through XML (01 §6)", "[stage1][renderlayer]")
 {
-    auto v = RenderLayer::create ("rl-1", "clip-42", 0.0, 4.0, "stable_audio_3");
+    auto v = RenderLayer::create ("rl-1", "clip-42", 0.0, 4.0, "stable_audio3");
     v.setProperty (ids::seed, 12345, nullptr);
     auto params = v.getChildWithName (ids::PARAMS);
     params.setProperty (ids::prompt, "warmer tape saturation", nullptr);
@@ -23,7 +23,7 @@ TEST_CASE ("MOSH_RENDERLAYER round-trips through XML (01 §6)", "[stage1][render
     REQUIRE (back.getType() == ids::MOSH_RENDERLAYER);
     REQUIRE (back[ids::id].toString() == "rl-1");
     REQUIRE (back[ids::inputRef].toString() == "clip-42");
-    REQUIRE (back[ids::modelAdapter].toString() == "stable_audio_3");
+    REQUIRE (back[ids::modelAdapter].toString() == "stable_audio3");
     REQUIRE ((int) back[ids::seed] == 12345);
     REQUIRE (back.getChildWithName (ids::PARAMS)[ids::prompt].toString() == "warmer tape saturation");
     REQUIRE (back.getChildWithName (ids::PARAMS).getChildWithName (ids::COLORS).getNumChildren() == 1);
@@ -31,7 +31,7 @@ TEST_CASE ("MOSH_RENDERLAYER round-trips through XML (01 §6)", "[stage1][render
 
 TEST_CASE ("full cache fingerprint is sensitive to route/variant/seed (05 §5)", "[stage1][cache]")
 {
-    auto v = RenderLayer::create ("rl-1", "clip-42", 0.0, 4.0, "stable_audio_3");
+    auto v = RenderLayer::create ("rl-1", "clip-42", 0.0, 4.0, "stable_audio3");
     v.setProperty (ids::modelVariant, "sa3-medium", nullptr);
     v.setProperty (ids::mode, "reimagine", nullptr);
     v.setProperty (ids::seed, 1, nullptr);

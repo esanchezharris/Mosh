@@ -41,13 +41,24 @@ add_custom_command(
 
 add_custom_target(MoshUI DEPENDS "${MOSH_UI_DIST}/index.html")
 
-# Stage the built bundle into Mosh.app/Contents/Resources/ui after the app links.
+# Stage the built bundle where WebBridge can serve it after the app links.
 add_dependencies(Mosh MoshUI)
-add_custom_command(TARGET Mosh POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E rm -rf
-            "$<TARGET_BUNDLE_CONTENT_DIR:Mosh>/Resources/ui"
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${MOSH_UI_DIST}"
-            "$<TARGET_BUNDLE_CONTENT_DIR:Mosh>/Resources/ui"
-    COMMENT "Staging UI bundle into Mosh.app/Contents/Resources/ui"
-    VERBATIM)
+if (APPLE)
+    add_custom_command(TARGET Mosh POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E rm -rf
+                "$<TARGET_BUNDLE_CONTENT_DIR:Mosh>/Resources/ui"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${MOSH_UI_DIST}"
+                "$<TARGET_BUNDLE_CONTENT_DIR:Mosh>/Resources/ui"
+        COMMENT "Staging UI bundle into Mosh.app/Contents/Resources/ui"
+        VERBATIM)
+else()
+    add_custom_command(TARGET Mosh POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E rm -rf
+                "$<TARGET_FILE_DIR:Mosh>/ui"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${MOSH_UI_DIST}"
+                "$<TARGET_FILE_DIR:Mosh>/ui"
+        COMMENT "Staging UI bundle next to Mosh executable"
+        VERBATIM)
+endif()

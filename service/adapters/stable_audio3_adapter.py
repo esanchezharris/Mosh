@@ -20,6 +20,32 @@ def _wav_meta(path):
         return w.getframerate(), w.getnchannels(), w.getnframes()
 
 
+def available() -> bool:
+    from sa3 import engine as E
+    if E.engine_available():
+        return True
+
+    try:
+        from adapters import stable_audio3_cuda as cuda
+        return cuda.available()
+    except Exception:
+        return False
+
+
+def backend_name() -> str:
+    from sa3 import engine as E
+    if E.engine_available():
+        return "mlx"
+
+    try:
+        from adapters import stable_audio3_cuda as cuda
+        if cuda.available():
+            return "cuda"
+    except Exception:
+        pass
+    return "unavailable"
+
+
 def render(input_wav: str, output_wav: str, params: dict) -> dict:
     # Lazy heavy imports (only when an SA3 job actually runs).
     import sys
@@ -27,6 +53,15 @@ def render(input_wav: str, output_wav: str, params: dict) -> dict:
     from sa3 import engine as E
     from sa3 import init_cache, qa
     from colors import runtime as CR
+
+    if not E.engine_available():
+        try:
+            from adapters import stable_audio3_cuda as cuda
+            if cuda.available():
+                return cuda.render(input_wav, output_wav, params)
+        except Exception:
+            raise
+        raise RuntimeError("stable_audio3 unavailable (no MLX or Windows CUDA backend found)")
 
     output_wav = os.path.abspath(output_wav)
     input_wav = os.path.abspath(input_wav) if input_wav else input_wav
