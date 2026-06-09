@@ -942,6 +942,67 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (meterOn (mt), "redo restores the meter tap");
     }
 
+    // ─── Wave: recording (arm / input monitor / snapshot plumbing) ───
+    // Headless (--selftest, no audio) there is no playback context, so
+    // getAllInputDevices() is empty: arm/monitor are graceful no-ops (applied:false,
+    // never an error) and the snapshot fields default false/"automatic"/false. The
+    // armed=true round-trip and actual capture are hardware/GUI-gated (see the plan).
+    std::cerr << "--- Wave: recording (arm / input monitor) ---\n";
+    {
+        auto rt = cmd (ops, "create_track", args1 ("name", "RecTrack"))["data"].getProperty ("trackId", var()).toString();
+
+        // Snapshot shape: every track var carries armed/monitor/hasInput.
+        auto rtv = trackById (rt);
+        check (rtv.hasProperty ("armed"), "snapshot track has armed field");
+        check (rtv.hasProperty ("monitor"), "snapshot track has monitor field");
+        check (rtv.hasProperty ("hasInput"), "snapshot track has hasInput field");
+        check (! (bool) rtv.getProperty ("armed", true), "armed defaults false headless");
+        check (! (bool) rtv.getProperty ("hasInput", true), "hasInput defaults false headless");
+        check (rtv.getProperty ("monitor", var()).toString() == "automatic", "monitor defaults automatic headless");
+
+        // arm_track on a valid track: graceful no-op (ok + applied:false) headless.
+        eventTypes.clear();
+        auto ar = cmd (ops, "arm_track", objN ({{ "trackId", rt }, { "armed", true }}));
+        check (ok (ar), "arm_track ok (graceful)");
+        check (! (bool) ar["data"].getProperty ("applied", true), "arm_track applied:false headless (no input device)");
+        check (hadEvent ("snapshot_invalidated"), "arm_track emitted snapshot_invalidated");
+        check (! (bool) trackById (rt).getProperty ("armed", true), "track still not armed headless (no instance)");
+
+        // arm_track with a bad/missing trackId -> validation error.
+        check (! ok (cmd (ops, "arm_track", objN ({{ "trackId", "no-such-track" }, { "armed", true }}))), "arm_track bad trackId errors");
+
+        // set_input_monitor: valid mode ok + applied:false no-op; bad mode errors.
+        eventTypes.clear();
+        auto mr = cmd (ops, "set_input_monitor", objN ({{ "trackId", rt }, { "mode", "on" }}));
+        check (ok (mr), "set_input_monitor mode:on ok (graceful)");
+        check (! (bool) mr["data"].getProperty ("applied", true), "set_input_monitor applied:false headless");
+        check (hadEvent ("snapshot_invalidated"), "set_input_monitor emitted snapshot_invalidated");
+        check (! ok (cmd (ops, "set_input_monitor", objN ({{ "trackId", rt }, { "mode", "banana" }}))), "set_input_monitor bad mode errors");
+        check (! ok (cmd (ops, "set_input_monitor", objN ({{ "trackId", "nope" }, { "mode", "on" }}))), "set_input_monitor bad trackId errors");
+
+        // arm_track / set_input_monitor are non-undoable monitoring preferences (the
+        // engine binds the armed flag with a nullptr UndoManager and monitor mode persists
+        // via saveProps, never the Edit undo stack — like set_metronome). So an undo after
+        // arm_track walks back to a prior real transaction by design; we only assert it
+        // stays ok and the snapshot is still well-formed (no crash).
+        check (ok (cmd (ops, "arm_track", objN ({{ "trackId", rt }, { "armed", false }}))), "arm_track disarm ok");
+        check (ok (cmd (ops, "undo")), "undo after arm_track ok (no crash)");
+        check (ops.snapshot().hasProperty ("tracks"), "snapshot still well-formed after arm-then-undo");
+
+        // JSONL records the recording commands, logged undoable:false (preferences).
+        auto rlog = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
+        check (rlog.contains ("arm_track"), "JSONL records arm_track");
+        check (rlog.contains ("set_input_monitor"), "JSONL records set_input_monitor");
+        bool armPref = false, monPref = false;
+        for (auto& ln : juce::StringArray::fromLines (rlog))
+        {
+            if (ln.contains ("\"command\": \"arm_track\"") && ln.contains ("\"undoable\": false")) armPref = true;
+            if (ln.contains ("\"command\": \"set_input_monitor\"") && ln.contains ("\"undoable\": false")) monPref = true;
+        }
+        check (armPref, "arm_track logged undoable:false (monitoring preference)");
+        check (monPref, "set_input_monitor logged undoable:false (monitoring preference)");
+    }
+
     std::cerr << "===== " << (checks - failures) << "/" << checks
               << " checks passed, " << failures << " failed =====\n\n";
     return failures;

@@ -304,6 +304,19 @@ function TrackHeader({ track, laneH }: { track: Track; laneH: number }) {
       </div>
       <div className="th-row">
         <button
+          className={`mixbtn ${track.armed ? "arm-on" : ""}`}
+          title={track.hasInput ? "Record-arm" : "Record-arm (no input device)"}
+          onClick={() => exec("arm_track", { trackId: track.id, armed: !track.armed })}
+        >R</button>
+        <button
+          className={`mixbtn ${track.monitor && track.monitor !== "off" ? "mon-on" : ""}`}
+          title={`Input monitor: ${track.monitor ?? "automatic"}`}
+          onClick={() => exec("set_input_monitor", {
+            trackId: track.id,
+            mode: track.monitor === "on" ? "off" : "on",
+          })}
+        >I</button>
+        <button
           className={`mixbtn ${track.mute ? "mute-on" : ""}`}
           onClick={() => exec("set_track_mute", { trackId: track.id, mute: !track.mute })}
         >M</button>

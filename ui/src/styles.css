@@ -141,6 +141,8 @@ button.on { border-color: var(--accent); color: var(--accent); background: #2120
 .mixbtn { width: 22px; height: 20px; padding: 0; font-size: 0.7rem; font-weight: 700; color: var(--muted); }
 .mixbtn.mute-on { background: #5a1d1d; color: #ff8b8b; border-color: #7a2a2a; }
 .mixbtn.solo-on { background: #5a4d12; color: var(--warn); border-color: #7a6a2a; }
+.mixbtn.arm-on { background: var(--rec, #e3463f); color: #fff; border-color: var(--rec, #e3463f); }
+.mixbtn.mon-on { background: var(--accent); color: #fff; border-color: var(--accent); }
 .vol { flex: 1; accent-color: var(--accent); height: 4px; }
 
 .lanes { position: relative; background:

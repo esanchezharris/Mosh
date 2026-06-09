@@ -145,6 +145,20 @@ The "not a single live meter" gap (built from `docs/plans/wave-metering.md`, whi
 
 **Shipped-on-both-axes: 58 → 60** (must-tier 44 → 46). The mixer is now a complete channel strip: fader, pan, mute/solo, sends, and a live meter.
 
+### 2026-06-09 · Wave: Recording — arm / input monitor ✅
+
+The "no recording" gap (built from `docs/plans/wave-recording.md`, which caught that the prompt's `setTargetTrack`/`setRecordingEnabled` API is stale — the pinned clone uses the `EditItemID`-keyed `InputDeviceInstance::setTarget` / `setRecordingEnabled` API). Commands `arm_track` and `set_input_monitor` route through the `getAllInputDevices()` + `isOnTargetTrack(slot 0)` read-through; arming a virgin track assigns the first wave input (`setTarget`) before record-enabling (mirrors `RecordingDemo`). The snapshot exposes `armed` / `monitor` / `hasInput` per track; the track header gains **R** (record-arm) and **I** (input-monitor) buttons left of M/S. `MoshEngine` enables the device's wave inputs once when audio + context first come up (latched, audio-only, `restartPlayback()`). **Correctly modelled as non-undoable monitoring preferences** (verified against the clone: the destination `armed` flag is bound with a `nullptr` UndoManager and monitor mode persists via `saveProps()`, not the Edit tree — so they log `undoable:false`, like `set_metronome`). Both degrade gracefully headless: `ok` + `applied:false` (never an error) when no input device exists. Verified: `Mosh --selftest` **215/215**, 0 assertions.
+
+| ID | Tier | Feature | Before → After |
+|---|---|---|---|
+| `ARE-002` | must | Record arm | ✗/✗ → ✓/✓ * |
+| `ARE-001` | must | Input monitoring | ✗/✗ → ✓/✓ * |
+| `ARE-003` | must | Latency-compensated recording | ✗/✗ → ◐/◐ |
+
+\* Command surface + arm/monitor state + snapshot + UI complete and headless-verified (dispatch, validation, graceful no-op, snapshot shape, `undoable:false`, JSONL). The **armed=true round-trip, actual capture, take landing, and audible monitoring need a live CoreAudio input device** (`getAllInputDevices()` is empty without a playback context) — the same honest hardware-gate the project documents for neural A/B and live meters. `ARE-003`'s latency-compensated take-landing is engine-automatic on `transport.record()` once armed (wave inputs enabled) but only verifiable with a real mic, so it lands at partial.
+
+**Shipped-on-both-axes: 60 → 62** (must-tier 46 → 48). The transport's record button (Wave 2) now has the arm + monitor preconditions behind it; live capture is one mic away.
+
 ## Coverage by category
 
 Per axis the three counts are **present ✓ / partial ◐ / missing ✗** (missing also folds in the one `not_applicable`).

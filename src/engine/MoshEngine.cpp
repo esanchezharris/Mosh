@@ -82,8 +82,27 @@ MoshEngine::~MoshEngine()
 
 void MoshEngine::ensurePlaybackContext()
 {
-    if (audioOpen)
-        edit().getTransport().ensureContextAllocated();
+    if (! audioOpen)
+        return;
+
+    edit().getTransport().ensureContextAllocated();
+
+    // One-time: enable the device manager's wave inputs so record-armed tracks
+    // actually capture (without setEnabled(true) they exist but stay silent). Never
+    // runs headless — guarded by audioOpen — and runs once via the latch. We default
+    // monitor mode to automatic (audible only when record-enabled) per RecordingDemo.
+    if (! inputsConfigured)
+    {
+        inputsConfigured = true;
+        auto& dm = enginePtr->getDeviceManager();
+        for (int i = 0; i < dm.getNumWaveInDevices(); ++i)
+            if (auto* wip = dm.getWaveInDevice (i))
+            {
+                wip->setMonitorMode (te::InputDevice::MonitorMode::automatic);
+                wip->setEnabled (true);
+            }
+        edit().restartPlayback();
+    }
 }
 
 void MoshEngine::applyRequestedAudioOutputDevice()

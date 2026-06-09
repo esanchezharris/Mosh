@@ -236,6 +236,8 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "set_track_pan")     return cmdSetTrackPan (args);
     if (name == "set_track_mute")    return cmdSetTrackMute (args);
     if (name == "set_track_solo")    return cmdSetTrackSolo (args);
+    if (name == "arm_track")         return cmdArmTrack (args);
+    if (name == "set_input_monitor") return cmdSetInputMonitor (args);
     if (name == "set_master_volume") return cmdSetMasterVolume (args);
     if (name == "set_master_pan")    return cmdSetMasterPan (args);
     if (name == "enable_track_meter")  return cmdEnableTrackMeter (args);
@@ -741,6 +743,124 @@ juce::var MoshOps::cmdSetTrackSolo (const juce::var& args)
     logLine ("set_track_solo", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("set_track_solo");
+}
+
+juce::var MoshOps::cmdArmTrack (const juce::var& args)
+{
+    auto* track = findTrack (args.getProperty ("trackId", var()).toString());
+    if (track == nullptr) return errResult ("arm_track", "no track");
+    const bool armed = (bool) args.getProperty ("armed", false);
+
+    // Record-arm is a monitoring preference, NOT an undoable session edit: the engine
+    // binds the destination's `armed` flag with a nullptr UndoManager
+    // (tracktion_InputDevice.h: recordEnabled.referTo (state, IDs::armed, nullptr, false)),
+    // so a transaction here would be empty. Treat it like set_metronome / set_transport.
+
+    // getAllInputDevices() is empty headless / without a playback context, so there
+    // are no instances to operate on. Degrade gracefully: ok result, applied:false,
+    // never an error (mirrors cmdSetTransport skipping play/record when !hasAudio()).
+    bool applied = false;
+    auto inputs = eng.edit().getAllInputDevices();
+
+    // Find an instance already targeting this track at slot 0.
+    te::InputDeviceInstance* target = nullptr;
+    for (auto* inst : inputs)
+        if (inst != nullptr && te::isOnTargetTrack (*inst, *track, 0))
+        {
+            target = inst;
+            break;
+        }
+
+    // Arming a virgin track: assign the first available wave input first, then enable
+    // (RecordingDemo does setTarget + setRecordingEnabled together). Disarming a track
+    // with no instance is a harmless no-op.
+    if (target == nullptr && armed)
+    {
+        for (auto* inst : inputs)
+            if (inst != nullptr
+                && inst->getInputDevice().getDeviceType() == te::InputDevice::waveDevice)
+            {
+                // setTarget returns tl::expected — check the error, never blind-deref.
+                // Pass nullptr (no UndoManager): arming is a non-undoable preference, so
+                // the target assignment stays off the Edit undo stack too (it still
+                // persists in the input-device ValueTree and saves with the Edit).
+                if (auto r = inst->setTarget (track->itemID, true, nullptr, 0))
+                    target = inst;
+                else
+                {
+                    // Genuine assignment failure (a live device rejected the target):
+                    // log exactly once and surface as an error — never a misleading ok.
+                    logLine ("arm_track", args, false, r.error(), false);
+                    return errResult ("arm_track", r.error());
+                }
+                break;
+            }
+    }
+
+    if (target != nullptr)
+    {
+        target->setRecordingEnabled (track->itemID, armed);
+        applied = true;
+    }
+
+    logLine ("arm_track", args, true, {}, false);
+    emitSnapshotInvalidated();
+
+    auto* data = new DynamicObject();
+    data->setProperty ("trackId", track->itemID.toString());
+    data->setProperty ("armed", armed);
+    data->setProperty ("applied", applied);
+    if (! applied)
+        data->setProperty ("reason", "no input device");
+    return okResult ("arm_track", var (data));
+}
+
+juce::var MoshOps::cmdSetInputMonitor (const juce::var& args)
+{
+    auto* track = findTrack (args.getProperty ("trackId", var()).toString());
+    if (track == nullptr) return errResult ("set_input_monitor", "no track");
+
+    // Accept either { mode: "off"|"automatic"|"on" } or legacy { monitor: bool }.
+    juce::String modeStr;
+    if (args.hasProperty ("mode"))
+        modeStr = args.getProperty ("mode", var()).toString();
+    else if (args.hasProperty ("monitor"))
+        modeStr = ((bool) args.getProperty ("monitor", false)) ? "on" : "off";
+    else
+        modeStr = "automatic";
+
+    te::InputDevice::MonitorMode mode;
+    if (modeStr == "off")            mode = te::InputDevice::MonitorMode::off;
+    else if (modeStr == "automatic") mode = te::InputDevice::MonitorMode::automatic;
+    else if (modeStr == "on")        mode = te::InputDevice::MonitorMode::on;
+    else return errResult ("set_input_monitor", "bad mode: " + modeStr);
+
+    // Input monitoring is a device preference, NOT an undoable Edit change: setMonitorMode
+    // writes the field + saveProps() (global engine props, not the Edit value tree), so a
+    // transaction would be empty. Treat it like set_metronome.
+
+    // Monitor mode is a property of the shared InputDevice (the *device*, not the
+    // instance) — two tracks fed by the same physical input share one monitor mode.
+    // Headless getAllInputDevices() is empty → no-op, applied:false (never an error).
+    bool applied = false;
+    for (auto* inst : eng.edit().getAllInputDevices())
+        if (inst != nullptr && te::isOnTargetTrack (*inst, *track, 0))
+        {
+            inst->getInputDevice().setMonitorMode (mode);
+            applied = true;
+            break;
+        }
+
+    logLine ("set_input_monitor", args, true, {}, false);
+    emitSnapshotInvalidated();
+
+    auto* data = new DynamicObject();
+    data->setProperty ("trackId", track->itemID.toString());
+    data->setProperty ("mode", modeStr);
+    data->setProperty ("applied", applied);
+    if (! applied)
+        data->setProperty ("reason", "no input device");
+    return okResult ("set_input_monitor", var (data));
 }
 
 juce::var MoshOps::cmdSetMasterVolume (const juce::var& args)
@@ -2094,6 +2214,31 @@ juce::var MoshOps::trackToVar (te::AudioTrack& t, int index)
     }
     o->setProperty ("mute", t.isMuted (false));
     o->setProperty ("solo", t.isSolo (false));
+
+    // Recording state (Wave: recording). Requires a live input-device instance;
+    // getAllInputDevices() is empty headless / without a playback context, so all
+    // three default false/"automatic"/false. Monitor mode is read off the shared
+    // InputDevice behind the instance (per-device, surfaced per-track).
+    {
+        bool armed = false; juce::String monitor = "automatic"; bool hasInput = false;
+        for (auto* inst : eng.edit().getAllInputDevices())
+            if (inst != nullptr && te::isOnTargetTrack (*inst, t, 0))
+            {
+                hasInput = true;
+                armed    = inst->isRecordingEnabled (t.itemID);
+                switch (inst->getInputDevice().getMonitorMode())
+                {
+                    case te::InputDevice::MonitorMode::off:       monitor = "off"; break;
+                    case te::InputDevice::MonitorMode::on:        monitor = "on"; break;
+                    case te::InputDevice::MonitorMode::automatic: monitor = "automatic"; break;
+                    default:                                      monitor = "automatic"; break;
+                }
+                break;
+            }
+        o->setProperty ("armed",    armed);     // bool
+        o->setProperty ("monitor",  monitor);   // "off" | "automatic" | "on"
+        o->setProperty ("hasInput", hasInput);  // bool — false headless; UI can show "no input"
+    }
 
     // Sends (post-fader aux sends) owned by this track (Wave 8).
     juce::Array<var> sends;

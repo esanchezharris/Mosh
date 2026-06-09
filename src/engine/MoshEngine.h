@@ -56,6 +56,7 @@ private:
     juce::File editPath;
     void applyRequestedAudioOutputDevice();
     bool       audioOpen = false;
+    bool       inputsConfigured = false;   // one-time wave-input enablement latch (audio-only)
     juce::String audioError;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MoshEngine)

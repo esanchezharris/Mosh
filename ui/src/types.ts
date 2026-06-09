@@ -114,6 +114,9 @@ export type Track = {
   pan?: number;
   mute?: boolean;
   solo?: boolean;
+  armed?: boolean;
+  monitor?: "off" | "automatic" | "on";
+  hasInput?: boolean;
   sends?: Send[];
   isReturn?: boolean;
   returnBus?: number;
