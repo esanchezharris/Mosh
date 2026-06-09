@@ -83,6 +83,12 @@ Each: decision, why, rejected alternative.
 **Why.** Scope; both are separable layers that benefit from a working single-player core. The command surface (§3.2) is the substrate they'll build on, so deferring them no longer implies a painful retrofit.
 **Reopen?** Are the right hooks present given the command facade is semantic-log, not yet CRDT?
 
+### 3.10 macOS / Apple Silicon only for v0 — adopted this pass
+**Why.** A single-platform target lets us lean fully into Apple Silicon (MLX/CoreML/Metal, unified-memory zero-copy — the load-bearing advantage for local neural inference) with no cross-platform abstraction tax, and it collapses CI to one target. It also removes the main objection to a future live generative-instrument lane (those models' real-time paths are Apple-Silicon-centric). The developer is on a Mac; the heavy generative service is already MLX.
+**Rejected.** Cross-platform from day one (abstraction tax, doubled QA surface, and the neural stack is Apple-optimized anyway).
+**Tradeoff accepted.** No Windows/Linux/CUDA in v0; a future port is a deliberate later effort (or upstream tooling gets there first). The risk is architectural lock-in to Apple-only paths — mitigated by keeping the model boundary (adapters, the job service) platform-neutral so only the host/runtime layer is Apple-specific.
+**Reopen?** Does single-platform v0 bake in assumptions that make a later cross-platform port disproportionately costly?
+
 ---
 
 ## 4. The latency model (worth challenging)
@@ -121,7 +127,7 @@ The offline layer's semantic control reuses prior research, exposed behind the a
 
 ## 7. Explicitly out of scope for v0 (deferred, not rejected)
 
-Each a layer the architecture must not preclude: the AI-operator character/agent (a client of the command surface); the full multiplayer / CRDT op-log (the command log is a semantic trail, not yet CRDT); real-time collaboration; an on-device generative model + whether the learned controls transfer to it; layering a "house style" adaptation under the interactive controls; scheduling steering across the diffusion trajectory; the full bespoke panel/drawer interaction system (a simplified set ships).
+Each a layer the architecture must not preclude: the AI-operator character/agent (a client of the command surface); the full multiplayer / CRDT op-log (the command log is a semantic trail, not yet CRDT); real-time collaboration; an on-device generative model + whether the learned controls transfer to it; a **live generative-instrument lane (Magenta RealTime 2)** — a MIDI/text/audio-conditioned real-time generator that would sit in the live tier as a neural *instrument*, now more viable since v0 is Apple-Silicon-only, but not core v0; layering a "house style" adaptation under the interactive controls; scheduling steering across the diffusion trajectory; the full bespoke panel/drawer interaction system (a simplified set ships); cross-platform (Windows/Linux/CUDA) support.
 
 ---
 

@@ -20,22 +20,24 @@ A generative diffusion model is a **job**: hand it a region, wait (seconds), aud
 
 ```
 GenerativeModelAdapter
-    id                      // "fake" | "stable_audio_3" | ...
+    id                      // "fake" | "stable_audio_3" | "stable_audio_open_small" | ...
     version
-    capabilities            // feature flags below
-    supported_sample_rates
-    max_duration
-    supports_inpaint
-    supports_audio_to_audio // re-imagine
-    supports_stems
+    generation_modes        // any of: text_to_audio · audio_to_audio · inpaint · continue · streaming
+    conditioning_inputs     // any of: prompt · init_audio · style_audio · negative_prompt · midi · lora
+    duration_limits         // {min, max} seconds  (e.g. SA3 Medium ≤ 380s; SA3 Small ≤ 120s)
+    sample_rates            // surfaced rates + channel modes  (SA3 family: stereo 44.1 kHz)
+    runtime_requirements    // any of: cpu · apple_mlx · cuda · tensorrt   (v0 = apple_mlx)
+    packaging_mode          // embedded_cpp · python_service · torchscript · onnx · mlx_bundle
     supports_seed
     supports_semantic_controls
+    license_meta            // recorded for awareness only (private research → not gating; see 07)
 ```
 
 - **`FakeAdapter`** — returns deterministic placeholder audio fast (e.g. a filtered/gain-shifted copy of the input, seeded). It exercises the *entire* pipeline — job submit, progress events, cache, RenderLayer states, accept/reject, the taste log — with no model. Build it first.
-- **`StableAudio3Adapter`** — wraps the carved SA3 service (§5–§7). Reports `supports_audio_to_audio`, `supports_inpaint`, `supports_seed`, `supports_semantic_controls = true`.
+- **`StableAudio3Adapter`** — wraps the carved SA3 service (§5–§7). `generation_modes = [text_to_audio, audio_to_audio, inpaint, continue]`; `conditioning_inputs` includes `prompt, init_audio, negative_prompt, lora`; `runtime_requirements = [apple_mlx]`; `duration_limits` Medium ≤ 380s / Small ≤ 120s; `sample_rates` stereo 44.1 kHz; `supports_semantic_controls = true`.
+- **`StableAudioOpenSmallAdapter`** *(optional bring-up rung)* — a real-but-light, CPU/MLX-capable adapter (~11s) usable as an intermediate between `FakeAdapter` and SA3 Medium. Optional for this project specifically, since the MLX SA3 port already runs locally and the `FakeAdapter` already de-risks orchestration — include only if a real-but-cheap render helps shake out the service before the heavy path.
 
-The product owns this abstraction so that a smaller local model (on-device SAO-Small later), a near-real-time model, or the existing research service can each slot in without touching the DAW.
+The product owns this abstraction so that a smaller local model (SAO-Small), a near-real-time model, or the existing research service can each slot in without touching the DAW.
 
 ---
 

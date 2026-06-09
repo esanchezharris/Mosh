@@ -108,6 +108,15 @@ Every continuous neural knob is surfaced as a perceptually-uniform **0–100 UI 
 
 **Lab mode (the escape hatch):** `set_neural_lab_mode(insertId, on)` unlocks the raw range beyond the clamp, behind a clear visual warning, with per-parameter reset and easy A/B. Lab mode is never used by default presets. ASTD is a **trust feature, not a cage** — the default protects; the producer can choose the broken/alien extremes deliberately. Implement once, generically (`src/plugins/neural/astd.*`), shared with Tier B (`05 §6`).
 
+### 2.7 Operational safety (distinct from ASTD; per lane)
+
+ASTD is *semantic* safety (knobs that don't sound broken). Live neural models also need *operational* safety, which differs by model class:
+- **NAM/Proteus (deterministic emulation):** standard plugin hygiene — correct gain staging, true bypass, preset sanity, low-noise startup state.
+- **RAVE/DDSP (fail like unstable instruments, not deterministic effects):** always expose a **dry/wet blend** and a **model reset**; a runaway latent shouldn't be unrecoverable.
+- **Live generative instruments (MRT2, deferred — `07`):** prioritize operational over semantic safety — **warmup** (no first-block stall), **state reset on transport stop**, **CPU/GPU headroom monitoring**, and a **hard-bypass path if latency spikes**. These are the invariants the neural host must enforce before any such model is wired in.
+
+Bake the dry/wet + reset affordances into the `NeuralInsertPlugin` host generically so every live model inherits them.
+
 ---
 
 ## 3. Threading

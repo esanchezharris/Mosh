@@ -15,6 +15,8 @@ Mosh is a **standalone JUCE application** (not a plugin) that hosts a **bundled 
 
 Add a **Vite build step** to CMake: build the `ui/` React app and stage its output where the WebView loads it (embedded resource or a known app-data path) for release; a dev mode may point the WebView at the Vite dev server.
 
+**Platform: macOS / Apple Silicon (arm64) only for v0.** No Windows/Linux/CUDA targets. The CMake target, CI, and all `// VERIFY` checks assume macOS arm64. This is a deliberate simplification (lean into MLX/CoreML/Metal + unified memory); cross-platform is a later concern (`00 §1`, `07`).
+
 ---
 
 ## 2. Dependencies (CPM, pinned to commits)
@@ -33,7 +35,7 @@ Add a **Vite build step** to CMake: build the `ui/` React app and stage its outp
 
 **Deliberately omitted in v0** (keep clean; document as deferred, not rejected): **foleys_gui_magic** (the UI is WebView now — foleys is unnecessary unless a native faceplate is later wanted); **cello** (MoshOps + Tracktion's UndoManager are the authority — `02` — so ValueTree sugar isn't needed); **Gin websockets / JUMP metering** (multiplayer deferred; metering is decimated events from the graph, `02 §4.2`).
 
-**Inference backend (Apple Silicon primary):** ONNX Runtime or LibTorch via anira (`04 §2.3`). The SA3 service uses MLX (Python) separately — not a C++ dep.
+**Inference backend (macOS / Apple Silicon only):** ONNX Runtime, LibTorch, or CoreML via anira (`04 §2.3`); lean on Apple Accelerate/Metal where it helps. The SA3 service uses MLX (Python) separately — not a C++ dep. No CUDA/TensorRT path in v0.
 
 ---
 
@@ -48,7 +50,7 @@ Match `00 §5`. Top-level `CMakeLists.txt`: C++20; the standalone-app target; `C
 - **Catch2** units: the `MOSH_RENDERLAYER` schema + full-fingerprint cache key (round-trip, dirty logic); the ASTD mapping (0–100 ↔ clamped raw, per-param; Lab-mode unlock); MoshOps command validation + the result envelope; the snapshot serialization + event application; clip-position math.
 - **Command-surface harness (the key test):** drive MoshOps with a scripted command sequence and assert results, emitted events, JSONL log lines, and snapshot state — this tests the spine and doubles as replayable regression. Because the UI is just a client of this surface, **most logic is testable without the UI**.
 - **Neural insert harness:** instantiate `NeuralInsertPlugin`, run blocks, assert RT-safety (no allocations in `applyToBuffer`, rtsan-style) and that `getLatencySeconds()` matches measured delay (the PDC null test, `04 §2.4`). No Pluginval (that's for plugins; Mosh is an app).
-- **CI** (GitHub Actions, Pamplejuce-style): build macOS arm64 (primary), build the Vite bundle, run Catch2 + the harnesses. Keep Win/Linux building if cheap.
+- **CI** (GitHub Actions, Pamplejuce-style): build **macOS arm64 only**, build the Vite bundle, run Catch2 + the harnesses. No Windows/Linux matrix in v0.
 
 ---
 
@@ -92,6 +94,6 @@ Build the arrangement incrementally within Stage 2/6 (static clips → drag/move
 - **Resolve every `// VERIFY` against the pinned `tracktion_engine` clone before relying on it** (VST3 editor accessor; takes/comp API; `LatencyPlugin` source; `Renderer::Parameters` fields; recent ctor signatures; JUCE 8 WebView native-fn/emit API). Prefer documented file-based fallbacks when uncertain (render-to-file over -to-buffer; new-clip over the takes API if opaque).
 - **The spine first:** MoshOps + the snapshot/events feed is the highest-leverage early work; the UI and both neural tiers are clients of it. Get the contract right before building breadth.
 - **FakeAdapter before SA3:** prove the generative orchestration (job/cache/RenderLayer/accept-reject/log) with the stub; swap the real model in last.
-- **Apple Silicon first** (macOS arm64; matches the MLX service). Keep cross-platform clean; don't block on it.
+- **macOS / Apple Silicon (arm64) only** (matches the MLX service). No cross-platform code paths in v0 — lean into MLX/CoreML/Metal + unified memory. CUDA/Linux is a later concern.
 - **Don't blur the tiers / don't bypass the spine:** Tier A in-process (anira); Tier B is a job via the adapter/service; **all** mutation through MoshOps; UI couples only via the contract.
 - **Always leave an artifact:** if context runs low mid-stage, write a handoff note (state reached, gate status, next concrete step, `// VERIFY` resolved) before stopping.

@@ -1,13 +1,26 @@
 #!/usr/bin/env bash
-# Dev launcher for the Mosh generative service (macOS / Linux).
+# Dev launcher for the Mosh generative service (06 §5).
 #
-# Zero external dependencies — runs against any stdlib Python 3.11+.
-# Usage:
-#   ./run.sh                       # 127.0.0.1:8765
-#   ./run.sh --port 9000           # custom port
-#   ./run.sh --host 0.0.0.0 --port 9000
+# Interpreter selection: when MOSH_ENABLE_SA3=1 and the SA3 MLX venv exists, run
+# under $SA3_MLX_DIR/.venv/bin/python so the carved in-process SA3 engine can import
+# mlx + the model code. Otherwise system python3 (FakeAdapter only — it is stdlib).
+# FakeAdapter works under either interpreter, so the choice is invisible over HTTP.
+#
+# External deps stay external, pointed at by env vars (App. B):
+#   SA3_MLX_DIR    — the MLX Stable-Audio-3 port (model + scripts)
+#   COLORRACK_DATA — the built colour rack (service/colors/build_colorrack.py)
 set -euo pipefail
+cd "$(dirname "$0")"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export SA3_MLX_DIR="${SA3_MLX_DIR:-$HOME/AI/stable-audio-3/optimized/mlx}"
+export COLORRACK_DATA="${COLORRACK_DATA:-$(pwd)/colors/COLORRACK_DATA}"
 
-exec python3 "${SCRIPT_DIR}/server.py" "$@"
+# SA3 is on by default; the carve runs under the MLX venv when present, else this
+# silently falls back to system python3 (FakeAdapter only). Set MOSH_ENABLE_SA3=0
+# to force FakeAdapter even when the venv exists.
+PY="python3"
+if [[ "${MOSH_ENABLE_SA3:-1}" == "1" && -x "$SA3_MLX_DIR/.venv/bin/python" ]]; then
+  PY="$SA3_MLX_DIR/.venv/bin/python"
+fi
+
+exec "$PY" server.py "$@"

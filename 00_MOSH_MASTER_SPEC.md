@@ -29,6 +29,7 @@ The source of truth is always the upstream source (synth preset / MIDI / automat
 
 | Decision | Choice | Rationale |
 |---|---|---|
+| **Platform** | **macOS on Apple Silicon (arm64) ONLY for v0** | Lean fully into MLX/CoreML/Metal + unified-memory zero-copy; no cross-platform hedging. Windows/Linux/CUDA are explicit non-goals for v0 (revisit later, or upstream/Google gets there first). |
 | Engine | **Tracktion Engine** (pin a commit) | Full edit/clip/automation/render/host model; ValueTree-backed store. |
 | Language / core | **C++20**, JUCE 8 | — |
 | Build scaffold | **Pamplejuce as template**, adapted to a **standalone-app** target + a Vite frontend build | Pamplejuce is plugin-shaped; we adopt its CMake/CPM/CI/test hygiene. See `06`. |
@@ -41,7 +42,7 @@ The source of truth is always the upstream source (synth preset / MIDI / automat
 | Safety | **ASTD clamp by default + a Lab-mode escape hatch** | Trusted "never sounds broken" default; unlock the broken/alien range deliberately. `04 §6`, `05 §6`. |
 | Collaboration | **None in v0** | Single-player. Deferred (MoshOps log is the future substrate). |
 
-**Explicitly NOT in v0:** B-5/Monster operator behavior (reserved UI slot only); full multiplayer / CRDT op-log (MoshOps JSONL is a semantic audit trail, not yet a CRDT); on-device generative tier (SAO-Small) and Medium→Small vector transfer; LoRA-base + vector layering; timestep-scheduled steering; the full bespoke Context-Drawers system (a simple panel/drawer set is fine).
+**Explicitly NOT in v0:** B-5/Monster operator behavior (reserved UI slot only); full multiplayer / CRDT op-log (MoshOps JSONL is a semantic audit trail, not yet a CRDT); on-device generative tier (SAO-Small) and Medium→Small vector transfer; LoRA-base + vector layering; timestep-scheduled steering; the full bespoke Context-Drawers system (a simple panel/drawer set is fine); **Magenta RealTime 2 (MRT2)** as a live generative-instrument lane (now *more* viable since we're Mac-only, but not core v0 — see `07`).
 
 ---
 
@@ -96,6 +97,7 @@ The source of truth is always the upstream source (synth preset / MIDI / automat
 | `04_PLUGIN_CHAIN_AND_REALTIME_NEURAL.md` | The plugin chain | VST3 hosting (`ExternalPlugin`) + the custom `Plugin` seam + Tier-A neural (NAM/Proteus ship, RAVE gated, DDSP), latency/PDC, RT-safety, ASTD + Lab mode | API wiring + real custom DSP work |
 | `05_GENERATIVE_LAYER.md` | Tier B / generative | The adapter abstraction, the job service, the RenderLayer + cache fingerprint, render→accept-as-take flow, SA3 specifics (colors, two vocabularies, re-imagine, init-latent cache, judge QA, composition cap) | API wiring + adapter/service + research carve-out |
 | `06_BUILD_TOOLING_AND_RUN_PLAN.md` | Build + run | Pamplejuce-adapted CMake/CPM + Vite build, deps, CI/tests, service packaging, the staged run plan with gates | Setup |
+| `07_DEFERRED_AND_MODEL_NOTES.md` | Context / parking lot | Model-landscape inventory, deferred lanes (MRT2, SAO-Small, on-device, LoRA, timestep steering), per-lane safety profiles, license posture | Not build work — context |
 
 Read order: `00` → `06` (set up build) → `01` → `02` → `03` → `04` → `05`.
 

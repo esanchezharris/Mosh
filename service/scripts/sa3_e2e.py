@@ -25,7 +25,7 @@ import soundfile as sf
 HERE = os.path.dirname(os.path.abspath(__file__))
 SERVICE = os.path.dirname(HERE)
 sys.path.insert(0, SERVICE)
-os.environ["MOSH_ADAPTER"] = "stable_audio_3"
+os.environ["MOSH_ADAPTER"] = "stable_audio3"
 
 import adapters.stable_audio3_adapter as A  # noqa: E402
 
@@ -47,54 +47,55 @@ def tone(path, freq, secs=3.0, sr=44100):
     return path
 
 
-def run(ad, jid, **req):
-    base = dict(jobId=jid, cacheKey=jid, outDir=OUT, prompt="warm lo-fi loop",
-                seed=0, durationSec=4.0, steps=8, cfg=7.0, nl=0.4)
+def run(jid, **req):
+    base = dict(prompt="warm lo-fi loop", seed=0, durationSec=4.0, steps=8,
+                cfg=7.0, nl=0.4, colors=[], lab=False)
     base.update(req)
-    return ad.render(base, lambda p: None, lambda: False)
+    input_wav = base.pop("inputWavPath", "")
+    if base.pop("mode", "generate") == "generate":
+        input_wav = ""
+    output_wav = os.path.join(OUT, f"{jid}.wav")
+    return A.render(input_wav, output_wav, base)
 
 
 def main():
-    ad = A.StableAudio3Adapter()
-    ad.warmup()  # load once
-
     # 1) generate + colors
-    m1 = run(ad, "gen_grit", mode="generate", colors=[{"name": "grit", "value": 80}], lab=False)
-    check("generate+colors: adapter + real steering applied", bool(m1) and m1["adapter"] == "stable_audio_3"
-          and len(m1.get("steering", [])) >= 1, f"steering={m1.get('steering')}")
+    m1 = run("gen_grit", mode="generate", colors=[{"name": "grit", "value": 80}], lab=False)
+    check("generate+colors: adapter + real steering applied", bool(m1) and m1["adapter"] == "stable_audio3"
+          and len(m1.get("steers", [])) >= 1, f"steers={m1.get('steers')}")
     check("generate+colors: pq present, colors recorded", "pq" in m1 and m1.get("colors"),
           f"pq={m1.get('pq')} colors={m1.get('colors')}")
 
     # 2) generate, no colors -> no steering
-    m2 = run(ad, "gen_plain", mode="generate", colors=[], lab=False)
-    check("generate no-colors: steering empty", bool(m2) and len(m2.get("steering", [])) == 0,
-          f"steering={m2.get('steering')}")
+    m2 = run("gen_plain", mode="generate", colors=[], lab=False)
+    check("generate no-colors: steering empty", bool(m2) and len(m2.get("steers", [])) == 0,
+          f"steers={m2.get('steers')}")
 
     # 3) reimagine + colors, seed=1 -> miss + pqBase
     src = tone(os.path.join(OUT, "src.wav"), 220.0)
-    m3 = run(ad, "re_s1", mode="reimagine", colors=[{"name": "air", "value": 70}], lab=False,
+    m3 = run("re_s1", mode="reimagine", colors=[{"name": "air", "value": 70}], lab=False,
              seed=1, inputWavPath=src, inputStartSec=0.0, inputLengthSec=3.0)
-    check("reimagine: pqBase + pqDelta present", bool(m3) and "pqBase" in m3 and "pqDelta" in m3,
-          f"pq={m3.get('pq')} pqBase={m3.get('pqBase')} delta={m3.get('pqDelta')}")
-    check("reimagine: init-latent cache MISS first time", m3.get("initLatentCache") == "miss",
-          str(m3.get("initLatentCache")))
+    check("reimagine: pq_base present", bool(m3) and "pq_base" in m3,
+          f"pq={m3.get('pq')} pq_base={m3.get('pq_base')}")
+    check("reimagine: init-latent cache MISS first time", m3.get("init_cache") == "miss",
+          str(m3.get("init_cache")))
 
     # 4) reimagine SAME source/region, only seed changed -> HIT
-    m4 = run(ad, "re_s2", mode="reimagine", colors=[{"name": "air", "value": 70}], lab=False,
+    m4 = run("re_s2", mode="reimagine", colors=[{"name": "air", "value": 70}], lab=False,
              seed=2, inputWavPath=src, inputStartSec=0.0, inputLengthSec=3.0)
-    check("reimagine: init-latent cache HIT on seed-only change", m4.get("initLatentCache") == "hit",
-          str(m4.get("initLatentCache")))
+    check("reimagine: init-latent cache HIT on seed-only change", m4.get("init_cache") == "hit",
+          str(m4.get("init_cache")))
 
     # 5) reimagine DIFFERENT source -> MISS again
     src2 = tone(os.path.join(OUT, "src2.wav"), 330.0)
-    m5 = run(ad, "re_s3", mode="reimagine", colors=[], lab=False, seed=2,
+    m5 = run("re_s3", mode="reimagine", colors=[], lab=False, seed=2,
              inputWavPath=src2, inputStartSec=0.0, inputLengthSec=3.0)
-    check("reimagine: cache MISS for a different source", m5.get("initLatentCache") == "miss",
-          str(m5.get("initLatentCache")))
+    check("reimagine: cache MISS for a different source", m5.get("init_cache") == "miss",
+          str(m5.get("init_cache")))
 
     # 6) no_stack_with colors -> render raises
     try:
-        run(ad, "bad", mode="generate",
+        run("bad", mode="generate",
             colors=[{"name": "drum_aggression", "value": 80}, {"name": "grid_tightness", "value": 80}])
         check("no_stack_with rejected at render", False, "did not raise")
     except RuntimeError as e:

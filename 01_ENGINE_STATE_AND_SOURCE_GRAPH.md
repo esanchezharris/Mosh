@@ -93,7 +93,8 @@ MOSH_RENDERLAYER
     modelAdapter        // e.g. "stable_audio_3"   (model-neutral; 05)
     modelVersion
     adapterVersion
-    mode                // "generate" | "reimagine"
+    mode                // "generate" | "reimagine" | "inpaint" | "continue"  (route — part of the cache key)
+    modelVariant        // model size / decoder variant, e.g. "sa3-medium" vs "sa3-small" (part of the cache key)
     params              // prompt, colors[], cfg, steps, nl  (see 05 §5–§6)
     seed
     safetyMappingVersion
@@ -107,7 +108,7 @@ MOSH_RENDERLAYER
 
 ### 4.3 The full cache fingerprint (do not shortcut to source+params)
 
-`cacheKey = hash(` upstream audio/MIDI/plugin-state hash · clip range · tempo/key context · sample-rate/channel layout · `modelAdapter` · `modelVersion` · `adapterVersion` · prompt/semantic controls · seed · sampling hyperparameters · `safetyMappingVersion` · service build/version `)`. Anything less and you get "why did the cache reuse the wrong audio?" bugs. On any fingerprint-input change, set `status="dirty"`; the render flow (`05 §3`) reuses `cacheArtifact` only when clean.
+`cacheKey = hash(` upstream audio/MIDI/plugin-state hash · clip range · tempo/key context · sample-rate/channel layout · `modelAdapter` · `modelVersion` · `adapterVersion` · **`modelVariant` (size/decoder)** · **`mode` (the transform route: generate / reimagine / inpaint / continue)** · prompt/semantic controls · seed · sampling hyperparameters · `safetyMappingVersion` · service build/version `)`. Anything less and you get "why did the cache reuse the wrong audio?" bugs — note especially that the **same clip can be transformed by different routes (text-only vs audio-to-audio vs inpaint) and by different model sizes/decoders**, so route and variant *must* be in the key. On any fingerprint-input change, set `status="dirty"`; the render flow (`05 §3`) reuses `cacheArtifact` only when clean.
 
 ### 4.4 Composition cap (enforced here)
 

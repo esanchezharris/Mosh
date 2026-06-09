@@ -1,380 +1,178 @@
-/**
- * store.ts — the dumb client store (02 §4, 03 §3).
- *
- * Two clearly separated halves:
- *
- *  1. BACKEND MIRROR — the last `getSnapshot()` plus typed events applied
- *     incrementally. This half owns NO domain logic: every mutation the user
- *     makes goes out through `executeCommand` (in components), and the only way
- *     this mirror changes is by applying an event the backend emitted.
- *
- *  2. VIEW STATE — selection, zoom (pixels-per-second), horizontal scroll, and
- *     the decimated live meter readouts. This is UI-LOCAL: it NEVER becomes a
- *     command. It lives here purely so components can share it.
- *
- * Keeping these apart is the swappability discipline: the mirror is the backend
- * contract; the view state is ours to throw away with the React layer.
- */
-
 import { create } from "zustand";
-import {
-  backendKind,
-  getSnapshot,
-  subscribe,
-  type BackendKind,
-  type ClipState,
-  type MoshEvent,
-  type Snapshot,
-  type TrackState,
-} from "./bridge";
+import { executeCommand, getSnapshot, onEvent, isNative } from "./bridge";
+import type {
+  Snapshot, Transport, MoshEvent, CommandResult, AvailablePlugin,
+  AvailableColor, RenderQA,
+} from "./types";
 
-/** Live, decimated meter readout for one track (view-only; from meter_update). */
-export interface MeterLevel {
-  rms: number;
-  peak: number;
-}
+export type Tool = "move" | "split";
+export type Peaks = [number, number][];
 
-interface MoshStore {
-  // --- backend mirror ----------------------------------------------------
-  backend: BackendKind;
+type State = {
   snapshot: Snapshot | null;
-  loading: boolean;
-  error: string | null;
-  /** Pull a fresh snapshot from the backend (load / resync). */
-  refresh: () => Promise<void>;
-  /** Apply one typed event to the mirrored snapshot. */
-  applyEvent: (event: MoshEvent) => void;
+  connected: boolean;
+  lastError: string | null;
 
-  // --- UI-local view state (NEVER a command) -----------------------------
-  /** pixels per second — horizontal zoom of the timeline. */
+  // UI-local view state (NOT commands — the swappable-seam rule: zoom, tool,
+  // snap, selection never cross the bridge).
   pxPerSec: number;
-  /** horizontal scroll offset of the timeline, in seconds. */
-  scrollSec: number;
-  /** currently selected clip id, or null. */
-  selectedClip: string | null;
-  /** currently selected track id, or null. */
-  selectedTrack: string | null;
-  /** per-track live meter levels, keyed by track id (decimated events). */
-  meters: Record<string, MeterLevel>;
+  tool: Tool;
+  snap: boolean;
+  snapGrid: number; // seconds
+  selection: Set<string>;
+  peaks: Record<string, Peaks>;
 
-  setZoom: (pxPerSec: number) => void;
-  setScroll: (scrollSec: number) => void;
-  selectClip: (id: string | null) => void;
-  selectTrack: (id: string | null) => void;
-}
+  // Stage 3: plugin browser
+  selectedTrackId: string | null;
+  availablePlugins: AvailablePlugin[];
+  browserOpen: boolean;
+  renderProgress: Record<string, number>; // clipId → 0..1 (Tier-B render)
+  availableColors: AvailableColor[];       // SA3 colour rack (from list_colors)
+  labMode: boolean;                        // ASTD unlock for generative colours
+  qaByClip: Record<string, RenderQA>;      // last render's quality readout
 
-// Apply a partial-fields update to a track in an immutable tracks array.
-function patchTrack(
-  tracks: TrackState[],
-  id: string,
-  fields: Partial<TrackState>
-): TrackState[] {
-  return tracks.map((t) => (t.id === id ? { ...t, ...fields } : t));
-}
+  refresh: () => Promise<void>;
+  exec: (command: string, args?: Record<string, unknown>) => Promise<CommandResult>;
+  init: () => void;
 
-// Replace one track's clips array immutably.
-function withClips(
-  tracks: TrackState[],
-  trackId: string,
-  fn: (clips: ClipState[]) => ClipState[]
-): TrackState[] {
-  return tracks.map((t) =>
-    t.id === trackId ? { ...t, clips: fn(t.clips) } : t
-  );
-}
+  setPxPerSec: (v: number) => void;
+  setTool: (t: Tool) => void;
+  setSnap: (b: boolean) => void;
+  select: (ids: string[], additive?: boolean) => void;
+  clearSelection: () => void;
+  snapTime: (t: number) => number;
+  ensurePeaks: (clipId: string) => void;
 
-// Find which track owns a clip id (events sometimes give only the clip id).
-function trackOfClip(tracks: TrackState[], clipId: string): string | null {
-  for (const t of tracks) {
-    if (t.clips.some((c) => c.id === clipId)) return t.id;
-  }
-  return null;
-}
+  setSelectedTrack: (id: string | null) => void;
+  openBrowser: () => void;
+  closeBrowser: () => void;
+  loadColors: () => void;
+  setLab: (b: boolean) => void;
 
-export const useStore = create<MoshStore>((set, get) => ({
-  backend: backendKind,
+  theme: "dark" | "light";
+  toggleTheme: () => void;
+};
+
+export const useStore = create<State>((set, get) => ({
   snapshot: null,
-  loading: true,
-  error: null,
+  connected: isNative(),
+  lastError: null,
 
   pxPerSec: 80,
-  scrollSec: 0,
-  selectedClip: null,
-  selectedTrack: null,
-  meters: {},
+  tool: "move",
+  snap: true,
+  snapGrid: 0.25,
+  selection: new Set<string>(),
+  peaks: {},
+  selectedTrackId: null,
+  availablePlugins: [],
+  browserOpen: false,
+  renderProgress: {},
+  availableColors: [],
+  labMode: false,
+  qaByClip: {},
 
-  async refresh() {
-    set({ loading: true, error: null });
+  refresh: async () => {
+    if (!isNative()) return;
     try {
-      const snap = await getSnapshot();
-      set({ snapshot: snap, loading: false });
-    } catch (e) {
-      set({
-        loading: false,
-        error: e instanceof Error ? e.message : String(e),
+      const snap = await getSnapshot<Snapshot>();
+      set({ snapshot: snap, connected: true });
+      // Prune selection / fetch peaks for current clips.
+      const ids = new Set(snap.tracks.flatMap((t) => t.clips.map((c) => c.id)));
+      set((s) => ({ selection: new Set([...s.selection].filter((id) => ids.has(id))) }));
+      // Auto-select a track for the rack if none is selected.
+      set((s) => {
+        const exists = snap.tracks.some((t) => t.id === s.selectedTrackId);
+        return exists ? {} : { selectedTrackId: snap.tracks[0]?.id ?? null };
       });
+      for (const t of snap.tracks) for (const c of t.clips) get().ensurePeaks(c.id);
+    } catch (e) {
+      set({ lastError: String(e) });
     }
   },
 
-  applyEvent(event) {
-    const snap = get().snapshot;
+  exec: async (command, args = {}) => {
+    const res = await executeCommand<CommandResult>({ command, args });
+    if (!res.ok) set({ lastError: res.error ?? `${command} failed` });
+    return res;
+  },
 
-    switch (event.type) {
-      case "snapshot_invalidated": {
+  init: () => {
+    onEvent("mosh_event", (raw) => {
+      const ev = raw as MoshEvent;
+      if (ev.type === "snapshot_invalidated") {
         void get().refresh();
-        return;
+      } else if (ev.type === "transport") {
+        const t = ev.payload as Transport;
+        set((s) => (s.snapshot ? { snapshot: { ...s.snapshot, transport: t } } : {}));
+      } else if (ev.type === "layer_render_progress") {
+        const p = ev.payload as { clipId: string; progress: number };
+        set((s) => ({ renderProgress: { ...s.renderProgress, [p.clipId]: p.progress } }));
+      } else if (ev.type === "layer_status") {
+        const p = ev.payload as { clipId?: string; qa?: RenderQA };
+        if (p?.clipId && p.qa)
+          set((s) => ({ qaByClip: { ...s.qaByClip, [p.clipId!]: p.qa as RenderQA } }));
+        void get().refresh();
       }
-
-      // --- tracks ----------------------------------------------------------
-      case "track_added": {
-        if (!snap) return;
-        // Idempotent: ignore if we already mirror this track.
-        if (snap.tracks.some((t) => t.id === event.track.id)) return;
-        set({ snapshot: { ...snap, tracks: [...snap.tracks, event.track] } });
-        return;
-      }
-      case "track_removed": {
-        if (!snap) return;
-        set({
-          snapshot: {
-            ...snap,
-            tracks: snap.tracks.filter((t) => t.id !== event.id),
-          },
-          selectedTrack:
-            get().selectedTrack === event.id ? null : get().selectedTrack,
-        });
-        return;
-      }
-      case "track_changed": {
-        if (!snap) return;
-        set({
-          snapshot: {
-            ...snap,
-            tracks: patchTrack(snap.tracks, event.id, event.fields),
-          },
-        });
-        return;
-      }
-
-      // --- clips -----------------------------------------------------------
-      case "clip_added": {
-        if (!snap) return;
-        set({
-          snapshot: {
-            ...snap,
-            tracks: withClips(snap.tracks, event.trackId, (clips) =>
-              clips.some((c) => c.id === event.clip.id)
-                ? clips
-                : [...clips, event.clip]
-            ),
-          },
-        });
-        return;
-      }
-      case "clip_moved": {
-        if (!snap) return;
-        const trackId = trackOfClip(snap.tracks, event.id);
-        if (!trackId) return;
-        set({
-          snapshot: {
-            ...snap,
-            tracks: withClips(snap.tracks, trackId, (clips) =>
-              clips.map((c) =>
-                c.id === event.id ? { ...c, range: event.range } : c
-              )
-            ),
-          },
-        });
-        return;
-      }
-      case "clip_split": {
-        if (!snap) return;
-        // Replace the original clip (first of clips shares its id) with the
-        // returned pieces, preserving order within the lane. Written to be
-        // IDEMPOTENT: applying the same clip_split twice yields the same lane,
-        // so a duplicate delivery can't produce duplicate clips.
-        set({
-          snapshot: {
-            ...snap,
-            tracks: withClips(snap.tracks, event.trackId, (clips) => {
-              const pieceIds = new Set(event.clips.map((c) => c.id));
-              // Drop any existing copies of the pieces (incl. the reused
-              // original id) wherever they sit, remembering the insert point.
-              let insertAt = clips.findIndex((c) => pieceIds.has(c.id));
-              if (insertAt === -1) insertAt = clips.length;
-              const remaining = clips.filter((c) => !pieceIds.has(c.id));
-              const head = remaining.slice(0, insertAt);
-              const tail = remaining.slice(insertAt);
-              return [...head, ...event.clips, ...tail];
-            }),
-          },
-        });
-        return;
-      }
-      case "clip_removed": {
-        if (!snap) return;
-        const trackId = trackOfClip(snap.tracks, event.id);
-        if (!trackId) return;
-        set({
-          snapshot: {
-            ...snap,
-            tracks: withClips(snap.tracks, trackId, (clips) =>
-              clips.filter((c) => c.id !== event.id)
-            ),
-          },
-          selectedClip:
-            get().selectedClip === event.id ? null : get().selectedClip,
-        });
-        return;
-      }
-
-      // --- plugins ---------------------------------------------------------
-      case "plugin_added": {
-        if (!snap) return;
-        set({
-          snapshot: {
-            ...snap,
-            tracks: snap.tracks.map((t) =>
-              t.id === event.trackId
-                ? t.plugins.some((p) => p.id === event.plugin.id)
-                  ? t
-                  : { ...t, plugins: [...t.plugins, event.plugin] }
-                : t
-            ),
-          },
-        });
-        return;
-      }
-      case "plugin_bypassed": {
-        if (!snap) return;
-        set({
-          snapshot: {
-            ...snap,
-            tracks: snap.tracks.map((t) => ({
-              ...t,
-              plugins: t.plugins.map((p) =>
-                p.id === event.pluginId
-                  ? { ...p, bypassed: event.bypassed }
-                  : p
-              ),
-            })),
-          },
-        });
-        return;
-      }
-      case "plugin_param_changed": {
-        // Param values are not part of the snapshot schema (faceplate-local);
-        // nothing to mirror. Components that show params subscribe separately.
-        return;
-      }
-
-      // --- render layers ---------------------------------------------------
-      case "layer_status": {
-        if (!snap) return;
-        set({
-          snapshot: {
-            ...snap,
-            tracks: snap.tracks.map((t) => ({
-              ...t,
-              renderLayers: t.renderLayers.map((l) =>
-                l.id === event.id ? { ...l, status: event.status } : l
-              ),
-            })),
-          },
-        });
-        return;
-      }
-      case "layer_render_progress":
-      case "layer_rendered": {
-        // Progress/eta and take ids are transient/auxiliary; the Timeline reads
-        // them off a small view-side map kept by the badge component. The
-        // durable status lives in the snapshot via layer_status above.
-        return;
-      }
-
-      // --- decimated telemetry (view-only) ---------------------------------
-      case "transport_position": {
-        if (!snap) return;
-        set({
-          snapshot: {
-            ...snap,
-            transport: { ...snap.transport, position: event.pos },
-          },
-        });
-        return;
-      }
-      case "meter_update": {
-        // Meters are pure view state — keep them OUT of the snapshot mirror so
-        // 60 Hz updates don't churn the backend-state object.
-        const meters = get().meters;
-        set({
-          meters: {
-            ...meters,
-            [event.trackId]: { rms: event.rms, peak: event.peak },
-          },
-        });
-        return;
-      }
-
-      default: {
-        // Exhaustiveness guard: if a new event type is added to the union and
-        // not handled, TypeScript flags `event` as `never` here.
-        const _exhaustive: never = event;
-        void _exhaustive;
-        return;
-      }
-    }
-  },
-
-  // --- view-state setters (UI-local; never commands) ---------------------
-  setZoom(pxPerSec) {
-    set({ pxPerSec: Math.max(16, Math.min(400, pxPerSec)) });
-  },
-  setScroll(scrollSec) {
-    set({ scrollSec: Math.max(0, scrollSec) });
-  },
-  selectClip(id) {
-    set({ selectedClip: id });
-  },
-  selectTrack(id) {
-    set({ selectedTrack: id });
-  },
-}));
-
-/** Start the snapshot+events feed. Call once on app mount.
- *
- * Ordering matters: we SUBSCRIBE first, then fetch the initial snapshot. Any
- * events that arrive in the gap before the snapshot resolves are BUFFERED and
- * replayed once the mirror exists — otherwise applyEvent's `!snapshot` guard
- * would silently drop them (a real load-time race: a command issued in that
- * window would never appear). Replay is safe because every applyEvent handler
- * is idempotent (track_added/clip_added/clip_split ignore ids they already
- * mirror), so a delta the fresh snapshot already includes is a harmless no-op.
- */
-export function connectFeed(): () => void {
-  const { applyEvent } = useStore.getState();
-  let ready = false;
-  const buffered: MoshEvent[] = [];
-
-  const onEvent = (event: MoshEvent) => {
-    if (ready) {
-      applyEvent(event);
-    } else {
-      buffered.push(event);
-    }
-  };
-
-  const unsubscribe = subscribe(onEvent);
-
-  void useStore
-    .getState()
-    .refresh()
-    .then(() => {
-      ready = true;
-      // Replay anything that arrived while the snapshot was loading, in order.
-      for (const event of buffered) applyEvent(event);
-      buffered.length = 0;
     });
+    void get().refresh();
+  },
 
-  return unsubscribe;
-}
+  setPxPerSec: (v) => set({ pxPerSec: Math.max(20, Math.min(400, v)) }),
+  setTool: (t) => set({ tool: t }),
+  setSnap: (b) => set({ snap: b }),
+  select: (ids, additive = false) =>
+    set((s) => {
+      const next = new Set(additive ? s.selection : []);
+      for (const id of ids) next.add(id);
+      return { selection: next };
+    }),
+  clearSelection: () => set({ selection: new Set<string>() }),
+  snapTime: (t) => {
+    const { snap, snapGrid } = get();
+    return snap ? Math.round(t / snapGrid) * snapGrid : t;
+  },
+
+  ensurePeaks: (clipId) => {
+    if (get().peaks[clipId]) return;
+    void executeCommand<CommandResult<{ peaks: Peaks }>>({
+      command: "get_clip_peaks",
+      args: { clipId, buckets: 800 },
+    }).then((res) => {
+      if (res.ok && res.data)
+        set((s) => ({ peaks: { ...s.peaks, [clipId]: res.data!.peaks } }));
+    });
+  },
+
+  setSelectedTrack: (id) => set({ selectedTrackId: id }),
+  openBrowser: () => {
+    set({ browserOpen: true });
+    if (get().availablePlugins.length === 0)
+      void executeCommand<CommandResult<{ plugins: AvailablePlugin[] }>>({
+        command: "list_plugins",
+        args: {},
+      }).then((res) => {
+        if (res.ok && res.data) set({ availablePlugins: res.data.plugins });
+      });
+  },
+  closeBrowser: () => set({ browserOpen: false }),
+
+  loadColors: () => {
+    if (get().availableColors.length > 0) return;
+    void executeCommand<CommandResult<{ colors: AvailableColor[] }>>({
+      command: "list_colors",
+      args: {},
+    }).then((res) => {
+      if (res.ok && res.data?.colors) set({ availableColors: res.data.colors });
+    });
+  },
+  setLab: (b) => set({ labMode: b }),
+
+  theme: "dark",
+  toggleTheme: () =>
+    set((s) => {
+      const next = s.theme === "dark" ? "light" : "dark";
+      document.documentElement.setAttribute("data-theme", next);
+      return { theme: next };
+    }),
+}));

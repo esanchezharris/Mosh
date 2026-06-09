@@ -1,13 +1,14 @@
 {
   "name": "mosh-ui",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.0.1",
   "type": "module",
-  "description": "Mosh WebView frontend (React/Vite, bundled into a JUCE 8 WebView). Couples to the C++ backend only via executeCommand + snapshot/events.",
+  "description": "Mosh arrangement UI — React/Vite in a JUCE 8 WebView. Swappable frontend (03).",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "react": "^18.3.1",
@@ -19,6 +20,7 @@
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
     "typescript": "^5.6.3",
-    "vite": "^5.4.11"
+    "vite": "^5.4.11",
+    "vite-plugin-singlefile": "^2.1.0"
   }
 }

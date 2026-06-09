@@ -1,44 +1,36 @@
 #!/usr/bin/env python3
-"""Mosh generative model service — health stub + FakeAdapter job protocol.
+"""Mosh generative model service (05 §4).
 
-A SEPARATE process from the C++ DAW. The C++ app's "Generative Job Manager"
-spawns this process and talks to it over a local HTTP + file/manifest protocol.
+A separate Python process — NOT built by CMake. Local job protocol: control over
+HTTP/JSON; audio over files + manifests (never giant JSON). The native Generative
+Job Manager (src/generative/) spawns/detects it, does a capability handshake +
+warmup, monitors heartbeat, and cancels jobs on project close.
 
-The service answers a health check and runs the generative **job protocol**:
-submit a render job, poll its status/progress, and cancel it. Audio is handed
-back over **files + manifests** (a WAV plus a sidecar manifest JSON), never inline
-in the HTTP body. The heavy generative work (StableAudio3 / MLX) lands much later
-behind the same interface and stays external/optional — this stage ships the
-deterministic FakeAdapter so the orchestration is proven before SA3 exists.
+Adapters: `fake` (stdlib stub) and `stable_audio3` (the carved MLX SA3 model — full
+carve: re-imagine/generate, ASTD colour rack, init-latent cache, judge QA). One
+SINGLE serialized worker owns the SA3 model (MLX is not concurrent). SA3 is
+advertised only when its model is present, so FakeAdapter-only runs are unaffected.
 
-ZERO external dependencies by design: standard library only (http.server, json,
-threading, uuid, argparse + the adapter's wave/struct/math). This guarantees the
-stub + FakeAdapter run anywhere/CI without the heavy SA3/MLX stack. See README.md.
-
-Adapter selection is module-level (`ADAPTER`) so concrete adapters can be plugged
-in later without touching the HTTP layer.
+Run:  service/run.sh         # picks the MLX venv python when MOSH_ENABLE_SA3=1
+      python3 service/server.py
 """
+from __future__ import annotations
 
-import argparse
+import hashlib
+import itertools
 import json
 import os
-import signal
+import queue
 import sys
 import threading
+import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from adapters import load_adapter
-
-SERVICE_NAME = "mosh-generative"
-VERSION = "0.0.0"
-
-# When spawned by the C++ host (a GUI app), our stdout/stderr handles may be invalid
-# or an undrained pipe — and torch/Stable-Audio-3 log heavily, which would error or
-# block. Redirect both to a log file BEFORE importing any heavy adapter. Standalone:
-# set MOSH_SERVICE_CONSOLE=1 to keep console output. The log path is printed nowhere
-# (no console), so: %TEMP%\mosh-service.log.
-if os.environ.get("MOSH_SERVICE_CONSOLE", "") != "1":
+# On Windows a JUCE GUI parent may launch this service with stdout/stderr pipes
+# that are not drained. Keep service logging file-backed unless a developer asks
+# for console output explicitly.
+if os.name == "nt" and os.environ.get("MOSH_SERVICE_CONSOLE", "") != "1":
     try:
         import tempfile
         _logfh = open(os.path.join(tempfile.gettempdir(), "mosh-service.log"),
@@ -48,330 +40,230 @@ if os.environ.get("MOSH_SERVICE_CONSOLE", "") != "1":
     except OSError:
         pass
 
-# Adapter selection via env (MOSH_ADAPTER), default the dependency-free FakeAdapter.
-# The real CUDA StableAudio3Adapter is selected with MOSH_ADAPTER=stable_audio_3 and
-# is imported lazily (load_adapter) so the Fake/CI path never pulls in torch. The
-# HTTP layer below is model-agnostic and does not change between adapters.
-ADAPTER = load_adapter(os.environ.get("MOSH_ADAPTER", "fake"))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from adapters import fake_adapter  # noqa: E402
+from adapters import stable_audio3_adapter  # noqa: E402  (path-only checks; heavy imports stay lazy)
 
-# In-memory job store, owned by the JobManager below. Jobs do not survive a
-# restart — the C++ host treats this process as disposable and re-submits.
-JOBS = None  # set in main() once the adapter/store are ready
+SERVICE_VERSION = "0.2.0"
+START_TIME = time.time()
+SA3_ENABLED = os.environ.get("MOSH_ENABLE_SA3", "1") == "1" and stable_audio3_adapter.available()
 
 
-def _log(message: str) -> None:
-    """Write a single clean line to stderr (stdout stays clear for protocol use)."""
-    print(message, file=sys.stderr, flush=True)
+def _colorrack_hash() -> str:
+    try:
+        from colors import runtime as CR
+        return hashlib.md5(json.dumps(CR.registry(), sort_keys=True).encode()).hexdigest()[:8]
+    except Exception:  # noqa: BLE001
+        return "none"
 
 
-class JobManager:
-    """In-memory job store + background render worker for the FakeAdapter.
+# service_build feeds the native render-cache fingerprint: changing the engine/colors
+# must invalidate cached renders, so it encodes the carve identity.
+if SA3_ENABLED:
+    SERVICE_BUILD = (f"sa3-1.0.0+{stable_audio3_adapter.backend_name()}"
+                     f"+colors{_colorrack_hash()}+sec{os.environ.get('SA3_SECONDS', '8.0')}")
+else:
+    SERVICE_BUILD = "fake-0.1.0"
 
-    Each submitted job runs on its own daemon thread (so a long render never blocks
-    the HTTP server's accept loop). State is guarded by a single lock; the public
-    methods are the only things the HTTP layer touches.
+FAKE_ADAPTER = {
+    "id": "fake", "version": "0.0.1",
+    "generation_modes": ["text_to_audio", "audio_to_audio"],
+    "conditioning_inputs": ["prompt", "init_audio", "negative_prompt"],
+    "duration_limits": {"min": 0.1, "max": 600.0},
+    "sample_rates": [44100], "channel_modes": ["stereo"],
+    "runtime_requirements": ["cpu"], "packaging_mode": "python_service",
+    "supports_seed": True, "supports_semantic_controls": False,
+    "service_build": SERVICE_BUILD,
+}
 
-    Job records are plain dicts with: ``jobId``, ``status``
-    (``queued``/``running``/``done``/``error``/``canceled``), ``progress``
-    (0.0..1.0), and once finished either ``manifest`` or ``error``. A per-job
-    ``_cancel`` event is the cooperative cancellation channel — the adapter polls it
-    via the ``is_canceled`` callback and aborts cleanly.
-    """
 
-    def __init__(self, adapter):
-        self._adapter = adapter
-        self._lock = threading.Lock()
-        self._jobs = {}
-        self._cancels = {}
-        self._threads = {}
+def _sa3_descriptor() -> dict:
+    return {
+        "id": "stable_audio3", "version": "1.0.0", "available": SA3_ENABLED,
+        "generation_modes": ["text_to_audio", "audio_to_audio"],
+        "conditioning_inputs": ["prompt", "init_audio", "negative_prompt", "colors"],
+        "duration_limits": {"min": 0.5, "max": float(os.environ.get("SA3_SECONDS", "8.0"))},
+        "sample_rates": [44100], "channel_modes": ["stereo"],
+        "runtime_requirements": [stable_audio3_adapter.backend_name()], "packaging_mode": "python_service",
+        "supports_seed": True, "supports_semantic_controls": True,
+        "semantic_controls": "colors", "service_build": SERVICE_BUILD,
+    }
 
-    def submit(self, request: dict) -> dict:
-        """Register a job and start its render thread. Returns the queued record."""
-        job_id = request.get("jobId") or uuid.uuid4().hex
-        request["jobId"] = job_id
 
-        with self._lock:
-            self._jobs[job_id] = {
-                "jobId": job_id,
-                "status": "queued",
-                "progress": 0.0,
-            }
-            cancel = threading.Event()
-            self._cancels[job_id] = cancel
+_jobs: dict[str, dict] = {}
+_lock = threading.Lock()
+_job_q: "queue.PriorityQueue" = queue.PriorityQueue()
+_seq = itertools.count()
 
-        thread = threading.Thread(
-            target=self._run,
-            args=(request, cancel),
-            name="mosh-job-%s" % job_id[:8],
-            daemon=True,
-        )
-        with self._lock:
-            self._threads[job_id] = thread
-        thread.start()
 
-        return {"jobId": job_id, "status": "queued"}
+def _adapter_for(adapter_id: str):
+    if adapter_id in ("stable_audio3", "sa3"):
+        from adapters import stable_audio3_adapter as ad
+        return ad
+    return fake_adapter
 
-    def get(self, job_id: str):
-        """Return a copy of the job record, or ``None`` if there is no such job."""
-        with self._lock:
-            record = self._jobs.get(job_id)
-            return dict(record) if record is not None else None
 
-    def cancel(self, job_id: str) -> bool:
-        """Request cooperative cancellation. Returns False if there's no such job.
-
-        A queued/running job is flipped to ``canceled`` and its cancel event is set;
-        the worker observes the event and stops producing. A job that has already
-        finished (``done``/``error``) keeps its terminal status — cancel is a no-op
-        beyond confirming the job exists.
-        """
-        with self._lock:
-            record = self._jobs.get(job_id)
-            if record is None:
-                return False
-            cancel = self._cancels.get(job_id)
-            if cancel is not None:
-                cancel.set()
-            if record["status"] in ("queued", "running"):
-                record["status"] = "canceled"
-        return True
-
-    def _run(self, request: dict, cancel: threading.Event) -> None:
-        """Worker body: drive the adapter render, recording status/progress/result."""
-        job_id = request["jobId"]
-
-        # Honour a cancel that arrived between submit() and thread start-up.
-        if cancel.is_set():
-            self._set(job_id, status="canceled")
+def _run_job(job_id: str) -> None:
+    with _lock:
+        job = _jobs[job_id]
+        if job.get("cancel"):
+            job["status"] = "cancelled"
             return
+        job["status"] = "rendering"
+        adapter_id = job.get("adapter", "fake")
+    try:
+        if adapter_id == "fake":
+            # Stepped progress for the cheap stub (debounced renders are slow IRL).
+            for step in range(1, 6):
+                with _lock:
+                    if _jobs[job_id].get("cancel"):
+                        _jobs[job_id]["status"] = "cancelled"
+                        return
+                    _jobs[job_id]["progress"] = step / 6.0
+                time.sleep(0.05)
+        else:
+            with _lock:
+                _jobs[job_id]["progress"] = 0.3   # coarse: real model render is one shot
 
-        self._set(job_id, status="running")
+        ad = _adapter_for(adapter_id)
+        manifest = ad.render(job["input_wav"], job["output_wav"], job["params"])
+        with open(job["manifest"], "w") as f:
+            json.dump(manifest, f)
+        with _lock:
+            _jobs[job_id]["progress"] = 1.0
+            _jobs[job_id]["status"] = "ready"
+            _jobs[job_id]["result"] = manifest
+    except Exception as e:  # noqa: BLE001
+        with _lock:
+            _jobs[job_id]["status"] = "error"
+            _jobs[job_id]["error"] = str(e)
 
-        def on_progress(pct: float) -> None:
-            # Don't overwrite a terminal status (e.g. a late cancel) with progress.
-            with self._lock:
-                record = self._jobs.get(job_id)
-                if record is not None and record["status"] == "running":
-                    record["progress"] = max(0.0, min(1.0, float(pct)))
 
+def _worker_loop() -> None:
+    """The ONE thread that ever runs an adapter — serializes inference so the
+    process-global MLX model is never touched concurrently (05 §6 priority queue)."""
+    while True:
+        _prio, _seq_n, job_id = _job_q.get()
         try:
-            manifest = self._adapter.render(request, on_progress, cancel.is_set)
-        except Exception as exc:  # noqa: BLE001 — surface any adapter failure as job error
-            _log("[job %s] render failed: %r" % (job_id, exc))
-            self._set(job_id, status="error", error=str(exc))
-            return
-
-        if manifest is None:
-            # Adapter aborted because it was canceled mid-render.
-            self._set(job_id, status="canceled")
-            return
-
-        self._set(job_id, status="done", progress=1.0, manifest=manifest)
-
-    def _set(self, job_id: str, **fields) -> None:
-        """Atomically merge ``fields`` into a job record if it still exists."""
-        with self._lock:
-            record = self._jobs.get(job_id)
-            if record is not None:
-                record.update(fields)
+            _run_job(job_id)
+        finally:
+            _job_q.task_done()
 
 
-class MoshServiceHandler(BaseHTTPRequestHandler):
-    """Routes the minimal Stage-0 surface. Adapters answer the capability queries."""
+class Handler(BaseHTTPRequestHandler):
+    server_version = f"MoshService/{SERVICE_VERSION}"
 
-    # Silence the default noisy per-request stderr format; we log our own lines.
-    def log_message(self, fmt, *args):  # noqa: N802 (stdlib signature)
-        _log("[%s] %s" % (self.address_string(), fmt % args))
-
-    def _send_json(self, status: int, payload: dict) -> None:
+    def _send(self, code: int, payload: dict) -> None:
         body = json.dumps(payload).encode("utf-8")
-        self.send_response(status)
+        self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
 
-    def _read_json_body(self):
-        """Read and parse the request body as JSON. Returns ``{}`` when empty.
-
-        Raises ``ValueError`` on malformed JSON so callers can return a 400.
-        """
-        length = int(self.headers.get("Content-Length") or 0)
-        if length <= 0:
+    def _read_json(self) -> dict:
+        n = int(self.headers.get("Content-Length", 0))
+        if n <= 0:
             return {}
-        raw = self.rfile.read(length)
-        if not raw:
+        try:
+            return json.loads(self.rfile.read(n).decode("utf-8"))
+        except Exception:  # noqa: BLE001
             return {}
-        return json.loads(raw.decode("utf-8"))
 
-    @staticmethod
-    def _job_id_from_path(path: str):
-        """Extract ``<jobId>`` from ``/jobs/<jobId>``; ``None`` if not that shape."""
-        parts = path.split("/")
-        # ["", "jobs", "<jobId>"] for a well-formed single-segment job path.
-        if len(parts) == 3 and parts[1] == "jobs" and parts[2]:
-            return parts[2]
-        return None
-
-    def do_GET(self):  # noqa: N802 (stdlib signature)
-        # Strip any query string; we only key off the path.
+    def do_GET(self) -> None:  # noqa: N802
         path = self.path.split("?", 1)[0].rstrip("/") or "/"
+        query = {}
+        if "?" in self.path:
+            for kv in self.path.split("?", 1)[1].split("&"):
+                if "=" in kv:
+                    k, v = kv.split("=", 1)
+                    query[k] = v
 
         if path == "/health":
-            caps = ADAPTER.health()
-            self._send_json(
-                200,
-                {
-                    "ok": True,
-                    "service": SERVICE_NAME,
-                    "version": VERSION,
-                    "adapter": ADAPTER.name,
-                    "capabilities": caps,
-                },
-            )
-            return
-
-        if path == "/capabilities":
-            self._send_json(200, {"capabilities": ADAPTER.health()})
-            return
-
-        # The Color Rack descriptor: each color's ASTD ceiling + metadata so the UI can
-        # clamp its 0–100 sliders (05 §6). Adapters without semantic colors return [].
-        if path == "/colors":
-            colors = ADAPTER.colors() if hasattr(ADAPTER, "colors") else []
-            self._send_json(200, {"colors": colors})
-            return
-
-        job_id = self._job_id_from_path(path)
-        if job_id is not None:
-            record = JOBS.get(job_id)
-            if record is None:
-                self._send_json(404, {"ok": False, "error_code": "NO_SUCH_JOB"})
-                return
-            payload = {
-                "ok": True,
-                "jobId": record["jobId"],
-                "status": record["status"],
-                "progress": record.get("progress", 0.0),
-            }
-            if "manifest" in record:
-                payload["manifest"] = record["manifest"]
-            if "error" in record:
-                payload["error"] = record["error"]
-            self._send_json(200, payload)
-            return
-
-        self._send_json(404, {"ok": False, "error_code": "NOT_FOUND"})
-
-    def do_POST(self):  # noqa: N802 (stdlib signature)
-        path = self.path.split("?", 1)[0].rstrip("/") or "/"
-
-        if path == "/jobs":
+            adapters = ["fake"] + (["stable_audio3"] if SA3_ENABLED else [])
+            self._send(200, {"ok": True, "service": "mosh-generative",
+                             "version": SERVICE_VERSION, "build": SERVICE_BUILD,
+                             "uptime_s": round(time.time() - START_TIME, 1),
+                             "adapters": adapters})
+        elif path == "/capabilities":
+            adapters = [FAKE_ADAPTER] + ([_sa3_descriptor()] if SA3_ENABLED else [])
+            self._send(200, {"ok": True, "adapters": adapters, "service_build": SERVICE_BUILD})
+        elif path == "/colors":
             try:
-                body = self._read_json_body()
-            except ValueError:
-                self._send_json(
-                    400, {"ok": False, "error_code": "BAD_JSON"}
-                )
-                return
+                from colors import runtime as CR
+                self._send(200, {"ok": True, "colors": CR.descriptor(),
+                                 "lab_alpha_max": CR._meta().get("lab_alpha_max", 0.4)})
+            except Exception as e:  # noqa: BLE001
+                self._send(503, {"ok": False, "error": f"colors unavailable: {e}", "colors": []})
+        elif path == "/status":
+            jid = query.get("jobId", "")
+            with _lock:
+                job = _jobs.get(jid)
+                if job is None:
+                    self._send(404, {"ok": False, "error": "unknown jobId"})
+                    return
+                self._send(200, {"ok": True, "jobId": jid, "status": job["status"],
+                                 "progress": job.get("progress", 0.0),
+                                 "outputWav": job["output_wav"],
+                                 "error": job.get("error"),
+                                 "manifest": job.get("result")})
+        else:
+            self._send(404, {"ok": False, "error": f"unknown path: {path}"})
 
-            missing = [k for k in ("mode", "prompt", "cacheKey", "outDir") if k not in body]
-            if missing:
-                self._send_json(
-                    400,
-                    {
-                        "ok": False,
-                        "error_code": "BAD_REQUEST",
-                        "error": "missing fields: %s" % ", ".join(missing),
-                    },
-                )
-                return
-
-            result = JOBS.submit(body)
-            self._send_json(
-                200,
-                {"ok": True, "jobId": result["jobId"], "status": result["status"]},
-            )
-            return
-
-        self._send_json(404, {"ok": False, "error_code": "NOT_FOUND"})
-
-    def do_DELETE(self):  # noqa: N802 (stdlib signature)
+    def do_POST(self) -> None:  # noqa: N802
         path = self.path.split("?", 1)[0].rstrip("/") or "/"
+        data = self._read_json()
+        if path == "/submit":
+            adapter_id = data.get("adapter", "fake")
+            if adapter_id in ("stable_audio3", "sa3") and not SA3_ENABLED:
+                self._send(503, {"ok": False, "error": "stable_audio3 unavailable "
+                                 "(model/venv absent or MOSH_ENABLE_SA3 not set)"})
+                return
+            input_wav = data.get("inputWav", "")
+            output_wav = data.get("outputWav", "")
+            if not input_wav or not os.path.exists(input_wav):
+                self._send(400, {"ok": False, "error": "inputWav missing"})
+                return
+            job_id = uuid.uuid4().hex[:12]
+            with _lock:
+                _jobs[job_id] = {
+                    "status": "queued", "progress": 0.0, "adapter": adapter_id,
+                    "input_wav": input_wav, "output_wav": output_wav,
+                    "manifest": data.get("manifest", output_wav + ".manifest.json"),
+                    "params": data.get("params", {}), "cancel": False,
+                }
+            _job_q.put((int(data.get("priority", 5)), next(_seq), job_id))
+            self._send(200, {"ok": True, "jobId": job_id})
+        elif path == "/cancel":
+            jid = data.get("jobId", "")
+            with _lock:
+                if jid in _jobs:
+                    _jobs[jid]["cancel"] = True
+            self._send(200, {"ok": True})
+        else:
+            self._send(404, {"ok": False, "error": f"unknown path: {path}"})
 
-        job_id = self._job_id_from_path(path)
-        if job_id is not None:
-            if JOBS.cancel(job_id):
-                self._send_json(200, {"ok": True, "status": "canceled"})
-            else:
-                self._send_json(404, {"ok": False, "error_code": "NO_SUCH_JOB"})
-            return
-
-        self._send_json(404, {"ok": False, "error_code": "NOT_FOUND"})
+    def log_message(self, fmt: str, *args) -> None:
+        sys.stderr.write("[service] " + (fmt % args) + "\n")
 
 
-def _make_server(host: str, port: int) -> ThreadingHTTPServer:
-    return ThreadingHTTPServer((host, port), MoshServiceHandler)
-
-
-def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(
-        prog="mosh-generative",
-        description="Mosh generative model service (Stage-0 health stub).",
-    )
-    parser.add_argument(
-        "--host",
-        default="127.0.0.1",
-        help="Bind address (default: 127.0.0.1).",
-    )
-    parser.add_argument(
-        "--port",
-        type=int,
-        default=8765,
-        help="Bind port (default: 8765).",
-    )
-    args = parser.parse_args(argv)
-
-    global JOBS
-    JOBS = JobManager(ADAPTER)
-
-    # Preload heavy models in the background (the SA3 weights are ~9 GB and slow to
-    # load from an HDD) so the first render isn't a multi-minute stall. Best-effort.
-    if hasattr(ADAPTER, "warmup"):
-        threading.Thread(target=ADAPTER.warmup, name="mosh-warmup", daemon=True).start()
-
-    server = _make_server(args.host, args.port)
-
-    def _shutdown(_signum, _frame):
-        _log("Received shutdown signal; stopping...")
-        # shutdown() must run off the serve_forever thread; signal handler is fine
-        # here because serve_forever blocks the main thread below.
-        raise KeyboardInterrupt
-
-    # SIGINT (Ctrl-C) is the primary stop path; SIGTERM when the C++ host kills us.
-    signal.signal(signal.SIGINT, _shutdown)
+def main() -> int:
+    host = os.environ.get("MOSH_SERVICE_HOST", "127.0.0.1")
+    port = int(os.environ.get("MOSH_SERVICE_PORT", "8770"))
+    threading.Thread(target=_worker_loop, daemon=True).start()
+    if SA3_ENABLED and stable_audio3_adapter.backend_name() == "mlx":
+        # Pre-load the judge model off the worker thread so the first render's QA
+        # is ~1–2s, not ~25s. Background + best-effort: never blocks /health.
+        from sa3 import qa  # noqa: PLC0415
+        threading.Thread(target=qa.warm, daemon=True).start()
+    httpd = ThreadingHTTPServer((host, port), Handler)
+    mode = "FakeAdapter + StableAudio3" if SA3_ENABLED else "FakeAdapter"
+    sys.stderr.write(f"[service] Mosh generative service v{SERVICE_VERSION} "
+                     f"on http://{host}:{port} ({mode}) build={SERVICE_BUILD}\n")
     try:
-        signal.signal(signal.SIGTERM, _shutdown)
-    except (AttributeError, ValueError):
-        # SIGTERM may be unavailable on some Windows configurations; ignore.
-        pass
-
-    _log(
-        "%s v%s (adapter=%s) listening on http://%s:%d"
-        % (SERVICE_NAME, VERSION, ADAPTER.name, args.host, args.port)
-    )
-    _log(
-        "Endpoints: GET /health, GET /capabilities, "
-        "POST /jobs, GET /jobs/<id>, DELETE /jobs/<id>"
-    )
-    try:
-        server.serve_forever()
+        httpd.serve_forever()
     except KeyboardInterrupt:
-        pass
-    finally:
-        server.shutdown()
-        server.server_close()
-        _log("Stopped cleanly.")
+        httpd.shutdown()
     return 0
 
 

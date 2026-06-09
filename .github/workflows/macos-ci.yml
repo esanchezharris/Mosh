@@ -1,0 +1,127 @@
+name: macOS CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      run_full_local:
+        description: "Run local-only full Mac gates on a self-hosted Mosh runner"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  hosted-smoke:
+    name: Hosted macOS smoke
+    runs-on: macos-15
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use HTTPS for Tracktion submodules
+        run: git config --global url."https://github.com/".insteadOf "git@github.com:"
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install native build tools
+        run: brew install cmake ninja ripgrep
+
+      - name: Build UI
+        run: |
+          npm --prefix ui ci --no-audit --no-fund
+          npm --prefix ui run build
+
+      - name: Configure CMake
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build native app and tests
+        run: cmake --build build --target Mosh MoshTests --config Debug --parallel 6
+
+      - name: Run CTest
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Run hosted headless gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ci-evidence
+          APP="build/Mosh_artefacts/Debug/Mosh.app/Contents/MacOS/Mosh"
+          MOSH_NO_AUDIO=1 "$APP" --selftest-undo 2>&1 | tee ci-evidence/selftest-undo.log
+          MOSH_NO_AUDIO=1 "$APP" --selftest 2>&1 | tee ci-evidence/selftest.log
+          scripts/validate-command-log-contract.sh 2>&1 | tee ci-evidence/command-log-contract.log
+
+      - name: Upload hosted smoke evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hosted-smoke-evidence
+          path: |
+            ci-evidence
+            build/Testing/Temporary/LastTest.log
+          if-no-files-found: ignore
+
+  self-hosted-full-mac:
+    name: Self-hosted full Mac gates
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_full_local }}
+    runs-on:
+      - self-hosted
+      - macOS
+      - ARM64
+      - mosh-local
+    timeout-minutes: 180
+    env:
+      MOSH_LEGACY_SA3_BUNDLE: /Users/emiliosanchez-harris/Documents/ClaudeMosh/_preserved_artifacts/2026-06-08-consolidation/mosh/sa3-colors-steering-data-20260608
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use HTTPS for Tracktion submodules
+        run: git config --global url."https://github.com/".insteadOf "git@github.com:"
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Preflight local-only dependencies
+        run: scripts/macos-local-preflight.sh
+
+      - name: Configure/build if needed
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm --prefix ui ci --no-audit --no-fund
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+          cmake --build build --target Mosh MoshTests --config Debug --parallel 6
+
+      - name: Run strict local V0 gate
+        run: scripts/strict-local-v0-gate.sh
+
+      - name: Run BlackHole live-audio gate
+        run: scripts/blackhole-live-audio-gate.sh
+
+      - name: Run macOS UI automation gate
+        run: scripts/macos-ui-automation-gate.py
+
+      - name: Upload local full-gate evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: self-hosted-full-mac-evidence
+          path: _preserved_artifacts/2026-06-08-consolidation/claudemosh
+          if-no-files-found: ignore

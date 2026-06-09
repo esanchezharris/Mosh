@@ -1,59 +1,62 @@
-# Reference clones (read-only, for resolving // VERIFY items against pinned deps)
-/.refclone/
-
 # Build output
-/build/
-/cmake-build-*/
-/out/
+build/
+build-*/
+cmake-build-*/
+out/
 
-# CPM / dependency cache
-/.cpm-cache/
-/libs/_deps/
+# CPM / fetched deps cache (kept out of repo; pinned by commit in CMake)
+.deps-inspect/
+libs/_deps/
+.cpm-cache/
 
-# JUCE / native build artifacts
-*.o
-*.obj
-*.lib
-*.a
-*.exp
-*.ilk
-*.pdb
-*.exe
-*.dll
-*.dylib
-*.so
-
-# UI (frontend manages its own; staged bundle is generated)
-/ui/node_modules/
-/ui/dist/
+# Node / Vite
+node_modules/
+ui/node_modules/
+ui/dist/
+ui/.vite/
+ui/playwright-report/
+ui/test-results/
+ui/.tsbuild-node/
+ui/*.tsbuildinfo
 
 # Python service
-__pycache__/
-*.pyc
-.venv/
 service/.venv/
-
-# Editor / OS
-.DS_Store
-Thumbs.db
-.vscode/
-.idea/
-*.user
-
-# Local env / secrets (external model paths live here)
-.env
-.env.local
-
-# Logs (the JSONL semantic log is written at runtime, not committed)
-*.log
-/sessions/
-
-# Headless-browser QA artifacts (Playwright snapshots/screenshots; throwaway)
-.playwright-mcp/
-/mosh-*.png
-
-# SA3 standalone smoke / e2e output (generated WAVs) + local env
+service/__pycache__/
+**/__pycache__/
+*.pyc
 service/scripts/_sa3_smoke_out/
 service/scripts/_sa3_e2e_out/
-.env
+
+# Runtime / data
+*.tracktionedit
+*.log
+*.wav
+*.aiff
+*.aif
+mosh-sessions/
+service/jobs/
+_preserved_artifacts/
+assets/grit_demo/
+midi_data/
+midi_rag_database.pkl
+
+# Headless/browser QA artifacts
+.e2e-artifacts/
+.playwright-mcp/
+playwright-report/
+test-results/
+mosh-*.png
+
+# Local agent/runtime scratch
 .gstack/
+.refclone/
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.xcodeproj
+*.xcworkspace
+compile_commands.json

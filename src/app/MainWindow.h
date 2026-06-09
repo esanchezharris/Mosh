@@ -1,33 +1,25 @@
 #pragma once
-#include <juce_gui_basics/juce_gui_basics.h>
-#include "WebViewHost.h"
-#include "DslExecutor.h"
+
+#include <juce_gui_extra/juce_gui_extra.h>
+#include "app/WebViewShell.h"
 
 namespace mosh
 {
-    // The top-level application window. Hosts the WebView shell. Pure native chrome
-    // around the swappable WebView frontend (03).
-    class MainWindow : public juce::DocumentWindow
-    {
-    public:
-        MainWindow (juce::String name, DslExecutor& executor, std::function<bool()> uiConnected = {})
-            : juce::DocumentWindow (std::move (name),
-                                    juce::Colours::black,
-                                    juce::DocumentWindow::allButtons)
-        {
-            setUsingNativeTitleBar (true);
-            setContentOwned (new WebViewHost (executor, std::move (uiConnected)), true);
-            setResizable (true, true);
-            centreWithSize (1280, 800);
-            setVisible (true);
-        }
+/** The single top-level window. Hosts the WebView shell as its content. */
+class MainWindow : public juce::DocumentWindow
+{
+public:
+    explicit MainWindow (juce::String name);
+    ~MainWindow() override;
 
-        void closeButtonPressed() override
-        {
-            juce::JUCEApplication::getInstance()->systemRequestedQuit();
-        }
+    void closeButtonPressed() override;
 
-    private:
-        JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainWindow)
-    };
-}
+    WebViewShell& shell() { return *content; }
+
+private:
+    std::unique_ptr<WebViewShell> content;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainWindow)
+};
+
+} // namespace mosh

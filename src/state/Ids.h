@@ -1,0 +1,49 @@
+#pragma once
+
+#include <juce_data_structures/juce_data_structures.h>
+
+// Mosh-owned ValueTree identifiers layered onto the Edit tree (01 §3–§4).
+// Tracktion owns its own IDs (TRACK, CLIP, PLUGIN, ...); these are the extra
+// sub-trees Mosh adds (the RenderLayer / source-graph model). Because they are
+// plain ValueTree data parented under the Edit, they inherit undo,
+// serialization, and observation for free.
+namespace mosh::ids
+{
+#define MOSH_DECLARE_ID(name) const juce::Identifier name (#name);
+
+    // The Tier-B generative transform record (01 §4.2). Parented under a clip
+    // (default) or track. All fields are CachedValue bound to the undo manager.
+    MOSH_DECLARE_ID (MOSH_RENDERLAYER)
+
+    MOSH_DECLARE_ID (id)
+    MOSH_DECLARE_ID (inputRef)
+    MOSH_DECLARE_ID (timeRangeStart)
+    MOSH_DECLARE_ID (timeRangeEnd)
+    MOSH_DECLARE_ID (modelAdapter)
+    MOSH_DECLARE_ID (modelVersion)
+    MOSH_DECLARE_ID (adapterVersion)
+    MOSH_DECLARE_ID (mode)             // generate | reimagine | inpaint | continue
+    MOSH_DECLARE_ID (modelVariant)     // size/decoder variant
+    MOSH_DECLARE_ID (params)           // prompt, colors[], cfg, steps, nl (child tree)
+    MOSH_DECLARE_ID (seed)
+    MOSH_DECLARE_ID (safetyMappingVersion)
+    MOSH_DECLARE_ID (sourceFingerprint)
+    MOSH_DECLARE_ID (cacheKey)
+    MOSH_DECLARE_ID (cacheArtifact)
+    MOSH_DECLARE_ID (status)           // empty | queued | rendering | ready | error | dirty
+    MOSH_DECLARE_ID (createdBy)        // user | (future) monster
+    MOSH_DECLARE_ID (userKept)
+
+    // params child + colors
+    MOSH_DECLARE_ID (PARAMS)
+    MOSH_DECLARE_ID (prompt)
+    MOSH_DECLARE_ID (COLORS)
+    MOSH_DECLARE_ID (COLOR)
+    MOSH_DECLARE_ID (name)
+    MOSH_DECLARE_ID (value)            // 0–100 ASTD UI value
+    MOSH_DECLARE_ID (cfg)
+    MOSH_DECLARE_ID (steps)
+    MOSH_DECLARE_ID (nl)               // init_noise_level (reimagine)
+
+#undef MOSH_DECLARE_ID
+} // namespace mosh::ids

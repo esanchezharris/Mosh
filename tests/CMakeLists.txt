@@ -1,33 +1,28 @@
-# ── mosh_tests — Catch2 units + the command-surface harness (06 §4) ────────────
-# Links only mosh_spine (Tracktion-free), so it builds & runs on any OS — the
-# real, runnable verification of the spine contract.
+# Catch2 tests + the MoshOps spine units (06 §4).
+# A JUCE console app so tests can use juce::ValueTree / SHA256 (the RenderLayer
+# round-trip + full-fingerprint cache key). The live command-surface harness
+# (driving a real engine) is exercised through the running app at the gate; these
+# units cover the pure, engine-free logic.
 
-add_executable(mosh_tests
-    test_result_envelope.cpp
-    test_astd.cpp
-    test_fingerprint.cpp
+juce_add_console_app(MoshTests PRODUCT_NAME "MoshTests")
+
+target_sources(MoshTests PRIVATE
+    test_sanity.cpp
     test_renderlayer.cpp
-    test_events.cpp
-    test_clipmath.cpp
-    test_generative.cpp
-    test_generative_commands.cpp
-    test_command_surface.cpp
-)
+    test_astd.cpp)
 
-target_link_libraries(mosh_tests PRIVATE mosh_spine Catch2::Catch2WithMain)
-target_compile_features(mosh_tests PRIVATE cxx_std_20)
-set_target_properties(mosh_tests PROPERTIES FOLDER "mosh")
+target_include_directories(MoshTests PRIVATE ${CMAKE_SOURCE_DIR}/src)
 
-# Register individual Catch2 cases with CTest.
-list(APPEND CMAKE_MODULE_PATH "${Catch2_SOURCE_DIR}/extras")
-include(Catch)
-catch_discover_tests(mosh_tests)
+target_compile_definitions(MoshTests PRIVATE
+    JUCE_USE_CURL=0
+    JUCE_WEB_BROWSER=0
+    JUCE_STANDALONE_APPLICATION=1)
 
-# ── Service integration test (spawns the Python service; opt-in target) ────────
-# Kept separate from mosh_tests so the fast unit suite never spawns a process.
-add_executable(mosh_service_tests test_generative_service.cpp)
-target_link_libraries(mosh_service_tests PRIVATE mosh_spine Catch2::Catch2WithMain)
-target_compile_features(mosh_service_tests PRIVATE cxx_std_20)
-target_compile_definitions(mosh_service_tests PRIVATE MOSH_SERVICE_DIR="${CMAKE_SOURCE_DIR}/service")
-set_target_properties(mosh_service_tests PROPERTIES FOLDER "mosh")
-catch_discover_tests(mosh_service_tests)
+target_link_libraries(MoshTests PRIVATE
+    Catch2::Catch2WithMain
+    juce::juce_core
+    juce::juce_data_structures
+    juce::juce_cryptography
+    juce::juce_recommended_config_flags)
+
+add_test(NAME MoshTests COMMAND $<TARGET_FILE:MoshTests>)
