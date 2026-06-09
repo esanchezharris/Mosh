@@ -164,6 +164,23 @@ export type AudioDevices = {
   audioEnabled: boolean;
 };
 
+// BRW-001 — content/file browser (read-only list_directory). Pure view data; the
+// only mutation is the existing import_clip command on a chosen file.
+export type DirEntry = {
+  name: string;
+  path: string;       // full absolute path
+  isDir: boolean;
+  size: number | null; // bytes (null for directories)
+};
+export type DirListing = {
+  path: string;          // normalized absolute dir actually listed
+  parent: string | null; // parent dir, or null at the filesystem root (drives Up)
+  exists: boolean;       // false when missing / not a dir / no read access
+  error: string | null;  // human-readable reason when exists==false
+  roots: { name: string; path: string }[]; // always present (recovery targets)
+  entries: DirEntry[];
+};
+
 export type Snapshot = {
   schemaVersion: number;
   session: {
@@ -180,6 +197,13 @@ export type Snapshot = {
     bitDepth?: number;
     bufferSize?: number;
     outputLatencyMs?: number;
+    // PRF-001 — multicore audio processing. availableCores is what the engine sees;
+    // audioThreads is the RESOLVED count it actually uses (== availableCores when auto);
+    // audioThreadsAuto shows "Auto (N)". A real preference (drives setNumThreads on the
+    // parallel graph), not a cosmetic readout. Single-thread is threads=1.
+    availableCores?: number;
+    audioThreads?: number;
+    audioThreadsAuto?: boolean;
     // Plugin delay compensation readout (MON-004): the whole-edit reported latency the
     // playback graph compensates (neural insert + all hosted plugins). Null context
     // (no audio device / idle engine) → latencyContextReady=false, label "PDC —".

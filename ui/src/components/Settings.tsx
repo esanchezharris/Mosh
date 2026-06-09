@@ -29,6 +29,18 @@ export function Settings() {
   const projectDefault = projectExt ? "untitled." + projectExt : "untitled";
   const audioEnabled = session?.audioEnabled ?? false;
 
+  // PRF-001 — multicore audio threads. Read the resolved values from the snapshot;
+  // the stepper is clamped to [1..availableCores] (UI never sends 0 — 1 is single-thread).
+  const cores = session?.availableCores;
+  const threads = session?.audioThreads ?? cores ?? 1;
+  const threadsAuto = session?.audioThreadsAuto ?? true;
+  const setThreads = async (n: number) => {
+    if (!cores) return;
+    const clamped = Math.max(1, Math.min(cores, Math.round(n)));
+    await exec("set_audio_threads", { threads: clamped });
+    await refresh();
+  };
+
   // Lazy device load on open (mirrors openBrowser/loadColors).
   const toggle = () => {
     const next = !open;
@@ -176,6 +188,39 @@ export function Settings() {
             {session?.audioDeviceError ? (
               <div className="settings-deverr">{session.audioDeviceError}</div>
             ) : null}
+          </div>
+
+          {/* CPU / audio threads (PRF-001). A GENUINE preference — it drives the
+              engine's parallel audio-graph thread count (1 = single-threaded). It is
+              NOT a fake "enable multicore" switch; threads=1 IS the single-thread state.
+              Valid even with no audio device (only the live re-apply needs a context),
+              so it stays enabled headless. */}
+          <div className="settings-group">
+            <div className="settings-label">CPU / Audio threads</div>
+            <div className="settings-readout">
+              <span>Available cores</span><span>{cores ?? "—"}</span>
+            </div>
+            <label className="settings-row">
+              <span>Threads</span>
+              <span className="settings-stepper">
+                <button
+                  className="mini"
+                  title="Fewer threads"
+                  disabled={!cores || threads <= 1}
+                  onClick={() => void setThreads(threads - 1)}
+                >−</button>
+                <span className="settings-threads-val">
+                  {cores ? `${threads}${threadsAuto ? " (auto)" : ""}` : "—"}
+                </span>
+                <button
+                  className="mini"
+                  title="More threads"
+                  disabled={!cores || threads >= (cores ?? 1)}
+                  onClick={() => void setThreads(threads + 1)}
+                >+</button>
+              </span>
+            </label>
+            <div className="settings-hint">Changing the audio thread count may cause a brief audio glitch while playing.</div>
           </div>
 
           {/* Display — UI scale (ACC-005). Pure UI-local view state (like theme);

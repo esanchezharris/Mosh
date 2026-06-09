@@ -140,6 +140,8 @@ private:
     juce::var cmdGetCommandLog    (const juce::var& args);   // read-only (reads mosh-log.jsonl; NOT logged)
     juce::var cmdSetAudioDevice   (const juce::var& args);   // machine preference (undoable:false)
     juce::var cmdSetBufferSize    (const juce::var& args);   // thin wrapper over set_audio_device
+    juce::var cmdSetAudioThreads  (const juce::var& args);   // PRF-001 multicore pref (undoable:false)
+    juce::var cmdListDirectory    (const juce::var& args);   // BRW-001 read-only file browse (no log/transaction)
     juce::var cmdNewProject       (const juce::var& args);   // replaces the Edit (undoable:false)
     juce::var cmdOpenProject      (const juce::var& args);   // replaces the Edit (undoable:false)
     juce::var cmdSaveAs           (const juce::var& args);   // persists + re-points (undoable:false)

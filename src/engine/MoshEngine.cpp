@@ -16,6 +16,21 @@ namespace
         // No audio → don't enumerate audio I/O device types (avoids the macOS
         // mic-permission prompt on headless/no-audio launches).
         bool addSystemAudioIODeviceTypes() override { return audio; }
+
+        // PRF-001 — the ONE knob Tracktion's parallel audio graph reads. The engine
+        // applies setNumThreads(getNumberOfCPUsToUseForAudio() - 1) in EditPlaybackContext
+        // (live) and NodeRenderContext (offline), so this is a genuine, load-bearing
+        // preference, NOT a dead toggle. 0 == auto (all cores, the engine default);
+        // a positive value clamps to [1..getNumCpus()]. UI value 1 => 0 workers =>
+        // single-threaded. Read on the message thread during context build AND under
+        // the audio-callback lock by DeviceManager::updateNumCPUs(), so it is atomic.
+        std::atomic<int> audioThreads { 0 };
+        int getNumberOfCPUsToUseForAudio() override
+        {
+            const int n = audioThreads.load (std::memory_order_relaxed);
+            const int cores = juce::jmax (1, juce::SystemStats::getNumCpus());
+            return n > 0 ? juce::jlimit (1, cores, n) : cores;
+        }
     };
 }
 
@@ -26,10 +41,15 @@ MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession)
 
     // 3-arg construction so we can disable auto device-init in no-audio mode
     // (the device opens during the Engine ctor otherwise — 01 §5).
+    // te::Engine takes ownership of the behaviour unique_ptr; capture the raw
+    // pointer FIRST (PRF-001) so we can mutate its audioThreads atomic later.
+    // The Engine outlives every mutation, so this borrowed pointer stays valid.
+    auto behaviour = std::make_unique<MoshEngineBehaviour> (audioOpen);
+    behaviourPtr = behaviour.get();
     enginePtr = std::make_unique<te::Engine> (
         juce::String ("Mosh"),
         std::make_unique<te::UIBehaviour>(),
-        std::make_unique<MoshEngineBehaviour> (audioOpen));
+        std::move (behaviour));
     applyRequestedAudioOutputDevice();
 
     // Session directory: a stable per-app-data folder so save/reload round-trips.
@@ -337,6 +357,45 @@ bool MoshEngine::saveProjectAs (const juce::File& file)
     if (ok)
         adoptEditFile (file);
     return ok;
+}
+
+// ── PRF-001 — multicore audio thread preference ──────────────────────────────
+// behaviourPtr is a MoshEngineBehaviour* (the type is anonymous-namespace-local
+// to this TU, stored in the header as the base te::EngineBehaviour*). The cast is
+// safe: we constructed exactly that derived type in the ctor.
+int MoshEngine::availableCores() const
+{
+    return juce::jmax (1, juce::SystemStats::getNumCpus());
+}
+
+int MoshEngine::audioThreadPref() const
+{
+    return static_cast<MoshEngineBehaviour*> (behaviourPtr)
+               ->audioThreads.load (std::memory_order_relaxed);
+}
+
+int MoshEngine::effectiveAudioThreads() const
+{
+    // The value getNumberOfCPUsToUseForAudio() would return RIGHT NOW — i.e. the
+    // resolved core count when 'auto' (pref 0), else the clamped preference. This is
+    // what the engine actually feeds setNumThreads(N-1), so it is the honest readout.
+    const int pref = audioThreadPref();
+    return pref > 0 ? juce::jlimit (1, availableCores(), pref) : availableCores();
+}
+
+void MoshEngine::setAudioThreadPref (int n)
+{
+    static_cast<MoshEngineBehaviour*> (behaviourPtr)
+        ->audioThreads.store (n, std::memory_order_relaxed);
+
+    // Re-apply LIVE to any running playback context (no restart). updateNumCPUs()
+    // locks the audio callback + context lock and calls setNumThreads on the running
+    // graph (a brief audio gap while the thread pool resizes — never a crash).
+    // Headless / no device: nothing to update, the preference + readout still hold.
+    // Offline renders read getNumberOfCPUsToUseForAudio() fresh at NodeRenderContext
+    // construction, so they pick up the new value with no extra call.
+    if (audioOpen)
+        enginePtr->getDeviceManager().updateNumCPUs();
 }
 
 } // namespace mosh

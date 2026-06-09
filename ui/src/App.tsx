@@ -10,6 +10,7 @@ import { PluginBrowser } from "./components/PluginBrowser";
 import { PianoRoll } from "./components/PianoRoll";
 import { AutomationPanel } from "./components/AutomationPanel";
 import { Settings } from "./components/Settings";
+import { ContentBrowser } from "./components/ContentBrowser";
 import { CommandLog } from "./components/CommandLog";
 import { ExportDialog } from "./components/ExportDialog";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
@@ -64,6 +65,7 @@ export function App() {
           <button className={view === "mixer" ? "on" : ""} onClick={() => setView("mixer")}>Mixer</button>
         </div>
         <div className="topbar-right">
+          <ContentBrowser />
           <Settings />
           <CommandLog />
           <RemoteCompanion />

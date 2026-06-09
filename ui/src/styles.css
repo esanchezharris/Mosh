@@ -105,6 +105,17 @@ button.on { border-color: var(--accent); color: var(--accent); background: #2120
 .settings-stepper .mini { width: 22px; height: 20px; font-size: 0.74rem; border: 1px solid var(--line); border-radius: 6px; }
 .settings-stepper .mini:disabled { opacity: 0.4; }
 .settings-scale-val { min-width: 42px; text-align: center; color: var(--text); font-variant-numeric: tabular-nums; }
+/* Audio-threads (PRF-001) readout/stepper reuses .settings-row + .settings-stepper. */
+.settings-threads-val { min-width: 70px; text-align: center; color: var(--text); font-variant-numeric: tabular-nums; }
+
+/* Content browser (BRW-001) — reuses .settings-pop / .modal-list / .plugin-row. A
+   thin breadcrumb bar + a right-aligned per-file Import button; no new visual language. */
+.cb-bar { display: flex; align-items: center; gap: 0.4rem; padding: 0.3rem 0; }
+.cb-path { font-size: 0.7rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; flex: 1; text-align: left; }
+.cb-file { flex-direction: row; align-items: center; justify-content: space-between; cursor: default; }
+.cb-file:hover { background: transparent; border-color: transparent; }
+.cb-file .pr-meta { margin-left: auto; margin-right: 0.5rem; font-variant-numeric: tabular-nums; }
+.cb-import { font-size: 0.7rem; padding: 0.15rem 0.5rem; }
 
 /* Command-log inspector (AGT-001) — reuses .remote-pop; read-only command list. */
 .cmdlog-pop { width: 320px; max-height: 70vh; overflow: hidden; }

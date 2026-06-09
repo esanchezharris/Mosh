@@ -296,6 +296,8 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "get_command_log")   return cmdGetCommandLog (args);
     if (name == "set_audio_device")  return cmdSetAudioDevice (args);
     if (name == "set_buffer_size")   return cmdSetBufferSize (args);
+    if (name == "set_audio_threads") return cmdSetAudioThreads (args);
+    if (name == "list_directory")    return cmdListDirectory (args);
     if (name == "new_project")       return cmdNewProject (args);
     if (name == "open_project")      return cmdOpenProject (args);
     if (name == "save_as")           return cmdSaveAs (args);
@@ -2627,6 +2629,124 @@ juce::var MoshOps::cmdListMidiInputs (const juce::var&)
     return okResult ("list_midi_inputs", var (data));
 }
 
+juce::var MoshOps::cmdListDirectory (const juce::var& args)
+{
+    // BRW-001 — content/file browser enumerator. STRICTLY READ-ONLY: no transaction,
+    // no log line, no event. Like cmdListAudioDevices / cmdGetCommandLog it returns
+    // okResult(...) directly — listing the filesystem must never pollute the undo
+    // stack or mosh-log.jsonl. There is no new mutation path: the UI imports a chosen
+    // file via the existing import_clip command (which re-validates at import time).
+    //
+    // Never recurses (one level per call). Never writes / deletes / mkdir. Graceful on
+    // a missing / not-a-directory / permission-denied path: returns ok:true with
+    // exists:false + an error string + the well-known roots so the UI can recover.
+    // errResult is reserved for a genuinely malformed request.
+    using TFTF = File::TypesOfFileToFind;
+    static const StringArray audioExts { ".wav", ".aif", ".aiff", ".flac", ".mp3", ".ogg" };
+
+    // Well-known roots — ALWAYS returned regardless of path validity, so the browser
+    // always has sane recovery targets. Skip-if-absent keeps this strictly read-only
+    // (we never create the imports dir just to advertise it).
+    Array<var> roots;
+    auto addRoot = [&] (const String& name, const File& dir)
+    {
+        if (dir.isDirectory())
+        {
+            auto* o = new DynamicObject();
+            o->setProperty ("name", name);
+            o->setProperty ("path", dir.getFullPathName());
+            roots.add (var (o));
+        }
+    };
+    addRoot ("Home",     File::getSpecialLocation (File::userHomeDirectory));
+    addRoot ("Music",    File::getSpecialLocation (File::userMusicDirectory));
+    addRoot ("Desktop",  File::getSpecialLocation (File::userDesktopDirectory));
+    addRoot ("Documents",File::getSpecialLocation (File::userDocumentsDirectory));
+    addRoot ("Imports",  eng.sessionDir().getChildFile ("imports"));
+
+    auto makeResult = [&] (const File& dir, bool exists, const String& error,
+                           const Array<var>& entries, const File* parentForUp) -> juce::var
+    {
+        auto* data = new DynamicObject();
+        data->setProperty ("path", dir.getFullPathName());
+        // parent drives the Up button; null at the filesystem root.
+        if (parentForUp != nullptr && *parentForUp != dir && parentForUp->isDirectory())
+            data->setProperty ("parent", parentForUp->getFullPathName());
+        else
+            data->setProperty ("parent", var());   // null
+        data->setProperty ("exists", exists);
+        data->setProperty ("error", error.isNotEmpty() ? var (error) : var());
+        data->setProperty ("roots", roots);
+        data->setProperty ("entries", entries);
+        return okResult ("list_directory", var (data));
+    };
+
+    const auto req = args.getProperty ("path", var()).toString();
+
+    // Resolve the target. Empty -> default to Home. NEVER resolve a relative path
+    // against the (unstable) process cwd, and NEVER construct File() with a non-absolute
+    // path (that trips a JUCE assertion) — guard with isAbsolutePath first.
+    File dir;
+    if (req.isEmpty())
+    {
+        dir = File::getSpecialLocation (File::userHomeDirectory);
+    }
+    else if (! File::isAbsolutePath (req))
+    {
+        // Malformed/relative request: return the home dir's parent? No — just report
+        // invalid with roots so the UI recovers, without ever building a relative File.
+        auto* data = new DynamicObject();
+        data->setProperty ("path", req);
+        data->setProperty ("parent", var());
+        data->setProperty ("exists", false);
+        data->setProperty ("error", "invalid path (must be absolute)");
+        data->setProperty ("roots", roots);
+        data->setProperty ("entries", Array<var>());
+        return okResult ("list_directory", var (data));
+    }
+    else
+    {
+        dir = File (req);
+    }
+
+    File parent = dir.getParentDirectory();
+
+    if (! dir.isDirectory())
+        return makeResult (dir, false, "not a directory or not found", Array<var>(), &parent);
+    if (! dir.hasReadAccess())
+        return makeResult (dir, false, "permission denied", Array<var>(), &parent);
+
+    // Gather sub-directories then audio files, each sorted case-insensitively, dirs
+    // first. ignoreHiddenFiles keeps dotfiles / .DS_Store out. searchRecursively=false.
+    Array<File> dirs  = dir.findChildFiles (TFTF::findDirectories | TFTF::ignoreHiddenFiles, false, "*");
+    Array<File> files = dir.findChildFiles (TFTF::findFiles       | TFTF::ignoreHiddenFiles, false, "*");
+
+    struct ByName { int compareElements (const File& a, const File& b) const {
+        return a.getFileName().compareIgnoreCase (b.getFileName()); } } byName;
+    dirs.sort (byName);
+    files.sort (byName);
+
+    Array<var> entries;
+    auto addEntry = [&] (const File& f, bool isDir)
+    {
+        auto* o = new DynamicObject();
+        o->setProperty ("name", f.getFileName());
+        o->setProperty ("path", f.getFullPathName());
+        o->setProperty ("isDir", isDir);
+        // File::getSize() is int64; juce::var has no int64 ctor — store as double to
+        // avoid overflow on large files (formatted in the UI).
+        o->setProperty ("size", isDir ? var() : var ((double) f.getSize()));
+        entries.add (var (o));
+    };
+
+    for (auto& d : dirs)  addEntry (d, true);
+    for (auto& f : files)
+        if (audioExts.contains (f.getFileExtension().toLowerCase()))
+            addEntry (f, false);
+
+    return makeResult (dir, true, {}, entries, &parent);
+}
+
 juce::var MoshOps::cmdGetCommandLog (const juce::var& args)
 {
     // READ-ONLY inspector over the canonical command log (mosh-log.jsonl). This is
@@ -2774,6 +2894,41 @@ juce::var MoshOps::cmdSetBufferSize (const juce::var& args)
     logLine ("set_buffer_size", args, true, {}, false);   // machine preference — not undoable
     emitSnapshotInvalidated();
     return okResult ("set_buffer_size", currentAudioSelection());
+}
+
+juce::var MoshOps::cmdSetAudioThreads (const juce::var& args)
+{
+    // PRF-001 — multicore audio processing preference. This is a GENUINE knob, not a
+    // dead toggle: it drives MoshEngineBehaviour::getNumberOfCPUsToUseForAudio(), which
+    // Tracktion applies as setNumThreads(N-1) on the parallel playback/render graph.
+    // UI value 1 => 0 worker threads => single-threaded; higher => more parallelism.
+    //
+    // Unlike set_buffer_size / set_audio_device this is NOT gated on an open audio
+    // device: the preference + readout are valid headless (only the live re-apply,
+    // handled inside setAudioThreadPref, is conditional on a running context). That
+    // keeps it testable in --selftest (which runs MOSH_NO_AUDIO).
+    if (! args.hasProperty ("threads"))
+        return errResult ("set_audio_threads", "missing 'threads'");
+
+    const int cores = eng.availableCores();
+    const int requested = (int) args.getProperty ("threads", var());
+
+    // Reject clearly-invalid input (<=0 or absurdly large) rather than silently
+    // coercing it into the valid range — keeps the readout honest and the UI safe.
+    if (requested < 1 || requested > 4096)
+        return errResult ("set_audio_threads",
+                          "threads out of range (expected 1.." + String (cores) + ")");
+
+    const int clamped = juce::jlimit (1, cores, requested);   // clamp to the real core count
+    eng.setAudioThreadPref (clamped);                         // store + LIVE re-apply (if a device is open)
+
+    logLine ("set_audio_threads", args, true, {}, false);     // machine preference — NOT undoable
+    emitSnapshotInvalidated();
+
+    auto* data = new DynamicObject();
+    data->setProperty ("availableCores", cores);
+    data->setProperty ("audioThreads", eng.effectiveAudioThreads());
+    return okResult ("set_audio_threads", var (data));
 }
 
 juce::var MoshOps::cmdNewProject (const juce::var& args)
@@ -2956,6 +3111,16 @@ juce::var MoshOps::snapshot()
     session->setProperty ("bitDepth", dm.getBitDepth());
     session->setProperty ("bufferSize", dm.getBlockSize());
     session->setProperty ("outputLatencyMs", dm.getOutputLatencySeconds() * 1000.0);
+
+    // PRF-001 — multicore audio readout + preference. availableCores is the logical
+    // core count the engine sees; audioThreads is the RESOLVED value it actually uses
+    // (== availableCores when 'auto'); audioThreadsAuto lets the UI show "Auto (N)".
+    // This is a real, load-bearing preference (drives setNumThreads on the parallel
+    // graph), valid headless — not a cosmetic readout. Single-thread is threads=1
+    // (no separate on/off flag exists in the engine).
+    session->setProperty ("availableCores", eng.availableCores());
+    session->setProperty ("audioThreads", eng.effectiveAudioThreads());
+    session->setProperty ("audioThreadsAuto", eng.audioThreadPref() <= 0);
 
     // Monitoring round-trip latency (MON-003). The performer-felt input-monitoring
     // delay is the hardware input + output latency (getRecordAdjustment*), distinct

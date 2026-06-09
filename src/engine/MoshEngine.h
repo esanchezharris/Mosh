@@ -63,9 +63,33 @@ public:
         the Edit's backing file). Does NOT replace the Edit object. */
     void adoptEditFile (const juce::File& file);
 
+    /** PRF-001 — multicore audio processing preference + readout. Tracktion's
+        parallel playback/render graph derives its worker-thread count from exactly
+        one knob: EngineBehaviour::getNumberOfCPUsToUseForAudio() (applied as
+        setNumThreads(N-1)). MoshEngineBehaviour overrides it to honour a runtime
+        preference, so this is a GENUINE, load-bearing control — not a dead toggle.
+
+        availableCores()        — logical cores the engine sees (>= 1).
+        audioThreadPref()       — the raw stored preference (0 == auto/all cores).
+        effectiveAudioThreads() — the resolved value the engine actually uses now
+                                  (== availableCores() when auto).
+        setAudioThreadPref(n)   — store the preference (0 = auto, else clamped to
+                                  [1..availableCores()]) and re-apply LIVE to any
+                                  open playback context via DeviceManager::updateNumCPUs()
+                                  (no playback restart; offline renders pick it up on
+                                  their next construction). Headless: stores only. */
+    int  availableCores()        const;
+    int  audioThreadPref()       const;
+    int  effectiveAudioThreads() const;
+    void setAudioThreadPref (int n);
+
 private:
     std::unique_ptr<te::Engine> enginePtr;
     std::unique_ptr<te::Edit>   editPtr;
+    // Borrowed (non-owning) pointer to the MoshEngineBehaviour the Engine owns —
+    // typed as the base here because the concrete type is anonymous-namespace-local
+    // to MoshEngine.cpp. Lets the PRF-001 accessors mutate its audioThreads atomic.
+    te::EngineBehaviour*        behaviourPtr = nullptr;
     juce::File session;
     juce::File editPath;
     void applyRequestedAudioOutputDevice();

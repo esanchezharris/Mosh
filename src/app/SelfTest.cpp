@@ -1543,6 +1543,205 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         npFile.deleteFile(); npFile2.deleteFile(); saFile.deleteFile();
     }
 
+    // ─── PRF-001 — multicore audio thread preference + readout ───
+    // A GENUINE, load-bearing knob (drives EngineBehaviour::getNumberOfCPUsToUseForAudio()
+    // -> setNumThreads(N-1) on the parallel graph), valid headless (no audio device).
+    // Only the command path / clamping / readout / JSONL are headless-testable; the
+    // audible single- vs multi-thread A/B and the live thread-pool-resize gap are
+    // hardware-gated (need an open device + real DSP load).
+    std::cerr << "--- PRF-001 (multicore audio threads) ---\n";
+    {
+        auto sess = [&] { return ops.snapshot().getProperty ("session", var()); };
+
+        // Snapshot readout: availableCores >= 1, audioThreads present + in [1..cores].
+        check (sess().hasProperty ("availableCores"), "snapshot session has availableCores readout");
+        const int cores = (int) sess().getProperty ("availableCores", 0);
+        check (cores >= 1, "availableCores >= 1");
+        check (sess().hasProperty ("audioThreads"), "snapshot session has audioThreads readout");
+        const int threads0 = (int) sess().getProperty ("audioThreads", 0);
+        check (threads0 >= 1 && threads0 <= cores, "audioThreads within [1..availableCores]");
+        check ((bool) sess().getProperty ("audioThreadsAuto", false), "audioThreads defaults to auto (resolved core count)");
+
+        // set_audio_threads applies WITHOUT an audio device (proves it is not device-gated,
+        // unlike set_buffer_size) and echoes availableCores + audioThreads in the result.
+        const int want = cores >= 2 ? 2 : 1;
+        auto st = cmd (ops, "set_audio_threads", args1 ("threads", want));
+        check (ok (st), "set_audio_threads ok with no audio device (not device-gated)");
+        check ((int) st["data"].getProperty ("availableCores", -1) == cores, "set_audio_threads echoes availableCores");
+        check ((int) st["data"].getProperty ("audioThreads", -1) == want, "set_audio_threads echoes the resolved audioThreads");
+
+        // Fresh snapshot reflects the new value (round-trip) and is no longer 'auto'.
+        check ((int) sess().getProperty ("audioThreads", -1) == want, "snapshot reflects new audioThreads after set");
+        check (! (bool) sess().getProperty ("audioThreadsAuto", true), "audioThreadsAuto is false after an explicit set");
+
+        // Out-of-range -> graceful errResult, never a crash. Above-cores clamps to cores.
+        check (! ok (cmd (ops, "set_audio_threads", args1 ("threads", 0))), "set_audio_threads threads=0 errors gracefully");
+        check (! ok (cmd (ops, "set_audio_threads", args1 ("threads", 99999))), "set_audio_threads threads=99999 errors gracefully");
+        auto clampHigh = cmd (ops, "set_audio_threads", args1 ("threads", cores + 1));
+        check (ok (clampHigh), "set_audio_threads cores+1 ok (clamps)");
+        check ((int) clampHigh["data"].getProperty ("audioThreads", -1) == cores, "set_audio_threads clamps cores+1 down to availableCores");
+
+        // Missing arg -> errResult.
+        check (! ok (cmd (ops, "set_audio_threads", var())), "set_audio_threads missing threads errors");
+
+        // JSONL: logged undoable:false (machine preference) — mirror the devPref check.
+        auto tlog = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
+        check (tlog.contains ("set_audio_threads"), "JSONL records set_audio_threads");
+        bool thrPref = false;
+        for (auto& ln : juce::StringArray::fromLines (tlog))
+            if (ln.contains ("\"command\": \"set_audio_threads\"") && ln.contains ("\"undoable\": false")) thrPref = true;
+        check (thrPref, "set_audio_threads logged undoable:false (machine preference)");
+
+        // Read-only: snapshot() must not append a set_audio_threads log line (the
+        // readout-only path never writes). Count occurrences before/after a snapshot.
+        const auto countLines = [&] (const String& needle) {
+            int n = 0;
+            for (auto& ln : juce::StringArray::fromLines (
+                     eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString()))
+                if (ln.contains (needle)) ++n;
+            return n;
+        };
+        const int before = countLines ("\"command\": \"set_audio_threads\"");
+        ops.snapshot(); ops.snapshot();
+        check (countLines ("\"command\": \"set_audio_threads\"") == before, "snapshot does not log set_audio_threads (read-only readout)");
+
+        // Restore auto so later blocks see the default. (threads=cores then... there is
+        // no 'set to auto' arg; leaving an explicit pref is harmless — it resolves to a
+        // real value. We simply assert the restored value is valid.)
+        check (ok (cmd (ops, "set_audio_threads", args1 ("threads", cores))), "restore set_audio_threads to all cores ok");
+    }
+
+    // ─── BRW-001 — content/file browser (read-only list_directory + import reuse) ───
+    // list_directory is STRICTLY READ-ONLY (no log / transaction / event), never
+    // recurses, never writes, and is graceful on missing / denied / relative paths.
+    // Import reuses the existing import_clip command (no new mutation path). The GUI
+    // browsing experience (popover, folder descent, breadcrumb) is hardware/GUI-gated;
+    // the command shape, filtering, navigation, safety + the import seam are headless.
+    std::cerr << "--- BRW-001 (content browser / list_directory) ---\n";
+    {
+        // Seed a known dir under the session: one audio file + one non-audio file +
+        // one sub-directory. The session-selftest dir is wiped each run, so seed fresh.
+        auto browseDir = eng.sessionDir().getChildFile ("browse-test");
+        browseDir.deleteRecursively();
+        browseDir.createDirectory();
+        auto wav = browseDir.getChildFile ("probe-tone.wav");
+        // Reuse the engine's deterministic test-tone WAV generator (writes to the audio
+        // dir), then copy it into browseDir so we control the listing contents exactly.
+        auto srcTone = eng.generateTestTone (0.25, 330.0, "browse-probe");
+        check (srcTone.existsAsFile() && srcTone.copyFileTo (wav), "seeded a real .wav into the browse dir");
+        auto txt = browseDir.getChildFile ("notes.txt");
+        txt.replaceWithText ("not audio");
+        auto childDir = browseDir.getChildFile ("subfolder");
+        childDir.createDirectory();
+
+        // Capture log-line + event counts to prove read-only.
+        const auto logCount = [&] (const String& needle) {
+            int n = 0;
+            for (auto& ln : juce::StringArray::fromLines (
+                     eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString()))
+                if (ln.contains (needle)) ++n;
+            return n;
+        };
+        const int ldLogBefore = logCount ("list_directory");
+        eventTypes.clear();
+
+        auto ld = cmd (ops, "list_directory", args1 ("path", browseDir.getFullPathName()));
+        check (ok (ld), "list_directory ok");
+        auto data = ld["data"];
+        check ((bool) data.getProperty ("exists", false), "list_directory exists:true for a real dir");
+        check (data.getProperty ("path", var()).toString() == browseDir.getFullPathName(), "list_directory path round-trips (normalized)");
+
+        // roots is a non-empty array containing a Home entry pointing at a real dir.
+        {
+            auto rootsVar = data.getProperty ("roots", var());
+            check (rootsVar.isArray() && rootsVar.size() > 0, "list_directory roots is a non-empty array");
+            bool homeOk = false;
+            if (auto* ra = rootsVar.getArray())
+                for (auto& r : *ra)
+                    if (r.getProperty ("name", var()).toString() == "Home"
+                        && File (r.getProperty ("path", var()).toString()).isDirectory())
+                        homeOk = true;
+            check (homeOk, "list_directory roots includes a Home pointing at a real directory");
+        }
+
+        // entries: the seeded .wav is present (isDir:false, size>0); the .txt is filtered
+        // out; the subfolder is present (isDir:true).
+        bool sawWav = false, sawTxt = false, sawDir = false;
+        {
+            auto entriesVar = data.getProperty ("entries", var());
+            check (entriesVar.isArray(), "list_directory entries is an array");
+            if (auto* ea = entriesVar.getArray())
+                for (auto& e : *ea)
+                {
+                    const auto nm = e.getProperty ("name", var()).toString();
+                    const bool isDir = (bool) e.getProperty ("isDir", false);
+                    if (nm == "probe-tone.wav") { sawWav = true;
+                        check (! isDir, "wav entry isDir:false");
+                        check ((double) e.getProperty ("size", 0.0) > 0.0, "wav entry size > 0"); }
+                    if (nm == "notes.txt")  sawTxt = true;
+                    if (nm == "subfolder" && isDir) sawDir = true;
+                }
+        }
+        check (sawWav, "list_directory lists the seeded .wav (extension filter passes audio)");
+        check (! sawTxt, "list_directory filters out the .txt (extension filter excludes non-audio)");
+        check (sawDir, "list_directory lists the subfolder (isDir:true)");
+
+        // Folder navigation: descend into the child, parent points back at browseDir.
+        auto into = cmd (ops, "list_directory", args1 ("path", childDir.getFullPathName()));
+        check (ok (into) && (bool) into["data"].getProperty ("exists", false), "list_directory into subfolder exists:true");
+        check (into["data"].getProperty ("parent", var()).toString() == browseDir.getFullPathName(),
+               "list_directory subfolder parent points back to the parent dir");
+
+        // Graceful failures: missing path -> ok:true, exists:false, error set, roots present.
+        auto missing = cmd (ops, "list_directory", args1 ("path", "/no/such/dir/xyz123"));
+        check (ok (missing), "list_directory missing path still ok (graceful shape)");
+        check (! (bool) missing["data"].getProperty ("exists", true), "list_directory missing path exists:false");
+        check (missing["data"].getProperty ("error", var()).toString().isNotEmpty(), "list_directory missing path has an error string");
+        {
+            auto mr = missing["data"].getProperty ("roots", var());
+            check (mr.isArray() && mr.size() > 0, "list_directory still returns roots on a missing path");
+            auto me = missing["data"].getProperty ("entries", var());
+            check (me.isArray() && me.size() == 0, "list_directory missing path has empty entries");
+        }
+
+        // Relative path -> invalid (never resolved against cwd, never builds a File()).
+        auto rel = cmd (ops, "list_directory", args1 ("path", "relative/path"));
+        check (ok (rel), "list_directory relative path returns ok (graceful)");
+        check (! (bool) rel["data"].getProperty ("exists", true), "list_directory relative path exists:false (not resolved against cwd)");
+
+        // Empty path defaults to Home (a real dir).
+        auto home = cmd (ops, "list_directory", var());
+        check (ok (home) && (bool) home["data"].getProperty ("exists", false), "list_directory with no path defaults to a real Home dir");
+
+        // READ-ONLY: no JSONL line written, no snapshot_invalidated emitted.
+        check (logCount ("list_directory") == ldLogBefore, "list_directory is READ-ONLY (not logged)");
+        bool sawInvalidate = false;
+        for (auto& t : eventTypes) if (t == "snapshot_invalidated") sawInvalidate = true;
+        check (! sawInvalidate, "list_directory emits no snapshot_invalidated (read-only)");
+
+        // End-to-end seam: a path from entries feeds import_clip and a clip lands
+        // (proves the browser -> import path headlessly, no new mutation path).
+        auto trk = cmd (ops, "create_track", args1 ("name", "BrowseImport"));
+        const auto trkId = trk["data"].getProperty ("trackId", var()).toString();
+        check (ok (trk), "create track for browse import ok");
+        // Clip count on the freshly-created (empty) BrowseImport track, found by id.
+        const auto clipsOn = [&] (const String& id) {
+            auto tracksVar = ops.snapshot().getProperty ("tracks", var());
+            if (auto* ta = tracksVar.getArray())
+                for (auto& t : *ta)
+                    if (t.getProperty ("id", var()).toString() == id)
+                        return (int) t.getProperty ("clips", var()).size();
+            return -1;
+        };
+        const int clipsBefore = clipsOn (trkId);
+        auto imp = cmd (ops, "import_clip", objN ({{ "file", wav.getFullPathName() }, { "trackId", trkId }}));
+        check (ok (imp), "import_clip on a browsed file ok (reuses existing import path)");
+        check (clipsOn (trkId) > clipsBefore, "browsed file imported as a real clip (browser -> import_clip seam)");
+
+        browseDir.deleteRecursively();
+        cmd (ops, "remove_track", args1 ("trackId", trkId));   // tidy up the probe track
+    }
+
     // ─── Wave: keyboard shortcuts + clip clipboard (CTL-002 / AED-001) ───
     // The keyboard layer is window 'keydown' handlers in the React UI (App mounts
     // useKeyboardShortcuts) — pure view code, NOT headless-testable, so it is NOT
