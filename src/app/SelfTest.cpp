@@ -907,6 +907,41 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (sendsOf (gt).size() == 0, "remove_bus sweeps orphan sends");
     }
 
+    // ─── Wave 9: channel metering (command + snapshot plumbing) ───
+    std::cerr << "--- Wave 9: channel metering ---\n";
+    {
+        auto meterOn = [&] (const String& tid) { return (bool) trackById (tid).getProperty ("meterEnabled", false); };
+        auto hasLevelInRack = [&] (const String& tid) -> bool {
+            auto trk = trackById (tid);
+            auto pv = trk.getProperty ("plugins", var());
+            if (auto* arr = pv.getArray())
+                for (auto& p : *arr) if (p.getProperty ("type", var()).toString() == "level") return true;
+            return false;
+        };
+
+        auto mt = cmd (ops, "create_track", args1 ("name", "Meters"))["data"].getProperty ("trackId", var()).toString();
+        check (ok (cmd (ops, "enable_track_meter", args1 ("trackId", mt))), "enable_track_meter ok");
+        check (meterOn (mt), "track reports meterEnabled");
+        check (! hasLevelInRack (mt), "meter tap is hidden from the plugin rack");
+        check (ok (cmd (ops, "enable_track_meter", args1 ("trackId", mt))), "enable_track_meter is idempotent");
+        check (meterOn (mt), "still metered after idempotent enable");
+
+        auto ea = cmd (ops, "enable_all_meters");
+        check (ok (ea) && (int) ea["data"].getProperty ("count", 0) > 0, "enable_all_meters meters every track");
+
+        check (ok (cmd (ops, "disable_track_meter", args1 ("trackId", mt))), "disable_track_meter ok");
+        check (! meterOn (mt), "meter removed after disable");
+
+        // Undo / redo of the tap (a normal pluginList mutation; reconcile keeps the
+        // client map safe when the plugin is destroyed by undo).
+        cmd (ops, "enable_track_meter", args1 ("trackId", mt));
+        check (meterOn (mt), "re-enabled before undo");
+        cmd (ops, "undo");
+        check (! meterOn (mt), "undo removes the meter tap");
+        cmd (ops, "redo");
+        check (meterOn (mt), "redo restores the meter tap");
+    }
+
     std::cerr << "===== " << (checks - failures) << "/" << checks
               << " checks passed, " << failures << " failed =====\n\n";
     return failures;

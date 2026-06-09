@@ -132,6 +132,19 @@ Routing to shared effect buses (built from the researched plan, `docs/plans/wave
 
 **Shipped-on-both-axes: 56 → 58** (must-tier 42 → 44). The wet-signal audibility (send→return graph edge) needs a live device — a bounce-based Catch2 test is the recommended way to close that headless, per the plan.
 
+### 2026-06-09 · Wave 9 — Channel metering (live level meters) ✅
+
+The "not a single live meter" gap (built from `docs/plans/wave-metering.md`, which caught that `getLevelCache()` is dead in this clone — the working path is a registered `LevelMeasurer::Client`). A `LevelMeterPlugin` tap is appended post-fader per track; `timerCallback` reads each client's peak-since-frame at 30Hz and emits a `"levels"` event `{tracks:[{id,l,r}], master:{l,r}}` (master from the playback context). Commands `enable_track_meter` / `disable_track_meter` / `enable_all_meters`; the tap is hidden from the rack (real index preserved); `meterEnabled` in the snapshot. **Undo/redo-safe** via per-frame `reconcileMeterClients()` (reads only our own `Client`, never a stale measurer). UI: a `Meter` bar component next to every fader + master, fed by the event (no snapshot churn); the mixer enables all meters on mount. Verified: `Mosh --selftest` **192/192**, 0 assertions.
+
+| ID | Tier | Feature | Before → After |
+|---|---|---|---|
+| `MTR-001` | must | Peak level meters | ✗/✗ → ✓/✓ * |
+| `MIX-011` | must | Channel metering | ✗/✗ → ✓/✓ * |
+
+\* Plumbing + UI complete and headless-verified (enable/disable/idempotent/undo/hidden/event-shape). Non-trivial **dB values require a live CoreAudio device + playing audio** (`processBuffer` only runs then) — the same honest hardware-gate the project documents for neural A/B. Meters animate in the running app on playback.
+
+**Shipped-on-both-axes: 58 → 60** (must-tier 44 → 46). The mixer is now a complete channel strip: fader, pan, mute/solo, sends, and a live meter.
+
 ## Coverage by category
 
 Per axis the three counts are **present ✓ / partial ◐ / missing ✗** (missing also folds in the one `not_applicable`).

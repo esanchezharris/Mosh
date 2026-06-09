@@ -5,7 +5,7 @@ import {
 } from "./bridge";
 import type {
   Snapshot, Transport, MoshEvent, CommandResult, AvailablePlugin,
-  BuiltinPlugin, AvailableColor, RenderQA,
+  BuiltinPlugin, AvailableColor, RenderQA, Level,
 } from "./types";
 import type { RemoteStatus } from "./bridge";
 import { type SnapDiv, snapStep, meterFrom } from "./time";
@@ -39,6 +39,8 @@ type State = {
   labMode: boolean;                        // ASTD unlock for generative colours
   qaByClip: Record<string, RenderQA>;      // last render's quality readout
   remoteStatus: RemoteStatus | null;       // iPhone companion server state
+  // Live level meters (Wave 9) — fed by the 30Hz "levels" event, NOT the snapshot.
+  levels: { tracks: Record<string, Level>; master: Level };
 
   refresh: () => Promise<void>;
   exec: (command: string, args?: Record<string, unknown>) => Promise<CommandResult>;
@@ -97,6 +99,7 @@ export const useStore = create<State>((set, get) => ({
   labMode: false,
   qaByClip: {},
   remoteStatus: null,
+  levels: { tracks: {}, master: { l: -100, r: -100 } },
 
   refresh: async () => {
     if (!isNative()) return;
@@ -131,6 +134,12 @@ export const useStore = create<State>((set, get) => ({
       } else if (ev.type === "transport") {
         const t = ev.payload as Transport;
         set((s) => (s.snapshot ? { snapshot: { ...s.snapshot, transport: t } } : {}));
+      } else if (ev.type === "levels") {
+        // Targeted set (no snapshot refetch) — same lightweight path as transport.
+        const p = ev.payload as { tracks: { id: string; l: number; r: number }[]; master: Level };
+        const tracks: Record<string, Level> = {};
+        for (const t of p.tracks ?? []) tracks[t.id] = { l: t.l, r: t.r };
+        set({ levels: { tracks, master: p.master ?? { l: -100, r: -100 } } });
       } else if (ev.type === "layer_render_progress") {
         const p = ev.payload as { clipId: string; progress: number };
         set((s) => ({ renderProgress: { ...s.renderProgress, [p.clipId]: p.progress } }));

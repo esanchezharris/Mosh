@@ -306,7 +306,11 @@ button.on { border-color: var(--accent); color: var(--accent); background: #2120
 .strip-name { font-size: 0.72rem; font-weight: 600; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .strip-fx { font-size: 0.6rem; color: var(--muted); }
 .strip .pan { width: 56px; accent-color: var(--warn); height: 4px; }
-.fader-wrap { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 140px; }
+.fader-wrap { flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px; min-height: 140px; }
+/* Live level meter (Wave 9) */
+.meter { display: flex; gap: 1px; height: 100%; width: 12px; align-items: stretch; }
+.meter-ch { flex: 1; background: rgba(0,0,0,0.4); border: 1px solid var(--line); border-radius: 2px; position: relative; overflow: hidden; display: flex; align-items: flex-end; }
+.meter-fill { width: 100%; transition: height 70ms linear; border-radius: 0 0 2px 2px; }
 .fader { -webkit-appearance: slider-vertical; appearance: slider-vertical; width: 8px; height: 100%; accent-color: var(--accent); }
 .strip-db { font-size: 0.66rem; color: var(--muted); font-variant-numeric: tabular-nums; }
 .strip-ms { display: flex; gap: 4px; }

@@ -2,6 +2,8 @@
 
 #include <tracktion_engine/tracktion_engine.h>
 #include <functional>
+#include <map>
+#include <memory>
 #include "engine/MoshEngine.h"
 #include "plugins/hosting/PluginHost.h"
 #include "generative/GenerativeJobManager.h"
@@ -68,6 +70,10 @@ private:
     juce::var cmdSetTrackSolo   (const juce::var& args);
     juce::var cmdSetMasterVolume (const juce::var& args);
     juce::var cmdSetMasterPan    (const juce::var& args);
+    // Wave 9 — channel metering
+    juce::var cmdEnableTrackMeter  (const juce::var& args);
+    juce::var cmdDisableTrackMeter (const juce::var& args);
+    juce::var cmdEnableAllMeters   (const juce::var& args);
     // Wave 8 — sends / returns / aux buses
     juce::var cmdCreateBus      (const juce::var& args);
     juce::var cmdAddSend        (const juce::var& args);
@@ -131,6 +137,16 @@ private:
     te::AuxReturnPlugin* firstAuxReturnOn (te::AudioTrack&);
     te::AudioTrack*      findReturnTrackForBus (int bus);
     int                  allocateBusNumber();
+
+    // ── metering (Wave 9): a level-meter tap + registered measurer client / track ──
+    struct MeterTap { te::LevelMeterPlugin* plugin = nullptr; te::LevelMeasurer::Client client; };
+    te::LevelMeterPlugin* ensureTrackMeter (te::AudioTrack&);
+    te::LevelMeterPlugin* findTrackMeter (te::AudioTrack&);
+    void reconcileMeterClients();           // sync client map to live taps (undo/redo-safe)
+    void unregisterAllMeterClients();       // removeClient on still-valid measurers, then clear
+    std::map<juce::String, std::unique_ptr<MeterTap>> meterClients;
+    te::LevelMeasurer::Client masterClient;
+    te::EditPlaybackContext*  lastSeenContext = nullptr;
     juce::var       pluginToVar (te::Plugin&, int index);
     juce::var       trackToVar (te::AudioTrack&, int index);
     juce::var       clipToVar  (te::Clip&);

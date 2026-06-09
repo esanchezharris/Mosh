@@ -117,7 +117,10 @@ export type Track = {
   sends?: Send[];
   isReturn?: boolean;
   returnBus?: number;
+  meterEnabled?: boolean;
 };
+
+export type Level = { l: number; r: number };           // peak dBFS, -100 floor
 
 export type Bus = { bus: number; name: string; trackId: string };
 

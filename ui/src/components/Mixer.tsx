@@ -1,11 +1,18 @@
+import { useEffect } from "react";
 import { useStore } from "../store";
 import type { Snapshot, Track, Bus } from "../types";
+import { Meter } from "./Meter";
 
-// The mixing surface (Wave 5 + 8): a channel strip per track, aux sends to
-// shared return buses, plus a master strip. Every control is a MoshOps command.
+// The mixing surface (Wave 5 + 8 + 9): a channel strip per track with a live
+// level meter, aux sends to shared return buses, plus a master strip. Every
+// control is a MoshOps command.
 export function Mixer({ snapshot }: { snapshot: Snapshot }) {
   const master = snapshot.master;
   const exec = useStore((s) => s.exec);
+
+  // Opening the mixer turns metering on for every track (opt-in keeps the
+  // command surface / headless runs clean).
+  useEffect(() => { void exec("enable_all_meters", {}); }, [exec]);
   const buses = snapshot.buses ?? [];
   const sources = snapshot.tracks.filter((t) => !t.isReturn);
   const returns = snapshot.tracks.filter((t) => t.isReturn);
@@ -33,6 +40,7 @@ export function Mixer({ snapshot }: { snapshot: Snapshot }) {
           <div className="fader-wrap">
             <input className="fader" type="range" min={-48} max={6} step={0.5} value={master?.volumeDb ?? -3}
               onChange={(e) => exec("set_master_volume", { db: Number(e.target.value) })} title="Master volume" />
+            <Meter master />
           </div>
           <div className="strip-db">{(master?.volumeDb ?? -3).toFixed(1)} dB</div>
         </div>
@@ -50,6 +58,7 @@ function StripCore({ track }: { track: Track }) {
       <div className="fader-wrap">
         <input className="fader" type="range" min={-48} max={6} step={0.5} value={track.volumeDb ?? 0}
           onChange={(e) => exec("set_track_volume", { trackId: track.id, db: Number(e.target.value) })} title="Volume" />
+        <Meter trackId={track.id} />
       </div>
       <div className="strip-db">{(track.volumeDb ?? 0).toFixed(1)} dB</div>
       <div className="strip-ms">

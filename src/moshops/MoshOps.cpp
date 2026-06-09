@@ -82,7 +82,74 @@ MoshOps::MoshOps (MoshEngine& engineToUse)
     startTimerHz (30);                       // telemetry decimated to 30 Hz, never per-block
 }
 
-MoshOps::~MoshOps() { stopTimer(); }
+MoshOps::~MoshOps() { stopTimer(); unregisterAllMeterClients(); }
+
+// ── Metering helpers (Wave 9) ────────────────────────────────────────────────
+te::LevelMeterPlugin* MoshOps::findTrackMeter (te::AudioTrack& t)
+{
+    for (auto* p : t.pluginList.getPlugins())
+        if (auto* m = dynamic_cast<te::LevelMeterPlugin*> (p))
+            return m;
+    return nullptr;
+}
+
+te::LevelMeterPlugin* MoshOps::ensureTrackMeter (te::AudioTrack& t)
+{
+    if (auto* lm = findTrackMeter (t)) return lm;
+    auto plugin = eng.edit().getPluginCache().createNewPlugin (te::LevelMeterPlugin::xmlTypeName, {});
+    if (plugin == nullptr) return nullptr;
+    auto* lm = dynamic_cast<te::LevelMeterPlugin*> (plugin.get());
+    t.pluginList.insertPlugin (plugin, t.pluginList.getPlugins().size(), nullptr);   // append → post-fader
+    return lm;                                                // client is wired by reconcileMeterClients()
+}
+
+// Sync the client map to the LIVE meter taps in the edit. Robust against undo/
+// redo/remove destroying a meter plugin: we only ever read our OWN Client (alive),
+// never a stale measurer. A tap whose track no longer has a meter is dropped
+// WITHOUT removeClient (its measurer is already gone); a fresh meter gets a client
+// added to its (live) measurer. Called every frame before reading levels.
+void MoshOps::reconcileMeterClients()
+{
+    std::map<juce::String, te::LevelMeterPlugin*> live;
+    for (auto* t : te::getAudioTracks (eng.edit()))
+        if (t != nullptr)
+            if (auto* lm = findTrackMeter (*t))
+                live[t->itemID.toString()] = lm;
+
+    for (auto it = meterClients.begin(); it != meterClients.end();)
+    {
+        if (live.find (it->first) == live.end())
+            it = meterClients.erase (it);                    // plugin gone (undo/remove) — drop, no removeClient
+        else
+            ++it;
+    }
+    for (auto& [id, lm] : live)
+    {
+        auto& slot = meterClients[id];
+        if (slot == nullptr) slot = std::make_unique<MeterTap>();
+        if (slot->plugin != lm)                              // new / replaced instance — (re)register our client
+        {
+            slot->plugin = lm;
+            lm->measurer.addClient (slot->client);
+        }
+    }
+}
+
+void MoshOps::unregisterAllMeterClients()
+{
+    // Detach our clients, but ONLY from measurers that are still live — a track
+    // removed since the last reconcile leaves a stale plugin pointer we must not
+    // deref. Build the live set and match by value.
+    juce::Array<te::LevelMeterPlugin*> live;
+    for (auto* t : te::getAudioTracks (eng.edit()))
+        if (t != nullptr)
+            if (auto* lm = findTrackMeter (*t))
+                live.add (lm);
+    for (auto& [id, tap] : meterClients)
+        if (tap != nullptr && tap->plugin != nullptr && live.contains (tap->plugin))
+            tap->plugin->measurer.removeClient (tap->client);
+    meterClients.clear();
+}
 
 void MoshOps::timerCallback()
 {
@@ -93,6 +160,43 @@ void MoshOps::timerCallback()
     if (playing || wasPlaying)
         emit ("transport", transportToVar());
     wasPlaying = playing;
+
+    // Decimated level meters (Wave 9). Reconcile first (undo/redo-safe), then each
+    // client reports the peak since the last read (getAndClear resets to -100);
+    // master comes from the playback context's measurer (null headless → -100).
+    reconcileMeterClients();
+    if (! meterClients.empty())
+    {
+        Array<var> trackLevels;
+        for (auto& [trackId, tap] : meterClients)
+        {
+            if (tap == nullptr) continue;
+            const float l = tap->client.getAndClearAudioLevel (0).dB;
+            const int chans = tap->client.getNumChannelsUsed();
+            const float r = chans >= 2 ? tap->client.getAndClearAudioLevel (1).dB : l;
+            auto* o = new DynamicObject();
+            o->setProperty ("id", trackId);
+            o->setProperty ("l", l);
+            o->setProperty ("r", r);
+            trackLevels.add (var (o));
+        }
+
+        float ml = -100.0f, mr = -100.0f;
+        if (auto* ctx = transport.getCurrentPlaybackContext())
+        {
+            if (ctx != lastSeenContext) { ctx->masterLevels.addClient (masterClient); lastSeenContext = ctx; }
+            ml = masterClient.getAndClearAudioLevel (0).dB;
+            mr = masterClient.getAndClearAudioLevel (1).dB;
+        }
+        else
+            lastSeenContext = nullptr;
+
+        auto* master = new DynamicObject(); master->setProperty ("l", ml); master->setProperty ("r", mr);
+        auto* payload = new DynamicObject();
+        payload->setProperty ("tracks", trackLevels);
+        payload->setProperty ("master", var (master));
+        emit ("levels", var (payload));
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -134,6 +238,9 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "set_track_solo")    return cmdSetTrackSolo (args);
     if (name == "set_master_volume") return cmdSetMasterVolume (args);
     if (name == "set_master_pan")    return cmdSetMasterPan (args);
+    if (name == "enable_track_meter")  return cmdEnableTrackMeter (args);
+    if (name == "disable_track_meter") return cmdDisableTrackMeter (args);
+    if (name == "enable_all_meters")   return cmdEnableAllMeters (args);
     if (name == "create_bus")        return cmdCreateBus (args);
     if (name == "add_send")          return cmdAddSend (args);
     if (name == "set_send_level")    return cmdSetSendLevel (args);
@@ -404,7 +511,8 @@ juce::var MoshOps::cmdSave (const juce::var& args)
 
 juce::var MoshOps::cmdReload (const juce::var& args)
 {
-    eng.reloadFromFile();
+    unregisterAllMeterClients();        // old measurers are still valid here
+    eng.reloadFromFile();               // reconcileMeterClients() re-registers on the next frame
     logFile = eng.sessionDir().getChildFile ("mosh-log.jsonl");
     logLine ("reload", args, true, {}, false);
     emitSnapshotInvalidated();
@@ -655,6 +763,47 @@ juce::var MoshOps::cmdSetMasterPan (const juce::var& args)
     logLine ("set_master_pan", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("set_master_pan");
+}
+
+juce::var MoshOps::cmdEnableTrackMeter (const juce::var& args)
+{
+    auto* track = findTrack (args.getProperty ("trackId", var()).toString());
+    if (track == nullptr) return errResult ("enable_track_meter", "no track");
+    undoManager().beginNewTransaction ("enable_track_meter");
+    if (ensureTrackMeter (*track) == nullptr) return errResult ("enable_track_meter", "could not create meter");
+    logLine ("enable_track_meter", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("enable_track_meter");
+}
+
+juce::var MoshOps::cmdDisableTrackMeter (const juce::var& args)
+{
+    auto* track = findTrack (args.getProperty ("trackId", var()).toString());
+    if (track == nullptr) return errResult ("disable_track_meter", "no track");
+    const auto id = track->itemID.toString();
+    if (auto it = meterClients.find (id); it != meterClients.end())
+    {
+        if (it->second != nullptr && it->second->plugin != nullptr)
+            it->second->plugin->measurer.removeClient (it->second->client);   // unregister before delete
+        meterClients.erase (it);
+    }
+    undoManager().beginNewTransaction ("disable_track_meter");
+    if (auto* lm = findTrackMeter (*track)) lm->deleteFromParent();
+    logLine ("disable_track_meter", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("disable_track_meter");
+}
+
+juce::var MoshOps::cmdEnableAllMeters (const juce::var& args)
+{
+    undoManager().beginNewTransaction ("enable_all_meters");
+    int n = 0;
+    for (auto* t : te::getAudioTracks (eng.edit()))
+        if (t != nullptr && ensureTrackMeter (*t) != nullptr) ++n;
+    logLine ("enable_all_meters", args, true, {}, true);
+    emitSnapshotInvalidated();
+    auto* data = new DynamicObject(); data->setProperty ("count", n);
+    return okResult ("enable_all_meters", var (data));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1921,13 +2070,16 @@ juce::var MoshOps::trackToVar (te::AudioTrack& t, int index)
     o->setProperty ("type", "audio");
     o->setProperty ("clips", clips);
 
-    // Plugin chain (Stage 3). Indexed within pluginList (built-ins included).
+    // Plugin chain (Stage 3). Indexed within pluginList (built-ins included). The
+    // metering tap (Wave 9) is hidden from the rack but keeps its real index so
+    // plugin-addressed commands still resolve.
     juce::Array<var> plugins;
     auto pl = t.pluginList.getPlugins();
     for (int i = 0; i < pl.size(); ++i)
-        if (pl[i] != nullptr)
+        if (pl[i] != nullptr && dynamic_cast<te::LevelMeterPlugin*> (pl[i].get()) == nullptr)
             plugins.add (pluginToVar (*pl[i], i));
     o->setProperty ("plugins", plugins);
+    o->setProperty ("meterEnabled", findTrackMeter (t) != nullptr);
 
     // Mixer state (Stage 2 mixer stub).
     if (auto* vp = t.getVolumePlugin())
