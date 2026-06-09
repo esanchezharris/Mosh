@@ -214,6 +214,7 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "rename_track")      return cmdRenameTrack (args);
     if (name == "remove_track")      return cmdRemoveTrack (args);
     if (name == "import_clip")       return cmdImportClip (args);
+    if (name == "import_clip_data")  return cmdImportClipData (args);
     if (name == "add_test_tone_clip")return cmdAddTestTone (args);
     if (name == "set_transport")     return cmdSetTransport (args);
     if (name == "set_tempo")         return cmdSetTempo (args);
@@ -343,6 +344,62 @@ juce::var MoshOps::cmdRemoveTrack (const juce::var& args)
     return okResult ("remove_track");
 }
 
+// Shared wave-file insertion path used by both import_clip (path-based) and
+// import_clip_data (bytes-over-bridge). The caller guarantees `file` is a real,
+// already-validated audio file on disk. Opens one undo transaction, finds-or-
+// creates the target track, inserts the wave clip at `startSeconds`, drains the
+// post-insert AsyncUpdater headless (so itemIDs settle, no itemID assert), logs
+// the command as undoable and emits a snapshot invalidation.
+juce::var MoshOps::importWaveFileToTrack (const juce::String& command,
+                                          const juce::File& file,
+                                          const juce::String& clipName,
+                                          const juce::String& trackId,
+                                          double startSeconds,
+                                          const juce::var& logArgs)
+{
+    auto& edit = eng.edit();
+    auto* track = trackId.isNotEmpty() ? findTrack (trackId) : nullptr;
+    if (track == nullptr)
+    {
+        auto tracks = te::getAudioTracks (edit);
+        track = tracks.isEmpty() ? nullptr : tracks.getFirst();
+    }
+
+    undoManager().beginNewTransaction (command);
+    if (track == nullptr)
+        track = createAudioTrack ({});
+    if (track == nullptr) return errResult (command, "no track");
+
+    te::AudioFile audioFile (edit.engine, file);
+    if (! audioFile.isValid()) return errResult (command, "invalid audio file");
+
+    const double len = audioFile.getLength();
+    auto name = clipName;
+    if (name.isEmpty()) name = file.getFileNameWithoutExtension();
+
+    auto clip = track->insertWaveClip (name, file,
+        { { tracktion::TimePosition::fromSeconds (startSeconds), tracktion::TimeDuration::fromSeconds (len) }, {} }, false);
+    if (clip == nullptr)
+    {
+        logLine (command, logArgs, false, "insert failed", true);
+        return errResult (command, "insertWaveClip failed");
+    }
+
+    // Tracktion queues a track/clip AsyncUpdater after a headless insert; drain
+    // it before returning so itemIDs settle (mirrors createAudioTrack).
+    if (! eng.hasAudio())
+        if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
+            mm->runDispatchLoopUntil (1);
+
+    auto* data = new DynamicObject();
+    data->setProperty ("clipId", clip->itemID.toString());
+    data->setProperty ("trackId", track->itemID.toString());
+    data->setProperty ("file", file.getFullPathName());
+    logLine (command, logArgs, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult (command, var (data));
+}
+
 juce::var MoshOps::cmdImportClip (const juce::var& args)
 {
     const auto path = args.getProperty ("file", var()).toString();
@@ -351,42 +408,55 @@ juce::var MoshOps::cmdImportClip (const juce::var& args)
     File file (path);
     if (! file.existsAsFile()) return errResult ("import_clip", "file not found: " + path);
 
-    auto& edit = eng.edit();
-    auto id = args.getProperty ("trackId", var()).toString();
-    auto* track = id.isNotEmpty() ? findTrack (id) : nullptr;
-    if (track == nullptr)
-    {
-        auto tracks = te::getAudioTracks (edit);
-        track = tracks.isEmpty() ? nullptr : tracks.getFirst();
-    }
+    return importWaveFileToTrack ("import_clip", file,
+                                  args.getProperty ("name", var()).toString(),
+                                  args.getProperty ("trackId", var()).toString(),
+                                  (double) args.getProperty ("startSeconds", 0.0),
+                                  args);
+}
 
-    undoManager().beginNewTransaction ("import_clip");
-    if (track == nullptr)
-        track = createAudioTrack ({});
-    if (track == nullptr) return errResult ("import_clip", "no track");
-
-    te::AudioFile audioFile (edit.engine, file);
-    if (! audioFile.isValid()) return errResult ("import_clip", "invalid audio file");
-
-    const double start = (double) args.getProperty ("startSeconds", 0.0);
-    const double len = audioFile.getLength();
+juce::var MoshOps::cmdImportClipData (const juce::var& args)
+{
     auto name = args.getProperty ("name", var()).toString();
-    if (name.isEmpty()) name = file.getFileNameWithoutExtension();
+    const auto dataBase64 = args.getProperty ("dataBase64", var()).toString();
+    if (name.isEmpty())       return errResult ("import_clip_data", "missing 'name'");
+    if (dataBase64.isEmpty()) return errResult ("import_clip_data", "missing 'dataBase64'");
 
-    auto clip = track->insertWaveClip (name, file,
-        { { tracktion::TimePosition::fromSeconds (start), tracktion::TimeDuration::fromSeconds (len) }, {} }, false);
-    if (clip == nullptr)
+    // Size guard: reject a pathological drop before decoding to avoid OOM.
+    // ~280 MB of base64 decodes to ~200 MB of audio.
+    if (dataBase64.length() > 280 * 1024 * 1024)
+        return errResult ("import_clip_data", "file too large");
+
+    // Decode base64 -> raw bytes. Guard against malformed input (no crash).
+    juce::MemoryOutputStream mos;
+    if (! juce::Base64::convertFromBase64 (mos, dataBase64))
+        return errResult ("import_clip_data", "invalid base64 data");
+
+    // Write the decoded bytes under sessionDir/imports/. Uniquify the destination so
+    // two drops sharing a display name (both "loop.wav") don't overwrite each other's
+    // on-disk source: an earlier imported clip still references the first file, so an
+    // in-place overwrite would silently alias it (and persist across save/reload).
+    auto importsDir = eng.sessionDir().getChildFile ("imports");
+    importsDir.createDirectory();
+    const juce::File named (importsDir.getChildFile (juce::File::createLegalFileName (name)));
+    auto file = importsDir.getNonexistentChildFile (named.getFileNameWithoutExtension(),
+                                                    named.getFileExtension(), false);
+    if (! file.replaceWithData (mos.getData(), mos.getDataSize()))
+        return errResult ("import_clip_data", "could not write the import file");
+
+    // Validate it is real audio BEFORE inserting; never leave a garbage file or
+    // insert a non-audio clip.
+    te::AudioFile af (eng.engine(), file);
+    if (! af.isValid())
     {
-        logLine ("import_clip", args, false, "insert failed", true);
-        return errResult ("import_clip", "insertWaveClip failed");
+        file.deleteFile();
+        return errResult ("import_clip_data", "not a supported audio file");
     }
 
-    auto* data = new DynamicObject();
-    data->setProperty ("clipId", clip->itemID.toString());
-    data->setProperty ("trackId", track->itemID.toString());
-    logLine ("import_clip", args, true, {}, true);
-    emitSnapshotInvalidated();
-    return okResult ("import_clip", var (data));
+    return importWaveFileToTrack ("import_clip_data", file, name,
+                                  args.getProperty ("trackId", var()).toString(),
+                                  (double) args.getProperty ("start", 0.0),
+                                  args);
 }
 
 juce::var MoshOps::cmdAddTestTone (const juce::var& args)

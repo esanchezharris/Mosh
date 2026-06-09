@@ -3,6 +3,7 @@
 #include "moshops/MoshOps.h"
 #include "plugins/neural/NeuralInsertPlugin.h"
 #include <atomic>
+#include <cstring>
 #include <iostream>
 #include <vector>
 
@@ -246,6 +247,78 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
       auto pk = cmd (ops, "get_clip_peaks", var (a));
       check (ok (pk), "get_clip_peaks ok");
       check ((int) pk["data"].getProperty ("buckets", 0) > 0, "peaks array non-empty"); }
+
+    // ─── BRW-007: drag-and-drop audio import via import_clip_data ───
+    // The drag GESTURE itself is GUI-gated (WKWebView HTML5 drop) and is NOT
+    // faked here; the headless import_clip_data command IS fully testable: it
+    // decodes base64 bytes, validates real audio, and inserts an undoable clip.
+    std::cerr << "--- BRW-007: import_clip_data (bytes-over-bridge) ---\n";
+    {
+        // Read a known-good small WAV (the test-tone source on the first clip)
+        // into memory and base64-encode it (inverse of convertFromBase64).
+        File wav (firstTrack (ops)["clips"][0].getProperty ("sourceFile", var()).toString());
+        check (wav.existsAsFile(), "have a real source WAV for import_clip_data");
+        MemoryBlock raw;
+        wav.loadFileAsData (raw);
+        const auto wavB64 = juce::Base64::toBase64 (raw.getData(), raw.getSize());
+        check (wavB64.isNotEmpty(), "WAV base64-encoded");
+
+        const int clipsBefore = trackClips (firstTrack (ops));
+        // The WAV's TRUE full duration (source length) -- NOT clip[0].length, which may
+        // be trimmed -- to compare against the imported clip.
+        const double srcDuration = (double) firstTrack (ops)["clips"][0].getProperty ("sourceLength", 0.0);
+
+        // Happy path: import the decoded WAV onto the first track.
+        auto rImp = cmd (ops, "import_clip_data",
+                         objN ({ { "name", "dropped.wav" }, { "dataBase64", wavB64 }, { "trackId", tid } }));
+        check (ok (rImp), "import_clip_data ok");
+        check (trackClips (firstTrack (ops)) == clipsBefore + 1, "import_clip_data added a clip");
+        // Find the ACTUALLY-imported clip by its (uniquified) source path -- it lands at
+        // start 0, so it is NOT necessarily the last index (clips are ordered by start).
+        const auto importedPath = rImp["data"].getProperty ("file", var()).toString();
+        double importedLen = -1.0;
+        {
+            auto ft = firstTrack (ops);
+            auto ftClips = ft.getProperty ("clips", var());
+            if (auto* arr = ftClips.getArray())
+                for (auto& c : *arr)
+                    if (c.getProperty ("sourceFile", var()).toString() == importedPath)
+                        importedLen = (double) c.getProperty ("length", 0.0);
+        }
+        check (importedLen > 0.0, "found the imported clip by its source path");
+        check (std::abs (importedLen - srcDuration) < 0.05, "imported clip length matches the true source duration");
+        check (File (importedPath).existsAsFile(), "imported file exists under sessionDir/imports");
+
+        // Undoable: undo removes the just-imported clip.
+        cmd (ops, "undo");
+        check (trackClips (firstTrack (ops)) == clipsBefore, "undo removed the imported clip");
+        cmd (ops, "redo");   // restore so later tests see the same state as before
+        check (trackClips (firstTrack (ops)) == clipsBefore + 1, "redo restored the imported clip");
+        cmd (ops, "undo");   // leave the arrangement as it was pre-import
+        check (trackClips (firstTrack (ops)) == clipsBefore, "import_clip_data undone (clean state for later tests)");
+
+        // Invalid base64 -> errResult, no crash.
+        auto rBad = cmd (ops, "import_clip_data",
+                         objN ({ { "name", "bad.wav" }, { "dataBase64", "!!!notbase64!!!" } }));
+        check (! ok (rBad), "import_clip_data rejects invalid base64");
+
+        // Valid base64 of NON-audio bytes -> errResult + no clip + no garbage file.
+        const char* hello = "hello world";
+        const auto helloB64 = juce::Base64::toBase64 (hello, (size_t) std::strlen (hello));
+        const int clipsNow = trackClips (firstTrack (ops));
+        auto rNon = cmd (ops, "import_clip_data",
+                         objN ({ { "name", "notaudio.wav" }, { "dataBase64", helloB64 }, { "trackId", tid } }));
+        check (! ok (rNon), "import_clip_data rejects non-audio bytes");
+        check (trackClips (firstTrack (ops)) == clipsNow, "non-audio import added no clip");
+        File garbage (eng.sessionDir().getChildFile ("imports").getChildFile ("notaudio.wav"));
+        check (! garbage.existsAsFile(), "non-audio temp file was deleted (no garbage)");
+
+        // Missing name / missing dataBase64 -> errResult.
+        check (! ok (cmd (ops, "import_clip_data", objN ({ { "dataBase64", wavB64 } }))),
+               "import_clip_data rejects missing name");
+        check (! ok (cmd (ops, "import_clip_data", objN ({ { "name", "x.wav" } }))),
+               "import_clip_data rejects missing dataBase64");
+    }
 
     // ─── Stage 3: VST3 hosting + MIDI ───
     std::cerr << "--- Stage 3: VST3 hosting + MIDI ---\n";

@@ -13,6 +13,7 @@ import { Settings } from "./components/Settings";
 import { CommandLog } from "./components/CommandLog";
 import { ExportDialog } from "./components/ExportDialog";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
+import { useFileDrop } from "./hooks/useFileDrop";
 
 // Stage 1 UI: renders the MoshOps snapshot cold, drives every mutation through
 // execute_command, and reacts to the snapshot+events feed. Deliberately thin and
@@ -33,6 +34,9 @@ export function App() {
 
   // Global keyboard-shortcut layer (CTL-002) — window keydown, ignores text inputs.
   useKeyboardShortcuts();
+
+  // Drag-and-drop audio import (BRW-007) — bytes-over-bridge via import_clip_data.
+  const dragging = useFileDrop();
 
   useEffect(() => {
     init();
@@ -91,6 +95,12 @@ export function App() {
       <PluginBrowser />
       <PianoRoll />
       <AutomationPanel />
+
+      {dragging && (
+        <div className="drop-overlay" aria-hidden="true">
+          <div className="drop-overlay-inner">Drop audio to import</div>
+        </div>
+      )}
     </div>
   );
 }

@@ -45,6 +45,7 @@ private:
     juce::var cmdRenameTrack    (const juce::var& args);
     juce::var cmdRemoveTrack    (const juce::var& args);
     juce::var cmdImportClip     (const juce::var& args);
+    juce::var cmdImportClipData (const juce::var& args);
     juce::var cmdAddTestTone    (const juce::var& args);
     juce::var cmdSetTransport   (const juce::var& args);
     juce::var cmdSetTempo       (const juce::var& args);
@@ -142,6 +143,13 @@ private:
 
     // ── helpers ──
     te::AudioTrack* createAudioTrack (const juce::String& name);
+    // Shared wave-file insertion path used by import_clip and import_clip_data.
+    juce::var       importWaveFileToTrack (const juce::String& command,
+                                           const juce::File& file,
+                                           const juce::String& clipName,
+                                           const juce::String& trackId,
+                                           double startSeconds,
+                                           const juce::var& logArgs);
     te::VolumeAndPanPlugin* ensureVolumePlugin (te::AudioTrack&);
     te::AudioTrack* findTrack (const juce::String& id);
     te::Clip*       findClip  (const juce::String& id);

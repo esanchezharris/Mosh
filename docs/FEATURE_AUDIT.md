@@ -226,6 +226,18 @@ Two of the three "polish" features (the third, drag-and-drop, is split out below
 
 **Shipped-on-both-axes: 76 → 78** (must-tier 62 → 64). `BRW-007` (drag-and-drop import) remains open — see the dedicated entry below; the file picker (Settings → Import) already covers import.
 
+### 2026-06-09 · Wave: Drag-and-drop import (BRW-007) — bytes-over-bridge ✅
+
+The first attempt (a native `juce::FileDragAndDropTarget` overlay) was caught in review as **fundamentally non-functional** — a JUCE `Component` overlay can't win the OS drag hit-test over the embedded `WKWebView` `NSView` — and reverted. This is the correct WebView approach: the JS drop handler reads the dropped file's **bytes** via `file.arrayBuffer()` (a WKWebView fires HTML5 `drop` with `File` objects; it only withholds the filesystem *path*, not the contents), base64-encodes them with a **chunked** encoder (spreading a big `Uint8Array` into `fromCharCode` overflows the stack), and sends them to a new undoable command **`import_clip_data`** `{name, dataBase64, trackId?, start?}`. The command size-guards, base64-decodes (bad data → error), writes to a **uniquified** path under `sessionDir/imports` (so two same-named drops can't overwrite each other's source — a persisted-aliasing bug caught in review), checks the write, validates real audio via `te::AudioFile::isValid()` (deletes the temp + errors on non-audio — no garbage), then inserts through a shared `importWaveFileToTrack` helper refactored out of `cmdImportClip` (one insertion path for both). A `dragover` `preventDefault` stops the WKWebView navigating to the dropped `file:///`. Verified: `Mosh --selftest` **356/356**, 0 failed — a real WAV round-trips (the imported clip is found *by its source path*, not a guessed index, and its length matches the true source duration), invalid base64 + non-audio bytes both error with no clip and no leftover file, and undo removes the clip.
+
+| ID | Tier | Feature | Before → After |
+|---|---|---|---|
+| `BRW-007` | must | Drag-and-drop import | ◐/✗ → ✓/✓ * |
+
+\* The `import_clip_data` command is fully headless-proven; the drag **gesture** itself is GUI-gated (verify by dragging a WAV onto the window). **Note:** the full `--selftest` run now surfaces one pre-existing **non-fatal** `jassert` (`tracktion_EditItem.h:133`) in the Stage 3 VST3-instrument-load path — a latent duplicate-itemID registration exposed by the itemID-allocation shift from accumulated earlier test blocks; orthogonal to BRW-007 and under separate investigation (the test still passes 356/356).
+
+**Shipped-on-both-axes: 78 → 79** (must-tier 64 → 65). Import now works both ways — the Settings picker and a direct drag-and-drop onto the arrangement.
+
 ## Coverage by category
 
 Per axis the three counts are **present ✓ / partial ◐ / missing ✗** (missing also folds in the one `not_applicable`).
