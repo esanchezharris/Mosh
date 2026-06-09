@@ -143,6 +143,10 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "reorder_plugin")    return cmdReorderPlugin (args);
     if (name == "set_plugin_param")  return cmdSetPluginParam (args);
     if (name == "bypass_plugin")     return cmdBypassPlugin (args);
+    if (name == "add_automation_point")    return cmdAddAutomationPoint (args);
+    if (name == "remove_automation_point") return cmdRemoveAutomationPoint (args);
+    if (name == "set_automation_point")    return cmdSetAutomationPoint (args);
+    if (name == "clear_automation")        return cmdClearAutomation (args);
     if (name == "open_plugin_editor")return cmdOpenPluginEditor (args);
     if (name == "add_midi_clip")     return cmdAddMidiClip (args);
     if (name == "add_note")          return cmdAddNote (args);
@@ -854,6 +858,83 @@ juce::var MoshOps::cmdBypassPlugin (const juce::var& args)
     logLine ("bypass_plugin", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("bypass_plugin");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Wave 7 — parameter automation. A parameter is addressed by
+// (trackId, pluginIndex, paramIndex); values cross the seam normalised 0–1 and
+// are mapped to the parameter's real range here. Times are in seconds.
+// ─────────────────────────────────────────────────────────────────────────────
+te::AutomatableParameter* MoshOps::findParam (const juce::var& args)
+{
+    auto* plugin = findPlugin (args.getProperty ("trackId", var()).toString(),
+                               (int) args.getProperty ("pluginIndex", -1));
+    if (plugin == nullptr) return nullptr;
+    const int pi = (int) args.getProperty ("paramIndex", -1);
+    if (pi < 0 || pi >= plugin->getNumAutomatableParameters()) return nullptr;
+    return plugin->getAutomatableParameter (pi).get();
+}
+
+juce::var MoshOps::cmdAddAutomationPoint (const juce::var& args)
+{
+    auto* param = findParam (args);
+    if (param == nullptr) return errResult ("add_automation_point", "no such parameter");
+    const double t = juce::jmax (0.0, (double) args.getProperty ("time", 0.0));
+    const float norm = juce::jlimit (0.0f, 1.0f, (float) (double) args.getProperty ("value", 0.0));
+    undoManager().beginNewTransaction ("add_automation_point");
+    const int idx = param->getCurve().addPoint (tracktion::TimePosition::fromSeconds (t),
+                                                 param->valueRange.convertFrom0to1 (norm), 0.0f, &undoManager());
+    logLine ("add_automation_point", args, true, {}, true);
+    emitSnapshotInvalidated();
+    auto* data = new DynamicObject(); data->setProperty ("pointIndex", idx);
+    return okResult ("add_automation_point", var (data));
+}
+
+juce::var MoshOps::cmdRemoveAutomationPoint (const juce::var& args)
+{
+    auto* param = findParam (args);
+    if (param == nullptr) return errResult ("remove_automation_point", "no such parameter");
+    auto& curve = param->getCurve();
+    const int idx = (int) args.getProperty ("pointIndex", -1);
+    if (idx < 0 || idx >= curve.getNumPoints()) return errResult ("remove_automation_point", "bad pointIndex");
+    undoManager().beginNewTransaction ("remove_automation_point");
+    curve.removePoint (idx, &undoManager());
+    logLine ("remove_automation_point", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("remove_automation_point");
+}
+
+juce::var MoshOps::cmdSetAutomationPoint (const juce::var& args)
+{
+    // Move a point: remove + re-add at the new (time, value).
+    auto* param = findParam (args);
+    if (param == nullptr) return errResult ("set_automation_point", "no such parameter");
+    auto& curve = param->getCurve();
+    const int idx = (int) args.getProperty ("pointIndex", -1);
+    if (idx < 0 || idx >= curve.getNumPoints()) return errResult ("set_automation_point", "bad pointIndex");
+
+    const double t = juce::jmax (0.0, (double) args.getProperty ("time", curve.getPointTime (idx).inSeconds()));
+    const float norm = juce::jlimit (0.0f, 1.0f,
+        (float) (double) args.getProperty ("value", param->valueRange.convertTo0to1 (curve.getPointValue (idx))));
+    undoManager().beginNewTransaction ("set_automation_point");
+    curve.removePoint (idx, &undoManager());
+    const int newIdx = curve.addPoint (tracktion::TimePosition::fromSeconds (t),
+                                       param->valueRange.convertFrom0to1 (norm), 0.0f, &undoManager());
+    logLine ("set_automation_point", args, true, {}, true);
+    emitSnapshotInvalidated();
+    auto* data = new DynamicObject(); data->setProperty ("pointIndex", newIdx);
+    return okResult ("set_automation_point", var (data));
+}
+
+juce::var MoshOps::cmdClearAutomation (const juce::var& args)
+{
+    auto* param = findParam (args);
+    if (param == nullptr) return errResult ("clear_automation", "no such parameter");
+    undoManager().beginNewTransaction ("clear_automation");
+    param->getCurve().clear (&undoManager());
+    logLine ("clear_automation", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("clear_automation");
 }
 
 juce::var MoshOps::cmdOpenPluginEditor (const juce::var& args)
@@ -1593,6 +1674,21 @@ juce::var MoshOps::pluginToVar (te::Plugin& p, int index)
         po->setProperty ("index", i);
         po->setProperty ("name", param->getParameterName());
         po->setProperty ("value", param->getCurrentNormalisedValue());
+        const bool automated = param->hasAutomationPoints();
+        po->setProperty ("automated", automated);
+        if (automated)
+        {
+            auto& curve = param->getCurve();
+            juce::Array<var> pts;
+            for (int j = 0; j < curve.getNumPoints(); ++j)
+            {
+                auto* pt = new DynamicObject();
+                pt->setProperty ("t", curve.getPointTime (j).inSeconds());
+                pt->setProperty ("v", param->valueRange.convertTo0to1 (curve.getPointValue (j)));
+                pts.add (var (pt));
+            }
+            po->setProperty ("points", pts);
+        }
         params.add (var (po));
     }
     o->setProperty ("params", params);

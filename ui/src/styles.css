@@ -264,6 +264,21 @@ button.on { border-color: var(--accent); color: var(--accent); background: #2120
 
 .boot { padding: 3rem; color: var(--muted); }
 
+/* Automation panel (Wave 7) */
+.auto-panel { width: min(900px, 92vw); background: var(--panel); border: 1px solid var(--line); border-radius: 12px; display: flex; flex-direction: column; box-shadow: 0 24px 60px rgba(0,0,0,0.5); overflow: hidden; }
+.auto-head { display: flex; align-items: center; gap: 0.5rem; padding: 0.6rem 0.9rem; border-bottom: 1px solid var(--line); }
+.auto-head select { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; color: var(--text); padding: 0.25rem 0.4rem; font-size: 0.78rem; }
+.auto-head .x { background: transparent; border-color: transparent; color: var(--muted); }
+.auto-spacer { flex: 1; }
+.auto-scroll { overflow-x: auto; background: var(--panel-2); }
+.auto-canvas { display: block; touch-action: none; }
+.auto-grid { stroke: var(--line); stroke-width: 1; opacity: 0.5; }
+.auto-grid.mid { opacity: 0.8; }
+.auto-line { stroke: var(--accent); stroke-width: 2; }
+.auto-dot { fill: var(--accent); stroke: #fff; stroke-width: 1; cursor: grab; }
+.auto-dot:hover { fill: #fff; }
+.auto-foot { padding: 0.4rem 0.9rem; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.7rem; }
+
 /* Clip actions bar (Wave 6) */
 .clip-actions { display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem 1rem; border-bottom: 1px solid var(--line); background: var(--panel-2); flex-wrap: wrap; }
 .ca-label { font-size: 0.74rem; color: var(--muted); }

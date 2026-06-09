@@ -78,6 +78,11 @@ private:
     juce::var cmdReorderPlugin  (const juce::var& args);
     juce::var cmdSetPluginParam (const juce::var& args);
     juce::var cmdBypassPlugin   (const juce::var& args);
+    // Wave 7 — parameter automation
+    juce::var cmdAddAutomationPoint    (const juce::var& args);
+    juce::var cmdRemoveAutomationPoint (const juce::var& args);
+    juce::var cmdSetAutomationPoint     (const juce::var& args);
+    juce::var cmdClearAutomation        (const juce::var& args);
     juce::var cmdOpenPluginEditor (const juce::var& args);
     juce::var cmdAddMidiClip    (const juce::var& args);
     juce::var cmdAddNote        (const juce::var& args);
@@ -115,6 +120,7 @@ private:
     te::AudioTrack* findTrack (const juce::String& id);
     te::Clip*       findClip  (const juce::String& id);
     te::Plugin*     findPlugin (const juce::String& trackId, int index);
+    te::AutomatableParameter* findParam (const juce::var& args);
     juce::var       pluginToVar (te::Plugin&, int index);
     juce::var       trackToVar (te::AudioTrack&, int index);
     juce::var       clipToVar  (te::Clip&);

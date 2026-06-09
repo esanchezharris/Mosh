@@ -425,6 +425,44 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (! clipById (cid).isObject(), "remove_clip deletes the clip");
     }
 
+    // ─── Wave 7: parameter automation ───
+    std::cerr << "--- Wave 7: parameter automation ---\n";
+    {
+        auto paramVar = [&] (const String& trkId, int plugIdx, int paramIdx) -> var {
+            auto trk = trackById (trkId);
+            if (auto* plugins = trk.getProperty ("plugins", var()).getArray())
+                for (auto& p : *plugins)
+                    if ((int) p.getProperty ("index", -1) == plugIdx)
+                        if (auto* params = p.getProperty ("params", var()).getArray())
+                            for (auto& pr : *params)
+                                if ((int) pr.getProperty ("index", -1) == paramIdx) return pr;
+            return {};
+        };
+
+        auto at = cmd (ops, "create_track", args1 ("name", "Auto"))["data"].getProperty ("trackId", var()).toString();
+        cmd (ops, "load_builtin", objN ({{ "trackId", at }, { "type", "compressor" }}));
+        int pidx = -1;
+        { auto trk = trackById (at);
+          if (auto* plugins = trk.getProperty ("plugins", var()).getArray())
+            for (auto& p : *plugins) if (p.getProperty ("type", var()).toString() == "compressor") pidx = (int) p.getProperty ("index", -1); }
+        check (pidx >= 0, "compressor loaded for automation");
+
+        check (ok (cmd (ops, "add_automation_point", objN ({{ "trackId", at }, { "pluginIndex", pidx }, { "paramIndex", 0 }, { "time", 0.0 }, { "value", 0.2 }}))), "add_automation_point ok");
+        check (ok (cmd (ops, "add_automation_point", objN ({{ "trackId", at }, { "pluginIndex", pidx }, { "paramIndex", 0 }, { "time", 2.0 }, { "value", 0.8 }}))), "second automation point ok");
+        check (paramVar (at, pidx, 0).getProperty ("points", var()).size() == 2, "snapshot serialises 2 automation points");
+        check ((bool) paramVar (at, pidx, 0).getProperty ("automated", false), "param flagged automated");
+        { auto pts = paramVar (at, pidx, 0).getProperty ("points", var());
+          check (pts.size() == 2 && std::abs ((double) pts[0].getProperty ("v", 0.0) - 0.2) < 0.03
+                 && std::abs ((double) pts[1].getProperty ("v", 0.0) - 0.8) < 0.03, "automation point values round-trip 0..1"); }
+
+        check (ok (cmd (ops, "set_automation_point", objN ({{ "trackId", at }, { "pluginIndex", pidx }, { "paramIndex", 0 }, { "pointIndex", 0 }, { "time", 0.5 }, { "value", 0.5 }}))), "set_automation_point ok");
+        check (ok (cmd (ops, "remove_automation_point", objN ({{ "trackId", at }, { "pluginIndex", pidx }, { "paramIndex", 0 }, { "pointIndex", 0 }}))), "remove_automation_point ok");
+        check (paramVar (at, pidx, 0).getProperty ("points", var()).size() == 1, "remove drops an automation point");
+
+        check (ok (cmd (ops, "clear_automation", objN ({{ "trackId", at }, { "pluginIndex", pidx }, { "paramIndex", 0 }}))), "clear_automation ok");
+        check (! (bool) paramVar (at, pidx, 0).getProperty ("automated", true), "clear_automation removes all points");
+    }
+
     // ─── Wave 1: engine built-in plugin palette (effects + instruments) ───
     std::cerr << "--- Wave 1: built-in plugin palette ---\n";
     {

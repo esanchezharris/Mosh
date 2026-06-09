@@ -7,6 +7,7 @@ import { GenPanel } from "./GenPanel";
 export function Rack({ snapshot }: { snapshot: Snapshot }) {
   const selectedTrackId = useStore((s) => s.selectedTrackId);
   const openBrowser = useStore((s) => s.openBrowser);
+  const openAutomation = useStore((s) => s.openAutomation);
   const exec = useStore((s) => s.exec);
 
   const track = snapshot.tracks.find((t) => t.id === selectedTrackId) ?? null;
@@ -53,6 +54,15 @@ export function Rack({ snapshot }: { snapshot: Snapshot }) {
             title="Add a MIDI clip with a default arpeggio"
           >
             + MIDI
+          </button>
+        )}
+        {track && (
+          <button
+            className="rack-add"
+            onClick={() => openAutomation(track.id)}
+            title="Edit parameter automation for this track"
+          >
+            ⌁ Automation
           </button>
         )}
       </div>

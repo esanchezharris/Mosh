@@ -61,6 +61,9 @@ type State = {
   editingClipId: string | null;            // MIDI clip open in the piano-roll
   openPianoRoll: (clipId: string) => void;
   closePianoRoll: () => void;
+  automationTrackId: string | null;        // track open in the automation editor
+  openAutomation: (trackId: string) => void;
+  closeAutomation: () => void;
   openBrowser: () => void;
   closeBrowser: () => void;
   loadColors: () => void;
@@ -194,6 +197,9 @@ export const useStore = create<State>((set, get) => ({
   editingClipId: null,
   openPianoRoll: (clipId) => set({ editingClipId: clipId }),
   closePianoRoll: () => set({ editingClipId: null }),
+  automationTrackId: null,
+  openAutomation: (trackId) => set({ automationTrackId: trackId }),
+  closeAutomation: () => set({ automationTrackId: null }),
   openBrowser: () => {
     set({ browserOpen: true });
     if (get().availablePlugins.length === 0)

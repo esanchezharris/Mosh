@@ -106,6 +106,20 @@ Filled a glaring gap: there was no way to even **delete** a clip. New commands `
 
 **Shipped-on-both-axes: 49 → 52** (ARR-016/023/024). Delete-a-clip + duplicate + per-clip gain/mute are core editing the DAW simply lacked before.
 
+### 2026-06-09 · Wave 7 — Parameter automation ✅
+
+A whole empty must-tier category. Backend: `add_automation_point` / `set_automation_point` / `remove_automation_point` / `clear_automation`, addressed by (trackId, pluginIndex, paramIndex), values normalised 0–1 mapped to the param's real range via `valueRange`; each automated param serialises its curve points into the snapshot (`automated` + `points[{t,v}]`). UI: an automation editor panel (opened from the Rack's "⌁ Automation") with plugin+param pickers (including track Vol/Pan), an SVG curve — click-add, drag-move, double-click-delete, Clear. Curves drive the parameter on playback (Tracktion read mode). Verified: `Mosh --selftest` **163/163**, 0 assertions + screenshot. (Research plans for the remaining waves saved under `docs/plans/`.)
+
+| ID | Tier | Feature | Before → After |
+|---|---|---|---|
+| `AUT-001` | must | Parameter automation | ✗/✗ → ✓/✓ |
+| `AUT-002` | must | Volume / pan automation | ✗/✗ → ✓/✓ |
+| `AUT-004` | must | Draw / pencil automation | ✗/✗ → ✓/✓ |
+| `INS-009` | must | Plugin parameter automation | ◐/✗ → ✓/✓ |
+| `AUT-003` | must | Automation lanes | ✗/✗ → ✓/◐ (editor panel; inline under-track lanes later) |
+
+**Shipped-on-both-axes: 52 → 56** (must-tier 38 → 42). Automation was zero on both axes across the whole category before this.
+
 ## Coverage by category
 
 Per axis the three counts are **present ✓ / partial ◐ / missing ✗** (missing also folds in the one `not_applicable`).

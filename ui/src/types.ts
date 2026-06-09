@@ -53,7 +53,14 @@ export type Clip = {
   renderLayer?: RenderLayer;
 };
 
-export type PluginParam = { index: number; name: string; value: number };
+export type AutoPoint = { t: number; v: number }; // t seconds, v normalised 0..1
+export type PluginParam = {
+  index: number;
+  name: string;
+  value: number;
+  automated?: boolean;
+  points?: AutoPoint[];
+};
 
 export type NeuralParam = { id: string; ui: number; safeMaxUi: number };
 export type NeuralInsert = {
