@@ -286,6 +286,7 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "list_colors")       return cmdListColors (args);
     if (name == "export_audio")      return cmdExportAudio (args);
     if (name == "list_audio_devices")return cmdListAudioDevices (args);
+    if (name == "get_command_log")   return cmdGetCommandLog (args);
     if (name == "set_audio_device")  return cmdSetAudioDevice (args);
     if (name == "set_buffer_size")   return cmdSetBufferSize (args);
     if (name == "new_project")       return cmdNewProject (args);
@@ -2296,6 +2297,61 @@ juce::var MoshOps::cmdListAudioDevices (const juce::var&)
     data->setProperty ("defaultBufferSize", defaultBufferSize);
     data->setProperty ("audioEnabled", eng.hasAudio());
     return okResult ("list_audio_devices", var (data));
+}
+
+juce::var MoshOps::cmdGetCommandLog (const juce::var& args)
+{
+    // READ-ONLY inspector over the canonical command log (mosh-log.jsonl). This is
+    // the one command that must NOT log/transact/emit — doing so would pollute the
+    // very file it returns (and make get_command_log appear in its own results).
+    // Modelled on cmdListAudioDevices / cmdListPlugins: returns okResult directly.
+    int limit = (int) args.getProperty ("limit", 50);
+    if (limit <= 0) limit = 50;
+    if (limit > 500) limit = 500;                    // clamp to a sane max
+
+    const auto file = eng.sessionDir().getChildFile ("mosh-log.jsonl");
+
+    Array<var> entries;
+    int total = 0;
+
+    if (file.existsAsFile())
+    {
+        const auto text = file.loadFileAsString();
+        auto lines = StringArray::fromLines (text);
+
+        for (auto& line : lines)
+        {
+            if (line.trim().isEmpty()) continue;     // skip blank lines
+
+            var parsed;
+            // A partially-written tail line must not crash the inspector — JSON::parse
+            // returns a non-ok Result on malformed input; skip such lines.
+            if (JSON::parse (line, parsed).failed()) continue;
+            if (! parsed.isObject()) continue;
+
+            ++total;
+
+            auto* o = new DynamicObject();
+            o->setProperty ("ts",       parsed.getProperty ("ts", var()));
+            o->setProperty ("seq",      parsed.getProperty ("seq", var()));
+            o->setProperty ("command",  parsed.getProperty ("command", var()));
+            o->setProperty ("ok",       (bool) parsed.getProperty ("ok", false));
+            o->setProperty ("undoable", (bool) parsed.getProperty ("undoable", false));
+            if (parsed.hasProperty ("error"))
+                o->setProperty ("error", parsed.getProperty ("error", var()));
+            entries.add (var (o));
+        }
+    }
+
+    // Most-recent-first, limited to the last `limit` entries.
+    Array<var> recent;
+    for (int i = entries.size() - 1; i >= 0 && recent.size() < limit; --i)
+        recent.add (entries.getReference (i));
+
+    auto* data = new DynamicObject();
+    data->setProperty ("entries", recent);
+    data->setProperty ("total", total);
+    return okResult ("get_command_log", var (data));
 }
 
 // Applies a device-setup patch (type/output/input/sampleRate/bufferSize) to the

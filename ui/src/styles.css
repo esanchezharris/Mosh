@@ -99,6 +99,27 @@ button.on { border-color: var(--accent); color: var(--accent); background: #2120
 .settings-files { display: flex; flex-wrap: wrap; gap: 0.35rem; }
 .settings-files .tool-btn { font-size: 0.76rem; padding: 0.28rem 0.5rem; }
 .settings-editfile { font-size: 0.68rem; color: var(--muted); word-break: break-all; opacity: 0.8; }
+/* UI-scale stepper (ACC-005) — sits in a .settings-row's value column. */
+.settings-stepper { display: flex; align-items: center; gap: 0.4rem; justify-content: flex-start; }
+.settings-stepper .mini { width: 22px; height: 20px; font-size: 0.74rem; border: 1px solid var(--line); border-radius: 6px; }
+.settings-stepper .mini:disabled { opacity: 0.4; }
+.settings-scale-val { min-width: 42px; text-align: center; color: var(--text); font-variant-numeric: tabular-nums; }
+
+/* Command-log inspector (AGT-001) — reuses .remote-pop; read-only command list. */
+.cmdlog-pop { width: 320px; max-height: 70vh; overflow: hidden; }
+.cmdlog-actions { display: flex; align-items: center; gap: 0.25rem; }
+.cmdlog-meta { font-size: 0.72rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.cmdlog-list { display: flex; flex-direction: column; max-height: 52vh; overflow-y: auto; gap: 1px; }
+.cmdlog-empty { font-size: 0.76rem; color: var(--muted); padding: 0.4rem 0; }
+.cmdlog-row { display: grid; grid-template-columns: 14px 1fr auto auto; align-items: center; gap: 0.45rem; font-size: 0.76rem; padding: 0.2rem 0.1rem; border-bottom: 1px solid var(--line); }
+.cmdlog-row:last-child { border-bottom: none; }
+.cmdlog-dot { font-size: 0.6rem; line-height: 1; }
+.cmdlog-dot.ok { color: var(--ok); }
+.cmdlog-dot.err { color: var(--warn); }
+.cmdlog-name { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.cmdlog-row.err .cmdlog-name { color: var(--warn); }
+.cmdlog-badge { font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 0 0.25rem; }
+.cmdlog-ts { color: var(--muted); font-size: 0.68rem; font-variant-numeric: tabular-nums; }
 
 .transport { display: flex; align-items: center; gap: 0.4rem; }
 .tbtn { width: 34px; height: 34px; display: grid; place-items: center; font-size: 0.95rem; border-radius: 8px; }

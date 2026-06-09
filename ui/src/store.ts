@@ -89,6 +89,11 @@ type State = {
 
   theme: "dark" | "light";
   toggleTheme: () => void;
+
+  // UI scale (ACC-005) — pure UI-local view state (like theme): never a command,
+  // never crosses the bridge. Applied via document zoom so the whole WebView reflows.
+  uiScale: number;
+  setUiScale: (n: number) => void;
 };
 
 export const useStore = create<State>((set, get) => ({
@@ -310,5 +315,15 @@ export const useStore = create<State>((set, get) => ({
       const next = s.theme === "dark" ? "light" : "dark";
       document.documentElement.setAttribute("data-theme", next);
       return { theme: next };
+    }),
+
+  uiScale: 1,
+  setUiScale: (n) =>
+    set(() => {
+      // Clamp to a legible range; zoom reflows cleanly in the JUCE WebView (no
+      // transform-origin / scrollbar artifacts) so we drive it directly.
+      const next = Math.min(1.4, Math.max(0.8, Number.isFinite(n) ? n : 1));
+      (document.documentElement.style as CSSStyleDeclaration & { zoom?: string }).zoom = String(next);
+      return { uiScale: next };
     }),
 }));

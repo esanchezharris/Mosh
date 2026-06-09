@@ -201,3 +201,19 @@ export type ExportResult = {
   bytes: number;
   renderMode: string;
 };
+
+// get_command_log result (AGT-001): a read-only window over the canonical command
+// log (mosh-log.jsonl). Most-recent-first, bounded by `limit`. `total` is the full
+// count of parsed lines in the log (entries.length <= total).
+export type CommandLogEntry = {
+  ts?: number;
+  seq?: number;
+  command: string;
+  ok: boolean;
+  undoable: boolean;
+  error?: string;
+};
+export type CommandLog = {
+  entries: CommandLogEntry[];
+  total: number;
+};

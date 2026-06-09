@@ -1317,6 +1317,91 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (pasteUndoable, "paste_clip logged undoable:true (genuine edit)");
     }
 
+    // ─── Wave: command-log inspector (AGT-001) ───
+    // get_command_log is a READ-ONLY window over the canonical command log
+    // (mosh-log.jsonl). It must NOT log/transact/emit (doing so would pollute the
+    // very file it returns and make it appear in its own results). Fully headless:
+    // run a couple of known commands, then read them back most-recent-first.
+    // (The UI-scale control is pure UI-local view state -- like theme -- and is NOT
+    //  a command, so it is documented, not asserted here.)
+    std::cerr << "--- Wave: command-log inspector (AGT-001) ---\n";
+    {
+        // Fresh, known commands so the log tail is predictable. The LAST undoable
+        // edit we issue before reading is rename_track, so it must be entry[0].
+        // Capture the total first so we can assert it grows by EXACTLY the 2 commands
+        // we issue (create_track + rename_track) -- get_command_log itself never logs.
+        const int totalBefore = (int) cmd (ops, "get_command_log", args1 ("limit", 1))["data"].getProperty ("total", -1);
+        check (ok (cmd (ops, "create_track", args1 ("name", "LogProbe"))), "create_track LogProbe ok");
+        auto lpSnap = ops.snapshot();
+        juce::String logProbeId;
+        if (auto* trackArr = lpSnap.getProperty ("tracks", var()).getArray())
+            for (auto& t : *trackArr)
+                if (t.getProperty ("name", var()).toString() == "LogProbe")
+                    logProbeId = t.getProperty ("id", var()).toString();
+        check (logProbeId.isNotEmpty(), "found the LogProbe track id");
+        check (ok (cmd (ops, "rename_track", objN ({{ "trackId", logProbeId }, { "name", "LogProbe2" }}))),
+               "rename_track LogProbe2 ok (this is the most-recent command before get_command_log)");
+
+        // get_command_log { limit: 5 } -> ok, well-formed bounded array.
+        auto gl = cmd (ops, "get_command_log", args1 ("limit", 5));
+        check (ok (gl), "get_command_log ok");
+        auto entriesVar = gl["data"].getProperty ("entries", var());   // bind before getArray
+        check (entriesVar.isArray(), "get_command_log entries is an array");
+        const int total = (int) gl["data"].getProperty ("total", -1);
+        check (total == totalBefore + 2, "get_command_log total grew by exactly the 2 commands issued (create_track + rename_track)");
+        if (auto* entries = entriesVar.getArray())
+        {
+            check (entries->size() <= 5, "get_command_log honours limit (<= 5 entries)");
+            check (entries->size() > 0, "get_command_log returned at least one entry");
+
+            // Most-recent-first: entry[0] is the LAST command issued before the read
+            // (rename_track) -- NOT get_command_log itself (it is not logged).
+            auto first = entries->getReference (0);
+            check (first.getProperty ("command", var()).toString() == "rename_track",
+                   "most-recent-first: entry[0].command == rename_track (the last command issued)");
+
+            // Every entry is well-formed: non-empty command + bool ok + bool undoable.
+            bool allShaped = true;
+            bool sawGetCommandLog = false;
+            for (auto& e : *entries)
+            {
+                if (e.getProperty ("command", var()).toString().isEmpty()) allShaped = false;
+                if (! e.getProperty ("ok", var()).isBool()) allShaped = false;
+                if (! e.getProperty ("undoable", var()).isBool()) allShaped = false;
+                if (e.getProperty ("command", var()).toString() == "get_command_log") sawGetCommandLog = true;
+            }
+            check (allShaped, "every entry has command (non-empty), ok (bool), undoable (bool)");
+            // READ-ONLY proof: get_command_log never logs itself.
+            check (! sawGetCommandLog, "get_command_log is READ-ONLY: it does NOT appear in the log it returns");
+        }
+
+        // Zero / no limit still returns ok with a well-formed entries array (default
+        // applies; clamp never crashes), and still does not log itself.
+        auto gl0 = cmd (ops, "get_command_log", args1 ("limit", 0));
+        check (ok (gl0), "get_command_log with zero limit still ok (default applies)");
+        auto entries0Var = gl0["data"].getProperty ("entries", var());
+        check (entries0Var.isArray(), "get_command_log zero-limit entries is a well-formed array");
+
+        // Malformed / non-object JSONL lines must be skipped, never crash the inspector.
+        // Inject a corrupt line + a valid-but-non-object line, then restore the file.
+        auto logFile = eng.sessionDir().getChildFile ("mosh-log.jsonl");
+        const auto logBackup = logFile.loadFileAsString();
+        const int totalClean = (int) cmd (ops, "get_command_log", args1 ("limit", 1))["data"].getProperty ("total", -1);
+        logFile.appendText ("{ this is not valid json\n");   // malformed
+        logFile.appendText ("12345\n");                        // valid JSON, but not an object
+        auto glBad = cmd (ops, "get_command_log", args1 ("limit", 5));
+        check (ok (glBad), "get_command_log tolerates malformed/partial lines (no crash)");
+        check ((int) glBad["data"].getProperty ("total", -1) == totalClean,
+               "malformed / non-object lines are skipped (total unchanged)");
+        logFile.replaceWithText (logBackup);                   // restore: drop the injected garbage
+
+        // Cross-check against the raw JSONL: get_command_log was issued several times
+        // above yet the log must contain ZERO occurrences of it (it is never written).
+        auto rawLog = logFile.loadFileAsString();
+        check (! rawLog.contains ("get_command_log"),
+               "mosh-log.jsonl contains NO get_command_log token (read-only confirmed at the file)");
+    }
+
     std::cerr << "===== " << (checks - failures) << "/" << checks
               << " checks passed, " << failures << " failed =====\n\n";
     return failures;

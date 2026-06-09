@@ -15,6 +15,8 @@ export function Settings() {
   const audioDevices = useStore((s) => s.audioDevices);
   const loadAudioDevices = useStore((s) => s.loadAudioDevices);
   const selectedTrackId = useStore((s) => s.selectedTrackId);
+  const uiScale = useStore((s) => s.uiScale);
+  const setUiScale = useStore((s) => s.setUiScale);
   const [open, setOpen] = useState(false);
 
   const session = snapshot?.session;
@@ -172,6 +174,30 @@ export function Settings() {
             {session?.audioDeviceError ? (
               <div className="settings-deverr">{session.audioDeviceError}</div>
             ) : null}
+          </div>
+
+          {/* Display — UI scale (ACC-005). Pure UI-local view state (like theme);
+              never a command, never crosses the bridge. */}
+          <div className="settings-group">
+            <div className="settings-label">Display</div>
+            <label className="settings-row">
+              <span>UI scale</span>
+              <span className="settings-stepper">
+                <button
+                  className="mini"
+                  title="Smaller"
+                  disabled={uiScale <= 0.8}
+                  onClick={() => setUiScale(Math.round((uiScale - 0.1) * 10) / 10)}
+                >A-</button>
+                <span className="settings-scale-val">{Math.round(uiScale * 100)}%</span>
+                <button
+                  className="mini"
+                  title="Larger"
+                  disabled={uiScale >= 1.4}
+                  onClick={() => setUiScale(Math.round((uiScale + 0.1) * 10) / 10)}
+                >A+</button>
+              </span>
+            </label>
           </div>
 
           {/* Project / File menu */}

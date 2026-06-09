@@ -204,6 +204,17 @@ The render path is headless-proven (`renderToFile` writes real wav/aiff files in
 
 **Shipped-on-both-axes: 72 → 74** (must-tier 58 → 60). The full producer loop now ends in a real bounce dialog: pick destination, format, depth, rate, export.
 
+### 2026-06-09 · Wave: Command-log inspector + UI scale ✅
+
+The "canonical command contract exists but is never shown" gap — on-brand for a DAW where *every* state change is a logged command. New read-only command **`get_command_log`** (`{ limit }` → `{ entries:[{ts,seq,command,ok,undoable,error?}], total }`, most-recent-first, limit-clamped 1..500): it parses the JSONL tail defensively (missing file → empty; malformed/partial/non-object lines skipped, never a crash) and — critically — is **truly read-only**: no `logLine`/transaction/emit, so it never appears in the very log it returns (proven both in-array and at the file). UI: a `CommandLog` inspector popover (lazy-loads via `get_command_log`, ok/error dot + undoable badge + timestamp, Refresh) mounted in the topbar — the command spine made visible. Also added a **UI-scale** control (`ACC-005`): a compact A-/A+ stepper in a Settings "Display" group, applied via document zoom — pure UI-local view state (like theme), never a command. Verified: `Mosh --selftest` **315/315**, 0 assertions — entries are most-recent-first (entry[0] == the last command issued, would fail if mis-ordered), `total` grows by *exactly* the commands issued, injected malformed/non-object lines are skipped (total unchanged), and the log carries zero `get_command_log` tokens.
+
+| ID | Tier | Feature | Before → After |
+|---|---|---|---|
+| `AGT-001` | must | Canonical command contract (inspectable) | ◐/✗ → ✓/✓ |
+| `ACC-005` | must | Hi-DPI / scalable UI | ✓/◐ → ✓/✓ |
+
+**Shipped-on-both-axes: 74 → 76** (must-tier 60 → 62). The architecture is now visible to the user — the 82-command surface and its JSONL audit trail have a live inspector, and the whole UI scales.
+
 ## Coverage by category
 
 Per axis the three counts are **present ✓ / partial ◐ / missing ✗** (missing also folds in the one `not_applicable`).

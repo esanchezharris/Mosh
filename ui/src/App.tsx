@@ -10,6 +10,7 @@ import { PluginBrowser } from "./components/PluginBrowser";
 import { PianoRoll } from "./components/PianoRoll";
 import { AutomationPanel } from "./components/AutomationPanel";
 import { Settings } from "./components/Settings";
+import { CommandLog } from "./components/CommandLog";
 import { ExportDialog } from "./components/ExportDialog";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 
@@ -60,6 +61,7 @@ export function App() {
         </div>
         <div className="topbar-right">
           <Settings />
+          <CommandLog />
           <RemoteCompanion />
           {/* Reserved B-5 / Monster operator slot (deferred — empty in v0). */}
           <span className="b5-slot" title="B-5 / Monster — reserved (deferred)">B-5</span>

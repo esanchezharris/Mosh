@@ -127,6 +127,7 @@ private:
     juce::var cmdExportAudio      (const juce::var& args);
     // Wave: settings — audio device picker + project lifecycle (both NON-undoable)
     juce::var cmdListAudioDevices (const juce::var& args);   // read-only (no log/transaction)
+    juce::var cmdGetCommandLog    (const juce::var& args);   // read-only (reads mosh-log.jsonl; NOT logged)
     juce::var cmdSetAudioDevice   (const juce::var& args);   // machine preference (undoable:false)
     juce::var cmdSetBufferSize    (const juce::var& args);   // thin wrapper over set_audio_device
     juce::var cmdNewProject       (const juce::var& args);   // replaces the Edit (undoable:false)
