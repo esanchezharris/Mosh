@@ -317,6 +317,35 @@ hardware-gated. `ARE-003` (latency-compensated take landing) completes in Wave B
 **Shipped-on-both-axes: 85 → 87** (must-tier 71 → 73). Projects now carry format intent that
 survives save/reload, and a chosen audio device persists.
 
+### 2026-06-09 · Wave B: full record-to-take (TRA-002 + MID-001 + ARE-003) ✅
+
+The arm/monitor routes shipped earlier; this closes the **stop-and-land** half. New
+non-undoable **`stop_recording`** stops the transport KEEPING takes (`transport.stop(discard=false,
+clearDevices=false)` — landing is synchronous inside `stop()` via `performStop → stopRecording →
+applyRecording`), then **diff-detects** the freshly-landed clip(s) across every armed track and
+returns `data.clips:[ids]`. **MIDI shares the exact path** — an armed instrument track lands a
+`MidiClip` (already serialized by `clipToVar`), so `MID-001` needs no separate command. The record
+button now drives `stop_recording` and auto-selects the returned take so it's immediately editable
+(+ a recording-active pulse). `ARE-003`: the latency-compensated start is applied by the engine on
+landing (read straight from the clip position). Graceful headless: `ok` + `applied:false` +
+`clips:[]` + a reason (never an error) when there's no input/device. Verified: `Mosh --selftest`
+**500/500 across 3 runs, 0 failed, 0 assertions** — `stop_recording` is graceful + non-undoable
+headless and emits the right events.
+
+| ID | Tier | Feature | Before → After |
+|---|---|---|---|
+| `TRA-002` | must | Record (to a take) | ✓/◐ → ✓/✓ * |
+| `MID-001` | must | MIDI record | ◐/✗ → ✓/✓ * |
+| `ARE-003` | must | Latency-compensated recording | ◐/◐ → ✓/✓ * |
+
+\* The `stop_recording` command surface + landed-clip detection + graceful degradation are
+headless-verified. The **actual take landing** (an audio clip from a live input; a MIDI clip from a
+controller) and the latency alignment need the real device — verified live on the interface +
+keyboard (arm a track → record → play → stop → the take appears).
+
+**Shipped-on-both-axes: 87 → 90** (must-tier 73 → 76). The record loop is closed end to end:
+arm, monitor, record, and the take lands on the track (audio or MIDI).
+
 ## Coverage by category
 
 Per axis the three counts are **present ✓ / partial ◐ / missing ✗** (missing also folds in the one `not_applicable`).

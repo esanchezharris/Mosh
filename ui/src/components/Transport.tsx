@@ -12,12 +12,28 @@ function fmt(t: number): string {
 export function Transport() {
   const snapshot = useStore((s) => s.snapshot);
   const exec = useStore((s) => s.exec);
+  const select = useStore((s) => s.select);
   const t = snapshot?.transport;
   const session = snapshot?.session;
 
   const playing = t?.playing ?? false;
   const recording = t?.recording ?? false;
   const looping = t?.looping ?? false;
+
+  // Wave B — record-to-take. While recording, the record button stops via the
+  // record-lifecycle command (stop_recording KEEPS the take); on resolve it returns the
+  // landed clip id(s), which we auto-select so the take is immediately editable. Starting
+  // a recording stays a plain transport action (set_transport record).
+  const onRecordToggle = async () => {
+    if (recording) {
+      const res = await exec("stop_recording");
+      const clips = (res.data as { clips?: { id: string }[] } | undefined)?.clips ?? [];
+      const ids = clips.map((c) => c.id).filter((id): id is string => !!id);
+      if (ids.length > 0) select(ids);
+    } else {
+      void exec("set_transport", { action: "record" });
+    }
+  };
   // Audio-engine gate (MON-007 / FLY-004): no device → play/record disabled. Pure
   // view logic, no command.
   const audioEnabled = session?.audioEnabled ?? false;
@@ -37,10 +53,10 @@ export function Transport() {
         {playing ? "■" : "▶"}
       </button>
       <button
-        className={`tbtn rec ${recording ? "on" : ""}`}
-        onClick={() => exec("set_transport", { action: recording ? "stop" : "record" })}
+        className={`tbtn rec ${recording ? "on recording-pulse" : ""}`}
+        onClick={onRecordToggle}
         disabled={!audioEnabled && !recording}
-        title={audioEnabled ? (recording ? "Stop recording" : "Record") : "No audio device — record disabled"}
+        title={audioEnabled ? (recording ? "Stop recording (lands the take)" : "Record") : "No audio device — record disabled"}
       >
         ●
       </button>

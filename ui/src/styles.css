@@ -140,6 +140,12 @@ button.on { border-color: var(--accent); color: var(--accent); background: #2120
 .tbtn.toggle.on { border-color: var(--accent); color: var(--accent); background: #21203a; }
 .tbtn.rec { color: var(--muted); }
 .tbtn.rec.on { color: #fff; border-color: var(--playhead); background: var(--playhead); box-shadow: 0 0 8px var(--playhead); }
+/* Wave B — record-active pulse, keyed to transport.recording. Pure view feedback. */
+.tbtn.rec.recording-pulse { animation: mosh-rec-pulse 1s ease-in-out infinite; }
+@keyframes mosh-rec-pulse {
+  0%, 100% { box-shadow: 0 0 6px var(--playhead); }
+  50%      { box-shadow: 0 0 16px var(--playhead); opacity: 0.85; }
+}
 .pos { margin-left: 0.5rem; font-variant-numeric: tabular-nums; font-size: 1rem; color: var(--muted); min-width: 76px; text-align: right; }
 .pos.bbs { margin-left: 0.25rem; min-width: 60px; font-size: 0.9rem; color: var(--accent); }
 .pos.pdc { margin-left: 0.5rem; min-width: auto; font-size: 0.78rem; color: var(--muted); }

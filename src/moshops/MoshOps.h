@@ -73,6 +73,9 @@ private:
     // Wave: recording — arm tracks + input monitoring
     juce::var cmdArmTrack       (const juce::var& args);
     juce::var cmdSetInputMonitor (const juce::var& args);
+    // Wave B — record-to-take (TRA-002 / MID-001 / ARE-003): stop the transport
+    // KEEPING takes, drain the async clip-add, return the landed clip ids.
+    juce::var cmdStopRecording  (const juce::var& args);
     juce::var cmdSetMasterVolume (const juce::var& args);
     juce::var cmdSetMasterPan    (const juce::var& args);
     // Wave 9 — channel metering

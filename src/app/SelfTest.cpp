@@ -1400,6 +1400,70 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                 if (ln.contains ("\"command\": \"arm_track\"") && ln.contains ("\"undoable\": false")) armInstPref = true;
             check (armInstPref, "arm_track (MIDI path) logged undoable:false (preference)");
         }
+
+        // ── Wave B: record-to-take landing (TRA-002 / MID-001 / ARE-003) ──
+        // stop_recording stops the transport KEEPING takes, drains the async clip-add,
+        // and returns the landed clip id(s). Headless (--selftest, no audio) there is no
+        // playback context and nothing was captured, so it is a graceful no-op
+        // (ok + applied:false + clips:[], NEVER an error) — exactly the arm_track posture.
+        // The ACTUAL take landing (a wave clip from a live mic, a MIDI clip from a
+        // controller) + ARE-003 latency-compensated clip start are HARDWARE-GATED: they
+        // need a live interface + keyboard, verified live by the user. We do NOT fake a
+        // landed take here.
+        std::cerr << "--- Wave B: record-to-take landing (stop_recording) ---\n";
+
+        // Use a FRESH wave track: the earlier `rt` may have been undone away by the
+        // arm_track+undo probes above (arm is non-undoable, so undo walks back to its
+        // create_track). Same precaution the CTL-001 block takes for its `pt`.
+        auto rb = cmd (ops, "create_track", args1 ("name", "RecTakeTrack"))["data"].getProperty ("trackId", var()).toString();
+
+        // arm the wave track, then "record" (no-op headless) so stop_recording has the
+        // canonical arm -> record -> stop sequence to walk.
+        check (ok (cmd (ops, "arm_track", objN ({{ "trackId", rb }, { "armed", true }}))), "arm_track (wave) ok for record-to-take");
+        eventTypes.clear();
+        auto recR = cmd (ops, "set_transport", objN ({{ "action", "record" }}));
+        check (ok (recR), "set_transport record ok (graceful headless)");
+        check (hadEvent ("transport"), "set_transport record emitted a transport event");
+
+        // stop_recording headless: ok, applied:false, clips:[], a reason, both events.
+        eventTypes.clear();
+        auto stopR = cmd (ops, "stop_recording");
+        check (ok (stopR), "stop_recording ok (graceful)");
+        check (! (bool) stopR["data"].getProperty ("applied", true), "stop_recording applied:false headless (no playback context)");
+        {
+            auto cl = stopR["data"].getProperty ("clips", var());   // bind to a local before getArray
+            check (cl.isArray() && cl.size() == 0, "stop_recording lands no clips headless (clips:[])");
+        }
+        check (stopR["data"].hasProperty ("reason"), "stop_recording reports a reason headless");
+        check (hadEvent ("transport"), "stop_recording emitted a transport event");
+        check (hadEvent ("snapshot_invalidated"), "stop_recording emitted snapshot_invalidated");
+
+        // discardRecordings:true is also a graceful no-op headless (throws nothing away,
+        // lands nothing) — exercises the discard branch of the command.
+        auto discardR = cmd (ops, "stop_recording", objN ({{ "discardRecordings", true }}));
+        check (ok (discardR), "stop_recording discardRecordings:true ok (graceful)");
+        {
+            auto cl = discardR["data"].getProperty ("clips", var());
+            check (cl.isArray() && cl.size() == 0, "stop_recording discard lands no clips headless");
+        }
+        check ((bool) discardR["data"].getProperty ("discarded", false), "stop_recording echoes discarded:true");
+
+        // Idempotent: calling stop_recording again when not recording is a clean no-op.
+        check (ok (cmd (ops, "stop_recording")), "stop_recording when not recording is a no-op ok");
+
+        // JSONL records stop_recording, logged undoable:false (a recording-lifecycle op,
+        // NOT an undoable session edit).
+        {
+            auto srlog = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
+            check (srlog.contains ("stop_recording"), "JSONL records stop_recording");
+            bool srPref = false;
+            for (auto& ln : juce::StringArray::fromLines (srlog))
+                if (ln.contains ("\"command\": \"stop_recording\"") && ln.contains ("\"undoable\": false")) srPref = true;
+            check (srPref, "stop_recording logged undoable:false (recording-lifecycle op)");
+        }
+
+        // Disarm so the recording test block leaves no armed input behind.
+        check (ok (cmd (ops, "arm_track", objN ({{ "trackId", rb }, { "armed", false }}))), "arm_track (wave) disarm after record-to-take ok");
     }
 
     // ─── MON-003: monitoring round-trip latency readout ───

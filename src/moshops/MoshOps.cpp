@@ -239,6 +239,7 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "set_track_mute")    return cmdSetTrackMute (args);
     if (name == "set_track_solo")    return cmdSetTrackSolo (args);
     if (name == "arm_track")         return cmdArmTrack (args);
+    if (name == "stop_recording")    return cmdStopRecording (args);
     if (name == "set_input_monitor") return cmdSetInputMonitor (args);
     if (name == "set_master_volume") return cmdSetMasterVolume (args);
     if (name == "set_master_pan")    return cmdSetMasterPan (args);
@@ -1110,6 +1111,114 @@ juce::var MoshOps::cmdArmTrack (const juce::var& args)
     if (! applied)
         data->setProperty ("reason", "no input device");
     return okResult ("arm_track", var (data));
+}
+
+juce::var MoshOps::cmdStopRecording (const juce::var& args)
+{
+    // Wave B — record-to-take landing (TRA-002 wave, MID-001 MIDI, ARE-003 latency).
+    //
+    // Stopping a recording is a RECORDING-LIFECYCLE action, NOT an undoable session
+    // edit: Tracktion lands the take's clip(s) on the armed track(s) via its own async
+    // clip-add path (the recording context's stopRecording produces a Clip::Array), and
+    // the user undoes the *take* via remove_clip if they reject it. So this is a
+    // non-undoable transport op (no beginNewTransaction; logged undoable:false) — the
+    // same posture as set_transport / arm_track.
+    //
+    // discardRecordings=false KEEPS the takes (the canonical RecordingDemo stop overload
+    // transport.stop(discardRecordings, clearDevices)); discardRecordings=true throws the
+    // captured audio/MIDI away and lands nothing. clearDevices stays false so the
+    // playback graph survives for the next take.
+    const bool discard = (bool) args.getProperty ("discardRecordings", false);
+
+    auto& transport = eng.edit().getTransport();
+
+    // Graceful degradation (mirrors cmdArmTrack / the cmdSetTransport record guard):
+    // headless / no audio device → no playback context → no armed inputs → nothing can
+    // have been captured. NEVER an error: ok result, applied:false, clips:[], reason.
+    auto reportNoOp = [&] (const char* reason) -> juce::var
+    {
+        logLine ("stop_recording", args, true, {}, false);   // recording op is NOT undoable
+        emit ("transport", transportToVar());
+        emitSnapshotInvalidated();
+        auto* data = new DynamicObject();
+        data->setProperty ("applied", false);
+        data->setProperty ("discarded", discard);
+        data->setProperty ("clips", Array<var>());
+        data->setProperty ("reason", reason);
+        return okResult ("stop_recording", var (data));
+    };
+
+    if (! eng.hasAudio())
+        return reportNoOp ("no audio device");
+
+    auto* context = transport.getCurrentPlaybackContext();
+    if (context == nullptr)
+        return reportNoOp ("no playback context");
+
+    if (! transport.isRecording())
+        return reportNoOp ("not recording");
+
+    // Snapshot the clip ids already present on every armed track BEFORE stopping, so the
+    // newly-landed take(s) are exactly the post-stop set minus this set. A single track
+    // can be targeted by multiple input instances (wave + MIDI), and several tracks can
+    // be armed at once, so we collect across ALL armed inputs (key the set per track id).
+    // Bind the input array to a local before iterating (no dangling temporary).
+    juce::Array<te::AudioTrack*> armedTracks;
+    {
+        auto inputs = eng.edit().getAllInputDevices();
+        auto allTracks = te::getAudioTracks (eng.edit());
+        for (auto* inst : inputs)
+            if (inst != nullptr)
+                for (auto* t : allTracks)
+                    if (t != nullptr
+                        && te::isOnTargetTrack (*inst, *t, 0)
+                        && inst->isRecordingEnabled (t->itemID)
+                        && ! armedTracks.contains (t))
+                        armedTracks.add (t);
+    }
+
+    juce::HashMap<juce::String, int> beforeIds;     // clip itemID -> 1 (membership set)
+    for (auto* t : armedTracks)
+        for (auto* c : t->getClips())
+            if (c != nullptr)
+                beforeIds.set (c->itemID.toString(), 1);
+
+    // Stop, KEEPING takes (unless asked to discard). clearDevices=false preserves the
+    // graph. Take landing is SYNCHRONOUS inside transport.stop() (performStop() ->
+    // playbackContext->stopRecording() -> applyRecording()), so the take clips exist in
+    // track.getClips() right after this returns.
+    transport.stop (discard, false);
+
+    // Belt-and-suspenders: pump the message loop so any queued ValueTree/Selectable
+    // settling + itemID assignment completes before we diff the clips. Headless there is
+    // no GUI dispatch between commands, so we pump explicitly (mirrors createAudioTrack).
+    if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
+        for (int i = 0; i < 4; ++i)
+            mm->runDispatchLoopUntil (1);
+
+    // Diff: any clip on an armed track not in the before-set is a freshly-landed take.
+    // This detects BOTH wave takes (WaveAudioClip) and MIDI takes (MidiClip, sequence
+    // already finalized on stop) — clipToVar serializes either kind (notes for MIDI).
+    // ARE-003: the landed clip's start is auto-adjusted by record latency inside
+    // Tracktion; we just read it back via clipToVar (no app-side alignment).
+    Array<var> landed;
+    if (! discard)
+        for (auto* t : armedTracks)
+            for (auto* c : t->getClips())
+                if (c != nullptr && ! beforeIds.contains (c->itemID.toString()))
+                    landed.add (clipToVar (*c));
+
+    logLine ("stop_recording", args, true, {}, false);   // recording op is NOT undoable
+    emit ("transport", transportToVar());
+    emitSnapshotInvalidated();
+
+    auto* data = new DynamicObject();
+    data->setProperty ("applied", true);
+    data->setProperty ("discarded", discard);
+    data->setProperty ("clips", landed);
+    if (landed.isEmpty() && ! discard)
+        data->setProperty ("reason", "no take captured (no live input)");
+    return okResult ("stop_recording", var (data));
 }
 
 juce::var MoshOps::cmdSetInputMonitor (const juce::var& args)
