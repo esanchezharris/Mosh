@@ -840,7 +840,10 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
     const bool wait = (bool) args.getProperty ("wait", false);
     if (wait)
     {
-        for (int i = 0; i < 2400; ++i)   // up to ~120s — generative renders are slow (model load + diffusion + QA)
+        const int waitTimeoutMs = juce::jmax (1000, juce::SystemStats::getEnvironmentVariable (
+            "MOSH_RENDER_WAIT_TIMEOUT_MS", "120000").getIntValue());
+        const int maxPolls = juce::jmax (1, waitTimeoutMs / 50);
+        for (int i = 0; i < maxPolls; ++i)   // default ~120s; PC CUDA cold loads can opt into longer waits
         {
             auto st = jobManager.jobStatus (jobId);
             const auto status = st.getProperty ("status", var()).toString();

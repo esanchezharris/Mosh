@@ -1,0 +1,14 @@
+# Normalize line endings to LF in the repo (primary target is macOS arm64).
+* text=auto eol=lf
+
+# Binary assets
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.wav binary
+*.npz binary

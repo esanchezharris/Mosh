@@ -75,6 +75,17 @@ bool GenerativeJobManager::ensureServiceRunning()
     auto script = locateServiceScript();
     if (! script.existsAsFile()) return false;
 
+    bool started = false;
+#if JUCE_WINDOWS
+    if (auto py = SystemStats::getEnvironmentVariable ("MOSH_SERVICE_PYTHON", {}); py.isNotEmpty())
+        started = serviceProcess.start (StringArray { py, script.getFullPathName() });
+    else
+    {
+        started = serviceProcess.start (StringArray { "py", "-3", script.getFullPathName() });
+        if (! started)
+            started = serviceProcess.start (StringArray { "python", script.getFullPathName() });
+    }
+#else
     // Launch via run.sh (it selects the MLX venv python when MOSH_ENABLE_SA3=1),
     // forwarding the SA3 env so the carved engine can find the model + colours
     // (App. B). Falls back to system python3 (FakeAdapter) when SA3 is off.
@@ -89,8 +100,9 @@ bool GenerativeJobManager::ensureServiceRunning()
     String shell = runSh.existsAsFile()
         ? (env + "exec /bin/bash " + runSh.getFullPathName().quoted())
         : (env + "exec python3 " + script.getFullPathName().quoted());
-    StringArray cmd { "/bin/sh", "-c", shell };
-    if (serviceProcess.start (cmd))
+    started = serviceProcess.start (StringArray { "/bin/sh", "-c", shell });
+#endif
+    if (started)
     {
         spawnedByUs = true;
         for (int i = 0; i < 60; ++i)     // up to ~12s for warmup

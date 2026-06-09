@@ -1,5 +1,6 @@
 # Build output
 build/
+build-*/
 cmake-build-*/
 out/
 
@@ -13,20 +14,42 @@ node_modules/
 ui/node_modules/
 ui/dist/
 ui/.vite/
+ui/playwright-report/
+ui/test-results/
+ui/.tsbuild-node/
+ui/*.tsbuildinfo
 
 # Python service
 service/.venv/
 service/__pycache__/
 **/__pycache__/
 *.pyc
+service/scripts/_sa3_smoke_out/
+service/scripts/_sa3_e2e_out/
 
 # Runtime / data
 *.tracktionedit
 *.log
+*.wav
+*.aiff
+*.aif
 mosh-sessions/
 service/jobs/
 _preserved_artifacts/
 assets/grit_demo/
+midi_data/
+midi_rag_database.pkl
+
+# Headless/browser QA artifacts
+.e2e-artifacts/
+.playwright-mcp/
+playwright-report/
+test-results/
+mosh-*.png
+
+# Local agent/runtime scratch
+.gstack/
+.refclone/
 
 # macOS
 .DS_Store

@@ -184,7 +184,11 @@ void NeuralInsertPlugin::applyToBuffer (const te::PluginRenderContext& fc)
 
 void NeuralInsertPlugin::restorePluginStateFromValueTree (const juce::ValueTree& v)
 {
-    te::copyPropertiesToCachedValues (v, driveValue, mixValue, latencyValue, labMode, modelId);
+    te::copyPropertiesToCachedValues (v, driveValue, mixValue, latencyValue, labMode);
+
+    if (v.hasProperty (idModel))
+        modelId = v.getProperty (idModel).toString();
+
     for (auto p : getAutomatableParameters())
         p->updateFromAttachedValue();
 }

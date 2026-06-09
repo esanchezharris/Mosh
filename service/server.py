@@ -27,13 +27,26 @@ import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+# On Windows a JUCE GUI parent may launch this service with stdout/stderr pipes
+# that are not drained. Keep service logging file-backed unless a developer asks
+# for console output explicitly.
+if os.name == "nt" and os.environ.get("MOSH_SERVICE_CONSOLE", "") != "1":
+    try:
+        import tempfile
+        _logfh = open(os.path.join(tempfile.gettempdir(), "mosh-service.log"),
+                      "a", buffering=1, encoding="utf-8", errors="replace")
+        sys.stdout = _logfh
+        sys.stderr = _logfh
+    except OSError:
+        pass
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from adapters import fake_adapter  # noqa: E402
-from sa3.engine import engine_available  # noqa: E402  (path-only check; no MLX import)
+from adapters import stable_audio3_adapter  # noqa: E402  (path-only checks; heavy imports stay lazy)
 
 SERVICE_VERSION = "0.2.0"
 START_TIME = time.time()
-SA3_ENABLED = os.environ.get("MOSH_ENABLE_SA3", "1") == "1" and engine_available()
+SA3_ENABLED = os.environ.get("MOSH_ENABLE_SA3", "1") == "1" and stable_audio3_adapter.available()
 
 
 def _colorrack_hash() -> str:
@@ -47,7 +60,8 @@ def _colorrack_hash() -> str:
 # service_build feeds the native render-cache fingerprint: changing the engine/colors
 # must invalidate cached renders, so it encodes the carve identity.
 if SA3_ENABLED:
-    SERVICE_BUILD = f"sa3-1.0.0+colors{_colorrack_hash()}+sec{os.environ.get('SA3_SECONDS', '8.0')}"
+    SERVICE_BUILD = (f"sa3-1.0.0+{stable_audio3_adapter.backend_name()}"
+                     f"+colors{_colorrack_hash()}+sec{os.environ.get('SA3_SECONDS', '8.0')}")
 else:
     SERVICE_BUILD = "fake-0.1.0"
 
@@ -70,7 +84,7 @@ def _sa3_descriptor() -> dict:
         "conditioning_inputs": ["prompt", "init_audio", "negative_prompt", "colors"],
         "duration_limits": {"min": 0.5, "max": float(os.environ.get("SA3_SECONDS", "8.0"))},
         "sample_rates": [44100], "channel_modes": ["stereo"],
-        "runtime_requirements": ["apple_mlx"], "packaging_mode": "python_service",
+        "runtime_requirements": [stable_audio3_adapter.backend_name()], "packaging_mode": "python_service",
         "supports_seed": True, "supports_semantic_controls": True,
         "semantic_controls": "colors", "service_build": SERVICE_BUILD,
     }
@@ -237,7 +251,7 @@ def main() -> int:
     host = os.environ.get("MOSH_SERVICE_HOST", "127.0.0.1")
     port = int(os.environ.get("MOSH_SERVICE_PORT", "8770"))
     threading.Thread(target=_worker_loop, daemon=True).start()
-    if SA3_ENABLED:
+    if SA3_ENABLED and stable_audio3_adapter.backend_name() == "mlx":
         # Pre-load the judge model off the worker thread so the first render's QA
         # is ~1–2s, not ~25s. Background + best-effort: never blocks /health.
         from sa3 import qa  # noqa: PLC0415
