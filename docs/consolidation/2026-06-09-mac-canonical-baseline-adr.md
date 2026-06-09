@@ -41,6 +41,18 @@ The `mac-green-2026-06-09` tag is the sync point PC sessions should use after it
 is pushed. PC sessions should sync from that tag or its target commit, then
 propose adapter or gate changes back toward Mac `main`.
 
+## Trunk Policy After PC Promotion
+
+PR #7 promoted the PC portability layer into `main` and the
+`cross-platform-green-2026-06-09` tag marks that baseline. From this point:
+
+- `main` is the only development trunk for ClaudeMosh.
+- `codex/claudemosh-alignment` is retired as an active development branch.
+- Future Windows work must branch from `main`, not from the retired alignment
+  branch.
+- PC-specific changes must land through pull requests into `main` after the
+  relevant Windows gates pass.
+
 ## Node24 GitHub Actions Runtime Note
 
 GitHub is migrating JavaScript actions from Node20 to Node24. The app build
