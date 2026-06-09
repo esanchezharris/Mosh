@@ -91,7 +91,7 @@ export function Clip({ clip, laneH }: { clip: ClipT; laneH: number }) {
 
   return (
     <div
-      className={`clip ${clip.type} ${selected ? "sel" : ""} ${tool === "split" ? "splitcur" : ""}`}
+      className={`clip ${clip.type} ${selected ? "sel" : ""} ${clip.mute ? "muted" : ""} ${tool === "split" ? "splitcur" : ""}`}
       style={{ left, width, height: LANE_H - CLIP_PAD * 2, top: CLIP_PAD }}
       onPointerDown={onPointerDown("move")}
       onPointerMove={onPointerMove}

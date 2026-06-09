@@ -123,6 +123,11 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "move_clip")         return cmdMoveClip (args);
     if (name == "trim_clip")         return cmdTrimClip (args);
     if (name == "split_clip")        return cmdSplitClip (args);
+    if (name == "remove_clip")       return cmdRemoveClip (args);
+    if (name == "rename_clip")       return cmdRenameClip (args);
+    if (name == "set_clip_mute")     return cmdSetClipMute (args);
+    if (name == "set_clip_gain")     return cmdSetClipGain (args);
+    if (name == "duplicate_clip")    return cmdDuplicateClip (args);
     if (name == "set_track_volume")  return cmdSetTrackVolume (args);
     if (name == "set_track_pan")     return cmdSetTrackPan (args);
     if (name == "set_track_mute")    return cmdSetTrackMute (args);
@@ -479,6 +484,95 @@ juce::var MoshOps::cmdSplitClip (const juce::var& args)
     logLine ("split_clip", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("split_clip", var (data));
+}
+
+juce::var MoshOps::cmdRemoveClip (const juce::var& args)
+{
+    auto* clip = findClip (args.getProperty ("clipId", var()).toString());
+    if (clip == nullptr) return errResult ("remove_clip", "no clip");
+    undoManager().beginNewTransaction ("remove_clip");
+    clip->removeFromParent();
+    logLine ("remove_clip", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("remove_clip");
+}
+
+juce::var MoshOps::cmdRenameClip (const juce::var& args)
+{
+    auto* clip = findClip (args.getProperty ("clipId", var()).toString());
+    if (clip == nullptr) return errResult ("rename_clip", "no clip");
+    undoManager().beginNewTransaction ("rename_clip");
+    clip->setName (args.getProperty ("name", var()).toString());
+    logLine ("rename_clip", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("rename_clip");
+}
+
+juce::var MoshOps::cmdSetClipMute (const juce::var& args)
+{
+    auto* clip = findClip (args.getProperty ("clipId", var()).toString());
+    if (clip == nullptr) return errResult ("set_clip_mute", "no clip");
+    undoManager().beginNewTransaction ("set_clip_mute");
+    clip->setMuted ((bool) args.getProperty ("mute", false));
+    logLine ("set_clip_mute", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("set_clip_mute");
+}
+
+juce::var MoshOps::cmdSetClipGain (const juce::var& args)
+{
+    auto* ac = dynamic_cast<te::AudioClipBase*> (findClip (args.getProperty ("clipId", var()).toString()));
+    if (ac == nullptr) return errResult ("set_clip_gain", "not an audio clip");
+    undoManager().beginNewTransaction ("set_clip_gain");
+    ac->setGainDB (juce::jlimit (-48.0f, 24.0f, (float) (double) args.getProperty ("gainDb", 0.0)));
+    logLine ("set_clip_gain", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("set_clip_gain");
+}
+
+juce::var MoshOps::cmdDuplicateClip (const juce::var& args)
+{
+    auto* clip = findClip (args.getProperty ("clipId", var()).toString());
+    if (clip == nullptr) return errResult ("duplicate_clip", "no clip");
+    auto* track = dynamic_cast<te::ClipTrack*> (clip->getTrack());
+    if (track == nullptr) return errResult ("duplicate_clip", "clip not on a clip track");
+
+    auto pos = clip->getPosition();
+    const double newStart = pos.getEnd().inSeconds();
+    const double len = pos.getLength().inSeconds();
+
+    undoManager().beginNewTransaction ("duplicate_clip");
+    te::Clip* dup = nullptr;
+    if (auto* w = dynamic_cast<te::WaveAudioClip*> (clip))
+    {
+        auto nc = track->insertWaveClip (clip->getName(), w->getCurrentSourceFile(),
+            { { tracktion::TimePosition::fromSeconds (newStart), pos.getLength() }, pos.getOffset() }, false);
+        if (nc != nullptr) { nc->setGainDB (w->getGainDB()); dup = nc.get(); }
+    }
+    else if (auto* m = dynamic_cast<te::MidiClip*> (clip))
+    {
+        auto nc = track->insertMIDIClip (clip->getName(),
+            { tracktion::TimePosition::fromSeconds (newStart),
+              tracktion::TimePosition::fromSeconds (newStart + len) }, nullptr);
+        if (nc != nullptr)
+        {
+            auto& src = m->getSequence();
+            auto& dst = nc->getSequence();
+            for (int i = 0; i < src.getNumNotes(); ++i)
+                if (auto* n = src.getNote (i))
+                    dst.addNote (n->getNoteNumber(), n->getStartBeat(), n->getLengthBeats(),
+                                 n->getVelocity(), 0, &undoManager());
+            dup = nc.get();
+        }
+    }
+    if (dup == nullptr) return errResult ("duplicate_clip", "could not duplicate this clip type");
+    dup->setMuted (clip->isMuted());
+
+    auto* data = new DynamicObject();
+    data->setProperty ("newClipId", dup->itemID.toString());
+    logLine ("duplicate_clip", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("duplicate_clip", var (data));
 }
 
 juce::var MoshOps::cmdSetTrackVolume (const juce::var& args)
@@ -1595,11 +1689,13 @@ juce::var MoshOps::clipToVar (te::Clip& c)
     o->setProperty ("length", pos.getLength().inSeconds());
     o->setProperty ("offset", pos.getOffset().inSeconds());
 
+    o->setProperty ("mute", c.isMuted());
     if (auto* w = dynamic_cast<te::WaveAudioClip*> (&c))
     {
         o->setProperty ("type", "wave");
         o->setProperty ("sourceFile", w->getCurrentSourceFile().getFullPathName());
         o->setProperty ("sourceLength", w->getSourceLength().inSeconds());
+        o->setProperty ("gainDb", w->getGainDB());
     }
     else if (auto* mc = dynamic_cast<te::MidiClip*> (&c))
     {

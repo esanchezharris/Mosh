@@ -91,6 +91,21 @@ Backend: snapshot now carries the `master` bus (the edit's master VolumeAndPan) 
 
 **Shipped-on-both-axes: 46 → 49** (must-tier 35 → 38). Channel metering (live level taps via `LevelMeterPlugin`) and buses/sends are the next mixer rungs.
 
+### 2026-06-09 · Wave 6 — Clip editing (delete / rename / mute / gain / duplicate) ✅
+
+Filled a glaring gap: there was no way to even **delete** a clip. New commands `remove_clip`, `rename_clip`, `set_clip_mute`, `set_clip_gain`, `duplicate_clip`; snapshot clips now carry `mute` + `gainDb`. UI: a selection-driven clip-actions bar (rename, mute, gain, duplicate, delete), Delete/Backspace key removal, and a dimmed visual for muted clips. Verified: `Mosh --selftest` **152/152**, 0 assertions.
+
+| ID | Tier | Feature | Before → After |
+|---|---|---|---|
+| `ARR-016` | should | Clip gain | ✗/✗ → ✓/✓ |
+| `ARR-023` | should | Clip mute / disable | ✗/✗ → ✓/✓ |
+| `ARR-024` | should | Clip rename | ◐/✗ → ✓/✓ |
+| `ARR-015` | should | Duplicate / loop clips | ✗/✗ → ◐/✓ (duplicate; loop-repeat later) |
+| `AED-001` | must | Cut / copy / paste / delete | ✗/✗ → ◐/◐ (delete + duplicate; clipboard cut/copy/paste later) |
+| `AED-005` | should | Clip gain / normalize | ✗/✗ → ◐/◐ (gain; normalize later) |
+
+**Shipped-on-both-axes: 49 → 52** (ARR-016/023/024). Delete-a-clip + duplicate + per-clip gain/mute are core editing the DAW simply lacked before.
+
 ## Coverage by category
 
 Per axis the three counts are **present ✓ / partial ◐ / missing ✗** (missing also folds in the one `not_applicable`).

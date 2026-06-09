@@ -388,6 +388,43 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         cmd (ops, "set_master_volume", args1 ("db", -3.0));   // restore a sane default
     }
 
+    // ─── Wave 6: clip editing (delete / rename / mute / gain / duplicate) ───
+    std::cerr << "--- Wave 6: clip editing ---\n";
+    {
+        auto clipById = [&] (const String& cid) -> var {
+            auto snap = ops.snapshot();
+            if (auto* tracks = snap["tracks"].getArray())
+                for (auto& tr : *tracks)
+                    if (auto* clips = tr.getProperty ("clips", var()).getArray())
+                        for (auto& c : *clips)
+                            if (c.getProperty ("id", var()).toString() == cid) return c;
+            return {};
+        };
+
+        auto et = cmd (ops, "create_track", args1 ("name", "Edit"))["data"].getProperty ("trackId", var()).toString();
+        auto cid = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", et }, { "seconds", 1.0 }, { "freq", 330.0 }}))["data"].getProperty ("clipId", var()).toString();
+        check (cid.isNotEmpty(), "tone clip created for editing");
+
+        check (ok (cmd (ops, "rename_clip", objN ({{ "clipId", cid }, { "name", "Renamed" }}))), "rename_clip ok");
+        check (clipById (cid).getProperty ("name", var()).toString() == "Renamed", "clip name reflects rename");
+
+        check (ok (cmd (ops, "set_clip_mute", objN ({{ "clipId", cid }, { "mute", true }}))), "set_clip_mute ok");
+        check ((bool) clipById (cid).getProperty ("mute", false), "clip mute reflects in snapshot");
+
+        check (ok (cmd (ops, "set_clip_gain", objN ({{ "clipId", cid }, { "gainDb", 6.0 }}))), "set_clip_gain ok");
+        check (std::abs ((double) clipById (cid).getProperty ("gainDb", 0.0) - 6.0) < 0.5, "clip gain reflects in snapshot");
+
+        const int before = trackById (et).getProperty ("clips", var()).size();
+        auto dup = cmd (ops, "duplicate_clip", args1 ("clipId", cid));
+        check (ok (dup), "duplicate_clip ok");
+        check (trackById (et).getProperty ("clips", var()).size() == before + 1, "duplicate adds a clip to the track");
+        const auto newId = dup["data"].getProperty ("newClipId", var()).toString();
+        check ((double) clipById (newId).getProperty ("start", 0.0) > 0.5, "duplicate lands after the original");
+
+        check (ok (cmd (ops, "remove_clip", args1 ("clipId", cid))), "remove_clip ok");
+        check (! clipById (cid).isObject(), "remove_clip deletes the clip");
+    }
+
     // ─── Wave 1: engine built-in plugin palette (effects + instruments) ───
     std::cerr << "--- Wave 1: built-in plugin palette ---\n";
     {

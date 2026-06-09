@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
 import type { Snapshot, Track } from "../types";
 import { Clip } from "./Clip";
@@ -85,9 +85,26 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
   const rulerWidth = RULER_SECONDS * pxPerSec;
   const lanesHeight = Math.max(LANE_H, snapshot.tracks.length * LANE_H);
 
+  // Delete / Backspace removes the selected clips (unless typing in a field).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement;
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT")) return;
+      if (e.key !== "Delete" && e.key !== "Backspace") return;
+      const st = useStore.getState();
+      if (st.selection.size === 0) return;
+      e.preventDefault();
+      [...st.selection].forEach((id) => void st.exec("remove_clip", { clipId: id }));
+      st.clearSelection();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   return (
     <div className="arrange">
       <Toolbar />
+      <ClipActions snapshot={snapshot} />
       <div className="timeline">
         <div className="tl-head">
           <div className="lane-gutter">tracks</div>
@@ -218,6 +235,53 @@ function Toolbar() {
       <span className="sep" />
       <button onClick={() => exec("save", {})}>Save</button>
       <button onClick={() => exec("reload", {})}>Reload</button>
+    </div>
+  );
+}
+
+// Selection-driven clip operations (Wave 6): rename / mute / gain / duplicate /
+// delete. Appears only when one or more clips are selected.
+function ClipActions({ snapshot }: { snapshot: Snapshot }) {
+  const selection = useStore((s) => s.selection);
+  const exec = useStore((s) => s.exec);
+  const clearSelection = useStore((s) => s.clearSelection);
+  const ids = [...selection];
+  if (ids.length === 0) return null;
+
+  const clips = snapshot.tracks.flatMap((t) => t.clips).filter((c) => selection.has(c.id));
+  if (clips.length === 0) return null;
+  const single = clips.length === 1 ? clips[0] : null;
+  const anyMuted = clips.some((c) => c.mute);
+
+  return (
+    <div className="clip-actions">
+      <span className="ca-label">{ids.length} clip{ids.length > 1 ? "s" : ""} selected</span>
+      {single && (
+        <input
+          className="ca-name"
+          key={single.id}
+          defaultValue={single.name}
+          onBlur={(e) => exec("rename_clip", { clipId: single.id, name: e.target.value })}
+          onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+          title="Rename clip (Enter to commit)"
+        />
+      )}
+      <button onClick={() => clips.forEach((c) => exec("set_clip_mute", { clipId: c.id, mute: !anyMuted }))}>
+        {anyMuted ? "Unmute" : "Mute"}
+      </button>
+      {single && single.type === "wave" && (
+        <label className="ca-gain" title="Clip gain">
+          gain
+          <input
+            type="range" min={-24} max={12} step={0.5}
+            value={single.gainDb ?? 0}
+            onChange={(e) => exec("set_clip_gain", { clipId: single.id, gainDb: Number(e.target.value) })}
+          />
+          <span>{(single.gainDb ?? 0).toFixed(1)}</span>
+        </label>
+      )}
+      <button onClick={() => clips.forEach((c) => exec("duplicate_clip", { clipId: c.id }))}>Duplicate</button>
+      <button className="danger" onClick={() => { clips.forEach((c) => exec("remove_clip", { clipId: c.id })); clearSelection(); }}>Delete</button>
     </div>
   );
 }

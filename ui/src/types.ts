@@ -44,6 +44,8 @@ export type Clip = {
   start: number;
   length: number;
   offset: number;
+  mute?: boolean;
+  gainDb?: number;
   sourceFile?: string;
   sourceLength?: number;
   notes?: MidiNote[];

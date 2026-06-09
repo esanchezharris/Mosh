@@ -264,6 +264,17 @@ button.on { border-color: var(--accent); color: var(--accent); background: #2120
 
 .boot { padding: 3rem; color: var(--muted); }
 
+/* Clip actions bar (Wave 6) */
+.clip-actions { display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem 1rem; border-bottom: 1px solid var(--line); background: var(--panel-2); flex-wrap: wrap; }
+.ca-label { font-size: 0.74rem; color: var(--muted); }
+.ca-name { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; color: var(--text); padding: 0.25rem 0.5rem; font-size: 0.8rem; width: 160px; }
+.ca-gain { display: flex; align-items: center; gap: 5px; font-size: 0.74rem; color: var(--muted); }
+.ca-gain input { width: 90px; accent-color: var(--accent); }
+.clip-actions button { font-size: 0.76rem; padding: 0.25rem 0.6rem; }
+.clip-actions button.danger { color: var(--playhead); border-color: #7a2a2a; }
+.clip-actions button.danger:hover { background: #5a1d1d; }
+.clip.muted { opacity: 0.4; filter: grayscale(0.6); }
+
 /* View toggle (Wave 5) */
 .view-toggle { display: flex; gap: 2px; margin-left: 0.4rem; }
 .view-toggle button { font-size: 0.76rem; padding: 0.3rem 0.6rem; color: var(--muted); }
