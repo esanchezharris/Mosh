@@ -171,6 +171,12 @@ export type Snapshot = {
     bitDepth?: number;
     bufferSize?: number;
     outputLatencyMs?: number;
+    // Plugin delay compensation readout (MON-004): the whole-edit reported latency the
+    // playback graph compensates (neural insert + all hosted plugins). Null context
+    // (no audio device / idle engine) → latencyContextReady=false, label "PDC —".
+    totalLatencySamples?: number;
+    totalLatencyMs?: number;
+    latencyContextReady?: boolean;
     audioDeviceName?: string;
     audioDeviceError?: string;
   };

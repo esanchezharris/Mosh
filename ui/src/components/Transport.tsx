@@ -78,6 +78,20 @@ export function Transport() {
         {secondsToBBS(t?.position ?? 0, meterFrom(session))}
       </span>
 
+      {/* Plugin delay compensation readout (MON-004). The whole-edit reported latency
+          Tracktion compensates across the neural insert + all hosted plugins. Non-
+          interactive — pure backend state, never a command. "PDC —" when the playback
+          graph isn't prepared (no audio device / idle), honest vs a false 0.0 ms. */}
+      {session?.latencyContextReady ? (
+        <span className="pos pdc" title="Plugin delay compensation — total reported latency of the active signal chain">
+          PDC {(session.totalLatencyMs ?? 0).toFixed(1)} ms
+        </span>
+      ) : (
+        <span className="pos pdc dim" title="Audio engine idle — latency reported once the playback graph is prepared">
+          PDC —
+        </span>
+      )}
+
       <label className="tempo" title="Tempo (BPM)">
         <input
           type="number"

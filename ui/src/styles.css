@@ -130,6 +130,8 @@ button.on { border-color: var(--accent); color: var(--accent); background: #2120
 .tbtn.rec.on { color: #fff; border-color: var(--playhead); background: var(--playhead); box-shadow: 0 0 8px var(--playhead); }
 .pos { margin-left: 0.5rem; font-variant-numeric: tabular-nums; font-size: 1rem; color: var(--muted); min-width: 76px; text-align: right; }
 .pos.bbs { margin-left: 0.25rem; min-width: 60px; font-size: 0.9rem; color: var(--accent); }
+.pos.pdc { margin-left: 0.5rem; min-width: auto; font-size: 0.78rem; color: var(--muted); }
+.pos.pdc.dim { opacity: 0.5; }
 
 /* Tempo + time-signature (Wave 2) */
 .tempo, .timesig { display: flex; align-items: center; gap: 3px; font-size: 0.8rem; color: var(--muted); }
@@ -286,6 +288,15 @@ button.on { border-color: var(--accent); color: var(--accent); background: #2120
 .gen-badge.st-rendering, .gen-badge.st-queued { background: #4a3a12; color: var(--warn); }
 .gen-badge.st-dirty { background: #4a2a2a; color: #ff9b9b; }
 .gen-badge.st-empty { background: var(--line); color: var(--muted); }
+.gen-badge.st-bypassed { background: var(--line); color: var(--muted); opacity: 0.7; }
+.gen-badge.st-frozen { background: #1d3a4a; color: #8bd0ff; }
+.gen-badge.st-bounced { background: #2d2d4a; color: #b8b8ff; }
+.gen-sub { font-size: 0.62rem; color: var(--muted); text-transform: lowercase; }
+.mixbtn.byp-on { background: var(--line); color: var(--text); border-color: var(--muted); }
+.gen-manage { margin-top: 4px; }
+.gen-actions button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.gen-remove { color: var(--muted); }
+.gen-remove:hover { color: var(--playhead); border-color: var(--playhead); }
 .gen-prog { flex: 1; height: 5px; background: var(--panel-2); border-radius: 3px; overflow: hidden; }
 .gen-prog span { display: block; height: 100%; background: var(--accent); transition: width 0.1s linear; }
 .gen-seed { font-size: 0.66rem; color: var(--muted); }

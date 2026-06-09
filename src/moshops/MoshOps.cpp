@@ -283,6 +283,7 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "bypass_layer")      return cmdBypassLayer (args);
     if (name == "freeze_layer")      return cmdFreezeLayer (args);
     if (name == "bounce_layer_to_clip") return cmdBounceLayerToClip (args);
+    if (name == "remove_render_layer") return cmdRemoveRenderLayer (args);
     if (name == "list_colors")       return cmdListColors (args);
     if (name == "export_audio")      return cmdExportAudio (args);
     if (name == "list_audio_devices")return cmdListAudioDevices (args);
@@ -2023,6 +2024,25 @@ juce::var MoshOps::cmdBounceLayerToClip (const juce::var& args)
     return okResult ("bounce_layer_to_clip");
 }
 
+juce::var MoshOps::cmdRemoveRenderLayer (const juce::var& args)
+{
+    // Clear the MOSH_RENDERLAYER node off the clip (the genuine "remove" — reject_render
+    // only marks the take dirty, it does NOT remove the layer). After this the clip has
+    // no layer and create_render_layer succeeds again. Undoable (mirrors remove_plugin);
+    // any accepted/bounced clip already landed on the neural lane is left untouched.
+    const auto clipId = args.getProperty ("clipId", var()).toString();
+    auto* clip = findClip (clipId);
+    if (clip == nullptr) return errResult ("remove_render_layer", "no clip: " + clipId);
+    auto node = clip->state.getChildWithName (ids::MOSH_RENDERLAYER);
+    if (! node.isValid()) return errResult ("remove_render_layer", "clip has no render layer");
+
+    undoManager().beginNewTransaction ("remove_render_layer");
+    clip->state.removeChild (node, &undoManager());
+    logLine ("remove_render_layer", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("remove_render_layer");
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Stage 6 — export (the full producer loop ends here)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2628,6 +2648,27 @@ juce::var MoshOps::snapshot()
     session->setProperty ("bitDepth", dm.getBitDepth());
     session->setProperty ("bufferSize", dm.getBlockSize());
     session->setProperty ("outputLatencyMs", dm.getOutputLatencySeconds() * 1000.0);
+
+    // Plugin delay compensation readout (MON-004). This is the WHOLE-GRAPH reported
+    // latency Tracktion itself compensates — the single authoritative total from the
+    // prepared playback graph (te::EditPlaybackContext::getLatencySamples()), which
+    // already folds in the neural insert + every hosted plugin (max across parallel
+    // paths, sum along chains). It is read-only state, not a command. The context is
+    // null until ensureContextAllocated() runs (only with an audio device); headless /
+    // no-audio reports 0 + latencyContextReady=false so the UI labels "PDC —" rather
+    // than a false "0.0 ms". Distinct from outputLatencyMs (device I/O latency above).
+    int totalLatencySamples = 0;
+    bool latencyContextReady = false;
+    if (auto* ctx = edit.getTransport().getCurrentPlaybackContext())
+    {
+        totalLatencySamples = ctx->getLatencySamples();
+        latencyContextReady = true;
+    }
+    const double latencySR = dm.getSampleRate() > 0.0 ? dm.getSampleRate() : 44100.0;
+    session->setProperty ("totalLatencySamples", totalLatencySamples);
+    session->setProperty ("totalLatencyMs", (double) totalLatencySamples / latencySR * 1000.0);
+    session->setProperty ("latencyContextReady", latencyContextReady);
+
     session->setProperty ("audioDeviceName",
         dm.deviceManager.getCurrentAudioDevice() != nullptr
             ? dm.deviceManager.getCurrentAudioDevice()->getName() : String());

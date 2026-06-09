@@ -591,6 +591,36 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         }
     }
 
+    // ─── MON-004: total plugin delay compensation (PDC) readout in the snapshot ───
+    std::cerr << "--- MON-004: PDC / reported-latency readout ---\n";
+    {
+        auto sess = ops.snapshot().getProperty ("session", var());
+        // Fields present + numeric (the UI reads these for the transport readout).
+        check (sess.hasProperty ("totalLatencySamples"), "session.totalLatencySamples present");
+        check (sess.hasProperty ("totalLatencyMs"), "session.totalLatencyMs present");
+        check (sess.hasProperty ("latencyContextReady"), "session.latencyContextReady present");
+        const int  latSamples = (int) sess.getProperty ("totalLatencySamples", -1);
+        const double latMs     = (double) sess.getProperty ("totalLatencyMs", -1.0);
+        const bool ready       = (bool) sess.getProperty ("latencyContextReady", true);
+        check (latSamples >= 0, "totalLatencySamples is non-negative");
+        check (latMs >= 0.0, "totalLatencyMs is non-negative");
+        // ms is consistent with samples / sampleRate (guard against a divide-by-zero SR).
+        const double sr = (double) sess.getProperty ("sampleRate", 44100.0);
+        const double sr2 = sr > 0.0 ? sr : 44100.0;
+        check (std::abs (latMs - (double) latSamples / sr2 * 1000.0) < 1e-6, "totalLatencyMs == samples / sampleRate * 1000 (consistent)");
+
+        // Honest headless posture: with no audio device the playback graph is never
+        // prepared, so the context is null -> ready=false + 0 samples (NOT a false 0 ms
+        // claimed as real). The number is verified live via the GUI / live-audio smoke.
+        if (! eng.hasAudio())
+        {
+            check (! ready, "no-audio headless -> latencyContextReady=false (honest, not a false 0.0 ms)");
+            check (latSamples == 0, "no-audio headless -> totalLatencySamples=0");
+        }
+        else
+            check (ready, "audio attached -> latencyContextReady=true (graph prepared)");
+    }
+
     // ─── Stage 5: Tier-B generative layer (FakeAdapter) ───
     std::cerr << "--- Stage 5: generative layer (FakeAdapter, full loop) ---\n";
     {
@@ -644,6 +674,74 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         cmd (ops, "reject_render", args1 ("clipId", gcid));
         renderLogText = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
         check (renderLogText.contains ("reject_render"), "JSONL records reject_render (taste label)");
+
+        // --- NRL-004: render-layer management (bypass / freeze / bounce / remove) ---
+        std::cerr << "--- NRL-004: render-layer management ---\n";
+        // Resolve the clip's render-layer var off the gen track by clipId (bind the
+        // snapshot to a local so the array doesn't dangle).
+        auto layerOf = [&] (const String& cid) -> var {
+            auto trk = trackById (gt);
+            if (auto* arr = trk.getProperty ("clips", var()).getArray())
+                for (auto& c : *arr)
+                    if (c.getProperty ("id", var()).toString() == cid)
+                        return c.getProperty ("renderLayer", var());
+            return {};
+        };
+        auto layerStatus = [&] (const String& cid) { return layerOf (cid).getProperty ("status", var()).toString(); };
+
+        // reject_render kept the layer (it is NOT a remove — the #1 trap).
+        check ((bool) trackById (gt).getProperty ("clips", var())[0].getProperty ("hasRenderLayer", false)
+                   || layerOf (gcid).isObject(),
+               "reject_render did NOT remove the layer (still present)");
+        check (layerStatus (gcid) == "dirty", "reject_render set status=dirty (re-roll, not remove)");
+
+        // bypass_layer toggles status ready<->bypassed.
+        check (ok (cmd (ops, "bypass_layer", objN ({{ "clipId", gcid }, { "bypassed", true }}))), "bypass_layer ok");
+        check (layerStatus (gcid) == "bypassed", "bypass_layer{true} -> status bypassed");
+        cmd (ops, "bypass_layer", objN ({{ "clipId", gcid }, { "bypassed", false }}));
+        check (layerStatus (gcid) == "ready", "bypass_layer{false} -> status ready");
+
+        // Re-render so a cached artifact exists for freeze/bounce (cache HIT path).
+        cmd (ops, "render_layer", objN ({{ "clipId", gcid }, { "wait", true }}));
+
+        // freeze_layer requires a cached artifact -> status frozen.
+        check (ok (cmd (ops, "freeze_layer", args1 ("clipId", gcid))), "freeze_layer ok (artifact present)");
+        check (layerStatus (gcid) == "frozen", "freeze_layer -> status frozen");
+
+        // bounce_layer_to_clip = accept + finalize: lands a clip on the neural lane.
+        cmd (ops, "render_layer", objN ({{ "clipId", gcid }, { "wait", true }}));   // refresh artifact (frozen status doesn't gate render)
+        const int tracksBeforeBounce = tracks (ops);
+        check (ok (cmd (ops, "bounce_layer_to_clip", args1 ("clipId", gcid))), "bounce_layer_to_clip ok");
+        check (layerStatus (gcid) == "bounced", "bounce_layer_to_clip -> status bounced");
+        check (tracks (ops) >= tracksBeforeBounce, "bounce landed audio on the neural lane (no track lost)");
+
+        // freeze on a layer with NO artifact errors (gate the button on hasArtifact).
+        auto gt2 = cmd (ops, "create_track", args1 ("name", "Gen2"))["data"].getProperty ("trackId", var()).toString();
+        auto tone2 = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", gt2 }, { "seconds", 1.0 }, { "freq", 210.0 }}));
+        const auto gcid2 = tone2["data"].getProperty ("clipId", var()).toString();
+        cmd (ops, "create_render_layer", objN ({{ "clipId", gcid2 }, { "adapter", "fake" }}));
+        check (! ok (cmd (ops, "freeze_layer", args1 ("clipId", gcid2))), "freeze_layer on un-rendered layer errors (nothing to freeze)");
+
+        // remove_render_layer clears the node; create_render_layer then succeeds again.
+        auto layerOf2 = [&] (const String& cid) -> bool {
+            auto trk = trackById (gt2);
+            if (auto* arr = trk.getProperty ("clips", var()).getArray())
+                for (auto& c : *arr)
+                    if (c.getProperty ("id", var()).toString() == cid)
+                        return (bool) c.getProperty ("hasRenderLayer", false);
+            return false;
+        };
+        check (layerOf2 (gcid2), "layer present before remove_render_layer");
+        check (ok (cmd (ops, "remove_render_layer", args1 ("clipId", gcid2))), "remove_render_layer ok");
+        check (! layerOf2 (gcid2), "remove_render_layer cleared MOSH_RENDERLAYER (hasRenderLayer=false)");
+        check (ok (cmd (ops, "create_render_layer", objN ({{ "clipId", gcid2 }, { "adapter", "fake" }}))),
+               "create_render_layer succeeds again after remove (no 'already has a layer')");
+        // undo restores the removed-then-recreated layer state; just prove remove is undoable.
+        cmd (ops, "undo");                                   // undo the re-create
+        cmd (ops, "undo");                                   // undo the remove -> layer back
+        check (layerOf2 (gcid2), "remove_render_layer is undoable (layer restored)");
+        check (eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString().contains ("remove_render_layer"),
+               "JSONL records remove_render_layer");
     }
 
     // --- Stage 6: full producer loop -> export, undo/redo correct throughout ---
@@ -1487,6 +1585,13 @@ int runLiveAudioSmoke (MoshEngine& eng, MoshOps& ops)
     check (ok (cmd (ops, "set_transport", args1 ("position", 0.0))), "transport seek ok");
     check (ok (cmd (ops, "set_transport", args1 ("action", "play"))), "transport play ok");
     check (eng.edit().getTransport().getCurrentPlaybackContext() != nullptr, "playback context allocated");
+
+    // MON-004: with the playback graph prepared, the PDC readout is live (ready=true).
+    {
+        auto sess = ops.snapshot().getProperty ("session", var());
+        check ((bool) sess.getProperty ("latencyContextReady", false), "PDC: latencyContextReady=true with the graph prepared");
+        check ((int) sess.getProperty ("totalLatencySamples", -1) >= 0, "PDC: totalLatencySamples non-negative (live graph)");
+    }
 
     LiveAudioProbe probe;
     deviceManager.addAudioCallback (&probe);

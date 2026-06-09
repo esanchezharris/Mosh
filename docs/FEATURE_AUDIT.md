@@ -215,6 +215,17 @@ The "canonical command contract exists but is never shown" gap — on-brand for 
 
 **Shipped-on-both-axes: 74 → 76** (must-tier 60 → 62). The architecture is now visible to the user — the 82-command surface and its JSONL audit trail have a live inspector, and the whole UI scales.
 
+### 2026-06-09 · Wave: Render-layer management (NRL-004) + PDC/latency indicator (MON-004) ✅
+
+Two of the three "polish" features (the third, drag-and-drop, is split out below — its first impl was caught broken in review). **NRL-004:** the generative render-layer drawer (`GenPanel`) exposed only create/render/accept/reject; this wires the rest of the lifecycle — bypass toggle, Freeze, Bounce-to-clip, and a real **remove** (a new `remove_render_layer` command, since `reject_render` only flags the layer dirty and nothing cleared the node; it mirrors `cmdRemovePlugin` — `removeChild` in an undoable transaction). Accept vs Reject tooltips disambiguated; bypassed/frozen/bounced status badges added. (Honest limit: `bypass_layer` records intent in the tree and survives save/reload but does not yet re-route audio — a deeper engine change.) **MON-004:** the snapshot gains `totalLatencySamples` / `totalLatencyMs` / `latencyContextReady` from `EditPlaybackContext::getLatencySamples()` (the same whole-graph reported latency Tracktion's PDC uses), surfaced as a "PDC X ms" readout in the transport. Verified: `Mosh --selftest` **340/340**, 0 assertions — `remove_render_layer` + undo/redo round-trips, bypass/freeze status transitions, and the latency field is present, non-negative, ms==samples/rate consistent, and honestly `latencyContextReady=false` headless (no fake 0.0; the live number is gated on a real graph).
+
+| ID | Tier | Feature | Before → After |
+|---|---|---|---|
+| `NRL-004` | must | Render-layer management | ✓/◐ → ✓/✓ |
+| `MON-004` | must | Plugin delay compensation (indicator) | ✓/◐ → ✓/✓ |
+
+**Shipped-on-both-axes: 76 → 78** (must-tier 62 → 64). `BRW-007` (drag-and-drop import) remains open — see the dedicated entry below; the file picker (Settings → Import) already covers import.
+
 ## Coverage by category
 
 Per axis the three counts are **present ✓ / partial ◐ / missing ✗** (missing also folds in the one `not_applicable`).

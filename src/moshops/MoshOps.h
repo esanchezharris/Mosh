@@ -122,6 +122,7 @@ private:
     juce::var cmdBypassLayer      (const juce::var& args);
     juce::var cmdFreezeLayer      (const juce::var& args);
     juce::var cmdBounceLayerToClip(const juce::var& args);
+    juce::var cmdRemoveRenderLayer(const juce::var& args);
     juce::var cmdListColors       (const juce::var& args);
     // Stage 6 — consolidation
     juce::var cmdExportAudio      (const juce::var& args);
