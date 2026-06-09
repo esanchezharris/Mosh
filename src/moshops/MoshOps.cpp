@@ -301,6 +301,7 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "new_project")       return cmdNewProject (args);
     if (name == "open_project")      return cmdOpenProject (args);
     if (name == "save_as")           return cmdSaveAs (args);
+    if (name == "set_project_settings") return cmdSetProjectSettings (args);
 
     return errResult (name, "unknown command: " + name);
 }
@@ -572,6 +573,96 @@ juce::var MoshOps::cmdSetMetronome (const juce::var& args)
     emitSnapshotInvalidated();
     auto* data = new DynamicObject(); data->setProperty ("metronome", on);
     return okResult ("set_metronome", var (data));
+}
+
+// PRJ-008 — the MOSH_PROJECT child of the Edit's own ValueTree (mirrors the
+// MOSH_RENDERLAYER parenting). Created empty on first access so it saves/reloads
+// with the .tracktionedit. Pure storage accessor: no undo manager, no logging.
+juce::ValueTree MoshOps::projectSettingsTree()
+{
+    auto state = eng.edit().state;
+    auto node = state.getChildWithName (ids::MOSH_PROJECT);
+    if (! node.isValid())
+    {
+        node = juce::ValueTree (ids::MOSH_PROJECT);
+        state.appendChild (node, nullptr);   // nullptr: not an undoable edit (preference)
+    }
+    return node;
+}
+
+juce::var MoshOps::projectSettingsToVar()
+{
+    // Project INTENT where stored; live device readout as the fallback (device values
+    // stay the live truth, project = intent). timeBase has no device analogue, so it
+    // defaults to "seconds". NON-mutating read (snapshot() is read-only by contract):
+    // getChildWithName returns an invalid tree when unset, whose hasProperty() is false,
+    // so the device-fallback below handles the absent case without writing the Edit tree.
+    auto node = eng.edit().state.getChildWithName (ids::MOSH_PROJECT);
+    auto& dm = eng.engine().getDeviceManager();
+
+    double sr = dm.getSampleRate();
+    if (sr < 7000.0) sr = 44100.0;
+    if (node.hasProperty (ids::projectSampleRate))
+        sr = (double) node.getProperty (ids::projectSampleRate);
+
+    int bd = dm.getBitDepth();
+    if (bd != 16 && bd != 24 && bd != 32) bd = 24;
+    if (node.hasProperty (ids::projectBitDepth))
+        bd = (int) node.getProperty (ids::projectBitDepth);
+
+    juce::String tb = node.hasProperty (ids::timeBase)
+                          ? node.getProperty (ids::timeBase).toString()
+                          : juce::String ("seconds");
+
+    auto* o = new DynamicObject();
+    o->setProperty ("sampleRate", sr);
+    o->setProperty ("bitDepth", bd);
+    o->setProperty ("timeBase", tb);
+    return var (o);
+}
+
+juce::var MoshOps::cmdSetProjectSettings (const juce::var& args)
+{
+    // Per-project format / time-base INTENT — a producer preference (the export/
+    // format default + the timeline display base), NOT a live device change. Stored
+    // on a MOSH_PROJECT child of the Edit tree so it persists with the session, and
+    // followed the cmdSetMetronome template exactly: no Tracktion transaction (no
+    // beginNewTransaction), logLine(..., false), emitSnapshotInvalidated. Works
+    // headless (no audio device required).
+    //
+    // Validate every supplied field before writing anything (partial patch: each
+    // field is optional, but a present field that fails validation is a hard error
+    // and leaves the stored settings untouched).
+    if (args.hasProperty ("sampleRate"))
+    {
+        const double sr = (double) args.getProperty ("sampleRate", 0.0);
+        if (sr < 7000.0)
+            return errResult ("set_project_settings", "sampleRate must be >= 7000");
+    }
+    if (args.hasProperty ("bitDepth"))
+    {
+        const int bd = (int) args.getProperty ("bitDepth", 0);
+        if (bd != 16 && bd != 24 && bd != 32)
+            return errResult ("set_project_settings", "bitDepth must be one of 16, 24, 32");
+    }
+    if (args.hasProperty ("timeBase"))
+    {
+        const auto tb = args.getProperty ("timeBase", var()).toString();
+        if (tb != "seconds" && tb != "barsBeats")
+            return errResult ("set_project_settings", "timeBase must be 'seconds' or 'barsBeats'");
+    }
+
+    auto node = projectSettingsTree();
+    if (args.hasProperty ("sampleRate"))
+        node.setProperty (ids::projectSampleRate, (double) args.getProperty ("sampleRate", 0.0), nullptr);
+    if (args.hasProperty ("bitDepth"))
+        node.setProperty (ids::projectBitDepth, (int) args.getProperty ("bitDepth", 0), nullptr);
+    if (args.hasProperty ("timeBase"))
+        node.setProperty (ids::timeBase, args.getProperty ("timeBase", var()).toString(), nullptr);
+
+    logLine ("set_project_settings", args, true, {}, false);   // preference — NOT undoable
+    emitSnapshotInvalidated();
+    return okResult ("set_project_settings", projectSettingsToVar());
 }
 
 juce::var MoshOps::cmdUndo (const juce::var& args)
@@ -2387,7 +2478,13 @@ juce::var MoshOps::cmdExportAudio (const juce::var& args)
     // Validate the requested depth against what this format can actually write
     // (getPossibleBitDepths). Reject an unsupported depth rather than silently
     // writing the wrong one. Absent -> 24 (or the format's nearest supported).
-    int bitDepth = 24;
+    // PRJ-008 — when the export omits bitDepth, default it from the stored per-project
+    // setting (NON-mutating read; an invalid/absent tree's hasProperty() is false ->
+    // the 24-bit / device-rate defaults below).
+    auto projectSettings = eng.edit().state.getChildWithName (ids::MOSH_PROJECT);
+    int bitDepth = projectSettings.hasProperty (ids::projectBitDepth)
+                       ? (int) projectSettings.getProperty (ids::projectBitDepth)
+                       : 24;
     {
         auto depths = audioFormat->getPossibleBitDepths();   // local copy of the Array<int>
         const bool depthRequested = args.hasProperty ("bitDepth");
@@ -2446,11 +2543,17 @@ juce::var MoshOps::cmdExportAudio (const juce::var& args)
 
     const double len = juce::jmax (0.1, edit.getLength().inSeconds());
 
-    // Sample rate: honor a valid explicit request (>= 7000), else the device rate
-    // with the existing 44100 fallback.
+    // Sample rate: honor a valid explicit request (>= 7000), else the stored
+    // per-project setting (PRJ-008), else the device rate with the 44100 fallback.
     double sampleRate = edit.engine.getDeviceManager().getSampleRate();
     if (sampleRate < 7000.0)
         sampleRate = 44100.0;
+    if (! args.hasProperty ("sampleRate") && projectSettings.hasProperty (ids::projectSampleRate))
+    {
+        const double projSr = (double) projectSettings.getProperty (ids::projectSampleRate);
+        if (projSr >= 7000.0)
+            sampleRate = projSr;
+    }
     if (args.hasProperty ("sampleRate"))
     {
         const double reqSr = (double) args.getProperty ("sampleRate", sampleRate);
@@ -2842,6 +2945,13 @@ juce::String MoshOps::applyAudioDeviceSetup (const juce::var& args)
     eng.engine().getDeviceManager().rescanWaveDeviceList();
     if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
         mm->runDispatchLoopUntil (50);
+
+    // PRE-001 — persist the chosen device setup to the session dir so it is restored
+    // on the next launch (MoshEngine reads it before the MOSH_AUDIO_OUTPUT_DEVICE env
+    // fallback). A machine/whole-app preference, written without the undo manager.
+    if (auto stateXml = std::unique_ptr<juce::XmlElement> (adm().createStateXml()))
+        stateXml->writeTo (eng.sessionDir().getChildFile ("audio-device.xml"));
+
     return {};
 }
 
@@ -3158,6 +3268,13 @@ juce::var MoshOps::snapshot()
         dm.deviceManager.getCurrentAudioDevice() != nullptr
             ? dm.deviceManager.getCurrentAudioDevice()->getName() : String());
     session->setProperty ("audioDeviceError", eng.audioDeviceError());
+
+    // PRJ-008 — per-project format / time-base INTENT (the export/format default +
+    // timeline display base). Read from the MOSH_PROJECT child of the Edit tree,
+    // falling back to the live device readout where unset (device = live truth,
+    // project = remembered intent). This is generic media-format state — no
+    // Tracktion concepts cross to the UI.
+    session->setProperty ("project", projectSettingsToVar());
 
     Array<var> tracks;
     int index = 0;

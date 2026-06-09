@@ -145,6 +145,17 @@ private:
     juce::var cmdNewProject       (const juce::var& args);   // replaces the Edit (undoable:false)
     juce::var cmdOpenProject      (const juce::var& args);   // replaces the Edit (undoable:false)
     juce::var cmdSaveAs           (const juce::var& args);   // persists + re-points (undoable:false)
+    // PRJ-008 — per-project format / time-base intent (undoable:false preference,
+    // stored on a MOSH_PROJECT child of the Edit tree; saves/reloads with the edit).
+    juce::var cmdSetProjectSettings (const juce::var& args);
+
+    // The MOSH_PROJECT child of eng.edit().state, created (empty) on first read so
+    // callers always get a valid tree. Pure storage accessor — no logging/transaction.
+    juce::ValueTree projectSettingsTree();
+    // The resolved { sampleRate, bitDepth, timeBase } block: the stored project
+    // INTENT where set, falling back to the live device readout when a field is
+    // unset (timeBase falls back to "seconds"). Used by the snapshot + cmd result.
+    juce::var projectSettingsToVar();
 
     juce::ValueTree findRenderLayer (const juce::String& clipId);
     juce::String    computeFingerprint (const juce::ValueTree& node, const juce::File& inputWav);

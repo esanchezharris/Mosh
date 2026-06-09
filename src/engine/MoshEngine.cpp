@@ -50,17 +50,19 @@ MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession)
         juce::String ("Mosh"),
         std::make_unique<te::UIBehaviour>(),
         std::move (behaviour));
-    applyRequestedAudioOutputDevice();
 
     // Session directory: a stable per-app-data folder so save/reload round-trips.
     // The harness gets an isolated "session-selftest" dir so it can't be polluted
-    // by (or clobber) a real GUI session — see freshSession below.
+    // by (or clobber) a real GUI session — see freshSession below. Established BEFORE
+    // the device init so PRE-001 can restore the persisted device setup from it.
     session = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
                   .getChildFile ("Mosh")
                   .getChildFile (freshSession ? "session-selftest" : "session");
     session.createDirectory();
     session.getChildFile ("audio").createDirectory();
     editPath = session.getChildFile ("session.tracktionedit");
+
+    applyRequestedAudioOutputDevice();
 
     // The harness saves + reloads internally; wipe any prior run's persisted edit
     // so it always starts cold and is idempotent across repeated --selftest runs.
@@ -155,6 +157,19 @@ void MoshEngine::applyRequestedAudioOutputDevice()
 {
     if (! audioOpen)
         return;
+
+    // PRE-001 — restore the persisted device setup (written by set_audio_device /
+    // set_buffer_size into the session dir) BEFORE the env-var fallback, so a saved
+    // device choice survives an app restart. The env vars below still override it
+    // (they are an explicit per-launch request). Missing/invalid XML is a no-op.
+    // NB: Mosh disables Tracktion's autoInitialiseDeviceManager and manages the device
+    // itself, so this raw JUCE initialise() is the single active restore (there is no
+    // competing Tracktion PropertyStorage auto-apply here). It deliberately accepts
+    // skipping te::DeviceManager::loadSettings()'s extra channel-enable / defaultWaveID
+    // restore; full cross-restart fidelity is hardware-gated and verified on a real device.
+    if (auto deviceXmlFile = session.getChildFile ("audio-device.xml"); deviceXmlFile.existsAsFile())
+        if (auto deviceXml = juce::XmlDocument::parse (deviceXmlFile))
+            enginePtr->getDeviceManager().deviceManager.initialise (256, 256, deviceXml.get(), true);
 
     const auto requested = juce::SystemStats::getEnvironmentVariable ("MOSH_AUDIO_OUTPUT_DEVICE", {}).trim();
     const auto requestedInput = juce::SystemStats::getEnvironmentVariable ("MOSH_AUDIO_INPUT_DEVICE", {}).trim();

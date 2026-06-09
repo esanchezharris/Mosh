@@ -21,6 +21,13 @@ export function Settings() {
 
   const session = snapshot?.session;
   const audio = snapshot?.audio;
+  // PRJ-008 — per-project format / time-base intent (the export/format default +
+  // timeline display base). Generic media-format values; no engine concepts.
+  const project = session?.project;
+  const setProject = async (patch: Record<string, unknown>) => {
+    await exec("set_project_settings", patch);
+    await refresh();
+  };
   // Project file filter/default come from the backend (session.projectExtension) so the
   // storage format stays out of the UI. Falls back to a generic "all files" before the
   // first snapshot loads — never hard-codes the engine's container extension.
@@ -188,6 +195,46 @@ export function Settings() {
             {session?.audioDeviceError ? (
               <div className="settings-deverr">{session.audioDeviceError}</div>
             ) : null}
+          </div>
+
+          {/* Project format (PRJ-008). Per-project format / time-base INTENT — the
+              remembered default for export + the timeline display base. Generic media
+              format values (no engine concepts); valid headless. Persists with the
+              project (saved on the Edit), so it survives reload. */}
+          <div className="settings-group">
+            <div className="settings-label">Project format</div>
+            <label className="settings-row">
+              <span>Sample rate</span>
+              <select
+                value={String(project?.sampleRate ?? 44100)}
+                onChange={(e) => void setProject({ sampleRate: Number(e.target.value) })}
+              >
+                {[44100, 48000, 88200, 96000, 192000].map((sr) => (
+                  <option key={sr} value={String(sr)}>{sr} Hz</option>
+                ))}
+              </select>
+            </label>
+            <label className="settings-row">
+              <span>Bit depth</span>
+              <select
+                value={String(project?.bitDepth ?? 24)}
+                onChange={(e) => void setProject({ bitDepth: Number(e.target.value) })}
+              >
+                {[16, 24, 32].map((bd) => (
+                  <option key={bd} value={String(bd)}>{bd}-bit</option>
+                ))}
+              </select>
+            </label>
+            <label className="settings-row">
+              <span>Time base</span>
+              <select
+                value={project?.timeBase ?? "seconds"}
+                onChange={(e) => void setProject({ timeBase: e.target.value })}
+              >
+                <option value="seconds">Seconds</option>
+                <option value="barsBeats">Bars &amp; beats</option>
+              </select>
+            </label>
           </div>
 
           {/* CPU / audio threads (PRF-001). A GENUINE preference — it drives the

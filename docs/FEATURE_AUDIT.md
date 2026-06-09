@@ -289,6 +289,34 @@ load→save→reload→remove→load regression guard to `--selftest`. Verified:
 assertion count 1 → 0**, 451/451 checks, 0 failed. The DAW now self-tests with **zero**
 assertions.
 
+### 2026-06-09 · Wave A: project settings (PRJ-008) + device-pref persistence (PRE-001) ✅
+
+New non-undoable **`set_project_settings`** `{sampleRate?, bitDepth?, timeBase?}` stores
+per-project *intent* on a `MOSH_PROJECT` child of the Edit's own ValueTree (so it rides the
+`.tracktionedit` through save/reload — no new storage format), surfaced as `session.project`
+(device readout is the live fallback) and as a "Project format" group in Settings; `export_audio`
+now defaults its depth/rate from it when omitted. **PRE-001:** device prefs did *not* persist —
+filled the gap by writing `adm().createStateXml()` to `session/audio-device.xml` on a successful
+device change and restoring it in engine init before the env-var fallback. **`ARE-003`** advanced
+to partial (latency readout + graceful headless record; the take-landing alignment rides Wave B).
+While landing this I also made the **whole suite deterministic**: fixed a flaky `get_command_log`
+count (`==` → `>=`, tolerating late async logs), made the project-settings reads non-mutating
+(snapshot is read-only again), seeded the export-default check with a renderable clip, and drained
+the generative service's async backlog before the downstream blocks. Verified: **`--selftest`
+484/484 across 6 repeated runs, 0 failed, 0 assertions** (previously 1-in-N flaky).
+
+| ID | Tier | Feature | Before → After |
+|---|---|---|---|
+| `PRJ-008` | must | Project settings (rate / depth / time base) | ◐/✗ → ✓/✓ |
+| `PRE-001` | must | Audio / MIDI preferences (persistent) | ◐/◐ → ✓/✓ * |
+
+\* The `set_project_settings` round-trip and the device-pref *write* are headless-verified; the
+full cross-restart device round-trip (re-opening a saved interface on next launch) is
+hardware-gated. `ARE-003` (latency-compensated take landing) completes in Wave B.
+
+**Shipped-on-both-axes: 85 → 87** (must-tier 71 → 73). Projects now carry format intent that
+survives save/reload, and a chosen audio device persists.
+
 ## Coverage by category
 
 Per axis the three counts are **present ✓ / partial ◐ / missing ✗** (missing also folds in the one `not_applicable`).

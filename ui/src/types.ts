@@ -217,6 +217,14 @@ export type Snapshot = {
     roundTripLatencySamples?: number;
     audioDeviceName?: string;
     audioDeviceError?: string;
+    // PRJ-008 — per-project format / time-base intent (the export/format default +
+    // timeline display base). Generic media-format values, persisted with the project;
+    // each field falls back to the live device readout when unset.
+    project?: {
+      sampleRate: number;
+      bitDepth: number;
+      timeBase: "seconds" | "barsBeats";
+    };
   };
   tracks: Track[];
   transport: Transport;
