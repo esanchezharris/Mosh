@@ -1,0 +1,5 @@
+[
+  {"ts": 4.0,  "kind": "bpm", "value": 140, "confidence": 0.95, "source": "frame"},
+  {"ts": 45.0, "kind": "track_count", "value": 2, "confidence": 0.9, "source": "frame"},
+  {"ts": 28.0, "kind": "notes_present", "value": 4, "confidence": 0.85, "source": "frame"}
+]

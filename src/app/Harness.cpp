@@ -140,8 +140,15 @@ int runHarness (MoshEngine& eng, MoshOps& ops, const String& commandLine)
     }
     auto data = ir.getProperty ("data", var());
 
-    auto hash = cmd (ops, "get_state_hash")
-                    .getProperty ("data", var()).getProperty ("hash", var()).toString();
+    // L2 symbolic diff (phase0 §8) reads the canonical projection — ask for it
+    // alongside the hash when the job wants it.
+    const bool wantProjection = (bool) job.getProperty ("projection", false);
+    auto hashRes = cmd (ops, "get_state_hash",
+                        wantProjection ? [] { auto* a = new DynamicObject();
+                                              a->setProperty ("projection", true);
+                                              return var (a); }()
+                                       : var());
+    auto hash = hashRes.getProperty ("data", var()).getProperty ("hash", var()).toString();
 
     auto* result = new DynamicObject();
     const bool ok = (! hasOps || (bool) ir.getProperty ("ok", false)) && commandsOk;
@@ -151,6 +158,9 @@ int runHarness (MoshEngine& eng, MoshOps& ops, const String& commandLine)
     result->setProperty ("results", data.getProperty ("results", var()));
     if (hasCommands)
         result->setProperty ("commandResults", commandResults);
+    if (wantProjection)
+        result->setProperty ("projection",
+                             hashRes.getProperty ("data", var()).getProperty ("projection", var()));
 
     if ((bool) job.getProperty ("bounce", false))
     {
