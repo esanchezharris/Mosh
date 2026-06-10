@@ -1158,6 +1158,43 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         cmd (ops, "remove_track", args1 ("trackId", busId));
     }
 
+    // --- Stage 18: crate browser (list_dir guard + read-only exclusion) ---
+    {
+        std::cerr << "--- Stage 18: crate browser ---\n";
+        // Use the session dir as a controlled crate root.
+        auto crate = eng.sessionDir().getChildFile ("crate-test");
+        crate.getChildFile ("sub").createDirectory();
+        eng.generateTestTone (0.1, 220.0, "crate-tone");
+        eng.sessionDir().getChildFile ("audio").getChildFile ("crate-tone.wav")
+            .copyFileTo (crate.getChildFile ("sub").getChildFile ("kick_test.wav"));
+        setenv ("MOSH_SAMPLE_LIBRARY", crate.getFullPathName().toRawUTF8(), 1);
+
+        auto rootList = cmd (ops, "list_dir");
+        check (ok (rootList) && rootList["data"].getProperty ("dirs", var()).size() == 1,
+               "list_dir lists the crate root");
+        auto subList = cmd (ops, "list_dir", args1 ("path", "sub"));
+        check (ok (subList) && subList["data"].getProperty ("files", var()).size() == 1,
+               "list_dir lists audio files in a subfolder");
+        check (! ok (cmd (ops, "list_dir", args1 ("path", "../../"))),
+               "path traversal is rejected");
+        auto search = cmd (ops, "list_dir", args1 ("query", "kick"));
+        check (ok (search) && search["data"].getProperty ("files", var()).size() == 1,
+               "recursive search finds the file");
+        // Headless: audition cleanly refuses (no audio session), never crashes.
+        check (! ok (cmd (ops, "audition_file", args1 ("path", "sub/kick_test.wav")))
+                   == ! eng.hasAudio(),
+               "audition matches the audio mode");
+        check (ok (cmd (ops, "stop_audition")), "stop_audition ok");
+        {
+            StringArray lines;
+            eng.sessionDir().getChildFile ("trajectory.jsonl").readLines (lines);
+            bool leaked = false;
+            for (auto& l : lines) if (l.contains ("list_dir") || l.contains ("audition_file")) leaked = true;
+            check (! leaked, "crate browsing never enters the trajectory");
+        }
+        unsetenv ("MOSH_SAMPLE_LIBRARY");
+    }
+
     std::cerr << "===== " << (checks - failures) << "/" << checks
               << " checks passed, " << failures << " failed =====\n\n";
     return failures;

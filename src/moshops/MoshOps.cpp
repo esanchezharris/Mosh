@@ -101,6 +101,9 @@ juce::var MoshOps::dispatch (const juce::String& name, const juce::var& args)
     if (name == "duplicate_clip")    return cmdDuplicateClip (args);
     if (name == "move_track")        return cmdMoveTrack (args);
     if (name == "choose_file")       return cmdChooseFile (args);
+    if (name == "list_dir")          return cmdListDir (args);
+    if (name == "audition_file")     return cmdAuditionFile (args);
+    if (name == "stop_audition")     return cmdStopAudition (args);
     if (name == "undo")              return cmdUndo (args);
     if (name == "redo")              return cmdRedo (args);
     if (name == "save")              return cmdSave (args);
@@ -483,6 +486,109 @@ juce::var MoshOps::cmdChooseFile (const juce::var& args)
     auto* d = new DynamicObject();
     d->setProperty ("path", fc.getResult().getFullPathName());
     return okResult ("choose_file", var (d));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Crate browser (Stage 18). Rooted at MOSH_SAMPLE_LIBRARY; every path arg is
+// RELATIVE to that root and traversal-guarded — the browser can never escape
+// the crate. All three commands are read-only/playback aids (excluded from
+// the recorder and collab sync).
+// ─────────────────────────────────────────────────────────────────────────────
+namespace
+{
+    juce::File crateRootDir()
+    {
+        const auto env = juce::SystemStats::getEnvironmentVariable ("MOSH_SAMPLE_LIBRARY", {}).trim();
+        if (env.isNotEmpty() && juce::File (env).isDirectory())
+            return juce::File (env);
+        auto fallback = juce::File::getSpecialLocation (juce::File::userHomeDirectory)
+                            .getChildFile ("Splice").getChildFile ("sounds");
+        return fallback.isDirectory()
+                   ? fallback
+                   : juce::File::getSpecialLocation (juce::File::userMusicDirectory);
+    }
+
+    bool isAudioFile (const juce::File& f)
+    {
+        static const juce::StringArray exts { ".wav", ".aif", ".aiff", ".mp3", ".flac", ".ogg", ".m4a" };
+        return exts.contains (f.getFileExtension().toLowerCase());
+    }
+
+    // Resolve a relative crate path; {} if it escapes the root.
+    juce::File resolveCratePath (const juce::String& rel)
+    {
+        auto root = crateRootDir();
+        if (rel.isEmpty()) return root;
+        if (rel.contains ("..")) return {};
+        auto f = root.getChildFile (rel);
+        if (! f.getFullPathName().startsWith (root.getFullPathName())) return {};
+        return f;
+    }
+}
+
+juce::var MoshOps::cmdListDir (const juce::var& args)
+{
+    auto root = crateRootDir();
+    auto* data = new DynamicObject();
+    data->setProperty ("root", root.getFullPathName());
+
+    if (const auto query = args.getProperty ("query", var()).toString().trim(); query.isNotEmpty())
+    {
+        // Recursive filename search, capped — the browser's search box.
+        Array<var> hits;
+        int count = 0;
+        for (const auto& f : root.findChildFiles (juce::File::findFiles, true,
+                                                  "*" + query + "*", juce::File::FollowSymlinks::no))
+        {
+            if (! isAudioFile (f)) continue;
+            if (count++ >= 200) { data->setProperty ("truncated", true); break; }
+            auto* e = new DynamicObject();
+            e->setProperty ("name", f.getFileName());
+            e->setProperty ("path", f.getRelativePathFrom (root));
+            hits.add (var (e));
+        }
+        data->setProperty ("files", hits);
+        data->setProperty ("dirs", Array<var>());
+        return okResult ("list_dir", var (data));
+    }
+
+    auto dir = resolveCratePath (args.getProperty ("path", var()).toString());
+    if (dir == juce::File() || ! dir.isDirectory())
+        return errResult ("list_dir", "bad path");
+
+    Array<var> dirs, files;
+    for (const auto& d : dir.findChildFiles (juce::File::findDirectories, false))
+        if (! d.isHidden())
+            dirs.add (d.getFileName());
+    for (const auto& f : dir.findChildFiles (juce::File::findFiles, false))
+        if (isAudioFile (f))
+        {
+            auto* e = new DynamicObject();
+            e->setProperty ("name", f.getFileName());
+            e->setProperty ("path", f.getRelativePathFrom (crateRootDir()));
+            files.add (var (e));
+        }
+    data->setProperty ("dirs", dirs);
+    data->setProperty ("files", files);
+    return okResult ("list_dir", var (data));
+}
+
+juce::var MoshOps::cmdAuditionFile (const juce::var& args)
+{
+    auto f = resolveCratePath (args.getProperty ("path", var()).toString());
+    if (f == juce::File() || ! f.existsAsFile())
+        return errResult ("audition_file", "bad path");
+    if (! eng.auditionFile (f))
+        return errResult ("audition_file", "no audio session");
+    auto* data = new DynamicObject();
+    data->setProperty ("file", f.getFullPathName());
+    return okResult ("audition_file", var (data));
+}
+
+juce::var MoshOps::cmdStopAudition (const juce::var&)
+{
+    eng.stopAudition();
+    return okResult ("stop_audition");
 }
 
 juce::var MoshOps::cmdListAudioOutputs (const juce::var&)

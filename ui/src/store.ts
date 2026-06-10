@@ -68,6 +68,10 @@ type State = {
   // Mixer view (Stage 17): swaps the rack area with channel strips.
   mixerOpen: boolean;
   setMixerOpen: (b: boolean) => void;
+
+  // Crate browser (Stage 18): left drawer over the sample library.
+  crateOpen: boolean;
+  setCrateOpen: (b: boolean) => void;
   loadColors: () => void;
   setLab: (b: boolean) => void;
 
@@ -195,6 +199,8 @@ export const useStore = create<State>((set, get) => ({
   setEditingClip: (id) => set({ editingClipId: id }),
   mixerOpen: false,
   setMixerOpen: (b) => set({ mixerOpen: b }),
+  crateOpen: false,
+  setCrateOpen: (b) => set({ crateOpen: b }),
   openBrowser: () => {
     set({ browserOpen: true });
     if (get().availablePlugins.length === 0)

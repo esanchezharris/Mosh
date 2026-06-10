@@ -81,6 +81,10 @@ private:
     juce::var cmdDuplicateClip    (const juce::var& args);
     juce::var cmdMoveTrack        (const juce::var& args);
     juce::var cmdChooseFile       (const juce::var& args);   // native dialog; read-only
+    // Stage 18 — crate browser (all read-only / playback aids)
+    juce::var cmdListDir          (const juce::var& args);
+    juce::var cmdAuditionFile     (const juce::var& args);
+    juce::var cmdStopAudition     (const juce::var& args);
     juce::var cmdUndo           (const juce::var& args);
     juce::var cmdRedo           (const juce::var& args);
     juce::var cmdSave           (const juce::var& args);

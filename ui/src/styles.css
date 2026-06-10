@@ -465,4 +465,33 @@ button.on { border-color: var(--accent); color: var(--accent); background: #2120
 }
 .tool-btn.on { border-color: var(--accent); color: var(--accent); }
 
+/* Crate browser (Stage 18): left drawer over the sample library. */
+.main-row { flex: 1; display: flex; min-height: 0; }
+.main-col { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.crate {
+  width: 240px; min-width: 240px; display: flex; flex-direction: column;
+  border-right: 1px solid var(--line); background: var(--panel);
+}
+.cb-head { display: flex; align-items: center; justify-content: space-between; padding: 4px 8px; border-bottom: 1px solid var(--line); }
+.cb-title { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--warn); }
+.cb-search {
+  margin: 6px; font: inherit; font-size: 0.76rem; color: var(--text);
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 7px; padding: 0.3rem 0.5rem;
+}
+.cb-search:focus { outline: none; border-color: var(--accent); }
+.cb-list { flex: 1; overflow: auto; padding: 0 4px 6px; font-size: 0.72rem; }
+.cb-dir { color: var(--muted); cursor: pointer; padding: 2px 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cb-dir:hover { color: var(--text); }
+.cb-file { display: flex; align-items: center; gap: 3px; padding: 1px 2px; border-radius: 4px; }
+.cb-file:hover { background: var(--panel-2); }
+.cb-file.playing .cb-fname { color: var(--ok); }
+.cb-fname { flex: 1; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cb-act {
+  font-size: 0.56rem; padding: 0 4px; border-radius: 4px; color: var(--muted);
+  background: transparent; border: 1px solid var(--line);
+}
+.cb-act:hover { color: var(--accent); }
+.cb-empty { color: var(--muted); padding: 8px; }
+.cb-foot { padding: 4px 8px; font-size: 0.6rem; color: var(--muted); border-top: 1px solid var(--line); }
+
 .boot { padding: 3rem; color: var(--muted); }

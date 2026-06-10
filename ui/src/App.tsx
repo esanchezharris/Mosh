@@ -8,6 +8,7 @@ import { PluginBrowser } from "./components/PluginBrowser";
 import { TutorialBar } from "./components/TutorialBar";
 import { CollabPanel } from "./components/CollabPanel";
 import { AgentPanel } from "./components/AgentPanel";
+import { CrateBrowser } from "./components/CrateBrowser";
 
 // Stage 1 UI: renders the MoshOps snapshot cold, drives every mutation through
 // execute_command, and reacts to the snapshot+events feed. Deliberately thin and
@@ -47,6 +48,26 @@ function useGlobalKeys() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+}
+
+function CrateToggleArea({ snapshot }: { snapshot: NonNullable<ReturnType<typeof useStore.getState>["snapshot"]> }) {
+  const crateOpen = useStore((s) => s.crateOpen);
+  if (!crateOpen) return null;
+  return <CrateBrowser snapshot={snapshot} />;
+}
+
+function CrateToggle() {
+  const crateOpen = useStore((s) => s.crateOpen);
+  const setCrateOpen = useStore((s) => s.setCrateOpen);
+  return (
+    <button
+      className={`tool-btn ${crateOpen ? "on" : ""}`}
+      title="Crate — browse + audition the sample library"
+      onClick={() => setCrateOpen(!crateOpen)}
+    >
+      🗄 Crate
+    </button>
+  );
 }
 
 function MixerToggle() {
@@ -108,6 +129,7 @@ export function App() {
           {/* Audio-output truth (Stage 14): show + switch the device. */}
           <AudioOut />
           <MixerToggle />
+          <CrateToggle />
           <button className="tool-btn" onClick={() => exec("export_audio", {})} title="Export the mix to WAV">
             ⤓ Export
           </button>
@@ -126,10 +148,13 @@ export function App() {
       )}
 
       {snapshot ? (
-        <>
-          <Arrangement snapshot={snapshot} />
-          <Rack snapshot={snapshot} />
-        </>
+        <div className="main-row">
+          <CrateToggleArea snapshot={snapshot} />
+          <div className="main-col">
+            <Arrangement snapshot={snapshot} />
+            <Rack snapshot={snapshot} />
+          </div>
+        </div>
       ) : (
         <div className="boot"><p>Loading snapshot…</p></div>
       )}

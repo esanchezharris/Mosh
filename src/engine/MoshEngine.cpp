@@ -92,10 +92,40 @@ MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession)
 
 MoshEngine::~MoshEngine()
 {
+    stopAudition();          // unhook the SoundPlayer before the device dies
     if (editPtr != nullptr)
         editPtr->getTransport().stop (false, false);
     editPtr.reset();
     enginePtr.reset();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Crate audition (Stage 18): preview files through the SAME device the engine
+// plays on, without touching the edit. SoundPlayer has no stop() — stopping is
+// unhooking the callback and dropping the player.
+// ─────────────────────────────────────────────────────────────────────────────
+bool MoshEngine::auditionFile (const juce::File& f)
+{
+    if (! audioOpen || ! f.existsAsFile())
+        return false;
+
+    auto& dm = enginePtr->getDeviceManager().deviceManager;
+    if (auditioner == nullptr)
+    {
+        auditioner = std::make_unique<juce::SoundPlayer>();
+        dm.addAudioCallback (auditioner.get());
+    }
+    auditioner->play (f);
+    return true;
+}
+
+void MoshEngine::stopAudition()
+{
+    if (auditioner == nullptr)
+        return;
+    if (enginePtr != nullptr)
+        enginePtr->getDeviceManager().deviceManager.removeAudioCallback (auditioner.get());
+    auditioner.reset();
 }
 
 void MoshEngine::ensurePlaybackContext()

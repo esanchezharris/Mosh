@@ -42,6 +42,13 @@ public:
     juce::String setAudioOutputDevice (const juce::String& name);
     static bool looksLikeVirtualSink (const juce::String& deviceName);
 
+    // ── crate audition (Stage 18) ──
+    // A juce::SoundPlayer riding the same device as the engine (an extra
+    // AudioIODeviceCallback, like the live-smoke probe) — one-shot preview of
+    // crate files without touching the edit. No-ops headless.
+    bool auditionFile (const juce::File&);
+    void stopAudition();
+
     juce::File sessionDir() const { return session; }
     juce::File editFile()   const { return editPath; }
 
@@ -76,6 +83,7 @@ private:
     bool       audioOpen = false;
     juce::String audioError;
     juce::String audioWarning;
+    std::unique_ptr<juce::SoundPlayer> auditioner;   // lazy; removed in dtor
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MoshEngine)
 };
