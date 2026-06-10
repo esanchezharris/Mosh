@@ -264,7 +264,11 @@ export function PianoRoll({ snapshot }: { snapshot: Snapshot }) {
     });
 
   // ── v2 toolbar actions ──
-  const quantize = () => void exec("quantize_notes", { clipId: theClip.id, grid: "1/16", strength: 1.0 });
+  const [swing, setSwing] = useState(0);
+  // gridBeats is NUMERIC (the "grid" string shape only exists in IR) — the
+  // original Q sent the wrong arg and silently erred (S31 catch).
+  const quantize = () =>
+    void exec("quantize_notes", { clipId: theClip.id, gridBeats: 0.25, strength: 1.0, swing });
   const humanize = () =>
     void exec("humanize_notes", {
       clipId: theClip.id,
@@ -314,7 +318,14 @@ export function PianoRoll({ snapshot }: { snapshot: Snapshot }) {
         <button className="mini" onClick={() => setPxPerBeat(Math.max(24, pxPerBeat / 1.3))}>−</button>
         <button className="mini" onClick={() => setPxPerBeat(Math.min(220, pxPerBeat * 1.3))}>+</button>
         <span className="pr-sep" />
-        <button className="pr-tool" onClick={quantize} title="Quantize the clip to 1/16">Q</button>
+        <button className="pr-tool" onClick={quantize} title={`Quantize to 1/16${swing ? ` with ${Math.round(swing * 100)}% swing` : ""}`}>Q</button>
+        <input
+          className="pr-swing"
+          type="range" min={0} max={1} step={0.05}
+          value={swing}
+          title={`Swing ${Math.round(swing * 100)}% — offbeats land late on Q`}
+          onChange={(e) => setSwing(Number(e.target.value))}
+        />
         <button className="pr-tool" onClick={humanize} title="Humanize (seeded ±20ms, ±8 vel)">H</button>
         <button className="pr-tool" onClick={() => transpose(-12)} title="Octave down">-12</button>
         <button className="pr-tool" onClick={() => transpose(-1)} title="Semitone down">-1</button>

@@ -124,6 +124,9 @@ juce::var MoshOps::dispatch (const juce::String& name, const juce::var& args)
     if (name == "open_project")      return cmdOpenProject (args);
     if (name == "set_clip_gain")     return cmdSetClipGain (args);
     if (name == "set_clip_reversed") return cmdSetClipReversed (args);
+    if (name == "save_device_preset") return cmdSaveDevicePreset (args);
+    if (name == "list_device_presets")return cmdListDevicePresets (args);
+    if (name == "load_device_preset") return cmdLoadDevicePreset (args);
     if (name == "set_clip_loop")     return cmdSetClipLoop (args);
     if (name == "set_clip_fades")    return cmdSetClipFades (args);
     if (name == "get_automation")    return cmdGetAutomation (args);
@@ -764,6 +767,76 @@ juce::var MoshOps::cmdSetClipReversed (const juce::var& args)
     logLine ("set_clip_reversed", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("set_clip_reversed");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Device presets (Stage 31, the v0.3 decision): the engine has no preset API,
+// but every plugin's state IS a ValueTree — presets are state files under
+// <appData>/Mosh/presets/<pluginType>/<name>.xml. Loading is a musical action
+// (recorded; IR device.load_preset now LOWERS — another ledger entry retired);
+// save/list are machine-local file ops.
+// ─────────────────────────────────────────────────────────────────────────────
+namespace
+{
+    juce::File presetDirFor (const juce::String& pluginType)
+    {
+        return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+                   .getChildFile ("Mosh").getChildFile ("presets")
+                   .getChildFile (juce::File::createLegalFileName (pluginType));
+    }
+}
+
+juce::var MoshOps::cmdSaveDevicePreset (const juce::var& args)
+{
+    auto* plugin = findPlugin (args.getProperty ("trackId", var()).toString(),
+                               (int) args.getProperty ("index", -1));
+    if (plugin == nullptr) return errResult ("save_device_preset", "no plugin");
+    const auto name = juce::File::createLegalFileName (args.getProperty ("name", var()).toString().trim());
+    if (name.isEmpty()) return errResult ("save_device_preset", "missing 'name'");
+
+    auto dir = presetDirFor (plugin->getPluginType());
+    dir.createDirectory();
+    if (auto xml = plugin->state.createXml())
+    {
+        dir.getChildFile (name + ".xml").replaceWithText (xml->toString());
+        auto* data = new DynamicObject();
+        data->setProperty ("name", name);
+        return okResult ("save_device_preset", var (data));
+    }
+    return errResult ("save_device_preset", "state serialization failed");
+}
+
+juce::var MoshOps::cmdListDevicePresets (const juce::var& args)
+{
+    auto* plugin = findPlugin (args.getProperty ("trackId", var()).toString(),
+                               (int) args.getProperty ("index", -1));
+    if (plugin == nullptr) return errResult ("list_device_presets", "no plugin");
+    Array<var> names;
+    for (const auto& f : presetDirFor (plugin->getPluginType())
+                             .findChildFiles (juce::File::findFiles, false, "*.xml"))
+        names.add (f.getFileNameWithoutExtension());
+    auto* data = new DynamicObject();
+    data->setProperty ("presets", names);
+    return okResult ("list_device_presets", var (data));
+}
+
+juce::var MoshOps::cmdLoadDevicePreset (const juce::var& args)
+{
+    auto* plugin = findPlugin (args.getProperty ("trackId", var()).toString(),
+                               (int) args.getProperty ("index", -1));
+    if (plugin == nullptr) return errResult ("load_device_preset", "no plugin");
+    const auto name = juce::File::createLegalFileName (args.getProperty ("name", var()).toString().trim());
+    auto f = presetDirFor (plugin->getPluginType()).getChildFile (name + ".xml");
+    if (! f.existsAsFile()) return errResult ("load_device_preset", "no preset: " + name);
+
+    auto vt = juce::ValueTree::fromXml (f.loadFileAsString());
+    if (! vt.isValid()) return errResult ("load_device_preset", "corrupt preset file");
+
+    undoManager().beginNewTransaction ("load_device_preset");
+    plugin->restorePluginStateFromValueTree (vt);
+    logLine ("load_device_preset", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("load_device_preset");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

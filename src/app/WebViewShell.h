@@ -9,7 +9,8 @@ namespace mosh
     the WebBridge (the swappable seam). In dev, set MOSH_UI_DEV_SERVER (e.g.
     http://localhost:5173) to point at the Vite dev server; otherwise the staged
     bundle is served via the bridge's resource provider. */
-class WebViewShell : public juce::Component
+class WebViewShell : public juce::Component,
+                     public juce::FileDragAndDropTarget
 {
 public:
     WebViewShell();
@@ -20,8 +21,17 @@ public:
     void load();
     void resized() override;
 
+    /** Finder drag-drop (Stage 31): audio files dropped on the WINDOW import
+        via the normal command path. The WebView itself can't deliver native
+        paths to JS — the native component can. */
+    using FilesDroppedFn = std::function<void (const juce::StringArray&)>;
+    void setOnFilesDropped (FilesDroppedFn f) { onFilesDropped = std::move (f); }
+    bool isInterestedInFileDrag (const juce::StringArray& files) override;
+    void filesDropped (const juce::StringArray& files, int x, int y) override;
+
 private:
     bool loaded = false;
+    FilesDroppedFn onFilesDropped;
     WebBridge webBridge;
     std::unique_ptr<juce::WebBrowserComponent> webView;
 

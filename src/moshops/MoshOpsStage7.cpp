@@ -261,13 +261,19 @@ juce::var MoshOps::cmdQuantizeNotes (const juce::var& args)
     if (mc == nullptr) return errResult ("quantize_notes", "no midi clip");
     const double grid = (double) args.getProperty ("gridBeats", 0.0);
     const double strength = jlimit (0.0, 1.0, (double) args.getProperty ("strength", 1.0));
+    // Swing (Stage 31, the v0.3 decision): offbeat subdivisions land LATE by
+    // swing × half-grid (0.5 ≈ triplet feel) — swing is a quantize FEATURE,
+    // not a global engine groove (project.set_swing stays unsupported).
+    const double swing = jlimit (0.0, 1.0, (double) args.getProperty ("swing", 0.0));
     if (grid <= 0.0) return errResult ("quantize_notes", "bad gridBeats");
 
     undoManager().beginNewTransaction ("quantize_notes");
     for (auto* n : mc->getSequence().getNotes())
     {
         const double st = n->getStartBeat().inBeats();
-        const double snapped = std::round (st / grid) * grid;
+        double snapped = std::round (st / grid) * grid;
+        if (swing > 0.0 && (juce::int64) std::llround (snapped / grid) % 2 != 0)
+            snapped += swing * grid * 0.5;
         const double ns = st + strength * (snapped - st);
         n->setStartAndLength (tracktion::BeatPosition::fromBeats (jmax (0.0, ns)),
                               n->getLengthBeats(), &undoManager());

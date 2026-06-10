@@ -105,6 +105,20 @@ public:
         bridge.setSnapshotProvider([this] { return moshOps->snapshot(); });
         moshOps->setEventSink ([&bridge] (const juce::var& e)
                                { bridge.emitEvent (juce::Identifier ("mosh_event"), e); });
+        // Finder drag-drop (Stage 31): each audio file imports via the one
+        // mutation path (lands on the first track / a new track).
+        mainWindow->shell().setOnFilesDropped ([this] (const juce::StringArray& files)
+        {
+            for (auto& f : files)
+            {
+                auto* cmd = new juce::DynamicObject();
+                cmd->setProperty ("command", "import_clip");
+                auto* a = new juce::DynamicObject();
+                a->setProperty ("file", f);
+                cmd->setProperty ("args", juce::var (a));
+                moshOps->execute (juce::var (cmd));
+            }
+        });
         mainWindow->shell().load();
 
         // Scripted Stage 3 demo: build a hosted-plugin session + open a native

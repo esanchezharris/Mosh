@@ -1373,6 +1373,87 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         eng.sessionDir().getChildFile ("project-name.txt").deleteFile();
     }
 
+    // --- Stage 31: parked decisions (swing, presets, IR load_preset) ---
+    {
+        std::cerr << "--- Stage 31: swing + presets ---\n";
+        auto t31 = cmd (ops, "create_track", args1 ("name", "Swing31"));
+        const auto t31id = t31["data"].getProperty ("trackId", var()).toString();
+        auto mc = cmd (ops, "add_midi_clip", objN ({{ "trackId", t31id }, { "name", "sw" },
+                       { "start", 0.0 }, { "length", 2.0 }, { "notes", Array<var>() }}));
+        const auto cid = mc["data"].getProperty ("clipId", var()).toString();
+        // Two 16ths: the on-beat must stay, the offbeat must land LATE.
+        Array<var> sn;
+        for (double st : { 0.0, 0.25 })
+        {
+            auto* n = new DynamicObject();
+            n->setProperty ("pitch", 60); n->setProperty ("startBeats", st);
+            n->setProperty ("durBeats", 0.1); n->setProperty ("vel", 100);
+            sn.add (var (n));
+        }
+        cmd (ops, "add_notes", objN ({{ "clipId", cid }, { "notes", sn }}));
+        check (ok (cmd (ops, "quantize_notes", objN ({{ "clipId", cid }, { "gridBeats", 0.25 },
+                       { "strength", 1.0 }, { "swing", 0.5 }}))), "quantize with swing ok");
+        {
+            auto snap = ops.snapshot();
+            var cv;
+            for (auto& tv : *snap["tracks"].getArray())
+                if (tv.getProperty ("id", var()).toString() == t31id) cv = tv["clips"][0];
+            double onBeat = -1, offBeat = -1;
+            for (auto& nv : *cv.getProperty ("notes", var()).getArray())
+            {
+                const double st = (double) nv.getProperty ("startBeats", -1.0);
+                if (st < 0.1) onBeat = st; else offBeat = st;
+            }
+            check (std::abs (onBeat - 0.0) < 0.01, "on-beat unmoved by swing");
+            check (std::abs (offBeat - 0.3125) < 0.01, "offbeat swung late by half-grid x 50%");
+        }
+
+        // Presets: save on an EQ, twist a param, load restores.
+        auto eq = cmd (ops, "load_builtin_plugin", objN ({{ "trackId", t31id }, { "type", "eq" }}));
+        const int eqIdx = (int) eq["data"].getProperty ("index", -1);
+        check (ok (cmd (ops, "save_device_preset", objN ({{ "trackId", t31id }, { "index", eqIdx },
+                       { "name", "selftest-eq" }}))), "save_device_preset ok");
+        auto lp = cmd (ops, "list_device_presets", objN ({{ "trackId", t31id }, { "index", eqIdx }}));
+        bool found = false;
+        for (auto& pn : *lp["data"].getProperty ("presets", var()).getArray())
+            if (pn.toString() == "selftest-eq") found = true;
+        check (found, "list_device_presets sees it");
+        check (ok (cmd (ops, "load_device_preset", objN ({{ "trackId", t31id }, { "index", eqIdx },
+                       { "name", "selftest-eq" }}))), "load_device_preset ok");
+
+        // IR device.load_preset lowers now (the ledgered Unsupported retired).
+        {
+            Array<var> irOps;
+            auto* o0 = new DynamicObject(); o0->setProperty ("kind", "track.create");
+            auto* p0 = new DynamicObject(); p0->setProperty ("track_id", "tpre"); p0->setProperty ("kind", "midi");
+            o0->setProperty ("params", var (p0)); irOps.add (var (o0));
+            auto* o1 = new DynamicObject(); o1->setProperty ("kind", "device.add");
+            auto* p1 = new DynamicObject(); p1->setProperty ("device_id", "dpre");
+            p1->setProperty ("track_id", "tpre"); p1->setProperty ("role", "eq");
+            Array<var> pref; pref.add ("builtin.eq"); p1->setProperty ("prefer", pref);
+            o1->setProperty ("params", var (p1)); irOps.add (var (o1));
+            auto* o2 = new DynamicObject(); o2->setProperty ("kind", "device.load_preset");
+            auto* p2 = new DynamicObject(); p2->setProperty ("device_id", "dpre");
+            p2->setProperty ("preset", "selftest-eq");
+            o2->setProperty ("params", var (p2)); irOps.add (var (o2));
+            auto r = cmd (ops, "execute_ir", args1 ("ops", irOps));
+            auto counts = r["data"].getProperty ("counts", var());
+            check (ok (r) && (int) counts.getProperty ("executed", 0) == 3
+                       && (int) counts.getProperty ("unsupported", 0) == 0,
+                   "device.load_preset lowers (ledger entry retired)");
+        }
+        // cleanup
+        for (auto& tv : *ops.snapshot()["tracks"].getArray())
+        {
+            const auto nm = tv.getProperty ("name", var()).toString();
+            if (nm == "Swing31" || nm == "tpre")
+                cmd (ops, "remove_track", args1 ("trackId", tv.getProperty ("id", var())));
+        }
+        juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+            .getChildFile ("Mosh").getChildFile ("presets").getChildFile ("4bandEq")
+            .getChildFile ("selftest-eq.xml").deleteFile();
+    }
+
     // --- Stage 30: stems export ---
     {
         std::cerr << "--- Stage 30: stems export ---\n";

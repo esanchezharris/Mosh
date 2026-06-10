@@ -14,17 +14,17 @@ Parity column makes IR↔UI gaps mechanical to spot.
 **Status legend:** ✅ works in the UI · 🔶 command-only (no UI gesture) ·
 🧠 agent/IR-only · ❌ missing everywhere · 🅿 parked by recorded decision.
 
-Last full audit: 2026-06-10 (Stage 26 — the next-tier pass: automation lanes, arranger, clip inspector, recording v2, projects).
+Last full audit: 2026-06-10 (Stage 31 — the final-tier pass: papercut v3, tempo map, loop/fades, stems, and every parked v0.3 decision settled).
 
 ## Project / session
 
 | Capability | Status | Parity (IR ↔ cmd ↔ UI) | Closes in |
 |---|---|---|---|
 | Tempo set/edit | ✅ | project.set_tempo ↔ set_tempo ↔ BPM chip | S15 |
-| Tempo CHANGES over time (tempo map) | ❌ single tempo only | — | post-v0 |
+| Tempo CHANGES over time (tempo map) | ✅ set_tempo{atBar}/remove_tempo, ♩flags on the ruler (alt-click), piecewise UI time math | map points await hash-v2 | S28 |
 | Time signature | ✅ | project.set_time_sig ↔ set_time_sig ↔ chip | S15 |
-| Key / scale | 🔶 | project.set_key ↔ set_key ↔ none | scale-aware piano roll stage |
-| Swing / global groove | 🅿 engine has no groove (ledgered) | project.set_swing → Unsupported | decision: v0.3 or drop |
+| Key / scale | ✅ key chip in the transport; scale highlight + fold in the roll | project.set_key ↔ set_key ↔ chip | S27 |
+| Swing | ✅ DECIDED: a quantize feature, not a global groove — quantize_notes{swing} + roll slider; project.set_swing stays unsupported by design | | S31 |
 | Save / load / autosave / projects | ✅ autosave (S21) + ▤ project menu: save-as + open, copy-based local projects (S26) | | S26 |
 | Undo/redo | ✅ buttons + ⌘Z/⌘⇧Z | one UndoManager | S15 |
 | Sections/arrangement markers | ✅ strip under the ruler: drag-create, move/resize, rename, delete, click-seek, shift-loop (+ remove_section) | | S23 |
@@ -52,10 +52,10 @@ Last full audit: 2026-06-10 (Stage 26 — the next-tier pass: automation lanes, 
 | Marquee + multi-select | ✅ | | S2 |
 | Track create/rename/remove/reorder | ✅ | dbl-click rename, ≡ drag | S15 |
 | Clip rename | ✅ context menu → Rename… (rename_clip) | | S21 |
-| Clip looping (cycle a clip region) | ❌ | engine supports loops; no cmd/UI | arrange stage |
-| Clip gain / fades | ✅ gain in Inspect… (set_clip_gain); fades ❌ | | S24 / audio-editing v2 |
-| Copy/paste across tracks | 🔶 duplicate_clip takes trackId; no paste UX | | papercut v2 |
-| Crossfades | ❌ | | post-v0 |
+| Clip looping | ✅ Inspect… loop N beats (set_clip_loop; stretch past length to repeat) | | S29 |
+| Clip gain / fades / crossfades | ✅ gain + fade in/out + auto-crossfade on overlap (set_clip_fades) | | S24/S29 |
+| Copy/paste | ✅ ⌘C/⌘V (paste at the playhead via duplicate_clip) | | S27 |
+| Crossfades | ✅ autoCrossfade per clip (overlaps fade automatically) | | S29 |
 
 ## MIDI editing
 
@@ -68,8 +68,8 @@ Last full audit: 2026-06-10 (Stage 26 — the next-tier pass: automation lanes, 
 | Note labels (pad/pitch names) | ✅ | the OpenUtau lyric look | S16 |
 | Multi-note selection / lasso in piano roll | ✅ marquee + shift-click; batch move/resize/delete in ONE undo step | | S20 |
 | 808 glides | ✅ REAL continuous slides via automated pitchshift (the sampler ignores MIDI bend — verified); slide… on a selected note | | S20 |
-| Scale highlighting / fold | ❌ | set_key exists, unused visually | scale-aware stage |
-| MIDI clip length change from editor | 🔶 trim in arrangement only | | piano-roll v2 |
+| Scale highlighting / fold | ✅ in-scale rows tinted + fold toggle (vertical drags walk visible rows) | | S27 |
+| MIDI clip length change from editor | ✅ length chip in the roll header (trim_clip) | | S27 |
 
 ## Audio clip editing
 
@@ -77,8 +77,8 @@ Last full audit: 2026-06-10 (Stage 26 — the next-tier pass: automation lanes, 
 |---|---|---|---|
 | Pitch shift / time stretch | ✅ Inspect… panel (right-click a wave clip) | | S24 |
 | Slice to grid | ✅ Inspect… → ✂ slice on the snap grid | | S24 |
-| Slice at transients | 🅿 ledgered (async detection) | | v0.3 decision |
-| Reverse | ✅ Inspect… toggle (set_clip_reversed; proxy drained in-command); normalize ❌ | | S24 |
+| Slice at transients | 🅿 DECIDED: defer to v0.4 — onset-detection quality work; grid slicing + the crate cover the workflow (recorded) | | v0.4 |
+| Reverse | ✅ Inspect… toggle; normalize ❌ (engine shouldNormalise exists on export only) | | S24 |
 | Waveform view | ✅ | peaks canvas | S2 |
 
 ## Devices & mixing
@@ -95,7 +95,7 @@ Last full audit: 2026-06-10 (Stage 26 — the next-tier pass: automation lanes, 
 | Sidechain | ✅ compressor cards: key ▾ track picker | | S17 |
 | Track routing (track→track) | ✅ out: ▾ dropdown per strip | | S17 |
 | Full mixer view (channel strips) | ✅ ☰ Mixer drawer: fader/meter/pan/M·S/routing/sends + master strip | | S17 |
-| Device presets | 🅿 ledgered (no engine preset API) | | v0.3 decision |
+| Device presets | ✅ DECIDED + built: plugin-state files (save/list/load_device_preset; 💾 on builtin cards); IR device.load_preset LOWERS — ledger entry retired | | S31 |
 
 ## Import & browser
 
@@ -103,7 +103,7 @@ Last full audit: 2026-06-10 (Stage 26 — the next-tier pass: automation lanes, 
 |---|---|---|---|
 | Import audio via dialog | ✅ | + Import, drum-rack + pad | S15 |
 | Crate browser + audition | ✅ 🗄 Crate drawer: tree, recursive search, in-engine audition, →trk/→pad | | S18 |
-| Drag-drop from Finder | 🅿 WebView drops don't carry paths; dialog is the path | | revisit native-window drop |
+| Drag-drop from Finder | ✅ native window FileDragAndDropTarget → import_clip per audio file (best-effort: if WKWebView swallows the drag, the dialog + crate remain) | | S31 |
 | Asset resolve from text (agent) | 🧠 | asset.resolve (token+path scoring, CLAP rerank tool) | crate browser surfaces it |
 
 ## Recording
@@ -126,8 +126,8 @@ Last full audit: 2026-06-10 (Stage 26 — the next-tier pass: automation lanes, 
 | Capability | Status | Notes | Closes in |
 |---|---|---|---|
 | Export mix to WAV | ✅ | topbar | S6 |
-| Bounce range/stems | ✅ loop-range export (⚙ menu); stems still 🔶 (harness tracksToDo) | | S21 / export v2 |
-| WAV bit-depth + sample-rate options | ✅ ⚙ export menu (16/24-bit × 44.1/48k × full/loop); MP3 ❌ (no LAME) | | S21 |
+| Bounce range/stems | ✅ loop-range export + stems (one WAV per non-empty track, ⚙ menu) | | S21/S30 |
+| Export formats | ✅ WAV 16/24 × 44.1/48k × full/loop + mp3 320k (lame) + m4a AAC (afconvert) | | S21/S27 |
 
 ## Collaboration & agent (the uniques)
 
@@ -142,14 +142,14 @@ Last full audit: 2026-06-10 (Stage 26 — the next-tier pass: automation lanes, 
 
 ## Standing priorities derived from this audit
 
-Stage-16's list cleared in S17–21; the next tier (automation lanes · arranger
-· clip inspector · recording v2 · projects) cleared in S22–26 (2026-06-10).
-What remains, by value:
+Three tiers cleared on 2026-06-10: S17–21 (mixer/crate/recording/roll-v2/
+papercuts), S22–26 (lanes/arranger/inspector/recording-v2/projects), and
+S27–31 (paste/MP3-M4A/scale-fold/tempo-map/loop-fades/stems + every parked
+v0.3 decision settled: swing=quantize feature ✅, presets=state files ✅,
+Finder drop=native target ✅, transient slicing=v0.4 by recorded decision).
 
-1. **Papercut v3** — paste UX, MP3 export, scale highlighting/fold in the
-   roll, MIDI-clip length from the editor, normalize, fades.
-2. **Tempo map** — tempo changes over time (post-v0 candidate).
-3. **Clip looping / crossfades** — engine supports loops; no gesture yet.
-4. **Stems export** — harness tracksToDo exists; no UI.
-5. **Parked decisions due in v0.3**: swing/groove, transient slicing,
-   device presets, Finder drag-drop (WebView path limitation).
+**The audit has no open ❌/🔶/🧠 rows that block everyday production.**
+What remains is deliberate scope: normalize (export-side exists), tap tempo,
+transient slicing (v0.4), the hash-v2 batch (master vol + tempo map + future
+mix state, one versioned bump + corpus re-stamp), and the IR v0.3 vocab batch
+(tempo-map op, track.move, master gain target, notes.quantize swing field).

@@ -101,6 +101,10 @@ private:
     // Stage 24 — clip inspector
     juce::var cmdSetClipGain      (const juce::var& args);
     juce::var cmdSetClipReversed  (const juce::var& args);
+    // Stage 31 — device presets (plugin-state files)
+    juce::var cmdSaveDevicePreset (const juce::var& args);   // file op; not recorded
+    juce::var cmdListDevicePresets(const juce::var& args);   // read-only
+    juce::var cmdLoadDevicePreset (const juce::var& args);   // musical; recorded + IR
     // Stage 29 — clip looping + fades
     juce::var cmdSetClipLoop      (const juce::var& args);
     juce::var cmdSetClipFades     (const juce::var& args);

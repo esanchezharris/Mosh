@@ -600,4 +600,16 @@ button.on { border-color: var(--accent); color: var(--accent); background: #2120
   background: var(--panel); border: 1px solid #fff; border-radius: 3px; padding: 0 2px;
 }
 
+/* Stage 31: swing + presets */
+.pr-swing { width: 56px; accent-color: var(--warn); height: 3px; }
+.preset-row { display: flex; align-items: center; gap: 3px; }
+.preset-select {
+  flex: 1; min-width: 0; font: inherit; font-size: 0.6rem; color: var(--muted);
+  background: var(--panel); border: 1px solid var(--line); border-radius: 5px; padding: 1px 3px;
+}
+.preset-input {
+  flex: 1; min-width: 0; font: inherit; font-size: 0.62rem; color: var(--text);
+  background: var(--panel); border: 1px solid var(--accent); border-radius: 5px; padding: 1px 4px;
+}
+
 .boot { padding: 3rem; color: var(--muted); }

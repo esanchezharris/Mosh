@@ -150,6 +150,7 @@ function PluginCard({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
         <>
           {plugin.type === "compressor" && <SidechainKey plugin={plugin} trackId={trackId} />}
           {isBuiltin && <BuiltinParams plugin={plugin} trackId={trackId} />}
+          {isBuiltin && <PresetRow plugin={plugin} trackId={trackId} />}
           <div className="pcard-actions">
             {plugin.external && (
               <button onClick={() => exec("open_plugin_editor", { trackId, index: plugin.index })}>Edit</button>
@@ -158,6 +159,64 @@ function PluginCard({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
             <button onClick={() => exec("reorder_plugin", { trackId, index: plugin.index, toIndex: plugin.index + 1 })} title="Move right">›</button>
             <button className="x" onClick={() => exec("remove_plugin", { trackId, index: plugin.index })}>✕</button>
           </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// Device presets (Stage 31): plugin-state files. The select loads; 💾 saves
+// under a typed name.
+function PresetRow({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
+  const exec = useStore((s) => s.exec);
+  const [presets, setPresets] = useState<string[] | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const load = async () => {
+    const res = await exec("list_device_presets", { trackId, index: plugin.index });
+    const data = res.data as { presets?: string[] } | undefined;
+    if (res.ok && data?.presets) setPresets(data.presets);
+  };
+
+  return (
+    <div className="preset-row">
+      {saving ? (
+        <input
+          className="preset-input"
+          autoFocus
+          placeholder="preset name…"
+          onBlur={(e) => {
+            const name = e.target.value.trim();
+            setSaving(false);
+            if (name) {
+              void exec("save_device_preset", { trackId, index: plugin.index, name });
+              setPresets(null);
+            }
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+            if (e.key === "Escape") setSaving(false);
+          }}
+        />
+      ) : (
+        <>
+          <select
+            className="preset-select"
+            value=""
+            title="Load a preset"
+            onPointerDown={() => presets == null && void load()}
+            onChange={(e) => {
+              if (e.target.value)
+                void exec("load_device_preset", { trackId, index: plugin.index, name: e.target.value });
+              e.target.value = "";
+            }}
+          >
+            <option value="" disabled>preset…</option>
+            {(presets ?? []).map((pn) => (
+              <option key={pn} value={pn}>{pn}</option>
+            ))}
+          </select>
+          <button className="mini" title="Save the current settings as a preset" onClick={() => setSaving(true)}>💾</button>
         </>
       )}
     </div>

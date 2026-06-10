@@ -601,7 +601,18 @@ juce::var Executor::runOp (const juce::var& op, const juce::String& tutorialId)
                              : failOp (kind, "execute", r.getProperty ("error", "").toString());
     }
     if (kind == "device.load_preset")
-        return unsupportedOp (op, "builtin devices have no preset API in the engine", "device.load_preset", tutorialId);
+    {
+        // Stage 31: presets are plugin-state files now — the op lowers.
+        auto* dev = find (p.getProperty ("device_id", var()).toString(), "device");
+        if (dev == nullptr) return failOp (kind, "validate", "unbound device id");
+        auto* a = obj();
+        a->setProperty ("trackId", dev->trackRef);
+        a->setProperty ("index", dev->index);
+        a->setProperty ("name", p.getProperty ("preset", var()));
+        auto r = run ("load_device_preset", a);
+        return succeeded (r) ? okOp (kind, { "load_device_preset" })
+                             : failOp (kind, "execute", r.getProperty ("error", "").toString());
+    }
     if (kind == "device.bypass")
     {
         auto* dev = find (p.getProperty ("device_id", var()).toString(), "device");

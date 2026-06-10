@@ -27,7 +27,8 @@ namespace
             || name == "set_input_monitor" || name == "set_count_in"    // playback aids (Stage 25)
             // Project file ops are machine-local workflow, not replayable
             // musical steps (Stage 26).
-            || name == "list_projects" || name == "save_project_as" || name == "open_project";
+            || name == "list_projects" || name == "save_project_as" || name == "open_project"
+            || name == "save_device_preset" || name == "list_device_presets";   // file ops (S31)
     }
 }
 

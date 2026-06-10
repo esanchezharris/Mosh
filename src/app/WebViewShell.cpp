@@ -35,4 +35,19 @@ void WebViewShell::resized()
         webView->setBounds (getLocalBounds());
 }
 
+bool WebViewShell::isInterestedInFileDrag (const juce::StringArray& files)
+{
+    static const juce::StringArray exts { ".wav", ".aif", ".aiff", ".mp3", ".flac", ".ogg", ".m4a" };
+    for (auto& f : files)
+        if (exts.contains (juce::File (f).getFileExtension().toLowerCase()))
+            return true;
+    return false;
+}
+
+void WebViewShell::filesDropped (const juce::StringArray& files, int, int)
+{
+    if (onFilesDropped)
+        onFilesDropped (files);
+}
+
 } // namespace mosh
