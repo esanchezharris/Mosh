@@ -283,7 +283,7 @@
     border: 2px solid #232613; border-radius: 7px;
     box-shadow: 0 4px 0 rgba(0,0,0,.85), inset 0 1px 0 rgba(246,242,235,.16),
                 0 0 0 1px rgba(204,255,35,.13); }
-  .clip .cn { color: rgba(246,242,235,.78); text-shadow: 0 1px 0 #000; }
+  .clip .cn { color: rgba(246,242,235,.78); }
   .clip canvas { opacity: .68; }
 
   /* knobs: machined — socket ring, deep throw, hot tick */
@@ -299,7 +299,7 @@
   .knob.mini { width: 30px; height: 30px; }
   .knob.mini i { width: 3px; height: 9px; margin-left: -1.5px; transform-origin: 50% 11px; }
   .klbl { font-size: 9.5px; opacity: .7; }
-  .kval { font-size: 13px; opacity: .85; text-shadow: 0 1px 0 #000; }
+  .kval { font-size: 13px; opacity: .85; }
 
   /* playhead: a needle with a head, not a hairline */
   #phead { width: 2px; opacity: 1; box-shadow: 0 0 4px rgba(204,255,35,.4); }
@@ -307,9 +307,9 @@
     transform: translateX(-50%); border: 7px solid transparent;
     border-top: 10px solid var(--lime); filter: drop-shadow(0 2px 0 #000); }
 
-  /* lane furniture: letterpress names, recessed meter trays */
-  .lhead .nm { font-size: 15px; text-shadow: 0 2px 0 rgba(0,0,0,.9); }
-  .lhead .ms { text-shadow: 0 1px 0 #000; }
+  /* lane furniture: recessed meter trays. NO text-shadows — the signal chain's
+     bloom is the ONE glow source; doubling it read as CRT inconsistency. */
+  .lhead .nm { font-size: 15px; }
   .lhead .vol { height: 9px; border-radius: 3px;
     box-shadow: inset 0 2px 2px rgba(0,0,0,.85), 0 1px 0 rgba(246,242,235,.05); }
   .sbar { height: 10px;
@@ -321,6 +321,13 @@
   .ghost:active { transform: translateY(3px); box-shadow: 0 0 0 #000; }
   #recchip { border-width: 2px; box-shadow: 0 3px 0 #000, inset 0 1px 0 rgba(246,242,235,.10); }
   .deed { border-width: 2px; box-shadow: 0 3px 0 rgba(0,0,0,.8), inset 0 1px 0 rgba(246,242,235,.08); }
+
+  /* LISTENING MODE: the real track owns the timeline; the mock recedes */
+  #arrange.listening .lane:not(.tracklane) { opacity: .22; height: 34px; margin-bottom: 6px; }
+  #arrange.listening .lane:not(.tracklane) .nm { font-size: 11px; }
+  #arrange.listening #ruler { cursor: pointer; }
+  .tracklane .lbody { box-shadow: inset 0 0 0 1px rgba(204,255,35,.20); }
+  .tracklane .clip { cursor: default; }
 
   /* M/S: tiny plastic switches. they latch DOWN when engaged. */
   .lhead .ms { display: flex; gap: 4px; opacity: 1; letter-spacing: 0; }
@@ -1214,8 +1221,13 @@ function frame(now) {
     tq = t;
   }
 
-  tc.textContent = `BAR ${Math.floor(beats / 4) + 1}.${Math.floor(beats % 4) + 1} · ${(tPos * SONG_S).toFixed(1).padStart(5, '0')}s`;
-  sect.textContent = SECTIONS[Math.floor(tPos * 8)];
+  if (audioOn && audioBuf) {
+    tc.textContent = `${mmss(tPos * audioBuf.duration)} / ${mmss(audioBuf.duration)} · LOOP`;
+    sect.textContent = `PART ${sectIdx + 1}/8`;          // honest: parts, not fake verses
+  } else {
+    tc.textContent = `BAR ${Math.floor(beats / 4) + 1}.${Math.floor(beats % 4) + 1} · ${(tPos * SONG_S).toFixed(1).padStart(5, '0')}s`;
+    sect.textContent = SECTIONS[Math.floor(tPos * 8)];
+  }
   const headW = 150, w = arrange.clientWidth - headW;
   phead.style.left = (headW + tPos * w) + 'px';
 
@@ -1353,7 +1365,8 @@ async function loadTrack(arrayBuf, name) {
     audioStart = actx.currentTime; audioOn = true; audioName = name;
     linkEl.textContent = '♪ ' + name.toUpperCase();
     linkEl.style.color = 'var(--lime)'; linkEl.style.opacity = '.9';
-    deed(`listening · ${name}`);
+    enterListening(name);
+    deed(`listening · ${name} — click the ruler to seek`);
   } catch (e) { deed('could not read that audio file'); }
 }
 function audioFrame() {
@@ -1388,6 +1401,52 @@ trackBtn.onclick = async () => {
   trackBtn.textContent = '♪ LOSERFACE';
   playing = true; playbtn.textContent = '▶';
 };
+// LISTENING MODE — no more fiction: the decoded track becomes a REAL lane
+// (true peaks from the buffer), the mock arrangement recedes, the ruler seeks.
+function mmss(s) { return Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0'); }
+function enterListening(name) {
+  arrange.classList.add('listening');
+  let tl = document.getElementById('tracklane');
+  if (!tl) {
+    tl = document.createElement('div');
+    tl.className = 'lane tracklane';
+    tl.id = 'tracklane';
+    tl.innerHTML = `<div class="lhead"><div class="nm disp">TRACK</div></div>
+      <div class="lbody"><div class="clip" style="left:.3%;width:99.4%">
+      <span class="cn mono"></span><canvas></canvas></div></div>`;
+    lanesEl.prepend(tl);
+  }
+  tl.querySelector('.cn').textContent = name.toUpperCase() + ' · LOOPS · CLICK RULER TO SEEK';
+  const wc = tl.querySelector('canvas'), g = wc.getContext('2d');
+  requestAnimationFrame(() => {                          // real peaks, not noise art
+    wc.width = wc.offsetWidth * 2; wc.height = 52;
+    const ch = audioBuf.getChannelData(0);
+    g.fillStyle = 'rgba(204,255,35,.8)';
+    for (let x = 0; x < wc.width; x += 3) {
+      const i0 = Math.floor(x / wc.width * ch.length),
+            i1 = Math.floor((x + 3) / wc.width * ch.length);
+      let mx = 0;
+      for (let i = i0; i < i1; i += 64) mx = Math.max(mx, Math.abs(ch[i]));
+      const h = Math.max(2, mx * 46);
+      g.fillRect(x, 26 - h / 2, 1.6, h);
+    }
+  });
+}
+function seekTrack(f) {
+  try { srcNode.stop(); } catch (e) {}
+  srcNode = actx.createBufferSource();
+  srcNode.buffer = audioBuf; srcNode.loop = true;
+  srcNode.connect(analyser);
+  const off = f * audioBuf.duration;
+  srcNode.start(0, off);
+  audioStart = actx.currentTime - off;
+}
+ruler.addEventListener('click', e => {
+  if (!audioOn || !audioBuf) return;
+  const r = arrange.getBoundingClientRect(), headW = 150;
+  seekTrack(Math.max(0, Math.min(1, (e.clientX - r.left - headW) / (arrange.clientWidth - headW))));
+});
+
 addEventListener('dragover', e => e.preventDefault());
 addEventListener('drop', async e => {
   e.preventDefault();

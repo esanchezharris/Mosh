@@ -18,11 +18,16 @@
 body { filter: url(#ps2signal); }
 html.raw body { filter: none; }              /* the A/B escape hatch  */
 
-/* Inline this SVG right after <body> in each experiment:
+/* Inline this SVG right after <body> in each experiment.
+   v2.3 added the CRT phosphor-bloom stage (halo merged under source) BEFORE the
+   soften+posterize. ONE glow source: never add text-shadows on top of this.
 
 <svg width="0" height="0" style="position:fixed" aria-hidden="true"><filter id="ps2signal"
   x="-2%" y="-2%" width="104%" height="104%" color-interpolation-filters="sRGB">
-  <feGaussianBlur stdDeviation="0.35"/>
+  <feGaussianBlur in="SourceGraphic" stdDeviation="1.6" result="halo"/>
+  <feComponentTransfer in="halo" result="halo2"><feFuncA type="linear" slope="0.40"/></feComponentTransfer>
+  <feMerge result="glowed"><feMergeNode in="halo2"/><feMergeNode in="SourceGraphic"/></feMerge>
+  <feGaussianBlur in="glowed" stdDeviation="0.5"/>
   <feComponentTransfer>
     <feFuncR type="discrete" tableValues="0 0.0667 0.1333 0.2 0.2667 0.3333 0.4 0.4667 0.5333 0.6 0.6667 0.7333 0.8 0.8667 0.9333 1"/>
     <feFuncG type="discrete" tableValues="0 0.0667 0.1333 0.2 0.2667 0.3333 0.4 0.4667 0.5333 0.6 0.6667 0.7333 0.8 0.8667 0.9333 1"/>

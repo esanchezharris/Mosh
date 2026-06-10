@@ -245,3 +245,22 @@ now… everything in our DAW as physical and tactile as the artifact, not so din
 - Room + heft propagated: 008 (faux-room CSS floor + machined knobs/cartridge
   clips/needle/console rail), 011 (the real room in its shader — fog bodies
   barely glow their floor — + heft on chips/clips/needle).
+
+## v13 (2026-06-10) — the honesty audit
+
+User called out false claims and inconsistencies. Hands-on re-audit confirmed:
+
+- **Listening mode was fiction**: fake BAR numbers, fake section names (VERSE 1),
+  and the mock five-lane arrangement displayed while a real 99.6s track played;
+  infinite loop, no seek. FIXED: a TRACK lane with the decoded buffer's real peaks
+  takes the timeline (mock recedes to 22% ghosts, compressed); the readout is
+  `m:ss / m:ss · LOOP` + `PART n/8`; **clicking the ruler seeks** (source restart
+  at offset, position math verified at exactly 0.5).
+- **CRT inconsistency was real**: the heft pass had added letterpress text-shadows
+  to some labels — doubling the signal chain's bloom on those while other text
+  stayed thin. FIXED: shadows removed; the bloom is the ONE glow source (now a
+  rule in tokens/ps2-pass.css, whose docs also described the pre-bloom filter —
+  also fixed).
+- Re-grounded against current-ui/AUDIT.md: the lab skeleton still maps 1:1 to the
+  shipping surface set (topbar / lanes / chain / generative-rack). The drift was
+  in claims, not bones.
