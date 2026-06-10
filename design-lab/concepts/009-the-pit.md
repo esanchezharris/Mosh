@@ -175,3 +175,25 @@ The HUD idea taken to its end state: the page is **world + instruments**.
   boxes left are clips — and clips are content, not chrome.
 - Verified: orbit widens with completeness; knobs drag correctly while orbiting
   (pointer events float above the stage); console clean.
+
+## v9 (2026-06-10) — the secondary artifact · every param reaches the stone
+
+User: the artifact "looks so fucking cool… but it's kind of a mess right now"; kill the
+pickup mechanic; actually try the transparent workflow; "it might not be our
+centerpiece anymore — it might be our secondary artifact"; "ALL of our parameters
+should affect this thing… some can be macros of others"; smooth the section
+transitions.
+
+- **The artifact steps aside.** It now lives in the right-lower quadrant — the kiln
+  beside the workbench. The arrangement owns the page; the orbit rides along.
+- **Every parameter reaches the stone:** GRIT/AIR/EPIC sculpt (as before), spectral
+  fill feeds, wild drives violence, REC splits — and now **NAM drives the crystal
+  hotter** (emission ×0.72–1.27) and **MIX is the macro**: the dry/wet of the whole
+  re-imagine — at 0 the plain rock (form/wear/geology-offsets zeroed, lume floor),
+  at 1 fully transformed. Different degrees, different ways, macros of others.
+- **Section transitions morph.** u_sect is continuous; the last 18% of each section
+  crossfades its geology seed into the next (wrap-aware) — the stone glides between
+  forms instead of snapping. The remaining section jolt is a small accent.
+- **The pickup mechanic died.** Slams still chip shards off the artifact — they arc,
+  land, and fade. Consequence without chores. The ◆ counter is gone.
+- **Transparency, actually tried:** clips at 55% alpha, lanes ghosts, no panels.

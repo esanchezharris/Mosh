@@ -129,6 +129,14 @@ menu language), shipped as shared CSS per page:
     instruments float free, lanes are ghosts. The only boxes on screen are clips,
     because clips are content. Shipped on 009 first; every new surface starts here.
 
+29. **Every parameter reaches the artifact** — to different degrees, in different
+    ways; some as macros of others (MIX = the dry/wet of the whole transform, NAM =
+    crystal drive). Turning any knob should be *felt* in the stone. And consequence
+    never becomes a chore: debris is spectacle, not collectibles.
+30. **States morph, never snap.** Section geology crossfades (the last ~18% of a
+    section glides into the next seed). Anything seeded that changes over time gets
+    the same treatment.
+
 ## Why this is still anti-slop
 
 Banded dither + flat facets physically can't produce the soft-gradient "vibe-coded"

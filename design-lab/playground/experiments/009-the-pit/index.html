@@ -70,7 +70,7 @@
     border-radius: 2px; box-shadow: 0 0 6px rgba(204,255,35,.5); }
   .lbody { position: relative; flex: 1; background: var(--slab-2); box-shadow: var(--seam);
     border-radius: 10px; overflow: hidden; }
-  .clip { position: absolute; top: 6px; bottom: 6px; background: #0a0a09;
+  .clip { position: absolute; top: 6px; bottom: 6px; background: rgba(10,10,9,.55);
     border: 1px solid rgba(204,255,35,.35); border-radius: 11px;
     box-shadow: inset 0 0 16px rgba(204,255,35,.07); cursor: pointer; }
   .clip .cn { position: absolute; top: 4px; left: 9px; font-size: 8px;
@@ -129,11 +129,6 @@
 
   #debris { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 3;
     image-rendering: pixelated; pointer-events: none; }
-  #shards { font-family: var(--font-mono); font-size: 10px; letter-spacing: .1em;
-    color: var(--ink); background: var(--lime); border-radius: 7px; padding: 3px 9px;
-    box-shadow: 0 2px 0 #5d7607; font-variant-numeric: tabular-nums; }
-  #shards.pop { animation: shpop .45s cubic-bezier(.34,1.56,.64,1); }
-  @keyframes shpop { 40% { transform: scale(1.35) rotate(-4deg); } }
 
   /* spectral fill — the artifact's diet, readable in the chrome */
   #specrow { display: flex; align-items: center; gap: 3px; font-size: 8px;
@@ -296,7 +291,6 @@
     <span style="opacity:.5">120 BPM</span>
     <span id="sect" style="color:var(--lime)">VERSE 1</span>
     <span id="link" style="font-size:9px;letter-spacing:.16em;opacity:.45">DEMO CLOCK</span>
-    <span id="shards" title="sweep your cursor over fallen shards">◆ 0</span>
     <span id="specrow" title="spectral fill — what the artifact eats">LOW<span class="sbar"><i id="sbl"></i></span>MID<span class="sbar"><i id="sbm"></i></span>HI<span class="sbar"><i id="sbh"></i></span></span>
     <span id="build" class="ghost" title="watch the artifact grow from an empty session">▶ BUILD</span>
     <span id="signal" class="ghost" title="the PS2 signal chain — toggle to compare">SIGNAL·PS2</span>
@@ -355,6 +349,7 @@ uniform float u_low, u_mid, u_high; // spectral fill of the ARRANGEMENT
 uniform float u_complete;           // weighted: the artifact is as built as the song
 uniform float u_aseed;              // arrangement hash -> every song grows its own stone
 uniform float u_wild;               // how hard the music is going -> violence budget
+uniform float u_nam;                // the chain's drive — it sharpens the crystal
 uniform float u_form, u_wear, u_lume, u_hue; // THE LOOK (user-sculpted + rerollable)
 uniform float u_lookA, u_lookB;     // reroll geology offsets
 
@@ -387,6 +382,7 @@ float smin(float a, float b, float k) {
   float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
   return mix(b, a, h) - k * h * (1.0 - h);
 }
+float sdOf(float s) { return fract(sin((s + 1.0 + u_aseed) * 12.9898) * 43758.5453); }
 
 float gCrack, gCore, gRidge, gHollow;
 float map(vec3 p) {
@@ -400,7 +396,10 @@ float map(vec3 p) {
   p /= gro;
   vec3 q = p;
   float crack = 1e9;
-  float sd  = fract(sin((u_sect + 1.0 + u_aseed) * 12.9898) * 43758.5453); // per-section seed:
+  // per-section geology, MORPHED: the last 18% of each section crossfades its
+  // seed into the next — the stone glides between forms instead of snapping.
+  float s0 = floor(u_sect), sf = fract(u_sect);
+  float sd  = mix(sdOf(s0), sdOf(mod(s0 + 1.0, 8.0)), smoothstep(0.82, 1.0, sf));
   float sd2 = fract(sd * 91.7);                                     // the song is geology
   for (int i = 0; i < 4; i++) {
     q = abs(q) - vec3(0.26 + 0.10 * u_epic + 0.09 * sd, 0.22 + 0.05 * sd2, 0.27);
@@ -457,7 +456,8 @@ vec3 normalAt(vec3 p) {
 
 void main() {
   vec2 uv = (gl_FragCoord.xy - 0.5 * u_res) / min(u_res.x, u_res.y);
-  uv.y += 0.07;                                       // the mass sits low, in the pit
+  uv.x -= 0.30; uv.y += 0.13;     // SECONDARY ARTIFACT: it steps aside — the
+                                  // arrangement is the workbench, this is the kiln
   float dth = bayer(gl_FragCoord.xy);
 
   vec3 ro = vec3(0.0, 0.0, 4.0);
@@ -493,8 +493,9 @@ void main() {
       float fis = exp(-gCrack * 95.0);                  // fissures -> sparse crystal
       float shard = step(0.82 - 0.16 * u_high, fis + dth * 0.12);   // highs grow shards
       float vein  = step(0.56, fis + dth * 0.12) - shard;
-      col += mix(LIME, GLOW, 0.6) * shard * (0.45 + 0.75 * u_energy + 2.2 * u_heat) * eL;
-      col += LIME * vein * (0.12 + 0.35 * u_energy + 1.1 * u_heat) * eL;
+      col += mix(LIME, GLOW, 0.6) * shard * (0.45 + 0.75 * u_energy + 2.2 * u_heat)
+             * eL * (0.72 + 0.55 * u_nam);            // NAM drives the crystal hotter
+      col += LIME * vein * (0.12 + 0.35 * u_energy + 1.1 * u_heat) * eL * (0.72 + 0.55 * u_nam);
       col += LIME * step(0.93, rim + dth * 0.3) * 0.55 * u_high * eL;  // top-end sparkle
       float hrim = (1.0 - smoothstep(0.0, 0.05, abs(gHollow))) * step(0.03, u_air);
       col += LIME * hrim * (0.30 + 0.5 * u_heat) * eL;              // hollow mouths glow
@@ -543,7 +544,7 @@ const al = gl.getAttribLocation(prog, 'a');
 gl.enableVertexAttribArray(al);
 gl.vertexAttribPointer(al, 2, gl.FLOAT, false, 0, 0);
 const U = {};
-for (const n of ['u_res','u_time','u_tq','u_rotA','u_rotB','u_spin','u_grit','u_air','u_epic','u_energy','u_onset','u_heat','u_bright','u_sect','u_low','u_mid','u_high','u_complete','u_aseed','u_wild','u_form','u_wear','u_lume','u_hue','u_lookA','u_lookB'])
+for (const n of ['u_res','u_time','u_tq','u_rotA','u_rotB','u_spin','u_grit','u_air','u_epic','u_energy','u_onset','u_heat','u_bright','u_sect','u_low','u_mid','u_high','u_complete','u_aseed','u_wild','u_form','u_wear','u_lume','u_hue','u_lookA','u_lookB','u_nam'])
   U[n] = gl.getUniformLocation(prog, n);
 
 function resize() {
@@ -1079,19 +1080,22 @@ function frame(now) {
   gl.uniform1f(U.u_onset, onsetEnv);
   gl.uniform1f(U.u_heat, heat);
   gl.uniform1f(U.u_bright, axes.air);
-  gl.uniform1f(U.u_sect, sectIdx);
+  gl.uniform1f(U.u_sect, tPos * 8);                     // continuous -> seeds morph
   gl.uniform1f(U.u_low, spec.low);
   gl.uniform1f(U.u_mid, spec.mid);
   gl.uniform1f(U.u_high, spec.high);
   gl.uniform1f(U.u_complete, spec.complete);
   gl.uniform1f(U.u_aseed, aseed);
   gl.uniform1f(U.u_wild, wild);
-  gl.uniform1f(U.u_form, look.form);
-  gl.uniform1f(U.u_wear, look.wear);
-  gl.uniform1f(U.u_lume, look.lume);
+  // EVERY parameter reaches the stone. MIX is the macro: the dry/wet of the
+  // whole re-imagine (0 = the plain rock, 1 = fully transformed); NAM = drive.
+  gl.uniform1f(U.u_form, look.form * chainVals.mix);
+  gl.uniform1f(U.u_wear, look.wear * chainVals.mix);
+  gl.uniform1f(U.u_lume, look.lume * (0.55 + 0.45 * chainVals.mix));
   gl.uniform1f(U.u_hue, look.hue);
-  gl.uniform1f(U.u_lookA, look.la);
-  gl.uniform1f(U.u_lookB, look.lb);
+  gl.uniform1f(U.u_lookA, look.la * chainVals.mix);
+  gl.uniform1f(U.u_lookB, look.lb * chainVals.mix);
+  gl.uniform1f(U.u_nam, chainVals.nam);
   gl.drawArrays(gl.TRIANGLES, 0, 3);
 
   moshi.set({ heat: recAmt, arousal: 0.10 });            // moshi idles for now (user note)
@@ -1100,7 +1104,7 @@ function frame(now) {
   // so the controls breathe with the thing they sculpt. bob is on twos.
   {
     const minD = Math.min(innerWidth, innerHeight);
-    const ocx = innerWidth / 2, ocy = innerHeight / 2 + 0.07 * minD;
+    const ocx = innerWidth / 2 + 0.30 * minD, ocy = innerHeight / 2 + 0.13 * minD;
     const gro = 0.45 + 0.55 * spec.complete;
     const oR = 0.2475 * gro * minD + 86;
     const ANG = [-0.42, 0.02, 0.46, 0.86, 1.18];
@@ -1112,22 +1116,21 @@ function frame(now) {
   debrisFrame(t, dt);
   requestAnimationFrame(frame);
 }
-// ── debris: big slams eject shards; fallen ones are collectibles —
-//    sweep your cursor over them (crash-crate energy). counter top bar.
+// ── debris: big slams chip shards off the artifact — they arc, land, and
+//    FADE. pure consequence, no chores (the pickup mechanic died — user note).
 const dcv = document.getElementById('debris'), dgx = dcv.getContext('2d');
 function dresize() { dcv.width = Math.floor(innerWidth / 4); dcv.height = Math.floor(innerHeight / 4); }
 addEventListener('resize', dresize); dresize();
-let debris = [], shardCount = 0, mX = -9999, mY = -9999;
-const shardsEl = document.getElementById('shards');
-addEventListener('mousemove', e => { mX = e.clientX; mY = e.clientY; });
+let debris = [];
 function eject(n) {
-  const cx = dcv.width / 2, cy = dcv.height * 0.55;
+  const minQ = Math.min(dcv.width * 4, dcv.height * 4) / 4;
+  const cx = dcv.width / 2 + 0.30 * minQ, cy = dcv.height / 2 + 0.13 * minQ;
   for (let i = 0; i < n && debris.length < 36; i++) {
     const a = -Math.PI / 2 + (Math.random() - 0.5) * 2.4;
     const sp = 2.0 + Math.random() * 2.8;
     debris.push({ x: cx, y: cy, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 1.0,
                   rot: Math.random() * 7, vr: (Math.random() - 0.5) * 0.4,
-                  s: 2.5 + Math.random() * 2.5, st: 0, life: 1, bob: Math.random() * 7 });
+                  s: 2.5 + Math.random() * 2.5, st: 0, life: 1 });
   }
 }
 function debrisFrame(t, dt) {
@@ -1138,24 +1141,17 @@ function debrisFrame(t, dt) {
       p.vy += 10.0 * dt; p.x += p.vx; p.y += p.vy; p.rot += p.vr;
       if (p.y >= floorY) { p.y = floorY; p.st = 1; }
       if (p.x < -10 || p.x > dcv.width + 10) return false;
-    } else if (p.st === 1) {                            // pickup, bobbing
-      p.y = floorY + Math.sin(t * 3 + p.bob) * 1.2;
-      if (Math.hypot(mX / 4 - p.x, mY / 4 - p.y) < 11) p.st = 2;
-    } else {                                            // collected: pop up + count
-      p.life -= dt * 4; p.y -= dt * 36; p.s *= 1.07;
-      if (p.life <= 0) {
-        shardCount++;
-        shardsEl.textContent = '◆ ' + shardCount;
-        shardsEl.classList.remove('pop'); void shardsEl.offsetWidth; shardsEl.classList.add('pop');
-        return false;
-      }
+    } else {                                            // landed: cool off, fade out
+      p.life -= dt * 0.7;
+      if (p.life <= 0) return false;
     }
     dgx.save(); dgx.translate(p.x, p.y); dgx.rotate(p.rot);
-    dgx.fillStyle = p.st === 1 ? '#D9FF4C' : '#CCFF23';
+    dgx.globalAlpha = Math.max(0, Math.min(1, p.life));
+    dgx.fillStyle = '#CCFF23';
     dgx.fillRect(-p.s / 2, -p.s / 2, p.s, p.s * 0.8);
     dgx.fillStyle = '#0B0B0B';
     dgx.fillRect(-p.s / 2 + 1, -p.s / 2 + 1, Math.max(1, p.s - 2), 1);
-    dgx.restore();
+    dgx.restore(); dgx.globalAlpha = 1;
     return true;
   });
 }
