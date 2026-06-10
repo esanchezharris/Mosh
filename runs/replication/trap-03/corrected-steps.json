@@ -393,10 +393,11 @@
      "kind": "asset.resolve",
      "params": {
       "descriptor": {
-       "text": "808 long boomy pure",
+       "text": "chakra aria 808 bass baby",
        "tags": [
         "808",
-        "atlanta"
+        "chakra",
+        "baby"
        ]
       },
       "strategy": [
@@ -593,6 +594,11 @@
    "root_cause": "convention",
    "what": "replication built 4 separate sampler tracks; Emilio: drums belong together on a native drum rack, 808 separate",
    "lesson": "drum-rack convention: one track + one builtin.sampler + one device.load_sound per channel with min_note=max_note=key_note (pads never overlap), all lanes in one pattern clip; the FL channel rack maps to PADS, not tracks"
+  },
+  {
+   "root_cause": "corrector-ear",
+   "what": "OS_ATL_808_pure didn't match the video's 808 character; Emilio picked TRKTRN_CHAKRA_808_Bass_Baby_C from his crate",
+   "lesson": "808 timbre is a taste call the human makes fast from their own crate - surface 2-3 candidates, don't optimize the pick"
   }
  ],
  "verified_claims": [
