@@ -84,6 +84,38 @@ juce::var RemoteCompanionServer::startPairing (const juce::var& args)
     return ok (juce::var (data));
 }
 
+juce::var RemoteCompanionServer::startLabFeed (const juce::String& token)
+{
+    const int requestedPort = RemoteCompanionProtocol::defaultPort();
+
+    const juce::ScopedLock sl (lock);
+    if (! running)
+    {
+        listener = std::make_unique<juce::StreamingSocket>();
+        if (! listener->createListener (requestedPort, {}))
+        {
+            listener.reset();
+            return err ("could not start lab feed server");
+        }
+
+        port = listener->getBoundPort();
+        running = true;
+        startBonjour();
+        startThread();
+    }
+
+    const auto info = protocol.beginPairing (localBonjourHost(), port,
+                                             juce::Time::currentTimeMillis(),
+                                             token,
+                                             24 * 60 * 60 * 1000LL);
+    juce::ignoreUnused (info);
+    auto* data = new juce::DynamicObject();
+    data->setProperty ("running", true);
+    data->setProperty ("labFeed", true);
+    data->setProperty ("port", port);
+    return ok (juce::var (data));
+}
+
 juce::var RemoteCompanionServer::stopServer()
 {
     {

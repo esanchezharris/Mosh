@@ -30,7 +30,8 @@ public:
 
     RemotePairingInfo beginPairing (const juce::String& host, int port,
                                     juce::int64 nowMs,
-                                    const juce::String& tokenOverride = {});
+                                    const juce::String& tokenOverride = {},
+                                    juce::int64 ttlOverrideMs = 0);
     RemoteAuthResult authorize (const juce::String& token, juce::int64 nowMs) const;
     RemotePairingInfo currentPairing() const { return pairing; }
     void clearPairing();

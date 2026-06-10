@@ -39,6 +39,17 @@ public:
         remoteServer->setCommandHandler ([this] (const juce::var& cmd) { return moshOps->execute (cmd); });
         remoteServer->setSnapshotProvider ([this] { return moshOps->snapshot(); });
 
+        // Design-lab feed (opt-in): MOSH_LAB_FEED=1 autostarts the companion server
+        // with a stable token (MOSH_LAB_TOKEN, default "mosh-lab") and a 24h TTL so
+        // the playground at localhost:5180 can poll transport/levels. Never in
+        // headless/selftest runs.
+        if (! headless
+            && juce::SystemStats::getEnvironmentVariable ("MOSH_LAB_FEED", "0") == "1")
+        {
+            const auto labToken = juce::SystemStats::getEnvironmentVariable ("MOSH_LAB_TOKEN", "mosh-lab");
+            remoteServer->startLabFeed (labToken);
+        }
+
         // Headless command-surface harness (06 §4): `Mosh --selftest`.
         if (undoSelfTest)
         {

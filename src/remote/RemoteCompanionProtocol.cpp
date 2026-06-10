@@ -28,13 +28,14 @@ bool RemoteCompanionProtocol::isRestrictedPort (int port)
 RemotePairingInfo RemoteCompanionProtocol::beginPairing (const juce::String& host,
                                                          int port,
                                                          juce::int64 nowMs,
-                                                         const juce::String& tokenOverride)
+                                                         const juce::String& tokenOverride,
+                                                         juce::int64 ttlOverrideMs)
 {
     jassert (! isRestrictedPort (port));
     pairing.host = host;
     pairing.port = port;
     pairing.token = tokenOverride.isNotEmpty() ? tokenOverride : makeToken();
-    pairing.expiresAtMs = nowMs + pairingTtlMs();
+    pairing.expiresAtMs = nowMs + (ttlOverrideMs > 0 ? ttlOverrideMs : pairingTtlMs());
     pairing.pairingUrl = makePairingUrl (host, port, pairing.token);
     pairing.webUrl = makeWebUrl (host, port, pairing.token);
     return pairing;

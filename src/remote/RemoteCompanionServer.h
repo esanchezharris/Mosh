@@ -21,6 +21,10 @@ public:
     void setSnapshotProvider (SnapshotProvider p) { snapshotProvider = std::move (p); }
 
     juce::var startPairing (const juce::var& args = {});
+    // Design-lab feed: same listener as pairing, but a caller-supplied stable token
+    // and a 24h TTL so a local browser playground can poll /events without the
+    // pairing dance. Opt-in (env-gated in Main); LAN-visible like pairing.
+    juce::var startLabFeed (const juce::String& token);
     juce::var stopServer();
     juce::var status (bool includePairingSecrets = true) const;
     void pushEvent (const juce::var& event);
