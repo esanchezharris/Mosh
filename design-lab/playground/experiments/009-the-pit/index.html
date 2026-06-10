@@ -55,10 +55,10 @@
   .deed.bye { opacity: 0; transform: translateY(-14px); }
   @keyframes din { from { opacity: 0; transform: translateX(26px) scale(.85); } }
 
-  #arrange { position: fixed; top: 64px; left: 14px; right: 14px; height: 290px; z-index: 5; }
+  #arrange { position: fixed; top: 64px; left: 14px; right: 14px; height: 330px; z-index: 5; }
   #ruler { height: 22px; display: flex; font-size: 9px; opacity: .4; padding-left: 150px; }
   #ruler span { flex: 1; border-left: 1px solid rgba(246,242,235,.12); padding: 4px 0 0 5px; }
-  .lane { display: flex; height: 74px; margin-bottom: 10px; }
+  .lane { display: flex; height: 52px; margin-bottom: 8px; }
   .lhead { width: 136px; flex: none; background: var(--slab); box-shadow: var(--seam);
     border-radius: 10px; margin-right: 14px; padding: 10px 12px; position: relative; }
   .lhead .nm { font-size: 13px; color: var(--bone); }
@@ -70,13 +70,15 @@
     border-radius: 2px; box-shadow: 0 0 6px rgba(204,255,35,.5); }
   .lbody { position: relative; flex: 1; background: var(--slab-2); box-shadow: var(--seam);
     border-radius: 10px; overflow: hidden; }
-  .clip { position: absolute; top: 9px; bottom: 9px; background: #0a0a09;
+  .clip { position: absolute; top: 6px; bottom: 6px; background: #0a0a09;
     border: 1px solid rgba(204,255,35,.35); border-radius: 11px;
     box-shadow: inset 0 0 16px rgba(204,255,35,.07); cursor: pointer; }
-  .clip .cn { position: absolute; top: 5px; left: 9px; font-size: 8.5px;
+  .clip .cn { position: absolute; top: 4px; left: 9px; font-size: 8px;
     letter-spacing: .12em; color: rgba(246,242,235,.55); }
-  .clip canvas { position: absolute; left: 4px; right: 4px; bottom: 4px; height: 26px;
+  .clip canvas { position: absolute; left: 4px; right: 4px; bottom: 3px; height: 15px;
     width: calc(100% - 8px); opacity: .9; }
+  .clip.pop { animation: cpop .5s cubic-bezier(.34,1.56,.64,1); }
+  @keyframes cpop { from { transform: scale(.55); opacity: 0; } 60% { transform: scale(1.08); } }
   #phead { position: absolute; top: 22px; bottom: 0; width: 2px; background: var(--lime);
     box-shadow: 0 0 10px rgba(217,255,76,.8); z-index: 9; pointer-events: none; }
 
@@ -117,8 +119,10 @@
     image-rendering: pixelated; }
   .moshi-face { position: absolute; left: 50%; top: 42%; pointer-events: none;
     transform: translate(-50%, -50%); display: flex; gap: .55em; align-items: center;
-    font-family: var(--font-display); font-weight: 900; color: var(--bone); }
-  .moshi-face span { display: inline-block; transition: transform .2s; }
+    font-family: var(--font-display); font-weight: 900; color: var(--bone);
+    transition: gap .3s, color .25s; }
+  .moshi-face span { display: inline-block; transition: transform .2s;
+    transform: scaleY(var(--eyeY, 1)); }
   .moshi-face.blink span { transform: scaleY(0.12); }
   .moshi-face.wide span { transform: scaleY(1.4); }
 
@@ -130,6 +134,15 @@
     box-shadow: 0 2px 0 #5d7607; font-variant-numeric: tabular-nums; }
   #shards.pop { animation: shpop .45s cubic-bezier(.34,1.56,.64,1); }
   @keyframes shpop { 40% { transform: scale(1.35) rotate(-4deg); } }
+
+  /* spectral fill — the artifact's diet, readable in the chrome */
+  #specrow { display: flex; align-items: center; gap: 3px; font-size: 8px;
+    letter-spacing: .14em; opacity: .75; }
+  .sbar { display: inline-block; width: 34px; height: 8px; background: #0a0a09;
+    box-shadow: inset 0 0 0 1px #1d2010; border-radius: 2px; margin-right: 6px; }
+  .sbar i { display: block; height: 100%; width: 0%; border-radius: 2px;
+    background: repeating-linear-gradient(90deg, var(--lime) 0 4px, #0e0e0d 4px 5px); }
+  #build { font-size: 9px; letter-spacing: .14em; }
 
   /* ── Y2K CONSOLE — house style v2 (see design-lab/HOUSE_STYLE.md) ──
      chunky plastic game-menu chrome: bevels, block shadows, segmented
@@ -164,9 +177,25 @@
   #wordmark b { text-shadow: none; }
   #phead { box-shadow: none; }
   #moshi { image-rendering: pixelated; }
+
+  /* THE PS2 SIGNAL CHAIN (HOUSE_STYLE v2.1) — one cable for every surface:
+     soft 2000s AA + 16-step posterize over DOM and GL alike. html.raw = A/B. */
+  * { -webkit-font-smoothing: antialiased; }
+  body { filter: url(#ps2signal); }
+  html.raw body { filter: none; }
 </style>
 </head>
 <body>
+<svg width="0" height="0" style="position:fixed" aria-hidden="true"><filter id="ps2signal"
+  x="-2%" y="-2%" width="104%" height="104%" color-interpolation-filters="sRGB">
+  <feGaussianBlur stdDeviation="0.35"/>
+  <feComponentTransfer>
+    <feFuncR type="discrete" tableValues="0 0.0667 0.1333 0.2 0.2667 0.3333 0.4 0.4667 0.5333 0.6 0.6667 0.7333 0.8 0.8667 0.9333 1"/>
+    <feFuncG type="discrete" tableValues="0 0.0667 0.1333 0.2 0.2667 0.3333 0.4 0.4667 0.5333 0.6 0.6667 0.7333 0.8 0.8667 0.9333 1"/>
+    <feFuncB type="discrete" tableValues="0 0.0667 0.1333 0.2 0.2667 0.3333 0.4 0.4667 0.5333 0.6 0.6667 0.7333 0.8 0.8667 0.9333 1"/>
+  </feComponentTransfer>
+</filter></svg>
+
 <canvas id="pit"></canvas>
 <canvas id="debris"></canvas>
 <div id="roomheat"></div>
@@ -180,6 +209,9 @@
     <span id="sect" style="color:var(--lime)">VERSE 1</span>
     <span id="link" style="font-size:9px;letter-spacing:.16em;opacity:.45">DEMO CLOCK</span>
     <span id="shards" title="sweep your cursor over fallen shards">◆ 0</span>
+    <span id="specrow" title="spectral fill — what the artifact eats">LOW<span class="sbar"><i id="sbl"></i></span>MID<span class="sbar"><i id="sbm"></i></span>HI<span class="sbar"><i id="sbh"></i></span></span>
+    <span id="build" class="ghost" title="watch the artifact grow from an empty session">▶ BUILD</span>
+    <span id="signal" class="ghost" title="the PS2 signal chain — toggle to compare">SIGNAL·PS2</span>
   </div>
   <div id="recchip" class="mono">● REC (R)</div>
 </div>
@@ -222,6 +254,11 @@
 //               the invisible neural transform finally has a body.
 //   REC      -> the mass splits; molten core shows through. room runs hot.
 //   position -> one full revolution per 8 bars + mono BAR in the transport.
+//   v5 THE ARTIFACT -> the arrangement's spectral fill FEEDS the stone: empty
+//     session = small monochrome nugget; lows give mass, mids give structure,
+//     highs give light — and at full highs the artifact alone earns a banded
+//     iridescent fringe (the ONE polychrome surface; chrome stays 5-color).
+//     ▶ BUILD in the topbar demos it: clips land lows-first, vox blooms last.
 // No bloom. No soft gradients. Bayer dither, hard bands, chunky pixels.
 
 const FRAG = `
@@ -233,6 +270,9 @@ uniform float u_spin;                // song position -> revolution
 uniform float u_grit, u_air, u_epic; // the rack
 uniform float u_energy, u_onset, u_heat, u_bright;
 uniform float u_sect;   // song section -> a different chunk of matter
+uniform float u_low, u_mid, u_high; // spectral fill of the ARRANGEMENT
+uniform float u_complete;           // weighted: the artifact is as built as the song
+uniform float u_aseed;              // arrangement hash -> every song grows its own stone
 
 const vec3 LIME = vec3(0.800, 1.000, 0.137);
 const vec3 GLOW = vec3(0.851, 1.000, 0.298);
@@ -266,9 +306,13 @@ float map(vec3 p) {
   p.xy = r2(0.5 + u_rotB) * p.xy;
   p.y *= 1.0 + 0.22 * u_onset;                       // the slam squash
   p.x += sign(p.x) * u_heat * 0.11;                  // REC: it splits
+  // THE ARTIFACT GROWS: empty session = a small rough nugget; filling the
+  // spectral range scales the whole stone up. LOW adds a slow heavy breath.
+  float gro = (0.45 + 0.55 * u_complete) * (1.0 + 0.03 * u_low * sin(u_tq * 0.5));
+  p /= gro;
   vec3 q = p;
   float crack = 1e9;
-  float sd  = fract(sin((u_sect + 1.0) * 12.9898) * 43758.5453);   // per-section seed:
+  float sd  = fract(sin((u_sect + 1.0 + u_aseed) * 12.9898) * 43758.5453); // per-section seed:
   float sd2 = fract(sd * 91.7);                                     // the song is geology
   for (int i = 0; i < 4; i++) {
     q = abs(q) - vec3(0.26 + 0.10 * u_epic + 0.09 * sd, 0.22 + 0.05 * sd2, 0.27);
@@ -278,7 +322,8 @@ float map(vec3 p) {
   }
   float d = (abs(q.x) + abs(q.y) + abs(q.z) - (0.34 + 0.10 * u_epic + 0.04 * u_energy)) * 0.42;
   // GRIT: reaction-diffusion-style labyrinth ridges grow on the hide
-  float lab = n3(q * 4.2 + u_tq * 0.12);
+  // (MID fill densifies the labyrinth — structure arrives with the midrange)
+  float lab = n3(q * (3.2 + 2.0 * u_mid) + u_tq * 0.12);
   gRidge = smoothstep(0.16, 0.03, abs(fract(lab * 3.0) - 0.5));
   d -= u_grit * (0.016 * (n3(q * 7.0 + u_tq * 0.8) - 0.5) * 2.0 + 0.05 * gRidge);
   d = max(d, length(p) - (0.66 + 0.20 * u_epic));   // BOUND the fractal: one chunk, carved
@@ -296,7 +341,7 @@ float map(vec3 p) {
   // molten core, visible when split
   float core = length(p) - 0.13 * u_heat;
   gCore = core;
-  return u_heat > 0.01 ? min(d, core) : d;
+  return (u_heat > 0.01 ? min(d, core) : d) * gro;   // re-scale: growth stays a true SDF
 }
 vec3 normalAt(vec3 p) {
   const vec2 e = vec2(0.004, -0.004);
@@ -334,15 +379,27 @@ void main() {
       vec3 col = vec3(0.030) + band * vec3(0.085, 0.09, 0.075);
       col *= 1.0 - 0.20 * u_grit * (1.0 - gRidge);                  // ridge valleys shade
       col += LIME * 0.05 * u_grit * step(0.75, gRidge) * band;      // crests catch light
+      // THE ARTIFACT EARNS ITS LIGHT: an empty session is a monochrome nugget;
+      // every lime term scales with completeness — beauty arrives with the song.
+      float eL = mix(0.06, 1.0, smoothstep(0.08, 0.55, u_complete));
       float rim = pow(1.0 - max(dot(n, -rd), 0.0), 3.0);
-      col += LIME * step(0.55, rim + dth * 0.25) * 0.20;          // hard rim, dithered
+      col += LIME * step(0.55, rim + dth * 0.25) * 0.20 * eL;    // hard rim, dithered
       float fis = exp(-gCrack * 70.0);                  // fissures -> CRYSTAL SHARDS
-      float shard = step(0.78, fis + dth * 0.12);       // hard-edged embedded lime
+      float shard = step(0.78 - 0.18 * u_high, fis + dth * 0.12);   // highs grow shards
       float vein  = step(0.45, fis + dth * 0.12) - shard;
-      col += mix(LIME, GLOW, 0.6) * shard * (0.55 + 0.85 * u_energy + 2.2 * u_heat);
-      col += LIME * vein * (0.14 + 0.40 * u_energy + 1.1 * u_heat);
+      col += mix(LIME, GLOW, 0.6) * shard * (0.55 + 0.85 * u_energy + 2.2 * u_heat) * eL;
+      col += LIME * vein * (0.14 + 0.40 * u_energy + 1.1 * u_heat) * eL;
+      col += LIME * step(0.93, rim + dth * 0.3) * 0.55 * u_high * eL;  // top-end sparkle
       float hrim = (1.0 - smoothstep(0.0, 0.05, abs(gHollow))) * step(0.03, u_air);
-      col += LIME * hrim * (0.30 + 0.5 * u_heat);                   // hollow mouths glow
+      col += LIME * hrim * (0.30 + 0.5 * u_heat) * eL;              // hollow mouths glow
+      // EARNED POLYCHROME — fill the highs and the artifact ALONE gets iridescence:
+      // banded thin-film fringe on shard edges + grazing rim. chrome stays 5-color.
+      float fr = u_high * eL * clamp(vein + smoothstep(0.62, 0.95, rim), 0.0, 1.0);
+      if (fr > 0.02) {
+        float hue = floor(fract(n3(hp * 5.0) + u_time * 0.04) * 3.0) / 3.0;
+        vec3 ic = hue < 0.3 ? LIME : (hue < 0.6 ? vec3(0.35, 0.95, 1.0) : vec3(1.0, 0.45, 0.95));
+        col = mix(col, ic, step(0.5, fr + dth * 0.35) * 0.65);
+      }
       outc = vec4(col, 1.0);
     }
   }
@@ -376,7 +433,7 @@ const al = gl.getAttribLocation(prog, 'a');
 gl.enableVertexAttribArray(al);
 gl.vertexAttribPointer(al, 2, gl.FLOAT, false, 0, 0);
 const U = {};
-for (const n of ['u_res','u_time','u_tq','u_rotA','u_rotB','u_spin','u_grit','u_air','u_epic','u_energy','u_onset','u_heat','u_bright','u_sect'])
+for (const n of ['u_res','u_time','u_tq','u_rotA','u_rotB','u_spin','u_grit','u_air','u_epic','u_energy','u_onset','u_heat','u_bright','u_sect','u_low','u_mid','u_high','u_complete','u_aseed'])
   U[n] = gl.getUniformLocation(prog, n);
 
 function resize() {
@@ -392,10 +449,13 @@ const BPM = 120, BARS = 16, SONG_S = (BARS * 4) * 60 / BPM;
 const SECTIONS = ['INTRO','VERSE 1','HOOK','VERSE 2','HOOK','BRIDGE','HOOK','OUT'];
 let playing = true, rec = false, tPos = 0.04;
 
+// every lane carries a spectral band — the arrangement's fill IS the artifact's food
 const LANES = [
-  { nm: 'VOX', clips: [{ a: .01, b: .14, n: 'take 4 · kept' }, { a: .30, b: .42, n: 'hook comp' }] },
-  { nm: 'GTR', clips: [{ a: .06, b: .26, n: 'tone-131' }] },
-  { nm: 'PAD', clips: [{ a: .02, b: .22, n: 'tone-196' }, { a: .48, b: .60, n: 'swell' }] },
+  { nm: 'VOX',   band: 'high', clips: [{ a: .01, b: .14, n: 'take 4 · kept' }, { a: .30, b: .42, n: 'hook comp' }] },
+  { nm: 'GTR',   band: 'mid',  clips: [{ a: .06, b: .26, n: 'tone-131' }] },
+  { nm: 'PAD',   band: 'mid',  clips: [{ a: .02, b: .22, n: 'tone-196' }, { a: .48, b: .60, n: 'swell' }] },
+  { nm: 'BASS',  band: 'low',  clips: [{ a: .02, b: .34, n: 'sub-line' }] },
+  { nm: 'DRUMS', band: 'low',  clips: [{ a: .00, b: .46, n: 'breaks-92' }, { a: .52, b: .64, n: 'fill' }] },
 ];
 const ruler = document.getElementById('ruler');
 for (let i = 0; i < BARS; i++) ruler.insertAdjacentHTML('beforeend', `<span class="mono">${i}</span>`);
@@ -414,6 +474,7 @@ for (const L of LANES) {
     el.style.width = ((c.b - c.a) * 100) + '%';
     el.innerHTML = `<span class="cn mono">${c.n.toUpperCase()}</span><canvas></canvas>`;
     body.appendChild(el);
+    c.el = el; c.live = true;
     requestAnimationFrame(() => {
       const wc = el.querySelector('canvas'), g = wc.getContext('2d');
       wc.width = wc.offsetWidth * 2; wc.height = 52;
@@ -426,6 +487,72 @@ for (const L of LANES) {
   }
   lanesEl.appendChild(lane);
 }
+
+// ---------- THE ARTIFACT: the arrangement's spectral fill feeds the mass ----------
+// empty session = small monochrome nugget. DRUMS/BASS (low) give it mass, GTR/PAD
+// (mid) give it structure, VOX (high) gives it light — and, at full highs, the one
+// earned polychrome fringe. the piece of music IS the stone it leaves behind.
+const spec = { low: 0, mid: 0, high: 0, complete: 0 };   // smoothed — matter accretes
+const sbl = document.getElementById('sbl'), sbm = document.getElementById('sbm'),
+      sbh = document.getElementById('sbh');
+let specT = { low: 0, mid: 0, high: 0 }, aseed = 0;
+function respec() {
+  const cov = { low: 0, mid: 0, high: 0 };
+  let h = 0;
+  for (const L of LANES) for (const c of L.clips) if (c.live) {
+    cov[L.band] += (c.b - c.a);
+    h = (h * 31 + Math.round(c.a * 97 + c.b * 53) + L.nm.length) % 997;
+  }
+  // per-band norms: vox is naturally sparse — it should feel full sooner than drums
+  const norm = { low: 0.6, mid: 0.45, high: 0.25 };
+  for (const k in cov) cov[k] = Math.min(1, cov[k] / norm[k]);
+  specT = cov; aseed = h / 997;
+}
+respec();
+function setClipLive(c, on) {
+  c.live = on;
+  c.el.style.display = on ? '' : 'none';
+  if (on) { c.el.classList.remove('pop'); void c.el.offsetWidth; c.el.classList.add('pop'); }
+}
+
+// ---------- BUILD: the thesis, demonstrable in one click ----------
+// strips the session bare, then lands clips lows-first (the producer's build);
+// the vox hook arrives last and the artifact blooms (the rapper's verse moment).
+const buildBtn = document.getElementById('build');
+let buildTimers = [], building = false;
+const BUILD_ORDER = (() => {
+  const rank = { low: 0, mid: 1, high: 2 }, all = [];
+  LANES.forEach(L => L.clips.forEach(c => all.push([rank[L.band], c.a, c, L])));
+  all.sort((x, y) => x[0] - y[0] || x[1] - y[1]);
+  return all.map(([, , c, L]) => [c, L]);
+})();
+buildBtn.onclick = () => {
+  buildTimers.forEach(clearTimeout); buildTimers = [];
+  if (building) {                                  // reset to the full session
+    building = false; buildBtn.textContent = '▶ BUILD';
+    LANES.forEach(L => L.clips.forEach(c => setClipLive(c, true)));
+    respec(); return;
+  }
+  building = true; buildBtn.textContent = '↺ RESET';
+  LANES.forEach(L => L.clips.forEach(c => setClipLive(c, false)));
+  respec();
+  deed('new session — bare artifact');
+  BUILD_ORDER.forEach(([c, L], i) => {
+    buildTimers.push(setTimeout(() => {
+      setClipLive(c, true); respec();
+      onsetEnv = Math.min(1, onsetEnv + 0.55);     // every landing thumps the mass
+      deed(L.band === 'high' ? `${c.n} lands — the artifact blooms`
+                             : `${L.nm.toLowerCase()} · ${c.n}`);
+    }, 1500 + i * 2300));
+  });
+};
+
+// the signal chain A/B — RAW shows the page off the cable (crisp = wrong machine)
+const signalChip = document.getElementById('signal');
+signalChip.onclick = () => {
+  const raw = document.documentElement.classList.toggle('raw');
+  signalChip.textContent = raw ? 'SIGNAL·RAW' : 'SIGNAL·PS2';
+};
 
 const deedsEl = document.getElementById('deeds');
 function deed(text) {
@@ -489,7 +616,7 @@ function MoshiBlob(host, opts = {}) {
 precision highp float;
 uniform vec2  u_res;
 uniform float u_t, u_tq, u_seed;
-uniform float u_arousal, u_heat, u_squash;
+uniform float u_arousal, u_heat, u_squash, u_gasp;
 uniform vec2  u_gaze;
 const vec3 LIME = vec3(0.800, 1.000, 0.137);
 const vec3 GLOW = vec3(0.851, 1.000, 0.298);
@@ -545,7 +672,8 @@ void main(){
     // the mouth — glossy lime decal, follows the gaze a little, opens with heat
     vec3 mdir = normalize(vec3(u_gaze.x * 0.30, -0.34 + u_gaze.y * 0.18, 1.0));
     float ang = acos(clamp(dot(normalize(hp), mdir), -1.0, 1.0));
-    float mr = 0.30 + 0.14 * u_heat + 0.06 * u_squash;
+    float mr = 0.30 + 0.14 * u_heat + 0.05 * abs(u_squash) + 0.20 * u_gasp
+             + 0.03 * u_arousal * sin(u_t * 9.0 + u_seed);   // gasp on impact, quiver when feral
     float mouth = smoothstep(mr, mr - 0.07, ang);
     col = mix(col, LIME * (0.78 + 0.30 * u_heat), mouth);
     // ember: banded heart, no halo
@@ -580,7 +708,7 @@ void main(){
   gl.enableVertexAttribArray(al);
   gl.vertexAttribPointer(al, 2, gl.FLOAT, false, 0, 0);
   const U = {};
-  for (const n of ['u_res','u_t','u_tq','u_seed','u_arousal','u_heat','u_squash','u_gaze'])
+  for (const n of ['u_res','u_t','u_tq','u_seed','u_arousal','u_heat','u_squash','u_gasp','u_gaze'])
     U[n] = gl.getUniformLocation(prog, n);
 
   function resize() {
@@ -594,7 +722,7 @@ void main(){
 
   const P = { arousal: 0.08, heat: 0, gx: 0, gy: 0 };
   const cur = { arousal: 0.08, heat: 0 };
-  let squash = 0, squashV = 0, tq = 0, lastTick = 0;
+  let squash = 0, squashV = 0, tq = 0, lastTick = 0, fjx = 0, fjy = 0;
   const t0 = performance.now() + seed * 997;
 
   // blink: alive even when idle
@@ -612,16 +740,29 @@ void main(){
     // damped spring with overshoot — squash & stretch, never robotic
     squashV += (-squash * 0.16 - squashV * 0.14);
     squash += squashV;
-    if (t - lastTick > 1 / 12) { lastTick = t; tq = t; }   // wobble on twos
-    // eyes ride the gaze
+    if (t - lastTick > 1 / 12) {                           // wobble on twos
+      lastTick = t; tq = t;
+      const tr = Math.max(0, cur.arousal - 0.35);          // feral = the face trembles
+      fjx = (Math.random() - 0.5) * 8 * tr;
+      fjy = (Math.random() - 0.5) * 6 * tr;
+    }
+    // the face IS the body: it squashes with the spring, leans into the gaze,
+    // rides the top surface down on impact, widens its set when feral
+    const sqv = Math.max(-0.6, Math.min(0.85, squash));
     face.style.transform =
-      `translate(calc(-50% + ${(P.gx * 13).toFixed(1)}%), calc(-50% + ${(P.gy * 11).toFixed(1)}%))`;
+      `translate(calc(-50% + ${(P.gx * 13 + fjx).toFixed(1)}%), calc(-50% + ${(P.gy * 11 + sqv * 16 + fjy).toFixed(1)}%))`
+      + ` rotate(${(P.gx * (4 + 5 * cur.arousal)).toFixed(1)}deg)`
+      + ` scale(${(1 + sqv * 0.30).toFixed(3)}, ${(1 - sqv * 0.45).toFixed(3)})`;
+    face.style.gap = (0.55 + 0.50 * Math.max(0, cur.arousal - 0.15)).toFixed(2) + 'em';
+    face.style.setProperty('--eyeY', (1 + cur.heat * 0.35).toFixed(2));
+    face.style.color = cur.heat > 0.6 ? 'var(--lime)' : 'var(--bone)';
     gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
     gl.uniform2f(U.u_res, cv.width, cv.height);
     gl.uniform1f(U.u_t, t); gl.uniform1f(U.u_tq, tq); gl.uniform1f(U.u_seed, seed);
     gl.uniform1f(U.u_arousal, cur.arousal);
     gl.uniform1f(U.u_heat, cur.heat);
-    gl.uniform1f(U.u_squash, Math.max(-0.6, Math.min(0.85, squash)));
+    gl.uniform1f(U.u_squash, sqv);
+    gl.uniform1f(U.u_gasp, Math.min(1, Math.abs(squashV) * 6));   // mouth gasps with impact velocity
     gl.uniform2f(U.u_gaze, P.gx, P.gy);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     requestAnimationFrame(frame);
@@ -631,7 +772,13 @@ void main(){
   return {
     el: host,
     set(p) { Object.assign(P, p); },
-    pulse(amount = 0.55) { squashV += amount * 0.45; },          // beat hit
+    pulse(amount = 0.55) {                                       // beat hit
+      squashV += amount * 0.45;
+      if (amount > 0.6 && Math.random() < 0.3) {                 // hard hits jolt a blink
+        face.classList.add('blink');
+        setTimeout(() => face.classList.remove('blink'), 100);
+      }
+    },
     poke() {                                                      // indignant squish
       squashV += 0.95 * 0.45;
       face.classList.add('wide');
@@ -655,7 +802,7 @@ addEventListener('mousemove', e => {
 let rotA = 0, rotB = 0, rotTA = 0, rotTB = 0, lastBeat = -1, lastTick = 0, lastSect = -1;
 let wobA = 0, wobB = 0;
 let onsetEnv = 0, recAmt = 0, energy = .4, tq = 0;
-let enginePos = 0, engineEnergy = 0;
+let enginePos = 0, engineEnergy = 0, engineActiveN = 0;
 const phead = document.getElementById('phead');
 const arrange = document.getElementById('arrange');
 const t0 = performance.now(); let last = t0;
@@ -686,6 +833,17 @@ function frame(now) {
   onsetEnv *= 0.90;
   energy = FEED.on ? Math.min(1, 0.12 + engineEnergy * 1.15 + 0.30 * onsetEnv)
                    : 0.30 + 0.55 * onsetEnv + 0.25 * axes.grit;
+
+  // the artifact accretes: spectral fill eases toward the arrangement (demo) or
+  // toward active-track count (engine link — no per-band data in the feed yet)
+  const eC = (FEED.on && !building) ? Math.min(1, engineActiveN / 6) : null;  // BUILD demos even while linked
+  spec.low  += ((eC ?? specT.low)  - spec.low)  * 0.035;
+  spec.mid  += ((eC ?? specT.mid)  - spec.mid)  * 0.035;
+  spec.high += ((eC ?? specT.high) - spec.high) * 0.035;
+  spec.complete = spec.low * 0.35 + spec.mid * 0.30 + spec.high * 0.35;
+  sbl.style.width = (spec.low * 100).toFixed(0) + '%';
+  sbm.style.width = (spec.mid * 100).toFixed(0) + '%';
+  sbh.style.width = (spec.high * 100).toFixed(0) + '%';
 
   // on twos: rotation + texture time snap at 12fps
   if (t - lastTick > 1 / 12) {
@@ -719,9 +877,15 @@ function frame(now) {
   gl.uniform1f(U.u_heat, heat);
   gl.uniform1f(U.u_bright, axes.air);
   gl.uniform1f(U.u_sect, sectIdx);
+  gl.uniform1f(U.u_low, spec.low);
+  gl.uniform1f(U.u_mid, spec.mid);
+  gl.uniform1f(U.u_high, spec.high);
+  gl.uniform1f(U.u_complete, spec.complete);
+  gl.uniform1f(U.u_aseed, aseed);
   gl.drawArrays(gl.TRIANGLES, 0, 3);
 
-  moshi.set({ heat: recAmt, arousal: Math.min(1, energy * 0.7 + axes.grit * 0.35) });
+  moshi.set({ heat: recAmt,                              // moshi has a stake in the build:
+    arousal: Math.min(1, energy * 0.6 + axes.grit * 0.3 + spec.complete * 0.25) });
   debrisFrame(t, dt);
   requestAnimationFrame(frame);
 }
@@ -825,6 +989,10 @@ function feedEvent(raw) {
     engineEnergy += (Math.min(1, lin * 1.5) - engineEnergy) * 0.5;
     if (lin - FEED.lastLin > 0.16) onsetEnv = 1;        // flux -> slam
     FEED.lastLin = lin;
+    // artifact completeness in engine mode: tracks actually carrying signal
+    // (no spectrum in the feed yet — active-track count is the honest proxy)
+    const act = (p.tracks || []).filter(tk => Math.max(tk.l ?? -100, tk.r ?? -100) > -55).length;
+    engineActiveN += (act - engineActiveN) * 0.2;
   }
   if (raw.seq) FEED.seq = Math.max(FEED.seq, raw.seq);
 }

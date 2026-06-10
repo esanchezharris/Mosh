@@ -1,4 +1,4 @@
-# HOUSE STYLE v2 — "Y2K console crunch"
+# HOUSE STYLE v2.1 — "Y2K console crunch" + the signal chain
 
 *v2, 2026-06-10. The v1 chrome overshot the decade: scanlines + terminal-green mono +
 `steps()` motion read **80s/90s Terminator/WarGames** ("boomer malaise"). The target
@@ -50,6 +50,25 @@ in chunky plastic game-menu chrome that bounces when you touch it.
 11. **Moshi is a 3D component** — `MoshiBlob` (experiment 010): mini raymarched SDF
     blob, faceted + dithered like the world, cursor-tracking eyes, beat squash,
     poke-to-squish, REC ember. The 2D sprite is retired.
+
+## The signal chain (v2.1) — one cable for every surface
+
+User: *"all surfaces should be filtered in the same way — we can't have components
+that are crystal clear right next to this. A general antialiasing 2000s pass."*
+
+12. **Whole-page PS2 pass:** an SVG filter on `body` — 0.35px blur (composite-cable
+    softness) + **16-step discrete posterize** per channel — so DOM text, plastic
+    chrome and the quarter-res GL world all arrive through the same video path.
+    16 levels keeps LIME #CCFF23 *exact* (0.8 → 12/15 = 0.8). Plus
+    `-webkit-font-smoothing: antialiased` everywhere (no subpixel fringing).
+    Canonical copy: `tokens/ps2-pass.css`; every experiment inlines it + the SVG.
+    `html.raw` disables it (the SIGNAL·PS2 chip on 009 is the A/B switch).
+    It is SIGNAL, not SCREEN: no scanlines, no vignette, no curvature — wrong decade.
+
+13. **Earned polychrome (the one palette exception):** the centerpiece artifact may
+    earn a banded thin-film fringe (lime→cyan→magenta, dither-quantized) at full
+    spectral completeness — beauty as a reward for finishing the song (009 v5).
+    Chrome NEVER gets it. Five colors everywhere else, always.
 
 ## Why this is still anti-slop
 

@@ -1,0 +1,32 @@
+/* ============================================================
+   THE PS2 SIGNAL CHAIN — every surface through one cable.
+   (HOUSE_STYLE.md v2.1 §signal · canonical copy; experiments
+   inline this + the SVG filter for artifact portability.)
+
+   The problem it solves: vector-crisp DOM chrome sitting next to
+   chunky quarter-res GL reads as two different machines. This is
+   the "general antialiasing 2000s pass" — a composite-cable
+   softness + 16-step posterize applied to the WHOLE page, so text,
+   panels and the raymarched world all arrive through the same
+   video path. NOT scanlines (wrong decade) — signal, not screen.
+
+   16 discrete levels per channel keeps LIME #CCFF23 exact
+   (0.8 → bin 12 → 12/15 = 0.8). Pair with the SVG filter below.
+   ============================================================ */
+
+* { -webkit-font-smoothing: antialiased; }   /* no subpixel fringing */
+body { filter: url(#ps2signal); }
+html.raw body { filter: none; }              /* the A/B escape hatch  */
+
+/* Inline this SVG right after <body> in each experiment:
+
+<svg width="0" height="0" style="position:fixed" aria-hidden="true"><filter id="ps2signal"
+  x="-2%" y="-2%" width="104%" height="104%" color-interpolation-filters="sRGB">
+  <feGaussianBlur stdDeviation="0.35"/>
+  <feComponentTransfer>
+    <feFuncR type="discrete" tableValues="0 0.0667 0.1333 0.2 0.2667 0.3333 0.4 0.4667 0.5333 0.6 0.6667 0.7333 0.8 0.8667 0.9333 1"/>
+    <feFuncG type="discrete" tableValues="0 0.0667 0.1333 0.2 0.2667 0.3333 0.4 0.4667 0.5333 0.6 0.6667 0.7333 0.8 0.8667 0.9333 1"/>
+    <feFuncB type="discrete" tableValues="0 0.0667 0.1333 0.2 0.2667 0.3333 0.4 0.4667 0.5333 0.6 0.6667 0.7333 0.8 0.8667 0.9333 1"/>
+  </feComponentTransfer>
+</filter></svg>
+*/

@@ -15,7 +15,7 @@ deliberately untouched by anything in here: the lab is upstream of the product.
 | [BRIEF.md](BRIEF.md) | The fiction + hard constraints. Feed it whole to any designer, human or model. |
 | [TOOLS.md](TOOLS.md) | The surplus: every design tool wired into this environment and when to reach for it. |
 | [tokens/moshi.css](tokens/moshi.css) | Canonical palette + type. Exact values are a constraint. |
-| [HOUSE_STYLE.md](HOUSE_STYLE.md) | **The register: Y2K console crunch (v2).** Dithered faceted world + chunky plastic bouncy chrome — and the decade test that keeps it 2000s, not 80s. |
+| [HOUSE_STYLE.md](HOUSE_STYLE.md) | **The register: Y2K console crunch (v2.1).** Dithered faceted world + chunky plastic bouncy chrome + the whole-page PS2 signal chain ([tokens/ps2-pass.css](tokens/ps2-pass.css)) — and the decade test that keeps it 2000s, not 80s. |
 | [inspiration/INDEX.md](inspiration/INDEX.md) | ~150 reference links, identified and tagged by theme. |
 | [playground/](playground/) | Vite app. Gallery of live experiments — each one self-contained HTML. |
 | [concepts/](concepts/) | One-pager per named design direction: thesis, how it meets the constraints, what to steal. |
@@ -73,7 +73,8 @@ single artifact into [open-design](https://github.com/nexu-io/open-design) for r
 | 007 | **TERRARIUM** — the specimen, kept quietly | Synthesis: SPECIMEN × SPORE LEDGER, HEARTH dimmed to atmosphere |
 | 008 | **POSSESSION** — the current UI, possessed | The shipping skeleton ([current-ui/AUDIT.md](current-ui/AUDIT.md)) re-materialized per the [field notes](inspiration/FIELD_NOTES.md) — the migration path |
 | 009 | **THE PIT** — the song as matter | 008's DAW + a raymarched, dithered, on-twos 3D mass in the stage; the Rack sculpts it. Now faceted, wobbly, draggable, pokeable. |
-| 010 | **MOSHI** — the agent as a 3D component | Portable `MoshiBlob`: faceted raymarched blob, cursor-tracking eyes, beat squash, poke-to-squish. Embedded in 008/009. |
+| 010 | **MOSHI** — the agent as a 3D component | Portable `MoshiBlob`: faceted raymarched blob, cursor-tracking eyes, beat squash, poke-to-squish. Embedded in 008/009. Face fused to the body (squash/tremble/lime-on-REC). |
+| 011 | **THE WAGER** — battle mode | Competitive seed: your growing artifact vs theirs (fog silhouette — see it, don't hear it) vs THE GLASS, an hourglass timer that erodes and sheds sand. |
 
 Wave 2 inputs: [current-ui/AUDIT.md](current-ui/AUDIT.md) (what the product looks like
 today and the gap to the brief) and [inspiration/FIELD_NOTES.md](inspiration/FIELD_NOTES.md)

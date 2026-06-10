@@ -46,13 +46,30 @@
   .moshi-face { position: absolute; left: 50%; top: 42%; pointer-events: none;
     transform: translate(-50%, -50%); display: flex; gap: .55em; align-items: center;
     font-family: var(--font-display); font-weight: 900; color: var(--bone);
-    transition: gap .3s; }
-  .moshi-face span { display: inline-block; transition: transform .2s; }
+    transition: gap .3s, color .25s; }
+  .moshi-face span { display: inline-block; transition: transform .2s;
+    transform: scaleY(var(--eyeY, 1)); }
   .moshi-face.blink span { transform: scaleY(0.12); }
   .moshi-face.wide span { transform: scaleY(1.4); }
+
+  /* THE PS2 SIGNAL CHAIN (HOUSE_STYLE v2.1) — one cable for every surface:
+     soft 2000s AA + 16-step posterize over DOM and GL alike. html.raw = A/B. */
+  * { -webkit-font-smoothing: antialiased; }
+  body { filter: url(#ps2signal); }
+  html.raw body { filter: none; }
 </style>
 </head>
 <body>
+<svg width="0" height="0" style="position:fixed" aria-hidden="true"><filter id="ps2signal"
+  x="-2%" y="-2%" width="104%" height="104%" color-interpolation-filters="sRGB">
+  <feGaussianBlur stdDeviation="0.35"/>
+  <feComponentTransfer>
+    <feFuncR type="discrete" tableValues="0 0.0667 0.1333 0.2 0.2667 0.3333 0.4 0.4667 0.5333 0.6 0.6667 0.7333 0.8 0.8667 0.9333 1"/>
+    <feFuncG type="discrete" tableValues="0 0.0667 0.1333 0.2 0.2667 0.3333 0.4 0.4667 0.5333 0.6 0.6667 0.7333 0.8 0.8667 0.9333 1"/>
+    <feFuncB type="discrete" tableValues="0 0.0667 0.1333 0.2 0.2667 0.3333 0.4 0.4667 0.5333 0.6 0.6667 0.7333 0.8 0.8667 0.9333 1"/>
+  </feComponentTransfer>
+</filter></svg>
+
 <div id="title"><b>MOSHI</b>&ensp;010 · the agent as a 3D component — poke them</div>
 <div id="stage">
   <div class="pedestal"><div class="blobhost" style="width:96px;height:88px"></div><div class="lab mono">CHIP · 96</div></div>
@@ -91,7 +108,7 @@ function MoshiBlob(host, opts = {}) {
 precision highp float;
 uniform vec2  u_res;
 uniform float u_t, u_tq, u_seed;
-uniform float u_arousal, u_heat, u_squash;
+uniform float u_arousal, u_heat, u_squash, u_gasp;
 uniform vec2  u_gaze;
 const vec3 LIME = vec3(0.800, 1.000, 0.137);
 const vec3 GLOW = vec3(0.851, 1.000, 0.298);
@@ -147,7 +164,8 @@ void main(){
     // the mouth — glossy lime decal, follows the gaze a little, opens with heat
     vec3 mdir = normalize(vec3(u_gaze.x * 0.30, -0.34 + u_gaze.y * 0.18, 1.0));
     float ang = acos(clamp(dot(normalize(hp), mdir), -1.0, 1.0));
-    float mr = 0.30 + 0.14 * u_heat + 0.06 * u_squash;
+    float mr = 0.30 + 0.14 * u_heat + 0.05 * abs(u_squash) + 0.20 * u_gasp
+             + 0.03 * u_arousal * sin(u_t * 9.0 + u_seed);   // gasp on impact, quiver when feral
     float mouth = smoothstep(mr, mr - 0.07, ang);
     col = mix(col, LIME * (0.78 + 0.30 * u_heat), mouth);
     // ember: banded heart, no halo
@@ -182,7 +200,7 @@ void main(){
   gl.enableVertexAttribArray(al);
   gl.vertexAttribPointer(al, 2, gl.FLOAT, false, 0, 0);
   const U = {};
-  for (const n of ['u_res','u_t','u_tq','u_seed','u_arousal','u_heat','u_squash','u_gaze'])
+  for (const n of ['u_res','u_t','u_tq','u_seed','u_arousal','u_heat','u_squash','u_gasp','u_gaze'])
     U[n] = gl.getUniformLocation(prog, n);
 
   function resize() {
@@ -196,7 +214,7 @@ void main(){
 
   const P = { arousal: 0.08, heat: 0, gx: 0, gy: 0 };
   const cur = { arousal: 0.08, heat: 0 };
-  let squash = 0, squashV = 0, tq = 0, lastTick = 0;
+  let squash = 0, squashV = 0, tq = 0, lastTick = 0, fjx = 0, fjy = 0;
   const t0 = performance.now() + seed * 997;
 
   // blink: alive even when idle
@@ -214,16 +232,29 @@ void main(){
     // damped spring with overshoot — squash & stretch, never robotic
     squashV += (-squash * 0.16 - squashV * 0.14);
     squash += squashV;
-    if (t - lastTick > 1 / 12) { lastTick = t; tq = t; }   // wobble on twos
-    // eyes ride the gaze
+    if (t - lastTick > 1 / 12) {                           // wobble on twos
+      lastTick = t; tq = t;
+      const tr = Math.max(0, cur.arousal - 0.35);          // feral = the face trembles
+      fjx = (Math.random() - 0.5) * 8 * tr;
+      fjy = (Math.random() - 0.5) * 6 * tr;
+    }
+    // the face IS the body: it squashes with the spring, leans into the gaze,
+    // rides the top surface down on impact, widens its set when feral
+    const sqv = Math.max(-0.6, Math.min(0.85, squash));
     face.style.transform =
-      `translate(calc(-50% + ${(P.gx * 13).toFixed(1)}%), calc(-50% + ${(P.gy * 11).toFixed(1)}%))`;
+      `translate(calc(-50% + ${(P.gx * 13 + fjx).toFixed(1)}%), calc(-50% + ${(P.gy * 11 + sqv * 16 + fjy).toFixed(1)}%))`
+      + ` rotate(${(P.gx * (4 + 5 * cur.arousal)).toFixed(1)}deg)`
+      + ` scale(${(1 + sqv * 0.30).toFixed(3)}, ${(1 - sqv * 0.45).toFixed(3)})`;
+    face.style.gap = (0.55 + 0.50 * Math.max(0, cur.arousal - 0.15)).toFixed(2) + 'em';
+    face.style.setProperty('--eyeY', (1 + cur.heat * 0.35).toFixed(2));
+    face.style.color = cur.heat > 0.6 ? 'var(--lime)' : 'var(--bone)';
     gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
     gl.uniform2f(U.u_res, cv.width, cv.height);
     gl.uniform1f(U.u_t, t); gl.uniform1f(U.u_tq, tq); gl.uniform1f(U.u_seed, seed);
     gl.uniform1f(U.u_arousal, cur.arousal);
     gl.uniform1f(U.u_heat, cur.heat);
-    gl.uniform1f(U.u_squash, Math.max(-0.6, Math.min(0.85, squash)));
+    gl.uniform1f(U.u_squash, sqv);
+    gl.uniform1f(U.u_gasp, Math.min(1, Math.abs(squashV) * 6));   // mouth gasps with impact velocity
     gl.uniform2f(U.u_gaze, P.gx, P.gy);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     requestAnimationFrame(frame);
@@ -233,7 +264,13 @@ void main(){
   return {
     el: host,
     set(p) { Object.assign(P, p); },
-    pulse(amount = 0.55) { squashV += amount * 0.45; },          // beat hit
+    pulse(amount = 0.55) {                                       // beat hit
+      squashV += amount * 0.45;
+      if (amount > 0.6 && Math.random() < 0.3) {                 // hard hits jolt a blink
+        face.classList.add('blink');
+        setTimeout(() => face.classList.remove('blink'), 100);
+      }
+    },
     poke() {                                                      // indignant squish
       squashV += 0.95 * 0.45;
       face.classList.add('wide');

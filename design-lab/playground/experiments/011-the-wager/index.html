@@ -1,0 +1,478 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>011 · THE WAGER — battle mode: build vs the hourglass</title>
+<style>
+  :root {
+    --ink: #0B0B0B; --lime: #CCFF23; --lime-glow: #D9FF4C;
+    --bone: #F6F2EB; --mist: #E5E5E1; --slab: #111110; --slab-2: #0d0d0c;
+    --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+    --font-display: "Archivo Black", "Helvetica Neue", -apple-system, "Arial Black", sans-serif;
+  }
+  * { -webkit-font-smoothing: antialiased; }
+  html, body { margin: 0; height: 100%; background: #070707; overflow: hidden;
+    font-family: var(--font-mono); color: var(--bone); }
+  /* THE PS2 SIGNAL CHAIN — every surface through one cable (HOUSE_STYLE v2.1).
+     soft 2000s AA + 16-step posterize; GL chunk and DOM text get the same video path. */
+  body { filter: url(#ps2signal); }
+  html.raw body { filter: none; }
+  .mono { font-variant-numeric: tabular-nums; letter-spacing: .06em; }
+  .disp { font-family: var(--font-display); font-weight: 900; text-transform: uppercase; }
+
+  #gl { position: fixed; inset: 0; width: 100%; height: 100%; image-rendering: pixelated; }
+  #sand { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 3;
+    image-rendering: pixelated; pointer-events: none; }
+
+  /* Y2K console chrome (house style v2) */
+  #topbar { position: fixed; top: 0; left: 0; right: 0; height: 52px; display: flex;
+    align-items: center; gap: 18px; padding: 0 20px; background: var(--slab); z-index: 20;
+    background-image: radial-gradient(rgba(204,255,35,.04) 1px, transparent 1.01px);
+    background-size: 3px 3px; box-shadow: 0 3px 0 #000, inset 0 -1px 0 rgba(246,242,235,.05); }
+  #wordmark { font-size: 17px; color: var(--bone); }
+  #wordmark b { color: var(--lime); }
+  .chip { font-size: 10px; letter-spacing: .16em; border: 2px solid #1d2010;
+    border-radius: 9px; padding: 5px 12px; background: var(--slab-2);
+    box-shadow: 0 2px 0 #000; }
+  .chip.lit { color: var(--ink); background: var(--lime); border-color: var(--lime);
+    box-shadow: 0 2px 0 #5d7607; }
+  button.chip { cursor: pointer; color: var(--bone); font-family: var(--font-mono);
+    transition: transform .08s, box-shadow .08s; }
+  button.chip:hover { border-color: var(--lime); color: var(--lime); }
+  button.chip:active { transform: translateY(2px); box-shadow: 0 0 0 #000; }
+  .meterlbl { font-size: 9px; letter-spacing: .18em; opacity: .7; }
+  .meter { display: inline-block; width: 90px; height: 10px; background: #0a0a09;
+    border-radius: 3px; box-shadow: inset 0 0 0 1px #1d2010; vertical-align: middle; }
+  .meter i { display: block; height: 100%; width: 0%; border-radius: 2px;
+    background: repeating-linear-gradient(90deg, var(--lime) 0 5px, #0e0e0d 5px 7px); }
+  .meter.foe i { background: repeating-linear-gradient(90deg, rgba(229,229,225,.55) 0 5px, #0e0e0d 5px 7px); }
+
+  /* the entities' nameplates */
+  .plate { position: fixed; top: 72px; z-index: 10; text-align: center; width: 300px; }
+  .plate .nm { font-size: 22px; letter-spacing: .04em; }
+  .plate .sub { font-size: 9px; letter-spacing: .16em; opacity: .5; margin-top: 4px; }
+  #plateYou { left: calc(50% - 450px - 150px); }
+  #plateYou .nm { color: var(--lime); }
+  #plateThem { right: calc(50% - 450px - 150px); }
+  #plateThem .nm { color: var(--mist); opacity: .8; }
+
+  /* the hourglass countdown */
+  #clockwrap { position: fixed; left: 50%; transform: translateX(-50%); bottom: 150px;
+    z-index: 10; text-align: center; }
+  #count { font-family: var(--font-mono); font-size: 42px; font-weight: 700;
+    letter-spacing: .04em; font-variant-numeric: tabular-nums; }
+  #count.hot { color: var(--lime); animation: cb .5s cubic-bezier(.34,1.56,.64,1) infinite alternate; }
+  @keyframes cb { to { transform: scale(1.09); } }
+  #clockwrap .sub { font-size: 9px; letter-spacing: .22em; opacity: .45; margin-top: 2px; }
+
+  /* verdict stamp */
+  #verdict { position: fixed; inset: 0; display: none; place-items: center; z-index: 40; }
+  #verdict.on { display: grid; }
+  #verdict .stamp { font-size: 120px; color: var(--lime); transform: rotate(-7deg);
+    text-shadow: 6px 6px 0 #000; animation: stomp .4s cubic-bezier(.34,1.56,.64,1); }
+  #verdict .why { font-size: 11px; letter-spacing: .18em; margin-top: 10px; text-align: center; }
+  @keyframes stomp { from { transform: rotate(-7deg) scale(3); opacity: 0; } }
+
+  /* DAW always present: compact transport + your two lanes */
+  #strip { position: fixed; left: 14px; right: 14px; bottom: 14px; height: 124px;
+    z-index: 12; background: var(--slab); border-radius: 10px; padding: 10px 14px;
+    background-image: radial-gradient(rgba(204,255,35,.04) 1px, transparent 1.01px);
+    background-size: 3px 3px;
+    box-shadow: 0 0 0 2px #1d2010, 0 3px 0 #000, inset 0 1px 0 rgba(246,242,235,.07); }
+  #transport { display: flex; gap: 14px; align-items: center; font-size: 10px;
+    opacity: .85; margin-bottom: 8px; }
+  #playbtn { cursor: pointer; border: 0; background: transparent; color: var(--lime);
+    font-size: 13px; font-family: var(--font-mono); padding: 0 4px; }
+  .lane { display: flex; height: 34px; margin-bottom: 6px; }
+  .lhead { width: 64px; flex: none; font-size: 11px; padding-top: 9px; color: var(--bone); }
+  .lbody { position: relative; flex: 1; background: var(--slab-2); border-radius: 7px;
+    box-shadow: inset 0 0 0 1px #1d2010; overflow: hidden; }
+  .clip { position: absolute; top: 4px; bottom: 4px; background: #0a0a09;
+    border: 2px solid rgba(204,255,35,.4); border-radius: 6px;
+    box-shadow: 0 2px 0 rgba(0,0,0,.85); }
+  .clip span { position: absolute; top: 4px; left: 7px; font-size: 8px;
+    letter-spacing: .1em; color: rgba(246,242,235,.6); }
+  .clip.pop { animation: cpop .5s cubic-bezier(.34,1.56,.64,1); }
+  @keyframes cpop { from { transform: scale(.55); opacity: 0; } 60% { transform: scale(1.08); } }
+  #phead { position: absolute; top: 28px; bottom: 10px; width: 2px; background: var(--lime);
+    z-index: 9; pointer-events: none; }
+  #title { position: fixed; bottom: 148px; left: 20px; font-size: 10px;
+    letter-spacing: .14em; opacity: .45; z-index: 10; }
+  #title b { color: var(--lime); }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:fixed" aria-hidden="true"><filter id="ps2signal"
+  x="-2%" y="-2%" width="104%" height="104%" color-interpolation-filters="sRGB">
+  <feGaussianBlur stdDeviation="0.35"/>
+  <feComponentTransfer>
+    <feFuncR type="discrete" tableValues="0 0.0667 0.1333 0.2 0.2667 0.3333 0.4 0.4667 0.5333 0.6 0.6667 0.7333 0.8 0.8667 0.9333 1"/>
+    <feFuncG type="discrete" tableValues="0 0.0667 0.1333 0.2 0.2667 0.3333 0.4 0.4667 0.5333 0.6 0.6667 0.7333 0.8 0.8667 0.9333 1"/>
+    <feFuncB type="discrete" tableValues="0 0.0667 0.1333 0.2 0.2667 0.3333 0.4 0.4667 0.5333 0.6 0.6667 0.7333 0.8 0.8667 0.9333 1"/>
+  </feComponentTransfer>
+</filter></svg>
+
+<canvas id="gl"></canvas>
+<canvas id="sand"></canvas>
+
+<div id="topbar">
+  <div id="wordmark" class="disp">M<b>O</b>SH&ensp;<span style="font-size:11px;opacity:.6">WAGER</span></div>
+  <span class="chip lit disp" style="font-size:10px">ROUND 1</span>
+  <span class="meterlbl">YOU <span class="meter"><i id="mYou"></i></span></span>
+  <span class="meterlbl">THEM <span class="meter foe"><i id="mThem"></i></span></span>
+  <button class="chip" id="startbtn">▶ START ROUND</button>
+  <span style="margin-left:auto;font-size:9px;letter-spacing:.16em;opacity:.4">BUILD MORE ARTIFACT THAN THEM BEFORE THE GLASS RUNS OUT</span>
+</div>
+
+<div class="plate" id="plateYou"><div class="nm disp">YOU</div>
+  <div class="sub">EVERY DROP FEEDS THE STONE</div></div>
+<div class="plate" id="plateThem"><div class="nm disp">THEM</div>
+  <div class="sub">YOU CAN SEE IT GROW · YOU CAN'T HEAR IT</div></div>
+
+<div id="clockwrap"><div id="count" class="mono">1:00.0</div>
+  <div class="sub">THE GLASS — IT IS EATEN AS YOU WORK</div></div>
+
+<div id="verdict"><div><div class="stamp disp" id="stamp">W</div>
+  <div class="why mono" id="why"></div></div></div>
+
+<div id="title"><b>011 · THE WAGER</b> — competitive seed: the build-up artifact vs the dwindling one</div>
+
+<div id="strip">
+  <div id="transport" class="mono">
+    <button id="playbtn">▶</button>
+    <span id="tc">BAR 1.1</span><span style="opacity:.5">140 BPM</span>
+    <span class="chip" style="font-size:8px;padding:3px 9px">● REC ARMED</span>
+  </div>
+  <div class="lane"><div class="lhead disp">BEAT</div><div class="lbody" id="laneBeat"></div></div>
+  <div class="lane"><div class="lhead disp">VOX</div><div class="lbody" id="laneVox"></div></div>
+  <div id="phead"></div>
+</div>
+
+<script>
+// THE WAGER — battle-mode concept (user seed: the REC choke/shrink effect would make
+// a great competitive hourglass; and you should see what opponents build, not hear it).
+//   YOU   (left)  — your artifact, pit-grammar, grows with every drop you land.
+//   GLASS (center)— the round timer as MATTER: an hourglass that erodes top-down,
+//                   shedding sand; the burn-line glows; endgame = hot + trembling.
+//   THEM  (right) — the rival artifact in PRESENCE-IN-FOG: silhouette + size only.
+// One GL context, one raymarch, three bodies. House style v2 + the PS2 signal chain.
+
+const FRAG = `
+precision highp float;
+uniform vec2  u_res;
+uniform float u_time, u_tq, u_rA, u_rB, u_jit;
+uniform float u_you, u_them, u_youHi;
+uniform float u_frac, u_hot;
+const vec3 LIME = vec3(0.800, 1.000, 0.137);
+const vec3 GLOW = vec3(0.851, 1.000, 0.298);
+mat2 r2(float a) { float c = cos(a), s = sin(a); return mat2(c, -s, s, c); }
+float hash31(vec3 p) {
+  p = fract(p * 0.3183099 + vec3(0.1, 0.2, 0.3)); p *= 17.0;
+  return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+}
+float n3(vec3 p) {
+  vec3 i = floor(p), f = fract(p); vec3 u = f * f * (3.0 - 2.0 * f);
+  return mix(
+    mix(mix(hash31(i),               hash31(i + vec3(1,0,0)), u.x),
+        mix(hash31(i + vec3(0,1,0)), hash31(i + vec3(1,1,0)), u.x), u.y),
+    mix(mix(hash31(i + vec3(0,0,1)), hash31(i + vec3(1,0,1)), u.x),
+        mix(hash31(i + vec3(0,1,1)), hash31(i + vec3(1,1,1)), u.x), u.y), u.z);
+}
+float bayer(vec2 fc) {
+  float b = mod(fc.x, 2.0) * 2.0 + mod(fc.y, 2.0);
+  vec2 f2 = floor(fc / 2.0);
+  return (b * 4.0 + mod(f2.x, 2.0) * 2.0 + mod(f2.y, 2.0)) / 16.0;
+}
+float oct(vec3 p, float s) { return (abs(p.x) + abs(p.y) + abs(p.z) - s) * 0.42; }
+
+float gID, gCrack, gErode;
+float chunk(vec3 p, float seed, float comp) {
+  float gro = 0.40 + 0.60 * comp;          // the artifact grows as the set fills
+  p /= gro;
+  p.xz = r2(u_rA + seed * 6.28) * p.xz;
+  p.xy = r2(0.5 + u_rB) * p.xy;
+  vec3 q = p; float crack = 1e9;
+  float sd = fract(sin((seed + 1.0) * 12.9898) * 43758.5453);
+  for (int i = 0; i < 4; i++) {
+    q = abs(q) - vec3(0.26 + 0.09 * sd, 0.22 + 0.05 * sd, 0.27);
+    crack = min(crack, min(abs(q.x), abs(q.y)));
+    q.xy = r2(0.50 + 0.45 * sd) * q.xy;
+    q.yz = r2(0.47 + 0.25 * sd * sd) * q.yz;
+  }
+  float d = oct(q, 0.34);
+  d -= 0.05 * (n3(q * 5.0 + u_tq * 0.5) - 0.5) * 2.0;
+  d = max(d, length(p) - 0.62);
+  gCrack = crack;
+  return d * gro;
+}
+float hourglass(vec3 p) {
+  p.xz = r2(u_rA * 0.4 + u_jit) * p.xz;
+  p.x += u_jit * 0.6;                                       // endgame tremble
+  float d = min(oct(p - vec3(0.0, 0.30, 0.0), 0.35),
+                oct(p + vec3(0.0, 0.30, 0.0), 0.35));
+  // erosion drains it TOP-DOWN as the round runs; gErode tracks the burn-line
+  float e = (1.0 - u_frac) * 2.6 + p.y * 0.9 - 0.85;   // 2.6: guarantees zero matter at 0:00
+  gErode = e - n3(p * 5.0 + 3.7);
+  d = max(d, gErode * 0.45);
+  return d;
+}
+float map(vec3 p) {
+  float cy, ct;
+  float dy = chunk(p - vec3(-1.2, -0.05, 0.0), 0.37, u_you);  cy = gCrack;
+  float dh = hourglass(p - vec3(0.0, 0.02, 0.0));
+  float dt = chunk(p - vec3( 1.2, -0.05, 0.0), 0.81, u_them); ct = gCrack;
+  float d = min(dy, min(dh, dt));
+  gID = (d == dh) ? 2.0 : ((d == dy) ? 1.0 : 3.0);
+  gCrack = (gID == 1.0) ? cy : ct;
+  return d;
+}
+vec3 normalAt(vec3 p) {
+  const vec2 e = vec2(0.004, -0.004);
+  return normalize(e.xyy * map(p + e.xyy) + e.yyx * map(p + e.yyx)
+                 + e.yxy * map(p + e.yxy) + e.xxx * map(p + e.xxx));
+}
+void main() {
+  vec2 uv = (gl_FragCoord.xy - 0.5 * u_res) / min(u_res.x, u_res.y);
+  uv.y += 0.06;
+  float dth = bayer(gl_FragCoord.xy);
+  vec3 ro = vec3(0.0, 0.0, 3.6);
+  vec3 rd = normalize(vec3(uv, -1.5));
+  float t = 0.0; vec3 hp; bool hit = false;
+  for (int i = 0; i < 64; i++) {
+    hp = ro + rd * t;
+    float d = map(hp);
+    if (d < 0.003) { hit = true; break; }
+    t += d * 0.9;
+    if (t > 6.5) break;
+  }
+  vec4 outc = vec4(0.0);
+  if (hit) {
+    map(hp);                                  // refresh gID/gCrack/gErode at the hit
+    float id = gID, crack = gCrack, erode = gErode;
+    vec3 n = normalAt(hp);
+    n = normalize(floor(n * 3.0 + 0.5) / 3.0);              // facets
+    float diff = max(dot(n, normalize(vec3(0.5, 0.8, 0.6))), 0.0);
+    float band = floor(diff * 3.0 + dth) / 3.0;
+    float rim = pow(1.0 - max(dot(n, -rd), 0.0), 3.0);
+    vec3 col;
+    if (id == 2.0) {
+      // THE GLASS — bone matter; the burn-line where time eats it glows lime
+      col = vec3(0.055) + band * vec3(0.105, 0.105, 0.10);
+      float burn = 1.0 - smoothstep(0.0, 0.14, abs(erode));
+      col += mix(LIME, GLOW, 0.5) * step(0.5, burn + dth * 0.25) * (0.6 + 0.5 * u_hot);
+      col += GLOW * u_hot * 0.20 * (0.6 + 0.4 * sin(u_time * 7.0)) * band;
+    } else if (id == 1.0) {
+      // YOU — the pit grammar: earned light, shards, fringe at full highs
+      col = vec3(0.035) + band * vec3(0.085, 0.09, 0.075);
+      float eL = mix(0.08, 1.0, smoothstep(0.05, 0.6, u_you));
+      col += LIME * step(0.55, rim + dth * 0.25) * 0.20 * eL;
+      float fis = exp(-crack * 70.0);
+      float shard = step(0.78 - 0.15 * u_youHi, fis + dth * 0.12);
+      float vein  = step(0.45, fis + dth * 0.12) - shard;
+      col += mix(LIME, GLOW, 0.6) * shard * 0.9 * eL;
+      col += LIME * vein * 0.30 * eL;
+      float fr = u_youHi * eL * clamp(vein + smoothstep(0.62, 0.95, rim), 0.0, 1.0);
+      if (fr > 0.02) {
+        float hue = floor(fract(n3(hp * 5.0) + u_time * 0.04) * 3.0) / 3.0;
+        vec3 ic = hue < 0.3 ? LIME : (hue < 0.6 ? vec3(0.35, 0.95, 1.0) : vec3(1.0, 0.45, 0.95));
+        col = mix(col, ic, step(0.5, fr + dth * 0.35) * 0.65);
+      }
+    } else {
+      // THEM — presence in fog: size and silhouette, no detail, no lime.
+      col = vec3(0.040) + band * vec3(0.050, 0.054, 0.060);
+      col = mix(col, vec3(0.045), 0.35 + 0.30 * n3(hp * 3.0 + u_time * 0.25));
+      col += vec3(0.10, 0.105, 0.11) * step(0.68, rim + dth * 0.2);
+    }
+    outc = vec4(col, 1.0);
+  }
+  gl_FragColor = outc;
+}`;
+const VERT = 'attribute vec2 a; void main(){ gl_Position = vec4(a, 0.0, 1.0); }';
+
+const cv = document.getElementById('gl');
+const gl = cv.getContext('webgl', { antialias: false, alpha: true, premultipliedAlpha: false });
+if (!gl) { setTimeout(() => location.reload(), 1500); throw new Error('webgl unavailable - retrying'); }
+cv.addEventListener('webglcontextlost', e => e.preventDefault());
+cv.addEventListener('webglcontextrestored', () => location.reload());
+function sh(ty, src) {
+  const s = gl.createShader(ty);
+  gl.shaderSource(s, src); gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+  return s;
+}
+const prog = gl.createProgram();
+gl.attachShader(prog, sh(gl.VERTEX_SHADER, VERT));
+gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FRAG));
+gl.linkProgram(prog);
+if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+gl.useProgram(prog);
+const buf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
+const al = gl.getAttribLocation(prog, 'a');
+gl.enableVertexAttribArray(al);
+gl.vertexAttribPointer(al, 2, gl.FLOAT, false, 0, 0);
+const U = {};
+for (const n of ['u_res','u_time','u_tq','u_rA','u_rB','u_jit','u_you','u_them','u_youHi','u_frac','u_hot'])
+  U[n] = gl.getUniformLocation(prog, n);
+function resize() {
+  cv.width = Math.min(440, Math.floor(innerWidth / 4));
+  cv.height = Math.min(240, Math.floor(innerHeight / 4));
+  gl.viewport(0, 0, cv.width, cv.height);
+}
+addEventListener('resize', resize); resize();
+
+// ---------- the round ----------
+const ROUND_S = 60;
+const BPM = 140;
+let state = 'idle';                  // idle | running | over
+let remain = ROUND_S;
+let you = { c: 0, hi: 0, tC: 0, tHi: 0 };       // completeness + highs (smoothed)
+let them = { c: 0, tC: 0 };
+let dropTimers = [];
+
+// your set, scripted (a real build would feed from the arrangement like 009):
+// lows first, vocals late — the artifact blooms right as the glass runs hot.
+const YOUR_SET = [
+  [0.05, 0.15, 0.00, 'BEAT', '808 loop'],
+  [0.17, 0.16, 0.00, 'BEAT', 'chop stack'],
+  [0.32, 0.16, 0.05, 'BEAT', 'perc + glue'],
+  [0.50, 0.18, 0.30, 'VOX',  'hook take'],
+  [0.68, 0.16, 0.35, 'VOX',  'adlibs'],
+  [0.85, 0.14, 0.30, 'VOX',  'mix pass'],
+];
+// the rival's pace — you only ever see the mass swell
+const THEIR_SET = [[0.08, 0.14], [0.22, 0.18], [0.38, 0.12], [0.55, 0.26], [0.80, 0.24]];
+
+const count = document.getElementById('count'), startbtn = document.getElementById('startbtn');
+const mYou = document.getElementById('mYou'), mThem = document.getElementById('mThem');
+const verdict = document.getElementById('verdict'), stamp = document.getElementById('stamp'),
+      why = document.getElementById('why');
+const laneEls = { BEAT: document.getElementById('laneBeat'), VOX: document.getElementById('laneVox') };
+const clipPos = { BEAT: 0.02, VOX: 0.02 };
+
+function dropClip(lane, name, width) {
+  const el = document.createElement('div');
+  el.className = 'clip pop';
+  el.style.left = (clipPos[lane] * 100) + '%';
+  el.style.width = (width * 100) + '%';
+  el.innerHTML = `<span class="mono">${name.toUpperCase()}</span>`;
+  laneEls[lane].appendChild(el);
+  clipPos[lane] += width + 0.015;
+}
+function resetRound() {
+  dropTimers.forEach(clearTimeout); dropTimers = [];
+  state = 'idle'; remain = ROUND_S;
+  you.tC = 0; you.tHi = 0; them.tC = 0;
+  clipPos.BEAT = 0.02; clipPos.VOX = 0.02;
+  laneEls.BEAT.innerHTML = ''; laneEls.VOX.innerHTML = '';
+  verdict.classList.remove('on');
+  count.classList.remove('hot');
+  startbtn.textContent = '▶ START ROUND';
+}
+startbtn.onclick = () => {
+  if (state === 'running' || state === 'over') { resetRound(); return; }
+  state = 'running'; remain = ROUND_S;
+  startbtn.textContent = '↺ RESET';
+  for (const [at, dc, dhi, lane, name] of YOUR_SET)
+    dropTimers.push(setTimeout(() => {
+      you.tC = Math.min(1, you.tC + dc); you.tHi = Math.min(1, you.tHi + dhi);
+      slam = 1; dropClip(lane, name, 0.13);
+    }, at * ROUND_S * 1000));
+  for (const [at, dc] of THEIR_SET)
+    dropTimers.push(setTimeout(() => { them.tC = Math.min(1, them.tC + dc); }, at * ROUND_S * 1000));
+};
+function endRound() {
+  state = 'over';
+  const win = you.c >= them.c;
+  stamp.textContent = win ? 'W' : 'L';
+  why.textContent = `YOUR ARTIFACT ${(you.c * 100).toFixed(0)}% · THEIRS ${(them.c * 100).toFixed(0)}% — NOW JUDGE BY EAR`;
+  verdict.classList.add('on');
+}
+
+// ---------- sand: the glass sheds matter as it is eaten ----------
+const scv = document.getElementById('sand'), sgx = scv.getContext('2d');
+function sresize() { scv.width = Math.floor(innerWidth / 4); scv.height = Math.floor(innerHeight / 4); }
+addEventListener('resize', sresize); sresize();
+const grains = [];
+function sandFrame(dt, hot) {
+  sgx.clearRect(0, 0, scv.width, scv.height);
+  if (state === 'running') {
+    const rate = 1 + hot * 4;
+    for (let i = 0; i < rate; i++) if (grains.length < 220 && Math.random() < 0.8)
+      grains.push({ x: scv.width / 2 + (Math.random() - 0.5) * 10,
+                    y: scv.height * 0.42 + Math.random() * 8,
+                    vx: (Math.random() - 0.5) * 4, vy: 6 + Math.random() * 12,
+                    a: 1 });
+  }
+  for (let i = grains.length - 1; i >= 0; i--) {
+    const g = grains[i];
+    g.vy += 28 * dt; g.x += g.vx * dt; g.y += g.vy * dt;
+    if (g.y > scv.height * 0.78) { g.a -= dt * 2.2; g.vy = 0; g.vx = 0; }
+    if (g.a <= 0) { grains.splice(i, 1); continue; }
+    sgx.fillStyle = g.a > 0.5 ? '#CCFF23' : 'rgba(204,255,35,0.4)';
+    sgx.fillRect(Math.round(g.x), Math.round(g.y), 1, 1);
+  }
+}
+
+// ---------- the loop ----------
+let rA = 0, rB = 0, rTA = 0.3, rTB = 0.1, tq = 0, lastTick = 0, jit = 0, slam = 0;
+let lastBeat = -1;
+const tcEl = document.getElementById('tc'), phead = document.getElementById('phead'),
+      playbtn = document.getElementById('playbtn');
+let playing = true;
+playbtn.onclick = () => { playing = !playing; playbtn.textContent = playing ? '▶' : '⏸'; };
+const t0 = performance.now(); let last = t0;
+function frame(now) {
+  const t = (now - t0) / 1000, dt = Math.min(0.05, (now - last) / 1000); last = now;
+  if (state === 'running') {
+    remain = Math.max(0, remain - dt);
+    if (remain <= 0) endRound();
+  }
+  const frac = remain / ROUND_S;
+  const hot = state === 'running' ? Math.max(0, 1 - frac / 0.25) : 0;  // last 15s burn
+  count.textContent = `${Math.floor(remain / 60)}:${(remain % 60).toFixed(1).padStart(4, '0')}`;
+  count.classList.toggle('hot', hot > 0);
+
+  // the beat: slams on the bar, on twos
+  const beats = playing ? t * (BPM / 60) : 0;
+  const beat = Math.floor(beats);
+  if (beat !== lastBeat) {
+    lastBeat = beat;
+    if (beat % 4 === 0) { rTA += 0.5 * (Math.random() - 0.5); slam = Math.max(slam, 0.5); }
+  }
+  slam *= 0.92;
+  tcEl.textContent = `BAR ${Math.floor(beats / 4) % 16 + 1}.${Math.floor(beats % 4) + 1}`;
+  phead.style.left = (78 + (beats / 4 % 16) / 16 * (innerWidth - 120)) + 'px';
+
+  you.c += (you.tC - you.c) * 0.03; you.hi += (you.tHi - you.hi) * 0.03;
+  them.c += (them.tC - them.c) * 0.03;
+  mYou.style.width = (you.c * 100).toFixed(0) + '%';
+  mThem.style.width = (them.c * 100).toFixed(0) + '%';
+
+  if (t - lastTick > 1 / 12) {                       // on twos
+    lastTick = t; tq = t;
+    rA += (rTA - rA) * 0.5 + (Math.random() - 0.5) * 0.012;
+    rB += (rTB - rB) * 0.5 + (Math.random() - 0.5) * 0.012;
+    jit = (Math.random() - 0.5) * 0.10 * hot;        // endgame tremble
+  }
+  rTB += dt * 0.05;                                  // slow drift
+
+  gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.uniform2f(U.u_res, cv.width, cv.height);
+  gl.uniform1f(U.u_time, t); gl.uniform1f(U.u_tq, tq);
+  gl.uniform1f(U.u_rA, rA + slam * 0.15); gl.uniform1f(U.u_rB, rB);
+  gl.uniform1f(U.u_jit, jit);
+  gl.uniform1f(U.u_you, you.c); gl.uniform1f(U.u_them, them.c);
+  gl.uniform1f(U.u_youHi, you.hi);
+  gl.uniform1f(U.u_frac, frac); gl.uniform1f(U.u_hot, hot);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+  sandFrame(dt, hot);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

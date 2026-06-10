@@ -47,9 +47,25 @@
   .card:hover .ph { color: rgba(204,255,35,.45); transform: scale(1.06); }
   .thumb iframe { position: absolute; inset: 0; }
   .thumb { position: relative; }
+
+  /* THE PS2 SIGNAL CHAIN (HOUSE_STYLE v2.1) — one cable for every surface:
+     soft 2000s AA + 16-step posterize over DOM and GL alike. html.raw = A/B. */
+  * { -webkit-font-smoothing: antialiased; }
+  body { filter: url(#ps2signal); }
+  html.raw body { filter: none; }
 </style>
 </head>
 <body>
+<svg width="0" height="0" style="position:fixed" aria-hidden="true"><filter id="ps2signal"
+  x="-2%" y="-2%" width="104%" height="104%" color-interpolation-filters="sRGB">
+  <feGaussianBlur stdDeviation="0.35"/>
+  <feComponentTransfer>
+    <feFuncR type="discrete" tableValues="0 0.0667 0.1333 0.2 0.2667 0.3333 0.4 0.4667 0.5333 0.6 0.6667 0.7333 0.8 0.8667 0.9333 1"/>
+    <feFuncG type="discrete" tableValues="0 0.0667 0.1333 0.2 0.2667 0.3333 0.4 0.4667 0.5333 0.6 0.6667 0.7333 0.8 0.8667 0.9333 1"/>
+    <feFuncB type="discrete" tableValues="0 0.0667 0.1333 0.2 0.2667 0.3333 0.4 0.4667 0.5333 0.6 0.6667 0.7333 0.8 0.8667 0.9333 1"/>
+  </feComponentTransfer>
+</filter></svg>
+
 <header>
   <h1>MOSH <em>DESIGN LAB</em></h1>
   <div class="sub">WAVE 1 · INTERFACES DERIVED FROM THE SYMBIOTE — NOT FROM A LAYOUT</div>
@@ -160,7 +176,9 @@
       <div class="what">The full DAW skeleton with the song AS MATTER in the empty stage: a
       raymarched obsidian mass — kifs-folded, noise-bitten, four dithered shading bands,
       rotation animated on-twos — that slams on the beat. The Rack sculpts it live: GRIT
-      folds it jagged, AIR lets it drift, EPIC grows it. R splits it molten.</div>
+      folds it jagged, AIR lets it drift, EPIC grows it. R splits it molten. v5: it's THE
+      ARTIFACT — the arrangement's spectral fill grows it from monochrome nugget to lit
+      monument; vox at full earns the one iridescent fringe. ▶ BUILD demos the thesis.</div>
     </div>
   </a>
   <a class="card" href="experiments/010-moshi/index.html">
@@ -171,7 +189,20 @@
       <div class="what">The agent graduates to 3D: a portable MoshiBlob component — mini
       raymarched lobes, faceted low-poly shading, dither bands, on-twos wobble. It watches
       your cursor, blinks, squashes on the beat, and squishes indignantly when poked.
-      Embedded live in 008 and 009.</div>
+      Embedded live in 008 and 009. Face fused to the body: eyes squash with the spring,
+      tremble when feral, run lime when recording.</div>
+    </div>
+  </a>
+  <a class="card" href="experiments/011-the-wager/index.html">
+    <div class="thumb" data-live="experiments/011-the-wager/index.html"><div class="ph disp">011</div></div>
+    <div class="meta">
+      <div class="num">011 · COMPETITIVE SEED · BATTLE MODE</div>
+      <div class="name">THE WAGER</div>
+      <div class="what">Beat-battle as matter. YOUR artifact grows with every drop; THEIR
+      artifact swells behind fog — you see what they're building, never hear it. Between
+      you: THE GLASS, a round timer that is literally eaten — eroding top-down, shedding
+      sand, burning lime at the waste-line, trembling in the final seconds. W stamp,
+      then judge by ear.</div>
     </div>
   </a>
 </div>

@@ -80,3 +80,32 @@ house 3D style; rack-sculpts-the-centerpiece as the Color Rack's reason to exist
   reload-on-restore, retry when a context can't be created), MoshiBlob degrades to a
   face-only stub instead of crashing the page, and the pit buffer is capped at
   380×240 so huge windows can't balloon the raymarch.
+
+## v5 (2026-06-10) — THE ARTIFACT (the user's thesis, made literal)
+
+User: *"as a producer, as you build up the track you'll add more color and beauty…
+as you fill out the spectral range you'll create a unique beautiful more complete
+artifact, and the piece of music is tied to that artifact. As a rapper the beat would
+be complete but subdued, and when you laid down your lines it would become vibrant."*
+
+- **The arrangement feeds the stone.** Every lane carries a band (DRUMS/BASS → low,
+  GTR/PAD → mid, VOX → high); clip coverage per band = spectral fill, smoothed so
+  matter *accretes* rather than snapping. Topbar gains LOW/MID/HI segmented meters.
+- **Growth mapping:** `u_complete` scales the whole SDF (0.45 → 1.0 — nugget to
+  monument); lows add a slow heavy breath; mids densify the ridge labyrinth;
+  highs drop the shard threshold (more crystal) + rim sparkle.
+- **Earned light:** every lime emission term is scaled by completeness — an empty
+  session is a *monochrome* nugget. Beauty arrives with the song.
+- **Earned polychrome (the bold call):** at full highs, shard edges + grazing rim get
+  a banded thin-film fringe (lime→cyan→magenta, dither-quantized). The artifact is
+  the ONE surface allowed past the five-color palette — the reward for filling the
+  spectrum. All chrome stays exact.
+- **Unique stone per song:** the arrangement hashes into the fold seed (`u_aseed`) —
+  change the clips, change the geology.
+- **▶ BUILD** (topbar): strips the session bare, then lands clips lows-first every
+  ~2.3s — the producer build — ending with the vox hook: the bloom. ↺ resets.
+- **Engine link:** completeness = active-track count from the levels feed (no
+  per-band data in the feed yet; honest proxy).
+- **The rapper story holds:** beat-only session (DRUMS+BASS+GTR live, VOX muted)
+  reads complete-but-subdued — full mass, half light, no fringe. Punch the vox in
+  and it goes vibrant. Same mapping, no special case.
