@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { useStore } from "./store";
 import { isNative } from "./bridge";
 import { Arrangement } from "./components/Arrangement";
-import { Transport } from "./components/Transport";
+import { Transport, AudioOut } from "./components/Transport";
 import { Rack } from "./components/Rack";
 import { PluginBrowser } from "./components/PluginBrowser";
 import { TutorialBar } from "./components/TutorialBar";
@@ -49,6 +49,8 @@ export function App() {
           <TutorialBar />
           {/* B-5 / Monster — the producer agent (Stage 11, phase0 s10). */}
           <AgentPanel />
+          {/* Audio-output truth (Stage 14): show + switch the device. */}
+          <AudioOut />
           <button className="tool-btn" onClick={() => exec("export_audio", {})} title="Export the mix to WAV">
             ⤓ Export
           </button>

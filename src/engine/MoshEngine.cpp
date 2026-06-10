@@ -30,7 +30,20 @@ MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession)
         juce::String ("Mosh"),
         std::make_unique<te::UIBehaviour>(),
         std::make_unique<MoshEngineBehaviour> (audioOpen));
-    applyRequestedAudioOutputDevice();
+    applyPreferredOrSaneOutputDevice();
+
+    if (audioOpen)
+    {
+        // The engine's first MIDI-device apply runs on a deferred timer and
+        // calls clearAllContextDevices(), which KILLS a running transport — if
+        // it lands mid-play, the first play after launch goes silent (a race
+        // the live-audio smoke caught). Force the apply to completion now,
+        // before any playback exists; the periodic re-checks then no-op unless
+        // hardware actually changes.
+        enginePtr->getDeviceManager().rescanMidiDeviceList();
+        if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
+            mm->runDispatchLoopUntil (150);
+    }
 
     // Session directory: a stable per-app-data folder so save/reload round-trips.
     // The harness gets an isolated "session-selftest" dir so it can't be polluted
@@ -189,6 +202,149 @@ void MoshEngine::applyRequestedAudioOutputDevice()
     tracktionDevices.rescanWaveDeviceList();
     if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
         mm->runDispatchLoopUntil (50);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Audio output device control (Stage 14). Rung 1's GUI silence: the machine's
+// default output was BlackHole — a virtual loopback sink with no speakers —
+// and Mosh inherited it without a word. Resolution order at startup:
+// env override (tests) > persisted user preference > never-sit-on-a-pure-sink.
+// ─────────────────────────────────────────────────────────────────────────────
+bool MoshEngine::looksLikeVirtualSink (const juce::String& deviceName)
+{
+    const auto n = deviceName.toLowerCase();
+    // Pure capture sinks only — multi-output/aggregate devices can still reach
+    // speakers, so they are NOT listed here.
+    for (auto* tag : { "blackhole", "soundflower", "loopback", "vb-cable",
+                       "vb-audio", "zoomaudiodevice", "teams audio" })
+        if (n.contains (tag))
+            return true;
+    return false;
+}
+
+juce::File MoshEngine::devicePrefFile() const
+{
+    return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+               .getChildFile ("Mosh").getChildFile ("audio-device.json");
+}
+
+juce::StringArray MoshEngine::listAudioOutputDevices()
+{
+    juce::StringArray names;
+    if (! audioOpen)
+        return names;
+    auto& devices = enginePtr->getDeviceManager().deviceManager;
+    for (auto* type : devices.getAvailableDeviceTypes())
+    {
+        type->scanForDevices();
+        names.addArray (type->getDeviceNames (false));
+    }
+    names.removeDuplicates (true);
+    return names;
+}
+
+juce::String MoshEngine::currentAudioOutputDevice()
+{
+    if (! audioOpen)
+        return {};
+    if (auto* d = enginePtr->getDeviceManager().deviceManager.getCurrentAudioDevice())
+        return d->getName();
+    return {};
+}
+
+juce::String MoshEngine::switchOutputDevice (const juce::String& requested)
+{
+    if (! audioOpen)
+        return "audio is disabled";
+
+    auto& devices = enginePtr->getDeviceManager().deviceManager;
+    juce::String matchedType, matchedOutput;
+    for (auto* type : devices.getAvailableDeviceTypes())
+    {
+        type->scanForDevices();
+        for (auto& name : type->getDeviceNames (false))
+            if (name.equalsIgnoreCase (requested))
+            {
+                matchedType = type->getTypeName();
+                matchedOutput = name;
+                break;
+            }
+        if (matchedOutput.isNotEmpty())
+            break;
+    }
+    if (matchedOutput.isEmpty())
+        return "audio output device not found: " + requested;
+
+    auto setup = devices.getAudioDeviceSetup();
+    devices.setCurrentAudioDeviceType (matchedType, true);
+    setup.outputDeviceName = matchedOutput;
+    setup.useDefaultOutputChannels = true;
+    if (auto error = devices.setAudioDeviceSetup (setup, true); error.isNotEmpty())
+        return error;
+
+    enginePtr->getDeviceManager().rescanWaveDeviceList();
+    // Settle the MIDI-device apply the device restart schedules — it would
+    // otherwise land mid-play and kill the transport (see ctor note).
+    enginePtr->getDeviceManager().rescanMidiDeviceList();
+    if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
+        mm->runDispatchLoopUntil (150);
+    return {};
+}
+
+juce::String MoshEngine::setAudioOutputDevice (const juce::String& name)
+{
+    auto err = switchOutputDevice (name);
+    if (err.isEmpty())
+    {
+        auto* o = new juce::DynamicObject();
+        o->setProperty ("output", name);
+        devicePrefFile().getParentDirectory().createDirectory();
+        devicePrefFile().replaceWithText (juce::JSON::toString (juce::var (o)) + "\n");
+        audioWarning.clear();
+    }
+    return err;
+}
+
+void MoshEngine::applyPreferredOrSaneOutputDevice()
+{
+    if (! audioOpen)
+        return;
+
+    // 1. Env overrides win outright (tests use these, incl. loopback input).
+    const auto envOut = juce::SystemStats::getEnvironmentVariable ("MOSH_AUDIO_OUTPUT_DEVICE", {}).trim();
+    const auto envIn  = juce::SystemStats::getEnvironmentVariable ("MOSH_AUDIO_INPUT_DEVICE", {}).trim();
+    if (envOut.isNotEmpty() || envIn.isNotEmpty())
+    {
+        applyRequestedAudioOutputDevice();
+        return;
+    }
+
+    // 2. Persisted user preference (set via set_audio_output, machine-local).
+    if (auto pref = juce::JSON::parse (devicePrefFile().loadFileAsString())
+                        .getProperty ("output", juce::var()).toString().trim();
+        pref.isNotEmpty())
+        if (switchOutputDevice (pref).isEmpty())
+            return;                 // pref device gone → fall through to policy
+
+    // 3. Policy: never default to a pure virtual sink while a real output exists.
+    auto& devices = enginePtr->getDeviceManager().deviceManager;
+    auto* current = devices.getCurrentAudioDevice();
+    if (current == nullptr || ! looksLikeVirtualSink (current->getName()))
+        return;
+
+    const auto sinkName = current->getName();
+    for (auto& name : listAudioOutputDevices())
+        if (! looksLikeVirtualSink (name))
+        {
+            if (switchOutputDevice (name).isEmpty())
+            {
+                audioWarning = "System default output is " + sinkName
+                             + " (a virtual sink) — Mosh switched to " + name
+                             + ". Pick a different device in the topbar to override.";
+                DBG (audioWarning);
+            }
+            return;
+        }
 }
 
 juce::File MoshEngine::generateTestTone (double seconds, double freqHz, const juce::String& name)

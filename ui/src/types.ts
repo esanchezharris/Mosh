@@ -28,6 +28,9 @@ export type AvailableColor = {
 // Quality readout from a completed render's manifest (judge panel, 05 §7).
 export type RenderQA = { pq?: number | null; pq_base?: number | null; flags?: string[]; adapter?: string };
 
+// MIDI note as the snapshot carries it (beats domain, Stage 14).
+export type Note = { pitch: number; startBeats: number; durBeats: number; vel: number };
+
 export type Clip = {
   id: string;
   name: string;
@@ -37,6 +40,7 @@ export type Clip = {
   offset: number;
   sourceFile?: string;
   sourceLength?: number;
+  notes?: Note[]; // MIDI clips only (capped at 512)
   hasRenderLayer: boolean;
   renderLayer?: RenderLayer;
 };
@@ -52,6 +56,9 @@ export type NeuralInsert = {
   params: NeuralParam[];
 };
 
+// A sampler pad: one loaded sound with its key mapping (drum rack, Stage 14).
+export type SamplerSound = { name: string; keyNote: number; minNote: number; maxNote: number };
+
 export type Plugin = {
   index: number;
   name: string;
@@ -62,6 +69,7 @@ export type Plugin = {
   params: PluginParam[];
   neural?: NeuralInsert;
   labMode?: boolean;
+  sounds?: SamplerSound[]; // sampler plugins only
 };
 
 export type AvailablePlugin = {
@@ -92,11 +100,25 @@ export type Transport = {
   looping: boolean;
   loopStart: number;
   loopEnd: number;
+  // Engine-output levels in dB, riding the 30 Hz transport event (Stage 14).
+  levels?: { master?: [number, number]; tracks?: Record<string, [number, number]> };
 };
+
+export type AudioOutputDevice = { name: string; virtualSink: boolean };
 
 export type Snapshot = {
   schemaVersion: number;
-  session: { sampleRate: number; tempo: number; editFile: string };
+  session: {
+    sampleRate: number;
+    tempo: number;
+    editFile: string;
+    timeSigNumerator?: number;
+    timeSigDenominator?: number;
+    hasAudio?: boolean;
+    audioOutputDevice?: string;
+    audioWarning?: string;
+    audioError?: string;
+  };
   tracks: Track[];
   transport: Transport;
 };

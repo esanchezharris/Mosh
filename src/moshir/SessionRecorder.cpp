@@ -14,7 +14,9 @@ namespace
     {
         return name == "ping" || name == "get_clip_peaks" || name == "get_state_hash"
             || name == "list_plugins" || name == "list_colors"
-            || name == "open_plugin_editor";
+            || name == "open_plugin_editor"
+            // Device prefs are machine-local, not musical actions (Stage 14).
+            || name == "list_audio_outputs" || name == "set_audio_output";
     }
 }
 

@@ -13,19 +13,53 @@ MoshOps::MoshOps (MoshEngine& engineToUse)
 {
     logFile = eng.sessionDir().getChildFile ("mosh-log.jsonl");
     pluginHost.initialise();                 // formats + curated VST3 scan
+    adoptEditMeters();                       // engine-output taps (Stage 14)
     startTimerHz (30);                       // telemetry decimated to 30 Hz, never per-block
 }
 
-MoshOps::~MoshOps() { stopTimer(); }
+MoshOps::~MoshOps()
+{
+    stopTimer();
+    releaseAllMeterClients();
+}
+
+void MoshOps::releaseMeterClient (MeterClient& mc)
+{
+    // The held Plugin::Ptr guarantees the measurer is alive for removeClient,
+    // even after the edit that owned the plugin is gone.
+    if (mc.plugin != nullptr && mc.client != nullptr)
+        if (auto* meter = dynamic_cast<te::LevelMeterPlugin*> (mc.plugin.get()))
+            meter->measurer.removeClient (*mc.client);
+    mc.plugin = nullptr;
+    mc.client.reset();
+}
+
+void MoshOps::releaseAllMeterClients()
+{
+    for (auto& [key, mc] : meterClients)
+        releaseMeterClient (mc);
+    meterClients.clear();
+}
 
 void MoshOps::timerCallback()
 {
+    // reload/resetEmpty/collab-rebase swap the Edit object out from under us;
+    // the old measurers died with it, so re-adopt before touching anything.
+    if (&eng.edit() != meterEdit)
+        adoptEditMeters();
+
     // Push a decimated transport delta while playing (and once on the
     // play-to-stop edge) so the UI playhead animates without polling (02 §4.2).
+    // Levels ride in the same event (one feed for playhead AND meters).
     auto& transport = eng.edit().getTransport();
     const bool playing = transport.isPlaying();
     if (playing || wasPlaying)
-        emit ("transport", transportToVar());
+    {
+        auto tv = transportToVar();
+        if (auto* o = tv.getDynamicObject())
+            o->setProperty ("levels", meterLevels());
+        emit ("transport", tv);
+    }
     wasPlaying = playing;
 }
 
@@ -59,6 +93,8 @@ juce::var MoshOps::dispatch (const juce::String& name, const juce::var& args)
     if (name == "import_clip")       return cmdImportClip (args);
     if (name == "add_test_tone_clip")return cmdAddTestTone (args);
     if (name == "set_transport")     return cmdSetTransport (args);
+    if (name == "list_audio_outputs") return cmdListAudioOutputs (args);
+    if (name == "set_audio_output")  return cmdSetAudioOutput (args);
     if (name == "undo")              return cmdUndo (args);
     if (name == "redo")              return cmdRedo (args);
     if (name == "save")              return cmdSave (args);
@@ -298,6 +334,41 @@ juce::var MoshOps::cmdSetTransport (const juce::var& args)
     logLine ("set_transport", args, true, {}, false);          // transport is NOT undoable
     emit ("transport", transportToVar());
     return okResult ("set_transport", transportToVar());
+}
+
+juce::var MoshOps::cmdListAudioOutputs (const juce::var&)
+{
+    Array<var> devices;
+    for (auto& name : eng.listAudioOutputDevices())
+    {
+        auto* d = new DynamicObject();
+        d->setProperty ("name", name);
+        d->setProperty ("virtualSink", MoshEngine::looksLikeVirtualSink (name));
+        devices.add (var (d));
+    }
+    auto* data = new DynamicObject();
+    data->setProperty ("devices", devices);
+    data->setProperty ("current", eng.currentAudioOutputDevice());
+    data->setProperty ("warning", eng.audioDeviceWarning());
+    return okResult ("list_audio_outputs", var (data));
+}
+
+juce::var MoshOps::cmdSetAudioOutput (const juce::var& args)
+{
+    const auto device = args.getProperty ("device", var()).toString().trim();
+    if (device.isEmpty()) return errResult ("set_audio_output", "missing 'device'");
+
+    // Machine-local preference — never an edit mutation, never undoable, never
+    // synced or recorded (a collaborator's speakers are not session state).
+    eng.edit().getTransport().stop (false, false);
+    if (auto err = eng.setAudioOutputDevice (device); err.isNotEmpty())
+        return errResult ("set_audio_output", err);
+
+    logLine ("set_audio_output", args, true, {}, false);
+    emitSnapshotInvalidated();
+    auto* data = new DynamicObject();
+    data->setProperty ("current", eng.currentAudioOutputDevice());
+    return okResult ("set_audio_output", var (data));
 }
 
 juce::var MoshOps::cmdUndo (const juce::var& args)
@@ -552,12 +623,17 @@ juce::var MoshOps::cmdLoadPlugin (const juce::var& args)
     auto plugin = eng.edit().getPluginCache().createNewPlugin (te::ExternalPlugin::xmlTypeName, desc);
     if (plugin == nullptr) return errResult ("load_plugin", "create failed");
 
-    int index = (int) args.getProperty ("index", -1);
-    if (index < 0) index = track->pluginList.getPlugins().size();   // append (−1 does not append)
-    track->pluginList.insertPlugin (plugin, index, nullptr);
+    // `index` is a VISIBLE index (meter taps don't count) — map to the raw list.
+    const int vIndex = (int) args.getProperty ("index", -1);
+    auto vis = visiblePlugins (*track);
+    const int rawIndex = (vIndex < 0 || vIndex >= vis.size())
+                             ? track->pluginList.getPlugins().size()
+                             : track->pluginList.indexOf (vis[vIndex]);
+    track->pluginList.insertPlugin (plugin, rawIndex, nullptr);
+    ensureMeterLast (*track);
 
     auto* data = new DynamicObject();
-    data->setProperty ("index", track->pluginList.indexOf (plugin.get()));
+    data->setProperty ("index", visiblePluginIndex (*track, plugin.get()));
     data->setProperty ("name", plugin->getName());
     logLine ("load_plugin", args, true, {}, true);
     emitSnapshotInvalidated();
@@ -583,13 +659,18 @@ juce::var MoshOps::cmdReorderPlugin (const juce::var& args)
     if (track == nullptr) return errResult ("reorder_plugin", "no track");
     const int from = (int) args.getProperty ("index", -1);
     const int to   = (int) args.getProperty ("toIndex", -1);
-    auto plugins = track->pluginList.getPlugins();
-    if (from < 0 || from >= plugins.size()) return errResult ("reorder_plugin", "bad index");
+    auto vis = visiblePlugins (*track);
+    if (from < 0 || from >= vis.size()) return errResult ("reorder_plugin", "bad index");
 
-    te::Plugin::Ptr p = plugins[from];
+    te::Plugin::Ptr p = vis[from];
     undoManager().beginNewTransaction ("reorder_plugin");
     p->removeFromParent();
-    track->pluginList.insertPlugin (p, to, nullptr);
+    auto vis2 = visiblePlugins (*track);
+    const int rawTo = (to < 0 || to >= vis2.size())
+                          ? track->pluginList.getPlugins().size()
+                          : track->pluginList.indexOf (vis2[to]);
+    track->pluginList.insertPlugin (p, rawTo, nullptr);
+    ensureMeterLast (*track);
     logLine ("reorder_plugin", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("reorder_plugin");
@@ -706,12 +787,16 @@ juce::var MoshOps::cmdAddNeuralInsert (const juce::var& args)
     if (auto* n = asNeural (plugin.get()))
         n->selectModel (args.getProperty ("modelId", "nam").toString());
 
-    int index = (int) args.getProperty ("index", -1);
-    if (index < 0) index = track->pluginList.getPlugins().size();
-    track->pluginList.insertPlugin (plugin, index, nullptr);
+    const int vIndex = (int) args.getProperty ("index", -1);
+    auto vis = visiblePlugins (*track);
+    const int rawIndex = (vIndex < 0 || vIndex >= vis.size())
+                             ? track->pluginList.getPlugins().size()
+                             : track->pluginList.indexOf (vis[vIndex]);
+    track->pluginList.insertPlugin (plugin, rawIndex, nullptr);
+    ensureMeterLast (*track);
 
     auto* data = new DynamicObject();
-    data->setProperty ("index", track->pluginList.indexOf (plugin.get()));
+    data->setProperty ("index", visiblePluginIndex (*track, plugin.get()));
     logLine ("add_neural_insert", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("add_neural_insert", var (data));
@@ -1153,6 +1238,8 @@ te::AudioTrack* MoshOps::createAudioTrack (const juce::String& name)
     if (name.isNotEmpty())
         track->setName (name);
 
+    ensureTrackMeter (*track);   // every track ships its tap (hash/snapshot skip type "level")
+
     // Tracktion queues a track-order AsyncUpdater after insertion. In headless
     // command runs there is no normal GUI dispatch between commands, so drain it
     // here before the next undo transaction is opened.
@@ -1171,10 +1258,142 @@ te::VolumeAndPanPlugin* MoshOps::ensureVolumePlugin (te::AudioTrack& track)
     if (auto plugin = eng.edit().getPluginCache().createNewPlugin (te::VolumeAndPanPlugin::xmlTypeName, {}))
     {
         track.pluginList.insertPlugin (plugin, -1, nullptr);
+        ensureMeterLast (track);    // the tap stays post-fader
         return dynamic_cast<te::VolumeAndPanPlugin*> (plugin.get());
     }
 
     return nullptr;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Engine-output meters (Stage 14). One te::LevelMeterPlugin on the master
+// chain and one per audio track; LevelMeasurer only measures while a Client is
+// registered, so the 30 Hz timer keeps one client per meter and polls them
+// into the transport event. Excluded from the canonical hash + snapshot rack.
+// ─────────────────────────────────────────────────────────────────────────────
+te::LevelMeterPlugin* MoshOps::ensureMasterMeter()
+{
+    auto& edit = eng.edit();
+    if (auto* existing = edit.getMasterPluginList().getPluginsOfType<te::LevelMeterPlugin>().getLast())
+        return existing;
+
+    if (auto plugin = edit.getPluginCache().createNewPlugin (te::LevelMeterPlugin::xmlTypeName, {}))
+    {
+        edit.getMasterPluginList().insertPlugin (plugin, -1, nullptr);
+        return dynamic_cast<te::LevelMeterPlugin*> (plugin.get());
+    }
+    return nullptr;
+}
+
+te::LevelMeterPlugin* MoshOps::ensureTrackMeter (te::AudioTrack& track)
+{
+    if (auto* existing = track.pluginList.getPluginsOfType<te::LevelMeterPlugin>().getLast())
+        return existing;
+
+    if (auto plugin = eng.edit().getPluginCache().createNewPlugin (te::LevelMeterPlugin::xmlTypeName, {}))
+    {
+        track.pluginList.insertPlugin (plugin, -1, nullptr);
+        return dynamic_cast<te::LevelMeterPlugin*> (plugin.get());
+    }
+    return nullptr;
+}
+
+juce::Array<te::Plugin*> MoshOps::visiblePlugins (te::AudioTrack& track)
+{
+    juce::Array<te::Plugin*> out;
+    for (auto* p : track.pluginList.getPlugins())
+        if (p != nullptr && p->getPluginType() != te::LevelMeterPlugin::xmlTypeName)
+            out.add (p);
+    return out;
+}
+
+int MoshOps::visiblePluginIndex (te::AudioTrack& track, te::Plugin* plugin)
+{
+    return visiblePlugins (track).indexOf (plugin);
+}
+
+void MoshOps::ensureMeterLast (te::AudioTrack& track)
+{
+    auto* meter = track.pluginList.getPluginsOfType<te::LevelMeterPlugin>().getLast();
+    if (meter == nullptr)
+    {
+        ensureTrackMeter (track);     // appends at the end
+        return;
+    }
+    auto plugins = track.pluginList.getPlugins();
+    if (! plugins.isEmpty() && plugins.getLast().get() == meter)
+        return;
+    te::Plugin::Ptr keep (meter);
+    keep->removeFromParent();
+    track.pluginList.insertPlugin (keep, -1, nullptr);   // index<0 appends (engine source)
+}
+
+void MoshOps::adoptEditMeters()
+{
+    // Unregister from the previous edit's measurers FIRST — graph nodes keep
+    // meter plugins alive past their edit, and a measurer must never hold a
+    // pointer to a destroyed client (guard-malloc-proven UAF otherwise).
+    releaseAllMeterClients();
+    meterEdit = &eng.edit();
+
+    bool inserted = meterEdit->getMasterPluginList().getPluginsOfType<te::LevelMeterPlugin>().isEmpty();
+    ensureMasterMeter();
+    for (auto* t : te::getAudioTracks (*meterEdit))
+        if (t != nullptr && t->pluginList.getPluginsOfType<te::LevelMeterPlugin>().isEmpty())
+        {
+            inserted = true;
+            ensureTrackMeter (*t);
+        }
+
+    // Adoption only happens on fresh edits (construction, reload, resetEmpty)
+    // whose undo history is empty; meter insertion must never become the
+    // user's first undoable step.
+    if (inserted)
+        meterEdit->getUndoManager().clearUndoHistory();
+}
+
+juce::var MoshOps::meterLevels()
+{
+    std::map<juce::String, bool> seen;
+
+    auto read = [this, &seen] (te::LevelMeterPlugin& meter) -> juce::var
+    {
+        const auto key = meter.itemID.toString();
+        seen[key] = true;
+        auto& mc = meterClients[key];
+        if (mc.client == nullptr)
+        {
+            mc.plugin = &meter;     // refcounted — keeps the measurer reachable
+            mc.client = std::make_unique<te::LevelMeasurer::Client>();
+            meter.measurer.addClient (*mc.client);
+        }
+        juce::Array<var> lr;
+        lr.add (juce::roundToInt (mc.client->getAndClearAudioLevel (0).dB * 10.0f) / 10.0);
+        lr.add (juce::roundToInt (mc.client->getAndClearAudioLevel (1).dB * 10.0f) / 10.0);
+        return lr;
+    };
+
+    auto* o = new DynamicObject();
+    if (auto* mm = eng.edit().getMasterPluginList().getPluginsOfType<te::LevelMeterPlugin>().getLast())
+        o->setProperty ("master", read (*mm));
+
+    auto* trackLevels = new DynamicObject();
+    for (auto* t : te::getAudioTracks (eng.edit()))
+        if (t != nullptr)
+            if (auto* m = t->pluginList.getPluginsOfType<te::LevelMeterPlugin>().getLast())
+                trackLevels->setProperty (t->itemID.toString(), read (*m));
+    o->setProperty ("tracks", var (trackLevels));
+
+    // Prune clients whose meter left the edit — unregister through the held
+    // Plugin::Ptr first (the plugin may still be alive inside a graph node).
+    for (auto it = meterClients.begin(); it != meterClients.end();)
+    {
+        if (seen.count (it->first) > 0) { ++it; continue; }
+        releaseMeterClient (it->second);
+        it = meterClients.erase (it);
+    }
+
+    return var (o);
 }
 
 juce::var MoshOps::pluginToVar (te::Plugin& p, int index)
@@ -1191,6 +1410,22 @@ juce::var MoshOps::pluginToVar (te::Plugin& p, int index)
     {
         o->setProperty ("neural", n->describe());
         o->setProperty ("labMode", n->isLabMode());
+    }
+
+    // Sampler pads (Stage 14): the drum-rack panel needs the loaded sounds.
+    if (auto* sp = dynamic_cast<te::SamplerPlugin*> (&p))
+    {
+        Array<var> sounds;
+        for (int i = 0; i < sp->getNumSounds(); ++i)
+        {
+            auto* so = new DynamicObject();
+            so->setProperty ("name", sp->getSoundName (i));
+            so->setProperty ("keyNote", sp->getKeyNote (i));
+            so->setProperty ("minNote", sp->getMinKey (i));
+            so->setProperty ("maxNote", sp->getMaxKey (i));
+            sounds.add (var (so));
+        }
+        o->setProperty ("sounds", sounds);
     }
 
     juce::Array<var> params;
@@ -1219,6 +1454,15 @@ juce::var MoshOps::snapshot()
     session->setProperty ("sampleRate", eng.engine().getDeviceManager().getSampleRate());
     session->setProperty ("tempo", edit.tempoSequence.getBpmAt (tracktion::TimePosition()));
     session->setProperty ("editFile", eng.editFile().getFullPathName());
+
+    // Stage 14: device truth in the UI (rung 1's silence was a BlackHole
+    // default output nobody could see).
+    session->setProperty ("hasAudio", eng.hasAudio());
+    session->setProperty ("audioOutputDevice", eng.currentAudioOutputDevice());
+    if (eng.audioDeviceWarning().isNotEmpty())
+        session->setProperty ("audioWarning", eng.audioDeviceWarning());
+    if (eng.audioDeviceError().isNotEmpty())
+        session->setProperty ("audioError", eng.audioDeviceError());
 
     // Stage 7: musical context (tempo map start, key, sections).
     auto& timeSig = edit.tempoSequence.getTimeSigAt (tracktion::TimePosition());
@@ -1270,12 +1514,13 @@ juce::var MoshOps::trackToVar (te::AudioTrack& t, int index)
     o->setProperty ("type", "audio");
     o->setProperty ("clips", clips);
 
-    // Plugin chain (Stage 3). Indexed within pluginList (built-ins included).
+    // Plugin chain (Stage 3), in VISIBLE-index space (Stage 14): the meter tap
+    // is observability, not a device — it never appears and never occupies an
+    // index, so these indices round-trip through every plugin command.
     juce::Array<var> plugins;
-    auto pl = t.pluginList.getPlugins();
-    for (int i = 0; i < pl.size(); ++i)
-        if (pl[i] != nullptr)
-            plugins.add (pluginToVar (*pl[i], i));
+    auto vis = visiblePlugins (t);
+    for (int i = 0; i < vis.size(); ++i)
+        plugins.add (pluginToVar (*vis[i], i));
     o->setProperty ("plugins", plugins);
 
     // Mixer state (Stage 2 mixer stub).
@@ -1310,8 +1555,27 @@ juce::var MoshOps::clipToVar (te::Clip& c)
         o->setProperty ("sourceFile", w->getCurrentSourceFile().getFullPathName());
         o->setProperty ("sourceLength", w->getSourceLength().inSeconds());
     }
-    else if (dynamic_cast<te::MidiClip*> (&c) != nullptr)
+    else if (auto* mc = dynamic_cast<te::MidiClip*> (&c))
+    {
         o->setProperty ("type", "midi");
+        // Notes inline (Stage 14): the clip preview + drum-rack step grid read
+        // these. Capped at 512 like the external-param cap — tutorial patterns
+        // are tiny; a full piano-roll fetch can become its own command later.
+        Array<var> notes;
+        int count = 0;
+        for (auto* n : mc->getSequence().getNotes())
+        {
+            if (n == nullptr) continue;
+            if (count++ >= 512) break;
+            auto* no = new DynamicObject();
+            no->setProperty ("pitch", n->getNoteNumber());
+            no->setProperty ("startBeats", n->getStartBeat().inBeats());
+            no->setProperty ("durBeats", n->getLengthBeats().inBeats());
+            no->setProperty ("vel", n->getVelocity());
+            notes.add (var (no));
+        }
+        o->setProperty ("notes", notes);
+    }
     else
         o->setProperty ("type", "clip");
 
@@ -1382,10 +1646,11 @@ te::Clip* MoshOps::findClip (const juce::String& id)
 
 te::Plugin* MoshOps::findPlugin (const juce::String& trackId, int index)
 {
+    // Visible-index space (Stage 14): the meter tap never occupies an index.
     auto* track = findTrack (trackId);
     if (track == nullptr) return nullptr;
-    auto plugins = track->pluginList.getPlugins();
-    return (index >= 0 && index < plugins.size()) ? plugins[index].get() : nullptr;
+    auto plugins = visiblePlugins (*track);
+    return (index >= 0 && index < plugins.size()) ? plugins[index] : nullptr;
 }
 
 te::MidiClip* MoshOps::findMidiClip (const juce::String& id)

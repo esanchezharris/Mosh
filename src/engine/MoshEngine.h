@@ -30,6 +30,17 @@ public:
     te::Edit&   edit()   { return *editPtr; }            // always fetch fresh (survives reload)
     bool        hasAudio() const { return audioOpen; }
     juce::String audioDeviceError() const { return audioError; }
+    juce::String audioDeviceWarning() const { return audioWarning; }
+
+    // ── audio output device control (Stage 14) ──
+    // Rung 1's GUI silence: the machine's default output was BlackHole (a
+    // virtual loopback sink) and Mosh inherited it silently. The product must
+    // show its device, allow switching, and never default to a pure sink.
+    juce::StringArray listAudioOutputDevices();
+    juce::String currentAudioOutputDevice();
+    /** Switch + persist as the machine-local preference. Returns "" on success. */
+    juce::String setAudioOutputDevice (const juce::String& name);
+    static bool looksLikeVirtualSink (const juce::String& deviceName);
 
     juce::File sessionDir() const { return session; }
     juce::File editFile()   const { return editPath; }
@@ -59,8 +70,12 @@ private:
     juce::File session;
     juce::File editPath;
     void applyRequestedAudioOutputDevice();
+    void applyPreferredOrSaneOutputDevice();  // env > persisted pref > sink policy
+    juce::String switchOutputDevice (const juce::String& name);   // "" on success
+    juce::File devicePrefFile() const;        // machine-local, never in the session
     bool       audioOpen = false;
     juce::String audioError;
+    juce::String audioWarning;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MoshEngine)
 };

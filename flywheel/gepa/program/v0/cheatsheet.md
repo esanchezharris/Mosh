@@ -42,10 +42,13 @@ Ids: you assign them (`t1`, `c1`, `d1`, `a1`, `bverb`); create before use.
 - device.add {device_id, track_id, role: synth|sampler|eq|comp|saturator|delay|reverb|limiter|filter|util, prefer?: ["Serum","builtin.synth"]}
   builtins: builtin.synth (4-osc) · builtin.sampler · builtin.eq · builtin.comp ·
   builtin.sat (the neural saturator) · builtin.delay · builtin.reverb · builtin.filter
-- device.load_sound {device_id, asset_id, key_note?: pitch, open_ended?: bool}
+- device.load_sound {device_id, asset_id, key_note?: pitch, min_note?, max_note?, open_ended?: bool}
   — load a resolved asset INTO a sampler (v0.2: a sampler with no sound is
   SILENT; resolve → add sampler → load_sound is the audible chain). key_note
   maps the sample's root to the pitch your notes use.
+  DRUM RACK recipe: ONE track + ONE builtin.sampler; one load_sound per drum
+  channel with min_note=max_note=key_note (e.g. kick D1, clap E1, hat F#1) so
+  pads never overlap; all lanes in ONE pattern clip. 808/melodic = own tracks.
 - device.set_param {device_id, param: "drive"|"cutoff"|... | <raw index>, value_norm: 0..1}
 - device.bypass {device_id, bypassed} · device.load_preset — UNSUPPORTED; avoid
 

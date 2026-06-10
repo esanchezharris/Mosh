@@ -234,12 +234,16 @@ juce::var MoshOps::cmdLoadBuiltin (const juce::var& args)
     auto plugin = eng.edit().getPluginCache().createNewPlugin (xmlType, {});
     if (plugin == nullptr) return errResult ("load_builtin_plugin", "create failed");
 
-    int index = (int) args.getProperty ("index", -1);
-    if (index < 0) index = track->pluginList.getPlugins().size();
-    track->pluginList.insertPlugin (plugin, index, nullptr);
+    const int vIndex = (int) args.getProperty ("index", -1);
+    auto vis = visiblePlugins (*track);
+    const int rawIndex = (vIndex < 0 || vIndex >= vis.size())
+                             ? track->pluginList.getPlugins().size()
+                             : track->pluginList.indexOf (vis[vIndex]);
+    track->pluginList.insertPlugin (plugin, rawIndex, nullptr);
+    ensureMeterLast (*track);
 
     auto* data = new DynamicObject();
-    data->setProperty ("index", track->pluginList.indexOf (plugin.get()));
+    data->setProperty ("index", visiblePluginIndex (*track, plugin.get()));
     data->setProperty ("pluginItemId", plugin->itemID.toString());
     data->setProperty ("type", type);
     logLine ("load_builtin_plugin", args, true, {}, true);
@@ -413,9 +417,10 @@ juce::var MoshOps::cmdAddSend (const juce::var& args)
     send->busNumber = bus;
     send->setGainDb ((float) (double) args.getProperty ("gainDb", 0.0));
     track->pluginList.insertPlugin (plugin, track->pluginList.getPlugins().size(), nullptr);
+    ensureMeterLast (*track);
 
     auto* data = new DynamicObject();
-    data->setProperty ("index", track->pluginList.indexOf (plugin.get()));
+    data->setProperty ("index", visiblePluginIndex (*track, plugin.get()));
     data->setProperty ("busNumber", bus);
     logLine ("add_send", args, true, {}, true);
     emitSnapshotInvalidated();
@@ -436,9 +441,10 @@ juce::var MoshOps::cmdAddReturn (const juce::var& args)
     ret->busNumber = bus;
     // Returns must sit BEFORE the track's volume plugin to feed the fader.
     track->pluginList.insertPlugin (plugin, 0, nullptr);
+    ensureMeterLast (*track);
 
     auto* data = new DynamicObject();
-    data->setProperty ("index", track->pluginList.indexOf (plugin.get()));
+    data->setProperty ("index", visiblePluginIndex (*track, plugin.get()));
     data->setProperty ("busNumber", bus);
     logLine ("add_return", args, true, {}, true);
     emitSnapshotInvalidated();

@@ -7,6 +7,10 @@ import type {
 
 export type Tool = "move" | "split";
 export type Peaks = [number, number][];
+// Musical snap divisions (Stage 14): seconds are derived from the snapshot's
+// tempo/time-sig at snap time — the grid is musical, the wire stays seconds.
+export type SnapDiv = "bar" | "1/2" | "1/4" | "1/8" | "1/16" | "1/16T";
+export const SNAP_DIVS: SnapDiv[] = ["bar", "1/2", "1/4", "1/8", "1/16", "1/16T"];
 
 type State = {
   snapshot: Snapshot | null;
@@ -18,7 +22,7 @@ type State = {
   pxPerSec: number;
   tool: Tool;
   snap: boolean;
-  snapGrid: number; // seconds
+  snapDiv: SnapDiv;
   selection: Set<string>;
   peaks: Record<string, Peaks>;
 
@@ -38,8 +42,12 @@ type State = {
   setPxPerSec: (v: number) => void;
   setTool: (t: Tool) => void;
   setSnap: (b: boolean) => void;
+  setSnapDiv: (d: SnapDiv) => void;
   select: (ids: string[], additive?: boolean) => void;
   clearSelection: () => void;
+  secsPerBeat: () => number;
+  beatsPerBar: () => number;
+  snapSeconds: () => number; // the current snap division, in seconds
   snapTime: (t: number) => number;
   ensurePeaks: (clipId: string) => void;
 
@@ -61,7 +69,7 @@ export const useStore = create<State>((set, get) => ({
   pxPerSec: 80,
   tool: "move",
   snap: true,
-  snapGrid: 0.25,
+  snapDiv: "1/16",
   selection: new Set<string>(),
   peaks: {},
   selectedTrackId: null,
@@ -121,6 +129,7 @@ export const useStore = create<State>((set, get) => ({
   setPxPerSec: (v) => set({ pxPerSec: Math.max(20, Math.min(400, v)) }),
   setTool: (t) => set({ tool: t }),
   setSnap: (b) => set({ snap: b }),
+  setSnapDiv: (d) => set({ snapDiv: d }),
   select: (ids, additive = false) =>
     set((s) => {
       const next = new Set(additive ? s.selection : []);
@@ -128,9 +137,28 @@ export const useStore = create<State>((set, get) => ({
       return { selection: next };
     }),
   clearSelection: () => set({ selection: new Set<string>() }),
+  secsPerBeat: () => 60 / (get().snapshot?.session.tempo || 120),
+  beatsPerBar: () => {
+    const s = get().snapshot?.session;
+    // Beats here are quarter notes (the engine's beat unit); a 4/4 bar is 4.
+    return ((s?.timeSigNumerator || 4) * 4) / (s?.timeSigDenominator || 4);
+  },
+  snapSeconds: () => {
+    const spb = get().secsPerBeat();
+    switch (get().snapDiv) {
+      case "bar": return spb * get().beatsPerBar();
+      case "1/2": return spb * 2;
+      case "1/4": return spb;
+      case "1/8": return spb / 2;
+      case "1/16T": return spb / 6;
+      default: return spb / 4; // 1/16
+    }
+  },
   snapTime: (t) => {
-    const { snap, snapGrid } = get();
-    return snap ? Math.round(t / snapGrid) * snapGrid : t;
+    const { snap } = get();
+    if (!snap) return t;
+    const g = get().snapSeconds();
+    return Math.round(t / g) * g;
   },
 
   ensurePeaks: (clipId) => {

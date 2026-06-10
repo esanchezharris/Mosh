@@ -22,10 +22,10 @@
    "l2": 1.0,
    "l4": 5.0,
    "grade": "silver",
-   "bounce_peak_dbfs": 0.0,
+   "bounce_peak_dbfs": -2.5,
    "delta_attempt_vs_corrected": {
-    "entity_f1": 0.5263,
-    "magnitude": 0.2665,
+    "entity_f1": 0.5882,
+    "magnitude": 0.3011,
     "detail": {
      "attempt_tags": {
       "tempo_changed": 1,
@@ -40,23 +40,27 @@
      "oracle_tags": {
       "tempo_changed": 1,
       "section_added": 0,
-      "track_added": 4,
-      "device_added:sampler": 4,
-      "clip_added:midi": 4,
+      "track_added": 2,
+      "device_added:sampler": 2,
+      "device_added:volume": 2,
+      "clip_added:midi": 2,
       "clip_added:wave": 0,
       "notes_changed": 1,
-      "automation_added": 0
+      "params_changed": 1,
+      "automation_added": 0,
+      "mixer_moved": 1
      },
      "magnitude_dims": [
       0.333,
       0.289,
       0.195,
-      0.281,
-      0.25,
-      0.25
+      0.289,
+      0.0,
+      0.5,
+      0.5
      ]
     },
-    "composite": 0.4094
+    "composite": 0.459
    },
    "corrections": [
     {
@@ -72,7 +76,7 @@
     {
      "root_cause": "inference",
      "what": "single-track pitch-lane drums diverged from the screen's 4-channel rack; duplicate set_tempo re-emitted; notes beyond clip length",
-     "lesson": "mirror the visible channel structure (one track per rack channel); never re-emit ops in the session summary; notes must fit the clip"
+     "lesson": "SUPERSEDED (S14): drums = ONE native drum-rack track (one sampler, key-ranged pads, one pattern clip); 808/melodic = own tracks. Never re-emit ops in the session summary; notes must fit the clip"
     },
     {
      "root_cause": "vocabulary",
@@ -98,10 +102,15 @@
      "root_cause": "corrector-ear",
      "what": "Emilio's grid corrections: kick channel plays NO steps (loaded but unused) and the 32nd hat roll was demoed, not kept \u2014 the corrector ALSO over-included demonstrated material",
      "lesson": "demo-vs-kept applies to the corrector too; the human ear is the final arbiter \u2014 exactly why Claude-corrected caps at silver until sign-off. 808/clap/hat placements confirmed unchanged."
+    },
+    {
+     "root_cause": "convention",
+     "what": "replication built 4 separate sampler tracks; Emilio: drums belong together on a native drum rack, 808 separate",
+     "lesson": "drum-rack convention: one track + one builtin.sampler + one device.load_sound per channel with min_note=max_note=key_note (pads never overlap), all lanes in one pattern clip; the FL channel rack maps to PADS, not tracks"
     }
    ],
    "traj_id": "tut-trap-03-corrected"
   },
-  "corrected_ts": 1781101794
+  "corrected_ts": 1781108036
  }
 }

@@ -279,9 +279,15 @@ String stateProjection (te::Edit& edit)
 
         c.key ("plugins"); c.openArr();
         auto plugins = t->pluginList.getPlugins();
+        int pi = 0;
         for (int i = 0; i < plugins.size(); ++i)
         {
-            if (i > 0) c.comma();
+            // The Stage-14 meter tap is observability, not musical state — a
+            // plugin that cannot change sound must not change the hash (old
+            // sessions lack it, every new track gains it).
+            if (plugins[i]->getPluginType() == te::LevelMeterPlugin::xmlTypeName)
+                continue;
+            if (pi++ > 0) c.comma();
             writePlugin (c, *plugins[i]);
         }
         c.closeArr(); c.comma();

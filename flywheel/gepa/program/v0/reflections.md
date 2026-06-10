@@ -32,3 +32,10 @@ imperative lesson per line. Human-auditable; prune when a lesson stops paying.
 - Demo-vs-kept needs FINAL-state verification: an element shown being built
   (a roll, an extra channel) only counts if it survives to the final screen/
   pattern — when in doubt, check the last frames, not the excited narration.
+- Drum-rack convention: drums live on ONE track — one builtin.sampler, one
+  device.load_sound per channel with min_note=max_note=key_note (pads never
+  overlap), all lanes in ONE pattern clip. An FL channel rack maps to PADS on
+  that track, not to separate tracks. Only the 808 / melodic parts get their
+  own tracks.
+- A sampler with no device.load_sound is SILENT — resolve → load_sound is part
+  of every drum channel, never optional.

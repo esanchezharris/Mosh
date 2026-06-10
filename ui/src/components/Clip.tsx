@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
 import type { Clip as ClipT } from "../types";
 import { Waveform } from "./Waveform";
+import { MidiNotePreview } from "./MidiNotePreview";
 
 type Pos = { start: number; length: number; offset: number };
 type DragKind = "move" | "trim-l" | "trim-r" | null;
@@ -17,6 +18,7 @@ export function Clip({ clip }: { clip: ClipT }) {
   const selected = useStore((s) => s.selection.has(clip.id));
   const select = useStore((s) => s.select);
   const peaks = useStore((s) => s.peaks[clip.id]);
+  const secsPerBeat = useStore((s) => s.secsPerBeat);
 
   // Optimistic preview while dragging; cleared when committed props arrive.
   const [preview, setPreview] = useState<Pos | null>(null);
@@ -98,14 +100,23 @@ export function Clip({ clip }: { clip: ClipT }) {
       title={`${clip.name} · ${pos.length.toFixed(2)}s`}
     >
       <div className="clip-wave">
-        <Waveform
-          peaks={peaks}
-          width={Math.max(1, width - 2)}
-          height={LANE_H - CLIP_PAD * 2 - 16}
-          offsetFrac={offsetFrac}
-          lengthFrac={lengthFrac}
-          color="rgba(255,255,255,0.85)"
-        />
+        {clip.type === "midi" ? (
+          <MidiNotePreview
+            notes={clip.notes ?? []}
+            lengthBeats={Math.max(0.25, pos.length / secsPerBeat())}
+            width={Math.max(1, width - 2)}
+            height={LANE_H - CLIP_PAD * 2 - 16}
+          />
+        ) : (
+          <Waveform
+            peaks={peaks}
+            width={Math.max(1, width - 2)}
+            height={LANE_H - CLIP_PAD * 2 - 16}
+            offsetFrac={offsetFrac}
+            lengthFrac={lengthFrac}
+            color="rgba(255,255,255,0.85)"
+          />
+        )}
       </div>
       <span className="clip-name">{clip.name}</span>
       {clip.hasRenderLayer && <span className="rl-badge">RL</span>}

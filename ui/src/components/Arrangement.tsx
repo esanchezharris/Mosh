@@ -1,17 +1,47 @@
 import { useRef, useState } from "react";
-import { useStore } from "../store";
+import { useStore, SNAP_DIVS, type SnapDiv } from "../store";
 import type { Snapshot, Track } from "../types";
 import { Clip } from "./Clip";
 
 const LANE_H = 84;
 const RULER_SECONDS = 48;
 
+// Musical ruler ticks (Stage 14): bars always; beats and 16ths appear as zoom
+// allows. Everything is derived from the snapshot's tempo/time-sig — the
+// second-based ruler never matched a 160 BPM session.
+function rulerTicks(pxPerSec: number, spb: number, bpb: number) {
+  const barSec = spb * bpb;
+  const pxPerBar = barSec * pxPerSec;
+  const showBeats = pxPerBar > 64;
+  const showSixteenths = spb * pxPerSec > 56;
+  const ticks: { left: number; kind: "bar" | "beat" | "sub"; label?: string }[] = [];
+  const totalBars = Math.ceil(RULER_SECONDS / barSec);
+  for (let b = 0; b < totalBars; b++) {
+    ticks.push({ left: b * pxPerBar, kind: "bar", label: String(b + 1) });
+    if (!showBeats) continue;
+    for (let k = 0; k < bpb; k++) {
+      if (k > 0) ticks.push({ left: (b * bpb + k) * spb * pxPerSec, kind: "beat" });
+      if (!showSixteenths) continue;
+      for (let s = 1; s < 4; s++)
+        ticks.push({ left: (b * bpb + k + s / 4) * spb * pxPerSec, kind: "sub" });
+    }
+  }
+  return ticks;
+}
+
 export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
   const pxPerSec = useStore((s) => s.pxPerSec);
   const exec = useStore((s) => s.exec);
   const clearSelection = useStore((s) => s.clearSelection);
   const select = useStore((s) => s.select);
+  const secsPerBeat = useStore((s) => s.secsPerBeat);
+  const beatsPerBar = useStore((s) => s.beatsPerBar);
   const t = snapshot.transport;
+  const spb = secsPerBeat();
+  const bpb = beatsPerBar();
+  const ticks = rulerTicks(pxPerSec, spb, bpb);
+  const barPx = spb * bpb * pxPerSec;
+  const beatPx = spb * pxPerSec;
   const lanesRef = useRef<HTMLDivElement>(null);
   const [marquee, setMarquee] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const loopDrag = useRef<number | null>(null);
@@ -89,9 +119,9 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
             onPointerMove={onRulerMove}
             onPointerUp={onRulerUp}
           >
-            {Array.from({ length: RULER_SECONDS }, (_, i) => (
-              <div className="tick" key={i} style={{ left: i * pxPerSec }}>
-                <span>{i}</span>
+            {ticks.map((tk, i) => (
+              <div className={`tick ${tk.kind}`} key={i} style={{ left: tk.left }}>
+                {tk.label && <span>{tk.label}</span>}
               </div>
             ))}
             {t.looping && t.loopEnd > t.loopStart && (
@@ -113,7 +143,14 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
           <div
             className="lanes"
             ref={lanesRef}
-            style={{ width: RULER_SECONDS * pxPerSec, height: Math.max(LANE_H, snapshot.tracks.length * LANE_H) }}
+            style={{
+              width: RULER_SECONDS * pxPerSec,
+              height: Math.max(LANE_H, snapshot.tracks.length * LANE_H),
+              // Tempo-true vertical grid: faint beats, stronger bars.
+              backgroundImage:
+                `repeating-linear-gradient(90deg, var(--grid-beat) 0 1px, transparent 1px ${beatPx}px),` +
+                `repeating-linear-gradient(90deg, var(--grid-bar) 0 1px, transparent 1px ${barPx}px)`,
+            }}
             onPointerDown={onLanesDown}
             onPointerMove={onLanesMove}
             onPointerUp={onLanesUp}
@@ -153,6 +190,8 @@ function Toolbar() {
   const setTool = useStore((s) => s.setTool);
   const snap = useStore((s) => s.snap);
   const setSnap = useStore((s) => s.setSnap);
+  const snapDiv = useStore((s) => s.snapDiv);
+  const setSnapDiv = useStore((s) => s.setSnapDiv);
   const pxPerSec = useStore((s) => s.pxPerSec);
   const setPxPerSec = useStore((s) => s.setPxPerSec);
 
@@ -165,6 +204,16 @@ function Toolbar() {
       <button className={tool === "move" ? "on" : ""} onClick={() => setTool("move")}>Move</button>
       <button className={tool === "split" ? "on" : ""} onClick={() => setTool("split")}>Split</button>
       <button className={snap ? "on" : ""} onClick={() => setSnap(!snap)}>Snap</button>
+      <select
+        className="snap-div"
+        value={snapDiv}
+        onChange={(e) => setSnapDiv(e.target.value as SnapDiv)}
+        title="Snap grid (musical)"
+      >
+        {SNAP_DIVS.map((d) => (
+          <option key={d} value={d}>{d}</option>
+        ))}
+      </select>
       <span className="sep" />
       <button onClick={() => setPxPerSec(pxPerSec / 1.4)}>Zoom −</button>
       <button onClick={() => setPxPerSec(pxPerSec * 1.4)}>Zoom +</button>
@@ -182,7 +231,10 @@ function TrackHeader({ track }: { track: Track }) {
   const exec = useStore((s) => s.exec);
   const selectedTrackId = useStore((s) => s.selectedTrackId);
   const setSelectedTrack = useStore((s) => s.setSelectedTrack);
+  const level = useStore((s) => s.snapshot?.transport.levels?.tracks?.[track.id]);
   const fxCount = (track.plugins ?? []).filter((p) => p.external || p.neural).length;
+  const db = level ? Math.max(level[0], level[1]) : -100;
+  const meterPct = Math.max(0, Math.min(1, (db + 60) / 60)) * 100;
   return (
     <div
       className={`track-head ${selectedTrackId === track.id ? "sel" : ""}`}
@@ -211,6 +263,13 @@ function TrackHeader({ track }: { track: Track }) {
           step={0.5}
           value={track.volumeDb ?? 0}
           onChange={(e) => exec("set_track_volume", { trackId: track.id, db: Number(e.target.value) })}
+        />
+      </div>
+      {/* Engine-output meter (Stage 14) — fed by the 30 Hz transport event. */}
+      <div className="tmeter">
+        <span
+          className={db > -1 ? "hot" : db > -9 ? "warm" : ""}
+          style={{ width: `${meterPct}%` }}
         />
       </div>
     </div>

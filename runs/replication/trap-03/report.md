@@ -74,3 +74,39 @@ water-drop perc outranked every clap) — tiebreak, not oracle.
 
 **Listen:** loop `bounce-corrected.wav` (one 2-bar cycle at 160) against the
 video's pattern sections (~10:00 for the bounce, ~15:30 for the rolls).
+
+
+## Round 3 — "use mosh, that's the whole point" → Stage 14 hardening
+
+Emilio reviewed IN THE APP and four product truths failed at once. Each was
+root-caused with new instrumentation, not guessed at:
+
+1. **Silence**: the Mac's default output was **BlackHole 2ch** (a virtual
+   loopback sink — no speakers) and Mosh inherited it invisibly. Found by the
+   new engine-output level tap: the graph measured −12 dBFS while the speakers
+   got nothing. Fixes: never default to a pure virtual sink; the output device
+   is now visible + switchable in the topbar (machine-local, never synced);
+   master + per-track meters ship in the 30 Hz feed. Two more latent bugs fell
+   out of the same gate: the deferred MIDI-device scan could KILL the first
+   play after launch (now settled at startup), and a meter-client UAF on edit
+   reload (guard-malloc-proven, fixed via refcounted plugin handles).
+2. **Grid**: the ruler ticked in SECONDS and snap was a hardcoded 0.25s — at
+   160 BPM nothing could align. Now: bars.beats ruler with zoom-aware
+   beat/16th ticks, tempo-true lane gridlines, musical snap (default 1/16).
+3. **Invisible MIDI**: clips now carry their notes in the snapshot and render
+   them as velocity-shaded note blocks.
+4. **Drum rack**: 4 separate sampler tracks → ONE native rack (one sampler,
+   key-ranged pads: hat F#1 · clap E1 · kick D1) + the 808 on its own track,
+   exactly as Emilio specified — with an FL-style **step sequencer** in the
+   app (click cycles hit → accent → off; every click is a recorded command).
+   `corrected-steps.json` restructured to the rack convention (19 ops + a
+   measured −6 dB headroom step: the old sum overshot full scale by ~3.5 dB).
+
+Re-scored after restructure: **L1 ✓ · L2 = 1.0 · judge 5.0 · silver
+(gold-candidate) · bounce −2.5 dBFS**. Program re-taught: rack-convention
+lesson + audible-chain rule in reflections, drum-rack recipe in the
+cheatsheet, the drums exemplar now models the full resolve→load_sound chain.
+
+**Review**: `python3 -m flywheel.replicate.ladder open trap-03` → press play
+(grid at 160, notes visible, rack steps clickable, meters moving) — or loop
+`~/Desktop/mosh-listen/trap-03.wav`.

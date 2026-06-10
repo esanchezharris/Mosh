@@ -15,6 +15,8 @@
   --playhead: #ff5c7a;
   --head-w: 168px;
   --lane-h: 84px;
+  --grid-bar: rgba(255, 255, 255, 0.14);
+  --grid-beat: rgba(255, 255, 255, 0.05);
   font-synthesis: none;
 }
 /* Two-theme system — shared design tokens (Stage 6). Dark is default; light
@@ -28,6 +30,8 @@
   --muted: #6a6a78;
   --clip: #3b6fe0;
   --clip-2: #2a52b8;
+  --grid-bar: rgba(0, 0, 0, 0.16);
+  --grid-beat: rgba(0, 0, 0, 0.06);
 }
 
 * { box-sizing: border-box; }
@@ -113,6 +117,39 @@ button.on { border-color: var(--accent); color: var(--accent); background: #2120
 .tbtn.stop { color: var(--playhead); }
 .tbtn.toggle.on { border-color: var(--accent); color: var(--accent); background: #21203a; }
 .pos { margin-left: 0.5rem; font-variant-numeric: tabular-nums; font-size: 1rem; color: var(--muted); min-width: 76px; text-align: right; }
+.pos-bars { margin-left: 0.6rem; font-variant-numeric: tabular-nums; font-size: 1rem; font-weight: 700; color: var(--text); min-width: 42px; text-align: right; }
+.bpm { font-size: 0.74rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* Engine-output meters (Stage 14) — 30 Hz transport-event levels. */
+.mmeter {
+  width: 72px; height: 8px; border-radius: 4px; overflow: hidden;
+  background: var(--panel-2); border: 1px solid var(--line); display: inline-block;
+}
+.mmeter > span, .tmeter > span {
+  display: block; height: 100%; background: var(--ok);
+  transition: width 60ms linear;
+}
+.mmeter > span.warm, .tmeter > span.warm { background: var(--warn); }
+.mmeter > span.hot, .tmeter > span.hot { background: var(--playhead); }
+.tmeter {
+  height: 4px; border-radius: 2px; overflow: hidden;
+  background: var(--panel-2); border: 1px solid var(--line);
+}
+
+/* Audio-output device picker (Stage 14). */
+.audio-out { display: inline-flex; align-items: center; gap: 4px; }
+.ao-select {
+  font: inherit; font-size: 0.72rem; color: var(--muted); background: var(--panel-2);
+  border: 1px solid var(--line); border-radius: 7px; padding: 0.25rem 0.35rem; max-width: 150px;
+}
+.audio-out.warned .ao-select { border-color: var(--warn); color: var(--warn); }
+.ao-warn { color: var(--warn); }
+
+/* Musical snap division select (Stage 14). */
+.snap-div {
+  font: inherit; font-size: 0.78rem; color: var(--text); background: var(--panel-2);
+  border: 1px solid var(--line); border-radius: 7px; padding: 0.25rem 0.35rem;
+}
 
 .error-bar { background: #3a1320; color: var(--warn); padding: 0.4rem 1rem; border-bottom: 1px solid var(--line); font-size: 0.85rem; }
 
@@ -132,7 +169,11 @@ button.on { border-color: var(--accent); color: var(--accent); background: #2120
   color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; background: var(--panel);
 }
 .ruler { position: relative; height: 30px; cursor: text; }
+/* Musical tick hierarchy (Stage 14): bars > beats > 16ths. */
 .tick { position: absolute; top: 0; height: 100%; border-left: 1px solid var(--line); }
+.tick.bar { border-left: 1px solid var(--muted); }
+.tick.beat { top: 12px; height: 18px; opacity: 0.7; }
+.tick.sub { top: 22px; height: 8px; opacity: 0.35; }
 .tick span { position: absolute; left: 4px; top: 2px; font-size: 0.68rem; color: var(--muted); }
 .loopregion { position: absolute; top: 0; height: 100%; background: rgba(108,92,255,0.22); border-left: 2px solid var(--accent); border-right: 2px solid var(--accent); }
 
@@ -148,8 +189,9 @@ button.on { border-color: var(--accent); color: var(--accent); background: #2120
 .mixbtn.solo-on { background: #5a4d12; color: var(--warn); border-color: #7a6a2a; }
 .vol { flex: 1; accent-color: var(--accent); height: 4px; }
 
-.lanes { position: relative; background:
-  repeating-linear-gradient(90deg, transparent 0, transparent calc(var(--lane-h) - 1px), var(--line) calc(var(--lane-h) - 1px), var(--line) var(--lane-h)); }
+/* The vertical time grid is tempo-derived and set inline by Arrangement
+   (Stage 14) — the old fixed-84px gradient drew lines unrelated to the BPM. */
+.lanes { position: relative; }
 .empty-hint { padding: 2rem; color: var(--muted); }
 .lane { position: absolute; left: 0; right: 0; border-bottom: 1px solid var(--line); }
 
@@ -260,5 +302,31 @@ button.on { border-color: var(--accent); color: var(--accent); background: #2120
 .gen-actions { display: flex; flex-wrap: wrap; gap: 4px; }
 .gen-actions button { padding: 0.2rem 0.5rem; font-size: 0.74rem; }
 .gen-actions button:disabled { opacity: 0.4; cursor: default; }
+
+/* Drum rack step sequencer (Stage 14): pads × 16th steps, FL-style. */
+.drumrack {
+  min-width: 300px; max-width: 46%; border-left: 1px solid var(--line);
+  padding: 0.5rem 0.8rem; display: flex; flex-direction: column; gap: 6px; overflow: auto;
+  background: linear-gradient(180deg, #162020, var(--panel));
+}
+.dr-title { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ok); display: flex; align-items: baseline; gap: 8px; }
+.dr-title b { color: var(--text); }
+.dr-hint { margin-left: auto; font-size: 0.62rem; color: var(--muted); text-transform: none; letter-spacing: 0; }
+.dr-grid { display: flex; flex-direction: column; gap: 3px; }
+.dr-row { display: flex; align-items: center; gap: 6px; }
+.dr-pad {
+  width: 96px; min-width: 96px; font-size: 0.66rem; color: var(--muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.dr-steps { display: flex; gap: 2px; }
+.dr-cell {
+  width: 16px; height: 18px; padding: 0; border-radius: 3px;
+  background: var(--panel-2); border: 1px solid var(--line);
+}
+.dr-cell.beat { border-color: #3a3a46; }
+.dr-cell.bar { border-color: var(--muted); }
+.dr-cell.s1 { background: var(--ok); border-color: var(--ok); }
+.dr-cell.s2 { background: var(--warn); border-color: var(--warn); box-shadow: 0 0 5px var(--warn); }
+.dr-cell:hover { border-color: var(--accent); }
 
 .boot { padding: 3rem; color: var(--muted); }

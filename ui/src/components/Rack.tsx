@@ -1,6 +1,7 @@
 import { useStore } from "../store";
 import type { Snapshot, Plugin } from "../types";
 import { GenPanel } from "./GenPanel";
+import { DrumRackPanel, trackHasRack } from "./DrumRackPanel";
 
 // The plugin rack for the selected track (Stage 3). Every action is a MoshOps
 // command: load/remove/reorder/bypass/open_plugin_editor.
@@ -56,6 +57,8 @@ export function Rack({ snapshot }: { snapshot: Snapshot }) {
         )}
       </div>
       </div>
+      {/* FL-style step sequencer over the track's sampler pads (Stage 14). */}
+      {trackHasRack(track) && <DrumRackPanel track={track} />}
       {track && <GenPanel track={track} />}
     </div>
   );

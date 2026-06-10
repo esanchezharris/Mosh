@@ -886,6 +886,63 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     else
         std::cerr << "  ..   (SA3 self-test skipped — set MOSH_SELFTEST_SA3=1 to exercise the real model)\n";
 
+    // --- Stage 14: playable-instrument hardening (snapshot truth + meters) ---
+    {
+        std::cerr << "--- Stage 14: musical snapshot + meter transparency + drum rack ---\n";
+        auto t14 = cmd (ops, "create_track", args1 ("name", "Rack14"));
+        const auto t14id = t14["data"].getProperty ("trackId", var()).toString();
+
+        // One sampler, two key-ranged pads (the drum-rack convention).
+        auto lb = cmd (ops, "load_builtin_plugin", objN ({{ "trackId", t14id }, { "type", "sampler" }}));
+        check (ok (lb), "rack sampler loads");
+        const int samplerIdx = (int) lb["data"].getProperty ("index", -1);
+        check (samplerIdx == 0, "sampler lands at VISIBLE index 0 (meter tap occupies no index)");
+        auto pad = eng.generateTestTone (0.2, 200.0, "pad14");
+        check (ok (cmd (ops, "add_sampler_sound", objN ({{ "trackId", t14id }, { "index", samplerIdx },
+                        { "file", pad.getFullPathName() }, { "keyNote", 26 }, { "minNote", 26 }, { "maxNote", 26 }}))),
+               "pad 1 (key-ranged) loads");
+        check (ok (cmd (ops, "add_sampler_sound", objN ({{ "trackId", t14id }, { "index", samplerIdx },
+                        { "file", pad.getFullPathName() }, { "keyNote", 28 }, { "minNote", 28 }, { "maxNote", 28 }}))),
+               "pad 2 (key-ranged) loads");
+
+        auto mc14 = cmd (ops, "add_midi_clip", objN ({{ "trackId", t14id }, { "name", "pat14" },
+                        { "start", 0.0 }, { "length", 2.0 }, { "notes", Array<var>() }}));
+        const auto c14 = mc14["data"].getProperty ("clipId", var()).toString();
+        Array<var> n14; { auto* n = new DynamicObject(); n->setProperty ("pitch", 26);
+            n->setProperty ("startBeats", 0.0); n->setProperty ("durBeats", 0.25); n->setProperty ("vel", 96); n14.add (var (n)); }
+        check (ok (cmd (ops, "add_notes", objN ({{ "clipId", c14 }, { "notes", n14 }}))), "step note lands");
+
+        auto snap14 = ops.snapshot();
+        check (snap14["session"].hasProperty ("timeSigNumerator"), "snapshot carries time signature");
+        check (snap14["session"].hasProperty ("audioOutputDevice"), "snapshot carries the audio output device");
+        var rackTrack;
+        for (auto& tv : *snap14["tracks"].getArray())
+            if (tv.getProperty ("id", var()).toString() == t14id) rackTrack = tv;
+        bool meterListed = false;
+        var samplerVar;
+        for (auto& pv : *rackTrack["plugins"].getArray())
+        {
+            if (pv.getProperty ("type", var()).toString() == "level") meterListed = true;
+            if (pv.getProperty ("sounds", var()).isArray()) samplerVar = pv;
+        }
+        check (! meterListed, "meter tap is invisible in the snapshot rack");
+        check (samplerVar.getProperty ("sounds", var()).size() == 2, "snapshot lists both sampler pads");
+        check ((int) samplerVar["sounds"][0].getProperty ("keyNote", 0) == 26, "pad key mapping in snapshot");
+        var clipVar = rackTrack["clips"][0];
+        check (clipVar.getProperty ("notes", var()).size() == 1, "MIDI clip notes ride the snapshot");
+        check ((int) clipVar["notes"][0].getProperty ("pitch", 0) == 26, "note pitch round-trips");
+
+        // The rack's remove-then-add step cycle (what a sequencer click does).
+        check (ok (cmd (ops, "remove_notes", objN ({{ "clipId", c14 }, { "pitches", Array<var> (var (26)) },
+                        { "rangeStartBeats", -0.001 }, { "rangeLengthBeats", 0.002 }}))), "step toggle removes");
+        auto snap15 = ops.snapshot();
+        for (auto& tv : *snap15["tracks"].getArray())
+            if (tv.getProperty ("id", var()).toString() == t14id) rackTrack = tv;
+        check (rackTrack["clips"][0].getProperty ("notes", var()).size() == 0, "step removal lands in the snapshot");
+
+        check (ok (cmd (ops, "remove_track", args1 ("trackId", t14id))), "rack track cleanup");
+    }
+
     std::cerr << "===== " << (checks - failures) << "/" << checks
               << " checks passed, " << failures << " failed =====\n\n";
     return failures;
@@ -960,6 +1017,40 @@ int runLiveAudioSmoke (MoshEngine& eng, MoshOps& ops)
             check (device->getName().equalsIgnoreCase (requested), "current output matches MOSH_AUDIO_OUTPUT_DEVICE");
     }
 
+    auto* mm = MessageManager::getInstanceWithoutCreating();
+
+    // Engine-output truth (Stage 14): a LevelMeasurer client on the master tap
+    // measures what the GRAPH produces, independent of speakers/device routing.
+    // Engine-out signal + silent speakers ⇒ device problem; engine-out silence
+    // ⇒ live-graph bug. This is the bisection the rung-1 silence lacked.
+    auto masterMeter = [&]() -> te::LevelMeterPlugin*
+    {
+        return eng.edit().getMasterPluginList().getPluginsOfType<te::LevelMeterPlugin>().getLast();
+    };
+    check (masterMeter() != nullptr, "master level tap present");
+
+    auto pumpPeakDb = [&] (te::LevelMeasurer::Client& client, int ms) -> float
+    {
+        float peak = -100.0f;
+        const auto until = Time::getMillisecondCounter() + (uint32) ms;
+        while (Time::getMillisecondCounter() < until)
+        {
+            if (mm != nullptr) mm->runDispatchLoopUntil (30);
+            else Thread::sleep (30);
+            for (int ch = 0; ch < 2; ++ch)
+                peak = jmax (peak, client.getAndClearAudioLevel (ch).dB);
+        }
+        return peak;
+    };
+
+    te::LevelMeasurer::Client tapClient;
+    if (auto* m0 = masterMeter())
+        m0->measurer.addClient (tapClient);
+
+    auto smokeMs = SystemStats::getEnvironmentVariable ("MOSH_LIVE_AUDIO_SMOKE_MS", "3500").getIntValue();
+    smokeMs = jlimit (500, 15000, smokeMs);
+
+    // ── Phase A: tone through a wave clip (the only previously-proven path) ──
     auto track = cmd (ops, "create_track", args1 ("name", "Live Smoke"));
     check (ok (track), "create_track ok");
     const auto trackId = track["data"].getProperty ("trackId", var()).toString();
@@ -974,18 +1065,11 @@ int runLiveAudioSmoke (MoshEngine& eng, MoshOps& ops)
 
     LiveAudioProbe probe;
     deviceManager.addAudioCallback (&probe);
-
-    auto* mm = MessageManager::getInstanceWithoutCreating();
-    auto smokeMs = SystemStats::getEnvironmentVariable ("MOSH_LIVE_AUDIO_SMOKE_MS", "3500").getIntValue();
-    smokeMs = jlimit (500, 15000, smokeMs);
-    const auto end = Time::getMillisecondCounter() + (uint32) smokeMs;
-    while (Time::getMillisecondCounter() < end)
-    {
-        if (mm != nullptr) mm->runDispatchLoopUntil (50);
-        else Thread::sleep (50);
-    }
-
+    const auto tonePeak = pumpPeakDb (tapClient, smokeMs);
     deviceManager.removeAudioCallback (&probe);
+
+    std::cerr << "  ..   tone master peak " << tonePeak << " dBFS\n";
+    check (tonePeak > -30.0f, "tone audible at the master tap (live wave path)");
     check (probe.getCallbackCount() > 0, "live-audio probe callback ran");
     check (probe.getSampleCount() > 0, "live-audio probe observed audio frames");
     check (probe.getWrittenSampleCount() > 0, "live-audio probe had writable output channels");
@@ -995,6 +1079,102 @@ int runLiveAudioSmoke (MoshEngine& eng, MoshOps& ops)
         check (probe.getInputNonSilentSampleCount() > 0, "live-audio probe captured loopback input");
     }
     check (ok (cmd (ops, "set_transport", args1 ("action", "stop"))), "transport stop ok");
+
+    // The tone track must not pollute phases B/C — the sampler has to prove
+    // itself alone at the master tap.
+    check (ok (cmd (ops, "remove_track", args1 ("trackId", trackId))), "tone track removed");
+
+    // ── Phase B: MIDI → builtin sampler, fresh-built (rung 1's silent path) ──
+    auto t2 = cmd (ops, "create_track", args1 ("name", "Smoke Sampler"));
+    check (ok (t2), "sampler track ok");
+    const auto t2id = t2["data"].getProperty ("trackId", var()).toString();
+    check (ok (cmd (ops, "load_builtin_plugin", objN ({{ "trackId", t2id }, { "type", "sampler" }}))),
+           "load builtin sampler ok");
+    auto fixture = eng.generateTestTone (0.4, 330.0, "smoke-pad");
+    check (ok (cmd (ops, "add_sampler_sound",
+                   objN ({{ "trackId", t2id }, { "index", 0 },
+                          { "file", fixture.getFullPathName() },
+                          { "keyNote", 60 }, { "openEnded", true }}))),
+           "add_sampler_sound ok");
+    // Default add_midi_clip seeds a C-major arpeggio at pitch 60+ — exactly
+    // what the sampler is keyed to.
+    check (ok (cmd (ops, "add_midi_clip",
+                   objN ({{ "trackId", t2id }, { "name", "smoke notes" },
+                          { "start", 0.0 }, { "length", 2.0 }}))),
+           "add_midi_clip ok");
+    // Let the SamplerPlugin's AsyncUpdater (sound-list rebuild) and the
+    // playback-graph rebuild settle before playing — in the real GUI the
+    // message loop always runs between building and pressing play; commands
+    // issued back-to-back here would race the updater.
+    if (mm != nullptr) mm->runDispatchLoopUntil (300);
+
+    check (ok (cmd (ops, "set_transport", args1 ("position", 0.0))), "sampler seek ok");
+    check (ok (cmd (ops, "set_transport", args1 ("action", "play"))), "sampler play ok");
+
+    // The per-track tap must hear it too (it sits at the chain END, post-fader).
+    te::LevelMeasurer::Client trackClient;
+    auto* samplerTrack = te::findAudioTrackForID (eng.edit(), te::EditItemID::fromString (t2id));
+    auto* trackMeter = samplerTrack != nullptr
+                           ? samplerTrack->pluginList.getPluginsOfType<te::LevelMeterPlugin>().getLast()
+                           : nullptr;
+    check (trackMeter != nullptr, "sampler track has a level tap");
+    if (trackMeter != nullptr)
+        trackMeter->measurer.addClient (trackClient);
+
+    // Poll BOTH taps continuously — a single read at the end only sees the
+    // final block (silence, once the 2s clip has passed).
+    float samplerPeak = -100.0f, trackPeak = -100.0f;
+    const auto untilB = Time::getMillisecondCounter() + 2500u;
+    while (Time::getMillisecondCounter() < untilB)
+    {
+        if (mm != nullptr) mm->runDispatchLoopUntil (30);
+        else Thread::sleep (30);
+        for (int ch = 0; ch < 2; ++ch)
+        {
+            samplerPeak = jmax (samplerPeak, tapClient.getAndClearAudioLevel (ch).dB);
+            trackPeak   = jmax (trackPeak, trackClient.getAndClearAudioLevel (ch).dB);
+        }
+    }
+    if (trackMeter != nullptr)
+        trackMeter->measurer.removeClient (trackClient);
+
+    std::cerr << "  ..   sampler master peak " << samplerPeak
+              << " dBFS, track peak " << trackPeak << " dBFS\n";
+    if (samplerPeak <= -40.0f)   // diagnose, don't guess: which half is broken?
+    {
+        auto* sp = samplerTrack != nullptr
+                       ? samplerTrack->pluginList.getPluginsOfType<te::SamplerPlugin>().getLast()
+                       : nullptr;
+        std::cerr << "  !!   diagnose: sounds=" << (sp != nullptr ? sp->getNumSounds() : -1)
+                  << " playing=" << (eng.edit().getTransport().isPlaying() ? 1 : 0)
+                  << " ctx=" << (eng.edit().getTransport().getCurrentPlaybackContext() != nullptr ? 1 : 0)
+                  << " pos=" << eng.edit().getTransport().getPosition().inSeconds() << "\n";
+    }
+    check (samplerPeak > -40.0f, "LIVE MIDI->sampler audible at the master tap");
+    check (trackPeak > -40.0f, "LIVE MIDI->sampler audible at the TRACK tap");
+    check (ok (cmd (ops, "set_transport", args1 ("action", "stop"))), "sampler stop ok");
+
+    // ── Phase C: cold reload, then play — exactly the GUI's load path ──
+    // (rung 1's GUI silence was on a sampler RESTORED from disk, a path no
+    // offline bounce had ever covered).
+    if (auto* m0 = masterMeter())
+        m0->measurer.removeClient (tapClient);      // old edit is about to die
+    check (ok (cmd (ops, "save")), "save ok");
+    check (ok (cmd (ops, "reload")), "reload ok");
+    if (mm != nullptr) mm->runDispatchLoopUntil (200);   // let the 30 Hz timer re-adopt meters
+    check (masterMeter() != nullptr, "master tap present after reload");
+
+    te::LevelMeasurer::Client reloadClient;
+    if (auto* m1 = masterMeter())
+        m1->measurer.addClient (reloadClient);
+    check (ok (cmd (ops, "set_transport", args1 ("position", 0.0))), "post-reload seek ok");
+    check (ok (cmd (ops, "set_transport", args1 ("action", "play"))), "post-reload play ok");
+    const auto reloadPeak = pumpPeakDb (reloadClient, 2500);
+    std::cerr << "  ..   post-reload master peak " << reloadPeak << " dBFS\n";
+    check (reloadPeak > -40.0f, "MIDI->sampler audible after cold reload (the GUI path)");
+    check (ok (cmd (ops, "set_transport", args1 ("action", "stop"))), "post-reload stop ok");
+    if (auto* m1 = masterMeter())
+        m1->measurer.removeClient (reloadClient);
 
     std::cerr << "===== " << checks - failures << "/" << checks
               << " live-audio checks passed, " << failures << " failed =====\n";

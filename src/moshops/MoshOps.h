@@ -2,6 +2,8 @@
 
 #include <tracktion_engine/tracktion_engine.h>
 #include <functional>
+#include <map>
+#include <memory>
 #include "engine/MoshEngine.h"
 #include "plugins/hosting/PluginHost.h"
 #include "generative/GenerativeJobManager.h"
@@ -70,6 +72,8 @@ private:
     juce::var cmdImportClip     (const juce::var& args);
     juce::var cmdAddTestTone    (const juce::var& args);
     juce::var cmdSetTransport   (const juce::var& args);
+    juce::var cmdListAudioOutputs (const juce::var& args);   // Stage 14: device truth
+    juce::var cmdSetAudioOutput   (const juce::var& args);   // machine-local, never synced
     juce::var cmdUndo           (const juce::var& args);
     juce::var cmdRedo           (const juce::var& args);
     juce::var cmdSave           (const juce::var& args);
@@ -169,6 +173,24 @@ private:
     te::AutomatableParameter::Ptr findParamByName (te::Plugin&, const juce::String& name);
     double beatsToSeconds (double beats);
 
+    // ── engine-output meters (Stage 14) ──
+    // A te::LevelMeterPlugin on the master chain + every audio track; the 30 Hz
+    // timer polls them into the transport event. Meters are observability, NOT
+    // musical state: the canonical hash and the snapshot's rack list skip type
+    // "level", so they never perturb replay determinism or the device chain.
+    void adoptEditMeters();                         // (re)attach after an edit swap
+    te::LevelMeterPlugin* ensureMasterMeter();
+    te::LevelMeterPlugin* ensureTrackMeter (te::AudioTrack&);
+    juce::var meterLevels();                        // {master:[L,R], tracks:{id:[L,R]}} in dB
+
+    // ALL plugin index args/results live in "visible" space — the pluginList
+    // minus meter taps. Stored trajectories/oplogs/exemplars predate meters,
+    // so visible space is the only index space that stays replayable. The tap
+    // is pinned to the chain END (it must measure the track's OUTPUT).
+    juce::Array<te::Plugin*> visiblePlugins (te::AudioTrack&);
+    int  visiblePluginIndex (te::AudioTrack&, te::Plugin*);
+    void ensureMeterLast (te::AudioTrack&);
+
     MoshEngine& eng;
     PluginHost  pluginHost;
     GenerativeJobManager jobManager;
@@ -180,6 +202,21 @@ private:
     juce::int64 seq = 0;
     juce::File  logFile;
     bool        wasPlaying = false;
+
+    // Meter poll clients, keyed by meter-plugin itemID. CRITICAL lifetime rule
+    // (smoke-caught UAF): the playback graph's LevelMeasurerProcessingNode
+    // holds a refcounted Plugin::Ptr, so a meter plugin OUTLIVES its edit —
+    // a client must therefore be removeClient()ed via a held Plugin::Ptr
+    // before it is destroyed, on every path (swap, prune, shutdown).
+    struct MeterClient
+    {
+        te::Plugin::Ptr plugin;    // keeps the measurer alive for removeClient
+        std::unique_ptr<te::LevelMeasurer::Client> client;
+    };
+    void releaseMeterClient (MeterClient&);
+    void releaseAllMeterClients();
+    te::Edit* meterEdit = nullptr;
+    std::map<juce::String, MeterClient> meterClients;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MoshOps)
 };
