@@ -20,9 +20,9 @@
    "tut_id": "trap-03",
    "l1": true,
    "l2": 1.0,
-   "l4": 4.0,
+   "l4": 5.0,
    "grade": "silver",
-   "bounce_peak_dbfs": -2.5,
+   "bounce_peak_dbfs": 0.0,
    "delta_attempt_vs_corrected": {
     "entity_f1": 0.5263,
     "magnitude": 0.2665,
@@ -102,6 +102,6 @@
    ],
    "traj_id": "tut-trap-03-corrected"
   },
-  "corrected_ts": 1781100156
+  "corrected_ts": 1781101794
  }
 }

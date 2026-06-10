@@ -95,3 +95,13 @@ scripts/harness-conformance.sh && scripts/flywheel-store-test.sh \
   && scripts/collab-sync-test.sh && scripts/agent-smoke-test.sh \
   && scripts/extract-smoke-test.sh
 ```
+
+## Reviewing IN Mosh (the point of the product)
+
+```bash
+python3 -m flywheel.replicate.ladder open trap-03   # materialize + launch the app
+```
+The corrected session lands in `~/Library/Mosh/session` (old one backed up),
+the 2-bar pattern loops on play, and the always-on SessionRecorder turns any
+tweak made in the app into correction data — import it afterwards with
+`flywheel.store.import_session` or read `~/Library/Mosh/session/trajectory.jsonl`.

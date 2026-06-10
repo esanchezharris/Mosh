@@ -250,6 +250,49 @@ def _update_board(tut_id: str, patch: dict) -> None:
     board_path.write_text(json.dumps(board, indent=1))
 
 
+def open_in_mosh(tut_id: str, app: Path) -> None:
+    """Materialize the corrected session into the REAL Mosh session and launch
+    the app — review happens in the DAW (transport, loop, mute/solo), not in a
+    wav file. The always-on recorder turns any tweak Emilio makes in the app
+    into correction data ("use mosh, that's the whole point")."""
+    t = tut(tut_id)
+    corrected_path = RUNS / tut_id / "corrected-steps.json"
+    src = corrected_path if corrected_path.is_file() else RUNS / tut_id / "attempt.json"
+    if not src.is_file():
+        raise SystemExit(f"no steps for {tut_id} — run attempt first")
+    doc = json.loads(src.read_text())
+    steps = doc["steps"] if "steps" in doc else doc.get("steps", [])
+    ops = [op for s in steps for op in (s.get("ops") or [])]
+
+    gui_sess = Path.home() / "Library/Mosh/session"
+    if gui_sess.exists():
+        backup = gui_sess.with_name(f"session-backup-{int(time.time())}")
+        gui_sess.rename(backup)
+        print(f"previous session backed up: {backup.name}")
+    gui_sess.mkdir(parents=True)
+
+    # Loop the pattern so play just grooves (assume <= 8 beats unless longer).
+    job = {"ops": ops,
+           "commands": [
+               {"command": "set_transport", "args": {"loop": True, "loopStart": 0.0,
+                                                     "loopEnd": 3.0, "position": 0.0}},
+               {"command": "set_tutorial", "args": {"url": t["url"]}},
+               {"command": "save", "args": {}}],
+           "timeout_s": 120}
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+        json.dump(job, f)
+        job_path = f.name
+    env = dict(os.environ, MOSH_SESSION_DIR=str(gui_sess), MOSH_KEEP_SESSION="1")
+    subprocess.run([str(app), "--harness", job_path, "--harness-out",
+                    job_path + ".result"], env=env, capture_output=True, timeout=200)
+    os.unlink(job_path)
+    subprocess.run(["pkill", "-f", "Mosh.app/Contents/MacOS/Mosh"], capture_output=True)
+    time.sleep(1)
+    subprocess.run(["open", str(app.parents[2])], check=True)
+    print(f"{tut_id} is open in Mosh — press play (the 2 bars loop); "
+          f"every tweak you make is recorded as correction data.")
+
+
 def status() -> None:
     board_path = RUNS / "ladder.json"
     board = json.loads(board_path.read_text()) if board_path.is_file() else {}
@@ -263,7 +306,7 @@ def status() -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["attempt", "rescore", "status"])
+    ap.add_argument("cmd", choices=["attempt", "rescore", "open", "status"])
     ap.add_argument("tut_id", nargs="?")
     ap.add_argument("--provider", default=os.environ.get("MOSH_AGENT_PROVIDER", "gemini"))
     ap.add_argument("--app", type=Path, default=Path(os.environ.get("MOSH_APP", DEFAULT_APP)))
@@ -275,6 +318,8 @@ def main() -> None:
         raise SystemExit("tutorial id required")
     if a.cmd == "attempt":
         attempt(a.tut_id, a.provider, a.app, a.db)
+    elif a.cmd == "open":
+        open_in_mosh(a.tut_id, a.app)
     else:
         rescore(a.tut_id, a.provider, a.app, a.db)
 

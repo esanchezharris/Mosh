@@ -278,6 +278,15 @@ juce::var MoshOps::cmdAddSamplerSound (const juce::var& args)
     if ((bool) args.getProperty ("openEnded", false))
         sp->setSoundOpenEnded (soundIndex, true);
 
+    // SamplerPlugin rebuilds its sound list via an AsyncUpdater; in headless
+    // command runs nothing pumps the message thread between this command and
+    // an offline render, so the sound would not EXIST yet (the silent-808
+    // bug: only samplers followed by a later create_track ever sounded).
+    // Same drain pattern as createAudioTrack.
+    if (! eng.hasAudio())
+        if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
+            mm->runDispatchLoopUntil (1);
+
     auto* data = new DynamicObject();
     data->setProperty ("soundIndex", soundIndex);
     logLine ("add_sampler_sound", args, true, {}, true);
