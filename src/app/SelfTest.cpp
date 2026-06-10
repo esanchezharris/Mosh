@@ -1289,6 +1289,29 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         cmd (ops, "remove_section", args1 ("name", "A"));
     }
 
+    // --- Stage 24: clip inspector (gain/reverse + snapshot fields) ---
+    {
+        std::cerr << "--- Stage 24: clip inspector ---\n";
+        auto t24 = cmd (ops, "create_track", args1 ("name", "Insp24"));
+        const auto t24id = t24["data"].getProperty ("trackId", var()).toString();
+        auto tone = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", t24id }, { "seconds", 1.0 }, { "freq", 220.0 }}));
+        const auto cid = tone["data"].getProperty ("clipId", var()).toString();
+
+        check (ok (cmd (ops, "set_clip_gain", objN ({{ "clipId", cid }, { "db", -7.5 }}))), "set_clip_gain ok");
+        check (ok (cmd (ops, "set_clip_reversed", objN ({{ "clipId", cid }, { "reversed", true }}))), "set_clip_reversed ok");
+        check (ok (cmd (ops, "set_clip_pitch", objN ({{ "clipId", cid }, { "semitones", 3.0 }}))), "set_clip_pitch ok");
+
+        auto snap = ops.snapshot();
+        var cv;
+        for (auto& tv : *snap["tracks"].getArray())
+            if (tv.getProperty ("id", var()).toString() == t24id) cv = tv["clips"][0];
+        check (std::abs ((double) cv.getProperty ("gainDb", 0.0) + 7.5) < 0.1, "gainDb in snapshot");
+        check ((bool) cv.getProperty ("reversed", false), "reversed in snapshot");
+        check (std::abs ((double) cv.getProperty ("pitchSemis", 0.0) - 3.0) < 0.1, "pitchSemis in snapshot");
+        check (ok (cmd (ops, "undo")), "undo pitch ok");
+        cmd (ops, "remove_track", args1 ("trackId", t24id));
+    }
+
     std::cerr << "===== " << (checks - failures) << "/" << checks
               << " checks passed, " << failures << " failed =====\n\n";
     return failures;

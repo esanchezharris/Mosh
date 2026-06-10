@@ -41,6 +41,10 @@ export type Clip = {
   sourceFile?: string;
   sourceLength?: number;
   notes?: Note[]; // MIDI clips only (capped at 512)
+  pitchSemis?: number;  // wave clips (Stage 24 inspector)
+  speedRatio?: number;
+  gainDb?: number;
+  reversed?: boolean;
   hasRenderLayer: boolean;
   renderLayer?: RenderLayer;
 };

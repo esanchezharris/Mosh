@@ -77,6 +77,10 @@ type State = {
   renamingClipId: string | null;
   setRenamingClip: (id: string | null) => void;
 
+  // Clip inspector (Stage 24, view state).
+  inspecting: { clipId: string; x: number; y: number } | null;
+  setInspecting: (v: { clipId: string; x: number; y: number } | null) => void;
+
   // Automation lanes (Stage 22): open lane + chosen target per track (view state).
   autoOpen: Record<string, { mixer?: "volume" | "pan"; pluginIndex?: number; paramName?: string; label: string }>;
   setAutoLane: (trackId: string, target: { mixer?: "volume" | "pan"; pluginIndex?: number; paramName?: string; label: string } | null) => void;
@@ -211,6 +215,8 @@ export const useStore = create<State>((set, get) => ({
   setCrateOpen: (b) => set({ crateOpen: b }),
   renamingClipId: null,
   setRenamingClip: (id) => set({ renamingClipId: id }),
+  inspecting: null,
+  setInspecting: (v) => set({ inspecting: v }),
   autoOpen: {},
   setAutoLane: (trackId, target) =>
     set((s) => {

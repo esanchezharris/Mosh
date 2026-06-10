@@ -91,6 +91,9 @@ private:
     juce::var cmdArmTrack         (const juce::var& args);   // device-bound; never synced
     // Stage 21 — papercuts
     juce::var cmdRenameClip       (const juce::var& args);
+    // Stage 24 — clip inspector
+    juce::var cmdSetClipGain      (const juce::var& args);
+    juce::var cmdSetClipReversed  (const juce::var& args);
     // Stage 22 — automation lanes
     juce::var cmdGetAutomation    (const juce::var& args);   // read-only
     juce::var cmdClearAutomation  (const juce::var& args);

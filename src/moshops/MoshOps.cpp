@@ -117,6 +117,8 @@ juce::var MoshOps::dispatch (const juce::String& name, const juce::var& args)
     if (name == "set_audio_input")   return cmdSetAudioInput (args);
     if (name == "arm_track")         return cmdArmTrack (args);
     if (name == "rename_clip")       return cmdRenameClip (args);
+    if (name == "set_clip_gain")     return cmdSetClipGain (args);
+    if (name == "set_clip_reversed") return cmdSetClipReversed (args);
     if (name == "get_automation")    return cmdGetAutomation (args);
     if (name == "clear_automation")  return cmdClearAutomation (args);
     if (name == "undo")              return cmdUndo (args);
@@ -634,6 +636,34 @@ juce::var MoshOps::cmdRenameClip (const juce::var& args)
 // (beats, normalized 0..1) — the exact shape write_automation consumes, so the
 // lane UI round-trips losslessly through the lane-replace semantics.
 // ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Clip inspector (Stage 24): gain + reverse join the existing pitch/stretch/
+// slice commands. Both are AudioClipBase properties — wave clips only.
+// ─────────────────────────────────────────────────────────────────────────────
+juce::var MoshOps::cmdSetClipGain (const juce::var& args)
+{
+    auto* acb = dynamic_cast<te::AudioClipBase*> (findClip (args.getProperty ("clipId", var()).toString()));
+    if (acb == nullptr) return errResult ("set_clip_gain", "no audio clip");
+
+    undoManager().beginNewTransaction ("set_clip_gain");
+    acb->setGainDB (juce::jlimit (-48.0f, 24.0f, (float) (double) args.getProperty ("db", 0.0)));
+    logLine ("set_clip_gain", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("set_clip_gain");
+}
+
+juce::var MoshOps::cmdSetClipReversed (const juce::var& args)
+{
+    auto* acb = dynamic_cast<te::AudioClipBase*> (findClip (args.getProperty ("clipId", var()).toString()));
+    if (acb == nullptr) return errResult ("set_clip_reversed", "no audio clip");
+
+    undoManager().beginNewTransaction ("set_clip_reversed");
+    acb->setIsReversed ((bool) args.getProperty ("reversed", false));
+    logLine ("set_clip_reversed", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("set_clip_reversed");
+}
+
 juce::var MoshOps::cmdGetAutomation (const juce::var& args)
 {
     auto* track = findTrack (args.getProperty ("trackId", var()).toString());
@@ -2051,6 +2081,11 @@ juce::var MoshOps::clipToVar (te::Clip& c)
         o->setProperty ("type", "wave");
         o->setProperty ("sourceFile", w->getCurrentSourceFile().getFullPathName());
         o->setProperty ("sourceLength", w->getSourceLength().inSeconds());
+        // Inspector fields (Stage 24).
+        o->setProperty ("pitchSemis", w->getPitchChange());
+        o->setProperty ("speedRatio", w->getSpeedRatio());
+        o->setProperty ("gainDb", w->getGainDB());
+        o->setProperty ("reversed", w->getIsReversed());
     }
     else if (auto* mc = dynamic_cast<te::MidiClip*> (&c))
     {

@@ -561,4 +561,18 @@ button.on { border-color: var(--accent); color: var(--accent); background: #2120
   border: 1px solid #fff; border-radius: 3px; padding: 0 2px;
 }
 
+/* Clip inspector (Stage 24) */
+.inspector {
+  position: fixed; z-index: 60; width: 230px; padding: 8px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 9px;
+  box-shadow: 0 12px 32px rgba(0,0,0,0.5); display: flex; flex-direction: column; gap: 6px;
+}
+.insp-head { display: flex; justify-content: space-between; align-items: center; font-size: 0.78rem; }
+.insp-row { display: flex; align-items: center; gap: 6px; font-size: 0.66rem; color: var(--muted); }
+.insp-row span { width: 42px; }
+.insp-row input[type="range"] { flex: 1; accent-color: var(--accent); height: 3px; }
+.insp-row i { font-style: normal; min-width: 44px; text-align: right; font-variant-numeric: tabular-nums; }
+.insp-hint { color: var(--muted); }
+.pr-tool.on { border-color: var(--warn); color: var(--warn); }
+
 .boot { padding: 3rem; color: var(--muted); }

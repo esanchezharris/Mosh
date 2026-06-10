@@ -3,6 +3,7 @@ import { useStore, SNAP_DIVS, type SnapDiv } from "../store";
 import type { Snapshot, Track, CommandResult } from "../types";
 import { Clip } from "./Clip";
 import { AutomationLane, AUTO_H, laneTargets, type LaneTarget } from "./AutomationLane";
+import { ClipInspector } from "./ClipInspector";
 
 const LANE_H = 84;
 const RULER_SECONDS = 48;
@@ -259,6 +260,7 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
           </div>
         </div>
       </div>
+      <ClipInspector snapshot={snapshot} />
       {/* Clip context menu (Stage 15). */}
       {ctxMenu && (
         <div className="ctx-menu" style={{ left: ctxMenu.x, top: ctxMenu.y }}>
@@ -269,6 +271,14 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
             }}
           >
             Rename…
+          </button>
+          <button
+            onClick={() => {
+              useStore.getState().setInspecting({ clipId: ctxMenu.clipId, x: ctxMenu.x, y: ctxMenu.y });
+              setCtxMenu(null);
+            }}
+          >
+            Inspect…
           </button>
           <button
             onClick={() => {
