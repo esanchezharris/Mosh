@@ -388,6 +388,10 @@ button.on { border-color: var(--accent); color: var(--accent); background: #2120
 .pr-title b { color: var(--text); }
 .pr-track { color: var(--muted); text-transform: none; letter-spacing: 0; }
 .pr-hint { margin-left: auto; font-size: 0.64rem; color: var(--muted); }
+.pr-sep { width: 1px; height: 16px; background: var(--line); margin: 0 2px; }
+.pr-tool { font-size: 0.68rem; padding: 0.15rem 0.4rem; border-radius: 5px; }
+.pr-slide { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); }
+.pr-slide:disabled { opacity: 0.45; }
 .pr-scroll { flex: 1; overflow: auto; min-height: 0; position: relative; }
 .pr-body { position: relative; }
 .pr-keys { position: sticky; left: 0; z-index: 3; height: 100%; }

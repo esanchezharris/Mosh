@@ -1219,6 +1219,30 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         cmd (ops, "remove_track", args1 ("trackId", t19id));
     }
 
+    // --- Stage 20: the slide chain (pitchshift automation = real 808 glides) ---
+    {
+        std::cerr << "--- Stage 20: slide chain ---\n";
+        auto t20 = cmd (ops, "create_track", args1 ("name", "Slide20"));
+        const auto t20id = t20["data"].getProperty ("trackId", var()).toString();
+        auto ps = cmd (ops, "load_builtin_plugin", objN ({{ "trackId", t20id }, { "type", "pitchshift" }}));
+        check (ok (ps), "pitchshift loads");
+        const int psIdx = (int) ps["data"].getProperty ("index", -1);
+        Array<var> pts;
+        for (auto [b, v] : std::initializer_list<std::pair<double,double>> {
+                 { 0.0, 0.5 }, { 2.0, 0.5 }, { 2.5, 0.25 }, { 2.51, 0.5 } })
+        {
+            auto* p = new DynamicObject();
+            p->setProperty ("beats", b); p->setProperty ("value", v);
+            pts.add (var (p));
+        }
+        auto wa = cmd (ops, "write_automation", objN ({{ "trackId", t20id },
+                       { "pluginIndex", psIdx }, { "paramName", "semitone" }, { "points", pts }}));
+        check (ok (wa), "slide ramp writes to the pitchshift semitones param");
+        check (wa["data"].getProperty ("param", var()).toString().containsIgnoreCase ("semitone"),
+               "addressed the semitones parameter");
+        cmd (ops, "remove_track", args1 ("trackId", t20id));
+    }
+
     std::cerr << "===== " << (checks - failures) << "/" << checks
               << " checks passed, " << failures << " failed =====\n\n";
     return failures;
