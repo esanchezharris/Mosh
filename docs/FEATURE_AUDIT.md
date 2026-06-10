@@ -469,6 +469,34 @@ inserts steps only) and **audio warp** (clip time-stretch following the map).
 feature in the 266-feature conformance audit is now shipped on both axes (capability + surface),
 with tempo ramps/warp as the only named, deliberate deferral beyond it.
 
+### 2026-06-09 · Wave V: tempo ramps + audio warp — the last named deferral, closed ✅
+
+**Ramps:** the engine's Bezier curve machinery was already there — a `TempoSetting`'s curve shapes
+the glide FROM that point TO the next (±1 = step; (-1,1) ramps: <0 log, 0 linear, >0 exponential),
+and playback subdivides each ramp into the engine's own ≤100 linear sections. New:
+**`set_tempo_curve`** `{index, curve}` (undoable) + a `curve` arg on `insert_tempo_change`. The
+UI-exactness trick: when any ramp exists, the snapshot emits **`tempoSections`** — the engine's
+OWN subdivision boundaries (the same `clamp(4·beats, 1, 100)` formula, times/bpm read back through
+its `toTime`/`getBpmAt`) — so `ui/src/time.ts`'s mapping is engine-faithful by construction.
+Bars now flow **continuously through a ramp** (compressing with the local tempo) while explicit
+changes still start fresh bars; snap went beat-domain so it stays musical mid-ritardando; a
+step/ramp toggle per point lives in the tempo-map popover. Step-only maps keep the lean snapshot +
+the exact piecewise-constant path. **Warp:** `AudioClipBase::setAutoTempo` re-anchors a clip in
+BEATS so it time-stretches to follow the map — and the remap is **immediate** (no proxy wait),
+making warp fully headless-verifiable. New **`set_clip_warp`** `{clipId, autoTempo, sourceBpm?,
+mode?}` (undoable; sourceBpm defaults to the map tempo at the clip start = 1:1 at enable);
+stretching uses the engine's **vendored SoundTouch**, enabled at build
+(`TRACKTION_ENABLE_TIMESTRETCH_SOUNDTOUCH` — no new external dependency; `defaultMode =
+soundtouchBetter`). A **Warp** toggle joins ClipActions; the snapshot carries
+`autoTempo`/`stretchMode`/`sourceBpm`. Verified: `Mosh --selftest` **650/650 across 3 runs,
+0 failed, 0 assertions** — engine truth mid-ramp (bpm strictly between the endpoints, monotonic),
+fine sections emitted only when ramped (lean otherwise) + strictly increasing, undo/redo of the
+curve, and the warp contract: **half tempo doubles the warped clip's length** (4.0s), restoring
+tempo restores it, an unwarped clip ignores tempo changes, and the stretch mode is SoundTouch.
+
+**Still genuinely deferred (the honest tail):** free warp **markers** (per-transient nonlinear
+warping — a separate editing subsystem, orthogonal to auto-tempo).
+
 ## Coverage by category
 
 Per axis the three counts are **present ✓ / partial ◐ / missing ✗** (missing also folds in the one `not_applicable`).

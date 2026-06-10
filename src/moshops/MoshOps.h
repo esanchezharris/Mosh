@@ -64,6 +64,9 @@ private:
     juce::var cmdRenameClip     (const juce::var& args);
     juce::var cmdSetClipMute    (const juce::var& args);
     juce::var cmdSetClipGain    (const juce::var& args);
+    // Audio warp — auto-tempo: the clip re-anchors in BEATS and time-stretches to
+    // follow the tempo map (SoundTouch; warp MARKERS are a deferred subsystem).
+    juce::var cmdSetClipWarp    (const juce::var& args);
     juce::var cmdDuplicateClip  (const juce::var& args);
     juce::var cmdPasteClip      (const juce::var& args);
     // Wave C — ARR-010: time-range as a true delete target. One undoable
@@ -167,7 +170,8 @@ private:
     juce::var cmdSetTrackOutput   (const juce::var& args);   // undoable (TrackOutput is Edit-UM-bound)
     // SES-001 — the tempo MAP: tempo / time-sig changes over time (step changes,
     // curve=1.0; the engine's TempoSequence does the math + playback natively).
-    juce::var cmdInsertTempoChange   (const juce::var& args); // undoable
+    juce::var cmdInsertTempoChange   (const juce::var& args); // undoable (optional curve)
+    juce::var cmdSetTempoCurve       (const juce::var& args); // undoable (ramp shape N -> N+1)
     juce::var cmdRemoveTempoChange   (const juce::var& args); // undoable (index>0)
     juce::var cmdInsertTimeSigChange (const juce::var& args); // undoable
     juce::var cmdRemoveTimeSigChange (const juce::var& args); // undoable (index>0)

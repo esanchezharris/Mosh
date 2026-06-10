@@ -57,19 +57,24 @@ export function secondsToBBS(sec: number, m: Meter): string {
   return `${bar + 1}.${beatInBar + 1}.${sixteenth + 1}`;
 }
 
+
 // ─────────────────────────────────────────────────────────────────────────────
-// SES-001 — the piecewise tempo MAP. The backend serializes the engine's
-// TempoSequence (session.tempoMap + session.timeSigMap, times computed by the
-// engine's own beats->seconds conversion). Mosh inserts STEP changes only
-// (curve=1.0 hold-then-jump), so a piecewise-CONSTANT mapping here is EXACT —
-// no duplicated engine math, no drift. Each change point starts a new bar
-// (the standard musical convention; a partial bar before a change counts as
-// one). Bezier ramps / audio warp are deferred (documented).
+// SES-001 — the piecewise tempo MAP (+ ramps). The backend serializes the
+// engine's TempoSequence (session.tempoMap + session.timeSigMap; and, when any
+// point carries a ramp curve, session.tempoSections — the engine's OWN fine
+// subdivision boundaries with times/bpm read back through its toTime/getBpmAt).
+// The mapping here is therefore engine-faithful by construction:
+//   - step-only maps: piecewise-constant, exact;
+//   - ramps: the same ≤100-sections-per-span approximation playback uses.
+// Bar semantics: every EXPLICIT tempo/meter change starts a fresh bar (the
+// standard convention; a trailing partial bar counts as one). Ramp-internal
+// section boundaries do NOT restart bars — the bar grid flows through a
+// ritardando, compressing/expanding with the local tempo.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export type TempoSeg = {
   startSec: number;
-  startBar: number;   // cumulative bar index at the segment start (0-based)
+  startBarF: number;  // continuous (fractional) bar position at the segment start
   tempo: number;
   num: number;
   den: number;
@@ -82,24 +87,34 @@ type SessionWithMaps = {
   tempo?: number;
   timeSigNumerator?: number;
   timeSigDenominator?: number;
-  tempoMap?: { time: number; bpm: number }[];
+  tempoMap?: { time: number; bpm: number; curve?: number }[];
   timeSigMap?: { time: number; numerator: number; denominator: number }[];
+  tempoSections?: { time: number; bpm: number }[];
 };
 
-/** Build the piecewise map. Falls back to a single constant segment (the old
-    behavior) when the session carries no map (or only the base point). */
+/** Build the piecewise map. Constant sessions yield one segment (the original
+    behavior); step maps yield one segment per change; ramped maps consume the
+    backend's engine-faithful fine sections. */
 export function tempoMapFrom(session?: SessionWithMaps): TempoMap {
   const base = meterFrom(session);
-  const tempos = (session?.tempoMap ?? []).slice().sort((a, b) => a.time - b.time);
   const sigs = (session?.timeSigMap ?? []).slice().sort((a, b) => a.time - b.time);
+  const explicit = new Set<number>([0]);
+  for (const p of session?.tempoMap ?? []) explicit.add(p.time);
+  for (const s of sigs) explicit.add(s.time);
 
-  // Merge the distinct change times (always include 0 for the base segment).
-  const times = Array.from(new Set([0, ...tempos.map((t) => t.time), ...sigs.map((s) => s.time)]))
+  // The fine time/bpm points: the engine sections when ramps exist, else the
+  // tempoMap points themselves (each a constant span).
+  const fine: { time: number; bpm: number }[] =
+    session?.tempoSections && session.tempoSections.length > 0
+      ? session.tempoSections.slice().sort((a, b) => a.time - b.time)
+      : (session?.tempoMap ?? []).map((p) => ({ time: p.time, bpm: p.bpm }));
+
+  const times = Array.from(new Set([0, ...fine.map((f) => f.time), ...sigs.map((s) => s.time)]))
     .sort((a, b) => a - b);
 
-  const tempoAt = (t: number) => {
-    let v = tempos.length > 0 && tempos[0].time <= 0 ? tempos[0].bpm : base.tempo;
-    for (const p of tempos) if (p.time <= t + 1e-9) v = p.bpm;
+  const bpmAt = (t: number) => {
+    let v = base.tempo;
+    for (const p of fine) if (p.time <= t + 1e-9) v = p.bpm; else break;
     return v;
   };
   const sigAt = (t: number) => {
@@ -109,25 +124,22 @@ export function tempoMapFrom(session?: SessionWithMaps): TempoMap {
   };
 
   const map: TempoMap = [];
-  let bar = 0;
+  let barF = 0;
   for (let i = 0; i < times.length; i++) {
     const t = times[i];
-    const tempo = tempoAt(t);
+    const tempo = bpmAt(t);
     const { num, den } = sigAt(t);
     const m: Meter = { tempo, num, den };
+    if (explicit.has(t)) barF = Math.ceil(barF - 1e-9); // explicit change -> fresh bar
     const seg: TempoSeg = {
-      startSec: t, startBar: bar, tempo, num, den,
+      startSec: t, startBarF: barF, tempo, num, den,
       barSec: barSeconds(m), beatSec: beatSeconds(m),
     };
     map.push(seg);
-    if (i < times.length - 1) {
-      // Bars consumed by this segment; a trailing partial bar counts as one
-      // (every change point starts a fresh bar).
-      const span = times[i + 1] - t;
-      bar += Math.max(1, Math.ceil(span / seg.barSec - 1e-9));
-    }
+    if (i < times.length - 1) barF += (times[i + 1] - t) / seg.barSec; // continuous through ramps
   }
-  return map.length > 0 ? map : [{ startSec: 0, startBar: 0, tempo: base.tempo, num: base.num, den: base.den, barSec: barSeconds(base), beatSec: beatSeconds(base) }];
+  return map.length > 0 ? map
+    : [{ startSec: 0, startBarF: 0, tempo: base.tempo, num: base.num, den: base.den, barSec: barSeconds(base), beatSec: beatSeconds(base) }];
 }
 
 /** The segment governing a time (the last one starting at or before it). */
@@ -143,7 +155,21 @@ export const meterAt = (map: TempoMap, sec: number): Meter => {
   return { tempo: s.tempo, num: s.num, den: s.den };
 };
 
-/** Bar/beat gridlines + change markers across a range (capped). */
+/** Continuous bar position (fractional) at a time. */
+const barPosAt = (map: TempoMap, sec: number): number => {
+  const s = segAt(map, sec);
+  return s.startBarF + Math.max(0, sec - s.startSec) / s.barSec;
+};
+
+/** Invert a continuous bar position back to seconds. */
+const barPosToSec = (map: TempoMap, barF: number): number => {
+  let seg = map[0];
+  for (const s of map) { if (s.startBarF <= barF + 1e-9) seg = s; else break; }
+  return seg.startSec + (barF - seg.startBarF) * seg.barSec;
+};
+
+/** Bar/beat gridlines + change markers across a range (capped). Bar lines land
+    on integer continuous-bar positions, so they compress through a ramp. */
 export function gridLines(map: TempoMap, fromSec: number, toSec: number, maxLines = 600): {
   bars: { sec: number; label: number }[];
   beats: number[];
@@ -153,43 +179,52 @@ export function gridLines(map: TempoMap, fromSec: number, toSec: number, maxLine
   const beats: number[] = [];
   const marks: { sec: number; label: string }[] = [];
   let total = 0;
-  for (let i = 0; i < map.length && total < maxLines; i++) {
-    const seg = map[i];
-    const segEnd = i + 1 < map.length ? map[i + 1].startSec : toSec;
-    if (seg.startSec > toSec || segEnd < fromSec) continue;
-    if (i > 0) marks.push({ sec: seg.startSec, label: `${Math.round(seg.tempo)} ${seg.num}/${seg.den}` });
-    for (let b = 0; total < maxLines; b++) {
-      const sec = seg.startSec + b * seg.barSec;
-      if (sec >= segEnd - 1e-9 || sec > toSec) break;
-      if (sec >= fromSec) { bars.push({ sec, label: seg.startBar + b + 1 }); total++; }
-      for (let k = 1; k < seg.num && total < maxLines; k++) {
-        const bs = sec + k * seg.beatSec;
-        if (bs >= segEnd - 1e-9 || bs > toSec) break;
-        if (bs >= fromSec) { beats.push(bs); total++; }
-      }
+
+  // Explicit-change markers (a mark per segment whose meter/tempo differs from
+  // its predecessor at an explicit boundary — ramp-internal segs are unmarked).
+  for (let i = 1; i < map.length && marks.length < 24; i++) {
+    const a = map[i - 1], b = map[i];
+    const explicitBoundary = Math.abs(b.startBarF - Math.round(b.startBarF)) < 1e-6;
+    const changed = b.num !== a.num || b.den !== a.den || Math.abs(b.tempo - a.tempo) > 0.5;
+    if (explicitBoundary && changed)
+      marks.push({ sec: b.startSec, label: `${Math.round(b.tempo)} ${b.num}/${b.den}` });
+  }
+
+  const startBar = Math.max(0, Math.floor(barPosAt(map, Math.max(0, fromSec))));
+  for (let k = startBar; total < maxLines; k++) {
+    const sec = barPosToSec(map, k);
+    if (sec > toSec) break;
+    if (sec >= fromSec - 1e-9) { bars.push({ sec, label: k + 1 }); total++; }
+    // Beats inside bar k (local meter at the bar start).
+    const seg = segAt(map, sec);
+    for (let j = 1; j < seg.num && total < maxLines; j++) {
+      const bs = barPosToSec(map, k + j / seg.num);
+      if (bs > toSec) break;
+      if (bs >= fromSec - 1e-9) { beats.push(bs); total++; }
     }
   }
   return { bars, beats, marks };
 }
 
-/** Snap a time to the local grid (anchored to the governing segment's start, so
-    the grid restarts at every tempo/meter change — musically standard). */
+/** Snap a time to the local musical grid (beat-domain rounding, so snapping
+    stays musical through ramps; the grid restarts at explicit changes). */
 export function snapTimeMap(map: TempoMap, t: number, division: SnapDiv): number {
   const seg = segAt(map, t);
   const m: Meter = { tempo: seg.tempo, num: seg.num, den: seg.den };
-  const step = snapStep(m, division);
-  if (step <= 0) return t;
-  return Math.max(0, seg.startSec + Math.round((t - seg.startSec) / step) * step);
+  const stepBars = division === "bar" ? 1 : snapStepBeats(m, division) / m.num;
+  const barF = barPosAt(map, t);
+  const snapped = Math.round(barF / stepBars) * stepBars;
+  return Math.max(0, barPosToSec(map, snapped));
 }
 
-/** Bars.beats.sixteenths over the map (1-based, exact for step changes). */
+/** Bars.beats.sixteenths over the map (1-based; bars flow through ramps). */
 export function secondsToBBSMap(map: TempoMap, sec: number): string {
   const seg = segAt(map, Math.max(0, sec));
-  const local = Math.max(0, sec) - seg.startSec;
-  const barsIn = Math.floor(local / seg.barSec + 1e-9);
-  const rem = local - barsIn * seg.barSec;
-  const beat = Math.min(seg.num - 1, Math.floor(rem / seg.beatSec + 1e-9));
-  const frac = rem / seg.beatSec - beat;
-  const sixteenth = Math.max(0, Math.min(3, Math.floor(frac * 4)));
-  return `${seg.startBar + barsIn + 1}.${beat + 1}.${sixteenth + 1}`;
+  const barF = barPosAt(map, Math.max(0, sec));
+  const bar = Math.floor(barF + 1e-9);
+  const frac = barF - bar;
+  const beatF = frac * seg.num;
+  const beat = Math.min(seg.num - 1, Math.floor(beatF + 1e-9));
+  const sixteenth = Math.max(0, Math.min(3, Math.floor((beatF - beat) * 4)));
+  return `${bar + 1}.${beat + 1}.${sixteenth + 1}`;
 }

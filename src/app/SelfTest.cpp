@@ -2510,6 +2510,138 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (isU, "tempo: insert_time_sig_change logged undoable:true");
     }
 
+    // ─── Wave V: tempo RAMPS (Bezier curves) ───
+    // curve lives on the point that STARTS a span and shapes the glide TO the next
+    // point: 1.0 = step (hold-then-jump), values in (-1,1) ramp. Engine truth via
+    // getBpmAt mid-ramp; the snapshot emits the engine-faithful fine sections
+    // (its own subdivision boundaries) so the UI mapping stays exact.
+    std::cerr << "--- Wave V: tempo ramps (curves) ---\n";
+    {
+        auto& seq = eng.edit().tempoSequence;
+        // Clean slate: drop any leftover points from earlier blocks, base 120.
+        while (seq.getNumTempos() > 1) cmd (ops, "remove_tempo_change", args1 ("index", 1));
+        while (seq.getNumTimeSigs() > 1) cmd (ops, "remove_time_sig_change", args1 ("index", 1));
+        check (ok (cmd (ops, "set_tempo", args1 ("bpm", 120))), "ramp: base 120 ok");
+
+        check (ok (cmd (ops, "insert_tempo_change", objN ({{ "time", 8.0 }, { "bpm", 60 }}))),
+               "ramp: insert 60 at 8s ok (step by default)");
+        auto bpmAt = [&] (double s) { return seq.getBpmAt (tracktion::TimePosition::fromSeconds (s)); };
+        check (std::abs (bpmAt (4.0) - 120.0) < 0.01, "ramp: step span holds 120 mid-way");
+        auto snapBefore = ops.snapshot()["session"];
+        check (! snapBefore.hasProperty ("tempoSections"), "ramp: step-only map emits NO tempoSections (lean snapshot)");
+
+        // Turn the base span into a LINEAR ramp: 120 glides to 60 across 0..8s.
+        check (ok (cmd (ops, "set_tempo_curve", objN ({{ "index", 0 }, { "curve", 0.0 }}))),
+               "ramp: set_tempo_curve index 0 -> linear ok");
+        const double mid = bpmAt (4.0);
+        check (mid < 119.0 && mid > 61.0, "ramp: engine bpm mid-ramp is strictly between 60 and 120");
+        check (bpmAt (1.0) > bpmAt (7.0), "ramp: engine bpm decreases monotonically across the ramp");
+
+        // The snapshot now carries the curve + the engine-faithful fine sections.
+        auto sess = ops.snapshot()["session"];
+        auto tm = sess.getProperty ("tempoMap", var());
+        check (std::abs ((double) tm[0].getProperty ("curve", 1.0)) < 0.01, "ramp: tempoMap[0].curve == 0 serialized");
+        auto secs = sess.getProperty ("tempoSections", var());
+        check (secs.isArray() && secs.size() > seq.getNumTempos(), "ramp: fine tempoSections emitted (more than the points)");
+        bool increasing = true;
+        for (int i = 1; i < secs.size(); ++i)
+            if ((double) secs[i].getProperty ("time", 0.0) <= (double) secs[i - 1].getProperty ("time", 0.0))
+                increasing = false;
+        check (increasing, "ramp: section times strictly increasing");
+
+        // Undo restores the step (and the lean snapshot); redo restores the ramp.
+        check (ok (cmd (ops, "undo")), "ramp: undo (set_tempo_curve) ok");
+        check (std::abs (bpmAt (4.0) - 120.0) < 0.01, "ramp: undo restored the step (120 mid-way)");
+        check (! ops.snapshot()["session"].hasProperty ("tempoSections"), "ramp: undo removed tempoSections");
+        check (ok (cmd (ops, "redo")), "ramp: redo ok");
+        check (bpmAt (4.0) < 119.0, "ramp: redo restored the ramp");
+
+        // insert_tempo_change accepts a curve arg directly.
+        check (ok (cmd (ops, "insert_tempo_change", objN ({{ "time", 16.0 }, { "bpm", 100 }, { "curve", 0.0 }}))),
+               "ramp: insert with curve arg ok");
+        auto tm2v = ops.snapshot()["session"].getProperty ("tempoMap", var());
+        check (std::abs ((double) tm2v[tm2v.size() - 1].getProperty ("curve", 1.0)) < 0.01,
+               "ramp: inserted point carries curve 0");
+
+        // Guards + JSONL.
+        check (! ok (cmd (ops, "set_tempo_curve", objN ({{ "index", 99 }, { "curve", 0.0 }}))), "ramp: bad index rejected");
+        check (! ok (cmd (ops, "set_tempo_curve", args1 ("index", 0))), "ramp: missing curve rejected");
+        auto rlog2 = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
+        bool curveU = false;
+        for (auto& ln : juce::StringArray::fromLines (rlog2))
+            if (ln.contains ("\"command\": \"set_tempo_curve\"") && ln.contains ("\"undoable\": true")) curveU = true;
+        check (curveU, "ramp: set_tempo_curve logged undoable:true");
+
+        // Clean up for the warp block: flat 120 map, step curve.
+        cmd (ops, "set_tempo_curve", objN ({{ "index", 0 }, { "curve", 1.0 }}));
+        while (seq.getNumTempos() > 1) cmd (ops, "remove_tempo_change", args1 ("index", 1));
+        cmd (ops, "set_tempo", args1 ("bpm", 120));
+    }
+
+    // ─── Wave V: audio WARP (auto-tempo time-stretch) ───
+    // setAutoTempo re-anchors the clip in BEATS: its seconds-length re-derives from
+    // the live tempo map IMMEDIATELY (no proxy wait) — the headless contract is
+    // that halving the tempo doubles the clip's seconds length. Stretching uses
+    // the engine's vendored SoundTouch (enabled at build). Warp MARKERS deferred.
+    std::cerr << "--- Wave V: audio warp (auto-tempo) ---\n";
+    {
+        auto wt = cmd (ops, "create_track", args1 ("name", "WarpTrack"))["data"].getProperty ("trackId", var()).toString();
+        auto wc = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", wt }, { "seconds", 2.0 }, { "freq", 311.0 }}));
+        check (ok (wc), "warp: 2s tone clip ok");
+        const auto wcid = wc["data"].getProperty ("clipId", var()).toString();
+        auto clipLen = [&]() -> double {
+            auto tv = trackById (wt);
+            auto cv = tv.getProperty ("clips", var());
+            if (auto* arr = cv.getArray())
+                for (auto& c : *arr)
+                    if (c.getProperty ("id", var()).toString() == wcid)
+                        return (double) c.getProperty ("length", 0.0);
+            return -1.0;
+        };
+        check (std::abs (clipLen() - 2.0) < 0.05, "warp: clip starts at 2.0s");
+
+        // Enable warp: 1:1 at the current tempo (sourceBpm defaults to the map).
+        auto w1 = cmd (ops, "set_clip_warp", objN ({{ "clipId", wcid }, { "autoTempo", true }}));
+        check (ok (w1), "warp: enable ok");
+        check (w1["data"].getProperty ("stretchMode", var()).toString().containsIgnoreCase ("soundtouch"),
+               "warp: stretch mode is SoundTouch (vendored stretcher compiled in)");
+        check (std::abs (clipLen() - 2.0) < 0.05, "warp: enabling at the same tempo is a 1:1 no-op");
+        {
+            auto tv = trackById (wt);
+            auto cv = tv.getProperty ("clips", var());
+            bool autoT = false; double srcBpm = 0;
+            if (auto* arr = cv.getArray())
+                for (auto& c : *arr)
+                    if (c.getProperty ("id", var()).toString() == wcid)
+                    { autoT = (bool) c.getProperty ("autoTempo", false); srcBpm = (double) c.getProperty ("sourceBpm", 0.0); }
+            check (autoT, "warp: snapshot clip carries autoTempo");
+            check (std::abs (srcBpm - 120.0) < 0.5, "warp: sourceBpm defaulted to the map tempo (120)");
+        }
+
+        // THE CONTRACT: halve the tempo -> the warped clip's seconds-length doubles.
+        check (ok (cmd (ops, "set_tempo", args1 ("bpm", 60))), "warp: tempo 120 -> 60 ok");
+        check (std::abs (clipLen() - 4.0) < 0.1, "warp: half tempo DOUBLES the clip length (4.0s)");
+        check (ok (cmd (ops, "set_tempo", args1 ("bpm", 120))), "warp: tempo back to 120 ok");
+        check (std::abs (clipLen() - 2.0) < 0.1, "warp: restoring tempo restores the length (2.0s)");
+
+        // Warp OFF: the clip is seconds-anchored again; tempo changes leave it alone.
+        check (ok (cmd (ops, "set_clip_warp", objN ({{ "clipId", wcid }, { "autoTempo", false }}))), "warp: disable ok");
+        cmd (ops, "set_tempo", args1 ("bpm", 60));
+        check (std::abs (clipLen() - 2.0) < 0.1, "warp: unwarped clip ignores the tempo change");
+        cmd (ops, "set_tempo", args1 ("bpm", 120));
+
+        // Guards + posture.
+        check (! ok (cmd (ops, "set_clip_warp", args1 ("clipId", wcid))), "warp: missing autoTempo rejected");
+        check (! ok (cmd (ops, "set_clip_warp", objN ({{ "clipId", "no-such" }, { "autoTempo", true }}))), "warp: bad clipId rejected");
+        auto wlog = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
+        bool warpU = false;
+        for (auto& ln : juce::StringArray::fromLines (wlog))
+            if (ln.contains ("\"command\": \"set_clip_warp\"") && ln.contains ("\"undoable\": true")) warpU = true;
+        check (warpU, "warp: set_clip_warp logged undoable:true");
+
+        cmd (ops, "remove_track", args1 ("trackId", wt));   // tidy
+    }
+
     std::cerr << "===== " << (checks - failures) << "/" << checks
               << " checks passed, " << failures << " failed =====\n\n";
     return failures;

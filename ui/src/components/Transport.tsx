@@ -156,15 +156,25 @@ export function Transport() {
           <div className="remote-pop tempomap-pop">
             <div className="remote-head"><strong>Tempo map</strong>
               <button className="mini" onClick={() => setMapOpen(false)}>x</button></div>
-            {tempoMap.map((p, i) => (
-              <div className="tm-row" key={`t-${i}`}>
-                <span>{fmt(p.time)}</span><span>{Math.round(p.bpm)} BPM</span>
-                {i > 0 ? (
-                  <button className="mini" title="Remove this tempo change"
-                    onClick={() => exec("remove_tempo_change", { index: i })}>x</button>
-                ) : <span className="tm-base">base</span>}
-              </div>
-            ))}
+            {tempoMap.map((p, i) => {
+              const ramps = Math.abs(p.curve ?? 1) < 0.9999 && i < tempoMap.length - 1;
+              return (
+                <div className="tm-row" key={`t-${i}`}>
+                  <span>{fmt(p.time)}</span><span>{Math.round(p.bpm)} BPM</span>
+                  {i < tempoMap.length - 1 && (
+                    <button className={`mini tm-curve ${ramps ? "on" : ""}`}
+                      title={ramps ? "Ramps (glides) to the next tempo — click for a step" : "Step (jumps) at the next tempo — click for a ramp"}
+                      onClick={() => exec("set_tempo_curve", { index: i, curve: ramps ? 1 : 0 })}>
+                      {ramps ? "/" : "⌐"}
+                    </button>
+                  )}
+                  {i > 0 ? (
+                    <button className="mini" title="Remove this tempo change"
+                      onClick={() => exec("remove_tempo_change", { index: i })}>x</button>
+                  ) : <span className="tm-base">base</span>}
+                </div>
+              );
+            })}
             {timeSigMap.map((p, i) => (
               <div className="tm-row" key={`s-${i}`}>
                 <span>{fmt(p.time)}</span><span>{p.numerator}/{p.denominator}</span>

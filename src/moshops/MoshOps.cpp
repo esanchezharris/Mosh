@@ -232,6 +232,7 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "rename_clip")       return cmdRenameClip (args);
     if (name == "set_clip_mute")     return cmdSetClipMute (args);
     if (name == "set_clip_gain")     return cmdSetClipGain (args);
+    if (name == "set_clip_warp")     return cmdSetClipWarp (args);
     if (name == "duplicate_clip")    return cmdDuplicateClip (args);
     if (name == "delete_time_range") return cmdDeleteTimeRange (args);
     if (name == "paste_clip")        return cmdPasteClip (args);
@@ -311,6 +312,7 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "list_track_outputs") return cmdListTrackOutputs (args);
     if (name == "set_track_output")   return cmdSetTrackOutput (args);
     if (name == "insert_tempo_change")    return cmdInsertTempoChange (args);
+    if (name == "set_tempo_curve")        return cmdSetTempoCurve (args);
     if (name == "remove_tempo_change")    return cmdRemoveTempoChange (args);
     if (name == "insert_time_sig_change") return cmdInsertTimeSigChange (args);
     if (name == "remove_time_sig_change") return cmdRemoveTimeSigChange (args);
@@ -592,19 +594,48 @@ juce::var MoshOps::cmdInsertTempoChange (const juce::var& args)
     const double bpm = (double) args.getProperty ("bpm", 0.0);
     if (bpm < 20.0 || bpm > 999.0) return errResult ("insert_tempo_change", "bpm must be 20..999");
 
+    // Optional curve: shapes the ramp FROM the PREVIOUS point TO this one is NOT how
+    // the engine models it — curve lives on the setting that STARTS a span (this
+    // setting's curve shapes the ramp from HERE to the NEXT point). 1.0 (default) =
+    // step (hold-then-jump); values in (-1, 1) ramp: <0 log, 0 linear, >0 exponential.
+    const double curve = juce::jlimit (-1.0, 1.0, (double) args.getProperty ("curve", 1.0));
+
     undoManager().beginNewTransaction ("insert_tempo_change");
     auto setting = edit.tempoSequence.insertTempo (tracktion::TimePosition::fromSeconds (time));
     if (setting == nullptr) return errResult ("insert_tempo_change", "insertTempo failed");
     setting->setBpm (bpm);
-    setting->setCurve (1.0f);   // step change (hold previous tempo, jump here)
+    setting->setCurve ((float) curve);
 
     logLine ("insert_tempo_change", args, true, {}, true);
     emitSnapshotInvalidated();
     auto* data = new DynamicObject();
     data->setProperty ("time", setting->getStartTime().inSeconds());
     data->setProperty ("bpm", setting->getBpm());
+    data->setProperty ("curve", (double) setting->getCurve());
     data->setProperty ("count", edit.tempoSequence.getNumTempos());
     return okResult ("insert_tempo_change", var (data));
+}
+
+juce::var MoshOps::cmdSetTempoCurve (const juce::var& args)
+{
+    auto& edit = eng.edit();
+    const int index = (int) args.getProperty ("index", -1);
+    if (index < 0 || index >= edit.tempoSequence.getNumTempos())
+        return errResult ("set_tempo_curve", "index must be 0..numTempos-1");
+    if (! args.hasProperty ("curve"))
+        return errResult ("set_tempo_curve", "missing 'curve'");
+    const double curve = juce::jlimit (-1.0, 1.0, (double) args.getProperty ("curve", 1.0));
+
+    // The curve on point N shapes the span FROM point N TO point N+1 (the engine's
+    // Section build gates the ramp subdivision on currTempo.curve != +-1).
+    undoManager().beginNewTransaction ("set_tempo_curve");
+    edit.tempoSequence.getTempo (index)->setCurve ((float) curve);
+    logLine ("set_tempo_curve", args, true, {}, true);
+    emitSnapshotInvalidated();
+    auto* data = new DynamicObject();
+    data->setProperty ("index", index);
+    data->setProperty ("curve", curve);
+    return okResult ("set_tempo_curve", var (data));
 }
 
 juce::var MoshOps::cmdRemoveTempoChange (const juce::var& args)
@@ -1243,6 +1274,51 @@ juce::var MoshOps::cmdSetClipGain (const juce::var& args)
     logLine ("set_clip_gain", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("set_clip_gain");
+}
+
+juce::var MoshOps::cmdSetClipWarp (const juce::var& args)
+{
+    // Audio warp (auto-tempo): the clip re-anchors in BEATS so its audio
+    // time-stretches to follow the tempo map. The position remap is IMMEDIATE
+    // (getMaximumLength reads the live tempoSequence), so a tempo change visibly
+    // re-lengths the clip in the next snapshot — fully headless-verifiable.
+    // Stretching uses the engine's vendored SoundTouch (TRACKTION_ENABLE_
+    // TIMESTRETCH_SOUNDTOUCH); free warp MARKERS are a deferred subsystem.
+    auto* ac = dynamic_cast<te::AudioClipBase*> (findClip (args.getProperty ("clipId", var()).toString()));
+    if (ac == nullptr) return errResult ("set_clip_warp", "not an audio clip");
+    if (! args.hasProperty ("autoTempo")) return errResult ("set_clip_warp", "missing 'autoTempo'");
+    const bool on = (bool) args.getProperty ("autoTempo", false);
+
+    undoManager().beginNewTransaction ("set_clip_warp");
+
+    if (on)
+    {
+        // Stretch mode: the requested name, validated against what this build
+        // compiles in (checkModeIsAvailable returns a usable fallback).
+        auto mode = te::TimeStretcher::defaultMode;
+        if (args.hasProperty ("mode"))
+            mode = te::TimeStretcher::getModeFromName (eng.engine(),
+                                                       args.getProperty ("mode", var()).toString());
+        mode = te::TimeStretcher::checkModeIsAvailable (mode);
+        ac->setTimeStretchMode (mode);
+
+        // Source BPM: explicit when given; else default to the map tempo at the
+        // clip's start, so enabling warp is a 1:1 no-op until the map changes.
+        const double defaultBpm = eng.edit().tempoSequence.getBpmAt (ac->getPosition().getStart());
+        const double sourceBpm = juce::jlimit (20.0, 999.0,
+            (double) args.getProperty ("sourceBpm", defaultBpm));
+        auto info = ac->getAudioFile().getInfo();
+        ac->getLoopInfo().setBpm (sourceBpm, info);
+    }
+    ac->setAutoTempo (on);
+
+    logLine ("set_clip_warp", args, true, {}, true);
+    emitSnapshotInvalidated();
+    auto* data = new DynamicObject();
+    data->setProperty ("clipId", ac->itemID.toString());
+    data->setProperty ("autoTempo", ac->getAutoTempo());
+    data->setProperty ("stretchMode", te::TimeStretcher::getNameOfMode (ac->getTimeStretchMode()));
+    return okResult ("set_clip_warp", var (data));
 }
 
 juce::var MoshOps::cmdDuplicateClip (const juce::var& args)
@@ -3876,15 +3952,58 @@ juce::var MoshOps::snapshot()
     // own beats->seconds conversion, so the UI's piecewise mapping starts exact.
     {
         Array<var> tempoMap;
+        bool anyRamp = false;
         for (int i = 0; i < edit.tempoSequence.getNumTempos(); ++i)
             if (auto* t = edit.tempoSequence.getTempo (i))
             {
                 auto* o = new DynamicObject();
                 o->setProperty ("time", t->getStartTime().inSeconds());
                 o->setProperty ("bpm", t->getBpm());
+                o->setProperty ("curve", (double) t->getCurve());
+                if (std::abs (t->getCurve()) < 0.9999f && i + 1 < edit.tempoSequence.getNumTempos())
+                    anyRamp = true;
                 tempoMap.add (var (o));
             }
         session->setProperty ("tempoMap", tempoMap);
+
+        // Tempo RAMPS (curve in (-1,1)): serialize the engine-faithful fine sections
+        // so the UI mapping stays exact. We reproduce the engine's own subdivision
+        // boundaries (tracktion_core Tempo.h: numSubdivisions = clamp(4 * beatSpan,
+        // 1, 100) per ramp span) and read time/bpm back through the engine's toTime /
+        // getBpmAt — the very piecewise approximation playback uses. Emitted ONLY
+        // when a ramp exists; step-only maps keep the lean tempoMap (the UI falls
+        // back to its exact piecewise-constant path).
+        if (anyRamp)
+        {
+            Array<var> sections;
+            auto& seq = edit.tempoSequence;
+            for (int i = 0; i < seq.getNumTempos(); ++i)
+            {
+                auto* t = seq.getTempo (i);
+                if (t == nullptr) continue;
+                auto* o0 = new DynamicObject();
+                o0->setProperty ("time", t->getStartTime().inSeconds());
+                o0->setProperty ("bpm", seq.getBpmAt (t->getStartTime()));
+                sections.add (var (o0));
+
+                if (i + 1 >= seq.getNumTempos() || std::abs (t->getCurve()) >= 0.9999f)
+                    continue;   // step span (or the open tail): one section suffices
+                const auto b0 = t->getStartBeat();
+                const auto b1 = seq.getTempo (i + 1)->getStartBeat();
+                const double span = (b1 - b0).inBeats();
+                const int subs = (int) std::clamp (4.0 * span, 1.0, 100.0);
+                for (int k = 1; k < subs; ++k)
+                {
+                    const auto bk = tracktion::BeatPosition::fromBeats (b0.inBeats() + span * (double) k / (double) subs);
+                    const auto tk = seq.toTime (bk);
+                    auto* o = new DynamicObject();
+                    o->setProperty ("time", tk.inSeconds());
+                    o->setProperty ("bpm", seq.getBpmAt (tk));
+                    sections.add (var (o));
+                }
+            }
+            session->setProperty ("tempoSections", sections);
+        }
 
         Array<var> sigMap;
         for (int i = 0; i < edit.tempoSequence.getNumTimeSigs(); ++i)
@@ -4199,6 +4318,14 @@ juce::var MoshOps::clipToVar (te::Clip& c)
         o->setProperty ("sourceFile", w->getCurrentSourceFile().getFullPathName());
         o->setProperty ("sourceLength", w->getSourceLength().inSeconds());
         o->setProperty ("gainDb", w->getGainDB());
+        // Audio warp (auto-tempo): the clip follows the tempo map when on.
+        o->setProperty ("autoTempo", w->getAutoTempo());
+        if (w->getAutoTempo())
+        {
+            o->setProperty ("stretchMode", te::TimeStretcher::getNameOfMode (w->getTimeStretchMode()));
+            auto info = w->getAudioFile().getInfo();
+            o->setProperty ("sourceBpm", w->getLoopInfo().getBpm (info));
+        }
     }
     else if (auto* mc = dynamic_cast<te::MidiClip*> (&c))
     {

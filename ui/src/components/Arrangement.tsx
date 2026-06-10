@@ -334,6 +334,17 @@ function ClipActions({ snapshot }: { snapshot: Snapshot }) {
           <span>{(single.gainDb ?? 0).toFixed(1)}</span>
         </label>
       )}
+      {single && single.type === "wave" && (
+        <button
+          className={single.autoTempo ? "on" : ""}
+          title={single.autoTempo
+            ? `Warp on — follows the tempo map (${single.stretchMode ?? "stretch"}, source ${Math.round(single.sourceBpm ?? 0)} BPM). Click to disable.`
+            : "Warp off — clip stays in seconds. Click to follow the tempo map (time-stretch)."}
+          onClick={() => exec("set_clip_warp", { clipId: single.id, autoTempo: !single.autoTempo })}
+        >
+          Warp
+        </button>
+      )}
       <button onClick={() => clips.forEach((c) => exec("duplicate_clip", { clipId: c.id }))}>Duplicate</button>
       <button className="danger" onClick={() => { clips.forEach((c) => exec("remove_clip", { clipId: c.id })); clearSelection(); }}>Delete</button>
       </>

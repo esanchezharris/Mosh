@@ -91,6 +91,11 @@ if (MOSH_BUILD_APP)
         JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:Mosh,JUCE_PRODUCT_NAME>"
         JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:Mosh,JUCE_VERSION>"
         JUCE_MODAL_LOOPS_PERMITTED=1
+        # Audio warp (auto-tempo time-stretch): enable the engine's VENDORED
+        # SoundTouch (modules/tracktion_engine/3rd_party/soundtouch — no new external
+        # dependency). Makes TimeStretcher::defaultMode = soundtouchBetter so warped
+        # clips genuinely time-stretch instead of Mode::disabled varispeed.
+        TRACKTION_ENABLE_TIMESTRETCH_SOUNDTOUCH=1
         # Mosh build identity / stage flags
         MOSH_VERSION_STRING="${PROJECT_VERSION}")
 

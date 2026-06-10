@@ -49,6 +49,11 @@ export type Clip = {
   sourceFile?: string;
   sourceLength?: number;
   notes?: MidiNote[];
+  // Audio warp (auto-tempo): the clip re-anchors in beats and time-stretches to
+  // follow the tempo map (SoundTouch). Wave clips only.
+  autoTempo?: boolean;
+  stretchMode?: string;
+  sourceBpm?: number;
   hasRenderLayer: boolean;
   renderLayer?: RenderLayer;
 };
@@ -209,8 +214,12 @@ export type Snapshot = {
     editFile: string;
     projectExtension?: string; // backend-owned project container extension (no leading dot)
     // SES-001 — the tempo MAP (additive; tempo/timeSig* above stay point 0).
-    tempoMap?: { time: number; bpm: number }[];
+    // curve: 1 = step (hold-then-jump), values in (-1,1) ramp to the next point.
+    tempoMap?: { time: number; bpm: number; curve?: number }[];
     timeSigMap?: { time: number; numerator: number; denominator: number }[];
+    // Ramps only: the engine-faithful fine sections (its own subdivision
+    // boundaries), making the UI mapping exact-by-construction through a ramp.
+    tempoSections?: { time: number; bpm: number }[];
     // Audio-engine gate + readout (wave: settings — MON-007 / FLY-004).
     audioEnabled?: boolean;
     bitDepth?: number;
