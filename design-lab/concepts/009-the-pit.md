@@ -52,3 +52,13 @@ house 3D style; rack-sculpts-the-centerpiece as the Color Rack's reason to exist
   level flux drives the slam. `ENGINE ●` chip in the transport shows link state.
 - **The song is geology:** each section reseeds the kifs fold — a different chunk
   of matter per section, so *where you are* is *what the rock looks like*.
+
+## v3 (2026-06-10) — Y2K console correction + toy physics
+
+- Chrome de-aged 20 years per user note (80s terminal -> 2000s console): scanlines
+  killed, plastic bevels + block shadows, segmented SSX-style meters, press states,
+  bounce motion. See HOUSE_STYLE v2.
+- Mass: **faceted normals** (flat low-poly light) + **PS1 vertex wobble** on twos;
+  fissures hardened into **embedded crystal shards** (treasure, not circuitry).
+- **It's a toy now:** drag orbits the mass, a tap pokes it (jolt + squash).
+- Moshi upgraded to the 3D component (010), bouncing with the beat beside the pit.

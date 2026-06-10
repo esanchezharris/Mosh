@@ -111,29 +111,54 @@
     font-family: var(--font-mono); font-size: 11.5px; letter-spacing: .07em; color: var(--bone); }
   #ask input::placeholder { color: rgba(246,242,235,.26); }
   #ask input:focus { border-bottom-color: rgba(204,255,35,.6); }
-  #moshi { position: fixed; bottom: 218px; left: 22px; width: 92px; height: 80px; z-index: 21;
-    pointer-events: none; }
+  #moshi { position: fixed; bottom: 206px; left: 18px; width: 122px; height: 110px;
+    z-index: 21; cursor: pointer; }
+  .moshi-canvas { position: absolute; inset: 0; width: 100%; height: 100%;
+    image-rendering: pixelated; }
+  .moshi-face { position: absolute; left: 50%; top: 42%; pointer-events: none;
+    transform: translate(-50%, -50%); display: flex; gap: .55em; align-items: center;
+    font-family: var(--font-display); font-weight: 900; color: var(--bone); }
+  .moshi-face span { display: inline-block; transition: transform .2s; }
+  .moshi-face.blink span { transform: scaleY(0.12); }
+  .moshi-face.wide span { transform: scaleY(1.4); }
 
-  /* ── PS2 CRUNCH — house style v1 (see design-lab/HOUSE_STYLE.md) ── */
-  #crt { position: fixed; inset: 0; z-index: 80; pointer-events: none;
-    background: repeating-linear-gradient(0deg, rgba(0,0,0,.18) 0 1px, transparent 1px 3px); }
+
+  /* ── Y2K CONSOLE — house style v2 (see design-lab/HOUSE_STYLE.md) ──
+     chunky plastic game-menu chrome: bevels, block shadows, segmented
+     meters, press states, bounce. No scanlines — wrong decade. */
   .slabpanel, .lhead, .lbody, #topbar {
-    background-image: radial-gradient(rgba(204,255,35,.05) 1px, transparent 1.01px);
+    background-image: radial-gradient(rgba(204,255,35,.04) 1px, transparent 1.01px);
     background-size: 3px 3px; }
-  .slabpanel, .lhead, .lbody, .clip, .pill, .deed, #recchip, .ghost, .badge { border-radius: 2px; }
+  .slabpanel, .lhead, .lbody { border-radius: 10px;
+    box-shadow: 0 0 0 2px #1d2010, 0 3px 0 #000, inset 0 1px 0 rgba(246,242,235,.07); }
+  #topbar { box-shadow: 0 3px 0 #000, inset 0 -1px 0 rgba(246,242,235,.05); }
+  .clip { border-radius: 8px; border-width: 2px; box-shadow: 0 2px 0 rgba(0,0,0,.85); }
+  .pill, #recchip, .ghost { border-radius: 9px; border-width: 2px;
+    box-shadow: 0 2px 0 #000; transition: transform .08s, box-shadow .08s; }
+  .pill:active, #recchip:active, .ghost:active { transform: translateY(2px); box-shadow: 0 0 0 #000; }
+  .badge { border-radius: 7px; box-shadow: 0 2px 0 #5d7607; }
+  .deed { border-radius: 9px; border-width: 2px; box-shadow: 0 2px 0 #000;
+    animation: din .45s cubic-bezier(.34,1.56,.64,1); }
+  body.rec #recchip { box-shadow: 0 2px 0 #5d7607;
+    animation: recbounce .5s cubic-bezier(.34,1.56,.64,1) infinite alternate; }
+  @keyframes recbounce { from { transform: scale(1); } to { transform: scale(1.1); } }
+  /* segmented meters — SSX boost-bar language */
+  .prow .track { height: 10px; border-radius: 3px; background: #0a0a09;
+    box-shadow: inset 0 0 0 1px #1d2010; }
+  .prow .track i { border-radius: 2px; box-shadow: none;
+    background: repeating-linear-gradient(90deg, var(--lime) 0 6px, #0e0e0d 6px 8px); }
+  .prow .track u { border-radius: 2px; width: 6px; height: 16px; box-shadow: 0 2px 0 #000; }
+  .lhead .vol { height: 8px; border-radius: 2px; }
+  .lhead .vol i { box-shadow: none;
+    background: repeating-linear-gradient(90deg, var(--lime) 0 4px, #0e0e0d 4px 6px); }
+  #sect { font-family: var(--font-display); font-weight: 900; font-size: 14px;
+    letter-spacing: .06em; transform: skewX(-6deg); }
   #wordmark b { text-shadow: none; }
-  .clip, .lhead .vol i, .prow .track i, .deed { box-shadow: none; }
-  .prow .track { height: 3px;
-    background: repeating-linear-gradient(90deg, rgba(246,242,235,.22) 0 1px, rgba(246,242,235,.05) 1px 10px); }
-  .prow .track u { border-radius: 0; width: 7px; height: 13px; box-shadow: none; }
   #phead { box-shadow: none; }
-  body.rec #recchip { box-shadow: none; animation: heat 1.1s steps(2, end) infinite; }
-  .deed { animation-timing-function: steps(4, end); }
   #moshi { image-rendering: pixelated; }
 </style>
 </head>
 <body>
-<div id="crt"></div>
 <canvas id="pit"></canvas>
 <div id="roomheat"></div>
 
@@ -175,7 +200,7 @@
 </div>
 
 <div id="ask"><input id="cmd" placeholder="tell moshi — “make the hook heavier”" autocomplete="off" /></div>
-<canvas id="moshi" width="46" height="40"></canvas>
+<div id="moshi"></div>
 
 <script>
 // THE PIT — answer to "where did my daw go / 3d / rougher / weirder".
@@ -280,15 +305,17 @@ void main() {
       outc = vec4(mix(GLOW, vec3(1.0), 0.4) * (0.85 + 0.15 * sin(u_time * 7.0)), 1.0);
     } else {
       vec3 n = normalAt(hp);
+      n = normalize(floor(n * 3.0 + 0.5) / 3.0);      // FACETS: flat low-poly light
       float diff = max(dot(n, normalize(vec3(0.5, 0.8, 0.6))), 0.0);
       float band = floor(diff * 3.0 + dth) / 3.0;     // FOUR BANDS. no gradients.
       vec3 col = vec3(0.030) + band * vec3(0.085, 0.09, 0.075);
       float rim = pow(1.0 - max(dot(n, -rd), 0.0), 3.0);
       col += LIME * step(0.55, rim + dth * 0.25) * 0.20;          // hard rim, dithered
-      float fis = exp(-gCrack * 70.0);                              // the fissures
-      float fband = floor(fis * 3.0 + dth) / 3.0;
-      col += mix(LIME, GLOW, u_bright) * fband
-           * (0.20 + 0.65 * u_energy + 2.6 * u_heat);
+      float fis = exp(-gCrack * 70.0);                  // fissures -> CRYSTAL SHARDS
+      float shard = step(0.78, fis + dth * 0.12);       // hard-edged embedded lime
+      float vein  = step(0.45, fis + dth * 0.12) - shard;
+      col += mix(LIME, GLOW, 0.6) * shard * (0.55 + 0.85 * u_energy + 2.2 * u_heat);
+      col += LIME * vein * (0.14 + 0.40 * u_energy + 1.1 * u_heat);
       outc = vec4(col, 1.0);
     }
   }
@@ -416,37 +443,179 @@ document.getElementById('render').onclick = () => {
   deed('re-imagining the mass · seed 3');
 };
 
-// ---------- Moshi, resident, watching its sculpture ----------
-const mc = document.getElementById('moshi'), mg = mc.getContext('2d');
-function drawMoshi(t, recAmt) {
-  mg.clearRect(0, 0, 46, 40);
-  mg.imageSmoothingEnabled = false;
-  const cx = 23, cy = 19, R = 12 * (1 + 0.06 * Math.sin(t * 1.4));
-  // chunky sprite: coarse polygon snapped to the pixel grid, no glow
-  mg.beginPath();
-  for (let i = 0; i <= 14; i++) {
-    const th = i / 14 * Math.PI * 2;
-    const r = R * (1 + 0.16 * Math.sin(th * 3 + t * 0.8));
-    const x = Math.round(cx + Math.cos(th) * r), y = Math.round(cy + Math.sin(th) * r * 0.9);
-    i ? mg.lineTo(x, y) : mg.moveTo(x, y);
-  }
-  mg.closePath();
-  mg.fillStyle = '#0d0d0c'; mg.fill();
-  mg.strokeStyle = recAmt > .5 ? '#D9FF4C' : '#CCFF23';
-  mg.lineWidth = 1; mg.stroke();
-  mg.fillStyle = '#F6F2EB';                                    // bracket eyes, pixel by pixel
-  mg.fillRect(cx - 8, cy - 5, 2, 2); mg.fillRect(cx - 6, cy - 3, 2, 2); mg.fillRect(cx - 8, cy - 1, 2, 2);
-  mg.fillRect(cx + 6, cy - 5, 2, 2); mg.fillRect(cx + 4, cy - 3, 2, 2); mg.fillRect(cx + 6, cy - 1, 2, 2);
-  mg.fillStyle = '#CCFF23';                                    // mouth block, opens when hot
-  mg.fillRect(cx - 3, cy + 3, 6, 3 + Math.round(3 * recAmt));
-  if (recAmt > 0.5 && Math.floor(t * 8) % 2 === 0) {           // ember flicker
-    mg.fillStyle = 'rgba(217,255,76,.5)';
-    mg.fillRect(cx - 2, cy + 1, 4, 2);
-  }
+// ---------- Moshi, resident: the 3D component (canonical copy lives in 010) ----------
+function MoshiBlob(host, opts = {}) {
+  const seed = opts.seed ?? Math.random() * 10;
+  const cv = document.createElement('canvas');
+  cv.className = 'moshi-canvas';
+  const face = document.createElement('div');
+  face.className = 'moshi-face';
+  face.innerHTML = '<span>&gt;</span><span>&lt;</span>';
+  host.appendChild(cv); host.appendChild(face);
+
+  const FRAG = `
+precision highp float;
+uniform vec2  u_res;
+uniform float u_t, u_tq, u_seed;
+uniform float u_arousal, u_heat, u_squash;
+uniform vec2  u_gaze;
+const vec3 LIME = vec3(0.800, 1.000, 0.137);
+const vec3 GLOW = vec3(0.851, 1.000, 0.298);
+float hash31(vec3 p){ p=fract(p*0.3183099+vec3(.1,.2,.3)); p*=17.0;
+  return fract(p.x*p.y*p.z*(p.x+p.y+p.z)); }
+float noise3(vec3 p){ vec3 i=floor(p), f=fract(p); vec3 u=f*f*(3.0-2.0*f);
+  return mix(mix(mix(hash31(i),hash31(i+vec3(1,0,0)),u.x),
+                 mix(hash31(i+vec3(0,1,0)),hash31(i+vec3(1,1,0)),u.x),u.y),
+             mix(mix(hash31(i+vec3(0,0,1)),hash31(i+vec3(1,0,1)),u.x),
+                 mix(hash31(i+vec3(0,1,1)),hash31(i+vec3(1,1,1)),u.x),u.y),u.z); }
+float smin(float a,float b,float k){ float h=clamp(.5+.5*(b-a)/k,0.,1.);
+  return mix(b,a,h)-k*h*(1.-h); }
+float bayer(vec2 fc){ float b=mod(fc.x,2.0)*2.0+mod(fc.y,2.0); vec2 f2=floor(fc/2.0);
+  return (b*4.0+mod(f2.x,2.0)*2.0+mod(f2.y,2.0))/16.0; }
+float map(vec3 p){
+  float sq = 1.0 - u_squash * 0.45;                 // squash & stretch, volume-ish
+  p.y *= 1.0 / sq; p.x *= sq; p.z *= sq;
+  float t = u_t * 0.8 + u_seed;
+  vec3 q = p;
+  float d = length(q) - 0.50 * (1.0 + 0.04 * sin(u_t * 1.3 + u_seed));
+  d = smin(d, length(q - vec3( 0.33*sin(t*.50+1.0), 0.28*cos(t*.40),  0.14*sin(t*.60))) - 0.25, 0.26);
+  d = smin(d, length(q - vec3(-0.36*sin(t*.35),     0.24*cos(t*.45+2.0), -0.12*cos(t*.30))) - 0.22, 0.26);
+  d = smin(d, length(q - vec3( 0.20*cos(t*.30+4.0), -0.34*sin(t*.38),  0.16*sin(t*.45))) - 0.19, 0.26);
+  d = smin(d, length(q - vec3(-0.15, 0.36*sin(t*.27+1.7), 0.10)) - 0.17, 0.26);
+  float amp = mix(0.008, 0.13, u_arousal * u_arousal);
+  d -= amp * (noise3(q * mix(3.0, 8.5, u_arousal) + u_tq) - 0.5) * 2.0;
+  return d;
 }
+vec3 normalAt(vec3 p){ const vec2 e = vec2(.004,-.004);
+  return normalize(e.xyy*map(p+e.xyy)+e.yyx*map(p+e.yyx)+e.yxy*map(p+e.yxy)+e.xxx*map(p+e.xxx)); }
+void main(){
+  vec2 uv = (gl_FragCoord.xy - 0.5*u_res) / min(u_res.x, u_res.y);
+  float dth = bayer(gl_FragCoord.xy);
+  vec3 ro = vec3(0.0, 0.0, 1.9);
+  vec3 rd = normalize(vec3(uv, -1.45));
+  float t = 0.0; vec3 hp; bool hit = false;
+  for (int i = 0; i < 56; i++) {
+    hp = ro + rd * t;
+    float d = map(hp);
+    if (d < 0.004) { hit = true; break; }
+    t += d * 0.9;
+    if (t > 4.0) break;
+  }
+  vec4 outc = vec4(0.0);
+  if (hit) {
+    vec3 n = normalAt(hp);
+    n = normalize(floor(n * 3.0 + 0.5) / 3.0);        // FACETS — flat low-poly light
+    float diff = max(dot(n, normalize(vec3(0.5, 0.8, 0.6))), 0.0);
+    float band = floor(diff * 3.0 + dth) / 3.0;
+    vec3 col = vec3(0.045) + band * vec3(0.065, 0.07, 0.06);
+    float rim = pow(1.0 - max(dot(n, -rd), 0.0), 2.2);
+    col += LIME * step(0.6, rim + dth * 0.22) * (0.16 + 0.25 * u_heat);
+    // the mouth — glossy lime decal, follows the gaze a little, opens with heat
+    vec3 mdir = normalize(vec3(u_gaze.x * 0.30, -0.34 + u_gaze.y * 0.18, 1.0));
+    float ang = acos(clamp(dot(normalize(hp), mdir), -1.0, 1.0));
+    float mr = 0.30 + 0.14 * u_heat + 0.06 * u_squash;
+    float mouth = smoothstep(mr, mr - 0.07, ang);
+    col = mix(col, LIME * (0.78 + 0.30 * u_heat), mouth);
+    // ember: banded heart, no halo
+    float ember = u_heat * exp(-2.6 * length(hp)) * (0.7 + 0.3 * sin(u_t * 7.0));
+    col += GLOW * (floor(ember * 3.0 + dth) / 3.0) * 0.55 * (1.0 - mouth);
+    outc = vec4(col, 1.0);
+  }
+  gl_FragColor = outc;
+}`;
+  const VERT = 'attribute vec2 a; void main(){ gl_Position = vec4(a, 0.0, 1.0); }';
+  const gl = cv.getContext('webgl', { antialias: false, alpha: true, premultipliedAlpha: false });
+  function sh(ty, src) {
+    const s = gl.createShader(ty);
+    gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+    return s;
+  }
+  const prog = gl.createProgram();
+  gl.attachShader(prog, sh(gl.VERTEX_SHADER, VERT));
+  gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FRAG));
+  gl.linkProgram(prog); gl.useProgram(prog);
+  const buf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
+  const al = gl.getAttribLocation(prog, 'a');
+  gl.enableVertexAttribArray(al);
+  gl.vertexAttribPointer(al, 2, gl.FLOAT, false, 0, 0);
+  const U = {};
+  for (const n of ['u_res','u_t','u_tq','u_seed','u_arousal','u_heat','u_squash','u_gaze'])
+    U[n] = gl.getUniformLocation(prog, n);
+
+  function resize() {
+    cv.width = Math.max(24, Math.floor(host.clientWidth / 3));   // chunky on purpose
+    cv.height = Math.max(24, Math.floor(host.clientHeight / 3));
+    gl.viewport(0, 0, cv.width, cv.height);
+    face.style.fontSize = Math.round(host.clientWidth * 0.17) + 'px';
+  }
+  resize();
+  if (typeof ResizeObserver !== 'undefined') new ResizeObserver(resize).observe(host);
+
+  const P = { arousal: 0.08, heat: 0, gx: 0, gy: 0 };
+  const cur = { arousal: 0.08, heat: 0 };
+  let squash = 0, squashV = 0, tq = 0, lastTick = 0;
+  const t0 = performance.now() + seed * 997;
+
+  // blink: alive even when idle
+  (function blink() {
+    setTimeout(() => {
+      face.classList.add('blink');
+      setTimeout(() => { face.classList.remove('blink'); blink(); }, 110);
+    }, 1600 + Math.random() * 3800);
+  })();
+
+  function frame(now) {
+    const t = (now - t0) / 1000;
+    cur.arousal += (P.arousal - cur.arousal) * 0.06;
+    cur.heat += (P.heat - cur.heat) * 0.07;
+    // damped spring with overshoot — squash & stretch, never robotic
+    squashV += (-squash * 0.16 - squashV * 0.14);
+    squash += squashV;
+    if (t - lastTick > 1 / 12) { lastTick = t; tq = t; }   // wobble on twos
+    // eyes ride the gaze
+    face.style.transform =
+      `translate(calc(-50% + ${(P.gx * 13).toFixed(1)}%), calc(-50% + ${(P.gy * 11).toFixed(1)}%))`;
+    gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.uniform2f(U.u_res, cv.width, cv.height);
+    gl.uniform1f(U.u_t, t); gl.uniform1f(U.u_tq, tq); gl.uniform1f(U.u_seed, seed);
+    gl.uniform1f(U.u_arousal, cur.arousal);
+    gl.uniform1f(U.u_heat, cur.heat);
+    gl.uniform1f(U.u_squash, Math.max(-0.6, Math.min(0.85, squash)));
+    gl.uniform2f(U.u_gaze, P.gx, P.gy);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  return {
+    el: host,
+    set(p) { Object.assign(P, p); },
+    pulse(amount = 0.55) { squashV += amount * 0.45; },          // beat hit
+    poke() {                                                      // indignant squish
+      squashV += 0.95 * 0.45;
+      face.classList.add('wide');
+      setTimeout(() => face.classList.remove('wide'), 450);
+      const a0 = P.arousal;
+      P.arousal = Math.min(1, a0 + 0.45);
+      setTimeout(() => { P.arousal = a0; }, 900);
+    },
+  };
+}
+const moshi = MoshiBlob(document.getElementById('moshi'), { seed: 3.1 });
+document.getElementById('moshi').addEventListener('pointerdown', () => moshi.poke());
+addEventListener('mousemove', e => {
+  const r = moshi.el.getBoundingClientRect();
+  const dx = (e.clientX - (r.left + r.width / 2)) / innerWidth;
+  const dy = (e.clientY - (r.top + r.height / 2)) / innerHeight;
+  moshi.set({ gx: Math.max(-1, Math.min(1, dx * 3)), gy: Math.max(-1, Math.min(1, dy * 3)) });
+});
 
 // ---------- the loop: beat clock, on-twos rotation, uniforms ----------
 let rotA = 0, rotB = 0, rotTA = 0, rotTB = 0, lastBeat = -1, lastTick = 0, lastSect = -1;
+let wobA = 0, wobB = 0;
 let onsetEnv = 0, recAmt = 0, energy = .4, tq = 0;
 let enginePos = 0, engineEnergy = 0;
 const phead = document.getElementById('phead');
@@ -466,6 +635,7 @@ function frame(now) {
     lastBeat = beatIdx;
     const hard = beatIdx % 4 === 0;
     onsetEnv = hard ? 1 : 0.45;
+    moshi.pulse(hard ? 0.8 : 0.35);
     rotTA += (Math.random() * 2.2 - 1.1) * (hard ? 1 : 0.4);
     rotTB += (Math.random() * 1.4 - 0.7) * (hard ? 1 : 0.4);
   }
@@ -483,6 +653,8 @@ function frame(now) {
     lastTick = t;
     rotA += (rotTA - rotA) * 0.5;
     rotB += (rotTB - rotB) * 0.5;
+    wobA = (Math.random() - 0.5) * 0.013;             // PS1 vertex swim, on twos
+    wobB = (Math.random() - 0.5) * 0.013;
     tq = t;
   }
 
@@ -497,8 +669,8 @@ function frame(now) {
   gl.uniform2f(U.u_res, cv.width, cv.height);
   gl.uniform1f(U.u_time, t);
   gl.uniform1f(U.u_tq, tq);
-  gl.uniform1f(U.u_rotA, rotA);
-  gl.uniform1f(U.u_rotB, rotB);
+  gl.uniform1f(U.u_rotA, rotA + wobA);
+  gl.uniform1f(U.u_rotB, rotB + wobB);
   gl.uniform1f(U.u_spin, (tPos * 2) % 1 * 6.2831853);   // one revolution per 8 bars
   gl.uniform1f(U.u_grit, axes.grit);
   gl.uniform1f(U.u_air, axes.air);
@@ -510,9 +682,25 @@ function frame(now) {
   gl.uniform1f(U.u_sect, sectIdx);
   gl.drawArrays(gl.TRIANGLES, 0, 3);
 
-  drawMoshi(t, recAmt);
+  moshi.set({ heat: recAmt, arousal: Math.min(1, energy * 0.7 + axes.grit * 0.35) });
   requestAnimationFrame(frame);
 }
+// the mass is a toy: drag orbits it, a tap pokes it
+cv.style.cursor = 'grab';
+let dragAt = null, dragged = false;
+cv.addEventListener('pointerdown', e => { dragAt = [e.clientX, e.clientY]; dragged = false; });
+addEventListener('pointermove', e => {
+  if (!dragAt) return;
+  const dx = e.clientX - dragAt[0], dy = e.clientY - dragAt[1];
+  if (Math.abs(dx) + Math.abs(dy) > 5) dragged = true;
+  rotTA += dx * 0.006; rotTB += dy * 0.004;
+  dragAt = [e.clientX, e.clientY];
+});
+addEventListener('pointerup', () => {
+  if (dragAt && !dragged) { onsetEnv = 1; rotTA += (Math.random() - 0.5) * 1.2; moshi.pulse(0.5); }
+  dragAt = null;
+});
+
 requestAnimationFrame(frame);
 deed('session restored · 3 tracks');
 

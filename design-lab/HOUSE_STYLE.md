@@ -1,59 +1,66 @@
-# HOUSE STYLE v1 — "PS2 crunch"
+# HOUSE STYLE v2 — "Y2K console crunch"
 
-*Decided 2026-06-10 from user direction: "chunky pixelation… nostalgic PlayStation 2
-vibe… I kind of wish more of it matched the centerpiece's retro gaming console
-sensibility. It just looks very sleek on every other surface." This is the register
-for ALL lab surfaces until revised. Born in [009 THE PIT](concepts/009-the-pit.md).*
+*v2, 2026-06-10. The v1 chrome overshot the decade: scanlines + terminal-green mono +
+`steps()` motion read **80s/90s Terminator/WarGames** ("boomer malaise"). The target
+is **2000s console nostalgia — Crash Bandicoot / PS2-era game UI**: chunky, plastic,
+bouncy, FUN. The world rendering (dithered chunky 3D) was right and survives intact.*
 
 ## The register, in one line
 
-**Low-poly chunk + crisp HUD** — chunky dithered 3D the way a PS2 drew it, with sharp
-mono text on top, exactly the way PS2 games drew *their* HUDs. No soft glows anywhere.
+**A PS2 game, not a mainframe** — flat-shaded low-poly world at quarter-res, wrapped
+in chunky plastic game-menu chrome that bounces when you touch it.
 
-## Rules
+## The decade test (pin this)
 
-### 3D / canvas surfaces (the world)
-1. **Quarter-resolution buffers, nearest-neighbor upscale** (`canvas { image-rendering:
-   pixelated }`, internal res = viewport/4; canvas-2D scenes may use /2 to keep
-   in-canvas text legible).
-2. **No gradients in shading.** Quantize to 4–6 bands through a **4×4 Bayer ordered
-   dither** (the `bayer(gl_FragCoord.xy)` helper in 002/009). Posterize-with-dither at
-   the end of the shader is the cheap retrofit: `col = floor(col * N + bayer) / N`.
-3. **Animate on twos:** geometry/texture time snaps at **12 fps** (`floor(t*12)/12`)
-   while input params and the HUD run at 60. Things lurch; they never glide.
-4. **No bloom, no shadowBlur.** Emission is a brighter band, not a halo.
+| reads 80s terminal — BANNED | reads 2000s console — REQUIRED |
+|---|---|
+| CRT scanline overlays | clean pixels; the chunk IS the texture |
+| hairline 1px seams | bold 2px outlines + drop-block shadows (`0 3px 0 #000`) |
+| sharp 2px corners everywhere | chunky rounded plastic (~10px radius) |
+| all-mono green type | big rounded display headers; mono only for values |
+| `steps()` robotic motion | **bounce** — overshoot bezier, squash & stretch |
+| thin-line sliders | **segmented block meters** (SSX boost-bar language) |
+| static chrome | press states — buttons physically depress |
+| screensaver centerpiece | a **toy** — drag it, poke it, it reacts |
 
-### Chrome (the HUD)
-5. **Text stays crisp** — vector mono/display type is period-correct (PS2 HUDs were
-   sharp over chunky worlds). Don't pixelate type.
-6. **Hard edges:** 1px solid seams (`--seam: 0 0 0 1px #232812`-class), border-radius
-   ≤ 3px, **zero box-shadow glows**.
-7. **Dither fills on slabs:** 3px lime-speckle (`radial-gradient` dot grid) instead of
-   flat fills.
-8. **Square slider thumbs**, notched tick tracks (repeating-linear-gradient).
-9. **UI animation in steps():** pulses `steps(2)`, entries `steps(4)`. Nothing eases
-   smoothly.
-10. **Scanline overlay** on every surface: 1px black @ 3px pitch, ~18% — the cheapest
-    cohesion device in the whole register.
-11. **Moshi is a sprite:** drawn into a ~46×40 buffer, pixel-snapped polygon, rect
-    eyes/mouth, upscaled pixelated. No glow; state = outline color + mouth height +
-    1-bit flicker.
+## World rules (3D / canvas — unchanged from v1, plus two)
 
-## Why this register is RIGHT for Mosh (not just nostalgia)
+1. **Quarter-res buffers, nearest-neighbor upscale** (`image-rendering: pixelated`).
+2. **Bayer-dithered band shading** (4–6 bands), no gradients, no bloom — emission is
+   a brighter band, never a halo.
+3. **Animate on twos** — geometry time snaps at 12 fps; inputs and HUD run at 60.
+4. **NEW — faceted normals:** quantize the surface normal before lighting
+   (`n = normalize(floor(n * 3.0 + 0.5) / 3.0)`) → flat-shaded low-poly facets,
+   the Crash-era silhouette.
+5. **NEW — vertex wobble:** tiny rotation jitter per on-twos tick — PS1 edges swim.
 
-- It's **anti-slop by construction** — the "vibe-coded" look is soft gradients +
-  bloom; banded dither physically can't produce it.
-- It's **honest about machinery** — quantization shows the grid, which suits a tool
-  that says "there's a creature in the machine."
-- It's **cheap and portable** — every rule above is trivial in SkiaSharp/SKSL
-  (the Avalonia path), and quarter-res raymarching is laptop-friendly.
-- It ties to the field notes: motif 5 (dither dust), riomadeit's CRT/WMP nostalgia,
-  obtainer's RGB scatter.
+## Chrome rules (the game menu)
+
+6. **Plastic slabs:** dark dither-speckle fill, ~10px radius, 2px solid edge ring +
+   `0 3px 0 #000` block shadow + 1px inner top-light. Panels look pickup-able.
+7. **Game buttons:** 2px outline, block shadow; `:active` = translateY(2px) + shadow
+   collapse (the button depresses). REC is a big lime button that breathes by
+   *scaling*, not glowing.
+8. **Segmented meters everywhere a value lives:** lime blocks on a dark well
+   (repeating-gradient blocks), chunky notch thumbs. No thin lines.
+9. **Type:** heavy rounded display for names/sections (big, occasionally skewed for
+   speed); tabular mono strictly for timecode/BPM/values. Crisp — PS2 HUDs were sharp.
+10. **Motion:** every entry/press uses overshoot (`cubic-bezier(.34,1.56,.64,1)`-class)
+    with squash & stretch. Nothing eases linearly; nothing steps.
+11. **Moshi is a 3D component** — `MoshiBlob` (experiment 010): mini raymarched SDF
+    blob, faceted + dithered like the world, cursor-tracking eyes, beat squash,
+    poke-to-squish, REC ember. The 2D sprite is retired.
+
+## Why this is still anti-slop
+
+Banded dither + flat facets physically can't produce the soft-gradient "vibe-coded"
+look; bounce + press states make the UI feel like a *thing*, not a dashboard; and
+every rule ports to SkiaSharp/SKSL for the Avalonia future.
 
 ## Status
 
-- **Full treatment:** 009 THE PIT, 008 POSSESSION (chrome), 002 SPECIMEN, 001 HEARTH v2.
-- **Light pass (res-drop + scanlines):** 003, 004, 006, 007. 005 scanlines only
-  (DOM goo study — re-render in canvas when revisited).
-- **Engine feed:** 009 carries the reference client (poll `127.0.0.1:47873`,
-  `MOSH_LAB_FEED=1`). Copy it into other experiments as they're revisited.
+- **Full v2:** 009 THE PIT (faceted + wobble + interactive + 3D Moshi), 010 MOSHI
+  (the component workbench), 008 POSSESSION (chrome + 3D Moshi).
+- **Scanlines removed lab-wide** (they were the wrong decade); 001–007 keep res-crunch
+  + dither and adopt full v2 chrome as each is revisited.
+- Engine feed: 009 carries the reference client (`MOSH_LAB_FEED=1`, port 47873).

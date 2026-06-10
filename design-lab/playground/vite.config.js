@@ -20,6 +20,7 @@ export default defineConfig({
         terrarium: resolve(root, 'experiments/007-terrarium/index.html'),
         possession: resolve(root, 'experiments/008-possession/index.html'),
         thePit: resolve(root, 'experiments/009-the-pit/index.html'),
+        moshiComponent: resolve(root, 'experiments/010-moshi/index.html'),
       },
     },
   },
