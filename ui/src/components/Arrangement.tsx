@@ -168,6 +168,12 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
           </div>
         </div>
 
+        {/* Arranger strip (Stage 23): sections over the timeline. */}
+        <div className="tl-sections">
+          <div className="lane-gutter">sections</div>
+          <SectionStrip snapshot={snapshot} pxPerSec={pxPerSec} barSec={spb * bpb} />
+        </div>
+
         <div className="tl-body">
           <div className="heads" ref={headsRef}>
             {snapshot.tracks.map((tr, row) => (
@@ -282,6 +288,150 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+// The arranger strip (Stage 23). create_section is idempotent-by-name, so
+// move/resize are just re-creates; delete is remove_section. Click seeks,
+// shift-click loops the section.
+function SectionStrip({ snapshot, pxPerSec, barSec }: { snapshot: Snapshot; pxPerSec: number; barSec: number }) {
+  const exec = useStore((s) => s.exec);
+  const sections = snapshot.session.sections ?? [];
+  const barPx = barSec * pxPerSec;
+  const stripRef = useRef<HTMLDivElement>(null);
+  const [draft, setDraft] = useState<{ x0: number; x1: number } | null>(null);
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const drag = useRef<{ name: string; kind: "move" | "resize"; startX: number; orig: { startBar: number; lengthBars: number } } | null>(null);
+
+  const nextName = () => {
+    const used = new Set(sections.map((sc) => sc.name));
+    for (const c of "ABCDEFGHIJKLMNOPQRSTUVWXYZ") if (!used.has(c)) return c;
+    return `S${sections.length + 1}`;
+  };
+
+  const onStripDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.target !== stripRef.current) return;
+    const rect = stripRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    setDraft({ x0: x, x1: x });
+  };
+  const onStripMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (draft) {
+      const rect = stripRef.current!.getBoundingClientRect();
+      setDraft({ ...draft, x1: e.clientX - rect.left });
+      return;
+    }
+    const d = drag.current;
+    if (!d) return;
+    const db = Math.round((e.clientX - d.startX) / barPx);
+    if (d.kind === "move") {
+      const startBar = Math.max(1, d.orig.startBar + db);
+      if (startBar !== d.orig.startBar)
+        void exec("create_section", { name: d.name, startBar, lengthBars: d.orig.lengthBars });
+    } else {
+      const lengthBars = Math.max(1, d.orig.lengthBars + db);
+      if (lengthBars !== d.orig.lengthBars)
+        void exec("create_section", { name: d.name, startBar: d.orig.startBar, lengthBars });
+    }
+  };
+  const onStripUp = () => {
+    if (draft) {
+      const [a, b] = [Math.min(draft.x0, draft.x1), Math.max(draft.x0, draft.x1)];
+      setDraft(null);
+      if (b - a > 8) {
+        const startBar = Math.floor(a / barPx) + 1;
+        const lengthBars = Math.max(1, Math.round((b - a) / barPx));
+        void exec("create_section", { name: nextName(), startBar, lengthBars });
+      }
+    }
+    drag.current = null;
+  };
+
+  const COLORS = ["#6c5cff", "#38d39f", "#ffb454", "#ff5c7a", "#3b9fe0", "#b06cff"];
+  return (
+    <div
+      className="section-strip"
+      ref={stripRef}
+      style={{ width: RULER_SECONDS * pxPerSec }}
+      onPointerDown={onStripDown}
+      onPointerMove={onStripMove}
+      onPointerUp={onStripUp}
+    >
+      {sections.map((sc, i) => (
+        <div
+          key={sc.name}
+          className="section-block"
+          style={{
+            left: (sc.startBar - 1) * barPx,
+            width: Math.max(12, sc.lengthBars * barPx - 1),
+            background: COLORS[i % COLORS.length],
+          }}
+          title={`${sc.name} · bar ${sc.startBar} +${sc.lengthBars} — click: seek · shift: loop · drag: move · 2×: rename · right-click: delete`}
+          onPointerDown={(e) => {
+            e.stopPropagation();
+            if (e.button === 2) return;
+            (e.target as HTMLElement).setPointerCapture(e.pointerId);
+            drag.current = { name: sc.name, kind: "move", startX: e.clientX, orig: { startBar: sc.startBar, lengthBars: sc.lengthBars } };
+          }}
+          onPointerMove={onStripMove}
+          onPointerUp={onStripUp}
+          onClick={(e) => {
+            const start = (sc.startBar - 1) * barSec;
+            if (e.shiftKey)
+              void exec("set_transport", { loop: true, loopStart: start, loopEnd: start + sc.lengthBars * barSec, position: start });
+            else void exec("set_transport", { position: start });
+          }}
+          onDoubleClick={(e) => { e.stopPropagation(); setRenaming(sc.name); }}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            void exec("remove_section", { name: sc.name });
+          }}
+        >
+          {renaming === sc.name ? (
+            <input
+              className="section-rename"
+              autoFocus
+              defaultValue={sc.name}
+              onFocus={(ev) => ev.target.select()}
+              onPointerDown={(ev) => ev.stopPropagation()}
+              onBlur={(ev) => {
+                const name = ev.target.value.trim();
+                setRenaming(null);
+                if (name && name !== sc.name) {
+                  void exec("remove_section", { name: sc.name });
+                  void exec("create_section", { name, startBar: sc.startBar, lengthBars: sc.lengthBars });
+                }
+              }}
+              onKeyDown={(ev) => {
+                if (ev.key === "Enter") (ev.target as HTMLInputElement).blur();
+                if (ev.key === "Escape") setRenaming(null);
+              }}
+            />
+          ) : (
+            <span className="section-name">{sc.name}</span>
+          )}
+          <span
+            className="section-resize"
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              (e.target as HTMLElement).setPointerCapture(e.pointerId);
+              drag.current = { name: sc.name, kind: "resize", startX: e.clientX, orig: { startBar: sc.startBar, lengthBars: sc.lengthBars } };
+            }}
+            onPointerMove={onStripMove}
+            onPointerUp={onStripUp}
+          />
+        </div>
+      ))}
+      {draft && (
+        <div
+          className="section-draft"
+          style={{ left: Math.min(draft.x0, draft.x1), width: Math.abs(draft.x1 - draft.x0) }}
+        />
+      )}
+      {sections.length === 0 && !draft && <span className="section-hint">drag to mark a section</span>}
     </div>
   );
 }

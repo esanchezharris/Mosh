@@ -632,4 +632,21 @@ juce::var MoshOps::cmdCreateSection (const juce::var& args)
     return okResult ("create_section");
 }
 
+// Stage 23: the arranger strip needs delete (create_section already moves/
+// resizes idempotently by name).
+juce::var MoshOps::cmdRemoveSection (const juce::var& args)
+{
+    const auto name = args.getProperty ("name", var()).toString();
+    if (name.isEmpty()) return errResult ("remove_section", "missing 'name'");
+    auto arrange = eng.edit().state.getChildWithName (MOSH_ARRANGE);
+    auto node = arrange.isValid() ? arrange.getChildWithProperty ("name", name) : juce::ValueTree();
+    if (! node.isValid()) return errResult ("remove_section", "no section: " + name);
+
+    undoManager().beginNewTransaction ("remove_section");
+    arrange.removeChild (node, &undoManager());
+    logLine ("remove_section", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("remove_section");
+}
+
 } // namespace mosh

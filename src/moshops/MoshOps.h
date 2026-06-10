@@ -159,6 +159,7 @@ private:
     juce::var cmdSetClipStretch  (const juce::var& args);
     juce::var cmdSliceClip       (const juce::var& args);
     juce::var cmdCreateSection   (const juce::var& args);
+    juce::var cmdRemoveSection   (const juce::var& args);   // Stage 23
     // Stage 8 — replay harness + determinism (phase0 §4). MoshOpsStage8.cpp.
     juce::var cmdGetStateHash    (const juce::var& args);
     juce::var cmdGenerateAsset   (const juce::var& args);

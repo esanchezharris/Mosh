@@ -178,6 +178,7 @@ juce::var MoshOps::dispatch (const juce::String& name, const juce::var& args)
     if (name == "set_clip_stretch")  return cmdSetClipStretch (args);
     if (name == "slice_clip")        return cmdSliceClip (args);
     if (name == "create_section")    return cmdCreateSection (args);
+    if (name == "remove_section")   return cmdRemoveSection (args);
     // Stage 8 — replay harness + determinism
     if (name == "get_state_hash")    return cmdGetStateHash (args);
     if (name == "generate_asset")    return cmdGenerateAsset (args);

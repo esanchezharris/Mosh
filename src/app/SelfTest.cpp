@@ -1263,6 +1263,25 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         cmd (ops, "remove_track", args1 ("trackId", t20id));
     }
 
+    // --- Stage 23: arranger sections (create idempotence + remove) ---
+    {
+        std::cerr << "--- Stage 23: arranger sections ---\n";
+        check (ok (cmd (ops, "create_section", objN ({{ "name", "A" }, { "startBar", 1 }, { "lengthBars", 4 }}))),
+               "create_section ok");
+        check (ok (cmd (ops, "create_section", objN ({{ "name", "A" }, { "startBar", 5 }, { "lengthBars", 8 }}))),
+               "re-create moves/resizes (idempotent by name)");
+        auto snap = ops.snapshot();
+        auto sections = snap["session"].getProperty ("sections", var());
+        check (sections.size() == 1 && (int) sections[0].getProperty ("startBar", 0) == 5
+                   && (int) sections[0].getProperty ("lengthBars", 0) == 8,
+               "snapshot carries the moved section");
+        check (ok (cmd (ops, "remove_section", args1 ("name", "A"))), "remove_section ok");
+        check (ops.snapshot()["session"].getProperty ("sections", var()).size() == 0, "section gone");
+        check (ok (cmd (ops, "undo")), "undo remove ok");
+        check (ops.snapshot()["session"].getProperty ("sections", var()).size() == 1, "undo restores the section");
+        cmd (ops, "remove_section", args1 ("name", "A"));
+    }
+
     std::cerr << "===== " << (checks - failures) << "/" << checks
               << " checks passed, " << failures << " failed =====\n\n";
     return failures;

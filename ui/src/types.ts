@@ -126,6 +126,7 @@ export type Snapshot = {
     audioError?: string;
     masterVolumeDb?: number;
     metronome?: boolean;
+    sections?: { name: string; startBar: number; lengthBars: number }[];
   };
   tracks: Track[];
   transport: Transport;
