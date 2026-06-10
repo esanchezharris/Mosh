@@ -1,7 +1,8 @@
 # Rung 1 — trap-03: BWB "How to Make Trap Beats • Rhythm" (18 min)
 
-**Outcome: silver (gold-candidate)** — L1 ✓ · L2 = 1.0 (corrector-verified
-claims) · judge = 4.5 · awaiting Emilio's ears:
+**Outcome: silver (gold-candidate), NOW AUDIBLE** — L1 ✓ · L2 = 1.0
+(corrector-verified claims) · judge = 4.0 · bounce peak **−2.5 dBFS** (the
+silence guard watches this now) · awaiting Emilio's ears:
 **listen to `bounce-corrected.wav` against https://www.youtube.com/watch?v=Tnb9dxHFIkg** —
 a thumbs-up flips the store row to gold and seeds the L3 calibration.
 
@@ -49,3 +50,27 @@ Per-step inference is still transcript-only — feeding each step's keyframes
 into `infer_step` (multimodal) is the single highest-leverage change this
 rung exposed; it would have caught 160 BPM and the 4-channel rack without a
 corrector.
+
+
+## Round 2 — "lol it's silent" → IR v0.2 + real drums
+
+Emilio's listen test failed at hello: structurally-perfect MIDI through
+EMPTY samplers renders silence. That friction promoted the one budgeted IR
+revision (§14.5): **v0.2 adds `device.load_sound`** (asset→sampler binding —
+the gap the §3.5 worked example always implied). Plus: the resolver now
+scores the full crate path (pack folders carry genre semantics), a CLAP
+text→audio rank tool (`flywheel/verify/resolve_rank.py`), and a 16/24-bit
+silence guard in rescore (the first meter only read 16-bit — meters must
+never be vaguer than the failure they guard).
+
+Sounds resolved from the Splice crate (CLAP-assisted, corrector-picked):
+- 808 → ZONE 6 Atlanta Trap `OS_ATL_808_pure_C` (key C1)
+- kick → Komorebi `KMRBI_RHS6_kick_punch` (D1)
+- clap → Southside King of Trap `SOUTHSIDE_clap_high` (E1)
+- hat → qwaston `MO_QW_hat_closed_ferraille` (F#1; rolls repitch to G#1)
+
+Lesson recorded: CLAP text→one-shot ranking is noisy on transients (a
+water-drop perc outranked every clap) — tiebreak, not oracle.
+
+**Listen:** loop `bounce-corrected.wav` (one 2-bar cycle at 160) against the
+video's pattern sections (~10:00 for the bounce, ~15:30 for the rolls).

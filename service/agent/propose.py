@@ -2,7 +2,7 @@
 
 Loads the version-pinned program (system prompt + cheatsheet + few-shot
 exemplars + reflection memory), calls the provider, validates the returned
-ops against moshir-0.1.schema.json, and on invalid output performs exactly
+ops against moshir-0.2.schema.json, and on invalid output performs exactly
 ONE repair retry with the validation errors as feedback (spec §7.3). Invalid
 after repair → a structured failure with the errors (GEPA's textual food),
 never a crash and never unvalidated ops.

@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://mosh.app/schemas/moshir-0.1.schema.json",
-  "title": "MoshIR v0.1",
-  "description": "Closed, typed, DAW-generic op schema (phase0 spec §3). One document validates ONE op: {kind, params, out?}. Extensions require an IR version bump. Stochastic ops (latent.*, notes.humanize) REQUIRE seed; latent.* additionally REQUIRE model_version — the harness rejects unseeded stochastic ops, and so does this schema. All positions/durations are tempo-relative (beats/bars); project.set_tempo defines the mapping to seconds.",
+  "title": "MoshIR v0.2",
+  "description": "Closed, typed, DAW-generic op schema (phase0 spec §3). One document validates ONE op: {kind, params, out?}. Extensions require an IR version bump. Stochastic ops (latent.*, notes.humanize) REQUIRE seed; latent.* additionally REQUIRE model_version — the harness rejects unseeded stochastic ops, and so does this schema. All positions/durations are tempo-relative (beats/bars); project.set_tempo defines the mapping to seconds. v0.2 is ADDITIVE over v0.1 (every v0.1 op remains valid): it adds device.load_sound — the asset→sampler binding the §3.5 worked example implied and the replication ladder proved blocking (a sampler with no sound renders silence). This is the one budgeted post-friction revision (§14.5); the remaining v0.2 candidates in docs/PHASE0_EXIT.md stay queued for Phase 1.",
   "$ref": "#/$defs/op",
 
   "$defs": {
@@ -37,6 +37,7 @@
         { "$ref": "#/$defs/sample.pitch" },
         { "$ref": "#/$defs/sample.stretch" },
         { "$ref": "#/$defs/device.add" },
+        { "$ref": "#/$defs/device.load_sound" },
         { "$ref": "#/$defs/device.set_param" },
         { "$ref": "#/$defs/device.load_preset" },
         { "$ref": "#/$defs/device.bypass" },
@@ -552,6 +553,24 @@
               "type": "array", "items": { "type": "string", "minLength": 1 },
               "description": "Ordered preference list ('Serum', 'Vital', 'builtin.synth'). Lowering picks the first available, logs the choice, and emits Unsupported to the gap ledger if none resolve (spec §3.4)."
             }
+          }
+        }
+      }
+    },
+    "device.load_sound": {
+      "type": "object", "additionalProperties": false, "required": ["kind", "params"],
+      "properties": {
+        "kind": { "const": "device.load_sound" },
+        "params": {
+          "type": "object", "additionalProperties": false,
+          "required": ["device_id", "asset_id"],
+          "properties": {
+            "device_id": { "$ref": "#/$defs/idRef", "description": "A sampler-role device." },
+            "asset_id":  { "$ref": "#/$defs/idRef", "description": "A resolved asset (asset.resolve / latent.*)." },
+            "key_note":  { "$ref": "#/$defs/pitch", "description": "MIDI note the sample's root maps to (default C4)." },
+            "min_note":  { "$ref": "#/$defs/pitch" },
+            "max_note":  { "$ref": "#/$defs/pitch" },
+            "open_ended": { "type": "boolean", "description": "Let the sample ring past note-off (one-shot drums). Default true." }
           }
         }
       }

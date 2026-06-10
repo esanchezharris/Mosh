@@ -104,8 +104,16 @@ def rescore(tut_id: str, provider: str, app: Path, db: Path) -> dict:
     l1 = counts.get("failed", 1) == 0 and bool(harness.get("state_hash"))
     if harness.get("projection"):
         (out_dir / "projection-corrected.json").write_text(harness["projection"])
+    bounce_db = None
     if harness.get("_bounce_bytes"):
-        (out_dir / "bounce-corrected.wav").write_bytes(harness.pop("_bounce_bytes"))
+        bounce = out_dir / "bounce-corrected.wav"
+        bounce.write_bytes(harness.pop("_bounce_bytes"))
+        bounce_db = _peak_dbfs(bounce)
+        if bounce_db is None or bounce_db < -60.0:
+            # The rung-1 facepalm: a structurally perfect render nobody can
+            # hear (empty samplers). Silence is a loud failure now.
+            print(f"!! SILENT BOUNCE ({bounce_db} dBFS) — samplers without "
+                  f"sounds? device.load_sound missing?")
 
     # Delta-score: how far was the autonomous attempt from the correction?
     attempt_proj = (out_dir / "projection.json")
@@ -179,6 +187,7 @@ def rescore(tut_id: str, provider: str, app: Path, db: Path) -> dict:
 
     summary = {"tut_id": tut_id, "l1": l1, "l2": l2.get("score"),
                "l4": verdict.get("mean"), "grade": decision["grade"],
+               "bounce_peak_dbfs": bounce_db,
                "delta_attempt_vs_corrected": dscore,
                "corrections": corrected.get("corrections", []) if isinstance(corrected, dict) else [],
                "traj_id": traj_id}
@@ -186,6 +195,40 @@ def rescore(tut_id: str, provider: str, app: Path, db: Path) -> dict:
     print(json.dumps({k: v for k, v in summary.items() if k != "delta_attempt_vs_corrected"}
                      | {"delta_composite": dscore["composite"]}))
     return summary
+
+
+def _peak_dbfs(wav_path: Path) -> float | None:
+    """Peak level of a 16/24-bit wav (stdlib only) — the silence guard.
+    (The engine bounces 24-bit; the first version of this meter only read
+    16-bit and reported None — meters must never be vaguer than the failure
+    they guard against.)"""
+    import math
+    import struct
+    import wave
+    try:
+        with wave.open(str(wav_path), "rb") as w:
+            width = w.getsampwidth()
+            if width not in (2, 3):
+                return None
+            peak, full = 1, float(1 << (8 * width - 1))
+            remaining = w.getnframes()
+            while remaining > 0:
+                chunk = w.readframes(min(remaining, 1 << 16))
+                remaining -= min(remaining, 1 << 16)
+                if width == 2:
+                    vals = struct.unpack(f"<{len(chunk) // 2}h", chunk)
+                else:
+                    vals = []
+                    for i in range(0, len(chunk) - 2, 3):
+                        v = chunk[i] | (chunk[i + 1] << 8) | (chunk[i + 2] << 16)
+                        if v & 0x800000:
+                            v -= 0x1000000
+                        vals.append(v)
+                if vals:
+                    peak = max(peak, max(abs(v) for v in vals))
+            return round(20 * math.log10(peak / full), 1)
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def _update_board(tut_id: str, patch: dict) -> None:

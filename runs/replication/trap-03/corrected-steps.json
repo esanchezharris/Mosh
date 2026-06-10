@@ -34,6 +34,33 @@
      }
     },
     {
+     "kind": "asset.resolve",
+     "params": {
+      "descriptor": {
+       "text": "hi hat closed short noize",
+       "tags": [
+        "hat",
+        "closed",
+        "ferraille"
+       ]
+      },
+      "strategy": [
+       "local",
+       "latent_gen"
+      ]
+     },
+     "out": "a_hat"
+    },
+    {
+     "kind": "device.load_sound",
+     "params": {
+      "device_id": "dhat",
+      "asset_id": "a_hat",
+      "key_note": "F#1",
+      "open_ended": true
+     }
+    },
+    {
      "kind": "clip.create",
      "params": {
       "clip_id": "chat",
@@ -273,6 +300,32 @@
      }
     },
     {
+     "kind": "asset.resolve",
+     "params": {
+      "descriptor": {
+       "text": "rnb clap high",
+       "tags": [
+        "clap",
+        "southside"
+       ]
+      },
+      "strategy": [
+       "local",
+       "latent_gen"
+      ]
+     },
+     "out": "a_clap"
+    },
+    {
+     "kind": "device.load_sound",
+     "params": {
+      "device_id": "dclap",
+      "asset_id": "a_clap",
+      "key_note": "E1",
+      "open_ended": true
+     }
+    },
+    {
      "kind": "clip.create",
      "params": {
       "clip_id": "cclap",
@@ -319,6 +372,33 @@
       "prefer": [
        "builtin.sampler"
       ]
+     }
+    },
+    {
+     "kind": "asset.resolve",
+     "params": {
+      "descriptor": {
+       "text": "punchy trap kick",
+       "tags": [
+        "kick",
+        "punch",
+        "komorebi"
+       ]
+      },
+      "strategy": [
+       "local",
+       "latent_gen"
+      ]
+     },
+     "out": "a_kick"
+    },
+    {
+     "kind": "device.load_sound",
+     "params": {
+      "device_id": "dkick",
+      "asset_id": "a_kick",
+      "key_note": "D1",
+      "open_ended": true
      }
     },
     {
@@ -372,6 +452,32 @@
       "prefer": [
        "builtin.sampler"
       ]
+     }
+    },
+    {
+     "kind": "asset.resolve",
+     "params": {
+      "descriptor": {
+       "text": "808 long boomy pure",
+       "tags": [
+        "808",
+        "atlanta"
+       ]
+      },
+      "strategy": [
+       "local",
+       "latent_gen"
+      ]
+     },
+     "out": "a_808"
+    },
+    {
+     "kind": "device.load_sound",
+     "params": {
+      "device_id": "d808",
+      "asset_id": "a_808",
+      "key_note": "C1",
+      "open_ended": true
      }
     },
     {
@@ -565,6 +671,16 @@
    "root_cause": "policy",
    "what": "duplicated vision claims saturated L2 (0.958) and the L2-only rule crowned a near-empty build gold",
    "lesson": "dedupe (kind,value) claims; gold requires L2>=0.8 AND judge>=4 (both shipped)"
+  },
+  {
+   "root_cause": "vocabulary",
+   "what": "samplers had no sounds \u2014 the replication was structurally right and SILENT (Emilio's listen test failed at hello)",
+   "lesson": "IR v0.2 promoted early per s14.5: device.load_sound (asset->sampler binding) \u2014 audibility is part of correctness; rescore now flags silent bounces"
+  },
+  {
+   "root_cause": "claims",
+   "what": "CLAP text->one-shot ranking is noisy on transients (a water-drop perc outranked real claps for 'rnb clap')",
+   "lesson": "use CLAP as a tiebreak over token+pack-context prefiltering, not as the oracle; resolver scores the full crate path, not just filenames"
   }
  ],
  "verified_claims": [

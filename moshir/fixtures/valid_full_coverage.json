@@ -1,77 +1,424 @@
 [
-  {"kind": "project.set_tempo", "params": {"bpm": 142}},
-  {"kind": "project.set_swing", "params": {"amount": 0.12}},
-  {"kind": "project.set_key", "params": {"root": "F", "scale": "minor"}},
-  {"kind": "project.set_time_sig", "params": {"num": 4, "denom": 4}},
-
-  {"kind": "track.create", "params": {"track_id": "tdrums", "kind": "audio", "role": "drums", "name": "Drums"}},
-  {"kind": "track.rename", "params": {"track_id": "tdrums", "name": "Drum Bus Feed"}},
-  {"kind": "track.set_role", "params": {"track_id": "tdrums", "role": "drums"}},
-  {"kind": "track.create", "params": {"track_id": "bverb", "kind": "bus", "role": "fx"}},
-  {"kind": "track.route", "params": {"track_id": "tdrums", "to": "bverb"}},
-  {"kind": "track.delete", "params": {"track_id": "tscrap"}},
-
-  {"kind": "asset.resolve", "params": {"descriptor": {"text": "dusty lo-fi keys",
-    "tags": ["keys", "lofi", "dusty"]}, "strategy": ["local", "latent_gen"]}, "out": "asset_keys"},
-
-  {"kind": "latent.generate", "params": {"prompt": "dark evolving pad, F minor",
-    "duration_beats": 16, "seed": 42, "model_version": "sa3-medium-mlx-1.0.0"}, "out": "asset_pad"},
-  {"kind": "latent.variate", "params": {"asset_id": "asset_pad", "strength": 0.4,
-    "seed": 7, "model_version": "sa3-medium-mlx-1.0.0"}, "out": "asset_pad2"},
-  {"kind": "latent.morph", "params": {"asset_a": "asset_pad", "asset_b": "asset_keys",
-    "mix": 0.5, "seed": 9, "model_version": "sa3-medium-mlx-1.0.0"}, "out": "asset_mx"},
-  {"kind": "latent.inpaint", "params": {"asset_id": "asset_pad",
-    "region": {"start_beats": 4, "length_beats": 4}, "prompt": "riser",
-    "seed": 3, "model_version": "sa3-medium-mlx-1.0.0"}, "out": "asset_inp"},
-
-  {"kind": "clip.create", "params": {"clip_id": "ckeys", "track_id": "tdrums",
-    "start_bar": 1, "length_beats": 16, "kind": "midi"}},
-  {"kind": "clip.move", "params": {"clip_id": "ckeys", "start_bar": 5}},
-  {"kind": "clip.duplicate", "params": {"clip_id": "ckeys", "new_clip_id": "ckeys2", "start_bar": 9}},
-  {"kind": "clip.delete", "params": {"clip_id": "ckeys2"}},
-  {"kind": "clip.set_length", "params": {"clip_id": "ckeys", "length_beats": 8}},
-
-  {"kind": "notes.add", "params": {"clip_id": "ckeys", "notes": [
-    {"pitch": 60, "start_beats": 0, "dur_beats": 1, "vel": 96},
-    {"pitch": "G#3", "start_beats": 1.5, "dur_beats": 0.5, "vel": 84}]}},
-  {"kind": "notes.remove", "params": {"clip_id": "ckeys", "pitches": ["C4"],
-    "range": {"start_beats": 0, "length_beats": 4}}},
-  {"kind": "notes.transpose", "params": {"clip_id": "ckeys", "semitones": -2}},
-  {"kind": "notes.quantize", "params": {"clip_id": "ckeys", "grid": "1/16", "strength": 0.8}},
-  {"kind": "notes.humanize", "params": {"clip_id": "ckeys", "timing_ms": 12, "vel_var": 10, "seed": 1234}},
-
-  {"kind": "sample.place", "params": {"clip_id": "ck808", "track_id": "tdrums",
-    "asset_id": "asset_keys", "start_bar": 1, "offset_beats": 0}},
-  {"kind": "sample.slice", "params": {"clip_id": "ck808", "mode": "transient"}},
-  {"kind": "sample.slice", "params": {"clip_id": "ck808", "mode": "grid", "grid": "1/16"}},
-  {"kind": "sample.pitch", "params": {"clip_id": "ck808", "semitones": -3}},
-  {"kind": "sample.stretch", "params": {"clip_id": "ck808", "ratio": 1.5, "algo": "percussive"}},
-
-  {"kind": "device.add", "params": {"device_id": "dsyn", "track_id": "tdrums",
-    "role": "synth", "prefer": ["Vital", "builtin.synth"]}},
-  {"kind": "device.set_param", "params": {"device_id": "dsyn", "param": "cutoff", "value_norm": 0.7}},
-  {"kind": "device.set_param", "params": {"device_id": "dsyn", "param": 12,
-    "value_norm": 0.31, "value_display": "2.3 kHz"}},
-  {"kind": "device.load_preset", "params": {"device_id": "dsyn", "preset": "Init"}},
-  {"kind": "device.bypass", "params": {"device_id": "dsyn", "bypassed": true}},
-
-  {"kind": "mixer.set_gain", "params": {"track_id": "tdrums", "db": -3.5}},
-  {"kind": "mixer.set_pan", "params": {"track_id": "tdrums", "pan": -0.2}},
-  {"kind": "mixer.send", "params": {"track_id": "tdrums", "to_bus": "bverb", "db": -12}},
-  {"kind": "mixer.sidechain", "params": {"src": "tkick", "dst": "t808",
-    "amount": 0.6, "attack_ms": 5, "release_ms": 120, "ratio": 4}},
-
-  {"kind": "automation.write", "params": {
-    "target": {"device_id": "dsyn", "param": "cutoff"},
-    "points": [{"pos_beats": 0, "value_norm": 0.2},
-               {"pos_beats": 8, "value_norm": 0.9, "curve": 0.5}]}},
-  {"kind": "automation.write", "params": {
-    "target": {"mixer": "gain", "track_id": "tdrums"},
-    "points": [{"pos_beats": 0, "value_norm": 0.8}]}},
-
-  {"kind": "arrange.create_section", "params": {"name": "drop", "start_bar": 17, "length_bars": 16}},
-  {"kind": "arrange.place", "params": {"clip_id": "ckeys", "section": "drop"}},
-
-  {"kind": "render.commit", "params": {}},
-  {"kind": "render.bounce", "params": {"range_bars": [1, 16], "tracks": ["tdrums"]}, "out": "render_main"}
+ {
+  "kind": "project.set_tempo",
+  "params": {
+   "bpm": 142
+  }
+ },
+ {
+  "kind": "project.set_swing",
+  "params": {
+   "amount": 0.12
+  }
+ },
+ {
+  "kind": "project.set_key",
+  "params": {
+   "root": "F",
+   "scale": "minor"
+  }
+ },
+ {
+  "kind": "project.set_time_sig",
+  "params": {
+   "num": 4,
+   "denom": 4
+  }
+ },
+ {
+  "kind": "track.create",
+  "params": {
+   "track_id": "tdrums",
+   "kind": "audio",
+   "role": "drums",
+   "name": "Drums"
+  }
+ },
+ {
+  "kind": "track.rename",
+  "params": {
+   "track_id": "tdrums",
+   "name": "Drum Bus Feed"
+  }
+ },
+ {
+  "kind": "track.set_role",
+  "params": {
+   "track_id": "tdrums",
+   "role": "drums"
+  }
+ },
+ {
+  "kind": "track.create",
+  "params": {
+   "track_id": "bverb",
+   "kind": "bus",
+   "role": "fx"
+  }
+ },
+ {
+  "kind": "track.route",
+  "params": {
+   "track_id": "tdrums",
+   "to": "bverb"
+  }
+ },
+ {
+  "kind": "track.delete",
+  "params": {
+   "track_id": "tscrap"
+  }
+ },
+ {
+  "kind": "asset.resolve",
+  "params": {
+   "descriptor": {
+    "text": "dusty lo-fi keys",
+    "tags": [
+     "keys",
+     "lofi",
+     "dusty"
+    ]
+   },
+   "strategy": [
+    "local",
+    "latent_gen"
+   ]
+  },
+  "out": "asset_keys"
+ },
+ {
+  "kind": "latent.generate",
+  "params": {
+   "prompt": "dark evolving pad, F minor",
+   "duration_beats": 16,
+   "seed": 42,
+   "model_version": "sa3-medium-mlx-1.0.0"
+  },
+  "out": "asset_pad"
+ },
+ {
+  "kind": "latent.variate",
+  "params": {
+   "asset_id": "asset_pad",
+   "strength": 0.4,
+   "seed": 7,
+   "model_version": "sa3-medium-mlx-1.0.0"
+  },
+  "out": "asset_pad2"
+ },
+ {
+  "kind": "latent.morph",
+  "params": {
+   "asset_a": "asset_pad",
+   "asset_b": "asset_keys",
+   "mix": 0.5,
+   "seed": 9,
+   "model_version": "sa3-medium-mlx-1.0.0"
+  },
+  "out": "asset_mx"
+ },
+ {
+  "kind": "latent.inpaint",
+  "params": {
+   "asset_id": "asset_pad",
+   "region": {
+    "start_beats": 4,
+    "length_beats": 4
+   },
+   "prompt": "riser",
+   "seed": 3,
+   "model_version": "sa3-medium-mlx-1.0.0"
+  },
+  "out": "asset_inp"
+ },
+ {
+  "kind": "clip.create",
+  "params": {
+   "clip_id": "ckeys",
+   "track_id": "tdrums",
+   "start_bar": 1,
+   "length_beats": 16,
+   "kind": "midi"
+  }
+ },
+ {
+  "kind": "clip.move",
+  "params": {
+   "clip_id": "ckeys",
+   "start_bar": 5
+  }
+ },
+ {
+  "kind": "clip.duplicate",
+  "params": {
+   "clip_id": "ckeys",
+   "new_clip_id": "ckeys2",
+   "start_bar": 9
+  }
+ },
+ {
+  "kind": "clip.delete",
+  "params": {
+   "clip_id": "ckeys2"
+  }
+ },
+ {
+  "kind": "clip.set_length",
+  "params": {
+   "clip_id": "ckeys",
+   "length_beats": 8
+  }
+ },
+ {
+  "kind": "notes.add",
+  "params": {
+   "clip_id": "ckeys",
+   "notes": [
+    {
+     "pitch": 60,
+     "start_beats": 0,
+     "dur_beats": 1,
+     "vel": 96
+    },
+    {
+     "pitch": "G#3",
+     "start_beats": 1.5,
+     "dur_beats": 0.5,
+     "vel": 84
+    }
+   ]
+  }
+ },
+ {
+  "kind": "notes.remove",
+  "params": {
+   "clip_id": "ckeys",
+   "pitches": [
+    "C4"
+   ],
+   "range": {
+    "start_beats": 0,
+    "length_beats": 4
+   }
+  }
+ },
+ {
+  "kind": "notes.transpose",
+  "params": {
+   "clip_id": "ckeys",
+   "semitones": -2
+  }
+ },
+ {
+  "kind": "notes.quantize",
+  "params": {
+   "clip_id": "ckeys",
+   "grid": "1/16",
+   "strength": 0.8
+  }
+ },
+ {
+  "kind": "notes.humanize",
+  "params": {
+   "clip_id": "ckeys",
+   "timing_ms": 12,
+   "vel_var": 10,
+   "seed": 1234
+  }
+ },
+ {
+  "kind": "sample.place",
+  "params": {
+   "clip_id": "ck808",
+   "track_id": "tdrums",
+   "asset_id": "asset_keys",
+   "start_bar": 1,
+   "offset_beats": 0
+  }
+ },
+ {
+  "kind": "sample.slice",
+  "params": {
+   "clip_id": "ck808",
+   "mode": "transient"
+  }
+ },
+ {
+  "kind": "sample.slice",
+  "params": {
+   "clip_id": "ck808",
+   "mode": "grid",
+   "grid": "1/16"
+  }
+ },
+ {
+  "kind": "sample.pitch",
+  "params": {
+   "clip_id": "ck808",
+   "semitones": -3
+  }
+ },
+ {
+  "kind": "sample.stretch",
+  "params": {
+   "clip_id": "ck808",
+   "ratio": 1.5,
+   "algo": "percussive"
+  }
+ },
+ {
+  "kind": "device.add",
+  "params": {
+   "device_id": "dsyn",
+   "track_id": "tdrums",
+   "role": "synth",
+   "prefer": [
+    "Vital",
+    "builtin.synth"
+   ]
+  }
+ },
+ {
+  "kind": "device.load_sound",
+  "params": {
+   "device_id": "dsyn",
+   "asset_id": "asset_keys",
+   "key_note": "C4",
+   "min_note": 0,
+   "max_note": 127,
+   "open_ended": true
+  }
+ },
+ {
+  "kind": "device.set_param",
+  "params": {
+   "device_id": "dsyn",
+   "param": "cutoff",
+   "value_norm": 0.7
+  }
+ },
+ {
+  "kind": "device.set_param",
+  "params": {
+   "device_id": "dsyn",
+   "param": 12,
+   "value_norm": 0.31,
+   "value_display": "2.3 kHz"
+  }
+ },
+ {
+  "kind": "device.load_preset",
+  "params": {
+   "device_id": "dsyn",
+   "preset": "Init"
+  }
+ },
+ {
+  "kind": "device.bypass",
+  "params": {
+   "device_id": "dsyn",
+   "bypassed": true
+  }
+ },
+ {
+  "kind": "mixer.set_gain",
+  "params": {
+   "track_id": "tdrums",
+   "db": -3.5
+  }
+ },
+ {
+  "kind": "mixer.set_pan",
+  "params": {
+   "track_id": "tdrums",
+   "pan": -0.2
+  }
+ },
+ {
+  "kind": "mixer.send",
+  "params": {
+   "track_id": "tdrums",
+   "to_bus": "bverb",
+   "db": -12
+  }
+ },
+ {
+  "kind": "mixer.sidechain",
+  "params": {
+   "src": "tkick",
+   "dst": "t808",
+   "amount": 0.6,
+   "attack_ms": 5,
+   "release_ms": 120,
+   "ratio": 4
+  }
+ },
+ {
+  "kind": "automation.write",
+  "params": {
+   "target": {
+    "device_id": "dsyn",
+    "param": "cutoff"
+   },
+   "points": [
+    {
+     "pos_beats": 0,
+     "value_norm": 0.2
+    },
+    {
+     "pos_beats": 8,
+     "value_norm": 0.9,
+     "curve": 0.5
+    }
+   ]
+  }
+ },
+ {
+  "kind": "automation.write",
+  "params": {
+   "target": {
+    "mixer": "gain",
+    "track_id": "tdrums"
+   },
+   "points": [
+    {
+     "pos_beats": 0,
+     "value_norm": 0.8
+    }
+   ]
+  }
+ },
+ {
+  "kind": "arrange.create_section",
+  "params": {
+   "name": "drop",
+   "start_bar": 17,
+   "length_bars": 16
+  }
+ },
+ {
+  "kind": "arrange.place",
+  "params": {
+   "clip_id": "ckeys",
+   "section": "drop"
+  }
+ },
+ {
+  "kind": "render.commit",
+  "params": {}
+ },
+ {
+  "kind": "render.bounce",
+  "params": {
+   "range_bars": [
+    1,
+    16
+   ],
+   "tracks": [
+    "tdrums"
+   ]
+  },
+  "out": "render_main"
+ }
 ]

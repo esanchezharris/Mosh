@@ -9,7 +9,7 @@ Consent is read from the session header plus any later {type:"consent"} lines
 (latest wins). Without consent the import REFUSES — that is the product
 contract, enforced at the store boundary. Renders found in <session>/renders
 are content-addressed into the object store. IR ops in steps are validated
-against moshir-0.1.schema.json; invalid ops fail the import (corrupt ops never
+against moshir-0.2.schema.json; invalid ops fail the import (corrupt ops never
 enter the corpus — phase0 §8 L1's job at the boundary).
 """
 from __future__ import annotations

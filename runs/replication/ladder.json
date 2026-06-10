@@ -20,8 +20,9 @@
    "tut_id": "trap-03",
    "l1": true,
    "l2": 1.0,
-   "l4": 4.5,
+   "l4": 4.0,
    "grade": "silver",
+   "bounce_peak_dbfs": -2.5,
    "delta_attempt_vs_corrected": {
     "entity_f1": 0.5263,
     "magnitude": 0.2889,
@@ -82,10 +83,20 @@
      "root_cause": "policy",
      "what": "duplicated vision claims saturated L2 (0.958) and the L2-only rule crowned a near-empty build gold",
      "lesson": "dedupe (kind,value) claims; gold requires L2>=0.8 AND judge>=4 (both shipped)"
+    },
+    {
+     "root_cause": "vocabulary",
+     "what": "samplers had no sounds \u2014 the replication was structurally right and SILENT (Emilio's listen test failed at hello)",
+     "lesson": "IR v0.2 promoted early per s14.5: device.load_sound (asset->sampler binding) \u2014 audibility is part of correctness; rescore now flags silent bounces"
+    },
+    {
+     "root_cause": "claims",
+     "what": "CLAP text->one-shot ranking is noisy on transients (a water-drop perc outranked real claps for 'rnb clap')",
+     "lesson": "use CLAP as a tiebreak over token+pack-context prefiltering, not as the oracle; resolver scores the full crate path, not just filenames"
     }
    ],
    "traj_id": "tut-trap-03-corrected"
   },
-  "corrected_ts": 1781090315
+  "corrected_ts": 1781091618
  }
 }

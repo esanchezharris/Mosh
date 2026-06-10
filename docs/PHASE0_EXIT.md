@@ -19,9 +19,10 @@ This document is the scorecard + the exact commands to close each item.
 
 Candidates accumulated by the build itself (run `cat ~/Library/Mosh/*/gap-ledger.jsonl` for live data):
 
-1. **asset→sampler binding op** — the §3.5 worked example *implies* the resolved
-   808 lands in the sampler, but v0.1 cannot say it (`device.add` has no
-   asset_id; the engine's `add_sampler_sound` exists and waits). Strongest candidate.
+1. ~~**asset→sampler binding op**~~ — **PROMOTED to IR v0.2 (2026-06-10)** as
+   `device.load_sound`: the replication ladder's first listen test failed on
+   silent samplers — operational blockage is exactly the promotion trigger
+   (§14.5). This consumed the one budgeted revision; items below queue for Phase 1.
 2. `mixer.mute` / `mixer.solo` — lift has no IR target for two everyday moves.
 3. `clip.duplicate` — common tutorial verb, currently Unsupported.
 4. `project.set_swing` — engine has no global groove (per-clip templates only);

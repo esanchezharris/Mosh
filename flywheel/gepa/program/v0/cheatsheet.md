@@ -42,6 +42,10 @@ Ids: you assign them (`t1`, `c1`, `d1`, `a1`, `bverb`); create before use.
 - device.add {device_id, track_id, role: synth|sampler|eq|comp|saturator|delay|reverb|limiter|filter|util, prefer?: ["Serum","builtin.synth"]}
   builtins: builtin.synth (4-osc) · builtin.sampler · builtin.eq · builtin.comp ·
   builtin.sat (the neural saturator) · builtin.delay · builtin.reverb · builtin.filter
+- device.load_sound {device_id, asset_id, key_note?: pitch, open_ended?: bool}
+  — load a resolved asset INTO a sampler (v0.2: a sampler with no sound is
+  SILENT; resolve → add sampler → load_sound is the audible chain). key_note
+  maps the sample's root to the pitch your notes use.
 - device.set_param {device_id, param: "drive"|"cutoff"|... | <raw index>, value_norm: 0..1}
 - device.bypass {device_id, bypassed} · device.load_preset — UNSUPPORTED; avoid
 

@@ -64,7 +64,7 @@ import json, sys
 sys.path.insert(0, sys.argv[2] + "/moshir")
 import validate as V
 rec = json.loads(open(sys.argv[1]).read().splitlines()[0])
-assert rec["ir_version"] == "0.1" and rec["source"] == "tutorial_replication"
+assert rec["ir_version"] == "0.2" and rec["source"] == "tutorial_replication"
 assert rec["instruction"] == "conformance fixture beat"
 assert rec["provenance"]["consent"] is True
 ops = [op for st in rec["steps"] for op in st["ops"]]

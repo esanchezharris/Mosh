@@ -553,6 +553,31 @@ juce::var Executor::runOp (const juce::var& op, const juce::String& tutorialId)
         }
         return okOp (kind, { "set_plugin_param" });
     }
+    if (kind == "device.load_sound")
+    {
+        // v0.2: the asset→sampler binding (what makes a MIDI channel audible).
+        auto* dev = find (p.getProperty ("device_id", var()).toString(), "device");
+        if (dev == nullptr) return failOp (kind, "validate",
+            "unbound device id: " + p.getProperty ("device_id", var()).toString());
+        auto* asset = find (p.getProperty ("asset_id", var()).toString(), "asset");
+        if (asset == nullptr) return failOp (kind, "validate",
+            "unbound asset id: " + p.getProperty ("asset_id", var()).toString());
+        if (! dev->type.contains ("sampler"))
+            return unsupportedOp (op, "device.load_sound targets a sampler-role device (got "
+                                       + dev->type + ")", "device.load_sound." + dev->type, tutorialId);
+        auto* a = obj();
+        a->setProperty ("trackId", dev->trackRef);
+        a->setProperty ("index", dev->index);
+        a->setProperty ("file", asset->ref);
+        a->setProperty ("keyNote", parsePitch (p.getProperty ("key_note", var ("C4"))));
+        if (p.hasProperty ("min_note")) a->setProperty ("minNote", parsePitch (p.getProperty ("min_note", var())));
+        if (p.hasProperty ("max_note")) a->setProperty ("maxNote", parsePitch (p.getProperty ("max_note", var())));
+        // One-shot drum semantics by default: the sample rings past note-off.
+        a->setProperty ("openEnded", p.getProperty ("open_ended", true));
+        auto r = run ("add_sampler_sound", a);
+        return succeeded (r) ? okOp (kind, { "add_sampler_sound" }, r.getProperty ("data", var()))
+                             : failOp (kind, "execute", r.getProperty ("error", "").toString());
+    }
     if (kind == "device.load_preset")
         return unsupportedOp (op, "builtin devices have no preset API in the engine", "device.load_preset", tutorialId);
     if (kind == "device.bypass")
@@ -735,17 +760,25 @@ juce::var Executor::lowerAssetResolve (const juce::var& p, const juce::String& o
             File lib (libPath);
             if (! lib.isDirectory()) continue;
 
-            // Deterministic scoring: token hits on the lowercased filename,
-            // ties broken lexicographically by path.
+            // Deterministic scoring: token hits on the lowercased RELATIVE
+            // PATH (real crates carry the semantics in pack/folder names —
+            // "ZONE 6 - ATLANTA TRAP/one_shots/808s/..."), filename hits
+            // weighted double; ties broken lexicographically by path.
             File best; int bestScore = 0;
             auto files = lib.findChildFiles (File::findFiles, true, "*.wav;*.aif;*.aiff;*.mp3;*.flac");
             files.sort();
             for (const auto& f : files)
             {
-                const auto name = f.getFileName().toLowerCase();
+                const auto rel = f.getRelativePathFrom (lib).toLowerCase()
+                                  .replace ("_", " ").replace ("-", " ");
+                const auto name = f.getFileName().toLowerCase()
+                                   .replace ("_", " ").replace ("-", " ");
                 int score = 0;
                 for (const auto& tok : tokens)
-                    if (name.contains (tok)) ++score;
+                {
+                    if (name.contains (tok)) score += 2;
+                    else if (rel.contains (tok)) ++score;
+                }
                 if (score > bestScore) { bestScore = score; best = f; }
             }
             if (bestScore > 0)
