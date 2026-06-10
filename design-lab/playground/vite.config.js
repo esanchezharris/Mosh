@@ -11,6 +11,7 @@ export default defineConfig({
       input: {
         gallery: resolve(root, 'index.html'),
         stage: resolve(root, 'experiments/001-stage/index.html'),
+        stageV1: resolve(root, 'experiments/001-stage/v1.html'),
         morphology: resolve(root, 'experiments/002-moshi-morphology/index.html'),
         periphery: resolve(root, 'experiments/003-periphery/index.html'),
         gullet: resolve(root, 'experiments/004-gullet/index.html'),

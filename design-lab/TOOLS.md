@@ -36,6 +36,7 @@ sites/tools are listed with how to use them.)
 | `canvas-design` | Static poster/brand art (Moshi key art, mood frames). |
 | `theme-factory` | Theming generated artifacts/decks. |
 | `firecrawl-*` | Scraping/archiving inspiration pages; `firecrawl-search` for discovery. |
+| `design-motion-principles` | Motion/transition choreography — build or AUDIT animations for AI-slop motion patterns. Our #1 named risk. (Installed 2026-06-09, skills.sh, 3.6K installs.) |
 | `deep-research` | Multi-source verified research (e.g. "state of real-time NPR in 2026"). |
 | `grab` | Downloading reference videos (yt-dlp, 1080p). |
 

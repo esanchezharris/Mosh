@@ -24,3 +24,28 @@ nothing in HEARTH moves fast except when the music does.
 
 **Steal even if killed.** The breathing cycle; the vein heat = energy mapping; the
 bar-front as ambient position. All shader-portable (GLSL→SKSL 1:1).
+
+---
+
+## v2 (2026-06-09) — presence in fog
+
+Rebuilt per [FIELD_NOTES](../inspiration/FIELD_NOTES.md) "what this changes" item 1.
+What changed and why:
+
+- **Veins-everywhere → ONE presence** (motif 3: MCHX17, sabosugi). A single mass,
+  low in the frame, luminance *earned by energy*. It drifts in and out of bilateral
+  symmetry — the fog almost resolves into a creature, then lets go. That oscillation
+  is the new core mechanic: pareidolia as ambience.
+- **Spectral fringe on the membrane** (motif 1: marioecg). Razor-thin, constant
+  screen-width (`fwidth`), lime-white core splitting to a cyan whisper inside and
+  magenta outside — *only* on the iso-edge. The streaks were deliberately separated
+  from the fringe field: streaks rake the luminance, the fringe traces one clean
+  membrane (first build had them coupled — instant "veins everywhere" relapse).
+- **Heat opens the core** (specoolar). Recording doesn't brighten the mass — it
+  inverts it: a true void wearing a doppler-bright accretion ring, pulsing 1.1 Hz.
+  Unmistakable across a room, which is the whole job of a REC state.
+- **Position = tide** — the fog leans toward the bar position once per 8 bars;
+  the mono `BAR x.y` stays for the skeptic.
+- Film-grain dither added (soft fields band horribly in 8-bit without it).
+
+v1 (the domain-warped vein field) is preserved at [v1.html](../playground/experiments/001-stage/v1.html).
