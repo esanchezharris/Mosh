@@ -1872,6 +1872,45 @@ juce::var MoshOps::cmdExportAudio (const juce::var& args)
 
     const double len = juce::jmax (0.1, edit.getLength().inSeconds());
 
+    // Stems (Stage 30): one file per track, rendered via tracksToDo bits.
+    if ((bool) args.getProperty ("stems", false))
+    {
+        juce::WavAudioFormat wavFormat;
+        auto stemDir = file.getParentDirectory()
+                           .getChildFile (file.getFileNameWithoutExtension() + "-stems");
+        stemDir.createDirectory();
+        auto tracks = te::getAudioTracks (edit);
+        Array<var> files;
+        for (int i = 0; i < tracks.size(); ++i)
+        {
+            auto* tr = tracks[i];
+            if (tr == nullptr || tr->getClips().isEmpty()) continue;
+            te::Renderer::Parameters params (edit);
+            auto stemFile = stemDir.getChildFile (
+                juce::File::createLegalFileName (String (i + 1) + "-"
+                    + (tr->getName().isNotEmpty() ? tr->getName() : "track")) + ".wav");
+            stemFile.deleteFile();
+            params.destFile = stemFile;
+            params.audioFormat = &wavFormat;
+            params.bitDepth = juce::jlimit (16, 32, (int) args.getProperty ("bitDepth", 24));
+            params.sampleRateForAudio = juce::jmax (22050.0, (double) args.getProperty ("sampleRate", 48000.0));
+            params.time = { tracktion::TimePosition(), tracktion::TimePosition::fromSeconds (len) };
+            juce::BigInteger one;
+            one.setBit (te::getAllTracks (edit).indexOf (tr));
+            params.tracksToDo = one;
+            auto out = te::Renderer::renderToFile ("Mosh stem", params);
+            if (out.existsAsFile() && out.getSize() > 0)
+                files.add (out.getFullPathName());
+        }
+        if (files.isEmpty())
+            return errResult ("export_audio", "no stems rendered (empty tracks?)");
+        logLine ("export_audio", args, true, {}, false);
+        auto* data = new DynamicObject();
+        data->setProperty ("stemDir", stemDir.getFullPathName());
+        data->setProperty ("files", files);
+        return okResult ("export_audio", var (data));
+    }
+
     // Export options (Stage 21): sample rate / bit depth / loop-range render
     // via the full Parameters path; the simple whole-edit overload otherwise.
     bool ok = false;

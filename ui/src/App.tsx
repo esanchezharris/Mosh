@@ -210,6 +210,7 @@ export function App() {
               else if (v === "wav16-44") void exec("export_audio", { bitDepth: 16, sampleRate: 44100 });
               else if (v === "loop24-48") void exec("export_audio", { bitDepth: 24, sampleRate: 48000, loopOnly: true });
               else if (v === "loop16-44") void exec("export_audio", { bitDepth: 16, sampleRate: 44100, loopOnly: true });
+              else if (v === "stems") void exec("export_audio", { stems: true, bitDepth: 24, sampleRate: 48000 });
               else if (v === "mp3") void exec("export_audio", { bitDepth: 24, sampleRate: 48000, format: "mp3" });
               else if (v === "m4a") void exec("export_audio", { bitDepth: 24, sampleRate: 48000, format: "m4a" });
             }}
@@ -219,6 +220,7 @@ export function App() {
             <option value="wav16-44">full · 16-bit 44.1k</option>
             <option value="loop24-48">loop · 24-bit 48k</option>
             <option value="loop16-44">loop · 16-bit 44.1k</option>
+            <option value="stems">stems · 24-bit 48k</option>
             <option value="mp3">mp3 · 320k</option>
             <option value="m4a">m4a · AAC</option>
           </select>

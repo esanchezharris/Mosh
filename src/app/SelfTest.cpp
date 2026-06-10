@@ -1373,6 +1373,22 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         eng.sessionDir().getChildFile ("project-name.txt").deleteFile();
     }
 
+    // --- Stage 30: stems export ---
+    {
+        std::cerr << "--- Stage 30: stems export ---\n";
+        auto a = cmd (ops, "create_track", args1 ("name", "Stem A"));
+        auto b = cmd (ops, "create_track", args1 ("name", "Stem B"));
+        cmd (ops, "add_test_tone_clip", objN ({{ "trackId", a["data"].getProperty ("trackId", var()) },
+              { "seconds", 0.5 }, { "freq", 220.0 }}));
+        cmd (ops, "add_test_tone_clip", objN ({{ "trackId", b["data"].getProperty ("trackId", var()) },
+              { "seconds", 0.5 }, { "freq", 440.0 }}));
+        auto st = cmd (ops, "export_audio", objN ({{ "stems", true }, { "bitDepth", 16 }, { "sampleRate", 44100 }}));
+        check (ok (st), "stems export ok");
+        check (st["data"].getProperty ("files", var()).size() >= 2, "one stem file per non-empty track");
+        cmd (ops, "remove_track", args1 ("trackId", a["data"].getProperty ("trackId", var())));
+        cmd (ops, "remove_track", args1 ("trackId", b["data"].getProperty ("trackId", var())));
+    }
+
     // --- Stage 29: clip looping + fades ---
     {
         std::cerr << "--- Stage 29: clip loop + fades ---\n";
