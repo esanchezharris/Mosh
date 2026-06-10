@@ -125,6 +125,9 @@ HA6=$(lastCmdHash a6)
 run B "{\"commands\": [{\"command\": \"collab_pull\", \"args\": {}}]}" b6
 HB6=$(field "$TMP/b6.json" "['commandResults'][0]['data']['state_hash']")
 [ -n "$HA6" ] && [ "$HA6" = "$HB6" ]; check $? "post-conflict states converge ($HA6)"
+# The dead op must NOT have been pushed: no peer should ever replay it.
+! grep -q "A was here" "$TMP/B/collab/oplog.jsonl"
+check $? "conflicted op was DROPPED from the shared log (dead ops never pushed)"
 
 echo "===== $PASS passed, $FAIL failed ====="
 rm -rf "$TMP"

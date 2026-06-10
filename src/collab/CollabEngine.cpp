@@ -222,6 +222,7 @@ juce::var CollabEngine::pull()
 
     ReplayReport report;
     std::map<String, String> idMap;
+    Array<var> survivors;       // pending steps that re-executed cleanly
     recorder.setPaused (true);
     if (pending.isEmpty())
     {
@@ -230,40 +231,50 @@ juce::var CollabEngine::pull()
     }
     else
     {
-        // REBASE: genesis → full shared log → re-execute pending with id remap.
+        // REBASE: genesis → full shared log → re-execute pending ONE AT A
+        // TIME with id remap. Only survivors enter the shared log — a step
+        // that fails on rebase (its target was deleted upstream, etc.) is a
+        // CONFLICT: reported, kept in the local trajectory for the record,
+        // but never pushed (dead ops must not pollute every peer's replay).
         eng.resetEmpty();
         irExec.resyncBindings();
         auto base = replayEntries (entries, idMap);
+        report.applied = base.applied;
         report.conflicts.addArray (base.conflicts);
-        Array<var> pendingEntries;
         for (auto& step : pending)
         {
             auto* e = obj();
             e->setProperty ("command", step.getProperty ("command", var()));
             e->setProperty ("args", step.getProperty ("args", var()));
             e->setProperty ("data", step.getProperty ("data", var()));
-            pendingEntries.add (var (e));
+            Array<var> one;
+            one.add (var (e));
+            auto re = replayEntries (one, idMap);
+            if (re.applied == 1)
+            {
+                ++report.applied;
+                survivors.add (step);
+            }
+            else
+                report.conflicts.addArray (re.conflicts);
         }
-        auto re = replayEntries (pendingEntries, idMap);
-        report.applied = base.applied + re.applied;
-        report.conflicts.addArray (re.conflicts);
     }
     recorder.setPaused (false);
     saveSyncState (lastPushed, entries.size());
 
-    // The rebase re-executed pending ops; they are still unpushed (localSeq
-    // unchanged) but their ids changed. Re-record them? No: pendingSteps
-    // re-reads the trajectory, whose old entries now hold STALE ids. Rewrite
-    // is handled at push time via the SAME idMap — persist it.
-    if (! pending.isEmpty() && ! idMap.empty())
+    if (! pending.isEmpty())
     {
-        // Rewrite the unpushed trajectory steps' ids in place is invasive;
-        // instead push the rebased ops NOW (they are the canonical form).
+        // Append the rebased SURVIVORS now (their canonical, id-remapped
+        // form), and advance the push bookmark past every pending step —
+        // survivors are in the log, conflicted steps are dropped from sync
+        // (a later push must not resurrect them with stale ids).
         auto entriesNow = readOplog();
         int n = entriesNow.size();
         Array<var> outEntries;
         int64 maxSeq = lastPushed;
         for (auto& step : pending)
+            maxSeq = jmax (maxSeq, (int64) step.getProperty ("seq", 0));
+        for (auto& step : survivors)
         {
             auto* e = obj();
             e->setProperty ("n", ++n);
@@ -272,9 +283,9 @@ juce::var CollabEngine::pull()
             e->setProperty ("args", outboundArgs (rewriteIds (step.getProperty ("args", var()), idMap)));
             e->setProperty ("state_hash_after", var());
             outEntries.add (var (e));
-            maxSeq = jmax (maxSeq, (int64) step.getProperty ("seq", 0));
         }
-        appendOplog (outEntries);
+        if (! outEntries.isEmpty())
+            appendOplog (outEntries);
         saveSyncState (maxSeq, n);
         String aout;
         git ({ "add", "-A" }, aout);
