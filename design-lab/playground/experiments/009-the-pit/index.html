@@ -534,7 +534,8 @@ async function feedPost(path, body) {
   });
   return r.json();
 }
-function feedEvent(ev) {
+function feedEvent(raw) {
+  const ev = raw.event || raw;            // server envelope: { seq, event: { type, payload } }
   const p = ev.payload || {};
   if (ev.type === 'transport') {
     enginePos = +p.position || 0;
@@ -549,7 +550,7 @@ function feedEvent(ev) {
     if (lin - FEED.lastLin > 0.16) onsetEnv = 1;        // flux -> slam
     FEED.lastLin = lin;
   }
-  if (ev.seq) FEED.seq = Math.max(FEED.seq, ev.seq);
+  if (raw.seq) FEED.seq = Math.max(FEED.seq, raw.seq);
 }
 async function feedLoop() {
   try {
