@@ -153,6 +153,11 @@ void main() {
 const VERT = `attribute vec2 a; void main(){ gl_Position = vec4(a, 0.0, 1.0); }`;
 const cv = document.getElementById('gl');
 const gl = cv.getContext('webgl', { antialias: false, alpha: false });
+// harden: survive WebGL context loss (context-cap churn) — retry/reload cleanly
+if (!gl) { setTimeout(() => location.reload(), 1500); throw new Error('webgl unavailable - retrying'); }
+cv.addEventListener('webglcontextlost', e => e.preventDefault());
+cv.addEventListener('webglcontextrestored', () => location.reload());
+
 function sh(ty, src) {
   const s = gl.createShader(ty);
   gl.shaderSource(s, src); gl.compileShader(s);

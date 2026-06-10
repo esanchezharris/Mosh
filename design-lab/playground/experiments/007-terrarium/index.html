@@ -342,6 +342,12 @@ function resize() {
   crGl.viewport(0, 0, crCv.width, crCv.height);
 }
 addEventListener('resize', resize); resize();
+// harden: survive WebGL context loss
+if (!bgGl || !crGl) { setTimeout(() => location.reload(), 1500); throw new Error('webgl unavailable - retrying'); }
+for (const c of [bgCv, crCv]) {
+  c.addEventListener('webglcontextlost', e => e.preventDefault());
+  c.addEventListener('webglcontextrestored', () => location.reload());
+}
 
 // ------------------------------------------------------------- the ledger
 const ledger = document.getElementById('ledger');

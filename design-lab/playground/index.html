@@ -37,6 +37,16 @@
   .meta .name { font-family: var(--font-display); font-weight: 900; font-size: 17px;
            color: var(--lime); margin: 4px 0 6px; letter-spacing: .03em; }
   .meta .what { font-size: 11px; line-height: 1.55; opacity: .7; }
+
+  /* hover-to-run: max ~3 live GL pages at once instead of 11 (context-cap glitch fix) */
+  .thumb { display: grid; place-items: center;
+    background-image: radial-gradient(rgba(204,255,35,.05) 1px, transparent 1.01px);
+    background-size: 4px 4px; }
+  .thumb .ph { font-size: 64px; color: rgba(204,255,35,.18); letter-spacing: .04em;
+    transition: color .2s, transform .2s; }
+  .card:hover .ph { color: rgba(204,255,35,.45); transform: scale(1.06); }
+  .thumb iframe { position: absolute; inset: 0; }
+  .thumb { position: relative; }
 </style>
 </head>
 <body>
@@ -53,7 +63,7 @@
 
 <div class="grid">
   <a class="card" href="experiments/001-stage/index.html">
-    <div class="thumb"><iframe src="experiments/001-stage/index.html" loading="lazy" tabindex="-1"></iframe></div>
+    <div class="thumb" data-live="experiments/001-stage/index.html"><div class="ph disp">001</div></div>
     <div class="meta">
       <div class="num">001 · THE CENTERPIECE</div>
       <div class="name">HEARTH v2</div>
@@ -65,7 +75,7 @@
   </a>
 
   <a class="card" href="experiments/002-moshi-morphology/index.html">
-    <div class="thumb"><iframe src="experiments/002-moshi-morphology/index.html" loading="lazy" tabindex="-1"></iframe></div>
+    <div class="thumb" data-live="experiments/002-moshi-morphology/index.html"><div class="ph disp">002</div></div>
     <div class="meta">
       <div class="num">002 · THE CREATURE</div>
       <div class="name">SPECIMEN</div>
@@ -76,7 +86,7 @@
   </a>
 
   <a class="card" href="experiments/003-periphery/index.html">
-    <div class="thumb"><iframe src="experiments/003-periphery/index.html" loading="lazy" tabindex="-1"></iframe></div>
+    <div class="thumb" data-live="experiments/003-periphery/index.html"><div class="ph disp">003</div></div>
     <div class="meta">
       <div class="num">003 · DIRECTION</div>
       <div class="name">PERIPHERY</div>
@@ -87,7 +97,7 @@
   </a>
 
   <a class="card" href="experiments/004-gullet/index.html">
-    <div class="thumb"><iframe src="experiments/004-gullet/index.html" loading="lazy" tabindex="-1"></iframe></div>
+    <div class="thumb" data-live="experiments/004-gullet/index.html"><div class="ph disp">004</div></div>
     <div class="meta">
       <div class="num">004 · DIRECTION</div>
       <div class="name">THE GULLET</div>
@@ -98,7 +108,7 @@
   </a>
 
   <a class="card" href="experiments/005-spore-ledger/index.html">
-    <div class="thumb"><iframe src="experiments/005-spore-ledger/index.html" loading="lazy" tabindex="-1"></iframe></div>
+    <div class="thumb" data-live="experiments/005-spore-ledger/index.html"><div class="ph disp">005</div></div>
     <div class="meta">
       <div class="num">005 · DIRECTION</div>
       <div class="name">SPORE LEDGER</div>
@@ -109,7 +119,7 @@
   </a>
 
   <a class="card" href="experiments/006-broadcast/index.html">
-    <div class="thumb"><iframe src="experiments/006-broadcast/index.html" loading="lazy" tabindex="-1"></iframe></div>
+    <div class="thumb" data-live="experiments/006-broadcast/index.html"><div class="ph disp">006</div></div>
     <div class="meta">
       <div class="num">006 · DIRECTION</div>
       <div class="name">BROADCAST</div>
@@ -120,7 +130,7 @@
   </a>
 
   <a class="card" href="experiments/007-terrarium/index.html">
-    <div class="thumb"><iframe src="experiments/007-terrarium/index.html" loading="lazy" tabindex="-1"></iframe></div>
+    <div class="thumb" data-live="experiments/007-terrarium/index.html"><div class="ph disp">007</div></div>
     <div class="meta">
       <div class="num">007 · SYNTHESIS · 002 + 005 + hushed 001</div>
       <div class="name">TERRARIUM</div>
@@ -132,7 +142,7 @@
   </a>
 
   <a class="card" href="experiments/008-possession/index.html">
-    <div class="thumb"><iframe src="experiments/008-possession/index.html" loading="lazy" tabindex="-1"></iframe></div>
+    <div class="thumb" data-live="experiments/008-possession/index.html"><div class="ph disp">008</div></div>
     <div class="meta">
       <div class="num">008 · GROUNDED · THE CURRENT UI, POSSESSED</div>
       <div class="name">POSSESSION</div>
@@ -143,7 +153,7 @@
     </div>
   </a>
   <a class="card" href="experiments/009-the-pit/index.html">
-    <div class="thumb"><iframe src="experiments/009-the-pit/index.html" loading="lazy" tabindex="-1"></iframe></div>
+    <div class="thumb" data-live="experiments/009-the-pit/index.html"><div class="ph disp">009</div></div>
     <div class="meta">
       <div class="num">009 · GROUNDED · 3D · ROUGH ON PURPOSE</div>
       <div class="name">THE PIT</div>
@@ -154,7 +164,7 @@
     </div>
   </a>
   <a class="card" href="experiments/010-moshi/index.html">
-    <div class="thumb"><iframe src="experiments/010-moshi/index.html" loading="lazy" tabindex="-1"></iframe></div>
+    <div class="thumb" data-live="experiments/010-moshi/index.html"><div class="ph disp">010</div></div>
     <div class="meta">
       <div class="num">010 · THE AGENT · 3D COMPONENT</div>
       <div class="name">MOSHI</div>
@@ -165,5 +175,25 @@
     </div>
   </a>
 </div>
+<script>
+// run an experiment live only while you hover its card — browsers cap WebGL
+// contexts (~8-16); ten always-on iframes was exactly the "glitching out".
+for (const th of document.querySelectorAll('.thumb[data-live]')) {
+  let f = null, t = null;
+  th.closest('.card').addEventListener('mouseenter', () => {
+    clearTimeout(t);
+    if (!f) {
+      f = document.createElement('iframe');
+      f.src = th.dataset.live;
+      f.tabIndex = -1;
+      f.style.cssText = 'width:400%;height:400%;transform:scale(.25);transform-origin:0 0;border:0;pointer-events:none';
+      th.appendChild(f);
+    }
+  });
+  th.closest('.card').addEventListener('mouseleave', () => {
+    t = setTimeout(() => { if (f) { f.remove(); f = null; } }, 1200);
+  });
+}
+</script>
 </body>
 </html>

@@ -443,6 +443,12 @@ void main(){
 }`;
   const VERT = 'attribute vec2 a; void main(){ gl_Position = vec4(a, 0.0, 1.0); }';
   const gl = cv.getContext('webgl', { antialias: false, alpha: true, premultipliedAlpha: false });
+  if (!gl) {                       // context cap hit — degrade to a face, keep the page alive
+    face.style.opacity = '0.6';
+    return { el: host, set() {}, pulse() {}, poke() {} };
+  }
+  cv.addEventListener('webglcontextlost', e => e.preventDefault());
+  cv.addEventListener('webglcontextrestored', () => location.reload());
   function sh(ty, src) {
     const s = gl.createShader(ty);
     gl.shaderSource(s, src); gl.compileShader(s);

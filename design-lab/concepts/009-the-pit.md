@@ -62,3 +62,21 @@ house 3D style; rack-sculpts-the-centerpiece as the Color Rack's reason to exist
   fissures hardened into **embedded crystal shards** (treasure, not circuitry).
 - **It's a toy now:** drag orbits the mass, a tap pokes it (jolt + squash).
 - Moshi upgraded to the 3D component (010), bouncing with the beat beside the pit.
+
+## v4 (2026-06-10) — the music's character, and hardening
+
+- **GRIT grows reaction-diffusion ridges** — labyrinth contour-band displacement on
+  the hide; valleys shade, crests catch light. GRIT 0 = smooth chunk, GRIT 100 =
+  brain coral.
+- **AIR bores hollows** — three seeded tunnels carved from the body; at high AIR you
+  see the room straight through the song. Hollow mouths glow faint lime.
+- **Slams eject collectible shards** (crash-crate energy): hard beats throw chunky
+  lime debris that arcs, lands, and bobs as pickups — sweep your cursor to collect;
+  the ◆ counter in the topbar pops. Pokes eject too.
+- **Hardening pass** (user: "keeps glitching out in my preview panel"): the gallery
+  ran 11 always-on WebGL iframes — past the browser's context cap, which kills the
+  oldest contexts (the glitch). Gallery is now hover-to-run (posters at rest, ≤1 live
+  page). Every GL page also gained context-loss recovery (preventDefault + clean
+  reload-on-restore, retry when a context can't be created), MoshiBlob degrades to a
+  face-only stub instead of crashing the page, and the pit buffer is capped at
+  380×240 so huge windows can't balloon the raymarch.

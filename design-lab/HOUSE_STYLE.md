@@ -64,3 +64,7 @@ every rule ports to SkiaSharp/SKSL for the Avalonia future.
 - **Scanlines removed lab-wide** (they were the wrong decade); 001–007 keep res-crunch
   + dither and adopt full v2 chrome as each is revisited.
 - Engine feed: 009 carries the reference client (`MOSH_LAB_FEED=1`, port 47873).
+- **Context discipline:** browsers cap WebGL contexts (~8-16). The gallery runs pages
+  hover-to-live only; every GL page handles `webglcontextlost/restored`; components
+  degrade gracefully when a context can't be created. Never ship an always-on grid
+  of live GL iframes.
