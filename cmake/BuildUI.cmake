@@ -41,24 +41,24 @@ add_custom_command(
 
 add_custom_target(MoshUI DEPENDS "${MOSH_UI_DIST}/index.html")
 
-# Stage the built bundle where WebBridge can serve it after the app links.
+# Stage the built bundle where WebBridge can serve it. NOT a POST_BUILD hook:
+# those only fire when the Mosh target relinks, so a UI-only change rebuilt
+# ui/dist and then silently shipped a STALE bundle inside the .app (the
+# S17-0 "fix didn't fix it" trap). A stamp-file rule re-stages whenever dist
+# changes; `cmake --build <dir>` (default target) covers both app and UI.
 add_dependencies(Mosh MoshUI)
+set(MOSH_UI_STAGE_STAMP "${CMAKE_BINARY_DIR}/ui-stage.stamp")
 if (APPLE)
-    add_custom_command(TARGET Mosh POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E rm -rf
-                "$<TARGET_BUNDLE_CONTENT_DIR:Mosh>/Resources/ui"
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-                "${MOSH_UI_DIST}"
-                "$<TARGET_BUNDLE_CONTENT_DIR:Mosh>/Resources/ui"
-        COMMENT "Staging UI bundle into Mosh.app/Contents/Resources/ui"
-        VERBATIM)
+    set(MOSH_UI_STAGE_DEST "$<TARGET_BUNDLE_CONTENT_DIR:Mosh>/Resources/ui")
 else()
-    add_custom_command(TARGET Mosh POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E rm -rf
-                "$<TARGET_FILE_DIR:Mosh>/ui"
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-                "${MOSH_UI_DIST}"
-                "$<TARGET_FILE_DIR:Mosh>/ui"
-        COMMENT "Staging UI bundle next to Mosh executable"
-        VERBATIM)
+    set(MOSH_UI_STAGE_DEST "$<TARGET_FILE_DIR:Mosh>/ui")
 endif()
+add_custom_command(
+    OUTPUT  "${MOSH_UI_STAGE_STAMP}"
+    COMMAND ${CMAKE_COMMAND} -E rm -rf "${MOSH_UI_STAGE_DEST}"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${MOSH_UI_DIST}" "${MOSH_UI_STAGE_DEST}"
+    COMMAND ${CMAKE_COMMAND} -E touch "${MOSH_UI_STAGE_STAMP}"
+    DEPENDS "${MOSH_UI_DIST}/index.html" Mosh
+    COMMENT "Staging UI bundle into the app (stamp: re-runs on any dist change)"
+    VERBATIM)
+add_custom_target(MoshUIStage ALL DEPENDS "${MOSH_UI_STAGE_STAMP}")

@@ -22,14 +22,6 @@ export function Rack({ snapshot }: { snapshot: Snapshot }) {
   const exec = useStore((s) => s.exec);
   const editingClipId = useStore((s) => s.editingClipId);
 
-  // Piano roll drawer (Stage 16): editing a clip swaps the whole rack area.
-  if (editingClipId)
-    return (
-      <div className="rack tall">
-        <PianoRoll snapshot={snapshot} />
-      </div>
-    );
-
   const track = snapshot.tracks.find((t) => t.id === selectedTrackId) ?? null;
   const plugins = (track?.plugins ?? []).filter((p) => p.type !== "volume");
 
@@ -38,6 +30,17 @@ export function Rack({ snapshot }: { snapshot: Snapshot }) {
   const hasLayer = !!track?.clips.some((c) => c.hasRenderLayer);
   const [genOpenManual, setGenOpenManual] = useState<boolean | null>(null);
   const genOpen = genOpenManual ?? hasLayer;
+
+  // Piano roll drawer (Stage 16): editing a clip swaps the whole rack area.
+  // MUST come AFTER every hook above — an early return before useState made
+  // React render fewer hooks than the previous pass and crash the UI the
+  // moment a clip was double-clicked (Emilio's repro).
+  if (editingClipId)
+    return (
+      <div className="rack tall">
+        <PianoRoll snapshot={snapshot} />
+      </div>
+    );
 
   return (
     <div className="rack">
