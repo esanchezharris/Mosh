@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>MOSH DESIGN LAB — gallery</title>
+<style>
+  :root {
+    --ink: #0B0B0B; --lime: #CCFF23; --lime-glow: #D9FF4C;
+    --bone: #F6F2EB; --mist: #E5E5E1;
+    --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+    --font-display: "Archivo Black", "Helvetica Neue", -apple-system, "Arial Black", sans-serif;
+  }
+  body { margin: 0; background: var(--ink); color: var(--bone);
+         font-family: var(--font-mono); }
+  header { padding: 44px 48px 8px; }
+  h1 { font-family: var(--font-display); font-weight: 900; font-size: 38px; margin: 0;
+       letter-spacing: -0.01em; color: var(--bone); }
+  h1 em { font-style: normal; color: var(--lime); text-shadow: 0 0 28px rgba(217,255,76,.4); }
+  .sub { font-size: 11px; letter-spacing: .14em; opacity: .5; margin-top: 10px; }
+  .docs { padding: 0 48px; font-size: 11px; letter-spacing: .08em; opacity: .75; }
+  .docs a { color: var(--lime); text-decoration: none; margin-right: 18px; }
+  .docs a:hover { text-shadow: 0 0 14px rgba(217,255,76,.6); }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+          gap: 26px; padding: 30px 48px 60px; }
+  .card { border: 1px solid rgba(246,242,235,.12); border-radius: 14px; overflow: hidden;
+          background: #0e0e0d; transition: border-color .25s, box-shadow .25s; display: block;
+          color: inherit; text-decoration: none; }
+  .card:hover { border-color: rgba(204,255,35,.55); box-shadow: 0 0 34px rgba(204,255,35,.12); }
+  .thumb { position: relative; width: 100%; aspect-ratio: 16/10; overflow: hidden;
+           background: #060606; }
+  .thumb iframe { width: 400%; height: 400%; transform: scale(.25); transform-origin: 0 0;
+           border: 0; pointer-events: none; }
+  .meta { padding: 14px 18px 16px; }
+  .meta .num { font-size: 10px; letter-spacing: .2em; opacity: .45; }
+  .meta .name { font-family: var(--font-display); font-weight: 900; font-size: 17px;
+           color: var(--lime); margin: 4px 0 6px; letter-spacing: .03em; }
+  .meta .what { font-size: 11px; line-height: 1.55; opacity: .7; }
+</style>
+</head>
+<body>
+<header>
+  <h1>MOSH <em>DESIGN LAB</em></h1>
+  <div class="sub">WAVE 1 · INTERFACES DERIVED FROM THE SYMBIOTE — NOT FROM A LAYOUT</div>
+</header>
+<nav class="docs">
+  <a href="../BRIEF.md">THE BRIEF</a>
+  <a href="../TOOLS.md">THE TOOLS</a>
+  <a href="../inspiration/INDEX.md">INSPIRATION INDEX</a>
+  <a href="../concepts/">CONCEPT ONE-PAGERS</a>
+</nav>
+
+<div class="grid">
+  <a class="card" href="experiments/001-stage/index.html">
+    <div class="thumb"><iframe src="experiments/001-stage/index.html" loading="lazy" tabindex="-1"></iframe></div>
+    <div class="meta">
+      <div class="num">001 · THE CENTERPIECE</div>
+      <div class="name">HEARTH</div>
+      <div class="what">What Moshi dreams about while you think. The fire/screensaver for
+      not-passthrough mode: domain-warped ink with bioluminescent veins, breathing on its
+      own, leaning toward the music. Mouse = energy/brightness; click = hit; or give it the mic.</div>
+    </div>
+  </a>
+
+  <a class="card" href="experiments/002-moshi-morphology/index.html">
+    <div class="thumb"><iframe src="experiments/002-moshi-morphology/index.html" loading="lazy" tabindex="-1"></iframe></div>
+    <div class="meta">
+      <div class="num">002 · THE CREATURE</div>
+      <div class="name">SPECIMEN</div>
+      <div class="what">The morphology spectrum, calm → feral, as a raymarched SDF body.
+      Recording is HEAT (an ember under the skin), song position is a lume circling the
+      membrane, clipping is a tremor. The body is the instrument cluster.</div>
+    </div>
+  </a>
+
+  <a class="card" href="experiments/003-periphery/index.html">
+    <div class="thumb"><iframe src="experiments/003-periphery/index.html" loading="lazy" tabindex="-1"></iframe></div>
+    <div class="meta">
+      <div class="num">003 · DIRECTION</div>
+      <div class="name">PERIPHERY</div>
+      <div class="what">The studio at the corner of your eye. The interface is a membrane
+      creeping in from the screen edges; the center belongs to your game / guitar / dishes.
+      A lume bead laps the border once per song; recording runs the whole rim hot.</div>
+    </div>
+  </a>
+
+  <a class="card" href="experiments/004-gullet/index.html">
+    <div class="thumb"><iframe src="experiments/004-gullet/index.html" loading="lazy" tabindex="-1"></iframe></div>
+    <div class="meta">
+      <div class="num">004 · DIRECTION</div>
+      <div class="name">THE GULLET</div>
+      <div class="what">The timeline is Moshi's body and the song is inside it. Takes are
+      lumps under the skin; the playhead is a peristaltic pulse; recording is the mouth
+      swallowing the live signal. Undo = it gives one back.</div>
+    </div>
+  </a>
+
+  <a class="card" href="experiments/005-spore-ledger/index.html">
+    <div class="thumb"><iframe src="experiments/005-spore-ledger/index.html" loading="lazy" tabindex="-1"></iframe></div>
+    <div class="meta">
+      <div class="num">005 · DIRECTION</div>
+      <div class="name">SPORE LEDGER</div>
+      <div class="what">Visible metabolism. Every autonomous action buds off the creature as
+      a living cell drifting into a ledger; hover to read the deed, pop to undo. Nothing
+      Moshi does is ever invisible — that's the whole direction.</div>
+    </div>
+  </a>
+
+  <a class="card" href="experiments/006-broadcast/index.html">
+    <div class="thumb"><iframe src="experiments/006-broadcast/index.html" loading="lazy" tabindex="-1"></iframe></div>
+    <div class="meta">
+      <div class="num">006 · DIRECTION</div>
+      <div class="name">BROADCAST</div>
+      <div class="what">The familiar, on stage. Moshi dances the beat for an audience: halo =
+      song position, eggs = takes landed, the pit votes VIBE/REDO, deeds roll on a ticker.
+      OBS-transparent toggle for streaming.</div>
+    </div>
+  </a>
+</div>
+</body>
+</html>

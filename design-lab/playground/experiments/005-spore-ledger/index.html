@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>005 · SPORE LEDGER — visible metabolism</title>
+<style>
+  :root {
+    --ink: #0B0B0B; --lime: #CCFF23; --lime-glow: #D9FF4C;
+    --bone: #F6F2EB; --mist: #E5E5E1;
+    --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+    --font-display: "Archivo Black", "Helvetica Neue", -apple-system, "Arial Black", sans-serif;
+  }
+  html, body { margin: 0; height: 100%; overflow: hidden;
+    background: radial-gradient(ellipse at 50% 65%, #101010 0%, var(--ink) 60%, #060606 100%); }
+  .chrome { position: fixed; font-family: var(--font-mono); color: var(--bone);
+            user-select: none; -webkit-user-select: none; }
+  #title { top: 18px; left: 20px; font-size: 11px; letter-spacing: .14em; opacity: .55; }
+  #title b { font-family: var(--font-display); font-weight: 900; color: var(--lime); font-size: 12px; }
+
+  /* ---- vitals: the two non-negotiables, quiet but absolute ---- */
+  #vitals { top: 16px; left: 50%; transform: translateX(-50%); text-align: center; }
+  #vitals svg { display: block; margin: 0 auto; }
+  #sect { font-size: 10px; letter-spacing: .2em; opacity: .5; margin-top: 2px; }
+
+  /* ---- Moshi, bottom left, gooey ---- */
+  #moshiWrap { bottom: 36px; left: 44px; width: 170px; height: 150px; }
+  #goo { width: 100%; height: 100%; filter: url(#gooF); }
+  .gb { position: absolute; background: #0d0d0c; border-radius: 50%; }
+  .gb.b1 { width: 92px; height: 84px; left: 36px; top: 44px; animation: d1 7s ease-in-out infinite; }
+  .gb.b2 { width: 56px; height: 52px; left: 14px; top: 66px; animation: d2 9s ease-in-out infinite; }
+  .gb.b3 { width: 48px; height: 46px; left: 92px; top: 36px; animation: d3 8s ease-in-out infinite; }
+  .gb.b4 { width: 40px; height: 38px; left: 70px; top: 88px; animation: d2 6s ease-in-out infinite reverse; }
+  @keyframes d1 { 50% { transform: translate(4px, -7px) scale(1.05); } }
+  @keyframes d2 { 50% { transform: translate(-6px, 5px) scale(0.95); } }
+  @keyframes d3 { 50% { transform: translate(5px, 6px) scale(1.08); } }
+  #face { position: absolute; left: 50px; top: 58px; width: 70px; text-align: center; }
+  #face .eyes { font-family: var(--font-display); font-weight: 900; font-size: 17px;
+        color: var(--bone); letter-spacing: 14px; text-indent: 14px; }
+  #face .mouth { width: 20px; height: 12px; margin: 3px auto 0; background: var(--lime);
+        border-radius: 0 0 12px 12px; box-shadow: 0 0 14px rgba(217,255,76,.8); }
+  #moshiGlow { position: absolute; inset: -30px; border-radius: 50%;
+        background: radial-gradient(circle, rgba(204,255,35,.10), transparent 65%);
+        animation: breathe 5s ease-in-out infinite; }
+  @keyframes breathe { 50% { opacity: .5; transform: scale(1.12); } }
+
+  /* ---- the ledger column: deeds as living cells ---- */
+  #ledger { top: 80px; right: 56px; bottom: 120px; width: 60px; display: flex;
+        flex-direction: column; align-items: center; gap: 14px; }
+  #ledgerLabel { top: 52px; right: 34px; font-size: 9px; letter-spacing: .22em; opacity: .35;
+        writing-mode: vertical-rl; }
+  .cell { position: relative; width: 36px; height: 34px; cursor: pointer; flex: none;
+        transition: opacity 2s; }
+  .cell .body { position: absolute; inset: 0; background: #0e0e0d;
+        border: 1px solid rgba(204,255,35,.4);
+        border-radius: 46% 54% 52% 48% / 52% 46% 54% 48%;
+        box-shadow: 0 0 12px rgba(204,255,35,.14), inset 0 0 8px rgba(204,255,35,.10);
+        animation: cellbreathe ease-in-out infinite; }
+  .cell .nuc { position: absolute; left: 50%; top: 50%; width: 9px; height: 9px;
+        transform: translate(-50%,-50%); border-radius: 50%; background: var(--lime);
+        box-shadow: 0 0 10px rgba(217,255,76,.9); }
+  @keyframes cellbreathe { 50% { transform: scale(1.08) rotate(3deg); } }
+  .cell:hover .body { border-color: var(--lime); box-shadow: 0 0 20px rgba(204,255,35,.4); }
+  .cell .tag { position: absolute; right: 48px; top: 50%; transform: translateY(-50%);
+        white-space: nowrap; font-size: 10.5px; letter-spacing: .06em; color: var(--bone);
+        background: rgba(11,11,11,.85); border: 1px solid rgba(204,255,35,.3);
+        border-radius: 999px; padding: 4px 11px; opacity: 0; pointer-events: none;
+        transition: opacity .25s; }
+  .cell:hover .tag { opacity: 1; }
+  .cell .tag em { font-style: normal; color: var(--lime); }
+
+  .splat { position: fixed; width: 5px; height: 5px; border-radius: 50%;
+        background: var(--lime); pointer-events: none; }
+
+  #ask { bottom: 40px; left: 50%; transform: translateX(-50%); width: min(420px, 60vw); }
+  #ask input { width: 100%; background: transparent; border: 0; outline: 0; text-align: center;
+        border-bottom: 1px solid rgba(246,242,235,.18); padding: 8px 2px;
+        font-family: var(--font-mono); font-size: 12px; letter-spacing: .08em; color: var(--bone); }
+  #ask input::placeholder { color: rgba(246,242,235,.25); }
+  #ask input:focus { border-bottom-color: rgba(204,255,35,.6); }
+  #toast { bottom: 84px; left: 50%; transform: translateX(-50%); font-size: 10.5px;
+        letter-spacing: .1em; color: var(--lime); opacity: 0; transition: opacity .4s; }
+  #hint { bottom: 14px; left: 50%; transform: translateX(-50%); font-size: 9.5px;
+        letter-spacing: .12em; opacity: .28; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:fixed">
+  <filter id="gooF">
+    <feGaussianBlur in="SourceGraphic" stdDeviation="8" result="b" />
+    <feColorMatrix in="b" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 22 -10" />
+  </filter>
+</svg>
+
+<div class="chrome" id="title"><b>SPORE LEDGER</b>&ensp;005 · you can see its metabolism</div>
+
+<div class="chrome" id="vitals">
+  <svg width="56" height="56" viewBox="0 0 56 56">
+    <circle cx="28" cy="28" r="21" fill="none" stroke="rgba(246,242,235,.12)" stroke-width="2"/>
+    <circle id="posRing" cx="28" cy="28" r="21" fill="none" stroke="#CCFF23" stroke-width="2"
+            stroke-linecap="round" stroke-dasharray="131.9" stroke-dashoffset="131.9"
+            transform="rotate(-90 28 28)"/>
+    <circle id="ember" cx="28" cy="28" r="5.5" fill="rgba(246,242,235,.18)"/>
+  </svg>
+  <div id="sect" class="tc">VERSE 1 · BAR 1.1 · R TO PUNCH IN</div>
+</div>
+
+<div class="chrome" id="moshiWrap">
+  <div id="moshiGlow"></div>
+  <div id="goo">
+    <div class="gb b1"></div><div class="gb b2"></div><div class="gb b3"></div><div class="gb b4"></div>
+  </div>
+  <div id="face"><div class="eyes">&gt;&lt;</div><div class="mouth"></div></div>
+</div>
+
+<div class="chrome" id="ledgerLabel">WHAT IT DID · POP TO UNDO</div>
+<div class="chrome" id="ledger"></div>
+<div class="chrome" id="toast"></div>
+<div class="chrome" id="ask"><input id="cmd" placeholder="tell moshi — it will show you the deed" autocomplete="off" /></div>
+<div class="chrome" id="hint">every action it takes becomes a cell · hover to read · pop to undo · old deeds metabolize away</div>
+
+<script>
+// SPORE LEDGER — recommendation #2 taken literally: nothing Moshi does is
+// invisible. Every autonomous action buds off its body as a living cell that
+// drifts into a ledger column. Hover a cell to read the deed; pop it to undo
+// (it bursts in lime). Old deeds fade — metabolized — but the undo stack is real.
+
+const ledger = document.getElementById('ledger');
+const toast = document.getElementById('toast');
+const moshi = document.getElementById('moshiWrap');
+const DEMO = ['kept take 4', 'added delay to lead vocal', 'raised vocal +1.5 dB',
+              'looped verse 2', 'tightened the hook comp', 'rolled off 80 Hz on bass',
+              'punched in after the hook', 'printed a rough bounce'];
+
+function say(msg) {
+  toast.textContent = msg;
+  toast.style.opacity = .9;
+  setTimeout(() => toast.style.opacity = 0, 2400);
+}
+
+function makeCell(text) {
+  const c = document.createElement('div');
+  c.className = 'cell';
+  const dur = (3.5 + Math.random() * 3).toFixed(1);
+  c.innerHTML = `<div class="body" style="animation-duration:${dur}s"></div>
+                 <div class="nuc"></div>
+                 <div class="tag"><em>✓</em> ${text}</div>`;
+  c.addEventListener('click', () => pop(c, text));
+  return c;
+}
+
+function pop(cell, text) {
+  const r = cell.getBoundingClientRect();
+  for (let i = 0; i < 9; i++) {
+    const s = document.createElement('div');
+    s.className = 'splat';
+    s.style.left = r.left + r.width / 2 + 'px';
+    s.style.top = r.top + r.height / 2 + 'px';
+    document.body.appendChild(s);
+    const a = Math.random() * Math.PI * 2, d = 24 + Math.random() * 36;
+    s.animate([{ transform: 'translate(0,0)', opacity: 1 },
+               { transform: `translate(${Math.cos(a) * d}px, ${Math.sin(a) * d}px)`, opacity: 0 }],
+              { duration: 480, easing: 'cubic-bezier(.17,.67,.4,1)' }).onfinish = () => s.remove();
+  }
+  cell.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.6)', opacity: 0 }],
+               { duration: 240, easing: 'ease-out' }).onfinish = () => cell.remove();
+  say(`↺ undid: ${text}`);
+}
+
+function deed(text) {
+  const cell = makeCell(text);
+  cell.style.visibility = 'hidden';
+  ledger.prepend(cell);
+  const target = cell.getBoundingClientRect();
+  const m = moshi.getBoundingClientRect();
+
+  // a spore buds off Moshi and travels to the ledger
+  const fly = document.createElement('div');
+  fly.className = 'cell';
+  fly.innerHTML = '<div class="body"></div><div class="nuc"></div>';
+  fly.style.position = 'fixed';
+  fly.style.left = m.left + m.width * .55 + 'px';
+  fly.style.top = m.top + m.height * .3 + 'px';
+  fly.style.zIndex = 10;
+  document.body.appendChild(fly);
+  const dx = target.left - (m.left + m.width * .55);
+  const dy = target.top - (m.top + m.height * .3);
+  fly.animate([
+    { transform: 'translate(0,0) scale(.4)', opacity: 0.0 },
+    { transform: `translate(${dx * .3}px, ${dy * .55 - 60}px) scale(1.1)`, opacity: 1, offset: .45 },
+    { transform: `translate(${dx}px, ${dy}px) scale(1)`, opacity: 1 },
+  ], { duration: 1300, easing: 'cubic-bezier(.45,.05,.35,1)' }).onfinish = () => {
+    fly.remove();
+    cell.style.visibility = 'visible';
+  };
+
+  // cap the column; the oldest metabolizes away
+  while (ledger.children.length > 7) ledger.lastElementChild.remove();
+  // slow fade with age
+  setTimeout(() => { if (cell.isConnected) cell.style.opacity = .45; }, 30000);
+  setTimeout(() => { if (cell.isConnected) { cell.style.opacity = 0; setTimeout(() => cell.remove(), 2000); } }, 55000);
+}
+
+// demo metabolism
+let di = 0;
+setTimeout(function tick() {
+  deed(DEMO[di++ % DEMO.length]);
+  setTimeout(tick, 5000 + Math.random() * 6000);
+}, 1200);
+
+const cmd = document.getElementById('cmd');
+cmd.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && cmd.value.trim()) { deed(cmd.value.trim()); cmd.value = ''; }
+});
+
+// vitals: position ring + ember
+const SECTIONS = ['INTRO','VERSE 1','HOOK','VERSE 2','HOOK','BRIDGE','HOOK','OUT'];
+const SONG_S = 96, BPM = 120, CIRC = 131.9;
+let recOn = false;
+const ember = document.getElementById('ember'), ring = document.getElementById('posRing'),
+      sect = document.getElementById('sect');
+addEventListener('keydown', e => {
+  if (e.key.toLowerCase() === 'r' && document.activeElement !== cmd) {
+    recOn = !recOn;
+    if (recOn) deed('punched in');
+  }
+});
+const t0 = performance.now();
+function frame(now) {
+  const t = (now - t0) / 1000;
+  const pos = (t % SONG_S) / SONG_S;
+  ring.setAttribute('stroke-dashoffset', (CIRC * (1 - pos)).toFixed(1));
+  const beats = t * BPM / 60;
+  sect.textContent = `${SECTIONS[Math.floor(pos * 8)]} · BAR ${Math.floor(beats / 4) % 48 + 1}.${Math.floor(beats % 4) + 1}${recOn ? ' · ● TAKING' : ' · R TO PUNCH IN'}`;
+  if (recOn) {
+    const p = .7 + .3 * Math.sin(t * 7);
+    ember.setAttribute('fill', `rgba(204,255,35,${p})`);
+    ember.setAttribute('r', (5.5 + p * 2).toFixed(1));
+  } else {
+    ember.setAttribute('fill', 'rgba(246,242,235,.18)');
+    ember.setAttribute('r', '5.5');
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
