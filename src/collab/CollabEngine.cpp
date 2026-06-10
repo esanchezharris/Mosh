@@ -354,6 +354,7 @@ bool CollabEngine::isSyncable (const String& command)
         "list_audio_outputs", "set_audio_output",   // a peer's speakers aren't session state
         "set_metronome", "choose_file",             // playback aid / local dialog (Stage 15)
         "list_dir", "audition_file", "stop_audition", // crate browsing (Stage 18)
+        "list_audio_inputs", "set_audio_input", "arm_track", // device-bound (Stage 19)
         "collab_init", "collab_clone", "collab_status", "collab_push", "collab_pull",
     };
     return ! excluded.contains (command);

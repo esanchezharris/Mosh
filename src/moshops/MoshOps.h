@@ -85,6 +85,10 @@ private:
     juce::var cmdListDir          (const juce::var& args);
     juce::var cmdAuditionFile     (const juce::var& args);
     juce::var cmdStopAudition     (const juce::var& args);
+    // Stage 19 — recording
+    juce::var cmdListAudioInputs  (const juce::var& args);   // read-only
+    juce::var cmdSetAudioInput    (const juce::var& args);   // machine-local
+    juce::var cmdArmTrack         (const juce::var& args);   // device-bound; never synced
     juce::var cmdUndo           (const juce::var& args);
     juce::var cmdRedo           (const juce::var& args);
     juce::var cmdSave           (const juce::var& args);

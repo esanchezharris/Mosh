@@ -385,6 +385,11 @@ function TrackHeader({
       </div>
       <div className="th-row">
         <button
+          className={`mixbtn arm ${track.armed ? "arm-on" : ""}`}
+          title={track.armed ? "Disarm" : "Arm for recording (needs an input — 🎙 in the topbar)"}
+          onClick={() => exec("arm_track", { trackId: track.id, on: !track.armed })}
+        >●</button>
+        <button
           className={`mixbtn ${track.mute ? "mute-on" : ""}`}
           onClick={() => exec("set_track_mute", { trackId: track.id, mute: !track.mute })}
         >M</button>

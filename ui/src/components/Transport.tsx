@@ -109,6 +109,13 @@ export function Transport() {
       >
         ◭
       </button>
+      <button
+        className={`tbtn rec ${t?.recording ? "rec-on" : ""}`}
+        onClick={() => exec("set_transport", { action: t?.recording ? "stop" : "record" })}
+        title={t?.recording ? "Stop recording" : "Record onto armed tracks (● in a track header)"}
+      >
+        ⏺
+      </button>
 
       <EditableValue
         value={String(tempo)}
@@ -150,6 +157,39 @@ export function Transport() {
         onChange={(e) => exec("set_master_volume", { db: Number(e.target.value) })}
       />
     </div>
+  );
+}
+
+// Audio INPUT picker (Stage 19): pick the recording source. Machine-local.
+export function AudioIn() {
+  const snapshot = useStore((s) => s.snapshot);
+  const exec = useStore((s) => s.exec);
+  const [devices, setDevices] = useState<string[] | null>(null);
+
+  const session = snapshot?.session;
+  if (!session || session.hasAudio === false) return null;
+  const current = session.audioInputDevice ?? "";
+
+  const load = async () => {
+    const res = (await exec("list_audio_inputs", {})) as CommandResult<{ devices: string[] }>;
+    if (res.ok && res.data) setDevices(res.data.devices);
+  };
+
+  return (
+    <span className="audio-out" title={`Recording input: ${current || "none"}`}>
+      <span className="ao-mic">🎙</span>
+      <select
+        className="ao-select"
+        value={current}
+        onPointerDown={() => devices == null && void load()}
+        onChange={(e) => e.target.value && void exec("set_audio_input", { device: e.target.value })}
+      >
+        {current === "" && <option value="">none</option>}
+        {(devices ?? (current ? [current] : [])).map((d) => (
+          <option key={d} value={d}>{d}</option>
+        ))}
+      </select>
+    </span>
   );
 }
 

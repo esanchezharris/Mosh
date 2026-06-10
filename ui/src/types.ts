@@ -95,6 +95,7 @@ export type Track = {
   mute?: boolean;
   solo?: boolean;
   routeTo?: string; // destination track id, "" = master (Stage 17)
+  armed?: boolean;  // record-armed (Stage 19)
 };
 
 export type Transport = {
@@ -120,6 +121,7 @@ export type Snapshot = {
     timeSigDenominator?: number;
     hasAudio?: boolean;
     audioOutputDevice?: string;
+    audioInputDevice?: string;
     audioWarning?: string;
     audioError?: string;
     masterVolumeDb?: number;

@@ -465,6 +465,14 @@ button.on { border-color: var(--accent); color: var(--accent); background: #2120
 }
 .tool-btn.on { border-color: var(--accent); color: var(--accent); }
 
+/* Recording (Stage 19) */
+.tbtn.rec { color: var(--muted); }
+.tbtn.rec-on { color: #fff; background: var(--playhead); border-color: var(--playhead); animation: recpulse 1s infinite; }
+@keyframes recpulse { 50% { opacity: 0.65; } }
+.mixbtn.arm { color: var(--muted); }
+.mixbtn.arm-on { background: #5a1d1d; color: var(--playhead); border-color: var(--playhead); }
+.ao-mic { font-size: 0.7rem; }
+
 /* Crate browser (Stage 18): left drawer over the sample library. */
 .main-row { flex: 1; display: flex; min-height: 0; }
 .main-col { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useStore } from "./store";
 import { isNative } from "./bridge";
 import { Arrangement } from "./components/Arrangement";
-import { Transport, AudioOut } from "./components/Transport";
+import { Transport, AudioOut, AudioIn } from "./components/Transport";
 import { Rack } from "./components/Rack";
 import { PluginBrowser } from "./components/PluginBrowser";
 import { TutorialBar } from "./components/TutorialBar";
@@ -128,6 +128,7 @@ export function App() {
           <AgentPanel />
           {/* Audio-output truth (Stage 14): show + switch the device. */}
           <AudioOut />
+          <AudioIn />
           <MixerToggle />
           <CrateToggle />
           <button className="tool-btn" onClick={() => exec("export_audio", {})} title="Export the mix to WAV">

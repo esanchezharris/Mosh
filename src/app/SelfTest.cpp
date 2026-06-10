@@ -1195,6 +1195,30 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         unsetenv ("MOSH_SAMPLE_LIBRARY");
     }
 
+    // --- Stage 19: recording surfaces (headless: structure + clean refusals) ---
+    {
+        std::cerr << "--- Stage 19: recording surfaces ---\n";
+        auto li = cmd (ops, "list_audio_inputs");
+        check (ok (li) && li["data"].hasProperty ("devices"), "list_audio_inputs ok");
+        auto t19 = cmd (ops, "create_track", args1 ("name", "Rec19"));
+        const auto t19id = t19["data"].getProperty ("trackId", var()).toString();
+        if (! eng.hasAudio())
+        {
+            check (! ok (cmd (ops, "arm_track", objN ({{ "trackId", t19id }, { "on", true }}))),
+                   "arm_track refuses cleanly without an input device");
+            check (! ok (cmd (ops, "set_audio_input", args1 ("device", "Nope"))),
+                   "set_audio_input refuses headless");
+        }
+        auto snap = ops.snapshot();
+        check (snap["session"].hasProperty ("audioInputDevice"), "snapshot carries audioInputDevice");
+        var tv19;
+        for (auto& tv : *snap["tracks"].getArray())
+            if (tv.getProperty ("id", var()).toString() == t19id) tv19 = tv;
+        check (tv19.hasProperty ("armed") && ! (bool) tv19.getProperty ("armed", true),
+               "snapshot carries armed=false by default");
+        cmd (ops, "remove_track", args1 ("trackId", t19id));
+    }
+
     std::cerr << "===== " << (checks - failures) << "/" << checks
               << " checks passed, " << failures << " failed =====\n\n";
     return failures;
@@ -1427,6 +1451,42 @@ int runLiveAudioSmoke (MoshEngine& eng, MoshOps& ops)
     check (ok (cmd (ops, "set_transport", args1 ("action", "stop"))), "post-reload stop ok");
     if (auto* m1 = masterMeter())
         m1->measurer.removeClient (reloadClient);
+
+    // ── Phase D (gated, MOSH_SMOKE_RECORD=1): REAL recording through the mic ──
+    // Needs the TCC microphone permission, so it is not part of the default
+    // battery; run manually to prove arm → record → clip-lands end to end.
+    if (SystemStats::getEnvironmentVariable ("MOSH_SMOKE_RECORD", "0") == "1")
+    {
+        std::cerr << "--- Phase D: live recording (mic) ---\n";
+        auto inputs = eng.listAudioInputDevices();
+        std::cerr << "  ..   inputs: " << inputs.joinIntoString (" | ") << "\n";
+        check (! inputs.isEmpty(), "an audio input device exists");
+        if (! inputs.isEmpty())
+        {
+            // Prefer the built-in mic — Continuity devices (iPhone mic) list
+            // but deliver nothing unless the phone is active.
+            auto pick = inputs[0];
+            for (auto& n : inputs)
+                if (n.containsIgnoreCase ("MacBook")) { pick = n; break; }
+            check (ok (cmd (ops, "set_audio_input", args1 ("device", pick))), "set_audio_input ok");
+            auto rt = cmd (ops, "create_track", args1 ("name", "Rec Smoke"));
+            const auto rtid = rt["data"].getProperty ("trackId", var()).toString();
+            auto arm = cmd (ops, "arm_track", objN ({{ "trackId", rtid }, { "on", true }}));
+            check (ok (arm) && (bool) arm["data"].getProperty ("armed", false), "track armed");
+            check (ok (cmd (ops, "set_transport", args1 ("position", 0.0))), "rec seek ok");
+            check (ok (cmd (ops, "set_transport", args1 ("action", "record"))), "record starts");
+            if (mm != nullptr) mm->runDispatchLoopUntil (1500);
+            check (ok (cmd (ops, "set_transport", args1 ("action", "stop"))), "record stops");
+            if (mm != nullptr) mm->runDispatchLoopUntil (400);   // clip commit is async-ish
+            auto snap = ops.snapshot();
+            int clips = -1;
+            for (auto& tv : *snap["tracks"].getArray())
+                if (tv.getProperty ("id", var()).toString() == rtid)
+                    clips = tv["clips"].size();
+            std::cerr << "  ..   recorded clips on the armed track: " << clips << "\n";
+            check (clips >= 1, "recording landed as a clip on the armed track");
+        }
+    }
 
     std::cerr << "===== " << checks - failures << "/" << checks
               << " live-audio checks passed, " << failures << " failed =====\n";

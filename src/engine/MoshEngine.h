@@ -42,6 +42,12 @@ public:
     juce::String setAudioOutputDevice (const juce::String& name);
     static bool looksLikeVirtualSink (const juce::String& deviceName);
 
+    // ── recording inputs (Stage 19) ──
+    juce::StringArray listAudioInputDevices();
+    juce::String currentAudioInputDevice();
+    /** Open an input device alongside the current output. "" on success. */
+    juce::String setAudioInputDevice (const juce::String& name);
+
     // ── crate audition (Stage 18) ──
     // A juce::SoundPlayer riding the same device as the engine (an extra
     // AudioIODeviceCallback, like the live-smoke probe) — one-shot preview of

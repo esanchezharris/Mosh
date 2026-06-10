@@ -100,6 +100,68 @@ MoshEngine::~MoshEngine()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Recording inputs (Stage 19). Same scan/switch pattern as the output side;
+// the input opens ALONGSIDE the current output device, with the deferred
+// MIDI-apply settle (it would otherwise kill the next play — Stage 14 lesson).
+// ─────────────────────────────────────────────────────────────────────────────
+juce::StringArray MoshEngine::listAudioInputDevices()
+{
+    juce::StringArray names;
+    if (! audioOpen)
+        return names;
+    auto& devices = enginePtr->getDeviceManager().deviceManager;
+    for (auto* type : devices.getAvailableDeviceTypes())
+    {
+        type->scanForDevices();
+        names.addArray (type->getDeviceNames (true));
+    }
+    names.removeDuplicates (true);
+    return names;
+}
+
+juce::String MoshEngine::currentAudioInputDevice()
+{
+    if (! audioOpen)
+        return {};
+    return enginePtr->getDeviceManager().deviceManager.getAudioDeviceSetup().inputDeviceName;
+}
+
+juce::String MoshEngine::setAudioInputDevice (const juce::String& requested)
+{
+    if (! audioOpen)
+        return "audio is disabled";
+
+    auto& devices = enginePtr->getDeviceManager().deviceManager;
+    juce::String matched;
+    for (auto* type : devices.getAvailableDeviceTypes())
+    {
+        type->scanForDevices();
+        for (auto& name : type->getDeviceNames (true))
+            if (name.equalsIgnoreCase (requested))
+            {
+                matched = name;
+                break;
+            }
+        if (matched.isNotEmpty())
+            break;
+    }
+    if (matched.isEmpty())
+        return "audio input device not found: " + requested;
+
+    auto setup = devices.getAudioDeviceSetup();
+    setup.inputDeviceName = matched;
+    setup.useDefaultInputChannels = true;
+    if (auto error = devices.setAudioDeviceSetup (setup, true); error.isNotEmpty())
+        return error;
+
+    enginePtr->getDeviceManager().rescanWaveDeviceList();
+    enginePtr->getDeviceManager().rescanMidiDeviceList();
+    if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
+        mm->runDispatchLoopUntil (150);
+    return {};
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Crate audition (Stage 18): preview files through the SAME device the engine
 // plays on, without touching the edit. SoundPlayer has no stop() — stopping is
 // unhooking the callback and dropping the player.

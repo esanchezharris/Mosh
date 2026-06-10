@@ -49,7 +49,11 @@ if (MOSH_BUILD_APP)
         PRODUCT_NAME "Mosh"
         BUNDLE_ID    "studio.mosh.app"
         COMPANY_NAME "Mosh"
-        NEEDS_WEBVIEW2 TRUE)
+        NEEDS_WEBVIEW2 TRUE
+        # Recording (Stage 19): without the usage description macOS kills the
+        # app the moment an input device opens.
+        MICROPHONE_PERMISSION_ENABLED TRUE
+        MICROPHONE_PERMISSION_TEXT "Mosh records audio from your microphone or interface onto armed tracks.")
 
 # Git identity for trajectory provenance (phase0 §5 mosh_version). Configure-time;
 # the flywheel importer re-stamps exact SHAs when it matters.

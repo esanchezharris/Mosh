@@ -104,6 +104,9 @@ juce::var MoshOps::dispatch (const juce::String& name, const juce::var& args)
     if (name == "list_dir")          return cmdListDir (args);
     if (name == "audition_file")     return cmdAuditionFile (args);
     if (name == "stop_audition")     return cmdStopAudition (args);
+    if (name == "list_audio_inputs") return cmdListAudioInputs (args);
+    if (name == "set_audio_input")   return cmdSetAudioInput (args);
+    if (name == "arm_track")         return cmdArmTrack (args);
     if (name == "undo")              return cmdUndo (args);
     if (name == "redo")              return cmdRedo (args);
     if (name == "save")              return cmdSave (args);
@@ -589,6 +592,72 @@ juce::var MoshOps::cmdStopAudition (const juce::var&)
 {
     eng.stopAudition();
     return okResult ("stop_audition");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Recording (Stage 19). Arming follows the engine's own example pattern:
+// assign the wave-input instance to the track (setTarget) then enable
+// recording for it; the existing set_transport {action:"record"} starts the
+// take and stop(false,…) COMMITS it as a clip on the track.
+// ─────────────────────────────────────────────────────────────────────────────
+juce::var MoshOps::cmdListAudioInputs (const juce::var&)
+{
+    Array<var> devices;
+    for (auto& name : eng.listAudioInputDevices())
+        devices.add (name);
+    auto* data = new DynamicObject();
+    data->setProperty ("devices", devices);
+    data->setProperty ("current", eng.currentAudioInputDevice());
+    return okResult ("list_audio_inputs", var (data));
+}
+
+juce::var MoshOps::cmdSetAudioInput (const juce::var& args)
+{
+    const auto device = args.getProperty ("device", var()).toString().trim();
+    if (device.isEmpty()) return errResult ("set_audio_input", "missing 'device'");
+
+    eng.edit().getTransport().stop (false, false);
+    if (auto err = eng.setAudioInputDevice (device); err.isNotEmpty())
+        return errResult ("set_audio_input", err);
+
+    logLine ("set_audio_input", args, true, {}, false);
+    emitSnapshotInvalidated();
+    auto* data = new DynamicObject();
+    data->setProperty ("current", eng.currentAudioInputDevice());
+    return okResult ("set_audio_input", var (data));
+}
+
+juce::var MoshOps::cmdArmTrack (const juce::var& args)
+{
+    auto* track = findTrack (args.getProperty ("trackId", var()).toString());
+    if (track == nullptr) return errResult ("arm_track", "no track");
+    const bool on = (bool) args.getProperty ("on", true);
+
+    auto instances = eng.edit().getAllInputDevices();
+    te::InputDeviceInstance* wave = nullptr;
+    for (auto* i : instances)
+        if (i != nullptr && i->getInputDevice().getDeviceType() == te::InputDevice::waveDevice)
+        {
+            wave = i;
+            break;
+        }
+    if (wave == nullptr)
+        return errResult ("arm_track", "no audio input device open — pick one (set_audio_input)");
+
+    undoManager().beginNewTransaction ("arm_track");
+    if (on && ! wave->getTargets().contains (track->itemID))
+    {
+        auto r = wave->setTarget (track->itemID, true, &undoManager());
+        if (! r.has_value())
+            return errResult ("arm_track", "cannot target track: " + r.error());
+    }
+    wave->setRecordingEnabled (track->itemID, on);
+
+    logLine ("arm_track", args, true, {}, true);
+    emitSnapshotInvalidated();
+    auto* data = new DynamicObject();
+    data->setProperty ("armed", wave->isRecordingEnabled (track->itemID));
+    return okResult ("arm_track", var (data));
 }
 
 juce::var MoshOps::cmdListAudioOutputs (const juce::var&)
@@ -1726,6 +1795,7 @@ juce::var MoshOps::snapshot()
     // default output nobody could see).
     session->setProperty ("hasAudio", eng.hasAudio());
     session->setProperty ("audioOutputDevice", eng.currentAudioOutputDevice());
+    session->setProperty ("audioInputDevice", eng.currentAudioInputDevice());
 
     // Stage 15: master fader + metronome state.
     if (auto mv = edit.getMasterVolumePlugin())
@@ -1808,6 +1878,13 @@ juce::var MoshOps::trackToVar (te::AudioTrack& t, int index)
     }
     o->setProperty ("mute", t.isMuted (false));
     o->setProperty ("solo", t.isSolo (false));
+
+    // Recording (Stage 19): armed = any input instance record-enabled for us.
+    bool armed = false;
+    for (auto* inst : eng.edit().getAllInputDevices())
+        if (inst != nullptr && inst->isRecordingEnabled (t.itemID))
+            armed = true;
+    o->setProperty ("armed", armed);
 
     // Routing (Stage 17): destination track id, or "" for the master/device.
     if (auto* dest = t.getOutput().getDestinationTrack())

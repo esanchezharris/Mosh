@@ -20,7 +20,9 @@ namespace
             // Playback aids / dialogs, not musical actions (Stage 15).
             || name == "set_metronome" || name == "choose_file"
             // Crate browser (Stage 18) — browsing/audition is not a mutation.
-            || name == "list_dir" || name == "audition_file" || name == "stop_audition";
+            || name == "list_dir" || name == "audition_file" || name == "stop_audition"
+            // Input device pick is machine-local (Stage 19); arming IS recorded.
+            || name == "list_audio_inputs" || name == "set_audio_input";
     }
 }
 
