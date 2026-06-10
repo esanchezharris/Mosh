@@ -198,6 +198,40 @@ juce::var lift (const String& command, const var& args, const var& result, te::E
     }
 
     // ── notes ────────────────────────────────────────────────────────────
+    if (command == "update_notes")
+    {
+        // Lossless in the v0.2 vocabulary: one notes.remove + notes.add pair
+        // per edit, re-adding the FINAL values the command resolved
+        // (result.data.notes — set-fields applied over the matched note).
+        const auto clip = clipSym (args.getProperty ("clipId", var()));
+        auto finals = result.getProperty ("data", var()).getProperty ("notes", var());
+        Array<var> ops;
+        if (finals.isArray())
+            for (auto& f : *finals.getArray())
+            {
+                auto* rem = obj();
+                rem->setProperty ("clip_id", clip);
+                Array<var> pitches; pitches.add (f.getProperty ("matchPitch", 0));
+                rem->setProperty ("pitches", pitches);
+                auto* range = obj();
+                range->setProperty ("start_beats", (double) f.getProperty ("matchStartBeats", 0.0) - 0.01);
+                range->setProperty ("length_beats", 0.02);
+                rem->setProperty ("range", var (range));
+                ops.add (op ("notes.remove", rem));
+
+                auto* add = obj();
+                add->setProperty ("clip_id", clip);
+                auto* nn = obj();
+                nn->setProperty ("pitch", f.getProperty ("pitch", 60));
+                nn->setProperty ("start_beats", f.getProperty ("startBeats", 0.0));
+                nn->setProperty ("dur_beats", f.getProperty ("durBeats", 0.25));
+                nn->setProperty ("vel", f.getProperty ("vel", 100));
+                Array<var> irNotes; irNotes.add (var (nn));
+                add->setProperty ("notes", irNotes);
+                ops.add (op ("notes.add", add));
+            }
+        return var (ops);
+    }
     if (command == "add_notes")
     {
         auto* p = obj();

@@ -1046,6 +1046,71 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         cmd (ops, "remove_track", args1 ("trackId", t15id));
     }
 
+    // --- Stage 16: piano-roll edit primitive (update_notes) ---
+    {
+        std::cerr << "--- Stage 16: update_notes (piano roll) ---\n";
+        auto t16 = cmd (ops, "create_track", args1 ("name", "PR16"));
+        const auto t16id = t16["data"].getProperty ("trackId", var()).toString();
+        auto mc = cmd (ops, "add_midi_clip", objN ({{ "trackId", t16id }, { "name", "pr" },
+                       { "start", 0.0 }, { "length", 2.0 }}));   // arpeggio: 60/64/67/72 at beats 0..3
+        const auto cid = mc["data"].getProperty ("clipId", var()).toString();
+
+        // Move + resize + re-pitch + re-velocity the first note in ONE call.
+        Array<var> edits;
+        {
+            auto* e = new DynamicObject();
+            auto* m = new DynamicObject(); m->setProperty ("pitch", 60); m->setProperty ("startBeats", 0.0);
+            auto* st = new DynamicObject(); st->setProperty ("pitch", 61);
+            st->setProperty ("startBeats", 0.75); st->setProperty ("durBeats", 0.5); st->setProperty ("vel", 80);
+            e->setProperty ("match", var (m)); e->setProperty ("set", var (st));
+            edits.add (var (e));
+        }
+        auto r = cmd (ops, "update_notes", objN ({{ "clipId", cid }, { "edits", edits }}));
+        check (ok (r) && (int) r["data"].getProperty ("updated", 0) == 1, "update_notes updates one note");
+        check (r["data"].getProperty ("notes", var()).size() == 1
+                   && (int) r["data"]["notes"][0].getProperty ("pitch", 0) == 61,
+               "result carries the resolved final note (the lift's source)");
+
+        auto findNote = [&] (int pitch, double start) -> bool
+        {
+            auto snap = ops.snapshot();
+            for (auto& tv : *snap["tracks"].getArray())
+                if (tv.getProperty ("id", var()).toString() == t16id)
+                    for (auto& nv : *tv["clips"][0].getProperty ("notes", var()).getArray())
+                        if ((int) nv.getProperty ("pitch", -1) == pitch
+                            && std::abs ((double) nv.getProperty ("startBeats", -1.0) - start) < 0.01)
+                            return true;
+            return false;
+        };
+        check (findNote (61, 0.75), "edited note at the new pitch/position");
+        check (! findNote (60, 0.0), "old note gone");
+
+        check (ok (cmd (ops, "undo")), "undo update_notes ok");
+        check (findNote (60, 0.0) && ! findNote (61, 0.75), "ONE undo step restores the note fully");
+
+        // The lift: the recorded step carries notes.remove + notes.add IR.
+        cmd (ops, "update_notes", objN ({{ "clipId", cid }, { "edits", edits }}));
+        {
+            StringArray lines;
+            eng.sessionDir().getChildFile ("trajectory.jsonl").readLines (lines);
+            lines.removeEmptyStrings();
+            bool liftOk = false;
+            for (int i = lines.size(); --i >= 0;)
+            {
+                auto rec = JSON::parse (lines[i]);
+                if (rec.getProperty ("command", var()).toString() != "update_notes") continue;
+                auto ir = rec.getProperty ("ir", var());
+                liftOk = ir.isArray() && ir.size() == 2
+                         && ir[0].getProperty ("kind", var()).toString() == "notes.remove"
+                         && ir[1].getProperty ("kind", var()).toString() == "notes.add";
+                break;
+            }
+            check (liftOk, "update_notes lifts to a notes.remove + notes.add pair");
+        }
+
+        cmd (ops, "remove_track", args1 ("trackId", t16id));
+    }
+
     std::cerr << "===== " << (checks - failures) << "/" << checks
               << " checks passed, " << failures << " failed =====\n\n";
     return failures;

@@ -26,6 +26,7 @@ function useGlobalKeys() {
         e.preventDefault();
         void s.exec("set_transport", { action: "toggle" });
       } else if (e.key === "Backspace" || e.key === "Delete") {
+        if (s.editingClipId) return;          // the piano roll owns delete while open
         if (s.selection.size === 0) return;
         e.preventDefault();
         for (const id of s.selection) void s.exec("remove_clip", { clipId: id });
@@ -34,7 +35,7 @@ function useGlobalKeys() {
         e.preventDefault();
         void s.exec(e.shiftKey ? "redo" : "undo", {});
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "d") {
-        if (s.selection.size === 0) return;
+        if (s.editingClipId || s.selection.size === 0) return;
         e.preventDefault();
         for (const id of s.selection) void s.exec("duplicate_clip", { clipId: id });
       } else if (e.key === "=" || e.key === "+") {

@@ -108,6 +108,69 @@ juce::var MoshOps::cmdAddNotes (const juce::var& args)
     return okResult ("add_notes", var (data));
 }
 
+// Stage 16: the piano roll's edit primitive. Each edit matches one note by
+// (pitch, startBeats ±0.01 beats) and rewrites pitch/start/duration/velocity.
+// ONE undo transaction for the whole batch — a drag is one undo step.
+juce::var MoshOps::cmdUpdateNotes (const juce::var& args)
+{
+    auto* mc = findMidiClip (args.getProperty ("clipId", var()).toString());
+    if (mc == nullptr) return errResult ("update_notes", "no midi clip");
+    auto edits = args.getProperty ("edits", var());
+    if (! edits.isArray() || edits.size() == 0)
+        return errResult ("update_notes", "missing 'edits'");
+
+    undoManager().beginNewTransaction ("update_notes");
+    auto& seq = mc->getSequence();
+    int updated = 0;
+    Array<var> finals;   // resolved post-edit notes — the lift re-adds these
+    for (auto& e : *edits.getArray())
+    {
+        const auto match = e.getProperty ("match", var());
+        const auto set   = e.getProperty ("set", var());
+        const int    mPitch = (int) match.getProperty ("pitch", -1);
+        const double mStart = (double) match.getProperty ("startBeats", -1.0);
+
+        for (auto* n : seq.getNotes())
+        {
+            if (n == nullptr) continue;
+            if (n->getNoteNumber() != mPitch) continue;
+            if (std::abs (n->getStartBeat().inBeats() - mStart) > 0.01) continue;
+
+            const double newStart = set.hasProperty ("startBeats")
+                                        ? (double) set.getProperty ("startBeats", 0.0)
+                                        : n->getStartBeat().inBeats();
+            const double newDur   = set.hasProperty ("durBeats")
+                                        ? (double) set.getProperty ("durBeats", 0.25)
+                                        : n->getLengthBeats().inBeats();
+            n->setStartAndLength (tracktion::BeatPosition::fromBeats (juce::jmax (0.0, newStart)),
+                                  tracktion::BeatDuration::fromBeats (juce::jmax (0.01, newDur)),
+                                  &undoManager());
+            if (set.hasProperty ("pitch"))
+                n->setNoteNumber (juce::jlimit (0, 127, (int) set.getProperty ("pitch", 60)), &undoManager());
+            if (set.hasProperty ("vel"))
+                n->setVelocity (juce::jlimit (1, 127, (int) set.getProperty ("vel", 100)), &undoManager());
+
+            auto* f = new DynamicObject();
+            f->setProperty ("matchPitch", mPitch);
+            f->setProperty ("matchStartBeats", mStart);
+            f->setProperty ("pitch", n->getNoteNumber());
+            f->setProperty ("startBeats", n->getStartBeat().inBeats());
+            f->setProperty ("durBeats", n->getLengthBeats().inBeats());
+            f->setProperty ("vel", n->getVelocity());
+            finals.add (var (f));
+            ++updated;
+            break;      // one note per edit
+        }
+    }
+
+    auto* data = new DynamicObject();
+    data->setProperty ("updated", updated);
+    data->setProperty ("notes", finals);
+    logLine ("update_notes", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("update_notes", var (data));
+}
+
 juce::var MoshOps::cmdRemoveNotes (const juce::var& args)
 {
     auto* mc = findMidiClip (args.getProperty ("clipId", var()).toString());

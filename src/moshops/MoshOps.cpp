@@ -143,6 +143,7 @@ juce::var MoshOps::dispatch (const juce::String& name, const juce::var& args)
     if (name == "set_key")           return cmdSetKey (args);
     if (name == "add_notes")         return cmdAddNotes (args);
     if (name == "remove_notes")      return cmdRemoveNotes (args);
+    if (name == "update_notes")      return cmdUpdateNotes (args);
     if (name == "transpose_notes")   return cmdTransposeNotes (args);
     if (name == "quantize_notes")    return cmdQuantizeNotes (args);
     if (name == "humanize_notes")    return cmdHumanizeNotes (args);

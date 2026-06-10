@@ -3,6 +3,7 @@ import { useStore } from "../store";
 import type { Snapshot, Plugin } from "../types";
 import { GenPanel } from "./GenPanel";
 import { DrumRackPanel, trackHasRack } from "./DrumRackPanel";
+import { PianoRoll } from "./PianoRoll";
 
 // Builtin device types the "+ Device" menu can load (load_builtin_plugin).
 const BUILTIN_TYPES = [
@@ -19,6 +20,15 @@ export function Rack({ snapshot }: { snapshot: Snapshot }) {
   const selectedTrackId = useStore((s) => s.selectedTrackId);
   const openBrowser = useStore((s) => s.openBrowser);
   const exec = useStore((s) => s.exec);
+  const editingClipId = useStore((s) => s.editingClipId);
+
+  // Piano roll drawer (Stage 16): editing a clip swaps the whole rack area.
+  if (editingClipId)
+    return (
+      <div className="rack tall">
+        <PianoRoll snapshot={snapshot} />
+      </div>
+    );
 
   const track = snapshot.tracks.find((t) => t.id === selectedTrackId) ?? null;
   const plugins = (track?.plugins ?? []).filter((p) => p.type !== "volume");

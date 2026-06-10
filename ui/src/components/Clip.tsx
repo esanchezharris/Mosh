@@ -104,6 +104,11 @@ export function Clip({ clip }: { clip: ClipT }) {
         select([clip.id], false);
         setCtxMenu({ x: e.clientX, y: e.clientY, clipId: clip.id });
       }}
+      onDoubleClick={(e) => {
+        if (clip.type !== "midi") return;
+        e.stopPropagation();
+        useStore.getState().setEditingClip(clip.id);
+      }}
       title={`${clip.name} · ${pos.length.toFixed(2)}s`}
     >
       <div className="clip-wave">

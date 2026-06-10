@@ -60,6 +60,10 @@ type State = {
   setCtxMenu: (m: { x: number; y: number; clipId: string } | null) => void;
   follow: boolean;
   setFollow: (b: boolean) => void;
+
+  // Piano roll (Stage 16): which MIDI clip is open in the editor drawer.
+  editingClipId: string | null;
+  setEditingClip: (id: string | null) => void;
   loadColors: () => void;
   setLab: (b: boolean) => void;
 
@@ -183,6 +187,8 @@ export const useStore = create<State>((set, get) => ({
   setCtxMenu: (m) => set({ ctxMenu: m }),
   follow: true,
   setFollow: (b) => set({ follow: b }),
+  editingClipId: null,
+  setEditingClip: (id) => set({ editingClipId: id }),
   openBrowser: () => {
     set({ browserOpen: true });
     if (get().availablePlugins.length === 0)

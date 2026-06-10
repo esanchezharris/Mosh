@@ -108,6 +108,13 @@ export function DrumRackPanel({ track }: { track: Track }) {
       <div className="dr-title">
         drum rack · <b>{track.name}</b>
         <button className="dr-add" onClick={() => void addPad()} title="Add a pad from a sample">+ pad</button>
+        <button
+          className="dr-add"
+          onClick={() => useStore.getState().setEditingClip(clip.id)}
+          title="Open the pattern in the piano roll"
+        >
+          ♪ roll
+        </button>
         <span className="dr-hint">click: hit → accent → off</span>
       </div>
       <div className="dr-grid">
