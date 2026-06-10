@@ -36,6 +36,9 @@ public:
     juce::var jobStatus (const juce::String& jobId);
     void cancelJob (const juce::String& jobId);
 
+    /** Generic JSON POST to the service (the agent endpoint uses this). */
+    juce::var postJson (const juce::String& path, const juce::var& body) { return httpPost (path, body); }
+
     juce::String serviceBuild() const { return svcBuild; }
 
 private:

@@ -76,6 +76,31 @@ button.on { border-color: var(--accent); color: var(--accent); background: #2120
 .tutorial-status { font-size: 0.7rem; color: var(--muted); white-space: nowrap; }
 .consent-on { border-color: var(--ok); color: var(--ok); }
 
+/* Monster / B-5 agent drawer (Stage 11). */
+.b5-live { letter-spacing: 0.08em; font-weight: 700; color: var(--accent); border-color: var(--accent); }
+.agent-drawer {
+  position: fixed; right: 12px; top: 54px; z-index: 40; width: 340px; max-height: 70vh;
+  display: flex; flex-direction: column; gap: 0.4rem; padding: 0.6rem;
+  background: var(--panel); border: 1px solid var(--accent); border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.45);
+}
+.agent-head { display: flex; align-items: center; justify-content: space-between; }
+.agent-title { font-weight: 700; color: var(--accent); letter-spacing: 0.05em; }
+.agent-log { overflow-y: auto; display: flex; flex-direction: column; gap: 0.45rem; min-height: 80px; }
+.agent-hint { font-size: 0.78rem; color: var(--muted); padding: 0.4rem; }
+.agent-msg { font-size: 0.82rem; padding: 0.4rem 0.55rem; border-radius: 8px; }
+.agent-user { background: var(--panel-2); align-self: flex-end; max-width: 90%; }
+.agent-monster { border: 1px solid var(--line); }
+.agent-system { color: var(--muted); font-size: 0.74rem; }
+.agent-ops { display: flex; flex-wrap: wrap; gap: 0.25rem; margin-top: 0.4rem; }
+.agent-op {
+  font-size: 0.68rem; font-family: ui-monospace, monospace; padding: 0.12rem 0.4rem;
+  border: 1px solid var(--line); border-radius: 5px; color: var(--muted); cursor: help;
+}
+.agent-run { margin-top: 0.3rem; width: 100%; color: var(--accent); }
+.agent-input-row { display: flex; gap: 0.35rem; }
+.agent-input { flex: 1; }
+
 /* Collab sync panel (Stage 10): share/join + pull/push + conflicts. */
 .collab-panel { display: flex; align-items: center; gap: 0.35rem; }
 .collab-remote { width: 170px; }

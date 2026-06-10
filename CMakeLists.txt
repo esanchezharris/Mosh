@@ -87,7 +87,9 @@ if (MOSH_BUILD_APP)
         src/moshir/Lift.cpp
         src/moshir/SessionRecorder.cpp
         # Stage 10 — git-style async session sync
-        src/collab/CollabEngine.cpp)
+        src/collab/CollabEngine.cpp
+        # Stage 11 — Monster v0 agent slot (phase0 §10)
+        src/moshops/MoshOpsStage11.cpp)
 
     target_include_directories(Mosh PRIVATE src)
 

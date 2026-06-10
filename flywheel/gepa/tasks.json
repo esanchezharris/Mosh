@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "notes": "The 24-task suite (phase0 s10): 12 gold-derived + 12 templated. Until the hand-replication sprint lands gold trajectories, the gold-derived half is authored from the spec's worked examples and marked provenance=gold_pending — swap in real gold-derived simplifications at the Stage 12 review. expect.* are light symbolic checks (L2-ish) the eval can verify from the ops themselves.",
+  "tasks": [
+    {"id": "g01", "provenance": "gold_pending", "genre": "trap", "instruction": "Start a dark trap beat at 142 bpm in F minor", "expect": {"bpm": 142, "kinds": ["project.set_tempo", "project.set_key"]}},
+    {"id": "g02", "provenance": "gold_pending", "genre": "trap", "instruction": "Add a long distorted 808 that follows a kick pattern, sliding up to F at the end", "expect": {"roles": ["808"], "kinds": ["notes.add"]}},
+    {"id": "g03", "provenance": "gold_pending", "genre": "trap", "instruction": "Lay 8 bars of trap drums: kick on 1 and the and-of-3, snare on 3, hats on 16ths", "expect": {"roles": ["drums"], "kinds": ["notes.add"]}},
+    {"id": "g04", "provenance": "gold_pending", "genre": "trap", "instruction": "Saturate the 808 with the house saturator, drive around 65%", "expect": {"kinds": ["device.add", "device.set_param"]}},
+    {"id": "g05", "provenance": "gold_pending", "genre": "trap", "instruction": "Quantize the hi-hats to a tight 1/16 grid", "expect": {"kinds": ["notes.quantize"]}},
+    {"id": "g06", "provenance": "gold_pending", "genre": "jersey", "instruction": "Jersey club kick pattern at 138 — the classic 5-hit bed squeak placement over 2 bars", "expect": {"bpm": 138, "kinds": ["notes.add"]}},
+    {"id": "g07", "provenance": "gold_pending", "genre": "jersey", "instruction": "Humanize the percussion slightly, around 8 ms and gentle velocity variation, seeded", "expect": {"kinds": ["notes.humanize"]}},
+    {"id": "g08", "provenance": "gold_pending", "genre": "lofi", "instruction": "Dusty lo-fi keys: resolve a warm rhodes-ish sample and place it from bar 1", "expect": {"kinds": ["asset.resolve", "sample.place"]}},
+    {"id": "g09", "provenance": "gold_pending", "genre": "lofi", "instruction": "Send the keys to a new reverb bus at -12 dB", "expect": {"kinds": ["mixer.send"]}},
+    {"id": "g10", "provenance": "gold_pending", "genre": "lofi", "instruction": "Duck the keys under the kick with a gentle sidechain", "expect": {"kinds": ["mixer.sidechain"]}},
+    {"id": "g11", "provenance": "gold_pending", "genre": "pop", "instruction": "Four-chord pop progression (C-G-Am-F) as whole-bar pads over 8 bars on a synth", "expect": {"kinds": ["device.add", "notes.add"]}},
+    {"id": "g12", "provenance": "gold_pending", "genre": "pop", "instruction": "Mark an 8-bar chorus section at bar 9 and move the vocal chop clip there", "expect": {"kinds": ["arrange.create_section"]}},
+    {"id": "t01", "provenance": "templated", "genre": "jersey", "instruction": "8-bar Jersey club drum loop at 138 with a triplet kick fill in the last bar", "expect": {"bpm": 138, "roles": ["drums"]}},
+    {"id": "t02", "provenance": "templated", "genre": "lofi", "instruction": "Lo-fi loop at 82 bpm: dusty keys, vinyl-feel velocity humanization (seeded), sidechained to the kick", "expect": {"bpm": 82, "kinds": ["notes.humanize", "mixer.sidechain"]}},
+    {"id": "t03", "provenance": "templated", "genre": "trap", "instruction": "Carti-style 4-bar synth lead over existing drums, bright and simple, around C5", "expect": {"kinds": ["device.add", "notes.add"]}},
+    {"id": "t04", "provenance": "templated", "genre": "trap", "instruction": "Generate a dark evolving pad with the latent model, 16 beats, seed 42, and place it on a new pad track", "expect": {"kinds": ["latent.generate", "sample.place"]}},
+    {"id": "t05", "provenance": "templated", "genre": "club", "instruction": "135 bpm club groove: four-on-the-floor kick, off-beat open hats, clap on 2 and 4", "expect": {"bpm": 135, "roles": ["drums"]}},
+    {"id": "t06", "provenance": "templated", "genre": "pop", "instruction": "Set up a vocal bus with reverb and route a new vox track into it", "expect": {"kinds": ["track.route"]}},
+    {"id": "t07", "provenance": "templated", "genre": "trap", "instruction": "Transpose the 808 pattern down 2 semitones and tighten it to a 1/8 grid", "expect": {"kinds": ["notes.transpose", "notes.quantize"]}},
+    {"id": "t08", "provenance": "templated", "genre": "lofi", "instruction": "Slow the placed sample to 0.8x and pitch it down 3 semitones for that tape feel", "expect": {"kinds": ["sample.stretch", "sample.pitch"]}},
+    {"id": "t09", "provenance": "templated", "genre": "club", "instruction": "Automate the lead synth filter cutoff: closed at the section start, fully open after 8 beats", "expect": {"kinds": ["automation.write"]}},
+    {"id": "t10", "provenance": "templated", "genre": "pop", "instruction": "Build the song skeleton: intro 8 bars, verse 16, chorus 8, all as named sections", "expect": {"kinds": ["arrange.create_section"]}},
+    {"id": "t11", "provenance": "templated", "genre": "trap", "instruction": "Balance the mix: drums at -2 dB, 808 at -4 dB panned center, lead at -8 dB slightly right", "expect": {"kinds": ["mixer.set_gain", "mixer.set_pan"]}},
+    {"id": "t12", "provenance": "templated", "genre": "club", "instruction": "Bounce the first 16 bars to a wav I can reference", "expect": {"kinds": ["render.bounce"]}}
+  ]
+}

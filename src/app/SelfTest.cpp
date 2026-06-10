@@ -803,6 +803,45 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                "identity file persisted the consent flip (isolated from the user's real one)");
     }
 
+    // --- Stage 11: Monster v0 — agent_propose through the app + service ---
+    {
+        std::cerr << "--- Stage 11: Monster v0 (mock provider, zero spend) ---\n";
+
+        // Proposal: instruction -> validated MoshIR via /agent/propose.
+        auto p = cmd (ops, "agent_propose", objN ({{ "instruction", "8-bar trap drums at 142 with kick and hats" },
+                                                   { "provider", "mock" }}));
+        check (ok (p), "agent_propose ok (service round-trip)");
+        auto agentOps = p["data"].getProperty ("ops", var());
+        check (agentOps.isArray() && agentOps.size() >= 3, "proposal carries MoshIR ops");
+        check (p["data"].getProperty ("program_version", var()).toString().isNotEmpty(),
+               "proposal is program-version-pinned");
+
+        // Execute the proposal through the ONE mutation path, attributed.
+        auto* irArgs = new DynamicObject();
+        irArgs->setProperty ("ops", agentOps);
+        irArgs->setProperty ("actor", "monster");
+        auto run = cmd (ops, "execute_ir", var (irArgs));
+        check (ok (run), "monster's ops execute via execute_ir");
+        check ((int) run["data"]["counts"].getProperty ("executed", 0) >= 3,
+               "monster's ops actually executed");
+
+        // The step is in the trajectory with the monster attribution.
+        StringArray lines;
+        eng.sessionDir().getChildFile ("trajectory.jsonl").readLines (lines);
+        lines.removeEmptyStrings();
+        bool attributed = false;
+        for (int i = lines.size(); --i >= 0 && ! attributed;)
+            if (auto rec = JSON::parse (lines[i]);
+                rec.getProperty ("command", var()).toString() == "execute_ir")
+                attributed = rec.getProperty ("args", var())
+                                .getProperty ("actor", var()).toString() == "monster";
+        check (attributed, "trajectory step carries createdBy=monster attribution");
+
+        // Failure shape: a missing instruction is a clean error, not a crash.
+        check (! ok (cmd (ops, "agent_propose", args1 ("provider", "mock"))),
+               "agent_propose without instruction -> clean error");
+    }
+
     // --- Stage 5 (SA3): the real StableAudio3Adapter - GATED on MOSH_SELFTEST_SA3 ---
     // (separate from MOSH_ENABLE_SA3, which now defaults on: real model + judge QA is
     //  ~30s, too heavy for the default --selftest. Opt in explicitly to exercise it.)

@@ -219,6 +219,16 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         path = self.path.split("?", 1)[0].rstrip("/") or "/"
         data = self._read_json()
+        if path == "/agent/propose":
+            # Monster v0 (phase0 §10): instruction → validated MoshIR ops.
+            # LLM keys come ONLY from env; the mock provider needs none.
+            try:
+                from agent import propose as agent_propose
+                result = agent_propose.propose(data)
+                self._send(200 if result.get("ok") else 422, result)
+            except Exception as e:  # noqa: BLE001
+                self._send(500, {"ok": False, "error": f"agent: {e}"})
+            return
         if path == "/submit":
             adapter_id = data.get("adapter", "fake")
             if adapter_id in ("stable_audio3", "sa3") and not SA3_ENABLED:

@@ -1,0 +1,14 @@
+{
+  "name": "monster",
+  "version": "v0.0",
+  "provider": "gemini",
+  "model": "gemini-2.0-flash",
+  "files": {
+    "system": "system.md",
+    "cheatsheet": "cheatsheet.md",
+    "exemplars": "exemplars.jsonl",
+    "reflections": "reflections.md"
+  },
+  "few_shot_count": 4,
+  "notes": "The program under GEPA optimization (phase0 s10): {system prompt, MoshIR cheatsheet, auto-selected few-shot exemplars, reflection memory}. GEPA mutates copies of this directory into the candidate pool; the winner is version-pinned into the agent slot."
+}

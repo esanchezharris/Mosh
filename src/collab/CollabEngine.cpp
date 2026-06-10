@@ -350,7 +350,7 @@ bool CollabEngine::isSyncable (const String& command)
     static const StringArray excluded {
         "set_transport", "save", "reload", "export_audio", "render_layer",
         "cancel_render", "open_plugin_editor", "set_tutorial", "drop_marker",
-        "set_consent", "generate_asset",
+        "set_consent", "generate_asset", "agent_propose",
         "collab_init", "collab_clone", "collab_status", "collab_push", "collab_pull",
     };
     return ! excluded.contains (command);
