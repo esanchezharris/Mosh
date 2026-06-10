@@ -101,6 +101,9 @@ private:
     // Stage 24 — clip inspector
     juce::var cmdSetClipGain      (const juce::var& args);
     juce::var cmdSetClipReversed  (const juce::var& args);
+    // Stage 29 — clip looping + fades
+    juce::var cmdSetClipLoop      (const juce::var& args);
+    juce::var cmdSetClipFades     (const juce::var& args);
     // Stage 22 — automation lanes
     juce::var cmdGetAutomation    (const juce::var& args);   // read-only
     juce::var cmdClearAutomation  (const juce::var& args);

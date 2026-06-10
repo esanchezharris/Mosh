@@ -45,6 +45,10 @@ export type Clip = {
   speedRatio?: number;
   gainDb?: number;
   reversed?: boolean;
+  loopBeats?: number;     // 0 = loop off (Stage 29)
+  fadeInSec?: number;
+  fadeOutSec?: number;
+  autoCrossfade?: boolean;
   hasRenderLayer: boolean;
   renderLayer?: RenderLayer;
 };

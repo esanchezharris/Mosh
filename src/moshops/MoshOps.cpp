@@ -124,6 +124,8 @@ juce::var MoshOps::dispatch (const juce::String& name, const juce::var& args)
     if (name == "open_project")      return cmdOpenProject (args);
     if (name == "set_clip_gain")     return cmdSetClipGain (args);
     if (name == "set_clip_reversed") return cmdSetClipReversed (args);
+    if (name == "set_clip_loop")     return cmdSetClipLoop (args);
+    if (name == "set_clip_fades")    return cmdSetClipFades (args);
     if (name == "get_automation")    return cmdGetAutomation (args);
     if (name == "clear_automation")  return cmdClearAutomation (args);
     if (name == "undo")              return cmdUndo (args);
@@ -762,6 +764,48 @@ juce::var MoshOps::cmdSetClipReversed (const juce::var& args)
     logLine ("set_clip_reversed", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("set_clip_reversed");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Clip looping + fades (Stage 29). Looping uses the engine's beat-based loop
+// range: content repeats every loopBeats when the clip is stretched longer.
+// Fades are AudioClipBase fade in/out; autoCrossfade makes overlapping clips
+// on a track crossfade automatically.
+// ─────────────────────────────────────────────────────────────────────────────
+juce::var MoshOps::cmdSetClipLoop (const juce::var& args)
+{
+    auto* clip = findClip (args.getProperty ("clipId", var()).toString());
+    if (clip == nullptr) return errResult ("set_clip_loop", "no clip");
+
+    undoManager().beginNewTransaction ("set_clip_loop");
+    const double loopBeats = (double) args.getProperty ("loopBeats", 0.0);
+    if (loopBeats <= 0.0)
+        clip->setLoopRangeBeats ({});   // loop off
+    else
+        clip->setLoopRangeBeats ({ tracktion::BeatPosition(),
+                                   tracktion::BeatPosition::fromBeats (loopBeats) });
+    logLine ("set_clip_loop", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("set_clip_loop");
+}
+
+juce::var MoshOps::cmdSetClipFades (const juce::var& args)
+{
+    auto* acb = dynamic_cast<te::AudioClipBase*> (findClip (args.getProperty ("clipId", var()).toString()));
+    if (acb == nullptr) return errResult ("set_clip_fades", "no audio clip");
+
+    undoManager().beginNewTransaction ("set_clip_fades");
+    if (args.hasProperty ("fadeInSec"))
+        acb->setFadeIn (tracktion::TimeDuration::fromSeconds (
+            juce::jmax (0.0, (double) args.getProperty ("fadeInSec", 0.0))));
+    if (args.hasProperty ("fadeOutSec"))
+        acb->setFadeOut (tracktion::TimeDuration::fromSeconds (
+            juce::jmax (0.0, (double) args.getProperty ("fadeOutSec", 0.0))));
+    if (args.hasProperty ("autoCrossfade"))
+        acb->setAutoCrossfade ((bool) args.getProperty ("autoCrossfade", false));
+    logLine ("set_clip_fades", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("set_clip_fades");
 }
 
 juce::var MoshOps::cmdGetAutomation (const juce::var& args)
@@ -2295,6 +2339,10 @@ juce::var MoshOps::clipToVar (te::Clip& c)
         o->setProperty ("speedRatio", w->getSpeedRatio());
         o->setProperty ("gainDb", w->getGainDB());
         o->setProperty ("reversed", w->getIsReversed());
+        o->setProperty ("loopBeats", w->getLoopRangeBeats().getLength().inBeats());
+        o->setProperty ("fadeInSec", w->getFadeIn().inSeconds());
+        o->setProperty ("fadeOutSec", w->getFadeOut().inSeconds());
+        o->setProperty ("autoCrossfade", w->getAutoCrossfade());
     }
     else if (auto* mc = dynamic_cast<te::MidiClip*> (&c))
     {

@@ -57,7 +57,42 @@ export function ClipInspector({ snapshot }: { snapshot: Snapshot }) {
             />
             <i>{(theClip.gainDb ?? 0).toFixed(1)} dB</i>
           </label>
+          <label className="insp-row">
+            <span>loop</span>
+            <input
+              type="range" min={0} max={16} step={1}
+              value={theClip.loopBeats ?? 0}
+              title="Loop the clip content every N beats (0 = off); stretch the clip longer to hear repeats"
+              onChange={(e) => exec("set_clip_loop", { clipId: theClip.id, loopBeats: Number(e.target.value) })}
+            />
+            <i>{(theClip.loopBeats ?? 0) > 0 ? `${theClip.loopBeats}b` : "off"}</i>
+          </label>
+          <label className="insp-row">
+            <span>fade in</span>
+            <input
+              type="range" min={0} max={2} step={0.05}
+              value={theClip.fadeInSec ?? 0}
+              onChange={(e) => exec("set_clip_fades", { clipId: theClip.id, fadeInSec: Number(e.target.value) })}
+            />
+            <i>{(theClip.fadeInSec ?? 0).toFixed(2)}s</i>
+          </label>
+          <label className="insp-row">
+            <span>fade out</span>
+            <input
+              type="range" min={0} max={2} step={0.05}
+              value={theClip.fadeOutSec ?? 0}
+              onChange={(e) => exec("set_clip_fades", { clipId: theClip.id, fadeOutSec: Number(e.target.value) })}
+            />
+            <i>{(theClip.fadeOutSec ?? 0).toFixed(2)}s</i>
+          </label>
           <div className="insp-row">
+            <button
+              className={`pr-tool ${theClip.autoCrossfade ? "on" : ""}`}
+              title="Crossfade automatically where clips overlap on this track"
+              onClick={() => exec("set_clip_fades", { clipId: theClip.id, autoCrossfade: !theClip.autoCrossfade })}
+            >
+              ⤬ auto-xfade
+            </button>
             <button
               className={`pr-tool ${theClip.reversed ? "on" : ""}`}
               onClick={() => exec("set_clip_reversed", { clipId: theClip.id, reversed: !theClip.reversed })}

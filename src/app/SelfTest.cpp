@@ -1373,6 +1373,29 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         eng.sessionDir().getChildFile ("project-name.txt").deleteFile();
     }
 
+    // --- Stage 29: clip looping + fades ---
+    {
+        std::cerr << "--- Stage 29: clip loop + fades ---\n";
+        auto t29 = cmd (ops, "create_track", args1 ("name", "Loop29"));
+        const auto t29id = t29["data"].getProperty ("trackId", var()).toString();
+        auto tone = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", t29id }, { "seconds", 1.0 }, { "freq", 220.0 }}));
+        const auto cid = tone["data"].getProperty ("clipId", var()).toString();
+
+        check (ok (cmd (ops, "set_clip_loop", objN ({{ "clipId", cid }, { "loopBeats", 4.0 }}))), "set_clip_loop ok");
+        check (ok (cmd (ops, "set_clip_fades", objN ({{ "clipId", cid }, { "fadeInSec", 0.2 },
+                       { "fadeOutSec", 0.4 }, { "autoCrossfade", true }}))), "set_clip_fades ok");
+        auto snap = ops.snapshot();
+        var cv;
+        for (auto& tv : *snap["tracks"].getArray())
+            if (tv.getProperty ("id", var()).toString() == t29id) cv = tv["clips"][0];
+        check (std::abs ((double) cv.getProperty ("loopBeats", 0.0) - 4.0) < 0.01, "loopBeats in snapshot");
+        check (std::abs ((double) cv.getProperty ("fadeInSec", 0.0) - 0.2) < 0.02, "fadeIn in snapshot");
+        check (std::abs ((double) cv.getProperty ("fadeOutSec", 0.0) - 0.4) < 0.02, "fadeOut in snapshot");
+        check ((bool) cv.getProperty ("autoCrossfade", false), "autoCrossfade in snapshot");
+        check (ok (cmd (ops, "set_clip_loop", objN ({{ "clipId", cid }, { "loopBeats", 0.0 }}))), "loop off ok");
+        cmd (ops, "remove_track", args1 ("trackId", t29id));
+    }
+
     // --- Stage 28: tempo map ---
     {
         std::cerr << "--- Stage 28: tempo map ---\n";
