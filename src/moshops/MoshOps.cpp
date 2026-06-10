@@ -96,6 +96,7 @@ juce::var MoshOps::dispatch (const juce::String& name, const juce::var& args)
     if (name == "list_audio_outputs") return cmdListAudioOutputs (args);
     if (name == "set_audio_output")  return cmdSetAudioOutput (args);
     if (name == "set_metronome")     return cmdSetMetronome (args);
+    if (name == "set_send_gain")     return cmdSetSendGain (args);
     if (name == "set_master_volume") return cmdSetMasterVolume (args);
     if (name == "duplicate_clip")    return cmdDuplicateClip (args);
     if (name == "move_track")        return cmdMoveTrack (args);
@@ -359,6 +360,20 @@ juce::var MoshOps::cmdSetMetronome (const juce::var& args)
     logLine ("set_metronome", args, true, {}, false);
     emitSnapshotInvalidated();
     return okResult ("set_metronome");
+}
+
+juce::var MoshOps::cmdSetSendGain (const juce::var& args)
+{
+    auto* send = dynamic_cast<te::AuxSendPlugin*> (
+        findPlugin (args.getProperty ("trackId", var()).toString(),
+                    (int) args.getProperty ("index", -1)));
+    if (send == nullptr) return errResult ("set_send_gain", "no send at index");
+
+    undoManager().beginNewTransaction ("set_send_gain");
+    send->setGainDb (juce::jlimit (-96.0f, 12.0f, (float) (double) args.getProperty ("gainDb", 0.0)));
+    logLine ("set_send_gain", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("set_send_gain");
 }
 
 juce::var MoshOps::cmdSetMasterVolume (const juce::var& args)
@@ -1546,6 +1561,18 @@ juce::var MoshOps::pluginToVar (te::Plugin& p, int index)
         o->setProperty ("labMode", n->isLabMode());
     }
 
+    // Mixer surfaces (Stage 17): sends/returns carry their bus + gain; any
+    // plugin keyed from another track exposes its sidechain source.
+    if (auto* send = dynamic_cast<te::AuxSendPlugin*> (&p))
+    {
+        o->setProperty ("busNumber", send->getBusNumber());
+        o->setProperty ("gainDb", send->getGainDb());
+    }
+    if (auto* ret = dynamic_cast<te::AuxReturnPlugin*> (&p))
+        o->setProperty ("busNumber", ret->busNumber.get());
+    if (p.getSidechainSourceID().isValid())
+        o->setProperty ("sidechainSourceId", p.getSidechainSourceID().toString());
+
     // Sampler pads (Stage 14): the drum-rack panel needs the loaded sounds.
     if (auto* sp = dynamic_cast<te::SamplerPlugin*> (&p))
     {
@@ -1675,6 +1702,12 @@ juce::var MoshOps::trackToVar (te::AudioTrack& t, int index)
     }
     o->setProperty ("mute", t.isMuted (false));
     o->setProperty ("solo", t.isSolo (false));
+
+    // Routing (Stage 17): destination track id, or "" for the master/device.
+    if (auto* dest = t.getOutput().getDestinationTrack())
+        o->setProperty ("routeTo", dest->itemID.toString());
+    else
+        o->setProperty ("routeTo", "");
     return var (o);
 }
 

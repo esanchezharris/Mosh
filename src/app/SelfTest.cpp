@@ -1111,6 +1111,53 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         cmd (ops, "remove_track", args1 ("trackId", t16id));
     }
 
+    // --- Stage 17: mixer surfaces (routing/sends/sidechain in the snapshot) ---
+    {
+        std::cerr << "--- Stage 17: mixer surfaces ---\n";
+        auto src = cmd (ops, "create_track", args1 ("name", "Mx Src"));
+        auto bus = cmd (ops, "create_track", args1 ("name", "Mx Bus"));
+        const auto srcId = src["data"].getProperty ("trackId", var()).toString();
+        const auto busId = bus["data"].getProperty ("trackId", var()).toString();
+
+        check (ok (cmd (ops, "add_return", objN ({{ "trackId", busId }, { "busNumber", 7 }}))), "add_return ok");
+        auto sendR = cmd (ops, "add_send", objN ({{ "trackId", srcId }, { "busNumber", 7 }, { "gainDb", -6.0 }}));
+        check (ok (sendR), "add_send ok");
+        const int sendIdx = (int) sendR["data"].getProperty ("index", -1);
+        check (ok (cmd (ops, "set_send_gain", objN ({{ "trackId", srcId }, { "index", sendIdx }, { "gainDb", -12.0 }}))),
+               "set_send_gain ok");
+        check (ok (cmd (ops, "route_track", objN ({{ "trackId", srcId }, { "destTrackId", busId }}))), "route_track ok");
+        check (ok (cmd (ops, "load_builtin_plugin", objN ({{ "trackId", busId }, { "type", "compressor" }}))),
+               "compressor on the bus");
+        auto comp = cmd (ops, "set_sidechain", objN ({{ "trackId", busId }, { "index", 1 },
+                        { "sourceTrackId", srcId }}));
+        check (ok (comp), "set_sidechain ok");
+
+        auto snap = ops.snapshot();
+        var srcVar, busVar;
+        for (auto& tv : *snap["tracks"].getArray())
+        {
+            if (tv.getProperty ("id", var()).toString() == srcId) srcVar = tv;
+            if (tv.getProperty ("id", var()).toString() == busId) busVar = tv;
+        }
+        check (srcVar.getProperty ("routeTo", var()).toString() == busId, "snapshot carries routeTo");
+        var sendVar, retVar, compVar;
+        for (auto& pv : *srcVar["plugins"].getArray())
+            if (pv.getProperty ("type", var()).toString() == "auxsend") sendVar = pv;
+        for (auto& pv : *busVar["plugins"].getArray())
+        {
+            if (pv.getProperty ("type", var()).toString() == "auxreturn") retVar = pv;
+            if (pv.getProperty ("type", var()).toString() == "compressor") compVar = pv;
+        }
+        check ((int) sendVar.getProperty ("busNumber", -1) == 7, "send busNumber in snapshot");
+        check (std::abs ((double) sendVar.getProperty ("gainDb", 0.0) + 12.0) < 0.5, "send gain in snapshot");
+        check ((int) retVar.getProperty ("busNumber", -1) == 7, "return busNumber in snapshot");
+        check (compVar.getProperty ("sidechainSourceId", var()).toString() == srcId,
+               "compressor sidechain source in snapshot");
+
+        cmd (ops, "remove_track", args1 ("trackId", srcId));
+        cmd (ops, "remove_track", args1 ("trackId", busId));
+    }
+
     std::cerr << "===== " << (checks - failures) << "/" << checks
               << " checks passed, " << failures << " failed =====\n\n";
     return failures;

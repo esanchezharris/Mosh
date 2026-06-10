@@ -70,6 +70,9 @@ export type Plugin = {
   neural?: NeuralInsert;
   labMode?: boolean;
   sounds?: SamplerSound[]; // sampler plugins only
+  busNumber?: number;      // auxsend/auxreturn (Stage 17)
+  gainDb?: number;         // auxsend
+  sidechainSourceId?: string; // any keyed plugin (compressor)
 };
 
 export type AvailablePlugin = {
@@ -91,6 +94,7 @@ export type Track = {
   pan?: number;
   mute?: boolean;
   solo?: boolean;
+  routeTo?: string; // destination track id, "" = master (Stage 17)
 };
 
 export type Transport = {

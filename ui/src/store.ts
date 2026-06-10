@@ -64,6 +64,10 @@ type State = {
   // Piano roll (Stage 16): which MIDI clip is open in the editor drawer.
   editingClipId: string | null;
   setEditingClip: (id: string | null) => void;
+
+  // Mixer view (Stage 17): swaps the rack area with channel strips.
+  mixerOpen: boolean;
+  setMixerOpen: (b: boolean) => void;
   loadColors: () => void;
   setLab: (b: boolean) => void;
 
@@ -189,6 +193,8 @@ export const useStore = create<State>((set, get) => ({
   setFollow: (b) => set({ follow: b }),
   editingClipId: null,
   setEditingClip: (id) => set({ editingClipId: id }),
+  mixerOpen: false,
+  setMixerOpen: (b) => set({ mixerOpen: b }),
   openBrowser: () => {
     set({ browserOpen: true });
     if (get().availablePlugins.length === 0)

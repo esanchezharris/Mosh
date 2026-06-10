@@ -49,6 +49,24 @@ function useGlobalKeys() {
   }, []);
 }
 
+function MixerToggle() {
+  const mixerOpen = useStore((s) => s.mixerOpen);
+  const setMixerOpen = useStore((s) => s.setMixerOpen);
+  const setEditingClip = useStore((s) => s.setEditingClip);
+  return (
+    <button
+      className={`tool-btn ${mixerOpen ? "on" : ""}`}
+      title="Mixer — sends, routing, faders"
+      onClick={() => {
+        setEditingClip(null);
+        setMixerOpen(!mixerOpen);
+      }}
+    >
+      ☰ Mixer
+    </button>
+  );
+}
+
 export function App() {
   const init = useStore((s) => s.init);
   const snapshot = useStore((s) => s.snapshot);
@@ -89,6 +107,7 @@ export function App() {
           <AgentPanel />
           {/* Audio-output truth (Stage 14): show + switch the device. */}
           <AudioOut />
+          <MixerToggle />
           <button className="tool-btn" onClick={() => exec("export_audio", {})} title="Export the mix to WAV">
             ⤓ Export
           </button>

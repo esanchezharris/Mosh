@@ -76,6 +76,7 @@ private:
     juce::var cmdSetAudioOutput   (const juce::var& args);   // machine-local, never synced
     // Stage 15 — real-DAW basics
     juce::var cmdSetMetronome     (const juce::var& args);   // playback aid, never synced/hashed
+    juce::var cmdSetSendGain      (const juce::var& args);   // Stage 17: mixer send level
     juce::var cmdSetMasterVolume  (const juce::var& args);
     juce::var cmdDuplicateClip    (const juce::var& args);
     juce::var cmdMoveTrack        (const juce::var& args);

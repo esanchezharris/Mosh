@@ -4,6 +4,7 @@ import type { Snapshot, Plugin } from "../types";
 import { GenPanel } from "./GenPanel";
 import { DrumRackPanel, trackHasRack } from "./DrumRackPanel";
 import { PianoRoll } from "./PianoRoll";
+import { MixerPanel } from "./MixerPanel";
 
 // Builtin device types the "+ Device" menu can load (load_builtin_plugin).
 const BUILTIN_TYPES = [
@@ -21,6 +22,7 @@ export function Rack({ snapshot }: { snapshot: Snapshot }) {
   const openBrowser = useStore((s) => s.openBrowser);
   const exec = useStore((s) => s.exec);
   const editingClipId = useStore((s) => s.editingClipId);
+  const mixerOpen = useStore((s) => s.mixerOpen);
 
   const track = snapshot.tracks.find((t) => t.id === selectedTrackId) ?? null;
   const plugins = (track?.plugins ?? []).filter((p) => p.type !== "volume");
@@ -39,6 +41,14 @@ export function Rack({ snapshot }: { snapshot: Snapshot }) {
     return (
       <div className="rack tall">
         <PianoRoll snapshot={snapshot} />
+      </div>
+    );
+
+  // Mixer view (Stage 17) — same drawer-swap pattern, same hook rule.
+  if (mixerOpen)
+    return (
+      <div className="rack tall">
+        <MixerPanel snapshot={snapshot} />
       </div>
     );
 
@@ -138,6 +148,7 @@ function PluginCard({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
         <NeuralBody plugin={plugin} trackId={trackId} />
       ) : (
         <>
+          {plugin.type === "compressor" && <SidechainKey plugin={plugin} trackId={trackId} />}
           {isBuiltin && <BuiltinParams plugin={plugin} trackId={trackId} />}
           <div className="pcard-actions">
             {plugin.external && (
@@ -150,6 +161,32 @@ function PluginCard({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
         </>
       )}
     </div>
+  );
+}
+
+// Sidechain key picker (Stage 17): compressors can be keyed from any other
+// track — set_sidechain wires setSidechainSourceID + guessSidechainRouting.
+function SidechainKey({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
+  const exec = useStore((s) => s.exec);
+  const tracks = useStore((s) => s.snapshot?.tracks ?? []);
+  return (
+    <label className="sc-key" title="Sidechain key source">
+      <span className="blabel">key</span>
+      <select
+        value={plugin.sidechainSourceId ?? ""}
+        onChange={(e) =>
+          e.target.value &&
+          exec("set_sidechain", { trackId, index: plugin.index, sourceTrackId: e.target.value })
+        }
+      >
+        <option value="">none</option>
+        {tracks
+          .filter((t) => t.id !== trackId)
+          .map((t) => (
+            <option key={t.id} value={t.id}>{t.name || `Track ${t.index + 1}`}</option>
+          ))}
+      </select>
+    </label>
   );
 }
 
