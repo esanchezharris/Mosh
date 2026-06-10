@@ -40,6 +40,19 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name.isEmpty())
         return errResult (name, "missing 'command'");
 
+    // Single interception point for the session recorder (phase0 §5): observe
+    // at depth 0 only, so IR-lowered sub-commands aren't double-recorded —
+    // the execute_ir step carries the corpus view.
+    ++execDepth;
+    auto result = dispatch (name, args);
+    --execDepth;
+    if (execDepth == 0 && commandObserver)
+        commandObserver (name, args, result);
+    return result;
+}
+
+juce::var MoshOps::dispatch (const juce::String& name, const juce::var& args)
+{
     if (name == "create_track")      return cmdCreateTrack (args);
     if (name == "rename_track")      return cmdRenameTrack (args);
     if (name == "remove_track")      return cmdRemoveTrack (args);
@@ -109,6 +122,29 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "generate_asset")    return cmdGenerateAsset (args);
     if (name == "execute_ir")        return irHook ? irHook (args)
                                                    : errResult (name, "IR executor not wired");
+    // Stage 9 — recorder-directed commands: MoshOps validates + logs; the
+    // SessionRecorder reacts via the command observer (layering stays clean).
+    if (name == "set_tutorial")
+    {
+        if (args.getProperty ("url", var()).toString().isEmpty())
+            return errResult (name, "missing 'url'");
+        logLine (name, args, true, {}, false);
+        return okResult (name);
+    }
+    if (name == "drop_marker")
+    {
+        if (! args.hasProperty ("videoTs"))
+            return errResult (name, "missing 'videoTs' (seconds into the tutorial video)");
+        logLine (name, args, true, {}, false);
+        return okResult (name);
+    }
+    if (name == "set_consent")
+    {
+        if (! args.hasProperty ("consent"))
+            return errResult (name, "missing 'consent'");
+        logLine (name, args, true, {}, false);
+        return okResult (name);
+    }
 
     return errResult (name, "unknown command: " + name);
 }

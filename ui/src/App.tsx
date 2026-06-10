@@ -5,6 +5,7 @@ import { Arrangement } from "./components/Arrangement";
 import { Transport } from "./components/Transport";
 import { Rack } from "./components/Rack";
 import { PluginBrowser } from "./components/PluginBrowser";
+import { TutorialBar } from "./components/TutorialBar";
 
 // Stage 1 UI: renders the MoshOps snapshot cold, drives every mutation through
 // execute_command, and reacts to the snapshot+events feed. Deliberately thin and
@@ -40,8 +41,10 @@ export function App() {
         </div>
         <Transport />
         <div className="topbar-right">
-          {/* Reserved B-5 / Monster operator slot (deferred — empty in v0). */}
-          <span className="b5-slot" title="B-5 / Monster — reserved (deferred)">B-5</span>
+          {/* Tutorial-replication tooling (phase0 s6): URL + markers + consent. */}
+          <TutorialBar />
+          {/* Reserved B-5 / Monster operator slot (Stage 11). */}
+          <span className="b5-slot" title="B-5 / Monster — reserved (Stage 11)">B-5</span>
           <button className="tool-btn" onClick={() => exec("export_audio", {})} title="Export the mix to WAV">
             ⤓ Export
           </button>

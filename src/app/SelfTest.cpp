@@ -735,6 +735,74 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                "generate_asset without seed -> hard error (no default seed)");
     }
 
+    // --- Stage 9: op logger / session recorder + tutorial marker ---
+    {
+        std::cerr << "--- Stage 9: session recorder + trajectory + markers ---\n";
+
+        auto trajFile = eng.sessionDir().getChildFile ("trajectory.jsonl");
+        check (trajFile.existsAsFile(), "trajectory.jsonl exists (recorder always on)");
+
+        StringArray lines;
+        trajFile.readLines (lines);
+        lines.removeEmptyStrings();
+        auto header = JSON::parse (lines[0]);
+        check (header.getProperty ("type", var()).toString() == "session"
+                 && header.getProperty ("ir_version", var()).toString() == "0.1",
+               "header line carries session + ir_version");
+        check (header.getProperty ("actor", var()).getProperty ("uuid", var()).toString().isNotEmpty(),
+               "header carries the actor identity");
+        check (! (bool) header.getProperty ("consent", true),
+               "consent defaults to FALSE (corpus entry is opt-in)");
+
+        auto lastLine = [&]() {
+            StringArray ls; trajFile.readLines (ls); ls.removeEmptyStrings();
+            return JSON::parse (ls[ls.size() - 1]); };
+
+        // A native mutation records a step with lifted IR + state hash.
+        cmd (ops, "create_track", args1 ("name", "Recorded"));
+        auto step = lastLine();
+        check (step.getProperty ("type", var()).toString() == "step"
+                 && step.getProperty ("command", var()).toString() == "create_track",
+               "native mutation recorded as a step");
+        check (step.getProperty ("ir", var())[0].getProperty ("kind", var()).toString() == "track.create",
+               "step carries the LIFTED IR op (track.create)");
+        check (step.getProperty ("state_hash_after", var()).toString().length() == 64,
+               "step carries state_hash_after");
+
+        // execute_ir records the IR verbatim, ONCE (no double-record of the
+        // lowered sub-commands — depth-0 observation).
+        StringArray before; trajFile.readLines (before); before.removeEmptyStrings();
+        cmd (ops, "execute_ir", JSON::parse (
+            R"json({"ops": [{"kind": "project.set_tempo", "params": {"bpm": 96}}]})json"));
+        StringArray after; trajFile.readLines (after); after.removeEmptyStrings();
+        check (after.size() == before.size() + 1, "execute_ir = exactly ONE new step (no double-record)");
+        auto irStep = JSON::parse (after[after.size() - 1]);
+        check (irStep.getProperty ("ir", var())[0].getProperty ("kind", var()).toString() == "project.set_tempo",
+               "execute_ir step carries the IR ops verbatim");
+        cmd (ops, "set_tempo", args1 ("bpm", 142.0));    // restore stage-7 tempo
+
+        // Tutorial binding + marker + friction note → gap ledger.
+        check (ok (cmd (ops, "set_tutorial", args1 ("url", "https://youtu.be/test123"))), "set_tutorial ok");
+        check (ok (cmd (ops, "drop_marker", objN ({{ "videoTs", 272.0 },
+            { "note", "selftest friction: no half-time device" }}))), "drop_marker ok");
+        auto marker = lastLine();
+        check (marker.getProperty ("type", var()).toString() == "marker"
+                 && (double) marker.getProperty ("video_ts", 0.0) == 272.0
+                 && (juce::int64) marker.getProperty ("op_seq", 0) > 0,
+               "marker binds (op_seq <-> video_ts)");
+        check (eng.sessionDir().getChildFile ("gap-ledger.jsonl").loadFileAsString()
+                   .contains ("selftest friction"),
+               "friction note appended to the gap ledger");
+
+        // Consent flip is recorded AND persisted to the identity file.
+        check (ok (cmd (ops, "set_consent", args1 ("consent", true))), "set_consent ok");
+        check ((bool) lastLine().getProperty ("consent", false), "consent change recorded");
+        auto idFile = File (SystemStats::getEnvironmentVariable ("MOSH_IDENTITY_FILE", {}));
+        check (idFile.existsAsFile()
+                 && (bool) JSON::parse (idFile.loadFileAsString()).getProperty ("consent", false),
+               "identity file persisted the consent flip (isolated from the user's real one)");
+    }
+
     // --- Stage 5 (SA3): the real StableAudio3Adapter - GATED on MOSH_SELFTEST_SA3 ---
     // (separate from MOSH_ENABLE_SA3, which now defaults on: real model + judge QA is
     //  ~30s, too heavy for the default --selftest. Opt in explicitly to exercise it.)

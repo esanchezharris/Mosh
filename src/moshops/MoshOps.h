@@ -44,11 +44,20 @@ public:
     using IRHook = std::function<juce::var (const juce::var& args)>;
     void setIRHook (IRHook h) { irHook = std::move (h); }
 
+    /** Session-recorder observer (phase0 §5): fired once per top-level command
+        (depth 0 — IR-lowered sub-commands are not double-observed). */
+    using CommandObserver = std::function<void (const juce::String& name,
+                                                const juce::var& args,
+                                                const juce::var& result)>;
+    void setCommandObserver (CommandObserver o) { commandObserver = std::move (o); }
+
     /** Result envelopes (public: the IR layer composes them too). */
     static juce::var okResult  (const juce::String& command, juce::var data = {});
     static juce::var errResult (const juce::String& command, const juce::String& message);
 
 private:
+    juce::var dispatch (const juce::String& name, const juce::var& args);
+
     // ── command handlers ──
     juce::var cmdCreateTrack    (const juce::var& args);
     juce::var cmdRenameTrack    (const juce::var& args);
@@ -158,6 +167,8 @@ private:
     GenerativeJobManager jobManager;
     EventSink   eventSink;
     IRHook      irHook;
+    CommandObserver commandObserver;
+    int         execDepth = 0;
     juce::int64 seq = 0;
     juce::File  logFile;
     bool        wasPlaying = false;

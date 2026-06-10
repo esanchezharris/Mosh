@@ -51,6 +51,15 @@ if (MOSH_BUILD_APP)
         COMPANY_NAME "Mosh"
         NEEDS_WEBVIEW2 TRUE)
 
+# Git identity for trajectory provenance (phase0 §5 mosh_version). Configure-time;
+# the flywheel importer re-stamps exact SHAs when it matters.
+    execute_process(COMMAND git rev-parse --short HEAD
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        OUTPUT_VARIABLE MOSH_GIT_SHA OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    if (MOSH_GIT_SHA)
+        target_compile_definitions(Mosh PRIVATE MOSH_GIT_SHA="${MOSH_GIT_SHA}")
+    endif()
+
 # Source modules (00 §5). Added incrementally per build stage.
     target_sources(Mosh PRIVATE
         src/Main.cpp
@@ -73,7 +82,10 @@ if (MOSH_BUILD_APP)
         # Stage 8 — replay harness + canonical state hash (phase0 §4)
         src/moshops/MoshOpsStage8.cpp
         src/state/StateHash.cpp
-        src/app/Harness.cpp)
+        src/app/Harness.cpp
+        # Stage 9 — op logger / session recorder + lift (phase0 §5–§6)
+        src/moshir/Lift.cpp
+        src/moshir/SessionRecorder.cpp)
 
     target_include_directories(Mosh PRIVATE src)
 

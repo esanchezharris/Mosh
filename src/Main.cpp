@@ -1,11 +1,13 @@
 #include <juce_gui_extra/juce_gui_extra.h>
 #include <tracktion_engine/tracktion_engine.h>
+#include <cstdlib>
 #include "app/MainWindow.h"
 #include "app/SelfTest.h"
 #include "app/Harness.h"
 #include "engine/MoshEngine.h"
 #include "moshops/MoshOps.h"
 #include "moshir/MoshIR.h"
+#include "moshir/SessionRecorder.h"
 
 namespace mosh
 {
@@ -41,6 +43,16 @@ public:
         // them back through execute(), preserving the one mutation path.
         irExecutor = std::make_unique<ir::Executor> (*moshOps, *engine);
         moshOps->setIRHook ([this] (const juce::var& a) { return irExecutor->executeOps (a); });
+
+        // The op logger / session recorder (phase0 §5) — always on, a product
+        // feature; consent gates corpus entry, not recording. Headless runs
+        // get an isolated identity so harness/selftest never touch the user's.
+        if (headless && juce::SystemStats::getEnvironmentVariable ("MOSH_IDENTITY_FILE", {}).isEmpty())
+            setenv ("MOSH_IDENTITY_FILE",
+                    engine->sessionDir().getChildFile ("identity.json").getFullPathName().toRawUTF8(), 1);
+        recorder = std::make_unique<ir::SessionRecorder> (*engine);
+        moshOps->setCommandObserver ([this] (const juce::String& n, const juce::var& a, const juce::var& r)
+                                     { recorder->afterCommand (n, a, r); });
 
         // Headless replay harness (phase0 §4): `Mosh --harness job.json`.
         if (harness)
@@ -101,6 +113,7 @@ public:
     void shutdown() override
     {
         mainWindow.reset();
+        recorder.reset();
         irExecutor.reset();
         moshOps.reset();
         engine.reset();
@@ -109,10 +122,11 @@ public:
     void systemRequestedQuit() override { quit(); }
 
 private:
-    std::unique_ptr<MoshEngine>   engine;
-    std::unique_ptr<MoshOps>      moshOps;
-    std::unique_ptr<ir::Executor> irExecutor;
-    std::unique_ptr<MainWindow>   mainWindow;
+    std::unique_ptr<MoshEngine>          engine;
+    std::unique_ptr<MoshOps>             moshOps;
+    std::unique_ptr<ir::Executor>        irExecutor;
+    std::unique_ptr<ir::SessionRecorder> recorder;
+    std::unique_ptr<MainWindow>          mainWindow;
 };
 
 } // namespace mosh

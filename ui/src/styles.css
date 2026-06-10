@@ -62,6 +62,20 @@ button.on { border-color: var(--accent); color: var(--accent); background: #2120
 }
 .tool-btn { padding: 0.35rem 0.6rem; border-radius: 7px; }
 
+/* Tutorial-replication bar (phase0 s6): URL + op<->video markers + consent. */
+.tutorial-bar { display: flex; align-items: center; gap: 0.35rem; }
+.tutorial-input {
+  font: inherit; font-size: 0.78rem; color: var(--text); background: var(--panel-2);
+  border: 1px solid var(--line); border-radius: 7px; padding: 0.3rem 0.5rem;
+}
+.tutorial-input:focus { outline: none; border-color: var(--accent); }
+.tutorial-url { width: 150px; }
+.tutorial-url:disabled { opacity: 0.55; }
+.tutorial-ts { width: 52px; text-align: center; font-variant-numeric: tabular-nums; }
+.tutorial-note { width: 140px; }
+.tutorial-status { font-size: 0.7rem; color: var(--muted); white-space: nowrap; }
+.consent-on { border-color: var(--ok); color: var(--ok); }
+
 .transport { display: flex; align-items: center; gap: 0.4rem; }
 .tbtn { width: 34px; height: 34px; display: grid; place-items: center; font-size: 0.95rem; border-radius: 8px; }
 .tbtn.play { color: var(--ok); }
