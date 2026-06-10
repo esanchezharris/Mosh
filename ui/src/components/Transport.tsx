@@ -55,8 +55,6 @@ function EditableValue({
 export function Transport() {
   const snapshot = useStore((s) => s.snapshot);
   const exec = useStore((s) => s.exec);
-  const secsPerBeat = useStore((s) => s.secsPerBeat);
-  const beatsPerBar = useStore((s) => s.beatsPerBar);
   const t = snapshot?.transport;
   const session = snapshot?.session;
 
@@ -64,11 +62,9 @@ export function Transport() {
   const looping = t?.looping ?? false;
   const metronome = session?.metronome ?? false;
 
-  // Musical position (Stage 14): bars.beats next to wall time.
+  // Musical position (Stage 14; tempo-map-aware since Stage 28).
   const pos = t?.position ?? 0;
-  const barSec = secsPerBeat() * beatsPerBar();
-  const bar = Math.floor(pos / barSec) + 1;
-  const beat = Math.floor((pos % barSec) / secsPerBeat()) + 1;
+  const { bar, beat } = useStore.getState().secToBarBeat(pos);
 
   // Master engine-output meter, fed by the 30 Hz transport event.
   const master = t?.levels?.master;

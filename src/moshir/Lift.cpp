@@ -55,6 +55,13 @@ juce::var lift (const String& command, const var& args, const var& result, te::E
     // ── project ──────────────────────────────────────────────────────────
     if (command == "set_tempo")
     {
+        // Tempo-MAP points (atBar) have no IR shape in v0.2 — native-only
+        // (ledger candidate: project.set_tempo gains at_bar in v0.3).
+        if (args.hasProperty ("atBar"))
+            return none();
+    }
+    if (command == "set_tempo")
+    {
         auto* p = obj(); p->setProperty ("bpm", args.getProperty ("bpm", 120.0));
         return one (op ("project.set_tempo", p));
     }

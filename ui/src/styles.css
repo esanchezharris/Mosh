@@ -588,4 +588,16 @@ button.on { border-color: var(--accent); color: var(--accent); background: #2120
 }
 .keychip { max-width: 92px; }
 
+/* Tempo-map flags (Stage 28) */
+.tempo-flag {
+  position: absolute; top: 0; transform: translateX(-1px); z-index: 4;
+  font-size: 0.56rem; font-weight: 700; color: #fff; background: var(--warn);
+  border-radius: 0 4px 4px 0; padding: 0 4px; line-height: 13px; cursor: pointer;
+  border-left: 2px solid #fff;
+}
+.tempo-flag-input {
+  width: 36px; font: inherit; font-size: 0.56rem; color: var(--text);
+  background: var(--panel); border: 1px solid #fff; border-radius: 3px; padding: 0 2px;
+}
+
 .boot { padding: 3rem; color: var(--muted); }

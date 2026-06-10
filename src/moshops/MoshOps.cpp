@@ -165,6 +165,7 @@ juce::var MoshOps::dispatch (const juce::String& name, const juce::var& args)
     if (name == "export_audio")      return cmdExportAudio (args);
     // Stage 7 — MoshIR engine gaps
     if (name == "set_tempo")         return cmdSetTempo (args);
+    if (name == "remove_tempo")     return cmdRemoveTempo (args);
     if (name == "set_time_sig")      return cmdSetTimeSig (args);
     if (name == "set_key")           return cmdSetKey (args);
     if (name == "add_notes")         return cmdAddNotes (args);
@@ -2132,6 +2133,27 @@ juce::var MoshOps::snapshot()
     auto* session = new DynamicObject();
     session->setProperty ("sampleRate", eng.engine().getDeviceManager().getSampleRate());
     session->setProperty ("tempo", edit.tempoSequence.getBpmAt (tracktion::TimePosition()));
+
+    // Tempo map (Stage 28): every tempo setting with its bar + wall-time —
+    // the UI's piecewise ruler/snap math reads exactly this. NOT in the
+    // canonical hash beyond the base tempo (hash-v2 parked, like master vol).
+    {
+        Array<var> tmap;
+        auto& seq = edit.tempoSequence;
+        auto& ts0 = seq.getTimeSigAt (tracktion::TimePosition());
+        const double beatsPerBar = ts0.numerator.get() * 4.0 / ts0.denominator.get();
+        for (int i = 0; i < seq.getNumTempos(); ++i)
+            if (auto* t = seq.getTempo (i))
+            {
+                auto* e = new DynamicObject();
+                e->setProperty ("bar", 1 + (int) std::lround (t->getStartBeat().inBeats() / beatsPerBar));
+                e->setProperty ("beat", t->getStartBeat().inBeats());
+                e->setProperty ("bpm", t->getBpm());
+                e->setProperty ("timeSec", seq.toTime (t->getStartBeat()).inSeconds());
+                tmap.add (var (e));
+            }
+        session->setProperty ("tempoMap", tmap);
+    }
     session->setProperty ("editFile", eng.editFile().getFullPathName());
 
     // Stage 14: device truth in the UI (rung 1's silence was a BlackHole

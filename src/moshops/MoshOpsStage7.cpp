@@ -33,12 +33,46 @@ juce::var MoshOps::cmdSetTempo (const juce::var& args)
         return errResult ("set_tempo", "bpm out of range [20, 400]: " + String (bpm));
 
     undoManager().beginNewTransaction ("set_tempo");
-    // v0 = single-tempo sessions: the first TempoSetting always exists (default
-    // 120 at beat 0), so mutate it rather than inserting a tempo map.
-    eng.edit().tempoSequence.getTempoAt (tracktion::TimePosition()).setBpm (bpm);
+    if (args.hasProperty ("atBar"))
+    {
+        // Tempo map (Stage 28): insert/update a tempo change at a bar line.
+        const int atBar = jmax (1, (int) args.getProperty ("atBar", 1));
+        auto& ts0 = eng.edit().tempoSequence.getTimeSigAt (tracktion::TimePosition());
+        const double beatsPerBar = ts0.numerator.get() * 4.0 / ts0.denominator.get();
+        const auto beat = tracktion::BeatPosition::fromBeats ((atBar - 1) * beatsPerBar);
+        eng.edit().tempoSequence.insertTempo (beat, bpm, 1.0f);   // public overload uses the edit's UM
+    }
+    else
+    {
+        // The session's base tempo: mutate the setting at beat 0.
+        eng.edit().tempoSequence.getTempoAt (tracktion::TimePosition()).setBpm (bpm);
+    }
     logLine ("set_tempo", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("set_tempo");
+}
+
+// Stage 28: drop a tempo-map point (never the base tempo at beat 0).
+juce::var MoshOps::cmdRemoveTempo (const juce::var& args)
+{
+    const int atBar = (int) args.getProperty ("atBar", -1);
+    if (atBar < 2) return errResult ("remove_tempo", "atBar must be >= 2 (the base tempo stays)");
+    auto& seq = eng.edit().tempoSequence;
+    auto& ts0 = seq.getTimeSigAt (tracktion::TimePosition());
+    const double beatsPerBar = ts0.numerator.get() * 4.0 / ts0.denominator.get();
+    const double targetBeat = (atBar - 1) * beatsPerBar;
+
+    undoManager().beginNewTransaction ("remove_tempo");
+    for (int i = seq.getNumTempos(); --i >= 1;)
+        if (auto* t = seq.getTempo (i))
+            if (std::abs (t->getStartBeat().inBeats() - targetBeat) < 0.01)
+            {
+                seq.removeTempo (i, true);
+                logLine ("remove_tempo", args, true, {}, true);
+                emitSnapshotInvalidated();
+                return okResult ("remove_tempo");
+            }
+    return errResult ("remove_tempo", "no tempo change at bar " + String (atBar));
 }
 
 juce::var MoshOps::cmdSetTimeSig (const juce::var& args)

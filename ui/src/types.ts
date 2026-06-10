@@ -136,6 +136,7 @@ export type Snapshot = {
     projectName?: string;
     keyRoot?: string;
     keyScale?: string;
+    tempoMap?: { bar: number; beat: number; bpm: number; timeSec: number }[];
   };
   tracks: Track[];
   transport: Transport;

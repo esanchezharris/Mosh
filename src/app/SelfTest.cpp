@@ -1373,6 +1373,24 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         eng.sessionDir().getChildFile ("project-name.txt").deleteFile();
     }
 
+    // --- Stage 28: tempo map ---
+    {
+        std::cerr << "--- Stage 28: tempo map ---\n";
+        check (ok (cmd (ops, "set_tempo", objN ({{ "bpm", 174.0 }, { "atBar", 5 }}))), "tempo point at bar 5");
+        auto tmap = ops.snapshot()["session"].getProperty ("tempoMap", var());
+        bool found = false;
+        for (auto& m : *tmap.getArray())
+            if ((int) m.getProperty ("bar", 0) == 5 && std::abs ((double) m.getProperty ("bpm", 0.0) - 174.0) < 0.1)
+                found = true;
+        check (tmap.size() >= 2 && found, "tempoMap carries the point with bar + bpm");
+        check (! ok (cmd (ops, "remove_tempo", args1 ("atBar", 1))), "base tempo cannot be removed");
+        check (ok (cmd (ops, "remove_tempo", args1 ("atBar", 5))), "remove_tempo ok");
+        check (ops.snapshot()["session"].getProperty ("tempoMap", var()).size() == 1, "map back to base only");
+        check (ok (cmd (ops, "undo")), "undo remove ok");
+        check (ops.snapshot()["session"].getProperty ("tempoMap", var()).size() == 2, "undo restores the point");
+        cmd (ops, "remove_tempo", args1 ("atBar", 5));
+    }
+
     // --- Stage 27: compressed export (m4a via afconvert; mp3 if lame) ---
     {
         std::cerr << "--- Stage 27: compressed export ---\n";

@@ -149,6 +149,7 @@ private:
     // Stage 7 — MoshIR engine gaps (phase0 §3.3: tempo/key/notes/sampler/
     // sends/sidechain/automation/sections). Implemented in MoshOpsStage7.cpp.
     juce::var cmdSetTempo        (const juce::var& args);
+    juce::var cmdRemoveTempo     (const juce::var& args);   // Stage 28 tempo map
     juce::var cmdSetTimeSig      (const juce::var& args);
     juce::var cmdSetKey          (const juce::var& args);
     juce::var cmdAddNotes        (const juce::var& args);

@@ -49,6 +49,9 @@ type State = {
   beatsPerBar: () => number;
   snapSeconds: () => number; // the current snap division, in seconds
   snapTime: (t: number) => number;
+  // Tempo map (Stage 28): piecewise time math. Segments from session.tempoMap.
+  tempoSegments: () => { startSec: number; startBeat: number; spb: number }[];
+  secToBarBeat: (t: number) => { bar: number; beat: number };
   ensurePeaks: (clipId: string) => void;
 
   setSelectedTrack: (id: string | null) => void;
@@ -189,11 +192,30 @@ export const useStore = create<State>((set, get) => ({
       default: return spb / 4; // 1/16
     }
   },
+  tempoSegments: () => {
+    const map = get().snapshot?.session.tempoMap;
+    if (!map || map.length === 0)
+      return [{ startSec: 0, startBeat: 0, spb: get().secsPerBeat() }];
+    return map.map((m) => ({ startSec: m.timeSec, startBeat: m.beat, spb: 60 / m.bpm }));
+  },
+  secToBarBeat: (t) => {
+    const segs = get().tempoSegments();
+    const bpb = get().beatsPerBar();
+    let seg = segs[0];
+    for (const sg of segs) if (sg.startSec <= t) seg = sg;
+    const beats = seg.startBeat + (t - seg.startSec) / seg.spb;
+    return { bar: Math.floor(beats / bpb) + 1, beat: Math.floor(beats % bpb) + 1 };
+  },
   snapTime: (t) => {
     const { snap } = get();
     if (!snap) return t;
-    const g = get().snapSeconds();
-    return Math.round(t / g) * g;
+    // Snap within the tempo segment containing t (piecewise-correct).
+    const segs = get().tempoSegments();
+    let seg = segs[0];
+    for (const sg of segs) if (sg.startSec <= t) seg = sg;
+    const spbRatio = seg.spb / get().secsPerBeat();
+    const g = get().snapSeconds() * spbRatio;
+    return seg.startSec + Math.round((t - seg.startSec) / g) * g;
   },
 
   ensurePeaks: (clipId) => {

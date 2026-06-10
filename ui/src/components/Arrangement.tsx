@@ -8,24 +8,29 @@ import { ClipInspector } from "./ClipInspector";
 const LANE_H = 84;
 const RULER_SECONDS = 48;
 
-// Musical ruler ticks (Stage 14): bars always; beats and 16ths appear as zoom
-// allows. Everything is derived from the snapshot's tempo/time-sig — the
-// second-based ruler never matched a 160 BPM session.
-function rulerTicks(pxPerSec: number, spb: number, bpb: number) {
-  const barSec = spb * bpb;
-  const pxPerBar = barSec * pxPerSec;
-  const showBeats = pxPerBar > 64;
-  const showSixteenths = spb * pxPerSec > 56;
+// Musical ruler ticks (Stage 14, tempo-map-aware since Stage 28): bar/beat/
+// 16th positions are computed PIECEWISE over the tempo segments — bar lines
+// stay true across tempo changes.
+type Seg = { startSec: number; startBeat: number; spb: number };
+function rulerTicks(pxPerSec: number, segs: Seg[], bpb: number) {
   const ticks: { left: number; kind: "bar" | "beat" | "sub"; label?: string }[] = [];
-  const totalBars = Math.ceil(RULER_SECONDS / barSec);
-  for (let b = 0; b < totalBars; b++) {
-    ticks.push({ left: b * pxPerBar, kind: "bar", label: String(b + 1) });
+  const beatSec = (beat: number) => {
+    let seg = segs[0];
+    for (const sg of segs) if (sg.startBeat <= beat + 1e-6) seg = sg;
+    return seg.startSec + (beat - seg.startBeat) * seg.spb;
+  };
+  const showBeats = segs[0].spb * bpb * pxPerSec > 64;
+  const showSixteenths = segs[0].spb * pxPerSec > 56;
+  for (let bar = 0; bar < 400; bar++) {
+    const t = beatSec(bar * bpb);
+    if (t > RULER_SECONDS) break;
+    ticks.push({ left: t * pxPerSec, kind: "bar", label: String(bar + 1) });
     if (!showBeats) continue;
     for (let k = 0; k < bpb; k++) {
-      if (k > 0) ticks.push({ left: (b * bpb + k) * spb * pxPerSec, kind: "beat" });
+      if (k > 0) ticks.push({ left: beatSec(bar * bpb + k) * pxPerSec, kind: "beat" });
       if (!showSixteenths) continue;
-      for (let s = 1; s < 4; s++)
-        ticks.push({ left: (b * bpb + k + s / 4) * spb * pxPerSec, kind: "sub" });
+      for (let sx = 1; sx < 4; sx++)
+        ticks.push({ left: beatSec(bar * bpb + k + sx / 4) * pxPerSec, kind: "sub" });
     }
   }
   return ticks;
@@ -41,12 +46,15 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
   const ctxMenu = useStore((s) => s.ctxMenu);
   const setCtxMenu = useStore((s) => s.setCtxMenu);
   const follow = useStore((s) => s.follow);
+  const tempoSegments = useStore((s) => s.tempoSegments);
   const t = snapshot.transport;
   const spb = secsPerBeat();
   const bpb = beatsPerBar();
-  const ticks = rulerTicks(pxPerSec, spb, bpb);
+  const segs = tempoSegments();
+  const ticks = rulerTicks(pxPerSec, segs, bpb);
   const barPx = spb * bpb * pxPerSec;
   const beatPx = spb * pxPerSec;
+  const tempoMap = snapshot.session.tempoMap ?? [];
   const timelineRef = useRef<HTMLDivElement>(null);
 
   // Track drag-reorder (Stage 15): slot model — slot k inserts before track k.
@@ -86,10 +94,16 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
     void exec("set_transport", { position: Math.max(0, (e.clientX - rect.left) / pxPerSec) });
   };
 
-  // Shift-drag the ruler → loop region.
+  // Shift-drag the ruler → loop region. Alt-click → tempo-map point (S28).
   const onRulerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const sec = Math.max(0, (e.clientX - rect.left) / pxPerSec);
+    if (e.altKey) {
+      const { bar } = useStore.getState().secToBarBeat(sec);
+      if (bar >= 2)
+        void exec("set_tempo", { bpm: snapshot.session.tempo, atBar: bar });
+      return;
+    }
     if (e.shiftKey) {
       loopDrag.current = sec;
       e.currentTarget.setPointerCapture(e.pointerId);
@@ -165,6 +179,10 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
                 style={{ left: t.loopStart * pxPerSec, width: (t.loopEnd - t.loopStart) * pxPerSec }}
               />
             )}
+            {/* Tempo-map flags (Stage 28): dblclick edits, right-click removes. */}
+            {tempoMap.filter((m) => m.bar > 1).map((m) => (
+              <TempoFlag key={m.bar} entry={m} pxPerSec={pxPerSec} />
+            ))}
             <div className="playhead" style={{ left: t.position * pxPerSec }} />
           </div>
         </div>
@@ -299,6 +317,51 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
         </div>
       )}
     </div>
+  );
+}
+
+// A tempo-map flag on the ruler (Stage 28).
+function TempoFlag({ entry, pxPerSec }: { entry: { bar: number; bpm: number; timeSec: number }; pxPerSec: number }) {
+  const exec = useStore((s) => s.exec);
+  const [editing, setEditing] = useState(false);
+  return (
+    <span
+      className="tempo-flag"
+      style={{ left: entry.timeSec * pxPerSec }}
+      title={`bar ${entry.bar}: ${entry.bpm} bpm — 2×: edit · right-click: remove`}
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => {
+        e.stopPropagation();
+        setEditing(true);
+      }}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        void exec("remove_tempo", { atBar: entry.bar });
+      }}
+    >
+      {editing ? (
+        <input
+          className="tempo-flag-input"
+          autoFocus
+          defaultValue={String(entry.bpm)}
+          onFocus={(ev) => ev.target.select()}
+          onBlur={(ev) => {
+            setEditing(false);
+            const bpm = Number(ev.target.value);
+            if (Number.isFinite(bpm) && bpm >= 20 && bpm <= 400)
+              void exec("set_tempo", { bpm, atBar: entry.bar });
+          }}
+          onKeyDown={(ev) => {
+            if (ev.key === "Enter") (ev.target as HTMLInputElement).blur();
+            if (ev.key === "Escape") setEditing(false);
+          }}
+        />
+      ) : (
+        <>♩{Math.round(entry.bpm)}</>
+      )}
+    </span>
   );
 }
 
