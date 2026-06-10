@@ -109,6 +109,17 @@ def rescore(tut_id: str, provider: str, app: Path, db: Path) -> dict:
         bounce = out_dir / "bounce-corrected.wav"
         bounce.write_bytes(harness.pop("_bounce_bytes"))
         bounce_db = _peak_dbfs(bounce)
+        # The worktree lives under a dot-directory Finder can't see — drop the
+        # listening copy somewhere a human can actually find ("why does it
+        # keep disappearing lmao").
+        listen_dir = Path(os.environ.get(
+            "MOSH_LISTEN_DIR", Path.home() / "Desktop/mosh-listen"))
+        try:
+            listen_dir.mkdir(parents=True, exist_ok=True)
+            (listen_dir / f"{tut_id}.wav").write_bytes(bounce.read_bytes())
+            print(f"listening copy: {listen_dir / f'{tut_id}.wav'}")
+        except OSError:
+            pass
         if bounce_db is None or bounce_db < -60.0:
             # The rung-1 facepalm: a structurally perfect render nobody can
             # hear (empty samplers). Silence is a loud failure now.
