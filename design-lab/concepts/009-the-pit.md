@@ -197,3 +197,21 @@ transitions.
 - **The pickup mechanic died.** Slams still chip shards off the artifact — they arc,
   land, and fade. Consequence without chores. The ◆ counter is gone.
 - **Transparency, actually tried:** clips at 55% alpha, lanes ghosts, no panels.
+
+## v10 (2026-06-10) — THE LISTENER · the real voice · the de-glitched morph
+
+- **The lab hears.** Drop any audio file on 009 (or hit ♪ LOSERFACE for the bundled
+  track) and an AnalyserNode drives everything for real: 3-band energy → spectral
+  fill, low-band flux → slams, track position → the playhead. Priority:
+  TRACK > ENGINE > DEMO. Verified live against LoserFace.wav (99.6s): bands
+  l/m/h = .85/.97/.97 at the drop.
+- **The morph glitch, diagnosed and fixed:** v9 derived `sd2 = fract(sd·91.7)` from
+  the *blended* seed — fract wraps ~92 times across the crossfade, spraying
+  discontinuities. Rule: blend derived seeds between FIXED endpoints, never derive
+  from a blend. Window widened to 25%, section jolt removed entirely.
+- **The display voice:** Nanum Square Round (user-supplied, OFL) — rounded-square
+  2000s console type, lab-wide (EB=800/B=700, canonical stack in tokens/moshi.css).
+- Philosophy formalized: [seeded-geology.md](seeded-geology.md) (per the
+  algorithmic-art skill's discipline; expressed in the 009 shader, not p5).
+- Parked next: a bitmap face for HUD numerals from ianhan/BitmapFonts (user link);
+  the real per-band engine feed in src/ (user approved).

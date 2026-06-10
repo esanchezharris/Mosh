@@ -5,12 +5,19 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>007 · TERRARIUM — the specimen, kept quietly</title>
 <style>
+  /* NANUM SQUARE ROUND — the display voice (user-supplied; OFL, Naver).
+     Rounded-square 2000s console face: the type finally matches the plastic. */
+  @font-face { font-family: 'NanumSquareRound'; font-weight: 800;
+    src: url('../../fonts/nanum-square-round/NanumSquareRoundEB.ttf') format('truetype'); }
+  @font-face { font-family: 'NanumSquareRound'; font-weight: 700;
+    src: url('../../fonts/nanum-square-round/NanumSquareRoundB.ttf') format('truetype'); }
+
   /* tokens (canonical: design-lab/tokens/moshi.css) */
   :root {
     --ink: #0B0B0B; --lime: #CCFF23; --lime-glow: #D9FF4C;
     --bone: #F6F2EB; --mist: #E5E5E1;
     --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
-    --font-display: "Archivo Black", "Helvetica Neue", -apple-system, "Arial Black", sans-serif;
+    --font-display: 'NanumSquareRound', "Archivo Black", "Helvetica Neue", -apple-system, "Arial Black", sans-serif;
   }
   html, body { margin: 0; height: 100%; background: var(--ink); overflow: hidden; }
   #bg { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }

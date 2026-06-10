@@ -5,11 +5,18 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>011 · THE SCENE — everyone's session, at a glance</title>
 <style>
+  /* NANUM SQUARE ROUND — the display voice (user-supplied; OFL, Naver).
+     Rounded-square 2000s console face: the type finally matches the plastic. */
+  @font-face { font-family: 'NanumSquareRound'; font-weight: 800;
+    src: url('../../fonts/nanum-square-round/NanumSquareRoundEB.ttf') format('truetype'); }
+  @font-face { font-family: 'NanumSquareRound'; font-weight: 700;
+    src: url('../../fonts/nanum-square-round/NanumSquareRoundB.ttf') format('truetype'); }
+
   :root {
     --ink: #0B0B0B; --lime: #CCFF23; --lime-glow: #D9FF4C;
     --bone: #F6F2EB; --mist: #E5E5E1; --slab: #111110; --slab-2: #0d0d0c;
     --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
-    --font-display: "Archivo Black", "Helvetica Neue", -apple-system, "Arial Black", sans-serif;
+    --font-display: 'NanumSquareRound', "Archivo Black", "Helvetica Neue", -apple-system, "Arial Black", sans-serif;
   }
   * { -webkit-font-smoothing: antialiased; }
   html, body { margin: 0; height: 100%; background: #070707; overflow: hidden;

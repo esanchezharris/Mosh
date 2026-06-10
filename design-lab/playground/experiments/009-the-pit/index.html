@@ -5,12 +5,19 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>009 · THE PIT — the song as matter</title>
 <style>
+  /* NANUM SQUARE ROUND — the display voice (user-supplied; OFL, Naver).
+     Rounded-square 2000s console face: the type finally matches the plastic. */
+  @font-face { font-family: 'NanumSquareRound'; font-weight: 800;
+    src: url('../../fonts/nanum-square-round/NanumSquareRoundEB.ttf') format('truetype'); }
+  @font-face { font-family: 'NanumSquareRound'; font-weight: 700;
+    src: url('../../fonts/nanum-square-round/NanumSquareRoundB.ttf') format('truetype'); }
+
   :root {
     --ink: #0B0B0B; --lime: #CCFF23; --lime-glow: #D9FF4C;
     --bone: #F6F2EB; --mist: #E5E5E1;
     --slab: #111110; --slab-2: #141413;
     --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
-    --font-display: "Archivo Black", "Helvetica Neue", -apple-system, "Arial Black", sans-serif;
+    --font-display: 'NanumSquareRound', "Archivo Black", "Helvetica Neue", -apple-system, "Arial Black", sans-serif;
     --seam: 0 0 0 1px rgba(204,255,35,.16), 0 0 9px rgba(204,255,35,.10);
   }
   html, body { margin: 0; height: 100%; background: #070707; overflow: hidden;
@@ -291,6 +298,7 @@
     <span style="opacity:.5">120 BPM</span>
     <span id="sect" style="color:var(--lime)">VERSE 1</span>
     <span id="link" style="font-size:9px;letter-spacing:.16em;opacity:.45">DEMO CLOCK</span>
+    <span id="trackbtn" class="ghost" title="play the bundled track — or drop any audio file anywhere on the page">♪ LOSERFACE</span>
     <span id="specrow" title="spectral fill — what the artifact eats">LOW<span class="sbar"><i id="sbl"></i></span>MID<span class="sbar"><i id="sbm"></i></span>HI<span class="sbar"><i id="sbh"></i></span></span>
     <span id="build" class="ghost" title="watch the artifact grow from an empty session">▶ BUILD</span>
     <span id="signal" class="ghost" title="the PS2 signal chain — toggle to compare">SIGNAL·PS2</span>
@@ -396,11 +404,14 @@ float map(vec3 p) {
   p /= gro;
   vec3 q = p;
   float crack = 1e9;
-  // per-section geology, MORPHED: the last 18% of each section crossfades its
-  // seed into the next — the stone glides between forms instead of snapping.
-  float s0 = floor(u_sect), sf = fract(u_sect);
-  float sd  = mix(sdOf(s0), sdOf(mod(s0 + 1.0, 8.0)), smoothstep(0.82, 1.0, sf));
-  float sd2 = fract(sd * 91.7);                                     // the song is geology
+  // per-section geology, MORPHED: the last 25% of each section crossfades into
+  // the next. CRITICAL: blend each derived seed between FIXED endpoints — never
+  // derive (fract/sin) from a blended value, or the wraps spray discontinuities.
+  float s0 = floor(u_sect), s1 = mod(s0 + 1.0, 8.0);
+  float w = smoothstep(0.75, 1.0, fract(u_sect));
+  float a0 = sdOf(s0), a1 = sdOf(s1);
+  float sd  = mix(a0, a1, w);
+  float sd2 = mix(fract(a0 * 91.7), fract(a1 * 91.7), w);           // the song is geology
   for (int i = 0; i < 4; i++) {
     q = abs(q) - vec3(0.26 + 0.10 * u_epic + 0.09 * sd, 0.22 + 0.05 * sd2, 0.27);
     crack = min(crack, min(abs(q.x), abs(q.y)));
@@ -1007,8 +1018,10 @@ const t0 = performance.now(); let last = t0;
 
 function frame(now) {
   const t = (now - t0) / 1000, dt = Math.min(.05, (now - last) / 1000); last = now;
-  if (FEED.on) tPos = (((enginePos % SONG_S) + SONG_S) % SONG_S) / SONG_S;
+  if (audioOn && audioBuf) tPos = ((actx.currentTime - audioStart) % audioBuf.duration) / audioBuf.duration;
+  else if (FEED.on) tPos = (((enginePos % SONG_S) + SONG_S) % SONG_S) / SONG_S;
   else if (playing) tPos = (tPos + dt / SONG_S) % 1;
+  audioFrame();
   recAmt += ((rec ? 1 : 0) - recAmt) * .07;
   renderFlare *= 0.985;
 
@@ -1018,7 +1031,8 @@ function frame(now) {
   // WILD: the violence budget follows the MUSIC, not the clock. The demo song
   // has dynamics now (calm intro/outro, hard hooks); engine mode follows levels.
   // A chill track = a calm beautiful stone. A banger earns the chaos.
-  const wildT = FEED.on ? Math.min(1, engineEnergy * 1.3)
+  const wildT = audioOn ? Math.min(1, aEnergy * 1.25)
+              : FEED.on ? Math.min(1, engineEnergy * 1.3)
                         : SECT_WILD[sectIdx] * (0.55 + 0.65 * axes.grit);
   wild += (Math.min(1, wildT) - wild) * 0.015;
   if (playing && beatIdx !== lastBeat) {                 // THE SLAM (wild-gated)
@@ -1029,20 +1043,21 @@ function frame(now) {
     rotTA += (Math.random() * 0.9 - 0.45) * (hard ? 1 : 0.4) * (0.2 + 0.8 * wild);
     rotTB += (Math.random() * 0.6 - 0.3) * (hard ? 1 : 0.4) * (0.2 + 0.8 * wild);
   }
-  if (sectIdx !== lastSect) {                              // new section = new matter
-    if (lastSect >= 0) { onsetEnv = 0.8; rotTA += (0.3 + 0.7 * wild) * (Math.random() - 0.5); }
-    lastSect = sectIdx;
-  }
+  if (sectIdx !== lastSect) lastSect = sectIdx;            // sections MORPH now — no jolt
   onsetEnv *= 0.90;
-  energy = FEED.on ? Math.min(1, 0.12 + engineEnergy * 1.15 + 0.30 * onsetEnv)
+  energy = audioOn ? Math.min(1, 0.10 + aEnergy * 1.0 + 0.25 * onsetEnv)
+         : FEED.on ? Math.min(1, 0.12 + engineEnergy * 1.15 + 0.30 * onsetEnv)
                    : Math.min(1, 0.14 + 0.40 * onsetEnv + 0.16 * axes.grit + 0.22 * wild);
 
   // the artifact accretes: spectral fill eases toward the arrangement (demo) or
   // toward active-track count (engine link — no per-band data in the feed yet)
   const eC = (FEED.on && !building) ? Math.min(1, engineActiveN / 6) : null;  // BUILD demos even while linked
-  spec.low  += ((eC ?? specT.low)  - spec.low)  * 0.035;
-  spec.mid  += ((eC ?? specT.mid)  - spec.mid)  * 0.035;
-  spec.high += ((eC ?? specT.high) - spec.high) * 0.035;
+  const tL = (audioOn && !building) ? aBands.low  : (eC ?? specT.low);
+  const tM = (audioOn && !building) ? aBands.mid  : (eC ?? specT.mid);
+  const tH = (audioOn && !building) ? aBands.high : (eC ?? specT.high);
+  spec.low  += (tL - spec.low)  * (audioOn ? 0.10 : 0.035);
+  spec.mid  += (tM - spec.mid)  * (audioOn ? 0.10 : 0.035);
+  spec.high += (tH - spec.high) * (audioOn ? 0.10 : 0.035);
   spec.complete = spec.low * 0.35 + spec.mid * 0.30 + spec.high * 0.35;
   sbl.style.width = (spec.low * 100).toFixed(0) + '%';
   sbm.style.width = (spec.mid * 100).toFixed(0) + '%';
@@ -1175,6 +1190,60 @@ addEventListener('pointerup', () => {
 requestAnimationFrame(frame);
 deed('session restored · 3 tracks');
 
+// ── THE LISTENER ── drop ANY audio file on the page (or hit ♪) and the lab
+// hears for real: 3-band energy from an AnalyserNode feeds the spectral fill,
+// low-band flux finds the slams, the playhead rides the actual track.
+// Priority: TRACK > ENGINE > DEMO CLOCK.
+let actx = null, analyser = null, srcNode = null, audioBuf = null;
+let audioOn = false, audioName = '', audioStart = 0;
+let aBands = { low: 0, mid: 0, high: 0 }, aEnergy = 0, aFluxPrev = 0;
+const fftBuf = new Uint8Array(1024);
+async function loadTrack(arrayBuf, name) {
+  try {
+    actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+    await actx.resume();
+    audioBuf = await actx.decodeAudioData(arrayBuf);
+    if (srcNode) { try { srcNode.stop(); } catch (e) {} }
+    analyser = actx.createAnalyser();
+    analyser.fftSize = 2048; analyser.smoothingTimeConstant = 0.55;
+    srcNode = actx.createBufferSource();
+    srcNode.buffer = audioBuf; srcNode.loop = true;
+    srcNode.connect(analyser); analyser.connect(actx.destination);
+    srcNode.start();
+    audioStart = actx.currentTime; audioOn = true; audioName = name;
+    linkEl.textContent = '♪ ' + name.toUpperCase();
+    linkEl.style.color = 'var(--lime)'; linkEl.style.opacity = '.9';
+    deed(`listening · ${name}`);
+  } catch (e) { deed('could not read that audio file'); }
+}
+function audioFrame() {
+  if (!audioOn || !analyser) return;
+  analyser.getByteFrequencyData(fftBuf);
+  const sr = actx.sampleRate, binHz = sr / 2048;
+  const band = (f0, f1) => {
+    let s = 0, n = 0;
+    for (let i = Math.max(1, Math.floor(f0 / binHz)); i < Math.min(1024, Math.ceil(f1 / binHz)); i++) { s += fftBuf[i]; n++; }
+    return n ? s / n / 255 : 0;
+  };
+  const lo = band(25, 250), mi = band(250, 2000), hi = band(2000, 11000);
+  aBands.low += (Math.min(1, lo * 1.7) - aBands.low) * 0.25;
+  aBands.mid += (Math.min(1, mi * 2.1) - aBands.mid) * 0.25;
+  aBands.high += (Math.min(1, hi * 2.6) - aBands.high) * 0.25;
+  aEnergy = Math.min(1, lo * 1.1 + mi * 0.7 + hi * 0.4);
+  if (lo - aFluxPrev > 0.10) onsetEnv = Math.max(onsetEnv, Math.min(1, (lo - aFluxPrev) * 5));
+  aFluxPrev = lo;
+}
+document.getElementById('trackbtn').onclick = async () => {
+  const r = await fetch('../../audio/LoserFace.wav');
+  loadTrack(await r.arrayBuffer(), 'LoserFace');
+};
+addEventListener('dragover', e => e.preventDefault());
+addEventListener('drop', async e => {
+  e.preventDefault();
+  const f = e.dataTransfer.files && e.dataTransfer.files[0];
+  if (f) loadTrack(await f.arrayBuffer(), f.name.replace(/\.[^.]+$/, ''));
+});
+
 // ── ENGINE LINK ── polls the Mosh companion server for real transport + levels.
 // Run the app with MOSH_LAB_FEED=1 (token: MOSH_LAB_TOKEN, default "mosh-lab").
 // Graceful: without it, the demo clock above keeps everything alive.
@@ -1233,8 +1302,10 @@ async function feedLoop() {
   } catch {
     if (FEED.on) { engineEnergy = 0; }
     FEED.on = false;
-    linkEl.textContent = 'DEMO CLOCK';
-    linkEl.style.color = ''; linkEl.style.opacity = '.45';
+    if (!audioOn) {
+      linkEl.textContent = 'DEMO CLOCK';
+      linkEl.style.color = ''; linkEl.style.opacity = '.45';
+    }
     setTimeout(feedLoop, 4000);
   }
 }
