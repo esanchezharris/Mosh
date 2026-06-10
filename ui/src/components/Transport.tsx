@@ -144,6 +144,22 @@ export function Transport() {
             void exec("set_tempo", { bpm });
         }}
       />
+      <select
+        className="ao-select keychip"
+        value={`${session?.keyRoot ?? ""}|${session?.keyScale ?? ""}`}
+        title="Key / scale — drives scale highlighting in the piano roll"
+        onChange={(e) => {
+          const [root, scale] = e.target.value.split("|");
+          if (root && scale) void exec("set_key", { root, scale });
+        }}
+      >
+        <option value="|">key…</option>
+        {["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"].flatMap((r) =>
+          ["major","minor"].map((sc) => (
+            <option key={`${r}|${sc}`} value={`${r}|${sc}`}>{r} {sc}</option>
+          )),
+        )}
+      </select>
       <EditableValue
         value={`${tsNum}/${tsDen}`}
         title="Time signature"

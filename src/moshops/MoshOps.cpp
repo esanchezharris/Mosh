@@ -1836,6 +1836,9 @@ juce::var MoshOps::cmdExportAudio (const juce::var& args)
         te::Renderer::Parameters params (edit);
         params.destFile = file;
         params.audioFormat = &wavFormat;
+        // The field comment says "empty = all tracks" but the implementation
+        // requires set bits (the simple overload passes all tracks explicitly).
+        params.tracksToDo = te::toBitSet (te::getAllTracks (edit));
         params.bitDepth = juce::jlimit (16, 32, (int) args.getProperty ("bitDepth", 24));
         params.sampleRateForAudio = juce::jmax (22050.0, (double) args.getProperty ("sampleRate", 48000.0));
         if ((bool) args.getProperty ("loopOnly", false) && edit.getTransport().looping.get())
@@ -1855,6 +1858,35 @@ juce::var MoshOps::cmdExportAudio (const juce::var& args)
 
     logLine ("export_audio", args, ok, ok ? String() : String ("render produced no file"), false);
     if (! ok) return errResult ("export_audio", "export render failed");
+
+    // Compressed formats (Stage 27): render WAV, then hand off to the system
+    // encoders — lame for MP3 (homebrew), afconvert for M4A/AAC (built-in).
+    const auto format = args.getProperty ("format", "wav").toString().toLowerCase();
+    if (format == "mp3" || format == "m4a")
+    {
+        auto out = file.withFileExtension (format);
+        out.deleteFile();
+        juce::ChildProcess enc;
+        bool started = false;
+        if (format == "mp3")
+        {
+            juce::File lame ("/opt/homebrew/bin/lame");
+            if (! lame.existsAsFile()) lame = juce::File ("/usr/local/bin/lame");
+            if (! lame.existsAsFile())
+                return errResult ("export_audio", "mp3 needs lame (brew install lame); m4a works without it");
+            started = enc.start (juce::StringArray { lame.getFullPathName(), "-b", "320",
+                                                     file.getFullPathName(), out.getFullPathName() });
+        }
+        else
+        {
+            started = enc.start (juce::StringArray { "/usr/bin/afconvert", "-f", "m4af", "-d", "aac",
+                                                     file.getFullPathName(), out.getFullPathName() });
+        }
+        if (! started || ! enc.waitForProcessToFinish (60000) || ! out.existsAsFile() || out.getSize() == 0)
+            return errResult ("export_audio", format + " encode failed");
+        file.deleteFile();   // the WAV was an intermediate
+        file = out;
+    }
 
     auto* data = new DynamicObject();
     data->setProperty ("file", file.getFullPathName());

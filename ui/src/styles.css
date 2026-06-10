@@ -579,4 +579,13 @@ button.on { border-color: var(--accent); color: var(--accent); background: #2120
 .proj-menu { max-width: 150px; }
 .proj-input { width: 130px; }
 
+/* Stage 27: scale highlighting + fold + clip length */
+.pr-rowscale { position: absolute; left: 0; right: 0; background: rgba(56, 211, 159, 0.07); pointer-events: none; }
+.pr-key.inscale { box-shadow: inset 3px 0 0 var(--ok); }
+.pr-len {
+  width: 46px; font: inherit; font-size: 0.68rem; color: var(--text);
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 5px; padding: 1px 4px;
+}
+.keychip { max-width: 92px; }
+
 .boot { padding: 3rem; color: var(--muted); }

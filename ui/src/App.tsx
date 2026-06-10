@@ -35,6 +35,16 @@ function useGlobalKeys() {
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
         e.preventDefault();
         void s.exec(e.shiftKey ? "redo" : "undo", {});
+      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "c") {
+        if (s.editingClipId || s.selection.size === 0) return;
+        e.preventDefault();
+        s.setClipClipboard([...s.selection]);
+      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "v") {
+        if (s.editingClipId || s.clipClipboard.length === 0) return;
+        e.preventDefault();
+        const at = s.snapshot?.transport.position ?? 0;
+        for (const id of s.clipClipboard)
+          void s.exec("duplicate_clip", { clipId: id, startSeconds: at });
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "d") {
         if (s.editingClipId || s.selection.size === 0) return;
         e.preventDefault();
@@ -200,6 +210,8 @@ export function App() {
               else if (v === "wav16-44") void exec("export_audio", { bitDepth: 16, sampleRate: 44100 });
               else if (v === "loop24-48") void exec("export_audio", { bitDepth: 24, sampleRate: 48000, loopOnly: true });
               else if (v === "loop16-44") void exec("export_audio", { bitDepth: 16, sampleRate: 44100, loopOnly: true });
+              else if (v === "mp3") void exec("export_audio", { bitDepth: 24, sampleRate: 48000, format: "mp3" });
+              else if (v === "m4a") void exec("export_audio", { bitDepth: 24, sampleRate: 48000, format: "m4a" });
             }}
           >
             <option value="" disabled>⚙</option>
@@ -207,6 +219,8 @@ export function App() {
             <option value="wav16-44">full · 16-bit 44.1k</option>
             <option value="loop24-48">loop · 24-bit 48k</option>
             <option value="loop16-44">loop · 16-bit 44.1k</option>
+            <option value="mp3">mp3 · 320k</option>
+            <option value="m4a">m4a · AAC</option>
           </select>
           <button className="tool-btn" onClick={toggleTheme} title="Toggle theme">
             {theme === "dark" ? "☾" : "☀"}

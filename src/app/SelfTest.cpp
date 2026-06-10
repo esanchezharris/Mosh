@@ -1373,6 +1373,26 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         eng.sessionDir().getChildFile ("project-name.txt").deleteFile();
     }
 
+    // --- Stage 27: compressed export (m4a via afconvert; mp3 if lame) ---
+    {
+        std::cerr << "--- Stage 27: compressed export ---\n";
+        auto t27 = cmd (ops, "create_track", args1 ("name", "Exp27"));
+        cmd (ops, "add_test_tone_clip", objN ({{ "trackId",
+              t27["data"].getProperty ("trackId", var()) }, { "seconds", 0.5 }, { "freq", 440.0 }}));
+        auto m4a = cmd (ops, "export_audio", objN ({{ "format", "m4a" }, { "bitDepth", 16 }, { "sampleRate", 44100 }}));
+        check (ok (m4a) && m4a["data"].getProperty ("file", var()).toString().endsWith (".m4a")
+                   && (juce::int64) m4a["data"].getProperty ("bytes", 0) > 1000,
+               "m4a export produced a real file (afconvert)");
+        if (juce::File ("/opt/homebrew/bin/lame").existsAsFile())
+        {
+            auto mp3 = cmd (ops, "export_audio", objN ({{ "format", "mp3" }, { "bitDepth", 16 }, { "sampleRate", 44100 }}));
+            check (ok (mp3) && mp3["data"].getProperty ("file", var()).toString().endsWith (".mp3")
+                       && (juce::int64) mp3["data"].getProperty ("bytes", 0) > 1000,
+                   "mp3 export produced a real file (lame 320k)");
+        }
+        cmd (ops, "remove_track", args1 ("trackId", t27["data"].getProperty ("trackId", var())));
+    }
+
     // Let every background proxy/render job finish while the message loop is
     // still fully alive — a job mid-callBlocking at quit times out and asserts
     // (the loop stops dispatching during shutdown).

@@ -134,6 +134,8 @@ export type Snapshot = {
     inputMonitor?: boolean;
     countInBars?: number;
     projectName?: string;
+    keyRoot?: string;
+    keyScale?: string;
   };
   tracks: Track[];
   transport: Transport;

@@ -8,6 +8,17 @@ namespace
     // ctor calls Engine::initialise() → DeviceManager::initialise(), which opens
     // CoreAudio). Headless/no-audio runs return false so construction never
     // blocks on the audio HAL.
+    // The stock te::UIBehaviour's runTaskWithProgressBar is jassertfalse + a
+    // NO-OP — any Renderer::Parameters render silently produces nothing
+    // (Stage 27 compressed-export lesson). Run tasks synchronously instead.
+    struct MoshUIBehaviour : te::UIBehaviour
+    {
+        void runTaskWithProgressBar (te::ThreadPoolJobWithProgress& t) override
+        {
+            while (t.runJob() == juce::ThreadPoolJob::jobNeedsRunningAgain) {}
+        }
+    };
+
     struct MoshEngineBehaviour : te::EngineBehaviour
     {
         bool audio;
@@ -28,7 +39,7 @@ MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession)
     // (the device opens during the Engine ctor otherwise — 01 §5).
     enginePtr = std::make_unique<te::Engine> (
         juce::String ("Mosh"),
-        std::make_unique<te::UIBehaviour>(),
+        std::make_unique<MoshUIBehaviour>(),
         std::make_unique<MoshEngineBehaviour> (audioOpen));
     applyPreferredOrSaneOutputDevice();
 

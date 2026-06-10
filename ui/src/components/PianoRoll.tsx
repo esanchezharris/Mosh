@@ -14,6 +14,11 @@ const KEY_W = 64;
 const VEL_H = 44;
 const NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 const BLACK = new Set([1, 3, 6, 8, 10]);
+// Scale highlighting (Stage 27): major/minor degree sets relative to the root.
+const SCALES: Record<string, number[]> = {
+  major: [0, 2, 4, 5, 7, 9, 11],
+  minor: [0, 2, 3, 5, 7, 8, 10],
+};
 const pitchName = (p: number) => `${NAMES[p % 12]}${Math.floor(p / 12) - 1}`;
 
 type Drag =
@@ -43,6 +48,7 @@ export function PianoRoll({ snapshot }: { snapshot: Snapshot }) {
       }
 
   const [pxPerBeat, setPxPerBeat] = useState(64);
+  const [fold, setFold] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [preview, setPreview] = useState<Record<string, Note>>({});
   const [marquee, setMarquee] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
@@ -59,7 +65,6 @@ export function PianoRoll({ snapshot }: { snapshot: Snapshot }) {
   const notes = useMemo<Note[]>(() => clip?.notes ?? [], [clip]);
   const lo = Math.max(0, Math.min(...(notes.length ? notes.map((n) => n.pitch) : [48])) - 5);
   const hi = Math.min(127, Math.max(...(notes.length ? notes.map((n) => n.pitch) : [72])) + 5);
-  const rows = hi - lo + 1;
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: Math.max(0, (hi - (lo + hi) / 2) * ROW_H - 80) });
     setSelected(new Set());
@@ -112,8 +117,24 @@ export function PianoRoll({ snapshot }: { snapshot: Snapshot }) {
     for (const snd of p.sounds ?? [])
       padName[snd.keyNote] = snd.name;
 
+  // Scale set from the session key (key chip in the transport).
+  const keyRoot = snapshot.session.keyRoot ?? "";
+  const degrees = SCALES[snapshot.session.keyScale ?? ""] ?? null;
+  const rootIdx = NAMES.indexOf(keyRoot);
+  const inScale = (p: number) =>
+    degrees != null && rootIdx >= 0 && degrees.includes((p - rootIdx + 120) % 12);
+  const hasNote = new Set(notes.map((n) => n.pitch));
+  // Fold (Stage 27): only rows that are in-scale or carry notes.
+  const visibleRows: number[] = [];
+  for (let p = hi; p >= lo; p--)
+    if (!fold || inScale(p) || hasNote.has(p) || padName[p]) visibleRows.push(p);
+  const rowOf: Record<number, number> = {};
+  visibleRows.forEach((p, i) => (rowOf[p] = i));
+  const rowsShown = visibleRows.length;
+
   const snapTo = (b: number) => (snapOn ? Math.round(b / snapBeats) * snapBeats : b);
-  const yToPitch = (y: number) => hi - Math.floor(y / ROW_H);
+  const yToPitch = (y: number) => visibleRows[Math.floor(y / ROW_H)] ?? -1;
+  const pitchY = (p: number) => (rowOf[p] ?? -1) * ROW_H;
   const label = (p: number) => padName[p] ?? pitchName(p);
 
   const commitMoved = (origs: Record<string, Note>) => {
@@ -163,7 +184,11 @@ export function PianoRoll({ snapshot }: { snapshot: Snapshot }) {
       const dRows = Math.round((e.clientY - d.startY) / ROW_H);
       for (const [key, orig] of Object.entries(d.origs)) {
         const startBeats = Math.max(0, Math.min(clipBeats - orig.durBeats, snapTo(orig.startBeats + db)));
-        const pitch = Math.max(0, Math.min(127, orig.pitch - dRows));
+        // Vertical moves walk the VISIBLE rows (fold-aware).
+        const fromRow = rowOf[orig.pitch];
+        const pitch = fromRow != null
+          ? visibleRows[Math.max(0, Math.min(rowsShown - 1, fromRow + dRows))]
+          : Math.max(0, Math.min(127, orig.pitch - dRows));
         next[key] = { ...orig, startBeats, pitch };
       }
     } else {
@@ -184,7 +209,7 @@ export function PianoRoll({ snapshot }: { snapshot: Snapshot }) {
         // a plain click: draw a note
         const beat = snapTo(d.x0 / pxPerBeat);
         const pitch = yToPitch(d.y0);
-        if (beat < clipBeats && pitch >= lo && pitch <= hi) {
+        if (beat < clipBeats && pitch >= 0) {
           void exec("add_notes", {
             clipId: theClip.id,
             notes: [{ pitch, startBeats: beat, durBeats: snapBeats, vel: 100 }],
@@ -198,7 +223,8 @@ export function PianoRoll({ snapshot }: { snapshot: Snapshot }) {
         for (const dn of displayNotes) {
           const nx = dn.cur.startBeats * pxPerBeat;
           const nw = dn.cur.durBeats * pxPerBeat;
-          const ny = (hi - dn.cur.pitch) * ROW_H;
+          const ny = pitchY(dn.cur.pitch);
+          if (ny < 0) continue;
           if (nx + nw >= xMin && nx <= xMax && ny + ROW_H >= yMin && ny <= yMax) hit.add(noteKey(dn.base));
         }
         setSelected(e.shiftKey ? new Set([...selected, ...hit]) : hit);
@@ -311,17 +337,43 @@ export function PianoRoll({ snapshot }: { snapshot: Snapshot }) {
             <option key={s} value={s}>{s > 0 ? `+${s}` : s} st</option>
           ))}
         </select>
+        <button
+          className={`pr-tool ${fold ? "on" : ""}`}
+          disabled={degrees == null}
+          title={degrees == null ? "Pick a key in the transport to fold" : "Fold to the scale (+ rows with notes)"}
+          onClick={() => setFold(!fold)}
+        >
+          fold
+        </button>
+        <input
+          className="pr-len"
+          type="number"
+          min={1}
+          max={64}
+          step={1}
+          value={Math.round(clipBeats)}
+          title="Clip length in beats"
+          onChange={(e) => {
+            const beats = Math.max(1, Math.min(64, Number(e.target.value)));
+            if (beats !== Math.round(clipBeats))
+              void exec("trim_clip", {
+                clipId: theClip.id,
+                start: theClip.start,
+                length: beats * spb,
+                offset: theClip.offset,
+              });
+          }}
+        />
         <span className="pr-hint">click: draw · drag: select · shift: multi · ⌫: delete · esc: close</span>
         <button className="mini" onClick={() => setEditingClip(null)}>✕</button>
       </div>
       <div className="pr-scroll" ref={scrollRef}>
-        <div className="pr-body" style={{ width: KEY_W + width, height: rows * ROW_H }}>
+        <div className="pr-body" style={{ width: KEY_W + width, height: rowsShown * ROW_H }}>
           <div className="pr-keys" style={{ width: KEY_W }}>
-            {Array.from({ length: rows }, (_, i) => {
-              const p = hi - i;
+            {visibleRows.map((p, i) => {
               const black = BLACK.has(p % 12);
               return (
-                <div key={p} className={`pr-key ${black ? "black" : ""}`} style={{ top: i * ROW_H, height: ROW_H }}>
+                <div key={p} className={`pr-key ${black ? "black" : ""} ${inScale(p) ? "inscale" : ""}`} style={{ top: i * ROW_H, height: ROW_H }}>
                   {(padName[p] || p % 12 === 0) && (
                     <span className={padName[p] ? "pr-padname" : ""}>
                       {padName[p] ? padName[p].slice(0, 9) : pitchName(p)}
@@ -337,7 +389,7 @@ export function PianoRoll({ snapshot }: { snapshot: Snapshot }) {
             style={{
               left: KEY_W,
               width,
-              height: rows * ROW_H,
+              height: rowsShown * ROW_H,
               backgroundImage:
                 `repeating-linear-gradient(0deg, var(--grid-beat) 0 1px, transparent 1px ${ROW_H}px),` +
                 `repeating-linear-gradient(90deg, var(--grid-beat) 0 1px, transparent 1px ${snapBeats * pxPerBeat}px),` +
@@ -348,9 +400,11 @@ export function PianoRoll({ snapshot }: { snapshot: Snapshot }) {
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
           >
-            {Array.from({ length: rows }, (_, i) =>
-              BLACK.has((hi - i) % 12) ? (
-                <div key={i} className="pr-rowshade" style={{ top: i * ROW_H, height: ROW_H }} />
+            {visibleRows.map((p, i) =>
+              degrees != null && inScale(p) ? (
+                <div key={`sc-${p}`} className="pr-rowscale" style={{ top: i * ROW_H, height: ROW_H }} />
+              ) : BLACK.has(p % 12) ? (
+                <div key={`sh-${p}`} className="pr-rowshade" style={{ top: i * ROW_H, height: ROW_H }} />
               ) : null,
             )}
             {displayNotes.map((d) => {
@@ -363,8 +417,9 @@ export function PianoRoll({ snapshot }: { snapshot: Snapshot }) {
                   style={{
                     left: n.startBeats * pxPerBeat,
                     width: Math.max(6, n.durBeats * pxPerBeat - 1),
-                    top: (hi - n.pitch) * ROW_H + 1,
+                    top: pitchY(n.pitch) + 1,
                     height: ROW_H - 2,
+                    display: rowOf[n.pitch] == null ? "none" : undefined,
                     opacity: 0.55 + 0.45 * Math.min(1, n.vel / 127),
                   }}
                   onPointerDown={onNoteDown("move", d)}
