@@ -730,9 +730,16 @@ recchip.onclick = () => setRec(!rec);
 addEventListener('keydown', e => {
   if (document.activeElement === cmd) return;
   if (e.key.toLowerCase() === 'r') setRec(!rec);
-  if (e.key === ' ') { e.preventDefault(); playing = !playing; playbtn.textContent = playing ? '▶' : '⏸'; }
+  if (e.key === ' ') {
+    e.preventDefault();
+    if (audioOn) { toggleAudio(); return; }
+    playing = !playing; playbtn.textContent = playing ? '▶' : '⏸';
+  }
 });
-playbtn.onclick = () => { playing = !playing; playbtn.textContent = playing ? '▶' : '⏸'; };
+playbtn.onclick = () => {
+  if (audioOn) { toggleAudio(); return; }       // the transport owns the track
+  playing = !playing; playbtn.textContent = playing ? '▶' : '⏸';
+};
 
 // ---------- the rack sculpts the mass ----------
 const axes = { grit: 0.62, air: 0.18, epic: 0.07 };
@@ -1233,9 +1240,20 @@ function audioFrame() {
   if (lo - aFluxPrev > 0.10) onsetEnv = Math.max(onsetEnv, Math.min(1, (lo - aFluxPrev) * 5));
   aFluxPrev = lo;
 }
-document.getElementById('trackbtn').onclick = async () => {
+async function toggleAudio() {
+  if (!actx) return;
+  if (actx.state === 'running') { await actx.suspend(); playing = false; }
+  else { await actx.resume(); playing = true; }
+  playbtn.textContent = playing ? '▶' : '⏸';
+}
+const trackBtn = document.getElementById('trackbtn');
+trackBtn.onclick = async () => {
+  if (audioOn) { toggleAudio(); return; }       // already loaded -> pause/resume
+  trackBtn.textContent = '… LOADING';
   const r = await fetch('../../audio/LoserFace.wav');
-  loadTrack(await r.arrayBuffer(), 'LoserFace');
+  await loadTrack(await r.arrayBuffer(), 'LoserFace');
+  trackBtn.textContent = '♪ LOSERFACE';
+  playing = true; playbtn.textContent = '▶';
 };
 addEventListener('dragover', e => e.preventDefault());
 addEventListener('drop', async e => {
