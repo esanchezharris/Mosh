@@ -116,6 +116,23 @@ export function Transport() {
       >
         ⏺
       </button>
+      <button
+        className={`tbtn toggle ${session?.inputMonitor ? "on" : ""}`}
+        onClick={() => exec("set_input_monitor", { on: !session?.inputMonitor })}
+        title="Input monitoring — hear the live input"
+      >
+        🎧
+      </button>
+      <select
+        className="ao-select countin"
+        value={session?.countInBars ?? 0}
+        title="Count-in before recording"
+        onChange={(e) => exec("set_count_in", { bars: Number(e.target.value) })}
+      >
+        <option value={0}>no count-in</option>
+        <option value={1}>1 bar</option>
+        <option value={2}>2 bars</option>
+      </select>
 
       <EditableValue
         value={String(tempo)}

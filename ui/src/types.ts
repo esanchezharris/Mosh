@@ -131,6 +131,8 @@ export type Snapshot = {
     masterVolumeDb?: number;
     metronome?: boolean;
     sections?: { name: string; startBar: number; lengthBars: number }[];
+    inputMonitor?: boolean;
+    countInBars?: number;
   };
   tracks: Track[];
   transport: Transport;

@@ -89,6 +89,9 @@ private:
     juce::var cmdListAudioInputs  (const juce::var& args);   // read-only
     juce::var cmdSetAudioInput    (const juce::var& args);   // machine-local
     juce::var cmdArmTrack         (const juce::var& args);   // device-bound; never synced
+    // Stage 25 — recording v2
+    juce::var cmdSetInputMonitor  (const juce::var& args);   // device-bound
+    juce::var cmdSetCountIn       (const juce::var& args);   // playback aid
     // Stage 21 — papercuts
     juce::var cmdRenameClip       (const juce::var& args);
     // Stage 24 — clip inspector

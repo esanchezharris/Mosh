@@ -116,6 +116,8 @@ juce::var MoshOps::dispatch (const juce::String& name, const juce::var& args)
     if (name == "list_audio_inputs") return cmdListAudioInputs (args);
     if (name == "set_audio_input")   return cmdSetAudioInput (args);
     if (name == "arm_track")         return cmdArmTrack (args);
+    if (name == "set_input_monitor") return cmdSetInputMonitor (args);
+    if (name == "set_count_in")      return cmdSetCountIn (args);
     if (name == "rename_clip")       return cmdRenameClip (args);
     if (name == "set_clip_gain")     return cmdSetClipGain (args);
     if (name == "set_clip_reversed") return cmdSetClipReversed (args);
@@ -784,31 +786,71 @@ juce::var MoshOps::cmdArmTrack (const juce::var& args)
     if (track == nullptr) return errResult ("arm_track", "no track");
     const bool on = (bool) args.getProperty ("on", true);
 
-    auto instances = eng.edit().getAllInputDevices();
-    te::InputDeviceInstance* wave = nullptr;
-    for (auto* i : instances)
-        if (i != nullptr && i->getInputDevice().getDeviceType() == te::InputDevice::waveDevice)
+    // Stage 25: arm EVERY usable input — the wave device for audio takes AND
+    // any MIDI inputs (physical keyboards + the virtual "All MIDI Ins"), so a
+    // sampler/synth track records MIDI clips from a keyboard.
+    juce::Array<te::InputDeviceInstance*> candidates;
+    for (auto* i : eng.edit().getAllInputDevices())
+        if (i != nullptr)
         {
-            wave = i;
-            break;
+            const auto type = i->getInputDevice().getDeviceType();
+            if (type == te::InputDevice::waveDevice
+                || type == te::InputDevice::physicalMidiDevice
+                || type == te::InputDevice::virtualMidiDevice)
+                candidates.add (i);
         }
-    if (wave == nullptr)
-        return errResult ("arm_track", "no audio input device open - pick one (set_audio_input)");
+    if (candidates.isEmpty())
+        return errResult ("arm_track", "no input devices open - pick one (set_audio_input)");
 
     undoManager().beginNewTransaction ("arm_track");
-    if (on && ! wave->getTargets().contains (track->itemID))
+    bool armed = false;
+    for (auto* inst : candidates)
     {
-        auto r = wave->setTarget (track->itemID, true, &undoManager());
-        if (! r.has_value())
-            return errResult ("arm_track", "cannot target track: " + r.error());
+        if (on && ! inst->getTargets().contains (track->itemID))
+            if (auto r = inst->setTarget (track->itemID, true, &undoManager()); ! r.has_value())
+                continue;   // some instances can refuse (busy elsewhere) — arm the rest
+        inst->setRecordingEnabled (track->itemID, on);
+        armed = armed || inst->isRecordingEnabled (track->itemID);
     }
-    wave->setRecordingEnabled (track->itemID, on);
+    if (on && ! armed)
+        return errResult ("arm_track", "no input instance accepted the track");
 
     logLine ("arm_track", args, true, {}, true);
     emitSnapshotInvalidated();
     auto* data = new DynamicObject();
-    data->setProperty ("armed", wave->isRecordingEnabled (track->itemID));
+    data->setProperty ("armed", armed);
     return okResult ("arm_track", var (data));
+}
+
+// Stage 25: input monitoring (per-device MonitorMode) + count-in. Both are
+// playback aids — never undoable, recorded, synced, or hashed.
+juce::var MoshOps::cmdSetInputMonitor (const juce::var& args)
+{
+    if (! eng.hasAudio()) return errResult ("set_input_monitor", "no audio session");
+    const bool on = (bool) args.getProperty ("on", false);
+    int touched = 0;
+    for (auto* dev : eng.engine().getDeviceManager().getWaveInputDevices())
+        if (dev != nullptr)
+        {
+            dev->setMonitorMode (on ? te::InputDevice::MonitorMode::on
+                                    : te::InputDevice::MonitorMode::automatic);
+            ++touched;
+        }
+    if (touched == 0) return errResult ("set_input_monitor", "no wave input device");
+    logLine ("set_input_monitor", args, true, {}, false);
+    emitSnapshotInvalidated();
+    return okResult ("set_input_monitor");
+}
+
+juce::var MoshOps::cmdSetCountIn (const juce::var& args)
+{
+    const int bars = juce::jlimit (0, 2, (int) args.getProperty ("bars", 0));
+    eng.edit().setCountInMode (bars == 0 ? te::Edit::CountIn::none
+                               : bars == 1 ? te::Edit::CountIn::oneBar
+                                           : te::Edit::CountIn::twoBar);
+    logLine ("set_count_in", args, true, {}, false);
+    emitSnapshotInvalidated();
+    return okResult ("set_count_in");
 }
 
 juce::var MoshOps::cmdListAudioOutputs (const juce::var&)
@@ -1968,6 +2010,18 @@ juce::var MoshOps::snapshot()
     session->setProperty ("hasAudio", eng.hasAudio());
     session->setProperty ("audioOutputDevice", eng.currentAudioOutputDevice());
     session->setProperty ("audioInputDevice", eng.currentAudioInputDevice());
+    // Stage 25: monitoring + count-in state.
+    {
+        bool mon = false;
+        if (eng.hasAudio())
+            for (auto* dev : eng.engine().getDeviceManager().getWaveInputDevices())
+                if (dev != nullptr && dev->getMonitorMode() == te::InputDevice::MonitorMode::on)
+                    mon = true;
+        session->setProperty ("inputMonitor", mon);
+        const auto ci = edit.getCountInMode();
+        session->setProperty ("countInBars", ci == te::Edit::CountIn::oneBar ? 1
+                                            : ci == te::Edit::CountIn::twoBar ? 2 : 0);
+    }
 
     // Stage 15: master fader + metronome state.
     if (auto mv = edit.getMasterVolumePlugin())

@@ -1312,6 +1312,26 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         cmd (ops, "remove_track", args1 ("trackId", t24id));
     }
 
+    // --- Stage 25: recording v2 surfaces ---
+    {
+        std::cerr << "--- Stage 25: recording v2 ---\n";
+        check (ok (cmd (ops, "set_count_in", args1 ("bars", 1))), "set_count_in ok");
+        check ((int) ops.snapshot()["session"].getProperty ("countInBars", 0) == 1,
+               "countInBars in snapshot");
+        cmd (ops, "set_count_in", args1 ("bars", 0));
+        if (! eng.hasAudio())
+            check (! ok (cmd (ops, "set_input_monitor", args1 ("on", true))),
+                   "monitor refuses cleanly headless");
+        check (ops.snapshot()["session"].hasProperty ("inputMonitor"), "inputMonitor in snapshot");
+        {
+            StringArray lines;
+            eng.sessionDir().getChildFile ("trajectory.jsonl").readLines (lines);
+            bool leaked = false;
+            for (auto& l : lines) if (l.contains ("set_count_in") || l.contains ("set_input_monitor")) leaked = true;
+            check (! leaked, "playback aids never enter the trajectory");
+        }
+    }
+
     std::cerr << "===== " << (checks - failures) << "/" << checks
               << " checks passed, " << failures << " failed =====\n\n";
     return failures;
