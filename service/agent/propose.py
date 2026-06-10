@@ -119,7 +119,9 @@ def propose(payload: dict) -> dict:
                                     payload.get("session_summary"), payload.get("history"),
                                     repair_errors=errors, prior_raw=raw)
         try:
-            raw = llm.complete(provider, system, user)
+            # Repair runs at temperature 0: malformed-JSON failures are mostly
+            # sampling noise in long arrays — determinism is the cure.
+            raw = llm.complete(provider, system, user, temperature=0.0)
         except llm.ProviderError as e:
             return {"ok": False, "error": str(e), "provider": provider, "attempts": attempts}
         doc, errors = _parse(raw)

@@ -1395,19 +1395,36 @@ te::MidiClip* MoshOps::findMidiClip (const juce::String& id)
 
 te::AutomatableParameter::Ptr MoshOps::findParamByName (te::Plugin& p, const juce::String& name)
 {
-    // Semantic addressing: exact (case-insensitive) match wins, else the first
-    // parameter whose name contains the requested token. Deterministic: scan
-    // order is the plugin's own parameter order.
-    const auto want = name.toLowerCase();
-    te::AutomatableParameter::Ptr partial;
-    for (int i = 0; i < p.getNumAutomatableParameters(); ++i)
+    // Semantic addressing (phase0 §3.4): exact (case-insensitive) match wins,
+    // else first contains-match, else common producer aliases — engine param
+    // names are version-fragile, the semantic names are the corpus's.
+    auto scan = [&p] (const juce::String& want) -> te::AutomatableParameter::Ptr
     {
-        auto param = p.getAutomatableParameter (i);
-        const auto have = param->getParameterName().toLowerCase();
-        if (have == want) return param;
-        if (partial == nullptr && have.contains (want)) partial = param;
-    }
-    return partial;
+        te::AutomatableParameter::Ptr partial;
+        for (int i = 0; i < p.getNumAutomatableParameters(); ++i)
+        {
+            auto param = p.getAutomatableParameter (i);
+            const auto have = param->getParameterName().toLowerCase();
+            if (have == want) return param;
+            if (partial == nullptr && have.contains (want)) partial = param;
+        }
+        return partial;
+    };
+
+    const auto want = name.toLowerCase();
+    if (auto direct = scan (want)) return direct;
+
+    static const std::map<juce::String, juce::StringArray> aliases = {
+        { "cutoff",    { "frequency", "freq" } },
+        { "resonance", { "q", "res" } },
+        { "volume",    { "level", "gain" } },
+        { "time",      { "delay", "length" } },
+        { "mix",       { "wet", "amount" } },
+    };
+    if (auto it = aliases.find (want); it != aliases.end())
+        for (const auto& alt : it->second)
+            if (auto param = scan (alt.toLowerCase())) return param;
+    return nullptr;
 }
 
 double MoshOps::beatsToSeconds (double beats)

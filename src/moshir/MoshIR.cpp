@@ -762,7 +762,33 @@ juce::var Executor::lowerAssetResolve (const juce::var& p, const juce::String& o
                 return okOp (kind, {}, var (data));
             }
         }
-        // splice / latent_gen: not wired in v0; fall through and ledger below.
+        if (strategy == "latent_gen")
+        {
+            // Generative fallback (spec §3.1.4 chain): synthesize the asset
+            // from the descriptor text. Deterministic: the seed derives from
+            // the descriptor, and the resolution (incl. seed) is logged —
+            // identical descriptors resolve identically on every machine.
+            const auto seed = (int) (descriptor.getProperty ("text", var()).toString().hashCode() & 0x7fffffff);
+            auto file = eng.sessionDir().getChildFile ("renders").getChildFile (outSym + ".wav");
+            auto* a = obj();
+            a->setProperty ("mode", "text_to_audio");
+            a->setProperty ("prompt", text);
+            a->setProperty ("seconds", 4.0);
+            a->setProperty ("seed", seed);
+            a->setProperty ("adapter", "fake");
+            a->setProperty ("file", file.getFullPathName());
+            auto r = run ("generate_asset", a);
+            if (! succeeded (r)) continue;   // service down → keep falling through
+            Binding b; b.kind = "asset"; b.ref = file.getFullPathName();
+            bind (outSym, b);
+            auto* data = obj();
+            data->setProperty ("assetId", outSym);
+            data->setProperty ("file", file.getFullPathName());
+            data->setProperty ("strategy", "latent_gen");
+            data->setProperty ("seed", seed);
+            return okOp (kind, { "generate_asset" }, var (data));
+        }
+        // splice: not wired in v0; fall through (and ledger if nothing lands).
     }
 
     auto* fakeOp = obj();
@@ -772,7 +798,8 @@ juce::var Executor::lowerAssetResolve (const juce::var& p, const juce::String& o
     pp->setProperty ("strategy", strategies);
     fakeOp->setProperty ("params", var (pp));
     return unsupportedOp (var (fakeOp),
-        "no local match for descriptor '" + text + "'; splice/latent_gen strategies not wired in v0",
+        "no resolution for descriptor '" + text + "' (local missed; splice not wired; latent_gen "
+        "absent from the strategy chain or service down)",
         "asset.resolve", tutorialId);
 }
 

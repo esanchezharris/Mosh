@@ -27,6 +27,26 @@ from flywheel.store import store  # noqa: E402
 
 DEFAULT_APP = REPO_ROOT / "build-macos-arm64/Mosh_artefacts/Debug/Mosh.app/Contents/MacOS/Mosh"
 
+# A deterministic sample library for rollout sandboxes: asset.resolve needs
+# something to resolve against (a producer has a crate; so does the testbed).
+# Generated via FakeAdapter (seeded, byte-stable) — never committed.
+LIBRARY_NAMES = [
+    "808-long-distorted", "808-sub-clean", "kick-punchy", "snare-tight",
+    "clap-layered", "hat-closed-crisp", "hat-open", "keys-rhodes-warm-dusty",
+    "pad-dark-evolving", "lead-bright-pluck", "vox-chop-wet", "perc-shaker",
+]
+
+
+def ensure_library() -> Path:
+    lib = Path(__file__).parent / "_library_cache"
+    if not all((lib / f"{n}.wav").exists() for n in LIBRARY_NAMES):
+        lib.mkdir(exist_ok=True)
+        from adapters import fake_adapter  # service/ is on sys.path
+        for i, n in enumerate(LIBRARY_NAMES):
+            fake_adapter.generate(str(lib / f"{n}.wav"),
+                                  {"seed": 1000 + i, "prompt": n, "seconds": 2.0})
+    return lib
+
 
 def run_rollout(task: dict, provider: str, app: Path | None = None,
                 program_dir: Path | None = None,
@@ -39,8 +59,13 @@ def run_rollout(task: dict, provider: str, app: Path | None = None,
 
     if program_dir is not None:
         os.environ["MOSH_AGENT_PROGRAM"] = str(program_dir)
-    proposal = agent_propose.propose({"instruction": task["instruction"],
-                                      "provider": provider})
+    proposal = agent_propose.propose({
+        "instruction": task["instruction"],
+        "provider": provider,
+        # Rollout sandboxes start cold — say so, exactly like the in-app flow
+        # always sends a real summary. "The 808" on an empty session means
+        # create it first; the agent can only know that if told.
+        "session_summary": "EMPTY project — no tracks, clips, or devices exist yet."})
     if not proposal.get("ok"):
         feedback.append("PROPOSAL FAILED: " + proposal.get("error", "unknown"))
         feedback += proposal.get("validation_errors", [])
@@ -60,7 +85,8 @@ def run_rollout(task: dict, provider: str, app: Path | None = None,
         out_path = Path(tmp) / "result.json"
         env = dict(os.environ,
                    MOSH_SESSION_DIR=str(Path(tmp) / "sess"),
-                   MOSH_GAP_LEDGER=str(Path(tmp) / "gap.jsonl"))
+                   MOSH_GAP_LEDGER=str(Path(tmp) / "gap.jsonl"),
+                   MOSH_SAMPLE_LIBRARY=str(ensure_library()))
         subprocess.run([str(app), "--harness", str(job_path),
                         "--harness-out", str(out_path)],
                        env=env, capture_output=True, timeout=180)
@@ -98,7 +124,8 @@ def run_rollout(task: dict, provider: str, app: Path | None = None,
             feedback.append(f"expectation: no {k} op in the program")
 
     verdict = judge_mod.judge(judge_provider or provider,
-                              task["instruction"], ops, counts)
+                              task["instruction"], ops, counts,
+                              rationale=proposal.get("rationale", ""))
     l4 = float(verdict.get("mean", 0.0))
     if verdict.get("critique"):
         feedback.append("judge: " + verdict["critique"])

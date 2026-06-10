@@ -2,7 +2,7 @@
   "name": "monster",
   "version": "v0.0",
   "provider": "gemini",
-  "model": "gemini-2.0-flash",
+  "model": "gemini-2.5-flash",
   "files": {
     "system": "system.md",
     "cheatsheet": "cheatsheet.md",

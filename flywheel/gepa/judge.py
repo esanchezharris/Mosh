@@ -16,12 +16,17 @@ from agent import llm  # noqa: E402
 RUBRIC = (Path(__file__).parent / "rubrics/v1.md").read_text()
 
 
-def judge(provider: str, instruction: str, ops: list, exec_counts: dict) -> dict:
+def judge(provider: str, instruction: str, ops: list, exec_counts: dict,
+          rationale: str = "") -> dict:
     if provider == "mock":
         return _mock_judge(instruction, ops, exec_counts)
     user = (f"Instruction: {instruction}\n\nOp program ({len(ops)} ops):\n"
             + json.dumps(ops, indent=1)[:6000]
             + f"\n\nExecution counts: {json.dumps(exec_counts)}")
+    if rationale:
+        # The agent's own caveats (vocabulary approximations etc.) — a human
+        # reviewer would read them; the judge should too.
+        user += f"\n\nAgent's stated rationale/caveats: {rationale[:500]}"
     try:
         raw = llm.complete(provider, RUBRIC, user, temperature=0.0)
         doc = json.loads(raw.strip().strip("`").lstrip("json"))

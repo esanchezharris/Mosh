@@ -15,7 +15,7 @@ import os
 import urllib.error
 import urllib.request
 
-GEMINI_MODEL = os.environ.get("MOSH_AGENT_MODEL", "gemini-2.0-flash")
+GEMINI_MODEL = os.environ.get("MOSH_AGENT_MODEL", "gemini-2.5-flash")
 CLAUDE_MODEL = os.environ.get("MOSH_REFLECT_MODEL", "claude-sonnet-4-6")
 
 
@@ -60,6 +60,7 @@ def _gemini(system: str, user: str, temperature: float, json_mode: bool) -> str:
         "contents": [{"role": "user", "parts": [{"text": user}]}],
         "generationConfig": {
             "temperature": temperature,
+            "maxOutputTokens": 16384,    # dense note arrays must never truncate
             **({"responseMimeType": "application/json"} if json_mode else {}),
         },
     }

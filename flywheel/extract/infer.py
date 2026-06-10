@@ -63,7 +63,7 @@ def infer_step(step: dict, session_summary: str, provider: str,
         parts.append("Your previous reply was INVALID:\n" + raw[:1500])
         parts.append("Validation errors:\n- " + "\n- ".join(errors[:8]))
         parts.append("Reply again with ONLY the corrected JSON object.")
-        raw = llm.complete(provider, system, "\n\n".join(parts))
+        raw = llm.complete(provider, system, "\n\n".join(parts), temperature=0.0)
         doc, errors = _parse(raw)
     if doc is None:
         return {"ok": False, "unextracted": True, "errors": errors[:8]}
