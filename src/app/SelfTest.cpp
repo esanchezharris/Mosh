@@ -1270,15 +1270,22 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                "create_section ok");
         check (ok (cmd (ops, "create_section", objN ({{ "name", "A" }, { "startBar", 5 }, { "lengthBars", 8 }}))),
                "re-create moves/resizes (idempotent by name)");
-        auto snap = ops.snapshot();
-        auto sections = snap["session"].getProperty ("sections", var());
-        check (sections.size() == 1 && (int) sections[0].getProperty ("startBar", 0) == 5
-                   && (int) sections[0].getProperty ("lengthBars", 0) == 8,
+        // Earlier stages create their own sections in this session — assert on
+        // OUR section by name, never on the array size.
+        auto findA = [&]() -> var
+        {
+            auto sections = ops.snapshot()["session"].getProperty ("sections", var());
+            for (auto& sc : *sections.getArray())
+                if (sc.getProperty ("name", var()).toString() == "A") return sc;
+            return {};
+        };
+        auto a = findA();
+        check ((int) a.getProperty ("startBar", 0) == 5 && (int) a.getProperty ("lengthBars", 0) == 8,
                "snapshot carries the moved section");
         check (ok (cmd (ops, "remove_section", args1 ("name", "A"))), "remove_section ok");
-        check (ops.snapshot()["session"].getProperty ("sections", var()).size() == 0, "section gone");
+        check (findA().isVoid(), "section gone");
         check (ok (cmd (ops, "undo")), "undo remove ok");
-        check (ops.snapshot()["session"].getProperty ("sections", var()).size() == 1, "undo restores the section");
+        check (! findA().isVoid(), "undo restores the section");
         cmd (ops, "remove_section", args1 ("name", "A"));
     }
 
