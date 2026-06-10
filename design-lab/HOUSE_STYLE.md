@@ -137,6 +137,17 @@ menu language), shipped as shared CSS per page:
     section glides into the next seed). Anything seeded that changes over time gets
     the same treatment.
 
+31. **World physics, or it's dinky.** "World + instruments" only works if every
+    instrument could plausibly exist in the world's physics. Anything that reads as
+    a label floating on glass is dinky by definition; anything with a socket, a
+    bevel, a needle, or a shadow belongs. Corollaries: toggles are switches that
+    latch down; levels are LED ladders in recessed trays; playheads are needles
+    with heads; and the background is never void — the world has a floor, and the
+    artifact lights it (THE ROOM: ground + contact glow + hue aura on the miss path).
+32. **Instruments are honest.** A switch that looks functional IS functional — and
+    its consequence reaches the stone (mute starves a band, level feeds it
+    proportionally). Decorative controls are banned.
+
 ## Why this is still anti-slop
 
 Banded dither + flat facets physically can't produce the soft-gradient "vibe-coded"

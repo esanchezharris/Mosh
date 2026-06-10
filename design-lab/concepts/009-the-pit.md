@@ -232,3 +232,16 @@ now… everything in our DAW as physical and tactile as the artifact, not so din
   needle head, clips as beveled cartridges (translucent but BUILT), letterpress lane
   names, recessed meter trays, thicker chips with deeper press, and the ask line
   became a console rail. Objects in the room, not labels on glass.
+
+## v12 (2026-06-10) — switches, ladders, and honest instruments
+
+- **M/S are real switches now**: tiny plastic caps that latch DOWN when engaged
+  (lime, depressed). **Levels are LED ladders** in recessed trays, draggable.
+- **And they're honest** (HOUSE_STYLE rule 32): mute starves that lane's band out
+  of the stone's diet; solo starves everyone else; level feeds coverage
+  proportionally. Verified: mute DRUMS+BASS → low 1→0; solo VOX → only highs
+  feed. Play with the visuals by playing with the sound — now literally true of
+  the mixer.
+- Room + heft propagated: 008 (faux-room CSS floor + machined knobs/cartridge
+  clips/needle/console rail), 011 (the real room in its shader — fog bodies
+  barely glow their floor — + heft on chips/clips/needle).

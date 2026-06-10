@@ -116,6 +116,29 @@
   #strip { background-color: rgba(13,13,12,.62); }
   .lbody { background-color: rgba(10,10,9,.42); }
   .clip { border-color: rgba(204,255,35,.20); }
+
+  /* ── THE HEFT PASS (HOUSE_STYLE v2.5): instruments gain mass — sockets,
+     bevels, needles. Objects in the room, not labels on glass. ── */
+  .knob { width: 44px; height: 44px;
+    background: radial-gradient(circle at 50% 36%, #343821 0 26%, #15160f 60%, #060606 100%);
+    box-shadow: 0 5px 0 #000, 0 0 0 2px #232613,
+                inset 0 2px 1px rgba(246,242,235,.20), inset 0 -4px 5px rgba(0,0,0,.75); }
+  .knob::after { content: ''; position: absolute; inset: -6px; border-radius: 50%;
+    box-shadow: inset 0 2px 3px rgba(0,0,0,.8), inset 0 -1px 0 rgba(246,242,235,.06);
+    pointer-events: none; }
+  .knob i { width: 4px; height: 14px; margin-left: -2px; transform-origin: 50% 18px;
+    box-shadow: 0 0 5px rgba(204,255,35,.55); }
+  .clip { border-width: 2px; border-color: #232613; border-radius: 7px;
+    box-shadow: 0 4px 0 rgba(0,0,0,.85), inset 0 1px 0 rgba(246,242,235,.16),
+                0 0 0 1px rgba(204,255,35,.13); }
+  #phead { width: 2px; opacity: 1; box-shadow: 0 0 4px rgba(204,255,35,.4); }
+  #phead::before { content: ''; position: absolute; top: -3px; left: 50%;
+    transform: translateX(-50%); border: 7px solid transparent;
+    border-top: 10px solid var(--lime); filter: drop-shadow(0 2px 0 #000); }
+  .deed { border-width: 2px; box-shadow: 0 3px 0 rgba(0,0,0,.8), inset 0 1px 0 rgba(246,242,235,.08); }
+
+  .chip { box-shadow: 0 3px 0 #000, inset 0 1px 0 rgba(246,242,235,.10); }
+  button.chip:active { transform: translateY(3px); box-shadow: 0 0 0 #000; }
 </style>
 </head>
 <body>
@@ -234,7 +257,24 @@ void main() {
     t += d * 0.9;
     if (t > 6.0) break;
   }
-  vec4 outc = vec4(0.0);
+  // THE ROOM: ground + contact glow + aura — the session is somewhere
+  vec3 room = vec3(0.015, 0.015, 0.014);
+  {
+    if (rd.y < -0.02) {
+      float tf = (-0.95 - ro.y) / rd.y;
+      vec3 gp = ro + rd * tf;
+      float gd = length(gp.xz);
+      float fade = exp(-gd * 0.7) * exp(-max(0.0, tf - 3.6) * 0.4);
+      float gr = n3(vec3(gp.x * 2.6, u_tq * 0.05, gp.z * 2.6));
+      room += vec3(0.028, 0.030, 0.026) * (0.6 + floor(gr * 3.0 + dth) / 3.0) * fade;
+      room += LIME * exp(-gd * 1.9) * fade * (0.025 + 0.09 * u_heat)
+            * (0.25 + 0.75 * u_comp) * (1.0 - 0.8 * u_mode);   // fog bodies barely glow
+    }
+    float aur = exp(-dot(uv, uv) * 4.5) * (0.10 + 0.5 * u_heat);
+    room += (u_mode < 0.5 ? LIME : vec3(0.5, 0.55, 0.6))
+          * (floor(aur * 4.0 + dth) / 4.0) * 0.045 * smoothstep(0.1, 0.6, u_comp);
+  }
+  vec4 outc = vec4(room, 1.0);
   if (hit) {
     map(hp);
     vec3 n = normalAt(hp);
