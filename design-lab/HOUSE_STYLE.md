@@ -1,4 +1,4 @@
-# HOUSE STYLE v2.3 — "Y2K console crunch": signal chain · plate pass · HUD restraint
+# HOUSE STYLE v2.4 — "Y2K console crunch": signal chain · plate pass · HUD restraint · no rectangles
 
 *v2, 2026-06-10. The v1 chrome overshot the decade: scanlines + terminal-green mono +
 `steps()` motion read **80s/90s Terminator/WarGames** ("boomer malaise"). The target
@@ -119,6 +119,15 @@ menu language), shipped as shared CSS per page:
     crystal accents beat dense fractal lattices — beauty by restraint. Beats ease the
     body (lerp ~0.26, small jolts); nothing snaps. Moshi idles unless addressed —
     REC heat is the one standing coupling.
+
+## No rectangles (v2.4) — controls live where their consequences live
+
+28. **The page is world + instruments.** Panels are a legacy of screens that had
+    nothing better to anchor to. We do: every control floats AT the thing it affects —
+    the rack orbits the artifact (anchored to its live screen radius, bobbing on twos),
+    the chain hangs in the tail of the lane it processes, the topbar is a scrim whose
+    instruments float free, lanes are ghosts. The only boxes on screen are clips,
+    because clips are content. Shipped on 009 first; every new surface starts here.
 
 ## Why this is still anti-slop
 

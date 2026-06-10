@@ -243,8 +243,31 @@
   .badge { background: rgba(204,255,35,.75); }
   .deed { background: rgba(11,11,11,.55); border-color: rgba(204,255,35,.22); }
   #phead { opacity: .8; }
-  #rackNote { opacity: .25; }
-  #rackNote::before { opacity: .45; }
+  /* ── v8 NO RECTANGLES — the page is world + instruments ──
+     the topbar becomes a scrim, the lanes become ghosts, the panels are gone */
+  #topbar { background: none; box-shadow: none;
+    background-image: linear-gradient(180deg, rgba(7,7,7,.88) 0%, rgba(7,7,7,.55) 60%, rgba(7,7,7,0) 100%); }
+  .lhead { background: none; background-image: none; box-shadow: none; }
+  .lbody { background-color: rgba(10,10,9,.16); background-image: none;
+    box-shadow: inset 0 0 0 1px rgba(246,242,235,.04); }
+  #ruler { opacity: .28; }
+
+  #rackorbit { position: fixed; inset: 0; z-index: 14; pointer-events: none; }
+  #rackorbit .kcell, #rackorbit .ghost, #rackorbit .owhisper {
+    position: fixed; left: 0; top: 0; will-change: transform; }
+  #rackorbit .kcell { pointer-events: auto; display: flex; flex-direction: column;
+    align-items: center; gap: 4px; }
+  #rackorbit .ghost { pointer-events: auto; transition: none; }
+  #rackorbit .owhisper { font-size: 8px; letter-spacing: .22em; opacity: .32;
+    white-space: nowrap; }
+
+  .chaincluster { position: absolute; right: 12px; top: 50%;
+    transform: translateY(-50%); display: flex; gap: 9px; align-items: center; z-index: 6; }
+  .chaincluster .cwhisper { font-size: 7.5px; letter-spacing: .2em; opacity: .4; }
+  .chaincluster .kcell { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+  .knob.mini { width: 25px; height: 25px; }
+  .knob.mini i { top: 3px; height: 7px; width: 2px; margin-left: -1px; transform-origin: 50% 9.5px; }
+  .chaincluster .klbl { font-size: 7px; }
 </style>
 </head>
 <body>
@@ -289,25 +312,14 @@
   <div id="phead"></div>
 </div>
 
-<div class="slabpanel" id="chain">
-  <div class="ptitle"><span class="plate">CHAIN</span> <b>VOX</b></div>
-  <div class="kdeck">
-    <div class="kcell"><div class="knob" data-k="nam"><i></i></div><span class="klbl">NAM</span><span class="kval mono">68</span></div>
-    <div class="kcell"><div class="knob" data-k="mix"><i></i></div><span class="klbl">MIX</span><span class="kval mono">100</span></div>
-  </div>
-  <div class="meta"><span class="badge">TIER A</span><span class="ghost">LAB</span><span class="mono" style="opacity:.45">0.0 ms</span></div>
-</div>
-
-<div class="slabpanel" id="rack">
-  <div class="ptitle"><span class="plate">THE RACK</span> <b>RE-IMAGINE</b></div>
-  <div class="kdeck">
-    <div class="kcell"><div class="knob" data-p="grit"><i></i></div><span class="klbl">GRIT</span><span class="kval mono">62</span></div>
-    <div class="kcell"><div class="knob" data-p="air"><i></i></div><span class="klbl">AIR</span><span class="kval mono">18</span></div>
-    <div class="kcell"><div class="knob" data-p="epic"><i></i></div><span class="klbl">EPIC</span><span class="kval mono">07</span></div>
-  </div>
-  <div class="meta"><span class="badge">LIVE</span><span class="mono" style="opacity:.45">seed 3</span>
-    <span class="ghost" id="render">RENDER</span></div>
-  <div id="rackNote">DRAG THE AXES — THE PIT IS THE READOUT OF THE TRANSFORM</div>
+<!-- v8 NO RECTANGLES: the rack ORBITS the artifact; the chain hangs in its lane.
+     controls live where their consequences live. -->
+<div id="rackorbit" aria-label="the rack — orbiting the artifact">
+  <div class="kcell" data-orb="0"><div class="knob" data-p="grit"><i></i></div><span class="klbl">GRIT</span><span class="kval mono">62</span></div>
+  <div class="kcell" data-orb="1"><div class="knob" data-p="air"><i></i></div><span class="klbl">AIR</span><span class="kval mono">18</span></div>
+  <div class="kcell" data-orb="2"><div class="knob" data-p="epic"><i></i></div><span class="klbl">EPIC</span><span class="kval mono">07</span></div>
+  <span class="ghost mono" id="render" data-orb="3">RENDER</span>
+  <span class="owhisper mono" data-orb="4">RE-IMAGINE · LIVE · THE PIT IS THE READOUT</span>
 </div>
 
 <div id="ask"><input id="cmd" placeholder="tell moshi — “make the hook heavier”" autocomplete="off" /></div>
@@ -585,6 +597,17 @@ for (const L of LANES) {
   }
   lanesEl.appendChild(lane);
 }
+// v8: the CHAIN hangs off the lane it processes — two mini knobs in VOX's tail
+{
+  const voxBody = lanesEl.querySelector('.lane .lbody');
+  const cc = document.createElement('div');
+  cc.className = 'chaincluster';
+  cc.title = 'CHAIN · VOX — NEURAL·NAM (Tier A · 0.0 ms)';
+  cc.innerHTML = `<span class="cwhisper mono">CHAIN</span>
+    <div class="kcell"><div class="knob mini" data-k="nam"><i></i></div><span class="klbl">NAM</span></div>
+    <div class="kcell"><div class="knob mini" data-k="mix"><i></i></div><span class="klbl">MIX</span></div>`;
+  voxBody.appendChild(cc);
+}
 
 // ---------- THE LOOK: no longer a user surface — the SOUND picks the look.
 // (user: "they should play with the visuals by playing with the sound") The
@@ -689,6 +712,7 @@ cmd.addEventListener('keydown', e => {
 
 const recchip = document.getElementById('recchip'), tc = document.getElementById('tc'),
       sect = document.getElementById('sect'), playbtn = document.getElementById('playbtn');
+const orbEls = [...document.querySelectorAll('#rackorbit [data-orb]')];
 function setRec(on) { rec = on; document.body.classList.toggle('rec', on); if (on) deed('punched in'); }
 recchip.onclick = () => setRec(!rec);
 addEventListener('keydown', e => {
@@ -705,8 +729,8 @@ const chainVals = { nam: 0.68, mix: 1.0 };
 function bindKnob(el, get, set) {
   const draw = () => {
     el.querySelector('i').style.transform = `rotate(${(-135 + get() * 270).toFixed(0)}deg)`;
-    el.parentElement.querySelector('.kval').textContent =
-      String(Math.round(get() * 100)).padStart(2, '0');
+    const kv = el.parentElement.querySelector('.kval');
+    if (kv) kv.textContent = String(Math.round(get() * 100)).padStart(2, '0');
   };
   el.addEventListener('pointerdown', e => {
     e.preventDefault();
@@ -1071,6 +1095,20 @@ function frame(now) {
   gl.drawArrays(gl.TRIANGLES, 0, 3);
 
   moshi.set({ heat: recAmt, arousal: 0.10 });            // moshi idles for now (user note)
+
+  // v8: the rack ORBITS the artifact — anchored to its actual screen radius,
+  // so the controls breathe with the thing they sculpt. bob is on twos.
+  {
+    const minD = Math.min(innerWidth, innerHeight);
+    const ocx = innerWidth / 2, ocy = innerHeight / 2 + 0.07 * minD;
+    const gro = 0.45 + 0.55 * spec.complete;
+    const oR = 0.2475 * gro * minD + 86;
+    const ANG = [-0.42, 0.02, 0.46, 0.86, 1.18];
+    orbEls.forEach((el, i) => {
+      const a = ANG[i] + Math.sin(tq * 0.35 + i * 2.1) * 0.022;
+      el.style.transform = `translate(${(ocx + Math.cos(a) * oR).toFixed(0)}px, ${(ocy + Math.sin(a) * oR).toFixed(0)}px) translate(-50%, -50%)`;
+    });
+  }
   debrisFrame(t, dt);
   requestAnimationFrame(frame);
 }

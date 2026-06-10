@@ -159,3 +159,19 @@ tastefully; "more 2002 than 2010."
   solid lime, dimmed waveforms/meters/borders.
 - **CRT in the signal chain:** a phosphor-bloom stage (1.6px halo at 40% merged under
   the source) + 0.5px softening before the posterize — text fuzzes tastefully.
+
+## v8 (2026-06-10) — NO RECTANGLES: controls live where their consequences live
+
+The HUD idea taken to its end state: the page is **world + instruments**.
+
+- **THE RACK orbits the artifact.** GRIT/AIR/EPIC are free-floating knobs on an arc
+  around the mass — anchored to its *actual screen radius*, so the controls breathe
+  with the thing they sculpt (nugget = tight orbit, monument = wide). They bob on
+  twos. RENDER and the whisper ride the lower arc.
+- **THE CHAIN hangs off its lane.** NAM/MIX are mini knobs in the tail of the VOX
+  lane body — the insert lives ON the thing it processes.
+- **The last rectangles dissolved:** the topbar is a scrim gradient (its instruments
+  float), lane heads are floating names, lane bodies are 16%-alpha ghosts. The only
+  boxes left are clips — and clips are content, not chrome.
+- Verified: orbit widens with completeness; knobs drag correctly while orbiting
+  (pointer events float above the stage); console clean.
