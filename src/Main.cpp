@@ -8,6 +8,7 @@
 #include "moshops/MoshOps.h"
 #include "moshir/MoshIR.h"
 #include "moshir/SessionRecorder.h"
+#include "collab/CollabEngine.h"
 
 namespace mosh
 {
@@ -35,8 +36,11 @@ public:
         const bool headless = undoSelfTest || harness || commandLine.contains ("--selftest");
         // Headless: no audio device, and an isolated cold session so the harness is
         // idempotent (it saves/reloads itself) and never touches the GUI session.
+        // MOSH_KEEP_SESSION=1: successive headless runs CONTINUE one session
+        // (the collab sync tests drive multi-step scenarios this way).
+        const bool keepSession = juce::SystemStats::getEnvironmentVariable ("MOSH_KEEP_SESSION", "0") == "1";
         engine  = std::make_unique<MoshEngine> ((! headless) || liveAudioSmoke,
-                                                /*freshSession=*/ headless || liveAudioSmoke);
+                                                /*freshSession=*/ (headless || liveAudioSmoke) && ! keepSession);
         moshOps = std::make_unique<MoshOps> (*engine);
 
         // MoshIR sits above MoshOps (phase0 §3): it lowers IR ops and feeds
@@ -53,6 +57,11 @@ public:
         recorder = std::make_unique<ir::SessionRecorder> (*engine);
         moshOps->setCommandObserver ([this] (const juce::String& n, const juce::var& a, const juce::var& r)
                                      { recorder->afterCommand (n, a, r); });
+
+        // Git-style async session sync (Stage 10): collab_* commands.
+        collabEngine = std::make_unique<collab::CollabEngine> (*moshOps, *engine, *irExecutor, *recorder);
+        moshOps->setCollabHook ([this] (const juce::String& n, const juce::var& a)
+                                { return collabEngine->handle (n, a); });
 
         // Headless replay harness (phase0 §4): `Mosh --harness job.json`.
         if (harness)
@@ -113,6 +122,7 @@ public:
     void shutdown() override
     {
         mainWindow.reset();
+        collabEngine.reset();
         recorder.reset();
         irExecutor.reset();
         moshOps.reset();
@@ -126,6 +136,7 @@ private:
     std::unique_ptr<MoshOps>             moshOps;
     std::unique_ptr<ir::Executor>        irExecutor;
     std::unique_ptr<ir::SessionRecorder> recorder;
+    std::unique_ptr<collab::CollabEngine> collabEngine;
     std::unique_ptr<MainWindow>          mainWindow;
 };
 

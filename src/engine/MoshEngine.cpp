@@ -242,4 +242,20 @@ void MoshEngine::reloadFromFile()
     editPtr->editFileRetriever = [this] { return editPath; };
 }
 
+void MoshEngine::resetEmpty()
+{
+    editPtr->getTransport().stop (false, false);
+    editPtr.reset();
+    editPath.deleteFile();
+    editPtr = te::createEmptyEdit (*enginePtr, editPath);
+    // Same cold start as the ctor: no default track, clean undo history.
+    juce::Array<te::AudioTrack*> defaults (te::getAudioTracks (*editPtr));
+    for (auto* t : defaults)
+        editPtr->deleteTrack (t);
+    if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
+        mm->runDispatchLoopUntil (1);
+    editPtr->getUndoManager().clearUndoHistory();
+    editPtr->editFileRetriever = [this] { return editPath; };
+}
+
 } // namespace mosh

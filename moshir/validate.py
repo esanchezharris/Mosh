@@ -20,24 +20,29 @@ Exit code = number of invalid ops (0 = all valid).
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
-import jsonschema
+try:
+    import jsonschema
+except ModuleNotFoundError:  # pragma: no cover - exercised by repo shell gates
+    jsonschema = None
 
 SCHEMA_PATH = Path(__file__).parent / "moshir-0.1.schema.json"
 IR_VERSION = "0.1"
 
 _schema: dict | None = None
 _kinds: list[str] | None = None
-_branch_validators: dict[str, jsonschema.Validator] = {}
+_branch_validators: dict[str, object] = {}
 
 
 def schema() -> dict:
     global _schema
     if _schema is None:
         _schema = json.loads(SCHEMA_PATH.read_text())
-        jsonschema.validators.validator_for(_schema).check_schema(_schema)
+        if jsonschema is not None:
+            jsonschema.validators.validator_for(_schema).check_schema(_schema)
     return _schema
 
 
@@ -49,9 +54,11 @@ def kind_enum() -> list[str]:
     return _kinds
 
 
-def _branch_validator(kind: str) -> jsonschema.Validator:
+def _branch_validator(kind: str):
     """Validator for one op kind's branch — gives focused errors instead of
     a 41-way oneOf mismatch dump."""
+    if jsonschema is None:
+        raise RuntimeError("jsonschema is not installed")
     v = _branch_validators.get(kind)
     if v is None:
         s = schema()
@@ -61,6 +68,116 @@ def _branch_validator(kind: str) -> jsonschema.Validator:
     return v
 
 
+def _schema_ref(ref: str) -> dict:
+    prefix = "#/$defs/"
+    name = ref[len(prefix):] if ref.startswith(prefix) else ref
+    if name not in schema()["$defs"]:
+        raise ValueError(f"unsupported $ref: {ref}")
+    return schema()["$defs"][name]
+
+
+def _path(path: str) -> str:
+    return path or "(op)"
+
+
+def _type_ok(value, expected: str) -> bool:
+    if expected == "object":
+        return isinstance(value, dict)
+    if expected == "array":
+        return isinstance(value, list)
+    if expected == "string":
+        return isinstance(value, str)
+    if expected == "boolean":
+        return isinstance(value, bool)
+    if expected == "integer":
+        return isinstance(value, int) and not isinstance(value, bool)
+    if expected == "number":
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+    return True
+
+
+def _fallback_validate(value, spec: dict, path: str = "") -> list[str]:
+    """Tiny JSON Schema subset for moshir-0.1.schema.json.
+
+    jsonschema is still used when installed. This fallback exists so harnesses,
+    the trajectory importer, and CI do not depend on a global Python package.
+    """
+    if "$ref" in spec:
+        return _fallback_validate(value, _schema_ref(spec["$ref"]), path)
+
+    errors: list[str] = []
+
+    if "const" in spec and value != spec["const"]:
+        errors.append(f"{_path(path)}: {value!r} is not equal to {spec['const']!r}")
+    if "enum" in spec and value not in spec["enum"]:
+        errors.append(f"{_path(path)}: {value!r} is not one of {spec['enum']}")
+
+    expected_type = spec.get("type")
+    if expected_type is not None and not _type_ok(value, expected_type):
+        return [f"{_path(path)}: {value!r} is not of type {expected_type}"]
+
+    if isinstance(value, str):
+        if "minLength" in spec and len(value) < spec["minLength"]:
+            errors.append(f"{_path(path)}: {value!r} is too short")
+        if "pattern" in spec and re.fullmatch(spec["pattern"], value) is None:
+            errors.append(f"{_path(path)}: {value!r} does not match {spec['pattern']}")
+
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if "minimum" in spec and value < spec["minimum"]:
+            errors.append(f"{_path(path)}: {value} is less than the minimum of {spec['minimum']}")
+        if "maximum" in spec and value > spec["maximum"]:
+            errors.append(f"{_path(path)}: {value} is greater than the maximum of {spec['maximum']}")
+        if "exclusiveMinimum" in spec and value <= spec["exclusiveMinimum"]:
+            errors.append(f"{_path(path)}: {value} is less than or equal to the minimum of {spec['exclusiveMinimum']}")
+
+    if "oneOf" in spec:
+        matches = [sub for sub in spec["oneOf"] if not _fallback_validate(value, sub, path)]
+        if len(matches) != 1:
+            errors.append(f"{_path(path)}: matches {len(matches)} oneOf branches, expected 1")
+
+    if "anyOf" in spec:
+        if not any(not _fallback_validate(value, sub, path) for sub in spec["anyOf"]):
+            errors.append(f"{_path(path)}: does not match any allowed shape")
+
+    if "if" in spec and "then" in spec and not _fallback_validate(value, spec["if"], path):
+        errors.extend(_fallback_validate(value, spec["then"], path))
+
+    if isinstance(value, dict):
+        props = spec.get("properties", {})
+        for key in spec.get("required", []):
+            if key not in value:
+                errors.append(f"{_path(path)}: {key!r} is a required property")
+        if spec.get("additionalProperties") is False:
+            extra = sorted(set(value) - set(props))
+            if extra:
+                errors.append(f"{_path(path)}: additional properties are not allowed: {extra}")
+        for key, sub in props.items():
+            if key in value:
+                child = f"{path}.{key}" if path else key
+                errors.extend(_fallback_validate(value[key], sub, child))
+
+    if isinstance(value, list):
+        if "minItems" in spec and len(value) < spec["minItems"]:
+            errors.append(f"{_path(path)}: has too few items")
+        if "maxItems" in spec and len(value) > spec["maxItems"]:
+            errors.append(f"{_path(path)}: has too many items")
+        if spec.get("uniqueItems") and len({json.dumps(v, sort_keys=True) for v in value}) != len(value):
+            errors.append(f"{_path(path)}: has non-unique items")
+
+        prefix = spec.get("prefixItems")
+        if prefix is not None:
+            for i, sub in enumerate(prefix):
+                if i < len(value):
+                    errors.extend(_fallback_validate(value[i], sub, f"{path}.{i}" if path else str(i)))
+            if spec.get("items") is False and len(value) > len(prefix):
+                errors.append(f"{_path(path)}: has unexpected additional items")
+        elif isinstance(spec.get("items"), dict):
+            for i, item in enumerate(value):
+                errors.extend(_fallback_validate(item, spec["items"], f"{path}.{i}" if path else str(i)))
+
+    return errors
+
+
 def validate_op(op) -> list[str]:
     """Return a list of human-readable problems (empty = valid)."""
     if not isinstance(op, dict):
@@ -68,6 +185,8 @@ def validate_op(op) -> list[str]:
     kind = op.get("kind")
     if not isinstance(kind, str) or kind not in kind_enum():
         return [f"kind: {kind!r} is not a MoshIR {IR_VERSION} op kind"]
+    if jsonschema is None:
+        return _fallback_validate(op, _schema_ref(kind))[:5]
     errs = sorted(_branch_validator(kind).iter_errors(op),
                   key=jsonschema.exceptions.relevance)
     out = []

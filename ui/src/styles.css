@@ -76,6 +76,12 @@ button.on { border-color: var(--accent); color: var(--accent); background: #2120
 .tutorial-status { font-size: 0.7rem; color: var(--muted); white-space: nowrap; }
 .consent-on { border-color: var(--ok); color: var(--ok); }
 
+/* Collab sync panel (Stage 10): share/join + pull/push + conflicts. */
+.collab-panel { display: flex; align-items: center; gap: 0.35rem; }
+.collab-remote { width: 170px; }
+.collab-status { font-size: 0.78rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.collab-conflicts { font-size: 0.74rem; color: var(--warn); cursor: help; }
+
 .transport { display: flex; align-items: center; gap: 0.4rem; }
 .tbtn { width: 34px; height: 34px; display: grid; place-items: center; font-size: 0.95rem; border-radius: 8px; }
 .tbtn.play { color: var(--ok); }

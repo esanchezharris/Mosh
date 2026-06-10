@@ -43,6 +43,16 @@ public:
         <sessionDir>/gap-ledger.jsonl; override with MOSH_GAP_LEDGER. */
     juce::File gapLedgerFile() const { return ledgerFile; }
 
+    /** Drop in-memory bindings and reload from the (possibly replaced) edit
+        state. The collab engine calls this after resetEmpty()/clone — stale
+        symbol bindings would otherwise reject replayed track.create ops. */
+    void resyncBindings()
+    {
+        bindings.clear();
+        nextBusNumber = 1;
+        loadBindings();
+    }
+
 private:
     struct Binding
     {

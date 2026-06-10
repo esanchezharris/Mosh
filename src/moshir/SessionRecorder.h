@@ -38,6 +38,10 @@ public:
     juce::var identity() const { return identityVar; }
     juce::File trajectoryFile() const { return trajFile; }
 
+    /** Collab replay suppression: replayed ops are already in the shared log —
+        recording them again would duplicate history on the next push. */
+    void setPaused (bool p) { paused = p; }
+
 private:
     void writeLine (juce::DynamicObject* line);
     void loadOrCreateIdentity();
@@ -48,6 +52,7 @@ private:
     juce::File identityFile;
     juce::var identityVar;
     juce::int64 stepSeq = 0;
+    bool paused = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SessionRecorder)
 };

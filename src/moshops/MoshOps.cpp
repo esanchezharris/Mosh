@@ -145,6 +145,10 @@ juce::var MoshOps::dispatch (const juce::String& name, const juce::var& args)
         logLine (name, args, true, {}, false);
         return okResult (name);
     }
+    // Stage 10 — git-style session sync
+    if (name.startsWith ("collab_"))
+        return collabHook ? collabHook (name, args)
+                          : errResult (name, "collab engine not wired");
 
     return errResult (name, "unknown command: " + name);
 }

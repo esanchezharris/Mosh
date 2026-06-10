@@ -24,6 +24,19 @@ SessionRecorder::SessionRecorder (MoshEngine& engineToUse)
     loadOrCreateIdentity();
     trajFile = eng.sessionDir().getChildFile ("trajectory.jsonl");
 
+    // Continuation sessions (MOSH_KEEP_SESSION runs, app restarts): step seqs
+    // must stay strictly monotonic across processes — collab sync bookmarks
+    // its push position by seq.
+    if (trajFile.existsAsFile())
+    {
+        StringArray lines;
+        trajFile.readLines (lines);
+        for (auto& l : lines)
+            if (l.contains ("\"seq\""))
+                if (auto rec = JSON::parse (l); rec.getProperty ("type", var()).toString() == "step")
+                    stepSeq = jmax (stepSeq, (int64) rec.getProperty ("seq", 0));
+    }
+
     auto* header = new DynamicObject();
     header->setProperty ("type", "session");
     header->setProperty ("traj_id", Uuid().toString());
@@ -45,7 +58,7 @@ SessionRecorder::SessionRecorder (MoshEngine& engineToUse)
 
 void SessionRecorder::afterCommand (const String& name, const var& args, const var& result)
 {
-    if (isReadOnly (name))
+    if (paused || isReadOnly (name))
         return;
 
     // ── recorder-directed commands (MoshOps only validates these) ──
@@ -102,6 +115,9 @@ void SessionRecorder::afterCommand (const String& name, const var& args, const v
     l->setProperty ("command", name);
     l->setProperty ("args", args);
     l->setProperty ("ok", ok);
+    // Result data (created ids etc.) — the collab rebase remaps ids from it.
+    if (auto data = result.getProperty ("data", var()); ! data.isVoid())
+        l->setProperty ("data", data);
 
     if (name == "execute_ir")
     {

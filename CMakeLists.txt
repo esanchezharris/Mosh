@@ -85,7 +85,9 @@ if (MOSH_BUILD_APP)
         src/app/Harness.cpp
         # Stage 9 — op logger / session recorder + lift (phase0 §5–§6)
         src/moshir/Lift.cpp
-        src/moshir/SessionRecorder.cpp)
+        src/moshir/SessionRecorder.cpp
+        # Stage 10 — git-style async session sync
+        src/collab/CollabEngine.cpp)
 
     target_include_directories(Mosh PRIVATE src)
 

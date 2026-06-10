@@ -49,6 +49,10 @@ public:
         Edit object; callers must re-read edit() afterwards. */
     void reloadFromFile();
 
+    /** Reset to a cold EMPTY Edit (collab rebase: replay-from-genesis starts
+        here). Replaces the Edit object; callers must re-read edit(). */
+    void resetEmpty();
+
 private:
     std::unique_ptr<te::Engine> enginePtr;
     std::unique_ptr<te::Edit>   editPtr;

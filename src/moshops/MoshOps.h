@@ -51,6 +51,11 @@ public:
                                                 const juce::var& result)>;
     void setCommandObserver (CommandObserver o) { commandObserver = std::move (o); }
 
+    /** Collab-sync hook (Stage 10): collab_* commands route here (the engine
+        lives in src/collab, above MoshOps — same layering as the IR hook). */
+    using CollabHook = std::function<juce::var (const juce::String& name, const juce::var& args)>;
+    void setCollabHook (CollabHook h) { collabHook = std::move (h); }
+
     /** Result envelopes (public: the IR layer composes them too). */
     static juce::var okResult  (const juce::String& command, juce::var data = {});
     static juce::var errResult (const juce::String& command, const juce::String& message);
@@ -168,6 +173,7 @@ private:
     EventSink   eventSink;
     IRHook      irHook;
     CommandObserver commandObserver;
+    CollabHook  collabHook;
     int         execDepth = 0;
     juce::int64 seq = 0;
     juce::File  logFile;

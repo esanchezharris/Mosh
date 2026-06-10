@@ -36,6 +36,24 @@ namespace
         void comma()                        { out << ','; }
     };
 
+    juce::String sourceContentId (const File& f)
+    {
+        // Cached by (path, size, mtime): clip sources are effectively
+        // immutable, and stateHash runs after every recorded mutation.
+        struct Entry { int64 size, mtime; String md5; };
+        static std::map<String, Entry> cache;
+        if (! f.existsAsFile()) return f.getFileName();
+        const auto key = f.getFullPathName();
+        const auto size = f.getSize();
+        const auto mtime = f.getLastModificationTime().toMilliseconds();
+        if (auto it = cache.find (key); it != cache.end()
+              && it->second.size == size && it->second.mtime == mtime)
+            return it->second.md5;
+        const auto md5 = MD5 (f).toHexString();
+        cache[key] = { size, mtime, md5 };
+        return md5;
+    }
+
     int trackOrdinalFor (te::Edit& edit, te::Track* t)
     {
         if (t == nullptr) return -1;
@@ -179,9 +197,10 @@ namespace
         {
             c.comma();
             c.key ("type"); c.str ("wave"); c.comma();
-            // Basename only: absolute paths differ across machines; content
-            // identity travels via the asset store (Stage 10).
-            c.key ("source"); c.str (w->getCurrentSourceFile().getFileName()); c.comma();
+            // CONTENT identity, not name identity: collab peers materialize
+            // the same audio under different filenames (content-addressed
+            // assets), so the canonical source is the file's MD5.
+            c.key ("source"); c.str (sourceContentId (w->getCurrentSourceFile())); c.comma();
             c.key ("pitch"); c.num ((double) w->getPitchChange()); c.comma();
             c.key ("speed"); c.num (w->getSpeedRatio());
         }

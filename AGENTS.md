@@ -67,6 +67,39 @@
 - [x] Mixer (in track headers: volume/pan/mute/solo); **two-theme system** (shared CSS tokens, dark/light toggle); **reserved B-5 slot** (empty placeholder in the topbar); quality readout via the FakeAdapter manifest (`pq`/`pq_base`/`flags`). `export_audio` command (synchronous `Renderer::renderToFile`).
 - [x] **GATE:** full producer loop — import (`add_test_tone_clip`) → arrange (`move`/`trim`) → host VST3 (`load_plugin`) → Tier-A insert (`add_neural_insert`) → generative transform (`create`/`render`/`accept_render`) → mix (`set_track_volume`) → **export** (794KB WAV of the whole signal chain) → undo/redo correct. Proven by `Mosh --selftest` **89/89** + `Mosh --demo6` consolidated-UI screenshot (both neural tiers on one track, export + theme + B-5 in the topbar).
 
+### Stage 7 — MoshIR v0.1 + lowering + engine gaps ✅ GATE PASSED (2026-06-09)
+- [x] Closed 41-op MoshIR schema (`moshir/moshir-0.1.schema.json`) + Python validator + fixtures. Stochastic ops require explicit seed/model version.
+- [x] Native `ir::Executor` validates, lowers to MoshOps, persists symbolic bindings, and logs unsupported ops to the gap ledger. `execute_ir` keeps the one mutation path intact.
+- [x] Engine gap commands added for tempo/time/key, MIDI notes, sampler/sounds, routing, sends/returns, sidechain, automation, clip pitch/stretch/grid slice, sections, and semantic plugin param names.
+- [x] **GATE:** worked example executes end to end, unsupported ops are ledgered, unseeded stochastic ops hard-reject, bindings survive save/reload, undo remains Tracktion-backed. Proven by `Mosh --selftest` **118/118 x3**, `--selftest-undo` **18/18**, Catch2 **169 assertions / 8 cases**, validator **64/64**.
+
+### Stage 8 — Replay harness + canonical determinism ✅ GATE PASSED (2026-06-09)
+- [x] Canonical state hash (`src/state/StateHash`) maps volatile engine ids to structural ordinals, normalizes floats/paths, and excludes playback-position live values from automated params.
+- [x] `Mosh --harness job.json` executes MoshIR from files with structured output, watchdog failure, isolated sessions, optional native command jobs, and optional bounce MD5/audio MD5.
+- [x] RenderLayer ids are seeded/persisted, latent generation and humanize reject missing seeds, and `generate_asset` gives deterministic seeded FakeAdapter assets.
+- [x] **GATE:** `scripts/harness-conformance.sh` **11/11**: replay x3 identical state hashes, byte-identical bounce audio, unseeded rejection, parallel batch convergence, and gap-ledger emission. `Mosh --selftest` **125/125 x3**.
+
+### Stage 9 — Op logger + trajectory store ✅ GATE PASSED (2026-06-09)
+- [x] `SessionRecorder` observes top-level MoshOps and writes `trajectory.jsonl` with identity, consent, lifted IR, result data, state hashes, tutorial markers, and friction notes.
+- [x] Tutorial tooling (`set_tutorial`, `drop_marker`, `set_consent`, `TutorialBar`) unblocks the human tutorial-replication sprint. Consent defaults false and is enforced at import.
+- [x] `flywheel/store/` imports consented trajectories into SQLite + content-addressed objects, exports spec-shaped JSONL, and replays stored IR via the harness.
+- [x] **GATE:** `scripts/flywheel-store-test.sh` **9/9**: unconsented import refused, consented import accepted, rows/objects land, export validates, fresh replay matches the recorded state hash. `Mosh --selftest` **141/141 x3**.
+
+### Stage 10 — Multiplayer: git-style async session sync ✅ GATE PASSED (2026-06-09)
+- [x] Shared sessions are git repos under `<session>/collab/`: linear `oplog.jsonl`, `session.json`, and content-addressed assets. Everyone runs their own app; no remote guests and no audio streaming.
+- [x] `CollabEngine` routes `collab_init/clone/status/pull/push` through MoshOps. Push is fast-forward-only; pull with pending work resets to genesis, replays the shared log, rebases pending ops with id remapping, and reports failed rebased ops as conflicts.
+- [x] Collab support hardened the harness (`commands`, persistent `MOSH_KEEP_SESSION`, save on exit), recorder sequence continuation, executor binding resync, and canonical audio source hashing by file content.
+- [x] `CollabPanel` adds the topbar sync surface: share/join remote URL, ahead/behind/pending status, pull/push, and conflict visibility.
+- [x] **GATE:** `scripts/collab-sync-test.sh` **17/17**: B clone matches A hash, B edit/push then A pull converges, behind push rejects, rebase converges, deleted-target rename surfaces as conflict, and final states converge. Regression battery: selftest **141/141 x3**, undo **18/18**, conformance **11/11**, store **9/9**, validator **64/64** without requiring `jsonschema`, CTest passed.
+
+### Stage 11 — Monster v0 (B-5 slot) + GEPA
+- [ ] Service `/agent/propose`: Gemini Flash structured output to MoshIR with one repair retry. Key only from env/gitignored local config; never repo/logs/trajectory. AgentPanel proposals execute through MoshOps and log agent rollouts.
+- [ ] GEPA loop: prompt/program versions, few-shot selector, reflection memory knowledge base, 24-task suite, L2/L4 verifiers, reproducible report.
+
+### Stage 12 — Extraction v0 + L3 + Phase 0 exit
+- [ ] Tutorial extraction pipeline: provenance-safe ingest, local ASR/keyframes/segmentation, Gemini op inference few-shot from gold, typed claims, harness replay, graded gold/silver/bronze acceptance.
+- [ ] L3 audio similarity calibrated on gold pairs; one IR v0.2 bump from gap-ledger review; Phase 0 exit = >=20 gold, >=30 auto-accepted, extraction >=30% on new tutorials, Monster >=70%/24 with L1+judge.
+
 Build the arrangement incrementally within Stage 2/6: static clips → drag/move → trim/split → zoom/snap → marquee.
 
 ---
@@ -109,4 +142,4 @@ Build the arrangement incrementally within Stage 2/6: static clips → drag/move
 - **FakeAdapter before SA3** (Stage 5) — prove orchestration with the stub.
 - The **arrange view** is incremental, not a from-scratch native renderer (it's React over the `02` contract) — lower risk than the prior plan, but still stage it.
 - Optional non-blocking adds once core works: prompt-concision rewriter (`05 §6`), judge-panel quality readout (`05 §7`), `StableAudioOpenSmallAdapter` bring-up rung (`05 §2`).
-- Deferred (do **not** build): B-5/operator behavior + multiplayer/CRDT op-log; on-device SAO-Small + Medium→Small transfer; LoRA-base + vector layering; timestep-scheduled steering; full Context-Drawers system; **MRT2 live generative-instrument lane** (more viable now we're Mac-only, but not core v0 — `07`); foleys/cello/Gin/JUMP (only if a later need appears).
+- Deferred (do **not** build yet): real-time multiplayer/CRDT/live audio streaming; on-device SAO-Small + Medium→Small transfer; LoRA-base + vector layering; timestep-scheduled steering; full Context-Drawers system; **MRT2 live generative-instrument lane** (more viable now we're Mac-only, but not core v0 — `07`); foleys/cello/Gin/JUMP (only if a later need appears).

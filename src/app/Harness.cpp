@@ -81,8 +81,10 @@ int runHarness (MoshEngine& eng, MoshOps& ops, const String& commandLine)
     if (! jobFile.existsAsFile())
         return fail ("job file not found: " + jobPath, 2);
     auto job = JSON::parse (jobFile.loadFileAsString());
-    if (! job.getProperty ("ops", var()).isArray())
-        return fail ("job has no 'ops' array", 2);
+    const bool hasOps = job.getProperty ("ops", var()).isArray();
+    const bool hasCommands = job.getProperty ("commands", var()).isArray();
+    if (! hasOps && ! hasCommands)
+        return fail ("job needs an 'ops' (MoshIR) or 'commands' (native) array", 2);
 
     // Watchdog (§4 req 4): structured failure, never a hang. Detached on
     // purpose — when it fires we are wedged, so it reports and hard-exits.
@@ -113,23 +115,42 @@ int runHarness (MoshEngine& eng, MoshOps& ops, const String& commandLine)
         eng.reloadFromFile();
     }
 
-    // Execute through the one mutation path.
-    auto* irArgs = new DynamicObject();
-    irArgs->setProperty ("ops", job.getProperty ("ops", var()));
-    if (job.hasProperty ("tutorialId"))
-        irArgs->setProperty ("tutorialId", job.getProperty ("tutorialId", var()));
-    auto ir = cmd (ops, "execute_ir", var (irArgs));
+    // Execute through the one mutation path. Two job dialects:
+    //   ops:      [MoshIR...]            → one execute_ir batch (the replay path)
+    //   commands: [{command, args}...]   → native script (collab tests, drivers)
+    var ir;
+    Array<var> commandResults;
+    bool commandsOk = true;
+    if (hasOps)
+    {
+        auto* irArgs = new DynamicObject();
+        irArgs->setProperty ("ops", job.getProperty ("ops", var()));
+        if (job.hasProperty ("tutorialId"))
+            irArgs->setProperty ("tutorialId", job.getProperty ("tutorialId", var()));
+        ir = cmd (ops, "execute_ir", var (irArgs));
+    }
+    if (hasCommands)
+    {
+        for (auto& c : *job.getProperty ("commands", var()).getArray())
+        {
+            auto r = ops.execute (c);
+            commandsOk = commandsOk && (bool) r.getProperty ("ok", false);
+            commandResults.add (r);
+        }
+    }
     auto data = ir.getProperty ("data", var());
 
     auto hash = cmd (ops, "get_state_hash")
                     .getProperty ("data", var()).getProperty ("hash", var()).toString();
 
     auto* result = new DynamicObject();
-    const bool ok = (bool) ir.getProperty ("ok", false);
+    const bool ok = (! hasOps || (bool) ir.getProperty ("ok", false)) && commandsOk;
     result->setProperty ("ok", ok);
     result->setProperty ("state_hash", hash);
     result->setProperty ("counts", data.getProperty ("counts", var()));
     result->setProperty ("results", data.getProperty ("results", var()));
+    if (hasCommands)
+        result->setProperty ("commandResults", commandResults);
 
     if ((bool) job.getProperty ("bounce", false))
     {
@@ -148,6 +169,9 @@ int runHarness (MoshEngine& eng, MoshOps& ops, const String& commandLine)
         }
         result->setProperty ("bounce", var (bo));
     }
+
+    // Persist: multi-invocation scenarios (collab sync) continue this session.
+    cmd (ops, "save");
 
     harnessDone.store (true);
     writeResult (outFile, var (result));

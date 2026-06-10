@@ -6,6 +6,7 @@ import { Transport } from "./components/Transport";
 import { Rack } from "./components/Rack";
 import { PluginBrowser } from "./components/PluginBrowser";
 import { TutorialBar } from "./components/TutorialBar";
+import { CollabPanel } from "./components/CollabPanel";
 
 // Stage 1 UI: renders the MoshOps snapshot cold, drives every mutation through
 // execute_command, and reacts to the snapshot+events feed. Deliberately thin and
@@ -41,6 +42,8 @@ export function App() {
         </div>
         <Transport />
         <div className="topbar-right">
+          {/* Git-style async session sync (Stage 10). */}
+          <CollabPanel />
           {/* Tutorial-replication tooling (phase0 s6): URL + markers + consent. */}
           <TutorialBar />
           {/* Reserved B-5 / Monster operator slot (Stage 11). */}
