@@ -61,6 +61,15 @@ void MoshOps::timerCallback()
         emit ("transport", tv);
     }
     wasPlaying = playing;
+
+    // Autosave (Stage 21): GUI sessions persist every ~90s when dirty — the
+    // headless paths save on exit already.
+    if (eng.hasAudio() && ++autosaveTicks >= 30 * 90)
+    {
+        autosaveTicks = 0;
+        if (eng.edit().hasChangedSinceSaved())
+            eng.save();
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -107,6 +116,7 @@ juce::var MoshOps::dispatch (const juce::String& name, const juce::var& args)
     if (name == "list_audio_inputs") return cmdListAudioInputs (args);
     if (name == "set_audio_input")   return cmdSetAudioInput (args);
     if (name == "arm_track")         return cmdArmTrack (args);
+    if (name == "rename_clip")       return cmdRenameClip (args);
     if (name == "undo")              return cmdUndo (args);
     if (name == "redo")              return cmdRedo (args);
     if (name == "save")              return cmdSave (args);
@@ -472,7 +482,7 @@ juce::var MoshOps::cmdChooseFile (const juce::var& args)
         return okResult ("choose_file", var (d));
     }
     if (! eng.hasAudio())
-        return errResult ("choose_file", "no UI session (headless) — set MOSH_CHOOSE_FILE for tests");
+        return errResult ("choose_file", "no UI session (headless) - set MOSH_CHOOSE_FILE for tests");
 
     const auto wildcard = args.getProperty ("wildcard", "*.wav;*.aif;*.aiff;*.mp3;*.flac;*.ogg").toString();
     auto initial = juce::File (juce::SystemStats::getEnvironmentVariable ("MOSH_SAMPLE_LIBRARY", {}));
@@ -533,6 +543,7 @@ juce::var MoshOps::cmdListDir (const juce::var& args)
 {
     auto root = crateRootDir();
     auto* data = new DynamicObject();
+    juce::var dataHolder (data);   // owns the object across the early error returns
     data->setProperty ("root", root.getFullPathName());
 
     if (const auto query = args.getProperty ("query", var()).toString().trim(); query.isNotEmpty())
@@ -552,7 +563,7 @@ juce::var MoshOps::cmdListDir (const juce::var& args)
         }
         data->setProperty ("files", hits);
         data->setProperty ("dirs", Array<var>());
-        return okResult ("list_dir", var (data));
+        return okResult ("list_dir", dataHolder);
     }
 
     auto dir = resolveCratePath (args.getProperty ("path", var()).toString());
@@ -573,7 +584,7 @@ juce::var MoshOps::cmdListDir (const juce::var& args)
         }
     data->setProperty ("dirs", dirs);
     data->setProperty ("files", files);
-    return okResult ("list_dir", var (data));
+    return okResult ("list_dir", dataHolder);
 }
 
 juce::var MoshOps::cmdAuditionFile (const juce::var& args)
@@ -600,6 +611,20 @@ juce::var MoshOps::cmdStopAudition (const juce::var&)
 // recording for it; the existing set_transport {action:"record"} starts the
 // take and stop(false,…) COMMITS it as a clip on the track.
 // ─────────────────────────────────────────────────────────────────────────────
+juce::var MoshOps::cmdRenameClip (const juce::var& args)
+{
+    auto* clip = findClip (args.getProperty ("clipId", var()).toString());
+    if (clip == nullptr) return errResult ("rename_clip", "no clip");
+    const auto name = args.getProperty ("name", var()).toString().trim();
+    if (name.isEmpty()) return errResult ("rename_clip", "missing 'name'");
+
+    undoManager().beginNewTransaction ("rename_clip");
+    clip->setName (name);
+    logLine ("rename_clip", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("rename_clip");
+}
+
 juce::var MoshOps::cmdListAudioInputs (const juce::var&)
 {
     Array<var> devices;
@@ -642,7 +667,7 @@ juce::var MoshOps::cmdArmTrack (const juce::var& args)
             break;
         }
     if (wave == nullptr)
-        return errResult ("arm_track", "no audio input device open — pick one (set_audio_input)");
+        return errResult ("arm_track", "no audio input device open - pick one (set_audio_input)");
 
     undoManager().beginNewTransaction ("arm_track");
     if (on && ! wave->getTargets().contains (track->itemID))
@@ -1537,10 +1562,31 @@ juce::var MoshOps::cmdExportAudio (const juce::var& args)
 
     const double len = juce::jmax (0.1, edit.getLength().inSeconds());
 
-    // Synchronous whole-edit render (useThread=false blocks until the file is
-    // written; the Parameters overload starts a BACKGROUND job and returns early).
-    const bool ok = te::Renderer::renderToFile (edit, file, false)
-                    && file.existsAsFile() && file.getSize() > 0;
+    // Export options (Stage 21): sample rate / bit depth / loop-range render
+    // via the full Parameters path; the simple whole-edit overload otherwise.
+    bool ok = false;
+    if (args.hasProperty ("sampleRate") || args.hasProperty ("bitDepth") || args.hasProperty ("loopOnly"))
+    {
+        juce::WavAudioFormat wavFormat;
+        te::Renderer::Parameters params (edit);
+        params.destFile = file;
+        params.audioFormat = &wavFormat;
+        params.bitDepth = juce::jlimit (16, 32, (int) args.getProperty ("bitDepth", 24));
+        params.sampleRateForAudio = juce::jmax (22050.0, (double) args.getProperty ("sampleRate", 48000.0));
+        if ((bool) args.getProperty ("loopOnly", false) && edit.getTransport().looping.get())
+            params.time = edit.getTransport().getLoopRange();
+        else
+            params.time = { tracktion::TimePosition(), tracktion::TimePosition::fromSeconds (len) };
+        auto out = te::Renderer::renderToFile ("Mosh export", params);
+        ok = out.existsAsFile() && out.getSize() > 0;
+    }
+    else
+    {
+        // Synchronous whole-edit render (useThread=false blocks until the file
+        // is written).
+        ok = te::Renderer::renderToFile (edit, file, false)
+             && file.existsAsFile() && file.getSize() > 0;
+    }
 
     logLine ("export_audio", args, ok, ok ? String() : String ("render produced no file"), false);
     if (! ok) return errResult ("export_audio", "export render failed");

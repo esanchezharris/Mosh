@@ -431,7 +431,7 @@ void MoshEngine::applyPreferredOrSaneOutputDevice()
             if (switchOutputDevice (name).isEmpty())
             {
                 audioWarning = "System default output is " + sinkName
-                             + " (a virtual sink) — Mosh switched to " + name
+                             + " (a virtual sink) - Mosh switched to " + name
                              + ". Pick a different device in the topbar to override.";
                 DBG (audioWarning);
             }

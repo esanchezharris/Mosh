@@ -14,7 +14,7 @@ Parity column makes IR↔UI gaps mechanical to spot.
 **Status legend:** ✅ works in the UI · 🔶 command-only (no UI gesture) ·
 🧠 agent/IR-only · ❌ missing everywhere · 🅿 parked by recorded decision.
 
-Last full audit: 2026-06-10 (Stage 16).
+Last full audit: 2026-06-10 (Stage 21 — the goal pass that cleared the Stage-16 priority list).
 
 ## Project / session
 
@@ -25,11 +25,11 @@ Last full audit: 2026-06-10 (Stage 16).
 | Time signature | ✅ | project.set_time_sig ↔ set_time_sig ↔ chip | S15 |
 | Key / scale | 🔶 | project.set_key ↔ set_key ↔ none | scale-aware piano roll stage |
 | Swing / global groove | 🅿 engine has no groove (ledgered) | project.set_swing → Unsupported | decision: v0.3 or drop |
-| Save / load / autosave | ✅ save+reload buttons; ❌ no autosave, no save-as/project browser | | project-mgmt stage |
+| Save / load / autosave | ✅ save/reload + autosave every ~90s when dirty (S21); ❌ save-as/project browser | | project-mgmt stage |
 | Undo/redo | ✅ buttons + ⌘Z/⌘⇧Z | one UndoManager | S15 |
 | Sections/arrangement markers | 🧠 | arrange.create_section/place ↔ create_section ↔ no UI | arranger stage |
 | Metronome | ✅ | native-only (playback aid) | S15 |
-| Count-in / pre-roll | ❌ | | recording stage |
+| Count-in / pre-roll | ❌ (recording works without it; metronome covers timing) | | recording v2 |
 
 ## Transport
 
@@ -51,10 +51,10 @@ Last full audit: 2026-06-10 (Stage 16).
 | Musical grid + snap divisions | ✅ | bar..1/16T | S14 |
 | Marquee + multi-select | ✅ | | S2 |
 | Track create/rename/remove/reorder | ✅ | dbl-click rename, ≡ drag | S15 |
-| Clip rename | ❌ | clips keep creation names | papercut batch |
+| Clip rename | ✅ context menu → Rename… (rename_clip) | | S21 |
 | Clip looping (cycle a clip region) | ❌ | engine supports loops; no cmd/UI | arrange stage |
 | Clip gain / fades | ❌ | | audio-editing stage |
-| Copy/paste across tracks | 🔶 duplicate_clip takes trackId; no paste UX | | papercut batch |
+| Copy/paste across tracks | 🔶 duplicate_clip takes trackId; no paste UX | | papercut v2 |
 | Crossfades | ❌ | | post-v0 |
 
 ## MIDI editing
@@ -64,10 +64,10 @@ Last full audit: 2026-06-10 (Stage 16).
 | Piano roll: draw/move/resize/delete notes | ✅ | OpenUtau-style, labeled notes, vel lane | **S16** |
 | Drum-rack step sequencer | ✅ | hit/accent cycle, pad rows | S14 |
 | Velocity editing | ✅ | vel lane in piano roll | S16 |
-| Quantize / humanize / transpose | 🔶 | IR + commands exist; no UI buttons | piano-roll toolbar batch |
+| Quantize / humanize / transpose | ✅ piano-roll toolbar (Q / H seeded / ±1 ±12) | | S20 |
 | Note labels (pad/pitch names) | ✅ | the OpenUtau lyric look | S16 |
-| Multi-note selection / lasso in piano roll | ❌ single-note ops only | | piano-roll v2 |
-| 808 glides / pitch bend curves | ❌ engine MIDI-bend spike needed | "slide to X" approximated stepped | named candidate stage |
+| Multi-note selection / lasso in piano roll | ✅ marquee + shift-click; batch move/resize/delete in ONE undo step | | S20 |
+| 808 glides | ✅ REAL continuous slides via automated pitchshift (the sampler ignores MIDI bend — verified); slide… on a selected note | | S20 |
 | Scale highlighting / fold | ❌ | set_key exists, unused visually | scale-aware stage |
 | MIDI clip length change from editor | 🔶 trim in arrangement only | | piano-roll v2 |
 
@@ -91,10 +91,10 @@ Last full audit: 2026-06-10 (Stage 16).
 | Sampler multi-pad (drum rack) + pad add | ✅ | key-ranged pads, file dialog | S14/S15 |
 | Track volume/pan/mute/solo | ✅ | headers | S2/S15 |
 | Master fader | ✅ | native-only cmd (hash-v2 parked) | S15 |
-| Sends / returns | 🧠 | mixer.send/add_send work; NO UI | mixer stage |
-| Sidechain | 🧠 | mixer.sidechain/set_sidechain; NO UI | mixer stage |
-| Track routing (track→track) | 🧠 | track.route/route_track; NO UI | mixer stage |
-| Full mixer view (channel strips) | ❌ headers only | | mixer stage |
+| Sends / returns | ✅ mixer strips: per-send gain (set_send_gain), + send / new bus… | | S17 |
+| Sidechain | ✅ compressor cards: key ▾ track picker | | S17 |
+| Track routing (track→track) | ✅ out: ▾ dropdown per strip | | S17 |
+| Full mixer view (channel strips) | ✅ ☰ Mixer drawer: fader/meter/pan/M·S/routing/sends + master strip | | S17 |
 | Device presets | 🅿 ledgered (no engine preset API) | | v0.3 decision |
 
 ## Import & browser
@@ -102,7 +102,7 @@ Last full audit: 2026-06-10 (Stage 16).
 | Capability | Status | Notes | Closes in |
 |---|---|---|---|
 | Import audio via dialog | ✅ | + Import, drum-rack + pad | S15 |
-| Crate browser + audition | ❌ | named next sound stage (Emilio-approved) | crate-browser stage |
+| Crate browser + audition | ✅ 🗄 Crate drawer: tree, recursive search, in-engine audition, →trk/→pad | | S18 |
 | Drag-drop from Finder | 🅿 WebView drops don't carry paths; dialog is the path | | revisit native-window drop |
 | Asset resolve from text (agent) | 🧠 | asset.resolve (token+path scoring, CLAP rerank tool) | crate browser surfaces it |
 
@@ -110,9 +110,9 @@ Last full audit: 2026-06-10 (Stage 16).
 
 | Capability | Status | Notes | Closes in |
 |---|---|---|---|
-| Audio input recording | ❌ | transport record exists; no input UI/arming | **recording stage (named next)** |
-| MIDI keyboard input | ❌ | | recording stage |
-| Input monitoring / arming | ❌ | | recording stage |
+| Audio input recording | ✅ 🎙 input pick + ● arm + ⏺ Rec — PROVEN with a real mic take landing as a clip (smoke Phase D) | | S19 |
+| MIDI keyboard input | ❌ (audio-input recording shipped first) | | recording v2 |
+| Input monitoring / arming | ✅ arming (arm_track); monitoring toggle ❌ | | S19 / recording v2 |
 
 ## Automation
 
@@ -126,8 +126,8 @@ Last full audit: 2026-06-10 (Stage 16).
 | Capability | Status | Notes | Closes in |
 |---|---|---|---|
 | Export mix to WAV | ✅ | topbar | S6 |
-| Bounce range/stems | 🔶 render.bounce (harness) | | export-options batch |
-| MP3/format options, sample-rate choice | ❌ | | export-options batch |
+| Bounce range/stems | ✅ loop-range export (⚙ menu); stems still 🔶 (harness tracksToDo) | | S21 / export v2 |
+| WAV bit-depth + sample-rate options | ✅ ⚙ export menu (16/24-bit × 44.1/48k × full/loop); MP3 ❌ (no LAME) | | S21 |
 
 ## Collaboration & agent (the uniques)
 
@@ -142,11 +142,13 @@ Last full audit: 2026-06-10 (Stage 16).
 
 ## Standing priorities derived from this audit
 
-1. **Mixer stage** — sends/returns/sidechain/routing have FULL agent+command
-   support and ZERO UI (the biggest closure-rule violation left).
-2. **Crate browser** (named, approved) — import exists; browsing/audition is
-   the producer workflow.
-3. **Recording stage** (named) — the only whole category at ❌.
-4. **Piano-roll v2** — multi-select, quantize/humanize buttons, clip-length,
-   scale highlighting; then the 808-glide/pitch-bend spike.
-5. **Papercut batch** — clip rename, paste UX, autosave, export options.
+The Stage-16 priority list (mixer · crate browser · recording · piano-roll v2
+· papercuts) was CLEARED in Stages 17–21 (2026-06-10). Next tier, by value:
+
+1. **Automation lanes UI** — automation.write works (and now powers slides);
+   curves still have no visible/editable lane.
+2. **Sections/arranger UI** — arrange.create_section is agent-only.
+3. **Clip inspector** — pitch/stretch/slice/reverse have commands, no UI.
+4. **Recording v2** — input monitoring toggle, count-in, MIDI keyboard input.
+5. **Project management** — save-as, project browser, recent sessions.
+6. **Papercut v2** — paste UX, MP3 export, scale highlighting in the roll.

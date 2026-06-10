@@ -130,7 +130,26 @@ export function Clip({ clip }: { clip: ClipT }) {
           />
         )}
       </div>
-      <span className="clip-name">{clip.name}</span>
+      {useStore((st) => st.renamingClipId) === clip.id ? (
+        <input
+          className="clip-rename"
+          autoFocus
+          defaultValue={clip.name}
+          onFocus={(ev) => ev.target.select()}
+          onPointerDown={(ev) => ev.stopPropagation()}
+          onBlur={(ev) => {
+            const name = ev.target.value.trim();
+            useStore.getState().setRenamingClip(null);
+            if (name && name !== clip.name) void exec("rename_clip", { clipId: clip.id, name });
+          }}
+          onKeyDown={(ev) => {
+            if (ev.key === "Enter") (ev.target as HTMLInputElement).blur();
+            if (ev.key === "Escape") useStore.getState().setRenamingClip(null);
+          }}
+        />
+      ) : (
+        <span className="clip-name">{clip.name}</span>
+      )}
       {clip.hasRenderLayer && <span className="rl-badge">RL</span>}
       {tool === "move" && (
         <>

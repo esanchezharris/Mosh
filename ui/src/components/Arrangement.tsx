@@ -226,6 +226,14 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
         <div className="ctx-menu" style={{ left: ctxMenu.x, top: ctxMenu.y }}>
           <button
             onClick={() => {
+              useStore.getState().setRenamingClip(ctxMenu.clipId);
+              setCtxMenu(null);
+            }}
+          >
+            Rename…
+          </button>
+          <button
+            onClick={() => {
               void exec("duplicate_clip", { clipId: ctxMenu.clipId });
               setCtxMenu(null);
             }}

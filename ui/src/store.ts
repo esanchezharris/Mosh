@@ -72,6 +72,10 @@ type State = {
   // Crate browser (Stage 18): left drawer over the sample library.
   crateOpen: boolean;
   setCrateOpen: (b: boolean) => void;
+
+  // Clip rename overlay (Stage 21).
+  renamingClipId: string | null;
+  setRenamingClip: (id: string | null) => void;
   loadColors: () => void;
   setLab: (b: boolean) => void;
 
@@ -201,6 +205,8 @@ export const useStore = create<State>((set, get) => ({
   setMixerOpen: (b) => set({ mixerOpen: b }),
   crateOpen: false,
   setCrateOpen: (b) => set({ crateOpen: b }),
+  renamingClipId: null,
+  setRenamingClip: (id) => set({ renamingClipId: id }),
   openBrowser: () => {
     set({ browserOpen: true });
     if (get().availablePlugins.length === 0)

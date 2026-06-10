@@ -506,4 +506,10 @@ button.on { border-color: var(--accent); color: var(--accent); background: #2120
 .cb-empty { color: var(--muted); padding: 8px; }
 .cb-foot { padding: 4px 8px; font-size: 0.6rem; color: var(--muted); border-top: 1px solid var(--line); }
 
+.clip-rename {
+  position: relative; margin: 2px 4px; width: calc(100% - 8px); font: inherit;
+  font-size: 0.72rem; color: var(--text); background: var(--panel);
+  border: 1px solid var(--accent); border-radius: 4px; padding: 1px 4px;
+}
+
 .boot { padding: 3rem; color: var(--muted); }

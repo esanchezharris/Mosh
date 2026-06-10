@@ -89,6 +89,8 @@ private:
     juce::var cmdListAudioInputs  (const juce::var& args);   // read-only
     juce::var cmdSetAudioInput    (const juce::var& args);   // machine-local
     juce::var cmdArmTrack         (const juce::var& args);   // device-bound; never synced
+    // Stage 21 — papercuts
+    juce::var cmdRenameClip       (const juce::var& args);
     juce::var cmdUndo           (const juce::var& args);
     juce::var cmdRedo           (const juce::var& args);
     juce::var cmdSave           (const juce::var& args);
@@ -218,6 +220,7 @@ private:
     juce::int64 seq = 0;
     juce::File  logFile;
     bool        wasPlaying = false;
+    int         autosaveTicks = 0;   // Stage 21: 30 Hz ticks since the last autosave check
 
     // Meter poll clients, keyed by meter-plugin itemID. CRITICAL lifetime rule
     // (smoke-caught UAF): the playback graph's LevelMeasurerProcessingNode

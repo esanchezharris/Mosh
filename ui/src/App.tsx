@@ -131,9 +131,28 @@ export function App() {
           <AudioIn />
           <MixerToggle />
           <CrateToggle />
-          <button className="tool-btn" onClick={() => exec("export_audio", {})} title="Export the mix to WAV">
+          <button className="tool-btn" onClick={() => exec("export_audio", {})} title="Export the mix (WAV 24-bit 48k)">
             ⤓ Export
           </button>
+          <select
+            className="ao-select"
+            value=""
+            title="Export options (Stage 21)"
+            onChange={(e) => {
+              const v = e.target.value;
+              e.target.value = "";
+              if (v === "wav24-48") void exec("export_audio", { bitDepth: 24, sampleRate: 48000 });
+              else if (v === "wav16-44") void exec("export_audio", { bitDepth: 16, sampleRate: 44100 });
+              else if (v === "loop24-48") void exec("export_audio", { bitDepth: 24, sampleRate: 48000, loopOnly: true });
+              else if (v === "loop16-44") void exec("export_audio", { bitDepth: 16, sampleRate: 44100, loopOnly: true });
+            }}
+          >
+            <option value="" disabled>⚙</option>
+            <option value="wav24-48">full · 24-bit 48k</option>
+            <option value="wav16-44">full · 16-bit 44.1k</option>
+            <option value="loop24-48">loop · 24-bit 48k</option>
+            <option value="loop16-44">loop · 16-bit 44.1k</option>
+          </select>
           <button className="tool-btn" onClick={toggleTheme} title="Toggle theme">
             {theme === "dark" ? "☾" : "☀"}
           </button>
