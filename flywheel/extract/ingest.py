@@ -16,6 +16,7 @@ Fixture path (deterministic, what the smoke gate uses):
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import time
@@ -50,23 +51,75 @@ def ingest(url: str | None = None, media: Path | None = None,
             raise SystemExit("ingest needs a url, a media file, or a fixture")
         if shutil.which("yt-dlp") is None:
             raise SystemExit("yt-dlp not installed (brew install yt-dlp) — or pass --media")
-        media = workdir / "source.m4a"
-        subprocess.run(["yt-dlp", "-x", "--audio-format", "m4a",
-                        "-o", str(media), url], check=True)
+        media = workdir / "source.mp4"
+        if not media.exists():    # downloads cache across reruns of one tutorial
+            subprocess.run(["yt-dlp", "-f", "bv*[height<=720]+ba/b[height<=720]/b",
+                            "--merge-output-format", "mp4",
+                            "-o", str(media), url], check=True)
 
     transcript = _whisper(media, workdir)
-    return {"transcript": transcript, "provenance": provenance}
+    out = {"transcript": transcript, "provenance": provenance, "media": media}
+    frames = _keyframes(media, workdir)
+    if frames:
+        out["frames_dir"] = workdir / "frames"
+        out["frame_index"] = frames
+    return out
 
 
 def _whisper(media: Path, workdir: Path) -> list[dict]:
+    cache = workdir / "transcript.json"
+    if cache.is_file():
+        return json.loads(cache.read_text())
     try:
         import mlx_whisper  # type: ignore
     except ModuleNotFoundError:
         raise SystemExit(
             "mlx-whisper not installed (pip install mlx-whisper) — ASR runs "
             "locally on Apple Silicon; or use --fixture for testing") from None
-    result = mlx_whisper.transcribe(str(media), word_timestamps=True)
-    out = [{"start": s["start"], "end": s["end"], "text": s["text"].strip()}
+    model = os.environ.get("MOSH_WHISPER_MODEL", "mlx-community/whisper-large-v3-turbo")
+    result = mlx_whisper.transcribe(str(media), path_or_hf_repo=model,
+                                    word_timestamps=True)
+    out = [{"start": round(float(s["start"]), 2), "end": round(float(s["end"]), 2),
+            "text": s["text"].strip()}
            for s in result["segments"]]
-    (workdir / "transcript.json").write_text(json.dumps(out, indent=1))
+    cache.write_text(json.dumps(out, indent=1))
     return out
+
+
+def _keyframes(media: Path, workdir: Path, max_frames: int = 120) -> list[dict]:
+    """Scene-change keyframes (phase0 §7.1: most of a tutorial is a static
+    screen with talking — keyframes cut VLM cost 5–10×). Returns
+    [{ts, file}] and writes frames/<n>.jpg + frames/index.json."""
+    frames_dir = workdir / "frames"
+    index_path = frames_dir / "index.json"
+    if index_path.is_file():
+        cached = json.loads(index_path.read_text())
+        if cached:                       # an empty cache means a failed pass — retry
+            return cached
+    if shutil.which("ffmpeg") is None:
+        return []
+    frames_dir.mkdir(exist_ok=True)
+    # DAW tutorials are NEAR-STATIC screens: pure scene-change detection finds
+    # nothing (rung-1 lesson: 0 frames at 0.18). Select on scene-change OR
+    # elapsed time, so static stretches still get periodic coverage.
+    # showinfo on stderr carries pts_time for every SELECTED frame, in order —
+    # that is the index that binds frame files to video timestamps.
+    proc = subprocess.run(
+        ["ffmpeg", "-hide_banner", "-i", str(media),
+         "-vf", ("select='isnan(prev_selected_t)+gt(scene,0.04)"
+                 "+gte(t-prev_selected_t,20)',showinfo,scale=960:-2"),
+         "-vsync", "vfr", "-frames:v", str(max_frames), "-q:v", "4",
+         str(frames_dir / "%05d.jpg")],
+        capture_output=True, text=True)
+    times = []
+    for line in proc.stderr.splitlines():
+        if "pts_time:" in line:
+            try:
+                times.append(round(float(line.split("pts_time:")[1].split()[0]), 2))
+            except (ValueError, IndexError):
+                pass
+    files = sorted(frames_dir.glob("*.jpg"))
+    index = [{"ts": times[i] if i < len(times) else None,
+              "file": str(f)} for i, f in enumerate(files)]
+    index_path.write_text(json.dumps(index, indent=1))
+    return index

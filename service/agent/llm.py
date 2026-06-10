@@ -35,6 +35,40 @@ def complete(provider: str, system: str, user: str,
     raise ProviderError(f"unknown provider: {provider}")
 
 
+def complete_with_images(provider: str, system: str, user: str,
+                         image_paths: list, temperature: float = 0.0) -> str:
+    """Multimodal completion (vision claims, phase0 §7.4). Gemini only;
+    mock returns an empty claims array so fixture paths stay zero-spend."""
+    if provider == "mock":
+        return "[]"
+    if provider != "gemini":
+        raise ProviderError(f"provider '{provider}' has no image path wired")
+    import base64
+    key = os.environ.get("GEMINI_API_KEY", "")
+    if not key:
+        raise ProviderError("GEMINI_API_KEY not set (env only — never in repo/chat)")
+    parts = [{"text": user}]
+    for p in image_paths:
+        with open(p, "rb") as f:
+            parts.append({"inline_data": {
+                "mime_type": "image/jpeg",
+                "data": base64.b64encode(f.read()).decode("ascii")}})
+    url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
+           f"{GEMINI_MODEL}:generateContent?key={key}")
+    body = {
+        "systemInstruction": {"parts": [{"text": system}]},
+        "contents": [{"role": "user", "parts": parts}],
+        "generationConfig": {"temperature": temperature,
+                             "maxOutputTokens": 8192,
+                             "responseMimeType": "application/json"},
+    }
+    out = _post(url, {}, body, timeout=120.0)
+    try:
+        return out["candidates"][0]["content"]["parts"][0]["text"]
+    except (KeyError, IndexError):
+        raise ProviderError(f"unexpected gemini response shape: {str(out)[:200]}") from None
+
+
 def _post(url: str, headers: dict, body: dict, timeout: float = 60.0) -> dict:
     req = urllib.request.Request(
         url, data=json.dumps(body).encode("utf-8"),

@@ -39,9 +39,12 @@ DEFAULT_APP = REPO_ROOT / "build-macos-arm64/Mosh_artefacts/Debug/Mosh.app/Conte
 
 def run_pipeline(url: str | None, media: Path | None, fixture: Path | None,
                  provider: str, app: Path, db_path: Path,
-                 judge_provider: str | None = None) -> dict:
+                 judge_provider: str | None = None,
+                 workdir: Path | None = None,
+                 artifacts_dir: Path | None = None,
+                 instruction: str | None = None) -> dict:
     t0 = time.time()
-    ing = ingest_mod.ingest(url=url, media=media, fixture=fixture)
+    ing = ingest_mod.ingest(url=url, media=media, fixture=fixture, workdir=workdir)
     steps = segment_mod.segment(ing["transcript"])
     print(f"segmented into {len(steps)} steps")
 
@@ -49,18 +52,50 @@ def run_pipeline(url: str | None, media: Path | None, fixture: Path | None,
     if fixture is not None and (fixture / "steps.json").is_file():
         fixture_steps = json.loads((fixture / "steps.json").read_text())
 
-    # Per-step inference; the running summary is just executed-op kinds (cheap).
+    # Per-step inference. The running summary is the SYMBOL TABLE — rung-1
+    # lesson: without it the model copies exemplar ids per step and later
+    # steps reference clips that don't exist yet.
     all_ops, step_records, unextracted = [], [], 0
-    summary_kinds: list[str] = []
+    symbols = {"tracks": {}, "clips": {}, "devices": {}}
+
+    def _summary() -> str:
+        if not any(symbols.values()):
+            return "EMPTY project — no tracks, clips, or devices exist yet."
+        parts = []
+        if symbols["tracks"]:
+            parts.append("tracks: " + ", ".join(
+                f"{k}({v})" for k, v in symbols["tracks"].items()))
+        if symbols["clips"]:
+            parts.append("clips: " + ", ".join(
+                f"{k}(on {v})" for k, v in symbols["clips"].items()))
+        if symbols["devices"]:
+            parts.append("devices: " + ", ".join(
+                f"{k}({v})" for k, v in symbols["devices"].items()))
+        return "; ".join(parts)
+
+    def _absorb(ops: list) -> None:
+        for op in ops:
+            k, p = op.get("kind", ""), op.get("params", {})
+            if k == "track.create":
+                symbols["tracks"][p.get("track_id")] = p.get("role", p.get("kind", "audio"))
+            elif k == "track.delete":
+                symbols["tracks"].pop(p.get("track_id"), None)
+            elif k in ("clip.create", "sample.place"):
+                symbols["clips"][p.get("clip_id")] = p.get("track_id")
+            elif k == "clip.delete":
+                symbols["clips"].pop(p.get("clip_id"), None)
+            elif k == "device.add":
+                symbols["devices"][p.get("device_id")] = \
+                    f"{p.get('role')} on {p.get('track_id')}"
+
     for i, step in enumerate(steps):
         mock_ops = fixture_steps[i] if fixture_steps and i < len(fixture_steps) else None
-        inf = infer_mod.infer_step(step, ", ".join(summary_kinds[-12:]),
-                                   provider, mock_ops=mock_ops)
+        inf = infer_mod.infer_step(step, _summary(), provider, mock_ops=mock_ops)
         ops = inf.get("ops", []) if inf.get("ok") else []
         if not inf.get("ok"):
             unextracted += 1
         all_ops += ops
-        summary_kinds += [op.get("kind", "") for op in ops]
+        _absorb(ops)
         step_records.append({"step": step, "ops": ops,
                              "unextracted": not inf.get("ok"),
                              "errors": inf.get("errors", [])})
@@ -89,16 +124,48 @@ def run_pipeline(url: str | None, media: Path | None, fixture: Path | None,
     l0 = (total - counts.get("unsupported", total)) / total
     l1 = counts.get("failed", 1) == 0 and bool(harness.get("state_hash"))
 
-    # Claims: fixture/VLM file + transcript-mined; L2 against the projection.
+    # Claims: transcript-mined + fixture file + REAL vision claims off the
+    # keyframes (mock provider → zero vision calls); L2 vs the projection.
     claims = verify.claims_from_transcript(ing["transcript"])
     if ing.get("claims_path"):
         claims += json.loads(Path(ing["claims_path"]).read_text())
-    l2 = verify.l2_score(claims, harness.get("projection", "{}")) \
+    if ing.get("frame_index") and provider != "mock":
+        vclaims = verify.claims_from_frames(ing["frame_index"], provider)
+        print(f"  vision claims: {len(vclaims)} from {len(ing['frame_index'])} keyframes")
+        claims += vclaims
+    # Claim hygiene (rung-1 lesson): spoken BPMs in a teaching video are often
+    # demonstrations ("if I drop to 90..."). Frame-read BPM beats speech; with
+    # no frames, only the LAST spoken bpm describes the kept artifact.
+    # Dedupe identical (kind, value) claims first — 93 keyframes of a static
+    # tempo display yield 48 copies of bpm=160, which would drown every other
+    # claim in the L2 denominator. Keep the max-confidence representative.
+    best: dict = {}
+    for c in claims:
+        k = (c.get("kind"), str(c.get("value")), c.get("source"))
+        if k not in best or c.get("confidence", 0) > best[k].get("confidence", 0):
+            best[k] = c
+    claims = list(best.values())
+
+    spoken_bpm = [c for c in claims if c.get("kind") == "bpm" and c.get("source") == "transcript"]
+    frame_bpm = [c for c in claims if c.get("kind") == "bpm" and c.get("source") == "frame"]
+    if spoken_bpm and (frame_bpm or len(spoken_bpm) > 1):
+        keep = set() if frame_bpm else {id(max(spoken_bpm, key=lambda c: c.get("ts", 0)))}
+        claims = [c for c in claims if not (c.get("kind") == "bpm"
+                                            and c.get("source") == "transcript"
+                                            and id(c) not in keep)]
+    duration_s = ing["transcript"][-1]["end"] if ing["transcript"] else None
+    l2 = verify.l2_score(claims, harness.get("projection", "{}"), duration_s) \
         if harness.get("projection") else {"score": None, "checked": 0, "misses": []}
     l3 = verify.l3_score(genre=ing["provenance"].get("genre", "unknown"))
-    instruction = (ing["provenance"].get("title")
+    instruction = (instruction or ing["provenance"].get("title")
                    or f"replicate tutorial: {steps[0]['narration'][:90]}")
-    verdict = judge_mod.judge(judge_provider or provider, instruction, all_ops, counts)
+    outline = "\n".join(f"- {s['narration'][:140]}" for s in steps[:20])
+    verdict = judge_mod.judge(
+        judge_provider or provider,
+        f"{instruction}\nWhat the tutorial covered, step by step:\n{outline}\n"
+        f"Judge how faithfully the op program realizes the BUILD steps among "
+        f"these (explanation-only steps need no ops).",
+        all_ops, counts)
     decision = verify.grade(l0, l1, l2, l3, float(verdict.get("mean", 0.0)))
 
     # Store it — provenance mandatory; graded, not binary (spec §14.2).
@@ -141,6 +208,25 @@ def run_pipeline(url: str | None, media: Path | None, fixture: Path | None,
               "accepted": decision["accepted"],
               "policy_notes": decision["policy_notes"],
               "seconds": round(time.time() - t0, 1)}
+
+    # Replication-ladder artifacts: everything the correction pass needs.
+    if artifacts_dir is not None:
+        artifacts_dir.mkdir(parents=True, exist_ok=True)
+        (artifacts_dir / "attempt.json").write_text(json.dumps({
+            "result": result,
+            "steps": [{"step_id": sr["step"]["step_id"],
+                       "narration": sr["step"]["narration"],
+                       "narration_ts": sr["step"]["narration_ts"],
+                       "ops": sr["ops"],
+                       "unextracted": sr["unextracted"],
+                       "errors": sr["errors"]} for sr in step_records],
+            "claims": claims,
+            "l2": l2,
+            "judge": verdict,
+        }, indent=1))
+        if harness.get("projection"):
+            (artifacts_dir / "projection.json").write_text(harness["projection"])
+
     print(json.dumps(result))
     return result
 

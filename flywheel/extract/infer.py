@@ -27,7 +27,27 @@ EXTRACT_SYSTEM_SUFFIX = """
 You are transcribing a TUTORIAL STEP into ops, not improvising. Express what
 the narrator DID — their tempo, their pattern shape, their device moves — at
 tutorial-step granularity. If the narration names something the vocabulary
-cannot express, do the expressible part; the gap ledger records the rest."""
+cannot express, do the expressible part; the gap ledger records the rest.
+
+Tutorials TEACH, so most narration is not a build action:
+- Replicate the ARTIFACT the producer keeps. Demonstrations, alternatives and
+  what-ifs ("for example...", "if I drop this to 90 BPM...", "some people
+  do X") are NOT build steps — when they audition X and settle on Y, emit Y.
+- A step that is pure explanation, recap, promotion, or listening emits an
+  EMPTY ops array: {"rationale": "talk only", "ops": []}. Empty is correct
+  and common; never invent ops to fill a step.
+- Producer slang is contextual: "bounce" while discussing rhythm/feel means
+  swing/groove (NOT render.bounce); "halftime" is a feel, not a tempo change.
+- REUSE the ids listed in "Session so far" — they are the live symbol table.
+  Add notes to the EXISTING clip on the right track; never re-create or
+  rename something that already exists, and never reference an id that is
+  neither in the session nor created earlier in YOUR ops for this step.
+- A step that NAMES a concrete addition ("I added another 808", "let me lay
+  down the snare", "grab any hi-hat, drag it out") is a build step, even when
+  it sits inside a long explanation.
+- Mirror the VISIBLE channel structure: one track per drum sound / rack
+  channel (kick, clap, hat, 808 each on their own track) — never pitch-lanes
+  on a single track unless the video shows one."""
 
 
 def infer_step(step: dict, session_summary: str, provider: str,
@@ -80,8 +100,10 @@ def _parse(raw: str):
     except json.JSONDecodeError as e:
         return None, [f"not valid JSON: {e}"]
     ops = doc.get("ops")
-    if not isinstance(ops, list) or not ops:
-        return None, ["no non-empty 'ops' array"]
+    if not isinstance(ops, list):
+        return None, ["no 'ops' array"]
+    # Empty ops is VALID in extraction: talk-only steps are common (rung-1
+    # lesson — forcing ops onto explanation segments hallucinates a build).
     errors = []
     for i, op in enumerate(ops):
         errors += [f"ops[{i}]: {m}" for m in moshir_validate.validate_op(op)]

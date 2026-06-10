@@ -35,22 +35,85 @@ def claims_from_transcript(transcript: list[dict]) -> list[dict]:
     return claims
 
 
-def l2_score(claims: list[dict], projection_text: str) -> dict:
+VISION_SYSTEM = """You read DAW tutorial screenshots (FL Studio / Ableton) and
+extract ONLY what is clearly visible as typed claims. Reply with ONLY a JSON
+array; each claim: {"ts": <number — the timestamp you were given for that
+frame>, "kind": "bpm"|"track_count"|"notes_present"|"section_present",
+"value": <number or string>, "confidence": <0..1>}.
+
+kinds:
+- bpm: the tempo display value — digit-level certainty REQUIRED: the display
+  is small; read each digit distinctly (beware 4 vs 6, 0 vs 8). If you cannot
+  resolve individual digits at this resolution, OMIT the claim entirely. Do
+  not let genre priors or numbers spoken in the tutorial influence the read.
+- track_count: count of track/channel rows visible in the rack or arrangement
+- notes_present: count of MIDI notes visible in a piano roll (if partially
+  scrolled, report what you can count and lower the confidence)
+- section_present: a named arrangement section label that is visible
+
+Never guess. Omit a frame entirely rather than inventing a claim."""
+
+
+def claims_from_frames(frame_index: list[dict], provider: str,
+                       batch_size: int = 8, max_batches: int = 6) -> list[dict]:
+    """Frame-state claims via the VLM (phase0 §7.4 — the strong fidelity
+    signal). Keyframes only; batched; mock provider returns []. Failures
+    degrade to zero claims, never crash the pipeline."""
+    import sys as _sys
+    from pathlib import Path as _Path
+    _sys.path.insert(0, str(_Path(__file__).resolve().parents[2] / "service"))
+    from agent import llm
+
+    frames = [f for f in frame_index if f.get("ts") is not None][: batch_size * max_batches]
+    claims: list[dict] = []
+    for i in range(0, len(frames), batch_size):
+        batch = frames[i:i + batch_size]
+        user = ("Frame timestamps, in order: "
+                + ", ".join(f"{f['ts']}s" for f in batch)
+                + ". Extract typed claims for each frame where state is legible.")
+        try:
+            raw = llm.complete_with_images(provider, VISION_SYSTEM, user,
+                                           [f["file"] for f in batch])
+            parsed = json.loads(raw.strip().strip("`").lstrip("json"))
+            for c in parsed if isinstance(parsed, list) else []:
+                if isinstance(c, dict) and c.get("kind") and "value" in c:
+                    c["source"] = "frame"
+                    claims.append(c)
+        except Exception as e:  # noqa: BLE001 — degrade, never crash (§7.3 spirit)
+            print(f"  vision batch {i // batch_size}: degraded ({e})")
+    return claims
+
+
+def l2_score(claims: list[dict], projection_text: str,
+             duration_s: float | None = None) -> dict:
     """Diff typed claims against the canonical projection. Returns
-    {score, checked, hits, misses: [...]}, score in [0,1]."""
+    {score, checked, hits, misses, unchecked}, score in [0,1].
+
+    The projection is the FINAL session state, so time-dependent claims
+    (track_count, notes_present) only count when they come from the last 20%
+    of the video; earlier ones are reported as unchecked, never as misses.
+    bpm claims check from anywhere (tempo rarely moves mid-tutorial)."""
     if not claims:
         return {"score": None, "checked": 0, "hits": 0, "misses": [],
-                "note": "no claims — L2 unavailable for this tutorial"}
+                "unchecked": 0, "note": "no claims — L2 unavailable for this tutorial"}
     proj = json.loads(projection_text)
-    hits, misses = 0, []
+    cutoff = 0.8 * duration_s if duration_s else None
+    hits, misses, unchecked = 0, [], 0
     for c in claims:
-        ok = _check_claim(c, proj)
-        if ok:
+        if (c.get("kind") != "bpm" and cutoff is not None
+                and float(c.get("ts", 0.0)) < cutoff):
+            unchecked += 1
+            continue
+        if _check_claim(c, proj):
             hits += 1
         else:
             misses.append(f"{c['kind']}={c['value']} not in session state")
-    return {"score": round(hits / len(claims), 3), "checked": len(claims),
-            "hits": hits, "misses": misses}
+    checked = hits + len(misses)
+    if checked == 0:
+        return {"score": None, "checked": 0, "hits": 0, "misses": [],
+                "unchecked": unchecked, "note": "no final-state claims checkable"}
+    return {"score": round(hits / checked, 3), "checked": checked,
+            "hits": hits, "misses": misses, "unchecked": unchecked}
 
 
 def _check_claim(c: dict, proj: dict) -> bool:
@@ -90,8 +153,14 @@ def grade(l0: float, l1: bool, l2: dict, l3: dict, l4_mean: float) -> dict:
         return {"grade": None, "accepted": False,
                 "policy_notes": [f"rejected: L0={l0} (<0.8) or L1={l1}"]}
     l2s = l2.get("score")
-    if l2s is not None and l2s >= 0.8:
+    # Gold needs the judge too (rung-1 lesson: sparse bpm/track_count claims
+    # saturate L2 — a near-empty build scored 0.958. L2 verifies what's
+    # claimed; the judge notices what's MISSING).
+    if l2s is not None and l2s >= 0.8 and l4_mean >= 4.0:
         return {"grade": "gold", "accepted": True, "policy_notes": notes}
+    if l2s is not None and l2s >= 0.8 and l4_mean < 4.0:
+        notes.append(f"L2={l2s} but judge={l4_mean} (<4): gold denied, "
+                     "claims likely under-cover the build")
     l3_ok = l3.get("status") == "pass"
     if l3.get("status") == "unavailable":
         notes.append("L3 uncalibrated: silver granted on L4 alone (relaxation)")

@@ -16,12 +16,36 @@ from agent import llm  # noqa: E402
 RUBRIC = (Path(__file__).parent / "rubrics/v1.md").read_text()
 
 
+def _digest(ops: list) -> str:
+    """Compact, COMPLETE program rendering for the judge — raw JSON of dense
+    note arrays blows any budget and silent truncation makes the judge grade
+    a program it never saw (rung-1 lesson: 'misses the rolls' — they were
+    past the cut)."""
+    lines = []
+    for op in ops:
+        k, p = op.get("kind", "?"), op.get("params", {})
+        if k == "notes.add":
+            ns = p.get("notes", [])
+            pitches = sorted({str(n.get("pitch")) for n in ns})
+            starts = [float(n.get("start_beats", 0)) for n in ns] or [0]
+            vels = [int(n.get("vel", 0)) for n in ns] or [0]
+            lines.append(
+                f"notes.add(clip={p.get('clip_id')}, {len(ns)} notes, "
+                f"pitches={'/'.join(pitches)}, beats {min(starts)}..{max(starts)}, "
+                f"vel {min(vels)}-{max(vels)})")
+        else:
+            args = {a: v for a, v in p.items() if a != "notes"}
+            lines.append(f"{k}({json.dumps(args, sort_keys=True)})"
+                         + (f" -> {op['out']}" if op.get("out") else ""))
+    return "\n".join(lines)
+
+
 def judge(provider: str, instruction: str, ops: list, exec_counts: dict,
           rationale: str = "") -> dict:
     if provider == "mock":
         return _mock_judge(instruction, ops, exec_counts)
-    user = (f"Instruction: {instruction}\n\nOp program ({len(ops)} ops):\n"
-            + json.dumps(ops, indent=1)[:6000]
+    user = (f"Instruction: {instruction}\n\nOp program ({len(ops)} ops, complete):\n"
+            + _digest(ops)
             + f"\n\nExecution counts: {json.dumps(exec_counts)}")
     if rationale:
         # The agent's own caveats (vocabulary approximations etc.) — a human

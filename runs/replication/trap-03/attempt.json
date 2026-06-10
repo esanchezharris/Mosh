@@ -1,0 +1,2289 @@
+{
+ "result": {
+  "traj_id": "tut-71e790754c",
+  "steps": 33,
+  "ops": 8,
+  "unextracted": 1,
+  "l0": 1.0,
+  "l1": true,
+  "l2": 0.958,
+  "l3": "unavailable",
+  "l4": 2.5,
+  "grade": "gold",
+  "accepted": true,
+  "policy_notes": [],
+  "seconds": 280.5
+ },
+ "steps": [
+  {
+   "step_id": "s1",
+   "narration": "Hello and welcome to BusyWorksBeats.com. Today we begin the trap series right here at BusyWorksBeats.com slash trap. And in this series I'm going to show you step-by-step all the components to make trap beats. So if you're a beginner all the way to advanced, you will learn the nuances of trap. A lot of us, when we're making beats, we forget the things that kind of made it make sense in the beginning. So when you revisit these basics, you actually become better. So this is for both beginners and advanced. So today we're going to focus on rhythms. Rhythms are the most important thing with trap because you can literally strip away all the instruments. And like you've heard in those TikTok beats, have just the 808, the hi-hats, and a snare. And that's the entire beat. So the rhythm is extremely important in trap beats. And there's about three main things we need to focus on with rhythm. One is going to be the bounce of the track. Two is going to be the timing or like when people say half-time. Okay, so we're going to cover bounce. We're going to cover half-time. And then we're going to cover the fundamental genre rhythms, like the drum rhythms. Okay, so that's what we'll cover today. So you'll get these project files, so don't worry about missing out or anything like that. So the first thing is, in FL Studio specifically, this is my opinion as to how trap became popular. It starts off at 140 BPM. So what beginners would do is just hit the metronome button and just make a beat because they didn't know anything about the BPM. So they just kept it at 140, which meant that they wanted the drums to go boom. Ka, t, t, t, ka. But they didn't know how to do that. So they would just draw it in manually without knowing what they were doing. I think that's where these high tempos came from. So the first thing to understand with genre drums, or we'll get into the concept of half drums, is that when you up the BPM beyond, let's say, 120, you're pretty much stepping into half-time territory. It's when you double the BPM, but you spread out the time. And the reason we do this in FL Studio is because you can do things a lot easier, like create hi-hat rolls.",
+   "narration_ts": [
+    0.0,
+    121.64
+   ],
+   "ops": [
+    {
+     "kind": "project.set_tempo",
+     "params": {
+      "bpm": 140
+     }
+    }
+   ],
+   "unextracted": false,
+   "errors": []
+  },
+  {
+   "step_id": "s2",
+   "narration": "For example, let's do something really simple just to show you the difference. So here's a simple hi-hat pattern. We'll just click over there, then right-click, fill each two steps.",
+   "narration_ts": [
+    121.82,
+    130.64
+   ],
+   "ops": [],
+   "unextracted": true,
+   "errors": [
+    "not valid JSON: Expecting ',' delimiter: line 1 column 2781 (char 2780)"
+   ]
+  },
+  {
+   "step_id": "s3",
+   "narration": "Now, 140 BPM, this sounds fast. And you can just add in notes, though. Okay, but if I drop this down to 90 BPM, you know, below that 120 BPM, it starts to sound really slow.",
+   "narration_ts": [
+    130.78,
+    149.36
+   ],
+   "ops": [],
+   "unextracted": false,
+   "errors": []
+  },
+  {
+   "step_id": "s4",
+   "narration": "Now, it still sounds good, but it's not as fast. So if you wanted to do hi-hat rolls, for example, even if you left-click and drag all the hi-hats in, it's just not as fast because you can't do those hi-hat rolls as easy. So that's another reason why we would use higher BPM. So again, anything in general, anything above 120 is usually going to be where we're going into that half-slowed-down feel. Okay, so turn on your metronome because that will always help you. Whenever you get stuck, turn on the metronome. The metronome, every time it clicks, is like a heartbeat. Okay, so we call those beats because it's like a heartbeat. So one, two, there, I'm just counting a little too slow. So one, two, three, four. Okay, that's every beat. So it's four beats. One, two, three, four. So what creates a bar?",
+   "narration_ts": [
+    154.48,
+    199.52
+   ],
+   "ops": [],
+   "unextracted": false,
+   "errors": []
+  },
+  {
+   "step_id": "s5",
+   "narration": "Now, bars are different sets of timing. Depending on your time signature, most music is in four, four. And what that means is how many beats are considered a bar? So the first number is how many beats. So in this case, four beats are considered one bar. So every time we have four heartbeats, one, two, three, four, that's considered one bar. Okay, but when you're in double time and all these different things, technically, it's not one bar. It's one bar according to the BPM, but it's not one bar according to the music because everything's stretched out to be double. So that's the tricky part that people usually kind of get twisted in their head. Like the number one thing you'll get confused with in the beginning is how many bars you're actually supposed to put in the playlist. So if you go to the playlist and you go to song mode, two bars really isn't two bars. Because before I get to that point, let me lay down the snare just to make an example. So with trap music, let's drag this out to a typical pattern. Okay, so I just right clicked, fill each two steps. We're at 140 BPM.",
+   "narration_ts": [
+    199.84,
+    264.44
+   ],
+   "ops": [
+    {
+     "kind": "project.set_tempo",
+     "params": {
+      "bpm": 140
+     }
+    },
+    {
+     "kind": "track.create",
+     "params": {
+      "track_id": "tdr",
+      "kind": "midi",
+      "role": "drums"
+     }
+    },
+    {
+     "kind": "device.add",
+     "params": {
+      "device_id": "ddr",
+      "track_id": "tdr",
+      "role": "sampler",
+      "prefer": [
+       "builtin.sampler"
+      ]
+     }
+    },
+    {
+     "kind": "clip.create",
+     "params": {
+      "clip_id": "cdr",
+      "track_id": "tdr",
+      "start_bar": 1,
+      "length_beats": 8,
+      "kind": "midi"
+     }
+    },
+    {
+     "kind": "notes.add",
+     "params": {
+      "clip_id": "cdr",
+      "notes": [
+       {
+        "pitch": "D1",
+        "start_beats": 0,
+        "dur_beats": 0.25,
+        "vel": 100
+       },
+       {
+        "pitch": "D1",
+        "start_beats": 0.5,
+        "dur_beats": 0.25,
+        "vel": 100
+       },
+       {
+        "pitch": "D1",
+        "start_beats": 1,
+        "dur_beats": 0.25,
+        "vel": 100
+       },
+       {
+        "pitch": "D1",
+        "start_beats": 1.5,
+        "dur_beats": 0.25,
+        "vel": 100
+       },
+       {
+        "pitch": "D1",
+        "start_beats": 2,
+        "dur_beats": 0.25,
+        "vel": 100
+       },
+       {
+        "pitch": "D1",
+        "start_beats": 2.5,
+        "dur_beats": 0.25,
+        "vel": 100
+       },
+       {
+        "pitch": "D1",
+        "start_beats": 3,
+        "dur_beats": 0.25,
+        "vel": 100
+       },
+       {
+        "pitch": "D1",
+        "start_beats": 3.5,
+        "dur_beats": 0.25,
+        "vel": 100
+       },
+       {
+        "pitch": "D1",
+        "start_beats": 4,
+        "dur_beats": 0.25,
+        "vel": 100
+       },
+       {
+        "pitch": "D1",
+        "start_beats": 4.5,
+        "dur_beats": 0.25,
+        "vel": 100
+       },
+       {
+        "pitch": "D1",
+        "start_beats": 5,
+        "dur_beats": 0.25,
+        "vel": 100
+       },
+       {
+        "pitch": "D1",
+        "start_beats": 5.5,
+        "dur_beats": 0.25,
+        "vel": 100
+       },
+       {
+        "pitch": "D1",
+        "start_beats": 6,
+        "dur_beats": 0.25,
+        "vel": 100
+       },
+       {
+        "pitch": "D1",
+        "start_beats": 6.5,
+        "dur_beats": 0.25,
+        "vel": 100
+       },
+       {
+        "pitch": "D1",
+        "start_beats": 7,
+        "dur_beats": 0.25,
+        "vel": 100
+       },
+       {
+        "pitch": "D1",
+        "start_beats": 7.5,
+        "dur_beats": 0.25,
+        "vel": 100
+       }
+      ]
+     }
+    }
+   ],
+   "unextracted": false,
+   "errors": []
+  },
+  {
+   "step_id": "s6",
+   "narration": "Now the clap is going to go on the three and the seven count for the most part. So again, listen to the metronome and count one, two. Let me turn off the hi-hats. One, two, three, four, five, six, seven, eight. One, two, three, four, five, six, seven, eight. Okay, so that's where the clap and the snare go.",
+   "narration_ts": [
+    264.68,
+    282.56
+   ],
+   "ops": [
+    {
+     "kind": "notes.add",
+     "params": {
+      "clip_id": "cdr",
+      "notes": [
+       {
+        "pitch": "D1",
+        "start_beats": 2,
+        "dur_beats": 0.5,
+        "vel": 105
+       },
+       {
+        "pitch": "D1",
+        "start_beats": 6,
+        "dur_beats": 0.5,
+        "vel": 105
+       },
+       {
+        "pitch": "D1",
+        "start_beats": 10,
+        "dur_beats": 0.5,
+        "vel": 105
+       },
+       {
+        "pitch": "D1",
+        "start_beats": 14,
+        "dur_beats": 0.5,
+        "vel": 105
+       },
+       {
+        "pitch": "D1",
+        "start_beats": 18,
+        "dur_beats": 0.5,
+        "vel": 105
+       },
+       {
+        "pitch": "D1",
+        "start_beats": 22,
+        "dur_beats": 0.5,
+        "vel": 105
+       },
+       {
+        "pitch": "D1",
+        "start_beats": 26,
+        "dur_beats": 0.5,
+        "vel": 105
+       },
+       {
+        "pitch": "D1",
+        "start_beats": 30,
+        "dur_beats": 0.5,
+        "vel": 105
+       }
+      ]
+     }
+    }
+   ],
+   "unextracted": false,
+   "errors": []
+  },
+  {
+   "step_id": "s7",
+   "narration": "Now if we were at 120 and below, the snare would not go on those spots. It would go on what's called the two and the four. And this is what separates the trap genre from like actual 140 BPM music. So actual 140 BPM music might be some type of dance music and EDM. They would put the snare on the two and the four. So it'd be one, two, three, four, five, six, seven, eight. One, two, three, four. And that's not where your trap drums go. Trap drums go on the three and the seven count. So that's why I said everything's kind of slowed down and spread apart. So it's one, two, three, four, five, six, seven, eight.",
+   "narration_ts": [
+    282.9,
+    318.36
+   ],
+   "ops": [],
+   "unextracted": false,
+   "errors": []
+  },
+  {
+   "step_id": "s8",
+   "narration": "So now when we add this to the playlist, the reason I said two bars is not really two bars when you're in these BPMs is because you have, you're slowed down. So it's one, two, three, four, two, two, three, four. And that's really two bars. So everything is going to be halved basically. So you're going to need double of everything in this type of genre. So really when we map four bars, it's only two bars, musically speaking. So just keep that in mind.",
+   "narration_ts": [
+    318.36,
+    352.08
+   ],
+   "ops": [],
+   "unextracted": false,
+   "errors": []
+  },
+  {
+   "step_id": "s9",
+   "narration": "Now you don't need to obsess about how many things to make. Just don't obsess about that. The point is you need to know that everything is double. Okay. So let's add a hi-hat back in. And most beats, surprisingly enough, just have these simple, straightforward hi-hats. They don't have a bunch of stuff going on. And later in this trap series, we'll get into hi-hat rolls, 808 slides and all that type of stuff.",
+   "narration_ts": [
+    352.2,
+    372.38
+   ],
+   "ops": [
+    {
+     "kind": "notes.add",
+     "params": {
+      "clip_id": "cdr",
+      "notes": [
+       {
+        "pitch": "F#1",
+        "start_beats": 0.0,
+        "dur_beats": 0.25,
+        "vel": 78
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 0.25,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 0.5,
+        "dur_beats": 0.25,
+        "vel": 72
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 0.75,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 1.0,
+        "dur_beats": 0.25,
+        "vel": 78
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 1.25,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 1.5,
+        "dur_beats": 0.25,
+        "vel": 72
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 1.75,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 2.0,
+        "dur_beats": 0.25,
+        "vel": 78
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 2.25,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 2.5,
+        "dur_beats": 0.25,
+        "vel": 72
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 2.75,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 3.0,
+        "dur_beats": 0.25,
+        "vel": 78
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 3.25,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 3.5,
+        "dur_beats": 0.25,
+        "vel": 72
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 3.75,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 4.0,
+        "dur_beats": 0.25,
+        "vel": 78
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 4.25,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 4.5,
+        "dur_beats": 0.25,
+        "vel": 72
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 4.75,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 5.0,
+        "dur_beats": 0.25,
+        "vel": 78
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 5.25,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 5.5,
+        "dur_beats": 0.25,
+        "vel": 72
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 5.75,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 6.0,
+        "dur_beats": 0.25,
+        "vel": 78
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 6.25,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 6.5,
+        "dur_beats": 0.25,
+        "vel": 72
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 6.75,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 7.0,
+        "dur_beats": 0.25,
+        "vel": 78
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 7.25,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 7.5,
+        "dur_beats": 0.25,
+        "vel": 72
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 7.75,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 8.0,
+        "dur_beats": 0.25,
+        "vel": 78
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 8.25,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 8.5,
+        "dur_beats": 0.25,
+        "vel": 72
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 8.75,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 9.0,
+        "dur_beats": 0.25,
+        "vel": 78
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 9.25,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 9.5,
+        "dur_beats": 0.25,
+        "vel": 72
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 9.75,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 10.0,
+        "dur_beats": 0.25,
+        "vel": 78
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 10.25,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 10.5,
+        "dur_beats": 0.25,
+        "vel": 72
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 10.75,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 11.0,
+        "dur_beats": 0.25,
+        "vel": 78
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 11.25,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 11.5,
+        "dur_beats": 0.25,
+        "vel": 72
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 11.75,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 12.0,
+        "dur_beats": 0.25,
+        "vel": 78
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 12.25,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 12.5,
+        "dur_beats": 0.25,
+        "vel": 72
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 12.75,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 13.0,
+        "dur_beats": 0.25,
+        "vel": 78
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 13.25,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 13.5,
+        "dur_beats": 0.25,
+        "vel": 72
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 13.75,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 14.0,
+        "dur_beats": 0.25,
+        "vel": 78
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 14.25,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 14.5,
+        "dur_beats": 0.25,
+        "vel": 72
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 14.75,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 15.0,
+        "dur_beats": 0.25,
+        "vel": 78
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 15.25,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 15.5,
+        "dur_beats": 0.25,
+        "vel": 72
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 15.75,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 16.0,
+        "dur_beats": 0.25,
+        "vel": 78
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 16.25,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 16.5,
+        "dur_beats": 0.25,
+        "vel": 72
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 16.75,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 17.0,
+        "dur_beats": 0.25,
+        "vel": 78
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 17.25,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 17.5,
+        "dur_beats": 0.25,
+        "vel": 72
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 17.75,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 18.0,
+        "dur_beats": 0.25,
+        "vel": 78
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 18.25,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 18.5,
+        "dur_beats": 0.25,
+        "vel": 72
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 18.75,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 19.0,
+        "dur_beats": 0.25,
+        "vel": 78
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 19.25,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 19.5,
+        "dur_beats": 0.25,
+        "vel": 72
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 19.75,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 20.0,
+        "dur_beats": 0.25,
+        "vel": 78
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 20.25,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 20.5,
+        "dur_beats": 0.25,
+        "vel": 72
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 20.75,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 21.0,
+        "dur_beats": 0.25,
+        "vel": 78
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 21.25,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 21.5,
+        "dur_beats": 0.25,
+        "vel": 72
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 21.75,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 22.0,
+        "dur_beats": 0.25,
+        "vel": 78
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 22.25,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 22.5,
+        "dur_beats": 0.25,
+        "vel": 72
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 22.75,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 23.0,
+        "dur_beats": 0.25,
+        "vel": 78
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 23.25,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 23.5,
+        "dur_beats": 0.25,
+        "vel": 72
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 23.75,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 24.0,
+        "dur_beats": 0.25,
+        "vel": 78
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 24.25,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 24.5,
+        "dur_beats": 0.25,
+        "vel": 72
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 24.75,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 25.0,
+        "dur_beats": 0.25,
+        "vel": 78
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 25.25,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 25.5,
+        "dur_beats": 0.25,
+        "vel": 72
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 25.75,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 26.0,
+        "dur_beats": 0.25,
+        "vel": 78
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 26.25,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 26.5,
+        "dur_beats": 0.25,
+        "vel": 72
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 26.75,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 27.0,
+        "dur_beats": 0.25,
+        "vel": 78
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 27.25,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 27.5,
+        "dur_beats": 0.25,
+        "vel": 72
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 27.75,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 28.0,
+        "dur_beats": 0.25,
+        "vel": 78
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 28.25,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 28.5,
+        "dur_beats": 0.25,
+        "vel": 72
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 28.75,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 29.0,
+        "dur_beats": 0.25,
+        "vel": 78
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 29.25,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 29.5,
+        "dur_beats": 0.25,
+        "vel": 72
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 29.75,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 30.0,
+        "dur_beats": 0.25,
+        "vel": 78
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 30.25,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 30.5,
+        "dur_beats": 0.25,
+        "vel": 72
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 30.75,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 31.0,
+        "dur_beats": 0.25,
+        "vel": 78
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 31.25,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 31.5,
+        "dur_beats": 0.25,
+        "vel": 72
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 31.75,
+        "dur_beats": 0.25,
+        "vel": 64
+       }
+      ]
+     }
+    }
+   ],
+   "unextracted": false,
+   "errors": []
+  },
+  {
+   "step_id": "s10",
+   "narration": "Right now we're just going to go over core rhythms. So that explains the halftime effect and what it means. We're slowing down everything through perception of where we put the snare. So wherever you put the snare, that's what creates the perception of the rhythm.",
+   "narration_ts": [
+    372.54,
+    384.44
+   ],
+   "ops": [],
+   "unextracted": false,
+   "errors": []
+  },
+  {
+   "step_id": "s11",
+   "narration": "Now we go into this in depth. If you want a real deep dive, like a master level deep dive on rhythms, how to make different genres, sound selection, how to become a beat maker for real, go to busyworksbeats.com slash beat magic. I made an entire course around the key rhythms for different genres, the music theory you need, and all the beat making stuff, like how to make beat sound selection, how to arrange stuff. So just go to busyworksbeats.com slash beat magic. There's a full course about it. And when I say I went in depth, that's the course I made when I was preparing for the beat battle. And once I learned the little nuances that I forgot, I actually became way better at making beats. Because the problem with advanced players is that we're so stuck in our habits. We forget the little things that we forgot along the way. And we forget the little things that can make a dramatic difference. And so just analyzing and being aware of those differences makes us make better beats. So believe you me, it's even worked on myself. After I made the course, my beats hit a new level.",
+   "narration_ts": [
+    384.6,
+    442.38
+   ],
+   "ops": [],
+   "unextracted": false,
+   "errors": []
+  },
+  {
+   "step_id": "s12",
+   "narration": "So now that we're here, let's get to the bounce element. So bounce is all about, it's all about the in-betweens. Okay, so I want to, you know, give you a philosophical understanding about what music is. Music is ons and it's offs. That sounds so crazy. You're like ons and offs. What is it? It's a pulse. Okay, so on is 100%. Off is 0%.",
+   "narration_ts": [
+    443.02,
+    469.72
+   ],
+   "ops": [],
+   "unextracted": false,
+   "errors": []
+  },
+  {
+   "step_id": "s13",
+   "narration": "Now music is all the 100 to 0 and everything in between. And sometimes we forget that there's in-between. We're just like, okay, it's either on or it's off. But there's an in-between grayscale from 100 to 0. There's all those degrees in between. And we need to remember that music is not only the stuff that's on, but it's the stuff that's off. So the gaps, okay, gaps in your timing create the groove. Time differences create the bounce. Okay, so it's the in-between stuff. That's what creates the push-pull effect.",
+   "narration_ts": [
+    469.72,
+    503.0
+   ],
+   "ops": [],
+   "unextracted": false,
+   "errors": []
+  },
+  {
+   "step_id": "s14",
+   "narration": "When your brain is anticipating a clap or a snare and it can't wait for the snare and the clap. And then that's when you have that, like, your brain creates this effect where it pulls you in. Literally, like, it feels like a push-pull effect. So bounce is all about having enough in-between space.",
+   "narration_ts": [
+    503.08,
+    519.64
+   ],
+   "ops": [],
+   "unextracted": false,
+   "errors": []
+  },
+  {
+   "step_id": "s15",
+   "narration": "Now, if your beat was just this all the way through, let's just exaggerate, of course. I mean, technically there is an in-between space with the hi-hats. But if it was just this, it's not music because it's just, there's no in-between space. It sounds crazy to listen to stuff like that. So the key really is just leave in-between space. So I'll give you a couple rhythms you can use.",
+   "narration_ts": [
+    519.64,
+    545.7
+   ],
+   "ops": [],
+   "unextracted": false,
+   "errors": []
+  },
+  {
+   "step_id": "s16",
+   "narration": "Now, one thing you got to get used to in this modern era trap, at least where we are right now, is higher BPMs. Now, I've studied the top songs. BPMs are ranging. There's no one spot for BPM. It could be all the way at 120 for the Migos stuff or 130. And it could be up to 180 for the Takashi stuff.",
+   "narration_ts": [
+    545.84,
+    563.66
+   ],
+   "ops": [],
+   "unextracted": false,
+   "errors": []
+  },
+  {
+   "step_id": "s17",
+   "narration": "So, I mean, there's really no set tempo right now. So don't obsess about BPM because you're going to be everywhere from 130 up to 180 and sometimes 200 I've seen. So don't obsess about it. Just pick something in that range. Use your brain, okay? Use your brain or at least use a reference track. So bounce is all about the in-between space. So a common bounce you'll see is boom, boom, boom, boom, boom, boom, boom, boom, boom, boom, boom, boom, boom, boom. Okay, that's the common, like, hip-hop bounce. So I'll map it out. Boom, boom, boom, boom, boom, boom.",
+   "narration_ts": [
+    563.82,
+    601.2
+   ],
+   "ops": [],
+   "unextracted": false,
+   "errors": []
+  },
+  {
+   "step_id": "s18",
+   "narration": "Now, I added another 808. Okay, so that's the common bounce. And the reason it works is because we have three main notes per the bar.",
+   "narration_ts": [
+    604.78,
+    615.2
+   ],
+   "ops": [],
+   "unextracted": false,
+   "errors": []
+  },
+  {
+   "step_id": "s19",
+   "narration": "Now, three is going to be a magical number. We're not talking about triplets here. We're talking about the rule of three. And I go into depth about this in our premium training at BusyWorksBeats.com slash premium. I have a course called Songwriting Secrets. And in that Songwriting Secrets, I go over the Atlantic songwriting literal formula for hit songs. And one of the rules is called the rule of three. And I go over, like, how to add the rule of three, what it means in music. Similar to art. You know, art works in the rule of three. Like, for example, you know, when you look at a classic picture, you split it into three sections. The person who's the focus usually shouldn't take up more than two-thirds of the screen. You have to have that other third. And that's what makes the magic. There's something magical about three, the number three, six, and nine when it comes to music and art. And that's the Tesla. You know, for all those who understand the Nikola Tesla and all that type of stuff. So, anyway, notice how it's three things per the bar. One, two, three, four.",
+   "narration_ts": [
+    615.2,
+    672.68
+   ],
+   "ops": [],
+   "unextracted": false,
+   "errors": []
+  },
+  {
+   "step_id": "s20",
+   "narration": "Now, technically, it's one, two, three, four. So, that would be if I turn on the metronome and turn off the hi-hats. So, it's one, two, three, four. That's the metronome. One, two, three, four. But we only have three things occurring per those four beats. Okay, so that's why it's magical to have that rhythm.",
+   "narration_ts": [
+    672.78,
+    693.9
+   ],
+   "ops": [],
+   "unextracted": false,
+   "errors": []
+  },
+  {
+   "step_id": "s21",
+   "narration": "Now, you can add other 808s in here. But it's something magical about the rule of three. It just works.",
+   "narration_ts": [
+    694.02,
+    698.3
+   ],
+   "ops": [],
+   "unextracted": false,
+   "errors": []
+  },
+  {
+   "step_id": "s22",
+   "narration": "Now, again, the magic here is that there's in-between space. That's what creates balance. The in-between space. Now, I'll give you a couple pointers here that we go over in the Beat Magic course just to give you a little, like, understanding of how deep we go. If you go to the hi-hats, for example, most people just leave their hi-hats right on the grid, which means right when the metronome hits, the hi-hat is right there. You know, perfectly lined up. In real life, when you're playing hi-hats, I'll even do it with my mouth. Does everything hit at the same exact time? No.",
+   "narration_ts": [
+    703.8,
+    739.76
+   ],
+   "ops": [],
+   "unextracted": false,
+   "errors": []
+  },
+  {
+   "step_id": "s23",
+   "narration": "So what we want to do here, now, in trap music, I'll be fair, because in trap music, most stuff is very quantized. So I want to give you that. A lot of trap music is extremely quantized. But that's as far as, like, relative timing. It doesn't mean absolute phase. And I don't want to get too geeky on you. So anyway, with the hi-hat, just turn up under your wrench tool. Go to time shift and just turn it up a little bit. I'll exaggerate this so you can hear it. This is the Metro Boomin' effect. It just delays the hi-hat a little bit behind it. Let me delay it so you can hear it. See how the ear grips on the groove a little bit differently? This is more of a Chicago style when you delay the 808s or the hi-hats this far. But it just creates a groove that you're like, wow, that's nasty. And it's because there's a space between the 808 and the hi-hat. Remember, groove is when you have time space. Okay? So we have the 808, and then we have the hi-hat.",
+   "narration_ts": [
+    740.42,
+    799.36
+   ],
+   "ops": [],
+   "unextracted": false,
+   "errors": []
+  },
+  {
+   "step_id": "s24",
+   "narration": "Now that they're not lined up perfectly like this, they're lined up like this. There's in-between space now. That's what creates that head bob effect. This pulls you in. So you can do it with your hi-hats. You can do it with the 808s. But just simply moving stuff a little bit off the grid with this time shift. Or nudging it to the right if you're in a different DAW.",
+   "narration_ts": [
+    799.48,
+    823.48
+   ],
+   "ops": [],
+   "unextracted": false,
+   "errors": []
+  },
+  {
+   "step_id": "s25",
+   "narration": "Now this is more of like a juice world type effect when you delay your 808 a little bit. Or a little Uzi Vert.",
+   "narration_ts": [
+    824.36,
+    831.5
+   ],
+   "ops": [],
+   "unextracted": false,
+   "errors": []
+  },
+  {
+   "step_id": "s26",
+   "narration": "Now they do it with bass more so because in real live bands and different things, when you play bass, it's a little bit dragged behind everything. Because when you're playing a bass guitar, boom, boom, boom, boom, boom. You know, you play it usually after a kick. The kick is the transient, the punchy part. And then the bass is like the body of it. So it's boom, boom. So when you have these 808s, it's the boom. It's not the part most of the time. So that's why a lot of people push that in the groove. So I'm just showing you different things. So that's bounce. You know, in the Beat Magic course, I go over a lot of different rhythms. Like Chicago drill, UK drill. But let me show you one thing here. Which is...",
+   "narration_ts": [
+    834.66,
+    872.44
+   ],
+   "ops": [],
+   "unextracted": false,
+   "errors": []
+  },
+  {
+   "step_id": "s27",
+   "narration": "Now I've noticed this in a lot of records that I like specifically. They'll stack the 808 on top of the clap. Or the kick on top of the clap. There's just something magical about stacking your kicks and your claps. Especially in trap. Okay, so that adds to the bounce too. That's more of a Chicago thing.",
+   "narration_ts": [
+    872.44,
+    897.76
+   ],
+   "ops": [],
+   "unextracted": false,
+   "errors": []
+  },
+  {
+   "step_id": "s28",
+   "narration": "Now, lastly, you know, when we're talking about genre drums, sound selection is everything for one. And sometimes you don't need a kick. That's why I said Beat Magic goes through all the sound selection stuff. So just go to BusyWorksBeats.com slash Beat Magic. It's a course for beat makers on how to make beats. It's one thing to learn FL Studio. It's a different thing to learn how to make beats. It's a whole different thing. And so when it comes to genre stuff, again, trap, you're usually putting the clap on the three and the seven. Count.",
+   "narration_ts": [
+    898.48,
+    926.06
+   ],
+   "ops": [],
+   "unextracted": false,
+   "errors": []
+  },
+  {
+   "step_id": "s29",
+   "narration": "Okay, now the last thing I could really talk about with trap is just hi-hat rolls. I'll show you a quick shortcut that I learned from Chop Squad DJ on his producer grind. Excuse me. Episode with them. So just grab any hi-hat, drag it out. Hit Alt-A and change your range to one and change your time multiplier. This creates the hi-hat effect. The hi-hat roll effect.",
+   "narration_ts": [
+    933.34,
+    954.0
+   ],
+   "ops": [],
+   "unextracted": false,
+   "errors": []
+  },
+  {
+   "step_id": "s30",
+   "narration": "And also one last tip I'll give you, which is from our course as well. Think about the hi-hat as two, like multiple rhythms for the hi-hat. So don't be afraid to use different notes on the hi-hat. Think about your hi-hat as a way to stack percussion within itself. So a lot of great songs have like bongos, congas, shakers, tambourines, all the percussion stacked up. It's okay to add multiple things to the hi-hats because it's being all those things in one. We don't typically use shakers anymore. So you can use your hi-hat to kind of do it in different tones. So I'm just showing you a couple things you can do. Even with this little baby loop here. Sounds good.",
+   "narration_ts": [
+    957.1,
+    1001.08
+   ],
+   "ops": [],
+   "unextracted": false,
+   "errors": []
+  },
+  {
+   "step_id": "s31",
+   "narration": "Now most people, again, here's the last thing. I said the last thing about the last thing. But here's the absolute last thing for this video. A lot of people obsess about the notes for your 808. In trap music, at least certain genres of trap. Like melodic trap, okay, the 808 can change a lot. In most like rapid-y trap, you're not going to... Treat the 808 like a kick drum, not like a tonal thing. Use it like a kick drum. So you just map out the pattern and just make sure it doesn't sound super out of key.",
+   "narration_ts": [
+    1002.8,
+    1027.14
+   ],
+   "ops": [],
+   "unextracted": false,
+   "errors": []
+  },
+  {
+   "step_id": "s32",
+   "narration": "You're not going to be changing every single note because now it's going to turn into a bass line as opposed to a kick drum. Like if I did the melodic thing, I would be changing the notes all over the place. Like so. Let's pull this up.",
+   "narration_ts": [
+    1027.38,
+    1039.64
+   ],
+   "ops": [],
+   "unextracted": false,
+   "errors": []
+  },
+  {
+   "step_id": "s33",
+   "narration": "Now in some genres like the kind of TikTok genres, that may be cool if you don't have a melodic thing going on. But for the most part, that's distracting when it gets to the melody and all the other stuff. So we're only on part one of this trap series. If you want to learn more about how to make trap beats, just go to busyworksbeats.com slash trap. I'll give you these project files and you'll get a bunch of free project files and sounds for free just for hopping in with us. But I'm excited, man, because revisiting the basics is one of the most exciting things to do, even as an advanced player. So thank you for watching. Subscribe if you're new and smash the like button and hit the little bell icon so that you can get notified. Tell your friends to join this series too. It's absolutely free. Just tell them to go to busyworksbeats.com slash trap. And there you can learn how to make trap beats for free. Peace.",
+   "narration_ts": [
+    1044.62,
+    1088.86
+   ],
+   "ops": [],
+   "unextracted": false,
+   "errors": []
+  }
+ ],
+ "claims": [
+  {
+   "ts": 0.0,
+   "kind": "bpm",
+   "value": 140.0,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 0.0,
+   "kind": "track_count",
+   "value": 4,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 20.0,
+   "kind": "bpm",
+   "value": 140.0,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 20.0,
+   "kind": "track_count",
+   "value": 4,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 40.0,
+   "kind": "bpm",
+   "value": 140.0,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 40.0,
+   "kind": "track_count",
+   "value": 4,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 60.0,
+   "kind": "bpm",
+   "value": 140.0,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 60.0,
+   "kind": "track_count",
+   "value": 4,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 80.0,
+   "kind": "bpm",
+   "value": 140.0,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 80.0,
+   "kind": "track_count",
+   "value": 4,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 100.0,
+   "kind": "bpm",
+   "value": 140.0,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 100.0,
+   "kind": "track_count",
+   "value": 4,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 120.0,
+   "kind": "bpm",
+   "value": 140.0,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 120.0,
+   "kind": "track_count",
+   "value": 4,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 123.9,
+   "kind": "bpm",
+   "value": 140.0,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 123.9,
+   "kind": "track_count",
+   "value": 4,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 125.08,
+   "kind": "bpm",
+   "value": 140,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 125.08,
+   "kind": "track_count",
+   "value": 4,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 125.08,
+   "kind": "notes_present",
+   "value": 20,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 128.67,
+   "kind": "bpm",
+   "value": 140,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 128.67,
+   "kind": "track_count",
+   "value": 4,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 128.67,
+   "kind": "notes_present",
+   "value": 20,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 129.98,
+   "kind": "bpm",
+   "value": 140,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 129.98,
+   "kind": "track_count",
+   "value": 4,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 129.98,
+   "kind": "notes_present",
+   "value": 20,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 149.98,
+   "kind": "bpm",
+   "value": 90,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 149.98,
+   "kind": "track_count",
+   "value": 4,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 149.98,
+   "kind": "notes_present",
+   "value": 20,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 169.98,
+   "kind": "bpm",
+   "value": 125,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 169.98,
+   "kind": "track_count",
+   "value": 4,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 169.98,
+   "kind": "notes_present",
+   "value": 20,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 188.53,
+   "kind": "bpm",
+   "value": 140,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 188.53,
+   "kind": "track_count",
+   "value": 4,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 188.53,
+   "kind": "notes_present",
+   "value": 20,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 188.63,
+   "kind": "bpm",
+   "value": 140,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 188.63,
+   "kind": "track_count",
+   "value": 4,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 188.63,
+   "kind": "notes_present",
+   "value": 20,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 208.63,
+   "kind": "bpm",
+   "value": 140,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 208.63,
+   "kind": "track_count",
+   "value": 4,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 208.63,
+   "kind": "notes_present",
+   "value": 20,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 228.63,
+   "kind": "bpm",
+   "value": 140.0,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 228.63,
+   "kind": "track_count",
+   "value": 4,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 228.63,
+   "kind": "notes_present",
+   "value": 20,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 239.58,
+   "kind": "bpm",
+   "value": 140.0,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 239.58,
+   "kind": "track_count",
+   "value": 4,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 239.58,
+   "kind": "notes_present",
+   "value": 20,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 240.83,
+   "kind": "bpm",
+   "value": 140.0,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 240.83,
+   "kind": "track_count",
+   "value": 4,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 240.83,
+   "kind": "notes_present",
+   "value": 20,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 241.3,
+   "kind": "bpm",
+   "value": 140.0,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 241.3,
+   "kind": "track_count",
+   "value": 20,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 241.3,
+   "kind": "section_present",
+   "value": "Pattern 1",
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 250.65,
+   "kind": "bpm",
+   "value": 140.0,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 250.65,
+   "kind": "track_count",
+   "value": 4,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 250.65,
+   "kind": "notes_present",
+   "value": 20,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 256.62,
+   "kind": "bpm",
+   "value": 140.0,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 256.62,
+   "kind": "track_count",
+   "value": 4,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 256.62,
+   "kind": "notes_present",
+   "value": 20,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 257.55,
+   "kind": "bpm",
+   "value": 140.0,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 257.55,
+   "kind": "track_count",
+   "value": 4,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 257.55,
+   "kind": "notes_present",
+   "value": 20,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 257.93,
+   "kind": "bpm",
+   "value": 140.0,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 257.93,
+   "kind": "track_count",
+   "value": 20,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 257.93,
+   "kind": "section_present",
+   "value": "Pattern 1",
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 257.93,
+   "kind": "section_present",
+   "value": "Pattern 2",
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 259.62,
+   "kind": "bpm",
+   "value": 140,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 259.62,
+   "kind": "track_count",
+   "value": 20,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 259.62,
+   "kind": "notes_present",
+   "value": 40,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 261.15,
+   "kind": "bpm",
+   "value": 140,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 261.15,
+   "kind": "track_count",
+   "value": 20,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 261.15,
+   "kind": "notes_present",
+   "value": 40,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 262.52,
+   "kind": "bpm",
+   "value": 140,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 262.52,
+   "kind": "track_count",
+   "value": 20,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 262.52,
+   "kind": "notes_present",
+   "value": 40,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 282.52,
+   "kind": "bpm",
+   "value": 140,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 282.52,
+   "kind": "track_count",
+   "value": 20,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 282.52,
+   "kind": "notes_present",
+   "value": 40,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 302.52,
+   "kind": "bpm",
+   "value": 140,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 302.52,
+   "kind": "track_count",
+   "value": 20,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 302.52,
+   "kind": "notes_present",
+   "value": 40,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 318.5,
+   "kind": "bpm",
+   "value": 140,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 318.5,
+   "kind": "track_count",
+   "value": 20,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 321.25,
+   "kind": "bpm",
+   "value": 140,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 321.25,
+   "kind": "track_count",
+   "value": 20,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 321.25,
+   "kind": "notes_present",
+   "value": 40,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 321.7,
+   "kind": "bpm",
+   "value": 140,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 321.7,
+   "kind": "track_count",
+   "value": 20,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 328.8,
+   "kind": "bpm",
+   "value": 140,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 328.8,
+   "kind": "track_count",
+   "value": 16,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 328.8,
+   "kind": "notes_present",
+   "value": 48,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 330.18,
+   "kind": "bpm",
+   "value": 140,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 330.18,
+   "kind": "track_count",
+   "value": 16,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 350.18,
+   "kind": "bpm",
+   "value": 140,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 350.18,
+   "kind": "track_count",
+   "value": 16,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 356.77,
+   "kind": "bpm",
+   "value": 140,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 356.77,
+   "kind": "track_count",
+   "value": 16,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 356.77,
+   "kind": "notes_present",
+   "value": 48,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 364.77,
+   "kind": "bpm",
+   "value": 140,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 364.77,
+   "kind": "track_count",
+   "value": 16,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 364.77,
+   "kind": "notes_present",
+   "value": 48,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 365.68,
+   "kind": "bpm",
+   "value": 140,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 365.68,
+   "kind": "track_count",
+   "value": 16,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 365.68,
+   "kind": "notes_present",
+   "value": 48,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 368.2,
+   "kind": "bpm",
+   "value": 140,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 368.2,
+   "kind": "track_count",
+   "value": 16,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 372.47,
+   "kind": "bpm",
+   "value": 140,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 372.47,
+   "kind": "track_count",
+   "value": 16,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 372.47,
+   "kind": "notes_present",
+   "value": 48,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 392.47,
+   "kind": "bpm",
+   "value": 140,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 392.47,
+   "kind": "track_count",
+   "value": 4,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 392.47,
+   "kind": "notes_present",
+   "value": 44,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 412.47,
+   "kind": "bpm",
+   "value": 140,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 412.47,
+   "kind": "track_count",
+   "value": 4,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 412.47,
+   "kind": "notes_present",
+   "value": 44,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 413.82,
+   "kind": "bpm",
+   "value": 140,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 413.82,
+   "kind": "track_count",
+   "value": 24,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 415.52,
+   "kind": "bpm",
+   "value": 140,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 415.52,
+   "kind": "track_count",
+   "value": 4,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 415.52,
+   "kind": "notes_present",
+   "value": 44,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 432.43,
+   "kind": "bpm",
+   "value": 140,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 432.43,
+   "kind": "track_count",
+   "value": 24,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 437.75,
+   "kind": "bpm",
+   "value": 140,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 437.75,
+   "kind": "track_count",
+   "value": 4,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 437.75,
+   "kind": "notes_present",
+   "value": 44,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 438.42,
+   "kind": "bpm",
+   "value": 140,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 438.42,
+   "kind": "track_count",
+   "value": 24,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 444.5,
+   "kind": "bpm",
+   "value": 140,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 444.5,
+   "kind": "track_count",
+   "value": 4,
+   "confidence": 1.0,
+   "source": "frame"
+  },
+  {
+   "ts": 444.5,
+   "kind": "notes_present",
+   "value": 44,
+   "confidence": 1.0,
+   "source": "frame"
+  }
+ ],
+ "l2": {
+  "score": 0.958,
+  "checked": 48,
+  "hits": 46,
+  "misses": [
+   "bpm=90 not in session state",
+   "bpm=125 not in session state"
+  ],
+  "unchecked": 81
+ },
+ "judge": {
+  "groove_timing": 2,
+  "sound_selection": 5,
+  "arrangement_sanity": 1,
+  "instruction_adherence": 2,
+  "mean": 2.5,
+  "critique": "The program correctly sets up a drum track with a sampler and creates a characteristic trap hi-hat pattern with velocity variation. However, the kick/snare patterns are musically incoherent for a trap beat, and several notes are placed outside the defined 8-beat clip length, indicating a fundamental misunderstanding of clip boundaries.",
+  "rubric_version": "v1"
+ }
+}

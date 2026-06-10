@@ -1,0 +1,91 @@
+{
+ "trap-03": {
+  "attempt": {
+   "traj_id": "tut-71e790754c",
+   "steps": 33,
+   "ops": 8,
+   "unextracted": 1,
+   "l0": 1.0,
+   "l1": true,
+   "l2": 0.958,
+   "l3": "unavailable",
+   "l4": 2.5,
+   "grade": "gold",
+   "accepted": true,
+   "policy_notes": [],
+   "seconds": 280.5
+  },
+  "attempt_ts": 1781089626,
+  "corrected": {
+   "tut_id": "trap-03",
+   "l1": true,
+   "l2": 1.0,
+   "l4": 4.5,
+   "grade": "silver",
+   "delta_attempt_vs_corrected": {
+    "entity_f1": 0.5263,
+    "magnitude": 0.2889,
+    "detail": {
+     "attempt_tags": {
+      "tempo_changed": 1,
+      "section_added": 0,
+      "track_added": 1,
+      "device_added:sampler": 1,
+      "clip_added:midi": 1,
+      "clip_added:wave": 0,
+      "notes_changed": 1,
+      "automation_added": 0
+     },
+     "oracle_tags": {
+      "tempo_changed": 1,
+      "section_added": 0,
+      "track_added": 4,
+      "device_added:sampler": 4,
+      "clip_added:midi": 4,
+      "clip_added:wave": 0,
+      "notes_changed": 1,
+      "automation_added": 0
+     },
+     "magnitude_dims": [
+      0.333,
+      0.349,
+      0.22,
+      0.331,
+      0.25,
+      0.25
+     ]
+    },
+    "composite": 0.4195
+   },
+   "corrections": [
+    {
+     "root_cause": "claims",
+     "what": "46 agreeing vision claims misread the tempo display as 140 (true value 160, verified by zoomed crops); the spoken '140' intro example likely anchored the misread",
+     "lesson": "small-digit displays need digit-level certainty or OCR-grade zoom; confident-and-numerous is not the same as correct; corrector-verified claims override (shipped)"
+    },
+    {
+     "root_cause": "inference",
+     "what": "missed the 808/bounce build (~585-610s, 'I added another 808') and the hat rolls (~933s) \u2014 over-aggressive talk-only classification after the empty-ops fix",
+     "lesson": "a step that names a concrete addition ('I added X', 'grab a hat, drag it out') is a build step even inside an explanation"
+    },
+    {
+     "root_cause": "inference",
+     "what": "single-track pitch-lane drums diverged from the screen's 4-channel rack; duplicate set_tempo re-emitted; notes beyond clip length",
+     "lesson": "mirror the visible channel structure (one track per rack channel); never re-emit ops in the session summary; notes must fit the clip"
+    },
+    {
+     "root_cause": "vocabulary",
+     "what": "FL wrench-tool micro-delay (systematic late nudge of selected notes) has no IR op; approximated with seeded humanize",
+     "lesson": "IR v0.2 candidate: notes.nudge {clip_id, selector, offset_beats}"
+    },
+    {
+     "root_cause": "policy",
+     "what": "duplicated vision claims saturated L2 (0.958) and the L2-only rule crowned a near-empty build gold",
+     "lesson": "dedupe (kind,value) claims; gold requires L2>=0.8 AND judge>=4 (both shipped)"
+    }
+   ],
+   "traj_id": "tut-trap-03-corrected"
+  },
+  "corrected_ts": 1781090315
+ }
+}

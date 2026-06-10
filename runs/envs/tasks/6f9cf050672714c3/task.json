@@ -1,0 +1,993 @@
+{
+ "instruction": "replicate tutorial: How to Make Trap Beats - FL STUDIO Beginner - Rhythm (Busy Works Beats)",
+ "ir_version": "0.1",
+ "source_traj": "tut-71e790754c",
+ "grade": "gold",
+ "oracle": {
+  "ops": [
+   {
+    "kind": "project.set_tempo",
+    "params": {
+     "bpm": 140
+    }
+   },
+   {
+    "kind": "project.set_tempo",
+    "params": {
+     "bpm": 140
+    }
+   },
+   {
+    "kind": "track.create",
+    "params": {
+     "track_id": "tdr",
+     "kind": "midi",
+     "role": "drums"
+    }
+   },
+   {
+    "kind": "device.add",
+    "params": {
+     "device_id": "ddr",
+     "track_id": "tdr",
+     "role": "sampler",
+     "prefer": [
+      "builtin.sampler"
+     ]
+    }
+   },
+   {
+    "kind": "clip.create",
+    "params": {
+     "clip_id": "cdr",
+     "track_id": "tdr",
+     "start_bar": 1,
+     "length_beats": 8,
+     "kind": "midi"
+    }
+   },
+   {
+    "kind": "notes.add",
+    "params": {
+     "clip_id": "cdr",
+     "notes": [
+      {
+       "pitch": "D1",
+       "start_beats": 0,
+       "dur_beats": 0.25,
+       "vel": 100
+      },
+      {
+       "pitch": "D1",
+       "start_beats": 0.5,
+       "dur_beats": 0.25,
+       "vel": 100
+      },
+      {
+       "pitch": "D1",
+       "start_beats": 1,
+       "dur_beats": 0.25,
+       "vel": 100
+      },
+      {
+       "pitch": "D1",
+       "start_beats": 1.5,
+       "dur_beats": 0.25,
+       "vel": 100
+      },
+      {
+       "pitch": "D1",
+       "start_beats": 2,
+       "dur_beats": 0.25,
+       "vel": 100
+      },
+      {
+       "pitch": "D1",
+       "start_beats": 2.5,
+       "dur_beats": 0.25,
+       "vel": 100
+      },
+      {
+       "pitch": "D1",
+       "start_beats": 3,
+       "dur_beats": 0.25,
+       "vel": 100
+      },
+      {
+       "pitch": "D1",
+       "start_beats": 3.5,
+       "dur_beats": 0.25,
+       "vel": 100
+      },
+      {
+       "pitch": "D1",
+       "start_beats": 4,
+       "dur_beats": 0.25,
+       "vel": 100
+      },
+      {
+       "pitch": "D1",
+       "start_beats": 4.5,
+       "dur_beats": 0.25,
+       "vel": 100
+      },
+      {
+       "pitch": "D1",
+       "start_beats": 5,
+       "dur_beats": 0.25,
+       "vel": 100
+      },
+      {
+       "pitch": "D1",
+       "start_beats": 5.5,
+       "dur_beats": 0.25,
+       "vel": 100
+      },
+      {
+       "pitch": "D1",
+       "start_beats": 6,
+       "dur_beats": 0.25,
+       "vel": 100
+      },
+      {
+       "pitch": "D1",
+       "start_beats": 6.5,
+       "dur_beats": 0.25,
+       "vel": 100
+      },
+      {
+       "pitch": "D1",
+       "start_beats": 7,
+       "dur_beats": 0.25,
+       "vel": 100
+      },
+      {
+       "pitch": "D1",
+       "start_beats": 7.5,
+       "dur_beats": 0.25,
+       "vel": 100
+      }
+     ]
+    }
+   },
+   {
+    "kind": "notes.add",
+    "params": {
+     "clip_id": "cdr",
+     "notes": [
+      {
+       "pitch": "D1",
+       "start_beats": 2,
+       "dur_beats": 0.5,
+       "vel": 105
+      },
+      {
+       "pitch": "D1",
+       "start_beats": 6,
+       "dur_beats": 0.5,
+       "vel": 105
+      },
+      {
+       "pitch": "D1",
+       "start_beats": 10,
+       "dur_beats": 0.5,
+       "vel": 105
+      },
+      {
+       "pitch": "D1",
+       "start_beats": 14,
+       "dur_beats": 0.5,
+       "vel": 105
+      },
+      {
+       "pitch": "D1",
+       "start_beats": 18,
+       "dur_beats": 0.5,
+       "vel": 105
+      },
+      {
+       "pitch": "D1",
+       "start_beats": 22,
+       "dur_beats": 0.5,
+       "vel": 105
+      },
+      {
+       "pitch": "D1",
+       "start_beats": 26,
+       "dur_beats": 0.5,
+       "vel": 105
+      },
+      {
+       "pitch": "D1",
+       "start_beats": 30,
+       "dur_beats": 0.5,
+       "vel": 105
+      }
+     ]
+    }
+   },
+   {
+    "kind": "notes.add",
+    "params": {
+     "clip_id": "cdr",
+     "notes": [
+      {
+       "pitch": "F#1",
+       "start_beats": 0.0,
+       "dur_beats": 0.25,
+       "vel": 78
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 0.25,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 0.5,
+       "dur_beats": 0.25,
+       "vel": 72
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 0.75,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 1.0,
+       "dur_beats": 0.25,
+       "vel": 78
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 1.25,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 1.5,
+       "dur_beats": 0.25,
+       "vel": 72
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 1.75,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 2.0,
+       "dur_beats": 0.25,
+       "vel": 78
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 2.25,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 2.5,
+       "dur_beats": 0.25,
+       "vel": 72
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 2.75,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 3.0,
+       "dur_beats": 0.25,
+       "vel": 78
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 3.25,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 3.5,
+       "dur_beats": 0.25,
+       "vel": 72
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 3.75,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 4.0,
+       "dur_beats": 0.25,
+       "vel": 78
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 4.25,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 4.5,
+       "dur_beats": 0.25,
+       "vel": 72
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 4.75,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 5.0,
+       "dur_beats": 0.25,
+       "vel": 78
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 5.25,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 5.5,
+       "dur_beats": 0.25,
+       "vel": 72
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 5.75,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 6.0,
+       "dur_beats": 0.25,
+       "vel": 78
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 6.25,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 6.5,
+       "dur_beats": 0.25,
+       "vel": 72
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 6.75,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 7.0,
+       "dur_beats": 0.25,
+       "vel": 78
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 7.25,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 7.5,
+       "dur_beats": 0.25,
+       "vel": 72
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 7.75,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 8.0,
+       "dur_beats": 0.25,
+       "vel": 78
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 8.25,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 8.5,
+       "dur_beats": 0.25,
+       "vel": 72
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 8.75,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 9.0,
+       "dur_beats": 0.25,
+       "vel": 78
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 9.25,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 9.5,
+       "dur_beats": 0.25,
+       "vel": 72
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 9.75,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 10.0,
+       "dur_beats": 0.25,
+       "vel": 78
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 10.25,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 10.5,
+       "dur_beats": 0.25,
+       "vel": 72
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 10.75,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 11.0,
+       "dur_beats": 0.25,
+       "vel": 78
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 11.25,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 11.5,
+       "dur_beats": 0.25,
+       "vel": 72
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 11.75,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 12.0,
+       "dur_beats": 0.25,
+       "vel": 78
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 12.25,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 12.5,
+       "dur_beats": 0.25,
+       "vel": 72
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 12.75,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 13.0,
+       "dur_beats": 0.25,
+       "vel": 78
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 13.25,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 13.5,
+       "dur_beats": 0.25,
+       "vel": 72
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 13.75,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 14.0,
+       "dur_beats": 0.25,
+       "vel": 78
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 14.25,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 14.5,
+       "dur_beats": 0.25,
+       "vel": 72
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 14.75,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 15.0,
+       "dur_beats": 0.25,
+       "vel": 78
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 15.25,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 15.5,
+       "dur_beats": 0.25,
+       "vel": 72
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 15.75,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 16.0,
+       "dur_beats": 0.25,
+       "vel": 78
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 16.25,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 16.5,
+       "dur_beats": 0.25,
+       "vel": 72
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 16.75,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 17.0,
+       "dur_beats": 0.25,
+       "vel": 78
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 17.25,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 17.5,
+       "dur_beats": 0.25,
+       "vel": 72
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 17.75,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 18.0,
+       "dur_beats": 0.25,
+       "vel": 78
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 18.25,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 18.5,
+       "dur_beats": 0.25,
+       "vel": 72
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 18.75,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 19.0,
+       "dur_beats": 0.25,
+       "vel": 78
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 19.25,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 19.5,
+       "dur_beats": 0.25,
+       "vel": 72
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 19.75,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 20.0,
+       "dur_beats": 0.25,
+       "vel": 78
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 20.25,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 20.5,
+       "dur_beats": 0.25,
+       "vel": 72
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 20.75,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 21.0,
+       "dur_beats": 0.25,
+       "vel": 78
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 21.25,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 21.5,
+       "dur_beats": 0.25,
+       "vel": 72
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 21.75,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 22.0,
+       "dur_beats": 0.25,
+       "vel": 78
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 22.25,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 22.5,
+       "dur_beats": 0.25,
+       "vel": 72
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 22.75,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 23.0,
+       "dur_beats": 0.25,
+       "vel": 78
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 23.25,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 23.5,
+       "dur_beats": 0.25,
+       "vel": 72
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 23.75,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 24.0,
+       "dur_beats": 0.25,
+       "vel": 78
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 24.25,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 24.5,
+       "dur_beats": 0.25,
+       "vel": 72
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 24.75,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 25.0,
+       "dur_beats": 0.25,
+       "vel": 78
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 25.25,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 25.5,
+       "dur_beats": 0.25,
+       "vel": 72
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 25.75,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 26.0,
+       "dur_beats": 0.25,
+       "vel": 78
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 26.25,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 26.5,
+       "dur_beats": 0.25,
+       "vel": 72
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 26.75,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 27.0,
+       "dur_beats": 0.25,
+       "vel": 78
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 27.25,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 27.5,
+       "dur_beats": 0.25,
+       "vel": 72
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 27.75,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 28.0,
+       "dur_beats": 0.25,
+       "vel": 78
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 28.25,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 28.5,
+       "dur_beats": 0.25,
+       "vel": 72
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 28.75,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 29.0,
+       "dur_beats": 0.25,
+       "vel": 78
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 29.25,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 29.5,
+       "dur_beats": 0.25,
+       "vel": 72
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 29.75,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 30.0,
+       "dur_beats": 0.25,
+       "vel": 78
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 30.25,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 30.5,
+       "dur_beats": 0.25,
+       "vel": 72
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 30.75,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 31.0,
+       "dur_beats": 0.25,
+       "vel": 78
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 31.25,
+       "dur_beats": 0.25,
+       "vel": 64
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 31.5,
+       "dur_beats": 0.25,
+       "vel": 72
+      },
+      {
+       "pitch": "F#1",
+       "start_beats": 31.75,
+       "dur_beats": 0.25,
+       "vel": 64
+      }
+     ]
+    }
+   }
+  ],
+  "state_hash": "20bd91e4479fe70b9e867ec4fd0fcaa99db37c5589fc03e2d27c7c38a3a5242d"
+ },
+ "scoring": {
+  "type": "session_delta",
+  "scorer": "flywheel.verify.delta.score",
+  "judge_rubric": "flywheel/gepa/rubrics/v1.md"
+ }
+}

@@ -1,0 +1,603 @@
+{
+ "steps": [
+  {
+   "step_id": "s1",
+   "narration": "Project 'Trap Series - 1 - Rhythms' at 160 BPM (tempo display, verified by zoomed crops at 603s and 1068s; spoken '140' was the intro example). Channel rack: hi-hat channel first \u2014 straight 16ths with accents.",
+   "narration_ts": [
+    77.4,
+    200.0
+   ],
+   "ops": [
+    {
+     "kind": "project.set_tempo",
+     "params": {
+      "bpm": 160
+     }
+    },
+    {
+     "kind": "track.create",
+     "params": {
+      "track_id": "that",
+      "kind": "midi",
+      "role": "drums"
+     }
+    },
+    {
+     "kind": "device.add",
+     "params": {
+      "device_id": "dhat",
+      "track_id": "that",
+      "role": "sampler",
+      "prefer": [
+       "builtin.sampler"
+      ]
+     }
+    },
+    {
+     "kind": "clip.create",
+     "params": {
+      "clip_id": "chat",
+      "track_id": "that",
+      "start_bar": 1,
+      "length_beats": 8,
+      "kind": "midi"
+     }
+    },
+    {
+     "kind": "notes.add",
+     "params": {
+      "clip_id": "chat",
+      "notes": [
+       {
+        "pitch": "F#1",
+        "start_beats": 0.0,
+        "dur_beats": 0.25,
+        "vel": 96
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 0.25,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 0.5,
+        "dur_beats": 0.25,
+        "vel": 78
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 0.75,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 1.0,
+        "dur_beats": 0.25,
+        "vel": 96
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 1.25,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 1.5,
+        "dur_beats": 0.25,
+        "vel": 78
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 1.75,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 2.0,
+        "dur_beats": 0.25,
+        "vel": 96
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 2.25,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 2.5,
+        "dur_beats": 0.25,
+        "vel": 78
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 2.75,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 3.0,
+        "dur_beats": 0.25,
+        "vel": 96
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 3.25,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 3.5,
+        "dur_beats": 0.25,
+        "vel": 78
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 3.75,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 4.0,
+        "dur_beats": 0.25,
+        "vel": 96
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 4.25,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 4.5,
+        "dur_beats": 0.25,
+        "vel": 78
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 4.75,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 5.0,
+        "dur_beats": 0.25,
+        "vel": 96
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 5.25,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 5.5,
+        "dur_beats": 0.25,
+        "vel": 78
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 5.75,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 6.0,
+        "dur_beats": 0.25,
+        "vel": 96
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 6.25,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 6.5,
+        "dur_beats": 0.25,
+        "vel": 78
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 6.75,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 7.0,
+        "dur_beats": 0.25,
+        "vel": 96
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 7.25,
+        "dur_beats": 0.25,
+        "vel": 64
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 7.5,
+        "dur_beats": 0.25,
+        "vel": 78
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 7.75,
+        "dur_beats": 0.25,
+        "vel": 64
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "step_id": "s2",
+   "narration": "Clap on the 3-and-7 count (rack: steps 9 and 25 of 32 = beats 2 and 6) \u2014 the halftime placement that makes it trap \u2014 plus the sparse trap-combo kick ('sometimes you don't need a kick').",
+   "narration_ts": [
+    249.6,
+    320.0
+   ],
+   "ops": [
+    {
+     "kind": "track.create",
+     "params": {
+      "track_id": "tclap",
+      "kind": "midi",
+      "role": "drums"
+     }
+    },
+    {
+     "kind": "device.add",
+     "params": {
+      "device_id": "dclap",
+      "track_id": "tclap",
+      "role": "sampler",
+      "prefer": [
+       "builtin.sampler"
+      ]
+     }
+    },
+    {
+     "kind": "clip.create",
+     "params": {
+      "clip_id": "cclap",
+      "track_id": "tclap",
+      "start_bar": 1,
+      "length_beats": 8,
+      "kind": "midi"
+     }
+    },
+    {
+     "kind": "notes.add",
+     "params": {
+      "clip_id": "cclap",
+      "notes": [
+       {
+        "pitch": "E1",
+        "start_beats": 2.0,
+        "dur_beats": 0.25,
+        "vel": 108
+       },
+       {
+        "pitch": "E1",
+        "start_beats": 6.0,
+        "dur_beats": 0.25,
+        "vel": 108
+       }
+      ]
+     }
+    },
+    {
+     "kind": "track.create",
+     "params": {
+      "track_id": "tkick",
+      "kind": "midi",
+      "role": "drums"
+     }
+    },
+    {
+     "kind": "device.add",
+     "params": {
+      "device_id": "dkick",
+      "track_id": "tkick",
+      "role": "sampler",
+      "prefer": [
+       "builtin.sampler"
+      ]
+     }
+    },
+    {
+     "kind": "clip.create",
+     "params": {
+      "clip_id": "ckick",
+      "track_id": "tkick",
+      "start_bar": 1,
+      "length_beats": 8,
+      "kind": "midi"
+     }
+    },
+    {
+     "kind": "notes.add",
+     "params": {
+      "clip_id": "ckick",
+      "notes": [
+       {
+        "pitch": "D1",
+        "start_beats": 2.5,
+        "dur_beats": 0.25,
+        "vel": 104
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "step_id": "s3",
+   "narration": "The bounce element: the 808 with in-between space \u2014 the common dotted-eighth hip-hop bounce ('boom, boom, boom' with anticipation), stacked against the clap.",
+   "narration_ts": [
+    443.0,
+    620.0
+   ],
+   "ops": [
+    {
+     "kind": "track.create",
+     "params": {
+      "track_id": "t808",
+      "kind": "midi",
+      "role": "808"
+     }
+    },
+    {
+     "kind": "device.add",
+     "params": {
+      "device_id": "d808",
+      "track_id": "t808",
+      "role": "sampler",
+      "prefer": [
+       "builtin.sampler"
+      ]
+     }
+    },
+    {
+     "kind": "clip.create",
+     "params": {
+      "clip_id": "c808",
+      "track_id": "t808",
+      "start_bar": 1,
+      "length_beats": 8,
+      "kind": "midi"
+     }
+    },
+    {
+     "kind": "notes.add",
+     "params": {
+      "clip_id": "c808",
+      "notes": [
+       {
+        "pitch": "C1",
+        "start_beats": 0,
+        "dur_beats": 0.5,
+        "vel": 112
+       },
+       {
+        "pitch": "C1",
+        "start_beats": 0.75,
+        "dur_beats": 0.5,
+        "vel": 96
+       },
+       {
+        "pitch": "C1",
+        "start_beats": 1.5,
+        "dur_beats": 0.5,
+        "vel": 112
+       },
+       {
+        "pitch": "C1",
+        "start_beats": 2.25,
+        "dur_beats": 0.5,
+        "vel": 96
+       },
+       {
+        "pitch": "C1",
+        "start_beats": 3.0,
+        "dur_beats": 0.5,
+        "vel": 112
+       },
+       {
+        "pitch": "C1",
+        "start_beats": 4,
+        "dur_beats": 0.5,
+        "vel": 112
+       },
+       {
+        "pitch": "C1",
+        "start_beats": 4.75,
+        "dur_beats": 0.5,
+        "vel": 96
+       },
+       {
+        "pitch": "C1",
+        "start_beats": 5.5,
+        "dur_beats": 0.5,
+        "vel": 112
+       },
+       {
+        "pitch": "C1",
+        "start_beats": 6.25,
+        "dur_beats": 0.5,
+        "vel": 96
+       },
+       {
+        "pitch": "C1",
+        "start_beats": 7.0,
+        "dur_beats": 0.5,
+        "vel": 112
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "step_id": "s4",
+   "narration": "Wrench-tool micro-delay on the hats (slightly behind the grid so it breathes) \u2014 approximated with a small seeded humanize; the systematic per-selection nudge is a vocabulary gap.",
+   "narration_ts": [
+    715.4,
+    830.0
+   ],
+   "ops": [
+    {
+     "kind": "notes.humanize",
+     "params": {
+      "clip_id": "chat",
+      "timing_ms": 10,
+      "vel_var": 8,
+      "seed": 6060
+     }
+    }
+   ]
+  },
+  {
+   "step_id": "s5",
+   "narration": "Hi-hat rolls: grab a hat, drag it out \u2014 a 32nd burst into the turnaround using a second tone ('stack percussion within the hat itself').",
+   "narration_ts": [
+    933.3,
+    1000.0
+   ],
+   "ops": [
+    {
+     "kind": "notes.add",
+     "params": {
+      "clip_id": "chat",
+      "notes": [
+       {
+        "pitch": "F#1",
+        "start_beats": 7.0,
+        "dur_beats": 0.125,
+        "vel": 60
+       },
+       {
+        "pitch": "G#1",
+        "start_beats": 7.125,
+        "dur_beats": 0.125,
+        "vel": 65
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 7.25,
+        "dur_beats": 0.125,
+        "vel": 70
+       },
+       {
+        "pitch": "G#1",
+        "start_beats": 7.375,
+        "dur_beats": 0.125,
+        "vel": 75
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 7.5,
+        "dur_beats": 0.125,
+        "vel": 80
+       },
+       {
+        "pitch": "G#1",
+        "start_beats": 7.625,
+        "dur_beats": 0.125,
+        "vel": 85
+       },
+       {
+        "pitch": "F#1",
+        "start_beats": 7.75,
+        "dur_beats": 0.125,
+        "vel": 90
+       },
+       {
+        "pitch": "G#1",
+        "start_beats": 7.875,
+        "dur_beats": 0.125,
+        "vel": 95
+       }
+      ]
+     }
+    }
+   ]
+  }
+ ],
+ "corrections": [
+  {
+   "root_cause": "claims",
+   "what": "46 agreeing vision claims misread the tempo display as 140 (true value 160, verified by zoomed crops); the spoken '140' intro example likely anchored the misread",
+   "lesson": "small-digit displays need digit-level certainty or OCR-grade zoom; confident-and-numerous is not the same as correct; corrector-verified claims override (shipped)"
+  },
+  {
+   "root_cause": "inference",
+   "what": "missed the 808/bounce build (~585-610s, 'I added another 808') and the hat rolls (~933s) \u2014 over-aggressive talk-only classification after the empty-ops fix",
+   "lesson": "a step that names a concrete addition ('I added X', 'grab a hat, drag it out') is a build step even inside an explanation"
+  },
+  {
+   "root_cause": "inference",
+   "what": "single-track pitch-lane drums diverged from the screen's 4-channel rack; duplicate set_tempo re-emitted; notes beyond clip length",
+   "lesson": "mirror the visible channel structure (one track per rack channel); never re-emit ops in the session summary; notes must fit the clip"
+  },
+  {
+   "root_cause": "vocabulary",
+   "what": "FL wrench-tool micro-delay (systematic late nudge of selected notes) has no IR op; approximated with seeded humanize",
+   "lesson": "IR v0.2 candidate: notes.nudge {clip_id, selector, offset_beats}"
+  },
+  {
+   "root_cause": "policy",
+   "what": "duplicated vision claims saturated L2 (0.958) and the L2-only rule crowned a near-empty build gold",
+   "lesson": "dedupe (kind,value) claims; gold requires L2>=0.8 AND judge>=4 (both shipped)"
+  }
+ ],
+ "verified_claims": [
+  {
+   "ts": 603.2,
+   "kind": "bpm",
+   "value": 160,
+   "confidence": 0.99,
+   "source": "corrector",
+   "evidence": "zoomed tempo-display crops at 603s + 1068s read 160.000 unambiguously"
+  },
+  {
+   "ts": 1068.0,
+   "kind": "bpm",
+   "value": 160,
+   "confidence": 0.99,
+   "source": "corrector"
+  },
+  {
+   "ts": 1068.0,
+   "kind": "track_count",
+   "value": 4,
+   "confidence": 0.95,
+   "source": "corrector",
+   "evidence": "4 channel-rack rows: 808 TIK TOK / Kick - Trap Combo / RNB CLAP / Hi Hat Noize Short"
+  },
+  {
+   "ts": 1068.0,
+   "kind": "notes_present",
+   "value": 30,
+   "confidence": 0.8,
+   "source": "corrector",
+   "evidence": "hat row near-fully lit (~32 cells) in the final rack"
+  }
+ ]
+}

@@ -63,3 +63,4 @@ compile_commands.json
 flywheel/gepa/_library_cache/
 runs/*.sqlite3
 extract-work/
+runs/replication/*/work/

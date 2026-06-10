@@ -1,0 +1,9 @@
+{
+ "pipeline": "tutorial_replication",
+ "content_hash": "3b1634a9d13b0e05",
+ "tutorial_url": "https://www.youtube.com/watch?v=Tnb9dxHFIkg",
+ "reward_types": [
+  "session_delta",
+  "llm_judge"
+ ]
+}
