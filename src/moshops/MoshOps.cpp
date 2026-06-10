@@ -83,6 +83,29 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "bounce_layer_to_clip") return cmdBounceLayerToClip (args);
     if (name == "list_colors")       return cmdListColors (args);
     if (name == "export_audio")      return cmdExportAudio (args);
+    // Stage 7 — MoshIR engine gaps
+    if (name == "set_tempo")         return cmdSetTempo (args);
+    if (name == "set_time_sig")      return cmdSetTimeSig (args);
+    if (name == "set_key")           return cmdSetKey (args);
+    if (name == "add_notes")         return cmdAddNotes (args);
+    if (name == "remove_notes")      return cmdRemoveNotes (args);
+    if (name == "transpose_notes")   return cmdTransposeNotes (args);
+    if (name == "quantize_notes")    return cmdQuantizeNotes (args);
+    if (name == "humanize_notes")    return cmdHumanizeNotes (args);
+    if (name == "load_builtin_plugin") return cmdLoadBuiltin (args);
+    if (name == "add_sampler_sound") return cmdAddSamplerSound (args);
+    if (name == "remove_clip")       return cmdRemoveClip (args);
+    if (name == "route_track")       return cmdRouteTrack (args);
+    if (name == "add_send")          return cmdAddSend (args);
+    if (name == "add_return")        return cmdAddReturn (args);
+    if (name == "set_sidechain")     return cmdSetSidechain (args);
+    if (name == "write_automation")  return cmdWriteAutomation (args);
+    if (name == "set_clip_pitch")    return cmdSetClipPitch (args);
+    if (name == "set_clip_stretch")  return cmdSetClipStretch (args);
+    if (name == "slice_clip")        return cmdSliceClip (args);
+    if (name == "create_section")    return cmdCreateSection (args);
+    if (name == "execute_ir")        return irHook ? irHook (args)
+                                                   : errResult (name, "IR executor not wired");
 
     return errResult (name, "unknown command: " + name);
 }
@@ -532,11 +555,22 @@ juce::var MoshOps::cmdSetPluginParam (const juce::var& args)
     auto* plugin = findPlugin (args.getProperty ("trackId", var()).toString(),
                                (int) args.getProperty ("index", -1));
     if (plugin == nullptr) return errResult ("set_plugin_param", "no plugin");
-    const int pi = (int) args.getProperty ("paramIndex", -1);
-    if (pi < 0 || pi >= plugin->getNumAutomatableParameters())
-        return errResult ("set_plugin_param", "bad paramIndex");
 
-    auto param = plugin->getAutomatableParameter (pi);
+    // Two-tier addressing (phase0 §3.4): semantic name (preferred) or raw index.
+    te::AutomatableParameter::Ptr param;
+    if (const auto pname = args.getProperty ("paramName", var()).toString(); pname.isNotEmpty())
+    {
+        param = findParamByName (*plugin, pname);
+        if (param == nullptr)
+            return errResult ("set_plugin_param", "no param named: " + pname);
+    }
+    else
+    {
+        const int pi = (int) args.getProperty ("paramIndex", -1);
+        if (pi < 0 || pi >= plugin->getNumAutomatableParameters())
+            return errResult ("set_plugin_param", "bad paramIndex");
+        param = plugin->getAutomatableParameter (pi);
+    }
     const float norm = juce::jlimit (0.0f, 1.0f, (float) (double) args.getProperty ("value", 0.0));
     undoManager().beginNewTransaction ("set_plugin_param");
     param->setParameter (param->valueRange.convertFrom0to1 (norm), juce::sendNotification);
@@ -1136,6 +1170,28 @@ juce::var MoshOps::snapshot()
     session->setProperty ("tempo", edit.tempoSequence.getBpmAt (tracktion::TimePosition()));
     session->setProperty ("editFile", eng.editFile().getFullPathName());
 
+    // Stage 7: musical context (tempo map start, key, sections).
+    auto& timeSig = edit.tempoSequence.getTimeSigAt (tracktion::TimePosition());
+    session->setProperty ("timeSigNumerator", timeSig.numerator.get());
+    session->setProperty ("timeSigDenominator", timeSig.denominator.get());
+    if (auto moshSession = edit.state.getChildWithName (juce::Identifier ("MOSH_SESSION")); moshSession.isValid())
+    {
+        session->setProperty ("keyRoot", moshSession.getProperty ("keyRoot", ""));
+        session->setProperty ("keyScale", moshSession.getProperty ("keyScale", ""));
+    }
+    Array<var> sections;
+    if (auto arrange = edit.state.getChildWithName (juce::Identifier ("MOSH_ARRANGE")); arrange.isValid())
+        for (int i = 0; i < arrange.getNumChildren(); ++i)
+        {
+            auto s = arrange.getChild (i);
+            auto* so = new DynamicObject();
+            so->setProperty ("name", s.getProperty ("name"));
+            so->setProperty ("startBar", (int) s.getProperty ("startBar"));
+            so->setProperty ("lengthBars", (int) s.getProperty ("lengthBars"));
+            sections.add (var (so));
+        }
+    session->setProperty ("sections", sections);
+
     Array<var> tracks;
     int index = 0;
     for (auto* t : te::getAudioTracks (edit))
@@ -1280,6 +1336,33 @@ te::Plugin* MoshOps::findPlugin (const juce::String& trackId, int index)
     if (track == nullptr) return nullptr;
     auto plugins = track->pluginList.getPlugins();
     return (index >= 0 && index < plugins.size()) ? plugins[index].get() : nullptr;
+}
+
+te::MidiClip* MoshOps::findMidiClip (const juce::String& id)
+{
+    return dynamic_cast<te::MidiClip*> (findClip (id));
+}
+
+te::AutomatableParameter::Ptr MoshOps::findParamByName (te::Plugin& p, const juce::String& name)
+{
+    // Semantic addressing: exact (case-insensitive) match wins, else the first
+    // parameter whose name contains the requested token. Deterministic: scan
+    // order is the plugin's own parameter order.
+    const auto want = name.toLowerCase();
+    te::AutomatableParameter::Ptr partial;
+    for (int i = 0; i < p.getNumAutomatableParameters(); ++i)
+    {
+        auto param = p.getAutomatableParameter (i);
+        const auto have = param->getParameterName().toLowerCase();
+        if (have == want) return param;
+        if (partial == nullptr && have.contains (want)) partial = param;
+    }
+    return partial;
+}
+
+double MoshOps::beatsToSeconds (double beats)
+{
+    return eng.edit().tempoSequence.toTime (tracktion::BeatPosition::fromBeats (beats)).inSeconds();
 }
 
 void MoshOps::emit (const juce::String& type, juce::var payload)

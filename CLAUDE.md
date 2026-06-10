@@ -71,6 +71,32 @@ Build the arrangement incrementally within Stage 2/6: static clips → drag/move
 
 ---
 
+## Phase 0 stages (spec: `mosh-phase0-spec.md` + approved plan) — MoshIR · harness · flywheel · multiplayer · Monster
+
+### Stage 7 — MoshIR v0.1 + lowering + engine gaps ✅ GATE PASSED (2026-06-09)
+- [x] `moshir/moshir-0.1.schema.json` — the closed 41-op vocabulary (spec §3.3), typed params, seed/model_version REQUIRED on stochastic ops. `moshir/validate.py` (Python authority; compact LLM-feedback errors) + fixtures: §3.5 worked example verbatim, full-coverage (all 41 kinds), negative (unseeded/malformed). `--self-test` 64/64.
+- [x] `src/moshir/` — `ir::Executor`: typed validation, `lower(op) → MoshOps command(s) | Unsupported → gap ledger` (`<session>/gap-ledger.jsonl`, override `MOSH_GAP_LEDGER`), symbolic-id binding table persisted in edit state (survives save/reload), exposed as the `execute_ir` command via `MoshOps::setIRHook` (one mutation path intact). `MoshIRVocab.h` = engine-free vocab header; Catch2 lockstep test diffs it against the schema.
+- [x] 20 new native commands: `set_tempo/set_time_sig/set_key`, `add/remove/transpose/quantize/humanize_notes` (humanize REQUIRES seed), `load_builtin_plugin` (sampler/4osc/compressor/eq/delay/reverb/lowpass/…), `add_sampler_sound`, `remove_clip`, `route_track`, `add_send/add_return` (auto bus pairing), `set_sidechain` (compressor keyed via `setSidechainSourceID`+`guessSidechainRouting`), `write_automation` (curves hold RAW param values — see ENGINE_API_NOTES), `set_clip_pitch/set_clip_stretch/slice_clip` (grid), `create_section`; `set_plugin_param` gained semantic `paramName` addressing (§3.4 two-tier).
+- [x] Deliberate gap-ledger entries (findings, not failures): `project.set_swing` (no engine groove), `sample.slice transient` (async detection), `clip.duplicate`, `device.load_preset`, `latent.*` (→ Stage 8 Tier-B wiring), splice/latent_gen resolver strategies. **IR v0.2 candidate:** an op binding a resolved asset to a sampler device (the §3.5 example implies it; v0.1 cannot express it).
+- [x] **GATE:** §3.5 worked example end-to-end via `execute_ir` (7/7 ops; sampler + Tier-A neural insert as the house `builtin.sat` land on the real track); unseeded stochastic ops hard-rejected; gap ledger written; buses/sends/sidechain/automation/sections execute; bindings survive save/reload (fresh executor resolves `c808a`); undo intact. **`Mosh --selftest` 118/118 ×3 deterministic, 0 assertions; `--selftest-undo` 18/18; Catch2 169 assertions/8 cases; `moshir/validate.py --self-test` 64/64.**
+
+### Stage 8 — Replay harness + determinism (NEXT)
+- [ ] Canonical state projection + SHA256 `state_hash` (stable keys, fixed-precision floats, IDs→ordinals, no timestamps); session seed; deterministic RenderLayer IDs; unseeded-stochastic rejection everywhere; `Mosh --harness job.json` (execute-from-file, 120s cap, batch, structured failure); CI conformance suite = spec §4 reqs 1–5; wire `latent.*` lowering → Tier-B jobs.
+
+### Stage 9 — Op logger + tutorial marker + trajectory store (unblocks the hand-replication sprint)
+- [ ] `logLine` + actor/consent/state_hash/lifted-IR; identity file; recorder → spec §5 trajectory JSONL; SQLite store (`flywheel/store/`); tutorial marker UI.
+
+### Stage 10 — Multiplayer: git-style ASYNC session sync ("like GitHub", NOT real-time)
+- [ ] Session repo (per-user append-only op-logs, content-addressed assets, state_hash checkpoints); `collab_init/clone/status/pull/push` wrapping git; pull = merge logs → replay (Stage 8 engine) → verify hash; conflicts = failed ops surfaced; CollabPanel + consent toggle.
+
+### Stage 11 — Monster v0 (B-5 slot) + GEPA
+- [ ] `/agent/propose` on the service (Gemini Flash, structured output → MoshIR, 1 repair retry); key ONLY from `GEMINI_API_KEY` env / gitignored `~/.config/mosh/env` — NEVER in repo/logs; AgentPanel chat drawer; rollouts logged as `agent_rollout`; GEPA loop + 24-task suite; verifiers L2/L4.
+
+### Stage 12 — Extraction v0 + L3 + Phase 0 exit
+- [ ] Ingest (provenance mandatory, source media never in corpus) → mlx-whisper → keyframes → segment → Gemini op inference (few-shot from gold) → frame claims → graded accept (§8); L3 rank calibration on gold pairs; IR v0.2 bump from gap-ledger review, then freeze. Exit gate = spec §1.
+
+---
+
 ## Consolidated `// VERIFY` (resolve against the pinned clone)
 
 **Engine / state (`01`)** — see `docs/ENGINE_API_NOTES.md` for exact signatures

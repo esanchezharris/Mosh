@@ -1,8 +1,10 @@
 #include "SelfTest.h"
 #include "engine/MoshEngine.h"
 #include "moshops/MoshOps.h"
+#include "moshir/MoshIR.h"
 #include "plugins/neural/NeuralInsertPlugin.h"
 #include <atomic>
+#include <cstdlib>
 #include <iostream>
 #include <vector>
 
@@ -506,6 +508,186 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (trackById (mt).getProperty ("name", var()).toString() == "Mix", "undo reverted the rename");
         cmd (ops, "redo");
         check (trackById (mt).getProperty ("name", var()).toString() == "Master Bus", "redo restored the rename");
+    }
+
+    // --- Stage 7: MoshIR — schema vocabulary, lowering, the §3.5 worked example,
+    //     gap ledger, stochastic-seed rejection, sends/sidechain/automation ---
+    {
+        std::cerr << "--- Stage 7: MoshIR lowering + engine gaps ---\n";
+
+        // Native musical-context commands first.
+        check (ok (cmd (ops, "set_tempo", args1 ("bpm", 142.0))), "set_tempo 142 ok");
+        check (std::abs ((double) ops.snapshot()["session"].getProperty ("tempo", 0.0) - 142.0) < 0.01,
+               "snapshot tempo == 142");
+        check (ok (cmd (ops, "set_time_sig", objN ({{ "numerator", 4 }, { "denominator", 4 }}))), "set_time_sig 4/4 ok");
+        check (ok (cmd (ops, "set_key", objN ({{ "root", "F" }, { "scale", "minor" }}))), "set_key F minor ok");
+        check (ops.snapshot()["session"].getProperty ("keyRoot", var()).toString() == "F", "snapshot keyRoot == F");
+
+        // A tiny deterministic sample library for the resolver (asset.resolve local).
+        auto libDir = eng.sessionDir().getChildFile ("selftest-library");
+        libDir.createDirectory();
+        auto tone = eng.generateTestTone (1.0, 55.0, "lib-808-src");
+        tone.copyFileTo (libDir.getChildFile ("808-distorted-long.wav"));
+        setenv ("MOSH_SAMPLE_LIBRARY", libDir.getFullPathName().toRawUTF8(), 1);
+
+        // The spec §3.5 worked example, verbatim ops, through execute_ir.
+        const auto workedExample = JSON::parse (R"json({
+          "ops": [
+            {"kind": "asset.resolve", "params": {"descriptor": {"text": "long distorted 808",
+              "tags": ["808", "distorted", "long"]},
+              "strategy": ["local", "splice", "latent_gen"]}, "out": "asset_3f9c"},
+            {"kind": "track.create", "params": {"track_id": "t808", "kind": "midi", "role": "808"}},
+            {"kind": "device.add", "params": {"device_id": "d808", "track_id": "t808",
+              "role": "synth", "prefer": ["builtin.sampler"]}},
+            {"kind": "clip.create", "params": {"clip_id": "c808a", "track_id": "t808",
+              "start_bar": 1, "length_beats": 16, "kind": "midi"}},
+            {"kind": "notes.add", "params": {"clip_id": "c808a", "notes": [
+              {"pitch": "C1",  "start_beats": 0,  "dur_beats": 3, "vel": 110},
+              {"pitch": "Eb1", "start_beats": 4,  "dur_beats": 2, "vel": 105},
+              {"pitch": "C1",  "start_beats": 8,  "dur_beats": 3, "vel": 110},
+              {"pitch": "F1",  "start_beats": 14, "dur_beats": 2, "vel": 115}]}},
+            {"kind": "device.add", "params": {"device_id": "dsat", "track_id": "t808",
+              "role": "saturator", "prefer": ["builtin.sat"]}},
+            {"kind": "device.set_param", "params": {"device_id": "dsat",
+              "param": "drive", "value_norm": 0.65}}
+          ]
+        })json");
+
+        auto ir = cmd (ops, "execute_ir", workedExample);
+        check (ok (ir), "worked example (spec 3.5): execute_ir ok");
+        auto counts = ir["data"]["counts"];
+        check ((int) counts.getProperty ("executed", 0) == 7, "worked example: all 7 ops executed");
+        check ((int) counts.getProperty ("unsupported", -1) == 0, "worked example: 0 unsupported");
+        check ((int) counts.getProperty ("failed", -1) == 0, "worked example: 0 failed");
+
+        auto irResults = ir["data"].getProperty ("results", var());
+        const auto t808 = irResults[1]["data"].getProperty ("trackId", var()).toString();
+        const auto c808a = irResults[3]["data"].getProperty ("clipId", var()).toString();
+        check ((int) irResults[4]["data"].getProperty ("added", 0) == 4, "notes.add placed 4 notes");
+
+        // Engine state really changed: sampler + neural saturator on the track.
+        auto t = trackById (t808);
+        check (t.isObject(), "t808 bound to a real engine track");
+        bool hasSampler = false, hasNeural = false;
+        for (auto& pl : *t.getProperty ("plugins", var()).getArray())
+        {
+            const auto type = pl.getProperty ("type", var()).toString();
+            if (type == "sampler") hasSampler = true;
+            if (type == "moshNeuralInsert") hasNeural = true;
+        }
+        check (hasSampler, "device.add synth/builtin.sampler -> sampler plugin on track");
+        check (hasNeural, "device.add saturator/builtin.sat -> Tier-A neural insert (the house saturator)");
+
+        // notes.* second wave: transpose / quantize / seeded humanize via IR.
+        auto wave2 = JSON::parse (R"json({
+          "ops": [
+            {"kind": "notes.transpose", "params": {"clip_id": "c808a", "semitones": 2}},
+            {"kind": "notes.quantize",  "params": {"clip_id": "c808a", "grid": "1/16", "strength": 1.0}},
+            {"kind": "notes.humanize",  "params": {"clip_id": "c808a", "timing_ms": 8, "vel_var": 6, "seed": 1234}}
+          ]})json");
+        auto ir2 = cmd (ops, "execute_ir", wave2);
+        check (ok (ir2) && (int) ir2["data"]["counts"].getProperty ("executed", 0) == 3,
+               "notes.transpose/quantize/humanize(seeded) all executed");
+
+        // Stochastic contract: unseeded humanize and unseeded latent are REJECTED
+        // (validate failure — not ledgered, not defaulted).
+        auto unseeded = JSON::parse (R"json({
+          "ops": [
+            {"kind": "notes.humanize", "params": {"clip_id": "c808a", "timing_ms": 8, "vel_var": 6}},
+            {"kind": "latent.generate", "params": {"prompt": "dark pad", "duration_beats": 8}}
+          ]})json");
+        auto ir3 = cmd (ops, "execute_ir", unseeded);
+        check (! ok (ir3) && (int) ir3["data"]["counts"].getProperty ("failed", 0) == 2,
+               "unseeded stochastic ops hard-rejected (no default seed)");
+
+        // Gap ledger: project.set_swing is a documented engine gap -> Unsupported,
+        // appended to the ledger, and NOT a hard failure of the batch.
+        auto swing = JSON::parse (R"json({"ops": [{"kind": "project.set_swing", "params": {"amount": 0.2}}]})json");
+        auto ir4 = cmd (ops, "execute_ir", swing);
+        check (ok (ir4) && (int) ir4["data"]["counts"].getProperty ("unsupported", 0) == 1,
+               "project.set_swing -> Unsupported (finding, not failure)");
+        auto ledgerFile = eng.sessionDir().getChildFile ("gap-ledger.jsonl");
+        check (ledgerFile.existsAsFile()
+                 && ledgerFile.loadFileAsString().contains ("project.set_swing"),
+               "gap ledger received the Unsupported entry");
+
+        // Buses, sends, sidechain, automation, sections — the mixer families.
+        auto wave3 = JSON::parse (R"json({
+          "ops": [
+            {"kind": "track.create", "params": {"track_id": "bverb", "kind": "bus", "role": "fx"}},
+            {"kind": "track.create", "params": {"track_id": "tkick", "kind": "audio", "role": "drums"}},
+            {"kind": "mixer.send", "params": {"track_id": "t808", "to_bus": "bverb", "db": -12}},
+            {"kind": "mixer.sidechain", "params": {"src": "tkick", "dst": "t808", "amount": 0.6,
+              "attack_ms": 5, "release_ms": 120, "ratio": 4}},
+            {"kind": "automation.write", "params": {
+              "target": {"mixer": "gain", "track_id": "t808"},
+              "points": [{"pos_beats": 0, "value_norm": 0.8},
+                         {"pos_beats": 8, "value_norm": 0.4, "curve": 0.5}]}},
+            {"kind": "arrange.create_section", "params": {"name": "drop", "start_bar": 17, "length_bars": 16}},
+            {"kind": "arrange.place", "params": {"clip_id": "c808a", "section": "drop"}},
+            {"kind": "mixer.set_gain", "params": {"track_id": "t808", "db": -3.0}},
+            {"kind": "mixer.set_pan", "params": {"track_id": "t808", "pan": -0.25}}
+          ]})json");
+        auto ir5 = cmd (ops, "execute_ir", wave3);
+        check (ok (ir5) && (int) ir5["data"]["counts"].getProperty ("executed", 0) == 9,
+               "bus/send/sidechain/automation/section/place/mixer ops all executed");
+
+        // Verify routing landed: t808 gained auxsend + compressor; bverb has the return.
+        t = trackById (t808);
+        bool hasSend = false, hasComp = false;
+        for (auto& pl : *t.getProperty ("plugins", var()).getArray())
+        {
+            const auto type = pl.getProperty ("type", var()).toString();
+            if (type == "auxsend") hasSend = true;
+            if (type == "compressor") hasComp = true;
+        }
+        check (hasSend, "mixer.send -> auxsend on t808");
+        check (hasComp, "mixer.sidechain -> keyed compressor on t808");
+        const auto bverbId = ir5["data"]["results"][0]["data"].getProperty ("trackId", var()).toString();
+        String busPluginTypes;
+        {
+            auto bv = trackById (bverbId);
+            if (auto* arr = bv.getProperty ("plugins", var()).getArray())
+                for (auto& pl : *arr)
+                    busPluginTypes += pl.getProperty ("type", var()).toString() + ",";
+        }
+        check (busPluginTypes.contains ("auxreturn"),
+               "mixer.send auto-installed the auxreturn on the bus track [id=" + bverbId
+                 + " plugins=" + busPluginTypes + "]");
+
+        // arrange.place moved the clip to bar 17 (64 beats at 142 bpm ≈ 27.04 s).
+        bool clipMoved = false;
+        for (auto& cl : *t.getProperty ("clips", var()).getArray())
+            if (cl.getProperty ("id", var()).toString() == c808a)
+                clipMoved = std::abs ((double) cl.getProperty ("start", 0.0) - 64.0 * 60.0 / 142.0) < 0.05;
+        check (clipMoved, "arrange.place(section drop) moved c808a to bar 17");
+        check (std::abs ((double) t.getProperty ("volumeDb", 0.0) + 3.0) < 0.5, "mixer.set_gain applied (-3 dB)");
+
+        // Sections are in the snapshot (musical context for the agent/extractor).
+        check (ops.snapshot()["session"].getProperty ("sections", var()).size() == 1,
+               "snapshot exposes the 'drop' section");
+
+        // render.bounce through IR -> deterministic artifact path, asset bound.
+        auto bounce = JSON::parse (R"json({"ops": [{"kind": "render.bounce", "params": {}, "out": "render_main"}]})json");
+        auto ir6 = cmd (ops, "execute_ir", bounce);
+        check (ok (ir6), "render.bounce executed (export_audio)");
+        check (eng.sessionDir().getChildFile ("renders").getChildFile ("render_main.wav").existsAsFile(),
+               "bounce artifact at the deterministic out-symbol path");
+
+        // Bindings survive save/reload: a FRESH executor (loads bindings from the
+        // edit state) must still resolve c808a after save.
+        check (ok (cmd (ops, "save")), "save after IR session ok");
+        {
+            ir::Executor fresh (ops, eng);
+            auto* a = new DynamicObject();
+            a->setProperty ("ops", JSON::parse (
+                R"json([{"kind": "notes.transpose", "params": {"clip_id": "c808a", "semitones": -2}}])json"));
+            auto rf = fresh.executeOps (var (a));
+            check (ok (rf), "fresh executor resolves persisted bindings (c808a) after save");
+        }
+
+        // Undo still flows through the one undo system after IR-driven edits.
+        check (ok (cmd (ops, "undo")), "undo after IR ops ok (single undo system intact)");
     }
 
     // --- Stage 5 (SA3): the real StableAudio3Adapter - GATED on MOSH_SELFTEST_SA3 ---

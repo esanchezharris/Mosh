@@ -1,0 +1,23 @@
+{
+  "step_id": "s7",
+  "narration_ts": [272, 301],
+  "ops": [
+    {"kind": "asset.resolve", "params": {"descriptor": {"text": "long distorted 808",
+      "tags": ["808", "distorted", "long"]},
+      "strategy": ["local", "splice", "latent_gen"]}, "out": "asset_3f9c"},
+    {"kind": "track.create", "params": {"track_id": "t808", "kind": "midi", "role": "808"}},
+    {"kind": "device.add", "params": {"device_id": "d808", "track_id": "t808",
+      "role": "synth", "prefer": ["builtin.sampler"]}},
+    {"kind": "clip.create", "params": {"clip_id": "c808a", "track_id": "t808",
+      "start_bar": 1, "length_beats": 16, "kind": "midi"}},
+    {"kind": "notes.add", "params": {"clip_id": "c808a", "notes": [
+      {"pitch": "C1", "start_beats": 0,  "dur_beats": 3, "vel": 110},
+      {"pitch": "Eb1", "start_beats": 4,  "dur_beats": 2, "vel": 105},
+      {"pitch": "C1", "start_beats": 8,  "dur_beats": 3, "vel": 110},
+      {"pitch": "F1", "start_beats": 14, "dur_beats": 2, "vel": 115}]}},
+    {"kind": "device.add", "params": {"device_id": "dsat", "track_id": "t808",
+      "role": "saturator", "prefer": ["builtin.sat"]}},
+    {"kind": "device.set_param", "params": {"device_id": "dsat",
+      "param": "drive", "value_norm": 0.65}}
+  ]
+}

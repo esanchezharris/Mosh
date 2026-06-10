@@ -9,14 +9,16 @@ juce_add_console_app(MoshTests PRODUCT_NAME "MoshTests")
 target_sources(MoshTests PRIVATE
     test_sanity.cpp
     test_renderlayer.cpp
-    test_astd.cpp)
+    test_astd.cpp
+    test_moshir_vocab.cpp)
 
 target_include_directories(MoshTests PRIVATE ${CMAKE_SOURCE_DIR}/src)
 
 target_compile_definitions(MoshTests PRIVATE
     JUCE_USE_CURL=0
     JUCE_WEB_BROWSER=0
-    JUCE_STANDALONE_APPLICATION=1)
+    JUCE_STANDALONE_APPLICATION=1
+    MOSH_MOSHIR_DIR="${CMAKE_SOURCE_DIR}/moshir")
 
 target_link_libraries(MoshTests PRIVATE
     Catch2::Catch2WithMain

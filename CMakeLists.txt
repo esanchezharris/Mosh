@@ -66,7 +66,10 @@ if (MOSH_BUILD_APP)
         # Stage 4 — Tier-A real-time neural insert (04 PART 2)
         src/plugins/neural/NeuralInsertPlugin.cpp
         # Stage 5 — Tier-B generative layer (05)
-        src/generative/GenerativeJobManager.cpp)
+        src/generative/GenerativeJobManager.cpp
+        # Stage 7 — MoshIR engine gaps + IR executor (phase0 §3–§4)
+        src/moshops/MoshOpsStage7.cpp
+        src/moshir/MoshIR.cpp)
 
     target_include_directories(Mosh PRIVATE src)
 

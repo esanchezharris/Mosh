@@ -37,6 +37,17 @@ public:
     /** Full session snapshot — bound to the WebView's get_snapshot. */
     juce::var snapshot();
 
+    /** MoshIR entry (`execute_ir`). The IR layer sits ABOVE MoshOps (it lowers
+        IR ops to commands and feeds them back through execute()), so MoshOps
+        only holds a hook — Main/SelfTest wire it to a mosh::ir::Executor.
+        Keeps the one-mutation-path rule: IR is just another caller. */
+    using IRHook = std::function<juce::var (const juce::var& args)>;
+    void setIRHook (IRHook h) { irHook = std::move (h); }
+
+    /** Result envelopes (public: the IR layer composes them too). */
+    static juce::var okResult  (const juce::String& command, juce::var data = {});
+    static juce::var errResult (const juce::String& command, const juce::String& message);
+
 private:
     // ── command handlers ──
     juce::var cmdCreateTrack    (const juce::var& args);
@@ -87,6 +98,28 @@ private:
     juce::var cmdListColors       (const juce::var& args);
     // Stage 6 — consolidation
     juce::var cmdExportAudio      (const juce::var& args);
+    // Stage 7 — MoshIR engine gaps (phase0 §3.3: tempo/key/notes/sampler/
+    // sends/sidechain/automation/sections). Implemented in MoshOpsStage7.cpp.
+    juce::var cmdSetTempo        (const juce::var& args);
+    juce::var cmdSetTimeSig      (const juce::var& args);
+    juce::var cmdSetKey          (const juce::var& args);
+    juce::var cmdAddNotes        (const juce::var& args);
+    juce::var cmdRemoveNotes     (const juce::var& args);
+    juce::var cmdTransposeNotes  (const juce::var& args);
+    juce::var cmdQuantizeNotes   (const juce::var& args);
+    juce::var cmdHumanizeNotes   (const juce::var& args);
+    juce::var cmdLoadBuiltin     (const juce::var& args);
+    juce::var cmdAddSamplerSound (const juce::var& args);
+    juce::var cmdRemoveClip      (const juce::var& args);
+    juce::var cmdRouteTrack      (const juce::var& args);
+    juce::var cmdAddSend         (const juce::var& args);
+    juce::var cmdAddReturn       (const juce::var& args);
+    juce::var cmdSetSidechain    (const juce::var& args);
+    juce::var cmdWriteAutomation (const juce::var& args);
+    juce::var cmdSetClipPitch    (const juce::var& args);
+    juce::var cmdSetClipStretch  (const juce::var& args);
+    juce::var cmdSliceClip       (const juce::var& args);
+    juce::var cmdCreateSection   (const juce::var& args);
 
     juce::ValueTree findRenderLayer (const juce::String& clipId);
     juce::String    computeFingerprint (const juce::ValueTree& node, const juce::File& inputWav);
@@ -111,15 +144,17 @@ private:
     void  logLine (const juce::String& command, const juce::var& args,
                    bool ok, const juce::String& error, bool undoable);
 
-    static juce::var okResult  (const juce::String& command, juce::var data = {});
-    static juce::var errResult (const juce::String& command, const juce::String& message);
-
     juce::UndoManager& undoManager() { return eng.edit().getUndoManager(); }
+
+    te::MidiClip* findMidiClip (const juce::String& id);
+    te::AutomatableParameter::Ptr findParamByName (te::Plugin&, const juce::String& name);
+    double beatsToSeconds (double beats);
 
     MoshEngine& eng;
     PluginHost  pluginHost;
     GenerativeJobManager jobManager;
     EventSink   eventSink;
+    IRHook      irHook;
     juce::int64 seq = 0;
     juce::File  logFile;
     bool        wasPlaying = false;

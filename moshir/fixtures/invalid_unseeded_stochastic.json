@@ -1,0 +1,8 @@
+[
+  {"kind": "latent.generate", "params": {"prompt": "dark pad", "duration_beats": 16,
+    "model_version": "sa3-medium-mlx-1.0.0"}, "out": "a1"},
+  {"kind": "notes.humanize", "params": {"clip_id": "c1", "timing_ms": 10, "vel_var": 8}},
+  {"kind": "latent.variate", "params": {"asset_id": "a1", "strength": 0.5, "seed": 7}, "out": "a2"},
+  {"kind": "latent.generate", "params": {"prompt": "pad", "duration_beats": 8, "seed": 1,
+    "model_version": "sa3-medium-mlx-1.0.0"}}
+]

@@ -4,6 +4,7 @@
 #include "app/SelfTest.h"
 #include "engine/MoshEngine.h"
 #include "moshops/MoshOps.h"
+#include "moshir/MoshIR.h"
 
 namespace mosh
 {
@@ -33,6 +34,11 @@ public:
         engine  = std::make_unique<MoshEngine> ((! headless) || liveAudioSmoke,
                                                 /*freshSession=*/ headless || liveAudioSmoke);
         moshOps = std::make_unique<MoshOps> (*engine);
+
+        // MoshIR sits above MoshOps (phase0 §3): it lowers IR ops and feeds
+        // them back through execute(), preserving the one mutation path.
+        irExecutor = std::make_unique<ir::Executor> (*moshOps, *engine);
+        moshOps->setIRHook ([this] (const juce::var& a) { return irExecutor->executeOps (a); });
 
         // Headless command-surface harness (06 §4): `Mosh --selftest`.
         if (undoSelfTest)
@@ -84,6 +90,7 @@ public:
     void shutdown() override
     {
         mainWindow.reset();
+        irExecutor.reset();
         moshOps.reset();
         engine.reset();
     }
@@ -91,9 +98,10 @@ public:
     void systemRequestedQuit() override { quit(); }
 
 private:
-    std::unique_ptr<MoshEngine> engine;
-    std::unique_ptr<MoshOps>    moshOps;
-    std::unique_ptr<MainWindow> mainWindow;
+    std::unique_ptr<MoshEngine>   engine;
+    std::unique_ptr<MoshOps>      moshOps;
+    std::unique_ptr<ir::Executor> irExecutor;
+    std::unique_ptr<MainWindow>   mainWindow;
 };
 
 } // namespace mosh

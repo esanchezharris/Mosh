@@ -129,6 +129,37 @@ const char* DistortionPlugin::xmlTypeName = "Distortion";
 ```
 `PluginRenderContext fc`: `fc.destBuffer` (`juce::AudioBuffer<float>*`), `fc.bufferNumSamples`, `fc.bufferStartSample`, `fc.bufferForMidiMessages`. Base stores `sampleRate`, `blockSizeSamples`. Latency base: `virtual double getLatencySeconds() { return 0.0; }`.
 
+## Stage 7 — MoshIR engine gaps (phase0 §3.3) — **RESOLVED** (2026-06-09)
+
+**Tempo / time-sig** (`model/edit/tracktion_TempoSequence.h`):
+```cpp
+edit.tempoSequence.getTempoAt (TimePosition()).setBpm (bpm);        // first setting always exists (120 @ beat 0)
+edit.tempoSequence.getTimeSigAt (TimePosition()).numerator = n;     // CachedValue<int>, + denominator
+BeatPosition toBeats (TimePosition); TimePosition toTime (BeatPosition);   // :169/:178 — the conversion heart
+```
+**No global swing/groove** on TempoSequence — only `MidiClip::get/setGrooveTemplate`. → `project.set_swing` is gap-ledgered.
+
+**MIDI notes** (`midi/tracktion_MidiList.h`): `midiClip->getSequence()` → `MidiList&`;
+`addNote (int pitch, BeatPosition startBeat /*clip-relative*/, BeatDuration, int vel, int colourIndex, UndoManager*)` (:85);
+`removeNote (MidiNote&, um)`; `MidiNote::setNoteNumber/setVelocity/setStartAndLength (..., um)`.
+
+**Sampler** (`plugins/effects/tracktion_SamplerPlugin.h`): xmlTypeName `"sampler"`;
+`addSound (path, name, startTime, length, gainDb) → String error ("" = ok)` (:38); `setSoundParams (idx, keyNote, minNote, maxNote)`; `setSoundOpenEnded`.
+
+**Builtin xmlTypeNames** (verified in .cpps): `4osc`, `compressor`, `4bandEq`, `delay`, `reverb`, `lowpass`, `pitchShifter`, `chorus`, `phaser`, `auxsend`, `auxreturn`. Instantiate ALL via `edit.getPluginCache().createNewPlugin (xmlTypeName, {})`.
+
+**Sends/returns/routing**: `AuxSendPlugin::busNumber` (CachedValue<int>) pairs with `AuxReturnPlugin::busNumber`; `setGainDb`. Track routing: `audioTrack->getOutput().setOutputToTrack (dest)` / `setOutputToDefaultDevice (false)` (`model/tracks/tracktion_TrackOutput.h:66`).
+
+**Sidechain** (`plugins/tracktion_Plugin.h:246–377` + `effects/tracktion_Compressor.h`):
+`plugin->setSidechainSourceID (track.itemID)`; `comp->useSidechainTrigger = true`; `comp->guessSidechainRouting()` wires the channels. Dynamics params set via name-scan on AutomatableParameters (engine param names are version-fragile).
+
+**Automation** (`model/automation/tracktion_AutomationCurve.h:89`):
+`param->getCurve().addPoint (EditPosition, float value, float curve(-1..1), um)`. **Point values are RAW param values**, not normalized — `AutomatableParameter.cpp:236` reads `curve.getValueAt (time, parameter.getCurrentBaseValue())` → convert IR's value_norm via `param->valueRange.convertFrom0to1 (v)`. Mixer lanes: `VolumeAndPanPlugin::volParam/panParam` (public Ptr members, :74).
+
+**Clip pitch/stretch** (`model/clips/tracktion_AudioClipBase.h`): `setPitchChange (float ±48)` (:363); `setTimeStretchMode (TimeStretcher::soundtouchBetter)` + `setSpeedRatio (double)` (:293–306; engine falls back via getActualTimeStretchMode when a mode isn't compiled). **Transient detection is async** (`WarpTimeManager::getTransientTimes() → {done, times}`) → `sample.slice mode=transient` is gap-ledgered; grid slicing = repeated `ClipTrack::splitClip`.
+
+**JUCE gotcha re-learned at the gate:** (1) non-ASCII string literals (e.g. `§`) into `juce::String` fire the UTF-8 assertion — keep selftest labels ASCII. (2) `*someVar.getProperty ("x", {}).getArray()` in a range-for dangles when the PARENT var is itself a temporary (refcount drops) — bind the parent to a named var first.
+
 ## Still to verify at their stages
 
 - **Renderer::Parameters** field names + `renderToFile` overload (`tracksToDo` bitset, `allowedClips`) — Stage 5. Grep `modules/tracktion_engine/.../tracktion_Renderer.h`.

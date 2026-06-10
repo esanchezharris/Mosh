@@ -1,0 +1,13 @@
+[
+  {"kind": "track.explode", "params": {"track_id": "t1"}},
+  {"kind": "notes.add", "params": {"clip_id": "c1", "notes": [
+    {"pitch": "C4", "start_beats": 0, "dur_beats": 1, "vel": 200}]}},
+  {"kind": "device.set_param", "params": {"device_id": "d1", "param": "drive", "value_norm": 1.5}},
+  {"kind": "clip.create", "params": {"clip_id": "c2", "track_id": "t1",
+    "start_bar": 1, "length_beats": 8, "kind": "wav"}},
+  {"kind": "project.set_tempo", "params": {"bpm": 142}, "comment": "extra top-level prop"},
+  {"kind": "notes.add", "params": {"clip_id": "c1", "notes": [
+    {"pitch": "H2", "start_beats": 0, "dur_beats": 1, "vel": 100}]}},
+  {"kind": "mixer.set_pan", "params": {"track_id": "t1", "pan": -2}},
+  {"kind": "asset.resolve", "params": {"descriptor": {"text": "808"}, "strategy": ["local"]}}
+]
