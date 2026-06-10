@@ -135,3 +135,27 @@ beautiful every time. Feel free to borrow other people's ideas online."*
   instead of one fixed cyan/magenta.
 - Borrowed-and-credited: iq cosine palettes, gyroid/TPMS implicit; smin/onion operators
   reviewed (iquilezles.org/articles/distfunctions) — onion shells considered, parked.
+
+## v7 (2026-06-10) — ORGANISM · the sound owns the look · HUD
+
+User notes: beats "less jerky"; Moshi idles (no beat coupling); "less visually busy…
+maybe organic looking, like Moshi himself"; acid green "a lot on my eyes" — declutter,
+HUD-like, knobs not sliders; visual controls should NOT be surfaced ("they should play
+with the visuals by playing with the sound"); fuzz the crystal-clear text — CRT,
+tastefully; "more 2002 than 2010."
+
+- **ORGANISM base:** the silhouette is now seeded smin lobes — Moshi's grammar grown
+  large; the kifs fold survives only to decide where the veins run. Sparse crystal
+  (fissure exp 70→95, higher shard/vein thresholds), bigger calmer facets (2.5),
+  tighter fringe zone. The stone reads as a BODY with kintsugi seams.
+- **Beats subtle:** rotation jolts halved and eased (0.26 lerp, no snap), slam squash
+  0.22→0.10, onset envelope reduced. Moshi idles — REC heat is the only coupling left.
+- **THE LOOK panel is gone.** The arrangement hash derives form/wear/lume/hue/geology
+  from bounded ranges on every respec — change the clips, change the stone. The sound
+  is the only visual instrument.
+- **Knobs replace sliders** in CHAIN and THE RACK (38px plastic rotaries, vertical
+  drag, lime tick) — panels shrink to 210/250px.
+- **HUD declutter:** translucent panels over the world, outline plates instead of
+  solid lime, dimmed waveforms/meters/borders.
+- **CRT in the signal chain:** a phosphor-bloom stage (1.6px halo at 40% merged under
+  the source) + 0.5px softening before the posterize — text fuzzes tastefully.

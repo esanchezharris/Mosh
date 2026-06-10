@@ -70,12 +70,19 @@
   * { -webkit-font-smoothing: antialiased; }
   body { filter: url(#ps2signal); }
   html.raw body { filter: none; }
+  /* HUD de-acid: outline plates, less solid lime */
+  .plate { background: rgba(204,255,35,.13); color: var(--lime);
+    border: 1px solid rgba(204,255,35,.45); box-shadow: 0 2px 0 rgba(0,0,0,.6); }
+
 </style>
 </head>
 <body>
 <svg width="0" height="0" style="position:fixed" aria-hidden="true"><filter id="ps2signal"
   x="-2%" y="-2%" width="104%" height="104%" color-interpolation-filters="sRGB">
-  <feGaussianBlur stdDeviation="0.35"/>
+  <feGaussianBlur in="SourceGraphic" stdDeviation="1.6" result="halo"/>
+  <feComponentTransfer in="halo" result="halo2"><feFuncA type="linear" slope="0.40"/></feComponentTransfer>
+  <feMerge result="glowed"><feMergeNode in="halo2"/><feMergeNode in="SourceGraphic"/></feMerge>
+  <feGaussianBlur in="glowed" stdDeviation="0.5"/>
   <feComponentTransfer>
     <feFuncR type="discrete" tableValues="0 0.0667 0.1333 0.2 0.2667 0.3333 0.4 0.4667 0.5333 0.6 0.6667 0.7333 0.8 0.8667 0.9333 1"/>
     <feFuncG type="discrete" tableValues="0 0.0667 0.1333 0.2 0.2667 0.3333 0.4 0.4667 0.5333 0.6 0.6667 0.7333 0.8 0.8667 0.9333 1"/>
@@ -181,21 +188,30 @@ void main(){
     vec3 col = vec3(0.045) + band * vec3(0.065, 0.07, 0.06);
     float rim = pow(1.0 - max(dot(n, -rd), 0.0), 2.2);
     col += LIME * step(0.6, rim + dth * 0.22) * (0.16 + 0.25 * u_heat);
-    // the mouth - glossy lime decal, follows the gaze a little, opens with heat
-    vec3 mdir = normalize(vec3(u_gaze.x * 0.30, -0.34 + u_gaze.y * 0.18, 1.0));
-    float ang = acos(clamp(dot(normalize(hp), mdir), -1.0, 1.0));
-    float mr = 0.30 + 0.14 * u_heat + 0.05 * abs(u_squash) + 0.20 * u_gasp
-             + 0.03 * u_arousal * sin(u_t * 9.0 + u_seed);   // gasp on impact, quiver when feral
-    float mouth = smoothstep(mr, mr - 0.07, ang);
-    col = mix(col, LIME * (0.78 + 0.30 * u_heat), mouth);
     // ember: banded heart, no halo
     float ember = u_heat * exp(-2.6 * length(hp)) * (0.7 + 0.3 * sin(u_t * 7.0));
-    col += GLOW * (floor(ember * 3.0 + dth) / 3.0) * 0.55 * (1.0 - mouth);
-    // THE FACE LIVES IN THE BODY - eye decals evaluated on the hit direction,
+    col += GLOW * (floor(ember * 3.0 + dth) / 3.0) * 0.45;
+    // THE FACE LIVES IN THE BODY - decals evaluated on the hit direction,
     // lit by the same facet bands, edges dithered: they squash, blink, lean and
-    // tremble WITH the matter instead of floating in front of it (no DOM eyes).
+    // tremble WITH the matter instead of floating in front of it (no DOM face).
     float sq = 1.0 - u_squash * 0.45;
     vec3 nd = normalize(hp);
+    // the mouth: a SMILE at rest; a poke (or a hard gasp) opens it to an O.
+    {
+      vec3 md = normalize(vec3(u_gaze.x * 0.26, (-0.30 + u_gaze.y * 0.15) * sq, 1.0));
+      if (dot(nd, md) > 0.6) {
+        vec3 mu = normalize(cross(vec3(0.0, 1.0, 0.0), md));
+        vec3 mv = cross(md, mu);
+        vec2 mo = vec2(dot(nd - md, mu), dot(nd - md, mv)) * 3.4;
+        mo.y /= sq;                                     // the grin squashes too
+        float oAmt = clamp(u_wide * 1.2 + u_gasp * 0.8, 0.0, 1.0);
+        float r = 0.30 + 0.08 * u_heat + 0.10 * oAmt;
+        float ring = abs(length(mo) - r) - (0.085 + 0.045 * u_heat + 0.04 * oAmt);
+        float m = (1.0 - step(0.0, ring + (dth - 0.5) * 0.05))
+                * step(mo.y, -0.05 + 1.4 * oAmt);       // lower arc -> full O
+        col = mix(col, LIME * (0.75 + 0.30 * u_heat), m);
+      }
+    }
     float sep = 0.30 + 0.10 * u_arousal;               // wide-set when feral
     float jit = (noise3(vec3(u_tq * 3.0, u_seed, 1.0)) - 0.5) * 0.14
               * max(0.0, u_arousal - 0.35);            // feral tremble, on twos

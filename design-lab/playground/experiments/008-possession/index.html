@@ -213,6 +213,30 @@
   #wordmark { transform: skewX(-10deg); background: var(--lime); padding: 3px 13px 2px;
     border-radius: 3px; box-shadow: 0 3px 0 #000, inset 0 1px 0 rgba(255,255,255,.4); }
   #wordmark, #wordmark b { color: var(--ink); }
+
+  /* ── KNOBS (hardware, not long sliders) ── */
+  .kdeck { display: flex; gap: 18px; align-items: flex-end; margin: 4px 0 6px; }
+  .kcell { display: flex; flex-direction: column; align-items: center; gap: 5px; }
+  .knob { width: 38px; height: 38px; border-radius: 50%; position: relative; cursor: ns-resize;
+    background: radial-gradient(circle at 35% 30%, #2a2c20, #101110 64%, #050505 100%);
+    box-shadow: 0 3px 0 #000, inset 0 1px 0 rgba(246,242,235,.16), 0 0 0 2px #1d2010; }
+  .knob i { position: absolute; left: 50%; top: 4px; width: 3px; height: 11px; margin-left: -1.5px;
+    background: var(--lime); border-radius: 2px; transform-origin: 50% 15px; opacity: .9; }
+  .klbl { font-size: 8.5px; letter-spacing: .16em; opacity: .55; }
+  .kval { font-size: 11px; opacity: .75; }
+
+  /* ── HUD DECLUTTER: translucent panels, outline plates, dimmer lime ── */
+  .slabpanel { background-color: rgba(13,13,12,.62); }
+  .lhead { background-color: rgba(13,13,12,.55); }
+  .lbody { background-color: rgba(10,10,9,.42); }
+  #topbar { background-color: rgba(13,13,12,.78); }
+  .plate, #wordmark { background: rgba(204,255,35,.13); color: var(--lime);
+    border: 1px solid rgba(204,255,35,.45); box-shadow: 0 2px 0 rgba(0,0,0,.6); }
+  #wordmark b { color: var(--lime); }
+  .clip { border-color: rgba(204,255,35,.20); }
+  .clip canvas { opacity: .45; }
+  .lhead .vol i { opacity: .65; }
+  .deed { background: rgba(11,11,11,.55); border-color: rgba(204,255,35,.22); }
   .lhead .nm { font-style: italic; }
   .lbody, .clip { background-image:
     linear-gradient(180deg, rgba(246,242,235,.03) 0 40%, rgba(0,0,0,.18) 40% 100%); }
@@ -230,7 +254,10 @@
 <body>
 <svg width="0" height="0" style="position:fixed" aria-hidden="true"><filter id="ps2signal"
   x="-2%" y="-2%" width="104%" height="104%" color-interpolation-filters="sRGB">
-  <feGaussianBlur stdDeviation="0.35"/>
+  <feGaussianBlur in="SourceGraphic" stdDeviation="1.6" result="halo"/>
+  <feComponentTransfer in="halo" result="halo2"><feFuncA type="linear" slope="0.40"/></feComponentTransfer>
+  <feMerge result="glowed"><feMergeNode in="halo2"/><feMergeNode in="SourceGraphic"/></feMerge>
+  <feGaussianBlur in="glowed" stdDeviation="0.5"/>
   <feComponentTransfer>
     <feFuncR type="discrete" tableValues="0 0.0667 0.1333 0.2 0.2667 0.3333 0.4 0.4667 0.5333 0.6 0.6667 0.7333 0.8 0.8667 0.9333 1"/>
     <feFuncG type="discrete" tableValues="0 0.0667 0.1333 0.2 0.2667 0.3333 0.4 0.4667 0.5333 0.6 0.6667 0.7333 0.8 0.8667 0.9333 1"/>
@@ -262,16 +289,20 @@
 
 <div class="slabpanel shown" id="chain">
   <div class="ptitle"><span class="plate">CHAIN</span> <b id="chainTrack">VOX</b></div>
-  <div class="prow"><span class="lbl">NEURAL·NAM</span><span class="track" data-p="drive"><i style="width:68%"></i><u style="left:68%"></u></span><span class="val mono">68</span></div>
-  <div class="prow"><span class="lbl">MIX</span><span class="track" data-p="mix"><i style="width:100%"></i><u style="left:100%"></u></span><span class="val mono">100</span></div>
+  <div class="kdeck">
+    <div class="kcell"><div class="knob" data-kn="0.68"><i></i></div><span class="klbl">NAM</span><span class="kval mono">68</span></div>
+    <div class="kcell"><div class="knob" data-kn="1.0"><i></i></div><span class="klbl">MIX</span><span class="kval mono">100</span></div>
+  </div>
   <div class="meta"><span class="badge">TIER A</span><span class="ghost">LAB</span><span class="mono" style="opacity:.45">0.0 ms</span></div>
 </div>
 
 <div class="slabpanel shown" id="rack">
   <div class="ptitle"><span class="plate">THE RACK</span> <b>RE-IMAGINE</b> · tone-147</div>
-  <div class="prow"><span class="lbl">GRIT</span><span class="track" data-p="grit"><i style="width:62%"></i><u style="left:62%"></u></span><span class="val mono" id="gritv">62</span></div>
-  <div class="prow"><span class="lbl">AIR</span><span class="track" data-p="air"><i style="width:18%"></i><u style="left:18%"></u></span><span class="val mono" id="airv">18</span></div>
-  <div class="prow"><span class="lbl">EPIC</span><span class="track" data-p="epic"><i style="width:7%"></i><u style="left:7%"></u></span><span class="val mono" id="epicv">07</span></div>
+  <div class="kdeck">
+    <div class="kcell"><div class="knob" data-kn="0.62"><i></i></div><span class="klbl">GRIT</span><span class="kval mono">62</span></div>
+    <div class="kcell"><div class="knob" data-kn="0.18"><i></i></div><span class="klbl">AIR</span><span class="kval mono">18</span></div>
+    <div class="kcell"><div class="knob" data-kn="0.07"><i></i></div><span class="klbl">EPIC</span><span class="kval mono">07</span></div>
+  </div>
   <div class="meta"><span class="badge" id="dirty">DIRTY</span><span class="mono" style="opacity:.45">seed 3</span>
     <span class="ghost" id="render">RENDER</span><span class="ghost">↻ SEED</span></div>
   <div id="capsules"></div>
@@ -383,17 +414,22 @@ function wire(tg, panel) {
 }
 wire('tgChain', 'chain'); wire('tgRack', 'rack');
 
-// rack sliders (display only) + capsules
-document.querySelectorAll('.track').forEach(tr => {
-  tr.addEventListener('pointerdown', function move(e) {
-    const r = tr.getBoundingClientRect();
-    const pct = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
-    tr.querySelector('i').style.width = pct * 100 + '%';
-    tr.querySelector('u').style.left = pct * 100 + '%';
-    const val = tr.closest('.prow').querySelector('.val');
-    if (val) val.textContent = String(Math.round(pct * 100)).padStart(2, '0');
-    document.getElementById('dirty').textContent = 'DIRTY';
+// rack knobs (display only) + capsules
+document.querySelectorAll('.knob[data-kn]').forEach(el => {
+  let v = parseFloat(el.dataset.kn);
+  const draw = () => {
+    el.querySelector('i').style.transform = `rotate(${(-135 + v * 270).toFixed(0)}deg)`;
+    el.parentElement.querySelector('.kval').textContent = String(Math.round(v * 100)).padStart(2, '0');
+  };
+  el.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    const y0 = e.clientY, v0 = v;
+    const move = ev => { v = Math.max(0, Math.min(1, v0 + (y0 - ev.clientY) / 120)); draw();
+      document.getElementById('dirty').textContent = 'DIRTY'; };
+    const up = () => { removeEventListener('pointermove', move); removeEventListener('pointerup', up); };
+    addEventListener('pointermove', move); addEventListener('pointerup', up);
   });
+  draw();
 });
 const caps = document.getElementById('capsules');
 document.getElementById('render').onclick = () => {
@@ -476,21 +512,30 @@ void main(){
     vec3 col = vec3(0.045) + band * vec3(0.065, 0.07, 0.06);
     float rim = pow(1.0 - max(dot(n, -rd), 0.0), 2.2);
     col += LIME * step(0.6, rim + dth * 0.22) * (0.16 + 0.25 * u_heat);
-    // the mouth - glossy lime decal, follows the gaze a little, opens with heat
-    vec3 mdir = normalize(vec3(u_gaze.x * 0.30, -0.34 + u_gaze.y * 0.18, 1.0));
-    float ang = acos(clamp(dot(normalize(hp), mdir), -1.0, 1.0));
-    float mr = 0.30 + 0.14 * u_heat + 0.05 * abs(u_squash) + 0.20 * u_gasp
-             + 0.03 * u_arousal * sin(u_t * 9.0 + u_seed);   // gasp on impact, quiver when feral
-    float mouth = smoothstep(mr, mr - 0.07, ang);
-    col = mix(col, LIME * (0.78 + 0.30 * u_heat), mouth);
     // ember: banded heart, no halo
     float ember = u_heat * exp(-2.6 * length(hp)) * (0.7 + 0.3 * sin(u_t * 7.0));
-    col += GLOW * (floor(ember * 3.0 + dth) / 3.0) * 0.55 * (1.0 - mouth);
-    // THE FACE LIVES IN THE BODY - eye decals evaluated on the hit direction,
+    col += GLOW * (floor(ember * 3.0 + dth) / 3.0) * 0.45;
+    // THE FACE LIVES IN THE BODY - decals evaluated on the hit direction,
     // lit by the same facet bands, edges dithered: they squash, blink, lean and
-    // tremble WITH the matter instead of floating in front of it (no DOM eyes).
+    // tremble WITH the matter instead of floating in front of it (no DOM face).
     float sq = 1.0 - u_squash * 0.45;
     vec3 nd = normalize(hp);
+    // the mouth: a SMILE at rest; a poke (or a hard gasp) opens it to an O.
+    {
+      vec3 md = normalize(vec3(u_gaze.x * 0.26, (-0.30 + u_gaze.y * 0.15) * sq, 1.0));
+      if (dot(nd, md) > 0.6) {
+        vec3 mu = normalize(cross(vec3(0.0, 1.0, 0.0), md));
+        vec3 mv = cross(md, mu);
+        vec2 mo = vec2(dot(nd - md, mu), dot(nd - md, mv)) * 3.4;
+        mo.y /= sq;                                     // the grin squashes too
+        float oAmt = clamp(u_wide * 1.2 + u_gasp * 0.8, 0.0, 1.0);
+        float r = 0.30 + 0.08 * u_heat + 0.10 * oAmt;
+        float ring = abs(length(mo) - r) - (0.085 + 0.045 * u_heat + 0.04 * oAmt);
+        float m = (1.0 - step(0.0, ring + (dth - 0.5) * 0.05))
+                * step(mo.y, -0.05 + 1.4 * oAmt);       // lower arc -> full O
+        col = mix(col, LIME * (0.75 + 0.30 * u_heat), m);
+      }
+    }
     float sep = 0.30 + 0.10 * u_arousal;               // wide-set when feral
     float jit = (noise3(vec3(u_tq * 3.0, u_seed, 1.0)) - 0.5) * 0.14
               * max(0.0, u_arousal - 0.35);            // feral tremble, on twos

@@ -84,8 +84,8 @@
 
   .slabpanel { position: fixed; bottom: 64px; background: var(--slab); box-shadow: var(--seam);
     border-radius: 14px; padding: 14px 18px; z-index: 12; }
-  #chain { left: 14px; width: 330px; }
-  #rack { right: 14px; width: 380px; }
+  #chain { left: 14px; width: 210px; }
+  #rack { right: 14px; width: 250px; }
   .ptitle { font-size: 9px; letter-spacing: .24em; opacity: .45; margin-bottom: 10px; }
   .ptitle b { color: var(--lime); opacity: 1; }
   .prow { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; font-size: 10.5px; }
@@ -178,6 +178,19 @@
   #phead { box-shadow: none; }
   #moshi { image-rendering: pixelated; }
 
+  /* ── KNOBS (user: hardware, not long sliders) ── */
+  .kdeck { display: flex; gap: 18px; align-items: flex-end; margin: 4px 0 6px; }
+  .kcell { display: flex; flex-direction: column; align-items: center; gap: 5px; }
+  .knob { width: 38px; height: 38px; border-radius: 50%; position: relative; cursor: ns-resize;
+    background: radial-gradient(circle at 35% 30%, #2a2c20, #101110 64%, #050505 100%);
+    box-shadow: 0 3px 0 #000, inset 0 1px 0 rgba(246,242,235,.16), 0 0 0 2px #1d2010; }
+  .knob i { position: absolute; left: 50%; top: 4px; width: 3px; height: 11px; margin-left: -1.5px;
+    background: var(--lime); border-radius: 2px; transform-origin: 50% 15px; opacity: .9; }
+  .klbl { font-size: 8.5px; letter-spacing: .16em; opacity: .55; }
+  .kval { font-size: 11px; opacity: .75; }
+
+
+
   /* ── Y2K PLATE PASS (HOUSE_STYLE v2.2): less modern app, more 2000s game menu.
      Plastic gloss (hard two-stop), skewed lime title plates, boxed numerals. ── */
   .plate { display: inline-block; transform: skewX(-12deg);
@@ -214,12 +227,33 @@
   * { -webkit-font-smoothing: antialiased; }
   body { filter: url(#ps2signal); }
   html.raw body { filter: none; }
+  /* ── HUD DECLUTTER (user: acid green is a lot; more like a HUD) ──
+     translucent panels over the world, outline plates, dimmer lime everywhere */
+  .slabpanel { background-color: rgba(13,13,12,.62); }
+  .lhead { background-color: rgba(13,13,12,.55); }
+  .lbody { background-color: rgba(10,10,9,.42); }
+  #topbar { background-color: rgba(13,13,12,.78); }
+  .plate, #wordmark { background: rgba(204,255,35,.13); color: var(--lime);
+    border: 1px solid rgba(204,255,35,.45); box-shadow: 0 2px 0 rgba(0,0,0,.6); }
+  #wordmark b { color: var(--lime); }
+  .clip { border-color: rgba(204,255,35,.20); }
+  .clip canvas { opacity: .45; }
+  .lhead .vol i, .sbar i { opacity: .65; }
+  #specrow { opacity: .5; }
+  .badge { background: rgba(204,255,35,.75); }
+  .deed { background: rgba(11,11,11,.55); border-color: rgba(204,255,35,.22); }
+  #phead { opacity: .8; }
+  #rackNote { opacity: .25; }
+  #rackNote::before { opacity: .45; }
 </style>
 </head>
 <body>
 <svg width="0" height="0" style="position:fixed" aria-hidden="true"><filter id="ps2signal"
   x="-2%" y="-2%" width="104%" height="104%" color-interpolation-filters="sRGB">
-  <feGaussianBlur stdDeviation="0.35"/>
+  <feGaussianBlur in="SourceGraphic" stdDeviation="1.6" result="halo"/>
+  <feComponentTransfer in="halo" result="halo2"><feFuncA type="linear" slope="0.40"/></feComponentTransfer>
+  <feMerge result="glowed"><feMergeNode in="halo2"/><feMergeNode in="SourceGraphic"/></feMerge>
+  <feGaussianBlur in="glowed" stdDeviation="0.5"/>
   <feComponentTransfer>
     <feFuncR type="discrete" tableValues="0 0.0667 0.1333 0.2 0.2667 0.3333 0.4 0.4667 0.5333 0.6 0.6667 0.7333 0.8 0.8667 0.9333 1"/>
     <feFuncG type="discrete" tableValues="0 0.0667 0.1333 0.2 0.2667 0.3333 0.4 0.4667 0.5333 0.6 0.6667 0.7333 0.8 0.8667 0.9333 1"/>
@@ -257,24 +291,22 @@
 
 <div class="slabpanel" id="chain">
   <div class="ptitle"><span class="plate">CHAIN</span> <b>VOX</b></div>
-  <div class="prow"><span class="lbl">NEURAL·NAM</span><span class="track"><i style="width:68%"></i><u style="left:68%"></u></span><span class="val mono">68</span></div>
-  <div class="prow"><span class="lbl">MIX</span><span class="track"><i style="width:100%"></i><u style="left:100%"></u></span><span class="val mono">100</span></div>
+  <div class="kdeck">
+    <div class="kcell"><div class="knob" data-k="nam"><i></i></div><span class="klbl">NAM</span><span class="kval mono">68</span></div>
+    <div class="kcell"><div class="knob" data-k="mix"><i></i></div><span class="klbl">MIX</span><span class="kval mono">100</span></div>
+  </div>
   <div class="meta"><span class="badge">TIER A</span><span class="ghost">LAB</span><span class="mono" style="opacity:.45">0.0 ms</span></div>
 </div>
 
 <div class="slabpanel" id="rack">
-  <div class="ptitle"><span class="plate">THE RACK</span> <b>RE-IMAGINE</b> · tone-147</div>
-  <div class="prow"><span class="lbl">GRIT</span><span class="track" data-p="grit"><i style="width:62%"></i><u style="left:62%"></u></span><span class="val mono">62</span></div>
-  <div class="prow"><span class="lbl">AIR</span><span class="track" data-p="air"><i style="width:18%"></i><u style="left:18%"></u></span><span class="val mono">18</span></div>
-  <div class="prow"><span class="lbl">EPIC</span><span class="track" data-p="epic"><i style="width:7%"></i><u style="left:7%"></u></span><span class="val mono">07</span></div>
+  <div class="ptitle"><span class="plate">THE RACK</span> <b>RE-IMAGINE</b></div>
+  <div class="kdeck">
+    <div class="kcell"><div class="knob" data-p="grit"><i></i></div><span class="klbl">GRIT</span><span class="kval mono">62</span></div>
+    <div class="kcell"><div class="knob" data-p="air"><i></i></div><span class="klbl">AIR</span><span class="kval mono">18</span></div>
+    <div class="kcell"><div class="knob" data-p="epic"><i></i></div><span class="klbl">EPIC</span><span class="kval mono">07</span></div>
+  </div>
   <div class="meta"><span class="badge">LIVE</span><span class="mono" style="opacity:.45">seed 3</span>
     <span class="ghost" id="render">RENDER</span></div>
-  <div class="ptitle" style="margin-top:14px"><span class="plate">THE LOOK</span> <b id="lookseed">SEED 0001</b>
-    <span class="ghost" id="reroll" title="bounded random — different and beautiful every time">⟳ REROLL</span></div>
-  <div class="prow"><span class="lbl">FORM</span><span class="track" data-l="form"><i></i><u></u></span><span class="val mono">00</span></div>
-  <div class="prow"><span class="lbl">WEAR</span><span class="track" data-l="wear"><i></i><u></u></span><span class="val mono">45</span></div>
-  <div class="prow"><span class="lbl">LUME</span><span class="track" data-l="lume"><i></i><u></u></span><span class="val mono">62</span></div>
-  <div class="prow"><span class="lbl">HUE</span><span class="track" data-l="hue"><i></i><u></u></span><span class="val mono">00</span></div>
   <div id="rackNote">DRAG THE AXES — THE PIT IS THE READOUT OF THE TRANSFORM</div>
 </div>
 
@@ -339,12 +371,16 @@ float bayer(vec2 fc) {
   float b2 = mod(f2.x, 2.0) * 2.0 + mod(f2.y, 2.0);
   return (b * 4.0 + b2) / 16.0;
 }
+float smin(float a, float b, float k) {
+  float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
+  return mix(b, a, h) - k * h * (1.0 - h);
+}
 
 float gCrack, gCore, gRidge, gHollow;
 float map(vec3 p) {
   p.xz = r2(u_spin + u_rotA) * p.xz;
   p.xy = r2(0.5 + u_rotB) * p.xy;
-  p.y *= 1.0 + 0.22 * u_onset;                       // the slam squash
+  p.y *= 1.0 + 0.10 * u_onset;                       // the slam squash (subtle)
   p.x += sign(p.x) * u_heat * 0.11;                  // REC: it splits
   // THE ARTIFACT GROWS: empty session = a small rough nugget; filling the
   // spectral range scales the whole stone up. LOW adds a slow heavy breath.
@@ -360,7 +396,17 @@ float map(vec3 p) {
     q.xy = r2(0.50 + 0.45 * u_grit + 0.45 * sd2 + u_lookA + 0.03 * sin(u_tq * 0.6)) * q.xy;
     q.yz = r2(0.47 - 0.22 * u_air + 0.25 * sd * sd + u_lookB) * q.yz;
   }
-  float d = (abs(q.x) + abs(q.y) + abs(q.z) - (0.34 + 0.10 * u_epic + 0.04 * u_energy)) * 0.42;
+  // v7 ORGANISM — the base is a BODY, not a crystal: seeded smin lobes
+  // (Moshi's grammar grown large). The kifs fold above no longer shapes the
+  // silhouette; it only decides where the veins run. Calmer, still unique.
+  float lt = u_tq * 0.07;
+  float d = length(p) - (0.30 + 0.10 * u_epic + 0.03 * u_energy);
+  d = smin(d, length(p - vec3( 0.26 * sin(sd * 6.3 + lt), 0.21 * cos(sd2 * 7.1), 0.14 * sin(sd * 3.0 + lt)))
+            - (0.20 + 0.06 * sd2 + 0.06 * u_epic), 0.17);
+  d = smin(d, length(p + vec3( 0.24 * cos(sd2 * 5.2 + lt), 0.18 * sin(sd * 8.4), 0.16))
+            - (0.18 + 0.05 * sd + 0.05 * u_epic), 0.17);
+  d = smin(d, length(p - vec3(-0.07, -0.24 * sin(sd2 * 4.7 + lt * 0.7), -0.18 * cos(sd * 2.2)))
+            - (0.16 + 0.04 * sd2), 0.17);
   // GRIT: reaction-diffusion-style labyrinth ridges grow on the hide
   // (MID fill densifies the labyrinth — structure arrives with the midrange)
   float lab = n3(q * (3.2 + 2.0 * u_mid) + u_tq * 0.12);
@@ -421,7 +467,7 @@ void main() {
       outc = vec4(mix(GLOW, vec3(1.0), 0.4) * (0.85 + 0.15 * sin(u_time * 7.0)), 1.0);
     } else {
       vec3 n = normalAt(hp);
-      n = normalize(floor(n * 3.0 + 0.5) / 3.0);      // FACETS: flat low-poly light
+      n = normalize(floor(n * 2.5 + 0.5) / 2.5);      // FACETS: bigger, calmer planes
       float diff = max(dot(n, normalize(vec3(0.5, 0.8, 0.6))), 0.0);
       float band = floor(diff * 3.0 + dth) / 3.0;     // FOUR BANDS. no gradients.
       vec3 col = vec3(0.030) + band * vec3(0.085, 0.09, 0.075);
@@ -431,10 +477,10 @@ void main() {
       // every lime term scales with completeness — beauty arrives with the song.
       float eL = mix(0.06, 1.0, smoothstep(0.08, 0.55, u_complete)) * u_lume;
       float rim = pow(1.0 - max(dot(n, -rd), 0.0), 3.0);
-      col += LIME * step(0.55, rim + dth * 0.25) * 0.20 * eL;    // hard rim, dithered
-      float fis = exp(-gCrack * 70.0);                  // fissures -> CRYSTAL SHARDS
-      float shard = step(0.78 - 0.18 * u_high, fis + dth * 0.12);   // highs grow shards
-      float vein  = step(0.45, fis + dth * 0.12) - shard;
+      col += LIME * step(0.58, rim + dth * 0.25) * 0.16 * eL;    // hard rim, dithered
+      float fis = exp(-gCrack * 95.0);                  // fissures -> sparse crystal
+      float shard = step(0.82 - 0.16 * u_high, fis + dth * 0.12);   // highs grow shards
+      float vein  = step(0.56, fis + dth * 0.12) - shard;
       col += mix(LIME, GLOW, 0.6) * shard * (0.45 + 0.75 * u_energy + 2.2 * u_heat) * eL;
       col += LIME * vein * (0.12 + 0.35 * u_energy + 1.1 * u_heat) * eL;
       col += LIME * step(0.93, rim + dth * 0.3) * 0.55 * u_high * eL;  // top-end sparkle
@@ -445,12 +491,12 @@ void main() {
       // a + b·cos(2π(c·t + d)) with c integer for clean cycling; d anchored so
       // HUE=0 band-0 lands on LIME; u_hue spins the whole family in harmony.
       // Quieter at rest — the fringe blooms with the music (u_wild).
-      float fr = u_high * eL * clamp(vein + smoothstep(0.62, 0.95, rim), 0.0, 1.0);
+      float fr = u_high * eL * clamp(vein + 0.6 * smoothstep(0.80, 0.98, rim), 0.0, 1.0);
       if (fr > 0.02) {
         float hue = floor(fract(n3(hp * 5.0) + u_time * 0.04) * 3.0) / 3.0;
         vec3 ic = clamp(vec3(0.5) + vec3(0.5) *
           cos(6.2831853 * (hue + vec3(0.853, 0.0, 0.379) + u_hue)), 0.0, 1.0);
-        col = mix(col, ic, step(0.5, fr + dth * 0.35) * (0.42 + 0.28 * u_wild));
+        col = mix(col, ic, step(0.5, fr + dth * 0.35) * (0.32 + 0.26 * u_wild));
       }
       outc = vec4(col, 1.0);
     }
@@ -540,6 +586,21 @@ for (const L of LANES) {
   lanesEl.appendChild(lane);
 }
 
+// ---------- THE LOOK: no longer a user surface — the SOUND picks the look.
+// (user: "they should play with the visuals by playing with the sound") The
+// arrangement hash seeds bounded ranges: change the clips, change the stone.
+const look = { form: 0.0, wear: 0.45, lume: 1.0, hue: 0.0, la: 0, lb: 0 };
+function deriveLook() {
+  const s = Math.floor(aseed * 997) + 13;
+  const h = k => { const x = Math.sin(s * 12.9898 + k * 78.233) * 43758.5453; return x - Math.floor(x); };
+  look.form = h(1) * 0.5;
+  look.wear = 0.2 + h(2) * 0.55;
+  look.lume = 0.75 + h(3) * 0.5;
+  look.hue  = h(4);
+  look.la   = (h(5) - 0.5) * 0.4;
+  look.lb   = (h(6) - 0.5) * 0.4;
+}
+
 // ---------- THE ARTIFACT: the arrangement's spectral fill feeds the mass ----------
 // empty session = small monochrome nugget. DRUMS/BASS (low) give it mass, GTR/PAD
 // (mid) give it structure, VOX (high) gives it light — and, at full highs, the one
@@ -559,6 +620,7 @@ function respec() {
   const norm = { low: 0.6, mid: 0.45, high: 0.25 };
   for (const k in cov) cov[k] = Math.min(1, cov[k] / norm[k]);
   specT = cov; aseed = h / 997;
+  deriveLook();
 }
 respec();
 function setClipLive(c, on) {
@@ -638,62 +700,32 @@ playbtn.onclick = () => { playing = !playing; playbtn.textContent = playing ? '�
 
 // ---------- the rack sculpts the mass ----------
 const axes = { grit: 0.62, air: 0.18, epic: 0.07 };
-document.querySelectorAll('#rack .track[data-p]').forEach(tr => {
-  tr.addEventListener('pointerdown', e => {
-    const r = tr.getBoundingClientRect();
-    const pct = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
-    tr.querySelector('i').style.width = pct * 100 + '%';
-    tr.querySelector('u').style.left = pct * 100 + '%';
-    tr.closest('.prow').querySelector('.val').textContent = String(Math.round(pct * 100)).padStart(2, '0');
-    axes[tr.dataset.p] = pct;
+const chainVals = { nam: 0.68, mix: 1.0 };
+// knobs: drag vertically. -135deg..135deg sweep, chunky plastic, lime tick.
+function bindKnob(el, get, set) {
+  const draw = () => {
+    el.querySelector('i').style.transform = `rotate(${(-135 + get() * 270).toFixed(0)}deg)`;
+    el.parentElement.querySelector('.kval').textContent =
+      String(Math.round(get() * 100)).padStart(2, '0');
+  };
+  el.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    const y0 = e.clientY, v0 = get();
+    const move = ev => { set(Math.max(0, Math.min(1, v0 + (y0 - ev.clientY) / 120))); draw(); };
+    const up = () => { removeEventListener('pointermove', move); removeEventListener('pointerup', up); };
+    addEventListener('pointermove', move); addEventListener('pointerup', up);
   });
-});
+  draw();
+}
+document.querySelectorAll('.knob[data-p]').forEach(el =>
+  bindKnob(el, () => axes[el.dataset.p], v => { axes[el.dataset.p] = v; }));
+document.querySelectorAll('.knob[data-k]').forEach(el =>
+  bindKnob(el, () => chainVals[el.dataset.k], v => { chainVals[el.dataset.k] = v; }));
 let renderFlare = 0;
 document.getElementById('render').onclick = () => {
   renderFlare = 1;
   deed('re-imagining the mass · seed 3');
 };
-
-// ---------- THE LOOK: user-sculpted, seeded-rerollable, persistent ----------
-// REROLL draws every axis from a BOUNDED range (form never passes 0.6, wear
-// never zeroes, lume stays tasteful) — different every time, ugly never.
-const LOOK_KEY = 'mosh-lab-look-009';
-const look = { form: 0.0, wear: 0.45, lume: 1.0, hue: 0.0, la: 0, lb: 0, seed: 1 };
-try { Object.assign(look, JSON.parse(localStorage.getItem(LOOK_KEY) || '{}')); } catch (e) {}
-const lookseedEl = document.getElementById('lookseed');
-function saveLook() { try { localStorage.setItem(LOOK_KEY, JSON.stringify(look)); } catch (e) {} }
-function lookPct(k) { return k === 'lume' ? (look.lume - 0.3) / 1.3 : look[k]; }
-function syncLookUI() {
-  document.querySelectorAll('#rack .track[data-l]').forEach(tr => {
-    const pct = Math.max(0, Math.min(1, lookPct(tr.dataset.l)));
-    tr.querySelector('i').style.width = pct * 100 + '%';
-    tr.querySelector('u').style.left = pct * 100 + '%';
-    tr.closest('.prow').querySelector('.val').textContent = String(Math.round(pct * 100)).padStart(2, '0');
-  });
-  lookseedEl.textContent = 'SEED ' + String(look.seed % 9973).padStart(4, '0');
-}
-document.querySelectorAll('#rack .track[data-l]').forEach(tr => {
-  tr.addEventListener('pointerdown', e => {
-    const r = tr.getBoundingClientRect();
-    const pct = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
-    const k = tr.dataset.l;
-    look[k] = k === 'lume' ? 0.3 + pct * 1.3 : pct;
-    saveLook(); syncLookUI();
-  });
-});
-document.getElementById('reroll').onclick = () => {
-  look.seed = (look.seed * 16807) % 2147483647;
-  const h = k => { const x = Math.sin((look.seed % 65521) * 0.0129898 + k * 78.233) * 43758.5453; return x - Math.floor(x); };
-  look.form = h(1) * 0.6;
-  look.wear = 0.2 + h(2) * 0.6;
-  look.lume = 0.7 + h(3) * 0.7;
-  look.hue  = h(4);
-  look.la   = (h(5) - 0.5) * 0.5;
-  look.lb   = (h(6) - 0.5) * 0.5;
-  saveLook(); syncLookUI();
-  deed(`re-rolled the stone · ${lookseedEl.textContent.toLowerCase()}`);
-};
-syncLookUI();
 
 // ---------- Moshi, resident: the 3D component (canonical copy lives in 010) ----------
 function MoshiBlob(host, opts = {}) {
@@ -765,21 +797,30 @@ void main(){
     vec3 col = vec3(0.045) + band * vec3(0.065, 0.07, 0.06);
     float rim = pow(1.0 - max(dot(n, -rd), 0.0), 2.2);
     col += LIME * step(0.6, rim + dth * 0.22) * (0.16 + 0.25 * u_heat);
-    // the mouth - glossy lime decal, follows the gaze a little, opens with heat
-    vec3 mdir = normalize(vec3(u_gaze.x * 0.30, -0.34 + u_gaze.y * 0.18, 1.0));
-    float ang = acos(clamp(dot(normalize(hp), mdir), -1.0, 1.0));
-    float mr = 0.30 + 0.14 * u_heat + 0.05 * abs(u_squash) + 0.20 * u_gasp
-             + 0.03 * u_arousal * sin(u_t * 9.0 + u_seed);   // gasp on impact, quiver when feral
-    float mouth = smoothstep(mr, mr - 0.07, ang);
-    col = mix(col, LIME * (0.78 + 0.30 * u_heat), mouth);
     // ember: banded heart, no halo
     float ember = u_heat * exp(-2.6 * length(hp)) * (0.7 + 0.3 * sin(u_t * 7.0));
-    col += GLOW * (floor(ember * 3.0 + dth) / 3.0) * 0.55 * (1.0 - mouth);
-    // THE FACE LIVES IN THE BODY - eye decals evaluated on the hit direction,
+    col += GLOW * (floor(ember * 3.0 + dth) / 3.0) * 0.45;
+    // THE FACE LIVES IN THE BODY - decals evaluated on the hit direction,
     // lit by the same facet bands, edges dithered: they squash, blink, lean and
-    // tremble WITH the matter instead of floating in front of it (no DOM eyes).
+    // tremble WITH the matter instead of floating in front of it (no DOM face).
     float sq = 1.0 - u_squash * 0.45;
     vec3 nd = normalize(hp);
+    // the mouth: a SMILE at rest; a poke (or a hard gasp) opens it to an O.
+    {
+      vec3 md = normalize(vec3(u_gaze.x * 0.26, (-0.30 + u_gaze.y * 0.15) * sq, 1.0));
+      if (dot(nd, md) > 0.6) {
+        vec3 mu = normalize(cross(vec3(0.0, 1.0, 0.0), md));
+        vec3 mv = cross(md, mu);
+        vec2 mo = vec2(dot(nd - md, mu), dot(nd - md, mv)) * 3.4;
+        mo.y /= sq;                                     // the grin squashes too
+        float oAmt = clamp(u_wide * 1.2 + u_gasp * 0.8, 0.0, 1.0);
+        float r = 0.30 + 0.08 * u_heat + 0.10 * oAmt;
+        float ring = abs(length(mo) - r) - (0.085 + 0.045 * u_heat + 0.04 * oAmt);
+        float m = (1.0 - step(0.0, ring + (dth - 0.5) * 0.05))
+                * step(mo.y, -0.05 + 1.4 * oAmt);       // lower arc -> full O
+        col = mix(col, LIME * (0.75 + 0.30 * u_heat), m);
+      }
+    }
     float sep = 0.30 + 0.10 * u_arousal;               // wide-set when feral
     float jit = (noise3(vec3(u_tq * 3.0, u_seed, 1.0)) - 0.5) * 0.14
               * max(0.0, u_arousal - 0.35);            // feral tremble, on twos
@@ -958,14 +999,13 @@ function frame(now) {
   if (playing && beatIdx !== lastBeat) {                 // THE SLAM (wild-gated)
     lastBeat = beatIdx;
     const hard = beatIdx % 4 === 0;
-    onsetEnv = Math.max(onsetEnv, (hard ? 1 : 0.45) * (0.25 + 0.75 * wild));
+    onsetEnv = Math.max(onsetEnv, (hard ? 0.7 : 0.3) * (0.25 + 0.75 * wild));
     if (hard && energy > 0.45) eject(2 + Math.floor(energy * 4));
-    moshi.pulse((hard ? 0.8 : 0.35) * (0.4 + 0.6 * wild));
-    rotTA += (Math.random() * 2.2 - 1.1) * (hard ? 1 : 0.4) * (0.2 + 0.8 * wild);
-    rotTB += (Math.random() * 1.4 - 0.7) * (hard ? 1 : 0.4) * (0.2 + 0.8 * wild);
+    rotTA += (Math.random() * 0.9 - 0.45) * (hard ? 1 : 0.4) * (0.2 + 0.8 * wild);
+    rotTB += (Math.random() * 0.6 - 0.3) * (hard ? 1 : 0.4) * (0.2 + 0.8 * wild);
   }
   if (sectIdx !== lastSect) {                              // new section = new matter
-    if (lastSect >= 0) { onsetEnv = 1; rotTA += (0.5 + 1.3 * wild) * (Math.random() - 0.5); }
+    if (lastSect >= 0) { onsetEnv = 0.8; rotTA += (0.3 + 0.7 * wild) * (Math.random() - 0.5); }
     lastSect = sectIdx;
   }
   onsetEnv *= 0.90;
@@ -986,8 +1026,8 @@ function frame(now) {
   // on twos: rotation + texture time snap at 12fps
   if (t - lastTick > 1 / 12) {
     lastTick = t;
-    rotA += (rotTA - rotA) * 0.5;
-    rotB += (rotTB - rotB) * 0.5;
+    rotA += (rotTA - rotA) * 0.26;             // ease, don't snap — less jerky
+    rotB += (rotTB - rotB) * 0.26;
     const wAmp = 0.005 + 0.011 * wild;                // PS1 vertex swim rides the music
     wobA = (Math.random() - 0.5) * wAmp;
     wobB = (Math.random() - 0.5) * wAmp;
@@ -1030,8 +1070,7 @@ function frame(now) {
   gl.uniform1f(U.u_lookB, look.lb);
   gl.drawArrays(gl.TRIANGLES, 0, 3);
 
-  moshi.set({ heat: recAmt,                              // moshi has a stake in the build:
-    arousal: Math.min(1, energy * 0.6 + axes.grit * 0.3 + spec.complete * 0.25) });
+  moshi.set({ heat: recAmt, arousal: 0.10 });            // moshi idles for now (user note)
   debrisFrame(t, dt);
   requestAnimationFrame(frame);
 }
@@ -1095,7 +1134,7 @@ addEventListener('pointermove', e => {
   dragAt = [e.clientX, e.clientY];
 });
 addEventListener('pointerup', () => {
-  if (dragAt && !dragged) { onsetEnv = 1; rotTA += (Math.random() - 0.5) * 1.2; moshi.pulse(0.5); eject(2); }
+  if (dragAt && !dragged) { onsetEnv = 0.8; rotTA += (Math.random() - 0.5) * 0.7; eject(2); }
   dragAt = null;
 });
 

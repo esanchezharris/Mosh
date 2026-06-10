@@ -1,4 +1,4 @@
-# HOUSE STYLE v2.2 — "Y2K console crunch" + the signal chain + the plate pass
+# HOUSE STYLE v2.3 — "Y2K console crunch": signal chain · plate pass · HUD restraint
 
 *v2, 2026-06-10. The v1 chrome overshot the decade: scanlines + terminal-green mono +
 `steps()` motion read **80s/90s Terminator/WarGames** ("boomer malaise"). The target
@@ -99,6 +99,26 @@ menu language), shipped as shared CSS per page:
 22. **Intensity follows the music.** Default state is CALM; slams, wobble, fringe and
     energy scale with a `wild` signal derived from the song (sections in demo, levels
     on the engine link). The chaos is earned, not constant.
+
+## HUD restraint (v2.3) — "the acid green is a lot on my eyes"
+
+23. **Translucent chrome:** panels are HUD glass over the world (`rgba` fills ~.45–.78),
+    not solid slabs. Outline plates (lime border + lime text on 13%-lime fill) replace
+    solid lime plates. Meters, waveforms, clip borders all run dimmer. Solid lime is
+    reserved for REC and true alerts — the non-negotiables keep their voltage.
+24. **Knobs, not sliders:** continuous values are 38px plastic rotaries (vertical drag,
+    lime tick, boxed numeral below). Long slider tracks read 2010-flat; knobs read rack
+    hardware.
+25. **The SOUND owns the visuals.** Never surface look/style controls to the user —
+    the arrangement (clips, spectral fill, sections) derives the look from bounded
+    seeded ranges. Play with the visuals by playing with the music.
+26. **CRT bloom in the signal chain:** a phosphor-halo stage (≈1.6px blur at 40% alpha
+    merged under the source) before the soften+posterize. Text fuzzes like a good
+    monitor, not like damage. "More 2002 than 2010."
+27. **The centerpiece is an organism.** Organic smin-lobed silhouettes with sparse
+    crystal accents beat dense fractal lattices — beauty by restraint. Beats ease the
+    body (lerp ~0.26, small jolts); nothing snaps. Moshi idles unless addressed —
+    REC heat is the one standing coupling.
 
 ## Why this is still anti-slop
 

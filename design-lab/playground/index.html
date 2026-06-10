@@ -39,7 +39,8 @@
   .meta .num { font-size: 10px; letter-spacing: .2em; opacity: .45; }
   .meta .name { display: inline-block; transform: skewX(-12deg);
            font-family: var(--font-display); font-weight: 900; font-style: italic;
-           font-size: 15px; background: var(--lime); color: var(--ink);
+           font-size: 15px; background: rgba(204,255,35,.13); color: var(--lime);
+           border: 1px solid rgba(204,255,35,.45);
            padding: 4px 13px 3px; border-radius: 3px; margin: 6px 0 8px;
            box-shadow: 0 3px 0 #000, inset 0 1px 0 rgba(255,255,255,.4);
            letter-spacing: .03em; text-transform: uppercase; }
@@ -65,7 +66,10 @@
 <body>
 <svg width="0" height="0" style="position:fixed" aria-hidden="true"><filter id="ps2signal"
   x="-2%" y="-2%" width="104%" height="104%" color-interpolation-filters="sRGB">
-  <feGaussianBlur stdDeviation="0.35"/>
+  <feGaussianBlur in="SourceGraphic" stdDeviation="1.6" result="halo"/>
+  <feComponentTransfer in="halo" result="halo2"><feFuncA type="linear" slope="0.40"/></feComponentTransfer>
+  <feMerge result="glowed"><feMergeNode in="halo2"/><feMergeNode in="SourceGraphic"/></feMerge>
+  <feGaussianBlur in="glowed" stdDeviation="0.5"/>
   <feComponentTransfer>
     <feFuncR type="discrete" tableValues="0 0.0667 0.1333 0.2 0.2667 0.3333 0.4 0.4667 0.5333 0.6 0.6667 0.7333 0.8 0.8667 0.9333 1"/>
     <feFuncG type="discrete" tableValues="0 0.0667 0.1333 0.2 0.2667 0.3333 0.4 0.4667 0.5333 0.6 0.6667 0.7333 0.8 0.8667 0.9333 1"/>

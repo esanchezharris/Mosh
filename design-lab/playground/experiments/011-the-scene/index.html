@@ -17,6 +17,7 @@
   /* THE PS2 SIGNAL CHAIN (HOUSE_STYLE v2.1) — one cable for every surface */
   body { filter: url(#ps2signal); }
   html.raw body { filter: none; }
+
   .mono { font-variant-numeric: tabular-nums; letter-spacing: .06em; }
   .disp { font-family: var(--font-display); font-weight: 900; text-transform: uppercase; }
 
@@ -100,12 +101,23 @@
     z-index: 9; pointer-events: none; }
   #title { position: fixed; bottom: 172px; left: 20px; font-size: 10px;
     letter-spacing: .14em; opacity: .5; z-index: 10; }
+
+  /* HUD de-acid: outline plates, less solid lime */
+  .plate { background: rgba(204,255,35,.13); color: var(--lime);
+    border: 1px solid rgba(204,255,35,.45); box-shadow: 0 2px 0 rgba(0,0,0,.6); }
+  #topbar { background-color: rgba(13,13,12,.78); }
+  #strip { background-color: rgba(13,13,12,.62); }
+  .lbody { background-color: rgba(10,10,9,.42); }
+  .clip { border-color: rgba(204,255,35,.20); }
 </style>
 </head>
 <body>
 <svg width="0" height="0" style="position:fixed" aria-hidden="true"><filter id="ps2signal"
   x="-2%" y="-2%" width="104%" height="104%" color-interpolation-filters="sRGB">
-  <feGaussianBlur stdDeviation="0.35"/>
+  <feGaussianBlur in="SourceGraphic" stdDeviation="1.6" result="halo"/>
+  <feComponentTransfer in="halo" result="halo2"><feFuncA type="linear" slope="0.40"/></feComponentTransfer>
+  <feMerge result="glowed"><feMergeNode in="halo2"/><feMergeNode in="SourceGraphic"/></feMerge>
+  <feGaussianBlur in="glowed" stdDeviation="0.5"/>
   <feComponentTransfer>
     <feFuncR type="discrete" tableValues="0 0.0667 0.1333 0.2 0.2667 0.3333 0.4 0.4667 0.5333 0.6 0.6667 0.7333 0.8 0.8667 0.9333 1"/>
     <feFuncG type="discrete" tableValues="0 0.0667 0.1333 0.2 0.2667 0.3333 0.4 0.4667 0.5333 0.6 0.6667 0.7333 0.8 0.8667 0.9333 1"/>
