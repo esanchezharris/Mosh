@@ -1,4 +1,4 @@
-# HOUSE STYLE v2.1 — "Y2K console crunch" + the signal chain
+# HOUSE STYLE v2.2 — "Y2K console crunch" + the signal chain + the plate pass
 
 *v2, 2026-06-10. The v1 chrome overshot the decade: scanlines + terminal-green mono +
 `steps()` motion read **80s/90s Terminator/WarGames** ("boomer malaise"). The target
@@ -69,6 +69,36 @@ that are crystal clear right next to this. A general antialiasing 2000s pass."*
     earn a banded thin-film fringe (lime→cyan→magenta, dither-quantized) at full
     spectral completeness — beauty as a reward for finishing the song (009 v5).
     Chrome NEVER gets it. Five colors everywhere else, always.
+
+## The plate pass (v2.2) — "more 2000s, less modern" on the panels
+
+User: *"I want all of the UI panels to look more 2000s, less modern."* What still read
+modern: flat single-tone fills, uniform border-radius, quiet type. The cure (SSX/THPS
+menu language), shipped as shared CSS per page:
+
+14. **Skewed lime title plates** (`.plate`): every panel/section name is an italic-900
+    parallelogram plate (skewX(-12°), ink-on-lime, block shadow). The wordmark too.
+15. **Plastic gloss:** hard two-stop vertical gradient (light upper, dark lower, hard
+    stop at ~44%) + 1px specular inner top line on panels, chips, buttons. CHROME ONLY —
+    the world keeps flat dither.
+16. **Chamfered corners:** a 45° clip-path notch on one corner of major panels (skip any
+    panel that animates its own clip-path, e.g. 008's drawers).
+17. **Boxed numerals:** values sit in recessed mono wells, bigger.
+18. **Hazard strip:** 45° lime stripe accent on panel footers, sparingly.
+19. **Faces live in the shader.** DOM glyphs floating over a raymarched body read as a
+    sticker on glass (the "sore thumb"). Eyes/mouths are SDF decals lit by the same
+    facet bands and dithered by the same Bayer — they squash, blink and tremble WITH
+    the matter. DOM faces are allowed only as the no-GL degraded fallback. (MoshiBlob
+    010: GLYPH default; SOCKET and VISOR variants on the workbench deck.)
+20. **Presence orbs:** people/processes appear as small dithered 2D-canvas orbs
+    (Bayer-checker banding, on-twos wobble) — crew with lime detail, rivals as fog
+    whose size is the only signal (011 THE SCENE). Zero GL contexts.
+21. **Bounded reroll:** every "random look" control draws from curated ranges so the
+    result is different every time and ugly never (009's THE LOOK + ⟳ REROLL; fringe
+    hues via iq's cosine palette, lime-anchored).
+22. **Intensity follows the music.** Default state is CALM; slams, wobble, fringe and
+    energy scale with a `wild` signal derived from the song (sections in demo, levels
+    on the engine link). The chaos is earned, not constant.
 
 ## Why this is still anti-slop
 

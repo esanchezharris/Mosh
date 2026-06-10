@@ -190,6 +190,33 @@
   #sect { font-family: var(--font-display); font-weight: 900; font-size: 14px;
     letter-spacing: .06em; transform: skewX(-6deg); }
   #wordmark b { text-shadow: none; }
+
+  /* ── Y2K PLATE PASS (HOUSE_STYLE v2.2): less modern app, more 2000s game menu.
+     Plastic gloss (hard two-stop), skewed lime title plates, boxed numerals. ── */
+  .plate { display: inline-block; transform: skewX(-12deg);
+    background: var(--lime); color: var(--ink);
+    font-family: var(--font-display); font-weight: 900; font-style: italic;
+    font-size: 11px; letter-spacing: .05em; padding: 4px 12px 3px; opacity: 1;
+    border-radius: 3px; box-shadow: 0 3px 0 #000, inset 0 1px 0 rgba(255,255,255,.4);
+    text-transform: uppercase; }
+
+  .slabpanel, .lhead, #topbar { background-image:
+      linear-gradient(180deg, rgba(246,242,235,.06) 0 44%, rgba(0,0,0,.30) 44% 100%),
+      radial-gradient(rgba(204,255,35,.04) 1px, transparent 1.01px);
+    background-size: 100% 100%, 3px 3px; }
+  .ptitle { opacity: .9; display: flex; align-items: center; gap: 8px; }
+  .prow .val { width: 36px; font-size: 12px; background: #060606; border-radius: 4px;
+    padding: 3px 5px; box-shadow: inset 0 1px 2px #000, inset 0 -1px 0 rgba(246,242,235,.06);
+    text-align: right; }
+  .ghost, .badge, #recchip { background-image:
+    linear-gradient(180deg, rgba(255,255,255,.10) 0 45%, rgba(0,0,0,.22) 45% 100%); }
+  #wordmark { transform: skewX(-10deg); background: var(--lime); padding: 3px 13px 2px;
+    border-radius: 3px; box-shadow: 0 3px 0 #000, inset 0 1px 0 rgba(255,255,255,.4); }
+  #wordmark, #wordmark b { color: var(--ink); }
+  .lhead .nm { font-style: italic; }
+  .lbody, .clip { background-image:
+    linear-gradient(180deg, rgba(246,242,235,.03) 0 40%, rgba(0,0,0,.18) 40% 100%); }
+
   #phead { box-shadow: none; }
   #moshi { image-rendering: pixelated; }
 
@@ -234,14 +261,14 @@
 </div>
 
 <div class="slabpanel shown" id="chain">
-  <div class="ptitle">CHAIN · <b id="chainTrack">VOX</b></div>
+  <div class="ptitle"><span class="plate">CHAIN</span> <b id="chainTrack">VOX</b></div>
   <div class="prow"><span class="lbl">NEURAL·NAM</span><span class="track" data-p="drive"><i style="width:68%"></i><u style="left:68%"></u></span><span class="val mono">68</span></div>
   <div class="prow"><span class="lbl">MIX</span><span class="track" data-p="mix"><i style="width:100%"></i><u style="left:100%"></u></span><span class="val mono">100</span></div>
   <div class="meta"><span class="badge">TIER A</span><span class="ghost">LAB</span><span class="mono" style="opacity:.45">0.0 ms</span></div>
 </div>
 
 <div class="slabpanel shown" id="rack">
-  <div class="ptitle">THE RACK · <b>RE-IMAGINE</b> · tone-147</div>
+  <div class="ptitle"><span class="plate">THE RACK</span> <b>RE-IMAGINE</b> · tone-147</div>
   <div class="prow"><span class="lbl">GRIT</span><span class="track" data-p="grit"><i style="width:62%"></i><u style="left:62%"></u></span><span class="val mono" id="gritv">62</span></div>
   <div class="prow"><span class="lbl">AIR</span><span class="track" data-p="air"><i style="width:18%"></i><u style="left:18%"></u></span><span class="val mono" id="airv">18</span></div>
   <div class="prow"><span class="lbl">EPIC</span><span class="track" data-p="epic"><i style="width:7%"></i><u style="left:7%"></u></span><span class="val mono" id="epicv">07</span></div>
@@ -384,16 +411,14 @@ function MoshiBlob(host, opts = {}) {
   const seed = opts.seed ?? Math.random() * 10;
   const cv = document.createElement('canvas');
   cv.className = 'moshi-canvas';
-  const face = document.createElement('div');
-  face.className = 'moshi-face';
-  face.innerHTML = '<span>&gt;</span><span>&lt;</span>';
-  host.appendChild(cv); host.appendChild(face);
+  host.appendChild(cv);
 
   const FRAG = `
 precision highp float;
 uniform vec2  u_res;
 uniform float u_t, u_tq, u_seed;
 uniform float u_arousal, u_heat, u_squash, u_gasp;
+uniform float u_eyeStyle, u_blink, u_wide;
 uniform vec2  u_gaze;
 const vec3 LIME = vec3(0.800, 1.000, 0.137);
 const vec3 GLOW = vec3(0.851, 1.000, 0.298);
@@ -408,6 +433,11 @@ float smin(float a,float b,float k){ float h=clamp(.5+.5*(b-a)/k,0.,1.);
   return mix(b,a,h)-k*h*(1.-h); }
 float bayer(vec2 fc){ float b=mod(fc.x,2.0)*2.0+mod(fc.y,2.0); vec2 f2=floor(fc/2.0);
   return (b*4.0+mod(f2.x,2.0)*2.0+mod(f2.y,2.0))/16.0; }
+float sdSeg(vec2 p, vec2 a, vec2 b){ vec2 pa=p-a, ba=b-a;
+  float h=clamp(dot(pa,ba)/dot(ba,ba),0.0,1.0); return length(pa-ba*h); }
+float chevron(vec2 p, float flip){ p.x*=flip;          // +1 = '>'   -1 = '<'
+  return min(sdSeg(p, vec2(-0.5, 0.62), vec2(0.5, 0.0)),
+             sdSeg(p, vec2(-0.5,-0.62), vec2(0.5, 0.0))); }
 float map(vec3 p){
   float sq = 1.0 - u_squash * 0.45;                 // squash & stretch, volume-ish
   p.y *= 1.0 / sq; p.x *= sq; p.z *= sq;
@@ -440,13 +470,13 @@ void main(){
   vec4 outc = vec4(0.0);
   if (hit) {
     vec3 n = normalAt(hp);
-    n = normalize(floor(n * 3.0 + 0.5) / 3.0);        // FACETS — flat low-poly light
+    n = normalize(floor(n * 3.0 + 0.5) / 3.0);        // FACETS - flat low-poly light
     float diff = max(dot(n, normalize(vec3(0.5, 0.8, 0.6))), 0.0);
     float band = floor(diff * 3.0 + dth) / 3.0;
     vec3 col = vec3(0.045) + band * vec3(0.065, 0.07, 0.06);
     float rim = pow(1.0 - max(dot(n, -rd), 0.0), 2.2);
     col += LIME * step(0.6, rim + dth * 0.22) * (0.16 + 0.25 * u_heat);
-    // the mouth — glossy lime decal, follows the gaze a little, opens with heat
+    // the mouth - glossy lime decal, follows the gaze a little, opens with heat
     vec3 mdir = normalize(vec3(u_gaze.x * 0.30, -0.34 + u_gaze.y * 0.18, 1.0));
     float ang = acos(clamp(dot(normalize(hp), mdir), -1.0, 1.0));
     float mr = 0.30 + 0.14 * u_heat + 0.05 * abs(u_squash) + 0.20 * u_gasp
@@ -456,14 +486,66 @@ void main(){
     // ember: banded heart, no halo
     float ember = u_heat * exp(-2.6 * length(hp)) * (0.7 + 0.3 * sin(u_t * 7.0));
     col += GLOW * (floor(ember * 3.0 + dth) / 3.0) * 0.55 * (1.0 - mouth);
+    // THE FACE LIVES IN THE BODY - eye decals evaluated on the hit direction,
+    // lit by the same facet bands, edges dithered: they squash, blink, lean and
+    // tremble WITH the matter instead of floating in front of it (no DOM eyes).
+    float sq = 1.0 - u_squash * 0.45;
+    vec3 nd = normalize(hp);
+    float sep = 0.30 + 0.10 * u_arousal;               // wide-set when feral
+    float jit = (noise3(vec3(u_tq * 3.0, u_seed, 1.0)) - 0.5) * 0.14
+              * max(0.0, u_arousal - 0.35);            // feral tremble, on twos
+    float eyeY = max(0.10,
+      (1.0 + 0.35 * smoothstep(0.4, 1.0, u_heat) + 0.4 * u_wide)
+      * (1.0 - u_blink * 0.92) * sq);                  // steep on REC, shut on blink
+    vec3 eyeCol = mix(vec3(0.90, 0.93, 0.87), LIME, smoothstep(0.45, 0.75, u_heat));
+    eyeCol *= 0.60 + 0.45 * band;                      // facet-lit like the hide
+    for (int e = 0; e < 2; e++) {
+      float s = (e == 0) ? -1.0 : 1.0;
+      vec3 ed = normalize(vec3(s * sep + u_gaze.x * 0.22 + jit,
+                               (0.20 + u_gaze.y * 0.16) * sq, 1.0));
+      if (dot(nd, ed) < 0.6) continue;
+      vec3 uu = normalize(cross(vec3(0.0, 1.0, 0.0), ed));
+      vec3 vv = cross(ed, uu);
+      vec2 o = vec2(dot(nd - ed, uu), dot(nd - ed, vv)) * 4.5;
+      o.y /= eyeY;
+      if (u_eyeStyle < 0.5) {                          // GLYPH - the brand brackets
+        float ch = chevron(o * 1.6, -s);
+        col = mix(col, eyeCol, 1.0 - step(0.20 + (dth - 0.5) * 0.10, ch));
+      } else if (u_eyeStyle < 1.5) {                   // SOCKET - carved pit, lime pupil
+        float so = length(o * vec2(1.0, 1.25)) - 0.56;
+        col = mix(col, vec3(0.015), 1.0 - step(0.0, so));
+        vec2 po = o - vec2(u_gaze.x, -u_gaze.y) * 0.16;
+        col = mix(col, LIME * (0.7 + 0.3 * u_heat),
+                  (1.0 - step(0.0, length(po) - 0.22)) * (1.0 - step(0.0, so)));
+      }
+    }
+    if (u_eyeStyle > 1.5) {                            // VISOR - band, chevron cutouts
+      vec3 fd = normalize(vec3(u_gaze.x * 0.20 + jit, (0.20 + u_gaze.y * 0.14) * sq, 1.0));
+      if (dot(nd, fd) > 0.55) {
+        vec3 uu = normalize(cross(vec3(0.0, 1.0, 0.0), fd));
+        vec3 vv = cross(fd, uu);
+        vec2 o = vec2(dot(nd - fd, uu), dot(nd - fd, vv)) * 4.5;
+        float bm = (1.0 - step(0.40 * eyeY, abs(o.y))) * (1.0 - step(1.15, abs(o.x)));
+        col = mix(col, vec3(0.02), bm);
+        float ch = min(chevron((o - vec2(-0.52, 0.0)) * 1.7, 1.0),
+                       chevron((o - vec2( 0.52, 0.0)) * 1.7, -1.0));
+        col = mix(col, LIME * (0.75 + 0.25 * u_heat),
+                  (1.0 - step(0.30 + (dth - 0.5) * 0.1, ch)) * bm);
+      }
+    }
     outc = vec4(col, 1.0);
   }
   gl_FragColor = outc;
 }`;
   const VERT = 'attribute vec2 a; void main(){ gl_Position = vec4(a, 0.0, 1.0); }';
   const gl = cv.getContext('webgl', { antialias: false, alpha: true, premultipliedAlpha: false });
-  if (!gl) {                       // context cap hit — degrade to a face, keep the page alive
+  if (!gl) {                       // context cap hit - a DOM face keeps the page alive
+    const face = document.createElement('div');
+    face.className = 'moshi-face';
+    face.innerHTML = '<span>&gt;</span><span>&lt;</span>';
     face.style.opacity = '0.6';
+    face.style.fontSize = Math.round(host.clientWidth * 0.17) + 'px';
+    host.appendChild(face);
     return { el: host, set() {}, pulse() {}, poke() {} };
   }
   cv.addEventListener('webglcontextlost', e => e.preventDefault());
@@ -485,61 +567,47 @@ void main(){
   gl.enableVertexAttribArray(al);
   gl.vertexAttribPointer(al, 2, gl.FLOAT, false, 0, 0);
   const U = {};
-  for (const n of ['u_res','u_t','u_tq','u_seed','u_arousal','u_heat','u_squash','u_gasp','u_gaze'])
+  for (const n of ['u_res','u_t','u_tq','u_seed','u_arousal','u_heat','u_squash','u_gasp','u_eyeStyle','u_blink','u_wide','u_gaze'])
     U[n] = gl.getUniformLocation(prog, n);
 
   function resize() {
     cv.width = Math.max(24, Math.floor(host.clientWidth / 3));   // chunky on purpose
     cv.height = Math.max(24, Math.floor(host.clientHeight / 3));
     gl.viewport(0, 0, cv.width, cv.height);
-    face.style.fontSize = Math.round(host.clientWidth * 0.17) + 'px';
   }
   resize();
   if (typeof ResizeObserver !== 'undefined') new ResizeObserver(resize).observe(host);
 
-  const P = { arousal: 0.08, heat: 0, gx: 0, gy: 0 };
+  const P = { arousal: 0.08, heat: 0, gx: 0, gy: 0, eyeStyle: opts.eyeStyle ?? 0 };
   const cur = { arousal: 0.08, heat: 0 };
-  let squash = 0, squashV = 0, tq = 0, lastTick = 0, fjx = 0, fjy = 0;
+  const eye = { blink: 0, wide: 0 };
+  let squash = 0, squashV = 0, tq = 0, lastTick = 0;
   const t0 = performance.now() + seed * 997;
 
-  // blink: alive even when idle
-  (function blink() {
-    setTimeout(() => {
-      face.classList.add('blink');
-      setTimeout(() => { face.classList.remove('blink'); blink(); }, 110);
-    }, 1600 + Math.random() * 3800);
+  (function blink() {              // alive even when idle
+    setTimeout(() => { eye.blink = 1; blink(); }, 1600 + Math.random() * 3800);
   })();
 
   function frame(now) {
     const t = (now - t0) / 1000;
     cur.arousal += (P.arousal - cur.arousal) * 0.06;
     cur.heat += (P.heat - cur.heat) * 0.07;
-    // damped spring with overshoot — squash & stretch, never robotic
+    // damped spring with overshoot - squash & stretch, never robotic
     squashV += (-squash * 0.16 - squashV * 0.14);
     squash += squashV;
-    if (t - lastTick > 1 / 12) {                           // wobble on twos
-      lastTick = t; tq = t;
-      const tr = Math.max(0, cur.arousal - 0.35);          // feral = the face trembles
-      fjx = (Math.random() - 0.5) * 8 * tr;
-      fjy = (Math.random() - 0.5) * 6 * tr;
-    }
-    // the face IS the body: it squashes with the spring, leans into the gaze,
-    // rides the top surface down on impact, widens its set when feral
+    eye.blink *= 0.80; eye.wide *= 0.94;     // face state decays; the shader wears it
+    if (t - lastTick > 1 / 12) { lastTick = t; tq = t; }   // wobble on twos
     const sqv = Math.max(-0.6, Math.min(0.85, squash));
-    face.style.transform =
-      `translate(calc(-50% + ${(P.gx * 13 + fjx).toFixed(1)}%), calc(-50% + ${(P.gy * 11 + sqv * 16 + fjy).toFixed(1)}%))`
-      + ` rotate(${(P.gx * (4 + 5 * cur.arousal)).toFixed(1)}deg)`
-      + ` scale(${(1 + sqv * 0.30).toFixed(3)}, ${(1 - sqv * 0.45).toFixed(3)})`;
-    face.style.gap = (0.55 + 0.50 * Math.max(0, cur.arousal - 0.15)).toFixed(2) + 'em';
-    face.style.setProperty('--eyeY', (1 + cur.heat * 0.35).toFixed(2));
-    face.style.color = cur.heat > 0.6 ? 'var(--lime)' : 'var(--bone)';
     gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
     gl.uniform2f(U.u_res, cv.width, cv.height);
     gl.uniform1f(U.u_t, t); gl.uniform1f(U.u_tq, tq); gl.uniform1f(U.u_seed, seed);
     gl.uniform1f(U.u_arousal, cur.arousal);
     gl.uniform1f(U.u_heat, cur.heat);
     gl.uniform1f(U.u_squash, sqv);
-    gl.uniform1f(U.u_gasp, Math.min(1, Math.abs(squashV) * 6));   // mouth gasps with impact velocity
+    gl.uniform1f(U.u_gasp, Math.min(1, Math.abs(squashV) * 6));   // mouth gasps with impact
+    gl.uniform1f(U.u_eyeStyle, P.eyeStyle);
+    gl.uniform1f(U.u_blink, Math.min(1, eye.blink));
+    gl.uniform1f(U.u_wide, Math.min(1, eye.wide));
     gl.uniform2f(U.u_gaze, P.gx, P.gy);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     requestAnimationFrame(frame);
@@ -551,15 +619,11 @@ void main(){
     set(p) { Object.assign(P, p); },
     pulse(amount = 0.55) {                                       // beat hit
       squashV += amount * 0.45;
-      if (amount > 0.6 && Math.random() < 0.3) {                 // hard hits jolt a blink
-        face.classList.add('blink');
-        setTimeout(() => face.classList.remove('blink'), 100);
-      }
+      if (amount > 0.6 && Math.random() < 0.3) eye.blink = 1;    // hard hits jolt a blink
     },
     poke() {                                                      // indignant squish
       squashV += 0.95 * 0.45;
-      face.classList.add('wide');
-      setTimeout(() => face.classList.remove('wide'), 450);
+      eye.wide = 1;
       const a0 = P.arousal;
       P.arousal = Math.min(1, a0 + 0.45);
       setTimeout(() => { P.arousal = a0; }, 900);

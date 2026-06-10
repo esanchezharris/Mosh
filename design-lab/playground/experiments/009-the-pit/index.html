@@ -178,6 +178,37 @@
   #phead { box-shadow: none; }
   #moshi { image-rendering: pixelated; }
 
+  /* ── Y2K PLATE PASS (HOUSE_STYLE v2.2): less modern app, more 2000s game menu.
+     Plastic gloss (hard two-stop), skewed lime title plates, boxed numerals. ── */
+  .plate { display: inline-block; transform: skewX(-12deg);
+    background: var(--lime); color: var(--ink);
+    font-family: var(--font-display); font-weight: 900; font-style: italic;
+    font-size: 11px; letter-spacing: .05em; padding: 4px 12px 3px; opacity: 1;
+    border-radius: 3px; box-shadow: 0 3px 0 #000, inset 0 1px 0 rgba(255,255,255,.4);
+    text-transform: uppercase; }
+
+  .slabpanel, .lhead, #topbar { background-image:
+      linear-gradient(180deg, rgba(246,242,235,.06) 0 44%, rgba(0,0,0,.30) 44% 100%),
+      radial-gradient(rgba(204,255,35,.04) 1px, transparent 1.01px);
+    background-size: 100% 100%, 3px 3px; }
+  .slabpanel { clip-path: polygon(0 0, calc(100% - 18px) 0, 100% 18px, 100% 100%, 0 100%); }
+  .ptitle { opacity: .9; display: flex; align-items: center; gap: 8px; }
+  .prow .val { width: 36px; font-size: 12px; background: #060606; border-radius: 4px;
+    padding: 3px 5px; box-shadow: inset 0 1px 2px #000, inset 0 -1px 0 rgba(246,242,235,.06);
+    text-align: right; }
+  .ghost, .badge, #recchip { background-image:
+    linear-gradient(180deg, rgba(255,255,255,.10) 0 45%, rgba(0,0,0,.22) 45% 100%); }
+  #rackNote { position: relative; padding-top: 9px; }
+  #rackNote::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 4px;
+    background: repeating-linear-gradient(-45deg, rgba(204,255,35,.55) 0 6px, transparent 6px 12px); }
+  #wordmark { transform: skewX(-10deg); background: var(--lime); padding: 3px 13px 2px;
+    border-radius: 3px; box-shadow: 0 3px 0 #000, inset 0 1px 0 rgba(255,255,255,.4); }
+  #wordmark, #wordmark b { color: var(--ink); }
+  .lhead .nm { font-style: italic; }
+  .lbody, .clip { background-image:
+    linear-gradient(180deg, rgba(246,242,235,.03) 0 40%, rgba(0,0,0,.18) 40% 100%); }
+
+
   /* THE PS2 SIGNAL CHAIN (HOUSE_STYLE v2.1) — one cable for every surface:
      soft 2000s AA + 16-step posterize over DOM and GL alike. html.raw = A/B. */
   * { -webkit-font-smoothing: antialiased; }
@@ -225,19 +256,25 @@
 </div>
 
 <div class="slabpanel" id="chain">
-  <div class="ptitle">CHAIN · <b>VOX</b></div>
+  <div class="ptitle"><span class="plate">CHAIN</span> <b>VOX</b></div>
   <div class="prow"><span class="lbl">NEURAL·NAM</span><span class="track"><i style="width:68%"></i><u style="left:68%"></u></span><span class="val mono">68</span></div>
   <div class="prow"><span class="lbl">MIX</span><span class="track"><i style="width:100%"></i><u style="left:100%"></u></span><span class="val mono">100</span></div>
   <div class="meta"><span class="badge">TIER A</span><span class="ghost">LAB</span><span class="mono" style="opacity:.45">0.0 ms</span></div>
 </div>
 
 <div class="slabpanel" id="rack">
-  <div class="ptitle">THE RACK · <b>RE-IMAGINE</b> · tone-147 — it sculpts the mass</div>
+  <div class="ptitle"><span class="plate">THE RACK</span> <b>RE-IMAGINE</b> · tone-147</div>
   <div class="prow"><span class="lbl">GRIT</span><span class="track" data-p="grit"><i style="width:62%"></i><u style="left:62%"></u></span><span class="val mono">62</span></div>
   <div class="prow"><span class="lbl">AIR</span><span class="track" data-p="air"><i style="width:18%"></i><u style="left:18%"></u></span><span class="val mono">18</span></div>
   <div class="prow"><span class="lbl">EPIC</span><span class="track" data-p="epic"><i style="width:7%"></i><u style="left:7%"></u></span><span class="val mono">07</span></div>
   <div class="meta"><span class="badge">LIVE</span><span class="mono" style="opacity:.45">seed 3</span>
     <span class="ghost" id="render">RENDER</span></div>
+  <div class="ptitle" style="margin-top:14px"><span class="plate">THE LOOK</span> <b id="lookseed">SEED 0001</b>
+    <span class="ghost" id="reroll" title="bounded random — different and beautiful every time">⟳ REROLL</span></div>
+  <div class="prow"><span class="lbl">FORM</span><span class="track" data-l="form"><i></i><u></u></span><span class="val mono">00</span></div>
+  <div class="prow"><span class="lbl">WEAR</span><span class="track" data-l="wear"><i></i><u></u></span><span class="val mono">45</span></div>
+  <div class="prow"><span class="lbl">LUME</span><span class="track" data-l="lume"><i></i><u></u></span><span class="val mono">62</span></div>
+  <div class="prow"><span class="lbl">HUE</span><span class="track" data-l="hue"><i></i><u></u></span><span class="val mono">00</span></div>
   <div id="rackNote">DRAG THE AXES — THE PIT IS THE READOUT OF THE TRANSFORM</div>
 </div>
 
@@ -273,6 +310,9 @@ uniform float u_sect;   // song section -> a different chunk of matter
 uniform float u_low, u_mid, u_high; // spectral fill of the ARRANGEMENT
 uniform float u_complete;           // weighted: the artifact is as built as the song
 uniform float u_aseed;              // arrangement hash -> every song grows its own stone
+uniform float u_wild;               // how hard the music is going -> violence budget
+uniform float u_form, u_wear, u_lume, u_hue; // THE LOOK (user-sculpted + rerollable)
+uniform float u_lookA, u_lookB;     // reroll geology offsets
 
 const vec3 LIME = vec3(0.800, 1.000, 0.137);
 const vec3 GLOW = vec3(0.851, 1.000, 0.298);
@@ -317,8 +357,8 @@ float map(vec3 p) {
   for (int i = 0; i < 4; i++) {
     q = abs(q) - vec3(0.26 + 0.10 * u_epic + 0.09 * sd, 0.22 + 0.05 * sd2, 0.27);
     crack = min(crack, min(abs(q.x), abs(q.y)));
-    q.xy = r2(0.50 + 0.45 * u_grit + 0.45 * sd2 + 0.03 * sin(u_tq * 0.6)) * q.xy;
-    q.yz = r2(0.47 - 0.22 * u_air + 0.25 * sd * sd) * q.yz;
+    q.xy = r2(0.50 + 0.45 * u_grit + 0.45 * sd2 + u_lookA + 0.03 * sin(u_tq * 0.6)) * q.xy;
+    q.yz = r2(0.47 - 0.22 * u_air + 0.25 * sd * sd + u_lookB) * q.yz;
   }
   float d = (abs(q.x) + abs(q.y) + abs(q.z) - (0.34 + 0.10 * u_epic + 0.04 * u_energy)) * 0.42;
   // GRIT: reaction-diffusion-style labyrinth ridges grow on the hide
@@ -326,6 +366,14 @@ float map(vec3 p) {
   float lab = n3(q * (3.2 + 2.0 * u_mid) + u_tq * 0.12);
   gRidge = smoothstep(0.16, 0.03, abs(fract(lab * 3.0) - 0.5));
   d -= u_grit * (0.016 * (n3(q * 7.0 + u_tq * 0.8) - 0.5) * 2.0 + 0.05 * gRidge);
+  // WEAR (the look): how bitten/weathered the stone is, independent of GRIT
+  d -= u_wear * 0.018 * (n3(q * 5.5 + u_tq * 0.25) - 0.5) * 2.0;
+  // FORM (the look): blend toward a gyroid-carved lattice (the classic TPMS
+  // implicit dot(sin p, cos p.yzx) — borrowed from the shadertoy canon)
+  if (u_form > 0.01) {
+    float gy = abs(dot(sin(p * 6.0), cos(p.yzx * 6.0))) / 6.0 - 0.015;
+    d = mix(d, max(d, gy), u_form);
+  }
   d = max(d, length(p) - (0.66 + 0.20 * u_epic));   // BOUND the fractal: one chunk, carved
   // AIR: hollows bored through the body — see the room through the song
   gHollow = 1e9;
@@ -381,24 +429,28 @@ void main() {
       col += LIME * 0.05 * u_grit * step(0.75, gRidge) * band;      // crests catch light
       // THE ARTIFACT EARNS ITS LIGHT: an empty session is a monochrome nugget;
       // every lime term scales with completeness — beauty arrives with the song.
-      float eL = mix(0.06, 1.0, smoothstep(0.08, 0.55, u_complete));
+      float eL = mix(0.06, 1.0, smoothstep(0.08, 0.55, u_complete)) * u_lume;
       float rim = pow(1.0 - max(dot(n, -rd), 0.0), 3.0);
       col += LIME * step(0.55, rim + dth * 0.25) * 0.20 * eL;    // hard rim, dithered
       float fis = exp(-gCrack * 70.0);                  // fissures -> CRYSTAL SHARDS
       float shard = step(0.78 - 0.18 * u_high, fis + dth * 0.12);   // highs grow shards
       float vein  = step(0.45, fis + dth * 0.12) - shard;
-      col += mix(LIME, GLOW, 0.6) * shard * (0.55 + 0.85 * u_energy + 2.2 * u_heat) * eL;
-      col += LIME * vein * (0.14 + 0.40 * u_energy + 1.1 * u_heat) * eL;
+      col += mix(LIME, GLOW, 0.6) * shard * (0.45 + 0.75 * u_energy + 2.2 * u_heat) * eL;
+      col += LIME * vein * (0.12 + 0.35 * u_energy + 1.1 * u_heat) * eL;
       col += LIME * step(0.93, rim + dth * 0.3) * 0.55 * u_high * eL;  // top-end sparkle
       float hrim = (1.0 - smoothstep(0.0, 0.05, abs(gHollow))) * step(0.03, u_air);
       col += LIME * hrim * (0.30 + 0.5 * u_heat) * eL;              // hollow mouths glow
-      // EARNED POLYCHROME — fill the highs and the artifact ALONE gets iridescence:
-      // banded thin-film fringe on shard edges + grazing rim. chrome stays 5-color.
+      // EARNED POLYCHROME — fill the highs and the artifact ALONE gets iridescence.
+      // Hues via iq's cosine palette (iquilezles.org/articles/palettes):
+      // a + b·cos(2π(c·t + d)) with c integer for clean cycling; d anchored so
+      // HUE=0 band-0 lands on LIME; u_hue spins the whole family in harmony.
+      // Quieter at rest — the fringe blooms with the music (u_wild).
       float fr = u_high * eL * clamp(vein + smoothstep(0.62, 0.95, rim), 0.0, 1.0);
       if (fr > 0.02) {
         float hue = floor(fract(n3(hp * 5.0) + u_time * 0.04) * 3.0) / 3.0;
-        vec3 ic = hue < 0.3 ? LIME : (hue < 0.6 ? vec3(0.35, 0.95, 1.0) : vec3(1.0, 0.45, 0.95));
-        col = mix(col, ic, step(0.5, fr + dth * 0.35) * 0.65);
+        vec3 ic = clamp(vec3(0.5) + vec3(0.5) *
+          cos(6.2831853 * (hue + vec3(0.853, 0.0, 0.379) + u_hue)), 0.0, 1.0);
+        col = mix(col, ic, step(0.5, fr + dth * 0.35) * (0.42 + 0.28 * u_wild));
       }
       outc = vec4(col, 1.0);
     }
@@ -433,7 +485,7 @@ const al = gl.getAttribLocation(prog, 'a');
 gl.enableVertexAttribArray(al);
 gl.vertexAttribPointer(al, 2, gl.FLOAT, false, 0, 0);
 const U = {};
-for (const n of ['u_res','u_time','u_tq','u_rotA','u_rotB','u_spin','u_grit','u_air','u_epic','u_energy','u_onset','u_heat','u_bright','u_sect','u_low','u_mid','u_high','u_complete','u_aseed'])
+for (const n of ['u_res','u_time','u_tq','u_rotA','u_rotB','u_spin','u_grit','u_air','u_epic','u_energy','u_onset','u_heat','u_bright','u_sect','u_low','u_mid','u_high','u_complete','u_aseed','u_wild','u_form','u_wear','u_lume','u_hue','u_lookA','u_lookB'])
   U[n] = gl.getUniformLocation(prog, n);
 
 function resize() {
@@ -602,21 +654,60 @@ document.getElementById('render').onclick = () => {
   deed('re-imagining the mass · seed 3');
 };
 
+// ---------- THE LOOK: user-sculpted, seeded-rerollable, persistent ----------
+// REROLL draws every axis from a BOUNDED range (form never passes 0.6, wear
+// never zeroes, lume stays tasteful) — different every time, ugly never.
+const LOOK_KEY = 'mosh-lab-look-009';
+const look = { form: 0.0, wear: 0.45, lume: 1.0, hue: 0.0, la: 0, lb: 0, seed: 1 };
+try { Object.assign(look, JSON.parse(localStorage.getItem(LOOK_KEY) || '{}')); } catch (e) {}
+const lookseedEl = document.getElementById('lookseed');
+function saveLook() { try { localStorage.setItem(LOOK_KEY, JSON.stringify(look)); } catch (e) {} }
+function lookPct(k) { return k === 'lume' ? (look.lume - 0.3) / 1.3 : look[k]; }
+function syncLookUI() {
+  document.querySelectorAll('#rack .track[data-l]').forEach(tr => {
+    const pct = Math.max(0, Math.min(1, lookPct(tr.dataset.l)));
+    tr.querySelector('i').style.width = pct * 100 + '%';
+    tr.querySelector('u').style.left = pct * 100 + '%';
+    tr.closest('.prow').querySelector('.val').textContent = String(Math.round(pct * 100)).padStart(2, '0');
+  });
+  lookseedEl.textContent = 'SEED ' + String(look.seed % 9973).padStart(4, '0');
+}
+document.querySelectorAll('#rack .track[data-l]').forEach(tr => {
+  tr.addEventListener('pointerdown', e => {
+    const r = tr.getBoundingClientRect();
+    const pct = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+    const k = tr.dataset.l;
+    look[k] = k === 'lume' ? 0.3 + pct * 1.3 : pct;
+    saveLook(); syncLookUI();
+  });
+});
+document.getElementById('reroll').onclick = () => {
+  look.seed = (look.seed * 16807) % 2147483647;
+  const h = k => { const x = Math.sin((look.seed % 65521) * 0.0129898 + k * 78.233) * 43758.5453; return x - Math.floor(x); };
+  look.form = h(1) * 0.6;
+  look.wear = 0.2 + h(2) * 0.6;
+  look.lume = 0.7 + h(3) * 0.7;
+  look.hue  = h(4);
+  look.la   = (h(5) - 0.5) * 0.5;
+  look.lb   = (h(6) - 0.5) * 0.5;
+  saveLook(); syncLookUI();
+  deed(`re-rolled the stone · ${lookseedEl.textContent.toLowerCase()}`);
+};
+syncLookUI();
+
 // ---------- Moshi, resident: the 3D component (canonical copy lives in 010) ----------
 function MoshiBlob(host, opts = {}) {
   const seed = opts.seed ?? Math.random() * 10;
   const cv = document.createElement('canvas');
   cv.className = 'moshi-canvas';
-  const face = document.createElement('div');
-  face.className = 'moshi-face';
-  face.innerHTML = '<span>&gt;</span><span>&lt;</span>';
-  host.appendChild(cv); host.appendChild(face);
+  host.appendChild(cv);
 
   const FRAG = `
 precision highp float;
 uniform vec2  u_res;
 uniform float u_t, u_tq, u_seed;
 uniform float u_arousal, u_heat, u_squash, u_gasp;
+uniform float u_eyeStyle, u_blink, u_wide;
 uniform vec2  u_gaze;
 const vec3 LIME = vec3(0.800, 1.000, 0.137);
 const vec3 GLOW = vec3(0.851, 1.000, 0.298);
@@ -631,6 +722,11 @@ float smin(float a,float b,float k){ float h=clamp(.5+.5*(b-a)/k,0.,1.);
   return mix(b,a,h)-k*h*(1.-h); }
 float bayer(vec2 fc){ float b=mod(fc.x,2.0)*2.0+mod(fc.y,2.0); vec2 f2=floor(fc/2.0);
   return (b*4.0+mod(f2.x,2.0)*2.0+mod(f2.y,2.0))/16.0; }
+float sdSeg(vec2 p, vec2 a, vec2 b){ vec2 pa=p-a, ba=b-a;
+  float h=clamp(dot(pa,ba)/dot(ba,ba),0.0,1.0); return length(pa-ba*h); }
+float chevron(vec2 p, float flip){ p.x*=flip;          // +1 = '>'   -1 = '<'
+  return min(sdSeg(p, vec2(-0.5, 0.62), vec2(0.5, 0.0)),
+             sdSeg(p, vec2(-0.5,-0.62), vec2(0.5, 0.0))); }
 float map(vec3 p){
   float sq = 1.0 - u_squash * 0.45;                 // squash & stretch, volume-ish
   p.y *= 1.0 / sq; p.x *= sq; p.z *= sq;
@@ -663,13 +759,13 @@ void main(){
   vec4 outc = vec4(0.0);
   if (hit) {
     vec3 n = normalAt(hp);
-    n = normalize(floor(n * 3.0 + 0.5) / 3.0);        // FACETS — flat low-poly light
+    n = normalize(floor(n * 3.0 + 0.5) / 3.0);        // FACETS - flat low-poly light
     float diff = max(dot(n, normalize(vec3(0.5, 0.8, 0.6))), 0.0);
     float band = floor(diff * 3.0 + dth) / 3.0;
     vec3 col = vec3(0.045) + band * vec3(0.065, 0.07, 0.06);
     float rim = pow(1.0 - max(dot(n, -rd), 0.0), 2.2);
     col += LIME * step(0.6, rim + dth * 0.22) * (0.16 + 0.25 * u_heat);
-    // the mouth — glossy lime decal, follows the gaze a little, opens with heat
+    // the mouth - glossy lime decal, follows the gaze a little, opens with heat
     vec3 mdir = normalize(vec3(u_gaze.x * 0.30, -0.34 + u_gaze.y * 0.18, 1.0));
     float ang = acos(clamp(dot(normalize(hp), mdir), -1.0, 1.0));
     float mr = 0.30 + 0.14 * u_heat + 0.05 * abs(u_squash) + 0.20 * u_gasp
@@ -679,14 +775,66 @@ void main(){
     // ember: banded heart, no halo
     float ember = u_heat * exp(-2.6 * length(hp)) * (0.7 + 0.3 * sin(u_t * 7.0));
     col += GLOW * (floor(ember * 3.0 + dth) / 3.0) * 0.55 * (1.0 - mouth);
+    // THE FACE LIVES IN THE BODY - eye decals evaluated on the hit direction,
+    // lit by the same facet bands, edges dithered: they squash, blink, lean and
+    // tremble WITH the matter instead of floating in front of it (no DOM eyes).
+    float sq = 1.0 - u_squash * 0.45;
+    vec3 nd = normalize(hp);
+    float sep = 0.30 + 0.10 * u_arousal;               // wide-set when feral
+    float jit = (noise3(vec3(u_tq * 3.0, u_seed, 1.0)) - 0.5) * 0.14
+              * max(0.0, u_arousal - 0.35);            // feral tremble, on twos
+    float eyeY = max(0.10,
+      (1.0 + 0.35 * smoothstep(0.4, 1.0, u_heat) + 0.4 * u_wide)
+      * (1.0 - u_blink * 0.92) * sq);                  // steep on REC, shut on blink
+    vec3 eyeCol = mix(vec3(0.90, 0.93, 0.87), LIME, smoothstep(0.45, 0.75, u_heat));
+    eyeCol *= 0.60 + 0.45 * band;                      // facet-lit like the hide
+    for (int e = 0; e < 2; e++) {
+      float s = (e == 0) ? -1.0 : 1.0;
+      vec3 ed = normalize(vec3(s * sep + u_gaze.x * 0.22 + jit,
+                               (0.20 + u_gaze.y * 0.16) * sq, 1.0));
+      if (dot(nd, ed) < 0.6) continue;
+      vec3 uu = normalize(cross(vec3(0.0, 1.0, 0.0), ed));
+      vec3 vv = cross(ed, uu);
+      vec2 o = vec2(dot(nd - ed, uu), dot(nd - ed, vv)) * 4.5;
+      o.y /= eyeY;
+      if (u_eyeStyle < 0.5) {                          // GLYPH - the brand brackets
+        float ch = chevron(o * 1.6, -s);
+        col = mix(col, eyeCol, 1.0 - step(0.20 + (dth - 0.5) * 0.10, ch));
+      } else if (u_eyeStyle < 1.5) {                   // SOCKET - carved pit, lime pupil
+        float so = length(o * vec2(1.0, 1.25)) - 0.56;
+        col = mix(col, vec3(0.015), 1.0 - step(0.0, so));
+        vec2 po = o - vec2(u_gaze.x, -u_gaze.y) * 0.16;
+        col = mix(col, LIME * (0.7 + 0.3 * u_heat),
+                  (1.0 - step(0.0, length(po) - 0.22)) * (1.0 - step(0.0, so)));
+      }
+    }
+    if (u_eyeStyle > 1.5) {                            // VISOR - band, chevron cutouts
+      vec3 fd = normalize(vec3(u_gaze.x * 0.20 + jit, (0.20 + u_gaze.y * 0.14) * sq, 1.0));
+      if (dot(nd, fd) > 0.55) {
+        vec3 uu = normalize(cross(vec3(0.0, 1.0, 0.0), fd));
+        vec3 vv = cross(fd, uu);
+        vec2 o = vec2(dot(nd - fd, uu), dot(nd - fd, vv)) * 4.5;
+        float bm = (1.0 - step(0.40 * eyeY, abs(o.y))) * (1.0 - step(1.15, abs(o.x)));
+        col = mix(col, vec3(0.02), bm);
+        float ch = min(chevron((o - vec2(-0.52, 0.0)) * 1.7, 1.0),
+                       chevron((o - vec2( 0.52, 0.0)) * 1.7, -1.0));
+        col = mix(col, LIME * (0.75 + 0.25 * u_heat),
+                  (1.0 - step(0.30 + (dth - 0.5) * 0.1, ch)) * bm);
+      }
+    }
     outc = vec4(col, 1.0);
   }
   gl_FragColor = outc;
 }`;
   const VERT = 'attribute vec2 a; void main(){ gl_Position = vec4(a, 0.0, 1.0); }';
   const gl = cv.getContext('webgl', { antialias: false, alpha: true, premultipliedAlpha: false });
-  if (!gl) {                       // context cap hit — degrade to a face, keep the page alive
+  if (!gl) {                       // context cap hit - a DOM face keeps the page alive
+    const face = document.createElement('div');
+    face.className = 'moshi-face';
+    face.innerHTML = '<span>&gt;</span><span>&lt;</span>';
     face.style.opacity = '0.6';
+    face.style.fontSize = Math.round(host.clientWidth * 0.17) + 'px';
+    host.appendChild(face);
     return { el: host, set() {}, pulse() {}, poke() {} };
   }
   cv.addEventListener('webglcontextlost', e => e.preventDefault());
@@ -708,61 +856,47 @@ void main(){
   gl.enableVertexAttribArray(al);
   gl.vertexAttribPointer(al, 2, gl.FLOAT, false, 0, 0);
   const U = {};
-  for (const n of ['u_res','u_t','u_tq','u_seed','u_arousal','u_heat','u_squash','u_gasp','u_gaze'])
+  for (const n of ['u_res','u_t','u_tq','u_seed','u_arousal','u_heat','u_squash','u_gasp','u_eyeStyle','u_blink','u_wide','u_gaze'])
     U[n] = gl.getUniformLocation(prog, n);
 
   function resize() {
     cv.width = Math.max(24, Math.floor(host.clientWidth / 3));   // chunky on purpose
     cv.height = Math.max(24, Math.floor(host.clientHeight / 3));
     gl.viewport(0, 0, cv.width, cv.height);
-    face.style.fontSize = Math.round(host.clientWidth * 0.17) + 'px';
   }
   resize();
   if (typeof ResizeObserver !== 'undefined') new ResizeObserver(resize).observe(host);
 
-  const P = { arousal: 0.08, heat: 0, gx: 0, gy: 0 };
+  const P = { arousal: 0.08, heat: 0, gx: 0, gy: 0, eyeStyle: opts.eyeStyle ?? 0 };
   const cur = { arousal: 0.08, heat: 0 };
-  let squash = 0, squashV = 0, tq = 0, lastTick = 0, fjx = 0, fjy = 0;
+  const eye = { blink: 0, wide: 0 };
+  let squash = 0, squashV = 0, tq = 0, lastTick = 0;
   const t0 = performance.now() + seed * 997;
 
-  // blink: alive even when idle
-  (function blink() {
-    setTimeout(() => {
-      face.classList.add('blink');
-      setTimeout(() => { face.classList.remove('blink'); blink(); }, 110);
-    }, 1600 + Math.random() * 3800);
+  (function blink() {              // alive even when idle
+    setTimeout(() => { eye.blink = 1; blink(); }, 1600 + Math.random() * 3800);
   })();
 
   function frame(now) {
     const t = (now - t0) / 1000;
     cur.arousal += (P.arousal - cur.arousal) * 0.06;
     cur.heat += (P.heat - cur.heat) * 0.07;
-    // damped spring with overshoot — squash & stretch, never robotic
+    // damped spring with overshoot - squash & stretch, never robotic
     squashV += (-squash * 0.16 - squashV * 0.14);
     squash += squashV;
-    if (t - lastTick > 1 / 12) {                           // wobble on twos
-      lastTick = t; tq = t;
-      const tr = Math.max(0, cur.arousal - 0.35);          // feral = the face trembles
-      fjx = (Math.random() - 0.5) * 8 * tr;
-      fjy = (Math.random() - 0.5) * 6 * tr;
-    }
-    // the face IS the body: it squashes with the spring, leans into the gaze,
-    // rides the top surface down on impact, widens its set when feral
+    eye.blink *= 0.80; eye.wide *= 0.94;     // face state decays; the shader wears it
+    if (t - lastTick > 1 / 12) { lastTick = t; tq = t; }   // wobble on twos
     const sqv = Math.max(-0.6, Math.min(0.85, squash));
-    face.style.transform =
-      `translate(calc(-50% + ${(P.gx * 13 + fjx).toFixed(1)}%), calc(-50% + ${(P.gy * 11 + sqv * 16 + fjy).toFixed(1)}%))`
-      + ` rotate(${(P.gx * (4 + 5 * cur.arousal)).toFixed(1)}deg)`
-      + ` scale(${(1 + sqv * 0.30).toFixed(3)}, ${(1 - sqv * 0.45).toFixed(3)})`;
-    face.style.gap = (0.55 + 0.50 * Math.max(0, cur.arousal - 0.15)).toFixed(2) + 'em';
-    face.style.setProperty('--eyeY', (1 + cur.heat * 0.35).toFixed(2));
-    face.style.color = cur.heat > 0.6 ? 'var(--lime)' : 'var(--bone)';
     gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
     gl.uniform2f(U.u_res, cv.width, cv.height);
     gl.uniform1f(U.u_t, t); gl.uniform1f(U.u_tq, tq); gl.uniform1f(U.u_seed, seed);
     gl.uniform1f(U.u_arousal, cur.arousal);
     gl.uniform1f(U.u_heat, cur.heat);
     gl.uniform1f(U.u_squash, sqv);
-    gl.uniform1f(U.u_gasp, Math.min(1, Math.abs(squashV) * 6));   // mouth gasps with impact velocity
+    gl.uniform1f(U.u_gasp, Math.min(1, Math.abs(squashV) * 6));   // mouth gasps with impact
+    gl.uniform1f(U.u_eyeStyle, P.eyeStyle);
+    gl.uniform1f(U.u_blink, Math.min(1, eye.blink));
+    gl.uniform1f(U.u_wide, Math.min(1, eye.wide));
     gl.uniform2f(U.u_gaze, P.gx, P.gy);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     requestAnimationFrame(frame);
@@ -774,15 +908,11 @@ void main(){
     set(p) { Object.assign(P, p); },
     pulse(amount = 0.55) {                                       // beat hit
       squashV += amount * 0.45;
-      if (amount > 0.6 && Math.random() < 0.3) {                 // hard hits jolt a blink
-        face.classList.add('blink');
-        setTimeout(() => face.classList.remove('blink'), 100);
-      }
+      if (amount > 0.6 && Math.random() < 0.3) eye.blink = 1;    // hard hits jolt a blink
     },
     poke() {                                                      // indignant squish
       squashV += 0.95 * 0.45;
-      face.classList.add('wide');
-      setTimeout(() => face.classList.remove('wide'), 450);
+      eye.wide = 1;
       const a0 = P.arousal;
       P.arousal = Math.min(1, a0 + 0.45);
       setTimeout(() => { P.arousal = a0; }, 900);
@@ -800,8 +930,10 @@ addEventListener('mousemove', e => {
 
 // ---------- the loop: beat clock, on-twos rotation, uniforms ----------
 let rotA = 0, rotB = 0, rotTA = 0, rotTB = 0, lastBeat = -1, lastTick = 0, lastSect = -1;
-let wobA = 0, wobB = 0;
-let onsetEnv = 0, recAmt = 0, energy = .4, tq = 0;
+let wobA = 0, wobB = 0, wild = 0.3;
+// the demo song's dynamics: INTRO calm, hooks hard, OUT spent
+const SECT_WILD = [0.15, 0.45, 0.95, 0.50, 0.95, 0.30, 1.0, 0.12];
+let onsetEnv = 0, recAmt = 0, energy = .3, tq = 0;
 let enginePos = 0, engineEnergy = 0, engineActiveN = 0;
 const phead = document.getElementById('phead');
 const arrange = document.getElementById('arrange');
@@ -816,23 +948,29 @@ function frame(now) {
 
   const beats = tPos * BARS * 4;
   const beatIdx = Math.floor(beats);
-  if (playing && beatIdx !== lastBeat) {                 // THE SLAM
+  const sectIdx = Math.floor(tPos * 8);
+  // WILD: the violence budget follows the MUSIC, not the clock. The demo song
+  // has dynamics now (calm intro/outro, hard hooks); engine mode follows levels.
+  // A chill track = a calm beautiful stone. A banger earns the chaos.
+  const wildT = FEED.on ? Math.min(1, engineEnergy * 1.3)
+                        : SECT_WILD[sectIdx] * (0.55 + 0.65 * axes.grit);
+  wild += (Math.min(1, wildT) - wild) * 0.015;
+  if (playing && beatIdx !== lastBeat) {                 // THE SLAM (wild-gated)
     lastBeat = beatIdx;
     const hard = beatIdx % 4 === 0;
-    onsetEnv = hard ? 1 : 0.45;
+    onsetEnv = Math.max(onsetEnv, (hard ? 1 : 0.45) * (0.25 + 0.75 * wild));
     if (hard && energy > 0.45) eject(2 + Math.floor(energy * 4));
-    moshi.pulse(hard ? 0.8 : 0.35);
-    rotTA += (Math.random() * 2.2 - 1.1) * (hard ? 1 : 0.4);
-    rotTB += (Math.random() * 1.4 - 0.7) * (hard ? 1 : 0.4);
+    moshi.pulse((hard ? 0.8 : 0.35) * (0.4 + 0.6 * wild));
+    rotTA += (Math.random() * 2.2 - 1.1) * (hard ? 1 : 0.4) * (0.2 + 0.8 * wild);
+    rotTB += (Math.random() * 1.4 - 0.7) * (hard ? 1 : 0.4) * (0.2 + 0.8 * wild);
   }
-  const sectIdx = Math.floor(tPos * 8);
   if (sectIdx !== lastSect) {                              // new section = new matter
-    if (lastSect >= 0) { onsetEnv = 1; rotTA += 1.8 * (Math.random() - 0.5); }
+    if (lastSect >= 0) { onsetEnv = 1; rotTA += (0.5 + 1.3 * wild) * (Math.random() - 0.5); }
     lastSect = sectIdx;
   }
   onsetEnv *= 0.90;
   energy = FEED.on ? Math.min(1, 0.12 + engineEnergy * 1.15 + 0.30 * onsetEnv)
-                   : 0.30 + 0.55 * onsetEnv + 0.25 * axes.grit;
+                   : Math.min(1, 0.14 + 0.40 * onsetEnv + 0.16 * axes.grit + 0.22 * wild);
 
   // the artifact accretes: spectral fill eases toward the arrangement (demo) or
   // toward active-track count (engine link — no per-band data in the feed yet)
@@ -850,8 +988,9 @@ function frame(now) {
     lastTick = t;
     rotA += (rotTA - rotA) * 0.5;
     rotB += (rotTB - rotB) * 0.5;
-    wobA = (Math.random() - 0.5) * 0.013;             // PS1 vertex swim, on twos
-    wobB = (Math.random() - 0.5) * 0.013;
+    const wAmp = 0.005 + 0.011 * wild;                // PS1 vertex swim rides the music
+    wobA = (Math.random() - 0.5) * wAmp;
+    wobB = (Math.random() - 0.5) * wAmp;
     tq = t;
   }
 
@@ -882,6 +1021,13 @@ function frame(now) {
   gl.uniform1f(U.u_high, spec.high);
   gl.uniform1f(U.u_complete, spec.complete);
   gl.uniform1f(U.u_aseed, aseed);
+  gl.uniform1f(U.u_wild, wild);
+  gl.uniform1f(U.u_form, look.form);
+  gl.uniform1f(U.u_wear, look.wear);
+  gl.uniform1f(U.u_lume, look.lume);
+  gl.uniform1f(U.u_hue, look.hue);
+  gl.uniform1f(U.u_lookA, look.la);
+  gl.uniform1f(U.u_lookB, look.lb);
   gl.drawArrays(gl.TRIANGLES, 0, 3);
 
   moshi.set({ heat: recAmt,                              // moshi has a stake in the build:

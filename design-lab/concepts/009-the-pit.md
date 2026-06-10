@@ -109,3 +109,29 @@ be complete but subdued, and when you laid down your lines it would become vibra
 - **The rapper story holds:** beat-only session (DRUMS+BASS+GTR live, VOX muted)
   reads complete-but-subdued — full mass, half light, no fringe. Punch the vox in
   and it goes vibrant. Same mapping, no special case.
+
+## v6 (2026-06-10) — chill default · THE LOOK · bounded reroll
+
+User: *"it honestly is a bit much right now — I kinda liked it when it was more chill,
+but if somebody's making a super crazy song it may well look like that… there should be
+a degree of customization by the user but also a real randomness that still looks
+beautiful every time. Feel free to borrow other people's ideas online."*
+
+- **The violence budget follows the MUSIC (`wild`):** the demo song has dynamics now
+  (calm INTRO/OUT, hard HOOKs via `SECT_WILD`); engine mode follows real levels. `wild`
+  scales beat-slam strength, rotation jolts, PS1 wobble amplitude, fringe intensity,
+  and the energy floor (down from 0.30 to 0.14). A quiet track = a calm beautiful
+  stone; a banger earns the chaos.
+- **THE LOOK** (second rack section): FORM (blend toward a gyroid-carved lattice —
+  the classic TPMS implicit `dot(sin p, cos p.yzx)`, shadertoy canon), WEAR (erosion
+  bite), LUME (light budget on all emission), HUE (fringe family). Persists in
+  localStorage.
+- **⟳ REROLL** — seeded LCG over **bounded ranges** (form ≤ 0.6, wear 0.2–0.8, lume
+  0.7–1.4, hue free, ±small geology offsets into the kifs rotations). Different every
+  time, ugly never — the register does the rest. SEED readout on the plate.
+- **Fringe hues via iq's cosine palette** (`a + b·cos(2π(c·t + d))`,
+  iquilezles.org/articles/palettes — c integer for clean cycling, d anchored so HUE=0
+  band-0 is LIME). One knob now spins an infinite family of harmonious iridescence
+  instead of one fixed cyan/magenta.
+- Borrowed-and-credited: iq cosine palettes, gyroid/TPMS implicit; smin/onion operators
+  reviewed (iquilezles.org/articles/distfunctions) — onion shells considered, parked.

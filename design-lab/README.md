@@ -15,7 +15,7 @@ deliberately untouched by anything in here: the lab is upstream of the product.
 | [BRIEF.md](BRIEF.md) | The fiction + hard constraints. Feed it whole to any designer, human or model. |
 | [TOOLS.md](TOOLS.md) | The surplus: every design tool wired into this environment and when to reach for it. |
 | [tokens/moshi.css](tokens/moshi.css) | Canonical palette + type. Exact values are a constraint. |
-| [HOUSE_STYLE.md](HOUSE_STYLE.md) | **The register: Y2K console crunch (v2.1).** Dithered faceted world + chunky plastic bouncy chrome + the whole-page PS2 signal chain ([tokens/ps2-pass.css](tokens/ps2-pass.css)) — and the decade test that keeps it 2000s, not 80s. |
+| [HOUSE_STYLE.md](HOUSE_STYLE.md) | **The register: Y2K console crunch (v2.2).** Dithered faceted world + plate-pass chrome (skewed lime plates, plastic gloss, chamfers) + the whole-page PS2 signal chain ([tokens/ps2-pass.css](tokens/ps2-pass.css)) — and the decade test that keeps it 2000s, not 80s. |
 | [inspiration/INDEX.md](inspiration/INDEX.md) | ~150 reference links, identified and tagged by theme. |
 | [playground/](playground/) | Vite app. Gallery of live experiments — each one self-contained HTML. |
 | [concepts/](concepts/) | One-pager per named design direction: thesis, how it meets the constraints, what to steal. |
@@ -55,26 +55,22 @@ single artifact into [open-design](https://github.com/nexu-io/open-design) for r
 6. **Every experiment leaves an artifact**: a live page in the gallery + (for interface
    directions) a one-pager in `concepts/`.
 
-## Wave 1 (shipped with the lab)
+## Wave 1 — retired (2026-06-10)
 
-| # | experiment | role |
-|---|---|---|
-| 001 | **HEARTH** — the stage centerpiece | The fire/screensaver: an ambient generative organism for not-passthrough mode |
-| 002 | **SPECIMEN** — Moshi morphology | The creature itself: calm→feral spectrum; REC + song-position carried by the body |
-| 003 | **PERIPHERY** — the vision filter | Interface lives at the edges of sight; center stays empty for your world |
-| 004 | **THE GULLET** — creature-as-timeline | The song is something Moshi is digesting, left to right |
-| 005 | **SPORE LEDGER** — visible metabolism | Every agent action is a living cell you can pop to undo |
-| 006 | **BROADCAST** — the familiar on stream | Moshi as the watchable star; OBS-friendly |
+Experiments 001–006 (HEARTH, SPECIMEN, PERIPHERY, GULLET, SPORE LEDGER, BROADCAST)
+were direction studies; the 008+ lineage absorbed what worked (presence-in-fog →
+THE SCENE's fog orbs; spore ledger → the deeds rail; SPECIMEN → MoshiBlob). Deleted
+from the working tree — **git history keeps every one** if a direction gets revisited.
 
 ## Wave 2 (grounded)
 
 | # | experiment | role |
 |---|---|---|
-| 007 | **TERRARIUM** — the specimen, kept quietly | Synthesis: SPECIMEN × SPORE LEDGER, HEARTH dimmed to atmosphere |
+| 007 | **TERRARIUM** — the specimen, kept quietly | The one Wave-1 survivor (synthesis of 002×005×001), brightened 2026-06-10 — it was too dark to read |
 | 008 | **POSSESSION** — the current UI, possessed | The shipping skeleton ([current-ui/AUDIT.md](current-ui/AUDIT.md)) re-materialized per the [field notes](inspiration/FIELD_NOTES.md) — the migration path |
 | 009 | **THE PIT** — the song as matter | 008's DAW + a raymarched, dithered, on-twos 3D mass in the stage; the Rack sculpts it. Now faceted, wobbly, draggable, pokeable. |
 | 010 | **MOSHI** — the agent as a 3D component | Portable `MoshiBlob`: faceted raymarched blob, cursor-tracking eyes, beat squash, poke-to-squish. Embedded in 008/009. Face fused to the body (squash/tremble/lime-on-REC). |
-| 011 | **THE WAGER** — battle mode | Competitive seed: your growing artifact vs theirs (fog silhouette — see it, don't hear it) vs THE GLASS, an hourglass timer that erodes and sheds sand. |
+| 011 | **THE SCENE** — presence at a glance | v2 of the battle seed: crew as detailed orbs on one side of the topbar, rivals as fog orbs (size only) on the other; tap to PEEK their artifact — see it, never hear it. The hourglass died. |
 
 Wave 2 inputs: [current-ui/AUDIT.md](current-ui/AUDIT.md) (what the product looks like
 today and the gap to the brief) and [inspiration/FIELD_NOTES.md](inspiration/FIELD_NOTES.md)

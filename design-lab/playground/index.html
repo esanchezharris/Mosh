@@ -24,9 +24,12 @@
 
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
           gap: 26px; padding: 30px 48px 60px; }
-  .card { border: 1px solid rgba(246,242,235,.12); border-radius: 14px; overflow: hidden;
-          background: #0e0e0d; transition: border-color .25s, box-shadow .25s; display: block;
-          color: inherit; text-decoration: none; }
+  .card { border: 2px solid #1d2010; border-radius: 12px; overflow: hidden;
+          background: #0e0e0d; transition: border-color .25s, transform .15s; display: block;
+          color: inherit; text-decoration: none;
+          box-shadow: 0 4px 0 #000, inset 0 1px 0 rgba(246,242,235,.07);
+          background-image: linear-gradient(180deg, rgba(246,242,235,.04) 0 42%, rgba(0,0,0,.22) 42% 100%); }
+  .card:hover { transform: translateY(-2px); }
   .card:hover { border-color: rgba(204,255,35,.55); box-shadow: 0 0 34px rgba(204,255,35,.12); }
   .thumb { position: relative; width: 100%; aspect-ratio: 16/10; overflow: hidden;
            background: #060606; }
@@ -34,8 +37,12 @@
            border: 0; pointer-events: none; }
   .meta { padding: 14px 18px 16px; }
   .meta .num { font-size: 10px; letter-spacing: .2em; opacity: .45; }
-  .meta .name { font-family: var(--font-display); font-weight: 900; font-size: 17px;
-           color: var(--lime); margin: 4px 0 6px; letter-spacing: .03em; }
+  .meta .name { display: inline-block; transform: skewX(-12deg);
+           font-family: var(--font-display); font-weight: 900; font-style: italic;
+           font-size: 15px; background: var(--lime); color: var(--ink);
+           padding: 4px 13px 3px; border-radius: 3px; margin: 6px 0 8px;
+           box-shadow: 0 3px 0 #000, inset 0 1px 0 rgba(255,255,255,.4);
+           letter-spacing: .03em; text-transform: uppercase; }
   .meta .what { font-size: 11px; line-height: 1.55; opacity: .7; }
 
   /* hover-to-run: max ~3 live GL pages at once instead of 11 (context-cap glitch fix) */
@@ -68,7 +75,7 @@
 
 <header>
   <h1>MOSH <em>DESIGN LAB</em></h1>
-  <div class="sub">WAVE 1 · INTERFACES DERIVED FROM THE SYMBIOTE — NOT FROM A LAYOUT</div>
+  <div class="sub">THE 008+ LINEAGE · WAVE 1 RETIRED 2026-06-10 (GIT HISTORY KEEPS IT) · 007 KEPT AS THE QUIET EXHIBIT</div>
 </header>
 <nav class="docs">
   <a href="../BRIEF.md">THE BRIEF</a>
@@ -78,73 +85,6 @@
 </nav>
 
 <div class="grid">
-  <a class="card" href="experiments/001-stage/index.html">
-    <div class="thumb" data-live="experiments/001-stage/index.html"><div class="ph disp">001</div></div>
-    <div class="meta">
-      <div class="num">001 · THE CENTERPIECE</div>
-      <div class="name">HEARTH v2</div>
-      <div class="what">Presence in fog. One barely-resolved mass breathing in ink, drifting
-      in and out of bilateral symmetry; interference streaks rake it; a razor-thin spectral
-      fringe lives on the membrane. R opens the core into a void wearing an accretion ring.
-      (v1 — the vein field — preserved inside.)</div>
-    </div>
-  </a>
-
-  <a class="card" href="experiments/002-moshi-morphology/index.html">
-    <div class="thumb" data-live="experiments/002-moshi-morphology/index.html"><div class="ph disp">002</div></div>
-    <div class="meta">
-      <div class="num">002 · THE CREATURE</div>
-      <div class="name">SPECIMEN</div>
-      <div class="what">The morphology spectrum, calm → feral, as a raymarched SDF body.
-      Recording is HEAT (an ember under the skin), song position is a lume circling the
-      membrane, clipping is a tremor. The body is the instrument cluster.</div>
-    </div>
-  </a>
-
-  <a class="card" href="experiments/003-periphery/index.html">
-    <div class="thumb" data-live="experiments/003-periphery/index.html"><div class="ph disp">003</div></div>
-    <div class="meta">
-      <div class="num">003 · DIRECTION</div>
-      <div class="name">PERIPHERY</div>
-      <div class="what">The studio at the corner of your eye. The interface is a membrane
-      creeping in from the screen edges; the center belongs to your game / guitar / dishes.
-      A lume bead laps the border once per song; recording runs the whole rim hot.</div>
-    </div>
-  </a>
-
-  <a class="card" href="experiments/004-gullet/index.html">
-    <div class="thumb" data-live="experiments/004-gullet/index.html"><div class="ph disp">004</div></div>
-    <div class="meta">
-      <div class="num">004 · DIRECTION</div>
-      <div class="name">THE GULLET</div>
-      <div class="what">The timeline is Moshi's body and the song is inside it. Takes are
-      lumps under the skin; the playhead is a peristaltic pulse; recording is the mouth
-      swallowing the live signal. Undo = it gives one back.</div>
-    </div>
-  </a>
-
-  <a class="card" href="experiments/005-spore-ledger/index.html">
-    <div class="thumb" data-live="experiments/005-spore-ledger/index.html"><div class="ph disp">005</div></div>
-    <div class="meta">
-      <div class="num">005 · DIRECTION</div>
-      <div class="name">SPORE LEDGER</div>
-      <div class="what">Visible metabolism. Every autonomous action buds off the creature as
-      a living cell drifting into a ledger; hover to read the deed, pop to undo. Nothing
-      Moshi does is ever invisible — that's the whole direction.</div>
-    </div>
-  </a>
-
-  <a class="card" href="experiments/006-broadcast/index.html">
-    <div class="thumb" data-live="experiments/006-broadcast/index.html"><div class="ph disp">006</div></div>
-    <div class="meta">
-      <div class="num">006 · DIRECTION</div>
-      <div class="name">BROADCAST</div>
-      <div class="what">The familiar, on stage. Moshi dances the beat for an audience: halo =
-      song position, eggs = takes landed, the pit votes VIBE/REDO, deeds roll on a ticker.
-      OBS-transparent toggle for streaming.</div>
-    </div>
-  </a>
-
   <a class="card" href="experiments/007-terrarium/index.html">
     <div class="thumb" data-live="experiments/007-terrarium/index.html"><div class="ph disp">007</div></div>
     <div class="meta">
@@ -193,16 +133,16 @@
       tremble when feral, run lime when recording.</div>
     </div>
   </a>
-  <a class="card" href="experiments/011-the-wager/index.html">
-    <div class="thumb" data-live="experiments/011-the-wager/index.html"><div class="ph disp">011</div></div>
+  <a class="card" href="experiments/011-the-scene/index.html">
+    <div class="thumb" data-live="experiments/011-the-scene/index.html"><div class="ph disp">011</div></div>
     <div class="meta">
-      <div class="num">011 · COMPETITIVE SEED · BATTLE MODE</div>
-      <div class="name">THE WAGER</div>
-      <div class="what">Beat-battle as matter. YOUR artifact grows with every drop; THEIR
-      artifact swells behind fog — you see what they're building, never hear it. Between
-      you: THE GLASS, a round timer that is literally eaten — eroding top-down, shedding
-      sand, burning lime at the waste-line, trembling in the final seconds. W stamp,
-      then judge by ear.</div>
+      <div class="num">011 · PRESENCE · MULTIPLAYER AT A GLANCE</div>
+      <div class="name">THE SCENE</div>
+      <div class="what">The wager, rebuilt for how it's actually used (rarely 1v1): your
+      CREW rides the left of the topbar as dithered orbs — lime rims, ember hearts when
+      they record, deed ticks as they work — while THE SCENE's rivals sit right as fog
+      orbs whose size is all you get. Tap one to PEEK: their artifact fills your stage
+      as a cold silhouette for four seconds. You can see it. You can't hear it.</div>
     </div>
   </a>
 </div>
