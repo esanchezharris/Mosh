@@ -29,3 +29,6 @@ imperative lesson per line. Human-auditable; prune when a lesson stops paying.
   a minimal loop first, then render.bounce.
 - The builtin synth has no filter cutoff — for filter sweeps, device.add a
   builtin.filter on the track and automate ITS "cutoff" param.
+- Demo-vs-kept needs FINAL-state verification: an element shown being built
+  (a roll, an extra channel) only counts if it survives to the final screen/
+  pattern — when in doubt, check the last frames, not the excited narration.

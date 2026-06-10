@@ -274,7 +274,7 @@
   },
   {
    "step_id": "s2",
-   "narration": "Clap on the 3-and-7 count (rack: steps 9 and 25 of 32 = beats 2 and 6) \u2014 the halftime placement that makes it trap \u2014 plus the sparse trap-combo kick ('sometimes you don't need a kick').",
+   "narration": "Clap on the 3-and-7 count (steps 9 and 25 of 32 = beats 2 and 6) \u2014 the halftime placement that makes it trap. The Kick\u2014Trap Combo channel is loaded but plays no steps in the kept pattern (Emilio-verified).",
    "narration_ts": [
     249.6,
     320.0
@@ -409,20 +409,6 @@
       "start_bar": 1,
       "length_beats": 8,
       "kind": "midi"
-     }
-    },
-    {
-     "kind": "notes.add",
-     "params": {
-      "clip_id": "ckick",
-      "notes": [
-       {
-        "pitch": "D1",
-        "start_beats": 2.5,
-        "dur_beats": 0.25,
-        "vel": 104
-       }
-      ]
      }
     }
    ]
@@ -581,69 +567,12 @@
   },
   {
    "step_id": "s5",
-   "narration": "Hi-hat rolls: grab a hat, drag it out \u2014 a 32nd burst into the turnaround using a second tone ('stack percussion within the hat itself').",
+   "narration": "Hi-hat rolls demonstrated ('grab a hat, drag it out') but NOT kept in the final pattern \u2014 demo only (Emilio-verified by ear). No ops.",
    "narration_ts": [
     933.3,
     1000.0
    ],
-   "ops": [
-    {
-     "kind": "notes.add",
-     "params": {
-      "clip_id": "chat",
-      "notes": [
-       {
-        "pitch": "F#1",
-        "start_beats": 7.0,
-        "dur_beats": 0.125,
-        "vel": 60
-       },
-       {
-        "pitch": "G#1",
-        "start_beats": 7.125,
-        "dur_beats": 0.125,
-        "vel": 65
-       },
-       {
-        "pitch": "F#1",
-        "start_beats": 7.25,
-        "dur_beats": 0.125,
-        "vel": 70
-       },
-       {
-        "pitch": "G#1",
-        "start_beats": 7.375,
-        "dur_beats": 0.125,
-        "vel": 75
-       },
-       {
-        "pitch": "F#1",
-        "start_beats": 7.5,
-        "dur_beats": 0.125,
-        "vel": 80
-       },
-       {
-        "pitch": "G#1",
-        "start_beats": 7.625,
-        "dur_beats": 0.125,
-        "vel": 85
-       },
-       {
-        "pitch": "F#1",
-        "start_beats": 7.75,
-        "dur_beats": 0.125,
-        "vel": 90
-       },
-       {
-        "pitch": "G#1",
-        "start_beats": 7.875,
-        "dur_beats": 0.125,
-        "vel": 95
-       }
-      ]
-     }
-    }
-   ]
+   "ops": []
   }
  ],
  "corrections": [
@@ -681,6 +610,11 @@
    "root_cause": "claims",
    "what": "CLAP text->one-shot ranking is noisy on transients (a water-drop perc outranked real claps for 'rnb clap')",
    "lesson": "use CLAP as a tiebreak over token+pack-context prefiltering, not as the oracle; resolver scores the full crate path, not just filenames"
+  },
+  {
+   "root_cause": "corrector-ear",
+   "what": "Emilio's grid corrections: kick channel plays NO steps (loaded but unused) and the 32nd hat roll was demoed, not kept \u2014 the corrector ALSO over-included demonstrated material",
+   "lesson": "demo-vs-kept applies to the corrector too; the human ear is the final arbiter \u2014 exactly why Claude-corrected caps at silver until sign-off. 808/clap/hat placements confirmed unchanged."
   }
  ],
  "verified_claims": [

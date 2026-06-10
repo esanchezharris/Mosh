@@ -25,7 +25,7 @@
    "bounce_peak_dbfs": -2.5,
    "delta_attempt_vs_corrected": {
     "entity_f1": 0.5263,
-    "magnitude": 0.2889,
+    "magnitude": 0.2665,
     "detail": {
      "attempt_tags": {
       "tempo_changed": 1,
@@ -49,14 +49,14 @@
      },
      "magnitude_dims": [
       0.333,
-      0.349,
-      0.22,
-      0.331,
+      0.289,
+      0.195,
+      0.281,
       0.25,
       0.25
      ]
     },
-    "composite": 0.4195
+    "composite": 0.4094
    },
    "corrections": [
     {
@@ -93,10 +93,15 @@
      "root_cause": "claims",
      "what": "CLAP text->one-shot ranking is noisy on transients (a water-drop perc outranked real claps for 'rnb clap')",
      "lesson": "use CLAP as a tiebreak over token+pack-context prefiltering, not as the oracle; resolver scores the full crate path, not just filenames"
+    },
+    {
+     "root_cause": "corrector-ear",
+     "what": "Emilio's grid corrections: kick channel plays NO steps (loaded but unused) and the 32nd hat roll was demoed, not kept \u2014 the corrector ALSO over-included demonstrated material",
+     "lesson": "demo-vs-kept applies to the corrector too; the human ear is the final arbiter \u2014 exactly why Claude-corrected caps at silver until sign-off. 808/clap/hat placements confirmed unchanged."
     }
    ],
    "traj_id": "tut-trap-03-corrected"
   },
-  "corrected_ts": 1781091618
+  "corrected_ts": 1781100156
  }
 }
