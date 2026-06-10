@@ -56,6 +56,60 @@ function CrateToggleArea({ snapshot }: { snapshot: NonNullable<ReturnType<typeof
   return <CrateBrowser snapshot={snapshot} />;
 }
 
+// Project menu (Stage 26): save-as + open, copy-based local projects.
+function ProjectMenu() {
+  const snapshot = useStore((s) => s.snapshot);
+  const exec = useStore((s) => s.exec);
+  const [projects, setProjects] = useState<string[] | null>(null);
+  const [savingAs, setSavingAs] = useState(false);
+  const current = snapshot?.session.projectName || "untitled";
+
+  const load = async () => {
+    const res = await exec("list_projects", {});
+    const data = res.data as { projects?: string[] } | undefined;
+    if (res.ok && data?.projects) setProjects(data.projects);
+  };
+
+  if (savingAs)
+    return (
+      <input
+        className="tutorial-input proj-input"
+        autoFocus
+        placeholder="project name…"
+        onBlur={(e) => {
+          const name = e.target.value.trim();
+          setSavingAs(false);
+          if (name) void exec("save_project_as", { name });
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+          if (e.key === "Escape") setSavingAs(false);
+        }}
+      />
+    );
+
+  return (
+    <select
+      className="ao-select proj-menu"
+      value=""
+      title={`Project: ${current}`}
+      onPointerDown={() => projects == null && void load()}
+      onChange={(e) => {
+        const v = e.target.value;
+        e.target.value = "";
+        if (v === "__saveas") setSavingAs(true);
+        else if (v) void exec("open_project", { name: v });
+      }}
+    >
+      <option value="" disabled>▤ {current}</option>
+      <option value="__saveas">save as…</option>
+      {(projects ?? []).filter((pn) => pn !== current).map((pn) => (
+        <option key={pn} value={pn}>open: {pn}</option>
+      ))}
+    </select>
+  );
+}
+
 function CrateToggle() {
   const crateOpen = useStore((s) => s.crateOpen);
   const setCrateOpen = useStore((s) => s.setCrateOpen);
@@ -117,6 +171,7 @@ export function App() {
       <header className="topbar">
         <div className="brand-min">
           <span className="logo-min">M</span> Mosh
+          <ProjectMenu />
         </div>
         <Transport />
         <div className="topbar-right">

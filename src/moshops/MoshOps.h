@@ -94,6 +94,10 @@ private:
     juce::var cmdSetCountIn       (const juce::var& args);   // playback aid
     // Stage 21 — papercuts
     juce::var cmdRenameClip       (const juce::var& args);
+    // Stage 26 — project management (machine-local file ops)
+    juce::var cmdListProjects     (const juce::var& args);   // read-only
+    juce::var cmdSaveProjectAs    (const juce::var& args);
+    juce::var cmdOpenProject      (const juce::var& args);
     // Stage 24 — clip inspector
     juce::var cmdSetClipGain      (const juce::var& args);
     juce::var cmdSetClipReversed  (const juce::var& args);

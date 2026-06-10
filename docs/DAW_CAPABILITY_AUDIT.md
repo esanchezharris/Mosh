@@ -14,7 +14,7 @@ Parity column makes IR↔UI gaps mechanical to spot.
 **Status legend:** ✅ works in the UI · 🔶 command-only (no UI gesture) ·
 🧠 agent/IR-only · ❌ missing everywhere · 🅿 parked by recorded decision.
 
-Last full audit: 2026-06-10 (Stage 21 — the goal pass that cleared the Stage-16 priority list).
+Last full audit: 2026-06-10 (Stage 26 — the next-tier pass: automation lanes, arranger, clip inspector, recording v2, projects).
 
 ## Project / session
 
@@ -25,11 +25,11 @@ Last full audit: 2026-06-10 (Stage 21 — the goal pass that cleared the Stage-1
 | Time signature | ✅ | project.set_time_sig ↔ set_time_sig ↔ chip | S15 |
 | Key / scale | 🔶 | project.set_key ↔ set_key ↔ none | scale-aware piano roll stage |
 | Swing / global groove | 🅿 engine has no groove (ledgered) | project.set_swing → Unsupported | decision: v0.3 or drop |
-| Save / load / autosave | ✅ save/reload + autosave every ~90s when dirty (S21); ❌ save-as/project browser | | project-mgmt stage |
+| Save / load / autosave / projects | ✅ autosave (S21) + ▤ project menu: save-as + open, copy-based local projects (S26) | | S26 |
 | Undo/redo | ✅ buttons + ⌘Z/⌘⇧Z | one UndoManager | S15 |
-| Sections/arrangement markers | 🧠 | arrange.create_section/place ↔ create_section ↔ no UI | arranger stage |
+| Sections/arrangement markers | ✅ strip under the ruler: drag-create, move/resize, rename, delete, click-seek, shift-loop (+ remove_section) | | S23 |
 | Metronome | ✅ | native-only (playback aid) | S15 |
-| Count-in / pre-roll | ❌ (recording works without it; metronome covers timing) | | recording v2 |
+| Count-in / pre-roll | ✅ none/1 bar/2 bars (Edit::CountIn) next to the metronome | | S25 |
 
 ## Transport
 
@@ -53,7 +53,7 @@ Last full audit: 2026-06-10 (Stage 21 — the goal pass that cleared the Stage-1
 | Track create/rename/remove/reorder | ✅ | dbl-click rename, ≡ drag | S15 |
 | Clip rename | ✅ context menu → Rename… (rename_clip) | | S21 |
 | Clip looping (cycle a clip region) | ❌ | engine supports loops; no cmd/UI | arrange stage |
-| Clip gain / fades | ❌ | | audio-editing stage |
+| Clip gain / fades | ✅ gain in Inspect… (set_clip_gain); fades ❌ | | S24 / audio-editing v2 |
 | Copy/paste across tracks | 🔶 duplicate_clip takes trackId; no paste UX | | papercut v2 |
 | Crossfades | ❌ | | post-v0 |
 
@@ -75,10 +75,10 @@ Last full audit: 2026-06-10 (Stage 21 — the goal pass that cleared the Stage-1
 
 | Capability | Status | Notes | Closes in |
 |---|---|---|---|
-| Pitch shift / time stretch | 🔶 | sample.pitch/stretch ↔ set_clip_pitch/stretch ↔ no UI | clip-inspector stage |
-| Slice to grid | 🔶 | slice_clip (grid) | clip-inspector stage |
+| Pitch shift / time stretch | ✅ Inspect… panel (right-click a wave clip) | | S24 |
+| Slice to grid | ✅ Inspect… → ✂ slice on the snap grid | | S24 |
 | Slice at transients | 🅿 ledgered (async detection) | | v0.3 decision |
-| Reverse / normalize | ❌ | | clip-inspector stage |
+| Reverse | ✅ Inspect… toggle (set_clip_reversed; proxy drained in-command); normalize ❌ | | S24 |
 | Waveform view | ✅ | peaks canvas | S2 |
 
 ## Devices & mixing
@@ -111,14 +111,14 @@ Last full audit: 2026-06-10 (Stage 21 — the goal pass that cleared the Stage-1
 | Capability | Status | Notes | Closes in |
 |---|---|---|---|
 | Audio input recording | ✅ 🎙 input pick + ● arm + ⏺ Rec — PROVEN with a real mic take landing as a clip (smoke Phase D) | | S19 |
-| MIDI keyboard input | ❌ (audio-input recording shipped first) | | recording v2 |
-| Input monitoring / arming | ✅ arming (arm_track); monitoring toggle ❌ | | S19 / recording v2 |
+| MIDI keyboard input | ✅ arm_track arms physical + virtual MIDI inputs — a keyboard records MIDI clips through the same ● | | S25 |
+| Input monitoring / arming | ✅ arming + 🎧 monitor toggle (per-device MonitorMode) | | S19/S25 |
 
 ## Automation
 
 | Capability | Status | Notes | Closes in |
 |---|---|---|---|
-| Write automation curves | 🧠 | automation.write ↔ write_automation; NO UI/lanes | automation stage |
+| Write automation curves | ✅ per-track A lanes: param picker, point add/drag/delete (get/clear_automation + lane-replace write) | | S22 |
 | Automation playback | ✅ engine | curves are canonical state (hash rule) | S8 |
 
 ## Render / export
@@ -142,13 +142,14 @@ Last full audit: 2026-06-10 (Stage 21 — the goal pass that cleared the Stage-1
 
 ## Standing priorities derived from this audit
 
-The Stage-16 priority list (mixer · crate browser · recording · piano-roll v2
-· papercuts) was CLEARED in Stages 17–21 (2026-06-10). Next tier, by value:
+Stage-16's list cleared in S17–21; the next tier (automation lanes · arranger
+· clip inspector · recording v2 · projects) cleared in S22–26 (2026-06-10).
+What remains, by value:
 
-1. **Automation lanes UI** — automation.write works (and now powers slides);
-   curves still have no visible/editable lane.
-2. **Sections/arranger UI** — arrange.create_section is agent-only.
-3. **Clip inspector** — pitch/stretch/slice/reverse have commands, no UI.
-4. **Recording v2** — input monitoring toggle, count-in, MIDI keyboard input.
-5. **Project management** — save-as, project browser, recent sessions.
-6. **Papercut v2** — paste UX, MP3 export, scale highlighting in the roll.
+1. **Papercut v3** — paste UX, MP3 export, scale highlighting/fold in the
+   roll, MIDI-clip length from the editor, normalize, fades.
+2. **Tempo map** — tempo changes over time (post-v0 candidate).
+3. **Clip looping / crossfades** — engine supports loops; no gesture yet.
+4. **Stems export** — harness tracksToDo exists; no UI.
+5. **Parked decisions due in v0.3**: swing/groove, transient slicing,
+   device presets, Finder drag-drop (WebView path limitation).

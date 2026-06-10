@@ -1332,6 +1332,52 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         }
     }
 
+    // --- Stage 26: projects (save-as → mutate → open restores) ---
+    {
+        std::cerr << "--- Stage 26: project management ---\n";
+        auto t26 = cmd (ops, "create_track", args1 ("name", "Proj26"));
+        const auto t26id = t26["data"].getProperty ("trackId", var()).toString();
+        const int tracksBefore = ops.snapshot()["tracks"].size();
+
+        check (ok (cmd (ops, "save_project_as", args1 ("name", "selftest-proj"))), "save_project_as ok");
+        check (ops.snapshot()["session"].getProperty ("projectName", var()).toString() == "selftest-proj",
+               "projectName in snapshot");
+        auto lp = cmd (ops, "list_projects");
+        bool found = false;
+        for (auto& pn : *lp["data"].getProperty ("projects", var()).getArray())
+            if (pn.toString() == "selftest-proj") found = true;
+        check (ok (lp) && found, "list_projects sees it");
+
+        // Mutate, then open the project — the mutation must be gone.
+        check (ok (cmd (ops, "remove_track", args1 ("trackId", t26id))), "mutate after save");
+        check (ops.snapshot()["tracks"].size() == tracksBefore - 1, "mutation applied");
+        check (ok (cmd (ops, "open_project", args1 ("name", "selftest-proj"))), "open_project ok");
+        check (ops.snapshot()["tracks"].size() == tracksBefore, "open restored the saved state");
+        // The reload spawns proxy jobs for every wave clip accumulated by the
+        // whole selftest session — give their callBlocking hops a serviced
+        // message thread before the next command burst.
+        eng.drainRenderJobs (4000);
+        {
+            StringArray lines;
+            eng.sessionDir().getChildFile ("trajectory.jsonl").readLines (lines);
+            bool leaked = false;
+            for (auto& l : lines) if (l.contains ("save_project_as") || l.contains ("open_project")) leaked = true;
+            check (! leaked, "project ops never enter the trajectory");
+        }
+        // cleanup: drop the test track + project dir
+        for (auto& tv : *ops.snapshot()["tracks"].getArray())
+            if (tv.getProperty ("name", var()).toString() == "Proj26")
+                cmd (ops, "remove_track", args1 ("trackId", tv.getProperty ("id", var())));
+        eng.sessionDir().getParentDirectory().getChildFile ("projects")
+            .getChildFile ("selftest-proj").deleteRecursively();
+        eng.sessionDir().getChildFile ("project-name.txt").deleteFile();
+    }
+
+    // Let every background proxy/render job finish while the message loop is
+    // still fully alive — a job mid-callBlocking at quit times out and asserts
+    // (the loop stops dispatching during shutdown).
+    eng.drainRenderJobs (6000);
+
     std::cerr << "===== " << (checks - failures) << "/" << checks
               << " checks passed, " << failures << " failed =====\n\n";
     return failures;

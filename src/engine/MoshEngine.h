@@ -73,9 +73,19 @@ public:
         Edit object; callers must re-read edit() afterwards. */
     void reloadFromFile();
 
+    /** Reload WITHOUT saving first (Stage 26: open_project copies a new edit
+        file into place — saving would clobber it with the old session). */
+    void reloadFromFileNoSave();
+
     /** Reset to a cold EMPTY Edit (collab rebase: replay-from-genesis starts
         here). Replaces the Edit object; callers must re-read edit(). */
     void resetEmpty();
+
+    /** Wait (pumping the message loop) until background render/proxy jobs
+        finish, up to the timeout. Every edit-swap path calls this — a proxy
+        job whose source vanishes mid-flight asserts on the render thread
+        (Stage 26 lesson: set_clip_reversed spawns reverse-proxy jobs). */
+    void drainRenderJobs (int timeoutMs = 2000);
 
 private:
     std::unique_ptr<te::Engine> enginePtr;

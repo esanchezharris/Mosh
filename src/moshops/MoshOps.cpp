@@ -119,6 +119,9 @@ juce::var MoshOps::dispatch (const juce::String& name, const juce::var& args)
     if (name == "set_input_monitor") return cmdSetInputMonitor (args);
     if (name == "set_count_in")      return cmdSetCountIn (args);
     if (name == "rename_clip")       return cmdRenameClip (args);
+    if (name == "list_projects")     return cmdListProjects (args);
+    if (name == "save_project_as")   return cmdSaveProjectAs (args);
+    if (name == "open_project")      return cmdOpenProject (args);
     if (name == "set_clip_gain")     return cmdSetClipGain (args);
     if (name == "set_clip_reversed") return cmdSetClipReversed (args);
     if (name == "get_automation")    return cmdGetAutomation (args);
@@ -639,6 +642,96 @@ juce::var MoshOps::cmdRenameClip (const juce::var& args)
 // lane UI round-trips losslessly through the lane-replace semantics.
 // ─────────────────────────────────────────────────────────────────────────────
 // ─────────────────────────────────────────────────────────────────────────────
+// Project management (Stage 26). Projects are copy-based snapshots under
+// <sessionParent>/projects/<name>/ (edit + session audio). The live edit
+// ALWAYS stays at the session path, so its absolute audio references hold:
+// save-as copies session files OUT, open copies them back IN then reloads.
+// Machine-local workflow — excluded from the recorder and collab sync
+// (a project switch is not a replayable musical op; the oplog stays the
+// source of truth for shared sessions).
+// ─────────────────────────────────────────────────────────────────────────────
+namespace
+{
+    juce::File projectsDir (MoshEngine& eng)
+    {
+        return eng.sessionDir().getParentDirectory().getChildFile ("projects");
+    }
+    juce::String sanitizeProjectName (const juce::String& raw)
+    {
+        return juce::File::createLegalFileName (raw.trim());
+    }
+}
+
+juce::var MoshOps::cmdListProjects (const juce::var&)
+{
+    Array<var> names;
+    for (const auto& d : projectsDir (eng).findChildFiles (juce::File::findDirectories, false))
+        if (d.getChildFile ("session.tracktionedit").existsAsFile())
+            names.add (d.getFileName());
+    auto* data = new DynamicObject();
+    data->setProperty ("projects", names);
+    data->setProperty ("current",
+        eng.sessionDir().getChildFile ("project-name.txt").loadFileAsString().trim());
+    return okResult ("list_projects", var (data));
+}
+
+juce::var MoshOps::cmdSaveProjectAs (const juce::var& args)
+{
+    const auto name = sanitizeProjectName (args.getProperty ("name", var()).toString());
+    if (name.isEmpty()) return errResult ("save_project_as", "missing 'name'");
+
+    eng.save();
+    auto dest = projectsDir (eng).getChildFile (name);
+    dest.deleteRecursively();
+    dest.createDirectory();
+    if (! eng.editFile().copyFileTo (dest.getChildFile ("session.tracktionedit")))
+        return errResult ("save_project_as", "copy failed");
+    auto audioSrc = eng.sessionDir().getChildFile ("audio");
+    if (audioSrc.isDirectory())
+        audioSrc.copyDirectoryTo (dest.getChildFile ("audio"));
+    eng.sessionDir().getChildFile ("project-name.txt").replaceWithText (name);
+
+    logLine ("save_project_as", args, true, {}, false);
+    emitSnapshotInvalidated();
+    auto* data = new DynamicObject();
+    data->setProperty ("name", name);
+    return okResult ("save_project_as", var (data));
+}
+
+juce::var MoshOps::cmdOpenProject (const juce::var& args)
+{
+    const auto name = sanitizeProjectName (args.getProperty ("name", var()).toString());
+    auto src = projectsDir (eng).getChildFile (name);
+    if (! src.getChildFile ("session.tracktionedit").existsAsFile())
+        return errResult ("open_project", "no project: " + name);
+
+    // Preserve the current work before swapping.
+    eng.save();
+    eng.edit().getTransport().stop (false, false);
+
+    // Drain background proxy/render jobs before files change under them
+    // (reloadFromFileNoSave drains again before the edit swap).
+    eng.drainRenderJobs();
+
+    src.getChildFile ("session.tracktionedit").copyFileTo (eng.editFile());
+    auto audioDst = eng.sessionDir().getChildFile ("audio");
+    auto audioSrc = src.getChildFile ("audio");
+    if (audioSrc.isDirectory())
+    {
+        for (const auto& f : audioSrc.findChildFiles (juce::File::findFiles, false))
+            f.copyFileTo (audioDst.getChildFile (f.getFileName()));
+    }
+    eng.reloadFromFileNoSave();
+    eng.sessionDir().getChildFile ("project-name.txt").replaceWithText (name);
+
+    logLine ("open_project", args, true, {}, false);
+    emitSnapshotInvalidated();
+    auto* data = new DynamicObject();
+    data->setProperty ("name", name);
+    return okResult ("open_project", var (data));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Clip inspector (Stage 24): gain + reverse join the existing pitch/stretch/
 // slice commands. Both are AudioClipBase properties — wave clips only.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -661,6 +754,10 @@ juce::var MoshOps::cmdSetClipReversed (const juce::var& args)
 
     undoManager().beginNewTransaction ("set_clip_reversed");
     acb->setIsReversed ((bool) args.getProperty ("reversed", false));
+    // Reversing spawns a proxy-render job whose worker hops onto the message
+    // thread via callBlocking — service it NOW; in headless command bursts
+    // nothing else pumps and the job times out + asserts at shutdown.
+    eng.drainRenderJobs (4000);
     logLine ("set_clip_reversed", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("set_clip_reversed");
@@ -2022,6 +2119,10 @@ juce::var MoshOps::snapshot()
         session->setProperty ("countInBars", ci == te::Edit::CountIn::oneBar ? 1
                                             : ci == te::Edit::CountIn::twoBar ? 2 : 0);
     }
+
+    // Stage 26: the named project this session was last saved-as/opened-from.
+    session->setProperty ("projectName",
+        eng.sessionDir().getChildFile ("project-name.txt").loadFileAsString().trim());
 
     // Stage 15: master fader + metronome state.
     if (auto mv = edit.getMasterVolumePlugin())

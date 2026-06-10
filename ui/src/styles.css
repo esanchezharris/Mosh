@@ -575,4 +575,8 @@ button.on { border-color: var(--accent); color: var(--accent); background: #2120
 .insp-hint { color: var(--muted); }
 .pr-tool.on { border-color: var(--warn); color: var(--warn); }
 
+/* Project menu (Stage 26) */
+.proj-menu { max-width: 150px; }
+.proj-input { width: 130px; }
+
 .boot { padding: 3rem; color: var(--muted); }

@@ -133,6 +133,7 @@ export type Snapshot = {
     sections?: { name: string; startBar: number; lengthBars: number }[];
     inputMonitor?: boolean;
     countInBars?: number;
+    projectName?: string;
   };
   tracks: Track[];
   transport: Transport;

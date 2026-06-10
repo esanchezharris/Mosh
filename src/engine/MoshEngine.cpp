@@ -92,6 +92,7 @@ MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession)
 
 MoshEngine::~MoshEngine()
 {
+    drainRenderJobs (1000);
     stopAudition();          // unhook the SoundPlayer before the device dies
     if (editPtr != nullptr)
         editPtr->getTransport().stop (false, false);
@@ -481,17 +482,45 @@ bool MoshEngine::save()
     return te::EditFileOperations (edit()).save (false, true, false);
 }
 
-void MoshEngine::reloadFromFile()
+void MoshEngine::drainRenderJobs (int timeoutMs)
 {
-    save();
+    auto& rm = enginePtr->getRenderManager();
+    const auto deadline = juce::Time::getMillisecondCounter() + (juce::uint32) timeoutMs;
+    while (rm.getNumJobs() > 0 && juce::Time::getMillisecondCounter() < deadline)
+    {
+        if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
+            mm->runDispatchLoopUntil (20);
+        else
+            juce::Thread::sleep (20);
+    }
+}
+
+void MoshEngine::reloadFromFileNoSave()
+{
+    drainRenderJobs();
     editPtr->getTransport().stop (false, false);
     editPtr.reset();
     editPtr = te::loadEditFromFile (*enginePtr, editPath);
     editPtr->editFileRetriever = [this] { return editPath; };
+    // The fresh edit spawns its own proxy jobs; their callBlocking hops need
+    // the message thread serviced NOW — headless command bursts never pump.
+    drainRenderJobs();
+}
+
+void MoshEngine::reloadFromFile()
+{
+    save();
+    drainRenderJobs();
+    editPtr->getTransport().stop (false, false);
+    editPtr.reset();
+    editPtr = te::loadEditFromFile (*enginePtr, editPath);
+    editPtr->editFileRetriever = [this] { return editPath; };
+    drainRenderJobs();   // same post-load pump as reloadFromFileNoSave
 }
 
 void MoshEngine::resetEmpty()
 {
+    drainRenderJobs();
     editPtr->getTransport().stop (false, false);
     editPtr.reset();
     editPath.deleteFile();

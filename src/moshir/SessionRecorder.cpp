@@ -24,7 +24,10 @@ namespace
             // Input device pick is machine-local (Stage 19); arming IS recorded.
             || name == "list_audio_inputs" || name == "set_audio_input"
             || name == "get_automation"    // lane reads (Stage 22)
-            || name == "set_input_monitor" || name == "set_count_in";   // playback aids (Stage 25)
+            || name == "set_input_monitor" || name == "set_count_in"    // playback aids (Stage 25)
+            // Project file ops are machine-local workflow, not replayable
+            // musical steps (Stage 26).
+            || name == "list_projects" || name == "save_project_as" || name == "open_project";
     }
 }
 
