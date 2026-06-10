@@ -1,0 +1,7 @@
+{
+  "tutorialId": "gap-ledger-fixture",
+  "timeout_s": 60,
+  "ops": [
+    {"kind": "project.set_swing", "params": {"amount": 0.25}}
+  ]
+}

@@ -126,7 +126,13 @@ def _run_job(job_id: str) -> None:
                 _jobs[job_id]["progress"] = 0.3   # coarse: real model render is one shot
 
         ad = _adapter_for(adapter_id)
-        manifest = ad.render(job["input_wav"], job["output_wav"], job["params"])
+        if (job["params"] or {}).get("mode") == "text_to_audio":
+            # Pure generation — no input audio. Adapters opt in via generate().
+            if not hasattr(ad, "generate"):
+                raise RuntimeError(f"adapter '{adapter_id}' does not support text_to_audio")
+            manifest = ad.generate(job["output_wav"], job["params"])
+        else:
+            manifest = ad.render(job["input_wav"], job["output_wav"], job["params"])
         with open(job["manifest"], "w") as f:
             json.dump(manifest, f)
         with _lock:
@@ -221,7 +227,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
             input_wav = data.get("inputWav", "")
             output_wav = data.get("outputWav", "")
-            if not input_wav or not os.path.exists(input_wav):
+            mode = (data.get("params") or {}).get("mode", "audio_to_audio")
+            # text_to_audio jobs have no input audio (latent.generate, phase0 §3.3).
+            if mode != "text_to_audio" and (not input_wav or not os.path.exists(input_wav)):
                 self._send(400, {"ok": False, "error": "inputWav missing"})
                 return
             job_id = uuid.uuid4().hex[:12]

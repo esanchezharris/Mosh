@@ -69,7 +69,11 @@ if (MOSH_BUILD_APP)
         src/generative/GenerativeJobManager.cpp
         # Stage 7 — MoshIR engine gaps + IR executor (phase0 §3–§4)
         src/moshops/MoshOpsStage7.cpp
-        src/moshir/MoshIR.cpp)
+        src/moshir/MoshIR.cpp
+        # Stage 8 — replay harness + canonical state hash (phase0 §4)
+        src/moshops/MoshOpsStage8.cpp
+        src/state/StateHash.cpp
+        src/app/Harness.cpp)
 
     target_include_directories(Mosh PRIVATE src)
 

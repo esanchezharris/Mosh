@@ -35,9 +35,14 @@ MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession)
     // Session directory: a stable per-app-data folder so save/reload round-trips.
     // The harness gets an isolated "session-selftest" dir so it can't be polluted
     // by (or clobber) a real GUI session — see freshSession below.
-    session = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
-                  .getChildFile ("Mosh")
-                  .getChildFile (freshSession ? "session-selftest" : "session");
+    // MOSH_SESSION_DIR overrides outright: the replay harness runs N parallel
+    // app instances, each in its own throwaway dir (phase0 §4 batch mode).
+    const auto sessionOverride = juce::SystemStats::getEnvironmentVariable ("MOSH_SESSION_DIR", {});
+    session = sessionOverride.isNotEmpty()
+                  ? juce::File (sessionOverride)
+                  : juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+                        .getChildFile ("Mosh")
+                        .getChildFile (freshSession ? "session-selftest" : "session");
     session.createDirectory();
     session.getChildFile ("audio").createDirectory();
     editPath = session.getChildFile ("session.tracktionedit");

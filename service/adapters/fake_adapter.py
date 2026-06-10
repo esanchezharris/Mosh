@@ -89,3 +89,57 @@ def render(input_wav: str, output_wav: str, params: dict) -> dict:
         "sample_rate": framerate,
         "channels": n_channels,
     }
+
+
+def generate(output_wav: str, params: dict) -> dict:
+    """text_to_audio for the stub (latent.generate, phase0 §3.3): synthesize a
+    short seeded tone cluster — a pure function of (prompt, seed, seconds), so
+    identical params yield BYTE-IDENTICAL output on every machine. That is the
+    property the replay-determinism conformance test (phase0 §4 req 1) pins for
+    seeded latent ops; the real model honors the same contract via seed +
+    model_version + sampler config.
+    """
+    import hashlib
+
+    seed = int(params["seed"])              # REQUIRED — the service never defaults a seed
+    prompt = str(params.get("prompt", ""))
+    seconds = max(0.1, min(60.0, float(params.get("seconds", 4.0))))
+    framerate, channels = 44100, 2
+
+    # Three partials + decay envelope, all derived from md5(prompt|seed).
+    digest = hashlib.md5(f"{prompt}|{seed}".encode("utf-8")).digest()
+    base = 55.0 * (2.0 ** ((digest[0] % 24) / 12.0))            # 55–220 Hz
+    ratios = [1.0, 1.5 + (digest[1] % 100) / 200.0, 2.0 + (digest[2] % 100) / 100.0]
+    amps = [0.5, 0.3 * (digest[3] / 255.0), 0.2 * (digest[4] / 255.0)]
+    decay = 1.5 + (digest[5] % 100) / 50.0
+
+    n = int(seconds * framerate)
+    frames = []
+    for i in range(n):
+        t = i / framerate
+        env = math.exp(-decay * t / seconds)
+        s = sum(a * math.sin(2.0 * math.pi * base * r * t) for r, a in zip(ratios, amps)) * env
+        v = int(max(-32768, min(32767, round(s * 32767.0))))
+        frames.append(v)   # left
+        frames.append(v)   # right (stereo dual-mono)
+
+    body = struct.pack("<%dh" % len(frames), *frames)
+    with wave.open(output_wav, "wb") as w:
+        w.setnchannels(channels)
+        w.setsampwidth(2)
+        w.setframerate(framerate)
+        w.writeframes(body)
+
+    return {
+        "ok": True,
+        "adapter": "fake",
+        "mode": "text_to_audio",
+        "pq": 0.8,
+        "pq_base": 0.85,
+        "flags": [],
+        "duration_s": round(seconds, 3),
+        "sample_rate": framerate,
+        "channels": channels,
+        "seed": seed,
+        "prompt": prompt,
+    }

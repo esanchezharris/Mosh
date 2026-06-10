@@ -218,13 +218,58 @@ juce::var Executor::runOp (const juce::var& op, const juce::String& tutorialId)
         return lowerAssetResolve (p, out, tutorialId);
     if (kind.startsWith ("latent."))
     {
-        // Stochastic contract enforced even though lowering is deferred:
-        // unseeded latent ops are rejected, not ledgered (§4.3).
+        // Stochastic contract first: unseeded/unpinned latent ops are rejected,
+        // not ledgered (§4.3) — there is no default seed and no floating model.
         if (! p.hasProperty ("seed"))
             return failOp (kind, "validate", "seed required (stochastic op, no default seed)");
         if (! p.hasProperty ("model_version"))
             return failOp (kind, "validate", "model_version required on latent ops");
-        return unsupportedOp (op, "latent ops route to Tier-B via the harness (Stage 8 wiring)",
+
+        const auto modelVersion = p.getProperty ("model_version", var()).toString();
+        const auto adapter = modelVersion.containsIgnoreCase ("sa3") ? String ("stable_audio3")
+                                                                     : String ("fake");
+
+        if (kind == "latent.generate")
+        {
+            if (out.isEmpty()) return failOp (kind, "validate", "latent.generate requires 'out'");
+            if (bindingExists (out)) return failOp (kind, "validate", "id already bound: " + out);
+            auto file = eng.sessionDir().getChildFile ("renders").getChildFile (out + ".wav");
+            auto* a = obj();
+            a->setProperty ("mode", "text_to_audio");
+            a->setProperty ("prompt", p.getProperty ("prompt", ""));
+            a->setProperty ("seconds", beatsToSeconds ((double) p.getProperty ("duration_beats", 8.0)));
+            a->setProperty ("seed", p.getProperty ("seed", 0));
+            a->setProperty ("adapter", adapter);
+            a->setProperty ("file", file.getFullPathName());
+            auto r = run ("generate_asset", a);
+            if (! succeeded (r)) return failOp (kind, "execute", r.getProperty ("error", "").toString());
+            Binding b; b.kind = "asset"; b.ref = file.getFullPathName();
+            bind (out, b);
+            return okOp (kind, { "generate_asset" }, r.getProperty ("data", var()));
+        }
+        if (kind == "latent.variate")
+        {
+            if (out.isEmpty()) return failOp (kind, "validate", "latent.variate requires 'out'");
+            if (bindingExists (out)) return failOp (kind, "validate", "id already bound: " + out);
+            auto* src = find (p.getProperty ("asset_id", var()).toString(), "asset");
+            if (src == nullptr) return failOp (kind, "validate",
+                "unbound asset id: " + p.getProperty ("asset_id", var()).toString());
+            auto file = eng.sessionDir().getChildFile ("renders").getChildFile (out + ".wav");
+            auto* a = obj();
+            a->setProperty ("mode", "audio_to_audio");
+            a->setProperty ("initFile", src->ref);
+            a->setProperty ("strength", p.getProperty ("strength", 0.4));
+            a->setProperty ("seed", p.getProperty ("seed", 0));
+            a->setProperty ("adapter", adapter);
+            a->setProperty ("file", file.getFullPathName());
+            auto r = run ("generate_asset", a);
+            if (! succeeded (r)) return failOp (kind, "execute", r.getProperty ("error", "").toString());
+            Binding b; b.kind = "asset"; b.ref = file.getFullPathName();
+            bind (out, b);
+            return okOp (kind, { "generate_asset" }, r.getProperty ("data", var()));
+        }
+        // morph / inpaint stay engine gaps for now.
+        return unsupportedOp (op, "latent morph/inpaint are not wired to an adapter yet",
                               kind, tutorialId);
     }
 

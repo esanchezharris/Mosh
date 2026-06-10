@@ -1,0 +1,25 @@
+{
+  "tutorialId": "conformance-fixture",
+  "bounce": true,
+  "timeout_s": 120,
+  "ops": [
+    {"kind": "project.set_tempo", "params": {"bpm": 140}},
+    {"kind": "project.set_time_sig", "params": {"num": 4, "denom": 4}},
+    {"kind": "project.set_key", "params": {"root": "C", "scale": "minor"}},
+    {"kind": "track.create", "params": {"track_id": "t1", "kind": "midi", "role": "melody"}},
+    {"kind": "clip.create", "params": {"clip_id": "c1", "track_id": "t1",
+      "start_bar": 1, "length_beats": 8, "kind": "midi"}},
+    {"kind": "notes.add", "params": {"clip_id": "c1", "notes": [
+      {"pitch": "C3",  "start_beats": 0, "dur_beats": 1, "vel": 100},
+      {"pitch": "Eb3", "start_beats": 2, "dur_beats": 1, "vel": 96},
+      {"pitch": "G3",  "start_beats": 4, "dur_beats": 2, "vel": 92}]}},
+    {"kind": "notes.humanize", "params": {"clip_id": "c1", "timing_ms": 6, "vel_var": 5, "seed": 777}},
+    {"kind": "latent.generate", "params": {"prompt": "deep sub pulse",
+      "duration_beats": 4, "seed": 99, "model_version": "fake-0.0.1"}, "out": "a_sub"},
+    {"kind": "track.create", "params": {"track_id": "t2", "kind": "audio", "role": "808"}},
+    {"kind": "sample.place", "params": {"clip_id": "c2", "track_id": "t2",
+      "asset_id": "a_sub", "start_bar": 1}},
+    {"kind": "mixer.set_gain", "params": {"track_id": "t2", "db": -2}},
+    {"kind": "render.commit", "params": {}}
+  ]
+}

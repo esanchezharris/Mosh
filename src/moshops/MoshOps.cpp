@@ -104,6 +104,9 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "set_clip_stretch")  return cmdSetClipStretch (args);
     if (name == "slice_clip")        return cmdSliceClip (args);
     if (name == "create_section")    return cmdCreateSection (args);
+    // Stage 8 — replay harness + determinism
+    if (name == "get_state_hash")    return cmdGetStateHash (args);
+    if (name == "generate_asset")    return cmdGenerateAsset (args);
     if (name == "execute_ir")        return irHook ? irHook (args)
                                                    : errResult (name, "IR executor not wired");
 
@@ -745,7 +748,12 @@ juce::var MoshOps::cmdCreateRenderLayer (const juce::var& args)
 
     undoManager().beginNewTransaction ("create_render_layer");
     auto pos = clip->getPosition();
-    auto node = RenderLayer::create ("rl-" + String (Time::getCurrentTime().toMilliseconds()),
+    // Deterministic layer ids (phase0 §4 req 1): a per-edit counter persisted in
+    // session state — NEVER wall-clock, which breaks replay hash equality.
+    auto moshSession = eng.edit().state.getOrCreateChildWithName (Identifier ("MOSH_SESSION"), nullptr);
+    const int rlSeq = (int) moshSession.getProperty ("nextRenderLayerSeq", 1);
+    moshSession.setProperty ("nextRenderLayerSeq", rlSeq + 1, nullptr);
+    auto node = RenderLayer::create ("rl-" + String (rlSeq),
         clipId, pos.getStart().inSeconds(), pos.getEnd().inSeconds(),
         args.getProperty ("adapter", "fake").toString());
     if (args.hasProperty ("mode"))         node.setProperty (ids::mode, args.getProperty ("mode", "reimagine"), nullptr);

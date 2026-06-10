@@ -690,6 +690,51 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (cmd (ops, "undo")), "undo after IR ops ok (single undo system intact)");
     }
 
+    // --- Stage 8: canonical state hash + replay primitives ---
+    {
+        std::cerr << "--- Stage 8: canonical state hash + replay primitives ---\n";
+
+        auto projNow = [&]() {
+            return cmd (ops, "get_state_hash", args1 ("projection", true))["data"]
+                       .getProperty ("projection", var()).toString(); };
+        auto hashNow = [&]() {
+            return cmd (ops, "get_state_hash")["data"].getProperty ("hash", var()).toString(); };
+        auto dumpOnMismatch = [&] (const String& a, const String& b, const String& tag)
+        {
+            if (a == b) return;
+            eng.sessionDir().getChildFile ("proj-" + tag + "-before.txt").replaceWithText (a);
+            eng.sessionDir().getChildFile ("proj-" + tag + "-after.txt").replaceWithText (b);
+            std::cerr << "  ..   projection diff dumped: proj-" << tag << "-{before,after}.txt\n";
+        };
+
+        const auto h0 = hashNow();
+        const auto p0 = projNow();
+        check (h0.length() == 64, "state hash is a SHA256 hex digest");
+        check (hashNow() == h0, "hash is stable across repeated reads");
+
+        // Undo-restores-hash uses a TREE-state op: parameter moves (faders)
+        // follow DAW semantics and are not undo transactions in the engine.
+        const auto firstTrackId = ops.snapshot()["tracks"][0].getProperty ("id", var()).toString();
+        const auto priorName = ops.snapshot()["tracks"][0].getProperty ("name", var()).toString();
+        cmd (ops, "rename_track", objN ({{ "trackId", firstTrackId }, { "name", priorName + " X" }}));
+        const auto h1 = hashNow();
+        check (h1 != h0, "a mutation changes the hash");
+        cmd (ops, "undo");
+        dumpOnMismatch (p0, projNow(), "undo");
+        check (hashNow() == h0, "undo restores the prior hash (one undo system)");
+
+        check (ok (cmd (ops, "save")), "save before reload-stability check");
+        cmd (ops, "reload");
+        dumpOnMismatch (p0, projNow(), "reload");
+        check (hashNow() == h0, "hash survives save/reload (canonical projection)");
+
+        // Stochastic primitive: generate_asset requires a seed, full stop.
+        auto ga = cmd (ops, "generate_asset", objN ({{ "prompt", "x" },
+            { "file", eng.sessionDir().getChildFile ("renders/unseeded.wav").getFullPathName() }}));
+        check (! ok (ga) && ga.getProperty ("error", var()).toString().contains ("seed"),
+               "generate_asset without seed -> hard error (no default seed)");
+    }
+
     // --- Stage 5 (SA3): the real StableAudio3Adapter - GATED on MOSH_SELFTEST_SA3 ---
     // (separate from MOSH_ENABLE_SA3, which now defaults on: real model + judge QA is
     //  ~30s, too heavy for the default --selftest. Opt in explicitly to exercise it.)

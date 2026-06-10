@@ -2,6 +2,7 @@
 #include <tracktion_engine/tracktion_engine.h>
 #include "app/MainWindow.h"
 #include "app/SelfTest.h"
+#include "app/Harness.h"
 #include "engine/MoshEngine.h"
 #include "moshops/MoshOps.h"
 #include "moshir/MoshIR.h"
@@ -28,7 +29,8 @@ public:
 
         const bool undoSelfTest = commandLine.contains ("--selftest-undo");
         const bool liveAudioSmoke = commandLine.contains ("--live-audio-smoke");
-        const bool headless = undoSelfTest || commandLine.contains ("--selftest");
+        const bool harness = commandLine.contains ("--harness");
+        const bool headless = undoSelfTest || harness || commandLine.contains ("--selftest");
         // Headless: no audio device, and an isolated cold session so the harness is
         // idempotent (it saves/reloads itself) and never touches the GUI session.
         engine  = std::make_unique<MoshEngine> ((! headless) || liveAudioSmoke,
@@ -39,6 +41,15 @@ public:
         // them back through execute(), preserving the one mutation path.
         irExecutor = std::make_unique<ir::Executor> (*moshOps, *engine);
         moshOps->setIRHook ([this] (const juce::var& a) { return irExecutor->executeOps (a); });
+
+        // Headless replay harness (phase0 §4): `Mosh --harness job.json`.
+        if (harness)
+        {
+            const int code = runHarness (*engine, *moshOps, commandLine);
+            setApplicationReturnValue (code);
+            quit();
+            return;
+        }
 
         // Headless command-surface harness (06 §4): `Mosh --selftest`.
         if (undoSelfTest)

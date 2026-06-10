@@ -1,0 +1,12 @@
+{
+  "tutorialId": "unseeded-rejection-fixture",
+  "timeout_s": 60,
+  "ops": [
+    {"kind": "track.create", "params": {"track_id": "t1", "kind": "midi", "role": "melody"}},
+    {"kind": "clip.create", "params": {"clip_id": "c1", "track_id": "t1",
+      "start_bar": 1, "length_beats": 4, "kind": "midi"}},
+    {"kind": "notes.add", "params": {"clip_id": "c1", "notes": [
+      {"pitch": 60, "start_beats": 0, "dur_beats": 1, "vel": 100}]}},
+    {"kind": "notes.humanize", "params": {"clip_id": "c1", "timing_ms": 8, "vel_var": 6}}
+  ]
+}
