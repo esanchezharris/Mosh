@@ -22,7 +22,8 @@ namespace
             // Crate browser (Stage 18) — browsing/audition is not a mutation.
             || name == "list_dir" || name == "audition_file" || name == "stop_audition"
             // Input device pick is machine-local (Stage 19); arming IS recorded.
-            || name == "list_audio_inputs" || name == "set_audio_input";
+            || name == "list_audio_inputs" || name == "set_audio_input"
+            || name == "get_automation";   // lane reads (Stage 22)
     }
 }
 

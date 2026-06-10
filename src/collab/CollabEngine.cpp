@@ -355,6 +355,7 @@ bool CollabEngine::isSyncable (const String& command)
         "set_metronome", "choose_file",             // playback aid / local dialog (Stage 15)
         "list_dir", "audition_file", "stop_audition", // crate browsing (Stage 18)
         "list_audio_inputs", "set_audio_input", "arm_track", // device-bound (Stage 19)
+        "get_automation",                            // read-only lane fetch (Stage 22)
         "collab_init", "collab_clone", "collab_status", "collab_push", "collab_pull",
     };
     return ! excluded.contains (command);

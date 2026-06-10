@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useStore, SNAP_DIVS, type SnapDiv } from "../store";
 import type { Snapshot, Track, CommandResult } from "../types";
 import { Clip } from "./Clip";
+import { AutomationLane, AUTO_H, laneTargets, type LaneTarget } from "./AutomationLane";
 
 const LANE_H = 84;
 const RULER_SECONDS = 48;
@@ -65,6 +66,20 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
   const [marquee, setMarquee] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const loopDrag = useRef<number | null>(null);
 
+  // Automation lanes (Stage 22): rows grow when a lane is open — every piece
+  // of row math below uses these offsets, never row * LANE_H.
+  const autoOpen = useStore((s) => s.autoOpen);
+  const rowOffsets: number[] = [];
+  {
+    let acc = 0;
+    for (const tr of snapshot.tracks) {
+      rowOffsets.push(acc);
+      acc += LANE_H + (autoOpen[tr.id] ? AUTO_H : 0);
+    }
+    rowOffsets.push(acc); // sentinel: total height
+  }
+  const lanesHeight = Math.max(LANE_H, rowOffsets[rowOffsets.length - 1]);
+
   const seekRuler = (e: React.MouseEvent, el: Element) => {
     const rect = el.getBoundingClientRect();
     void exec("set_transport", { position: Math.max(0, (e.clientX - rect.left) / pxPerSec) });
@@ -112,7 +127,7 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
     const yMax = Math.max(marquee.y0, marquee.y1);
     const hit: string[] = [];
     snapshot.tracks.forEach((tr, row) => {
-      const top = row * LANE_H;
+      const top = rowOffsets[row];
       if (top + LANE_H < yMin || top > yMax) return;
       for (const c of tr.clips) {
         const cl = c.start * pxPerSec;
@@ -159,12 +174,17 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
               <TrackHeader
                 key={tr.id}
                 track={tr}
+                autoTarget={autoOpen[tr.id] ?? null}
                 onDragStart={() => setTrackDrag({ id: tr.id, from: row, slot: row })}
                 onDragMove={(clientY) => {
                   if (!trackDrag) return;
                   const rect = headsRef.current!.getBoundingClientRect();
-                  const slot = Math.max(0, Math.min(snapshot.tracks.length,
-                    Math.round((clientY - rect.top) / LANE_H)));
+                  const y = clientY - rect.top;
+                  let slot = snapshot.tracks.length;
+                  for (let i = 0; i < snapshot.tracks.length; i++) {
+                    const mid = (rowOffsets[i] + rowOffsets[i + 1]) / 2;
+                    if (y < mid) { slot = i; break; }
+                  }
                   if (slot !== trackDrag.slot) setTrackDrag({ ...trackDrag, slot });
                 }}
                 onDragEnd={() => {
@@ -178,7 +198,7 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
               />
             ))}
             {trackDrag && (
-              <div className="track-drop-line" style={{ top: trackDrag.slot * LANE_H }} />
+              <div className="track-drop-line" style={{ top: rowOffsets[trackDrag.slot] }} />
             )}
           </div>
           <div
@@ -186,7 +206,7 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
             ref={lanesRef}
             style={{
               width: RULER_SECONDS * pxPerSec,
-              height: Math.max(LANE_H, snapshot.tracks.length * LANE_H),
+              height: lanesHeight,
               // Tempo-true vertical grid: faint beats, stronger bars.
               backgroundImage:
                 `repeating-linear-gradient(90deg, var(--grid-beat) 0 1px, transparent 1px ${beatPx}px),` +
@@ -200,13 +220,25 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
               <div className="empty-hint">No tracks yet — add a track or drop in a test tone.</div>
             )}
             {snapshot.tracks.map((tr, row) => (
-              <div className="lane" key={tr.id} style={{ top: row * LANE_H, height: LANE_H }}>
+              <div className="lane" key={tr.id} style={{ top: rowOffsets[row], height: LANE_H }}>
                 {tr.clips.map((c) => (
                   <Clip key={c.id} clip={c} />
                 ))}
               </div>
             ))}
-            <div className="playhead lane-ph" style={{ left: t.position * pxPerSec, height: Math.max(LANE_H, snapshot.tracks.length * LANE_H) }} />
+            {snapshot.tracks.map((tr, row) =>
+              autoOpen[tr.id] ? (
+                <div key={`auto-${tr.id}`} className="autolane-row" style={{ top: rowOffsets[row] + LANE_H }}>
+                  <AutomationLane
+                    track={tr}
+                    widthPx={RULER_SECONDS * pxPerSec}
+                    pxPerSec={pxPerSec}
+                    target={autoOpen[tr.id] as LaneTarget}
+                  />
+                </div>
+              ) : null,
+            )}
+            <div className="playhead lane-ph" style={{ left: t.position * pxPerSec, height: lanesHeight }} />
             {marquee && (
               <div
                 className="marquee"
@@ -326,16 +358,19 @@ function Toolbar({ snapshot, timelineRef }: { snapshot: Snapshot; timelineRef: R
 
 function TrackHeader({
   track,
+  autoTarget,
   onDragStart,
   onDragMove,
   onDragEnd,
 }: {
   track: Track;
+  autoTarget: LaneTarget | null;
   onDragStart: () => void;
   onDragMove: (clientY: number) => void;
   onDragEnd: () => void;
 }) {
   const exec = useStore((s) => s.exec);
+  const setAutoLane = useStore((s) => s.setAutoLane);
   const selectedTrackId = useStore((s) => s.selectedTrackId);
   const setSelectedTrack = useStore((s) => s.setSelectedTrack);
   const level = useStore((s) => s.snapshot?.transport.levels?.tracks?.[track.id]);
@@ -344,6 +379,7 @@ function TrackHeader({
   const db = level ? Math.max(level[0], level[1]) : -100;
   const meterPct = Math.max(0, Math.min(1, (db + 60) / 60)) * 100;
   return (
+    <>
     <div
       className={`track-head ${selectedTrackId === track.id ? "sel" : ""}`}
       style={{ height: LANE_H }}
@@ -426,6 +462,11 @@ function TrackHeader({
           onDoubleClick={() => exec("set_track_pan", { trackId: track.id, pan: 0 })}
           onChange={(e) => exec("set_track_pan", { trackId: track.id, pan: Number(e.target.value) })}
         />
+        <button
+          className={`mixbtn ${autoTarget ? "auto-on" : ""}`}
+          title={autoTarget ? "Close the automation lane" : "Show the automation lane"}
+          onClick={() => setAutoLane(track.id, autoTarget ? null : { mixer: "volume", label: "volume" })}
+        >A</button>
       </div>
       {/* Engine-output meter (Stage 14) — fed by the 30 Hz transport event. */}
       <div className="tmeter">
@@ -435,5 +476,23 @@ function TrackHeader({
         />
       </div>
     </div>
+    {autoTarget && (
+      <div className="autohead" style={{ height: AUTO_H }}>
+        <select
+          className="autohead-select"
+          value={autoTarget.label}
+          onChange={(e) => {
+            const t = laneTargets(track).find((lt) => lt.label === e.target.value);
+            if (t) setAutoLane(track.id, t);
+          }}
+        >
+          {laneTargets(track).map((lt) => (
+            <option key={lt.label} value={lt.label}>{lt.label}</option>
+          ))}
+        </select>
+        <button className="mini" title="Close lane" onClick={() => setAutoLane(track.id, null)}>✕</button>
+      </div>
+    )}
+    </>
   );
 }

@@ -1240,6 +1240,26 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (wa), "slide ramp writes to the pitchshift semitones param");
         check (wa["data"].getProperty ("param", var()).toString().containsIgnoreCase ("semitone"),
                "addressed the semitones parameter");
+
+        // --- Stage 22: lanes read back what write_automation wrote ---
+        std::cerr << "--- Stage 22: automation lanes ---\n";
+        auto ga = cmd (ops, "get_automation", args1 ("trackId", t20id));
+        check (ok (ga) && ga["data"].getProperty ("lanes", var()).size() == 1,
+               "get_automation lists the written lane");
+        auto lane0 = ga["data"]["lanes"][0];
+        check (lane0.getProperty ("points", var()).size() == 4, "lane carries all 4 points");
+        check (std::abs ((double) lane0["points"][2].getProperty ("value", 0.0) - 0.25) < 0.02,
+               "normalized point value round-trips");
+        check (std::abs ((double) lane0["points"][2].getProperty ("beats", 0.0) - 2.5) < 0.01,
+               "point time round-trips in beats");
+        check (ok (cmd (ops, "clear_automation", objN ({{ "trackId", t20id },
+                       { "pluginIndex", psIdx }, { "paramName", "semitone" }}))), "clear_automation ok");
+        auto ga2 = cmd (ops, "get_automation", args1 ("trackId", t20id));
+        check (ga2["data"].getProperty ("lanes", var()).size() == 0, "lane gone after clear");
+        check (ok (cmd (ops, "undo")), "undo clear ok");
+        auto ga3 = cmd (ops, "get_automation", args1 ("trackId", t20id));
+        check (ga3["data"].getProperty ("lanes", var()).size() == 1, "undo restores the lane");
+
         cmd (ops, "remove_track", args1 ("trackId", t20id));
     }
 

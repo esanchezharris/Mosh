@@ -512,4 +512,31 @@ button.on { border-color: var(--accent); color: var(--accent); background: #2120
   border: 1px solid var(--accent); border-radius: 4px; padding: 1px 4px;
 }
 
+/* Automation lanes (Stage 22) */
+.autolane-row { position: absolute; left: 0; }
+.autolane {
+  position: relative; background: rgba(108, 92, 255, 0.06);
+  border-bottom: 1px solid var(--line); cursor: copy;
+}
+.autolane-svg { position: absolute; inset: 0; pointer-events: none; }
+.autolane-svg polyline { stroke: var(--accent-2); stroke-width: 1.5; }
+.autopoint {
+  position: absolute; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--accent-2); border: 1px solid #fff; cursor: grab; z-index: 2;
+}
+.autopoint:active { cursor: grabbing; }
+.autolane-hint {
+  position: absolute; left: 8px; top: 50%; transform: translateY(-50%);
+  font-size: 0.62rem; color: var(--muted); pointer-events: none;
+}
+.autohead {
+  display: flex; align-items: center; gap: 4px; padding: 0 0.7rem;
+  border-bottom: 1px solid var(--line); background: rgba(108, 92, 255, 0.06);
+}
+.autohead-select {
+  flex: 1; min-width: 0; font: inherit; font-size: 0.62rem; color: var(--text);
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 5px; padding: 1px 3px;
+}
+.mixbtn.auto-on { background: #2a2046; color: var(--accent-2); border-color: var(--accent-2); }
+
 .boot { padding: 3rem; color: var(--muted); }

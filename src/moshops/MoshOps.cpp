@@ -117,6 +117,8 @@ juce::var MoshOps::dispatch (const juce::String& name, const juce::var& args)
     if (name == "set_audio_input")   return cmdSetAudioInput (args);
     if (name == "arm_track")         return cmdArmTrack (args);
     if (name == "rename_clip")       return cmdRenameClip (args);
+    if (name == "get_automation")    return cmdGetAutomation (args);
+    if (name == "clear_automation")  return cmdClearAutomation (args);
     if (name == "undo")              return cmdUndo (args);
     if (name == "redo")              return cmdRedo (args);
     if (name == "save")              return cmdSave (args);
@@ -623,6 +625,99 @@ juce::var MoshOps::cmdRenameClip (const juce::var& args)
     logLine ("rename_clip", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("rename_clip");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Automation lanes (Stage 22). get_automation lists every parameter on the
+// track that HAS a curve (volume/pan + visible plugins), with points in
+// (beats, normalized 0..1) — the exact shape write_automation consumes, so the
+// lane UI round-trips losslessly through the lane-replace semantics.
+// ─────────────────────────────────────────────────────────────────────────────
+juce::var MoshOps::cmdGetAutomation (const juce::var& args)
+{
+    auto* track = findTrack (args.getProperty ("trackId", var()).toString());
+    if (track == nullptr) return errResult ("get_automation", "no track");
+
+    auto& ts = eng.edit().tempoSequence;
+    auto laneFor = [&] (te::AutomatableParameter& param) -> juce::var
+    {
+        Array<var> points;
+        auto& curve = param.getCurve();
+        for (int i = 0; i < curve.getNumPoints(); ++i)
+        {
+            auto* p = new DynamicObject();
+            p->setProperty ("beats", ts.toBeats (curve.getPointTime (i)).inBeats());
+            p->setProperty ("value", param.valueRange.convertTo0to1 (curve.getPointValue (i)));
+            p->setProperty ("curve", curve.getPointCurve (i));
+            points.add (var (p));
+        }
+        return points;
+    };
+
+    Array<var> lanes;
+    if (auto* vp = track->getVolumePlugin())
+    {
+        if (vp->volParam != nullptr && vp->volParam->hasAutomationPoints())
+        {
+            auto* l = new DynamicObject();
+            l->setProperty ("mixer", "volume");
+            l->setProperty ("label", "volume");
+            l->setProperty ("points", laneFor (*vp->volParam));
+            lanes.add (var (l));
+        }
+        if (vp->panParam != nullptr && vp->panParam->hasAutomationPoints())
+        {
+            auto* l = new DynamicObject();
+            l->setProperty ("mixer", "pan");
+            l->setProperty ("label", "pan");
+            l->setProperty ("points", laneFor (*vp->panParam));
+            lanes.add (var (l));
+        }
+    }
+    auto vis = visiblePlugins (*track);
+    for (int pi = 0; pi < vis.size(); ++pi)
+    {
+        auto* plugin = vis[pi];
+        const int n = juce::jmin (64, plugin->getNumAutomatableParameters());
+        for (int i = 0; i < n; ++i)
+        {
+            auto param = plugin->getAutomatableParameter (i);
+            if (param == nullptr || ! param->hasAutomationPoints()) continue;
+            auto* l = new DynamicObject();
+            l->setProperty ("pluginIndex", pi);
+            l->setProperty ("paramName", param->getParameterName());
+            l->setProperty ("label", plugin->getName() + " · " + param->getParameterName());
+            l->setProperty ("points", laneFor (*param));
+            lanes.add (var (l));
+        }
+    }
+
+    auto* data = new DynamicObject();
+    data->setProperty ("lanes", lanes);
+    return okResult ("get_automation", var (data));
+}
+
+juce::var MoshOps::cmdClearAutomation (const juce::var& args)
+{
+    auto* track = findTrack (args.getProperty ("trackId", var()).toString());
+    if (track == nullptr) return errResult ("clear_automation", "no track");
+
+    te::AutomatableParameter::Ptr param;
+    if (const auto mixer = args.getProperty ("mixer", var()).toString(); mixer.isNotEmpty())
+    {
+        if (auto* vp = track->getVolumePlugin())
+            param = (mixer == "pan") ? vp->panParam : vp->volParam;
+    }
+    else if (auto* plugin = findPlugin (args.getProperty ("trackId", var()).toString(),
+                                        (int) args.getProperty ("pluginIndex", -1)))
+        param = findParamByName (*plugin, args.getProperty ("paramName", var()).toString());
+    if (param == nullptr) return errResult ("clear_automation", "no such param");
+
+    undoManager().beginNewTransaction ("clear_automation");
+    param->getCurve().clear (&undoManager());
+    logLine ("clear_automation", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("clear_automation");
 }
 
 juce::var MoshOps::cmdListAudioInputs (const juce::var&)

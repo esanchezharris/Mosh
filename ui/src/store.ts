@@ -76,6 +76,10 @@ type State = {
   // Clip rename overlay (Stage 21).
   renamingClipId: string | null;
   setRenamingClip: (id: string | null) => void;
+
+  // Automation lanes (Stage 22): open lane + chosen target per track (view state).
+  autoOpen: Record<string, { mixer?: "volume" | "pan"; pluginIndex?: number; paramName?: string; label: string }>;
+  setAutoLane: (trackId: string, target: { mixer?: "volume" | "pan"; pluginIndex?: number; paramName?: string; label: string } | null) => void;
   loadColors: () => void;
   setLab: (b: boolean) => void;
 
@@ -207,6 +211,14 @@ export const useStore = create<State>((set, get) => ({
   setCrateOpen: (b) => set({ crateOpen: b }),
   renamingClipId: null,
   setRenamingClip: (id) => set({ renamingClipId: id }),
+  autoOpen: {},
+  setAutoLane: (trackId, target) =>
+    set((s) => {
+      const next = { ...s.autoOpen };
+      if (target) next[trackId] = target;
+      else delete next[trackId];
+      return { autoOpen: next };
+    }),
   openBrowser: () => {
     set({ browserOpen: true });
     if (get().availablePlugins.length === 0)
