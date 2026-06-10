@@ -159,6 +159,12 @@ private:
     // its children through a SummingNode + its own plugin chain (engine-proven).
     juce::var cmdCreateGroupTrack (const juce::var& args);   // undoable (one transaction)
     juce::var cmdUngroupTrack     (const juce::var& args);   // undoable (hoists children, deletes group)
+    // RTG-001/002 — per-track input choice + output routing over the engine's own
+    // machinery (WaveInputDevice-per-pair + te::TrackOutput).
+    juce::var cmdListWaveInputs   (const juce::var& args);   // read-only (no log/transaction)
+    juce::var cmdSetTrackInput    (const juce::var& args);   // monitoring preference (undoable:false)
+    juce::var cmdListTrackOutputs (const juce::var& args);   // read-only (no log/transaction)
+    juce::var cmdSetTrackOutput   (const juce::var& args);   // undoable (TrackOutput is Edit-UM-bound)
 
     // The MOSH_PROJECT child of eng.edit().state, created (empty) on first read so
     // callers always get a valid tree. Pure storage accessor — no logging/transaction.

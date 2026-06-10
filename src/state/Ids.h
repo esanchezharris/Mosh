@@ -27,6 +27,12 @@ namespace mosh::ids
     MOSH_DECLARE_ID (projectBitDepth)
     MOSH_DECLARE_ID (timeBase)         // "seconds" | "barsBeats"
 
+    // RTG-001 — the track's CHOSEN input device (a WaveInputDevice deviceID).
+    // A plain property on the track's own state tree so the choice saves/reloads
+    // with the edit; arm_track prefers it over first-match. NON-undoable
+    // preference (written without the undo manager, like monitor mode).
+    MOSH_DECLARE_ID (moshInputDevice)
+
     MOSH_DECLARE_ID (id)
     MOSH_DECLARE_ID (inputRef)
     MOSH_DECLARE_ID (timeRangeStart)

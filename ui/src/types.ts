@@ -134,6 +134,18 @@ export type Track = {
   // an empty clips array; a track nested under a group carries parentId.
   isGroup?: boolean;
   parentId?: string;
+  // RTG-001/002 — routing. input = the explicitly-chosen input device; output =
+  // the track's destination (absent = default out; isTrack = routed into a track).
+  input?: { deviceID: string; name?: string };
+  output?: { isTrack: boolean; destId?: string; name: string; deviceID?: string };
+};
+
+// RTG-001/002 — routing enumerations (read-only, on-demand like AudioDevices).
+export type WaveInput = { deviceID: string; name: string; enabled: boolean; isStereoPair: boolean };
+export type TrackOutputs = {
+  outputs: { deviceID: string; name: string; enabled: boolean }[];
+  tracks: { id: string; name: string }[];
+  audioEnabled: boolean;
 };
 
 export type Level = { l: number; r: number };           // peak dBFS, -100 floor

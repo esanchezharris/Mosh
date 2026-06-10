@@ -6,6 +6,7 @@ import {
 import type {
   Snapshot, Transport, MoshEvent, CommandResult, AvailablePlugin,
   BuiltinPlugin, AvailableColor, RenderQA, Level, AudioDevices, Clip,
+  WaveInput, TrackOutputs,
   PluginCounts, PluginBlockEntry,
 } from "./types";
 import type { RemoteStatus } from "./bridge";
@@ -56,6 +57,8 @@ type State = {
   qaByClip: Record<string, RenderQA>;      // last render's quality readout
   remoteStatus: RemoteStatus | null;       // iPhone companion server state
   audioDevices: AudioDevices | null;       // full device enumeration (on-demand, lazy)
+  waveInputs: WaveInput[] | null;          // RTG-001 input choices (on-demand, lazy)
+  trackOutputs: TrackOutputs | null;       // RTG-002 output destinations (on-demand, lazy)
   // Live level meters (Wave 9) — fed by the 30Hz "levels" event, NOT the snapshot.
   levels: { tracks: Record<string, Level>; master: Level };
 
@@ -109,6 +112,7 @@ type State = {
   refreshPluginList: () => Promise<void>;
   loadColors: () => void;
   loadAudioDevices: () => Promise<void>;   // lazy + on-demand (force re-fetch after a device change)
+  loadRouting: () => Promise<void>;        // RTG-001/002 — wave inputs + track outputs
   setLab: (b: boolean) => void;
 
   view: View;
@@ -150,6 +154,8 @@ export const useStore = create<State>((set, get) => ({
   qaByClip: {},
   remoteStatus: null,
   audioDevices: null,
+  waveInputs: null,
+  trackOutputs: null,
   levels: { tracks: {}, master: { l: -100, r: -100 } },
   clipboard: null,
 
@@ -380,6 +386,18 @@ export const useStore = create<State>((set, get) => ({
       args: {},
     });
     if (res.ok && res.data) set({ audioDevices: res.data });
+  },
+
+  loadRouting: async () => {
+    if (!isNative()) return;
+    const wi = await executeCommand<CommandResult<{ inputs: WaveInput[] }>>({
+      command: "list_wave_inputs", args: {},
+    });
+    if (wi.ok && wi.data) set({ waveInputs: wi.data.inputs });
+    const to = await executeCommand<CommandResult<TrackOutputs>>({
+      command: "list_track_outputs", args: {},
+    });
+    if (to.ok && to.data) set({ trackOutputs: to.data });
   },
   setLab: (b) => set({ labMode: b }),
 

@@ -2348,6 +2348,82 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ugUndoable, "group: ungroup_track logged undoable:true");
     }
 
+    // ─── Wave R: RTG-001 input choice + RTG-002 output routing ───
+    // Engine machinery exists fully (WaveInputDevice-per-pair; te::TrackOutput with
+    // route-to-device AND route-to-track). Headless: enumeration shape, the stored
+    // input CHOICE round-trip, and the track->track output routing (ValueTree-backed,
+    // no hardware needed) incl. cycle rejection, undo, and persistence. Real capture
+    // from a chosen pair / audible multi-out are hardware-gated (verified live).
+    std::cerr << "--- Wave R: routing (RTG-001 inputs / RTG-002 outputs) ---\n";
+    {
+        // Read-only enumerations: ok + shape; not logged.
+        auto lwiBefore = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
+        auto lwi = cmd (ops, "list_wave_inputs", var());
+        check (ok (lwi), "routing: list_wave_inputs ok");
+        auto lwiInputs = lwi["data"].getProperty ("inputs", var());
+        check (lwiInputs.isArray(), "routing: list_wave_inputs inputs is an array (empty headless)");
+        auto lto = cmd (ops, "list_track_outputs", var());
+        check (ok (lto), "routing: list_track_outputs ok");
+        auto ltoOuts = lto["data"].getProperty ("outputs", var());
+        auto ltoTracks = lto["data"].getProperty ("tracks", var());
+        check (ltoOuts.isArray(), "routing: list_track_outputs outputs is an array");
+        check (ltoTracks.isArray() && ltoTracks.size() > 0, "routing: list_track_outputs lists candidate tracks");
+        auto lwiAfter = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
+        check (lwiAfter == lwiBefore, "routing: list commands are READ-ONLY (not logged)");
+
+        // RTG-001 — the input CHOICE: stored on the track, graceful headless, persists.
+        auto ra = cmd (ops, "create_track", args1 ("name", "RouteA"))["data"].getProperty ("trackId", var()).toString();
+        auto rb = cmd (ops, "create_track", args1 ("name", "RouteB"))["data"].getProperty ("trackId", var()).toString();
+        check (ra.isNotEmpty() && rb.isNotEmpty(), "routing: two tracks created");
+        auto sti = cmd (ops, "set_track_input", objN ({{ "trackId", ra }, { "deviceID", "in-3-4" }}));
+        check (ok (sti), "routing: set_track_input ok (graceful headless)");
+        check (! (bool) sti["data"].getProperty ("applied", true), "routing: applied:false headless (choice stored)");
+        check (trackById (ra)["input"].getProperty ("deviceID", var()).toString() == "in-3-4",
+               "routing: chosen input deviceID in the snapshot");
+        check (! ok (cmd (ops, "set_track_input", args1 ("trackId", ra))), "routing: set_track_input missing deviceID errors");
+        check (! ok (cmd (ops, "set_track_input", objN ({{ "trackId", "nope" }, { "deviceID", "x" }}))),
+               "routing: set_track_input bad trackId errors");
+        check (ok (cmd (ops, "save")) && ok (cmd (ops, "reload")), "routing: save+reload ok");
+        check (trackById (ra)["input"].getProperty ("deviceID", var()).toString() == "in-3-4",
+               "routing: input choice persists across save/reload");
+
+        // RTG-002 — track->track routing (fully headless: ValueTree-backed).
+        check (! trackById (ra).hasProperty ("output"), "routing: default output emits no output field");
+        auto sto = cmd (ops, "set_track_output", objN ({{ "trackId", ra }, { "destTrackId", rb }}));
+        check (ok (sto), "routing: set_track_output A->B ok");
+        auto outv = trackById (ra)["output"];
+        check ((bool) outv.getProperty ("isTrack", false), "routing: output isTrack");
+        check (outv.getProperty ("destId", var()).toString() == rb, "routing: output destId == B");
+        // Cycle + self rejection.
+        check (! ok (cmd (ops, "set_track_output", objN ({{ "trackId", rb }, { "destTrackId", ra }}))),
+               "routing: B->A rejected (cycle)");
+        check (! ok (cmd (ops, "set_track_output", objN ({{ "trackId", ra }, { "destTrackId", ra }}))),
+               "routing: A->A rejected (self)");
+        // Persistence + undo.
+        check (ok (cmd (ops, "save")) && ok (cmd (ops, "reload")), "routing: save+reload ok (output)");
+        check (trackById (ra)["output"].getProperty ("destId", var()).toString() == rb,
+               "routing: A->B routing persists across save/reload");
+        check (ok (cmd (ops, "set_track_output", objN ({{ "trackId", ra }, { "output", "default" }}))),
+               "routing: reset to default ok");
+        check (! trackById (ra).hasProperty ("output"), "routing: reset removed the output field");
+        check (ok (cmd (ops, "undo")), "routing: undo (reset) ok");
+        check (trackById (ra)["output"].getProperty ("destId", var()).toString() == rb,
+               "routing: undo restored the A->B routing");
+        check (! ok (cmd (ops, "set_track_output", args1 ("trackId", ra))),
+               "routing: set_track_output with no destination errors");
+
+        // JSONL postures: input choice is a preference, output routing is undoable.
+        auto rlog = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
+        bool inPref = false, outUndo = false;
+        for (auto& ln : juce::StringArray::fromLines (rlog))
+        {
+            if (ln.contains ("\"command\": \"set_track_input\"") && ln.contains ("\"undoable\": false")) inPref = true;
+            if (ln.contains ("\"command\": \"set_track_output\"") && ln.contains ("\"undoable\": true")) outUndo = true;
+        }
+        check (inPref, "routing: set_track_input logged undoable:false (preference)");
+        check (outUndo, "routing: set_track_output logged undoable:true (Edit mutation)");
+    }
+
     std::cerr << "===== " << (checks - failures) << "/" << checks
               << " checks passed, " << failures << " failed =====\n\n";
     return failures;

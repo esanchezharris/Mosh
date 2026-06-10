@@ -404,6 +404,39 @@ groups. The only remaining must-tier are the three deferred-with-rationale infra
 `RTG-001`/`RTG-002` (per-channel input/output routing — needs a graph routing matrix) and
 `SES-001`'s full tempo-map (tempo automation — a warp/groove subsystem).
 
+### 2026-06-09 · Wave R: routing — input choice (RTG-001) + output routing (RTG-002) ✅
+
+The "needs a routing matrix" deferral was **wrong** — plan-mode scouts verified the engine has both
+subsystems fully. **RTG-001:** the `DeviceManager` already builds one `WaveInputDevice` per stereo
+pair / mono channel, and `InputDeviceInstance::setTarget` assigns *any* input to *any* track —
+Mosh only auto-picked the first. New: read-only **`list_wave_inputs`** + **`set_track_input`**
+`{trackId, deviceID}` (a non-undoable preference, like arm/monitor): the choice is stored on the
+track's own state tree (`moshInputDevice` — saves/reloads with the edit), the live instance is
+retargeted (arm state preserved across the swap), and **`arm_track` now prefers the chosen input**
+before first-match. **RTG-002:** every track owns a `te::TrackOutput` — route to any hardware out
+(`setOutputToDeviceID`) **or into another track** (`setOutputToTrack`; the graph sums feeders via a
+`SummingNode` — an implicit bus), ValueTree-persisted + Edit-undoable with built-in cycle detection.
+New: **`set_track_output`** `{destTrackId | deviceID | output:"default"}` (undoable, cycle/self
+rejected *before* applying) + read-only **`list_track_outputs`**. Snapshot (additive): per-track
+`input {deviceID,name}` + `output {isTrack,destId,name}` (absent = default; a missing device
+surfaces its persisted name). UI: compact **in:/out: selectors** on every mixer strip (hardware
+outs + "→ track" destinations). Verified: `Mosh --selftest` **583/583 across 3 runs, 0 failed,
+0 assertions** — 29 checks incl. the fully-headless track→track route (A→B reflects + persists
+across save/reload, **B→A and A→A rejected as cycles**, reset-to-default + undo restore), the
+input-choice round-trip, read-only non-logging, and both JSONL postures.
+
+| ID | Tier | Feature | Before → After |
+|---|---|---|---|
+| `RTG-001` | must | Configurable inputs | ◐/✗ → ✓/✓ * |
+| `RTG-002` | must | Configurable outputs | ◐/✗ → ✓/✓ * |
+
+\* Track→track routing + choice persistence are headless-proven. **Live capture from a chosen
+channel pair** and **audible multi-out routing** need the interface — verified live (pick "in: 3-4"
+on a strip, arm, record; route a strip to another hardware out).
+
+**Shipped-on-both-axes: 93 → 95** (must-tier 79 → **81 of 82**). Only `SES-001`'s tempo map
+remains.
+
 ## Coverage by category
 
 Per axis the three counts are **present ✓ / partial ◐ / missing ✗** (missing also folds in the one `not_applicable`).

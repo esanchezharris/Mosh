@@ -306,6 +306,10 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "set_project_settings") return cmdSetProjectSettings (args);
     if (name == "create_group_track") return cmdCreateGroupTrack (args);
     if (name == "ungroup_track")      return cmdUngroupTrack (args);
+    if (name == "list_wave_inputs")   return cmdListWaveInputs (args);
+    if (name == "set_track_input")    return cmdSetTrackInput (args);
+    if (name == "list_track_outputs") return cmdListTrackOutputs (args);
+    if (name == "set_track_output")   return cmdSetTrackOutput (args);
 
     return errResult (name, "unknown command: " + name);
 }
@@ -780,6 +784,206 @@ juce::var MoshOps::cmdUngroupTrack (const juce::var& args)
     logLine ("ungroup_track", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("ungroup_track", var (data));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RTG-001 / RTG-002 — per-track input choice + output routing
+//
+// Both ride engine machinery that already exists: the DeviceManager builds one
+// WaveInputDevice per stereo pair / mono channel (so "input 3-4" is a device),
+// and every AudioTrack owns a te::TrackOutput that can route to any hardware
+// out OR into another track (the graph sums feeders via a SummingNode — an
+// implicit bus, with cycle detection). Mosh adds only the choice surface.
+// ─────────────────────────────────────────────────────────────────────────────
+juce::var MoshOps::cmdListWaveInputs (const juce::var&)
+{
+    // Read-only audio-input enumeration (RTG-001) — modelled on cmdListMidiInputs:
+    // no transaction, no log line, no event. Headless the wave-input list is empty
+    // (devices exist only once CoreAudio is up) -> a well-formed empty array.
+    auto& dm = eng.engine().getDeviceManager();
+
+    Array<var> inputs;
+    for (int i = 0; i < dm.getNumWaveInDevices(); ++i)
+        if (auto* wi = dm.getWaveInDevice (i))
+        {
+            auto* o = new DynamicObject();
+            o->setProperty ("deviceID", wi->getDeviceID());
+            o->setProperty ("name", wi->getName());
+            o->setProperty ("enabled", wi->isEnabled());
+            o->setProperty ("isStereoPair", wi->isStereoPair());
+            inputs.add (var (o));
+        }
+
+    auto* data = new DynamicObject();
+    data->setProperty ("inputs", inputs);
+    data->setProperty ("audioEnabled", eng.hasAudio());
+    return okResult ("list_wave_inputs", var (data));
+}
+
+juce::var MoshOps::cmdSetTrackInput (const juce::var& args)
+{
+    auto* track = findTrack (args.getProperty ("trackId", var()).toString());
+    if (track == nullptr) return errResult ("set_track_input", "no track");
+    const auto deviceID = args.getProperty ("deviceID", var()).toString();
+    if (deviceID.isEmpty()) return errResult ("set_track_input", "missing 'deviceID'");
+
+    // A monitoring/routing PREFERENCE (like arm_track / set_input_monitor): the
+    // engine binds input destinations without the undo manager, so no transaction.
+    // The CHOICE is stored on the track's own state tree (saves/reloads with the
+    // edit) and arm_track prefers it over first-match.
+    track->state.setProperty (ids::moshInputDevice, deviceID, nullptr);
+
+    // Live application: retarget the chosen wave instance to this track. Headless
+    // (no playback context) there are no instances -> graceful applied:false.
+    bool applied = false;
+    bool wasArmed = false;
+    te::InputDeviceInstance* chosen = nullptr;
+    for (auto* inst : eng.edit().getAllInputDevices())
+    {
+        if (inst == nullptr || inst->getInputDevice().isMidi()) continue;
+        if (te::isOnTargetTrack (*inst, *track, 0))
+        {
+            wasArmed = inst->isRecordingEnabled (track->itemID);
+            if (inst->getInputDevice().getDeviceID() != deviceID)
+            {
+                // Clear the old assignment; ignore the Result (a missing target
+                // is already the state we want).
+                [[maybe_unused]] auto r = inst->removeTarget (track->itemID, nullptr);
+            }
+        }
+        if (inst->getInputDevice().getDeviceID() == deviceID)
+            chosen = inst;
+    }
+    if (chosen != nullptr)
+    {
+        // setTarget returns tl::expected — check, never blind-deref.
+        if (auto r = chosen->setTarget (track->itemID, true, nullptr, 0))
+        {
+            if (wasArmed)
+                chosen->setRecordingEnabled (track->itemID, true);   // keep the arm across the swap
+            applied = true;
+        }
+        else
+        {
+            logLine ("set_track_input", args, false, r.error(), false);
+            return errResult ("set_track_input", r.error());
+        }
+    }
+
+    auto* data = new DynamicObject();
+    data->setProperty ("trackId", track->itemID.toString());
+    data->setProperty ("deviceID", deviceID);
+    data->setProperty ("applied", applied);
+    if (! applied) data->setProperty ("reason", "no live input instance (choice stored)");
+    logLine ("set_track_input", args, true, {}, false);   // preference — not undoable
+    emitSnapshotInvalidated();
+    return okResult ("set_track_input", var (data));
+}
+
+juce::var MoshOps::cmdListTrackOutputs (const juce::var&)
+{
+    // Read-only output enumeration (RTG-002): the hardware wave outs + every audio
+    // track as a candidate route-to-track destination (an implicit submix). No
+    // transaction, no log line. Headless: empty device list, tracks still listed.
+    auto& dm = eng.engine().getDeviceManager();
+
+    Array<var> outputs;
+    for (int i = 0; i < dm.getNumWaveOutDevices(); ++i)
+        if (auto* wo = dm.getWaveOutDevice (i))
+        {
+            auto* o = new DynamicObject();
+            o->setProperty ("deviceID", wo->getDeviceID());
+            o->setProperty ("name", wo->getName());
+            o->setProperty ("enabled", wo->isEnabled());
+            outputs.add (var (o));
+        }
+
+    Array<var> trackDests;
+    for (auto* t : te::getAudioTracks (eng.edit()))
+        if (t != nullptr)
+        {
+            auto* o = new DynamicObject();
+            o->setProperty ("id", t->itemID.toString());
+            o->setProperty ("name", t->getName());
+            trackDests.add (var (o));
+        }
+
+    auto* data = new DynamicObject();
+    data->setProperty ("outputs", outputs);
+    data->setProperty ("tracks", trackDests);
+    data->setProperty ("audioEnabled", eng.hasAudio());
+    return okResult ("list_track_outputs", var (data));
+}
+
+juce::var MoshOps::cmdSetTrackOutput (const juce::var& args)
+{
+    auto* track = findTrack (args.getProperty ("trackId", var()).toString());
+    if (track == nullptr) return errResult ("set_track_output", "no track");
+    auto& out = track->getOutput();
+
+    // Three destination forms: { destTrackId } routes into another track (implicit
+    // bus), { deviceID } routes to a hardware out, { output: "default" } resets.
+    // TrackOutput state is CachedValue-bound to the Edit's UndoManager -> undoable.
+    if (args.hasProperty ("destTrackId"))
+    {
+        const auto destId = args.getProperty ("destTrackId", var()).toString();
+        auto* dest = findTrack (destId);
+        if (dest == nullptr) return errResult ("set_track_output", "no destination track: " + destId);
+        if (dest == track)   return errResult ("set_track_output", "a track cannot output to itself");
+        // Cycle guard BEFORE applying: if the destination already feeds into this
+        // track (directly or transitively), routing track->dest would loop.
+        if (dest->getOutput().feedsInto (track))
+            return errResult ("set_track_output", "routing would create a cycle");
+
+        undoManager().beginNewTransaction ("set_track_output");
+        out.setOutputToTrack (dest);
+        logLine ("set_track_output", args, true, {}, true);
+        emitSnapshotInvalidated();
+        auto* data = new DynamicObject();
+        data->setProperty ("trackId", track->itemID.toString());
+        data->setProperty ("destTrackId", dest->itemID.toString());
+        return okResult ("set_track_output", var (data));
+    }
+
+    if (args.hasProperty ("deviceID"))
+    {
+        const auto deviceID = args.getProperty ("deviceID", var()).toString();
+        if (deviceID.isEmpty()) return errResult ("set_track_output", "empty 'deviceID'");
+        // With a live device manager, validate the id; headless the list is empty,
+        // so accept it as persisted intent (the graph resolves it when audio is up;
+        // a missing device falls back to silence + the UI shows the stored name).
+        if (eng.hasAudio())
+        {
+            auto& dm = eng.engine().getDeviceManager();
+            bool known = false;
+            for (int i = 0; i < dm.getNumWaveOutDevices(); ++i)
+                if (auto* wo = dm.getWaveOutDevice (i))
+                    if (wo->getDeviceID() == deviceID) { known = true; break; }
+            if (! known) return errResult ("set_track_output", "unknown output device: " + deviceID);
+        }
+        undoManager().beginNewTransaction ("set_track_output");
+        out.setOutputToDeviceID (deviceID);
+        logLine ("set_track_output", args, true, {}, true);
+        emitSnapshotInvalidated();
+        auto* data = new DynamicObject();
+        data->setProperty ("trackId", track->itemID.toString());
+        data->setProperty ("deviceID", deviceID);
+        return okResult ("set_track_output", var (data));
+    }
+
+    if (args.getProperty ("output", var()).toString() == "default")
+    {
+        undoManager().beginNewTransaction ("set_track_output");
+        out.setOutputToDefaultDevice (false /*isMidi*/);
+        logLine ("set_track_output", args, true, {}, true);
+        emitSnapshotInvalidated();
+        auto* data = new DynamicObject();
+        data->setProperty ("trackId", track->itemID.toString());
+        data->setProperty ("output", "default");
+        return okResult ("set_track_output", var (data));
+    }
+
+    return errResult ("set_track_output", "expected 'destTrackId', 'deviceID', or output:'default'");
 }
 
 juce::var MoshOps::cmdUndo (const juce::var& args)
@@ -1294,6 +1498,21 @@ juce::var MoshOps::cmdArmTrack (const juce::var& args)
     if (target == nullptr && armed)
     {
         const bool wantMidi = trackHasInstrument (*track);
+
+        // RTG-001 — honor an explicitly-chosen input first (set_track_input stores
+        // the WaveInputDevice deviceID on the track's state). Falls through to the
+        // family-preference passes below when no choice is stored / not present.
+        const auto chosenID = track->state.getProperty (ids::moshInputDevice, var()).toString();
+        if (chosenID.isNotEmpty())
+            for (auto* inst : inputs)
+                if (inst != nullptr && inst->getInputDevice().getDeviceID() == chosenID)
+                {
+                    if (auto r = inst->setTarget (track->itemID, true, nullptr, 0))
+                        target = inst;
+                    // A failed setTarget on the chosen device falls through to the
+                    // normal auto-assign rather than failing the arm outright.
+                    break;
+                }
 
         auto matchesPreferred = [wantMidi] (te::InputDeviceInstance* inst)
         {
@@ -3711,6 +3930,46 @@ juce::var MoshOps::trackToVar (te::AudioTrack& t, int index)
     // the same array, ungrouped tracks have no parentId.
     if (auto* parent = t.getParentFolderTrack())
         o->setProperty ("parentId", parent->itemID.toString());
+
+    // RTG-001 — the explicitly-chosen input (stored preference; the live name is
+    // resolved when the device is present, else the persisted id stands alone).
+    {
+        const auto chosenID = t.state.getProperty (ids::moshInputDevice, var()).toString();
+        if (chosenID.isNotEmpty())
+        {
+            auto* in = new DynamicObject();
+            in->setProperty ("deviceID", chosenID);
+            auto& dm = eng.engine().getDeviceManager();
+            for (int i = 0; i < dm.getNumWaveInDevices(); ++i)
+                if (auto* wi = dm.getWaveInDevice (i))
+                    if (wi->getDeviceID() == chosenID) { in->setProperty ("name", wi->getName()); break; }
+            o->setProperty ("input", var (in));
+        }
+    }
+
+    // RTG-002 — the track's output destination (te::TrackOutput). Absent = the
+    // default output. A route-to-track destination is an implicit submix.
+    {
+        auto& out = t.getOutput();
+        if (auto* dest = out.getDestinationTrack())
+        {
+            auto* ov = new DynamicObject();
+            ov->setProperty ("isTrack", true);
+            ov->setProperty ("destId", dest->itemID.toString());
+            ov->setProperty ("name", dest->getName());
+            o->setProperty ("output", var (ov));
+        }
+        else if (! out.usesDefaultAudioOut())
+        {
+            // A non-default device destination (or a persisted-but-missing device):
+            // surface the stored name/id so the UI can show it (incl. "missing").
+            auto* ov = new DynamicObject();
+            ov->setProperty ("isTrack", false);
+            ov->setProperty ("name", out.getOutputName());
+            ov->setProperty ("deviceID", out.getOutputDeviceID());
+            o->setProperty ("output", var (ov));
+        }
+    }
 
     // Plugin chain (Stage 3). Indexed within pluginList (built-ins included). The
     // metering tap (Wave 9) is hidden from the rack but keeps its real index so

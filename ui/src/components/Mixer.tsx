@@ -11,8 +11,10 @@ export function Mixer({ snapshot }: { snapshot: Snapshot }) {
   const exec = useStore((s) => s.exec);
 
   // Opening the mixer turns metering on for every track (opt-in keeps the
-  // command surface / headless runs clean).
-  useEffect(() => { void exec("enable_all_meters", {}); }, [exec]);
+  // command surface / headless runs clean) and loads the routing enumerations
+  // (RTG-001/002 input + output choices, lazy like the device lists).
+  const loadRouting = useStore((s) => s.loadRouting);
+  useEffect(() => { void exec("enable_all_meters", {}); void loadRouting(); }, [exec, loadRouting]);
   const buses = snapshot.buses ?? [];
   const selectedTrackId = useStore((s) => s.selectedTrackId);
   const sources = snapshot.tracks.filter((t) => !t.isReturn && !t.isGroup);
@@ -95,10 +97,50 @@ function ChannelStrip({ track, buses }: { track: Track; buses: Bus[] }) {
   // Buses this track can still send to (not itself, not already sent).
   const addable = buses.filter((b) => b.trackId !== track.id && !sends.some((s) => s.bus === b.bus));
 
+  // RTG-001/002 — routing selectors (enumerations are lazy-loaded by the Mixer).
+  const waveInputs = useStore((s) => s.waveInputs) ?? [];
+  const trackOutputs = useStore((s) => s.trackOutputs);
+  const outputValue = track.output ? (track.output.isTrack ? `t:${track.output.destId}` : `d:${track.output.deviceID ?? ""}`) : "default";
+
   return (
     <div className={`strip ${selectedTrackId === track.id ? "sel" : ""}`} onPointerDown={() => setSelectedTrack(track.id)}>
       <div className="strip-name" title={track.name}>{track.name || `Track ${track.index + 1}`}</div>
       {fxCount > 0 && <div className="strip-fx">{fxCount} fx</div>}
+      <div className="strip-route">
+        <select
+          className="route-sel"
+          title={track.input?.name ? `Input: ${track.input.name}` : "Input (choose a device pair)"}
+          value={track.input?.deviceID ?? ""}
+          onChange={(e) => { if (e.target.value) void exec("set_track_input", { trackId: track.id, deviceID: e.target.value }); }}
+        >
+          <option value="">{track.input && waveInputs.length === 0 ? `in: ${track.input.name ?? track.input.deviceID}` : "in: auto"}</option>
+          {waveInputs.map((wi) => (
+            <option key={wi.deviceID} value={wi.deviceID}>in: {wi.name}</option>
+          ))}
+        </select>
+        <select
+          className="route-sel"
+          title={track.output ? `Output: ${track.output.name}` : "Output (default)"}
+          value={outputValue}
+          onChange={(e) => {
+            const v = e.target.value;
+            if (v === "default") void exec("set_track_output", { trackId: track.id, output: "default" });
+            else if (v.startsWith("t:")) void exec("set_track_output", { trackId: track.id, destTrackId: v.slice(2) });
+            else if (v.startsWith("d:")) void exec("set_track_output", { trackId: track.id, deviceID: v.slice(2) });
+          }}
+        >
+          <option value="default">out: default</option>
+          {(trackOutputs?.outputs ?? []).map((o) => (
+            <option key={o.deviceID} value={`d:${o.deviceID}`}>out: {o.name}</option>
+          ))}
+          {(trackOutputs?.tracks ?? []).filter((t2) => t2.id !== track.id).map((t2) => (
+            <option key={t2.id} value={`t:${t2.id}`}>→ {t2.name}</option>
+          ))}
+          {track.output && !track.output.isTrack && !(trackOutputs?.outputs ?? []).some((o) => o.deviceID === track.output?.deviceID) && (
+            <option value={outputValue}>out: {track.output.name} (missing)</option>
+          )}
+        </select>
+      </div>
       <StripCore track={track} />
       {(sends.length > 0 || addable.length > 0) && (
         <div className="strip-sends">
