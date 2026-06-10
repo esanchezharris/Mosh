@@ -1,0 +1,40 @@
+# 009 · THE PIT — the song as matter
+
+**Thesis.** Direct response to user feedback on HEARTH v2: *"where did my daw go /
+something 3d / rougher, weirder, less vibe-coded / I need my controls."* The DAW
+skeleton (008's, intact: lanes, clips, chain, rack, transport, deeds, whisper line)
+stays fully operational — and the empty stage between the lanes and the slabs becomes
+**the pit**, where the song itself stands as matter: a raymarched obsidian mass,
+kifs-folded and noise-bitten, that **slams on the beat**.
+
+**The fiction, literally.** Moshi doesn't visualize your song — it *sculpts* it. The
+mass is the track's sonic body. Heavier music = gnarlier matter. And the name does
+double duty: the empty center of the DAW is a mosh pit, and the thing in it dances.
+
+**The anti-vibe-coded rendering stack** (this is the point):
+- **No gradients anywhere.** Diffuse light quantized to four bands through a 4×4
+  Bayer ordered dither; hard-stepped rim light. The texture is demoscene, not
+  Instagram.
+- **Quarter-resolution buffer, nearest-neighbor upscaled** — chunky pixels on purpose
+  (field-notes motif 5, obtainer/p1xelfool dust).
+- **Animated on twos:** rotation and surface noise snap at 12 fps while the UI runs
+  at 60 — the Spider-Verse "crunchy" pop from the earlier research, finally used.
+- **Beat jolts:** every beat kicks a random rotation step (hard on the downbeat) +
+  a squash; the mass never glides, it *lurches*.
+
+**The unlock — the Rack sculpts it.** GRIT drives fold angle + surface noise
+(jaggedness), AIR loosens the fold (drift), EPIC grows the mass. The neural
+transform's invisible work finally has a body: drag a slider, watch the matter
+change. RENDER flares it molten for a moment (re-imagining = re-smelting).
+
+**The two non-negotiables.** REC = the mass **splits**, molten core showing through
+the gap, room edges run hot (+ lime REC chip). Position = one full revolution per
+8 bars + the lume playhead in the lanes + mono `BAR x.y`.
+
+**Risks.** Fractal legibility: kifs folds can read as noise at small sizes — the
+bounding-sphere cut (which also fixed an unbounded-fractal bug: kifs fills all of
+space without it) doubles as the "carved chunk" look. Beat-sync without real audio
+is a demo fiction; the engine's onset feed is the Wave-3 wiring.
+
+**Steal even if killed.** The dither/posterize/on-twos rendering stack as Mosh's
+house 3D style; rack-sculpts-the-centerpiece as the Color Rack's reason to exist.

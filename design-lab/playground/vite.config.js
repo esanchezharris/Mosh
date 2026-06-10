@@ -19,6 +19,7 @@ export default defineConfig({
         broadcast: resolve(root, 'experiments/006-broadcast/index.html'),
         terrarium: resolve(root, 'experiments/007-terrarium/index.html'),
         possession: resolve(root, 'experiments/008-possession/index.html'),
+        thePit: resolve(root, 'experiments/009-the-pit/index.html'),
       },
     },
   },

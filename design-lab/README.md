@@ -71,6 +71,7 @@ single artifact into [open-design](https://github.com/nexu-io/open-design) for r
 |---|---|---|
 | 007 | **TERRARIUM** — the specimen, kept quietly | Synthesis: SPECIMEN × SPORE LEDGER, HEARTH dimmed to atmosphere |
 | 008 | **POSSESSION** — the current UI, possessed | The shipping skeleton ([current-ui/AUDIT.md](current-ui/AUDIT.md)) re-materialized per the [field notes](inspiration/FIELD_NOTES.md) — the migration path |
+| 009 | **THE PIT** — the song as matter | 008's DAW + a raymarched, dithered, on-twos 3D mass in the stage; the Rack sculpts it. Rough on purpose. |
 
 Wave 2 inputs: [current-ui/AUDIT.md](current-ui/AUDIT.md) (what the product looks like
 today and the gap to the brief) and [inspiration/FIELD_NOTES.md](inspiration/FIELD_NOTES.md)

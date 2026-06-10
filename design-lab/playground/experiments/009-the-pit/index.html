@@ -1,0 +1,489 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>009 · THE PIT — the song as matter</title>
+<style>
+  :root {
+    --ink: #0B0B0B; --lime: #CCFF23; --lime-glow: #D9FF4C;
+    --bone: #F6F2EB; --mist: #E5E5E1;
+    --slab: #111110; --slab-2: #141413;
+    --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+    --font-display: "Archivo Black", "Helvetica Neue", -apple-system, "Arial Black", sans-serif;
+    --seam: 0 0 0 1px rgba(204,255,35,.16), 0 0 9px rgba(204,255,35,.10);
+  }
+  html, body { margin: 0; height: 100%; background: #070707; overflow: hidden;
+    font-family: var(--font-mono); color: var(--bone); }
+  .mono { font-variant-numeric: tabular-nums; letter-spacing: .06em; }
+  .disp { font-family: var(--font-display); font-weight: 900; letter-spacing: .02em;
+    text-transform: uppercase; }
+
+  /* THE PIT — low-res raymarch buffer, upscaled hard. chunky on purpose. */
+  #pit { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 2;
+    image-rendering: pixelated; image-rendering: crisp-edges; }
+
+  #roomheat { position: fixed; inset: 0; pointer-events: none; opacity: 0; z-index: 50;
+    background: radial-gradient(ellipse at 50% 50%, transparent 55%, rgba(204,255,35,.07) 100%);
+    transition: opacity .8s; }
+  body.rec #roomheat { opacity: 1; animation: heat 1.1s ease-in-out infinite; }
+  @keyframes heat { 50% { opacity: .55; } }
+
+  #topbar { position: fixed; top: 0; left: 0; right: 0; height: 52px; display: flex;
+    align-items: center; gap: 22px; padding: 0 20px; background: var(--slab);
+    box-shadow: var(--seam); z-index: 20; }
+  #wordmark { font-size: 17px; color: var(--bone); }
+  #wordmark b { color: var(--lime); text-shadow: 0 0 16px rgba(217,255,76,.4); }
+  #transport { display: flex; align-items: center; gap: 14px; font-size: 11px; opacity: .85; }
+  #playbtn { cursor: pointer; border: 0; background: transparent; color: var(--lime);
+    font-size: 13px; font-family: var(--font-mono); padding: 2px 6px; }
+  #recchip { margin-left: auto; font-size: 10px; letter-spacing: .16em; cursor: pointer;
+    border: 1px solid rgba(246,242,235,.18); border-radius: 999px; padding: 5px 13px; opacity: .6; }
+  body.rec #recchip { color: var(--ink); background: var(--lime); border-color: var(--lime);
+    opacity: 1; box-shadow: 0 0 22px rgba(217,255,76,.55); animation: heat 1.1s infinite; }
+
+  #deeds { position: fixed; top: 64px; right: 16px; display: flex; flex-direction: column;
+    gap: 7px; align-items: flex-end; z-index: 30; }
+  .deed { font-size: 10px; letter-spacing: .05em; color: var(--bone);
+    background: rgba(11,11,11,.82); border: 1px solid rgba(204,255,35,.32);
+    border-radius: 999px; padding: 5px 11px; display: flex; gap: 8px; align-items: center;
+    animation: din .45s cubic-bezier(.34,1.56,.64,1); transition: opacity 1s, transform 1s; }
+  .deed em { font-style: normal; color: var(--lime); }
+  .deed button { background: none; border: 0; color: rgba(246,242,235,.4); cursor: pointer;
+    font-family: var(--font-mono); font-size: 10px; padding: 0; }
+  .deed button:hover { color: var(--lime); }
+  .deed.bye { opacity: 0; transform: translateY(-14px); }
+  @keyframes din { from { opacity: 0; transform: translateX(26px) scale(.85); } }
+
+  #arrange { position: fixed; top: 64px; left: 14px; right: 14px; height: 290px; z-index: 5; }
+  #ruler { height: 22px; display: flex; font-size: 9px; opacity: .4; padding-left: 150px; }
+  #ruler span { flex: 1; border-left: 1px solid rgba(246,242,235,.12); padding: 4px 0 0 5px; }
+  .lane { display: flex; height: 74px; margin-bottom: 10px; }
+  .lhead { width: 136px; flex: none; background: var(--slab); box-shadow: var(--seam);
+    border-radius: 10px; margin-right: 14px; padding: 10px 12px; position: relative; }
+  .lhead .nm { font-size: 13px; color: var(--bone); }
+  .lhead .ms { position: absolute; bottom: 9px; left: 12px; font-size: 9px;
+    letter-spacing: .2em; opacity: .45; }
+  .lhead .vol { position: absolute; bottom: 13px; right: 12px; width: 44px; height: 2px;
+    background: rgba(246,242,235,.15); border-radius: 2px; }
+  .lhead .vol i { display: block; height: 100%; width: 72%; background: var(--lime);
+    border-radius: 2px; box-shadow: 0 0 6px rgba(204,255,35,.5); }
+  .lbody { position: relative; flex: 1; background: var(--slab-2); box-shadow: var(--seam);
+    border-radius: 10px; overflow: hidden; }
+  .clip { position: absolute; top: 9px; bottom: 9px; background: #0a0a09;
+    border: 1px solid rgba(204,255,35,.35); border-radius: 11px;
+    box-shadow: inset 0 0 16px rgba(204,255,35,.07); cursor: pointer; }
+  .clip .cn { position: absolute; top: 5px; left: 9px; font-size: 8.5px;
+    letter-spacing: .12em; color: rgba(246,242,235,.55); }
+  .clip canvas { position: absolute; left: 4px; right: 4px; bottom: 4px; height: 26px;
+    width: calc(100% - 8px); opacity: .9; }
+  #phead { position: absolute; top: 22px; bottom: 0; width: 2px; background: var(--lime);
+    box-shadow: 0 0 10px rgba(217,255,76,.8); z-index: 9; pointer-events: none; }
+
+  .slabpanel { position: fixed; bottom: 64px; background: var(--slab); box-shadow: var(--seam);
+    border-radius: 14px; padding: 14px 18px; z-index: 12; }
+  #chain { left: 14px; width: 330px; }
+  #rack { right: 14px; width: 380px; }
+  .ptitle { font-size: 9px; letter-spacing: .24em; opacity: .45; margin-bottom: 10px; }
+  .ptitle b { color: var(--lime); opacity: 1; }
+  .prow { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; font-size: 10.5px; }
+  .prow .lbl { width: 64px; letter-spacing: .14em; opacity: .8; }
+  .prow .track { flex: 1; height: 2px; background: rgba(246,242,235,.13); border-radius: 2px;
+    position: relative; cursor: pointer; }
+  .prow .track i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--lime);
+    border-radius: 2px; box-shadow: 0 0 7px rgba(204,255,35,.55); }
+  .prow .track u { position: absolute; top: 50%; width: 9px; height: 9px; border-radius: 50%;
+    background: var(--lime); transform: translate(-50%,-50%);
+    box-shadow: 0 0 9px rgba(217,255,76,.8); }
+  .prow .val { width: 30px; text-align: right; opacity: .7; }
+  .meta { display: flex; gap: 8px; align-items: center; margin-top: 10px; font-size: 9.5px; }
+  .badge { color: var(--ink); background: var(--lime); border-radius: 99px; padding: 2px 8px;
+    letter-spacing: .1em; }
+  .ghost { border: 1px solid rgba(246,242,235,.2); border-radius: 99px; padding: 2px 10px;
+    opacity: .65; cursor: pointer; }
+  .ghost:hover { border-color: var(--lime); color: var(--lime); opacity: 1; }
+  #rackNote { font-size: 8.5px; letter-spacing: .1em; opacity: .35; margin-top: 9px; }
+
+  #ask { position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%);
+    width: min(430px, 50vw); z-index: 20; }
+  #ask input { width: 100%; background: transparent; border: 0; outline: 0; text-align: center;
+    border-bottom: 1px solid rgba(246,242,235,.18); padding: 7px 2px;
+    font-family: var(--font-mono); font-size: 11.5px; letter-spacing: .07em; color: var(--bone); }
+  #ask input::placeholder { color: rgba(246,242,235,.26); }
+  #ask input:focus { border-bottom-color: rgba(204,255,35,.6); }
+  #moshi { position: fixed; bottom: 218px; left: 22px; width: 92px; height: 80px; z-index: 21;
+    pointer-events: none; }
+</style>
+</head>
+<body>
+<canvas id="pit"></canvas>
+<div id="roomheat"></div>
+
+<div id="topbar">
+  <div id="wordmark" class="disp">M<b>O</b>SH</div>
+  <div id="transport" class="mono">
+    <button id="playbtn" title="play/pause">▶</button>
+    <span id="tc">BAR 1.1 · 0:00.0</span>
+    <span style="opacity:.5">120 BPM</span>
+    <span id="sect" style="color:var(--lime)">VERSE 1</span>
+  </div>
+  <div id="recchip" class="mono">● REC (R)</div>
+</div>
+
+<div id="deeds"></div>
+
+<div id="arrange">
+  <div id="ruler"></div>
+  <div id="lanes"></div>
+  <div id="phead"></div>
+</div>
+
+<div class="slabpanel" id="chain">
+  <div class="ptitle">CHAIN · <b>VOX</b></div>
+  <div class="prow"><span class="lbl">NEURAL·NAM</span><span class="track"><i style="width:68%"></i><u style="left:68%"></u></span><span class="val mono">68</span></div>
+  <div class="prow"><span class="lbl">MIX</span><span class="track"><i style="width:100%"></i><u style="left:100%"></u></span><span class="val mono">100</span></div>
+  <div class="meta"><span class="badge">TIER A</span><span class="ghost">LAB</span><span class="mono" style="opacity:.45">0.0 ms</span></div>
+</div>
+
+<div class="slabpanel" id="rack">
+  <div class="ptitle">THE RACK · <b>RE-IMAGINE</b> · tone-147 — it sculpts the mass</div>
+  <div class="prow"><span class="lbl">GRIT</span><span class="track" data-p="grit"><i style="width:62%"></i><u style="left:62%"></u></span><span class="val mono">62</span></div>
+  <div class="prow"><span class="lbl">AIR</span><span class="track" data-p="air"><i style="width:18%"></i><u style="left:18%"></u></span><span class="val mono">18</span></div>
+  <div class="prow"><span class="lbl">EPIC</span><span class="track" data-p="epic"><i style="width:7%"></i><u style="left:7%"></u></span><span class="val mono">07</span></div>
+  <div class="meta"><span class="badge">LIVE</span><span class="mono" style="opacity:.45">seed 3</span>
+    <span class="ghost" id="render">RENDER</span></div>
+  <div id="rackNote">DRAG THE AXES — THE PIT IS THE READOUT OF THE TRANSFORM</div>
+</div>
+
+<div id="ask"><input id="cmd" placeholder="tell moshi — “make the hook heavier”" autocomplete="off" /></div>
+<canvas id="moshi" width="184" height="160"></canvas>
+
+<script>
+// THE PIT — answer to "where did my daw go / 3d / rougher / weirder".
+// The DAW skeleton is 008's, intact. In the empty stage lives the SONG AS MATTER:
+// a raymarched obsidian mass — kifs-folded, noise-bitten, lit in 4 dithered bands,
+// animated ON TWOS (12fps rotation snaps) so it reads carved, not blended.
+//   beat     -> it SLAMS (squash + rotation jolt). mosh = violence-as-joy.
+//   the rack -> GRIT folds it jagged · AIR lets it drift · EPIC grows it.
+//               the invisible neural transform finally has a body.
+//   REC      -> the mass splits; molten core shows through. room runs hot.
+//   position -> one full revolution per 8 bars + mono BAR in the transport.
+// No bloom. No soft gradients. Bayer dither, hard bands, chunky pixels.
+
+const FRAG = `
+precision highp float;
+uniform vec2  u_res;
+uniform float u_time, u_tq;          // smooth + 12fps-quantized time
+uniform float u_rotA, u_rotB;        // beat-jolted angles (stepped in JS)
+uniform float u_spin;                // song position -> revolution
+uniform float u_grit, u_air, u_epic; // the rack
+uniform float u_energy, u_onset, u_heat, u_bright;
+
+const vec3 LIME = vec3(0.800, 1.000, 0.137);
+const vec3 GLOW = vec3(0.851, 1.000, 0.298);
+
+mat2 r2(float a) { float c = cos(a), s = sin(a); return mat2(c, -s, s, c); }
+float hash31(vec3 p) {
+  p = fract(p * 0.3183099 + vec3(0.1, 0.2, 0.3));
+  p *= 17.0;
+  return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+}
+float n3(vec3 p) {
+  vec3 i = floor(p), f = fract(p);
+  vec3 u = f * f * (3.0 - 2.0 * f);
+  return mix(
+    mix(mix(hash31(i),               hash31(i + vec3(1,0,0)), u.x),
+        mix(hash31(i + vec3(0,1,0)), hash31(i + vec3(1,1,0)), u.x), u.y),
+    mix(mix(hash31(i + vec3(0,0,1)), hash31(i + vec3(1,0,1)), u.x),
+        mix(hash31(i + vec3(0,1,1)), hash31(i + vec3(1,1,1)), u.x), u.y), u.z);
+}
+// ordered dither — the texture of the whole render
+float bayer(vec2 fc) {
+  float b = mod(fc.x, 2.0) * 2.0 + mod(fc.y, 2.0);
+  vec2 f2 = floor(fc / 2.0);
+  float b2 = mod(f2.x, 2.0) * 2.0 + mod(f2.y, 2.0);
+  return (b * 4.0 + b2) / 16.0;
+}
+
+float gCrack, gCore;
+float map(vec3 p) {
+  p.xz = r2(u_spin + u_rotA) * p.xz;
+  p.xy = r2(0.5 + u_rotB) * p.xy;
+  p.y *= 1.0 + 0.22 * u_onset;                       // the slam squash
+  p.x += sign(p.x) * u_heat * 0.11;                  // REC: it splits
+  vec3 q = p;
+  float crack = 1e9;
+  for (int i = 0; i < 4; i++) {
+    q = abs(q) - vec3(0.30 + 0.10 * u_epic, 0.24, 0.27);
+    crack = min(crack, min(abs(q.x), abs(q.y)));
+    q.xy = r2(0.58 + 0.45 * u_grit + 0.03 * sin(u_tq * 0.6)) * q.xy;
+    q.yz = r2(0.47 - 0.22 * u_air) * q.yz;
+  }
+  float d = (abs(q.x) + abs(q.y) + abs(q.z) - (0.34 + 0.10 * u_epic + 0.04 * u_energy)) * 0.42;
+  d -= u_grit * 0.045 * (n3(q * 7.0 + u_tq * 0.8) - 0.5) * 2.0;   // rough hide
+  d = max(d, length(p) - (0.66 + 0.20 * u_epic));   // BOUND the fractal: one chunk, carved
+  gCrack = crack;
+  // molten core, visible when split
+  float core = length(p) - 0.13 * u_heat;
+  gCore = core;
+  return u_heat > 0.01 ? min(d, core) : d;
+}
+vec3 normalAt(vec3 p) {
+  const vec2 e = vec2(0.004, -0.004);
+  return normalize(e.xyy * map(p + e.xyy) + e.yyx * map(p + e.yyx)
+                 + e.yxy * map(p + e.yxy) + e.xxx * map(p + e.xxx));
+}
+
+void main() {
+  vec2 uv = (gl_FragCoord.xy - 0.5 * u_res) / min(u_res.x, u_res.y);
+  uv.y += 0.07;                                       // the mass sits low, in the pit
+  float dth = bayer(gl_FragCoord.xy);
+
+  vec3 ro = vec3(0.0, 0.0, 4.0);
+  vec3 rd = normalize(vec3(uv, -1.5));
+  float t = 0.0; vec3 hp; bool hit = false;
+  for (int i = 0; i < 64; i++) {
+    hp = ro + rd * t;
+    float d = map(hp);
+    if (d < 0.003) { hit = true; break; }
+    t += d * 0.9;
+    if (t > 5.0) break;
+  }
+
+  vec4 outc = vec4(0.0);
+  if (hit) {
+    // core hit = molten
+    map(hp);
+    if (u_heat > 0.01 && gCore < 0.004) {
+      outc = vec4(mix(GLOW, vec3(1.0), 0.4) * (0.85 + 0.15 * sin(u_time * 7.0)), 1.0);
+    } else {
+      vec3 n = normalAt(hp);
+      float diff = max(dot(n, normalize(vec3(0.5, 0.8, 0.6))), 0.0);
+      float band = floor(diff * 3.0 + dth) / 3.0;     // FOUR BANDS. no gradients.
+      vec3 col = vec3(0.030) + band * vec3(0.085, 0.09, 0.075);
+      float rim = pow(1.0 - max(dot(n, -rd), 0.0), 3.0);
+      col += LIME * step(0.55, rim + dth * 0.25) * 0.20;          // hard rim, dithered
+      float fis = exp(-gCrack * 70.0);                              // the fissures
+      float fband = floor(fis * 3.0 + dth) / 3.0;
+      col += mix(LIME, GLOW, u_bright) * fband
+           * (0.20 + 0.65 * u_energy + 2.6 * u_heat);
+      outc = vec4(col, 1.0);
+    }
+  }
+  gl_FragColor = outc;
+}`;
+
+const VERT = `attribute vec2 a; void main(){ gl_Position = vec4(a, 0.0, 1.0); }`;
+
+const cv = document.getElementById('pit');
+const gl = cv.getContext('webgl', { antialias: false, alpha: true, premultipliedAlpha: false });
+function sh(ty, src) {
+  const s = gl.createShader(ty);
+  gl.shaderSource(s, src); gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+  return s;
+}
+const prog = gl.createProgram();
+gl.attachShader(prog, sh(gl.VERTEX_SHADER, VERT));
+gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FRAG));
+gl.linkProgram(prog);
+if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+gl.useProgram(prog);
+const buf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
+const al = gl.getAttribLocation(prog, 'a');
+gl.enableVertexAttribArray(al);
+gl.vertexAttribPointer(al, 2, gl.FLOAT, false, 0, 0);
+const U = {};
+for (const n of ['u_res','u_time','u_tq','u_rotA','u_rotB','u_spin','u_grit','u_air','u_epic','u_energy','u_onset','u_heat','u_bright'])
+  U[n] = gl.getUniformLocation(prog, n);
+
+function resize() {
+  const W = Math.floor(innerWidth / 4), H = Math.floor(innerHeight / 4);  // CHUNKY
+  cv.width = W; cv.height = H;
+  gl.viewport(0, 0, W, H);
+}
+addEventListener('resize', resize); resize();
+
+// ---------- DAW skeleton (008's, intact) ----------
+const BPM = 120, BARS = 16, SONG_S = (BARS * 4) * 60 / BPM;
+const SECTIONS = ['INTRO','VERSE 1','HOOK','VERSE 2','HOOK','BRIDGE','HOOK','OUT'];
+let playing = true, rec = false, tPos = 0.04;
+
+const LANES = [
+  { nm: 'VOX', clips: [{ a: .01, b: .14, n: 'take 4 · kept' }, { a: .30, b: .42, n: 'hook comp' }] },
+  { nm: 'GTR', clips: [{ a: .06, b: .26, n: 'tone-131' }] },
+  { nm: 'PAD', clips: [{ a: .02, b: .22, n: 'tone-196' }, { a: .48, b: .60, n: 'swell' }] },
+];
+const ruler = document.getElementById('ruler');
+for (let i = 0; i < BARS; i++) ruler.insertAdjacentHTML('beforeend', `<span class="mono">${i}</span>`);
+const lanesEl = document.getElementById('lanes');
+for (const L of LANES) {
+  const lane = document.createElement('div');
+  lane.className = 'lane';
+  lane.innerHTML = `<div class="lhead"><div class="nm disp">${L.nm}</div>
+      <div class="ms">M&ensp;S</div><div class="vol"><i></i></div></div>
+    <div class="lbody"></div>`;
+  const body = lane.querySelector('.lbody');
+  for (const c of L.clips) {
+    const el = document.createElement('div');
+    el.className = 'clip';
+    el.style.left = (c.a * 100) + '%';
+    el.style.width = ((c.b - c.a) * 100) + '%';
+    el.innerHTML = `<span class="cn mono">${c.n.toUpperCase()}</span><canvas></canvas>`;
+    body.appendChild(el);
+    requestAnimationFrame(() => {
+      const wc = el.querySelector('canvas'), g = wc.getContext('2d');
+      wc.width = wc.offsetWidth * 2; wc.height = 52;
+      g.fillStyle = 'rgba(204,255,35,.75)';
+      for (let x = 0; x < wc.width; x += 3) {
+        const h = (Math.abs(Math.sin(x * .07 + c.a * 40)) * .7 + Math.random() * .3) * 40;
+        g.fillRect(x, 26 - h / 2, 1.6, h);
+      }
+    });
+  }
+  lanesEl.appendChild(lane);
+}
+
+const deedsEl = document.getElementById('deeds');
+function deed(text) {
+  const d = document.createElement('div');
+  d.className = 'deed';
+  d.innerHTML = `<em>✓</em> ${text} <button>×</button>`;
+  d.querySelector('button').onclick = () => {
+    d.firstElementChild.textContent = '↺';
+    setTimeout(() => d.classList.add('bye'), 600);
+    setTimeout(() => d.remove(), 1700);
+  };
+  deedsEl.prepend(d);
+  while (deedsEl.children.length > 4) deedsEl.lastElementChild.remove();
+  setTimeout(() => { if (d.isConnected) { d.classList.add('bye'); setTimeout(() => d.remove(), 1200); } }, 8000);
+}
+const cmd = document.getElementById('cmd');
+cmd.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && cmd.value.trim()) { deed(cmd.value.trim()); cmd.value = ''; cmd.blur(); }
+});
+
+const recchip = document.getElementById('recchip'), tc = document.getElementById('tc'),
+      sect = document.getElementById('sect'), playbtn = document.getElementById('playbtn');
+function setRec(on) { rec = on; document.body.classList.toggle('rec', on); if (on) deed('punched in'); }
+recchip.onclick = () => setRec(!rec);
+addEventListener('keydown', e => {
+  if (document.activeElement === cmd) return;
+  if (e.key.toLowerCase() === 'r') setRec(!rec);
+  if (e.key === ' ') { e.preventDefault(); playing = !playing; playbtn.textContent = playing ? '▶' : '⏸'; }
+});
+playbtn.onclick = () => { playing = !playing; playbtn.textContent = playing ? '▶' : '⏸'; };
+
+// ---------- the rack sculpts the mass ----------
+const axes = { grit: 0.62, air: 0.18, epic: 0.07 };
+document.querySelectorAll('#rack .track[data-p]').forEach(tr => {
+  tr.addEventListener('pointerdown', e => {
+    const r = tr.getBoundingClientRect();
+    const pct = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+    tr.querySelector('i').style.width = pct * 100 + '%';
+    tr.querySelector('u').style.left = pct * 100 + '%';
+    tr.closest('.prow').querySelector('.val').textContent = String(Math.round(pct * 100)).padStart(2, '0');
+    axes[tr.dataset.p] = pct;
+  });
+});
+let renderFlare = 0;
+document.getElementById('render').onclick = () => {
+  renderFlare = 1;
+  deed('re-imagining the mass · seed 3');
+};
+
+// ---------- Moshi, resident, watching its sculpture ----------
+const mc = document.getElementById('moshi'), mg = mc.getContext('2d');
+function drawMoshi(t, recAmt) {
+  mg.clearRect(0, 0, 184, 160);
+  const cx = 92, cy = 92, R = 46 * (1 + .04 * Math.sin(t * 1.4));
+  mg.beginPath();
+  for (let i = 0; i <= 64; i++) {
+    const th = i / 64 * Math.PI * 2;
+    const r = R * (1 + .12 * Math.sin(th * 3 + t * .8) + .06 * Math.sin(th * 5 - t * .5));
+    i ? mg.lineTo(cx + Math.cos(th) * r, cy + Math.sin(th) * r * .9)
+      : mg.moveTo(cx + Math.cos(th) * r, cy + Math.sin(th) * r * .9);
+  }
+  mg.closePath();
+  mg.fillStyle = '#0d0d0c';
+  mg.shadowColor = `rgba(204,255,35,${.3 + .5 * recAmt})`;
+  mg.shadowBlur = 18 + 16 * recAmt;
+  mg.fill(); mg.shadowBlur = 0;
+  mg.strokeStyle = `rgba(204,255,35,${.35 + .4 * recAmt})`;
+  mg.lineWidth = 1.2; mg.stroke();
+  mg.fillStyle = '#F6F2EB';
+  mg.font = '900 17px "Archivo Black","Helvetica Neue",sans-serif';
+  mg.textAlign = 'center';
+  mg.fillText('>', cx - 14, cy - 2); mg.fillText('<', cx + 14, cy - 2);
+  mg.fillStyle = '#CCFF23';
+  mg.shadowColor = 'rgba(217,255,76,.8)'; mg.shadowBlur = 8;
+  mg.beginPath(); mg.ellipse(cx, cy + 14, 8, 5 + 3 * recAmt, 0, 0, Math.PI); mg.fill();
+  mg.shadowBlur = 0;
+}
+
+// ---------- the loop: beat clock, on-twos rotation, uniforms ----------
+let rotA = 0, rotB = 0, rotTA = 0, rotTB = 0, lastBeat = -1, lastTick = 0;
+let onsetEnv = 0, recAmt = 0, energy = .4, tq = 0;
+const phead = document.getElementById('phead');
+const arrange = document.getElementById('arrange');
+const t0 = performance.now(); let last = t0;
+
+function frame(now) {
+  const t = (now - t0) / 1000, dt = Math.min(.05, (now - last) / 1000); last = now;
+  if (playing) tPos = (tPos + dt / SONG_S) % 1;
+  recAmt += ((rec ? 1 : 0) - recAmt) * .07;
+  renderFlare *= 0.985;
+
+  const beats = tPos * BARS * 4;
+  const beatIdx = Math.floor(beats);
+  if (playing && beatIdx !== lastBeat) {                 // THE SLAM
+    lastBeat = beatIdx;
+    const hard = beatIdx % 4 === 0;
+    onsetEnv = hard ? 1 : 0.45;
+    rotTA += (Math.random() * 2.2 - 1.1) * (hard ? 1 : 0.4);
+    rotTB += (Math.random() * 1.4 - 0.7) * (hard ? 1 : 0.4);
+  }
+  onsetEnv *= 0.90;
+  energy = 0.30 + 0.55 * onsetEnv + 0.25 * axes.grit;
+
+  // on twos: rotation + texture time snap at 12fps
+  if (t - lastTick > 1 / 12) {
+    lastTick = t;
+    rotA += (rotTA - rotA) * 0.5;
+    rotB += (rotTB - rotB) * 0.5;
+    tq = t;
+  }
+
+  tc.textContent = `BAR ${Math.floor(beats / 4) + 1}.${Math.floor(beats % 4) + 1} · ${(tPos * SONG_S).toFixed(1).padStart(5, '0')}s`;
+  sect.textContent = SECTIONS[Math.floor(tPos * 8)];
+  const headW = 150, w = arrange.clientWidth - headW;
+  phead.style.left = (headW + tPos * w) + 'px';
+
+  const heat = Math.max(recAmt, renderFlare * 0.8);
+  gl.clearColor(0, 0, 0, 0);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.uniform2f(U.u_res, cv.width, cv.height);
+  gl.uniform1f(U.u_time, t);
+  gl.uniform1f(U.u_tq, tq);
+  gl.uniform1f(U.u_rotA, rotA);
+  gl.uniform1f(U.u_rotB, rotB);
+  gl.uniform1f(U.u_spin, (tPos * 2) % 1 * 6.2831853);   // one revolution per 8 bars
+  gl.uniform1f(U.u_grit, axes.grit);
+  gl.uniform1f(U.u_air, axes.air);
+  gl.uniform1f(U.u_epic, axes.epic);
+  gl.uniform1f(U.u_energy, energy);
+  gl.uniform1f(U.u_onset, onsetEnv);
+  gl.uniform1f(U.u_heat, heat);
+  gl.uniform1f(U.u_bright, axes.air);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+  drawMoshi(t, recAmt);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+deed('session restored · 3 tracks');
+</script>
+</body>
+</html>
