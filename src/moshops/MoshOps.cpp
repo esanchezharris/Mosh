@@ -95,6 +95,11 @@ juce::var MoshOps::dispatch (const juce::String& name, const juce::var& args)
     if (name == "set_transport")     return cmdSetTransport (args);
     if (name == "list_audio_outputs") return cmdListAudioOutputs (args);
     if (name == "set_audio_output")  return cmdSetAudioOutput (args);
+    if (name == "set_metronome")     return cmdSetMetronome (args);
+    if (name == "set_master_volume") return cmdSetMasterVolume (args);
+    if (name == "duplicate_clip")    return cmdDuplicateClip (args);
+    if (name == "move_track")        return cmdMoveTrack (args);
+    if (name == "choose_file")       return cmdChooseFile (args);
     if (name == "undo")              return cmdUndo (args);
     if (name == "redo")              return cmdRedo (args);
     if (name == "save")              return cmdSave (args);
@@ -334,6 +339,134 @@ juce::var MoshOps::cmdSetTransport (const juce::var& args)
     logLine ("set_transport", args, true, {}, false);          // transport is NOT undoable
     emit ("transport", transportToVar());
     return okResult ("set_transport", transportToVar());
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Stage 15 — real-DAW basics
+// ─────────────────────────────────────────────────────────────────────────────
+juce::var MoshOps::cmdSetMetronome (const juce::var& args)
+{
+    auto& edit = eng.edit();
+    // Playback aid, not musical state: bypass the undo manager (a metronome
+    // toggle must never become an undo step), keep it out of the trajectory,
+    // collab sync, and the canonical hash.
+    edit.clickTrackEnabled.setValue ((bool) args.getProperty ("on", false), nullptr);
+    if (args.hasProperty ("gain"))
+        edit.clickTrackGain.setValue (juce::jlimit (0.2f, 1.0f,
+            (float) (double) args.getProperty ("gain", 0.6)), nullptr);
+
+    logLine ("set_metronome", args, true, {}, false);
+    emitSnapshotInvalidated();
+    return okResult ("set_metronome");
+}
+
+juce::var MoshOps::cmdSetMasterVolume (const juce::var& args)
+{
+    auto vp = eng.edit().getMasterVolumePlugin();
+    if (vp == nullptr) return errResult ("set_master_volume", "no master volume plugin");
+
+    undoManager().beginNewTransaction ("set_master_volume");
+    vp->setVolumeDb (juce::jlimit (-96.0f, 12.0f, (float) (double) args.getProperty ("db", 0.0)));
+    logLine ("set_master_volume", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("set_master_volume");
+}
+
+juce::var MoshOps::cmdDuplicateClip (const juce::var& args)
+{
+    auto* clip = findClip (args.getProperty ("clipId", var()).toString());
+    if (clip == nullptr) return errResult ("duplicate_clip", "no clip: "
+                                           + args.getProperty ("clipId", var()).toString());
+    auto* track = args.hasProperty ("trackId")
+                      ? findTrack (args.getProperty ("trackId", var()).toString())
+                      : dynamic_cast<te::AudioTrack*> (clip->getTrack());
+    if (track == nullptr) return errResult ("duplicate_clip", "no destination track");
+
+    undoManager().beginNewTransaction ("duplicate_clip");
+    auto state = clip->state.createCopy();
+    // Fresh EditItemIDs for the copy and everything inside it (notes etc.) —
+    // duplicate ids corrupt lookups and the canonical hash's ordinal mapping.
+    te::EditItemID::remapIDs (state, nullptr, eng.edit());
+    auto* copy = te::insertClipWithState (*track, state);
+    if (copy == nullptr) return errResult ("duplicate_clip", "insertClipWithState failed");
+
+    const double start = args.hasProperty ("startSeconds")
+                             ? (double) args.getProperty ("startSeconds", 0.0)
+                             : clip->getPosition().getEnd().inSeconds();   // FL-style: land after the source
+    copy->setStart (tracktion::TimePosition::fromSeconds (start), false, true);
+
+    auto* data = new DynamicObject();
+    data->setProperty ("clipId", copy->itemID.toString());
+    data->setProperty ("trackId", track->itemID.toString());
+    logLine ("duplicate_clip", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("duplicate_clip", var (data));
+}
+
+juce::var MoshOps::cmdMoveTrack (const juce::var& args)
+{
+    auto* track = findTrack (args.getProperty ("trackId", var()).toString());
+    if (track == nullptr) return errResult ("move_track", "no track");
+
+    auto& edit = eng.edit();
+    undoManager().beginNewTransaction ("move_track");
+    if (const auto beforeId = args.getProperty ("beforeTrackId", var()).toString(); beforeId.isNotEmpty())
+    {
+        auto* before = findTrack (beforeId);
+        if (before == nullptr) return errResult ("move_track", "no track: " + beforeId);
+        // Insert before `before`: the preceding sibling is whatever sits above it.
+        auto tracks = te::getAudioTracks (edit);
+        const int bi = tracks.indexOf (before);
+        te::Track* preceding = bi > 0 ? static_cast<te::Track*> (tracks[bi - 1]) : nullptr;
+        if (preceding == track)        // already there
+        {
+            logLine ("move_track", args, true, {}, true);
+            return okResult ("move_track");
+        }
+        edit.moveTrack (track, te::TrackInsertPoint (nullptr, preceding));
+    }
+    else
+    {
+        edit.moveTrack (track, te::TrackInsertPoint::getEndOfTracks (edit));
+    }
+
+    // Track-order AsyncUpdater drain (same as createAudioTrack).
+    if (! eng.hasAudio())
+        if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
+            mm->runDispatchLoopUntil (1);
+
+    logLine ("move_track", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("move_track");
+}
+
+juce::var MoshOps::cmdChooseFile (const juce::var& args)
+{
+    // Test/headless override: dialogs can't open without a UI session.
+    if (const auto forced = juce::SystemStats::getEnvironmentVariable ("MOSH_CHOOSE_FILE", {}); forced.isNotEmpty())
+    {
+        auto* d = new DynamicObject();
+        d->setProperty ("path", forced);
+        return okResult ("choose_file", var (d));
+    }
+    if (! eng.hasAudio())
+        return errResult ("choose_file", "no UI session (headless) — set MOSH_CHOOSE_FILE for tests");
+
+    const auto wildcard = args.getProperty ("wildcard", "*.wav;*.aif;*.aiff;*.mp3;*.flac;*.ogg").toString();
+    auto initial = juce::File (juce::SystemStats::getEnvironmentVariable ("MOSH_SAMPLE_LIBRARY", {}));
+    if (! initial.isDirectory())
+        initial = juce::File::getSpecialLocation (juce::File::userHomeDirectory);
+
+    juce::FileChooser fc (args.getProperty ("title", "Choose an audio file").toString(), initial, wildcard);
+    if (! fc.browseForFileToOpen())     // JUCE_MODAL_LOOPS_PERMITTED=1 (CMakeLists)
+    {
+        auto* d = new DynamicObject();
+        d->setProperty ("cancelled", true);
+        return okResult ("choose_file", var (d));
+    }
+    auto* d = new DynamicObject();
+    d->setProperty ("path", fc.getResult().getFullPathName());
+    return okResult ("choose_file", var (d));
 }
 
 juce::var MoshOps::cmdListAudioOutputs (const juce::var&)
@@ -1459,6 +1592,11 @@ juce::var MoshOps::snapshot()
     // default output nobody could see).
     session->setProperty ("hasAudio", eng.hasAudio());
     session->setProperty ("audioOutputDevice", eng.currentAudioOutputDevice());
+
+    // Stage 15: master fader + metronome state.
+    if (auto mv = edit.getMasterVolumePlugin())
+        session->setProperty ("masterVolumeDb", mv->getVolumeDb());
+    session->setProperty ("metronome", edit.clickTrackEnabled.get());
     if (eng.audioDeviceWarning().isNotEmpty())
         session->setProperty ("audioWarning", eng.audioDeviceWarning());
     if (eng.audioDeviceError().isNotEmpty())

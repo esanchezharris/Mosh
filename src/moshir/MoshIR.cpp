@@ -317,7 +317,29 @@ juce::var Executor::runOp (const juce::var& op, const juce::String& tutorialId)
                              : failOp (kind, "execute", r.getProperty ("error", "").toString());
     }
     if (kind == "clip.duplicate")
-        return unsupportedOp (op, "clip duplication is not yet a native command", "clip.duplicate", tutorialId);
+    {
+        // Stage 15: duplicate_clip landed natively — this retires the
+        // longest-standing gap-ledger entry (no schema change; the op has been
+        // in the vocabulary since v0.1).
+        const auto newSym = p.getProperty ("new_clip_id", var()).toString();
+        if (newSym.isEmpty()) return failOp (kind, "validate", "missing new_clip_id");
+        if (bindingExists (newSym)) return failOp (kind, "validate", "id already bound: " + newSym);
+        const auto id = clipId(); if (id.isEmpty()) return needClip();
+
+        auto* a = obj();
+        a->setProperty ("clipId", id);
+        if (p.hasProperty ("start_bar"))
+            a->setProperty ("startSeconds", beatsToSeconds (barToBeats ((int) p.getProperty ("start_bar", 1))));
+        auto r = run ("duplicate_clip", a);
+        if (! succeeded (r)) return failOp (kind, "execute", r.getProperty ("error", "").toString());
+
+        Binding b; b.kind = "clip";
+        b.ref = r.getProperty ("data", var()).getProperty ("clipId", var()).toString();
+        b.trackRef = r.getProperty ("data", var()).getProperty ("trackId", var()).toString();
+        bind (newSym, b);
+        auto* data = obj(); data->setProperty ("clipId", b.ref);
+        return okOp (kind, { "duplicate_clip" }, var (data));
+    }
     if (kind == "clip.delete")
     {
         const auto sym = p.getProperty ("clip_id", var()).toString();

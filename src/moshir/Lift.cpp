@@ -172,6 +172,16 @@ juce::var lift (const String& command, const var& args, const var& result, te::E
         p->setProperty ("clip_id", clipSym (args.getProperty ("clipId", var())));
         return one (op ("clip.delete", p));
     }
+    if (command == "duplicate_clip")
+    {
+        auto data = result.getProperty ("data", var());
+        auto* p = obj();
+        p->setProperty ("clip_id", clipSym (args.getProperty ("clipId", var())));
+        p->setProperty ("new_clip_id", clipSym (data.getProperty ("clipId", var())));
+        if (args.hasProperty ("startSeconds"))
+            p->setProperty ("start_bar", secondsToBar (edit, (double) args.getProperty ("startSeconds", 0.0)));
+        return one (op ("clip.duplicate", p));
+    }
     if (command == "set_clip_pitch")
     {
         auto* p = obj();

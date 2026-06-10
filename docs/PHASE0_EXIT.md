@@ -36,6 +36,17 @@ v0.2 bump (rather than piecemeal churn) IS the prioritization decision the
 ledger drove** — plus the Stage 7 call to ship `builtin.sat` as the saturator
 route instead of building a dedicated saturator device.
 
+**Stage 15 update (2026-06-10):** candidate #3 `clip.duplicate` is RETIRED —
+the op was in the schema all along; the native `duplicate_clip` command +
+executor lowering landed in the real-DAW pass (no schema change, no version
+bump). New ledger candidates from the same pass: `track.move` (track
+reordering has no IR family) and a master target for `mixer.set_gain`
+(`set_master_volume` is native-only). **Hash-v2 parking note:** master volume
+is deliberately NOT in the canonical hash — adding any new field invalidates
+every stored trajectory hash, so new mix-state coverage (master volume, future
+sends/automation summaries) batches into one versioned hash bump with a
+corpus re-stamp, not piecemeal additions.
+
 ## What is machine-proven today (the standing batteries)
 
 | Battery | Checks | Covers |

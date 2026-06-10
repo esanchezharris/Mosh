@@ -1,6 +1,6 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useStore, SNAP_DIVS, type SnapDiv } from "../store";
-import type { Snapshot, Track } from "../types";
+import type { Snapshot, Track, CommandResult } from "../types";
 import { Clip } from "./Clip";
 
 const LANE_H = 84;
@@ -36,12 +36,31 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
   const select = useStore((s) => s.select);
   const secsPerBeat = useStore((s) => s.secsPerBeat);
   const beatsPerBar = useStore((s) => s.beatsPerBar);
+  const ctxMenu = useStore((s) => s.ctxMenu);
+  const setCtxMenu = useStore((s) => s.setCtxMenu);
+  const follow = useStore((s) => s.follow);
   const t = snapshot.transport;
   const spb = secsPerBeat();
   const bpb = beatsPerBar();
   const ticks = rulerTicks(pxPerSec, spb, bpb);
   const barPx = spb * bpb * pxPerSec;
   const beatPx = spb * pxPerSec;
+  const timelineRef = useRef<HTMLDivElement>(null);
+
+  // Track drag-reorder (Stage 15): slot model — slot k inserts before track k.
+  const headsRef = useRef<HTMLDivElement>(null);
+  const [trackDrag, setTrackDrag] = useState<{ id: string; from: number; slot: number } | null>(null);
+
+  // Follow the playhead while playing (Stage 15, toggleable in the toolbar).
+  useEffect(() => {
+    if (!follow || !t.playing) return;
+    const el = timelineRef.current;
+    if (!el) return;
+    const headW = 168;
+    const px = t.position * pxPerSec + headW;
+    if (px < el.scrollLeft + headW || px > el.scrollLeft + el.clientWidth * 0.85)
+      el.scrollLeft = Math.max(0, px - el.clientWidth * 0.3);
+  }, [t.position, t.playing, follow, pxPerSec]);
   const lanesRef = useRef<HTMLDivElement>(null);
   const [marquee, setMarquee] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const loopDrag = useRef<number | null>(null);
@@ -107,8 +126,8 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
 
   return (
     <div className="arrange">
-      <Toolbar />
-      <div className="timeline">
+      <Toolbar snapshot={snapshot} timelineRef={timelineRef} />
+      <div className="timeline" ref={timelineRef} onPointerDown={() => ctxMenu && setCtxMenu(null)}>
         <div className="tl-head">
           <div className="lane-gutter">tracks</div>
           <div
@@ -135,10 +154,32 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
         </div>
 
         <div className="tl-body">
-          <div className="heads">
-            {snapshot.tracks.map((tr) => (
-              <TrackHeader key={tr.id} track={tr} />
+          <div className="heads" ref={headsRef}>
+            {snapshot.tracks.map((tr, row) => (
+              <TrackHeader
+                key={tr.id}
+                track={tr}
+                onDragStart={() => setTrackDrag({ id: tr.id, from: row, slot: row })}
+                onDragMove={(clientY) => {
+                  if (!trackDrag) return;
+                  const rect = headsRef.current!.getBoundingClientRect();
+                  const slot = Math.max(0, Math.min(snapshot.tracks.length,
+                    Math.round((clientY - rect.top) / LANE_H)));
+                  if (slot !== trackDrag.slot) setTrackDrag({ ...trackDrag, slot });
+                }}
+                onDragEnd={() => {
+                  if (!trackDrag) return;
+                  const { id, from, slot } = trackDrag;
+                  setTrackDrag(null);
+                  if (slot === from || slot === from + 1) return; // no-op slots
+                  const before = slot < snapshot.tracks.length ? snapshot.tracks[slot].id : undefined;
+                  void exec("move_track", before ? { trackId: id, beforeTrackId: before } : { trackId: id });
+                }}
+              />
             ))}
+            {trackDrag && (
+              <div className="track-drop-line" style={{ top: trackDrag.slot * LANE_H }} />
+            )}
           </div>
           <div
             className="lanes"
@@ -180,11 +221,32 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
           </div>
         </div>
       </div>
+      {/* Clip context menu (Stage 15). */}
+      {ctxMenu && (
+        <div className="ctx-menu" style={{ left: ctxMenu.x, top: ctxMenu.y }}>
+          <button
+            onClick={() => {
+              void exec("duplicate_clip", { clipId: ctxMenu.clipId });
+              setCtxMenu(null);
+            }}
+          >
+            Duplicate <span className="ctx-kbd">⌘D</span>
+          </button>
+          <button
+            onClick={() => {
+              void exec("remove_clip", { clipId: ctxMenu.clipId });
+              setCtxMenu(null);
+            }}
+          >
+            Delete <span className="ctx-kbd">⌫</span>
+          </button>
+        </div>
+      )}
     </div>
   );
 }
 
-function Toolbar() {
+function Toolbar({ snapshot, timelineRef }: { snapshot: Snapshot; timelineRef: React.RefObject<HTMLDivElement> }) {
   const exec = useStore((s) => s.exec);
   const tool = useStore((s) => s.tool);
   const setTool = useStore((s) => s.setTool);
@@ -194,10 +256,33 @@ function Toolbar() {
   const setSnapDiv = useStore((s) => s.setSnapDiv);
   const pxPerSec = useStore((s) => s.pxPerSec);
   const setPxPerSec = useStore((s) => s.setPxPerSec);
+  const follow = useStore((s) => s.follow);
+  const setFollow = useStore((s) => s.setFollow);
+  const selectedTrackId = useStore((s) => s.selectedTrackId);
+
+  // Native file dialog → import_clip onto the selected track (Stage 15).
+  const importAudio = async () => {
+    const res = (await exec("choose_file", { title: "Import audio" })) as CommandResult<{ path?: string }>;
+    const path = res.ok ? res.data?.path : undefined;
+    if (!path) return;
+    void exec("import_clip", selectedTrackId ? { file: path, trackId: selectedTrackId } : { file: path });
+  };
+
+  // Zoom so the whole arrangement fits the viewport.
+  const zoomToFit = () => {
+    const el = timelineRef.current;
+    if (!el) return;
+    let end = 8;
+    for (const tr of snapshot.tracks)
+      for (const c of tr.clips) end = Math.max(end, c.start + c.length);
+    setPxPerSec(Math.max(20, (el.clientWidth - 168 - 24) / end));
+    el.scrollLeft = 0;
+  };
 
   return (
     <div className="toolbar">
       <button onClick={() => exec("create_track", {})}>+ Track</button>
+      <button onClick={() => void importAudio()} title="Import an audio file to the selected track">+ Import</button>
       <button onClick={() => exec("add_test_tone_clip", { seconds: 2, freq: 220 })}>+ Test Tone</button>
       <button onClick={() => exec("add_midi_clip", {})}>+ MIDI</button>
       <span className="sep" />
@@ -217,6 +302,10 @@ function Toolbar() {
       <span className="sep" />
       <button onClick={() => setPxPerSec(pxPerSec / 1.4)}>Zoom −</button>
       <button onClick={() => setPxPerSec(pxPerSec * 1.4)}>Zoom +</button>
+      <button onClick={zoomToFit} title="Zoom to fit the arrangement">Fit</button>
+      <button className={follow ? "on" : ""} onClick={() => setFollow(!follow)} title="Follow the playhead">
+        Follow
+      </button>
       <span className="sep" />
       <button onClick={() => exec("undo", {})}>↶ Undo</button>
       <button onClick={() => exec("redo", {})}>↷ Redo</button>
@@ -227,11 +316,22 @@ function Toolbar() {
   );
 }
 
-function TrackHeader({ track }: { track: Track }) {
+function TrackHeader({
+  track,
+  onDragStart,
+  onDragMove,
+  onDragEnd,
+}: {
+  track: Track;
+  onDragStart: () => void;
+  onDragMove: (clientY: number) => void;
+  onDragEnd: () => void;
+}) {
   const exec = useStore((s) => s.exec);
   const selectedTrackId = useStore((s) => s.selectedTrackId);
   const setSelectedTrack = useStore((s) => s.setSelectedTrack);
   const level = useStore((s) => s.snapshot?.transport.levels?.tracks?.[track.id]);
+  const [renaming, setRenaming] = useState(false);
   const fxCount = (track.plugins ?? []).filter((p) => p.external || p.neural).length;
   const db = level ? Math.max(level[0], level[1]) : -100;
   const meterPct = Math.max(0, Math.min(1, (db + 60) / 60)) * 100;
@@ -242,7 +342,44 @@ function TrackHeader({ track }: { track: Track }) {
       onPointerDown={() => setSelectedTrack(track.id)}
     >
       <div className="th-row">
-        <span className="track-name">{track.name || `Track ${track.index + 1}`}</span>
+        <span
+          className="track-grip"
+          title="Drag to reorder"
+          onPointerDown={(e) => {
+            e.stopPropagation();
+            (e.target as HTMLElement).setPointerCapture(e.pointerId);
+            onDragStart();
+          }}
+          onPointerMove={(e) => onDragMove(e.clientY)}
+          onPointerUp={onDragEnd}
+        >
+          ≡
+        </span>
+        {renaming ? (
+          <input
+            className="track-rename"
+            autoFocus
+            defaultValue={track.name}
+            onFocus={(e) => e.target.select()}
+            onBlur={(e) => {
+              setRenaming(false);
+              const name = e.target.value.trim();
+              if (name && name !== track.name) void exec("rename_track", { trackId: track.id, name });
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+              if (e.key === "Escape") setRenaming(false);
+            }}
+          />
+        ) : (
+          <span
+            className="track-name"
+            title="Double-click to rename"
+            onDoubleClick={() => setRenaming(true)}
+          >
+            {track.name || `Track ${track.index + 1}`}
+          </span>
+        )}
         {fxCount > 0 && <span className="fx-count">{fxCount} fx</span>}
         <button className="mini" title="Remove" onClick={(e) => { e.stopPropagation(); exec("remove_track", { trackId: track.id }); }}>✕</button>
       </div>
@@ -262,7 +399,19 @@ function TrackHeader({ track }: { track: Track }) {
           max={6}
           step={0.5}
           value={track.volumeDb ?? 0}
+          title={`Volume ${(track.volumeDb ?? 0).toFixed(1)} dB`}
           onChange={(e) => exec("set_track_volume", { trackId: track.id, db: Number(e.target.value) })}
+        />
+        <input
+          className="pan"
+          type="range"
+          min={-1}
+          max={1}
+          step={0.05}
+          value={track.pan ?? 0}
+          title={`Pan ${((track.pan ?? 0) * 100).toFixed(0)}`}
+          onDoubleClick={() => exec("set_track_pan", { trackId: track.id, pan: 0 })}
+          onChange={(e) => exec("set_track_pan", { trackId: track.id, pan: Number(e.target.value) })}
         />
       </div>
       {/* Engine-output meter (Stage 14) — fed by the 30 Hz transport event. */}

@@ -24,7 +24,7 @@ Ids: you assign them (`t1`, `c1`, `d1`, `a1`, `bverb`); create before use.
 ## clip
 - clip.create {clip_id, track_id, start_bar, length_beats, kind: midi}   (audio clips come from sample.place)
 - clip.move {clip_id, start_bar, track_id?} · clip.delete {clip_id} · clip.set_length {clip_id, length_beats}
-- clip.duplicate — UNSUPPORTED; create + notes.add again instead
+- clip.duplicate {clip_id, new_clip_id, start_bar?} — copy a clip (defaults to landing right after the source); the cheap way to extend a pattern
 
 ## notes (MIDI; pitch "C1".."B8" or 0..127; vel 1..127)
 - notes.add {clip_id, notes: [{pitch, start_beats, dur_beats, vel}]}

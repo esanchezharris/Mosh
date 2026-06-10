@@ -943,6 +943,109 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (cmd (ops, "remove_track", args1 ("trackId", t14id))), "rack track cleanup");
     }
 
+    // --- Stage 15: real-DAW basics (metronome/master/duplicate/move/choose) ---
+    {
+        std::cerr << "--- Stage 15: real-DAW basics ---\n";
+
+        // Metronome: flips the engine click flag, never undoable, never recorded.
+        check (ok (cmd (ops, "set_metronome", objN ({{ "on", true }, { "gain", 0.8 }}))), "set_metronome on");
+        check (eng.edit().clickTrackEnabled.get(), "click track enabled in the engine");
+        check (ok (cmd (ops, "set_metronome", args1 ("on", false))), "set_metronome off");
+        check (! eng.edit().clickTrackEnabled.get(), "click track disabled");
+
+        // Master volume: round-trips + rides the snapshot.
+        check (ok (cmd (ops, "set_master_volume", args1 ("db", -4.5))), "set_master_volume ok");
+        auto s15 = ops.snapshot();
+        check (std::abs ((double) s15["session"].getProperty ("masterVolumeDb", 0.0) + 4.5) < 0.1,
+               "masterVolumeDb in snapshot");
+        check (s15["session"].hasProperty ("metronome"), "metronome state in snapshot");
+        cmd (ops, "set_master_volume", args1 ("db", 0.0));
+
+        // duplicate_clip: two clips, distinct ids, identical notes; undo removes.
+        auto t15 = cmd (ops, "create_track", args1 ("name", "Dup15"));
+        const auto t15id = t15["data"].getProperty ("trackId", var()).toString();
+        auto mc = cmd (ops, "add_midi_clip", objN ({{ "trackId", t15id }, { "name", "src" },
+                       { "start", 0.0 }, { "length", 2.0 }}));   // default 4-note arpeggio
+        const auto srcClip = mc["data"].getProperty ("clipId", var()).toString();
+        auto dup = cmd (ops, "duplicate_clip", args1 ("clipId", srcClip));
+        check (ok (dup), "duplicate_clip ok");
+        const auto dupClip = dup["data"].getProperty ("clipId", var()).toString();
+        check (dupClip.isNotEmpty() && dupClip != srcClip, "duplicate has a fresh id");
+        {
+            auto snap = ops.snapshot();
+            var trackVar;
+            for (auto& tv : *snap["tracks"].getArray())
+                if (tv.getProperty ("id", var()).toString() == t15id) trackVar = tv;
+            check (trackVar["clips"].size() == 2, "two clips after duplicate");
+            check (trackVar["clips"][0].getProperty ("notes", var()).size()
+                       == trackVar["clips"][1].getProperty ("notes", var()).size(),
+                   "duplicate carries the notes");
+            const double srcEnd = (double) trackVar["clips"][0].getProperty ("start", 0.0)
+                                + (double) trackVar["clips"][0].getProperty ("length", 0.0);
+            check (std::abs ((double) trackVar["clips"][1].getProperty ("start", -1.0) - srcEnd) < 0.01,
+                   "duplicate lands at the source end");
+        }
+        check (ok (cmd (ops, "undo")), "undo duplicate ok");
+        {
+            auto snap = ops.snapshot();
+            var trackVar;
+            for (auto& tv : *snap["tracks"].getArray())
+                if (tv.getProperty ("id", var()).toString() == t15id) trackVar = tv;
+            check (trackVar["clips"].size() == 1, "undo removed the duplicate");
+        }
+
+        // IR clip.duplicate lowers through the executor (gap-ledger entry retired).
+        {
+            Array<var> irOps;
+            auto* o1 = new DynamicObject(); o1->setProperty ("kind", "clip.create");
+            auto* p1 = new DynamicObject(); p1->setProperty ("clip_id", "cdup");
+            p1->setProperty ("track_id", "tdup"); p1->setProperty ("start_bar", 1);
+            p1->setProperty ("length_beats", 4); p1->setProperty ("kind", "midi");
+            o1->setProperty ("params", var (p1)); irOps.add (var (o1));
+            auto* o0 = new DynamicObject(); o0->setProperty ("kind", "track.create");
+            auto* p0 = new DynamicObject(); p0->setProperty ("track_id", "tdup");
+            p0->setProperty ("kind", "midi");
+            o0->setProperty ("params", var (p0));
+            irOps.insert (0, var (o0));
+            auto* o2 = new DynamicObject(); o2->setProperty ("kind", "clip.duplicate");
+            auto* p2 = new DynamicObject(); p2->setProperty ("clip_id", "cdup");
+            p2->setProperty ("new_clip_id", "cdup2"); p2->setProperty ("start_bar", 3);
+            o2->setProperty ("params", var (p2)); irOps.add (var (o2));
+            auto r = cmd (ops, "execute_ir", args1 ("ops", irOps));
+            check (ok (r), "execute_ir with clip.duplicate ok");
+            auto counts = r["data"].getProperty ("counts", var());
+            check ((int) counts.getProperty ("executed", 0) == 3
+                       && (int) counts.getProperty ("unsupported", 0) == 0,
+                   "clip.duplicate lowers (no longer a ledger gap)");
+        }
+
+        // move_track: reorders the snapshot AND changes the canonical hash.
+        const auto hashBefore = cmd (ops, "get_state_hash")["data"].getProperty ("hash", var()).toString();
+        check (ok (cmd (ops, "move_track", objN ({{ "trackId", t15id }, { "beforeTrackId",
+                       ops.snapshot()["tracks"][0].getProperty ("id", var()) }}))), "move_track ok");
+        check (ops.snapshot()["tracks"][0].getProperty ("id", var()).toString() == t15id,
+               "track moved to the top of the snapshot");
+        const auto hashAfter = cmd (ops, "get_state_hash")["data"].getProperty ("hash", var()).toString();
+        check (hashBefore != hashAfter, "track order is canonical-hash state");
+
+        // choose_file: env override works headless; excluded from the trajectory.
+        setenv ("MOSH_CHOOSE_FILE", "/tmp/fake.wav", 1);
+        auto cf = cmd (ops, "choose_file", args1 ("purpose", "test"));
+        unsetenv ("MOSH_CHOOSE_FILE");
+        check (ok (cf) && cf["data"].getProperty ("path", var()).toString() == "/tmp/fake.wav",
+               "choose_file honours the test override");
+        {
+            StringArray lines;
+            eng.sessionDir().getChildFile ("trajectory.jsonl").readLines (lines);
+            bool leaked = false;
+            for (auto& l : lines)
+                if (l.contains ("choose_file") || l.contains ("set_metronome")) leaked = true;
+            check (! leaked, "choose_file/set_metronome never enter the trajectory");
+        }
+
+        cmd (ops, "remove_track", args1 ("trackId", t15id));
+    }
+
     std::cerr << "===== " << (checks - failures) << "/" << checks
               << " checks passed, " << failures << " failed =====\n\n";
     return failures;

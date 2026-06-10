@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useStore } from "./store";
 import { isNative } from "./bridge";
 import { Arrangement } from "./components/Arrangement";
@@ -13,6 +13,41 @@ import { AgentPanel } from "./components/AgentPanel";
 // execute_command, and reacts to the snapshot+events feed. Deliberately thin and
 // conventional — Stage 2 grows this into the full arrangement (drag/trim/split,
 // zoom/snap, marquee). The backend has zero knowledge of any of it (swappable seam).
+// Global DAW keyboard (Stage 15). Same input-guard as the TutorialBar hotkey:
+// never fire while typing.
+function useGlobalKeys() {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement;
+      if (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)
+        return;
+      const s = useStore.getState();
+      if (e.code === "Space") {
+        e.preventDefault();
+        void s.exec("set_transport", { action: "toggle" });
+      } else if (e.key === "Backspace" || e.key === "Delete") {
+        if (s.selection.size === 0) return;
+        e.preventDefault();
+        for (const id of s.selection) void s.exec("remove_clip", { clipId: id });
+        s.clearSelection();
+      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        void s.exec(e.shiftKey ? "redo" : "undo", {});
+      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "d") {
+        if (s.selection.size === 0) return;
+        e.preventDefault();
+        for (const id of s.selection) void s.exec("duplicate_clip", { clipId: id });
+      } else if (e.key === "=" || e.key === "+") {
+        s.setPxPerSec(s.pxPerSec * 1.4);
+      } else if (e.key === "-") {
+        s.setPxPerSec(s.pxPerSec / 1.4);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+}
+
 export function App() {
   const init = useStore((s) => s.init);
   const snapshot = useStore((s) => s.snapshot);
@@ -20,10 +55,12 @@ export function App() {
   const exec = useStore((s) => s.exec);
   const theme = useStore((s) => s.theme);
   const toggleTheme = useStore((s) => s.toggleTheme);
+  const [warningDismissed, setWarningDismissed] = useState(false);
 
   useEffect(() => {
     init();
   }, [init]);
+  useGlobalKeys();
 
   if (!isNative()) {
     return (
@@ -61,6 +98,12 @@ export function App() {
       </header>
 
       {lastError && <div className="error-bar">⚠ {lastError}</div>}
+      {snapshot?.session.audioWarning && !warningDismissed && (
+        <div className="warn-bar">
+          ⚠ {snapshot.session.audioWarning}
+          <button className="mini" onClick={() => setWarningDismissed(true)}>✕</button>
+        </div>
+      )}
 
       {snapshot ? (
         <>

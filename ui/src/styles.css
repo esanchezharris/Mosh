@@ -151,6 +151,53 @@ button.on { border-color: var(--accent); color: var(--accent); background: #2120
   border: 1px solid var(--line); border-radius: 7px; padding: 0.25rem 0.35rem;
 }
 
+/* Stage 15 — real-DAW basics */
+.chip-edit {
+  font-variant-numeric: tabular-nums; font-size: 0.86rem; font-weight: 700;
+  padding: 0.25rem 0.5rem; border-radius: 7px;
+}
+.chip-suffix { font-weight: 400; font-size: 0.68rem; color: var(--muted); margin-left: 2px; }
+.chip-input {
+  font: inherit; font-size: 0.86rem; color: var(--text); background: var(--panel-2);
+  border: 1px solid var(--accent); border-radius: 7px; padding: 0.25rem 0.4rem;
+}
+.master-fader { width: 90px; accent-color: var(--accent); height: 4px; }
+.warn-bar {
+  display: flex; align-items: center; gap: 0.6rem;
+  background: #3a2a10; color: var(--warn); padding: 0.4rem 1rem;
+  border-bottom: 1px solid var(--line); font-size: 0.85rem;
+}
+.ctx-menu {
+  position: fixed; z-index: 60; min-width: 150px; padding: 4px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 9px;
+  box-shadow: 0 12px 32px rgba(0,0,0,0.5); display: flex; flex-direction: column; gap: 2px;
+}
+.ctx-menu button {
+  display: flex; justify-content: space-between; gap: 1rem; text-align: left;
+  background: transparent; border-color: transparent; padding: 0.35rem 0.6rem;
+}
+.ctx-menu button:hover { background: var(--panel-2); border-color: var(--line); }
+.ctx-kbd { color: var(--muted); font-size: 0.74rem; }
+.track-grip { cursor: grab; color: var(--muted); font-size: 0.8rem; padding: 0 2px; touch-action: none; }
+.track-grip:active { cursor: grabbing; color: var(--accent); }
+.track-drop-line {
+  position: absolute; left: 0; right: 0; height: 2px; background: var(--accent);
+  box-shadow: 0 0 6px var(--accent); z-index: 5; pointer-events: none;
+}
+.heads { position: relative; }
+.track-rename {
+  flex: 1; min-width: 0; font: inherit; font-size: 0.88rem; color: var(--text);
+  background: var(--panel-2); border: 1px solid var(--accent); border-radius: 5px; padding: 1px 4px;
+}
+.pan { width: 44px; accent-color: var(--accent-2); height: 4px; }
+.device-menu { font: inherit; color: var(--text); background: var(--panel-2); border-radius: 7px; padding: 0.3rem 0.4rem; }
+.bparams { display: flex; flex-direction: column; gap: 2px; }
+.bparam { display: grid; grid-template-columns: 60px 1fr; align-items: center; gap: 5px; }
+.blabel { font-size: 0.62rem; color: var(--muted); white-space: nowrap; overflow: hidden; }
+.bparam input { width: 100%; accent-color: var(--accent); height: 3px; }
+.dr-add { font-size: 0.66rem; padding: 0.1rem 0.4rem; border-style: dashed; }
+.rack-add.on { border-color: var(--accent-2); color: var(--accent-2); }
+
 .error-bar { background: #3a1320; color: var(--warn); padding: 0.4rem 1rem; border-bottom: 1px solid var(--line); font-size: 0.85rem; }
 
 .arrange { flex: 1; display: flex; flex-direction: column; min-height: 0; }

@@ -10,15 +10,59 @@ function fmt(t: number): string {
   return `${mm}:${ss.toString().padStart(2, "0")}.${cs.toString().padStart(2, "0")}`;
 }
 
+// Click-to-edit numeric chip (Stage 15) — the tempo/time-sig pattern: a value
+// that LOOKS like a label until you click it, then commits via a command.
+function EditableValue({
+  value,
+  title,
+  suffix,
+  width = 56,
+  onCommit,
+}: {
+  value: string;
+  title: string;
+  suffix?: string;
+  width?: number;
+  onCommit: (text: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  if (!editing)
+    return (
+      <button className="chip-edit" title={`${title} — click to edit`} onClick={() => setEditing(true)}>
+        {value}
+        {suffix && <span className="chip-suffix">{suffix}</span>}
+      </button>
+    );
+  return (
+    <input
+      className="chip-input"
+      style={{ width }}
+      autoFocus
+      defaultValue={value}
+      onFocus={(e) => e.target.select()}
+      onBlur={(e) => {
+        setEditing(false);
+        onCommit(e.target.value);
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+        if (e.key === "Escape") setEditing(false);
+      }}
+    />
+  );
+}
+
 export function Transport() {
   const snapshot = useStore((s) => s.snapshot);
   const exec = useStore((s) => s.exec);
   const secsPerBeat = useStore((s) => s.secsPerBeat);
   const beatsPerBar = useStore((s) => s.beatsPerBar);
   const t = snapshot?.transport;
+  const session = snapshot?.session;
 
   const playing = t?.playing ?? false;
   const looping = t?.looping ?? false;
+  const metronome = session?.metronome ?? false;
 
   // Musical position (Stage 14): bars.beats next to wall time.
   const pos = t?.position ?? 0;
@@ -31,12 +75,16 @@ export function Transport() {
   const db = master ? Math.max(master[0], master[1]) : -100;
   const meterPct = Math.max(0, Math.min(1, (db + 60) / 60)) * 100;
 
+  const tempo = Math.round((session?.tempo ?? 120) * 10) / 10;
+  const tsNum = session?.timeSigNumerator ?? 4;
+  const tsDen = session?.timeSigDenominator ?? 4;
+
   return (
     <div className="transport">
       <button
         className={`tbtn ${playing ? "stop" : "play"}`}
         onClick={() => exec("set_transport", { action: "toggle" })}
-        title={playing ? "Stop" : "Play"}
+        title={playing ? "Stop (Space)" : "Play (Space)"}
       >
         {playing ? "■" : "▶"}
       </button>
@@ -54,15 +102,53 @@ export function Transport() {
       >
         ⟳
       </button>
+      <button
+        className={`tbtn toggle ${metronome ? "on" : ""}`}
+        onClick={() => exec("set_metronome", { on: !metronome, gain: 0.7 })}
+        title="Metronome"
+      >
+        ◭
+      </button>
+
+      <EditableValue
+        value={String(tempo)}
+        suffix=" bpm"
+        title="Tempo"
+        onCommit={(text) => {
+          const bpm = Number(text);
+          if (Number.isFinite(bpm) && bpm >= 20 && bpm <= 400 && bpm !== tempo)
+            void exec("set_tempo", { bpm });
+        }}
+      />
+      <EditableValue
+        value={`${tsNum}/${tsDen}`}
+        title="Time signature"
+        width={44}
+        onCommit={(text) => {
+          const m = text.match(/^\s*(\d{1,2})\s*\/\s*(\d{1,2})\s*$/);
+          if (m) void exec("set_time_sig", { numerator: Number(m[1]), denominator: Number(m[2]) });
+        }}
+      />
+
       <span className="pos-bars" title="bar.beat">{bar}.{beat}</span>
       <span className="pos">{fmt(pos)}</span>
+
       <span className="mmeter" title={`master ${db <= -99 ? "−∞" : db.toFixed(1)} dB`}>
         <span
           className={db > -1 ? "hot" : db > -9 ? "warm" : ""}
           style={{ width: `${meterPct}%` }}
         />
       </span>
-      <span className="bpm" title="Session tempo">{Math.round(snapshot?.session.tempo ?? 120)} bpm</span>
+      <input
+        className="master-fader"
+        type="range"
+        min={-48}
+        max={6}
+        step={0.5}
+        value={session?.masterVolumeDb ?? 0}
+        title={`Master ${(session?.masterVolumeDb ?? 0).toFixed(1)} dB`}
+        onChange={(e) => exec("set_master_volume", { db: Number(e.target.value) })}
+      />
     </div>
   );
 }

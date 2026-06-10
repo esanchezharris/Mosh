@@ -1,18 +1,33 @@
+import { useState } from "react";
 import { useStore } from "../store";
 import type { Snapshot, Plugin } from "../types";
 import { GenPanel } from "./GenPanel";
 import { DrumRackPanel, trackHasRack } from "./DrumRackPanel";
 
-// The plugin rack for the selected track (Stage 3). Every action is a MoshOps
-// command: load/remove/reorder/bypass/open_plugin_editor.
+// Builtin device types the "+ Device" menu can load (load_builtin_plugin).
+const BUILTIN_TYPES = [
+  "sampler", "4osc", "eq", "compressor", "delay", "reverb",
+  "lowpass", "chorus", "phaser",
+] as const;
+
+// The plugin rack for the selected track (Stage 3, opened up in Stage 15).
+// Shows EVERY device on the chain — builtins included (they were filtered out
+// before, which made the sampler/EQ/etc. invisible and unloadable). The meter
+// tap never appears (snapshot-invisible); VolumeAndPan is hidden here because
+// the track header IS its UI.
 export function Rack({ snapshot }: { snapshot: Snapshot }) {
   const selectedTrackId = useStore((s) => s.selectedTrackId);
   const openBrowser = useStore((s) => s.openBrowser);
   const exec = useStore((s) => s.exec);
 
   const track = snapshot.tracks.find((t) => t.id === selectedTrackId) ?? null;
-  // Show user-facing inserts: hosted VST3s (external) + Tier-A neural inserts.
-  const plugins = (track?.plugins ?? []).filter((p) => p.external || p.neural);
+  const plugins = (track?.plugins ?? []).filter((p) => p.type !== "volume");
+
+  // GenPanel is collapsible (Stage 15): open automatically only when the
+  // track already has a render layer to show.
+  const hasLayer = !!track?.clips.some((c) => c.hasRenderLayer);
+  const [genOpenManual, setGenOpenManual] = useState<boolean | null>(null);
+  const genOpen = genOpenManual ?? hasLayer;
 
   return (
     <div className="rack">
@@ -29,9 +44,25 @@ export function Rack({ snapshot }: { snapshot: Snapshot }) {
       <div className="rack-chain">
         {track &&
           plugins.map((p) => (
-            <PluginCard key={p.index} plugin={p} trackId={track.id} />
+            <PluginCard key={`${p.index}-${p.type}`} plugin={p} trackId={track.id} />
           ))}
-        {track && plugins.length === 0 && <span className="rack-empty">no plugins</span>}
+        {track && plugins.length === 0 && <span className="rack-empty">no devices</span>}
+        {track && (
+          <select
+            className="rack-add device-menu"
+            value=""
+            title="Add a builtin device"
+            onChange={(e) => {
+              if (e.target.value) void exec("load_builtin_plugin", { trackId: track.id, type: e.target.value });
+              e.target.value = "";
+            }}
+          >
+            <option value="" disabled>+ Device</option>
+            {BUILTIN_TYPES.map((t) => (
+              <option key={t} value={t}>{t}</option>
+            ))}
+          </select>
+        )}
         {track && (
           <button className="rack-add" onClick={openBrowser} title="Add VST3 plugin">
             + Plugin
@@ -55,11 +86,20 @@ export function Rack({ snapshot }: { snapshot: Snapshot }) {
             + MIDI
           </button>
         )}
+        {track && (
+          <button
+            className={`rack-add ${genOpen ? "on" : ""}`}
+            onClick={() => setGenOpenManual(!genOpen)}
+            title="Generative layer (Tier B)"
+          >
+            ✨ Gen
+          </button>
+        )}
       </div>
       </div>
       {/* FL-style step sequencer over the track's sampler pads (Stage 14). */}
       {trackHasRack(track) && <DrumRackPanel track={track} />}
-      {track && <GenPanel track={track} />}
+      {track && genOpen && <GenPanel track={track} />}
     </div>
   );
 }
@@ -67,6 +107,7 @@ export function Rack({ snapshot }: { snapshot: Snapshot }) {
 function PluginCard({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
   const exec = useStore((s) => s.exec);
   const isNeural = !!plugin.neural;
+  const isBuiltin = !plugin.external && !isNeural;
   return (
     <div className={`pcard ${plugin.enabled ? "" : "bypassed"} ${isNeural ? "neural" : ""}`}>
       <div className="pcard-head">
@@ -83,13 +124,51 @@ function PluginCard({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
       {isNeural ? (
         <NeuralBody plugin={plugin} trackId={trackId} />
       ) : (
-        <div className="pcard-actions">
-          <button onClick={() => exec("open_plugin_editor", { trackId, index: plugin.index })}>Edit</button>
-          <button onClick={() => exec("reorder_plugin", { trackId, index: plugin.index, toIndex: plugin.index - 1 })} title="Move left">‹</button>
-          <button onClick={() => exec("reorder_plugin", { trackId, index: plugin.index, toIndex: plugin.index + 1 })} title="Move right">›</button>
-          <button className="x" onClick={() => exec("remove_plugin", { trackId, index: plugin.index })}>✕</button>
-        </div>
+        <>
+          {isBuiltin && <BuiltinParams plugin={plugin} trackId={trackId} />}
+          <div className="pcard-actions">
+            {plugin.external && (
+              <button onClick={() => exec("open_plugin_editor", { trackId, index: plugin.index })}>Edit</button>
+            )}
+            <button onClick={() => exec("reorder_plugin", { trackId, index: plugin.index, toIndex: plugin.index - 1 })} title="Move left">‹</button>
+            <button onClick={() => exec("reorder_plugin", { trackId, index: plugin.index, toIndex: plugin.index + 1 })} title="Move right">›</button>
+            <button className="x" onClick={() => exec("remove_plugin", { trackId, index: plugin.index })}>✕</button>
+          </div>
+        </>
       )}
+    </div>
+  );
+}
+
+// Generic param sliders for builtin devices (Stage 15): the snapshot already
+// ships the first 16 automatable params; expose the first few so an EQ or
+// compressor is usable without a dedicated editor.
+function BuiltinParams({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
+  const exec = useStore((s) => s.exec);
+  const params = plugin.params.slice(0, 6);
+  if (params.length === 0) return null;
+  return (
+    <div className="bparams">
+      {params.map((p) => (
+        <label key={p.index} className="bparam" title={p.name}>
+          <span className="blabel">{p.name.length > 9 ? p.name.slice(0, 8) + "…" : p.name}</span>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.01}
+            value={p.value}
+            onChange={(e) =>
+              exec("set_plugin_param", {
+                trackId,
+                index: plugin.index,
+                paramIndex: p.index,
+                value: Number(e.target.value),
+              })
+            }
+          />
+        </label>
+      ))}
     </div>
   );
 }

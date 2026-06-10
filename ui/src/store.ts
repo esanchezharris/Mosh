@@ -54,6 +54,12 @@ type State = {
   setSelectedTrack: (id: string | null) => void;
   openBrowser: () => void;
   closeBrowser: () => void;
+
+  // Clip context menu + follow-playhead (Stage 15, pure view state).
+  ctxMenu: { x: number; y: number; clipId: string } | null;
+  setCtxMenu: (m: { x: number; y: number; clipId: string } | null) => void;
+  follow: boolean;
+  setFollow: (b: boolean) => void;
   loadColors: () => void;
   setLab: (b: boolean) => void;
 
@@ -173,6 +179,10 @@ export const useStore = create<State>((set, get) => ({
   },
 
   setSelectedTrack: (id) => set({ selectedTrackId: id }),
+  ctxMenu: null,
+  setCtxMenu: (m) => set({ ctxMenu: m }),
+  follow: true,
+  setFollow: (b) => set({ follow: b }),
   openBrowser: () => {
     set({ browserOpen: true });
     if (get().availablePlugins.length === 0)

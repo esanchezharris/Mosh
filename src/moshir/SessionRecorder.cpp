@@ -16,7 +16,9 @@ namespace
             || name == "list_plugins" || name == "list_colors"
             || name == "open_plugin_editor"
             // Device prefs are machine-local, not musical actions (Stage 14).
-            || name == "list_audio_outputs" || name == "set_audio_output";
+            || name == "list_audio_outputs" || name == "set_audio_output"
+            // Playback aids / dialogs, not musical actions (Stage 15).
+            || name == "set_metronome" || name == "choose_file";
     }
 }
 

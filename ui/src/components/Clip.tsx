@@ -19,6 +19,7 @@ export function Clip({ clip }: { clip: ClipT }) {
   const select = useStore((s) => s.select);
   const peaks = useStore((s) => s.peaks[clip.id]);
   const secsPerBeat = useStore((s) => s.secsPerBeat);
+  const setCtxMenu = useStore((s) => s.setCtxMenu);
 
   // Optimistic preview while dragging; cleared when committed props arrive.
   const [preview, setPreview] = useState<Pos | null>(null);
@@ -97,6 +98,12 @@ export function Clip({ clip }: { clip: ClipT }) {
       onPointerDown={onPointerDown("move")}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        select([clip.id], false);
+        setCtxMenu({ x: e.clientX, y: e.clientY, clipId: clip.id });
+      }}
       title={`${clip.name} · ${pos.length.toFixed(2)}s`}
     >
       <div className="clip-wave">

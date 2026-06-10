@@ -74,6 +74,12 @@ private:
     juce::var cmdSetTransport   (const juce::var& args);
     juce::var cmdListAudioOutputs (const juce::var& args);   // Stage 14: device truth
     juce::var cmdSetAudioOutput   (const juce::var& args);   // machine-local, never synced
+    // Stage 15 — real-DAW basics
+    juce::var cmdSetMetronome     (const juce::var& args);   // playback aid, never synced/hashed
+    juce::var cmdSetMasterVolume  (const juce::var& args);
+    juce::var cmdDuplicateClip    (const juce::var& args);
+    juce::var cmdMoveTrack        (const juce::var& args);
+    juce::var cmdChooseFile       (const juce::var& args);   // native dialog; read-only
     juce::var cmdUndo           (const juce::var& args);
     juce::var cmdRedo           (const juce::var& args);
     juce::var cmdSave           (const juce::var& args);

@@ -118,6 +118,8 @@ export type Snapshot = {
     audioOutputDevice?: string;
     audioWarning?: string;
     audioError?: string;
+    masterVolumeDb?: number;
+    metronome?: boolean;
   };
   tracks: Track[];
   transport: Transport;

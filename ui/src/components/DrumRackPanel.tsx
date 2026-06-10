@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useStore } from "../store";
-import type { Track, SamplerSound } from "../types";
+import type { Track, SamplerSound, CommandResult } from "../types";
 
 // The native drum rack (Stage 14): an FL-style step sequencer over the track's
 // sampler pads. Rows = loaded sounds, columns = 16th steps across the first
@@ -85,10 +85,29 @@ export function DrumRackPanel({ track }: { track: Track }) {
 
   const sounds: SamplerSound[] = sampler.sounds ?? [];
 
+  // "+ pad" (Stage 15): native file dialog → add_sampler_sound on the next
+  // free key above the highest pad (key-ranged so pads never overlap).
+  const addPad = async () => {
+    const res = (await exec("choose_file", { title: "Choose a one-shot for the new pad" })) as CommandResult<{ path?: string }>;
+    const path = res.ok ? res.data?.path : undefined;
+    if (!path) return;
+    const key = sounds.length ? Math.max(...sounds.map((s) => s.keyNote)) + 2 : 24;
+    void exec("add_sampler_sound", {
+      trackId: track.id,
+      index: sampler.index,
+      file: path,
+      keyNote: key,
+      minNote: key,
+      maxNote: key,
+      openEnded: true,
+    });
+  };
+
   return (
     <div className="drumrack">
       <div className="dr-title">
         drum rack · <b>{track.name}</b>
+        <button className="dr-add" onClick={() => void addPad()} title="Add a pad from a sample">+ pad</button>
         <span className="dr-hint">click: hit → accent → off</span>
       </div>
       <div className="dr-grid">

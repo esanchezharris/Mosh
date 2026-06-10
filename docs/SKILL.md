@@ -105,3 +105,15 @@ The corrected session lands in `~/Library/Mosh/session` (old one backed up),
 the 2-bar pattern loops on play, and the always-on SessionRecorder turns any
 tweak made in the app into correction data — import it afterwards with
 `flywheel.store.import_session` or read `~/Library/Mosh/session/trajectory.jsonl`.
+
+## Stage 15 — real-DAW commands
+
+`set_tempo {bpm}` / `set_time_sig {numerator,denominator}` now have UI
+(click the BPM / time-sig chips in the transport). New commands:
+`set_metronome {on,gain?}` (playback aid — never recorded/synced/hashed),
+`set_master_volume {db}` (synced; NOT hashed — see the hash-v2 note in
+PHASE0_EXIT.md), `duplicate_clip {clipId,startSeconds?}` (lifts to
+clip.duplicate — ledger entry retired), `move_track {trackId,beforeTrackId?}`,
+`choose_file {title?,wildcard?}` (native dialog; headless tests set
+MOSH_CHOOSE_FILE to bypass it). Keyboard in-app: Space play/stop · ⌫ delete
+clips · ⌘Z/⌘⇧Z undo/redo · ⌘D duplicate · +/− zoom.
