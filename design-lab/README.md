@@ -65,6 +65,18 @@ single artifact into [open-design](https://github.com/nexu-io/open-design) for r
 | 005 | **SPORE LEDGER** — visible metabolism | Every agent action is a living cell you can pop to undo |
 | 006 | **BROADCAST** — the familiar on stream | Moshi as the watchable star; OBS-friendly |
 
+## Wave 2 (grounded)
+
+| # | experiment | role |
+|---|---|---|
+| 007 | **TERRARIUM** — the specimen, kept quietly | Synthesis: SPECIMEN × SPORE LEDGER, HEARTH dimmed to atmosphere |
+| 008 | **POSSESSION** — the current UI, possessed | The shipping skeleton ([current-ui/AUDIT.md](current-ui/AUDIT.md)) re-materialized per the [field notes](inspiration/FIELD_NOTES.md) — the migration path |
+
+Wave 2 inputs: [current-ui/AUDIT.md](current-ui/AUDIT.md) (what the product looks like
+today and the gap to the brief) and [inspiration/FIELD_NOTES.md](inspiration/FIELD_NOTES.md)
+(the linked inspiration actually viewed — 100/101 posts fetched as imagery — distilled
+into eight motifs with steal-this mappings).
+
 ## Parked (next waves)
 
 - **Real audio features** into experiments — needs a WebSocket tap on the engine's

@@ -16,6 +16,8 @@ export default defineConfig({
         gullet: resolve(root, 'experiments/004-gullet/index.html'),
         sporeLedger: resolve(root, 'experiments/005-spore-ledger/index.html'),
         broadcast: resolve(root, 'experiments/006-broadcast/index.html'),
+        terrarium: resolve(root, 'experiments/007-terrarium/index.html'),
+        possession: resolve(root, 'experiments/008-possession/index.html'),
       },
     },
   },
