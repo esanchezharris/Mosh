@@ -1,5 +1,6 @@
+import { useState } from "react";
 import { useStore } from "../store";
-import { meterFrom, secondsToBBS } from "../time";
+import { tempoMapFrom, secondsToBBSMap } from "../time";
 
 function fmt(t: number): string {
   const s = Math.max(0, t);
@@ -41,6 +42,10 @@ export function Transport() {
   const tempo = session?.tempo ?? 120;
   const num = session?.timeSigNumerator ?? 4;
   const den = session?.timeSigDenominator ?? 4;
+  // SES-001 — the tempo-map popover (list points, add at the playhead, remove).
+  const [mapOpen, setMapOpen] = useState(false);
+  const tempoMap = session?.tempoMap ?? [];
+  const timeSigMap = session?.timeSigMap ?? [];
 
   return (
     <div className="transport">
@@ -91,7 +96,7 @@ export function Transport() {
 
       <span className="pos" title="Position (min:sec)">{fmt(t?.position ?? 0)}</span>
       <span className="pos bbs" title="Position (bars.beats.sixteenths)">
-        {secondsToBBS(t?.position ?? 0, meterFrom(session))}
+        {secondsToBBSMap(tempoMapFrom(session), t?.position ?? 0)}
       </span>
 
       {/* Plugin delay compensation readout (MON-004). The whole-edit reported latency
@@ -139,6 +144,49 @@ export function Transport() {
           ))}
         </select>
       </label>
+
+      {/* SES-001 — the tempo map: tempo / meter changes over time (step changes;
+          the engine's TempoSequence does the math + playback natively). */}
+      <div className="remote-companion">
+        <button className={`tbtn toggle ${mapOpen || tempoMap.length > 1 || timeSigMap.length > 1 ? "on" : ""}`}
+          onClick={() => setMapOpen((v) => !v)} title="Tempo map (tempo/meter changes over time)">
+          ↗♩
+        </button>
+        {mapOpen && (
+          <div className="remote-pop tempomap-pop">
+            <div className="remote-head"><strong>Tempo map</strong>
+              <button className="mini" onClick={() => setMapOpen(false)}>x</button></div>
+            {tempoMap.map((p, i) => (
+              <div className="tm-row" key={`t-${i}`}>
+                <span>{fmt(p.time)}</span><span>{Math.round(p.bpm)} BPM</span>
+                {i > 0 ? (
+                  <button className="mini" title="Remove this tempo change"
+                    onClick={() => exec("remove_tempo_change", { index: i })}>x</button>
+                ) : <span className="tm-base">base</span>}
+              </div>
+            ))}
+            {timeSigMap.map((p, i) => (
+              <div className="tm-row" key={`s-${i}`}>
+                <span>{fmt(p.time)}</span><span>{p.numerator}/{p.denominator}</span>
+                {i > 0 ? (
+                  <button className="mini" title="Remove this meter change"
+                    onClick={() => exec("remove_time_sig_change", { index: i })}>x</button>
+                ) : <span className="tm-base">base</span>}
+              </div>
+            ))}
+            <div className="tm-actions">
+              <button className="mini-action" title="Insert a tempo change at the playhead (edit the BPM after)"
+                onClick={() => exec("insert_tempo_change", { time: t?.position ?? 0, bpm: Math.round(tempo) })}>
+                + tempo @ playhead
+              </button>
+              <button className="mini-action" title="Insert a meter change at the playhead"
+                onClick={() => exec("insert_time_sig_change", { time: t?.position ?? 0, numerator: num, denominator: den })}>
+                + meter @ playhead
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

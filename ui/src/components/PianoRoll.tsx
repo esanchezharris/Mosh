@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
 import type { MidiNote } from "../types";
-import { meterFrom, beatSeconds, snapStepBeats } from "../time";
+import { meterAt, tempoMapFrom, beatSeconds, snapStepBeats } from "../time";
 
 const ROW_H = 15;
 const BEAT_PX = 42;
@@ -35,7 +35,9 @@ export function PianoRoll() {
 
   if (!editingClipId || !clip) return null;
 
-  const m = meterFrom(snapshot?.session);
+  // SES-001 — the meter LOCAL to the clip start (a clip spanning a tempo
+  // change displays its grid at the start tempo; documented simplification).
+  const m = meterAt(tempoMapFrom(snapshot?.session), clip.start);
   const stepBeats = snap ? snapStepBeats(m, snapDivision) : 0;
   const snapBeat = (b: number) => (stepBeats > 0 ? Math.round(b / stepBeats) * stepBeats : b);
   const pitches = Array.from({ length: HIGH - LOW + 1 }, (_, k) => HIGH - k); // top→bottom

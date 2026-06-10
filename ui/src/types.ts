@@ -208,6 +208,9 @@ export type Snapshot = {
     length?: number;
     editFile: string;
     projectExtension?: string; // backend-owned project container extension (no leading dot)
+    // SES-001 — the tempo MAP (additive; tempo/timeSig* above stay point 0).
+    tempoMap?: { time: number; bpm: number }[];
+    timeSigMap?: { time: number; numerator: number; denominator: number }[];
     // Audio-engine gate + readout (wave: settings — MON-007 / FLY-004).
     audioEnabled?: boolean;
     bitDepth?: number;

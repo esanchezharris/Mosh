@@ -10,7 +10,7 @@ import type {
   PluginCounts, PluginBlockEntry,
 } from "./types";
 import type { RemoteStatus } from "./bridge";
-import { type SnapDiv, snapStep, meterFrom } from "./time";
+import { type SnapDiv, snapTimeMap, tempoMapFrom } from "./time";
 
 export type Tool = "move" | "split" | "range";
 export type View = "arrange" | "mixer";
@@ -258,8 +258,9 @@ export const useStore = create<State>((set, get) => ({
   snapTime: (t) => {
     const { snap, snapDivision, snapshot } = get();
     if (!snap) return t;
-    const step = snapStep(meterFrom(snapshot?.session), snapDivision);
-    return step > 0 ? Math.round(t / step) * step : t;
+    // SES-001 — snap over the piecewise tempo map (the grid restarts at every
+    // tempo/meter change; constant-tempo sessions behave exactly as before).
+    return snapTimeMap(tempoMapFrom(snapshot?.session), t, snapDivision);
   },
 
   ensurePeaks: (clipId) => {

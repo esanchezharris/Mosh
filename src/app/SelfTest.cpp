@@ -2424,6 +2424,92 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (outUndo, "routing: set_track_output logged undoable:true (Edit mutation)");
     }
 
+    // ─── Wave T: SES-001 tempo map (tempo / time-sig changes over time) ───
+    // The engine's TempoSequence does the math + playback natively; Mosh inserts
+    // STEP changes (curve=1.0 -> hold-then-jump; the ramp branch is gated on
+    // curve != +-1). ENGINE TRUTH is asserted here via getBpmAt at probe times;
+    // the UI's piecewise-constant mapping is exact by construction for steps.
+    std::cerr << "--- Wave T: tempo map (SES-001) ---\n";
+    {
+        auto& seq = eng.edit().tempoSequence;
+        // Normalize the base for deterministic probes.
+        check (ok (cmd (ops, "set_tempo", args1 ("bpm", 120))), "tempo: base 120 ok");
+        const int temposBefore = seq.getNumTempos();
+
+        // Insert step changes: 140 @ 10s, 90 @ 20s.
+        auto t1 = cmd (ops, "insert_tempo_change", objN ({{ "time", 10.0 }, { "bpm", 140 }}));
+        check (ok (t1), "tempo: insert 140 at 10s ok");
+        auto t2 = cmd (ops, "insert_tempo_change", objN ({{ "time", 20.0 }, { "bpm", 90 }}));
+        check (ok (t2), "tempo: insert 90 at 20s ok");
+        check (seq.getNumTempos() == temposBefore + 2, "tempo: two points added");
+
+        // ENGINE truth — step semantics at the probes (exact, no ramp).
+        auto bpmAt = [&] (double s) { return seq.getBpmAt (tracktion::TimePosition::fromSeconds (s)); };
+        check (std::abs (bpmAt (5.0)  - 120.0) < 0.01, "tempo: engine bpm at 5s == 120");
+        check (std::abs (bpmAt (15.0) - 140.0) < 0.01, "tempo: engine bpm at 15s == 140 (step, no ramp)");
+        check (std::abs (bpmAt (25.0) -  90.0) < 0.01, "tempo: engine bpm at 25s == 90");
+        check (std::abs (bpmAt (9.9)  - 120.0) < 0.01, "tempo: engine bpm just before the change == 120 (hold)");
+
+        // Beats<->seconds round-trip across both boundaries (engine math).
+        const auto probeBeats = seq.toBeats (tracktion::TimePosition::fromSeconds (25.0));
+        const auto roundTrip  = seq.toTime (probeBeats).inSeconds();
+        check (std::abs (roundTrip - 25.0) < 1.0e-6, "tempo: beats<->seconds round-trip across the map");
+
+        // Snapshot serializes the ordered map (additive: session.tempo stays point 0).
+        auto sess = ops.snapshot()["session"];
+        auto tmv = sess.getProperty ("tempoMap", var());
+        check (tmv.isArray() && tmv.size() == temposBefore + 2, "tempo: snapshot tempoMap has all points");
+        check (std::abs ((double) tmv[tmv.size() - 1].getProperty ("bpm", 0.0) - 90.0) < 0.01,
+               "tempo: snapshot last point is the 90 BPM change");
+        check (std::abs ((double) sess.getProperty ("tempo", 0.0) - 120.0) < 0.01,
+               "tempo: session.tempo still reports point 0 (back-compat)");
+
+        // Time-sig change @ 30s -> 3/4; map serialized; engine agrees.
+        const int sigsBefore = seq.getNumTimeSigs();
+        check (ok (cmd (ops, "insert_time_sig_change", objN ({{ "time", 30.0 }, { "numerator", 3 }, { "denominator", 4 }}))),
+               "tempo: insert 3/4 at 30s ok");
+        check (seq.getNumTimeSigs() == sigsBefore + 1, "tempo: time-sig point added");
+        auto sigv = ops.snapshot()["session"].getProperty ("timeSigMap", var());
+        check (sigv.isArray() && sigv.size() == sigsBefore + 1, "tempo: snapshot timeSigMap serialized");
+        check ((int) sigv[sigv.size() - 1].getProperty ("numerator", 0) == 3, "tempo: last sig point is 3/4");
+
+        // Persistence: the map survives save/reload.
+        check (ok (cmd (ops, "save")) && ok (cmd (ops, "reload")), "tempo: save+reload ok");
+        auto& seq2 = eng.edit().tempoSequence;   // reload swapped the Edit
+        check (std::abs (seq2.getBpmAt (tracktion::TimePosition::fromSeconds (15.0)) - 140.0) < 0.01,
+               "tempo: map survives save/reload (140 at 15s)");
+
+        // remove_tempo_change: drop the middle point -> bpm at 15s reverts to 120.
+        check (ok (cmd (ops, "remove_tempo_change", args1 ("index", 1))), "tempo: remove middle point ok");
+        check (std::abs (seq2.getBpmAt (tracktion::TimePosition::fromSeconds (15.0)) - 120.0) < 0.01,
+               "tempo: bpm at 15s reverts after removal");
+        check (ok (cmd (ops, "undo")), "tempo: undo (remove) ok");
+        check (std::abs (eng.edit().tempoSequence.getBpmAt (tracktion::TimePosition::fromSeconds (15.0)) - 140.0) < 0.01,
+               "tempo: undo restored the 140 change");
+
+        // Guards: index 0 protected; bad args rejected.
+        check (! ok (cmd (ops, "remove_tempo_change", args1 ("index", 0))), "tempo: removing point 0 rejected");
+        check (! ok (cmd (ops, "remove_tempo_change", args1 ("index", 99))), "tempo: out-of-range index rejected");
+        check (! ok (cmd (ops, "insert_tempo_change", objN ({{ "time", -1.0 }, { "bpm", 120 }}))), "tempo: negative time rejected");
+        check (! ok (cmd (ops, "insert_tempo_change", objN ({{ "time", 5.0 }, { "bpm", 5000 }}))), "tempo: absurd bpm rejected");
+        check (! ok (cmd (ops, "remove_time_sig_change", args1 ("index", 0))), "tempo: removing sig point 0 rejected");
+        check (! ok (cmd (ops, "insert_time_sig_change", objN ({{ "time", 5.0 }, { "numerator", 4 }, { "denominator", 5 }}))),
+               "tempo: non-power-of-two denominator rejected");
+
+        // JSONL: all four commands undoable:true.
+        auto tlog = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
+        bool itU = false, rtU = false, isU = false;
+        for (auto& ln : juce::StringArray::fromLines (tlog))
+        {
+            if (ln.contains ("\"command\": \"insert_tempo_change\"") && ln.contains ("\"undoable\": true")) itU = true;
+            if (ln.contains ("\"command\": \"remove_tempo_change\"") && ln.contains ("\"undoable\": true")) rtU = true;
+            if (ln.contains ("\"command\": \"insert_time_sig_change\"") && ln.contains ("\"undoable\": true")) isU = true;
+        }
+        check (itU, "tempo: insert_tempo_change logged undoable:true");
+        check (rtU, "tempo: remove_tempo_change logged undoable:true");
+        check (isU, "tempo: insert_time_sig_change logged undoable:true");
+    }
+
     std::cerr << "===== " << (checks - failures) << "/" << checks
               << " checks passed, " << failures << " failed =====\n\n";
     return failures;

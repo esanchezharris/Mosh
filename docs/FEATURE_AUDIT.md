@@ -437,6 +437,38 @@ on a strip, arm, record; route a strip to another hardware out).
 **Shipped-on-both-axes: 93 → 95** (must-tier 79 → **81 of 82**). Only `SES-001`'s tempo map
 remains.
 
+### 2026-06-09 · Wave T: the tempo map (SES-001 — full time model) ✅ · **MUST-TIER COMPLETE**
+
+The engine's `TempoSequence` natively supports multi-point tempo + time-sig maps (insert/remove/
+`toBeats`/`toTime`; playback honors the map with no clip-anchoring work) — the genuine build was
+**Mosh's UI time model**. Four new undoable commands: **`insert_tempo_change`** `{time, bpm}` /
+**`remove_tempo_change`** `{index}` (index 0 protected — it's the base, edited by `set_tempo`) /
+**`insert_time_sig_change`** / **`remove_time_sig_change`**. Changes are **steps** (curve=1.0 —
+verified in the engine source: the ramp branch is gated on `curve != ±1`), which makes the UI's new
+**piecewise-constant** mapping *exact* — no duplicated engine math, no drift. Snapshot (additive):
+`session.tempoMap` + `session.timeSigMap`, times computed by the engine's own conversion;
+`session.tempo`/`timeSig*` stay point 0 for back-compat. `ui/src/time.ts` gains the map machinery
+(`tempoMapFrom`/`meterAt`/`gridLines`/`snapTimeMap`/`secondsToBBSMap`; every change point starts a
+fresh bar) and **every consumer went map-aware**: the ruler + gridlines render true bar boundaries
+(with tempo/meter markers at each change), snap restarts its grid at changes, the BBS readout walks
+the map, and the piano roll uses the meter local to its clip's start (documented simplification).
+A tempo-map popover on the transport lists the points with "+ @ playhead" / remove. Verified:
+`Mosh --selftest` **614/614 across 3 runs, 0 failed, 0 assertions** — **engine truth asserted**:
+bpm 120@5s / **140@15s (step, no ramp)** / 90@25s / 120 held just before the change, a
+beats↔seconds round-trip across both boundaries, save/reload persistence, removal reverts +
+undo restores, index-0 + bad-arg guards, JSONL `undoable:true`.
+
+| ID | Tier | Feature | Before → After |
+|---|---|---|---|
+| `SES-001` | must | Single canonical time model (full tempo map) | ◐/◐ → ✓/✓ |
+
+**Honestly deferred beyond the audit:** tempo **curves/ramps** (the engine supports Bezier; Mosh
+inserts steps only) and **audio warp** (clip time-stretch following the map).
+
+**Shipped-on-both-axes: 95 → 96. Must-tier: 81 → 82 of 82 — COMPLETE.** Every table-stakes
+feature in the 266-feature conformance audit is now shipped on both axes (capability + surface),
+with tempo ramps/warp as the only named, deliberate deferral beyond it.
+
 ## Coverage by category
 
 Per axis the three counts are **present ✓ / partial ◐ / missing ✗** (missing also folds in the one `not_applicable`).

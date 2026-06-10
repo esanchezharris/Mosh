@@ -165,6 +165,12 @@ private:
     juce::var cmdSetTrackInput    (const juce::var& args);   // monitoring preference (undoable:false)
     juce::var cmdListTrackOutputs (const juce::var& args);   // read-only (no log/transaction)
     juce::var cmdSetTrackOutput   (const juce::var& args);   // undoable (TrackOutput is Edit-UM-bound)
+    // SES-001 — the tempo MAP: tempo / time-sig changes over time (step changes,
+    // curve=1.0; the engine's TempoSequence does the math + playback natively).
+    juce::var cmdInsertTempoChange   (const juce::var& args); // undoable
+    juce::var cmdRemoveTempoChange   (const juce::var& args); // undoable (index>0)
+    juce::var cmdInsertTimeSigChange (const juce::var& args); // undoable
+    juce::var cmdRemoveTimeSigChange (const juce::var& args); // undoable (index>0)
 
     // The MOSH_PROJECT child of eng.edit().state, created (empty) on first read so
     // callers always get a valid tree. Pure storage accessor — no logging/transaction.

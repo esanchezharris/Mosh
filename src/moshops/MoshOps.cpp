@@ -310,6 +310,10 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "set_track_input")    return cmdSetTrackInput (args);
     if (name == "list_track_outputs") return cmdListTrackOutputs (args);
     if (name == "set_track_output")   return cmdSetTrackOutput (args);
+    if (name == "insert_tempo_change")    return cmdInsertTempoChange (args);
+    if (name == "remove_tempo_change")    return cmdRemoveTempoChange (args);
+    if (name == "insert_time_sig_change") return cmdInsertTimeSigChange (args);
+    if (name == "remove_time_sig_change") return cmdRemoveTimeSigChange (args);
 
     return errResult (name, "unknown command: " + name);
 }
@@ -570,6 +574,99 @@ juce::var MoshOps::cmdSetTimeSignature (const juce::var& args)
     data->setProperty ("numerator", ts->numerator.get());
     data->setProperty ("denominator", ts->denominator.get());
     return okResult ("set_time_signature", var (data));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SES-001 — the tempo MAP. te::TempoSequence natively supports multi-point tempo
+// and time-sig changes (insert/remove/toBeats/toTime; playback honors the map
+// with no clip-anchoring work). Mosh inserts STEP changes only: curve = 1.0 is
+// the engine's hold-then-jump form (the ramp branch in tracktion_core's
+// Sequence::Section build is gated on curve != +-1.0). Bezier ramps + audio warp
+// are deliberately deferred. set_tempo / set_time_signature keep editing point 0.
+// ─────────────────────────────────────────────────────────────────────────────
+juce::var MoshOps::cmdInsertTempoChange (const juce::var& args)
+{
+    auto& edit = eng.edit();
+    const double time = (double) args.getProperty ("time", -1.0);
+    if (time < 0.0) return errResult ("insert_tempo_change", "missing/negative 'time'");
+    const double bpm = (double) args.getProperty ("bpm", 0.0);
+    if (bpm < 20.0 || bpm > 999.0) return errResult ("insert_tempo_change", "bpm must be 20..999");
+
+    undoManager().beginNewTransaction ("insert_tempo_change");
+    auto setting = edit.tempoSequence.insertTempo (tracktion::TimePosition::fromSeconds (time));
+    if (setting == nullptr) return errResult ("insert_tempo_change", "insertTempo failed");
+    setting->setBpm (bpm);
+    setting->setCurve (1.0f);   // step change (hold previous tempo, jump here)
+
+    logLine ("insert_tempo_change", args, true, {}, true);
+    emitSnapshotInvalidated();
+    auto* data = new DynamicObject();
+    data->setProperty ("time", setting->getStartTime().inSeconds());
+    data->setProperty ("bpm", setting->getBpm());
+    data->setProperty ("count", edit.tempoSequence.getNumTempos());
+    return okResult ("insert_tempo_change", var (data));
+}
+
+juce::var MoshOps::cmdRemoveTempoChange (const juce::var& args)
+{
+    auto& edit = eng.edit();
+    const int index = (int) args.getProperty ("index", -1);
+    // Index 0 is the edit's base tempo (the engine requires a first setting; it is
+    // edited via set_tempo, never removed).
+    if (index <= 0 || index >= edit.tempoSequence.getNumTempos())
+        return errResult ("remove_tempo_change", "index must be 1..numTempos-1");
+
+    undoManager().beginNewTransaction ("remove_tempo_change");
+    // remapEdit=false: Mosh's command surface is seconds-anchored, so removing a
+    // tempo point must not shift clip positions.
+    edit.tempoSequence.removeTempo (index, false);
+    logLine ("remove_tempo_change", args, true, {}, true);
+    emitSnapshotInvalidated();
+    auto* data = new DynamicObject();
+    data->setProperty ("count", edit.tempoSequence.getNumTempos());
+    return okResult ("remove_tempo_change", var (data));
+}
+
+juce::var MoshOps::cmdInsertTimeSigChange (const juce::var& args)
+{
+    auto& edit = eng.edit();
+    const double time = (double) args.getProperty ("time", -1.0);
+    if (time < 0.0) return errResult ("insert_time_sig_change", "missing/negative 'time'");
+    const int num = juce::jlimit (1, 32, (int) args.getProperty ("numerator", 4));
+    const int den = (int) args.getProperty ("denominator", 4);
+    static const int validDen[] = { 1, 2, 4, 8, 16, 32 };
+    bool denOk = false;
+    for (int d : validDen) if (d == den) denOk = true;
+    if (! denOk) return errResult ("insert_time_sig_change", "denominator must be a power of two (1..32)");
+
+    undoManager().beginNewTransaction ("insert_time_sig_change");
+    auto setting = edit.tempoSequence.insertTimeSig (tracktion::TimePosition::fromSeconds (time));
+    if (setting == nullptr) return errResult ("insert_time_sig_change", "insertTimeSig failed");
+    setting->setStringTimeSig (juce::String (num) + "/" + juce::String (den));
+
+    logLine ("insert_time_sig_change", args, true, {}, true);
+    emitSnapshotInvalidated();
+    auto* data = new DynamicObject();
+    data->setProperty ("numerator", setting->numerator.get());
+    data->setProperty ("denominator", setting->denominator.get());
+    data->setProperty ("count", edit.tempoSequence.getNumTimeSigs());
+    return okResult ("insert_time_sig_change", var (data));
+}
+
+juce::var MoshOps::cmdRemoveTimeSigChange (const juce::var& args)
+{
+    auto& edit = eng.edit();
+    const int index = (int) args.getProperty ("index", -1);
+    if (index <= 0 || index >= edit.tempoSequence.getNumTimeSigs())
+        return errResult ("remove_time_sig_change", "index must be 1..numTimeSigs-1");
+
+    undoManager().beginNewTransaction ("remove_time_sig_change");
+    edit.tempoSequence.removeTimeSig (index);
+    logLine ("remove_time_sig_change", args, true, {}, true);
+    emitSnapshotInvalidated();
+    auto* data = new DynamicObject();
+    data->setProperty ("count", edit.tempoSequence.getNumTimeSigs());
+    return okResult ("remove_time_sig_change", var (data));
 }
 
 juce::var MoshOps::cmdSetMetronome (const juce::var& args)
@@ -3772,6 +3869,34 @@ juce::var MoshOps::snapshot()
     {
         session->setProperty ("timeSigNumerator", ts->numerator.get());
         session->setProperty ("timeSigDenominator", ts->denominator.get());
+    }
+
+    // SES-001 — the full tempo MAP (additive: tempo/timeSig* above stay point 0 for
+    // every existing consumer). Engine-ordered; times in seconds via the engine's
+    // own beats->seconds conversion, so the UI's piecewise mapping starts exact.
+    {
+        Array<var> tempoMap;
+        for (int i = 0; i < edit.tempoSequence.getNumTempos(); ++i)
+            if (auto* t = edit.tempoSequence.getTempo (i))
+            {
+                auto* o = new DynamicObject();
+                o->setProperty ("time", t->getStartTime().inSeconds());
+                o->setProperty ("bpm", t->getBpm());
+                tempoMap.add (var (o));
+            }
+        session->setProperty ("tempoMap", tempoMap);
+
+        Array<var> sigMap;
+        for (int i = 0; i < edit.tempoSequence.getNumTimeSigs(); ++i)
+            if (auto* s = edit.tempoSequence.getTimeSig (i))
+            {
+                auto* o = new DynamicObject();
+                o->setProperty ("time", edit.tempoSequence.toTime (s->getStartBeat()).inSeconds());
+                o->setProperty ("numerator", s->numerator.get());
+                o->setProperty ("denominator", s->denominator.get());
+                sigMap.add (var (o));
+            }
+        session->setProperty ("timeSigMap", sigMap);
     }
     session->setProperty ("metronome", edit.clickTrackEnabled.get());
     session->setProperty ("length", edit.getLength().inSeconds());

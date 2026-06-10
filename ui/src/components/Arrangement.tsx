@@ -3,7 +3,7 @@ import { useStore } from "../store";
 import type { Snapshot, Track } from "../types";
 import { Clip } from "./Clip";
 import { InlineAutomationLane, InlineAutoPicker } from "./InlineAutomationLane";
-import { meterFrom, barSeconds, beatSeconds, SNAP_DIVISIONS } from "../time";
+import { tempoMapFrom, gridLines, SNAP_DIVISIONS } from "../time";
 
 const RULER_SECONDS = 48;
 
@@ -28,10 +28,10 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
   // MIX-008 — group (submix) entries live in the Mixer, not as arrangement lanes;
   // their member tracks render here indented (via parentId).
   const laneTracks = snapshot.tracks.filter((tr) => !tr.isGroup);
-  const m = meterFrom(snapshot.session);
-  const barSec = barSeconds(m);
-  const beatSec = beatSeconds(m);
-  const numBars = Math.max(1, Math.ceil(RULER_SECONDS / barSec) + 1);
+  // SES-001 — bar/beat boundaries come from the piecewise tempo map (exact for
+  // the step changes the commands create); constant sessions render as before.
+  const tmap = tempoMapFrom(snapshot.session);
+  const grid = gridLines(tmap, 0, RULER_SECONDS);
 
   const seekRuler = (e: React.MouseEvent, el: Element) => {
     const rect = el.getBoundingClientRect();
@@ -136,23 +136,19 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
             onPointerMove={onRulerMove}
             onPointerUp={onRulerUp}
           >
-            {Array.from({ length: numBars }, (_, b) => (
-              <div className="tick bar" key={`bar-${b}`} style={{ left: b * barSec * pxPerSec }}>
-                <span>{b + 1}</span>
+            {grid.bars.map((b) => (
+              <div className="tick bar" key={`bar-${b.sec}`} style={{ left: b.sec * pxPerSec }}>
+                <span>{b.label}</span>
               </div>
             ))}
-            {numBars * m.num < 400 &&
-              Array.from({ length: numBars }, (_, b) =>
-                Array.from({ length: m.num }, (_, beat) =>
-                  beat === 0 ? null : (
-                    <div
-                      className="tick beat"
-                      key={`beat-${b}-${beat}`}
-                      style={{ left: (b * m.num + beat) * beatSec * pxPerSec }}
-                    />
-                  )
-                )
-              )}
+            {grid.beats.map((sec) => (
+              <div className="tick beat" key={`beat-${sec}`} style={{ left: sec * pxPerSec }} />
+            ))}
+            {grid.marks.map((mk) => (
+              <div className="tick tempo-mark" key={`mk-${mk.sec}`} style={{ left: mk.sec * pxPerSec }} title={`Tempo/meter change: ${mk.label}`}>
+                <span>{mk.label}</span>
+              </div>
+            ))}
             {t.looping && t.loopEnd > t.loopStart && (
               <div
                 className="loopregion"
@@ -179,8 +175,8 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
           >
             {/* Musical gridlines (bar lines bright, beats faint) — same mapping as the ruler. */}
             <div className="gridlines" style={{ height: lanesHeight }}>
-              {Array.from({ length: numBars }, (_, b) => (
-                <div className="gl bar" key={`glb-${b}`} style={{ left: b * barSec * pxPerSec }} />
+              {grid.bars.map((b) => (
+                <div className="gl bar" key={`glb-${b.sec}`} style={{ left: b.sec * pxPerSec }} />
               ))}
             </div>
             {laneTracks.length === 0 && (
