@@ -215,3 +215,20 @@ transitions.
   algorithmic-art skill's discipline; expressed in the 009 shader, not p5).
 - Parked next: a bitmap face for HUD numerals from ianhan/BitmapFonts (user link);
   the real per-band engine feed in src/ (user approved).
+
+## v11 (2026-06-10) — THE ROOM and THE HEFT
+
+User: "we're definitely not in passthrough mode, so we definitely have a background —
+and it should be informed by the artifact. And all the other components look so cheap
+now… everything in our DAW as physical and tactile as the artifact, not so dinky."
+
+- **THE ROOM:** the shader's miss path is no longer void. A dithered ground plane
+  (y = −0.92) sits under the artifact; the stone casts a **contact glow** onto it
+  (scaled by heat/wild/completeness/lume); a faint 4-band aura in the artifact's own
+  cosine-palette hue family breathes around it. The background is literally informed
+  by the artifact — same uniforms, same register, one pass.
+- **THE HEFT:** no panels returned — the instruments themselves gained mass.
+  Machined knobs (socket rings, deep throw, glowing ticks, 44px), a playhead with a
+  needle head, clips as beveled cartridges (translucent but BUILT), letterpress lane
+  names, recessed meter trays, thicker chips with deeper press, and the ask line
+  became a console rail. Objects in the room, not labels on glass.

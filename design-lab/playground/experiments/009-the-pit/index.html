@@ -270,6 +270,63 @@
   .knob.mini { width: 25px; height: 25px; }
   .knob.mini i { top: 3px; height: 7px; width: 2px; margin-left: -1px; transform-origin: 50% 9.5px; }
   .chaincluster .klbl { font-size: 7px; }
+
+  /* ── THE HEFT PASS (user: "not so dinky — as physical and tactile as the
+     artifact"). No panels return; the INSTRUMENTS themselves gain mass:
+     bevels, sockets, needles, trays. Objects in the room, not labels on glass. */
+
+  /* clips: cartridges — translucent but BUILT */
+  .clip { background:
+      linear-gradient(180deg, rgba(246,242,235,.10) 0, rgba(246,242,235,.02) 3px,
+                      transparent 42%, rgba(0,0,0,.45) 100%),
+      rgba(13,13,12,.74) !important;
+    border: 2px solid #232613; border-radius: 7px;
+    box-shadow: 0 4px 0 rgba(0,0,0,.85), inset 0 1px 0 rgba(246,242,235,.16),
+                0 0 0 1px rgba(204,255,35,.13); }
+  .clip .cn { color: rgba(246,242,235,.78); text-shadow: 0 1px 0 #000; }
+  .clip canvas { opacity: .68; }
+
+  /* knobs: machined — socket ring, deep throw, hot tick */
+  .knob { width: 44px; height: 44px;
+    background: radial-gradient(circle at 50% 36%, #343821 0 26%, #15160f 60%, #060606 100%);
+    box-shadow: 0 5px 0 #000, 0 0 0 2px #232613,
+                inset 0 2px 1px rgba(246,242,235,.20), inset 0 -4px 5px rgba(0,0,0,.75); }
+  .knob::after { content: ''; position: absolute; inset: -6px; border-radius: 50%;
+    box-shadow: inset 0 2px 3px rgba(0,0,0,.8), inset 0 -1px 0 rgba(246,242,235,.06);
+    pointer-events: none; }
+  .knob i { width: 4px; height: 14px; margin-left: -2px; transform-origin: 50% 18px;
+    box-shadow: 0 0 5px rgba(204,255,35,.55); }
+  .knob.mini { width: 30px; height: 30px; }
+  .knob.mini i { width: 3px; height: 9px; margin-left: -1.5px; transform-origin: 50% 11px; }
+  .klbl { font-size: 9.5px; opacity: .7; }
+  .kval { font-size: 13px; opacity: .85; text-shadow: 0 1px 0 #000; }
+
+  /* playhead: a needle with a head, not a hairline */
+  #phead { width: 2px; opacity: 1; box-shadow: 0 0 4px rgba(204,255,35,.4); }
+  #phead::before { content: ''; position: absolute; top: -3px; left: 50%;
+    transform: translateX(-50%); border: 7px solid transparent;
+    border-top: 10px solid var(--lime); filter: drop-shadow(0 2px 0 #000); }
+
+  /* lane furniture: letterpress names, recessed meter trays */
+  .lhead .nm { font-size: 15px; text-shadow: 0 2px 0 rgba(0,0,0,.9); }
+  .lhead .ms { text-shadow: 0 1px 0 #000; }
+  .lhead .vol { height: 9px; border-radius: 3px;
+    box-shadow: inset 0 2px 2px rgba(0,0,0,.85), 0 1px 0 rgba(246,242,235,.05); }
+  .sbar { height: 10px;
+    box-shadow: inset 0 2px 2px rgba(0,0,0,.85), 0 1px 0 rgba(246,242,235,.05); }
+
+  /* chips + buttons: thicker plastic, deeper press */
+  .ghost { border-width: 2px; padding: 4px 12px; font-size: 9.5px;
+    box-shadow: 0 3px 0 #000, inset 0 1px 0 rgba(246,242,235,.10); }
+  .ghost:active { transform: translateY(3px); box-shadow: 0 0 0 #000; }
+  #recchip { border-width: 2px; box-shadow: 0 3px 0 #000, inset 0 1px 0 rgba(246,242,235,.10); }
+  .deed { border-width: 2px; box-shadow: 0 3px 0 rgba(0,0,0,.8), inset 0 1px 0 rgba(246,242,235,.08); }
+
+  /* the ask line becomes a console rail — an instrument, not a floating string */
+  #ask input { background: rgba(10,10,9,.55); border: 2px solid #232613; border-radius: 10px;
+    padding: 9px 14px; box-shadow: inset 0 2px 3px rgba(0,0,0,.75), 0 3px 0 #000;
+    border-bottom: 2px solid #232613; }
+  #ask input:focus { border-color: rgba(204,255,35,.5); }
 </style>
 </head>
 <body>
@@ -482,7 +539,29 @@ void main() {
     if (t > 5.0) break;
   }
 
-  vec4 outc = vec4(0.0);
+  // THE ROOM — we are NOT in passthrough: the artifact informs its own
+  // atmosphere. A dithered ground it sits on, a contact glow it casts, and a
+  // faint banded aura in its own hue family. All of it breathes with the song.
+  vec3 room = vec3(0.016, 0.016, 0.015);
+  {
+    if (rd.y < -0.02) {                                  // the ground (y = -0.92)
+      float tf = (-0.92 - ro.y) / rd.y;
+      vec3 gp = ro + rd * tf;
+      float gd = length(gp.xz);
+      float fade = exp(-gd * 0.7) * exp(-max(0.0, tf - 4.0) * 0.4);
+      float gr = n3(vec3(gp.x * 2.6, u_tq * 0.05, gp.z * 2.6));
+      float gband = floor(gr * 3.0 + dth) / 3.0;
+      room += vec3(0.030, 0.032, 0.028) * (0.6 + gband) * fade;
+      room += LIME * exp(-gd * 1.9) * fade                // contact glow: the stone
+            * (0.030 + 0.10 * u_heat + 0.035 * u_wild)    // lights its own floor
+            * (0.25 + 0.75 * u_complete) * u_lume;
+    }
+    float aur = exp(-dot(uv, uv) * 4.5) * (0.10 + 0.30 * u_wild + 0.55 * u_heat);
+    vec3 ac = clamp(vec3(0.5) + vec3(0.5)
+            * cos(6.2831853 * (vec3(0.853, 0.0, 0.379) + u_hue)), 0.0, 1.0);
+    room += ac * (floor(aur * 4.0 + dth) / 4.0) * 0.055 * u_lume * smoothstep(0.1, 0.6, u_complete);
+  }
+  vec4 outc = vec4(room, 1.0);
   if (hit) {
     // core hit = molten
     map(hp);
