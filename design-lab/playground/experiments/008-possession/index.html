@@ -147,9 +147,27 @@
   /* Moshi, resident */
   #moshi { position: fixed; bottom: 218px; left: 22px; width: 92px; height: 80px; z-index: 21;
     pointer-events: none; }
+
+  /* ── PS2 CRUNCH — house style v1 (see design-lab/HOUSE_STYLE.md) ── */
+  #crt { position: fixed; inset: 0; z-index: 80; pointer-events: none;
+    background: repeating-linear-gradient(0deg, rgba(0,0,0,.18) 0 1px, transparent 1px 3px); }
+  .slabpanel, .lhead, .lbody, #topbar {
+    background-image: radial-gradient(rgba(204,255,35,.05) 1px, transparent 1.01px);
+    background-size: 3px 3px; }
+  .slabpanel, .lhead, .lbody, .clip, .pill, .deed, #recchip, .ghost, .badge { border-radius: 2px; }
+  #wordmark b { text-shadow: none; }
+  .clip, .lhead .vol i, .prow .track i, .deed { box-shadow: none; }
+  .prow .track { height: 3px;
+    background: repeating-linear-gradient(90deg, rgba(246,242,235,.22) 0 1px, rgba(246,242,235,.05) 1px 10px); }
+  .prow .track u { border-radius: 0; width: 7px; height: 13px; box-shadow: none; }
+  #phead { box-shadow: none; }
+  body.rec #recchip { box-shadow: none; animation: heat 1.1s steps(2, end) infinite; }
+  .deed { animation-timing-function: steps(4, end); }
+  #moshi { image-rendering: pixelated; }
 </style>
 </head>
 <body>
+<div id="crt"></div>
 <div id="roomheat"></div>
 
 <div id="topbar">
@@ -191,7 +209,7 @@
 
 <div id="dock" class="mono"><span id="tgChain" class="on">CHAIN</span><span id="tgRack" class="on">THE RACK</span></div>
 <div id="ask"><input id="cmd" placeholder="tell moshi — “punch me in after the hook”" autocomplete="off" /></div>
-<canvas id="moshi" width="184" height="160"></canvas>
+<canvas id="moshi" width="46" height="40"></canvas>
 
 <script>
 // POSSESSION — the shipping UI's exact skeleton (topbar / ruler / lanes / clips /
@@ -320,36 +338,30 @@ document.getElementById('render').onclick = () => {
 // ---- Moshi, resident (tiny canvas blob; ember = REC) ----
 const mc = document.getElementById('moshi'), mg = mc.getContext('2d');
 function drawMoshi(t, recAmt) {
-  mg.clearRect(0, 0, 184, 160);
-  const cx = 92, cy = 92, R = 46 * (1 + .04 * Math.sin(t * 1.4));
+  mg.clearRect(0, 0, 46, 40);
+  mg.imageSmoothingEnabled = false;
+  const cx = 23, cy = 19, R = 12 * (1 + 0.06 * Math.sin(t * 1.4));
+  // chunky sprite: coarse polygon snapped to the pixel grid, no glow
   mg.beginPath();
-  for (let i = 0; i <= 64; i++) {
-    const th = i / 64 * Math.PI * 2;
-    const r = R * (1 + .12 * Math.sin(th * 3 + t * .8) + .06 * Math.sin(th * 5 - t * .5));
-    const x = cx + Math.cos(th) * r, y = cy + Math.sin(th) * r * .9;
+  for (let i = 0; i <= 14; i++) {
+    const th = i / 14 * Math.PI * 2;
+    const r = R * (1 + 0.16 * Math.sin(th * 3 + t * 0.8));
+    const x = Math.round(cx + Math.cos(th) * r), y = Math.round(cy + Math.sin(th) * r * 0.9);
     i ? mg.lineTo(x, y) : mg.moveTo(x, y);
   }
   mg.closePath();
-  mg.fillStyle = '#0d0d0c';
-  mg.shadowColor = `rgba(204,255,35,${.3 + .5 * recAmt})`;
-  mg.shadowBlur = 18 + 16 * recAmt;
-  mg.fill(); mg.shadowBlur = 0;
-  mg.strokeStyle = `rgba(204,255,35,${.35 + .4 * recAmt})`;
-  mg.lineWidth = 1.2; mg.stroke();
-  if (recAmt > .02) {                               // the ember
-    const hg = mg.createRadialGradient(cx, cy + 4, 2, cx, cy + 4, R * .8);
-    hg.addColorStop(0, `rgba(217,255,76,${.55 * recAmt * (0.7 + 0.3 * Math.sin(t * 7))})`);
-    hg.addColorStop(1, 'rgba(217,255,76,0)');
-    mg.fillStyle = hg; mg.beginPath(); mg.arc(cx, cy + 4, R * .8, 0, 7); mg.fill();
+  mg.fillStyle = '#0d0d0c'; mg.fill();
+  mg.strokeStyle = recAmt > .5 ? '#D9FF4C' : '#CCFF23';
+  mg.lineWidth = 1; mg.stroke();
+  mg.fillStyle = '#F6F2EB';                                    // bracket eyes, pixel by pixel
+  mg.fillRect(cx - 8, cy - 5, 2, 2); mg.fillRect(cx - 6, cy - 3, 2, 2); mg.fillRect(cx - 8, cy - 1, 2, 2);
+  mg.fillRect(cx + 6, cy - 5, 2, 2); mg.fillRect(cx + 4, cy - 3, 2, 2); mg.fillRect(cx + 6, cy - 1, 2, 2);
+  mg.fillStyle = '#CCFF23';                                    // mouth block, opens when hot
+  mg.fillRect(cx - 3, cy + 3, 6, 3 + Math.round(3 * recAmt));
+  if (recAmt > 0.5 && Math.floor(t * 8) % 2 === 0) {           // ember flicker
+    mg.fillStyle = 'rgba(217,255,76,.5)';
+    mg.fillRect(cx - 2, cy + 1, 4, 2);
   }
-  mg.fillStyle = '#F6F2EB';
-  mg.font = '900 17px "Archivo Black","Helvetica Neue",sans-serif';
-  mg.textAlign = 'center';
-  mg.fillText('>', cx - 14, cy - 2); mg.fillText('<', cx + 14, cy - 2);
-  mg.fillStyle = '#CCFF23';
-  mg.shadowColor = 'rgba(217,255,76,.8)'; mg.shadowBlur = 8;
-  mg.beginPath(); mg.ellipse(cx, cy + 14, 8, 5 + 3 * recAmt, 0, 0, Math.PI); mg.fill();
-  mg.shadowBlur = 0;
 }
 
 // ---- the loop: playhead line + peristaltic pulse through the lanes ----

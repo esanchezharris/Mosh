@@ -82,9 +82,15 @@
         letter-spacing: .1em; color: var(--lime); opacity: 0; transition: opacity .4s; }
   #hint { bottom: 14px; left: 50%; transform: translateX(-50%); font-size: 9.5px;
         letter-spacing: .12em; opacity: .28; }
+
+  /* PS2 CRUNCH (house style v1) */
+  #crt2 { position: fixed; inset: 0; z-index: 90; pointer-events: none;
+    background: repeating-linear-gradient(0deg, rgba(0,0,0,.18) 0 1px, transparent 1px 3px); }
+  canvas { image-rendering: pixelated; }
 </style>
 </head>
 <body>
+<div id="crt2"></div>
 <svg width="0" height="0" style="position:fixed">
   <filter id="gooF">
     <feGaussianBlur in="SourceGraphic" stdDeviation="8" result="b" />

@@ -38,3 +38,17 @@ is a demo fiction; the engine's onset feed is the Wave-3 wiring.
 
 **Steal even if killed.** The dither/posterize/on-twos rendering stack as Mosh's
 house 3D style; rack-sculpts-the-centerpiece as the Color Rack's reason to exist.
+
+---
+
+## v2 (2026-06-10) — house style + engine link
+
+- The PS2-crunch register born here is now codified in [HOUSE_STYLE.md](../HOUSE_STYLE.md)
+  and applied lab-wide (user direction: the chrome was "too sleek" next to the mass —
+  now: hard 1px seams, dither-speckle slabs, notched tracks, square thumbs, steps()
+  motion, scanlines, sprite Moshi).
+- **Engine link:** with `MOSH_LAB_FEED=1`, the page polls the companion server —
+  real transport position replaces the demo clock, master meters drive energy,
+  level flux drives the slam. `ENGINE ●` chip in the transport shows link state.
+- **The song is geology:** each section reseeds the kifs fold — a different chunk
+  of matter per section, so *where you are* is *what the rock looks like*.

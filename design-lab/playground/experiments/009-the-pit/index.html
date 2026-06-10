@@ -113,9 +113,27 @@
   #ask input:focus { border-bottom-color: rgba(204,255,35,.6); }
   #moshi { position: fixed; bottom: 218px; left: 22px; width: 92px; height: 80px; z-index: 21;
     pointer-events: none; }
+
+  /* ── PS2 CRUNCH — house style v1 (see design-lab/HOUSE_STYLE.md) ── */
+  #crt { position: fixed; inset: 0; z-index: 80; pointer-events: none;
+    background: repeating-linear-gradient(0deg, rgba(0,0,0,.18) 0 1px, transparent 1px 3px); }
+  .slabpanel, .lhead, .lbody, #topbar {
+    background-image: radial-gradient(rgba(204,255,35,.05) 1px, transparent 1.01px);
+    background-size: 3px 3px; }
+  .slabpanel, .lhead, .lbody, .clip, .pill, .deed, #recchip, .ghost, .badge { border-radius: 2px; }
+  #wordmark b { text-shadow: none; }
+  .clip, .lhead .vol i, .prow .track i, .deed { box-shadow: none; }
+  .prow .track { height: 3px;
+    background: repeating-linear-gradient(90deg, rgba(246,242,235,.22) 0 1px, rgba(246,242,235,.05) 1px 10px); }
+  .prow .track u { border-radius: 0; width: 7px; height: 13px; box-shadow: none; }
+  #phead { box-shadow: none; }
+  body.rec #recchip { box-shadow: none; animation: heat 1.1s steps(2, end) infinite; }
+  .deed { animation-timing-function: steps(4, end); }
+  #moshi { image-rendering: pixelated; }
 </style>
 </head>
 <body>
+<div id="crt"></div>
 <canvas id="pit"></canvas>
 <div id="roomheat"></div>
 
@@ -126,6 +144,7 @@
     <span id="tc">BAR 1.1 · 0:00.0</span>
     <span style="opacity:.5">120 BPM</span>
     <span id="sect" style="color:var(--lime)">VERSE 1</span>
+    <span id="link" style="font-size:9px;letter-spacing:.16em;opacity:.45">DEMO CLOCK</span>
   </div>
   <div id="recchip" class="mono">● REC (R)</div>
 </div>
@@ -156,7 +175,7 @@
 </div>
 
 <div id="ask"><input id="cmd" placeholder="tell moshi — “make the hook heavier”" autocomplete="off" /></div>
-<canvas id="moshi" width="184" height="160"></canvas>
+<canvas id="moshi" width="46" height="40"></canvas>
 
 <script>
 // THE PIT — answer to "where did my daw go / 3d / rougher / weirder".
@@ -178,6 +197,7 @@ uniform float u_rotA, u_rotB;        // beat-jolted angles (stepped in JS)
 uniform float u_spin;                // song position -> revolution
 uniform float u_grit, u_air, u_epic; // the rack
 uniform float u_energy, u_onset, u_heat, u_bright;
+uniform float u_sect;   // song section -> a different chunk of matter
 
 const vec3 LIME = vec3(0.800, 1.000, 0.137);
 const vec3 GLOW = vec3(0.851, 1.000, 0.298);
@@ -213,11 +233,13 @@ float map(vec3 p) {
   p.x += sign(p.x) * u_heat * 0.11;                  // REC: it splits
   vec3 q = p;
   float crack = 1e9;
+  float sd  = fract(sin((u_sect + 1.0) * 12.9898) * 43758.5453);   // per-section seed:
+  float sd2 = fract(sd * 91.7);                                     // the song is geology
   for (int i = 0; i < 4; i++) {
-    q = abs(q) - vec3(0.30 + 0.10 * u_epic, 0.24, 0.27);
+    q = abs(q) - vec3(0.26 + 0.10 * u_epic + 0.09 * sd, 0.22 + 0.05 * sd2, 0.27);
     crack = min(crack, min(abs(q.x), abs(q.y)));
-    q.xy = r2(0.58 + 0.45 * u_grit + 0.03 * sin(u_tq * 0.6)) * q.xy;
-    q.yz = r2(0.47 - 0.22 * u_air) * q.yz;
+    q.xy = r2(0.50 + 0.45 * u_grit + 0.45 * sd2 + 0.03 * sin(u_tq * 0.6)) * q.xy;
+    q.yz = r2(0.47 - 0.22 * u_air + 0.25 * sd * sd) * q.yz;
   }
   float d = (abs(q.x) + abs(q.y) + abs(q.z) - (0.34 + 0.10 * u_epic + 0.04 * u_energy)) * 0.42;
   d -= u_grit * 0.045 * (n3(q * 7.0 + u_tq * 0.8) - 0.5) * 2.0;   // rough hide
@@ -296,7 +318,7 @@ const al = gl.getAttribLocation(prog, 'a');
 gl.enableVertexAttribArray(al);
 gl.vertexAttribPointer(al, 2, gl.FLOAT, false, 0, 0);
 const U = {};
-for (const n of ['u_res','u_time','u_tq','u_rotA','u_rotB','u_spin','u_grit','u_air','u_epic','u_energy','u_onset','u_heat','u_bright'])
+for (const n of ['u_res','u_time','u_tq','u_rotA','u_rotB','u_spin','u_grit','u_air','u_epic','u_energy','u_onset','u_heat','u_bright','u_sect'])
   U[n] = gl.getUniformLocation(prog, n);
 
 function resize() {
@@ -397,42 +419,44 @@ document.getElementById('render').onclick = () => {
 // ---------- Moshi, resident, watching its sculpture ----------
 const mc = document.getElementById('moshi'), mg = mc.getContext('2d');
 function drawMoshi(t, recAmt) {
-  mg.clearRect(0, 0, 184, 160);
-  const cx = 92, cy = 92, R = 46 * (1 + .04 * Math.sin(t * 1.4));
+  mg.clearRect(0, 0, 46, 40);
+  mg.imageSmoothingEnabled = false;
+  const cx = 23, cy = 19, R = 12 * (1 + 0.06 * Math.sin(t * 1.4));
+  // chunky sprite: coarse polygon snapped to the pixel grid, no glow
   mg.beginPath();
-  for (let i = 0; i <= 64; i++) {
-    const th = i / 64 * Math.PI * 2;
-    const r = R * (1 + .12 * Math.sin(th * 3 + t * .8) + .06 * Math.sin(th * 5 - t * .5));
-    i ? mg.lineTo(cx + Math.cos(th) * r, cy + Math.sin(th) * r * .9)
-      : mg.moveTo(cx + Math.cos(th) * r, cy + Math.sin(th) * r * .9);
+  for (let i = 0; i <= 14; i++) {
+    const th = i / 14 * Math.PI * 2;
+    const r = R * (1 + 0.16 * Math.sin(th * 3 + t * 0.8));
+    const x = Math.round(cx + Math.cos(th) * r), y = Math.round(cy + Math.sin(th) * r * 0.9);
+    i ? mg.lineTo(x, y) : mg.moveTo(x, y);
   }
   mg.closePath();
-  mg.fillStyle = '#0d0d0c';
-  mg.shadowColor = `rgba(204,255,35,${.3 + .5 * recAmt})`;
-  mg.shadowBlur = 18 + 16 * recAmt;
-  mg.fill(); mg.shadowBlur = 0;
-  mg.strokeStyle = `rgba(204,255,35,${.35 + .4 * recAmt})`;
-  mg.lineWidth = 1.2; mg.stroke();
-  mg.fillStyle = '#F6F2EB';
-  mg.font = '900 17px "Archivo Black","Helvetica Neue",sans-serif';
-  mg.textAlign = 'center';
-  mg.fillText('>', cx - 14, cy - 2); mg.fillText('<', cx + 14, cy - 2);
-  mg.fillStyle = '#CCFF23';
-  mg.shadowColor = 'rgba(217,255,76,.8)'; mg.shadowBlur = 8;
-  mg.beginPath(); mg.ellipse(cx, cy + 14, 8, 5 + 3 * recAmt, 0, 0, Math.PI); mg.fill();
-  mg.shadowBlur = 0;
+  mg.fillStyle = '#0d0d0c'; mg.fill();
+  mg.strokeStyle = recAmt > .5 ? '#D9FF4C' : '#CCFF23';
+  mg.lineWidth = 1; mg.stroke();
+  mg.fillStyle = '#F6F2EB';                                    // bracket eyes, pixel by pixel
+  mg.fillRect(cx - 8, cy - 5, 2, 2); mg.fillRect(cx - 6, cy - 3, 2, 2); mg.fillRect(cx - 8, cy - 1, 2, 2);
+  mg.fillRect(cx + 6, cy - 5, 2, 2); mg.fillRect(cx + 4, cy - 3, 2, 2); mg.fillRect(cx + 6, cy - 1, 2, 2);
+  mg.fillStyle = '#CCFF23';                                    // mouth block, opens when hot
+  mg.fillRect(cx - 3, cy + 3, 6, 3 + Math.round(3 * recAmt));
+  if (recAmt > 0.5 && Math.floor(t * 8) % 2 === 0) {           // ember flicker
+    mg.fillStyle = 'rgba(217,255,76,.5)';
+    mg.fillRect(cx - 2, cy + 1, 4, 2);
+  }
 }
 
 // ---------- the loop: beat clock, on-twos rotation, uniforms ----------
-let rotA = 0, rotB = 0, rotTA = 0, rotTB = 0, lastBeat = -1, lastTick = 0;
+let rotA = 0, rotB = 0, rotTA = 0, rotTB = 0, lastBeat = -1, lastTick = 0, lastSect = -1;
 let onsetEnv = 0, recAmt = 0, energy = .4, tq = 0;
+let enginePos = 0, engineEnergy = 0;
 const phead = document.getElementById('phead');
 const arrange = document.getElementById('arrange');
 const t0 = performance.now(); let last = t0;
 
 function frame(now) {
   const t = (now - t0) / 1000, dt = Math.min(.05, (now - last) / 1000); last = now;
-  if (playing) tPos = (tPos + dt / SONG_S) % 1;
+  if (FEED.on) tPos = (((enginePos % SONG_S) + SONG_S) % SONG_S) / SONG_S;
+  else if (playing) tPos = (tPos + dt / SONG_S) % 1;
   recAmt += ((rec ? 1 : 0) - recAmt) * .07;
   renderFlare *= 0.985;
 
@@ -445,8 +469,14 @@ function frame(now) {
     rotTA += (Math.random() * 2.2 - 1.1) * (hard ? 1 : 0.4);
     rotTB += (Math.random() * 1.4 - 0.7) * (hard ? 1 : 0.4);
   }
+  const sectIdx = Math.floor(tPos * 8);
+  if (sectIdx !== lastSect) {                              // new section = new matter
+    if (lastSect >= 0) { onsetEnv = 1; rotTA += 1.8 * (Math.random() - 0.5); }
+    lastSect = sectIdx;
+  }
   onsetEnv *= 0.90;
-  energy = 0.30 + 0.55 * onsetEnv + 0.25 * axes.grit;
+  energy = FEED.on ? Math.min(1, 0.12 + engineEnergy * 1.15 + 0.30 * onsetEnv)
+                   : 0.30 + 0.55 * onsetEnv + 0.25 * axes.grit;
 
   // on twos: rotation + texture time snap at 12fps
   if (t - lastTick > 1 / 12) {
@@ -477,6 +507,7 @@ function frame(now) {
   gl.uniform1f(U.u_onset, onsetEnv);
   gl.uniform1f(U.u_heat, heat);
   gl.uniform1f(U.u_bright, axes.air);
+  gl.uniform1f(U.u_sect, sectIdx);
   gl.drawArrays(gl.TRIANGLES, 0, 3);
 
   drawMoshi(t, recAmt);
@@ -484,6 +515,66 @@ function frame(now) {
 }
 requestAnimationFrame(frame);
 deed('session restored · 3 tracks');
+
+// ── ENGINE LINK ── polls the Mosh companion server for real transport + levels.
+// Run the app with MOSH_LAB_FEED=1 (token: MOSH_LAB_TOKEN, default "mosh-lab").
+// Graceful: without it, the demo clock above keeps everything alive.
+const FEED = {
+  base: 'http://127.0.0.1:47873',
+  token: new URLSearchParams(location.search).get('token') || 'mosh-lab',
+  seq: 0, on: false, lastLin: 0,
+};
+const linkEl = document.getElementById('link');
+async function feedPost(path, body) {
+  const r = await fetch(FEED.base + path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token: FEED.token, ...body }),
+    signal: AbortSignal.timeout(2500),
+  });
+  return r.json();
+}
+function feedEvent(ev) {
+  const p = ev.payload || {};
+  if (ev.type === 'transport') {
+    enginePos = +p.position || 0;
+    playing = !!p.playing;
+    const r = !!p.recording;
+    if (r !== rec) { rec = r; document.body.classList.toggle('rec', r); }
+  } else if (ev.type === 'levels') {
+    const m = p.master || {};
+    const db = Math.max(m.l ?? -100, m.r ?? -100);
+    const lin = Math.pow(10, Math.min(0, db) / 20);     // peak dBFS -> 0..1
+    engineEnergy += (Math.min(1, lin * 1.5) - engineEnergy) * 0.5;
+    if (lin - FEED.lastLin > 0.16) onsetEnv = 1;        // flux -> slam
+    FEED.lastLin = lin;
+  }
+  if (ev.seq) FEED.seq = Math.max(FEED.seq, ev.seq);
+}
+async function feedLoop() {
+  try {
+    const h = await fetch(FEED.base + '/health', { signal: AbortSignal.timeout(1200) });
+    if (!h.ok) throw 0;
+    const j = await feedPost('/events', { since: FEED.seq });
+    if (!j.ok) throw 0;
+    if (!FEED.on) {
+      FEED.on = true;
+      linkEl.textContent = 'ENGINE \u25CF';
+      linkEl.style.color = 'var(--lime)'; linkEl.style.opacity = '.9';
+      feedPost('/command', { command: { command: 'enable_all_meters', args: {} } }).catch(() => {});
+      deed('engine linked \u00b7 real transport + meters');
+    }
+    for (const ev of ((j.data && j.data.events) || [])) feedEvent(ev);
+    setTimeout(feedLoop, 40);
+  } catch {
+    if (FEED.on) { engineEnergy = 0; }
+    FEED.on = false;
+    linkEl.textContent = 'DEMO CLOCK';
+    linkEl.style.color = ''; linkEl.style.opacity = '.45';
+    setTimeout(feedLoop, 4000);
+  }
+}
+feedLoop();
 </script>
 </body>
 </html>

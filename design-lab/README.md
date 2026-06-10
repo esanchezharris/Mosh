@@ -15,6 +15,7 @@ deliberately untouched by anything in here: the lab is upstream of the product.
 | [BRIEF.md](BRIEF.md) | The fiction + hard constraints. Feed it whole to any designer, human or model. |
 | [TOOLS.md](TOOLS.md) | The surplus: every design tool wired into this environment and when to reach for it. |
 | [tokens/moshi.css](tokens/moshi.css) | Canonical palette + type. Exact values are a constraint. |
+| [HOUSE_STYLE.md](HOUSE_STYLE.md) | **The register: PS2 crunch.** Dither bands, quarter-res, on-twos, hard chrome — rules for every surface. |
 | [inspiration/INDEX.md](inspiration/INDEX.md) | ~150 reference links, identified and tagged by theme. |
 | [playground/](playground/) | Vite app. Gallery of live experiments — each one self-contained HTML. |
 | [concepts/](concepts/) | One-pager per named design direction: thesis, how it meets the constraints, what to steal. |
@@ -80,9 +81,11 @@ into eight motifs with steal-this mappings).
 
 ## Parked (next waves)
 
-- **Real audio features** into experiments — needs a WebSocket tap on the engine's
-  30 Hz transport/level feed (the experiments already expose `energy/onset/brightness`
-  params with mouse + mic fallbacks, so wiring is mechanical).
+- ~~Real audio features~~ **DONE (2026-06-10):** run Mosh with `MOSH_LAB_FEED=1` and 009
+  links to the companion server (port 47873) — real transport position drives the bars,
+  master meters drive energy/slams (`enable_all_meters` is sent automatically). Token:
+  `MOSH_LAB_TOKEN` (default `mosh-lab`), or `?token=` on the page URL. Other experiments
+  adopt the same client as they're revisited.
 - **Rive / diffusion-baked Moshi sprites** — prior research says bake offline, SDF for
   continuous motion. Experiment 002 informs whether/when to invest.
 - **Avalonia code** — notes only until the native-surface decision is firm.

@@ -36,9 +36,15 @@
   @keyframes rp { 50% { box-shadow: 0 0 44px rgba(217,255,76,.7); } }
   #err { top: 50%; left: 50%; transform: translate(-50%,-50%); color: var(--lime);
          font-size: 12px; display: none; }
+
+  /* PS2 CRUNCH (house style v1) */
+  #crt2 { position: fixed; inset: 0; z-index: 90; pointer-events: none;
+    background: repeating-linear-gradient(0deg, rgba(0,0,0,.18) 0 1px, transparent 1px 3px); }
+  canvas { image-rendering: pixelated; }
 </style>
 </head>
 <body>
+<div id="crt2"></div>
 <canvas id="gl"></canvas>
 <div class="chrome" id="title"><b>HEARTH</b>&ensp;001 · v2 — presence in fog</div>
 <div class="chrome tc" id="bar">BAR 1.1</div>
@@ -160,7 +166,7 @@ void main() {
   // vignette into the void + grain (banding dies here)
   float vig = smoothstep(1.30, 0.42, length(uv));
   col = mix(vec3(0.014), col, vig);
-  col += (hash(gl_FragCoord.xy + fract(u_time) * 61.7) - 0.5) * (2.0 / 255.0);
+  col = floor(col * 6.0 + hash(gl_FragCoord.xy + fract(u_time) * 61.7)) / 6.0;   // 6 bands + dither
 
   gl_FragColor = vec4(col, 1.0);
 }`;
@@ -196,7 +202,7 @@ for (const n of ['u_res','u_time','u_energy','u_bright','u_onset','u_heat','u_ba
   U[n] = gl.getUniformLocation(prog, n);
 
 function resize() {
-  const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+  const dpr = 0.25;   // PS2 crunch: quarter-res, nearest
   cv.width = Math.floor(innerWidth * dpr);
   cv.height = Math.floor(innerHeight * dpr);
   gl.viewport(0, 0, cv.width, cv.height);
@@ -287,7 +293,7 @@ function frame(now) {
   barEl.textContent = `BAR ${Math.floor(beats / 4 % BARS) + 1}.${Math.floor(beats % 4) + 1}`;
 
   gl.uniform2f(U.u_res, cv.width, cv.height);
-  gl.uniform1f(U.u_time, t);
+  gl.uniform1f(U.u_time, Math.floor(t * 12) / 12);   // on twos
   gl.uniform1f(U.u_energy, state.energy);
   gl.uniform1f(U.u_bright, state.bright);
   gl.uniform1f(U.u_onset, state.onset);

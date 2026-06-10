@@ -30,9 +30,15 @@
         box-shadow: 0 0 18px rgba(217,255,76,.45); }
   #toast { bottom: 64px; left: 50%; transform: translateX(-50%); font-size: 10.5px;
         letter-spacing: .1em; color: var(--lime); opacity: 0; transition: opacity .4s; }
+
+  /* PS2 CRUNCH (house style v1) */
+  #crt2 { position: fixed; inset: 0; z-index: 90; pointer-events: none;
+    background: repeating-linear-gradient(0deg, rgba(0,0,0,.18) 0 1px, transparent 1px 3px); }
+  canvas { image-rendering: pixelated; }
 </style>
 </head>
 <body>
+<div id="crt2"></div>
 <canvas id="cv"></canvas>
 <div class="chrome" id="title"><b>THE GULLET</b>&ensp;004 · the song is something it's digesting</div>
 <div class="chrome" id="cap">takes are swallowed · the pulse is the playhead · undo = it gives one back</div>
@@ -59,7 +65,7 @@ const LIME = '#CCFF23', GLOW = '#D9FF4C', BONE = '#F6F2EB';
 
 let W, H, dpr;
 function resize() {
-  dpr = Math.min(devicePixelRatio || 1, 2);
+  dpr = 0.5;   // PS2 crunch
   W = innerWidth; H = innerHeight;
   cv.width = W * dpr; cv.height = H * dpr;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);

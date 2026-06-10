@@ -52,9 +52,15 @@
   #spectrum input { accent-color: var(--lime); width: 130px; }
   #caption { bottom: 64px; left: 50%; transform: translateX(-50%); font-size: 10px;
           letter-spacing: .12em; opacity: .35; }
+
+  /* PS2 CRUNCH (house style v1) */
+  #crt2 { position: fixed; inset: 0; z-index: 90; pointer-events: none;
+    background: repeating-linear-gradient(0deg, rgba(0,0,0,.18) 0 1px, transparent 1px 3px); }
+  canvas { image-rendering: pixelated; }
 </style>
 </head>
 <body>
+<div id="crt2"></div>
 <canvas id="gl"></canvas>
 <div class="chrome" id="eyes"><span>&gt;</span><span>&lt;</span></div>
 <div class="chrome" id="title"><b>SPECIMEN</b>&ensp;002 · morphology — the body IS the record light</div>
@@ -104,6 +110,11 @@ float noise3(vec3 p) {
         mix(hash31(i + vec3(0,1,0)),    hash31(i + vec3(1,1,0)), u.x), u.y),
     mix(mix(hash31(i + vec3(0,0,1)),    hash31(i + vec3(1,0,1)), u.x),
         mix(hash31(i + vec3(0,1,1)),    hash31(i + vec3(1,1,1)), u.x), u.y), u.z);
+}
+float bayer(vec2 fc) {
+  float b = mod(fc.x, 2.0) * 2.0 + mod(fc.y, 2.0);
+  vec2 f2 = floor(fc / 2.0);
+  return (b * 4.0 + mod(f2.x, 2.0) * 2.0 + mod(f2.y, 2.0)) / 16.0;
 }
 float smin(float a, float b, float k) {
   float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
@@ -183,6 +194,7 @@ void main() {
 
   float vig = smoothstep(1.35, 0.5, length(uv));
   col = mix(vec3(0.0195), col, vig);
+  col = floor(col * 5.0 + bayer(gl_FragCoord.xy)) / 5.0;   // 5 bands + ordered dither
   gl_FragColor = vec4(col, 1.0);
 }`;
 
@@ -213,7 +225,7 @@ for (const n of ['u_res','u_time','u_arousal','u_heat','u_clip','u_mouth','u_bar
   U[n] = gl.getUniformLocation(prog, n);
 
 function resize() {
-  const dpr = Math.min(window.devicePixelRatio || 1, 1.25);   // raymarch: keep it cheap
+  const dpr = 0.25;   // PS2 crunch: quarter-res, nearest
   cv.width = Math.floor(innerWidth * dpr);
   cv.height = Math.floor(innerHeight * dpr);
   gl.viewport(0, 0, cv.width, cv.height);
@@ -266,7 +278,7 @@ function frame(now) {
   barEl.textContent = `BAR ${Math.floor(beats / 4 % BARS) + 1}.${Math.floor(beats % 4) + 1}`;
 
   gl.uniform2f(U.u_res, cv.width, cv.height);
-  gl.uniform1f(U.u_time, t);
+  gl.uniform1f(U.u_time, Math.floor(t * 12) / 12);   // on twos
   gl.uniform1f(U.u_arousal, cur.a);
   gl.uniform1f(U.u_heat, cur.heat);
   gl.uniform1f(U.u_clip, cur.clip);

@@ -50,9 +50,15 @@
   .deed button:hover { color: var(--lime); }
   .deed.bye { opacity: 0; transform: translateY(-18px); }
   @keyframes dein { from { opacity: 0; transform: translateX(30px) scale(.8); } }
+
+  /* PS2 CRUNCH (house style v1) */
+  #crt2 { position: fixed; inset: 0; z-index: 90; pointer-events: none;
+    background: repeating-linear-gradient(0deg, rgba(0,0,0,.18) 0 1px, transparent 1px 3px); }
+  canvas { image-rendering: pixelated; }
 </style>
 </head>
 <body>
+<div id="crt2"></div>
 <canvas id="gl"></canvas>
 <div class="chrome" id="title"><b>PERIPHERY</b>&ensp;003 · the studio at the corner of your eye</div>
 <div class="chrome" id="center">YOUR WORLD STAYS HERE — GAME · GUITAR · DISHES</div>
@@ -170,7 +176,7 @@ gl.vertexAttribPointer(al, 2, gl.FLOAT, false, 0, 0);
 const U = {};
 for (const n of ['u_res','u_time','u_rec','u_pos','u_ask']) U[n] = gl.getUniformLocation(prog, n);
 function resize() {
-  const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+  const dpr = 0.25;   // PS2 crunch
   cv.width = Math.floor(innerWidth * dpr);
   cv.height = Math.floor(innerHeight * dpr);
   gl.viewport(0, 0, cv.width, cv.height);
