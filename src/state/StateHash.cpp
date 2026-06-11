@@ -105,6 +105,26 @@ namespace
         c.key ("type"); c.str (p.getPluginType()); c.comma();
         c.key ("name"); c.str (p.getName()); c.comma();
         c.key ("enabled"); c.boolean (p.isEnabled()); c.comma();
+        // v2: aux bus wiring is musical routing state.
+        if (auto* send = dynamic_cast<te::AuxSendPlugin*> (&p))
+        {
+            c.key ("bus"); c.num (send->getBusNumber()); c.comma();
+        }
+        else if (auto* ret = dynamic_cast<te::AuxReturnPlugin*> (&p))
+        {
+            c.key ("bus"); c.num (ret->busNumber.get()); c.comma();
+        }
+        // v2: sidechain key source as a track ordinal (EditItemIDs never hash).
+        if (auto scId = p.getSidechainSourceID(); scId.isValid())
+        {
+            int ord = -1, k = 0;
+            for (auto* t : te::getAudioTracks (p.edit))
+            {
+                if (t != nullptr && t->itemID == scId) { ord = k; break; }
+                ++k;
+            }
+            c.key ("scSrc"); c.num (ord); c.comma();
+        }
         c.key ("params"); c.openArr();
         // ALL params for builtins; externals capped at 128 (header note).
         // An AUTOMATED parameter's live value is playback-position state, not
@@ -202,7 +222,14 @@ namespace
             // assets), so the canonical source is the file's MD5.
             c.key ("source"); c.str (sourceContentId (w->getCurrentSourceFile())); c.comma();
             c.key ("pitch"); c.num ((double) w->getPitchChange()); c.comma();
-            c.key ("speed"); c.num (w->getSpeedRatio());
+            c.key ("speed"); c.num (w->getSpeedRatio()); c.comma();
+            // v2: the audio-editing surface grown in S24/S29.
+            c.key ("gain"); c.num ((double) w->getGainDB()); c.comma();
+            c.key ("rev"); c.boolean (w->getIsReversed()); c.comma();
+            c.key ("loop"); c.num (w->getLoopRangeBeats().getLength().inBeats()); c.comma();
+            c.key ("fadeIn"); c.num (w->getFadeIn().inSeconds()); c.comma();
+            c.key ("fadeOut"); c.num (w->getFadeOut().inSeconds()); c.comma();
+            c.key ("xfade"); c.boolean (w->getAutoCrossfade());
         }
         else if (auto* m = dynamic_cast<te::MidiClip*> (&clip))
         {
@@ -226,10 +253,32 @@ String stateProjection (te::Edit& edit)
     c.open();
 
     // ── session / musical context ──
-    c.key ("schema"); c.num (1); c.comma();
+    // HASH v2 (2026-06-11, S33): one versioned bump batching every musical
+    // field added since Stage 8 — master volume, the tempo map, clip
+    // gain/reverse/loop/fades, aux bus wiring, sidechain sources. Stored
+    // v1 hashes were re-stamped via flywheel/store/restamp_hashes.py.
+    c.key ("schema"); c.num (2); c.comma();
     c.key ("tempo"); c.num (edit.tempoSequence.getBpmAt (tracktion::TimePosition())); c.comma();
     auto& ts = edit.tempoSequence.getTimeSigAt (tracktion::TimePosition());
     c.key ("timeSig"); c.openArr(); c.num (ts.numerator.get()); c.comma(); c.num (ts.denominator.get()); c.closeArr(); c.comma();
+
+    // Tempo-map points beyond the base setting (v2).
+    c.key ("tempoMap"); c.openArr();
+    for (int i = 1; i < edit.tempoSequence.getNumTempos(); ++i)
+        if (auto* tp = edit.tempoSequence.getTempo (i))
+        {
+            if (i > 1) c.comma();
+            c.open();
+            c.key ("beat"); c.num (tp->getStartBeat().inBeats()); c.comma();
+            c.key ("bpm"); c.num (tp->getBpm());
+            c.close();
+        }
+    c.closeArr(); c.comma();
+
+    // Master gain (v2) — a mix decision, hence session state.
+    c.key ("masterDb");
+    c.num (edit.getMasterVolumePlugin() != nullptr ? (double) edit.getMasterVolumePlugin()->getVolumeDb() : 0.0);
+    c.comma();
 
     auto moshSession = edit.state.getChildWithName (Identifier ("MOSH_SESSION"));
     c.key ("key"); c.str (moshSession.isValid()

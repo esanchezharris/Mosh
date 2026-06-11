@@ -1373,6 +1373,38 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         eng.sessionDir().getChildFile ("project-name.txt").deleteFile();
     }
 
+    // --- Stage 33: hash v2 sensitivity (the previously-blind fields) ---
+    {
+        std::cerr << "--- Stage 33: hash v2 ---\n";
+        // Fader moves are NOT undo transactions (Stage 8 semantic) — restore
+        // the exact baseline value; and undo the tempo insert rather than
+        // remove_tempo (whose remapEdit can shift content positions).
+        const double masterBase = (double) ops.snapshot()["session"].getProperty ("masterVolumeDb", 0.0);
+        auto h0 = cmd (ops, "get_state_hash")["data"].getProperty ("hash", var()).toString();
+        cmd (ops, "set_master_volume", args1 ("db", masterBase - 5.0));
+        auto h1 = cmd (ops, "get_state_hash")["data"].getProperty ("hash", var()).toString();
+        check (h0 != h1, "master volume now moves the hash (v1-blind)");
+        cmd (ops, "set_master_volume", args1 ("db", masterBase));
+
+        cmd (ops, "set_tempo", objN ({{ "bpm", 150.0 }, { "atBar", 9 }}));
+        auto h2 = cmd (ops, "get_state_hash")["data"].getProperty ("hash", var()).toString();
+        check (h1 != h2 && h0 != h2, "a tempo-map point now moves the hash (v1-blind)");
+        cmd (ops, "undo");
+
+        auto t33 = cmd (ops, "create_track", args1 ("name", "Hash33"));
+        const auto t33id = t33["data"].getProperty ("trackId", var()).toString();
+        auto tone = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", t33id }, { "seconds", 0.5 }, { "freq", 330.0 }}));
+        const auto cid = tone["data"].getProperty ("clipId", var()).toString();
+        auto h3 = cmd (ops, "get_state_hash")["data"].getProperty ("hash", var()).toString();
+        cmd (ops, "set_clip_gain", objN ({{ "clipId", cid }, { "db", -6.0 }}));
+        auto h4 = cmd (ops, "get_state_hash")["data"].getProperty ("hash", var()).toString();
+        check (h3 != h4, "clip gain now moves the hash (v1-blind)");
+        cmd (ops, "remove_track", args1 ("trackId", t33id));
+
+        auto hEnd = cmd (ops, "get_state_hash")["data"].getProperty ("hash", var()).toString();
+        check (hEnd == h0, "v2 hash returns to baseline after the round-trip");
+    }
+
     // --- Stage 32: IR v0.3 vocab batch ---
     {
         std::cerr << "--- Stage 32: IR v0.3 ---\n";

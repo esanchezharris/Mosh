@@ -150,6 +150,8 @@ Finder drop=native target ✅, transient slicing=v0.4 by recorded decision).
 
 **The audit has no open ❌/🔶/🧠 rows that block everyday production.**
 What remains is deliberate scope: normalize (export-side exists), tap tempo,
-transient slicing (v0.4), the hash-v2 batch (master vol + tempo map + future
-mix state, one versioned bump + corpus re-stamp), and the IR v0.3 vocab batch
-(tempo-map op, track.move, master gain target, notes.quantize swing field).
+and transient slicing (v0.4). The two housekeeping batches SHIPPED 2026-06-11:
+hash v2 (S33 — master vol, tempo map, clip gain/reverse/loop/fades, bus
+wiring, sidechain; corpus re-stamped, trap-03 replays MATCH) and IR v0.3
+(S32 — mute/solo/master-gain/track.move/clip.rename/notes.nudge + tempo-map
+and swing fields; 48 ops, frozen).

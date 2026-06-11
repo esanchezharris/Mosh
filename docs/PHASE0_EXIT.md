@@ -52,11 +52,17 @@ the op was in the schema all along; the native `duplicate_clip` command +
 executor lowering landed in the real-DAW pass (no schema change, no version
 bump). New ledger candidates from the same pass: `track.move` (track
 reordering has no IR family) and a master target for `mixer.set_gain`
-(`set_master_volume` is native-only). **Hash-v2 parking note:** master volume
-is deliberately NOT in the canonical hash — adding any new field invalidates
-every stored trajectory hash, so new mix-state coverage (master volume, future
-sends/automation summaries) batches into one versioned hash bump with a
-corpus re-stamp, not piecemeal additions.
+(`set_master_volume` is native-only). **Hash v2 — SHIPPED (2026-06-11, S33):** the batched
+bump landed: the canon's `schema` key is 2, and it now covers master volume,
+tempo-map points, clip gain/reverse/loop/fades/auto-crossfade, aux bus
+wiring, and sidechain sources (as track ordinals). The corpus re-stamp
+(`flywheel/store/restamp_hashes.py`) replayed every stored trajectory on the
+new binary and updated the asserted final hashes — the gold-candidate
+trap-03 trajectory replays to its re-stamped v2 hash (replay_check MATCH).
+One eval-residue trajectory (tut-8529e05eaa) was found not replay-coherent
+(ops from separate eval sessions concatenated; pre-existing) and is left at
+v1 so the incoherence stays visible. Future mix-state fields batch into v3
+under the same rule.
 
 ## What is machine-proven today (the standing batteries)
 
