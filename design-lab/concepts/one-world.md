@@ -52,3 +52,27 @@ into the pit shader behind a `u_moshi` toggle; retarget poke/gaze; retire the se
 context). B's finished-track smile rides along later as a one-shot moment, where it's
 magic instead of confusion. The component model survives: MoshiBlob stays canonical
 for 008/011 and any surface without a world.
+
+## Postscript (2026-06-10): the user had the better idea — and it shipped
+
+The user overrode option A with a frame that dissolves the ownership problem
+entirely: **everybody starts with the SAME Moshi**, and your music is what makes
+yours yours. The agent doesn't claim your track; your track is inscribed on the
+agent. Identity through craft. (It also makes THE SCENE's fog-orbs literally other
+people's Moshis.)
+
+The signal-collapse objection is resolved by **two channels on one being**:
+- **FACE = the agent channel**: eyes, grin dial, blink, gaze, REC ember/heat.
+- **BODY = the work channel**: growth, lobes, skin, veins, fringe — fed by the song.
+They never compete. REC never touches matter; the song never touches the face.
+
+Body language rebuilt on the **Blob Mixer grammar** (14islands; source studied via
+github.com/connorhvnsen/blob-mixer — credited): two displacement layers
+(body waves = AIR/FORM/wild ≈ distort/frequency/speed; skin = GRIT/WEAR/MID ≈
+surfaceDistort/surfaceFrequency) with face protection (≈ poleAmount), plus
+personality FAMILIES (BREAKS/SILK/MOLTEN/GHOST — its preset idea) picked by the
+arrangement hash. AIR no longer bores holes — it airs him out as smooth undulation.
+
+**The covenant is provable**: at complete=0 every seed-driven term gates to zero —
+verified pixel-identical renders across different arrangement hashes. Everyone
+starts with the same Moshi. v15, experiment 009.

@@ -264,3 +264,22 @@ User called out false claims and inconsistencies. Hands-on re-audit confirmed:
 - Re-grounded against current-ui/AUDIT.md: the lab skeleton still maps 1:1 to the
   shipping surface set (topbar / lanes / chain / generative-rack). The drift was
   in claims, not bones.
+
+## v15 (2026-06-10) — THE SYMBIOTE: Moshi IS the artifact
+
+User: "combine the agent and the stone — everybody starts with the same Moshi by
+default, and as you build/select/perform it changes the ways the stone did."
+
+- ONE being on the stage (one GL context — the corner MoshiBlob is removed from
+  009; the component survives for 008/011). The orbit knobs orbit HIM.
+- **Two channels**: FACE (eyes/grin/blink/gaze/REC ember — ported in-shader) =
+  agent; BODY (growth 52→100%, lobes default→seeded, two blob-mixer displacement
+  layers, veins/fringe) = the work. REC never touches matter.
+- **The covenant, proven**: complete=0 renders are pixel-identical across
+  arrangement seeds (gg + lookG gates) — everyone starts with the same Moshi.
+- AIR redesigned: smooth body waves (no holes). GRIT/WEAR/MID = skin layer.
+  FORM = wave family. Personality FAMILIES (Blob Mixer's preset idea, credited):
+  BREAKS / SILK / MOLTEN / GHOST, picked by the arrangement hash.
+- Debug epic: paste removal left an orphan getElementById('moshi') listener →
+  silent script death (everything after it in TDZ). Bisected by probing which
+  top-level consts existed. Lesson: removals need a reference sweep.

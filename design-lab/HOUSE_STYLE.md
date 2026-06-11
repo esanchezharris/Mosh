@@ -148,6 +148,14 @@ menu language), shipped as shared CSS per page:
     its consequence reaches the stone (mute starves a band, level feeds it
     proportionally). Decorative controls are banned.
 
+33. **THE SYMBIOTE (the centerpiece doctrine).** The agent and the artifact are ONE
+    being with two channels: the FACE is the agent (eyes, grin, blink, REC ember —
+    never touched by the song's matter), the BODY is the work (growth, waves, skin,
+    veins, fringe — never touched by agent state). Everybody starts with the SAME
+    default Moshi — provably seed-invariant at complete=0 — and diverges only
+    through what they make. Body language = Blob Mixer's two-layer displacement
+    grammar (credited), face-protected.
+
 ## Why this is still anti-slop
 
 Banded dither + flat facets physically can't produce the soft-gradient "vibe-coded"
