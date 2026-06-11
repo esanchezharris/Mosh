@@ -16,10 +16,12 @@ APP=build/Mosh_artefacts/Debug/Mosh.app/Contents/MacOS/Mosh
 MOSH_NO_AUDIO=1 "$APP" --selftest        # 650/650, 0 failed, 0 JUCE assertions
 MOSH_NO_AUDIO=1 "$APP" --selftest-undo   # 18/18
 ```
-CI (`.github/workflows/macos-ci.yml`) runs the same on PRs and is a
-REQUIRED check on main. NOTE 2026-06-11: hosted runners are blocked by a
-GitHub Actions billing limit — fix in account Billing & plans; until then
-runs fail in seconds with "job was not started".
+The LOCAL battery above is THE merge gate — run it and paste the tallies
+in the PR/commit. CI (`.github/workflows/macos-ci.yml`) is manual-only
+(`workflow_dispatch`): hosted macOS runners are paid (10x minute
+multiplier) and this project does not depend on paid GitHub features.
+If automated CI is ever wanted, use a self-hosted runner on the studio
+Mac — never re-enable hosted triggers without a budget decision.
 
 ## Hard rules (line-independent)
 - macOS / Apple Silicon arm64 only.

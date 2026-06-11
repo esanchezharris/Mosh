@@ -1,10 +1,10 @@
 name: macOS CI
 
+# 2026-06-11: hosted macOS runners are PAID (10x minute multiplier) and ate
+# the Actions spending limit. CI is now MANUAL-ONLY (workflow_dispatch) — the
+# enforced verification is the LOCAL battery (see AGENTS.md). Re-enable
+# triggers only with a self-hosted runner or a deliberate budget decision.
 on:
-  pull_request:
-  push:
-    branches:
-      - main
   workflow_dispatch:
     inputs:
       run_full_local:
