@@ -49,13 +49,52 @@ public:
         Edit object; callers must re-read edit() afterwards. */
     void reloadFromFile();
 
+    /** Project lifecycle (wave: settings). Each replaces the live Edit object, so
+        callers must re-read edit() and refetch any cached track/clip pointers
+        afterwards. They are machine/whole-Edit operations — NOT undoable. The
+        transport is stopped + the playback context freed before the swap to avoid
+        device/Edit-mismatch asserts (matches the export render-exclusivity dance).
+        editPath + editFileRetriever are re-pointed to the new file. */
+    void newProject (const juce::File& file);   // save current, then a fresh empty Edit at file
+    void openProject (const juce::File& file);  // save current, then load the Edit at file
+    bool saveProjectAs (const juce::File& file); // saveAs to file + adopt it as the backing file
+
+    /** Re-point editPath + editFileRetriever to file (after a saveAs that changed
+        the Edit's backing file). Does NOT replace the Edit object. */
+    void adoptEditFile (const juce::File& file);
+
+    /** PRF-001 — multicore audio processing preference + readout. Tracktion's
+        parallel playback/render graph derives its worker-thread count from exactly
+        one knob: EngineBehaviour::getNumberOfCPUsToUseForAudio() (applied as
+        setNumThreads(N-1)). MoshEngineBehaviour overrides it to honour a runtime
+        preference, so this is a GENUINE, load-bearing control — not a dead toggle.
+
+        availableCores()        — logical cores the engine sees (>= 1).
+        audioThreadPref()       — the raw stored preference (0 == auto/all cores).
+        effectiveAudioThreads() — the resolved value the engine actually uses now
+                                  (== availableCores() when auto).
+        setAudioThreadPref(n)   — store the preference (0 = auto, else clamped to
+                                  [1..availableCores()]) and re-apply LIVE to any
+                                  open playback context via DeviceManager::updateNumCPUs()
+                                  (no playback restart; offline renders pick it up on
+                                  their next construction). Headless: stores only. */
+    int  availableCores()        const;
+    int  audioThreadPref()       const;
+    int  effectiveAudioThreads() const;
+    void setAudioThreadPref (int n);
+
 private:
     std::unique_ptr<te::Engine> enginePtr;
     std::unique_ptr<te::Edit>   editPtr;
+    // Borrowed (non-owning) pointer to the MoshEngineBehaviour the Engine owns —
+    // typed as the base here because the concrete type is anonymous-namespace-local
+    // to MoshEngine.cpp. Lets the PRF-001 accessors mutate its audioThreads atomic.
+    te::EngineBehaviour*        behaviourPtr = nullptr;
     juce::File session;
     juce::File editPath;
     void applyRequestedAudioOutputDevice();
     bool       audioOpen = false;
+    bool       inputsConfigured = false;   // one-time wave-input enablement latch (audio-only)
     juce::String audioError;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MoshEngine)

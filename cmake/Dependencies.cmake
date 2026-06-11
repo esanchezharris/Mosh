@@ -20,12 +20,23 @@ include(FetchContent)
 # guaranteeing a matched JUCE/Tracktion pair. Disable its example targets.
 set(TE_ADD_EXAMPLES OFF CACHE BOOL "" FORCE)
 
+# MOSH PATCH (engine fix): Edit::createNewItemID() must scan ALL EditItem caches, not
+# just track + clip — otherwise an ID held only by a live plugin (automatableEditItemCache,
+# e.g. one reconstructed on reload or outliving its removal via the undo stack) can be
+# reused, tripping the EditItemCache::addItem jassert and silently overwriting the
+# itemID->item map in release builds. See patches/. NB: re-pinning tracktion (GIT_TAG)
+# requires re-rolling this patch against the new revision.
+set(MOSH_TRACKTION_PATCH
+    "${CMAKE_CURRENT_LIST_DIR}/../patches/0001-tracktion-createNewItemID-scan-all-caches.patch")
 FetchContent_Declare(tracktion_engine
     GIT_REPOSITORY      https://github.com/Tracktion/tracktion_engine.git
     GIT_TAG             2877b621f2fbee564d0696a616b86bf8ba8c8ab0
     GIT_SHALLOW         FALSE
     GIT_SUBMODULES_RECURSE TRUE
-    GIT_PROGRESS        TRUE)
+    GIT_PROGRESS        TRUE
+    # Idempotent: skip when already applied (reverse-check succeeds), else apply. Runs in
+    # the tracktion source dir (a git clone) on a fresh fetch.
+    PATCH_COMMAND       bash -c "git apply -R --check '${MOSH_TRACKTION_PATCH}' 2>/dev/null && echo 'tracktion createNewItemID patch already applied' || git apply '${MOSH_TRACKTION_PATCH}'")
 FetchContent_MakeAvailable(tracktion_engine)
 
 # ── Catch2 (tests) ──────────────────────────────────────────────────────────

@@ -129,9 +129,19 @@ function GenBody({
 
       <div className="gen-status">
         <span className={`gen-badge st-${rl.status}`}>{rl.status}</span>
+        <span className="gen-sub" title="render-layer adapter · mode">{rl.adapter}{rl.mode ? ` · ${rl.mode}` : ""}</span>
         {rendering && (
           <span className="gen-prog"><span style={{ width: `${Math.round(progress * 100)}%` }} /></span>
         )}
+        {/* Bypass toggle (NRL-004): records intent in the render-layer tree (status
+            flips ready↔bypassed); survives save/reload. */}
+        <button
+          className={`mixbtn ${rl.status === "bypassed" ? "byp-on" : ""}`}
+          title="Bypass the render layer"
+          onClick={() => exec("bypass_layer", { clipId: clip.id, bypassed: rl.status !== "bypassed" })}
+        >
+          ø
+        </button>
         <button className={`mixbtn ${labMode ? "lab-on" : ""}`} title="Lab — unlock the ASTD clamp" onClick={() => setLab(!labMode)}>
           {labMode ? "⚠ LAB" : "Lab"}
         </button>
@@ -150,9 +160,40 @@ function GenBody({
           {rl.hasArtifact ? "Re-render" : "Render"}
         </button>
         {rendering && <button onClick={() => exec("cancel_render", { clipId: clip.id })}>Cancel</button>}
-        <button disabled={!rl.hasArtifact} onClick={() => exec("accept_render", { clipId: clip.id })}>Accept</button>
-        <button disabled={!rl.hasArtifact} onClick={() => exec("reject_render", { clipId: clip.id })}>Reject</button>
+        {/* Audition take controls. Accept = keep this take (lands a clip on the Neural
+            Renders lane, status stays ready). Reject = discard the take / re-roll
+            signal (status→dirty, userKept=false) — it does NOT remove the layer. */}
+        <button disabled={!rl.hasArtifact} onClick={() => exec("accept_render", { clipId: clip.id })} title="keep this take (lands a clip on the Neural Renders lane)">Accept</button>
+        <button disabled={!rl.hasArtifact} onClick={() => exec("reject_render", { clipId: clip.id })} title="discard take (re-roll) — keeps the layer">Reject</button>
         <button onClick={() => exec("set_render_param", { clipId: clip.id, seed: Number(rl.seed) + 1 })} title="new take">⟳ seed</button>
+      </div>
+
+      {/* Render-layer management (NRL-004): finalize / freeze / clear. Freeze and
+          Bounce both need a cached artifact; Bounce commits to a clip AND finalizes. */}
+      <div className="gen-actions gen-manage">
+        <button
+          className={rl.status === "frozen" ? "on" : ""}
+          disabled={!rl.hasArtifact}
+          onClick={() => exec("freeze_layer", { clipId: clip.id })}
+          title="Freeze — commit the cached render as the durable take"
+        >
+          Freeze
+        </button>
+        <button
+          className={rl.status === "bounced" ? "on" : ""}
+          disabled={!rl.hasArtifact}
+          onClick={() => exec("bounce_layer_to_clip", { clipId: clip.id })}
+          title="Bounce to clip — finalize: lands a clip on the Neural Renders lane"
+        >
+          Bounce
+        </button>
+        <button
+          className="gen-remove"
+          onClick={() => exec("remove_render_layer", { clipId: clip.id })}
+          title="Remove the render layer from this clip"
+        >
+          ✕ layer
+        </button>
       </div>
     </div>
   );

@@ -1,0 +1,173 @@
+{
+  "group": "ARR",
+  "features": [
+    {
+      "id": "ARR-001",
+      "capability": "present",
+      "capabilityEvidence": "createAudioTrack->insertNewAudioTrack MoshOps.cpp:1176; cmdCreateTrack:132; unbounded; snapshot iterates getAudioTracks:1257",
+      "surface": "present",
+      "surfaceEvidence": "Arrangement.tsx:161 '+ Track'; TrackHeader:181 name/remove/mute/solo/vol; tracks rendered:109 (audio+MIDI share one type)"
+    },
+    {
+      "id": "ARR-002",
+      "capability": "present",
+      "capabilityEvidence": "cmdImportClip insertWaveClip MoshOps.cpp:205; clipToVar gives start/length/offset/sourceFile/sourceLength:1313-1321",
+      "surface": "present",
+      "surfaceEvidence": "Clip.tsx renders name + Waveform from get_clip_peaks (store ensurePeaks:164); Arrangement lanes:124-129"
+    },
+    {
+      "id": "ARR-003",
+      "capability": "present",
+      "capabilityEvidence": "cmdAddMidiClip insertMIDIClip + sequence.addNote MoshOps.cpp:621-651; clipToVar tags type 'midi':1323",
+      "surface": "partial",
+      "surfaceEvidence": "add_midi_clip wired (Arrangement.tsx:163, Rack.tsx:51), midi clip styled (styles.css:141); but NO piano-roll/note editor in ui/src"
+    },
+    {
+      "id": "ARR-004",
+      "capability": "partial",
+      "capabilityEvidence": "tempoSequence exists (getBpmAt MoshOps.cpp:1252) but backend exposes no bars/beats; ruler derives from seconds not the musical model",
+      "surface": "partial",
+      "surfaceEvidence": "Arrangement.tsx:92-96 ruler ticks are integer SECONDS ('<span>{i}</span>'), not bars:beats; no musical ruler"
+    },
+    {
+      "id": "ARR-005",
+      "capability": "missing",
+      "capabilityEvidence": "snapshot/transport carry only seconds (transportToVar position.inSeconds MoshOps.cpp:1367); no samples/timecode/bars conversion",
+      "surface": "missing",
+      "surfaceEvidence": "Transport.tsx fmt() shows only mm:ss.cs:3-9; no time-format switch; ruler is seconds-only"
+    },
+    {
+      "id": "ARR-006",
+      "capability": "partial",
+      "capabilityEvidence": "snapping is UI-only (store.snapTime:159 rounds to snapGrid seconds); backend move/trim/split take raw times, engine has no grid",
+      "surface": "partial",
+      "surfaceEvidence": "Snap toggle Arrangement.tsx:167; grid fixed 0.25 SECONDS (store.ts:72), not musical, and no visible grid lines"
+    },
+    {
+      "id": "ARR-007",
+      "capability": "missing",
+      "capabilityEvidence": "snapGrid hardcoded 0.25s store.ts:72; no resolution setter; engine has no grid concept",
+      "surface": "missing",
+      "surfaceEvidence": "Toolbar exposes only on/off Snap (Arrangement.tsx:167); no resolution selector (1/4..1/16/bar) in ui/src"
+    },
+    {
+      "id": "ARR-008",
+      "capability": "partial",
+      "capabilityEvidence": "horizontal zoom is pure UI scale (pxPerSec store.ts:69,149); vertical/track-height not adjustable (LANE_H const 84 Arrangement.tsx:6)",
+      "surface": "partial",
+      "surfaceEvidence": "Zoom -/+ buttons (horizontal) Arrangement.tsx:169-170; NO vertical/track-height zoom control"
+    },
+    {
+      "id": "ARR-009",
+      "capability": "missing",
+      "capabilityEvidence": "no marker command in the 43-command set; grep 'marker' in src = none found",
+      "surface": "missing",
+      "surfaceEvidence": "no marker UI; grep 'marker' in ui/src = none found"
+    },
+    {
+      "id": "ARR-010",
+      "capability": "partial",
+      "capabilityEvidence": "no backend time-range selection; closest is loop range (transport.setLoopRange MoshOps.cpp:266), which is the loop region not an edit target",
+      "surface": "partial",
+      "surfaceEvidence": "marquee selects CLIPS not a time span (Arrangement.tsx:58-76); shift-drag ruler sets loop region:35-42; no time-range edit target"
+    },
+    {
+      "id": "ARR-011",
+      "capability": "present",
+      "capabilityEvidence": "cmdMoveClip clip->setStart + optional moveTo(track) MoshOps.cpp:331-350; source unchanged, undo transaction",
+      "surface": "present",
+      "surfaceEvidence": "Clip.tsx drag move->exec('move_clip'):77-79 with optimistic preview, snaps:60; readout is title tooltip only; cross-track trackId not wired"
+    },
+    {
+      "id": "ARR-012",
+      "capability": "present",
+      "capabilityEvidence": "cmdTrimClip sets {start,length,offset} MoshOps.cpp:352-370; start/end/offset independent + reversible",
+      "surface": "present",
+      "surfaceEvidence": "Clip.tsx trim-l/trim-r handles->exec('trim_clip'):82-88; left-trim adjusts offset:65-68; handles when tool==='move':112-116"
+    },
+    {
+      "id": "ARR-013",
+      "capability": "present",
+      "capabilityEvidence": "cmdSplitClip ClipTrack::splitClip MoshOps.cpp:372-388; returns newClipId",
+      "surface": "present",
+      "surfaceEvidence": "Split tool button Arrangement.tsx:166; Clip.tsx click in split tool->exec('split_clip') at snapped time:39-43"
+    },
+    {
+      "id": "ARR-014",
+      "capability": "missing",
+      "capabilityEvidence": "no fade/crossfade command or attribute; clipToVar carries no fade fields MoshOps.cpp:1307-1357; grep 'fade' in src = none found",
+      "surface": "missing",
+      "surfaceEvidence": "no fade handles/crossfade in ui/src; grep 'fade'/'crossfade' = none found"
+    },
+    {
+      "id": "ARR-015",
+      "capability": "missing",
+      "capabilityEvidence": "no duplicate or loop-clip command in the 43-command set",
+      "surface": "missing",
+      "surfaceEvidence": "no Duplicate/Loop action in ui/src; grep 'duplicate' = none found"
+    },
+    {
+      "id": "ARR-016",
+      "capability": "missing",
+      "capabilityEvidence": "no clip-gain command; clipToVar has no gain field MoshOps.cpp:1307-1357; only per-track set_track_volume exists",
+      "surface": "missing",
+      "surfaceEvidence": "no clip-gain control/inspector in ui/src; grep 'clipgain' = none found"
+    },
+    {
+      "id": "ARR-017",
+      "capability": "missing",
+      "capabilityEvidence": "all tracks are flat AudioTracks (createAudioTrack MoshOps.cpp:1176); no FolderTrack/group; grep 'foldertrack'/'grouptrack' = none found",
+      "surface": "missing",
+      "surfaceEvidence": "no folder/group affordance in ui/src; tracks render as a flat list (Arrangement.tsx:109)"
+    },
+    {
+      "id": "ARR-018",
+      "capability": "missing",
+      "capabilityEvidence": "no track freeze/flatten; freeze_layer MoshOps.cpp:1044 is a Tier-B render-LAYER op (marks generative layer 'frozen'), not a track-chain bounce",
+      "surface": "missing",
+      "surfaceEvidence": "no track freeze/flatten control in ui/src; grep 'freeze' in ui/src = none found"
+    },
+    {
+      "id": "ARR-019",
+      "capability": "missing",
+      "capabilityEvidence": "no color attribute for tracks/clips; trackToVar/clipToVar carry no color field MoshOps.cpp:1269-1357",
+      "surface": "missing",
+      "surfaceEvidence": "no color-assign control; clip color is type-derived CSS only (styles.css:141), not per-item"
+    },
+    {
+      "id": "ARR-020",
+      "capability": "missing",
+      "capabilityEvidence": "no ripple/insert-time op in the 43-command set; edits affect only the targeted clip",
+      "surface": "missing",
+      "surfaceEvidence": "no ripple/insert-time mode in ui/src; grep 'ripple' = none found"
+    },
+    {
+      "id": "ARR-021",
+      "capability": "missing",
+      "capabilityEvidence": "track height is hardcoded const LANE_H=84 (Arrangement.tsx:6); no per-track height in engine or snapshot",
+      "surface": "missing",
+      "surfaceEvidence": "no track-height resize handle in ui/src; all lanes fixed LANE_H (Arrangement.tsx:125,189)"
+    },
+    {
+      "id": "ARR-022",
+      "capability": "missing",
+      "capabilityEvidence": "no section/scene model (depends on absent markers ARR-009); none found in src",
+      "surface": "missing",
+      "surfaceEvidence": "no section navigator in ui/src; none found"
+    },
+    {
+      "id": "ARR-023",
+      "capability": "missing",
+      "capabilityEvidence": "no clip mute/disable command or flag; set_track_mute mutes the whole TRACK (MoshOps.cpp:419-428); clipToVar has no mute field",
+      "surface": "missing",
+      "surfaceEvidence": "only track-level M button (Arrangement.tsx:198-201); no per-clip mute in ui/src"
+    },
+    {
+      "id": "ARR-024",
+      "capability": "partial",
+      "capabilityEvidence": "clips store a name (insertWaveClip name MoshOps.cpp:205; clipToVar c.getName():1311) but NO rename_clip command - name only set at creation",
+      "surface": "missing",
+      "surfaceEvidence": "clip name read-only (Clip.tsx:110); no rename-in-place/inspector; rename in ui/src is only the rename_track path, not clips"
+    }
+  ]
+}

@@ -1,0 +1,54 @@
+/* ============================================================
+   MOSHI TOKENS — the canonical palette + type for the design lab.
+   Exact values are a hard constraint (BRIEF.md §3). Experiments
+   inline a copy of this block for artifact portability; THIS file
+   is the source of truth — if it changes, re-sync the copies.
+   ============================================================ */
+
+:root {
+  /* -- the five. exact. -- */
+  --ink:       #0B0B0B;
+  --lime:      #CCFF23;
+  --lime-glow: #D9FF4C;
+  --bone:      #F6F2EB;
+  --mist:      #E5E5E1;
+
+  /* -- derived (tweakable) -- */
+  --ink-raise: #131312;            /* surfaces barely off the void          */
+  --ink-deep:  #060606;            /* the void behind the void              */
+  --lime-dim:  rgba(204, 255, 35, 0.42);
+  --lime-faint:rgba(204, 255, 35, 0.12);
+  --bone-dim:  rgba(246, 242, 235, 0.55);
+  --glow-sm:   0 0 8px  rgba(217, 255, 76, 0.45);
+  --glow-md:   0 0 24px rgba(217, 255, 76, 0.35);
+  --glow-lg:   0 0 64px rgba(217, 255, 76, 0.25);
+  --membrane:  radial-gradient(ellipse at 50% 60%, #101010 0%, var(--ink) 55%, var(--ink-deep) 100%);
+
+  /* -- type -- */
+  /* display: NANUM SQUARE ROUND (user-supplied 2026-06-10; OFL, Naver) — the
+     rounded-square 2000s console voice. Pages carry their own @font-face
+     pointing at playground/fonts/nanum-square-round/ (EB=800, B=700). */
+  --font-display: 'NanumSquareRound', "Archivo Black", "Helvetica Neue", -apple-system, "Arial Black", sans-serif;
+  --font-body:    -apple-system, "SF Pro Text", "Helvetica Neue", sans-serif;
+  --font-mono:    ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+/* timecodes / BPM / levels are ALWAYS tabular mono */
+.tc {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+}
+
+.display {
+  font-family: var(--font-display);
+  font-weight: 900;
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
+}
+
+body.stage {
+  background: var(--ink);
+  color: var(--bone);
+  margin: 0;
+}

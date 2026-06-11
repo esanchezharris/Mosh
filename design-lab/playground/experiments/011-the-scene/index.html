@@ -1,0 +1,492 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>011 · THE SCENE — everyone's session, at a glance</title>
+<style>
+  /* NANUM SQUARE ROUND — the display voice (user-supplied; OFL, Naver).
+     Rounded-square 2000s console face: the type finally matches the plastic. */
+  @font-face { font-family: 'NanumSquareRound'; font-weight: 800;
+    src: url('../../fonts/nanum-square-round/NanumSquareRoundEB.ttf') format('truetype'); }
+  @font-face { font-family: 'NanumSquareRound'; font-weight: 700;
+    src: url('../../fonts/nanum-square-round/NanumSquareRoundB.ttf') format('truetype'); }
+
+  :root {
+    --ink: #0B0B0B; --lime: #CCFF23; --lime-glow: #D9FF4C;
+    --bone: #F6F2EB; --mist: #E5E5E1; --slab: #111110; --slab-2: #0d0d0c;
+    --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+    --font-display: 'NanumSquareRound', "Archivo Black", "Helvetica Neue", -apple-system, "Arial Black", sans-serif;
+  }
+  * { -webkit-font-smoothing: antialiased; }
+  html, body { margin: 0; height: 100%; background: #070707; overflow: hidden;
+    font-family: var(--font-mono); color: var(--bone); }
+  /* THE PS2 SIGNAL CHAIN (HOUSE_STYLE v2.1) — one cable for every surface */
+  body { filter: url(#ps2signal); }
+  html.raw body { filter: none; }
+
+  .mono { font-variant-numeric: tabular-nums; letter-spacing: .06em; }
+  .disp { font-family: var(--font-display); font-weight: 900; text-transform: uppercase; }
+
+  #gl { position: fixed; inset: 0; width: 100%; height: 100%; image-rendering: pixelated; }
+
+  /* ── Y2K PLATE PASS (HOUSE_STYLE v2.2) ── */
+  .plate { display: inline-block; transform: skewX(-12deg);
+    background: var(--lime); color: var(--ink);
+    font-family: var(--font-display); font-weight: 900; font-style: italic;
+    font-size: 11px; letter-spacing: .05em; padding: 4px 12px 3px;
+    border-radius: 3px; box-shadow: 0 3px 0 #000, inset 0 1px 0 rgba(255,255,255,.4);
+    text-transform: uppercase; }
+
+  #topbar { position: fixed; top: 0; left: 0; right: 0; height: 64px; display: flex;
+    align-items: center; gap: 14px; padding: 0 20px; background: var(--slab); z-index: 20;
+    background-image:
+      linear-gradient(180deg, rgba(246,242,235,.06) 0 44%, rgba(0,0,0,.30) 44% 100%),
+      radial-gradient(rgba(204,255,35,.04) 1px, transparent 1.01px);
+    background-size: 100% 100%, 3px 3px;
+    box-shadow: 0 3px 0 #000, inset 0 -1px 0 rgba(246,242,235,.05); }
+
+  /* the presence rail: dithered 2D orbs — people as small matter */
+  .rail { display: flex; align-items: center; gap: 10px; }
+  .raillbl { font-size: 8px; letter-spacing: .2em; opacity: .45; }
+  .peer { position: relative; width: 44px; text-align: center; cursor: pointer; }
+  .peer canvas { width: 40px; height: 40px; image-rendering: pixelated; display: block;
+    margin: 0 auto; }
+  .peer .nm { font-size: 8px; letter-spacing: .12em; opacity: .6; margin-top: -2px; }
+  .peer .tick { position: absolute; top: -6px; left: 50%; transform: translateX(-50%);
+    font-size: 8px; color: var(--ink); background: var(--lime); border-radius: 5px;
+    padding: 1px 6px; box-shadow: 0 2px 0 #000; opacity: 0; pointer-events: none;
+    white-space: nowrap; }
+  .peer .tick.pop { animation: tpop 1.6s cubic-bezier(.34,1.56,.64,1); }
+  @keyframes tpop { 0% { opacity: 0; transform: translateX(-50%) scale(.5); }
+    12% { opacity: 1; transform: translateX(-50%) scale(1.1); }
+    80% { opacity: 1; } 100% { opacity: 0; } }
+  .peer:hover canvas { transform: scale(1.12); }
+
+  #recchip { margin-left: 8px; font-size: 10px; letter-spacing: .16em; cursor: pointer;
+    border: 2px solid #1d2010; border-radius: 9px; padding: 5px 13px; opacity: .6;
+    box-shadow: 0 2px 0 #000; background-image:
+      linear-gradient(180deg, rgba(255,255,255,.10) 0 45%, rgba(0,0,0,.22) 45% 100%); }
+  body.rec #recchip { color: var(--ink); background: var(--lime); border-color: var(--lime);
+    opacity: 1; box-shadow: 0 2px 0 #5d7607;
+    animation: recb .5s cubic-bezier(.34,1.56,.64,1) infinite alternate; }
+  @keyframes recb { to { transform: scale(1.08); } }
+
+  /* peek label under the center mass */
+  #peeklbl { position: fixed; left: 50%; transform: translateX(-50%); bottom: 190px;
+    font-size: 10px; letter-spacing: .18em; color: var(--mist); opacity: 0;
+    transition: opacity .3s; z-index: 10; text-align: center; }
+  #peeklbl.on { opacity: .85; }
+  #youlbl { position: fixed; left: 50%; transform: translateX(-50%); top: 84px;
+    font-size: 9px; letter-spacing: .2em; opacity: .4; z-index: 10; }
+
+  /* DAW always present: compact transport + your two lanes */
+  #strip { position: fixed; left: 14px; right: 14px; bottom: 14px; height: 124px;
+    z-index: 12; background: var(--slab); border-radius: 10px; padding: 10px 14px;
+    clip-path: polygon(0 0, calc(100% - 18px) 0, 100% 18px, 100% 100%, 0 100%);
+    background-image:
+      linear-gradient(180deg, rgba(246,242,235,.06) 0 44%, rgba(0,0,0,.30) 44% 100%),
+      radial-gradient(rgba(204,255,35,.04) 1px, transparent 1.01px);
+    background-size: 100% 100%, 3px 3px;
+    box-shadow: 0 0 0 2px #1d2010, 0 3px 0 #000, inset 0 1px 0 rgba(246,242,235,.07); }
+  #transport { display: flex; gap: 14px; align-items: center; font-size: 10px;
+    opacity: .85; margin-bottom: 8px; }
+  #playbtn { cursor: pointer; border: 0; background: transparent; color: var(--lime);
+    font-size: 13px; font-family: var(--font-mono); padding: 0 4px; }
+  .lane { display: flex; height: 34px; margin-bottom: 6px; }
+  .lhead { width: 64px; flex: none; font-size: 11px; padding-top: 9px; color: var(--bone);
+    font-style: italic; font-family: var(--font-display); font-weight: 900; }
+  .lbody { position: relative; flex: 1; background: var(--slab-2); border-radius: 7px;
+    box-shadow: inset 0 0 0 1px #1d2010; overflow: hidden;
+    background-image: linear-gradient(180deg, rgba(246,242,235,.03) 0 40%, rgba(0,0,0,.18) 40% 100%); }
+  .clip { position: absolute; top: 4px; bottom: 4px; background: #0a0a09;
+    border: 2px solid rgba(204,255,35,.4); border-radius: 6px;
+    box-shadow: 0 2px 0 rgba(0,0,0,.85); }
+  .clip span { position: absolute; top: 4px; left: 7px; font-size: 8px;
+    letter-spacing: .1em; color: rgba(246,242,235,.6); }
+  #phead { position: absolute; top: 28px; bottom: 10px; width: 2px; background: var(--lime);
+    z-index: 9; pointer-events: none; }
+  #title { position: fixed; bottom: 172px; left: 20px; font-size: 10px;
+    letter-spacing: .14em; opacity: .5; z-index: 10; }
+
+  /* HUD de-acid: outline plates, less solid lime */
+  .plate { background: rgba(204,255,35,.13); color: var(--lime);
+    border: 1px solid rgba(204,255,35,.45); box-shadow: 0 2px 0 rgba(0,0,0,.6); }
+  #topbar { background-color: rgba(13,13,12,.78); }
+  #strip { background-color: rgba(13,13,12,.62); }
+  .lbody { background-color: rgba(10,10,9,.42); }
+  .clip { border-color: rgba(204,255,35,.20); }
+
+  /* ── THE HEFT PASS (HOUSE_STYLE v2.5): instruments gain mass — sockets,
+     bevels, needles. Objects in the room, not labels on glass. ── */
+  .knob { width: 44px; height: 44px;
+    background: radial-gradient(circle at 50% 36%, #343821 0 26%, #15160f 60%, #060606 100%);
+    box-shadow: 0 5px 0 #000, 0 0 0 2px #232613,
+                inset 0 2px 1px rgba(246,242,235,.20), inset 0 -4px 5px rgba(0,0,0,.75); }
+  .knob::after { content: ''; position: absolute; inset: -6px; border-radius: 50%;
+    box-shadow: inset 0 2px 3px rgba(0,0,0,.8), inset 0 -1px 0 rgba(246,242,235,.06);
+    pointer-events: none; }
+  .knob i { width: 4px; height: 14px; margin-left: -2px; transform-origin: 50% 18px;
+    box-shadow: 0 0 5px rgba(204,255,35,.55); }
+  .clip { border-width: 2px; border-color: #232613; border-radius: 7px;
+    box-shadow: 0 4px 0 rgba(0,0,0,.85), inset 0 1px 0 rgba(246,242,235,.16),
+                0 0 0 1px rgba(204,255,35,.13); }
+  #phead { width: 2px; opacity: 1; box-shadow: 0 0 4px rgba(204,255,35,.4); }
+  #phead::before { content: ''; position: absolute; top: -3px; left: 50%;
+    transform: translateX(-50%); border: 7px solid transparent;
+    border-top: 10px solid var(--lime); filter: drop-shadow(0 2px 0 #000); }
+  .deed { border-width: 2px; box-shadow: 0 3px 0 rgba(0,0,0,.8), inset 0 1px 0 rgba(246,242,235,.08); }
+
+  .chip { box-shadow: 0 3px 0 #000, inset 0 1px 0 rgba(246,242,235,.10); }
+  button.chip:active { transform: translateY(3px); box-shadow: 0 0 0 #000; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:fixed" aria-hidden="true"><filter id="ps2signal"
+  x="-2%" y="-2%" width="104%" height="104%" color-interpolation-filters="sRGB">
+  <feGaussianBlur in="SourceGraphic" stdDeviation="1.6" result="halo"/>
+  <feComponentTransfer in="halo" result="halo2"><feFuncA type="linear" slope="0.40"/></feComponentTransfer>
+  <feMerge result="glowed"><feMergeNode in="halo2"/><feMergeNode in="SourceGraphic"/></feMerge>
+  <feGaussianBlur in="glowed" stdDeviation="0.5"/>
+  <feComponentTransfer>
+    <feFuncR type="discrete" tableValues="0 0.0667 0.1333 0.2 0.2667 0.3333 0.4 0.4667 0.5333 0.6 0.6667 0.7333 0.8 0.8667 0.9333 1"/>
+    <feFuncG type="discrete" tableValues="0 0.0667 0.1333 0.2 0.2667 0.3333 0.4 0.4667 0.5333 0.6 0.6667 0.7333 0.8 0.8667 0.9333 1"/>
+    <feFuncB type="discrete" tableValues="0 0.0667 0.1333 0.2 0.2667 0.3333 0.4 0.4667 0.5333 0.6 0.6667 0.7333 0.8 0.8667 0.9333 1"/>
+  </feComponentTransfer>
+</filter></svg>
+
+<canvas id="gl"></canvas>
+
+<div id="topbar">
+  <span class="plate">MOSH</span>
+  <span style="font-size:9px;letter-spacing:.16em;opacity:.5">THE SCENE</span>
+  <div class="rail" id="crewRail"><span class="raillbl">CREW · IN YOUR SESSION</span></div>
+  <div style="flex:1"></div>
+  <div class="rail" id="sceneRail"><span class="raillbl">THE SCENE · TAP TO PEEK</span></div>
+  <div id="recchip" class="mono">● REC (R)</div>
+</div>
+
+<div id="youlbl">YOUR ARTIFACT — THE SESSION, AS MATTER</div>
+<div id="peeklbl" class="mono"></div>
+<div id="title"><span class="plate" style="font-size:9px;padding:3px 9px 2px">011 · THE SCENE</span>
+  &ensp;collaborators ride your topbar · rivals are visible, never audible</div>
+
+<div id="strip">
+  <div id="transport" class="mono">
+    <button id="playbtn">▶</button>
+    <span id="tc">BAR 1.1</span><span style="opacity:.5">140 BPM</span>
+  </div>
+  <div class="lane"><div class="lhead">BEAT</div><div class="lbody" id="laneBeat"></div></div>
+  <div class="lane"><div class="lhead">VOX</div><div class="lbody" id="laneVox"></div></div>
+  <div id="phead"></div>
+</div>
+
+<script>
+// THE SCENE — the wager, rebuilt around how it'll actually be used (user note:
+// "you're almost never in a 1v1 — collaborators on one side of the topbar,
+// competitor ORBS on the other; a small representation of what others are doing").
+//   CENTER     your artifact (pit grammar, chill v6 default)
+//   CREW rail  collaborators as dithered orbs: heat = recording, tick = a deed
+//   SCENE rail rivals as FOG orbs: size = how built their session is. tap to PEEK —
+//              the stage shows their fogged artifact for 4s. see it, never hear it.
+//   The hourglass is dead (it looked bad). Presence is the concept now.
+
+const FRAG = `
+precision highp float;
+uniform vec2  u_res;
+uniform float u_time, u_tq, u_rA, u_rB;
+uniform float u_comp, u_hi, u_heat, u_onset;
+uniform float u_mode, u_pseed;   // 0 = yours (full light) · 1 = theirs (fog)
+const vec3 LIME = vec3(0.800, 1.000, 0.137);
+const vec3 GLOW = vec3(0.851, 1.000, 0.298);
+mat2 r2(float a) { float c = cos(a), s = sin(a); return mat2(c, -s, s, c); }
+float hash31(vec3 p) {
+  p = fract(p * 0.3183099 + vec3(0.1, 0.2, 0.3)); p *= 17.0;
+  return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+}
+float n3(vec3 p) {
+  vec3 i = floor(p), f = fract(p); vec3 u = f * f * (3.0 - 2.0 * f);
+  return mix(
+    mix(mix(hash31(i),               hash31(i + vec3(1,0,0)), u.x),
+        mix(hash31(i + vec3(0,1,0)), hash31(i + vec3(1,1,0)), u.x), u.y),
+    mix(mix(hash31(i + vec3(0,0,1)), hash31(i + vec3(1,0,1)), u.x),
+        mix(hash31(i + vec3(0,1,1)), hash31(i + vec3(1,1,1)), u.x), u.y), u.z);
+}
+float bayer(vec2 fc) {
+  float b = mod(fc.x, 2.0) * 2.0 + mod(fc.y, 2.0);
+  vec2 f2 = floor(fc / 2.0);
+  return (b * 4.0 + mod(f2.x, 2.0) * 2.0 + mod(f2.y, 2.0)) / 16.0;
+}
+float gCrack;
+float map(vec3 p) {
+  float gro = 0.45 + 0.55 * u_comp;
+  p /= gro;
+  p.y *= 1.0 + 0.20 * u_onset;
+  p.xz = r2(u_rA + u_pseed * 6.28) * p.xz;
+  p.xy = r2(0.5 + u_rB) * p.xy;
+  vec3 q = p; float crack = 1e9;
+  float sd = fract(sin((u_pseed + 1.0) * 12.9898) * 43758.5453);
+  for (int i = 0; i < 4; i++) {
+    q = abs(q) - vec3(0.26 + 0.09 * sd, 0.22 + 0.05 * sd, 0.27);
+    crack = min(crack, min(abs(q.x), abs(q.y)));
+    q.xy = r2(0.50 + 0.45 * sd) * q.xy;
+    q.yz = r2(0.47 + 0.25 * sd * sd) * q.yz;
+  }
+  float d = (abs(q.x) + abs(q.y) + abs(q.z) - 0.34) * 0.42;
+  d -= 0.05 * (n3(q * 5.0 + u_tq * 0.4) - 0.5) * 2.0;
+  d = max(d, length(p) - 0.62);
+  gCrack = crack;
+  return d * gro;
+}
+vec3 normalAt(vec3 p) {
+  const vec2 e = vec2(0.004, -0.004);
+  return normalize(e.xyy * map(p + e.xyy) + e.yyx * map(p + e.yyx)
+                 + e.yxy * map(p + e.yxy) + e.xxx * map(p + e.xxx));
+}
+void main() {
+  vec2 uv = (gl_FragCoord.xy - 0.5 * u_res) / min(u_res.x, u_res.y);
+  uv.y += 0.10;
+  float dth = bayer(gl_FragCoord.xy);
+  vec3 ro = vec3(0.0, 0.0, 3.4);
+  vec3 rd = normalize(vec3(uv, -1.5));
+  float t = 0.0; vec3 hp; bool hit = false;
+  for (int i = 0; i < 64; i++) {
+    hp = ro + rd * t;
+    float d = map(hp);
+    if (d < 0.003) { hit = true; break; }
+    t += d * 0.9;
+    if (t > 6.0) break;
+  }
+  // THE ROOM: ground + contact glow + aura — the session is somewhere
+  vec3 room = vec3(0.015, 0.015, 0.014);
+  {
+    if (rd.y < -0.02) {
+      float tf = (-0.95 - ro.y) / rd.y;
+      vec3 gp = ro + rd * tf;
+      float gd = length(gp.xz);
+      float fade = exp(-gd * 0.7) * exp(-max(0.0, tf - 3.6) * 0.4);
+      float gr = n3(vec3(gp.x * 2.6, u_tq * 0.05, gp.z * 2.6));
+      room += vec3(0.028, 0.030, 0.026) * (0.6 + floor(gr * 3.0 + dth) / 3.0) * fade;
+      room += LIME * exp(-gd * 1.9) * fade * (0.025 + 0.09 * u_heat)
+            * (0.25 + 0.75 * u_comp) * (1.0 - 0.8 * u_mode);   // fog bodies barely glow
+    }
+    float aur = exp(-dot(uv, uv) * 4.5) * (0.10 + 0.5 * u_heat);
+    room += (u_mode < 0.5 ? LIME : vec3(0.5, 0.55, 0.6))
+          * (floor(aur * 4.0 + dth) / 4.0) * 0.045 * smoothstep(0.1, 0.6, u_comp);
+  }
+  vec4 outc = vec4(room, 1.0);
+  if (hit) {
+    map(hp);
+    vec3 n = normalAt(hp);
+    n = normalize(floor(n * 3.0 + 0.5) / 3.0);
+    float diff = max(dot(n, normalize(vec3(0.5, 0.8, 0.6))), 0.0);
+    float band = floor(diff * 3.0 + dth) / 3.0;
+    float rim = pow(1.0 - max(dot(n, -rd), 0.0), 3.0);
+    vec3 col;
+    if (u_mode < 0.5) {
+      // YOURS — earned light, REC heat, fringe at full highs
+      col = vec3(0.035) + band * vec3(0.085, 0.09, 0.075);
+      float eL = mix(0.08, 1.0, smoothstep(0.05, 0.6, u_comp));
+      col += LIME * step(0.55, rim + dth * 0.25) * 0.20 * eL;
+      float fis = exp(-gCrack * 70.0);
+      float shard = step(0.78 - 0.15 * u_hi, fis + dth * 0.12);
+      float vein  = step(0.45, fis + dth * 0.12) - shard;
+      col += mix(LIME, GLOW, 0.6) * shard * (0.55 + 2.0 * u_heat) * eL;
+      col += LIME * vein * (0.22 + 1.0 * u_heat) * eL;
+      float fr = u_hi * eL * clamp(vein + smoothstep(0.62, 0.95, rim), 0.0, 1.0);
+      if (fr > 0.02) {
+        float hue = floor(fract(n3(hp * 5.0) + u_time * 0.04) * 3.0) / 3.0;
+        vec3 ic = clamp(vec3(0.5) + vec3(0.5) *
+          cos(6.2831853 * (hue + vec3(0.853, 0.0, 0.379))), 0.0, 1.0);
+        col = mix(col, ic, step(0.5, fr + dth * 0.35) * 0.5);
+      }
+    } else {
+      // THEIRS — presence in fog: size and silhouette only. no lime, no secrets.
+      col = vec3(0.040) + band * vec3(0.050, 0.054, 0.060);
+      col = mix(col, vec3(0.045), 0.35 + 0.30 * n3(hp * 3.0 + u_time * 0.25));
+      col += vec3(0.10, 0.105, 0.11) * step(0.68, rim + dth * 0.2);
+    }
+    outc = vec4(col, 1.0);
+  }
+  gl_FragColor = outc;
+}`;
+const VERT = 'attribute vec2 a; void main(){ gl_Position = vec4(a, 0.0, 1.0); }';
+
+const cv = document.getElementById('gl');
+const gl = cv.getContext('webgl', { antialias: false, alpha: true, premultipliedAlpha: false });
+if (!gl) { setTimeout(() => location.reload(), 1500); throw new Error('webgl unavailable - retrying'); }
+cv.addEventListener('webglcontextlost', e => e.preventDefault());
+cv.addEventListener('webglcontextrestored', () => location.reload());
+function sh(ty, src) {
+  const s = gl.createShader(ty);
+  gl.shaderSource(s, src); gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+  return s;
+}
+const prog = gl.createProgram();
+gl.attachShader(prog, sh(gl.VERTEX_SHADER, VERT));
+gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FRAG));
+gl.linkProgram(prog);
+if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+gl.useProgram(prog);
+const buf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
+const al = gl.getAttribLocation(prog, 'a');
+gl.enableVertexAttribArray(al);
+gl.vertexAttribPointer(al, 2, gl.FLOAT, false, 0, 0);
+const U = {};
+for (const n of ['u_res','u_time','u_tq','u_rA','u_rB','u_comp','u_hi','u_heat','u_onset','u_mode','u_pseed'])
+  U[n] = gl.getUniformLocation(prog, n);
+function resize() {
+  cv.width = Math.min(420, Math.floor(innerWidth / 4));
+  cv.height = Math.min(240, Math.floor(innerHeight / 4));
+  gl.viewport(0, 0, cv.width, cv.height);
+}
+addEventListener('resize', resize); resize();
+
+// ---------- the people: dithered 2D orbs (zero GL contexts spent) ----------
+//   crew  = in your session: full detail — lime rim, ember when recording, deed ticks
+//   scene = rivals: fog orbs — size is how built their session is. that's all you get.
+const PEERS = [
+  { name: 'JAY',  crew: true,  built: 0.55, state: 'building',  seed: 2 },
+  { name: 'M0',   crew: true,  built: 0.40, state: 'idle',      seed: 5 },
+  { name: 'VV',   crew: false, built: 0.30, state: 'building',  seed: 8 },
+  { name: 'KORG', crew: false, built: 0.62, state: 'recording', seed: 11 },
+  { name: 'DSGN', crew: false, built: 0.18, state: 'idle',      seed: 14 },
+];
+const DEEDS = ['+clip', 'comped', 'rendered', '+808', 'rerolled', 'mixed'];
+const crewRail = document.getElementById('crewRail'), sceneRail = document.getElementById('sceneRail');
+for (const p of PEERS) {
+  const el = document.createElement('div');
+  el.className = 'peer';
+  el.innerHTML = `<span class="tick mono"></span><canvas width="22" height="22"></canvas>
+    <div class="nm mono">${p.name}</div>`;
+  el.title = p.crew ? `${p.name} — in your session` : `${p.name} — tap to peek (you won't hear it)`;
+  (p.crew ? crewRail : sceneRail).appendChild(el);
+  p.el = el; p.cv = el.querySelector('canvas'); p.g = p.cv.getContext('2d');
+  p.tick = el.querySelector('.tick');
+  el.addEventListener('click', () => p.crew ? crewTick(p, 'says: run it back') : peekAt(p));
+}
+function orbDraw(p) {
+  const g = p.g, W = 22, r = 4.5 + 5.5 * p.built;
+  g.clearRect(0, 0, W, W);
+  const cx = W / 2 + (Math.random() - 0.5) * (p.state === 'recording' ? 1.2 : 0.4),
+        cy = W / 2 + (Math.random() - 0.5) * 0.6;
+  for (let y = 0; y < W; y++) for (let x = 0; x < W; x++) {
+    const dx = x - cx, dy = y - cy, d = Math.hypot(dx, dy);
+    if (d > r) continue;
+    const lit = 0.5 - (dx * 0.4 + dy * 0.6) / (r * 1.4);          // fake top-left light
+    const bandv = Math.floor(lit * 3 + ((x & 1) ^ (y & 1)) * 0.5) / 3;
+    if (p.crew) {
+      const heat = p.state === 'recording';
+      g.fillStyle = d > r - 1.4
+        ? (heat ? '#CCFF23' : 'rgba(204,255,35,.55)')              // rim runs lime
+        : `rgb(${14 + bandv * 26},${15 + bandv * 28},${13 + bandv * 24})`;
+      if (heat && d < r * 0.35) g.fillStyle = '#D9FF4C';           // ember heart
+    } else {
+      g.fillStyle = `rgb(${22 + bandv * 20},${23 + bandv * 21},${25 + bandv * 23})`; // fog
+    }
+    g.fillRect(x, y, 1, 1);
+  }
+}
+function crewTick(p, txt) {
+  p.tick.textContent = txt || DEEDS[Math.floor(Math.random() * DEEDS.length)];
+  p.tick.classList.remove('pop'); void p.tick.offsetWidth; p.tick.classList.add('pop');
+}
+
+// ---------- PEEK: tap a rival orb — see the size of it, never the sound ----------
+const peeklbl = document.getElementById('peeklbl');
+let peek = null, peekUntil = 0;
+function peekAt(p) {
+  peek = p; peekUntil = performance.now() + 4000;
+  peeklbl.textContent = `PEEKING ${p.name} · ${(p.built * 100).toFixed(0)}% BUILT — YOU CAN SEE IT · YOU CAN'T HEAR IT`;
+  peeklbl.classList.add('on');
+}
+
+// ---------- the sim: people work. orbs breathe, tick, swell. ----------
+setInterval(() => {
+  for (const p of PEERS) {
+    const roll = Math.random();
+    if (p.state === 'idle' && roll < 0.4) p.state = 'building';
+    else if (p.state === 'building' && roll < 0.25) p.state = p.crew ? 'recording' : 'building';
+    else if (p.state === 'recording' && roll < 0.5) p.state = 'building';
+    if (p.state !== 'idle') {
+      p.built = Math.min(1, p.built + 0.02 + Math.random() * 0.04);
+      if (p.crew && Math.random() < 0.55) crewTick(p);
+    }
+  }
+}, 4200);
+
+// ---------- your session: transport, lanes, the artifact ----------
+const BPM = 140, BARS = 16;
+let playing = true, rec = false, tPos = 0.03;
+const CLIPS = [['BEAT', .02, .30, '808 loop'], ['BEAT', .34, .52, 'chop stack'], ['VOX', .04, .20, 'hook take']];
+const laneEls = { BEAT: document.getElementById('laneBeat'), VOX: document.getElementById('laneVox') };
+let youBuilt = 0, youHi = 0;
+{
+  const cov = { BEAT: 0, VOX: 0 };
+  for (const [lane, a, b, n] of CLIPS) {
+    cov[lane] += b - a;
+    const el = document.createElement('div');
+    el.className = 'clip';
+    el.style.left = (a * 100) + '%'; el.style.width = ((b - a) * 100) + '%';
+    el.innerHTML = `<span class="mono">${n.toUpperCase()}</span>`;
+    laneEls[lane].appendChild(el);
+  }
+  youBuilt = Math.min(1, (cov.BEAT + cov.VOX) / 0.8);
+  youHi = Math.min(1, cov.VOX / 0.25);
+}
+const recchip = document.getElementById('recchip'), tcEl = document.getElementById('tc'),
+      phead = document.getElementById('phead'), playbtn = document.getElementById('playbtn');
+function setRec(on) { rec = on; document.body.classList.toggle('rec', on); }
+recchip.onclick = () => setRec(!rec);
+addEventListener('keydown', e => {
+  if (e.key.toLowerCase() === 'r') setRec(!rec);
+  if (e.key === ' ') { e.preventDefault(); playing = !playing; playbtn.textContent = playing ? '▶' : '⏸'; }
+});
+playbtn.onclick = () => { playing = !playing; playbtn.textContent = playing ? '▶' : '⏸'; };
+
+// ---------- the loop ----------
+let rA = 0.2, rB = 0.1, rTA = 0.2, tq = 0, lastTick = 0, lastBeat = -1;
+let onset = 0, recAmt = 0, comp = 0, hi = 0;
+const t0 = performance.now(); let last = t0;
+function frame(now) {
+  const t = (now - t0) / 1000, dt = Math.min(0.05, (now - last) / 1000); last = now;
+  if (playing) tPos = (tPos + dt / ((BARS * 4) * 60 / BPM)) % 1;
+  const beats = tPos * BARS * 4, beat = Math.floor(beats);
+  if (playing && beat !== lastBeat) {
+    lastBeat = beat;
+    if (beat % 4 === 0) { rTA += 0.30 * (Math.random() - 0.5); onset = Math.max(onset, 0.5); }
+  }
+  onset *= 0.92;
+  recAmt += ((rec ? 1 : 0) - recAmt) * 0.06;
+  comp += (youBuilt - comp) * 0.03; hi += (youHi - hi) * 0.03;
+  tcEl.textContent = `BAR ${Math.floor(beats / 4) % 16 + 1}.${Math.floor(beats % 4) + 1}`;
+  phead.style.left = (78 + (beats / 4 % 16) / 16 * (innerWidth - 120)) + 'px';
+
+  if (t - lastTick > 1 / 12) {                       // on twos
+    lastTick = t; tq = t;
+    rA += (rTA - rA) * 0.5 + (Math.random() - 0.5) * 0.008;
+    rB += dt * 0.4 + (Math.random() - 0.5) * 0.008;
+    for (const p of PEERS) orbDraw(p);               // orbs wobble on twos too
+  }
+  if (peek && now > peekUntil) { peek = null; peeklbl.classList.remove('on'); }
+
+  gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.uniform2f(U.u_res, cv.width, cv.height);
+  gl.uniform1f(U.u_time, t); gl.uniform1f(U.u_tq, tq);
+  gl.uniform1f(U.u_rA, rA); gl.uniform1f(U.u_rB, rB);
+  gl.uniform1f(U.u_comp, peek ? peek.built : comp);
+  gl.uniform1f(U.u_hi, peek ? 0 : hi);
+  gl.uniform1f(U.u_heat, peek ? 0 : recAmt);
+  gl.uniform1f(U.u_onset, peek ? 0 : onset);
+  gl.uniform1f(U.u_mode, peek ? 1 : 0);
+  gl.uniform1f(U.u_pseed, peek ? peek.seed * 0.37 : 0.37);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

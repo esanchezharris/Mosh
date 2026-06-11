@@ -28,6 +28,15 @@ export type AvailableColor = {
 // Quality readout from a completed render's manifest (judge panel, 05 §7).
 export type RenderQA = { pq?: number | null; pq_base?: number | null; flags?: string[]; adapter?: string };
 
+// A MIDI note as serialised in the snapshot — beats within the clip sequence.
+export type MidiNote = {
+  i: number;        // index into the clip's note list (the command handle)
+  pitch: number;    // 0..127
+  start: number;    // beats
+  length: number;   // beats
+  velocity: number; // 1..127
+};
+
 export type Clip = {
   id: string;
   name: string;
@@ -35,13 +44,28 @@ export type Clip = {
   start: number;
   length: number;
   offset: number;
+  mute?: boolean;
+  gainDb?: number;
   sourceFile?: string;
   sourceLength?: number;
+  notes?: MidiNote[];
+  // Audio warp (auto-tempo): the clip re-anchors in beats and time-stretches to
+  // follow the tempo map (SoundTouch). Wave clips only.
+  autoTempo?: boolean;
+  stretchMode?: string;
+  sourceBpm?: number;
   hasRenderLayer: boolean;
   renderLayer?: RenderLayer;
 };
 
-export type PluginParam = { index: number; name: string; value: number };
+export type AutoPoint = { t: number; v: number }; // t seconds, v normalised 0..1
+export type PluginParam = {
+  index: number;
+  name: string;
+  value: number;
+  automated?: boolean;
+  points?: AutoPoint[];
+};
 
 export type NeuralParam = { id: string; ui: number; safeMaxUi: number };
 export type NeuralInsert = {
@@ -58,6 +82,8 @@ export type Plugin = {
   type: string;
   enabled: boolean;
   external: boolean;
+  builtin?: boolean;
+  category?: string;
   isInstrument: boolean;
   params: PluginParam[];
   neural?: NeuralInsert;
@@ -67,11 +93,27 @@ export type Plugin = {
 export type AvailablePlugin = {
   id: string;
   name: string;
-  format: string;
+  format: string;       // "VST3" | "AudioUnit"
   manufacturer: string;
   isInstrument: boolean;
 };
 
+// Per-format catalog counts (INS-005) — rides on the list_plugins result.
+export type PluginCounts = { vst3: number; au: number; total: number };
+
+// A quarantined plugin (INS-005) — crashed a scan or was blocked manually.
+export type PluginBlockEntry = { id: string; reason: string };
+
+// Engine built-in plugin (from list_builtins) — loaded via load_builtin by type.
+export type BuiltinPlugin = {
+  type: string;
+  name: string;
+  category: string;
+  isInstrument: boolean;
+  builtin: true;
+};
+
+export type Send = { bus: number; db: number; mute: boolean };
 export type Track = {
   id: string;
   index: number;
@@ -83,7 +125,37 @@ export type Track = {
   pan?: number;
   mute?: boolean;
   solo?: boolean;
+  armed?: boolean;
+  monitor?: "off" | "automatic" | "on";
+  hasInput?: boolean;
+  inputType?: "wave" | "midi";  // kind of the routed input (CTL-001)
+  midiInputName?: string;       // name of the routed MIDI input device, when inputType=="midi"
+  isInstrument?: boolean;       // hosts a synth/builtin instrument -> live MIDI armable (CTL-001)
+  sends?: Send[];
+  isReturn?: boolean;
+  returnBus?: number;
+  meterEnabled?: boolean;
+  // MIX-008 — group (submix) tracks. A group entry has isGroup + type "group" and
+  // an empty clips array; a track nested under a group carries parentId.
+  isGroup?: boolean;
+  parentId?: string;
+  // RTG-001/002 — routing. input = the explicitly-chosen input device; output =
+  // the track's destination (absent = default out; isTrack = routed into a track).
+  input?: { deviceID: string; name?: string };
+  output?: { isTrack: boolean; destId?: string; name: string; deviceID?: string };
 };
+
+// RTG-001/002 — routing enumerations (read-only, on-demand like AudioDevices).
+export type WaveInput = { deviceID: string; name: string; enabled: boolean; isStereoPair: boolean };
+export type TrackOutputs = {
+  outputs: { deviceID: string; name: string; enabled: boolean }[];
+  tracks: { id: string; name: string }[];
+  audioEnabled: boolean;
+};
+
+export type Level = { l: number; r: number };           // peak dBFS, -100 floor
+
+export type Bus = { bus: number; name: string; trackId: string };
 
 export type Transport = {
   playing: boolean;
@@ -94,11 +166,99 @@ export type Transport = {
   loopEnd: number;
 };
 
+// Current audio-device selection summary (snapshot.audio) — the settings edit form.
+export type AudioSelection = {
+  type: string;
+  outputDevice: string;
+  inputDevice: string;
+  sampleRate: number;
+  bufferSize: number;
+};
+
+// Full device enumeration from list_audio_devices (on-demand, NOT in the snapshot).
+export type AudioDevices = {
+  types: { name: string; outputs: string[]; inputs: string[] }[];
+  current: AudioSelection;
+  sampleRates: number[];
+  bufferSizes: number[];
+  defaultBufferSize: number;
+  audioEnabled: boolean;
+};
+
+// BRW-001 — content/file browser (read-only list_directory). Pure view data; the
+// only mutation is the existing import_clip command on a chosen file.
+export type DirEntry = {
+  name: string;
+  path: string;       // full absolute path
+  isDir: boolean;
+  size: number | null; // bytes (null for directories)
+};
+export type DirListing = {
+  path: string;          // normalized absolute dir actually listed
+  parent: string | null; // parent dir, or null at the filesystem root (drives Up)
+  exists: boolean;       // false when missing / not a dir / no read access
+  error: string | null;  // human-readable reason when exists==false
+  roots: { name: string; path: string }[]; // always present (recovery targets)
+  entries: DirEntry[];
+};
+
 export type Snapshot = {
   schemaVersion: number;
-  session: { sampleRate: number; tempo: number; editFile: string };
+  session: {
+    sampleRate: number;
+    tempo: number;
+    timeSigNumerator?: number;
+    timeSigDenominator?: number;
+    metronome?: boolean;
+    length?: number;
+    editFile: string;
+    projectExtension?: string; // backend-owned project container extension (no leading dot)
+    // SES-001 — the tempo MAP (additive; tempo/timeSig* above stay point 0).
+    // curve: 1 = step (hold-then-jump), values in (-1,1) ramp to the next point.
+    tempoMap?: { time: number; bpm: number; curve?: number }[];
+    timeSigMap?: { time: number; numerator: number; denominator: number }[];
+    // Ramps only: the engine-faithful fine sections (its own subdivision
+    // boundaries), making the UI mapping exact-by-construction through a ramp.
+    tempoSections?: { time: number; bpm: number }[];
+    // Audio-engine gate + readout (wave: settings — MON-007 / FLY-004).
+    audioEnabled?: boolean;
+    bitDepth?: number;
+    bufferSize?: number;
+    outputLatencyMs?: number;
+    // PRF-001 — multicore audio processing. availableCores is what the engine sees;
+    // audioThreads is the RESOLVED count it actually uses (== availableCores when auto);
+    // audioThreadsAuto shows "Auto (N)". A real preference (drives setNumThreads on the
+    // parallel graph), not a cosmetic readout. Single-thread is threads=1.
+    availableCores?: number;
+    audioThreads?: number;
+    audioThreadsAuto?: boolean;
+    // Plugin delay compensation readout (MON-004): the whole-edit reported latency the
+    // playback graph compensates (neural insert + all hosted plugins). Null context
+    // (no audio device / idle engine) → latencyContextReady=false, label "PDC —".
+    totalLatencySamples?: number;
+    totalLatencyMs?: number;
+    latencyContextReady?: boolean;
+    // Monitoring round-trip latency (MON-003): hardware input + output latency, i.e. the
+    // delay a performer hears through software input monitoring. 0 with no open device
+    // (show "—"). Smaller buffer size lowers it; monitoring is software-only.
+    roundTripLatencyMs?: number;
+    roundTripLatencySamples?: number;
+    audioDeviceName?: string;
+    audioDeviceError?: string;
+    // PRJ-008 — per-project format / time-base intent (the export/format default +
+    // timeline display base). Generic media-format values, persisted with the project;
+    // each field falls back to the live device readout when unset.
+    project?: {
+      sampleRate: number;
+      bitDepth: number;
+      timeBase: "seconds" | "barsBeats";
+    };
+  };
   tracks: Track[];
   transport: Transport;
+  master?: { volumeDb: number; pan: number };
+  buses?: Bus[];
+  audio?: AudioSelection;
 };
 
 export type CommandResult<T = unknown> = {
@@ -109,3 +269,31 @@ export type CommandResult<T = unknown> = {
 };
 
 export type MoshEvent = { type: string; payload?: unknown };
+
+// export_audio result data (IOX-002 / IOX-007). file/format/bitDepth/sampleRate
+// echo the resolved render settings; format is a generic media format keyword.
+export type ExportFormat = "wav" | "aiff" | "flac";
+export type ExportResult = {
+  file: string;
+  format: ExportFormat;
+  bitDepth: number;
+  sampleRate: number;
+  bytes: number;
+  renderMode: string;
+};
+
+// get_command_log result (AGT-001): a read-only window over the canonical command
+// log (mosh-log.jsonl). Most-recent-first, bounded by `limit`. `total` is the full
+// count of parsed lines in the log (entries.length <= total).
+export type CommandLogEntry = {
+  ts?: number;
+  seq?: number;
+  command: string;
+  ok: boolean;
+  undoable: boolean;
+  error?: string;
+};
+export type CommandLog = {
+  entries: CommandLogEntry[];
+  total: number;
+};

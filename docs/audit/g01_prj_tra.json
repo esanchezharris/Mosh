@@ -1,0 +1,166 @@
+{
+  "group": "PRJ_TRA",
+  "features": [
+    {
+      "id": "PRJ-001",
+      "capability": "partial",
+      "capabilityEvidence": "MoshEngine.cpp:60 createEmptyEdit on cold start (default audio/time settings), but no new-project command and single fixed session dir; no templates.",
+      "surface": "missing",
+      "surfaceEvidence": "No New / New-from-template action in App.tsx or any component; fresh Edit only happens at process launch."
+    },
+    {
+      "id": "PRJ-002",
+      "capability": "partial",
+      "capabilityEvidence": "MoshEngine.cpp:50-53 loads the single fixed ~/Library/Mosh/session/session.tracktionedit at startup; no open-by-path, no recent files.",
+      "surface": "missing",
+      "surfaceEvidence": "No Open action or recent-files affordance in ui/src; only a 'Reload' button (re-reads the one fixed file) in Arrangement.tsx:176."
+    },
+    {
+      "id": "PRJ-003",
+      "capability": "present",
+      "capabilityEvidence": "cmdSave -> MoshEngine::save() EditFileOperations.save (MoshEngine.cpp:228); SelfTest.cpp:192-197/308 verifies tracks/clips/plugins/renderLayer round-trip. Single fixed path, no Save As.",
+      "surface": "partial",
+      "surfaceEvidence": "Save button in Arrangement.tsx:175 calls exec('save'); no Save As, no file name shown in title/window (App.tsx topbar shows only 'Mosh')."
+    },
+    {
+      "id": "PRJ-004",
+      "capability": "missing",
+      "capabilityEvidence": "No interval/threshold checkpointing; save only happens on explicit save command. grep autosave/auto-save: none in src.",
+      "surface": "missing",
+      "surfaceEvidence": "No auto-save config or last-saved indicator in ui/src."
+    },
+    {
+      "id": "PRJ-005",
+      "capability": "missing",
+      "capabilityEvidence": "Single .tracktionedit file overwritten in place; no multi-version store. grep version history/snapshot history: none.",
+      "surface": "missing",
+      "surfaceEvidence": "No history/snapshots panel in ui/src."
+    },
+    {
+      "id": "PRJ-006",
+      "capability": "missing",
+      "capabilityEvidence": "No crash-recovery record written; no recovery reconstruction path in MoshEngine.cpp. grep recovery: none.",
+      "surface": "missing",
+      "surfaceEvidence": "No recovery prompt on relaunch in App.tsx/init flow (store.ts init just refreshes snapshot)."
+    },
+    {
+      "id": "PRJ-007",
+      "capability": "missing",
+      "capabilityEvidence": "No template capture/instantiation in engine; grep template (non-CSS/plugin) finds nothing functional.",
+      "surface": "missing",
+      "surfaceEvidence": "No template create/choose/manage UI in ui/src."
+    },
+    {
+      "id": "PRJ-008",
+      "capability": "partial",
+      "capabilityEvidence": "Sample rate read from device (MoshOps.cpp:1251); export bitDepth hardcoded 24 (MoshOps.cpp:1118); no per-project stored rate/depth/time-base honoured by a settings store.",
+      "surface": "missing",
+      "surfaceEvidence": "No project-settings dialog for sample rate/bit depth/time base in ui/src; sampleRate appears only as a read-only snapshot field."
+    },
+    {
+      "id": "PRJ-009",
+      "capability": "missing",
+      "capabilityEvidence": "No copy-external-media-into-project or re-path logic; grep consolidate/collect finds only an unrelated SelfTest demo comment.",
+      "surface": "missing",
+      "surfaceEvidence": "No consolidate/collect action in ui/src."
+    },
+    {
+      "id": "TRA-001",
+      "capability": "present",
+      "capabilityEvidence": "cmdSetTransport play/stop -> transport.play/stop with ensurePlaybackContext (MoshOps.cpp:244-252); deterministic from current position.",
+      "surface": "present",
+      "surfaceEvidence": "Transport.tsx:21-27 play/stop toggle button reflects t.playing; position readout at :42."
+    },
+    {
+      "id": "TRA-002",
+      "capability": "present",
+      "capabilityEvidence": "cmdSetTransport action 'record' -> transport.record(false) (MoshOps.cpp:253-256); recording exposed in transportToVar (:1366). No record-arm per track.",
+      "surface": "missing",
+      "surfaceEvidence": "Transport.tsx has only play/stop/return/loop buttons; no Record control and no command path in ui/src ever sends action:'record'."
+    },
+    {
+      "id": "TRA-003",
+      "capability": "present",
+      "capabilityEvidence": "cmdSetTransport sets transport.looping and setLoopRange (MoshOps.cpp:262-267); Tracktion loops over the region during play (and record).",
+      "surface": "present",
+      "surfaceEvidence": "Loop toggle in Transport.tsx:35-41; editable loop region via shift-drag on ruler in Arrangement.tsx:41 + rendered loopregion :97-102."
+    },
+    {
+      "id": "TRA-004",
+      "capability": "present",
+      "capabilityEvidence": "transport.setPosition for any position incl. 0 (MoshOps.cpp:259-260); could seek to edit length but no end helper wired.",
+      "surface": "partial",
+      "surfaceEvidence": "Transport.tsx:28-34 'Return to start' (stop, position:0) and ruler-click seek; no go-to-end control."
+    },
+    {
+      "id": "TRA-005",
+      "capability": "missing",
+      "capabilityEvidence": "No named time-location store/recall; grep locator/cue finds nothing in src.",
+      "surface": "missing",
+      "surfaceEvidence": "No locator add-on-ruler or list in ui/src."
+    },
+    {
+      "id": "TRA-006",
+      "capability": "partial",
+      "capabilityEvidence": "Tempo exists as default from createEmptyEdit and is read via tempoSequence.getBpmAt into snapshot (MoshOps.cpp:1252); no set_tempo/setBpm command exists to change it.",
+      "surface": "missing",
+      "surfaceEvidence": "tempo is in the Snapshot.session type (types.ts:99) but not displayed or editable in Transport.tsx or any component."
+    },
+    {
+      "id": "TRA-007",
+      "capability": "missing",
+      "capabilityEvidence": "No time-signature read or set; grep timeSig/setNumerator/setDenominator: none in src. Not in snapshot.",
+      "surface": "missing",
+      "surfaceEvidence": "No time-signature display or editor in ui/src."
+    },
+    {
+      "id": "TRA-008",
+      "capability": "missing",
+      "capabilityEvidence": "No click track / metronome; grep metronome/click track/getClickTrack: none in src.",
+      "surface": "missing",
+      "surfaceEvidence": "No metronome toggle in Transport.tsx or anywhere in ui/src."
+    },
+    {
+      "id": "TRA-009",
+      "capability": "missing",
+      "capabilityEvidence": "No count-in/pre-roll before record; grep count-in/preroll: none.",
+      "surface": "missing",
+      "surfaceEvidence": "No count-in config or indicator in ui/src."
+    },
+    {
+      "id": "TRA-010",
+      "capability": "missing",
+      "capabilityEvidence": "No punch-in/out arming range; grep punch: none in src.",
+      "surface": "missing",
+      "surfaceEvidence": "No punch-range control on the timeline in ui/src."
+    },
+    {
+      "id": "TRA-011",
+      "capability": "partial",
+      "capabilityEvidence": "Ruler click sets transport position (seek) (Arrangement.tsx:19-22) but there is no audio-while-dragging scrub; transport just repositions, no proportional playback.",
+      "surface": "partial",
+      "surfaceEvidence": "Ruler click/seek exists in Arrangement.tsx but produces no audible scrub feedback; no dedicated scrub/jog affordance."
+    },
+    {
+      "id": "TRA-012",
+      "capability": "missing",
+      "capabilityEvidence": "No view-follows-playhead logic; lanes use fixed scroll, playhead just positioned by left offset (Arrangement.tsx:103,131).",
+      "surface": "missing",
+      "surfaceEvidence": "No auto-scroll/follow toggle in ui/src."
+    },
+    {
+      "id": "TRA-013",
+      "capability": "missing",
+      "capabilityEvidence": "No markers persisted at positions; no MarkerTrack/insertMarker usage in src.",
+      "surface": "missing",
+      "surfaceEvidence": "No add/name/click markers on the ruler in Arrangement.tsx; ruler only renders second ticks, playhead and loop region."
+    },
+    {
+      "id": "TRA-014",
+      "capability": "missing",
+      "capabilityEvidence": "No global playback-rate/varispeed control; grep varispeed/playback rate: none in src.",
+      "surface": "missing",
+      "surfaceEvidence": "No varispeed control in ui/src."
+    }
+  ]
+}

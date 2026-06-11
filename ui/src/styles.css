@@ -61,13 +61,103 @@ button.on { border-color: var(--accent); color: var(--accent); background: #2120
   border: 1px dashed var(--line); border-radius: 6px; padding: 0.2rem 0.5rem; opacity: 0.6;
 }
 .tool-btn { padding: 0.35rem 0.6rem; border-radius: 7px; }
+.remote-companion { position: relative; }
+.remote-btn.on { border-color: var(--ok); color: var(--ok); background: rgba(56, 211, 159, 0.12); }
+.remote-pop {
+  position: absolute; right: 0; top: calc(100% + 8px); width: 310px; z-index: 20;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  box-shadow: 0 18px 40px rgba(0,0,0,0.45); padding: 0.7rem; display: flex; flex-direction: column; gap: 0.55rem;
+}
+.remote-head { display: flex; align-items: center; justify-content: space-between; font-size: 0.85rem; }
+.remote-mode { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.remote-mode button { font-size: 0.74rem; padding: 0.28rem 0.45rem; }
+.remote-mode button.active { border-color: var(--ok); color: var(--ok); background: rgba(56, 211, 159, 0.12); }
+.remote-code {
+  font-size: 1.45rem; font-weight: 800; letter-spacing: 0.16em; color: var(--ok);
+  font-variant-numeric: tabular-nums; line-height: 1.2;
+}
+.remote-meta { color: var(--muted); font-size: 0.78rem; font-variant-numeric: tabular-nums; }
+.remote-qr {
+  width: 180px; height: 180px; align-self: center; border-radius: 6px;
+  border: 1px solid var(--line); background: #fff; padding: 6px;
+}
+.remote-stop, .remote-start, .remote-copy { align-self: flex-start; }
+.remote-copy { font-size: 0.74rem; padding: 0.25rem 0.45rem; }
+
+/* Settings popover (wave: settings) — reuses .remote-pop, adds device/project rows. */
+.settings-pop { width: 340px; max-height: 78vh; overflow-y: auto; }
+.settings-gate { display: flex; align-items: center; gap: 0.5rem; border-radius: 6px; border-bottom: none; }
+.settings-gate .mini-action { font-size: 0.7rem; padding: 0.15rem 0.4rem; margin-left: auto; }
+.settings-group { display: flex; flex-direction: column; gap: 0.35rem; padding-top: 0.4rem; border-top: 1px solid var(--line); }
+.settings-label { font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.settings-row { display: grid; grid-template-columns: 84px 1fr; align-items: center; gap: 0.4rem; font-size: 0.78rem; color: var(--muted); }
+.settings-row select { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; color: var(--text); padding: 0.25rem 0.3rem; width: 100%; }
+.settings-row select:disabled { opacity: 0.5; }
+.settings-readout { display: grid; grid-template-columns: 84px 1fr; gap: 0.2rem 0.4rem; font-size: 0.78rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.settings-readout span:nth-child(even) { color: var(--text); }
+.settings-deverr { color: var(--warn); font-size: 0.74rem; }
+.settings-hint { color: var(--muted); font-size: 0.72rem; margin-top: 0.3rem; line-height: 1.3; }
+.settings-files { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.settings-files .tool-btn { font-size: 0.76rem; padding: 0.28rem 0.5rem; }
+.settings-editfile { font-size: 0.68rem; color: var(--muted); word-break: break-all; opacity: 0.8; }
+/* UI-scale stepper (ACC-005) — sits in a .settings-row's value column. */
+.settings-stepper { display: flex; align-items: center; gap: 0.4rem; justify-content: flex-start; }
+.settings-stepper .mini { width: 22px; height: 20px; font-size: 0.74rem; border: 1px solid var(--line); border-radius: 6px; }
+.settings-stepper .mini:disabled { opacity: 0.4; }
+.settings-scale-val { min-width: 42px; text-align: center; color: var(--text); font-variant-numeric: tabular-nums; }
+/* Audio-threads (PRF-001) readout/stepper reuses .settings-row + .settings-stepper. */
+.settings-threads-val { min-width: 70px; text-align: center; color: var(--text); font-variant-numeric: tabular-nums; }
+
+/* Content browser (BRW-001) — reuses .settings-pop / .modal-list / .plugin-row. A
+   thin breadcrumb bar + a right-aligned per-file Import button; no new visual language. */
+.cb-bar { display: flex; align-items: center; gap: 0.4rem; padding: 0.3rem 0; }
+.cb-path { font-size: 0.7rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; flex: 1; text-align: left; }
+.cb-file { flex-direction: row; align-items: center; justify-content: space-between; cursor: default; }
+.cb-file:hover { background: transparent; border-color: transparent; }
+.cb-file .pr-meta { margin-left: auto; margin-right: 0.5rem; font-variant-numeric: tabular-nums; }
+.cb-import { font-size: 0.7rem; padding: 0.15rem 0.5rem; }
+
+/* Command-log inspector (AGT-001) — reuses .remote-pop; read-only command list. */
+.cmdlog-pop { width: 320px; max-height: 70vh; overflow: hidden; }
+.cmdlog-actions { display: flex; align-items: center; gap: 0.25rem; }
+.cmdlog-meta { font-size: 0.72rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.cmdlog-list { display: flex; flex-direction: column; max-height: 52vh; overflow-y: auto; gap: 1px; }
+.cmdlog-empty { font-size: 0.76rem; color: var(--muted); padding: 0.4rem 0; }
+.cmdlog-row { display: grid; grid-template-columns: 14px 1fr auto auto; align-items: center; gap: 0.45rem; font-size: 0.76rem; padding: 0.2rem 0.1rem; border-bottom: 1px solid var(--line); }
+.cmdlog-row:last-child { border-bottom: none; }
+.cmdlog-dot { font-size: 0.6rem; line-height: 1; }
+.cmdlog-dot.ok { color: var(--ok); }
+.cmdlog-dot.err { color: var(--warn); }
+.cmdlog-name { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.cmdlog-row.err .cmdlog-name { color: var(--warn); }
+.cmdlog-badge { font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 0 0.25rem; }
+.cmdlog-ts { color: var(--muted); font-size: 0.68rem; font-variant-numeric: tabular-nums; }
 
 .transport { display: flex; align-items: center; gap: 0.4rem; }
 .tbtn { width: 34px; height: 34px; display: grid; place-items: center; font-size: 0.95rem; border-radius: 8px; }
 .tbtn.play { color: var(--ok); }
 .tbtn.stop { color: var(--playhead); }
 .tbtn.toggle.on { border-color: var(--accent); color: var(--accent); background: #21203a; }
+.tbtn.rec { color: var(--muted); }
+.tbtn.rec.on { color: #fff; border-color: var(--playhead); background: var(--playhead); box-shadow: 0 0 8px var(--playhead); }
+/* Wave B — record-active pulse, keyed to transport.recording. Pure view feedback. */
+.tbtn.rec.recording-pulse { animation: mosh-rec-pulse 1s ease-in-out infinite; }
+@keyframes mosh-rec-pulse {
+  0%, 100% { box-shadow: 0 0 6px var(--playhead); }
+  50%      { box-shadow: 0 0 16px var(--playhead); opacity: 0.85; }
+}
 .pos { margin-left: 0.5rem; font-variant-numeric: tabular-nums; font-size: 1rem; color: var(--muted); min-width: 76px; text-align: right; }
+.pos.bbs { margin-left: 0.25rem; min-width: 60px; font-size: 0.9rem; color: var(--accent); }
+.pos.pdc { margin-left: 0.5rem; min-width: auto; font-size: 0.78rem; color: var(--muted); }
+.pos.pdc.dim { opacity: 0.5; }
+
+/* Tempo + time-signature (Wave 2) */
+.tempo, .timesig { display: flex; align-items: center; gap: 3px; font-size: 0.8rem; color: var(--muted); }
+.tempo input, .timesig input { width: 44px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; color: var(--text); padding: 0.25rem 0.3rem; font-variant-numeric: tabular-nums; }
+.timesig input { width: 34px; }
+.timesig select { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; color: var(--text); padding: 0.25rem 0.2rem; }
+.tempo .unit { letter-spacing: 0.04em; }
+.timesig .slash { opacity: 0.7; }
 
 .error-bar { background: #3a1320; color: var(--warn); padding: 0.4rem 1rem; border-bottom: 1px solid var(--line); font-size: 0.85rem; }
 
@@ -87,8 +177,23 @@ button.on { border-color: var(--accent); color: var(--accent); background: #2120
   color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; background: var(--panel);
 }
 .ruler { position: relative; height: 30px; cursor: text; }
-.tick { position: absolute; top: 0; height: 100%; border-left: 1px solid var(--line); }
+.tick { position: absolute; top: 0; height: 100%; }
+.tick.bar { border-left: 1px solid var(--line); }
+.tick.beat { border-left: 1px solid var(--line); opacity: 0.32; height: 40%; top: 60%; }
 .tick span { position: absolute; left: 4px; top: 2px; font-size: 0.68rem; color: var(--muted); }
+/* SES-001 — tempo/meter change markers + the tempo-map popover */
+.tick.tempo-mark { border-left: 2px solid var(--accent); }
+.tick.tempo-mark span { color: var(--accent); top: 14px; font-size: 0.58rem; }
+.tempomap-pop { min-width: 220px; }
+.tm-row { display: flex; align-items: center; gap: 8px; font-size: 0.72rem; padding: 2px 0; }
+.tm-row span:first-child { color: var(--muted); width: 64px; }
+.tm-base { color: var(--muted); font-size: 0.6rem; }
+.tm-actions { display: flex; gap: 6px; margin-top: 6px; }
+/* Musical gridlines behind the clips (bar lines, same mapping as the ruler) */
+.gridlines { position: absolute; top: 0; left: 0; right: 0; pointer-events: none; z-index: 0; }
+.gl { position: absolute; top: 0; bottom: 0; width: 1px; }
+.gl.bar { background: var(--line); opacity: 0.55; }
+.grid-sel { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; color: var(--text); padding: 0.2rem 0.3rem; font-size: 0.76rem; }
 .loopregion { position: absolute; top: 0; height: 100%; background: rgba(108,92,255,0.22); border-left: 2px solid var(--accent); border-right: 2px solid var(--accent); }
 
 .tl-body { display: flex; min-height: 0; }
@@ -101,6 +206,8 @@ button.on { border-color: var(--accent); color: var(--accent); background: #2120
 .mixbtn { width: 22px; height: 20px; padding: 0; font-size: 0.7rem; font-weight: 700; color: var(--muted); }
 .mixbtn.mute-on { background: #5a1d1d; color: #ff8b8b; border-color: #7a2a2a; }
 .mixbtn.solo-on { background: #5a4d12; color: var(--warn); border-color: #7a6a2a; }
+.mixbtn.arm-on { background: var(--rec, #e3463f); color: #fff; border-color: var(--rec, #e3463f); }
+.mixbtn.mon-on { background: var(--accent); color: #fff; border-color: var(--accent); }
 .vol { flex: 1; accent-color: var(--accent); height: 4px; }
 
 .lanes { position: relative; background:
@@ -128,6 +235,14 @@ button.on { border-color: var(--accent); color: var(--accent); background: #2120
 .playhead { position: absolute; top: 0; width: 2px; background: var(--playhead); pointer-events: none; z-index: 3; }
 .tl-head .playhead { height: 30px; }
 .marquee { position: absolute; border: 1px solid var(--accent); background: rgba(108,92,255,0.12); z-index: 4; pointer-events: none; }
+/* ARR-010 — the edit time-range band over the lanes (warmer than the loop region). */
+.loopregion.rangeband { z-index: 2; background: rgba(227,70,63,0.16); border-left: 2px solid var(--rec, #e3463f); border-right: 2px solid var(--rec, #e3463f); pointer-events: none; }
+/* AUT-003 — inline automation strip pinned to the bottom of each lane. */
+.inline-auto-wrap { position: absolute; left: 0; bottom: 0; right: 0; z-index: 2; pointer-events: none; }
+.inline-auto { display: block; touch-action: none; pointer-events: auto; opacity: 0.85; }
+.inline-auto .auto-dot { r: 4; }
+.ia-picker { display: flex; gap: 4px; margin-top: 2px; }
+.ia-sel { flex: 1; min-width: 0; background: var(--panel-2); border: 1px solid var(--line); border-radius: 5px; color: var(--text); padding: 0.1rem 0.2rem; font-size: 0.66rem; }
 
 .track-head.sel { background: #20202c; box-shadow: inset 3px 0 0 var(--accent); }
 .fx-count { font-size: 0.6rem; color: var(--accent); background: #21203a; border-radius: 4px; padding: 0 4px; }
@@ -170,6 +285,12 @@ button.on { border-color: var(--accent); color: var(--accent); background: #2120
 .plugin-row:hover { background: var(--panel-2); border-color: var(--line); }
 .pr-name { font-size: 0.9rem; }
 .pr-meta { font-size: 0.72rem; color: var(--muted); }
+.plugin-group { display: flex; flex-direction: column; gap: 1px; margin-bottom: 0.4rem; }
+.pg-label { font-size: 0.62rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); padding: 0.4rem 0.7rem 0.2rem; }
+
+/* Built-in plugin card (Wave 1 — engine effects/instruments, inline params) */
+.pcard.builtin { min-width: 200px; border-color: #2c4a3a; background: linear-gradient(180deg, #16241c, var(--panel-2)); }
+.bbadge { background: #2f8f6a; }
 
 /* Neural insert (Stage 4) */
 .pcard.neural { min-width: 220px; border-color: #3a3a6a; background: linear-gradient(180deg, #1c1c2c, var(--panel-2)); }
@@ -201,6 +322,15 @@ button.on { border-color: var(--accent); color: var(--accent); background: #2120
 .gen-badge.st-rendering, .gen-badge.st-queued { background: #4a3a12; color: var(--warn); }
 .gen-badge.st-dirty { background: #4a2a2a; color: #ff9b9b; }
 .gen-badge.st-empty { background: var(--line); color: var(--muted); }
+.gen-badge.st-bypassed { background: var(--line); color: var(--muted); opacity: 0.7; }
+.gen-badge.st-frozen { background: #1d3a4a; color: #8bd0ff; }
+.gen-badge.st-bounced { background: #2d2d4a; color: #b8b8ff; }
+.gen-sub { font-size: 0.62rem; color: var(--muted); text-transform: lowercase; }
+.mixbtn.byp-on { background: var(--line); color: var(--text); border-color: var(--muted); }
+.gen-manage { margin-top: 4px; }
+.gen-actions button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.gen-remove { color: var(--muted); }
+.gen-remove:hover { color: var(--playhead); border-color: var(--playhead); }
 .gen-prog { flex: 1; height: 5px; background: var(--panel-2); border-radius: 3px; overflow: hidden; }
 .gen-prog span { display: block; height: 100%; background: var(--accent); transition: width 0.1s linear; }
 .gen-seed { font-size: 0.66rem; color: var(--muted); }
@@ -217,3 +347,112 @@ button.on { border-color: var(--accent); color: var(--accent); background: #2120
 .gen-actions button:disabled { opacity: 0.4; cursor: default; }
 
 .boot { padding: 3rem; color: var(--muted); }
+
+/* Automation panel (Wave 7) */
+.auto-panel { width: min(900px, 92vw); background: var(--panel); border: 1px solid var(--line); border-radius: 12px; display: flex; flex-direction: column; box-shadow: 0 24px 60px rgba(0,0,0,0.5); overflow: hidden; }
+.auto-head { display: flex; align-items: center; gap: 0.5rem; padding: 0.6rem 0.9rem; border-bottom: 1px solid var(--line); }
+.auto-head select { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; color: var(--text); padding: 0.25rem 0.4rem; font-size: 0.78rem; }
+.auto-head .x { background: transparent; border-color: transparent; color: var(--muted); }
+.auto-spacer { flex: 1; }
+.auto-scroll { overflow-x: auto; background: var(--panel-2); }
+.auto-canvas { display: block; touch-action: none; }
+.auto-grid { stroke: var(--line); stroke-width: 1; opacity: 0.5; }
+.auto-grid.mid { opacity: 0.8; }
+.auto-line { stroke: var(--accent); stroke-width: 2; }
+.auto-dot { fill: var(--accent); stroke: #fff; stroke-width: 1; cursor: grab; }
+.auto-dot:hover { fill: #fff; }
+.auto-foot { padding: 0.4rem 0.9rem; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.7rem; }
+
+/* Clip actions bar (Wave 6) */
+.clip-actions { display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem 1rem; border-bottom: 1px solid var(--line); background: var(--panel-2); flex-wrap: wrap; }
+.ca-label { font-size: 0.74rem; color: var(--muted); }
+.ca-name { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; color: var(--text); padding: 0.25rem 0.5rem; font-size: 0.8rem; width: 160px; }
+.ca-gain { display: flex; align-items: center; gap: 5px; font-size: 0.74rem; color: var(--muted); }
+.ca-gain input { width: 90px; accent-color: var(--accent); }
+.clip-actions button { font-size: 0.76rem; padding: 0.25rem 0.6rem; }
+.clip-actions button.danger { color: var(--playhead); border-color: #7a2a2a; }
+.clip-actions button.danger:hover { background: #5a1d1d; }
+.clip.muted { opacity: 0.4; filter: grayscale(0.6); }
+
+/* View toggle (Wave 5) */
+.view-toggle { display: flex; gap: 2px; margin-left: 0.4rem; }
+.view-toggle button { font-size: 0.76rem; padding: 0.3rem 0.6rem; color: var(--muted); }
+.view-toggle button.on { border-color: var(--accent); color: var(--accent); background: #21203a; }
+.pan-mini { width: 38px; accent-color: var(--warn); height: 4px; }
+
+/* Mixer (Wave 5) */
+.mixer { flex: 1; display: flex; min-height: 0; overflow: hidden; }
+.mix-strips { flex: 1; display: flex; gap: 6px; padding: 12px; overflow-x: auto; align-items: stretch; }
+.mix-master { border-left: 1px solid var(--line); padding: 12px; background: var(--panel); }
+.strip { width: 74px; min-width: 74px; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px 6px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; }
+.strip.sel { border-color: var(--accent); }
+.strip.master { background: linear-gradient(180deg, #20202f, var(--panel-2)); border-color: #3a3a6a; }
+.strip-name { font-size: 0.72rem; font-weight: 600; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.strip-fx { font-size: 0.6rem; color: var(--muted); }
+.strip .pan { width: 56px; accent-color: var(--warn); height: 4px; }
+.fader-wrap { flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px; min-height: 140px; }
+/* Live level meter (Wave 9) */
+.meter { display: flex; gap: 1px; height: 100%; width: 12px; align-items: stretch; }
+.meter-ch { flex: 1; background: rgba(0,0,0,0.4); border: 1px solid var(--line); border-radius: 2px; position: relative; overflow: hidden; display: flex; align-items: flex-end; }
+.meter-fill { width: 100%; transition: height 70ms linear; border-radius: 0 0 2px 2px; }
+.fader { -webkit-appearance: slider-vertical; appearance: slider-vertical; width: 8px; height: 100%; accent-color: var(--accent); }
+.strip-db { font-size: 0.66rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.strip-ms { display: flex; gap: 4px; }
+/* Sends + return buses (Wave 8) */
+.mix-toolbar { display: flex; align-items: flex-start; padding-right: 4px; }
+.mix-toolbar button { font-size: 0.74rem; padding: 0.3rem 0.5rem; }
+.mix-divider { width: 1px; background: var(--line); align-self: stretch; margin: 0 4px; }
+.strip.return { border-color: #5a4d12; background: linear-gradient(180deg, #24220f, var(--panel-2)); }
+.rbadge { background: var(--warn); color: #1a1a1a; border-radius: 3px; padding: 0 3px; font-size: 0.6rem; font-weight: 700; }
+/* RTG-001/002 — per-strip routing selectors */
+.strip-route { display: flex; flex-direction: column; gap: 2px; width: 100%; }
+.route-sel { width: 100%; font-size: 0.58rem; background: var(--panel-2); color: var(--muted); border: 1px solid var(--line); border-radius: 3px; padding: 1px 2px; }
+/* MIX-008 — group (submix) strips + grouped-track indent */
+.strip.group { border-color: #2c4d5a; background: linear-gradient(180deg, #0f1e24, var(--panel-2)); }
+.gbadge { background: var(--accent); color: #1a1a1a; border-radius: 3px; padding: 0 3px; font-size: 0.6rem; font-weight: 700; }
+.track-head.grouped { padding-left: 14px; }
+.grp-badge { color: var(--accent); font-size: 0.65rem; margin-right: 2px; }
+.strip-sends { display: flex; flex-direction: column; gap: 3px; width: 100%; border-top: 1px solid var(--line); padding-top: 4px; }
+.send-row { display: flex; align-items: center; gap: 3px; }
+.send-name { font-size: 0.58rem; color: var(--muted); width: 30px; overflow: hidden; }
+.send-row input { flex: 1; accent-color: var(--warn); height: 3px; }
+.send-x { font-size: 0.7rem; padding: 0 4px; color: var(--muted); background: transparent; border-color: transparent; }
+.send-x:hover { color: var(--playhead); }
+.send-add { font-size: 0.58rem; padding: 0.1rem 0.3rem; color: var(--muted); }
+.bus-x { border: 1px solid #7a2a2a; color: var(--playhead); border-radius: 6px; margin-top: 4px; font-size: 0.62rem; }
+
+/* Piano roll (Wave 4) */
+.pr { width: min(960px, 94vw); height: min(70vh, 640px); background: var(--panel); border: 1px solid var(--line); border-radius: 12px; display: flex; flex-direction: column; box-shadow: 0 24px 60px rgba(0,0,0,0.5); overflow: hidden; }
+.pr-head { display: flex; align-items: center; gap: 0.6rem; padding: 0.6rem 0.9rem; border-bottom: 1px solid var(--line); }
+.pr-head .pr-meta { color: var(--muted); font-size: 0.76rem; }
+.pr-spacer { flex: 1; }
+.pr-vel { display: flex; align-items: center; gap: 5px; font-size: 0.76rem; color: var(--muted); }
+.pr-vel input { width: 90px; accent-color: var(--accent); }
+.pr-head .x { background: transparent; border-color: transparent; color: var(--muted); }
+.pr-body { flex: 1; display: flex; min-height: 0; }
+.pr-keys { width: 52px; min-width: 52px; overflow: hidden; border-right: 1px solid var(--line); background: var(--panel-2); }
+.pr-key { display: flex; align-items: center; justify-content: flex-end; padding-right: 4px; font-size: 0.6rem; color: var(--muted); box-sizing: border-box; border-bottom: 1px solid rgba(255,255,255,0.04); }
+.pr-key.black { background: rgba(0,0,0,0.28); }
+.pr-scroll { flex: 1; overflow: auto; }
+.pr-grid { position: relative; background: var(--panel); }
+.pr-row { position: absolute; left: 0; right: 0; }
+.pr-row.black { background: rgba(255,255,255,0.03); }
+.pr-gl { position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(255,255,255,0.05); }
+.pr-gl.bar { background: rgba(255,255,255,0.16); }
+.pr-note { position: absolute; background: linear-gradient(180deg, #8f7bff, #6c5cff); border: 1px solid rgba(255,255,255,0.3); border-radius: 3px; cursor: grab; }
+.pr-note.sel { outline: 1px solid #fff; z-index: 2; }
+.pr-note-grip { position: absolute; right: 0; top: 0; bottom: 0; width: 6px; cursor: ew-resize; }
+.pr-foot { padding: 0.4rem 0.9rem; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.7rem; }
+
+/* BRW-007 — drag-and-drop audio import affordance. */
+.drop-overlay {
+  position: fixed; inset: 0; z-index: 1000; pointer-events: none;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(20, 18, 40, 0.45);
+}
+.drop-overlay-inner {
+  padding: 1.2rem 2rem; border-radius: 12px; color: var(--text);
+  background: var(--panel); border: 2px dashed var(--accent);
+  font-weight: 700; letter-spacing: 0.02em;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.4);
+}

@@ -1,0 +1,180 @@
+{
+  "group": "TMP, ARE, AED (Tempo/meter; audio recording; audio editing)",
+  "features": [
+    {
+      "id": "TMP-001",
+      "capability": "partial",
+      "capabilityEvidence": "Tracktion edit.tempoSequence drives timing; snapshot reads getBpmAt at MoshOps.cpp:1252. No set-tempo command; default tempo only, never user-settable.",
+      "surface": "missing",
+      "surfaceEvidence": "tempo is in types.ts:99 snapshot type but never rendered. Transport.tsx shows only play/loop/pos; no tempo field anywhere in ui/src."
+    },
+    {
+      "id": "TMP-002",
+      "capability": "missing",
+      "capabilityEvidence": "No tempo map / tempo-automation code; tempoSequence is read once via getBpmAt(t=0) only (MoshOps.cpp:1252). No command to add tempo changes.",
+      "surface": "missing",
+      "surfaceEvidence": "No tempo track or curve in Arrangement.tsx; ruler ticks are seconds (Arrangement.tsx:92-96). none found."
+    },
+    {
+      "id": "TMP-003",
+      "capability": "missing",
+      "capabilityEvidence": "No time-signature handling; grep for timeSignature/numerator/denominator across src returns none. Snapshot has no meter field.",
+      "surface": "missing",
+      "surfaceEvidence": "No time-signature control in Transport.tsx or anywhere in ui/src. none found."
+    },
+    {
+      "id": "TMP-004",
+      "capability": "missing",
+      "capabilityEvidence": "No tap-tempo logic anywhere in src/. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No tap-tempo control in ui/src. none found."
+    },
+    {
+      "id": "TMP-005",
+      "capability": "missing",
+      "capabilityEvidence": "No audio tempo/beat detection in src or service; get_clip_peaks only computes min/max buckets (MoshOps.cpp:441-486). none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No detect-tempo action in ui/src. none found."
+    },
+    {
+      "id": "TMP-006",
+      "capability": "missing",
+      "capabilityEvidence": "No groove/swing offset logic; no quantize anywhere in src/. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No groove/swing selector in ui/src. none found."
+    },
+    {
+      "id": "ARE-001",
+      "capability": "missing",
+      "capabilityEvidence": "MoshEngine.cpp:172 assigns an input device, but no per-track input-monitor path; no armForRecording/WaveInputDevice usage in src. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No input-monitor control per track; TrackHeader (Arrangement.tsx:181) has only mute/solo/volume. none found."
+    },
+    {
+      "id": "ARE-002",
+      "capability": "missing",
+      "capabilityEvidence": "No record-arm: grep for armForRecording/setRecordEnabled/recordEnabled in src returns none. Tracks cannot be armed.",
+      "surface": "missing",
+      "surfaceEvidence": "No record-arm control per track in ui/src; TrackHeader has only M/S/volume (Arrangement.tsx:197-214). none found."
+    },
+    {
+      "id": "ARE-003",
+      "capability": "missing",
+      "capabilityEvidence": "No latency compensation for recording; no plugin-latency or round-trip comp wiring. transport.record(false) at MoshOps.cpp:256 with no armed input. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No recorded-take landing in ui/src; no record button (Transport.tsx has no record action, set_transport never called with action:'record'). none found."
+    },
+    {
+      "id": "ARE-004",
+      "capability": "missing",
+      "capabilityEvidence": "No multitrack record; no per-track input assignment or arming exists (see ARE-002). none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No multi-arm UI in ui/src. none found."
+    },
+    {
+      "id": "ARE-005",
+      "capability": "partial",
+      "capabilityEvidence": "Engine transport.record() exists (MoshOps.cpp:256) but no loop-record/takes. Out-of-band: iPhone companion records PCM takes, lands via import_clip (RemoteCompanionServer.cpp:313-330) — single take, not loop passes.",
+      "surface": "missing",
+      "surfaceEvidence": "Take recorder UI is iOS companion (TakeRecorderView.swift), not ui/src. No take/loop-record affordance in ui/src. none found."
+    },
+    {
+      "id": "ARE-006",
+      "capability": "missing",
+      "capabilityEvidence": "No pre-record input gain/trim; engine input setup at MoshEngine.cpp:168-176 applies no gain. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No input-trim control in ui/src. none found."
+    },
+    {
+      "id": "AED-001",
+      "capability": "missing",
+      "capabilityEvidence": "No clip cut/copy/paste/delete: no remove_clip command in MoshOps dispatch (lines 82-125); clips only removable by deleting their whole track (cmdRemoveTrack). split exists, copy/paste/delete do not.",
+      "surface": "missing",
+      "surfaceEvidence": "No clip delete/cut/copy/paste in ui/src; no keyboard/Backspace handler; only 'copy' is the pairing-link copy (App.tsx:122). none found."
+    },
+    {
+      "id": "AED-002",
+      "capability": "present",
+      "capabilityEvidence": "cmdTrimClip (MoshOps.cpp:352-370) sets start/length/offset via clip->setPosition, adjusting source offset (slip) independently and reversibly (undo transaction).",
+      "surface": "present",
+      "surfaceEvidence": "Clip.tsx trim handles (left/right, lines 114-115) call trim_clip; left-trim adjusts offset for slip (Clip.tsx:65-68)."
+    },
+    {
+      "id": "AED-003",
+      "capability": "present",
+      "capabilityEvidence": "cmdSplitClip (MoshOps.cpp:372-389) calls ClipTrack::splitClip at a time position, producing an independent new clip; undoable.",
+      "surface": "present",
+      "surfaceEvidence": "Split tool in Toolbar (Arrangement.tsx:166); Clip.tsx:39-44 invokes split_clip at the pointer position when tool=='split'."
+    },
+    {
+      "id": "AED-004",
+      "capability": "missing",
+      "capabilityEvidence": "No fade/crossfade: grep for fadeIn/fadeOut/crossfade/setFade in src returns none. clipToVar (MoshOps.cpp:1307) carries no fade fields.",
+      "surface": "missing",
+      "surfaceEvidence": "No fade handles or crossfade editing in Clip.tsx. none found."
+    },
+    {
+      "id": "AED-005",
+      "capability": "missing",
+      "capabilityEvidence": "No per-clip gain or normalize: no clipGain/setGainDb/normalize for audio in src (only color-normalize in service). none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No clip-gain or normalize control on clips in ui/src. none found."
+    },
+    {
+      "id": "AED-006",
+      "capability": "missing",
+      "capabilityEvidence": "No reverse operation anywhere in src/. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No reverse action on clips in ui/src. none found."
+    },
+    {
+      "id": "AED-007",
+      "capability": "missing",
+      "capabilityEvidence": "No time-stretch: no TimeStretcher/elastique/warp usage in src. trim_clip changes bounds only, not stretch ratio. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No time-stretch control/handle in ui/src. none found."
+    },
+    {
+      "id": "AED-008",
+      "capability": "missing",
+      "capabilityEvidence": "No pitch-shift (audio) in src; only the generative SA3 re-imagine path, which is not semitone/cent clip pitch. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No pitch-shift control on clips in ui/src. none found."
+    },
+    {
+      "id": "AED-009",
+      "capability": "missing",
+      "capabilityEvidence": "No transient/onset detection; get_clip_peaks computes only min/max buckets (MoshOps.cpp:441-486). none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No transient markers shown on clips in Clip.tsx/Waveform.tsx. none found."
+    },
+    {
+      "id": "AED-010",
+      "capability": "missing",
+      "capabilityEvidence": "No slice-to-MIDI/clips; no transient detection to slice on (see AED-009). none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No slice action in ui/src. none found."
+    },
+    {
+      "id": "AED-011",
+      "capability": "missing",
+      "capabilityEvidence": "No zero-crossing snap; snapTime rounds to a fixed time grid (store.ts:159-162), no audio sample inspection. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No zero-crossing-snap option in ui/src. none found."
+    },
+    {
+      "id": "AED-012",
+      "capability": "missing",
+      "capabilityEvidence": "No spectral edit/repair; no frequency-domain editing in src. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No spectral edit view in ui/src. none found."
+    },
+    {
+      "id": "AED-013",
+      "capability": "missing",
+      "capabilityEvidence": "No audio quantize; no transient detection (AED-009) and no stretch (AED-007) to drive it. none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No audio-quantize action in ui/src. none found."
+    }
+  ]
+}

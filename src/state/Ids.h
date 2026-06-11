@@ -15,6 +15,24 @@ namespace mosh::ids
     // (default) or track. All fields are CachedValue bound to the undo manager.
     MOSH_DECLARE_ID (MOSH_RENDERLAYER)
 
+    // PRJ-008 — per-project format / time-base INTENT. A single child of the
+    // Edit's own ValueTree (mirrors how MOSH_RENDERLAYER is parented under the
+    // clip/Edit state), so it saves/reloads with the .tracktionedit with no new
+    // storage format. This is producer intent (the export/format default), NOT a
+    // live device setting — the device readout stays the live truth; this is the
+    // remembered preference. NON-undoable preference, written without the undo
+    // manager (like the device prefs).
+    MOSH_DECLARE_ID (MOSH_PROJECT)
+    MOSH_DECLARE_ID (projectSampleRate)
+    MOSH_DECLARE_ID (projectBitDepth)
+    MOSH_DECLARE_ID (timeBase)         // "seconds" | "barsBeats"
+
+    // RTG-001 — the track's CHOSEN input device (a WaveInputDevice deviceID).
+    // A plain property on the track's own state tree so the choice saves/reloads
+    // with the edit; arm_track prefers it over first-match. NON-undoable
+    // preference (written without the undo manager, like monitor mode).
+    MOSH_DECLARE_ID (moshInputDevice)
+
     MOSH_DECLARE_ID (id)
     MOSH_DECLARE_ID (inputRef)
     MOSH_DECLARE_ID (timeRangeStart)

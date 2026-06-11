@@ -16,6 +16,21 @@ namespace
         // No audio → don't enumerate audio I/O device types (avoids the macOS
         // mic-permission prompt on headless/no-audio launches).
         bool addSystemAudioIODeviceTypes() override { return audio; }
+
+        // PRF-001 — the ONE knob Tracktion's parallel audio graph reads. The engine
+        // applies setNumThreads(getNumberOfCPUsToUseForAudio() - 1) in EditPlaybackContext
+        // (live) and NodeRenderContext (offline), so this is a genuine, load-bearing
+        // preference, NOT a dead toggle. 0 == auto (all cores, the engine default);
+        // a positive value clamps to [1..getNumCpus()]. UI value 1 => 0 workers =>
+        // single-threaded. Read on the message thread during context build AND under
+        // the audio-callback lock by DeviceManager::updateNumCPUs(), so it is atomic.
+        std::atomic<int> audioThreads { 0 };
+        int getNumberOfCPUsToUseForAudio() override
+        {
+            const int n = audioThreads.load (std::memory_order_relaxed);
+            const int cores = juce::jmax (1, juce::SystemStats::getNumCpus());
+            return n > 0 ? juce::jlimit (1, cores, n) : cores;
+        }
     };
 }
 
@@ -26,21 +41,28 @@ MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession)
 
     // 3-arg construction so we can disable auto device-init in no-audio mode
     // (the device opens during the Engine ctor otherwise — 01 §5).
+    // te::Engine takes ownership of the behaviour unique_ptr; capture the raw
+    // pointer FIRST (PRF-001) so we can mutate its audioThreads atomic later.
+    // The Engine outlives every mutation, so this borrowed pointer stays valid.
+    auto behaviour = std::make_unique<MoshEngineBehaviour> (audioOpen);
+    behaviourPtr = behaviour.get();
     enginePtr = std::make_unique<te::Engine> (
         juce::String ("Mosh"),
         std::make_unique<te::UIBehaviour>(),
-        std::make_unique<MoshEngineBehaviour> (audioOpen));
-    applyRequestedAudioOutputDevice();
+        std::move (behaviour));
 
     // Session directory: a stable per-app-data folder so save/reload round-trips.
     // The harness gets an isolated "session-selftest" dir so it can't be polluted
-    // by (or clobber) a real GUI session — see freshSession below.
+    // by (or clobber) a real GUI session — see freshSession below. Established BEFORE
+    // the device init so PRE-001 can restore the persisted device setup from it.
     session = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
                   .getChildFile ("Mosh")
                   .getChildFile (freshSession ? "session-selftest" : "session");
     session.createDirectory();
     session.getChildFile ("audio").createDirectory();
     editPath = session.getChildFile ("session.tracktionedit");
+
+    applyRequestedAudioOutputDevice();
 
     // The harness saves + reloads internally; wipe any prior run's persisted edit
     // so it always starts cold and is idempotent across repeated --selftest runs.
@@ -82,14 +104,72 @@ MoshEngine::~MoshEngine()
 
 void MoshEngine::ensurePlaybackContext()
 {
-    if (audioOpen)
-        edit().getTransport().ensureContextAllocated();
+    if (! audioOpen)
+        return;
+
+    edit().getTransport().ensureContextAllocated();
+
+    // One-time: enable the device manager's wave inputs so record-armed tracks
+    // actually capture (without setEnabled(true) they exist but stay silent). Never
+    // runs headless — guarded by audioOpen — and runs once via the latch. We default
+    // monitor mode to automatic (audible only when record-enabled) per RecordingDemo.
+    if (! inputsConfigured)
+    {
+        inputsConfigured = true;
+        auto& dm = enginePtr->getDeviceManager();
+        for (int i = 0; i < dm.getNumWaveInDevices(); ++i)
+            if (auto* wip = dm.getWaveInDevice (i))
+            {
+                wip->setMonitorMode (te::InputDevice::MonitorMode::automatic);
+                wip->setEnabled (true);
+            }
+
+        // ── Live MIDI inputs (CTL-001) ──────────────────────────────────────
+        // Enable every physical/virtual MIDI input so a controller can drive an
+        // ARMED instrument track live (exactly the wave path, just the MIDI device
+        // family). Monitor=automatic matches the wave default: the synth only sounds
+        // when the track is armed (isLivePlayEnabled() == acceptsInput AND a dest
+        // targets the track AND (monitor==on OR (automatic AND recordEnabled))).
+        // setEnabled defaults true on the device ctor but loadMidiProps can override
+        // it from saved per-device engine props, so we set it unconditionally (a
+        // global engine pref via saveProps — correctly NON-undoable, like the wave
+        // path). This is the canonical MidiRecordingDemo enable-then-target sequence.
+        for (auto& mi : dm.getMidiInDevices())
+            if (mi != nullptr)
+            {
+                mi->setMonitorMode (te::InputDevice::MonitorMode::automatic);
+                mi->setEnabled (true);
+            }
+
+        // setEnabled(true) on a MIDI device calls dm.rescanMidiDeviceList() which is
+        // ASYNC (startTimer(5) -> timerCallback -> applyNewMidiDeviceList). Pump the
+        // message loop briefly so the rescan applies and EditPlaybackContext rebuilds
+        // its device list BEFORE restartPlayback(), otherwise the new MIDI instances
+        // would not yet appear in getAllInputDevices() and the route would race.
+        if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
+            mm->runDispatchLoopUntil (30);
+
+        edit().restartPlayback();
+    }
 }
 
 void MoshEngine::applyRequestedAudioOutputDevice()
 {
     if (! audioOpen)
         return;
+
+    // PRE-001 — restore the persisted device setup (written by set_audio_device /
+    // set_buffer_size into the session dir) BEFORE the env-var fallback, so a saved
+    // device choice survives an app restart. The env vars below still override it
+    // (they are an explicit per-launch request). Missing/invalid XML is a no-op.
+    // NB: Mosh disables Tracktion's autoInitialiseDeviceManager and manages the device
+    // itself, so this raw JUCE initialise() is the single active restore (there is no
+    // competing Tracktion PropertyStorage auto-apply here). It deliberately accepts
+    // skipping te::DeviceManager::loadSettings()'s extra channel-enable / defaultWaveID
+    // restore; full cross-restart fidelity is hardware-gated and verified on a real device.
+    if (auto deviceXmlFile = session.getChildFile ("audio-device.xml"); deviceXmlFile.existsAsFile())
+        if (auto deviceXml = juce::XmlDocument::parse (deviceXmlFile))
+            enginePtr->getDeviceManager().deviceManager.initialise (256, 256, deviceXml.get(), true);
 
     const auto requested = juce::SystemStats::getEnvironmentVariable ("MOSH_AUDIO_OUTPUT_DEVICE", {}).trim();
     const auto requestedInput = juce::SystemStats::getEnvironmentVariable ("MOSH_AUDIO_INPUT_DEVICE", {}).trim();
@@ -235,6 +315,102 @@ void MoshEngine::reloadFromFile()
     editPtr.reset();
     editPtr = te::loadEditFromFile (*enginePtr, editPath);
     editPtr->editFileRetriever = [this] { return editPath; };
+}
+
+void MoshEngine::adoptEditFile (const juce::File& file)
+{
+    editPath = file;
+    editPtr->editFileRetriever = [this] { return editPath; };
+}
+
+void MoshEngine::newProject (const juce::File& file)
+{
+    // Persist the outgoing Edit, then detach it from the device before swapping
+    // (a live playback context bound to the old Edit asserts on destruction —
+    // mirrors the export render-exclusivity dance).
+    save();
+    editPtr->getTransport().stop (false, false);
+    editPtr->getTransport().freePlaybackContext();
+    editPtr.reset();
+
+    file.getParentDirectory().createDirectory();
+
+    // Fresh empty Edit — strip createEmptyEdit's default audio track so Mosh
+    // starts empty (every track is an explicit create_track command), matching
+    // the cold-session seeding in the ctor.
+    editPtr = te::createEmptyEdit (*enginePtr, file);
+    juce::Array<te::AudioTrack*> defaults (te::getAudioTracks (*editPtr));
+    for (auto* t : defaults)
+        editPtr->deleteTrack (t);
+
+    editPtr->getSceneList();
+    if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
+        mm->runDispatchLoopUntil (1);
+
+    editPtr->getUndoManager().clearUndoHistory();
+    adoptEditFile (file);
+    save();                                  // write the new empty .tracktionedit to disk
+}
+
+void MoshEngine::openProject (const juce::File& file)
+{
+    save();
+    editPtr->getTransport().stop (false, false);
+    editPtr->getTransport().freePlaybackContext();
+    editPtr.reset();
+    editPtr = te::loadEditFromFile (*enginePtr, file);
+    adoptEditFile (file);
+}
+
+bool MoshEngine::saveProjectAs (const juce::File& file)
+{
+    editPtr->getTransport().stop (false, false);
+    file.getParentDirectory().createDirectory();
+    // saveAs re-points the Edit's backing file; force-overwrite is safe because
+    // the native save dialog (the only caller path) has already confirmed it.
+    const bool ok = te::EditFileOperations (*editPtr).saveAs (file, true);
+    if (ok)
+        adoptEditFile (file);
+    return ok;
+}
+
+// ── PRF-001 — multicore audio thread preference ──────────────────────────────
+// behaviourPtr is a MoshEngineBehaviour* (the type is anonymous-namespace-local
+// to this TU, stored in the header as the base te::EngineBehaviour*). The cast is
+// safe: we constructed exactly that derived type in the ctor.
+int MoshEngine::availableCores() const
+{
+    return juce::jmax (1, juce::SystemStats::getNumCpus());
+}
+
+int MoshEngine::audioThreadPref() const
+{
+    return static_cast<MoshEngineBehaviour*> (behaviourPtr)
+               ->audioThreads.load (std::memory_order_relaxed);
+}
+
+int MoshEngine::effectiveAudioThreads() const
+{
+    // The value getNumberOfCPUsToUseForAudio() would return RIGHT NOW — i.e. the
+    // resolved core count when 'auto' (pref 0), else the clamped preference. This is
+    // what the engine actually feeds setNumThreads(N-1), so it is the honest readout.
+    const int pref = audioThreadPref();
+    return pref > 0 ? juce::jlimit (1, availableCores(), pref) : availableCores();
+}
+
+void MoshEngine::setAudioThreadPref (int n)
+{
+    static_cast<MoshEngineBehaviour*> (behaviourPtr)
+        ->audioThreads.store (n, std::memory_order_relaxed);
+
+    // Re-apply LIVE to any running playback context (no restart). updateNumCPUs()
+    // locks the audio callback + context lock and calls setNumThreads on the running
+    // graph (a brief audio gap while the thread pool resizes — never a crash).
+    // Headless / no device: nothing to update, the preference + readout still hold.
+    // Offline renders read getNumberOfCPUsToUseForAudio() fresh at NodeRenderContext
+    // construction, so they pick up the new value with no extra call.
+    if (audioOpen)
+        enginePtr->getDeviceManager().updateNumCPUs();
 }
 
 } // namespace mosh

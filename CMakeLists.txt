@@ -45,11 +45,19 @@ endif()
 
 # ── The app target ───────────────────────────────────────────────────────────
 if (MOSH_BUILD_APP)
+    set(MOSH_APP_EXTRA_ARGS NEEDS_WEBVIEW2 TRUE)
+    if (APPLE)
+        list(APPEND MOSH_APP_EXTRA_ARGS
+            LOCAL_NETWORK_PERMISSION_ENABLED TRUE
+            LOCAL_NETWORK_PERMISSION_TEXT "Mosh uses the local network to pair with the iPhone companion while you are near this Mac."
+            PLIST_TO_MERGE "${CMAKE_SOURCE_DIR}/cmake/MoshRemoteInfo.plist")
+    endif()
+
     juce_add_gui_app(Mosh
         PRODUCT_NAME "Mosh"
         BUNDLE_ID    "studio.mosh.app"
         COMPANY_NAME "Mosh"
-        NEEDS_WEBVIEW2 TRUE)
+        ${MOSH_APP_EXTRA_ARGS})
 
 # Source modules (00 §5). Added incrementally per build stage.
     target_sources(Mosh PRIVATE
@@ -66,7 +74,10 @@ if (MOSH_BUILD_APP)
         # Stage 4 — Tier-A real-time neural insert (04 PART 2)
         src/plugins/neural/NeuralInsertPlugin.cpp
         # Stage 5 — Tier-B generative layer (05)
-        src/generative/GenerativeJobManager.cpp)
+        src/generative/GenerativeJobManager.cpp
+        # iPhone companion remote control + phone-take ingest
+        src/remote/RemoteCompanionProtocol.cpp
+        src/remote/RemoteCompanionServer.cpp)
 
     target_include_directories(Mosh PRIVATE src)
 
@@ -80,6 +91,11 @@ if (MOSH_BUILD_APP)
         JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:Mosh,JUCE_PRODUCT_NAME>"
         JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:Mosh,JUCE_VERSION>"
         JUCE_MODAL_LOOPS_PERMITTED=1
+        # Audio warp (auto-tempo time-stretch): enable the engine's VENDORED
+        # SoundTouch (modules/tracktion_engine/3rd_party/soundtouch — no new external
+        # dependency). Makes TimeStretcher::defaultMode = soundtouchBetter so warped
+        # clips genuinely time-stretch instead of Mode::disabled varispeed.
+        TRACKTION_ENABLE_TIMESTRETCH_SOUNDTOUCH=1
         # Mosh build identity / stage flags
         MOSH_VERSION_STRING="${PROJECT_VERSION}")
 

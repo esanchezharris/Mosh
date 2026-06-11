@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>MOSH DESIGN LAB — gallery</title>
+<style>
+  /* NANUM SQUARE ROUND — the display voice (user-supplied; OFL, Naver).
+     Rounded-square 2000s console face: the type finally matches the plastic. */
+  @font-face { font-family: 'NanumSquareRound'; font-weight: 800;
+    src: url('fonts/nanum-square-round/NanumSquareRoundEB.ttf') format('truetype'); }
+  @font-face { font-family: 'NanumSquareRound'; font-weight: 700;
+    src: url('fonts/nanum-square-round/NanumSquareRoundB.ttf') format('truetype'); }
+
+  :root {
+    --ink: #0B0B0B; --lime: #CCFF23; --lime-glow: #D9FF4C;
+    --bone: #F6F2EB; --mist: #E5E5E1;
+    --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+    --font-display: 'NanumSquareRound', "Archivo Black", "Helvetica Neue", -apple-system, "Arial Black", sans-serif;
+  }
+  body { margin: 0; background: var(--ink); color: var(--bone);
+         font-family: var(--font-mono); }
+  header { padding: 44px 48px 8px; }
+  h1 { font-family: var(--font-display); font-weight: 900; font-size: 38px; margin: 0;
+       letter-spacing: -0.01em; color: var(--bone); }
+  h1 em { font-style: normal; color: var(--lime); text-shadow: 0 0 28px rgba(217,255,76,.4); }
+  .sub { font-size: 11px; letter-spacing: .14em; opacity: .5; margin-top: 10px; }
+  .docs { padding: 0 48px; font-size: 11px; letter-spacing: .08em; opacity: .75; }
+  .docs a { color: var(--lime); text-decoration: none; margin-right: 18px; }
+  .docs a:hover { text-shadow: 0 0 14px rgba(217,255,76,.6); }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+          gap: 26px; padding: 30px 48px 60px; }
+  .card { border: 2px solid #1d2010; border-radius: 12px; overflow: hidden;
+          background: #0e0e0d; transition: border-color .25s, transform .15s; display: block;
+          color: inherit; text-decoration: none;
+          box-shadow: 0 4px 0 #000, inset 0 1px 0 rgba(246,242,235,.07);
+          background-image: linear-gradient(180deg, rgba(246,242,235,.04) 0 42%, rgba(0,0,0,.22) 42% 100%); }
+  .card:hover { transform: translateY(-2px); }
+  .card:hover { border-color: rgba(204,255,35,.55); box-shadow: 0 0 34px rgba(204,255,35,.12); }
+  .thumb { position: relative; width: 100%; aspect-ratio: 16/10; overflow: hidden;
+           background: #060606; }
+  .thumb iframe { width: 400%; height: 400%; transform: scale(.25); transform-origin: 0 0;
+           border: 0; pointer-events: none; }
+  .meta { padding: 14px 18px 16px; }
+  .meta .num { font-size: 10px; letter-spacing: .2em; opacity: .45; }
+  .meta .name { display: inline-block; transform: skewX(-12deg);
+           font-family: var(--font-display); font-weight: 900; font-style: italic;
+           font-size: 15px; background: rgba(204,255,35,.13); color: var(--lime);
+           border: 1px solid rgba(204,255,35,.45);
+           padding: 4px 13px 3px; border-radius: 3px; margin: 6px 0 8px;
+           box-shadow: 0 3px 0 #000, inset 0 1px 0 rgba(255,255,255,.4);
+           letter-spacing: .03em; text-transform: uppercase; }
+  .meta .what { font-size: 11px; line-height: 1.55; opacity: .7; }
+
+  /* hover-to-run: max ~3 live GL pages at once instead of 11 (context-cap glitch fix) */
+  .thumb { display: grid; place-items: center;
+    background-image: radial-gradient(rgba(204,255,35,.05) 1px, transparent 1.01px);
+    background-size: 4px 4px; }
+  .thumb .ph { font-size: 64px; color: rgba(204,255,35,.18); letter-spacing: .04em;
+    transition: color .2s, transform .2s; }
+  .card:hover .ph { color: rgba(204,255,35,.45); transform: scale(1.06); }
+  .thumb iframe { position: absolute; inset: 0; }
+  .thumb { position: relative; }
+
+  /* THE PS2 SIGNAL CHAIN (HOUSE_STYLE v2.1) — one cable for every surface:
+     soft 2000s AA + 16-step posterize over DOM and GL alike. html.raw = A/B. */
+  * { -webkit-font-smoothing: antialiased; }
+  body { filter: url(#ps2signal); }
+  html.raw body { filter: none; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:fixed" aria-hidden="true"><filter id="ps2signal"
+  x="-2%" y="-2%" width="104%" height="104%" color-interpolation-filters="sRGB">
+  <feGaussianBlur in="SourceGraphic" stdDeviation="1.6" result="halo"/>
+  <feComponentTransfer in="halo" result="halo2"><feFuncA type="linear" slope="0.40"/></feComponentTransfer>
+  <feMerge result="glowed"><feMergeNode in="halo2"/><feMergeNode in="SourceGraphic"/></feMerge>
+  <feGaussianBlur in="glowed" stdDeviation="0.5"/>
+  <feComponentTransfer>
+    <feFuncR type="discrete" tableValues="0 0.0667 0.1333 0.2 0.2667 0.3333 0.4 0.4667 0.5333 0.6 0.6667 0.7333 0.8 0.8667 0.9333 1"/>
+    <feFuncG type="discrete" tableValues="0 0.0667 0.1333 0.2 0.2667 0.3333 0.4 0.4667 0.5333 0.6 0.6667 0.7333 0.8 0.8667 0.9333 1"/>
+    <feFuncB type="discrete" tableValues="0 0.0667 0.1333 0.2 0.2667 0.3333 0.4 0.4667 0.5333 0.6 0.6667 0.7333 0.8 0.8667 0.9333 1"/>
+  </feComponentTransfer>
+</filter></svg>
+
+<header>
+  <h1>MOSH <em>DESIGN LAB</em></h1>
+  <div class="sub">THE 008+ LINEAGE · WAVE 1 RETIRED 2026-06-10 (GIT HISTORY KEEPS IT) · 007 KEPT AS THE QUIET EXHIBIT</div>
+</header>
+<nav class="docs">
+  <a href="../BRIEF.md">THE BRIEF</a>
+  <a href="../TOOLS.md">THE TOOLS</a>
+  <a href="../inspiration/INDEX.md">INSPIRATION INDEX</a>
+  <a href="../concepts/">CONCEPT ONE-PAGERS</a>
+</nav>
+
+<div class="grid">
+  <a class="card" href="experiments/007-terrarium/index.html">
+    <div class="thumb" data-live="experiments/007-terrarium/index.html"><div class="ph disp">007</div></div>
+    <div class="meta">
+      <div class="num">007 · SYNTHESIS · 002 + 005 + hushed 001</div>
+      <div class="name">TERRARIUM</div>
+      <div class="what">The specimen, kept quietly. SPECIMEN's raymarched body with its full
+      reactivity (heat, arousal, tremor) lives small in SPORE LEDGER's corner; deeds still bud
+      into the ledger. Behind it, HEARTH dimmed to a breath — slow ink, faint veins, no rings —
+      warming only when the creature works.</div>
+    </div>
+  </a>
+
+  <a class="card" href="experiments/008-possession/index.html">
+    <div class="thumb" data-live="experiments/008-possession/index.html"><div class="ph disp">008</div></div>
+    <div class="meta">
+      <div class="num">008 · GROUNDED · THE CURRENT UI, POSSESSED</div>
+      <div class="name">POSSESSION</div>
+      <div class="what">The shipping UI's exact skeleton — topbar, lanes, clips, chain,
+      generative drawer — re-materialized per the field notes: ink slabs with lume seams,
+      panels eaten open, a peristaltic playhead, takes as capsules, deeds ledger, Moshi
+      resident. Same MoshOps under every control: a skin, not a rebuild.</div>
+    </div>
+  </a>
+  <a class="card" href="experiments/009-the-pit/index.html">
+    <div class="thumb" data-live="experiments/009-the-pit/index.html"><div class="ph disp">009</div></div>
+    <div class="meta">
+      <div class="num">009 · GROUNDED · 3D · ROUGH ON PURPOSE</div>
+      <div class="name">THE PIT</div>
+      <div class="what">The full DAW skeleton with the song AS MATTER in the empty stage: a
+      raymarched obsidian mass — kifs-folded, noise-bitten, four dithered shading bands,
+      rotation animated on-twos — that slams on the beat. The Rack sculpts it live: GRIT
+      folds it jagged, AIR lets it drift, EPIC grows it. R splits it molten. v5: it's THE
+      ARTIFACT — the arrangement's spectral fill grows it from monochrome nugget to lit
+      monument; vox at full earns the one iridescent fringe. ▶ BUILD demos the thesis.</div>
+    </div>
+  </a>
+  <a class="card" href="experiments/010-moshi/index.html">
+    <div class="thumb" data-live="experiments/010-moshi/index.html"><div class="ph disp">010</div></div>
+    <div class="meta">
+      <div class="num">010 · THE AGENT · 3D COMPONENT</div>
+      <div class="name">MOSHI</div>
+      <div class="what">The agent graduates to 3D: a portable MoshiBlob component — mini
+      raymarched lobes, faceted low-poly shading, dither bands, on-twos wobble. It watches
+      your cursor, blinks, squashes on the beat, and squishes indignantly when poked.
+      Embedded live in 008 and 009. Face fused to the body: eyes squash with the spring,
+      tremble when feral, run lime when recording.</div>
+    </div>
+  </a>
+  <a class="card" href="experiments/011-the-scene/index.html">
+    <div class="thumb" data-live="experiments/011-the-scene/index.html"><div class="ph disp">011</div></div>
+    <div class="meta">
+      <div class="num">011 · PRESENCE · MULTIPLAYER AT A GLANCE</div>
+      <div class="name">THE SCENE</div>
+      <div class="what">The wager, rebuilt for how it's actually used (rarely 1v1): your
+      CREW rides the left of the topbar as dithered orbs — lime rims, ember hearts when
+      they record, deed ticks as they work — while THE SCENE's rivals sit right as fog
+      orbs whose size is all you get. Tap one to PEEK: their artifact fills your stage
+      as a cold silhouette for four seconds. You can see it. You can't hear it.</div>
+    </div>
+  </a>
+</div>
+<script>
+// run an experiment live only while you hover its card — browsers cap WebGL
+// contexts (~8-16); ten always-on iframes was exactly the "glitching out".
+for (const th of document.querySelectorAll('.thumb[data-live]')) {
+  let f = null, t = null;
+  th.closest('.card').addEventListener('mouseenter', () => {
+    clearTimeout(t);
+    if (!f) {
+      f = document.createElement('iframe');
+      f.src = th.dataset.live;
+      f.tabIndex = -1;
+      f.style.cssText = 'width:400%;height:400%;transform:scale(.25);transform-origin:0 0;border:0;pointer-events:none';
+      th.appendChild(f);
+    }
+  });
+  th.closest('.card').addEventListener('mouseleave', () => {
+    t = setTimeout(() => { if (f) { f.remove(); f = null; } }, 1200);
+  });
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,152 @@
+{
+  "group": "MID, SCR (MIDI record/edit/piano-roll; score/notation)",
+  "features": [
+    {
+      "id": "MID-001",
+      "capability": "partial",
+      "capabilityEvidence": "set_transport action 'record' calls transport.record() (MoshOps.cpp:253-256) but no MIDI input device assigned, no track arm; grep for midiInput/recordEnabled in src/ = none found. Cannot capture live MIDI to clips.",
+      "surface": "missing",
+      "surfaceEvidence": "Transport.tsx has only play/stop/loop/return-to-start buttons; no record control. No track record-arm in any UI component. 'add_midi_clip' inserts preset notes, not a recorded performance."
+    },
+    {
+      "id": "MID-002",
+      "capability": "missing",
+      "capabilityEvidence": "No piano-roll/pitch-vs-time model. clipToVar for MIDI sets only type:'midi' (MoshOps.cpp:1323-1324); notes never serialized. get_clip_peaks errors on non-wave clips (MoshOps.cpp:447-448).",
+      "surface": "missing",
+      "surfaceEvidence": "No piano-roll view exists. MIDI clips render via Clip.tsx as an empty colored block (styles.css:141) with name only. No editor opens for MIDI clips; grep for piano/note-editor in ui/src = none found."
+    },
+    {
+      "id": "MID-003",
+      "capability": "partial",
+      "capabilityEvidence": "cmdAddMidiClip can add notes via te sequence.addNote(pitch,start,length,velocity) (MoshOps.cpp:639-642), but only at clip creation from args; no command to move/resize/delete individual notes after creation.",
+      "surface": "missing",
+      "surfaceEvidence": "No note-editing surface. The '+ MIDI' button (Rack.tsx:51, Arrangement.tsx:163) inserts a fixed C-major arpeggio with no args; user cannot create/move/resize/delete notes anywhere in ui/src."
+    },
+    {
+      "id": "MID-004",
+      "capability": "partial",
+      "capabilityEvidence": "sequence.addNote takes a velocity param, default 100 (MoshOps.cpp:642); stored in the Tracktion MIDI sequence. No command to edit an existing note's velocity.",
+      "surface": "missing",
+      "surfaceEvidence": "No velocity lane or per-note velocity control in ui/src. clipToVar does not expose velocity, so UI cannot even display it. None found."
+    },
+    {
+      "id": "MID-005",
+      "capability": "missing",
+      "capabilityEvidence": "No CC / pitch-bend / aftertouch handling. grep for controller/aftertouch/pitchBend/CC in src/ = none found beyond the unrelated JUCE controlParameterIndexAnnotation helper.",
+      "surface": "missing",
+      "surfaceEvidence": "No controller lanes in ui/src. None found."
+    },
+    {
+      "id": "MID-006",
+      "capability": "missing",
+      "capabilityEvidence": "No quantize command or note-timing snap. grep for quantize/Quantize in src/ = none found. The 43-command spine has no quantize_midi.",
+      "surface": "missing",
+      "surfaceEvidence": "No quantize control (value+strength) in ui/src. None found."
+    },
+    {
+      "id": "MID-007",
+      "capability": "missing",
+      "capabilityEvidence": "No humanize/randomize logic. grep humanize/randomize in src/ = none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No humanize/randomize control in ui/src. None found."
+    },
+    {
+      "id": "MID-008",
+      "capability": "missing",
+      "capabilityEvidence": "No scale/key constraint model. grep scale/key-constraint in src/ = none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No scale/key selector in ui/src. None found."
+    },
+    {
+      "id": "MID-009",
+      "capability": "missing",
+      "capabilityEvidence": "No chord generation/editing. grep chord in src/ = none found. The hardcoded arpeggio (MoshOps.cpp:647) is a fixed note list, not a chord tool.",
+      "surface": "missing",
+      "surfaceEvidence": "No chord entry/assist in ui/src. None found."
+    },
+    {
+      "id": "MID-010",
+      "capability": "missing",
+      "capabilityEvidence": "No arpeggiator device. The only 'arpeggio' is a fixed C-major note pattern inserted by cmdAddMidiClip (MoshOps.cpp:646-650); not a real-time arpeggiator transforming held notes.",
+      "surface": "missing",
+      "surfaceEvidence": "No arpeggiator device on MIDI in ui/src; the '+ MIDI' tooltip says 'default arpeggio' (Rack.tsx:52) but it is a static clip. None found."
+    },
+    {
+      "id": "MID-011",
+      "capability": "missing",
+      "capabilityEvidence": "No step-input mode. grep step.input in src/ = none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No step-input mode in ui/src. None found."
+    },
+    {
+      "id": "MID-012",
+      "capability": "missing",
+      "capabilityEvidence": "No MPE handling (per-note pitch/pressure/timbre). grep MPE in src/ = none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No MPE tracks/instruments or per-note editing in ui/src. None found."
+    },
+    {
+      "id": "MID-013",
+      "capability": "missing",
+      "capabilityEvidence": "No retrospective MIDI capture buffer. grep retrospect/capture-last in src/ = none found; no live MIDI input path at all.",
+      "surface": "missing",
+      "surfaceEvidence": "No capture-last action in ui/src. None found."
+    },
+    {
+      "id": "MID-014",
+      "capability": "missing",
+      "capabilityEvidence": "No per-note expression curves. grep note.expression in src/ = none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No per-note expression editing in ui/src. None found."
+    },
+    {
+      "id": "MID-015",
+      "capability": "missing",
+      "capabilityEvidence": "No transform/logical-edit rules engine. grep transform/logical.edit in src/ = none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No transform/logical-edit tool in ui/src. None found."
+    },
+    {
+      "id": "MID-016",
+      "capability": "missing",
+      "capabilityEvidence": "No bulk legato/length tools. grep legato in src/ = none found; no command operates on existing note lengths.",
+      "surface": "missing",
+      "surfaceEvidence": "No length/legato tools in ui/src. None found."
+    },
+    {
+      "id": "MID-017",
+      "capability": "missing",
+      "capabilityEvidence": "No step/drum-grid pattern model. grep drum.grid/step-sequencer in src/ = none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No drum/step view for MIDI clips in ui/src. None found."
+    },
+    {
+      "id": "MID-018",
+      "capability": "missing",
+      "capabilityEvidence": "No MIDI-domain effect slots before instruments. PluginHost hosts audio VST3/AU only; no MIDI-effect insert path. grep midi effect in src/ = none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No MIDI effect slots on instrument tracks in ui/src; Rack.tsx shows audio plugin rack + neural cards only. None found."
+    },
+    {
+      "id": "SCR-001",
+      "capability": "missing",
+      "capabilityEvidence": "No staff-notation rendering of MIDI. grep notation/staff/musicxml across src+ui+service = none found (only unrelated JUCE/py annotation matches).",
+      "surface": "missing",
+      "surfaceEvidence": "No notation view in ui/src. None found."
+    },
+    {
+      "id": "SCR-002",
+      "capability": "missing",
+      "capabilityEvidence": "No notation-based editing (depends on absent SCR-001). grep score editing/notation in src/ = none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No notation editing tools in ui/src. None found."
+    },
+    {
+      "id": "SCR-003",
+      "capability": "missing",
+      "capabilityEvidence": "No chord-symbol/lead-sheet model. grep chord/leadsheet in src/ = none found.",
+      "surface": "missing",
+      "surfaceEvidence": "No lead-sheet/chord display in ui/src. None found."
+    }
+  ]
+}

@@ -6,16 +6,17 @@ import { Waveform } from "./Waveform";
 type Pos = { start: number; length: number; offset: number };
 type DragKind = "move" | "trim-l" | "trim-r" | null;
 
-const LANE_H = 84;
 const CLIP_PAD = 8;
 
-export function Clip({ clip }: { clip: ClipT }) {
+export function Clip({ clip, laneH }: { clip: ClipT; laneH: number }) {
+  const LANE_H = laneH;
   const pxPerSec = useStore((s) => s.pxPerSec);
   const tool = useStore((s) => s.tool);
   const snapTime = useStore((s) => s.snapTime);
   const exec = useStore((s) => s.exec);
   const selected = useStore((s) => s.selection.has(clip.id));
   const select = useStore((s) => s.select);
+  const openPianoRoll = useStore((s) => s.openPianoRoll);
   const peaks = useStore((s) => s.peaks[clip.id]);
 
   // Optimistic preview while dragging; cleared when committed props arrive.
@@ -90,12 +91,13 @@ export function Clip({ clip }: { clip: ClipT }) {
 
   return (
     <div
-      className={`clip ${clip.type} ${selected ? "sel" : ""} ${tool === "split" ? "splitcur" : ""}`}
+      className={`clip ${clip.type} ${selected ? "sel" : ""} ${clip.mute ? "muted" : ""} ${tool === "split" ? "splitcur" : ""}`}
       style={{ left, width, height: LANE_H - CLIP_PAD * 2, top: CLIP_PAD }}
       onPointerDown={onPointerDown("move")}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
-      title={`${clip.name} · ${pos.length.toFixed(2)}s`}
+      onDoubleClick={(e) => { if (clip.type === "midi") { e.stopPropagation(); openPianoRoll(clip.id); } }}
+      title={clip.type === "midi" ? `${clip.name} · double-click to edit notes` : `${clip.name} · ${pos.length.toFixed(2)}s`}
     >
       <div className="clip-wave">
         <Waveform

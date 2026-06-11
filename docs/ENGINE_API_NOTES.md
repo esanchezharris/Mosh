@@ -136,3 +136,16 @@ const char* DistortionPlugin::xmlTypeName = "Distortion";
 - **LatencyPlugin .h/.cpp** exact latency-reporting pattern — Stage 4. `modules/tracktion_engine/plugins/effects/`.
 - **anira `InferenceHandler::process/prepare`** signatures — Stage 4, against the pinned anira.
 - **Bypassed-plugin PDC** (`allowBypassedProcessing` / `canProcessBypassed`, forum #53709) — Stage 4, in `tracktion_PluginNode.cpp`.
+
+## Applied engine patches (committed under `patches/`, wired in `cmake/Dependencies.cmake`)
+
+- **`0001-tracktion-createNewItemID-scan-all-caches.patch`** — `Edit::createNewItemID()`
+  seeded its ID allocator by scanning only `trackCache` + `clipCache`, not the other three
+  `EditItemCache`s. A plugin whose ID lived only in `automatableEditItemCache` (reconstructed
+  on reload, or outliving its removal via the undo stack) was invisible to the allocator, so
+  a new plugin could be handed a duplicate ID → `EditItemCache::addItem` jassert (and, in
+  release, a silently overwritten `itemID → item` map). The patch adds `visitItems` scans for
+  `clipSlotCache`, `automatableEditItemCache`, and `automationCurveModifierEditItemCache`.
+  Additive, message-thread-only, once-per-Edit; no behavior change for normal edits. Verified:
+  `--selftest` JUCE-assertion count 1 → 0. **Re-pinning tracktion (GIT_TAG) requires
+  re-rolling this patch against the new revision.**

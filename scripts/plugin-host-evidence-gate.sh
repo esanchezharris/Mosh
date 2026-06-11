@@ -13,12 +13,16 @@ fi
 
 mkdir -p "$EVID"
 LOG="$EVID/selftest.log"
+EXPECTED_SELFTEST_COUNT=89
+if [[ -e /Library/Audio/Plug-Ins/VST3/Serum2.vst3 ]]; then
+  EXPECTED_SELFTEST_COUNT=98
+fi
 
 echo "[plugin-host-evidence-gate] app=$APP" >&2
 MOSH_NO_AUDIO=1 "$APP" --selftest > "$LOG" 2>&1
 
-if ! rg -q '===== 89/89 checks passed, 0 failed =====' "$LOG"; then
-  echo "[plugin-host-evidence-gate] FAIL: selftest did not report 89/89 checks" >&2
+if ! rg -q "===== $EXPECTED_SELFTEST_COUNT/$EXPECTED_SELFTEST_COUNT checks passed, 0 failed =====" "$LOG"; then
+  echo "[plugin-host-evidence-gate] FAIL: selftest did not report $EXPECTED_SELFTEST_COUNT/$EXPECTED_SELFTEST_COUNT checks" >&2
   tail -80 "$LOG" >&2
   exit 1
 fi
@@ -39,7 +43,7 @@ cat > "$EVID/REPORT.md" <<EOF
 App: $APP
 Mode: MOSH_NO_AUDIO=1 --selftest
 Log: $LOG
-Result: PASS command-surface selftest reported 89/89.
+Result: PASS command-surface selftest reported $EXPECTED_SELFTEST_COUNT/$EXPECTED_SELFTEST_COUNT.
 
 Notes:
 - Assertions/leak detector lines, if present, are copied to assertions.txt.

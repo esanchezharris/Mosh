@@ -1,0 +1,20 @@
+diff --git a/modules/tracktion_engine/model/edit/tracktion_Edit.cpp b/modules/tracktion_engine/model/edit/tracktion_Edit.cpp
+index cccfc455af9..1b137a61141 100644
+--- a/modules/tracktion_engine/model/edit/tracktion_Edit.cpp
++++ b/modules/tracktion_engine/model/edit/tracktion_Edit.cpp
+@@ -1288,6 +1288,15 @@ EditItemID Edit::createNewItemID (const std::vector<EditItemID>& idsToAvoid) con
+ 
+         trackCache.visitItems ([&] (auto i)  { existingIDs.push_back (i->itemID); });
+         clipCache.visitItems ([&] (auto i)   { existingIDs.push_back (i->itemID); });
++        // MOSH PATCH: also scan the remaining EditItem caches so the allocator never
++        // reuses an ID held by a live plugin / clip-slot / curve-modifier whose ID is
++        // not in `state` (e.g. a plugin reconstructed on reload, or one outliving its
++        // removal via the undo stack). Without this, createNewItemID could hand out a
++        // duplicate ID -> EditItemCache::addItem jassert (and, in release, a silently
++        // overwritten itemID->item map).
++        clipSlotCache.visitItems ([&] (auto i)                        { existingIDs.push_back (i->itemID); });
++        automatableEditItemCache.visitItems ([&] (auto i)             { existingIDs.push_back (i->itemID); });
++        automationCurveModifierEditItemCache.visitItems ([&] (auto i) { existingIDs.push_back (i->itemID); });
+ 
+         std::sort (existingIDs.begin(), existingIDs.end());
+         nextID = existingIDs.empty() ? 1001 : (existingIDs.back().getRawID() + 1);

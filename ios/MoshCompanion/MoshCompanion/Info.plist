@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleDevelopmentRegion</key>
+  <string>$(DEVELOPMENT_LANGUAGE)</string>
+  <key>CFBundleDisplayName</key>
+  <string>Mosh</string>
+  <key>CFBundleExecutable</key>
+  <string>$(EXECUTABLE_NAME)</string>
+  <key>CFBundleIdentifier</key>
+  <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+  <key>CFBundleInfoDictionaryVersion</key>
+  <string>6.0</string>
+  <key>CFBundleName</key>
+  <string>$(PRODUCT_NAME)</string>
+  <key>CFBundlePackageType</key>
+  <string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
+  <key>CFBundleShortVersionString</key>
+  <string>$(MARKETING_VERSION)</string>
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key>
+      <string>studio.mosh.companion.pair</string>
+      <key>CFBundleURLSchemes</key>
+      <array>
+        <string>mosh</string>
+      </array>
+    </dict>
+  </array>
+  <key>CFBundleVersion</key>
+  <string>$(CURRENT_PROJECT_VERSION)</string>
+  <key>NSBonjourServices</key>
+  <array>
+    <string>_moshcompanion._tcp</string>
+  </array>
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>Mosh Companion connects to your nearby Mac to control MOSH and upload phone mic takes.</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Mosh Companion uses the iPhone microphone for hold-to-talk commands and phone mic takes.</string>
+  <key>NSSpeechRecognitionUsageDescription</key>
+  <string>Mosh Companion uses on-device speech recognition for hold-to-talk MOSH commands when available.</string>
+</dict>
+</plist>

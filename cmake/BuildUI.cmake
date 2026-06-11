@@ -62,3 +62,20 @@ else()
         COMMENT "Staging UI bundle next to Mosh executable"
         VERBATIM)
 endif()
+
+# The POST_BUILD staging above only runs when the Mosh target itself relinks.
+# UI-only iterations (no C++ change) rebuild the bundle via MoshUI but never
+# relink Mosh, so the app would ship a STALE bundle. This ALL target always
+# restages the freshest dist after the app exists (it depends on Mosh + MoshUI),
+# closing that gap. Build it (or the default `all`) to guarantee a fresh bundle.
+if (APPLE)
+    set(MOSH_UI_STAGE_DIR "$<TARGET_BUNDLE_CONTENT_DIR:Mosh>/Resources/ui")
+else()
+    set(MOSH_UI_STAGE_DIR "$<TARGET_FILE_DIR:Mosh>/ui")
+endif()
+add_custom_target(MoshStageUI ALL
+    COMMAND ${CMAKE_COMMAND} -E rm -rf "${MOSH_UI_STAGE_DIR}"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${MOSH_UI_DIST}" "${MOSH_UI_STAGE_DIR}"
+    COMMENT "Restaging UI bundle into the app (UI-only-safe)"
+    VERBATIM)
+add_dependencies(MoshStageUI Mosh MoshUI)

@@ -146,6 +146,120 @@ juce::WebBrowserComponent::Options WebBridge::buildOptions()
                     juce::WebBrowserComponent::NativeFunctionCompletion completion)
             {
                 completion (snapshotProvider ? snapshotProvider() : juce::var());
+            })
+        .withNativeFunction (
+            juce::Identifier ("remote_start_pairing"),
+            [this] (const juce::Array<juce::var>& args,
+                    juce::WebBrowserComponent::NativeFunctionCompletion completion)
+            {
+                completion (remoteStartHandler ? remoteStartHandler (args.size() > 0 ? args[0] : juce::var())
+                                               : juce::var());
+            })
+        .withNativeFunction (
+            juce::Identifier ("remote_stop"),
+            [this] (const juce::Array<juce::var>& args,
+                    juce::WebBrowserComponent::NativeFunctionCompletion completion)
+            {
+                completion (remoteStopHandler ? remoteStopHandler (args.size() > 0 ? args[0] : juce::var())
+                                              : juce::var());
+            })
+        .withNativeFunction (
+            juce::Identifier ("remote_status"),
+            [this] (const juce::Array<juce::var>&,
+                    juce::WebBrowserComponent::NativeFunctionCompletion completion)
+            {
+                completion (remoteStatusProvider ? remoteStatusProvider() : juce::var());
+            })
+        // Native file-open picker (wave: settings). Async on the message thread; the
+        // FileChooser is held in a member so the callback outlives the dialog. The
+        // NativeFunctionCompletion is resolved EXACTLY ONCE, including the cancel path
+        // ({ok:false, files:[]}). The mutation (import_clip / open_project) still runs
+        // via execute_command afterwards — this only resolves paths.
+        .withNativeFunction (
+            juce::Identifier ("pick_files"),
+            [this] (const juce::Array<juce::var>& args,
+                    juce::WebBrowserComponent::NativeFunctionCompletion completion)
+            {
+                // Re-entry guard: a dialog is already in flight. Resolve immediately
+                // ({ok:false}) rather than replacing the live FileChooser (which would
+                // destroy its in-flight completion and hang that Promise forever).
+                if (pickerBusy)
+                {
+                    auto* busy = new juce::DynamicObject();
+                    busy->setProperty ("ok", false);
+                    busy->setProperty ("files", juce::Array<juce::var>());
+                    completion (juce::var (busy));
+                    return;
+                }
+
+                const auto opts   = args.size() > 0 ? args[0] : juce::var();
+                const bool multi  = (bool) opts.getProperty ("multiple", false);
+                auto       title  = opts.getProperty ("title", "Open").toString();
+                auto       filter = opts.getProperty ("filters", "").toString();
+
+                int flags = juce::FileBrowserComponent::openMode
+                          | juce::FileBrowserComponent::canSelectFiles;
+                if (multi) flags |= juce::FileBrowserComponent::canSelectMultipleItems;
+
+                pickerBusy = true;
+                fileChooser = std::make_unique<juce::FileChooser> (title, juce::File(), filter);
+                fileChooser->launchAsync (flags,
+                    [this, completion] (const juce::FileChooser& fc) mutable
+                    {
+                        auto results = fc.getResults();
+                        juce::Array<juce::var> files;
+                        for (auto& f : results)
+                            files.add (f.getFullPathName());
+
+                        auto* o = new juce::DynamicObject();
+                        o->setProperty ("ok", files.size() > 0);
+                        o->setProperty ("files", files);
+                        completion (juce::var (o));            // resolved once (incl. cancel → empty)
+                        pickerBusy = false;                    // allow the next dialog
+                    });
+            })
+        // Native file-save picker (wave: settings). Same lifetime/resolve-once rules;
+        // returns {ok, file}. save_as runs via execute_command afterwards.
+        .withNativeFunction (
+            juce::Identifier ("pick_save_file"),
+            [this] (const juce::Array<juce::var>& args,
+                    juce::WebBrowserComponent::NativeFunctionCompletion completion)
+            {
+                // Re-entry guard (see pick_files): never replace a live chooser.
+                if (pickerBusy)
+                {
+                    auto* busy = new juce::DynamicObject();
+                    busy->setProperty ("ok", false);
+                    busy->setProperty ("file", juce::String());
+                    completion (juce::var (busy));
+                    return;
+                }
+
+                const auto opts     = args.size() > 0 ? args[0] : juce::var();
+                auto       title    = opts.getProperty ("title", "Save As").toString();
+                auto       filter   = opts.getProperty ("filters", "").toString();
+                auto       defName  = opts.getProperty ("defaultName", "").toString();
+
+                const int flags = juce::FileBrowserComponent::saveMode
+                                | juce::FileBrowserComponent::canSelectFiles
+                                | juce::FileBrowserComponent::warnAboutOverwriting;
+
+                juce::File start = defName.isNotEmpty()
+                    ? juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile (defName)
+                    : juce::File();
+
+                pickerBusy = true;
+                fileChooser = std::make_unique<juce::FileChooser> (title, start, filter);
+                fileChooser->launchAsync (flags,
+                    [this, completion] (const juce::FileChooser& fc) mutable
+                    {
+                        auto result = fc.getResult();
+                        auto* o = new juce::DynamicObject();
+                        o->setProperty ("ok", result != juce::File());
+                        o->setProperty ("file", result.getFullPathName());
+                        completion (juce::var (o));            // resolved once (incl. cancel → empty)
+                        pickerBusy = false;                    // allow the next dialog
+                    });
             });
 }
 
