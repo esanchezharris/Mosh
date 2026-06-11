@@ -4,6 +4,8 @@
 
 **Spec set:** `00_MOSH_MASTER_SPEC.md` (start) → `01_ENGINE_STATE_AND_SOURCE_GRAPH.md` → `02_MOSHOPS_AND_STATE_FEED.md` → `03_WEBVIEW_UI.md` → `04_PLUGIN_CHAIN_AND_REALTIME_NEURAL.md` → `05_GENERATIVE_LAYER.md` → `06_BUILD_TOOLING_AND_RUN_PLAN.md`. `07_DEFERRED_AND_MODEL_NOTES.md` is context/parking-lot (model landscape, deferred lanes, license posture) — not build work.
 
+**HANDOFF (2026-06-11):** active phase = DAW hardening/verification in an external tool — see `docs/HANDOFF.md` (mission, battery contract, invariants, hardening backlog, paused-flywheel stub). Flywheel/agent work is PAUSED until the owner is fully confident in the DAW.
+
 **Product capability source of truth:** `docs/DAW_CAPABILITY_AUDIT.md` — the FL-first checkbox audit of what the DAW can actually do (closure rule: every IR op needs a UI gesture). Stage gates measure build progress; THAT doc measures product reality. Tick its rows in every capability stage.
 
 ---
