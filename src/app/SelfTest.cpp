@@ -1373,6 +1373,89 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         eng.sessionDir().getChildFile ("project-name.txt").deleteFile();
     }
 
+    // --- Stage 32: IR v0.3 vocab batch ---
+    {
+        std::cerr << "--- Stage 32: IR v0.3 ---\n";
+        // mute/solo/move/master/nudge/rename all through execute_ir.
+        Array<var> irOps;
+        auto addOp = [&] (const char* kind, std::initializer_list<std::pair<const char*, var>> params)
+        {
+            auto* o = new DynamicObject(); o->setProperty ("kind", kind);
+            auto* pp = new DynamicObject();
+            for (auto& [k, v] : params) pp->setProperty (k, v);
+            o->setProperty ("params", var (pp)); irOps.add (var (o));
+        };
+        addOp ("track.create", {{ "track_id", "t32a" }, { "kind", "midi" }});
+        addOp ("track.create", {{ "track_id", "t32b" }, { "kind", "midi" }});
+        addOp ("mixer.mute", {{ "track_id", "t32a" }, { "on", true }});
+        addOp ("mixer.solo", {{ "track_id", "t32b" }, { "on", true }});
+        addOp ("mixer.set_master_gain", {{ "db", -2.0 }});
+        addOp ("track.move", {{ "track_id", "t32b" }, { "before_track_id", "t32a" }});
+        addOp ("clip.create", {{ "clip_id", "c32" }, { "track_id", "t32a" },
+                               { "start_bar", 1 }, { "length_bars", 1 }});
+        {   // notes for the nudge
+            auto* o = new DynamicObject(); o->setProperty ("kind", "notes.add");
+            auto* pp = new DynamicObject(); pp->setProperty ("clip_id", "c32");
+            Array<var> ns;
+            for (double st : { 0.0, 0.25 })
+            {
+                auto* n = new DynamicObject();
+                n->setProperty ("pitch", "C3"); n->setProperty ("start_beats", st);
+                n->setProperty ("length_beats", 0.1); n->setProperty ("velocity", 100);
+                ns.add (var (n));
+            }
+            pp->setProperty ("notes", ns);
+            o->setProperty ("params", var (pp)); irOps.add (var (o));
+        }
+        addOp ("notes.nudge", {{ "clip_id", "c32" }, { "offset_beats", 0.05 }});
+        auto r = cmd (ops, "execute_ir", args1 ("ops", irOps));
+        auto counts = r["data"].getProperty ("counts", var());
+        check (ok (r) && (int) counts.getProperty ("executed", 0) == 9
+                   && (int) counts.getProperty ("unsupported", 0) == 0,
+               "all 9 v0.3 ops execute (0 unsupported)");
+
+        // State checks: mute landed, order moved, notes nudged.
+        auto snap = ops.snapshot();
+        var ta, tb; int ia = -1, ib = -1, idx = 0;
+        for (auto& tv : *snap["tracks"].getArray())
+        {
+            const auto nm = tv.getProperty ("name", var()).toString();
+            if (nm == "t32a") { ta = tv; ia = idx; }
+            if (nm == "t32b") { tb = tv; ib = idx; }
+            ++idx;
+        }
+        check ((bool) ta.getProperty ("mute", false), "mixer.mute landed");
+        check ((bool) tb.getProperty ("solo", false), "mixer.solo landed");
+        check (ib >= 0 && ia >= 0 && ib < ia, "track.move put t32b before t32a");
+        check (std::abs ((double) snap["session"].getProperty ("masterVolumeDb", 0.0) + 2.0) < 0.1,
+               "mixer.set_master_gain landed");
+        {
+            double n0 = -1;
+            for (auto& nv : *ta["clips"][0].getProperty ("notes", var()).getArray())
+                if ((double) nv.getProperty ("startBeats", -1.0) < 0.1)
+                    n0 = (double) nv.getProperty ("startBeats", -1.0);
+            check (std::abs (n0 - 0.05) < 0.01, "notes.nudge shifted starts by 0.05");
+        }
+
+        // The LIFT round-trip: native mute/solo now produce IR (the Stage-9 gap).
+        check (ok (cmd (ops, "set_track_mute", objN ({{ "trackId", ta.getProperty ("id", var()) },
+                       { "mute", false }}))), "native unmute ok");
+        {
+            StringArray lines;
+            eng.sessionDir().getChildFile ("trajectory.jsonl").readLines (lines);
+            bool lifted = false;
+            for (auto& l : lines)
+                if (l.contains ("\"mixer.mute\"")) lifted = true;
+            check (lifted, "set_track_mute lifts to mixer.mute in the trajectory");
+        }
+        for (auto& tv : *ops.snapshot()["tracks"].getArray())
+        {
+            const auto nm = tv.getProperty ("name", var()).toString();
+            if (nm == "t32a" || nm == "t32b")
+                cmd (ops, "remove_track", args1 ("trackId", tv.getProperty ("id", var())));
+        }
+    }
+
     // --- Stage 31: parked decisions (swing, presets, IR load_preset) ---
     {
         std::cerr << "--- Stage 31: swing + presets ---\n";

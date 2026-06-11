@@ -1,0 +1,2138 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "$id": "https://mosh.app/schemas/moshir-0.1.schema.json",
+ "title": "MoshIR v0.3",
+ "description": "Closed, typed, DAW-generic op schema (phase0 spec \u00a73). One document validates ONE op: {kind, params, out?}. Extensions require an IR version bump. Stochastic ops (latent.*, notes.humanize) REQUIRE seed; latent.* additionally REQUIRE model_version \u2014 the harness rejects unseeded stochastic ops, and so does this schema. All positions/durations are tempo-relative (beats/bars); project.set_tempo defines the mapping to seconds. v0.2 is ADDITIVE over v0.1 (every v0.1 op remains valid): it adds device.load_sound \u2014 the asset\u2192sampler binding the \u00a73.5 worked example implied and the replication ladder proved blocking (a sampler with no sound renders silence). This is the one budgeted post-friction revision (\u00a714.5); the remaining v0.2 candidates in docs/PHASE0_EXIT.md stay queued for Phase 1.",
+ "$ref": "#/$defs/op",
+ "$defs": {
+  "op": {
+   "oneOf": [
+    {
+     "$ref": "#/$defs/project.set_tempo"
+    },
+    {
+     "$ref": "#/$defs/project.set_swing"
+    },
+    {
+     "$ref": "#/$defs/project.set_key"
+    },
+    {
+     "$ref": "#/$defs/project.set_time_sig"
+    },
+    {
+     "$ref": "#/$defs/track.create"
+    },
+    {
+     "$ref": "#/$defs/track.rename"
+    },
+    {
+     "$ref": "#/$defs/track.set_role"
+    },
+    {
+     "$ref": "#/$defs/track.route"
+    },
+    {
+     "$ref": "#/$defs/track.move"
+    },
+    {
+     "$ref": "#/$defs/track.delete"
+    },
+    {
+     "$ref": "#/$defs/asset.resolve"
+    },
+    {
+     "$ref": "#/$defs/latent.generate"
+    },
+    {
+     "$ref": "#/$defs/latent.variate"
+    },
+    {
+     "$ref": "#/$defs/latent.morph"
+    },
+    {
+     "$ref": "#/$defs/latent.inpaint"
+    },
+    {
+     "$ref": "#/$defs/clip.create"
+    },
+    {
+     "$ref": "#/$defs/clip.move"
+    },
+    {
+     "$ref": "#/$defs/clip.duplicate"
+    },
+    {
+     "$ref": "#/$defs/clip.delete"
+    },
+    {
+     "$ref": "#/$defs/clip.set_length"
+    },
+    {
+     "$ref": "#/$defs/clip.rename"
+    },
+    {
+     "$ref": "#/$defs/notes.add"
+    },
+    {
+     "$ref": "#/$defs/notes.remove"
+    },
+    {
+     "$ref": "#/$defs/notes.transpose"
+    },
+    {
+     "$ref": "#/$defs/notes.quantize"
+    },
+    {
+     "$ref": "#/$defs/notes.humanize"
+    },
+    {
+     "$ref": "#/$defs/notes.nudge"
+    },
+    {
+     "$ref": "#/$defs/sample.place"
+    },
+    {
+     "$ref": "#/$defs/sample.slice"
+    },
+    {
+     "$ref": "#/$defs/sample.pitch"
+    },
+    {
+     "$ref": "#/$defs/sample.stretch"
+    },
+    {
+     "$ref": "#/$defs/device.add"
+    },
+    {
+     "$ref": "#/$defs/device.load_sound"
+    },
+    {
+     "$ref": "#/$defs/device.set_param"
+    },
+    {
+     "$ref": "#/$defs/device.load_preset"
+    },
+    {
+     "$ref": "#/$defs/device.bypass"
+    },
+    {
+     "$ref": "#/$defs/mixer.set_gain"
+    },
+    {
+     "$ref": "#/$defs/mixer.set_pan"
+    },
+    {
+     "$ref": "#/$defs/mixer.send"
+    },
+    {
+     "$ref": "#/$defs/mixer.sidechain"
+    },
+    {
+     "$ref": "#/$defs/mixer.mute"
+    },
+    {
+     "$ref": "#/$defs/mixer.solo"
+    },
+    {
+     "$ref": "#/$defs/mixer.set_master_gain"
+    },
+    {
+     "$ref": "#/$defs/automation.write"
+    },
+    {
+     "$ref": "#/$defs/arrange.create_section"
+    },
+    {
+     "$ref": "#/$defs/arrange.place"
+    },
+    {
+     "$ref": "#/$defs/render.commit"
+    },
+    {
+     "$ref": "#/$defs/render.bounce"
+    }
+   ]
+  },
+  "idRef": {
+   "type": "string",
+   "description": "Caller-assigned symbolic id (e.g. 't808', 'c808a', 'asset_3f9c'). The executor maps symbolic ids to engine ids; engine ids never appear in IR.",
+   "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+  },
+  "beats": {
+   "type": "number",
+   "minimum": 0,
+   "description": "Position/length in beats (tempo-relative)."
+  },
+  "posBeats": {
+   "$ref": "#/$defs/beats"
+  },
+  "durBeats": {
+   "type": "number",
+   "exclusiveMinimum": 0,
+   "description": "Duration in beats, > 0."
+  },
+  "bar": {
+   "type": "integer",
+   "minimum": 1,
+   "description": "1-based bar index."
+  },
+  "bars": {
+   "type": "integer",
+   "minimum": 1,
+   "description": "Length in whole bars."
+  },
+  "seed": {
+   "type": "integer",
+   "minimum": 0,
+   "maximum": 4294967295,
+   "description": "Required on every stochastic op. The harness hard-rejects unseeded stochastic ops; there is NO default seed."
+  },
+  "modelVersion": {
+   "type": "string",
+   "minLength": 1,
+   "description": "Pinned generative model identity (e.g. 'sa3-medium-mlx-1.0.0'). Required on latent.* for replay determinism."
+  },
+  "normValue": {
+   "type": "number",
+   "minimum": 0,
+   "maximum": 1
+  },
+  "db": {
+   "type": "number",
+   "minimum": -96,
+   "maximum": 12
+  },
+  "pan": {
+   "type": "number",
+   "minimum": -1,
+   "maximum": 1
+  },
+  "pitch": {
+   "description": "Scientific pitch name ('C1', 'Eb1', 'F#3') or MIDI note number 0\u2013127.",
+   "oneOf": [
+    {
+     "type": "string",
+     "pattern": "^[A-Ga-g][#b]?(-1|[0-9])$"
+    },
+    {
+     "type": "integer",
+     "minimum": 0,
+     "maximum": 127
+    }
+   ]
+  },
+  "note": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "pitch",
+    "start_beats",
+    "dur_beats",
+    "vel"
+   ],
+   "properties": {
+    "pitch": {
+     "$ref": "#/$defs/pitch"
+    },
+    "start_beats": {
+     "$ref": "#/$defs/beats",
+     "description": "Clip-relative start."
+    },
+    "dur_beats": {
+     "$ref": "#/$defs/durBeats"
+    },
+    "vel": {
+     "type": "integer",
+     "minimum": 1,
+     "maximum": 127
+    }
+   }
+  },
+  "beatRange": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "start_beats",
+    "length_beats"
+   ],
+   "properties": {
+    "start_beats": {
+     "$ref": "#/$defs/beats"
+    },
+    "length_beats": {
+     "$ref": "#/$defs/durBeats"
+    }
+   }
+  },
+  "barRange": {
+   "type": "array",
+   "description": "[start_bar, end_bar] inclusive, 1-based.",
+   "prefixItems": [
+    {
+     "$ref": "#/$defs/bar"
+    },
+    {
+     "$ref": "#/$defs/bar"
+    }
+   ],
+   "items": false,
+   "minItems": 2,
+   "maxItems": 2
+  },
+  "trackKind": {
+   "enum": [
+    "audio",
+    "midi",
+    "bus"
+   ]
+  },
+  "trackRole": {
+   "enum": [
+    "drums",
+    "808",
+    "melody",
+    "vox",
+    "fx",
+    "bus"
+   ]
+  },
+  "deviceRole": {
+   "enum": [
+    "synth",
+    "sampler",
+    "eq",
+    "comp",
+    "saturator",
+    "delay",
+    "reverb",
+    "limiter",
+    "filter",
+    "util"
+   ]
+  },
+  "quantGrid": {
+   "enum": [
+    "1/4",
+    "1/8",
+    "1/16",
+    "1/32",
+    "1/4T",
+    "1/8T",
+    "1/16T"
+   ]
+  },
+  "stretchAlgo": {
+   "enum": [
+    "auto",
+    "melodic",
+    "percussive"
+   ],
+   "description": "Semantic algorithm intent; lowering maps to the engine's available time-stretch modes."
+  },
+  "descriptor": {
+   "type": "object",
+   "description": "Asset descriptor \u2014 never 'that 808 from the video'; resolution is explicit and logged (spec \u00a73.1.4).",
+   "additionalProperties": false,
+   "required": [
+    "text"
+   ],
+   "properties": {
+    "text": {
+     "type": "string",
+     "minLength": 1
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "uniqueItems": true
+    },
+    "ref_audio": {
+     "type": "string",
+     "description": "Optional content-addressed reference-audio asset id."
+    }
+   }
+  },
+  "resolveStrategy": {
+   "type": "array",
+   "minItems": 1,
+   "uniqueItems": true,
+   "items": {
+    "enum": [
+     "local",
+     "splice",
+     "latent_gen"
+    ]
+   },
+   "description": "Ordered fallback chain. Licensing is enforced at the resolver, nowhere else (spec \u00a714.1)."
+  },
+  "project.set_tempo": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "kind",
+    "params"
+   ],
+   "properties": {
+    "kind": {
+     "const": "project.set_tempo"
+    },
+    "params": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "bpm"
+     ],
+     "properties": {
+      "bpm": {
+       "type": "number",
+       "minimum": 20,
+       "maximum": 400
+      },
+      "at_bar": {
+       "type": "integer",
+       "minimum": 2
+      }
+     }
+    }
+   }
+  },
+  "project.set_swing": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "kind",
+    "params"
+   ],
+   "properties": {
+    "kind": {
+     "const": "project.set_swing"
+    },
+    "params": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "amount"
+     ],
+     "properties": {
+      "amount": {
+       "$ref": "#/$defs/normValue"
+      }
+     }
+    }
+   }
+  },
+  "project.set_key": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "kind",
+    "params"
+   ],
+   "properties": {
+    "kind": {
+     "const": "project.set_key"
+    },
+    "params": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "root",
+      "scale"
+     ],
+     "properties": {
+      "root": {
+       "enum": [
+        "C",
+        "C#",
+        "Db",
+        "D",
+        "D#",
+        "Eb",
+        "E",
+        "F",
+        "F#",
+        "Gb",
+        "G",
+        "G#",
+        "Ab",
+        "A",
+        "A#",
+        "Bb",
+        "B"
+       ]
+      },
+      "scale": {
+       "enum": [
+        "major",
+        "minor",
+        "harmonic_minor",
+        "melodic_minor",
+        "dorian",
+        "phrygian",
+        "lydian",
+        "mixolydian",
+        "locrian"
+       ]
+      }
+     }
+    }
+   }
+  },
+  "project.set_time_sig": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "kind",
+    "params"
+   ],
+   "properties": {
+    "kind": {
+     "const": "project.set_time_sig"
+    },
+    "params": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "num",
+      "denom"
+     ],
+     "properties": {
+      "num": {
+       "type": "integer",
+       "minimum": 1,
+       "maximum": 32
+      },
+      "denom": {
+       "enum": [
+        1,
+        2,
+        4,
+        8,
+        16,
+        32
+       ]
+      }
+     }
+    }
+   }
+  },
+  "track.create": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "kind",
+    "params"
+   ],
+   "properties": {
+    "kind": {
+     "const": "track.create"
+    },
+    "params": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "track_id",
+      "kind"
+     ],
+     "properties": {
+      "track_id": {
+       "$ref": "#/$defs/idRef"
+      },
+      "kind": {
+       "$ref": "#/$defs/trackKind"
+      },
+      "role": {
+       "$ref": "#/$defs/trackRole"
+      },
+      "name": {
+       "type": "string"
+      }
+     }
+    }
+   }
+  },
+  "track.rename": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "kind",
+    "params"
+   ],
+   "properties": {
+    "kind": {
+     "const": "track.rename"
+    },
+    "params": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "track_id",
+      "name"
+     ],
+     "properties": {
+      "track_id": {
+       "$ref": "#/$defs/idRef"
+      },
+      "name": {
+       "type": "string",
+       "minLength": 1
+      }
+     }
+    }
+   }
+  },
+  "track.set_role": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "kind",
+    "params"
+   ],
+   "properties": {
+    "kind": {
+     "const": "track.set_role"
+    },
+    "params": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "track_id",
+      "role"
+     ],
+     "properties": {
+      "track_id": {
+       "$ref": "#/$defs/idRef"
+      },
+      "role": {
+       "$ref": "#/$defs/trackRole"
+      }
+     }
+    }
+   }
+  },
+  "track.route": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "kind",
+    "params"
+   ],
+   "properties": {
+    "kind": {
+     "const": "track.route"
+    },
+    "params": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "track_id",
+      "to"
+     ],
+     "properties": {
+      "track_id": {
+       "$ref": "#/$defs/idRef"
+      },
+      "to": {
+       "$ref": "#/$defs/idRef",
+       "description": "Destination bus/track id."
+      }
+     }
+    }
+   }
+  },
+  "track.delete": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "kind",
+    "params"
+   ],
+   "properties": {
+    "kind": {
+     "const": "track.delete"
+    },
+    "params": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "track_id"
+     ],
+     "properties": {
+      "track_id": {
+       "$ref": "#/$defs/idRef"
+      }
+     }
+    }
+   }
+  },
+  "asset.resolve": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "kind",
+    "params",
+    "out"
+   ],
+   "properties": {
+    "kind": {
+     "const": "asset.resolve"
+    },
+    "params": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "descriptor",
+      "strategy"
+     ],
+     "properties": {
+      "descriptor": {
+       "$ref": "#/$defs/descriptor"
+      },
+      "strategy": {
+       "$ref": "#/$defs/resolveStrategy"
+      }
+     }
+    },
+    "out": {
+     "$ref": "#/$defs/idRef",
+     "description": "Symbolic binding for the resolved content-addressed asset. The resolution is logged \u2014 it is training data for a future resolver model."
+    }
+   }
+  },
+  "latent.generate": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "kind",
+    "params",
+    "out"
+   ],
+   "properties": {
+    "kind": {
+     "const": "latent.generate"
+    },
+    "params": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "prompt",
+      "duration_beats",
+      "seed",
+      "model_version"
+     ],
+     "properties": {
+      "prompt": {
+       "type": "string",
+       "minLength": 1
+      },
+      "duration_beats": {
+       "$ref": "#/$defs/durBeats"
+      },
+      "seed": {
+       "$ref": "#/$defs/seed"
+      },
+      "model_version": {
+       "$ref": "#/$defs/modelVersion"
+      }
+     }
+    },
+    "out": {
+     "$ref": "#/$defs/idRef"
+    }
+   }
+  },
+  "latent.variate": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "kind",
+    "params",
+    "out"
+   ],
+   "properties": {
+    "kind": {
+     "const": "latent.variate"
+    },
+    "params": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "asset_id",
+      "strength",
+      "seed",
+      "model_version"
+     ],
+     "properties": {
+      "asset_id": {
+       "$ref": "#/$defs/idRef"
+      },
+      "strength": {
+       "$ref": "#/$defs/normValue"
+      },
+      "seed": {
+       "$ref": "#/$defs/seed"
+      },
+      "model_version": {
+       "$ref": "#/$defs/modelVersion"
+      }
+     }
+    },
+    "out": {
+     "$ref": "#/$defs/idRef"
+    }
+   }
+  },
+  "latent.morph": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "kind",
+    "params",
+    "out"
+   ],
+   "properties": {
+    "kind": {
+     "const": "latent.morph"
+    },
+    "params": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "asset_a",
+      "asset_b",
+      "mix",
+      "seed",
+      "model_version"
+     ],
+     "properties": {
+      "asset_a": {
+       "$ref": "#/$defs/idRef"
+      },
+      "asset_b": {
+       "$ref": "#/$defs/idRef"
+      },
+      "mix": {
+       "$ref": "#/$defs/normValue"
+      },
+      "seed": {
+       "$ref": "#/$defs/seed"
+      },
+      "model_version": {
+       "$ref": "#/$defs/modelVersion"
+      }
+     }
+    },
+    "out": {
+     "$ref": "#/$defs/idRef"
+    }
+   }
+  },
+  "latent.inpaint": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "kind",
+    "params",
+    "out"
+   ],
+   "properties": {
+    "kind": {
+     "const": "latent.inpaint"
+    },
+    "params": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "asset_id",
+      "region",
+      "seed",
+      "model_version"
+     ],
+     "properties": {
+      "asset_id": {
+       "$ref": "#/$defs/idRef"
+      },
+      "region": {
+       "$ref": "#/$defs/beatRange"
+      },
+      "prompt": {
+       "type": "string"
+      },
+      "seed": {
+       "$ref": "#/$defs/seed"
+      },
+      "model_version": {
+       "$ref": "#/$defs/modelVersion"
+      }
+     }
+    },
+    "out": {
+     "$ref": "#/$defs/idRef"
+    }
+   }
+  },
+  "clip.create": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "kind",
+    "params"
+   ],
+   "properties": {
+    "kind": {
+     "const": "clip.create"
+    },
+    "params": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "clip_id",
+      "track_id",
+      "start_bar",
+      "length_beats",
+      "kind"
+     ],
+     "properties": {
+      "clip_id": {
+       "$ref": "#/$defs/idRef"
+      },
+      "track_id": {
+       "$ref": "#/$defs/idRef"
+      },
+      "start_bar": {
+       "$ref": "#/$defs/bar"
+      },
+      "length_beats": {
+       "$ref": "#/$defs/durBeats"
+      },
+      "kind": {
+       "enum": [
+        "midi",
+        "audio"
+       ]
+      }
+     }
+    }
+   }
+  },
+  "clip.move": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "kind",
+    "params"
+   ],
+   "properties": {
+    "kind": {
+     "const": "clip.move"
+    },
+    "params": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "clip_id",
+      "start_bar"
+     ],
+     "properties": {
+      "clip_id": {
+       "$ref": "#/$defs/idRef"
+      },
+      "start_bar": {
+       "$ref": "#/$defs/bar"
+      },
+      "track_id": {
+       "$ref": "#/$defs/idRef",
+       "description": "Optional destination track (move across lanes)."
+      }
+     }
+    }
+   }
+  },
+  "clip.duplicate": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "kind",
+    "params"
+   ],
+   "properties": {
+    "kind": {
+     "const": "clip.duplicate"
+    },
+    "params": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "clip_id",
+      "new_clip_id",
+      "start_bar"
+     ],
+     "properties": {
+      "clip_id": {
+       "$ref": "#/$defs/idRef"
+      },
+      "new_clip_id": {
+       "$ref": "#/$defs/idRef"
+      },
+      "start_bar": {
+       "$ref": "#/$defs/bar"
+      },
+      "track_id": {
+       "$ref": "#/$defs/idRef"
+      }
+     }
+    }
+   }
+  },
+  "clip.delete": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "kind",
+    "params"
+   ],
+   "properties": {
+    "kind": {
+     "const": "clip.delete"
+    },
+    "params": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "clip_id"
+     ],
+     "properties": {
+      "clip_id": {
+       "$ref": "#/$defs/idRef"
+      }
+     }
+    }
+   }
+  },
+  "clip.set_length": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "kind",
+    "params"
+   ],
+   "properties": {
+    "kind": {
+     "const": "clip.set_length"
+    },
+    "params": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "clip_id",
+      "length_beats"
+     ],
+     "properties": {
+      "clip_id": {
+       "$ref": "#/$defs/idRef"
+      },
+      "length_beats": {
+       "$ref": "#/$defs/durBeats"
+      }
+     }
+    }
+   }
+  },
+  "notes.add": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "kind",
+    "params"
+   ],
+   "properties": {
+    "kind": {
+     "const": "notes.add"
+    },
+    "params": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "clip_id",
+      "notes"
+     ],
+     "properties": {
+      "clip_id": {
+       "$ref": "#/$defs/idRef"
+      },
+      "notes": {
+       "type": "array",
+       "minItems": 1,
+       "items": {
+        "$ref": "#/$defs/note"
+       }
+      }
+     }
+    }
+   }
+  },
+  "notes.remove": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "kind",
+    "params"
+   ],
+   "properties": {
+    "kind": {
+     "const": "notes.remove"
+    },
+    "params": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "clip_id"
+     ],
+     "properties": {
+      "clip_id": {
+       "$ref": "#/$defs/idRef"
+      },
+      "pitches": {
+       "type": "array",
+       "items": {
+        "$ref": "#/$defs/pitch"
+       },
+       "description": "Limit removal to these pitches."
+      },
+      "range": {
+       "$ref": "#/$defs/beatRange",
+       "description": "Limit removal to this clip-relative range. Omitting pitches AND range removes all notes."
+      }
+     }
+    }
+   }
+  },
+  "notes.transpose": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "kind",
+    "params"
+   ],
+   "properties": {
+    "kind": {
+     "const": "notes.transpose"
+    },
+    "params": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "clip_id",
+      "semitones"
+     ],
+     "properties": {
+      "clip_id": {
+       "$ref": "#/$defs/idRef"
+      },
+      "semitones": {
+       "type": "integer",
+       "minimum": -48,
+       "maximum": 48
+      }
+     }
+    }
+   }
+  },
+  "notes.quantize": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "kind",
+    "params"
+   ],
+   "properties": {
+    "kind": {
+     "const": "notes.quantize"
+    },
+    "params": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "clip_id",
+      "grid",
+      "strength"
+     ],
+     "properties": {
+      "clip_id": {
+       "$ref": "#/$defs/idRef"
+      },
+      "grid": {
+       "$ref": "#/$defs/quantGrid"
+      },
+      "strength": {
+       "$ref": "#/$defs/normValue"
+      },
+      "swing": {
+       "$ref": "#/$defs/normValue"
+      }
+     }
+    }
+   }
+  },
+  "notes.humanize": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "kind",
+    "params"
+   ],
+   "properties": {
+    "kind": {
+     "const": "notes.humanize"
+    },
+    "params": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "clip_id",
+      "timing_ms",
+      "vel_var",
+      "seed"
+     ],
+     "properties": {
+      "clip_id": {
+       "$ref": "#/$defs/idRef"
+      },
+      "timing_ms": {
+       "type": "number",
+       "minimum": 0,
+       "maximum": 100
+      },
+      "vel_var": {
+       "type": "number",
+       "minimum": 0,
+       "maximum": 64
+      },
+      "seed": {
+       "$ref": "#/$defs/seed"
+      }
+     }
+    }
+   }
+  },
+  "sample.place": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "kind",
+    "params"
+   ],
+   "properties": {
+    "kind": {
+     "const": "sample.place"
+    },
+    "params": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "clip_id",
+      "track_id",
+      "asset_id",
+      "start_bar"
+     ],
+     "properties": {
+      "clip_id": {
+       "$ref": "#/$defs/idRef"
+      },
+      "track_id": {
+       "$ref": "#/$defs/idRef"
+      },
+      "asset_id": {
+       "$ref": "#/$defs/idRef"
+      },
+      "start_bar": {
+       "$ref": "#/$defs/bar"
+      },
+      "offset_beats": {
+       "$ref": "#/$defs/beats",
+       "description": "Trim into the source from its start."
+      }
+     }
+    }
+   }
+  },
+  "sample.slice": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "kind",
+    "params"
+   ],
+   "properties": {
+    "kind": {
+     "const": "sample.slice"
+    },
+    "params": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "clip_id",
+      "mode"
+     ],
+     "properties": {
+      "clip_id": {
+       "$ref": "#/$defs/idRef"
+      },
+      "mode": {
+       "enum": [
+        "transient",
+        "grid"
+       ]
+      },
+      "grid": {
+       "$ref": "#/$defs/quantGrid",
+       "description": "Required when mode = grid."
+      }
+     },
+     "if": {
+      "properties": {
+       "mode": {
+        "const": "grid"
+       }
+      }
+     },
+     "then": {
+      "required": [
+       "clip_id",
+       "mode",
+       "grid"
+      ]
+     }
+    }
+   }
+  },
+  "sample.pitch": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "kind",
+    "params"
+   ],
+   "properties": {
+    "kind": {
+     "const": "sample.pitch"
+    },
+    "params": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "clip_id",
+      "semitones"
+     ],
+     "properties": {
+      "clip_id": {
+       "$ref": "#/$defs/idRef"
+      },
+      "semitones": {
+       "type": "number",
+       "minimum": -24,
+       "maximum": 24
+      }
+     }
+    }
+   }
+  },
+  "sample.stretch": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "kind",
+    "params"
+   ],
+   "properties": {
+    "kind": {
+     "const": "sample.stretch"
+    },
+    "params": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "clip_id",
+      "ratio"
+     ],
+     "properties": {
+      "clip_id": {
+       "$ref": "#/$defs/idRef"
+      },
+      "ratio": {
+       "type": "number",
+       "minimum": 0.25,
+       "maximum": 4
+      },
+      "algo": {
+       "$ref": "#/$defs/stretchAlgo",
+       "default": "auto"
+      }
+     }
+    }
+   }
+  },
+  "device.add": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "kind",
+    "params"
+   ],
+   "properties": {
+    "kind": {
+     "const": "device.add"
+    },
+    "params": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "device_id",
+      "track_id",
+      "role"
+     ],
+     "properties": {
+      "device_id": {
+       "$ref": "#/$defs/idRef"
+      },
+      "track_id": {
+       "$ref": "#/$defs/idRef"
+      },
+      "role": {
+       "$ref": "#/$defs/deviceRole"
+      },
+      "prefer": {
+       "type": "array",
+       "items": {
+        "type": "string",
+        "minLength": 1
+       },
+       "description": "Ordered preference list ('Serum', 'Vital', 'builtin.synth'). Lowering picks the first available, logs the choice, and emits Unsupported to the gap ledger if none resolve (spec \u00a73.4)."
+      }
+     }
+    }
+   }
+  },
+  "device.load_sound": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "kind",
+    "params"
+   ],
+   "properties": {
+    "kind": {
+     "const": "device.load_sound"
+    },
+    "params": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "device_id",
+      "asset_id"
+     ],
+     "properties": {
+      "device_id": {
+       "$ref": "#/$defs/idRef",
+       "description": "A sampler-role device."
+      },
+      "asset_id": {
+       "$ref": "#/$defs/idRef",
+       "description": "A resolved asset (asset.resolve / latent.*)."
+      },
+      "key_note": {
+       "$ref": "#/$defs/pitch",
+       "description": "MIDI note the sample's root maps to (default C4)."
+      },
+      "min_note": {
+       "$ref": "#/$defs/pitch"
+      },
+      "max_note": {
+       "$ref": "#/$defs/pitch"
+      },
+      "open_ended": {
+       "type": "boolean",
+       "description": "Let the sample ring past note-off (one-shot drums). Default true."
+      }
+     }
+    }
+   }
+  },
+  "device.set_param": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "kind",
+    "params"
+   ],
+   "properties": {
+    "kind": {
+     "const": "device.set_param"
+    },
+    "params": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "device_id",
+      "param",
+      "value_norm"
+     ],
+     "properties": {
+      "device_id": {
+       "$ref": "#/$defs/idRef"
+      },
+      "param": {
+       "description": "Semantic name (preferred for training) or raw parameter index.",
+       "oneOf": [
+        {
+         "type": "string",
+         "minLength": 1
+        },
+        {
+         "type": "integer",
+         "minimum": 0
+        }
+       ]
+      },
+      "value_norm": {
+       "$ref": "#/$defs/normValue"
+      },
+      "value_display": {
+       "type": "string",
+       "description": "Human-readable value for raw_index addressing ('2.3 kHz')."
+      }
+     }
+    }
+   }
+  },
+  "device.load_preset": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "kind",
+    "params"
+   ],
+   "properties": {
+    "kind": {
+     "const": "device.load_preset"
+    },
+    "params": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "device_id",
+      "preset"
+     ],
+     "properties": {
+      "device_id": {
+       "$ref": "#/$defs/idRef"
+      },
+      "preset": {
+       "type": "string",
+       "minLength": 1
+      }
+     }
+    }
+   }
+  },
+  "device.bypass": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "kind",
+    "params"
+   ],
+   "properties": {
+    "kind": {
+     "const": "device.bypass"
+    },
+    "params": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "device_id",
+      "bypassed"
+     ],
+     "properties": {
+      "device_id": {
+       "$ref": "#/$defs/idRef"
+      },
+      "bypassed": {
+       "type": "boolean"
+      }
+     }
+    }
+   }
+  },
+  "mixer.set_gain": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "kind",
+    "params"
+   ],
+   "properties": {
+    "kind": {
+     "const": "mixer.set_gain"
+    },
+    "params": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "track_id",
+      "db"
+     ],
+     "properties": {
+      "track_id": {
+       "$ref": "#/$defs/idRef"
+      },
+      "db": {
+       "$ref": "#/$defs/db"
+      }
+     }
+    }
+   }
+  },
+  "mixer.set_pan": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "kind",
+    "params"
+   ],
+   "properties": {
+    "kind": {
+     "const": "mixer.set_pan"
+    },
+    "params": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "track_id",
+      "pan"
+     ],
+     "properties": {
+      "track_id": {
+       "$ref": "#/$defs/idRef"
+      },
+      "pan": {
+       "$ref": "#/$defs/pan"
+      }
+     }
+    }
+   }
+  },
+  "mixer.send": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "kind",
+    "params"
+   ],
+   "properties": {
+    "kind": {
+     "const": "mixer.send"
+    },
+    "params": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "track_id",
+      "to_bus",
+      "db"
+     ],
+     "properties": {
+      "track_id": {
+       "$ref": "#/$defs/idRef"
+      },
+      "to_bus": {
+       "$ref": "#/$defs/idRef"
+      },
+      "db": {
+       "$ref": "#/$defs/db"
+      }
+     }
+    }
+   }
+  },
+  "mixer.sidechain": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "kind",
+    "params"
+   ],
+   "properties": {
+    "kind": {
+     "const": "mixer.sidechain"
+    },
+    "params": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "src",
+      "dst",
+      "amount"
+     ],
+     "properties": {
+      "src": {
+       "$ref": "#/$defs/idRef",
+       "description": "Source track (e.g. the kick)."
+      },
+      "dst": {
+       "$ref": "#/$defs/idRef",
+       "description": "Destination track to be ducked."
+      },
+      "amount": {
+       "$ref": "#/$defs/normValue"
+      },
+      "attack_ms": {
+       "type": "number",
+       "minimum": 0.1,
+       "maximum": 500
+      },
+      "release_ms": {
+       "type": "number",
+       "minimum": 1,
+       "maximum": 2000
+      },
+      "ratio": {
+       "type": "number",
+       "minimum": 1,
+       "maximum": 100
+      }
+     }
+    }
+   }
+  },
+  "automation.write": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "kind",
+    "params"
+   ],
+   "properties": {
+    "kind": {
+     "const": "automation.write"
+    },
+    "params": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "target",
+      "points"
+     ],
+     "properties": {
+      "target": {
+       "oneOf": [
+        {
+         "type": "object",
+         "additionalProperties": false,
+         "required": [
+          "device_id",
+          "param"
+         ],
+         "properties": {
+          "device_id": {
+           "$ref": "#/$defs/idRef"
+          },
+          "param": {
+           "oneOf": [
+            {
+             "type": "string",
+             "minLength": 1
+            },
+            {
+             "type": "integer",
+             "minimum": 0
+            }
+           ]
+          }
+         }
+        },
+        {
+         "type": "object",
+         "additionalProperties": false,
+         "required": [
+          "mixer",
+          "track_id"
+         ],
+         "properties": {
+          "mixer": {
+           "enum": [
+            "gain",
+            "pan"
+           ]
+          },
+          "track_id": {
+           "$ref": "#/$defs/idRef"
+          }
+         }
+        }
+       ]
+      },
+      "points": {
+       "type": "array",
+       "minItems": 1,
+       "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+         "pos_beats",
+         "value_norm"
+        ],
+        "properties": {
+         "pos_beats": {
+          "$ref": "#/$defs/beats"
+         },
+         "value_norm": {
+          "$ref": "#/$defs/normValue"
+         },
+         "curve": {
+          "type": "number",
+          "minimum": -1,
+          "maximum": 1,
+          "default": 0
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "arrange.create_section": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "kind",
+    "params"
+   ],
+   "properties": {
+    "kind": {
+     "const": "arrange.create_section"
+    },
+    "params": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "name",
+      "start_bar",
+      "length_bars"
+     ],
+     "properties": {
+      "name": {
+       "type": "string",
+       "minLength": 1
+      },
+      "start_bar": {
+       "$ref": "#/$defs/bar"
+      },
+      "length_bars": {
+       "$ref": "#/$defs/bars"
+      }
+     }
+    }
+   }
+  },
+  "arrange.place": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "kind",
+    "params"
+   ],
+   "properties": {
+    "kind": {
+     "const": "arrange.place"
+    },
+    "params": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "clip_id"
+     ],
+     "properties": {
+      "clip_id": {
+       "$ref": "#/$defs/idRef"
+      },
+      "section": {
+       "type": "string",
+       "description": "Place at a named section's start."
+      },
+      "start_bar": {
+       "$ref": "#/$defs/bar"
+      }
+     },
+     "anyOf": [
+      {
+       "required": [
+        "section"
+       ]
+      },
+      {
+       "required": [
+        "start_bar"
+       ]
+      }
+     ]
+    }
+   }
+  },
+  "render.commit": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "kind",
+    "params"
+   ],
+   "properties": {
+    "kind": {
+     "const": "render.commit"
+    },
+    "params": {
+     "type": "object",
+     "additionalProperties": false,
+     "properties": {
+      "range_bars": {
+       "$ref": "#/$defs/barRange"
+      },
+      "tracks": {
+       "type": "array",
+       "items": {
+        "$ref": "#/$defs/idRef"
+       }
+      }
+     }
+    }
+   }
+  },
+  "render.bounce": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "kind",
+    "params"
+   ],
+   "properties": {
+    "kind": {
+     "const": "render.bounce"
+    },
+    "params": {
+     "type": "object",
+     "additionalProperties": false,
+     "properties": {
+      "range_bars": {
+       "$ref": "#/$defs/barRange"
+      },
+      "tracks": {
+       "type": "array",
+       "items": {
+        "$ref": "#/$defs/idRef"
+       }
+      }
+     }
+    },
+    "out": {
+     "$ref": "#/$defs/idRef",
+     "description": "Symbolic binding for the bounced render asset (render_ref)."
+    }
+   }
+  },
+  "mixer.mute": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "kind",
+    "params"
+   ],
+   "properties": {
+    "kind": {
+     "const": "mixer.mute"
+    },
+    "params": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "track_id",
+      "on"
+     ],
+     "properties": {
+      "track_id": {
+       "$ref": "#/$defs/idRef"
+      },
+      "on": {
+       "type": "boolean"
+      }
+     }
+    }
+   }
+  },
+  "mixer.solo": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "kind",
+    "params"
+   ],
+   "properties": {
+    "kind": {
+     "const": "mixer.solo"
+    },
+    "params": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "track_id",
+      "on"
+     ],
+     "properties": {
+      "track_id": {
+       "$ref": "#/$defs/idRef"
+      },
+      "on": {
+       "type": "boolean"
+      }
+     }
+    }
+   }
+  },
+  "mixer.set_master_gain": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "kind",
+    "params"
+   ],
+   "properties": {
+    "kind": {
+     "const": "mixer.set_master_gain"
+    },
+    "params": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "db"
+     ],
+     "properties": {
+      "db": {
+       "$ref": "#/$defs/db"
+      }
+     }
+    }
+   }
+  },
+  "track.move": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "kind",
+    "params"
+   ],
+   "properties": {
+    "kind": {
+     "const": "track.move"
+    },
+    "params": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "track_id"
+     ],
+     "properties": {
+      "track_id": {
+       "$ref": "#/$defs/idRef"
+      },
+      "before_track_id": {
+       "$ref": "#/$defs/idRef"
+      }
+     }
+    }
+   }
+  },
+  "clip.rename": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "kind",
+    "params"
+   ],
+   "properties": {
+    "kind": {
+     "const": "clip.rename"
+    },
+    "params": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "clip_id",
+      "name"
+     ],
+     "properties": {
+      "clip_id": {
+       "$ref": "#/$defs/idRef"
+      },
+      "name": {
+       "type": "string",
+       "minLength": 1
+      }
+     }
+    }
+   }
+  },
+  "notes.nudge": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "kind",
+    "params"
+   ],
+   "properties": {
+    "kind": {
+     "const": "notes.nudge"
+    },
+    "params": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "clip_id",
+      "offset_beats"
+     ],
+     "properties": {
+      "clip_id": {
+       "$ref": "#/$defs/idRef"
+      },
+      "offset_beats": {
+       "type": "number",
+       "minimum": -4,
+       "maximum": 4
+      },
+      "pitches": {
+       "type": "array",
+       "items": {
+        "$ref": "#/$defs/pitch"
+       }
+      },
+      "range": {
+       "type": "object",
+       "additionalProperties": false,
+       "properties": {
+        "start_beats": {
+         "type": "number",
+         "minimum": 0
+        },
+        "length_beats": {
+         "type": "number",
+         "exclusiveMinimum": 0
+        }
+       }
+      }
+     }
+    }
+   }
+  }
+ }
+}

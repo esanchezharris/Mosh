@@ -15,6 +15,17 @@ This document is the scorecard + the exact commands to close each item.
 | 4 | 100% replay determinism incl. seeded latent ops (state_hash reproducible) | ✅ **PROVEN** | `scripts/harness-conformance.sh` (11/11: 3× identical state_hash incl. a seeded latent op, byte-identical bounce audio, parallel batch converges) — runs in CI on every engine change per spec §13 |
 | 5 | Gap ledger exists and has driven ≥1 IR/feature prioritization decision | ✅ ledger live (engine + friction + extraction entries) · decision log below | the IR v0.2 review (one revision, then freeze — §14.5) after the sprint |
 
+## IR v0.3 — SHIPPED (2026-06-11, S32)
+
+The §14.5 freeze ("one post-sprint revision") was superseded at Emilio's
+direction: the housekeeping batch landed as v0.3. Additions: mixer.mute /
+mixer.solo / mixer.set_master_gain · track.move · clip.rename · notes.nudge
+(the FL wrench micro-delay, rung-1's oldest gap) · project.set_tempo gains
+at_bar (tempo map) · notes.quantize gains swing. Every native-only command
+the lift had been dropping now lifts. Schema: moshir/moshir-0.3.schema.json
+(48 ops, lockstep-tested); program cheatsheet updated. v0.3 is now FROZEN —
+the next revision requires the same explicit owner call.
+
 ## Gap-ledger → IR v0.2 review (the one budgeted revision)
 
 Candidates accumulated by the build itself (run `cat ~/Library/Mosh/*/gap-ledger.jsonl` for live data):

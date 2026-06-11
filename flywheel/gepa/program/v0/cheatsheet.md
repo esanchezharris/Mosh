@@ -8,7 +8,7 @@ Ids: you assign them (`t1`, `c1`, `d1`, `a1`, `bverb`); create before use.
 - project.set_tempo {bpm: 20..400}
 - project.set_time_sig {num: 1..32, denom: 1|2|4|8|16|32}
 - project.set_key {root: C..B (sharps/flats ok), scale: major|minor|harmonic_minor|melodic_minor|dorian|phrygian|lydian|mixolydian|locrian}
-- project.set_swing {amount: 0..1}   — currently UNSUPPORTED (gap-ledgered); avoid
+- project.set_swing — UNSUPPORTED by DESIGN: swing is notes.quantize {swing: 0..1} (offbeats land late)
 
 ## track
 - track.create {track_id, kind: audio|midi|bus, role?: drums|808|melody|vox|fx|bus, name?}
@@ -50,12 +50,21 @@ Ids: you assign them (`t1`, `c1`, `d1`, `a1`, `bverb`); create before use.
   channel with min_note=max_note=key_note (e.g. kick D1, clap E1, hat F#1) so
   pads never overlap; all lanes in ONE pattern clip. 808/melodic = own tracks.
 - device.set_param {device_id, param: "drive"|"cutoff"|... | <raw index>, value_norm: 0..1}
-- device.bypass {device_id, bypassed} · device.load_preset — UNSUPPORTED; avoid
+- device.bypass {device_id, bypassed} · device.load_preset {device_id, preset} — loads a saved plugin-state preset
 
 ## mixer
 - mixer.set_gain {track_id, db: -96..12} · mixer.set_pan {track_id, pan: -1..1}
 - mixer.send {track_id, to_bus: <bus track id>, db}   (create the bus with track.create kind=bus first)
 - mixer.sidechain {src: <trigger track>, dst: <ducked track>, amount: 0..1, attack_ms?, release_ms?, ratio?}
+- mixer.mute {track_id, on} · mixer.solo {track_id, on} · mixer.set_master_gain {db}   (v0.3)
+
+## v0.3 additions
+- project.set_tempo gains at_bar?: int>=2 — a tempo-MAP change at that bar
+- track.move {track_id, before_track_id?} — reorder tracks
+- clip.rename {clip_id, name}
+- notes.nudge {clip_id, offset_beats: -4..4, pitches?, range?} — micro-delay
+  selected notes (the FL wrench tool); use for late-hat feel, NOT humanize
+- notes.quantize gains swing?: 0..1 — offbeats land late (0.5 ≈ triplet feel)
 
 ## automation / arrange / render
 - automation.write {target: {device_id, param} | {mixer: "gain"|"pan", track_id}, points: [{pos_beats, value_norm, curve?: -1..1}]}

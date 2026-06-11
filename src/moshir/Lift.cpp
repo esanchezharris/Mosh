@@ -55,14 +55,9 @@ juce::var lift (const String& command, const var& args, const var& result, te::E
     // ── project ──────────────────────────────────────────────────────────
     if (command == "set_tempo")
     {
-        // Tempo-MAP points (atBar) have no IR shape in v0.2 — native-only
-        // (ledger candidate: project.set_tempo gains at_bar in v0.3).
-        if (args.hasProperty ("atBar"))
-            return none();
-    }
-    if (command == "set_tempo")
-    {
         auto* p = obj(); p->setProperty ("bpm", args.getProperty ("bpm", 120.0));
+        if (args.hasProperty ("atBar"))
+            p->setProperty ("at_bar", args.getProperty ("atBar", 1));   // v0.3
         return one (op ("project.set_tempo", p));
     }
     if (command == "set_time_sig")
@@ -179,6 +174,51 @@ juce::var lift (const String& command, const var& args, const var& result, te::E
         p->setProperty ("clip_id", clipSym (args.getProperty ("clipId", var())));
         return one (op ("clip.delete", p));
     }
+    if (command == "rename_clip")
+    {
+        auto* p = obj();
+        p->setProperty ("clip_id", clipSym (args.getProperty ("clipId", var())));
+        p->setProperty ("name", args.getProperty ("name", var()));
+        return one (op ("clip.rename", p));
+    }
+    if (command == "nudge_notes")
+    {
+        auto* p = obj();
+        p->setProperty ("clip_id", clipSym (args.getProperty ("clipId", var())));
+        p->setProperty ("offset_beats", args.getProperty ("offsetBeats", 0.0));
+        if (auto pv = args.getProperty ("pitches", var()); pv.isArray())
+            p->setProperty ("pitches", pv);
+        if (args.hasProperty ("rangeStartBeats"))
+        {
+            auto* r = obj();
+            r->setProperty ("start_beats", args.getProperty ("rangeStartBeats", 0.0));
+            r->setProperty ("length_beats", args.getProperty ("rangeLengthBeats", 0.0));
+            p->setProperty ("range", var (r));
+        }
+        return one (op ("notes.nudge", p));
+    }
+    if (command == "set_track_mute" || command == "set_track_solo")
+    {
+        // v0.3: mute/solo finally have IR shapes (the Stage-9 lift gap).
+        auto* p = obj();
+        p->setProperty ("track_id", trackSym (args.getProperty ("trackId", var())));
+        p->setProperty ("on", args.getProperty (command == "set_track_mute" ? "mute" : "solo", false));
+        return one (op (command == "set_track_mute" ? "mixer.mute" : "mixer.solo", p));
+    }
+    if (command == "move_track")
+    {
+        auto* p = obj();
+        p->setProperty ("track_id", trackSym (args.getProperty ("trackId", var())));
+        if (args.hasProperty ("beforeTrackId"))
+            p->setProperty ("before_track_id", trackSym (args.getProperty ("beforeTrackId", var())));
+        return one (op ("track.move", p));
+    }
+    if (command == "set_master_volume")
+    {
+        auto* p = obj();
+        p->setProperty ("db", args.getProperty ("db", 0.0));
+        return one (op ("mixer.set_master_gain", p));
+    }
     if (command == "duplicate_clip")
     {
         auto data = result.getProperty ("data", var());
@@ -273,6 +313,8 @@ juce::var lift (const String& command, const var& args, const var& result, te::E
         p->setProperty ("grid", grid >= 1.0 ? "1/4" : grid >= 0.5 ? "1/8"
                                   : grid >= 0.25 ? "1/16" : "1/32");
         p->setProperty ("strength", args.getProperty ("strength", 1.0));
+        if (args.hasProperty ("swing"))
+            p->setProperty ("swing", args.getProperty ("swing", 0.0));   // v0.3
         return one (op ("notes.quantize", p));
     }
     if (command == "humanize_notes")

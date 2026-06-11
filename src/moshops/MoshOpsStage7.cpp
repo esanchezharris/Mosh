@@ -205,6 +205,44 @@ juce::var MoshOps::cmdUpdateNotes (const juce::var& args)
     return okResult ("update_notes", var (data));
 }
 
+// S32 (IR v0.3 notes.nudge): shift matching notes by a fixed beat offset —
+// the FL wrench-tool micro-delay, finally a first-class op.
+juce::var MoshOps::cmdNudgeNotes (const juce::var& args)
+{
+    auto* mc = findMidiClip (args.getProperty ("clipId", var()).toString());
+    if (mc == nullptr) return errResult ("nudge_notes", "no midi clip");
+    const double offset = (double) args.getProperty ("offsetBeats", 0.0);
+    if (offset == 0.0) return errResult ("nudge_notes", "offsetBeats must be non-zero");
+
+    juce::SortedSet<int> pitches;
+    if (auto pv = args.getProperty ("pitches", var()); pv.isArray())
+        for (auto& pp : *pv.getArray()) pitches.add ((int) pp);
+    const bool hasRange = args.hasProperty ("rangeStartBeats");
+    const double r0 = (double) args.getProperty ("rangeStartBeats", 0.0);
+    const double r1 = r0 + (double) args.getProperty ("rangeLengthBeats", 0.0);
+
+    undoManager().beginNewTransaction ("nudge_notes");
+    int moved = 0;
+    for (auto* n : mc->getSequence().getNotes())
+    {
+        if (! pitches.isEmpty() && ! pitches.contains (n->getNoteNumber())) continue;
+        if (hasRange)
+        {
+            const double st = n->getStartBeat().inBeats();
+            if (st < r0 || st >= r1) continue;
+        }
+        n->setStartAndLength (tracktion::BeatPosition::fromBeats (
+                                  jmax (0.0, n->getStartBeat().inBeats() + offset)),
+                              n->getLengthBeats(), &undoManager());
+        ++moved;
+    }
+    auto* data = new DynamicObject();
+    data->setProperty ("moved", moved);
+    logLine ("nudge_notes", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("nudge_notes", var (data));
+}
+
 juce::var MoshOps::cmdRemoveNotes (const juce::var& args)
 {
     auto* mc = findMidiClip (args.getProperty ("clipId", var()).toString());

@@ -2,7 +2,7 @@
 """MoshIR validator — the Python-side authority on op well-formedness.
 
 Every pipeline component (extraction, Monster, GEPA, the store importer)
-validates ops against moshir-0.2.schema.json through this module. The C++
+validates ops against moshir-0.3.schema.json through this module. The C++
 executor has its own typed validation (src/moshir/); the schema here is the
 source of truth both must agree with, and the lockstep fixtures under
 moshir/fixtures/ are replayed by both sides' test suites.
@@ -29,8 +29,8 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - exercised by repo shell gates
     jsonschema = None
 
-SCHEMA_PATH = Path(__file__).parent / "moshir-0.2.schema.json"
-IR_VERSION = "0.2"
+SCHEMA_PATH = Path(__file__).parent / "moshir-0.3.schema.json"
+IR_VERSION = "0.3"
 
 _schema: dict | None = None
 _kinds: list[str] | None = None
@@ -97,7 +97,7 @@ def _type_ok(value, expected: str) -> bool:
 
 
 def _fallback_validate(value, spec: dict, path: str = "") -> list[str]:
-    """Tiny JSON Schema subset for moshir-0.2.schema.json.
+    """Tiny JSON Schema subset for moshir-0.3.schema.json.
 
     jsonschema is still used when installed. This fallback exists so harnesses,
     the trajectory importer, and CI do not depend on a global Python package.

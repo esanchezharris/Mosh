@@ -420,5 +420,69 @@
    ]
   },
   "out": "render_main"
+ },
+ {
+  "kind": "track.move",
+  "params": {
+   "track_id": "tdrums",
+   "before_track_id": "bverb"
+  }
+ },
+ {
+  "kind": "clip.rename",
+  "params": {
+   "clip_id": "ckeys",
+   "name": "Keys Verse"
+  }
+ },
+ {
+  "kind": "notes.nudge",
+  "params": {
+   "clip_id": "ckeys",
+   "offset_beats": 0.03,
+   "pitches": [
+    "F#1"
+   ],
+   "range": {
+    "start_beats": 0,
+    "length_beats": 8
+   }
+  }
+ },
+ {
+  "kind": "mixer.mute",
+  "params": {
+   "track_id": "tdrums",
+   "on": true
+  }
+ },
+ {
+  "kind": "mixer.solo",
+  "params": {
+   "track_id": "tdrums",
+   "on": false
+  }
+ },
+ {
+  "kind": "mixer.set_master_gain",
+  "params": {
+   "db": -3.0
+  }
+ },
+ {
+  "kind": "project.set_tempo",
+  "params": {
+   "bpm": 150,
+   "at_bar": 9
+  }
+ },
+ {
+  "kind": "notes.quantize",
+  "params": {
+   "clip_id": "ckeys",
+   "grid": "1/16",
+   "strength": 1.0,
+   "swing": 0.5
+  }
  }
 ]

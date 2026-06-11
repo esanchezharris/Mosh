@@ -162,6 +162,7 @@ private:
     juce::var cmdAddNotes        (const juce::var& args);
     juce::var cmdRemoveNotes     (const juce::var& args);
     juce::var cmdUpdateNotes     (const juce::var& args);   // Stage 16: piano-roll edits
+    juce::var cmdNudgeNotes      (const juce::var& args);   // S32 / IR v0.3 notes.nudge
     juce::var cmdTransposeNotes  (const juce::var& args);
     juce::var cmdQuantizeNotes   (const juce::var& args);
     juce::var cmdHumanizeNotes   (const juce::var& args);

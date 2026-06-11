@@ -123,6 +123,8 @@ juce::var Executor::runOp (const juce::var& op, const juce::String& tutorialId)
     if (kind == "project.set_tempo")
     {
         auto* a = obj(); a->setProperty ("bpm", p.getProperty ("bpm", 0.0));
+        if (p.hasProperty ("at_bar"))
+            a->setProperty ("atBar", p.getProperty ("at_bar", 1));   // v0.3 tempo map
         auto r = run ("set_tempo", a);
         return succeeded (r) ? okOp (kind, { "set_tempo" })
                              : failOp (kind, "execute", r.getProperty ("error", "").toString());
@@ -316,6 +318,73 @@ juce::var Executor::runOp (const juce::var& op, const juce::String& tutorialId)
         return succeeded (r) ? okOp (kind, { "move_clip" })
                              : failOp (kind, "execute", r.getProperty ("error", "").toString());
     }
+    if (kind == "clip.rename")
+    {
+        const auto id = clipId(); if (id.isEmpty()) return needClip();
+        auto* a = obj();
+        a->setProperty ("clipId", id);
+        a->setProperty ("name", p.getProperty ("name", var()));
+        auto r = run ("rename_clip", a);
+        return succeeded (r) ? okOp (kind, { "rename_clip" })
+                             : failOp (kind, "execute", r.getProperty ("error", "").toString());
+    }
+    if (kind == "notes.nudge")
+    {
+        // v0.3: the FL wrench-tool micro-delay finally has its op (rung-1's
+        // oldest vocabulary gap).
+        const auto id = clipId(); if (id.isEmpty()) return needClip();
+        auto* a = obj();
+        a->setProperty ("clipId", id);
+        a->setProperty ("offsetBeats", p.getProperty ("offset_beats", 0.0));
+        if (auto pv = p.getProperty ("pitches", juce::var()); pv.isArray())
+        {
+            juce::Array<juce::var> pitches;
+            for (auto& pp : *pv.getArray()) pitches.add (parsePitch (pp));
+            a->setProperty ("pitches", pitches);
+        }
+        if (auto rv = p.getProperty ("range", juce::var()); rv.isObject())
+        {
+            a->setProperty ("rangeStartBeats", rv.getProperty ("start_beats", 0.0));
+            a->setProperty ("rangeLengthBeats", rv.getProperty ("length_beats", 0.0));
+        }
+        auto r = run ("nudge_notes", a);
+        return succeeded (r) ? okOp (kind, { "nudge_notes" }, r.getProperty ("data", juce::var()))
+                             : failOp (kind, "execute", r.getProperty ("error", "").toString());
+    }
+    if (kind == "track.move")
+    {
+        const auto id = trackId(); if (id.isEmpty()) return needTrack();
+        auto* a = obj();
+        a->setProperty ("trackId", id);
+        if (p.hasProperty ("before_track_id"))
+        {
+            auto* before = find (p.getProperty ("before_track_id", juce::var()).toString(), "track");
+            if (before == nullptr) return failOp (kind, "validate", "unbound before_track_id");
+            a->setProperty ("beforeTrackId", before->ref);
+        }
+        auto r = run ("move_track", a);
+        return succeeded (r) ? okOp (kind, { "move_track" })
+                             : failOp (kind, "execute", r.getProperty ("error", "").toString());
+    }
+    if (kind == "mixer.mute" || kind == "mixer.solo")
+    {
+        const auto id = trackId(); if (id.isEmpty()) return needTrack();
+        auto* a = obj();
+        a->setProperty ("trackId", id);
+        a->setProperty (kind == "mixer.mute" ? "mute" : "solo", p.getProperty ("on", false));
+        const auto cmdName = kind == "mixer.mute" ? "set_track_mute" : "set_track_solo";
+        auto r = run (cmdName, a);
+        return succeeded (r) ? okOp (kind, { cmdName })
+                             : failOp (kind, "execute", r.getProperty ("error", "").toString());
+    }
+    if (kind == "mixer.set_master_gain")
+    {
+        auto* a = obj();
+        a->setProperty ("db", p.getProperty ("db", 0.0));
+        auto r = run ("set_master_volume", a);
+        return succeeded (r) ? okOp (kind, { "set_master_volume" })
+                             : failOp (kind, "execute", r.getProperty ("error", "").toString());
+    }
     if (kind == "clip.duplicate")
     {
         // Stage 15: duplicate_clip landed natively — this retires the
@@ -432,6 +501,8 @@ juce::var Executor::runOp (const juce::var& op, const juce::String& tutorialId)
         a->setProperty ("clipId", id);
         a->setProperty ("gridBeats", grid);
         a->setProperty ("strength", p.getProperty ("strength", 1.0));
+        if (p.hasProperty ("swing"))
+            a->setProperty ("swing", p.getProperty ("swing", 0.0));   // v0.3
         auto r = run ("quantize_notes", a);
         return succeeded (r) ? okOp (kind, { "quantize_notes" })
                              : failOp (kind, "execute", r.getProperty ("error", "").toString());

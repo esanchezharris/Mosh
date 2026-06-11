@@ -1,5 +1,5 @@
 // MoshIR vocabulary lockstep (phase0 §3): the C++ executor's closed op list
-// (src/moshir/MoshIRVocab.h) must match moshir/moshir-0.2.schema.json exactly —
+// (src/moshir/MoshIRVocab.h) must match moshir/moshir-0.3.schema.json exactly —
 // same kinds, same order. The Python side validates against the schema file,
 // the executor validates against the header; this test is what stops them
 // drifting apart silently. MOSH_MOSHIR_DIR is injected by CMake.
@@ -21,7 +21,7 @@ static var loadJson (const String& name)
 
 static StringArray schemaKinds()
 {
-    auto schema = loadJson ("moshir-0.2.schema.json");
+    auto schema = loadJson ("moshir-0.3.schema.json");
     auto oneOf = schema["$defs"]["op"]["oneOf"];
     REQUIRE (oneOf.isArray());
     StringArray kinds;
