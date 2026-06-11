@@ -555,20 +555,22 @@ void main(){
     // tremble WITH the matter instead of floating in front of it (no DOM face).
     float sq = 1.0 - u_squash * 0.45;
     vec3 nd = normalize(hp);
-    // the mouth: a SMILE at rest; a poke (or a hard gasp) opens it to an O.
+    // the mouth: an OPEN grin by default (never a tight line) that widens AND
+    // opens on ONE continuous dial — poke, gasp and heat all push the same
+    // scaler. No shape swap, just more grin. (user note)
     {
       vec3 md = normalize(vec3(u_gaze.x * 0.26, (-0.30 + u_gaze.y * 0.15) * sq, 1.0));
       if (dot(nd, md) > 0.6) {
         vec3 mu = normalize(cross(vec3(0.0, 1.0, 0.0), md));
         vec3 mv = cross(md, mu);
-        vec2 mo = vec2(dot(nd - md, mu), dot(nd - md, mv)) * 3.4;
+        vec2 mo = vec2(dot(nd - md, mu), dot(nd - md, mv)) * 2.7;
         mo.y /= sq;                                     // the grin squashes too
-        float oAmt = clamp(u_wide * 1.2 + u_gasp * 0.8, 0.0, 1.0);
-        float r = 0.30 + 0.08 * u_heat + 0.10 * oAmt;
-        float ring = abs(length(mo) - r) - (0.085 + 0.045 * u_heat + 0.04 * oAmt);
-        float m = (1.0 - step(0.0, ring + (dth - 0.5) * 0.05))
-                * step(mo.y, -0.05 + 1.4 * oAmt);       // lower arc -> full O
-        col = mix(col, LIME * (0.75 + 0.30 * u_heat), m);
+        float o = clamp(0.22 + u_wide * 0.95 + u_gasp * 0.55 + u_heat * 0.35, 0.0, 1.35);
+        float r = 0.33 * (1.0 + 0.55 * o);              // wider...
+        float lip = -0.07 + 0.30 * o;                   // ...and more open. same shape.
+        float m = (1.0 - step(0.0, length(mo) - r + (dth - 0.5) * 0.05))
+                * (1.0 - step(lip, mo.y));              // half-moon under the lip line
+        col = mix(col, LIME * (0.72 + 0.30 * u_heat), m);
       }
     }
     float sep = 0.30 + 0.10 * u_arousal;               // wide-set when feral

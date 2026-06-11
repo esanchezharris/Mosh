@@ -120,8 +120,8 @@
     font-family: var(--font-mono); font-size: 11.5px; letter-spacing: .07em; color: var(--bone); }
   #ask input::placeholder { color: rgba(246,242,235,.26); }
   #ask input:focus { border-bottom-color: rgba(204,255,35,.6); }
-  #moshi { position: fixed; bottom: 206px; left: 18px; width: 122px; height: 110px;
-    z-index: 21; cursor: pointer; }
+  #moshi { position: fixed; left: 0; top: 0; width: 122px; height: 110px;
+    z-index: 21; cursor: pointer; will-change: transform; }
   .moshi-canvas { position: absolute; inset: 0; width: 100%; height: 100%;
     image-rendering: pixelated; }
   .moshi-face { position: absolute; left: 50%; top: 42%; pointer-events: none;
@@ -865,6 +865,7 @@ cmd.addEventListener('keydown', e => {
 const recchip = document.getElementById('recchip'), tc = document.getElementById('tc'),
       sect = document.getElementById('sect'), playbtn = document.getElementById('playbtn');
 const orbEls = [...document.querySelectorAll('#rackorbit [data-orb]')];
+const moshiHost = document.getElementById('moshi');
 function setRec(on) { rec = on; document.body.classList.toggle('rec', on); if (on) deed('punched in'); }
 recchip.onclick = () => setRec(!rec);
 addEventListener('keydown', e => {
@@ -988,20 +989,22 @@ void main(){
     // tremble WITH the matter instead of floating in front of it (no DOM face).
     float sq = 1.0 - u_squash * 0.45;
     vec3 nd = normalize(hp);
-    // the mouth: a SMILE at rest; a poke (or a hard gasp) opens it to an O.
+    // the mouth: an OPEN grin by default (never a tight line) that widens AND
+    // opens on ONE continuous dial — poke, gasp and heat all push the same
+    // scaler. No shape swap, just more grin. (user note)
     {
       vec3 md = normalize(vec3(u_gaze.x * 0.26, (-0.30 + u_gaze.y * 0.15) * sq, 1.0));
       if (dot(nd, md) > 0.6) {
         vec3 mu = normalize(cross(vec3(0.0, 1.0, 0.0), md));
         vec3 mv = cross(md, mu);
-        vec2 mo = vec2(dot(nd - md, mu), dot(nd - md, mv)) * 3.4;
+        vec2 mo = vec2(dot(nd - md, mu), dot(nd - md, mv)) * 2.7;
         mo.y /= sq;                                     // the grin squashes too
-        float oAmt = clamp(u_wide * 1.2 + u_gasp * 0.8, 0.0, 1.0);
-        float r = 0.30 + 0.08 * u_heat + 0.10 * oAmt;
-        float ring = abs(length(mo) - r) - (0.085 + 0.045 * u_heat + 0.04 * oAmt);
-        float m = (1.0 - step(0.0, ring + (dth - 0.5) * 0.05))
-                * step(mo.y, -0.05 + 1.4 * oAmt);       // lower arc -> full O
-        col = mix(col, LIME * (0.75 + 0.30 * u_heat), m);
+        float o = clamp(0.22 + u_wide * 0.95 + u_gasp * 0.55 + u_heat * 0.35, 0.0, 1.35);
+        float r = 0.33 * (1.0 + 0.55 * o);              // wider...
+        float lip = -0.07 + 0.30 * o;                   // ...and more open. same shape.
+        float m = (1.0 - step(0.0, length(mo) - r + (dth - 0.5) * 0.05))
+                * (1.0 - step(lip, mo.y));              // half-moon under the lip line
+        col = mix(col, LIME * (0.72 + 0.30 * u_heat), m);
       }
     }
     float sep = 0.30 + 0.10 * u_arousal;               // wide-set when feral
@@ -1279,6 +1282,11 @@ function frame(now) {
       const a = ANG[i] + Math.sin(tq * 0.35 + i * 2.1) * 0.022;
       el.style.transform = `translate(${(ocx + Math.cos(a) * oR).toFixed(0)}px, ${(ocy + Math.sin(a) * oR).toFixed(0)}px) translate(-50%, -50%)`;
     });
+    // THE KEEPER (consolidation preview — one WORLD, two beings): moshi tends
+    // the kiln from the stone's left base, breathing with its radius. The full
+    // single-canvas merge is weighed in concepts/one-world.md.
+    moshiHost.style.transform =
+      `translate(${(ocx - oR - 96).toFixed(0)}px, ${(ocy + 0.085 * minD).toFixed(0)}px) translate(-50%, -50%)`;
   }
   debrisFrame(t, dt);
   requestAnimationFrame(frame);
