@@ -5,33 +5,36 @@
  * full stage. This is the keeper from the design lab: the PS2-register
  * raymarched creature, with the two-channel doctrine intact:
  *
- *   FACE = the agent  (eyes, grin, ember — blink/gaze/poke/REC-heat)
+ *   FACE = the agent  (eyes, grin, ember — attention/blink/poke/REC-heat)
  *   BODY = the matter (lobes, waves, skin, veins — personality + drives)
  *
  * Body language is Blob Mixer's grammar, credited: 14islands' Blob Mixer
  * (https://blobmixer.14islands.com/, source via github.com/connorhvnsen/
  * blob-mixer) — two displacement layers (low-freq body waves + high-freq
  * surface skin) with pole/face protection, and NAMED PERSONALITIES à la its
- * Discobrain/T-1000/Slimebag presets: each family is a full material
- * (cosine palette, iridescence, clearcoat glint) + motion temperament.
- * Rendered our way: quarter-res nearest, Bayer dither, 3-band quantized
- * light, faceted normals, animation on twos. Crunch is in-shader, so the
- * look ports wherever GLSL does.
+ * Discobrain/T-1000/Slimebag presets. Limb migration, the flow bands, the
+ * mouth tilt and the tongue are steals from the user's web-Claude symbiote
+ * lab. Rendered our way: low-res nearest, Bayer dither, banded light,
+ * faceted normals, animation on twos. Crunch is in-shader, so the look
+ * ports wherever GLSL does.
  *
  * API — semantic drives, not sources. The host wires whatever it has
  * (engine meters, agent state, nothing) into the same scalars:
  *
  *   const m = Moshi(hostEl, { personality: 'TAR', seed: 0.5 });
- *   m.set('energy', v)   // 0..1  how hard the work is going (waves, veins)
- *   m.set('mood', v)     // 0..1  resting grin + liveliness
- *   m.set('heat', v)     // 0..1  REC/excitement: ember core, lime eyes
- *   m.setPersonality('GHOST' | 0.37)  // crossfades (MORPH RULE: phases are
- *                                     // integrated, endpoints are fixed)
- *   m.reroll(); m.poke(); m.lookAt(nx, ny); m.state(); m.destroy();
+ *   m.set('energy', v)        // 0..1  how hard the work is going
+ *   m.set('mood', v)          // 0..1  resting grin + liveliness
+ *   m.set('heat', v)          // 0..1  REC/excitement: ember, lime eyes
+ *   m.setState('LISTENING')   // IDLE/LISTENING/RECORDING/PAUSED/RENDERING/SLEEPING
+ *   m.celebrate()             // one-shot: a take landed
+ *   m.setPersonality('GHOST' | 0.37 [, seed] [, {snap:true}])
+ *   m.setQuality('ps2+'); m.reroll(); m.poke(); m.lookAt(nx, ny);
+ *   m.state(); m.onPersonality(fn); m.destroy();
  *
- * Interactivity (gaze/poke/drag-spin/pet + idle life: blinks, saccades,
- * antics, sleep) is built in; pass { interactive: false } to drive him
- * purely via the API.
+ * The face is ON the body: drag him around and his face goes with him —
+ * but he wants to face you, and eases home when you let go. His ATTENTION
+ * is his own: he watches the viewer by default; the cursor must earn a
+ * glance by passing near him, and sometimes he pointedly ignores it.
  */
 (function () {
 'use strict';
@@ -40,14 +43,18 @@ const FRAG = `
 precision highp float;
 uniform vec2  u_res;
 uniform float u_time, u_tq;            // smooth + 12fps-quantized time
-uniform float u_lph, u_bph, u_sph;     // INTEGRATED phases: lobes, body waves,
-                                       // surface skin (rates lerp safely in JS)
-uniform float u_rotA, u_rotB;          // orbit + wobble (stepped in JS)
+uniform float u_lph, u_bph, u_sph;     // INTEGRATED phases (rates lerp safely in JS)
+uniform vec4  u_rotM;                  // body rotation: cosA, sinA, cos(.5+B), sin(.5+B)
+uniform vec2  u_rotF;                  // face rotation:               cosB,    sinB
 uniform float u_onset;                 // poke/slam envelope
 uniform float u_energy, u_mood, u_heat;
-uniform vec2  u_gaze, u_sq;            // gaze; spring squash (x,y scale)
+uniform vec2  u_gaze, u_sq;            // gaze (face-space); spring squash (x,y)
 uniform float u_blink, u_wide, u_lid;  // blink snap, startle, sleepy droop
-uniform float u_sd, u_sd2, u_la, u_lb; // seed-derived geology (JS-resolved)
+uniform float u_sd, u_sd2;             // seed-derived texture offsets
+uniform vec3  u_L1, u_L2, u_L3;        // lobe centers — CPU-computed per frame
+uniform vec3  u_LR;                    // lobe radii   — (they're frame constants;
+                                       //  recomputing them per map() per step per
+                                       //  pixel was ~100M wasted trig ops/frame)
 uniform float u_bw, u_bf;              // body waves: amplitude, spatial freq
 uniform float u_sw, u_sf;              // surface skin: amplitude, spatial freq
 uniform float u_smink;                 // lobe goo (smin k)
@@ -55,7 +62,6 @@ uniform vec3  u_palA, u_palB, u_palD;  // iq cosine palette (family material)
 uniform float u_irid, u_glint, u_veins;
 uniform float u_scale, u_room;
 uniform float u_flow, u_flowPh;        // state channel: liquid bands (LIGHT only)
-uniform vec3  u_lshift, u_ltuck;       // lobe migration: orbit shift + transit tuck
 uniform float u_mtilt, u_inkeye;       // grin attitude; ink-faced families
 
 const vec3 LIME = vec3(0.800, 1.000, 0.137);
@@ -105,32 +111,30 @@ vec3 pal3(float t) {                 // the family material — iq cosine palett
 }
 
 float gRidge;
+mat2 gA, gB;                         // world->body mat2s, built once in main()
 float map(vec3 p) {
-  vec3 pW = p;                                       // world frame — the face lives here
-  p.xz = r2(u_rotA) * p.xz;
-  p.xy = r2(0.5 + u_rotB) * p.xy;
+  vec3 pW = p;                                       // world frame
+  p.xz = gA * p.xz;
+  p.xy = gB * p.xy;
   p.x /= u_sq.x; p.y /= u_sq.y;                      // spring squash & stretch
   p /= u_scale; pW /= u_scale;
-  // THE BODY — smin lobes, seeded per (personality, seed); drift on u_lph.
-  // u_lshift slides a lobe along its orbit (the migration steal: limbs that
-  // relocate); u_ltuck pulls it in while it travels.
+  // THE BODY — smin lobes; centers/radii arrive from the CPU (migration,
+  // tuck and orbit drift are all baked into u_L*/u_LR each frame)
   float d = length(p) - 0.345;
-  vec3 L1 = vec3( 0.25 * sin(u_sd * 6.3 + u_lph + u_lshift.x),        0.21 * cos(u_sd2 * 7.1 + u_lph * 0.8 + u_lshift.x * 0.6),  0.14 * sin(u_sd * 3.0 + u_lph));
-  vec3 L2 = vec3(-0.24 * cos(u_sd2 * 5.2 + u_lph + u_lshift.y),      -0.18 * sin(u_sd * 8.4 + u_lph * 0.6 + u_lshift.y * 0.6), -0.15);
-  vec3 L3 = vec3(-0.07 * cos(u_sd * 2.2 + u_lshift.z),               -0.23 * sin(u_sd2 * 4.7 + u_lph * 0.7 + u_lshift.z * 0.6), -0.16 * cos(u_sd * 2.2));
-  d = smin(d, length(p - L1) - (0.185 + 0.055 * u_sd2) * (1.0 - 0.22 * u_ltuck.x), u_smink);
-  d = smin(d, length(p - L2) - (0.165 + 0.050 * u_sd)  * (1.0 - 0.22 * u_ltuck.y), u_smink);
-  d = smin(d, length(p - L3) - (0.150 + 0.040 * u_sd2) * (1.0 - 0.22 * u_ltuck.z), u_smink);
+  d = smin(d, length(p - u_L1) - u_LR.x, u_smink);
+  d = smin(d, length(p - u_L2) - u_LR.y, u_smink);
+  d = smin(d, length(p - u_L3) - u_LR.z, u_smink);
   // BLOB-MIXER GRAMMAR (14islands, credited): two displacement layers with
-  // face protection (its poleAmount). Phases arrive integrated from JS.
-  float fz = 1.0 - 0.85 * smoothstep(0.40, 0.72, dot(normalize(pW), vec3(0.0, 0.0, 1.0)));
-  // layer 1 · BODY WAVES — the personality's gait; energy leans into it
-  d -= fz * u_bw * (1.0 + 0.55 * u_energy)
-     * (n3(p * u_bf + vec3(0.0, u_bph, u_sd * 4.0)) - 0.5) * 2.0;
-  // layer 2 · SURFACE SKIN — the personality's texture
-  float surf = n3(p * u_sf + vec3(u_sd2 * 7.0) + u_sph);
-  gRidge = smoothstep(0.68, 0.95, surf);
-  d -= fz * u_sw * (surf - 0.5) * 2.0;
+  // face protection (its poleAmount) — near-field only; far steps and miss
+  // rays skip the 16 hash calls (max displacement ~0.25, gate at 0.45)
+  if (d < 0.45) {
+    float fz = 1.0 - 0.85 * smoothstep(0.40, 0.72, dot(normalize(pW), vec3(0.0, 0.0, 1.0)));
+    d -= fz * u_bw * (1.0 + 0.55 * u_energy)
+       * (n3(p * u_bf + vec3(0.0, u_bph, u_sd * 4.0)) - 0.5) * 2.0;
+    float surf = n3(p * u_sf + vec3(u_sd2 * 7.0) + u_sph);
+    gRidge = smoothstep(0.68, 0.95, surf);
+    d -= fz * u_sw * (surf - 0.5) * 2.0;
+  }
   d = max(d, length(p) - 0.80);                      // bound: one being
   return d * u_scale * min(u_sq.x, u_sq.y) * 0.9;    // squash-safe step
 }
@@ -141,6 +145,8 @@ vec3 normalAt(vec3 p) {
 }
 
 void main() {
+  gA = mat2(u_rotM.x, -u_rotM.y, u_rotM.y, u_rotM.x);
+  gB = mat2(u_rotM.z, -u_rotM.w, u_rotM.w, u_rotM.z);
   vec2 uv = (gl_FragCoord.xy - 0.5 * u_res) / min(u_res.x, u_res.y);
   float dth = bayer(gl_FragCoord.xy);
 
@@ -152,7 +158,7 @@ void main() {
     hp = ro + rd * t;
     float dl = map(hp);
     if (dl < dm) { dm = dl; bp = hp; }
-    if (dl < 0.003) { hit = true; break; }
+    if (dl < 0.0025 + 0.0012 * t) { hit = true; break; }  // eps grows with t (LOD)
     t += dl * 0.85;                 // displaced field is not quite Lipschitz
     if (t > 5.0) break;
   }
@@ -181,7 +187,6 @@ void main() {
   }
   vec4 outc = vec4(room, u_room);
   if (hit) {
-    map(hp);
     vec3 n0 = normalAt(hp);                          // smooth — rim/silhouette only
     vec3 n = normalize(floor(n0 * 2.5 + 0.5) / 2.5); // FACETS: calm low-poly planes
     vec3 nd = normalize(hp);
@@ -207,13 +212,12 @@ void main() {
     // fres fires on interior planes and rains dither over the whole body)
     col += mix(LIME, pal3(gt + 0.5), 0.6) * step(0.55, fres + dth * 0.07) * 0.15;
     // VEINS — always lime: the one brand constant on the body. Iso-curves of a
-    // noise field in BODY space (noise keeps gradient nearly everywhere, so the
-    // curves stay thin; the old kifs-crack field sat flat in wide basins and any
-    // threshold dithered into body-wide lattice rain). Shards = beads where a
+    // noise field in BODY space (noise keeps gradient nearly everywhere; flat
+    // fold-fields dither into body-wide lattice rain). Shards = beads where a
     // second field peaks along a vein.
     vec3 bs = hp;
-    bs.xz = r2(u_rotA) * bs.xz;
-    bs.xy = r2(0.5 + u_rotB) * bs.xy;
+    bs.xz = gA * bs.xz;
+    bs.xy = gB * bs.xy;
     bs /= u_scale;
     float f1 = n3(bs * 3.2 + vec3(u_sd * 9.0, u_lph * 0.15, u_sd2 * 5.0));
     float f2 = n3(bs * 5.0 + vec3(u_sd2 * 7.0, 0.0, u_lph * 0.10));
@@ -231,7 +235,12 @@ void main() {
       col += mix(LIME, pal3(gt + 0.35), 0.45)
            * (floor(fb * 2.0 + dth * 0.7) / 2.0) * 0.35 * u_flow;
     }
-    // ── THE AGENT CHANNEL: the face. View-anchored — he always faces the room.
+    // ── THE AGENT CHANNEL: the face — ON THE BODY. Drag him and the face goes
+    // with him (bd = direction in the dynamic body frame); JS homes the body
+    // back to face the room, and the eyes counter-rotate to hold your gaze.
+    vec3 bd = nd;
+    bd.xz = gA * bd.xz;
+    bd.xy = mat2(u_rotF.x, -u_rotF.y, u_rotF.y, u_rotF.x) * bd.xy;
     float sq = 1.0 - 0.10 * u_onset;
     float lidv = max(u_blink, u_lid * 0.82);
     float eyeY = max(0.08, (1.0 + 0.35 * smoothstep(0.4, 1.0, u_heat))
@@ -242,20 +251,20 @@ void main() {
     for (int e = 0; e < 2; e++) {
       float s = (e == 0) ? -1.0 : 1.0;
       vec3 ed = normalize(vec3(s * 0.30 + u_gaze.x * 0.22, (0.20 + u_gaze.y * 0.16) * sq, 1.0));
-      if (dot(nd, ed) < 0.6) continue;
+      if (dot(bd, ed) < 0.6) continue;
       vec3 uu = normalize(cross(vec3(0.0, 1.0, 0.0), ed));
       vec3 vv = cross(ed, uu);
-      vec2 o = vec2(dot(nd - ed, uu), dot(nd - ed, vv)) * 3.7;
+      vec2 o = vec2(dot(bd - ed, uu), dot(bd - ed, vv)) * 3.7;
       o.y /= eyeY;
       float ch = chevron(o * 1.6, -s);
       col = mix(col, eyeCol, 1.0 - step(0.20 + (dth - 0.5) * 0.10, ch));
     }
     {                                                // the grin dial — one scaler
       vec3 md = normalize(vec3(u_gaze.x * 0.26, (-0.30 + u_gaze.y * 0.15) * sq, 1.0));
-      if (dot(nd, md) > 0.6) {
+      if (dot(bd, md) > 0.6) {
         vec3 mu = normalize(cross(vec3(0.0, 1.0, 0.0), md));
         vec3 mv = cross(md, mu);
-        vec2 mo = vec2(dot(nd - md, mu), dot(nd - md, mv)) * 2.35;
+        vec2 mo = vec2(dot(bd - md, mu), dot(bd - md, mv)) * 2.35;
         mo = r2(u_mtilt) * mo;                       // attitude: the family lean
         mo.y /= sq;
         float o2 = clamp(0.10 + 0.42 * u_mood + u_wide * 0.95 + u_onset * 0.18 + u_heat * 0.35, 0.0, 1.35);
@@ -283,8 +292,6 @@ const VERT = 'attribute vec2 a; void main(){ gl_Position = vec4(a, 0.0, 1.0); }'
 // ── PERSONALITIES — Blob Mixer's named-preset move, in our register.
 // Each family = material (palette/irid/glint/veins) + displacement voice
 // (bw/bf body waves · sw/sf surface skin · smin goo) + temperament.
-// Translated from real Blob Mixer preset ranges (distort 0–0.7 low-freq,
-// surfaceDistort 0–10 high-freq), scaled to our SDF units.
 const FAMILIES = {
   TAR:    { // the canonical Moshi — obsidian, lime-veined. where he started.
     bw: 0.030, bf: 1.8, bsp: 0.45, sw: 0.045, sf: 5.5, ssp: 0.35, k: 0.17,
@@ -350,7 +357,7 @@ function makeSpec(name, seed) {
     bw: j(F.bw, 0.15), bf: j(F.bf, 0.12), bsp: j(F.bsp, 0.15),
     sw: j(F.sw, 0.15), sf: j(F.sf, 0.12), ssp: j(F.ssp, 0.15),
     k: j(F.k, 0.10), scale: j(F.scale, 0.04),
-    sd: h(11), sd2: h(12), la: (h(13) - 0.5) * 0.4, lb: (h(14) - 0.5) * 0.4,
+    sd: h(11), sd2: h(12),
     palA: F.palA.slice(), palB: F.palB.slice(),
     palD: F.palD.map(d => d + (h(15) - 0.5) * 0.06),
     irid: F.irid, glint: F.glint, veins: F.veins,
@@ -360,7 +367,7 @@ function makeSpec(name, seed) {
     spin: F.spin, tempo: F.tempo,
   };
 }
-const NUMS = ['bw','bf','bsp','sw','sf','ssp','k','scale','sd','sd2','la','lb',
+const NUMS = ['bw','bf','bsp','sw','sf','ssp','k','scale','sd','sd2',
   'irid','glint','veins','tilt','ink','restless',
   'blink','sacc','antic','springK','springD','breathe','spin','tempo'];
 function lerpSpec(a, b, w) {
@@ -370,11 +377,11 @@ function lerpSpec(a, b, w) {
     o[k] = a[k].map((v, i) => v + (b[k][i] - v) * w);
   return o;
 }
-const UNIFS = ['u_res','u_time','u_tq','u_lph','u_bph','u_sph','u_rotA','u_rotB',
+const UNIFS = ['u_res','u_time','u_tq','u_lph','u_bph','u_sph','u_rotM','u_rotF',
   'u_onset','u_energy','u_mood','u_heat','u_gaze','u_sq','u_blink','u_wide','u_lid',
-  'u_sd','u_sd2','u_la','u_lb','u_bw','u_bf','u_sw','u_sf','u_smink',
+  'u_sd','u_sd2','u_L1','u_L2','u_L3','u_LR','u_bw','u_bf','u_sw','u_sf','u_smink',
   'u_palA','u_palB','u_palD','u_irid','u_glint','u_veins','u_scale','u_room',
-  'u_flow','u_flowPh','u_lshift','u_ltuck','u_mtilt','u_inkeye'];
+  'u_flow','u_flowPh','u_mtilt','u_inkeye'];
 
 // ── THE CONSOLE DIAL — PS1 swims, PS2 holds. Resolution up, wobble down:
 // vertex swim is the PS1 tell; the PS2 had subpixel-stable geometry.
@@ -395,10 +402,13 @@ const STATES = {
   SLEEPING:  { mood: 0.50, heat: 0.0, flow: 0.00, frate: 0.0, tempo: 0.30, antics: 0.0,  lid: 0.85, blink: 0.00, gaze: 'wander' },
 };
 
+const TAU = Math.PI * 2;
+const clamp1 = v => Math.max(-1, Math.min(1, v));
+
 function Moshi(host, opts = {}) {
   const O = Object.assign({
     personality: 'TAR', seed: 0.5, interactive: true, room: false,
-    quality: 'ps2', resDiv: null, maxW: null, maxH: null,
+    quality: 'ps2', resDiv: null, maxW: null, maxH: null, preserve: false,
   }, opts);
 
   const cv = document.createElement('canvas');
@@ -407,7 +417,13 @@ function Moshi(host, opts = {}) {
 
   let gl = null, prog = null, U = {}, dead = false;
   function initGL() {
-    gl = cv.getContext('webgl', { antialias: false, alpha: true, premultipliedAlpha: false, preserveDrawingBuffer: true });
+    // opaque when he owns the frame (room mode) — cheaper composite; alpha
+    // only for embeds. preserveDrawingBuffer defeats tile-discard on Apple
+    // Silicon — off unless a harness asks (opts.preserve) to sample pixels.
+    gl = cv.getContext('webgl', {
+      antialias: false, alpha: !O.room, premultipliedAlpha: false,
+      preserveDrawingBuffer: !!O.preserve,
+    });
     if (!gl) throw new Error('moshi: webgl unavailable');
     const sh = (ty, src) => {
       const s = gl.createShader(ty);
@@ -434,7 +450,12 @@ function Moshi(host, opts = {}) {
   cv.addEventListener('webglcontextlost', e => e.preventDefault());
   cv.addEventListener('webglcontextrestored', () => { if (!dead) initGL(); });
 
+  let cvRect = null;                  // cached — a getBoundingClientRect in the
+  function rect() {                   // hot path forces layout mid-frame
+    return cvRect || (cvRect = cv.getBoundingClientRect());
+  }
   function resize() {
+    cvRect = null;
     const Q = QUALITY[O.quality] || QUALITY['ps2'];
     const div = O.resDiv != null ? O.resDiv : Q.div;
     const r = host.getBoundingClientRect();
@@ -445,6 +466,8 @@ function Moshi(host, opts = {}) {
   }
   const rob = new ResizeObserver(resize);
   rob.observe(host);
+  const onScroll = () => { cvRect = null; };
+  addEventListener('scroll', onScroll, { passive: true, capture: true });
 
   // ── state ──
   let from = makeSpec(O.personality, O.seed),
@@ -457,10 +480,50 @@ function Moshi(host, opts = {}) {
   let onsetEnv = 0, blink = 0, wide = 0, lid = 0, lidT = 0;
   let sy = 1, vy = 0;                          // squash spring
   let gaze = { x: 0, y: 0 }, gazeT = { x: 0, y: 0 }, lookHold = 0;
-  let ptrAt = 0, ptrX = 0, ptrY = 0, idleT = 0;
+  let ptrAt = 0, ptrX = 0, ptrY = 0, prevPX = 0, prevPY = 0, idleT = 0;
   let petting = false, petCand = null, dragAt = null, dragged = false;
   let anticT = 4 + Math.random() * 8, stretchT = 0, shiverT = 0;
   let onChange = O.onPersonality || null;
+
+  // ── ATTENTION — he watches YOU by default; the cursor must EARN a glance
+  // (pass near him with speed), and sometimes he pointedly ignores it.
+  let att = 'viewer', attT = 0, interest = 0, habit = 1, ignoreUntil = 0;
+  let sacV = 0;                                // ballistic saccade burst (~90ms)
+  let microT = 0.8;                            // micro-saccade jitter timer
+  let headFT = 0, headFX = 0, headFY = 0;      // eyes lead, body follows ~150ms
+  let lastBlinkAt = 0;
+  function fireBlink() {
+    const now = performance.now();
+    if (now - lastBlinkAt < 600) return;       // punctuation, not stutter
+    lastBlinkAt = now;
+    blink = 1;
+  }
+  // a real saccade is ballistic: snap, land, HOLD. Drift reads dead.
+  function saccadeTo(x, y, hold) {
+    gazeT.x = clamp1(x); gazeT.y = clamp1(y);
+    lookHold = hold;
+    sacV = 1;
+    const ecc = Math.hypot(gazeT.x - gaze.x, gazeT.y - gaze.y);
+    if (ecc > 0.55) {
+      if (Math.random() < 0.7) fireBlink();    // gaze-evoked blink
+      headFT = 0.15; headFX = gazeT.x; headFY = gazeT.y;   // head follows later
+    }
+  }
+  function retargetIdleGaze() {
+    let tx, ty;
+    if (st.gaze === 'you') { tx = (Math.random() - 0.5) * 0.22; ty = 0.08 + (Math.random() - 0.5) * 0.14; }
+    else if (st.gaze === 'low') { tx = (Math.random() - 0.5) * 0.5; ty = -0.5 + (Math.random() - 0.5) * 0.2; }
+    else {
+      const r = Math.random();                 // center-biased wander: mostly you,
+      if (r < 0.6)      { tx = (Math.random() - 0.5) * 0.3; ty = 0.06 + (Math.random() - 0.5) * 0.18; }
+      else if (r < 0.9) { tx = (Math.random() - 0.5) * 0.9; ty = (Math.random() - 0.5) * 0.55; }
+      else              { tx = (Math.random() < 0.5 ? -1 : 1) * (0.7 + Math.random() * 0.3); ty = (Math.random() - 0.5) * 0.7; }
+    }
+    // scan paths correlate; far darts hold SHORT, home fixations hold LONG
+    const nx = gazeT.x * 0.25 + tx * 0.75, ny = gazeT.y * 0.25 + ty * 0.75;
+    const ecc = Math.hypot(nx, ny);
+    saccadeTo(nx, ny, (ecc > 0.6 ? 0.5 + Math.random() : 2 + Math.random() * 3) / Math.max(0.3, cur.sacc));
+  }
 
   // agent state: behavior bundle + the flow light (phase integrated — MORPH RULE)
   let stName = 'IDLE', st = STATES.IDLE, autoSlept = false;
@@ -468,6 +531,7 @@ function Moshi(host, opts = {}) {
   function setStateRaw(n) {
     stName = n; st = STATES[n]; autoSlept = false;
     drives.mood = st.mood; drives.heat = st.heat;   // baselines; hosts may override
+    if (n === 'LISTENING' || n === 'RECORDING') fireBlink();  // acknowledgment
   }
 
   // the migration steal: lobes that relocate — shift slides a lobe along its
@@ -482,20 +546,27 @@ function Moshi(host, opts = {}) {
     else [0, 1, 2].forEach(i => go(i, lmb[i].s + (Math.random() - 0.5) * 0.9));            // scatter
   }
 
-  // ── idle life: blink on a life timer ──
+  // ── idle life: blink on a life timer (events suppress it briefly) ──
   let blinkTimer = null;
   (function blinkLoop() {
     blinkTimer = setTimeout(() => {
-      if (st.blink > 0) { blink = 1; if (Math.random() < 0.18) setTimeout(() => { blink = 1; }, 240); }
+      if (st.blink > 0) { fireBlink(); if (Math.random() < 0.18) setTimeout(() => { blink = 1; }, 240); }
       blinkLoop();
     }, (1700 + Math.random() * 4200) / Math.max(0.25, cur.blink * Math.max(0.05, st.blink)));
   })();
 
-  // ── interaction: gaze, poke, drag-spin, pet-and-hold ──
+  // ── interaction: attention, poke, drag-spin, pet-and-hold ──
+  function ptrDD() {                  // cursor distance from his center, in radii
+    const R = rect();
+    const m = Math.min(R.width, R.height) || 1;
+    return Math.hypot(ptrX - (R.left + R.width / 2), ptrY - (R.top + R.height / 2)) / (0.5 * m);
+  }
   function wake(startle) {
     if (stName === 'SLEEPING' && autoSlept) {
+      const dd = ptrDD();
+      if (startle && dd > 1.6) return;          // a far-off cursor doesn't bolt him awake
       setStateRaw('IDLE');
-      if (startle) { wide = 0.7; blink = 1; }
+      if (startle) { wide = 0.7 * Math.max(0.3, 1.4 - dd * 0.7); fireBlink(); }
     }
     idleT = 0;
   }
@@ -515,7 +586,7 @@ function Moshi(host, opts = {}) {
     }
   };
   const onDown = e => {
-    wake(true);
+    wake(true); idleT = 0;
     dragAt = [e.clientX, e.clientY]; dragged = false;
     petCand = { x: e.clientX, y: e.clientY, t: performance.now() };
   };
@@ -529,6 +600,9 @@ function Moshi(host, opts = {}) {
     addEventListener('pointerup', onUp);
     cv.style.cursor = 'grab';
   }
+
+  // poke escalation bookkeeping
+  let pokeN = 0, pokeAt = 0, annoyT = 0;
 
   // ── the loop ──
   let raf = 0, t0 = performance.now(), last = t0;
@@ -546,10 +620,11 @@ function Moshi(host, opts = {}) {
     }
     for (const k in drives) dCur[k] += (drives[k] - dCur[k]) * Math.min(1, dt * 6);
 
-    // sleep: ignored long enough in IDLE, he drifts off. any touch wakes him.
+    // sleep: ignored long enough in IDLE, he drifts off. a NEAR touch wakes him.
     idleT += dt;
     if (O.interactive && stName === 'IDLE' && idleT > 45) { setStateRaw('SLEEPING'); autoSlept = true; }
-    lidT = Math.max(st.lid, petting ? 0.65 : 0);
+    annoyT = Math.max(0, annoyT - dt);
+    lidT = Math.max(st.lid, petting ? 0.65 : 0, annoyT > 0 ? 0.45 : 0);
     lid += (lidT - lid) * Math.min(1, dt * 3.5);
     const tScale = st.tempo * (petting ? 0.6 : 1.0);
     // the state's light: amount eases, phase integrates
@@ -573,41 +648,71 @@ function Moshi(host, opts = {}) {
                   * Math.sin(t * (stName === 'SLEEPING' ? 1.1 : 1.9));
     const sx = 1 / Math.sqrt(syF);
 
-    // gaze: follow the cursor when it's alive; wander on saccades when not
-    const fresh = O.interactive && (performance.now() - ptrAt < 2800);
-    if (fresh) {
-      const r = cv.getBoundingClientRect();
-      const cx = r.left + r.width / 2, cyy = r.top + r.height / 2;
-      const m = Math.min(r.width, r.height);
-      gazeT.x = Math.max(-1, Math.min(1, (ptrX - cx) / (0.6 * m)));
-      gazeT.y = Math.max(-1, Math.min(1, (cyy - ptrY) / (0.6 * m)));
-      // proximity affection: lean the grin open as the cursor comes close
-      const dd = Math.hypot(ptrX - cx, ptrY - cyy) / m;
-      drives.mood = Math.max(drives.mood, Math.min(0.92, 0.55 + 0.45 * (1 - Math.min(1, dd))));
-    } else {
-      lookHold -= dt;
-      if (lookHold <= 0 && stName !== 'SLEEPING') {
-        if (st.gaze === 'you') {             // attentive: he holds the room's eye
-          gazeT.x = (Math.random() - 0.5) * 0.25;
-          gazeT.y = 0.08 + (Math.random() - 0.5) * 0.15;
-        } else if (st.gaze === 'low') {      // paused: eyes drift down, waiting
-          gazeT.x = (Math.random() - 0.5) * 0.5;
-          gazeT.y = -0.5 + (Math.random() - 0.5) * 0.2;
-        } else {
-          gazeT.x = (Math.random() - 0.5) * 1.1;
-          gazeT.y = (Math.random() - 0.5) * 0.8;
-        }
-        lookHold = (1.4 + Math.random() * 3.0) / Math.max(0.3, cur.sacc);
-      }
-      if (!petting) drives.mood += (st.mood - drives.mood) * Math.min(1, dt * 0.5);
+    // ── ATTENTION ──
+    lookHold -= dt;
+    const live = O.interactive && (now - ptrAt < 150);
+    let dd = 9;
+    if (live) {
+      dd = ptrDD();
+      const spd = Math.hypot(ptrX - prevPX, ptrY - prevPY) / Math.max(dt, 1e-3);  // px/s
+      // interest builds only when the cursor moves NEAR him; habit dulls it
+      interest += dt * Math.min(3, spd * 0.0035) * Math.max(0, 1.3 - dd) * habit;
     }
-    const gs = Math.min(1, dt * (stName === 'SLEEPING' ? 1.2 : 5.5) * cur.sacc);
+    prevPX = ptrX; prevPY = ptrY;
+    interest *= Math.pow(0.25, dt);
+    // habituation: a cursor that camps next to him stops being news
+    habit = Math.max(0.3, Math.min(1, habit + dt * (live && dd < 1.0 ? -0.12 : 0.2)));
+    // proximity affection — habituated, two-way (no more frozen grin)
+    if (!petting) {
+      const prox = Math.max(0, 1 - Math.min(1, dd));
+      const moodT = Math.min(1, st.mood + 0.35 * prox * habit);
+      drives.mood += (moodT - drives.mood) * Math.min(1, dt * 1.2);
+    }
+    if (att === 'viewer') {
+      if (interest > 0.5 && now > ignoreUntil && stName !== 'SLEEPING' && !dragAt) {
+        interest = 0;
+        if (Math.random() < 0.75) {            // glance at it…
+          att = 'cursor'; attT = 0.5 + Math.random() * 1.0;
+          fireBlink(); sacV = 1;
+        } else {                               // …or pointedly not. (the snub
+          ignoreUntil = now + 1500;            //  is what sells sentience)
+          fireBlink();
+        }
+      }
+      if (lookHold <= 0 && stName !== 'SLEEPING') retargetIdleGaze();
+      // micro-saccades during holds — a perfectly still eye is a dead eye
+      microT -= dt;
+      if (microT <= 0) {
+        microT = 0.6 + Math.random() * 0.9;
+        gazeT.x = clamp1(gazeT.x + (Math.random() - 0.5) * 0.06);
+        gazeT.y = clamp1(gazeT.y + (Math.random() - 0.5) * 0.06);
+      }
+    } else if (att === 'cursor') {
+      const R = rect();
+      const m = Math.min(R.width, R.height) || 1;
+      gazeT.x = clamp1((ptrX - (R.left + R.width / 2)) / (0.6 * m));
+      gazeT.y = clamp1(((R.top + R.height / 2) - ptrY) / (0.6 * m));
+      attT -= dt;
+      if (attT <= 0 || dd > 1.8) {             // seen it. back to YOU.
+        att = 'viewer';
+        saccadeTo(0, 0.06, 1.2 + Math.random() * 2);
+        ignoreUntil = now + 2000 + Math.random() * 4000;
+      }
+    }
+    // ballistic saccades: a ~90ms fast burst, then settle and HOLD
+    sacV *= Math.pow(0.001, dt);
+    const gs = Math.min(1, dt * (stName === 'SLEEPING' ? 1.2 : (att === 'cursor' ? 5.5 : 4.0 + 22 * sacV)) * cur.sacc);
     gaze.x += (gazeT.x - gaze.x) * gs;
     gaze.y += (gazeT.y - gaze.y) * gs;
+    // eyes lead, the body follows a beat later
+    if (headFT > 0) {
+      headFT -= dt;
+      if (headFT <= 0) { rotTA += headFX * 0.09; rotTB += -headFY * 0.035; }
+    }
 
-    // pet-and-hold: a long still press becomes a purr
-    if (petCand && !petting && performance.now() - petCand.t > 550) {
-      petting = true; wide = 0; drives.mood = 1;
+    // pet-and-hold: a long still press becomes a purr (and forgives pokes)
+    if (petCand && !petting && now - petCand.t > 550) {
+      petting = true; wide = 0; drives.mood = 1; annoyT = 0; pokeN = 0;
     }
     if (petting) { drives.mood = 1; rotTB += Math.sin(t * 9) * 0.0014; }
 
@@ -618,8 +723,8 @@ function Moshi(host, opts = {}) {
       const r = Math.random();
       if (r < 0.3) shiverT = 0.5;
       else if (r < 0.55) stretchT = 1.1;
-      else if (r < 0.8) { gazeT.x = (Math.random() < 0.5 ? -1 : 1) * 0.9; gazeT.y = 0.5; lookHold = 1.4; }
-      else { rotTA += (Math.random() - 0.5) * 2.2; blink = 1; }
+      else if (r < 0.8) saccadeTo((Math.random() < 0.5 ? -1 : 1) * 0.9, 0.5, 1.4);
+      else { rotTA += (Math.random() - 0.5) * 2.2; fireBlink(); }
     }
     shiverT = Math.max(0, shiverT - dt);
     stretchT = Math.max(0, stretchT - dt);
@@ -643,24 +748,42 @@ function Moshi(host, opts = {}) {
       shiftV[i] = L.s;
     }
 
-    // idle drift + drag inertia
-    rotTA += dt * cur.spin * tScale + spinV * dt;
+    // he WANTS to face you: drag/antics swing him away, he eases home
+    // (the face is on the body now — homing is what keeps it findable)
+    if (!dragAt) {
+      const home = Math.round(rotTA / TAU) * TAU;
+      const swayA = Math.sin(t * 0.4) * (0.05 + cur.spin * 0.6);
+      const swayB = Math.sin(t * 0.27) * 0.04;
+      rotTA += (home + swayA - rotTA) * Math.min(1, dt * 1.1);
+      rotTB += (swayB - rotTB) * Math.min(1, dt * 1.1);
+    }
+    rotTA += spinV * dt;
     spinV *= Math.pow(0.12, dt);
     onsetEnv *= Math.pow(0.04, dt);
     blink *= Math.pow(0.0008, dt);
     wide *= Math.pow(0.15, dt);
 
-    // on twos: rotation ease, PS1 wobble, texture clock — 12fps, carved
+    // rotation eases at FULL frame rate — easing it on the 12fps clock made
+    // mouse drags render as dropped frames no matter how fast the GPU was.
+    // The wobble and texture clock stay on twos: the crunch is a look, the
+    // pose update rate is not.
+    const rk = 1 - Math.pow(0.04, dt);
+    rotA += (rotTA - rotA) * rk;
+    rotB += (rotTB - rotB) * rk;
     if (t - lastTick > 1 / 12) {
       lastTick = t;
-      rotA += (rotTA - rotA) * 0.26;
-      rotB += (rotTB - rotB) * 0.26;
       const wAmp = ((0.005 + 0.010 * dCur.energy) * (stName === 'SLEEPING' ? 0.3 : 1)
                  + (shiverT > 0 ? 0.05 : 0)) * (QUALITY[O.quality] || QUALITY['ps2']).wob;
       wobA = (Math.random() - 0.5) * wAmp;
       wobB = (Math.random() - 0.5) * wAmp;
       tq = t;
     }
+
+    // CPU-side frame constants (were recomputed per map() per step per pixel)
+    const sd = cur.sd, sd2 = cur.sd2;
+    const s1 = shiftV[0], s2 = shiftV[1], s3 = shiftV[2];
+    const lA = rotA + wobA;
+    const lB = rotB + wobB + (st.nod ? Math.sin(t * 2.1) * 0.02 : 0);
 
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
@@ -670,21 +793,33 @@ function Moshi(host, opts = {}) {
     gl.uniform1f(U.u_lph, lph);
     gl.uniform1f(U.u_bph, bph);
     gl.uniform1f(U.u_sph, sph);
-    gl.uniform1f(U.u_rotA, rotA + wobA);
-    gl.uniform1f(U.u_rotB, rotB + wobB + (st.nod ? Math.sin(t * 2.1) * 0.02 : 0));
+    gl.uniform4f(U.u_rotM, Math.cos(lA), Math.sin(lA), Math.cos(0.5 + lB), Math.sin(0.5 + lB));
+    gl.uniform2f(U.u_rotF, Math.cos(lB), Math.sin(lB));
     gl.uniform1f(U.u_onset, onsetEnv);
     gl.uniform1f(U.u_energy, Math.min(1, dCur.energy + celebE));
     gl.uniform1f(U.u_mood, dCur.mood);
     gl.uniform1f(U.u_heat, dCur.heat);
-    gl.uniform2f(U.u_gaze, gaze.x, gaze.y);
+    // the eyes counter-rotate to hold YOUR gaze while the body is swung away
+    {
+      const wrapA = Math.atan2(Math.sin(rotA), Math.cos(rotA));
+      gl.uniform2f(U.u_gaze, clamp1(gaze.x - wrapA * 0.55), clamp1(gaze.y + rotB * 0.45));
+    }
     gl.uniform2f(U.u_sq, sx, syF);
     gl.uniform1f(U.u_blink, Math.min(1, blink));
     gl.uniform1f(U.u_wide, Math.min(1, wide));
     gl.uniform1f(U.u_lid, lid);
-    gl.uniform1f(U.u_sd, cur.sd);
-    gl.uniform1f(U.u_sd2, cur.sd2);
-    gl.uniform1f(U.u_la, cur.la);
-    gl.uniform1f(U.u_lb, cur.lb);
+    gl.uniform1f(U.u_sd, sd);
+    gl.uniform1f(U.u_sd2, sd2);
+    gl.uniform3f(U.u_L1,
+       0.25 * Math.sin(sd * 6.3 + lph + s1),  0.21 * Math.cos(sd2 * 7.1 + lph * 0.8 + s1 * 0.6),  0.14 * Math.sin(sd * 3.0 + lph));
+    gl.uniform3f(U.u_L2,
+      -0.24 * Math.cos(sd2 * 5.2 + lph + s2), -0.18 * Math.sin(sd * 8.4 + lph * 0.6 + s2 * 0.6), -0.15);
+    gl.uniform3f(U.u_L3,
+      -0.07 * Math.cos(sd * 2.2 + s3),        -0.23 * Math.sin(sd2 * 4.7 + lph * 0.7 + s3 * 0.6), -0.16 * Math.cos(sd * 2.2));
+    gl.uniform3f(U.u_LR,
+      (0.185 + 0.055 * sd2) * (1 - 0.22 * tuckV[0]),
+      (0.165 + 0.050 * sd)  * (1 - 0.22 * tuckV[1]),
+      (0.150 + 0.040 * sd2) * (1 - 0.22 * tuckV[2]));
     gl.uniform1f(U.u_bw, cur.bw);
     gl.uniform1f(U.u_bf, cur.bf);
     gl.uniform1f(U.u_sw, cur.sw);
@@ -700,9 +835,7 @@ function Moshi(host, opts = {}) {
     gl.uniform1f(U.u_room, O.room ? 1 : 0);
     gl.uniform1f(U.u_flow, flowA);
     gl.uniform1f(U.u_flowPh, flowPh);
-    gl.uniform3f(U.u_lshift, shiftV[0], shiftV[1], shiftV[2]);
-    gl.uniform3f(U.u_ltuck, tuckV[0], tuckV[1], tuckV[2]);
-    gl.uniform1f(U.u_mtilt, cur.tilt * (0.5 + 0.5 * dCur.mood));
+    gl.uniform1f(U.u_mtilt, cur.tilt * (0.5 + 0.5 * dCur.mood) - (annoyT > 0 ? 0.22 : 0));
     gl.uniform1f(U.u_inkeye, cur.ink);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     raf = requestAnimationFrame(frame);
@@ -739,7 +872,7 @@ function Moshi(host, opts = {}) {
       celebT = 1.5; celebE = 1;
       wide = 1; vy -= 5.2;
       rotTA += (Math.random() - 0.5) * 1.6;
-      setTimeout(() => { if (!dead) { vy -= 3.0; blink = 1; } }, 380);
+      setTimeout(() => { if (!dead) { vy -= 3.0; fireBlink(); } }, 380);
       wake(false);
       return api;
     },
@@ -749,14 +882,55 @@ function Moshi(host, opts = {}) {
       resize();
       return api;
     },
+    // a poke is a CONVERSATION, not a button: five reactions, personality-
+    // weighted, escalating to annoyance when you spam him. Petting forgives.
     poke() {
-      onsetEnv = Math.min(1.2, onsetEnv + 0.8);
-      wide = 1; vy -= 4.2; wake(false);
-      rotTA += (Math.random() - 0.5) * 0.7;
+      const now = performance.now();
+      pokeN = now - pokeAt < 4000 ? pokeN + 1 : 1;
+      pokeAt = now;
+      wake(false); idleT = 0;
+      const R = rect();
+      const m = Math.min(R.width, R.height) || 1;
+      const px = clamp1((ptrX - (R.left + R.width / 2)) / (0.6 * m));
+      const py = clamp1(((R.top + R.height / 2) - ptrY) / (0.6 * m));
+      if (pokeN >= 5) {                          // DONE WITH YOU.
+        annoyT = 4;
+        drives.mood = 0.15;
+        shiverT = 0.45;
+        saccadeTo(px > 0 ? -0.8 : 0.8, -0.2, 2.5);     // pointedly away
+        rotTA += px > 0 ? -0.5 : 0.5;
+        ignoreUntil = now + 6000;
+        return api;
+      }
+      if (pokeN >= 3) {                          // genuinely startled now
+        wide = 1; vy -= 5.5; onsetEnv = Math.min(1.2, onsetEnv + 1.0);
+        fireBlink(); setTimeout(() => { if (!dead) blink = 1; }, 220);
+        rotTA += (Math.random() - 0.5) * 1.0;
+        return api;
+      }
+      const r = Math.random() * (0.85 + 0.45 * cur.antic);  // temperament weights the menu
+      if (r < 0.35) {                            // classic startle-hop
+        onsetEnv = Math.min(1.2, onsetEnv + 0.8); wide = 1; vy -= 4.2;
+        rotTA += (Math.random() - 0.5) * 0.7;
+      } else if (r < 0.6) {                      // squash-oof: compress, double-blink
+        vy += 4.5; onsetEnv = Math.min(1.2, onsetEnv + 0.6);
+        fireBlink(); setTimeout(() => { if (!dead) blink = 1; }, 200);
+      } else if (r < 0.85) {                     // double-take: the spot, then YOU
+        vy -= 1.5;
+        saccadeTo(px, py, 0.38);
+        setTimeout(() => {
+          if (dead) return;
+          saccadeTo(0, 0.06, 1.5); wide = 0.6; fireBlink();
+        }, 380);
+      } else {                                   // delight-bounce: tongue out
+        vy -= 3.5; wide = 0.9; celebE = Math.max(celebE, 0.5);
+        drives.mood = 1;
+        rotTA += (Math.random() - 0.5) * 1.2;
+      }
       return api;
     },
-    lookAt(nx, ny) { gazeT.x = Math.max(-1, Math.min(1, nx)); gazeT.y = Math.max(-1, Math.min(1, ny)); lookHold = 2; return api; },
-    state() { return { personality: to.name, seed: to.seed, state: stName, quality: O.quality, petting, drives: Object.assign({}, drives) }; },
+    lookAt(nx, ny) { saccadeTo(nx, ny, 2); ignoreUntil = performance.now() + 2000; return api; },
+    state() { return { personality: to.name, seed: to.seed, state: stName, quality: O.quality, petting, attention: att, drives: Object.assign({}, drives) }; },
     _move() { lobeMove((performance.now() - t0) / 1000); return api; },   // test hook
     onPersonality(fn) { onChange = fn; return api; },
     _step() {                       // one synchronous frame — for harnesses
@@ -767,6 +941,7 @@ function Moshi(host, opts = {}) {
     destroy() {
       dead = true;
       cancelAnimationFrame(raf); clearTimeout(blinkTimer); rob.disconnect();
+      removeEventListener('scroll', onScroll, { capture: true });
       if (O.interactive) {
         removeEventListener('pointermove', onMove);
         removeEventListener('pointerup', onUp);

@@ -87,16 +87,22 @@
   .arrow:hover { opacity: .8; }
   #prev { left: 8px; } #next { right: 8px; }
 
-  /* THE PS2 SIGNAL CHAIN — one cable for every surface. html.raw = A/B.
-     ONE glow source: never add text-shadows on top of this. */
+  /* THE PS2 SIGNAL CHAIN — the cable carries the CHROME. html.raw = A/B.
+     ONE glow source: never add text-shadows on top of this.
+     The canvases live OUTSIDE the filtered subtree: a filter wrapping an
+     every-frame-animating canvas re-rasterizes the whole page through the
+     blur+posterize chain per frame (Chromium only caches filtered subtrees
+     that hold still); the GL world carries its own crunch in-shader. */
   * { -webkit-font-smoothing: antialiased; }
-  body { filter: url(#ps2signal); }
-  html.raw body { filter: none; }
+  #chrome { position: fixed; inset: 0; z-index: 10; pointer-events: none;
+    filter: url(#ps2signal); }
+  html.raw #chrome { filter: none; }
+  #chrome .chip, #chrome .arrow, #chrome #states .st { pointer-events: auto; }
 </style>
 </head>
 <body>
 <svg width="0" height="0" style="position:fixed" aria-hidden="true"><filter id="ps2signal"
-  x="-2%" y="-2%" width="104%" height="104%" color-interpolation-filters="sRGB">
+  x="0%" y="0%" width="100%" height="100%" color-interpolation-filters="sRGB">
   <feGaussianBlur in="SourceGraphic" stdDeviation="1.6" result="halo"/>
   <feComponentTransfer in="halo" result="halo2"><feFuncA type="linear" slope="0.40"/></feComponentTransfer>
   <feMerge result="glowed"><feMergeNode in="halo2"/><feMergeNode in="SourceGraphic"/></feMerge>
@@ -109,27 +115,28 @@
 </filter></svg>
 
 <div id="stage"></div>
-
-<div id="wordmark" class="disp">MOSHI · LOOKBOOK</div>
-<div id="res" class="chip mono">RES·PS2</div>
-<div id="signal" class="chip mono">SIGNAL·PS2</div>
-
-<div class="arrow" id="prev" title="previous look">◀</div>
-<div class="arrow" id="next" title="next look">▶</div>
-
-<div id="states">
-  <div id="stlbl" class="mono">STATE</div>
-</div>
-
-<div id="plate">
-  <div id="pnum" class="mono">LOOK 01 / 12</div>
-  <div id="pname" class="disp">TAR</div>
-  <div id="pcap" class="mono"></div>
-</div>
-<div id="hint" class="mono">◀ ▶ THE LOOKBOOK · R = REROLL · C = TAKE LANDS · CLICK = POKE · HOLD = PET · DRAG = SPIN</div>
-
 <div id="mini"></div>
-<div id="minilbl" class="mono">SAME GUY · 76PX</div>
+
+<div id="chrome">
+  <div id="wordmark" class="disp">MOSHI · LOOKBOOK</div>
+  <div id="res" class="chip mono">RES·PS2</div>
+  <div id="signal" class="chip mono">SIGNAL·PS2</div>
+
+  <div class="arrow" id="prev" title="previous look">◀</div>
+  <div class="arrow" id="next" title="next look">▶</div>
+
+  <div id="states">
+    <div id="stlbl" class="mono">STATE</div>
+  </div>
+
+  <div id="plate">
+    <div id="pnum" class="mono">LOOK 01 / 12</div>
+    <div id="pname" class="disp">TAR</div>
+    <div id="pcap" class="mono"></div>
+  </div>
+  <div id="hint" class="mono">◀ ▶ THE LOOKBOOK · R = REROLL · C = TAKE LANDS · CLICK = POKE · HOLD = PET · DRAG = SPIN</div>
+  <div id="minilbl" class="mono">SAME GUY · 76PX</div>
+</div>
 
 <script src="moshi.js"></script>
 <script>

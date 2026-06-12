@@ -90,6 +90,17 @@ subpixel-stable geometry. Dither, bands and facets stay at every tier.
 - **v2 — THE LOOKBOOK** (2026-06-12): agent states + celebrate; flow bands;
   lobe migration; mouth tilt + tongue; PORCELAIN; the console dial (PS1/PS2/PS2+,
   default moved off PS1-res to PS2); the stage became this catalog.
+- **v3 — HE GETS A MIND (and 60fps)** (2026-06-12, workflow-reviewed): the user's
+  frame drops were a 12Hz pose-update bug (rotation easing lived on the on-twos
+  clock) + the page filter re-rasterizing the animating canvas — fixed (full-rate
+  easing; the cable now carries chrome only; lobe math hoisted to CPU uniforms;
+  displacement gated to the near field; rect caching; preserve/alpha context
+  flags). The face moved ONTO the body (drag him, it goes with him; he eases
+  home and his eyes counter-rotate to keep watching you). Gaze became ATTENTION
+  (viewer-default, earn-a-glance, deliberate snubs, habituation, ballistic
+  saccades, eyes-lead-body-follows, blink-as-punctuation). Pokes became a
+  REPERTOIRE (startle-hop / squash-oof / double-take / delight-bounce,
+  temperament-weighted) with escalation to genuine annoyance; petting forgives.
 
 ## Adding a look
 

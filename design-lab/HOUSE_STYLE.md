@@ -51,10 +51,15 @@ dithered at quarter-res, who happens to be alive.
 
 ## The signal chain — one cable for every surface
 
-10. **Whole-page PS2 pass** (canonical: `tokens/ps2-pass.css`): phosphor bloom
-    (≈1.6px halo at 40% under the source) → 0.5px soften → 16-step discrete
-    posterize (keeps LIME #CCFF23 exact). DOM and GL arrive through the same cable;
-    `html.raw` is the A/B. It is SIGNAL, not SCREEN: no scanlines, no vignette.
+10. **The PS2 pass carries the CHROME** (canonical: `tokens/ps2-pass.css`): phosphor
+    bloom (≈1.6px halo at 40% under the source) → 0.5px soften → 16-step discrete
+    posterize (keeps LIME #CCFF23 exact); `html.raw` is the A/B. It is SIGNAL, not
+    SCREEN: no scanlines, no vignette. **The GL canvases live OUTSIDE the filtered
+    subtree** (v3 perf rule): a filter wrapping an every-frame-animating canvas
+    re-rasterizes the entire page through the chain per frame at device resolution —
+    Chromium only caches filtered subtrees that hold still. The world's crunch is
+    in-shader (dither, bands, facets), so it never needed the cable. Set the filter
+    region to 0%/100% (the default −10%/120% allocates 1.44× the pixels).
 11. **ONE glow source.** Never add text-shadows or CSS glows on top of the chain —
     doubled bloom reads as inconsistency (the v13 lesson).
 
@@ -85,8 +90,26 @@ dithered at quarter-res, who happens to be alive.
     phases in JS (`phase += dt * rate`) and upload the phase, or the motion jumps
     when the rate changes.
 16. **Idle life is the product.** Blink timers, saccade gaze wander, proximity
-    affection, pet-purr, antics (shiver/stretch/glance/spin), sleep after neglect,
-    startle wake. A character that only reacts is a widget.
+    affection, pet-purr, antics (shiver/stretch/glance/spin), lobe migration,
+    sleep after neglect, proximity-gated startle wake. A character that only
+    reacts is a widget.
+16a. **ATTENTION is a decision, not a servo.** He watches the VIEWER by default
+    (long center-biased holds); the cursor must EARN a glance by passing near him
+    with speed; glances are brief and end with a return-to-you plus a cooldown;
+    sometimes he pointedly ignores it — the snub sells sentience. Habituation
+    dulls repeated stimuli. Saccades are BALLISTIC (a ~90ms burst, then a held
+    fixation — eased drift reads dead); big saccades carry a blink and the body
+    follows the eyes a beat later. (Sources: Eyes Alive SIGGRAPH '02 gaze
+    statistics; PS2-era mascot idle ladders.)
+16b. **The face is ON the body.** Drag him and the face goes with him — a
+    view-anchored face breaks the object illusion. He *wants* to face you:
+    rotation eases home (nearest full turn) when released, and the eyes
+    counter-rotate to hold your gaze while the body is swung away.
+16c. **Reactions are a repertoire, never a button.** A poke draws from
+    temperament-weighted reactions (startle-hop, squash-oof, double-take,
+    delight-bounce) and ESCALATES under spam — real startle, then genuine
+    annoyance (squint, sulked grin, turned back, 6s of ignoring you). Petting
+    forgives. The same input producing the same output is a vending machine.
 17. **Bounded reroll.** Seeds jitter INSIDE a family's curated ranges — different
     every time, ugly never.
 
@@ -110,6 +133,15 @@ dithered at quarter-res, who happens to be alive.
     scales with the canvas, behavior is identical.
 23. **Context discipline:** browsers cap WebGL contexts (~8–16). Handle
     `webglcontextlost/restored`; never ship an always-on grid of live GL instances.
+24. **The pose updates at full frame rate; the CRUNCH stays on twos.** Quantizing
+    user-driven rotation to the 12fps clock reads as dropped frames no matter how
+    fast the GPU is — the wobble and texture clock keep the cadence, the easing
+    does not. Corollaries: hoist frame-constant shader math (lobe centers, rotation
+    matrices) to CPU uniforms — recomputing them per map() per step per pixel
+    wastes ~10⁸ trig ops/frame; no layout reads (getBoundingClientRect) in the
+    render loop — cache rects on resize/scroll; `preserveDrawingBuffer` off
+    (defeats tile-discard on Apple Silicon) and opaque context when he owns the
+    frame.
 
 ## Why this is still anti-slop
 
