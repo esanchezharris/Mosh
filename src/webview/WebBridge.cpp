@@ -124,6 +124,16 @@ juce::WebBrowserComponent::Options WebBridge::buildOptions()
             {
                 completion (appInfo());
             })
+        .withNativeFunction (
+            juce::Identifier ("ui_ready"),
+            [this] (const juce::Array<juce::var>&,
+                    juce::WebBrowserComponent::NativeFunctionCompletion completion)
+            {
+                browserReadyForEvents = true;
+                auto* ok = new juce::DynamicObject();
+                ok->setProperty ("ok", true);
+                completion (juce::var (ok));
+            })
         // The single mutation entry point (MoshOps, 02). Wired in Stage 1.
         .withNativeFunction (
             juce::Identifier ("execute_command"),
@@ -265,7 +275,7 @@ juce::WebBrowserComponent::Options WebBridge::buildOptions()
 
 void WebBridge::emitEvent (const juce::Identifier& eventId, const juce::var& payload)
 {
-    if (webView != nullptr)
+    if (webView != nullptr && browserReadyForEvents)
         webView->emitEventIfBrowserIsVisible (eventId, payload);
 }
 

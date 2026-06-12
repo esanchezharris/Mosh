@@ -203,8 +203,27 @@ still needs Emilio's hand because automation can build, install, launch, deep
 link, and exercise the Mac HTTP endpoint, but it cannot decide whether the
 physical phone mic capture workflow feels correct.
 
-Separate UI-startup observation: lab-feed `--demo5` launches still print
-repeated `juce_WebBrowserComponent.cpp:170` assertions while the WebView waits
-for `window.__JUCE__.backend`. This did not affect the phone-take endpoint fix
-and did not appear in the headless selftest assertion surface, but it should be
-closed as its own rendered UI startup hardening slice.
+## WebView Startup Addendum (Codex, 2026-06-11)
+
+The rendered GUI launch residual is now closed:
+
+- Repro before fix: normal GUI and `--demo5` launches printed repeated
+  `juce_WebBrowserComponent.cpp:170` assertions because native events reached
+  the WebView before JUCE's frontend bridge had installed
+  `window.__JUCE__.backend`.
+- Fix: the UI now calls a native `ui_ready` function after registering the
+  `mosh_event` listener; `WebBridge::emitEvent` drops early transient events
+  until that handshake completes. Startup state still arrives through the
+  existing full `get_snapshot` refresh, so no durable state is lost.
+- A second rendered bug surfaced during verification: the 150px rack clipped
+  the generative action row at the lower window edge, making the Render button
+  unreliable for real mouse clicks. The rack is now 200px tall so Render,
+  Accept, Reject, Freeze, and Bounce sit inside the native window.
+- Direct proof: `MOSH_NO_AUDIO=1 "$APP" --demo5` ran for 7s with zero
+  `JUCE Assertion failure` lines.
+- Rendered workflow proof:
+  `scripts/macos-ui-automation-gate.py` passed in 54.47s with evidence at
+  `_preserved_artifacts/2026-06-08-consolidation/claudemosh/macos-ui-automation-20260611-213150`.
+- Regression battery after this slice: CTest PASS 0.10s, selftest PASS
+  `650/650` 32.92s, undo PASS `18/18` 0.64s, command-log contract PASS
+  286 records 0.04s.

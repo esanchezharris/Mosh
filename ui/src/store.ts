@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import {
-  executeCommand, getSnapshot, onEvent, isNative,
+  executeCommand, getSnapshot, onEvent, isNative, notifyUiReady,
   getRemoteStatus, startRemotePairing, stopRemoteCompanion,
 } from "./bridge";
 import type {
@@ -217,6 +217,7 @@ export const useStore = create<State>((set, get) => ({
         void get().refresh();
       }
     });
+    void notifyUiReady();
     void get().refresh();
     void get().refreshRemote();
   },

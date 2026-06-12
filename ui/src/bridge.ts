@@ -71,6 +71,11 @@ export async function ping(): Promise<AppInfo> {
   return (await native("ping")()) as AppInfo;
 }
 
+export async function notifyUiReady(): Promise<void> {
+  if (!isNative()) return;
+  await native("ui_ready")();
+}
+
 /** The single mutation entry point (MoshOps, 02). Returns a result envelope. */
 export async function executeCommand<T = unknown>(command: unknown): Promise<T> {
   if (!isNative()) throw new Error("execute_command: not running in JUCE WebView");

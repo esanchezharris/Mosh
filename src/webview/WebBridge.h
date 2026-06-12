@@ -43,8 +43,16 @@ public:
     juce::WebBrowserComponent::Options buildOptions();
 
     /** Wire the live WebBrowserComponent so the bridge can push events to JS. */
-    void attach (juce::WebBrowserComponent& wb) { webView = &wb; }
-    void detach() { webView = nullptr; }
+    void attach (juce::WebBrowserComponent& wb)
+    {
+        webView = &wb;
+        browserReadyForEvents = false;
+    }
+    void detach()
+    {
+        browserReadyForEvents = false;
+        webView = nullptr;
+    }
 
     /** Push a typed event to the UI (snapshot+events feed, 02 §4). Safe to call
         from the message thread only. */
@@ -62,6 +70,7 @@ private:
     RemoteHandler     remoteStopHandler;
     RemoteStatusProvider remoteStatusProvider;
     juce::WebBrowserComponent* webView = nullptr;
+    bool browserReadyForEvents = false;
 
     // The native file dialog (wave: settings). launchAsync's callback must outlive
     // the dialog, so the FileChooser is held here, not in a local. Only one dialog at

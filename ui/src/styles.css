@@ -249,7 +249,7 @@ button.on { border-color: var(--accent); color: var(--accent); background: #2120
 
 /* Plugin rack (Stage 3) + generative drawer (Stage 5) */
 .rack {
-  height: 150px; min-height: 150px; border-top: 1px solid var(--line);
+  height: 200px; min-height: 200px; border-top: 1px solid var(--line);
   background: var(--panel); display: flex; flex-direction: row;
 }
 .rack-left { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 0.5rem 0.8rem; gap: 0.4rem; }
