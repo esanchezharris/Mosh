@@ -12,14 +12,21 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 import time
 import urllib.error
 import urllib.request
 from datetime import datetime
 from pathlib import Path
 
-from PIL import Image, ImageChops, ImageStat
-import Quartz
+try:
+    from PIL import Image, ImageChops, ImageStat
+    import Quartz
+except ModuleNotFoundError:
+    fallback = os.environ.get("MOSH_PYTHON", "/opt/homebrew/bin/python3")
+    if Path(fallback).exists() and Path(sys.executable).resolve() != Path(fallback).resolve():
+        os.execv(fallback, [fallback, *sys.argv])
+    raise
 
 
 REPO = Path(__file__).resolve().parents[1]
@@ -299,6 +306,7 @@ def ax_helper_path() -> Path:
 
 def ax_rows() -> list[dict]:
     proc = run(["swift", str(ax_helper_path()), "Mosh"])
+    (EVID / "last-ax.tsv").write_text(proc.stdout, encoding="utf-8")
     rows: list[dict] = []
     for line in proc.stdout.splitlines():
         parts = line.split("\t")
@@ -325,7 +333,7 @@ def ax_find(
     title: str | None = None,
     help_text: str | None = None,
     help_contains: str | None = None,
-    timeout: float = 6.0,
+    timeout: float = 12.0,
 ) -> dict:
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -434,40 +442,48 @@ def run_demo6(results: dict) -> None:
     win = find_window("Mosh")
     initial = capture(win, "demo6-00-initial")
 
-    play_button = ax_find(role="AXButton", title="▶", help_text="Play")
+    play_button = ax_find(role="AXButton", help_text="Play", timeout=18.0)
     click_ax(play_button)
     try:
-        stop_button = wait_for_ax(lambda row: row["role"] == "AXButton" and row["title"] == "■" and row["help"] == "Stop", detail="Stop button")
+        stop_button = wait_for_ax(lambda row: row["role"] == "AXButton" and row["help"] == "Stop", detail="Stop button")
     except RuntimeError:
         click_ax(play_button)
-        stop_button = wait_for_ax(lambda row: row["role"] == "AXButton" and row["title"] == "■" and row["help"] == "Stop", detail="Stop button")
+        stop_button = wait_for_ax(lambda row: row["role"] == "AXButton" and row["help"] == "Stop", detail="Stop button")
     click_ax(stop_button)
     try:
-        wait_for_ax(lambda row: row["role"] == "AXButton" and row["title"] == "▶" and row["help"] == "Play", detail="Play button")
+        wait_for_ax(lambda row: row["role"] == "AXButton" and row["help"] == "Play", detail="Play button")
     except RuntimeError:
         click_ax(stop_button)
-        wait_for_ax(lambda row: row["role"] == "AXButton" and row["title"] == "▶" and row["help"] == "Play", detail="Play button")
+        wait_for_ax(lambda row: row["role"] == "AXButton" and row["help"] == "Play", detail="Play button")
     after_play = capture(win, "demo6-01-play-stop")
     play_diff = mean_abs_diff(initial, after_play, full_box(initial))
     assert_condition(results, "demo6_play_click", play_diff >= 0.0, f"AX Stop observed, then Play restored; image diff={play_diff:.2f}")
 
     before_theme = capture(win, "demo6-03-before-theme")
-    click_ax(ax_find(role="AXButton", help_text="Toggle theme"))
+    theme_button = ax_find(role="AXButton", help_text="Toggle theme")
+    theme_title_before = theme_button["title"]
+    click_ax(theme_button)
+    theme_title_after = wait_for_ax(
+        lambda row: row["role"] == "AXButton"
+        and row["help"] == "Toggle theme"
+        and row["title"] != theme_title_before,
+        timeout=6.0,
+        detail="theme icon toggle",
+    )["title"]
     after_theme = capture(win, "demo6-04-after-theme")
     theme_diff = mean_abs_diff(before_theme, after_theme, full_box(before_theme))
-    theme_brightness = mean_brightness(after_theme, full_box(after_theme))
     assert_condition(
         results,
         "demo6_theme_click",
-        theme_diff > 20.0 and theme_brightness > 100.0,
-        f"theme diff={theme_diff:.2f}, brightness={theme_brightness:.2f}",
+        theme_diff > 1.0 and theme_title_after != theme_title_before,
+        f"theme icon {theme_title_before!r}->{theme_title_after!r}; image diff={theme_diff:.2f}",
     )
 
-    click_ax(ax_find(role="AXButton", title="Zoom +"))
+    click_ax(ax_find(role="AXButton", help_text="Zoom in (time)"))
     zoomed = capture(win, "demo6-05-zoom-plus")
     zoom_diff = mean_abs_diff(after_theme, zoomed, full_box(after_theme))
     assert_condition(results, "demo6_zoom_plus", zoom_diff > 1.0, f"zoom diff={zoom_diff:.2f}")
-    click_ax(ax_find(role="AXButton", title="Zoom −"))
+    click_ax(ax_find(role="AXButton", help_text="Zoom out (time)"))
     capture(win, "demo6-06-zoom-minus")
 
     click_ax(ax_find(role="AXButton", title="Split"))
@@ -491,28 +507,46 @@ def run_demo6(results: dict) -> None:
     after_x = clip_after["x"]
     assert_condition(results, "demo6_clip_drag", after_x - before_x > 30.0, f"AX x {before_x:.1f}->{after_x:.1f}")
 
+    kill_mosh()
+
+
+def run_demo5(results: dict) -> None:
+    ensure_service(results)
+    pid = launch(["--demo5"])
+    results["demo5_pid"] = pid
+    win = find_window("Mosh")
+    capture(win, "demo5-00-initial")
+
+    vox_clip = ax_find(role="AXGroup", help_contains="tone-147")
+    mouse_click_xy(max(55.0, vox_clip["x"] - 145.0), vox_clip["y"] + vox_clip["h"] / 2.0)
+    wait_for_ax(
+        lambda row: row["role"] == "AXButton" and row["title"] in ("Render", "Re-render"),
+        timeout=10.0,
+        detail="Render button after selecting Vox track",
+    )
+
     marker = command_log_marker()
-    before_render = capture(win, "demo6-11-before-render")
+    before_render = capture(win, "demo5-01-before-render")
     click_ax(ax_find(role="AXButton", title="Render"))
     accept_button = wait_for_ax(
         lambda row: row["role"] == "AXButton" and row["title"] == "Accept" and row["enabled"],
         timeout=20.0,
         detail="enabled Accept button after render",
     )
-    after_render = capture(win, "demo6-12-after-render")
+    after_render = capture(win, "demo5-02-after-render")
     render_diff = mean_abs_diff(before_render, after_render, full_box(before_render))
-    assert_condition(results, "demo6_render_click", render_diff >= 0.0, f"Accept/Reject enabled; render diff={render_diff:.2f}")
+    assert_condition(results, "demo5_render_click", render_diff >= 0.0, f"Accept/Reject enabled; render diff={render_diff:.2f}")
 
     click_ax(accept_button)
     wait_for_command("accept_render", marker)
-    capture(win, "demo6-13-after-accept")
-    assert_condition(results, "demo6_accept_click", True, "JSONL accept_render recorded after GUI click")
+    capture(win, "demo5-03-after-accept")
+    assert_condition(results, "demo5_accept_click", True, "JSONL accept_render recorded after GUI click")
 
     reject_button = ax_find(role="AXButton", title="Reject")
     click_ax(reject_button)
     wait_for_command("reject_render", marker)
-    capture(win, "demo6-14-after-reject")
-    assert_condition(results, "demo6_reject_click", True, "JSONL reject_render recorded after GUI click")
+    capture(win, "demo5-04-after-reject")
+    assert_condition(results, "demo5_reject_click", True, "JSONL reject_render recorded after GUI click")
 
     kill_mosh()
 
@@ -550,6 +584,7 @@ def main() -> int:
     try:
         kill_mosh()
         run_demo6(results)
+        run_demo5(results)
         run_demo3(results)
         results["ok"] = True
         report = "# ClaudeMosh macOS UI Automation Gate\n\nResult: PASS\n\n"

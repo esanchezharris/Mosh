@@ -22,8 +22,11 @@ public:
         and direct DSP need no device, and device init can block on CoreAudio.
         @param freshSession  use an isolated session dir and always start from a
         cold empty Edit. The --selftest harness passes true so it is idempotent
-        (it saves/reloads internally) and never collides with the GUI session. */
-    explicit MoshEngine (bool openAudioDevice = true, bool freshSession = false);
+        (it saves/reloads internally) and never collides with the GUI session.
+        @param freshSessionName  optional isolated-session folder for distinct
+        headless harnesses that must not overwrite each other's evidence. */
+    explicit MoshEngine (bool openAudioDevice = true, bool freshSession = false,
+                         const juce::String& freshSessionName = {});
     ~MoshEngine();
 
     te::Engine& engine() { return *enginePtr; }

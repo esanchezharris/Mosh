@@ -13,16 +13,33 @@ fi
 
 mkdir -p "$EVID"
 LOG="$EVID/selftest.log"
-EXPECTED_SELFTEST_COUNT=89
-if [[ -e /Library/Audio/Plug-Ins/VST3/Serum2.vst3 ]]; then
-  EXPECTED_SELFTEST_COUNT=98
-fi
+MIN_SELFTEST_COUNT="${MOSH_MIN_SELFTEST_COUNT:-650}"
 
 echo "[plugin-host-evidence-gate] app=$APP" >&2
 MOSH_NO_AUDIO=1 "$APP" --selftest > "$LOG" 2>&1
 
-if ! rg -q "===== $EXPECTED_SELFTEST_COUNT/$EXPECTED_SELFTEST_COUNT checks passed, 0 failed =====" "$LOG"; then
-  echo "[plugin-host-evidence-gate] FAIL: selftest did not report $EXPECTED_SELFTEST_COUNT/$EXPECTED_SELFTEST_COUNT checks" >&2
+if ! SUMMARY="$(python3 - "$LOG" "$MIN_SELFTEST_COUNT" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+log = Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace")
+minimum = int(sys.argv[2])
+matches = re.findall(r"===== (\d+)/(\d+) checks passed, (\d+) failed =====", log)
+if not matches:
+    print("missing selftest summary")
+    raise SystemExit(1)
+passed, total, failed = map(int, matches[-1])
+if failed != 0 or passed != total:
+    print(f"selftest reported {passed}/{total}, failed={failed}")
+    raise SystemExit(1)
+if total < minimum:
+    print(f"selftest reported {total} checks; expected at least {minimum}")
+    raise SystemExit(1)
+print(f"{passed}/{total}, failed={failed}")
+PY
+)"; then
+  echo "[plugin-host-evidence-gate] FAIL: $SUMMARY" >&2
   tail -80 "$LOG" >&2
   exit 1
 fi
@@ -43,7 +60,7 @@ cat > "$EVID/REPORT.md" <<EOF
 App: $APP
 Mode: MOSH_NO_AUDIO=1 --selftest
 Log: $LOG
-Result: PASS command-surface selftest reported $EXPECTED_SELFTEST_COUNT/$EXPECTED_SELFTEST_COUNT.
+Result: PASS command-surface selftest reported $SUMMARY.
 
 Notes:
 - Assertions/leak detector lines, if present, are copied to assertions.txt.

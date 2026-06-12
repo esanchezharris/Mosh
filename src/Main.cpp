@@ -29,10 +29,14 @@ public:
         const bool undoSelfTest = commandLine.contains ("--selftest-undo");
         const bool liveAudioSmoke = commandLine.contains ("--live-audio-smoke");
         const bool headless = undoSelfTest || commandLine.contains ("--selftest");
+        const juce::String freshSessionName = undoSelfTest ? "session-selftest-undo"
+                                            : (liveAudioSmoke ? "session-live-audio-smoke"
+                                                              : "session-selftest");
         // Headless: no audio device, and an isolated cold session so the harness is
         // idempotent (it saves/reloads itself) and never touches the GUI session.
         engine  = std::make_unique<MoshEngine> ((! headless) || liveAudioSmoke,
-                                                /*freshSession=*/ headless || liveAudioSmoke);
+                                                /*freshSession=*/ headless || liveAudioSmoke,
+                                                freshSessionName);
         moshOps = std::make_unique<MoshOps> (*engine);
         remoteServer = std::make_unique<RemoteCompanionServer> (
             engine->sessionDir().getChildFile ("phone-takes"));

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 LOG_PATH="${1:-$HOME/Library/Mosh/session-selftest/mosh-log.jsonl}"
-N="${2:-200}"
+N="${2:-500}"
 
 python3 - "$LOG_PATH" "$N" <<'PY'
 import json
@@ -50,6 +50,9 @@ for offset, line in enumerate(subset, start=len(lines) - len(subset) + 1):
         record = json.loads(line)
     except Exception as exc:
         errors.append(f"line {offset}: JSON parse error: {exc}")
+        continue
+    if not isinstance(record, dict):
+        errors.append(f"line {offset}: JSON value is {type(record).__name__}, expected object")
         continue
 
     for key, typ in required.items():

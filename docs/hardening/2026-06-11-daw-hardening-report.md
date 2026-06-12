@@ -1,0 +1,92 @@
+# Mosh DAW Hardening Report - 2026-06-11
+
+## Repo Truth
+
+- Seat: `/Users/emiliosanchez-harris/Documents/ClaudeMosh`
+- Branch: `main`
+- Starting HEAD: `781adb068f361c8924b1407a41a4648f513cff96`
+- Host: macOS Apple Silicon arm64
+- Off-limits worktrees were not touched:
+  - `/Users/emiliosanchez-harris/Documents/ClaudeMosh-lab`
+  - `/Users/emiliosanchez-harris/Documents/ClaudeMosh/.claude/worktrees/laughing-grothendieck-22549c`
+- Hosted GitHub Actions were not changed or re-enabled.
+
+## Baseline And Final Battery
+
+The first baseline exposed a real harness/runtime problem: `--selftest` reused a persistent `session-selftest` directory with a 113 MB `mosh-log.jsonl`, and `get_command_log` loaded and parsed the full file. The run was still inside `cmdGetCommandLog` when it was terminated after 332.871s. Because `--selftest-undo` reused the same session directory, it also erased the default selftest log before the command-log validator ran in the requested command order.
+
+| Step | Baseline result | Final result | Artifact |
+| --- | --- | --- | --- |
+| `cmake --build build` | PASS, 0.258s | PASS, 0.298s | `_preserved_artifacts/2026-06-12-hardening/hardening-final-battery-20260611-175020` |
+| `MOSH_NO_AUDIO=1 "$APP" --selftest` | terminated at 332.871s | PASS, 28.049s, `650/650` | `_preserved_artifacts/2026-06-12-hardening/hardening-final-battery-20260611-175020/selftest.log` |
+| `MOSH_NO_AUDIO=1 "$APP" --selftest-undo` | PASS, 0.601s | PASS, 0.576s, `18/18` | `_preserved_artifacts/2026-06-12-hardening/hardening-final-battery-20260611-175020/selftest-undo.log` |
+| `ctest --test-dir build --output-on-failure` | PASS, 0.700s | PASS, 0.133s | `_preserved_artifacts/2026-06-12-hardening/hardening-final-battery-20260611-175020/ctest.log` |
+| `scripts/validate-command-log-contract.sh` | FAIL after stale/malformed log state | PASS, 0.078s | `_preserved_artifacts/2026-06-12-hardening/hardening-final-battery-20260611-175020/command-log.log` |
+
+Selftest profiling is now emitted in the ordinary selftest log. The slowest final sections were:
+
+| Section | Time | Checks |
+| --- | ---: | ---: |
+| `Wave: command-log inspector (AGT-001)` | 7.633s | 16 |
+| `Wave A: project format (PRJ-008) / device prefs (PRE-001) / record latency (ARE-003)` | 4.541s | 33 |
+| `Export format / depth options (IOX-002, IOX-007)` | 4.080s | 10 |
+| `Serum render compatibility (optional local plugin gate)` | 3.014s | 9 |
+| `Stage 6: full producer loop + export` | 2.607s | 8 |
+| `Stage 5: generative layer (FakeAdapter, full loop)` | 1.136s | 12 |
+
+## Gate Audit
+
+| Gate | What it proves | Duplicates / misses | Speed tier | Command | Pass signal | Artifact |
+| --- | --- | --- | --- | --- | --- | --- |
+| Selftest | MoshOps command semantics, snapshots, events, undoable command posture, save/reload, plugin command surface, MIDI, tempo, warp, export, routing | Duplicates portions of strict-local-v0 and plugin-host; misses rendered native gestures and hardware loopback | Fast local merge gate, about 28s final | `MOSH_NO_AUDIO=1 "$APP" --selftest` | `650/650 checks passed, 0 failed` | `_preserved_artifacts/2026-06-12-hardening/hardening-final-battery-20260611-175020/selftest.log` |
+| Focused undo | Tracktion undo grouping and redo contracts for focused edits | Duplicates selftest undo checks at a smaller risk layer; misses native UI gestures | Fast, under 1s | `MOSH_NO_AUDIO=1 "$APP" --selftest-undo` | `18/18 focused undo checks passed, 0 failed` | `_preserved_artifacts/2026-06-12-hardening/hardening-final-battery-20260611-175020/selftest-undo.log` |
+| CTest | Native unit/integration target still builds and passes under CMake | Duplicates build health; misses packaged app workflows | Fast, under 1s | `ctest --test-dir build --output-on-failure` | exit 0 | `_preserved_artifacts/2026-06-12-hardening/hardening-final-battery-20260611-175020/ctest.log` |
+| Command-log contract | JSONL records remain parseable and expose required command envelope fields | Duplicates the selftest AGT surface; misses complete history if called with a small window | Fast, under 1s | `scripts/validate-command-log-contract.sh` | checked recent command-shaped records with no schema errors | `_preserved_artifacts/2026-06-12-hardening/hardening-final-battery-20260611-175020/command-log.log` |
+| Strict local v0 | UI build, Mosh/MoshTests build, CTest, default/undo/SA3 selftests, plugin-host strict assertions, command-log, preservation manifest, SA3 colors | Duplicates core merge battery; misses BlackHole loopback and rendered macOS UI gestures | Full local strict gate, about 86s in this run | `MOSH_EVID=... scripts/strict-local-v0-gate.sh` | `Result: PASS` | `_preserved_artifacts/2026-06-12-hardening/gate-evidence-20260611-173659/strict-local-v0/REPORT.md` |
+| Plugin-host evidence | Full selftest under plugin-host evidence capture; external plugin surface is represented when local plugins exist | Duplicates selftest; misses rendered plugin editor windows unless paired with UI automation | Medium, about 23s | `scripts/plugin-host-evidence-gate.sh` | `PASS command-surface selftest reported 650/650, failed=0` | `_preserved_artifacts/2026-06-08-consolidation/claudemosh/plugin-host-evidence-20260611-175107/REPORT.md` |
+| macOS local preflight | Machine prerequisites: arm64 host, Python UI deps, Accessibility, screen capture, BlackHole visibility, ffmpeg, service health, plugin directory, preservation state | Duplicates environment portions of UI/BlackHole gates; misses actual rendered behavior | Fast environment gate | `scripts/macos-local-preflight.sh` | `Result: PASS` | `_preserved_artifacts/2026-06-12-hardening/gate-evidence-20260611-173659/macos-local-preflight-pythonfix/REPORT.md` |
+| macOS UI automation | Real `Mosh.app` rendered workflow: transport play/stop, theme toggle, zoom, Split/Move modes, arrangement clip drag, render Accept/Reject through JSONL, Serum 2 native editor and tab visual diff | Does not yet cover piano-roll lasso/draw/velocity lane or device settings dialogs | Medium, 47.95s | `scripts/macos-ui-automation-gate.py` | `Result: PASS` with screenshots and JSON result | `_preserved_artifacts/2026-06-12-hardening/gate-evidence-20260611-173659/macos-ui-automation-v3/REPORT.md` |
+| BlackHole live audio | CoreAudio HAL loopback path contains non-silent captured audio, not just app-side output callbacks | Duplicates preflight BlackHole visibility; still misses real studio routing until capture is non-silent | Hardware-gated, about 3 capture attempts | `scripts/blackhole-live-audio-gate.sh` | FAIL: app callbacks ran, BlackHole input capture stayed silent-ish | `_preserved_artifacts/2026-06-12-hardening/gate-evidence-20260611-173659/blackhole-live-audio/REPORT.md` |
+| iOS companion simulator | Companion client parsing, snapshot decoding, accept/reject command routing, voice guardrails, monitoring metrics on iOS Simulator | Duplicates shell `xcodebuild` and XcodeBuildMCP `test_sim`; misses physical device pairing/audio | Medium, about 38-50s | `xcodebuild test ...` and XcodeBuildMCP `test_sim` | 5 tests, 0 failures | shell: `_preserved_artifacts/2026-06-12-hardening/gate-evidence-20260611-173659/ios-companion-simulator-test/xcodebuild-test.log`; MCP: `/Users/emiliosanchez-harris/Library/Developer/XcodeBuildMCP/workspaces/ClaudeMosh-61190dceaa86/logs/test_sim_2026-06-12T00-47-14-291Z_pid6191_1a100b38.log` |
+
+## Changes Made
+
+- `MoshEngine` now deletes isolated headless session directories before a fresh harness run, making selftests cold and idempotent instead of dependent on stale app-support logs.
+- Headless app modes now use distinct session directories: `session-selftest`, `session-selftest-undo`, and `session-live-audio-smoke`, so one gate does not erase another gate's evidence.
+- `get_command_log` now streams `mosh-log.jsonl`, counts command-shaped records, keeps only the requested tail window, and reports additive `limit` and `logBytes` metadata.
+- The command-log validator now checks a 500-record window by default and reports non-object JSON values cleanly.
+- The selftest harness now emits per-section timings and prefixes failures with the active section name, while preserving the existing summary format.
+- The plugin-host evidence gate now accepts the current selftest count dynamically (`>=650`) instead of hard-coded stale counts.
+- The macOS preflight and UI automation scripts now choose a Python that can import PIL/Quartz, instead of depending on the caller's PATH.
+- The macOS UI automation gate now uses current AX selectors and proves rendered arrangement/plugin workflows with screenshots plus JSONL command evidence.
+
+## Highest-Risk Surface Coverage
+
+- Piano roll: engine-level MIDI note editing remains covered in selftest; rendered lasso/draw/velocity-lane gestures are still a UI automation gap.
+- Arrangement: engine move/trim/split and undo coverage remains in selftest; rendered Split/Move mode, zoom, and clip drag are now proved against real `Mosh.app`.
+- Engine/session: save/reload, project lifecycle, render job draining, export options, stems, tempo ramps, and warp clips are covered in selftest and strict-local-v0.
+- Plugin hosting: command-surface plugin evidence and strict assertion scan pass; Serum 2 native editor open and OSC/MATRIX tab visual diff pass in real UI automation.
+- Hardware-gated: BlackHole is installed and visible, but the loopback capture gate is still red because captured input remains below non-silent thresholds.
+
+## Remaining Risks And Closing Commands
+
+1. BlackHole loopback routing is the only red audited gate. Close it with:
+   `MOSH_EVID=/Users/emiliosanchez-harris/Documents/ClaudeMosh/_preserved_artifacts/2026-06-12-hardening/gate-evidence-$(date +%Y%m%d-%H%M%S)/blackhole-live-audio scripts/blackhole-live-audio-gate.sh`
+
+2. Physical iPhone companion pairing was not run. Close it with:
+   `MOSH_IOS_TEAM_ID=<team-id> scripts/iphone-companion-device-gate.sh`
+
+3. Piano-roll native gestures still need a rendered gate for lasso vs draw, note-edge resize, velocity lane, quantize/humanize/swing, fold/scale, and undo grouping. The right next artifact is a new UI automation slice that saves screenshots and command-log markers under `_preserved_artifacts/2026-06-12-hardening/`.
+
+4. Device settings dialogs and CoreAudio device switching should stay hardware/manual until automation can assert the exact selected device and non-silent capture. Re-run preflight first:
+   `MOSH_EVID=/Users/emiliosanchez-harris/Documents/ClaudeMosh/_preserved_artifacts/2026-06-12-hardening/gate-evidence-$(date +%Y%m%d-%H%M%S)/macos-local-preflight scripts/macos-local-preflight.sh`
+
+## Human QA Script For The Current UI Slice
+
+Automation already proved the rendered arrangement/plugin workflow, so human QA is only useful for qualitative feel and hardware routing:
+
+1. Open `build/Mosh_artefacts/Debug/Mosh.app`.
+2. In a demo arrangement, switch between Move and Split, drag a visible clip, zoom in/out, then undo/redo quickly.
+3. Render a selected track, click Accept, then Reject; verify the visible state matches the command intent.
+4. Open Serum 2 from the plugin surface and switch OSC to MATRIX; confirm the native editor remains responsive.
+5. If BlackHole is routed as system output/input, run the BlackHole gate above and keep the `REPORT.md`, `analysis.json`, and capture WAV if it still fails.

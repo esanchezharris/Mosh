@@ -72,6 +72,18 @@ namespace
 
         return {};
     }
+
+    bool looksLikeCommandLogRecord (const juce::String& line)
+    {
+        const auto t = line.trim();
+        return t.startsWithChar ('{')
+               && t.endsWithChar ('}')
+               && t.contains ("\"ts\"")
+               && t.contains ("\"seq\"")
+               && t.contains ("\"command\"")
+               && t.contains ("\"ok\"")
+               && t.contains ("\"undoable\"");
+    }
 }
 
 MoshOps::MoshOps (MoshEngine& engineToUse)
@@ -3609,30 +3621,38 @@ juce::var MoshOps::cmdGetCommandLog (const juce::var& args)
 
     if (file.existsAsFile())
     {
-        const auto text = file.loadFileAsString();
-        auto lines = StringArray::fromLines (text);
-
-        for (auto& line : lines)
+        if (auto stream = file.createInputStream())
         {
-            if (line.trim().isEmpty()) continue;     // skip blank lines
+            juce::StringArray recentLines;
 
-            var parsed;
-            // A partially-written tail line must not crash the inspector — JSON::parse
-            // returns a non-ok Result on malformed input; skip such lines.
-            if (JSON::parse (line, parsed).failed()) continue;
-            if (! parsed.isObject()) continue;
+            while (! stream->isExhausted())
+            {
+                const auto line = stream->readNextLine().trim();
+                if (! looksLikeCommandLogRecord (line))
+                    continue;
 
-            ++total;
+                ++total;
+                recentLines.add (line);
+                if (recentLines.size() > limit)
+                    recentLines.remove (0);
+            }
 
-            auto* o = new DynamicObject();
-            o->setProperty ("ts",       parsed.getProperty ("ts", var()));
-            o->setProperty ("seq",      parsed.getProperty ("seq", var()));
-            o->setProperty ("command",  parsed.getProperty ("command", var()));
-            o->setProperty ("ok",       (bool) parsed.getProperty ("ok", false));
-            o->setProperty ("undoable", (bool) parsed.getProperty ("undoable", false));
-            if (parsed.hasProperty ("error"))
-                o->setProperty ("error", parsed.getProperty ("error", var()));
-            entries.add (var (o));
+            for (auto& line : recentLines)
+            {
+                var parsed;
+                if (JSON::parse (line, parsed).failed() || ! parsed.isObject())
+                    continue;
+
+                auto* o = new DynamicObject();
+                o->setProperty ("ts",       parsed.getProperty ("ts", var()));
+                o->setProperty ("seq",      parsed.getProperty ("seq", var()));
+                o->setProperty ("command",  parsed.getProperty ("command", var()));
+                o->setProperty ("ok",       (bool) parsed.getProperty ("ok", false));
+                o->setProperty ("undoable", (bool) parsed.getProperty ("undoable", false));
+                if (parsed.hasProperty ("error"))
+                    o->setProperty ("error", parsed.getProperty ("error", var()));
+                entries.add (var (o));
+            }
         }
     }
 
@@ -3644,6 +3664,8 @@ juce::var MoshOps::cmdGetCommandLog (const juce::var& args)
     auto* data = new DynamicObject();
     data->setProperty ("entries", recent);
     data->setProperty ("total", total);
+    data->setProperty ("limit", limit);
+    data->setProperty ("logBytes", file.existsAsFile() ? (double) file.getSize() : 0.0);
     return okResult ("get_command_log", var (data));
 }
 

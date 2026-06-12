@@ -65,13 +65,33 @@ for cmd in cmake npm rg python3 swift osascript screencapture ffmpeg system_prof
   require_cmd "$cmd"
 done
 
-if python3 - <<'PY'
+PYTHON_BIN="${MOSH_PYTHON:-$(command -v python3)}"
+if ! "$PYTHON_BIN" - <<'PY' >/dev/null 2>&1
 import PIL
 import Quartz
 print("python-ui-deps-ok")
 PY
 then
-  pass "Python can import PIL and Quartz"
+  for candidate in /opt/homebrew/bin/python3 /usr/local/bin/python3; do
+    if [[ -x "$candidate" ]] && "$candidate" - <<'PY' >/dev/null 2>&1
+import PIL
+import Quartz
+print("python-ui-deps-ok")
+PY
+    then
+      PYTHON_BIN="$candidate"
+      break
+    fi
+  done
+fi
+
+if "$PYTHON_BIN" - <<'PY'
+import PIL
+import Quartz
+print("python-ui-deps-ok")
+PY
+then
+  pass "Python can import PIL and Quartz: $PYTHON_BIN"
 else
   fail "Python cannot import PIL and Quartz"
 fi
@@ -112,7 +132,7 @@ if command -v ffmpeg >/dev/null 2>&1; then
 fi
 
 set +e
-python3 - "$SERVICE_HOST" "$SERVICE_PORT" "$EVID/service-health.json" <<'PY'
+"$PYTHON_BIN" - "$SERVICE_HOST" "$SERVICE_PORT" "$EVID/service-health.json" <<'PY'
 import json
 import sys
 import urllib.error

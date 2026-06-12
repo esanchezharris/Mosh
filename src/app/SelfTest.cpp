@@ -13,11 +13,49 @@ namespace
 {
     int failures = 0;
     int checks = 0;
+    juce::String activeSection;
+    double activeSectionStartedMs = 0.0;
+    int activeSectionStartChecks = 0;
+    int activeSectionStartFailures = 0;
+
+    void finishSection()
+    {
+        if (activeSection.isEmpty())
+            return;
+
+        const auto elapsed = (juce::Time::getMillisecondCounterHiRes() - activeSectionStartedMs) / 1000.0;
+        std::cerr << "  ..   section \"" << activeSection.toStdString() << "\" completed in "
+                  << juce::String (elapsed, 3).toStdString() << "s ("
+                  << (checks - activeSectionStartChecks) << " checks, "
+                  << (failures - activeSectionStartFailures) << " failed)" << std::endl;
+        activeSection.clear();
+    }
+
+    void resetSections()
+    {
+        activeSection.clear();
+        activeSectionStartedMs = 0.0;
+        activeSectionStartChecks = checks;
+        activeSectionStartFailures = failures;
+    }
+
+    void section (const juce::String& name)
+    {
+        finishSection();
+        activeSection = name;
+        activeSectionStartedMs = juce::Time::getMillisecondCounterHiRes();
+        activeSectionStartChecks = checks;
+        activeSectionStartFailures = failures;
+        std::cerr << "--- " << name.toStdString() << " ---" << std::endl;
+    }
 
     void check (bool cond, const juce::String& what)
     {
         ++checks;
-        std::cerr << (cond ? "  ok   " : "  FAIL ") << what << std::endl;  // flush each line
+        std::cerr << (cond ? "  ok   " : "  FAIL ");
+        if (! cond && activeSection.isNotEmpty())
+            std::cerr << "[" << activeSection.toStdString() << "] ";
+        std::cerr << what << std::endl;  // flush each line
         if (! cond) ++failures;
     }
 
@@ -120,7 +158,9 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 {
     using namespace juce;
     failures = 0; checks = 0;
+    resetSections();
     std::cerr << "\n===== Mosh Stage 1 command-surface harness =====\n";
+    section ("Stage 1: command surface / cold snapshot");
 
     // Capture emitted events.
     std::vector<String> eventTypes;
@@ -208,7 +248,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     check (logsCommand ("undo"),         "JSONL records undo");
 
     // ─── Stage 2: arrangement editing + mixer stub ───
-    std::cerr << "--- Stage 2: arrangement + mixer ---\n";
+    section ("Stage 2: arrangement + mixer");
     const auto cid = firstTrack (ops)["clips"][0].getProperty ("id", var()).toString();
     const auto tid = firstTrack (ops).getProperty ("id", var()).toString();
 
@@ -252,7 +292,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // The drag GESTURE itself is GUI-gated (WKWebView HTML5 drop) and is NOT
     // faked here; the headless import_clip_data command IS fully testable: it
     // decodes base64 bytes, validates real audio, and inserts an undoable clip.
-    std::cerr << "--- BRW-007: import_clip_data (bytes-over-bridge) ---\n";
+    section ("BRW-007: import_clip_data (bytes-over-bridge)");
     {
         // Read a known-good small WAV (the test-tone source on the first clip)
         // into memory and base64-encode it (inverse of convertFromBase64).
@@ -321,7 +361,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     }
 
     // ─── Stage 3: VST3 hosting + MIDI ───
-    std::cerr << "--- Stage 3: VST3 hosting + MIDI ---\n";
+    section ("Stage 3: VST3 hosting + MIDI");
     auto trackById = [&] (const String& id) -> var {
         auto snap = ops.snapshot();                 // keep the temporary alive (no dangling array)
         if (auto* arr = snap["tracks"].getArray())
@@ -412,7 +452,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // (MOSH_SCAN_AU is unset here, so rescan_plugins stays VST3-only + inline) and
     // we do NOT assert any machine-specific AU content -- only shape/ok, so the
     // gate stays green on a box with zero .component files.
-    std::cerr << "--- INS-002/INS-005: AU hosting + scan / blocklist ---\n";
+    section ("INS-002/INS-005: AU hosting + scan / blocklist");
     {
         // The AudioUnit format is registered (proves the JUCE_PLUGINHOST_AU flag is
         // live) -- machine-independent; the format object exists even with no AUs.
@@ -529,7 +569,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     }
 
     // ─── Wave 2: tempo / time-signature / metronome / record / navigation ───
-    std::cerr << "--- Wave 2: tempo / meter / metronome / nav ---\n";
+    section ("Wave 2: tempo / meter / metronome / nav");
     {
         auto sess = [&] { return ops.snapshot().getProperty ("session", var()); };
 
@@ -565,7 +605,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     }
 
     // ─── Wave 5: mixer — master bus + pan ───
-    std::cerr << "--- Wave 5: mixer / master / pan ---\n";
+    section ("Wave 5: mixer / master / pan");
     {
         auto master = [&] { return ops.snapshot().getProperty ("master", var()); };
         check (master().isObject(), "snapshot exposes a master bus");
@@ -583,7 +623,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     }
 
     // ─── Wave 6: clip editing (delete / rename / mute / gain / duplicate) ───
-    std::cerr << "--- Wave 6: clip editing ---\n";
+    section ("Wave 6: clip editing");
     {
         auto clipById = [&] (const String& cid) -> var {
             auto snap = ops.snapshot();
@@ -620,7 +660,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     }
 
     // ─── Wave 7: parameter automation ───
-    std::cerr << "--- Wave 7: parameter automation ---\n";
+    section ("Wave 7: parameter automation");
     {
         auto paramVar = [&] (const String& trkId, int plugIdx, int paramIdx) -> var {
             auto trk = trackById (trkId);
@@ -658,7 +698,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     }
 
     // ─── Wave 1: engine built-in plugin palette (effects + instruments) ───
-    std::cerr << "--- Wave 1: built-in plugin palette ---\n";
+    section ("Wave 1: built-in plugin palette");
     {
         auto builtinIndex = [&] (const var& track, const char* type) -> int {
             if (auto* arr = track.getProperty ("plugins", var()).getArray())
@@ -719,7 +759,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     }
 
     // ─── Stage 4: Tier-A real-time neural insert ───
-    std::cerr << "--- Stage 4: Tier-A neural insert (RT-safe / PDC / ASTD) ---\n";
+    section ("Stage 4: Tier-A neural insert (RT-safe / PDC / ASTD)");
     {
         auto nt = cmd (ops, "create_track", args1 ("name", "Neural"))["data"].getProperty ("trackId", var()).toString();
         auto ar = cmd (ops, "add_neural_insert", objN ({{ "trackId", nt }, { "modelId", "nam" }}));
@@ -786,7 +826,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     }
 
     // ─── MON-004: total plugin delay compensation (PDC) readout in the snapshot ───
-    std::cerr << "--- MON-004: PDC / reported-latency readout ---\n";
+    section ("MON-004: PDC / reported-latency readout");
     {
         auto sess = ops.snapshot().getProperty ("session", var());
         // Fields present + numeric (the UI reads these for the transport readout).
@@ -816,7 +856,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     }
 
     // ─── Stage 5: Tier-B generative layer (FakeAdapter) ───
-    std::cerr << "--- Stage 5: generative layer (FakeAdapter, full loop) ---\n";
+    section ("Stage 5: generative layer (FakeAdapter, full loop)");
     {
         // Fresh track + source clip for the generative flow.
         auto gt = cmd (ops, "create_track", args1 ("name", "Gen"))["data"].getProperty ("trackId", var()).toString();
@@ -870,7 +910,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (renderLogText.contains ("reject_render"), "JSONL records reject_render (taste label)");
 
         // --- NRL-004: render-layer management (bypass / freeze / bounce / remove) ---
-        std::cerr << "--- NRL-004: render-layer management ---\n";
+        section ("NRL-004: render-layer management");
         // Resolve the clip's render-layer var off the gen track by clipId (bind the
         // snapshot to a local so the array doesn't dangle).
         auto layerOf = [&] (const String& cid) -> var {
@@ -939,7 +979,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     }
 
     // --- Stage 6: full producer loop -> export, undo/redo correct throughout ---
-    std::cerr << "--- Stage 6: full producer loop + export ---\n";
+    section ("Stage 6: full producer loop + export");
     {
         // import/record -> arrange
         auto mt = cmd (ops, "create_track", args1 ("name", "Mix"))["data"].getProperty ("trackId", var()).toString();
@@ -992,7 +1032,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // --- IOX-002 / IOX-007: export format / bit-depth / sample-rate options ---
         // Renders headless (no device) like the export above. Each check exercises the
         // format-resolution + bit-depth-validation path, not just the happy WAV case.
-        std::cerr << "--- Export format / depth options (IOX-002, IOX-007) ---\n";
+        section ("Export format / depth options (IOX-002, IOX-007)");
         auto wavFile  = eng.sessionDir().getChildFile ("exports").getChildFile ("opt-test.wav");
         auto aiffFile = eng.sessionDir().getChildFile ("exports").getChildFile ("opt-test.aiff");
 
@@ -1037,7 +1077,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         aiffFile.deleteFile();
     }
 
-    std::cerr << "--- Serum render compatibility (optional local plugin gate) ---\n";
+    section ("Serum render compatibility (optional local plugin gate)");
     if (File ("/Library/Audio/Plug-Ins/VST3/Serum2.vst3").exists())
     {
         String serumId;
@@ -1107,7 +1147,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     //  ~30s, too heavy for the default --selftest. Opt in explicitly to exercise it.)
     if (SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SA3", "0") == "1")
     {
-        std::cerr << "--- Stage 5 (SA3): real Stable Audio 3 backend ---\n";
+        section ("Stage 5 (SA3): real Stable Audio 3 backend");
         // /colors handshake
         auto lc = cmd (ops, "list_colors");
         const int nColors = lc["data"].getProperty ("colors", var()).size();
@@ -1155,7 +1195,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         mm->runDispatchLoopUntil (250);
 
     // ─── Wave 4: MIDI note editing (piano-roll command surface) ───
-    std::cerr << "--- Wave 4: MIDI note editing ---\n";
+    section ("Wave 4: MIDI note editing");
     {
         auto clipNotes = [&] (const String& cid) -> var {
             auto snap = ops.snapshot();
@@ -1205,7 +1245,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     }
 
     // ─── Wave 8: sends / returns / aux buses ───
-    std::cerr << "--- Wave 8: sends / returns / aux buses ---\n";
+    section ("Wave 8: sends / returns / aux buses");
     {
         auto buses  = [&] { return ops.snapshot().getProperty ("buses", var()); };
         auto sendsOf = [&] (const String& tid) -> var { return trackById (tid).getProperty ("sends", var()); };
@@ -1255,7 +1295,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     }
 
     // ─── Wave 9: channel metering (command + snapshot plumbing) ───
-    std::cerr << "--- Wave 9: channel metering ---\n";
+    section ("Wave 9: channel metering");
     {
         auto meterOn = [&] (const String& tid) { return (bool) trackById (tid).getProperty ("meterEnabled", false); };
         auto hasLevelInRack = [&] (const String& tid) -> bool {
@@ -1294,7 +1334,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // getAllInputDevices() is empty: arm/monitor are graceful no-ops (applied:false,
     // never an error) and the snapshot fields default false/"automatic"/false. The
     // armed=true round-trip and actual capture are hardware/GUI-gated (see the plan).
-    std::cerr << "--- Wave: recording (arm / input monitor) ---\n";
+    section ("Wave: recording (arm / input monitor)");
     {
         auto rt = cmd (ops, "create_track", args1 ("name", "RecTrack"))["data"].getProperty ("trackId", var()).toString();
 
@@ -1410,7 +1450,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // controller) + ARE-003 latency-compensated clip start are HARDWARE-GATED: they
         // need a live interface + keyboard, verified live by the user. We do NOT fake a
         // landed take here.
-        std::cerr << "--- Wave B: record-to-take landing (stop_recording) ---\n";
+        section ("Wave B: record-to-take landing (stop_recording)");
 
         // Use a FRESH wave track: the earlier `rt` may have been undone away by the
         // arm_track+undo probes above (arm is non-undoable, so undo walks back to its
@@ -1471,7 +1511,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // hears via software input monitoring. Needs only an open device (NOT a prepared
     // graph), so it is 0 headless. Read-only state, not a command. The real numbers +
     // audible low-latency monitoring are HARDWARE-GATED (verified live).
-    std::cerr << "--- MON-003: monitoring round-trip latency readout ---\n";
+    section ("MON-003: monitoring round-trip latency readout");
     {
         auto sess = ops.snapshot().getProperty ("session", var());
         check (sess.hasProperty ("roundTripLatencyMs"), "session.roundTripLatencyMs present");
@@ -1499,7 +1539,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // reports honestly, device commands return graceful errors (never crash), and
     // device enumeration content + a successful device round-trip + the FileChooser
     // dialog are hardware/GUI-gated (verified manually in the GUI — see the plan).
-    std::cerr << "--- Wave: settings (audio gate / device / project lifecycle) ---\n";
+    section ("Wave: settings (audio gate / device / project lifecycle)");
     {
         auto sess = [&] { return ops.snapshot().getProperty ("session", var()); };
 
@@ -1621,7 +1661,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // Only the command path / clamping / readout / JSONL are headless-testable; the
     // audible single- vs multi-thread A/B and the live thread-pool-resize gap are
     // hardware-gated (need an open device + real DSP load).
-    std::cerr << "--- PRF-001 (multicore audio threads) ---\n";
+    section ("PRF-001 (multicore audio threads)");
     {
         auto sess = [&] { return ops.snapshot().getProperty ("session", var()); };
 
@@ -1689,7 +1729,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // Import reuses the existing import_clip command (no new mutation path). The GUI
     // browsing experience (popover, folder descent, breadcrumb) is hardware/GUI-gated;
     // the command shape, filtering, navigation, safety + the import seam are headless.
-    std::cerr << "--- BRW-001 (content browser / list_directory) ---\n";
+    section ("BRW-001 (content browser / list_directory)");
     {
         // Seed a known dir under the session: one audio file + one non-audio file +
         // one sub-directory. The session-selftest dir is wiped each run, so seed fresh.
@@ -1820,7 +1860,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // asserted here (no synthetic key events). What IS headless-verifiable, and is
     // proven below, is the one backend half: paste_clip reconstructs a clip from a
     // clipToVar-shaped descriptor (the UI clipboard's payload) on a target track.
-    std::cerr << "--- Wave: clip clipboard / paste_clip (AED-001) ---\n";
+    section ("Wave: clip clipboard / paste_clip (AED-001)");
     {
         // Track A with a wave clip; read A's clip descriptor from the snapshot
         // (this is exactly the object the UI clipboard captures via clipToVar).
@@ -1967,7 +2007,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // run a couple of known commands, then read them back most-recent-first.
     // (The UI-scale control is pure UI-local view state -- like theme -- and is NOT
     //  a command, so it is documented, not asserted here.)
-    std::cerr << "--- Wave: command-log inspector (AGT-001) ---\n";
+    section ("Wave: command-log inspector (AGT-001)");
     {
         // Fresh, known commands so the log tail is predictable. The LAST undoable
         // edit we issue before reading is rename_track, so it must be entry[0].
@@ -2057,7 +2097,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // full cross-restart is hardware-gated). ARE-003: latency-compensated recording —
     // verify the readout fields + the headless record graceful-degradation (the take
     // landing alignment rides Wave B + is hardware-gated).
-    std::cerr << "--- Wave A: project format (PRJ-008) / device prefs (PRE-001) / record latency (ARE-003) ---\n";
+    section ("Wave A: project format (PRJ-008) / device prefs (PRE-001) / record latency (ARE-003)");
     {
         auto sess = [&] { return ops.snapshot().getProperty ("session", var()); };
         auto proj = [&] { return sess().getProperty ("project", var()); };
@@ -2157,7 +2197,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // release). The BINDING proof is the run-wide JUCE-Assertion count being 0
     // (Mosh --selftest 2>&1 | grep -c 'JUCE Assertion'); here we assert the sequence runs
     // clean as a regression guard.
-    std::cerr << "--- itemID allocator regression (engine patch) ---\n";
+    section ("itemID allocator regression (engine patch)");
     {
         auto findIdByName = [&] (const juce::String& nm) -> juce::String {
             auto snap = ops.snapshot();
@@ -2184,7 +2224,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     }
 
     // ─── Wave C: ARR-010 time-range as a true delete target ───
-    std::cerr << "--- Wave C: delete_time_range (ARR-010) ---\n";
+    section ("Wave C: delete_time_range (ARR-010)");
     {
         // A single clip spanning 0..4s; delete [1,2] -> two clips with a 1..2s gap.
         auto dt = cmd (ops, "create_track", args1 ("name", "RangeDel"))["data"].getProperty ("trackId", var()).toString();
@@ -2275,7 +2315,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // builder routes them through a SummingNode + the folder's plugin chain — the
     // engine's own nested-submix test proves the audio). Headless we verify the
     // command surface, the snapshot structure, the group fader, and undo/redo.
-    std::cerr << "--- Wave D: group / submix tracks (MIX-008) ---\n";
+    section ("Wave D: group / submix tracks (MIX-008)");
     {
         auto ga = cmd (ops, "create_track", args1 ("name", "GrpA"))["data"].getProperty ("trackId", var()).toString();
         auto gb = cmd (ops, "create_track", args1 ("name", "GrpB"))["data"].getProperty ("trackId", var()).toString();
@@ -2354,7 +2394,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // input CHOICE round-trip, and the track->track output routing (ValueTree-backed,
     // no hardware needed) incl. cycle rejection, undo, and persistence. Real capture
     // from a chosen pair / audible multi-out are hardware-gated (verified live).
-    std::cerr << "--- Wave R: routing (RTG-001 inputs / RTG-002 outputs) ---\n";
+    section ("Wave R: routing (RTG-001 inputs / RTG-002 outputs)");
     {
         // Read-only enumerations: ok + shape; not logged.
         auto lwiBefore = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
@@ -2429,7 +2469,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // STEP changes (curve=1.0 -> hold-then-jump; the ramp branch is gated on
     // curve != +-1). ENGINE TRUTH is asserted here via getBpmAt at probe times;
     // the UI's piecewise-constant mapping is exact by construction for steps.
-    std::cerr << "--- Wave T: tempo map (SES-001) ---\n";
+    section ("Wave T: tempo map (SES-001)");
     {
         auto& seq = eng.edit().tempoSequence;
         // Normalize the base for deterministic probes.
@@ -2515,7 +2555,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // point: 1.0 = step (hold-then-jump), values in (-1,1) ramp. Engine truth via
     // getBpmAt mid-ramp; the snapshot emits the engine-faithful fine sections
     // (its own subdivision boundaries) so the UI mapping stays exact.
-    std::cerr << "--- Wave V: tempo ramps (curves) ---\n";
+    section ("Wave V: tempo ramps (curves)");
     {
         auto& seq = eng.edit().tempoSequence;
         // Clean slate: drop any leftover points from earlier blocks, base 120.
@@ -2583,7 +2623,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // the live tempo map IMMEDIATELY (no proxy wait) — the headless contract is
     // that halving the tempo doubles the clip's seconds length. Stretching uses
     // the engine's vendored SoundTouch (enabled at build). Warp MARKERS deferred.
-    std::cerr << "--- Wave V: audio warp (auto-tempo) ---\n";
+    section ("Wave V: audio warp (auto-tempo)");
     {
         auto wt = cmd (ops, "create_track", args1 ("name", "WarpTrack"))["data"].getProperty ("trackId", var()).toString();
         auto wc = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", wt }, { "seconds", 2.0 }, { "freq", 311.0 }}));
@@ -2642,6 +2682,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         cmd (ops, "remove_track", args1 ("trackId", wt));   // tidy
     }
 
+    finishSection();
     std::cerr << "===== " << (checks - failures) << "/" << checks
               << " checks passed, " << failures << " failed =====\n\n";
     return failures;
@@ -2652,8 +2693,10 @@ int runUndoSelfTest (MoshEngine&, MoshOps& ops)
     using namespace juce;
     failures = 0;
     checks = 0;
+    resetSections();
 
     std::cerr << "\n===== Mosh focused undo harness =====\n";
+    section ("focused undo transaction coverage");
 
     auto r = cmd (ops, "create_track", args1 ("name", "Undo Probe"));
     check (ok (r), "create_track ok");
@@ -2684,6 +2727,7 @@ int runUndoSelfTest (MoshEngine&, MoshOps& ops)
     check (ok (cmd (ops, "redo")), "redo render layer command ok");
     check ((bool) firstTrack (ops)["clips"][0].getProperty ("hasRenderLayer", false), "redo restored render layer");
 
+    finishSection();
     std::cerr << "===== " << checks - failures << "/" << checks
               << " focused undo checks passed, " << failures << " failed =====\n";
     return failures;
@@ -2694,8 +2738,10 @@ int runLiveAudioSmoke (MoshEngine& eng, MoshOps& ops)
     using namespace juce;
     failures = 0;
     checks = 0;
+    resetSections();
 
     std::cerr << "\n===== Mosh live-audio smoke =====\n";
+    section ("live-audio CoreAudio callback smoke");
 
     auto& deviceManager = eng.engine().getDeviceManager().deviceManager;
     auto* device = deviceManager.getCurrentAudioDevice();
@@ -2759,6 +2805,7 @@ int runLiveAudioSmoke (MoshEngine& eng, MoshOps& ops)
     }
     check (ok (cmd (ops, "set_transport", args1 ("action", "stop"))), "transport stop ok");
 
+    finishSection();
     std::cerr << "===== " << checks - failures << "/" << checks
               << " live-audio checks passed, " << failures << " failed =====\n";
     return failures;

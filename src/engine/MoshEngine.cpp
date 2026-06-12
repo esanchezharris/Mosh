@@ -34,7 +34,7 @@ namespace
     };
 }
 
-MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession)
+MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession, const juce::String& freshSessionName)
 {
     audioOpen = openAudioDevice
                 && ! juce::SystemStats::getEnvironmentVariable ("MOSH_NO_AUDIO", {}).isNotEmpty();
@@ -55,9 +55,14 @@ MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession)
     // The harness gets an isolated "session-selftest" dir so it can't be polluted
     // by (or clobber) a real GUI session — see freshSession below. Established BEFORE
     // the device init so PRE-001 can restore the persisted device setup from it.
+    const auto sessionLeaf = freshSession
+                             ? (freshSessionName.isNotEmpty() ? freshSessionName : juce::String ("session-selftest"))
+                             : juce::String ("session");
     session = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
                   .getChildFile ("Mosh")
-                  .getChildFile (freshSession ? "session-selftest" : "session");
+                  .getChildFile (sessionLeaf);
+    if (freshSession)
+        session.deleteRecursively();
     session.createDirectory();
     session.getChildFile ("audio").createDirectory();
     editPath = session.getChildFile ("session.tracktionedit");
