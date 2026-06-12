@@ -9,6 +9,10 @@
 **Mission for this phase:** intensive testing, verification, and hardening
 of the DAW. No new features unless a bug demands one.
 
+**PAUSED (2026-06-12):** read `docs/hardening/2026-06-12-pause-alignment.md`
+immediately after this file — it is the pause marker: seat map, last green
+battery, parked side branches, resume procedures, and the owner's open items.
+
 ## Verify before any merge
 ```sh
 cmake --build build
@@ -37,6 +41,9 @@ Mac — never re-enable hosted triggers without a budget decision.
 ## Other branches
 - **`design-lab`** — Emilio + Claude's design playground (own worktree at
   `~/Documents/ClaudeMosh-lab`). Not program code; do not touch.
+- **`codex/ios-companion-park`** — the iOS companion hardening slice (own
+  worktree at `~/Documents/ClaudeMosh-ios`); `codex/ios-companion-main-merge`
+  is its prebuilt merge candidate — do not merge without an explicit decision.
 - **`claude/laughing-grothendieck-22549c`** — PARKED (PR #10 closed with
   the park note): the paused agent-training stack (MoshIR, replay harness,
   trajectory store, collab sync, Monster/GEPA, replication ladder) + its

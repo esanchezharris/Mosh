@@ -127,3 +127,35 @@ Use this in a separate thread when the iOS app work resumes:
    not already known green.
 7. Keep any iOS, design-lab, or parked Claude work out of this checkout unless
    the user explicitly changes the branch boundary.
+
+## Owner To-Do (human-only items, in rough priority order)
+
+These cannot be done by an agent and block specific resumptions:
+
+1. **BlackHole driver repair** (blocks the last red Mac gate):
+   `sudo killall coreaudiod`, and if the gate still reports ENV-BLOCKED,
+   `brew reinstall blackhole-2ch` then restart coreaudiod again or reboot.
+   The gate self-diagnoses via `scripts/blackhole-control-probe.swift`.
+2. **Apple ID into Xcode** (blocks the physical-iPhone gate): sign in via
+   Xcode > Settings > Accounts (free Personal Team is sufficient); then
+   `scripts/iphone-companion-device-gate.sh` auto-detects the team. iPhone:
+   enable Developer Mode and trust the developer profile after first install.
+3. **GitHub Actions billing** (optional): hosted runners stay broken until
+   Billing & plans is fixed; nothing depends on them (CI is manual-only).
+4. **trap-03 gold sign-off** (first flywheel-resume step): listen to the
+   rung-1 bounce vs the tutorial; on sign-off the stored trajectory flips to
+   gold and seeds L3 calibration.
+5. **Budgeted spends** (when training resumes): the GEPA campaign and the
+   ~40-tutorial extraction pass — commands in `docs/PHASE0_EXIT.md` on the
+   parked branch.
+
+## Paused Flywheel Pointer
+
+The agent-training stack (MoshIR, replay harness, recorder/trajectory store,
+collab sync, Monster/GEPA, replication ladder) lives ONLY on
+`claude/laughing-grothendieck-22549c` (worktree
+`.claude/worktrees/laughing-grothendieck-22549c`). Its own pause brief is
+`docs/HANDOFF.md` on that branch; the owner's recorded rung-1 corrections are
+at `runs/replication/trap-03/emilio-corrections-2026-06-11.jsonl` there.
+Resume = port the stack atop this trunk's command surface (a deliberate
+project, not a merge — 21 core files diverged).
