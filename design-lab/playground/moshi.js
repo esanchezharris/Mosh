@@ -51,9 +51,13 @@ uniform float u_energy, u_mood, u_heat;
 uniform vec2  u_gaze, u_sq;            // gaze (face-space); spring squash (x,y)
 uniform float u_blink, u_wide, u_lid;  // blink snap, startle, sleepy droop
 uniform float u_sd, u_sd2;             // seed-derived texture offsets
-uniform vec3  u_limb[5];               // THE SPLAT's limbs: angle, length, radius —
+uniform vec4  u_limb[5];               // limbs: angle, length, radius, z-tilt —
                                        // CPU-computed per frame (pose blend + sway
                                        // baked in; frame constants stay off the GPU)
+uniform float u_zflat;                 // 3D blob at rest -> 2D sticker on emotes
+uniform vec2  u_lean;                  // the core leans into poses
+uniform float u_coreS;                 // ...and breathes with them
+uniform float u_faceE;                 // pose energy reaching the face
 uniform float u_toon;                  // the STYLE dial: 0 = PS2 crunch, 1 = sticker
 uniform float u_bw, u_bf;              // body waves: amplitude, spatial freq
 uniform float u_sw, u_sf;              // surface skin: amplitude, spatial freq
@@ -123,15 +127,18 @@ float map(vec3 p) {
   p.xy = gB * p.xy;
   p.x /= u_sq.x; p.y /= u_sq.y;                      // spring squash & stretch
   p /= u_scale; pW /= u_scale;
-  // THE SPLAT — the brand silhouette: a core with five gooey limbs in the
-  // camera plane, flattened in z. Limb configs arrive from the CPU with the
-  // pose blend, sway and transit-tuck already baked in.
-  p.z *= 1.45;
-  float d = length(p) - 0.30;
+  // THE SPLAT, in the round — a 3D blob at rest (limbs tilted fore and aft,
+  // mild flatten) that snaps FLAT into the sticker plane when he emotes.
+  // Limb configs arrive from the CPU with pose, sway and tuck baked in;
+  // the core leans into poses and breathes with them.
+  p.z *= u_zflat;
+  vec3 lean = vec3(u_lean, 0.0);
+  float d = length(p - lean * 0.5) - 0.30 * u_coreS;
   for (int i = 0; i < 5; i++) {
-    vec3 L = u_limb[i];
-    vec2 dir = vec2(cos(L.x), sin(L.x));
-    d = smin(d, sdCap(p, vec3(dir * 0.10, 0.0), vec3(dir * L.y, 0.0), L.z), u_smink);
+    vec4 L = u_limb[i];
+    float ct = cos(L.w);
+    vec3 dir = vec3(cos(L.x) * ct, sin(L.x) * ct, sin(L.w));
+    d = smin(d, sdCap(p, dir * 0.10 + lean, dir * L.y + lean, L.z), u_smink);
   }
   // BLOB-MIXER GRAMMAR (14islands, credited): two displacement layers with
   // face protection (its poleAmount) — near-field only; far steps and miss
@@ -145,8 +152,8 @@ float map(vec3 p) {
     d -= fz * u_sw * (surf - 0.5) * 2.0;
   }
   d = max(d, length(p) - 1.0);                       // bound: one being
-  // 0.62 = 0.9 squash safety / 1.45 z-flatten Lipschitz correction
-  return d * u_scale * min(u_sq.x, u_sq.y) * 0.62;
+  // squash safety / dynamic z-flatten Lipschitz correction
+  return d * u_scale * min(u_sq.x, u_sq.y) * 0.9 / u_zflat;
 }
 vec3 normalAt(vec3 p) {
   const vec2 e = vec2(0.004, -0.004);
@@ -222,9 +229,14 @@ void main() {
     vec3 H = normalize(KEY - rd);
     float spec = pow(max(dot(n, H), 0.0), 26.0);
     col += vec3(0.95) * step(0.60, spec + dth * 0.25) * 0.5 * u_glint * (1.0 - 0.6 * u_toon);
-    // rim: family-tinted hard edge in PS2; a crisp dark OUTLINE in toon
+    // edge fill — grazing facets shade near-black and read as a thick oil
+    // border around every look (user note); a touch of body color in the
+    // silhouette band thins it in both styles
+    col += body * 0.20 * smoothstep(0.5, 0.85, fres);
+    // rim: family-tinted hard edge in PS2; a THIN dark outline ring in toon
     col += mix(LIME, pal3(gt + 0.5), 0.6) * step(0.55, fres + dth * 0.07) * 0.15 * (1.0 - u_toon);
-    col = mix(col, vec3(0.04, 0.045, 0.04), u_toon * step(0.52, fres));
+    col = mix(col, vec3(0.05, 0.055, 0.05),
+              u_toon * (step(0.64, fres) - step(0.90, fres)));
     // VEINS — always lime: the one brand constant on the body. Iso-curves of a
     // noise field in BODY space (noise keeps gradient nearly everywhere; flat
     // fold-fields dither into body-wide lattice rain). Shards = beads where a
@@ -257,31 +269,35 @@ void main() {
     bd.xy = mat2(u_rotF.x, -u_rotF.y, u_rotF.y, u_rotF.x) * bd.xy;
     float sq = 1.0 - 0.10 * u_onset;
     float lidv = max(u_blink, u_lid * 0.82);
-    float eyeY = max(0.08, (1.0 + 0.35 * smoothstep(0.4, 1.0, u_heat))
+    float eyeY = max(0.08, (1.0 + 0.35 * smoothstep(0.4, 1.0, u_heat) + 0.20 * u_faceE)
                         * (1.0 - lidv * 0.92) * sq);
     vec3 eyeCol = mix(mix(vec3(0.90, 0.93, 0.87), vec3(0.05, 0.05, 0.06), u_inkeye),
                       LIME, smoothstep(0.45, 0.75, u_heat));
     eyeCol *= 0.60 + 0.45 * bk;                      // facet-lit like the hide
+    // the face is BIG like the reference art, and it rides the body: the
+    // pose lean carries the whole face, pose energy widens the eyes
     for (int e = 0; e < 2; e++) {
       float s = (e == 0) ? -1.0 : 1.0;
-      vec3 ed = normalize(vec3(s * 0.30 + u_gaze.x * 0.22, (0.20 + u_gaze.y * 0.16) * sq, 1.0));
-      if (dot(bd, ed) < 0.6) continue;
+      vec3 ed = normalize(vec3(s * 0.30 + u_gaze.x * 0.22 + u_lean.x * 0.8,
+                               (0.20 + u_gaze.y * 0.16) * sq + u_lean.y * 0.8, 1.0));
+      if (dot(bd, ed) < 0.55) continue;
       vec3 uu = normalize(cross(vec3(0.0, 1.0, 0.0), ed));
       vec3 vv = cross(ed, uu);
-      vec2 o = vec2(dot(bd - ed, uu), dot(bd - ed, vv)) * 3.7;
+      vec2 o = vec2(dot(bd - ed, uu), dot(bd - ed, vv)) * 2.7;
       o.y /= eyeY;
       float ch = chevron(o * 1.6, -s);
       col = mix(col, eyeCol, 1.0 - step(0.20 + (dth - 0.5) * 0.10, ch));
     }
     {                                                // the grin dial — one scaler
-      vec3 md = normalize(vec3(u_gaze.x * 0.26, (-0.30 + u_gaze.y * 0.15) * sq, 1.0));
-      if (dot(bd, md) > 0.6) {
+      vec3 md = normalize(vec3(u_gaze.x * 0.26 + u_lean.x * 0.8,
+                               (-0.27 + u_gaze.y * 0.15) * sq + u_lean.y * 0.8, 1.0));
+      if (dot(bd, md) > 0.55) {
         vec3 mu = normalize(cross(vec3(0.0, 1.0, 0.0), md));
         vec3 mv = cross(md, mu);
-        vec2 mo = vec2(dot(bd - md, mu), dot(bd - md, mv)) * 2.35;
+        vec2 mo = vec2(dot(bd - md, mu), dot(bd - md, mv)) * 1.85;
         mo = r2(u_mtilt) * mo;                       // attitude: the family lean
         mo.y /= sq;
-        float o2 = clamp(0.10 + 0.42 * u_mood + u_wide * 0.95 + u_onset * 0.18 + u_heat * 0.35, 0.0, 1.35);
+        float o2 = clamp(0.10 + 0.42 * u_mood + u_wide * 0.95 + u_onset * 0.18 + u_heat * 0.35 + 0.18 * u_faceE, 0.0, 1.35);
         float r = 0.33 * (1.0 + 0.55 * o2);
         float lip = -0.07 + 0.30 * o2;
         float m = (1.0 - step(0.0, length(mo) - r + (dth - 0.5) * 0.05))
@@ -382,6 +398,8 @@ function makeSpec(name, seed) {
     limbA: BASE_ANG.map((a, i) => a + (h(21 + i) - 0.5) * 0.3),
     limbL: BASE_ANG.map((a, i) => 0.50 * (1 + (h(31 + i) - 0.5) * 0.24)),
     limbR: BASE_ANG.map((a, i) => 0.155 * (1 + (h(41 + i) - 0.5) * 0.30)),
+    // fore/aft tilts (alternating, seeded): the limbs live in 3D space at rest
+    limbT: [0.22, -0.22, 0.22, -0.22, 0.22].map((b, i) => b + (h(51 + i) - 0.5) * 0.36),
     palA: F.palA.slice(), palB: F.palB.slice(),
     palD: F.palD.map(d => d + (h(15) - 0.5) * 0.06),
     irid: F.irid, glint: F.glint, veins: F.veins,
@@ -397,13 +415,14 @@ const NUMS = ['bw','bf','bsp','sw','sf','ssp','k','scale','sd','sd2',
 function lerpSpec(a, b, w) {
   const o = { name: w < 0.5 ? a.name : b.name, seed: w < 0.5 ? a.seed : b.seed };
   for (const k of NUMS) o[k] = a[k] + (b[k] - a[k]) * w;
-  for (const k of ['palA','palB','palD','limbA','limbL','limbR'])
+  for (const k of ['palA','palB','palD','limbA','limbL','limbR','limbT'])
     o[k] = a[k].map((v, i) => v + (b[k][i] - v) * w);
   return o;
 }
 const UNIFS = ['u_res','u_time','u_tq','u_lph','u_bph','u_sph','u_rotM','u_rotF',
   'u_onset','u_energy','u_mood','u_heat','u_gaze','u_sq','u_blink','u_wide','u_lid',
-  'u_sd','u_sd2','u_limb[0]','u_toon','u_bw','u_bf','u_sw','u_sf','u_smink',
+  'u_sd','u_sd2','u_limb[0]','u_zflat','u_lean','u_coreS','u_faceE','u_toon',
+  'u_bw','u_bf','u_sw','u_sf','u_smink',
   'u_palA','u_palB','u_palD','u_irid','u_glint','u_veins','u_scale','u_room',
   'u_flow','u_flowPh','u_mtilt','u_inkeye'];
 
@@ -432,19 +451,62 @@ const clamp1 = v => Math.max(-1, Math.min(1, v));
 // THE SPLAT's rest anatomy (radians): left arm, head, right arm, right leg, left leg
 const BASE_ANG = [2.618, 1.571, 0.436, -0.960, -2.182];
 
-// ── POSES — the body's vocabulary: per-limb [angle offset, length ×, radius ×].
-// Poses crossfade per the MORPH RULE (fixed-endpoint configs, eased) and
-// auto-return to the state's base pose after their hold.
+// ── SECOND-ORDER DYNAMICS (t3ssel8r's procedural-animation controller,
+// credited: "Giving Personality to Procedural Animations using Math") —
+// frequency f, damping z, response r per channel. Interruptions are smooth
+// by construction; z < 1 gives the anticipation/overshoot/settle that
+// hand-eased smoothsteps never had. This is the fix for "jerky transitions".
+function SOD(f, z, r, x0) {
+  const k1 = z / (Math.PI * f),
+        k2 = 1 / ((TAU * f) * (TAU * f)),
+        k3 = (r * z) / (TAU * f);
+  let xp = x0, y = x0, yd = 0;
+  return {
+    step(T, x) {
+      if (T <= 0) return y;
+      const xd = (x - xp) / T; xp = x;
+      const k2s = Math.max(k2, T * T / 2 + T * k1 / 2, T * k1);   // stability clamp
+      y += T * yd;
+      yd += T * (x + k3 * xd - y - k1 * yd) / k2s;
+      return y;
+    },
+    vel() { return yd; },
+    set(v) { xp = v; y = v; yd = 0; },
+  };
+}
+
+// ── POSES — the body's vocabulary. Each: per-limb [angle offset, length ×,
+// radius ×] + meta: flat (3D blob -> 2D sticker), lean (the core goes WITH
+// the pose), core (radius breath), and SOD motion temperament (f, z).
+// Poses blend per the MORPH RULE and auto-return to the state's base pose.
 const POSES = {
-  NEUTRAL: [[0,1,1],[0,1,1],[0,1,1],[0,1,1],[0,1,1]],
-  SPLAY:   [[ 0.28,1.30,0.88],[0,1.22,0.88],[-0.28,1.30,0.88],[-0.20,1.18,0.90],[ 0.20,1.18,0.90]],   // startle!
-  ARMS_UP: [[-0.35,1.30,0.92],[0,1.05,0.95],[ 0.35,1.30,0.92],[ 0.18,0.78,1.12],[-0.18,0.78,1.12]],   // a take landed
-  TUCK:    [[ 0,0.60,1.35],[0,0.60,1.35],[ 0,0.60,1.35],[ 0,0.70,1.30],[ 0,0.70,1.30]],               // oof
-  DROOP:   [[ 0.55,0.90,1.00],[0.45,0.72,1.05],[-0.55,0.90,1.00],[-0.10,1.05,1.00],[ 0.10,1.05,1.00]],// sleepy / sulking
-  WAVE:    [[ 0,1,1],[0,1,1],[ 0.70,1.45,0.82],[0,1,1],[0,1,1]],                                      // right arm up (wiggles)
-  REACH:   [[ 0,1,1],[0,1,1],[ 0.18,1.55,0.78],[0,1,1],[0,1,1]],                                      // toward the thing
+  NEUTRAL: { L: [[0,1,1],[0,1,1],[0,1,1],[0,1,1],[0,1,1]],
+             flat: 0,    lean: [0, 0],      core: 1.00, f: 1.6, z: 0.95 },
+  SPLAY:   { L: [[ 0.28,1.30,0.88],[0,1.22,0.88],[-0.28,1.30,0.88],[-0.20,1.18,0.90],[ 0.20,1.18,0.90]],
+             flat: 1,    lean: [0, 0.03],   core: 0.92, f: 3.4, z: 0.50 },  // startle!
+  ARMS_UP: { L: [[-0.35,1.30,0.92],[0,1.05,0.95],[ 0.35,1.30,0.92],[ 0.18,0.78,1.12],[-0.18,0.78,1.12]],
+             flat: 1,    lean: [0, 0.05],   core: 0.95, f: 2.6, z: 0.60 },  // a take landed
+  TUCK:    { L: [[ 0,0.60,1.35],[0,0.60,1.35],[ 0,0.60,1.35],[ 0,0.70,1.30],[ 0,0.70,1.30]],
+             flat: 0.25, lean: [0, -0.05],  core: 1.18, f: 3.0, z: 0.65 },  // oof
+  DROOP:   { L: [[ 0.55,0.90,1.00],[0.45,0.72,1.05],[-0.55,0.90,1.00],[-0.10,1.05,1.00],[ 0.10,1.05,1.00]],
+             flat: 0.35, lean: [0, -0.07],  core: 1.00, f: 1.1, z: 1.10 },  // sleepy / sulking
+  WAVE:    { L: [[ 0,1,1],[0,1,1],[ 0.70,1.45,0.82],[0,1,1],[0,1,1]],
+             flat: 0.8,  lean: [0.03, 0],   core: 1.00, f: 2.2, z: 0.70 },  // one arm up (wiggles)
+  REACH:   { L: [[ 0,1,1],[0,1,1],[ 0.18,1.55,0.78],[0,1,1],[0,1,1]],
+             flat: 0.85, lean: [0.05, 0],   core: 0.97, f: 2.8, z: 0.70 },  // toward the thing
 };
 const POSE_NAMES = Object.keys(POSES);
+
+// ── ANATOMY TUNE — the 3D-blob-vs-2D-emote dial (live variations on the
+// stage's ANAT chip until the user picks a winner):
+//   restZ/emoteZ  z-flatten at rest / fully emoting
+//   restLen       how absorbed the limbs sit at rest
+//   tiltKeep      how much fore/aft limb tilt SURVIVES an emote (0 = goes flat)
+const ANATOMY = {
+  A: { restZ: 1.12, emoteZ: 1.45, restLen: 0.78, tiltKeep: 0.0 },   // 3D blob, flat emotes
+  B: { restZ: 1.12, emoteZ: 1.20, restLen: 0.82, tiltKeep: 0.7 },   // always volumetric
+  C: { restZ: 1.06, emoteZ: 1.52, restLen: 0.62, tiltKeep: 0.0 },   // sea-star: max contrast
+};
 
 function Moshi(host, opts = {}) {
   const O = Object.assign({
@@ -575,30 +637,51 @@ function Moshi(host, opts = {}) {
     if (n === 'LISTENING' || n === 'RECORDING') fireBlink();  // acknowledgment
   }
 
-  // ── the POSE engine: fixed-endpoint configs, eased crossfade, auto-return ──
-  let poseName = 'NEUTRAL', poseFrom = POSES.NEUTRAL, poseTo = POSES.NEUTRAL,
-      poseMix = 1, poseHold = 0;
+  // ── the POSE engine: fixed-endpoint configs blended by ONE second-order
+  // dynamics channel — overshoot/settle for free, interruptions smooth ──
+  let poseName = 'NEUTRAL', poseHold = 0, poseQueued = null, poseAt = 0;
+  let poseFrom = { L: POSES.NEUTRAL.L, flat: 0, lean: [0, 0], core: 1 },
+      poseTo = poseFrom;
+  let poseSOD = SOD(1.6, 0.95, 0, 1);
   const poseCfg = (n, aimX) => {
-    let c = POSES[n].map(l => l.slice());
+    const P = POSES[n];
+    let L = P.L.map(l => l.slice());
+    let lean = P.lean.slice();
     if ((n === 'REACH' || n === 'WAVE') && aimX < 0) {       // mirror to the left arm
-      const t = c[2]; c[2] = [0, 1, 1];
-      c[0] = [-t[0], t[1], t[2]];
+      const t = L[2]; L[2] = [0, 1, 1];
+      L[0] = [-t[0], t[1], t[2]];
+      lean[0] = -lean[0];
     }
-    return c;
+    return { L, flat: P.flat, lean, core: P.core };
   };
   function poseNow() {                       // current blended config (an endpoint)
-    const w = poseMix * poseMix * (3 - 2 * poseMix);
-    return poseFrom.map((l, i) => l.map((v, k) => v + (poseTo[i][k] - v) * w));
+    const w = Math.max(-0.15, Math.min(1.3, poseSOD.step(0, 1)));
+    const lerp = (a, b) => a + (b - a) * w;
+    return {
+      L: poseFrom.L.map((l, i) => l.map((v, k) => lerp(v, poseTo.L[i][k]))),
+      flat: lerp(poseFrom.flat, poseTo.flat),
+      lean: [lerp(poseFrom.lean[0], poseTo.lean[0]), lerp(poseFrom.lean[1], poseTo.lean[1])],
+      core: lerp(poseFrom.core, poseTo.core),
+    };
   }
   function setPoseRaw(n, hold, aimX) {
     if (!POSES[n]) throw new Error('moshi: unknown pose ' + n);
+    const now = performance.now();
+    if (now - poseAt < 140 && poseName !== n) {        // intelligent triggering:
+      poseQueued = [n, hold, aimX];                    // don't machine-gun poses
+      return;
+    }
+    poseAt = now;
     poseFrom = poseNow();
     poseTo = poseCfg(n, aimX || 0);
-    poseMix = 0; poseName = n;
+    poseSOD = SOD(POSES[n].f, POSES[n].z, 0, 0);       // per-pose temperament
+    poseName = n;
     poseHold = hold != null ? hold : 1.2;
   }
   const basePose = () => (stName === 'SLEEPING' || annoyT > 0) ? 'DROOP' : 'NEUTRAL';
-  const limbArr = new Float32Array(15);      // upload scratch, allocated once
+  const limbArr = new Float32Array(20);      // upload scratch, allocated once
+  // the anatomy dial (see ANATOMY at module scope)
+  let TUNE = Object.assign({}, ANATOMY.A);
 
   // the migration steal, splat edition: limbs fidget around their sockets —
   // bounded (an arm stays an arm), tucking in while they travel
@@ -821,13 +904,20 @@ function Moshi(host, opts = {}) {
       shiftV[i] = L.s;
     }
 
-    // the pose advances, holds, and returns to the state's base pose
-    if (poseMix < 1) poseMix = Math.min(1, poseMix + dt / 0.35);
-    poseHold -= dt;
-    if (poseHold <= 0 && poseName !== basePose()) setPoseRaw(basePose(), 0);
+    // the pose advances on its second-order channel, holds once SETTLED,
+    // then returns to the state's base pose — no mid-flight snatching
+    const pw = poseSOD.step(dt, 1);
+    if (Math.abs(pw - 1) < 0.08) {
+      if (poseQueued) { const q = poseQueued; poseQueued = null; poseAt = 0; setPoseRaw(q[0], q[1], q[2]); }
+      else poseHold -= dt;
+    }
+    if (poseHold <= 0 && poseName !== basePose()) { poseAt = 0; setPoseRaw(basePose(), 0); }
     const pose = poseNow();
-    if (poseName === 'WAVE' && poseMix > 0.6)        // the wave wiggles
-      pose[poseTo[0][1] !== 1 ? 0 : 2][0] += Math.sin(t * 9) * 0.22;
+    if (poseName === 'WAVE' && pw > 0.6)             // the wave wiggles
+      pose.L[poseTo.L[0][1] !== 1 ? 0 : 2][0] += Math.sin(t * 9) * 0.22;
+    // pose energy reaches the FACE (eyes widen, grin lifts, the face leans
+    // with the body) — the cure for the static-center disconnect
+    const faceE = Math.min(1, Math.abs(poseSOD.vel()) * 0.35 + pose.flat * 0.3);
 
     // the style dial eases
     toonA += (toonT - toonA) * Math.min(1, dt * 4);
@@ -893,20 +983,28 @@ function Moshi(host, opts = {}) {
     gl.uniform1f(U.u_lid, lid);
     gl.uniform1f(U.u_sd, sd);
     gl.uniform1f(U.u_sd2, sd2);
-    // THE SPLAT's limbs: anatomy × pose × fidget × breath-drift, baked on CPU
+    // THE SPLAT's limbs: anatomy × pose × fidget × breath-drift, baked on CPU.
+    // At rest limbs sit absorbed (TUNE.restLen) with fore/aft tilt — a 3D
+    // blob; emoting extends them and flattens the tilt into the sticker plane.
+    const restEase = TUNE.restLen + (1 - TUNE.restLen) * pose.flat;
     for (let i = 0; i < 5; i++) {
-      const P = pose[i];
-      limbArr[i * 3]     = cur.limbA[i] + P[0] + shiftV[i] + Math.sin(lph * 0.9 + i * 2.1) * 0.05;
-      limbArr[i * 3 + 1] = cur.limbL[i] * P[1] * (1 - 0.18 * tuckV[i]) * (1 + Math.sin(lph * 0.7 + i * 1.7) * 0.04);
-      limbArr[i * 3 + 2] = cur.limbR[i] * P[2] * (1 + 0.12 * tuckV[i]);
+      const P = pose.L[i];
+      limbArr[i * 4]     = cur.limbA[i] + P[0] + shiftV[i] + Math.sin(lph * 0.9 + i * 2.1) * 0.05;
+      limbArr[i * 4 + 1] = cur.limbL[i] * P[1] * restEase * (1 - 0.18 * tuckV[i]) * (1 + Math.sin(lph * 0.7 + i * 1.7) * 0.04);
+      limbArr[i * 4 + 2] = cur.limbR[i] * P[2] * (1 + 0.12 * tuckV[i]);
+      limbArr[i * 4 + 3] = cur.limbT[i] * (1 - pose.flat * (1 - TUNE.tiltKeep));
     }
-    gl.uniform3fv(U['u_limb[0]'], limbArr);
+    gl.uniform4fv(U['u_limb[0]'], limbArr);
+    gl.uniform1f(U.u_zflat, TUNE.restZ + (TUNE.emoteZ - TUNE.restZ) * pose.flat);
+    gl.uniform2f(U.u_lean, pose.lean[0], pose.lean[1]);
+    gl.uniform1f(U.u_coreS, pose.core);
+    gl.uniform1f(U.u_faceE, faceE);
     gl.uniform1f(U.u_toon, toonA);
     gl.uniform1f(U.u_bw, cur.bw);
     gl.uniform1f(U.u_bf, cur.bf);
     gl.uniform1f(U.u_sw, cur.sw);
     gl.uniform1f(U.u_sf, cur.sf);
-    gl.uniform1f(U.u_smink, cur.k);
+    gl.uniform1f(U.u_smink, cur.k * (1 + 0.30 * (1 - pose.flat)));   // gooier at rest
     gl.uniform3f(U.u_palA, cur.palA[0], cur.palA[1], cur.palA[2]);
     gl.uniform3f(U.u_palB, cur.palB[0], cur.palB[1], cur.palB[2]);
     gl.uniform3f(U.u_palD, cur.palD[0], cur.palD[1], cur.palD[2]);
@@ -1028,6 +1126,12 @@ function Moshi(host, opts = {}) {
       O.style = s; toonT = s === 'toon' ? 1 : 0;
       return api;
     },
+    setAnatomy(n) {                  // A / B / C — the 3D-vs-flat variations
+      if (!ANATOMY[n]) throw new Error('moshi: unknown anatomy ' + n);
+      TUNE = Object.assign({}, ANATOMY[n]);
+      O.anatomy = n;
+      return api;
+    },
     lookAt(nx, ny) { saccadeTo(nx, ny, 2); ignoreUntil = performance.now() + 2000; return api; },
     state() { return { personality: to.name, seed: to.seed, state: stName, pose: poseName, style: O.style, quality: O.quality, petting, attention: att, drives: Object.assign({}, drives) }; },
     _move() { lobeMove((performance.now() - t0) / 1000); return api; },   // test hook
@@ -1061,5 +1165,6 @@ Moshi.STATES = Object.keys(STATES);
 Moshi.QUALITIES = Object.keys(QUALITY);
 Moshi.POSES = POSE_NAMES.slice();
 Moshi.STYLES = ['ps2', 'toon'];
+Moshi.ANATOMIES = Object.keys(ANATOMY);
 window.Moshi = Moshi;
 })();

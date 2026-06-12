@@ -43,6 +43,7 @@
   #signal { top: 18px; right: 18px; }
   #res    { top: 18px; right: 132px; }
   #style  { top: 18px; right: 246px; }
+  #anat   { top: 18px; right: 372px; }
 
   /* THE LOOKBOOK plate — number, name, state, caption */
   #plate { position: fixed; left: 50%; bottom: 46px; transform: translateX(-50%);
@@ -122,8 +123,9 @@
 
 <div id="chrome">
   <div id="wordmark" class="disp">MOSHI · LOOKBOOK</div>
-  <div id="style" class="chip mono">STYLE·PS2</div>
-  <div id="res" class="chip mono">RES·PS2</div>
+  <div id="anat" class="chip mono" title="anatomy: A = 3D blob w/ flat emotes · B = always volumetric · C = sea-star max contrast">ANAT·A</div>
+  <div id="style" class="chip mono">STYLE·TOON</div>
+  <div id="res" class="chip mono">RES·PS2+</div>
   <div id="signal" class="chip mono">SIGNAL·PS2</div>
 
   <div class="arrow" id="prev" title="previous look">◀</div>
@@ -166,12 +168,15 @@ const LOOKS = [
   { p: 'TAR',       sd: 0.500, st: 'LISTENING', cap: 'even obsidian moves when the music is on.' },
 ];
 
+// the user's frontrunner settings (2026-06-12): TOON style at PS2+ res,
+// the chrome on the PS2 signal cable
 const stage = Moshi(document.getElementById('stage'), {
-  personality: LOOKS[0].p, seed: LOOKS[0].sd, room: true, quality: 'ps2',
+  personality: LOOKS[0].p, seed: LOOKS[0].sd, room: true,
+  quality: 'ps2+', style: 'toon',
 });
 const mini = Moshi(document.getElementById('mini'), {
   personality: LOOKS[0].p, seed: LOOKS[0].sd, interactive: false,
-  resDiv: 2, maxW: 96, maxH: 96,
+  resDiv: 2, maxW: 96, maxH: 96, style: 'toon',
 });
 mini.set('mood', 0.7);
 
@@ -238,9 +243,9 @@ addEventListener('wheel', e => {
   go(e.deltaY > 0 ? 1 : -1);
 }, { passive: true });
 
-// the console dial: PS1 swims · PS2 holds · PS2+ is for screenshots
+// the console dial: PS1 swims · PS2 holds · PS2+ is the frontrunner
 const resChip = document.getElementById('res');
-let qi = 1;
+let qi = 2;
 resChip.onclick = () => {
   qi = (qi + 1) % Moshi.QUALITIES.length;
   const q = Moshi.QUALITIES[qi];
@@ -250,12 +255,22 @@ resChip.onclick = () => {
 
 // the STYLE dial: PS2 crunch <-> the sticker (clean 2-band toon)
 const styleChip = document.getElementById('style');
-let toon = false;
+let toon = true;
 styleChip.onclick = () => {
   toon = !toon;
   const s = toon ? 'toon' : 'ps2';
   stage.setStyle(s); mini.setStyle(s);
   styleChip.textContent = 'STYLE·' + s.toUpperCase();
+};
+
+// the ANATOMY variations: pick the 3D-vs-flat balance by eye
+const anatChip = document.getElementById('anat');
+let ai = 0;
+anatChip.onclick = () => {
+  ai = (ai + 1) % Moshi.ANATOMIES.length;
+  const a = Moshi.ANATOMIES[ai];
+  stage.setAnatomy(a); mini.setAnatomy(a);
+  anatChip.textContent = 'ANAT·' + a;
 };
 
 // the signal chain A/B

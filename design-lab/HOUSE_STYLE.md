@@ -112,10 +112,19 @@ dithered at quarter-res, who happens to be alive.
     forgives. The same input producing the same output is a vending machine.
 16d. **THE SPLAT is the anatomy; POSES are its vocabulary.** The brand
     silhouette is a core + five gooey limbs (left arm, head, right arm, two
-    legs) in the camera plane, z-flattened. Limbs hit named POSES — SPLAY,
-    ARMS_UP, TUCK, DROOP, WAVE, REACH — for different actions, crossfading
-    per the MORPH RULE and returning to the state's base. Reactions get a
-    face beat AND a body beat.
+    legs). **He is 3D at rest and 2D when he speaks:** limbs carry seeded
+    fore/aft tilts and sit absorbed in a round blob; emoting extends them and
+    flattens everything into the sticker plane (he's on a 2D screen — the
+    flat pose is how he projects). The core is never static: it leans into
+    poses, breathes with them, and pose energy reaches the face (eyes widen,
+    grin lifts, the face rides the lean) — one organism, no ball-with-arms.
+    Poses blend per the MORPH RULE and return to the state's base.
+16d′. **Motion is second-order dynamics** (t3ssel8r, credited): every pose
+    transition runs through an f/ζ channel — anticipation, overshoot, settle,
+    and smooth interruption for free. Per-pose temperament (startle snappy
+    and underdamped; droop slow and overdamped). New triggers within 140ms
+    queue instead of snatching. Hand-tuned smoothsteps are retired for
+    anything the user watches move.
 16e. **Drag is grab-the-surface.** The body follows the cursor under drag —
     the opposite mapping reads inverted (user note, 2026-06-12).
 17. **Bounded reroll.** Seeds jitter INSIDE a family's curated ranges — different

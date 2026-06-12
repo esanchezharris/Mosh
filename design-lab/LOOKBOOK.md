@@ -127,6 +127,22 @@ Poses crossfade per the MORPH RULE and auto-return to the state's base pose.
   agnostic OpenAI-compatible client (`MOSHI_BRAIN_URL/_KEY/_MODEL` — DeepSeek
   or OpenAI keys both fit), built when a key lands.
 
+- **v5 — IN THE ROUND** (2026-06-12, user notes): the pancake died — limbs
+  live in 3D at rest (seeded fore/aft tilts, mild flatten, absorbed lengths)
+  and SNAP FLAT into the sticker plane when he emotes ("a 3D blob guy who
+  emotes in 2D when he needs to get it across" — the user's settled design).
+  Three live ANATOMY variations on the ANAT chip (A: 3D blob w/ flat emotes ·
+  B: always volumetric · C: sea-star max contrast) for the user to pick by
+  eye. The static-center disconnect fixed: the core LEANS into poses and
+  breathes with them, pose energy reaches the face (eyes widen, grin lifts,
+  the whole face rides the lean), the body goes gooier at rest. The face went
+  BIG like the reference art (eyes ~37% larger, mouth ~27%). Motion moved to
+  SECOND-ORDER DYNAMICS (t3ssel8r's procedural-animation controller,
+  credited) — per-pose frequency/damping, natural overshoot/settle, smooth
+  interruption, pose queueing — the fix for "jerky transitions". The oil
+  border thinned (edge fill + thin outline ring). Stage defaults = the user's
+  frontrunner: STYLE·TOON at RES·PS2+ on the PS2 signal cable.
+
 ## Adding a look
 
 Append to `LOOKS` in `playground/index.html`: `{ p: FAMILY, sd: seed, st: STATE,
