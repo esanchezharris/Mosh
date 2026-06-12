@@ -1,64 +1,70 @@
-# Mosh Design Lab
+# THE MOSHI LAB
 
-The workspace where Mosh's next-generation interface — the **Moshi symbiote** premise —
-is generated, browsed, critiqued, and promoted. The app build (`/src`, `/ui`, CMake) is
-deliberately untouched by anything in here: the lab is upstream of the product.
+One deliverable lives here: **Moshi** — the agent as a beautiful, interactive,
+PlayStation-2-register character. Everything else this lab ever built (the DAW
+skins, the arrangement views, the scene rail) was retired on 2026-06-12
+("THE MOSHI PASS: scorched earth"); git history before that commit keeps all of it.
+The app build (`/src`, `/ui`, CMake) remains untouched by anything in here.
 
-> The interface is not an app you look at. It's what the world looks like when a
-> creature that happens to be a world-class audio engineer is riding along inside
-> your senses. See [BRIEF.md](BRIEF.md) — the canonical seed for every concept.
+> Everybody meets the same Moshi. What he becomes is up to what you make.
+
+## Run it
+
+```sh
+cd design-lab/playground
+npm install   # first time only (vite is the only dep)
+npm run dev   # → http://localhost:5180 — the stage
+```
+
+The stage: ◀ ▶ (or wheel) walks the eight personalities, **R** rerolls the seed
+inside a family, click = poke, hold = pet, drag = spin. He blinks, glances around,
+does the occasional antic, and falls asleep if you ignore him long enough.
+SIGNAL·PS2 (top right) A/Bs the whole-page signal chain.
+
+## The component — `playground/moshi.js`
+
+One classic script, zero deps, WebGL1. Drop it next to a host element in any page
+(or any WebView, in any app, in any language) and he lives in it — from a 24px
+presence orb to a full stage. The crunch (quarter-res, Bayer dither, banded light,
+faceted normals, on-twos) is all in-shader, so the look ports wherever GLSL does.
+
+```js
+const m = Moshi(hostEl, {
+  personality: 'TAR',   // TAR · DISCO · MOLTEN · GHOST · SILK · BREAKS · CHROME · BUBBLE
+  seed: 0.5,            // bounded variation inside the family
+  interactive: true,    // gaze/poke/drag/pet + idle life; false = API-driven only
+  room: false,          // ground + contact glow + aura (the stage turns this on)
+});
+
+m.set('energy', v);     // 0..1 — how hard the work is going (waves, veins)
+m.set('mood', v);       // 0..1 — resting grin + liveliness
+m.set('heat', v);       // 0..1 — REC/excitement: ember core, lime eyes
+m.setPersonality('GHOST' | 0.37 [, seed] [, { snap: true }]);  // crossfades
+m.reroll(); m.poke(); m.lookAt(nx, ny);
+m.state(); m.onPersonality(fn); m.destroy();
+```
+
+**Drives are semantic, not sources.** The component never knows about transports,
+meters or agents — the host wires whatever it has into the same three scalars.
+That's the swappable seam: the future UI (whatever language it's written in)
+keeps Moshi by feeding three numbers and a canvas.
+
+**Two channels, one being** (the doctrine that survived every era of this lab):
+the FACE is the agent — eyes, grin, blink, gaze, ember; the BODY is the work —
+waves, skin, veins, palette. They never compete for the same pixels.
+
+Body language is Blob Mixer's grammar, credited — 14islands' Blob Mixer
+(https://blobmixer.14islands.com/, source via github.com/connorhvnsen/blob-mixer):
+two displacement layers with face protection, and named personality presets
+translated into our raymarched, dithered register.
 
 ## Map
 
 | path | what |
 |---|---|
-| [BRIEF.md](BRIEF.md) | The fiction + hard constraints. Feed it whole to any designer, human or model. |
-| [TOOLS.md](TOOLS.md) | The surplus: every design tool wired into this environment and when to reach for it. |
-| [tokens/moshi.css](tokens/moshi.css) | Canonical palette + type. Exact values are a constraint. |
-| [HOUSE_STYLE.md](HOUSE_STYLE.md) | **The register: Y2K console crunch (v2.2).** Dithered faceted world + plate-pass chrome (skewed lime plates, plastic gloss, chamfers) + the whole-page PS2 signal chain ([tokens/ps2-pass.css](tokens/ps2-pass.css)) — and the decade test that keeps it 2000s, not 80s. |
-| [inspiration/INDEX.md](inspiration/INDEX.md) | ~150 reference links, identified and tagged by theme. |
-| [playground/](playground/) | Vite app. **THE one main view** (index.html) — self-contained HTML. |
-| [concepts/](concepts/) | One-pager per named design direction: thesis, how it meets the constraints, what to steal. |
-| [avalonia/NOTES.md](avalonia/NOTES.md) | The native-surface translation path (web prototype → Avalonia/SkiaSharp). |
-
-## Run THE VIEW
-
-```sh
-cd design-lab/playground
-npm install   # first time only (vite is the only dep)
-npm run dev   # → http://localhost:5180 — the one main view
-```
-
-## ONE MAIN VIEW (consolidated 2026-06-10)
-
-The experiment pages (007–011) are retired — **everything lives in
-[playground/index.html](playground/index.html)** now:
-
-- **THE SYMBIOTE** — Moshi IS the artifact: everyone starts with the same agent
-  (provably seed-invariant); your music grows and inscribes him. Face = agent
-  channel (REC ember, grin, gaze), body = work channel (growth, waves, skin,
-  veins, fringe — Blob Mixer two-layer grammar, credited).
-- **The DAW skeleton** — ghost lanes, cartridge clips, latching M/S switches +
-  LED ladders that feed him, the needle playhead, BUILD demo.
-- **THE LISTENER** — ♪ LoserFace chip or drop any audio file: real 3-band
-  analysis drives everything; ruler seeks; honest time readout.
-- **No rectangles** — the rack orbits him, the chain hangs in its lane, the
-  topbar is a scrim; THE ROOM (his ground + contact glow + hue aura).
-- **THE SCENE rail** — crew orbs (deed ticks, REC embers) + rival fog orbs;
-  tap a rival to PEEK their Moshi in fog. See it, never hear it.
-- The whole page through the PS2 signal chain (CRT bloom + posterize), Nanum
-  Square Round display voice.
-
-Retired pages live in git history; the concepts/ one-pagers remain as the
-design record (009-the-pit.md carries the full v1→v15 changelog).
-
-## Parked (next waves)
-
-- ~~Real audio features~~ **DONE (2026-06-10):** run Mosh with `MOSH_LAB_FEED=1` and 009
-  links to the companion server (port 47873) — real transport position drives the bars,
-  master meters drive energy/slams (`enable_all_meters` is sent automatically). Token:
-  `MOSH_LAB_TOKEN` (default `mosh-lab`), or `?token=` on the page URL. Other experiments
-  adopt the same client as they're revisited.
-- **Rive / diffusion-baked Moshi sprites** — prior research says bake offline, SDF for
-  continuous motion. Experiment 002 informs whether/when to invest.
-- **Avalonia code** — notes only until the native-surface decision is firm.
+| [playground/moshi.js](playground/moshi.js) | THE COMPONENT — self-contained, portable |
+| [playground/index.html](playground/index.html) | THE STAGE — hosts him full-size + a 76px corner twin |
+| [HOUSE_STYLE.md](HOUSE_STYLE.md) | The register: PS2 crunch, signal chain, face doctrine, morph rule, color doctrine |
+| [BRIEF.md](BRIEF.md) | The fiction — who Moshi is |
+| [tokens/moshi.css](tokens/moshi.css) | Palette + the NanumSquareRound display face |
+| [tokens/ps2-pass.css](tokens/ps2-pass.css) | The whole-page signal chain (canonical copy) |
