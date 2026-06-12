@@ -121,3 +121,27 @@ The gate now performs this control probe itself
 (`scripts/blackhole-control-probe.swift`) and exits **3 = ENV-BLOCKED** with
 remediation text when the driver is at fault, so an environment failure can
 never again read as an application failure.
+
+## Physical iPhone Gate Addendum (Codex, 2026-06-11)
+
+After Xcode account setup, the physical iPhone path advanced past the earlier
+signing blocker:
+
+- `devicectl` sees Emilio's iPhone (`00008110-001E4D920181401E`) as paired,
+  booted, Developer Mode enabled, and capable of install/launch.
+- Xcode created a valid Apple Development identity for the Personal Team.
+- The correct team id is the certificate `OU` field: `ZYT77F9B27`.
+- `scripts/iphone-companion-device-gate.sh` now auto-detects that team id,
+  clears local Finder/file-provider xattrs that can poison device codesign,
+  builds for `iphoneos`, signs with the Personal Team profile, and installs
+  `studio.mosh.companion` on the phone.
+- The current remaining blocker is phone-side trust: iOS refuses to launch the
+  installed app until the Personal Team profile is explicitly trusted on the
+  device. The script exits `5` with the exact remediation:
+  `Settings > General > VPN & Device Management > Developer App > Trust`.
+
+Close it after trusting the profile on the iPhone:
+
+```sh
+scripts/iphone-companion-device-gate.sh
+```
