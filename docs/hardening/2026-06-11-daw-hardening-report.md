@@ -73,8 +73,9 @@ Selftest profiling is now emitted in the ordinary selftest log. The slowest fina
 1. BlackHole loopback routing is the only red audited gate. Close it with:
    `MOSH_EVID=/Users/emiliosanchez-harris/Documents/ClaudeMosh/_preserved_artifacts/2026-06-12-hardening/gate-evidence-$(date +%Y%m%d-%H%M%S)/blackhole-live-audio scripts/blackhole-live-audio-gate.sh`
 
-2. Physical iPhone companion pairing was not run. Close it with:
-   `MOSH_IOS_TEAM_ID=<team-id> scripts/iphone-companion-device-gate.sh`
+2. Physical iPhone install/launch is now green. Remaining phone-side manual QA
+   is the real mic workflow: start Mac pairing, scan the QR/deep link, record
+   two 5-second takes, and verify JSONL/undo/save/reload.
 
 3. Piano-roll native gestures still need a rendered gate for lasso vs draw, note-edge resize, velocity lane, quantize/humanize/swing, fold/scale, and undo grouping. The right next artifact is a new UI automation slice that saves screenshots and command-log markers under `_preserved_artifacts/2026-06-12-hardening/`.
 
@@ -135,13 +136,75 @@ signing blocker:
   clears local Finder/file-provider xattrs that can poison device codesign,
   builds for `iphoneos`, signs with the Personal Team profile, and installs
   `studio.mosh.companion` on the phone.
-- The current remaining blocker is phone-side trust: iOS refuses to launch the
-  installed app until the Personal Team profile is explicitly trusted on the
-  device. The script exits `5` with the exact remediation:
-  `Settings > General > VPN & Device Management > Developer App > Trust`.
+- After the profile was trusted on the phone, the gate passed end to end:
+  build, install, and launch on `00008110-001E4D920181401E`.
 
-Close it after trusting the profile on the iPhone:
+Current pass command:
 
 ```sh
 scripts/iphone-companion-device-gate.sh
 ```
+
+Pass signal: `Mosh Companion installed and launched on
+00008110-001E4D920181401E.` Timing from the rerun was 10.12s.
+
+## iPhone Companion Take-Path Addendum (Codex, 2026-06-11)
+
+The physical gate proved signing/install/launch, and a local HTTP continuation
+found a real Mac-side take-upload bug before asking Emilio for manual mic QA:
+
+- `/take/chunk` rejected Swift/Python-standard padded Base64 PCM strings
+  before they reached `RemotePhoneTakeStore`.
+- Root cause: `RemoteCompanionServer` used
+  `juce::MemoryBlock::fromBase64Encoding`, while the iOS app sends
+  `Data.base64EncodedString()` and existing Mosh import code already uses
+  `juce::Base64::convertFromBase64`.
+- Fix: decode `/take/chunk` with `juce::Base64::convertFromBase64`, then pass
+  the decoded bytes into the existing sequenced PCM append path.
+- Regression:
+  `remote companion server accepts standard Base64 phone take chunks` in
+  `tests/test_remote_companion.cpp`. It starts a take, uploads a padded
+  standard Base64 chunk, finishes the take, and verifies the generated WAV is
+  routed through `import_clip`.
+- Focused proof:
+  `build/tests/MoshTests_artefacts/Debug/MoshTests "[remote][takes]"` passed
+  22 assertions in 2 test cases.
+- Live app proof: launched rebuilt `Mosh.app` with
+  `MOSH_NO_AUDIO=1 MOSH_LAB_FEED=1 MOSH_LAB_TOKEN=codex-device-gate`, posted
+  three frame-aligned standard Base64 chunks to `/take/chunk`, finished the
+  take, and verified `import_clip` plus undo/redo by snapshot counts:
+  clips `3 -> 4 -> 3 -> 4`.
+- Evidence:
+  `_preserved_artifacts/2026-06-12-claude-verify/iphone-companion-e2e/summary.json`
+  plus request/response snapshots in the same directory.
+
+Current local gate rerun after the fix:
+
+| Gate | Result |
+| --- | --- |
+| `cmake --build build` | PASS, 0.24s |
+| `MOSH_NO_AUDIO=1 "$APP" --selftest` | PASS, 26.20s, `650/650` |
+| `MOSH_NO_AUDIO=1 "$APP" --selftest-undo` | PASS, 0.50s, `18/18` |
+| `ctest --test-dir build --output-on-failure` | PASS, 0.08s |
+| `scripts/validate-command-log-contract.sh` | PASS, 0.04s, 286 records |
+| `scripts/strict-local-v0-gate.sh` | PASS, 139.54s |
+| XcodeBuildMCP `test_sim` | PASS, 5/5, 27.744s |
+| `scripts/iphone-companion-device-gate.sh` | PASS, 10.12s |
+
+XcodeBuildMCP simulator artifacts:
+
+- Build log:
+  `/Users/emiliosanchez-harris/Library/Developer/XcodeBuildMCP/workspaces/ClaudeMosh-61190dceaa86/logs/test_sim_2026-06-12T04-15-44-130Z_pid81375_902c08d1.log`
+- Result bundle:
+  `/Users/emiliosanchez-harris/Library/Developer/XcodeBuildMCP/workspaces/ClaudeMosh-61190dceaa86/result-bundles/test_sim_2026-06-12T04-15-44-130Z_pid81375_6e84ae8f.xcresult`
+
+Residual manual/hardware risk: the actual iPhone microphone recording gesture
+still needs Emilio's hand because automation can build, install, launch, deep
+link, and exercise the Mac HTTP endpoint, but it cannot decide whether the
+physical phone mic capture workflow feels correct.
+
+Separate UI-startup observation: lab-feed `--demo5` launches still print
+repeated `juce_WebBrowserComponent.cpp:170` assertions while the WebView waits
+for `window.__JUCE__.backend`. This did not affect the phone-take endpoint fix
+and did not appear in the headless selftest assertion surface, but it should be
+closed as its own rendered UI startup hardening slice.

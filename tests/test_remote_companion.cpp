@@ -94,6 +94,71 @@ TEST_CASE ("remote companion server rejects unauthenticated commands and routes 
     server.stopServer();
 }
 
+TEST_CASE ("remote companion server accepts standard Base64 phone take chunks", "[remote][takes]")
+{
+    juce::ScopedJuceInitialiser_GUI juce;
+
+    auto root = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                    .getChildFile ("mosh-remote-server-take-test");
+    root.deleteRecursively();
+
+    RemoteCompanionServer server (root);
+    int importCalls = 0;
+    juce::String importedFile;
+    server.setCommandHandler ([&] (const juce::var& command) {
+        ++importCalls;
+        REQUIRE (command.getProperty ("command", {}).toString() == "import_clip");
+        const auto args = command.getProperty ("args", {});
+        importedFile = args.getProperty ("file", {}).toString();
+        REQUIRE (juce::File (importedFile).existsAsFile());
+        REQUIRE (args.getProperty ("name", {}).toString() == "Phone Gate");
+        auto* result = new juce::DynamicObject();
+        result->setProperty ("ok", true);
+        result->setProperty ("command", "import_clip");
+        return juce::var (result);
+    });
+
+    auto* startArgs = new juce::DynamicObject();
+    startArgs->setProperty ("port", 47878);
+    auto pairingResult = server.startPairing (juce::var (startArgs));
+    REQUIRE ((bool) pairingResult.getProperty ("ok", false));
+    const auto token = pairingResult.getProperty ("data", {})
+                           .getProperty ("pairing", {})
+                           .getProperty ("token", {})
+                           .toString();
+    REQUIRE (token.isNotEmpty());
+
+    auto* takeStart = new juce::DynamicObject();
+    takeStart->setProperty ("token", token);
+    takeStart->setProperty ("trackId", "track-1");
+    takeStart->setProperty ("name", "Phone Gate");
+    takeStart->setProperty ("sampleRate", 44100.0);
+    takeStart->setProperty ("channels", 1);
+    auto started = server.handleTestRequest ("POST", "/take/start", juce::var (takeStart));
+    REQUIRE ((bool) started.getProperty ("ok", false));
+    const auto takeId = started.getProperty ("data", {}).getProperty ("takeId", {}).toString();
+    REQUIRE (takeId.isNotEmpty());
+
+    auto* chunk0 = new juce::DynamicObject();
+    chunk0->setProperty ("token", token);
+    chunk0->setProperty ("takeId", takeId);
+    chunk0->setProperty ("sequence", 0);
+    chunk0->setProperty ("pcm16Base64", "6APoA+gD6APoA+gD6APoAw==");
+    auto chunked = server.handleTestRequest ("POST", "/take/chunk", juce::var (chunk0));
+    REQUIRE ((bool) chunked.getProperty ("ok", false));
+
+    auto* finish = new juce::DynamicObject();
+    finish->setProperty ("token", token);
+    finish->setProperty ("takeId", takeId);
+    finish->setProperty ("startSeconds", 0.0);
+    auto finished = server.handleTestRequest ("POST", "/take/finish", juce::var (finish));
+    REQUIRE ((bool) finished.getProperty ("ok", false));
+    REQUIRE (importCalls == 1);
+    REQUIRE (juce::File (importedFile).existsAsFile());
+    REQUIRE (juce::File (importedFile).getSize() > 44);
+    server.stopServer();
+}
+
 TEST_CASE ("remote health status does not expose pairing secrets", "[remote][server]")
 {
     juce::ScopedJuceInitialiser_GUI juce;

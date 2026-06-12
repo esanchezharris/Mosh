@@ -326,9 +326,10 @@ juce::var RemoteCompanionServer::handleRequest (const Request& request)
 
     if (request.method == "POST" && request.path == "/take/chunk")
     {
-        juce::MemoryBlock pcm;
-        if (! pcm.fromBase64Encoding (propString (body, "pcm16Base64")))
+        juce::MemoryOutputStream decodedPcm;
+        if (! juce::Base64::convertFromBase64 (decodedPcm, propString (body, "pcm16Base64")))
             return err ("invalid pcm16Base64");
+        juce::MemoryBlock pcm (decodedPcm.getData(), decodedPcm.getDataSize());
         auto appended = takeStore.appendPcm16Chunk (propString (body, "takeId"),
                                                    propInt (body, "sequence", -1), pcm);
         return appended.ok ? ok() : err (appended.error);
