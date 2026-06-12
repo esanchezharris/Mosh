@@ -23,14 +23,18 @@ dithered at quarter-res, who happens to be alive.
 
 ## World rules (the crunch)
 
-1. **Quarter-res buffers, nearest upscale** (`image-rendering: pixelated`), cap ~380×240.
+1. **Low-res buffers, nearest upscale** (`image-rendering: pixelated`) — on the
+   CONSOLE DIAL: PS1 = /4 cap 380×240, **PS2 = /3 cap 512×336 (the default —
+   user note 2026-06-12: quarter-res "looks PS1-ish")**, PS2+ = /2 cap 720×450.
 2. **Bayer-dithered band shading** (3–4 bands), no gradients, no bloom in-shader —
    emission is a brighter band, never a halo.
 3. **Animate on twos** — geometry time snaps at 12 fps; inputs and springs run at 60.
 4. **Faceted normals** for lighting (`floor(n*2.5+0.5)/2.5`) — but **fresnel/rim from
    the SMOOTH normal**: faceted fresnel fires on interior planes and rains dither
    over the whole body.
-5. **Vertex wobble:** tiny rotation jitter per on-twos tick — PS1 edges swim.
+5. **Vertex wobble scales INVERSELY with the dial:** full swim at PS1, 0.45× at
+   PS2, 0.15× at PS2+ — the swim is the PS1 tell; PS2 geometry was subpixel-stable.
+   Dither, bands and facets stay at every tier.
 6. **Floor the dither coords.** `gl_FragCoord` sits at pixel CENTERS (x.5) — an
    un-floored Bayer matrix tops out at 1.31, and every `floor(x + dth)` then fires
    at x=0 in a column lattice. (This bug shipped quietly in every artifact since
@@ -57,9 +61,13 @@ dithered at quarter-res, who happens to be alive.
 ## The character (THE SYMBIOTE doctrine)
 
 12. **Two channels, one being.** FACE = the agent: GLYPH chevron eyes (gaze, blink,
-    startle-wide, sleepy lids), the one-dial open grin, the heat ember. BODY = the
-    work: lobes, two displacement layers, skin, veins, palette. Neither channel
-    ever touches the other's pixels. Heat/REC never moves matter.
+    startle-wide, sleepy lids), the one-dial open grin (+ family tilt, + the tongue
+    at full open), the heat ember. BODY = the work: lobes, two displacement layers,
+    skin, veins, palette. Neither channel ever touches the other's pixels.
+    **Corollary — agent STATES may LIGHT the body, never deform it:** the ember
+    and the flow bands (LISTENING/RENDERING) are light; matter belongs to the work.
+    States are bundles (face pose + tempo + light), they crossfade, and idle life
+    (blinks, saccades, antics, lobe migration, sleep) is the IDLE state's business.
 13. **Faces live in the shader.** Eyes and grin are SDF decals lit by the same bands
     and dithered by the same Bayer — they squash, blink and gaze WITH the body.
     DOM faces only as a no-GL fallback.
@@ -67,6 +75,10 @@ dithered at quarter-res, who happens to be alive.
     body waves (the gait), layer 2 = high-freq surface skin (the texture), both
     face-protected (their poleAmount). Personalities are NAMED FAMILIES à la their
     Discobrain/T-1000/Slimebag: a full material + temperament per name.
+    **Second credit line (2026-06-12):** the user's web-Claude SYMBIOTE LAB
+    artifact contributed limb MIGRATION (lobes relocate/swap/scatter, tucking in
+    while they travel), the liquid FLOW bands (re-cast as quantized state-light),
+    the mouth tilt, and the tongue. Steal from anything good; write down where.
 15. **The MORPH RULE.** States crossfade, never snap — and blends happen between
     FIXED endpoints only. Never re-derive (fract/sin/hash) from a blended value.
     **Corollary:** time-RATE parameters (wave speeds) cannot be lerped — integrate

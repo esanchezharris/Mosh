@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>MOSHI — the agent</title>
+<title>MOSHI — the lookbook</title>
 <style>
   /* NANUM SQUARE ROUND — the display voice (user-supplied; OFL, Naver). */
   @font-face { font-family: 'NanumSquareRound'; font-weight: 800;
@@ -23,7 +23,7 @@
   .disp { font-family: var(--font-display); font-weight: 800; letter-spacing: .02em;
     text-transform: uppercase; }
 
-  /* THE STAGE — he is the page. everything else is a whisper at the edges. */
+  /* THE STAGE — he is the page. everything else whispers at the edges. */
   #stage { position: fixed; inset: 0; }
 
   #wordmark { position: fixed; top: 16px; left: 18px; z-index: 10;
@@ -32,18 +32,21 @@
     border: 1px solid rgba(204,255,35,.45); border-radius: 3px;
     padding: 3px 13px 2px; box-shadow: 0 2px 0 rgba(0,0,0,.6); }
 
-  #signal { position: fixed; top: 18px; right: 18px; z-index: 10; cursor: pointer;
+  .chip { position: fixed; z-index: 10; cursor: pointer;
     font-size: 9.5px; letter-spacing: .14em; opacity: .55;
     border: 2px solid rgba(246,242,235,.2); border-radius: 9px; padding: 4px 12px;
     background-image: linear-gradient(180deg, rgba(255,255,255,.10) 0 45%, rgba(0,0,0,.22) 45% 100%);
     box-shadow: 0 3px 0 #000, inset 0 1px 0 rgba(246,242,235,.10);
     transition: transform .08s, box-shadow .08s; }
-  #signal:hover { border-color: var(--lime); color: var(--lime); opacity: 1; }
-  #signal:active { transform: translateY(3px); box-shadow: 0 0 0 #000; }
+  .chip:hover { border-color: var(--lime); color: var(--lime); opacity: 1; }
+  .chip:active { transform: translateY(3px); box-shadow: 0 0 0 #000; }
+  #signal { top: 18px; right: 18px; }
+  #res    { top: 18px; right: 132px; }
 
-  /* the nameplate — the only loud type on the page */
-  #plate { position: fixed; left: 50%; bottom: 56px; transform: translateX(-50%);
-    z-index: 10; text-align: center; pointer-events: none; }
+  /* THE LOOKBOOK plate — number, name, state, caption */
+  #plate { position: fixed; left: 50%; bottom: 46px; transform: translateX(-50%);
+    z-index: 10; text-align: center; pointer-events: none; width: min(560px, 86vw); }
+  #pnum { font-size: 9px; letter-spacing: .26em; opacity: .45; margin-bottom: 6px; }
   #pname { display: inline-block; transform: skewX(-12deg);
     font-family: var(--font-display); font-weight: 800; font-style: italic;
     font-size: 22px; letter-spacing: .05em; text-transform: uppercase;
@@ -51,11 +54,26 @@
     border: 1px solid rgba(204,255,35,.45); border-radius: 3px;
     padding: 5px 18px 4px; box-shadow: 0 3px 0 rgba(0,0,0,.6);
     transition: opacity .25s; }
-  #pseed { margin-top: 7px; font-size: 9px; letter-spacing: .22em; opacity: .4; }
+  #pcap { margin-top: 8px; font-size: 10px; letter-spacing: .10em; opacity: .55;
+    line-height: 1.6; transition: opacity .25s; }
 
-  #hint { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%);
-    z-index: 10; font-size: 9px; letter-spacing: .18em; opacity: .32;
+  #hint { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%);
+    z-index: 10; font-size: 9px; letter-spacing: .16em; opacity: .30;
     white-space: nowrap; }
+
+  /* state chips — agent states, not style sliders */
+  #states { position: fixed; left: 18px; bottom: 18px; z-index: 10;
+    display: flex; flex-direction: column; gap: 6px; }
+  #states .st { cursor: pointer; font-size: 8.5px; letter-spacing: .18em;
+    color: rgba(246,242,235,.5); border: 1px solid rgba(246,242,235,.16);
+    border-radius: 8px; padding: 4px 10px; width: 86px; text-align: left;
+    background: rgba(11,11,11,.4); box-shadow: 0 2px 0 rgba(0,0,0,.7);
+    transition: transform .08s; }
+  #states .st:hover { color: var(--lime); border-color: rgba(204,255,35,.5); }
+  #states .st:active { transform: translateY(2px); }
+  #states .st.on { color: var(--ink); background: var(--lime); border-color: var(--lime);
+    font-weight: 700; }
+  #stlbl { font-size: 7.5px; letter-spacing: .22em; opacity: .35; margin-bottom: 2px; }
 
   /* the presence orb — the SAME component at coat-pocket size */
   #mini { position: fixed; right: 22px; bottom: 22px; width: 76px; height: 76px;
@@ -63,15 +81,13 @@
   #minilbl { position: fixed; right: 22px; bottom: 8px; width: 76px; z-index: 10;
     font-size: 7px; letter-spacing: .16em; opacity: .3; text-align: center; }
 
-  /* arrows — barely there until hovered */
   .arrow { position: fixed; top: 50%; transform: translateY(-50%); z-index: 10;
     font-size: 26px; color: var(--lime); opacity: .18; cursor: pointer;
     padding: 18px 14px; user-select: none; transition: opacity .2s; }
   .arrow:hover { opacity: .8; }
   #prev { left: 8px; } #next { right: 8px; }
 
-  /* THE PS2 SIGNAL CHAIN — one cable for every surface: phosphor bloom,
-     soft 2000s AA, 16-step posterize, over DOM and GL alike. html.raw = A/B.
+  /* THE PS2 SIGNAL CHAIN — one cable for every surface. html.raw = A/B.
      ONE glow source: never add text-shadows on top of this. */
   * { -webkit-font-smoothing: antialiased; }
   body { filter: url(#ps2signal); }
@@ -94,62 +110,103 @@
 
 <div id="stage"></div>
 
-<div id="wordmark" class="disp">MOSHI</div>
-<div id="signal" class="mono">SIGNAL·PS2</div>
+<div id="wordmark" class="disp">MOSHI · LOOKBOOK</div>
+<div id="res" class="chip mono">RES·PS2</div>
+<div id="signal" class="chip mono">SIGNAL·PS2</div>
 
-<div class="arrow" id="prev" title="previous personality">◀</div>
-<div class="arrow" id="next" title="next personality">▶</div>
+<div class="arrow" id="prev" title="previous look">◀</div>
+<div class="arrow" id="next" title="next look">▶</div>
+
+<div id="states">
+  <div id="stlbl" class="mono">STATE</div>
+</div>
 
 <div id="plate">
+  <div id="pnum" class="mono">LOOK 01 / 12</div>
   <div id="pname" class="disp">TAR</div>
-  <div id="pseed" class="mono">SEED 0.500</div>
+  <div id="pcap" class="mono"></div>
 </div>
-<div id="hint" class="mono">◀ ▶ MEET THE OTHERS · CLICK = POKE · HOLD = PET · DRAG = SPIN · R = REROLL</div>
+<div id="hint" class="mono">◀ ▶ THE LOOKBOOK · R = REROLL · C = TAKE LANDS · CLICK = POKE · HOLD = PET · DRAG = SPIN</div>
 
 <div id="mini"></div>
 <div id="minilbl" class="mono">SAME GUY · 76PX</div>
 
 <script src="moshi.js"></script>
 <script>
-// THE STAGE — Moshi alone, full size, with the room on. The corner orb is a
-// second live instance of the same component at presence-orb scale (its own
-// GL context, interactivity off, slaved to the stage's personality): the
-// proof that one file carries him from topbar chip to centerpiece.
+// THE LOOKBOOK — a curated, captioned walk through who Moshi can be:
+// personality × state × seed, numbered like a catalog. Scroll/arrows turn
+// pages; the state chips re-pose the current look; R rerolls inside the
+// family. Curation over sliders: every page is an opinion.
+const LOOKS = [
+  { p: 'TAR',       sd: 0.500, st: 'IDLE',      cap: 'THE CANONICAL — everyone starts here. obsidian, lime-veined.' },
+  { p: 'TAR',       sd: 0.500, st: 'RECORDING', cap: 'REC lives in the face: ember + hot eyes. the matter never flinches.' },
+  { p: 'DISCO',     sd: 0.500, st: 'LISTENING', cap: 'the flow runs through him while the track plays. he nods.' },
+  { p: 'MOLTEN',    sd: 0.500, st: 'IDLE',      cap: 'heavy gold. the patience of a planet.' },
+  { p: 'GHOST',     sd: 0.500, st: 'PAUSED',    cap: 'held breath — lids low, eyes down. the world can wait.' },
+  { p: 'SILK',      sd: 0.500, st: 'SLEEPING',  cap: 'pearl at rest. the waves slow to tide.' },
+  { p: 'BREAKS',    sd: 0.500, st: 'RECORDING', cap: 'punched in and running hot.' },
+  { p: 'CHROME',    sd: 0.500, st: 'RENDERING', cap: 'cooking — the work churns under the skin as light.' },
+  { p: 'BUBBLE',    sd: 0.500, st: 'IDLE',      cap: 'poke him. you know you want to.' },
+  { p: 'PORCELAIN', sd: 0.500, st: 'IDLE',      cap: 'the paper look: bone body, ink eyes. lime keeps the grin.' },
+  { p: 'DISCO',     sd: 0.870, st: 'IDLE',      cap: 'same family, different child — R rerolls inside the lines.' },
+  { p: 'TAR',       sd: 0.500, st: 'LISTENING', cap: 'even obsidian moves when the music is on.' },
+];
+
 const stage = Moshi(document.getElementById('stage'), {
-  personality: 'TAR', seed: 0.5, room: true,
+  personality: LOOKS[0].p, seed: LOOKS[0].sd, room: true, quality: 'ps2',
 });
 const mini = Moshi(document.getElementById('mini'), {
-  personality: 'TAR', seed: 0.5, interactive: false, resDiv: 2, maxW: 96, maxH: 96,
+  personality: LOOKS[0].p, seed: LOOKS[0].sd, interactive: false,
+  resDiv: 2, maxW: 96, maxH: 96,
 });
 mini.set('mood', 0.7);
 
-const NAMES = Moshi.PERSONALITIES;
-let idx = 0, seed = 0.5;
-const pname = document.getElementById('pname'), pseed = document.getElementById('pseed');
-function show(nm, sd) {
-  pname.style.opacity = 0;
-  setTimeout(() => { pname.textContent = nm; pname.style.opacity = 1; }, 220);
-  pseed.textContent = 'SEED ' + sd.toFixed(3);
+const pnum = document.getElementById('pnum'), pname = document.getElementById('pname'),
+      pcap = document.getElementById('pcap');
+let idx = 0, seed = LOOKS[0].sd;
+
+// state chips
+const statesEl = document.getElementById('states');
+const stBtns = {};
+for (const s of Moshi.STATES) {
+  const b = document.createElement('button');
+  b.className = 'st mono';
+  b.textContent = s;
+  b.onclick = () => { setLookState(s); };
+  statesEl.appendChild(b);
+  stBtns[s] = b;
+}
+function setLookState(s) {
+  stage.setState(s); mini.setState(s);
+  for (const k in stBtns) stBtns[k].classList.toggle('on', k === s);
+  pnum.textContent = `LOOK ${String(idx + 1).padStart(2, '0')} / ${LOOKS.length} · ${s}`;
+}
+
+function show(snap) {
+  const L = LOOKS[idx];
+  pname.style.opacity = 0; pcap.style.opacity = 0;
+  setTimeout(() => {
+    pname.textContent = L.p;
+    pcap.textContent = L.cap + `   ·   SEED ${seed.toFixed(3)}`;
+    pname.style.opacity = 1; pcap.style.opacity = 1;
+  }, 200);
+  stage.setPersonality(L.p, seed, snap ? { snap: true } : undefined);
+  mini.setPersonality(L.p, seed, snap ? { snap: true } : undefined);
+  setLookState(L.st);
 }
 function go(d) {
-  idx = ((idx + d) % NAMES.length + NAMES.length) % NAMES.length;
-  stage.setPersonality(NAMES[idx], seed);
-  mini.setPersonality(NAMES[idx], seed);
-  show(NAMES[idx], seed);
+  idx = ((idx + d) % LOOKS.length + LOOKS.length) % LOOKS.length;
+  seed = LOOKS[idx].sd;
+  show(false);
 }
 document.getElementById('prev').onclick = () => go(-1);
 document.getElementById('next').onclick = () => go(1);
 addEventListener('keydown', e => {
   if (e.key === 'ArrowRight') go(1);
   if (e.key === 'ArrowLeft') go(-1);
-  if (e.key.toLowerCase() === 'r') {
-    seed = Math.random();
-    stage.setPersonality(NAMES[idx], seed);
-    mini.setPersonality(NAMES[idx], seed);
-    show(NAMES[idx], seed);
-  }
+  if (e.key.toLowerCase() === 'r') { seed = Math.random(); show(false); }
+  if (e.key.toLowerCase() === 'c') { stage.celebrate(); mini.celebrate(); }
 });
-// wheel = the blobmixer carousel move (debounced to one step per gesture)
 let wheelLock = 0;
 addEventListener('wheel', e => {
   const now = performance.now();
@@ -158,12 +215,24 @@ addEventListener('wheel', e => {
   go(e.deltaY > 0 ? 1 : -1);
 }, { passive: true });
 
-// the signal chain A/B — RAW shows the page off the cable
+// the console dial: PS1 swims · PS2 holds · PS2+ is for screenshots
+const resChip = document.getElementById('res');
+let qi = 1;
+resChip.onclick = () => {
+  qi = (qi + 1) % Moshi.QUALITIES.length;
+  const q = Moshi.QUALITIES[qi];
+  stage.setQuality(q);
+  resChip.textContent = 'RES·' + q.toUpperCase();
+};
+
+// the signal chain A/B
 const signal = document.getElementById('signal');
 signal.onclick = () => {
   const raw = document.documentElement.classList.toggle('raw');
   signal.textContent = raw ? 'SIGNAL·RAW' : 'SIGNAL·PS2';
 };
+
+show(true);
 </script>
 </body>
 </html>

@@ -54,6 +54,9 @@ uniform float u_smink;                 // lobe goo (smin k)
 uniform vec3  u_palA, u_palB, u_palD;  // iq cosine palette (family material)
 uniform float u_irid, u_glint, u_veins;
 uniform float u_scale, u_room;
+uniform float u_flow, u_flowPh;        // state channel: liquid bands (LIGHT only)
+uniform vec3  u_lshift, u_ltuck;       // lobe migration: orbit shift + transit tuck
+uniform float u_mtilt, u_inkeye;       // grin attitude; ink-faced families
 
 const vec3 LIME = vec3(0.800, 1.000, 0.137);
 const vec3 GLOW = vec3(0.851, 1.000, 0.298);
@@ -108,14 +111,16 @@ float map(vec3 p) {
   p.xy = r2(0.5 + u_rotB) * p.xy;
   p.x /= u_sq.x; p.y /= u_sq.y;                      // spring squash & stretch
   p /= u_scale; pW /= u_scale;
-  // THE BODY — smin lobes, seeded per (personality, seed); drift on u_lph
+  // THE BODY — smin lobes, seeded per (personality, seed); drift on u_lph.
+  // u_lshift slides a lobe along its orbit (the migration steal: limbs that
+  // relocate); u_ltuck pulls it in while it travels.
   float d = length(p) - 0.345;
-  vec3 L1 = vec3( 0.25 * sin(u_sd * 6.3 + u_lph),        0.21 * cos(u_sd2 * 7.1 + u_lph * 0.8),  0.14 * sin(u_sd * 3.0 + u_lph));
-  vec3 L2 = vec3(-0.24 * cos(u_sd2 * 5.2 + u_lph),      -0.18 * sin(u_sd * 8.4 + u_lph * 0.6), -0.15);
-  vec3 L3 = vec3(-0.07 * cos(u_sd * 2.2),               -0.23 * sin(u_sd2 * 4.7 + u_lph * 0.7), -0.16 * cos(u_sd * 2.2));
-  d = smin(d, length(p - L1) - (0.185 + 0.055 * u_sd2), u_smink);
-  d = smin(d, length(p - L2) - (0.165 + 0.050 * u_sd),  u_smink);
-  d = smin(d, length(p - L3) - (0.150 + 0.040 * u_sd2), u_smink);
+  vec3 L1 = vec3( 0.25 * sin(u_sd * 6.3 + u_lph + u_lshift.x),        0.21 * cos(u_sd2 * 7.1 + u_lph * 0.8 + u_lshift.x * 0.6),  0.14 * sin(u_sd * 3.0 + u_lph));
+  vec3 L2 = vec3(-0.24 * cos(u_sd2 * 5.2 + u_lph + u_lshift.y),      -0.18 * sin(u_sd * 8.4 + u_lph * 0.6 + u_lshift.y * 0.6), -0.15);
+  vec3 L3 = vec3(-0.07 * cos(u_sd * 2.2 + u_lshift.z),               -0.23 * sin(u_sd2 * 4.7 + u_lph * 0.7 + u_lshift.z * 0.6), -0.16 * cos(u_sd * 2.2));
+  d = smin(d, length(p - L1) - (0.185 + 0.055 * u_sd2) * (1.0 - 0.22 * u_ltuck.x), u_smink);
+  d = smin(d, length(p - L2) - (0.165 + 0.050 * u_sd)  * (1.0 - 0.22 * u_ltuck.y), u_smink);
+  d = smin(d, length(p - L3) - (0.150 + 0.040 * u_sd2) * (1.0 - 0.22 * u_ltuck.z), u_smink);
   // BLOB-MIXER GRAMMAR (14islands, credited): two displacement layers with
   // face protection (its poleAmount). Phases arrive integrated from JS.
   float fz = 1.0 - 0.85 * smoothstep(0.40, 0.72, dot(normalize(pW), vec3(0.0, 0.0, 1.0)));
@@ -217,12 +222,22 @@ void main() {
     vein -= shard;
     col += LIME * vein  * u_veins * (0.15 + 0.40 * u_energy);
     col += GLOW * shard * u_veins * (0.30 + 0.70 * u_energy);
+    // THE FLOW (state channel, LIGHT only — agent states may light the body,
+    // never deform it): liquid bands circulating through him. The steal from
+    // the user's web-Claude symbiote lab, quantized to the register.
+    if (u_flow > 0.004) {
+      float fb = 0.5 + 0.5 * sin(bs.y * 7.5 + n3(bs * 2.6 + vec3(u_sd * 3.0)) * 5.0 - u_flowPh);
+      fb = pow(fb, 5.0);
+      col += mix(LIME, pal3(gt + 0.35), 0.45)
+           * (floor(fb * 2.0 + dth * 0.7) / 2.0) * 0.35 * u_flow;
+    }
     // ── THE AGENT CHANNEL: the face. View-anchored — he always faces the room.
     float sq = 1.0 - 0.10 * u_onset;
     float lidv = max(u_blink, u_lid * 0.82);
     float eyeY = max(0.08, (1.0 + 0.35 * smoothstep(0.4, 1.0, u_heat))
                         * (1.0 - lidv * 0.92) * sq);
-    vec3 eyeCol = mix(vec3(0.90, 0.93, 0.87), LIME, smoothstep(0.45, 0.75, u_heat));
+    vec3 eyeCol = mix(mix(vec3(0.90, 0.93, 0.87), vec3(0.05, 0.05, 0.06), u_inkeye),
+                      LIME, smoothstep(0.45, 0.75, u_heat));
     eyeCol *= 0.60 + 0.45 * bk;                      // facet-lit like the hide
     for (int e = 0; e < 2; e++) {
       float s = (e == 0) ? -1.0 : 1.0;
@@ -241,6 +256,7 @@ void main() {
         vec3 mu = normalize(cross(vec3(0.0, 1.0, 0.0), md));
         vec3 mv = cross(md, mu);
         vec2 mo = vec2(dot(nd - md, mu), dot(nd - md, mv)) * 2.35;
+        mo = r2(u_mtilt) * mo;                       // attitude: the family lean
         mo.y /= sq;
         float o2 = clamp(0.10 + 0.42 * u_mood + u_wide * 0.95 + u_onset * 0.18 + u_heat * 0.35, 0.0, 1.35);
         float r = 0.33 * (1.0 + 0.55 * o2);
@@ -248,6 +264,9 @@ void main() {
         float m = (1.0 - step(0.0, length(mo) - r + (dth - 0.5) * 0.05))
                 * (1.0 - step(lip, mo.y));
         col = mix(col, LIME * (0.72 + 0.30 * u_heat), m);
+        // the tongue — earns its place only when the grin is properly open
+        float tng = (1.0 - step(0.0, length(mo - vec2(0.0, lip - r * 0.78)) - r * 0.46)) * m;
+        col = mix(col, LIME * 0.32, tng * smoothstep(0.5, 0.8, o2));
       }
     }
     // the ember heart — heat only. Agent channel; the matter never splits.
@@ -270,43 +289,48 @@ const FAMILIES = {
   TAR:    { // the canonical Moshi — obsidian, lime-veined. where he started.
     bw: 0.030, bf: 1.8, bsp: 0.45, sw: 0.045, sf: 5.5, ssp: 0.35, k: 0.17,
     palA: [0.100, 0.100, 0.100], palB: [0.042, 0.046, 0.040], palD: [0.00, 0.00, 0.00],
-    irid: 0.15, glint: 0.40, veins: 1.00, scale: 1.00,
+    irid: 0.15, glint: 0.40, veins: 1.00, scale: 1.00, tilt: 0.07, ink: 0, restless: 0.50,
     blink: 1.0, sacc: 1.0, antic: 0.5, springK: 42, springD: 5.0, breathe: 0.012, spin: 0.05, tempo: 0.09 },
   DISCO:  { // their Discobrain — rainbow iridescence, fast shallow waves
     bw: 0.085, bf: 3.0, bsp: 1.45, sw: 0.016, sf: 7.0, ssp: 0.70, k: 0.20,
     palA: [0.50, 0.50, 0.50], palB: [0.42, 0.42, 0.42], palD: [0.00, 0.33, 0.67],
-    irid: 0.90, glint: 0.80, veins: 0.45, scale: 0.98,
+    irid: 0.90, glint: 0.80, veins: 0.45, scale: 0.98, tilt: 0.13, ink: 0, restless: 0.90,
     blink: 1.3, sacc: 1.5, antic: 0.9, springK: 60, springD: 4.2, breathe: 0.010, spin: 0.11, tempo: 0.14 },
   MOLTEN: { // their Molten — heavy gold skin, slow and certain
     bw: 0.034, bf: 2.1, bsp: 0.22, sw: 0.050, sf: 4.0, ssp: 0.18, k: 0.14,
     palA: [0.46, 0.30, 0.10], palB: [0.40, 0.27, 0.12], palD: [0.02, 0.10, 0.26],
-    irid: 0.35, glint: 0.95, veins: 0.65, scale: 1.04,
+    irid: 0.35, glint: 0.95, veins: 0.65, scale: 1.04, tilt: 0.04, ink: 0, restless: 0.20,
     blink: 0.7, sacc: 0.6, antic: 0.25, springK: 30, springD: 6.5, breathe: 0.016, spin: 0.03, tempo: 0.06 },
   GHOST:  { // their Ghost — airy violet drift, big soft waves
     bw: 0.125, bf: 1.6, bsp: 0.75, sw: 0.011, sf: 6.0, ssp: 0.45, k: 0.24,
     palA: [0.38, 0.40, 0.54], palB: [0.24, 0.28, 0.38], palD: [0.55, 0.62, 0.78],
-    irid: 0.70, glint: 0.30, veins: 0.40, scale: 1.00,
+    irid: 0.70, glint: 0.30, veins: 0.40, scale: 1.00, tilt: 0.06, ink: 0, restless: 0.35,
     blink: 0.8, sacc: 0.7, antic: 0.4, springK: 26, springD: 4.0, breathe: 0.020, spin: 0.07, tempo: 0.08 },
   SILK:   { // their Silkworm — long pearl swells, barely any skin
     bw: 0.080, bf: 1.3, bsp: 0.42, sw: 0.008, sf: 3.5, ssp: 0.25, k: 0.26,
     palA: [0.60, 0.54, 0.52], palB: [0.22, 0.22, 0.26], palD: [0.90, 0.97, 0.06],
-    irid: 0.50, glint: 0.55, veins: 0.35, scale: 1.00,
+    irid: 0.50, glint: 0.55, veins: 0.35, scale: 1.00, tilt: 0.02, ink: 0, restless: 0.25,
     blink: 0.85, sacc: 0.8, antic: 0.3, springK: 34, springD: 5.5, breathe: 0.015, spin: 0.04, tempo: 0.07 },
   BREAKS: { // ours — choppy hot amen-break energy, jagged and quick
     bw: 0.050, bf: 4.2, bsp: 1.85, sw: 0.038, sf: 8.5, ssp: 0.95, k: 0.13,
     palA: [0.45, 0.18, 0.10], palB: [0.40, 0.25, 0.15], palD: [0.00, 0.92, 0.85],
-    irid: 0.25, glint: 0.50, veins: 1.00, scale: 0.97,
+    irid: 0.25, glint: 0.50, veins: 1.00, scale: 0.97, tilt: 0.17, ink: 0, restless: 1.00,
     blink: 1.5, sacc: 1.8, antic: 1.0, springK: 75, springD: 3.6, breathe: 0.008, spin: 0.13, tempo: 0.16 },
   CHROME: { // their T-1000 — cold mirror, dense fine ripple
     bw: 0.055, bf: 2.6, bsp: 1.05, sw: 0.028, sf: 9.0, ssp: 0.80, k: 0.16,
     palA: [0.44, 0.49, 0.54], palB: [0.34, 0.34, 0.38], palD: [0.58, 0.60, 0.65],
-    irid: 0.60, glint: 1.00, veins: 0.50, scale: 0.99,
+    irid: 0.60, glint: 1.00, veins: 0.50, scale: 0.99, tilt: 0.05, ink: 0, restless: 0.45,
     blink: 0.9, sacc: 1.1, antic: 0.5, springK: 55, springD: 5.0, breathe: 0.010, spin: 0.08, tempo: 0.10 },
   BUBBLE: { // their Slimebag — goopy aqua-green bounce
     bw: 0.090, bf: 1.9, bsp: 0.65, sw: 0.020, sf: 4.5, ssp: 0.40, k: 0.25,
     palA: [0.30, 0.48, 0.24], palB: [0.26, 0.38, 0.22], palD: [0.25, 0.35, 0.45],
-    irid: 0.45, glint: 0.70, veins: 0.55, scale: 1.02,
+    irid: 0.45, glint: 0.70, veins: 0.55, scale: 1.02, tilt: 0.10, ink: 0, restless: 0.75,
     blink: 1.1, sacc: 1.2, antic: 0.8, springK: 38, springD: 3.2, breathe: 0.018, spin: 0.06, tempo: 0.11 },
+  PORCELAIN: { // the paper look — bone body, ink eyes (their GHOST preset, inverted into our world)
+    bw: 0.050, bf: 1.7, bsp: 0.50, sw: 0.016, sf: 5.0, ssp: 0.30, k: 0.22,
+    palA: [0.74, 0.73, 0.70], palB: [0.16, 0.16, 0.15], palD: [0.02, 0.02, 0.02],
+    irid: 0.12, glint: 0.55, veins: 0.50, scale: 1.00, tilt: 0.03, ink: 1, restless: 0.30,
+    blink: 0.9, sacc: 0.8, antic: 0.35, springK: 40, springD: 5.5, breathe: 0.012, spin: 0.05, tempo: 0.08 },
 };
 const NAMES = Object.keys(FAMILIES);
 
@@ -330,13 +354,15 @@ function makeSpec(name, seed) {
     palA: F.palA.slice(), palB: F.palB.slice(),
     palD: F.palD.map(d => d + (h(15) - 0.5) * 0.06),
     irid: F.irid, glint: F.glint, veins: F.veins,
+    tilt: F.tilt, ink: F.ink, restless: F.restless,
     blink: F.blink, sacc: F.sacc, antic: F.antic,
     springK: F.springK, springD: F.springD, breathe: F.breathe,
     spin: F.spin, tempo: F.tempo,
   };
 }
 const NUMS = ['bw','bf','bsp','sw','sf','ssp','k','scale','sd','sd2','la','lb',
-  'irid','glint','veins','blink','sacc','antic','springK','springD','breathe','spin','tempo'];
+  'irid','glint','veins','tilt','ink','restless',
+  'blink','sacc','antic','springK','springD','breathe','spin','tempo'];
 function lerpSpec(a, b, w) {
   const o = { name: w < 0.5 ? a.name : b.name, seed: w < 0.5 ? a.seed : b.seed };
   for (const k of NUMS) o[k] = a[k] + (b[k] - a[k]) * w;
@@ -347,12 +373,32 @@ function lerpSpec(a, b, w) {
 const UNIFS = ['u_res','u_time','u_tq','u_lph','u_bph','u_sph','u_rotA','u_rotB',
   'u_onset','u_energy','u_mood','u_heat','u_gaze','u_sq','u_blink','u_wide','u_lid',
   'u_sd','u_sd2','u_la','u_lb','u_bw','u_bf','u_sw','u_sf','u_smink',
-  'u_palA','u_palB','u_palD','u_irid','u_glint','u_veins','u_scale','u_room'];
+  'u_palA','u_palB','u_palD','u_irid','u_glint','u_veins','u_scale','u_room',
+  'u_flow','u_flowPh','u_lshift','u_ltuck','u_mtilt','u_inkeye'];
+
+// ── THE CONSOLE DIAL — PS1 swims, PS2 holds. Resolution up, wobble down:
+// vertex swim is the PS1 tell; the PS2 had subpixel-stable geometry.
+const QUALITY = {
+  'ps1':  { div: 4, maxW: 380, maxH: 240, wob: 1.00 },
+  'ps2':  { div: 3, maxW: 512, maxH: 336, wob: 0.45 },
+  'ps2+': { div: 2, maxW: 720, maxH: 450, wob: 0.15 },
+};
+
+// ── AGENT STATES — bundles of face behavior, tempo and light. Doctrine:
+// states may LIGHT the body (flow, ember) but never deform it.
+const STATES = {
+  IDLE:      { mood: 0.55, heat: 0.0, flow: 0.00, frate: 0.0, tempo: 1.00, antics: 1.0,  lid: 0.00, blink: 1.00, gaze: 'wander' },
+  LISTENING: { mood: 0.72, heat: 0.0, flow: 0.55, frate: 1.0, tempo: 0.90, antics: 0.0,  lid: 0.00, blink: 0.80, gaze: 'you', nod: true },
+  RECORDING: { mood: 0.60, heat: 1.0, flow: 0.00, frate: 0.0, tempo: 1.00, antics: 0.0,  lid: 0.00, blink: 0.45, gaze: 'you' },
+  PAUSED:    { mood: 0.38, heat: 0.0, flow: 0.00, frate: 0.0, tempo: 0.45, antics: 0.15, lid: 0.38, blink: 0.60, gaze: 'low' },
+  RENDERING: { mood: 0.62, heat: 0.2, flow: 1.00, frate: 2.6, tempo: 0.70, antics: 0.0,  lid: 0.55, blink: 0.50, gaze: 'wander', shiver: true },
+  SLEEPING:  { mood: 0.50, heat: 0.0, flow: 0.00, frate: 0.0, tempo: 0.30, antics: 0.0,  lid: 0.85, blink: 0.00, gaze: 'wander' },
+};
 
 function Moshi(host, opts = {}) {
   const O = Object.assign({
     personality: 'TAR', seed: 0.5, interactive: true, room: false,
-    resDiv: 4, maxW: 380, maxH: 240,
+    quality: 'ps2', resDiv: null, maxW: null, maxH: null,
   }, opts);
 
   const cv = document.createElement('canvas');
@@ -389,9 +435,11 @@ function Moshi(host, opts = {}) {
   cv.addEventListener('webglcontextrestored', () => { if (!dead) initGL(); });
 
   function resize() {
+    const Q = QUALITY[O.quality] || QUALITY['ps2'];
+    const div = O.resDiv != null ? O.resDiv : Q.div;
     const r = host.getBoundingClientRect();
-    const W = Math.max(24, Math.min(O.maxW, Math.floor(r.width / O.resDiv))),
-          H = Math.max(24, Math.min(O.maxH, Math.floor(r.height / O.resDiv)));
+    const W = Math.max(24, Math.min(O.maxW != null ? O.maxW : Q.maxW, Math.floor(r.width / div))),
+          H = Math.max(24, Math.min(O.maxH != null ? O.maxH : Q.maxH, Math.floor(r.height / div)));
     if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
     gl && gl.viewport(0, 0, W, H);
   }
@@ -409,23 +457,46 @@ function Moshi(host, opts = {}) {
   let onsetEnv = 0, blink = 0, wide = 0, lid = 0, lidT = 0;
   let sy = 1, vy = 0;                          // squash spring
   let gaze = { x: 0, y: 0 }, gazeT = { x: 0, y: 0 }, lookHold = 0;
-  let ptrAt = 0, ptrX = 0, ptrY = 0, asleep = false, idleT = 0;
+  let ptrAt = 0, ptrX = 0, ptrY = 0, idleT = 0;
   let petting = false, petCand = null, dragAt = null, dragged = false;
   let anticT = 4 + Math.random() * 8, stretchT = 0, shiverT = 0;
   let onChange = O.onPersonality || null;
+
+  // agent state: behavior bundle + the flow light (phase integrated — MORPH RULE)
+  let stName = 'IDLE', st = STATES.IDLE, autoSlept = false;
+  let flowA = 0, flowPh = 0, celebT = 0, celebE = 0;
+  function setStateRaw(n) {
+    stName = n; st = STATES[n]; autoSlept = false;
+    drives.mood = st.mood; drives.heat = st.heat;   // baselines; hosts may override
+  }
+
+  // the migration steal: lobes that relocate — shift slides a lobe along its
+  // orbit, transits tuck it in (it travels as a smaller thing)
+  const lmb = [0, 1, 2].map(() => ({ s: 0, from: 0, tgt: 0, t0: 0, dur: 1, on: false }));
+  let moveT = 6 + Math.random() * 8;
+  function lobeMove(now) {
+    const go = (i, tgt) => { const L = lmb[i]; L.from = L.s; L.tgt = tgt; L.t0 = now; L.dur = 1.3 + Math.random() * 1.5; L.on = true; };
+    const r = Math.random();
+    if (r < 0.45) go((Math.random() * 3) | 0, (Math.random() - 0.5) * 3.2);               // migrate
+    else if (r < 0.72) { const a = lmb[0].s, b = lmb[1].s; go(0, b); go(1, a); }           // swap slots
+    else [0, 1, 2].forEach(i => go(i, lmb[i].s + (Math.random() - 0.5) * 0.9));            // scatter
+  }
 
   // ── idle life: blink on a life timer ──
   let blinkTimer = null;
   (function blinkLoop() {
     blinkTimer = setTimeout(() => {
-      if (!asleep) { blink = 1; if (Math.random() < 0.18) setTimeout(() => { blink = 1; }, 240); }
+      if (st.blink > 0) { blink = 1; if (Math.random() < 0.18) setTimeout(() => { blink = 1; }, 240); }
       blinkLoop();
-    }, (1700 + Math.random() * 4200) / Math.max(0.3, cur.blink));
+    }, (1700 + Math.random() * 4200) / Math.max(0.25, cur.blink * Math.max(0.05, st.blink)));
   })();
 
   // ── interaction: gaze, poke, drag-spin, pet-and-hold ──
   function wake(startle) {
-    if (asleep) { asleep = false; lidT = 0; if (startle) { wide = 0.7; blink = 1; } }
+    if (stName === 'SLEEPING' && autoSlept) {
+      setStateRaw('IDLE');
+      if (startle) { wide = 0.7; blink = 1; }
+    }
     idleT = 0;
   }
   const onMove = e => {
@@ -475,12 +546,18 @@ function Moshi(host, opts = {}) {
     }
     for (const k in drives) dCur[k] += (drives[k] - dCur[k]) * Math.min(1, dt * 6);
 
-    // sleep: untouched long enough, he drifts off. waves slow with him.
+    // sleep: ignored long enough in IDLE, he drifts off. any touch wakes him.
     idleT += dt;
-    if (O.interactive && !asleep && idleT > 45) asleep = true;
-    lidT = asleep ? 0.85 : (petting ? 0.65 : 0);
+    if (O.interactive && stName === 'IDLE' && idleT > 45) { setStateRaw('SLEEPING'); autoSlept = true; }
+    lidT = Math.max(st.lid, petting ? 0.65 : 0);
     lid += (lidT - lid) * Math.min(1, dt * 3.5);
-    const tScale = asleep ? 0.30 : (petting ? 0.55 : 1.0);
+    const tScale = st.tempo * (petting ? 0.6 : 1.0);
+    // the state's light: amount eases, phase integrates
+    flowA += (st.flow - flowA) * Math.min(1, dt * 2.5);
+    flowPh += dt * st.frate * tScale;
+    celebT = Math.max(0, celebT - dt);
+    celebE *= Math.pow(0.18, dt);
+    if (st.shiver && Math.random() < dt * 0.5) shiverT = 0.35;
 
     // integrated phases — rates can lerp freely, motion never jumps
     lph += dt * cur.tempo * tScale * (1 + 0.8 * dCur.energy);
@@ -492,7 +569,8 @@ function Moshi(host, opts = {}) {
     vy += acc * dt; sy += vy * dt;
     sy = Math.max(0.72, Math.min(1.35, sy));
     let syF = sy + (stretchT > 0 ? 0.16 * Math.min(1, stretchT * 2) : 0);
-    const breathe = 1 + cur.breathe * (1 + (asleep || petting ? 1.2 : 0)) * Math.sin(t * (asleep ? 1.1 : 1.9));
+    const breathe = 1 + cur.breathe * (1 + (stName === 'SLEEPING' || petting ? 1.2 : 0))
+                  * Math.sin(t * (stName === 'SLEEPING' ? 1.1 : 1.9));
     const sx = 1 / Math.sqrt(syF);
 
     // gaze: follow the cursor when it's alive; wander on saccades when not
@@ -508,14 +586,22 @@ function Moshi(host, opts = {}) {
       drives.mood = Math.max(drives.mood, Math.min(0.92, 0.55 + 0.45 * (1 - Math.min(1, dd))));
     } else {
       lookHold -= dt;
-      if (lookHold <= 0 && !asleep) {
-        gazeT.x = (Math.random() - 0.5) * 1.1;
-        gazeT.y = (Math.random() - 0.5) * 0.8;
+      if (lookHold <= 0 && stName !== 'SLEEPING') {
+        if (st.gaze === 'you') {             // attentive: he holds the room's eye
+          gazeT.x = (Math.random() - 0.5) * 0.25;
+          gazeT.y = 0.08 + (Math.random() - 0.5) * 0.15;
+        } else if (st.gaze === 'low') {      // paused: eyes drift down, waiting
+          gazeT.x = (Math.random() - 0.5) * 0.5;
+          gazeT.y = -0.5 + (Math.random() - 0.5) * 0.2;
+        } else {
+          gazeT.x = (Math.random() - 0.5) * 1.1;
+          gazeT.y = (Math.random() - 0.5) * 0.8;
+        }
         lookHold = (1.4 + Math.random() * 3.0) / Math.max(0.3, cur.sacc);
       }
-      if (!petting) drives.mood += (0.55 - drives.mood) * Math.min(1, dt * 0.5);
+      if (!petting) drives.mood += (st.mood - drives.mood) * Math.min(1, dt * 0.5);
     }
-    const gs = Math.min(1, dt * (asleep ? 1.2 : 5.5) * cur.sacc);
+    const gs = Math.min(1, dt * (stName === 'SLEEPING' ? 1.2 : 5.5) * cur.sacc);
     gaze.x += (gazeT.x - gaze.x) * gs;
     gaze.y += (gazeT.y - gaze.y) * gs;
 
@@ -527,8 +613,8 @@ function Moshi(host, opts = {}) {
 
     // antics — family-biased: shiver, stretch, glance, spin-flair
     anticT -= dt;
-    if (anticT <= 0 && !asleep && !petting) {
-      anticT = 8 + Math.random() * 16 / Math.max(0.2, cur.antic);
+    if (anticT <= 0 && st.antics > 0 && !petting) {
+      anticT = (8 + Math.random() * 16 / Math.max(0.2, cur.antic)) / Math.max(0.05, st.antics);
       const r = Math.random();
       if (r < 0.3) shiverT = 0.5;
       else if (r < 0.55) stretchT = 1.1;
@@ -537,6 +623,25 @@ function Moshi(host, opts = {}) {
     }
     shiverT = Math.max(0, shiverT - dt);
     stretchT = Math.max(0, stretchT - dt);
+
+    // lobe migration — IDLE-class business only; the body rearranges itself
+    moveT -= dt;
+    if (moveT <= 0 && st.antics > 0.2 && !petting) {
+      lobeMove(t);
+      moveT = (7 + Math.random() * 12) / Math.max(0.15, cur.restless);
+    }
+    const shiftV = [0, 0, 0], tuckV = [0, 0, 0];
+    for (let i = 0; i < 3; i++) {
+      const L = lmb[i];
+      if (L.on) {
+        const ph = Math.min((t - L.t0) / L.dur, 1);
+        const e = ph * ph * (3 - 2 * ph);
+        L.s = L.from + (L.tgt - L.from) * e;
+        tuckV[i] = Math.sin(ph * Math.PI);
+        if (ph >= 1) { L.s = L.tgt; L.on = false; }
+      }
+      shiftV[i] = L.s;
+    }
 
     // idle drift + drag inertia
     rotTA += dt * cur.spin * tScale + spinV * dt;
@@ -550,7 +655,8 @@ function Moshi(host, opts = {}) {
       lastTick = t;
       rotA += (rotTA - rotA) * 0.26;
       rotB += (rotTB - rotB) * 0.26;
-      const wAmp = (0.005 + 0.010 * dCur.energy) * (asleep ? 0.3 : 1) + (shiverT > 0 ? 0.05 : 0);
+      const wAmp = ((0.005 + 0.010 * dCur.energy) * (stName === 'SLEEPING' ? 0.3 : 1)
+                 + (shiverT > 0 ? 0.05 : 0)) * (QUALITY[O.quality] || QUALITY['ps2']).wob;
       wobA = (Math.random() - 0.5) * wAmp;
       wobB = (Math.random() - 0.5) * wAmp;
       tq = t;
@@ -565,9 +671,9 @@ function Moshi(host, opts = {}) {
     gl.uniform1f(U.u_bph, bph);
     gl.uniform1f(U.u_sph, sph);
     gl.uniform1f(U.u_rotA, rotA + wobA);
-    gl.uniform1f(U.u_rotB, rotB + wobB);
+    gl.uniform1f(U.u_rotB, rotB + wobB + (st.nod ? Math.sin(t * 2.1) * 0.02 : 0));
     gl.uniform1f(U.u_onset, onsetEnv);
-    gl.uniform1f(U.u_energy, dCur.energy);
+    gl.uniform1f(U.u_energy, Math.min(1, dCur.energy + celebE));
     gl.uniform1f(U.u_mood, dCur.mood);
     gl.uniform1f(U.u_heat, dCur.heat);
     gl.uniform2f(U.u_gaze, gaze.x, gaze.y);
@@ -592,6 +698,12 @@ function Moshi(host, opts = {}) {
     gl.uniform1f(U.u_veins, cur.veins);
     gl.uniform1f(U.u_scale, cur.scale * breathe);
     gl.uniform1f(U.u_room, O.room ? 1 : 0);
+    gl.uniform1f(U.u_flow, flowA);
+    gl.uniform1f(U.u_flowPh, flowPh);
+    gl.uniform3f(U.u_lshift, shiftV[0], shiftV[1], shiftV[2]);
+    gl.uniform3f(U.u_ltuck, tuckV[0], tuckV[1], tuckV[2]);
+    gl.uniform1f(U.u_mtilt, cur.tilt * (0.5 + 0.5 * dCur.mood));
+    gl.uniform1f(U.u_inkeye, cur.ink);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     raf = requestAnimationFrame(frame);
   }
@@ -616,6 +728,27 @@ function Moshi(host, opts = {}) {
       return api;
     },
     reroll() { return api.setPersonality(to.name, Math.random()); },
+    setState(n) {
+      n = String(n).toUpperCase();
+      if (!STATES[n]) throw new Error('moshi: unknown state ' + n);
+      setStateRaw(n);
+      idleT = 0;
+      return api;
+    },
+    celebrate() {                    // a take landed — one big joyful beat
+      celebT = 1.5; celebE = 1;
+      wide = 1; vy -= 5.2;
+      rotTA += (Math.random() - 0.5) * 1.6;
+      setTimeout(() => { if (!dead) { vy -= 3.0; blink = 1; } }, 380);
+      wake(false);
+      return api;
+    },
+    setQuality(q) {
+      if (!QUALITY[q]) throw new Error('moshi: unknown quality ' + q);
+      O.quality = q;
+      resize();
+      return api;
+    },
     poke() {
       onsetEnv = Math.min(1.2, onsetEnv + 0.8);
       wide = 1; vy -= 4.2; wake(false);
@@ -623,7 +756,8 @@ function Moshi(host, opts = {}) {
       return api;
     },
     lookAt(nx, ny) { gazeT.x = Math.max(-1, Math.min(1, nx)); gazeT.y = Math.max(-1, Math.min(1, ny)); lookHold = 2; return api; },
-    state() { return { personality: to.name, seed: to.seed, asleep, petting, drives: Object.assign({}, drives) }; },
+    state() { return { personality: to.name, seed: to.seed, state: stName, quality: O.quality, petting, drives: Object.assign({}, drives) }; },
+    _move() { lobeMove((performance.now() - t0) / 1000); return api; },   // test hook
     onPersonality(fn) { onChange = fn; return api; },
     _step() {                       // one synchronous frame — for harnesses
       cancelAnimationFrame(raf);    // whose rAF is throttled (tests, captures)
@@ -649,5 +783,7 @@ function Moshi(host, opts = {}) {
 }
 
 Moshi.PERSONALITIES = NAMES.slice();
+Moshi.STATES = Object.keys(STATES);
+Moshi.QUALITIES = Object.keys(QUALITY);
 window.Moshi = Moshi;
 })();

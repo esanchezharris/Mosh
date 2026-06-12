@@ -16,10 +16,13 @@ npm install   # first time only (vite is the only dep)
 npm run dev   # → http://localhost:5180 — the stage
 ```
 
-The stage: ◀ ▶ (or wheel) walks the eight personalities, **R** rerolls the seed
-inside a family, click = poke, hold = pet, drag = spin. He blinks, glances around,
-does the occasional antic, and falls asleep if you ignore him long enough.
-SIGNAL·PS2 (top right) A/Bs the whole-page signal chain.
+The stage is **THE LOOKBOOK** ([LOOKBOOK.md](LOOKBOOK.md) is its catalog): ◀ ▶ or
+the wheel turn pages through curated looks (personality × state × seed, captioned),
+the state chips re-pose the current look, **R** rerolls the seed inside a family,
+**C** = a take lands. Click = poke, hold = pet, drag = spin. He blinks, glances
+around, migrates his own lobes, and falls asleep if you ignore him long enough.
+RES (top right) walks the console dial — PS1 / PS2 / PS2+ — and SIGNAL A/Bs the
+whole-page signal chain.
 
 ## The component — `playground/moshi.js`
 
@@ -30,17 +33,20 @@ faceted normals, on-twos) is all in-shader, so the look ports wherever GLSL does
 
 ```js
 const m = Moshi(hostEl, {
-  personality: 'TAR',   // TAR · DISCO · MOLTEN · GHOST · SILK · BREAKS · CHROME · BUBBLE
+  personality: 'TAR',   // TAR · DISCO · MOLTEN · GHOST · SILK · BREAKS · CHROME · BUBBLE · PORCELAIN
   seed: 0.5,            // bounded variation inside the family
   interactive: true,    // gaze/poke/drag/pet + idle life; false = API-driven only
   room: false,          // ground + contact glow + aura (the stage turns this on)
+  quality: 'ps2',       // the console dial: 'ps1' | 'ps2' | 'ps2+'
 });
 
 m.set('energy', v);     // 0..1 — how hard the work is going (waves, veins)
 m.set('mood', v);       // 0..1 — resting grin + liveliness
 m.set('heat', v);       // 0..1 — REC/excitement: ember core, lime eyes
+m.setState('LISTENING'); // IDLE · LISTENING · RECORDING · PAUSED · RENDERING · SLEEPING
+m.celebrate();           // one-shot: a take landed
 m.setPersonality('GHOST' | 0.37 [, seed] [, { snap: true }]);  // crossfades
-m.reroll(); m.poke(); m.lookAt(nx, ny);
+m.setQuality('ps2+'); m.reroll(); m.poke(); m.lookAt(nx, ny);
 m.state(); m.onPersonality(fn); m.destroy();
 ```
 
@@ -63,7 +69,8 @@ translated into our raymarched, dithered register.
 | path | what |
 |---|---|
 | [playground/moshi.js](playground/moshi.js) | THE COMPONENT — self-contained, portable |
-| [playground/index.html](playground/index.html) | THE STAGE — hosts him full-size + a 76px corner twin |
+| [playground/index.html](playground/index.html) | THE LOOKBOOK — the curated stage + a 76px corner twin |
+| [LOOKBOOK.md](LOOKBOOK.md) | The catalog: every look, state, family, steal, and version |
 | [HOUSE_STYLE.md](HOUSE_STYLE.md) | The register: PS2 crunch, signal chain, face doctrine, morph rule, color doctrine |
 | [BRIEF.md](BRIEF.md) | The fiction — who Moshi is |
 | [tokens/moshi.css](tokens/moshi.css) | Palette + the NanumSquareRound display face |
