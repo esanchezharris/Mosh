@@ -364,7 +364,8 @@ button.on { border-color: var(--accent); color: var(--accent); background: #2120
 .auto-foot { padding: 0.4rem 0.9rem; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.7rem; }
 
 /* Clip actions bar (Wave 6) */
-.clip-actions { display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem 1rem; border-bottom: 1px solid var(--line); background: var(--panel-2); flex-wrap: wrap; }
+.clip-actions { display: flex; align-items: center; gap: 0.5rem; min-height: 43px; padding: 0.4rem 1rem; border-bottom: 1px solid var(--line); background: var(--panel-2); flex-wrap: wrap; box-sizing: border-box; }
+.clip-actions.empty { pointer-events: none; }
 .ca-label { font-size: 0.74rem; color: var(--muted); }
 .ca-name { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; color: var(--text); padding: 0.25rem 0.5rem; font-size: 0.8rem; width: 160px; }
 .ca-gain { display: flex; align-items: center; gap: 5px; font-size: 0.74rem; color: var(--muted); }
@@ -439,9 +440,11 @@ button.on { border-color: var(--accent); color: var(--accent); background: #2120
 .pr-row.black { background: rgba(255,255,255,0.03); }
 .pr-gl { position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(255,255,255,0.05); }
 .pr-gl.bar { background: rgba(255,255,255,0.16); }
+.pr-row, .pr-gl { pointer-events: none; }
 .pr-note { position: absolute; background: linear-gradient(180deg, #8f7bff, #6c5cff); border: 1px solid rgba(255,255,255,0.3); border-radius: 3px; cursor: grab; }
 .pr-note.sel { outline: 1px solid #fff; z-index: 2; }
 .pr-note-grip { position: absolute; right: 0; top: 0; bottom: 0; width: 6px; cursor: ew-resize; }
+.pr-lasso { position: absolute; z-index: 3; border: 1px solid var(--accent); background: rgba(108,92,255,0.14); pointer-events: none; }
 .pr-foot { padding: 0.4rem 0.9rem; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.7rem; }
 
 /* BRW-007 — drag-and-drop audio import affordance. */

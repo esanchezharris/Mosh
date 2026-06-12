@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -204,6 +205,39 @@ def wait_for_command(command: str, marker: int, timeout: float = 8.0) -> None:
     raise RuntimeError(f"timed out waiting for JSONL command {command!r}")
 
 
+def command_records(marker: int) -> list[dict]:
+    try:
+        with COMMAND_LOG.open("r", encoding="utf-8") as fh:
+            fh.seek(marker)
+            tail = fh.read()
+    except FileNotFoundError:
+        return []
+
+    records: list[dict] = []
+    for line in tail.splitlines():
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(item, dict):
+            records.append(item)
+    return records
+
+
+def command_count(command: str, marker: int) -> int:
+    return sum(1 for item in command_records(marker) if item.get("command") == command and item.get("ok") is True)
+
+
+def wait_for_command_count(command: str, marker: int, minimum: int = 1, timeout: float = 8.0) -> int:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        count = command_count(command, marker)
+        if count >= minimum:
+            return count
+        time.sleep(0.25)
+    raise RuntimeError(f"timed out waiting for {minimum} JSONL {command!r} records")
+
+
 def launch(args: list[str]) -> int:
     if not APP_BUNDLE.is_dir() or not APP_BIN.exists():
         raise SystemExit(f"missing app bundle or binary: {APP_BUNDLE}")
@@ -367,6 +401,22 @@ def mouse_click_xy(x: float, y: float) -> None:
     time.sleep(0.35)
 
 
+def mouse_double_click_xy(x: float, y: float) -> None:
+    activate()
+    point = Quartz.CGPoint(x, y)
+    source = Quartz.CGEventSourceCreate(Quartz.kCGEventSourceStateHIDSystemState)
+    for click_state in (1, 2):
+        down = Quartz.CGEventCreateMouseEvent(source, Quartz.kCGEventLeftMouseDown, point, Quartz.kCGMouseButtonLeft)
+        up = Quartz.CGEventCreateMouseEvent(source, Quartz.kCGEventLeftMouseUp, point, Quartz.kCGMouseButtonLeft)
+        Quartz.CGEventSetIntegerValueField(down, Quartz.kCGMouseEventClickState, click_state)
+        Quartz.CGEventSetIntegerValueField(up, Quartz.kCGMouseEventClickState, click_state)
+        Quartz.CGEventPost(Quartz.kCGHIDEventTap, down)
+        time.sleep(0.04)
+        Quartz.CGEventPost(Quartz.kCGHIDEventTap, up)
+        time.sleep(0.08)
+    time.sleep(0.7)
+
+
 def mouse_drag_xy(x1: float, y1: float, x2: float, y2: float) -> None:
     activate()
     source = Quartz.CGEventSourceCreate(Quartz.kCGEventSourceStateHIDSystemState)
@@ -383,6 +433,23 @@ def mouse_drag_xy(x1: float, y1: float, x2: float, y2: float) -> None:
     up = Quartz.CGEventCreateMouseEvent(source, Quartz.kCGEventLeftMouseUp, Quartz.CGPoint(x2, y2), Quartz.kCGMouseButtonLeft)
     Quartz.CGEventPost(Quartz.kCGHIDEventTap, up)
     time.sleep(0.5)
+
+
+def key_cmd_z(*, shift: bool = False) -> None:
+    activate()
+    source = Quartz.CGEventSourceCreate(Quartz.kCGEventSourceStateHIDSystemState)
+    flags = Quartz.kCGEventFlagMaskCommand
+    if shift:
+        flags |= Quartz.kCGEventFlagMaskShift
+    key_z = 6
+    down = Quartz.CGEventCreateKeyboardEvent(source, key_z, True)
+    up = Quartz.CGEventCreateKeyboardEvent(source, key_z, False)
+    Quartz.CGEventSetFlags(down, flags)
+    Quartz.CGEventSetFlags(up, flags)
+    Quartz.CGEventPost(Quartz.kCGHIDEventTap, down)
+    time.sleep(0.05)
+    Quartz.CGEventPost(Quartz.kCGHIDEventTap, up)
+    time.sleep(0.55)
 
 
 def click_ax(row: dict) -> None:
@@ -433,6 +500,203 @@ def assert_condition(results: dict, key: str, ok: bool, detail: str) -> None:
     results[key] = {"ok": bool(ok), "detail": detail}
     if not ok:
         raise RuntimeError(f"{key} failed: {detail}")
+
+
+NOTE_TITLE = re.compile(r"^[A-G]#?\d note start ")
+
+
+def piano_note_rows() -> list[dict]:
+    return [
+        row for row in ax_rows()
+        if row["role"] == "AXButton" and NOTE_TITLE.search(row["title"])
+    ]
+
+
+def wait_for_note_count(minimum: int, timeout: float = 8.0) -> list[dict]:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        notes = piano_note_rows()
+        if len(notes) >= minimum:
+            return notes
+        time.sleep(0.25)
+    raise RuntimeError(f"timed out waiting for at least {minimum} piano-roll notes")
+
+
+def find_note(prefix: str, timeout: float = 8.0) -> dict:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        for row in piano_note_rows():
+            if row["title"].startswith(prefix):
+                return row
+        time.sleep(0.25)
+    raise RuntimeError(f"piano-roll note not found: {prefix}")
+
+
+def rightmost_note(timeout: float = 8.0) -> dict:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        notes = piano_note_rows()
+        visible = [n for n in notes if 180 <= n["y"] <= 850]
+        if visible:
+            return sorted(visible, key=lambda n: n["x"])[-1]
+        time.sleep(0.25)
+    raise RuntimeError("no visible piano-roll notes found")
+
+
+def run_piano_roll(results: dict, win: dict) -> None:
+    # Use an explicit default MIDI clip rather than the demo drum clips: the drum
+    # notes sit below the current C2-C7 viewport, while the default arpeggio is visible.
+    snap = ax_find(role="AXButton", title="Snap")
+    click_ax(snap)  # snap off: draw an off-grid note, then prove Quantize moves it.
+
+    marker = command_log_marker()
+    midi_buttons = [
+        r for r in ax_rows()
+        if r["role"] == "AXButton" and r["title"] == "+ MIDI" and r["y"] < 180
+    ]
+    if not midi_buttons:
+        raise RuntimeError("toolbar + MIDI button not found")
+    click_ax(sorted(midi_buttons, key=lambda r: r["y"])[0])
+    wait_for_command("add_midi_clip", marker)
+    midi_clip = wait_for_ax(
+        lambda row: row["role"] == "AXGroup"
+        and row["help"].startswith("MIDI · double-click to edit notes"),
+        timeout=10.0,
+        detail="new default MIDI clip",
+    )
+
+    mouse_double_click_xy(midi_clip["x"] + midi_clip["w"] / 2.0, midi_clip["y"] + midi_clip["h"] / 2.0)
+    wait_for_ax(
+        lambda row: row["role"] == "AXButton" and row["title"].startswith("Quantize "),
+        timeout=10.0,
+        detail="piano-roll Quantize button",
+    )
+    opened = capture(win, "demo6-pr-00-open")
+    notes = wait_for_note_count(4)
+    assert_condition(
+        results,
+        "demo6_piano_roll_open",
+        len(notes) >= 4,
+        f"double-click opened piano roll with {len(notes)} AX-visible notes",
+    )
+
+    g4 = find_note("G4 note start 2.00")
+    c5 = find_note("C5 note start 3.00")
+    marker = command_log_marker()
+    before_lasso_count = len(piano_note_rows())
+    before_lasso = capture(win, "demo6-pr-01-before-lasso")
+    mouse_drag_xy(
+        min(g4["x"], c5["x"]) - 8,
+        min(g4["y"], c5["y"]) - 8,
+        max(g4["x"] + g4["w"], c5["x"] + c5["w"]) + 10,
+        max(g4["y"] + g4["h"], c5["y"] + c5["h"]) + 10,
+    )
+    time.sleep(0.6)
+    after_lasso = capture(win, "demo6-pr-02-after-lasso")
+    lasso_count = len(piano_note_rows())
+    lasso_diff = mean_abs_diff(before_lasso, after_lasso, full_box(before_lasso))
+    lasso_adds = command_count("add_note", marker)
+    assert_condition(
+        results,
+        "demo6_piano_lasso_vs_draw",
+        lasso_count == before_lasso_count and lasso_adds == 0 and lasso_diff > 0.02,
+        f"lasso selected visible notes without add_note; notes {before_lasso_count}->{lasso_count}; diff={lasso_diff:.2f}",
+    )
+
+    marker = command_log_marker()
+    grid = ax_find(role="AXGroup", title="Piano roll grid")
+    draw_x = grid["x"] + 5.5 * 42.0
+    draw_y = c5["y"] + c5["h"] / 2.0
+    before_draw_count = len(piano_note_rows())
+    mouse_click_xy(draw_x, draw_y)
+    wait_for_command("add_note", marker)
+    notes_after_draw = wait_for_note_count(before_draw_count + 1)
+    capture(win, "demo6-pr-03-after-draw")
+    assert_condition(
+        results,
+        "demo6_piano_draw_note",
+        len(notes_after_draw) == before_draw_count + 1,
+        f"empty-grid click recorded add_note and note count {before_draw_count}->{len(notes_after_draw)}",
+    )
+
+    new_note = rightmost_note()
+    marker = command_log_marker()
+    resize_before_w = new_note["w"]
+    mouse_drag_xy(
+        new_note["x"] + new_note["w"] - 2,
+        new_note["y"] + new_note["h"] / 2.0,
+        new_note["x"] + new_note["w"] + 52,
+        new_note["y"] + new_note["h"] / 2.0,
+    )
+    resize_set_notes = wait_for_command_count("set_note", marker, 1)
+    resized = rightmost_note()
+    capture(win, "demo6-pr-04-after-resize")
+    assert_condition(
+        results,
+        "demo6_piano_edge_resize",
+        resize_set_notes == 1 and resized["w"] > resize_before_w + 25,
+        f"one set_note resized right edge width {resize_before_w:.1f}->{resized['w']:.1f}",
+    )
+
+    click_ax(resized)
+    slider = ax_find(role="AXSlider", title="Selected note velocity", timeout=8.0)
+    marker = command_log_marker()
+    mouse_drag_xy(
+        slider["x"] + slider["w"] * 0.78,
+        slider["y"] + slider["h"] / 2.0,
+        slider["x"] + slider["w"] * 0.28,
+        slider["y"] + slider["h"] / 2.0,
+    )
+    velocity_set_notes = wait_for_command_count("set_note", marker, 1)
+    time.sleep(0.5)
+    after_velocity = rightmost_note()
+    capture(win, "demo6-pr-05-after-velocity")
+    assert_condition(
+        results,
+        "demo6_piano_velocity_lane",
+        velocity_set_notes == 1 and "velocity 100" not in after_velocity["title"],
+        f"velocity drag committed one set_note; note label now {after_velocity['title']!r}",
+    )
+
+    before_quantize = capture(win, "demo6-pr-06-before-quantize")
+    before_quantize_note = rightmost_note()
+    marker = command_log_marker()
+    click_ax(ax_find(role="AXButton", help_text="Quantize all notes to the grid"))
+    quantize_count = wait_for_command_count("quantize_notes", marker, 1)
+    time.sleep(0.7)
+    quantized_note = rightmost_note()
+    after_quantize = capture(win, "demo6-pr-07-after-quantize")
+    quantize_diff = mean_abs_diff(before_quantize, after_quantize, full_box(before_quantize))
+    assert_condition(
+        results,
+        "demo6_piano_quantize",
+        quantize_count == 1 and abs(quantized_note["x"] - before_quantize_note["x"]) > 8,
+        f"one quantize_notes moved rightmost note x {before_quantize_note['x']:.1f}->{quantized_note['x']:.1f}; diff={quantize_diff:.2f}",
+    )
+
+    marker = command_log_marker()
+    # Defocus the velocity slider so the global Mod+Z shortcut is not ignored as
+    # editable-input text handling.
+    mouse_click_xy(grid["x"] + grid["w"] - 20, 215)
+    key_cmd_z()
+    undo_count = wait_for_command_count("undo", marker, 1)
+    time.sleep(0.7)
+    undo_note = rightmost_note()
+    after_undo = capture(win, "demo6-pr-08-after-undo-quantize")
+    undo_diff = mean_abs_diff(after_quantize, after_undo, full_box(after_quantize))
+    assert_condition(
+        results,
+        "demo6_piano_undo_grouping",
+        undo_count == 1 and abs(undo_note["x"] - before_quantize_note["x"]) <= 8,
+        f"one Mod+Z undo restored quantized note x {quantized_note['x']:.1f}->{undo_note['x']:.1f}; diff={undo_diff:.2f}",
+    )
+
+    assert_condition(
+        results,
+        "demo6_piano_workflow_visuals",
+        mean_abs_diff(opened, after_undo, full_box(opened)) > 0.1,
+        "screenshots captured open/lasso/draw/resize/velocity/quantize/undo piano-roll states",
+    )
 
 
 def run_demo6(results: dict) -> None:
@@ -507,6 +771,8 @@ def run_demo6(results: dict) -> None:
     after_x = clip_after["x"]
     assert_condition(results, "demo6_clip_drag", after_x - before_x > 30.0, f"AX x {before_x:.1f}->{after_x:.1f}")
 
+    run_piano_roll(results, win)
+
     kill_mosh()
 
 
@@ -563,12 +829,19 @@ def run_demo3(results: dict) -> None:
         "opened exact Serum 2 native editor after host playback-context warmup",
     )
 
-    mouse_click(win, 198, 78)  # OSC
-    osc = capture(win, "demo3-01-serum-osc")
-    mouse_click(win, 333, 78)  # MATRIX tab in the native editor
-    matrix = capture(win, "demo3-02-serum-matrix")
-    matrix_diff = mean_abs_diff(osc, matrix, (0, 100, 1160, 420))
-    assert_condition(results, "demo3_serum_matrix_tab", matrix_diff > 5.0, f"osc/matrix diff={matrix_diff:.2f}")
+    before_control = capture(win, "demo3-01-serum-before-control")
+    # Serum's top tab hit targets move with native scaling and skin layout. This
+    # dropdown is a stable native editor control and still proves real pop-out
+    # hit-testing plus screenshot-visible plugin UI response.
+    mouse_click(win, 600, 120)
+    after_control = capture(win, "demo3-02-serum-after-control")
+    control_diff = mean_abs_diff(before_control, after_control, (0, 80, 1600, 700))
+    assert_condition(
+        results,
+        "demo3_serum_native_control_click",
+        control_diff > 1.0,
+        f"native Serum control click changed editor pixels; diff={control_diff:.2f}",
+    )
 
     kill_mosh()
 

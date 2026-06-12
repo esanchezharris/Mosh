@@ -282,7 +282,8 @@ function ClipActions({ snapshot }: { snapshot: Snapshot }) {
   const clips = snapshot.tracks.flatMap((t) => t.clips).filter((c) => selection.has(c.id));
   const hasRange = !!timeRange && timeRange.end > timeRange.start;
   // The bar appears for a clip selection OR an active time-range (ARR-010).
-  if (clips.length === 0 && !hasRange) return null;
+  if (clips.length === 0 && !hasRange)
+    return <div className="clip-actions empty" aria-hidden="true" />;
   const single = clips.length === 1 ? clips[0] : null;
   const anyMuted = clips.some((c) => c.mute);
 

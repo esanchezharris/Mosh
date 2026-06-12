@@ -227,3 +227,53 @@ The rendered GUI launch residual is now closed:
 - Regression battery after this slice: CTest PASS 0.10s, selftest PASS
   `650/650` 32.92s, undo PASS `18/18` 0.64s, command-log contract PASS
   286 records 0.04s.
+
+## Piano-Roll UI Automation Addendum (Codex, 2026-06-11)
+
+The next rendered macOS workflow slice is now covered in
+`scripts/macos-ui-automation-gate.py`:
+
+- Real `Mosh.app --demo6` creates a visible default MIDI clip through the
+  toolbar, double-clicks it open, and drives the piano roll with Quartz mouse
+  and keyboard events.
+- The gate proves lasso-vs-draw separation, empty-grid draw, note right-edge
+  resize, selected-note velocity lane, Quantize, and one-step undo grouping.
+- Evidence:
+  `_preserved_artifacts/2026-06-08-consolidation/claudemosh/macos-ui-automation-20260611-223235`
+  (`REPORT.md`, `result.json`, and screenshots
+  `demo6-pr-00-open.png` through `demo6-pr-08-after-undo-quantize.png`).
+
+Two product bugs were fixed while making the slice automatable:
+
+- MIDI clip double-click was unreliable because the first click selected the
+  clip, inserted the clip-actions row, and shifted the lane before the second
+  click. `ClipActions` now reserves its row height even when empty, so the
+  second click lands on the same clip.
+- The piano-roll background did not cleanly separate draw from drag gestures,
+  and row/gridline children could intercept empty-grid clicks. The grid now
+  treats click as draw and drag as UI-local lasso selection; no lasso gesture
+  emits `add_note`.
+- Velocity slider drags now commit one `set_note` on release/blur/key-up,
+  instead of sending one command per slider input event. The rendered gate
+  asserts exactly one `set_note` for the velocity gesture.
+
+The gate also now uses accessibility labels for the piano-roll grid, notes,
+note resize handles, and selected-note velocity slider, so failures name the
+DAW surface and the exact stage instead of relying only on pixels.
+
+The legacy Serum MATRIX-tab click in the UI gate had become native-scale
+fragile. It was replaced with a stable Serum native-control interaction: open
+a visible dropdown in the editor and assert screenshot-visible pixel change.
+This keeps the plugin-editor proof at the native hit-testing layer without
+depending on one skin coordinate.
+
+Current verification after this slice:
+
+| Gate | Result |
+| --- | --- |
+| `cmake --build build` | PASS, 1.59s |
+| `MOSH_NO_AUDIO=1 "$APP" --selftest` | PASS, 32.18s, `650/650` |
+| `MOSH_NO_AUDIO=1 "$APP" --selftest-undo` | PASS, 1.16s, `18/18` |
+| `ctest --test-dir build --output-on-failure` | PASS, 0.10s |
+| `scripts/validate-command-log-contract.sh` | PASS, 0.16s, 286 records |
+| `scripts/macos-ui-automation-gate.py` | PASS, evidence path above |

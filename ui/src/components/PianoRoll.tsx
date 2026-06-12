@@ -13,6 +13,7 @@ const noteName = (p: number) => `${NAMES[((p % 12) + 12) % 12]}${Math.floor(p / 
 
 type DragKind = "move" | "resize";
 type Drag = { kind: DragKind; i: number; startX: number; startY: number; orig: MidiNote };
+type GridDrag = { pointerId: number; x0: number; y0: number; moved: boolean };
 
 export function PianoRoll() {
   const editingClipId = useStore((s) => s.editingClipId);
@@ -24,14 +25,33 @@ export function PianoRoll() {
 
   const clip = snapshot?.tracks.flatMap((t) => t.clips).find((c) => c.id === editingClipId) ?? null;
 
-  const [sel, setSel] = useState<number | null>(null);
+  const [selectedNotes, setSelectedNotes] = useState<Set<number>>(() => new Set());
   const [preview, setPreview] = useState<MidiNote | null>(null);
+  const [lasso, setLasso] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
+  const [velocityDraft, setVelocityDraft] = useState<number | null>(null);
   const dragRef = useRef<Drag | null>(null);
+  const gridDragRef = useRef<GridDrag | null>(null);
+  const previewRef = useRef<MidiNote | null>(null);
+  const velocityDraftRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (editingClipId && !clip) close();
   }, [editingClipId, clip, close]);
-  useEffect(() => { setPreview(null); }, [clip?.notes]);
+  useEffect(() => {
+    setPreview(null);
+    previewRef.current = null;
+    setLasso(null);
+    gridDragRef.current = null;
+    setSelectedNotes((prev) => {
+      const available = new Set((clip?.notes ?? []).map((n) => n.i));
+      const next = new Set([...prev].filter((i) => available.has(i)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [clip?.notes]);
+  useEffect(() => {
+    setVelocityDraft(null);
+    velocityDraftRef.current = null;
+  }, [editingClipId, selectedNotes]);
 
   if (!editingClipId || !clip) return null;
 
@@ -46,51 +66,120 @@ export function PianoRoll() {
   const gridW = gridBeats * BEAT_PX;
   const yOf = (pitch: number) => (HIGH - pitch) * ROW_H;
   const pitchAt = (y: number) => HIGH - Math.floor(y / ROW_H);
+  const noteBox = (n: MidiNote) => ({
+    x: n.start * BEAT_PX,
+    y: yOf(n.pitch) + 1,
+    w: Math.max(6, n.length * BEAT_PX - 1),
+    h: ROW_H - 2,
+  });
+  const setPreviewNote = (n: MidiNote | null) => {
+    previewRef.current = n;
+    setPreview(n);
+  };
 
   const notes: MidiNote[] = (clip.notes ?? []).map((n) =>
     preview && preview.i === n.i ? preview : n
   );
 
-  const addAt = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (e.target !== e.currentTarget) return; // only empty grid
+  const onGridDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if ((e.target as HTMLElement).closest(".pr-note")) return;
     const rect = e.currentTarget.getBoundingClientRect();
-    const start = Math.max(0, snapBeat((e.clientX - rect.left) / BEAT_PX));
-    const pitch = pitchAt(e.clientY - rect.top);
-    const length = stepBeats > 0 ? stepBeats : 1;
-    void exec("add_note", { clipId: clip.id, pitch, start, length, velocity: 100 });
+    const x = Math.max(0, e.clientX - rect.left);
+    const y = Math.max(0, e.clientY - rect.top);
+    gridDragRef.current = { pointerId: e.pointerId, x0: x, y0: y, moved: false };
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setSelectedNotes(new Set());
   };
 
   const onNoteDown = (kind: DragKind, n: MidiNote) => (e: React.PointerEvent) => {
     e.stopPropagation();
-    setSel(n.i);
+    setSelectedNotes(new Set([n.i]));
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
     dragRef.current = { kind, i: n.i, startX: e.clientX, startY: e.clientY, orig: n };
   };
-  const onMove = (e: React.PointerEvent) => {
+  const onGridMove = (e: React.PointerEvent<HTMLDivElement>) => {
     const d = dragRef.current;
-    if (!d) return;
-    const db = (e.clientX - d.startX) / BEAT_PX;
-    if (d.kind === "move") {
-      const start = Math.max(0, snapBeat(d.orig.start + db));
-      const dp = -Math.round((e.clientY - d.startY) / ROW_H);
-      const pitch = Math.min(127, Math.max(0, d.orig.pitch + dp));
-      setPreview({ ...d.orig, start, pitch });
-    } else {
-      const length = Math.max(stepBeats || 0.25, snapBeat(d.orig.start + d.orig.length + db) - d.orig.start);
-      setPreview({ ...d.orig, length });
+    if (d) {
+      const db = (e.clientX - d.startX) / BEAT_PX;
+      if (d.kind === "move") {
+        const start = Math.max(0, snapBeat(d.orig.start + db));
+        const dp = -Math.round((e.clientY - d.startY) / ROW_H);
+        const pitch = Math.min(127, Math.max(0, d.orig.pitch + dp));
+        setPreviewNote({ ...d.orig, start, pitch });
+      } else {
+        const length = Math.max(stepBeats || 0.25, snapBeat(d.orig.start + d.orig.length + db) - d.orig.start);
+        setPreviewNote({ ...d.orig, length });
+      }
+      return;
     }
+
+    const gd = gridDragRef.current;
+    if (!gd) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = Math.max(0, e.clientX - rect.left);
+    const y = Math.max(0, e.clientY - rect.top);
+    if (Math.hypot(x - gd.x0, y - gd.y0) > 4) gd.moved = true;
+    if (gd.moved) setLasso({ x0: gd.x0, y0: gd.y0, x1: x, y1: y });
   };
-  const onUp = () => {
+  const onGridUp = (e: React.PointerEvent<HTMLDivElement>) => {
     const d = dragRef.current;
-    dragRef.current = null;
-    if (!d || !preview) return;
-    if (d.kind === "move")
-      void exec("set_note", { clipId: clip.id, noteIndex: d.i, start: preview.start, pitch: preview.pitch });
-    else
-      void exec("set_note", { clipId: clip.id, noteIndex: d.i, length: preview.length });
+    if (d) {
+      const finalPreview = previewRef.current;
+      dragRef.current = null;
+      setPreviewNote(null);
+      if (!finalPreview) return;
+      if (d.kind === "move")
+        void exec("set_note", { clipId: clip.id, noteIndex: d.i, start: finalPreview.start, pitch: finalPreview.pitch });
+      else
+        void exec("set_note", { clipId: clip.id, noteIndex: d.i, length: finalPreview.length });
+      return;
+    }
+
+    const gd = gridDragRef.current;
+    if (!gd) return;
+    gridDragRef.current = null;
+    e.currentTarget.releasePointerCapture?.(gd.pointerId);
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = Math.max(0, e.clientX - rect.left);
+    const y = Math.max(0, e.clientY - rect.top);
+    const wasMoved = gd.moved || Math.hypot(x - gd.x0, y - gd.y0) > 4;
+    setLasso(null);
+
+    if (!wasMoved) {
+      const start = Math.max(0, snapBeat(x / BEAT_PX));
+      const pitch = pitchAt(y);
+      const length = stepBeats > 0 ? stepBeats : 1;
+      void exec("add_note", { clipId: clip.id, pitch, start, length, velocity: 100 });
+      return;
+    }
+
+    const xMin = Math.min(gd.x0, x), xMax = Math.max(gd.x0, x);
+    const yMin = Math.min(gd.y0, y), yMax = Math.max(gd.y0, y);
+    const hit = (clip.notes ?? [])
+      .filter((n) => {
+        const b = noteBox(n);
+        return b.x + b.w >= xMin && b.x <= xMax && b.y + b.h >= yMin && b.y <= yMax;
+      })
+      .map((n) => n.i);
+    setSelectedNotes(new Set(hit));
   };
 
-  const selNote = sel != null ? (clip.notes ?? []).find((n) => n.i === sel) : undefined;
+  const selectedIndex = selectedNotes.values().next().value as number | undefined;
+  const selNote = selectedIndex != null ? (clip.notes ?? []).find((n) => n.i === selectedIndex) : undefined;
+  const velocityValue = velocityDraft ?? selNote?.velocity ?? 100;
+  const setDraftVelocity = (value: number) => {
+    const next = Math.round(Math.min(127, Math.max(1, value)));
+    velocityDraftRef.current = next;
+    setVelocityDraft(next);
+  };
+  const commitVelocity = () => {
+    if (!selNote) return;
+    const next = velocityDraftRef.current;
+    if (next == null || next === selNote.velocity) return;
+    velocityDraftRef.current = null;
+    setVelocityDraft(null);
+    void exec("set_note", { clipId: clip.id, noteIndex: selNote.i, velocity: next });
+  };
 
   return (
     <div className="modal-backdrop" onClick={close}>
@@ -103,10 +192,14 @@ export function PianoRoll() {
             <label className="pr-vel" title="Velocity of the selected note">
               vel
               <input
-                type="range" min={1} max={127} step={1} value={selNote.velocity}
-                onChange={(e) => exec("set_note", { clipId: clip.id, noteIndex: selNote.i, velocity: Number(e.target.value) })}
+                aria-label="Selected note velocity"
+                type="range" min={1} max={127} step={1} value={velocityValue}
+                onChange={(e) => setDraftVelocity(Number(e.target.value))}
+                onPointerUp={commitVelocity}
+                onKeyUp={commitVelocity}
+                onBlur={commitVelocity}
               />
-              <span>{selNote.velocity}</span>
+              <span>{velocityValue}</span>
             </label>
           )}
           <button onClick={() => exec("quantize_notes", { clipId: clip.id, division: snapStepBeats(m, snapDivision) })} title="Quantize all notes to the grid">
@@ -126,10 +219,12 @@ export function PianoRoll() {
           <div className="pr-scroll">
             <div
               className="pr-grid"
+              role="group"
+              aria-label="Piano roll grid"
               style={{ width: gridW, height: pitches.length * ROW_H }}
-              onPointerDown={addAt}
-              onPointerMove={onMove}
-              onPointerUp={onUp}
+              onPointerDown={onGridDown}
+              onPointerMove={onGridMove}
+              onPointerUp={onGridUp}
             >
               {/* row shading */}
               {pitches.map((p) => (
@@ -140,20 +235,34 @@ export function PianoRoll() {
                 <div key={`c${b}`} className={`pr-gl ${b % m.num === 0 ? "bar" : ""}`} style={{ left: b * BEAT_PX }} />
               ))}
               {/* notes */}
-              {notes.map((n) => (
+              {notes.map((n) => {
+                const b = noteBox(n);
+                return (
                 <div
                   key={n.i}
-                  className={`pr-note ${sel === n.i ? "sel" : ""}`}
-                  style={{ left: n.start * BEAT_PX, top: yOf(n.pitch) + 1, width: Math.max(6, n.length * BEAT_PX - 1), height: ROW_H - 2 }}
+                  className={`pr-note ${selectedNotes.has(n.i) ? "sel" : ""}`}
+                  role="button"
+                  aria-label={`${noteName(n.pitch)} note start ${n.start.toFixed(2)} length ${n.length.toFixed(2)} velocity ${n.velocity}`}
+                  style={{ left: b.x, top: b.y, width: b.w, height: b.h }}
                   onPointerDown={onNoteDown("move", n)}
-                  onPointerMove={onMove}
-                  onPointerUp={onUp}
                   onDoubleClick={(e) => { e.stopPropagation(); void exec("remove_note", { clipId: clip.id, noteIndex: n.i }); }}
                   title={`${noteName(n.pitch)} · vel ${n.velocity} · dbl-click to delete`}
                 >
-                  <span className="pr-note-grip" onPointerDown={onNoteDown("resize", n)} />
+                  <span className="pr-note-grip" role="separator" aria-label={`Resize ${noteName(n.pitch)} note`} onPointerDown={onNoteDown("resize", n)} />
                 </div>
-              ))}
+                );
+              })}
+              {lasso && (
+                <div
+                  className="pr-lasso"
+                  style={{
+                    left: Math.min(lasso.x0, lasso.x1),
+                    top: Math.min(lasso.y0, lasso.y1),
+                    width: Math.abs(lasso.x1 - lasso.x0),
+                    height: Math.abs(lasso.y1 - lasso.y0),
+                  }}
+                />
+              )}
             </div>
           </div>
         </div>
