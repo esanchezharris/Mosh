@@ -14,7 +14,7 @@ struct DiagnosticsView: View {
                         Label(store.monitoring.isRunning ? "Running" : "Run Latency Spike",
                               systemImage: "waveform.path.ecg")
                     }
-                    .disabled(store.monitoring.isRunning)
+                    .disabled(store.monitoring.isRunning || !store.canSendCommands)
 
                     if let report = store.monitoring.lastReport {
                         LabeledContent("Network median", value: format(report.networkMedianMs))

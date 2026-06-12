@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEVICE_ID="${MOSH_IOS_DEVICE_ID:-00008110-001E4D920181401E}"
 TEAM_ID="${MOSH_IOS_TEAM_ID:-auto}"
-DERIVED="$ROOT/build/ios-device"
+DERIVED="${MOSH_IOS_DERIVED_DATA:-${TMPDIR:-/tmp}/mosh-ios-device}"
 PROJECT="$ROOT/ios/MoshCompanion/MoshCompanion.xcodeproj"
 APP="$DERIVED/Build/Products/Debug-iphoneos/MoshCompanion.app"
 BUNDLE_ID="studio.mosh.companion"
@@ -93,6 +93,17 @@ LAUNCH_STATUS=$?
 set -e
 
 if [[ "$LAUNCH_STATUS" -ne 0 ]]; then
+  if grep -qi "device was not, or could not be, unlocked\\|because the device.*locked\\|BSErrorCodeDescription = Locked" "$LAUNCH_LOG"; then
+    cat "$LAUNCH_LOG" >&2
+    cat >&2 <<'MSG'
+
+Mosh Companion installed, but iOS refused to launch it because the iPhone is
+locked. Unlock the phone and leave it awake, then rerun:
+  scripts/iphone-companion-device-gate.sh
+MSG
+    exit 6
+  fi
+
   if grep -qi "not been explicitly trusted\\|profile has not been explicitly trusted" "$LAUNCH_LOG"; then
     cat "$LAUNCH_LOG" >&2
     cat >&2 <<'MSG'

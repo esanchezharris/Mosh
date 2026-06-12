@@ -32,6 +32,13 @@ struct RemoteStatus: Decodable, Equatable {
     let pairing: RemotePairingInfo?
 }
 
+enum CompanionConnectionState: Equatable {
+    case unpaired
+    case connecting
+    case online(lastUpdated: Date)
+    case offline(message: String, lastOnline: Date?)
+}
+
 struct MoshSnapshot: Decodable, Equatable {
     var tracks: [MoshTrack]
     var transport: MoshTransport
