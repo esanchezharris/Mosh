@@ -90,3 +90,34 @@ Automation already proved the rendered arrangement/plugin workflow, so human QA 
 3. Render a selected track, click Accept, then Reject; verify the visible state matches the command intent.
 4. Open Serum 2 from the plugin surface and switch OSC to MATRIX; confirm the native editor remains responsive.
 5. If BlackHole is routed as system output/input, run the BlackHole gate above and keep the `REPORT.md`, `analysis.json`, and capture WAV if it still fails.
+
+## Independent Verification Addendum (Claude, 2026-06-11)
+
+Every claim above was re-verified independently on commit `1ebe1f4`:
+
+- Battery re-run from scratch: build PASS · selftest **650/650 in 26s, 0 JUCE
+  assertions** · undo 18/18 · CTest PASS · command-log contract PASS.
+- Code review of the diff: the session-dir isolation, streaming
+  `get_command_log` (bounded tail window, additive `limit`/`logBytes`
+  metadata), per-section selftest timings, and gate-script changes are all
+  sound; no contract regressions found.
+- Evidence spot-checks: strict-local-v0 REPORT (PASS, 10 checks), UI
+  automation REPORT (PASS with AX assertions + image diffs; Serum native
+  editor screenshots verified by eye), iOS simulator log ("All tests"
+  passed), XcodeBuildMCP log present.
+
+### BlackHole red gate — ROOT-CAUSED: environment, not Mosh
+
+An independent control experiment (AVAudioEngine writer pinned to the
+BlackHole device id, 440 Hz at 0.5 amplitude — no Mosh involvement) also
+captured silence from BlackHole's input, and an acoustic-bleed test proved
+the AVFoundation capture index really is BlackHole. Conclusion: **the
+BlackHole driver's loopback is inoperative system-wide** (macOS 26.4.1,
+BlackHole 0.6.1) — no application can pass this gate until the environment
+is repaired (`sudo killall coreaudiod`, then `brew reinstall blackhole-2ch`
+if still silent).
+
+The gate now performs this control probe itself
+(`scripts/blackhole-control-probe.swift`) and exits **3 = ENV-BLOCKED** with
+remediation text when the driver is at fault, so an environment failure can
+never again read as an application failure.

@@ -75,6 +75,54 @@ copy_attempt_logs() {
   cp "$EVID/analysis-attempt-${attempt}.json" "$EVID/analysis.json" 2>/dev/null || true
 }
 
+# -- Control probe (2026-06-11): prove the DRIVER's loopback works before
+# implicating Mosh. An independent AVAudioEngine writer pins BlackHole by
+# device id and plays a 440 Hz tone at 0.5 amplitude; if even THAT does not
+# appear on BlackHole's input, the environment is broken (root-caused on
+# macOS 26.4.1 + BlackHole 0.6.1: loopback dead until coreaudiod restart /
+# driver reinstall) and the gate exits 3 = ENV-BLOCKED, not FAIL.
+echo "[blackhole-live-audio] control probe: independent tone through the driver"
+CONTROL_WAV="$EVID/control-capture.wav"
+swift "$REPO/scripts/blackhole-control-probe.swift" 6 > "$EVID/control-probe.log" 2>&1 &
+PROBE_PID=$!
+sleep 2
+"$FFMPEG" -hide_banner -y -f avfoundation -i ":$INDEX" -t 3 -ac 2 -ar 48000 "$CONTROL_WAV" > "$EVID/control-capture.log" 2>&1 || true
+wait "$PROBE_PID" || true
+
+CONTROL_PEAK=$(python3 -c "
+import struct, sys, wave
+try:
+    with wave.open('$CONTROL_WAV', 'rb') as w:
+        data = w.readframes(w.getnframes())
+        n = len(data) // 2
+        samples = struct.unpack('<%dh' % n, data)
+        print(max(abs(x) for x in samples) / 32768 if samples else 0.0)
+except Exception:
+    print(0.0)
+")
+
+if ! python3 -c "import sys; sys.exit(0 if float('$CONTROL_PEAK') > 0.05 else 1)"; then
+  {
+    echo "# ClaudeMosh BlackHole Live Audio Gate"
+    echo
+    echo "Result: ENV-BLOCKED"
+    echo "Device: $DEVICE"
+    echo "Reason: the BlackHole driver loopback itself is inoperative (an independent"
+    echo "AVAudioEngine control tone at 0.5 amplitude captured peak=$CONTROL_PEAK)."
+    echo "No application can pass this gate until the environment is repaired."
+    echo
+    echo "Remediation (requires admin password):"
+    echo "  sudo killall coreaudiod        # restart the CoreAudio daemon first - usually enough"
+    echo "  # if still silent:"
+    echo "  brew reinstall blackhole-2ch   # then restart coreaudiod again or reboot"
+    echo
+    echo "Evidence: $EVID (control-probe.log, control-capture.wav, control-capture.log)"
+  } > "$EVID/REPORT.md"
+  echo "[blackhole-live-audio] ENV-BLOCKED: driver loopback inoperative (control peak=$CONTROL_PEAK); see $EVID/REPORT.md" >&2
+  exit 3
+fi
+echo "[blackhole-live-audio] control probe OK (peak=$CONTROL_PEAK) - the driver loops back; testing Mosh"
+
 LAST_ATTEMPT=0
 LAST_REASON=""
 
