@@ -277,3 +277,57 @@ Current verification after this slice:
 | `ctest --test-dir build --output-on-failure` | PASS, 0.10s |
 | `scripts/validate-command-log-contract.sh` | PASS, 0.16s, 286 records |
 | `scripts/macos-ui-automation-gate.py` | PASS, evidence path above |
+
+## UI Usability Harness Addendum (Codex, 2026-06-11)
+
+The macOS UI gate now treats obvious usability failures as first-class test
+failures, not just visual artifacts for manual review:
+
+- Arrangement hit-area guard: the gate asserts the track-header volume slider's
+  AX box ends before the clip lane begins, then clicks a clip and checks that no
+  `set_track_volume`, `add_automation_point`, or `set_automation_point` command
+  was emitted.
+- Inline automation guard: inline automation strips are now read-only in the
+  arrangement lane. Editing remains in the explicit Automation panel, so a
+  normal bottom-of-clip click cannot accidentally write automation.
+- Arrangement gesture coverage: real `Mosh.app --demo6` now drives right-edge
+  trim, Split tool, snapped moves at low and high time zoom, and four rapid
+  undo/redo steps. Each gesture is tied to JSONL command counts and screenshots.
+- Light-mode piano-roll readability: the gate opens the piano roll after
+  toggling light mode and measures vertical gridline contrast from the saved
+  screenshot. The current pass reads `60.29`, after strengthening the light-mode
+  piano-roll grid tokens.
+- Accessibility/testability: track headers and track pan/volume sliders now
+  expose stable labels so AX failures name the DAW surface instead of depending
+  only on coordinates.
+
+Evidence:
+`_preserved_artifacts/2026-06-08-consolidation/claudemosh/macos-ui-automation-20260611-234556`
+(`REPORT.md`, `result.json`, `last-ax.tsv`, and screenshots
+`demo6-arr-00-before-trim.png` through
+`demo6-arr-08-after-rapid-redo.png`, plus the existing piano-roll/render/plugin
+screenshots).
+
+Design decision: do not switch the current UI to SwiftUI for this hardening
+slice. The app already has a native macOS shell with an automatable WebView
+surface. The failures were test-structure and interaction-contract gaps:
+hit-area bounds, accidental command emission, and screenshot-visible contrast.
+A SwiftUI migration would be a large product rewrite and would not by itself
+prove the MoshOps/undo/screenshot contracts.
+
+## Piano-Roll Remaining Gap Audit (Codex, 2026-06-11)
+
+The piano-roll gate now proves the basic rendered edit loop, but the following
+remain uncovered or unimplemented:
+
+| Area | Current truth | Missing proof / next test |
+| --- | --- | --- |
+| Fold | No fold-to-used-notes or drum/key-fold mode in `PianoRoll.tsx`; the viewport is fixed C2-C7. | Add engine/UI state only when the product behavior is defined, then screenshot-test that hidden pitches are not reachable and visible notes retain positions. |
+| Scale/key constraint | No scale model, key selector, or pitch constraint command; notes can be moved chromatically. | Add command-level semantics first, then UI automation for draw/move rejecting out-of-scale pitches or snapping to allowed pitches. |
+| Humanize/swing | `quantize_notes` is strict grid quantize; no humanize/randomize or swing amount exists in MoshOps or the piano-roll UI. | Add deterministic engine tests for seeded timing/velocity offsets before any rendered control. |
+| Dense chords | Notes render as independent blocks; there is no stress test for many same-start notes, occluded resize handles, or selection disambiguation. | Add a deterministic dense-chord MIDI fixture and screenshot/AX assertions for visible note count, overlap affordances, and no accidental deletes/resizes. |
+| Multi-note edit | Lasso creates a multi-note selection, but note drag/resize and velocity editing are single-note paths; Quantize applies to all clip notes, not selected notes. | Add a focused multi-select contract: group move, group velocity, selected-only quantize, and one undo step per grouped gesture. |
+
+This is the right next piano-roll slice after arrangement hardening. It should
+start with engine/selftest semantics for selected-note command scope, then add a
+rendered UI gate only where screenshot-visible behavior matters.

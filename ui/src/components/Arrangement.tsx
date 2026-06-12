@@ -364,6 +364,8 @@ function TrackHeader({ track, laneH }: { track: Track; laneH: number }) {
       className={`track-head ${selectedTrackId === track.id ? "sel" : ""} ${track.parentId ? "grouped" : ""}`}
       style={{ height: laneH }}
       onPointerDown={() => setSelectedTrack(track.id)}
+      role="group"
+      aria-label={`Track header ${track.name || `Track ${track.index + 1}`}`}
     >
       <div className="th-row">
         {track.parentId && <span className="grp-badge" title="In a group (submix)">▸</span>}
@@ -403,6 +405,7 @@ function TrackHeader({ track, laneH }: { track: Track; laneH: number }) {
         >S</button>
         <input
           className="pan-mini"
+          aria-label={`Pan ${track.name || `Track ${track.index + 1}`}`}
           type="range"
           min={-1}
           max={1}
@@ -413,6 +416,7 @@ function TrackHeader({ track, laneH }: { track: Track; laneH: number }) {
         />
         <input
           className="vol"
+          aria-label={`Volume ${track.name || `Track ${track.index + 1}`}`}
           type="range"
           min={-48}
           max={6}

@@ -89,6 +89,7 @@ func walk(_ el: AXUIElement) {
     let title = attr(el, kAXTitleAttribute) as? String
     let desc = attr(el, kAXDescriptionAttribute) as? String
     let help = attr(el, kAXHelpAttribute) as? String
+    let value = attr(el, kAXValueAttribute)
     let enabled = (attr(el, kAXEnabledAttribute) as? Bool) ?? true
     let p = point(attr(el, kAXPositionAttribute))
     let s = size(attr(el, kAXSizeAttribute))
@@ -102,6 +103,7 @@ func walk(_ el: AXUIElement) {
             String(Double(p?.y ?? -1)),
             String(Double(s?.width ?? -1)),
             String(Double(s?.height ?? -1)),
+            esc(value == nil ? nil : "\(value!)"),
             enabled ? "1" : "0"
         ]
         print(fields.joined(separator: "\t"))
@@ -228,6 +230,10 @@ def command_count(command: str, marker: int) -> int:
     return sum(1 for item in command_records(marker) if item.get("command") == command and item.get("ok") is True)
 
 
+def commands_since(command: str, marker: int) -> list[dict]:
+    return [item for item in command_records(marker) if item.get("command") == command and item.get("ok") is True]
+
+
 def wait_for_command_count(command: str, marker: int, minimum: int = 1, timeout: float = 8.0) -> int:
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -344,9 +350,9 @@ def ax_rows() -> list[dict]:
     rows: list[dict] = []
     for line in proc.stdout.splitlines():
         parts = line.split("\t")
-        if len(parts) != 9:
+        if len(parts) != 10:
             continue
-        role, title, desc, help_text, x, y, w, h, enabled = parts
+        role, title, desc, help_text, x, y, w, h, value, enabled = parts
         rows.append({
             "role": role,
             "title": title,
@@ -356,6 +362,7 @@ def ax_rows() -> list[dict]:
             "y": float(y),
             "w": float(w),
             "h": float(h),
+            "value": value,
             "enabled": enabled == "1",
         })
     return rows
@@ -387,6 +394,22 @@ def ax_find(
         f"AX element not found: role={role!r} title={title!r} "
         f"help={help_text!r} contains={help_contains!r}"
     )
+
+
+def ax_text(row: dict) -> str:
+    return " ".join(str(row.get(k, "")) for k in ("title", "desc", "help"))
+
+
+def ax_find_contains(role: str | None, text: str, timeout: float = 12.0) -> dict:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        for row in ax_rows():
+            if role is not None and row["role"] != role:
+                continue
+            if text in ax_text(row) and row["x"] >= 0 and row["y"] >= 0 and row["w"] > 0 and row["h"] > 0:
+                return row
+        time.sleep(0.2)
+    raise RuntimeError(f"AX element containing {text!r} not found for role={role!r}")
 
 
 def mouse_click_xy(x: float, y: float) -> None:
@@ -481,6 +504,53 @@ def mean_abs_diff(a: Image.Image, b: Image.Image, box: tuple[int, int, int, int]
     return float(ImageStat.Stat(diff).mean[0])
 
 
+def ax_box(img: Image.Image, win: dict, row: dict, pad: float = 0.0) -> tuple[int, int, int, int]:
+    bx, by, bw, bh = bounds(win)
+    sx = img.width / max(1, bw)
+    sy = img.height / max(1, bh)
+    x0 = int(max(0, (row["x"] - bx - pad) * sx))
+    y0 = int(max(0, (row["y"] - by - pad) * sy))
+    x1 = int(min(img.width, (row["x"] - bx + row["w"] + pad) * sx))
+    y1 = int(min(img.height, (row["y"] - by + row["h"] + pad) * sy))
+    if x1 <= x0 or y1 <= y0:
+        raise RuntimeError(f"empty image box for AX row {row}")
+    return x0, y0, x1, y1
+
+
+def vertical_edge_contrast(img: Image.Image, box: tuple[int, int, int, int]) -> float:
+    crop = img.crop(box).convert("L")
+    if crop.width < 5 or crop.height < 5:
+        return 0.0
+    cols: list[float] = []
+    for x in range(crop.width):
+        column = crop.crop((x, 0, x + 1, crop.height))
+        cols.append(float(ImageStat.Stat(column).mean[0]))
+    diffs = [abs(cols[i] - ((cols[i - 1] + cols[i + 1]) / 2.0)) for i in range(1, len(cols) - 1)]
+    if not diffs:
+        return 0.0
+    diffs.sort()
+    # Gridlines are sparse; a high percentile catches the line strokes while
+    # still ignoring isolated note/label pixels better than max().
+    return diffs[int(len(diffs) * 0.99)]
+
+
+def current_tempo_bpm() -> float:
+    for row in ax_rows():
+        if row["role"] != "AXTextField" or "Tempo (BPM)" not in ax_text(row):
+            continue
+        for candidate in (row.get("value", ""), row.get("title", ""), row.get("desc", "")):
+            match = re.search(r"-?\d+(?:\.\d+)?", str(candidate))
+            if match:
+                bpm = float(match.group(0))
+                if bpm > 0:
+                    return bpm
+    return 120.0
+
+
+def is_snapped_seconds(value: float, step: float, tolerance: float = 0.035) -> bool:
+    return abs(value - round(value / step) * step) <= tolerance
+
+
 def blue_centroid_x(img: Image.Image, box: tuple[int, int, int, int]) -> float:
     crop = img.crop(box).convert("RGB")
     total_x = 0.0
@@ -543,6 +613,204 @@ def rightmost_note(timeout: float = 8.0) -> dict:
     raise RuntimeError("no visible piano-roll notes found")
 
 
+def arrangement_clip_rows(help_contains: str | None = None) -> list[dict]:
+    rows = [
+        row for row in ax_rows()
+        if row["role"] == "AXGroup"
+        and row["w"] > 8
+        and row["h"] > 8
+        and (
+            "double-click to edit notes" in row["help"]
+            or re.search(r" · [0-9.]+s$", row["help"])
+        )
+    ]
+    if help_contains is not None:
+        rows = [row for row in rows if help_contains in row["help"]]
+    return rows
+
+
+def wait_for_clip_count(help_contains: str, minimum: int, timeout: float = 8.0) -> list[dict]:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        rows = arrangement_clip_rows(help_contains)
+        if len(rows) >= minimum:
+            return rows
+        time.sleep(0.25)
+    raise RuntimeError(f"timed out waiting for {minimum} arrangement clips containing {help_contains!r}")
+
+
+def arrangement_clip(help_contains: str, timeout: float = 8.0, *, pick: str = "leftmost") -> dict:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        rows = arrangement_clip_rows(help_contains)
+        if rows:
+            key = (lambda r: r["x"]) if pick == "leftmost" else (lambda r: r["w"])
+            return sorted(rows, key=key)[0 if pick == "leftmost" else -1]
+        time.sleep(0.25)
+    raise RuntimeError(f"arrangement clip not found: {help_contains!r}")
+
+
+def assert_no_commands(results: dict, key: str, marker: int, commands: list[str], detail: str) -> None:
+    counts = {command: command_count(command, marker) for command in commands}
+    assert_condition(
+        results,
+        key,
+        all(count == 0 for count in counts.values()),
+        f"{detail}; command counts={counts}",
+    )
+
+
+def latest_command_args(command: str, marker: int) -> dict:
+    records = commands_since(command, marker)
+    if not records:
+        raise RuntimeError(f"no {command!r} command found after marker")
+    args = records[-1].get("args")
+    return args if isinstance(args, dict) else {}
+
+
+def run_arrangement_advanced(results: dict, win: dict) -> None:
+    clip = arrangement_clip("tone-196")
+    volume = ax_find_contains("AXSlider", "Volume")
+    assert_condition(
+        results,
+        "demo6_arrangement_track_header_hit_area",
+        volume["x"] + volume["w"] <= clip["x"] - 2,
+        f"volume slider AX box ends before lane starts ({volume['x'] + volume['w']:.1f} <= {clip['x']:.1f})",
+    )
+
+    marker = command_log_marker()
+    mouse_click_xy(clip["x"] + clip["w"] * 0.50, clip["y"] + clip["h"] * 0.50)
+    assert_no_commands(
+        results,
+        "demo6_arrangement_clip_click_guard",
+        marker,
+        ["set_track_volume", "add_automation_point", "set_automation_point"],
+        "plain clip click selected only; no mixer or automation mutation",
+    )
+
+    marker = command_log_marker()
+    mouse_click_xy(clip["x"] + clip["w"] * 0.50, clip["y"] + clip["h"] - 5)
+    assert_no_commands(
+        results,
+        "demo6_arrangement_inline_automation_guard",
+        marker,
+        ["add_automation_point", "set_automation_point", "remove_automation_point"],
+        "bottom-of-clip click did not write inline automation",
+    )
+
+    before_trim = capture(win, "demo6-arr-00-before-trim")
+    clip = arrangement_clip("tone-196")
+    trim_before_w = clip["w"]
+    marker = command_log_marker()
+    mouse_drag_xy(
+        clip["x"] + clip["w"] - 3,
+        clip["y"] + clip["h"] * 0.50,
+        clip["x"] + clip["w"] + 48,
+        clip["y"] + clip["h"] * 0.50,
+    )
+    trim_count = wait_for_command_count("trim_clip", marker, 1)
+    trimmed = arrangement_clip("tone-196")
+    after_trim = capture(win, "demo6-arr-01-after-trim")
+    trim_diff = mean_abs_diff(before_trim, after_trim, full_box(before_trim))
+    assert_condition(
+        results,
+        "demo6_arrangement_trim_right_edge",
+        trim_count == 1 and trimmed["w"] > trim_before_w + 20,
+        f"one trim_clip widened clip {trim_before_w:.1f}->{trimmed['w']:.1f}; diff={trim_diff:.2f}",
+    )
+
+    split_button = ax_find(role="AXButton", title="Split")
+    click_ax(split_button)
+    split_target = arrangement_clip("tone-196", pick="widest")
+    split_before_count = len(arrangement_clip_rows("tone-196"))
+    marker = command_log_marker()
+    mouse_click_xy(split_target["x"] + split_target["w"] * 0.52, split_target["y"] + split_target["h"] * 0.50)
+    split_count = wait_for_command_count("split_clip", marker, 1)
+    split_rows = wait_for_clip_count("tone-196", split_before_count + 1)
+    capture(win, "demo6-arr-02-after-split")
+    assert_condition(
+        results,
+        "demo6_arrangement_split_tool",
+        split_count == 1 and len(split_rows) == split_before_count + 1,
+        f"one split_clip increased tone-196 clips {split_before_count}->{len(split_rows)}",
+    )
+
+    click_ax(ax_find(role="AXButton", title="Move"))
+    snap_step = 60.0 / current_tempo_bpm()
+    for _ in range(8):
+        click_ax(ax_find(role="AXButton", help_text="Zoom out (time)"))
+    low_zoom = capture(win, "demo6-arr-03-low-zoom")
+    low_clip = arrangement_clip("tone-196")
+    marker = command_log_marker()
+    mouse_drag_xy(
+        low_clip["x"] + min(30, low_clip["w"] * 0.35),
+        low_clip["y"] + low_clip["h"] * 0.50,
+        low_clip["x"] + min(30, low_clip["w"] * 0.35) + 12,
+        low_clip["y"] + low_clip["h"] * 0.50,
+    )
+    wait_for_command_count("move_clip", marker, 1)
+    low_args = latest_command_args("move_clip", marker)
+    low_start = float(low_args.get("start", -1))
+    after_low_move = capture(win, "demo6-arr-04-low-zoom-snap-move")
+    assert_condition(
+        results,
+        "demo6_arrangement_snap_low_zoom",
+        is_snapped_seconds(low_start, snap_step),
+        (
+            f"low-zoom move snapped to quarter-grid start={low_start:.3f} "
+            f"step={snap_step:.5f}; diff={mean_abs_diff(low_zoom, after_low_move, full_box(low_zoom)):.2f}"
+        ),
+    )
+
+    for _ in range(12):
+        click_ax(ax_find(role="AXButton", help_text="Zoom in (time)"))
+    high_zoom = capture(win, "demo6-arr-05-high-zoom")
+    high_clip = arrangement_clip("tone-196")
+    marker = command_log_marker()
+    mouse_drag_xy(
+        high_clip["x"] + min(80, high_clip["w"] * 0.35),
+        high_clip["y"] + high_clip["h"] * 0.50,
+        high_clip["x"] + min(80, high_clip["w"] * 0.35) + 260,
+        high_clip["y"] + high_clip["h"] * 0.50,
+    )
+    wait_for_command_count("move_clip", marker, 1)
+    high_args = latest_command_args("move_clip", marker)
+    high_start = float(high_args.get("start", -1))
+    after_high_move = capture(win, "demo6-arr-06-high-zoom-snap-move")
+    assert_condition(
+        results,
+        "demo6_arrangement_snap_high_zoom",
+        is_snapped_seconds(high_start, snap_step),
+        (
+            f"high-zoom move snapped to quarter-grid start={high_start:.3f} "
+            f"step={snap_step:.5f}; diff={mean_abs_diff(high_zoom, after_high_move, full_box(high_zoom)):.2f}"
+        ),
+    )
+
+    post_ops_count = len(arrangement_clip_rows("tone-196"))
+    marker = command_log_marker()
+    for _ in range(4):
+        key_cmd_z()
+    undo_seen = wait_for_command_count("undo", marker, 4, timeout=10.0)
+    after_undo = capture(win, "demo6-arr-07-after-rapid-undo")
+    undo_count_rows = len(arrangement_clip_rows("tone-196"))
+    for _ in range(4):
+        key_cmd_z(shift=True)
+    redo_seen = wait_for_command_count("redo", marker, 4, timeout=10.0)
+    after_redo = capture(win, "demo6-arr-08-after-rapid-redo")
+    redo_count_rows = len(arrangement_clip_rows("tone-196"))
+    assert_condition(
+        results,
+        "demo6_arrangement_rapid_undo_redo",
+        undo_seen == 4 and redo_seen == 4 and undo_count_rows < post_ops_count and redo_count_rows == post_ops_count,
+        (
+            f"rapid undo/redo counts undo={undo_seen} redo={redo_seen}; "
+            f"tone-196 clips {post_ops_count}->{undo_count_rows}->{redo_count_rows}; "
+            f"diff={mean_abs_diff(after_undo, after_redo, full_box(after_undo)):.2f}"
+        ),
+    )
+
+
 def run_piano_roll(results: dict, win: dict) -> None:
     # Use an explicit default MIDI clip rather than the demo drum clips: the drum
     # notes sit below the current C2-C7 viewport, while the default arpeggio is visible.
@@ -573,11 +841,26 @@ def run_piano_roll(results: dict, win: dict) -> None:
     )
     opened = capture(win, "demo6-pr-00-open")
     notes = wait_for_note_count(4)
+    grid = ax_find(role="AXGroup", title="Piano roll grid")
+    grid_crop = ax_box(opened, win, grid, pad=-2)
+    grid_sample = (
+        grid_crop[0],
+        grid_crop[1],
+        min(grid_crop[2], grid_crop[0] + 600),
+        min(grid_crop[3], grid_crop[1] + 340),
+    )
+    grid_contrast = vertical_edge_contrast(opened, grid_sample)
     assert_condition(
         results,
         "demo6_piano_roll_open",
         len(notes) >= 4,
         f"double-click opened piano roll with {len(notes)} AX-visible notes",
+    )
+    assert_condition(
+        results,
+        "demo6_piano_light_grid_visibility",
+        grid_contrast > 45.0,
+        f"light-mode piano-roll vertical grid edge contrast={grid_contrast:.2f}",
     )
 
     g4 = find_note("G4 note start 2.00")
@@ -604,7 +887,6 @@ def run_piano_roll(results: dict, win: dict) -> None:
     )
 
     marker = command_log_marker()
-    grid = ax_find(role="AXGroup", title="Piano roll grid")
     draw_x = grid["x"] + 5.5 * 42.0
     draw_y = c5["y"] + c5["h"] / 2.0
     before_draw_count = len(piano_note_rows())
@@ -771,6 +1053,7 @@ def run_demo6(results: dict) -> None:
     after_x = clip_after["x"]
     assert_condition(results, "demo6_clip_drag", after_x - before_x > 30.0, f"AX x {before_x:.1f}->{after_x:.1f}")
 
+    run_arrangement_advanced(results, win)
     run_piano_roll(results, win)
 
     kill_mosh()
