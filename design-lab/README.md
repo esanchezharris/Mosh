@@ -76,6 +76,7 @@ DeepSeek: `https://api.deepseek.com` + `deepseek-chat`. OpenAI:
 
 | path | what |
 |---|---|
+| [HANDOFF.md](HANDOFF.md) | **Start here if you're new** — the full state, systems, open threads |
 | [playground/moshi.js](playground/moshi.js) | THE COMPONENT — self-contained, portable |
 | [playground/index.html](playground/index.html) | THE LOOKBOOK — the curated stage + a 76px corner twin |
 | [LOOKBOOK.md](LOOKBOOK.md) | The catalog: every look, state, family, steal, and version |
