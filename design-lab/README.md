@@ -44,6 +44,8 @@ m.set('energy', v);     // 0..1 — how hard the work is going (waves, veins)
 m.set('mood', v);       // 0..1 — resting grin + liveliness
 m.set('heat', v);       // 0..1 — REC/excitement: ember core, lime eyes
 m.setState('LISTENING'); // IDLE · LISTENING · RECORDING · PAUSED · RENDERING · SLEEPING
+m.setPose('ARMS_UP');    // NEUTRAL · SPLAY · ARMS_UP · TUCK · DROOP · WAVE · REACH
+m.setStyle('toon');      // 'ps2' (the crunch) | 'toon' (the clean sticker)
 m.celebrate();           // one-shot: a take landed
 m.setPersonality('GHOST' | 0.37 [, seed] [, { snap: true }]);  // crossfades
 m.setQuality('ps2+'); m.reroll(); m.poke(); m.lookAt(nx, ny);
@@ -62,7 +64,13 @@ waves, skin, veins, palette. They never compete for the same pixels.
 Body language is Blob Mixer's grammar, credited — 14islands' Blob Mixer
 (https://blobmixer.14islands.com/, source via github.com/connorhvnsen/blob-mixer):
 two displacement layers with face protection, and named personality presets
-translated into our raymarched, dithered register.
+translated into our raymarched, dithered register. The SHAPE is the brand
+splat: a core with five gooey limbs that pose.
+
+**The brain (when a key lands):** the demo client reads `MOSHI_BRAIN_URL` /
+`MOSHI_BRAIN_KEY` / `MOSHI_BRAIN_MODEL` — any OpenAI-compatible endpoint.
+DeepSeek: `https://api.deepseek.com` + `deepseek-chat`. OpenAI:
+`https://api.openai.com` + a 4o-mini-class model. Drop either key and say so.
 
 ## Map
 

@@ -102,6 +102,31 @@ subpixel-stable geometry. Dither, bands and facets stay at every tier.
   REPERTOIRE (startle-hop / squash-oof / double-take / delight-bounce,
   temperament-weighted) with escalation to genuine annoyance; petting forgives.
 
+## The poses (the body's vocabulary)
+
+| pose | reads as | fires on |
+|---|---|---|
+| NEUTRAL | at rest | base (IDLE-class states) |
+| SPLAY | startle! limbs flare wide | startle-hop poke, real startle |
+| ARMS_UP | a take landed | celebrate(), delight-bounce poke |
+| TUCK | oof — short and chubby | squash-oof poke |
+| DROOP | everything sags | SLEEPING base, annoyance |
+| WAVE | one arm up, wiggling | manual / greetings |
+| REACH | an arm extends toward the thing | double-take poke, cursor glances |
+
+Poses crossfade per the MORPH RULE and auto-return to the state's base pose.
+`m.setPose(name, hold)` — REACH/WAVE mirror to whichever side he's looking.
+
+- **v4 — THE SPLAT PASS** (2026-06-12): the body returned to the brand
+  silhouette (user reference images): a core + five capsule limbs in the camera
+  plane, z-flattened — the same topology as their web-Claude artifact. POSES
+  shipped (above) wired into pokes/states/celebrate; drag-spin INVERTED to
+  grab-the-surface (body follows the cursor); the STYLE dial added (PS2 crunch
+  ↔ TOON: dither starved, 2 clean bands, smooth normals, dark outline — the
+  sticker look); the mouth got its gleam. Brain demo decision: provider-
+  agnostic OpenAI-compatible client (`MOSHI_BRAIN_URL/_KEY/_MODEL` — DeepSeek
+  or OpenAI keys both fit), built when a key lands.
+
 ## Adding a look
 
 Append to `LOOKS` in `playground/index.html`: `{ p: FAMILY, sd: seed, st: STATE,

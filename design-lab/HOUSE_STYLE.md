@@ -110,8 +110,24 @@ dithered at quarter-res, who happens to be alive.
     delight-bounce) and ESCALATES under spam — real startle, then genuine
     annoyance (squint, sulked grin, turned back, 6s of ignoring you). Petting
     forgives. The same input producing the same output is a vending machine.
+16d. **THE SPLAT is the anatomy; POSES are its vocabulary.** The brand
+    silhouette is a core + five gooey limbs (left arm, head, right arm, two
+    legs) in the camera plane, z-flattened. Limbs hit named POSES — SPLAY,
+    ARMS_UP, TUCK, DROOP, WAVE, REACH — for different actions, crossfading
+    per the MORPH RULE and returning to the state's base. Reactions get a
+    face beat AND a body beat.
+16e. **Drag is grab-the-surface.** The body follows the cursor under drag —
+    the opposite mapping reads inverted (user note, 2026-06-12).
 17. **Bounded reroll.** Seeds jitter INSIDE a family's curated ranges — different
     every time, ugly never.
+
+## The STYLE dial (v4)
+
+The register has TWO sanctioned renders, both in-shader: **PS2** (the default
+crunch — dither, facets, banded light) and **TOON** (the sticker: dither
+starved to 8%, two clean bands, smooth normals, crisp dark outline — the
+user's flat reference art). The dial crossfades; everything else (anatomy,
+poses, palettes, face) is identical across both.
 
 ## Color doctrine (v3.0 — the body goes polychrome)
 

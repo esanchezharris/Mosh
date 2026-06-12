@@ -42,6 +42,7 @@
   .chip:active { transform: translateY(3px); box-shadow: 0 0 0 #000; }
   #signal { top: 18px; right: 18px; }
   #res    { top: 18px; right: 132px; }
+  #style  { top: 18px; right: 246px; }
 
   /* THE LOOKBOOK plate — number, name, state, caption */
   #plate { position: fixed; left: 50%; bottom: 46px; transform: translateX(-50%);
@@ -61,19 +62,21 @@
     z-index: 10; font-size: 9px; letter-spacing: .16em; opacity: .30;
     white-space: nowrap; }
 
-  /* state chips — agent states, not style sliders */
-  #states { position: fixed; left: 18px; bottom: 18px; z-index: 10;
+  /* state + pose chips — the agent's repertoire, not style sliders */
+  #states, #poses { position: fixed; bottom: 18px; z-index: 10;
     display: flex; flex-direction: column; gap: 6px; }
-  #states .st { cursor: pointer; font-size: 8.5px; letter-spacing: .18em;
+  #states { left: 18px; }
+  #poses  { left: 132px; }
+  #states .st, #poses .st { cursor: pointer; font-size: 8.5px; letter-spacing: .18em;
     color: rgba(246,242,235,.5); border: 1px solid rgba(246,242,235,.16);
     border-radius: 8px; padding: 4px 10px; width: 86px; text-align: left;
     background: rgba(11,11,11,.4); box-shadow: 0 2px 0 rgba(0,0,0,.7);
     transition: transform .08s; }
-  #states .st:hover { color: var(--lime); border-color: rgba(204,255,35,.5); }
-  #states .st:active { transform: translateY(2px); }
-  #states .st.on { color: var(--ink); background: var(--lime); border-color: var(--lime);
-    font-weight: 700; }
-  #stlbl { font-size: 7.5px; letter-spacing: .22em; opacity: .35; margin-bottom: 2px; }
+  #states .st:hover, #poses .st:hover { color: var(--lime); border-color: rgba(204,255,35,.5); }
+  #states .st:active, #poses .st:active { transform: translateY(2px); }
+  #states .st.on, #poses .st.on { color: var(--ink); background: var(--lime);
+    border-color: var(--lime); font-weight: 700; }
+  .raillbl2 { font-size: 7.5px; letter-spacing: .22em; opacity: .35; margin-bottom: 2px; }
 
   /* the presence orb — the SAME component at coat-pocket size */
   #mini { position: fixed; right: 22px; bottom: 22px; width: 76px; height: 76px;
@@ -119,6 +122,7 @@
 
 <div id="chrome">
   <div id="wordmark" class="disp">MOSHI · LOOKBOOK</div>
+  <div id="style" class="chip mono">STYLE·PS2</div>
   <div id="res" class="chip mono">RES·PS2</div>
   <div id="signal" class="chip mono">SIGNAL·PS2</div>
 
@@ -126,7 +130,10 @@
   <div class="arrow" id="next" title="next look">▶</div>
 
   <div id="states">
-    <div id="stlbl" class="mono">STATE</div>
+    <div class="raillbl2 mono">STATE</div>
+  </div>
+  <div id="poses">
+    <div class="raillbl2 mono">POSE</div>
   </div>
 
   <div id="plate">
@@ -183,6 +190,15 @@ for (const s of Moshi.STATES) {
   statesEl.appendChild(b);
   stBtns[s] = b;
 }
+// pose chips — browse the body's vocabulary on any look
+const posesEl = document.getElementById('poses');
+for (const p of Moshi.POSES) {
+  const b = document.createElement('button');
+  b.className = 'st mono';
+  b.textContent = p.replace('_', ' ');
+  b.onclick = () => { stage.setPose(p, 3); mini.setPose(p, 3); };
+  posesEl.appendChild(b);
+}
 function setLookState(s) {
   stage.setState(s); mini.setState(s);
   for (const k in stBtns) stBtns[k].classList.toggle('on', k === s);
@@ -230,6 +246,16 @@ resChip.onclick = () => {
   const q = Moshi.QUALITIES[qi];
   stage.setQuality(q);
   resChip.textContent = 'RES·' + q.toUpperCase();
+};
+
+// the STYLE dial: PS2 crunch <-> the sticker (clean 2-band toon)
+const styleChip = document.getElementById('style');
+let toon = false;
+styleChip.onclick = () => {
+  toon = !toon;
+  const s = toon ? 'toon' : 'ps2';
+  stage.setStyle(s); mini.setStyle(s);
+  styleChip.textContent = 'STYLE·' + s.toUpperCase();
 };
 
 // the signal chain A/B

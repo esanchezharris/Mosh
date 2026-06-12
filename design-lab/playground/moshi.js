@@ -51,10 +51,10 @@ uniform float u_energy, u_mood, u_heat;
 uniform vec2  u_gaze, u_sq;            // gaze (face-space); spring squash (x,y)
 uniform float u_blink, u_wide, u_lid;  // blink snap, startle, sleepy droop
 uniform float u_sd, u_sd2;             // seed-derived texture offsets
-uniform vec3  u_L1, u_L2, u_L3;        // lobe centers — CPU-computed per frame
-uniform vec3  u_LR;                    // lobe radii   — (they're frame constants;
-                                       //  recomputing them per map() per step per
-                                       //  pixel was ~100M wasted trig ops/frame)
+uniform vec3  u_limb[5];               // THE SPLAT's limbs: angle, length, radius —
+                                       // CPU-computed per frame (pose blend + sway
+                                       // baked in; frame constants stay off the GPU)
+uniform float u_toon;                  // the STYLE dial: 0 = PS2 crunch, 1 = sticker
 uniform float u_bw, u_bf;              // body waves: amplitude, spatial freq
 uniform float u_sw, u_sf;              // surface skin: amplitude, spatial freq
 uniform float u_smink;                 // lobe goo (smin k)
@@ -101,6 +101,11 @@ float sdSeg(vec2 p, vec2 a, vec2 b) {
   float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
   return length(pa - ba * h);
 }
+float sdCap(vec3 p, vec3 a, vec3 b, float r) {
+  vec3 pa = p - a, ba = b - a;
+  float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+  return length(pa - ba * h) - r;
+}
 float chevron(vec2 p, float flip) {                  // +1 = '>'   -1 = '<'
   p.x *= flip;
   return min(sdSeg(p, vec2(-0.5, 0.62), vec2(0.5, 0.0)),
@@ -118,12 +123,16 @@ float map(vec3 p) {
   p.xy = gB * p.xy;
   p.x /= u_sq.x; p.y /= u_sq.y;                      // spring squash & stretch
   p /= u_scale; pW /= u_scale;
-  // THE BODY — smin lobes; centers/radii arrive from the CPU (migration,
-  // tuck and orbit drift are all baked into u_L*/u_LR each frame)
-  float d = length(p) - 0.345;
-  d = smin(d, length(p - u_L1) - u_LR.x, u_smink);
-  d = smin(d, length(p - u_L2) - u_LR.y, u_smink);
-  d = smin(d, length(p - u_L3) - u_LR.z, u_smink);
+  // THE SPLAT — the brand silhouette: a core with five gooey limbs in the
+  // camera plane, flattened in z. Limb configs arrive from the CPU with the
+  // pose blend, sway and transit-tuck already baked in.
+  p.z *= 1.45;
+  float d = length(p) - 0.30;
+  for (int i = 0; i < 5; i++) {
+    vec3 L = u_limb[i];
+    vec2 dir = vec2(cos(L.x), sin(L.x));
+    d = smin(d, sdCap(p, vec3(dir * 0.10, 0.0), vec3(dir * L.y, 0.0), L.z), u_smink);
+  }
   // BLOB-MIXER GRAMMAR (14islands, credited): two displacement layers with
   // face protection (its poleAmount) — near-field only; far steps and miss
   // rays skip the 16 hash calls (max displacement ~0.25, gate at 0.45)
@@ -135,8 +144,9 @@ float map(vec3 p) {
     gRidge = smoothstep(0.68, 0.95, surf);
     d -= fz * u_sw * (surf - 0.5) * 2.0;
   }
-  d = max(d, length(p) - 0.80);                      // bound: one being
-  return d * u_scale * min(u_sq.x, u_sq.y) * 0.9;    // squash-safe step
+  d = max(d, length(p) - 1.0);                       // bound: one being
+  // 0.62 = 0.9 squash safety / 1.45 z-flatten Lipschitz correction
+  return d * u_scale * min(u_sq.x, u_sq.y) * 0.62;
 }
 vec3 normalAt(vec3 p) {
   const vec2 e = vec2(0.004, -0.004);
@@ -148,7 +158,8 @@ void main() {
   gA = mat2(u_rotM.x, -u_rotM.y, u_rotM.y, u_rotM.x);
   gB = mat2(u_rotM.z, -u_rotM.w, u_rotM.w, u_rotM.z);
   vec2 uv = (gl_FragCoord.xy - 0.5 * u_res) / min(u_res.x, u_res.y);
-  float dth = bayer(gl_FragCoord.xy);
+  // the STYLE dial starves the dither: toon is clean-edged like the stickers
+  float dth = bayer(gl_FragCoord.xy) * (1.0 - 0.92 * u_toon);
 
   vec3 ro = vec3(0.0, 0.0, 3.3);
   vec3 rd = normalize(vec3(uv, -1.55));
@@ -188,29 +199,32 @@ void main() {
   vec4 outc = vec4(room, u_room);
   if (hit) {
     vec3 n0 = normalAt(hp);                          // smooth — rim/silhouette only
-    vec3 n = normalize(floor(n0 * 2.5 + 0.5) / 2.5); // FACETS: calm low-poly planes
+    // FACETS for the crunch; toon smooths them out (sticker bands are clean)
+    vec3 n = normalize(mix(normalize(floor(n0 * 2.5 + 0.5) / 2.5), n0, u_toon));
     vec3 nd = normalize(hp);
     // BLOB-MIXER LIGHTING, banded: colored key + fill + hard rim + clearcoat.
     vec3 KEY = normalize(vec3(0.5, 0.8, 0.6));
     vec3 FIL = normalize(vec3(-0.7, -0.25, 0.45));
-    float bk = floor(max(dot(n, KEY), 0.0) * 3.0 + dth) / 3.0;   // 4 bands
-    float bf = floor(max(dot(n, FIL), 0.0) * 2.0 + dth) / 2.0;   // cool fill
+    float nb = 3.0 - u_toon;                         // toon collapses to 2 bands
+    float bk = floor(min(max(dot(n, KEY), 0.0), 0.999) * nb + dth) / nb;
+    float bf = floor(max(dot(n, FIL), 0.0) * 2.0 + dth) / 2.0 * (1.0 - u_toon);
     float fres = pow(1.0 - max(dot(n0, -rd), 0.0), 3.0);
     // the gradient body: vertical drift + light + iridescent view shift
-    float gt = 0.18 + 0.30 * (nd.y * 0.5 + 0.5) + 0.34 * bk + u_irid * 0.45 * fres;
+    float gt = 0.18 + 0.30 * (nd.y * 0.5 + 0.5) + 0.34 * bk
+             + u_irid * 0.45 * fres * (1.0 - 0.7 * u_toon);
     vec3 body = pal3(gt);
     // visible floor under the dither — band-promoted pixels must land ON a
     // body, never alone on black (alone they read as rain, not texture)
-    vec3 col = body * (0.30 + 0.58 * bk) + body * 0.10 * bf;
-    col *= 1.0 - 3.2 * u_sw * (1.0 - gRidge);                  // skin valleys shade
-    col += pal3(gt + 0.12) * 4.5 * u_sw * step(0.75, gRidge) * bk;  // crests catch
+    vec3 col = body * (mix(0.30, 0.60, u_toon) + mix(0.58, 0.40, u_toon) * bk) + body * 0.10 * bf;
+    col *= 1.0 - 3.2 * u_sw * (1.0 - gRidge) * (1.0 - u_toon);     // skin valleys
+    col += pal3(gt + 0.12) * 4.5 * u_sw * step(0.75, gRidge) * bk * (1.0 - u_toon);
     // clearcoat — one hard wet-plastic glint (their clearcoat, our band)
     vec3 H = normalize(KEY - rd);
     float spec = pow(max(dot(n, H), 0.0), 26.0);
-    col += vec3(0.95) * step(0.60, spec + dth * 0.25) * 0.5 * u_glint;
-    // rim: family-tinted, hard-edged (fres from the SMOOTH normal — faceted
-    // fres fires on interior planes and rains dither over the whole body)
-    col += mix(LIME, pal3(gt + 0.5), 0.6) * step(0.55, fres + dth * 0.07) * 0.15;
+    col += vec3(0.95) * step(0.60, spec + dth * 0.25) * 0.5 * u_glint * (1.0 - 0.6 * u_toon);
+    // rim: family-tinted hard edge in PS2; a crisp dark OUTLINE in toon
+    col += mix(LIME, pal3(gt + 0.5), 0.6) * step(0.55, fres + dth * 0.07) * 0.15 * (1.0 - u_toon);
+    col = mix(col, vec3(0.04, 0.045, 0.04), u_toon * step(0.52, fres));
     // VEINS — always lime: the one brand constant on the body. Iso-curves of a
     // noise field in BODY space (noise keeps gradient nearly everywhere; flat
     // fold-fields dither into body-wide lattice rain). Shards = beads where a
@@ -276,6 +290,11 @@ void main() {
         // the tongue — earns its place only when the grin is properly open
         float tng = (1.0 - step(0.0, length(mo - vec2(0.0, lip - r * 0.78)) - r * 0.46)) * m;
         col = mix(col, LIME * 0.32, tng * smoothstep(0.5, 0.8, o2));
+        // the gleam — the sticker mouth's little shine; earns its place with
+        // the open grin, like the tongue
+        float shn = 1.0 - step(0.0,
+          length((mo - vec2(-r * 0.34, lip - r * 0.52)) * vec2(1.0, 1.5)) - r * 0.17);
+        col = mix(col, vec3(0.93, 0.95, 0.90), shn * m * 0.9 * smoothstep(0.3, 0.55, o2));
       }
     }
     // the ember heart — heat only. Agent channel; the matter never splits.
@@ -358,6 +377,11 @@ function makeSpec(name, seed) {
     sw: j(F.sw, 0.15), sf: j(F.sf, 0.12), ssp: j(F.ssp, 0.15),
     k: j(F.k, 0.10), scale: j(F.scale, 0.04),
     sd: h(11), sd2: h(12),
+    // THE SPLAT's anatomy: five limbs (left arm, head, right arm, right leg,
+    // left leg), seeded inside the brand silhouette's lines
+    limbA: BASE_ANG.map((a, i) => a + (h(21 + i) - 0.5) * 0.3),
+    limbL: BASE_ANG.map((a, i) => 0.50 * (1 + (h(31 + i) - 0.5) * 0.24)),
+    limbR: BASE_ANG.map((a, i) => 0.155 * (1 + (h(41 + i) - 0.5) * 0.30)),
     palA: F.palA.slice(), palB: F.palB.slice(),
     palD: F.palD.map(d => d + (h(15) - 0.5) * 0.06),
     irid: F.irid, glint: F.glint, veins: F.veins,
@@ -373,13 +397,13 @@ const NUMS = ['bw','bf','bsp','sw','sf','ssp','k','scale','sd','sd2',
 function lerpSpec(a, b, w) {
   const o = { name: w < 0.5 ? a.name : b.name, seed: w < 0.5 ? a.seed : b.seed };
   for (const k of NUMS) o[k] = a[k] + (b[k] - a[k]) * w;
-  for (const k of ['palA','palB','palD'])
+  for (const k of ['palA','palB','palD','limbA','limbL','limbR'])
     o[k] = a[k].map((v, i) => v + (b[k][i] - v) * w);
   return o;
 }
 const UNIFS = ['u_res','u_time','u_tq','u_lph','u_bph','u_sph','u_rotM','u_rotF',
   'u_onset','u_energy','u_mood','u_heat','u_gaze','u_sq','u_blink','u_wide','u_lid',
-  'u_sd','u_sd2','u_L1','u_L2','u_L3','u_LR','u_bw','u_bf','u_sw','u_sf','u_smink',
+  'u_sd','u_sd2','u_limb[0]','u_toon','u_bw','u_bf','u_sw','u_sf','u_smink',
   'u_palA','u_palB','u_palD','u_irid','u_glint','u_veins','u_scale','u_room',
   'u_flow','u_flowPh','u_mtilt','u_inkeye'];
 
@@ -405,10 +429,27 @@ const STATES = {
 const TAU = Math.PI * 2;
 const clamp1 = v => Math.max(-1, Math.min(1, v));
 
+// THE SPLAT's rest anatomy (radians): left arm, head, right arm, right leg, left leg
+const BASE_ANG = [2.618, 1.571, 0.436, -0.960, -2.182];
+
+// ── POSES — the body's vocabulary: per-limb [angle offset, length ×, radius ×].
+// Poses crossfade per the MORPH RULE (fixed-endpoint configs, eased) and
+// auto-return to the state's base pose after their hold.
+const POSES = {
+  NEUTRAL: [[0,1,1],[0,1,1],[0,1,1],[0,1,1],[0,1,1]],
+  SPLAY:   [[ 0.28,1.30,0.88],[0,1.22,0.88],[-0.28,1.30,0.88],[-0.20,1.18,0.90],[ 0.20,1.18,0.90]],   // startle!
+  ARMS_UP: [[-0.35,1.30,0.92],[0,1.05,0.95],[ 0.35,1.30,0.92],[ 0.18,0.78,1.12],[-0.18,0.78,1.12]],   // a take landed
+  TUCK:    [[ 0,0.60,1.35],[0,0.60,1.35],[ 0,0.60,1.35],[ 0,0.70,1.30],[ 0,0.70,1.30]],               // oof
+  DROOP:   [[ 0.55,0.90,1.00],[0.45,0.72,1.05],[-0.55,0.90,1.00],[-0.10,1.05,1.00],[ 0.10,1.05,1.00]],// sleepy / sulking
+  WAVE:    [[ 0,1,1],[0,1,1],[ 0.70,1.45,0.82],[0,1,1],[0,1,1]],                                      // right arm up (wiggles)
+  REACH:   [[ 0,1,1],[0,1,1],[ 0.18,1.55,0.78],[0,1,1],[0,1,1]],                                      // toward the thing
+};
+const POSE_NAMES = Object.keys(POSES);
+
 function Moshi(host, opts = {}) {
   const O = Object.assign({
     personality: 'TAR', seed: 0.5, interactive: true, room: false,
-    quality: 'ps2', resDiv: null, maxW: null, maxH: null, preserve: false,
+    quality: 'ps2', style: 'ps2', resDiv: null, maxW: null, maxH: null, preserve: false,
   }, opts);
 
   const cv = document.createElement('canvas');
@@ -534,16 +575,41 @@ function Moshi(host, opts = {}) {
     if (n === 'LISTENING' || n === 'RECORDING') fireBlink();  // acknowledgment
   }
 
-  // the migration steal: lobes that relocate — shift slides a lobe along its
-  // orbit, transits tuck it in (it travels as a smaller thing)
-  const lmb = [0, 1, 2].map(() => ({ s: 0, from: 0, tgt: 0, t0: 0, dur: 1, on: false }));
+  // ── the POSE engine: fixed-endpoint configs, eased crossfade, auto-return ──
+  let poseName = 'NEUTRAL', poseFrom = POSES.NEUTRAL, poseTo = POSES.NEUTRAL,
+      poseMix = 1, poseHold = 0;
+  const poseCfg = (n, aimX) => {
+    let c = POSES[n].map(l => l.slice());
+    if ((n === 'REACH' || n === 'WAVE') && aimX < 0) {       // mirror to the left arm
+      const t = c[2]; c[2] = [0, 1, 1];
+      c[0] = [-t[0], t[1], t[2]];
+    }
+    return c;
+  };
+  function poseNow() {                       // current blended config (an endpoint)
+    const w = poseMix * poseMix * (3 - 2 * poseMix);
+    return poseFrom.map((l, i) => l.map((v, k) => v + (poseTo[i][k] - v) * w));
+  }
+  function setPoseRaw(n, hold, aimX) {
+    if (!POSES[n]) throw new Error('moshi: unknown pose ' + n);
+    poseFrom = poseNow();
+    poseTo = poseCfg(n, aimX || 0);
+    poseMix = 0; poseName = n;
+    poseHold = hold != null ? hold : 1.2;
+  }
+  const basePose = () => (stName === 'SLEEPING' || annoyT > 0) ? 'DROOP' : 'NEUTRAL';
+  const limbArr = new Float32Array(15);      // upload scratch, allocated once
+
+  // the migration steal, splat edition: limbs fidget around their sockets —
+  // bounded (an arm stays an arm), tucking in while they travel
+  const lmb = [0, 1, 2, 3, 4].map(() => ({ s: 0, from: 0, tgt: 0, t0: 0, dur: 1, on: false }));
   let moveT = 6 + Math.random() * 8;
   function lobeMove(now) {
-    const go = (i, tgt) => { const L = lmb[i]; L.from = L.s; L.tgt = tgt; L.t0 = now; L.dur = 1.3 + Math.random() * 1.5; L.on = true; };
+    const go = (i, tgt) => { const L = lmb[i]; L.from = L.s; L.tgt = Math.max(-0.28, Math.min(0.28, tgt)); L.t0 = now; L.dur = 1.3 + Math.random() * 1.5; L.on = true; };
     const r = Math.random();
-    if (r < 0.45) go((Math.random() * 3) | 0, (Math.random() - 0.5) * 3.2);               // migrate
-    else if (r < 0.72) { const a = lmb[0].s, b = lmb[1].s; go(0, b); go(1, a); }           // swap slots
-    else [0, 1, 2].forEach(i => go(i, lmb[i].s + (Math.random() - 0.5) * 0.9));            // scatter
+    if (r < 0.45) go((Math.random() * 5) | 0, (Math.random() - 0.5) * 0.8);                // shuffle one
+    else if (r < 0.72) { const i = (Math.random() * 5) | 0, j = (i + 1) % 5; const a = lmb[i].s; go(i, lmb[j].s); go(j, a); }  // neighbors trade
+    else [0, 1, 2, 3, 4].forEach(i => go(i, lmb[i].s + (Math.random() - 0.5) * 0.4));      // scatter
   }
 
   // ── idle life: blink on a life timer (events suppress it briefly) ──
@@ -580,8 +646,9 @@ function Moshi(host, opts = {}) {
     if (dragAt) {
       const dx = e.clientX - dragAt[0], dy = e.clientY - dragAt[1];
       if (Math.abs(dx) + Math.abs(dy) > 5) { dragged = true; petCand = null; petting = false; }
-      rotTA += dx * 0.006; rotTB += dy * 0.004;
-      spinV = dx * 0.10;                              // inertia source
+      // grab-the-surface: the body FOLLOWS the cursor (the + signs read inverted)
+      rotTA -= dx * 0.006; rotTB -= dy * 0.004;
+      spinV = -dx * 0.10;                             // inertia source
       dragAt = [e.clientX, e.clientY];
     }
   };
@@ -603,6 +670,8 @@ function Moshi(host, opts = {}) {
 
   // poke escalation bookkeeping
   let pokeN = 0, pokeAt = 0, annoyT = 0;
+  // the STYLE dial (eased so PS2<->TOON morphs, never snaps)
+  let toonA = O.style === 'toon' ? 1 : 0, toonT = toonA;
 
   // ── the loop ──
   let raf = 0, t0 = performance.now(), last = t0;
@@ -674,6 +743,10 @@ function Moshi(host, opts = {}) {
         if (Math.random() < 0.75) {            // glance at it…
           att = 'cursor'; attT = 0.5 + Math.random() * 1.0;
           fireBlink(); sacV = 1;
+          if (Math.random() < 0.35) {          // …sometimes reaching toward it
+            const R = rect();
+            setPoseRaw('REACH', 0.9, ptrX - (R.left + R.width / 2));
+          }
         } else {                               // …or pointedly not. (the snub
           ignoreUntil = now + 1500;            //  is what sells sentience)
           fireBlink();
@@ -735,8 +808,8 @@ function Moshi(host, opts = {}) {
       lobeMove(t);
       moveT = (7 + Math.random() * 12) / Math.max(0.15, cur.restless);
     }
-    const shiftV = [0, 0, 0], tuckV = [0, 0, 0];
-    for (let i = 0; i < 3; i++) {
+    const shiftV = [0, 0, 0, 0, 0], tuckV = [0, 0, 0, 0, 0];
+    for (let i = 0; i < 5; i++) {
       const L = lmb[i];
       if (L.on) {
         const ph = Math.min((t - L.t0) / L.dur, 1);
@@ -747,6 +820,17 @@ function Moshi(host, opts = {}) {
       }
       shiftV[i] = L.s;
     }
+
+    // the pose advances, holds, and returns to the state's base pose
+    if (poseMix < 1) poseMix = Math.min(1, poseMix + dt / 0.35);
+    poseHold -= dt;
+    if (poseHold <= 0 && poseName !== basePose()) setPoseRaw(basePose(), 0);
+    const pose = poseNow();
+    if (poseName === 'WAVE' && poseMix > 0.6)        // the wave wiggles
+      pose[poseTo[0][1] !== 1 ? 0 : 2][0] += Math.sin(t * 9) * 0.22;
+
+    // the style dial eases
+    toonA += (toonT - toonA) * Math.min(1, dt * 4);
 
     // he WANTS to face you: drag/antics swing him away, he eases home
     // (the face is on the body now — homing is what keeps it findable)
@@ -781,7 +865,6 @@ function Moshi(host, opts = {}) {
 
     // CPU-side frame constants (were recomputed per map() per step per pixel)
     const sd = cur.sd, sd2 = cur.sd2;
-    const s1 = shiftV[0], s2 = shiftV[1], s3 = shiftV[2];
     const lA = rotA + wobA;
     const lB = rotB + wobB + (st.nod ? Math.sin(t * 2.1) * 0.02 : 0);
 
@@ -810,16 +893,15 @@ function Moshi(host, opts = {}) {
     gl.uniform1f(U.u_lid, lid);
     gl.uniform1f(U.u_sd, sd);
     gl.uniform1f(U.u_sd2, sd2);
-    gl.uniform3f(U.u_L1,
-       0.25 * Math.sin(sd * 6.3 + lph + s1),  0.21 * Math.cos(sd2 * 7.1 + lph * 0.8 + s1 * 0.6),  0.14 * Math.sin(sd * 3.0 + lph));
-    gl.uniform3f(U.u_L2,
-      -0.24 * Math.cos(sd2 * 5.2 + lph + s2), -0.18 * Math.sin(sd * 8.4 + lph * 0.6 + s2 * 0.6), -0.15);
-    gl.uniform3f(U.u_L3,
-      -0.07 * Math.cos(sd * 2.2 + s3),        -0.23 * Math.sin(sd2 * 4.7 + lph * 0.7 + s3 * 0.6), -0.16 * Math.cos(sd * 2.2));
-    gl.uniform3f(U.u_LR,
-      (0.185 + 0.055 * sd2) * (1 - 0.22 * tuckV[0]),
-      (0.165 + 0.050 * sd)  * (1 - 0.22 * tuckV[1]),
-      (0.150 + 0.040 * sd2) * (1 - 0.22 * tuckV[2]));
+    // THE SPLAT's limbs: anatomy × pose × fidget × breath-drift, baked on CPU
+    for (let i = 0; i < 5; i++) {
+      const P = pose[i];
+      limbArr[i * 3]     = cur.limbA[i] + P[0] + shiftV[i] + Math.sin(lph * 0.9 + i * 2.1) * 0.05;
+      limbArr[i * 3 + 1] = cur.limbL[i] * P[1] * (1 - 0.18 * tuckV[i]) * (1 + Math.sin(lph * 0.7 + i * 1.7) * 0.04);
+      limbArr[i * 3 + 2] = cur.limbR[i] * P[2] * (1 + 0.12 * tuckV[i]);
+    }
+    gl.uniform3fv(U['u_limb[0]'], limbArr);
+    gl.uniform1f(U.u_toon, toonA);
     gl.uniform1f(U.u_bw, cur.bw);
     gl.uniform1f(U.u_bf, cur.bf);
     gl.uniform1f(U.u_sw, cur.sw);
@@ -868,10 +950,11 @@ function Moshi(host, opts = {}) {
       idleT = 0;
       return api;
     },
-    celebrate() {                    // a take landed — one big joyful beat
+    celebrate() {                    // a take landed — arms up, one big joyful beat
       celebT = 1.5; celebE = 1;
       wide = 1; vy -= 5.2;
       rotTA += (Math.random() - 0.5) * 1.6;
+      setPoseRaw('ARMS_UP', 1.5);
       setTimeout(() => { if (!dead) { vy -= 3.0; fireBlink(); } }, 380);
       wake(false);
       return api;
@@ -899,6 +982,7 @@ function Moshi(host, opts = {}) {
         shiverT = 0.45;
         saccadeTo(px > 0 ? -0.8 : 0.8, -0.2, 2.5);     // pointedly away
         rotTA += px > 0 ? -0.5 : 0.5;
+        setPoseRaw('DROOP', 4);                  // everything sags. happy now?
         ignoreUntil = now + 6000;
         return api;
       }
@@ -906,31 +990,46 @@ function Moshi(host, opts = {}) {
         wide = 1; vy -= 5.5; onsetEnv = Math.min(1.2, onsetEnv + 1.0);
         fireBlink(); setTimeout(() => { if (!dead) blink = 1; }, 220);
         rotTA += (Math.random() - 0.5) * 1.0;
+        setPoseRaw('SPLAY', 1.0);                // full flare
         return api;
       }
       const r = Math.random() * (0.85 + 0.45 * cur.antic);  // temperament weights the menu
       if (r < 0.35) {                            // classic startle-hop
         onsetEnv = Math.min(1.2, onsetEnv + 0.8); wide = 1; vy -= 4.2;
         rotTA += (Math.random() - 0.5) * 0.7;
+        setPoseRaw('SPLAY', 0.7);
       } else if (r < 0.6) {                      // squash-oof: compress, double-blink
         vy += 4.5; onsetEnv = Math.min(1.2, onsetEnv + 0.6);
         fireBlink(); setTimeout(() => { if (!dead) blink = 1; }, 200);
+        setPoseRaw('TUCK', 0.8);
       } else if (r < 0.85) {                     // double-take: the spot, then YOU
         vy -= 1.5;
         saccadeTo(px, py, 0.38);
+        setPoseRaw('REACH', 0.9, px);
         setTimeout(() => {
           if (dead) return;
           saccadeTo(0, 0.06, 1.5); wide = 0.6; fireBlink();
         }, 380);
-      } else {                                   // delight-bounce: tongue out
+      } else {                                   // delight-bounce: tongue out, arms up
         vy -= 3.5; wide = 0.9; celebE = Math.max(celebE, 0.5);
         drives.mood = 1;
         rotTA += (Math.random() - 0.5) * 1.2;
+        setPoseRaw('ARMS_UP', 1.1);
       }
       return api;
     },
+    setPose(n, hold) {
+      setPoseRaw(String(n).toUpperCase(), hold != null ? hold : 2.5,
+                 gaze.x);                        // REACH/WAVE aim where he's looking
+      return api;
+    },
+    setStyle(s) {
+      if (s !== 'ps2' && s !== 'toon') throw new Error('moshi: unknown style ' + s);
+      O.style = s; toonT = s === 'toon' ? 1 : 0;
+      return api;
+    },
     lookAt(nx, ny) { saccadeTo(nx, ny, 2); ignoreUntil = performance.now() + 2000; return api; },
-    state() { return { personality: to.name, seed: to.seed, state: stName, quality: O.quality, petting, attention: att, drives: Object.assign({}, drives) }; },
+    state() { return { personality: to.name, seed: to.seed, state: stName, pose: poseName, style: O.style, quality: O.quality, petting, attention: att, drives: Object.assign({}, drives) }; },
     _move() { lobeMove((performance.now() - t0) / 1000); return api; },   // test hook
     onPersonality(fn) { onChange = fn; return api; },
     _step() {                       // one synchronous frame — for harnesses
@@ -960,5 +1059,7 @@ function Moshi(host, opts = {}) {
 Moshi.PERSONALITIES = NAMES.slice();
 Moshi.STATES = Object.keys(STATES);
 Moshi.QUALITIES = Object.keys(QUALITY);
+Moshi.POSES = POSE_NAMES.slice();
+Moshi.STYLES = ['ps2', 'toon'];
 window.Moshi = Moshi;
 })();
