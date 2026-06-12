@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>MOSH — the main view</title>
+<title>MOSH DESIGN LAB — gallery</title>
 <style>
   /* NANUM SQUARE ROUND — the display voice (user-supplied; OFL, Naver).
      Rounded-square 2000s console face: the type finally matches the plastic. */
@@ -15,351 +15,59 @@
   :root {
     --ink: #0B0B0B; --lime: #CCFF23; --lime-glow: #D9FF4C;
     --bone: #F6F2EB; --mist: #E5E5E1;
-    --slab: #111110; --slab-2: #141413;
     --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
     --font-display: 'NanumSquareRound', "Archivo Black", "Helvetica Neue", -apple-system, "Arial Black", sans-serif;
-    --seam: 0 0 0 1px rgba(204,255,35,.16), 0 0 9px rgba(204,255,35,.10);
   }
-  html, body { margin: 0; height: 100%; background: #070707; overflow: hidden;
-    font-family: var(--font-mono); color: var(--bone); }
-  .mono { font-variant-numeric: tabular-nums; letter-spacing: .06em; }
-  .disp { font-family: var(--font-display); font-weight: 900; letter-spacing: .02em;
-    text-transform: uppercase; }
+  body { margin: 0; background: var(--ink); color: var(--bone);
+         font-family: var(--font-mono); }
+  header { padding: 44px 48px 8px; }
+  h1 { font-family: var(--font-display); font-weight: 900; font-size: 38px; margin: 0;
+       letter-spacing: -0.01em; color: var(--bone); }
+  h1 em { font-style: normal; color: var(--lime); text-shadow: 0 0 28px rgba(217,255,76,.4); }
+  .sub { font-size: 11px; letter-spacing: .14em; opacity: .5; margin-top: 10px; }
+  .docs { padding: 0 48px; font-size: 11px; letter-spacing: .08em; opacity: .75; }
+  .docs a { color: var(--lime); text-decoration: none; margin-right: 18px; }
+  .docs a:hover { text-shadow: 0 0 14px rgba(217,255,76,.6); }
 
-  /* THE PIT — low-res raymarch buffer, upscaled hard. chunky on purpose. */
-  #pit { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 2;
-    image-rendering: pixelated; image-rendering: crisp-edges; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+          gap: 26px; padding: 30px 48px 60px; }
+  .card { border: 2px solid #1d2010; border-radius: 12px; overflow: hidden;
+          background: #0e0e0d; transition: border-color .25s, transform .15s; display: block;
+          color: inherit; text-decoration: none;
+          box-shadow: 0 4px 0 #000, inset 0 1px 0 rgba(246,242,235,.07);
+          background-image: linear-gradient(180deg, rgba(246,242,235,.04) 0 42%, rgba(0,0,0,.22) 42% 100%); }
+  .card:hover { transform: translateY(-2px); }
+  .card:hover { border-color: rgba(204,255,35,.55); box-shadow: 0 0 34px rgba(204,255,35,.12); }
+  .thumb { position: relative; width: 100%; aspect-ratio: 16/10; overflow: hidden;
+           background: #060606; }
+  .thumb iframe { width: 400%; height: 400%; transform: scale(.25); transform-origin: 0 0;
+           border: 0; pointer-events: none; }
+  .meta { padding: 14px 18px 16px; }
+  .meta .num { font-size: 10px; letter-spacing: .2em; opacity: .45; }
+  .meta .name { display: inline-block; transform: skewX(-12deg);
+           font-family: var(--font-display); font-weight: 900; font-style: italic;
+           font-size: 15px; background: rgba(204,255,35,.13); color: var(--lime);
+           border: 1px solid rgba(204,255,35,.45);
+           padding: 4px 13px 3px; border-radius: 3px; margin: 6px 0 8px;
+           box-shadow: 0 3px 0 #000, inset 0 1px 0 rgba(255,255,255,.4);
+           letter-spacing: .03em; text-transform: uppercase; }
+  .meta .what { font-size: 11px; line-height: 1.55; opacity: .7; }
 
-  #roomheat { position: fixed; inset: 0; pointer-events: none; opacity: 0; z-index: 50;
-    background: radial-gradient(ellipse at 50% 50%, transparent 55%, rgba(204,255,35,.07) 100%);
-    transition: opacity .8s; }
-  body.rec #roomheat { opacity: 1; animation: heat 1.1s ease-in-out infinite; }
-  @keyframes heat { 50% { opacity: .55; } }
-
-  #topbar { position: fixed; top: 0; left: 0; right: 0; height: 64px; display: flex;
-    align-items: center; gap: 16px; padding: 0 20px; background: var(--slab);
-    box-shadow: var(--seam); z-index: 20; }
-
-  /* THE SCENE, folded in: crew + rivals as dithered orbs (from 011) */
-  .rail { display: flex; align-items: center; gap: 8px; }
-  .raillbl { font-size: 7.5px; letter-spacing: .18em; opacity: .4; }
-  .peer { position: relative; width: 34px; text-align: center; cursor: pointer; }
-  .peer canvas { width: 30px; height: 30px; image-rendering: pixelated; display: block; margin: 0 auto; }
-  .peer .nm { font-size: 7px; letter-spacing: .1em; opacity: .55; margin-top: -2px; }
-  .peer .tick { position: absolute; top: -7px; left: 50%; transform: translateX(-50%);
-    font-size: 7.5px; color: var(--ink); background: var(--lime); border-radius: 5px;
-    padding: 1px 5px; box-shadow: 0 2px 0 #000; opacity: 0; pointer-events: none;
-    white-space: nowrap; }
-  .peer .tick.pop { animation: tpop 1.6s cubic-bezier(.34,1.56,.64,1); }
-  @keyframes tpop { 0% { opacity: 0; transform: translateX(-50%) scale(.5); }
-    12% { opacity: 1; transform: translateX(-50%) scale(1.1); }
-    80% { opacity: 1; } 100% { opacity: 0; } }
-  #peeklbl { position: fixed; left: 50%; transform: translateX(-50%); bottom: 64px;
-    font-size: 10px; letter-spacing: .18em; color: var(--mist); opacity: 0;
-    transition: opacity .3s; z-index: 22; }
-  #peeklbl.on { opacity: .85; }
-  #wordmark { font-size: 17px; color: var(--bone); }
-  #wordmark b { color: var(--lime); text-shadow: 0 0 16px rgba(217,255,76,.4); }
-  #transport { display: flex; align-items: center; gap: 14px; font-size: 11px; opacity: .85; }
-  #playbtn { cursor: pointer; border: 0; background: transparent; color: var(--lime);
-    font-size: 13px; font-family: var(--font-mono); padding: 2px 6px; }
-  #recchip { margin-left: auto; font-size: 10px; letter-spacing: .16em; cursor: pointer;
-    border: 1px solid rgba(246,242,235,.18); border-radius: 999px; padding: 5px 13px; opacity: .6; }
-  body.rec #recchip { color: var(--ink); background: var(--lime); border-color: var(--lime);
-    opacity: 1; box-shadow: 0 0 22px rgba(217,255,76,.55); animation: heat 1.1s infinite; }
-
-  #deeds { position: fixed; top: 78px; right: 16px; display: flex; flex-direction: column;
-    gap: 7px; align-items: flex-end; z-index: 30; }
-  .deed { font-size: 10px; letter-spacing: .05em; color: var(--bone);
-    background: rgba(11,11,11,.82); border: 1px solid rgba(204,255,35,.32);
-    border-radius: 999px; padding: 5px 11px; display: flex; gap: 8px; align-items: center;
-    animation: din .45s cubic-bezier(.34,1.56,.64,1); transition: opacity 1s, transform 1s; }
-  .deed em { font-style: normal; color: var(--lime); }
-  .deed button { background: none; border: 0; color: rgba(246,242,235,.4); cursor: pointer;
-    font-family: var(--font-mono); font-size: 10px; padding: 0; }
-  .deed button:hover { color: var(--lime); }
-  .deed.bye { opacity: 0; transform: translateY(-14px); }
-  @keyframes din { from { opacity: 0; transform: translateX(26px) scale(.85); } }
-
-  #arrange { position: fixed; top: 76px; left: 14px; right: 14px; height: 330px; z-index: 5; }
-  #ruler { height: 22px; display: flex; font-size: 9px; opacity: .4; padding-left: 150px; }
-  #ruler span { flex: 1; border-left: 1px solid rgba(246,242,235,.12); padding: 4px 0 0 5px; }
-  .lane { display: flex; height: 52px; margin-bottom: 8px; }
-  .lhead { width: 136px; flex: none; background: var(--slab); box-shadow: var(--seam);
-    border-radius: 10px; margin-right: 14px; padding: 10px 12px; position: relative; }
-  .lhead .nm { font-size: 13px; color: var(--bone); }
-  .lhead .ms { position: absolute; bottom: 9px; left: 12px; font-size: 9px;
-    letter-spacing: .2em; opacity: .45; }
-  .lhead .vol { position: absolute; bottom: 13px; right: 12px; width: 44px; height: 2px;
-    background: rgba(246,242,235,.15); border-radius: 2px; }
-  .lhead .vol i { display: block; height: 100%; width: 72%; background: var(--lime);
-    border-radius: 2px; box-shadow: 0 0 6px rgba(204,255,35,.5); }
-  .lbody { position: relative; flex: 1; background: var(--slab-2); box-shadow: var(--seam);
-    border-radius: 10px; overflow: hidden; }
-  .clip { position: absolute; top: 6px; bottom: 6px; background: rgba(10,10,9,.55);
-    border: 1px solid rgba(204,255,35,.35); border-radius: 11px;
-    box-shadow: inset 0 0 16px rgba(204,255,35,.07); cursor: pointer; }
-  .clip .cn { position: absolute; top: 4px; left: 9px; font-size: 8px;
-    letter-spacing: .12em; color: rgba(246,242,235,.55); }
-  .clip canvas { position: absolute; left: 4px; right: 4px; bottom: 3px; height: 15px;
-    width: calc(100% - 8px); opacity: .9; }
-  .clip.pop { animation: cpop .5s cubic-bezier(.34,1.56,.64,1); }
-  @keyframes cpop { from { transform: scale(.55); opacity: 0; } 60% { transform: scale(1.08); } }
-  #phead { position: absolute; top: 22px; bottom: 0; width: 2px; background: var(--lime);
-    box-shadow: 0 0 10px rgba(217,255,76,.8); z-index: 9; pointer-events: none; }
-
-  .slabpanel { position: fixed; bottom: 64px; background: var(--slab); box-shadow: var(--seam);
-    border-radius: 14px; padding: 14px 18px; z-index: 12; }
-  #chain { left: 14px; width: 210px; }
-  #rack { right: 14px; width: 250px; }
-  .ptitle { font-size: 9px; letter-spacing: .24em; opacity: .45; margin-bottom: 10px; }
-  .ptitle b { color: var(--lime); opacity: 1; }
-  .prow { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; font-size: 10.5px; }
-  .prow .lbl { width: 64px; letter-spacing: .14em; opacity: .8; }
-  .prow .track { flex: 1; height: 2px; background: rgba(246,242,235,.13); border-radius: 2px;
-    position: relative; cursor: pointer; }
-  .prow .track i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--lime);
-    border-radius: 2px; box-shadow: 0 0 7px rgba(204,255,35,.55); }
-  .prow .track u { position: absolute; top: 50%; width: 9px; height: 9px; border-radius: 50%;
-    background: var(--lime); transform: translate(-50%,-50%);
-    box-shadow: 0 0 9px rgba(217,255,76,.8); }
-  .prow .val { width: 30px; text-align: right; opacity: .7; }
-  .meta { display: flex; gap: 8px; align-items: center; margin-top: 10px; font-size: 9.5px; }
-  .badge { color: var(--ink); background: var(--lime); border-radius: 99px; padding: 2px 8px;
-    letter-spacing: .1em; }
-  .ghost { border: 1px solid rgba(246,242,235,.2); border-radius: 99px; padding: 2px 10px;
-    opacity: .65; cursor: pointer; }
-  .ghost:hover { border-color: var(--lime); color: var(--lime); opacity: 1; }
-  #rackNote { font-size: 8.5px; letter-spacing: .1em; opacity: .35; margin-top: 9px; }
-
-  #ask { position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%);
-    width: min(430px, 50vw); z-index: 20; }
-  #ask input { width: 100%; background: transparent; border: 0; outline: 0; text-align: center;
-    border-bottom: 1px solid rgba(246,242,235,.18); padding: 7px 2px;
-    font-family: var(--font-mono); font-size: 11.5px; letter-spacing: .07em; color: var(--bone); }
-  #ask input::placeholder { color: rgba(246,242,235,.26); }
-  #ask input:focus { border-bottom-color: rgba(204,255,35,.6); }
-
-
-  #debris { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 3;
-    image-rendering: pixelated; pointer-events: none; }
-
-  /* spectral fill — the artifact's diet, readable in the chrome */
-  #specrow { display: flex; align-items: center; gap: 3px; font-size: 8px;
-    letter-spacing: .14em; opacity: .75; }
-  .sbar { display: inline-block; width: 34px; height: 8px; background: #0a0a09;
-    box-shadow: inset 0 0 0 1px #1d2010; border-radius: 2px; margin-right: 6px; }
-  .sbar i { display: block; height: 100%; width: 0%; border-radius: 2px;
-    background: repeating-linear-gradient(90deg, var(--lime) 0 4px, #0e0e0d 4px 5px); }
-  #build { font-size: 9px; letter-spacing: .14em; }
-
-  /* ── Y2K CONSOLE — house style v2 (see design-lab/HOUSE_STYLE.md) ──
-     chunky plastic game-menu chrome: bevels, block shadows, segmented
-     meters, press states, bounce. No scanlines — wrong decade. */
-  .slabpanel, .lhead, .lbody, #topbar {
-    background-image: radial-gradient(rgba(204,255,35,.04) 1px, transparent 1.01px);
-    background-size: 3px 3px; }
-  .slabpanel, .lhead, .lbody { border-radius: 10px;
-    box-shadow: 0 0 0 2px #1d2010, 0 3px 0 #000, inset 0 1px 0 rgba(246,242,235,.07); }
-  #topbar { box-shadow: 0 3px 0 #000, inset 0 -1px 0 rgba(246,242,235,.05); }
-  .clip { border-radius: 8px; border-width: 2px; box-shadow: 0 2px 0 rgba(0,0,0,.85); }
-  .pill, #recchip, .ghost { border-radius: 9px; border-width: 2px;
-    box-shadow: 0 2px 0 #000; transition: transform .08s, box-shadow .08s; }
-  .pill:active, #recchip:active, .ghost:active { transform: translateY(2px); box-shadow: 0 0 0 #000; }
-  .badge { border-radius: 7px; box-shadow: 0 2px 0 #5d7607; }
-  .deed { border-radius: 9px; border-width: 2px; box-shadow: 0 2px 0 #000;
-    animation: din .45s cubic-bezier(.34,1.56,.64,1); }
-  body.rec #recchip { box-shadow: 0 2px 0 #5d7607;
-    animation: recbounce .5s cubic-bezier(.34,1.56,.64,1) infinite alternate; }
-  @keyframes recbounce { from { transform: scale(1); } to { transform: scale(1.1); } }
-  /* segmented meters — SSX boost-bar language */
-  .prow .track { height: 10px; border-radius: 3px; background: #0a0a09;
-    box-shadow: inset 0 0 0 1px #1d2010; }
-  .prow .track i { border-radius: 2px; box-shadow: none;
-    background: repeating-linear-gradient(90deg, var(--lime) 0 6px, #0e0e0d 6px 8px); }
-  .prow .track u { border-radius: 2px; width: 6px; height: 16px; box-shadow: 0 2px 0 #000; }
-  .lhead .vol { height: 8px; border-radius: 2px; }
-  .lhead .vol i { box-shadow: none;
-    background: repeating-linear-gradient(90deg, var(--lime) 0 4px, #0e0e0d 4px 6px); }
-  #sect { font-family: var(--font-display); font-weight: 900; font-size: 14px;
-    letter-spacing: .06em; transform: skewX(-6deg); }
-  #wordmark b { text-shadow: none; }
-  #phead { box-shadow: none; }
-
-  /* ── KNOBS (user: hardware, not long sliders) ── */
-  .kdeck { display: flex; gap: 18px; align-items: flex-end; margin: 4px 0 6px; }
-  .kcell { display: flex; flex-direction: column; align-items: center; gap: 5px; }
-  .knob { width: 38px; height: 38px; border-radius: 50%; position: relative; cursor: ns-resize;
-    background: radial-gradient(circle at 35% 30%, #2a2c20, #101110 64%, #050505 100%);
-    box-shadow: 0 3px 0 #000, inset 0 1px 0 rgba(246,242,235,.16), 0 0 0 2px #1d2010; }
-  .knob i { position: absolute; left: 50%; top: 4px; width: 3px; height: 11px; margin-left: -1.5px;
-    background: var(--lime); border-radius: 2px; transform-origin: 50% 15px; opacity: .9; }
-  .klbl { font-size: 8.5px; letter-spacing: .16em; opacity: .55; }
-  .kval { font-size: 11px; opacity: .75; }
-
-
-
-  /* ── Y2K PLATE PASS (HOUSE_STYLE v2.2): less modern app, more 2000s game menu.
-     Plastic gloss (hard two-stop), skewed lime title plates, boxed numerals. ── */
-  .plate { display: inline-block; transform: skewX(-12deg);
-    background: var(--lime); color: var(--ink);
-    font-family: var(--font-display); font-weight: 900; font-style: italic;
-    font-size: 11px; letter-spacing: .05em; padding: 4px 12px 3px; opacity: 1;
-    border-radius: 3px; box-shadow: 0 3px 0 #000, inset 0 1px 0 rgba(255,255,255,.4);
-    text-transform: uppercase; }
-
-  .slabpanel, .lhead, #topbar { background-image:
-      linear-gradient(180deg, rgba(246,242,235,.06) 0 44%, rgba(0,0,0,.30) 44% 100%),
-      radial-gradient(rgba(204,255,35,.04) 1px, transparent 1.01px);
-    background-size: 100% 100%, 3px 3px; }
-  .slabpanel { clip-path: polygon(0 0, calc(100% - 18px) 0, 100% 18px, 100% 100%, 0 100%); }
-  .ptitle { opacity: .9; display: flex; align-items: center; gap: 8px; }
-  .prow .val { width: 36px; font-size: 12px; background: #060606; border-radius: 4px;
-    padding: 3px 5px; box-shadow: inset 0 1px 2px #000, inset 0 -1px 0 rgba(246,242,235,.06);
-    text-align: right; }
-  .ghost, .badge, #recchip { background-image:
-    linear-gradient(180deg, rgba(255,255,255,.10) 0 45%, rgba(0,0,0,.22) 45% 100%); }
-  #rackNote { position: relative; padding-top: 9px; }
-  #rackNote::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 4px;
-    background: repeating-linear-gradient(-45deg, rgba(204,255,35,.55) 0 6px, transparent 6px 12px); }
-  #wordmark { transform: skewX(-10deg); background: var(--lime); padding: 3px 13px 2px;
-    border-radius: 3px; box-shadow: 0 3px 0 #000, inset 0 1px 0 rgba(255,255,255,.4); }
-  #wordmark, #wordmark b { color: var(--ink); }
-  .lhead .nm { font-style: italic; }
-  .lbody, .clip { background-image:
-    linear-gradient(180deg, rgba(246,242,235,.03) 0 40%, rgba(0,0,0,.18) 40% 100%); }
-
+  /* hover-to-run: max ~3 live GL pages at once instead of 11 (context-cap glitch fix) */
+  .thumb { display: grid; place-items: center;
+    background-image: radial-gradient(rgba(204,255,35,.05) 1px, transparent 1.01px);
+    background-size: 4px 4px; }
+  .thumb .ph { font-size: 64px; color: rgba(204,255,35,.18); letter-spacing: .04em;
+    transition: color .2s, transform .2s; }
+  .card:hover .ph { color: rgba(204,255,35,.45); transform: scale(1.06); }
+  .thumb iframe { position: absolute; inset: 0; }
+  .thumb { position: relative; }
 
   /* THE PS2 SIGNAL CHAIN (HOUSE_STYLE v2.1) — one cable for every surface:
      soft 2000s AA + 16-step posterize over DOM and GL alike. html.raw = A/B. */
   * { -webkit-font-smoothing: antialiased; }
   body { filter: url(#ps2signal); }
   html.raw body { filter: none; }
-  /* ── HUD DECLUTTER (user: acid green is a lot; more like a HUD) ──
-     translucent panels over the world, outline plates, dimmer lime everywhere */
-  .slabpanel { background-color: rgba(13,13,12,.62); }
-  .lhead { background-color: rgba(13,13,12,.55); }
-  .lbody { background-color: rgba(10,10,9,.42); }
-  #topbar { background-color: rgba(13,13,12,.78); }
-  .plate, #wordmark { background: rgba(204,255,35,.13); color: var(--lime);
-    border: 1px solid rgba(204,255,35,.45); box-shadow: 0 2px 0 rgba(0,0,0,.6); }
-  #wordmark b { color: var(--lime); }
-  .clip { border-color: rgba(204,255,35,.20); }
-  .clip canvas { opacity: .45; }
-  .lhead .vol i, .sbar i { opacity: .65; }
-  #specrow { opacity: .5; }
-  .badge { background: rgba(204,255,35,.75); }
-  .deed { background: rgba(11,11,11,.55); border-color: rgba(204,255,35,.22); }
-  #phead { opacity: .8; }
-  /* ── v8 NO RECTANGLES — the page is world + instruments ──
-     the topbar becomes a scrim, the lanes become ghosts, the panels are gone */
-  #topbar { background: none; box-shadow: none;
-    background-image: linear-gradient(180deg, rgba(7,7,7,.88) 0%, rgba(7,7,7,.55) 60%, rgba(7,7,7,0) 100%); }
-  .lhead { background: none; background-image: none; box-shadow: none; }
-  .lbody { background-color: rgba(10,10,9,.16); background-image: none;
-    box-shadow: inset 0 0 0 1px rgba(246,242,235,.04); }
-  #ruler { opacity: .28; }
-
-  #rackorbit { position: fixed; inset: 0; z-index: 14; pointer-events: none; }
-  #rackorbit .kcell, #rackorbit .ghost, #rackorbit .owhisper {
-    position: fixed; left: 0; top: 0; will-change: transform; }
-  #rackorbit .kcell { pointer-events: auto; display: flex; flex-direction: column;
-    align-items: center; gap: 4px; }
-  #rackorbit .ghost { pointer-events: auto; transition: none; }
-  #rackorbit .owhisper { font-size: 8px; letter-spacing: .22em; opacity: .32;
-    white-space: nowrap; }
-
-  .chaincluster { position: absolute; right: 12px; top: 50%;
-    transform: translateY(-50%); display: flex; gap: 9px; align-items: center; z-index: 6; }
-  .chaincluster .cwhisper { font-size: 7.5px; letter-spacing: .2em; opacity: .4; }
-  .chaincluster .kcell { display: flex; flex-direction: column; align-items: center; gap: 2px; }
-  .knob.mini { width: 25px; height: 25px; }
-  .knob.mini i { top: 3px; height: 7px; width: 2px; margin-left: -1px; transform-origin: 50% 9.5px; }
-  .chaincluster .klbl { font-size: 7px; }
-
-  /* ── THE HEFT PASS (user: "not so dinky — as physical and tactile as the
-     artifact"). No panels return; the INSTRUMENTS themselves gain mass:
-     bevels, sockets, needles, trays. Objects in the room, not labels on glass. */
-
-  /* clips: cartridges — translucent but BUILT */
-  .clip { background:
-      linear-gradient(180deg, rgba(246,242,235,.10) 0, rgba(246,242,235,.02) 3px,
-                      transparent 42%, rgba(0,0,0,.45) 100%),
-      rgba(13,13,12,.74) !important;
-    border: 2px solid #232613; border-radius: 7px;
-    box-shadow: 0 4px 0 rgba(0,0,0,.85), inset 0 1px 0 rgba(246,242,235,.16),
-                0 0 0 1px rgba(204,255,35,.13); }
-  .clip .cn { color: rgba(246,242,235,.78); }
-  .clip canvas { opacity: .68; }
-
-  /* knobs: machined — socket ring, deep throw, hot tick */
-  .knob { width: 44px; height: 44px;
-    background: radial-gradient(circle at 50% 36%, #343821 0 26%, #15160f 60%, #060606 100%);
-    box-shadow: 0 5px 0 #000, 0 0 0 2px #232613,
-                inset 0 2px 1px rgba(246,242,235,.20), inset 0 -4px 5px rgba(0,0,0,.75); }
-  .knob::after { content: ''; position: absolute; inset: -6px; border-radius: 50%;
-    box-shadow: inset 0 2px 3px rgba(0,0,0,.8), inset 0 -1px 0 rgba(246,242,235,.06);
-    pointer-events: none; }
-  .knob i { width: 4px; height: 14px; margin-left: -2px; transform-origin: 50% 18px;
-    box-shadow: 0 0 5px rgba(204,255,35,.55); }
-  .knob.mini { width: 30px; height: 30px; }
-  .knob.mini i { width: 3px; height: 9px; margin-left: -1.5px; transform-origin: 50% 11px; }
-  .klbl { font-size: 9.5px; opacity: .7; }
-  .kval { font-size: 13px; opacity: .85; }
-
-  /* playhead: a needle with a head, not a hairline */
-  #phead { width: 2px; opacity: 1; box-shadow: 0 0 4px rgba(204,255,35,.4); }
-  #phead::before { content: ''; position: absolute; top: -3px; left: 50%;
-    transform: translateX(-50%); border: 7px solid transparent;
-    border-top: 10px solid var(--lime); filter: drop-shadow(0 2px 0 #000); }
-
-  /* lane furniture: recessed meter trays. NO text-shadows — the signal chain's
-     bloom is the ONE glow source; doubling it read as CRT inconsistency. */
-  .lhead .nm { font-size: 15px; }
-  .lhead .vol { height: 9px; border-radius: 3px;
-    box-shadow: inset 0 2px 2px rgba(0,0,0,.85), 0 1px 0 rgba(246,242,235,.05); }
-  .sbar { height: 10px;
-    box-shadow: inset 0 2px 2px rgba(0,0,0,.85), 0 1px 0 rgba(246,242,235,.05); }
-
-  /* chips + buttons: thicker plastic, deeper press */
-  .ghost { border-width: 2px; padding: 4px 12px; font-size: 9.5px;
-    box-shadow: 0 3px 0 #000, inset 0 1px 0 rgba(246,242,235,.10); }
-  .ghost:active { transform: translateY(3px); box-shadow: 0 0 0 #000; }
-  #recchip { border-width: 2px; box-shadow: 0 3px 0 #000, inset 0 1px 0 rgba(246,242,235,.10); }
-  .deed { border-width: 2px; box-shadow: 0 3px 0 rgba(0,0,0,.8), inset 0 1px 0 rgba(246,242,235,.08); }
-
-  /* LISTENING MODE: the real track owns the timeline; the mock recedes */
-  #arrange.listening .lane:not(.tracklane) { opacity: .22; height: 34px; margin-bottom: 6px; }
-  #arrange.listening .lane:not(.tracklane) .nm { font-size: 11px; }
-  #arrange.listening #ruler { cursor: pointer; }
-  .tracklane .lbody { box-shadow: inset 0 0 0 1px rgba(204,255,35,.20); }
-  .tracklane .clip { cursor: default; }
-
-  /* M/S: tiny plastic switches. they latch DOWN when engaged. */
-  .lhead .ms { display: flex; gap: 4px; opacity: 1; letter-spacing: 0; }
-  .lhead .sw { width: 17px; height: 15px; font-size: 8px; font-family: var(--font-mono);
-    color: rgba(246,242,235,.55); padding: 0; cursor: pointer; border-radius: 4px;
-    background: linear-gradient(180deg, #1c1e12 0 45%, #0c0d09 100%);
-    border: 1px solid #232613;
-    box-shadow: 0 2px 0 #000, inset 0 1px 0 rgba(246,242,235,.12); }
-  .lhead .sw:active { transform: translateY(2px); box-shadow: 0 0 0 #000; }
-  .lhead .sw.on { color: var(--ink); background: var(--lime); border-color: var(--lime);
-    transform: translateY(1px);
-    box-shadow: 0 1px 0 #5d7607, inset 0 1px 0 rgba(255,255,255,.45); }
-  /* level: an LED ladder in a recessed tray — lit segments + visible unlit wells */
-  .lhead .vol { width: 54px; height: 10px; cursor: ew-resize;
-    background: repeating-linear-gradient(90deg, #131410 0 4px, #0a0a09 4px 6px); }
-  .lhead .vol i { background: repeating-linear-gradient(90deg, var(--lime) 0 4px, transparent 4px 6px);
-    box-shadow: 0 0 5px rgba(204,255,35,.3); opacity: .9; }
-  .sbar { background: repeating-linear-gradient(90deg, #131410 0 3px, #0a0a09 3px 5px); }
-  .lane.quiet .lbody, .lane.quiet .nm { opacity: .3; }
-  .lane.quiet .clip canvas { opacity: .2; }
-
-  /* the ask line becomes a console rail — an instrument, not a floating string */
-  #ask input { background: rgba(10,10,9,.55); border: 2px solid #232613; border-radius: 10px;
-    padding: 9px 14px; box-shadow: inset 0 2px 3px rgba(0,0,0,.75), 0 3px 0 #000;
-    border-bottom: 2px solid #232613; }
-  #ask input:focus { border-color: rgba(204,255,35,.5); }
 </style>
 </head>
 <body>
@@ -376,1064 +84,98 @@
   </feComponentTransfer>
 </filter></svg>
 
-<canvas id="pit"></canvas>
-<canvas id="debris"></canvas>
-<div id="roomheat"></div>
+<header>
+  <h1>MOSH <em>DESIGN LAB</em></h1>
+  <div class="sub">THE 008+ LINEAGE · WAVE 1 RETIRED 2026-06-10 (GIT HISTORY KEEPS IT) · 007 KEPT AS THE QUIET EXHIBIT</div>
+</header>
+<nav class="docs">
+  <a href="../BRIEF.md">THE BRIEF</a>
+  <a href="../TOOLS.md">THE TOOLS</a>
+  <a href="../inspiration/INDEX.md">INSPIRATION INDEX</a>
+  <a href="../concepts/">CONCEPT ONE-PAGERS</a>
+</nav>
 
-<div id="topbar">
-  <div id="wordmark" class="disp">M<b>O</b>SH</div>
-  <div id="transport" class="mono">
-    <button id="playbtn" title="play/pause">▶</button>
-    <span id="tc">BAR 1.1 · 0:00.0</span>
-    <span style="opacity:.5">120 BPM</span>
-    <span id="sect" style="color:var(--lime)">VERSE 1</span>
-    <span id="link" style="font-size:9px;letter-spacing:.16em;opacity:.45">DEMO CLOCK</span>
-    <span id="trackbtn" class="ghost" title="play the bundled track — or drop any audio file anywhere on the page">♪ LOSERFACE</span>
-    <span id="specrow" title="spectral fill — what the artifact eats">LOW<span class="sbar"><i id="sbl"></i></span>MID<span class="sbar"><i id="sbm"></i></span>HI<span class="sbar"><i id="sbh"></i></span></span>
-    <span id="build" class="ghost" title="watch the artifact grow from an empty session">▶ BUILD</span>
-    <span id="signal" class="ghost" title="the PS2 signal chain — toggle to compare">SIGNAL·PS2</span>
-  </div>
-  <div class="rail" id="crewRail"><span class="raillbl">CREW</span></div>
-  <div class="rail" id="sceneRail"><span class="raillbl">SCENE · TAP TO PEEK</span></div>
-  <div id="recchip" class="mono">● REC (R)</div>
+<div class="grid">
+  <a class="card" href="experiments/007-terrarium/index.html">
+    <div class="thumb" data-live="experiments/007-terrarium/index.html"><div class="ph disp">007</div></div>
+    <div class="meta">
+      <div class="num">007 · SYNTHESIS · 002 + 005 + hushed 001</div>
+      <div class="name">TERRARIUM</div>
+      <div class="what">The specimen, kept quietly. SPECIMEN's raymarched body with its full
+      reactivity (heat, arousal, tremor) lives small in SPORE LEDGER's corner; deeds still bud
+      into the ledger. Behind it, HEARTH dimmed to a breath — slow ink, faint veins, no rings —
+      warming only when the creature works.</div>
+    </div>
+  </a>
+
+  <a class="card" href="experiments/008-possession/index.html">
+    <div class="thumb" data-live="experiments/008-possession/index.html"><div class="ph disp">008</div></div>
+    <div class="meta">
+      <div class="num">008 · GROUNDED · THE CURRENT UI, POSSESSED</div>
+      <div class="name">POSSESSION</div>
+      <div class="what">The shipping UI's exact skeleton — topbar, lanes, clips, chain,
+      generative drawer — re-materialized per the field notes: ink slabs with lume seams,
+      panels eaten open, a peristaltic playhead, takes as capsules, deeds ledger, Moshi
+      resident. Same MoshOps under every control: a skin, not a rebuild.</div>
+    </div>
+  </a>
+  <a class="card" href="experiments/009-the-pit/index.html">
+    <div class="thumb" data-live="experiments/009-the-pit/index.html"><div class="ph disp">009</div></div>
+    <div class="meta">
+      <div class="num">009 · GROUNDED · 3D · ROUGH ON PURPOSE</div>
+      <div class="name">THE PIT</div>
+      <div class="what">The full DAW skeleton with the song AS MATTER in the empty stage: a
+      raymarched obsidian mass — kifs-folded, noise-bitten, four dithered shading bands,
+      rotation animated on-twos — that slams on the beat. The Rack sculpts it live: GRIT
+      folds it jagged, AIR lets it drift, EPIC grows it. R splits it molten. v5: it's THE
+      ARTIFACT — the arrangement's spectral fill grows it from monochrome nugget to lit
+      monument; vox at full earns the one iridescent fringe. ▶ BUILD demos the thesis.</div>
+    </div>
+  </a>
+  <a class="card" href="experiments/010-moshi/index.html">
+    <div class="thumb" data-live="experiments/010-moshi/index.html"><div class="ph disp">010</div></div>
+    <div class="meta">
+      <div class="num">010 · THE AGENT · 3D COMPONENT</div>
+      <div class="name">MOSHI</div>
+      <div class="what">The agent graduates to 3D: a portable MoshiBlob component — mini
+      raymarched lobes, faceted low-poly shading, dither bands, on-twos wobble. It watches
+      your cursor, blinks, squashes on the beat, and squishes indignantly when poked.
+      Embedded live in 008 and 009. Face fused to the body: eyes squash with the spring,
+      tremble when feral, run lime when recording.</div>
+    </div>
+  </a>
+  <a class="card" href="experiments/011-the-scene/index.html">
+    <div class="thumb" data-live="experiments/011-the-scene/index.html"><div class="ph disp">011</div></div>
+    <div class="meta">
+      <div class="num">011 · PRESENCE · MULTIPLAYER AT A GLANCE</div>
+      <div class="name">THE SCENE</div>
+      <div class="what">The wager, rebuilt for how it's actually used (rarely 1v1): your
+      CREW rides the left of the topbar as dithered orbs — lime rims, ember hearts when
+      they record, deed ticks as they work — while THE SCENE's rivals sit right as fog
+      orbs whose size is all you get. Tap one to PEEK: their artifact fills your stage
+      as a cold silhouette for four seconds. You can see it. You can't hear it.</div>
+    </div>
+  </a>
 </div>
-
-<div id="deeds"></div>
-<div id="peeklbl" class="mono"></div>
-
-<div id="arrange">
-  <div id="ruler"></div>
-  <div id="lanes"></div>
-  <div id="phead"></div>
-</div>
-
-<!-- v8 NO RECTANGLES: the rack ORBITS the artifact; the chain hangs in its lane.
-     controls live where their consequences live. -->
-<div id="rackorbit" aria-label="the rack — orbiting the artifact">
-  <div class="kcell" data-orb="0"><div class="knob" data-p="grit"><i></i></div><span class="klbl">GRIT</span><span class="kval mono">62</span></div>
-  <div class="kcell" data-orb="1"><div class="knob" data-p="air"><i></i></div><span class="klbl">AIR</span><span class="kval mono">18</span></div>
-  <div class="kcell" data-orb="2"><div class="knob" data-p="epic"><i></i></div><span class="klbl">EPIC</span><span class="kval mono">07</span></div>
-  <span class="ghost mono" id="render" data-orb="3">RENDER</span>
-  <span class="owhisper mono" data-orb="4">RE-IMAGINE · LIVE · THE PIT IS THE READOUT</span>
-</div>
-
-<div id="ask"><input id="cmd" placeholder="tell moshi — “make the hook heavier”" autocomplete="off" /></div>
-
 <script>
-// THE PIT — answer to "where did my daw go / 3d / rougher / weirder".
-// The DAW skeleton is 008's, intact. In the empty stage lives the SONG AS MATTER:
-// a raymarched obsidian mass — kifs-folded, noise-bitten, lit in 4 dithered bands,
-// animated ON TWOS (12fps rotation snaps) so it reads carved, not blended.
-//   beat     -> it SLAMS (squash + rotation jolt). mosh = violence-as-joy.
-//   the rack -> GRIT folds it jagged · AIR lets it drift · EPIC grows it.
-//               the invisible neural transform finally has a body.
-//   REC      -> the mass splits; molten core shows through. room runs hot.
-//   position -> one full revolution per 8 bars + mono BAR in the transport.
-//   v5 THE ARTIFACT -> the arrangement's spectral fill FEEDS the stone: empty
-//     session = small monochrome nugget; lows give mass, mids give structure,
-//     highs give light — and at full highs the artifact alone earns a banded
-//     iridescent fringe (the ONE polychrome surface; chrome stays 5-color).
-//     ▶ BUILD in the topbar demos it: clips land lows-first, vox blooms last.
-// No bloom. No soft gradients. Bayer dither, hard bands, chunky pixels.
-
-const FRAG = `
-precision highp float;
-uniform vec2  u_res;
-uniform float u_time, u_tq;          // smooth + 12fps-quantized time
-uniform float u_rotA, u_rotB;        // beat-jolted angles (stepped in JS)
-uniform float u_spin;                // song position -> revolution
-uniform float u_grit, u_air, u_epic; // the rack
-uniform float u_energy, u_onset, u_heat, u_bright;
-uniform float u_sect;   // song section -> a different chunk of matter
-uniform float u_low, u_mid, u_high; // spectral fill of the ARRANGEMENT
-uniform float u_complete;           // weighted: the artifact is as built as the song
-uniform float u_aseed;              // arrangement hash -> every song grows its own stone
-uniform float u_wild;               // how hard the music is going -> violence budget
-uniform float u_nam;                // the chain's drive — it sharpens the crystal
-uniform vec2  u_gaze;               // THE FACE — the agent channel lives here
-uniform float u_blink, u_wide;
-uniform float u_peek;               // 1 = a rival's Moshi, in fog. no face, no light.
-uniform float u_form, u_wear, u_lume, u_hue; // THE LOOK (user-sculpted + rerollable)
-uniform float u_lookA, u_lookB;     // reroll geology offsets
-
-const vec3 LIME = vec3(0.800, 1.000, 0.137);
-const vec3 GLOW = vec3(0.851, 1.000, 0.298);
-
-mat2 r2(float a) { float c = cos(a), s = sin(a); return mat2(c, -s, s, c); }
-float hash31(vec3 p) {
-  p = fract(p * 0.3183099 + vec3(0.1, 0.2, 0.3));
-  p *= 17.0;
-  return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
-}
-float n3(vec3 p) {
-  vec3 i = floor(p), f = fract(p);
-  vec3 u = f * f * (3.0 - 2.0 * f);
-  return mix(
-    mix(mix(hash31(i),               hash31(i + vec3(1,0,0)), u.x),
-        mix(hash31(i + vec3(0,1,0)), hash31(i + vec3(1,1,0)), u.x), u.y),
-    mix(mix(hash31(i + vec3(0,0,1)), hash31(i + vec3(1,0,1)), u.x),
-        mix(hash31(i + vec3(0,1,1)), hash31(i + vec3(1,1,1)), u.x), u.y), u.z);
-}
-// ordered dither — the texture of the whole render
-float bayer(vec2 fc) {
-  float b = mod(fc.x, 2.0) * 2.0 + mod(fc.y, 2.0);
-  vec2 f2 = floor(fc / 2.0);
-  float b2 = mod(f2.x, 2.0) * 2.0 + mod(f2.y, 2.0);
-  return (b * 4.0 + b2) / 16.0;
-}
-float smin(float a, float b, float k) {
-  float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
-  return mix(b, a, h) - k * h * (1.0 - h);
-}
-float sdOf(float s) { return fract(sin((s + 1.0 + u_aseed) * 12.9898) * 43758.5453); }
-float sdSeg(vec2 p, vec2 a, vec2 b) {
-  vec2 pa = p - a, ba = b - a;
-  float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
-  return length(pa - ba * h);
-}
-float chevron(vec2 p, float flip) {                  // +1 = '>'   -1 = '<'
-  p.x *= flip;
-  return min(sdSeg(p, vec2(-0.5, 0.62), vec2(0.5, 0.0)),
-             sdSeg(p, vec2(-0.5, -0.62), vec2(0.5, 0.0)));
-}
-
-float gCrack, gRidge;
-float map(vec3 p) {
-  vec3 pW = p;                                       // world frame — the face lives here
-  p.xz = r2(u_spin + u_rotA) * p.xz;
-  p.xy = r2(0.5 + u_rotB) * p.xy;
-  p.y *= 1.0 + 0.10 * u_onset;                       // the slam squash (subtle)
-  // THE SYMBIOTE GROWS: everyone starts with the SAME Moshi (~52%); the track
-  // grows him toward monument. LOW adds a slow heavy breath. REC never touches
-  // the body — recording is the FACE's business (two channels, one being).
-  float gro = (0.52 + 0.48 * u_complete) * (1.0 + 0.03 * u_low * sin(u_tq * 0.5));
-  p /= gro; pW /= gro;
-  // identity diverges with the WORK: gg 0 = the canonical default Moshi
-  // (seed-INVARIANT, identical for everybody), 1 = this song's creature.
-  float gg = smoothstep(0.05, 0.7, u_complete);
-  vec3 q = p;
-  float crack = 1e9;
-  // per-section geology, MORPHED (fixed-endpoint blends; never derive from a blend)
-  float s0 = floor(u_sect), s1 = mod(s0 + 1.0, 8.0);
-  float w = smoothstep(0.75, 1.0, fract(u_sect));
-  float a0 = sdOf(s0), a1 = sdOf(s1);
-  float sd  = mix(a0, a1, w) * gg;
-  float sd2 = mix(fract(a0 * 91.7), fract(a1 * 91.7), w) * gg;
-  for (int i = 0; i < 4; i++) {                      // the fold only routes VEINS now
-    q = abs(q) - vec3(0.26 + 0.10 * u_epic + 0.09 * sd, 0.22 + 0.05 * sd2, 0.27);
-    crack = min(crack, min(abs(q.x), abs(q.y)));
-    q.xy = r2(0.50 + 0.45 * u_grit + 0.45 * sd2 + u_lookA * gg + 0.03 * sin(u_tq * 0.6)) * q.xy;
-    q.yz = r2(0.47 - 0.22 * u_air + 0.25 * sd * sd + u_lookB * gg) * q.yz;
-  }
-  // THE BODY — Moshi's own smin lobes. The default config blends toward the
-  // seeded per-song config as the track grows: identity through craft.
-  float lt = u_tq * 0.09;
-  float d = length(p) - (0.30 + 0.10 * u_epic + 0.03 * u_energy);
-  vec3 L1 = mix(vec3( 0.22 * sin(lt + 1.0),        0.19 * cos(lt * 0.8),        0.10 * sin(lt * 1.2)),
-                vec3( 0.26 * sin(sd * 6.3 + lt),   0.21 * cos(sd2 * 7.1),       0.14 * sin(sd * 3.0 + lt)), gg);
-  vec3 L2 = mix(vec3(-0.24 * sin(lt * 0.7),        0.16 * cos(lt * 0.9 + 2.0), -0.08),
-                vec3(-0.24 * cos(sd2 * 5.2 + lt), -0.18 * sin(sd * 8.4),       -0.16), gg);
-  vec3 L3 = mix(vec3( 0.05,                       -0.20 * sin(lt * 0.54),       0.12),
-                vec3(-0.07,                       -0.24 * sin(sd2 * 4.7 + lt * 0.7), -0.18 * cos(sd * 2.2)), gg);
-  d = smin(d, length(p - L1) - mix(0.17, 0.20 + 0.06 * sd2 + 0.06 * u_epic, gg), 0.17);
-  d = smin(d, length(p - L2) - mix(0.15, 0.18 + 0.05 * sd  + 0.05 * u_epic, gg), 0.17);
-  d = smin(d, length(p - L3) - mix(0.13, 0.16 + 0.04 * sd2, gg), 0.17);
-  // BLOB-MIXER GRAMMAR (14islands Blob Mixer via connorhvnsen/blob-mixer —
-  // credited): two displacement layers along the field, face-protected like
-  // its poleAmount. distort/frequency/speed -> body; surface* -> skin.
-  float fz = 1.0 - 0.85 * smoothstep(0.40, 0.72, dot(normalize(pW), vec3(0.0, 0.0, 1.0)));
-  // layer 1 · BODY WAVES: AIR airs him out as smooth undulation (no holes);
-  //           FORM picks the wave family; the music's wildness sets the speed.
-  float wf = 1.5 + 3.0 * u_form;
-  d -= fz * (0.018 + 0.17 * u_air)
-     * (n3(p * wf + vec3(0.0, lt * (0.6 + 1.8 * u_wild), sd * 4.0)) - 0.5) * 2.0;
-  // layer 2 · SURFACE: GRIT/WEAR write the skin; MID densifies it.
-  float surf = n3(p * (4.5 + 2.5 * u_mid + 2.0 * sd) + u_tq * 0.35);
-  gRidge = smoothstep(0.68, 0.95, surf);
-  d -= fz * (0.010 + 0.042 * u_grit + 0.020 * u_wear) * (surf - 0.5) * 2.0;
-  d = max(d, length(p) - (0.66 + 0.20 * u_epic));    // bound: one being
-  gCrack = crack;
-  return d * gro;
-}
-vec3 normalAt(vec3 p) {
-  const vec2 e = vec2(0.004, -0.004);
-  return normalize(e.xyy * map(p + e.xyy) + e.yyx * map(p + e.yyx)
-                 + e.yxy * map(p + e.yxy) + e.xxx * map(p + e.xxx));
-}
-
-void main() {
-  vec2 uv = (gl_FragCoord.xy - 0.5 * u_res) / min(u_res.x, u_res.y);
-  uv.x -= 0.30; uv.y += 0.13;     // SECONDARY ARTIFACT: it steps aside — the
-                                  // arrangement is the workbench, this is the kiln
-  float dth = bayer(gl_FragCoord.xy);
-
-  vec3 ro = vec3(0.0, 0.0, 4.0);
-  vec3 rd = normalize(vec3(uv, -1.5));
-  float t = 0.0; vec3 hp; bool hit = false;
-  for (int i = 0; i < 64; i++) {
-    hp = ro + rd * t;
-    float d = map(hp);
-    if (d < 0.003) { hit = true; break; }
-    t += d * 0.9;
-    if (t > 5.0) break;
-  }
-
-  // THE ROOM — we are NOT in passthrough: the artifact informs its own
-  // atmosphere. A dithered ground it sits on, a contact glow it casts, and a
-  // faint banded aura in its own hue family. All of it breathes with the song.
-  vec3 room = vec3(0.016, 0.016, 0.015);
-  {
-    if (rd.y < -0.02) {                                  // the ground (y = -0.92)
-      float tf = (-0.92 - ro.y) / rd.y;
-      vec3 gp = ro + rd * tf;
-      float gd = length(gp.xz);
-      float fade = exp(-gd * 0.7) * exp(-max(0.0, tf - 4.0) * 0.4);
-      float gr = n3(vec3(gp.x * 2.6, u_tq * 0.05, gp.z * 2.6));
-      float gband = floor(gr * 3.0 + dth) / 3.0;
-      room += vec3(0.030, 0.032, 0.028) * (0.6 + gband) * fade;
-      room += LIME * exp(-gd * 1.9) * fade                // contact glow: the stone
-            * (0.030 + 0.10 * u_heat + 0.035 * u_wild)    // lights its own floor
-            * (0.25 + 0.75 * u_complete) * u_lume;
-    }
-    float aur = exp(-dot(uv, uv) * 4.5) * (0.10 + 0.30 * u_wild + 0.55 * u_heat);
-    vec3 ac = clamp(vec3(0.5) + vec3(0.5)
-            * cos(6.2831853 * (vec3(0.853, 0.0, 0.379) + u_hue)), 0.0, 1.0);
-    room += ac * (floor(aur * 4.0 + dth) / 4.0) * 0.055 * u_lume * smoothstep(0.1, 0.6, u_complete);
-  }
-  vec4 outc = vec4(room, 1.0);
-  if (hit) {
-    map(hp);
-    vec3 n = normalAt(hp);
-    n = normalize(floor(n * 2.5 + 0.5) / 2.5);      // FACETS: bigger, calmer planes
-    float diff = max(dot(n, normalize(vec3(0.5, 0.8, 0.6))), 0.0);
-    float band = floor(diff * 3.0 + dth) / 3.0;     // FOUR BANDS. no gradients.
-    float rim0 = pow(1.0 - max(dot(n, -rd), 0.0), 3.0);
-    if (u_peek > 0.5) {
-      // PRESENCE IN FOG — their session's Moshi: size + silhouette, no secrets
-      vec3 fcol = vec3(0.040) + band * vec3(0.050, 0.054, 0.060);
-      fcol = mix(fcol, vec3(0.045), 0.35 + 0.30 * n3(hp * 3.0 + u_time * 0.25));
-      fcol += vec3(0.10, 0.105, 0.11) * step(0.68, rim0 + dth * 0.2);
-      gl_FragColor = vec4(fcol, 1.0);
-      return;
-    }
-    vec3 col = vec3(0.030) + band * vec3(0.085, 0.09, 0.075);
-    col *= 1.0 - 0.20 * u_grit * (1.0 - gRidge);                  // skin valleys shade
-    col += LIME * 0.05 * u_grit * step(0.75, gRidge) * band;      // crests catch light
-    // THE WORK CHANNEL: the body earns its light from the song. vGate makes the
-    // empty-session default truly seed-invariant (everyone's Moshi is the same).
-    float vGate = smoothstep(0.06, 0.30, u_complete);
-    float eL = mix(0.06, 1.0, smoothstep(0.08, 0.55, u_complete)) * u_lume * vGate;
-    float rim = pow(1.0 - max(dot(n, -rd), 0.0), 3.0);
-    col += LIME * step(0.58, rim + dth * 0.25) * (0.10 + 0.06 * vGate);   // hard rim
-    float fis = exp(-gCrack * 95.0);                  // fissures -> sparse crystal
-    float shard = step(0.82 - 0.16 * u_high, fis + dth * 0.12);   // highs grow shards
-    float vein  = step(0.56, fis + dth * 0.12) - shard;
-    col += mix(LIME, GLOW, 0.6) * shard * (0.45 + 0.75 * u_energy)
-           * eL * (0.72 + 0.55 * u_nam);              // NAM drives the crystal hotter
-    col += LIME * vein * (0.12 + 0.35 * u_energy) * eL * (0.72 + 0.55 * u_nam);
-    col += LIME * step(0.93, rim + dth * 0.3) * 0.55 * u_high * eL;  // top-end sparkle
-    // EARNED POLYCHROME — iq cosine palette fringe, unchanged covenant.
-    float fr = u_high * eL * clamp(vein + 0.6 * smoothstep(0.80, 0.98, rim), 0.0, 1.0);
-    if (fr > 0.02) {
-      float hue = floor(fract(n3(hp * 5.0) + u_time * 0.04) * 3.0) / 3.0;
-      vec3 ic = clamp(vec3(0.5) + vec3(0.5) *
-        cos(6.2831853 * (hue + vec3(0.853, 0.0, 0.379) + u_hue)), 0.0, 1.0);
-      col = mix(col, ic, step(0.5, fr + dth * 0.35) * (0.32 + 0.26 * u_wild));
-    }
-    // ── THE AGENT CHANNEL: the face. View-anchored — he always faces the room.
-    float sq = 1.0 - 0.10 * u_onset;                 // features ride the slam squash
-    vec3 nd = normalize(hp);
-    float eyeY = max(0.10, (1.0 + 0.35 * smoothstep(0.4, 1.0, u_heat))
-                        * (1.0 - u_blink * 0.92) * sq);
-    vec3 eyeCol = mix(vec3(0.90, 0.93, 0.87), LIME, smoothstep(0.45, 0.75, u_heat));
-    eyeCol *= 0.60 + 0.45 * band;                    // facet-lit like the hide
-    for (int e = 0; e < 2; e++) {
-      float s = (e == 0) ? -1.0 : 1.0;
-      vec3 ed = normalize(vec3(s * 0.30 + u_gaze.x * 0.22, (0.20 + u_gaze.y * 0.16) * sq, 1.0));
-      if (dot(nd, ed) < 0.6) continue;
-      vec3 uu = normalize(cross(vec3(0.0, 1.0, 0.0), ed));
-      vec3 vv = cross(ed, uu);
-      vec2 o = vec2(dot(nd - ed, uu), dot(nd - ed, vv)) * 4.5;
-      o.y /= eyeY;
-      float ch = chevron(o * 1.6, -s);
-      col = mix(col, eyeCol, 1.0 - step(0.20 + (dth - 0.5) * 0.10, ch));
-    }
-    {                                                // the grin dial (v14)
-      vec3 md = normalize(vec3(u_gaze.x * 0.26, (-0.30 + u_gaze.y * 0.15) * sq, 1.0));
-      if (dot(nd, md) > 0.6) {
-        vec3 mu = normalize(cross(vec3(0.0, 1.0, 0.0), md));
-        vec3 mv = cross(md, mu);
-        vec2 mo = vec2(dot(nd - md, mu), dot(nd - md, mv)) * 2.7;
-        mo.y /= sq;
-        float o2 = clamp(0.22 + u_wide * 0.95 + u_onset * 0.18 + u_heat * 0.35, 0.0, 1.35);
-        float r = 0.33 * (1.0 + 0.55 * o2);
-        float lip = -0.07 + 0.30 * o2;
-        float m = (1.0 - step(0.0, length(mo) - r + (dth - 0.5) * 0.05))
-                * (1.0 - step(lip, mo.y));
-        col = mix(col, LIME * (0.72 + 0.30 * u_heat), m);
-      }
-    }
-    // REC = the ember heart. Agent channel only — the matter never splits.
-    float ember = u_heat * exp(-2.4 * length(hp)) * (0.7 + 0.3 * sin(u_time * 7.0));
-    col += GLOW * (floor(ember * 3.0 + dth) / 3.0) * 0.5;
-    outc = vec4(col, 1.0);
-  }
-  gl_FragColor = outc;
-}`;
-
-const VERT = `attribute vec2 a; void main(){ gl_Position = vec4(a, 0.0, 1.0); }`;
-
-const cv = document.getElementById('pit');
-const gl = cv.getContext('webgl', { antialias: false, alpha: true, premultipliedAlpha: false });
-// harden: survive WebGL context loss (the context-cap churn behind 'glitching out')
-if (!gl) { setTimeout(() => location.reload(), 1500); throw new Error('webgl unavailable - retrying'); }
-cv.addEventListener('webglcontextlost', e => e.preventDefault());
-cv.addEventListener('webglcontextrestored', () => location.reload());
-function sh(ty, src) {
-  const s = gl.createShader(ty);
-  gl.shaderSource(s, src); gl.compileShader(s);
-  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
-  return s;
-}
-const prog = gl.createProgram();
-gl.attachShader(prog, sh(gl.VERTEX_SHADER, VERT));
-gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FRAG));
-gl.linkProgram(prog);
-if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
-gl.useProgram(prog);
-const buf = gl.createBuffer();
-gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
-const al = gl.getAttribLocation(prog, 'a');
-gl.enableVertexAttribArray(al);
-gl.vertexAttribPointer(al, 2, gl.FLOAT, false, 0, 0);
-const U = {};
-for (const n of ['u_res','u_time','u_tq','u_rotA','u_rotB','u_spin','u_grit','u_air','u_epic','u_energy','u_onset','u_heat','u_bright','u_sect','u_low','u_mid','u_high','u_complete','u_aseed','u_wild','u_form','u_wear','u_lume','u_hue','u_lookA','u_lookB','u_nam','u_gaze','u_blink','u_wide','u_peek'])
-  U[n] = gl.getUniformLocation(prog, n);
-
-function resize() {
-  const W = Math.min(380, Math.floor(innerWidth / 4)),                     // CHUNKY,
-        H = Math.min(240, Math.floor(innerHeight / 4));                    // and CAPPED
-  cv.width = W; cv.height = H;
-  gl.viewport(0, 0, W, H);
-}
-addEventListener('resize', resize); resize();
-
-// ---------- DAW skeleton (008's, intact) ----------
-const BPM = 120, BARS = 16, SONG_S = (BARS * 4) * 60 / BPM;
-const SECTIONS = ['INTRO','VERSE 1','HOOK','VERSE 2','HOOK','BRIDGE','HOOK','OUT'];
-let playing = true, rec = false, tPos = 0.04;
-
-// every lane carries a spectral band — the arrangement's fill IS the artifact's food
-const LANES = [
-  { nm: 'VOX',   band: 'high', vol: .80, clips: [{ a: .01, b: .14, n: 'take 4 · kept' }, { a: .30, b: .42, n: 'hook comp' }] },
-  { nm: 'GTR',   band: 'mid',  vol: .70, clips: [{ a: .06, b: .26, n: 'tone-131' }] },
-  { nm: 'PAD',   band: 'mid',  vol: .65, clips: [{ a: .02, b: .22, n: 'tone-196' }, { a: .48, b: .60, n: 'swell' }] },
-  { nm: 'BASS',  band: 'low',  vol: .80, clips: [{ a: .02, b: .34, n: 'sub-line' }] },
-  { nm: 'DRUMS', band: 'low',  vol: .85, clips: [{ a: .00, b: .46, n: 'breaks-92' }, { a: .52, b: .64, n: 'fill' }] },
-];
-const ruler = document.getElementById('ruler');
-for (let i = 0; i < BARS; i++) ruler.insertAdjacentHTML('beforeend', `<span class="mono">${i}</span>`);
-const lanesEl = document.getElementById('lanes');
-for (const L of LANES) {
-  const lane = document.createElement('div');
-  lane.className = 'lane';
-  lane.innerHTML = `<div class="lhead"><div class="nm disp">${L.nm}</div>
-      <div class="ms"><button class="sw" data-sw="m" title="mute — the stone feels it">M</button><button class="sw" data-sw="s" title="solo">S</button></div>
-      <div class="vol" title="level — drag. it feeds the stone."><i></i></div></div>
-    <div class="lbody"></div>`;
-  const body = lane.querySelector('.lbody');
-  for (const c of L.clips) {
-    const el = document.createElement('div');
-    el.className = 'clip';
-    el.style.left = (c.a * 100) + '%';
-    el.style.width = ((c.b - c.a) * 100) + '%';
-    el.innerHTML = `<span class="cn mono">${c.n.toUpperCase()}</span><canvas></canvas>`;
-    body.appendChild(el);
-    c.el = el; c.live = true;
-    requestAnimationFrame(() => {
-      const wc = el.querySelector('canvas'), g = wc.getContext('2d');
-      wc.width = wc.offsetWidth * 2; wc.height = 52;
-      g.fillStyle = 'rgba(204,255,35,.75)';
-      for (let x = 0; x < wc.width; x += 3) {
-        const h = (Math.abs(Math.sin(x * .07 + c.a * 40)) * .7 + Math.random() * .3) * 40;
-        g.fillRect(x, 26 - h / 2, 1.6, h);
-      }
-    });
-  }
-  // switches + ladder are INSTRUMENTS: mute/solo/level all feed the stone
-  L.el = lane; L.mute = false; L.solo = false;
-  lane.querySelector('[data-sw="m"]').onclick = e => {
-    L.mute = !L.mute; e.target.classList.toggle('on', L.mute); applyLaneStates();
-  };
-  lane.querySelector('[data-sw="s"]').onclick = e => {
-    L.solo = !L.solo; e.target.classList.toggle('on', L.solo); applyLaneStates();
-  };
-  const volEl = lane.querySelector('.vol');
-  volEl.querySelector('i').style.width = (L.vol * 100) + '%';
-  volEl.addEventListener('pointerdown', e => {
-    e.preventDefault();
-    const drag = ev => {
-      const r = volEl.getBoundingClientRect();
-      L.vol = Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width));
-      volEl.querySelector('i').style.width = (L.vol * 100) + '%';
-      respec();
-    };
-    drag(e);
-    const up = () => { removeEventListener('pointermove', drag); removeEventListener('pointerup', up); };
-    addEventListener('pointermove', drag); addEventListener('pointerup', up);
-  });
-  lanesEl.appendChild(lane);
-}
-function applyLaneStates() {
-  const anySolo = LANES.some(L => L.solo);
-  for (const L of LANES) {
-    L.audible = !L.mute && (!anySolo || L.solo);
-    L.el.classList.toggle('quiet', !L.audible);
-  }
-  respec();
-}
-// v8: the CHAIN hangs off the lane it processes — two mini knobs in VOX's tail
-{
-  const voxBody = lanesEl.querySelector('.lane .lbody');
-  const cc = document.createElement('div');
-  cc.className = 'chaincluster';
-  cc.title = 'CHAIN · VOX — NEURAL·NAM (Tier A · 0.0 ms)';
-  cc.innerHTML = `<span class="cwhisper mono">CHAIN</span>
-    <div class="kcell"><div class="knob mini" data-k="nam"><i></i></div><span class="klbl">NAM</span></div>
-    <div class="kcell"><div class="knob mini" data-k="mix"><i></i></div><span class="klbl">MIX</span></div>`;
-  voxBody.appendChild(cc);
-}
-
-// ---------- THE LOOK: no longer a user surface — the SOUND picks the look.
-// (user: "they should play with the visuals by playing with the sound") The
-// arrangement hash seeds bounded ranges: change the clips, change the stone.
-const look = { form: 0.0, wear: 0.45, lume: 1.0, hue: 0.0, la: 0, lb: 0 };
-// personality FAMILIES — the Blob Mixer steal (its disco/ghost/slime presets),
-// lab-named. The arrangement hash picks a family, then jitters inside it.
-const FAMILIES = [
-  { nm: 'BREAKS', form: .42, wear: .62, lume: 1.10, hue: .04 },   // choppy, hot veins
-  { nm: 'SILK',   form: .10, wear: .22, lume: 0.85, hue: .55 },   // long slow waves
-  { nm: 'MOLTEN', form: .28, wear: .75, lume: 1.20, hue: .12 },   // heavy skin, bright
-  { nm: 'GHOST',  form: .18, wear: .32, lume: 0.72, hue: .78 },   // airy, cool fringe
-];
-function lookFrom(aseedV) {
-  const s = Math.floor(aseedV * 997) + 13;
-  const h = k => { const x = Math.sin(s * 12.9898 + k * 78.233) * 43758.5453; return x - Math.floor(x); };
-  const F = FAMILIES[Math.floor(h(7) * FAMILIES.length)];
-  return {
-    form: Math.max(0, F.form + (h(1) - 0.5) * 0.16),
-    wear: Math.max(0.1, F.wear + (h(2) - 0.5) * 0.20),
-    lume: F.lume + (h(3) - 0.5) * 0.18,
-    hue:  (F.hue + (h(4) - 0.5) * 0.10 + 1.0) % 1.0,
-    la:   (h(5) - 0.5) * 0.4,
-    lb:   (h(6) - 0.5) * 0.4,
-  };
-}
-function deriveLook() { Object.assign(look, lookFrom(aseed)); }
-
-// ---------- THE ARTIFACT: the arrangement's spectral fill feeds the mass ----------
-// empty session = small monochrome nugget. DRUMS/BASS (low) give it mass, GTR/PAD
-// (mid) give it structure, VOX (high) gives it light — and, at full highs, the one
-// earned polychrome fringe. the piece of music IS the stone it leaves behind.
-const spec = { low: 0, mid: 0, high: 0, complete: 0 };   // smoothed — matter accretes
-const sbl = document.getElementById('sbl'), sbm = document.getElementById('sbm'),
-      sbh = document.getElementById('sbh');
-let specT = { low: 0, mid: 0, high: 0 }, aseed = 0;
-function respec() {
-  const cov = { low: 0, mid: 0, high: 0 };
-  let h = 0;
-  for (const L of LANES) {
-    if (L.audible === false) continue;               // muted lanes starve the stone
-    for (const c of L.clips) if (c.live) {
-      cov[L.band] += (c.b - c.a) * (L.vol ?? 1);     // level feeds it proportionally
-      h = (h * 31 + Math.round(c.a * 97 + c.b * 53) + L.nm.length) % 997;
-    }
-  }
-  // per-band norms: vox is naturally sparse — it should feel full sooner than drums
-  const norm = { low: 0.5, mid: 0.32, high: 0.2 };
-  for (const k in cov) cov[k] = Math.min(1, cov[k] / norm[k]);
-  specT = cov; aseed = h / 997;
-  deriveLook();
-}
-respec();
-function setClipLive(c, on) {
-  c.live = on;
-  c.el.style.display = on ? '' : 'none';
-  if (on) { c.el.classList.remove('pop'); void c.el.offsetWidth; c.el.classList.add('pop'); }
-}
-
-// ---------- BUILD: the thesis, demonstrable in one click ----------
-// strips the session bare, then lands clips lows-first (the producer's build);
-// the vox hook arrives last and the artifact blooms (the rapper's verse moment).
-const buildBtn = document.getElementById('build');
-let buildTimers = [], building = false;
-const BUILD_ORDER = (() => {
-  const rank = { low: 0, mid: 1, high: 2 }, all = [];
-  LANES.forEach(L => L.clips.forEach(c => all.push([rank[L.band], c.a, c, L])));
-  all.sort((x, y) => x[0] - y[0] || x[1] - y[1]);
-  return all.map(([, , c, L]) => [c, L]);
-})();
-buildBtn.onclick = () => {
-  buildTimers.forEach(clearTimeout); buildTimers = [];
-  if (building) {                                  // reset to the full session
-    building = false; buildBtn.textContent = '▶ BUILD';
-    LANES.forEach(L => L.clips.forEach(c => setClipLive(c, true)));
-    respec(); return;
-  }
-  building = true; buildBtn.textContent = '↺ RESET';
-  LANES.forEach(L => L.clips.forEach(c => setClipLive(c, false)));
-  respec();
-  deed('new session — bare artifact');
-  BUILD_ORDER.forEach(([c, L], i) => {
-    buildTimers.push(setTimeout(() => {
-      setClipLive(c, true); respec();
-      onsetEnv = Math.min(1, onsetEnv + 0.55);     // every landing thumps the mass
-      deed(L.band === 'high' ? `${c.n} lands — the artifact blooms`
-                             : `${L.nm.toLowerCase()} · ${c.n}`);
-    }, 1500 + i * 2300));
-  });
-};
-
-// the signal chain A/B — RAW shows the page off the cable (crisp = wrong machine)
-const signalChip = document.getElementById('signal');
-signalChip.onclick = () => {
-  const raw = document.documentElement.classList.toggle('raw');
-  signalChip.textContent = raw ? 'SIGNAL·RAW' : 'SIGNAL·PS2';
-};
-
-const deedsEl = document.getElementById('deeds');
-function deed(text) {
-  const d = document.createElement('div');
-  d.className = 'deed';
-  d.innerHTML = `<em>✓</em> ${text} <button>×</button>`;
-  d.querySelector('button').onclick = () => {
-    d.firstElementChild.textContent = '↺';
-    setTimeout(() => d.classList.add('bye'), 600);
-    setTimeout(() => d.remove(), 1700);
-  };
-  deedsEl.prepend(d);
-  while (deedsEl.children.length > 4) deedsEl.lastElementChild.remove();
-  setTimeout(() => { if (d.isConnected) { d.classList.add('bye'); setTimeout(() => d.remove(), 1200); } }, 8000);
-}
-const cmd = document.getElementById('cmd');
-cmd.addEventListener('keydown', e => {
-  if (e.key === 'Enter' && cmd.value.trim()) { deed(cmd.value.trim()); cmd.value = ''; cmd.blur(); }
-});
-
-const recchip = document.getElementById('recchip'), tc = document.getElementById('tc'),
-      sect = document.getElementById('sect'), playbtn = document.getElementById('playbtn');
-const orbEls = [...document.querySelectorAll('#rackorbit [data-orb]')];
-function setRec(on) { rec = on; document.body.classList.toggle('rec', on); if (on) deed('punched in'); }
-recchip.onclick = () => setRec(!rec);
-addEventListener('keydown', e => {
-  if (document.activeElement === cmd) return;
-  if (e.key.toLowerCase() === 'r') setRec(!rec);
-  if (e.key === ' ') {
-    e.preventDefault();
-    if (audioOn) { toggleAudio(); return; }
-    playing = !playing; playbtn.textContent = playing ? '▶' : '⏸';
-  }
-});
-playbtn.onclick = () => {
-  if (audioOn) { toggleAudio(); return; }       // the transport owns the track
-  playing = !playing; playbtn.textContent = playing ? '▶' : '⏸';
-};
-
-// ---------- the rack sculpts the mass ----------
-const axes = { grit: 0.62, air: 0.18, epic: 0.07 };
-const chainVals = { nam: 0.68, mix: 1.0 };
-// knobs: drag vertically. -135deg..135deg sweep, chunky plastic, lime tick.
-function bindKnob(el, get, set) {
-  const draw = () => {
-    el.querySelector('i').style.transform = `rotate(${(-135 + get() * 270).toFixed(0)}deg)`;
-    const kv = el.parentElement.querySelector('.kval');
-    if (kv) kv.textContent = String(Math.round(get() * 100)).padStart(2, '0');
-  };
-  el.addEventListener('pointerdown', e => {
-    e.preventDefault();
-    const y0 = e.clientY, v0 = get();
-    const move = ev => { set(Math.max(0, Math.min(1, v0 + (y0 - ev.clientY) / 120))); draw(); };
-    const up = () => { removeEventListener('pointermove', move); removeEventListener('pointerup', up); };
-    addEventListener('pointermove', move); addEventListener('pointerup', up);
-  });
-  draw();
-}
-document.querySelectorAll('.knob[data-p]').forEach(el =>
-  bindKnob(el, () => axes[el.dataset.p], v => { axes[el.dataset.p] = v; }));
-document.querySelectorAll('.knob[data-k]').forEach(el =>
-  bindKnob(el, () => chainVals[el.dataset.k], v => { chainVals[el.dataset.k] = v; }));
-let renderFlare = 0;
-document.getElementById('render').onclick = () => {
-  renderFlare = 1;
-  deed('re-imagining the mass · seed 3');
-};
-
-
-// ── THE SCENE, folded in (011 retired): crew + rivals ride the topbar as
-// dithered 2D orbs. Tap a rival to PEEK — their Moshi fills the stage in FOG
-// for 4s. You can see it. You can't hear it.
-const PEERS = [
-  { name: 'JAY',  crew: true,  built: 0.55, state: 'building',  aseed: 0.31 },
-  { name: 'M0',   crew: true,  built: 0.40, state: 'idle',      aseed: 0.62 },
-  { name: 'VV',   crew: false, built: 0.30, state: 'building',  aseed: 0.11 },
-  { name: 'KORG', crew: false, built: 0.62, state: 'recording', aseed: 0.84 },
-];
-const PEER_DEEDS = ['+clip', 'comped', 'rendered', '+808', 'rerolled', 'mixed'];
-{
-  const crewRail = document.getElementById('crewRail'), sceneRail = document.getElementById('sceneRail');
-  for (const pr of PEERS) {
-    const el = document.createElement('div');
-    el.className = 'peer';
-    el.innerHTML = `<span class="tick mono"></span><canvas width="22" height="22"></canvas>
-      <div class="nm mono">${pr.name}</div>`;
-    el.title = pr.crew ? `${pr.name} — in your session`
-                       : `${pr.name} — tap to peek (you won't hear it)`;
-    (pr.crew ? crewRail : sceneRail).appendChild(el);
-    pr.el = el; pr.g = el.querySelector('canvas').getContext('2d');
-    pr.tick = el.querySelector('.tick');
-    el.addEventListener('click', () => pr.crew ? crewTick(pr, 'says: run it back') : peekAt(pr));
-  }
-}
-function orbDraw(pr) {
-  const g = pr.g, W = 22, r = 4.5 + 5.5 * pr.built;
-  g.clearRect(0, 0, W, W);
-  const cx = W / 2 + (Math.random() - 0.5) * (pr.state === 'recording' ? 1.2 : 0.4),
-        cy = W / 2 + (Math.random() - 0.5) * 0.6;
-  for (let y = 0; y < W; y++) for (let x = 0; x < W; x++) {
-    const dx = x - cx, dy = y - cy, d = Math.hypot(dx, dy);
-    if (d > r) continue;
-    const lit = 0.5 - (dx * 0.4 + dy * 0.6) / (r * 1.4);
-    const bandv = Math.floor(lit * 3 + ((x & 1) ^ (y & 1)) * 0.5) / 3;
-    if (pr.crew) {
-      const hot = pr.state === 'recording';
-      g.fillStyle = d > r - 1.4 ? (hot ? '#CCFF23' : 'rgba(204,255,35,.55)')
-        : `rgb(${14 + bandv * 26},${15 + bandv * 28},${13 + bandv * 24})`;
-      if (hot && d < r * 0.35) g.fillStyle = '#D9FF4C';
-    } else {
-      g.fillStyle = `rgb(${22 + bandv * 20},${23 + bandv * 21},${25 + bandv * 23})`;
-    }
-    g.fillRect(x, y, 1, 1);
-  }
-}
-function crewTick(pr, txt) {
-  pr.tick.textContent = txt || PEER_DEEDS[Math.floor(Math.random() * PEER_DEEDS.length)];
-  pr.tick.classList.remove('pop'); void pr.tick.offsetWidth; pr.tick.classList.add('pop');
-}
-setInterval(() => {
-  for (const pr of PEERS) {
-    const roll = Math.random();
-    if (pr.state === 'idle' && roll < 0.4) pr.state = 'building';
-    else if (pr.state === 'building' && roll < 0.25) pr.state = pr.crew ? 'recording' : 'building';
-    else if (pr.state === 'recording' && roll < 0.5) pr.state = 'building';
-    if (pr.state !== 'idle') {
-      pr.built = Math.min(1, pr.built + 0.015 + Math.random() * 0.03);
-      if (pr.crew && Math.random() < 0.5) crewTick(pr);
-    }
-  }
-}, 4500);
-const peeklbl = document.getElementById('peeklbl');
-let peek = null, peekUntil = 0;
-function peekAt(pr) {
-  peek = { built: pr.built, aseed: pr.aseed, look: lookFrom(pr.aseed) };
-  peekUntil = performance.now() + 4000;
-  peeklbl.textContent = `PEEKING ${pr.name} · ${(pr.built * 100).toFixed(0)}% BUILT — YOU CAN SEE IT · YOU CAN'T HEAR IT`;
-  peeklbl.classList.add('on');
-}
-
-// ── THE FACE (agent channel): he IS the stage now. Blink on a life timer,
-// gaze follows the cursor, poke widens the eyes + opens the grin.
-let eyeBlink = 0, eyeWide = 0, mX = innerWidth / 2, mY = 0;
-addEventListener('mousemove', e => { mX = e.clientX; mY = e.clientY; });
-(function blinkLoop() {
-  setTimeout(() => { eyeBlink = 1; blinkLoop(); }, 1700 + Math.random() * 4000);
-})();
-
-// ---------- the loop: beat clock, on-twos rotation, uniforms ----------
-let rotA = 0, rotB = 0, rotTA = 0, rotTB = 0, lastBeat = -1, lastTick = 0, lastSect = -1;
-let wobA = 0, wobB = 0, wild = 0.3;
-// the demo song's dynamics: INTRO calm, hooks hard, OUT spent
-const SECT_WILD = [0.15, 0.45, 0.95, 0.50, 0.95, 0.30, 1.0, 0.12];
-let onsetEnv = 0, recAmt = 0, energy = .3, tq = 0;
-let enginePos = 0, engineEnergy = 0, engineActiveN = 0;
-const phead = document.getElementById('phead');
-const arrange = document.getElementById('arrange');
-const t0 = performance.now(); let last = t0;
-
-function frame(now) {
-  const t = (now - t0) / 1000, dt = Math.min(.05, (now - last) / 1000); last = now;
-  if (audioOn && audioBuf) tPos = ((actx.currentTime - audioStart) % audioBuf.duration) / audioBuf.duration;
-  else if (FEED.on) tPos = (((enginePos % SONG_S) + SONG_S) % SONG_S) / SONG_S;
-  else if (playing) tPos = (tPos + dt / SONG_S) % 1;
-  audioFrame();
-  recAmt += ((rec ? 1 : 0) - recAmt) * .07;
-  renderFlare *= 0.985;
-
-  const beats = tPos * BARS * 4;
-  const beatIdx = Math.floor(beats);
-  const sectIdx = Math.floor(tPos * 8);
-  // WILD: the violence budget follows the MUSIC, not the clock. The demo song
-  // has dynamics now (calm intro/outro, hard hooks); engine mode follows levels.
-  // A chill track = a calm beautiful stone. A banger earns the chaos.
-  const wildT = audioOn ? Math.min(1, aEnergy * 1.25)
-              : FEED.on ? Math.min(1, engineEnergy * 1.3)
-                        : SECT_WILD[sectIdx] * (0.55 + 0.65 * axes.grit);
-  wild += (Math.min(1, wildT) - wild) * 0.015;
-  if (playing && beatIdx !== lastBeat) {                 // THE SLAM (wild-gated)
-    lastBeat = beatIdx;
-    const hard = beatIdx % 4 === 0;
-    onsetEnv = Math.max(onsetEnv, (hard ? 0.7 : 0.3) * (0.25 + 0.75 * wild));
-    if (hard && energy > 0.45) eject(2 + Math.floor(energy * 4));
-    rotTA += (Math.random() * 0.9 - 0.45) * (hard ? 1 : 0.4) * (0.2 + 0.8 * wild);
-    rotTB += (Math.random() * 0.6 - 0.3) * (hard ? 1 : 0.4) * (0.2 + 0.8 * wild);
-  }
-  if (sectIdx !== lastSect) lastSect = sectIdx;            // sections MORPH now — no jolt
-  onsetEnv *= 0.90;
-  energy = audioOn ? Math.min(1, 0.10 + aEnergy * 1.0 + 0.25 * onsetEnv)
-         : FEED.on ? Math.min(1, 0.12 + engineEnergy * 1.15 + 0.30 * onsetEnv)
-                   : Math.min(1, 0.14 + 0.40 * onsetEnv + 0.16 * axes.grit + 0.22 * wild);
-
-  // the artifact accretes: spectral fill eases toward the arrangement (demo) or
-  // toward active-track count (engine link — no per-band data in the feed yet)
-  const eC = (FEED.on && !building) ? Math.min(1, engineActiveN / 6) : null;  // BUILD demos even while linked
-  const tL = (audioOn && !building) ? aBands.low  : (eC ?? specT.low);
-  const tM = (audioOn && !building) ? aBands.mid  : (eC ?? specT.mid);
-  const tH = (audioOn && !building) ? aBands.high : (eC ?? specT.high);
-  spec.low  += (tL - spec.low)  * (audioOn ? 0.10 : 0.035);
-  spec.mid  += (tM - spec.mid)  * (audioOn ? 0.10 : 0.035);
-  spec.high += (tH - spec.high) * (audioOn ? 0.10 : 0.035);
-  spec.complete = spec.low * 0.35 + spec.mid * 0.30 + spec.high * 0.35;
-  sbl.style.width = (spec.low * 100).toFixed(0) + '%';
-  sbm.style.width = (spec.mid * 100).toFixed(0) + '%';
-  sbh.style.width = (spec.high * 100).toFixed(0) + '%';
-
-  // on twos: rotation + texture time snap at 12fps
-  if (t - lastTick > 1 / 12) {
-    lastTick = t;
-    rotA += (rotTA - rotA) * 0.26;             // ease, don't snap — less jerky
-    rotB += (rotTB - rotB) * 0.26;
-    const wAmp = 0.005 + 0.011 * wild;                // PS1 vertex swim rides the music
-    wobA = (Math.random() - 0.5) * wAmp;
-    wobB = (Math.random() - 0.5) * wAmp;
-    for (const pr of PEERS) orbDraw(pr);              // the scene wobbles on twos too
-    tq = t;
-  }
-
-  if (audioOn && audioBuf) {
-    tc.textContent = `${mmss(tPos * audioBuf.duration)} / ${mmss(audioBuf.duration)} · LOOP`;
-    sect.textContent = `PART ${sectIdx + 1}/8`;          // honest: parts, not fake verses
-  } else {
-    tc.textContent = `BAR ${Math.floor(beats / 4) + 1}.${Math.floor(beats % 4) + 1} · ${(tPos * SONG_S).toFixed(1).padStart(5, '0')}s`;
-    sect.textContent = SECTIONS[Math.floor(tPos * 8)];
-  }
-  const headW = 150, w = arrange.clientWidth - headW;
-  phead.style.left = (headW + tPos * w) + 'px';
-
-  const heat = Math.max(recAmt, renderFlare * 0.8);
-  // PEEK: for 4s the stage renders THEIR Moshi — their seed, their growth, their
-  // look — in fog. Your session state is untouched underneath.
-  if (peek && now > peekUntil) { peek = null; peeklbl.classList.remove('on'); }
-  const pk = peek;
-  const C  = pk ? pk.built : spec.complete;
-  const LK = pk ? pk.look : look;
-  const AS = pk ? pk.aseed : aseed;
-  const HT = pk ? 0 : heat;
-  gl.clearColor(0, 0, 0, 0);
-  gl.clear(gl.COLOR_BUFFER_BIT);
-  gl.uniform2f(U.u_res, cv.width, cv.height);
-  gl.uniform1f(U.u_time, t);
-  gl.uniform1f(U.u_tq, tq);
-  gl.uniform1f(U.u_rotA, rotA + wobA);
-  gl.uniform1f(U.u_rotB, rotB + wobB);
-  gl.uniform1f(U.u_spin, (tPos * 2) % 1 * 6.2831853);   // one revolution per 8 bars
-  gl.uniform1f(U.u_grit, pk ? 0.3 : axes.grit);
-  gl.uniform1f(U.u_air, pk ? 0.2 : axes.air);
-  gl.uniform1f(U.u_epic, pk ? 0.1 : axes.epic);
-  gl.uniform1f(U.u_energy, pk ? 0.2 : energy);
-  gl.uniform1f(U.u_onset, pk ? 0 : onsetEnv);
-  gl.uniform1f(U.u_heat, HT);
-  gl.uniform1f(U.u_bright, axes.air);
-  gl.uniform1f(U.u_sect, tPos * 8);                     // continuous -> seeds morph
-  gl.uniform1f(U.u_low, pk ? C : spec.low);
-  gl.uniform1f(U.u_mid, pk ? C : spec.mid);
-  gl.uniform1f(U.u_high, pk ? C : spec.high);
-  gl.uniform1f(U.u_complete, C);
-  gl.uniform1f(U.u_aseed, AS);
-  gl.uniform1f(U.u_wild, pk ? 0.2 : wild);
-  gl.uniform1f(U.u_peek, pk ? 1 : 0);
-  // EVERY parameter reaches the body. MIX is the macro: the dry/wet of the
-  // whole re-imagine; NAM = drive. lookG gates the seeded LOOK by growth so the
-  // empty-session default Moshi is IDENTICAL for everyone (the covenant).
-  const lookG = Math.min(1, Math.max(0, (C - 0.05) / 0.65));
-  gl.uniform1f(U.u_form, LK.form * chainVals.mix * lookG);
-  gl.uniform1f(U.u_wear, LK.wear * chainVals.mix * lookG);
-  gl.uniform1f(U.u_lume, 1.0 + (LK.lume * (0.55 + 0.45 * chainVals.mix) - 1.0) * lookG);
-  gl.uniform1f(U.u_hue, LK.hue);
-  gl.uniform1f(U.u_lookA, LK.la * chainVals.mix * lookG);
-  gl.uniform1f(U.u_lookB, LK.lb * chainVals.mix * lookG);
-  // the face state decays; the shader wears it
-  eyeBlink *= 0.80; eyeWide *= 0.94;
-  const minD = Math.min(innerWidth, innerHeight);
-  const ocx = innerWidth / 2 + 0.30 * minD, ocy = innerHeight / 2 + 0.13 * minD;
-  gl.uniform2f(U.u_gaze,
-    Math.max(-1, Math.min(1, (mX - ocx) / (0.45 * minD))),
-    Math.max(-1, Math.min(1, (ocy - mY) / (0.45 * minD))));
-  gl.uniform1f(U.u_blink, Math.min(1, eyeBlink));
-  gl.uniform1f(U.u_wide, Math.min(1, eyeWide));
-  gl.uniform1f(U.u_nam, chainVals.nam);
-  gl.drawArrays(gl.TRIANGLES, 0, 3);
-
-  // v8: the rack ORBITS him — anchored to his actual screen radius,
-  // so the controls breathe with the being they sculpt. bob is on twos.
-  {
-    const gro = 0.52 + 0.48 * spec.complete;
-    const oR = 0.2475 * gro * minD + 86;
-    const ANG = [-0.42, 0.02, 0.46, 0.86, 1.18];
-    orbEls.forEach((el, i) => {
-      const a = ANG[i] + Math.sin(tq * 0.35 + i * 2.1) * 0.022;
-      el.style.transform = `translate(${(ocx + Math.cos(a) * oR).toFixed(0)}px, ${(ocy + Math.sin(a) * oR).toFixed(0)}px) translate(-50%, -50%)`;
-    });
-  }
-  debrisFrame(t, dt);
-  requestAnimationFrame(frame);
-}
-// ── debris: big slams chip shards off the artifact — they arc, land, and
-//    FADE. pure consequence, no chores (the pickup mechanic died — user note).
-const dcv = document.getElementById('debris'), dgx = dcv.getContext('2d');
-function dresize() { dcv.width = Math.floor(innerWidth / 4); dcv.height = Math.floor(innerHeight / 4); }
-addEventListener('resize', dresize); dresize();
-let debris = [];
-function eject(n) {
-  const minQ = Math.min(dcv.width * 4, dcv.height * 4) / 4;
-  const cx = dcv.width / 2 + 0.30 * minQ, cy = dcv.height / 2 + 0.13 * minQ;
-  for (let i = 0; i < n && debris.length < 36; i++) {
-    const a = -Math.PI / 2 + (Math.random() - 0.5) * 2.4;
-    const sp = 2.0 + Math.random() * 2.8;
-    debris.push({ x: cx, y: cy, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 1.0,
-                  rot: Math.random() * 7, vr: (Math.random() - 0.5) * 0.4,
-                  s: 2.5 + Math.random() * 2.5, st: 0, life: 1 });
-  }
-}
-function debrisFrame(t, dt) {
-  dgx.clearRect(0, 0, dcv.width, dcv.height);
-  const floorY = dcv.height * 0.88;
-  debris = debris.filter(p => {
-    if (p.st === 0) {                                   // flying
-      p.vy += 10.0 * dt; p.x += p.vx; p.y += p.vy; p.rot += p.vr;
-      if (p.y >= floorY) { p.y = floorY; p.st = 1; }
-      if (p.x < -10 || p.x > dcv.width + 10) return false;
-    } else {                                            // landed: cool off, fade out
-      p.life -= dt * 0.7;
-      if (p.life <= 0) return false;
-    }
-    dgx.save(); dgx.translate(p.x, p.y); dgx.rotate(p.rot);
-    dgx.globalAlpha = Math.max(0, Math.min(1, p.life));
-    dgx.fillStyle = '#CCFF23';
-    dgx.fillRect(-p.s / 2, -p.s / 2, p.s, p.s * 0.8);
-    dgx.fillStyle = '#0B0B0B';
-    dgx.fillRect(-p.s / 2 + 1, -p.s / 2 + 1, Math.max(1, p.s - 2), 1);
-    dgx.restore(); dgx.globalAlpha = 1;
-    return true;
-  });
-}
-
-// the mass is a toy: drag orbits it, a tap pokes it
-cv.style.cursor = 'grab';
-let dragAt = null, dragged = false;
-cv.addEventListener('pointerdown', e => { dragAt = [e.clientX, e.clientY]; dragged = false; });
-addEventListener('pointermove', e => {
-  if (!dragAt) return;
-  const dx = e.clientX - dragAt[0], dy = e.clientY - dragAt[1];
-  if (Math.abs(dx) + Math.abs(dy) > 5) dragged = true;
-  rotTA += dx * 0.006; rotTB += dy * 0.004;
-  dragAt = [e.clientX, e.clientY];
-});
-addEventListener('pointerup', () => {
-  if (dragAt && !dragged) { onsetEnv = 0.8; eyeWide = 1; rotTA += (Math.random() - 0.5) * 0.7; eject(2); }
-  dragAt = null;
-});
-
-requestAnimationFrame(frame);
-deed('session restored · 3 tracks');
-
-// ── THE LISTENER ── drop ANY audio file on the page (or hit ♪) and the lab
-// hears for real: 3-band energy from an AnalyserNode feeds the spectral fill,
-// low-band flux finds the slams, the playhead rides the actual track.
-// Priority: TRACK > ENGINE > DEMO CLOCK.
-let actx = null, analyser = null, srcNode = null, audioBuf = null;
-let audioOn = false, audioName = '', audioStart = 0;
-let aBands = { low: 0, mid: 0, high: 0 }, aEnergy = 0, aFluxPrev = 0;
-const fftBuf = new Uint8Array(1024);
-async function loadTrack(arrayBuf, name) {
-  try {
-    actx = actx || new (window.AudioContext || window.webkitAudioContext)();
-    await actx.resume();
-    audioBuf = await actx.decodeAudioData(arrayBuf);
-    if (srcNode) { try { srcNode.stop(); } catch (e) {} }
-    analyser = actx.createAnalyser();
-    analyser.fftSize = 2048; analyser.smoothingTimeConstant = 0.55;
-    srcNode = actx.createBufferSource();
-    srcNode.buffer = audioBuf; srcNode.loop = true;
-    srcNode.connect(analyser); analyser.connect(actx.destination);
-    srcNode.start();
-    audioStart = actx.currentTime; audioOn = true; audioName = name;
-    linkEl.textContent = '♪ ' + name.toUpperCase();
-    linkEl.style.color = 'var(--lime)'; linkEl.style.opacity = '.9';
-    enterListening(name);
-    deed(`listening · ${name} — click the ruler to seek`);
-  } catch (e) { deed('could not read that audio file'); }
-}
-function audioFrame() {
-  if (!audioOn || !analyser) return;
-  analyser.getByteFrequencyData(fftBuf);
-  const sr = actx.sampleRate, binHz = sr / 2048;
-  const band = (f0, f1) => {
-    let s = 0, n = 0;
-    for (let i = Math.max(1, Math.floor(f0 / binHz)); i < Math.min(1024, Math.ceil(f1 / binHz)); i++) { s += fftBuf[i]; n++; }
-    return n ? s / n / 255 : 0;
-  };
-  const lo = band(25, 250), mi = band(250, 2000), hi = band(2000, 11000);
-  aBands.low += (Math.min(1, lo * 1.7) - aBands.low) * 0.25;
-  aBands.mid += (Math.min(1, mi * 2.1) - aBands.mid) * 0.25;
-  aBands.high += (Math.min(1, hi * 2.6) - aBands.high) * 0.25;
-  aEnergy = Math.min(1, lo * 1.1 + mi * 0.7 + hi * 0.4);
-  if (lo - aFluxPrev > 0.10) onsetEnv = Math.max(onsetEnv, Math.min(1, (lo - aFluxPrev) * 5));
-  aFluxPrev = lo;
-}
-async function toggleAudio() {
-  if (!actx) return;
-  if (actx.state === 'running') { await actx.suspend(); playing = false; }
-  else { await actx.resume(); playing = true; }
-  playbtn.textContent = playing ? '▶' : '⏸';
-}
-const trackBtn = document.getElementById('trackbtn');
-trackBtn.onclick = async () => {
-  if (audioOn) { toggleAudio(); return; }       // already loaded -> pause/resume
-  trackBtn.textContent = '… LOADING';
-  const r = await fetch('audio/LoserFace.wav');
-  await loadTrack(await r.arrayBuffer(), 'LoserFace');
-  trackBtn.textContent = '♪ LOSERFACE';
-  playing = true; playbtn.textContent = '▶';
-};
-// LISTENING MODE — no more fiction: the decoded track becomes a REAL lane
-// (true peaks from the buffer), the mock arrangement recedes, the ruler seeks.
-function mmss(s) { return Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0'); }
-function enterListening(name) {
-  arrange.classList.add('listening');
-  let tl = document.getElementById('tracklane');
-  if (!tl) {
-    tl = document.createElement('div');
-    tl.className = 'lane tracklane';
-    tl.id = 'tracklane';
-    tl.innerHTML = `<div class="lhead"><div class="nm disp">TRACK</div></div>
-      <div class="lbody"><div class="clip" style="left:.3%;width:99.4%">
-      <span class="cn mono"></span><canvas></canvas></div></div>`;
-    lanesEl.prepend(tl);
-  }
-  tl.querySelector('.cn').textContent = name.toUpperCase() + ' · LOOPS · CLICK RULER TO SEEK';
-  const wc = tl.querySelector('canvas'), g = wc.getContext('2d');
-  requestAnimationFrame(() => {                          // real peaks, not noise art
-    wc.width = wc.offsetWidth * 2; wc.height = 52;
-    const ch = audioBuf.getChannelData(0);
-    g.fillStyle = 'rgba(204,255,35,.8)';
-    for (let x = 0; x < wc.width; x += 3) {
-      const i0 = Math.floor(x / wc.width * ch.length),
-            i1 = Math.floor((x + 3) / wc.width * ch.length);
-      let mx = 0;
-      for (let i = i0; i < i1; i += 64) mx = Math.max(mx, Math.abs(ch[i]));
-      const h = Math.max(2, mx * 46);
-      g.fillRect(x, 26 - h / 2, 1.6, h);
+// run an experiment live only while you hover its card — browsers cap WebGL
+// contexts (~8-16); ten always-on iframes was exactly the "glitching out".
+for (const th of document.querySelectorAll('.thumb[data-live]')) {
+  let f = null, t = null;
+  th.closest('.card').addEventListener('mouseenter', () => {
+    clearTimeout(t);
+    if (!f) {
+      f = document.createElement('iframe');
+      f.src = th.dataset.live;
+      f.tabIndex = -1;
+      f.style.cssText = 'width:400%;height:400%;transform:scale(.25);transform-origin:0 0;border:0;pointer-events:none';
+      th.appendChild(f);
     }
   });
-}
-function seekTrack(f) {
-  try { srcNode.stop(); } catch (e) {}
-  srcNode = actx.createBufferSource();
-  srcNode.buffer = audioBuf; srcNode.loop = true;
-  srcNode.connect(analyser);
-  const off = f * audioBuf.duration;
-  srcNode.start(0, off);
-  audioStart = actx.currentTime - off;
-}
-ruler.addEventListener('click', e => {
-  if (!audioOn || !audioBuf) return;
-  const r = arrange.getBoundingClientRect(), headW = 150;
-  seekTrack(Math.max(0, Math.min(1, (e.clientX - r.left - headW) / (arrange.clientWidth - headW))));
-});
-
-addEventListener('dragover', e => e.preventDefault());
-addEventListener('drop', async e => {
-  e.preventDefault();
-  const f = e.dataTransfer.files && e.dataTransfer.files[0];
-  if (f) loadTrack(await f.arrayBuffer(), f.name.replace(/\.[^.]+$/, ''));
-});
-
-// ── ENGINE LINK ── polls the Mosh companion server for real transport + levels.
-// Run the app with MOSH_LAB_FEED=1 (token: MOSH_LAB_TOKEN, default "mosh-lab").
-// Graceful: without it, the demo clock above keeps everything alive.
-const FEED = {
-  base: 'http://127.0.0.1:47873',
-  token: new URLSearchParams(location.search).get('token') || 'mosh-lab',
-  seq: 0, on: false, lastLin: 0,
-};
-const linkEl = document.getElementById('link');
-async function feedPost(path, body) {
-  const r = await fetch(FEED.base + path, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ token: FEED.token, ...body }),
-    signal: AbortSignal.timeout(2500),
+  th.closest('.card').addEventListener('mouseleave', () => {
+    t = setTimeout(() => { if (f) { f.remove(); f = null; } }, 1200);
   });
-  return r.json();
 }
-function feedEvent(raw) {
-  const ev = raw.event || raw;            // server envelope: { seq, event: { type, payload } }
-  const p = ev.payload || {};
-  if (ev.type === 'transport') {
-    enginePos = +p.position || 0;
-    playing = !!p.playing;
-    const r = !!p.recording;
-    if (r !== rec) { rec = r; document.body.classList.toggle('rec', r); }
-  } else if (ev.type === 'levels') {
-    const m = p.master || {};
-    const db = Math.max(m.l ?? -100, m.r ?? -100);
-    const lin = Math.pow(10, Math.min(0, db) / 20);     // peak dBFS -> 0..1
-    engineEnergy += (Math.min(1, lin * 1.5) - engineEnergy) * 0.5;
-    if (lin - FEED.lastLin > 0.16) onsetEnv = 1;        // flux -> slam
-    FEED.lastLin = lin;
-    // artifact completeness in engine mode: tracks actually carrying signal
-    // (no spectrum in the feed yet — active-track count is the honest proxy)
-    const act = (p.tracks || []).filter(tk => Math.max(tk.l ?? -100, tk.r ?? -100) > -55).length;
-    engineActiveN += (act - engineActiveN) * 0.2;
-  }
-  if (raw.seq) FEED.seq = Math.max(FEED.seq, raw.seq);
-}
-async function feedLoop() {
-  try {
-    const h = await fetch(FEED.base + '/health', { signal: AbortSignal.timeout(1200) });
-    if (!h.ok) throw 0;
-    const j = await feedPost('/events', { since: FEED.seq });
-    if (!j.ok) throw 0;
-    if (!FEED.on) {
-      FEED.on = true;
-      linkEl.textContent = 'ENGINE \u25CF';
-      linkEl.style.color = 'var(--lime)'; linkEl.style.opacity = '.9';
-      feedPost('/command', { command: { command: 'enable_all_meters', args: {} } }).catch(() => {});
-      deed('engine linked \u00b7 real transport + meters');
-    }
-    for (const ev of ((j.data && j.data.events) || [])) feedEvent(ev);
-    setTimeout(feedLoop, 40);
-  } catch {
-    if (FEED.on) { engineEnergy = 0; }
-    FEED.on = false;
-    if (!audioOn) {
-      linkEl.textContent = 'DEMO CLOCK';
-      linkEl.style.color = ''; linkEl.style.opacity = '.45';
-    }
-    setTimeout(feedLoop, 4000);
-  }
-}
-feedLoop();
 </script>
 </body>
 </html>
