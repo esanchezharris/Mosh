@@ -148,12 +148,20 @@ artifact (limb migration, flow bands, mouth tilt, tongue, GHOST→PORCELAIN)
 · t3ssel8r (second-order dynamics) · Inigo Quilez (cosine palettes, SDF
 canon) · NanumSquareRound (Naver, OFL).
 
-## Branch topology
+## Branch topology — CONSOLIDATED (2026-06-12)
 
-The lab's full history lives on the **`design-lab`** branch
-(`~/Documents/ClaudeMosh-lab` worktree): v1 THE MOSHI PASS (scorched earth
-`a73f3e7`, build `2d4ef28`) → v2 THE LOOKBOOK (`a36df11`) → v3 mind+60fps
-(`685edfb`) → v4 THE SPLAT (`8facebe`) → v5 IN THE ROUND (`97dd50c`).
-What's on `main` is a SNAPSHOT of that state, landed so Codex can continue
-in the main checkout; keep committing wherever you work, but know the
-fine-grained history is on `design-lab`.
+**`main` is now the single source of truth.** The Moshi work (v1→v6) and
+Codex's app build (`/src`, `/ui`, gates) live together on `main`. All work
+continues here, in the main checkout (`~/Documents/ClaudeMosh`); the next
+phase is a full UI rebuild that integrates the Moshi component. Run the
+lookbook with `npm run dev` from the repo root (`.claude/launch.json` →
+`design-lab/playground`, port 5180; `npm install` there first).
+
+The **`design-lab`** branch (on origin) is now a frozen ARCHIVE of the
+fine-grained v1→v6 history: v1 THE MOSHI PASS (`a73f3e7`/`2d4ef28`) → v2 THE
+LOOKBOOK (`a36df11`) → v3 mind+60fps (`685edfb`) → v4 THE SPLAT (`8facebe`) →
+v5 IN THE ROUND (`97dd50c`) → v6 FLUID & FACE-ON (`0e4ea68`). Don't develop
+on it — it's there to read how a decision was reached. Its worktree
+(`~/Documents/ClaudeMosh-lab`) is redundant now; safe to `git worktree
+remove`, but it holds gitignored extras (node_modules, fetched inspiration
+media), so it was left in place rather than deleted unprompted.

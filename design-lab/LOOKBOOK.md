@@ -143,6 +143,17 @@ Poses crossfade per the MORPH RULE and auto-return to the state's base pose.
   border thinned (edge fill + thin outline ring). Stage defaults = the user's
   frontrunner: STYLE·TOON at RES·PS2+ on the PS2 signal cable.
 
+- **v6 — FLUID & FACE-ON** (2026-06-12, user notes): rotation rebuilt as
+  yaw+pitch (was yaw + in-screen roll, which read inverted on his left side) —
+  consistent both sides, grab-the-surface, face-on like the reference art. The
+  confusing mouth "dot" (the gleam) removed. The face stopped being static:
+  slow grin/eye breath, gaze micro-tremor, bigger gaze travel, pose energy
+  widening eyes + lifting grin. The pose engine became a momentum-preserving
+  VECTOR second-order system (the per-change reset was the jerk) with
+  impact-frame SEQUENCES — pokes now anticipate (a TUCK wind-up) then hit the
+  peak (SPLAY/ARMS_UP) then settle, the user's "transition to a state and back"
+  idea. `m.playSeq` internal; `setPose` unchanged.
+
 ## Adding a look
 
 Append to `LOOKS` in `playground/index.html`: `{ p: FAMILY, sd: seed, st: STATE,

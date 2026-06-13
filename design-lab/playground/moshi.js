@@ -44,8 +44,7 @@ precision highp float;
 uniform vec2  u_res;
 uniform float u_time, u_tq;            // smooth + 12fps-quantized time
 uniform float u_lph, u_bph, u_sph;     // INTEGRATED phases (rates lerp safely in JS)
-uniform vec4  u_rotM;                  // body rotation: cosA, sinA, cos(.5+B), sin(.5+B)
-uniform vec2  u_rotF;                  // face rotation:               cosB,    sinB
+uniform vec4  u_rotM;                  // cos/sin yaw (xy), cos/sin pitch (zw)
 uniform float u_onset;                 // poke/slam envelope
 uniform float u_energy, u_mood, u_heat;
 uniform vec2  u_gaze, u_sq;            // gaze (face-space); spring squash (x,y)
@@ -120,11 +119,13 @@ vec3 pal3(float t) {                 // the family material — iq cosine palett
 }
 
 float gRidge;
-mat2 gA, gB;                         // world->body mat2s, built once in main()
+mat2 gA, gB;                         // world->body: gA = yaw (xz), gB = pitch (yz)
 float map(vec3 p) {
   vec3 pW = p;                                       // world frame
-  p.xz = gA * p.xz;
-  p.xy = gB * p.xy;
+  p.xz = gA * p.xz;                                  // yaw — horizontal drag
+  p.yz = gB * p.yz;                                  // pitch — vertical drag (was
+                                                     // in-screen ROLL, which read
+                                                     // inverted depending on grab side)
   p.x /= u_sq.x; p.y /= u_sq.y;                      // spring squash & stretch
   p /= u_scale; pW /= u_scale;
   // THE SPLAT, in the round — a 3D blob at rest (limbs tilted fore and aft,
@@ -243,7 +244,7 @@ void main() {
     // second field peaks along a vein.
     vec3 bs = hp;
     bs.xz = gA * bs.xz;
-    bs.xy = gB * bs.xy;
+    bs.yz = gB * bs.yz;
     bs /= u_scale;
     float f1 = n3(bs * 3.2 + vec3(u_sd * 9.0, u_lph * 0.15, u_sd2 * 5.0));
     float f2 = n3(bs * 5.0 + vec3(u_sd2 * 7.0, 0.0, u_lph * 0.10));
@@ -266,10 +267,11 @@ void main() {
     // back to face the room, and the eyes counter-rotate to hold your gaze.
     vec3 bd = nd;
     bd.xz = gA * bd.xz;
-    bd.xy = mat2(u_rotF.x, -u_rotF.y, u_rotF.y, u_rotF.x) * bd.xy;
+    bd.yz = gB * bd.yz;
     float sq = 1.0 - 0.10 * u_onset;
     float lidv = max(u_blink, u_lid * 0.82);
-    float eyeY = max(0.08, (1.0 + 0.35 * smoothstep(0.4, 1.0, u_heat) + 0.20 * u_faceE)
+    float eyeY = max(0.08, (1.0 + 0.05 * sin(u_time * 1.5 + 1.7)     // resting eye breath
+                        + 0.35 * smoothstep(0.4, 1.0, u_heat) + 0.20 * u_faceE)
                         * (1.0 - lidv * 0.92) * sq);
     vec3 eyeCol = mix(mix(vec3(0.90, 0.93, 0.87), vec3(0.05, 0.05, 0.06), u_inkeye),
                       LIME, smoothstep(0.45, 0.75, u_heat));
@@ -278,8 +280,8 @@ void main() {
     // pose lean carries the whole face, pose energy widens the eyes
     for (int e = 0; e < 2; e++) {
       float s = (e == 0) ? -1.0 : 1.0;
-      vec3 ed = normalize(vec3(s * 0.30 + u_gaze.x * 0.22 + u_lean.x * 0.8,
-                               (0.20 + u_gaze.y * 0.16) * sq + u_lean.y * 0.8, 1.0));
+      vec3 ed = normalize(vec3(s * 0.30 + u_gaze.x * 0.30 + u_lean.x * 0.8,
+                               (0.20 + u_gaze.y * 0.22) * sq + u_lean.y * 0.8, 1.0));
       if (dot(bd, ed) < 0.55) continue;
       vec3 uu = normalize(cross(vec3(0.0, 1.0, 0.0), ed));
       vec3 vv = cross(ed, uu);
@@ -289,15 +291,16 @@ void main() {
       col = mix(col, eyeCol, 1.0 - step(0.20 + (dth - 0.5) * 0.10, ch));
     }
     {                                                // the grin dial — one scaler
-      vec3 md = normalize(vec3(u_gaze.x * 0.26 + u_lean.x * 0.8,
-                               (-0.27 + u_gaze.y * 0.15) * sq + u_lean.y * 0.8, 1.0));
+      vec3 md = normalize(vec3(u_gaze.x * 0.32 + u_lean.x * 0.8,
+                               (-0.27 + u_gaze.y * 0.20) * sq + u_lean.y * 0.8, 1.0));
       if (dot(bd, md) > 0.55) {
         vec3 mu = normalize(cross(vec3(0.0, 1.0, 0.0), md));
         vec3 mv = cross(md, mu);
         vec2 mo = vec2(dot(bd - md, mu), dot(bd - md, mv)) * 1.85;
         mo = r2(u_mtilt) * mo;                       // attitude: the family lean
         mo.y /= sq;
-        float o2 = clamp(0.10 + 0.42 * u_mood + u_wide * 0.95 + u_onset * 0.18 + u_heat * 0.35 + 0.18 * u_faceE, 0.0, 1.35);
+        float o2 = clamp(0.10 + 0.42 * u_mood + 0.05 * sin(u_time * 1.5)   // resting grin breath
+                       + u_wide * 0.95 + u_onset * 0.18 + u_heat * 0.35 + 0.18 * u_faceE, 0.0, 1.35);
         float r = 0.33 * (1.0 + 0.55 * o2);
         float lip = -0.07 + 0.30 * o2;
         float m = (1.0 - step(0.0, length(mo) - r + (dth - 0.5) * 0.05))
@@ -306,11 +309,6 @@ void main() {
         // the tongue — earns its place only when the grin is properly open
         float tng = (1.0 - step(0.0, length(mo - vec2(0.0, lip - r * 0.78)) - r * 0.46)) * m;
         col = mix(col, LIME * 0.32, tng * smoothstep(0.5, 0.8, o2));
-        // the gleam — the sticker mouth's little shine; earns its place with
-        // the open grin, like the tongue
-        float shn = 1.0 - step(0.0,
-          length((mo - vec2(-r * 0.34, lip - r * 0.52)) * vec2(1.0, 1.5)) - r * 0.17);
-        col = mix(col, vec3(0.93, 0.95, 0.90), shn * m * 0.9 * smoothstep(0.3, 0.55, o2));
       }
     }
     // the ember heart — heat only. Agent channel; the matter never splits.
@@ -419,7 +417,7 @@ function lerpSpec(a, b, w) {
     o[k] = a[k].map((v, i) => v + (b[k][i] - v) * w);
   return o;
 }
-const UNIFS = ['u_res','u_time','u_tq','u_lph','u_bph','u_sph','u_rotM','u_rotF',
+const UNIFS = ['u_res','u_time','u_tq','u_lph','u_bph','u_sph','u_rotM',
   'u_onset','u_energy','u_mood','u_heat','u_gaze','u_sq','u_blink','u_wide','u_lid',
   'u_sd','u_sd2','u_limb[0]','u_zflat','u_lean','u_coreS','u_faceE','u_toon',
   'u_bw','u_bf','u_sw','u_sf','u_smink',
@@ -453,25 +451,31 @@ const BASE_ANG = [2.618, 1.571, 0.436, -0.960, -2.182];
 
 // ── SECOND-ORDER DYNAMICS (t3ssel8r's procedural-animation controller,
 // credited: "Giving Personality to Procedural Animations using Math") —
-// frequency f, damping z, response r per channel. Interruptions are smooth
-// by construction; z < 1 gives the anticipation/overshoot/settle that
-// hand-eased smoothsteps never had. This is the fix for "jerky transitions".
-function SOD(f, z, r, x0) {
-  const k1 = z / (Math.PI * f),
-        k2 = 1 / ((TAU * f) * (TAU * f)),
-        k3 = (r * z) / (TAU * f);
-  let xp = x0, y = x0, yd = 0;
+// frequency f, damping z. A VECTOR system tracks a target array directly, so
+// position AND velocity carry across re-targets: interrupting a pose mid-flight
+// is smooth by construction (the old per-change reset was the "jerky" velocity
+// discontinuity). z < 1 gives the anticipation/overshoot/settle a smoothstep
+// can't. Tunable mid-flight so each pose carries its own temperament.
+function SODV(n, f, z) {
+  let k1, k2;
+  function tune(F, Z) { k1 = Z / (Math.PI * F); k2 = 1 / ((TAU * F) * (TAU * F)); }
+  tune(f, z);
+  const y = new Float64Array(n), yd = new Float64Array(n), xp = new Float64Array(n);
   return {
+    tune,
+    set(x) { for (let i = 0; i < n; i++) { y[i] = x[i]; xp[i] = x[i]; yd[i] = 0; } },
     step(T, x) {
-      if (T <= 0) return y;
-      const xd = (x - xp) / T; xp = x;
-      const k2s = Math.max(k2, T * T / 2 + T * k1 / 2, T * k1);   // stability clamp
-      y += T * yd;
-      yd += T * (x + k3 * xd - y - k1 * yd) / k2s;
+      if (T > 0) {
+        const k2s = Math.max(k2, T * T / 2 + T * k1 / 2, T * k1);   // stability clamp
+        for (let i = 0; i < n; i++) {
+          const xd = (x[i] - xp[i]) / T; xp[i] = x[i];
+          y[i] += T * yd[i];
+          yd[i] += T * (x[i] - y[i] - k1 * yd[i]) / k2s;
+        }
+      }
       return y;
     },
-    vel() { return yd; },
-    set(v) { xp = v; y = v; yd = 0; },
+    speed() { let s = 0; for (let i = 0; i < n; i++) s += Math.abs(yd[i]); return s; },
   };
 }
 
@@ -637,12 +641,14 @@ function Moshi(host, opts = {}) {
     if (n === 'LISTENING' || n === 'RECORDING') fireBlink();  // acknowledgment
   }
 
-  // ── the POSE engine: fixed-endpoint configs blended by ONE second-order
-  // dynamics channel — overshoot/settle for free, interruptions smooth ──
-  let poseName = 'NEUTRAL', poseHold = 0, poseQueued = null, poseAt = 0;
-  let poseFrom = { L: POSES.NEUTRAL.L, flat: 0, lean: [0, 0], core: 1 },
-      poseTo = poseFrom;
-  let poseSOD = SOD(1.6, 0.95, 0, 1);
+  // ── the POSE engine: a vector second-order system tracks the target config
+  // DIRECTLY (19 channels), so momentum carries across re-targets. Impact-frame
+  // SEQUENCES (anticipate -> peak -> settle) are just timed re-targets on it. ──
+  const PN = 19;   // 5 limbs x [angle,len,rad] + flat + leanX + leanY + core
+  function flattenPose(c, out) {
+    for (let i = 0; i < 5; i++) { out[i*3] = c.L[i][0]; out[i*3+1] = c.L[i][1]; out[i*3+2] = c.L[i][2]; }
+    out[15] = c.flat; out[16] = c.lean[0]; out[17] = c.lean[1]; out[18] = c.core;
+  }
   const poseCfg = (n, aimX) => {
     const P = POSES[n];
     let L = P.L.map(l => l.slice());
@@ -654,30 +660,26 @@ function Moshi(host, opts = {}) {
     }
     return { L, flat: P.flat, lean, core: P.core };
   };
-  function poseNow() {                       // current blended config (an endpoint)
-    const w = Math.max(-0.15, Math.min(1.3, poseSOD.step(0, 1)));
-    const lerp = (a, b) => a + (b - a) * w;
-    return {
-      L: poseFrom.L.map((l, i) => l.map((v, k) => lerp(v, poseTo.L[i][k]))),
-      flat: lerp(poseFrom.flat, poseTo.flat),
-      lean: [lerp(poseFrom.lean[0], poseTo.lean[0]), lerp(poseFrom.lean[1], poseTo.lean[1])],
-      core: lerp(poseFrom.core, poseTo.core),
-    };
-  }
-  function setPoseRaw(n, hold, aimX) {
+  let poseName = 'NEUTRAL', poseHold = 0;
+  let seq = null, seqI = 0, seqT = 0;                  // impact-frame sequence player
+  const poseTarget = new Float64Array(PN);
+  flattenPose(poseCfg('NEUTRAL', 0), poseTarget);
+  const poseV = SODV(PN, POSES.NEUTRAL.f, POSES.NEUTRAL.z);
+  poseV.set(poseTarget);
+  const poseOut = { L: [[1,1,1],[1,1,1],[1,1,1],[1,1,1],[1,1,1]], lean: [0,0], flat: 0, core: 1 };
+
+  function applyPose(n, hold, aimX) {       // retarget — momentum preserved (fluid)
     if (!POSES[n]) throw new Error('moshi: unknown pose ' + n);
-    const now = performance.now();
-    if (now - poseAt < 140 && poseName !== n) {        // intelligent triggering:
-      poseQueued = [n, hold, aimX];                    // don't machine-gun poses
-      return;
-    }
-    poseAt = now;
-    poseFrom = poseNow();
-    poseTo = poseCfg(n, aimX || 0);
-    poseSOD = SOD(POSES[n].f, POSES[n].z, 0, 0);       // per-pose temperament
+    flattenPose(poseCfg(n, aimX || 0), poseTarget);
+    poseV.tune(POSES[n].f, POSES[n].z);     // per-pose temperament, no state reset
     poseName = n;
     poseHold = hold != null ? hold : 1.2;
   }
+  // the user's idea: "transition to one state and back, an impact frame."
+  // steps = [[poseName, durSeconds, aimX], ...] — a wind-up then the peak, the
+  // SODV smoothing the whole arc; auto-returns to base after the last step.
+  function playSeq(steps) { seq = steps; seqI = 0; seqT = 0; applyPose(steps[0][0], 1e9, steps[0][2]); }
+  function setPoseOne(n, hold, aimX) { seq = null; applyPose(n, hold, aimX); }   // single, clears any seq
   const basePose = () => (stName === 'SLEEPING' || annoyT > 0) ? 'DROOP' : 'NEUTRAL';
   const limbArr = new Float32Array(20);      // upload scratch, allocated once
   // the anatomy dial (see ANATOMY at module scope)
@@ -729,8 +731,9 @@ function Moshi(host, opts = {}) {
     if (dragAt) {
       const dx = e.clientX - dragAt[0], dy = e.clientY - dragAt[1];
       if (Math.abs(dx) + Math.abs(dy) > 5) { dragged = true; petCand = null; petting = false; }
-      // grab-the-surface: the body FOLLOWS the cursor (the + signs read inverted)
-      rotTA -= dx * 0.006; rotTB -= dy * 0.004;
+      // grab-the-surface: the body FOLLOWS the cursor — yaw from horizontal,
+      // pitch from vertical (drag down -> face tips down toward your cursor)
+      rotTA -= dx * 0.006; rotTB += dy * 0.004;
       spinV = -dx * 0.10;                             // inertia source
       dragAt = [e.clientX, e.clientY];
     }
@@ -826,9 +829,9 @@ function Moshi(host, opts = {}) {
         if (Math.random() < 0.75) {            // glance at it…
           att = 'cursor'; attT = 0.5 + Math.random() * 1.0;
           fireBlink(); sacV = 1;
-          if (Math.random() < 0.35) {          // …sometimes reaching toward it
+          if (Math.random() < 0.35 && !seq) {  // …sometimes reaching toward it
             const R = rect();
-            setPoseRaw('REACH', 0.9, ptrX - (R.left + R.width / 2));
+            setPoseOne('REACH', 0.9, ptrX - (R.left + R.width / 2));
           }
         } else {                               // …or pointedly not. (the snub
           ignoreUntil = now + 1500;            //  is what sells sentience)
@@ -904,20 +907,32 @@ function Moshi(host, opts = {}) {
       shiftV[i] = L.s;
     }
 
-    // the pose advances on its second-order channel, holds once SETTLED,
-    // then returns to the state's base pose — no mid-flight snatching
-    const pw = poseSOD.step(dt, 1);
-    if (Math.abs(pw - 1) < 0.08) {
-      if (poseQueued) { const q = poseQueued; poseQueued = null; poseAt = 0; setPoseRaw(q[0], q[1], q[2]); }
-      else poseHold -= dt;
+    // impact-frame sequence player advances by time; the SODV smooths the arc
+    if (seq) {
+      seqT += dt;
+      if (seqT >= seq[seqI][1]) {
+        seqT = 0; seqI++;
+        if (seqI >= seq.length) { seq = null; poseHold = 0.35; }   // hold, then base
+        else applyPose(seq[seqI][0], 1e9, seq[seqI][2]);
+      }
     }
-    if (poseHold <= 0 && poseName !== basePose()) { poseAt = 0; setPoseRaw(basePose(), 0); }
-    const pose = poseNow();
-    if (poseName === 'WAVE' && pw > 0.6)             // the wave wiggles
-      pose.L[poseTo.L[0][1] !== 1 ? 0 : 2][0] += Math.sin(t * 9) * 0.22;
-    // pose energy reaches the FACE (eyes widen, grin lifts, the face leans
-    // with the body) — the cure for the static-center disconnect
-    const faceE = Math.min(1, Math.abs(poseSOD.vel()) * 0.35 + pose.flat * 0.3);
+    // the vector second-order system tracks the target; momentum is preserved
+    const py = poseV.step(dt, poseTarget);
+    for (let i = 0; i < 5; i++) { poseOut.L[i][0] = py[i*3]; poseOut.L[i][1] = py[i*3+1]; poseOut.L[i][2] = py[i*3+2]; }
+    poseOut.flat = py[15]; poseOut.lean[0] = py[16]; poseOut.lean[1] = py[17]; poseOut.core = py[18];
+    const pose = poseOut;
+    // hold once SETTLED, then ease back to the state's base pose
+    if (!seq && poseV.speed() < 0.4) {
+      poseHold -= dt;
+      if (poseHold <= 0 && poseName !== basePose()) applyPose(basePose(), 0);
+    }
+    if (poseName === 'WAVE') {                       // the raised arm wiggles
+      const armi = Math.abs(poseTarget[7] - 1) > 0.1 ? 2 : 0;
+      pose.L[armi][0] += Math.sin(t * 9) * 0.22;
+    }
+    // pose energy reaches the FACE (eyes widen, grin lifts) — the cure for the
+    // static-center disconnect
+    const faceE = Math.min(1, poseV.speed() * 0.05 + pose.flat * 0.3);
 
     // the style dial eases
     toonA += (toonT - toonA) * Math.min(1, dt * 4);
@@ -966,16 +981,18 @@ function Moshi(host, opts = {}) {
     gl.uniform1f(U.u_lph, lph);
     gl.uniform1f(U.u_bph, bph);
     gl.uniform1f(U.u_sph, sph);
-    gl.uniform4f(U.u_rotM, Math.cos(lA), Math.sin(lA), Math.cos(0.5 + lB), Math.sin(0.5 + lB));
-    gl.uniform2f(U.u_rotF, Math.cos(lB), Math.sin(lB));
+    gl.uniform4f(U.u_rotM, Math.cos(lA), Math.sin(lA), Math.cos(lB), Math.sin(lB));
     gl.uniform1f(U.u_onset, onsetEnv);
     gl.uniform1f(U.u_energy, Math.min(1, dCur.energy + celebE));
     gl.uniform1f(U.u_mood, dCur.mood);
     gl.uniform1f(U.u_heat, dCur.heat);
-    // the eyes counter-rotate to hold YOUR gaze while the body is swung away
+    // the eyes counter-rotate to hold YOUR gaze while the body is swung away,
+    // + ocular microtremor so a resting eye is never perfectly dead
     {
       const wrapA = Math.atan2(Math.sin(rotA), Math.cos(rotA));
-      gl.uniform2f(U.u_gaze, clamp1(gaze.x - wrapA * 0.55), clamp1(gaze.y + rotB * 0.45));
+      gl.uniform2f(U.u_gaze,
+        clamp1(gaze.x - wrapA * 0.55 + Math.sin(t * 7.3) * 0.012),
+        clamp1(gaze.y - rotB * 0.55 + Math.sin(t * 8.1 + 2.0) * 0.010));
     }
     gl.uniform2f(U.u_sq, sx, syF);
     gl.uniform1f(U.u_blink, Math.min(1, blink));
@@ -1052,7 +1069,7 @@ function Moshi(host, opts = {}) {
       celebT = 1.5; celebE = 1;
       wide = 1; vy -= 5.2;
       rotTA += (Math.random() - 0.5) * 1.6;
-      setPoseRaw('ARMS_UP', 1.5);
+      playSeq([['TUCK', 0.07, 0], ['ARMS_UP', 1.4, 0]]);   // wind-up, then up
       setTimeout(() => { if (!dead) { vy -= 3.0; fireBlink(); } }, 380);
       wake(false);
       return api;
@@ -1080,7 +1097,7 @@ function Moshi(host, opts = {}) {
         shiverT = 0.45;
         saccadeTo(px > 0 ? -0.8 : 0.8, -0.2, 2.5);     // pointedly away
         rotTA += px > 0 ? -0.5 : 0.5;
-        setPoseRaw('DROOP', 4);                  // everything sags. happy now?
+        setPoseOne('DROOP', 4);                  // everything sags. happy now?
         ignoreUntil = now + 6000;
         return api;
       }
@@ -1088,22 +1105,22 @@ function Moshi(host, opts = {}) {
         wide = 1; vy -= 5.5; onsetEnv = Math.min(1.2, onsetEnv + 1.0);
         fireBlink(); setTimeout(() => { if (!dead) blink = 1; }, 220);
         rotTA += (Math.random() - 0.5) * 1.0;
-        setPoseRaw('SPLAY', 1.0);                // full flare
+        playSeq([['TUCK', 0.06, 0], ['SPLAY', 0.7, 0]]);   // wind-up, then big flare
         return api;
       }
       const r = Math.random() * (0.85 + 0.45 * cur.antic);  // temperament weights the menu
       if (r < 0.35) {                            // classic startle-hop
         onsetEnv = Math.min(1.2, onsetEnv + 0.8); wide = 1; vy -= 4.2;
         rotTA += (Math.random() - 0.5) * 0.7;
-        setPoseRaw('SPLAY', 0.7);
-      } else if (r < 0.6) {                      // squash-oof: compress, double-blink
+        playSeq([['TUCK', 0.05, 0], ['SPLAY', 0.5, 0]]);   // anticipate -> flare
+      } else if (r < 0.6) {                      // squash-oof: tiny rise, then compress
         vy += 4.5; onsetEnv = Math.min(1.2, onsetEnv + 0.6);
         fireBlink(); setTimeout(() => { if (!dead) blink = 1; }, 200);
-        setPoseRaw('TUCK', 0.8);
+        playSeq([['SPLAY', 0.04, 0], ['TUCK', 0.5, 0]]);
       } else if (r < 0.85) {                     // double-take: the spot, then YOU
         vy -= 1.5;
         saccadeTo(px, py, 0.38);
-        setPoseRaw('REACH', 0.9, px);
+        setPoseOne('REACH', 0.9, px);
         setTimeout(() => {
           if (dead) return;
           saccadeTo(0, 0.06, 1.5); wide = 0.6; fireBlink();
@@ -1112,12 +1129,12 @@ function Moshi(host, opts = {}) {
         vy -= 3.5; wide = 0.9; celebE = Math.max(celebE, 0.5);
         drives.mood = 1;
         rotTA += (Math.random() - 0.5) * 1.2;
-        setPoseRaw('ARMS_UP', 1.1);
+        playSeq([['TUCK', 0.05, 0], ['ARMS_UP', 0.7, 0]]);   // wind-up, then up
       }
       return api;
     },
     setPose(n, hold) {
-      setPoseRaw(String(n).toUpperCase(), hold != null ? hold : 2.5,
+      setPoseOne(String(n).toUpperCase(), hold != null ? hold : 2.5,
                  gaze.x);                        // REACH/WAVE aim where he's looking
       return api;
     },

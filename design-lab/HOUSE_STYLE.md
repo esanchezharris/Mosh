@@ -125,8 +125,22 @@ dithered at quarter-res, who happens to be alive.
     and underdamped; droop slow and overdamped). New triggers within 140ms
     queue instead of snatching. Hand-tuned smoothsteps are retired for
     anything the user watches move.
-16e. **Drag is grab-the-surface.** The body follows the cursor under drag —
-    the opposite mapping reads inverted (user note, 2026-06-12).
+16e. **Drag is grab-the-surface, on TWO clean axes.** Horizontal drag = YAW,
+    vertical drag = PITCH (the body follows the cursor). Never in-screen ROLL
+    from a vertical drag — roll is position-independent in code but reads
+    INVERTED depending on which side you grabbed (the v5 bug). Yaw+pitch has
+    no left/right asymmetry. The face is face-on at rest (the reference art),
+    not 3/4.
+16f. **The face is never static.** Even at rest the grin and eyes carry a slow
+    breath, the gaze micro-tremors and wanders, and pose energy widens the
+    eyes / lifts the grin. A frozen smile (and a stray mouth "dot") breaks the
+    illusion — the face must always be doing a little something.
+16g. **Pose motion is ONE momentum-preserving vector channel.** Run the SOD
+    directly on the target config (not a from→to 0→1 blend that resets each
+    change — that velocity reset IS the jerk). Re-targeting mid-flight keeps
+    position and velocity → fluid interruptions. Reactions are SEQUENCES
+    (anticipate → impact → settle: a TUCK wind-up before a SPLAY, etc.) — the
+    user's "transition to a state and back, an impact frame" idea.
 17. **Bounded reroll.** Seeds jitter INSIDE a family's curated ranges — different
     every time, ugly never.
 
