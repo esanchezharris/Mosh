@@ -138,8 +138,20 @@ body { background: var(--ink); color: var(--bone); font-family: var(--font-body)
 .clip .trim.l { left: 0; } .clip .trim.r { right: 0; }
 .clip .trim:hover { background: var(--lime-dim); }
 
+.clip.splitcur { cursor: crosshair; }
+.clip.splitcur .trim { display: none; }
+
 /* playhead — one element, mapped through the same sec→px as the grid */
 .playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--lime); z-index: 4; pointer-events: none; box-shadow: 0 0 6px var(--lime-dim); }
+
+/* loop region (ruler tab + lane band) and the Range tool's UI-local band */
+.ruler .loop-tab { position: absolute; top: 0; bottom: 0; background: var(--lime-faint); border-left: 1px solid var(--lime); border-right: 1px solid var(--lime); }
+.band { position: absolute; top: 0; z-index: 2; pointer-events: none; }
+.band.loop { background: rgba(204, 255, 35, 0.07); border-left: 1px solid var(--lime-dim); border-right: 1px solid var(--lime-dim); }
+.band.range { background: rgba(217, 255, 76, 0.12); border-left: 1px solid var(--lime); border-right: 1px solid var(--lime); }
+
+/* marquee selection rectangle (content coords inside .lanes-inner) */
+.marquee { position: absolute; z-index: 5; pointer-events: none; background: var(--lime-faint); border: 1px solid var(--lime-dim); border-radius: 2px; }
 
 /* track header */
 .thead { padding: 8px 10px; height: var(--lane-h); border-bottom: 1px solid var(--ink-line-soft); display: flex; flex-direction: column; gap: 6px; }
