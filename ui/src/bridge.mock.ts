@@ -86,6 +86,11 @@ const future: Snapshot[] = [];
 
 type Listener = (payload: unknown) => void;
 const listeners = new Map<string, Set<Listener>>();
+
+// Mock command log (drives the CommandLog panel). Read-only commands don't log.
+const cmdLog: { command: string; ok: boolean; undoable: boolean; ts: number }[] = [];
+const READONLY = new Set(["get_snapshot", "get_clip_peaks", "get_command_log", "list_plugins", "list_builtins", "list_colors", "list_audio_devices", "list_wave_inputs", "list_track_outputs"]);
+const NON_UNDOABLE = new Set(["set_transport", "undo", "redo", "save", "reload", "render_layer", "open_plugin_editor", "set_plugin_param", "set_neural_param", "export_audio"]);
 function emit(type: string, payload?: unknown) {
   const ls = listeners.get("mosh_event");
   if (ls) for (const fn of ls) fn({ type, payload });
@@ -316,6 +321,21 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     case "list_wave_inputs": return ok(command, { inputs: [] });
     case "list_track_outputs": return ok(command, { outputs: [], tracks: snapshot.tracks.map((t) => ({ id: t.id, name: t.name })), audioEnabled: true });
 
+    // ── settings / export / command log (topbar utilities) ───────────────────
+    case "list_audio_devices": return ok(command, {
+      types: [{ name: "CoreAudio", outputs: ["MacBook Pro Speakers", "External Headphones"], inputs: ["MacBook Pro Microphone"] }],
+      current: { type: "CoreAudio", outputDevice: "MacBook Pro Speakers", inputDevice: "MacBook Pro Microphone", sampleRate: SR, bufferSize: snapshot.session.bufferSize ?? 512 },
+      sampleRates: [44100, 48000, 96000], bufferSizes: [128, 256, 512, 1024], defaultBufferSize: 512, audioEnabled: true,
+    });
+    case "set_buffer_size": { if (snapshot.session) snapshot.session.bufferSize = num(args.bufferSize, 512); invalidate(); return ok(command); }
+    case "set_audio_threads": { if (snapshot.session) { snapshot.session.audioThreads = num(args.threads, 8); snapshot.session.audioThreadsAuto = false; } invalidate(); return ok(command); }
+    case "set_audio_device": case "set_project_settings": case "new_project": case "open_project": case "save_as": case "set_metronome": case "set_time_signature": return ok(command);
+    case "export_audio": return ok(command, { file: str(args.file) || "/mock/mixdown." + str(args.format, "wav"), format: str(args.format, "wav"), bitDepth: num(args.bitDepth, 24), sampleRate: num(args.sampleRate, SR), bytes: 794000, renderMode: "offline" });
+    case "get_command_log": {
+      const limit = Math.max(1, num(args.limit, 50));
+      return ok(command, { entries: cmdLog.slice(-limit).reverse(), total: cmdLog.length });
+    }
+
     case "load_builtin": {
       const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found");
       const b = BUILTINS.find((x) => x.type === str(args.type)); if (!b) return err(command, "unknown builtin");
@@ -418,6 +438,8 @@ function makePeaks(clip: Clip | null, buckets: number): [number, number][] {
 export function mockExecute<T = unknown>(command: unknown): Promise<T> {
   const c = command as { command: string; args?: Record<string, unknown> };
   const res = dispatch(c.command, c.args ?? {});
+  if (!READONLY.has(c.command))
+    cmdLog.push({ command: c.command, ok: res.ok, undoable: !NON_UNDOABLE.has(c.command), ts: Date.now() });
   return Promise.resolve(res as unknown as T);
 }
 export function mockSnapshot<T = unknown>(): Promise<T> {
