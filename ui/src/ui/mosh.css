@@ -310,3 +310,19 @@ body { background: var(--ink); color: var(--bone); font-family: var(--font-body)
 .pr-note-grip { position: absolute; right: 0; top: 0; bottom: 0; width: 5px; cursor: ew-resize; }
 .pr-lasso { position: absolute; background: var(--lime-faint); border: 1px solid var(--lime-dim); pointer-events: none; }
 .pr-foot { padding: 7px 14px; border-top: 1px solid var(--ink-line); font-size: 10px; color: var(--bone-dim); }
+
+/* buried automation entry (small ⌁ in the chain header) */
+.rack-auto { margin-left: 8px; background: transparent; border: 1px solid var(--ink-line); color: var(--bone-dim); border-radius: 5px; width: 20px; height: 18px; font-size: 11px; cursor: pointer; vertical-align: middle; }
+.rack-auto:hover { border-color: var(--lime-dim); color: var(--lime); }
+
+/* ── automation editor (modal) ───────────────────────────────────────────────*/
+.auto-panel { width: min(860px, 92vw); display: flex; flex-direction: column; background: var(--ink-raise); border: 1px solid var(--ink-line); border-radius: 12px; overflow: hidden; }
+.auto-head { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--ink-line); }
+.auto-scroll { overflow: auto; background: var(--ink); }
+.auto-canvas { display: block; }
+.auto-grid { stroke: var(--ink-line-soft); stroke-width: 1; }
+.auto-grid.mid { stroke: var(--ink-line); }
+.auto-line { stroke: var(--lime); stroke-width: 2; }
+.auto-dot { fill: var(--lime); stroke: var(--ink); stroke-width: 1.5; cursor: grab; }
+.auto-dot:hover { fill: var(--lime-glow); }
+.auto-foot { padding: 7px 14px; border-top: 1px solid var(--ink-line); font-size: 10px; color: var(--bone-dim); }

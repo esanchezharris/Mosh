@@ -19,11 +19,15 @@ export function Dock({ snapshot }: { snapshot: Snapshot }) {
 
 function Rack({ track }: { track: Track | null }) {
   const openBrowser = useStore((s) => s.openBrowser);
+  const openAutomation = useStore((s) => s.openAutomation);
   const exec = useStore((s) => s.exec);
   const plugins = (track?.plugins ?? []).filter((p) => p.external || p.neural || p.builtin);
   return (
     <div className="rack" data-testid="rack">
-      <div className="rack-label">{track ? <>CHAIN · <b>{track.name}</b></> : "select a track"}</div>
+      <div className="rack-label">
+        {track ? <>CHAIN · <b>{track.name}</b></> : "select a track"}
+        {track && <button className="rack-auto" data-testid="open-automation" title="Parameter automation" onClick={() => openAutomation(track.id)}>⌁</button>}
+      </div>
       <div className="rack-chain">
         {track && plugins.map((p) => <PluginCard key={p.index} plugin={p} trackId={track.id} />)}
         {track && plugins.length === 0 && <span className="rack-empty">no plugins</span>}

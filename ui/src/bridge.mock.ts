@@ -380,6 +380,21 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     case "set_neural_lab_mode": { const f = findPlugin(str(args.trackId), num(args.index)); if (f?.track.plugins![f.idx].neural) { pushUndo(); f.track.plugins![f.idx].neural!.labMode = Boolean(args.on); invalidate(); } return ok(command); }
     case "reset_neural": case "open_plugin_editor": case "set_neural_latency": return ok(command);
 
+    // ── parameter automation (buried editor) ─────────────────────────────────
+    case "add_automation_point": case "set_automation_point": case "remove_automation_point": case "clear_automation": {
+      const f = findPlugin(str(args.trackId), num(args.pluginIndex));
+      const p = f?.track.plugins![f.idx].params?.find((x) => x.index === num(args.paramIndex));
+      if (!p) return err(command, "param not found");
+      pushUndo();
+      p.points = p.points ?? [];
+      if (command === "add_automation_point") p.points.push({ t: Math.max(0, num(args.time)), v: Math.min(1, Math.max(0, num(args.value))) });
+      else if (command === "set_automation_point") { const pt = p.points[num(args.pointIndex)]; if (pt) { pt.t = Math.max(0, num(args.time)); pt.v = Math.min(1, Math.max(0, num(args.value))); } }
+      else if (command === "remove_automation_point") p.points.splice(num(args.pointIndex), 1);
+      else p.points = [];
+      p.automated = p.points.length > 0;
+      invalidate(); return ok(command);
+    }
+
     // ── generative (Tier-B) render layers ────────────────────────────────────
     case "list_colors": return ok(command, { colors: COLORS });
     case "create_render_layer": {

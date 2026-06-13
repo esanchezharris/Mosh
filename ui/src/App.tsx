@@ -18,6 +18,7 @@ import { Dock } from "./ui/Dock";
 import { Mixer } from "./ui/Mixer";
 import { PluginBrowser } from "./ui/PluginBrowser";
 import { PianoRoll } from "./ui/PianoRoll";
+import { AutomationPanel } from "./ui/AutomationPanel";
 
 export function App() {
   const init = useStore((s) => s.init);
@@ -65,6 +66,7 @@ export function App() {
 
       <PluginBrowser />
       <PianoRoll />
+      <AutomationPanel />
     </div>
   );
 }
