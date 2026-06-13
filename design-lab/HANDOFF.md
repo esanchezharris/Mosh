@@ -71,8 +71,9 @@ counter-rotating to hold your gaze.
    ANNOYED (squint, sulked grin via mouth-tilt flatten, turned back, DROOP,
    6s ignore). Petting (hold 550ms still) forgives.
 8. **Dials** — `setQuality('ps1'|'ps2'|'ps2+')` (res + wobble inverse),
-   `setStyle('ps2'|'toon'|'points'|'baked')` (render language: crunch · sticker
-   · point-cloud splat · soft baked clay — see HOUSE_STYLE "STYLE dial"),
+   `setStyle('ps2'|'toon'|'baked')` (render language: crunch · sticker · soft
+   baked adventure-game clay — see HOUSE_STYLE "STYLE dial"; a point-cloud
+   style was built and cut, the user didn't like it),
    `setAnatomy('A'|'B'|'C')` (3D-vs-flat balance — user choosing),
    `interactive`, `room`, `preserve` (pixel-readback for tests).
 

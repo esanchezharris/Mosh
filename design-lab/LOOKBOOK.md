@@ -153,15 +153,16 @@ Poses crossfade per the MORPH RULE and auto-return to the state's base pose.
   impact-frame SEQUENCES — pokes now anticipate (a TUCK wind-up) then hit the
   peak (SPLAY/ARMS_UP) then settle, the user's "transition to a state and back"
   idea. `m.playSeq` internal; `setPose` unchanged.
-- **v7 — TWO NEW RENDER LANGUAGES** (2026-06-12, user refs: point-e + Gaussian
-  splats, and the Humongous baked-lighting adventure games): the STYLE dial
-  grew from 2 to 4. **POINTS** — point cloud / Gaussian splat: the lit surface
-  becomes soft jittered dots whose size tracks shading (lit = solid, shadow =
-  sparse), bg through the gaps; Moshi literally being a splat, it fits. **BAKED**
+- **v7 — BAKED, the third render language** (2026-06-12, user refs: point-e +
+  Gaussian splats, and the Humongous baked-lighting adventure games): **BAKED**
   — Putt-Putt / Pajama Sam soft baked lighting: smooth wrap key + cool fill,
-  SDF ambient occlusion in the crevices, warm/cool split, value lifted to
-  friendly clay, no dither. Render-only (`u_mode`); anatomy/poses/face
-  unchanged. `m.setStyle('ps2'|'toon'|'points'|'baked')`; STYLE chip cycles all four.
+  one-tap SDF ambient occlusion in the crevices, warm/cool split, soft sheen +
+  rim, no dither — the family palette rendered untouched (TAR stays dark
+  obsidian; bright PORCELAIN stays readable). Render-only (`u_mode`); anatomy/
+  poses/face unchanged. `m.setStyle('ps2'|'toon'|'baked')`; chip cycles three.
+  A POINTS (point-cloud / Gaussian-splat) style was also built — and CUT: the
+  user didn't like the floating-dots read. (First instinct on BAKED was a
+  value-lift to brighten dark TAR; user said too far — reverted. He likes dark.)
 
 ## Adding a look
 

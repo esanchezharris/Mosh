@@ -144,26 +144,28 @@ dithered at quarter-res, who happens to be alive.
 17. **Bounded reroll.** Seeds jitter INSIDE a family's curated ranges — different
     every time, ugly never.
 
-## The STYLE dial (v4 + v7) — FOUR sanctioned renders, all in-shader
+## The STYLE dial (v4 + v7) — THREE sanctioned renders, all in-shader
 
-One body, one anatomy, one face — rendered four ways. The `u_toon` float
-crossfades the SOLID family; `u_mode` (0/1/2) picks the render family:
+One body, one anatomy, one face — rendered three ways. The `u_toon` float
+crossfades the SOLID family; `u_mode` (0/1) picks the render family:
 
 - **PS2** (`mode 0`, dithered) — the house crunch: Bayer dither, faceted
   normals, banded light. The default register.
 - **TOON** (`mode 0`, clean) — the sticker: dither starved, two clean bands,
   smooth normals, thin dark outline. The user's flat reference art.
-- **POINTS** (`mode 1`) — point cloud / Gaussian splat (point-e; and Moshi
-  literally IS a splat): the lit surface becomes soft jittered dots on a
-  screen grid, dot size driven by shading so lit reads solid and shadow goes
-  sparse; the background shows through (transparent between dots in embeds).
-- **BAKED** (`mode 2`) — the Humongous click-adventure look (Putt-Putt /
+- **BAKED** (`mode 1`) — the Humongous click-adventure look (Putt-Putt /
   Pajama Sam): NO dither/facets. Smooth wrap key + cool sky fill, one-tap SDF
   ambient occlusion darkening the crevices, warm/cool light split, soft
-  sheen + rim, value lifted toward friendly clay. Hand-painted, not crunchy.
+  sheen + rim. **The family palette is rendered UNTOUCHED — no value-lift:**
+  TAR stays dark obsidian (the user likes him dark), and the bright families
+  (PORCELAIN) stay readable instead of blowing out. Hand-painted, not crunchy.
+
+A point-cloud / Gaussian-splat style (point-e ref) was built and cut — the
+user didn't like the floating-dots read. Lesson banked: render experiments
+are cheap to add AND cheap to remove; ship variations, keep the keepers.
 
 Anatomy, poses, palettes, veins, and the face channel are identical across
-all four — only the surface render changes. New render styles are
+all three — only the surface render changes. New render styles are
 render-only: they must not touch the body/face geometry or the two-channel
 doctrine.
 
