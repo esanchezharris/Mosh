@@ -152,6 +152,39 @@ namespace
 
     juce::var firstTrack (MoshOps& ops) { return ops.snapshot()["tracks"][0]; }
     int trackClips (const juce::var& t) { return t.getProperty ("clips", juce::var()).size(); }
+
+    bool capabilitiesContain (const juce::var& capabilities,
+                              const juce::String& operation,
+                              const juce::String& status = {})
+    {
+        if (auto* arr = capabilities.getArray())
+            for (const auto& cap : *arr)
+                if (cap.getProperty ("operation", juce::var()).toString() == operation
+                    && (status.isEmpty() || cap.getProperty ("status", juce::var()).toString() == status))
+                    return true;
+
+        return false;
+    }
+
+    juce::String structuredErrorCode (const juce::var& result)
+    {
+        auto structured = result.getProperty ("data", juce::var());
+        if (auto* error = structured.getProperty ("error", juce::var()).getDynamicObject())
+            return error->getProperty ("code").toString();
+
+        return {};
+    }
+
+    juce::String selectedBackendExpectation()
+    {
+        const auto requested = juce::SystemStats::getEnvironmentVariable ("MOSH_ENGINE_BACKEND", "maolan")
+                                   .trim()
+                                   .toLowerCase();
+        if (requested == "tracktion" || requested == "maolan")
+            return requested;
+
+        return "maolan";
+    }
 }
 
 int runSelfTest (MoshEngine& eng, MoshOps& ops)
@@ -172,6 +205,47 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // 1. cold snapshot
     check (tracks (ops) == 0, "cold snapshot has no tracks");
     check ((int) ops.snapshot().getProperty ("schemaVersion", 0) == 1, "snapshot schemaVersion == 1");
+    {
+        auto session = ops.snapshot().getProperty ("session", var());
+        const auto backend = session.getProperty ("backend", var()).toString();
+        const auto capabilities = session.getProperty ("backendCapabilities", var());
+        const auto expectedBackend = selectedBackendExpectation();
+        check (backend == expectedBackend,
+               expectedBackend == "maolan"
+                   ? "default engine backend is Maolan production"
+                   : "default engine backend is Tracktion/JUCE reference");
+        if (backend == "maolan")
+        {
+            check (session.getProperty ("backendDisplayName", var()).toString().contains ("Maolan"),
+                   "snapshot exposes backend display name");
+            check (capabilitiesContain (capabilities, "createTrack", "process"),
+                   "snapshot backendCapabilities include createTrack process support");
+            check (capabilitiesContain (capabilities, "renderExport", "process"),
+                   "snapshot backendCapabilities include renderExport process support");
+        }
+        else
+        {
+            check (session.getProperty ("backendDisplayName", var()).toString().contains ("Tracktion"),
+                   "snapshot exposes backend display name");
+            check (capabilitiesContain (capabilities, "createTrack", "reference"),
+                   "snapshot backendCapabilities include createTrack reference support");
+            check (capabilitiesContain (capabilities, "renderExport", "reference"),
+                   "snapshot backendCapabilities include renderExport reference support");
+        }
+        auto diagnostics = cmd (ops, "get_engine_diagnostics");
+        check (ok (diagnostics), "get_engine_diagnostics ok");
+        auto data = diagnostics.getProperty ("data", var());
+        check (data.getProperty ("backend", var()).toString() == backend,
+               "engine diagnostics report selected backend");
+        check (data.getProperty ("commandId", var()).toString() == "diagnostics",
+               "engine diagnostics carry commandId");
+        if (backend == "maolan")
+            check (capabilitiesContain (data.getProperty ("capabilities", var()), "diagnostics", "process"),
+                   "engine diagnostics carry capabilities");
+        else
+            check (capabilitiesContain (data.getProperty ("capabilities", var()), "diagnostics", "reference"),
+                   "engine diagnostics carry capabilities");
+    }
 
     // 2. create_track
     auto r = cmd (ops, "create_track", args1 ("name", "Drums"));
@@ -2685,6 +2759,2328 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     finishSection();
     std::cerr << "===== " << (checks - failures) << "/" << checks
               << " checks passed, " << failures << " failed =====\n\n";
+    return failures;
+}
+
+int runEngineContractSelfTest (MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+    (void) eng;
+    failures = 0;
+    checks = 0;
+    resetSections();
+
+    std::cerr << "\n===== Mosh engine-contract harness =====\n";
+    section ("engine contract selection and diagnostics");
+
+    auto snapshot = ops.snapshot();
+    auto session = snapshot.getProperty ("session", var());
+    const auto backend = session.getProperty ("backend", var()).toString();
+    const auto displayName = session.getProperty ("backendDisplayName", var()).toString();
+    const auto capabilities = session.getProperty ("backendCapabilities", var());
+    const auto expectedBackend = selectedBackendExpectation();
+
+    check (backend == "tracktion" || backend == "maolan", "snapshot names a known engine backend");
+    check (displayName.isNotEmpty(), "snapshot exposes backend display name");
+    check (capabilities.size() > 0, "snapshot exposes backend capabilities");
+    check (capabilitiesContain (capabilities, "diagnostics"), "snapshot capabilities include diagnostics");
+    check (backend == expectedBackend,
+           expectedBackend == "maolan"
+               ? "selected backend defaults to Maolan production"
+               : "selected backend honors the Tracktion reference override");
+    if (backend == "maolan")
+        check (displayName.containsIgnoreCase ("Maolan"), "snapshot exposes Maolan backend display name");
+    else
+        check (displayName.containsIgnoreCase ("Tracktion"), "snapshot exposes Tracktion backend display name");
+
+    auto diagnostics = cmd (ops, "get_engine_diagnostics");
+    check (ok (diagnostics), "get_engine_diagnostics ok");
+    auto data = diagnostics.getProperty ("data", var());
+    check (data.getProperty ("backend", var()).toString() == backend, "diagnostics backend matches snapshot");
+    check (data.getProperty ("commandId", var()).toString() == "diagnostics", "diagnostics commandId is stable");
+    check (data.hasProperty ("timestampMs"), "diagnostics include timestampMs");
+    check (data.hasProperty ("capabilities"), "diagnostics include capabilities");
+    if (backend == "maolan")
+        check (capabilitiesContain (data.getProperty ("capabilities", var()), "diagnostics", "process"),
+               "diagnostics capability is process-backed in Maolan mode");
+    else
+        check (capabilitiesContain (data.getProperty ("capabilities", var()), "diagnostics", "reference"),
+               "diagnostics capability is reference-backed in Tracktion mode");
+
+    if (backend == "maolan")
+    {
+        section ("maolan routed command posture");
+        check (capabilitiesContain (capabilities, "createTrack", "process"),
+               "maolan capabilities expose createTrack as process-backed");
+        check (capabilitiesContain (capabilities, "renameTrack", "process"),
+               "maolan capabilities expose renameTrack as process-backed");
+        check (capabilitiesContain (capabilities, "removeTrack", "process"),
+               "maolan capabilities expose removeTrack as process-backed");
+        check (capabilitiesContain (capabilities, "addClip", "process"),
+               "maolan capabilities expose addClip as process-backed");
+        check (capabilitiesContain (capabilities, "moveClip", "process"),
+               "maolan capabilities expose moveClip as process-backed");
+        check (capabilitiesContain (capabilities, "trimClip", "process"),
+               "maolan capabilities expose trimClip as process-backed");
+        check (capabilitiesContain (capabilities, "splitClip", "process"),
+               "maolan capabilities expose splitClip as process-backed");
+        check (capabilitiesContain (capabilities, "duplicateClip", "process"),
+               "maolan capabilities expose duplicateClip as process-backed");
+        check (capabilitiesContain (capabilities, "pasteClip", "process"),
+               "maolan capabilities expose pasteClip as process-backed");
+        check (capabilitiesContain (capabilities, "deleteTimeRange", "process"),
+               "maolan capabilities expose deleteTimeRange as process-backed");
+        check (capabilitiesContain (capabilities, "getClipPeaks", "process"),
+               "maolan capabilities expose getClipPeaks as process-backed");
+        check (capabilitiesContain (capabilities, "addMidiClip", "process"),
+               "maolan capabilities expose addMidiClip as process-backed");
+        check (capabilitiesContain (capabilities, "addNote", "process"),
+               "maolan capabilities expose addNote as process-backed");
+        check (capabilitiesContain (capabilities, "removeNote", "process"),
+               "maolan capabilities expose removeNote as process-backed");
+        check (capabilitiesContain (capabilities, "setNote", "process"),
+               "maolan capabilities expose setNote as process-backed");
+        check (capabilitiesContain (capabilities, "quantizeNotes", "process"),
+               "maolan capabilities expose quantizeNotes as process-backed");
+        check (capabilitiesContain (capabilities, "renameClip", "process"),
+               "maolan capabilities expose renameClip as process-backed");
+        check (capabilitiesContain (capabilities, "setTrackVolume", "process"),
+               "maolan capabilities expose setTrackVolume as process-backed");
+        check (capabilitiesContain (capabilities, "setTrackPan", "process"),
+               "maolan capabilities expose setTrackPan as process-backed");
+        check (capabilitiesContain (capabilities, "setTrackMute", "process"),
+               "maolan capabilities expose setTrackMute as process-backed");
+        check (capabilitiesContain (capabilities, "setTrackSolo", "process"),
+               "maolan capabilities expose setTrackSolo as process-backed");
+        check (capabilitiesContain (capabilities, "setMasterVolume", "process"),
+               "maolan capabilities expose setMasterVolume as process-backed");
+        check (capabilitiesContain (capabilities, "setMasterPan", "process"),
+               "maolan capabilities expose setMasterPan as process-backed");
+        check (capabilitiesContain (capabilities, "createBus", "process"),
+               "maolan capabilities expose createBus as process-backed");
+        check (capabilitiesContain (capabilities, "addSend", "process"),
+               "maolan capabilities expose addSend as process-backed");
+        check (capabilitiesContain (capabilities, "setSendLevel", "process"),
+               "maolan capabilities expose setSendLevel as process-backed");
+        check (capabilitiesContain (capabilities, "removeSend", "process"),
+               "maolan capabilities expose removeSend as process-backed");
+        check (capabilitiesContain (capabilities, "removeBus", "process"),
+               "maolan capabilities expose removeBus as process-backed");
+        check (capabilitiesContain (capabilities, "renameBus", "process"),
+               "maolan capabilities expose renameBus as process-backed");
+        check (capabilitiesContain (capabilities, "createGroupTrack", "process"),
+               "maolan capabilities expose createGroupTrack as process-backed");
+        check (capabilitiesContain (capabilities, "ungroupTrack", "process"),
+               "maolan capabilities expose ungroupTrack as process-backed");
+        check (capabilitiesContain (capabilities, "setTrackInput", "process"),
+               "maolan capabilities expose setTrackInput as process-backed");
+        check (capabilitiesContain (capabilities, "setTrackOutput", "process"),
+               "maolan capabilities expose setTrackOutput as process-backed");
+        check (capabilitiesContain (capabilities, "armTrack", "process"),
+               "maolan capabilities expose armTrack as process-backed");
+        check (capabilitiesContain (capabilities, "setInputMonitor", "process"),
+               "maolan capabilities expose setInputMonitor as process-backed");
+        check (capabilitiesContain (capabilities, "stopRecording", "process"),
+               "maolan capabilities expose stopRecording as process-backed");
+        check (capabilitiesContain (capabilities, "setTempo", "process"),
+               "maolan capabilities expose setTempo as process-backed");
+        check (capabilitiesContain (capabilities, "insertTempoChange", "process"),
+               "maolan capabilities expose insertTempoChange as process-backed");
+        check (capabilitiesContain (capabilities, "removeTempoChange", "process"),
+               "maolan capabilities expose removeTempoChange as process-backed");
+        check (capabilitiesContain (capabilities, "setTempoCurve", "process"),
+               "maolan capabilities expose setTempoCurve as process-backed");
+        check (capabilitiesContain (capabilities, "setTimeSignature", "process"),
+               "maolan capabilities expose setTimeSignature as process-backed");
+        check (capabilitiesContain (capabilities, "insertTimeSigChange", "process"),
+               "maolan capabilities expose insertTimeSigChange as process-backed");
+        check (capabilitiesContain (capabilities, "removeTimeSigChange", "process"),
+               "maolan capabilities expose removeTimeSigChange as process-backed");
+        check (capabilitiesContain (capabilities, "setMetronome", "process"),
+               "maolan capabilities expose setMetronome as process-backed");
+        check (capabilitiesContain (capabilities, "setProjectSettings", "process"),
+               "maolan capabilities expose setProjectSettings as process-backed");
+        check (capabilitiesContain (capabilities, "setPluginParam", "process"),
+               "maolan capabilities expose setPluginParam as process-backed");
+        check (capabilitiesContain (capabilities, "bypassPlugin", "process"),
+               "maolan capabilities expose bypassPlugin as process-backed");
+        check (capabilitiesContain (capabilities, "removePlugin", "process"),
+               "maolan capabilities expose removePlugin as process-backed");
+        check (capabilitiesContain (capabilities, "setTransport", "process"),
+               "maolan capabilities expose process-backed stop/seek transport state");
+
+        const auto beforeBackendTracks = tracks (ops);
+        const auto beforeTracktionTracks = tracktion::engine::getAudioTracks (eng.edit()).size();
+        auto createdSession = cmd (ops, "new_project", args1 ("sessionId", "maolan-moshops-routing-probe"));
+        check (ok (createdSession), "maolan new_project routes to createSession");
+        auto selectedDevice = cmd (ops, "set_audio_device", args1 ("device", "coreaudio:default"));
+        check (ok (selectedDevice), "maolan set_audio_device accepts coreaudio:default");
+        auto listedDevices = cmd (ops, "list_audio_devices");
+        check (ok (listedDevices), "maolan list_audio_devices returns synthetic CoreAudio contract view");
+        check (listedDevices.getProperty ("data", var()).getProperty ("current", var()).getProperty ("outputDevice", var()).toString() == "coreaudio:default",
+               "maolan list_audio_devices reports coreaudio:default");
+
+        check (ok (cmd (ops, "set_tempo", args1 ("bpm", 137.5))),
+               "maolan set_tempo routes to setTempo");
+        auto formatSession = ops.snapshot().getProperty ("session", var());
+        check (std::abs ((double) formatSession.getProperty ("tempo", 0.0) - 137.5) < 0.01,
+               "maolan snapshot reflects backend tempo");
+        check (formatSession.getProperty ("tempoMap", var()).size() == 1,
+               "maolan snapshot exposes backend tempo map");
+
+        check (ok (cmd (ops, "set_time_signature", objN ({{ "numerator", 7 }, { "denominator", 8 }}))),
+               "maolan set_time_signature routes to setTimeSignature");
+        formatSession = ops.snapshot().getProperty ("session", var());
+        check ((int) formatSession.getProperty ("timeSigNumerator", 0) == 7,
+               "maolan snapshot reflects backend time signature numerator");
+        check ((int) formatSession.getProperty ("timeSigDenominator", 0) == 8,
+               "maolan snapshot reflects backend time signature denominator");
+        check (formatSession.getProperty ("timeSigMap", var()).size() == 1,
+               "maolan snapshot exposes backend time signature map");
+        check (! ok (cmd (ops, "set_time_signature", objN ({{ "numerator", 4 }, { "denominator", 5 }}))),
+               "maolan set_time_signature rejects non-power-of-two denominator");
+
+        check (ok (cmd (ops, "set_metronome", args1 ("enabled", true))),
+               "maolan set_metronome routes to setMetronome");
+        formatSession = ops.snapshot().getProperty ("session", var());
+        check ((bool) formatSession.getProperty ("metronome", false),
+               "maolan snapshot reflects backend metronome state");
+
+        check (ok (cmd (ops, "set_project_settings", objN ({{ "sampleRate", 96000 }, { "bitDepth", 16 }, { "timeBase", "barsBeats" }}))),
+               "maolan set_project_settings routes to setProjectSettings");
+        formatSession = ops.snapshot().getProperty ("session", var());
+        auto project = formatSession.getProperty ("project", var());
+        check (std::abs ((double) project.getProperty ("sampleRate", 0.0) - 96000.0) < 0.01,
+               "maolan snapshot reflects backend project sample rate");
+        check ((int) project.getProperty ("bitDepth", 0) == 16,
+               "maolan snapshot reflects backend project bit depth");
+        check (project.getProperty ("timeBase", var()).toString() == "barsBeats",
+               "maolan snapshot reflects backend project time base");
+        check (! ok (cmd (ops, "set_project_settings", args1 ("bitDepth", 20))),
+               "maolan set_project_settings rejects unsupported bit depth");
+
+        auto createdTrack = cmd (ops, "create_track", args1 ("name", "Maolan Routed Track"));
+        check (ok (createdTrack), "maolan create_track routes to createTrack");
+        const auto trackId = createdTrack.getProperty ("data", var()).getProperty ("trackId", var()).toString();
+        check (trackId.isNotEmpty(), "maolan create_track returns a trackId");
+        check (tracks (ops) == beforeBackendTracks + 1, "maolan snapshot exposes the backend-created track");
+
+        auto renamed = cmd (ops, "rename_track", objN ({{ "trackId", trackId }, { "name", "Maolan Contract Renamed" }}));
+        check (ok (renamed), "maolan rename_track routes to renameTrack");
+        check (ops.snapshot().getProperty ("tracks", var())[0].getProperty ("name", var()).toString() == "Maolan Contract Renamed",
+               "maolan rename_track updates snapshot graph");
+
+        auto secondTrack = cmd (ops, "create_track", args1 ("name", "Maolan Remove Probe"));
+        check (ok (secondTrack), "maolan second create_track appends backend track");
+        const auto secondTrackId = secondTrack.getProperty ("data", var()).getProperty ("trackId", var()).toString();
+        check (tracks (ops) == beforeBackendTracks + 2, "maolan snapshot exposes second backend track");
+        auto removed = cmd (ops, "remove_track", args1 ("trackId", secondTrackId));
+        check (ok (removed), "maolan remove_track routes to removeTrack");
+        check (tracks (ops) == beforeBackendTracks + 1, "maolan remove_track updates snapshot graph");
+
+        check (ok (cmd (ops, "set_track_volume", objN ({{ "trackId", trackId }, { "db", -8.0 }}))),
+               "maolan set_track_volume routes to setTrackVolume");
+        check (std::abs ((double) ops.snapshot().getProperty ("tracks", var())[0].getProperty ("volumeDb", 0.0) - (-8.0)) < 0.01,
+               "maolan set_track_volume updates snapshot graph");
+        check (ok (cmd (ops, "set_track_pan", objN ({{ "trackId", trackId }, { "pan", 0.75 }}))),
+               "maolan set_track_pan routes to setTrackPan");
+        check (std::abs ((double) ops.snapshot().getProperty ("tracks", var())[0].getProperty ("pan", 0.0) - 0.75) < 0.01,
+               "maolan set_track_pan updates snapshot graph");
+        check (ok (cmd (ops, "set_track_mute", objN ({{ "trackId", trackId }, { "mute", true }}))),
+               "maolan set_track_mute routes to setTrackMute");
+        check ((bool) ops.snapshot().getProperty ("tracks", var())[0].getProperty ("mute", false),
+               "maolan set_track_mute updates snapshot graph");
+        check (ok (cmd (ops, "set_track_solo", objN ({{ "trackId", trackId }, { "solo", true }}))),
+               "maolan set_track_solo routes to setTrackSolo");
+        check ((bool) ops.snapshot().getProperty ("tracks", var())[0].getProperty ("solo", false),
+               "maolan set_track_solo updates snapshot graph");
+        check (ok (cmd (ops, "enable_track_meter", args1 ("trackId", trackId))),
+               "maolan enable_track_meter routes to enableTrackMeter");
+        check ((bool) ops.snapshot().getProperty ("tracks", var())[0].getProperty ("meterEnabled", false),
+               "maolan enable_track_meter updates snapshot graph");
+        check (ok (cmd (ops, "disable_track_meter", args1 ("trackId", trackId))),
+               "maolan disable_track_meter routes to disableTrackMeter");
+        check (! (bool) ops.snapshot().getProperty ("tracks", var())[0].getProperty ("meterEnabled", true),
+               "maolan disable_track_meter updates snapshot graph");
+
+        auto addedClip = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", trackId }, { "name", "Maolan Routed Tone" }, { "seconds", 1.0 }, { "freq", 440.0 }}));
+        check (ok (addedClip), "maolan add_test_tone_clip routes to addClip");
+        const auto clipId = addedClip.getProperty ("data", var()).getProperty ("clipId", var()).toString();
+        check (clipId.isNotEmpty(), "maolan add_test_tone_clip returns clipId");
+        check (File (addedClip.getProperty ("data", var()).getProperty ("file", var()).toString()).existsAsFile(),
+               "maolan add_test_tone_clip writes source WAV evidence");
+        check (ops.snapshot().getProperty ("tracks", var())[0].getProperty ("clips", var()).size() == 1,
+               "maolan add_test_tone_clip updates snapshot graph");
+        auto peaks = cmd (ops, "get_clip_peaks", objN ({{ "clipId", clipId }, { "buckets", 64 }}));
+        check (ok (peaks), "maolan get_clip_peaks routes to getClipPeaks");
+        check ((int) peaks.getProperty ("data", var()).getProperty ("buckets", 0) > 0,
+               "maolan get_clip_peaks returns peak buckets");
+        check (peaks.getProperty ("data", var()).getProperty ("peaks", var()).isArray(),
+               "maolan get_clip_peaks returns peak array");
+        check (ok (cmd (ops, "move_clip", objN ({{ "clipId", clipId }, { "start", 0.5 }}))),
+               "maolan move_clip routes to moveClip");
+        check (std::abs ((double) ops.snapshot().getProperty ("tracks", var())[0].getProperty ("clips", var())[0].getProperty ("start", 0.0) - 0.5) < 0.01,
+               "maolan move_clip updates snapshot graph");
+        check (ok (cmd (ops, "trim_clip", objN ({{ "clipId", clipId }, { "start", 0.5 }, { "length", 0.75 }, { "offset", 0.1 }}))),
+               "maolan trim_clip routes to trimClip");
+        check (std::abs ((double) ops.snapshot().getProperty ("tracks", var())[0].getProperty ("clips", var())[0].getProperty ("length", 0.0) - 0.75) < 0.01,
+               "maolan trim_clip updates snapshot graph");
+        auto split = cmd (ops, "split_clip", objN ({{ "clipId", clipId }, { "time", 0.75 }, { "newClipId", "maolan-routed-split" }}));
+        check (ok (split), "maolan split_clip routes to splitClip");
+        check (split.getProperty ("data", var()).getProperty ("newClipId", var()).toString() == "maolan-routed-split",
+               "maolan split_clip returns requested newClipId");
+        check (ops.snapshot().getProperty ("tracks", var())[0].getProperty ("clips", var()).size() == 2,
+               "maolan split_clip updates snapshot graph");
+        auto duplicate = cmd (ops, "duplicate_clip", objN ({{ "clipId", "maolan-routed-split" }, { "newClipId", "maolan-routed-copy" }}));
+        check (ok (duplicate), "maolan duplicate_clip routes to duplicateClip");
+        check (duplicate.getProperty ("data", var()).getProperty ("newClipId", var()).toString() == "maolan-routed-copy",
+               "maolan duplicate_clip returns requested newClipId");
+        check (ops.snapshot().getProperty ("tracks", var())[0].getProperty ("clips", var()).size() == 3,
+               "maolan duplicate_clip updates snapshot graph");
+        auto pasteSource = ops.snapshot().getProperty ("tracks", var())[0].getProperty ("clips", var())[1];
+        auto paste = cmd (ops, "paste_clip", objN ({
+            { "trackId", trackId },
+            { "newClipId", "maolan-routed-paste" },
+            { "start", 1.75 },
+            { "clip", objN ({
+                { "id", pasteSource.getProperty ("id", var()) },
+                { "type", "wave" },
+                { "name", "Maolan Routed Paste" },
+                { "sourcePath", pasteSource.getProperty ("sourcePath", pasteSource.getProperty ("sourceFile", var())) },
+                { "length", pasteSource.getProperty ("length", var()) },
+                { "offset", pasteSource.getProperty ("offset", var()) },
+                { "gainDb", pasteSource.getProperty ("gainDb", var()) },
+                { "mute", pasteSource.getProperty ("mute", var()) },
+            }) },
+        }));
+        check (ok (paste), "maolan paste_clip routes to pasteClip");
+        check (paste.getProperty ("data", var()).getProperty ("newClipId", var()).toString() == "maolan-routed-paste",
+               "maolan paste_clip returns requested new clip id");
+        check (ops.snapshot().getProperty ("tracks", var())[0].getProperty ("clips", var()).size() == 4,
+               "maolan paste_clip updates snapshot graph");
+        auto deleteTrack = cmd (ops, "create_track", args1 ("name", "Maolan Delete Probe"));
+        check (ok (deleteTrack), "maolan create_track creates delete_time_range probe track");
+        const auto deleteTrackId = deleteTrack.getProperty ("data", var()).getProperty ("trackId", var()).toString();
+        check (ok (cmd (ops, "add_test_tone_clip", objN ({{ "trackId", deleteTrackId }, { "clipId", "maolan-delete-probe" }, { "seconds", 2.0 }, { "freq", 220.0 }}))),
+               "maolan add_test_tone_clip creates delete_time_range probe clip");
+        auto* quickDeleteArgs = new DynamicObject();
+        quickDeleteArgs->setProperty ("start", 0.5);
+        quickDeleteArgs->setProperty ("end", 1.25);
+        Array<var> quickDeleteTrackIds;
+        quickDeleteTrackIds.add (deleteTrackId);
+        quickDeleteArgs->setProperty ("trackIds", quickDeleteTrackIds);
+        auto deletedRange = cmd (ops, "delete_time_range", var (quickDeleteArgs));
+        check (ok (deletedRange), "maolan delete_time_range routes to deleteTimeRange");
+        check ((int) deletedRange.getProperty ("data", var()).getProperty ("removed", 0) == 1,
+               "maolan delete_time_range reports removed segment");
+        check ((int) deletedRange.getProperty ("data", var()).getProperty ("splits", 0) == 2,
+               "maolan delete_time_range reports two boundary splits");
+        check (ops.snapshot().getProperty ("tracks", var())[1].getProperty ("clips", var()).size() == 2,
+               "maolan delete_time_range leaves outside clip fragments");
+        check (ok (cmd (ops, "remove_track", args1 ("trackId", deleteTrackId))),
+               "maolan remove_track removes delete_time_range probe track");
+        check (ok (cmd (ops, "rename_clip", objN ({{ "clipId", clipId }, { "name", "Maolan Routed Tone Edited" }}))),
+               "maolan rename_clip routes to renameClip");
+        check (ops.snapshot().getProperty ("tracks", var())[0].getProperty ("clips", var())[0].getProperty ("name", var()).toString() == "Maolan Routed Tone Edited",
+               "maolan rename_clip updates snapshot graph");
+        check (ok (cmd (ops, "set_clip_gain", objN ({{ "clipId", clipId }, { "gainDb", -4.0 }}))),
+               "maolan set_clip_gain routes to setClipGain");
+        check (ok (cmd (ops, "set_clip_mute", objN ({{ "clipId", clipId }, { "mute", true }}))),
+               "maolan set_clip_mute routes to setClipMute");
+        check ((bool) ops.snapshot().getProperty ("tracks", var())[0].getProperty ("clips", var())[0].getProperty ("mute", false),
+               "maolan set_clip_mute updates snapshot graph");
+
+        auto stopped = cmd (ops, "set_transport", objN ({{ "action", "stop" }, { "position", 0.5 }}));
+        check (ok (stopped), "maolan set_transport supports stop/seek state");
+        check ((double) stopped.getProperty ("data", var()).getProperty ("position", 0.0) == 0.5,
+               "maolan set_transport returns persisted position");
+    auto saved = cmd (ops, "save");
+    check (ok (saved), "maolan save routes to saveSessionGraph");
+    check (tracktion::engine::getAudioTracks (eng.edit()).size() == beforeTracktionTracks,
+           "maolan routed commands do not mutate Tracktion edit state");
+
+    auto unsupportedUndo = cmd (ops, "undo");
+    check (! ok (unsupportedUndo), "undo stays unsupported in Maolan mode");
+    check (structuredErrorCode (unsupportedUndo) == "unsupported_by_backend",
+           "undo returns structured unsupported_by_backend");
+    auto unsupportedRedo = cmd (ops, "redo");
+    check (! ok (unsupportedRedo), "redo stays unsupported in Maolan mode");
+    check (structuredErrorCode (unsupportedRedo) == "unsupported_by_backend",
+           "redo returns structured unsupported_by_backend");
+    auto unsupportedBuffer = cmd (ops, "set_buffer_size", args1 ("bufferSize", 512));
+    check (! ok (unsupportedBuffer), "set_buffer_size stays unsupported in Maolan mode");
+    check (structuredErrorCode (unsupportedBuffer) == "unsupported_by_backend",
+           "set_buffer_size returns structured unsupported_by_backend");
+    auto unsupportedThreads = cmd (ops, "set_audio_threads", args1 ("threads", 2));
+    check (! ok (unsupportedThreads), "set_audio_threads stays unsupported in Maolan mode");
+    check (structuredErrorCode (unsupportedThreads) == "unsupported_by_backend",
+           "set_audio_threads returns structured unsupported_by_backend");
+    auto unsupportedBuiltin = cmd (ops, "load_builtin", objN ({{ "trackId", trackId }, { "type", "compressor" }}));
+    check (! ok (unsupportedBuiltin), "load_builtin stays unsupported in Maolan mode");
+    check (structuredErrorCode (unsupportedBuiltin) == "unsupported_by_backend",
+           "load_builtin returns structured unsupported_by_backend");
+
+    auto unsupported = cmd (ops, "add_render_layer", var (new DynamicObject()));
+    check (! ok (unsupported), "maolan mode rejects unsupported legacy command");
+    check (unsupported.getProperty ("error", var()).toString().startsWith ("unsupported_by_backend:"),
+           "maolan unsupported command returns unsupported_by_backend message");
+    auto structured = unsupported.getProperty ("data", var());
+    check (structured.getProperty ("backend", var()).toString() == "maolan",
+           "maolan unsupported result carries backend");
+    check (structured.getProperty ("commandId", var()).toString() == "add_render_layer",
+           "maolan unsupported result carries commandId");
+    check (structuredErrorCode (unsupported) == "unsupported_by_backend",
+           "maolan unsupported result carries structured error code");
+    check (structured.getProperty ("diagnostics", var()).getProperty ("backend", var()).toString() == "maolan",
+           "maolan unsupported result carries diagnostics");
+    check (tracks (ops) == beforeBackendTracks + 1, "maolan unsupported command does not add backend tracks");
+    check (tracktion::engine::getAudioTracks (eng.edit()).size() == beforeTracktionTracks,
+           "maolan unsupported command still does not mutate Tracktion edit state");
+    }
+    else
+    {
+        section ("tracktion default reference path");
+        check (backend == "tracktion", "default backend is tracktion");
+        check (capabilitiesContain (capabilities, "createTrack", "reference"),
+               "tracktion capabilities expose createTrack reference support");
+        auto created = cmd (ops, "create_track", args1 ("name", "Contract Probe"));
+        check (ok (created), "tracktion create_track still works through default command path");
+        check (tracks (ops) == 1, "tracktion create_track mutates the reference edit");
+    }
+
+    finishSection();
+    std::cerr << "===== " << checks - failures << "/" << checks
+              << " engine-contract checks passed, " << failures << " failed =====\n";
+    return failures;
+}
+
+int runEngineContractSliceSelfTest (MoshEngine&, MoshOps& ops)
+{
+    using namespace juce;
+    failures = 0;
+    checks = 0;
+    resetSections();
+
+    std::cerr << "\n===== Mosh engine-contract slice harness =====\n";
+    section ("maolan contract slice through MoshOps");
+
+    auto session = ops.snapshot().getProperty ("session", var());
+    check (session.getProperty ("backend", var()).toString() == "maolan",
+           "contract slice harness is running against Maolan backend");
+
+    auto* args = new DynamicObject();
+    const auto outputDir = SystemStats::getEnvironmentVariable ("MOSH_ENGINE_CONTRACT_OUTPUT_DIR", {}).trim();
+    if (outputDir.isNotEmpty())
+        args->setProperty ("outputDir", outputDir);
+    const auto timeout = SystemStats::getEnvironmentVariable ("MOSH_ENGINE_CONTRACT_TIMEOUT_SECONDS", {}).getIntValue();
+    if (timeout > 0)
+        args->setProperty ("timeoutSeconds", timeout);
+
+    auto result = cmd (ops, "run_engine_contract_slice", var (args));
+    check (ok (result), "run_engine_contract_slice ok");
+
+    auto envelope = result.getProperty ("data", var());
+    check (envelope.getProperty ("backend", var()).toString() == "maolan",
+           "slice result envelope reports maolan backend");
+    check (envelope.getProperty ("commandId", var()).toString() == "run_engine_contract_slice",
+           "slice result envelope carries commandId");
+
+    auto data = envelope.getProperty ("data", var());
+    const auto summaryPath = data.getProperty ("summaryPath", var()).toString();
+    const auto commandLog = data.getProperty ("commandLog", var()).toString();
+    const auto timingCsv = data.getProperty ("timingCsv", var()).toString();
+    const auto renderWav = data.getProperty ("renderWav", var()).toString();
+    const auto renderStats = data.getProperty ("renderStats", var()).toString();
+    const auto playbackStats = data.getProperty ("playbackStats", var()).toString();
+    const auto sessionGraph = data.getProperty ("sessionGraph", var()).toString();
+    const auto restoredGraph = data.getProperty ("restoredSessionGraph", var()).toString();
+
+    check (File (summaryPath).existsAsFile(), "slice summary.json exists");
+    check (File (commandLog).existsAsFile(), "slice command-log.jsonl exists");
+    check (File (timingCsv).existsAsFile(), "slice timing.csv exists");
+    check (File (renderWav).existsAsFile() && File (renderWav).getSize() > 0, "slice render WAV exists and is non-empty");
+    check (File (renderStats).existsAsFile(), "slice render stats JSON exists");
+    check (File (playbackStats).existsAsFile(), "slice playback stats JSON exists");
+    check (File (sessionGraph).existsAsFile(), "slice session graph exists");
+    check (File (restoredGraph).existsAsFile(), "slice restored session graph exists");
+
+    auto summary = JSON::parse (File (summaryPath).loadFileAsString());
+    check (summary.getProperty ("status", var()).toString() == "PASS", "slice summary status PASS");
+    check (summary.getProperty ("backend", var()).toString() == "maolan", "slice summary backend maolan");
+    check (summary.getProperty ("device", var()).toString() == "coreaudio:default", "slice summary device coreaudio:default");
+    check ((int) summary.getProperty ("track_count", 0) == 1, "slice summary has one track");
+    check ((bool) summary.getProperty ("session_graph_restored", false), "slice summary restored graph");
+
+    const auto commandText = File (commandLog).loadFileAsString();
+    check (commandText.contains ("createSession"), "command log records createSession");
+    check (commandText.contains ("scanPlugins"), "command log records scanPlugins");
+    check (commandText.contains ("loadPlugin"), "command log records loadPlugin");
+    check (commandText.contains ("setPluginParam"), "command log records setPluginParam");
+    check (commandText.contains ("bypassPlugin"), "command log records bypassPlugin");
+    check (commandText.contains ("removePlugin"), "command log records removePlugin");
+    check (commandText.contains ("setTransport"), "command log records setTransport playback");
+    check (commandText.contains ("renderExport"), "command log records renderExport");
+    check (commandText.contains ("restoreSessionGraph"), "command log records restoreSessionGraph");
+
+    auto stats = JSON::parse (File (renderStats).loadFileAsString());
+    check ((int64) stats.getProperty ("bytes", (int64) 0) > 0, "render stats report bytes > 0");
+    check ((double) stats.getProperty ("duration_seconds", 0.0) > 0.0, "render stats report duration > 0");
+    auto playback = JSON::parse (File (playbackStats).loadFileAsString());
+    check (playback.getProperty ("playback_source", var()).toString() == "maolan-session-playback",
+           "playback stats report Maolan session playback source");
+    check ((bool) playback.getProperty ("play_started", false), "playback stats confirm play start");
+    check ((bool) playback.getProperty ("stop_confirmed", false), "playback stats confirm stop");
+    check ((int) playback.getProperty ("transport_sample", 0) > 0, "playback stats report transport movement");
+
+    finishSection();
+    std::cerr << "===== " << checks - failures << "/" << checks
+              << " engine-contract slice checks passed, " << failures << " failed =====\n";
+    return failures;
+}
+
+int runMaolanMoshOpsRoutingSelfTest (MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+    failures = 0;
+    checks = 0;
+    resetSections();
+
+    std::cerr << "\n===== Maolan MoshOps routing harness =====\n";
+    section ("supported MoshOps commands route to Maolan backend");
+
+    auto session = ops.snapshot().getProperty ("session", var());
+    check (session.getProperty ("backend", var()).toString() == "maolan",
+           "MoshOps routing harness is running against Maolan backend");
+    const auto beforeTracktionTracks = tracktion::engine::getAudioTracks (eng.edit()).size();
+
+    const auto outputDir = SystemStats::getEnvironmentVariable ("MOSH_ENGINE_CONTRACT_OUTPUT_DIR", {}).trim();
+    auto* newArgs = new DynamicObject();
+    newArgs->setProperty ("sessionId", "maolan-moshops-routing");
+    if (outputDir.isNotEmpty())
+        newArgs->setProperty ("outputDir", outputDir);
+
+    auto createdSession = cmd (ops, "new_project", var (newArgs));
+    check (ok (createdSession), "new_project routes to Maolan createSession");
+
+    auto devices = cmd (ops, "list_audio_devices");
+    check (ok (devices), "list_audio_devices ok");
+    check (devices.getProperty ("data", var()).getProperty ("current", var()).getProperty ("outputDevice", var()).toString() == "coreaudio:default",
+           "list_audio_devices reports coreaudio:default");
+
+    auto selected = cmd (ops, "set_audio_device", args1 ("device", "coreaudio:default"));
+    check (ok (selected), "set_audio_device coreaudio:default ok");
+    auto unsupportedDevice = cmd (ops, "set_audio_device", args1 ("device", "Built-in Output"));
+    check (! ok (unsupportedDevice), "set_audio_device rejects host-specific device names");
+    check (structuredErrorCode (unsupportedDevice) == "unsupported_by_backend",
+           "unsupported device returns structured unsupported_by_backend");
+
+    check (ok (cmd (ops, "set_tempo", args1 ("bpm", 137.5))),
+           "set_tempo routes to Maolan setTempo");
+    auto sessionFormat = ops.snapshot().getProperty ("session", var());
+    check (std::abs ((double) sessionFormat.getProperty ("tempo", 0.0) - 137.5) < 0.01,
+           "Maolan snapshot reflects backend tempo");
+    check (sessionFormat.getProperty ("tempoMap", var()).size() == 1,
+           "Maolan snapshot exposes backend tempo map");
+    auto insertedTempo = cmd (ops, "insert_tempo_change", objN ({{ "time", 8.0 }, { "bpm", 90.0 }}));
+    check (ok (insertedTempo), "insert_tempo_change routes to Maolan insertTempoChange");
+    check (ops.snapshot().getProperty ("session", var()).getProperty ("tempoMap", var()).size() == 2,
+           "Maolan snapshot exposes inserted tempo-map point");
+    check (ok (cmd (ops, "set_tempo_curve", objN ({{ "index", 0 }, { "curve", 0.0 }}))),
+           "set_tempo_curve routes to Maolan setTempoCurve");
+    check (std::abs ((double) ops.snapshot().getProperty ("session", var()).getProperty ("tempoMap", var())[0].getProperty ("curve", 1.0)) < 0.01,
+           "Maolan snapshot exposes tempo curve metadata");
+    auto badTempoRemove = cmd (ops, "remove_tempo_change", args1 ("index", 0));
+    check (! ok (badTempoRemove), "remove_tempo_change rejects base tempo point");
+    check (structuredErrorCode (badTempoRemove) == "invalid_argument",
+           "bad tempo removal returns structured invalid_argument");
+    check (ok (cmd (ops, "remove_tempo_change", args1 ("index", 1))),
+           "remove_tempo_change routes to Maolan removeTempoChange");
+    check (ops.snapshot().getProperty ("session", var()).getProperty ("tempoMap", var()).size() == 1,
+           "Maolan snapshot removes tempo-map point");
+
+    check (ok (cmd (ops, "set_time_signature", objN ({{ "numerator", 7 }, { "denominator", 8 }}))),
+           "set_time_signature routes to Maolan setTimeSignature");
+    sessionFormat = ops.snapshot().getProperty ("session", var());
+    check ((int) sessionFormat.getProperty ("timeSigNumerator", 0) == 7,
+           "Maolan snapshot reflects backend time signature numerator");
+    check ((int) sessionFormat.getProperty ("timeSigDenominator", 0) == 8,
+           "Maolan snapshot reflects backend time signature denominator");
+    check (sessionFormat.getProperty ("timeSigMap", var()).size() == 1,
+           "Maolan snapshot exposes backend time signature map");
+    auto insertedTimeSig = cmd (ops, "insert_time_sig_change", objN ({{ "time", 12.0 }, { "numerator", 3 }, { "denominator", 4 }}));
+    check (ok (insertedTimeSig), "insert_time_sig_change routes to Maolan insertTimeSigChange");
+    check (ops.snapshot().getProperty ("session", var()).getProperty ("timeSigMap", var()).size() == 2,
+           "Maolan snapshot exposes inserted time-signature point");
+    auto badTimeSigRemove = cmd (ops, "remove_time_sig_change", args1 ("index", 0));
+    check (! ok (badTimeSigRemove), "remove_time_sig_change rejects base time-signature point");
+    check (structuredErrorCode (badTimeSigRemove) == "invalid_argument",
+           "bad time-signature removal returns structured invalid_argument");
+    check (ok (cmd (ops, "remove_time_sig_change", args1 ("index", 1))),
+           "remove_time_sig_change routes to Maolan removeTimeSigChange");
+    check (ops.snapshot().getProperty ("session", var()).getProperty ("timeSigMap", var()).size() == 1,
+           "Maolan snapshot removes time-signature point");
+    auto badSignature = cmd (ops, "set_time_signature", objN ({{ "numerator", 4 }, { "denominator", 5 }}));
+    check (! ok (badSignature), "set_time_signature rejects non-power-of-two denominator");
+    check (structuredErrorCode (badSignature) == "invalid_argument",
+           "bad time signature returns structured invalid_argument");
+
+    check (ok (cmd (ops, "set_metronome", args1 ("enabled", true))),
+           "set_metronome routes to Maolan setMetronome");
+    sessionFormat = ops.snapshot().getProperty ("session", var());
+    check ((bool) sessionFormat.getProperty ("metronome", false),
+           "Maolan snapshot reflects backend metronome state");
+
+    check (ok (cmd (ops, "set_project_settings", objN ({{ "sampleRate", 96000 }, { "bitDepth", 16 }, { "timeBase", "barsBeats" }}))),
+           "set_project_settings routes to Maolan setProjectSettings");
+    sessionFormat = ops.snapshot().getProperty ("session", var());
+    auto projectFormat = sessionFormat.getProperty ("project", var());
+    check (std::abs ((double) projectFormat.getProperty ("sampleRate", 0.0) - 96000.0) < 0.01,
+           "Maolan snapshot reflects backend project sample rate");
+    check ((int) projectFormat.getProperty ("bitDepth", 0) == 16,
+           "Maolan snapshot reflects backend project bit depth");
+    check (projectFormat.getProperty ("timeBase", var()).toString() == "barsBeats",
+           "Maolan snapshot reflects backend project time base");
+    auto badProject = cmd (ops, "set_project_settings", args1 ("bitDepth", 20));
+    check (! ok (badProject), "set_project_settings rejects unsupported bit depth");
+    check (structuredErrorCode (badProject) == "invalid_argument",
+           "bad project settings return structured invalid_argument");
+
+    auto* scanArgs = new DynamicObject();
+    scanArgs->setProperty ("format", "vst3");
+    const auto timeout = SystemStats::getEnvironmentVariable ("MOSH_ENGINE_CONTRACT_TIMEOUT_SECONDS", {}).getIntValue();
+    if (timeout > 0)
+        scanArgs->setProperty ("timeoutSeconds", timeout);
+    auto scan = cmd (ops, "rescan_plugins", var (scanArgs));
+    check (ok (scan), "rescan_plugins routes to Maolan scanPlugins");
+
+    auto plugins = cmd (ops, "list_plugins");
+    check (ok (plugins), "list_plugins ok");
+    auto pluginList = plugins.getProperty ("data", var()).getProperty ("plugins", var());
+    check (pluginList.size() >= 1, "list_plugins exposes at least one process-backed plugin");
+    bool foundJamPilot = false;
+    if (auto* arr = pluginList.getArray())
+        for (const auto& plugin : *arr)
+            if (plugin.getProperty ("path", var()).toString().contains ("JamPilotTestGain.vst3"))
+                foundJamPilot = true;
+    check (foundJamPilot, "list_plugins exposes JamPilotTestGain.vst3");
+
+        auto builtins = cmd (ops, "list_builtins");
+        check (ok (builtins), "list_builtins returns Maolan built-in catalog posture");
+        check (builtins.getProperty ("data", var()).getProperty ("plugins", var()).isArray(),
+               "list_builtins exposes a plugins array in Maolan mode");
+        check (builtins.getProperty ("data", var()).getProperty ("plugins", var()).size() == 0,
+               "list_builtins returns no Tracktion built-ins for Maolan process backend");
+
+        auto colors = cmd (ops, "list_colors");
+        check (ok (colors), "list_colors returns a Maolan-local empty color rack");
+        check (colors.getProperty ("data", var()).getProperty ("colors", var()).isArray(),
+               "list_colors exposes an array in Maolan mode");
+        check (colors.getProperty ("data", var()).getProperty ("colors", var()).size() == 0,
+               "list_colors returns no SA3 colors for Maolan mode");
+        check (! eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString().contains ("list_colors"),
+               "list_colors is not logged in Maolan mode");
+
+        auto createdTrack = cmd (ops, "create_track", args1 ("name", "Maolan MoshOps Track"));
+        check (ok (createdTrack), "create_track routes to Maolan createTrack");
+    const auto trackId = createdTrack.getProperty ("data", var()).getProperty ("trackId", var()).toString();
+    check (trackId.isNotEmpty(), "create_track returns trackId");
+
+    auto initialBlocklist = cmd (ops, "get_plugin_blocklist");
+    check (ok (initialBlocklist), "get_plugin_blocklist routes to Maolan getPluginBlocklist");
+    check (initialBlocklist.getProperty ("data", var()).getProperty ("blocklist", var()).isArray(),
+           "get_plugin_blocklist returns Maolan blocklist array");
+    check (initialBlocklist.getProperty ("data", var()).getProperty ("blocklist", var()).size() == 0,
+           "Maolan blocklist starts empty");
+
+    auto bogusBlock = cmd (ops, "block_plugin", args1 ("pluginId", "not-a-real-maolan-plugin"));
+    check (! ok (bogusBlock), "block_plugin rejects unknown Maolan plugin id");
+    check (structuredErrorCode (bogusBlock) == "not_found",
+           "unknown Maolan block_plugin returns structured not_found");
+
+    check (ok (cmd (ops, "block_plugin", args1 ("pluginId", "jampilot-test-gain-vst3"))),
+           "block_plugin blocks JamPilotTestGain in Maolan catalog");
+    auto blockedList = cmd (ops, "get_plugin_blocklist");
+    check (ok (blockedList), "get_plugin_blocklist reads blocked JamPilot entry");
+    auto blockedEntries = blockedList.getProperty ("data", var()).getProperty ("blocklist", var());
+    check (blockedEntries.size() == 1, "Maolan blocklist has one entry after block_plugin");
+    bool blockedJamPilot = false;
+    if (auto* arr = blockedEntries.getArray())
+        for (const auto& entry : *arr)
+            if (entry.getProperty ("id", var()).toString() == "jampilot-test-gain-vst3")
+                blockedJamPilot = true;
+    check (blockedJamPilot, "Maolan blocklist contains JamPilotTestGain id");
+
+    auto pluginsWhileBlocked = cmd (ops, "list_plugins");
+    check (ok (pluginsWhileBlocked), "list_plugins works while JamPilot is blocked");
+    auto pluginListWhileBlocked = pluginsWhileBlocked.getProperty ("data", var()).getProperty ("plugins", var());
+    bool hiddenJamPilot = true;
+    if (auto* arr = pluginListWhileBlocked.getArray())
+        for (const auto& plugin : *arr)
+            if (plugin.getProperty ("path", var()).toString().contains ("JamPilotTestGain.vst3")
+                || plugin.getProperty ("id", var()).toString() == "jampilot-test-gain-vst3")
+                hiddenJamPilot = false;
+    check (hiddenJamPilot, "blocked JamPilot fixture is hidden from list_plugins");
+
+    auto* blockedLoadArgs = new DynamicObject();
+    blockedLoadArgs->setProperty ("trackId", trackId);
+    blockedLoadArgs->setProperty ("pluginId", "jampilot-test-gain-vst3");
+    blockedLoadArgs->setProperty ("pluginPath", SystemStats::getEnvironmentVariable (
+        "MOSH_MAOLAN_PLUGIN_PATH",
+        "/Users/emiliosanchez-harris/Library/Audio/Plug-Ins/VST3/JamPilotTestGain.vst3"));
+    if (timeout > 0)
+        blockedLoadArgs->setProperty ("timeoutSeconds", timeout);
+    auto blockedLoad = cmd (ops, "load_plugin", var (blockedLoadArgs));
+    check (! ok (blockedLoad), "load_plugin rejects blocked JamPilot fixture");
+    check (structuredErrorCode (blockedLoad) == "blocked_plugin",
+           "blocked Maolan load_plugin returns structured blocked_plugin");
+
+    check (ok (cmd (ops, "clear_plugin_blocklist")), "clear_plugin_blocklist clears Maolan blocklist");
+    auto clearedBlocklist = cmd (ops, "get_plugin_blocklist");
+    check (ok (clearedBlocklist), "get_plugin_blocklist works after clear_plugin_blocklist");
+    check (clearedBlocklist.getProperty ("data", var()).getProperty ("blocklist", var()).size() == 0,
+           "Maolan blocklist is empty after clear_plugin_blocklist");
+    auto pluginsAfterClear = cmd (ops, "list_plugins");
+    check (ok (pluginsAfterClear), "list_plugins works after clearing Maolan blocklist");
+    auto pluginListAfterClear = pluginsAfterClear.getProperty ("data", var()).getProperty ("plugins", var());
+    bool restoredJamPilot = false;
+    if (auto* arr = pluginListAfterClear.getArray())
+        for (const auto& plugin : *arr)
+            if (plugin.getProperty ("path", var()).toString().contains ("JamPilotTestGain.vst3"))
+                restoredJamPilot = true;
+    check (restoredJamPilot, "clear_plugin_blocklist restores JamPilotTestGain to list_plugins");
+
+    auto renamed = cmd (ops, "rename_track", objN ({{ "trackId", trackId }, { "name", "Maolan Renamed Track" }}));
+    check (ok (renamed), "rename_track routes to Maolan renameTrack");
+    auto snapshotTracks = ops.snapshot().getProperty ("tracks", var());
+    check (snapshotTracks.size() == 1, "Maolan snapshot exposes one backend track after rename");
+    check (snapshotTracks[0].getProperty ("name", var()).toString() == "Maolan Renamed Track",
+           "Maolan snapshot reflects renamed backend track");
+
+    auto createdSecondTrack = cmd (ops, "create_track", args1 ("name", "Maolan Temporary Track"));
+    check (ok (createdSecondTrack), "second create_track appends a Maolan backend track");
+    const auto secondTrackId = createdSecondTrack.getProperty ("data", var()).getProperty ("trackId", var()).toString();
+    check (secondTrackId.isNotEmpty() && secondTrackId != trackId, "second create_track returns a distinct track id");
+    check (tracks (ops) == 2, "Maolan snapshot exposes two backend tracks");
+
+    auto outputs = cmd (ops, "list_track_outputs");
+    check (ok (outputs), "list_track_outputs returns Maolan track output candidates");
+    check (outputs.getProperty ("data", var()).getProperty ("tracks", var()).size() == 2,
+           "list_track_outputs exposes Maolan backend tracks");
+    auto routedOutput = cmd (ops, "set_track_output", objN ({{ "trackId", trackId }, { "destTrackId", secondTrackId }}));
+    check (ok (routedOutput), "set_track_output routes Maolan track into another backend track");
+    auto outputSnapshot = ops.snapshot().getProperty ("tracks", var())[0].getProperty ("output", var());
+    check ((bool) outputSnapshot.getProperty ("isTrack", false),
+           "Maolan snapshot exposes track output route");
+    check (outputSnapshot.getProperty ("destId", var()).toString() == secondTrackId,
+           "Maolan snapshot exposes track output destination");
+    auto cycleOutput = cmd (ops, "set_track_output", objN ({{ "trackId", secondTrackId }, { "destTrackId", trackId }}));
+    check (! ok (cycleOutput), "set_track_output rejects Maolan output cycles");
+    check (structuredErrorCode (cycleOutput) == "invalid_argument",
+           "set_track_output cycle returns structured invalid_argument");
+    check (ok (cmd (ops, "set_track_output", objN ({{ "trackId", trackId }, { "output", "default" }}))),
+           "set_track_output resets Maolan output to default");
+    check (! ops.snapshot().getProperty ("tracks", var())[0].hasProperty ("output"),
+           "Maolan snapshot removes output field after default reset");
+
+    Array<var> routingGroupMembers;
+    routingGroupMembers.add (trackId);
+    routingGroupMembers.add (secondTrackId);
+    auto createdGroup = cmd (ops, "create_group_track", objN ({{ "trackIds", var (routingGroupMembers) }, { "name", "Maolan Routing Group" }, { "groupId", "group-routing" }}));
+    check (ok (createdGroup), "create_group_track routes to Maolan createGroupTrack");
+    check (createdGroup.getProperty ("data", var()).getProperty ("groupId", var()).toString() == "group-routing",
+           "create_group_track returns requested Maolan group id");
+    auto groupedTracks = ops.snapshot().getProperty ("tracks", var());
+    check (groupedTracks.size() == 3, "Maolan snapshot exposes group track");
+    check ((bool) groupedTracks[2].getProperty ("isGroup", false)
+           && groupedTracks[2].getProperty ("type", var()).toString() == "group",
+           "Maolan snapshot marks group track");
+    check (groupedTracks[0].getProperty ("parentId", var()).toString() == "group-routing",
+           "Maolan snapshot stores first group member parentId");
+    check (groupedTracks[1].getProperty ("parentId", var()).toString() == "group-routing",
+           "Maolan snapshot stores second group member parentId");
+    auto ungrouped = cmd (ops, "ungroup_track", args1 ("trackId", "group-routing"));
+    check (ok (ungrouped), "ungroup_track routes to Maolan ungroupTrack");
+    groupedTracks = ops.snapshot().getProperty ("tracks", var());
+    check (groupedTracks.size() == 2, "Maolan snapshot removes group after ungroup");
+    check (groupedTracks[0].getProperty ("parentId", var()).toString().isEmpty()
+           && groupedTracks[1].getProperty ("parentId", var()).toString().isEmpty(),
+           "Maolan snapshot hoists group members after ungroup");
+
+    auto removedSecondTrack = cmd (ops, "remove_track", args1 ("trackId", secondTrackId));
+    check (ok (removedSecondTrack), "remove_track routes to Maolan removeTrack");
+    check (tracks (ops) == 1, "Maolan snapshot returns to one backend track after remove");
+
+    check (ok (cmd (ops, "set_track_volume", objN ({{ "trackId", trackId }, { "db", -6.5 }}))),
+           "set_track_volume routes to Maolan setTrackVolume");
+    check (std::abs ((double) ops.snapshot().getProperty ("tracks", var())[0].getProperty ("volumeDb", 0.0) - (-6.5)) < 0.01,
+           "Maolan snapshot reflects backend track volume");
+    check (ok (cmd (ops, "set_track_pan", objN ({{ "trackId", trackId }, { "pan", 1.5 }}))),
+           "set_track_pan routes to Maolan setTrackPan");
+    check (std::abs ((double) ops.snapshot().getProperty ("tracks", var())[0].getProperty ("pan", 0.0) - 1.0) < 0.01,
+           "Maolan snapshot reflects clamped backend track pan");
+    check (ok (cmd (ops, "set_track_mute", objN ({{ "trackId", trackId }, { "mute", true }}))),
+           "set_track_mute routes to Maolan setTrackMute");
+    check ((bool) ops.snapshot().getProperty ("tracks", var())[0].getProperty ("mute", false),
+           "Maolan snapshot reflects backend track mute");
+    check (ok (cmd (ops, "set_track_mute", objN ({{ "trackId", trackId }, { "mute", false }}))),
+           "set_track_mute can unmute Maolan backend track before render");
+    check (! (bool) ops.snapshot().getProperty ("tracks", var())[0].getProperty ("mute", true),
+           "Maolan snapshot reflects backend track unmute");
+    check (ok (cmd (ops, "set_track_solo", objN ({{ "trackId", trackId }, { "solo", true }}))),
+           "set_track_solo routes to Maolan setTrackSolo");
+    check ((bool) ops.snapshot().getProperty ("tracks", var())[0].getProperty ("solo", false),
+           "Maolan snapshot reflects backend track solo");
+    check (ok (cmd (ops, "enable_track_meter", args1 ("trackId", trackId))),
+           "enable_track_meter routes to Maolan enableTrackMeter");
+    check ((bool) ops.snapshot().getProperty ("tracks", var())[0].getProperty ("meterEnabled", false),
+           "Maolan snapshot reflects enabled backend track meter");
+    check (ok (cmd (ops, "disable_track_meter", args1 ("trackId", trackId))),
+           "disable_track_meter routes to Maolan disableTrackMeter");
+    check (! (bool) ops.snapshot().getProperty ("tracks", var())[0].getProperty ("meterEnabled", true),
+           "Maolan snapshot reflects disabled backend track meter");
+    auto enableAllMeters = cmd (ops, "enable_all_meters", var());
+    check (ok (enableAllMeters), "enable_all_meters routes to Maolan enableAllMeters");
+    check ((int) enableAllMeters.getProperty ("data", var()).getProperty ("count", 0) >= 1,
+           "enable_all_meters reports enabled track count");
+    check ((bool) ops.snapshot().getProperty ("tracks", var())[0].getProperty ("meterEnabled", false),
+           "Maolan snapshot reflects enable_all_meters on backend track");
+
+    check (ok (cmd (ops, "set_master_volume", args1 ("db", -4.5))),
+           "set_master_volume routes to Maolan setMasterVolume");
+    check (std::abs ((double) ops.snapshot().getProperty ("master", var()).getProperty ("volumeDb", 0.0) - (-4.5)) < 0.01,
+           "Maolan snapshot reflects backend master volume");
+    check (ok (cmd (ops, "set_master_pan", args1 ("pan", -1.5))),
+           "set_master_pan routes to Maolan setMasterPan");
+    check (std::abs ((double) ops.snapshot().getProperty ("master", var()).getProperty ("pan", 0.0) - (-1.0)) < 0.01,
+           "Maolan snapshot reflects clamped backend master pan");
+
+    auto createdBus = cmd (ops, "create_bus", args1 ("name", "Maolan Routing Bus"));
+    check (ok (createdBus), "create_bus routes to Maolan createBus");
+    const int busNumber = (int) createdBus.getProperty ("data", var()).getProperty ("bus", -1);
+    const auto busTrackId = createdBus.getProperty ("data", var()).getProperty ("trackId", var()).toString();
+    check (busNumber == 0 && busTrackId.isNotEmpty(), "create_bus returns bus number and return track id");
+    check (ops.snapshot().getProperty ("buses", var()).size() == 1,
+           "Maolan snapshot exposes one backend bus");
+    check ((bool) ops.snapshot().getProperty ("tracks", var())[1].getProperty ("isReturn", false),
+           "Maolan snapshot exposes bus return track");
+    check (ok (cmd (ops, "rename_bus", objN ({{ "bus", busNumber }, { "name", "Maolan Routing Bus Renamed" }}))),
+           "rename_bus routes to Maolan renameBus");
+    check (ops.snapshot().getProperty ("buses", var())[0].getProperty ("name", var()).toString() == "Maolan Routing Bus Renamed",
+           "Maolan snapshot reflects renamed bus");
+    auto addedSend = cmd (ops, "add_send", objN ({{ "trackId", trackId }, { "bus", busNumber }, { "db", -9.0 }}));
+    check (ok (addedSend), "add_send routes to Maolan addSend");
+    check (! (bool) addedSend.getProperty ("data", var()).getProperty ("applied", true),
+           "add_send reports live aux summing deferred");
+    check (ops.snapshot().getProperty ("tracks", var())[0].getProperty ("sends", var()).size() == 1,
+           "Maolan snapshot exposes backend send");
+    check (ok (cmd (ops, "set_send_level", objN ({{ "trackId", trackId }, { "bus", busNumber }, { "db", -12.0 }, { "mute", true }}))),
+           "set_send_level routes to Maolan setSendLevel");
+    auto sendSnapshot = ops.snapshot().getProperty ("tracks", var())[0].getProperty ("sends", var())[0];
+    check (std::abs ((double) sendSnapshot.getProperty ("db", 0.0) - (-12.0)) < 0.01,
+           "Maolan snapshot reflects backend send level");
+    check ((bool) sendSnapshot.getProperty ("mute", false),
+           "Maolan snapshot reflects backend send mute");
+    check (ok (cmd (ops, "remove_send", objN ({{ "trackId", trackId }, { "bus", busNumber }}))),
+           "remove_send routes to Maolan removeSend");
+    check (ops.snapshot().getProperty ("tracks", var())[0].getProperty ("sends", var()).size() == 0,
+           "Maolan snapshot removes backend send");
+    check (ok (cmd (ops, "remove_bus", args1 ("bus", busNumber))),
+           "remove_bus routes to Maolan removeBus");
+    check (ops.snapshot().getProperty ("buses", var()).size() == 0,
+           "Maolan snapshot removes backend bus");
+    check (tracks (ops) == 1, "Maolan snapshot returns to one backend track after bus removal");
+
+    auto waveInputs = cmd (ops, "list_wave_inputs");
+    check (ok (waveInputs), "list_wave_inputs returns Maolan no-live-input view");
+    check (waveInputs.getProperty ("data", var()).getProperty ("inputs", var()).isArray(),
+           "list_wave_inputs exposes an inputs array");
+    auto midiInputs = cmd (ops, "list_midi_inputs");
+    check (ok (midiInputs), "list_midi_inputs returns Maolan no-live-MIDI view");
+    check (midiInputs.getProperty ("data", var()).getProperty ("inputs", var()).isArray(),
+           "list_midi_inputs exposes an inputs array in Maolan mode");
+    check (! (bool) midiInputs.getProperty ("data", var()).getProperty ("audioEnabled", true),
+           "list_midi_inputs reports audioEnabled false in Maolan process slice");
+    check (ok (cmd (ops, "set_track_input", objN ({{ "trackId", trackId }, { "deviceID", "input-3-4" }}))),
+           "set_track_input routes Maolan input preference");
+    auto inputSnapshot = ops.snapshot().getProperty ("tracks", var())[0];
+    check (inputSnapshot.getProperty ("input", var()).getProperty ("deviceID", var()).toString() == "input-3-4",
+           "Maolan snapshot exposes stored input choice");
+    check (! (bool) inputSnapshot.getProperty ("hasInput", true),
+           "Maolan snapshot keeps hasInput false without live input binding");
+    auto armed = cmd (ops, "arm_track", objN ({{ "trackId", trackId }, { "armed", true }}));
+    check (ok (armed), "arm_track routes Maolan record-arm posture");
+    check (! (bool) armed.getProperty ("data", var()).getProperty ("applied", true),
+           "arm_track reports no live input binding in Maolan process slice");
+    check ((bool) ops.snapshot().getProperty ("tracks", var())[0].getProperty ("armed", false),
+           "Maolan snapshot exposes stored arm posture");
+    check (ok (cmd (ops, "set_input_monitor", objN ({{ "trackId", trackId }, { "mode", "on" }}))),
+           "set_input_monitor routes Maolan monitor posture");
+    check (ops.snapshot().getProperty ("tracks", var())[0].getProperty ("monitor", var()).toString() == "on",
+           "Maolan snapshot exposes stored monitor posture");
+    auto badMonitor = cmd (ops, "set_input_monitor", objN ({{ "trackId", trackId }, { "mode", "banana" }}));
+    check (! ok (badMonitor), "set_input_monitor rejects bad Maolan monitor mode");
+    check (structuredErrorCode (badMonitor) == "invalid_argument",
+           "bad Maolan monitor mode returns structured invalid_argument");
+    auto stoppedRecording = cmd (ops, "stop_recording", objN ({{ "discardRecordings", true }}));
+    check (ok (stoppedRecording), "stop_recording returns structured Maolan no-live-input posture");
+    check (! (bool) stoppedRecording.getProperty ("data", var()).getProperty ("applied", true),
+           "stop_recording reports applied:false in Maolan process slice");
+    check (stoppedRecording.getProperty ("data", var()).getProperty ("clips", var()).isArray(),
+           "stop_recording returns a clips array");
+
+    Array<var> midiSeed;
+    for (int k = 0; k < 3; ++k)
+    {
+        auto* note = new DynamicObject();
+        note->setProperty ("pitch", 60 + k);
+        note->setProperty ("start", (double) k + 0.2);
+        note->setProperty ("length", 0.5);
+        note->setProperty ("velocity", 90);
+        midiSeed.add (var (note));
+    }
+    auto midiClip = cmd (ops, "add_midi_clip", objN ({{ "trackId", trackId }, { "clipId", "clip-routing-midi" }, { "name", "Maolan Routing MIDI" }, { "notes", var (midiSeed) }}));
+    check (ok (midiClip), "add_midi_clip routes to Maolan addMidiClip");
+    auto midiClipsSnapshot = ops.snapshot().getProperty ("tracks", var())[0].getProperty ("clips", var());
+    check (midiClipsSnapshot.size() == 1 && midiClipsSnapshot[0].getProperty ("notes", var()).size() == 3,
+           "Maolan snapshot exposes MIDI notes");
+    check (ok (cmd (ops, "add_note", objN ({{ "clipId", "clip-routing-midi" }, { "pitch", 72 }, { "start", 1.4 }, { "length", 1.0 }, { "velocity", 100 }}))),
+           "add_note routes to Maolan addNote");
+    check (ops.snapshot().getProperty ("tracks", var())[0].getProperty ("clips", var())[0].getProperty ("notes", var()).size() == 4,
+           "Maolan snapshot exposes added MIDI note");
+    check (ok (cmd (ops, "set_note", objN ({{ "clipId", "clip-routing-midi" }, { "noteIndex", 0 }, { "pitch", 48 }, { "velocity", 127 }}))),
+           "set_note routes to Maolan setNote");
+    check ((int) ops.snapshot().getProperty ("tracks", var())[0].getProperty ("clips", var())[0].getProperty ("notes", var())[0].getProperty ("pitch", -1) == 48,
+           "Maolan snapshot reflects edited MIDI note");
+    check (ok (cmd (ops, "quantize_notes", objN ({{ "clipId", "clip-routing-midi" }, { "division", 1.0 }}))),
+           "quantize_notes routes to Maolan quantizeNotes");
+    auto midiNotesAfterQuantize = ops.snapshot().getProperty ("tracks", var())[0].getProperty ("clips", var())[0].getProperty ("notes", var());
+    bool allMidiNotesOnGrid = midiNotesAfterQuantize.size() > 0;
+    if (auto* midiNoteArr = midiNotesAfterQuantize.getArray())
+        for (const auto& note : *midiNoteArr)
+        {
+            const double start = (double) note.getProperty ("start", 0.0);
+            if (std::abs (start - std::round (start)) > 0.02)
+                allMidiNotesOnGrid = false;
+        }
+    check (allMidiNotesOnGrid, "Maolan quantize_notes snaps MIDI notes to grid");
+    const int midiNotesBeforeRemove = midiNotesAfterQuantize.size();
+    check (ok (cmd (ops, "remove_note", objN ({{ "clipId", "clip-routing-midi" }, { "noteIndex", 0 }}))),
+           "remove_note routes to Maolan removeNote");
+    check (ops.snapshot().getProperty ("tracks", var())[0].getProperty ("clips", var())[0].getProperty ("notes", var()).size() == midiNotesBeforeRemove - 1,
+           "Maolan snapshot removes MIDI note");
+    auto badNote = cmd (ops, "set_note", objN ({{ "clipId", "clip-routing-midi" }, { "noteIndex", 999 }}));
+    check (! ok (badNote), "set_note rejects out-of-range Maolan note index");
+    check (structuredErrorCode (badNote) == "invalid_argument",
+           "bad Maolan note index returns structured invalid_argument");
+    check (ok (cmd (ops, "remove_clip", args1 ("clipId", "clip-routing-midi"))),
+           "remove_clip removes routed Maolan MIDI probe");
+    check (ops.snapshot().getProperty ("tracks", var())[0].getProperty ("clips", var()).size() == 0,
+           "Maolan snapshot removes routed MIDI probe before audio render");
+
+    auto addedClip = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", trackId }, { "clipId", "clip-routing-1" }, { "name", "Maolan Routing Tone" }, { "seconds", 1.5 }, { "freq", 440.0 }}));
+    check (ok (addedClip), "add_test_tone_clip routes to Maolan addClip");
+    const auto clipId = addedClip.getProperty ("data", var()).getProperty ("clipId", var()).toString();
+    check (clipId == "clip-routing-1", "add_test_tone_clip returns requested clip id");
+    check (File (addedClip.getProperty ("data", var()).getProperty ("file", var()).toString()).existsAsFile(),
+           "add_test_tone_clip writes source WAV evidence");
+    auto clipSnapshot = ops.snapshot().getProperty ("tracks", var())[0].getProperty ("clips", var());
+    check (clipSnapshot.size() == 1, "Maolan snapshot exposes one backend clip");
+    check (clipSnapshot[0].getProperty ("name", var()).toString() == "Maolan Routing Tone",
+           "Maolan snapshot reflects backend clip name");
+
+    const File importSource (addedClip.getProperty ("data", var()).getProperty ("file", var()).toString());
+    check (importSource.existsAsFile(), "Maolan import source WAV exists");
+    auto listedClipDir = cmd (ops, "list_directory", args1 ("path", importSource.getParentDirectory().getFullPathName()));
+    check (ok (listedClipDir), "list_directory runs as a Maolan-neutral local read");
+    auto listedEntries = listedClipDir.getProperty ("data", var()).getProperty ("entries", var());
+    bool listedSourceWav = false;
+    if (auto* listedArr = listedEntries.getArray())
+        for (const auto& entry : *listedArr)
+            if (! (bool) entry.getProperty ("isDir", true)
+                && entry.getProperty ("path", var()).toString() == importSource.getFullPathName())
+                listedSourceWav = true;
+    check (listedSourceWav, "list_directory exposes Maolan-owned source WAV without Tracktion fallback");
+    auto commandLogView = cmd (ops, "get_command_log", args1 ("limit", 8));
+    check (ok (commandLogView), "get_command_log runs as a Maolan-neutral local read");
+    const auto commandLogEntries = commandLogView.getProperty ("data", var()).getProperty ("entries", var());
+    check (commandLogEntries.isArray(), "get_command_log returns a bounded entries array");
+    bool localReadLogged = false;
+    if (auto* commandLogArr = commandLogEntries.getArray())
+        for (const auto& entry : *commandLogArr)
+        {
+            const auto commandName = entry.getProperty ("command", var()).toString();
+            if (commandName == "list_directory" || commandName == "get_command_log")
+                localReadLogged = true;
+        }
+    check (! localReadLogged, "Maolan-neutral local reads stay out of the MoshOps command log");
+    auto importTrack = cmd (ops, "create_track", args1 ("name", "Maolan Import Probe"));
+    check (ok (importTrack), "create_track creates import probe track");
+    const auto importTrackId = importTrack.getProperty ("data", var()).getProperty ("trackId", var()).toString();
+    auto importedPathClip = cmd (ops, "import_clip", objN ({
+        { "trackId", importTrackId },
+        { "clipId", "clip-routing-import-path" },
+        { "file", importSource.getFullPathName() },
+        { "name", "Maolan Path Import" },
+        { "start", 0.25 },
+    }));
+    check (ok (importedPathClip), "import_clip routes to Maolan file-backed addClip");
+    check (importedPathClip.getProperty ("data", var()).getProperty ("clipId", var()).toString() == "clip-routing-import-path",
+           "import_clip returns requested clip id");
+    auto importTrackClips = ops.snapshot().getProperty ("tracks", var())[1].getProperty ("clips", var());
+    check (importTrackClips.size() == 1, "Maolan snapshot exposes path-imported clip");
+    if (importTrackClips.size() > 0)
+    {
+        check (importTrackClips[0].getProperty ("name", var()).toString() == "Maolan Path Import",
+               "Maolan snapshot reflects path-imported clip name");
+        check (File (importTrackClips[0].getProperty ("sourceFile", var()).toString()).existsAsFile(),
+               "Maolan snapshot path-imported source exists");
+    }
+
+    MemoryBlock importRaw;
+    importSource.loadFileAsData (importRaw);
+    const auto importBase64 = Base64::toBase64 (importRaw.getData(), importRaw.getSize());
+    auto importedBytesClip = cmd (ops, "import_clip_data", objN ({
+        { "trackId", importTrackId },
+        { "clipId", "clip-routing-import-data" },
+        { "name", "maolan-dropped.wav" },
+        { "dataBase64", importBase64 },
+        { "start", 1.0 },
+    }));
+    check (ok (importedBytesClip), "import_clip_data routes decoded audio to Maolan addClip");
+    check (importedBytesClip.getProperty ("data", var()).getProperty ("clipId", var()).toString() == "clip-routing-import-data",
+           "import_clip_data returns requested clip id");
+    check (File (importedBytesClip.getProperty ("data", var()).getProperty ("file", var()).toString()).existsAsFile(),
+           "import_clip_data writes decoded import file");
+    importTrackClips = ops.snapshot().getProperty ("tracks", var())[1].getProperty ("clips", var());
+    check (importTrackClips.size() == 2, "Maolan snapshot exposes decoded imported clip");
+    auto badBase64 = cmd (ops, "import_clip_data", objN ({{ "name", "bad.wav" }, { "dataBase64", "!!!notbase64!!!" }, { "trackId", importTrackId }}));
+    check (! ok (badBase64), "import_clip_data rejects invalid base64 in Maolan mode");
+    check (structuredErrorCode (badBase64) == "invalid_argument",
+           "invalid import_clip_data base64 returns structured invalid_argument");
+    const char* hello = "hello world";
+    const auto helloBase64 = Base64::toBase64 (hello, (size_t) std::strlen (hello));
+    auto nonAudio = cmd (ops, "import_clip_data", objN ({{ "name", "notaudio.wav" }, { "dataBase64", helloBase64 }, { "trackId", importTrackId }}));
+    check (! ok (nonAudio), "import_clip_data rejects non-audio bytes in Maolan mode");
+    check (structuredErrorCode (nonAudio) == "invalid_argument",
+           "non-audio import_clip_data returns structured invalid_argument");
+    importTrackClips = ops.snapshot().getProperty ("tracks", var())[1].getProperty ("clips", var());
+    check (importTrackClips.size() == 2, "failed import_clip_data leaves Maolan import track unchanged");
+    check (! eng.sessionDir().getChildFile ("imports").getChildFile ("notaudio.wav").existsAsFile(),
+           "non-audio import_clip_data deletes temporary file");
+    check (ok (cmd (ops, "remove_track", args1 ("trackId", importTrackId))),
+           "remove_track removes import probe track");
+    check (tracks (ops) == 1, "Maolan snapshot returns to one backend track after import probe");
+
+    auto routedPeaks = cmd (ops, "get_clip_peaks", objN ({{ "clipId", clipId }, { "buckets", 64 }}));
+    check (ok (routedPeaks), "get_clip_peaks routes to Maolan getClipPeaks");
+    check ((int) routedPeaks.getProperty ("data", var()).getProperty ("buckets", 0) > 0,
+           "get_clip_peaks returns peak buckets");
+    check (routedPeaks.getProperty ("data", var()).getProperty ("peaks", var()).isArray(),
+           "get_clip_peaks returns a peak array");
+
+    check (ok (cmd (ops, "move_clip", objN ({{ "clipId", clipId }, { "start", 0.75 }}))),
+           "move_clip routes to Maolan moveClip");
+    check (std::abs ((double) ops.snapshot().getProperty ("tracks", var())[0].getProperty ("clips", var())[0].getProperty ("start", 0.0) - 0.75) < 0.01,
+           "Maolan snapshot reflects moved clip start");
+    check (ok (cmd (ops, "trim_clip", objN ({{ "clipId", clipId }, { "start", 0.75 }, { "length", 0.5 }, { "offset", 0.25 }}))),
+           "trim_clip routes to Maolan trimClip");
+    check (std::abs ((double) ops.snapshot().getProperty ("tracks", var())[0].getProperty ("clips", var())[0].getProperty ("length", 0.0) - 0.5) < 0.01,
+           "Maolan snapshot reflects trimmed clip length");
+    check (ok (cmd (ops, "rename_clip", objN ({{ "clipId", clipId }, { "name", "Maolan Routing Clip Edited" }}))),
+           "rename_clip routes to Maolan renameClip");
+    check (ops.snapshot().getProperty ("tracks", var())[0].getProperty ("clips", var())[0].getProperty ("name", var()).toString() == "Maolan Routing Clip Edited",
+           "Maolan snapshot reflects renamed clip");
+    check (ok (cmd (ops, "set_clip_gain", objN ({{ "clipId", clipId }, { "gainDb", -3.5 }}))),
+           "set_clip_gain routes to Maolan setClipGain");
+    check (std::abs ((double) ops.snapshot().getProperty ("tracks", var())[0].getProperty ("clips", var())[0].getProperty ("gainDb", 0.0) - (-3.5)) < 0.01,
+           "Maolan snapshot reflects clip gain");
+    check (ok (cmd (ops, "set_clip_mute", objN ({{ "clipId", clipId }, { "mute", true }}))),
+           "set_clip_mute routes to Maolan setClipMute");
+    check ((bool) ops.snapshot().getProperty ("tracks", var())[0].getProperty ("clips", var())[0].getProperty ("mute", false),
+           "Maolan snapshot reflects clip mute");
+    check (ok (cmd (ops, "set_clip_mute", objN ({{ "clipId", clipId }, { "mute", false }}))),
+           "set_clip_mute can unmute Maolan backend clip before render");
+    check (! (bool) ops.snapshot().getProperty ("tracks", var())[0].getProperty ("clips", var())[0].getProperty ("mute", true),
+           "Maolan snapshot reflects clip unmute");
+    auto warpOn = cmd (ops, "set_clip_warp", objN ({{ "clipId", clipId }, { "autoTempo", true }, { "sourceBpm", 137.5 }}));
+    check (ok (warpOn), "set_clip_warp routes to Maolan setClipWarp");
+    auto warpedClip = ops.snapshot().getProperty ("tracks", var())[0].getProperty ("clips", var())[0];
+    check ((bool) warpedClip.getProperty ("autoTempo", false),
+           "Maolan snapshot exposes clip autoTempo metadata");
+    check (std::abs ((double) warpedClip.getProperty ("sourceBpm", 0.0) - 137.5) < 0.01,
+           "Maolan snapshot exposes clip sourceBpm metadata");
+    check (warpedClip.getProperty ("stretchMode", var()).toString().containsIgnoreCase ("soundtouch"),
+           "Maolan snapshot exposes clip stretch mode metadata");
+    auto warpOff = cmd (ops, "set_clip_warp", objN ({{ "clipId", clipId }, { "autoTempo", false }}));
+    check (ok (warpOff), "set_clip_warp can disable Maolan autoTempo metadata");
+    check (! (bool) ops.snapshot().getProperty ("tracks", var())[0].getProperty ("clips", var())[0].getProperty ("autoTempo", true),
+           "Maolan snapshot clears clip autoTempo metadata");
+    auto splitClip = cmd (ops, "split_clip", objN ({{ "clipId", clipId }, { "time", 1.0 }, { "newClipId", "clip-routing-1-split" }}));
+    check (ok (splitClip), "split_clip routes to Maolan splitClip");
+    check (splitClip.getProperty ("data", var()).getProperty ("newClipId", var()).toString() == "clip-routing-1-split",
+           "split_clip returns requested new clip id");
+    auto splitSnapshot = ops.snapshot().getProperty ("tracks", var())[0].getProperty ("clips", var());
+    check (splitSnapshot.size() == 2, "Maolan snapshot exposes split clip pair");
+    check (std::abs ((double) splitSnapshot[0].getProperty ("length", 0.0) - 0.25) < 0.01,
+           "split_clip shortens the left clip");
+    check (std::abs ((double) splitSnapshot[1].getProperty ("start", 0.0) - 1.0) < 0.01,
+           "split_clip positions the right clip");
+    check (std::abs ((double) splitSnapshot[1].getProperty ("offset", 0.0) - 0.5) < 0.01,
+           "split_clip advances the right clip source offset");
+    auto duplicateClip = cmd (ops, "duplicate_clip", objN ({{ "clipId", "clip-routing-1-split" }, { "newClipId", "clip-routing-1-copy" }}));
+    check (ok (duplicateClip), "duplicate_clip routes to Maolan duplicateClip");
+    check (duplicateClip.getProperty ("data", var()).getProperty ("newClipId", var()).toString() == "clip-routing-1-copy",
+           "duplicate_clip returns requested new clip id");
+    auto duplicateSnapshot = ops.snapshot().getProperty ("tracks", var())[0].getProperty ("clips", var());
+    check (duplicateSnapshot.size() == 3, "Maolan snapshot exposes duplicated clip");
+    check (std::abs ((double) duplicateSnapshot[2].getProperty ("start", 0.0) - 1.25) < 0.01,
+           "duplicate_clip places the copy after the source");
+    check (std::abs ((double) duplicateSnapshot[2].getProperty ("length", 0.0) - 0.25) < 0.01,
+           "duplicate_clip preserves clip length");
+    check (std::abs ((double) duplicateSnapshot[2].getProperty ("offset", 0.0) - 0.5) < 0.01,
+           "duplicate_clip preserves source offset");
+    auto pasteClip = cmd (ops, "paste_clip", objN ({
+        { "trackId", trackId },
+        { "newClipId", "clip-routing-1-paste" },
+        { "start", 1.75 },
+        { "clip", objN ({
+            { "id", duplicateSnapshot[1].getProperty ("id", var()) },
+            { "type", "wave" },
+            { "name", "Maolan Routing Paste" },
+            { "sourcePath", duplicateSnapshot[1].getProperty ("sourcePath", duplicateSnapshot[1].getProperty ("sourceFile", var())) },
+            { "length", duplicateSnapshot[1].getProperty ("length", var()) },
+            { "offset", duplicateSnapshot[1].getProperty ("offset", var()) },
+            { "gainDb", duplicateSnapshot[1].getProperty ("gainDb", var()) },
+            { "mute", duplicateSnapshot[1].getProperty ("mute", var()) },
+        }) },
+    }));
+    check (ok (pasteClip), "paste_clip routes to Maolan pasteClip");
+    check (pasteClip.getProperty ("data", var()).getProperty ("newClipId", var()).toString() == "clip-routing-1-paste",
+           "paste_clip returns requested new clip id");
+    auto pasteSnapshot = ops.snapshot().getProperty ("tracks", var())[0].getProperty ("clips", var());
+    check (pasteSnapshot.size() == 4, "Maolan snapshot exposes pasted clip");
+    check (std::abs ((double) pasteSnapshot[3].getProperty ("start", 0.0) - 1.75) < 0.01,
+           "paste_clip places the pasted clip at the requested start");
+    check (std::abs ((double) pasteSnapshot[3].getProperty ("length", 0.0) - 0.25) < 0.01,
+           "paste_clip preserves clip length");
+    check (std::abs ((double) pasteSnapshot[3].getProperty ("offset", 0.0) - 0.5) < 0.01,
+           "paste_clip preserves source offset");
+    auto deleteRangeTrack = cmd (ops, "create_track", args1 ("name", "Maolan Routing Delete Probe"));
+    check (ok (deleteRangeTrack), "create_track creates delete_time_range probe track");
+    const auto deleteRangeTrackId = deleteRangeTrack.getProperty ("data", var()).getProperty ("trackId", var()).toString();
+    check (ok (cmd (ops, "add_test_tone_clip", objN ({{ "trackId", deleteRangeTrackId }, { "clipId", "clip-routing-delete" }, { "name", "Maolan Delete Range Clip" }, { "seconds", 2.0 }, { "freq", 330.0 }}))),
+           "add_test_tone_clip creates delete_time_range probe clip");
+    auto* deleteRangeArgs = new DynamicObject();
+    deleteRangeArgs->setProperty ("start", 0.5);
+    deleteRangeArgs->setProperty ("end", 1.25);
+    Array<var> deleteRangeTrackIds;
+    deleteRangeTrackIds.add (deleteRangeTrackId);
+    deleteRangeArgs->setProperty ("trackIds", deleteRangeTrackIds);
+    auto deleteRange = cmd (ops, "delete_time_range", var (deleteRangeArgs));
+    check (ok (deleteRange), "delete_time_range routes to Maolan deleteTimeRange");
+    check ((int) deleteRange.getProperty ("data", var()).getProperty ("removed", 0) == 1,
+           "delete_time_range reports removed segment");
+    check ((int) deleteRange.getProperty ("data", var()).getProperty ("splits", 0) == 2,
+           "delete_time_range reports boundary splits");
+    auto deleteRangeSnapshot = ops.snapshot().getProperty ("tracks", var())[1].getProperty ("clips", var());
+    check (deleteRangeSnapshot.size() == 2, "delete_time_range leaves two outside fragments");
+    if (deleteRangeSnapshot.size() > 1)
+    {
+        check (deleteRangeSnapshot[0].getProperty ("id", var()).toString() == "clip-routing-delete",
+               "delete_time_range keeps the left fragment id");
+        check (deleteRangeSnapshot[1].getProperty ("id", var()).toString() == "clip-routing-delete-after-delete",
+               "delete_time_range gives the right fragment a deterministic id");
+        check (std::abs ((double) deleteRangeSnapshot[1].getProperty ("start", 0.0) - 1.25) < 0.01,
+               "delete_time_range positions the right fragment");
+        check (std::abs ((double) deleteRangeSnapshot[1].getProperty ("offset", 0.0) - 1.25) < 0.01,
+               "delete_time_range advances the right fragment source offset");
+    }
+    check (ok (cmd (ops, "remove_track", args1 ("trackId", deleteRangeTrackId))),
+           "remove_track removes delete_time_range probe track");
+    auto removableClip = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", trackId }, { "clipId", "clip-routing-remove" }, { "name", "Maolan Remove Clip" }, { "seconds", 0.25 }, { "freq", 660.0 }}));
+    check (ok (removableClip), "second add_test_tone_clip creates a removable clip");
+    check (ops.snapshot().getProperty ("tracks", var())[0].getProperty ("clips", var()).size() == 5,
+           "Maolan snapshot exposes removable clip before remove_clip");
+    check (ok (cmd (ops, "remove_clip", args1 ("clipId", "clip-routing-remove"))),
+           "remove_clip routes to Maolan removeClip");
+    check (ops.snapshot().getProperty ("tracks", var())[0].getProperty ("clips", var()).size() == 4,
+           "Maolan snapshot removes backend clip");
+
+    auto* loadArgs = new DynamicObject();
+    loadArgs->setProperty ("trackId", trackId);
+    loadArgs->setProperty ("pluginId", "jampilot-test-gain-vst3");
+    loadArgs->setProperty ("pluginPath", SystemStats::getEnvironmentVariable (
+        "MOSH_MAOLAN_PLUGIN_PATH",
+        "/Users/emiliosanchez-harris/Library/Audio/Plug-Ins/VST3/JamPilotTestGain.vst3"));
+    if (timeout > 0)
+        loadArgs->setProperty ("timeoutSeconds", timeout);
+    auto loaded = cmd (ops, "load_plugin", var (loadArgs));
+    check (ok (loaded), "load_plugin routes to Maolan loadPlugin");
+    if (ok (loaded))
+        check (loaded.getProperty ("data", var()).getProperty ("name", var()).toString().contains ("JamPilotTestGain.vst3"),
+               "load_plugin result names JamPilotTestGain.vst3");
+    auto loadedPluginList = ops.snapshot().getProperty ("tracks", var())[0].getProperty ("plugins", var());
+    check (loadedPluginList.size() == 1,
+           "Maolan snapshot exposes loaded plugin");
+
+    check (ok (cmd (ops, "set_plugin_param", objN ({{ "trackId", trackId }, { "index", 0 }, { "paramIndex", 0 }, { "value", 0.42 }}))),
+           "set_plugin_param routes to Maolan setPluginParam");
+    loadedPluginList = ops.snapshot().getProperty ("tracks", var())[0].getProperty ("plugins", var());
+    if (loadedPluginList.size() > 0)
+    {
+        auto pluginSnapshot = loadedPluginList[0];
+        auto paramsSnapshot = pluginSnapshot.getProperty ("params", var());
+        check (paramsSnapshot.size() == 1, "Maolan snapshot exposes plugin param metadata");
+        if (paramsSnapshot.size() > 0)
+            check (std::abs ((double) paramsSnapshot[0].getProperty ("value", 0.0) - 0.42) < 0.01,
+                   "Maolan snapshot reflects plugin param value");
+    }
+
+    check (ok (cmd (ops, "add_automation_point", objN ({{ "trackId", trackId }, { "pluginIndex", 0 }, { "paramIndex", 0 }, { "time", 0.0 }, { "value", 0.2 }}))),
+           "add_automation_point routes to Maolan addAutomationPoint");
+    check (ok (cmd (ops, "add_automation_point", objN ({{ "trackId", trackId }, { "pluginIndex", 0 }, { "paramIndex", 0 }, { "time", 2.0 }, { "value", 0.8 }}))),
+           "second add_automation_point routes to Maolan addAutomationPoint");
+    loadedPluginList = ops.snapshot().getProperty ("tracks", var())[0].getProperty ("plugins", var());
+    if (loadedPluginList.size() > 0)
+    {
+        auto paramsSnapshot = loadedPluginList[0].getProperty ("params", var());
+        check (paramsSnapshot.size() == 1, "Maolan snapshot keeps automated plugin param metadata");
+        if (paramsSnapshot.size() > 0)
+        {
+            check ((bool) paramsSnapshot[0].getProperty ("automated", false),
+                   "Maolan snapshot marks automated plugin param");
+            check (paramsSnapshot[0].getProperty ("points", var()).size() == 2,
+                   "Maolan snapshot exposes automation points");
+        }
+    }
+    check (ok (cmd (ops, "set_automation_point", objN ({{ "trackId", trackId }, { "pluginIndex", 0 }, { "paramIndex", 0 }, { "pointIndex", 0 }, { "time", 0.5 }, { "value", 0.5 }}))),
+           "set_automation_point routes to Maolan setAutomationPoint");
+    loadedPluginList = ops.snapshot().getProperty ("tracks", var())[0].getProperty ("plugins", var());
+    if (loadedPluginList.size() > 0)
+    {
+        auto points = loadedPluginList[0].getProperty ("params", var())[0].getProperty ("points", var());
+        if (points.size() > 0)
+            check (std::abs ((double) points[0].getProperty ("v", 0.0) - 0.5) < 0.01,
+                   "Maolan snapshot reflects edited automation point");
+    }
+    check (ok (cmd (ops, "remove_automation_point", objN ({{ "trackId", trackId }, { "pluginIndex", 0 }, { "paramIndex", 0 }, { "pointIndex", 0 }}))),
+           "remove_automation_point routes to Maolan removeAutomationPoint");
+    loadedPluginList = ops.snapshot().getProperty ("tracks", var())[0].getProperty ("plugins", var());
+    if (loadedPluginList.size() > 0)
+        check (loadedPluginList[0].getProperty ("params", var())[0].getProperty ("points", var()).size() == 1,
+               "Maolan snapshot removes automation point");
+    check (ok (cmd (ops, "clear_automation", objN ({{ "trackId", trackId }, { "pluginIndex", 0 }, { "paramIndex", 0 }}))),
+           "clear_automation routes to Maolan clearAutomation");
+    loadedPluginList = ops.snapshot().getProperty ("tracks", var())[0].getProperty ("plugins", var());
+    if (loadedPluginList.size() > 0)
+    {
+        auto paramSnapshot = loadedPluginList[0].getProperty ("params", var())[0];
+        check (! (bool) paramSnapshot.getProperty ("automated", true),
+               "Maolan snapshot clears automation flag");
+        check (paramSnapshot.getProperty ("points", var()).size() == 0,
+               "Maolan snapshot clears automation points");
+    }
+
+    check (ok (cmd (ops, "bypass_plugin", objN ({{ "trackId", trackId }, { "index", 0 }, { "bypassed", true }}))),
+           "bypass_plugin routes to Maolan bypassPlugin");
+    loadedPluginList = ops.snapshot().getProperty ("tracks", var())[0].getProperty ("plugins", var());
+    if (loadedPluginList.size() > 0)
+        check (! (bool) loadedPluginList[0].getProperty ("enabled", true),
+               "Maolan snapshot reflects plugin bypass state");
+
+    auto* removeProbeArgs = new DynamicObject();
+    removeProbeArgs->setProperty ("trackId", trackId);
+    removeProbeArgs->setProperty ("pluginId", "jampilot-remove-probe");
+    removeProbeArgs->setProperty ("pluginPath", SystemStats::getEnvironmentVariable (
+        "MOSH_MAOLAN_PLUGIN_PATH",
+        "/Users/emiliosanchez-harris/Library/Audio/Plug-Ins/VST3/JamPilotTestGain.vst3"));
+    removeProbeArgs->setProperty ("index", 1);
+    if (timeout > 0)
+        removeProbeArgs->setProperty ("timeoutSeconds", timeout);
+    check (ok (cmd (ops, "load_plugin", var (removeProbeArgs))), "second load_plugin creates removable plugin");
+    loadedPluginList = ops.snapshot().getProperty ("tracks", var())[0].getProperty ("plugins", var());
+    check (loadedPluginList.size() == 2,
+           "Maolan snapshot exposes removable plugin before remove_plugin");
+    auto reorderedPlugin = cmd (ops, "reorder_plugin", objN ({{ "trackId", trackId }, { "index", 1 }, { "toIndex", 0 }}));
+    check (ok (reorderedPlugin), "reorder_plugin routes to Maolan reorderPlugin");
+    check ((int) reorderedPlugin.getProperty ("data", var()).getProperty ("index", -1) == 0,
+           "reorder_plugin reports moved plugin index");
+    loadedPluginList = ops.snapshot().getProperty ("tracks", var())[0].getProperty ("plugins", var());
+    check (loadedPluginList.size() == 2
+           && loadedPluginList[0].getProperty ("identifier", var()).toString() == "jampilot-remove-probe",
+           "Maolan snapshot reflects reordered plugin chain");
+    check (ok (cmd (ops, "reorder_plugin", objN ({{ "trackId", trackId }, { "index", 0 }, { "toIndex", 1 }}))),
+           "reorder_plugin can restore original plugin order");
+    loadedPluginList = ops.snapshot().getProperty ("tracks", var())[0].getProperty ("plugins", var());
+    check (loadedPluginList.size() == 2
+           && loadedPluginList[1].getProperty ("identifier", var()).toString() == "jampilot-remove-probe",
+           "Maolan snapshot reflects restored plugin chain");
+    check (ok (cmd (ops, "remove_plugin", objN ({{ "trackId", trackId }, { "index", 1 }}))),
+           "remove_plugin routes to Maolan removePlugin");
+    loadedPluginList = ops.snapshot().getProperty ("tracks", var())[0].getProperty ("plugins", var());
+    check (loadedPluginList.size() == 1,
+           "Maolan snapshot removes backend plugin");
+
+    auto stopped = cmd (ops, "set_transport", objN ({{ "action", "stop" }, { "position", 0.25 }}));
+    check (ok (stopped), "set_transport supports process stop/seek");
+    auto play = cmd (ops, "set_transport", objN ({{ "action", "play" }, { "durationSeconds", 0.5 }}));
+    check (ok (play), "set_transport play runs Maolan playback smoke");
+    const auto playbackStats = play.getProperty ("data", var()).getProperty ("playbackStats", var()).toString();
+    check (File (playbackStats).existsAsFile(), "set_transport play writes playback stats JSON");
+    auto playback = JSON::parse (File (playbackStats).loadFileAsString());
+    check (playback.getProperty ("playback_source", var()).toString() == "maolan-session-playback",
+           "set_transport play stats report Maolan session playback source");
+    check ((bool) playback.getProperty ("play_started", false), "set_transport play stats confirm play start");
+    check ((bool) playback.getProperty ("stop_confirmed", false), "set_transport play stats confirm stop");
+    check ((int) playback.getProperty ("transport_sample", 0) > 0, "set_transport play stats report transport movement");
+
+    auto* exportArgs = new DynamicObject();
+    exportArgs->setProperty ("trackId", trackId);
+    if (timeout > 0)
+        exportArgs->setProperty ("timeoutSeconds", timeout);
+    auto exported = cmd (ops, "export_audio", var (exportArgs));
+    check (ok (exported), "export_audio routes to Maolan renderExport");
+    const auto renderWav = exported.getProperty ("data", var()).getProperty ("file", var()).toString();
+    const auto renderStats = exported.getProperty ("data", var()).getProperty ("statsPath", var()).toString();
+    check (File (renderWav).existsAsFile() && File (renderWav).getSize() > 0, "export_audio produced non-empty WAV");
+    check (File (renderStats).existsAsFile(), "export_audio produced render stats JSON");
+
+    auto saved = cmd (ops, "save");
+    check (ok (saved), "save routes to Maolan saveSessionGraph");
+    const auto sessionGraph = saved.getProperty ("data", var()).getProperty ("file", var()).toString();
+    check (File (sessionGraph).existsAsFile(), "save wrote session graph");
+
+    auto restored = cmd (ops, "reload");
+    check (ok (restored), "reload routes to Maolan restoreSessionGraph");
+    const auto restoredGraph = restored.getProperty ("data", var()).getProperty ("restoredFile", var()).toString();
+    check (File (restoredGraph).existsAsFile(), "reload wrote restored session graph");
+
+    auto unsupported = cmd (ops, "add_render_layer", var (new DynamicObject()));
+    check (! ok (unsupported), "unsupported MoshOps command stays rejected");
+    check (structuredErrorCode (unsupported) == "unsupported_by_backend",
+           "unsupported MoshOps command returns structured unsupported_by_backend");
+    check (tracks (ops) == 1, "Maolan snapshot exposes one backend track");
+    check (tracktion::engine::getAudioTracks (eng.edit()).size() == beforeTracktionTracks,
+           "Maolan-routed commands do not mutate Tracktion edit state");
+
+    section ("routing evidence artifacts");
+    const auto evidenceDir = outputDir.isNotEmpty() ? File (outputDir) : File (sessionGraph).getParentDirectory();
+    const auto backendCommandLog = evidenceDir.getChildFile ("command-log.jsonl");
+    const auto timingCsv = evidenceDir.getChildFile ("timing.csv");
+    check (backendCommandLog.existsAsFile(), "Maolan backend command-log.jsonl exists");
+    check (timingCsv.existsAsFile(), "Maolan backend timing.csv exists");
+    const auto commandText = backendCommandLog.loadFileAsString();
+    check (commandText.contains ("createSession"), "backend command log records createSession");
+    check (commandText.contains ("selectAudioDevice"), "backend command log records selectAudioDevice");
+    check (commandText.contains ("scanPlugins"), "backend command log records scanPlugins");
+    check (commandText.contains ("getPluginBlocklist"), "backend command log records getPluginBlocklist");
+    check (commandText.contains ("blockPlugin"), "backend command log records blockPlugin");
+    check (commandText.contains ("clearPluginBlocklist"), "backend command log records clearPluginBlocklist");
+    check (commandText.contains ("renameTrack"), "backend command log records renameTrack");
+    check (commandText.contains ("removeTrack"), "backend command log records removeTrack");
+    check (commandText.contains ("addClip"), "backend command log records addClip");
+    check (commandText.contains ("getClipPeaks"), "backend command log records getClipPeaks");
+    check (commandText.contains ("moveClip"), "backend command log records moveClip");
+    check (commandText.contains ("trimClip"), "backend command log records trimClip");
+    check (commandText.contains ("splitClip"), "backend command log records splitClip");
+    check (commandText.contains ("duplicateClip"), "backend command log records duplicateClip");
+    check (commandText.contains ("pasteClip"), "backend command log records pasteClip");
+    check (commandText.contains ("deleteTimeRange"), "backend command log records deleteTimeRange");
+    check (commandText.contains ("renameClip"), "backend command log records renameClip");
+    check (commandText.contains ("removeClip"), "backend command log records removeClip");
+    check (commandText.contains ("setClipGain"), "backend command log records setClipGain");
+    check (commandText.contains ("setClipMute"), "backend command log records setClipMute");
+    check (commandText.contains ("addMidiClip"), "backend command log records addMidiClip");
+    check (commandText.contains ("addNote"), "backend command log records addNote");
+    check (commandText.contains ("setNote"), "backend command log records setNote");
+    check (commandText.contains ("quantizeNotes"), "backend command log records quantizeNotes");
+    check (commandText.contains ("removeNote"), "backend command log records removeNote");
+    check (commandText.contains ("setTrackVolume"), "backend command log records setTrackVolume");
+    check (commandText.contains ("setTrackPan"), "backend command log records setTrackPan");
+    check (commandText.contains ("setTrackMute"), "backend command log records setTrackMute");
+    check (commandText.contains ("setTrackSolo"), "backend command log records setTrackSolo");
+    check (commandText.contains ("enableTrackMeter"), "backend command log records enableTrackMeter");
+    check (commandText.contains ("disableTrackMeter"), "backend command log records disableTrackMeter");
+    check (commandText.contains ("enableAllMeters"), "backend command log records enableAllMeters");
+    check (commandText.contains ("setMasterVolume"), "backend command log records setMasterVolume");
+    check (commandText.contains ("setMasterPan"), "backend command log records setMasterPan");
+    check (commandText.contains ("createBus"), "backend command log records createBus");
+    check (commandText.contains ("renameBus"), "backend command log records renameBus");
+    check (commandText.contains ("addSend"), "backend command log records addSend");
+    check (commandText.contains ("setSendLevel"), "backend command log records setSendLevel");
+    check (commandText.contains ("removeSend"), "backend command log records removeSend");
+    check (commandText.contains ("removeBus"), "backend command log records removeBus");
+    check (commandText.contains ("createGroupTrack"), "backend command log records createGroupTrack");
+    check (commandText.contains ("ungroupTrack"), "backend command log records ungroupTrack");
+    check (commandText.contains ("setTempo"), "backend command log records setTempo");
+    check (commandText.contains ("insertTempoChange"), "backend command log records insertTempoChange");
+    check (commandText.contains ("setTempoCurve"), "backend command log records setTempoCurve");
+    check (commandText.contains ("removeTempoChange"), "backend command log records removeTempoChange");
+    check (commandText.contains ("setTimeSignature"), "backend command log records setTimeSignature");
+    check (commandText.contains ("insertTimeSigChange"), "backend command log records insertTimeSigChange");
+    check (commandText.contains ("removeTimeSigChange"), "backend command log records removeTimeSigChange");
+    check (commandText.contains ("setMetronome"), "backend command log records setMetronome");
+    check (commandText.contains ("setProjectSettings"), "backend command log records setProjectSettings");
+    check (commandText.contains ("loadPlugin"), "backend command log records loadPlugin");
+    check (commandText.contains ("setPluginParam"), "backend command log records setPluginParam");
+    check (commandText.contains ("bypassPlugin"), "backend command log records bypassPlugin");
+    check (commandText.contains ("reorderPlugin"), "backend command log records reorderPlugin");
+    check (commandText.contains ("removePlugin"), "backend command log records removePlugin");
+    check (commandText.contains ("setTransport"), "backend command log records setTransport");
+    check (commandText.contains ("renderExport"), "backend command log records renderExport");
+    const auto moshOpsCommandLog = eng.sessionDir().getChildFile ("mosh-log.jsonl");
+    check (moshOpsCommandLog.existsAsFile(),
+           "MoshOps command log exists for routed UI commands");
+    const auto moshOpsCommandText = moshOpsCommandLog.loadFileAsString();
+    check (moshOpsCommandText.contains ("\"command\": \"block_plugin\""),
+           "MoshOps command log records Maolan block_plugin mutation");
+    check (moshOpsCommandText.contains ("\"command\": \"clear_plugin_blocklist\""),
+           "MoshOps command log records Maolan clear_plugin_blocklist mutation");
+    check (! moshOpsCommandText.contains ("\"command\": \"get_plugin_blocklist\""),
+           "MoshOps command log excludes read-only get_plugin_blocklist");
+    check (! moshOpsCommandText.contains ("\"command\": \"list_midi_inputs\""),
+           "MoshOps command log excludes read-only list_midi_inputs");
+    check (! moshOpsCommandText.contains ("\"command\": \"list_builtins\""),
+           "MoshOps command log excludes read-only list_builtins");
+    check (! moshOpsCommandText.contains ("\"command\": \"list_directory\""),
+           "MoshOps command log excludes local read-only list_directory");
+    check (! moshOpsCommandText.contains ("\"command\": \"get_command_log\""),
+           "MoshOps command log excludes local read-only get_command_log");
+
+    finishSection();
+    std::cerr << "===== " << checks - failures << "/" << checks
+              << " Maolan MoshOps routing checks passed, " << failures << " failed =====\n";
+    return failures;
+}
+
+int runMaolanPersistenceRestartSelfTest (MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+    failures = 0;
+    checks = 0;
+    resetSections();
+
+    const auto phase = SystemStats::getEnvironmentVariable ("MOSH_MAOLAN_PERSISTENCE_PHASE", "write")
+                           .trim()
+                           .toLowerCase();
+    const auto graphPath = SystemStats::getEnvironmentVariable ("MOSH_MAOLAN_PERSISTENCE_GRAPH", {}).trim();
+    const auto outputDir = SystemStats::getEnvironmentVariable ("MOSH_ENGINE_CONTRACT_OUTPUT_DIR", {}).trim();
+    const auto timeout = SystemStats::getEnvironmentVariable ("MOSH_ENGINE_CONTRACT_TIMEOUT_SECONDS", {}).getIntValue();
+    const auto pluginPath = SystemStats::getEnvironmentVariable (
+        "MOSH_MAOLAN_PLUGIN_PATH",
+        "/Users/emiliosanchez-harris/Library/Audio/Plug-Ins/VST3/JamPilotTestGain.vst3");
+
+    std::cerr << "\n===== Maolan persistence restart harness (" << phase << ") =====\n";
+
+    auto session = ops.snapshot().getProperty ("session", var());
+    check (session.getProperty ("backend", var()).toString() == "maolan",
+           "persistence harness is running against Maolan backend");
+    check (graphPath.isNotEmpty(), "persistence graph path is configured");
+
+    const File persistedGraph (graphPath);
+    const auto beforeTracktionTracks = tracktion::engine::getAudioTracks (eng.edit()).size();
+
+    auto graphHasJamPilotTrack = [&ops] (const String& label)
+    {
+        auto snapshot = ops.snapshot();
+        auto sessionVar = snapshot.getProperty ("session", var());
+        check (std::abs ((double) sessionVar.getProperty ("tempo", 0.0) - 132.0) < 0.01,
+               label + " preserves tempo");
+        const auto tempoMap = sessionVar.getProperty ("tempoMap", var());
+        check (tempoMap.size() == 2, label + " preserves tempo-map point count");
+        if (tempoMap.size() > 1)
+        {
+            check (std::abs ((double) tempoMap[0].getProperty ("curve", 1.0)) < 0.01,
+                   label + " preserves tempo curve metadata");
+            check (std::abs ((double) tempoMap[1].getProperty ("time", 0.0) - 8.0) < 0.01,
+                   label + " preserves inserted tempo-map time");
+            check (std::abs ((double) tempoMap[1].getProperty ("bpm", 0.0) - 96.0) < 0.01,
+                   label + " preserves inserted tempo-map bpm");
+        }
+        check ((int) sessionVar.getProperty ("timeSigNumerator", 0) == 5,
+               label + " preserves time signature numerator");
+        check ((int) sessionVar.getProperty ("timeSigDenominator", 0) == 4,
+               label + " preserves time signature denominator");
+        const auto timeSigMap = sessionVar.getProperty ("timeSigMap", var());
+        check (timeSigMap.size() == 2, label + " preserves time-signature map point count");
+        if (timeSigMap.size() > 1)
+        {
+            check (std::abs ((double) timeSigMap[1].getProperty ("time", 0.0) - 16.0) < 0.01,
+                   label + " preserves inserted time-signature time");
+            check ((int) timeSigMap[1].getProperty ("numerator", 0) == 3,
+                   label + " preserves inserted time-signature numerator");
+            check ((int) timeSigMap[1].getProperty ("denominator", 0) == 4,
+                   label + " preserves inserted time-signature denominator");
+        }
+        check ((bool) sessionVar.getProperty ("metronome", false),
+               label + " preserves metronome state");
+        const auto projectVar = sessionVar.getProperty ("project", var());
+        check (std::abs ((double) projectVar.getProperty ("sampleRate", 0.0) - 88200.0) < 0.01,
+               label + " preserves project sample rate");
+        check ((int) projectVar.getProperty ("bitDepth", 0) == 32,
+               label + " preserves project bit depth");
+        check (projectVar.getProperty ("timeBase", var()).toString() == "barsBeats",
+               label + " preserves project time base");
+        check (std::abs ((double) snapshot.getProperty ("master", var()).getProperty ("volumeDb", 0.0) - (-3.25)) < 0.01,
+               label + " preserves master volume");
+        check (std::abs ((double) snapshot.getProperty ("master", var()).getProperty ("pan", 0.0) - 0.5) < 0.01,
+               label + " preserves master pan");
+        check (snapshot.getProperty ("buses", var()).size() == 1,
+               label + " preserves one backend bus");
+        if (snapshot.getProperty ("buses", var()).size() > 0)
+        {
+            const auto bus = snapshot.getProperty ("buses", var())[0];
+            check ((int) bus.getProperty ("bus", -1) == 0,
+                   label + " preserves bus number");
+            check (bus.getProperty ("name", var()).toString() == "Maolan Persistence Bus Renamed",
+                   label + " preserves bus name");
+        }
+
+        auto tracksVar = snapshot.getProperty ("tracks", var());
+        check (tracksVar.size() == 3, label + " exposes source track plus bus return and group tracks");
+        if (tracksVar.size() == 0)
+            return String();
+
+        const auto track = tracksVar[0];
+        check (track.getProperty ("name", var()).toString().isNotEmpty(),
+               label + " track has a name");
+        check (std::abs ((double) track.getProperty ("volumeDb", 0.0) - (-5.5)) < 0.01,
+               label + " preserves track volume");
+        check (std::abs ((double) track.getProperty ("pan", 0.0) - (-0.25)) < 0.01,
+               label + " preserves track pan");
+        check (! (bool) track.getProperty ("mute", true),
+               label + " preserves track mute state");
+        check ((bool) track.getProperty ("solo", false),
+               label + " preserves track solo");
+        check ((bool) track.getProperty ("meterEnabled", false),
+               label + " preserves track meter posture");
+        check ((bool) track.getProperty ("armed", false),
+               label + " preserves track arm posture");
+        check (track.getProperty ("monitor", var()).toString() == "on",
+               label + " preserves monitor posture");
+        check (! (bool) track.getProperty ("hasInput", true),
+               label + " keeps hasInput false without live input binding");
+        check (track.getProperty ("input", var()).getProperty ("deviceID", var()).toString() == "input-3-4",
+               label + " preserves input choice");
+        check (track.getProperty ("parentId", var()).toString() == "group-persist",
+               label + " preserves group membership parentId");
+        const auto sends = track.getProperty ("sends", var());
+        check (sends.size() == 1, label + " preserves one send");
+        if (sends.size() > 0)
+        {
+            const auto send = sends[0];
+            check ((int) send.getProperty ("bus", -1) == 0,
+                   label + " preserves send bus");
+            check (std::abs ((double) send.getProperty ("db", 0.0) - (-10.0)) < 0.01,
+                   label + " preserves send level");
+            check (! (bool) send.getProperty ("mute", true),
+                   label + " preserves send mute");
+        }
+        if (tracksVar.size() > 1)
+        {
+            const auto returnTrack = tracksVar[1];
+            check ((bool) returnTrack.getProperty ("isReturn", false),
+                   label + " preserves bus return track");
+            check ((int) returnTrack.getProperty ("returnBus", -1) == 0,
+                   label + " preserves bus return number");
+        }
+        if (tracksVar.size() > 2)
+        {
+            const auto groupTrack = tracksVar[2];
+            check (groupTrack.getProperty ("id", var()).toString() == "group-persist",
+                   label + " preserves group track id");
+            check (groupTrack.getProperty ("name", var()).toString() == "Maolan Persistence Group",
+                   label + " preserves group track name");
+            check (groupTrack.getProperty ("type", var()).toString() == "group",
+                   label + " preserves group track type");
+            check ((bool) groupTrack.getProperty ("isGroup", false),
+                   label + " preserves group marker");
+        }
+        const auto clips = track.getProperty ("clips", var());
+        check (clips.size() == 7, label + " exposes audio clip set plus MIDI clip");
+        if (clips.size() > 0)
+        {
+            const auto clip = clips[0];
+            check (clip.getProperty ("name", var()).toString() == "Maolan Persistence Clip Edited",
+                   label + " preserves left clip name");
+            check (std::abs ((double) clip.getProperty ("start", 0.0) - 0.5) < 0.01,
+                   label + " preserves left clip start");
+            check (std::abs ((double) clip.getProperty ("length", 0.0) - 0.5) < 0.01,
+                   label + " preserves left clip length");
+            check (std::abs ((double) clip.getProperty ("offset", 0.0) - 0.2) < 0.01,
+                   label + " preserves left clip offset");
+            check (std::abs ((double) clip.getProperty ("gainDb", 0.0) - (-1.5)) < 0.01,
+                   label + " preserves left clip gain");
+            check (! (bool) clip.getProperty ("mute", true),
+                   label + " preserves left clip mute state");
+            check (File (clip.getProperty ("sourceFile", var()).toString()).existsAsFile(),
+                   label + " left clip source file exists");
+        }
+        if (clips.size() > 1)
+        {
+            const auto clip = clips[1];
+            check (clip.getProperty ("id", var()).toString() == "clip-persist-1-split",
+                   label + " preserves right clip id");
+            check (clip.getProperty ("name", var()).toString() == "Maolan Persistence Clip Edited",
+                   label + " preserves right clip name");
+            check (std::abs ((double) clip.getProperty ("start", 0.0) - 1.0) < 0.01,
+                   label + " preserves right clip start");
+            check (std::abs ((double) clip.getProperty ("length", 0.0) - 0.5) < 0.01,
+                   label + " preserves right clip length");
+            check (std::abs ((double) clip.getProperty ("offset", 0.0) - 0.7) < 0.01,
+                   label + " preserves right clip offset");
+            check (std::abs ((double) clip.getProperty ("gainDb", 0.0) - (-1.5)) < 0.01,
+                   label + " preserves right clip gain");
+            check (! (bool) clip.getProperty ("mute", true),
+                   label + " preserves right clip mute state");
+            check (File (clip.getProperty ("sourceFile", var()).toString()).existsAsFile(),
+                   label + " right clip source file exists");
+        }
+        if (clips.size() > 2)
+        {
+            const auto clip = clips[2];
+            check (clip.getProperty ("id", var()).toString() == "clip-persist-1-copy",
+                   label + " preserves duplicate clip id");
+            check (clip.getProperty ("name", var()).toString() == "Maolan Persistence Clip Edited",
+                   label + " preserves duplicate clip name");
+            check (std::abs ((double) clip.getProperty ("start", 0.0) - 1.5) < 0.01,
+                   label + " preserves duplicate clip start");
+            check (std::abs ((double) clip.getProperty ("length", 0.0) - 0.5) < 0.01,
+                   label + " preserves duplicate clip length");
+            check (std::abs ((double) clip.getProperty ("offset", 0.0) - 0.7) < 0.01,
+                   label + " preserves duplicate clip offset");
+            check (std::abs ((double) clip.getProperty ("gainDb", 0.0) - (-1.5)) < 0.01,
+                   label + " preserves duplicate clip gain");
+            check (! (bool) clip.getProperty ("mute", true),
+                   label + " preserves duplicate clip mute state");
+            check ((bool) clip.getProperty ("autoTempo", false),
+                   label + " preserves duplicate clip auto-tempo metadata");
+            check (std::abs ((double) clip.getProperty ("sourceBpm", 0.0) - 132.0) < 0.01,
+                   label + " preserves duplicate clip source BPM");
+            check (clip.getProperty ("stretchMode", var()).toString().containsIgnoreCase ("soundtouch"),
+                   label + " preserves duplicate clip stretch mode");
+            check (std::abs ((double) clip.getProperty ("warpSourceLengthSeconds", 0.0) - 0.5) < 0.01,
+                   label + " preserves duplicate clip warp source length");
+            check (File (clip.getProperty ("sourceFile", var()).toString()).existsAsFile(),
+                   label + " duplicate clip source file exists");
+        }
+        if (clips.size() > 3)
+        {
+            const auto clip = clips[3];
+            check (clip.getProperty ("id", var()).toString() == "clip-persist-1-paste",
+                   label + " preserves pasted clip id");
+            check (clip.getProperty ("name", var()).toString() == "Maolan Persistence Paste",
+                   label + " preserves pasted clip name");
+            check (std::abs ((double) clip.getProperty ("start", 0.0) - 2.0) < 0.01,
+                   label + " preserves pasted clip start");
+            check (std::abs ((double) clip.getProperty ("length", 0.0) - 0.5) < 0.01,
+                   label + " preserves pasted clip length");
+            check (std::abs ((double) clip.getProperty ("offset", 0.0) - 0.7) < 0.01,
+                   label + " preserves pasted clip offset");
+            check (std::abs ((double) clip.getProperty ("gainDb", 0.0) - (-1.5)) < 0.01,
+                   label + " preserves pasted clip gain");
+            check (! (bool) clip.getProperty ("mute", true),
+                   label + " preserves pasted clip mute state");
+            check (File (clip.getProperty ("sourceFile", var()).toString()).existsAsFile(),
+                   label + " pasted clip source file exists");
+        }
+        if (clips.size() > 5)
+        {
+            const auto leftDeleteClip = clips[4];
+            check (leftDeleteClip.getProperty ("id", var()).toString() == "clip-persist-delete",
+                   label + " preserves delete range left clip id");
+            check (leftDeleteClip.getProperty ("name", var()).toString() == "Maolan Persistence Delete Range",
+                   label + " preserves delete range left clip name");
+            check (std::abs ((double) leftDeleteClip.getProperty ("start", 0.0) - 2.5) < 0.01,
+                   label + " preserves delete range left clip start");
+            check (std::abs ((double) leftDeleteClip.getProperty ("length", 0.0) - 0.25) < 0.01,
+                   label + " preserves delete range left clip length");
+            check (std::abs ((double) leftDeleteClip.getProperty ("offset", 0.0)) < 0.01,
+                   label + " preserves delete range left clip offset");
+            check (File (leftDeleteClip.getProperty ("sourceFile", var()).toString()).existsAsFile(),
+                   label + " delete range left clip source file exists");
+
+            const auto rightDeleteClip = clips[5];
+            check (rightDeleteClip.getProperty ("id", var()).toString() == "clip-persist-delete-after-delete",
+                   label + " preserves delete range right clip id");
+            check (rightDeleteClip.getProperty ("name", var()).toString() == "Maolan Persistence Delete Range",
+                   label + " preserves delete range right clip name");
+            check (std::abs ((double) rightDeleteClip.getProperty ("start", 0.0) - 3.0) < 0.01,
+                   label + " preserves delete range right clip start");
+            check (std::abs ((double) rightDeleteClip.getProperty ("length", 0.0) - 0.5) < 0.01,
+                   label + " preserves delete range right clip length");
+            check (std::abs ((double) rightDeleteClip.getProperty ("offset", 0.0) - 0.5) < 0.01,
+                   label + " preserves delete range right clip offset");
+            check (File (rightDeleteClip.getProperty ("sourceFile", var()).toString()).existsAsFile(),
+                   label + " delete range right clip source file exists");
+        }
+        if (clips.size() > 6)
+        {
+            const auto midiClip = clips[6];
+            check (midiClip.getProperty ("id", var()).toString() == "clip-persist-midi",
+                   label + " preserves MIDI clip id");
+            check (midiClip.getProperty ("type", var()).toString() == "midi",
+                   label + " preserves MIDI clip type");
+            const auto notes = midiClip.getProperty ("notes", var());
+            check (notes.size() == 3, label + " preserves MIDI note count");
+            if (notes.size() > 0)
+            {
+                check ((int) notes[0].getProperty ("pitch", -1) != 60,
+                       label + " preserves edited/removed MIDI notes");
+                bool onGrid = true;
+                if (auto* noteArr = notes.getArray())
+                    for (const auto& note : *noteArr)
+                    {
+                        const double start = (double) note.getProperty ("start", 0.0);
+                        if (std::abs (start - std::round (start)) > 0.02)
+                            onGrid = false;
+                    }
+                check (onGrid, label + " preserves quantized MIDI note starts");
+            }
+        }
+        const auto plugins = track.getProperty ("plugins", var());
+        check (plugins.size() == 2, label + " exposes reordered plugin chain");
+        if (plugins.size() == 0)
+            return track.getProperty ("id", var()).toString();
+
+        const auto plugin = plugins[0];
+        check (plugin.getProperty ("identifier", var()).toString() == "jampilot-test-gain-vst3",
+               label + " preserves reordered primary plugin id at index 0");
+        check (plugin.getProperty ("name", var()).toString().contains ("JamPilotTestGain.vst3"),
+               label + " plugin name is JamPilotTestGain.vst3");
+        check (plugin.getProperty ("file", var()).toString().contains ("JamPilotTestGain.vst3"),
+               label + " plugin file is JamPilotTestGain.vst3");
+        check (! (bool) plugin.getProperty ("enabled", true),
+               label + " preserves plugin bypass state");
+        const auto params = plugin.getProperty ("params", var());
+        check (params.size() == 1, label + " preserves one plugin param");
+        if (params.size() > 0)
+        {
+            const auto param = params[0];
+            check ((int) param.getProperty ("index", -1) == 0,
+                   label + " preserves plugin param index");
+            check (std::abs ((double) param.getProperty ("value", 0.0) - 0.37) < 0.01,
+                   label + " preserves plugin param value");
+            check ((bool) param.getProperty ("automated", false),
+                   label + " preserves plugin automation flag");
+            const auto points = param.getProperty ("points", var());
+            check (points.size() == 1, label + " preserves plugin automation point count");
+            if (points.size() > 0)
+            {
+                check (std::abs ((double) points[0].getProperty ("t", 0.0) - 0.5) < 0.01,
+                       label + " preserves plugin automation time");
+                check (std::abs ((double) points[0].getProperty ("v", 0.0) - 0.5) < 0.01,
+                       label + " preserves plugin automation value");
+            }
+        }
+        if (plugins.size() > 1)
+        {
+            const auto secondPlugin = plugins[1];
+            check (secondPlugin.getProperty ("identifier", var()).toString() == "jampilot-persistence-reorder-probe",
+                   label + " preserves reordered secondary plugin id at index 1");
+            check (secondPlugin.getProperty ("file", var()).toString().contains ("JamPilotTestGain.vst3"),
+                   label + " preserves secondary plugin file");
+        }
+        return track.getProperty ("id", var()).toString();
+    };
+
+    auto runPlaybackProbe = [&ops, timeout] (const String& label)
+    {
+        auto* playArgs = new DynamicObject();
+        playArgs->setProperty ("action", "play");
+        playArgs->setProperty ("durationSeconds", 0.5);
+        if (timeout > 0)
+            playArgs->setProperty ("timeoutSeconds", timeout);
+
+        auto played = cmd (ops, "set_transport", var (playArgs));
+        check (ok (played), label + " set_transport play runs Maolan playback smoke");
+
+        const auto playbackStats = played.getProperty ("data", var()).getProperty ("playbackStats", var()).toString();
+        const File playbackStatsFile (playbackStats);
+        check (playbackStatsFile.existsAsFile(), label + " playback stats JSON exists");
+        if (! playbackStatsFile.existsAsFile())
+            return;
+
+        auto playback = JSON::parse (playbackStatsFile.loadFileAsString());
+        check (playback.getProperty ("playback_source", var()).toString() == "maolan-session-playback",
+               label + " playback stats report Maolan session playback source");
+        check ((bool) playback.getProperty ("play_started", false),
+               label + " playback stats confirm play start");
+        check ((bool) playback.getProperty ("stop_confirmed", false),
+               label + " playback stats confirm stop");
+        check ((int) playback.getProperty ("transport_sample", 0) > 0,
+               label + " playback stats report transport movement");
+        check ((int) playback.getProperty ("vst3_instances", 0) >= 1,
+               label + " playback stats report restored VST3 instance");
+        check ((int) playback.getProperty ("workers_ready", 0) >= (int) playback.getProperty ("workers_total", 1),
+               label + " playback stats report ready workers");
+        check ((bool) playback.getProperty ("during_play", var()).getProperty ("playing", false),
+               label + " playback stats show transport playing during probe");
+        check (! (bool) playback.getProperty ("stopped", var()).getProperty ("playing", true),
+               label + " playback stats show stopped transport after probe");
+    };
+
+    if (phase == "write")
+    {
+        section ("write persisted Maolan session graph");
+
+        auto* newArgs = new DynamicObject();
+        newArgs->setProperty ("sessionId", "maolan-persistence-restart");
+        if (outputDir.isNotEmpty())
+            newArgs->setProperty ("outputDir", outputDir);
+
+        check (ok (cmd (ops, "new_project", var (newArgs))), "new_project creates Maolan persistence session");
+        check (ok (cmd (ops, "set_audio_device", args1 ("device", "coreaudio:default"))),
+               "set_audio_device selects coreaudio:default");
+        check (ok (cmd (ops, "set_tempo", args1 ("bpm", 132.0))),
+               "set_tempo writes persistence graph");
+        check (ok (cmd (ops, "insert_tempo_change", objN ({{ "time", 8.0 }, { "bpm", 96.0 }}))),
+               "insert_tempo_change writes persistence graph");
+        check (ok (cmd (ops, "set_tempo_curve", objN ({{ "index", 0 }, { "curve", 0.0 }}))),
+               "set_tempo_curve writes persistence graph");
+        check (ok (cmd (ops, "set_time_signature", objN ({{ "numerator", 5 }, { "denominator", 4 }}))),
+               "set_time_signature writes persistence graph");
+        check (ok (cmd (ops, "insert_time_sig_change", objN ({{ "time", 16.0 }, { "numerator", 3 }, { "denominator", 4 }}))),
+               "insert_time_sig_change writes persistence graph");
+        check (ok (cmd (ops, "set_metronome", args1 ("enabled", true))),
+               "set_metronome writes persistence graph");
+        check (ok (cmd (ops, "set_project_settings", objN ({{ "sampleRate", 88200 }, { "bitDepth", 32 }, { "timeBase", "barsBeats" }}))),
+               "set_project_settings writes persistence graph");
+        check (ok (cmd (ops, "set_master_volume", args1 ("db", -3.25))),
+               "set_master_volume writes persistence graph");
+        check (ok (cmd (ops, "set_master_pan", args1 ("pan", 0.5))),
+               "set_master_pan writes persistence graph");
+
+        auto* scanArgs = new DynamicObject();
+        scanArgs->setProperty ("format", "vst3");
+        if (timeout > 0)
+            scanArgs->setProperty ("timeoutSeconds", timeout);
+        check (ok (cmd (ops, "rescan_plugins", var (scanArgs))), "rescan_plugins primes Maolan fixture catalog");
+
+        auto createdTrack = cmd (ops, "create_track", args1 ("name", "Maolan Persistence Track"));
+        check (ok (createdTrack), "create_track writes backend track");
+        const auto trackId = createdTrack.getProperty ("data", var()).getProperty ("trackId", var()).toString();
+        check (trackId.isNotEmpty(), "create_track returned a track id");
+        check (ok (cmd (ops, "set_track_volume", objN ({{ "trackId", trackId }, { "db", -5.5 }}))),
+               "set_track_volume writes persistence graph");
+        check (ok (cmd (ops, "set_track_pan", objN ({{ "trackId", trackId }, { "pan", -0.25 }}))),
+               "set_track_pan writes persistence graph");
+        check (ok (cmd (ops, "set_track_mute", objN ({{ "trackId", trackId }, { "mute", true }}))),
+               "set_track_mute writes persistence graph");
+        check ((bool) ops.snapshot().getProperty ("tracks", var())[0].getProperty ("mute", false),
+               "set_track_mute snapshot reflects muted state before final render state");
+        check (ok (cmd (ops, "set_track_mute", objN ({{ "trackId", trackId }, { "mute", false }}))),
+               "set_track_mute writes final unmuted persistence graph");
+        check (ok (cmd (ops, "set_track_solo", objN ({{ "trackId", trackId }, { "solo", true }}))),
+               "set_track_solo writes persistence graph");
+        check (ok (cmd (ops, "enable_track_meter", args1 ("trackId", trackId))),
+               "enable_track_meter writes persistence graph");
+        check ((bool) ops.snapshot().getProperty ("tracks", var())[0].getProperty ("meterEnabled", false),
+               "snapshot reflects persistence meter enabled");
+        check (ok (cmd (ops, "disable_track_meter", args1 ("trackId", trackId))),
+               "disable_track_meter writes persistence graph");
+        check (! (bool) ops.snapshot().getProperty ("tracks", var())[0].getProperty ("meterEnabled", true),
+               "snapshot reflects persistence meter disabled");
+        check (ok (cmd (ops, "enable_all_meters", var())),
+               "enable_all_meters writes persistence graph");
+        check ((bool) ops.snapshot().getProperty ("tracks", var())[0].getProperty ("meterEnabled", false),
+               "snapshot reflects persistence enable_all_meters");
+        auto persistenceBus = cmd (ops, "create_bus", args1 ("name", "Maolan Persistence Bus"));
+        check (ok (persistenceBus), "create_bus writes persistence graph");
+        const int persistenceBusNumber = (int) persistenceBus.getProperty ("data", var()).getProperty ("bus", -1);
+        check (persistenceBusNumber == 0, "create_bus returns first persistence bus");
+        check (ok (cmd (ops, "rename_bus", objN ({{ "bus", persistenceBusNumber }, { "name", "Maolan Persistence Bus Renamed" }}))),
+               "rename_bus writes persistence graph");
+        Array<var> persistenceGroupMembers;
+        persistenceGroupMembers.add (trackId);
+        check (ok (cmd (ops, "create_group_track", objN ({{ "trackIds", var (persistenceGroupMembers) },
+                                                          { "groupId", "group-persist" },
+                                                          { "name", "Maolan Persistence Group" }}))),
+               "create_group_track writes persistence graph");
+        auto persistenceSend = cmd (ops, "add_send", objN ({{ "trackId", trackId }, { "bus", persistenceBusNumber }, { "db", -8.0 }}));
+        check (ok (persistenceSend), "add_send writes persistence graph");
+        check (! (bool) persistenceSend.getProperty ("data", var()).getProperty ("applied", true),
+               "add_send persistence reports live aux summing deferred");
+        check (ok (cmd (ops, "set_send_level", objN ({{ "trackId", trackId }, { "bus", persistenceBusNumber }, { "db", -10.0 }, { "mute", false }}))),
+               "set_send_level writes persistence graph");
+        check (ok (cmd (ops, "set_track_input", objN ({{ "trackId", trackId }, { "deviceID", "input-3-4" }}))),
+               "set_track_input writes persistence graph");
+        check (ok (cmd (ops, "arm_track", objN ({{ "trackId", trackId }, { "armed", true }}))),
+               "arm_track writes persistence graph");
+        check (ok (cmd (ops, "set_input_monitor", objN ({{ "trackId", trackId }, { "mode", "on" }}))),
+               "set_input_monitor writes persistence graph");
+        auto stopProbe = cmd (ops, "stop_recording", objN ({{ "discardRecordings", false }}));
+        check (ok (stopProbe), "stop_recording reports Maolan persistence no-live-input posture");
+        check (! (bool) stopProbe.getProperty ("data", var()).getProperty ("applied", true),
+               "stop_recording persistence posture reports applied:false");
+        auto addedClip = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", trackId }, { "clipId", "clip-persist-1" }, { "name", "Maolan Persistence Clip" }, { "seconds", 2.0 }, { "freq", 550.0 }}));
+        check (ok (addedClip), "add_test_tone_clip writes persistence graph");
+        check (File (addedClip.getProperty ("data", var()).getProperty ("file", var()).toString()).existsAsFile(),
+               "persistence clip source WAV exists");
+        auto persistencePeaks = cmd (ops, "get_clip_peaks", objN ({{ "clipId", "clip-persist-1" }, { "buckets", 64 }}));
+        check (ok (persistencePeaks), "get_clip_peaks reads persistence source WAV");
+        check ((int) persistencePeaks.getProperty ("data", var()).getProperty ("buckets", 0) > 0,
+               "get_clip_peaks returns persistence peak buckets");
+        check (ok (cmd (ops, "move_clip", objN ({{ "clipId", "clip-persist-1" }, { "start", 0.5 }}))),
+               "move_clip writes persistence graph");
+        check (ok (cmd (ops, "trim_clip", objN ({{ "clipId", "clip-persist-1" }, { "start", 0.5 }, { "length", 1.0 }, { "offset", 0.2 }}))),
+               "trim_clip writes persistence graph");
+        check (ok (cmd (ops, "rename_clip", objN ({{ "clipId", "clip-persist-1" }, { "name", "Maolan Persistence Clip Edited" }}))),
+               "rename_clip writes persistence graph");
+        check (ok (cmd (ops, "set_clip_gain", objN ({{ "clipId", "clip-persist-1" }, { "gainDb", -1.5 }}))),
+               "set_clip_gain writes persistence graph");
+        check (ok (cmd (ops, "set_clip_mute", objN ({{ "clipId", "clip-persist-1" }, { "mute", false }}))),
+               "set_clip_mute writes persistence graph");
+        auto splitPersist = cmd (ops, "split_clip", objN ({{ "clipId", "clip-persist-1" }, { "time", 1.0 }, { "newClipId", "clip-persist-1-split" }}));
+        check (ok (splitPersist), "split_clip writes persistence graph");
+        check (splitPersist.getProperty ("data", var()).getProperty ("newClipId", var()).toString() == "clip-persist-1-split",
+               "split_clip returns persistence right clip id");
+        auto duplicatePersist = cmd (ops, "duplicate_clip", objN ({{ "clipId", "clip-persist-1-split" }, { "newClipId", "clip-persist-1-copy" }}));
+        check (ok (duplicatePersist), "duplicate_clip writes persistence graph");
+        check (duplicatePersist.getProperty ("data", var()).getProperty ("newClipId", var()).toString() == "clip-persist-1-copy",
+               "duplicate_clip returns persistence copy clip id");
+        check (ok (cmd (ops, "set_clip_warp", objN ({{ "clipId", "clip-persist-1-copy" }, { "autoTempo", true }, { "sourceBpm", 132.0 }}))),
+               "set_clip_warp writes persistence graph");
+        auto persistencePasteSource = ops.snapshot().getProperty ("tracks", var())[0].getProperty ("clips", var())[1];
+        auto pastePersist = cmd (ops, "paste_clip", objN ({
+            { "trackId", trackId },
+            { "newClipId", "clip-persist-1-paste" },
+            { "start", 2.0 },
+            { "clip", objN ({
+                { "id", persistencePasteSource.getProperty ("id", var()) },
+                { "type", "wave" },
+                { "name", "Maolan Persistence Paste" },
+                { "sourcePath", persistencePasteSource.getProperty ("sourcePath", persistencePasteSource.getProperty ("sourceFile", var())) },
+                { "length", persistencePasteSource.getProperty ("length", var()) },
+                { "offset", persistencePasteSource.getProperty ("offset", var()) },
+                { "gainDb", persistencePasteSource.getProperty ("gainDb", var()) },
+                { "mute", persistencePasteSource.getProperty ("mute", var()) },
+            }) },
+        }));
+        check (ok (pastePersist), "paste_clip writes persistence graph");
+        check (pastePersist.getProperty ("data", var()).getProperty ("newClipId", var()).toString() == "clip-persist-1-paste",
+               "paste_clip returns persistence pasted clip id");
+        check (ok (cmd (ops, "add_test_tone_clip", objN ({{ "trackId", trackId }, { "clipId", "clip-persist-delete" }, { "name", "Maolan Persistence Delete Range" }, { "seconds", 1.0 }, { "freq", 440.0 }, { "start", 2.5 }}))),
+               "add_test_tone_clip creates persistence delete_time_range clip");
+        auto* persistenceDeleteArgs = new DynamicObject();
+        persistenceDeleteArgs->setProperty ("start", 2.75);
+        persistenceDeleteArgs->setProperty ("end", 3.0);
+        Array<var> persistenceDeleteTrackIds;
+        persistenceDeleteTrackIds.add (trackId);
+        persistenceDeleteArgs->setProperty ("trackIds", persistenceDeleteTrackIds);
+        auto deletePersist = cmd (ops, "delete_time_range", var (persistenceDeleteArgs));
+        check (ok (deletePersist), "delete_time_range writes persistence graph");
+        check ((int) deletePersist.getProperty ("data", var()).getProperty ("removed", 0) == 1,
+               "delete_time_range reports one removed persistence segment");
+        check ((int) deletePersist.getProperty ("data", var()).getProperty ("splits", 0) == 2,
+               "delete_time_range reports two persistence boundary splits");
+
+        Array<var> persistenceMidiSeed;
+        for (int k = 0; k < 3; ++k)
+        {
+            auto* note = new DynamicObject();
+            note->setProperty ("pitch", 60 + k);
+            note->setProperty ("start", (double) k + 0.2);
+            note->setProperty ("length", 0.5);
+            note->setProperty ("velocity", 90);
+            persistenceMidiSeed.add (var (note));
+        }
+        auto persistenceMidiClip = cmd (ops, "add_midi_clip", objN ({{ "trackId", trackId }, { "clipId", "clip-persist-midi" }, { "name", "Maolan Persistence MIDI" }, { "notes", var (persistenceMidiSeed) }}));
+        check (ok (persistenceMidiClip), "add_midi_clip writes MIDI persistence graph");
+        check (ok (cmd (ops, "add_note", objN ({{ "clipId", "clip-persist-midi" }, { "pitch", 72 }, { "start", 1.4 }, { "length", 1.0 }, { "velocity", 100 }}))),
+               "add_note writes MIDI persistence graph");
+        check (ok (cmd (ops, "set_note", objN ({{ "clipId", "clip-persist-midi" }, { "noteIndex", 0 }, { "pitch", 48 }, { "velocity", 127 }}))),
+               "set_note writes MIDI persistence graph");
+        check (ok (cmd (ops, "quantize_notes", objN ({{ "clipId", "clip-persist-midi" }, { "division", 1.0 }}))),
+               "quantize_notes writes MIDI persistence graph");
+        check (ok (cmd (ops, "remove_note", objN ({{ "clipId", "clip-persist-midi" }, { "noteIndex", 0 }}))),
+               "remove_note writes MIDI persistence graph");
+
+        auto* loadArgs = new DynamicObject();
+        loadArgs->setProperty ("trackId", trackId);
+        loadArgs->setProperty ("pluginId", "jampilot-test-gain-vst3");
+        loadArgs->setProperty ("pluginPath", pluginPath);
+        if (timeout > 0)
+            loadArgs->setProperty ("timeoutSeconds", timeout);
+        check (ok (cmd (ops, "load_plugin", var (loadArgs))), "load_plugin writes JamPilot fixture");
+        auto* loadReorderProbeArgs = new DynamicObject();
+        loadReorderProbeArgs->setProperty ("trackId", trackId);
+        loadReorderProbeArgs->setProperty ("pluginId", "jampilot-persistence-reorder-probe");
+        loadReorderProbeArgs->setProperty ("pluginPath", pluginPath);
+        loadReorderProbeArgs->setProperty ("index", 1);
+        if (timeout > 0)
+            loadReorderProbeArgs->setProperty ("timeoutSeconds", timeout);
+        check (ok (cmd (ops, "load_plugin", var (loadReorderProbeArgs))),
+               "second load_plugin writes persistence reorder probe");
+        check (ok (cmd (ops, "reorder_plugin", objN ({{ "trackId", trackId }, { "index", 1 }, { "toIndex", 0 }}))),
+               "reorder_plugin moves persistence probe to the front");
+        auto persistencePluginOrder = ops.snapshot().getProperty ("tracks", var())[0].getProperty ("plugins", var());
+        check (persistencePluginOrder.size() == 2
+               && persistencePluginOrder[0].getProperty ("identifier", var()).toString() == "jampilot-persistence-reorder-probe",
+               "snapshot reflects persistence probe moved to index 0");
+        check (ok (cmd (ops, "reorder_plugin", objN ({{ "trackId", trackId }, { "index", 1 }, { "toIndex", 0 }}))),
+               "reorder_plugin restores primary plugin to the front");
+        persistencePluginOrder = ops.snapshot().getProperty ("tracks", var())[0].getProperty ("plugins", var());
+        check (persistencePluginOrder.size() == 2
+               && persistencePluginOrder[0].getProperty ("identifier", var()).toString() == "jampilot-test-gain-vst3"
+               && persistencePluginOrder[1].getProperty ("identifier", var()).toString() == "jampilot-persistence-reorder-probe",
+               "snapshot reflects restored plugin order before parameter edits");
+        check (ok (cmd (ops, "set_plugin_param", objN ({{ "trackId", trackId }, { "index", 0 }, { "paramIndex", 0 }, { "value", 0.37 }}))),
+               "set_plugin_param writes plugin parameter metadata");
+        check (ok (cmd (ops, "add_automation_point", objN ({{ "trackId", trackId }, { "pluginIndex", 0 }, { "paramIndex", 0 }, { "time", 0.0 }, { "value", 0.2 }}))),
+               "add_automation_point writes first plugin automation point");
+        check (ok (cmd (ops, "add_automation_point", objN ({{ "trackId", trackId }, { "pluginIndex", 0 }, { "paramIndex", 0 }, { "time", 2.0 }, { "value", 0.8 }}))),
+               "add_automation_point writes second plugin automation point");
+        check (ok (cmd (ops, "set_automation_point", objN ({{ "trackId", trackId }, { "pluginIndex", 0 }, { "paramIndex", 0 }, { "pointIndex", 0 }, { "time", 0.5 }, { "value", 0.5 }}))),
+               "set_automation_point writes plugin automation metadata");
+        check (ok (cmd (ops, "remove_automation_point", objN ({{ "trackId", trackId }, { "pluginIndex", 0 }, { "paramIndex", 0 }, { "pointIndex", 1 }}))),
+               "remove_automation_point writes plugin automation metadata");
+        check (ok (cmd (ops, "bypass_plugin", objN ({{ "trackId", trackId }, { "index", 0 }, { "bypassed", true }}))),
+               "bypass_plugin writes plugin bypass metadata");
+
+        graphHasJamPilotTrack ("write snapshot");
+        runPlaybackProbe ("write phase");
+
+        auto* exportArgs = new DynamicObject();
+        exportArgs->setProperty ("trackId", trackId);
+        if (timeout > 0)
+            exportArgs->setProperty ("timeoutSeconds", timeout);
+        auto exported = cmd (ops, "export_audio", var (exportArgs));
+        check (ok (exported), "export_audio renders before persistence save");
+        const auto renderWav = exported.getProperty ("data", var()).getProperty ("file", var()).toString();
+        check (File (renderWav).existsAsFile() && File (renderWav).getSize() > 0,
+               "write phase render WAV exists");
+
+        auto saved = cmd (ops, "save_as", args1 ("file", persistedGraph.getFullPathName()));
+        check (ok (saved), "save_as writes persisted Maolan session graph");
+        check (persistedGraph.existsAsFile(), "persisted session graph exists");
+
+        auto graph = JSON::parse (persistedGraph.loadFileAsString());
+        check (graph.getProperty ("backend", var()).toString() == "maolan", "persisted graph backend maolan");
+        check (graph.getProperty ("device", var()).toString() == "coreaudio:default", "persisted graph device coreaudio:default");
+        check (graph.getProperty ("pluginBlocklist", var()).isArray()
+               && graph.getProperty ("pluginBlocklist", var()).size() == 0,
+               "persisted graph has cleared plugin blocklist");
+        check (std::abs ((double) graph.getProperty ("tempo", 0.0) - 132.0) < 0.01,
+               "persisted graph has tempo");
+        const auto persistedTempoMap = graph.getProperty ("tempoMap", var());
+        check (persistedTempoMap.size() == 2, "persisted graph has tempo-map point count");
+        if (persistedTempoMap.size() > 1)
+        {
+            check (std::abs ((double) persistedTempoMap[0].getProperty ("curve", 1.0)) < 0.01,
+                   "persisted graph has tempo curve metadata");
+            check (std::abs ((double) persistedTempoMap[1].getProperty ("time", 0.0) - 8.0) < 0.01,
+                   "persisted graph has inserted tempo-map time");
+            check (std::abs ((double) persistedTempoMap[1].getProperty ("bpm", 0.0) - 96.0) < 0.01,
+                   "persisted graph has inserted tempo-map bpm");
+        }
+        check ((int) graph.getProperty ("timeSigNumerator", 0) == 5,
+               "persisted graph has time signature numerator");
+        check ((int) graph.getProperty ("timeSigDenominator", 0) == 4,
+               "persisted graph has time signature denominator");
+        const auto persistedTimeSigMap = graph.getProperty ("timeSigMap", var());
+        check (persistedTimeSigMap.size() == 2, "persisted graph has time-signature map point count");
+        if (persistedTimeSigMap.size() > 1)
+        {
+            check (std::abs ((double) persistedTimeSigMap[1].getProperty ("time", 0.0) - 16.0) < 0.01,
+                   "persisted graph has inserted time-signature time");
+            check ((int) persistedTimeSigMap[1].getProperty ("numerator", 0) == 3,
+                   "persisted graph has inserted time-signature numerator");
+            check ((int) persistedTimeSigMap[1].getProperty ("denominator", 0) == 4,
+                   "persisted graph has inserted time-signature denominator");
+        }
+        check ((bool) graph.getProperty ("metronome", false),
+               "persisted graph has metronome state");
+        const auto persistedProject = graph.getProperty ("project", var());
+        check (std::abs ((double) persistedProject.getProperty ("sampleRate", 0.0) - 88200.0) < 0.01,
+               "persisted graph has project sample rate");
+        check ((int) persistedProject.getProperty ("bitDepth", 0) == 32,
+               "persisted graph has project bit depth");
+        check (persistedProject.getProperty ("timeBase", var()).toString() == "barsBeats",
+               "persisted graph has project time base");
+        const auto persistedMaster = graph.getProperty ("master", var());
+        check (std::abs ((double) persistedMaster.getProperty ("volumeDb", 0.0) - (-3.25)) < 0.01,
+               "persisted graph has master volume");
+        check (std::abs ((double) persistedMaster.getProperty ("pan", 0.0) - 0.5) < 0.01,
+               "persisted graph has master pan");
+        check (graph.getProperty ("buses", var()).size() == 1,
+               "persisted graph has one bus");
+        if (graph.getProperty ("buses", var()).size() > 0)
+        {
+            const auto persistedBus = graph.getProperty ("buses", var())[0];
+            check ((int) persistedBus.getProperty ("bus", -1) == 0,
+                   "persisted graph has bus number");
+            check (persistedBus.getProperty ("name", var()).toString() == "Maolan Persistence Bus Renamed",
+                   "persisted graph has bus name");
+        }
+        check (graph.getProperty ("tracks", var()).size() == 3, "persisted graph has source track plus bus return and group tracks");
+        const auto persistedTrack = graph.getProperty ("tracks", var())[0];
+        check (std::abs ((double) persistedTrack.getProperty ("volumeDb", 0.0) - (-5.5)) < 0.01,
+               "persisted graph has track volume");
+        check (std::abs ((double) persistedTrack.getProperty ("pan", 0.0) - (-0.25)) < 0.01,
+               "persisted graph has track pan");
+        check (! (bool) persistedTrack.getProperty ("mute", true), "persisted graph has track mute state");
+        check ((bool) persistedTrack.getProperty ("solo", false), "persisted graph has track solo");
+        check ((bool) persistedTrack.getProperty ("meterEnabled", false), "persisted graph has track meter posture");
+        check ((bool) persistedTrack.getProperty ("armed", false), "persisted graph has track arm posture");
+        check (persistedTrack.getProperty ("monitor", var()).toString() == "on",
+               "persisted graph has monitor posture");
+        check (persistedTrack.getProperty ("input", var()).getProperty ("deviceID", var()).toString() == "input-3-4",
+               "persisted graph has input choice");
+        check (! (bool) persistedTrack.getProperty ("hasInput", true),
+               "persisted graph keeps hasInput false without live input binding");
+        check (persistedTrack.getProperty ("parentId", var()).toString() == "group-persist",
+               "persisted graph has source track group parentId");
+        const auto persistedSends = persistedTrack.getProperty ("sends", var());
+        check (persistedSends.size() == 1, "persisted graph has one send");
+        if (persistedSends.size() > 0)
+        {
+            const auto persistedSend = persistedSends[0];
+            check ((int) persistedSend.getProperty ("bus", -1) == 0,
+                   "persisted graph has send bus");
+            check (std::abs ((double) persistedSend.getProperty ("db", 0.0) - (-10.0)) < 0.01,
+                   "persisted graph has send level");
+            check (! (bool) persistedSend.getProperty ("mute", true),
+                   "persisted graph has send mute");
+        }
+        if (graph.getProperty ("tracks", var()).size() > 1)
+        {
+            const auto persistedReturn = graph.getProperty ("tracks", var())[1];
+            check ((bool) persistedReturn.getProperty ("isReturn", false),
+                   "persisted graph has bus return track");
+            check ((int) persistedReturn.getProperty ("returnBus", -1) == 0,
+                   "persisted graph has return bus number");
+        }
+        if (graph.getProperty ("tracks", var()).size() > 2)
+        {
+            const auto persistedGroup = graph.getProperty ("tracks", var())[2];
+            check (persistedGroup.getProperty ("id", var()).toString() == "group-persist",
+                   "persisted graph has group track id");
+            check (persistedGroup.getProperty ("name", var()).toString() == "Maolan Persistence Group",
+                   "persisted graph has group track name");
+            check (persistedGroup.getProperty ("type", var()).toString() == "group",
+                   "persisted graph has group track type");
+            check ((bool) persistedGroup.getProperty ("isGroup", false),
+                   "persisted graph has group marker");
+        }
+        const auto persistedClips = persistedTrack.getProperty ("clips", var());
+        check (persistedClips.size() == 7, "persisted graph has audio clip set plus MIDI clip");
+        if (persistedClips.size() > 0)
+        {
+            const auto persistedClip = persistedClips[0];
+            check (persistedClip.getProperty ("name", var()).toString() == "Maolan Persistence Clip Edited",
+                   "persisted graph has left clip name");
+            check (std::abs ((double) persistedClip.getProperty ("startSeconds", 0.0) - 0.5) < 0.01,
+                   "persisted graph has left clip start");
+            check (std::abs ((double) persistedClip.getProperty ("lengthSeconds", 0.0) - 0.5) < 0.01,
+                   "persisted graph has left clip length");
+            check (std::abs ((double) persistedClip.getProperty ("offsetSeconds", 0.0) - 0.2) < 0.01,
+                   "persisted graph has left clip offset");
+            check (std::abs ((double) persistedClip.getProperty ("gainDb", 0.0) - (-1.5)) < 0.01,
+                   "persisted graph has left clip gain");
+            check (! (bool) persistedClip.getProperty ("mute", true), "persisted graph has left clip mute state");
+            check (File (persistedClip.getProperty ("sourcePath", var()).toString()).existsAsFile(),
+                   "persisted graph left clip source exists");
+        }
+        if (persistedClips.size() > 1)
+        {
+            const auto persistedClip = persistedClips[1];
+            check (persistedClip.getProperty ("id", var()).toString() == "clip-persist-1-split",
+                   "persisted graph has right clip id");
+            check (persistedClip.getProperty ("name", var()).toString() == "Maolan Persistence Clip Edited",
+                   "persisted graph has right clip name");
+            check (std::abs ((double) persistedClip.getProperty ("startSeconds", 0.0) - 1.0) < 0.01,
+                   "persisted graph has right clip start");
+            check (std::abs ((double) persistedClip.getProperty ("lengthSeconds", 0.0) - 0.5) < 0.01,
+                   "persisted graph has right clip length");
+            check (std::abs ((double) persistedClip.getProperty ("offsetSeconds", 0.0) - 0.7) < 0.01,
+                   "persisted graph has right clip offset");
+            check (std::abs ((double) persistedClip.getProperty ("gainDb", 0.0) - (-1.5)) < 0.01,
+                   "persisted graph has right clip gain");
+            check (! (bool) persistedClip.getProperty ("mute", true), "persisted graph has right clip mute state");
+            check (File (persistedClip.getProperty ("sourcePath", var()).toString()).existsAsFile(),
+                   "persisted graph right clip source exists");
+        }
+        if (persistedClips.size() > 2)
+        {
+            const auto persistedClip = persistedClips[2];
+            check (persistedClip.getProperty ("id", var()).toString() == "clip-persist-1-copy",
+                   "persisted graph has duplicate clip id");
+            check (persistedClip.getProperty ("name", var()).toString() == "Maolan Persistence Clip Edited",
+                   "persisted graph has duplicate clip name");
+            check (std::abs ((double) persistedClip.getProperty ("startSeconds", 0.0) - 1.5) < 0.01,
+                   "persisted graph has duplicate clip start");
+            check (std::abs ((double) persistedClip.getProperty ("lengthSeconds", 0.0) - 0.5) < 0.01,
+                   "persisted graph has duplicate clip length");
+            check (std::abs ((double) persistedClip.getProperty ("offsetSeconds", 0.0) - 0.7) < 0.01,
+                   "persisted graph has duplicate clip offset");
+            check (std::abs ((double) persistedClip.getProperty ("gainDb", 0.0) - (-1.5)) < 0.01,
+                   "persisted graph has duplicate clip gain");
+            check (! (bool) persistedClip.getProperty ("mute", true), "persisted graph has duplicate clip mute state");
+            check ((bool) persistedClip.getProperty ("autoTempo", false),
+                   "persisted graph has duplicate clip auto-tempo metadata");
+            check (std::abs ((double) persistedClip.getProperty ("sourceBpm", 0.0) - 132.0) < 0.01,
+                   "persisted graph has duplicate clip source BPM");
+            check (persistedClip.getProperty ("stretchMode", var()).toString().containsIgnoreCase ("soundtouch"),
+                   "persisted graph has duplicate clip stretch mode");
+            check (std::abs ((double) persistedClip.getProperty ("warpSourceLengthSeconds", 0.0) - 0.5) < 0.01,
+                   "persisted graph has duplicate clip warp source length");
+            check (File (persistedClip.getProperty ("sourcePath", var()).toString()).existsAsFile(),
+                   "persisted graph duplicate clip source exists");
+        }
+        if (persistedClips.size() > 3)
+        {
+            const auto persistedClip = persistedClips[3];
+            check (persistedClip.getProperty ("id", var()).toString() == "clip-persist-1-paste",
+                   "persisted graph has pasted clip id");
+            check (persistedClip.getProperty ("name", var()).toString() == "Maolan Persistence Paste",
+                   "persisted graph has pasted clip name");
+            check (std::abs ((double) persistedClip.getProperty ("startSeconds", 0.0) - 2.0) < 0.01,
+                   "persisted graph has pasted clip start");
+            check (std::abs ((double) persistedClip.getProperty ("lengthSeconds", 0.0) - 0.5) < 0.01,
+                   "persisted graph has pasted clip length");
+            check (std::abs ((double) persistedClip.getProperty ("offsetSeconds", 0.0) - 0.7) < 0.01,
+                   "persisted graph has pasted clip offset");
+            check (std::abs ((double) persistedClip.getProperty ("gainDb", 0.0) - (-1.5)) < 0.01,
+                   "persisted graph has pasted clip gain");
+            check (! (bool) persistedClip.getProperty ("mute", true), "persisted graph has pasted clip mute state");
+            check (File (persistedClip.getProperty ("sourcePath", var()).toString()).existsAsFile(),
+                   "persisted graph pasted clip source exists");
+        }
+        if (persistedClips.size() > 5)
+        {
+            const auto leftDeleteClip = persistedClips[4];
+            check (leftDeleteClip.getProperty ("id", var()).toString() == "clip-persist-delete",
+                   "persisted graph has delete range left clip id");
+            check (leftDeleteClip.getProperty ("name", var()).toString() == "Maolan Persistence Delete Range",
+                   "persisted graph has delete range left clip name");
+            check (std::abs ((double) leftDeleteClip.getProperty ("startSeconds", 0.0) - 2.5) < 0.01,
+                   "persisted graph has delete range left clip start");
+            check (std::abs ((double) leftDeleteClip.getProperty ("lengthSeconds", 0.0) - 0.25) < 0.01,
+                   "persisted graph has delete range left clip length");
+            check (std::abs ((double) leftDeleteClip.getProperty ("offsetSeconds", 0.0)) < 0.01,
+                   "persisted graph has delete range left clip offset");
+            check (File (leftDeleteClip.getProperty ("sourcePath", var()).toString()).existsAsFile(),
+                   "persisted graph delete range left clip source exists");
+
+            const auto rightDeleteClip = persistedClips[5];
+            check (rightDeleteClip.getProperty ("id", var()).toString() == "clip-persist-delete-after-delete",
+                   "persisted graph has delete range right clip id");
+            check (rightDeleteClip.getProperty ("name", var()).toString() == "Maolan Persistence Delete Range",
+                   "persisted graph has delete range right clip name");
+            check (std::abs ((double) rightDeleteClip.getProperty ("startSeconds", 0.0) - 3.0) < 0.01,
+                   "persisted graph has delete range right clip start");
+            check (std::abs ((double) rightDeleteClip.getProperty ("lengthSeconds", 0.0) - 0.5) < 0.01,
+                   "persisted graph has delete range right clip length");
+            check (std::abs ((double) rightDeleteClip.getProperty ("offsetSeconds", 0.0) - 0.5) < 0.01,
+                   "persisted graph has delete range right clip offset");
+            check (File (rightDeleteClip.getProperty ("sourcePath", var()).toString()).existsAsFile(),
+                   "persisted graph delete range right clip source exists");
+        }
+        if (persistedClips.size() > 6)
+        {
+            const auto persistedMidi = persistedClips[6];
+            check (persistedMidi.getProperty ("id", var()).toString() == "clip-persist-midi",
+                   "persisted graph has MIDI clip id");
+            check (persistedMidi.getProperty ("type", var()).toString() == "midi",
+                   "persisted graph has MIDI clip type");
+            const auto persistedNotes = persistedMidi.getProperty ("notes", var());
+            check (persistedNotes.size() == 3, "persisted graph has MIDI notes");
+            if (persistedNotes.size() > 0)
+            {
+                check ((int) persistedNotes[0].getProperty ("pitch", -1) != 60,
+                       "persisted graph has edited/removed MIDI notes");
+                bool persistedOnGrid = true;
+                if (auto* noteArr = persistedNotes.getArray())
+                    for (const auto& note : *noteArr)
+                    {
+                        const double start = (double) note.getProperty ("start", 0.0);
+                        if (std::abs (start - std::round (start)) > 0.02)
+                            persistedOnGrid = false;
+                    }
+                check (persistedOnGrid, "persisted graph has quantized MIDI note starts");
+            }
+        }
+        const auto persistedPlugins = graph.getProperty ("tracks", var())[0].getProperty ("plugins", var());
+        check (persistedPlugins.size() == 2, "persisted graph has reordered plugin chain");
+        if (persistedPlugins.size() > 0)
+        {
+            const auto persistedPlugin = persistedPlugins[0];
+            check (persistedPlugin.getProperty ("id", var()).toString() == "jampilot-test-gain-vst3",
+                   "persisted graph has primary plugin at index 0");
+            check (! (bool) persistedPlugin.getProperty ("enabled", true),
+                   "persisted graph has plugin bypass state");
+            const auto persistedParams = persistedPlugin.getProperty ("params", var());
+            check (persistedParams.size() == 1, "persisted graph has one plugin param");
+            if (persistedParams.size() > 0)
+            {
+                check ((int) persistedParams[0].getProperty ("index", -1) == 0,
+                       "persisted graph has plugin param index");
+                check (std::abs ((double) persistedParams[0].getProperty ("value", 0.0) - 0.37) < 0.01,
+                       "persisted graph has plugin param value");
+            }
+        }
+        if (persistedPlugins.size() > 1)
+        {
+            const auto persistedSecondPlugin = persistedPlugins[1];
+            check (persistedSecondPlugin.getProperty ("id", var()).toString() == "jampilot-persistence-reorder-probe",
+                   "persisted graph has reorder probe plugin at index 1");
+            check (persistedSecondPlugin.getProperty ("path", var()).toString().contains ("JamPilotTestGain.vst3"),
+                   "persisted graph has reorder probe plugin file");
+        }
+    }
+    else if (phase == "read")
+    {
+        section ("open persisted Maolan session graph in fresh process");
+
+        check (persistedGraph.existsAsFile(), "persisted graph exists before read phase");
+        auto opened = cmd (ops, "open_project", args1 ("file", persistedGraph.getFullPathName()));
+        check (ok (opened), "open_project loads persisted Maolan graph");
+
+        const auto trackId = graphHasJamPilotTrack ("read snapshot");
+        check (trackId.isNotEmpty(), "read phase recovered backend track id");
+        runPlaybackProbe ("read phase");
+
+        auto sessionAfterOpen = ops.snapshot().getProperty ("session", var());
+        auto backendGraph = sessionAfterOpen.getProperty ("backendSessionGraph", var());
+        check (backendGraph.getProperty ("sessionId", var()).toString() == "maolan-persistence-restart",
+               "snapshot backend graph preserves session id");
+
+        auto* exportArgs = new DynamicObject();
+        exportArgs->setProperty ("trackId", trackId);
+        if (timeout > 0)
+            exportArgs->setProperty ("timeoutSeconds", timeout);
+        auto exported = cmd (ops, "export_audio", var (exportArgs));
+        check (ok (exported), "export_audio renders after fresh-process open");
+        const auto renderWav = exported.getProperty ("data", var()).getProperty ("file", var()).toString();
+        check (File (renderWav).existsAsFile() && File (renderWav).getSize() > 0,
+               "read phase render WAV exists");
+
+        auto saved = cmd (ops, "save");
+        check (ok (saved), "save rewrites opened session graph into read evidence dir");
+        const auto readGraph = saved.getProperty ("data", var()).getProperty ("file", var()).toString();
+        check (File (readGraph).existsAsFile(), "read phase session graph exists");
+
+        auto restored = cmd (ops, "reload");
+        check (ok (restored), "reload restores read phase session graph");
+        const auto restoredGraph = restored.getProperty ("data", var()).getProperty ("restoredFile", var()).toString();
+        check (File (restoredGraph).existsAsFile(), "read phase restored graph exists");
+
+        graphHasJamPilotTrack ("restored read snapshot");
+    }
+    else
+    {
+        section ("invalid persistence phase");
+        check (false, "MOSH_MAOLAN_PERSISTENCE_PHASE must be write or read");
+    }
+
+    check (tracktion::engine::getAudioTracks (eng.edit()).size() == beforeTracktionTracks,
+           "Maolan persistence phase did not mutate Tracktion edit state");
+
+    finishSection();
+    std::cerr << "===== " << checks - failures << "/" << checks
+              << " Maolan persistence " << phase << " checks passed, "
+              << failures << " failed =====\n";
     return failures;
 }
 

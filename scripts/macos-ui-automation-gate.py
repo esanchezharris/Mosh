@@ -247,7 +247,7 @@ def wait_for_command_count(command: str, marker: int, minimum: int = 1, timeout:
 def launch(args: list[str]) -> int:
     if not APP_BUNDLE.is_dir() or not APP_BIN.exists():
         raise SystemExit(f"missing app bundle or binary: {APP_BUNDLE}")
-    run(["open", "-n", str(APP_BUNDLE), "--args", *args])
+    run(["open", "-n", str(APP_BUNDLE), "--args", "-ApplePersistenceIgnoreState", "YES", *args])
     deadline = time.time() + 12
     while time.time() < deadline:
         proc = run(["pgrep", "-n", "-f", str(APP_BIN)], check=False)
@@ -988,19 +988,26 @@ def run_demo6(results: dict) -> None:
     win = find_window("Mosh")
     initial = capture(win, "demo6-00-initial")
 
-    play_button = ax_find(role="AXButton", help_text="Play", timeout=18.0)
+    def wait_for_transport_button(*, playing: bool, timeout: float = 18.0) -> dict:
+        if playing:
+            return wait_for_ax(
+                lambda row: row["role"] == "AXButton"
+                and (row["help"] == "Stop" or row["help"].startswith("Stop") or row["title"] == "■"),
+                timeout=timeout,
+                detail="Stop button",
+            )
+        return wait_for_ax(
+            lambda row: row["role"] == "AXButton"
+            and (row["help"] == "Play" or row["help"].startswith("Play") or row["title"] == "▶"),
+            timeout=timeout,
+            detail="Play button",
+        )
+
+    play_button = wait_for_transport_button(playing=False, timeout=18.0)
     click_ax(play_button)
-    try:
-        stop_button = wait_for_ax(lambda row: row["role"] == "AXButton" and row["help"] == "Stop", detail="Stop button")
-    except RuntimeError:
-        click_ax(play_button)
-        stop_button = wait_for_ax(lambda row: row["role"] == "AXButton" and row["help"] == "Stop", detail="Stop button")
+    stop_button = wait_for_transport_button(playing=True)
     click_ax(stop_button)
-    try:
-        wait_for_ax(lambda row: row["role"] == "AXButton" and row["help"] == "Play", detail="Play button")
-    except RuntimeError:
-        click_ax(stop_button)
-        wait_for_ax(lambda row: row["role"] == "AXButton" and row["help"] == "Play", detail="Play button")
+    wait_for_transport_button(playing=False)
     after_play = capture(win, "demo6-01-play-stop")
     play_diff = mean_abs_diff(initial, after_play, full_box(initial))
     assert_condition(results, "demo6_play_click", play_diff >= 0.0, f"AX Stop observed, then Play restored; image diff={play_diff:.2f}")

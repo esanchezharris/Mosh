@@ -11,6 +11,24 @@ class MoshOps;
     the UI. Returns 0 on success, the number of failed checks otherwise. */
 int runSelfTest (MoshEngine&, MoshOps&);
 
+/** Focused backend-contract probe for selection, diagnostics, additive snapshot
+    fields, and Maolan-mode unsupported command posture. */
+int runEngineContractSelfTest (MoshEngine&, MoshOps&);
+
+/** Runs the full Maolan contract slice through MoshOps and the active backend.
+    Intended for `MOSH_ENGINE_BACKEND=maolan Mosh --selftest-engine-contract-slice`. */
+int runEngineContractSliceSelfTest (MoshEngine&, MoshOps&);
+
+/** Runs the supported Maolan process backend through normal MoshOps command names.
+    Intended for `MOSH_ENGINE_BACKEND=maolan Mosh --selftest-maolan-moshops-routing`. */
+int runMaolanMoshOpsRoutingSelfTest (MoshEngine&, MoshOps&);
+
+/** Two-phase persistence probe for Maolan session graphs.
+    Intended for `MOSH_ENGINE_BACKEND=maolan Mosh --selftest-maolan-persistence-restart`
+    with MOSH_MAOLAN_PERSISTENCE_PHASE=write|read and
+    MOSH_MAOLAN_PERSISTENCE_GRAPH=/path/to/persisted-session-graph.json. */
+int runMaolanPersistenceRestartSelfTest (MoshEngine&, MoshOps&);
+
 /** Focused strict-mode probe for the Tracktion undo chain used by Stage 1.
     Keeps assertion debugging separate from plugin hosting and generative jobs. */
 int runUndoSelfTest (MoshEngine&, MoshOps&);

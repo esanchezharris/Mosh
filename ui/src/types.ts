@@ -185,6 +185,50 @@ export type AudioDevices = {
   audioEnabled: boolean;
 };
 
+export type EngineCapability = {
+  operation: string;
+  status: "supported" | "reference" | "process" | "unsupported" | string;
+  supported: boolean;
+  notes?: string;
+};
+
+export type EngineDiagnostics = {
+  backend: string;
+  commandId: string;
+  displayName?: string;
+  mode?: string;
+  repoRoot?: string;
+  sessionDir?: string;
+  editFile?: string;
+  audioEnabled?: boolean;
+  audioDeviceError?: string;
+  envFile?: string;
+  envFileExists?: boolean;
+  script?: string;
+  scriptExists?: boolean;
+  supportedDevice?: string;
+  fixturePlugin?: string;
+  fixturePluginExists?: boolean;
+  capabilities?: EngineCapability[];
+};
+
+export type EngineContractSlice = {
+  ok: boolean;
+  backend: string;
+  commandId: string;
+  data?: {
+    outputDir?: string;
+    summaryPath?: string;
+    stdoutPath?: string;
+    stderrPath?: string;
+    exitCode?: number;
+    timingMs?: number;
+    summary?: Record<string, unknown>;
+  };
+  error?: { code?: string; message?: string } | string;
+  diagnostics?: Record<string, unknown>;
+};
+
 // BRW-001 — content/file browser (read-only list_directory). Pure view data; the
 // only mutation is the existing import_clip command on a chosen file.
 export type DirEntry = {
@@ -213,6 +257,9 @@ export type Snapshot = {
     length?: number;
     editFile: string;
     projectExtension?: string; // backend-owned project container extension (no leading dot)
+    backend?: string;
+    backendDisplayName?: string;
+    backendCapabilities?: EngineCapability[];
     // SES-001 — the tempo MAP (additive; tempo/timeSig* above stay point 0).
     // curve: 1 = step (hold-then-jump), values in (-1,1) ramp to the next point.
     tempoMap?: { time: number; bpm: number; curve?: number }[];

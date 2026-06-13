@@ -1,3 +1,11 @@
+# Secrets — never commit API keys / brain provider creds
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.local
+*.secret
+
 # Build output
 build/
 build-*/

@@ -68,6 +68,9 @@ if (MOSH_BUILD_APP)
         src/webview/WebBridge.cpp
         # Stage 1 — Engine + MoshOps spine + state feed (01, 02)
         src/engine/MoshEngine.cpp
+        src/engine_contract/MoshEngineBackend.cpp
+        src/engine_contract/TracktionEngineBackend.cpp
+        src/engine_contract/MaolanProcessBackend.cpp
         src/moshops/MoshOps.cpp
         # Stage 3 — VST3 hosting (04 PART 1)
         src/plugins/hosting/PluginHost.cpp

@@ -8,9 +8,12 @@ juce_add_console_app(MoshTests PRODUCT_NAME "MoshTests")
 
 target_sources(MoshTests PRIVATE
     test_sanity.cpp
+    test_engine_contract.cpp
     test_renderlayer.cpp
     test_astd.cpp
     test_remote_companion.cpp
+    ${CMAKE_SOURCE_DIR}/src/engine_contract/MoshEngineBackend.cpp
+    ${CMAKE_SOURCE_DIR}/src/engine_contract/MaolanProcessBackend.cpp
     ${CMAKE_SOURCE_DIR}/src/remote/RemoteCompanionProtocol.cpp
     ${CMAKE_SOURCE_DIR}/src/remote/RemoteCompanionServer.cpp)
 

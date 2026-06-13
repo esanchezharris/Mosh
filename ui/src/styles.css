@@ -69,6 +69,8 @@ button.on { border-color: var(--accent); color: var(--accent); background: #2120
 .tool-btn { padding: 0.35rem 0.6rem; border-radius: 7px; }
 .remote-companion { position: relative; }
 .remote-btn.on { border-color: var(--ok); color: var(--ok); background: rgba(56, 211, 159, 0.12); }
+.engine-contract { position: relative; }
+.engine-btn.on { border-color: var(--ok); color: var(--ok); background: rgba(56, 211, 159, 0.12); }
 .remote-pop {
   position: absolute; right: 0; top: calc(100% + 8px); width: 310px; z-index: 20;
   background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
@@ -89,6 +91,30 @@ button.on { border-color: var(--accent); color: var(--accent); background: #2120
 }
 .remote-stop, .remote-start, .remote-copy { align-self: flex-start; }
 .remote-copy { font-size: 0.74rem; padding: 0.25rem 0.45rem; }
+.engine-pop { width: 360px; }
+.engine-readout { display: grid; grid-template-columns: 72px 1fr; gap: 0.25rem 0.5rem; font-size: 0.76rem; color: var(--muted); }
+.engine-readout b { color: var(--text); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.engine-actions { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }
+.engine-actions button:disabled { opacity: 0.45; cursor: default; }
+.engine-workflow { display: flex; flex-direction: column; gap: 0.45rem; padding-top: 0.5rem; border-top: 1px solid var(--line); }
+.engine-section-title { font-size: 0.7rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.engine-actions-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.35rem; }
+.engine-actions-grid .tool-btn { min-width: 0; padding: 0.26rem 0.35rem; font-size: 0.72rem; }
+.engine-run { align-self: stretch; }
+.engine-status { min-height: 18px; font-size: 0.74rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.engine-status.ok { color: var(--ok); }
+.engine-status.err { color: var(--warn); }
+.engine-plugin-list, .engine-artifacts { display: flex; flex-direction: column; gap: 1px; }
+.engine-plugin-row { display: grid; grid-template-columns: 1fr auto; gap: 0.5rem; font-size: 0.72rem; color: var(--muted); border-bottom: 1px solid var(--line); padding: 0.15rem 0; }
+.engine-plugin-row span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.engine-plugin-row b { color: var(--text); font-weight: 600; }
+.engine-caps { display: flex; flex-direction: column; gap: 1px; max-height: 210px; overflow-y: auto; }
+.engine-cap { display: grid; grid-template-columns: 1fr auto; gap: 0.5rem; padding: 0.22rem 0; border-bottom: 1px solid var(--line); font-size: 0.74rem; }
+.engine-cap span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.engine-cap b { color: var(--muted); font-weight: 600; }
+.engine-cap.ok b { color: var(--ok); }
+.engine-cap.off b { color: var(--warn); }
+.engine-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 0.68rem; }
 
 /* Settings popover (wave: settings) — reuses .remote-pop, adds device/project rows. */
 .settings-pop { width: 340px; max-height: 78vh; overflow-y: auto; }

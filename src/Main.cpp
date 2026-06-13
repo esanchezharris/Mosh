@@ -1,14 +1,54 @@
 #include <juce_gui_extra/juce_gui_extra.h>
 #include <tracktion_engine/tracktion_engine.h>
+#include <cstdlib>
 #include "app/MainWindow.h"
 #include "app/SelfTest.h"
 #include "engine/MoshEngine.h"
 #include "moshops/MoshOps.h"
 #include "remote/RemoteCompanionServer.h"
 
+#if JUCE_MAC
+#include <CoreFoundation/CoreFoundation.h>
+#endif
+
 namespace mosh
 {
 namespace te = tracktion::engine;
+
+#if JUCE_MAC
+struct PersistentUiPreferenceState
+{
+    bool hadValue = false;
+    bool value = false;
+};
+
+static PersistentUiPreferenceState setPersistentUiIgnoreStateForHeadless()
+{
+    PersistentUiPreferenceState previous;
+    if (auto existing = CFPreferencesCopyAppValue (CFSTR ("ApplePersistenceIgnoreState"),
+                                                   kCFPreferencesCurrentApplication))
+    {
+        previous.hadValue = true;
+        if (CFGetTypeID (existing) == CFBooleanGetTypeID())
+            previous.value = CFBooleanGetValue ((CFBooleanRef) existing);
+        CFRelease (existing);
+    }
+
+    CFPreferencesSetAppValue (CFSTR ("ApplePersistenceIgnoreState"),
+                              kCFBooleanTrue,
+                              kCFPreferencesCurrentApplication);
+    CFPreferencesAppSynchronize (kCFPreferencesCurrentApplication);
+    return previous;
+}
+
+static void restorePersistentUiIgnoreState (const PersistentUiPreferenceState& previous)
+{
+    CFPreferencesSetAppValue (CFSTR ("ApplePersistenceIgnoreState"),
+                              previous.hadValue ? (previous.value ? kCFBooleanTrue : kCFBooleanFalse) : nullptr,
+                              kCFPreferencesCurrentApplication);
+    CFPreferencesAppSynchronize (kCFPreferencesCurrentApplication);
+}
+#endif
 
 class MoshApplication : public juce::JUCEApplication
 {
@@ -27,11 +67,35 @@ public:
             return;
 
         const bool undoSelfTest = commandLine.contains ("--selftest-undo");
+        const bool maolanMoshOpsRoutingSelfTest = commandLine.contains ("--selftest-maolan-moshops-routing");
+        const bool maolanPersistenceRestartSelfTest = commandLine.contains ("--selftest-maolan-persistence-restart");
+        const bool engineContractSliceSelfTest = commandLine.contains ("--selftest-engine-contract-slice");
+        const bool engineContractSelfTest = ! engineContractSliceSelfTest
+                                            && commandLine.contains ("--selftest-engine-contract");
         const bool liveAudioSmoke = commandLine.contains ("--live-audio-smoke");
-        const bool headless = undoSelfTest || commandLine.contains ("--selftest");
+        const bool headless = undoSelfTest || maolanMoshOpsRoutingSelfTest || maolanPersistenceRestartSelfTest
+                              || engineContractSelfTest || engineContractSliceSelfTest || commandLine.contains ("--selftest");
+#if JUCE_MAC
+        if (headless)
+        {
+            persistentUiWasSuppressed = true;
+            previousPersistentUiState = setPersistentUiIgnoreStateForHeadless();
+        }
+#endif
+        const auto maolanPersistencePhase = juce::SystemStats::getEnvironmentVariable ("MOSH_MAOLAN_PERSISTENCE_PHASE", "write")
+                                                .trim()
+                                                .toLowerCase();
+        const bool maolanHarness = maolanMoshOpsRoutingSelfTest || maolanPersistenceRestartSelfTest
+                                   || engineContractSelfTest || engineContractSliceSelfTest;
+        if (undoSelfTest || (commandLine.contains ("--selftest") && ! maolanHarness))
+            ::setenv ("MOSH_ENGINE_BACKEND", "tracktion", 1);
         const juce::String freshSessionName = undoSelfTest ? "session-selftest-undo"
+                                            : (maolanMoshOpsRoutingSelfTest ? "session-selftest-maolan-moshops-routing"
+                                            : (maolanPersistenceRestartSelfTest ? "session-selftest-maolan-persistence-" + maolanPersistencePhase
+                                            : (engineContractSliceSelfTest ? "session-selftest-engine-contract-slice"
+                                            : (engineContractSelfTest ? "session-selftest-engine-contract"
                                             : (liveAudioSmoke ? "session-live-audio-smoke"
-                                                              : "session-selftest");
+                                                              : "session-selftest")))));
         // Headless: no audio device, and an isolated cold session so the harness is
         // idempotent (it saves/reloads itself) and never touches the GUI session.
         engine  = std::make_unique<MoshEngine> ((! headless) || liveAudioSmoke,
@@ -58,6 +122,38 @@ public:
         if (undoSelfTest)
         {
             const int fails = runUndoSelfTest (*engine, *moshOps);
+            setApplicationReturnValue (fails);
+            quit();
+            return;
+        }
+
+        if (engineContractSelfTest)
+        {
+            const int fails = runEngineContractSelfTest (*engine, *moshOps);
+            setApplicationReturnValue (fails);
+            quit();
+            return;
+        }
+
+        if (maolanMoshOpsRoutingSelfTest)
+        {
+            const int fails = runMaolanMoshOpsRoutingSelfTest (*engine, *moshOps);
+            setApplicationReturnValue (fails);
+            quit();
+            return;
+        }
+
+        if (maolanPersistenceRestartSelfTest)
+        {
+            const int fails = runMaolanPersistenceRestartSelfTest (*engine, *moshOps);
+            setApplicationReturnValue (fails);
+            quit();
+            return;
+        }
+
+        if (engineContractSliceSelfTest)
+        {
+            const int fails = runEngineContractSliceSelfTest (*engine, *moshOps);
             setApplicationReturnValue (fails);
             quit();
             return;
@@ -114,6 +210,10 @@ public:
         remoteServer.reset();
         moshOps.reset();
         engine.reset();
+#if JUCE_MAC
+        if (persistentUiWasSuppressed)
+            restorePersistentUiIgnoreState (previousPersistentUiState);
+#endif
     }
 
     void systemRequestedQuit() override { quit(); }
@@ -123,6 +223,10 @@ private:
     std::unique_ptr<MoshOps>    moshOps;
     std::unique_ptr<RemoteCompanionServer> remoteServer;
     std::unique_ptr<MainWindow> mainWindow;
+#if JUCE_MAC
+    PersistentUiPreferenceState previousPersistentUiState;
+    bool persistentUiWasSuppressed = false;
+#endif
 };
 
 } // namespace mosh

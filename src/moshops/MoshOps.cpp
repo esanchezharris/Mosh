@@ -1,6 +1,8 @@
 #include "MoshOps.h"
 #include "state/Ids.h"
 #include "state/RenderLayer.h"
+#include "engine_contract/MaolanProcessBackend.h"
+#include "engine_contract/TracktionEngineBackend.h"
 #include "plugins/neural/NeuralInsertPlugin.h"
 #include <thread>
 
@@ -84,10 +86,853 @@ namespace
                && t.contains ("\"ok\"")
                && t.contains ("\"undoable\"");
     }
+
+    bool hasEngineContractScript (const juce::File& root)
+    {
+        return root.getChildFile ("scripts")
+                   .getChildFile ("maolan-contract-slice-gate.sh")
+                   .existsAsFile();
+    }
+
+    juce::File findEngineContractRootFrom (juce::File candidate)
+    {
+        for (int i = 0; i < 8 && candidate.exists(); ++i)
+        {
+            if (hasEngineContractScript (candidate) || candidate.getChildFile ("docs").getChildFile ("02_MOSHOPS_CONTRACT.md").existsAsFile())
+                return candidate;
+            candidate = candidate.getParentDirectory();
+        }
+        return {};
+    }
+
+    juce::File detectEngineContractRoot()
+    {
+        const auto envRoot = juce::SystemStats::getEnvironmentVariable ("MOSH_REPO_ROOT", {});
+        if (envRoot.isNotEmpty())
+            return juce::File (envRoot);
+
+        if (auto root = findEngineContractRootFrom (juce::File::getCurrentWorkingDirectory()); root.exists())
+            return root;
+
+        const auto exe = juce::File::getSpecialLocation (juce::File::currentExecutableFile);
+        if (auto root = findEngineContractRootFrom (exe.getParentDirectory()); root.exists())
+            return root;
+
+        return juce::File::getCurrentWorkingDirectory();
+    }
+
+    std::unique_ptr<MoshEngineBackend> createEngineBackend (MoshEngine& engine)
+    {
+        EngineBackendContext context;
+        context.sessionDir = engine.sessionDir();
+        context.repoRoot = detectEngineContractRoot();
+
+        const auto requested = juce::SystemStats::getEnvironmentVariable ("MOSH_ENGINE_BACKEND", "maolan")
+                                   .trim()
+                                   .toLowerCase();
+        if (requested == "maolan")
+            return std::make_unique<MaolanProcessBackend> (context);
+
+        return std::make_unique<TracktionEngineBackend> (engine, context);
+    }
+
+    bool isMaolanProcessBackend (const MoshEngineBackend* backend)
+    {
+        return backend != nullptr && backend->backendId() == "maolan";
+    }
+
+    bool isMaolanBackendPassthroughCommand (const juce::String& command)
+    {
+        return command == "get_engine_diagnostics"
+               || command == "run_engine_contract_slice";
+    }
+
+    bool isMaolanBackendRoutedCommand (const juce::String& command)
+    {
+        return command == "new_project"
+               || command == "open_project"
+               || command == "save"
+               || command == "save_as"
+               || command == "reload"
+               || command == "list_audio_devices"
+               || command == "set_audio_device"
+               || command == "rescan_plugins"
+               || command == "list_plugins"
+               || command == "list_builtins"
+               || command == "get_plugin_blocklist"
+               || command == "clear_plugin_blocklist"
+               || command == "block_plugin"
+               || command == "create_track"
+               || command == "rename_track"
+               || command == "remove_track"
+               || command == "add_test_tone_clip"
+               || command == "import_clip"
+               || command == "import_clip_data"
+               || command == "move_clip"
+               || command == "trim_clip"
+               || command == "split_clip"
+               || command == "duplicate_clip"
+               || command == "paste_clip"
+               || command == "delete_time_range"
+               || command == "rename_clip"
+               || command == "remove_clip"
+               || command == "set_clip_mute"
+               || command == "set_clip_gain"
+               || command == "set_clip_warp"
+               || command == "get_clip_peaks"
+               || command == "add_midi_clip"
+               || command == "add_note"
+               || command == "remove_note"
+               || command == "set_note"
+               || command == "quantize_notes"
+               || command == "set_track_volume"
+               || command == "set_track_pan"
+               || command == "set_track_mute"
+               || command == "set_track_solo"
+               || command == "enable_track_meter"
+               || command == "disable_track_meter"
+               || command == "enable_all_meters"
+               || command == "set_master_volume"
+               || command == "set_master_pan"
+               || command == "create_bus"
+               || command == "add_send"
+               || command == "set_send_level"
+               || command == "remove_send"
+               || command == "remove_bus"
+               || command == "rename_bus"
+               || command == "create_group_track"
+               || command == "ungroup_track"
+               || command == "list_midi_inputs"
+               || command == "list_wave_inputs"
+               || command == "list_track_outputs"
+               || command == "set_track_input"
+               || command == "set_track_output"
+               || command == "arm_track"
+               || command == "set_input_monitor"
+               || command == "stop_recording"
+               || command == "set_tempo"
+               || command == "insert_tempo_change"
+               || command == "remove_tempo_change"
+               || command == "set_tempo_curve"
+               || command == "set_time_signature"
+               || command == "insert_time_sig_change"
+               || command == "remove_time_sig_change"
+               || command == "set_metronome"
+               || command == "set_project_settings"
+               || command == "load_plugin"
+               || command == "remove_plugin"
+               || command == "reorder_plugin"
+               || command == "set_plugin_param"
+               || command == "bypass_plugin"
+               || command == "add_automation_point"
+               || command == "remove_automation_point"
+               || command == "set_automation_point"
+               || command == "clear_automation"
+               || command == "set_transport"
+               || command == "export_audio";
+    }
+
+    bool isMaolanBackendReadOnlyCommand (const juce::String& command)
+    {
+        return command == "list_audio_devices"
+               || command == "list_plugins"
+               || command == "list_builtins"
+               || command == "get_plugin_blocklist"
+               || command == "list_midi_inputs"
+               || command == "list_wave_inputs"
+               || command == "list_track_outputs"
+               || command == "get_clip_peaks";
+    }
+
+    bool isMaolanBackendNeutralLocalCommand (const juce::String& command)
+    {
+        return command == "list_directory"
+               || command == "list_colors"
+               || command == "get_command_log";
+    }
+
+    bool isReadableAudioFileForImport (const File& file)
+    {
+        AudioFormatManager formats;
+        formats.registerBasicFormats();
+        std::unique_ptr<AudioFormatReader> reader (formats.createReaderFor (file));
+        return reader != nullptr && reader->lengthInSamples > 0 && reader->sampleRate > 0.0;
+    }
+
+    bool shouldBlockForMaolanProcessBackend (const MoshEngineBackend* backend, const juce::String& command)
+    {
+        return isMaolanProcessBackend (backend)
+               && ! isMaolanBackendPassthroughCommand (command)
+               && ! isMaolanBackendRoutedCommand (command)
+               && ! isMaolanBackendNeutralLocalCommand (command);
+    }
+
+    String defaultJamPilotFixturePath()
+    {
+        return SystemStats::getEnvironmentVariable (
+            "MOSH_MAOLAN_PLUGIN_PATH",
+            "/Users/emiliosanchez-harris/Library/Audio/Plug-Ins/VST3/JamPilotTestGain.vst3");
+    }
+
+    var maolanCurrentAudioSelection (const String& device = "coreaudio:default")
+    {
+        auto* current = new DynamicObject();
+        current->setProperty ("type", "CoreAudio");
+        current->setProperty ("outputDevice", device);
+        current->setProperty ("inputDevice", {});
+        current->setProperty ("device", device);
+        current->setProperty ("sampleRate", 48000.0);
+        current->setProperty ("bufferSize", 512);
+        return var (current);
+    }
+
+    var maolanListAudioDevicesData (var engineResult)
+    {
+        Array<var> outputs;
+        outputs.add ("coreaudio:default");
+
+        Array<var> inputs;
+
+        auto* type = new DynamicObject();
+        type->setProperty ("name", "CoreAudio");
+        type->setProperty ("outputs", outputs);
+        type->setProperty ("inputs", inputs);
+
+        Array<var> types;
+        types.add (var (type));
+
+        Array<var> sampleRates;
+        sampleRates.add (48000.0);
+
+        Array<var> bufferSizes;
+        bufferSizes.add (512);
+
+        auto* data = new DynamicObject();
+        data->setProperty ("types", types);
+        data->setProperty ("current", maolanCurrentAudioSelection());
+        data->setProperty ("sampleRates", sampleRates);
+        data->setProperty ("bufferSizes", bufferSizes);
+        data->setProperty ("defaultBufferSize", 512);
+        data->setProperty ("audioEnabled", true);
+        data->setProperty ("backend", "maolan");
+        data->setProperty ("engineResult", engineResult);
+        return var (data);
+    }
+
+    var maolanPluginCounts (const var& plugins)
+    {
+        int total = 0;
+        int vst3 = 0;
+        int au = 0;
+        if (auto* arr = plugins.getArray())
+        {
+            total = arr->size();
+            for (const auto& plugin : *arr)
+            {
+                const auto format = plugin.getProperty ("format", var()).toString().toLowerCase();
+                if (format == "vst3") ++vst3;
+                if (format == "audiounit" || format == "au") ++au;
+            }
+        }
+
+        auto* counts = new DynamicObject();
+        counts->setProperty ("vst3", vst3);
+        counts->setProperty ("au", au);
+        counts->setProperty ("total", total);
+        return var (counts);
+    }
+
+    Array<var> maolanTracksFromGraph (const var& graph)
+    {
+        Array<var> result;
+        const auto graphTracks = graph.getProperty ("tracks", var());
+        if (auto* arr = graphTracks.getArray())
+        {
+            int index = 0;
+            for (const auto& graphTrack : *arr)
+            {
+                Array<var> plugins;
+                const auto graphPlugins = graphTrack.getProperty ("plugins", var());
+                if (auto* pluginArr = graphPlugins.getArray())
+                {
+                    int pluginIndex = 0;
+                    for (const auto& graphPlugin : *pluginArr)
+                    {
+                        auto* p = new DynamicObject();
+                        const auto path = graphPlugin.getProperty ("path", var()).toString();
+                        p->setProperty ("index", pluginIndex++);
+                        p->setProperty ("name", graphPlugin.getProperty ("name", File (path).getFileName()));
+                        p->setProperty ("type", graphPlugin.getProperty ("format", "vst3"));
+                        p->setProperty ("enabled", graphPlugin.getProperty ("enabled", true));
+                        p->setProperty ("external", true);
+                        p->setProperty ("builtin", false);
+                        p->setProperty ("isInstrument", false);
+                        p->setProperty ("file", path);
+                        p->setProperty ("identifier", graphPlugin.getProperty ("id", var()));
+                        p->setProperty ("manufacturer", "Maolan");
+                        Array<var> params;
+                        const auto graphParams = graphPlugin.getProperty ("params", var());
+                        if (auto* paramArr = graphParams.getArray())
+                        {
+                            for (const auto& graphParam : *paramArr)
+                            {
+                                auto* po = new DynamicObject();
+                                po->setProperty ("index", graphParam.getProperty ("index", params.size()));
+                                po->setProperty ("name", graphParam.getProperty ("name", "Param " + String (params.size())));
+                                po->setProperty ("value", graphParam.getProperty ("value", 0.0));
+                                po->setProperty ("automated", graphParam.getProperty ("automated", false));
+                                po->setProperty ("points", graphParam.getProperty ("points", Array<var>()));
+                                params.add (var (po));
+                            }
+                        }
+                        p->setProperty ("params", params);
+                        plugins.add (var (p));
+                    }
+                }
+
+                Array<var> clips;
+                const auto graphClips = graphTrack.getProperty ("clips", var());
+                if (auto* clipArr = graphClips.getArray())
+                {
+                    for (const auto& graphClip : *clipArr)
+                    {
+                        auto* c = new DynamicObject();
+                        const auto sourcePath = graphClip.getProperty ("sourcePath", var()).toString();
+                        c->setProperty ("id", graphClip.getProperty ("id", var()));
+                        c->setProperty ("name", graphClip.getProperty ("name", "Maolan Clip"));
+                        c->setProperty ("type", graphClip.getProperty ("type", "wave"));
+                        c->setProperty ("start", graphClip.getProperty ("startSeconds", 0.0));
+                        c->setProperty ("length", graphClip.getProperty ("lengthSeconds", 0.0));
+                        c->setProperty ("offset", graphClip.getProperty ("offsetSeconds", 0.0));
+                        c->setProperty ("mute", graphClip.getProperty ("mute", false));
+                        c->setProperty ("gainDb", graphClip.getProperty ("gainDb", 0.0));
+                        c->setProperty ("sourceFile", sourcePath);
+                        c->setProperty ("sourceLength", graphClip.getProperty ("warpSourceLengthSeconds", graphClip.getProperty ("lengthSeconds", 0.0)));
+                        c->setProperty ("warpSourceLengthSeconds", graphClip.getProperty ("warpSourceLengthSeconds", graphClip.getProperty ("lengthSeconds", 0.0)));
+                        c->setProperty ("sourceKind", graphClip.getProperty ("sourceKind", "file"));
+                        c->setProperty ("autoTempo", graphClip.getProperty ("autoTempo", false));
+                        if ((bool) graphClip.getProperty ("autoTempo", false))
+                        {
+                            c->setProperty ("stretchMode", graphClip.getProperty ("stretchMode", "SoundTouch"));
+                            c->setProperty ("sourceBpm", graphClip.getProperty ("sourceBpm", 0.0));
+                        }
+                        c->setProperty ("notes", graphClip.getProperty ("notes", Array<var>()));
+                        c->setProperty ("hasRenderLayer", false);
+                        clips.add (var (c));
+                    }
+                }
+
+                auto* t = new DynamicObject();
+                t->setProperty ("id", graphTrack.getProperty ("id", "track-" + String (index + 1)));
+                t->setProperty ("index", index++);
+                t->setProperty ("name", graphTrack.getProperty ("name", "Maolan Track"));
+                t->setProperty ("type", graphTrack.getProperty ("type", "audio"));
+                t->setProperty ("isGroup", graphTrack.getProperty ("isGroup", false));
+                const auto parentId = graphTrack.getProperty ("parentId", var()).toString();
+                if (parentId.isNotEmpty())
+                    t->setProperty ("parentId", parentId);
+                t->setProperty ("clips", clips);
+                t->setProperty ("plugins", plugins);
+                t->setProperty ("volumeDb", graphTrack.getProperty ("volumeDb", 0.0));
+                t->setProperty ("pan", graphTrack.getProperty ("pan", 0.0));
+                t->setProperty ("mute", graphTrack.getProperty ("mute", false));
+                t->setProperty ("solo", graphTrack.getProperty ("solo", false));
+                t->setProperty ("meterEnabled", graphTrack.getProperty ("meterEnabled", false));
+                t->setProperty ("sends", graphTrack.getProperty ("sends", Array<var>()));
+                t->setProperty ("isReturn", graphTrack.getProperty ("isReturn", false));
+                t->setProperty ("returnBus", graphTrack.getProperty ("returnBus", -1));
+                t->setProperty ("armed", graphTrack.getProperty ("armed", false));
+                t->setProperty ("monitor", graphTrack.getProperty ("monitor", "automatic"));
+                t->setProperty ("hasInput", graphTrack.getProperty ("hasInput", false));
+                t->setProperty ("inputType", "wave");
+                const auto input = graphTrack.getProperty ("input", var());
+                if (input.isObject())
+                    t->setProperty ("input", input);
+                const auto output = graphTrack.getProperty ("output", var());
+                if (output.isObject())
+                    t->setProperty ("output", output);
+                t->setProperty ("isInstrument", false);
+                result.add (var (t));
+            }
+        }
+        return result;
+    }
+
+    var maolanTransportFromGraph (const var& graph)
+    {
+        const auto transport = graph.getProperty ("transport", var());
+        auto* t = new DynamicObject();
+        t->setProperty ("playing", (bool) transport.getProperty ("playing", false));
+        t->setProperty ("recording", false);
+        t->setProperty ("position", (double) transport.getProperty ("position", 0.0));
+        t->setProperty ("looping", false);
+        t->setProperty ("loopStart", 0.0);
+        t->setProperty ("loopEnd", 0.0);
+        return var (t);
+    }
+
+    var maolanCommandDataForMoshOps (const String& command, var engineResult)
+    {
+        auto backendData = engineResult.getProperty ("data", var());
+
+        if (command == "list_audio_devices")
+            return maolanListAudioDevicesData (engineResult);
+
+        auto* data = new DynamicObject();
+        data->setProperty ("backend", "maolan");
+        data->setProperty ("engineResult", engineResult);
+        data->setProperty ("diagnostics", engineResult.getProperty ("diagnostics", var()));
+
+        if (command == "set_audio_device")
+        {
+            const auto device = backendData.getProperty ("device", "coreaudio:default").toString();
+            data->setProperty ("current", maolanCurrentAudioSelection (device));
+            data->setProperty ("device", device);
+            data->setProperty ("type", "CoreAudio");
+            data->setProperty ("outputDevice", device);
+            data->setProperty ("sampleRate", 48000.0);
+            data->setProperty ("bufferSize", 512);
+            return var (data);
+        }
+
+        if (command == "list_plugins" || command == "rescan_plugins")
+        {
+            const auto plugins = backendData.getProperty ("plugins", var());
+            data->setProperty ("plugins", plugins);
+            data->setProperty ("counts", maolanPluginCounts (plugins));
+            data->setProperty ("count", backendData.getProperty ("count", plugins.size()));
+            data->setProperty ("status", "done");
+            data->setProperty ("timingCsv", backendData.getProperty ("timingCsv", var()));
+            data->setProperty ("blocklist", backendData.getProperty ("blocklist", var()));
+            return var (data);
+        }
+
+        if (command == "get_plugin_blocklist"
+            || command == "clear_plugin_blocklist"
+            || command == "block_plugin")
+        {
+            data->setProperty ("blocklist", backendData.getProperty ("blocklist", var()));
+            data->setProperty ("count", backendData.getProperty ("count", var()));
+            data->setProperty ("sessionGraph", backendData.getProperty ("sessionGraph", var()));
+            return var (data);
+        }
+
+        if (command == "new_project")
+        {
+            data->setProperty ("editFile", backendData.getProperty ("sessionGraph", var()));
+            data->setProperty ("sessionGraph", backendData.getProperty ("sessionGraph", var()));
+            data->setProperty ("sessionId", backendData.getProperty ("sessionId", var()));
+            data->setProperty ("outputDir", backendData.getProperty ("outputDir", var()));
+            return var (data);
+        }
+
+        if (command == "open_project")
+        {
+            data->setProperty ("editFile", backendData.getProperty ("file", var()));
+            data->setProperty ("file", backendData.getProperty ("file", var()));
+            data->setProperty ("sessionId", backendData.getProperty ("sessionId", var()));
+            data->setProperty ("sessionGraph", backendData.getProperty ("sessionGraph", var()));
+            data->setProperty ("maolanSessionDir", backendData.getProperty ("maolanSessionDir", var()));
+            data->setProperty ("maolanSessionJson", backendData.getProperty ("maolanSessionJson", var()));
+            return var (data);
+        }
+
+        if (command == "save" || command == "save_as")
+        {
+            data->setProperty ("file", backendData.getProperty ("file", var()));
+            data->setProperty ("maolanSessionDir", backendData.getProperty ("maolanSessionDir", var()));
+            data->setProperty ("maolanSessionJson", backendData.getProperty ("maolanSessionJson", var()));
+            return var (data);
+        }
+
+        if (command == "list_builtins"
+            || command == "list_midi_inputs"
+            || command == "list_wave_inputs"
+            || command == "list_track_outputs")
+            return backendData;
+
+        if (command == "reload")
+        {
+            data->setProperty ("file", backendData.getProperty ("file", var()));
+            data->setProperty ("restoredFile", backendData.getProperty ("restoredFile", var()));
+            data->setProperty ("restored", backendData.getProperty ("restored", false));
+            data->setProperty ("sessionGraph", backendData.getProperty ("sessionGraph", var()));
+            data->setProperty ("maolanSessionDir", backendData.getProperty ("maolanSessionDir", var()));
+            data->setProperty ("maolanSessionJson", backendData.getProperty ("maolanSessionJson", var()));
+            return var (data);
+        }
+
+        if (command == "set_tempo"
+            || command == "insert_tempo_change"
+            || command == "remove_tempo_change"
+            || command == "set_tempo_curve")
+        {
+            data->setProperty ("bpm", backendData.getProperty ("bpm", var()));
+            data->setProperty ("time", backendData.getProperty ("time", var()));
+            data->setProperty ("index", backendData.getProperty ("index", var()));
+            data->setProperty ("removedIndex", backendData.getProperty ("removedIndex", var()));
+            data->setProperty ("curve", backendData.getProperty ("curve", var()));
+            data->setProperty ("tempoMap", backendData.getProperty ("tempoMap", var()));
+            data->setProperty ("sessionGraph", backendData.getProperty ("sessionGraph", var()));
+            return var (data);
+        }
+
+        if (command == "set_time_signature"
+            || command == "insert_time_sig_change"
+            || command == "remove_time_sig_change")
+        {
+            data->setProperty ("numerator", backendData.getProperty ("numerator", var()));
+            data->setProperty ("denominator", backendData.getProperty ("denominator", var()));
+            data->setProperty ("time", backendData.getProperty ("time", var()));
+            data->setProperty ("index", backendData.getProperty ("index", var()));
+            data->setProperty ("removedIndex", backendData.getProperty ("removedIndex", var()));
+            data->setProperty ("timeSigMap", backendData.getProperty ("timeSigMap", var()));
+            data->setProperty ("sessionGraph", backendData.getProperty ("sessionGraph", var()));
+            return var (data);
+        }
+
+        if (command == "set_metronome")
+        {
+            data->setProperty ("metronome", backendData.getProperty ("metronome", var()));
+            data->setProperty ("enabled", backendData.getProperty ("enabled", var()));
+            data->setProperty ("sessionGraph", backendData.getProperty ("sessionGraph", var()));
+            return var (data);
+        }
+
+        if (command == "set_project_settings")
+        {
+            data->setProperty ("sampleRate", backendData.getProperty ("sampleRate", var()));
+            data->setProperty ("bitDepth", backendData.getProperty ("bitDepth", var()));
+            data->setProperty ("timeBase", backendData.getProperty ("timeBase", var()));
+            data->setProperty ("project", backendData.getProperty ("project", var()));
+            data->setProperty ("sessionGraph", backendData.getProperty ("sessionGraph", var()));
+            return var (data);
+        }
+
+        if (command == "create_track")
+        {
+            data->setProperty ("trackId", backendData.getProperty ("trackId", var()));
+            data->setProperty ("id", backendData.getProperty ("trackId", var()));
+            data->setProperty ("name", backendData.getProperty ("name", var()));
+            data->setProperty ("sessionGraph", backendData.getProperty ("sessionGraph", var()));
+            return var (data);
+        }
+
+        if (command == "rename_track")
+        {
+            data->setProperty ("trackId", backendData.getProperty ("trackId", var()));
+            data->setProperty ("id", backendData.getProperty ("trackId", var()));
+            data->setProperty ("name", backendData.getProperty ("name", var()));
+            data->setProperty ("sessionGraph", backendData.getProperty ("sessionGraph", var()));
+            return var (data);
+        }
+
+        if (command == "remove_track")
+        {
+            data->setProperty ("trackId", backendData.getProperty ("trackId", var()));
+            data->setProperty ("id", backendData.getProperty ("trackId", var()));
+            data->setProperty ("sessionGraph", backendData.getProperty ("sessionGraph", var()));
+            return var (data);
+        }
+
+        if (command == "add_test_tone_clip"
+            || command == "import_clip"
+            || command == "import_clip_data"
+            || command == "add_midi_clip"
+            || command == "move_clip"
+            || command == "trim_clip"
+            || command == "split_clip"
+            || command == "duplicate_clip"
+            || command == "paste_clip"
+            || command == "delete_time_range"
+            || command == "rename_clip"
+            || command == "set_clip_mute"
+            || command == "set_clip_gain"
+            || command == "set_clip_warp"
+            || command == "get_clip_peaks")
+        {
+            data->setProperty ("trackId", backendData.getProperty ("trackId", var()));
+            data->setProperty ("clipId", backendData.getProperty ("clipId", var()));
+            data->setProperty ("id", backendData.getProperty ("clipId", var()));
+            data->setProperty ("newClipId", backendData.getProperty ("newClipId", var()));
+            data->setProperty ("sourceClipId", backendData.getProperty ("sourceClipId", var()));
+            data->setProperty ("originalClipId", backendData.getProperty ("originalClipId", var()));
+            data->setProperty ("leftClipId", backendData.getProperty ("leftClipId", var()));
+            data->setProperty ("rightClipId", backendData.getProperty ("rightClipId", var()));
+            data->setProperty ("name", backendData.getProperty ("name", var()));
+            data->setProperty ("file", backendData.getProperty ("file", var()));
+            data->setProperty ("sourceFile", backendData.getProperty ("sourcePath", backendData.getProperty ("file", var())));
+            data->setProperty ("start", backendData.getProperty ("start", var()));
+            data->setProperty ("length", backendData.getProperty ("length", var()));
+            data->setProperty ("offset", backendData.getProperty ("offset", var()));
+            data->setProperty ("gainDb", backendData.getProperty ("gainDb", var()));
+            data->setProperty ("mute", backendData.getProperty ("mute", var()));
+            data->setProperty ("autoTempo", backendData.getProperty ("autoTempo", var()));
+            data->setProperty ("sourceBpm", backendData.getProperty ("sourceBpm", var()));
+            data->setProperty ("stretchMode", backendData.getProperty ("stretchMode", var()));
+            data->setProperty ("warpSourceLengthSeconds", backendData.getProperty ("warpSourceLengthSeconds", var()));
+            data->setProperty ("removed", backendData.getProperty ("removed", var()));
+            data->setProperty ("splits", backendData.getProperty ("splits", var()));
+            data->setProperty ("tracks", backendData.getProperty ("tracks", var()));
+            data->setProperty ("buckets", backendData.getProperty ("buckets", var()));
+            data->setProperty ("peaks", backendData.getProperty ("peaks", Array<var>()));
+            data->setProperty ("notes", backendData.getProperty ("notes", Array<var>()));
+            data->setProperty ("sessionGraph", backendData.getProperty ("sessionGraph", var()));
+            return var (data);
+        }
+
+        if (command == "add_note"
+            || command == "remove_note"
+            || command == "set_note"
+            || command == "quantize_notes")
+        {
+            data->setProperty ("trackId", backendData.getProperty ("trackId", var()));
+            data->setProperty ("clipId", backendData.getProperty ("clipId", var()));
+            data->setProperty ("noteIndex", backendData.getProperty ("noteIndex", var()));
+            data->setProperty ("noteCount", backendData.getProperty ("noteCount", var()));
+            data->setProperty ("moved", backendData.getProperty ("moved", var()));
+            data->setProperty ("pitch", backendData.getProperty ("pitch", var()));
+            data->setProperty ("start", backendData.getProperty ("start", var()));
+            data->setProperty ("length", backendData.getProperty ("length", var()));
+            data->setProperty ("velocity", backendData.getProperty ("velocity", var()));
+            data->setProperty ("sessionGraph", backendData.getProperty ("sessionGraph", var()));
+            return var (data);
+        }
+
+        if (command == "remove_clip")
+        {
+            data->setProperty ("trackId", backendData.getProperty ("trackId", var()));
+            data->setProperty ("clipId", backendData.getProperty ("clipId", var()));
+            data->setProperty ("id", backendData.getProperty ("clipId", var()));
+            data->setProperty ("sessionGraph", backendData.getProperty ("sessionGraph", var()));
+            return var (data);
+        }
+
+        if (command == "set_track_volume"
+            || command == "set_track_pan"
+            || command == "set_track_mute"
+            || command == "set_track_solo")
+        {
+            data->setProperty ("trackId", backendData.getProperty ("trackId", var()));
+            data->setProperty ("id", backendData.getProperty ("trackId", var()));
+            data->setProperty ("volumeDb", backendData.getProperty ("volumeDb", var()));
+            data->setProperty ("pan", backendData.getProperty ("pan", var()));
+            data->setProperty ("mute", backendData.getProperty ("mute", var()));
+            data->setProperty ("solo", backendData.getProperty ("solo", var()));
+            data->setProperty ("sessionGraph", backendData.getProperty ("sessionGraph", var()));
+            return var (data);
+        }
+
+        if (command == "enable_track_meter"
+            || command == "disable_track_meter"
+            || command == "enable_all_meters")
+        {
+            data->setProperty ("trackId", backendData.getProperty ("trackId", var()));
+            data->setProperty ("meterEnabled", backendData.getProperty ("meterEnabled", var()));
+            data->setProperty ("enabledTracks", backendData.getProperty ("enabledTracks", Array<var>()));
+            data->setProperty ("count", backendData.getProperty ("count", var()));
+            data->setProperty ("applied", backendData.getProperty ("applied", false));
+            data->setProperty ("reason", backendData.getProperty ("reason", var()));
+            data->setProperty ("sessionGraph", backendData.getProperty ("sessionGraph", var()));
+            return var (data);
+        }
+
+        if (command == "set_master_volume" || command == "set_master_pan")
+        {
+            data->setProperty ("volumeDb", backendData.getProperty ("volumeDb", var()));
+            data->setProperty ("pan", backendData.getProperty ("pan", var()));
+            data->setProperty ("sessionGraph", backendData.getProperty ("sessionGraph", var()));
+            return var (data);
+        }
+
+        if (command == "create_bus" || command == "rename_bus" || command == "remove_bus")
+        {
+            data->setProperty ("bus", backendData.getProperty ("bus", backendData.getProperty ("busNumber", var())));
+            data->setProperty ("busNumber", backendData.getProperty ("busNumber", backendData.getProperty ("bus", var())));
+            data->setProperty ("trackId", backendData.getProperty ("trackId", var()));
+            data->setProperty ("name", backendData.getProperty ("name", var()));
+            data->setProperty ("applied", backendData.getProperty ("applied", var()));
+            data->setProperty ("reason", backendData.getProperty ("reason", var()));
+            data->setProperty ("sessionGraph", backendData.getProperty ("sessionGraph", var()));
+            return var (data);
+        }
+
+        if (command == "add_send" || command == "set_send_level" || command == "remove_send")
+        {
+            data->setProperty ("trackId", backendData.getProperty ("trackId", var()));
+            data->setProperty ("bus", backendData.getProperty ("bus", var()));
+            data->setProperty ("db", backendData.getProperty ("db", var()));
+            data->setProperty ("mute", backendData.getProperty ("mute", var()));
+            data->setProperty ("applied", backendData.getProperty ("applied", var()));
+            data->setProperty ("reason", backendData.getProperty ("reason", var()));
+            data->setProperty ("sessionGraph", backendData.getProperty ("sessionGraph", var()));
+            return var (data);
+        }
+
+        if (command == "create_group_track" || command == "ungroup_track")
+        {
+            data->setProperty ("groupId", backendData.getProperty ("groupId", backendData.getProperty ("trackId", var())));
+            data->setProperty ("trackId", backendData.getProperty ("trackId", backendData.getProperty ("groupId", var())));
+            data->setProperty ("name", backendData.getProperty ("name", var()));
+            data->setProperty ("moved", backendData.getProperty ("moved", var()));
+            data->setProperty ("hoisted", backendData.getProperty ("hoisted", var()));
+            data->setProperty ("unknownTrackIds", backendData.getProperty ("unknownTrackIds", var()));
+            data->setProperty ("applied", backendData.getProperty ("applied", var()));
+            data->setProperty ("reason", backendData.getProperty ("reason", var()));
+            data->setProperty ("sessionGraph", backendData.getProperty ("sessionGraph", var()));
+            return var (data);
+        }
+
+        if (command == "set_track_input")
+        {
+            data->setProperty ("trackId", backendData.getProperty ("trackId", var()));
+            data->setProperty ("deviceID", backendData.getProperty ("deviceID", var()));
+            data->setProperty ("applied", backendData.getProperty ("applied", false));
+            data->setProperty ("reason", backendData.getProperty ("reason", var()));
+            data->setProperty ("sessionGraph", backendData.getProperty ("sessionGraph", var()));
+            return var (data);
+        }
+
+        if (command == "set_track_output")
+        {
+            data->setProperty ("trackId", backendData.getProperty ("trackId", var()));
+            data->setProperty ("destTrackId", backendData.getProperty ("destTrackId", var()));
+            data->setProperty ("deviceID", backendData.getProperty ("deviceID", var()));
+            data->setProperty ("output", backendData.getProperty ("output", var()));
+            data->setProperty ("sessionGraph", backendData.getProperty ("sessionGraph", var()));
+            return var (data);
+        }
+
+        if (command == "arm_track")
+        {
+            data->setProperty ("trackId", backendData.getProperty ("trackId", var()));
+            data->setProperty ("armed", backendData.getProperty ("armed", false));
+            data->setProperty ("applied", backendData.getProperty ("applied", false));
+            data->setProperty ("reason", backendData.getProperty ("reason", var()));
+            data->setProperty ("sessionGraph", backendData.getProperty ("sessionGraph", var()));
+            return var (data);
+        }
+
+        if (command == "set_input_monitor")
+        {
+            data->setProperty ("trackId", backendData.getProperty ("trackId", var()));
+            data->setProperty ("mode", backendData.getProperty ("mode", var()));
+            data->setProperty ("applied", backendData.getProperty ("applied", false));
+            data->setProperty ("reason", backendData.getProperty ("reason", var()));
+            data->setProperty ("sessionGraph", backendData.getProperty ("sessionGraph", var()));
+            return var (data);
+        }
+
+        if (command == "stop_recording")
+        {
+            data->setProperty ("applied", backendData.getProperty ("applied", false));
+            data->setProperty ("discarded", backendData.getProperty ("discarded", false));
+            data->setProperty ("clips", backendData.getProperty ("clips", Array<var>()));
+            data->setProperty ("reason", backendData.getProperty ("reason", var()));
+            data->setProperty ("sessionGraph", backendData.getProperty ("sessionGraph", var()));
+            return var (data);
+        }
+
+        if (command == "load_plugin")
+        {
+            auto pluginPath = backendData.getProperty ("pluginPath", var()).toString();
+            if (pluginPath.isEmpty())
+                pluginPath = backendData.getProperty ("file", backendData.getProperty ("path", var())).toString();
+            data->setProperty ("trackId", backendData.getProperty ("trackId", var()));
+            data->setProperty ("pluginId", backendData.getProperty ("pluginId", var()));
+            data->setProperty ("pluginPath", pluginPath);
+            data->setProperty ("file", pluginPath);
+            data->setProperty ("format", backendData.getProperty ("format", "vst3"));
+            data->setProperty ("name", File (pluginPath).getFileName());
+            data->setProperty ("index", backendData.getProperty ("index", 0));
+            data->setProperty ("sessionGraph", backendData.getProperty ("sessionGraph", var()));
+            return var (data);
+        }
+
+        if (command == "reorder_plugin")
+        {
+            data->setProperty ("trackId", backendData.getProperty ("trackId", var()));
+            data->setProperty ("index", backendData.getProperty ("index", var()));
+            data->setProperty ("pluginId", backendData.getProperty ("pluginId", var()));
+            data->setProperty ("name", backendData.getProperty ("name", var()));
+            data->setProperty ("enabled", backendData.getProperty ("enabled", var()));
+            data->setProperty ("params", backendData.getProperty ("params", Array<var>()));
+            data->setProperty ("sessionGraph", backendData.getProperty ("sessionGraph", var()));
+            return var (data);
+        }
+
+        if (command == "set_plugin_param" || command == "bypass_plugin")
+        {
+            data->setProperty ("trackId", backendData.getProperty ("trackId", var()));
+            data->setProperty ("index", backendData.getProperty ("index", var()));
+            data->setProperty ("pluginId", backendData.getProperty ("pluginId", var()));
+            data->setProperty ("name", backendData.getProperty ("name", var()));
+            data->setProperty ("enabled", backendData.getProperty ("enabled", var()));
+            data->setProperty ("params", backendData.getProperty ("params", Array<var>()));
+            data->setProperty ("sessionGraph", backendData.getProperty ("sessionGraph", var()));
+            return var (data);
+        }
+
+        if (command == "add_automation_point"
+            || command == "remove_automation_point"
+            || command == "set_automation_point"
+            || command == "clear_automation")
+        {
+            data->setProperty ("trackId", backendData.getProperty ("trackId", var()));
+            data->setProperty ("index", backendData.getProperty ("index", var()));
+            data->setProperty ("pluginIndex", backendData.getProperty ("index", var()));
+            data->setProperty ("pluginId", backendData.getProperty ("pluginId", var()));
+            data->setProperty ("paramIndex", backendData.getProperty ("paramIndex", var()));
+            data->setProperty ("pointIndex", backendData.getProperty ("pointIndex", var()));
+            data->setProperty ("points", backendData.getProperty ("points", Array<var>()));
+            data->setProperty ("params", backendData.getProperty ("params", Array<var>()));
+            data->setProperty ("automated", backendData.getProperty ("automated", false));
+            data->setProperty ("sessionGraph", backendData.getProperty ("sessionGraph", var()));
+            return var (data);
+        }
+
+        if (command == "remove_plugin")
+        {
+            data->setProperty ("trackId", backendData.getProperty ("trackId", var()));
+            data->setProperty ("index", backendData.getProperty ("index", var()));
+            data->setProperty ("sessionGraph", backendData.getProperty ("sessionGraph", var()));
+            return var (data);
+        }
+
+        if (command == "set_transport")
+        {
+            data->setProperty ("playing", backendData.getProperty ("playing", false));
+            data->setProperty ("position", backendData.getProperty ("position", 0.0));
+            data->setProperty ("state", backendData.getProperty ("state", "stopped"));
+            data->setProperty ("playbackStats", backendData.getProperty ("playbackStats", var()));
+            data->setProperty ("playback", backendData.getProperty ("playback", var()));
+            data->setProperty ("sessionGraph", backendData.getProperty ("sessionGraph", var()));
+            return var (data);
+        }
+
+        if (command == "export_audio")
+        {
+            const auto file = backendData.getProperty ("file", var()).toString();
+            const auto stats = backendData.getProperty ("stats", var());
+            data->setProperty ("file", file);
+            data->setProperty ("format", "wav");
+            data->setProperty ("bytes", File (file).existsAsFile() ? (int64) File (file).getSize() : (int64) 0);
+            data->setProperty ("seconds", stats.getProperty ("duration_seconds", var()));
+            data->setProperty ("sampleRate", stats.getProperty ("sample_rate", var()));
+            data->setProperty ("statsPath", backendData.getProperty ("statsPath", var()));
+            data->setProperty ("stats", stats);
+            data->setProperty ("renderMode", "maolan-process");
+            data->setProperty ("renderModeRequested", "maolan-process");
+            data->setProperty ("realTimeRender", false);
+            return var (data);
+        }
+
+        return var (data);
+    }
 }
 
 MoshOps::MoshOps (MoshEngine& engineToUse)
-    : eng (engineToUse), pluginHost (engineToUse.engine())
+    : eng (engineToUse), engineBackend (createEngineBackend (engineToUse)), pluginHost (engineToUse.engine())
 {
     logFile = eng.sessionDir().getChildFile ("mosh-log.jsonl");
     pluginHost.initialise();                 // formats + curated VST3 scan
@@ -222,6 +1067,23 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name.isEmpty())
         return errResult (name, "missing 'command'");
 
+    if (isMaolanProcessBackend (engineBackend.get())
+        && isMaolanBackendRoutedCommand (name))
+    {
+        return cmdMaolanBackendCommand (name, args);
+    }
+
+    if (shouldBlockForMaolanProcessBackend (engineBackend.get(), name))
+    {
+        auto diagnostics = makeEngineDiagnostics ("maolan", name);
+        auto result = makeEngineError ("maolan", name, "unsupported_by_backend",
+                                       "Maolan process backend does not support this MoshOps command through the engine contract yet.",
+                                       diagnostics);
+        const auto message = engineResultMessage (result);
+        logLine (name, args, false, message, false);
+        return errResult (name, message, result);
+    }
+
     if (name == "create_track")      return cmdCreateTrack (args);
     if (name == "rename_track")      return cmdRenameTrack (args);
     if (name == "remove_track")      return cmdRemoveTrack (args);
@@ -328,6 +1190,8 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "remove_tempo_change")    return cmdRemoveTempoChange (args);
     if (name == "insert_time_sig_change") return cmdInsertTimeSigChange (args);
     if (name == "remove_time_sig_change") return cmdRemoveTimeSigChange (args);
+    if (name == "get_engine_diagnostics") return cmdGetEngineDiagnostics (args);
+    if (name == "run_engine_contract_slice") return cmdRunEngineContractSlice (args);
 
     return errResult (name, "unknown command: " + name);
 }
@@ -335,6 +1199,521 @@ juce::var MoshOps::execute (const juce::var& command)
 // ─────────────────────────────────────────────────────────────────────────────
 // Commands
 // ─────────────────────────────────────────────────────────────────────────────
+juce::var MoshOps::cmdGetEngineDiagnostics (const juce::var& args)
+{
+    (void) args;
+    if (engineBackend == nullptr)
+        return errResult ("get_engine_diagnostics", "engine backend unavailable");
+
+    return okResult ("get_engine_diagnostics", engineBackend->diagnostics());
+}
+
+juce::var MoshOps::cmdRunEngineContractSlice (const juce::var& args)
+{
+    if (engineBackend == nullptr)
+    {
+        logLine ("run_engine_contract_slice", args, false, "engine backend unavailable", false);
+        return errResult ("run_engine_contract_slice", "engine backend unavailable");
+    }
+
+    auto result = engineBackend->runContractSlice (args);
+    const bool ok = (bool) result.getProperty ("ok", false);
+    if (ok)
+    {
+        logLine ("run_engine_contract_slice", args, true, {}, false);
+        return okResult ("run_engine_contract_slice", result);
+    }
+
+    const auto message = engineResultMessage (result);
+    logLine ("run_engine_contract_slice", args, false, message, false);
+    return errResult ("run_engine_contract_slice", message, result);
+}
+
+juce::var MoshOps::cmdMaolanBackendCommand (const juce::String& command, const juce::var& args)
+{
+    if (engineBackend == nullptr)
+    {
+        logLine (command, args, false, "engine backend unavailable", false);
+        return errResult (command, "engine backend unavailable");
+    }
+
+    juce::var result;
+
+    if (command == "new_project")
+    {
+        result = engineBackend->createSession (args);
+    }
+    else if (command == "open_project")
+    {
+        result = engineBackend->openSession (args);
+    }
+    else if (command == "save")
+    {
+        result = engineBackend->saveSessionGraph (args);
+    }
+    else if (command == "save_as")
+    {
+        result = engineBackend->saveSessionGraph (args);
+    }
+    else if (command == "reload")
+    {
+        result = engineBackend->restoreSessionGraph (args);
+    }
+    else if (command == "list_audio_devices")
+    {
+        result = makeEngineResult ("maolan", "list_audio_devices", {}, makeEngineDiagnostics ("maolan", "list_audio_devices"));
+    }
+    else if (command == "set_audio_device")
+    {
+        auto* o = new DynamicObject();
+        const auto requested = args.getProperty ("device", args.getProperty ("outputDevice", "coreaudio:default")).toString();
+        o->setProperty ("device", requested.isNotEmpty() ? requested : String ("coreaudio:default"));
+        result = engineBackend->selectAudioDevice (var (o));
+    }
+    else if (command == "rescan_plugins" || command == "list_plugins")
+    {
+        auto* o = new DynamicObject();
+        o->setProperty ("format", args.getProperty ("format", "vst3"));
+        if (args.hasProperty ("timeoutSeconds"))
+            o->setProperty ("timeoutSeconds", args.getProperty ("timeoutSeconds", var()));
+        result = engineBackend->scanPlugins (var (o));
+    }
+    else if (command == "list_builtins")
+    {
+        Array<var> plugins;
+        auto* data = new DynamicObject();
+        data->setProperty ("plugins", plugins);
+        data->setProperty ("backend", "maolan");
+        data->setProperty ("note", "Maolan process backend does not expose MOSH built-in plugins in this slice.");
+        result = makeEngineResult ("maolan", "list_builtins", var (data),
+                                   makeEngineDiagnostics ("maolan", "list_builtins"));
+    }
+    else if (command == "get_plugin_blocklist")
+    {
+        result = engineBackend->getPluginBlocklist (args);
+    }
+    else if (command == "clear_plugin_blocklist")
+    {
+        result = engineBackend->clearPluginBlocklist (args);
+    }
+    else if (command == "block_plugin")
+    {
+        result = engineBackend->blockPlugin (args);
+    }
+    else if (command == "list_wave_inputs")
+    {
+        Array<var> inputs;
+        auto* data = new DynamicObject();
+        data->setProperty ("inputs", inputs);
+        data->setProperty ("audioEnabled", false);
+        result = makeEngineResult ("maolan", "list_wave_inputs", var (data),
+                                   makeEngineDiagnostics ("maolan", "list_wave_inputs"));
+    }
+    else if (command == "list_midi_inputs")
+    {
+        Array<var> inputs;
+        auto* data = new DynamicObject();
+        data->setProperty ("inputs", inputs);
+        data->setProperty ("audioEnabled", false);
+        result = makeEngineResult ("maolan", "list_midi_inputs", var (data),
+                                   makeEngineDiagnostics ("maolan", "list_midi_inputs"));
+    }
+    else if (command == "list_track_outputs")
+    {
+        Array<var> outputs;
+        auto* output = new DynamicObject();
+        output->setProperty ("deviceID", "coreaudio:default");
+        output->setProperty ("name", "coreaudio:default");
+        output->setProperty ("enabled", true);
+        outputs.add (var (output));
+
+        Array<var> trackDests;
+        const auto graph = engineBackend->sessionGraph();
+        const auto graphTracks = graph.getProperty ("tracks", var());
+        if (auto* arr = graphTracks.getArray())
+            for (const auto& track : *arr)
+            {
+                auto* t = new DynamicObject();
+                t->setProperty ("id", track.getProperty ("id", var()));
+                t->setProperty ("name", track.getProperty ("name", "Maolan Track"));
+                trackDests.add (var (t));
+            }
+
+        auto* data = new DynamicObject();
+        data->setProperty ("outputs", outputs);
+        data->setProperty ("tracks", trackDests);
+        data->setProperty ("audioEnabled", false);
+        result = makeEngineResult ("maolan", "list_track_outputs", var (data),
+                                   makeEngineDiagnostics ("maolan", "list_track_outputs"));
+    }
+    else if (command == "create_track")
+    {
+        result = engineBackend->createTrack (args);
+    }
+    else if (command == "rename_track")
+    {
+        result = engineBackend->renameTrack (args);
+    }
+    else if (command == "remove_track")
+    {
+        result = engineBackend->removeTrack (args);
+    }
+    else if (command == "add_test_tone_clip")
+    {
+        auto* o = new DynamicObject();
+        o->setProperty ("trackId", args.getProperty ("trackId", var()));
+        o->setProperty ("clipId", args.getProperty ("clipId", var()));
+        o->setProperty ("sourceKind", "test-tone");
+        o->setProperty ("name", args.getProperty ("name", var()));
+        o->setProperty ("seconds", args.getProperty ("seconds", 2.0));
+        o->setProperty ("freq", args.getProperty ("freq", 220.0));
+        o->setProperty ("start", args.getProperty ("start", args.getProperty ("startSeconds", 0.0)));
+        result = engineBackend->addClip (var (o));
+    }
+    else if (command == "import_clip")
+    {
+        auto* o = new DynamicObject();
+        o->setProperty ("trackId", args.getProperty ("trackId", var()));
+        o->setProperty ("clipId", args.getProperty ("clipId", var()));
+        o->setProperty ("sourceKind", "file");
+        o->setProperty ("file", args.getProperty ("file", var()));
+        o->setProperty ("name", args.getProperty ("name", var()));
+        o->setProperty ("start", args.getProperty ("start", args.getProperty ("startSeconds", 0.0)));
+        result = engineBackend->addClip (var (o));
+    }
+    else if (command == "import_clip_data")
+    {
+        auto name = args.getProperty ("name", var()).toString();
+        const auto dataBase64 = args.getProperty ("dataBase64", var()).toString();
+        if (name.isEmpty())
+        {
+            result = makeEngineError ("maolan", "import_clip_data", "invalid_argument",
+                                      "missing 'name'", makeEngineDiagnostics ("maolan", "import_clip_data"));
+        }
+        else if (dataBase64.isEmpty())
+        {
+            result = makeEngineError ("maolan", "import_clip_data", "invalid_argument",
+                                      "missing 'dataBase64'", makeEngineDiagnostics ("maolan", "import_clip_data"));
+        }
+        else if (dataBase64.length() > 280 * 1024 * 1024)
+        {
+            result = makeEngineError ("maolan", "import_clip_data", "invalid_argument",
+                                      "file too large", makeEngineDiagnostics ("maolan", "import_clip_data"));
+        }
+        else
+        {
+            MemoryOutputStream mos;
+            if (! Base64::convertFromBase64 (mos, dataBase64))
+            {
+                result = makeEngineError ("maolan", "import_clip_data", "invalid_argument",
+                                          "invalid base64 data", makeEngineDiagnostics ("maolan", "import_clip_data"));
+            }
+            else
+            {
+                auto importsDir = eng.sessionDir().getChildFile ("imports");
+                importsDir.createDirectory();
+                const File named (importsDir.getChildFile (File::createLegalFileName (name)));
+                auto file = importsDir.getNonexistentChildFile (named.getFileNameWithoutExtension(),
+                                                                named.getFileExtension(), false);
+                if (! file.replaceWithData (mos.getData(), mos.getDataSize()))
+                {
+                    result = makeEngineError ("maolan", "import_clip_data", "artifact_write_failed",
+                                              "could not write the import file", makeEngineDiagnostics ("maolan", "import_clip_data"));
+                }
+                else if (! isReadableAudioFileForImport (file))
+                {
+                    file.deleteFile();
+                    result = makeEngineError ("maolan", "import_clip_data", "invalid_argument",
+                                              "not a supported audio file", makeEngineDiagnostics ("maolan", "import_clip_data"));
+                }
+                else
+                {
+                    auto* o = new DynamicObject();
+                    o->setProperty ("trackId", args.getProperty ("trackId", var()));
+                    o->setProperty ("clipId", args.getProperty ("clipId", var()));
+                    o->setProperty ("sourceKind", "file");
+                    o->setProperty ("file", file.getFullPathName());
+                    o->setProperty ("name", name);
+                    o->setProperty ("start", args.getProperty ("start", args.getProperty ("startSeconds", 0.0)));
+                    result = engineBackend->addClip (var (o));
+                }
+            }
+        }
+    }
+    else if (command == "move_clip")
+    {
+        result = engineBackend->moveClip (args);
+    }
+    else if (command == "trim_clip")
+    {
+        result = engineBackend->trimClip (args);
+    }
+    else if (command == "split_clip")
+    {
+        result = engineBackend->splitClip (args);
+    }
+    else if (command == "duplicate_clip")
+    {
+        result = engineBackend->duplicateClip (args);
+    }
+    else if (command == "paste_clip")
+    {
+        result = engineBackend->pasteClip (args);
+    }
+    else if (command == "delete_time_range")
+    {
+        result = engineBackend->deleteTimeRange (args);
+    }
+    else if (command == "rename_clip")
+    {
+        result = engineBackend->renameClip (args);
+    }
+    else if (command == "remove_clip")
+    {
+        result = engineBackend->removeClip (args);
+    }
+    else if (command == "set_clip_mute")
+    {
+        result = engineBackend->setClipMute (args);
+    }
+    else if (command == "set_clip_gain")
+    {
+        result = engineBackend->setClipGain (args);
+    }
+    else if (command == "set_clip_warp")
+    {
+        result = engineBackend->setClipWarp (args);
+    }
+    else if (command == "get_clip_peaks")
+    {
+        result = engineBackend->getClipPeaks (args);
+    }
+    else if (command == "add_midi_clip")
+    {
+        result = engineBackend->addMidiClip (args);
+    }
+    else if (command == "add_note")
+    {
+        result = engineBackend->addNote (args);
+    }
+    else if (command == "remove_note")
+    {
+        result = engineBackend->removeNote (args);
+    }
+    else if (command == "set_note")
+    {
+        result = engineBackend->setNote (args);
+    }
+    else if (command == "quantize_notes")
+    {
+        result = engineBackend->quantizeNotes (args);
+    }
+    else if (command == "set_track_volume")
+    {
+        result = engineBackend->setTrackVolume (args);
+    }
+    else if (command == "set_track_pan")
+    {
+        result = engineBackend->setTrackPan (args);
+    }
+    else if (command == "set_track_mute")
+    {
+        result = engineBackend->setTrackMute (args);
+    }
+    else if (command == "set_track_solo")
+    {
+        result = engineBackend->setTrackSolo (args);
+    }
+    else if (command == "enable_track_meter")
+    {
+        result = engineBackend->enableTrackMeter (args);
+    }
+    else if (command == "disable_track_meter")
+    {
+        result = engineBackend->disableTrackMeter (args);
+    }
+    else if (command == "enable_all_meters")
+    {
+        result = engineBackend->enableAllMeters (args);
+    }
+    else if (command == "set_master_volume")
+    {
+        result = engineBackend->setMasterVolume (args);
+    }
+    else if (command == "set_master_pan")
+    {
+        result = engineBackend->setMasterPan (args);
+    }
+    else if (command == "create_bus")
+    {
+        result = engineBackend->createBus (args);
+    }
+    else if (command == "add_send")
+    {
+        result = engineBackend->addSend (args);
+    }
+    else if (command == "set_send_level")
+    {
+        result = engineBackend->setSendLevel (args);
+    }
+    else if (command == "remove_send")
+    {
+        result = engineBackend->removeSend (args);
+    }
+    else if (command == "remove_bus")
+    {
+        result = engineBackend->removeBus (args);
+    }
+    else if (command == "rename_bus")
+    {
+        result = engineBackend->renameBus (args);
+    }
+    else if (command == "create_group_track")
+    {
+        result = engineBackend->createGroupTrack (args);
+    }
+    else if (command == "ungroup_track")
+    {
+        result = engineBackend->ungroupTrack (args);
+    }
+    else if (command == "set_track_input")
+    {
+        result = engineBackend->setTrackInput (args);
+    }
+    else if (command == "set_track_output")
+    {
+        result = engineBackend->setTrackOutput (args);
+    }
+    else if (command == "arm_track")
+    {
+        result = engineBackend->armTrack (args);
+    }
+    else if (command == "set_input_monitor")
+    {
+        result = engineBackend->setInputMonitor (args);
+    }
+    else if (command == "stop_recording")
+    {
+        result = engineBackend->stopRecording (args);
+    }
+    else if (command == "set_tempo")
+    {
+        result = engineBackend->setTempo (args);
+    }
+    else if (command == "insert_tempo_change")
+    {
+        result = engineBackend->insertTempoChange (args);
+    }
+    else if (command == "remove_tempo_change")
+    {
+        result = engineBackend->removeTempoChange (args);
+    }
+    else if (command == "set_tempo_curve")
+    {
+        result = engineBackend->setTempoCurve (args);
+    }
+    else if (command == "set_time_signature")
+    {
+        result = engineBackend->setTimeSignature (args);
+    }
+    else if (command == "insert_time_sig_change")
+    {
+        result = engineBackend->insertTimeSigChange (args);
+    }
+    else if (command == "remove_time_sig_change")
+    {
+        result = engineBackend->removeTimeSigChange (args);
+    }
+    else if (command == "set_metronome")
+    {
+        result = engineBackend->setMetronome (args);
+    }
+    else if (command == "set_project_settings")
+    {
+        result = engineBackend->setProjectSettings (args);
+    }
+    else if (command == "load_plugin")
+    {
+        auto* o = new DynamicObject();
+        o->setProperty ("trackId", args.getProperty ("trackId", "track-1"));
+        o->setProperty ("pluginId", args.getProperty ("pluginId", "jampilot-test-gain-vst3"));
+        if (args.hasProperty ("index"))
+            o->setProperty ("index", args.getProperty ("index", var()));
+
+        auto pluginPath = args.getProperty ("pluginPath", var()).toString();
+        if (pluginPath.isEmpty())
+            pluginPath = args.getProperty ("file", var()).toString();
+        if (pluginPath.isEmpty())
+            pluginPath = defaultJamPilotFixturePath();
+        o->setProperty ("pluginPath", pluginPath);
+
+        if (args.hasProperty ("timeoutSeconds"))
+            o->setProperty ("timeoutSeconds", args.getProperty ("timeoutSeconds", var()));
+        result = engineBackend->loadPlugin (var (o));
+    }
+    else if (command == "remove_plugin")
+    {
+        result = engineBackend->removePlugin (args);
+    }
+    else if (command == "reorder_plugin")
+    {
+        result = engineBackend->reorderPlugin (args);
+    }
+    else if (command == "set_plugin_param")
+    {
+        result = engineBackend->setPluginParam (args);
+    }
+    else if (command == "bypass_plugin")
+    {
+        result = engineBackend->bypassPlugin (args);
+    }
+    else if (command == "add_automation_point")
+    {
+        result = engineBackend->addAutomationPoint (args);
+    }
+    else if (command == "remove_automation_point")
+    {
+        result = engineBackend->removeAutomationPoint (args);
+    }
+    else if (command == "set_automation_point")
+    {
+        result = engineBackend->setAutomationPoint (args);
+    }
+    else if (command == "clear_automation")
+    {
+        result = engineBackend->clearAutomation (args);
+    }
+    else if (command == "set_transport")
+    {
+        result = engineBackend->setTransport (args);
+    }
+    else if (command == "export_audio")
+    {
+        result = engineBackend->renderExport (args);
+    }
+    else
+    {
+        result = makeEngineError ("maolan", command, "unsupported_by_backend",
+                                  "Maolan process backend does not support this MoshOps command through the engine contract yet.",
+                                  makeEngineDiagnostics ("maolan", command));
+    }
+
+    const bool ok = (bool) result.getProperty ("ok", false);
+    if (! isMaolanBackendReadOnlyCommand (command))
+    {
+        const auto message = ok ? String() : engineResultMessage (result);
+        logLine (command, args, ok, message, false);
+    }
+
+    if (! ok)
+        return errResult (command, engineResultMessage (result), result);
+
+    if (! isMaolanBackendReadOnlyCommand (command))
+        emitSnapshotInvalidated();
+
+    return okResult (command, maolanCommandDataForMoshOps (command, result));
+}
+
 juce::var MoshOps::cmdCreateTrack (const juce::var& args)
 {
     undoManager().beginNewTransaction ("create_track");
@@ -3033,6 +4412,11 @@ void MoshOps::finalizeRender (const juce::String& clipId, const juce::File& outp
 juce::var MoshOps::cmdListColors (const juce::var&)
 {
     // The SA3 colour rack (name + ASTD ceiling per color) for the generative UI.
+    // In Maolan mode this is a local read-only UI helper, not a backend contract
+    // operation: the process slice does not expose the SA3 color service yet.
+    if (isMaolanProcessBackend (engineBackend.get()))
+        return okResult ("list_colors", [] { auto* o = new DynamicObject(); o->setProperty ("colors", Array<var>{}); return var (o); }());
+
     if (! jobManager.ensureServiceRunning())
         return errResult ("list_colors", "generative service unavailable");
     auto r = jobManager.listColors();
@@ -4045,6 +5429,31 @@ juce::var MoshOps::snapshot()
     // Project container extension, backend-owned (keeps the storage format out of the
     // UI — the file-dialog filter is built from this, not a hard-coded constant).
     session->setProperty ("projectExtension", eng.editFile().getFileExtension().substring (1));
+    if (engineBackend != nullptr)
+    {
+        session->setProperty ("backend", engineBackend->backendId());
+        session->setProperty ("backendDisplayName", engineBackend->displayName());
+        session->setProperty ("backendCapabilities", engineBackend->capabilities());
+    }
+    const bool maolanSnapshot = isMaolanProcessBackend (engineBackend.get());
+    const auto backendGraph = maolanSnapshot && engineBackend != nullptr ? engineBackend->sessionGraph() : var();
+    if (backendGraph.isObject())
+    {
+        session->setProperty ("backendSessionGraph", backendGraph);
+        session->setProperty ("tempo", backendGraph.getProperty ("tempo", session->getProperty ("tempo")));
+        session->setProperty ("tempoMap", backendGraph.getProperty ("tempoMap", session->getProperty ("tempoMap")));
+        session->setProperty ("timeSigNumerator", backendGraph.getProperty ("timeSigNumerator", session->getProperty ("timeSigNumerator")));
+        session->setProperty ("timeSigDenominator", backendGraph.getProperty ("timeSigDenominator", session->getProperty ("timeSigDenominator")));
+        session->setProperty ("timeSigMap", backendGraph.getProperty ("timeSigMap", session->getProperty ("timeSigMap")));
+        session->setProperty ("metronome", backendGraph.getProperty ("metronome", session->getProperty ("metronome")));
+        const auto artifacts = backendGraph.getProperty ("artifacts", var());
+        const auto sessionGraphPath = artifacts.getProperty ("sessionGraph", var()).toString();
+        if (sessionGraphPath.isNotEmpty())
+        {
+            session->setProperty ("editFile", sessionGraphPath);
+            session->setProperty ("projectExtension", "json");
+        }
+    }
 
     // Audio-engine gate + readout (wave: settings — MON-007 / FLY-004). audioEnabled
     // is the gate field the UI reads to disable play/record/export + show the
@@ -4109,43 +5518,54 @@ juce::var MoshOps::snapshot()
     // falling back to the live device readout where unset (device = live truth,
     // project = remembered intent). This is generic media-format state — no
     // Tracktion concepts cross to the UI.
-    session->setProperty ("project", projectSettingsToVar());
+    session->setProperty ("project", backendGraph.isObject()
+                                          ? backendGraph.getProperty ("project", projectSettingsToVar())
+                                          : projectSettingsToVar());
 
     Array<var> tracks;
-    int index = 0;
-    for (auto* t : te::getAudioTracks (edit))
-        if (t != nullptr)
-            tracks.add (trackToVar (*t, index++));
+    var transport = transportToVar();
+    if (backendGraph.isObject())
+    {
+        tracks = maolanTracksFromGraph (backendGraph);
+        transport = maolanTransportFromGraph (backendGraph);
+    }
+    else
+    {
+        int index = 0;
+        for (auto* t : te::getAudioTracks (edit))
+            if (t != nullptr)
+                tracks.add (trackToVar (*t, index++));
 
-    // MIX-008 — group (submix) tracks, appended AFTER the audio tracks so every
-    // existing flat consumer (lanes, mixer strips, selftest firstTrack) is
-    // unbroken. A group entry carries isGroup + its real fader (the submix
-    // VolumeAndPan the engine added) and an empty clips array.
-    for (auto* t : te::getAllTracks (edit))
-        if (auto* ft = dynamic_cast<te::FolderTrack*> (t))
-        {
-            auto* g = new DynamicObject();
-            g->setProperty ("id", ft->itemID.toString());
-            g->setProperty ("index", index++);
-            g->setProperty ("name", ft->getName());
-            g->setProperty ("type", "group");
-            g->setProperty ("isGroup", true);
-            g->setProperty ("clips", Array<var>());
-            if (auto* vp = ft->getVolumePlugin())
+        // MIX-008 — group (submix) tracks, appended AFTER the audio tracks so every
+        // existing flat consumer (lanes, mixer strips, selftest firstTrack) is
+        // unbroken. A group entry carries isGroup + its real fader (the submix
+        // VolumeAndPan the engine added) and an empty clips array.
+        for (auto* t : te::getAllTracks (edit))
+            if (auto* ft = dynamic_cast<te::FolderTrack*> (t))
             {
-                g->setProperty ("volumeDb", vp->getVolumeDb());
-                g->setProperty ("pan", vp->getPan());
+                auto* g = new DynamicObject();
+                g->setProperty ("id", ft->itemID.toString());
+                g->setProperty ("index", index++);
+                g->setProperty ("name", ft->getName());
+                g->setProperty ("type", "group");
+                g->setProperty ("isGroup", true);
+                g->setProperty ("clips", Array<var>());
+                if (auto* vp = ft->getVolumePlugin())
+                {
+                    g->setProperty ("volumeDb", vp->getVolumeDb());
+                    g->setProperty ("pan", vp->getPan());
+                }
+                if (auto* parent = ft->getParentFolderTrack())   // nested groups
+                    g->setProperty ("parentId", parent->itemID.toString());
+                tracks.add (var (g));
             }
-            if (auto* parent = ft->getParentFolderTrack())   // nested groups
-                g->setProperty ("parentId", parent->itemID.toString());
-            tracks.add (var (g));
-        }
+    }
 
     auto* root = new DynamicObject();
     root->setProperty ("schemaVersion", 1);
     root->setProperty ("session", var (session));
     root->setProperty ("tracks", tracks);
-    root->setProperty ("transport", transportToVar());
+    root->setProperty ("transport", transport);
 
     // Lightweight current audio-device selection summary for the settings edit form
     // (duplicates session.sampleRate intentionally). Full lists stay on-demand.
@@ -4153,22 +5573,38 @@ juce::var MoshOps::snapshot()
 
     // Aux buses (Wave 8) — one entry per AuxReturn-carrying track.
     Array<var> buses;
-    for (auto* t : te::getAudioTracks (edit))
-        if (t != nullptr)
-            if (auto* r = firstAuxReturnOn (*t))
-            {
-                const int bus = r->busNumber.get();
-                auto* bo = new DynamicObject();
-                bo->setProperty ("bus", bus);
-                bo->setProperty ("name", edit.getAuxBusName (bus).isNotEmpty()
-                                             ? edit.getAuxBusName (bus) : ("Bus " + String (bus + 1)));
-                bo->setProperty ("trackId", t->itemID.toString());
-                buses.add (var (bo));
-            }
+    if (backendGraph.isObject())
+    {
+        const auto backendBuses = backendGraph.getProperty ("buses", var());
+        if (auto* arr = backendBuses.getArray())
+            buses = *arr;
+    }
+    else
+    {
+        for (auto* t : te::getAudioTracks (edit))
+            if (t != nullptr)
+                if (auto* r = firstAuxReturnOn (*t))
+                {
+                    const int bus = r->busNumber.get();
+                    auto* bo = new DynamicObject();
+                    bo->setProperty ("bus", bus);
+                    bo->setProperty ("name", edit.getAuxBusName (bus).isNotEmpty()
+                                                 ? edit.getAuxBusName (bus) : ("Bus " + String (bus + 1)));
+                    bo->setProperty ("trackId", t->itemID.toString());
+                    buses.add (var (bo));
+                }
+    }
     root->setProperty ("buses", buses);
 
     // Master bus (Wave 5) — the edit's master VolumeAndPan, always present.
-    if (auto mvp = edit.getMasterVolumePlugin())
+    if (backendGraph.isObject())
+    {
+        auto fallbackMaster = var (new DynamicObject());
+        fallbackMaster.getDynamicObject()->setProperty ("volumeDb", 0.0);
+        fallbackMaster.getDynamicObject()->setProperty ("pan", 0.0);
+        root->setProperty ("master", backendGraph.getProperty ("master", fallbackMaster));
+    }
+    else if (auto mvp = edit.getMasterVolumePlugin())
     {
         auto* master = new DynamicObject();
         master->setProperty ("volumeDb", mvp->getVolumeDb());
@@ -4505,6 +5941,16 @@ juce::var MoshOps::errResult (const juce::String& command, const juce::String& m
     o->setProperty ("ok", false);
     o->setProperty ("command", command);
     o->setProperty ("error", message);
+    return var (o);
+}
+
+juce::var MoshOps::errResult (const juce::String& command, const juce::String& message, juce::var data)
+{
+    auto* o = new DynamicObject();
+    o->setProperty ("ok", false);
+    o->setProperty ("command", command);
+    o->setProperty ("error", message);
+    if (! data.isVoid()) o->setProperty ("data", data);
     return var (o);
 }
 

@@ -8,6 +8,7 @@ import type {
   BuiltinPlugin, AvailableColor, RenderQA, Level, AudioDevices, Clip,
   WaveInput, TrackOutputs,
   PluginCounts, PluginBlockEntry,
+  EngineDiagnostics, EngineContractSlice,
 } from "./types";
 import type { RemoteStatus } from "./bridge";
 import { type SnapDiv, snapTimeMap, tempoMapFrom } from "./time";
@@ -59,6 +60,9 @@ type State = {
   audioDevices: AudioDevices | null;       // full device enumeration (on-demand, lazy)
   waveInputs: WaveInput[] | null;          // RTG-001 input choices (on-demand, lazy)
   trackOutputs: TrackOutputs | null;       // RTG-002 output destinations (on-demand, lazy)
+  engineDiagnostics: EngineDiagnostics | null;
+  engineSlice: EngineContractSlice | null;
+  engineSliceRunning: boolean;
   // Live level meters (Wave 9) — fed by the 30Hz "levels" event, NOT the snapshot.
   levels: { tracks: Record<string, Level>; master: Level };
 
@@ -113,6 +117,8 @@ type State = {
   loadColors: () => void;
   loadAudioDevices: () => Promise<void>;   // lazy + on-demand (force re-fetch after a device change)
   loadRouting: () => Promise<void>;        // RTG-001/002 — wave inputs + track outputs
+  loadEngineDiagnostics: () => Promise<void>;
+  runEngineContractSlice: () => Promise<void>;
   setLab: (b: boolean) => void;
 
   view: View;
@@ -156,6 +162,9 @@ export const useStore = create<State>((set, get) => ({
   audioDevices: null,
   waveInputs: null,
   trackOutputs: null,
+  engineDiagnostics: null,
+  engineSlice: null,
+  engineSliceRunning: false,
   levels: { tracks: {}, master: { l: -100, r: -100 } },
   clipboard: null,
 
@@ -400,6 +409,29 @@ export const useStore = create<State>((set, get) => ({
       command: "list_track_outputs", args: {},
     });
     if (to.ok && to.data) set({ trackOutputs: to.data });
+  },
+
+  loadEngineDiagnostics: async () => {
+    if (!isNative()) return;
+    const res = await executeCommand<CommandResult<EngineDiagnostics>>({
+      command: "get_engine_diagnostics",
+      args: {},
+    });
+    if (res.ok && res.data) set({ engineDiagnostics: res.data });
+    else set({ lastError: res.error ?? "engine diagnostics failed" });
+  },
+
+  runEngineContractSlice: async () => {
+    if (!isNative()) return;
+    set({ engineSliceRunning: true, engineSlice: null });
+    const res = await executeCommand<CommandResult<EngineContractSlice>>({
+      command: "run_engine_contract_slice",
+      args: {},
+    });
+    if (res.data) set({ engineSlice: res.data });
+    if (!res.ok) set({ lastError: res.error ?? "engine contract slice failed" });
+    set({ engineSliceRunning: false });
+    await get().loadEngineDiagnostics();
   },
   setLab: (b) => set({ labMode: b }),
 

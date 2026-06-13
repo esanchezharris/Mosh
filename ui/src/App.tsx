@@ -13,6 +13,7 @@ import { Settings } from "./components/Settings";
 import { ContentBrowser } from "./components/ContentBrowser";
 import { CommandLog } from "./components/CommandLog";
 import { ExportDialog } from "./components/ExportDialog";
+import { EngineContractPanel } from "./components/EngineContractPanel";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useFileDrop } from "./hooks/useFileDrop";
 
@@ -31,7 +32,9 @@ export function App() {
 
   // Audio-engine gate (MON-007 / FLY-004): pure view logic, no command. Disables
   // Export + drives the banner; Transport reads the same field to gate play/record.
+  const backend = snapshot?.session.backend ?? "maolan";
   const audioEnabled = snapshot?.session.audioEnabled ?? false;
+  const exportEnabled = audioEnabled || backend === "maolan";
 
   // Global keyboard-shortcut layer (CTL-002) — window keydown, ignores text inputs.
   useKeyboardShortcuts();
@@ -67,18 +70,19 @@ export function App() {
         <div className="topbar-right">
           <ContentBrowser />
           <Settings />
+          <EngineContractPanel />
           <CommandLog />
           <RemoteCompanion />
           {/* Reserved B-5 / Monster operator slot (deferred — empty in v0). */}
           <span className="b5-slot" title="B-5 / Monster — reserved (deferred)">B-5</span>
-          <ExportDialog audioEnabled={audioEnabled} />
+          <ExportDialog audioEnabled={exportEnabled} />
           <button className="tool-btn" onClick={toggleTheme} title="Toggle theme">
             {theme === "dark" ? "☾" : "☀"}
           </button>
         </div>
       </header>
 
-      {!audioEnabled && (
+      {!audioEnabled && backend !== "maolan" && (
         <div className="error-bar">
           ⚠ No audio device — playback, record and export are disabled. Open Settings (⚙) to choose a device.
         </div>

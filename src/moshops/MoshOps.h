@@ -10,6 +10,8 @@
 
 namespace mosh
 {
+class MoshEngineBackend;
+
 /** MoshOps / DslExecutor — the single mutation surface (00 §6, reconstructs the
     missing spec 02). Every user-visible change is a typed command that:
       validate → begin a Tracktion undo transaction → mutate via engine APIs →
@@ -175,6 +177,13 @@ private:
     juce::var cmdRemoveTempoChange   (const juce::var& args); // undoable (index>0)
     juce::var cmdInsertTimeSigChange (const juce::var& args); // undoable
     juce::var cmdRemoveTimeSigChange (const juce::var& args); // undoable (index>0)
+    // Engine-contract seam (additive): diagnostics/readiness and the Maolan
+    // vertical-slice gate. The default backend path follows the selected engine
+    // backend; Maolan is the default production path and Tracktion remains the
+    // reference harness.
+    juce::var cmdGetEngineDiagnostics (const juce::var& args);     // read-only
+    juce::var cmdRunEngineContractSlice (const juce::var& args);   // evidence/process gate
+    juce::var cmdMaolanBackendCommand (const juce::String& command, const juce::var& args);
 
     // The MOSH_PROJECT child of eng.edit().state, created (empty) on first read so
     // callers always get a valid tree. Pure storage accessor — no logging/transaction.
@@ -235,6 +244,7 @@ private:
 
     static juce::var okResult  (const juce::String& command, juce::var data = {});
     static juce::var errResult (const juce::String& command, const juce::String& message);
+    static juce::var errResult (const juce::String& command, const juce::String& message, juce::var data);
 
     juce::UndoManager& undoManager() { return eng.edit().getUndoManager(); }
 
@@ -248,6 +258,7 @@ private:
     juce::String applyAudioDeviceSetup (const juce::var& args);
 
     MoshEngine& eng;
+    std::unique_ptr<MoshEngineBackend> engineBackend;
     PluginHost  pluginHost;
     GenerativeJobManager jobManager;
     EventSink   eventSink;
