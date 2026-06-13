@@ -165,15 +165,13 @@ body { background: var(--ink); color: var(--bone); font-family: var(--font-body)
 .thead input[type="range"] { flex: 1 1 auto; accent-color: var(--lime); }
 .thead .x { margin-left: auto; }
 
-/* moshi presence orb (placeholder until the GL component mounts) */
-.moshi-orb {
-  width: 34px; height: 34px; border-radius: 50%;
-  background: radial-gradient(circle at 38% 34%, var(--lime-glow), #5a7a10 64%, #2a330a);
-  box-shadow: 0 0 0 1px rgba(204,255,35,0.3), 0 0 16px var(--lime-faint);
-  display: grid; place-items: center; cursor: pointer; position: relative;
+/* moshi presence — the GL character mounts its own canvas into this host */
+.moshi-mount {
+  width: 40px; height: 40px; border-radius: 50%; overflow: hidden; flex: 0 0 auto;
+  cursor: pointer; background: var(--ink-deep);
+  box-shadow: 0 0 0 1px rgba(204,255,35,0.25), 0 0 14px var(--lime-faint);
 }
-.moshi-orb::before, .moshi-orb::after { content: ""; position: absolute; top: 13px; width: 4px; height: 6px; background: var(--ink); border-radius: 2px; }
-.moshi-orb::before { left: 11px; } .moshi-orb::after { right: 11px; }
+.moshi-mount canvas { display: block; width: 100%; height: 100%; image-rendering: pixelated; }
 
 /* misc */
 .error-bar { padding: 7px 14px; background: #3a1419; color: #ff8a9c; font-size: 12px; border-bottom: 1px solid #5a1f28; }
