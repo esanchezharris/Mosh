@@ -144,13 +144,28 @@ dithered at quarter-res, who happens to be alive.
 17. **Bounded reroll.** Seeds jitter INSIDE a family's curated ranges — different
     every time, ugly never.
 
-## The STYLE dial (v4)
+## The STYLE dial (v4 + v7) — FOUR sanctioned renders, all in-shader
 
-The register has TWO sanctioned renders, both in-shader: **PS2** (the default
-crunch — dither, facets, banded light) and **TOON** (the sticker: dither
-starved to 8%, two clean bands, smooth normals, crisp dark outline — the
-user's flat reference art). The dial crossfades; everything else (anatomy,
-poses, palettes, face) is identical across both.
+One body, one anatomy, one face — rendered four ways. The `u_toon` float
+crossfades the SOLID family; `u_mode` (0/1/2) picks the render family:
+
+- **PS2** (`mode 0`, dithered) — the house crunch: Bayer dither, faceted
+  normals, banded light. The default register.
+- **TOON** (`mode 0`, clean) — the sticker: dither starved, two clean bands,
+  smooth normals, thin dark outline. The user's flat reference art.
+- **POINTS** (`mode 1`) — point cloud / Gaussian splat (point-e; and Moshi
+  literally IS a splat): the lit surface becomes soft jittered dots on a
+  screen grid, dot size driven by shading so lit reads solid and shadow goes
+  sparse; the background shows through (transparent between dots in embeds).
+- **BAKED** (`mode 2`) — the Humongous click-adventure look (Putt-Putt /
+  Pajama Sam): NO dither/facets. Smooth wrap key + cool sky fill, one-tap SDF
+  ambient occlusion darkening the crevices, warm/cool light split, soft
+  sheen + rim, value lifted toward friendly clay. Hand-painted, not crunchy.
+
+Anatomy, poses, palettes, veins, and the face channel are identical across
+all four — only the surface render changes. New render styles are
+render-only: they must not touch the body/face geometry or the two-channel
+doctrine.
 
 ## Color doctrine (v3.0 — the body goes polychrome)
 

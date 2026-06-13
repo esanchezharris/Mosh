@@ -45,7 +45,7 @@ m.set('mood', v);       // 0..1 — resting grin + liveliness
 m.set('heat', v);       // 0..1 — REC/excitement: ember core, lime eyes
 m.setState('LISTENING'); // IDLE · LISTENING · RECORDING · PAUSED · RENDERING · SLEEPING
 m.setPose('ARMS_UP');    // NEUTRAL · SPLAY · ARMS_UP · TUCK · DROOP · WAVE · REACH
-m.setStyle('toon');      // 'ps2' (the crunch) | 'toon' (the clean sticker)
+m.setStyle('baked');     // 'ps2' crunch · 'toon' sticker · 'points' splat · 'baked' clay
 m.celebrate();           // one-shot: a take landed
 m.setPersonality('GHOST' | 0.37 [, seed] [, { snap: true }]);  // crossfades
 m.setQuality('ps2+'); m.reroll(); m.poke(); m.lookAt(nx, ny);

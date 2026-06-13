@@ -57,7 +57,8 @@ uniform float u_zflat;                 // 3D blob at rest -> 2D sticker on emote
 uniform vec2  u_lean;                  // the core leans into poses
 uniform float u_coreS;                 // ...and breathes with them
 uniform float u_faceE;                 // pose energy reaching the face
-uniform float u_toon;                  // the STYLE dial: 0 = PS2 crunch, 1 = sticker
+uniform float u_toon;                  // 0 = PS2 crunch, 1 = clean sticker (SOLID family)
+uniform float u_mode;                  // render family: 0 SOLID · 1 POINTS (splat) · 2 BAKED
 uniform float u_bw, u_bf;              // body waves: amplitude, spatial freq
 uniform float u_sw, u_sf;              // surface skin: amplitude, spatial freq
 uniform float u_smink;                 // lobe goo (smin k)
@@ -71,6 +72,7 @@ const vec3 LIME = vec3(0.800, 1.000, 0.137);
 const vec3 GLOW = vec3(0.851, 1.000, 0.298);
 
 mat2 r2(float a) { float c = cos(a), s = sin(a); return mat2(c, -s, s, c); }
+float h2(vec2 p) { return fract(sin(dot(p, vec2(41.3, 289.1))) * 43758.5453); }
 float hash31(vec3 p) {
   p = fract(p * 0.3183099 + vec3(0.1, 0.2, 0.3));
   p *= 17.0;
@@ -207,8 +209,11 @@ void main() {
   vec4 outc = vec4(room, u_room);
   if (hit) {
     vec3 n0 = normalAt(hp);                          // smooth — rim/silhouette only
-    // FACETS for the crunch; toon smooths them out (sticker bands are clean)
-    vec3 n = normalize(mix(normalize(floor(n0 * 2.5 + 0.5) / 2.5), n0, u_toon));
+    float mBaked = step(1.5, u_mode);                // mode 2
+    float mPoints = step(0.5, u_mode) * (1.0 - mBaked);  // mode 1
+    // FACETS for the crunch; toon/points/baked smooth them out
+    float smoothN = max(u_toon, step(0.5, u_mode));
+    vec3 n = normalize(mix(normalize(floor(n0 * 2.5 + 0.5) / 2.5), n0, smoothN));
     vec3 nd = normalize(hp);
     // BLOB-MIXER LIGHTING, banded: colored key + fill + hard rim + clearcoat.
     vec3 KEY = normalize(vec3(0.5, 0.8, 0.6));
@@ -261,6 +266,26 @@ void main() {
       fb = pow(fb, 5.0);
       col += mix(LIME, pal3(gt + 0.35), 0.45)
            * (floor(fb * 2.0 + dth * 0.7) / 2.0) * 0.35 * u_flow;
+    }
+    // ── BAKED — the Humongous click-adventure look (Putt-Putt / Pajama Sam):
+    // soft baked lighting, no dither/facets. Smooth wrap key + cool sky fill,
+    // SDF ambient occlusion darkening the crevices between limbs, a warm/cool
+    // light split, a soft sheen and rim — hand-painted, not crunchy.
+    if (mBaked > 0.5) {
+      float wrap = dot(n0, KEY) * 0.5 + 0.5;                       // soft, no terminator
+      float fill = max(dot(n0, FIL), 0.0);
+      float ao = clamp(map(hp + n0 * 0.09) / 0.09, 0.0, 1.0);      // one tap -> crevice AO
+      ao = mix(0.52, 1.0, ao);
+      vec3 warm = vec3(1.07, 0.99, 0.85), cool = vec3(0.82, 0.88, 1.05);
+      // lift the value toward friendly clay — these were bright kids' games;
+      // raw near-black TAR would read as a void, not a painted character
+      vec3 base = pal3(0.30 + 0.20 * (nd.y * 0.5 + 0.5)) * 1.8 + 0.18;
+      vec3 bcol = base * ao * (0.55 + 0.70 * wrap) * warm;         // ambient floor + soft key
+      bcol += base * 0.28 * fill * cool;                          // sky fill
+      bcol += vec3(1.0) * pow(max(dot(n0, H), 0.0), 50.0) * 0.12 * u_glint;  // soft sheen
+      bcol += pal3(0.6) * pow(fres, 2.0) * 0.14;                  // soft rim
+      bcol += LIME * vein * 0.32 * u_veins;                       // soft veins, no crunch
+      col = bcol;
     }
     // ── THE AGENT CHANNEL: the face — ON THE BODY. Drag him and the face goes
     // with him (bd = direction in the dynamic body frame); JS homes the body
@@ -315,7 +340,22 @@ void main() {
     // tight core: a wide falloff band-dithers the whole front into speckle
     float ember = u_heat * exp(-4.2 * length(hp)) * (0.7 + 0.3 * sin(u_time * 7.0));
     col += GLOW * (floor(ember * 3.0 + dth * 0.5) / 3.0) * 0.55;
-    outc = vec4(col, 1.0);
+    // ── POINTS — point cloud / Gaussian splat (point-e, and Moshi IS a splat):
+    // the lit surface becomes a field of soft jittered dots on a screen grid,
+    // their size driven by shading so lit areas read solid and shadow goes
+    // sparse and dotty; the background shows through the gaps.
+    if (mPoints > 0.5) {
+      vec2 cell = vec2(3.0);
+      vec2 gid = floor(gl_FragCoord.xy / cell);
+      vec2 ctr = (gid + 0.5 + (vec2(h2(gid), h2(gid + 9.1)) - 0.5) * 0.8) * cell;
+      float dpx = length(gl_FragCoord.xy - ctr);
+      float bright = clamp(dot(col, vec3(0.5)) + 0.12, 0.0, 1.0);
+      float rad = cell.x * (0.26 + 0.66 * bright);              // brighter -> bigger splat
+      float splat = smoothstep(rad, rad * 0.25, dpx);           // soft gaussian-ish dot
+      outc = vec4(mix(room, col * 1.25, splat), max(u_room, splat));
+    } else {
+      outc = vec4(col, 1.0);
+    }
   }
   gl_FragColor = outc;
 }`;
@@ -419,7 +459,7 @@ function lerpSpec(a, b, w) {
 }
 const UNIFS = ['u_res','u_time','u_tq','u_lph','u_bph','u_sph','u_rotM',
   'u_onset','u_energy','u_mood','u_heat','u_gaze','u_sq','u_blink','u_wide','u_lid',
-  'u_sd','u_sd2','u_limb[0]','u_zflat','u_lean','u_coreS','u_faceE','u_toon',
+  'u_sd','u_sd2','u_limb[0]','u_zflat','u_lean','u_coreS','u_faceE','u_toon','u_mode',
   'u_bw','u_bf','u_sw','u_sf','u_smink',
   'u_palA','u_palB','u_palD','u_irid','u_glint','u_veins','u_scale','u_room',
   'u_flow','u_flowPh','u_mtilt','u_inkeye'];
@@ -757,7 +797,10 @@ function Moshi(host, opts = {}) {
   // poke escalation bookkeeping
   let pokeN = 0, pokeAt = 0, annoyT = 0;
   // the STYLE dial (eased so PS2<->TOON morphs, never snaps)
-  let toonA = O.style === 'toon' ? 1 : 0, toonT = toonA;
+  // STYLE = a SOLID-family crossfade (toon) + a render MODE (solid/points/baked)
+  const MODE_OF = { ps2: 0, toon: 0, points: 1, baked: 2 };
+  let toonA = O.style === 'ps2' ? 0 : 1, toonT = toonA;     // ps2 dithers; all else clean
+  let modeCur = MODE_OF[O.style] != null ? MODE_OF[O.style] : 0;
 
   // ── the loop ──
   let raf = 0, t0 = performance.now(), last = t0;
@@ -1017,6 +1060,7 @@ function Moshi(host, opts = {}) {
     gl.uniform1f(U.u_coreS, pose.core);
     gl.uniform1f(U.u_faceE, faceE);
     gl.uniform1f(U.u_toon, toonA);
+    gl.uniform1f(U.u_mode, modeCur);
     gl.uniform1f(U.u_bw, cur.bw);
     gl.uniform1f(U.u_bf, cur.bf);
     gl.uniform1f(U.u_sw, cur.sw);
@@ -1139,8 +1183,10 @@ function Moshi(host, opts = {}) {
       return api;
     },
     setStyle(s) {
-      if (s !== 'ps2' && s !== 'toon') throw new Error('moshi: unknown style ' + s);
-      O.style = s; toonT = s === 'toon' ? 1 : 0;
+      if (MODE_OF[s] == null) throw new Error('moshi: unknown style ' + s);
+      O.style = s;
+      toonT = s === 'ps2' ? 0 : 1;     // ps2 = dithered crunch; everything else clean
+      modeCur = MODE_OF[s];            // solid / points / baked — switches instantly
       return api;
     },
     setAnatomy(n) {                  // A / B / C — the 3D-vs-flat variations
@@ -1181,7 +1227,7 @@ Moshi.PERSONALITIES = NAMES.slice();
 Moshi.STATES = Object.keys(STATES);
 Moshi.QUALITIES = Object.keys(QUALITY);
 Moshi.POSES = POSE_NAMES.slice();
-Moshi.STYLES = ['ps2', 'toon'];
+Moshi.STYLES = ['ps2', 'toon', 'points', 'baked'];
 Moshi.ANATOMIES = Object.keys(ANATOMY);
 window.Moshi = Moshi;
 })();

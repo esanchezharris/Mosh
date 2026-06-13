@@ -253,12 +253,13 @@ resChip.onclick = () => {
   resChip.textContent = 'RES·' + q.toUpperCase();
 };
 
-// the STYLE dial: PS2 crunch <-> the sticker (clean 2-band toon)
+// the STYLE dial cycles the render languages: PS2 crunch · clean TOON sticker ·
+// POINTS (point-cloud / Gaussian splat) · BAKED (Humongous click-adventure light)
 const styleChip = document.getElementById('style');
-let toon = true;
+let si = Moshi.STYLES.indexOf('toon');
 styleChip.onclick = () => {
-  toon = !toon;
-  const s = toon ? 'toon' : 'ps2';
+  si = (si + 1) % Moshi.STYLES.length;
+  const s = Moshi.STYLES[si];
   stage.setStyle(s); mini.setStyle(s);
   styleChip.textContent = 'STYLE·' + s.toUpperCase();
 };
