@@ -87,6 +87,8 @@ export function Toolbar() {
         <button className="btn" onClick={() => void exec("create_track", { name: "Audio" })}>+ Track</button>
         <button className="btn" disabled={!selectedTrackId}
           onClick={() => void exec("add_test_tone_clip", { trackId: selectedTrackId })}>+ Test Tone</button>
+        <button className="btn" disabled={!selectedTrackId}
+          onClick={() => void exec("add_midi_clip", { trackId: selectedTrackId })}>+ MIDI</button>
       </div>
       <div className="sep" />
       <div className="seg" role="group" aria-label="Tool">

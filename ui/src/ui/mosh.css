@@ -285,3 +285,28 @@ body { background: var(--ink); color: var(--bone); font-family: var(--font-body)
 .cmdlog-badge { font-size: 8px; color: var(--bone-dim); border: 1px solid var(--ink-line); border-radius: 3px; padding: 0 3px; }
 .remote-code { font-family: var(--font-mono); font-size: 20px; letter-spacing: 0.18em; text-align: center; color: var(--lime); }
 .remote-qr { width: 160px; height: 160px; align-self: center; border-radius: 8px; image-rendering: pixelated; }
+.cb-file { flex-direction: row; align-items: center; justify-content: space-between; }
+.cb-import { flex: 0 0 auto; }
+
+/* ── piano roll (MIDI editor) ────────────────────────────────────────────────*/
+.pr { width: min(880px, 92vw); height: min(560px, 84vh); display: flex; flex-direction: column; background: var(--ink-raise); border: 1px solid var(--ink-line); border-radius: 12px; overflow: hidden; }
+.pr-head { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--ink-line); }
+.pr-head .pr-meta { color: var(--bone-dim); font-size: 11px; }
+.pr-vel { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--bone-dim); }
+.pr-vel input { accent-color: var(--lime); }
+.pr-body { flex: 1 1 auto; display: flex; min-height: 0; overflow: hidden; }
+.pr-keys { flex: 0 0 46px; background: var(--ink); border-right: 1px solid var(--ink-line); overflow: hidden; }
+.pr-key { display: flex; align-items: center; justify-content: flex-end; padding-right: 4px; font-size: 8px; color: var(--bone-dim); border-bottom: 1px solid rgba(0,0,0,0.4); }
+.pr-key.black { background: var(--ink-deep); }
+.pr-key.white { background: #171715; }
+.pr-scroll { flex: 1 1 auto; overflow: auto; }
+.pr-grid { position: relative; background: var(--ink); }
+.pr-row { position: absolute; left: 0; right: 0; }
+.pr-row.black { background: rgba(0,0,0,0.28); }
+.pr-gl { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--ink-line-soft); }
+.pr-gl.bar { background: var(--ink-line); }
+.pr-note { position: absolute; background: var(--lime); border: 1px solid #97c01a; border-radius: 3px; cursor: grab; box-sizing: border-box; }
+.pr-note.sel { background: var(--lime-glow); box-shadow: 0 0 0 1px #fff inset; }
+.pr-note-grip { position: absolute; right: 0; top: 0; bottom: 0; width: 5px; cursor: ew-resize; }
+.pr-lasso { position: absolute; background: var(--lime-faint); border: 1px solid var(--lime-dim); pointer-events: none; }
+.pr-foot { padding: 7px 14px; border-top: 1px solid var(--ink-line); font-size: 10px; color: var(--bone-dim); }

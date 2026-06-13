@@ -8,7 +8,7 @@ import { useEffect, useRef, useState } from "react";
 import * as QRCode from "qrcode";
 import { useStore } from "../store";
 import { pickFiles, pickSaveFile } from "../bridge";
-import type { Snapshot, ExportFormat, CommandLog as CommandLogData } from "../types";
+import type { Snapshot, ExportFormat, CommandLog as CommandLogData, DirListing } from "../types";
 
 // Small popover anchored under its trigger; closes on outside click / Esc.
 function Pop({ label, title, on, children }: { label: string; title: string; on?: boolean; children: (close: () => void) => React.ReactNode }) {
@@ -35,12 +35,58 @@ export function TopbarTools({ snapshot }: { snapshot: Snapshot }) {
   const audioEnabled = snapshot.session.audioEnabled ?? true;
   return (
     <div className="topbar-tools">
+      <FilesTool />
       <SettingsTool snapshot={snapshot} />
       <ExportTool audioEnabled={audioEnabled} />
       <CommandLogTool />
       <RemoteTool />
       <button className="btn icon" title="Toggle theme" onClick={toggleTheme}>{theme === "dark" ? "☾" : "☀"}</button>
     </div>
+  );
+}
+
+function FilesTool() {
+  const exec = useStore((s) => s.exec);
+  const refresh = useStore((s) => s.refresh);
+  const selectedTrackId = useStore((s) => s.selectedTrackId);
+  const [listing, setListing] = useState<DirListing | null>(null);
+  const navigate = async (path?: string) => { const r = await exec("list_directory", path ? { path } : {}); if (r.ok && r.data) setListing(r.data as DirListing); };
+  const onImport = async (file: string) => { await exec("import_clip", { file, trackId: selectedTrackId ?? undefined }); await refresh(); };
+  const dirs = listing?.entries.filter((e) => e.isDir) ?? [];
+  const files = listing?.entries.filter((e) => !e.isDir) ?? [];
+  return (
+    <Pop label="🗀" title="Browse audio files">
+      {() => {
+        if (!listing) void navigate();
+        return (
+          <>
+            <div className="pop-head">Files</div>
+            <div className="pop-row">
+              <button className="btn" disabled={!listing?.parent} onClick={() => void navigate(listing?.parent ?? undefined)}>↑ Up</button>
+              <span className="pop-note" title={listing?.path}>{listing?.path ?? "…"}</span>
+            </div>
+            <div className="modal-list" data-testid="content-browser" style={{ maxHeight: 240 }}>
+              {dirs.length > 0 && (
+                <div className="plugin-group"><div className="pg-label">Folders</div>
+                  {dirs.map((d) => <button key={d.path} className="plugin-row" onClick={() => void navigate(d.path)}><span className="pr-name">🗀 {d.name}</span></button>)}
+                </div>
+              )}
+              {files.length > 0 && (
+                <div className="plugin-group"><div className="pg-label">Audio files</div>
+                  {files.map((f) => (
+                    <div key={f.path} className="plugin-row cb-file">
+                      <span className="pr-name">{f.name}</span>
+                      <button className="btn cb-import" onClick={() => void onImport(f.path)}>Import</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {listing && dirs.length === 0 && files.length === 0 && <div className="rack-empty">empty</div>}
+            </div>
+          </>
+        );
+      }}
+    </Pop>
   );
 }
 

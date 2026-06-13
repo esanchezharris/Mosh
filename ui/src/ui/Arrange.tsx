@@ -307,6 +307,7 @@ function ClipBlock({
 }) {
   const ensurePeaks = useStore((s) => s.ensurePeaks);
   const peaks = useStore((s) => s.peaks[clip.id]);
+  const openPianoRoll = useStore((s) => s.openPianoRoll);
   useEffect(() => { if (clip.type === "wave") ensurePeaks(clip.id); }, [clip.id, clip.type, ensurePeaks]);
 
   // Optimistic preview during a drag; cleared when committed props arrive.
@@ -362,6 +363,7 @@ function ClipBlock({
       data-state={selected ? "selected" : "idle"} data-dragging={drag.current ? "true" : "false"}
       style={{ left, width: widthPx }}
       onPointerDown={beginDrag("move")} onPointerMove={onMove} onPointerUp={onUp}
+      onDoubleClick={() => { if (clip.type === "midi") openPianoRoll(clip.id); }}
     >
       <div className="label">{clip.name}</div>
       {clip.type === "wave" && <ClipWave peaks={peaks} width={widthPx} />}

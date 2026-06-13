@@ -160,6 +160,7 @@ const COLORS = [
 ];
 
 const reindex = (t: Track) => t.plugins!.forEach((p, i) => (p.index = i));
+const reindexNotes = (c: Clip) => c.notes!.forEach((n, i) => (n.i = i));
 function findPlugin(trackId: string, index: number): { track: Track; idx: number } | null {
   const t = findTrack(trackId);
   if (!t || !t.plugins || index < 0 || index >= t.plugins.length) return null;
@@ -414,6 +415,55 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     case "bypass_layer": { const f = findClip(str(args.clipId)); if (f?.clip.renderLayer) { f.clip.renderLayer.status = Boolean(args.bypassed) ? "bypassed" : "ready"; invalidate(); } return ok(command); }
     case "cancel_render": { const f = findClip(str(args.clipId)); if (f?.clip.renderLayer) { f.clip.renderLayer.status = "dirty"; invalidate(); } return ok(command); }
     case "remove_render_layer": { const f = findClip(str(args.clipId)); if (f) { pushUndo(); f.clip.hasRenderLayer = false; delete f.clip.renderLayer; invalidate(); } return ok(command); }
+
+    // ── MIDI clips + notes (piano-roll) ──────────────────────────────────────
+    case "add_midi_clip": {
+      const t = findTrack(str(args.trackId)) ?? snapshot.tracks[0]; if (!t) return err(command, "no track");
+      pushUndo();
+      const c: Clip = { id: nextClipId(), name: "midi", type: "midi", start: num(args.start, snapshot.transport.position), length: 4, offset: 0, hasRenderLayer: false,
+        notes: [60, 64, 67, 72].map((pitch, k) => ({ i: k, pitch, start: k * 0.5, length: 0.5, velocity: 100 })) };
+      t.clips.push(c); invalidate(); return ok(command, { clipId: c.id });
+    }
+    case "add_note": {
+      const f = findClip(str(args.clipId)); if (!f?.clip.notes) return err(command, "not a midi clip");
+      pushUndo();
+      f.clip.notes.push({ i: f.clip.notes.length, pitch: num(args.pitch, 60), start: num(args.start, 0), length: num(args.length, 0.5), velocity: num(args.velocity, 100) });
+      reindexNotes(f.clip); invalidate(); return ok(command);
+    }
+    case "remove_note": {
+      const f = findClip(str(args.clipId)); if (!f?.clip.notes) return err(command, "not a midi clip");
+      pushUndo(); f.clip.notes.splice(num(args.noteIndex), 1); reindexNotes(f.clip); invalidate(); return ok(command);
+    }
+    case "set_note": {
+      const f = findClip(str(args.clipId)); const n = f?.clip.notes?.[num(args.noteIndex)]; if (!n) return err(command, "note not found");
+      pushUndo();
+      if ("start" in args) n.start = Math.max(0, num(args.start, n.start));
+      if ("pitch" in args) n.pitch = Math.max(0, Math.min(127, num(args.pitch, n.pitch)));
+      if ("length" in args) n.length = Math.max(0.05, num(args.length, n.length));
+      if ("velocity" in args) n.velocity = Math.max(1, Math.min(127, num(args.velocity, n.velocity)));
+      invalidate(); return ok(command);
+    }
+    case "quantize_notes": {
+      const f = findClip(str(args.clipId)); if (!f?.clip.notes) return err(command, "not a midi clip");
+      const div = num(args.division, 1); if (div > 0) { pushUndo(); for (const n of f.clip.notes) n.start = Math.round(n.start / div) * div; invalidate(); }
+      return ok(command);
+    }
+
+    // ── content browser (read-only directory listing) ────────────────────────
+    case "list_directory": {
+      const path = str(args.path) || "/Users/you";
+      return ok(command, {
+        path, parent: path === "/" ? null : path.replace(/\/[^/]+$/, "") || "/", exists: true, error: null,
+        roots: [{ name: "Home", path: "/Users/you" }, { name: "Desktop", path: "/Users/you/Desktop" }, { name: "Downloads", path: "/Users/you/Downloads" }],
+        entries: [
+          { name: "Samples", path: path + "/Samples", isDir: true, size: null },
+          { name: "Loops", path: path + "/Loops", isDir: true, size: null },
+          { name: "kick.wav", path: path + "/kick.wav", isDir: false, size: 240000 },
+          { name: "snare.wav", path: path + "/snare.wav", isDir: false, size: 180000 },
+          { name: "vocal_take.wav", path: path + "/vocal_take.wav", isDir: false, size: 4200000 },
+        ],
+      });
+    }
 
     default:
       return ok(command);

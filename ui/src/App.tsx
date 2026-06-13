@@ -17,6 +17,7 @@ import { Arrange } from "./ui/Arrange";
 import { Dock } from "./ui/Dock";
 import { Mixer } from "./ui/Mixer";
 import { PluginBrowser } from "./ui/PluginBrowser";
+import { PianoRoll } from "./ui/PianoRoll";
 
 export function App() {
   const init = useStore((s) => s.init);
@@ -63,6 +64,7 @@ export function App() {
       )}
 
       <PluginBrowser />
+      <PianoRoll />
     </div>
   );
 }
