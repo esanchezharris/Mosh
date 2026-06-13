@@ -208,9 +208,9 @@ void main() {
   vec4 outc = vec4(room, u_room);
   if (hit) {
     vec3 n0 = normalAt(hp);                          // smooth — rim/silhouette only
-    float mBaked = step(0.5, u_mode);                // BAKED render family
+    // u_mode eases 0->1 (SOLID -> BAKED) so the styles CROSSFADE like PS2<->TOON
     // FACETS for the crunch; toon + baked smooth them out
-    float smoothN = max(u_toon, mBaked);
+    float smoothN = max(u_toon, u_mode);
     vec3 n = normalize(mix(normalize(floor(n0 * 2.5 + 0.5) / 2.5), n0, smoothN));
     vec3 nd = normalize(hp);
     // BLOB-MIXER LIGHTING, banded: colored key + fill + hard rim + clearcoat.
@@ -269,7 +269,9 @@ void main() {
     // soft baked lighting, no dither/facets. Smooth wrap key + cool sky fill,
     // SDF ambient occlusion darkening the crevices between limbs, a warm/cool
     // light split, a soft sheen and rim — hand-painted, not crunchy.
-    if (mBaked > 0.5) {
+    // computed whenever any baked-ness is dialed in (uniform branch, coherent);
+    // CROSSFADED with the solid col by the eased u_mode — no hard snap
+    if (u_mode > 0.001) {
       float wrap = dot(n0, KEY) * 0.5 + 0.5;                       // soft, no terminator
       float fill = max(dot(n0, FIL), 0.0);
       float ao = clamp(map(hp + n0 * 0.09) / 0.09, 0.0, 1.0);      // one tap -> crevice AO
@@ -283,7 +285,7 @@ void main() {
       bcol += vec3(1.0) * pow(max(dot(n0, H), 0.0), 50.0) * 0.10 * u_glint;  // soft sheen
       bcol += pal3(0.6) * pow(fres, 2.0) * 0.12;                 // soft rim
       bcol += LIME * vein * 0.30 * u_veins;                      // soft veins, no crunch
-      col = bcol;
+      col = mix(col, bcol, u_mode);
     }
     // ── THE AGENT CHANNEL: the face — ON THE BODY. Drag him and the face goes
     // with him (bd = direction in the dynamic body frame); JS homes the body
@@ -783,7 +785,7 @@ function Moshi(host, opts = {}) {
   // STYLE = a SOLID-family crossfade (toon) + a render MODE (solid / baked)
   const MODE_OF = { ps2: 0, toon: 0, baked: 1 };
   let toonA = O.style === 'ps2' ? 0 : 1, toonT = toonA;     // ps2 dithers; all else clean
-  let modeCur = MODE_OF[O.style] != null ? MODE_OF[O.style] : 0;
+  let modeT = MODE_OF[O.style] != null ? MODE_OF[O.style] : 0, modeA = modeT;  // eased -> crossfade
 
   // ── the loop ──
   let raf = 0, t0 = performance.now(), last = t0;
@@ -962,6 +964,7 @@ function Moshi(host, opts = {}) {
 
     // the style dial eases
     toonA += (toonT - toonA) * Math.min(1, dt * 4);
+    modeA += (modeT - modeA) * Math.min(1, dt * 4);   // BAKED crossfades like toon
 
     // he WANTS to face you: drag/antics swing him away, he eases home
     // (the face is on the body now — homing is what keeps it findable)
@@ -1043,7 +1046,7 @@ function Moshi(host, opts = {}) {
     gl.uniform1f(U.u_coreS, pose.core);
     gl.uniform1f(U.u_faceE, faceE);
     gl.uniform1f(U.u_toon, toonA);
-    gl.uniform1f(U.u_mode, modeCur);
+    gl.uniform1f(U.u_mode, modeA);
     gl.uniform1f(U.u_bw, cur.bw);
     gl.uniform1f(U.u_bf, cur.bf);
     gl.uniform1f(U.u_sw, cur.sw);
@@ -1169,7 +1172,7 @@ function Moshi(host, opts = {}) {
       if (MODE_OF[s] == null) throw new Error('moshi: unknown style ' + s);
       O.style = s;
       toonT = s === 'ps2' ? 0 : 1;     // ps2 = dithered crunch; everything else clean
-      modeCur = MODE_OF[s];            // solid / baked — switches instantly
+      modeT = MODE_OF[s];              // solid / baked — eased crossfade
       return api;
     },
     setAnatomy(n) {                  // A / B / C — the 3D-vs-flat variations

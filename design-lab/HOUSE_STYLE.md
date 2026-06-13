@@ -146,8 +146,10 @@ dithered at quarter-res, who happens to be alive.
 
 ## The STYLE dial (v4 + v7) — THREE sanctioned renders, all in-shader
 
-One body, one anatomy, one face — rendered three ways. The `u_toon` float
-crossfades the SOLID family; `u_mode` (0/1) picks the render family:
+One body, one anatomy, one face — rendered three ways. BOTH dials EASE, so
+every style switch crossfades (no snap): `u_toon` blends PS2↔TOON within the
+SOLID family, and `u_mode` (0→1) blends SOLID↔BAKED by computing both shadings
+and `mix()`-ing them. Same eased feel as the PS2/TOON dial throughout.
 
 - **PS2** (`mode 0`, dithered) — the house crunch: Bayer dither, faceted
   normals, banded light. The default register.
