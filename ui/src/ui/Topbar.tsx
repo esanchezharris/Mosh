@@ -47,8 +47,22 @@ export function Topbar({ snapshot }: { snapshot: Snapshot }) {
       </div>
 
       <div className="spacer" />
+      <ViewToggle />
       <div className="moshi-orb" data-testid="moshi" title="Moshi (presence — GL component mounts here)" />
     </header>
+  );
+}
+
+function ViewToggle() {
+  const view = useStore((s) => s.view);
+  const setView = useStore((s) => s.setView);
+  return (
+    <div className="seg" role="group" aria-label="View" data-testid="view-toggle">
+      {(["arrange", "mixer"] as const).map((v) => (
+        <button key={v} className={`btn${view === v ? " on" : ""}`} data-state={view === v ? "active" : "idle"}
+          aria-pressed={view === v} onClick={() => setView(v)}>{v[0].toUpperCase() + v.slice(1)}</button>
+      ))}
+    </div>
   );
 }
 

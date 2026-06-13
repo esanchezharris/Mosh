@@ -14,11 +14,15 @@ import { useStore } from "./store";
 import { isNative } from "./bridge";
 import { Topbar, Toolbar } from "./ui/Topbar";
 import { Arrange } from "./ui/Arrange";
+import { Dock } from "./ui/Dock";
+import { Mixer } from "./ui/Mixer";
+import { PluginBrowser } from "./ui/PluginBrowser";
 
 export function App() {
   const init = useStore((s) => s.init);
   const snapshot = useStore((s) => s.snapshot);
   const lastError = useStore((s) => s.lastError);
+  const view = useStore((s) => s.view);
 
   useEffect(() => { init(); }, [init]);
 
@@ -44,12 +48,21 @@ export function App() {
       {lastError && <div className="error-bar" data-testid="error">⚠ {lastError}</div>}
 
       {snapshot ? (
-        <div className="arrange" data-testid="view" data-view="arrange">
-          <Arrange snapshot={snapshot} />
-        </div>
+        view === "mixer" ? (
+          <div className="view" data-testid="view" data-view="mixer">
+            <Mixer snapshot={snapshot} />
+          </div>
+        ) : (
+          <div className="view arrange-view" data-testid="view" data-view="arrange">
+            <Arrange snapshot={snapshot} />
+            <Dock snapshot={snapshot} />
+          </div>
+        )
       ) : (
         <div className="boot"><p>Loading snapshot…</p></div>
       )}
+
+      <PluginBrowser />
     </div>
   );
 }

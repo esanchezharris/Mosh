@@ -14,7 +14,7 @@
 // behaviour the UI relies on is exercised, while audio/Tracktion concepts never
 // appear (the swappable seam holds on the web side too).
 
-import type { Snapshot, Clip, Track, Transport, CommandResult } from "./types";
+import type { Snapshot, Clip, Track, Transport, CommandResult, RenderLayer } from "./types";
 
 export const MOCK_ENABLED: boolean =
   typeof import.meta !== "undefined" && Boolean(import.meta.env?.DEV);
@@ -136,6 +136,33 @@ function pushUndo() { history.push(clone(snapshot)); future.length = 0; if (hist
 
 const ok = (command: string, data?: unknown): CommandResult => ({ ok: true, command, data });
 const err = (command: string, error: string): CommandResult => ({ ok: false, command, error });
+
+// ── plugin / neural / generative catalog (dev-mock only) ─────────────────────
+const BUILTINS = [
+  { type: "4osc", name: "4OSC", category: "Instruments", isInstrument: true, builtin: true as const },
+  { type: "reverb", name: "Reverb", category: "Effects", isInstrument: false, builtin: true as const },
+  { type: "delay", name: "Delay", category: "Effects", isInstrument: false, builtin: true as const },
+  { type: "eq", name: "4-Band EQ", category: "Effects", isInstrument: false, builtin: true as const },
+];
+const VST3S = [
+  { id: "vital", name: "Vital", format: "VST3", manufacturer: "Vital Audio", isInstrument: true },
+  { id: "ott", name: "OTT", format: "VST3", manufacturer: "Xfer", isInstrument: false },
+];
+const COLORS = [
+  { name: "grit", astd_max: 0.55, peak_layer: 2, more_sign: 1, verdict: "STRONG", no_stack_with: [] as string[] },
+  { name: "brightness", astd_max: 0.5, peak_layer: 3, more_sign: 1, verdict: "STRONG", no_stack_with: ["air"] },
+  { name: "air", astd_max: 0.08, peak_layer: 1, more_sign: 1, verdict: "WEAK", no_stack_with: ["brightness"] },
+];
+
+const reindex = (t: Track) => t.plugins!.forEach((p, i) => (p.index = i));
+function findPlugin(trackId: string, index: number): { track: Track; idx: number } | null {
+  const t = findTrack(trackId);
+  if (!t || !t.plugins || index < 0 || index >= t.plugins.length) return null;
+  return { track: t, idx: index };
+}
+function mkParams(n: number) {
+  return Array.from({ length: n }, (_, i) => ({ index: i, name: ["Drive", "Tone", "Mix", "Decay", "Size", "Rate", "Depth", "Gain"][i] ?? `P${i}`, value: 0.5 }));
+}
 
 // ── command dispatch ─────────────────────────────────────────────────────────
 
@@ -281,11 +308,93 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       return ok(command, { peaks });
     }
 
-    // commands the rebuild doesn't drive yet — succeed as no-ops so the UI
-    // never wedges on an unimplemented path during dev.
-    case "list_plugins": return ok(command, { plugins: [], counts: { vst3: 0, au: 0, total: 0 } });
-    case "list_builtins": return ok(command, { plugins: [] });
-    case "list_colors": return ok(command, { colors: [] });
+    // ── plugins / neural rack ────────────────────────────────────────────────
+    case "list_plugins": return ok(command, { plugins: VST3S, counts: { vst3: VST3S.length, au: 0, total: VST3S.length } });
+    case "list_builtins": return ok(command, { plugins: BUILTINS });
+    case "set_master_pan": { pushUndo(); if (snapshot.master) snapshot.master.pan = num(args.pan); invalidate(); return ok(command); }
+    case "enable_all_meters": case "enable_track_meter": case "disable_track_meter": return ok(command);
+    case "list_wave_inputs": return ok(command, { inputs: [] });
+    case "list_track_outputs": return ok(command, { outputs: [], tracks: snapshot.tracks.map((t) => ({ id: t.id, name: t.name })), audioEnabled: true });
+
+    case "load_builtin": {
+      const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found");
+      const b = BUILTINS.find((x) => x.type === str(args.type)); if (!b) return err(command, "unknown builtin");
+      pushUndo(); t.plugins = t.plugins ?? [];
+      t.plugins.push({ index: t.plugins.length, name: b.name, type: b.type, enabled: true, external: false, builtin: true, category: b.category, isInstrument: b.isInstrument, params: mkParams(b.isInstrument ? 0 : 4) });
+      invalidate(); return ok(command);
+    }
+    case "load_plugin": {
+      const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found");
+      const v = VST3S.find((x) => x.id === str(args.pluginId)); if (!v) return err(command, "unknown plugin");
+      pushUndo(); t.plugins = t.plugins ?? [];
+      t.plugins.push({ index: t.plugins.length, name: v.name, type: v.format, enabled: true, external: true, isInstrument: v.isInstrument, params: mkParams(6) });
+      invalidate(); return ok(command);
+    }
+    case "add_neural_insert": {
+      const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found");
+      pushUndo(); t.plugins = t.plugins ?? [];
+      const model = str(args.modelId, "nam");
+      t.plugins.push({ index: t.plugins.length, name: `Neural · ${model}`, type: "neural", enabled: true, external: false, isInstrument: false, params: [],
+        neural: { model, labMode: false, latencySamples: 64, latencySeconds: 64 / SR,
+          params: [{ id: "drive", ui: 40, safeMaxUi: 70 }, { id: "tone", ui: 50, safeMaxUi: 100 }, { id: "mix", ui: 100, safeMaxUi: 100 }] } });
+      invalidate(); return ok(command);
+    }
+    case "bypass_plugin": { const f = findPlugin(str(args.trackId), num(args.index)); if (!f) return err(command, "plugin not found"); pushUndo(); f.track.plugins![f.idx].enabled = !Boolean(args.bypassed); invalidate(); return ok(command); }
+    case "remove_plugin": { const f = findPlugin(str(args.trackId), num(args.index)); if (!f) return err(command, "plugin not found"); pushUndo(); f.track.plugins!.splice(f.idx, 1); reindex(f.track); invalidate(); return ok(command); }
+    case "reorder_plugin": {
+      const f = findPlugin(str(args.trackId), num(args.index)); if (!f) return err(command, "plugin not found");
+      const to = num(args.toIndex); if (to < 0 || to >= f.track.plugins!.length) return ok(command);
+      pushUndo(); const [p] = f.track.plugins!.splice(f.idx, 1); f.track.plugins!.splice(to, 0, p); reindex(f.track); invalidate(); return ok(command);
+    }
+    case "set_plugin_param": {
+      const f = findPlugin(str(args.trackId), num(args.index)); if (!f) return err(command, "plugin not found");
+      const p = f.track.plugins![f.idx].params?.find((x) => x.index === num(args.paramIndex)); if (p) p.value = num(args.value);
+      invalidate(); return ok(command);
+    }
+    case "set_neural_param": {
+      const f = findPlugin(str(args.trackId), num(args.index)); if (!f?.track.plugins![f.idx].neural) return err(command, "not a neural insert");
+      const np = f.track.plugins![f.idx].neural!.params.find((x) => x.id === str(args.paramId)); if (np) np.ui = num(args.value);
+      invalidate(); return ok(command);
+    }
+    case "set_neural_lab_mode": { const f = findPlugin(str(args.trackId), num(args.index)); if (f?.track.plugins![f.idx].neural) { pushUndo(); f.track.plugins![f.idx].neural!.labMode = Boolean(args.on); invalidate(); } return ok(command); }
+    case "reset_neural": case "open_plugin_editor": case "set_neural_latency": return ok(command);
+
+    // ── generative (Tier-B) render layers ────────────────────────────────────
+    case "list_colors": return ok(command, { colors: COLORS });
+    case "create_render_layer": {
+      const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found");
+      pushUndo();
+      f.clip.hasRenderLayer = true;
+      f.clip.renderLayer = { id: "rl-" + f.clip.id, status: "dirty", adapter: str(args.adapter, "fake"), mode: str(args.mode, "reimagine"), seed: 1, userKept: false, hasArtifact: false, nl: 0.45, colors: [] };
+      invalidate(); return ok(command);
+    }
+    case "set_render_param": {
+      const f = findClip(str(args.clipId)); if (!f?.clip.renderLayer) return err(command, "no render layer");
+      const rl = f.clip.renderLayer;
+      if ("colors" in args) rl.colors = args.colors as RenderLayer["colors"];
+      if ("nl" in args) rl.nl = num(args.nl, rl.nl);
+      if ("seed" in args) rl.seed = num(args.seed, rl.seed);
+      rl.status = "dirty"; rl.hasArtifact = false;
+      invalidate(); return ok(command);
+    }
+    case "render_layer": {
+      const f = findClip(str(args.clipId)); if (!f?.clip.renderLayer) return err(command, "no render layer");
+      f.clip.renderLayer.status = "ready"; f.clip.renderLayer.hasArtifact = true;
+      emit("layer_status", { clipId: f.clip.id, qa: { pq: 5.1, pq_base: 5.66, flags: ["quality_degraded"], adapter: f.clip.renderLayer.adapter } });
+      invalidate(); return ok(command);
+    }
+    case "accept_render": case "freeze_layer": case "bounce_layer_to_clip": {
+      const f = findClip(str(args.clipId)); if (!f?.clip.renderLayer) return err(command, "no render layer");
+      pushUndo();
+      f.clip.renderLayer.userKept = true;
+      f.clip.renderLayer.status = command === "freeze_layer" ? "frozen" : command === "bounce_layer_to_clip" ? "bounced" : "ready";
+      invalidate(); return ok(command);
+    }
+    case "reject_render": { const f = findClip(str(args.clipId)); if (f?.clip.renderLayer) { f.clip.renderLayer.status = "dirty"; f.clip.renderLayer.userKept = false; invalidate(); } return ok(command); }
+    case "bypass_layer": { const f = findClip(str(args.clipId)); if (f?.clip.renderLayer) { f.clip.renderLayer.status = Boolean(args.bypassed) ? "bypassed" : "ready"; invalidate(); } return ok(command); }
+    case "cancel_render": { const f = findClip(str(args.clipId)); if (f?.clip.renderLayer) { f.clip.renderLayer.status = "dirty"; invalidate(); } return ok(command); }
+    case "remove_render_layer": { const f = findClip(str(args.clipId)); if (f) { pushUndo(); f.clip.hasRenderLayer = false; delete f.clip.renderLayer; invalidate(); } return ok(command); }
+
     default:
       return ok(command);
   }
