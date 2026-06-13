@@ -1,7 +1,7 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
-import "./styles.css";
+import "./ui/mosh.css";
 
 // Resilience: a single component throwing during render must NOT blank the whole
 // app (React unmounts the entire tree on an uncaught render error). This boundary

@@ -1,0 +1,169 @@
+/* ============================================================================
+   THE MOSH UI — the new shell (ink + lime, PS2 register per HOUSE_STYLE v3.0).
+   Rebuilt from scratch on the swappable command/snapshot seam. ONE musical grid:
+   the timeline draws its bar/beat lines from time.ts (gridLines) and NOTHING
+   else paints a competing grid — the old `.lanes` repeating-linear-gradient (a
+   second grid at lane-height spacing) is gone for good.
+   ============================================================================ */
+
+:root {
+  /* the five — exact (design-lab/tokens/moshi.css) */
+  --ink: #0b0b0b;
+  --lime: #ccff23;
+  --lime-glow: #d9ff4c;
+  --bone: #f6f2eb;
+  --mist: #e5e5e1;
+
+  --ink-raise: #131312;
+  --ink-deep: #060606;
+  --ink-line: #232323;
+  --ink-line-soft: #1a1a1a;
+  --lime-dim: rgba(204, 255, 35, 0.42);
+  --lime-faint: rgba(204, 255, 35, 0.12);
+  --bone-dim: rgba(246, 242, 235, 0.55);
+
+  --font-display: "NanumSquareRound", "Archivo Black", "Helvetica Neue", "Arial Black", sans-serif;
+  --font-body: -apple-system, "SF Pro Text", "Helvetica Neue", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+
+  --head-w: 176px;
+  --lane-h: 76px;
+  --ruler-h: 30px;
+  --topbar-h: 52px;
+}
+
+* { box-sizing: border-box; }
+html, body, #root { margin: 0; height: 100%; width: 100%; }
+body { background: var(--ink); color: var(--bone); font-family: var(--font-body); overflow: hidden; }
+
+.tc { font-family: var(--font-mono); font-variant-numeric: tabular-nums; letter-spacing: 0.04em; }
+.display { font-family: var(--font-display); font-weight: 900; letter-spacing: -0.01em; text-transform: uppercase; }
+
+/* ── app frame ─────────────────────────────────────────────────────────────*/
+.app { display: flex; flex-direction: column; height: 100vh; background: var(--ink); }
+
+/* ── topbar ────────────────────────────────────────────────────────────────*/
+.topbar {
+  height: var(--topbar-h); flex: 0 0 var(--topbar-h);
+  display: flex; align-items: center; gap: 18px; padding: 0 14px;
+  background: var(--ink-raise); border-bottom: 1px solid var(--ink-line);
+}
+.brand { display: flex; align-items: center; gap: 9px; }
+.brand .mark {
+  width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center;
+  background: var(--lime); color: var(--ink); font-weight: 900; font-family: var(--font-display);
+}
+.brand .name { font-family: var(--font-display); font-size: 15px; letter-spacing: 0.02em; }
+
+.transport { display: flex; align-items: center; gap: 6px; }
+.transport .read { margin-left: 10px; display: flex; gap: 14px; align-items: baseline; }
+.transport .read .pos { font-size: 19px; color: var(--bone); }
+.transport .read .bpm { font-size: 12px; color: var(--bone-dim); }
+.spacer { flex: 1 1 auto; }
+
+/* buttons */
+.btn {
+  appearance: none; border: 1px solid var(--ink-line); background: var(--ink);
+  color: var(--mist); font: inherit; font-size: 12px; padding: 6px 10px; border-radius: 8px;
+  cursor: pointer; transition: background 120ms, border-color 120ms, color 120ms;
+}
+.btn:hover { border-color: var(--lime-dim); color: var(--bone); }
+.btn:active { transform: translateY(0.5px); }
+.btn.icon { padding: 6px 9px; min-width: 34px; display: grid; place-items: center; }
+.btn.on, .btn[aria-pressed="true"] { background: var(--lime); border-color: var(--lime); color: var(--ink); }
+.btn.rec[data-state="recording"] { background: #ff3b5c; border-color: #ff3b5c; color: #fff; }
+.btn.ghost { background: transparent; }
+.seg { display: inline-flex; border: 1px solid var(--ink-line); border-radius: 8px; overflow: hidden; }
+.seg .btn { border: none; border-radius: 0; }
+.seg .btn + .btn { border-left: 1px solid var(--ink-line); }
+
+/* ── arrangement ───────────────────────────────────────────────────────────*/
+.arrange { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+
+.toolbar {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+  border-bottom: 1px solid var(--ink-line-soft); background: var(--ink-raise);
+}
+.toolbar .group { display: flex; gap: 6px; align-items: center; }
+.toolbar .sep { width: 1px; height: 20px; background: var(--ink-line); margin: 0 4px; }
+.toolbar label { font-size: 11px; color: var(--bone-dim); }
+
+/* the scroll surface holds ruler + lanes so they share one horizontal scroll */
+.timeline { flex: 1 1 auto; display: flex; min-height: 0; }
+.headers {
+  flex: 0 0 var(--head-w); width: var(--head-w);
+  border-right: 1px solid var(--ink-line); background: var(--ink-raise); overflow: hidden;
+}
+.headers .ruler-corner { height: var(--ruler-h); border-bottom: 1px solid var(--ink-line); display: flex; align-items: center; padding: 0 12px; }
+.headers .ruler-corner span { font-size: 10px; letter-spacing: 0.14em; color: var(--bone-dim); }
+
+.lanes-scroll { flex: 1 1 auto; overflow: auto; min-width: 0; position: relative; }
+.lanes-inner { position: relative; }
+
+/* ruler */
+.ruler {
+  position: sticky; top: 0; z-index: 5; height: var(--ruler-h);
+  background: var(--ink-raise); border-bottom: 1px solid var(--ink-line);
+}
+.ruler .bar-num { position: absolute; top: 4px; font-size: 10px; color: var(--bone-dim); padding-left: 4px; }
+.ruler .mark { position: absolute; top: 4px; font-size: 9px; color: var(--lime-dim); padding-left: 4px; }
+
+/* THE ONE GRID — bar + beat lines, absolutely positioned from time.ts gridLines */
+.grid { position: absolute; inset: 0; pointer-events: none; z-index: 0; }
+.grid .line { position: absolute; top: 0; bottom: 0; width: 1px; }
+.grid .line.bar { background: var(--ink-line); }
+.grid .line.beat { background: var(--ink-line-soft); }
+
+/* lanes + clips */
+.lane {
+  position: relative; height: var(--lane-h); border-bottom: 1px solid var(--ink-line-soft);
+}
+.lane.selected { background: var(--lime-faint); }
+
+.clip {
+  position: absolute; top: 6px; bottom: 6px; border-radius: 7px; overflow: hidden;
+  background: linear-gradient(180deg, #1d1d1a, #161613);
+  border: 1px solid var(--ink-line); cursor: grab; z-index: 1;
+}
+.clip.wave { border-color: rgba(204, 255, 35, 0.32); }
+.clip.midi { border-color: rgba(180, 108, 255, 0.4); }
+.clip.selected { border-color: var(--lime); box-shadow: 0 0 0 1px var(--lime) inset; }
+.clip .label {
+  position: absolute; top: 0; left: 0; right: 0; height: 16px; padding: 1px 6px;
+  font-size: 10px; color: var(--bone-dim); background: rgba(0, 0, 0, 0.35);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; z-index: 2;
+}
+.clip canvas { position: absolute; inset: 16px 0 0 0; width: 100%; height: calc(100% - 16px); display: block; }
+.clip .trim { position: absolute; top: 0; bottom: 0; width: 7px; cursor: ew-resize; z-index: 3; }
+.clip .trim.l { left: 0; } .clip .trim.r { right: 0; }
+.clip .trim:hover { background: var(--lime-dim); }
+
+/* playhead — one element, mapped through the same sec→px as the grid */
+.playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--lime); z-index: 4; pointer-events: none; box-shadow: 0 0 6px var(--lime-dim); }
+
+/* track header */
+.thead { padding: 8px 10px; height: var(--lane-h); border-bottom: 1px solid var(--ink-line-soft); display: flex; flex-direction: column; gap: 6px; }
+.thead.selected { background: var(--lime-faint); }
+.thead .row1 { display: flex; align-items: center; gap: 6px; }
+.thead .tname { flex: 1 1 auto; font-size: 12px; font-weight: 600; color: var(--bone); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.thead .mix { display: flex; align-items: center; gap: 5px; }
+.thead .msx { width: 20px; height: 20px; border-radius: 5px; border: 1px solid var(--ink-line); background: var(--ink); color: var(--bone-dim); font-size: 10px; font-weight: 700; cursor: pointer; }
+.thead .msx.on.m { background: #ffb454; border-color: #ffb454; color: var(--ink); }
+.thead .msx.on.s { background: var(--lime); border-color: var(--lime); color: var(--ink); }
+.thead input[type="range"] { flex: 1 1 auto; accent-color: var(--lime); }
+.thead .x { margin-left: auto; }
+
+/* moshi presence orb (placeholder until the GL component mounts) */
+.moshi-orb {
+  width: 34px; height: 34px; border-radius: 50%;
+  background: radial-gradient(circle at 38% 34%, var(--lime-glow), #5a7a10 64%, #2a330a);
+  box-shadow: 0 0 0 1px rgba(204,255,35,0.3), 0 0 16px var(--lime-faint);
+  display: grid; place-items: center; cursor: pointer; position: relative;
+}
+.moshi-orb::before, .moshi-orb::after { content: ""; position: absolute; top: 13px; width: 4px; height: 6px; background: var(--ink); border-radius: 2px; }
+.moshi-orb::before { left: 11px; } .moshi-orb::after { right: 11px; }
+
+/* misc */
+.error-bar { padding: 7px 14px; background: #3a1419; color: #ff8a9c; font-size: 12px; border-bottom: 1px solid #5a1f28; }
+.boot { display: grid; place-items: center; height: 100%; color: var(--bone-dim); gap: 6px; }
+.empty-hint { padding: 28px; color: var(--bone-dim); font-size: 13px; }

@@ -8,6 +8,7 @@
 // plain browser, so the UI still renders during pure-web (Vite dev) work.
 
 import { getNativeFunction } from "./juce/index.js";
+import { MOCK_ENABLED, mockExecute, mockSnapshot, mockOnEvent } from "./bridge.mock";
 
 type InitData = {
   __juce__functions?: string[];
@@ -18,10 +19,16 @@ const initData = (): InitData =>
   (window as unknown as { __JUCE__?: { initialisationData?: InitData } }).__JUCE__
     ?.initialisationData ?? {};
 
-/** True when running inside the JUCE WebView with real native functions bound
- *  (distinguishes the real backend from check_native_interop's placeholder). */
-export const isNative = (): boolean =>
+/** True ONLY inside the real JUCE WebView with native functions bound. Gates the
+ *  actual native dispatch (and the dev-mock fallback) below. */
+const realNative = (): boolean =>
   (initData().__juce__functions?.length ?? 0) > 0;
+
+/** True when a backend (real native OR the browser dev-mock) is available. The
+ *  store keys its data-loading guards off this, so the UI drives identically in
+ *  the JUCE WebView and in Vite dev — the dev-mock satisfies the same contract.
+ *  In a production `vite build` MOCK_ENABLED is false, so this is real-native only. */
+export const isNative = (): boolean => realNative() || MOCK_ENABLED;
 
 // Lazily-bound native functions (created once the backend has registered them).
 const nativeCache = new Map<string, (...a: unknown[]) => Promise<unknown>>();
@@ -66,40 +73,42 @@ export type RemoteResult<T = unknown> = {
 };
 
 export async function ping(): Promise<AppInfo> {
-  if (!isNative())
-    return { ok: false, app: "Mosh", version: "dev", stage: 0, backend: "web" };
-  return (await native("ping")()) as AppInfo;
+  if (realNative()) return (await native("ping")()) as AppInfo;
+  return { ok: MOCK_ENABLED, app: "Mosh", version: "dev", stage: 0, backend: MOCK_ENABLED ? "mock" : "web" };
 }
 
 export async function notifyUiReady(): Promise<void> {
-  if (!isNative()) return;
+  if (!realNative()) return; // mock needs no ready handshake
   await native("ui_ready")();
 }
 
-/** The single mutation entry point (MoshOps, 02). Returns a result envelope. */
+/** The single mutation entry point (MoshOps, 02). Returns a result envelope.
+ *  Real native in the WebView; the in-memory dev-mock in Vite dev. */
 export async function executeCommand<T = unknown>(command: unknown): Promise<T> {
-  if (!isNative()) throw new Error("execute_command: not running in JUCE WebView");
-  return (await native("execute_command")(command)) as T;
+  if (realNative()) return (await native("execute_command")(command)) as T;
+  if (MOCK_ENABLED) return mockExecute<T>(command);
+  throw new Error("execute_command: not running in JUCE WebView");
 }
 
 /** Full session snapshot on load/resync. */
 export async function getSnapshot<T = unknown>(): Promise<T> {
-  if (!isNative()) throw new Error("get_snapshot: not running in JUCE WebView");
-  return (await native("get_snapshot")()) as T;
+  if (realNative()) return (await native("get_snapshot")()) as T;
+  if (MOCK_ENABLED) return mockSnapshot<T>();
+  throw new Error("get_snapshot: not running in JUCE WebView");
 }
 
 export async function startRemotePairing(): Promise<RemoteResult<RemoteStatus>> {
-  if (!isNative()) throw new Error("remote_start_pairing: not running in JUCE WebView");
+  if (!realNative()) return { ok: false, error: "remote companion unavailable in dev" };
   return (await native("remote_start_pairing")({})) as RemoteResult<RemoteStatus>;
 }
 
 export async function stopRemoteCompanion(): Promise<RemoteResult> {
-  if (!isNative()) throw new Error("remote_stop: not running in JUCE WebView");
+  if (!realNative()) return { ok: false, error: "remote companion unavailable in dev" };
   return (await native("remote_stop")({})) as RemoteResult;
 }
 
 export async function getRemoteStatus(): Promise<RemoteResult<RemoteStatus>> {
-  if (!isNative()) throw new Error("remote_status: not running in JUCE WebView");
+  if (!realNative()) return { ok: false, error: "remote companion unavailable in dev" };
   return (await native("remote_status")()) as RemoteResult<RemoteStatus>;
 }
 
@@ -128,6 +137,7 @@ export async function pickSaveFile(opts?: {
 /** Subscribe to a typed backend event (snapshot+events feed, 02 §4).
  *  Returns an unsubscribe fn. No-op in pure-web dev. */
 export function onEvent(eventId: string, fn: (payload: unknown) => void): () => void {
+  if (!realNative()) return MOCK_ENABLED ? mockOnEvent(eventId, fn) : () => {};
   const backend = (
     window as unknown as {
       __JUCE__?: {
