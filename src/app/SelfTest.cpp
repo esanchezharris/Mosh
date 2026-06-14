@@ -171,6 +171,20 @@ namespace
         for (auto& e : eventTypes) if (e == t) return true;
         return false;
     }
+
+    // Shared across sections: the id of the first track (captured once in Stage 2)
+    // and a by-id snapshot track lookup. File-scope so sections extracted into free
+    // functions still see them — behavior-preserving: same captured id, same lookup.
+    juce::String tid;
+
+    juce::var trackById (MoshOps& ops, const juce::String& id)
+    {
+        auto snap = ops.snapshot();                 // keep the temporary alive (no dangling array)
+        if (auto* arr = snap["tracks"].getArray())
+            for (auto& tr : *arr)
+                if (tr.getProperty ("id", juce::var()).toString() == id) return tr;
+        return {};
+    }
 }
 
 int runSelfTest (MoshEngine& eng, MoshOps& ops)
@@ -265,7 +279,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // ─── Stage 2: arrangement editing + mixer stub ───
     section ("Stage 2: arrangement + mixer");
     const auto cid = firstTrack (ops)["clips"][0].getProperty ("id", var()).toString();
-    const auto tid = firstTrack (ops).getProperty ("id", var()).toString();
+    tid = firstTrack (ops).getProperty ("id", var()).toString();   // file-scope: shared across sections
 
     // move_clip -> start 2.0s
     { auto* a = new DynamicObject(); a->setProperty ("clipId", cid); a->setProperty ("start", 2.0);
@@ -377,13 +391,6 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 
     // ─── Stage 3: VST3 hosting + MIDI ───
     section ("Stage 3: VST3 hosting + MIDI");
-    auto trackById = [&] (const String& id) -> var {
-        auto snap = ops.snapshot();                 // keep the temporary alive (no dangling array)
-        if (auto* arr = snap["tracks"].getArray())
-            for (auto& tr : *arr)
-                if (tr.getProperty ("id", var()).toString() == id) return tr;
-        return {};
-    };
     auto externalPluginIndex = [&] (const var& track) -> int {
         if (auto* arr = track.getProperty ("plugins", var()).getArray())
             for (auto& p : *arr)
@@ -416,7 +423,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         {
             { auto* a = new DynamicObject(); a->setProperty ("trackId", tid); a->setProperty ("pluginId", fxId);
               check (ok (cmd (ops, "load_plugin", var (a))), "load_plugin (effect) on wave track ok"); }
-            int idx = externalPluginIndex (trackById (tid));
+            int idx = externalPluginIndex (trackById (ops, tid));
             check (idx >= 0, "effect appears in the plugin chain");
             if (idx >= 0)
             {
@@ -428,17 +435,17 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                   cmd (ops, "bypass_plugin", var (a)); }
                 // enabled==false reflected
                 bool bypassed = false;
-                { auto trk = trackById (tid);   // bind to a local (no dangling temporary)
+                { auto trk = trackById (ops, tid);   // bind to a local (no dangling temporary)
                   if (auto* arr = trk.getProperty ("plugins", var()).getArray())
                     for (auto& p : *arr) if ((int) p.getProperty ("index", -1) == idx) bypassed = ! (bool) p.getProperty ("enabled", true); }
                 check (bypassed, "bypass_plugin disabled the plugin");
                 // persists across save/reload
                 cmd (ops, "save"); cmd (ops, "reload");
-                check (externalPluginIndex (trackById (tid)) >= 0, "hosted plugin persists across save/reload");
+                check (externalPluginIndex (trackById (ops, tid)) >= 0, "hosted plugin persists across save/reload");
                 { auto* a = new DynamicObject(); a->setProperty ("trackId", tid);
-                  a->setProperty ("index", externalPluginIndex (trackById (tid)));
+                  a->setProperty ("index", externalPluginIndex (trackById (ops, tid)));
                   check (ok (cmd (ops, "remove_plugin", var (a))), "remove_plugin ok"); }
-                check (externalPluginIndex (trackById (tid)) < 0, "plugin removed from chain");
+                check (externalPluginIndex (trackById (ops, tid)) < 0, "plugin removed from chain");
             }
         }
 
@@ -447,15 +454,15 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         const auto synthTid = ct["data"].getProperty ("trackId", var()).toString();
         { auto* a = new DynamicObject(); a->setProperty ("trackId", synthTid);
           check (ok (cmd (ops, "add_midi_clip", var (a))), "add_midi_clip ok"); }
-        check (trackClips (trackById (synthTid)) == 1, "MIDI clip on synth track");
-        auto synthClips = trackById (synthTid).getProperty ("clips", var());
+        check (trackClips (trackById (ops, synthTid)) == 1, "MIDI clip on synth track");
+        auto synthClips = trackById (ops, synthTid).getProperty ("clips", var());
         check (synthClips.size() > 0 && synthClips[0].getProperty ("type", var()).toString() == "midi", "clip type == midi");
         if (instId.isNotEmpty())
         {
             { auto* a = new DynamicObject(); a->setProperty ("trackId", synthTid); a->setProperty ("pluginId", instId);
               check (ok (cmd (ops, "load_plugin", var (a))), "load_plugin (instrument) on MIDI track ok"); }
             bool hasInst = false;
-            { auto trk = trackById (synthTid);   // bind to a local (no dangling temporary)
+            { auto trk = trackById (ops, synthTid);   // bind to a local (no dangling temporary)
               if (auto* arr = trk.getProperty ("plugins", var()).getArray())
                 for (auto& p : *arr) if ((bool) p.getProperty ("isInstrument", false)) hasInst = true; }
             check (hasInst, "instrument appears in the synth track chain");
@@ -632,7 +639,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 
         // Per-track pan (set_track_pan existed but was never covered).
         check (ok (cmd (ops, "set_track_pan", objN ({{ "trackId", tid }, { "pan", 0.4 }}))), "set_track_pan ok");
-        check (std::abs ((double) trackById (tid).getProperty ("pan", 0.0) - 0.4) < 0.02, "track pan reflects in snapshot");
+        check (std::abs ((double) trackById (ops, tid).getProperty ("pan", 0.0) - 0.4) < 0.02, "track pan reflects in snapshot");
 
         cmd (ops, "set_master_volume", args1 ("db", -3.0));   // restore a sane default
     }
@@ -663,10 +670,10 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (cmd (ops, "set_clip_gain", objN ({{ "clipId", cid }, { "gainDb", 6.0 }}))), "set_clip_gain ok");
         check (std::abs ((double) clipById (cid).getProperty ("gainDb", 0.0) - 6.0) < 0.5, "clip gain reflects in snapshot");
 
-        const int before = trackById (et).getProperty ("clips", var()).size();
+        const int before = trackById (ops, et).getProperty ("clips", var()).size();
         auto dup = cmd (ops, "duplicate_clip", args1 ("clipId", cid));
         check (ok (dup), "duplicate_clip ok");
-        check (trackById (et).getProperty ("clips", var()).size() == before + 1, "duplicate adds a clip to the track");
+        check (trackById (ops, et).getProperty ("clips", var()).size() == before + 1, "duplicate adds a clip to the track");
         const auto newId = dup["data"].getProperty ("newClipId", var()).toString();
         check ((double) clipById (newId).getProperty ("start", 0.0) > 0.5, "duplicate lands after the original");
 
@@ -678,7 +685,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     section ("Wave 7: parameter automation");
     {
         auto paramVar = [&] (const String& trkId, int plugIdx, int paramIdx) -> var {
-            auto trk = trackById (trkId);
+            auto trk = trackById (ops, trkId);
             if (auto* plugins = trk.getProperty ("plugins", var()).getArray())
                 for (auto& p : *plugins)
                     if ((int) p.getProperty ("index", -1) == plugIdx)
@@ -691,7 +698,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         auto at = cmd (ops, "create_track", args1 ("name", "Auto"))["data"].getProperty ("trackId", var()).toString();
         cmd (ops, "load_builtin", objN ({{ "trackId", at }, { "type", "compressor" }}));
         int pidx = -1;
-        { auto trk = trackById (at);
+        { auto trk = trackById (ops, at);
           if (auto* plugins = trk.getProperty ("plugins", var()).getArray())
             for (auto& p : *plugins) if (p.getProperty ("type", var()).toString() == "compressor") pidx = (int) p.getProperty ("index", -1); }
         check (pidx >= 0, "compressor loaded for automation");
@@ -741,10 +748,10 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 
         // Effect: a built-in compressor lands in the chain, flagged + categorised.
         check (ok (cmd (ops, "load_builtin", objN ({{ "trackId", bt }, { "type", "compressor" }}))), "load_builtin (compressor) ok");
-        int cidx = builtinIndex (trackById (bt), "compressor");
+        int cidx = builtinIndex (trackById (ops, bt), "compressor");
         check (cidx >= 0, "compressor appears in the chain");
         bool compFlagged = false, compCategorised = false;
-        { auto trk = trackById (bt);
+        { auto trk = trackById (ops, bt);
           if (auto* arr = trk.getProperty ("plugins", var()).getArray())
             for (auto& p : *arr) if ((int) p.getProperty ("index", -1) == cidx)
             { compFlagged = (bool) p.getProperty ("builtin", false);
@@ -758,7 +765,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // Instrument: a built-in synth on the same track is flagged isInstrument.
         check (ok (cmd (ops, "load_builtin", objN ({{ "trackId", bt }, { "type", "4osc" }}))), "load_builtin (4osc synth) ok");
         bool hasBuiltinInst = false;
-        { auto trk = trackById (bt);
+        { auto trk = trackById (ops, bt);
           if (auto* arr = trk.getProperty ("plugins", var()).getArray())
             for (auto& p : *arr) if (p.getProperty ("type", var()).toString() == "4osc")
                 hasBuiltinInst = (bool) p.getProperty ("isInstrument", false); }
@@ -766,7 +773,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 
         // Persistence + validation.
         cmd (ops, "save"); cmd (ops, "reload");
-        check (builtinIndex (trackById (bt), "compressor") >= 0, "built-in plugin persists across save/reload");
+        check (builtinIndex (trackById (ops, bt), "compressor") >= 0, "built-in plugin persists across save/reload");
         check (! ok (cmd (ops, "load_builtin", objN ({{ "trackId", bt }, { "type", "no_such_plugin" }}))), "load_builtin rejects unknown type");
         // The scratch "Built-ins" track is left in place: the only later count
         // check in this run is relative (tracksBefore+1), and absolute-count
@@ -891,7 +898,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (r1["data"].getProperty ("status", var()).toString() == "ready", "render completed -> status ready");
         // snapshot reflects the rendered layer
         bool hasArtifact = false;
-        { auto trk = trackById (gt);
+        { auto trk = trackById (ops, gt);
           if (auto* arr = trk.getProperty ("clips", var()).getArray())
             for (auto& c : *arr) if (c.getProperty ("id", var()).toString() == gcid)
                 hasArtifact = (bool) c.getProperty ("renderLayer", var()).getProperty ("hasArtifact", false); }
@@ -929,7 +936,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // Resolve the clip's render-layer var off the gen track by clipId (bind the
         // snapshot to a local so the array doesn't dangle).
         auto layerOf = [&] (const String& cid) -> var {
-            auto trk = trackById (gt);
+            auto trk = trackById (ops, gt);
             if (auto* arr = trk.getProperty ("clips", var()).getArray())
                 for (auto& c : *arr)
                     if (c.getProperty ("id", var()).toString() == cid)
@@ -939,7 +946,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         auto layerStatus = [&] (const String& cid) { return layerOf (cid).getProperty ("status", var()).toString(); };
 
         // reject_render kept the layer (it is NOT a remove — the #1 trap).
-        check ((bool) trackById (gt).getProperty ("clips", var())[0].getProperty ("hasRenderLayer", false)
+        check ((bool) trackById (ops, gt).getProperty ("clips", var())[0].getProperty ("hasRenderLayer", false)
                    || layerOf (gcid).isObject(),
                "reject_render did NOT remove the layer (still present)");
         check (layerStatus (gcid) == "dirty", "reject_render set status=dirty (re-roll, not remove)");
@@ -973,7 +980,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 
         // remove_render_layer clears the node; create_render_layer then succeeds again.
         auto layerOf2 = [&] (const String& cid) -> bool {
-            auto trk = trackById (gt2);
+            auto trk = trackById (ops, gt2);
             if (auto* arr = trk.getProperty ("clips", var()).getArray())
                 for (auto& c : *arr)
                     if (c.getProperty ("id", var()).toString() == cid)
@@ -1034,15 +1041,15 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (File (exportFile).existsAsFile() && (juce::int64) exp["data"].getProperty ("bytes", 0) > 1000,
                "export produced a non-empty WAV (full producer loop)");
 
-        check (std::abs ((double) trackById (mt).getProperty ("volumeDb", 0.0) + 4.0) < 0.5, "mix volume applied (-4 dB)");
+        check (std::abs ((double) trackById (ops, mt).getProperty ("volumeDb", 0.0) + 4.0) < 0.5, "mix volume applied (-4 dB)");
 
         // undo/redo correct throughout (a clean undoable op after the full loop)
         cmd (ops, "rename_track", objN ({{ "trackId", mt }, { "name", "Master Bus" }}));
-        check (trackById (mt).getProperty ("name", var()).toString() == "Master Bus", "rename applied");
+        check (trackById (ops, mt).getProperty ("name", var()).toString() == "Master Bus", "rename applied");
         cmd (ops, "undo");
-        check (trackById (mt).getProperty ("name", var()).toString() == "Mix", "undo reverted the rename");
+        check (trackById (ops, mt).getProperty ("name", var()).toString() == "Mix", "undo reverted the rename");
         cmd (ops, "redo");
-        check (trackById (mt).getProperty ("name", var()).toString() == "Master Bus", "redo restored the rename");
+        check (trackById (ops, mt).getProperty ("name", var()).toString() == "Master Bus", "redo restored the rename");
 
         // --- IOX-002 / IOX-007: export format / bit-depth / sample-rate options ---
         // Renders headless (no device) like the export above. Each check exercises the
@@ -1120,7 +1127,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 
             bool hasMetadata = false;
             {
-                auto trk = trackById (serumTrack);
+                auto trk = trackById (ops, serumTrack);
                 if (auto* arr = trk.getProperty ("plugins", var()).getArray())
                     for (auto& p : *arr)
                         if ((int) p.getProperty ("index", -1) == serumIndex)
@@ -1263,7 +1270,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     section ("Wave 8: sends / returns / aux buses");
     {
         auto buses  = [&] { return ops.snapshot().getProperty ("buses", var()); };
-        auto sendsOf = [&] (const String& tid) -> var { return trackById (tid).getProperty ("sends", var()); };
+        auto sendsOf = [&] (const String& tid) -> var { return trackById (ops, tid).getProperty ("sends", var()); };
 
         const int busesBefore = buses().size();
         auto cb = cmd (ops, "create_bus", args1 ("name", "Reverb"));
@@ -1271,10 +1278,10 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         const int bus0 = (int) cb["data"].getProperty ("busNumber", -1);
         const auto rtid = cb["data"].getProperty ("trackId", var()).toString();
         check (buses().size() == busesBefore + 1, "snapshot lists the new bus");
-        check ((bool) trackById (rtid).getProperty ("isReturn", false), "return track flagged isReturn");
-        check ((int) trackById (rtid).getProperty ("returnBus", -1) == bus0, "return track carries the bus number");
+        check ((bool) trackById (ops, rtid).getProperty ("isReturn", false), "return track flagged isReturn");
+        check ((int) trackById (ops, rtid).getProperty ("returnBus", -1) == bus0, "return track carries the bus number");
         { bool hasReturn = false;
-          auto rt = trackById (rtid);                          // bind to a local (no dangling temporary)
+          auto rt = trackById (ops, rtid);                          // bind to a local (no dangling temporary)
           auto pv = rt.getProperty ("plugins", var());
           if (auto* plugins = pv.getArray())
             for (auto& p : *plugins) if (p.getProperty ("type", var()).toString() == "auxreturn") hasReturn = true;
@@ -1312,9 +1319,9 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // ─── Wave 9: channel metering (command + snapshot plumbing) ───
     section ("Wave 9: channel metering");
     {
-        auto meterOn = [&] (const String& tid) { return (bool) trackById (tid).getProperty ("meterEnabled", false); };
+        auto meterOn = [&] (const String& tid) { return (bool) trackById (ops, tid).getProperty ("meterEnabled", false); };
         auto hasLevelInRack = [&] (const String& tid) -> bool {
-            auto trk = trackById (tid);
+            auto trk = trackById (ops, tid);
             auto pv = trk.getProperty ("plugins", var());
             if (auto* arr = pv.getArray())
                 for (auto& p : *arr) if (p.getProperty ("type", var()).toString() == "level") return true;
@@ -1354,7 +1361,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         auto rt = cmd (ops, "create_track", args1 ("name", "RecTrack"))["data"].getProperty ("trackId", var()).toString();
 
         // Snapshot shape: every track var carries armed/monitor/hasInput.
-        auto rtv = trackById (rt);
+        auto rtv = trackById (ops, rt);
         check (rtv.hasProperty ("armed"), "snapshot track has armed field");
         check (rtv.hasProperty ("monitor"), "snapshot track has monitor field");
         check (rtv.hasProperty ("hasInput"), "snapshot track has hasInput field");
@@ -1368,7 +1375,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (ar), "arm_track ok (graceful)");
         check (! (bool) ar["data"].getProperty ("applied", true), "arm_track applied:false headless (no input device)");
         check (hadEvent ("snapshot_invalidated"), "arm_track emitted snapshot_invalidated");
-        check (! (bool) trackById (rt).getProperty ("armed", true), "track still not armed headless (no instance)");
+        check (! (bool) trackById (ops, rt).getProperty ("armed", true), "track still not armed headless (no instance)");
 
         // arm_track with a bad/missing trackId -> validation error.
         check (! ok (cmd (ops, "arm_track", objN ({{ "trackId", "no-such-track" }, { "armed", true }}))), "arm_track bad trackId errors");
@@ -1426,7 +1433,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // input on it (vs a wave input on a plain track). Snapshot must report it.
         auto it = cmd (ops, "create_track", args1 ("name", "Instrument"))["data"].getProperty ("trackId", var()).toString();
         check (ok (cmd (ops, "load_builtin", objN ({{ "trackId", it }, { "type", "4osc" }}))), "load 4OSC instrument ok");
-        auto itv = trackById (it);
+        auto itv = trackById (ops, it);
         check ((bool) itv.getProperty ("isInstrument", false), "instrument track reports isInstrument:true");
         check (itv.hasProperty ("inputType"), "snapshot track has inputType field");
         check (itv.getProperty ("inputType", var()).toString() == "wave", "inputType defaults wave (no routed input headless)");
@@ -1435,7 +1442,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // bare track (the earlier `rt` may have been undone away by an arm_track+undo
         // probe above — arm is non-undoable so undo walks back to its create_track).
         auto pt = cmd (ops, "create_track", args1 ("name", "Plain"))["data"].getProperty ("trackId", var()).toString();
-        check (! (bool) trackById (pt).getProperty ("isInstrument", true), "plain track reports isInstrument:false");
+        check (! (bool) trackById (ops, pt).getProperty ("isInstrument", true), "plain track reports isInstrument:false");
 
         // arm_track on the instrument track: graceful no-op headless (no MIDI device).
         eventTypes.clear();
@@ -1443,7 +1450,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (ari), "arm_track on instrument track ok (graceful)");
         check (! (bool) ari["data"].getProperty ("applied", true), "arm_track instrument applied:false headless (no MIDI device)");
         check (hadEvent ("snapshot_invalidated"), "arm_track (instrument) emitted snapshot_invalidated");
-        check (! (bool) trackById (it).getProperty ("armed", true), "instrument track still not armed headless (no MIDI instance)");
+        check (! (bool) trackById (ops, it).getProperty ("armed", true), "instrument track still not armed headless (no MIDI instance)");
 
         // Still a non-undoable preference on the MIDI path (no transaction pushed).
         check (ok (cmd (ops, "arm_track", objN ({{ "trackId", it }, { "armed", false }}))), "arm_track (instrument) disarm ok");
@@ -1994,13 +2001,13 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // Zero-side-effect validation: a wave descriptor with a non-existent sourceFile
         // on a VALID track must error WITHOUT creating an orphan clip (the source check
         // is hoisted above the transaction / track auto-create).
-        auto bBefore = trackById (trackB);
+        auto bBefore = trackById (ops, trackB);
         auto bBeforeClips = bBefore.getProperty ("clips", var());
         const int bCountBefore = bBeforeClips.isArray() ? bBeforeClips.getArray()->size() : 0;
         check (! ok (cmd (ops, "paste_clip", objN ({{ "trackId", trackB }, { "start", 0.0 },
                    { "clip", objN ({{ "type", "wave" }, { "length", 1.0 }, { "sourceFile", "/no/such/file.wav" }}) }}))),
                "paste_clip wave with missing source errors");
-        auto bAfter = trackById (trackB);
+        auto bAfter = trackById (ops, trackB);
         auto bAfterClips = bAfter.getProperty ("clips", var());
         const int bCountAfter = bAfterClips.isArray() ? bAfterClips.getArray()->size() : 0;
         check (bCountAfter == bCountBefore, "failed wave paste left no orphan clip (zero side effects)");
@@ -2246,19 +2253,19 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (dt.isNotEmpty(), "range: track created");
         auto rc = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", dt }, { "seconds", 4.0 }, { "freq", 217.0 }}));
         check (ok (rc), "range: 0..4s tone clip created");
-        check (trackById (dt).getProperty ("clips", var()).size() == 1, "range: track has 1 clip before delete");
+        check (trackById (ops, dt).getProperty ("clips", var()).size() == 1, "range: track has 1 clip before delete");
 
         // start >= end errors (graceful, no mutation).
         check (! ok (cmd (ops, "delete_time_range", objN ({{ "start", 2.0 }, { "end", 1.0 }}))), "range: start>end errors");
         check (! ok (cmd (ops, "delete_time_range", objN ({{ "start", 1.0 }, { "end", 1.0 }}))), "range: start==end errors");
-        check (trackById (dt).getProperty ("clips", var()).size() == 1, "range: errored delete left the clip untouched");
+        check (trackById (ops, dt).getProperty ("clips", var()).size() == 1, "range: errored delete left the clip untouched");
 
         // The real delete: [1,2] on this track only.
         auto del = cmd (ops, "delete_time_range", objN ({{ "start", 1.0 }, { "end", 2.0 },
                                                          { "trackIds", var (juce::Array<var> { var (dt) }) }}));
         check (ok (del), "range: delete_time_range [1,2] ok");
         {
-            auto trk = trackById (dt);
+            auto trk = trackById (ops, dt);
             check (trk.getProperty ("clips", var()).size() == 2, "range: clip split into 2 segments");
             // Collect the segment time spans and assert the 1..2s gap.
             double seg0Start = 1e9, seg0End = 0.0, seg1Start = 1e9, seg1End = 0.0;
@@ -2286,7 +2293,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // Undo restores the single clip.
         check (ok (cmd (ops, "undo")), "range: undo ok");
         {
-            auto trk = trackById (dt);
+            auto trk = trackById (ops, dt);
             check (trk.getProperty ("clips", var()).size() == 1, "range: undo restored a single clip");
             auto c0 = trk["clips"][0];
             check (std::abs ((double) c0.getProperty ("start", 1.0) - 0.0) < 0.05
@@ -2299,7 +2306,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                                                           { "trackIds", var (juce::Array<var> { var (dt) }) }}));
         check (ok (noop), "range: no-overlap range is ok (no-op)");
         check ((int) noop["data"].getProperty ("removed", -1) == 0, "range: no-overlap removed nothing");
-        check (trackById (dt).getProperty ("clips", var()).size() == 1, "range: no-overlap left the clip whole");
+        check (trackById (ops, dt).getProperty ("clips", var()).size() == 1, "range: no-overlap left the clip whole");
 
         // An empty track in the target set is a graceful no-op too.
         auto et2 = cmd (ops, "create_track", args1 ("name", "RangeEmpty"))["data"].getProperty ("trackId", var()).toString();
@@ -2316,12 +2323,12 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         {
             const auto wcid = wc["data"].getProperty ("clipId", var()).toString();
             cmd (ops, "move_clip", objN ({{ "clipId", wcid }, { "start", 1.5 }}));
-            check (trackById (wt).getProperty ("clips", var()).size() == 1, "range: enclosed clip present before delete");
+            check (trackById (ops, wt).getProperty ("clips", var()).size() == 1, "range: enclosed clip present before delete");
             auto wholeDel = cmd (ops, "delete_time_range", objN ({{ "start", 1.0 }, { "end", 3.0 },
                                                                  { "trackIds", var (juce::Array<var> { var (wt) }) }}));
             check (ok (wholeDel), "range: enclosing-range delete ok");
             check ((int) wholeDel["data"].getProperty ("removed", 0) == 1, "range: clip fully inside was removed whole");
-            check (trackById (wt).getProperty ("clips", var()).size() == 0, "range: track empty after enclosing delete");
+            check (trackById (ops, wt).getProperty ("clips", var()).size() == 0, "range: track empty after enclosing delete");
         }
     }
 
@@ -2345,41 +2352,41 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (gid.isNotEmpty(), "group: returned a groupId");
         check ((int) gr["data"].getProperty ("moved", 0) == 2, "group: moved both member tracks");
 
-        auto gv = trackById (gid);
+        auto gv = trackById (ops, gid);
         check (gv.getProperty ("type", var()).toString() == "group", "group: snapshot entry has type group");
         check ((bool) gv.getProperty ("isGroup", false), "group: snapshot entry flagged isGroup");
         check (gv.getProperty ("name", var()).toString() == "Drums", "group: snapshot entry carries the name");
         check (gv.hasProperty ("volumeDb"), "group: snapshot entry has a real fader (submix VolumeAndPan)");
-        check (trackById (ga).getProperty ("parentId", var()).toString() == gid, "group: member A carries parentId");
-        check (trackById (gb).getProperty ("parentId", var()).toString() == gid, "group: member B carries parentId");
+        check (trackById (ops, ga).getProperty ("parentId", var()).toString() == gid, "group: member A carries parentId");
+        check (trackById (ops, gb).getProperty ("parentId", var()).toString() == gid, "group: member B carries parentId");
 
         // The group fader + rename drive the FolderTrack via the EXISTING commands.
         check (ok (cmd (ops, "set_track_volume", objN ({{ "trackId", gid }, { "db", -6.0 }}))),
                "group: set_track_volume on the group ok");
-        check (std::abs ((double) trackById (gid).getProperty ("volumeDb", 0.0) - (-6.0)) < 0.25,
+        check (std::abs ((double) trackById (ops, gid).getProperty ("volumeDb", 0.0) - (-6.0)) < 0.25,
                "group: group fader reflects -6 dB");
         check (ok (cmd (ops, "rename_track", objN ({{ "trackId", gid }, { "name", "DrumBus" }}))),
                "group: rename_track on the group ok");
-        check (trackById (gid).getProperty ("name", var()).toString() == "DrumBus", "group: rename reflects");
+        check (trackById (ops, gid).getProperty ("name", var()).toString() == "DrumBus", "group: rename reflects");
 
         // One undo step per command: undo(rename) -> undo(volume) -> undo(create+move).
         cmd (ops, "undo"); cmd (ops, "undo");
         check (ok (cmd (ops, "undo")), "group: undo (create_group_track) ok");
-        check (! trackById (gid).isObject() || trackById (gid).getProperty ("type", var()).toString() != "group",
+        check (! trackById (ops, gid).isObject() || trackById (ops, gid).getProperty ("type", var()).toString() != "group",
                "group: undo removed the group entry");
-        check (trackById (ga).getProperty ("parentId", var()).toString().isEmpty(), "group: undo restored A to top level");
+        check (trackById (ops, ga).getProperty ("parentId", var()).toString().isEmpty(), "group: undo restored A to top level");
         check (ok (cmd (ops, "redo")), "group: redo ok");
-        check (trackById (ga).getProperty ("parentId", var()).toString() == gid, "group: redo re-grouped A");
+        check (trackById (ops, ga).getProperty ("parentId", var()).toString() == gid, "group: redo re-grouped A");
 
         // Ungroup: hoists the members back to top level + deletes the group.
         auto ug = cmd (ops, "ungroup_track", args1 ("trackId", gid));
         check (ok (ug), "group: ungroup_track ok");
         check ((int) ug["data"].getProperty ("hoisted", 0) == 2, "group: ungroup hoisted both members");
-        check (trackById (ga).getProperty ("parentId", var()).toString().isEmpty(), "group: A back at top level");
-        check (trackById (ga).isObject() && trackById (gb).isObject(), "group: both members survived the ungroup");
-        check (! trackById (gid).isObject(), "group: group entry gone after ungroup");
+        check (trackById (ops, ga).getProperty ("parentId", var()).toString().isEmpty(), "group: A back at top level");
+        check (trackById (ops, ga).isObject() && trackById (ops, gb).isObject(), "group: both members survived the ungroup");
+        check (! trackById (ops, gid).isObject(), "group: group entry gone after ungroup");
         check (ok (cmd (ops, "undo")), "group: undo (ungroup) ok");
-        check (trackById (ga).getProperty ("parentId", var()).toString() == gid, "group: undo restored the grouping");
+        check (trackById (ops, ga).getProperty ("parentId", var()).toString() == gid, "group: undo restored the grouping");
         cmd (ops, "redo");   // leave the edit flat (group removed) for hygiene
 
         // Graceful bad args.
@@ -2433,20 +2440,20 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         auto sti = cmd (ops, "set_track_input", objN ({{ "trackId", ra }, { "deviceID", "in-3-4" }}));
         check (ok (sti), "routing: set_track_input ok (graceful headless)");
         check (! (bool) sti["data"].getProperty ("applied", true), "routing: applied:false headless (choice stored)");
-        check (trackById (ra)["input"].getProperty ("deviceID", var()).toString() == "in-3-4",
+        check (trackById (ops, ra)["input"].getProperty ("deviceID", var()).toString() == "in-3-4",
                "routing: chosen input deviceID in the snapshot");
         check (! ok (cmd (ops, "set_track_input", args1 ("trackId", ra))), "routing: set_track_input missing deviceID errors");
         check (! ok (cmd (ops, "set_track_input", objN ({{ "trackId", "nope" }, { "deviceID", "x" }}))),
                "routing: set_track_input bad trackId errors");
         check (ok (cmd (ops, "save")) && ok (cmd (ops, "reload")), "routing: save+reload ok");
-        check (trackById (ra)["input"].getProperty ("deviceID", var()).toString() == "in-3-4",
+        check (trackById (ops, ra)["input"].getProperty ("deviceID", var()).toString() == "in-3-4",
                "routing: input choice persists across save/reload");
 
         // RTG-002 — track->track routing (fully headless: ValueTree-backed).
-        check (! trackById (ra).hasProperty ("output"), "routing: default output emits no output field");
+        check (! trackById (ops, ra).hasProperty ("output"), "routing: default output emits no output field");
         auto sto = cmd (ops, "set_track_output", objN ({{ "trackId", ra }, { "destTrackId", rb }}));
         check (ok (sto), "routing: set_track_output A->B ok");
-        auto outv = trackById (ra)["output"];
+        auto outv = trackById (ops, ra)["output"];
         check ((bool) outv.getProperty ("isTrack", false), "routing: output isTrack");
         check (outv.getProperty ("destId", var()).toString() == rb, "routing: output destId == B");
         // Cycle + self rejection.
@@ -2456,13 +2463,13 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                "routing: A->A rejected (self)");
         // Persistence + undo.
         check (ok (cmd (ops, "save")) && ok (cmd (ops, "reload")), "routing: save+reload ok (output)");
-        check (trackById (ra)["output"].getProperty ("destId", var()).toString() == rb,
+        check (trackById (ops, ra)["output"].getProperty ("destId", var()).toString() == rb,
                "routing: A->B routing persists across save/reload");
         check (ok (cmd (ops, "set_track_output", objN ({{ "trackId", ra }, { "output", "default" }}))),
                "routing: reset to default ok");
-        check (! trackById (ra).hasProperty ("output"), "routing: reset removed the output field");
+        check (! trackById (ops, ra).hasProperty ("output"), "routing: reset removed the output field");
         check (ok (cmd (ops, "undo")), "routing: undo (reset) ok");
-        check (trackById (ra)["output"].getProperty ("destId", var()).toString() == rb,
+        check (trackById (ops, ra)["output"].getProperty ("destId", var()).toString() == rb,
                "routing: undo restored the A->B routing");
         check (! ok (cmd (ops, "set_track_output", args1 ("trackId", ra))),
                "routing: set_track_output with no destination errors");
@@ -2645,7 +2652,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (wc), "warp: 2s tone clip ok");
         const auto wcid = wc["data"].getProperty ("clipId", var()).toString();
         auto clipLen = [&]() -> double {
-            auto tv = trackById (wt);
+            auto tv = trackById (ops, wt);
             auto cv = tv.getProperty ("clips", var());
             if (auto* arr = cv.getArray())
                 for (auto& c : *arr)
@@ -2662,7 +2669,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                "warp: stretch mode is SoundTouch (vendored stretcher compiled in)");
         check (std::abs (clipLen() - 2.0) < 0.05, "warp: enabling at the same tempo is a 1:1 no-op");
         {
-            auto tv = trackById (wt);
+            auto tv = trackById (ops, wt);
             auto cv = tv.getProperty ("clips", var());
             bool autoT = false; double srcBpm = 0;
             if (auto* arr = cv.getArray())
