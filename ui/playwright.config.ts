@@ -9,6 +9,12 @@ export default defineConfig({
   timeout: 120_000,
   expect: { timeout: 10_000 },
   reporter: [["list"]],
+  // The specs drive ONE shared, stateful MoshOps backend (a single Edit/session).
+  // They must not run concurrently or they would mutate each other's arrangement.
+  // Each spec resets to a known state, so they stay independently runnable in series
+  // (e.g. `playwright test generative` to iterate one flow without the whole chain).
+  fullyParallel: false,
+  workers: 1,
   outputDir:
     process.env.PLAYWRIGHT_OUTPUT_DIR || "../.e2e-artifacts/playwright",
   use: {
