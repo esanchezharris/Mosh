@@ -1,6 +1,7 @@
 #pragma once
 
 #include <tracktion_engine/tracktion_engine.h>
+#include <atomic>
 
 namespace mosh
 {
@@ -89,6 +90,13 @@ private:
     juce::HashMap<juce::String, juce::DocumentWindow*> windowByPlugin;
     bool initialised = false;
     bool vst3SlowScan = false;   // set during a rescan(slowVST3=true): scanFile loads modules
+    // Bumped per plugin (scanFile + the AU sweep): a progress heartbeat the deep-scan
+    // watchdog polls. A hung out-of-process child stops this advancing, so the watchdog
+    // kills the child (te treats it as a crash -> blocklist -> continue).
+    std::atomic<int> scanFilesProcessed { 0 };
+    // Single-flight latch: only one rescan() runs at a time (a second concurrent scan
+    // would race the OOP flag, the watchdog, and the dead-mans-pedal).
+    std::atomic<bool> scanInProgress { false };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PluginHost)
 };

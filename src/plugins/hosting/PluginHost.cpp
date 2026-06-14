@@ -1,6 +1,8 @@
 #include "PluginHost.h"
 #include "plugins/neural/NeuralInsertPlugin.h"
 #include "plugins/spectral/MasterSpectralTapPlugin.h"
+#include <thread>
+#include <unistd.h>   // getpid
 
 namespace mosh
 {
@@ -8,6 +10,24 @@ using namespace juce;
 
 namespace
 {
+    // Kill the out-of-process plugin-scan child (Tracktion launches it with a
+    // "--PluginScan:<pipe>" command line). The deep-scan watchdog calls this when a
+    // child hangs loading a plugin (e.g. a license/cloud helper blocked on a socket):
+    // te's master sees the broken pipe as a crash, gives the plugin one retry, then
+    // blocklists it and continues — turning an unrecoverable hang into a skip.
+    //
+    // Scoped to DIRECT CHILDREN of THIS process (-P getpid) so a second Mosh instance's
+    // scan worker — or any unrelated process — is never collaterally killed; the te
+    // master is in-process, so its worker is always our direct child.
+    void killScanWorkers()
+    {
+        juce::ChildProcess pk;
+        pk.start (juce::StringArray { "/usr/bin/pkill", "-9",
+                                      "-P", juce::String ((int) getpid()),
+                                      "-f", "PluginScan:" });
+        pk.waitForProcessToFinish (2000);
+    }
+
     // A native plugin-editor pop-out (03 §4) that notifies on close.
     struct EditorWindow : DocumentWindow
     {
@@ -98,9 +118,10 @@ void PluginHost::initialise()
     if (initialised)
         return;
 
-    // Scan in-process only (our curated scanFile() path) -- avoid the engine
-    // spawning a child Mosh for out-of-process scanning, which deadlocks against
-    // the single-instance lock in headless --selftest/--demo runs.
+    // Default OFF at startup: the cold catalog populate below + --selftest scan only
+    // the cheap moduleinfo.json fast path in-process (no module load, no child). The
+    // out-of-process scanner is enabled TRANSIENTLY inside rescan() for an explicit
+    // deep (module-loading) sweep, so launch/headless never spawn a scan child.
     engine.getPluginManager().setUsesSeparateProcessForScanning (false);
     if (engine.getPluginManager().pluginFormatManager.getNumFormats() == 0)
         engine.getPluginManager().initialise();
@@ -213,36 +234,100 @@ void PluginHost::scanAUComponents()
         list.scanAndAddFile (id, true /*dontRescanIfAlreadyInList*/, found, au);
 
         pedal.deleteFile();   // clean return -> disarm
+        scanFilesProcessed.fetch_add (1, std::memory_order_relaxed);   // watchdog heartbeat
     }
    #endif
 }
 
 int PluginHost::rescan (bool clearFirst, bool includeVST3, bool includeAU, bool slowVST3)
 {
-    // Re-arm crash recovery BEFORE a module-loading sweep.  recoverFromDeadMansPedal()
-    // runs once in initialise() for the launch-time case; repeated in-session rescans
-    // (e.g. user-triggered rescan_plugins) need the same protection so a crasher
-    // detected by a previous in-session scan is quarantined before the next sweep.
-    // A slow VST3 sweep loads modules too, so it gets the same pre-recovery.
+    auto& pm = engine.getPluginManager();
+    auto& list = pm.knownPluginList;
+
+    // Single-flight: only one scan at a time. A second concurrent rescan (the remote
+    // command surface firing again, or CLI + GUI) would race the OOP flag, the watchdog
+    // heartbeat, and the dead-mans-pedal. If one is already running, return the current
+    // count rather than launching a racing second sweep.
+    bool expected = false;
+    if (! scanInProgress.compare_exchange_strong (expected, true))
+        return list.getNumTypes();
+
+    const bool oop = slowVST3;
+    std::atomic<bool> scanRunning { true };
+    std::thread watchdog;
+
+    // RAII teardown — runs on EVERY exit path (normal return OR stack-unwind from an
+    // exception in scanInstalledVST3/scanAUComponents/saveCatalog). It always stops +
+    // joins the watchdog (an un-joined std::thread dtor would call std::terminate and
+    // hard-crash the app, defeating the crash isolation), restores the OOP flag, and
+    // releases the single-flight latch. Declared AFTER scanRunning + watchdog so it
+    // destructs FIRST — joining the thread while scanRunning is still alive.
+    struct ScanGuard
+    {
+        te::PluginManager& pm; std::atomic<bool>& running; std::thread& wd;
+        bool& slowFlag; std::atomic<bool>& inProgress; bool oop;
+        ~ScanGuard()
+        {
+            running.store (false, std::memory_order_relaxed);
+            if (wd.joinable()) wd.join();
+            slowFlag = false;
+            if (oop) pm.setUsesSeparateProcessForScanning (false);
+            inProgress.store (false, std::memory_order_relaxed);
+        }
+    } guard { pm, scanRunning, watchdog, vst3SlowScan, scanInProgress, oop };
+
+    // Re-arm crash recovery BEFORE a module-loading sweep (quarantine a prior crasher
+    // before re-scanning it).
     if (includeAU || (includeVST3 && slowVST3))
         recoverFromDeadMansPedal();
 
-    // scanFile() consults this to load bundles without moduleinfo.json. Scoped to
-    // this call: the launch-time scanInstalledVST3() (not via rescan) stays fast.
-    vst3SlowScan = slowVST3;
+    // Enable Tracktion's out-of-process scanner for the deep (module-loading) sweep:
+    // scanFile()'s slow path routes through knownPluginList.scanAndAddFile -> te's
+    // CustomScanner -> a child Mosh process, so a plugin that crashes/asserts on load
+    // takes down only the child (te relaunches + blocklists it). The guard restores it.
+    if (oop) pm.setUsesSeparateProcessForScanning (true);
+    vst3SlowScan = slowVST3;   // scanFile() consults this to load bundles w/o moduleinfo
 
-    auto& list = engine.getPluginManager().knownPluginList;
     if (clearFirst)
-        list.clear();          // drops types; blocklist is preserved by createXml/recreateFromXml
+        list.clear();          // drops types; the blocklist is preserved
+
+    // Per-plugin hang watchdog (OOP sweep only): te's waitForReply has no timeout, so a
+    // child blocked loading a plugin (e.g. a cloud/license helper on a socket) would
+    // stall forever. scanFile()/scanAUComponents() bump scanFilesProcessed per plugin;
+    // if it stops advancing for kStallMs the watchdog kills our scan child so te sees a
+    // "crash" and skips+blocklists the offender. False positives self-heal (te re-scans).
+    if (oop)
+    {
+        watchdog = std::thread ([this, &scanRunning]
+        {
+            constexpr int kStallMs = 25000;
+            int last = scanFilesProcessed.load (std::memory_order_relaxed);
+            auto lastAdvance = juce::Time::getMillisecondCounter();
+            while (scanRunning.load (std::memory_order_relaxed))
+            {
+                juce::Thread::sleep (500);
+                const int now = scanFilesProcessed.load (std::memory_order_relaxed);
+                const auto t = juce::Time::getMillisecondCounter();
+                if (now != last) { last = now; lastAdvance = t; continue; }
+                if (t - lastAdvance > (uint32) kStallMs)
+                {
+                    killScanWorkers();      // hung child -> te sees a crash -> skip + blocklist
+                    lastAdvance = t;        // give the retry/next plugin a fresh window
+                }
+            }
+        });
+    }
 
     if (includeVST3)
         scanInstalledVST3();
+    if (includeVST3 && includeAU)
+        saveCatalog();         // persist the VST3 result BEFORE the in-process AU sweep,
+                               // so a slow/hanging AU can never lose a good VST3 catalog.
     if (includeAU)
-        scanAUComponents();    // may run on a background thread (MoshOps drives it there)
+        scanAUComponents();    // bumps the heartbeat per component (watchdog-tracked too)
 
-    vst3SlowScan = false;
     saveCatalog();
-    return list.getNumTypes();
+    return list.getNumTypes();   // guard runs here: stops watchdog, restores OOP flag, releases latch
 }
 
 void PluginHost::scanFile (const File& file)
@@ -255,33 +340,37 @@ void PluginHost::scanFile (const File& file)
 
     auto& list = engine.getPluginManager().knownPluginList;
     const auto path = file.getFullPathName();
-
-    // A module-loading scan can crash on a bad bundle. Skip a previously-quarantined
-    // file, and arm the dead-mans-pedal around the load so a crasher is blocklisted
-    // on the next launch (mirrors the AU path). moduleinfo.json scans don't load the
-    // binary, so they need neither guard.
-    if (needsModuleLoad)
-    {
-        if (list.getBlacklistedFiles().contains (path))
-            return;
-        deadMansPedal().replaceWithText (path);
-    }
+    if (list.getBlacklistedFiles().contains (path))
+        return;
 
     VST3PluginFormat vst3;
     OwnedArray<PluginDescription> found;
-    vst3.findAllTypesForFile (found, path);
 
     if (needsModuleLoad)
-        deadMansPedal().deleteFile();   // clean return -> disarm
-
-    for (auto* d : found)
     {
-        // Honor the blocklist: a manually blocked or crash-recovered plugin must
-        // NOT be re-added on the next scan (the blocklist is keyed on fileOrIdentifier).
-        if (list.getBlacklistedFiles().contains (d->fileOrIdentifier))
-            continue;
-        list.addType (*d);
+        // Module-loading scan -> route through te's KnownPluginList CustomScanner.
+        // With OOP enabled (rescan() turns it on for the deep sweep) the binary loads
+        // in a CHILD Mosh process, so a crash/assert on load kills only the child: te
+        // relaunches it, blocklists the offender, and the sweep continues. The dead-
+        // mans-pedal is armed as belt-and-suspenders for the in-process fallback (an
+        // env-only MOSH_SCAN_SLOW_VST3 sweep with OOP off). scanAndAddFile adds the
+        // results to the list itself and blacklists a file whose scan returns false.
+        deadMansPedal().replaceWithText (path);
+        list.scanAndAddFile (path, true /*dontRescanIfAlreadyInList*/, found, vst3);
+        deadMansPedal().deleteFile();
     }
+    else
+    {
+        // moduleinfo.json fast path: JUCE reads the JSON without loading the binary --
+        // safe + instant in-process, no child spawn. findAllTypesForFile only FINDS,
+        // so add the results here (honoring the blocklist).
+        vst3.findAllTypesForFile (found, path);
+        for (auto* d : found)
+            if (! list.getBlacklistedFiles().contains (d->fileOrIdentifier))
+                list.addType (*d);
+    }
+
+    scanFilesProcessed.fetch_add (1, std::memory_order_relaxed);   // per-plugin heartbeat (watchdog)
 }
 
 Array<PluginDescription> PluginHost::available() const

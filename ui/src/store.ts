@@ -455,7 +455,10 @@ export const useStore = create<State>((set, get) => ({
   // runs it off the message thread); we refresh the list when the scan reports done.
   rescanPlugins: async (format = "all", slow = false) => {
     set({ scanProgress: { format, done: false } });
-    const res = await get().exec("rescan_plugins", { format, slow });
+    // `slow` deep-scans VST3 bundles without moduleinfo.json (out-of-process, crash-safe);
+    // `au` includes AudioUnits (scanned in-process by the engine). Both are off for the
+    // fast/default path so a quick refresh stays instant.
+    const res = await get().exec("rescan_plugins", { format, slow, au: format === "all" || format === "au" });
     // Inline/VST3 rescans return done immediately; AU rescans complete via the
     // 'plugin_scan_progress' event (see init()).
     const status = (res.data as { status?: string } | undefined)?.status;

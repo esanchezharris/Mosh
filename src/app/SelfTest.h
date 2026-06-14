@@ -19,6 +19,12 @@ int runUndoSelfTest (MoshEngine&, MoshOps&);
     exits. Used by the BlackHole virtual loopback gate. */
 int runLiveAudioSmoke (MoshEngine&, MoshOps&);
 
+/** Diagnostic (`Mosh --scan-plugins-deep`): runs a synchronous deep plugin scan
+    (out-of-process VST3 + in-process AudioUnit), then prints the resulting catalog
+    (count, names, formats) and blocklist to stderr. Rebuilds the persisted catalog
+    the GUI app reads. Returns 0 on success. */
+int runDeepPluginScan (MoshOps&);
+
 /** Scripted Stage 3 demo (`Mosh --demo3`): builds a session with a VST3 effect on
     a wave track and a VST3 synth on a MIDI track, and opens the synth's native
     editor — then leaves the GUI running (for visual verification of the gate). */

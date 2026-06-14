@@ -3064,6 +3064,45 @@ int runLiveAudioSmoke (MoshEngine& eng, MoshOps& ops)
     return failures;
 }
 
+int runDeepPluginScan (MoshOps& ops)
+{
+    using namespace juce;
+    std::cerr << "===== Deep plugin scan: out-of-process VST3 + AudioUnit =====\n";
+
+    const auto t0 = Time::getMillisecondCounterHiRes();
+    auto rs = cmd (ops, "rescan_plugins",
+                   objN ({ { "format", "all" }, { "slow", true }, { "au", true },
+                           { "clearFirst", false }, { "wait", true } }));   // wait => synchronous; keep blocklist
+    const auto secs = (Time::getMillisecondCounterHiRes() - t0) / 1000.0;
+
+    const bool scanned = ok (rs);
+    std::cerr << "  rescan ok=" << (scanned ? "true" : "false")
+              << "  count=" << (int) rs["data"].getProperty ("count", -1)
+              << "  in " << String (secs, 1).toStdString() << "s\n";
+
+    auto data = cmd (ops, "list_plugins")["data"];
+    auto counts = data.getProperty ("counts", var());
+    std::cerr << "  catalog: vst3=" << (int) counts.getProperty ("vst3", -1)
+              << "  au=" << (int) counts.getProperty ("au", -1)
+              << "  total=" << (int) counts.getProperty ("total", -1) << "\n";
+    if (auto* arr = data.getProperty ("plugins", var()).getArray())
+        for (auto& p : *arr)
+            std::cerr << "    - " << p.getProperty ("name", "?").toString().toStdString()
+                      << "  [" << p.getProperty ("format", "?").toString().toStdString() << "]"
+                      << (((bool) p.getProperty ("isInstrument", false)) ? "  (instrument)" : "")
+                      << "\n";
+
+    if (auto* bl = cmd (ops, "get_plugin_blocklist")["data"].getProperty ("blocklist", var()).getArray())
+    {
+        std::cerr << "  blocklisted (" << bl->size() << "):\n";
+        for (auto& b : *bl)
+            std::cerr << "    x " << b.getProperty ("id", b).toString().toStdString() << "\n";
+    }
+
+    std::cerr << "===== deep scan " << (scanned ? "OK" : "FAILED") << " =====\n";
+    return scanned ? 0 : 1;
+}
+
 void runPluginDemo (MoshOps& ops)
 {
     using namespace juce;

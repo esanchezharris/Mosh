@@ -2462,22 +2462,30 @@ juce::var MoshOps::cmdRescanPlugins (const juce::var& args)
     const auto format = args.getProperty ("format", "all").toString();   // "vst3" | "au" | "all"
     const bool clearFirst = (bool) args.getProperty ("clearFirst", false);
     const bool includeVST3 = (format == "vst3" || format == "all");
-    // AU is the slow/risky path: only when requested AND opted in (so --selftest,
-    // which never sets MOSH_SCAN_AU, performs no AU sweep). VST3-only rescans are
-    // always allowed.
+    // AU is scanned in-process (te can't OOP-scan AU — AUv3 needs the message thread),
+    // so it carries a residual hang risk; te + the dead-mans-pedal recover crashers.
+    // Include AU when the caller asks for it explicitly (the UI Rescan passes au:true,
+    // format:"all") OR via the legacy MOSH_SCAN_AU opt-in. --selftest uses format:"vst3"
+    // (and sets neither), so it never sweeps AU.
     const bool auOptedIn = SystemStats::getEnvironmentVariable ("MOSH_SCAN_AU", {}) == "1";
-    const bool includeAU = (format == "au" || format == "all") && auOptedIn;
+    const bool includeAU = (format == "au" || format == "all")
+                            && (auOptedIn || (bool) args.getProperty ("au", false));
     // A slow VST3 sweep LOADS each module (so it surfaces bundles without
     // moduleinfo.json — Vital, OTT, Valhalla, …, which the fast path can't see).
     // That can block for seconds and can crash on a bad bundle, so it runs OFF the
     // message thread exactly like AU, with the dead-mans-pedal armed per file.
     const bool slowVST3 = ((bool) args.getProperty ("slow", false)) && includeVST3;
 
-    const bool runAsync = includeAU || slowVST3;   // anything that loads modules
+    // wait:true forces a synchronous, inline scan (used by --scan-plugins-deep and
+    // the selftest); the UI omits it so a module-loading sweep stays async/off-thread.
+    const bool wait = (bool) args.getProperty ("wait", false);
+    const bool runAsync = (includeAU || slowVST3) && ! wait;   // module-loading work, off-thread
     if (! runAsync)
     {
-        // Fast VST3 (moduleinfo.json) sweep: cheap + safe, run synchronously.
-        const int total = pluginHost.rescan (clearFirst, includeVST3, false);
+        // Synchronous, inline scan. Reached by the fast case (no AU, no slow) OR a
+        // wait:true deep scan (--scan-plugins-deep / selftest) — so pass the real
+        // includeAU + slowVST3 through, not a hardcoded fast sweep.
+        const int total = pluginHost.rescan (clearFirst, includeVST3, includeAU, slowVST3);
         logLine ("rescan_plugins", args, true, {}, false);   // non-undoable catalog op
         emitSnapshotInvalidated();
         auto* d = new DynamicObject();

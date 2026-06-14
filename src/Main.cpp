@@ -28,14 +28,17 @@ public:
 
         const bool undoSelfTest = commandLine.contains ("--selftest-undo");
         const bool liveAudioSmoke = commandLine.contains ("--live-audio-smoke");
+        const bool scanDeep = commandLine.contains ("--scan-plugins-deep");
         const bool headless = undoSelfTest || commandLine.contains ("--selftest");
+        const bool noAudio = headless || scanDeep;   // device-free for the harnesses + the scan utility
         const juce::String freshSessionName = undoSelfTest ? "session-selftest-undo"
-                                            : (liveAudioSmoke ? "session-live-audio-smoke"
-                                                              : "session-selftest");
+                                            : liveAudioSmoke ? "session-live-audio-smoke"
+                                            : scanDeep ? "session-scan"
+                                            : "session-selftest";
         // Headless: no audio device, and an isolated cold session so the harness is
         // idempotent (it saves/reloads itself) and never touches the GUI session.
-        engine  = std::make_unique<MoshEngine> ((! headless) || liveAudioSmoke,
-                                                /*freshSession=*/ headless || liveAudioSmoke,
+        engine  = std::make_unique<MoshEngine> ((! noAudio) || liveAudioSmoke,
+                                                /*freshSession=*/ noAudio || liveAudioSmoke,
                                                 freshSessionName);
         moshOps = std::make_unique<MoshOps> (*engine);
         remoteServer = std::make_unique<RemoteCompanionServer> (
@@ -75,6 +78,16 @@ public:
         {
             const int fails = runLiveAudioSmoke (*engine, *moshOps);
             setApplicationReturnValue (fails);
+            quit();
+            return;
+        }
+
+        // Diagnostic: rebuild the plugin catalog from the terminal (out-of-process
+        // VST3 + AU), print it, and exit. Updates the global catalog the GUI reads.
+        if (scanDeep)
+        {
+            const int rc = runDeepPluginScan (*moshOps);
+            setApplicationReturnValue (rc);
             quit();
             return;
         }

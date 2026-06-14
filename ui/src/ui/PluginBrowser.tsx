@@ -41,8 +41,8 @@ export function PluginBrowser() {
         <div className="modal-head">
           <strong className="display">Add plugin</strong>
           <span className="pr-meta tc">{counts ? `${counts.vst3} VST3 · ${counts.au} AU` : `${plugins.length} installed`}</span>
-          <button className="btn ghost" onClick={() => void rescanPlugins("vst3")} disabled={scanning}
-            title="Re-scan the installed VST3 folders">{scanning ? "Scanning…" : "Rescan"}</button>
+          <button className="btn ghost" onClick={() => void rescanPlugins("vst3", true)} disabled={scanning}
+            title="Deep-scan every installed VST3 out-of-process (crash/hang-safe)">{scanning ? "Scanning…" : "Rescan"}</button>
           <button className="btn x" onClick={close}>✕</button>
         </div>
         <div className="modal-filters">

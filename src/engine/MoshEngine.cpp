@@ -17,6 +17,14 @@ namespace
         // mic-permission prompt on headless/no-audio launches).
         bool addSystemAudioIODeviceTypes() override { return audio; }
 
+        // INS-006 — allow Tracktion's out-of-process plugin scanner. With this true
+        // (and PluginManager::setUsesSeparateProcessForScanning(true)), a module-
+        // loading VST3 scan runs in a throwaway child Mosh process, so a plugin that
+        // crashes or asserts on load kills only the child — te relaunches it and the
+        // catalog scan continues. moreThanOneInstanceAllowed()==true (Main.cpp) means
+        // the child runs free (no single-instance forwarding/deadlock).
+        bool canScanPluginsOutOfProcess() override { return true; }
+
         // PRF-001 — the ONE knob Tracktion's parallel audio graph reads. The engine
         // applies setNumThreads(getNumberOfCPUsToUseForAudio() - 1) in EditPlaybackContext
         // (live) and NodeRenderContext (offline), so this is a genuine, load-bearing

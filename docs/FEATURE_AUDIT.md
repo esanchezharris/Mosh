@@ -264,21 +264,54 @@ Research confirmed the **hosting** half already works — `JUCE_PLUGINHOST_AU=1`
 
 **Shipped-on-both-axes: 81 → 83** (must-tier 67 → 69). Plugin hosting now spans both Mac formats with a persisted catalog, a working blocklist, and rescan — not just a curated VST3 list.
 
-### 2026-06-14 · VST3 scan: curated list → full folder enumeration
+### 2026-06-14 · VST3 scan: curated list → full folder enumeration + out-of-process deep scan (INS-006)
 
-`scanCuratedVST3()` (a hardcoded list of 6 bundle filenames) was the reason the
-browser only ever showed a handful of plug-ins. It is now `scanInstalledVST3()`,
-which enumerates **every** `.vst3` bundle in `/Library/Audio/Plug-Ins/VST3` and
-`~/Library/Audio/Plug-Ins/VST3` (plus one level of vendor subfolders) and catalogs
-each via `scanFile()`. The default fast path still only adds bundles carrying
-`moduleinfo.json` (no module load → safe, no Debug assertion noise), which on a
-typical machine jumps the catalog from a curated handful to the full set of
-moduleinfo-bearing plug-ins. Bundles **without** `moduleinfo.json` (e.g. Vital,
-OTT, Valhalla) require loading the module to read the factory, so they stay behind
-the existing opt-in **`MOSH_SCAN_SLOW_VST3=1`** (the slow path now also benefits
-from full enumeration, arms the dead-mans-pedal per bundle, and — via
-`rescan_plugins {slow:true}` — runs on a background thread so the UI never freezes).
-The PluginBrowser **Rescan** button runs the safe fast enumeration.
+`scanCuratedVST3()` (a hardcoded list of 6 bundle filenames) was why the browser
+only ever showed a handful of plug-ins. It is now `scanInstalledVST3()`, which
+enumerates **every** `.vst3` bundle in `/Library/Audio/Plug-Ins/VST3` and
+`~/Library/Audio/Plug-Ins/VST3` (plus one level of vendor subfolders).
+
+Two scan depths:
+- **Fast (default, in-process):** only bundles with `moduleinfo.json` (JUCE reads
+  the JSON without loading the binary — safe, instant). Cold-start + `--selftest`
+  use only this, so launch stays fast and child-free.
+- **Deep (the Rescan button → `rescan_plugins {slow:true}`):** also loads bundles
+  *without* moduleinfo (Vital, OTT, Valhalla, FabFilter, soothe2, …). Loading a
+  module can crash, assert (a null-factory `jassert` in Debug), or **hang** (a
+  cloud/license helper blocked on a socket). So the deep sweep runs
+  **out-of-process**: `MoshEngineBehaviour::canScanPluginsOutOfProcess()` is true and
+  `rescan()` flips `setUsesSeparateProcessForScanning(true)` for the sweep, so
+  `scanFile()`'s slow path routes through `knownPluginList.scanAndAddFile()` → te's
+  `CustomScanner` → a child Mosh process (the existing `startChildProcessPluginScan`
+  hook at `Main.cpp:26`). A crash kills only the child; te relaunches, retries once,
+  blocklists the offender, and continues.
+
+te's `waitForReply` has **no timeout**, so a *hung* (non-crashing) child would stall
+forever. `rescan()` therefore runs a **watchdog thread**: each plugin bumps an atomic
+`scanFilesProcessed` heartbeat (`scanFile()` for VST3, the AU sweep too); if it stalls
+>25 s, the watchdog `pkill`s **our scan child** (scoped to `-P getpid()` so a second
+Mosh instance is never collaterally killed), which te treats as a crash → skip +
+blocklist → continue. The whole sweep is **single-flight** (`scanInProgress` latch —
+no overlapping scans racing the OOP flag) and wrapped in an **RAII guard** so the
+watchdog is always joined and the OOP flag restored on every exit path, even an
+exception (an un-joined `std::thread` dtor would `std::terminate`). Verified on a real
+library: cold 3 → **~37 VST3** (incl. previously-invisible Vital/OTT/Valhalla), hanging
+`WaveShell1-VST3` shells auto-quarantined, 0 orphaned workers, `--selftest` 650/650.
+
+NB: a host can only catalog what the OS can load. A tangled vendor install — e.g.
+multiple conflicting Waves framework versions (`WavesLib1_16.6/16.7/16.8` co-installed)
+makes WaveShell hang on load for *every* host (pluginval included), so those plug-ins
+stay quarantined until the duplicate runtimes are removed. That is a system-config
+issue, not a scanner limitation.
+
+**AU** is scannable the same way (`rescan_plugins {au:true}` / `--scan-plugins-deep`,
+also out-of-process) but is **NOT on the one-click Rescan**: a WaveShell install
+exposes the *entire* Waves catalog (×N shell versions = hundreds of AU entries),
+turning a combined sweep into a 15-min, browser-cluttering scan. VST3 covers the
+user's primary library; AU stays an explicit opt-in. **CLAP** is not hosted by
+JUCE 8 (a multi-week custom `AudioPluginFormat` over the CLAP C ABI) and every
+CLAP-only case here is also installed as VST3/AU — deferred. `--scan-plugins-deep`
+is a terminal diagnostic that runs the full VST3+AU sweep and prints the catalog.
 
 ### 2026-06-09 · Wave 18: multicore audio (PRF-001) + content browser (BRW-001) ✅
 
