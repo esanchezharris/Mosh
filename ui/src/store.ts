@@ -142,15 +142,12 @@ type State = {
   view: View;
   setView: (v: View) => void;
 
-  theme: "dark" | "light";
-  toggleTheme: () => void;
-
   // Moshi's voice mute — UI-local view state (never a command). Default: muted, so
   // the WebView never makes sound until the user opts in (and a gesture unlocks audio).
   moshiMuted: boolean;
   toggleMoshiMute: () => void;
 
-  // UI scale (ACC-005) — pure UI-local view state (like theme): never a command,
+  // UI scale (ACC-005) — pure UI-local view state (like moshiMuted): never a command,
   // never crosses the bridge. Applied via document zoom so the whole WebView reflows.
   uiScale: number;
   setUiScale: (n: number) => void;
@@ -515,14 +512,6 @@ export const useStore = create<State>((set, get) => ({
 
   view: "arrange",
   setView: (v) => set({ view: v }),
-
-  theme: "dark",
-  toggleTheme: () =>
-    set((s) => {
-      const next = s.theme === "dark" ? "light" : "dark";
-      document.documentElement.setAttribute("data-theme", next);
-      return { theme: next };
-    }),
 
   moshiMuted: true,
   toggleMoshiMute: () => set((s) => ({ moshiMuted: !s.moshiMuted })),

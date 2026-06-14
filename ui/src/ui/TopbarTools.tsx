@@ -1,4 +1,4 @@
-// Topbar utility cluster: theme toggle + Settings / Export / Command-log /
+// Topbar utility cluster: Settings / Export / Command-log /
 // iPhone-companion popovers. Ported from the legacy components into the ink+lime
 // register; every mutation stays a command on the seam (native file dialogs only
 // resolve paths). In Vite dev the mock drives Settings/Export/Log; the iPhone
@@ -33,8 +33,6 @@ function Pop({ label, title, on, className, onOpen, children }: { label: string;
 }
 
 export function TopbarTools({ snapshot }: { snapshot: Snapshot }) {
-  const theme = useStore((s) => s.theme);
-  const toggleTheme = useStore((s) => s.toggleTheme);
   const audioEnabled = snapshot.session.audioEnabled ?? true;
   return (
     <div className="topbar-tools">
@@ -44,7 +42,6 @@ export function TopbarTools({ snapshot }: { snapshot: Snapshot }) {
       <ExportTool audioEnabled={audioEnabled} />
       <CommandLogTool />
       <RemoteTool />
-      <button className="btn icon" title="Toggle theme" onClick={toggleTheme}>{theme === "dark" ? "☾" : "☀"}</button>
     </div>
   );
 }
