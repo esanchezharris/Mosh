@@ -908,23 +908,10 @@ static void testStage4TierANeuralInsert ([[maybe_unused]] MoshEngine& eng, MoshO
     // ─── MON-004: total plugin delay compensation (PDC) readout in the snapshot ───
 }
 
-int runSelfTest (MoshEngine& eng, MoshOps& ops)
+static void testMON004PDCReportedLatencyReadout ([[maybe_unused]] MoshEngine& eng, MoshOps& ops)
 {
     using namespace juce;
-    failures = 0; checks = 0;
-    resetSections();
-    std::cerr << "\n===== Mosh Stage 1 command-surface harness =====\n";
-    testStage1CommandSurfaceColdSnapshot (eng, ops);
-    testStage2ArrangementMixer (eng, ops);
-    testBRW007ImportClipData (eng, ops);
-    testStage3VST3HostingMIDI (eng, ops);
-    testINS002INS005AUHostingScanBlocklist (eng, ops);
-    testWave2TempoMeterMetronomeNav (eng, ops);
-    testWave5MixerMasterPan (eng, ops);
-    testWave6ClipEditing (eng, ops);
-    testWave7ParameterAutomation (eng, ops);
-    testWave1BuiltInPluginPalette (eng, ops);
-    testStage4TierANeuralInsert (eng, ops);
+
     section ("MON-004: PDC / reported-latency readout");
     {
         auto sess = ops.snapshot().getProperty ("session", var());
@@ -955,6 +942,12 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     }
 
     // ─── Stage 5: Tier-B generative layer (FakeAdapter) ───
+}
+
+static void testStage5GenerativeLayer ([[maybe_unused]] MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+
     section ("Stage 5: generative layer (FakeAdapter, full loop)");
     {
         // Fresh track + source clip for the generative flow.
@@ -1078,6 +1071,12 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     }
 
     // --- Stage 6: full producer loop -> export, undo/redo correct throughout ---
+}
+
+static void testStage6FullProducerLoopExport ([[maybe_unused]] MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+
     section ("Stage 6: full producer loop + export");
     {
         // import/record -> arrange
@@ -1175,6 +1174,12 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         wavFile.deleteFile();
         aiffFile.deleteFile();
     }
+
+}
+
+static void testSerumRenderCompatibility ([[maybe_unused]] MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
 
     section ("Serum render compatibility (optional local plugin gate)");
     if (File ("/Library/Audio/Plug-Ins/VST3/Serum2.vst3").exists())
@@ -1294,6 +1299,12 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         mm->runDispatchLoopUntil (250);
 
     // ─── Wave 4: MIDI note editing (piano-roll command surface) ───
+}
+
+static void testWave4MIDINoteEditing ([[maybe_unused]] MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+
     section ("Wave 4: MIDI note editing");
     {
         auto clipNotes = [&] (const String& cid) -> var {
@@ -1344,6 +1355,12 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     }
 
     // ─── Wave 8: sends / returns / aux buses ───
+}
+
+static void testWave8SendsReturnsAuxBuses ([[maybe_unused]] MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+
     section ("Wave 8: sends / returns / aux buses");
     {
         auto buses  = [&] { return ops.snapshot().getProperty ("buses", var()); };
@@ -1394,6 +1411,12 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     }
 
     // ─── Wave 9: channel metering (command + snapshot plumbing) ───
+}
+
+static void testWave9ChannelMetering ([[maybe_unused]] MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+
     section ("Wave 9: channel metering");
     {
         auto meterOn = [&] (const String& tid) { return (bool) trackById (ops, tid).getProperty ("meterEnabled", false); };
@@ -1433,6 +1456,12 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // getAllInputDevices() is empty: arm/monitor are graceful no-ops (applied:false,
     // never an error) and the snapshot fields default false/"automatic"/false. The
     // armed=true round-trip and actual capture are hardware/GUI-gated (see the plan).
+}
+
+static void testWaveRecording ([[maybe_unused]] MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+
     section ("Wave: recording (arm / input monitor)");
     {
         auto rt = cmd (ops, "create_track", args1 ("name", "RecTrack"))["data"].getProperty ("trackId", var()).toString();
@@ -1610,6 +1639,12 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // hears via software input monitoring. Needs only an open device (NOT a prepared
     // graph), so it is 0 headless. Read-only state, not a command. The real numbers +
     // audible low-latency monitoring are HARDWARE-GATED (verified live).
+}
+
+static void testMON003MonitoringRoundTripLatencyReadout ([[maybe_unused]] MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+
     section ("MON-003: monitoring round-trip latency readout");
     {
         auto sess = ops.snapshot().getProperty ("session", var());
@@ -1638,6 +1673,12 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // reports honestly, device commands return graceful errors (never crash), and
     // device enumeration content + a successful device round-trip + the FileChooser
     // dialog are hardware/GUI-gated (verified manually in the GUI — see the plan).
+}
+
+static void testWaveSettings ([[maybe_unused]] MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+
     section ("Wave: settings (audio gate / device / project lifecycle)");
     {
         auto sess = [&] { return ops.snapshot().getProperty ("session", var()); };
@@ -1760,6 +1801,12 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // Only the command path / clamping / readout / JSONL are headless-testable; the
     // audible single- vs multi-thread A/B and the live thread-pool-resize gap are
     // hardware-gated (need an open device + real DSP load).
+}
+
+static void testPRF001 ([[maybe_unused]] MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+
     section ("PRF-001 (multicore audio threads)");
     {
         auto sess = [&] { return ops.snapshot().getProperty ("session", var()); };
@@ -1828,6 +1875,36 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // Import reuses the existing import_clip command (no new mutation path). The GUI
     // browsing experience (popover, folder descent, breadcrumb) is hardware/GUI-gated;
     // the command shape, filtering, navigation, safety + the import seam are headless.
+}
+
+int runSelfTest (MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+    failures = 0; checks = 0;
+    resetSections();
+    std::cerr << "\n===== Mosh Stage 1 command-surface harness =====\n";
+    testStage1CommandSurfaceColdSnapshot (eng, ops);
+    testStage2ArrangementMixer (eng, ops);
+    testBRW007ImportClipData (eng, ops);
+    testStage3VST3HostingMIDI (eng, ops);
+    testINS002INS005AUHostingScanBlocklist (eng, ops);
+    testWave2TempoMeterMetronomeNav (eng, ops);
+    testWave5MixerMasterPan (eng, ops);
+    testWave6ClipEditing (eng, ops);
+    testWave7ParameterAutomation (eng, ops);
+    testWave1BuiltInPluginPalette (eng, ops);
+    testStage4TierANeuralInsert (eng, ops);
+    testMON004PDCReportedLatencyReadout (eng, ops);
+    testStage5GenerativeLayer (eng, ops);
+    testStage6FullProducerLoopExport (eng, ops);
+    testSerumRenderCompatibility (eng, ops);
+    testWave4MIDINoteEditing (eng, ops);
+    testWave8SendsReturnsAuxBuses (eng, ops);
+    testWave9ChannelMetering (eng, ops);
+    testWaveRecording (eng, ops);
+    testMON003MonitoringRoundTripLatencyReadout (eng, ops);
+    testWaveSettings (eng, ops);
+    testPRF001 (eng, ops);
     section ("BRW-001 (content browser / list_directory)");
     {
         // Seed a known dir under the session: one audio file + one non-audio file +
