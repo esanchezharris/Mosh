@@ -38,8 +38,23 @@ export function PianoRoll() {
   const gridDragRef = useRef<GridDrag | null>(null);
   const previewRef = useRef<MidiNote | null>(null);
   const velocityDraftRef = useRef<number | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const keysRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => { if (editingClipId && !clip) close(); }, [editingClipId, clip, close]);
+  // On open, centre the vertical scroll on the clip's notes so off-screen
+  // material (e.g. a low bassline near E2/A2) is visible instead of an
+  // apparently empty grid scrolled to the top (C7). Keys are synced to match.
+  useEffect(() => {
+    const sc = scrollRef.current;
+    const ns = clip?.notes ?? [];
+    if (!sc || ns.length === 0) return;
+    const mean = ns.reduce((s, n) => s + n.pitch, 0) / ns.length;
+    const target = (HIGH - mean) * ROW_H - sc.clientHeight / 2 + ROW_H / 2;
+    const top = Math.max(0, Math.min(sc.scrollHeight - sc.clientHeight, target));
+    sc.scrollTop = top;
+    if (keysRef.current) keysRef.current.scrollTop = top;
+  }, [editingClipId]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     setPreview(null); previewRef.current = null; setLasso(null); gridDragRef.current = null;
     setSelectedNotes((prev) => {
@@ -159,12 +174,12 @@ export function PianoRoll() {
           <button className="btn x" onClick={close}>✕</button>
         </div>
         <div className="pr-body">
-          <div className="pr-keys">
+          <div className="pr-keys" ref={keysRef}>
             {pitches.map((p) => (
               <div key={p} className={`pr-key ${isBlack(p) ? "black" : "white"}`} style={{ height: ROW_H }}>{p % 12 === 0 && <span>{noteName(p)}</span>}</div>
             ))}
           </div>
-          <div className="pr-scroll">
+          <div className="pr-scroll" ref={scrollRef} onScroll={(e) => { if (keysRef.current) keysRef.current.scrollTop = e.currentTarget.scrollTop; }}>
             <div className="pr-grid" role="group" aria-label="Piano roll grid" style={{ width: gridW, height: pitches.length * ROW_H }}
               onPointerDown={onGridDown} onPointerMove={onGridMove} onPointerUp={onGridUp} onPointerCancel={onGridCancel} onLostPointerCapture={onGridCancel}>
               {pitches.map((p) => <div key={`r${p}`} className={`pr-row ${isBlack(p) ? "black" : ""}`} style={{ top: yOf(p), height: ROW_H }} />)}
