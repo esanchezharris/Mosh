@@ -187,12 +187,10 @@ namespace
     }
 }
 
-int runSelfTest (MoshEngine& eng, MoshOps& ops)
+static void testStage1CommandSurfaceColdSnapshot ([[maybe_unused]] MoshEngine& eng, MoshOps& ops)
 {
     using namespace juce;
-    failures = 0; checks = 0;
-    resetSections();
-    std::cerr << "\n===== Mosh Stage 1 command-surface harness =====\n";
+
     section ("Stage 1: command surface / cold snapshot");
 
     // Capture emitted events (sink + state are file-scope; see installEventSink).
@@ -277,6 +275,12 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     check (logsCommand ("undo"),         "JSONL records undo");
 
     // ─── Stage 2: arrangement editing + mixer stub ───
+}
+
+static void testStage2ArrangementMixer ([[maybe_unused]] MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+
     section ("Stage 2: arrangement + mixer");
     const auto cid = firstTrack (ops)["clips"][0].getProperty ("id", var()).toString();
     tid = firstTrack (ops).getProperty ("id", var()).toString();   // file-scope: shared across sections
@@ -321,6 +325,12 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // The drag GESTURE itself is GUI-gated (WKWebView HTML5 drop) and is NOT
     // faked here; the headless import_clip_data command IS fully testable: it
     // decodes base64 bytes, validates real audio, and inserts an undoable clip.
+}
+
+static void testBRW007ImportClipData ([[maybe_unused]] MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+
     section ("BRW-007: import_clip_data (bytes-over-bridge)");
     {
         // Read a known-good small WAV (the test-tone source on the first clip)
@@ -390,6 +400,12 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     }
 
     // ─── Stage 3: VST3 hosting + MIDI ───
+}
+
+static void testStage3VST3HostingMIDI ([[maybe_unused]] MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+
     section ("Stage 3: VST3 hosting + MIDI");
     auto externalPluginIndex = [&] (const var& track) -> int {
         if (auto* arr = track.getProperty ("plugins", var()).getArray())
@@ -474,6 +490,12 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // (MOSH_SCAN_AU is unset here, so rescan_plugins stays VST3-only + inline) and
     // we do NOT assert any machine-specific AU content -- only shape/ok, so the
     // gate stays green on a box with zero .component files.
+}
+
+static void testINS002INS005AUHostingScanBlocklist ([[maybe_unused]] MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+
     section ("INS-002/INS-005: AU hosting + scan / blocklist");
     {
         // The AudioUnit format is registered (proves the JUCE_PLUGINHOST_AU flag is
@@ -591,6 +613,12 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     }
 
     // ─── Wave 2: tempo / time-signature / metronome / record / navigation ───
+}
+
+static void testWave2TempoMeterMetronomeNav ([[maybe_unused]] MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+
     section ("Wave 2: tempo / meter / metronome / nav");
     {
         auto sess = [&] { return ops.snapshot().getProperty ("session", var()); };
@@ -627,6 +655,12 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     }
 
     // ─── Wave 5: mixer — master bus + pan ───
+}
+
+static void testWave5MixerMasterPan ([[maybe_unused]] MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+
     section ("Wave 5: mixer / master / pan");
     {
         auto master = [&] { return ops.snapshot().getProperty ("master", var()); };
@@ -645,6 +679,12 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     }
 
     // ─── Wave 6: clip editing (delete / rename / mute / gain / duplicate) ───
+}
+
+static void testWave6ClipEditing ([[maybe_unused]] MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+
     section ("Wave 6: clip editing");
     {
         auto clipById = [&] (const String& cid) -> var {
@@ -682,6 +722,12 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     }
 
     // ─── Wave 7: parameter automation ───
+}
+
+static void testWave7ParameterAutomation ([[maybe_unused]] MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+
     section ("Wave 7: parameter automation");
     {
         auto paramVar = [&] (const String& trkId, int plugIdx, int paramIdx) -> var {
@@ -720,6 +766,12 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     }
 
     // ─── Wave 1: engine built-in plugin palette (effects + instruments) ───
+}
+
+static void testWave1BuiltInPluginPalette ([[maybe_unused]] MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+
     section ("Wave 1: built-in plugin palette");
     {
         auto builtinIndex = [&] (const var& track, const char* type) -> int {
@@ -781,6 +833,12 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     }
 
     // ─── Stage 4: Tier-A real-time neural insert ───
+}
+
+static void testStage4TierANeuralInsert ([[maybe_unused]] MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+
     section ("Stage 4: Tier-A neural insert (RT-safe / PDC / ASTD)");
     {
         auto nt = cmd (ops, "create_track", args1 ("name", "Neural"))["data"].getProperty ("trackId", var()).toString();
@@ -848,6 +906,25 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     }
 
     // ─── MON-004: total plugin delay compensation (PDC) readout in the snapshot ───
+}
+
+int runSelfTest (MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+    failures = 0; checks = 0;
+    resetSections();
+    std::cerr << "\n===== Mosh Stage 1 command-surface harness =====\n";
+    testStage1CommandSurfaceColdSnapshot (eng, ops);
+    testStage2ArrangementMixer (eng, ops);
+    testBRW007ImportClipData (eng, ops);
+    testStage3VST3HostingMIDI (eng, ops);
+    testINS002INS005AUHostingScanBlocklist (eng, ops);
+    testWave2TempoMeterMetronomeNav (eng, ops);
+    testWave5MixerMasterPan (eng, ops);
+    testWave6ClipEditing (eng, ops);
+    testWave7ParameterAutomation (eng, ops);
+    testWave1BuiltInPluginPalette (eng, ops);
+    testStage4TierANeuralInsert (eng, ops);
     section ("MON-004: PDC / reported-latency readout");
     {
         auto sess = ops.snapshot().getProperty ("session", var());
