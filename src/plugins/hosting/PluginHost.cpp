@@ -97,6 +97,25 @@ void PluginHost::saveCatalog()
         xml->writeTo (f);
 }
 
+// Periodic catalog persistence DURING a rescan sweep, so a long scan that the user
+// kills (e.g. a ~1000-component Waves AU sweep) keeps the plugins cataloged so far
+// instead of discarding everything back to the last phase boundary -- the next launch
+// then resumes from a fuller catalog. Called from scanFile()/scanAUComponents() right
+// after the per-plugin heartbeat bump, so it runs ON the scan thread between plugin
+// additions (never concurrently with knownPluginList mutation). Gated by scanInProgress
+// so the cold initialise() populate and lazy findDescription() scans never checkpoint.
+// saveCatalog() writes atomically (temp file + rename), so an interrupted save is safe.
+void PluginHost::checkpointCatalog()
+{
+    if (! scanInProgress.load (std::memory_order_relaxed))
+        return;
+    const int processed = scanFilesProcessed.load (std::memory_order_relaxed);
+    if (processed - lastCatalogCheckpoint.load (std::memory_order_relaxed) < kCatalogCheckpointInterval)
+        return;
+    lastCatalogCheckpoint.store (processed, std::memory_order_relaxed);
+    saveCatalog();
+}
+
 // If the pedal file survived from the last run, the plugin named in it crashed
 // (or hung) mid-scan -> blocklist it so it is skipped from now on, then clear the
 // pedal. This is the safety net that makes AU cataloging non-fatal.
@@ -235,6 +254,7 @@ void PluginHost::scanAUComponents()
 
         pedal.deleteFile();   // clean return -> disarm
         scanFilesProcessed.fetch_add (1, std::memory_order_relaxed);   // watchdog heartbeat
+        checkpointCatalog();  // persist AU progress periodically so a killed sweep isn't lost
     }
    #endif
 }
@@ -251,6 +271,12 @@ int PluginHost::rescan (bool clearFirst, bool includeVST3, bool includeAU, bool 
     bool expected = false;
     if (! scanInProgress.compare_exchange_strong (expected, true))
         return list.getNumTypes();
+
+    // Seed the incremental-checkpoint baseline to the current heartbeat so the first
+    // mid-scan save lands kCatalogCheckpointInterval plugins into THIS sweep (the
+    // heartbeat is a monotonic lifetime counter, never reset between scans).
+    lastCatalogCheckpoint.store (scanFilesProcessed.load (std::memory_order_relaxed),
+                                 std::memory_order_relaxed);
 
     const bool oop = slowVST3;
     std::atomic<bool> scanRunning { true };
@@ -379,6 +405,7 @@ void PluginHost::scanFile (const File& file)
     }
 
     scanFilesProcessed.fetch_add (1, std::memory_order_relaxed);   // per-plugin heartbeat (watchdog)
+    checkpointCatalog();   // persist VST3 progress periodically so a killed sweep isn't lost
 }
 
 Array<PluginDescription> PluginHost::available() const

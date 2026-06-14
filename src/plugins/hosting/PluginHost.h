@@ -80,6 +80,7 @@ private:
     void scanAUComponents();                             // AudioUnit (.component) catalog (slow/risky)
     void loadCatalog();                                  // recreateFromXml if present
     void saveCatalog();                                  // createXml → plugin-catalog.xml
+    void checkpointCatalog();                            // periodic saveCatalog() during a rescan sweep
     void recoverFromDeadMansPedal();                     // blocklist a prior crasher, then clear
     juce::File catalogFile()   const;
     juce::File deadMansPedal() const;
@@ -97,6 +98,15 @@ private:
     // Single-flight latch: only one rescan() runs at a time (a second concurrent scan
     // would race the OOP flag, the watchdog, and the dead-mans-pedal).
     std::atomic<bool> scanInProgress { false };
+    // Incremental catalog checkpoint: during a deep rescan() the catalog is re-saved
+    // every kCatalogCheckpointInterval plugins, so an interrupted sweep (the user
+    // killing a slow Waves AU scan, or a crash) keeps the progress made so far instead
+    // of discarding everything back to the last phase boundary. saveCatalog() writes
+    // atomically (temp file + rename), so a kill mid-write never corrupts the catalog.
+    // Touched only on the scan thread (rescan() seeds it; scanFile/scanAUComponents
+    // advance it in lock-step with scanFilesProcessed), so it needs no extra locking.
+    static constexpr int kCatalogCheckpointInterval = 20;
+    std::atomic<int> lastCatalogCheckpoint { 0 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PluginHost)
 };
