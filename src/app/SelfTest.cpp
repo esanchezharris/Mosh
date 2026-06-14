@@ -152,6 +152,25 @@ namespace
 
     juce::var firstTrack (MoshOps& ops) { return ops.snapshot()["tracks"][0]; }
     int trackClips (const juce::var& t) { return t.getProperty ("clips", juce::var()).size(); }
+
+    // Cross-section shared event sink. Promoted to file scope so the sink lambda
+    // does not dangle once individual sections are extracted into free functions:
+    // the sink is installed once (Stage 1) and read by later sections (recording,
+    // BRW-001). Backing store + helpers live here; sections just call hadEvent().
+    std::vector<juce::String> eventTypes;
+
+    void installEventSink (MoshOps& ops)
+    {
+        eventTypes.clear();
+        ops.setEventSink ([] (const juce::var& e) {
+            eventTypes.push_back (e.getProperty ("type", juce::var()).toString()); });
+    }
+
+    bool hadEvent (const juce::String& t)
+    {
+        for (auto& e : eventTypes) if (e == t) return true;
+        return false;
+    }
 }
 
 int runSelfTest (MoshEngine& eng, MoshOps& ops)
@@ -162,12 +181,8 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     std::cerr << "\n===== Mosh Stage 1 command-surface harness =====\n";
     section ("Stage 1: command surface / cold snapshot");
 
-    // Capture emitted events.
-    std::vector<String> eventTypes;
-    ops.setEventSink ([&] (const var& e) { eventTypes.push_back (e.getProperty ("type", var()).toString()); });
-
-    auto hadEvent = [&] (const String& t) {
-        for (auto& e : eventTypes) if (e == t) return true; return false; };
+    // Capture emitted events (sink + state are file-scope; see installEventSink).
+    installEventSink (ops);
 
     // 1. cold snapshot
     check (tracks (ops) == 0, "cold snapshot has no tracks");
