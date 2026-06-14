@@ -1877,34 +1877,10 @@ static void testPRF001 ([[maybe_unused]] MoshEngine& eng, MoshOps& ops)
     // the command shape, filtering, navigation, safety + the import seam are headless.
 }
 
-int runSelfTest (MoshEngine& eng, MoshOps& ops)
+static void testBRW001 ([[maybe_unused]] MoshEngine& eng, MoshOps& ops)
 {
     using namespace juce;
-    failures = 0; checks = 0;
-    resetSections();
-    std::cerr << "\n===== Mosh Stage 1 command-surface harness =====\n";
-    testStage1CommandSurfaceColdSnapshot (eng, ops);
-    testStage2ArrangementMixer (eng, ops);
-    testBRW007ImportClipData (eng, ops);
-    testStage3VST3HostingMIDI (eng, ops);
-    testINS002INS005AUHostingScanBlocklist (eng, ops);
-    testWave2TempoMeterMetronomeNav (eng, ops);
-    testWave5MixerMasterPan (eng, ops);
-    testWave6ClipEditing (eng, ops);
-    testWave7ParameterAutomation (eng, ops);
-    testWave1BuiltInPluginPalette (eng, ops);
-    testStage4TierANeuralInsert (eng, ops);
-    testMON004PDCReportedLatencyReadout (eng, ops);
-    testStage5GenerativeLayer (eng, ops);
-    testStage6FullProducerLoopExport (eng, ops);
-    testSerumRenderCompatibility (eng, ops);
-    testWave4MIDINoteEditing (eng, ops);
-    testWave8SendsReturnsAuxBuses (eng, ops);
-    testWave9ChannelMetering (eng, ops);
-    testWaveRecording (eng, ops);
-    testMON003MonitoringRoundTripLatencyReadout (eng, ops);
-    testWaveSettings (eng, ops);
-    testPRF001 (eng, ops);
+
     section ("BRW-001 (content browser / list_directory)");
     {
         // Seed a known dir under the session: one audio file + one non-audio file +
@@ -2036,6 +2012,12 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // asserted here (no synthetic key events). What IS headless-verifiable, and is
     // proven below, is the one backend half: paste_clip reconstructs a clip from a
     // clipToVar-shaped descriptor (the UI clipboard's payload) on a target track.
+}
+
+static void testWaveClipClipboardPasteClip ([[maybe_unused]] MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+
     section ("Wave: clip clipboard / paste_clip (AED-001)");
     {
         // Track A with a wave clip; read A's clip descriptor from the snapshot
@@ -2183,6 +2165,12 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // run a couple of known commands, then read them back most-recent-first.
     // (The UI-scale control is pure UI-local view state -- like theme -- and is NOT
     //  a command, so it is documented, not asserted here.)
+}
+
+static void testWaveCommandLogInspector ([[maybe_unused]] MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+
     section ("Wave: command-log inspector (AGT-001)");
     {
         // Fresh, known commands so the log tail is predictable. The LAST undoable
@@ -2273,6 +2261,12 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // full cross-restart is hardware-gated). ARE-003: latency-compensated recording —
     // verify the readout fields + the headless record graceful-degradation (the take
     // landing alignment rides Wave B + is hardware-gated).
+}
+
+static void testWaveAProjectFormatDevicePrefsRecordLatency ([[maybe_unused]] MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+
     section ("Wave A: project format (PRJ-008) / device prefs (PRE-001) / record latency (ARE-003)");
     {
         auto sess = [&] { return ops.snapshot().getProperty ("session", var()); };
@@ -2373,6 +2367,12 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // release). The BINDING proof is the run-wide JUCE-Assertion count being 0
     // (Mosh --selftest 2>&1 | grep -c 'JUCE Assertion'); here we assert the sequence runs
     // clean as a regression guard.
+}
+
+static void testItemIDAllocatorRegression ([[maybe_unused]] MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+
     section ("itemID allocator regression (engine patch)");
     {
         auto findIdByName = [&] (const juce::String& nm) -> juce::String {
@@ -2400,6 +2400,12 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     }
 
     // ─── Wave C: ARR-010 time-range as a true delete target ───
+}
+
+static void testWaveCDeleteTimeRange ([[maybe_unused]] MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+
     section ("Wave C: delete_time_range (ARR-010)");
     {
         // A single clip spanning 0..4s; delete [1,2] -> two clips with a 1..2s gap.
@@ -2491,6 +2497,12 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // builder routes them through a SummingNode + the folder's plugin chain — the
     // engine's own nested-submix test proves the audio). Headless we verify the
     // command surface, the snapshot structure, the group fader, and undo/redo.
+}
+
+static void testWaveDGroupSubmixTracks ([[maybe_unused]] MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+
     section ("Wave D: group / submix tracks (MIX-008)");
     {
         auto ga = cmd (ops, "create_track", args1 ("name", "GrpA"))["data"].getProperty ("trackId", var()).toString();
@@ -2570,6 +2582,12 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // input CHOICE round-trip, and the track->track output routing (ValueTree-backed,
     // no hardware needed) incl. cycle rejection, undo, and persistence. Real capture
     // from a chosen pair / audible multi-out are hardware-gated (verified live).
+}
+
+static void testWaveRRouting ([[maybe_unused]] MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+
     section ("Wave R: routing (RTG-001 inputs / RTG-002 outputs)");
     {
         // Read-only enumerations: ok + shape; not logged.
@@ -2645,6 +2663,12 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // STEP changes (curve=1.0 -> hold-then-jump; the ramp branch is gated on
     // curve != +-1). ENGINE TRUTH is asserted here via getBpmAt at probe times;
     // the UI's piecewise-constant mapping is exact by construction for steps.
+}
+
+static void testWaveTTempoMap ([[maybe_unused]] MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+
     section ("Wave T: tempo map (SES-001)");
     {
         auto& seq = eng.edit().tempoSequence;
@@ -2731,6 +2755,12 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // point: 1.0 = step (hold-then-jump), values in (-1,1) ramp. Engine truth via
     // getBpmAt mid-ramp; the snapshot emits the engine-faithful fine sections
     // (its own subdivision boundaries) so the UI mapping stays exact.
+}
+
+static void testWaveVTempoRamps ([[maybe_unused]] MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+
     section ("Wave V: tempo ramps (curves)");
     {
         auto& seq = eng.edit().tempoSequence;
@@ -2799,6 +2829,12 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // the live tempo map IMMEDIATELY (no proxy wait) — the headless contract is
     // that halving the tempo doubles the clip's seconds length. Stretching uses
     // the engine's vendored SoundTouch (enabled at build). Warp MARKERS deferred.
+}
+
+static void testWaveVAudioWarp ([[maybe_unused]] MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+
     section ("Wave V: audio warp (auto-tempo)");
     {
         auto wt = cmd (ops, "create_track", args1 ("name", "WarpTrack"))["data"].getProperty ("trackId", var()).toString();
@@ -2858,6 +2894,47 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         cmd (ops, "remove_track", args1 ("trackId", wt));   // tidy
     }
 
+}
+
+int runSelfTest (MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+    failures = 0; checks = 0;
+    resetSections();
+    std::cerr << "\n===== Mosh Stage 1 command-surface harness =====\n";
+    testStage1CommandSurfaceColdSnapshot (eng, ops);
+    testStage2ArrangementMixer (eng, ops);
+    testBRW007ImportClipData (eng, ops);
+    testStage3VST3HostingMIDI (eng, ops);
+    testINS002INS005AUHostingScanBlocklist (eng, ops);
+    testWave2TempoMeterMetronomeNav (eng, ops);
+    testWave5MixerMasterPan (eng, ops);
+    testWave6ClipEditing (eng, ops);
+    testWave7ParameterAutomation (eng, ops);
+    testWave1BuiltInPluginPalette (eng, ops);
+    testStage4TierANeuralInsert (eng, ops);
+    testMON004PDCReportedLatencyReadout (eng, ops);
+    testStage5GenerativeLayer (eng, ops);
+    testStage6FullProducerLoopExport (eng, ops);
+    testSerumRenderCompatibility (eng, ops);
+    testWave4MIDINoteEditing (eng, ops);
+    testWave8SendsReturnsAuxBuses (eng, ops);
+    testWave9ChannelMetering (eng, ops);
+    testWaveRecording (eng, ops);
+    testMON003MonitoringRoundTripLatencyReadout (eng, ops);
+    testWaveSettings (eng, ops);
+    testPRF001 (eng, ops);
+    testBRW001 (eng, ops);
+    testWaveClipClipboardPasteClip (eng, ops);
+    testWaveCommandLogInspector (eng, ops);
+    testWaveAProjectFormatDevicePrefsRecordLatency (eng, ops);
+    testItemIDAllocatorRegression (eng, ops);
+    testWaveCDeleteTimeRange (eng, ops);
+    testWaveDGroupSubmixTracks (eng, ops);
+    testWaveRRouting (eng, ops);
+    testWaveTTempoMap (eng, ops);
+    testWaveVTempoRamps (eng, ops);
+    testWaveVAudioWarp (eng, ops);
     finishSection();
     std::cerr << "===== " << (checks - failures) << "/" << checks
               << " checks passed, " << failures << " failed =====\n\n";
