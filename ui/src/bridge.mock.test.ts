@@ -44,8 +44,13 @@ function listSourceFiles(dir: string): string[] {
 
 function uiDispatchedCommands(): Set<string> {
   const cmds = new Set<string>();
-  // exec("name", …)  and  command: "name"  (templates with vars are skipped — only literals are checkable)
-  const patterns = [/\bexec\(\s*["'`]([a-z_][a-z_0-9]*)["'`]/g, /\bcommand:\s*["'`]([a-z_][a-z_0-9]*)["'`]/g];
+  // exec("name", …) · command: "name" · execLatest("key", "name", …) — the command
+  // is the 2nd arg there. Templates with vars are skipped (only literals are checkable).
+  const patterns = [
+    /\bexec\(\s*["'`]([a-z_][a-z_0-9]*)["'`]/g,
+    /\bcommand:\s*["'`]([a-z_][a-z_0-9]*)["'`]/g,
+    /\bexecLatest\(\s*["'`][^"'`]*["'`]\s*,\s*["'`]([a-z_][a-z_0-9]*)["'`]/g,
+  ];
   for (const file of listSourceFiles(SRC)) {
     const text = fs.readFileSync(file, "utf8");
     for (const re of patterns) {

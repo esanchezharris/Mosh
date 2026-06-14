@@ -269,6 +269,7 @@ export function Arrange({ snapshot }: { snapshot: Snapshot }) {
 
 function TrackHeader({ track }: { track: Track }) {
   const exec = useStore((s) => s.exec);
+  const execLatest = useStore((s) => s.execLatest);
   const selectedTrackId = useStore((s) => s.selectedTrackId);
   const setSelectedTrack = useStore((s) => s.setSelectedTrack);
   const selected = selectedTrackId === track.id;
@@ -289,7 +290,7 @@ function TrackHeader({ track }: { track: Track }) {
           onClick={(e) => { e.stopPropagation(); void exec("set_track_solo", { trackId: track.id, solo: !track.solo }); }}>S</button>
         <input type="range" min={-60} max={6} step={0.5} value={track.volumeDb ?? 0}
           title={`Volume ${(track.volumeDb ?? 0).toFixed(1)} dB`}
-          onChange={(e) => void exec("set_track_volume", { trackId: track.id, db: Number(e.target.value) })} />
+          onChange={(e) => execLatest("vol:" + track.id, "set_track_volume", { trackId: track.id, db: Number(e.target.value) })} />
       </div>
     </div>
   );

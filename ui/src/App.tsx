@@ -26,6 +26,7 @@ export function App() {
   const snapshot = useStore((s) => s.snapshot);
   const lastError = useStore((s) => s.lastError);
   const view = useStore((s) => s.view);
+  const pending = useStore((s) => s.pending);
 
   useEffect(() => { init(); }, [init]);
 
@@ -42,9 +43,9 @@ export function App() {
   const audioEnabled = snapshot?.session.audioEnabled ?? true;
 
   return (
-    <div className="app" data-testid="app">
+    <div className="app" data-testid="app" data-pending={pending > 0}>
       {snapshot && <Topbar snapshot={snapshot} />}
-      <Toolbar />
+      {view === "arrange" && <Toolbar />}
       {!audioEnabled && (
         <div className="error-bar">⚠ No audio device — playback/record/export disabled.</div>
       )}

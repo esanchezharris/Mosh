@@ -73,8 +73,20 @@ type State = {
   // (swappable-seam rule). v1 holds a single clip; multi-clip copy is optional.
   clipboard: { clip: Clip; sourceTrackId: string } | null;
 
+  // Serialized command dispatch (rapid sequential commands never race on a stale
+  // snapshot). `pending` > 0 while any command is in flight. `optimistic` is an
+  // additive overlay keyed by entity id, cleared on every refresh().
+  pending: number;
+  optimistic: Record<string, unknown>;
+
   refresh: () => Promise<void>;
   exec: (command: string, args?: Record<string, unknown>) => Promise<CommandResult>;
+  // Unserialized escape hatch (rare; bypasses the queue).
+  execNow: (command: string, args?: Record<string, unknown>) => Promise<CommandResult>;
+  // Keyed trailing-throttle for continuous controls (sliders) — coalesces rapid
+  // updates and always delivers the final value, routed through the serialized queue.
+  execLatest: (key: string, command: string, args?: Record<string, unknown>) => void;
+  setOptimistic: (id: string, patch: Record<string, unknown> | null) => void;
   init: () => void;
   refreshRemote: () => Promise<void>;
   startRemotePairing: () => Promise<void>;
@@ -133,10 +145,21 @@ type State = {
   setUiScale: (n: number) => void;
 };
 
+// ── Dispatch plumbing (transient runtime state, not reactive UI state) ──────────
+// A single serialized command chain: each exec/execLatest waits for the prior to
+// settle, so rapid sequential dispatches submit in order and never race on a stale
+// snapshot. The tail is always a non-rejecting promise so one failure can't poison
+// the queue. latestArgs/latestQueued back execLatest's keyed trailing-throttle.
+let cmdChain: Promise<unknown> = Promise.resolve();
+const latestArgs: Record<string, { command: string; args: Record<string, unknown> }> = {};
+const latestQueued = new Set<string>();
+
 export const useStore = create<State>((set, get) => ({
   snapshot: null,
   connected: isNative(),
   lastError: null,
+  pending: 0,
+  optimistic: {},
 
   pxPerSec: 80,
   tool: "move",
@@ -170,7 +193,8 @@ export const useStore = create<State>((set, get) => ({
     if (!isNative()) return;
     try {
       const snap = await getSnapshot<Snapshot>();
-      set({ snapshot: snap, connected: true });
+      // A fresh snapshot supersedes any optimistic overlay.
+      set({ snapshot: snap, connected: true, optimistic: {} });
       // Prune selection / fetch peaks for current clips.
       const ids = new Set(snap.tracks.flatMap((t) => t.clips.map((c) => c.id)));
       set((s) => ({ selection: new Set([...s.selection].filter((id) => ids.has(id))) }));
@@ -186,10 +210,64 @@ export const useStore = create<State>((set, get) => ({
   },
 
   exec: async (command, args = {}) => {
+    // Serialize onto the shared chain: this command runs only after the prior one
+    // settles, so a burst of commands submits in submission order and never races
+    // on a stale snapshot. The tail is a non-rejecting promise (a prior failure is
+    // swallowed) so one error can't poison the queue.
+    const run = cmdChain.then(
+      () => executeCommand<CommandResult>({ command, args }),
+      () => executeCommand<CommandResult>({ command, args }),
+    );
+    cmdChain = run.then(() => undefined, () => undefined);
+    set((s) => ({ pending: s.pending + 1 }));
+    try {
+      const res = await run;
+      if (!res.ok) set({ lastError: res.error ?? `${command} failed` });
+      return res;
+    } finally {
+      set((s) => ({ pending: Math.max(0, s.pending - 1) }));
+    }
+  },
+
+  execNow: async (command, args = {}) => {
+    // Unserialized: fires immediately, bypassing the queue. Use only for reads that
+    // must not wait behind a long mutation.
     const res = await executeCommand<CommandResult>({ command, args });
     if (!res.ok) set({ lastError: res.error ?? `${command} failed` });
     return res;
   },
+
+  execLatest: (key, command, args = {}) => {
+    // Record the most recent intent for this key, then flush the LATEST through the
+    // serialized queue. Intermediate drags coalesce; the final value always lands.
+    latestArgs[key] = { command, args };
+    if (latestQueued.has(key)) return;
+    latestQueued.add(key);
+    const flush = () => {
+      latestQueued.delete(key);
+      const latest = latestArgs[key];
+      if (!latest) return undefined;
+      return executeCommand<CommandResult>(latest).then((res) => {
+        if (!res.ok) set({ lastError: res.error ?? `${latest.command} failed` });
+        return res;
+      });
+    };
+    const run = cmdChain.then(flush, flush);
+    cmdChain = run.then(() => undefined, () => undefined);
+    set((s) => ({ pending: s.pending + 1 }));
+    void run.then(
+      () => set((s) => ({ pending: Math.max(0, s.pending - 1) })),
+      () => set((s) => ({ pending: Math.max(0, s.pending - 1) })),
+    );
+  },
+
+  setOptimistic: (id, patch) =>
+    set((s) => {
+      const next = { ...s.optimistic };
+      if (patch === null) delete next[id];
+      else next[id] = patch;
+      return { optimistic: next };
+    }),
 
   init: () => {
     onEvent("mosh_event", (raw) => {

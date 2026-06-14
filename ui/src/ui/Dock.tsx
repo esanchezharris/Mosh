@@ -40,6 +40,9 @@ function Rack({ track }: { track: Track | null }) {
 
 function PluginCard({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
   const exec = useStore((s) => s.exec);
+  // reorder/remove compute their target from the current index, so block re-fire
+  // until the prior mutation's snapshot lands (else two clicks race a stale index).
+  const pending = useStore((s) => s.pending);
   const isNeural = !!plugin.neural, isBuiltin = !!plugin.builtin;
   return (
     <div className={`pcard${plugin.enabled ? "" : " bypassed"}${isNeural ? " neural" : ""}`} data-testid="plugin-card" data-plugin-index={plugin.index} data-enabled={plugin.enabled}>
@@ -57,9 +60,9 @@ function PluginCard({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
         : (
           <div className="pcard-actions">
             <button className="btn" onClick={() => void exec("open_plugin_editor", { trackId, index: plugin.index })}>Edit</button>
-            <button className="btn" title="Move left" onClick={() => void exec("reorder_plugin", { trackId, index: plugin.index, toIndex: plugin.index - 1 })}>‹</button>
-            <button className="btn" title="Move right" onClick={() => void exec("reorder_plugin", { trackId, index: plugin.index, toIndex: plugin.index + 1 })}>›</button>
-            <button className="btn x" onClick={() => void exec("remove_plugin", { trackId, index: plugin.index })}>✕</button>
+            <button className="btn" title="Move left" disabled={pending > 0} onClick={() => void exec("reorder_plugin", { trackId, index: plugin.index, toIndex: plugin.index - 1 })}>‹</button>
+            <button className="btn" title="Move right" disabled={pending > 0} onClick={() => void exec("reorder_plugin", { trackId, index: plugin.index, toIndex: plugin.index + 1 })}>›</button>
+            <button className="btn x" title="Remove" disabled={pending > 0} onClick={() => void exec("remove_plugin", { trackId, index: plugin.index })}>✕</button>
           </div>
         )}
     </div>
@@ -68,6 +71,8 @@ function PluginCard({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
 
 function ParamBody({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
   const exec = useStore((s) => s.exec);
+  const execLatest = useStore((s) => s.execLatest);
+  const pending = useStore((s) => s.pending);
   const params = (plugin.params ?? []).slice(0, 8);
   return (
     <div className="pbody">
@@ -75,15 +80,15 @@ function ParamBody({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
         <label key={p.index} className="nparam">
           <span className="nlabel" title={p.name}>{p.name}</span>
           <input type="range" min={0} max={1} step={0.01} value={p.value}
-            onChange={(e) => void exec("set_plugin_param", { trackId, index: plugin.index, paramIndex: p.index, value: Number(e.target.value) })} />
+            onChange={(e) => execLatest(`pp:${trackId}:${plugin.index}:${p.index}`, "set_plugin_param", { trackId, index: plugin.index, paramIndex: p.index, value: Number(e.target.value) })} />
           <span className="nval">{Math.round(p.value * 100)}</span>
         </label>
       ))}
       {params.length === 0 && <span className="rack-empty">no params</span>}
       <div className="neural-row">
-        <button className="btn" onClick={() => void exec("reorder_plugin", { trackId, index: plugin.index, toIndex: plugin.index - 1 })}>‹</button>
-        <button className="btn" onClick={() => void exec("reorder_plugin", { trackId, index: plugin.index, toIndex: plugin.index + 1 })}>›</button>
-        <button className="btn x" onClick={() => void exec("remove_plugin", { trackId, index: plugin.index })}>✕</button>
+        <button className="btn" title="Move left" disabled={pending > 0} onClick={() => void exec("reorder_plugin", { trackId, index: plugin.index, toIndex: plugin.index - 1 })}>‹</button>
+        <button className="btn" title="Move right" disabled={pending > 0} onClick={() => void exec("reorder_plugin", { trackId, index: plugin.index, toIndex: plugin.index + 1 })}>›</button>
+        <button className="btn x" title="Remove" disabled={pending > 0} onClick={() => void exec("remove_plugin", { trackId, index: plugin.index })}>✕</button>
       </div>
     </div>
   );
@@ -91,6 +96,8 @@ function ParamBody({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
 
 function NeuralBody({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
   const exec = useStore((s) => s.exec);
+  const execLatest = useStore((s) => s.execLatest);
+  const pending = useStore((s) => s.pending);
   const n = plugin.neural!;
   return (
     <div className="pbody">
@@ -99,7 +106,7 @@ function NeuralBody({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
           <span className="nlabel">{p.id}</span>
           <span className="nslider">
             <input type="range" min={0} max={100} step={1} value={Math.round(p.ui)}
-              onChange={(e) => void exec("set_neural_param", { trackId, index: plugin.index, paramId: p.id, value: Number(e.target.value) })} />
+              onChange={(e) => execLatest(`np:${trackId}:${plugin.index}:${p.id}`, "set_neural_param", { trackId, index: plugin.index, paramId: p.id, value: Number(e.target.value) })} />
             {!n.labMode && p.safeMaxUi < 100 && <span className="astd-mark" style={{ left: `${p.safeMaxUi}%` }} title="ASTD safe limit" />}
           </span>
           <span className="nval">{Math.round(p.ui)}</span>
@@ -110,7 +117,7 @@ function NeuralBody({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
           onClick={() => void exec("set_neural_lab_mode", { trackId, index: plugin.index, on: !n.labMode })}>{n.labMode ? "⚠ LAB" : "Lab"}</button>
         <button className="btn" onClick={() => void exec("reset_neural", { trackId, index: plugin.index })}>Reset</button>
         <span className="nlat tc">{(n.latencySeconds * 1000).toFixed(1)} ms</span>
-        <button className="btn x" onClick={() => void exec("remove_plugin", { trackId, index: plugin.index })}>✕</button>
+        <button className="btn x" title="Remove" disabled={pending > 0} onClick={() => void exec("remove_plugin", { trackId, index: plugin.index })}>✕</button>
       </div>
     </div>
   );
@@ -143,12 +150,16 @@ function GenDrawer({ track }: { track: Track }) {
 
 function GenBody({ clip, qa }: { clip: Clip; qa?: { pq?: number | null; pq_base?: number | null; flags?: string[] } }) {
   const exec = useStore((s) => s.exec);
+  const execLatest = useStore((s) => s.execLatest);
+  const pending = useStore((s) => s.pending);
   const colorsAvail = useStore((s) => s.availableColors);
   const labMode = useStore((s) => s.labMode);
   const setLab = useStore((s) => s.setLab);
   const rl = clip.renderLayer!;
   const active: RenderColor[] = rl.colors ?? [];
   const rendering = rl.status === "rendering" || rl.status === "queued";
+  // Structural changes (add/remove a colour) commit immediately; dragging a colour's
+  // value coalesces via execLatest (below) so a fast drag sends only its final value.
   const setColors = (next: RenderColor[]) => exec("set_render_param", { clipId: clip.id, colors: next.slice(0, 3), lab: labMode });
   const blockedBy = (name: string) => (colorsAvail.find((c) => c.name === name)?.no_stack_with ?? []).some((n) => active.some((a) => a.name === n));
   const addable = colorsAvail.filter((c) => !active.some((a) => a.name === c.name) && !blockedBy(c.name));
@@ -161,7 +172,7 @@ function GenBody({ clip, qa }: { clip: Clip; qa?: { pq?: number | null; pq_base?
           <label key={c.name} className="nparam">
             <span className="nlabel">{c.name}{meta && meta.astd_max <= 0.1 && <span className="cap-tag">CAPPED</span>}</span>
             <input type="range" min={0} max={100} step={1} value={Math.round(c.value)}
-              onChange={(e) => setColors(active.map((a) => (a.name === c.name ? { ...a, value: Number(e.target.value) } : a)))} />
+              onChange={(e) => execLatest("rp:" + clip.id, "set_render_param", { clipId: clip.id, colors: active.map((a) => (a.name === c.name ? { ...a, value: Number(e.target.value) } : a)).slice(0, 3), lab: labMode })} />
             <button className="btn x" onClick={() => setColors(active.filter((a) => a.name !== c.name))}>✕</button>
           </label>
         );
@@ -188,8 +199,8 @@ function GenBody({ clip, qa }: { clip: Clip; qa?: { pq?: number | null; pq_base?
         {rendering && <button className="btn" onClick={() => void exec("cancel_render", { clipId: clip.id })}>Cancel</button>}
         <button className="btn" disabled={!rl.hasArtifact} data-testid="gen-accept" onClick={() => void exec("accept_render", { clipId: clip.id })}>Accept</button>
         <button className="btn" disabled={!rl.hasArtifact} onClick={() => void exec("reject_render", { clipId: clip.id })}>Reject</button>
-        <button className="btn" title="new take" onClick={() => void exec("set_render_param", { clipId: clip.id, seed: Number(rl.seed) + 1 })}>⟳ seed</button>
-        <button className="btn x" title="remove layer" onClick={() => void exec("remove_render_layer", { clipId: clip.id })}>✕</button>
+        <button className="btn" title="new take" disabled={pending > 0} onClick={() => void exec("set_render_param", { clipId: clip.id, seed: Number(rl.seed) + 1 })}>⟳ seed</button>
+        <button className="btn x" title="remove layer" disabled={pending > 0} onClick={() => void exec("remove_render_layer", { clipId: clip.id })}>✕</button>
       </div>
     </div>
   );
