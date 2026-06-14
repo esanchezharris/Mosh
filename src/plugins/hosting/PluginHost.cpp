@@ -271,7 +271,15 @@ int PluginHost::rescan (bool clearFirst, bool includeVST3, bool includeAU, bool 
             running.store (false, std::memory_order_relaxed);
             if (wd.joinable()) wd.join();
             slowFlag = false;
-            if (oop) pm.setUsesSeparateProcessForScanning (false);
+            if (oop)
+            {
+                // Tell te's CustomScanner the sweep is over: it resets its
+                // PluginScanMasterProcess, whose dtor kills the child scan worker.
+                // Without this the idle worker leaks until the app quits (Mosh drives
+                // the scan via scanAndAddFile, so nothing else calls scanFinished).
+                pm.knownPluginList.scanFinished();
+                pm.setUsesSeparateProcessForScanning (false);
+            }
             inProgress.store (false, std::memory_order_relaxed);
         }
     } guard { pm, scanRunning, watchdog, vst3SlowScan, scanInProgress, oop };
