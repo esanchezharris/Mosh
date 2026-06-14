@@ -264,6 +264,22 @@ Research confirmed the **hosting** half already works — `JUCE_PLUGINHOST_AU=1`
 
 **Shipped-on-both-axes: 81 → 83** (must-tier 67 → 69). Plugin hosting now spans both Mac formats with a persisted catalog, a working blocklist, and rescan — not just a curated VST3 list.
 
+### 2026-06-14 · VST3 scan: curated list → full folder enumeration
+
+`scanCuratedVST3()` (a hardcoded list of 6 bundle filenames) was the reason the
+browser only ever showed a handful of plug-ins. It is now `scanInstalledVST3()`,
+which enumerates **every** `.vst3` bundle in `/Library/Audio/Plug-Ins/VST3` and
+`~/Library/Audio/Plug-Ins/VST3` (plus one level of vendor subfolders) and catalogs
+each via `scanFile()`. The default fast path still only adds bundles carrying
+`moduleinfo.json` (no module load → safe, no Debug assertion noise), which on a
+typical machine jumps the catalog from a curated handful to the full set of
+moduleinfo-bearing plug-ins. Bundles **without** `moduleinfo.json` (e.g. Vital,
+OTT, Valhalla) require loading the module to read the factory, so they stay behind
+the existing opt-in **`MOSH_SCAN_SLOW_VST3=1`** (the slow path now also benefits
+from full enumeration, arms the dead-mans-pedal per bundle, and — via
+`rescan_plugins {slow:true}` — runs on a background thread so the UI never freezes).
+The PluginBrowser **Rescan** button runs the safe fast enumeration.
+
 ### 2026-06-09 · Wave 18: multicore audio (PRF-001) + content browser (BRW-001) ✅
 
 **PRF-001** — the research confirmed this is a *genuine* knob, not a dead one: Tracktion's parallel graph (`LockFreeMultiThreadedNodePlayer`) reads exactly one value, `EngineBehaviour::getNumberOfCPUsToUseForAudio()` (applied as `setNumThreads(N-1)` in both live playback and offline render). `MoshEngineBehaviour` now overrides it from an `atomic<int>` (0 = auto/all cores); the new non-undoable `set_audio_threads` command clamps to `[1..cores]`, stores the preference, and re-applies it **live** via `DeviceManager::updateNumCPUs()` (no playback restart). The snapshot exposes `availableCores` / `audioThreads` / `audioThreadsAuto`, surfaced as a thread-count stepper in Settings. Notably it's *not* device-gated — the preference + readout work headless. **BRW-001** — a read-only `list_directory { path }` (subdirs + audio files by extension, well-known roots incl. Home/Music/session imports, graceful on missing/denied paths, no recursion, `File()` guarded against relative paths) feeding a new `ContentBrowser` panel that navigates the filesystem and imports a chosen file via `import_clip`. Verified: `Mosh --selftest` **443/443**, 0 failed, exactly 1 assertion (the known Stage-3 one — none added) — `set_audio_threads` clamps/validates/round-trips and logs `undoable:false`; `list_directory` lists a seeded `.wav`, filters out a `.txt`, lists a subfolder as `isDir`, and roots resolve to real dirs.

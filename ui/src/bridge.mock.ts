@@ -14,7 +14,7 @@
 // behaviour the UI relies on is exercised, while audio/Tracktion concepts never
 // appear (the swappable seam holds on the web side too).
 
-import type { Snapshot, Clip, Track, Transport, CommandResult, RenderLayer, TrainingState } from "./types";
+import type { Snapshot, Clip, Track, Transport, CommandResult, RenderLayer, TrainingState, MidiNote } from "./types";
 
 export const MOCK_ENABLED: boolean =
   typeof import.meta !== "undefined" && Boolean(import.meta.env?.DEV);
@@ -41,24 +41,81 @@ function waveClip(name: string, start: number, length: number): Clip {
   };
 }
 
+// A MIDI clip. start/length are SECONDS (arrangement geometry); note start/length
+// are BEATS relative to the clip, matching the add_midi_clip contract + PianoRoll.
+function midiClip(name: string, start: number, length: number, notes: MidiNote[]): Clip {
+  return {
+    id: nextClipId(),
+    name,
+    type: "midi",
+    start,
+    length,
+    offset: 0,
+    notes: notes.map((nn, i) => ({ ...nn, i })),   // re-index so n.i is the command handle
+    hasRenderLayer: false,
+  };
+}
+
+// terse note constructor (i is overwritten by midiClip's .map)
+const n = (pitch: number, start: number, length: number, velocity = 100): MidiNote =>
+  ({ i: 0, pitch, start, length, velocity });
+
+// 4-bar (16-beat) demo patterns @ 4/4. Show the three clip "looks":
+//   drums -> ClipDrumGrid (FL-style lanes), bass/keys -> ClipMidi note blocks.
+function drumPattern(): MidiNote[] {
+  const out: MidiNote[] = [];
+  for (let bar = 0; bar < 4; bar++) {
+    const b = bar * 4;
+    out.push(n(36, b + 0, 0.25, 112), n(36, b + 1, 0.25, 92),   // kick four-on-floor
+             n(36, b + 2, 0.25, 112), n(36, b + 3, 0.25, 92));
+    out.push(n(38, b + 1, 0.25, 108), n(38, b + 3, 0.25, 108));  // snare on 2 & 4
+    for (let h = 0; h < 8; h++) out.push(n(42, b + h * 0.5, 0.2, h % 2 ? 64 : 88)); // 8th hats
+  }
+  out.push(n(38, 15.0, 0.2, 90), n(38, 15.25, 0.2, 98),         // end fill
+           n(38, 15.5, 0.2, 108), n(38, 15.75, 0.2, 118));
+  return out;
+}
+function bassPattern(): MidiNote[] {
+  const roots = [40, 45, 36, 43];                                // E2 A2 C2 G2, one per bar
+  const out: MidiNote[] = [];
+  roots.forEach((r, bar) => {
+    const b = bar * 4;
+    out.push(n(r, b + 0, 0.9, 108), n(r, b + 1, 0.5, 82),
+             n(r + 7, b + 2, 0.5, 92), n(r, b + 3, 0.5, 82));    // root, root, fifth, root
+  });
+  return out;
+}
+function keysPattern(): MidiNote[] {
+  const chords = [[57, 60, 64], [53, 57, 60], [48, 52, 55], [55, 59, 62]]; // Am F C G
+  const out: MidiNote[] = [];
+  chords.forEach((ch, bar) => { const b = bar * 4; for (const p of ch) out.push(n(p, b, 3.8, 84)); });
+  return out;
+}
+
 function seedSnapshot(): Snapshot {
   const tracks: Track[] = [
     {
       id: nextTrackId(), index: 0, name: "Drums", type: "audio",
       volumeDb: 0, pan: 0, mute: false, solo: false,
-      clips: [waveClip("loop", 0, 4), waveClip("fill", 6, 2)],
+      clips: [midiClip("beat", 0, 8, drumPattern())],
       plugins: [],
     },
     {
       id: nextTrackId(), index: 1, name: "Bass", type: "audio",
       volumeDb: -3, pan: 0, mute: false, solo: false,
-      clips: [waveClip("sub", 0, 8)],
+      clips: [midiClip("bassline", 0, 8, bassPattern())],
       plugins: [],
     },
     {
       id: nextTrackId(), index: 2, name: "Keys", type: "audio",
       volumeDb: -6, pan: 0.2, mute: false, solo: false,
-      clips: [waveClip("chords", 2, 6)],
+      clips: [midiClip("chords", 0, 8, keysPattern())],
+      plugins: [],
+    },
+    {
+      id: nextTrackId(), index: 3, name: "Vox", type: "audio",
+      volumeDb: -4, pan: 0, mute: false, solo: false,
+      clips: [waveClip("vox take", 0, 8)],   // keeps the waveform path demoing
       plugins: [],
     },
   ];
@@ -201,9 +258,19 @@ const BUILTINS = [
   { type: "delay", name: "Delay", category: "Effects", isInstrument: false, builtin: true as const },
   { type: "eq", name: "4-Band EQ", category: "Effects", isInstrument: false, builtin: true as const },
 ];
+// Dev-mock catalog — stand-ins for a real VST3 folder scan (the native backend
+// enumerates ~/Library/Audio/Plug-Ins/VST3). Deliberately varied so the browser
+// renders a realistic catalog, not a stub of two.
 const VST3S = [
   { id: "vital", name: "Vital", format: "VST3", manufacturer: "Vital Audio", isInstrument: true },
-  { id: "ott", name: "OTT", format: "VST3", manufacturer: "Xfer", isInstrument: false },
+  { id: "serum2", name: "Serum 2", format: "VST3", manufacturer: "Xfer Records", isInstrument: true },
+  { id: "diva", name: "Diva", format: "VST3", manufacturer: "u-he", isInstrument: true },
+  { id: "ott", name: "OTT", format: "VST3", manufacturer: "Xfer Records", isInstrument: false },
+  { id: "proq3", name: "Pro-Q 3", format: "VST3", manufacturer: "FabFilter", isInstrument: false },
+  { id: "valhalla-delay", name: "ValhallaDelay", format: "VST3", manufacturer: "Valhalla DSP", isInstrument: false },
+  { id: "valhalla-vintage", name: "ValhallaVintageVerb", format: "VST3", manufacturer: "Valhalla DSP", isInstrument: false },
+  { id: "tal-chorus", name: "TAL-Chorus-LX", format: "VST3", manufacturer: "TAL Software", isInstrument: false },
+  { id: "portal", name: "Portal", format: "VST3", manufacturer: "Output", isInstrument: false },
 ];
 const COLORS = [
   { name: "grit", astd_max: 0.55, peak_layer: 2, more_sign: 1, verdict: "STRONG", no_stack_with: [] as string[] },
@@ -384,6 +451,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
 
     // ── plugins / neural rack ────────────────────────────────────────────────
     case "list_plugins": return ok(command, { plugins: VST3S, counts: { vst3: VST3S.length, au: 0, total: VST3S.length } });
+    case "rescan_plugins": return ok(command, { total: VST3S.length, vst3: VST3S.length, au: 0 });
     case "list_builtins": return ok(command, { plugins: BUILTINS });
     case "set_master_pan": { pushUndo(); if (snapshot.master) snapshot.master.pan = num(args.pan); invalidate(); return ok(command); }
     case "enable_all_meters": meterEnabled = true; return ok(command, { count: snapshot.tracks.length });

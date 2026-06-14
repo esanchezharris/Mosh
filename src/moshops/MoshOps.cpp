@@ -2467,18 +2467,16 @@ juce::var MoshOps::cmdRescanPlugins (const juce::var& args)
     // always allowed.
     const bool auOptedIn = SystemStats::getEnvironmentVariable ("MOSH_SCAN_AU", {}) == "1";
     const bool includeAU = (format == "au" || format == "all") && auOptedIn;
+    // A slow VST3 sweep LOADS each module (so it surfaces bundles without
+    // moduleinfo.json — Vital, OTT, Valhalla, …, which the fast path can't see).
+    // That can block for seconds and can crash on a bad bundle, so it runs OFF the
+    // message thread exactly like AU, with the dead-mans-pedal armed per file.
+    const bool slowVST3 = ((bool) args.getProperty ("slow", false)) && includeVST3;
 
-    // wait:true forces a synchronous VST3 sweep (cheap + safe on the message thread).
-    // AU cataloging ALWAYS runs on a background thread, even when wait:true, because
-    // JUCE's AudioPluginFormat::createInstanceFromDescription marshals component
-    // instantiation back to the message thread — a hanging AU stalls the UI with no
-    // per-component timeout.  Only CRASHes are recovered via the dead-mans-pedal;
-    // a HANG requires a forced app restart.  Never call the AU sweep synchronously
-    // on the message thread.
-    const bool wait = (bool) args.getProperty ("wait", false);
-    if (! includeAU)
+    const bool runAsync = includeAU || slowVST3;   // anything that loads modules
+    if (! runAsync)
     {
-        // VST3-only (or no formats): fast + safe, run synchronously.
+        // Fast VST3 (moduleinfo.json) sweep: cheap + safe, run synchronously.
         const int total = pluginHost.rescan (clearFirst, includeVST3, false);
         logLine ("rescan_plugins", args, true, {}, false);   // non-undoable catalog op
         emitSnapshotInvalidated();
@@ -2487,28 +2485,17 @@ juce::var MoshOps::cmdRescanPlugins (const juce::var& args)
         d->setProperty ("count", total);
         return okResult ("rescan_plugins", var (d));
     }
-    if (wait)
-    {
-        // wait:true with AU requested: do the VST3 part inline, THEN kick off the
-        // AU sweep on a background thread and return "scanning" to the caller.
-        // (Keeping the message-thread VST3 result gives the caller a useful count
-        // while the AU sweep is in progress.)
-        if (includeVST3)
-            pluginHost.rescan (clearFirst, includeVST3, false);
-    }
 
-    // Async AU rescan — mirror cmdRenderLayer: do the slow work on a background
-    // std::thread, marshal the result back to the message thread.
+    // Async rescan (AU and/or slow VST3) — mirror cmdRenderLayer: do the slow,
+    // module-loading work on a background std::thread, marshal the result back to
+    // the message thread. AU instantiation still marshals back internally (a hang
+    // needs a restart; a crash is recovered via the dead-mans-pedal), but the slow
+    // VST3 module scan runs entirely off-thread, so the UI never freezes.
     emit ("plugin_scan_progress", [&] { auto* o = new DynamicObject();
         o->setProperty ("format", format); o->setProperty ("done", false); return var (o); }());
-    // NOTE: clearFirst and the VST3 sweep have already run inline (if wait:true) or
-    // will run together below (async path).  Pass clearFirst=false and includeVST3 in
-    // the async lambda only if we didn't already do them above.
-    const bool asyncClearFirst  = clearFirst && ! wait;
-    const bool asyncIncludeVST3 = includeVST3 && ! wait;
-    std::thread ([this, asyncClearFirst, asyncIncludeVST3, format]
+    std::thread ([this, clearFirst, includeVST3, includeAU, slowVST3, format]
     {
-        const int total = pluginHost.rescan (asyncClearFirst, asyncIncludeVST3, true);
+        const int total = pluginHost.rescan (clearFirst, includeVST3, includeAU, slowVST3);
         juce::MessageManager::callAsync ([this, total, format]
         {
             emit ("plugin_scan_progress", [&] { auto* o = new juce::DynamicObject();

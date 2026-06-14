@@ -19,11 +19,27 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore, type Peaks } from "../store";
-import { tempoMapFrom, gridLines } from "../time";
-import type { Snapshot, Track, Clip } from "../types";
+import { tempoMapFrom, gridLines, meterAt, beatSeconds, type Meter, type TempoMap } from "../time";
+import type { Snapshot, Track, Clip, MidiNote } from "../types";
 
 const LANE_H = 76;
 const MIN_LEN = 0.05; // shortest clip / trim, seconds
+
+// A drum track renders as a fixed-lane step grid (FL-style) rather than
+// pitch-mapped note blocks. Detected by an explicit kind, else by name.
+const isDrumTrack = (t: Track): boolean =>
+  (t as { kind?: string }).kind === "drum" || /drum|beat|kick|perc/i.test(t.name);
+
+// GM-ish drum pitch -> fixed lane (0 = top row). Unknown pitches fall to snare.
+const DRUM_LANES: Record<number, number> = {
+  49: 0, 51: 0, 57: 0,            // crash / ride / cymbal
+  42: 1, 44: 1, 46: 1,            // hats: closed / pedal / open
+  38: 2, 40: 2, 39: 2,            // snare / clap
+  41: 3, 43: 3, 45: 3, 47: 3, 48: 3, 50: 3, // toms
+  35: 4, 36: 4,                   // kick
+};
+const DRUM_LANE_COUNT = 5;
+const drumLane = (pitch: number) => DRUM_LANES[pitch] ?? 2;
 
 // Pointer capture keeps a drag tracking when the cursor leaves the element.
 // Wrapped because some environments (and synthetic events) throw InvalidPointerId;
@@ -247,7 +263,7 @@ export function Arrange({ snapshot }: { snapshot: Snapshot }) {
             <div key={t.id} className="lane" data-testid="lane" data-track-id={t.id}
               style={{ position: "absolute", top: i * LANE_H, left: 0, right: 0, height: LANE_H }}>
               {t.clips.map((c) => (
-                <ClipBlock key={c.id} clip={c} selected={selection.has(c.id)}
+                <ClipBlock key={c.id} clip={c} track={t} map={map} selected={selection.has(c.id)}
                   tool={tool} snapTime={snapTime} secToPx={secToPx} pxToSec={pxToSec}
                   onSelect={(additive) => select([c.id], additive)} exec={exec} />
               ))}
@@ -262,6 +278,14 @@ export function Arrange({ snapshot }: { snapshot: Snapshot }) {
             <div className="band range" data-testid="range-band"
               style={{ left: secToPx(timeRange.start), width: secToPx(timeRange.end - timeRange.start), height: lanesHeight }} />
           )}
+
+          {/* bar-line overlay — bars only, painted ABOVE clips so the grid reads
+              continuously across opaque clip bodies (beats stay in the base grid). */}
+          <div className="grid-overlay" aria-hidden="true">
+            {grid.bars.map((b) => (
+              <div key={`bo-${b.label}`} className="line bar" style={{ left: secToPx(b.sec) }} />
+            ))}
+          </div>
 
           <div className="playhead" data-testid="playhead" data-pos={transport.position.toFixed(3)} style={{ left: secToPx(transport.position) }} />
 
@@ -310,9 +334,9 @@ type ExecFn = (command: string, args?: Record<string, unknown>) => Promise<unkno
 type DragKind = "move" | "trim-l" | "trim-r";
 
 function ClipBlock({
-  clip, selected, tool, snapTime, secToPx, pxToSec, onSelect, exec,
+  clip, track, map, selected, tool, snapTime, secToPx, pxToSec, onSelect, exec,
 }: {
-  clip: Clip; selected: boolean; tool: string;
+  clip: Clip; track: Track; map: TempoMap; selected: boolean; tool: string;
   snapTime: (t: number) => number; secToPx: (s: number) => number; pxToSec: (px: number) => number;
   onSelect: (additive: boolean) => void; exec: ExecFn;
 }) {
@@ -378,6 +402,11 @@ function ClipBlock({
     >
       <div className="label">{clip.name}</div>
       {clip.type === "wave" && <ClipWave peaks={peaks} width={widthPx} />}
+      {clip.type === "midi" && (
+        isDrumTrack(track)
+          ? <ClipDrumGrid notes={clip.notes} width={widthPx} meter={meterAt(map, clip.start)} secToPx={secToPx} />
+          : <ClipMidi notes={clip.notes} width={widthPx} meter={meterAt(map, clip.start)} secToPx={secToPx} />
+      )}
       {tool === "move" && (
         <>
           <div className="trim l" title="Trim start" onPointerDown={beginDrag("trim-l")} onPointerMove={onMove} onPointerUp={onUp} />
@@ -406,5 +435,74 @@ function ClipWave({ peaks, width }: { peaks?: Peaks; width: number }) {
       ctx.fillRect(x, top, 1, Math.max(1, bot - top));
     }
   }, [peaks, width]);
+  return <canvas ref={ref} />;
+}
+
+// Inline MIDI preview — pitch-mapped note blocks (bass/keys/lead). Notes carry
+// beats; convert through the clip's meter so blocks land on the same grid the
+// ruler/playhead use. Double-click the clip still opens the full PianoRoll.
+function ClipMidi({ notes, width, meter, secToPx }:
+  { notes?: MidiNote[]; width: number; meter: Meter; secToPx: (s: number) => number }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const cv = ref.current; if (!cv) return;
+    const dpr = window.devicePixelRatio || 1;
+    const h = cv.clientHeight, w = cv.clientWidth;
+    cv.width = Math.max(1, Math.floor(w * dpr)); cv.height = Math.max(1, Math.floor(h * dpr));
+    const ctx = cv.getContext("2d"); if (!ctx) return;
+    ctx.scale(dpr, dpr); ctx.clearRect(0, 0, w, h);
+    const ns = notes ?? []; if (ns.length === 0) return;
+
+    // Vertical range from the clip's own pitches (padded); fixed window if degenerate.
+    let lo = Infinity, hi = -Infinity;
+    for (const n of ns) { if (n.pitch < lo) lo = n.pitch; if (n.pitch > hi) hi = n.pitch; }
+    if (hi - lo < 4) { const c = Math.round((lo + hi) / 2 || 60); lo = c - 6; hi = c + 6; }
+    else { lo -= 1; hi += 1; }
+    const span = Math.max(1, hi - lo);
+    const rowH = Math.max(2, Math.min(7, (h - 2) / span));
+    const bs = beatSeconds(meter);
+
+    ctx.fillStyle = "rgba(180,108,255,1)";   // violet — matches the .clip.midi identity
+    for (const n of ns) {
+      const x = secToPx(n.start * bs);
+      const wpx = Math.max(2, secToPx(n.length * bs) - 1);
+      const y = (1 - (n.pitch - lo) / span) * (h - rowH);   // high pitch toward top
+      ctx.globalAlpha = 0.45 + 0.55 * (Math.min(127, Math.max(1, n.velocity)) / 127);
+      ctx.fillRect(x, y, wpx, rowH);
+    }
+    ctx.globalAlpha = 1;
+  }, [notes, width, meter, secToPx]);
+  return <canvas ref={ref} />;
+}
+
+// Inline drum preview — fixed lanes (cymbal/hat/snare/tom/kick), FL-style steps.
+// x stays grid-aligned via secToPx(beats); y is the GM-lane, not the pitch.
+function ClipDrumGrid({ notes, width, meter, secToPx }:
+  { notes?: MidiNote[]; width: number; meter: Meter; secToPx: (s: number) => number }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const cv = ref.current; if (!cv) return;
+    const dpr = window.devicePixelRatio || 1;
+    const h = cv.clientHeight, w = cv.clientWidth;
+    cv.width = Math.max(1, Math.floor(w * dpr)); cv.height = Math.max(1, Math.floor(h * dpr));
+    const ctx = cv.getContext("2d"); if (!ctx) return;
+    ctx.scale(dpr, dpr); ctx.clearRect(0, 0, w, h);
+    const ns = notes ?? []; if (ns.length === 0) return;
+
+    const laneH = h / DRUM_LANE_COUNT;
+    ctx.fillStyle = "rgba(180,108,255,0.14)";                // faint lane separators
+    for (let l = 1; l < DRUM_LANE_COUNT; l++) ctx.fillRect(0, Math.round(l * laneH), w, 1);
+
+    const bs = beatSeconds(meter);
+    for (const n of ns) {
+      const x = secToPx(n.start * bs);
+      const cell = Math.max(3, Math.min(secToPx(n.length * bs), laneH - 2));
+      const y = drumLane(n.pitch) * laneH + 1;
+      ctx.globalAlpha = 0.5 + 0.5 * (Math.min(127, Math.max(1, n.velocity)) / 127);
+      ctx.fillStyle = "rgba(180,108,255,1)";
+      ctx.fillRect(x, y, cell, Math.max(2, laneH - 3));
+    }
+    ctx.globalAlpha = 1;
+  }, [notes, width, meter, secToPx]);
   return <canvas ref={ref} />;
 }

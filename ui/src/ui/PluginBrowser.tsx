@@ -12,6 +12,9 @@ export function PluginBrowser() {
   const counts = useStore((s) => s.pluginCounts);
   const selectedTrackId = useStore((s) => s.selectedTrackId);
   const exec = useStore((s) => s.exec);
+  const rescanPlugins = useStore((s) => s.rescanPlugins);
+  const scanProgress = useStore((s) => s.scanProgress);
+  const scanning = scanProgress != null && !scanProgress.done;
   const [q, setQ] = useState("");
   const [kind, setKind] = useState<"all" | "inst" | "fx">("all");
 
@@ -38,6 +41,8 @@ export function PluginBrowser() {
         <div className="modal-head">
           <strong className="display">Add plugin</strong>
           <span className="pr-meta tc">{counts ? `${counts.vst3} VST3 · ${counts.au} AU` : `${plugins.length} installed`}</span>
+          <button className="btn ghost" onClick={() => void rescanPlugins("vst3")} disabled={scanning}
+            title="Re-scan the installed VST3 folders">{scanning ? "Scanning…" : "Rescan"}</button>
           <button className="btn x" onClick={close}>✕</button>
         </div>
         <div className="modal-filters">

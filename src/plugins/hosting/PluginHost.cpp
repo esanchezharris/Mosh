@@ -126,7 +126,7 @@ void PluginHost::initialise()
     // --selftest never sets MOSH_SCAN_AU, so the harness performs NO AU sweep.
     if (engine.getPluginManager().knownPluginList.getNumTypes() == 0)
     {
-        scanCuratedVST3();
+        scanInstalledVST3();
         if (SystemStats::getEnvironmentVariable ("MOSH_SCAN_AU", {}) == "1")
             scanAUComponents();
         saveCatalog();
@@ -135,24 +135,33 @@ void PluginHost::initialise()
     initialised = true;
 }
 
-void PluginHost::scanCuratedVST3()
+void PluginHost::scanInstalledVST3()
 {
-    // Curated fast in-process scan. Bundles without VST3 moduleinfo require
-    // MOSH_SCAN_SLOW_VST3=1 because JUCE's slow scan leaves Debug shutdown
-    // assertion/leak noise in headless gates.
-    static const char* curated[] = {
-        "Vital.vst3", "OTT.vst3", "TAL-Chorus-LX.vst3",
-        "JamPilotTestGain.vst3", "ValhallaDelay.vst3", "Serum2.vst3"
-    };
+    // Enumerate EVERY .vst3 bundle in the standard macOS locations and catalog each
+    // via scanFile(). This replaces the old hardcoded curated-filename list (which
+    // only ever surfaced a fixed handful) so the browser reflects what the user
+    // actually has installed. scanFile() keeps the moduleinfo.json fast-path (no
+    // module load) unless MOSH_SCAN_SLOW_VST3=1, and honors the blocklist, so this
+    // stays in-process and crash-safe. Bundles without moduleinfo still need the
+    // slow-scan opt-in (Debug shutdown noise is why it is not the default).
     const File sysDir ("/Library/Audio/Plug-Ins/VST3");
     const File usrDir (File::getSpecialLocation (File::userHomeDirectory)
                            .getChildFile ("Library/Audio/Plug-Ins/VST3"));
-    for (auto* name : curated)
+    for (const auto& root : { sysDir, usrDir })
     {
-        auto sys = sysDir.getChildFile (name);
-        auto usr = usrDir.getChildFile (name);
-        if (sys.exists())      scanFile (sys);
-        else if (usr.exists()) scanFile (usr);
+        if (! root.isDirectory())
+            continue;
+
+        // Standard flat layout: top-level *.vst3 bundles.
+        for (const auto& f : root.findChildFiles (File::findDirectories, false, "*.vst3"))
+            scanFile (f);
+
+        // Plus one level of vendor subfolders (e.g. .../VST3/Vendor/Name.vst3),
+        // WITHOUT recursing into the bundles' own internals.
+        for (const auto& sub : root.findChildFiles (File::findDirectories, false, "*"))
+            if (! sub.getFileName().endsWithIgnoreCase (".vst3"))
+                for (const auto& f : sub.findChildFiles (File::findDirectories, false, "*.vst3"))
+                    scanFile (f);
     }
 }
 
@@ -208,38 +217,63 @@ void PluginHost::scanAUComponents()
    #endif
 }
 
-int PluginHost::rescan (bool clearFirst, bool includeVST3, bool includeAU)
+int PluginHost::rescan (bool clearFirst, bool includeVST3, bool includeAU, bool slowVST3)
 {
-    // Re-arm crash recovery BEFORE sweeping AUs.  recoverFromDeadMansPedal() runs
-    // once in initialise() for the launch-time case; repeated in-session rescans
+    // Re-arm crash recovery BEFORE a module-loading sweep.  recoverFromDeadMansPedal()
+    // runs once in initialise() for the launch-time case; repeated in-session rescans
     // (e.g. user-triggered rescan_plugins) need the same protection so a crasher
     // detected by a previous in-session scan is quarantined before the next sweep.
-    if (includeAU)
+    // A slow VST3 sweep loads modules too, so it gets the same pre-recovery.
+    if (includeAU || (includeVST3 && slowVST3))
         recoverFromDeadMansPedal();
+
+    // scanFile() consults this to load bundles without moduleinfo.json. Scoped to
+    // this call: the launch-time scanInstalledVST3() (not via rescan) stays fast.
+    vst3SlowScan = slowVST3;
 
     auto& list = engine.getPluginManager().knownPluginList;
     if (clearFirst)
         list.clear();          // drops types; blocklist is preserved by createXml/recreateFromXml
 
     if (includeVST3)
-        scanCuratedVST3();
+        scanInstalledVST3();
     if (includeAU)
         scanAUComponents();    // may run on a background thread (MoshOps drives it there)
 
+    vst3SlowScan = false;
     saveCatalog();
     return list.getNumTypes();
 }
 
 void PluginHost::scanFile (const File& file)
 {
-    const bool allowSlowScan = SystemStats::getEnvironmentVariable ("MOSH_SCAN_SLOW_VST3", {}) == "1";
-    if (! allowSlowScan && ! hasModuleInfo (file))
+    const bool allowSlowScan = vst3SlowScan
+        || SystemStats::getEnvironmentVariable ("MOSH_SCAN_SLOW_VST3", {}) == "1";
+    const bool needsModuleLoad = ! hasModuleInfo (file);   // no moduleinfo -> JUCE loads the binary
+    if (needsModuleLoad && ! allowSlowScan)
         return;
+
+    auto& list = engine.getPluginManager().knownPluginList;
+    const auto path = file.getFullPathName();
+
+    // A module-loading scan can crash on a bad bundle. Skip a previously-quarantined
+    // file, and arm the dead-mans-pedal around the load so a crasher is blocklisted
+    // on the next launch (mirrors the AU path). moduleinfo.json scans don't load the
+    // binary, so they need neither guard.
+    if (needsModuleLoad)
+    {
+        if (list.getBlacklistedFiles().contains (path))
+            return;
+        deadMansPedal().replaceWithText (path);
+    }
 
     VST3PluginFormat vst3;
     OwnedArray<PluginDescription> found;
-    vst3.findAllTypesForFile (found, file.getFullPathName());
-    auto& list = engine.getPluginManager().knownPluginList;
+    vst3.findAllTypesForFile (found, path);
+
+    if (needsModuleLoad)
+        deadMansPedal().deleteFile();   // clean return -> disarm
+
     for (auto* d : found)
     {
         // Honor the blocklist: a manually blocked or crash-recovered plugin must

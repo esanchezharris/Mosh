@@ -130,7 +130,7 @@ type State = {
   openBrowser: () => void;
   closeBrowser: () => void;
   // INS-005 — plugin scan / blocklist management (all via exec; UI-local view state otherwise).
-  rescanPlugins: (format?: "vst3" | "au" | "all") => Promise<void>;
+  rescanPlugins: (format?: "vst3" | "au" | "all", slow?: boolean) => Promise<void>;
   loadBlocklist: () => Promise<void>;
   clearBlocklist: () => Promise<void>;
   refreshPluginList: () => Promise<void>;
@@ -453,9 +453,9 @@ export const useStore = create<State>((set, get) => ({
 
   // INS-005 — re-enumerate the catalog. AU is the slow/risky path (the backend
   // runs it off the message thread); we refresh the list when the scan reports done.
-  rescanPlugins: async (format = "all") => {
+  rescanPlugins: async (format = "all", slow = false) => {
     set({ scanProgress: { format, done: false } });
-    const res = await get().exec("rescan_plugins", { format });
+    const res = await get().exec("rescan_plugins", { format, slow });
     // Inline/VST3 rescans return done immediately; AU rescans complete via the
     // 'plugin_scan_progress' event (see init()).
     const status = (res.data as { status?: string } | undefined)?.status;

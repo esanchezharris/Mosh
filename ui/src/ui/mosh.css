@@ -160,6 +160,14 @@ body { background: var(--ink); color: var(--bone); font-family: var(--font-body)
 .grid .line.bar { background: var(--ink-line); }
 .grid .line.beat { background: var(--ink-line-soft); }
 
+/* Bar-line overlay — sits ABOVE clips (z 1) but below playhead (z 4) so bar
+   lines stay readable across opaque clip bodies. Bars only; beats stay below. */
+.grid-overlay { position: absolute; inset: 0; pointer-events: none; z-index: 2; }
+.grid-overlay .line.bar {
+  position: absolute; top: 0; bottom: 0; width: 1px;
+  background: rgba(190, 190, 178, 0.16);   /* neutral tick — reads over clips, not an accent */
+}
+
 /* lanes + clips */
 .lane {
   position: relative; height: var(--lane-h); border-bottom: 1px solid var(--ink-line-soft);
