@@ -1,4 +1,4 @@
-# HANDOFF — THE MOSHI LAB, v5 state (2026-06-12)
+# HANDOFF — THE MOSHI LAB, v9 state (2026-06-13)
 
 *Written for the next agent (Codex or anyone) to continue this work cold.
 Everything here was built and verified in the design lab; the app build
@@ -9,15 +9,21 @@ rules), [LOOKBOOK.md](LOOKBOOK.md) (the catalog + version record).*
 ## What this is
 
 **Moshi** — Mosh's agent — as a portable, interactive, PS2-register 3D
-character. One deliverable in two files:
+character with a procedural voice. The lab is now four host-wired files (the
+pattern: `moshi.js` is pure; everything else couples to it through its public
+API):
 
 - **`playground/moshi.js`** — THE COMPONENT. One classic script, zero deps,
   WebGL1. `Moshi(hostEl, opts)` → a living creature in any canvas-capable
-  host, 24px to full-stage. This is the artifact the product will eventually
-  embed (the user may rebuild the product UI in another language — the
-  component's GLSL + semantic-drives API is the portability seam).
-- **`playground/index.html`** — THE LOOKBOOK. The demo stage: curated
-  numbered looks, plus chips for STATE / POSE / ANAT / STYLE / RES / SIGNAL.
+  host, 24px to full-stage. The portability seam (GLSL + semantic-drives API).
+  **Stays pure — no audio, no network inside it.**
+- **`playground/voice.js`** — THE VOICE (`MoshiVoice`). Procedural R2-D2-style
+  earcons (Web Audio, zero-dep), one per INTENT, affect-coloured + seeded.
+- **`playground/brain.js`** — THE BRAIN (`MoshiBrain`). LLM → `intent` + opt
+  `say`, via a key-safe Vite proxy. Intent-aware; routes through `utter()`.
+- **`playground/index.html`** — THE STAGE. Curated looks + chips (STATE / POSE /
+  ANAT / STYLE / RES / SIGNAL), the **event panel** (drives him by simulated
+  agent/engine events), and the **`utter()` funnel** (sound + pose + opt bubble).
   `npm run dev` in `playground/` → http://localhost:5180.
 
 ## The design, in one paragraph
@@ -114,12 +120,34 @@ on chrome** (current stage default).
    Improved from the "oil" but not perfect. Ideas: shade rescued hits with
    pulled-back normals; widen the rescue epsilon with res; outline from a
    screen-space silhouette test instead of fres.
-3. **The brain** — provider-agnostic client, contract documented in README:
-   `MOSHI_BRAIN_URL` / `MOSHI_BRAIN_KEY` / `MOSHI_BRAIN_MODEL`, OpenAI-
-   compatible chat-completions (DeepSeek `api.deepseek.com`+`deepseek-chat`,
-   or OpenAI). User will supply a key; then: a chat line on the stage where
-   agent activity drives states/glances (typing→LISTENING, tools→RENDERING,
-   done→celebrate()).
+3. **The brain + the voice + events** — ✅ BUILT (2026-06-13, v8→v9).
+   - **Brain** (`brain.js`): an LLM classifies a turn into an `intent` (+ optional
+     `say`); keys live server-side in a Vite plugin (`vite.config.js`) proxying
+     `/api/brain/*` (browser never sees one). Three providers, switchable:
+     DeepSeek `deepseek-v4-flash` (default/fastest), OpenAI `gpt-5.4-mini`
+     (GPT-5/o-series → `max_completion_tokens`, no custom temp), xAI `grok-4.3`.
+     Reasoning models need a generous token budget or the JSON clips. Config:
+     `.env.example` → gitignored `.env.local`. The brain is now intent-aware and
+     routes through `utter()` via `MoshiBrain(stage, {onUtter})` — de-surfaced in
+     the lab (no chat box) but ready for the product "talk to him" path.
+   - **Voice** (`voice.js` = `MoshiVoice`): procedural earcons, Web Audio,
+     zero-dep. Timbre = a **cute creature** (sine/triangle coos, chorus +
+     portamento; an astromech take was tried then softened — user's call). 8
+     intents (ACK_GOT_IT/ACK_WORKING loop/DONE/HUH/NUH/UHOH/GREET/IDLE_MURMUR),
+     affect-coloured + seeded. **IN-KEY:** contours are scale degrees snapped to
+     the song's key via `voice.setKey(tonic,mode)` — STUB: the engine has no key
+     yet (tempo/time-sig only; `tempoKeyContext` placeholder in RenderLayer.h);
+     feed a real key from `mosh_event` when it exists. A host
+     `utter(intent,{affect,say})` funnel co-fires sound + the intent's pose/face;
+     bubble only when `say` is set. Autoplay unlocks on first gesture. CAP=6
+     concurrent + onended teardown (no leaks). DONE/non-working intents clear the
+     RENDERING work-state; any event wakes him from SLEEPING.
+   - **Events**: the lab is event-driven — buttons fire mock events keyed to the
+     real `mosh_event` contract through an `EVENT_INTENT` translator into
+     `utter()`. NEXT: point `fireEvent`/the translator at the LIVE feed
+     (`ui/src/store.ts` `mosh_event`, or RemoteCompanionServer `/events` poll via
+     `startLabFeed`) and add the agent-activity events the product still lacks
+     (task-received, ambiguous, declined). Optional: a real *spoken* lane later.
 4. **Parked (user-blessed):** bitmap HUD-numeral face
    (github.com/ianhan/BitmapFonts); real per-band spectral feed in
    `src/RemoteCompanionServer` (~50 lines, approved, next time src/ is

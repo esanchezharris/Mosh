@@ -1,3 +1,14 @@
+# Secrets — never commit API keys / brain provider creds.
+# Precise patterns (NOT a broad .env.* glob) so .env.example stays committable
+# as a template without needing a fragile negation.
+.env
+.env.local
+.env.*.local
+**/.env
+**/.env.local
+**/.env.*.local
+*.secret
+
 # Build output
 build/
 build-*/

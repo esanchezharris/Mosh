@@ -40,10 +40,12 @@
     transition: transform .08s, box-shadow .08s; }
   .chip:hover { border-color: var(--lime); color: var(--lime); opacity: 1; }
   .chip:active { transform: translateY(3px); box-shadow: 0 0 0 #000; }
-  #signal { top: 18px; right: 18px; }
-  #res    { top: 18px; right: 132px; }
-  #style  { top: 18px; right: 246px; }
-  #anat   { top: 18px; right: 372px; }
+  /* the lookbook dials — a tidy vertical stack down the right edge, clear of
+     the centered event panel (they used to span the top row and collide). */
+  #signal { top: 16px;  right: 16px; }
+  #res    { top: 46px;  right: 16px; }
+  #style  { top: 76px;  right: 16px; }
+  #anat   { top: 106px; right: 16px; }
 
   /* THE LOOKBOOK plate — number, name, state, caption */
   #plate { position: fixed; left: 50%; bottom: 46px; transform: translateX(-50%);
@@ -80,9 +82,9 @@
   .raillbl2 { font-size: 7.5px; letter-spacing: .22em; opacity: .35; margin-bottom: 2px; }
 
   /* the presence orb — the SAME component at coat-pocket size */
-  #mini { position: fixed; right: 22px; bottom: 22px; width: 76px; height: 76px;
-    z-index: 10; opacity: .9; }
-  #minilbl { position: fixed; right: 22px; bottom: 8px; width: 76px; z-index: 10;
+  #mini { position: fixed; right: 24px; bottom: 30px; width: 220px; height: 220px;
+    z-index: 10; opacity: .94; }
+  #minilbl { position: fixed; right: 24px; bottom: 12px; width: 220px; z-index: 10;
     font-size: 7px; letter-spacing: .16em; opacity: .3; text-align: center; }
 
   .arrow { position: fixed; top: 50%; transform: translateY(-50%); z-index: 10;
@@ -102,6 +104,36 @@
     filter: url(#ps2signal); }
   html.raw #chrome { filter: none; }
   #chrome .chip, #chrome .arrow, #chrome #states .st { pointer-events: auto; }
+
+  /* THE EVENT PANEL — Moshi reacts to simulated engine/agent EVENTS, not typed
+     chat: he answers in SOUND + body (a bubble only when words are essential).
+     These mirror the real `mosh_event` contract so the same translator drops
+     onto the live feed later. Outside #chrome so the buttons stay crisp. */
+  #events { position: fixed; top: 14px; left: 50%; transform: translateX(-50%);
+    z-index: 12; display: flex; gap: 5px; align-items: center; flex-wrap: wrap;
+    justify-content: center; width: min(520px, 56vw); }
+  #events .evlbl { font-size: 7.5px; letter-spacing: .22em; opacity: .4; margin-right: 2px; }
+  #events .ev { cursor: pointer; font-size: 9px; letter-spacing: .12em;
+    color: rgba(246,242,235,.62); border: 1px solid rgba(246,242,235,.18);
+    border-radius: 7px; padding: 4px 10px; background: rgba(11,11,11,.55);
+    box-shadow: 0 2px 0 rgba(0,0,0,.6); transition: transform .08s, color .1s, border-color .1s; }
+  #events .ev:hover { color: var(--lime); border-color: rgba(204,255,35,.5); }
+  #events .ev:active { transform: translateY(2px); }
+  #events .ev.err:hover { color: #ff7a7a; border-color: rgba(255,122,122,.6); }
+  #voicetog { cursor: pointer; font-size: 9px; letter-spacing: .12em; color: var(--lime);
+    border: 1px solid rgba(204,255,35,.45); border-radius: 7px; padding: 4px 10px;
+    background: rgba(204,255,35,.10); box-shadow: 0 2px 0 rgba(0,0,0,.6); margin-left: 4px; }
+
+  /* the speech bubble — Moshi's voice, crisp + on-brand (not the LLM's; HIS) */
+  #bubble { position: fixed; left: 50%; top: 24%; z-index: 12;
+    transform: translate(-50%, -6px) skewX(-7deg); max-width: min(360px, 70vw);
+    pointer-events: none; background: rgba(204,255,35,.14); color: var(--lime);
+    border: 1px solid rgba(204,255,35,.5); border-radius: 4px; padding: 7px 15px 6px;
+    box-shadow: 0 3px 0 rgba(0,0,0,.6); font-family: var(--font-display);
+    font-weight: 800; font-style: italic; font-size: 16px; letter-spacing: .03em;
+    text-transform: uppercase; text-align: center; opacity: 0;
+    transition: opacity .22s, transform .22s; }
+  #bubble.on { opacity: 1; transform: translate(-50%, 0) skewX(-7deg); }
 </style>
 </head>
 <body>
@@ -121,8 +153,22 @@
 <div id="stage"></div>
 <div id="mini"></div>
 
+<div id="bubble" class="disp"></div>
+<div id="events">
+  <span class="evlbl mono">AGENT EVENT →</span>
+  <button class="ev mono" data-ev="agent.connected">HELLO</button>
+  <button class="ev mono" data-ev="agent.task_received">GOT IT</button>
+  <button class="ev mono" data-ev="layer_render_progress">WORKING</button>
+  <button class="ev mono" data-ev="layer_status.ready">DONE</button>
+  <button class="ev mono" data-ev="agent.ambiguous">HUH?</button>
+  <button class="ev mono" data-ev="agent.declined">NOPE</button>
+  <button class="ev err mono" data-ev="error">ERROR</button>
+  <button class="ev mono" id="keychip" title="Moshi sings in the song's key — click to change key">KEY · Am</button>
+  <button id="voicetog" class="mono">🔊 VOICE</button>
+</div>
+
 <div id="chrome">
-  <div id="wordmark" class="disp">MOSHI · LOOKBOOK</div>
+  <div id="wordmark" class="disp">MOSHI</div>
   <div id="anat" class="chip mono" title="anatomy: A = 3D blob w/ flat emotes · B = always volumetric · C = sea-star max contrast">ANAT·A</div>
   <div id="style" class="chip mono">STYLE·TOON</div>
   <div id="res" class="chip mono">RES·PS2+</div>
@@ -144,10 +190,12 @@
     <div id="pcap" class="mono"></div>
   </div>
   <div id="hint" class="mono">◀ ▶ THE LOOKBOOK · R = REROLL · C = TAKE LANDS · CLICK = POKE · HOLD = PET · DRAG = SPIN</div>
-  <div id="minilbl" class="mono">SAME GUY · 76PX</div>
+  <div id="minilbl" class="mono">SAME GUY · 220PX</div>
 </div>
 
 <script src="moshi.js"></script>
+<script src="voice.js"></script>
+<script src="brain.js"></script>
 <script>
 // THE LOOKBOOK — a curated, captioned walk through who Moshi can be:
 // personality × state × seed, numbered like a catalog. Scroll/arrows turn
@@ -176,7 +224,7 @@ const stage = Moshi(document.getElementById('stage'), {
 });
 const mini = Moshi(document.getElementById('mini'), {
   personality: LOOKS[0].p, seed: LOOKS[0].sd, interactive: false,
-  resDiv: 2, maxW: 96, maxH: 96, style: 'toon',
+  resDiv: 1, maxW: 480, maxH: 480, quality: 'ps2+', style: 'toon',   // 220px slot at true max-res — detailed + readable
 });
 mini.set('mood', 0.7);
 
@@ -282,6 +330,110 @@ signal.onclick = () => {
 };
 
 show(true);
+
+// THE VOICE + EVENTS — Moshi has no chat box. He reacts to engine/agent EVENTS
+// by emitting an expressive SOUND co-fired with a pose/face beat (R2-D2 style);
+// a text bubble pops ONLY when words are essential. The event types mirror the
+// real `mosh_event` contract, so this translator transfers to the live feed.
+const voice = MoshiVoice({ master: 0.7 });
+
+// HIS VOICE SINGS IN THE SONG'S KEY. STUB: the engine doesn't track a musical
+// key yet (it has tempo + time-sig; `tempoKeyContext` in src/state/RenderLayer.h
+// is a placeholder). When a real key lands on the `mosh_event` feed, replace this
+// demo cycle with voice.setKey(ev.tonic, ev.mode) on that event.
+const KEYS = [['A', 'minor'], ['C', 'major'], ['E', 'minor'], ['F', 'major'], ['D', 'dorian'], ['G', 'minor']];
+let ki = 0;
+const keychip = document.getElementById('keychip');
+function applyKey() {
+  const [n, m] = KEYS[ki];
+  voice.setKey(n, m);
+  keychip.textContent = 'KEY · ' + n + (m === 'major' ? '' : m === 'minor' ? 'm' : ' ' + m.slice(0, 3));
+}
+keychip.onclick = () => { ki = (ki + 1) % KEYS.length; voice.unlock(); applyKey(); };
+applyKey();
+
+const bubbleEl = document.getElementById('bubble');
+let bubbleT = 0;
+function showBubble(text) {
+  bubbleEl.textContent = text;
+  bubbleEl.classList.add('on');
+  clearTimeout(bubbleT);
+  bubbleT = setTimeout(() => bubbleEl.classList.remove('on'),
+    Math.max(2200, Math.min(7000, 1400 + text.length * 55)));
+}
+// keep the STATE rail mirroring whatever put him in a state
+function syncStateChips() { const s = stage.state().state; for (const k in stBtns) stBtns[k].classList.toggle('on', k === s); }
+
+// intent → his BODY reaction (sound is added by voice; this is the pose/face)
+const INTENT_REACTION = {
+  ACK_GOT_IT:  { pose: 'REACH', hold: 1.6, mood: 0.7 },
+  ACK_WORKING: { state: 'RENDERING' },
+  DONE:        { celebrate: true },
+  HUH:         { pose: 'SPLAY', hold: 1.2, mood: 0.6 },
+  NUH:         { pose: 'DROOP', hold: 1.4, mood: 0.35 },
+  UHOH:        { pose: 'TUCK',  hold: 1.6, mood: 0.25 },
+  GREET:       { pose: 'WAVE',  hold: 2.0, mood: 0.85 },
+  IDLE_MURMUR: {},
+};
+// THE FUNNEL — one place co-fires sound + body + (optional) words.
+let workingLoopActive = false;
+function utter(intent, o) {
+  o = o || {};
+  voice.unlock();                                   // idempotent; satisfies autoplay synchronously
+  // an event rouses him from sleep (something is happening) — murmurs don't
+  if (intent !== 'IDLE_MURMUR' && stage.state().state === 'SLEEPING') { stage.setState('IDLE'); mini.setState('IDLE'); }
+  if (intent === 'ACK_WORKING') { voice.startLoop(intent, { affect: o.affect }); workingLoopActive = true; }
+  else {
+    // leaving the working loop = the task ended → clear RENDERING back to rest
+    if (workingLoopActive) { voice.stopLoop(); workingLoopActive = false; stage.setState('IDLE'); mini.setState('IDLE'); }
+    voice.play(intent, { affect: o.affect, seed: o.seed });
+  }
+  const r = INTENT_REACTION[intent] || {};
+  if (r.celebrate) { stage.celebrate(); mini.celebrate(); }
+  else if (r.pose) { stage.setPose(r.pose, r.hold); mini.setPose(r.pose, r.hold); }
+  if (r.state) { stage.setState(r.state); mini.setState(r.state); }
+  if (typeof r.mood === 'number') { stage.set('mood', r.mood); mini.set('mood', r.mood); }
+  syncStateChips();
+  if (o.say) showBubble(o.say);
+}
+window.utter = utter;   // expose for the harness / future host wiring
+
+// EVENT → INTENT translator. Keys mirror the documented mosh_event contract
+// (layer_render_progress / layer_status / error) + agent-activity events the
+// product will add. affect colours the earcon; `say` only where words matter.
+const EVENT_INTENT = {
+  'agent.connected':       { intent: 'GREET',       affect: { valence: 0.8, arousal: 0.7 } },
+  'agent.task_received':   { intent: 'ACK_GOT_IT',  affect: { valence: 0.5, arousal: 0.7 } },
+  'layer_render_progress': { intent: 'ACK_WORKING', affect: { valence: 0.1, arousal: 0.4 } },
+  'layer_status.ready':    { intent: 'DONE',        affect: { valence: 0.9, arousal: 0.9 } },
+  'agent.ambiguous':       { intent: 'HUH',         affect: { valence: 0.0, arousal: 0.6 } },
+  'agent.declined':        { intent: 'NUH',         affect: { valence: -0.4, arousal: 0.4 } },
+  'error':                 { intent: 'UHOH',        affect: { valence: -0.8, arousal: 0.5 }, say: 'hmm — that one broke' },
+};
+function fireEvent(type) { const e = EVENT_INTENT[type]; if (e) utter(e.intent, { affect: e.affect, say: e.say }); }
+window.fireEvent = fireEvent;   // the same call the live mosh_event feed will make
+
+for (const b of document.querySelectorAll('#events .ev[data-ev]')) b.onclick = () => fireEvent(b.dataset.ev);
+
+// autoplay: AudioContext can only start inside a user gesture. Prime on the
+// first interaction anywhere; every event button also unlocks (idempotent).
+let voiceOn = true;
+const voiceChip = document.getElementById('voicetog');
+function updateVoiceChip() { voiceChip.textContent = (voiceOn ? '🔊 VOICE' : '🔇 MUTED') + (voice.isReady() ? '' : ' · WAKE'); }
+function primeAudio() { voice.unlock(); updateVoiceChip(); }
+addEventListener('pointerdown', primeAudio, { capture: true, once: true });
+addEventListener('keydown', primeAudio, { capture: true, once: true });
+voiceChip.onclick = () => { voiceOn = !voiceOn; voice.setEnabled(voiceOn); voice.unlock(); updateVoiceChip(); };
+updateVoiceChip();
+
+// IDLE_MURMUR — he mutters to himself now and then, only while idle.
+let murmurT = 0;
+(function scheduleMurmur() {
+  murmurT = setTimeout(() => {
+    if (voiceOn && stage.state().state === 'IDLE') utter('IDLE_MURMUR', { affect: { valence: 0.1, arousal: 0.2 } });
+    scheduleMurmur();
+  }, 8000 + Math.random() * 12000);
+})();
 </script>
 </body>
 </html>

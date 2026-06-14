@@ -201,6 +201,31 @@ doctrine.
     (defeats tile-discard on Apple Silicon) and opaque context when he owns the
     frame.
 
+## The voice doctrine (v9 — he speaks in sound, not words)
+
+25. **Non-verbal by default.** Moshi communicates like R2-D2: an expressive
+    SOUND co-fired with a body pose. A beep is ambiguous; a beep + posture is
+    unmistakable — so the voice never works alone, it always rides an `utter()`
+    with a pose/face beat. Words (a text bubble) are the EXCEPTION, reserved for
+    when a precise message is genuinely needed (an error detail, a real
+    question). Never narrate in prose what a chirp + a wave already says.
+26. **One INTENT, three renderings.** The atom is an intent (ACK_GOT_IT,
+    ACK_WORKING, DONE, HUH, NUH, UHOH, GREET, IDLE_MURMUR) — the event/brain
+    picks it; the voice renders the sound, the pose engine renders the body, the
+    bubble (maybe) renders words. The intent vocabulary is the contract.
+27. **A cute creature, synthesized not sampled.** Sine/triangle coos + chirps,
+    gentle chorus + smooth portamento (Wall-E register, not a robot, not the
+    digital crunch — the user's call; an astromech version was tried first and
+    softened). Procedural and seeded (different every time, ugly never) — the
+    audio twin of the visual seed law, and the cure for feedback-fatigue (a
+    feedback sound must survive the 1000th hearing). The voice is a HOST module
+    (`voice.js`); `moshi.js` never makes a sound itself.
+28. **He sings IN THE SONG'S KEY.** Earcons are written in scale degrees and
+    snapped to the current key (`voice.setKey(tonic, mode)`), so he's always
+    consonant with the track. The song key is the host's to feed (engine →
+    `mosh_event` → `setKey`); the engine doesn't track key yet (stub in
+    `voice.js` + `src/state/RenderLayer.h`'s `tempoKeyContext` placeholder).
+
 ## Why this is still anti-slop
 
 Banded dither + flat facets physically can't produce the soft-gradient "vibe-coded"

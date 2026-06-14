@@ -163,6 +163,38 @@ Poses crossfade per the MORPH RULE and auto-return to the state's base pose.
   A POINTS (point-cloud / Gaussian-splat) style was also built — and CUT: the
   user didn't like the floating-dots read. (First instinct on BAKED was a
   value-lift to brighten dark TAR; user said too far — reverted. He likes dark.)
+- **v7.1 — BAKED crossfades** (2026-06-13, commit `92336fa`): `u_mode` eases
+  0↔1 like `u_toon`; the shader `mix()`es solid+baked shading so BAKED melts
+  in/out instead of snapping. All three render languages now transition
+  smoothly.
+- **v8 — THE BRAIN** (2026-06-13, user supplied DeepSeek/OpenAI/Grok keys):
+  Moshi gets a mind. Type to him on the stage; a real LLM returns a JSON
+  behaviour directive (`say/state/pose/mood/energy/heat/celebrate`) and
+  `brain.js` applies it through the public API — DeepSeek waves, Grok goes
+  droopy when asked if he's bored, GPT celebrates your first track. Keys stay
+  server-side in a Vite proxy (`vite.config.js`, same-origin `/api/brain/*`);
+  the browser never sees one. A provider switch (DEEPSEEK · OPENAI · GROK) A/Bs
+  the models live; a speech bubble carries his line; the STATE rail mirrors
+  whatever state the model puts him in. Default `deepseek-v4-flash` (fastest);
+  reasoning models get a generous token budget so the JSON isn't clipped.
+  `moshi.js` stays pure — the brain is host wiring, the documented seam.
+- **v9 — HE GETS A VOICE (R2-D2)** (2026-06-13, user direction): Moshi stops
+  speaking in words and starts *communicating in sound* like R2-D2. A new
+  `voice.js` (`MoshiVoice`, Web Audio, zero-dep) synthesizes earcons — a **cute
+  creature** (sine/triangle coos + chirps, gentle chorus + portamento; an
+  astromech take was tried first then softened at the user's call), **in the
+  song's musical key** (scale-degree contours snapped to the key via `setKey` —
+  engine doesn't track key yet, so a stub) — one per INTENT: ACK_GOT_IT · ACK_WORKING (loops) ·
+  DONE · HUH · NUH · UHOH · GREET · IDLE_MURMUR, each affect-coloured + seeded
+  (different every time, ugly never — the rule that beats feedback-fatigue). An
+  `utter()` funnel co-fires the sound with the intent's pose/face; a text bubble
+  pops ONLY when words are essential (errors). The chat box is gone: the lab is
+  now **event-driven** — a panel of simulated agent/engine events (mirroring the
+  real `mosh_event` contract) drives his reactions, so the same translator drops
+  onto the live feed later. Skills: installed character-appeal; used
+  game-designer (feedback feel) + design-motion-principles. `moshi.js` untouched.
+  Honest gap: synthesis verified (builds/schedules/tears down clean, no leaks);
+  timbre judged by ear.
 
 ## Adding a look
 

@@ -67,10 +67,61 @@ two displacement layers with face protection, and named personality presets
 translated into our raymarched, dithered register. The SHAPE is the brand
 splat: a core with five gooey limbs that pose.
 
-**The brain (when a key lands):** the demo client reads `MOSHI_BRAIN_URL` /
-`MOSHI_BRAIN_KEY` / `MOSHI_BRAIN_MODEL` — any OpenAI-compatible endpoint.
-DeepSeek: `https://api.deepseek.com` + `deepseek-chat`. OpenAI:
-`https://api.openai.com` + a 4o-mini-class model. Drop either key and say so.
+**The brain (built — 2026-06-13).** Type to Moshi on the stage and a real LLM
+drives him. Doctrine holds: `moshi.js` stays pure; the brain is host wiring
+([playground/brain.js](playground/brain.js)) that turns a chat turn into a
+**behaviour directive** and applies it through the public API:
+
+```json
+{ "say": "<=12 words", "state": "RECORDING", "pose": "ARMS_UP",
+  "mood": 0.9, "energy": 0.8, "heat": 0.7, "celebrate": false }
+```
+
+Every field is validated against Moshi's own enums (`Moshi.STATES` / `.POSES`)
+and the drives are clamped — a hallucinated value is ignored, never thrown.
+
+**Keys never touch the browser.** A Vite dev plugin ([vite.config.js](playground/vite.config.js))
+holds them server-side and proxies same-origin `/api/brain/{providers,chat}`.
+Three providers ship, all OpenAI-compatible, switchable live on the stage to
+A/B the same prompt:
+
+| provider | base | default model | note |
+|---|---|---|---|
+| DeepSeek | `api.deepseek.com` | `deepseek-v4-flash` | fastest (~0.4–2s); the default |
+| OpenAI | `api.openai.com/v1` | `gpt-5.4-mini` | GPT-5/o-series → `max_completion_tokens`, no custom temp |
+| xAI / Grok | `api.x.ai/v1` | `grok-4.3` | |
+
+Setup: `cp playground/.env.example playground/.env.local`, fill any subset of
+keys, set `MOSHI_BRAIN_PROVIDER`. `.env.local` is gitignored. v4/GPT-5/Grok are
+reasoning models — the proxy budgets tokens for hidden reasoning + the JSON so
+short replies aren't clipped mid-object. (Legacy `MOSHI_BRAIN_URL/_KEY/_MODEL`
+single-endpoint shape is superseded by this multi-provider proxy.)
+
+**The voice + events (v9, 2026-06-13).** Moshi doesn't speak in words — he
+communicates in **sound**, like a small cute creature (Wall-E register: sine/
+triangle coos + chirps, gentle chorus + portamento, no bit-crush).
+[playground/voice.js](playground/voice.js) (`MoshiVoice`, Web Audio, zero-dep)
+synthesizes one earcon per INTENT (`ACK_GOT_IT · ACK_WORKING · DONE · HUH · NUH ·
+UHOH · GREET · IDLE_MURMUR`), each affect-coloured (`{valence,arousal}`) and
+seeded so it varies but never goes ugly. A host `utter(intent, {affect, say})`
+funnel co-fires the sound + the intent's pose/face; a **text bubble pops only
+when words are essential** (e.g. an error detail).
+
+**He sings IN THE SONG'S KEY.** Every earcon is written in scale degrees and
+snapped to the current key, so he's always consonant with the track.
+`voice.setKey(tonic, mode)` (e.g. `'A','minor'`) — the stage cycles demo keys on
+the KEY chip. **Stub:** the engine doesn't track a musical key yet (it has tempo
++ time-sig; `tempoKeyContext` in `src/state/RenderLayer.h` is a placeholder) —
+when a real key lands on the `mosh_event` feed, call `setKey` from that event.
+
+The lab is **event-driven** (no chat box): a panel of simulated agent/engine
+events — keyed to mirror the real `mosh_event` contract (`layer_render_progress`,
+`layer_status`, `error`, …) — runs through an `EVENT_INTENT` translator into
+`utter()`. The same `fireEvent(type)` call later sits on the live feed unchanged.
+The LLM brain above stays available and is now intent-aware (it emits an `intent`
++ optional `say`, routed through the same funnel via `MoshiBrain(stage,{onUtter})`)
+— it's just de-surfaced in the lab this pass. Autoplay: the AudioContext unlocks
+on the first user gesture (a primer + every event button calls `voice.unlock()`).
 
 ## Map
 
@@ -78,7 +129,11 @@ DeepSeek: `https://api.deepseek.com` + `deepseek-chat`. OpenAI:
 |---|---|
 | [HANDOFF.md](HANDOFF.md) | **Start here if you're new** — the full state, systems, open threads |
 | [playground/moshi.js](playground/moshi.js) | THE COMPONENT — self-contained, portable |
-| [playground/index.html](playground/index.html) | THE LOOKBOOK — the curated stage + a 76px corner twin |
+| [playground/index.html](playground/index.html) | THE LOOKBOOK — the curated stage + 220px max-res corner twin + the event panel + the `utter()` funnel |
+| [playground/voice.js](playground/voice.js) | THE VOICE — `MoshiVoice`: procedural PS2-astromech earcons (Web Audio, zero-dep) |
+| [playground/brain.js](playground/brain.js) | THE BRAIN — host wiring: chat turn → intent directive → `utter()` (intent-aware) |
+| [playground/vite.config.js](playground/vite.config.js) | dev server + the brain proxy (keys server-side; OpenAI-compatible) |
+| [playground/.env.example](playground/.env.example) | brain provider config template (copy to gitignored `.env.local`) |
 | [LOOKBOOK.md](LOOKBOOK.md) | The catalog: every look, state, family, steal, and version |
 | [HOUSE_STYLE.md](HOUSE_STYLE.md) | The register: PS2 crunch, signal chain, face doctrine, morph rule, color doctrine |
 | [BRIEF.md](BRIEF.md) | The fiction — who Moshi is |
