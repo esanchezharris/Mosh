@@ -1,0 +1,13 @@
+/* NanumSquareRound — the rounded 2000s-console display face (HOUSE_STYLE). One
+   ExtraBold weight covers every .display use (which requests 900) via a 700–900
+   range, keeping the inlined bundle lean. Vite base64-inlines the .ttf at build
+   (build.assetsInlineLimit), so it survives the single-file WebView bundle with no
+   external fetch (an external .ttf wouldn't be served by the JUCE resource provider).
+   A lighter Bold weight can be added later if a non-900 display weight is wanted. */
+@font-face {
+  font-family: "NanumSquareRound";
+  src: url("./NanumSquareRoundEB.ttf") format("truetype");
+  font-weight: 700 900;
+  font-style: normal;
+  font-display: swap;
+}

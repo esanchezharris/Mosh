@@ -17,6 +17,10 @@ export default defineConfig({
     emptyOutDir: true,
     target: "es2020",
     sourcemap: false,
+    // Base64-inline fonts so they survive the single-file WebView bundle (the JUCE
+    // resource provider won't reliably serve an external .ttf). Other assets keep the
+    // default 4 KB threshold.
+    assetsInlineLimit: (filePath: string) => (filePath.endsWith(".ttf") ? true : undefined),
   },
   server: {
     port: 5173,

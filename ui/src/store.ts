@@ -78,6 +78,9 @@ type State = {
   // additive overlay keyed by entity id, cleared on every refresh().
   pending: number;
   optimistic: Record<string, unknown>;
+  // Bumped to Date.now() when a take is accepted — drives Moshi's celebrate() and the
+  // generative badge's success-bounce. Pure UI-local derived signal, never a command.
+  lastCelebrateAt: number;
 
   refresh: () => Promise<void>;
   exec: (command: string, args?: Record<string, unknown>) => Promise<CommandResult>;
@@ -142,6 +145,11 @@ type State = {
   theme: "dark" | "light";
   toggleTheme: () => void;
 
+  // Moshi's voice mute — UI-local view state (never a command). Default: muted, so
+  // the WebView never makes sound until the user opts in (and a gesture unlocks audio).
+  moshiMuted: boolean;
+  toggleMoshiMute: () => void;
+
   // UI scale (ACC-005) — pure UI-local view state (like theme): never a command,
   // never crosses the bridge. Applied via document zoom so the whole WebView reflows.
   uiScale: number;
@@ -163,6 +171,7 @@ export const useStore = create<State>((set, get) => ({
   lastError: null,
   pending: 0,
   optimistic: {},
+  lastCelebrateAt: 0,
 
   pxPerSec: 80,
   tool: "move",
@@ -229,6 +238,7 @@ export const useStore = create<State>((set, get) => ({
     try {
       const res = await run;
       if (!res.ok) set({ lastError: res.error ?? `${command} failed` });
+      else if (command === "accept_render") set({ lastCelebrateAt: Date.now() });
       return res;
     } finally {
       set((s) => ({ pending: Math.max(0, s.pending - 1) }));
@@ -513,6 +523,9 @@ export const useStore = create<State>((set, get) => ({
       document.documentElement.setAttribute("data-theme", next);
       return { theme: next };
     }),
+
+  moshiMuted: true,
+  toggleMoshiMute: () => set((s) => ({ moshiMuted: !s.moshiMuted })),
 
   uiScale: 1,
   setUiScale: (n) =>

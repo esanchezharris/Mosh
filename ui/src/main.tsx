@@ -1,6 +1,7 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import "./fonts/nanum.css"; // load the display face before the stylesheet that uses it
 import "./ui/mosh.css";
 
 // Resilience: a single component throwing during render must NOT blank the whole
