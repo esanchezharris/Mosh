@@ -231,7 +231,17 @@ export function Arrange({ snapshot }: { snapshot: Snapshot }) {
             ))}
           </div>
 
-          {tracks.length === 0 && <div className="empty-hint">No tracks yet — add a track or a test tone.</div>}
+          {tracks.length === 0 && (
+            <div className="empty-state" data-testid="arrange-empty">
+              <div className="empty-glyph" aria-hidden="true">♫</div>
+              <div className="empty-title display">empty session</div>
+              <div className="empty-sub">add a track to begin</div>
+              <div className="empty-actions">
+                <button className="btn" onClick={() => void exec("create_track", { name: "Audio" })}>+ track</button>
+                <button className="btn ghost" onClick={() => { void exec("create_track", { name: "Audio" }); void exec("add_test_tone_clip", {}); }}>+ test tone</button>
+              </div>
+            </div>
+          )}
 
           {tracks.map((t, i) => (
             <div key={t.id} className="lane" data-testid="lane" data-track-id={t.id}

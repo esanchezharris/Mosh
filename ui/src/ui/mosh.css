@@ -282,20 +282,66 @@ body { background: var(--ink); color: var(--bone); font-family: var(--font-body)
 .qa-flag.warn { color: #ff9b3b; border-color: #ff9b3b; }
 .gen-actions { display: flex; flex-wrap: wrap; gap: 5px; }
 .gen-actions .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* render progress — determinate from layer_render_progress, else an indeterminate sweep */
+.gen-progress { height: 3px; background: var(--ink-deep); border-radius: 2px; overflow: hidden; }
+.gen-progress-bar { height: 100%; width: 0; background: var(--lime); transition: width var(--t-base) linear; }
+.gen-progress-bar[data-indeterminate="true"] { width: 38%; transition: none; animation: gen-sweep 1.1s ease-in-out infinite; }
+@keyframes gen-sweep { 0% { margin-left: -38%; } 100% { margin-left: 100%; } }
 .color-add { font-size: 11px; }
 
 /* ── mixer ──────────────────────────────────────────────────────────────────*/
 .mixer { flex: 1 1 auto; display: flex; gap: 10px; padding: 14px; overflow: auto; background: var(--ink); }
 .mix-strips { display: flex; gap: 8px; flex: 1 1 auto; }
-.strip { flex: 0 0 88px; width: 88px; background: var(--ink-raise); border: 1px solid var(--ink-line); border-radius: 10px; padding: 10px 8px; display: flex; flex-direction: column; align-items: center; gap: 8px; cursor: pointer; }
+.strip { flex: 0 0 104px; width: 104px; background: var(--ink-raise); border: 1px solid var(--ink-line); border-radius: 10px; padding: 10px 8px; display: flex; flex-direction: column; align-items: center; gap: 8px; cursor: pointer; }
 .strip.sel { border-color: var(--lime); box-shadow: 0 0 0 1px var(--lime) inset; }
-.strip.master { flex: 0 0 100px; width: 100px; border-color: var(--lime-dim); }
+.strip.master { flex: 0 0 112px; width: 112px; border-color: var(--lime-dim); }
 .strip-name { font-size: 11px; font-weight: 700; color: var(--bone); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; text-align: center; }
 .strip-fx { font-size: 9px; color: var(--lime-dim); }
 .strip .pan { width: 76px; accent-color: var(--lime); }
 .strip .fader { writing-mode: vertical-lr; direction: rtl; height: 150px; accent-color: var(--lime); }
 .strip-db { font-size: 10px; color: var(--bone-dim); font-family: var(--font-mono); }
 .strip-ms { display: flex; gap: 5px; }
+
+/* fader + meter sit side-by-side at matched height */
+.strip-fader-row { display: flex; gap: 6px; align-items: flex-end; height: 150px; }
+.strip-fader-row .fader { height: 150px; }
+
+/* ── level meters (Wave 9 'levels' feed → Meter.tsx; rAF writes height/bottom) ──*/
+.meter { display: flex; gap: 2px; align-items: flex-end; height: 100%; width: 13px; }
+.meter-ch {
+  position: relative; flex: 1 1 0; min-width: 4px; height: 100%;
+  background: var(--ink-deep); border-radius: 2px; overflow: hidden;
+  box-shadow: inset 0 0 0 1px var(--ink-line);
+}
+.meter-bar {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 0;
+  background: linear-gradient(to top, var(--lime) 0%, var(--lime-glow) 78%, #ffd23b 100%);
+}
+.meter-hold { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: var(--bone); opacity: 0.85; }
+.meter.clip .meter-ch { box-shadow: inset 0 0 0 1px #ff3b5c; }
+.meter.clip .meter-bar { background: linear-gradient(to top, var(--lime), #ff3b5c); }
+
+/* ── channel inserts (mixer strip plugin list) ───────────────────────────────*/
+.strip-inserts { display: flex; flex-direction: column; gap: 3px; width: 100%; }
+.ins { display: flex; align-items: center; gap: 4px; padding: 2px 4px; border-radius: 5px; background: var(--ink); border: 1px solid var(--ink-line); font-size: 9px; }
+.ins.bypassed { opacity: 0.5; }
+.ins.neural { border-color: var(--lime-dim); }
+.ins-name { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--mist); cursor: pointer; }
+.ins-name:hover { color: var(--bone); }
+.ins-x { appearance: none; border: none; background: none; color: var(--bone-dim); cursor: pointer; font-size: 9px; padding: 0 2px; }
+.ins-x:hover:not(:disabled) { color: #ff3b5c; }
+.ins-x:disabled { opacity: 0.4; cursor: default; }
+.ins-add { appearance: none; border: 1px dashed var(--ink-line); background: transparent; color: var(--bone-dim); font: inherit; font-size: 9px; border-radius: 5px; padding: 2px; cursor: pointer; }
+.ins-add:hover { border-color: var(--lime-dim); color: var(--bone); }
+
+/* ── empty states (mixer + arrange) ──────────────────────────────────────────*/
+.empty-state { margin: auto; display: flex; flex-direction: column; align-items: center; gap: 10px; color: var(--bone-dim); padding: 40px; text-align: center; animation: pop-in var(--t-enter) var(--ease-spring) both; }
+.empty-glyph { font-size: 42px; color: var(--lime-faint); line-height: 1; }
+.empty-title { font-size: 14px; color: var(--bone-dim); letter-spacing: 0.04em; text-transform: lowercase; }
+.empty-sub { font-size: 11px; color: var(--bone-dim); }
+.empty-actions { display: flex; gap: 8px; margin-top: 2px; }
+.empty-state .btn { margin-top: 2px; }
 
 /* ── modal plugin browser ───────────────────────────────────────────────────*/
 .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: grid; place-items: center; z-index: 50; }

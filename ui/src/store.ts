@@ -87,6 +87,9 @@ type State = {
   // updates and always delivers the final value, routed through the serialized queue.
   execLatest: (key: string, command: string, args?: Record<string, unknown>) => void;
   setOptimistic: (id: string, patch: Record<string, unknown> | null) => void;
+  // Opt the UI in to the engine's level-meter feed (it only emits `levels` once a
+  // client registers). Idempotent; re-called when the track count grows.
+  enableMeters: () => void;
   init: () => void;
   refreshRemote: () => Promise<void>;
   startRemotePairing: () => Promise<void>;
@@ -193,8 +196,11 @@ export const useStore = create<State>((set, get) => ({
     if (!isNative()) return;
     try {
       const snap = await getSnapshot<Snapshot>();
+      const grew = snap.tracks.length > (get().snapshot?.tracks.length ?? 0);
       // A fresh snapshot supersedes any optimistic overlay.
       set({ snapshot: snap, connected: true, optimistic: {} });
+      // New tracks need their meter registered (enable_all_meters is idempotent).
+      if (grew) get().enableMeters();
       // Prune selection / fetch peaks for current clips.
       const ids = new Set(snap.tracks.flatMap((t) => t.clips.map((c) => c.id)));
       set((s) => ({ selection: new Set([...s.selection].filter((id) => ids.has(id))) }));
@@ -269,6 +275,10 @@ export const useStore = create<State>((set, get) => ({
       return { optimistic: next };
     }),
 
+  enableMeters: () => {
+    if (isNative()) void get().exec("enable_all_meters");
+  },
+
   init: () => {
     onEvent("mosh_event", (raw) => {
       const ev = raw as MoshEvent;
@@ -308,6 +318,7 @@ export const useStore = create<State>((set, get) => ({
     });
     void notifyUiReady();
     void get().refresh();
+    void get().enableMeters();
     void get().refreshRemote();
   },
 

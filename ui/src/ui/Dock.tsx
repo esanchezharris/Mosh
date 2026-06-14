@@ -155,8 +155,11 @@ function GenBody({ clip, qa }: { clip: Clip; qa?: { pq?: number | null; pq_base?
   const colorsAvail = useStore((s) => s.availableColors);
   const labMode = useStore((s) => s.labMode);
   const setLab = useStore((s) => s.setLab);
+  const progress = useStore((s) => s.renderProgress[clip.id]);
   const rl = clip.renderLayer!;
   const active: RenderColor[] = rl.colors ?? [];
+  // Defensive: treat any non-terminal status as "in progress" rather than enumerating
+  // the full 9-value enum, so an unknown future status still shows activity, never crashes.
   const rendering = rl.status === "rendering" || rl.status === "queued";
   // Structural changes (add/remove a colour) commit immediately; dragging a colour's
   // value coalesces via execLatest (below) so a fast drag sends only its final value.
@@ -188,6 +191,12 @@ function GenBody({ clip, qa }: { clip: Clip; qa?: { pq?: number | null; pq_base?
         <span className="gen-seed tc">seed {rl.seed}</span>
         <button className={`btn${labMode ? " on" : ""}`} title="Lab — unlock the ASTD clamp" aria-pressed={labMode} onClick={() => setLab(!labMode)}>{labMode ? "⚠ LAB" : "Lab"}</button>
       </div>
+      {rendering && (
+        <div className="gen-progress" title="render progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress != null ? Math.round(progress * 100) : undefined}>
+          <div className="gen-progress-bar" data-indeterminate={progress == null}
+            style={progress != null ? { width: `${Math.round(progress * 100)}%` } : undefined} />
+        </div>
+      )}
       {qa && qa.pq != null && (
         <div className="gen-qa tc" title="judge-panel production quality">
           pq {qa.pq}{qa.pq_base != null ? ` / ${qa.pq_base}` : ""}

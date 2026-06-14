@@ -107,6 +107,9 @@ const invalidate = () => emit("snapshot_invalidated");
 
 let playTimer: ReturnType<typeof setInterval> | null = null;
 let lastTick = 0;
+// Mirrors the real backend: the engine only emits `levels` once a meter client
+// registers (enable_*_meter). The UI opts in at startup, so this flips true.
+let meterEnabled = false;
 function startPlayback() {
   if (playTimer) return;
   lastTick = Date.now();
@@ -130,11 +133,29 @@ function startPlayback() {
     const level = bands.reduce((a, b) => a + b, 0) / N;
     const flux = Math.max(0, Math.sin(pos * Math.PI * 4)) ** 6; // sharp beat pulse
     emit("spectrum", { bands, level, flux });
+    // Per-track peak meters (only when a client has opted in, like the real engine).
+    // Seeded per-track jitter off the master level, biased by the fader, floored on mute.
+    if (meterEnabled) {
+      const tracks = snapshot.tracks.map((tk) => {
+        if (tk.mute) return { id: tk.id, l: -100, r: -100 };
+        const seed = Number(tk.id) || 1;
+        const j = 0.5 + 0.5 * Math.sin(pos * (3 + (seed % 5) * 0.7) + seed);
+        const norm = Math.max(0, Math.min(1, level * (0.55 + 0.45 * j)));
+        const db = -54 + norm * 54 + (tk.volumeDb ?? 0); // -54..0 swing, fader-biased
+        const l = Math.max(-100, Math.min(6, db));
+        const r = Math.max(-100, Math.min(6, db - 2 + j * 4));
+        return { id: tk.id, l, r };
+      });
+      const mpk = tracks.reduce((m, t) => Math.max(m, t.l, t.r), -60);
+      emit("levels", { tracks, master: { l: Math.min(6, mpk + 1), r: Math.min(6, mpk) } });
+    }
   }, 1000 / 30);
 }
 function stopPlayback() {
   if (playTimer) { clearInterval(playTimer); playTimer = null; }
   emit("spectrum", { bands: Array(8).fill(0), level: 0, flux: 0 }); // calm on stop
+  if (meterEnabled)
+    emit("levels", { tracks: snapshot.tracks.map((t) => ({ id: t.id, l: -100, r: -100 })), master: { l: -100, r: -100 } });
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -330,7 +351,9 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     case "list_plugins": return ok(command, { plugins: VST3S, counts: { vst3: VST3S.length, au: 0, total: VST3S.length } });
     case "list_builtins": return ok(command, { plugins: BUILTINS });
     case "set_master_pan": { pushUndo(); if (snapshot.master) snapshot.master.pan = num(args.pan); invalidate(); return ok(command); }
-    case "enable_all_meters": case "enable_track_meter": case "disable_track_meter": return ok(command);
+    case "enable_all_meters": meterEnabled = true; return ok(command, { count: snapshot.tracks.length });
+    case "enable_track_meter": meterEnabled = true; return ok(command, { count: 1 });
+    case "disable_track_meter": return ok(command);
     case "list_wave_inputs": return ok(command, { inputs: [] });
     case "list_track_outputs": return ok(command, { outputs: [], tracks: snapshot.tracks.map((t) => ({ id: t.id, name: t.name })), audioEnabled: true });
 
