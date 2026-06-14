@@ -19,6 +19,7 @@ import { Mixer } from "./ui/Mixer";
 import { PluginBrowser } from "./ui/PluginBrowser";
 import { PianoRoll } from "./ui/PianoRoll";
 import { AutomationPanel } from "./ui/AutomationPanel";
+import { MoshiStage } from "./ui/MoshiStage";
 
 export function App() {
   const init = useStore((s) => s.init);
@@ -50,16 +51,19 @@ export function App() {
       {lastError && <div className="error-bar" data-testid="error">⚠ {lastError}</div>}
 
       {snapshot ? (
-        view === "mixer" ? (
-          <div className="view" data-testid="view" data-view="mixer">
-            <Mixer snapshot={snapshot} />
-          </div>
-        ) : (
-          <div className="view arrange-view" data-testid="view" data-view="arrange">
-            <Arrange snapshot={snapshot} />
-            <Dock snapshot={snapshot} />
-          </div>
-        )
+        <div className="body" data-testid="body">
+          {view === "mixer" ? (
+            <div className="view" data-testid="view" data-view="mixer">
+              <Mixer snapshot={snapshot} />
+            </div>
+          ) : (
+            <div className="view arrange-view" data-testid="view" data-view="arrange">
+              <Arrange snapshot={snapshot} />
+              <Dock snapshot={snapshot} />
+            </div>
+          )}
+          <MoshiStage />
+        </div>
       ) : (
         <div className="boot"><p>Loading snapshot…</p></div>
       )}

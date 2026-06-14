@@ -15,6 +15,10 @@ import { type SnapDiv, snapTimeMap, tempoMapFrom } from "./time";
 export type Tool = "move" | "split" | "range";
 export type View = "arrange" | "mixer";
 export type Peaks = [number, number][];
+// Live spectral feed (Moshi reactivity) — fed by the 30Hz "spectrum" event from the
+// engine (master FFT). bands are per-band energy 0..1 (low→high); level/flux 0..1.
+// Pure telemetry like `levels`; never a command, no audio concepts leak (just numbers).
+export type Spectrum = { bands: number[]; level: number; flux: number };
 // ARR-010 — a UI-local edit time-range [start,end] in seconds. Never a command;
 // only delete_time_range sends {start,end} across the bridge when invoked.
 export type TimeRange = { start: number; end: number };
@@ -61,6 +65,8 @@ type State = {
   trackOutputs: TrackOutputs | null;       // RTG-002 output destinations (on-demand, lazy)
   // Live level meters (Wave 9) — fed by the 30Hz "levels" event, NOT the snapshot.
   levels: { tracks: Record<string, Level>; master: Level };
+  // Live spectral feed (Moshi reactivity) — fed by the 30Hz "spectrum" event.
+  spectrum: Spectrum;
 
   // Clip clipboard — pure UI-local view state. The captured clip descriptor only
   // crosses the bridge on paste (paste_clip); copy/cut never touch the backend
@@ -157,6 +163,7 @@ export const useStore = create<State>((set, get) => ({
   waveInputs: null,
   trackOutputs: null,
   levels: { tracks: {}, master: { l: -100, r: -100 } },
+  spectrum: { bands: [], level: 0, flux: 0 },
   clipboard: null,
 
   refresh: async () => {
@@ -198,6 +205,10 @@ export const useStore = create<State>((set, get) => ({
         const tracks: Record<string, Level> = {};
         for (const t of p.tracks ?? []) tracks[t.id] = { l: t.l, r: t.r };
         set({ levels: { tracks, master: p.master ?? { l: -100, r: -100 } } });
+      } else if (ev.type === "spectrum") {
+        // Master FFT feed (Moshi reactivity) — targeted set, no snapshot refetch.
+        const p = ev.payload as Partial<Spectrum>;
+        set({ spectrum: { bands: p.bands ?? [], level: p.level ?? 0, flux: p.flux ?? 0 } });
       } else if (ev.type === "plugin_scan_progress") {
         // INS-005 — async (AU) rescan lifecycle. On done, refresh the catalog list.
         const p = ev.payload as { format: string; done: boolean };
