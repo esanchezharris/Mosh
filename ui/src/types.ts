@@ -28,6 +28,56 @@ export type AvailableColor = {
 // Quality readout from a completed render's manifest (judge panel, 05 §7).
 export type RenderQA = { pq?: number | null; pq_base?: number | null; flags?: string[]; adapter?: string };
 
+export type TrainingSource = {
+  index: number;
+  source_id: string;
+  title: string;
+  creator: string;
+  source_url: string;
+  local_path: string;
+  user_claimed_license: string;
+  license_name?: string;
+  proof_of_rights: string;
+  approved_for_training: boolean;
+  expiration?: string | null;
+  notes: string;
+  eligible?: boolean;
+  blocked_reason?: string;
+};
+
+export type TrainingAdapter = {
+  adapterId: string;
+  bundleHash: string;
+  bundlePath: string;
+  artifactPath: string;
+  manifestPath: string;
+  active: boolean;
+  quality?: Record<string, unknown>;
+};
+
+export type TrainingJob = {
+  jobId: string;
+  status: string;
+  progress: number;
+  bundlePath?: string;
+  outputDir?: string;
+  artifactPath?: string;
+  manifestPath?: string;
+  error?: string;
+  result?: Record<string, unknown> | null;
+};
+
+export type TrainingState = {
+  registryPath: string;
+  statePath: string;
+  activeAdapterId: string;
+  activeAdapterPath: string;
+  activeCorpusHash: string;
+  sources: TrainingSource[];
+  adapters: TrainingAdapter[];
+  jobs: TrainingJob[];
+};
+
 // A MIDI note as serialised in the snapshot — beats within the clip sequence.
 export type MidiNote = {
   i: number;        // index into the clip's note list (the command handle)
@@ -254,6 +304,7 @@ export type Snapshot = {
       timeBase: "seconds" | "barsBeats";
     };
   };
+  training?: TrainingState;
   tracks: Track[];
   transport: Transport;
   master?: { volumeDb: number; pan: number };

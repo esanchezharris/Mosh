@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mosh.local/schemas/corpus-manifest.schema.json",
+  "title": "Mosh Training Corpus Manifest",
+  "type": "object",
+  "required": ["schema_version", "bundle_id", "bundle_hash", "created_at", "source_count", "sources"],
+  "properties": {
+    "schema_version": { "type": "integer", "minimum": 1 },
+    "bundle_id": { "type": "string", "minLength": 1 },
+    "bundle_hash": { "type": "string", "minLength": 16 },
+    "created_at": { "type": "string", "minLength": 1 },
+    "registry_path": { "type": "string" },
+    "source_count": { "type": "integer", "minimum": 0 },
+    "skipped_sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["source_id", "reason"],
+        "properties": {
+          "source_id": { "type": "string" },
+          "reason": { "type": "string" }
+        }
+      }
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["source_id", "title", "creator", "user_claimed_license", "proof_of_rights", "approved_for_training", "sha256", "bytes"],
+        "properties": {
+          "source_id": { "type": "string" },
+          "title": { "type": "string" },
+          "creator": { "type": "string" },
+          "source_url": { "type": "string" },
+          "local_path": { "type": "string" },
+          "copied_path": { "type": "string" },
+          "user_claimed_license": { "type": "string" },
+          "proof_of_rights": { "type": "string" },
+          "approved_for_training": { "type": "boolean" },
+          "expiration": { "type": ["string", "null"] },
+          "notes": { "type": "string" },
+          "sha256": { "type": "string" },
+          "bytes": { "type": "integer", "minimum": 0 }
+        }
+      }
+    }
+  }
+}

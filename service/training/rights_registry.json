@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "updated_at": "2026-06-14T00:00:00Z",
+  "sources": [
+    {
+      "source_id": "beat-001",
+      "title": "Reference Beat 001",
+      "creator": "Unknown Creator",
+      "source_url": "https://example.invalid/beat-001",
+      "local_path": "",
+      "user_claimed_license": "user-provided rights claim",
+      "proof_of_rights": "user-provided claim; attach proof before training",
+      "approved_for_training": false,
+      "expiration": null,
+      "notes": "Discovery-only placeholder."
+    }
+  ]
+}

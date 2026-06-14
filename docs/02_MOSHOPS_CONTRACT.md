@@ -41,6 +41,16 @@ Every command: **validate → begin a Tracktion undo transaction (if undoable) �
 | `undo` / `redo` | `{}` | ✗ (drives the manager) | `bool` | `snapshot_invalidated` |
 | `save` / `reload` | `{}` | ✗ | — | `reload`→`snapshot_invalidated` |
 | `add_render_layer` | `{clipId, adapter?}` | ✓ | `{layerId}` | `snapshot_invalidated` |
+| `import_training_source` | `{sourceId?, title, creator, sourceUrl?, localPath?, userClaimedLicense, proofOfRights, approvedForTraining?, licenseName?}` | ✗ | `{source}` | `snapshot_invalidated` |
+| `list_training_sources` | `{}` | ✗ | `{registryPath, sources[], sourceCount}` | — |
+| `approve_training_source` | `{sourceId, approved?}` | ✗ | `{source}` | `snapshot_invalidated` |
+| `build_training_corpus` | `{bundleName?}` | ✗ | `{bundleId, bundleHash, bundlePath, manifestPath, indexPath, sourceCount, sources[]}` | `snapshot_invalidated` |
+| `submit_training_job` | `{corpusBundle, config, outputDir?}` | ✗ | `{jobId, bundlePath, outputDir}` | `snapshot_invalidated` |
+| `training_job_status` | `{jobId}` | ✗ | `{status, progress, result?, error?}` | — |
+| `cancel_training_job` | `{jobId}` | ✗ | — | `snapshot_invalidated` |
+| `import_lora_adapter` | `{jobId?, artifactPath?, manifestPath?, adapterId?}` | ✗ | `{adapterId, artifactPath, manifestPath}` | `snapshot_invalidated` |
+| `activate_lora_adapter` | `{adapterId, adapterPath?, corpusHash?}` | ✗ | `{adapterId, adapterPath, corpusHash}` | `snapshot_invalidated` |
+| `list_lora_adapters` | `{}` | ✗ | `{activeAdapterId, activeAdapterPath, activeCorpusHash, adapters[]}` | — |
 
 Stage 2 adds `move_clip` / `trim_clip` / `split_clip`; Stage 3 the plugin commands; Stage 4 `add_neural_insert` / `set_neural_param` / `set_neural_lab_mode`; Stage 5 the generative commands. Stage 6 adds `export_audio` with `{file?, renderMode?}` where `renderMode` is `"auto" | "fast" | "realtime"`; `"auto"` keeps fast render unless a known realtime-only hosted plugin such as Xfer Serum 2 is enabled, then selects realtime render. Its result includes `{file, bytes, seconds, renderModeRequested, renderMode, renderModeReason, realTimeRender}`. All follow the same envelope.
 
@@ -61,7 +71,17 @@ Hosted plugin snapshots/results include external-plugin diagnostics when Trackti
       ] }
   ],
   "transport": { "playing": false, "recording": false, "position": 0.0,
-                 "looping": false, "loopStart": 0.0, "loopEnd": 0.0 }
+                 "looping": false, "loopStart": 0.0, "loopEnd": 0.0 },
+  "training": {
+    "registryPath": "…/training/rights_registry.json",
+    "statePath": "…/training/training_state.json",
+    "activeAdapterId": "",
+    "activeAdapterPath": "",
+    "activeCorpusHash": "",
+    "sources": [],
+    "adapters": [],
+    "jobs": []
+  }
 }
 ```
 

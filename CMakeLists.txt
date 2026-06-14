@@ -57,6 +57,7 @@ if (MOSH_BUILD_APP)
         PRODUCT_NAME "Mosh"
         BUNDLE_ID    "studio.mosh.app"
         COMPANY_NAME "Mosh"
+        ICON_BIG     "${CMAKE_SOURCE_DIR}/resources/icon/MoshIcon.png"
         ${MOSH_APP_EXTRA_ARGS})
 
 # Source modules (00 §5). Added incrementally per build stage.
@@ -77,6 +78,9 @@ if (MOSH_BUILD_APP)
         src/plugins/spectral/MasterSpectralTapPlugin.cpp
         # Stage 5 — Tier-B generative layer (05)
         src/generative/GenerativeJobManager.cpp
+        # Stage 7 — rights-cleared type-beat LoRA training
+        src/training/TrainerRegistry.cpp
+        src/training/TrainingJobManager.cpp
         # iPhone companion remote control + phone-take ingest
         src/remote/RemoteCompanionProtocol.cpp
         src/remote/RemoteCompanionServer.cpp)

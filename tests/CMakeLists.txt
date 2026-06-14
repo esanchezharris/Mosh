@@ -10,7 +10,9 @@ target_sources(MoshTests PRIVATE
     test_sanity.cpp
     test_renderlayer.cpp
     test_astd.cpp
+    test_training.cpp
     test_remote_companion.cpp
+    ${CMAKE_SOURCE_DIR}/src/training/TrainerRegistry.cpp
     ${CMAKE_SOURCE_DIR}/src/remote/RemoteCompanionProtocol.cpp
     ${CMAKE_SOURCE_DIR}/src/remote/RemoteCompanionServer.cpp)
 

@@ -43,10 +43,15 @@ if os.name == "nt" and os.environ.get("MOSH_SERVICE_CONSOLE", "") != "1":
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from adapters import fake_adapter  # noqa: E402
 from adapters import stable_audio3_adapter  # noqa: E402  (path-only checks; heavy imports stay lazy)
+from training import lora_trainer_adapter  # noqa: E402
+from training.corpus_bundle import build_corpus_bundle  # noqa: E402
+from training.rights import load_registry, save_registry, write_json  # noqa: E402
+from training.trainer_job import train as train_lora  # noqa: E402
 
-SERVICE_VERSION = "0.2.0"
+SERVICE_VERSION = "0.3.0"
 START_TIME = time.time()
 SA3_ENABLED = os.environ.get("MOSH_ENABLE_SA3", "1") == "1" and stable_audio3_adapter.available()
+TRAINING_ENABLED = lora_trainer_adapter.available()
 
 
 def _colorrack_hash() -> str:
@@ -90,10 +95,76 @@ def _sa3_descriptor() -> dict:
     }
 
 
+def _training_descriptor() -> dict:
+    return {
+        "id": "lora_trainer",
+        "version": "0.1.0",
+        "available": TRAINING_ENABLED,
+        "output_formats": ["json_stub"],
+        "runtime_requirements": ["cpu"],
+        "packaging_mode": "python_service",
+        "service_build": SERVICE_BUILD,
+        "backend": lora_trainer_adapter.backend_name(),
+    }
+
+
 _jobs: dict[str, dict] = {}
 _lock = threading.Lock()
 _job_q: "queue.PriorityQueue" = queue.PriorityQueue()
 _seq = itertools.count()
+_training_jobs: dict[str, dict] = {}
+_training_lock = threading.Lock()
+_training_q: "queue.PriorityQueue" = queue.PriorityQueue()
+_training_seq = itertools.count()
+
+
+def _training_root() -> str:
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "training")
+
+
+def _training_registry_path() -> str:
+    return os.path.join(_training_root(), "rights_registry.json")
+
+
+def _training_state_path() -> str:
+    return os.path.join(_training_root(), "training_state.json")
+
+
+def _load_training_state() -> dict:
+    data = {}
+    try:
+        with open(_training_state_path(), "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    data.setdefault("activeAdapterId", "")
+    data.setdefault("activeAdapterPath", "")
+    data.setdefault("activeCorpusHash", "")
+    data.setdefault("jobs", [])
+    data.setdefault("adapters", [])
+    return data
+
+
+def _save_training_state(state: dict) -> None:
+    write_json(_training_state_path(), state)
+
+
+def _record_training_job(job: dict) -> None:
+    state = _load_training_state()
+    jobs = [j for j in state.get("jobs", []) if isinstance(j, dict) and j.get("jobId") != job.get("jobId")]
+    jobs.append(job)
+    state["jobs"] = jobs[-20:]
+    _save_training_state(state)
+
+
+def _upsert_adapter_record(adapter: dict) -> None:
+    state = _load_training_state()
+    adapters = [a for a in state.get("adapters", []) if isinstance(a, dict) and a.get("adapterId") != adapter.get("adapterId")]
+    adapters.append(adapter)
+    state["adapters"] = adapters[-20:]
+    _save_training_state(state)
 
 
 def _adapter_for(adapter_id: str):
@@ -139,6 +210,61 @@ def _run_job(job_id: str) -> None:
             _jobs[job_id]["error"] = str(e)
 
 
+def _run_training_job(job_id: str) -> None:
+    with _training_lock:
+        job = _training_jobs[job_id]
+        if job.get("cancel"):
+            job["status"] = "cancelled"
+            _record_training_job({
+                "jobId": job_id, "status": "cancelled", "progress": job.get("progress", 0.0),
+                "bundlePath": job.get("bundle_path", ""), "outputDir": job.get("output_dir", ""),
+                "error": "", "updatedAt": time.time(),
+            })
+            return
+        job["status"] = "running"
+    try:
+        for step in range(1, 6):
+            with _training_lock:
+                if _training_jobs[job_id].get("cancel"):
+                    _training_jobs[job_id]["status"] = "cancelled"
+                    _record_training_job({
+                        "jobId": job_id, "status": "cancelled", "progress": _training_jobs[job_id].get("progress", 0.0),
+                        "bundlePath": job.get("bundle_path", ""), "outputDir": job.get("output_dir", ""),
+                        "error": "", "updatedAt": time.time(),
+                    })
+                    return
+                _training_jobs[job_id]["progress"] = step / 6.0
+            time.sleep(0.05)
+
+        result = train_lora(job["bundle_path"], job["output_dir"], job["config"])
+        with _training_lock:
+            _training_jobs[job_id]["progress"] = 1.0
+            _training_jobs[job_id]["status"] = "ready"
+            _training_jobs[job_id]["result"] = result
+        _record_training_job({
+            "jobId": job_id,
+            "status": "ready",
+            "progress": 1.0,
+            "bundlePath": job["bundle_path"],
+            "outputDir": job["output_dir"],
+            "artifactPath": result["artifact_path"],
+            "manifestPath": result["manifest_path"],
+            "bundleHash": result["bundle_hash"],
+            "quality": result["quality"],
+            "error": "",
+            "updatedAt": time.time(),
+        })
+    except Exception as e:  # noqa: BLE001
+        with _training_lock:
+            _training_jobs[job_id]["status"] = "error"
+            _training_jobs[job_id]["error"] = str(e)
+        _record_training_job({
+            "jobId": job_id, "status": "error", "progress": _training_jobs[job_id].get("progress", 0.0),
+            "bundlePath": job.get("bundle_path", ""), "outputDir": job.get("output_dir", ""),
+            "error": str(e), "updatedAt": time.time(),
+        })
+
+
 def _worker_loop() -> None:
     """The ONE thread that ever runs an adapter — serializes inference so the
     process-global MLX model is never touched concurrently (05 §6 priority queue)."""
@@ -148,6 +274,91 @@ def _worker_loop() -> None:
             _run_job(job_id)
         finally:
             _job_q.task_done()
+
+
+def _training_worker_loop() -> None:
+    while True:
+        _prio, _seq_n, job_id = _training_q.get()
+        try:
+            _run_training_job(job_id)
+        finally:
+            _training_q.task_done()
+
+
+def _normalize_training_submit(data: dict, *,
+                               accept_aliases: bool = True) -> dict:
+    if accept_aliases:
+        corpus_bundle = str(data.get("corpusBundle", data.get("corpus_bundle", ""))).strip()
+        priority = data.get("priority", 5)
+    else:
+        corpus_bundle = str(data.get("corpusBundle", "")).strip()
+        priority = data.get("priority", 5)
+    output_dir = str(data.get("outputDir", "")).strip()
+    if not output_dir and accept_aliases:
+        output_dir = str(data.get("output_dir", "")).strip()
+    config = data.get("config", {})
+    bundle_payload = data.get("bundle", {})
+    if isinstance(bundle_payload, dict):
+        bundle_path = str(bundle_payload.get("bundle_path", "")).strip()
+        if bundle_path:
+            corpus_bundle = corpus_bundle or bundle_path
+    try:
+        priority = int(priority)
+    except Exception:
+        priority = 5
+    return {
+        "corpus_bundle": corpus_bundle,
+        "output_dir": output_dir,
+        "config": config,
+        "priority": priority,
+    }
+
+
+def _resolve_training_status_url(host: str, job_id: str) -> str:
+    host = host.strip()
+    if host and not host.startswith("http://") and not host.startswith("https://"):
+        return f"http://{host}/training/jobs/{job_id}"
+    return f"{host.rstrip('/')}/training/jobs/{job_id}"
+
+
+def _create_training_job_record(data: dict, host: str) -> dict:
+    normalized = _normalize_training_submit(data)
+    bundle_path = normalized["corpus_bundle"]
+    if not bundle_path or not os.path.isdir(bundle_path):
+        return {"error": "corpusBundle missing", "status_code": 400}
+    job_id = uuid.uuid4().hex[:12]
+    output_dir = normalized["output_dir"]
+    if not output_dir:
+        output_dir = os.path.join(bundle_path, "training-output", job_id)
+    os.makedirs(output_dir, exist_ok=True)
+    config = normalized["config"]
+    with _training_lock:
+        _training_jobs[job_id] = {
+            "status": "queued",
+            "progress": 0.0,
+            "bundle_path": bundle_path,
+            "output_dir": output_dir,
+            "config": config,
+            "cancel": False,
+            "error": "",
+        }
+    _record_training_job({
+        "jobId": job_id,
+        "status": "queued",
+        "progress": 0.0,
+        "bundlePath": bundle_path,
+        "outputDir": output_dir,
+        "error": "",
+        "updatedAt": time.time(),
+    })
+    _training_q.put((int(normalized["priority"]), next(_training_seq), job_id))
+    return {
+        "ok": True,
+        "jobId": job_id,
+        "status_url": _resolve_training_status_url(host, job_id),
+        "bundlePath": bundle_path,
+        "outputDir": output_dir,
+    }
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -187,7 +398,8 @@ class Handler(BaseHTTPRequestHandler):
                              "adapters": adapters})
         elif path == "/capabilities":
             adapters = [FAKE_ADAPTER] + ([_sa3_descriptor()] if SA3_ENABLED else [])
-            self._send(200, {"ok": True, "adapters": adapters, "service_build": SERVICE_BUILD})
+            training = [_training_descriptor()] if TRAINING_ENABLED else []
+            self._send(200, {"ok": True, "adapters": adapters, "training": training, "service_build": SERVICE_BUILD})
         elif path == "/colors":
             try:
                 from colors import runtime as CR
@@ -195,6 +407,23 @@ class Handler(BaseHTTPRequestHandler):
                                  "lab_alpha_max": CR._meta().get("lab_alpha_max", 0.4)})
             except Exception as e:  # noqa: BLE001
                 self._send(503, {"ok": False, "error": f"colors unavailable: {e}", "colors": []})
+        elif path == "/training/health":
+            self._send(200, {
+                "ok": True,
+                "service": "mosh-training",
+                "version": SERVICE_VERSION,
+                "build": SERVICE_BUILD,
+                "uptime_s": round(time.time() - START_TIME, 1),
+                "backend": lora_trainer_adapter.backend_name(),
+                "available": TRAINING_ENABLED,
+            })
+        elif path == "/training/capabilities":
+            self._send(200, {"ok": True, "training": _training_descriptor(), "service_build": SERVICE_BUILD})
+        elif path == "/training/sources":
+            registry = load_registry(_training_registry_path())
+            self._send(200, {"ok": True, "registry": registry, "sources": registry.get("sources", [])})
+        elif path == "/training/state":
+            self._send(200, {"ok": True, "state": _load_training_state()})
         elif path == "/status":
             jid = query.get("jobId", "")
             with _lock:
@@ -207,6 +436,38 @@ class Handler(BaseHTTPRequestHandler):
                                  "outputWav": job["output_wav"],
                                  "error": job.get("error"),
                                  "manifest": job.get("result")})
+        elif path == "/training/status":
+            jid = query.get("jobId", "")
+            with _training_lock:
+                job = _training_jobs.get(jid)
+                if job is None:
+                    self._send(404, {"ok": False, "error": "unknown jobId"})
+                    return
+                self._send(200, {
+                    "ok": True,
+                    "jobId": jid,
+                    "status": job["status"],
+                    "progress": job.get("progress", 0.0),
+                    "outputDir": job.get("output_dir", ""),
+                    "error": job.get("error"),
+                    "result": job.get("result"),
+                })
+        elif path.startswith("/training/jobs/"):
+            jid = path.rsplit("/", 1)[-1]
+            with _training_lock:
+                job = _training_jobs.get(jid)
+                if job is None:
+                    self._send(404, {"ok": False, "error": "unknown jobId"})
+                    return
+                self._send(200, {
+                    "ok": True,
+                    "jobId": jid,
+                    "status": job["status"],
+                    "progress": job.get("progress", 0.0),
+                    "outputDir": job.get("output_dir", ""),
+                    "error": job.get("error"),
+                    "result": job.get("result"),
+                })
         else:
             self._send(404, {"ok": False, "error": f"unknown path: {path}"})
 
@@ -240,6 +501,37 @@ class Handler(BaseHTTPRequestHandler):
                 if jid in _jobs:
                     _jobs[jid]["cancel"] = True
             self._send(200, {"ok": True})
+        elif path == "/training/submit" or path == "/training/jobs":
+            if not TRAINING_ENABLED:
+                self._send(503, {"ok": False, "error": "lora trainer unavailable"})
+                return
+            host = self.headers.get("Host", "") or f"{os.environ.get('MOSH_SERVICE_HOST', '127.0.0.1')}:{os.environ.get('MOSH_SERVICE_PORT', '8770')}"
+            record = _create_training_job_record(data, host)
+            if record.pop("status_code", 0):
+                code = record.pop("status_code", 500)
+                self._send(code, record)
+                return
+            self._send(200, record)
+        elif path == "/training/cancel":
+            jid = data.get("jobId", "")
+            with _training_lock:
+                if jid in _training_jobs:
+                    _training_jobs[jid]["cancel"] = True
+            self._send(200, {"ok": True})
+        elif path == "/training/import-registry":
+            registry = data.get("registry", {})
+            if not isinstance(registry, dict):
+                self._send(400, {"ok": False, "error": "registry must be an object"})
+                return
+            save_registry(_training_registry_path(), registry)
+            self._send(200, {"ok": True})
+        elif path == "/training/activate":
+            state = _load_training_state()
+            state["activeAdapterId"] = str(data.get("adapterId", "")).strip()
+            state["activeAdapterPath"] = str(data.get("adapterPath", "")).strip()
+            state["activeCorpusHash"] = str(data.get("corpusHash", "")).strip()
+            _save_training_state(state)
+            self._send(200, {"ok": True, "state": state})
         else:
             self._send(404, {"ok": False, "error": f"unknown path: {path}"})
 
@@ -251,6 +543,7 @@ def main() -> int:
     host = os.environ.get("MOSH_SERVICE_HOST", "127.0.0.1")
     port = int(os.environ.get("MOSH_SERVICE_PORT", "8770"))
     threading.Thread(target=_worker_loop, daemon=True).start()
+    threading.Thread(target=_training_worker_loop, daemon=True).start()
     if SA3_ENABLED and stable_audio3_adapter.backend_name() == "mlx":
         # Pre-load the judge model off the worker thread so the first render's QA
         # is ~1–2s, not ~25s. Background + best-effort: never blocks /health.

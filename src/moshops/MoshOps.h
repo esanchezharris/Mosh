@@ -9,6 +9,8 @@
 #include "plugins/hosting/PluginHost.h"
 #include "plugins/spectral/MasterSpectralTapPlugin.h"
 #include "generative/GenerativeJobManager.h"
+#include "training/TrainerRegistry.h"
+#include "training/TrainingJobManager.h"
 
 namespace mosh
 {
@@ -132,6 +134,17 @@ private:
     juce::var cmdSetNeuralLabMode(const juce::var& args);
     juce::var cmdSetNeuralLatency(const juce::var& args);
     juce::var cmdResetNeural     (const juce::var& args);
+    // Stage 7 — type-beat LoRA training + rights registry
+    juce::var cmdImportTrainingSource   (const juce::var& args);
+    juce::var cmdListTrainingSources    (const juce::var& args);
+    juce::var cmdApproveTrainingSource  (const juce::var& args);
+    juce::var cmdBuildTrainingCorpus    (const juce::var& args);
+    juce::var cmdSubmitTrainingJob      (const juce::var& args);
+    juce::var cmdTrainingJobStatus      (const juce::var& args);
+    juce::var cmdCancelTrainingJob      (const juce::var& args);
+    juce::var cmdImportLoraAdapter      (const juce::var& args);
+    juce::var cmdActivateLoraAdapter    (const juce::var& args);
+    juce::var cmdListLoraAdapters       (const juce::var& args);
     // Stage 5 — Tier-B generative layer (RenderLayer flow)
     juce::var cmdCreateRenderLayer (const juce::var& args);
     juce::var cmdSetRenderParam   (const juce::var& args);
@@ -261,6 +274,8 @@ private:
     MoshEngine& eng;
     PluginHost  pluginHost;
     GenerativeJobManager jobManager;
+    TrainerRegistry      trainerRegistry;
+    TrainingJobManager   trainingJobManager;
     EventSink   eventSink;
     juce::int64 seq = 0;
     juce::File  logFile;
