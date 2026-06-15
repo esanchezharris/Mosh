@@ -3252,7 +3252,11 @@ int runNeuralAB (MoshEngine& eng, MoshOps& ops)
     auto t = cmd ("create_track", obj ({{ "name", "Amp A/B" }}))["data"].getProperty ("trackId", var()).toString();
     std::cerr << "  import_clip: " << (ok (cmd ("import_clip", obj ({{ "file", wavPath }, { "trackId", t }}))) ? "ok" : "FAILED") << "\n";
     const int idx = (int) cmd ("add_neural_insert", obj ({{ "trackId", t }, { "modelId", "nam" }}))["data"].getProperty ("index", -1);
-    auto lm = cmd ("load_neural_model", obj ({{ "trackId", t }, { "index", idx }, { "path", modelPath }}));
+    auto loadArgs = obj ({{ "trackId", t }, { "index", idx }, { "path", modelPath }});
+    const auto skipEnv = SystemStats::getEnvironmentVariable ("MOSH_NEURAL_AB_SKIP", {});   // ""=self-describe, 0/1=force
+    if (skipEnv.isNotEmpty())
+        loadArgs.getDynamicObject()->setProperty ("skip", skipEnv.getIntValue() != 0);
+    auto lm = cmd ("load_neural_model", loadArgs);
     const bool applied   = (bool) lm["data"].getProperty ("applied", false);
     const auto modelName = lm["data"].getProperty ("describe", var()).getProperty ("modelName", var()).toString();
     std::cerr << "  load_neural_model: applied=" << (applied ? "true" : "false")

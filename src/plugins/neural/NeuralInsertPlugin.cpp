@@ -163,20 +163,33 @@ float NeuralInsertPlugin::inferSample (float x, float driveRaw) const
         // drive knob still shapes the sound, then run the loaded waveshaper. forward()
         // is RT-safe (preallocated internal buffers) and reads model weights only.
         const float in = driveRaw * x;
-        const float y = rtnModel->forward (&in);
+        float y = rtnModel->forward (&in);
+        // Residual ("skip") captures (GuitarML/NeuralPi) learn only the delta the amp
+        // adds, so the full output is net(in) + in. Full-output models (AIDA-X) don't.
+        if (modelSkip.load (std::memory_order_relaxed))
+            y += in;
         return std::tanh (y);   // bound the output (clean silence-in → silence-out for in=0)
     }
    #endif
     return runModel (x, driveRaw);
 }
 
-bool NeuralInsertPlugin::loadModelFromFile (const juce::File& jsonFile)
+bool NeuralInsertPlugin::loadModelFromFile (const juce::File& jsonFile, int forceSkip)
 {
    #if MOSH_HAVE_RTNEURAL
     // MESSAGE THREAD ONLY — all file I/O, JSON parse, allocation and warm-up happen
     // here, never on the audio thread.
     if (! jsonFile.existsAsFile())
         return false;
+
+    // Skip/residual: the command can force it; otherwise the model self-describes via a
+    // top-level "mosh_skip" bool (ignored by RTNeural's json_parser). Parsed here on the
+    // message thread; published below before the rtnReady release-store.
+    bool skip = false;
+    if (forceSkip >= 0)
+        skip = (forceSkip != 0);
+    else if (auto parsed = juce::JSON::parse (jsonFile.loadFileAsString()); auto* o = parsed.getDynamicObject())
+        skip = (bool) o->getProperty ("mosh_skip");
 
     std::unique_ptr<RTNeural::Model<float>> built;
     try
@@ -204,12 +217,13 @@ bool NeuralInsertPlugin::loadModelFromFile (const juce::File& jsonFile)
     // thread never frees on the RT path; move the new one in; release-store readiness.
     rtnModelOld = std::move (rtnModel);
     rtnModel    = std::move (built);
+    modelSkip.store (skip, std::memory_order_relaxed);   // published by the release-store below
     rtnReady.store (true, std::memory_order_release);
 
     modelPath = jsonFile.getFullPathName();
     return true;
    #else
-    juce::ignoreUnused (jsonFile);
+    juce::ignoreUnused (jsonFile, forceSkip);
     return false;   // graceful no-op when the RTNeural backend isn't built
    #endif
 }

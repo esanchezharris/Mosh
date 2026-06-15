@@ -62,8 +62,10 @@ public:
         model is built fully, then an atomic readiness flag is flipped so the audio
         thread starts using it on its next acquire-load; the previous model stays
         alive until the next load / resetModel (no audio-thread alloc or lock). When
-        MOSH_HAVE_RTNEURAL is not defined this is a graceful no-op returning false. */
-    bool  loadModelFromFile (const juce::File& jsonFile);
+        MOSH_HAVE_RTNEURAL is not defined this is a graceful no-op returning false.
+        forceSkip: -1 = read the model's own "mosh_skip" field (residual models add the
+        dry input back: output = net(x) + x — e.g. GuitarML/NeuralPi captures); 0/1 = force. */
+    bool  loadModelFromFile (const juce::File& jsonFile, int forceSkip = -1);
 
     /** A JSON description for the snapshot. */
     juce::var describe() const;
@@ -90,6 +92,10 @@ private:
     // true (acquire/release handshake). The retired model is kept alive in
     // rtnModelOld until the next swap so the audio thread never frees on the RT path.
     std::atomic<bool> rtnReady { false };
+    // Residual ("skip") models output only the delta the amp adds; the full signal is
+    // net(x) + x. Set on the message thread before the rtnReady release-store, read
+    // relaxed on the audio thread (the rtnReady acquire already orders it).
+    std::atomic<bool> modelSkip { false };
    #if MOSH_HAVE_RTNEURAL
     std::unique_ptr<RTNeural::Model<float>> rtnModel;     // live (audio-thread reads when ready)
     std::unique_ptr<RTNeural::Model<float>> rtnModelOld;  // retired, kept alive past the swap

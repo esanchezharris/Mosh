@@ -2945,7 +2945,11 @@ juce::var MoshOps::cmdLoadNeuralModel (const juce::var& args)
     if (! file.existsAsFile())
         return errResult ("load_neural_model", "model file not found: " + path);
 
-    const bool loaded = n->loadModelFromFile (file);
+    // Optional skip/residual override; default (-1) lets the model self-describe via its
+    // own "mosh_skip" field (GuitarML/NeuralPi captures are residual, AIDA-X are not).
+    const int forceSkip = args.hasProperty ("skip")
+                              ? ((bool) args.getProperty ("skip", false) ? 1 : 0) : -1;
+    const bool loaded = n->loadModelFromFile (file, forceSkip);
     logLine ("load_neural_model", args, loaded, loaded ? juce::String() : juce::String ("model load failed"), false);
     emitSnapshotInvalidated();
     if (! loaded)
