@@ -72,7 +72,7 @@ export function Moshi() {
   const voiceOn = useStore((s) => s.voiceOn);
   const qaByClip = useStore((s) => s.qaByClip);
 
-  // ── mount once: moshi + voice + the funnel + energy loop + idle murmur ──────
+  // ── mount once: moshi + voice + the funnel + energy loop + first-open greet ──
   useEffect(() => {
     const host = hostRef.current;
     if (!host || typeof window.Moshi !== "function") return;
@@ -152,17 +152,9 @@ export function Moshi() {
     };
     raf = requestAnimationFrame(tick);
 
-    // idle murmur — he mutters to himself now and then, only while idle.
-    let murmur = 0;
-    const scheduleMurmur = () => {
-      murmur = window.setTimeout(() => {
-        const m = apiRef.current;
-        if (useStore.getState().voiceOn && m && m.state().state === "IDLE")
-          utterRef.current("IDLE_MURMUR", { affect: { valence: 0.1, arousal: 0.2 } });
-        scheduleMurmur();
-      }, 9000 + Math.random() * 11000);
-    };
-    scheduleMurmur();
+    // (idle murmur removed — he no longer mutters to himself unprompted; he only
+    // speaks in response to events. The IDLE_MURMUR intent is still wired in the
+    // voice/reaction maps if we ever want to bring back a much rarer idle beat.)
 
     // a little hello when the app first opens (gated to once per session)
     const greetT = window.setTimeout(() => {
@@ -180,7 +172,7 @@ export function Moshi() {
 
     return () => {
       cancelAnimationFrame(raf);
-      clearTimeout(murmur); clearTimeout(greetT);
+      clearTimeout(greetT);
       document.removeEventListener("visibilitychange", onVis);
       window.removeEventListener("pointerdown", prime, true);
       window.removeEventListener("keydown", prime, true);
