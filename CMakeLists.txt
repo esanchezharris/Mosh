@@ -112,6 +112,26 @@ if (MOSH_BUILD_APP)
         target_link_libraries(Mosh PRIVATE mosh_neural_backends)
     endif()
 
+    # ── Re-inject Info.plist keys that PLIST_TO_MERGE drops ───────────────────
+    # JUCE honours PLIST_TO_MERGE (set above) ONLY under the Xcode generator.
+    # This project builds with the Makefiles/Ninja generator, where those merged
+    # keys are silently dropped from the packaged Info.plist. The built-in
+    # permission flags (LOCAL_NETWORK_PERMISSION_*) survive, but NSBonjourServices
+    # — declared in cmake/MoshRemoteInfo.plist for the iPhone-companion mDNS
+    # service — does not, and macOS 14+ refuses to advertise the service type
+    # without it. Re-inject it after the bundle is built. `plutil -replace`
+    # creates the key when absent and is idempotent, so it is safe on every
+    # relink (JUCE regenerates Info.plist when Mosh relinks; this runs after).
+    # Keep the service type in sync with cmake/MoshRemoteInfo.plist.
+    if (APPLE)
+        add_custom_command(TARGET Mosh POST_BUILD
+            COMMAND /usr/bin/plutil -replace NSBonjourServices -json
+                    "[\"_moshcompanion._tcp\"]"
+                    "$<TARGET_BUNDLE_CONTENT_DIR:Mosh>/Info.plist"
+            COMMENT "Injecting NSBonjourServices into Mosh.app Info.plist (PLIST_TO_MERGE is Xcode-only)"
+            VERBATIM)
+    endif()
+
     # ── UI bundle (Vite) ─────────────────────────────────────────────────────
     if (MOSH_BUILD_UI)
         include(cmake/BuildUI.cmake)
