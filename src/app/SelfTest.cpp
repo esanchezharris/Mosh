@@ -844,6 +844,109 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                 check (std::abs (out.getSample (0, 0)) < 1e-4f && std::abs (out.getSample (0, 64)) < 1e-4f, "no output before the reported latency");
                 check (std::abs (out.getSample (0, 128)) > 0.05f, "impulse emerges at exactly the reported latency (delay == reported, no drift)");
             }
+
+            // ── GAP 1 — real Tier-A model load (load_neural_model) ──
+            // Return latency to 0 + full mix/drive so we compare model-vs-inline on the
+            // SAME first sample with no delay-line offset.
+            cmd (ops, "set_neural_latency", objN ({{ "trackId", nt }, { "index", nidx }, { "samples", 0 }}));
+            cmd (ops, "set_neural_param", objN ({{ "trackId", nt }, { "index", nidx }, { "paramId", "mix" }, { "value", 100.0 }}));
+            cmd (ops, "set_neural_param", objN ({{ "trackId", nt }, { "index", nidx }, { "paramId", "drive" }, { "value", 50.0 }}));
+            n->resetModel();
+
+            // Capture the inline-MLP output for the driven probe BEFORE loading any model.
+            const float inlineY = process (0.5f, 8).getSample (0, 0);
+
+           #if MOSH_HAVE_RTNEURAL
+            // CI-runnable: the in-repo fixture path (compile-time repo dir), env override
+            // MOSH_SELFTEST_RTNEURAL_MODEL wins when set.
+            juce::String fixturePath = juce::SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_RTNEURAL_MODEL", {});
+            if (fixturePath.isEmpty())
+                fixturePath = juce::String (MOSH_REPO_SOURCE_DIR) + "/assets/neural_waveshaper.json";
+            const juce::File fixture (fixturePath);
+            check (fixture.existsAsFile(), "RTNeural model fixture present (assets/neural_waveshaper.json)");
+
+            auto lm = cmd (ops, "load_neural_model", objN ({{ "trackId", nt }, { "pluginIndex", nidx }, { "path", fixturePath }}));
+            check (ok (lm), "load_neural_model ok (RTNeural built)");
+            check ((bool) lm["data"].getProperty ("applied", false), "load_neural_model applied:true (RTNeural built)");
+
+            n->resetModel();
+            {
+                auto out = process (0.5f, 8);
+                const float modelY = out.getSample (0, 0);
+                check (std::abs (modelY - inlineY) > 1e-3f, "RTNeural model output DIFFERS numerically from the inline MLP (same input)");
+                // silence-in → silence-out with the model loaded.
+                check (std::abs (out.getSample (0, 4)) < 1e-4f, "silence stays silent with the RTNeural model loaded");
+            }
+
+            // Persisted model path survives save/reload (re-loads the file on restore).
+            check (n->describe().getProperty ("modelPath", var()).toString() == fixturePath, "describe() reports the loaded modelPath");
+            check (n->describe().getProperty ("modelName", var()).toString().isNotEmpty(), "describe() reports a modelName");
+            check (ok (cmd (ops, "save")),   "save (neural model path) ok");
+            check (ok (cmd (ops, "reload")), "reload (neural model path) ok");
+            {
+                // Re-find the plugin after reload (the Edit was reconstructed).
+                NeuralInsertPlugin* n2 = nullptr;
+                if (auto* t = te::findAudioTrackForID (eng.edit(), te::EditItemID::fromString (nt)))
+                    for (auto* p : t->pluginList.getPlugins())
+                        if (auto* nn = dynamic_cast<NeuralInsertPlugin*> (p)) n2 = nn;
+                check (n2 != nullptr, "neural insert still present after reload");
+                if (n2 != nullptr)
+                {
+                    check (n2->describe().getProperty ("modelPath", var()).toString() == fixturePath, "model path restored after save+reload");
+                    // initialise() is the deterministic re-load hook (loads the persisted
+                    // model file on the message thread once the plugin is prepared).
+                    n2->initialise ({ {}, 44100.0, 512 });
+                    check ((bool) n2->describe().getProperty ("modelLoaded", false), "RTNeural model re-loaded on reload (file re-read from persisted path)");
+                    // Find the neural plugin's index in the reloaded chain so the param
+                    // set targets the right plugin (the volume plugin sits at index 0).
+                    int nidx2 = -1;
+                    if (auto* t = te::findAudioTrackForID (eng.edit(), te::EditItemID::fromString (nt)))
+                    {
+                        const auto& plugs = t->pluginList.getPlugins();
+                        for (int i = 0; i < plugs.size(); ++i)
+                            if (dynamic_cast<NeuralInsertPlugin*> (plugs[i].get()) != nullptr) nidx2 = i;
+                    }
+                    auto procN2 = [&] (float amp, int len) {
+                        AudioBuffer<float> buf (2, len); buf.clear();
+                        buf.setSample (0, 0, amp); buf.setSample (1, 0, amp);
+                        te::MidiMessageArray midi;
+                        te::PluginRenderContext ctx (&buf, AudioChannelSet::stereo(), 0, len, &midi, 0.0,
+                                                     tracktion::TimeRange(), true, false, false, false);
+                        n2->applyToBuffer (ctx);
+                        return buf;
+                    };
+                    cmd (ops, "set_neural_param", objN ({{ "trackId", nt }, { "index", nidx2 }, { "paramId", "drive" }, { "value", 50.0 }}));
+                    cmd (ops, "set_neural_param", objN ({{ "trackId", nt }, { "index", nidx2 }, { "paramId", "mix" }, { "value", 100.0 }}));
+                    n2->resetModel();
+                    const float reloadedY = procN2 (0.5f, 8).getSample (0, 0);
+                    check (std::abs (reloadedY - inlineY) > 1e-3f, "reloaded model still transforms differently from the inline MLP (path re-loaded)");
+
+                    // PDC null test still holds with the model loaded.
+                    n2->resetModel();
+                    cmd (ops, "set_neural_latency", objN ({{ "trackId", nt }, { "index", nidx2 }, { "samples", 128 }}));
+                    auto outL = procN2 (0.5f, 256);
+                    check (std::abs (outL.getSample (0, 0)) < 1e-4f && std::abs (outL.getSample (0, 64)) < 1e-4f, "PDC: no output before latency with model loaded");
+                    check (std::abs (outL.getSample (0, 128)) > 0.02f, "PDC: impulse emerges at the reported latency with model loaded");
+                }
+            }
+           #else
+            // DEFAULT build (no RTNeural): load_neural_model is a graceful no-op, and the
+            // inline MLP still does real inference (alters the driven signal, silence stays
+            // silent). This keeps the default selftest green.
+            juce::ignoreUnused (inlineY);
+            auto lm = cmd (ops, "load_neural_model",
+                           objN ({{ "trackId", nt }, { "pluginIndex", nidx }, { "path", juce::String ("/does/not/matter.json") }}));
+            check (ok (lm), "load_neural_model returns ok (graceful, RTNeural not built)");
+            check (! (bool) lm["data"].getProperty ("applied", true), "load_neural_model applied:false (RTNeural not built)");
+            check (lm["data"].getProperty ("reason", var()).toString() == "RTNeural not built", "load_neural_model reason: RTNeural not built");
+            {
+                // Inline MLP still alters a driven signal + keeps silence silent.
+                cmd (ops, "set_neural_latency", objN ({{ "trackId", nt }, { "index", nidx }, { "samples", 0 }}));
+                auto out = process (0.5f, 8);
+                check (std::abs (out.getSample (0, 0) - 0.5f) > 0.05f, "inline MLP still alters the driven signal (default build)");
+                check (std::abs (out.getSample (0, 4)) < 1e-4f, "inline MLP keeps silence silent (default build)");
+            }
+           #endif
         }
     }
 
@@ -2212,6 +2315,56 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (! (bool) ops.snapshot().getProperty ("transport", var()).getProperty ("recording", false), "ARE-003: not recording headless (no audio device)");
     }
 
+    // ─── KEY-001 — the project's musical key (tonic + mode) ───
+    // Stored on the same MOSH_PROJECT node as the format/time-base prefs (saves/reloads
+    // with the .tracktionedit). set_key is a NON-undoable preference (cmdSetProjectSettings
+    // template). The tonic/mode domains mirror voice.js NOTE_PC / SCALES exactly, so the
+    // host only accepts keys Moshi's in-key voice can sing. The key also feeds the
+    // RenderLayer fingerprint (proven separately in the generative section); here we cover
+    // the snapshot surface + validation + persistence + non-undoability.
+    section ("KEY-001: musical key (set_key, snapshot.project.key, persistence)");
+    {
+        auto sess = [&] { return ops.snapshot().getProperty ("session", var()); };
+        auto key  = [&] { return sess().getProperty ("project", var()).getProperty ("key", var()); };
+
+        // Snapshot ALWAYS exposes session.project.key with the A/minor default (never absent).
+        check (key().isObject(), "snapshot session.project.key block present");
+        check (key().hasProperty ("tonic"), "session.project.key has tonic");
+        check (key().hasProperty ("mode"), "session.project.key has mode");
+        check (key().getProperty ("tonic", var()).toString() == "A", "session.project.key.tonic defaults to A");
+        check (key().getProperty ("mode", var()).toString() == "minor", "session.project.key.mode defaults to minor");
+
+        // Valid set (both fields) → ok + reflected in the snapshot.
+        check (ok (cmd (ops, "set_key", objN ({{ "tonic", "F#" }, { "mode", "dorian" }}))), "set_key (F# dorian) ok");
+        check (key().getProperty ("tonic", var()).toString() == "F#", "session.project.key.tonic == F# after set");
+        check (key().getProperty ("mode", var()).toString() == "dorian", "session.project.key.mode == dorian after set");
+
+        // Invalid tonic AND invalid mode each rejected; storage stays at the last good value.
+        check (! ok (cmd (ops, "set_key", args1 ("tonic", "H"))), "set_key rejects a tonic outside NOTE_PC");
+        check (key().getProperty ("tonic", var()).toString() == "F#", "rejected tonic left storage untouched (still F#)");
+        check (! ok (cmd (ops, "set_key", args1 ("mode", "lydian"))), "set_key rejects a mode outside SCALES");
+        check (key().getProperty ("mode", var()).toString() == "dorian", "rejected mode left storage untouched (still dorian)");
+
+        // Save → reload → the key round-trips with the .tracktionedit.
+        check (ok (cmd (ops, "save")),   "save (musical key) ok");
+        check (ok (cmd (ops, "reload")), "reload (musical key) ok");
+        check (key().getProperty ("tonic", var()).toString() == "F#", "session.project.key.tonic survived save+reload");
+        check (key().getProperty ("mode", var()).toString() == "dorian", "session.project.key.mode survived save+reload");
+
+        // NON-undoable preference: logged undoable:false, and an undo right after must NOT
+        // revert it (no transaction was pushed).
+        auto klog = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
+        bool keyPref = false;
+        for (auto& ln : juce::StringArray::fromLines (klog))
+            if (ln.contains ("\"command\": \"set_key\"") && ln.contains ("\"undoable\": false")) keyPref = true;
+        check (keyPref, "set_key logged undoable:false (preference)");
+        cmd (ops, "undo");
+        check (key().getProperty ("tonic", var()).toString() == "F#", "undo after set_key does NOT revert the key (non-undoable)");
+
+        // Restore the default so later blocks see a clean project.
+        check (ok (cmd (ops, "set_key", objN ({{ "tonic", "A" }, { "mode", "minor" }}))), "set_key restore default (A minor) ok");
+    }
+
     // ─── itemID-allocator regression (engine patch: createNewItemID scans ALL caches) ───
     // Before the patch, this load -> save -> reload -> remove -> load sequence could hand
     // the second plugin an itemID still held by the first in automatableEditItemCache ->
@@ -2844,6 +2997,49 @@ int runLiveAudioSmoke (MoshEngine& eng, MoshOps& ops)
            "add_test_tone_clip ok");
 
     check (ok (cmd (ops, "set_transport", args1 ("position", 0.0))), "transport seek ok");
+
+    // ── GAP 3 — metering live-smoke (gated on MOSH_AUDIO_OUTPUT_DEVICE) ──
+    // Enable the track meter + attach the level sink BEFORE playback, so the
+    // LevelMeterPlugin tap is present when the playback graph is prepared (this matches
+    // the product, which calls enable_all_meters at init — a meter inserted into an
+    // already-prepared graph isn't tapped until the next rebuild). We then capture the
+    // decimated "levels" events the 30 Hz timer emits while the tone plays and assert at
+    // least one level above the -100 floor. Env-gated out of the default headless run.
+    const bool gap3 = requested.isNotEmpty();
+    std::atomic<double> maxLevelSeen { -1000.0 };
+    std::atomic<int> levelEvents { 0 };
+    std::atomic<double> maxTrack { -1000.0 }, maxMaster { -1000.0 };
+    if (gap3)
+    {
+        check (ok (cmd (ops, "enable_track_meter", args1 ("trackId", trackId))), "GAP3: enable_track_meter ok");
+        ops.setEventSink ([&] (const var& e)
+        {
+            if (e.getProperty ("type", var()).toString() != "levels") return;
+            levelEvents.fetch_add (1);
+            auto fold = [] (std::atomic<double>& dst, double l, double r)
+            {
+                const double hi = jmax (l, r);
+                double cur = dst.load();
+                while (hi > cur && ! dst.compare_exchange_weak (cur, hi)) {}
+            };
+            // The "levels" event is wrapped { type, payload } (the UI reads ev.payload.*).
+            auto payload = e.getProperty ("payload", var());
+            auto tracks = payload.getProperty ("tracks", var());
+            if (auto* arr = tracks.getArray())
+                for (auto& tv : *arr)
+                    fold (maxTrack, (double) tv.getProperty ("l", -1000.0), (double) tv.getProperty ("r", -1000.0));
+            // The MASTER tap (ctx->masterLevels) is the authoritative engine output level
+            // — what actually reaches the device. A track LevelMeterPlugin can still read
+            // the floor if it isn't yet in the prepared graph, so the master is the
+            // ground-truth "audio is live" signal (the tone is audible on the device).
+            auto master = payload.getProperty ("master", var());
+            fold (maxMaster, (double) master.getProperty ("l", -1000.0), (double) master.getProperty ("r", -1000.0));
+            const double both = jmax (maxTrack.load(), maxMaster.load());
+            double cur = maxLevelSeen.load();
+            while (both > cur && ! maxLevelSeen.compare_exchange_weak (cur, both)) {}
+        });
+    }
+
     check (ok (cmd (ops, "set_transport", args1 ("action", "play"))), "transport play ok");
     check (eng.edit().getTransport().getCurrentPlaybackContext() != nullptr, "playback context allocated");
 
@@ -2877,6 +3073,80 @@ int runLiveAudioSmoke (MoshEngine& eng, MoshOps& ops)
         check (probe.getInputNonSilentSampleCount() > 0, "live-audio probe captured loopback input");
     }
     check (ok (cmd (ops, "set_transport", args1 ("action", "stop"))), "transport stop ok");
+
+    if (gap3)
+    {
+        ops.setEventSink ({});   // detach before the local maxLevelSeen goes out of scope
+        std::cerr << "  ..   GAP3 diag: levels events=" << levelEvents.load()
+                  << "  maxTrack=" << maxTrack.load() << "dB  maxMaster=" << maxMaster.load() << "dB\n";
+        check (maxLevelSeen.load() > -100.0, "GAP3: captured a 'levels' event above the -100 floor (meter live)");
+    }
+
+    // ── GAP 2 — recording live-smoke (gated on MOSH_AUDIO_INPUT_DEVICE) ──
+    // arm a fresh track → record ~1s of the live input → stop → assert a clip landed
+    // with a non-silent source WAV. Needs a real, non-silent input device; the env gate
+    // keeps it out of the default headless selftest.
+    if (requestedInput.isNotEmpty())
+    {
+        auto rt = cmd (ops, "create_track", args1 ("name", "Record Smoke"));
+        check (ok (rt), "GAP2: create_track (record) ok");
+        const auto recTrackId = rt["data"].getProperty ("trackId", var()).toString();
+
+        auto arm = cmd (ops, "arm_track", objN ({{ "trackId", recTrackId }, { "armed", true }}));
+        check (ok (arm), "GAP2: arm_track ok");
+        check ((bool) arm["data"].getProperty ("applied", false), "GAP2: arm_track applied (input assigned)");
+        check ((bool) arm["data"].getProperty ("armed", false), "GAP2: track reports armed");
+        // The track snapshot should report it has an input now.
+        {
+            auto tv = ops.snapshot().getProperty ("tracks", var());
+            bool hasInput = false;
+            if (auto* arr = tv.getArray())
+                for (auto& t : *arr)
+                    if (t.getProperty ("id", var()).toString() == recTrackId)
+                        hasInput = (bool) t.getProperty ("hasInput", false);
+            check (hasInput, "GAP2: armed track reports hasInput");
+        }
+
+        check (ok (cmd (ops, "set_transport", args1 ("position", 0.0))), "GAP2: seek to 0 ok");
+        check (ok (cmd (ops, "set_transport", args1 ("action", "record"))), "GAP2: set_transport record ok");
+
+        const auto recEnd = Time::getMillisecondCounter() + (uint32) 1200;
+        while (Time::getMillisecondCounter() < recEnd)
+        {
+            if (mm != nullptr) mm->runDispatchLoopUntil (50);
+            else Thread::sleep (50);
+        }
+
+        auto stop = cmd (ops, "stop_recording");
+        check (ok (stop), "GAP2: stop_recording ok");
+        auto landed = stop["data"].getProperty ("clips", var());
+        const int nLanded = landed.isArray() ? landed.size() : 0;
+        check (nLanded > 0, "GAP2: a take clip landed on the armed track");
+        if (nLanded > 0)
+        {
+            const auto srcPath = landed[0].getProperty ("sourceFile", var()).toString();
+            check (srcPath.isNotEmpty(), "GAP2: landed clip has a sourceFile");
+            const File src (srcPath);
+            check (src.existsAsFile(), "GAP2: recorded source WAV exists on disk");
+
+            // Non-silent: read the WAV and check any sample above a small floor.
+            bool nonSilent = false;
+            AudioFormatManager fm; fm.registerBasicFormats();
+            if (std::unique_ptr<AudioFormatReader> reader { fm.createReaderFor (src) })
+            {
+                const int toRead = (int) jmin ((int64) 96000, reader->lengthInSamples);
+                if (toRead > 0)
+                {
+                    AudioBuffer<float> buf ((int) reader->numChannels, toRead);
+                    reader->read (&buf, 0, toRead, 0, true, true);
+                    for (int ch = 0; ch < buf.getNumChannels() && ! nonSilent; ++ch)
+                        if (buf.getMagnitude (ch, 0, toRead) > 0.001f)
+                            nonSilent = true;
+                }
+            }
+            check (nonSilent, "GAP2: recorded source WAV is non-silent (captured live input)");
+        }
+    }
 
     finishSection();
     std::cerr << "===== " << checks - failures << "/" << checks
@@ -2940,6 +3210,75 @@ void runPluginDemo (MoshOps& ops)
         if (idx >= 0)
             cmd ("open_plugin_editor", obj ({{ "trackId", t2 }, { "index", idx }}));
     }
+}
+
+// Audible A/B of a REAL Tier-A neural model (`Mosh --neural-ab`). Imports a DI clip,
+// inserts a neural plugin, loads a real RTNeural model (MOSH_NEURAL_AB_MODEL), then
+// plays the clip through the device alternating WET (amp on) / DRY (bypassed) so a
+// human can A/B it. Needs a real output device (MOSH_AUDIO_OUTPUT_DEVICE) + the model
+// and DI paths via env. Returns 0 when the model loaded, 1 otherwise.
+int runNeuralAB (MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+    ignoreUnused (eng);
+    auto cmd = [&] (const String& n, var a = var()) {
+        auto* c = new DynamicObject(); c->setProperty ("command", n);
+        if (! a.isVoid()) c->setProperty ("args", a);
+        return ops.execute (var (c));
+    };
+    auto obj = [] (std::initializer_list<std::pair<const char*, var>> kv) {
+        auto* o = new DynamicObject();
+        for (auto& p : kv) o->setProperty (p.first, p.second);
+        return var (o);
+    };
+    auto* mm = MessageManager::getInstanceWithoutCreating();
+    auto pump = [&] (int ms) {
+        const auto end = Time::getMillisecondCounter() + (uint32) jmax (0, ms);
+        while (Time::getMillisecondCounter() < end)
+        { if (mm != nullptr) mm->runDispatchLoopUntil (50); else Thread::sleep (50); }
+    };
+
+    const auto modelPath = SystemStats::getEnvironmentVariable ("MOSH_NEURAL_AB_MODEL", {});
+    const auto wavPath   = SystemStats::getEnvironmentVariable ("MOSH_NEURAL_AB_WAV", {});
+    const int  secs      = jlimit (1, 30, SystemStats::getEnvironmentVariable ("MOSH_NEURAL_AB_SECS", "6").getIntValue());
+    std::cerr << "\n===== Mosh neural A/B (real Tier-A model) =====\n";
+    if (modelPath.isEmpty() || wavPath.isEmpty())
+    {
+        std::cerr << "  set MOSH_NEURAL_AB_MODEL=<model.json> and MOSH_NEURAL_AB_WAV=<di.wav>\n";
+        return 1;
+    }
+    std::cerr << "  model: " << modelPath << "\n  input: " << wavPath << "\n";
+
+    auto t = cmd ("create_track", obj ({{ "name", "Amp A/B" }}))["data"].getProperty ("trackId", var()).toString();
+    std::cerr << "  import_clip: " << (ok (cmd ("import_clip", obj ({{ "file", wavPath }, { "trackId", t }}))) ? "ok" : "FAILED") << "\n";
+    const int idx = (int) cmd ("add_neural_insert", obj ({{ "trackId", t }, { "modelId", "nam" }}))["data"].getProperty ("index", -1);
+    auto lm = cmd ("load_neural_model", obj ({{ "trackId", t }, { "index", idx }, { "path", modelPath }}));
+    const bool applied   = (bool) lm["data"].getProperty ("applied", false);
+    const auto modelName = lm["data"].getProperty ("describe", var()).getProperty ("modelName", var()).toString();
+    std::cerr << "  load_neural_model: applied=" << (applied ? "true" : "false")
+              << (modelName.isNotEmpty() ? ("  model=" + modelName) : String()) << "\n";
+    if (! applied)
+        std::cerr << "  (model did not load — build with -DMOSH_ENABLE_RTNEURAL=ON and an RTNeural-native JSON)\n";
+    cmd ("set_neural_param", obj ({{ "trackId", t }, { "index", idx }, { "paramId", "mix" }, { "value", 100.0 }}));
+
+    for (int cycle = 0; cycle < 2; ++cycle)
+    {
+        cmd ("bypass_plugin", obj ({{ "trackId", t }, { "index", idx }, { "bypassed", false }}));
+        std::cerr << "  >> WET  — amp ON  (" << (modelName.isNotEmpty() ? modelName : String ("model")) << ") — listen...\n";
+        cmd ("set_transport", obj ({{ "position", 0.0 }}));
+        cmd ("set_transport", obj ({{ "action", "play" }}));
+        pump (secs * 1000);
+        cmd ("set_transport", obj ({{ "action", "stop" }}));
+
+        cmd ("bypass_plugin", obj ({{ "trackId", t }, { "index", idx }, { "bypassed", true }}));
+        std::cerr << "  >> DRY  — bypassed (clean DI) — listen...\n";
+        cmd ("set_transport", obj ({{ "position", 0.0 }}));
+        cmd ("set_transport", obj ({{ "action", "play" }}));
+        pump (secs * 1000);
+        cmd ("set_transport", obj ({{ "action", "stop" }}));
+    }
+    std::cerr << "===== neural A/B done =====\n";
+    return applied ? 0 : 1;
 }
 
 void runNeuralDemo (MoshOps& ops)

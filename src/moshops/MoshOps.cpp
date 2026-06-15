@@ -296,6 +296,7 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "set_neural_lab_mode") return cmdSetNeuralLabMode (args);
     if (name == "set_neural_latency")return cmdSetNeuralLatency (args);
     if (name == "reset_neural")      return cmdResetNeural (args);
+    if (name == "load_neural_model") return cmdLoadNeuralModel (args);
     if (name == "create_render_layer") return cmdCreateRenderLayer (args);
     if (name == "set_render_param")  return cmdSetRenderParam (args);
     if (name == "render_layer")      return cmdRenderLayer (args);
@@ -319,6 +320,7 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "open_project")      return cmdOpenProject (args);
     if (name == "save_as")           return cmdSaveAs (args);
     if (name == "set_project_settings") return cmdSetProjectSettings (args);
+    if (name == "set_key")           return cmdSetKey (args);
     if (name == "create_group_track") return cmdCreateGroupTrack (args);
     if (name == "ungroup_track")      return cmdUngroupTrack (args);
     if (name == "list_wave_inputs")   return cmdListWaveInputs (args);
@@ -726,6 +728,38 @@ juce::var MoshOps::cmdSetMetronome (const juce::var& args)
     return okResult ("set_metronome", var (data));
 }
 
+// KEY-001 — the musical-key domains. These MUST stay byte-identical to the literal
+// arrays in ui/src/vendor/voice.js (NOTE_PC keys + SCALES keys); Moshi's voice snaps
+// every earcon to (tonic, mode), so a mismatch would make the host accept a key the
+// voice cannot sing. Validated by cmdSetKey; the snapshot defaults below match the
+// voice's neutral start (A4 tonic + SCALES.minor).
+namespace
+{
+    // voice.js NOTE_PC keys (enharmonic spellings included), in declaration order.
+    const char* const kNotePcNames[] = {
+        "C", "C#", "Db", "D", "D#", "Eb", "E", "F", "F#", "Gb",
+        "G", "G#", "Ab", "A", "A#", "Bb", "B"
+    };
+    // voice.js SCALES keys.
+    const char* const kScaleNames[] = {
+        "major", "minor", "dorian", "mixolydian", "pentatonic", "chromatic"
+    };
+
+    bool isValidTonic (const juce::String& t)
+    {
+        for (auto* n : kNotePcNames) if (t == n) return true;
+        return false;
+    }
+    bool isValidMode (const juce::String& m)
+    {
+        for (auto* n : kScaleNames) if (m == n) return true;
+        return false;
+    }
+}
+
+const char* const MoshOps::kDefaultKeyTonic = "A";
+const char* const MoshOps::kDefaultKeyMode  = "minor";
+
 // PRJ-008 — the MOSH_PROJECT child of the Edit's own ValueTree (mirrors the
 // MOSH_RENDERLAYER parenting). Created empty on first access so it saves/reloads
 // with the .tracktionedit. Pure storage accessor: no undo manager, no logging.
@@ -765,10 +799,25 @@ juce::var MoshOps::projectSettingsToVar()
                           ? node.getProperty (ids::timeBase).toString()
                           : juce::String ("seconds");
 
+    // KEY-001 — the musical key, ALWAYS present so the UI never sees a missing field.
+    // Default A/minor (matches voice.js's neutral A4 tonic + SCALES.minor). Stored on
+    // the same MOSH_PROJECT node; falls back to the default where unset.
+    juce::String tonic = node.hasProperty (ids::musicalTonic)
+                             ? node.getProperty (ids::musicalTonic).toString()
+                             : juce::String (kDefaultKeyTonic);
+    juce::String keyMode = node.hasProperty (ids::musicalMode)
+                               ? node.getProperty (ids::musicalMode).toString()
+                               : juce::String (kDefaultKeyMode);
+
+    auto* key = new DynamicObject();
+    key->setProperty ("tonic", tonic);
+    key->setProperty ("mode", keyMode);
+
     auto* o = new DynamicObject();
     o->setProperty ("sampleRate", sr);
     o->setProperty ("bitDepth", bd);
     o->setProperty ("timeBase", tb);
+    o->setProperty ("key", var (key));
     return var (o);
 }
 
@@ -814,6 +863,41 @@ juce::var MoshOps::cmdSetProjectSettings (const juce::var& args)
     logLine ("set_project_settings", args, true, {}, false);   // preference — NOT undoable
     emitSnapshotInvalidated();
     return okResult ("set_project_settings", projectSettingsToVar());
+}
+
+juce::var MoshOps::cmdSetKey (const juce::var& args)
+{
+    // KEY-001 — the project's musical key (tonic + mode). Producer INTENT, stored on
+    // the same MOSH_PROJECT node as the format/time-base prefs, so it saves/reloads
+    // with the .tracktionedit. Followed the cmdSetProjectSettings template exactly:
+    // validate-then-write, NO Tracktion transaction (no beginNewTransaction),
+    // logLine(..., false) → NON-undoable preference, emitSnapshotInvalidated. Works
+    // headless (no audio device required).
+    //
+    // Validate against the voice.js NOTE_PC / SCALES domains BEFORE writing anything
+    // (a present-but-invalid field is a hard error that leaves storage untouched).
+    if (args.hasProperty ("tonic"))
+    {
+        const auto tonic = args.getProperty ("tonic", var()).toString();
+        if (! isValidTonic (tonic))
+            return errResult ("set_key", "tonic must be one of the voice.js NOTE_PC names (C..B incl. enharmonics)");
+    }
+    if (args.hasProperty ("mode"))
+    {
+        const auto m = args.getProperty ("mode", var()).toString();
+        if (! isValidMode (m))
+            return errResult ("set_key", "mode must be one of the voice.js SCALES (major|minor|dorian|mixolydian|pentatonic|chromatic)");
+    }
+
+    auto node = projectSettingsTree();
+    if (args.hasProperty ("tonic"))
+        node.setProperty (ids::musicalTonic, args.getProperty ("tonic", var()).toString(), nullptr);
+    if (args.hasProperty ("mode"))
+        node.setProperty (ids::musicalMode, args.getProperty ("mode", var()).toString(), nullptr);
+
+    logLine ("set_key", args, true, {}, false);   // preference — NOT undoable
+    emitSnapshotInvalidated();
+    return okResult ("set_key", projectSettingsToVar());
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2382,6 +2466,12 @@ juce::var MoshOps::cmdBypassPlugin (const juce::var& args)
 // ─────────────────────────────────────────────────────────────────────────────
 juce::var MoshOps::cmdRescanPlugins (const juce::var& args)
 {
+    // SCAN GUARD (tier wall): plugin scanning must NEVER reach the generative service.
+    // This handler drives ONLY pluginHost.rescan (VST3/AU cataloging via the JUCE
+    // PluginManager) — it never calls jobManager.ensureServiceRunning, so a rescan can
+    // never spawn or warm the SA3 service (the service is lazy: only cmdRenderLayer /
+    // cmdListColors start it). If a deep-scan CLI entry is ever added, it must early-
+    // return before MoshOps is constructed and force MOSH_ENABLE_SA3=0 for that process.
     const auto format = args.getProperty ("format", "all").toString();   // "vst3" | "au" | "all"
     const bool clearFirst = (bool) args.getProperty ("clearFirst", false);
     const bool includeVST3 = (format == "vst3" || format == "all");
@@ -2832,6 +2922,50 @@ juce::var MoshOps::cmdResetNeural (const juce::var& args)
     return okResult ("reset_neural");
 }
 
+juce::var MoshOps::cmdLoadNeuralModel (const juce::var& args)
+{
+    // GAP 1 — load a real Tier-A model (RTNeural JSON) into a neural insert. The
+    // contract field is pluginIndex; we also accept the neural surface's usual "index"
+    // for consistency. Model loading is operational (file → model), NOT an undoable
+    // session edit — but the path IS persisted on the plugin's own state (CachedValue
+    // modelPath), so it rides save/reload. Logged undoable:false (like reset_neural).
+    const auto trackId = args.getProperty ("trackId", var()).toString();
+    const int pluginIndex = args.hasProperty ("pluginIndex")
+                                ? (int) args.getProperty ("pluginIndex", -1)
+                                : (int) args.getProperty ("index", -1);
+    auto* n = asNeural (findPlugin (trackId, pluginIndex));
+    if (n == nullptr) return errResult ("load_neural_model", "no neural insert");
+
+    const auto path = args.getProperty ("path", var()).toString();
+    if (path.isEmpty())
+        return errResult ("load_neural_model", "path required");
+
+   #if MOSH_HAVE_RTNEURAL
+    const juce::File file (path);
+    if (! file.existsAsFile())
+        return errResult ("load_neural_model", "model file not found: " + path);
+
+    const bool loaded = n->loadModelFromFile (file);
+    logLine ("load_neural_model", args, loaded, loaded ? juce::String() : juce::String ("model load failed"), false);
+    emitSnapshotInvalidated();
+    if (! loaded)
+        return errResult ("load_neural_model", "could not parse model file: " + path);
+    auto* data = new DynamicObject();
+    data->setProperty ("applied", true);
+    data->setProperty ("describe", n->describe());
+    return okResult ("load_neural_model", var (data));
+   #else
+    // Graceful no-op when the RTNeural backend isn't built — mirrors the arm/record
+    // posture (ok result, applied:false, reason) so the DEFAULT build's selftest stays
+    // green. The command still validates the target + path above.
+    logLine ("load_neural_model", args, true, {}, false);
+    auto* data = new DynamicObject();
+    data->setProperty ("applied", false);
+    data->setProperty ("reason", "RTNeural not built");
+    return okResult ("load_neural_model", var (data));
+   #endif
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Stage 5 — Tier-B generative layer (RenderLayer flow)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2845,7 +2979,24 @@ juce::ValueTree MoshOps::findRenderLayer (const juce::String& clipId)
 juce::String MoshOps::computeFingerprint (const juce::ValueTree& node, const juce::File& inputWav)
 {
     const auto upstreamHash = juce::MD5 (inputWav).toHexString();   // full upstream audio hash
-    return RenderLayer::fingerprint (node, upstreamHash, "120bpm/Cmaj", 44100, 2,
+
+    // KEY-001 — feed the LIVE tempo/key context into the fingerprint (was the
+    // hardcoded "120bpm/Cmaj" placeholder). bpm is the playback bpm at the start of
+    // the edit; the key is the stored project intent (defaulting A/minor where unset),
+    // read straight from the MOSH_PROJECT node so it matches the snapshot. A key (or
+    // tempo) change therefore changes the fingerprint → render cache MISS.
+    const double bpm = eng.edit().tempoSequence.getBpmAt (tracktion::TimePosition());
+    auto proj = eng.edit().state.getChildWithName (ids::MOSH_PROJECT);
+    const juce::String tonic = proj.hasProperty (ids::musicalTonic)
+                                   ? proj.getProperty (ids::musicalTonic).toString()
+                                   : juce::String (kDefaultKeyTonic);
+    const juce::String keyMode = proj.hasProperty (ids::musicalMode)
+                                     ? proj.getProperty (ids::musicalMode).toString()
+                                     : juce::String (kDefaultKeyMode);
+    const juce::String tempoKeyContext =
+        juce::String (bpm, 4) + "bpm/" + tonic + " " + keyMode;
+
+    return RenderLayer::fingerprint (node, upstreamHash, tempoKeyContext, 44100, 2,
                                      jobManager.serviceBuild());
 }
 
@@ -4136,7 +4287,14 @@ juce::var MoshOps::snapshot()
     // falling back to the live device readout where unset (device = live truth,
     // project = remembered intent). This is generic media-format state — no
     // Tracktion concepts cross to the UI.
-    session->setProperty ("project", projectSettingsToVar());
+    auto projectVar = projectSettingsToVar();
+    session->setProperty ("project", projectVar);
+    // KEY-001 — also mirror the musical key to the TOP level of session (exactly like
+    // sampleRate/bitDepth/tempo/metronome above), so the UI reads session.key directly.
+    // Single source: the MOSH_PROJECT node via projectSettingsToVar; a convenience mirror,
+    // not a second store.
+    if (auto* po = projectVar.getDynamicObject())
+        session->setProperty ("key", po->getProperty ("key"));
 
     Array<var> tracks;
     int index = 0;

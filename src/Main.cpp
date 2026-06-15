@@ -69,6 +69,16 @@ public:
     {
         // Out-of-process VST3 scan worker hook (04 §1.1): if this launch is a
         // scan child, handle it and bail before building any UI/engine.
+        //
+        // SCAN GUARD (tier wall): a scan path must NEVER reach the generative
+        // GenerativeJobManager / the SA3 service. This child returns here BEFORE
+        // MoshOps (and thus jobManager) is ever constructed, so plugin scanning is
+        // structurally isolated from generative job orchestration. If a deep-scan CLI
+        // entry (e.g. "--scan-plugins-deep") is ever (re)introduced, it MUST likewise
+        // early-return before constructing MoshOps, and force MOSH_ENABLE_SA3=0 for
+        // that process, so a scan can never warm SA3. (The in-session rescan_plugins
+        // command runs on the message thread and also never touches jobManager — see
+        // MoshOps::cmdRescanPlugins / PluginHost::rescan.)
         if (te::PluginManager::startChildProcessPluginScan (commandLine))
             return;
 
@@ -84,14 +94,17 @@ public:
 
         const bool undoSelfTest = commandLine.contains ("--selftest-undo");
         const bool liveAudioSmoke = commandLine.contains ("--live-audio-smoke");
+        const bool neuralAB = commandLine.contains ("--neural-ab");
+        const bool liveAudio = liveAudioSmoke || neuralAB;   // opens the real device, fresh cold session
         const bool headless = undoSelfTest || commandLine.contains ("--selftest");
         const juce::String freshSessionName = undoSelfTest ? "session-selftest-undo"
+                                            : (neuralAB ? "session-neural-ab"
                                             : (liveAudioSmoke ? "session-live-audio-smoke"
-                                                              : "session-selftest");
+                                                              : "session-selftest"));
         // Headless: no audio device, and an isolated cold session so the harness is
         // idempotent (it saves/reloads itself) and never touches the GUI session.
-        engine  = std::make_unique<MoshEngine> ((! headless) || liveAudioSmoke,
-                                                /*freshSession=*/ headless || liveAudioSmoke,
+        engine  = std::make_unique<MoshEngine> ((! headless) || liveAudio,
+                                                /*freshSession=*/ headless || liveAudio,
                                                 freshSessionName);
         moshOps = std::make_unique<MoshOps> (*engine);
         remoteServer = std::make_unique<RemoteCompanionServer> (
@@ -131,6 +144,14 @@ public:
         {
             const int fails = runLiveAudioSmoke (*engine, *moshOps);
             setApplicationReturnValue (fails);
+            quit();
+            return;
+        }
+
+        if (neuralAB)
+        {
+            const int rc = runNeuralAB (*engine, *moshOps);
+            setApplicationReturnValue (rc);
             quit();
             return;
         }

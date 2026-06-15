@@ -1,10 +1,29 @@
 name: macOS CI
 
 # 2026-06-11: hosted macOS runners are PAID (10x minute multiplier) and ate
-# the Actions spending limit. CI is now MANUAL-ONLY (workflow_dispatch) — the
-# enforced verification is the LOCAL battery (see AGENTS.md). Re-enable
-# triggers only with a self-hosted runner or a deliberate budget decision.
+# the Actions spending limit. The EXPENSIVE native macOS build (hosted-smoke)
+# is therefore MANUAL-ONLY (workflow_dispatch). The enforced verification is
+# the LOCAL battery (see AGENTS.md).
+#
+# 2026-06-15: restored cheap per-push signal WITHOUT re-triggering the hosted
+# macOS drain. The `ui-build` job runs on free `ubuntu-latest` (the UI build is
+# `tsc --noEmit && vite build` — platform-agnostic, no native deps) and fires
+# on push + PR (doc-only commits are skipped via paths-ignore). `hosted-smoke`
+# stays workflow_dispatch-only. `self-hosted-full-mac` (free, self-hosted
+# minutes are unbilled) also runs on push but is NON-required (it depends on
+# the `mosh-local` runner being online). Do NOT mark any check required while
+# Actions billing is broken / the self-hosted runner may be offline.
 on:
+  push:
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "design-lab/**"
+  pull_request:
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "design-lab/**"
   workflow_dispatch:
     inputs:
       run_full_local:
@@ -16,8 +35,34 @@ permissions:
   contents: read
 
 jobs:
+  ui-build:
+    name: UI build (cheap, per-push)
+    # Ubuntu is far cheaper than hosted macOS and the UI build (tsc + vite) is
+    # fully platform-agnostic — no native/JUCE deps. This is the per-push signal.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Build UI (includes tsc --noEmit)
+        run: |
+          npm --prefix ui ci --no-audit --no-fund
+          npm --prefix ui run build
+
   hosted-smoke:
     name: Hosted macOS smoke
+    # MANUAL-ONLY: hosted macOS runners are billed at a 10x multiplier. Never
+    # run on push/PR — only on a deliberate workflow_dispatch.
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     runs-on: macos-15
     timeout-minutes: 90
 
@@ -37,6 +82,22 @@ jobs:
 
       - name: Install native build tools
         run: brew install cmake ninja ripgrep
+
+      - name: Cache CPM dependencies
+        uses: actions/cache@v4
+        with:
+          path: .cpm-cache
+          key: cpm-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'cmake/Dependencies.cmake') }}
+          restore-keys: |
+            cpm-${{ runner.os }}-
+
+      - name: Cache native build tree
+        uses: actions/cache@v4
+        with:
+          path: build
+          key: build-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'cmake/Dependencies.cmake') }}
+          restore-keys: |
+            build-${{ runner.os }}-
 
       - name: Build UI
         run: |
@@ -74,7 +135,11 @@ jobs:
 
   self-hosted-full-mac:
     name: Self-hosted full Mac gates
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_full_local }}
+    # Self-hosted minutes are unbilled, so this can run on push for free. It is
+    # NON-required: it only executes when the `mosh-local` runner is online, and
+    # a required check that can't run would block all PRs. The explicit
+    # workflow_dispatch path still honours the run_full_local toggle.
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_full_local }}
     runs-on:
       - self-hosted
       - macOS

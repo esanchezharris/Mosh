@@ -7,6 +7,7 @@
 
 import { useEffect, useRef } from "react";
 import { useStore } from "../store";
+import { DEFAULT_KEY } from "../musicalKey";
 import { AgentComposer } from "./AgentComposer";
 import "../vendor/moshi.js";
 import "../vendor/voice.js";
@@ -18,6 +19,7 @@ type MoshiApi = {
   setStyle: (s: string) => MoshiApi;
   setQuality: (q: string) => MoshiApi;
   setPersonality: (n: string | number, seed?: number, o?: object) => MoshiApi;
+  setAnatomy: (n: string) => MoshiApi;
   celebrate: () => MoshiApi;
   lookAt: (nx: number, ny: number) => MoshiApi;
   poke: () => void;
@@ -71,6 +73,10 @@ export function Moshi() {
   const celebrateTick = useStore((s) => s.celebrateTick);
   const voiceOn = useStore((s) => s.voiceOn);
   const qaByClip = useStore((s) => s.qaByClip);
+  // Song key — drives his in-key voice. The store refetches the whole snapshot on
+  // snapshot_invalidated, so these update reactively when set_key lands.
+  const keyTonic = useStore((s) => s.snapshot?.session.key?.tonic ?? DEFAULT_KEY.tonic);
+  const keyMode = useStore((s) => s.snapshot?.session.key?.mode ?? DEFAULT_KEY.mode);
 
   // ── mount once: moshi + voice + the funnel + energy loop + first-open greet ──
   useEffect(() => {
@@ -84,6 +90,7 @@ export function Moshi() {
       // chunky low-res pixelation is removed.
       api = window.Moshi(host, { personality: "TAR", seed: 0.5, resDiv: 1 });
       api.setQuality("ps2");
+      api.setAnatomy("A"); // baked anatomy pick (the lab's chosen 3D-vs-flat balance)
       apiRef.current = api;
     } catch { apiRef.current = null; }
 
@@ -91,7 +98,10 @@ export function Moshi() {
     try {
       if (typeof window.MoshiVoice === "function") {
         const v = window.MoshiVoice({ master: 0.55, enabled: useStore.getState().voiceOn });
-        v.setKey("A", "minor"); // STUB: the engine tracks no musical key yet (see voice.js)
+        // Initialise from the snapshot's musical key (always present + defaulted on
+        // the backend). The reactive effect below re-applies it when the key changes.
+        const k = useStore.getState().snapshot?.session.key ?? DEFAULT_KEY;
+        v.setKey(k.tonic, k.mode);
         voiceRef.current = v;
       }
     } catch { voiceRef.current = null; }
@@ -163,6 +173,24 @@ export function Moshi() {
       utterRef.current("GREET", { affect: { valence: 0.8, arousal: 0.7 } });
     }, 700);
 
+    // long-period idle nudge — a silent host glance every 45–90s, ONLY when nothing
+    // is happening (not playing/recording/rendering). It just re-aims his gaze, which
+    // moshi.js eases on its own; moshi.js's built-in idle ladder carries the rest.
+    // setTimeout-driven (no rAF loop), so it can't masquerade as a dropped frame.
+    let nudgeT = 0;
+    const scheduleNudge = () => {
+      nudgeT = window.setTimeout(() => {
+        const st = useStore.getState();
+        const busy = st.snapshot?.transport.playing || st.snapshot?.transport.recording
+          || Object.keys(st.renderProgress).length > 0;
+        if (!busy) {
+          try { apiRef.current?.lookAt((Math.random() * 2 - 1) * 0.5, (Math.random() * 2 - 1) * 0.3); } catch { /* noop */ }
+        }
+        scheduleNudge();
+      }, 45000 + Math.random() * 45000);
+    };
+    scheduleNudge();
+
     // pause battery/CPU when the window is hidden
     const onVis = () => {
       if (document.hidden) { cancelAnimationFrame(raf); }
@@ -173,6 +201,7 @@ export function Moshi() {
     return () => {
       cancelAnimationFrame(raf);
       clearTimeout(greetT);
+      clearTimeout(nudgeT);
       document.removeEventListener("visibilitychange", onVis);
       window.removeEventListener("pointerdown", prime, true);
       window.removeEventListener("keydown", prime, true);
@@ -238,6 +267,9 @@ export function Moshi() {
   // ── voice enable follows the UI toggle ──────────────────────────────────────
   useEffect(() => { try { voiceRef.current?.setEnabled(voiceOn); } catch { /* noop */ } }, [voiceOn]);
 
+  // ── voice key follows the session's musical key (set_key → snapshot.session.key)─
+  useEffect(() => { try { voiceRef.current?.setKey(keyTonic, keyMode); } catch { /* noop */ } }, [keyTonic, keyMode]);
+
   // ── react to the agent's reply (voice + pose) — the composer pushes an utter ─
   const agentUtter = useStore((s) => s.agentUtter);
   useEffect(() => {
@@ -253,6 +285,11 @@ export function Moshi() {
 
   const toggleVoice = useStore((s) => s.toggleVoice);
   const stateLabel = recording ? "● rec" : rendering ? "working…" : playing ? "listening" : "idle";
+  // One-word mood derived from the same live state. `mood` keys the mount's
+  // state-tinted glow (box-shadow only — no transform/filter on the canvas wrapper);
+  // `moodWord` exercises the new display font in the cap.
+  const mood = recording ? "rec" : rendering ? "work" : playing ? "listen" : "idle";
+  const moodWord = recording ? "rec" : rendering ? "cook" : playing ? "vibe" : "chill";
 
   // Fixed dock panel (lives at the right of the bottom dock, by the generative
   // drawer — where his reactions happen). Not floating, not draggable.
@@ -264,9 +301,16 @@ export function Moshi() {
           title={voiceOn ? "Mute Moshi" : "Unmute Moshi"} aria-label={voiceOn ? "Mute Moshi" : "Unmute Moshi"}
           onClick={() => toggleVoice()}>{voiceOn ? "🔊" : "🔇"}</button>
       </div>
-      <div ref={hostRef} className="moshi-mount" data-testid="moshi" title="Moshi — poke him"
+      {/* data-mood drives ONLY a box-shadow tint on this canvas wrapper (HARD RULE:
+          never transform/filter the live-GL .moshi-mount). */}
+      <div ref={hostRef} className="moshi-mount" data-testid="moshi" data-mood={mood} title="Moshi — poke him"
         tabIndex={0} role="img" aria-label="Moshi, the agent creature"
         onClick={() => { try { apiRef.current?.poke?.(); } catch { /* noop */ } }} />
+      {/* data-celebrate flips parity each accept (celebrateTick) so the CSS bounce
+          re-triggers exactly on the reward, not on every render. NON-canvas element. */}
+      <span className="moshi-mood display" data-mood={mood}
+        data-celebrate={celebrateTick > 0 ? (celebrateTick % 2 === 0 ? "a" : "b") : "off"}
+        data-testid="moshi-mood">{moodWord}</span>
       <AgentComposer />
     </div>
   );

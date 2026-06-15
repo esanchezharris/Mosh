@@ -69,6 +69,7 @@ function seedSnapshot(): Snapshot {
       metronome: false, length: 16, editFile: "/mock/session.mosh",
       audioEnabled: true, bitDepth: 24, bufferSize: 512,
       availableCores: 8, audioThreads: 8, audioThreadsAuto: true,
+      key: { tonic: "A", mode: "minor" },
     },
     tracks,
     transport: { playing: false, recording: false, position: 0, looping: false, loopStart: 0, loopEnd: 0 },
@@ -298,6 +299,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     case "set_clip_gain": { const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found"); pushUndo(); f.clip.gainDb = num(args.db); invalidate(); return ok(command); }
 
     case "set_tempo": { pushUndo(); snapshot.session.tempo = Math.max(20, num(args.tempo, snapshot.session.tempo)); invalidate(); return ok(command); }
+    case "set_key": { pushUndo(); snapshot.session.key = { tonic: str(args.tonic, snapshot.session.key?.tonic ?? "A"), mode: str(args.mode, snapshot.session.key?.mode ?? "minor") }; invalidate(); return ok(command); }
     case "set_master_volume": { pushUndo(); if (snapshot.master) snapshot.master.volumeDb = num(args.db); invalidate(); return ok(command); }
 
     case "undo": {

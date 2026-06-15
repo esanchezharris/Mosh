@@ -2,6 +2,12 @@
 
 #include <tracktion_engine/tracktion_engine.h>
 #include "plugins/neural/Astd.h"
+#include <atomic>
+#include <memory>
+
+#if MOSH_HAVE_RTNEURAL
+ #include <RTNeural/RTNeural.h>
+#endif
 
 namespace mosh
 {
@@ -51,21 +57,43 @@ public:
     void  resetModel();                                  // operational reset (§2.7)
     void  setLatencySamples (int samples);               // model latency / PDC test
 
+    /** GAP 1 — load a real RTNeural model from a JSON file (message thread ONLY: all
+        file I/O, parsing, allocation and warm-up happen here). On success the new
+        model is built fully, then an atomic readiness flag is flipped so the audio
+        thread starts using it on its next acquire-load; the previous model stays
+        alive until the next load / resetModel (no audio-thread alloc or lock). When
+        MOSH_HAVE_RTNEURAL is not defined this is a graceful no-op returning false. */
+    bool  loadModelFromFile (const juce::File& jsonFile);
+
     /** A JSON description for the snapshot. */
     juce::var describe() const;
 
 private:
     void registerAstdRanges();
-    float runModel (float x, float driveRaw) const;      // RT-safe, no alloc
+    float runModel (float x, float driveRaw) const;      // RT-safe, no alloc (inline MLP)
+    // RT-safe per-sample dispatch: the loaded RTNeural model when ready (acquire load
+    // of rtnReady on the audio thread), else the inline runModel fallback.
+    float inferSample (float x, float driveRaw) const;   // RT-safe, no alloc
 
     // Params (raw values are what automation stores; UI is 0–100 via ASTD).
     juce::CachedValue<float>       driveValue, mixValue;
     juce::CachedValue<int>         latencyValue;
     juce::CachedValue<bool>        labMode;
     juce::CachedValue<juce::String> modelId;
+    juce::CachedValue<juce::String> modelPath;            // GAP 1 — persisted model file path
     te::AutomatableParameter::Ptr  driveParam, mixParam;
 
     astd::Registry astdRanges;
+
+    // GAP 1 — the real Tier-A model holder (only compiled with the RTNeural backend).
+    // Built on the message thread; the audio thread reads it ONLY when rtnReady is
+    // true (acquire/release handshake). The retired model is kept alive in
+    // rtnModelOld until the next swap so the audio thread never frees on the RT path.
+    std::atomic<bool> rtnReady { false };
+   #if MOSH_HAVE_RTNEURAL
+    std::unique_ptr<RTNeural::Model<float>> rtnModel;     // live (audio-thread reads when ready)
+    std::unique_ptr<RTNeural::Model<float>> rtnModelOld;  // retired, kept alive past the swap
+   #endif
 
     // Preallocated latency delay line (per channel ring buffer).
     juce::AudioBuffer<float> delayBuffer;                 // [maxChannels][maxDelay]

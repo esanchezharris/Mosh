@@ -132,6 +132,10 @@ private:
     juce::var cmdSetNeuralLabMode(const juce::var& args);
     juce::var cmdSetNeuralLatency(const juce::var& args);
     juce::var cmdResetNeural     (const juce::var& args);
+    // GAP 1 — load a real Tier-A model file (RTNeural JSON) into a neural insert. When
+    // MOSH_HAVE_RTNEURAL is NOT built this returns ok with { applied:false,
+    // reason:"RTNeural not built" } — a graceful no-op so the default build stays green.
+    juce::var cmdLoadNeuralModel (const juce::var& args);
     // Stage 5 — Tier-B generative layer (RenderLayer flow)
     juce::var cmdCreateRenderLayer (const juce::var& args);
     juce::var cmdSetRenderParam   (const juce::var& args);
@@ -160,6 +164,11 @@ private:
     // PRJ-008 — per-project format / time-base intent (undoable:false preference,
     // stored on a MOSH_PROJECT child of the Edit tree; saves/reloads with the edit).
     juce::var cmdSetProjectSettings (const juce::var& args);
+    // KEY-001 — the project's musical key (tonic + mode), same MOSH_PROJECT node as
+    // the format intent. NON-undoable preference (cmdSetProjectSettings template);
+    // validated against the voice.js NOTE_PC/SCALES domains; feeds the snapshot
+    // (session.project.key) + the RenderLayer fingerprint (a key change = cache MISS).
+    juce::var cmdSetKey (const juce::var& args);
     // MIX-008 — group (submix) tracks: a te::FolderTrack created asSubmix=true sums
     // its children through a SummingNode + its own plugin chain (engine-proven).
     juce::var cmdCreateGroupTrack (const juce::var& args);   // undoable (one transaction)
@@ -181,10 +190,15 @@ private:
     // The MOSH_PROJECT child of eng.edit().state, created (empty) on first read so
     // callers always get a valid tree. Pure storage accessor — no logging/transaction.
     juce::ValueTree projectSettingsTree();
-    // The resolved { sampleRate, bitDepth, timeBase } block: the stored project
+    // The resolved { sampleRate, bitDepth, timeBase, key } block: the stored project
     // INTENT where set, falling back to the live device readout when a field is
     // unset (timeBase falls back to "seconds"). Used by the snapshot + cmd result.
     juce::var projectSettingsToVar();
+
+    // KEY-001 — the default musical key surfaced in the snapshot before any set_key
+    // (A/minor — matches the voice's neutral A4 tonic + SCALES.minor in voice.js).
+    static const char* const kDefaultKeyTonic;
+    static const char* const kDefaultKeyMode;
 
     juce::ValueTree findRenderLayer (const juce::String& clipId);
     juce::String    computeFingerprint (const juce::ValueTree& node, const juce::File& inputWav);

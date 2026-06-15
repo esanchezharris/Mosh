@@ -206,6 +206,14 @@ void PluginHost::scanAUComponents()
 
 int PluginHost::rescan (bool clearFirst, bool includeVST3, bool includeAU)
 {
+    // SCAN GUARD (tier wall): this is a self-contained catalog sweep over the JUCE
+    // PluginManager (knownPluginList + the curated VST3 / AU formats). It has NO
+    // reference to the generative GenerativeJobManager or the SA3 service and must
+    // keep it that way — a plugin scan must never spawn or warm the generative
+    // service (the service is lazy: only render/list-colors start it). If a deep-scan
+    // CLI entry is ever (re)introduced, it must early-return before MoshOps is built
+    // and force MOSH_ENABLE_SA3=0 for that process.
+    //
     // Re-arm crash recovery BEFORE sweeping AUs.  recoverFromDeadMansPedal() runs
     // once in initialise() for the launch-time case; repeated in-session rescans
     // (e.g. user-triggered rescan_plugins) need the same protection so a crasher
