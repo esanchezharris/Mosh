@@ -12,6 +12,8 @@ export function PluginBrowser() {
   const counts = useStore((s) => s.pluginCounts);
   const selectedTrackId = useStore((s) => s.selectedTrackId);
   const exec = useStore((s) => s.exec);
+  const rescan = useStore((s) => s.rescanPlugins);
+  const scanProgress = useStore((s) => s.scanProgress);
   const [q, setQ] = useState("");
   const [kind, setKind] = useState<"all" | "inst" | "fx">("all");
 
@@ -38,8 +40,16 @@ export function PluginBrowser() {
         <div className="modal-head">
           <strong className="display">Add plugin</strong>
           <span className="pr-meta tc">{counts ? `${counts.vst3} VST3 · ${counts.au} AU` : `${plugins.length} installed`}</span>
+          <button className="btn ghost" disabled={!!scanProgress}
+            title="Re-scan installed VST3 plugins (out-of-process; hung plugins are quarantined)"
+            onClick={() => void rescan("vst3")}>{scanProgress ? "Scanning…" : "Rescan"}</button>
           <button className="btn x" onClick={close}>✕</button>
         </div>
+        {scanProgress && (
+          <div className="scan-status" role="status" aria-live="polite">
+            Scanning {scanProgress.format}… out-of-process — hung plugins (e.g. WaveShell) are quarantined, not loaded.
+          </div>
+        )}
         <div className="modal-filters">
           <input autoFocus placeholder="Filter…" value={q} onChange={(e) => setQ(e.target.value)} />
           {(["all", "inst", "fx"] as const).map((k) => (

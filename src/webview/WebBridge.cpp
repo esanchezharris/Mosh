@@ -1,8 +1,13 @@
 #include "WebBridge.h"
+#include "../brain/BrainProxy.h"
+#include "../voice/NativeSpeech.h"
 
 namespace mosh
 {
 using Resource = juce::WebBrowserComponent::Resource;
+
+WebBridge::WebBridge() = default;
+WebBridge::~WebBridge() = default;   // NativeSpeech is complete here → unique_ptr can destroy it
 
 namespace
 {
@@ -156,6 +161,75 @@ juce::WebBrowserComponent::Options WebBridge::buildOptions()
                     juce::WebBrowserComponent::NativeFunctionCompletion completion)
             {
                 completion (snapshotProvider ? snapshotProvider() : juce::var());
+            })
+        // Moshi's brain, server side (the native equivalent of the Vite /api/brain
+        // proxy). Keys live in the environment, never in the WebView. The HTTP call
+        // blocks, so it runs off the message thread and resolves the promise back on
+        // it. Returns { ok, content, ... } or { ok:false, error } — bridge.ts throws
+        // on the error shape so the UI falls back to the mock brain (as in dev).
+        .withNativeFunction (
+            juce::Identifier ("brain_chat"),
+            [] (const juce::Array<juce::var>& args,
+                juce::WebBrowserComponent::NativeFunctionCompletion completion)
+            {
+                const auto req      = args.size() > 0 ? args[0] : juce::var();
+                const auto messages = req.getProperty ("messages", juce::var());
+                const auto provider = req.getProperty ("provider", juce::var()).toString();
+                juce::Thread::launch ([messages, provider, completion]() mutable
+                {
+                    auto result = BrainProxy::chat (messages, provider);
+                    juce::MessageManager::callAsync ([completion, result]() mutable { completion (result); });
+                });
+            })
+        // Native speech-to-text (packaged-app voice). isSupported() does NOT imply
+        // permission — that is requested on the first voice_start. Transcripts flow
+        // to the UI on the dedicated `voice_event` channel.
+        .withNativeFunction (
+            juce::Identifier ("voice_supported"),
+            [] (const juce::Array<juce::var>&,
+                juce::WebBrowserComponent::NativeFunctionCompletion completion)
+            {
+                auto* o = new juce::DynamicObject();
+                o->setProperty ("supported", NativeSpeech::isSupported());
+                completion (juce::var (o));
+            })
+        .withNativeFunction (
+            juce::Identifier ("voice_start"),
+            [this] (const juce::Array<juce::var>&,
+                    juce::WebBrowserComponent::NativeFunctionCompletion completion)
+            {
+                if (speech == nullptr)
+                    speech = std::make_unique<NativeSpeech>();
+
+                auto emit = [this] (const char* type, const juce::String& text, bool hasText)
+                {
+                    auto* o = new juce::DynamicObject();
+                    o->setProperty ("type", juce::String (type));
+                    if (hasText) o->setProperty ("text", text);
+                    emitEvent (juce::Identifier ("voice_event"), juce::var (o));
+                };
+
+                NativeSpeech::Callbacks cb;
+                cb.onStart   = [emit] { emit ("start", {}, false); };
+                cb.onInterim = [emit] (const juce::String& t) { emit ("interim", t, true); };
+                cb.onFinal   = [emit] (const juce::String& t) { emit ("final", t, true); };
+                cb.onStop    = [emit] { emit ("stop", {}, false); };
+                cb.onError   = [emit] (const juce::String& e) { emit ("error", e, true); };
+                speech->start (std::move (cb));
+
+                auto* ok = new juce::DynamicObject();
+                ok->setProperty ("ok", true);
+                completion (juce::var (ok));
+            })
+        .withNativeFunction (
+            juce::Identifier ("voice_stop"),
+            [this] (const juce::Array<juce::var>&,
+                    juce::WebBrowserComponent::NativeFunctionCompletion completion)
+            {
+                if (speech != nullptr) speech->stop();
+                auto* ok = new juce::DynamicObject();
+                ok->setProperty ("ok", true);
+                completion (juce::var (ok));
             })
         .withNativeFunction (
             juce::Identifier ("remote_start_pairing"),

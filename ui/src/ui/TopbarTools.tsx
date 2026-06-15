@@ -40,8 +40,37 @@ export function TopbarTools({ snapshot }: { snapshot: Snapshot }) {
       <ExportTool audioEnabled={audioEnabled} />
       <CommandLogTool />
       <RemoteTool />
-      <button className="btn icon" title="Toggle theme" onClick={toggleTheme}>{theme === "dark" ? "☾" : "☀"}</button>
+      <HelpTool />
+      <button className="btn icon" title="Toggle theme" aria-label="Toggle light/dark theme" onClick={toggleTheme}>{theme === "dark" ? "☾" : "☀"}</button>
     </div>
+  );
+}
+
+// Keyboard-shortcut help — the bindings live in Arrange's keydown handler + the
+// ruler/clip pointer handlers; surfaced here so they're discoverable.
+function HelpTool() {
+  const SHORTCUTS: [string, string][] = [
+    ["Space", "Play / pause"],
+    ["Delete  ⌫", "Remove selected clip"],
+    ["⌘/Ctrl + Z", "Undo"],
+    ["⌘/Ctrl + ⇧ + Z", "Redo"],
+    ["Drag clip", "Move · drag an edge to trim"],
+    ["Click ruler", "Seek · ⇧-drag sets the loop"],
+  ];
+  return (
+    <Pop label="?" title="Keyboard shortcuts">
+      {() => (
+        <>
+          <div className="pop-head">Shortcuts</div>
+          <div className="pop-group">
+            {SHORTCUTS.map(([k, d]) => (
+              <div className="pop-row" key={k}><span className="tc">{k}</span><span className="pop-note">{d}</span></div>
+            ))}
+          </div>
+          <div className="pop-note">Tools (Move / Split / Range) &amp; Snap live in the toolbar.</div>
+        </>
+      )}
+    </Pop>
   );
 }
 

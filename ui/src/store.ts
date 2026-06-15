@@ -11,6 +11,7 @@ import type {
 } from "./types";
 import type { RemoteStatus } from "./bridge";
 import { type SnapDiv, snapTimeMap, tempoMapFrom } from "./time";
+import type { ChangeSet } from "./agent/executor";
 
 export type Tool = "move" | "split" | "range";
 export type View = "arrange" | "mixer";
@@ -120,6 +121,26 @@ type State = {
 
   theme: "dark" | "light";
   toggleTheme: () => void;
+
+  // Moshi creature — UI-local signals the character watches (never cross the bridge).
+  // celebrateTick is bumped when a render is accepted (his reward moment); the voice
+  // settings are UI-local + persisted, exactly like theme/uiScale.
+  celebrateTick: number;
+  bumpCelebrate: () => void;
+  voiceOn: boolean;
+  voiceVol: number;
+  toggleVoice: () => void;
+
+  // Agent (Moshi running the session) — UI-local. agentChangeSet drives Monster
+  // changes; agentUtter signals the creature to react (voice + pose) to a reply.
+  agentBusy: boolean;
+  agentChangeSet: ChangeSet | null;
+  agentUtter: { intent: string; say?: string; tick: number } | null;
+  agentListening: boolean;            // hold-to-talk active — Moshi perks toward you
+  setAgentBusy: (b: boolean) => void;
+  setAgentChangeSet: (cs: ChangeSet | null) => void;
+  pushAgentUtter: (intent: string, say?: string) => void;
+  setAgentListening: (b: boolean) => void;
 
   // UI scale (ACC-005) — pure UI-local view state (like theme): never a command,
   // never crosses the bridge. Applied via document zoom so the whole WebView reflows.
@@ -413,6 +434,27 @@ export const useStore = create<State>((set, get) => ({
       document.documentElement.setAttribute("data-theme", next);
       return { theme: next };
     }),
+
+  celebrateTick: 0,
+  voiceOn: !(typeof localStorage !== "undefined" && localStorage.getItem("mosh.voiceOn") === "0"),
+  voiceVol: 0.55,
+  bumpCelebrate: () => set((s) => ({ celebrateTick: s.celebrateTick + 1 })),
+  toggleVoice: () =>
+    set((s) => {
+      const next = !s.voiceOn;
+      try { localStorage.setItem("mosh.voiceOn", next ? "1" : "0"); } catch { /* noop */ }
+      return { voiceOn: next };
+    }),
+
+  agentBusy: false,
+  agentChangeSet: null,
+  agentUtter: null,
+  agentListening: false,
+  setAgentBusy: (b) => set({ agentBusy: b }),
+  setAgentChangeSet: (cs) => set({ agentChangeSet: cs }),
+  pushAgentUtter: (intent, say) =>
+    set((s) => ({ agentUtter: { intent, say, tick: (s.agentUtter?.tick ?? 0) + 1 } })),
+  setAgentListening: (b) => set({ agentListening: b }),
 
   uiScale: 1,
   setUiScale: (n) =>

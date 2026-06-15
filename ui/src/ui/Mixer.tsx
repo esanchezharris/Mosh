@@ -4,6 +4,7 @@
 
 import { useStore } from "../store";
 import type { Snapshot, Track } from "../types";
+import { Moshi } from "./Moshi";
 
 export function Mixer({ snapshot }: { snapshot: Snapshot }) {
   const exec = useStore((s) => s.exec);
@@ -23,6 +24,7 @@ export function Mixer({ snapshot }: { snapshot: Snapshot }) {
           title="Master volume" onChange={(e) => void exec("set_master_volume", { db: Number(e.target.value) })} />
         <div className="strip-db tc">{(master?.volumeDb ?? 0).toFixed(1)} dB</div>
       </div>
+      <Moshi />
     </div>
   );
 }

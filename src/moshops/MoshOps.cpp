@@ -234,6 +234,8 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "set_metronome")     return cmdSetMetronome (args);
     if (name == "undo")              return cmdUndo (args);
     if (name == "redo")              return cmdRedo (args);
+    if (name == "batch_begin")       return cmdBatchBegin (args);
+    if (name == "batch_end")         return cmdBatchEnd (args);
     if (name == "save")              return cmdSave (args);
     if (name == "reload")            return cmdReload (args);
     if (name == "add_render_layer")  return cmdAddRenderLayer (args);
@@ -337,7 +339,7 @@ juce::var MoshOps::execute (const juce::var& command)
 // ─────────────────────────────────────────────────────────────────────────────
 juce::var MoshOps::cmdCreateTrack (const juce::var& args)
 {
-    undoManager().beginNewTransaction ("create_track");
+    beginTxn ("create_track");
     auto* track = createAudioTrack (args.getProperty ("name", var()).toString());
     if (track == nullptr)
     {
@@ -359,7 +361,7 @@ juce::var MoshOps::cmdRenameTrack (const juce::var& args)
     if (track == nullptr) track = findGroupTrack (id);   // MIX-008: groups rename too
     if (track == nullptr) return errResult ("rename_track", "no track: " + id);
 
-    undoManager().beginNewTransaction ("rename_track");
+    beginTxn ("rename_track");
     track->setName (args.getProperty ("name", var()).toString());
     logLine ("rename_track", args, true, {}, true);
     emitSnapshotInvalidated();
@@ -372,7 +374,7 @@ juce::var MoshOps::cmdRemoveTrack (const juce::var& args)
     auto* track = findTrack (id);
     if (track == nullptr) return errResult ("remove_track", "no track: " + id);
 
-    undoManager().beginNewTransaction ("remove_track");
+    beginTxn ("remove_track");
     eng.edit().deleteTrack (track);
     logLine ("remove_track", args, true, {}, true);
     emitSnapshotInvalidated();
@@ -400,7 +402,7 @@ juce::var MoshOps::importWaveFileToTrack (const juce::String& command,
         track = tracks.isEmpty() ? nullptr : tracks.getFirst();
     }
 
-    undoManager().beginNewTransaction (command);
+    beginTxn (command);
     if (track == nullptr)
         track = createAudioTrack ({});
     if (track == nullptr) return errResult (command, "no track");
@@ -559,7 +561,7 @@ juce::var MoshOps::cmdSetTempo (const juce::var& args)
     if (tempo == nullptr) return errResult ("set_tempo", "no tempo setting");
 
     const double bpm = juce::jlimit (20.0, 999.0, (double) args.getProperty ("bpm", 120.0));
-    undoManager().beginNewTransaction ("set_tempo");
+    beginTxn ("set_tempo");
     tempo->setBpm (bpm);
     logLine ("set_tempo", args, true, {}, true);
     emitSnapshotInvalidated();
@@ -580,7 +582,7 @@ juce::var MoshOps::cmdSetTimeSignature (const juce::var& args)
     for (int d : validDen) if (d == den) denOk = true;
     if (! denOk) return errResult ("set_time_signature", "denominator must be a power of two (1..32)");
 
-    undoManager().beginNewTransaction ("set_time_signature");
+    beginTxn ("set_time_signature");
     ts->setStringTimeSig (juce::String (num) + "/" + juce::String (den));
     logLine ("set_time_signature", args, true, {}, true);
     emitSnapshotInvalidated();
@@ -612,7 +614,7 @@ juce::var MoshOps::cmdInsertTempoChange (const juce::var& args)
     // step (hold-then-jump); values in (-1, 1) ramp: <0 log, 0 linear, >0 exponential.
     const double curve = juce::jlimit (-1.0, 1.0, (double) args.getProperty ("curve", 1.0));
 
-    undoManager().beginNewTransaction ("insert_tempo_change");
+    beginTxn ("insert_tempo_change");
     auto setting = edit.tempoSequence.insertTempo (tracktion::TimePosition::fromSeconds (time));
     if (setting == nullptr) return errResult ("insert_tempo_change", "insertTempo failed");
     setting->setBpm (bpm);
@@ -640,7 +642,7 @@ juce::var MoshOps::cmdSetTempoCurve (const juce::var& args)
 
     // The curve on point N shapes the span FROM point N TO point N+1 (the engine's
     // Section build gates the ramp subdivision on currTempo.curve != +-1).
-    undoManager().beginNewTransaction ("set_tempo_curve");
+    beginTxn ("set_tempo_curve");
     edit.tempoSequence.getTempo (index)->setCurve ((float) curve);
     logLine ("set_tempo_curve", args, true, {}, true);
     emitSnapshotInvalidated();
@@ -659,7 +661,7 @@ juce::var MoshOps::cmdRemoveTempoChange (const juce::var& args)
     if (index <= 0 || index >= edit.tempoSequence.getNumTempos())
         return errResult ("remove_tempo_change", "index must be 1..numTempos-1");
 
-    undoManager().beginNewTransaction ("remove_tempo_change");
+    beginTxn ("remove_tempo_change");
     // remapEdit=false: Mosh's command surface is seconds-anchored, so removing a
     // tempo point must not shift clip positions.
     edit.tempoSequence.removeTempo (index, false);
@@ -682,7 +684,7 @@ juce::var MoshOps::cmdInsertTimeSigChange (const juce::var& args)
     for (int d : validDen) if (d == den) denOk = true;
     if (! denOk) return errResult ("insert_time_sig_change", "denominator must be a power of two (1..32)");
 
-    undoManager().beginNewTransaction ("insert_time_sig_change");
+    beginTxn ("insert_time_sig_change");
     auto setting = edit.tempoSequence.insertTimeSig (tracktion::TimePosition::fromSeconds (time));
     if (setting == nullptr) return errResult ("insert_time_sig_change", "insertTimeSig failed");
     setting->setStringTimeSig (juce::String (num) + "/" + juce::String (den));
@@ -703,7 +705,7 @@ juce::var MoshOps::cmdRemoveTimeSigChange (const juce::var& args)
     if (index <= 0 || index >= edit.tempoSequence.getNumTimeSigs())
         return errResult ("remove_time_sig_change", "index must be 1..numTimeSigs-1");
 
-    undoManager().beginNewTransaction ("remove_time_sig_change");
+    beginTxn ("remove_time_sig_change");
     edit.tempoSequence.removeTimeSig (index);
     logLine ("remove_time_sig_change", args, true, {}, true);
     emitSnapshotInvalidated();
@@ -856,7 +858,7 @@ juce::var MoshOps::cmdCreateGroupTrack (const juce::var& args)
                 ++unknown;
         }
 
-    undoManager().beginNewTransaction ("create_group_track");
+    beginTxn ("create_group_track");
 
     auto folder = edit.insertNewFolderTrack (te::TrackInsertPoint::getEndOfTracks (edit),
                                              nullptr, /*asSubmix*/ true);
@@ -903,7 +905,7 @@ juce::var MoshOps::cmdUngroupTrack (const juce::var& args)
         if (t != nullptr && t->getParentTrack() == folder)
             children.add (t);
 
-    undoManager().beginNewTransaction ("ungroup_track");
+    beginTxn ("ungroup_track");
 
     // Hoist each child to the top level right after the folder (order preserved),
     // then delete the now-empty folder. One transaction = one undo step.
@@ -1075,7 +1077,7 @@ juce::var MoshOps::cmdSetTrackOutput (const juce::var& args)
         if (dest->getOutput().feedsInto (track))
             return errResult ("set_track_output", "routing would create a cycle");
 
-        undoManager().beginNewTransaction ("set_track_output");
+        beginTxn ("set_track_output");
         out.setOutputToTrack (dest);
         logLine ("set_track_output", args, true, {}, true);
         emitSnapshotInvalidated();
@@ -1101,7 +1103,7 @@ juce::var MoshOps::cmdSetTrackOutput (const juce::var& args)
                     if (wo->getDeviceID() == deviceID) { known = true; break; }
             if (! known) return errResult ("set_track_output", "unknown output device: " + deviceID);
         }
-        undoManager().beginNewTransaction ("set_track_output");
+        beginTxn ("set_track_output");
         out.setOutputToDeviceID (deviceID);
         logLine ("set_track_output", args, true, {}, true);
         emitSnapshotInvalidated();
@@ -1113,7 +1115,7 @@ juce::var MoshOps::cmdSetTrackOutput (const juce::var& args)
 
     if (args.getProperty ("output", var()).toString() == "default")
     {
-        undoManager().beginNewTransaction ("set_track_output");
+        beginTxn ("set_track_output");
         out.setOutputToDefaultDevice (false /*isMidi*/);
         logLine ("set_track_output", args, true, {}, true);
         emitSnapshotInvalidated();
@@ -1142,6 +1144,31 @@ juce::var MoshOps::cmdRedo (const juce::var& args)
     return okResult ("redo", var (did));
 }
 
+// Agent batch grouping: batch_begin opens ONE undo transaction; every command run
+// while inBatch skips its own beginNewTransaction (see beginTxn), so the whole batch
+// is a single undo step. batch_end closes it. The agent ("Monster changes") brackets
+// its edits with these so one Undo reverts the entire batch.
+juce::var MoshOps::cmdBatchBegin (const juce::var& args)
+{
+    if (inBatch)
+        return errResult ("batch_begin", "a batch is already open");
+    const auto label = args.getProperty ("name", var ("agent edit")).toString();
+    undoManager().beginNewTransaction (label);
+    inBatch = true;
+    logLine ("batch_begin", args, true, {}, false);
+    return okResult ("batch_begin");
+}
+
+juce::var MoshOps::cmdBatchEnd (const juce::var& args)
+{
+    if (! inBatch)
+        return errResult ("batch_end", "no batch is open");
+    inBatch = false;
+    logLine ("batch_end", args, true, {}, false);
+    emitSnapshotInvalidated();
+    return okResult ("batch_end");
+}
+
 juce::var MoshOps::cmdSave (const juce::var& args)
 {
     const bool ok = eng.save();
@@ -1165,7 +1192,7 @@ juce::var MoshOps::cmdAddRenderLayer (const juce::var& args)
     auto* clip = findClip (clipId);
     if (clip == nullptr) return errResult ("add_render_layer", "no clip: " + clipId);
 
-    undoManager().beginNewTransaction ("add_render_layer");
+    beginTxn ("add_render_layer");
     auto pos = clip->getPosition();
     auto node = RenderLayer::create (
         "rl-" + String (Time::getCurrentTime().toMilliseconds()),
@@ -1190,7 +1217,7 @@ juce::var MoshOps::cmdMoveClip (const juce::var& args)
     auto* clip = findClip (id);
     if (clip == nullptr) return errResult ("move_clip", "no clip: " + id);
 
-    undoManager().beginNewTransaction ("move_clip");
+    beginTxn ("move_clip");
     const double newStart = juce::jmax (0.0, (double) args.getProperty ("start", clip->getPosition().getStart().inSeconds()));
     clip->setStart (tracktion::TimePosition::fromSeconds (newStart), false, true);   // keep length
 
@@ -1216,7 +1243,7 @@ juce::var MoshOps::cmdTrimClip (const juce::var& args)
     const double length = juce::jmax (0.01, (double) args.getProperty ("length", pos.getLength().inSeconds()));
     const double offset = (double) args.getProperty ("offset", pos.getOffset().inSeconds());
 
-    undoManager().beginNewTransaction ("trim_clip");
+    beginTxn ("trim_clip");
     clip->setPosition ({ { tracktion::TimePosition::fromSeconds (start),
                            tracktion::TimeDuration::fromSeconds (length) },
                          tracktion::TimeDuration::fromSeconds (offset) });
@@ -1234,7 +1261,7 @@ juce::var MoshOps::cmdSplitClip (const juce::var& args)
     if (clipTrack == nullptr) return errResult ("split_clip", "clip not on a clip track");
 
     const double at = (double) args.getProperty ("time", 0.0);
-    undoManager().beginNewTransaction ("split_clip");
+    beginTxn ("split_clip");
     auto* newClip = clipTrack->splitClip (*clip, tracktion::TimePosition::fromSeconds (at));
 
     auto* data = new DynamicObject();
@@ -1248,7 +1275,7 @@ juce::var MoshOps::cmdRemoveClip (const juce::var& args)
 {
     auto* clip = findClip (args.getProperty ("clipId", var()).toString());
     if (clip == nullptr) return errResult ("remove_clip", "no clip");
-    undoManager().beginNewTransaction ("remove_clip");
+    beginTxn ("remove_clip");
     clip->removeFromParent();
     logLine ("remove_clip", args, true, {}, true);
     emitSnapshotInvalidated();
@@ -1259,7 +1286,7 @@ juce::var MoshOps::cmdRenameClip (const juce::var& args)
 {
     auto* clip = findClip (args.getProperty ("clipId", var()).toString());
     if (clip == nullptr) return errResult ("rename_clip", "no clip");
-    undoManager().beginNewTransaction ("rename_clip");
+    beginTxn ("rename_clip");
     clip->setName (args.getProperty ("name", var()).toString());
     logLine ("rename_clip", args, true, {}, true);
     emitSnapshotInvalidated();
@@ -1270,7 +1297,7 @@ juce::var MoshOps::cmdSetClipMute (const juce::var& args)
 {
     auto* clip = findClip (args.getProperty ("clipId", var()).toString());
     if (clip == nullptr) return errResult ("set_clip_mute", "no clip");
-    undoManager().beginNewTransaction ("set_clip_mute");
+    beginTxn ("set_clip_mute");
     clip->setMuted ((bool) args.getProperty ("mute", false));
     logLine ("set_clip_mute", args, true, {}, true);
     emitSnapshotInvalidated();
@@ -1281,7 +1308,7 @@ juce::var MoshOps::cmdSetClipGain (const juce::var& args)
 {
     auto* ac = dynamic_cast<te::AudioClipBase*> (findClip (args.getProperty ("clipId", var()).toString()));
     if (ac == nullptr) return errResult ("set_clip_gain", "not an audio clip");
-    undoManager().beginNewTransaction ("set_clip_gain");
+    beginTxn ("set_clip_gain");
     ac->setGainDB (juce::jlimit (-48.0f, 24.0f, (float) (double) args.getProperty ("gainDb", 0.0)));
     logLine ("set_clip_gain", args, true, {}, true);
     emitSnapshotInvalidated();
@@ -1301,7 +1328,7 @@ juce::var MoshOps::cmdSetClipWarp (const juce::var& args)
     if (! args.hasProperty ("autoTempo")) return errResult ("set_clip_warp", "missing 'autoTempo'");
     const bool on = (bool) args.getProperty ("autoTempo", false);
 
-    undoManager().beginNewTransaction ("set_clip_warp");
+    beginTxn ("set_clip_warp");
 
     if (on)
     {
@@ -1344,7 +1371,7 @@ juce::var MoshOps::cmdDuplicateClip (const juce::var& args)
     const double newStart = pos.getEnd().inSeconds();
     const double len = pos.getLength().inSeconds();
 
-    undoManager().beginNewTransaction ("duplicate_clip");
+    beginTxn ("duplicate_clip");
     te::Clip* dup = nullptr;
     if (auto* w = dynamic_cast<te::WaveAudioClip*> (clip))
     {
@@ -1417,7 +1444,7 @@ juce::var MoshOps::cmdDeleteTimeRange (const juce::var& args)
     const auto rStart = tracktion::TimePosition::fromSeconds (start);
     const auto rEnd   = tracktion::TimePosition::fromSeconds (end);
 
-    undoManager().beginNewTransaction ("delete_time_range");
+    beginTxn ("delete_time_range");
 
     int removed = 0, splits = 0;
     bool structurallyChanged = false;
@@ -1530,7 +1557,7 @@ juce::var MoshOps::cmdPasteClip (const juce::var& args)
 
     auto* track = findTrack (trackId);
 
-    undoManager().beginNewTransaction ("paste_clip");
+    beginTxn ("paste_clip");
     // Match cmdImportClip/cmdAddMidiClip: create the track if it's missing.
     if (track == nullptr)
         track = createAudioTrack ({});
@@ -1599,7 +1626,7 @@ juce::var MoshOps::cmdSetTrackVolume (const juce::var& args)
         vp = group->getVolumePlugin();
     if (vp == nullptr) return errResult ("set_track_volume", "no track");
 
-    undoManager().beginNewTransaction ("set_track_volume");
+    beginTxn ("set_track_volume");
     vp->setVolumeDb ((float) (double) args.getProperty ("db", 0.0));
     logLine ("set_track_volume", args, true, {}, true);
     emitSnapshotInvalidated();
@@ -1613,7 +1640,7 @@ juce::var MoshOps::cmdSetTrackPan (const juce::var& args)
     auto* vp = ensureVolumePlugin (*track);
     if (vp == nullptr) return errResult ("set_track_pan", "no volume plugin");
 
-    undoManager().beginNewTransaction ("set_track_pan");
+    beginTxn ("set_track_pan");
     vp->setPan (juce::jlimit (-1.0f, 1.0f, (float) (double) args.getProperty ("pan", 0.0)));
     logLine ("set_track_pan", args, true, {}, true);
     emitSnapshotInvalidated();
@@ -1624,7 +1651,7 @@ juce::var MoshOps::cmdSetTrackMute (const juce::var& args)
 {
     auto* track = findTrack (args.getProperty ("trackId", var()).toString());
     if (track == nullptr) return errResult ("set_track_mute", "no track");
-    undoManager().beginNewTransaction ("set_track_mute");
+    beginTxn ("set_track_mute");
     track->setMute ((bool) args.getProperty ("mute", false));
     logLine ("set_track_mute", args, true, {}, true);
     emitSnapshotInvalidated();
@@ -1635,7 +1662,7 @@ juce::var MoshOps::cmdSetTrackSolo (const juce::var& args)
 {
     auto* track = findTrack (args.getProperty ("trackId", var()).toString());
     if (track == nullptr) return errResult ("set_track_solo", "no track");
-    undoManager().beginNewTransaction ("set_track_solo");
+    beginTxn ("set_track_solo");
     track->setSolo ((bool) args.getProperty ("solo", false));
     logLine ("set_track_solo", args, true, {}, true);
     emitSnapshotInvalidated();
@@ -1918,7 +1945,7 @@ juce::var MoshOps::cmdSetMasterVolume (const juce::var& args)
 {
     auto mvp = eng.edit().getMasterVolumePlugin();
     if (mvp == nullptr) return errResult ("set_master_volume", "no master plugin");
-    undoManager().beginNewTransaction ("set_master_volume");
+    beginTxn ("set_master_volume");
     mvp->setVolumeDb (juce::jlimit (-48.0f, 6.0f, (float) (double) args.getProperty ("db", 0.0)));
     logLine ("set_master_volume", args, true, {}, true);
     emitSnapshotInvalidated();
@@ -1929,7 +1956,7 @@ juce::var MoshOps::cmdSetMasterPan (const juce::var& args)
 {
     auto mvp = eng.edit().getMasterVolumePlugin();
     if (mvp == nullptr) return errResult ("set_master_pan", "no master plugin");
-    undoManager().beginNewTransaction ("set_master_pan");
+    beginTxn ("set_master_pan");
     mvp->setPan (juce::jlimit (-1.0f, 1.0f, (float) (double) args.getProperty ("pan", 0.0)));
     logLine ("set_master_pan", args, true, {}, true);
     emitSnapshotInvalidated();
@@ -1940,7 +1967,7 @@ juce::var MoshOps::cmdEnableTrackMeter (const juce::var& args)
 {
     auto* track = findTrack (args.getProperty ("trackId", var()).toString());
     if (track == nullptr) return errResult ("enable_track_meter", "no track");
-    undoManager().beginNewTransaction ("enable_track_meter");
+    beginTxn ("enable_track_meter");
     if (ensureTrackMeter (*track) == nullptr) return errResult ("enable_track_meter", "could not create meter");
     logLine ("enable_track_meter", args, true, {}, true);
     emitSnapshotInvalidated();
@@ -1958,7 +1985,7 @@ juce::var MoshOps::cmdDisableTrackMeter (const juce::var& args)
             it->second->plugin->measurer.removeClient (it->second->client);   // unregister before delete
         meterClients.erase (it);
     }
-    undoManager().beginNewTransaction ("disable_track_meter");
+    beginTxn ("disable_track_meter");
     if (auto* lm = findTrackMeter (*track)) lm->deleteFromParent();
     logLine ("disable_track_meter", args, true, {}, true);
     emitSnapshotInvalidated();
@@ -1967,7 +1994,7 @@ juce::var MoshOps::cmdDisableTrackMeter (const juce::var& args)
 
 juce::var MoshOps::cmdEnableAllMeters (const juce::var& args)
 {
-    undoManager().beginNewTransaction ("enable_all_meters");
+    beginTxn ("enable_all_meters");
     int n = 0;
     for (auto* t : te::getAudioTracks (eng.edit()))
         if (t != nullptr && ensureTrackMeter (*t) != nullptr) ++n;
@@ -2021,7 +2048,7 @@ juce::var MoshOps::cmdCreateBus (const juce::var& args)
     auto name = args.getProperty ("name", var()).toString();
     if (name.isEmpty()) name = "Bus " + String (bus + 1);
 
-    undoManager().beginNewTransaction ("create_bus");
+    beginTxn ("create_bus");
     auto* track = createAudioTrack (name);
     if (track == nullptr) return errResult ("create_bus", "could not create return track");
 
@@ -2050,7 +2077,7 @@ juce::var MoshOps::cmdAddSend (const juce::var& args)
     if (findReturnTrackForBus (bus) == nullptr) return errResult ("add_send", "no such bus");
     if (track->getAuxSendPlugin (bus) != nullptr) return errResult ("add_send", "send already exists");
 
-    undoManager().beginNewTransaction ("add_send");
+    beginTxn ("add_send");
     auto plugin = eng.edit().getPluginCache().createNewPlugin (te::AuxSendPlugin::xmlTypeName, {});
     if (plugin == nullptr) return errResult ("add_send", "could not create aux send");
     if (auto* s = dynamic_cast<te::AuxSendPlugin*> (plugin.get()))
@@ -2071,7 +2098,7 @@ juce::var MoshOps::cmdSetSendLevel (const juce::var& args)
     if (track == nullptr) return errResult ("set_send_level", "no track");
     auto* s = track->getAuxSendPlugin ((int) args.getProperty ("bus", -1));
     if (s == nullptr) return errResult ("set_send_level", "no send to that bus");
-    undoManager().beginNewTransaction ("set_send_level");
+    beginTxn ("set_send_level");
     s->setGainDb (juce::jlimit (-100.0f, 6.0f, (float) (double) args.getProperty ("db", 0.0)));
     logLine ("set_send_level", args, true, {}, true);
     emitSnapshotInvalidated();
@@ -2084,7 +2111,7 @@ juce::var MoshOps::cmdRemoveSend (const juce::var& args)
     if (track == nullptr) return errResult ("remove_send", "no track");
     auto* s = track->getAuxSendPlugin ((int) args.getProperty ("bus", -1));
     if (s == nullptr) return errResult ("remove_send", "no send to that bus");
-    undoManager().beginNewTransaction ("remove_send");
+    beginTxn ("remove_send");
     s->deleteFromParent();
     logLine ("remove_send", args, true, {}, true);
     emitSnapshotInvalidated();
@@ -2098,7 +2125,7 @@ juce::var MoshOps::cmdRemoveBus (const juce::var& args)
     auto* returnTrack = findReturnTrackForBus (bus);
     if (returnTrack == nullptr) return errResult ("remove_bus", "no such bus");
 
-    undoManager().beginNewTransaction ("remove_bus");
+    beginTxn ("remove_bus");
     // Sweep orphan sends pointing at this bus, then drop the name + the return track.
     for (auto* t : te::getAudioTracks (eng.edit()))
         if (t != nullptr)
@@ -2116,7 +2143,7 @@ juce::var MoshOps::cmdRenameBus (const juce::var& args)
     const int bus = (int) args.getProperty ("bus", -1);
     auto* returnTrack = findReturnTrackForBus (bus);
     if (returnTrack == nullptr) return errResult ("rename_bus", "no such bus");
-    undoManager().beginNewTransaction ("rename_bus");
+    beginTxn ("rename_bus");
     const auto name = args.getProperty ("name", var()).toString();
     eng.edit().setAuxBusName (bus, name);
     returnTrack->setName (name);
@@ -2234,7 +2261,7 @@ juce::var MoshOps::cmdLoadBuiltin (const juce::var& args)
     const auto* spec = findBuiltin (type);
     if (spec == nullptr) return errResult ("load_builtin", "unknown builtin: " + type);
 
-    undoManager().beginNewTransaction ("load_builtin");
+    beginTxn ("load_builtin");
     // Same cache path as load_plugin — the inserted plugin IS the one we hold.
     auto plugin = eng.edit().getPluginCache().createNewPlugin (type, {});
     if (plugin == nullptr) return errResult ("load_builtin", "create failed: " + type);
@@ -2263,7 +2290,7 @@ juce::var MoshOps::cmdLoadPlugin (const juce::var& args)
     if (! pluginHost.findDescription (pluginId, desc))
         return errResult ("load_plugin", "unknown plugin: " + pluginId);
 
-    undoManager().beginNewTransaction ("load_plugin");
+    beginTxn ("load_plugin");
     // MUST use the Edit's PluginCache so the inserted plugin IS the one we hold
     // (PluginManager::createNewPlugin yields a different instance → insertPlugin
     // re-creates from state, indexOf fails, and it asserts — engine's own note).
@@ -2290,7 +2317,7 @@ juce::var MoshOps::cmdRemovePlugin (const juce::var& args)
                                (int) args.getProperty ("index", -1));
     if (plugin == nullptr) return errResult ("remove_plugin", "no plugin");
     pluginHost.closeEditor (*plugin);
-    undoManager().beginNewTransaction ("remove_plugin");
+    beginTxn ("remove_plugin");
     plugin->deleteFromParent();
     logLine ("remove_plugin", args, true, {}, true);
     emitSnapshotInvalidated();
@@ -2307,7 +2334,7 @@ juce::var MoshOps::cmdReorderPlugin (const juce::var& args)
     if (from < 0 || from >= plugins.size()) return errResult ("reorder_plugin", "bad index");
 
     te::Plugin::Ptr p = plugins[from];
-    undoManager().beginNewTransaction ("reorder_plugin");
+    beginTxn ("reorder_plugin");
     p->removeFromParent();
     track->pluginList.insertPlugin (p, to, nullptr);
     logLine ("reorder_plugin", args, true, {}, true);
@@ -2326,7 +2353,7 @@ juce::var MoshOps::cmdSetPluginParam (const juce::var& args)
 
     auto param = plugin->getAutomatableParameter (pi);
     const float norm = juce::jlimit (0.0f, 1.0f, (float) (double) args.getProperty ("value", 0.0));
-    undoManager().beginNewTransaction ("set_plugin_param");
+    beginTxn ("set_plugin_param");
     param->setParameter (param->valueRange.convertFrom0to1 (norm), juce::sendNotification);
     logLine ("set_plugin_param", args, true, {}, true);
     emitSnapshotInvalidated();
@@ -2339,7 +2366,7 @@ juce::var MoshOps::cmdBypassPlugin (const juce::var& args)
                                (int) args.getProperty ("index", -1));
     if (plugin == nullptr) return errResult ("bypass_plugin", "no plugin");
     const bool bypassed = (bool) args.getProperty ("bypassed", false);
-    undoManager().beginNewTransaction ("bypass_plugin");
+    beginTxn ("bypass_plugin");
     plugin->setEnabled (! bypassed);          // enabled == not bypassed
     logLine ("bypass_plugin", args, true, {}, true);
     emitSnapshotInvalidated();
@@ -2522,7 +2549,7 @@ juce::var MoshOps::cmdAddAutomationPoint (const juce::var& args)
     if (param == nullptr) return errResult ("add_automation_point", "no such parameter");
     const double t = juce::jmax (0.0, (double) args.getProperty ("time", 0.0));
     const float norm = juce::jlimit (0.0f, 1.0f, (float) (double) args.getProperty ("value", 0.0));
-    undoManager().beginNewTransaction ("add_automation_point");
+    beginTxn ("add_automation_point");
     const int idx = param->getCurve().addPoint (tracktion::TimePosition::fromSeconds (t),
                                                  param->valueRange.convertFrom0to1 (norm), 0.0f, &undoManager());
     logLine ("add_automation_point", args, true, {}, true);
@@ -2538,7 +2565,7 @@ juce::var MoshOps::cmdRemoveAutomationPoint (const juce::var& args)
     auto& curve = param->getCurve();
     const int idx = (int) args.getProperty ("pointIndex", -1);
     if (idx < 0 || idx >= curve.getNumPoints()) return errResult ("remove_automation_point", "bad pointIndex");
-    undoManager().beginNewTransaction ("remove_automation_point");
+    beginTxn ("remove_automation_point");
     curve.removePoint (idx, &undoManager());
     logLine ("remove_automation_point", args, true, {}, true);
     emitSnapshotInvalidated();
@@ -2557,7 +2584,7 @@ juce::var MoshOps::cmdSetAutomationPoint (const juce::var& args)
     const double t = juce::jmax (0.0, (double) args.getProperty ("time", curve.getPointTime (idx).inSeconds()));
     const float norm = juce::jlimit (0.0f, 1.0f,
         (float) (double) args.getProperty ("value", param->valueRange.convertTo0to1 (curve.getPointValue (idx))));
-    undoManager().beginNewTransaction ("set_automation_point");
+    beginTxn ("set_automation_point");
     curve.removePoint (idx, &undoManager());
     const int newIdx = curve.addPoint (tracktion::TimePosition::fromSeconds (t),
                                        param->valueRange.convertFrom0to1 (norm), 0.0f, &undoManager());
@@ -2571,7 +2598,7 @@ juce::var MoshOps::cmdClearAutomation (const juce::var& args)
 {
     auto* param = findParam (args);
     if (param == nullptr) return errResult ("clear_automation", "no such parameter");
-    undoManager().beginNewTransaction ("clear_automation");
+    beginTxn ("clear_automation");
     param->getCurve().clear (&undoManager());
     logLine ("clear_automation", args, true, {}, true);
     emitSnapshotInvalidated();
@@ -2600,7 +2627,7 @@ juce::var MoshOps::cmdOpenPluginEditor (const juce::var& args)
 juce::var MoshOps::cmdAddMidiClip (const juce::var& args)
 {
     auto* track = findTrack (args.getProperty ("trackId", var()).toString());
-    undoManager().beginNewTransaction ("add_midi_clip");
+    beginTxn ("add_midi_clip");
     if (track == nullptr)
         track = createAudioTrack ({});
     if (track == nullptr) return errResult ("add_midi_clip", "no track");
@@ -2652,7 +2679,7 @@ juce::var MoshOps::cmdAddNote (const juce::var& args)
     const double length = juce::jmax (0.0625, (double) args.getProperty ("length", 1.0));
     const int vel = juce::jlimit (1, 127, (int) args.getProperty ("velocity", 100));
 
-    undoManager().beginNewTransaction ("add_note");
+    beginTxn ("add_note");
     mc->getSequence().addNote (pitch, tracktion::BeatPosition::fromBeats (start),
                                tracktion::BeatDuration::fromBeats (length), vel, 0, &undoManager());
     logLine ("add_note", args, true, {}, true);
@@ -2670,7 +2697,7 @@ juce::var MoshOps::cmdRemoveNote (const juce::var& args)
     const int idx = (int) args.getProperty ("noteIndex", -1);
     if (idx < 0 || idx >= seq.getNumNotes()) return errResult ("remove_note", "bad noteIndex");
 
-    undoManager().beginNewTransaction ("remove_note");
+    beginTxn ("remove_note");
     seq.removeNote (*seq.getNote (idx), &undoManager());
     logLine ("remove_note", args, true, {}, true);
     emitSnapshotInvalidated();
@@ -2686,7 +2713,7 @@ juce::var MoshOps::cmdSetNote (const juce::var& args)
     if (idx < 0 || idx >= seq.getNumNotes()) return errResult ("set_note", "bad noteIndex");
     auto* note = seq.getNote (idx);
 
-    undoManager().beginNewTransaction ("set_note");
+    beginTxn ("set_note");
     if (args.hasProperty ("pitch"))
         note->setNoteNumber (juce::jlimit (0, 127, (int) args.getProperty ("pitch", note->getNoteNumber())), &undoManager());
     if (args.hasProperty ("start") || args.hasProperty ("length"))
@@ -2713,7 +2740,7 @@ juce::var MoshOps::cmdQuantizeNotes (const juce::var& args)
     const double division = juce::jmax (0.03125, (double) args.getProperty ("division", 1.0));   // beats
     const double strength = juce::jlimit (0.0, 1.0, (double) args.getProperty ("strength", 1.0));
 
-    undoManager().beginNewTransaction ("quantize_notes");
+    beginTxn ("quantize_notes");
     int moved = 0;
     for (int i = 0; i < seq.getNumNotes(); ++i)
     {
@@ -2742,7 +2769,7 @@ juce::var MoshOps::cmdAddNeuralInsert (const juce::var& args)
     auto* track = findTrack (args.getProperty ("trackId", var()).toString());
     if (track == nullptr) return errResult ("add_neural_insert", "no track");
 
-    undoManager().beginNewTransaction ("add_neural_insert");
+    beginTxn ("add_neural_insert");
     auto plugin = eng.edit().getPluginCache().createNewPlugin (NeuralInsertPlugin::xmlTypeName, {});
     if (plugin == nullptr) return errResult ("add_neural_insert", "create failed");
     if (auto* n = asNeural (plugin.get()))
@@ -2764,7 +2791,7 @@ juce::var MoshOps::cmdSetNeuralParam (const juce::var& args)
     auto* n = asNeural (findPlugin (args.getProperty ("trackId", var()).toString(),
                                     (int) args.getProperty ("index", -1)));
     if (n == nullptr) return errResult ("set_neural_param", "no neural insert");
-    undoManager().beginNewTransaction ("set_neural_param");
+    beginTxn ("set_neural_param");
     n->setNeuralParamUi (args.getProperty ("paramId", "drive").toString(),
                          (float) (double) args.getProperty ("value", 0.0));   // 0–100 UI
     logLine ("set_neural_param", args, true, {}, true);
@@ -2777,7 +2804,7 @@ juce::var MoshOps::cmdSetNeuralLabMode (const juce::var& args)
     auto* n = asNeural (findPlugin (args.getProperty ("trackId", var()).toString(),
                                     (int) args.getProperty ("index", -1)));
     if (n == nullptr) return errResult ("set_neural_lab_mode", "no neural insert");
-    undoManager().beginNewTransaction ("set_neural_lab_mode");
+    beginTxn ("set_neural_lab_mode");
     n->setLabMode ((bool) args.getProperty ("on", false));
     logLine ("set_neural_lab_mode", args, true, {}, true);
     emitSnapshotInvalidated();
@@ -2830,7 +2857,7 @@ juce::var MoshOps::cmdCreateRenderLayer (const juce::var& args)
     if (clip->state.getChildWithName (ids::MOSH_RENDERLAYER).isValid())
         return errResult ("create_render_layer", "clip already has a render layer");
 
-    undoManager().beginNewTransaction ("create_render_layer");
+    beginTxn ("create_render_layer");
     auto pos = clip->getPosition();
     auto node = RenderLayer::create ("rl-" + String (Time::getCurrentTime().toMilliseconds()),
         clipId, pos.getStart().inSeconds(), pos.getEnd().inSeconds(),
@@ -2851,7 +2878,7 @@ juce::var MoshOps::cmdSetRenderParam (const juce::var& args)
     auto node = findRenderLayer (args.getProperty ("clipId", var()).toString());
     if (! node.isValid()) return errResult ("set_render_param", "no render layer");
 
-    undoManager().beginNewTransaction ("set_render_param");
+    beginTxn ("set_render_param");
     auto params = node.getChildWithName (ids::PARAMS);
     if (args.hasProperty ("prompt")) params.setProperty (ids::prompt, args.getProperty ("prompt", ""), &undoManager());
     if (args.hasProperty ("cfg"))    params.setProperty (ids::cfg, args.getProperty ("cfg", 7.0), &undoManager());
@@ -3062,7 +3089,7 @@ juce::var MoshOps::cmdAcceptRender (const juce::var& args)
 
     // Landing: new clip on a dedicated "neural" lane (the documented guaranteed
     // fallback, 05 §3.1 — ships as a user-selectable mode, not a defeat).
-    undoManager().beginNewTransaction ("accept_render");
+    beginTxn ("accept_render");
     auto& edit = eng.edit();
     te::AudioTrack* lane = nullptr;
     for (auto* t : te::getAudioTracks (edit))
@@ -3098,7 +3125,7 @@ juce::var MoshOps::cmdRejectRender (const juce::var& args)
 {
     auto node = findRenderLayer (args.getProperty ("clipId", var()).toString());
     if (! node.isValid()) return errResult ("reject_render", "no render layer");
-    undoManager().beginNewTransaction ("reject_render");
+    beginTxn ("reject_render");
     node.setProperty (ids::userKept, false, &undoManager());
     node.setProperty (ids::status, "dirty", &undoManager());
     logLine ("reject_render", args, true, {}, true);   // TASTE LABEL (reject)
@@ -3110,7 +3137,7 @@ juce::var MoshOps::cmdBypassLayer (const juce::var& args)
 {
     auto node = findRenderLayer (args.getProperty ("clipId", var()).toString());
     if (! node.isValid()) return errResult ("bypass_layer", "no render layer");
-    undoManager().beginNewTransaction ("bypass_layer");
+    beginTxn ("bypass_layer");
     node.setProperty (ids::status, (bool) args.getProperty ("bypassed", false) ? "bypassed" : "ready", &undoManager());
     logLine ("bypass_layer", args, true, {}, true);
     emitSnapshotInvalidated();
@@ -3124,7 +3151,7 @@ juce::var MoshOps::cmdFreezeLayer (const juce::var& args)
     if (! node.isValid()) return errResult ("freeze_layer", "no render layer");
     if (! juce::File (node[ids::cacheArtifact].toString()).existsAsFile())
         return errResult ("freeze_layer", "nothing rendered to freeze");
-    undoManager().beginNewTransaction ("freeze_layer");
+    beginTxn ("freeze_layer");
     node.setProperty (ids::status, "frozen", &undoManager());
     logLine ("freeze_layer", args, true, {}, true);
     emitSnapshotInvalidated();
@@ -3156,7 +3183,7 @@ juce::var MoshOps::cmdRemoveRenderLayer (const juce::var& args)
     auto node = clip->state.getChildWithName (ids::MOSH_RENDERLAYER);
     if (! node.isValid()) return errResult ("remove_render_layer", "clip has no render layer");
 
-    undoManager().beginNewTransaction ("remove_render_layer");
+    beginTxn ("remove_render_layer");
     clip->state.removeChild (node, &undoManager());
     logLine ("remove_render_layer", args, true, {}, true);
     emitSnapshotInvalidated();

@@ -544,7 +544,7 @@ function Moshi(host, opts = {}) {
   }, opts);
 
   const cv = document.createElement('canvas');
-  cv.style.cssText = 'width:100%;height:100%;display:block;image-rendering:pixelated;image-rendering:crisp-edges;';
+  cv.style.cssText = 'width:100%;height:100%;display:block;';
   host.appendChild(cv);
 
   let gl = null, prog = null, U = {}, dead = false;
@@ -591,8 +591,9 @@ function Moshi(host, opts = {}) {
     const Q = QUALITY[O.quality] || QUALITY['ps2'];
     const div = O.resDiv != null ? O.resDiv : Q.div;
     const r = host.getBoundingClientRect();
-    const W = Math.max(24, Math.min(O.maxW != null ? O.maxW : Q.maxW, Math.floor(r.width / div))),
-          H = Math.max(24, Math.min(O.maxH != null ? O.maxH : Q.maxH, Math.floor(r.height / div)));
+    const dpr = Math.min(window.devicePixelRatio || 1, 3);   // render at physical px (retina-crisp), capped so huge-DPR hosts don't overshoot maxW
+    const W = Math.max(24, Math.min(O.maxW != null ? O.maxW : Q.maxW, Math.floor(r.width * dpr / div))),
+          H = Math.max(24, Math.min(O.maxH != null ? O.maxH : Q.maxH, Math.floor(r.height * dpr / div)));
     if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
     gl && gl.viewport(0, 0, W, H);
   }

@@ -81,6 +81,9 @@ let snapshot: Snapshot = seedSnapshot();
 const clone = (s: Snapshot): Snapshot => JSON.parse(JSON.stringify(s)) as Snapshot;
 const history: Snapshot[] = [];
 const future: Snapshot[] = [];
+// Agent batch grouping (mirrors the backend batch_begin/batch_end): while a batch
+// is open, per-command pushUndo() is suppressed so the whole batch is ONE undo step.
+let inBatch = false;
 
 // ── event bus (mirrors window.__JUCE__.backend on the real side) ─────────────
 
@@ -137,7 +140,7 @@ function findClip(clipId: string): { track: Track; clip: Clip } | null {
 function findTrack(trackId: string): Track | null {
   return snapshot.tracks.find((t) => t.id === trackId) ?? null;
 }
-function pushUndo() { history.push(clone(snapshot)); future.length = 0; if (history.length > 100) history.shift(); }
+function pushUndo() { if (inBatch) return; history.push(clone(snapshot)); future.length = 0; if (history.length > 100) history.shift(); }
 
 const ok = (command: string, data?: unknown): CommandResult => ({ ok: true, command, data });
 const err = (command: string, error: string): CommandResult => ({ ok: false, command, error });
@@ -304,6 +307,14 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     case "redo": {
       if (!future.length) return ok(command, { redone: false });
       history.push(clone(snapshot)); snapshot = future.pop()!; stopPlayback(); invalidate(); return ok(command, { redone: true });
+    }
+    case "batch_begin": {
+      if (inBatch) return err(command, "a batch is already open");
+      pushUndo(); inBatch = true; return ok(command);
+    }
+    case "batch_end": {
+      if (!inBatch) return err(command, "no batch is open");
+      inBatch = false; invalidate(); return ok(command);
     }
     case "save": case "reload": return ok(command);
 
