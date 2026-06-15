@@ -2,7 +2,10 @@
 #include "engine/MoshEngine.h"
 #include "moshops/MoshOps.h"
 #include "plugins/neural/NeuralInsertPlugin.h"
+#include "brain/BrainProxy.h"
+#include "voice/NativeSpeech.h"
 #include <atomic>
+#include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <vector>
@@ -246,6 +249,25 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     check (logsCommand ("import_clip"),  "JSONL records import_clip");
     check (logsCommand ("set_transport"),"JSONL records set_transport");
     check (logsCommand ("undo"),         "JSONL records undo");
+
+    // ─── Agent batch (batch_begin/end): N edits coalesce into ONE undo step ───
+    // This is what "Monster changes" rides on — the agent brackets its edits so a
+    // single Undo reverts the whole thing. Leaves state unchanged for Stage 2.
+    section ("Agent batch: N edits = one undo step");
+    const int batchBase = tracks (ops);
+    check (ok (cmd (ops, "batch_begin", objN ({ { "name", "agent edit" } }))), "batch_begin ok");
+    check (! ok (cmd (ops, "batch_begin")), "second batch_begin errors (already open)");
+    cmd (ops, "create_track", objN ({ { "name", "Agent A" } }));
+    cmd (ops, "create_track", objN ({ { "name", "Agent B" } }));
+    check (tracks (ops) == batchBase + 2, "two tracks created inside the batch");
+    check (ok (cmd (ops, "batch_end")), "batch_end ok");
+    check (! ok (cmd (ops, "batch_end")), "second batch_end errors (none open)");
+    cmd (ops, "undo");
+    check (tracks (ops) == batchBase, "one undo reverts the whole batch (both tracks gone)");
+    cmd (ops, "redo");
+    check (tracks (ops) == batchBase + 2, "one redo restores the whole batch");
+    cmd (ops, "undo");
+    check (tracks (ops) == batchBase, "batch undone again — clean state for Stage 2");
 
     // ─── Stage 2: arrangement editing + mixer stub ───
     section ("Stage 2: arrangement + mixer");
@@ -2680,6 +2702,57 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (warpU, "warp: set_clip_warp logged undoable:true");
 
         cmd (ops, "remove_track", args1 ("trackId", wt));   // tidy
+    }
+
+    section ("Moshi brain proxy + native voice (packaged-app pieces)");
+    {
+        // Deterministic provider resolution — set known env, no network calls.
+        ::setenv ("DEEPSEEK_BASE_URL", "https://api.deepseek.test", 1);
+        ::setenv ("DEEPSEEK_MODEL", "deepseek-test", 1);
+        ::setenv ("DEEPSEEK_API_KEY", "sk-test-deepseek", 1);
+        ::setenv ("XAI_BASE_URL", "https://api.x.test", 1);
+        ::setenv ("XAI_MODEL", "grok-test", 1);
+        ::setenv ("XAI_API_KEY", "sk-test-xai", 1);
+        ::unsetenv ("OPENAI_API_KEY");          // leave openai incomplete
+        ::setenv ("MOSHI_BRAIN_PROVIDER", "xai", 1);
+
+        auto info  = BrainProxy::providersInfo();
+        auto provs = info.getProperty ("providers", var());
+        check (provs.isArray() && provs.getArray()->size() == 3,
+               "brain: three providers enumerated (deepseek/openai/xai)");
+
+        auto chosen = BrainProxy::resolve();    // honours MOSHI_BRAIN_PROVIDER=xai
+        check (chosen.id == "xai", "brain: MOSHI_BRAIN_PROVIDER selects the default provider");
+        check (chosen.url == "https://api.x.test" && chosen.model == "grok-test",
+               "brain: resolved provider carries its env url/model");
+
+        check (BrainProxy::resolve ("deepseek").id == "deepseek",
+               "brain: an explicit complete provider is honoured over the default");
+
+        auto fallback = BrainProxy::resolve ("openai");   // incomplete → fall back
+        check (fallback.id != "openai" && fallback.isComplete(),
+               "brain: an incomplete requested provider falls back to a configured one");
+
+        auto badShape = BrainProxy::chat (var(), "deepseek");   // not an array → no HTTP
+        check (! (bool) badShape.getProperty ("ok", true)
+                   && badShape.getProperty ("error", var()).toString().isNotEmpty(),
+               "brain: chat() rejects a non-array messages payload with an error shape");
+
+        // Clear every key → no provider resolves and chat() errors cleanly (no network).
+        ::unsetenv ("DEEPSEEK_API_KEY"); ::unsetenv ("XAI_API_KEY"); ::unsetenv ("MOSHI_BRAIN_PROVIDER");
+        check (! BrainProxy::resolve().isComplete(), "brain: nothing resolves when no key is set");
+        auto noProv = BrainProxy::chat (var (Array<var>{}), {});
+        check (! (bool) noProv.getProperty ("ok", true),
+               "brain: chat() with no provider returns { ok:false } (no crash, no network)");
+
+        // Native speech: probe availability + lifecycle without requesting permission.
+       #if JUCE_MAC
+        check (NativeSpeech::isSupported(), "voice: macOS Speech available (SFSpeechRecognizer present)");
+       #endif
+        NativeSpeech sp;
+        check (! sp.isListening(), "voice: a fresh NativeSpeech is idle");
+        sp.stop();   // stop-while-idle must be a safe no-op
+        check (! sp.isListening(), "voice: stop() while idle is a safe no-op");
     }
 
     finishSection();

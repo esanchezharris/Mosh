@@ -7,5 +7,7 @@
   <array>
     <string>_moshcompanion._tcp</string>
   </array>
+  <key>NSSpeechRecognitionUsageDescription</key>
+  <string>Mosh transcribes your voice so you can talk to Moshi, your in-app collaborator, instead of typing.</string>
 </dict>
 </plist>

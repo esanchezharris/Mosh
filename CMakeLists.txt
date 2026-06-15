@@ -50,6 +50,10 @@ if (MOSH_BUILD_APP)
         list(APPEND MOSH_APP_EXTRA_ARGS
             LOCAL_NETWORK_PERMISSION_ENABLED TRUE
             LOCAL_NETWORK_PERMISSION_TEXT "Mosh uses the local network to pair with the iPhone companion while you are near this Mac."
+            # Microphone: recording + native voice (NSMicrophoneUsageDescription).
+            MICROPHONE_PERMISSION_ENABLED TRUE
+            MICROPHONE_PERMISSION_TEXT "Mosh uses the microphone to record audio and to let you talk to Moshi, your in-app collaborator."
+            # NSSpeechRecognitionUsageDescription rides in the merged plist (no JUCE flag).
             PLIST_TO_MERGE "${CMAKE_SOURCE_DIR}/cmake/MoshRemoteInfo.plist")
     endif()
 
@@ -66,6 +70,9 @@ if (MOSH_BUILD_APP)
         src/app/WebViewShell.cpp
         src/app/SelfTest.cpp
         src/webview/WebBridge.cpp
+        # Moshi's brain (server-side LLM proxy) + native voice (macOS Speech) — the
+        # packaged-app equivalents of the Vite dev brain proxy + browser Web Speech.
+        src/brain/BrainProxy.cpp
         # Stage 1 — Engine + MoshOps spine + state feed (01, 02)
         src/engine/MoshEngine.cpp
         src/moshops/MoshOps.cpp
@@ -110,6 +117,25 @@ if (MOSH_BUILD_APP)
 
     if (MOSH_ENABLE_RTNEURAL AND TARGET mosh_neural_backends)
         target_link_libraries(Mosh PRIVATE mosh_neural_backends)
+    endif()
+
+    # ── Native voice: macOS Speech (SFSpeechRecognizer + AVAudioEngine) ───────
+    # Obj-C++ with ARC; the browser Web Speech API covers the Vite dev path. The
+    # .mm is Apple-only (Windows/Linux fall back to the disabled-mic UI state).
+    if (APPLE)
+        target_sources(Mosh PRIVATE src/voice/NativeSpeech.mm)
+        set_source_files_properties(src/voice/NativeSpeech.mm PROPERTIES COMPILE_FLAGS "-fobjc-arc")
+        target_link_libraries(Mosh PRIVATE "-framework Speech" "-framework AVFoundation")
+
+        # JUCE's PLIST_TO_MERGE is honoured ONLY by the Xcode generator; under Makefiles/
+        # Ninja the bundle Info.plist omits those keys. NSSpeechRecognitionUsageDescription
+        # is mandatory — without it SFSpeechRecognizer authorization TCC-crashes the app —
+        # so inject it directly into the built bundle. (Mic perm rides JUCE's built-in flag.)
+        add_custom_command(TARGET Mosh POST_BUILD
+            COMMAND /usr/bin/plutil -replace NSSpeechRecognitionUsageDescription
+                    -string "Mosh transcribes your voice so you can talk to Moshi, your in-app collaborator, instead of typing."
+                    "$<TARGET_BUNDLE_DIR:Mosh>/Contents/Info.plist"
+            VERBATIM)
     endif()
 
     # ── UI bundle (Vite) ─────────────────────────────────────────────────────

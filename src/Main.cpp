@@ -5,10 +5,56 @@
 #include "engine/MoshEngine.h"
 #include "moshops/MoshOps.h"
 #include "remote/RemoteCompanionServer.h"
+#include "brain/BrainProxy.h"
+#include <iostream>
 
 namespace mosh
 {
 namespace te = tracktion::engine;
+
+namespace
+{
+    // Non-interactive live brain round-trip — the command-line smoke for the native
+    // brain_chat proxy. Resolves the provider from the env and prints the reply (or a
+    // clean error). Returns 0 on a successful round-trip, 1 otherwise.
+    int runBrainSmoke()
+    {
+        const auto prompt = juce::SystemStats::getEnvironmentVariable (
+            "MOSH_BRAIN_SMOKE_PROMPT", "Greet me as Moshi in one short, upbeat line.");
+        // Optional provider override for the smoke (so all three can be demoed without
+        // touching MOSHI_BRAIN_PROVIDER, which .env.local sets). Empty → default pick.
+        const auto requested = juce::SystemStats::getEnvironmentVariable ("MOSH_BRAIN_SMOKE_PROVIDER", {});
+
+        juce::Array<juce::var> messages;
+        auto* sys = new juce::DynamicObject();
+        sys->setProperty ("role", "system");
+        sys->setProperty ("content",
+            "You are Moshi, a friendly in-app music collaborator. Reply ONLY with a "
+            "compact JSON object of the form {\"say\": \"<one short line>\"}. JSON only.");
+        messages.add (juce::var (sys));
+        auto* usr = new juce::DynamicObject();
+        usr->setProperty ("role", "user");
+        usr->setProperty ("content", prompt);
+        messages.add (juce::var (usr));
+
+        const auto chosen = BrainProxy::resolve (requested);
+        std::cerr << "brain-smoke: provider="
+                  << (chosen.isComplete() ? chosen.id.toStdString() : std::string ("<none configured>"))
+                  << "  model=" << chosen.model.toStdString()
+                  << "\n             prompt=\"" << prompt.toStdString() << "\"" << std::endl;
+
+        const auto r  = BrainProxy::chat (juce::var (messages), requested);
+        const bool ok = (bool) r.getProperty ("ok", false);
+        if (ok)
+            std::cerr << "  OK  [" << r.getProperty ("provider", {}).toString().toStdString() << "/"
+                      << r.getProperty ("model", {}).toString().toStdString() << "  "
+                      << (int) r.getProperty ("ms", 0) << "ms]\n"
+                      << "  content: " << r.getProperty ("content", {}).toString().toStdString() << std::endl;
+        else
+            std::cerr << "  FAIL: " << r.getProperty ("error", {}).toString().toStdString() << std::endl;
+        return ok ? 0 : 1;
+    }
+}
 
 class MoshApplication : public juce::JUCEApplication
 {
@@ -25,6 +71,16 @@ public:
         // scan child, handle it and bail before building any UI/engine.
         if (te::PluginManager::startChildProcessPluginScan (commandLine))
             return;
+
+        // Non-interactive live brain round-trip (no engine/audio needed). Proves the
+        // native brain_chat path end-to-end against the real provider resolved from
+        // the environment. Prompt overridable via MOSH_BRAIN_SMOKE_PROMPT.
+        if (commandLine.contains ("--brain-smoke"))
+        {
+            setApplicationReturnValue (runBrainSmoke());
+            quit();
+            return;
+        }
 
         const bool undoSelfTest = commandLine.contains ("--selftest-undo");
         const bool liveAudioSmoke = commandLine.contains ("--live-audio-smoke");
