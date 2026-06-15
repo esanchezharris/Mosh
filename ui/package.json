@@ -8,7 +8,9 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "brain-eval": "MOSH_BRAIN_EVAL=1 vitest run src/agent/brainEval.test.ts"
   },
   "dependencies": {
     "qrcode": "^1.5.4",
@@ -23,6 +25,7 @@
     "@vitejs/plugin-react": "^4.3.4",
     "typescript": "^5.6.3",
     "vite": "^5.4.11",
-    "vite-plugin-singlefile": "^2.1.0"
+    "vite-plugin-singlefile": "^2.1.0",
+    "vitest": "^2.1.9"
   }
 }

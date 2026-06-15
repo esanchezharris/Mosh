@@ -1,73 +1,105 @@
-// The curated tool catalog Moshi's brain is allowed to call. Phase 1 deliberately
-// exposes a high-value, low-blast-radius subset of the ~93 MoshOps commands — no
-// project IO, device settings, scans, or anything that could lose the user's work.
-// Each entry feeds two consumers: (1) the LLM system prompt (so the brain knows
-// what it can do), and (2) client-side validation, so a malformed or unknown
-// command is rejected BEFORE it ever reaches the command seam.
+// The curated tool catalog Moshi's brain is allowed to call. A deliberately
+// high-value, low-blast-radius subset of the ~93 MoshOps commands — no project IO
+// that could lose the user's work, no device settings, no raw scans.
+//
+// SINGLE SOURCE OF TRUTH: each entry carries everything its three consumers need —
+//   desc      → the LLM system prompt (commandCatalogPrompt)
+//   args      → client-side validation (validateCommand), the hallucination gate
+//   summary   → the human changelog line (describeCommand)
+//   confirm   → destructive ops that need a spoken "yes" (REQUIRES_CONFIRM)
+// so adding a command is ONE object literal and the three can never drift.
+//
+// EVERY arg name here MUST match what the C++ handler reads in MoshOps.cpp — see the
+// `catalog ↔ backend arg contract` test, which parses the .cpp and fails on drift.
 
 export type ArgType = "string" | "number" | "boolean";
 export type ArgSpec = { name: string; type: ArgType; required?: boolean; desc?: string };
-export type AgentCommand = { command: string; desc: string; args: ArgSpec[] };
+type DescArgs = Record<string, string | number | boolean | undefined>;
+export type AgentCommand = {
+  command: string;
+  desc: string;
+  args: ArgSpec[];
+  confirm?: boolean;
+  summary?: (a: DescArgs) => string;
+};
 
 const S = (name: string, required = true, desc?: string): ArgSpec => ({ name, type: "string", required, desc });
 const N = (name: string, required = true, desc?: string): ArgSpec => ({ name, type: "number", required, desc });
 const B = (name: string, required = true, desc?: string): ArgSpec => ({ name, type: "boolean", required, desc });
 
 export const AGENT_COMMANDS: AgentCommand[] = [
+  // ── session / history ─────────────────────────────────────────────────────
+  { command: "undo", desc: "Undo the last change", args: [], summary: () => "Undid the last change" },
+  { command: "redo", desc: "Redo the last undone change", args: [], summary: () => "Redid a change" },
+  { command: "save", desc: "Save the session to disk", args: [], summary: () => "Saved the session" },
+
   // ── tracks ──────────────────────────────────────────────────────────────
-  { command: "create_track", desc: "Add a new audio track", args: [S("name", false, "track name")] },
-  { command: "rename_track", desc: "Rename a track", args: [S("trackId"), S("name")] },
-  { command: "remove_track", desc: "Delete a track and its clips", args: [S("trackId")] },
+  { command: "create_track", desc: "Add a new audio track", args: [S("name", false, "track name")], summary: (a) => `Added track${a.name ? ` "${a.name}"` : ""}` },
+  { command: "rename_track", desc: "Rename a track", args: [S("trackId"), S("name")], summary: (a) => `Renamed track to "${a.name}"` },
+  { command: "remove_track", desc: "Delete a track and its clips", args: [S("trackId")], summary: () => "Removed a track" },
 
   // ── clips ───────────────────────────────────────────────────────────────
-  { command: "add_test_tone_clip", desc: "Drop a test-tone clip on a track", args: [S("trackId", false), N("start", false, "seconds"), N("durationSeconds", false)] },
-  { command: "add_midi_clip", desc: "Add an empty MIDI clip", args: [S("trackId"), N("start", false, "seconds"), N("lengthBeats", false)] },
-  { command: "move_clip", desc: "Move a clip to a new start time (and optionally another track)", args: [S("clipId"), S("trackId", false), N("start", true, "seconds")] },
-  { command: "trim_clip", desc: "Set a clip's start and length", args: [S("clipId"), N("start"), N("length")] },
-  { command: "split_clip", desc: "Split a clip at a time position", args: [S("clipId"), N("position", true, "seconds")] },
-  { command: "duplicate_clip", desc: "Duplicate a clip", args: [S("clipId"), N("start", false)] },
-  { command: "remove_clip", desc: "Delete a clip", args: [S("clipId")] },
-  { command: "set_clip_gain", desc: "Set a clip's gain in dB", args: [S("clipId"), N("gainDb")] },
-  { command: "set_clip_mute", desc: "Mute/unmute a clip", args: [S("clipId"), B("mute")] },
+  { command: "add_test_tone_clip", desc: "Drop a test-tone clip on a track", args: [S("trackId", false), N("seconds", false, "duration in seconds"), N("freq", false, "tone frequency in Hz")], summary: () => "Added a test tone" },
+  { command: "add_midi_clip", desc: "Add an empty MIDI clip", args: [S("trackId"), N("start", false, "seconds"), N("length", false, "length in beats")], summary: () => "Added a MIDI clip" },
+  { command: "move_clip", desc: "Move a clip to a new start time (and optionally another track)", args: [S("clipId"), S("trackId", false), N("start", true, "seconds")], summary: (a) => `Moved a clip to ${a.start}s` },
+  { command: "trim_clip", desc: "Set a clip's start and length", args: [S("clipId"), N("start"), N("length")], summary: () => "Trimmed a clip" },
+  { command: "split_clip", desc: "Split a clip at a time position", args: [S("clipId"), N("time", true, "seconds")], summary: (a) => `Split a clip at ${a.time}s` },
+  { command: "duplicate_clip", desc: "Duplicate a clip", args: [S("clipId")], summary: () => "Duplicated a clip" },
+  { command: "rename_clip", desc: "Rename a clip", args: [S("clipId"), S("name")], summary: (a) => `Renamed a clip to "${a.name}"` },
+  { command: "remove_clip", desc: "Delete a clip", args: [S("clipId")], summary: () => "Removed a clip" },
+  { command: "set_clip_gain", desc: "Set a clip's gain in dB", args: [S("clipId"), N("gainDb")], summary: (a) => `Set clip gain to ${a.gainDb} dB` },
+  { command: "set_clip_mute", desc: "Mute/unmute a clip", args: [S("clipId"), B("mute")], summary: (a) => (a.mute ? "Muted a clip" : "Unmuted a clip") },
 
   // ── MIDI notes ──────────────────────────────────────────────────────────
-  { command: "add_note", desc: "Add a MIDI note (pitch 0-127) to a MIDI clip", args: [S("clipId"), N("pitch"), N("start", true, "beats"), N("length", true, "beats"), N("velocity", false, "0-127")] },
-  { command: "remove_note", desc: "Remove a MIDI note by index", args: [S("clipId"), N("noteIndex")] },
-  { command: "set_note", desc: "Edit a MIDI note's pitch/start/length/velocity", args: [S("clipId"), N("noteIndex"), N("pitch", false), N("start", false), N("length", false), N("velocity", false)] },
-  { command: "quantize_notes", desc: "Quantize a MIDI clip's notes to a grid", args: [S("clipId"), S("grid", false, '"1/4" | "1/8" | "1/16"')] },
+  { command: "add_note", desc: "Add a MIDI note (pitch 0-127) to a MIDI clip", args: [S("clipId"), N("pitch"), N("start", true, "beats"), N("length", true, "beats"), N("velocity", false, "0-127")], summary: () => "Added a note" },
+  { command: "remove_note", desc: "Remove a MIDI note by index", args: [S("clipId"), N("noteIndex")], summary: () => "Removed a note" },
+  { command: "set_note", desc: "Edit a MIDI note's pitch/start/length/velocity", args: [S("clipId"), N("noteIndex"), N("pitch", false), N("start", false), N("length", false), N("velocity", false)], summary: () => "Edited a note" },
+  { command: "quantize_notes", desc: "Quantize a MIDI clip's notes to a grid", args: [S("clipId"), N("division", true, "grid in beats — 1 = 1/4, 0.5 = 1/8, 0.25 = 1/16"), N("strength", false, "0-1")], summary: () => "Quantized notes" },
 
   // ── transport & timing ──────────────────────────────────────────────────
-  { command: "set_tempo", desc: "Set the project tempo in BPM", args: [N("bpm")] },
-  { command: "set_time_signature", desc: "Set the time signature", args: [N("numerator"), N("denominator")] },
-  { command: "set_metronome", desc: "Toggle the metronome click", args: [B("enabled")] },
-  { command: "set_transport", desc: "Play/stop, optionally seek to a position", args: [B("playing"), N("position", false, "seconds")] },
+  { command: "set_tempo", desc: "Set the project tempo in BPM", args: [N("bpm")], summary: (a) => `Set tempo to ${a.bpm} BPM` },
+  { command: "set_time_signature", desc: "Set the time signature", args: [N("numerator"), N("denominator")], summary: (a) => `Set time signature to ${a.numerator}/${a.denominator}` },
+  { command: "set_metronome", desc: "Toggle the metronome click", args: [B("enabled")], summary: (a) => (a.enabled ? "Turned the metronome on" : "Turned the metronome off") },
+  { command: "set_transport", desc: "Play/pause/stop/record, seek, or set the loop region", args: [S("action", false, '"toggle" (play/pause) | "stop" | "record" | "to_start" | "to_end"'), N("position", false, "seek to seconds"), B("loop", false, "enable loop"), N("loopStart", false, "seconds"), N("loopEnd", false, "seconds")], summary: (a) => (a.action === "record" ? "Started recording" : a.action === "stop" ? "Stopped" : a.loop ? "Set the loop region" : a.action === "toggle" ? "Toggled playback" : "Moved the playhead") },
 
   // ── mixer ───────────────────────────────────────────────────────────────
-  { command: "set_track_volume", desc: "Set a track's volume in dB", args: [S("trackId"), N("db")] },
-  { command: "set_track_pan", desc: "Set a track's pan (-1 left … 1 right)", args: [S("trackId"), N("pan")] },
-  { command: "set_track_mute", desc: "Mute/unmute a track", args: [S("trackId"), B("mute")] },
-  { command: "set_track_solo", desc: "Solo/unsolo a track", args: [S("trackId"), B("solo")] },
-  { command: "set_master_volume", desc: "Set the master volume in dB", args: [N("db")] },
+  { command: "set_track_volume", desc: "Set a track's volume in dB", args: [S("trackId"), N("db")], summary: (a) => `Set track volume to ${a.db} dB` },
+  { command: "set_track_pan", desc: "Set a track's pan (-1 left … 1 right)", args: [S("trackId"), N("pan")], summary: (a) => `Set track pan to ${a.pan}` },
+  { command: "set_track_mute", desc: "Mute/unmute a track", args: [S("trackId"), B("mute")], summary: (a) => (a.mute ? "Muted a track" : "Unmuted a track") },
+  { command: "set_track_solo", desc: "Solo/unsolo a track", args: [S("trackId"), B("solo")], summary: (a) => (a.solo ? "Soloed a track" : "Unsoloed a track") },
+  { command: "set_master_volume", desc: "Set the master volume in dB", args: [N("db")], summary: (a) => `Set master volume to ${a.db} dB` },
 
   // ── plugins ─────────────────────────────────────────────────────────────
-  { command: "load_builtin", desc: "Add a built-in effect/instrument to a track (type from list_builtins)", args: [S("trackId"), N("index", false, "chain position"), S("type")] },
-  { command: "set_plugin_param", desc: "Set a plugin parameter (0-1) by chain index + param index", args: [S("trackId"), N("index"), N("paramIndex"), N("value", true, "0-1")] },
-  { command: "bypass_plugin", desc: "Bypass/enable a plugin in a track's chain", args: [S("trackId"), N("index"), B("bypassed")] },
-  { command: "remove_plugin", desc: "Remove a plugin from a track's chain", args: [S("trackId"), N("index")] },
+  { command: "load_builtin", desc: "Add a built-in effect/instrument to a track (type from list_builtins)", args: [S("trackId"), N("index", false, "chain position"), S("type")], summary: (a) => `Added ${a.type}` },
+  { command: "set_plugin_param", desc: "Set a plugin parameter (0-1) by chain index + param index", args: [S("trackId"), N("index"), N("paramIndex"), N("value", true, "0-1")], summary: () => "Tweaked a plugin parameter" },
+  { command: "bypass_plugin", desc: "Bypass/enable a plugin in a track's chain", args: [S("trackId"), N("index"), B("bypassed")], summary: (a) => (a.bypassed ? "Bypassed a plugin" : "Enabled a plugin") },
+  { command: "reorder_plugin", desc: "Move a plugin to a new position in a track's chain", args: [S("trackId"), N("index"), N("toIndex")], summary: () => "Reordered a plugin" },
+  { command: "open_plugin_editor", desc: "Pop out a plugin's native editor window", args: [S("trackId"), N("index")], summary: () => "Opened a plugin editor" },
+  { command: "remove_plugin", desc: "Remove a plugin from a track's chain", args: [S("trackId"), N("index")], summary: () => "Removed a plugin" },
 
   // ── neural (Tier-A) ─────────────────────────────────────────────────────
-  { command: "add_neural_insert", desc: "Add the real-time neural insert to a track", args: [S("trackId"), N("index", false)] },
-  { command: "set_neural_param", desc: "Set a neural insert param (0-100, ASTD-clamped)", args: [S("trackId"), S("paramId", true, '"drive" | "mix"'), N("uiValue", true, "0-100")] },
+  { command: "add_neural_insert", desc: "Add the real-time neural insert to a track", args: [S("trackId"), N("index", false)], summary: () => "Added a neural insert" },
+  { command: "set_neural_param", desc: "Set a neural insert param (0-100, ASTD-clamped)", args: [S("trackId"), S("paramId", true, '"drive" | "mix"'), N("value", true, "0-100"), N("index", false, "chain position of the insert")], summary: (a) => `Set neural ${a.paramId} to ${a.value}` },
+  { command: "set_neural_lab_mode", desc: "Unlock the neural insert's raw (Lab) range", args: [S("trackId"), B("on"), N("index", false)], summary: (a) => (a.on ? "Unlocked neural Lab mode" : "Locked neural to safe range") },
+  { command: "reset_neural", desc: "Reset the neural model's internal state", args: [S("trackId"), N("index", false)], summary: () => "Reset the neural model" },
 
   // ── generative (Tier-B) ─────────────────────────────────────────────────
-  { command: "create_render_layer", desc: "Attach a generative re-imagine layer to a wave clip", args: [S("clipId"), S("adapter", false)] },
-  { command: "set_render_param", desc: "Set a render-layer parameter (grit/color/seed)", args: [S("clipId"), S("param"), N("value", false), S("valueStr", false)] },
-  { command: "render_layer", desc: "Run the generative render on a clip's layer", args: [S("clipId"), N("seed", false)] },
-  { command: "accept_render", desc: "Accept a finished render (lands it as a clip)", args: [S("clipId")] },
-  { command: "reject_render", desc: "Reject a render", args: [S("clipId")] },
+  { command: "create_render_layer", desc: "Attach a generative re-imagine layer to a wave clip", args: [S("clipId"), S("adapter", false)], summary: () => "Attached a generative layer" },
+  { command: "set_render_param", desc: "Set render-layer parameters (seed bump = new take)", args: [S("clipId"), N("seed", false, "change to get a new take"), S("prompt", false), N("nl", false, "0-1 noise level"), B("lab", false, "unlock raw ASTD range")], summary: () => "Set a render parameter" },
+  { command: "render_layer", desc: "Run the generative render on a clip's layer", args: [S("clipId")], summary: () => "Started a render" },
+  { command: "cancel_render", desc: "Cancel an in-flight generative render", args: [S("clipId"), S("jobId", false)], summary: () => "Cancelled a render" },
+  { command: "accept_render", desc: "Accept a finished render (lands it as a clip)", args: [S("clipId")], summary: () => "Accepted a render" },
+  { command: "reject_render", desc: "Reject a render", args: [S("clipId")], summary: () => "Rejected a render" },
+  { command: "bypass_layer", desc: "Bypass/enable a clip's generative render layer", args: [S("clipId"), B("bypassed")], summary: (a) => (a.bypassed ? "Bypassed a generative layer" : "Enabled a generative layer") },
+  { command: "freeze_layer", desc: "Freeze a render as durable audio", args: [S("clipId")], summary: () => "Froze a render" },
+  { command: "bounce_layer_to_clip", desc: "Bounce a render down to a plain clip", args: [S("clipId")], summary: () => "Bounced a render to a clip" },
+  { command: "remove_render_layer", desc: "Remove a clip's generative layer", args: [S("clipId")], summary: () => "Removed a generative layer" },
 ];
 
 export const AGENT_COMMAND_MAP = new Map(AGENT_COMMANDS.map((c) => [c.command, c]));
+
+/** Commands the brain must get a spoken confirmation for before they run (set via `confirm: true`). */
+export const REQUIRES_CONFIRM = new Set(AGENT_COMMANDS.filter((c) => c.confirm).map((c) => c.command));
 
 /** Validate a planned command against the curated catalog. Returns an error
  *  string, or null if valid. Unknown commands and bad arg types are rejected
@@ -98,44 +130,7 @@ export function commandCatalogPrompt(): string {
 
 /** A short, human-readable summary of an executed command, for Monster changes. */
 export function describeCommand(command: string, args: Record<string, unknown>): string {
-  const a = args as Record<string, string | number | boolean | undefined>;
-  switch (command) {
-    case "create_track": return `Added track${a.name ? ` "${a.name}"` : ""}`;
-    case "rename_track": return `Renamed track to "${a.name}"`;
-    case "remove_track": return `Removed a track`;
-    case "add_test_tone_clip": return `Added a test tone`;
-    case "add_midi_clip": return `Added a MIDI clip`;
-    case "move_clip": return `Moved a clip to ${a.start}s`;
-    case "trim_clip": return `Trimmed a clip`;
-    case "split_clip": return `Split a clip at ${a.position}s`;
-    case "duplicate_clip": return `Duplicated a clip`;
-    case "remove_clip": return `Removed a clip`;
-    case "set_clip_gain": return `Set clip gain to ${a.gainDb} dB`;
-    case "set_clip_mute": return a.mute ? `Muted a clip` : `Unmuted a clip`;
-    case "add_note": return `Added a note`;
-    case "remove_note": return `Removed a note`;
-    case "set_note": return `Edited a note`;
-    case "quantize_notes": return `Quantized notes${a.grid ? ` to ${a.grid}` : ""}`;
-    case "set_tempo": return `Set tempo to ${a.bpm} BPM`;
-    case "set_time_signature": return `Set time signature to ${a.numerator}/${a.denominator}`;
-    case "set_metronome": return a.enabled ? `Turned the metronome on` : `Turned the metronome off`;
-    case "set_transport": return a.playing ? `Started playback` : `Stopped playback`;
-    case "set_track_volume": return `Set track volume to ${a.db} dB`;
-    case "set_track_pan": return `Set track pan to ${a.pan}`;
-    case "set_track_mute": return a.mute ? `Muted a track` : `Unmuted a track`;
-    case "set_track_solo": return a.solo ? `Soloed a track` : `Unsoloed a track`;
-    case "set_master_volume": return `Set master volume to ${a.db} dB`;
-    case "load_builtin": return `Added ${a.type}`;
-    case "set_plugin_param": return `Tweaked a plugin parameter`;
-    case "bypass_plugin": return a.bypassed ? `Bypassed a plugin` : `Enabled a plugin`;
-    case "remove_plugin": return `Removed a plugin`;
-    case "add_neural_insert": return `Added a neural insert`;
-    case "set_neural_param": return `Set neural ${a.paramId} to ${a.uiValue}`;
-    case "create_render_layer": return `Attached a generative layer`;
-    case "set_render_param": return `Set a render parameter`;
-    case "render_layer": return `Started a render`;
-    case "accept_render": return `Accepted a render`;
-    case "reject_render": return `Rejected a render`;
-    default: return command.replace(/_/g, " ");
-  }
+  const spec = AGENT_COMMAND_MAP.get(command);
+  if (spec?.summary) return spec.summary(args as DescArgs);
+  return command.replace(/_/g, " ");
 }

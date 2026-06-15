@@ -58,5 +58,16 @@ export function mockBrainReply(text: string, snap: Snapshot | null): BrainReply 
     return { intent: "ACK_GOT_IT", say: on ? "click on" : "click off", commands: cmds };
   }
 
+  // transport (the headline arg-contract fix: action, not playing)
+  if (/\b(play|stop|pause)\b/.test(t)) {
+    const action = /\b(stop|pause)\b/.test(t) ? "stop" : "toggle";
+    cmds.push({ command: "set_transport", args: { action } });
+    return { intent: "ACK_GOT_IT", say: action === "stop" ? "stopped" : "playing", commands: cmds };
+  }
+
+  // undo / save
+  if (/\bundo\b/.test(t)) { cmds.push({ command: "undo", args: {} }); return { intent: "ACK_GOT_IT", say: "rolled back", commands: cmds }; }
+  if (/\bsave\b/.test(t)) { cmds.push({ command: "save", args: {} }); return { intent: "DONE", say: "saved", commands: cmds }; }
+
   return { intent: "HUH", say: "add my keys and I'll really think" };
 }
