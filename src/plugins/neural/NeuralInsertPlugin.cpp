@@ -14,6 +14,7 @@ namespace
     const Identifier idLatency ("neuralLatency");
     const Identifier idLab     ("neuralLab");
     const Identifier idModel   ("neuralModel");
+    const Identifier idModelPath ("neuralModelPath");   // GAP 1 — persisted RTNeural file path
 
     // ── A genuine, fixed-weight 2-layer tanh MLP (8 hidden units), computed once
     //    deterministically. Read-only at audio time → RT-safe. Input is
@@ -54,6 +55,7 @@ NeuralInsertPlugin::NeuralInsertPlugin (te::PluginCreationInfo info) : te::Plugi
     latencyValue.referTo (state, idLatency, um, 0);
     labMode.referTo      (state, idLab,     um, false);
     modelId.referTo      (state, idModel,   um, String ("nam"));
+    modelPath.referTo    (state, idModelPath, um, String());
 
     // Params store RAW values (automation is on the real value); the UI is 0–100
     // and the set_neural_param command maps via ASTD.
@@ -92,6 +94,20 @@ void NeuralInsertPlugin::initialise (const te::PluginInitialisationInfo&)
     // Warm-up a few inferences so the first audio block never stalls (§2.7).
     for (int i = 0; i < 64; ++i)
         (void) runModel (0.0f, driveValue.get());
+
+    // GAP 1 — if a model path persisted (e.g. after a session reload) but isn't loaded
+    // yet, load it now on the message thread. This is the deterministic re-load hook:
+    // restorePluginStateFromValueTree may run before the CachedValues settle, but
+    // initialise() runs once the plugin is prepared with its state in place. No-op when
+    // already loaded or when no path is set; graceful when the file is missing.
+   #if MOSH_HAVE_RTNEURAL
+    if (! rtnReady.load (std::memory_order_acquire))
+    {
+        const auto p = modelPath.get();
+        if (p.isNotEmpty())
+            loadModelFromFile (juce::File (p));
+    }
+   #endif
 }
 
 void NeuralInsertPlugin::deinitialise()
@@ -135,6 +151,83 @@ float NeuralInsertPlugin::runModel (float x, float driveRaw) const
     return std::tanh (driveRaw * x * (1.0f + 0.5f * resid));
 }
 
+float NeuralInsertPlugin::inferSample (float x, float driveRaw) const
+{
+    // RT-safe dispatch. When a real RTNeural model is loaded and ready, run it; else
+    // fall back to the self-contained inline MLP. The acquire-load pairs with the
+    // release-store in loadModelFromFile so we only ever read a fully-built model.
+   #if MOSH_HAVE_RTNEURAL
+    if (rtnReady.load (std::memory_order_acquire) && rtnModel != nullptr)
+    {
+        // Drive-condition the input the same way the inline path does, so the ASTD
+        // drive knob still shapes the sound, then run the loaded waveshaper. forward()
+        // is RT-safe (preallocated internal buffers) and reads model weights only.
+        const float in = driveRaw * x;
+        float y = rtnModel->forward (&in);
+        // Residual ("skip") captures (GuitarML/NeuralPi) learn only the delta the amp
+        // adds, so the full output is net(in) + in. Full-output models (AIDA-X) don't.
+        if (modelSkip.load (std::memory_order_relaxed))
+            y += in;
+        return std::tanh (y);   // bound the output (clean silence-in → silence-out for in=0)
+    }
+   #endif
+    return runModel (x, driveRaw);
+}
+
+bool NeuralInsertPlugin::loadModelFromFile (const juce::File& jsonFile, int forceSkip)
+{
+   #if MOSH_HAVE_RTNEURAL
+    // MESSAGE THREAD ONLY — all file I/O, JSON parse, allocation and warm-up happen
+    // here, never on the audio thread.
+    if (! jsonFile.existsAsFile())
+        return false;
+
+    // Skip/residual: the command can force it; otherwise the model self-describes via a
+    // top-level "mosh_skip" bool (ignored by RTNeural's json_parser). Parsed here on the
+    // message thread; published below before the rtnReady release-store.
+    bool skip = false;
+    if (forceSkip >= 0)
+        skip = (forceSkip != 0);
+    else if (auto parsed = juce::JSON::parse (jsonFile.loadFileAsString()); auto* o = parsed.getDynamicObject())
+        skip = (bool) o->getProperty ("mosh_skip");
+
+    std::unique_ptr<RTNeural::Model<float>> built;
+    try
+    {
+        std::ifstream stream (jsonFile.getFullPathName().toStdString());
+        if (! stream.is_open())
+            return false;
+        built = RTNeural::json_parser::parseJson<float> (stream, /*debug*/ false);
+    }
+    catch (...) { built = nullptr; }
+
+    // The fixture is a single-sample (in_size==1) waveshaper. Reject anything else so a
+    // malformed/mismatched file degrades gracefully (keeps the inline fallback) rather
+    // than reading out of bounds on the audio thread.
+    if (built == nullptr || built->getInSize() != 1)
+        return false;
+
+    // Warm up + zero the state on the message thread so the first audio block doesn't
+    // stall and we don't leak transient state into the first samples.
+    built->reset();
+    for (int i = 0; i < 64; ++i) { const float z = 0.0f; (void) built->forward (&z); }
+    built->reset();
+
+    // Publish: keep the OLD model alive (rtnModelOld) until the next swap so the audio
+    // thread never frees on the RT path; move the new one in; release-store readiness.
+    rtnModelOld = std::move (rtnModel);
+    rtnModel    = std::move (built);
+    modelSkip.store (skip, std::memory_order_relaxed);   // published by the release-store below
+    rtnReady.store (true, std::memory_order_release);
+
+    modelPath = jsonFile.getFullPathName();
+    return true;
+   #else
+    juce::ignoreUnused (jsonFile, forceSkip);
+    return false;   // graceful no-op when the RTNeural backend isn't built
+   #endif
+}
+
 void NeuralInsertPlugin::applyToBuffer (const te::PluginRenderContext& fc)
 {
     auto* buf = fc.destBuffer;
@@ -164,7 +257,9 @@ void NeuralInsertPlugin::applyToBuffer (const te::PluginRenderContext& fc)
             const float x = dests[ch][start + i];
             // Bypass (isEnabled false) → dry passthrough (still delayed by L so
             // latency stays constant on bypass — guards the PDC inverted-logic bug).
-            const float y = enabled ? (x + mix * (runModel (x, drive) - x)) : x;
+            // inferSample dispatches to the loaded RTNeural model when ready, else the
+            // inline MLP (both RT-safe / zero-alloc).
+            const float y = enabled ? (x + mix * (inferSample (x, drive) - x)) : x;
 
             if (L > 0)
             {
@@ -188,6 +283,19 @@ void NeuralInsertPlugin::restorePluginStateFromValueTree (const juce::ValueTree&
 
     if (v.hasProperty (idModel))
         modelId = v.getProperty (idModel).toString();
+
+    // GAP 1 — restore the persisted RTNeural model path and re-load the file (message
+    // thread; restore runs there). Read from the value tree when present, else fall back
+    // to the CachedValue (referTo() already re-read it from `state` at construction). A
+    // missing/invalid file degrades gracefully to the inline MLP (loadModelFromFile
+    // returns false; readiness stays false → inline fallback).
+    if (v.hasProperty (idModelPath))
+        modelPath = v.getProperty (idModelPath).toString();
+    {
+        const auto p = modelPath.get();
+        if (p.isNotEmpty())
+            loadModelFromFile (juce::File (p));
+    }
 
     for (auto p : getAutomatableParameters())
         p->updateFromAttachedValue();
@@ -216,6 +324,14 @@ void NeuralInsertPlugin::resetModel()
 {
     delayBuffer.clear();
     delayWritePos = 0;
+
+    // Also reset the loaded RTNeural model's internal state (a no-op for stateless
+    // dense waveshapers, load-bearing for recurrent captures). Safe on the message
+    // thread; the audio thread tolerates a concurrent reset of a stateless model.
+   #if MOSH_HAVE_RTNEURAL
+    if (rtnModel != nullptr)
+        rtnModel->reset();
+   #endif
 }
 
 void NeuralInsertPlugin::setLatencySamples (int samples)
@@ -228,6 +344,12 @@ juce::var NeuralInsertPlugin::describe() const
 {
     auto* o = new DynamicObject();
     o->setProperty ("model", modelId.get());
+    // GAP 1 — the loaded real-model identity. modelName is the human/model id (falls
+    // back to the inline model id); modelPath is the loaded RTNeural file ("" when the
+    // inline MLP is active). modelLoaded reflects the live readiness flag.
+    o->setProperty ("modelName", modelId.get());
+    o->setProperty ("modelPath", modelPath.get());
+    o->setProperty ("modelLoaded", rtnReady.load (std::memory_order_acquire));
     o->setProperty ("labMode", labMode.get());
     o->setProperty ("latencySamples", latencyValue.get());
     o->setProperty ("latencySeconds", (double) latencyValue.get() / (sampleRate > 0 ? sampleRate : 44100.0));

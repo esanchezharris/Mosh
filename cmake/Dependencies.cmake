@@ -61,6 +61,18 @@ if (MOSH_ENABLE_RTNEURAL)
 
     add_library(mosh_neural_backends INTERFACE)
     target_link_libraries(mosh_neural_backends INTERFACE RTNeural)
+    # Compile-time switch: code behind #if MOSH_HAVE_RTNEURAL only builds when the
+    # RTNeural backend is present (mirrors MOSH_HAVE_ANIRA below). The DEFAULT build
+    # (MOSH_ENABLE_RTNEURAL=OFF) never links this target, so MOSH_HAVE_RTNEURAL is
+    # undefined and the neural insert falls back to its self-contained inline MLP.
+    #
+    # MOSH_REPO_SOURCE_DIR lets the RTNeural-ON selftest locate the in-repo model
+    # fixture (assets/neural_waveshaper.json) without an env var, so the numeric A/B is
+    # CI-runnable. Only the RTNeural build needs it (propagated to Mosh via the existing
+    # target_link_libraries(Mosh PRIVATE mosh_neural_backends) in CMakeLists.txt).
+    target_compile_definitions(mosh_neural_backends INTERFACE
+        MOSH_HAVE_RTNEURAL=1
+        MOSH_REPO_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 
     if (MOSH_ENABLE_ANIRA)
         CPMAddPackage(

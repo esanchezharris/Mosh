@@ -27,6 +27,15 @@ namespace mosh::ids
     MOSH_DECLARE_ID (projectBitDepth)
     MOSH_DECLARE_ID (timeBase)         // "seconds" | "barsBeats"
 
+    // KEY-001 — the project's MUSICAL KEY (tonic pitch-class + scale mode), stored
+    // on the same MOSH_PROJECT node next to timeBase. Producer intent that the song
+    // is "in" this key; it feeds the RenderLayer fingerprint (a key change is a
+    // cache MISS) and drives Moshi's in-key voice (ui/src/vendor/voice.js). The
+    // tonic/mode domains MUST mirror voice.js's NOTE_PC / SCALES literals exactly.
+    // NON-undoable preference (written without the undo manager, like timeBase).
+    MOSH_DECLARE_ID (musicalTonic)     // pitch-class name: "C".."B" incl. sharps/flats
+    MOSH_DECLARE_ID (musicalMode)      // scale mode: "major" | "minor" | ... (SCALES)
+
     // RTG-001 — the track's CHOSEN input device (a WaveInputDevice deviceID).
     // A plain property on the track's own state tree so the choice saves/reloads
     // with the edit; arm_track prefers it over first-match. NON-undoable

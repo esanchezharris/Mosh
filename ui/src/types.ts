@@ -74,6 +74,11 @@ export type NeuralInsert = {
   latencySamples: number;
   latencySeconds: number;
   params: NeuralParam[];
+  // load_neural_model{trackId,pluginIndex,path} populates these on describe(): the
+  // human-readable name of the loaded model file and its on-disk path. Absent until
+  // a model is loaded (the host's self-contained default reports neither).
+  modelName?: string;
+  modelPath?: string;
 };
 
 export type Plugin = {
@@ -202,6 +207,11 @@ export type DirListing = {
   entries: DirEntry[];
 };
 
+// Musical key for the session (Moshi sings in-key). ALWAYS present in the snapshot,
+// backend-defaulted, so the UI never sees a missing field. tonic ∈ voice.js NOTE_PC,
+// mode ∈ voice.js SCALES — the two domains must match the voice module exactly.
+export type SessionKey = { tonic: string; mode: string };
+
 export type Snapshot = {
   schemaVersion: number;
   session: {
@@ -210,6 +220,8 @@ export type Snapshot = {
     timeSigNumerator?: number;
     timeSigDenominator?: number;
     metronome?: boolean;
+    // Musical key (set_key command writes it; always defaulted on the backend).
+    key: SessionKey;
     length?: number;
     editFile: string;
     projectExtension?: string; // backend-owned project container extension (no leading dot)

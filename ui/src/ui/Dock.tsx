@@ -94,8 +94,18 @@ function ParamBody({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
 function NeuralBody({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
   const exec = useStore((s) => s.exec);
   const n = plugin.neural!;
+  // Load a model file into this neural insert (load_neural_model{trackId,pluginIndex,path}).
+  // No native file picker on the bridge, so prompt for a path; describe() then reports
+  // modelName/modelPath, shown below. A blank/cancelled prompt is a no-op.
+  const loadModel = () => {
+    const path = window.prompt("Model file path (NAM/RTNeural capture):", n.modelPath ?? "");
+    if (path && path.trim()) void exec("load_neural_model", { trackId, pluginIndex: plugin.index, path: path.trim() });
+  };
   return (
     <div className="pbody">
+      {n.modelName && (
+        <div className="neural-model tc" title={n.modelPath ?? n.modelName} data-testid="neural-model-name">{n.modelName}</div>
+      )}
       {n.params.map((p) => (
         <label key={p.id} className="nparam">
           <span className="nlabel">{p.id}</span>
@@ -108,6 +118,7 @@ function NeuralBody({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
         </label>
       ))}
       <div className="neural-row">
+        <button className="btn" data-testid="neural-load-model" title="Load a model file (NAM / RTNeural capture)" onClick={loadModel}>Load model…</button>
         <button className={`btn${n.labMode ? " on" : ""}`} title="Lab mode — unlock past the ASTD clamp" aria-pressed={n.labMode}
           onClick={() => void exec("set_neural_lab_mode", { trackId, index: plugin.index, on: !n.labMode })}>{n.labMode ? "⚠ LAB" : "Lab"}</button>
         <button className="btn" onClick={() => void exec("reset_neural", { trackId, index: plugin.index })}>Reset</button>

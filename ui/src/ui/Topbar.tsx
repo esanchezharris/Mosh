@@ -6,6 +6,7 @@
 import { useStore } from "../store";
 import { tempoMapFrom, secondsToBBSMap, SNAP_DIVISIONS } from "../time";
 import type { Snapshot } from "../types";
+import { TONICS, MODES, DEFAULT_KEY } from "../musicalKey";
 import { TopbarTools } from "./TopbarTools";
 
 export function Topbar({ snapshot }: { snapshot: Snapshot }) {
@@ -45,12 +46,37 @@ export function Topbar({ snapshot }: { snapshot: Snapshot }) {
           <span className="pos tc" data-testid="position">{bbs}</span>
           <span className="bpm tc">{Math.round(snapshot.session.tempo)} BPM · {snapshot.session.timeSigNumerator ?? 4}/{snapshot.session.timeSigDenominator ?? 4}</span>
         </div>
+
+        <KeyControl snapshot={snapshot} />
       </div>
 
       <div className="spacer" />
       <TopbarTools snapshot={snapshot} />
       <ViewToggle />
     </header>
+  );
+}
+
+// Minimal tonic + mode control sitting by the BPM readout. The key drives Moshi's
+// in-key voice (snapshot.session.key → voice.setKey). Pure command surface: each
+// change is a set_key{tonic,mode} — the backend defaults the field, so it's always
+// present. Domains come from musicalKey.ts, which mirrors voice.js exactly.
+function KeyControl({ snapshot }: { snapshot: Snapshot }) {
+  const exec = useStore((s) => s.exec);
+  const key = snapshot.session.key ?? DEFAULT_KEY;
+  const tonic = key.tonic ?? DEFAULT_KEY.tonic;
+  const mode = key.mode ?? DEFAULT_KEY.mode;
+  return (
+    <div className="key-ctl" data-testid="key-control" title="Song key — Moshi sings in tune with it">
+      <select className="btn ghost key-tonic tc" aria-label="Key tonic" value={tonic}
+        onChange={(e) => void exec("set_key", { tonic: e.target.value, mode })}>
+        {TONICS.map((t) => <option key={t} value={t}>{t}</option>)}
+      </select>
+      <select className="btn ghost key-mode" aria-label="Key mode" value={mode}
+        onChange={(e) => void exec("set_key", { tonic, mode: e.target.value })}>
+        {MODES.map((m) => <option key={m} value={m}>{m}</option>)}
+      </select>
+    </div>
   );
 }
 

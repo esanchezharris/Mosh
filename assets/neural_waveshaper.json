@@ -1,0 +1,23 @@
+{
+  "in_shape": [null, 1],
+  "layers": [
+    {
+      "type": "dense",
+      "shape": [null, 4],
+      "activation": "tanh",
+      "weights": [
+        [[2.5, 1.2, -0.8, 3.0]],
+        [0.0, 0.0, 0.0, 0.0]
+      ]
+    },
+    {
+      "type": "dense",
+      "shape": [null, 1],
+      "activation": "",
+      "weights": [
+        [[0.9], [0.5], [0.7], [0.4]],
+        [0.0]
+      ]
+    }
+  ]
+}
