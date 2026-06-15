@@ -127,14 +127,23 @@ if (MOSH_BUILD_APP)
         set_source_files_properties(src/voice/NativeSpeech.mm PROPERTIES COMPILE_FLAGS "-fobjc-arc")
         target_link_libraries(Mosh PRIVATE "-framework Speech" "-framework AVFoundation")
 
-        # JUCE's PLIST_TO_MERGE is honoured ONLY by the Xcode generator; under Makefiles/
-        # Ninja the bundle Info.plist omits those keys. NSSpeechRecognitionUsageDescription
-        # is mandatory — without it SFSpeechRecognizer authorization TCC-crashes the app —
-        # so inject it directly into the built bundle. (Mic perm rides JUCE's built-in flag.)
+        # JUCE's PLIST_TO_MERGE is honoured ONLY by the Xcode generator; under the
+        # Makefiles/Ninja generator this repo uses, those merged keys are silently
+        # dropped from the bundle Info.plist. Re-inject the ones we depend on after
+        # build — `plutil -replace` creates-if-absent and is idempotent on relink:
+        #   • NSSpeechRecognitionUsageDescription — mandatory, or SFSpeechRecognizer
+        #     authorization TCC-crashes the app (native voice).
+        #   • NSBonjourServices — or macOS 14+ won't advertise the iPhone-companion
+        #     mDNS service (keep the type in sync with cmake/MoshRemoteInfo.plist).
+        # (Built-in flags MICROPHONE_PERMISSION_* / LOCAL_NETWORK_PERMISSION_* DO
+        #  survive — they go through a different path than PLIST_TO_MERGE.)
         add_custom_command(TARGET Mosh POST_BUILD
             COMMAND /usr/bin/plutil -replace NSSpeechRecognitionUsageDescription
                     -string "Mosh transcribes your voice so you can talk to Moshi, your in-app collaborator, instead of typing."
                     "$<TARGET_BUNDLE_DIR:Mosh>/Contents/Info.plist"
+            COMMAND /usr/bin/plutil -replace NSBonjourServices -json "[\"_moshcompanion._tcp\"]"
+                    "$<TARGET_BUNDLE_DIR:Mosh>/Contents/Info.plist"
+            COMMENT "Re-injecting Info.plist keys PLIST_TO_MERGE drops (speech + Bonjour)"
             VERBATIM)
     endif()
 
