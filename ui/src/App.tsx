@@ -19,6 +19,7 @@ import { Mixer } from "./ui/Mixer";
 import { PluginBrowser } from "./ui/PluginBrowser";
 import { PianoRoll } from "./ui/PianoRoll";
 import { AutomationPanel } from "./ui/AutomationPanel";
+import { MonsterChanges } from "./ui/MonsterChanges";
 
 export function App() {
   const init = useStore((s) => s.init);
@@ -45,9 +46,9 @@ export function App() {
       {snapshot && <Topbar snapshot={snapshot} />}
       <Toolbar />
       {!audioEnabled && (
-        <div className="error-bar">⚠ No audio device — playback/record/export disabled.</div>
+        <div className="error-bar" role="status" aria-live="polite">⚠ No audio device — playback/record/export disabled.</div>
       )}
-      {lastError && <div className="error-bar" data-testid="error">⚠ {lastError}</div>}
+      {lastError && <div className="error-bar" data-testid="error" role="alert">⚠ {lastError}</div>}
 
       {snapshot ? (
         view === "mixer" ? (
@@ -67,6 +68,7 @@ export function App() {
       <PluginBrowser />
       <PianoRoll />
       <AutomationPanel />
+      <MonsterChanges />
     </div>
   );
 }

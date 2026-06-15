@@ -5,6 +5,7 @@
 import { useEffect } from "react";
 import { useStore } from "../store";
 import type { Snapshot, Plugin, Track, Clip, RenderColor } from "../types";
+import { Moshi } from "./Moshi";
 
 export function Dock({ snapshot }: { snapshot: Snapshot }) {
   const selectedTrackId = useStore((s) => s.selectedTrackId);
@@ -13,6 +14,7 @@ export function Dock({ snapshot }: { snapshot: Snapshot }) {
     <div className="dock" data-testid="dock">
       <Rack track={track} />
       {track && <GenDrawer track={track} />}
+      <Moshi />
     </div>
   );
 }
@@ -25,14 +27,14 @@ function Rack({ track }: { track: Track | null }) {
   return (
     <div className="rack" data-testid="rack">
       <div className="rack-label">
-        {track ? <>CHAIN · <b>{track.name}</b></> : "select a track"}
-        {track && <button className="rack-auto" data-testid="open-automation" title="Parameter automation" onClick={() => openAutomation(track.id)}>⌁</button>}
+        {track ? <>CHAIN · <b>{track.name}</b></> : "select a track to add effects"}
       </div>
       <div className="rack-chain">
         {track && plugins.map((p) => <PluginCard key={p.index} plugin={p} trackId={track.id} />)}
-        {track && plugins.length === 0 && <span className="rack-empty">no plugins</span>}
+        {track && plugins.length === 0 && <span className="rack-empty">No effects yet — add a plugin or neural insert.</span>}
         {track && <button className="btn rack-add" onClick={openBrowser}>+ Plugin</button>}
         {track && <button className="btn rack-add" onClick={() => void exec("add_neural_insert", { trackId: track.id, modelId: "nam" })}>+ Neural</button>}
+        {track && <button className="btn rack-add" data-testid="open-automation" title="Parameter automation" aria-label="Open parameter automation" onClick={() => openAutomation(track.id)}>⌁ Automation</button>}
       </div>
     </div>
   );
@@ -124,7 +126,7 @@ function GenDrawer({ track }: { track: Track }) {
   useEffect(() => { loadColors(); }, [loadColors]);
 
   const clip = track.clips.find((c) => c.type === "wave");
-  if (!clip) return <div className="gen" data-testid="generative"><div className="gen-head"><span className="gen-title">⃝ GENERATIVE</span></div><span className="rack-empty">no wave clip</span></div>;
+  if (!clip) return <div className="gen" data-testid="generative"><div className="gen-head"><span className="gen-title">⃝ GENERATIVE</span></div><span className="rack-empty">Add or import an audio clip on this track to re-imagine it.</span></div>;
   const rl = clip.renderLayer;
   const sa3 = colorsAvail.length > 0;
 
@@ -146,6 +148,8 @@ function GenBody({ clip, qa }: { clip: Clip; qa?: { pq?: number | null; pq_base?
   const colorsAvail = useStore((s) => s.availableColors);
   const labMode = useStore((s) => s.labMode);
   const setLab = useStore((s) => s.setLab);
+  const bumpCelebrate = useStore((s) => s.bumpCelebrate);
+  const progress = useStore((s) => s.renderProgress[clip.id]);
   const rl = clip.renderLayer!;
   const active: RenderColor[] = rl.colors ?? [];
   const rendering = rl.status === "rendering" || rl.status === "queued";
@@ -172,11 +176,17 @@ function GenBody({ clip, qa }: { clip: Clip; qa?: { pq?: number | null; pq_base?
           {addable.map((c) => <option key={c.name} value={c.name}>{c.name}{c.verdict === "WEAK" ? " (weak)" : ""}</option>)}
         </select>
       )}
-      <div className="gen-status">
+      <div className="gen-status" role="status" aria-live="polite">
         <span className={`gen-badge st-${rl.status}`} data-testid="render-status">{rl.status}</span>
         <span className="gen-seed tc">seed {rl.seed}</span>
         <button className={`btn${labMode ? " on" : ""}`} title="Lab — unlock the ASTD clamp" aria-pressed={labMode} onClick={() => setLab(!labMode)}>{labMode ? "⚠ LAB" : "Lab"}</button>
       </div>
+      {rendering && (
+        <div className="gen-prog" role="progressbar" aria-label="Render progress"
+          aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round((progress ?? 0) * 100)}>
+          <span style={{ width: `${Math.round((progress ?? 0) * 100)}%` }} />
+        </div>
+      )}
       {qa && qa.pq != null && (
         <div className="gen-qa tc" title="judge-panel production quality">
           pq {qa.pq}{qa.pq_base != null ? ` / ${qa.pq_base}` : ""}
@@ -186,7 +196,7 @@ function GenBody({ clip, qa }: { clip: Clip; qa?: { pq?: number | null; pq_base?
       <div className="gen-actions">
         <button className="btn" data-testid="gen-render" onClick={() => void exec("render_layer", { clipId: clip.id })}>{rl.hasArtifact ? "Re-render" : "Render"}</button>
         {rendering && <button className="btn" onClick={() => void exec("cancel_render", { clipId: clip.id })}>Cancel</button>}
-        <button className="btn" disabled={!rl.hasArtifact} data-testid="gen-accept" onClick={() => void exec("accept_render", { clipId: clip.id })}>Accept</button>
+        <button className="btn" disabled={!rl.hasArtifact} data-testid="gen-accept" onClick={async () => { const r = await exec("accept_render", { clipId: clip.id }); if (r.ok) bumpCelebrate(); }}>Accept</button>
         <button className="btn" disabled={!rl.hasArtifact} onClick={() => void exec("reject_render", { clipId: clip.id })}>Reject</button>
         <button className="btn" title="new take" onClick={() => void exec("set_render_param", { clipId: clip.id, seed: Number(rl.seed) + 1 })}>⟳ seed</button>
         <button className="btn x" title="remove layer" onClick={() => void exec("remove_render_layer", { clipId: clip.id })}>✕</button>

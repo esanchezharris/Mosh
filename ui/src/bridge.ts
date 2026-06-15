@@ -97,6 +97,43 @@ export async function getSnapshot<T = unknown>(): Promise<T> {
   throw new Error("get_snapshot: not running in JUCE WebView");
 }
 
+// Moshi's brain talks to an LLM through a SERVER-SIDE proxy (keys never reach the
+// client): a native `brain_chat` function in the packaged app, the Vite /api/brain
+// proxy in dev. Throws on failure (no proxy / no key) so the caller falls back to
+// the demo mock-brain. NOT the executeCommand seam — this is a chat round-trip.
+export type BrainMessage = { role: string; content: string };
+export async function brainChat(messages: BrainMessage[], provider?: string): Promise<{ content: string }> {
+  if (realNative()) {
+    // Native proxy returns { ok, content } or { ok:false, error }. Throw on the error
+    // shape so the caller falls back to the mock brain — same contract as the dev fetch.
+    const r = (await native("brain_chat")({ messages, provider })) as { ok?: boolean; content?: string; error?: string };
+    if (r && r.ok === false) throw new Error(r.error ? String(r.error) : "brain unavailable");
+    return { content: String(r?.content ?? "") };
+  }
+  const r = await fetch("/api/brain/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ messages, provider }),
+  });
+  let j: { content?: string; error?: unknown } = {};
+  try { j = await r.json(); } catch { /* non-JSON error body */ }
+  if (!r.ok) throw new Error(j?.error ? String(j.error) : `brain proxy ${r.status}`);
+  return { content: String(j.content ?? "") };
+}
+
+// Native speech-to-text (packaged app). The browser Web Speech API covers the Vite
+// dev path; WKWebView lacks it, so there we drive macOS Speech via these wrappers.
+// Transcripts arrive on the "voice_event" channel (subscribe with onEvent). All are
+// no-ops outside the real WebView, so voiceInput.ts can branch on nativeVoiceAvailable().
+export function nativeVoiceAvailable(): boolean { return realNative(); }
+export async function voiceSupported(): Promise<boolean> {
+  if (!realNative()) return false;
+  try { const r = (await native("voice_supported")()) as { supported?: boolean }; return !!r?.supported; }
+  catch { return false; }
+}
+export async function voiceStart(): Promise<void> { if (realNative()) await native("voice_start")(); }
+export async function voiceStop(): Promise<void> { if (realNative()) await native("voice_stop")(); }
+
 export async function startRemotePairing(): Promise<RemoteResult<RemoteStatus>> {
   if (!realNative()) return { ok: false, error: "remote companion unavailable in dev" };
   return (await native("remote_start_pairing")({})) as RemoteResult<RemoteStatus>;

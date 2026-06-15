@@ -6,7 +6,6 @@
 import { useStore } from "../store";
 import { tempoMapFrom, secondsToBBSMap, SNAP_DIVISIONS } from "../time";
 import type { Snapshot } from "../types";
-import { Moshi } from "./Moshi";
 import { TopbarTools } from "./TopbarTools";
 
 export function Topbar({ snapshot }: { snapshot: Snapshot }) {
@@ -51,7 +50,6 @@ export function Topbar({ snapshot }: { snapshot: Snapshot }) {
       <div className="spacer" />
       <TopbarTools snapshot={snapshot} />
       <ViewToggle />
-      <Moshi />
     </header>
   );
 }

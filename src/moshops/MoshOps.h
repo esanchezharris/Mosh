@@ -53,6 +53,8 @@ private:
     juce::var cmdSetMetronome   (const juce::var& args);
     juce::var cmdUndo           (const juce::var& args);
     juce::var cmdRedo           (const juce::var& args);
+    juce::var cmdBatchBegin     (const juce::var& args);   // group N agent edits into ONE undo step
+    juce::var cmdBatchEnd       (const juce::var& args);
     juce::var cmdSave           (const juce::var& args);
     juce::var cmdReload         (const juce::var& args);
     juce::var cmdAddRenderLayer (const juce::var& args);
@@ -238,6 +240,11 @@ private:
 
     juce::UndoManager& undoManager() { return eng.edit().getUndoManager(); }
 
+    // Agent "Monster changes": inside a batch (batch_begin..batch_end) every command
+    // coalesces into the ONE transaction batch_begin opened, so the whole batch undoes
+    // as a single step. Outside a batch this is identical to the old per-command call.
+    void beginTxn (const juce::String& name) { if (! inBatch) undoManager().beginNewTransaction (name); }
+
     /** The JUCE device manager under Tracktion's wrapper — the object the device
         picker drives (the same one MoshEngine::applyRequestedAudioOutputDevice
         uses). */
@@ -254,6 +261,7 @@ private:
     juce::int64 seq = 0;
     juce::File  logFile;
     bool        wasPlaying = false;
+    bool        inBatch    = false;   // true between batch_begin / batch_end (agent batch = one undo step)
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MoshOps)
 };
