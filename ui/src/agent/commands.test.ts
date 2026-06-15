@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { AGENT_COMMANDS, validateCommand, describeCommand, type ArgSpec, type ArgType } from "./commands";
+import { AGENT_COMMANDS, validateCommand, describeCommand, resolvePluginId, commandNeedsConfirm, type ArgSpec, type ArgType } from "./commands";
 
 const sample = (t: ArgType): string | number | boolean => (t === "number" ? 1 : t === "boolean" ? true : "x");
 
@@ -39,6 +39,42 @@ describe("validateCommand — rejections", () => {
       expect(validateCommand(c.command, fullArgs(c.args, req.name))).toMatch(/missing required/);
     });
   }
+});
+
+describe("resolvePluginId — fuzzy name → real id, never a wrong guess", () => {
+  const plugins = [
+    { id: "vst3:OTT", name: "OTT" },
+    { id: "vst3:Vital", name: "Vital" },
+    { id: "vst3:VitalFX", name: "Vital FX" },
+    { id: "au:ProQ3", name: "Pro-Q 3" },
+  ];
+  it("exact match, case/punctuation-insensitive", () => {
+    expect(resolvePluginId("ott", plugins)).toEqual({ id: "vst3:OTT" });
+    expect(resolvePluginId("pro q 3", plugins)).toEqual({ id: "au:ProQ3" });
+  });
+  it("fuzzy contains prefers the most specific (shortest) name", () => {
+    expect(resolvePluginId("vita", plugins)).toEqual({ id: "vst3:Vital" });
+  });
+  it("errors (does not guess) when nothing matches", () => {
+    const r = resolvePluginId("nonexistent-thing", plugins);
+    expect("error" in r).toBe(true);
+  });
+  it("errors on an empty query", () => {
+    expect("error" in resolvePluginId("", plugins)).toBe(true);
+  });
+});
+
+describe("commandNeedsConfirm — only destructive variants are gated", () => {
+  it("export_audio with a file (overwrite) needs confirm", () => {
+    expect(commandNeedsConfirm("export_audio", { file: "mix.wav" })).toBe(true);
+  });
+  it("export_audio without a file (safe timestamped) does not", () => {
+    expect(commandNeedsConfirm("export_audio", {})).toBe(false);
+  });
+  it("a plain edit never confirms", () => {
+    expect(commandNeedsConfirm("create_track", { name: "x" })).toBe(false);
+    expect(commandNeedsConfirm("remove_track", { trackId: "t1" })).toBe(false);
+  });
 });
 
 describe("describeCommand — every command yields a non-empty changelog line", () => {

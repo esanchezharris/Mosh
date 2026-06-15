@@ -14,13 +14,16 @@ export type { BrainReply } from "./parseReply";
 
 export type Brain = { send: (text: string) => Promise<BrainReply>; clear: () => void };
 
-export function createBrain(getSnapshot: () => Snapshot | null): Brain {
+export function createBrain(
+  getSnapshot: () => Snapshot | null,
+  getPluginNames?: () => string[],
+): Brain {
   const history: { role: string; content: string }[] = [];
   return {
     async send(text: string): Promise<BrainReply> {
       const snap = getSnapshot();
       history.push({ role: "user", content: text });
-      const messages = [{ role: "system", content: systemPrompt(snap) }, ...history.slice(-8)];
+      const messages = [{ role: "system", content: systemPrompt(snap, getPluginNames?.() ?? []) }, ...history.slice(-8)];
       try {
         const { content } = await brainChat(messages);
         history.push({ role: "assistant", content });

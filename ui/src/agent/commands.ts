@@ -19,7 +19,9 @@ export type AgentCommand = {
   command: string;
   desc: string;
   args: ArgSpec[];
-  confirm?: boolean;
+  // true → always confirm; a predicate → confirm only for certain args (e.g.
+  // export_audio only when it would overwrite an explicit file).
+  confirm?: boolean | ((a: DescArgs) => boolean);
   summary?: (a: DescArgs) => string;
 };
 
@@ -73,6 +75,7 @@ export const AGENT_COMMANDS: AgentCommand[] = [
 
   // ── plugins ─────────────────────────────────────────────────────────────
   { command: "load_builtin", desc: "Add a built-in effect/instrument to a track (type from list_builtins)", args: [S("trackId"), N("index", false, "chain position"), S("type")], summary: (a) => `Added ${a.type}` },
+  { command: "load_plugin", desc: "Add a scanned VST3/AU plugin to a track BY NAME (use the exact name from the available-plugins list)", args: [S("trackId"), S("pluginId", true, "exact plugin name"), N("index", false, "chain position")], summary: (a) => `Added ${a.pluginId}` },
   { command: "set_plugin_param", desc: "Set a plugin parameter (0-1) by chain index + param index", args: [S("trackId"), N("index"), N("paramIndex"), N("value", true, "0-1")], summary: () => "Tweaked a plugin parameter" },
   { command: "bypass_plugin", desc: "Bypass/enable a plugin in a track's chain", args: [S("trackId"), N("index"), B("bypassed")], summary: (a) => (a.bypassed ? "Bypassed a plugin" : "Enabled a plugin") },
   { command: "reorder_plugin", desc: "Move a plugin to a new position in a track's chain", args: [S("trackId"), N("index"), N("toIndex")], summary: () => "Reordered a plugin" },
@@ -96,12 +99,48 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "freeze_layer", desc: "Freeze a render as durable audio", args: [S("clipId")], summary: () => "Froze a render" },
   { command: "bounce_layer_to_clip", desc: "Bounce a render down to a plain clip", args: [S("clipId")], summary: () => "Bounced a render to a clip" },
   { command: "remove_render_layer", desc: "Remove a clip's generative layer", args: [S("clipId")], summary: () => "Removed a generative layer" },
+
+  // ── export ──────────────────────────────────────────────────────────────
+  // Omit `file` for a safe timestamped export; a given `file` may overwrite, so
+  // that variant is gated behind a spoken confirmation (see commandNeedsConfirm).
+  { command: "export_audio", desc: "Export/bounce the mix to an audio file (omit file for a safe timestamped name)", args: [S("file", false, "path — omit for a safe timestamped file"), S("format", false, '"wav" | "aiff" | "flac"'), N("bitDepth", false), S("renderMode", false, '"auto" | "fast" | "realtime"'), N("sampleRate", false)], confirm: (a) => Boolean(a.file), summary: () => "Exported the mix" },
 ];
 
 export const AGENT_COMMAND_MAP = new Map(AGENT_COMMANDS.map((c) => [c.command, c]));
 
-/** Commands the brain must get a spoken confirmation for before they run (set via `confirm: true`). */
-export const REQUIRES_CONFIRM = new Set(AGENT_COMMANDS.filter((c) => c.confirm).map((c) => c.command));
+/** Does this command (with these args) need a spoken "yes" before it runs? */
+export function commandNeedsConfirm(command: string, args: Record<string, unknown>): boolean {
+  const c = AGENT_COMMAND_MAP.get(command);
+  if (!c?.confirm) return false;
+  return typeof c.confirm === "function" ? c.confirm(args as DescArgs) : c.confirm;
+}
+
+/** Resolve a plugin the brain named (e.g. "ott", "pro q 3") to a real scanned-plugin
+ *  id, tolerating case/spacing/punctuation. Returns the id, or an error string when
+ *  there's no usable match — never guesses a wrong plugin into the chain. */
+export function resolvePluginId(
+  query: string,
+  plugins: readonly { id: string; name: string }[],
+): { id: string } | { error: string } {
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const q = norm(query);
+  if (!q) return { error: "no plugin name given" };
+
+  const exact = plugins.find((p) => norm(p.name) === q);
+  if (exact) return { id: exact.id };
+
+  const contains = plugins.filter((p) => {
+    const n = norm(p.name);
+    return n.includes(q) || q.includes(n);
+  });
+  if (contains.length === 1) return { id: contains[0].id };
+  if (contains.length > 1) {
+    // most-specific wins (shortest name that still contains the query)
+    const best = [...contains].sort((a, b) => norm(a.name).length - norm(b.name).length);
+    return { id: best[0].id };
+  }
+  return { error: `no plugin matching "${query}" — open the plugin browser to see what's installed` };
+}
 
 /** Validate a planned command against the curated catalog. Returns an error
  *  string, or null if valid. Unknown commands and bad arg types are rejected

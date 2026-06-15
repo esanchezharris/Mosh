@@ -11,7 +11,7 @@ import type {
 } from "./types";
 import type { RemoteStatus } from "./bridge";
 import { type SnapDiv, snapTimeMap, tempoMapFrom } from "./time";
-import type { ChangeSet } from "./agent/executor";
+import type { ChangeSet, AgentCommandCall } from "./agent/executor";
 
 export type Tool = "move" | "split" | "range";
 export type View = "arrange" | "mixer";
@@ -137,10 +137,14 @@ type State = {
   agentChangeSet: ChangeSet | null;
   agentUtter: { intent: string; say?: string; tick: number } | null;
   agentListening: boolean;            // hold-to-talk active — Moshi perks toward you
+  // A destructive command (e.g. export-overwrite) the brain planned, parked until
+  // the user's next utterance answers yes/no. UI-local, never a command.
+  pendingConfirm: { calls: AgentCommandCall[]; label: string; prompt: string } | null;
   setAgentBusy: (b: boolean) => void;
   setAgentChangeSet: (cs: ChangeSet | null) => void;
   pushAgentUtter: (intent: string, say?: string) => void;
   setAgentListening: (b: boolean) => void;
+  setPendingConfirm: (p: { calls: AgentCommandCall[]; label: string; prompt: string } | null) => void;
 
   // UI scale (ACC-005) — pure UI-local view state (like theme): never a command,
   // never crosses the bridge. Applied via document zoom so the whole WebView reflows.
@@ -450,11 +454,13 @@ export const useStore = create<State>((set, get) => ({
   agentChangeSet: null,
   agentUtter: null,
   agentListening: false,
+  pendingConfirm: null,
   setAgentBusy: (b) => set({ agentBusy: b }),
   setAgentChangeSet: (cs) => set({ agentChangeSet: cs }),
   pushAgentUtter: (intent, say) =>
     set((s) => ({ agentUtter: { intent, say, tick: (s.agentUtter?.tick ?? 0) + 1 } })),
   setAgentListening: (b) => set({ agentListening: b }),
+  setPendingConfirm: (p) => set({ pendingConfirm: p }),
 
   uiScale: 1,
   setUiScale: (n) =>

@@ -69,5 +69,15 @@ export function mockBrainReply(text: string, snap: Snapshot | null): BrainReply 
   if (/\bundo\b/.test(t)) { cmds.push({ command: "undo", args: {} }); return { intent: "ACK_GOT_IT", say: "rolled back", commands: cmds }; }
   if (/\bsave\b/.test(t)) { cmds.push({ command: "save", args: {} }); return { intent: "DONE", say: "saved", commands: cmds }; }
 
+  // export / bounce — "as <name>" sets a file, which the composer gates behind a
+  // spoken "yes" (overwrite); a bare bounce uses the safe timestamped path.
+  const ex = t.match(/\b(?:export|bounce|mix ?down|render (?:out|down))\b(?:.*\bas\s+([\w.-]+))?/);
+  if (ex) {
+    const named = ex[1];
+    const args = named ? { file: named.endsWith(".wav") ? named : `${named}.wav` } : {};
+    cmds.push({ command: "export_audio", args });
+    return { intent: named ? "ACK_WORKING" : "DONE", say: named ? `exporting to ${(args as { file: string }).file}` : "bouncing the mix", commands: cmds };
+  }
+
   return { intent: "HUH", say: "add my keys and I'll really think" };
 }

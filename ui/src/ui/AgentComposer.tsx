@@ -3,11 +3,14 @@
 // runs the edits as ONE undo step, and the result lands in Monster changes. Voice
 // and text feed the very same run() funnel; nothing downstream knows the difference.
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
 import { createBrain, type Brain } from "../agent/brain";
 import { runAgentBatch } from "../agent/executor";
+import { commandNeedsConfirm, describeCommand } from "../agent/commands";
 import { createVoiceInput, isVoiceSupported, type VoiceInput } from "../agent/voiceInput";
+
+const AFFIRM = /^\s*(y|yes|yeah|yep|yup|sure|ok|okay|do it|go ahead|go|confirm|please|aye)\b/i;
 
 export function AgentComposer() {
   const agentBusy = useStore((s) => s.agentBusy);
@@ -15,12 +18,22 @@ export function AgentComposer() {
   const setAgentChangeSet = useStore((s) => s.setAgentChangeSet);
   const pushAgentUtter = useStore((s) => s.pushAgentUtter);
   const setAgentListening = useStore((s) => s.setAgentListening);
+  const refreshPluginList = useStore((s) => s.refreshPluginList);
   const [input, setInput] = useState("");
   const [say, setSay] = useState<string | null>(null);
   const [listening, setListening] = useState(false);
 
+  // Make sure the brain knows what plugins are installed (for load-by-name).
+  useEffect(() => {
+    if (useStore.getState().availablePlugins.length === 0) void refreshPluginList();
+  }, [refreshPluginList]);
+
   const brainRef = useRef<Brain | null>(null);
-  if (!brainRef.current) brainRef.current = createBrain(() => useStore.getState().snapshot);
+  if (!brainRef.current)
+    brainRef.current = createBrain(
+      () => useStore.getState().snapshot,
+      () => useStore.getState().availablePlugins.map((p) => p.name),
+    );
 
   const voiceSupported = isVoiceSupported();
   // undefined = not yet built; null = platform has no speech API.
@@ -29,14 +42,47 @@ export function AgentComposer() {
   // The single funnel: typed text and final speech both arrive here.
   const run = async (text: string) => {
     if (!text || useStore.getState().agentBusy) return;
-    setInput(""); setSay(null); setAgentBusy(true);
+    setInput("");
+
+    // If a destructive command is parked, THIS utterance is the yes/no answer —
+    // it never reaches the brain.
+    const pending = useStore.getState().pendingConfirm;
+    if (pending) {
+      useStore.getState().setPendingConfirm(null);
+      setAgentBusy(true);
+      try {
+        if (AFFIRM.test(text)) {
+          const cs = await runAgentBatch(pending.label, pending.calls);
+          setAgentChangeSet(cs); setSay("done"); pushAgentUtter("ACK_GOT_IT", "done");
+        } else {
+          setSay("ok, left it"); pushAgentUtter("NUH", "ok, left it");
+        }
+      } finally { setAgentBusy(false); }
+      return;
+    }
+
+    setSay(null); setAgentBusy(true);
     try {
       const reply = await brainRef.current!.send(text);
-      setSay(reply.say ?? null);
-      pushAgentUtter(reply.intent ?? "ACK_GOT_IT", reply.say);
-      if (reply.commands && reply.commands.length > 0) {
-        const cs = await runAgentBatch(reply.say || text, reply.commands);
+      const all = reply.commands ?? [];
+      const gated = all.filter((c) => commandNeedsConfirm(c.command, c.args ?? {}));
+      const safe = all.filter((c) => !commandNeedsConfirm(c.command, c.args ?? {}));
+
+      if (safe.length > 0) {
+        const cs = await runAgentBatch(reply.say || text, safe);
         setAgentChangeSet(cs);
+      }
+
+      if (gated.length > 0) {
+        const first = gated[0];
+        const prompt = first.command === "export_audio" && first.args?.file
+          ? `that overwrites ${String(first.args.file)} — say yes to go ahead`
+          : `${describeCommand(first.command, first.args ?? {})} — say yes to confirm`;
+        useStore.getState().setPendingConfirm({ calls: gated, label: reply.say || text, prompt });
+        setSay(prompt); pushAgentUtter("HUH", prompt);
+      } else {
+        setSay(reply.say ?? null);
+        pushAgentUtter(reply.intent ?? "ACK_GOT_IT", reply.say);
       }
     } catch {
       setSay("hmm — that broke");
