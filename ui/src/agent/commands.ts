@@ -59,6 +59,7 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   // ── transport & timing ──────────────────────────────────────────────────
   { command: "set_tempo", desc: "Set the project tempo in BPM", args: [N("bpm")], summary: (a) => `Set tempo to ${a.bpm} BPM` },
   { command: "set_time_signature", desc: "Set the time signature", args: [N("numerator"), N("denominator")], summary: (a) => `Set time signature to ${a.numerator}/${a.denominator}` },
+  { command: "set_key", desc: "Set the project's musical key (tonic and/or mode)", args: [S("tonic", false, '"C".."B" incl. sharps/flats'), S("mode", false, '"major" | "minor" | "dorian" | "mixolydian" | "pentatonic" | "chromatic"')], summary: (a) => `Set the key${a.tonic ? ` to ${a.tonic}` : ""}${a.mode ? ` ${a.mode}` : ""}` },
   { command: "set_metronome", desc: "Toggle the metronome click", args: [B("enabled")], summary: (a) => (a.enabled ? "Turned the metronome on" : "Turned the metronome off") },
   { command: "set_transport", desc: "Play/pause/stop/record, seek, or set the loop region", args: [S("action", false, '"toggle" (play/pause) | "stop" | "record" | "to_start" | "to_end"'), N("position", false, "seek to seconds"), B("loop", false, "enable loop"), N("loopStart", false, "seconds"), N("loopEnd", false, "seconds")], summary: (a) => (a.action === "record" ? "Started recording" : a.action === "stop" ? "Stopped" : a.loop ? "Set the loop region" : a.action === "toggle" ? "Toggled playback" : "Moved the playhead") },
 
@@ -68,6 +69,7 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "set_track_mute", desc: "Mute/unmute a track", args: [S("trackId"), B("mute")], summary: (a) => (a.mute ? "Muted a track" : "Unmuted a track") },
   { command: "set_track_solo", desc: "Solo/unsolo a track", args: [S("trackId"), B("solo")], summary: (a) => (a.solo ? "Soloed a track" : "Unsoloed a track") },
   { command: "set_master_volume", desc: "Set the master volume in dB", args: [N("db")], summary: (a) => `Set master volume to ${a.db} dB` },
+  { command: "set_master_pan", desc: "Set the master pan (-1 left … 1 right)", args: [N("pan")], summary: (a) => `Set master pan to ${a.pan}` },
 
   // ── plugins ─────────────────────────────────────────────────────────────
   { command: "load_builtin", desc: "Add a built-in effect/instrument to a track (type from list_builtins)", args: [S("trackId"), N("index", false, "chain position"), S("type")], summary: (a) => `Added ${a.type}` },
