@@ -8,6 +8,7 @@ import { brainChat } from "../bridge";
 import { mockBrainReply } from "./brainMock";
 import { parseReply, type BrainReply } from "./parseReply";
 import { systemPrompt } from "./prompt";
+import { retrieveCards } from "./knowledge/retrieve";
 import type { Snapshot } from "../types";
 
 export type { BrainReply } from "./parseReply";
@@ -23,7 +24,9 @@ export function createBrain(
     async send(text: string): Promise<BrainReply> {
       const snap = getSnapshot();
       history.push({ role: "user", content: text });
-      const messages = [{ role: "system", content: systemPrompt(snap, getPluginNames?.() ?? []) }, ...history.slice(-8)];
+      // Pull in any validated producer-knowledge cards relevant to THIS request.
+      const cards = retrieveCards(text);
+      const messages = [{ role: "system", content: systemPrompt(snap, getPluginNames?.() ?? [], cards) }, ...history.slice(-8)];
       try {
         const { content } = await brainChat(messages);
         history.push({ role: "assistant", content });

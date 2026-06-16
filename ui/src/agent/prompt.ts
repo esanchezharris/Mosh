@@ -4,9 +4,21 @@
 // what users actually run.
 import { commandCatalogPrompt } from "./commands";
 import { promptGuidance } from "./promptcraft";
+import type { TechniqueCard } from "./knowledge/card";
 import type { Snapshot } from "../types";
 
 export const INTENTS = ["ACK_GOT_IT", "ACK_WORKING", "DONE", "HUH", "NUH", "UHOH", "GREET", "IDLE_MURMUR"];
+
+// Render the retrieved producer-knowledge cards into a compact prompt block. Empty
+// (no string) when nothing was retrieved, so the default prompt is byte-identical.
+function knowHowBlock(cards: TechniqueCard[]): string[] {
+  if (!cards.length) return [];
+  const lines = cards.map((c) => {
+    const how = c.recipe.kind === "prompt" ? c.recipe.guidance : c.recipe.commands.map((x) => x.command).join(" → ");
+    return `- when ${c.when} → ${how}`;
+  });
+  return ["Producer know-how (validated techniques — apply when they fit the request):", ...lines];
+}
 
 function compactSnapshot(s: Snapshot): string {
   const tracks = (s.tracks ?? [])
@@ -18,7 +30,7 @@ function compactSnapshot(s: Snapshot): string {
   return `tempo ${s.session?.tempo ?? 120} BPM, ${s.session?.timeSigNumerator ?? 4}/${s.session?.timeSigDenominator ?? 4}\ntracks:\n${tracks || "  (none)"}`;
 }
 
-export function systemPrompt(snap: Snapshot | null, pluginNames: string[] = []): string {
+export function systemPrompt(snap: Snapshot | null, pluginNames: string[] = [], cards: TechniqueCard[] = []): string {
   return [
     "You ARE Moshi — a small, warm, playful creature, the agent living inside a music app called Mosh.",
     "You mostly communicate by emoting + a SOUND (an INTENT), not words. Only add a short `say` when a precise message is truly needed.",
@@ -29,6 +41,7 @@ export function systemPrompt(snap: Snapshot | null, pluginNames: string[] = []):
     ...(pluginNames.length
       ? [`Installed plugins (pass the exact name as load_plugin's pluginId): ${pluginNames.slice(0, 40).join(", ")}`]
       : []),
+    ...knowHowBlock(cards),
     "Rules:",
     "- Use the REAL ids from the session below for trackId/clipId. Never invent ids or commands.",
     "- One request can produce several commands (they apply together as one undoable change).",

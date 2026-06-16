@@ -13,7 +13,8 @@
     "brain-eval": "MOSH_BRAIN_EVAL=1 vitest run src/agent/brainEval.test.ts",
     "eval-matrix": "vite-node scripts/evalMatrix.mts",
     "arena": "vite-node scripts/arena.mts",
-    "genbench": "vite-node scripts/genbench.mts"
+    "genbench": "vite-node scripts/genbench.mts",
+    "flywheel": "vite-node scripts/flywheel.mts"
   },
   "dependencies": {
     "qrcode": "^1.5.4",

@@ -36,10 +36,12 @@ export function resolveProvider(want?: string): Provider | null {
 
 const isReasoning = (m: string) => /^(gpt-5|gpt-6|o[0-9])/.test(m) || /reason|thinking/.test(m);
 
-export async function callLLM(p: Provider, messages: { role: string; content: string }[]): Promise<string> {
+export async function callLLM(p: Provider, messages: { role: string; content: string }[], opts?: { maxTokens?: number }): Promise<string> {
   const body: Record<string, unknown> = { model: p.model, messages };
-  if (isReasoning(p.model)) body.max_completion_tokens = 1500;
-  else { body.max_tokens = 1200; body.temperature = 0.5; }
+  // Default budgets unchanged; callers needing a long structured reply (e.g. the
+  // flywheel's multi-card distill) can raise it so the JSON isn't truncated mid-array.
+  if (isReasoning(p.model)) body.max_completion_tokens = opts?.maxTokens ?? 1500;
+  else { body.max_tokens = opts?.maxTokens ?? 1200; body.temperature = 0.5; }
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 60_000);
   try {
