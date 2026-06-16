@@ -235,7 +235,42 @@ export const VALIDATED_CARDS: TechniqueCard[] = [
             "velocity": 80
           }
         }
-      ]
+      ],
+      "check": {
+        "kind": "pattern",
+        "clip": "$drumClipId",
+        "pattern": {
+          "hits": [
+            {
+              "pitch": 36,
+              "beats": [
+                0,
+                2.5
+              ]
+            },
+            {
+              "pitch": 38,
+              "beats": [
+                1,
+                3
+              ]
+            },
+            {
+              "pitch": 42,
+              "beats": [
+                0,
+                0.5,
+                1,
+                1.5,
+                2,
+                2.5,
+                3,
+                3.5
+              ]
+            }
+          ]
+        }
+      }
     },
     "evidence": [
       {
@@ -281,7 +316,13 @@ export const VALIDATED_CARDS: TechniqueCard[] = [
             "swing": 0.58
           }
         }
-      ]
+      ],
+      "check": {
+        "kind": "swing",
+        "clip": "$hatsClipId",
+        "division": 0.5,
+        "swing": 0.58
+      }
     },
     "evidence": [
       {
@@ -326,7 +367,12 @@ export const VALIDATED_CARDS: TechniqueCard[] = [
             "seed": 42
           }
         }
-      ]
+      ],
+      "check": {
+        "kind": "humanize",
+        "clip": "$keysClipId",
+        "maxOffsetBeats": 0.125
+      }
     },
     "evidence": [
       {
@@ -382,7 +428,14 @@ export const VALIDATED_CARDS: TechniqueCard[] = [
             "value": 0.9
           }
         }
-      ]
+      ],
+      "check": {
+        "kind": "automation",
+        "track": "$keysTrackId",
+        "pluginIndex": "$keysFilterPluginIndex",
+        "paramIndex": "$keysFilterParamIndex",
+        "direction": "up"
+      }
     },
     "evidence": [
       {
@@ -432,7 +485,13 @@ export const VALIDATED_CARDS: TechniqueCard[] = [
             "db": -12
           }
         }
-      ]
+      ],
+      "check": {
+        "kind": "send",
+        "track": "$keysTrackId",
+        "bus": "$busNumber",
+        "db": -12
+      }
     },
     "evidence": [
       {

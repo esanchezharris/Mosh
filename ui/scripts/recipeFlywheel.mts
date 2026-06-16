@@ -16,17 +16,15 @@ import { fileURLToPath } from "node:url";
 import { execSync } from "node:child_process";
 import { Engine, MOSH_BIN } from "./agentEngine.mts";
 import { bindRecipe, type RecipeCommand } from "../src/agent/knowledge/recipe";
-import {
-  patternConformance, swingConformance, humanizeConformance, automationConformance, sendConformance,
-  type ConformanceResult, type PatternSpec,
-} from "../src/agent/knowledge/conformance";
+import { type ConformanceResult, type PatternSpec } from "../src/agent/knowledge/conformance";
+import { runCheck, type CheckSpec } from "../src/agent/knowledge/check";
 import {
   type TechniqueCard, type CardEvidence, type CardRecipe, type TaskType,
   stableId, judgeConformance,
 } from "../src/agent/knowledge/card";
 import { coerceArgs, validateCommand } from "../src/agent/commands";
 import { upsertCards, writeCardsData } from "./knowledgeStore.mts";
-import { buildBase, type BaseSpec, type BaseBindings } from "./recipeBase.mts";
+import { buildBase, type BaseSpec } from "./recipeBase.mts";
 
 const UI_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const REPO = resolve(UI_ROOT, "..");
@@ -41,17 +39,6 @@ const ARRANGEMENTS: BaseSpec[] = [
 
 const env = (): Record<string, string> => ({ MOSH_NO_AUDIO: "1" });
 
-// ── snapshot slice accessors (symbolic — the conformance substrate) ───────────────
-const clipNotes = (snap: any, clipId: string): any[] => {
-  for (const t of snap?.tracks || []) for (const c of t.clips || []) if (c.id === clipId) return c.notes || [];
-  return [];
-};
-const findTrack = (snap: any, trackId: string): any => (snap?.tracks || []).find((t: any) => t.id === trackId);
-const findParam = (snap: any, trackId: string, pluginIndex: number, paramIndex: number): any => {
-  const p = (findTrack(snap, trackId)?.plugins || []).find((x: any) => x.index === pluginIndex);
-  return (p?.params || []).find((x: any) => x.index === paramIndex);
-};
-
 const DRUM_PATTERN: PatternSpec = { hits: [
   { pitch: 36, beats: [0, 2.5] },                          // kick: the 1 and the "and" of 3
   { pitch: 38, beats: [1, 3] },                            // snare: the backbeats
@@ -61,11 +48,12 @@ const drumCommands: RecipeCommand[] = DRUM_PATTERN.hits.flatMap((h) =>
   h.beats.map((b) => ({ command: "add_note", args: { clipId: "$drumClipId", pitch: h.pitch, start: b, length: 0.25, velocity: h.pitch === 36 ? 110 : h.pitch === 38 ? 100 : 80 } })),
 );
 
-// A hand-seeded technique card + how to CHECK its conformance off the after-snapshot.
+// A hand-seeded technique card + how to CHECK its conformance — now a declarative
+// CheckSpec (data, not a closure), so the SAME shape an LLM/YouTube miner emits.
 type SeedCard = {
   meta: { skill_name: string; task_type: TaskType; genre_context: string[]; producer_intent: string; when: string };
   commands: RecipeCommand[];
-  check: (before: any, after: any, b: BaseBindings, runtime: Record<string, unknown>) => ConformanceResult;
+  check: CheckSpec;
 };
 
 const SEED_CARDS: SeedCard[] = [
@@ -75,7 +63,7 @@ const SEED_CARDS: SeedCard[] = [
       producer_intent: "the classic boom-bap skeleton — kick on the 1 and the 'and' of 3, snare on the 2 & 4, hats on every 8th",
       when: "programming a boom-bap or lo-fi hip-hop drum pattern from scratch" },
     commands: drumCommands,
-    check: (_b, after, b) => patternConformance(clipNotes(after, b.drumClipId), DRUM_PATTERN),
+    check: { kind: "pattern", clip: "$drumClipId", pattern: DRUM_PATTERN },
   },
   {
     meta: { skill_name: "MPC swing on the hats (~0.58)", task_type: "drum_programming",
@@ -83,7 +71,7 @@ const SEED_CARDS: SeedCard[] = [
       producer_intent: "push the off-beat 8ths late for that drunk MPC/boom-bap swing instead of a stiff straight grid",
       when: "the hats/drums feel too straight and need a swung, off-grid groove" },
     commands: [{ command: "quantize_notes", args: { clipId: "$hatsClipId", division: 0.5, strength: 1, swing: 0.58 } }],
-    check: (_b, after, b) => swingConformance(clipNotes(after, b.hatsClipId), { division: 0.5, swing: 0.58 }),
+    check: { kind: "swing", clip: "$hatsClipId", division: 0.5, swing: 0.58 },
   },
   {
     meta: { skill_name: "Humanize the keys (subtle timing + velocity)", task_type: "arrangement",
@@ -91,7 +79,7 @@ const SEED_CARDS: SeedCard[] = [
       producer_intent: "a small seeded timing + velocity jitter so a programmed Rhodes/keys part breathes instead of sounding robotic",
       when: "a programmed keys/chord part sounds too quantized / robotic" },
     commands: [{ command: "humanize_notes", args: { clipId: "$keysClipId", timing: 0.2, velocity: 0.3, seed: 42 } }],
-    check: (before, after, b) => humanizeConformance(clipNotes(before, b.keysClipId), clipNotes(after, b.keysClipId), { maxOffsetBeats: 0.125 }),
+    check: { kind: "humanize", clip: "$keysClipId", maxOffsetBeats: 0.125 },
   },
   {
     meta: { skill_name: "Filter-open automation over the intro", task_type: "mixing",
@@ -102,7 +90,7 @@ const SEED_CARDS: SeedCard[] = [
       { command: "add_automation_point", args: { trackId: "$keysTrackId", pluginIndex: "$keysFilterPluginIndex", paramIndex: "$keysFilterParamIndex", time: 0, value: 0.2 } },
       { command: "add_automation_point", args: { trackId: "$keysTrackId", pluginIndex: "$keysFilterPluginIndex", paramIndex: "$keysFilterParamIndex", time: 4, value: 0.9 } },
     ],
-    check: (_b, after, b) => automationConformance(findParam(after, b.keysTrackId, b.keysFilterPluginIndex, b.keysFilterParamIndex), { direction: "up" }),
+    check: { kind: "automation", track: "$keysTrackId", pluginIndex: "$keysFilterPluginIndex", paramIndex: "$keysFilterParamIndex", direction: "up" },
   },
   {
     meta: { skill_name: "Shared reverb on a send bus", task_type: "mixing",
@@ -113,7 +101,7 @@ const SEED_CARDS: SeedCard[] = [
       { command: "create_bus", args: { name: "Reverb" } },
       { command: "add_send", args: { trackId: "$keysTrackId", bus: "$busNumber", db: -12 } },
     ],
-    check: (_b, after, b, runtime) => sendConformance(findTrack(after, b.keysTrackId), { bus: Number(runtime.busNumber), db: -12 }),
+    check: { kind: "send", track: "$keysTrackId", bus: "$busNumber", db: -12 },
   },
 ];
 
@@ -153,7 +141,7 @@ async function main() {
         const before = await eng.snapshot();
         const runtime = await applyRecipe(eng, seed.commands, base as unknown as Record<string, unknown>);
         const after = await eng.snapshot();
-        res = seed.check(before, after, base, runtime);
+        res = runCheck(seed.check, before, after, base as unknown as Record<string, unknown>, runtime);
       } catch (e) {
         res = { conformant: false, detail: `error: ${(e as Error).message}` };
       } finally { eng.close(); }
@@ -162,7 +150,7 @@ async function main() {
       console.error(`  ${seed.meta.skill_name.slice(0, 42).padEnd(42)} · ${arr.baseId.padEnd(11)} · ${res.conformant ? "✓" : res.inconclusive ? "?" : "✗"} ${res.detail}`);
     }
     const verdict = judgeConformance(evidence);
-    const recipe: CardRecipe = { kind: "recipe", commands: seed.commands };
+    const recipe: CardRecipe = { kind: "recipe", commands: seed.commands, check: seed.check };
     const card: TechniqueCard = {
       id: stableId({ skill_name: seed.meta.skill_name, recipe }),
       source: "distill", skill_name: seed.meta.skill_name, task_type: seed.meta.task_type,

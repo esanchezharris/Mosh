@@ -6,6 +6,7 @@
 // emit the SAME shape (source:"youtube") into the same store + the same loop.
 //
 // Pure + browser-safe (no node imports): the product bundle imports this for retrieval.
+import type { CheckSpec } from "./check";
 
 export type CardSource = "distill" | "selfplay" | "youtube";
 // prompt cards: candidate → validated/rejected (audio brief-match bar). recipe (in-the-box)
@@ -21,9 +22,12 @@ export type TaskType =
 // A card's intervention is one of two kinds, so the flywheel can A/B it cheaply:
 //  - prompt: text appended to a generative (Stable Audio) prompt — tested by re-rendering.
 //  - recipe: a concrete MoshOps command sequence applied in the DAW — tested by replay.
+// A recipe card optionally carries its CONFORMANCE check as DATA (a CheckSpec) so the
+// loop can re-validate it and a non-TS source (LLM/YouTube) can emit it whole. The baked
+// product card ignores `check` (retrieval/injection only need the commands + the intent).
 export type CardRecipe =
   | { kind: "prompt"; guidance: string }
-  | { kind: "recipe"; commands: { command: string; args: Record<string, unknown> }[] };
+  | { kind: "recipe"; commands: { command: string; args: Record<string, unknown> }[]; check?: CheckSpec };
 
 // One A/B measurement: with-card vs without-card on a brief, on one scorer dimension.
 // technique_conformance (recipe cards): withScore 1 = move took effect, 0 = it didn't.
@@ -59,7 +63,11 @@ function djb2(s: string): string {
 }
 
 export function stableId(c: Pick<TechniqueCard, "skill_name" | "recipe">): string {
-  return "card_" + djb2(c.skill_name.trim().toLowerCase() + "|" + JSON.stringify(c.recipe));
+  // Identity = what the card DOES (skill + commands/guidance), NOT how it's validated.
+  // Strip the optional recipe `check` so adding or changing a check never re-ids an
+  // existing card (and the same technique mined from two sources collides correctly).
+  const recipe = c.recipe.kind === "recipe" ? { kind: c.recipe.kind, commands: c.recipe.commands } : c.recipe;
+  return "card_" + djb2(c.skill_name.trim().toLowerCase() + "|" + JSON.stringify(recipe));
 }
 
 export const isValidated = (c: TechniqueCard): boolean => c.status === "validated";

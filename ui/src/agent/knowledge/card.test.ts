@@ -20,6 +20,19 @@ describe("stableId — reproducible from content", () => {
   });
 });
 
+describe("stableId — a recipe card's identity is what it DOES, not how it's checked", () => {
+  const commands = [{ command: "add_note", args: { clipId: "$c", pitch: 36, start: 0 } }];
+  const withCheck: CardRecipe = { kind: "recipe", commands, check: { kind: "pattern", clip: "$c", pattern: { hits: [{ pitch: 36, beats: [0] }] } } };
+  const noCheck: CardRecipe = { kind: "recipe", commands };
+  it("ignores the recipe's check (adding/changing a check never re-ids an existing card)", () => {
+    expect(stableId({ skill_name: "drum", recipe: withCheck })).toBe(stableId({ skill_name: "drum", recipe: noCheck }));
+  });
+  it("still changes when the commands change", () => {
+    const other: CardRecipe = { kind: "recipe", commands: [{ command: "add_note", args: { clipId: "$c", pitch: 38, start: 0 } }] };
+    expect(stableId({ skill_name: "drum", recipe: withCheck })).not.toBe(stableId({ skill_name: "drum", recipe: other }));
+  });
+});
+
 describe("judgeAcceptance — the flywheel's keep/reject bar", () => {
   it("keeps a card that improves brief-match by ≥margin on ≥2 briefs", () => {
     const r = judgeAcceptance([ev("b1", ACCEPT_MARGIN + 0.05), ev("b2", 0.01)]);

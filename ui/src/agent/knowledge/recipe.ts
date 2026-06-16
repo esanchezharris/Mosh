@@ -8,7 +8,9 @@ export type RecipeCommand = { command: string; args: Record<string, unknown> };
 // Resolve one value: a string of the exact form "$name" → bindings[name] (any type,
 // e.g. a number paramIndex); arrays/objects are walked; everything else is returned
 // as-is. An unbound "$name" stays literal so downstream validateCommand trips it.
-function resolveValue(v: unknown, bindings: Record<string, unknown>): unknown {
+// Exported so the conformance dispatcher (check.ts) resolves a CheckSpec's $token refs
+// with the SAME semantics a recipe's command args use — one source of truth.
+export function resolveValue(v: unknown, bindings: Record<string, unknown>): unknown {
   if (typeof v === "string" && v.startsWith("$")) {
     const key = v.slice(1);
     return key in bindings ? bindings[key] : v;
