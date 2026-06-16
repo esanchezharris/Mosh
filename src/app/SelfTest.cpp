@@ -759,8 +759,27 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (compFlagged, "built-in plugin flagged builtin=true in snapshot");
         check (compCategorised, "built-in plugin carries its category");
         if (cidx >= 0)
+        {
             check (ok (cmd (ops, "set_plugin_param", objN ({{ "trackId", bt }, { "index", cidx }, { "paramIndex", 0 }, { "value", 0.5 }}))),
                    "set_plugin_param on a built-in ok");
+
+            // set_plugin_param_by_name: resolve param 0's name from the snapshot, then
+            // set it BY NAME — the intent-addressable path (no index guessing).
+            String p0name;
+            { auto trk = trackById (bt);
+              if (auto* arr = trk.getProperty ("plugins", var()).getArray())
+                for (auto& p : *arr) if ((int) p.getProperty ("index", -1) == cidx)
+                  if (auto* ps = p.getProperty ("params", var()).getArray())
+                    if (ps->size() > 0) p0name = (*ps)[0].getProperty ("name", var()).toString(); }
+            check (p0name.isNotEmpty(), "built-in compressor exposes a named param in the snapshot");
+            if (p0name.isNotEmpty())
+            {
+                check (ok (cmd (ops, "set_plugin_param_by_name", objN ({{ "trackId", bt }, { "index", cidx }, { "paramName", p0name }, { "value", 0.6 }}))),
+                       "set_plugin_param_by_name (exact name) ok");
+                check (! ok (cmd (ops, "set_plugin_param_by_name", objN ({{ "trackId", bt }, { "index", cidx }, { "paramName", "definitely_not_a_param" }, { "value", 0.5 }}))),
+                       "set_plugin_param_by_name rejects an unknown param name (no wrong guess)");
+            }
+        }
 
         // Instrument: a built-in synth on the same track is flagged isInstrument.
         check (ok (cmd (ops, "load_builtin", objN ({{ "trackId", bt }, { "type", "4osc" }}))), "load_builtin (4osc synth) ok");
@@ -1154,6 +1173,23 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         cmd (ops, "redo");
         check (trackById (mt).getProperty ("name", var()).toString() == "Master Bus", "redo restored the rename");
 
+        // --- bounce_track: print the mix track's FX chain to a clip on a NEW track ---
+        // (renders headless like export; lands a wave clip; non-destructive; undoable.)
+        {
+            auto bnc = cmd (ops, "bounce_track", objN ({{ "trackId", mt }}));
+            check (ok (bnc), "bounce_track ok");
+            const auto bncFile  = bnc["data"].getProperty ("file", var()).toString();
+            check (File (bncFile).existsAsFile() && (juce::int64) bnc["data"].getProperty ("bytes", 0) > 1000,
+                   "bounce_track produced a non-empty WAV");
+            const auto bncTrack = bnc["data"].getProperty ("trackId", var()).toString();
+            const auto bncClip  = bnc["data"].getProperty ("clipId", var()).toString();
+            check (bncTrack.isNotEmpty() && bncClip.isNotEmpty() && bncTrack != mt,
+                   "bounce_track lands a clip on a NEW track (source kept)");
+            check (trackById (mt).isObject(), "bounce_track keeps the source track");
+            cmd (ops, "undo");
+            check (! trackById (bncTrack).isObject(), "undo removes the bounce track + clip in one step");
+        }
+
         // --- IOX-002 / IOX-007: export format / bit-depth / sample-rate options ---
         // Renders headless (no device) like the export above. Each check exercises the
         // format-resolution + bit-depth-validation path, not just the happy WAV case.
@@ -1359,6 +1395,13 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
               const double s = (double) n.getProperty ("start", 0.0);
               if (std::abs (s - std::round (s)) > 0.02) allOnGrid = false; }
           check (allOnGrid, "quantize_notes snaps every note onto the beat grid"); }
+
+        // humanize_notes: seeded jitter; non-destructive to note count, starts stay >= 0.
+        const int humBefore = clipNotes (mClip).size();
+        check (ok (cmd (ops, "humanize_notes", objN ({{ "clipId", mClip }, { "timing", 0.3 }, { "velocity", 0.3 }, { "seed", 42 }}))), "humanize_notes ok");
+        { auto ns = clipNotes (mClip); bool good = ns.size() == humBefore;
+          if (auto* arr = ns.getArray()) for (auto& n : *arr) if ((double) n.getProperty ("start", 0.0) < 0.0) good = false;
+          check (good, "humanize_notes preserves note count and keeps starts >= 0"); }
 
         const int before = clipNotes (mClip).size();
         check (ok (cmd (ops, "remove_note", objN ({{ "clipId", mClip }, { "noteIndex", 0 }}))), "remove_note ok");

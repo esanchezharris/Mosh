@@ -107,6 +107,7 @@ private:
     juce::var cmdRemovePlugin   (const juce::var& args);
     juce::var cmdReorderPlugin  (const juce::var& args);
     juce::var cmdSetPluginParam (const juce::var& args);
+    juce::var cmdSetPluginParamByName (const juce::var& args);  // address a param by NAME (no index guessing)
     juce::var cmdSet4oscPatch   (const juce::var& args);   // curated 4OSC patches (the default is a SINE)
     juce::var cmdBypassPlugin   (const juce::var& args);
     // INS-005 — plugin scan / blocklist / management (NON-undoable: catalog ops,
@@ -127,6 +128,7 @@ private:
     juce::var cmdRemoveNote     (const juce::var& args);
     juce::var cmdSetNote        (const juce::var& args);
     juce::var cmdQuantizeNotes  (const juce::var& args);
+    juce::var cmdHumanizeNotes  (const juce::var& args);   // seeded timing+velocity jitter (deterministic)
     // Stage 4 — Tier-A real-time neural insert
     juce::var cmdAddNeuralInsert (const juce::var& args);
     juce::var cmdSetNeuralParam  (const juce::var& args);
@@ -152,6 +154,7 @@ private:
     juce::var cmdGenerateAudio    (const juce::var& args);   // one-shot text-to-audio (no sine-host dance)
     // Stage 6 — consolidation
     juce::var cmdExportAudio      (const juce::var& args);
+    juce::var cmdBounceTrack      (const juce::var& args);   // print a track's FX chain to a new audio clip
     // Wave: settings — audio device picker + project lifecycle (both NON-undoable)
     juce::var cmdListAudioDevices (const juce::var& args);   // read-only (no log/transaction)
     juce::var cmdListMidiInputs   (const juce::var& args);   // read-only MIDI-input enumeration (CTL-001)
@@ -217,6 +220,11 @@ private:
                                            const juce::String& trackId,
                                            double startSeconds,
                                            const juce::var& logArgs);
+    // Shared render core for bounce_track: frees the playback context (render
+    // exclusivity) and renders the given tracks' own FX (not the master bus) to
+    // dest. Returns "" on success, else an error string. Reads no command args.
+    juce::String    bounceRenderToFile (juce::Array<te::Track*> tracks, const juce::File& dest,
+                                        double renderSeconds, bool realtimeRender);
     te::VolumeAndPanPlugin* ensureVolumePlugin (te::AudioTrack&);
     te::AudioTrack* findTrack (const juce::String& id);
     te::FolderTrack* findGroupTrack (const juce::String& id);   // MIX-008 submix folder lookup

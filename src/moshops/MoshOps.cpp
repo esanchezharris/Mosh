@@ -276,6 +276,7 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "remove_plugin")     return cmdRemovePlugin (args);
     if (name == "reorder_plugin")    return cmdReorderPlugin (args);
     if (name == "set_plugin_param")  return cmdSetPluginParam (args);
+    if (name == "set_plugin_param_by_name") return cmdSetPluginParamByName (args);
     if (name == "set_4osc_patch")    return cmdSet4oscPatch (args);
     if (name == "bypass_plugin")     return cmdBypassPlugin (args);
     if (name == "rescan_plugins")        return cmdRescanPlugins (args);
@@ -292,6 +293,7 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "remove_note")       return cmdRemoveNote (args);
     if (name == "set_note")          return cmdSetNote (args);
     if (name == "quantize_notes")    return cmdQuantizeNotes (args);
+    if (name == "humanize_notes")    return cmdHumanizeNotes (args);
     if (name == "add_neural_insert") return cmdAddNeuralInsert (args);
     if (name == "set_neural_param")  return cmdSetNeuralParam (args);
     if (name == "set_neural_lab_mode") return cmdSetNeuralLabMode (args);
@@ -311,6 +313,7 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "list_colors")       return cmdListColors (args);
     if (name == "generate_audio")    return cmdGenerateAudio (args);
     if (name == "export_audio")      return cmdExportAudio (args);
+    if (name == "bounce_track")      return cmdBounceTrack (args);
     if (name == "list_audio_devices")return cmdListAudioDevices (args);
     if (name == "list_midi_inputs")  return cmdListMidiInputs (args);
     if (name == "get_command_log")   return cmdGetCommandLog (args);
@@ -2514,6 +2517,65 @@ juce::var MoshOps::cmdSetPluginParam (const juce::var& args)
     return okResult ("set_plugin_param");
 }
 
+// Set a plugin parameter addressed by NAME so the agent can target "Frequency"/
+// "Ratio"/etc. straight off the snapshot's fx:[…{i:name=val}] without guessing a
+// slot. Resolution is case-insensitive: exact name first, then an UNAMBIGUOUS
+// substring (>1 substring match is rejected, not guessed). The plugin is addressed
+// by chain index, or by pluginName when the index is unknown.
+juce::var MoshOps::cmdSetPluginParamByName (const juce::var& args)
+{
+    const auto trackId    = args.getProperty ("trackId", var()).toString();
+    const int  index      = (int) args.getProperty ("index", -1);
+    const auto pluginName = args.getProperty ("pluginName", var()).toString();
+
+    auto* plugin = findPlugin (trackId, index);
+    if (plugin == nullptr && pluginName.isNotEmpty())
+        if (auto* track = findTrack (trackId))
+        {
+            // Same no-wrong-guess rule as the param resolution below: reject an ambiguous
+            // pluginName (e.g. two EQs) rather than silently mutating the first match.
+            te::Plugin* hit = nullptr; int hits = 0;
+            for (auto* pl : track->pluginList.getPlugins())
+                if (pl != nullptr && pl->getName().containsIgnoreCase (pluginName)) { if (hit == nullptr) hit = pl; ++hits; }
+            if (hits > 1) return errResult ("set_plugin_param_by_name",
+                                            "ambiguous pluginName '" + pluginName + "' (" + String (hits) + " matches)");
+            plugin = hit;
+        }
+    if (plugin == nullptr) return errResult ("set_plugin_param_by_name", "no plugin (give a valid index or pluginName)");
+
+    const auto paramName = args.getProperty ("paramName", var()).toString();
+    if (paramName.isEmpty()) return errResult ("set_plugin_param_by_name", "missing paramName");
+    const float norm = juce::jlimit (0.0f, 1.0f, (float) (double) args.getProperty ("value", 0.0));
+
+    te::AutomatableParameter::Ptr match, partial;
+    int matchIndex = -1, partialIndex = -1, partialCount = 0;
+    const int np = plugin->getNumAutomatableParameters();
+    for (int i = 0; i < np; ++i)
+    {
+        auto p = plugin->getAutomatableParameter (i);
+        if (p == nullptr) continue;
+        const auto pn = p->getParameterName();
+        if (pn.equalsIgnoreCase (paramName)) { match = p; matchIndex = i; break; }
+        if (pn.containsIgnoreCase (paramName)) { if (partial == nullptr) { partial = p; partialIndex = i; } ++partialCount; }
+    }
+    if (match == nullptr)
+    {
+        if (partialCount == 1) { match = partial; matchIndex = partialIndex; }
+        else if (partialCount > 1) return errResult ("set_plugin_param_by_name",
+                                                     "ambiguous paramName '" + paramName + "' (" + String (partialCount) + " matches)");
+    }
+    if (match == nullptr) return errResult ("set_plugin_param_by_name", "no parameter named '" + paramName + "'");
+
+    beginTxn ("set_plugin_param_by_name");
+    match->setParameter (match->valueRange.convertFrom0to1 (norm), juce::sendNotification);
+    logLine ("set_plugin_param_by_name", args, true, {}, true);
+    emitSnapshotInvalidated();
+    auto* d = new DynamicObject();
+    d->setProperty ("paramIndex", matchIndex);
+    d->setProperty ("paramName", match->getParameterName());
+    return okResult ("set_plugin_param_by_name", var (d));
+}
+
 // Curated 4OSC patches. The 4OSC default oscillator is a SINE (waveShape, a value-tree
 // property — NOT an automatable param, so set_plugin_param can't reach it), which is why
 // MIDI on a fresh 4OSC sounds like a sine. This sets the oscillator waveform + amp ADSR +
@@ -2994,6 +3056,58 @@ juce::var MoshOps::cmdQuantizeNotes (const juce::var& args)
     emitSnapshotInvalidated();
     auto* data = new DynamicObject(); data->setProperty ("moved", moved);
     return okResult ("quantize_notes", var (data));
+}
+
+// Add seeded, DETERMINISTIC timing + velocity jitter so a programmed part breathes.
+// `seed` makes it reproducible (the eval/flywheel harness depends on identical calls
+// reproducing identical output). timing/velocity are 0–1 amounts; timing slop is
+// capped at a 1/8 note and velocity at ±40 so it stays musical. Two RNG draws per
+// note ALWAYS (independent of the amounts) so a given seed is stable across knobs.
+juce::var MoshOps::cmdHumanizeNotes (const juce::var& args)
+{
+    auto* mc = dynamic_cast<te::MidiClip*> (findClip (args.getProperty ("clipId", var()).toString()));
+    if (mc == nullptr) return errResult ("humanize_notes", "no midi clip");
+    auto& seq = mc->getSequence();
+
+    const double timing = juce::jlimit (0.0, 1.0, (double) args.getProperty ("timing", 0.2));
+    const double velAmt = juce::jlimit (0.0, 1.0, (double) args.getProperty ("velocity", 0.2));
+    const int    seed   = (int) args.getProperty ("seed", 1);
+
+    const double maxOffsetBeats = 0.125;   // ±1/8 note at amount 1 — keeps it musical
+    const double maxVelDelta    = 40.0;    // ±40 velocity units at amount 1
+    juce::Random rng ((juce::int64) seed);
+
+    beginTxn ("humanize_notes");
+    // Snapshot the note pointers in their current order BEFORE mutating: shifting a note's
+    // start can re-sort the sequence, so iterating live by getNote(i) could skip/re-hit a
+    // note. The MidiNote objects persist (only their array order changes), so the pointers
+    // stay valid. Iterating the stable snapshot also pins the RNG draw order → determinism.
+    juce::Array<te::MidiNote*> notes;
+    for (int i = 0; i < seq.getNumNotes(); ++i)
+        if (auto* n = seq.getNote (i)) notes.add (n);
+
+    int moved = 0;
+    for (auto* note : notes)
+    {
+        const double tj = rng.nextDouble() * 2.0 - 1.0;   // timing jitter draw (always)
+        const double vj = rng.nextDouble() * 2.0 - 1.0;   // velocity jitter draw (always)
+        if (timing > 0.0)
+        {
+            const double start = juce::jmax (0.0, note->getStartBeat().inBeats());
+            note->setStartAndLength (tracktion::BeatPosition::fromBeats (juce::jmax (0.0, start + tj * timing * maxOffsetBeats)),
+                                     note->getLengthBeats(), &undoManager());
+            ++moved;
+        }
+        if (velAmt > 0.0)
+        {
+            const int nv = juce::jlimit (1, 127, (int) std::lround (note->getVelocity() + vj * velAmt * maxVelDelta));
+            note->setVelocity (nv, &undoManager());
+        }
+    }
+    logLine ("humanize_notes", args, true, {}, true);
+    emitSnapshotInvalidated();
+    auto* data = new DynamicObject(); data->setProperty ("humanized", moved);
+    return okResult ("humanize_notes", var (data));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3804,6 +3918,149 @@ juce::var MoshOps::cmdExportAudio (const juce::var& args)
     data->setProperty ("renderModeReason", renderModeReason);
     data->setProperty ("realTimeRender", params.realTimeRender);
     return okResult ("export_audio", var (data));
+}
+
+// Shared render core for bounce_track. Mirrors cmdExportAudio's render-exclusivity
+// teardown (01 §5 — detach + free the playback context, asserts otherwise), but
+// renders ONLY the given tracks' own FX chains (useMasterPlugins=false → a stem,
+// not the master bus). Returns "" on success, else an error string. Takes no args.
+juce::String MoshOps::bounceRenderToFile (juce::Array<te::Track*> tracks, const juce::File& dest,
+                                          double renderSeconds, bool realtimeRender)
+{
+    auto& edit = eng.edit();
+    auto& afm  = edit.engine.getAudioFileFormatManager();
+
+    dest.getParentDirectory().createDirectory();
+    dest.deleteFile();
+
+    // Render exclusivity: tear down meter taps + free the playback context first
+    // (same swap guard cmdExportAudio/cmdNewProject use; clears the master tap).
+    unregisterAllMeterClients();
+    edit.getTransport().stop (false, false);
+    edit.getTransport().freePlaybackContext();
+    lastSeenContext = nullptr;
+
+    double sampleRate = edit.engine.getDeviceManager().getSampleRate();
+    if (sampleRate < 7000.0) sampleRate = 44100.0;
+
+    te::Renderer::Parameters params (edit);
+    params.destFile = dest;
+    params.audioFormat = afm.getWavFormat();
+    params.bitDepth = 24;
+    params.sampleRateForAudio = sampleRate;
+    params.blockSizeForAudio = edit.engine.getDeviceManager().getBlockSize();
+    if (params.blockSizeForAudio <= 0) params.blockSizeForAudio = 512;
+    // renderSeconds is the caller's track-scoped window (floored > 0 so the engine
+    // never sees a zero-length range — that asserts and writes an empty file).
+    params.time = { tracktion::TimePosition(), tracktion::TimeDuration::fromSeconds (juce::jmax (0.1, renderSeconds)) };
+    params.tracksToDo = te::toBitSet (tracks);
+    params.usePlugins = true;
+    params.useMasterPlugins = false;          // stem: the track's own chain, not the master bus
+    params.realTimeRender = realtimeRender;   // realtime-only plugins (Serum) render wrong offline
+
+    juce::String renderError;
+    {
+        const te::Edit::ScopedRenderStatus srs (edit, true);
+        te::TransportControl::stopAllTransports (edit.engine, false, true);
+        te::Renderer::turnOffAllPlugins (edit);
+
+        if (params.tracksToDo.countNumberOfSetBits() > 0
+            && params.destFile.hasWriteAccess()
+            && ! params.destFile.isDirectory())
+        {
+            te::Renderer::RenderTask task ("Mosh bounce", params, nullptr, nullptr);
+            while (task.runJob() == juce::ThreadPoolJob::jobNeedsRunningAgain)
+            {}
+
+            te::Renderer::turnOffAllPlugins (edit);
+            if (task.errorMessage.isNotEmpty()) { renderError = task.errorMessage; dest.deleteFile(); }
+        }
+        else
+        {
+            renderError = "bounce target is not writable or the track is not renderable";
+        }
+    }
+    return renderError;
+}
+
+// Bounce a track's full FX chain to a new audio clip on a NEW track (prints the
+// inserts; the source track is kept — non-destructive). Useful to commit a sound
+// or freeze a chain before a heavy generative pass. The render writes a file; only
+// the new-track+clip insert is the undoable transaction (one undo reverts both).
+juce::var MoshOps::cmdBounceTrack (const juce::var& args)
+{
+    const auto trackId = args.getProperty ("trackId", var()).toString();
+    auto* src = findTrack (trackId);
+    if (src == nullptr) return errResult ("bounce_track", "no track: " + trackId);
+
+    const auto reqName = args.getProperty ("name", var()).toString();
+    const double tail  = juce::jmax (0.0, (double) args.getProperty ("tailSeconds", 0.0));
+    const auto baseName = reqName.isNotEmpty() ? reqName : (src->getName() + " (bounce)");
+
+    auto dest = eng.sessionDir().getChildFile ("bounces")
+                   .getChildFile ("bounce-" + juce::File::createLegalFileName (baseName)
+                                  + "-" + String (Time::getCurrentTime().toMilliseconds()))
+                   .withFileExtension ("wav");
+
+    // Render window = the bounced track's OWN content length (+ any tail), floored so a
+    // short/empty track still yields a valid window — the full-edit length would pad with
+    // silence from longer sibling tracks into an oversized clip. Force a realtime render
+    // when a realtime-only plugin (e.g. Serum) is present, else it renders silently wrong
+    // offline (the same guard cmdExportAudio uses).
+    const double renderSeconds = juce::jmax (0.1, src->getLength().inSeconds()) + tail;
+    const bool   realtime      = findSerumRealtimeRenderReason (eng.edit()).isNotEmpty();
+
+    juce::Array<te::Track*> sel; sel.add (src);
+    const auto renderError = bounceRenderToFile (sel, dest, renderSeconds, realtime);
+    const bool rendered = renderError.isEmpty() && dest.existsAsFile() && dest.getSize() > 0;
+    if (! rendered)
+    {
+        logLine ("bounce_track", args, false, renderError.isNotEmpty() ? renderError : String ("bounce produced no file"), false);
+        return errResult ("bounce_track", renderError.isNotEmpty() ? renderError : String ("bounce render failed"));
+    }
+
+    auto& edit = eng.edit();
+
+    // Undo atomicity is timing-sensitive here, so make it deterministic. The render
+    // above (RenderTask on background threads) and Tracktion's track-order updater
+    // both post AsyncUpdaters to the message thread; if one fires AFTER this command
+    // returns it lands in the NEXT command's transaction, leaving undo to revert only
+    // part of the bounce (a dangling empty track) — and whether it fires in time was
+    // flaky (it rode on eng.hasAudio(), which flutters headless). So: (1) flush any
+    // render-queued async work BEFORE opening the transaction, then (2) insert the
+    // track + clip with no dispatch between them, then (3) drain UNCONDITIONALLY so
+    // the track-order updater fires INSIDE this transaction. Now one undo reverts the
+    // whole bounce every time. Safe to pump here: this is a heavyweight render op that
+    // already detached the playback context (no RT-audio re-entrancy to guard).
+    auto* mm = juce::MessageManager::getInstanceWithoutCreating();
+    if (mm != nullptr) mm->runDispatchLoopUntil (1);
+
+    beginTxn ("bounce_track");
+    auto dst = edit.insertNewAudioTrack (te::TrackInsertPoint::getEndOfTracks (edit), nullptr, false);
+    if (dst == nullptr) return errResult ("bounce_track", "could not create bounce track");
+    dst->setName (baseName);
+
+    te::AudioFile audioFile (edit.engine, dest);
+    const double len = audioFile.isValid() ? audioFile.getLength() : 0.0;
+    auto clip = dst->insertWaveClip (baseName, dest,
+        { { tracktion::TimePosition(), tracktion::TimeDuration::fromSeconds (juce::jmax (0.0, len)) }, {} }, false);
+    if (clip == nullptr)
+    {
+        undoManager().undo();   // roll back the just-inserted (now clip-less) track — don't dirty the edit on a failed bounce
+        return errResult ("bounce_track", "insertWaveClip failed");
+    }
+
+    if (mm != nullptr) mm->runDispatchLoopUntil (1);   // fire the track-order updater inside this txn
+
+    logLine ("bounce_track", args, true, {}, true);
+    emitSnapshotInvalidated();
+    auto* data = new DynamicObject();
+    data->setProperty ("trackId", dst->itemID.toString());
+    data->setProperty ("clipId", clip->itemID.toString());
+    data->setProperty ("file", dest.getFullPathName());
+    data->setProperty ("bytes", (juce::int64) dest.getSize());
+    data->setProperty ("seconds", len);
+    return okResult ("bounce_track", var (data));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

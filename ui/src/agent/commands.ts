@@ -63,6 +63,7 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "remove_note", desc: "Remove a MIDI note by index", args: [S("clipId"), N("noteIndex")], summary: () => "Removed a note" },
   { command: "set_note", desc: "Edit a MIDI note's pitch/start/length/velocity", args: [S("clipId"), N("noteIndex"), N("pitch", false), N("start", false), N("length", false), N("velocity", false)], summary: () => "Edited a note" },
   { command: "quantize_notes", desc: "Quantize a MIDI clip's notes to a grid, optionally with swing", args: [S("clipId"), N("division", true, "grid in beats — 1 = 1/4, 0.5 = 1/8, 0.25 = 1/16"), N("strength", false, "0-1 snap amount"), N("swing", false, "0-0.75 — delays the off-beats (0.66 ≈ triplet/MPC feel)")], summary: () => "Quantized notes" },
+  { command: "humanize_notes", desc: "Add seeded, deterministic timing + velocity jitter to a MIDI clip so a programmed part feels human, not robotic. The SAME seed reproduces the same feel", args: [S("clipId"), N("timing", false, "0-1 timing slop (±1/8 note at 1); small 0.1-0.3 is musical"), N("velocity", false, "0-1 velocity variation"), N("seed", false, "integer — reproduces the same feel")], summary: () => "Humanized notes" },
 
   // ── transport & timing ──────────────────────────────────────────────────
   { command: "set_tempo", desc: "Set the project tempo in BPM", args: [N("bpm")], summary: (a) => `Set tempo to ${a.bpm} BPM` },
@@ -85,6 +86,7 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "load_builtin", desc: "Add a built-in effect/instrument to a track (type from list_builtins)", args: [S("trackId"), N("index", false, "chain position"), S("type")], summary: (a) => `Added ${a.type}` },
   { command: "load_plugin", desc: "Add a scanned VST3/AU plugin to a track BY NAME (use the exact name from the available-plugins list)", args: [S("trackId"), S("pluginId", true, "exact plugin name"), N("index", false, "chain position")], summary: (a) => `Added ${a.pluginId}` },
   { command: "set_plugin_param", desc: "Set a plugin parameter (0-1) by chain index + param index", args: [S("trackId"), N("index"), N("paramIndex"), N("value", true, "0-1")], summary: () => "Tweaked a plugin parameter" },
+  { command: "set_plugin_param_by_name", desc: "Set a plugin param by NAME (no index guessing) — e.g. an EQ's 'Frequency' or a comp's 'Ratio'. Read the names from the track's fx:[i:name{pi:name=val}] in the snapshot. Address the plugin by chain index, or pluginName if you don't know the index", args: [S("trackId"), N("index", false, "plugin chain position — or give pluginName"), S("pluginName", false, "match the plugin by name instead of index"), S("paramName", true, "param name (case-insensitive; unambiguous substring ok)"), N("value", true, "0-1 normalised")], summary: (a) => `Set ${a.paramName ?? "a parameter"}` },
   { command: "set_4osc_patch", desc: "Give a 4osc synth a real tone (its default is a bare SINE). Call right after load_builtin {type:'4osc'}, before adding notes", args: [S("trackId"), N("index", false, "chain position of the 4osc"), S("patch", true, '"warm_keys" | "sub_bass" | "soft_pad" | "pluck" | "saw_lead"')], summary: (a) => `Set 4osc patch → ${a.patch}` },
   { command: "bypass_plugin", desc: "Bypass/enable a plugin in a track's chain", args: [S("trackId"), N("index"), B("bypassed")], summary: (a) => (a.bypassed ? "Bypassed a plugin" : "Enabled a plugin") },
   { command: "reorder_plugin", desc: "Move a plugin to a new position in a track's chain", args: [S("trackId"), N("index"), N("toIndex")], summary: () => "Reordered a plugin" },
@@ -141,6 +143,7 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   // Omit `file` for a safe timestamped export; a given `file` may overwrite, so
   // that variant is gated behind a spoken confirmation (see commandNeedsConfirm).
   { command: "export_audio", desc: "Export/bounce the mix to an audio file (omit file for a safe timestamped name)", args: [S("file", false, "path — omit for a safe timestamped file"), S("format", false, '"wav" | "aiff" | "flac"'), N("bitDepth", false), S("renderMode", false, '"auto" | "fast" | "realtime"'), N("sampleRate", false)], confirm: (a) => Boolean(a.file), summary: () => "Exported the mix" },
+  { command: "bounce_track", desc: "Bounce/print ONE track's full FX chain to a new audio clip on a new track (the source is kept). Use to commit a sound, or to freeze a chain before a heavy generative pass", args: [S("trackId"), S("name", false, "name for the bounce track/clip"), N("tailSeconds", false, "extra render time for reverb/delay tails")], summary: () => "Bounced a track to audio" },
 ];
 
 export const AGENT_COMMAND_MAP = new Map(AGENT_COMMANDS.map((c) => [c.command, c]));
