@@ -14,7 +14,10 @@ export const INTENTS = ["ACK_GOT_IT", "ACK_WORKING", "DONE", "HUH", "NUH", "UHOH
 function knowHowBlock(cards: TechniqueCard[]): string[] {
   if (!cards.length) return [];
   const lines = cards.map((c) => {
-    const how = c.recipe.kind === "prompt" ? c.recipe.guidance : c.recipe.commands.map((x) => x.command).join(" → ");
+    // prompt cards: the literal guidance to append. recipe (in-the-box) cards: the
+    // producer INTENT (the technique in plain language) — not the raw command list,
+    // which is noise; the agent maps intent → commands via the catalog + Production moves.
+    const how = c.recipe.kind === "prompt" ? c.recipe.guidance : c.producer_intent;
     return `- when ${c.when} → ${how}`;
   });
   return ["Producer know-how (validated techniques — apply when they fit the request):", ...lines];

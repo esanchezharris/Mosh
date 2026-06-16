@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { stableId, judgeAcceptance, deltaConfidence, ACCEPT_MARGIN, type CardEvidence, type CardRecipe } from "./card";
+import { stableId, judgeAcceptance, judgeConformance, isShippable, deltaConfidence, ACCEPT_MARGIN, type CardEvidence, type CardRecipe, type TechniqueCard } from "./card";
 
 const promptRecipe: CardRecipe = { kind: "prompt", guidance: "name every instrument" };
 
@@ -40,6 +40,43 @@ describe("judgeAcceptance — the flywheel's keep/reject bar", () => {
   it("honours a custom margin", () => {
     expect(judgeAcceptance([ev("b1", 0.03), ev("b2", 0.03)], { margin: 0.1 }).pass).toBe(false);
     expect(judgeAcceptance([ev("b1", 0.12), ev("b2", 0.01)], { margin: 0.1 }).pass).toBe(true);
+  });
+});
+
+const conf = (brief: string, conformant: boolean): CardEvidence => ({
+  brief, metric: "technique_conformance", withScore: conformant ? 1 : 0, withoutScore: 0, delta: conformant ? 1 : 0,
+});
+
+describe("judgeConformance — recipe cards validate by symbolic conformance across arrangements", () => {
+  it("passes when conformant on ≥2 arrangements with no broken state", () => {
+    expect(judgeConformance([conf("base-A", true), conf("base-B", true)]).pass).toBe(true);
+  });
+  it("fails when only one arrangement was tested (not reproduced)", () => {
+    expect(judgeConformance([conf("base-A", true)]).pass).toBe(false);
+  });
+  it("fails when the move didn't take effect on an arrangement", () => {
+    expect(judgeConformance([conf("base-A", true), conf("base-B", false)]).pass).toBe(false);
+  });
+  it("vetoes when the move broke the mix (hygiene regressed)", () => {
+    expect(judgeConformance([conf("base-A", true), conf("base-B", true)], { regressedHygiene: true }).pass).toBe(false);
+  });
+  it("ignores non-conformance evidence rows (e.g. a pq nudge)", () => {
+    const mixed = [conf("base-A", true), conf("base-B", true), ev("base-A", 0, "pq_perceptual")];
+    expect(judgeConformance(mixed).pass).toBe(true);
+  });
+});
+
+const cardWith = (status: TechniqueCard["status"]): TechniqueCard => ({
+  id: "x", source: "distill", skill_name: "s", task_type: "other", genre_context: [], producer_intent: "", when: "", recipe: promptRecipe, evidence: [], confidence: 0.5, status,
+});
+
+describe("isShippable — which cards reach the product (validated prompt OR conformant/preferred recipe)", () => {
+  it("ships validated, conformant, and preferred; not candidate/rejected", () => {
+    expect(isShippable(cardWith("validated"))).toBe(true);
+    expect(isShippable(cardWith("conformant"))).toBe(true);
+    expect(isShippable(cardWith("preferred"))).toBe(true);
+    expect(isShippable(cardWith("candidate"))).toBe(false);
+    expect(isShippable(cardWith("rejected"))).toBe(false);
   });
 });
 

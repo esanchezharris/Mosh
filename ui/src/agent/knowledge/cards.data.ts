@@ -99,5 +99,358 @@ export const VALIDATED_CARDS: TechniqueCard[] = [
     ],
     "confidence": 0.692,
     "status": "validated"
+  },
+  {
+    "id": "card_12sr5ye",
+    "source": "distill",
+    "skill_name": "Boom-bap drum pattern (kick/snare/8th-hats)",
+    "task_type": "drum_programming",
+    "genre_context": [
+      "boom-bap",
+      "lo-fi hip-hop",
+      "hip-hop"
+    ],
+    "producer_intent": "the classic boom-bap skeleton — kick on the 1 and the 'and' of 3, snare on the 2 & 4, hats on every 8th",
+    "when": "programming a boom-bap or lo-fi hip-hop drum pattern from scratch",
+    "recipe": {
+      "kind": "recipe",
+      "commands": [
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 36,
+            "start": 0,
+            "length": 0.25,
+            "velocity": 110
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 36,
+            "start": 2.5,
+            "length": 0.25,
+            "velocity": 110
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 38,
+            "start": 1,
+            "length": 0.25,
+            "velocity": 100
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 38,
+            "start": 3,
+            "length": 0.25,
+            "velocity": 100
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 42,
+            "start": 0,
+            "length": 0.25,
+            "velocity": 80
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 42,
+            "start": 0.5,
+            "length": 0.25,
+            "velocity": 80
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 42,
+            "start": 1,
+            "length": 0.25,
+            "velocity": 80
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 42,
+            "start": 1.5,
+            "length": 0.25,
+            "velocity": 80
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 42,
+            "start": 2,
+            "length": 0.25,
+            "velocity": 80
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 42,
+            "start": 2.5,
+            "length": 0.25,
+            "velocity": 80
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 42,
+            "start": 3,
+            "length": 0.25,
+            "velocity": 80
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 42,
+            "start": 3.5,
+            "length": 0.25,
+            "velocity": 80
+          }
+        }
+      ]
+    },
+    "evidence": [
+      {
+        "brief": "lofi-85-Am",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      },
+      {
+        "brief": "dark-70-Cm",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      }
+    ],
+    "confidence": 0.75,
+    "status": "conformant"
+  },
+  {
+    "id": "card_ayxwyv",
+    "source": "distill",
+    "skill_name": "MPC swing on the hats (~0.58)",
+    "task_type": "drum_programming",
+    "genre_context": [
+      "boom-bap",
+      "lo-fi hip-hop",
+      "hip-hop",
+      "neo-soul"
+    ],
+    "producer_intent": "push the off-beat 8ths late for that drunk MPC/boom-bap swing instead of a stiff straight grid",
+    "when": "the hats/drums feel too straight and need a swung, off-grid groove",
+    "recipe": {
+      "kind": "recipe",
+      "commands": [
+        {
+          "command": "quantize_notes",
+          "args": {
+            "clipId": "$hatsClipId",
+            "division": 0.5,
+            "strength": 1,
+            "swing": 0.58
+          }
+        }
+      ]
+    },
+    "evidence": [
+      {
+        "brief": "lofi-85-Am",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      },
+      {
+        "brief": "dark-70-Cm",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      }
+    ],
+    "confidence": 0.75,
+    "status": "conformant"
+  },
+  {
+    "id": "card_1mrax2f",
+    "source": "distill",
+    "skill_name": "Humanize the keys (subtle timing + velocity)",
+    "task_type": "arrangement",
+    "genre_context": [
+      "lo-fi hip-hop",
+      "neo-soul",
+      "boom-bap"
+    ],
+    "producer_intent": "a small seeded timing + velocity jitter so a programmed Rhodes/keys part breathes instead of sounding robotic",
+    "when": "a programmed keys/chord part sounds too quantized / robotic",
+    "recipe": {
+      "kind": "recipe",
+      "commands": [
+        {
+          "command": "humanize_notes",
+          "args": {
+            "clipId": "$keysClipId",
+            "timing": 0.2,
+            "velocity": 0.3,
+            "seed": 42
+          }
+        }
+      ]
+    },
+    "evidence": [
+      {
+        "brief": "lofi-85-Am",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      },
+      {
+        "brief": "dark-70-Cm",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      }
+    ],
+    "confidence": 0.75,
+    "status": "conformant"
+  },
+  {
+    "id": "card_7oekwz",
+    "source": "distill",
+    "skill_name": "Filter-open automation over the intro",
+    "task_type": "mixing",
+    "genre_context": [
+      "lo-fi hip-hop",
+      "house",
+      "electronic"
+    ],
+    "producer_intent": "automate the EQ/filter opening up over the bars for movement, instead of a single static setting",
+    "when": "an intro/build needs movement — open the filter up over time",
+    "recipe": {
+      "kind": "recipe",
+      "commands": [
+        {
+          "command": "add_automation_point",
+          "args": {
+            "trackId": "$keysTrackId",
+            "pluginIndex": "$keysFilterPluginIndex",
+            "paramIndex": "$keysFilterParamIndex",
+            "time": 0,
+            "value": 0.2
+          }
+        },
+        {
+          "command": "add_automation_point",
+          "args": {
+            "trackId": "$keysTrackId",
+            "pluginIndex": "$keysFilterPluginIndex",
+            "paramIndex": "$keysFilterParamIndex",
+            "time": 4,
+            "value": 0.9
+          }
+        }
+      ]
+    },
+    "evidence": [
+      {
+        "brief": "lofi-85-Am",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      },
+      {
+        "brief": "dark-70-Cm",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      }
+    ],
+    "confidence": 0.75,
+    "status": "conformant"
+  },
+  {
+    "id": "card_ip4mp1",
+    "source": "distill",
+    "skill_name": "Shared reverb on a send bus",
+    "task_type": "mixing",
+    "genre_context": [
+      "lo-fi hip-hop",
+      "neo-soul",
+      "ambient"
+    ],
+    "producer_intent": "send the keys to ONE shared reverb return for depth, instead of a reverb inserted on every track",
+    "when": "the mix needs depth / space — a shared reverb the tracks send to",
+    "recipe": {
+      "kind": "recipe",
+      "commands": [
+        {
+          "command": "create_bus",
+          "args": {
+            "name": "Reverb"
+          }
+        },
+        {
+          "command": "add_send",
+          "args": {
+            "trackId": "$keysTrackId",
+            "bus": "$busNumber",
+            "db": -12
+          }
+        }
+      ]
+    },
+    "evidence": [
+      {
+        "brief": "lofi-85-Am",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      },
+      {
+        "brief": "dark-70-Cm",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      }
+    ],
+    "confidence": 0.75,
+    "status": "conformant"
   }
 ];

@@ -2,7 +2,7 @@
 // prompt. v1 retrieval is deliberately simple: token overlap between the request text
 // and each card's genre/when/skill, validated-only, top-K. Pure (no bridge/fs) so the
 // product, the eval harness, and the flywheel all retrieve identically.
-import { type TechniqueCard, isValidated } from "./card";
+import { type TechniqueCard, isShippable } from "./card";
 import { VALIDATED_CARDS } from "./cards.data";
 
 const STOP = new Set(["the", "and", "for", "with", "make", "give", "want", "need", "some", "that", "this", "into", "from", "beat", "song", "track", "sound"]);
@@ -30,7 +30,7 @@ function relevance(card: TechniqueCard, query: string): number {
 export function retrieveCards(query: string, k = 3, cards: TechniqueCard[] = VALIDATED_CARDS): TechniqueCard[] {
   if (!query?.trim()) return [];
   return cards
-    .filter(isValidated)
+    .filter(isShippable)
     .map((c) => ({ c, s: relevance(c, query) }))
     .filter((x) => x.s > 0)
     .sort((a, b) => b.s - a.s || b.c.confidence - a.c.confidence)

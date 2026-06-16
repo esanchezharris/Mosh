@@ -8,7 +8,10 @@
 // Pure + browser-safe (no node imports): the product bundle imports this for retrieval.
 
 export type CardSource = "distill" | "selfplay" | "youtube";
-export type CardStatus = "candidate" | "validated" | "rejected";
+// prompt cards: candidate → validated/rejected (audio brief-match bar). recipe (in-the-box)
+// cards: candidate → conformant (symbolic move-took-effect bar) → preferred (a human/learned
+// audio-quality upgrade, deferred). See judgeAcceptance vs judgeConformance below.
+export type CardStatus = "candidate" | "validated" | "rejected" | "conformant" | "preferred";
 
 // Mirrors the spike's task_type enum (+ "prompt_craft" for generative-prompt knowledge).
 export type TaskType =
@@ -23,9 +26,11 @@ export type CardRecipe =
   | { kind: "recipe"; commands: { command: string; args: Record<string, unknown> }[] };
 
 // One A/B measurement: with-card vs without-card on a brief, on one scorer dimension.
+// technique_conformance (recipe cards): withScore 1 = move took effect, 0 = it didn't.
+// human_pref (deferred): a blind A/B ear label, 1 = with-card preferred.
 export type CardEvidence = {
   brief: string;
-  metric: "clap_brief" | "pq_perceptual" | "pq_hygiene";
+  metric: "clap_brief" | "pq_perceptual" | "pq_hygiene" | "technique_conformance" | "human_pref";
   withScore: number;
   withoutScore: number;
   delta: number; // withScore - withoutScore
@@ -59,6 +64,13 @@ export function stableId(c: Pick<TechniqueCard, "skill_name" | "recipe">): strin
 
 export const isValidated = (c: TechniqueCard): boolean => c.status === "validated";
 
+// The product ships cards that EARNED a place via either bar: prompt cards that passed
+// brief-match ("validated"), or recipe (in-the-box) cards that passed conformance
+// ("conformant") — or were ear-upgraded ("preferred"). Used by the store (what to bake)
+// and retrieval (what to inject). candidate/rejected never ship.
+export const isShippable = (c: TechniqueCard): boolean =>
+  c.status === "validated" || c.status === "conformant" || c.status === "preferred";
+
 // The acceptance bar (the flywheel's whole point): a card EARNS "validated" only if,
 // injected, it raises clap_brief by ≥ margin on the primary brief AND never regresses
 // brief-match on any tested brief (reproducibility over ≥2 briefs), AND doesn't flip
@@ -77,6 +89,23 @@ export function judgeAcceptance(
   if (clap.some((e) => e.delta < 0)) return { pass: false, reason: "regressed brief-match on a brief" };
   if (!clap.some((e) => e.delta >= margin)) return { pass: false, reason: `no brief improved by ≥${margin}` };
   return { pass: true, reason: "improves brief-match, reproduced, no regression" };
+}
+
+// The acceptance bar for RECIPE (in-the-box) cards — a CONFORMANCE bar, not a quality
+// one: a card earns "conformant" iff the move took effect (symbolic conformance, read
+// from the snapshot) on ≥2 arrangements, with no arrangement where it failed, and
+// without breaking the mix. Quality — "does it sound better" — is the deferred
+// audio-quality layer, NOT this. Pure + deterministic so it unit-tests.
+export function judgeConformance(
+  evidence: CardEvidence[],
+  opts: { regressedHygiene?: boolean } = {},
+): { pass: boolean; reason: string } {
+  if (opts.regressedHygiene) return { pass: false, reason: "made the audio broken (hygiene/PQ flagged)" };
+  const conf = evidence.filter((e) => e.metric === "technique_conformance");
+  const briefs = new Set(conf.map((e) => e.brief));
+  if (briefs.size < 2) return { pass: false, reason: "needs conformance on ≥2 arrangements" };
+  if (conf.some((e) => e.withScore < 1)) return { pass: false, reason: "the move didn't take effect on an arrangement" };
+  return { pass: true, reason: "move reproduced across arrangements, mix intact" };
 }
 
 // Map an accepted card's mean brief-match delta to a 0..1 confidence (bigger lift =

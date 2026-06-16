@@ -14,7 +14,8 @@
     "eval-matrix": "vite-node scripts/evalMatrix.mts",
     "arena": "vite-node scripts/arena.mts",
     "genbench": "vite-node scripts/genbench.mts",
-    "flywheel": "vite-node scripts/flywheel.mts"
+    "flywheel": "vite-node scripts/flywheel.mts",
+    "recipe-flywheel": "vite-node scripts/recipeFlywheel.mts"
   },
   "dependencies": {
     "qrcode": "^1.5.4",

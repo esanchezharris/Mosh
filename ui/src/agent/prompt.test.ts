@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { systemPrompt } from "./prompt";
 import type { Snapshot } from "../types";
+import type { TechniqueCard } from "./knowledge/card";
 
 // A minimal-but-valid snapshot with a track that hosts a plugin with NAMED params + a
 // bus — the data the agent needs to target set_plugin_param / automation by intent.
@@ -71,5 +72,23 @@ describe("systemPrompt — surfaces what the agent needs to target params + buse
     ]) {
       expect(out).toContain(cue);
     }
+  });
+});
+
+describe("knowHowBlock — an injected RECIPE card teaches the technique, not a command dump", () => {
+  const recipeCard: TechniqueCard = {
+    id: "c1", source: "distill", skill_name: "Boom-bap drum pattern", task_type: "drum_programming",
+    genre_context: ["boom-bap"], producer_intent: "the classic boom-bap kick/snare/hat skeleton",
+    when: "programming a boom-bap pattern",
+    recipe: { kind: "recipe", commands: [{ command: "add_note", args: {} }, { command: "add_note", args: {} }] },
+    evidence: [], confidence: 0.7, status: "conformant",
+  };
+  const out = systemPrompt(null, [], [recipeCard]);
+  it("renders the producer intent + when (the teaching)", () => {
+    expect(out).toContain("the classic boom-bap kick/snare/hat skeleton");
+    expect(out).toContain("programming a boom-bap pattern");
+  });
+  it("does NOT dump the raw command chain (noise the agent can't use)", () => {
+    expect(out).not.toContain("add_note → add_note"); // the old command-name join
   });
 });
