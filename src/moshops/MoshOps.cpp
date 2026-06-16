@@ -276,6 +276,7 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "remove_plugin")     return cmdRemovePlugin (args);
     if (name == "reorder_plugin")    return cmdReorderPlugin (args);
     if (name == "set_plugin_param")  return cmdSetPluginParam (args);
+    if (name == "set_4osc_patch")    return cmdSet4oscPatch (args);
     if (name == "bypass_plugin")     return cmdBypassPlugin (args);
     if (name == "rescan_plugins")        return cmdRescanPlugins (args);
     if (name == "get_plugin_blocklist")  return cmdGetPluginBlocklist (args);
@@ -2509,6 +2510,65 @@ juce::var MoshOps::cmdSetPluginParam (const juce::var& args)
     logLine ("set_plugin_param", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("set_plugin_param");
+}
+
+// Curated 4OSC patches. The 4OSC default oscillator is a SINE (waveShape, a value-tree
+// property — NOT an automatable param, so set_plugin_param can't reach it), which is why
+// MIDI on a fresh 4OSC sounds like a sine. This sets the oscillator waveform + amp ADSR +
+// filter to a usable patch by name, so the agent can get real synth tones.
+juce::var MoshOps::cmdSet4oscPatch (const juce::var& args)
+{
+    // Find the 4OSC: by explicit chain index, else the first one on the track.
+    const auto trackId = args.getProperty ("trackId", var()).toString();
+    const int idx = (int) args.getProperty ("index", -1);
+    te::FourOscPlugin* fo = nullptr;
+    if (auto* track = findTrack (trackId))
+    {
+        auto plugins = track->pluginList.getPlugins();
+        if (idx >= 0 && idx < plugins.size())
+            fo = dynamic_cast<te::FourOscPlugin*> (plugins[idx].get());
+        else
+            for (auto* pl : plugins)
+                if (auto* f = dynamic_cast<te::FourOscPlugin*> (pl)) { fo = f; break; }
+    }
+    if (fo == nullptr) return errResult ("set_4osc_patch", "no 4osc on that track (load_builtin {type:'4osc'} first)");
+
+    const auto patch = args.getProperty ("patch", "warm_keys").toString().toLowerCase();
+
+    // WaveShape ints (tracktion_FourOscPlugin.h): sine=0, triangle=1, sawUp=2, sawDown=3, square=4.
+    int wave = 2;                                   // sawUp — broadband, the anti-sine default
+    float fa = 0.02f, fd = 0.4f, fs = 0.6f, fr = 0.35f;  // amp ADSR (normalised 0..1)
+    float cutoff = 0.55f, reso = 0.12f, master = 0.7f;
+
+    if (patch == "sub_bass")       { wave = 1; fa = 0.005f; fd = 0.25f; fs = 0.9f; fr = 0.2f;  cutoff = 0.30f; reso = 0.08f; }
+    else if (patch == "warm_keys") { wave = 2; fa = 0.02f;  fd = 0.5f;  fs = 0.5f; fr = 0.45f; cutoff = 0.55f; reso = 0.12f; }
+    else if (patch == "soft_pad")  { wave = 2; fa = 0.30f;  fd = 0.5f;  fs = 0.8f; fr = 0.6f;  cutoff = 0.5f;  reso = 0.1f;  }
+    else if (patch == "pluck")     { wave = 4; fa = 0.005f; fd = 0.25f; fs = 0.0f; fr = 0.2f;  cutoff = 0.65f; reso = 0.2f;  }
+    else if (patch == "saw_lead")  { wave = 2; fa = 0.01f;  fd = 0.3f;  fs = 0.7f; fr = 0.3f;  cutoff = 0.7f;  reso = 0.18f; }
+
+    beginTxn ("set_4osc_patch");
+
+    auto setP = [] (te::AutomatableParameter::Ptr p, float norm)
+    {
+        if (p != nullptr)
+            p->setParameter (p->valueRange.convertFrom0to1 (juce::jlimit (0.0f, 1.0f, norm)), juce::sendNotification);
+    };
+
+    // Oscillator waveform — the key fix. waveShapeValue is read LIVE by the synth
+    // (FourOscPlugin.cpp:671 `o.setWave(... waveShapeValue.get())`), so a direct set
+    // takes effect. Leave osc levels at their defaults (osc 1 is the audible one).
+    for (auto* osc : fo->oscParams)
+        if (osc != nullptr) osc->waveShapeValue = wave;
+
+    setP (fo->ampAttack, fa);   setP (fo->ampDecay, fd);   setP (fo->ampSustain, fs);   setP (fo->ampRelease, fr);
+    setP (fo->filterFreq, cutoff);   setP (fo->filterResonance, reso);
+    fo->filterTypeValue = 1;    // engage the low-pass so the saw isn't harsh
+    setP (fo->masterLevel, master);
+
+    logLine ("set_4osc_patch", args, true, {}, true);
+    emitSnapshotInvalidated();
+    auto* d = new DynamicObject(); d->setProperty ("patch", patch);
+    return okResult ("set_4osc_patch", var (d));
 }
 
 juce::var MoshOps::cmdBypassPlugin (const juce::var& args)

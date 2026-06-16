@@ -107,6 +107,7 @@ private:
     juce::var cmdRemovePlugin   (const juce::var& args);
     juce::var cmdReorderPlugin  (const juce::var& args);
     juce::var cmdSetPluginParam (const juce::var& args);
+    juce::var cmdSet4oscPatch   (const juce::var& args);   // curated 4OSC patches (the default is a SINE)
     juce::var cmdBypassPlugin   (const juce::var& args);
     // INS-005 — plugin scan / blocklist / management (NON-undoable: catalog ops,
     // not Edit mutations). rescan persists the catalog; the rest are read-only or
