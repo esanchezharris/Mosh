@@ -22,7 +22,7 @@ export type Outcome = { card: TechniqueCard; perArr: { baseId: string; res: Conf
 export async function applyRecipe(eng: Engine, commands: RecipeCommand[], bindings: Record<string, unknown>): Promise<Record<string, unknown>> {
   const runtime: Record<string, unknown> = {};
   for (const raw of commands) {
-    const [bound] = bindRecipe([raw], { ...runtime, ...bindings }); // base bindings win on name collisions
+    const [bound] = bindRecipe([raw], { ...bindings, ...runtime }); // runtime captures (e.g. $busNumber) win on a name collision
     const args = coerceArgs(bound.command, bound.args);
     const err = validateCommand(bound.command, args);
     if (err) throw new Error(`recipe command invalid: ${err}`);

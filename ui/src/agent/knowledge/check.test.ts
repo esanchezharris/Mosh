@@ -104,11 +104,12 @@ describe("runCheck · send — bus token resolves from RUNTIME (captured mid-rec
   });
 });
 
-describe("runCheck · $token scope — base bindings win over runtime on collision", () => {
-  // base.trackId and runtime.trackId both present; the spec's $trackId must resolve to base.
+describe("runCheck · $token scope — runtime captures override base on a name collision", () => {
+  // base.trackId and runtime.trackId both present; a just-created (runtime) id wins, so
+  // $trackId resolves to the runtime value. $busNumber (runtime-only) also resolves.
   const spec: CheckSpec = { kind: "send", track: "$trackId", bus: "$busNumber" };
-  it("resolves $trackId from bindings, $busNumber from runtime", () => {
-    const after = snapOf(fxTrack("base_track", 0, { index: 0, name: "x", value: 0 }, [{ bus: 2, db: -6, mute: false }]));
+  it("resolves $trackId from runtime (the just-created id), $busNumber from runtime", () => {
+    const after = snapOf(fxTrack("runtime_track", 0, { index: 0, name: "x", value: 0 }, [{ bus: 2, db: -6, mute: false }]));
     expect(runCheck(spec, snapOf(), after, { trackId: "base_track" }, { trackId: "runtime_track", busNumber: 2 }).conformant).toBe(true);
   });
 });

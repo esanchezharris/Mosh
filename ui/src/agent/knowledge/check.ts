@@ -40,7 +40,9 @@ export function findParam(snap: any, trackId: string, pluginIndex: number, param
 
 // Run a declarative check against the before/after snapshots. `bindings` are the base
 // arrangement's $token table; `runtime` are ids captured mid-recipe (e.g. create_bus →
-// busNumber). Base wins on a name collision — the same precedence applyRecipe uses.
+// busNumber). Runtime captures WIN on a name collision — a just-created id overrides a
+// pre-existing slot of the same name (the namespaces are disjoint today, so this only
+// fixes a latent trap; same precedence as applyRecipe).
 export function runCheck(
   spec: CheckSpec,
   before: any,
@@ -48,7 +50,7 @@ export function runCheck(
   bindings: Record<string, unknown>,
   runtime: Record<string, unknown> = {},
 ): ConformanceResult {
-  const scope = { ...runtime, ...bindings };
+  const scope = { ...bindings, ...runtime };
   const str = (r: Ref): string => String(resolveValue(r, scope));
   const num = (r: Ref): number => Number(resolveValue(r, scope));
 
