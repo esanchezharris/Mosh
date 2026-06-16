@@ -15,7 +15,8 @@
     "arena": "vite-node scripts/arena.mts",
     "genbench": "vite-node scripts/genbench.mts",
     "flywheel": "vite-node scripts/flywheel.mts",
-    "recipe-flywheel": "vite-node scripts/recipeFlywheel.mts"
+    "recipe-flywheel": "vite-node scripts/recipeFlywheel.mts",
+    "recipe-distill": "vite-node scripts/recipeDistill.mts"
   },
   "dependencies": {
     "qrcode": "^1.5.4",

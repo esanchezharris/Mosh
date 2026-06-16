@@ -511,5 +511,631 @@ export const VALIDATED_CARDS: TechniqueCard[] = [
     ],
     "confidence": 0.75,
     "status": "conformant"
+  },
+  {
+    "id": "card_d0cask",
+    "source": "distill",
+    "skill_name": "808 boom with core trap drum skeleton",
+    "task_type": "drum_programming",
+    "genre_context": [
+      "trap",
+      "140 BPM",
+      "808-driven"
+    ],
+    "producer_intent": "Lock in a sparse but heavy 2-bar drum foundation with booming kick placement, backbeat snare/clap, and enough space for the sub to hit hard.",
+    "when": "Use as the main drum loop before adding variations and fills.",
+    "recipe": {
+      "kind": "recipe",
+      "commands": [
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 36,
+            "start": 0,
+            "length": 0.25,
+            "velocity": 112
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 36,
+            "start": 1.5,
+            "length": 0.25,
+            "velocity": 118
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 36,
+            "start": 2.75,
+            "length": 0.25,
+            "velocity": 108
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 36,
+            "start": 3.75,
+            "length": 0.25,
+            "velocity": 116
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 36,
+            "start": 4,
+            "length": 0.25,
+            "velocity": 114
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 36,
+            "start": 5.5,
+            "length": 0.25,
+            "velocity": 120
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 36,
+            "start": 6.75,
+            "length": 0.25,
+            "velocity": 110
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 36,
+            "start": 7.5,
+            "length": 0.25,
+            "velocity": 117
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 38,
+            "start": 1,
+            "length": 0.25,
+            "velocity": 124
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 38,
+            "start": 3,
+            "length": 0.25,
+            "velocity": 126
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 38,
+            "start": 5,
+            "length": 0.25,
+            "velocity": 125
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 38,
+            "start": 7,
+            "length": 0.25,
+            "velocity": 127
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 39,
+            "start": 1,
+            "length": 0.25,
+            "velocity": 98
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 39,
+            "start": 3,
+            "length": 0.25,
+            "velocity": 96
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 39,
+            "start": 5,
+            "length": 0.25,
+            "velocity": 94
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 39,
+            "start": 7,
+            "length": 0.25,
+            "velocity": 97
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 46,
+            "start": 3.5,
+            "length": 0.25,
+            "velocity": 92
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 46,
+            "start": 7.5,
+            "length": 0.25,
+            "velocity": 90
+          }
+        }
+      ],
+      "check": {
+        "kind": "pattern",
+        "clip": "$drumClipId",
+        "pattern": {
+          "hits": [
+            {
+              "pitch": 36,
+              "beats": [
+                0,
+                1.5,
+                2.75,
+                3.75,
+                4,
+                5.5,
+                6.75,
+                7.5
+              ]
+            },
+            {
+              "pitch": 38,
+              "beats": [
+                1,
+                3,
+                5,
+                7
+              ]
+            },
+            {
+              "pitch": 39,
+              "beats": [
+                1,
+                3,
+                5,
+                7
+              ]
+            },
+            {
+              "pitch": 46,
+              "beats": [
+                3.5,
+                7.5
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "evidence": [
+      {
+        "brief": "lofi-85-Am",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      },
+      {
+        "brief": "dark-70-Cm",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      }
+    ],
+    "confidence": 0.75,
+    "status": "conformant"
+  },
+  {
+    "id": "card_1819111",
+    "source": "distill",
+    "skill_name": "key filter sweep into drop",
+    "task_type": "sound_design",
+    "genre_context": [
+      "trap",
+      "140 BPM",
+      "transition"
+    ],
+    "producer_intent": "Use the existing key filter to create a tension lift into the hook by opening the top end gradually.",
+    "when": "Place on a 4- or 8-bar pre-drop phrase to make the arrangement breathe.",
+    "recipe": {
+      "kind": "recipe",
+      "commands": [
+        {
+          "command": "add_automation_point",
+          "args": {
+            "trackId": "$keysTrackId",
+            "pluginIndex": "$keysFilterPluginIndex",
+            "paramIndex": "$keysFilterParamIndex",
+            "time": 0,
+            "value": 0.18
+          }
+        },
+        {
+          "command": "add_automation_point",
+          "args": {
+            "trackId": "$keysTrackId",
+            "pluginIndex": "$keysFilterPluginIndex",
+            "paramIndex": "$keysFilterParamIndex",
+            "time": 4,
+            "value": 0.52
+          }
+        },
+        {
+          "command": "add_automation_point",
+          "args": {
+            "trackId": "$keysTrackId",
+            "pluginIndex": "$keysFilterPluginIndex",
+            "paramIndex": "$keysFilterParamIndex",
+            "time": 8,
+            "value": 0.88
+          }
+        }
+      ],
+      "check": {
+        "kind": "automation",
+        "track": "$keysTrackId",
+        "pluginIndex": "$keysFilterPluginIndex",
+        "paramIndex": "$keysFilterParamIndex",
+        "direction": "up"
+      }
+    },
+    "evidence": [
+      {
+        "brief": "lofi-85-Am",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      },
+      {
+        "brief": "dark-70-Cm",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      }
+    ],
+    "confidence": 0.75,
+    "status": "conformant"
+  },
+  {
+    "id": "card_lu4ys8",
+    "source": "distill",
+    "skill_name": "dark space bus for keys",
+    "task_type": "mixing",
+    "genre_context": [
+      "trap",
+      "140 BPM",
+      "atmosphere"
+    ],
+    "producer_intent": "Send the keys to a shared return so the sparse harmony feels wider and more cinematic without cluttering the center.",
+    "when": "Use when the keys feel too dry or too upfront in the mix.",
+    "recipe": {
+      "kind": "recipe",
+      "commands": [
+        {
+          "command": "create_bus",
+          "args": {
+            "name": "dark_space"
+          }
+        },
+        {
+          "command": "add_send",
+          "args": {
+            "trackId": "$keysTrackId",
+            "bus": "$busNumber",
+            "db": -12
+          }
+        }
+      ],
+      "check": {
+        "kind": "send",
+        "track": "$keysTrackId",
+        "bus": "$busNumber",
+        "db": -12
+      }
+    },
+    "evidence": [
+      {
+        "brief": "lofi-85-Am",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      },
+      {
+        "brief": "dark-70-Cm",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      }
+    ],
+    "confidence": 0.75,
+    "status": "conformant"
+  },
+  {
+    "id": "card_anst0e",
+    "source": "distill",
+    "skill_name": "808 and drum anchor pattern with snare discipline",
+    "task_type": "arrangement",
+    "genre_context": [
+      "trap",
+      "140 BPM",
+      "hook-ready"
+    ],
+    "producer_intent": "Build a cleaner, hook-friendly drum pattern that emphasizes the downbeat, backbeat, and a few syncopated punches for the 808 to answer.",
+    "when": "Use as an alternate section or chorus drum variation to keep the beat from looping too predictably.",
+    "recipe": {
+      "kind": "recipe",
+      "commands": [
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 36,
+            "start": 0,
+            "length": 0.25,
+            "velocity": 120
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 36,
+            "start": 0.75,
+            "length": 0.25,
+            "velocity": 106
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 36,
+            "start": 2,
+            "length": 0.25,
+            "velocity": 122
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 36,
+            "start": 2.5,
+            "length": 0.25,
+            "velocity": 110
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 36,
+            "start": 4,
+            "length": 0.25,
+            "velocity": 119
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 36,
+            "start": 4.75,
+            "length": 0.25,
+            "velocity": 108
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 36,
+            "start": 6,
+            "length": 0.25,
+            "velocity": 123
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 36,
+            "start": 6.5,
+            "length": 0.25,
+            "velocity": 112
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 38,
+            "start": 1,
+            "length": 0.25,
+            "velocity": 125
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 38,
+            "start": 3,
+            "length": 0.25,
+            "velocity": 127
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 38,
+            "start": 5,
+            "length": 0.25,
+            "velocity": 126
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 38,
+            "start": 7,
+            "length": 0.25,
+            "velocity": 128
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 37,
+            "start": 1.75,
+            "length": 0.125,
+            "velocity": 88
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 37,
+            "start": 3.75,
+            "length": 0.125,
+            "velocity": 92
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 37,
+            "start": 5.75,
+            "length": 0.125,
+            "velocity": 90
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 37,
+            "start": 7.75,
+            "length": 0.125,
+            "velocity": 94
+          }
+        }
+      ],
+      "check": {
+        "kind": "pattern",
+        "clip": "$drumClipId",
+        "pattern": {
+          "hits": [
+            {
+              "pitch": 36,
+              "beats": [
+                0,
+                0.75,
+                2,
+                2.5,
+                4,
+                4.75,
+                6,
+                6.5
+              ]
+            },
+            {
+              "pitch": 38,
+              "beats": [
+                1,
+                3,
+                5,
+                7
+              ]
+            },
+            {
+              "pitch": 37,
+              "beats": [
+                1.75,
+                3.75,
+                5.75,
+                7.75
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "evidence": [
+      {
+        "brief": "lofi-85-Am",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      },
+      {
+        "brief": "dark-70-Cm",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      }
+    ],
+    "confidence": 0.75,
+    "status": "conformant"
   }
 ];

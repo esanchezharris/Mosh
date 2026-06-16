@@ -14,17 +14,13 @@ import { mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execSync } from "node:child_process";
-import { Engine, MOSH_BIN } from "./agentEngine.mts";
-import { bindRecipe, type RecipeCommand } from "../src/agent/knowledge/recipe";
-import { type ConformanceResult, type PatternSpec } from "../src/agent/knowledge/conformance";
-import { runCheck, type CheckSpec } from "../src/agent/knowledge/check";
-import {
-  type TechniqueCard, type CardEvidence, type CardRecipe, type TaskType,
-  stableId, judgeConformance,
-} from "../src/agent/knowledge/card";
-import { coerceArgs, validateCommand } from "../src/agent/commands";
+import { MOSH_BIN } from "./agentEngine.mts";
+import { type RecipeCommand } from "../src/agent/knowledge/recipe";
+import { type PatternSpec } from "../src/agent/knowledge/conformance";
+import { type CandidateCard } from "../src/agent/knowledge/distill";
 import { upsertCards, writeCardsData } from "./knowledgeStore.mts";
-import { buildBase, type BaseSpec } from "./recipeBase.mts";
+import { type BaseSpec } from "./recipeBase.mts";
+import { runCandidateThroughLoop, type Outcome } from "./recipeLoop.mts";
 
 const UI_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const REPO = resolve(UI_ROOT, "..");
@@ -48,15 +44,9 @@ const drumCommands: RecipeCommand[] = DRUM_PATTERN.hits.flatMap((h) =>
   h.beats.map((b) => ({ command: "add_note", args: { clipId: "$drumClipId", pitch: h.pitch, start: b, length: 0.25, velocity: h.pitch === 36 ? 110 : h.pitch === 38 ? 100 : 80 } })),
 );
 
-// A hand-seeded technique card + how to CHECK its conformance — now a declarative
-// CheckSpec (data, not a closure), so the SAME shape an LLM/YouTube miner emits.
-type SeedCard = {
-  meta: { skill_name: string; task_type: TaskType; genre_context: string[]; producer_intent: string; when: string };
-  commands: RecipeCommand[];
-  check: CheckSpec;
-};
-
-const SEED_CARDS: SeedCard[] = [
+// A hand-seeded technique card = a CandidateCard (meta + commands + a declarative check),
+// the SAME shape the LLM distiller + the YouTube miner emit and run through the same loop.
+const SEED_CARDS: CandidateCard[] = [
   {
     meta: { skill_name: "Boom-bap drum pattern (kick/snare/8th-hats)", task_type: "drum_programming",
       genre_context: ["boom-bap", "lo-fi hip-hop", "hip-hop"],
@@ -105,24 +95,6 @@ const SEED_CARDS: SeedCard[] = [
   },
 ];
 
-// Progressive bind+exec: resolve $tokens against the base bindings + ids captured from
-// EARLIER commands in this same recipe (e.g. create_bus → $busNumber), validate, run.
-async function applyRecipe(eng: Engine, commands: RecipeCommand[], bindings: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const runtime: Record<string, unknown> = {};
-  for (const raw of commands) {
-    const [bound] = bindRecipe([raw], { ...runtime, ...bindings }); // base bindings win on name collisions
-    const args = coerceArgs(bound.command, bound.args);
-    const err = validateCommand(bound.command, args);
-    if (err) throw new Error(`recipe command invalid: ${err}`);
-    const r = await eng.exec(bound.command, args);
-    if (!r?.ok) throw new Error(`recipe ${bound.command} failed — ${r?.error || "no error"}`);
-    for (const k of ["busNumber", "trackId", "clipId", "pointIndex"]) if (r.data?.[k] != null && runtime[k] == null) runtime[k] = r.data[k];
-  }
-  return runtime;
-}
-
-type Outcome = { card: TechniqueCard; perArr: { baseId: string; res: ConformanceResult }[]; reason: string };
-
 async function main() {
   if (!existsSync(MOSH_BIN)) { console.error("Mosh not built:", MOSH_BIN); process.exit(2); }
   try { execSync("pkill -f server.py", { stdio: "ignore" }); } catch { /* none */ }
@@ -131,33 +103,12 @@ async function main() {
 
   const outcomes: Outcome[] = [];
   for (const seed of SEED_CARDS) {
-    const evidence: CardEvidence[] = [];
-    const perArr: { baseId: string; res: ConformanceResult }[] = [];
-    for (const arr of ARRANGEMENTS) {
-      let res: ConformanceResult;
-      const eng = new Engine(env());
-      try {
-        const base = await buildBase(eng, arr);
-        const before = await eng.snapshot();
-        const runtime = await applyRecipe(eng, seed.commands, base as unknown as Record<string, unknown>);
-        const after = await eng.snapshot();
-        res = runCheck(seed.check, before, after, base as unknown as Record<string, unknown>, runtime);
-      } catch (e) {
-        res = { conformant: false, detail: `error: ${(e as Error).message}` };
-      } finally { eng.close(); }
-      perArr.push({ baseId: arr.baseId, res });
-      evidence.push({ brief: arr.baseId, metric: "technique_conformance", withScore: res.conformant ? 1 : 0, withoutScore: 0, delta: res.conformant ? 1 : 0 });
-      console.error(`  ${seed.meta.skill_name.slice(0, 42).padEnd(42)} · ${arr.baseId.padEnd(11)} · ${res.conformant ? "✓" : res.inconclusive ? "?" : "✗"} ${res.detail}`);
-    }
-    const verdict = judgeConformance(evidence);
-    const recipe: CardRecipe = { kind: "recipe", commands: seed.commands, check: seed.check };
-    const card: TechniqueCard = {
-      id: stableId({ skill_name: seed.meta.skill_name, recipe }),
-      source: "distill", skill_name: seed.meta.skill_name, task_type: seed.meta.task_type,
-      genre_context: seed.meta.genre_context, producer_intent: seed.meta.producer_intent, when: seed.meta.when,
-      recipe, evidence, confidence: verdict.pass ? 0.75 : 0.3, status: verdict.pass ? "conformant" : "rejected",
-    };
-    outcomes.push({ card, perArr, reason: verdict.reason });
+    outcomes.push(await runCandidateThroughLoop(seed, ARRANGEMENTS, {
+      source: "distill",
+      env: env(),
+      onResult: (baseId, res) =>
+        console.error(`  ${seed.meta.skill_name.slice(0, 42).padEnd(42)} · ${baseId.padEnd(11)} · ${res.conformant ? "✓" : res.inconclusive ? "?" : "✗"} ${res.detail}`),
+    }));
   }
 
   const conformant = outcomes.filter((o) => o.card.status === "conformant").map((o) => o.card);

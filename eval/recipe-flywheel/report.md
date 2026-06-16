@@ -1,6 +1,6 @@
 # In-the-box flywheel — symbolic conformance
 
-2 arrangements [lofi-85-Am, dark-70-Cm] · a card is **conformant** iff the move took effect on EVERY arrangement (read from the snapshot), with no broken state. 5/5 conformant → 8 shippable in the product KB.
+2 arrangements [lofi-85-Am, dark-70-Cm] · a card is **conformant** iff the move took effect on EVERY arrangement (read from the snapshot), with no broken state. 5/5 conformant → 12 shippable in the product KB.
 
 | card | task | lofi-85-Am | dark-70-Cm | verdict |
 |------|------|----|----|---------|

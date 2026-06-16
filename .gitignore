@@ -90,3 +90,6 @@ eval/genbench/**/_spec_*.json
 
 # knowledge flywheel: heavy A/B WAVs (report.md + cards.jsonl are the committed snapshot)
 eval/flywheel/**/*.wav
+
+# recipe distiller: raw LLM reply dump (report.md + cards.jsonl are the committed snapshot)
+eval/recipe-distill/last-reply.txt
