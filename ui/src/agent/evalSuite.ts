@@ -12,12 +12,27 @@ import { parseReply } from "./parseReply";
 /** Plugins the eval pretends are installed, injected into the prompt so plugin-by-name is testable. */
 export const EVAL_PLUGINS = ["OTT", "Vital", "Pro-Q 3", "Valhalla VintageVerb"];
 
-/** The fixed session every case reasons over (real ids the brain must reuse). */
+/** The fixed session the base cases reason over (real ids the brain must reuse).
+ *  Kept minimal so the base cases stay reliable; efficacy cases that need plugins/MIDI
+ *  carry their own richer session via EvalCase.snap (EVAL_SNAPSHOT_RICH) below. */
 export const EVAL_SNAPSHOT = {
   session: { tempo: 120, timeSigNumerator: 4, timeSigDenominator: 4 },
   tracks: [
     { id: "t-drums", name: "Drums", volumeDb: 0, mute: false, solo: false, clips: [{ id: "c-dr1", type: "wave", start: 0 }] },
     { id: "t-bass", name: "Bass", volumeDb: -3, mute: false, solo: false, clips: [] },
+  ],
+} as unknown as Snapshot;
+
+/** Richer session for the teaching-efficacy cases: Drums host an EQ with NAMED params
+ *  (by-name / automation targeting) and Rhodes hosts a MIDI clip (humanize). Carried
+ *  per-case so the minimal base session above stays untouched. */
+export const EVAL_SNAPSHOT_RICH = {
+  session: { tempo: 120, timeSigNumerator: 4, timeSigDenominator: 4 },
+  tracks: [
+    { id: "t-drums", name: "Drums", volumeDb: 0, mute: false, solo: false, clips: [{ id: "c-dr1", type: "wave", start: 0 }],
+      plugins: [{ index: 0, name: "Pro-Q 3", params: [{ index: 0, name: "Gain", value: 0.5 }, { index: 1, name: "Frequency", value: 0.3 }] }] },
+    { id: "t-bass", name: "Bass", volumeDb: -3, mute: false, solo: false, clips: [] },
+    { id: "t-keys", name: "Rhodes", volumeDb: -6, mute: false, solo: false, clips: [{ id: "c-keys", type: "midi", start: 0 }] },
   ],
 } as unknown as Snapshot;
 
@@ -32,6 +47,7 @@ export type EvalCase = {
   id: string;
   ask: string;
   want: string; // human description of the rubric, for the report
+  snap?: Snapshot; // optional per-case session (defaults to EVAL_SNAPSHOT); efficacy cases pass the rich one
   check: (r: Reply) => boolean;
 };
 
@@ -64,6 +80,23 @@ export const EVAL_CASES: EvalCase[] = [
     check: (r) => find(r.commands, "add_neural_insert")?.args?.trackId === "t-bass" },
   { id: "loop-region", ask: "turn on looping", want: "set_transport with loop=true",
     check: (r) => find(r.commands, "set_transport")?.args?.loop === true },
+  // ── teaching efficacy: does the agent REACH for the fuller (batch-1+2) reach? ──
+  // Each ask is one a producer answers with a move that was unreachable (or un-thought-of)
+  // before the catalog + "Production moves" teaching. Efficacy cases that need plugins/MIDI
+  // carry the rich session (snap). NOTE: swing and the multi-step reverb-send bus are taught
+  // and mechanically proven (selftest + headless), but the flash model reaches for them
+  // inconsistently one-shot, so they're deliberately NOT gated here (a known soft spot —
+  // candidates for stronger teaching or a flywheel-discovered recipe card).
+  { id: "bounce-track", ask: "bounce the drums down to its own audio track", want: "bounce_track on t-drums",
+    check: (r) => find(r.commands, "bounce_track")?.args?.trackId === "t-drums" },
+  { id: "automate-sweep", ask: "make the drums' EQ sweep the frequency open over the intro", snap: EVAL_SNAPSHOT_RICH,
+    want: "automation (add/set_automation_point) on the drum EQ, not a static set",
+    check: (r) => { const c = find(r.commands, "add_automation_point") ?? find(r.commands, "set_automation_point"); return c?.args?.trackId === "t-drums"; } },
+  { id: "param-by-name", ask: "set the EQ frequency on the drums to about a third", snap: EVAL_SNAPSHOT_RICH,
+    want: "set_plugin_param_by_name paramName ~ frequency",
+    check: (r) => { const c = find(r.commands, "set_plugin_param_by_name"); return c?.args?.trackId === "t-drums" && /freq/i.test(String(c?.args?.paramName ?? "")); } },
+  { id: "humanize-feel", ask: "humanize the Rhodes, it sounds too robotic", snap: EVAL_SNAPSHOT_RICH, want: "humanize_notes on c-keys",
+    check: (r) => find(r.commands, "humanize_notes")?.args?.clipId === "c-keys" },
   // ── restraint / anti-hallucination ──────────────────────────────────────
   { id: "clarify-vague", ask: "do the thing", want: "intent HUH, no commands",
     check: (r) => r.intent === "HUH" && r.commands.length === 0 },

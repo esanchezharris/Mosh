@@ -20,6 +20,22 @@ function knowHowBlock(cards: TechniqueCard[]): string[] {
   return ["Producer know-how (validated techniques — apply when they fit the request):", ...lines];
 }
 
+// WHEN/WHY for the agent's fuller reach (the catalog says a command EXISTS; this says
+// when to choose it). Without this the agent defaults to one static set instead of the
+// move a producer would make — automate for movement, a bus for shared space, swing/
+// humanize for feel, etc. Terse + names the exact command so intent → command connects.
+function productionMoves(): string[] {
+  return [
+    "Production moves — reach for these when they fit (a producer rarely just sets ONE static value):",
+    "- MOVEMENT: to build or sweep, AUTOMATE a param over time (add_automation_point, 2+ points) — e.g. filter cutoff rising over the bars — not a single static set.",
+    "- DEPTH: for a shared reverb/delay or parallel compression, create_bus + add_send (a return) instead of inserting a reverb on every track.",
+    "- BY INTENT: set EQ/comp params with set_plugin_param_by_name ('Frequency', 'Ratio'…) — read the names from the snapshot's fx:[…] below; don't guess a paramIndex.",
+    "- FEEL: for boom-bap / MPC swing, quantize_notes with swing 0.55-0.62; humanize_notes (small timing+velocity, fixed seed) so programmed hats/keys breathe.",
+    "- STRUCTURE: create_group_track to submix related tracks; set_clip_warp to time-stretch a loop to the project tempo.",
+    "- COMMIT: bounce_track to print a track's FX chain to audio — before a heavy generative pass, or to lock in a sound.",
+  ];
+}
+
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
 function compactSnapshot(s: Snapshot): string {
@@ -56,6 +72,7 @@ export function systemPrompt(snap: Snapshot | null, pluginNames: string[] = [], 
       ? [`Installed plugins (pass the exact name as load_plugin's pluginId): ${pluginNames.slice(0, 40).join(", ")}`]
       : []),
     ...knowHowBlock(cards),
+    ...productionMoves(),
     "Rules:",
     "- Use the REAL ids from the session below for trackId/clipId. Never invent ids or commands.",
     "- One request can produce several commands (they apply together as one undoable change).",

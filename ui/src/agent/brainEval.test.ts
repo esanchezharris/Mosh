@@ -71,9 +71,9 @@ async function callLLM(p: Provider, sys: string, user: string): Promise<string> 
 }
 
 describe.skipIf(!RUN)(`brain eval (live · ${provider?.id ?? "none"} · ${provider?.model ?? ""})`, () => {
-  const sys = systemPrompt(EVAL_SNAPSHOT, EVAL_PLUGINS);
   for (const c of EVAL_CASES) {
     it(`${c.id} — "${c.ask}"`, async () => {
+      const sys = systemPrompt(c.snap ?? EVAL_SNAPSHOT, EVAL_PLUGINS);
       const s = scoreReply(c, await callLLM(provider!, sys, c.ask));
       expect(s.hallucination, `hallucinated commands: [${s.emitted.join(", ")}]`).toBe(false);
       expect(s.pass, `want: ${c.want}; got [${s.emitted.join(", ")}] intent=${s.intent}`).toBe(true);

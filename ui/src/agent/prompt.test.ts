@@ -52,4 +52,24 @@ describe("systemPrompt — surfaces what the agent needs to target params + buse
     expect(bare).not.toContain("fx:[0:Pro-Q"); // no RENDERED plugin chain
     expect(bare).not.toContain('buses: 0:"');  // no RENDERED bus line
   });
+
+  // Teaching guard: the agent must be told WHEN to reach for the fuller (batch-1+2)
+  // reach, not just that the commands exist in the catalog. If this block is dropped
+  // the agent regresses to static single-value edits — so pin the key cues.
+  it("teaches the new reach (automation / sends / by-name / feel / bounce), even with no snapshot", () => {
+    const out = systemPrompt(null); // unconditional — present regardless of session state
+    expect(out).toContain("Production moves");
+    for (const cue of [
+      "add_automation_point",      // movement, not a static set
+      "create_bus",                // shared depth / parallel comp
+      "set_plugin_param_by_name",  // EQ/comp by intent
+      "swing",                     // MPC feel
+      "humanize_notes",            // breathe
+      "create_group_track",        // submix
+      "set_clip_warp",             // tempo-match a loop
+      "bounce_track",              // commit / print FX
+    ]) {
+      expect(out).toContain(cue);
+    }
+  });
 });

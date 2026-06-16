@@ -138,7 +138,6 @@ async function run() {
   }
   console.error(`Providers: ${provs.map((p) => p.id).join(", ")}  ·  ${EVAL_CASES.length} cases  ·  up to ${MAX_MODELS} models each\n`);
 
-  const sys = systemPrompt(EVAL_SNAPSHOT, EVAL_PLUGINS);
   const matrix: ModelResult[] = [];
 
   for (const p of provs) {
@@ -147,7 +146,7 @@ async function run() {
     for (const model of models) {
       const mr: ModelResult = { provider: p.id, model, results: [] };
       await pool(EVAL_CASES, CONCURRENCY, async (c) => {
-        const out = await callLLM(p, model, sys, c.ask);
+        const out = await callLLM(p, model, systemPrompt(c.snap ?? EVAL_SNAPSHOT, EVAL_PLUGINS), c.ask);
         if (out.error || out.content === undefined) {
           mr.results.push({ caseId: c.id, pass: false, hallucination: false, emitted: [], ms: out.ms, error: out.error ?? "no content" });
         } else {
