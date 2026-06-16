@@ -316,6 +316,7 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "set_buffer_size")   return cmdSetBufferSize (args);
     if (name == "set_audio_threads") return cmdSetAudioThreads (args);
     if (name == "list_directory")    return cmdListDirectory (args);
+    if (name == "list_samples")      return cmdListSamples (args);
     if (name == "new_project")       return cmdNewProject (args);
     if (name == "open_project")      return cmdOpenProject (args);
     if (name == "save_as")           return cmdSaveAs (args);
@@ -452,6 +453,72 @@ juce::var MoshOps::cmdImportClip (const juce::var& args)
                                   args.getProperty ("trackId", var()).toString(),
                                   (double) args.getProperty ("startSeconds", 0.0),
                                   args);
+}
+
+// Read-only browse of the user's sample library (MOSH_SAMPLES_DIR, else a few common
+// spots). Returns one-shots/loops categorised by filename so the agent can pick (then
+// `import_clip` them). Bounded + filterable so a large library stays responsive.
+juce::var MoshOps::cmdListSamples (const juce::var& args)
+{
+    File root;
+    if (auto envDir = SystemStats::getEnvironmentVariable ("MOSH_SAMPLES_DIR", {}); envDir.isNotEmpty())
+        root = File (envDir);
+    else
+    {
+        auto home = File::getSpecialLocation (File::userHomeDirectory);
+        for (auto cand : { home.getChildFile ("Music/MonsterSamples"),
+                           home.getChildFile ("Splice/sounds"),
+                           home.getChildFile ("Music") })
+            if (cand.isDirectory()) { root = cand; break; }
+    }
+    if (! root.isDirectory())
+        return errResult ("list_samples", "no sample dir — set MOSH_SAMPLES_DIR to your library");
+
+    const auto query    = args.getProperty ("query", var()).toString().toLowerCase();
+    const auto category = args.getProperty ("category", var()).toString().toLowerCase();
+    const int  limit    = jlimit (1, 300, (int) args.getProperty ("limit", 60));
+
+    auto categorise = [] (const String& fileName) -> String
+    {
+        auto s = fileName.toLowerCase();
+        if (s.contains ("kick") || s.contains ("808") || s.contains ("bassdrum")) return "kick";
+        if (s.contains ("snare") || s.contains ("snr") || s.contains ("clap") || s.contains ("rim")) return "snare";
+        if (s.contains ("hat") || s.contains ("hihat") || s.containsWholeWord ("hh")) return "hat";
+        if (s.contains ("crash") || s.contains ("cymbal") || s.contains ("ride")) return "cymbal";
+        if (s.contains ("perc") || s.contains ("tom") || s.contains ("conga") || s.contains ("shaker") || s.contains ("bongo")) return "perc";
+        if (s.contains ("bass") || s.contains ("sub")) return "bass";
+        if (s.contains ("vox") || s.contains ("vocal")) return "vocal";
+        if (s.contains ("loop")) return "loop";
+        if (s.contains ("fx") || s.contains ("riser") || s.contains ("sweep") || s.contains ("impact") || s.contains ("downlifter")) return "fx";
+        return "other";
+    };
+
+    Array<File> files = root.findChildFiles (File::findFiles, true, "*.wav;*.aif;*.aiff");
+    Array<var> out;
+    for (auto& f : files)
+    {
+        const auto nm  = f.getFileNameWithoutExtension();
+        const auto cat = categorise (f.getFileName());
+        if (category.isNotEmpty() && cat != category) continue;
+        if (query.isNotEmpty()
+            && ! nm.toLowerCase().contains (query)
+            && ! f.getParentDirectory().getFileName().toLowerCase().contains (query))
+            continue;
+
+        auto* o = new DynamicObject();
+        o->setProperty ("name", nm);
+        o->setProperty ("category", cat);
+        o->setProperty ("file", f.getFullPathName());
+        out.add (var (o));
+        if (out.size() >= limit) break;
+    }
+
+    auto* data = new DynamicObject();
+    data->setProperty ("samples", out);
+    data->setProperty ("dir", root.getFullPathName());
+    data->setProperty ("returned", out.size());
+    data->setProperty ("scanned", files.size());
+    return okResult ("list_samples", var (data));
 }
 
 juce::var MoshOps::cmdImportClipData (const juce::var& args)

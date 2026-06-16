@@ -80,3 +80,6 @@ ios/MoshCompanion/build/
 
 # eval matrix raw run outputs (report.md is the committed snapshot)
 eval/report-*.json
+
+# arena audio renders (report.md is the committed snapshot)
+eval/arena/**/*.wav

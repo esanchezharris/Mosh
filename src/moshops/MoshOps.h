@@ -158,6 +158,7 @@ private:
     juce::var cmdSetBufferSize    (const juce::var& args);   // thin wrapper over set_audio_device
     juce::var cmdSetAudioThreads  (const juce::var& args);   // PRF-001 multicore pref (undoable:false)
     juce::var cmdListDirectory    (const juce::var& args);   // BRW-001 read-only file browse (no log/transaction)
+    juce::var cmdListSamples      (const juce::var& args);   // browse the user's sample library (read-only)
     juce::var cmdNewProject       (const juce::var& args);   // replaces the Edit (undoable:false)
     juce::var cmdOpenProject      (const juce::var& args);   // replaces the Edit (undoable:false)
     juce::var cmdSaveAs           (const juce::var& args);   // persists + re-points (undoable:false)

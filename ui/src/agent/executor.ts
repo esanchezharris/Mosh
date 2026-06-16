@@ -7,7 +7,7 @@
 // fails the entry rather than loading the wrong plugin.
 
 import { useStore } from "../store";
-import { validateCommand, describeCommand, resolvePluginId } from "./commands";
+import { validateCommand, describeCommand, resolvePluginId, coerceArgs } from "./commands";
 
 export type AgentCommandCall = { command: string; args?: Record<string, unknown> };
 export type ChangeEntry = { summary: string; ok: boolean; error?: string };
@@ -19,7 +19,7 @@ export async function runAgentBatch(label: string, calls: AgentCommandCall[]): P
   const valid: { call: AgentCommandCall; execArgs: Record<string, unknown> }[] = [];
 
   for (const c of calls) {
-    const args = c.args ?? {};
+    const args = coerceArgs(c.command, c.args ?? {});
     const err = validateCommand(c.command, args);
     if (err) { entries.push({ summary: c.command.replace(/_/g, " "), ok: false, error: err }); continue; }
 

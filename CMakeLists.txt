@@ -69,6 +69,7 @@ if (MOSH_BUILD_APP)
         src/app/MainWindow.cpp
         src/app/WebViewShell.cpp
         src/app/SelfTest.cpp
+        src/app/AgentServer.cpp
         src/webview/WebBridge.cpp
         # Moshi's brain (server-side LLM proxy) + native voice (macOS Speech) — the
         # packaged-app equivalents of the Vite dev brain proxy + browser Web Speech.

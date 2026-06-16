@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "brain-eval": "MOSH_BRAIN_EVAL=1 vitest run src/agent/brainEval.test.ts",
-    "eval-matrix": "vite-node scripts/evalMatrix.mts"
+    "eval-matrix": "vite-node scripts/evalMatrix.mts",
+    "arena": "vite-node scripts/arena.mts"
   },
   "dependencies": {
     "qrcode": "^1.5.4",

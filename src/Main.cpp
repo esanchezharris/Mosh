@@ -2,6 +2,7 @@
 #include <tracktion_engine/tracktion_engine.h>
 #include "app/MainWindow.h"
 #include "app/SelfTest.h"
+#include "app/AgentServer.h"
 #include "engine/MoshEngine.h"
 #include "moshops/MoshOps.h"
 #include "remote/RemoteCompanionServer.h"
@@ -95,12 +96,14 @@ public:
         const bool undoSelfTest = commandLine.contains ("--selftest-undo");
         const bool liveAudioSmoke = commandLine.contains ("--live-audio-smoke");
         const bool neuralAB = commandLine.contains ("--neural-ab");
+        const bool agentServer = commandLine.contains ("--agent-server");
         const bool liveAudio = liveAudioSmoke || neuralAB;   // opens the real device, fresh cold session
-        const bool headless = undoSelfTest || commandLine.contains ("--selftest");
+        const bool headless = undoSelfTest || agentServer || commandLine.contains ("--selftest");
         const juce::String freshSessionName = undoSelfTest ? "session-selftest-undo"
+                                            : (agentServer ? "session-agent-server"
                                             : (neuralAB ? "session-neural-ab"
                                             : (liveAudioSmoke ? "session-live-audio-smoke"
-                                                              : "session-selftest"));
+                                                              : "session-selftest")));
         // Headless: no audio device, and an isolated cold session so the harness is
         // idempotent (it saves/reloads itself) and never touches the GUI session.
         engine  = std::make_unique<MoshEngine> ((! headless) || liveAudio,
@@ -128,6 +131,15 @@ public:
         {
             const int fails = runUndoSelfTest (*engine, *moshOps);
             setApplicationReturnValue (fails);
+            quit();
+            return;
+        }
+
+        // Headless agent driver: external harness drives the real engine over stdin.
+        if (agentServer)
+        {
+            const int rc = runAgentServer (*engine, *moshOps);
+            setApplicationReturnValue (rc);
             quit();
             return;
         }

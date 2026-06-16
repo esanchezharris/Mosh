@@ -52,6 +52,10 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "set_clip_gain", desc: "Set a clip's gain in dB", args: [S("clipId"), N("gainDb")], summary: (a) => `Set clip gain to ${a.gainDb} dB` },
   { command: "set_clip_mute", desc: "Mute/unmute a clip", args: [S("clipId"), B("mute")], summary: (a) => (a.mute ? "Muted a clip" : "Unmuted a clip") },
 
+  // ── samples (browse the user's library, then import) ──────────────────────
+  { command: "list_samples", desc: "Browse the user's sample library for one-shots/loops (filter by query and/or category)", args: [S("query", false, "name filter, e.g. 'kick'"), S("category", false, '"kick"|"snare"|"hat"|"cymbal"|"perc"|"bass"|"loop"|"fx"|"vocal"'), N("limit", false)], summary: () => "Browsed samples" },
+  { command: "import_clip", desc: "Import an audio file (e.g. a sample path returned by list_samples) onto a track", args: [S("file", true, "absolute path from list_samples"), S("trackId", false), S("name", false), N("startSeconds", false, "seconds")], summary: (a) => `Imported ${a.name ?? "a sample"}` },
+
   // ── MIDI notes ──────────────────────────────────────────────────────────
   { command: "add_note", desc: "Add a MIDI note (pitch 0-127) to a MIDI clip", args: [S("clipId"), N("pitch"), N("start", true, "beats"), N("length", true, "beats"), N("velocity", false, "0-127")], summary: () => "Added a note" },
   { command: "remove_note", desc: "Remove a MIDI note by index", args: [S("clipId"), N("noteIndex")], summary: () => "Removed a note" },
@@ -107,6 +111,18 @@ export const AGENT_COMMANDS: AgentCommand[] = [
 ];
 
 export const AGENT_COMMAND_MAP = new Map(AGENT_COMMANDS.map((c) => [c.command, c]));
+
+/** LLMs habitually emit ids as numbers (`trackId: 1010`) even when the snapshot
+ *  shows them as strings. Coerce number→string for any arg declared `string` so a
+ *  well-meant plan isn't rejected by the validator. Applied before validateCommand. */
+export function coerceArgs(command: string, args: Record<string, unknown>): Record<string, unknown> {
+  const spec = AGENT_COMMAND_MAP.get(command);
+  if (!spec) return args;
+  const out: Record<string, unknown> = { ...args };
+  for (const a of spec.args)
+    if (a.type === "string" && typeof out[a.name] === "number") out[a.name] = String(out[a.name]);
+  return out;
+}
 
 /** Does this command (with these args) need a spoken "yes" before it runs? */
 export function commandNeedsConfirm(command: string, args: Record<string, unknown>): boolean {

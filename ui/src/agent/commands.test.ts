@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { AGENT_COMMANDS, validateCommand, describeCommand, resolvePluginId, commandNeedsConfirm, type ArgSpec, type ArgType } from "./commands";
+import { AGENT_COMMANDS, validateCommand, describeCommand, resolvePluginId, commandNeedsConfirm, coerceArgs, type ArgSpec, type ArgType } from "./commands";
 
 const sample = (t: ArgType): string | number | boolean => (t === "number" ? 1 : t === "boolean" ? true : "x");
 
@@ -61,6 +61,20 @@ describe("resolvePluginId — fuzzy name → real id, never a wrong guess", () =
   });
   it("errors on an empty query", () => {
     expect("error" in resolvePluginId("", plugins)).toBe(true);
+  });
+});
+
+describe("coerceArgs — numeric ids become strings so the validator accepts them", () => {
+  it("stringifies a number passed for a string arg (trackId)", () => {
+    const a = coerceArgs("set_track_mute", { trackId: 1010, mute: true });
+    expect(a.trackId).toBe("1010");
+    expect(validateCommand("set_track_mute", a)).toBeNull();
+  });
+  it("leaves number args (bpm) untouched", () => {
+    expect(coerceArgs("set_tempo", { bpm: 90 }).bpm).toBe(90);
+  });
+  it("is a no-op for unknown commands", () => {
+    expect(coerceArgs("nope", { x: 1 })).toEqual({ x: 1 });
   });
 });
 
