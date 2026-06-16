@@ -100,3 +100,25 @@ export function craftPrompt(brief: Brief, style: PromptStyle = "tag"): string {
 export function allStyles(brief: Brief): { style: PromptStyle; prompt: string }[] {
   return PROMPT_STYLES.map((style) => ({ style, prompt: craftPrompt(brief, style) }));
 }
+
+const GUIDANCE_EXAMPLE = craftPrompt(
+  {
+    genre: "lo-fi hip-hop", bpm: 85, key: "A minor",
+    instruments: ["dusty boom-bap drums", "warm Rhodes chords", "mellow sub bass"],
+    mood: ["nostalgic", "mellow"], production: ["vinyl crackle", "tape saturation"], era: "90s",
+  },
+  "tag",
+);
+
+/** Compact guidance for an LLM that has to WRITE an SA3 prompt — the single source for
+ *  both the product system prompt and the arena strategies. Encodes the bench result:
+ *  rich tag/reference phrasing beats a terse prompt by ~55% brief-match, and a terse
+ *  prompt renders only the elements it names (the "drums-only" failure). */
+export function promptGuidance(): string {
+  return [
+    "Writing a generative prompt (Stable Audio text-to-audio):",
+    "- Use the metadata-tag style: comma-separated descriptors — genre, era, EVERY instrument you want to hear, BPM, key, mood, production character.",
+    '- Name ALL the elements you want. A terse prompt renders only what it names ("boom-bap drums" alone → drums only, no bass or keys).',
+    `- Example: ${GUIDANCE_EXAMPLE}`,
+  ].join("\n");
+}

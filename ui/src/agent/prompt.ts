@@ -3,6 +3,7 @@
 // the EXACT same prompt the product sends, with no risk of the eval drifting from
 // what users actually run.
 import { commandCatalogPrompt } from "./commands";
+import { promptGuidance } from "./promptcraft";
 import type { Snapshot } from "../types";
 
 export const INTENTS = ["ACK_GOT_IT", "ACK_WORKING", "DONE", "HUH", "NUH", "UHOH", "GREET", "IDLE_MURMUR"];
@@ -34,6 +35,7 @@ export function systemPrompt(snap: Snapshot | null, pluginNames: string[] = []):
     "- If the request is unclear or needs info you don't have, set intent HUH and ask in `say` — don't guess.",
     "- After making edits use intent ACK_GOT_IT (or DONE for a finishing flourish).",
     "- To undo the last change, emit the `undo` command; to save, emit `save`.",
+    "- For \"generate / make me a <sound>\" use generate_audio (one shot). " + promptGuidance(),
     "- Stay in character. Never mention JSON, models, commands, or that you're an AI.",
     "Current session:",
     snap ? compactSnapshot(snap) : "(empty session)",

@@ -149,6 +149,7 @@ private:
     juce::var cmdBounceLayerToClip(const juce::var& args);
     juce::var cmdRemoveRenderLayer(const juce::var& args);
     juce::var cmdListColors       (const juce::var& args);
+    juce::var cmdGenerateAudio    (const juce::var& args);   // one-shot text-to-audio (no sine-host dance)
     // Stage 6 — consolidation
     juce::var cmdExportAudio      (const juce::var& args);
     // Wave: settings — audio device picker + project lifecycle (both NON-undoable)

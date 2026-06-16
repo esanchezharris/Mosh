@@ -143,7 +143,7 @@ async function main() {
     (b.s.clap_brief ?? -1) - (a.s.clap_brief ?? -1) || (b.s.pq_perceptual ?? -1) - (a.s.pq_perceptual ?? -1))[0];
 
   writeReport(techs, results, byWav, bonWinner?.r.id);
-  stageForListening(results);
+  stageForListening(techs, results, byWav, bonWinner?.r.id);
 }
 
 function fmt(n: number | null | undefined, d = 2) { return n == null ? "–" : n.toFixed(d); }
@@ -181,12 +181,44 @@ function writeReport(techs: Tech[], results: RenderResult[], byWav: Map<string, 
   console.error(`\n✓ report → eval/genbench/${slug(BRIEF_TEXT)}/report.md`);
 }
 
-function stageForListening(results: RenderResult[]) {
+function stageForListening(techs: Tech[], results: RenderResult[], byWav: Map<string, WavScore>, bonWinnerId?: string) {
   const dst = resolve(DESKTOP, slug(BRIEF_TEXT));
   mkdirSync(dst, { recursive: true });
+  const byId = new Map(results.map((r) => [r.id, r]));
   let n = 0;
   for (const r of results) if (r.ok && existsSync(r.out)) { copyFileSync(r.out, resolve(dst, `${r.id}.wav`)); n++; }
-  console.error(`✓ staged ${n} WAVs → ${dst}`);
+
+  // Copy the REAL source loops the a2a renders started from, so input→output is hearable.
+  for (const t of techs) if (t.method === "a2a" && t.source && existsSync(t.source))
+    copyFileSync(t.source, resolve(dst, `_SOURCE_for_${t.id}.wav`));
+
+  // A self-documenting README: what each render's GOAL was + provenance (the recurring
+  // "I'm not sure what the agent was going for / what the source was" question).
+  const R: string[] = [];
+  R.push(`GENERATIVE TECHNIQUES BENCH — listening guide`);
+  R.push(`Brief: ${BRIEF_TEXT}  (${BRIEF.bpm} BPM, ${BRIEF.key}, real Stable Audio 3)`);
+  R.push(`Every file is peak-normalized to -1 dBFS so loudness isn't a confound — judge timbre.`);
+  R.push(`"brief-match" = how much it sounds like the brief (CLAP, higher better). All distinct seeds/prompts.\n`);
+  for (const g of ["prompt", "audio2audio", "color", "seed", "steps"]) {
+    const ts = techs.filter((t) => t.group === g); if (!ts.length) continue;
+    R.push(`── ${g.toUpperCase()} ──`);
+    for (const t of ts) {
+      const s = byId.get(t.id)?.out ? byWav.get(byId.get(t.id)!.out) : undefined;
+      const bm = s?.clap_brief != null ? `brief-match ${s.clap_brief.toFixed(3)}` : "";
+      const win = t.id === bonWinnerId ? "  [best-of-N winner]" : "";
+      R.push(`  ${t.id}.wav — ${t.blurb}${bm ? `  (${bm})` : ""}${win}`);
+      if (t.method === "a2a" && t.source)
+        R.push(`     ↳ started from REAL audio: _SOURCE_for_${t.id}.wav  (${t.source.split("/").pop()})`);
+    }
+    R.push("");
+  }
+  R.push(`The GOAL of this bench: audition how the GENERATION itself sounds across techniques —`);
+  R.push(`prompt phrasing, generating outright vs re-imagining a real loop, steering, seeds —`);
+  R.push(`so you can pick what to bake into the product. a2a "sounds cool but off-brief" is expected:`);
+  R.push(`it follows the SOURCE loop more than the brief (great for "flip this loop", not "realize this brief").`);
+  writeFileSync(resolve(dst, "README.txt"), R.join("\n") + "\n");
+
+  console.error(`✓ staged ${n} WAVs + sources + README → ${dst}`);
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });

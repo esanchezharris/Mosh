@@ -3,6 +3,7 @@
 // (text-to-audio stems) to fully-agentic (samples + MIDI + FX, no generation).
 // Pure module (no bridge/store) so the arena harness and tests can both use it.
 import { commandCatalogPrompt } from "./commands";
+import { promptGuidance } from "./promptcraft";
 
 export type Rung = {
   id: string;
@@ -21,10 +22,8 @@ export const RUNGS: Rung[] = [
     label: "Pure generative — one render",
     usesSA3: true,
     directive:
-      "PURE GENERATIVE (one render for the whole brief). Exact sequence: (1) create_track. (2) add_test_tone_clip on it — READ the clipId it returns. " +
-      "(3) create_render_layer with that EXACT clipId. (4) set_render_param {clipId, prompt:'<vivid full-brief description>'} (do NOT set nl → text-to-audio). " +
-      "(5) render_layer {clipId, wait:true}. (6) accept_render {clipId} — lands the generated audio as a NEW clip. " +
-      "(7) remove_clip the ORIGINAL test-tone host clip (so the sine doesn't play; remove the host, NOT the new render). (8) set_track_volume. No MIDI, no samples.",
+      "PURE GENERATIVE (one render for the whole brief). ONE call: generate_audio {prompt:'<full-brief metadata-tag description naming EVERY instrument>', seed}. " +
+      "It makes a track, renders Stable Audio text-to-audio, and lands the clip — no host-clip / accept / remove steps. Then set_track_volume if needed. No MIDI, no samples.",
   },
   {
     id: "R1-generative-stems",
@@ -80,6 +79,7 @@ const PROTOCOL = [
   "- A FRESH 4osc SYNTH IS A BARE SINE: after load_builtin {type:'4osc'} you MUST call set_4osc_patch {trackId, patch} BEFORE adding notes — 'sub_bass' for bass, 'warm_keys'/'soft_pad' for chords/keys, 'pluck'/'saw_lead' for leads. (4osc is for bass/keys/leads only — NEVER drums.)",
   "- FILL THE LOOP: make ~8 seconds of CONTINUOUS music — no long silent gaps. Place a drum hit on every beat/off-beat across ~2 bars (startSeconds = beatIndex × 60/bpm), re-importing the sample at each position.",
   "- MIX — DRUMS ON TOP, with HEADROOM (never clip): the DRUMS are the loudest element and the sub/synth must not drown them — set_track_volume drums≈-4 dB, bass≈-11 dB, chords/keys≈-14 dB, pads/textures≈-17 dB, and set_master_volume to -4 dB for headroom. Keep sub-bass restrained. Pan for space.",
+  "- " + promptGuidance().replace(/\n/g, "\n  "),
   "- Use ONLY the commands below. Set done=true only when the loop fully realises the brief AND is mixed.",
 ].join("\n");
 

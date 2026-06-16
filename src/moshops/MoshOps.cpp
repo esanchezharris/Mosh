@@ -309,6 +309,7 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "bounce_layer_to_clip") return cmdBounceLayerToClip (args);
     if (name == "remove_render_layer") return cmdRemoveRenderLayer (args);
     if (name == "list_colors")       return cmdListColors (args);
+    if (name == "generate_audio")    return cmdGenerateAudio (args);
     if (name == "export_audio")      return cmdExportAudio (args);
     if (name == "list_audio_devices")return cmdListAudioDevices (args);
     if (name == "list_midi_inputs")  return cmdListMidiInputs (args);
@@ -580,6 +581,7 @@ juce::var MoshOps::cmdAddTestTone (const juce::var& args)
     importArgs->setProperty ("file", file.getFullPathName());
     importArgs->setProperty ("trackId", args.getProperty ("trackId", var()));
     importArgs->setProperty ("name", name);
+    importArgs->setProperty ("start", args.getProperty ("start", 0.0));   // honour placement
     return cmdImportClip (var (importArgs));   // logs as import_clip
 }
 
@@ -3348,6 +3350,105 @@ juce::var MoshOps::cmdListColors (const juce::var&)
     if (! (bool) r.getProperty ("ok", false))
         return okResult ("list_colors", [] { auto* o = new DynamicObject(); o->setProperty ("colors", Array<var>{}); return var (o); }());
     return okResult ("list_colors", r);
+}
+
+juce::var MoshOps::cmdGenerateAudio (const juce::var& args)
+{
+    // Generate audio OUTRIGHT (SA3 text-to-audio) in ONE call — no manual sine-host
+    // dance. The render-layer machinery needs a wave clip to attach to, and in t2a
+    // mode (no `nl`) SA3 starts from pure noise and IGNORES the host's audio — so we
+    // create a throwaway host tone, render, accept the result onto the Neural Renders
+    // lane, and remove the host so the sine never plays. This is the seam the owner
+    // asked for: "just generate the audio outright" with the sine workflow hidden.
+    //
+    // Composes the existing render commands (one mutation path); the trade-off is that
+    // undo unwinds the steps individually. args: prompt (req), trackId?, startSeconds?,
+    // seed?, colors? (≤3 {name,value}), lab?.
+    const auto prompt = args.getProperty ("prompt", var()).toString();
+    if (prompt.isEmpty()) return errResult ("generate_audio", "prompt required");
+
+    // 1. Target track — reuse the given one, else a throwaway scratch track we remove
+    //    at the end (the accepted clip lands on the Neural Renders lane regardless).
+    auto trackId = args.getProperty ("trackId", var()).toString();
+    bool createdTrack = false;
+    if (trackId.isEmpty())
+    {
+        auto* tArgs = new DynamicObject(); tArgs->setProperty ("name", "gen-scratch");
+        auto tRes = cmdCreateTrack (var (tArgs));
+        if (! (bool) tRes.getProperty ("ok", false)) return errResult ("generate_audio", "could not create track");
+        trackId = tRes.getProperty ("data", var()).getProperty ("trackId", var()).toString();
+        createdTrack = true;
+    }
+    const double startSeconds = (double) args.getProperty ("startSeconds", 0.0);
+
+    // A readable clip name from the prompt's first words (the accepted clip is
+    // "neural-<this>"), so the landed clip reads as the sound, not "gen-host".
+    auto hostName = prompt.upToFirstOccurrenceOf (",", false, false).trim()
+                        .retainCharacters ("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -")
+                        .substring (0, 28).trim();
+    if (hostName.isEmpty()) hostName = "generated";
+
+    // 2. Throwaway host tone (8s — SA3's pinned duration). Its audio is ignored in t2a;
+    //    the accepted clip inherits its position, so place it at startSeconds.
+    auto* hostArgs = new DynamicObject();
+    hostArgs->setProperty ("trackId", trackId);
+    hostArgs->setProperty ("seconds", 8.0);
+    hostArgs->setProperty ("start", startSeconds);
+    hostArgs->setProperty ("name", hostName);
+    auto hostRes = cmdAddTestTone (var (hostArgs));
+    if (! (bool) hostRes.getProperty ("ok", false)) return errResult ("generate_audio", "host clip failed");
+    const auto hostClipId = hostRes.getProperty ("data", var()).getProperty ("clipId", var()).toString();
+
+    // 3. Render layer — real SA3 when enabled, else the FakeAdapter (graceful downgrade).
+    const bool sa3 = juce::SystemStats::getEnvironmentVariable ("MOSH_ENABLE_SA3", "0") == "1";
+    auto* rlArgs = new DynamicObject();
+    rlArgs->setProperty ("clipId", hostClipId);
+    rlArgs->setProperty ("adapter", sa3 ? "stable_audio3" : "fake");
+    auto rlRes = cmdCreateRenderLayer (var (rlArgs));
+    if (! (bool) rlRes.getProperty ("ok", false)) return errResult ("generate_audio", "render layer failed");
+
+    // 4. Params — NO `nl` → text-to-audio (host audio ignored). Forward seed/colors/lab.
+    auto* spArgs = new DynamicObject();
+    spArgs->setProperty ("clipId", hostClipId);
+    spArgs->setProperty ("prompt", prompt);
+    if (args.hasProperty ("seed"))   spArgs->setProperty ("seed", args.getProperty ("seed", 0));
+    if (args.hasProperty ("colors")) spArgs->setProperty ("colors", args.getProperty ("colors", var()));
+    if (args.hasProperty ("lab"))    spArgs->setProperty ("lab", args.getProperty ("lab", false));
+    cmdSetRenderParam (var (spArgs));
+
+    // 5. Render (blocking — headless harness + the inline path both wait here).
+    auto* rArgs = new DynamicObject();
+    rArgs->setProperty ("clipId", hostClipId);
+    rArgs->setProperty ("wait", true);
+    auto rRes = cmdRenderLayer (var (rArgs));
+    if (! (bool) rRes.getProperty ("ok", false)) return errResult ("generate_audio", "render failed");
+
+    // 6. Accept — lands the generated audio as a new clip on the "Neural Renders" lane.
+    auto* aArgs = new DynamicObject(); aArgs->setProperty ("clipId", hostClipId);
+    auto aRes = cmdAcceptRender (var (aArgs));
+    if (! (bool) aRes.getProperty ("ok", false)) return errResult ("generate_audio", "accept failed");
+
+    // 7. Clean up the host (the sine never sounds): if we made a scratch track, remove
+    //    it whole (takes the host with it); otherwise just remove the host from the
+    //    user's track. Either way only the accepted clip on Neural Renders remains.
+    if (createdTrack)
+    {
+        auto* rtArgs = new DynamicObject(); rtArgs->setProperty ("trackId", trackId);
+        cmdRemoveTrack (var (rtArgs));
+    }
+    else
+    {
+        auto* rmArgs = new DynamicObject(); rmArgs->setProperty ("clipId", hostClipId);
+        cmdRemoveClip (var (rmArgs));
+    }
+
+    logLine ("generate_audio", args, true, {}, true);
+    emitSnapshotInvalidated();
+    auto* data = new DynamicObject();
+    data->setProperty ("trackId", trackId);
+    data->setProperty ("status", "ready");
+    data->setProperty ("landing", "Neural Renders");
+    return okResult ("generate_audio", var (data));
 }
 
 juce::var MoshOps::cmdCancelRender (const juce::var& args)

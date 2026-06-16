@@ -12,7 +12,7 @@
 // EVERY arg name here MUST match what the C++ handler reads in MoshOps.cpp — see the
 // `catalog ↔ backend arg contract` test, which parses the .cpp and fails on drift.
 
-export type ArgType = "string" | "number" | "boolean";
+export type ArgType = "string" | "number" | "boolean" | "array";
 export type ArgSpec = { name: string; type: ArgType; required?: boolean; desc?: string };
 type DescArgs = Record<string, string | number | boolean | undefined>;
 export type AgentCommand = {
@@ -28,6 +28,7 @@ export type AgentCommand = {
 const S = (name: string, required = true, desc?: string): ArgSpec => ({ name, type: "string", required, desc });
 const N = (name: string, required = true, desc?: string): ArgSpec => ({ name, type: "number", required, desc });
 const B = (name: string, required = true, desc?: string): ArgSpec => ({ name, type: "boolean", required, desc });
+const A = (name: string, required = true, desc?: string): ArgSpec => ({ name, type: "array", required, desc });
 
 export const AGENT_COMMANDS: AgentCommand[] = [
   // ── session / history ─────────────────────────────────────────────────────
@@ -94,8 +95,13 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "reset_neural", desc: "Reset the neural model's internal state", args: [S("trackId"), N("index", false)], summary: () => "Reset the neural model" },
 
   // ── generative (Tier-B) ─────────────────────────────────────────────────
+  // generate_audio is the one-shot "make a sound from a text prompt" seam — no host-clip
+  // setup. Prefer it for "generate/create/make me a <sound>". Write the prompt in the SA3
+  // metadata style (genre, era, EVERY instrument you want, BPM, key, mood, production —
+  // comma-separated); a terse prompt renders only what it names.
+  { command: "generate_audio", desc: "Generate a sound/loop from a text prompt (Stable Audio) and drop it in — one shot, no setup", args: [S("prompt", true, "SA3 metadata-style: genre, instruments, BPM, key, mood, production, comma-separated"), S("trackId", false, "omit to make a new track"), N("seed", false, "change for a different take"), A("colors", false, '≤3 timbre pushes [{name,value 0-100}] e.g. grit/air — optional'), N("startSeconds", false), B("lab", false, "unlock raw ASTD range")], summary: () => "Generated audio from a prompt" },
   { command: "create_render_layer", desc: "Attach a generative re-imagine layer to a wave clip", args: [S("clipId"), S("adapter", false)], summary: () => "Attached a generative layer" },
-  { command: "set_render_param", desc: "Set render-layer parameters (seed bump = new take)", args: [S("clipId"), N("seed", false, "change to get a new take"), S("prompt", false), N("nl", false, "0-1 noise level"), B("lab", false, "unlock raw ASTD range")], summary: () => "Set a render parameter" },
+  { command: "set_render_param", desc: "Set render-layer parameters (seed bump = new take)", args: [S("clipId"), N("seed", false, "change to get a new take"), S("prompt", false), N("nl", false, "0-1 noise level"), A("colors", false, "≤3 timbre pushes [{name,value 0-100}]"), B("lab", false, "unlock raw ASTD range")], summary: () => "Set a render parameter" },
   { command: "render_layer", desc: "Run the generative render on a clip's layer", args: [S("clipId")], summary: () => "Started a render" },
   { command: "cancel_render", desc: "Cancel an in-flight generative render", args: [S("clipId"), S("jobId", false)], summary: () => "Cancelled a render" },
   { command: "accept_render", desc: "Accept a finished render (lands it as a clip)", args: [S("clipId")], summary: () => "Accepted a render" },
@@ -174,6 +180,7 @@ export function validateCommand(command: string, args: Record<string, unknown>):
     if (a.type === "number" && typeof v !== "number") return `${command}: "${a.name}" must be a number`;
     if (a.type === "boolean" && typeof v !== "boolean") return `${command}: "${a.name}" must be true/false`;
     if (a.type === "string" && typeof v !== "string") return `${command}: "${a.name}" must be a string`;
+    if (a.type === "array" && !Array.isArray(v)) return `${command}: "${a.name}" must be an array`;
   }
   return null;
 }

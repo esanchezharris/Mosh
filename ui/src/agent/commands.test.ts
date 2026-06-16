@@ -3,7 +3,8 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { AGENT_COMMANDS, validateCommand, describeCommand, resolvePluginId, commandNeedsConfirm, coerceArgs, type ArgSpec, type ArgType } from "./commands";
 
-const sample = (t: ArgType): string | number | boolean => (t === "number" ? 1 : t === "boolean" ? true : "x");
+const sample = (t: ArgType): string | number | boolean | unknown[] =>
+  t === "number" ? 1 : t === "boolean" ? true : t === "array" ? [{ name: "grit", value: 50 }] : "x";
 
 /** Fill every arg with a well-typed value, optionally skipping one (to test rejection). */
 function fullArgs(args: ArgSpec[], skip?: string): Record<string, unknown> {
