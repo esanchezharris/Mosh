@@ -83,7 +83,7 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "remove_plugin", desc: "Remove a plugin from a track's chain", args: [S("trackId"), N("index")], summary: () => "Removed a plugin" },
 
   // ── neural (Tier-A) ─────────────────────────────────────────────────────
-  { command: "add_neural_insert", desc: "Add the real-time neural insert to a track", args: [S("trackId"), N("index", false)], summary: () => "Added a neural insert" },
+  { command: "add_neural_insert", desc: "Add a real-time neural amp / guitar-amp / cabinet / tone modeler (the neural insert) to a track", args: [S("trackId"), N("index", false)], summary: () => "Added a neural insert" },
   { command: "set_neural_param", desc: "Set a neural insert param (0-100, ASTD-clamped)", args: [S("trackId"), S("paramId", true, '"drive" | "mix"'), N("value", true, "0-100"), N("index", false, "chain position of the insert")], summary: (a) => `Set neural ${a.paramId} to ${a.value}` },
   { command: "set_neural_lab_mode", desc: "Unlock the neural insert's raw (Lab) range", args: [S("trackId"), B("on"), N("index", false)], summary: (a) => (a.on ? "Unlocked neural Lab mode" : "Locked neural to safe range") },
   { command: "reset_neural", desc: "Reset the neural model's internal state", args: [S("trackId"), N("index", false)], summary: () => "Reset the neural model" },

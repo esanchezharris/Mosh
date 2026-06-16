@@ -77,3 +77,6 @@ ios/MoshCompanion/build/
 !ios/MoshCompanion/MoshCompanion.xcodeproj/xcshareddata/
 !ios/MoshCompanion/MoshCompanion.xcodeproj/xcshareddata/xcschemes/
 !ios/MoshCompanion/MoshCompanion.xcodeproj/xcshareddata/xcschemes/MoshCompanion.xcscheme
+
+# eval matrix raw run outputs (report.md is the committed snapshot)
+eval/report-*.json
