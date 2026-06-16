@@ -1137,5 +1137,174 @@ export const VALIDATED_CARDS: TechniqueCard[] = [
     ],
     "confidence": 0.75,
     "status": "conformant"
+  },
+  {
+    "id": "card_1tyg4k8",
+    "source": "youtube",
+    "skill_name": "90s boom bap one-two drum foundation with ghost-note variation",
+    "task_type": "drum_programming",
+    "genre_context": [
+      "boom bap",
+      "90s hip-hop"
+    ],
+    "producer_intent": "Build a simple kick/snare backbone, then add low-velocity ghost notes and slight off-grid placement for bounce.",
+    "when": "When starting a boom bap beat and wanting a very simple, universal drum pocket with swing.",
+    "recipe": {
+      "kind": "recipe",
+      "commands": [
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 36,
+            "start": 0,
+            "length": 0.25,
+            "velocity": 100
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 36,
+            "start": 2,
+            "length": 0.25,
+            "velocity": 100
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 38,
+            "start": 1,
+            "length": 0.25,
+            "velocity": 100
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 38,
+            "start": 3,
+            "length": 0.25,
+            "velocity": 100
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 36,
+            "start": 1.5,
+            "length": 0.25,
+            "velocity": 35
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 36,
+            "start": 3.5,
+            "length": 0.25,
+            "velocity": 35
+          }
+        }
+      ],
+      "check": {
+        "kind": "pattern",
+        "clip": "$drumClipId",
+        "pattern": {
+          "hits": [
+            {
+              "pitch": 36,
+              "beats": [
+                0,
+                1.5,
+                2,
+                3.5
+              ]
+            },
+            {
+              "pitch": 38,
+              "beats": [
+                1,
+                3
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "evidence": [
+      {
+        "brief": "lofi-85-Am",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      },
+      {
+        "brief": "dark-70-Cm",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      }
+    ],
+    "confidence": 0.75,
+    "status": "conformant"
+  },
+  {
+    "id": "card_12c91bs",
+    "source": "youtube",
+    "skill_name": "Basic boom bap hat pocket with light swing",
+    "task_type": "drum_programming",
+    "genre_context": [
+      "boom bap",
+      "90s hip-hop"
+    ],
+    "producer_intent": "Keep hats simple but give them a small amount of swing so the groove feels less rigid.",
+    "when": "When programming a straight hat line and wanting the classic relaxed boom bap bounce.",
+    "recipe": {
+      "kind": "recipe",
+      "commands": [
+        {
+          "command": "quantize_notes",
+          "args": {
+            "clipId": "$hatsClipId",
+            "division": 0.5,
+            "strength": 1,
+            "swing": 0.58
+          }
+        }
+      ],
+      "check": {
+        "kind": "swing",
+        "clip": "$hatsClipId",
+        "division": 0.5,
+        "swing": 0.58
+      }
+    },
+    "evidence": [
+      {
+        "brief": "lofi-85-Am",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      },
+      {
+        "brief": "dark-70-Cm",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      }
+    ],
+    "confidence": 0.75,
+    "status": "conformant"
   }
 ];

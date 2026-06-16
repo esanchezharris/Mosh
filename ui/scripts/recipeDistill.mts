@@ -19,8 +19,8 @@ import { fileURLToPath } from "node:url";
 import { execSync } from "node:child_process";
 import { MOSH_BIN } from "./agentEngine.mts";
 import { loadEnvFiles, resolveProviders, callLLM } from "./llm.mts";
-import { AGENT_COMMANDS } from "../src/agent/commands";
 import { parseDistilledCards } from "../src/agent/knowledge/distill";
+import { IN_THE_BOX_COMMANDS, BASE_TOKENS, DISTILL_SYS, recipeCardRules } from "../src/agent/knowledge/distillPrompt";
 import { runCandidateThroughLoop, type Outcome } from "./recipeLoop.mts";
 import { upsertCards, writeCardsData, loadCards } from "./knowledgeStore.mts";
 import { type BaseSpec } from "./recipeBase.mts";
@@ -31,59 +31,20 @@ const OUT_DIR = resolve(REPO, "eval/recipe-distill");
 
 const env = (): Record<string, string> => ({ MOSH_NO_AUDIO: "1" });
 
-// The base arrangement's $token vocabulary (recipeBase.BaseBindings) + the runtime capture.
-const TOKENS = ["drumTrackId", "drumClipId", "hatsTrackId", "hatsClipId", "keysTrackId", "keysClipId", "keysFilterPluginIndex", "keysFilterParamIndex", "busNumber"];
-// The in-the-box command subset a recipe card may use (each maps to a conformance reader).
-const COMMANDS = ["add_note", "quantize_notes", "humanize_notes", "add_automation_point", "create_bus", "add_send"];
-
 // ≥2 arrangements (different tempo/key) so "reproduced" is a real claim — same as the flywheel.
 const ARRANGEMENTS: BaseSpec[] = [
   { baseId: "lofi-85-Am", tempo: 85, key: "A minor" },
   { baseId: "dark-70-Cm", tempo: 70, key: "C minor" },
 ];
 
-function commandSubsetPrompt(): string {
-  const map = new Map(AGENT_COMMANDS.map((c) => [c.command, c]));
-  return COMMANDS.map((name) => {
-    const c = map.get(name);
-    if (!c) return `- ${name}`;
-    const a = c.args.map((x) => `${x.name}${x.required ? "" : "?"}`).join(", ");
-    return `- ${name}(${a}) — ${c.desc}`;
-  }).join("\n");
-}
-
 function buildPrompt(brief: string, n: number): { sys: string; user: string } {
-  const sys =
-    "You are a senior music producer teaching an AI DAW agent IN-THE-BOX technique (MIDI " +
-    "programming, groove, automation, routing). Return ONLY JSON, no prose.";
   const user = [
     `Brief: ${brief}.`,
     `Propose ${n} distinct, concrete in-the-box "recipe cards" a producer would actually use for this brief.`,
     ``,
-    `Each card is a SEQUENCE of MoshOps commands applied to a fixed BASE session, plus a declarative CHECK that proves the move took effect (read symbolically from the session — no audio).`,
-    ``,
-    `The BASE session already has these tracks/clips. Refer to them ONLY by these $tokens:`,
-    `- Drums track ($drumTrackId) with an EMPTY midi clip $drumClipId — fill it with a drum PATTERN (kick=36, snare=38, closed-hat=42, open-hat=46, clap=39, rim=37).`,
-    `- Hats track ($hatsTrackId) with straight 8th-note hats in clip $hatsClipId — reprogram or swing them.`,
-    `- Keys track ($keysTrackId): a synth + a 3-note arp in clip $keysClipId, and a 4-band EQ at plugin index $keysFilterPluginIndex whose frequency param index is $keysFilterParamIndex.`,
-    `After a create_bus command, refer to the new bus as $busNumber.`,
-    `Use NO other ids. start/length are in BEATS; 1 bar = 4 beats.`,
-    ``,
-    `You may ONLY use these commands:`,
-    commandSubsetPrompt(),
-    ``,
-    `The CHECK is exactly one of these (its refs MUST be the same $tokens your commands touch, and MUST match what your commands do):`,
-    `- {"kind":"pattern","clip":"$drumClipId","pattern":{"hits":[{"pitch":36,"beats":[0,2]},{"pitch":38,"beats":[1,3]}]}}  — list every (pitch,beat) you add_note'd`,
-    `- {"kind":"swing","clip":"$hatsClipId","division":0.5,"swing":0.58}  — after a quantize_notes with that division+swing`,
-    `- {"kind":"humanize","clip":"$keysClipId","maxOffsetBeats":0.125}  — after a humanize_notes`,
-    `- {"kind":"automation","track":"$keysTrackId","pluginIndex":"$keysFilterPluginIndex","paramIndex":"$keysFilterParamIndex","direction":"up"}  — after 2+ add_automation_point (up=rising, down=falling)`,
-    `- {"kind":"send","track":"$keysTrackId","bus":"$busNumber","db":-12}  — after create_bus + add_send`,
-    ``,
-    `STRONGLY prefer multi-step PATTERN cards (a full drum or melodic grid of add_note commands) — those are the valuable, mineable ones. A single-knob card is weak.`,
-    ``,
-    `Output EXACTLY: {"cards":[{"skill_name":string,"task_type":"drum_programming"|"bass"|"melody"|"arrangement"|"mixing"|"sound_design"|"other","genre_context":[string],"producer_intent":string,"when":string,"commands":[{"command":string,"args":object}],"check":object}]}`,
+    ...recipeCardRules(),
   ].join("\n");
-  return { sys, user };
+  return { sys: DISTILL_SYS, user };
 }
 
 async function main() {
@@ -104,11 +65,11 @@ async function main() {
   for (const provider of providers) {
     reply = await callLLM(provider, [{ role: "system", content: sys }, { role: "user", content: user }], { maxTokens: 4000 });
     usedModel = `${provider.id}/${provider.model}`;
-    if (parseDistilledCards(reply, { commands: COMMANDS, tokens: TOKENS }).cards.length) break;
+    if (parseDistilledCards(reply, { commands: IN_THE_BOX_COMMANDS, tokens: BASE_TOKENS }).cards.length) break;
     console.error(`  ${usedModel} yielded no runnable cards — falling back to the next provider…`);
   }
   writeFileSync(resolve(OUT_DIR, "last-reply.txt"), reply); // raw reply, for inspecting parse misses
-  const { cards: candidates, rejects } = parseDistilledCards(reply, { commands: COMMANDS, tokens: TOKENS });
+  const { cards: candidates, rejects } = parseDistilledCards(reply, { commands: IN_THE_BOX_COMMANDS, tokens: BASE_TOKENS });
   console.error(`\nmodel=${usedModel} · parsed ${candidates.length} candidate(s); ${rejects.length} rejected at the shape gate (raw reply: ${reply.length} chars → ${resolve(OUT_DIR, "last-reply.txt")})`);
   for (const r of rejects) console.error(`  ✗ shape: ${r.reason}`);
   if (!candidates.length) { console.error("\nno runnable candidates — nothing to validate."); process.exit(0); }
