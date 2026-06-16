@@ -83,3 +83,7 @@ eval/report-*.json
 
 # arena audio renders (report.md is the committed snapshot)
 eval/arena/**/*.wav
+
+# generative-techniques bench: heavy WAVs + staged sample copies (report.md is the snapshot)
+eval/genbench/**/*.wav
+eval/genbench/**/_spec_*.json
