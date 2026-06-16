@@ -52,6 +52,7 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "remove_clip", desc: "Delete a clip", args: [S("clipId")], summary: () => "Removed a clip" },
   { command: "set_clip_gain", desc: "Set a clip's gain in dB", args: [S("clipId"), N("gainDb")], summary: (a) => `Set clip gain to ${a.gainDb} dB` },
   { command: "set_clip_mute", desc: "Mute/unmute a clip", args: [S("clipId"), B("mute")], summary: (a) => (a.mute ? "Muted a clip" : "Unmuted a clip") },
+  { command: "set_clip_warp", desc: "Enable/disable audio warp (auto-tempo) on a wave clip so it time-stretches to follow the project tempo — give sourceBpm = the loop's original BPM for an accurate fit", args: [S("clipId"), B("autoTempo", true, "on/off"), S("mode", false, "stretch mode, e.g. 'elastiquePro'"), N("sourceBpm", false, "the clip's original BPM")], summary: (a) => (a.autoTempo ? "Warped a clip to tempo" : "Unwarped a clip") },
 
   // ── samples (browse the user's library, then import) ──────────────────────
   { command: "list_samples", desc: "Browse the user's sample library for one-shots/loops (filter by query and/or category)", args: [S("query", false, "name filter, e.g. 'kick'"), S("category", false, '"kick"|"snare"|"hat"|"cymbal"|"perc"|"bass"|"loop"|"fx"|"vocal"'), N("limit", false)], summary: () => "Browsed samples" },
@@ -61,7 +62,7 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "add_note", desc: "Add a MIDI note (pitch 0-127) to a MIDI clip", args: [S("clipId"), N("pitch"), N("start", true, "beats"), N("length", true, "beats"), N("velocity", false, "0-127")], summary: () => "Added a note" },
   { command: "remove_note", desc: "Remove a MIDI note by index", args: [S("clipId"), N("noteIndex")], summary: () => "Removed a note" },
   { command: "set_note", desc: "Edit a MIDI note's pitch/start/length/velocity", args: [S("clipId"), N("noteIndex"), N("pitch", false), N("start", false), N("length", false), N("velocity", false)], summary: () => "Edited a note" },
-  { command: "quantize_notes", desc: "Quantize a MIDI clip's notes to a grid", args: [S("clipId"), N("division", true, "grid in beats — 1 = 1/4, 0.5 = 1/8, 0.25 = 1/16"), N("strength", false, "0-1")], summary: () => "Quantized notes" },
+  { command: "quantize_notes", desc: "Quantize a MIDI clip's notes to a grid, optionally with swing", args: [S("clipId"), N("division", true, "grid in beats — 1 = 1/4, 0.5 = 1/8, 0.25 = 1/16"), N("strength", false, "0-1 snap amount"), N("swing", false, "0-0.75 — delays the off-beats (0.66 ≈ triplet/MPC feel)")], summary: () => "Quantized notes" },
 
   // ── transport & timing ──────────────────────────────────────────────────
   { command: "set_tempo", desc: "Set the project tempo in BPM", args: [N("bpm")], summary: (a) => `Set tempo to ${a.bpm} BPM` },
@@ -69,6 +70,8 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "set_key", desc: "Set the project's musical key (tonic and/or mode)", args: [S("tonic", false, '"C".."B" incl. sharps/flats'), S("mode", false, '"major" | "minor" | "dorian" | "mixolydian" | "pentatonic" | "chromatic"')], summary: (a) => `Set the key${a.tonic ? ` to ${a.tonic}` : ""}${a.mode ? ` ${a.mode}` : ""}` },
   { command: "set_metronome", desc: "Toggle the metronome click", args: [B("enabled")], summary: (a) => (a.enabled ? "Turned the metronome on" : "Turned the metronome off") },
   { command: "set_transport", desc: "Play/pause/stop/record, seek, or set the loop region", args: [S("action", false, '"toggle" (play/pause) | "stop" | "record" | "to_start" | "to_end"'), N("position", false, "seek to seconds"), B("loop", false, "enable loop"), N("loopStart", false, "seconds"), N("loopEnd", false, "seconds")], summary: (a) => (a.action === "record" ? "Started recording" : a.action === "stop" ? "Stopped" : a.loop ? "Set the loop region" : a.action === "toggle" ? "Toggled playback" : "Moved the playhead") },
+  { command: "insert_tempo_change", desc: "Insert a tempo change at a time (a tempo MAP, for accelerando/ritardando or section tempo shifts). curve ramps to the next change", args: [N("time", true, "seconds"), N("bpm"), N("curve", false, "-1..1 ramp shape (0 = linear ramp, 1 = instant step)")], summary: (a) => `Tempo → ${a.bpm} BPM at ${a.time}s` },
+  { command: "insert_time_sig_change", desc: "Insert a time-signature change at a time (seconds)", args: [N("time", true, "seconds"), N("numerator", false), N("denominator", false)], summary: (a) => `Time sig → ${a.numerator}/${a.denominator}` },
 
   // ── mixer ───────────────────────────────────────────────────────────────
   { command: "set_track_volume", desc: "Set a track's volume in dB", args: [S("trackId"), N("db")], summary: (a) => `Set track volume to ${a.db} dB` },
@@ -87,6 +90,29 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "reorder_plugin", desc: "Move a plugin to a new position in a track's chain", args: [S("trackId"), N("index"), N("toIndex")], summary: () => "Reordered a plugin" },
   { command: "open_plugin_editor", desc: "Pop out a plugin's native editor window", args: [S("trackId"), N("index")], summary: () => "Opened a plugin editor" },
   { command: "remove_plugin", desc: "Remove a plugin from a track's chain", args: [S("trackId"), N("index")], summary: () => "Removed a plugin" },
+
+  // ── parameter automation (target a plugin param by chain index + param index from the
+  //    snapshot's fx:[i:name{pi:name=value}]; the track fader/pan is a plugin too) ──────
+  { command: "add_automation_point", desc: "Automate a plugin parameter — add a breakpoint. Read pluginIndex + paramIndex from the track's fx:[…] in the snapshot. value is 0-1 normalised; time in seconds. Two+ points make a move (e.g. a filter sweep)", args: [S("trackId"), N("pluginIndex", true, "chain position from snapshot fx:[i:name]"), N("paramIndex", true, "param slot from fx:[…{pi:name}]"), N("time", true, "seconds"), N("value", true, "0-1 normalised")], summary: (a) => `Automated a parameter at ${a.time}s` },
+  { command: "set_automation_point", desc: "Move an existing automation breakpoint to a new time and/or value (omit one to keep it)", args: [S("trackId"), N("pluginIndex"), N("paramIndex"), N("pointIndex", true, "which breakpoint (its position in the param's points[])"), N("time", false, "seconds"), N("value", false, "0-1")], summary: () => "Moved an automation point" },
+  { command: "remove_automation_point", desc: "Remove one automation breakpoint from a plugin parameter", args: [S("trackId"), N("pluginIndex"), N("paramIndex"), N("pointIndex", true, "which breakpoint")], summary: () => "Removed an automation point" },
+  { command: "clear_automation", desc: "Clear all automation from a plugin parameter", args: [S("trackId"), N("pluginIndex"), N("paramIndex")], summary: () => "Cleared a parameter's automation" },
+
+  // ── sends & buses (reverb returns, parallel compression) ──────────────────
+  { command: "create_bus", desc: "Create an aux send/return bus (a return track) — for a shared reverb/delay or parallel compression. Returns its busNumber", args: [S("name", false, "bus name")], summary: (a) => `Created bus${a.name ? ` "${a.name}"` : ""}` },
+  { command: "add_send", desc: "Add a post-fader send from a track to a bus (by busNumber from create_bus or the snapshot's buses line)", args: [S("trackId"), N("bus", true, "the bus number"), N("db", false, "send level dB, -60..6")], summary: () => "Added a send" },
+  { command: "set_send_level", desc: "Set an existing send's level in dB (-100 mutes the send, up to +6)", args: [S("trackId"), N("bus"), N("db", true, "dB — -100 mutes, up to +6")], summary: (a) => `Set a send to ${a.db} dB` },
+  { command: "remove_send", desc: "Remove a track's send to a bus", args: [S("trackId"), N("bus")], summary: () => "Removed a send" },
+  // remove_bus / rename_bus deferred to batch 2: the engine's setAuxBusName mutates the
+  // bus-NAME node with a null UndoManager, so undo restores the routing but the name
+  // reverts to default — a cosmetic undo wart. Expose once the name change is undo-tracked.
+
+  // ── groups (submixes) ─────────────────────────────────────────────────────
+  { command: "create_group_track", desc: "Group tracks into a submix/folder track for shared processing", args: [A("trackIds", true, "ids of the tracks to group"), S("name", false, "group name")], summary: () => "Grouped tracks" },
+  { command: "ungroup_track", desc: "Ungroup a track from its submix", args: [S("trackId")], summary: () => "Ungrouped a track" },
+
+  // ── arrangement (destructive time edit — gated) ───────────────────────────
+  { command: "delete_time_range", desc: "Delete everything in a time range (optionally only on some tracks). Destructive but undoable", args: [N("start", true, "seconds"), N("end", true, "seconds"), A("trackIds", false, "limit to these tracks; omit for all")], confirm: true, summary: (a) => `Deleted ${a.start}-${a.end}s` },
 
   // ── neural (Tier-A) ─────────────────────────────────────────────────────
   { command: "add_neural_insert", desc: "Add a real-time neural amp / guitar-amp / cabinet / tone modeler (the neural insert) to a track", args: [S("trackId"), N("index", false)], summary: () => "Added a neural insert" },

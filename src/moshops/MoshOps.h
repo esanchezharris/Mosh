@@ -226,7 +226,7 @@ private:
     // arm_track routes live MIDI (not wave) to such tracks (CTL-001).
     bool            trackHasInstrument (te::AudioTrack&);
     te::Plugin*     findPlugin (const juce::String& trackId, int index);
-    te::AutomatableParameter* findParam (const juce::var& args);
+    te::AutomatableParameter* findParam (const juce::String& trackId, int pluginIndex, int paramIndex);
     te::AuxReturnPlugin* firstAuxReturnOn (te::AudioTrack&);
     te::AudioTrack*      findReturnTrackForBus (int bus);
     int                  allocateBusNumber();

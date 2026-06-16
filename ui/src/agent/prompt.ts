@@ -20,14 +20,28 @@ function knowHowBlock(cards: TechniqueCard[]): string[] {
   return ["Producer know-how (validated techniques — apply when they fit the request):", ...lines];
 }
 
+const r2 = (n: number) => Math.round(n * 100) / 100;
+
 function compactSnapshot(s: Snapshot): string {
   const tracks = (s.tracks ?? [])
     .map((t) => {
       const clips = (t.clips ?? []).map((c) => `${c.id}:${c.type}@${c.start}s`).join(", ");
-      return `  ${t.id} "${t.name}" ${t.volumeDb ?? 0}dB${t.mute ? " muted" : ""}${t.solo ? " solo" : ""} clips:[${clips}]`;
+      // Surface the plugin chain + each plugin's params (index:name=value, capped) so
+      // the agent can target set_plugin_param / automation BY INTENT — it needs the
+      // chain index and the param index+name to know which slot is "frequency" etc.
+      const fx = (t.plugins ?? [])
+        .map((p) => {
+          const params = (p.params ?? []).slice(0, 8).map((pr) => `${pr.index}:${pr.name}=${r2(pr.value)}`).join(", ");
+          return `${p.index}:${p.name}${params ? `{${params}}` : ""}`;
+        })
+        .join(" | ");
+      return `  ${t.id} "${t.name}" ${t.volumeDb ?? 0}dB${t.mute ? " muted" : ""}${t.solo ? " solo" : ""} clips:[${clips}]${fx ? ` fx:[${fx}]` : ""}`;
     })
     .join("\n");
-  return `tempo ${s.session?.tempo ?? 120} BPM, ${s.session?.timeSigNumerator ?? 4}/${s.session?.timeSigDenominator ?? 4}\ntracks:\n${tracks || "  (none)"}`;
+  // Buses are send/return targets — surface them so the agent can route add_send to an
+  // existing bus across turns (not just the one create_bus returned this turn).
+  const buses = (s.buses ?? []).map((b) => `${b.bus}:"${b.name}"`).join(", ");
+  return `tempo ${s.session?.tempo ?? 120} BPM, ${s.session?.timeSigNumerator ?? 4}/${s.session?.timeSigDenominator ?? 4}${buses ? `\nbuses: ${buses}` : ""}\ntracks:\n${tracks || "  (none)"}`;
 }
 
 export function systemPrompt(snap: Snapshot | null, pluginNames: string[] = [], cards: TechniqueCard[] = []): string {

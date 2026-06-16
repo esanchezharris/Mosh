@@ -2253,7 +2253,7 @@ juce::var MoshOps::cmdSetSendLevel (const juce::var& args)
     auto* s = track->getAuxSendPlugin ((int) args.getProperty ("bus", -1));
     if (s == nullptr) return errResult ("set_send_level", "no send to that bus");
     beginTxn ("set_send_level");
-    s->setGainDb (juce::jlimit (-100.0f, 6.0f, (float) (double) args.getProperty ("db", 0.0)));
+    s->setGainDb (juce::jlimit (-100.0f, 6.0f, (float) (double) args.getProperty ("db", 0.0)));   // -100 dB = mute the send (intentional floor)
     logLine ("set_send_level", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("set_send_level");
@@ -2752,19 +2752,23 @@ juce::var MoshOps::cmdBlockPlugin (const juce::var& args)
 // (trackId, pluginIndex, paramIndex); values cross the seam normalised 0–1 and
 // are mapped to the parameter's real range here. Times are in seconds.
 // ─────────────────────────────────────────────────────────────────────────────
-te::AutomatableParameter* MoshOps::findParam (const juce::var& args)
+// Address an automatable parameter by (trackId, pluginIndex, paramIndex). Each
+// automation command reads the trio in its OWN body (mirrors cmdSetPluginParam) so the
+// getProperty literals are visible to the catalog↔backend contract test, which scans
+// getProperty only within the cmd handler — not in helpers like this one.
+te::AutomatableParameter* MoshOps::findParam (const juce::String& trackId, int pluginIndex, int paramIndex)
 {
-    auto* plugin = findPlugin (args.getProperty ("trackId", var()).toString(),
-                               (int) args.getProperty ("pluginIndex", -1));
+    auto* plugin = findPlugin (trackId, pluginIndex);
     if (plugin == nullptr) return nullptr;
-    const int pi = (int) args.getProperty ("paramIndex", -1);
-    if (pi < 0 || pi >= plugin->getNumAutomatableParameters()) return nullptr;
-    return plugin->getAutomatableParameter (pi).get();
+    if (paramIndex < 0 || paramIndex >= plugin->getNumAutomatableParameters()) return nullptr;
+    return plugin->getAutomatableParameter (paramIndex).get();
 }
 
 juce::var MoshOps::cmdAddAutomationPoint (const juce::var& args)
 {
-    auto* param = findParam (args);
+    auto* param = findParam (args.getProperty ("trackId", var()).toString(),
+                             (int) args.getProperty ("pluginIndex", -1),
+                             (int) args.getProperty ("paramIndex", -1));
     if (param == nullptr) return errResult ("add_automation_point", "no such parameter");
     const double t = juce::jmax (0.0, (double) args.getProperty ("time", 0.0));
     const float norm = juce::jlimit (0.0f, 1.0f, (float) (double) args.getProperty ("value", 0.0));
@@ -2779,7 +2783,9 @@ juce::var MoshOps::cmdAddAutomationPoint (const juce::var& args)
 
 juce::var MoshOps::cmdRemoveAutomationPoint (const juce::var& args)
 {
-    auto* param = findParam (args);
+    auto* param = findParam (args.getProperty ("trackId", var()).toString(),
+                             (int) args.getProperty ("pluginIndex", -1),
+                             (int) args.getProperty ("paramIndex", -1));
     if (param == nullptr) return errResult ("remove_automation_point", "no such parameter");
     auto& curve = param->getCurve();
     const int idx = (int) args.getProperty ("pointIndex", -1);
@@ -2794,7 +2800,9 @@ juce::var MoshOps::cmdRemoveAutomationPoint (const juce::var& args)
 juce::var MoshOps::cmdSetAutomationPoint (const juce::var& args)
 {
     // Move a point: remove + re-add at the new (time, value).
-    auto* param = findParam (args);
+    auto* param = findParam (args.getProperty ("trackId", var()).toString(),
+                             (int) args.getProperty ("pluginIndex", -1),
+                             (int) args.getProperty ("paramIndex", -1));
     if (param == nullptr) return errResult ("set_automation_point", "no such parameter");
     auto& curve = param->getCurve();
     const int idx = (int) args.getProperty ("pointIndex", -1);
@@ -2815,7 +2823,9 @@ juce::var MoshOps::cmdSetAutomationPoint (const juce::var& args)
 
 juce::var MoshOps::cmdClearAutomation (const juce::var& args)
 {
-    auto* param = findParam (args);
+    auto* param = findParam (args.getProperty ("trackId", var()).toString(),
+                             (int) args.getProperty ("pluginIndex", -1),
+                             (int) args.getProperty ("paramIndex", -1));
     if (param == nullptr) return errResult ("clear_automation", "no such parameter");
     beginTxn ("clear_automation");
     param->getCurve().clear (&undoManager());
@@ -2958,14 +2968,20 @@ juce::var MoshOps::cmdQuantizeNotes (const juce::var& args)
 
     const double division = juce::jmax (0.03125, (double) args.getProperty ("division", 1.0));   // beats
     const double strength = juce::jlimit (0.0, 1.0, (double) args.getProperty ("strength", 1.0));
+    // Swing: delay notes on ODD subdivisions of `division` by swing*division so the
+    // off-beats land late (0 = straight, ~0.66 ≈ triplet/MPC feel). Applied to the
+    // quantised target, then blended by `strength` like the straight snap.
+    const double swing = juce::jlimit (0.0, 0.75, (double) args.getProperty ("swing", 0.0));
 
     beginTxn ("quantize_notes");
     int moved = 0;
     for (int i = 0; i < seq.getNumNotes(); ++i)
     {
         auto* note = seq.getNote (i);
-        const double start = note->getStartBeat().inBeats();
-        const double q = std::round (start / division) * division;
+        const double start = juce::jmax (0.0, note->getStartBeat().inBeats());   // guard: keeps sub>=0 so the odd-subdivision test is well-defined
+        const long sub = std::lround (start / division);
+        double q = (double) sub * division;
+        if (swing > 0.0 && (sub % 2) != 0) q += swing * division;   // push the off-beats late
         const double next = start + (q - start) * strength;
         if (std::abs (next - start) > 1.0e-6)
         {
