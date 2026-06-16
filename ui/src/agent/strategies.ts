@@ -76,10 +76,10 @@ const PROTOCOL = [
   "RULES — follow exactly:",
   "- ID DISCIPLINE: use the EXACT ids shown under 'Session now' and echoed in results (e.g. `ok (clipId=1012)`). After you create a track/clip/layer its id appears in BOTH the result and the snapshot — reuse it. NEVER invent or guess an id, and never reuse a stale one.",
   "- Emit 2-4 commands per turn, then read the results + fresh snapshot before continuing. Do not re-send a command that already succeeded.",
-  "- DRUMS = REAL SAMPLES, NEVER A SYNTH: to make drums you MUST call list_samples (its result lists samples with their `file` paths), then call import_clip {trackId, file:'<the exact path shown>', startSeconds} for EACH hit. Listing without importing produces NO drums.",
-  "- A FRESH 4osc SYNTH IS A BARE SINE: after load_builtin {type:'4osc'} you MUST call set_4osc_patch {trackId, patch} BEFORE adding notes — use 'sub_bass' for bass, 'warm_keys' or 'soft_pad' for chords/keys, 'pluck'/'saw_lead' for leads. Skipping this makes the part sound like a sine. (4osc is for bass/keys/leads only — NEVER drums.)",
-  "- FILL THE LOOP: make ~8 seconds of CONTINUOUS music — enough material that there are NO long silent gaps. For sampled drums, place a hit on every beat/off-beat across ~2 bars (startSeconds = beatIndex × 60/bpm), re-importing the sample at each position.",
-  "- MIX so it does NOT clip: keep busy tracks around -6 to -9 dB (set_track_volume) and pan for space.",
+  "- DRUMS = REAL SAMPLES, NEVER A SYNTH: call list_samples for kick AND snare AND hat (category:'kick' / 'snare' / 'hat'), then import_clip {trackId, file:'<exact path>', startSeconds} for EACH hit. You MUST include a SNARE (on beats 2 & 4) and HI-HATS (on the off-beats) — the snare + hats are the broadband sounds that make it READ as a beat; kicks/808s alone sound tonal. Listing without importing produces NO drums.",
+  "- A FRESH 4osc SYNTH IS A BARE SINE: after load_builtin {type:'4osc'} you MUST call set_4osc_patch {trackId, patch} BEFORE adding notes — 'sub_bass' for bass, 'warm_keys'/'soft_pad' for chords/keys, 'pluck'/'saw_lead' for leads. (4osc is for bass/keys/leads only — NEVER drums.)",
+  "- FILL THE LOOP: make ~8 seconds of CONTINUOUS music — no long silent gaps. Place a drum hit on every beat/off-beat across ~2 bars (startSeconds = beatIndex × 60/bpm), re-importing the sample at each position.",
+  "- MIX — DRUMS ON TOP, with HEADROOM (never clip): the DRUMS are the loudest element and the sub/synth must not drown them — set_track_volume drums≈-4 dB, bass≈-11 dB, chords/keys≈-14 dB, pads/textures≈-17 dB, and set_master_volume to -4 dB for headroom. Keep sub-bass restrained. Pan for space.",
   "- Use ONLY the commands below. Set done=true only when the loop fully realises the brief AND is mixed.",
 ].join("\n");
 
