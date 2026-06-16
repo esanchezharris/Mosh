@@ -184,12 +184,13 @@ function report(runs: RunResult[], scores: Map<string, WavScore>, stamp: string)
   L.push("");
   L.push(`**Brief:** ${BRIEF}  ·  ${BPM} BPM · ${KEY}  ·  generative: **${REAL_SA3 ? "real SA3" : "FakeAdapter"}**`);
   L.push("");
-  L.push("| rung | approach | wav | cmds ok | hygiene | perceptual | verdict | flags |");
-  L.push("|------|----------|-----|---------|---------|------------|---------|-------|");
+  L.push("| rung | approach | wav | cmds ok | hygiene | perceptual | brief-match | verdict | flags |");
+  L.push("|------|----------|-----|---------|---------|------------|-------------|---------|-------|");
   for (const r of runs) {
     const s = r.wav ? scores.get(r.wav) : undefined;
     const kb = r.wav ? `${Math.round(statSize(r.wav) / 1024)}KB` : "—";
-    L.push(`| \`${r.rung.id}\` | ${r.rung.label} | ${kb} | ${r.cmdsOk}/${r.cmdsTotal} | ${s?.pq_hygiene ?? "—"} | ${s?.pq_perceptual?.toFixed?.(2) ?? "—"} | ${s?.verdict ?? (r.wav ? "?" : "no-wav")} | ${(s?.flags || []).slice(0, 2).join("; ")} |`);
+    const brief = s?.clap_brief != null ? `${s.clap_brief.toFixed(3)}${s.clap_sine != null && s.clap_sine > s.clap_brief ? " ⚠️sine" : ""}` : "—";
+    L.push(`| \`${r.rung.id}\` | ${r.rung.label} | ${kb} | ${r.cmdsOk}/${r.cmdsTotal} | ${s?.pq_hygiene ?? "—"} | ${s?.pq_perceptual?.toFixed?.(2) ?? "—"} | ${brief} | ${s?.verdict ?? (r.wav ? "?" : "no-wav")} | ${(s?.flags || []).slice(0, 2).join("; ")} |`);
   }
   L.push("");
   L.push("## Listening index");
@@ -231,7 +232,7 @@ for (const rung of rungsToRun) {
 
 const wavs = runs.map((r) => r.wav).filter(Boolean) as string[];
 console.error(`Scoring ${wavs.length} renders (judge cold-loads once)...`);
-const scoreList = scoreWavs(wavs);
+const scoreList = scoreWavs(wavs, BRIEF);
 const scores = new Map(scoreList.map((s) => [s.file, s]));
 
 const stamp = new Date().toISOString().replace(/[:.]/g, "-");

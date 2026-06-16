@@ -14,6 +14,8 @@ export type WavScore = {
   file: string;
   pq_hygiene: number | null;
   pq_perceptual: number | null;
+  clap_brief: number | null;   // CLAP text↔audio similarity to the brief (higher = on-brief)
+  clap_sine: number | null;    // similarity to "a pure sine tone" (a sanity anti-reference)
   metrics: Record<string, unknown> | null;
   flags: string[];
   verdict: "pass" | "flag";
@@ -27,17 +29,20 @@ function scorerPython(): string {
   return "python3";
 }
 
-const BROKEN = /clip|silent|silence|too_quiet|near_silent|dropout|tonal_suspect|hygiene_failed|scorer/i;
+const BROKEN = /clip|silent|silence|too_quiet|near_silent|dropout|tonal_suspect|off_brief|hygiene_failed|scorer/i;
+const nul = (f: string): Omit<WavScore, "verdict"> => ({ file: f, pq_hygiene: null, pq_perceptual: null, clap_brief: null, clap_sine: null, metrics: null, flags: [] });
 
-export function scoreWavs(paths: string[]): WavScore[] {
+/** Score wavs. Pass `brief` to also get CLAP brief-adherence (needs the CLAP ckpt). */
+export function scoreWavs(paths: string[], brief?: string): WavScore[] {
   const real = paths.filter((p) => existsSync(p));
   if (real.length === 0) return [];
-  const r = spawnSync(scorerPython(), [SCORER, ...real], { encoding: "utf8", timeout: 600_000, maxBuffer: 128 * 1024 * 1024 });
+  const env = { ...process.env, ...(brief ? { MOSH_BRIEF: brief } : {}) };
+  const r = spawnSync(scorerPython(), [SCORER, ...real], { encoding: "utf8", timeout: 600_000, maxBuffer: 128 * 1024 * 1024, env });
   if (r.status !== 0 || !r.stdout) {
-    return real.map((f) => ({ file: f, pq_hygiene: null, pq_perceptual: null, metrics: null, flags: [`scorer_failed: ${(r.stderr || "").slice(0, 160)}`], verdict: "flag" }));
+    return real.map((f) => ({ ...nul(f), flags: [`scorer_failed: ${(r.stderr || "").slice(0, 160)}`], verdict: "flag" }));
   }
   let arr: Omit<WavScore, "verdict">[];
   try { arr = JSON.parse(r.stdout.trim().split("\n").pop()!); }
-  catch { return real.map((f) => ({ file: f, pq_hygiene: null, pq_perceptual: null, metrics: null, flags: ["scorer_parse_failed"], verdict: "flag" })); }
+  catch { return real.map((f) => ({ ...nul(f), flags: ["scorer_parse_failed"], verdict: "flag" })); }
   return arr.map((s) => ({ ...s, verdict: (s.flags || []).some((f) => BROKEN.test(f)) ? "flag" : "pass" }));
 }
