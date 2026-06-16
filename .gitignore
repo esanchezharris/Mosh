@@ -93,3 +93,8 @@ eval/flywheel/**/*.wav
 
 # recipe distiller: raw LLM reply dump (report.md + cards.jsonl are the committed snapshot)
 eval/recipe-distill/last-reply.txt
+
+# quality seed: heavy before/after + blind A/B WAVs + per-card manifests (mert-seed.jsonl
+# + cards.jsonl are the committed seed)
+eval/quality-seed/**/*.wav
+eval/quality-seed/**/manifest.json

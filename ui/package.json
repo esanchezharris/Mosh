@@ -18,7 +18,8 @@
     "recipe-flywheel": "vite-node scripts/recipeFlywheel.mts",
     "recipe-distill": "vite-node scripts/recipeDistill.mts",
     "eval-ab": "vite-node scripts/evalAB.mts",
-    "yt-mine": "vite-node scripts/ytMiner.mts"
+    "yt-mine": "vite-node scripts/ytMiner.mts",
+    "quality-seed": "vite-node scripts/qualitySeed.mts"
   },
   "dependencies": {
     "qrcode": "^1.5.4",
