@@ -73,6 +73,22 @@ def analyze_array(x, sr: int) -> dict:
     cum = np.cumsum(S)
     ridx = int(np.searchsorted(cum, 0.85 * cum[-1]))
     rolloff = float(freqs[min(ridx, len(freqs) - 1)])
+    # spectral flatness (geo mean / arith mean of power): ~0 = a pure tone (sine /
+    # test-tone / sine-synth — NOT music), higher = broadband (drums, a real mix).
+    # Averaged over the WHOLE file (not just the first frame, which could be a single
+    # kick) so it represents the mix. Catches "agent exported a tone, scores clean".
+    flN = 4096
+    if n >= flN:
+        acc = np.zeros(flN // 2 + 1)
+        cnt = 0
+        w2 = np.hanning(flN)
+        for i in range(0, n - flN + 1, flN // 2):
+            acc += np.abs(np.fft.rfft(mono[i:i + flN] * w2)) ** 2
+            cnt += 1
+        Pavg = acc / max(cnt, 1) + EPS
+    else:
+        Pavg = S ** 2 + EPS
+    flatness = float(np.exp(np.mean(np.log(Pavg))) / np.mean(Pavg))
 
     # ── stereo ──
     if ch >= 2:
@@ -103,6 +119,7 @@ def analyze_array(x, sr: int) -> dict:
         "dc_offset": round(dc, 5), "clip_run": int(best),
         "centroid_hz": round(centroid, 1), "rolloff85_hz": round(rolloff, 1),
         "stereo_corr": round(corr, 3), "silence_ratio": round(silence_ratio, 3),
+        "spectral_flatness": round(flatness, 4),
     }
 
     # ── flags ──
@@ -125,6 +142,8 @@ def analyze_array(x, sr: int) -> dict:
         flags.append(f"out_of_phase: stereo corr {corr:.2f} (< 0)")
     if dropout:
         flags.append("dropout: silent gap mid-signal")
+    if flatness < 0.01 and silence_ratio < 0.95:
+        flags.append(f"tonal_suspect: flatness {flatness:.4f} — likely a test tone / empty synth, not a real mix")
 
     # ── pq in [0,10] (soft sub-scores summing to 10) ──
     s_loud = _clamp(1 - abs(rms_dbfs - (-14)) / 14)          # peaks at -14 dBFS
@@ -142,6 +161,8 @@ def analyze_array(x, sr: int) -> dict:
         pq = min(pq, 1.0)
     if corr < 0:
         pq = min(pq, 5.0)
+    if flatness < 0.005 and silence_ratio < 0.95:
+        pq = min(pq, 3.5)   # a near-pure tone is not a real mix, however "clean"
     pq = round(pq, 2)
 
     return {"pq": pq, "metrics": metrics, "flags": flags}

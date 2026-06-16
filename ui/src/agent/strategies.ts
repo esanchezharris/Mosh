@@ -11,54 +11,61 @@ export type Rung = {
   directive: string;
 };
 
+// Note the generative pattern's gotcha, baked into the directives below: a render
+// needs a host WAVE clip (add_test_tone_clip — a SINE), SA3 ignores its sound in
+// text-to-audio mode, but accept_render lands the result as a NEW clip and the sine
+// host KEEPS PLAYING — so you MUST remove_clip the host after accepting.
 export const RUNGS: Rung[] = [
   {
     id: "R0-generative-single",
     label: "Pure generative — one render",
     usesSA3: true,
     directive:
-      "PURE GENERATIVE (single render). Produce the ENTIRE brief as ONE ~8s generative audio render. " +
-      "Steps: create_track; add_test_tone_clip on it (a placeholder the generator replaces); create_render_layer on that clip; " +
-      "set_render_param with a vivid `prompt` describing the WHOLE brief (do NOT set `nl` — leaving it unset means text-to-audio from scratch); " +
-      "render_layer with wait=true; accept_render. Then set a sensible track/master volume. Do not program MIDI or import samples.",
+      "PURE GENERATIVE (one render for the whole brief). Exact sequence: (1) create_track. (2) add_test_tone_clip on it — READ the clipId it returns. " +
+      "(3) create_render_layer with that EXACT clipId. (4) set_render_param {clipId, prompt:'<vivid full-brief description>'} (do NOT set nl → text-to-audio). " +
+      "(5) render_layer {clipId, wait:true}. (6) accept_render {clipId} — lands the generated audio as a NEW clip. " +
+      "(7) remove_clip the ORIGINAL test-tone host clip (so the sine doesn't play; remove the host, NOT the new render). (8) set_track_volume. No MIDI, no samples.",
   },
   {
     id: "R1-generative-stems",
     label: "Generative stems",
     usesSA3: true,
     directive:
-      "GENERATIVE STEMS. Split the brief into 2-3 stems (e.g. drums, bass, melody/chords). For EACH stem: create_track; add_test_tone_clip host; " +
-      "create_render_layer; set_render_param with a `prompt` describing ONLY that stem (no `nl`); render_layer wait=true; accept_render. " +
-      "Then balance the stems with set_track_volume so nothing clips. No MIDI, no samples.",
+      "GENERATIVE STEMS. For EACH of 2-3 stems (drums, bass, chords): create_track; add_test_tone_clip (read the clipId); create_render_layer {clipId}; " +
+      "set_render_param {clipId, prompt:'just the <stem>, <style>'} (no nl); render_layer {clipId, wait:true}; accept_render {clipId}; then remove_clip the host " +
+      "test-tone clip so only the generated stem plays. Finally balance with set_track_volume (~-7dB each). No MIDI, no samples.",
   },
   {
     id: "R2-hybrid-gendrums-midi",
     label: "Hybrid — generated drums + played instruments",
     usesSA3: true,
     directive:
-      "HYBRID (generated drums + played instruments). Drums = ONE generative render (create_track → add_test_tone_clip → create_render_layer → " +
-      "set_render_param prompt 'drums only, <style>' → render_layer wait=true → accept_render). Bass & melody = create tracks, load_builtin a synth " +
-      "instrument (use an EXACT type from the available built-ins), add_midi_clip, and add_note to play a bassline and chords/melody in the brief's key. Balance volumes.",
+      "HYBRID (generated drums + PLAYED instruments). Drums = ONE generative render: create_track → add_test_tone_clip (read clipId) → create_render_layer {clipId} → " +
+      "set_render_param {clipId, prompt:'boom-bap drum loop, <style>'} → render_layer {clipId, wait:true} → accept_render {clipId} → remove_clip the host tone. " +
+      "Bass + chords = create 2 tracks, load_builtin {type:'4osc'} on each, add_midi_clip on each (READ each returned clipId), then add_note {clipId, pitch, start, length} " +
+      "MANY times to actually play a bassline and chords IN KEY (an empty MIDI clip is SILENT — you MUST add notes). Balance volumes.",
   },
   {
     id: "R3-hybrid-sampled-gentexture",
     label: "Hybrid — sampled core + generated texture",
     usesSA3: true,
     directive:
-      "HYBRID (sampled + played core, generated texture). Drums = use list_samples to find kick/snare/hat one-shots, then import_clip them onto a track at the " +
-      "right beat positions (compute startSeconds from the bpm: one beat = 60/bpm seconds) to build a pattern of several hits. Bass/melody = load_builtin a synth, " +
-      "add_midi_clip + add_note in the key. Add ONE generative texture/atmosphere layer (host clip → create_render_layer → render_layer wait=true → accept). " +
-      "Optionally add a neural insert for tone. Balance volumes so nothing clips.",
+      "HYBRID (SAMPLED drums + PLAYED keys + generated texture). Drums: list_samples {category:'kick'} (and 'snare','hat') — then for the chosen samples, call " +
+      "import_clip {trackId, file:'<the EXACT file path from list_samples>', startSeconds} REPEATEDLY to lay a full 2-bar pattern (kick on each beat, snare on 2 & 4, " +
+      "hats between; startSeconds = beatIndex × 60/bpm). You MUST actually call import_clip — listing is not enough. Keys/bass: load_builtin {type:'4osc'}, add_midi_clip " +
+      "(read clipId), add_note several times IN KEY. ONE generative texture: create_track → add_test_tone_clip → create_render_layer → set_render_param prompt 'warm vinyl " +
+      "ambience' → render_layer wait → accept_render → remove the host tone. Balance volumes.",
   },
   {
     id: "R4-fully-agentic",
     label: "Fully agentic — in the box",
     usesSA3: false,
     directive:
-      "FULLY AGENTIC (no generative audio at all). Build everything in the box. Drums = list_samples to pick kick/snare/hat/perc one-shots, then import_clip each " +
-      "at computed beat positions (60/bpm seconds per beat) to lay a full pattern (many hits across a bar or two). Bass & melody/chords = load_builtin synth " +
-      "instruments, add_midi_clip + add_note in the key. Add FX via load_builtin (e.g. reverb, compressor) into the chain. Mix with set_track_volume/set_track_pan so " +
-      "it's balanced and never clips. Do NOT use create_render_layer or render_layer.",
+      "FULLY AGENTIC (no generation). Drums: list_samples {category:'kick'} / 'snare' / 'hat' / 'perc', then import_clip {trackId, file:'<EXACT file path>', startSeconds} " +
+      "REPEATEDLY to lay a FULL 2-bar pattern — kick on every beat, snare on 2 & 4, hats on the off-beats (startSeconds = beatIndex × 60/bpm), re-importing the same kick at " +
+      "each kick position. LISTING IS NOT ENOUGH — you must call import_clip for every hit, no silent gaps. Bass + Rhodes chords: load_builtin {type:'4osc'}, add_midi_clip " +
+      "(read clipId), add_note MANY times IN KEY (empty clips are silent). FX: load_builtin {type:'reverb'} / 'compressor'. Mix with set_track_volume/set_track_pan, no " +
+      "clipping. Do NOT use create_render_layer.",
   },
 ];
 
@@ -66,10 +73,13 @@ const PROTOCOL = [
   "You are Moshi, an autonomous music producer driving a real DAW to fulfil a brief.",
   "Work in steps. On each turn reply with ONE JSON object and NOTHING else:",
   '{ "commands": [ { "command": string, "args": object } ], "note": string (<=14 words), "done": boolean }',
-  "- Emit a few commands per turn; you will see each result + a fresh session snapshot, then continue.",
-  "- Use ONLY the commands below, with REAL ids from the snapshot. Never invent ids or commands.",
-  "- Set done=true only when the track fully realises the brief and is mixed (balanced, not clipping).",
-  "- Keep it to roughly 8 seconds of music (one short loop).",
+  "RULES — follow exactly:",
+  "- ID DISCIPLINE: use the EXACT ids shown under 'Session now' and echoed in results (e.g. `ok (clipId=1012)`). After you create a track/clip/layer its id appears in BOTH the result and the snapshot — reuse it. NEVER invent or guess an id, and never reuse a stale one.",
+  "- Emit 2-4 commands per turn, then read the results + fresh snapshot before continuing. Do not re-send a command that already succeeded.",
+  "- DRUMS = REAL SAMPLES, NEVER A SYNTH: to make drums you MUST call list_samples (its result lists samples with their `file` paths), then call import_clip {trackId, file:'<the exact path shown>', startSeconds} for EACH hit. Listing without importing produces NO drums. The 4osc synth is a sine — use it ONLY for bass/chords, NEVER for drums.",
+  "- FILL THE LOOP: make ~8 seconds of CONTINUOUS music — enough material that there are NO long silent gaps. For sampled drums, place a hit on every beat/off-beat across ~2 bars (startSeconds = beatIndex × 60/bpm), re-importing the sample at each position.",
+  "- MIX so it does NOT clip: keep busy tracks around -6 to -9 dB (set_track_volume) and pan for space.",
+  "- Use ONLY the commands below. Set done=true only when the loop fully realises the brief AND is mixed.",
 ].join("\n");
 
 /** Compose the full system prompt for a rung from the live session context. */

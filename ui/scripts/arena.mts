@@ -48,13 +48,42 @@ function parsePlan(content: string): Plan {
   } catch { return { commands: [] }; }
 }
 
+// Surface EVERY id the agent needs (track ids, clip ids, note counts, layer status,
+// plugin indices) — the agent's main failure mode was not seeing clip ids.
 function compactSnap(snap: any): string {
   const tracks = (snap?.tracks || []).map((t: any) => {
-    const clips = (t.clips || []).map((c: any) => `${c.type || "clip"}@${c.start}s`).join(",");
-    const plugs = (t.plugins || []).map((p: any) => p.name).join(",");
-    return `  ${t.id} "${t.name}" ${t.volumeDb ?? 0}dB clips[${clips}]${plugs ? ` fx[${plugs}]` : ""}`;
+    const clips = (t.clips || []).map((c: any) => {
+      const notes = Array.isArray(c.notes) ? `,${c.notes.length}n` : "";
+      const layer = c.hasRenderLayer ? `,layer:${c.renderLayer?.status ?? "?"}` : "";
+      return `${c.id}(${c.type || "clip"}@${c.start}s${notes}${layer})`;
+    }).join(" ");
+    const plugs = (t.plugins || []).map((p: any) => `${p.index}:${p.name}`).join(",");
+    return `  ${t.id} "${t.name}" ${t.volumeDb ?? 0}dB clips[${clips || "—"}]${plugs ? ` fx[${plugs}]` : ""}`;
   }).join("\n");
-  return `tempo ${snap?.session?.tempo ?? BPM}\n${tracks || "  (empty session)"}`;
+  return `tempo ${snap?.session?.tempo ?? BPM}\ntracks (use these EXACT ids):\n${tracks || "  (empty session)"}`;
+}
+
+// Echo the id of whatever a command just created, so the agent can use it next turn.
+function idHint(data: any): string {
+  if (!data || typeof data !== "object") return "";
+  const k = ["trackId", "clipId", "layerId"].find((x) => data[x] != null);
+  return k ? ` (${k}=${data[k]})` : "";
+}
+
+// Echo the DATA a list/browse command returned — the agent can't act on what it
+// can't see (it kept listing samples but never importing, because the paths never
+// came back). Surface sample file paths, builtin types, plugin names.
+function dataHint(command: string, data: any): string {
+  if (!data || typeof data !== "object") return "";
+  if (command === "list_samples" && Array.isArray(data.samples)) {
+    const items = data.samples.slice(0, 16).map((s: any) => `      ${s.category}: ${s.name}  →  file="${s.file}"`);
+    return `\n   ${data.returned} samples — call import_clip with one of these EXACT file paths:\n${items.join("\n")}`;
+  }
+  if (command === "list_builtins" && Array.isArray(data.plugins))
+    return `\n   builtin types: ${data.plugins.map((b: any) => b.type).join(", ")}`;
+  if (command === "list_plugins" && Array.isArray(data.plugins))
+    return `\n   plugins: ${data.plugins.slice(0, 30).map((p: any) => p.name).join(", ")}`;
+  return "";
 }
 
 // One synchronous request/response per line over the agent-server's stdio.
@@ -135,7 +164,7 @@ async function runRung(rung: Rung, provider: Provider): Promise<RunResult> {
         if (res?.ok) cmdsOk++;
         else if (/no such|unknown|not allowed|missing|unsupported/i.test(String(res?.error || ""))) gaps.push(`${c.command}: ${res?.error}`);
         transcript.push({ command: c.command, args, ok: !!res?.ok, error: res?.error });
-        results.push(`${c.command}: ${res?.ok ? "ok" : "FAIL " + (res?.error || "")}`);
+        results.push(`${c.command}: ${res?.ok ? `ok${idHint(res.data)}${dataHint(c.command, res.data)}` : "FAIL " + (res?.error || "")}`);
       }
       const snap = await eng.snapshot();
       messages.push({ role: "user", content: `Results:\n${results.join("\n") || "(no commands)"}\n\nSession now:\n${compactSnap(snap)}\n\nContinue, or reply {"commands":[],"done":true} when the brief is realised and mixed.` });
@@ -190,8 +219,10 @@ if (!provider) { console.error("No provider configured — put keys in ui/.env.l
 if (!existsSync(BIN)) { console.error("Mosh binary not built:", BIN); process.exit(2); }
 
 console.error(`Arena · brief="${BRIEF}" · ${BPM}BPM ${KEY} · model=${provider.id}/${provider.model} · generative=${REAL_SA3 ? "real SA3" : "Fake"}\n`);
+const only = (process.env.ARENA_ONLY || "").split(",").map((s) => s.trim()).filter(Boolean);
+const rungsToRun = only.length ? RUNGS.filter((r) => only.some((o) => r.id.toLowerCase().includes(o.toLowerCase()))) : RUNGS;
 const runs: RunResult[] = [];
-for (const rung of RUNGS) {
+for (const rung of rungsToRun) {
   console.error(`=== ${rung.id} (${rung.label}) ===`);
   const r = await runRung(rung, provider);
   console.error(`  -> ${r.wav ? `${Math.round(statSize(r.wav) / 1024)}KB` : "NO WAV"} · ${r.cmdsOk}/${r.cmdsTotal} cmds ok · gaps:${r.gaps.length}${r.note ? ` · "${r.note}"` : ""}\n`);

@@ -27,7 +27,7 @@ function scorerPython(): string {
   return "python3";
 }
 
-const BROKEN = /clip|silent|silence|too_quiet|near_silent|dropout|hygiene_failed|scorer/i;
+const BROKEN = /clip|silent|silence|too_quiet|near_silent|dropout|tonal_suspect|hygiene_failed|scorer/i;
 
 export function scoreWavs(paths: string[]): WavScore[] {
   const real = paths.filter((p) => existsSync(p));
