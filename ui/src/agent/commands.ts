@@ -20,12 +20,12 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "remove_track", desc: "Delete a track and its clips", args: [S("trackId")] },
 
   // ── clips ───────────────────────────────────────────────────────────────
-  { command: "add_test_tone_clip", desc: "Drop a test-tone clip on a track", args: [S("trackId", false), N("start", false, "seconds"), N("durationSeconds", false)] },
-  { command: "add_midi_clip", desc: "Add an empty MIDI clip", args: [S("trackId"), N("start", false, "seconds"), N("lengthBeats", false)] },
+  { command: "add_test_tone_clip", desc: "Drop a test-tone clip on a track (lands at 0)", args: [S("trackId", false), N("seconds", false, "duration in seconds"), N("freq", false, "Hz")] },
+  { command: "add_midi_clip", desc: "Add an empty MIDI clip", args: [S("trackId"), N("start", false, "seconds"), N("length", false, "seconds")] },
   { command: "move_clip", desc: "Move a clip to a new start time (and optionally another track)", args: [S("clipId"), S("trackId", false), N("start", true, "seconds")] },
   { command: "trim_clip", desc: "Set a clip's start and length", args: [S("clipId"), N("start"), N("length")] },
-  { command: "split_clip", desc: "Split a clip at a time position", args: [S("clipId"), N("position", true, "seconds")] },
-  { command: "duplicate_clip", desc: "Duplicate a clip", args: [S("clipId"), N("start", false)] },
+  { command: "split_clip", desc: "Split a clip at a time position", args: [S("clipId"), N("time", true, "seconds")] },
+  { command: "duplicate_clip", desc: "Duplicate a clip", args: [S("clipId")] },
   { command: "remove_clip", desc: "Delete a clip", args: [S("clipId")] },
   { command: "set_clip_gain", desc: "Set a clip's gain in dB", args: [S("clipId"), N("gainDb")] },
   { command: "set_clip_mute", desc: "Mute/unmute a clip", args: [S("clipId"), B("mute")] },
@@ -34,7 +34,7 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "add_note", desc: "Add a MIDI note (pitch 0-127) to a MIDI clip", args: [S("clipId"), N("pitch"), N("start", true, "beats"), N("length", true, "beats"), N("velocity", false, "0-127")] },
   { command: "remove_note", desc: "Remove a MIDI note by index", args: [S("clipId"), N("noteIndex")] },
   { command: "set_note", desc: "Edit a MIDI note's pitch/start/length/velocity", args: [S("clipId"), N("noteIndex"), N("pitch", false), N("start", false), N("length", false), N("velocity", false)] },
-  { command: "quantize_notes", desc: "Quantize a MIDI clip's notes to a grid", args: [S("clipId"), S("grid", false, '"1/4" | "1/8" | "1/16"')] },
+  { command: "quantize_notes", desc: "Quantize a MIDI clip's notes to a grid", args: [S("clipId"), N("division", false, "beats: 1=1/4, 0.5=1/8, 0.25=1/16"), N("strength", false, "0-1")] },
 
   // ── transport & timing ──────────────────────────────────────────────────
   { command: "set_tempo", desc: "Set the project tempo in BPM", args: [N("bpm")] },
@@ -70,12 +70,12 @@ export const AGENT_COMMANDS: AgentCommand[] = [
 
   // ── neural (Tier-A) ─────────────────────────────────────────────────────
   { command: "add_neural_insert", desc: "Add the real-time neural insert to a track", args: [S("trackId"), N("index", false)] },
-  { command: "set_neural_param", desc: "Set a neural insert param (0-100, ASTD-clamped)", args: [S("trackId"), S("paramId", true, '"drive" | "mix"'), N("uiValue", true, "0-100")] },
+  { command: "set_neural_param", desc: "Set a neural insert param (0-100, ASTD-clamped) by chain index", args: [S("trackId"), N("index", true, "chain position of the neural insert"), S("paramId", true, '"drive" | "tone" | "mix"'), N("value", true, "0-100")] },
 
   // ── generative (Tier-B) ─────────────────────────────────────────────────
   { command: "create_render_layer", desc: "Attach a generative re-imagine layer to a wave clip", args: [S("clipId"), S("adapter", false)] },
-  { command: "set_render_param", desc: "Set a render-layer parameter (grit/color/seed)", args: [S("clipId"), S("param"), N("value", false), S("valueStr", false)] },
-  { command: "render_layer", desc: "Run the generative render on a clip's layer", args: [S("clipId"), N("seed", false)] },
+  { command: "set_render_param", desc: "Set a render-layer parameter (prompt/noise/seed)", args: [S("clipId"), S("prompt", false), N("nl", false, "noise level 0-1"), N("seed", false)] },
+  { command: "render_layer", desc: "Run the generative render on a clip's layer", args: [S("clipId")] },
   { command: "accept_render", desc: "Accept a finished render (lands it as a clip)", args: [S("clipId")] },
   { command: "reject_render", desc: "Reject a render", args: [S("clipId")] },
 ];
@@ -120,7 +120,7 @@ export function describeCommand(command: string, args: Record<string, unknown>):
     case "add_midi_clip": return `Added a MIDI clip`;
     case "move_clip": return `Moved a clip to ${a.start}s`;
     case "trim_clip": return `Trimmed a clip`;
-    case "split_clip": return `Split a clip at ${a.position}s`;
+    case "split_clip": return `Split a clip at ${a.time}s`;
     case "duplicate_clip": return `Duplicated a clip`;
     case "remove_clip": return `Removed a clip`;
     case "set_clip_gain": return `Set clip gain to ${a.gainDb} dB`;
@@ -128,7 +128,7 @@ export function describeCommand(command: string, args: Record<string, unknown>):
     case "add_note": return `Added a note`;
     case "remove_note": return `Removed a note`;
     case "set_note": return `Edited a note`;
-    case "quantize_notes": return `Quantized notes${a.grid ? ` to ${a.grid}` : ""}`;
+    case "quantize_notes": return `Quantized notes${a.division != null ? ` (${a.division}-beat grid)` : ""}`;
     case "set_tempo": return `Set tempo to ${a.bpm} BPM`;
     case "set_time_signature": return `Set time signature to ${a.numerator}/${a.denominator}`;
     case "set_metronome": return a.enabled ? `Turned the metronome on` : `Turned the metronome off`;
@@ -152,7 +152,7 @@ export function describeCommand(command: string, args: Record<string, unknown>):
     case "bypass_plugin": return a.bypassed ? `Bypassed a plugin` : `Enabled a plugin`;
     case "remove_plugin": return `Removed a plugin`;
     case "add_neural_insert": return `Added a neural insert`;
-    case "set_neural_param": return `Set neural ${a.paramId} to ${a.uiValue}`;
+    case "set_neural_param": return `Set neural ${a.paramId} to ${a.value}`;
     case "create_render_layer": return `Attached a generative layer`;
     case "set_render_param": return `Set a render parameter`;
     case "render_layer": return `Started a render`;
