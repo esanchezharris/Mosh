@@ -25,6 +25,11 @@ int runLiveAudioSmoke (MoshEngine&, MoshOps&);
     human can hear the difference. Needs a real output device + an RTNeural-ON build. */
 int runNeuralAB (MoshEngine&, MoshOps&);
 
+/** Headless deep plugin scan (`Mosh --scan-plugins-deep`): a synchronous out-of-
+    process VST3 + AudioUnit catalog sweep with the hang-watchdog engaged, then
+    prints the catalog + the quarantine list. Returns 0 on success. */
+int runDeepPluginScan (MoshOps&);
+
 /** Scripted Stage 3 demo (`Mosh --demo3`): builds a session with a VST3 effect on
     a wave track and a VST3 synth on a MIDI track, and opens the synth's native
     editor — then leaves the GUI running (for visual verification of the gate). */

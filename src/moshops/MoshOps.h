@@ -39,6 +39,11 @@ public:
     /** Full session snapshot — bound to the WebView's get_snapshot. */
     juce::var snapshot();
 
+    /** Direct plugin-host access for the headless deep-scan CLI (--scan-plugins-deep),
+        which runs a synchronous OOP + hang-watchdog rescan off the message thread.
+        NOT used by the normal command surface (that goes through cmdRescanPlugins). */
+    PluginHost& pluginHostForScan() { return pluginHost; }
+
 private:
     // ── command handlers ──
     juce::var cmdCreateTrack    (const juce::var& args);

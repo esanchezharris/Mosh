@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <thread>
 #include <vector>
 
 namespace mosh
@@ -155,6 +156,44 @@ namespace
 
     juce::var firstTrack (MoshOps& ops) { return ops.snapshot()["tracks"][0]; }
     int trackClips (const juce::var& t) { return t.getProperty ("clips", juce::var()).size(); }
+}
+
+// Headless deep plugin scan (--scan-plugins-deep): a synchronous out-of-process
+// VST3 + AudioUnit sweep with the hang-watchdog engaged, then prints the catalog +
+// the quarantine list. This is the terminal entry for cataloging a big/hostile
+// plugin set (e.g. a conflicting Waves install) without tying up the GUI.
+int runDeepPluginScan (MoshOps& ops)
+{
+    using namespace juce;
+    std::cerr << "===== Deep plugin scan: out-of-process VST3 + AudioUnit (hang-watchdog) =====\n";
+
+    // PRECONDITION: this runs on a BACKGROUND thread (Main spawns it) while the JUCE
+    // message loop keeps pumping. That matters — te's out-of-process scanner manages
+    // its child via the message thread, so if we blocked the message thread here the
+    // OOP path would fall back to IN-PROCESS scanning and a hostile plugin (e.g. a
+    // WaveShell that builds an NSWindow on load) would crash this process off-main.
+    const auto t0 = Time::getMillisecondCounterHiRes();
+    const int total = ops.pluginHostForScan().rescan (/*clearFirst=*/false, /*includeVST3=*/true,
+                                                      /*includeAU=*/true, /*slowVST3=*/true);
+    const auto secs = (Time::getMillisecondCounterHiRes() - t0) / 1000.0;
+    std::cerr << "  rescan done: " << total << " catalog types in "
+              << String (secs, 1).toStdString() << "s\n";
+
+    auto data = cmd (ops, "list_plugins")["data"];
+    auto counts = data.getProperty ("counts", var());
+    std::cerr << "  catalog: vst3=" << (int) counts.getProperty ("vst3", -1)
+              << "  au=" << (int) counts.getProperty ("au", -1)
+              << "  total=" << (int) counts.getProperty ("total", -1) << "\n";
+
+    if (auto* bl = cmd (ops, "get_plugin_blocklist")["data"].getProperty ("blocklist", var()).getArray())
+    {
+        std::cerr << "  quarantined/blocklisted (" << bl->size() << "):\n";
+        for (auto& b : *bl)
+            std::cerr << "    x " << b.getProperty ("id", b).toString().toStdString() << "\n";
+    }
+
+    std::cerr << "===== deep scan complete =====\n";
+    return 0;
 }
 
 int runSelfTest (MoshEngine& eng, MoshOps& ops)

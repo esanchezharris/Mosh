@@ -7,6 +7,7 @@
 #include "remote/RemoteCompanionServer.h"
 #include "brain/BrainProxy.h"
 #include <iostream>
+#include <thread>
 
 namespace mosh
 {
@@ -95,16 +96,30 @@ public:
         const bool undoSelfTest = commandLine.contains ("--selftest-undo");
         const bool liveAudioSmoke = commandLine.contains ("--live-audio-smoke");
         const bool neuralAB = commandLine.contains ("--neural-ab");
+        const bool scanDeep = commandLine.contains ("--scan-plugins-deep");
         const bool liveAudio = liveAudioSmoke || neuralAB;   // opens the real device, fresh cold session
         const bool headless = undoSelfTest || commandLine.contains ("--selftest");
+        const bool noAudio = headless || scanDeep;           // device-free harnesses + the scan utility
+
+        // SCAN GUARD (tier wall): a deep scan must NEVER warm the generative service.
+        // Force MOSH_ENABLE_SA3=0 for THIS process BEFORE MoshOps (and thus jobManager)
+        // is constructed below, so a scan can never spawn/warm SA3. (MOSH_SCAN_AU opts
+        // the AU sweep in — a deep scan is the full VST3 + AU catalog.)
+        if (scanDeep)
+        {
+            setenv ("MOSH_ENABLE_SA3", "0", 1);
+            setenv ("MOSH_SCAN_AU", "1", 1);
+        }
+
         const juce::String freshSessionName = undoSelfTest ? "session-selftest-undo"
                                             : (neuralAB ? "session-neural-ab"
                                             : (liveAudioSmoke ? "session-live-audio-smoke"
-                                                              : "session-selftest"));
+                                            : (scanDeep ? "session-scan"
+                                                              : "session-selftest")));
         // Headless: no audio device, and an isolated cold session so the harness is
         // idempotent (it saves/reloads itself) and never touches the GUI session.
-        engine  = std::make_unique<MoshEngine> ((! headless) || liveAudio,
-                                                /*freshSession=*/ headless || liveAudio,
+        engine  = std::make_unique<MoshEngine> ((! noAudio) || liveAudio,
+                                                /*freshSession=*/ noAudio || liveAudio,
                                                 freshSessionName);
         moshOps = std::make_unique<MoshOps> (*engine);
         remoteServer = std::make_unique<RemoteCompanionServer> (
@@ -129,6 +144,29 @@ public:
             const int fails = runUndoSelfTest (*engine, *moshOps);
             setApplicationReturnValue (fails);
             quit();
+            return;
+        }
+
+        // Headless deep plugin catalog sweep (terminal utility) — runs the hardened
+        // out-of-process VST3 + AU scan with the hang-watchdog, prints the catalog +
+        // quarantine list, and exits. Never builds the UI.
+        //
+        // The scan runs on a BACKGROUND thread and we RETURN (don't quit) so the JUCE
+        // message loop keeps pumping — te's out-of-process child scanner is driven via
+        // the message thread, so blocking it here would force in-process scanning and a
+        // hostile plugin (NSWindow-on-load) would crash us off the main thread. On
+        // completion the worker hops back to the message thread to print + quit.
+        if (scanDeep)
+        {
+            std::thread ([this]
+            {
+                const int rc = runDeepPluginScan (*moshOps);
+                juce::MessageManager::callAsync ([this, rc]
+                {
+                    setApplicationReturnValue (rc);
+                    quit();
+                });
+            }).detach();
             return;
         }
 
