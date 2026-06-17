@@ -20,6 +20,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore, type Peaks } from "../store";
 import { tempoMapFrom, gridLines } from "../time";
+import { deriveTakeLanes } from "./takeLanes";
 import type { Snapshot, Track, Clip } from "../types";
 
 const LANE_H = 76;
@@ -319,6 +320,11 @@ function ClipBlock({
   const left = secToPx(pos.start);
   const widthPx = Math.max(2, secToPx(pos.length));
 
+  // Native take tree → stacked lanes within this clip's footprint. Clicking a lane
+  // selects it (set_current_take); the current lane owns a keep-take affordance
+  // (flatten to it). Empty unless the clip actually has ≥2 takes.
+  const takeLanes = deriveTakeLanes(clip);
+
   const beginDrag = (kind: DragKind) => (e: React.PointerEvent) => {
     e.stopPropagation();
     if (tool === "split" && kind === "move") {
@@ -365,8 +371,31 @@ function ClipBlock({
       onPointerDown={beginDrag("move")} onPointerMove={onMove} onPointerUp={onUp}
       onDoubleClick={() => { if (clip.type === "midi") openPianoRoll(clip.id); }}
     >
-      <div className="label">{clip.name}</div>
-      {clip.type === "wave" && <ClipWave peaks={peaks} width={widthPx} />}
+      <div className="label">{clip.name}{takeLanes.length > 0 && <span className="take-count"> · {takeLanes.length} takes</span>}</div>
+      {takeLanes.length > 0 ? (
+        <div className="take-lanes" data-testid="take-lanes" data-num-takes={takeLanes.length}>
+          {takeLanes.map((ln) => (
+            <div key={ln.index}
+              className={`take-lane${ln.isCurrent ? " current" : ""}`}
+              data-testid="take-lane" data-take-index={ln.index} data-current={ln.isCurrent ? "true" : "false"}
+              title={ln.title ?? ln.label}
+              onPointerDown={(e) => {
+                e.stopPropagation(); // a lane click selects a take, never starts a clip drag
+                if (!ln.isCurrent) void exec("set_current_take", { clipId: clip.id, takeIndex: ln.index });
+              }}
+            >
+              <span className="take-label">{ln.label}</span>
+              {ln.isCurrent && (
+                <button className="take-keep" title="Keep this take (flatten the rest)" aria-label="Keep this take"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => { e.stopPropagation(); void exec("keep_take", { clipId: clip.id }); }}>✓</button>
+              )}
+            </div>
+          ))}
+        </div>
+      ) : (
+        clip.type === "wave" && <ClipWave peaks={peaks} width={widthPx} />
+      )}
       {tool === "move" && (
         <>
           <div className="trim l" title="Trim start" onPointerDown={beginDrag("trim-l")} onPointerMove={onMove} onPointerUp={onUp} />

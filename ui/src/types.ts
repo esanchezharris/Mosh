@@ -28,6 +28,15 @@ export type AvailableColor = {
 // Quality readout from a completed render's manifest (judge panel, 05 §7).
 export type RenderQA = { pq?: number | null; pq_base?: number | null; flags?: string[]; adapter?: string };
 
+// One entry in a wave clip's native take tree (Tracktion). Present on the clip
+// only when it has takes (recording over a region stacks takes); the UI renders
+// them as separate lanes. set_current_take / keep_take act on this tree.
+export type ClipTake = {
+  index: number;        // position in the take tree (the command handle)
+  description?: string; // engine-supplied take description (file/name), if any
+  isCurrent?: boolean;  // the take that currently plays
+};
+
 // A MIDI note as serialised in the snapshot — beats within the clip sequence.
 export type MidiNote = {
   i: number;        // index into the clip's note list (the command handle)
@@ -56,6 +65,11 @@ export type Clip = {
   sourceBpm?: number;
   hasRenderLayer: boolean;
   renderLayer?: RenderLayer;
+  // Take lanes (wave clips). Present only when the clip has takes in the engine's
+  // native take tree; the UI stacks them as lanes within the clip footprint.
+  numTakes?: number;
+  currentTakeIndex?: number;
+  takes?: ClipTake[];
 };
 
 export type AutoPoint = { t: number; v: number }; // t seconds, v normalised 0..1

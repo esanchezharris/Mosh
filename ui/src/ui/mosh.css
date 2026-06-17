@@ -184,6 +184,29 @@ body { background: var(--ink); color: var(--bone); font-family: var(--font-body)
 .clip.splitcur { cursor: crosshair; }
 .clip.splitcur .trim { display: none; }
 
+/* take lanes — Tracktion's native take tree surfaced as stacked lanes inside the
+   clip body. The current lane plays (lime-accented + keep affordance); other lanes
+   are auditionable on click (set_current_take). */
+.clip .take-count { color: var(--lime); opacity: 0.85; }
+.take-lanes { position: absolute; inset: 16px 0 0 0; z-index: 2; display: flex; flex-direction: column; }
+.take-lane {
+  /* The clip chip is always a dark gradient (both themes), so take-lane text is a
+     fixed light tone — NOT theme-aware --bone, which would go dark-on-dark in light mode. */
+  flex: 1 1 0; min-height: 0; display: flex; align-items: center; justify-content: space-between;
+  gap: 4px; padding: 0 6px; font-size: 9px; color: rgba(246, 242, 235, 0.6); cursor: pointer;
+  border-top: 1px solid rgba(0, 0, 0, 0.32); background: rgba(255, 255, 255, 0.015);
+  transition: background 120ms;
+}
+.take-lane:first-child { border-top: none; }
+.take-lane:hover { background: var(--lime-faint); color: #f6f2eb; }
+.take-lane.current { background: rgba(204, 255, 35, 0.16); color: #f6f2eb; box-shadow: inset 2px 0 0 var(--lime); }
+.take-lane .take-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.take-lane .take-keep {
+  flex: 0 0 auto; width: 16px; height: 15px; line-height: 1; padding: 0; cursor: pointer;
+  border: 1px solid var(--lime-dim); border-radius: 3px; background: transparent; color: var(--lime); font-size: 10px;
+}
+.take-lane .take-keep:hover { background: var(--lime); color: #161613; }
+
 /* playhead — one element, mapped through the same sec→px as the grid */
 .playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--lime); z-index: 4; pointer-events: none; box-shadow: 0 0 6px var(--lime-dim); }
 
