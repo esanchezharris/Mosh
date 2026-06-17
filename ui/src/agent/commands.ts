@@ -27,6 +27,7 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "split_clip", desc: "Split a clip at a time position", args: [S("clipId"), N("time", true, "seconds")] },
   { command: "duplicate_clip", desc: "Duplicate a clip", args: [S("clipId")] },
   { command: "remove_clip", desc: "Delete a clip", args: [S("clipId")] },
+  { command: "rename_clip", desc: "Rename a clip", args: [S("clipId"), S("name")] },
   { command: "set_clip_gain", desc: "Set a clip's gain in dB", args: [S("clipId"), N("gainDb")] },
   { command: "set_clip_mute", desc: "Mute/unmute a clip", args: [S("clipId"), B("mute")] },
 
@@ -40,6 +41,7 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "set_tempo", desc: "Set the project tempo in BPM", args: [N("bpm")] },
   { command: "set_time_signature", desc: "Set the time signature", args: [N("numerator"), N("denominator")] },
   { command: "set_metronome", desc: "Toggle the metronome click", args: [B("enabled")] },
+  { command: "set_key", desc: "Set the project musical key", args: [S("tonic", false, "C, C#, D … B"), S("mode", false, "major | minor | dorian | mixolydian | pentatonic | chromatic")] },
   { command: "set_transport", desc: "Transport: play/stop/record/seek", args: [S("action", false, '"play"|"toggle"|"stop"|"record"|"to_start"|"to_end"'), B("loop", false), N("position", false, "seconds")] },
 
   // ── recording / takes ─────────────────────────────────────────────────────
@@ -61,16 +63,22 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "set_track_mute", desc: "Mute/unmute a track", args: [S("trackId"), B("mute")] },
   { command: "set_track_solo", desc: "Solo/unsolo a track", args: [S("trackId"), B("solo")] },
   { command: "set_master_volume", desc: "Set the master volume in dB", args: [N("db")] },
+  { command: "set_master_pan", desc: "Set the master pan (-1 left … 1 right)", args: [N("pan")] },
 
   // ── plugins ─────────────────────────────────────────────────────────────
   { command: "load_builtin", desc: "Add a built-in effect/instrument to a track (type from list_builtins)", args: [S("trackId"), N("index", false, "chain position"), S("type")] },
+  { command: "load_plugin", desc: "Add a scanned VST3/AU plugin to a track (pluginId from list_plugins)", args: [S("trackId"), S("pluginId"), N("index", false, "chain position")] },
   { command: "set_plugin_param", desc: "Set a plugin parameter (0-1) by chain index + param index", args: [S("trackId"), N("index"), N("paramIndex"), N("value", true, "0-1")] },
   { command: "bypass_plugin", desc: "Bypass/enable a plugin in a track's chain", args: [S("trackId"), N("index"), B("bypassed")] },
+  { command: "reorder_plugin", desc: "Move a plugin to a new chain position", args: [S("trackId"), N("index"), N("toIndex")] },
+  { command: "open_plugin_editor", desc: "Pop out a plugin's native editor window", args: [S("trackId"), N("index")] },
   { command: "remove_plugin", desc: "Remove a plugin from a track's chain", args: [S("trackId"), N("index")] },
 
   // ── neural (Tier-A) ─────────────────────────────────────────────────────
   { command: "add_neural_insert", desc: "Add the real-time neural insert to a track", args: [S("trackId"), N("index", false)] },
   { command: "set_neural_param", desc: "Set a neural insert param (0-100, ASTD-clamped) by chain index", args: [S("trackId"), N("index", true, "chain position of the neural insert"), S("paramId", true, '"drive" | "tone" | "mix"'), N("value", true, "0-100")] },
+  { command: "set_neural_lab_mode", desc: "Unlock the raw (Lab) range on a neural insert", args: [S("trackId"), N("index"), B("on")] },
+  { command: "reset_neural", desc: "Reset a neural insert's model state", args: [S("trackId"), N("index")] },
 
   // ── generative (Tier-B) ─────────────────────────────────────────────────
   { command: "create_render_layer", desc: "Attach a generative re-imagine layer to a wave clip", args: [S("clipId"), S("adapter", false)] },
@@ -78,6 +86,10 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "render_layer", desc: "Run the generative render on a clip's layer", args: [S("clipId")] },
   { command: "accept_render", desc: "Accept a finished render (lands it as a clip)", args: [S("clipId")] },
   { command: "reject_render", desc: "Reject a render", args: [S("clipId")] },
+  { command: "bypass_layer", desc: "Bypass/enable a clip's render layer", args: [S("clipId"), B("bypassed")] },
+  { command: "freeze_layer", desc: "Freeze a clip's render layer (commit the rendered audio)", args: [S("clipId")] },
+  { command: "bounce_layer_to_clip", desc: "Bounce a render layer down to a plain clip", args: [S("clipId")] },
+  { command: "remove_render_layer", desc: "Remove a clip's render layer", args: [S("clipId")] },
 ];
 
 export const AGENT_COMMAND_MAP = new Map(AGENT_COMMANDS.map((c) => [c.command, c]));
@@ -123,6 +135,7 @@ export function describeCommand(command: string, args: Record<string, unknown>):
     case "split_clip": return `Split a clip at ${a.time}s`;
     case "duplicate_clip": return `Duplicated a clip`;
     case "remove_clip": return `Removed a clip`;
+    case "rename_clip": return `Renamed a clip to "${a.name}"`;
     case "set_clip_gain": return `Set clip gain to ${a.gainDb} dB`;
     case "set_clip_mute": return a.mute ? `Muted a clip` : `Unmuted a clip`;
     case "add_note": return `Added a note`;
@@ -132,6 +145,7 @@ export function describeCommand(command: string, args: Record<string, unknown>):
     case "set_tempo": return `Set tempo to ${a.bpm} BPM`;
     case "set_time_signature": return `Set time signature to ${a.numerator}/${a.denominator}`;
     case "set_metronome": return a.enabled ? `Turned the metronome on` : `Turned the metronome off`;
+    case "set_key": return `Set key to ${a.tonic ?? ""} ${a.mode ?? ""}`.trim();
     case "set_transport": return a.action === "record" ? `Recording` : a.action === "stop" ? `Stopped` : a.action === "to_start" ? `Back to the start` : `Transport`;
     case "arm_track": return a.armed ? `Armed a track` : `Disarmed a track`;
     case "stop_recording": return `Stopped recording`;
@@ -147,17 +161,27 @@ export function describeCommand(command: string, args: Record<string, unknown>):
     case "set_track_mute": return a.mute ? `Muted a track` : `Unmuted a track`;
     case "set_track_solo": return a.solo ? `Soloed a track` : `Unsoloed a track`;
     case "set_master_volume": return `Set master volume to ${a.db} dB`;
+    case "set_master_pan": return `Set master pan to ${a.pan}`;
     case "load_builtin": return `Added ${a.type}`;
+    case "load_plugin": return `Added a plugin`;
     case "set_plugin_param": return `Tweaked a plugin parameter`;
     case "bypass_plugin": return a.bypassed ? `Bypassed a plugin` : `Enabled a plugin`;
+    case "reorder_plugin": return `Reordered a plugin`;
+    case "open_plugin_editor": return `Opened a plugin editor`;
     case "remove_plugin": return `Removed a plugin`;
     case "add_neural_insert": return `Added a neural insert`;
     case "set_neural_param": return `Set neural ${a.paramId} to ${a.value}`;
+    case "set_neural_lab_mode": return a.on ? `Unlocked neural Lab mode` : `Locked neural Lab mode`;
+    case "reset_neural": return `Reset the neural insert`;
     case "create_render_layer": return `Attached a generative layer`;
     case "set_render_param": return `Set a render parameter`;
     case "render_layer": return `Started a render`;
     case "accept_render": return `Accepted a render`;
     case "reject_render": return `Rejected a render`;
+    case "bypass_layer": return a.bypassed ? `Bypassed a render layer` : `Enabled a render layer`;
+    case "freeze_layer": return `Froze a render layer`;
+    case "bounce_layer_to_clip": return `Bounced a layer to a clip`;
+    case "remove_render_layer": return `Removed a render layer`;
     default: return command.replace(/_/g, " ");
   }
 }
