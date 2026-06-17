@@ -26,17 +26,6 @@ const ALLOWLIST = new Set<string>([
   // stays green; give them real mock cases when dev-mode fidelity matters.
   "paste_clip",
   "create_group_track",
-  // Recording transport — no audio I/O in the browser dev mock, so these are
-  // inert here (the native backend arms/monitors/captures real input):
-  "arm_track",
-  "set_input_monitor",
-  "stop_recording",
-  // Take-lane state (comp/take tree) — not modeled in the dev mock yet:
-  "keep_take",
-  "list_takes",
-  "set_current_take",
-  // Neural model load — the dev mock has no inference engine to load into:
-  "load_neural_model",
 ]);
 
 function listSourceFiles(dir: string): string[] {
