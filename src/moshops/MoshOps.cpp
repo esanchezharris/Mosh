@@ -336,6 +336,7 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "rename_clip")       return cmdRenameClip (args);
     if (name == "set_clip_mute")     return cmdSetClipMute (args);
     if (name == "set_clip_gain")     return cmdSetClipGain (args);
+    if (name == "relink_clip")       return cmdRelinkClip (args);
     if (name == "set_clip_warp")     return cmdSetClipWarp (args);
     if (name == "duplicate_clip")    return cmdDuplicateClip (args);
     if (name == "delete_time_range") return cmdDeleteTimeRange (args);
@@ -953,6 +954,7 @@ juce::var MoshOps::cmdSetProjectSettings (const juce::var& args)
     if (args.hasProperty ("timeBase"))
         node.setProperty (ids::timeBase, args.getProperty ("timeBase", var()).toString(), nullptr);
 
+    eng.markDirty();                                           // edit-state change → needs re-save (gap 1)
     logLine ("set_project_settings", args, true, {}, false);   // preference — NOT undoable
     emitSnapshotInvalidated();
     return okResult ("set_project_settings", projectSettingsToVar());
@@ -988,6 +990,7 @@ juce::var MoshOps::cmdSetKey (const juce::var& args)
     if (args.hasProperty ("mode"))
         node.setProperty (ids::musicalMode, args.getProperty ("mode", var()).toString(), nullptr);
 
+    eng.markDirty();                              // edit-state change → needs re-save (gap 1)
     logLine ("set_key", args, true, {}, false);   // preference — NOT undoable
     emitSnapshotInvalidated();
     return okResult ("set_key", projectSettingsToVar());
@@ -1308,6 +1311,7 @@ juce::var MoshOps::cmdSetTrackOutput (const juce::var& args)
 juce::var MoshOps::cmdUndo (const juce::var& args)
 {
     const bool did = undoManager().undo();
+    if (did) eng.markDirty();               // edit content changed → needs re-save (gap 1)
     logLine ("undo", args, did, did ? String() : String ("nothing to undo"), false);
     emitSnapshotInvalidated();
     return okResult ("undo", var (did));
@@ -1316,6 +1320,7 @@ juce::var MoshOps::cmdUndo (const juce::var& args)
 juce::var MoshOps::cmdRedo (const juce::var& args)
 {
     const bool did = undoManager().redo();
+    if (did) eng.markDirty();               // edit content changed → needs re-save (gap 1)
     logLine ("redo", args, did, did ? String() : String ("nothing to redo"), false);
     emitSnapshotInvalidated();
     return okResult ("redo", var (did));
@@ -1490,6 +1495,29 @@ juce::var MoshOps::cmdSetClipGain (const juce::var& args)
     logLine ("set_clip_gain", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("set_clip_gain");
+}
+
+juce::var MoshOps::cmdRelinkClip (const juce::var& args)
+{
+    // gap 3 — relink-on-load: re-point a wave clip whose source went missing (a project
+    // moved off-machine, audio renamed, etc.) to a user-chosen file. Stores the ref
+    // relative iff the new file lives under the project dir (keeps a relinked-to-local
+    // file portable), else absolute. Undoable.
+    const auto id   = args.getProperty ("clipId", var()).toString();
+    const auto path = args.getProperty ("file", var()).toString();
+    if (path.isEmpty()) return errResult ("relink_clip", "missing 'file'");
+    File newFile (path);
+    if (! newFile.existsAsFile()) return errResult ("relink_clip", "file not found: " + path);
+    auto* w = dynamic_cast<te::WaveAudioClip*> (findClip (id));
+    if (w == nullptr) return errResult ("relink_clip", "wave clip not found: " + id);
+
+    beginTxn ("relink_clip");
+    const bool local = newFile.isAChildOf (eng.editFile().getParentDirectory());
+    w->getSourceFileReference().setToDirectFileReference (newFile, local);
+    w->sourceMediaChanged();                    // refresh the clip's cached source file
+    logLine ("relink_clip", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("relink_clip");
 }
 
 juce::var MoshOps::cmdSetClipWarp (const juce::var& args)
@@ -4322,6 +4350,8 @@ juce::var MoshOps::snapshot()
     session->setProperty ("metronome", edit.clickTrackEnabled.get());
     session->setProperty ("length", edit.getLength().inSeconds());
     session->setProperty ("editFile", eng.editFile().getFullPathName());
+    session->setProperty ("dirty", eng.isDirty());   // unsaved-changes flag (gap 1)
+    session->setProperty ("recentProjects", eng.recentProjects());   // Recent list (gap 2)
     // Project container extension, backend-owned (keeps the storage format out of the
     // UI — the file-dialog filter is built from this, not a hard-coded constant).
     session->setProperty ("projectExtension", eng.editFile().getFileExtension().substring (1));
@@ -4674,6 +4704,7 @@ juce::var MoshOps::clipToVar (te::Clip& c)
     {
         o->setProperty ("type", "wave");
         o->setProperty ("sourceFile", w->getCurrentSourceFile().getFullPathName());
+        o->setProperty ("sourceMissing", ! w->getCurrentSourceFile().existsAsFile());   // gap 3 — relink cue
         o->setProperty ("sourceLength", w->getSourceLength().inSeconds());
         o->setProperty ("gainDb", w->getGainDB());
         // Audio warp (auto-tempo): the clip follows the tempo map when on.

@@ -48,6 +48,14 @@ public:
     /** Save the Edit to its .tracktionedit file via EditFileOperations (01 §6). */
     bool save();
 
+    /** Unsaved-changes flag (data-safety, gap 1). Every MoshOps mutation marks the
+        Edit dirty; save()/saveIfDirty() clear it; new/open/reload/saveAs leave it
+        clean (the Edit was just persisted to / loaded from disk). Drives the GUI
+        periodic auto-save timer + save-on-quit so closing the window never loses work. */
+    void markDirty();
+    bool isDirty() const;
+    bool saveIfDirty();          // save() iff dirty; returns true iff a save happened
+
     /** Reload the Edit from its file (proves save/reload restore). Replaces the
         Edit object; callers must re-read edit() afterwards. */
     void reloadFromFile();
@@ -61,6 +69,16 @@ public:
     void newProject (const juce::File& file);   // save current, then a fresh empty Edit at file
     void openProject (const juce::File& file);  // save current, then load the Edit at file
     bool saveProjectAs (const juce::File& file); // saveAs to file + adopt it as the backing file
+
+    /** gap 2 — reopen the last project on relaunch. rememberProject persists the
+        current project path + a recent list to session/last-project.json on every
+        new/open/save-as; startupEditFile() (called by the ctor) resolves the edit to
+        open at launch (the remembered project, or session.tracktionedit when none /
+        the remembered file is missing); recentProjects() is the existing-file Recent
+        list for the UI (newest-first). */
+    void       rememberProject (const juce::File& file);
+    juce::File startupEditFile() const;
+    juce::var  recentProjects() const;
 
     /** Re-point editPath + editFileRetriever to file (after a saveAs that changed
         the Edit's backing file). Does NOT replace the Edit object. */
@@ -96,7 +114,10 @@ private:
     juce::File session;
     juce::File editPath;
     void applyRequestedAudioOutputDevice();
+    void wireEditResolvers();                                  // gap 3 — editFileRetriever + filePathResolver
+    void consolidateAudioInto (const juce::File& projectDir);  // gap 3 — copy referenced audio project-local
     bool       audioOpen = false;
+    bool       dirty = false;              // unsaved-changes flag (gap 1)
     bool       inputsConfigured = false;   // one-time wave-input enablement latch (audio-only)
     juce::String audioError;
 

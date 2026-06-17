@@ -156,13 +156,26 @@ function SettingsTool({ snapshot }: { snapshot: Snapshot }) {
             </div>
           </div>
           <div className="pop-group">
-            <div className="pop-label">Project</div>
+            <div className="pop-label">Project{s.dirty ? <span className="pop-note" title="Unsaved changes (auto-saved)"> • unsaved</span> : null}</div>
             <div className="pop-actions">
               <button className="btn" onClick={() => void exec("new_project", {}).then(() => refresh())}>New</button>
               <button className="btn" onClick={() => void exec("save", {})}>Save</button>
-              <button className="btn" onClick={async () => { const r = await pickSaveFile({ title: "Save project as" }); if (r.ok && r.file) void exec("save_as", { file: r.file }); }}>Save As…</button>
+              <button className="btn" onClick={async () => { const r = await pickSaveFile({ title: "Save project as" }); if (r.ok && r.file) void exec("save_as", { file: r.file }).then(() => refresh()); }}>Save As…</button>
               <button className="btn" onClick={async () => { const r = await pickFiles({ title: "Open project" }); if (r.ok && r.files[0]) void exec("open_project", { file: r.files[0] }).then(() => refresh()); }}>Open…</button>
             </div>
+            {(s.recentProjects?.length ?? 0) > 0 && (
+              <>
+                <div className="pop-label">Recent</div>
+                <div className="modal-list" data-testid="recent-projects" style={{ maxHeight: 160 }}>
+                  {s.recentProjects!.slice(0, 8).map((p) => (
+                    <button key={p.path} className="plugin-row" title={p.path} disabled={p.path === s.editFile}
+                            onClick={() => void exec("open_project", { file: p.path }).then(() => refresh())}>
+                      <span className="pr-name">{p.path === s.editFile ? "● " : ""}{p.name}</span>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         </>
       )}
