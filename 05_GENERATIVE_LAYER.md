@@ -1,5 +1,7 @@
 # 05 — Tier B: The Generative Layer (adapter + job service)
 
+> **Status:** Design spec — source of truth for *how* this subsystem was built (v0, gate PASSED). New to the repo? Start with [ARCHITECTURE.md](ARCHITECTURE.md); build status is in [CLAUDE.md](CLAUDE.md).
+
 *Scope: the offline, non-destructive generative layer. A model-neutral `GenerativeModelAdapter` behind a proper job service; the RenderLayer flow (render a region → audition → accept as a reversible take); a `FakeAdapter` for bring-up and a `StableAudio3Adapter` as the first real adapter (colors, two control vocabularies, re-imagine, init-latent cache, judge QA, composition cap). All invoked through MoshOps commands (`02`).*
 
 **Depends on:** `01` (RenderLayer model, render/playback exclusivity), `02` (the generative commands), `06` (service packaging). **Consumed by:** `03` (the generative drawer / Color Rack).
