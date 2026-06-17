@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.24)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Mosh - native hybrid DAW (standalone JUCE 8 app, NOT a plugin).
-# macOS / Apple Silicon remains canonical; Windows support is a portability layer.
+# macOS / Apple Silicon ONLY (v0 prime directive — no Windows/Linux build paths).
 # ─────────────────────────────────────────────────────────────────────────────
 project(Mosh VERSION 0.0.1 LANGUAGES C CXX)
 
@@ -32,20 +32,15 @@ option(MOSH_BUILD_PLUGIN_FIXTURES "Build deterministic in-repo VST3 fixtures for
 include(cmake/CPM.cmake)
 include(cmake/Dependencies.cmake)
 
-if (APPLE)
-    set(MOSH_PLUGINHOST_AU 1)
-    set(MOSH_USE_WIN_WEBVIEW2 0)
-elseif (WIN32)
-    set(MOSH_PLUGINHOST_AU 0)
-    set(MOSH_USE_WIN_WEBVIEW2 1)
-else()
-    set(MOSH_PLUGINHOST_AU 0)
-    set(MOSH_USE_WIN_WEBVIEW2 0)
+# v0 builds on Apple Silicon only; AU plug-in hosting is a macOS format.
+if (NOT APPLE)
+    message(FATAL_ERROR "Mosh v0 targets macOS / Apple Silicon only — no Windows/Linux build path.")
 endif()
+set(MOSH_PLUGINHOST_AU 1)
 
 # ── The app target ───────────────────────────────────────────────────────────
 if (MOSH_BUILD_APP)
-    set(MOSH_APP_EXTRA_ARGS NEEDS_WEBVIEW2 TRUE)
+    set(MOSH_APP_EXTRA_ARGS "")
     if (APPLE)
         list(APPEND MOSH_APP_EXTRA_ARGS
             LOCAL_NETWORK_PERMISSION_ENABLED TRUE
@@ -92,7 +87,6 @@ if (MOSH_BUILD_APP)
 
     target_compile_definitions(Mosh PRIVATE
         JUCE_WEB_BROWSER=1
-        JUCE_USE_WIN_WEBVIEW2=${MOSH_USE_WIN_WEBVIEW2}
         JUCE_USE_CURL=0
         # VST3/AU hosting (04 PART 1) — compiles JUCE's hosting format classes.
         JUCE_PLUGINHOST_VST3=1
@@ -122,8 +116,7 @@ if (MOSH_BUILD_APP)
     endif()
 
     # ── Native voice: macOS Speech (SFSpeechRecognizer + AVAudioEngine) ───────
-    # Obj-C++ with ARC; the browser Web Speech API covers the Vite dev path. The
-    # .mm is Apple-only (Windows/Linux fall back to the disabled-mic UI state).
+    # Obj-C++ with ARC; the browser Web Speech API covers the Vite dev path.
     if (APPLE)
         target_sources(Mosh PRIVATE src/voice/NativeSpeech.mm)
         set_source_files_properties(src/voice/NativeSpeech.mm PROPERTIES COMPILE_FLAGS "-fobjc-arc")
