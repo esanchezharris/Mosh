@@ -56,6 +56,7 @@ export type Clip = {
   mute?: boolean;
   gainDb?: number;
   sourceFile?: string;
+  sourceMissing?: boolean;   // gap 3 — source file absent on disk; offer relink
   sourceLength?: number;
   notes?: MidiNote[];
   // Audio warp (auto-tempo): the clip re-anchors in beats and time-stretches to
@@ -238,6 +239,8 @@ export type Snapshot = {
     key: SessionKey;
     length?: number;
     editFile: string;
+    dirty?: boolean;           // gap 1 — unsaved changes (drives auto-save; advisory in UI)
+    recentProjects?: { path: string; name: string }[]; // gap 2 — Recent list (newest-first)
     projectExtension?: string; // backend-owned project container extension (no leading dot)
     // SES-001 — the tempo MAP (additive; tempo/timeSig* above stay point 0).
     // curve: 1 = step (hold-then-jump), values in (-1,1) ramp to the next point.

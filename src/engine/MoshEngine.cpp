@@ -65,7 +65,11 @@ MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession, const juce::Str
         session.deleteRecursively();
     session.createDirectory();
     session.getChildFile ("audio").createDirectory();
-    editPath = session.getChildFile ("session.tracktionedit");
+    // gap 2 — reopen the last project on relaunch (GUI path). The harness keeps the fixed
+    // session file: a freshSession dir is wiped above, so last-project.json never exists
+    // there and startupEditFile() would fall back anyway — we short-circuit it explicitly.
+    editPath = freshSession ? session.getChildFile ("session.tracktionedit")
+                            : startupEditFile();
 
     applyRequestedAudioOutputDevice();
 
@@ -96,7 +100,7 @@ MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession, const juce::Str
 
         editPtr->getUndoManager().clearUndoHistory();
     }
-    editPtr->editFileRetriever = [this] { return editPath; };
+    wireEditResolvers();
 }
 
 MoshEngine::~MoshEngine()
@@ -310,7 +314,110 @@ juce::File MoshEngine::generateTestTone (double seconds, double freqHz, const ju
 
 bool MoshEngine::save()
 {
-    return te::EditFileOperations (edit()).save (false, true, false);
+    const bool ok = te::EditFileOperations (edit()).save (false, true, false);
+    if (ok) dirty = false;                 // on-disk now matches in-memory (gap 1)
+    return ok;
+}
+
+// gap 1 — unsaved-changes flag. markDirty on every mutation; cleared on a successful
+// save; saveIfDirty is what the GUI auto-save timer + save-on-quit call.
+void MoshEngine::markDirty() { dirty = true; }
+bool MoshEngine::isDirty() const { return dirty; }
+bool MoshEngine::saveIfDirty() { return dirty ? save() : false; }
+
+// gap 2 — reopen-last-project. last-project.json = { "last": <abs>, "recent": [<abs>…] }
+// in the session dir. The recent list is newest-first, deduped, capped at 10.
+void MoshEngine::rememberProject (const juce::File& file)
+{
+    const auto path = file.getFullPathName();
+    auto jsonFile = session.getChildFile ("last-project.json");
+
+    juce::Array<juce::var> recent;
+    recent.add (path);                                  // newest first
+    if (auto prev = juce::JSON::parse (jsonFile); prev.isObject())
+        if (auto* arr = prev.getProperty ("recent", juce::var()).getArray())
+            for (auto& p : *arr)
+                if (p.toString() != path && recent.size() < 10)
+                    recent.add (p);
+
+    auto* o = new juce::DynamicObject();
+    o->setProperty ("last", path);
+    o->setProperty ("recent", recent);
+    jsonFile.replaceWithText (juce::JSON::toString (juce::var (o)));
+}
+
+juce::File MoshEngine::startupEditFile() const
+{
+    const auto fallback = session.getChildFile ("session.tracktionedit");
+    if (auto j = juce::JSON::parse (session.getChildFile ("last-project.json")); j.isObject())
+    {
+        const auto last = j.getProperty ("last", juce::var()).toString();
+        if (last.isNotEmpty() && juce::File (last).existsAsFile())
+            return juce::File (last);
+    }
+    return fallback;
+}
+
+juce::var MoshEngine::recentProjects() const
+{
+    juce::Array<juce::var> out;
+    if (auto j = juce::JSON::parse (session.getChildFile ("last-project.json")); j.isObject())
+        if (auto* arr = j.getProperty ("recent", juce::var()).getArray())
+            for (auto& p : *arr)
+            {
+                juce::File f (p.toString());
+                if (f.existsAsFile())
+                {
+                    auto* e = new juce::DynamicObject();
+                    e->setProperty ("path", f.getFullPathName());
+                    e->setProperty ("name", f.getFileNameWithoutExtension());
+                    out.add (juce::var (e));
+                }
+            }
+    return out;
+}
+
+// gap 3 — portable audio references. Set on every (re)wire of the Edit so relative paths
+// resolve against the .tracktionedit's directory and absolute (legacy / external) paths
+// resolve as-is. With both this and editFileRetriever set (and the edit file on disk),
+// Tracktion stores audio refs RELATIVE to the edit — the precondition for portability.
+void MoshEngine::wireEditResolvers()
+{
+    editPtr->editFileRetriever = [this] { return editPath; };
+    editPtr->filePathResolver = [this] (const juce::String& path) -> juce::File
+    {
+        if (juce::File::isAbsolutePath (path))
+            return juce::File (path);
+        return editPath.getParentDirectory().getChildFile (path);
+    };
+}
+
+// gap 3 — make a project self-contained: copy every referenced wave-clip source that
+// isn't already inside projectDir into projectDir/audio, and re-point the clip to it with
+// a RELATIVE reference (so the project dir can be moved/copied wholesale). Missing sources
+// are skipped (left for relink-on-load). Called from saveProjectAs after adopt, when
+// editPath is the new on-disk file so the relative reference computes correctly.
+void MoshEngine::consolidateAudioInto (const juce::File& projectDir)
+{
+    auto audioDir = projectDir.getChildFile ("audio");
+    audioDir.createDirectory();
+    for (auto* t : te::getAudioTracks (*editPtr))
+        if (t != nullptr)
+            for (auto* c : t->getClips())
+                if (auto* w = dynamic_cast<te::WaveAudioClip*> (c))
+                {
+                    const auto src = w->getCurrentSourceFile();
+                    if (! src.existsAsFile() || src.isAChildOf (projectDir))
+                        continue;                         // missing (relink) or already local
+                    auto dest = audioDir.getChildFile (src.getFileName());
+                    for (int n = 2; dest.existsAsFile() && dest.getSize() != src.getSize(); ++n)
+                        dest = audioDir.getChildFile (src.getFileNameWithoutExtension()
+                                                      + "_" + juce::String (n) + src.getFileExtension());
+                    if (! dest.existsAsFile())
+                        src.copyFileTo (dest);
+                    c->getSourceFileReference().setToDirectFileReference (dest, true);   // relative
+                    c->sourceMediaChanged();          // refresh the clip's cached source file
+                }
 }
 
 void MoshEngine::reloadFromFile()
@@ -319,13 +426,14 @@ void MoshEngine::reloadFromFile()
     editPtr->getTransport().stop (false, false);
     editPtr.reset();
     editPtr = te::loadEditFromFile (*enginePtr, editPath);
-    editPtr->editFileRetriever = [this] { return editPath; };
+    wireEditResolvers();
+    dirty = false;                          // freshly loaded from disk (gap 1)
 }
 
 void MoshEngine::adoptEditFile (const juce::File& file)
 {
     editPath = file;
-    editPtr->editFileRetriever = [this] { return editPath; };
+    wireEditResolvers();
 }
 
 void MoshEngine::newProject (const juce::File& file)
@@ -355,6 +463,7 @@ void MoshEngine::newProject (const juce::File& file)
     editPtr->getUndoManager().clearUndoHistory();
     adoptEditFile (file);
     save();                                  // write the new empty .tracktionedit to disk
+    rememberProject (file);                  // gap 2 — record as last/recent project
 }
 
 void MoshEngine::openProject (const juce::File& file)
@@ -365,6 +474,8 @@ void MoshEngine::openProject (const juce::File& file)
     editPtr.reset();
     editPtr = te::loadEditFromFile (*enginePtr, file);
     adoptEditFile (file);
+    save();                                  // gap 2 — parity with newProject: persist on adopt (also clears dirty)
+    rememberProject (file);                  // gap 2 — record as last/recent project
 }
 
 bool MoshEngine::saveProjectAs (const juce::File& file)
@@ -375,7 +486,12 @@ bool MoshEngine::saveProjectAs (const juce::File& file)
     // the native save dialog (the only caller path) has already confirmed it.
     const bool ok = te::EditFileOperations (*editPtr).saveAs (file, true);
     if (ok)
-        adoptEditFile (file);
+    {
+        adoptEditFile (file);                              // re-points editPath + resolvers (gap 3)
+        consolidateAudioInto (file.getParentDirectory()); // gap 3 — copy audio local + re-point relative
+        save();                                            // persist the consolidated relative refs (clears dirty)
+        rememberProject (file);                            // gap 2 — record as last/recent project
+    }
     return ok;
 }
 

@@ -73,6 +73,7 @@ private:
     juce::var cmdRenameClip     (const juce::var& args);
     juce::var cmdSetClipMute    (const juce::var& args);
     juce::var cmdSetClipGain    (const juce::var& args);
+    juce::var cmdRelinkClip     (const juce::var& args);   // gap 3 — re-point a missing wave source
     // Audio warp — auto-tempo: the clip re-anchors in BEATS and time-stretches to
     // follow the tempo map (SoundTouch; warp MARKERS are a deferred subsystem).
     juce::var cmdSetClipWarp    (const juce::var& args);
@@ -280,7 +281,7 @@ private:
     // Agent "Monster changes": inside a batch (batch_begin..batch_end) every command
     // coalesces into the ONE transaction batch_begin opened, so the whole batch undoes
     // as a single step. Outside a batch this is identical to the old per-command call.
-    void beginTxn (const juce::String& name) { if (! inBatch) undoManager().beginNewTransaction (name); }
+    void beginTxn (const juce::String& name) { eng.markDirty(); if (! inBatch) undoManager().beginNewTransaction (name); }
 
     /** The JUCE device manager under Tracktion's wrapper — the object the device
         picker drives (the same one MoshEngine::applyRequestedAudioOutputDevice

@@ -1830,6 +1830,169 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         npFile.deleteFile(); npFile2.deleteFile(); saFile.deleteFile();
     }
 
+    // ─── Project safety: auto-save / dirty flag (DATA-LOSS gap 1) ───
+    // Closing the window with unsaved changes used to lose work (no save-on-quit, no
+    // auto-save). The fix is a dirty flag every mutation sets, cleared on save; the GUI
+    // app drives a periodic auto-save + save-on-quit off it. The timer itself is GUI-only
+    // (no message loop headless), so we test the underlying mechanism directly.
+    section ("Project safety: auto-save / dirty flag (gap 1)");
+    {
+        auto sess = [&] { return ops.snapshot().getProperty ("session", var()); };
+        const int n0 = tracks (ops);
+
+        // A clean save zeroes the flag; the snapshot mirrors it.
+        check (ok (cmd (ops, "save")), "save establishes a clean baseline");
+        check (! eng.isDirty(), "engine clean immediately after save");
+        check (! (bool) sess().getProperty ("dirty", true), "snapshot.session.dirty false when clean");
+
+        // A mutating command marks the Edit dirty (so auto-save / quit will persist it).
+        check (ok (cmd (ops, "create_track", args1 ("name", "DirtyProbe"))), "create_track ok");
+        check (eng.isDirty(), "mutating command marks the engine dirty");
+        check ((bool) sess().getProperty ("dirty", false), "snapshot.session.dirty true when dirty");
+
+        // saveIfDirty persists + clears; a second call is a no-op (nothing to save).
+        check (eng.saveIfDirty(), "saveIfDirty saves when dirty (returns true)");
+        check (! eng.isDirty(), "engine clean after saveIfDirty");
+        check (! eng.saveIfDirty(), "saveIfDirty is a no-op when clean (returns false)");
+
+        // The plain save command also clears the flag.
+        check (ok (cmd (ops, "create_track", args1 ("name", "DirtyProbe2"))), "second mutation ok");
+        check (eng.isDirty(), "dirty again after another mutation");
+        check (ok (cmd (ops, "save")), "save command ok");
+        check (! eng.isDirty(), "save command clears the dirty flag");
+
+        // Teardown: revert the two probe tracks (each its own transaction) + persist clean.
+        check (ok (cmd (ops, "undo")), "undo probe 2"); check (ok (cmd (ops, "undo")), "undo probe 1");
+        check (tracks (ops) == n0, "probe tracks reverted (clean teardown)");
+        cmd (ops, "save");
+    }
+
+    // ─── Project safety: reopen last project on relaunch (gap 2) ───
+    // Relaunch always loaded the fixed session.tracktionedit, never the project the user
+    // last worked in (no Recent list either). The fix persists session/last-project.json
+    // on every new/open/save-as; the ctor resolves the startup edit via startupEditFile().
+    // The app-restart path itself went untested (why this gap was undetected), so we test
+    // the decision method directly here.
+    section ("Project safety: reopen last project on relaunch (gap 2)");
+    {
+        const auto sessionEdit = eng.editFile();
+        const auto defaultEdit = eng.sessionDir().getChildFile ("session.tracktionedit");
+        const auto lastJson    = eng.sessionDir().getChildFile ("last-project.json");
+
+        // (a) rememberProject persists the path; startupEditFile resolves to it — i.e. a
+        // relaunch would reopen it (this is the previously-untested app-restart decision).
+        auto probe = eng.sessionDir().getChildFile ("projects").getChildFile ("relaunch-probe.tracktionedit");
+        probe.getParentDirectory().createDirectory();
+        probe.replaceWithText ("<EDIT/>");   // a real file so existsAsFile() passes
+        eng.rememberProject (probe);
+        check (lastJson.existsAsFile(), "rememberProject writes last-project.json");
+        check (eng.startupEditFile() == probe, "startupEditFile resolves to the remembered project (relaunch reopens it)");
+
+        // (b) a missing remembered project falls back to the default session file.
+        eng.rememberProject (eng.sessionDir().getChildFile ("projects").getChildFile ("does-not-exist.tracktionedit"));
+        check (eng.startupEditFile() == defaultEdit, "startupEditFile falls back to session.tracktionedit when the last project is missing");
+
+        // (c) new_project records itself as last + appears in the snapshot Recent list,
+        // newest-first; open_project updates it too.
+        check (ok (cmd (ops, "new_project", args1 ("name", "relaunch-A"))), "new_project relaunch-A ok");
+        const auto editA = eng.editFile();
+        check (eng.startupEditFile() == editA, "new_project updates the remembered last project");
+        check (ok (cmd (ops, "new_project", args1 ("name", "relaunch-B"))), "new_project relaunch-B ok");
+        const auto editB = eng.editFile();
+        auto recents = ops.snapshot().getProperty ("session", var()).getProperty ("recentProjects", var());
+        check (recents.isArray() && recents.size() >= 2, "snapshot.session.recentProjects lists projects");
+        check (recents[0].getProperty ("path", var()).toString() == editB.getFullPathName(), "recentProjects is newest-first (relaunch-B first)");
+        check (ok (cmd (ops, "open_project", args1 ("file", editA.getFullPathName()))), "open_project relaunch-A ok");
+        check (eng.startupEditFile() == editA, "open_project updates the remembered last project");
+
+        // teardown: restore the harness session edit for later sections.
+        check (ok (cmd (ops, "open_project", args1 ("file", sessionEdit.getFullPathName()))), "restored the session edit (gap2 teardown)");
+        probe.deleteFile();
+    }
+
+    // ─── Project safety: portable projects + relink (gap 3) ───
+    // Projects shared one absolute-path audio pool (~/Library/Mosh/session), so a saved/
+    // copied .tracktionedit pointed back at the pool and broke when moved. The fix sets a
+    // filePathResolver and consolidates referenced audio into a project-local audio/ dir on
+    // Save As (relative refs → portable), plus a relink_clip command + a sourceMissing flag.
+    section ("Project safety: portable projects + relink (gap 3)");
+    {
+        const auto sessionEdit = eng.editFile();
+        const auto poolAudio   = eng.sessionDir().getChildFile ("audio");
+
+        // local snapshot helpers (the trackById/clip helpers elsewhere are out of scope here)
+        auto trackVar = [&] (const String& tid) -> var {
+            auto trks = ops.snapshot().getProperty ("tracks", var());
+            for (int i = 0; i < trks.size(); ++i)
+                if (trks[i].getProperty ("id", var()).toString() == tid) return trks[i];
+            return var();
+        };
+        auto clipById = [&] (const String& cid) -> var {
+            auto trks = ops.snapshot().getProperty ("tracks", var());
+            for (int i = 0; i < trks.size(); ++i) {
+                auto cl = trks[i].getProperty ("clips", var());
+                for (int j = 0; j < cl.size(); ++j)
+                    if (cl[j].getProperty ("id", var()).toString() == cid) return cl[j];
+            }
+            return var();
+        };
+
+        // A project with one wave clip whose audio lives in the shared session pool.
+        check (ok (cmd (ops, "new_project", args1 ("name", "portable-src"))), "new_project portable-src ok");
+        auto trk = cmd (ops, "create_track", args1 ("name", "Aud"));
+        const auto trackId = trk["data"].getProperty ("trackId", var()).toString();
+        check (trackId.isNotEmpty(), "create_track returned a trackId");
+        check (ok (cmd (ops, "add_test_tone_clip", objN ({ { "trackId", trackId }, { "seconds", 1 }, { "freq", 330 } }))), "add_test_tone_clip ok");
+        const auto poolSrc = File (firstTrack (ops)["clips"][0].getProperty ("sourceFile", var()).toString());
+        check (poolSrc.isAChildOf (poolAudio), "clip audio starts in the shared session pool");
+
+        // Save As to a standalone dir OUTSIDE the pool → consolidation copies audio local.
+        auto destDir  = File::getSpecialLocation (File::tempDirectory).getChildFile ("mosh-portable-src");
+        destDir.deleteRecursively(); destDir.createDirectory();
+        auto destEdit = destDir.getChildFile ("portable.tracktionedit");
+        check (ok (cmd (ops, "save_as", args1 ("file", destEdit.getFullPathName()))), "save_as ok");
+        check (destDir.getChildFile ("audio").isDirectory(), "save_as created a project-local audio/ dir");
+        check (destDir.getChildFile ("audio").getNumberOfChildFiles (File::findFiles) >= 1, "save_as consolidated audio into the project");
+
+        // On-disk edit must reference audio RELATIVELY (portable), never the shared pool.
+        const auto xml = destEdit.loadFileAsString();
+        check (! xml.contains (poolAudio.getFullPathName()), "saved edit has no shared-pool absolute audio path");
+        check (xml.contains ("audio/") && ! xml.contains ("../audio"), "saved edit references audio by a co-located relative path (no ../)");
+
+        // PROVE portability: copy the whole project elsewhere, hide the ORIGINAL pool source
+        // so resolution can ONLY succeed via the co-located copy, then open the copy.
+        auto moved = File::getSpecialLocation (File::tempDirectory).getChildFile ("mosh-portable-moved");
+        moved.deleteRecursively();
+        check (destDir.copyDirectoryTo (moved), "copied the project dir to a new location");
+        auto poolBak = poolSrc.getSiblingFile (poolSrc.getFileName() + ".gap3bak");
+        poolBak.deleteFile(); poolSrc.moveFileTo (poolBak);     // hide the original
+        check (ok (cmd (ops, "open_project", args1 ("file", moved.getChildFile ("portable.tracktionedit").getFullPathName()))), "open the moved project ok");
+        auto movedClip = firstTrack (ops)["clips"][0];
+        check (! (bool) movedClip.getProperty ("sourceMissing", true), "moved project's clip resolves to co-located audio (portable)");
+        check (File (movedClip.getProperty ("sourceFile", var()).toString()).isAChildOf (moved), "resolved source is inside the moved project dir");
+        poolBak.moveFileTo (poolSrc);                            // restore the pool original
+
+        // relink: a clip whose source goes missing reports sourceMissing; relink_clip fixes it.
+        check (ok (cmd (ops, "open_project", args1 ("file", sessionEdit.getFullPathName()))), "reopened session edit");
+        auto rtrk = cmd (ops, "create_track", args1 ("name", "Relink"));
+        const auto rtid = rtrk["data"].getProperty ("trackId", var()).toString();
+        check (ok (cmd (ops, "add_test_tone_clip", objN ({ { "trackId", rtid }, { "seconds", 1 }, { "freq", 440 }, { "name", "relinkme" } }))), "add relink probe clip ok");
+        auto rClip = trackVar (rtid).getProperty ("clips", var())[0];
+        const auto rClipId = rClip.getProperty ("id", var()).toString();
+        File rSrc (rClip.getProperty ("sourceFile", var()).toString());
+        check (! (bool) rClip.getProperty ("sourceMissing", true), "relink probe clip initially present");
+        // copy to a relink target, then delete the original source
+        auto relinkTarget = eng.sessionDir().getChildFile ("audio").getChildFile ("relink-target.wav");
+        relinkTarget.deleteFile(); rSrc.copyFileTo (relinkTarget); rSrc.deleteFile();
+        check ((bool) clipById (rClipId).getProperty ("sourceMissing", false), "deleted source reports sourceMissing");
+        check (ok (cmd (ops, "relink_clip", objN ({ { "clipId", rClipId }, { "file", relinkTarget.getFullPathName() } }))), "relink_clip ok");
+        check (! (bool) clipById (rClipId).getProperty ("sourceMissing", true), "relink_clip clears sourceMissing");
+
+        // teardown
+        check (ok (cmd (ops, "open_project", args1 ("file", sessionEdit.getFullPathName()))), "restored the session edit (gap3 teardown)");
+        destDir.deleteRecursively(); moved.deleteRecursively();
+    }
+
     // ─── PRF-001 — multicore audio thread preference + readout ───
     // A GENUINE, load-bearing knob (drives EngineBehaviour::getNumberOfCPUsToUseForAudio()
     // -> setNumThreads(N-1) on the parallel graph), valid headless (no audio device).

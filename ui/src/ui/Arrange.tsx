@@ -18,6 +18,7 @@
 // use rect-relative coords (getBoundingClientRect already folds in scrollLeft).
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { pickFiles } from "../bridge";
 import { useStore, type Peaks } from "../store";
 import { tempoMapFrom, gridLines } from "../time";
 import { deriveTakeLanes } from "./takeLanes";
@@ -367,11 +368,24 @@ function ClipBlock({
       className={`clip ${clip.type}${selected ? " selected" : ""}${tool === "split" ? " splitcur" : ""}`}
       data-testid="clip" data-clip-id={clip.id} data-clip-start={pos.start} data-clip-length={pos.length}
       data-state={selected ? "selected" : "idle"} data-dragging={drag.current ? "true" : "false"}
+      data-source-missing={clip.sourceMissing ? "true" : "false"}
       style={{ left, width: widthPx }}
       onPointerDown={beginDrag("move")} onPointerMove={onMove} onPointerUp={onUp}
       onDoubleClick={() => { if (clip.type === "midi") openPianoRoll(clip.id); }}
     >
-      <div className="label">{clip.name}{takeLanes.length > 0 && <span className="take-count"> · {takeLanes.length} takes</span>}</div>
+      <div className="label">
+        {clip.name}
+        {clip.sourceMissing && (
+          <button className="clip-relink" data-testid="clip-relink" title="Source audio missing — click to relink" aria-label="Relink missing audio"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={async (e) => {
+              e.stopPropagation();
+              const r = await pickFiles({ title: `Relink audio for ${clip.name}` });
+              if (r.ok && r.files[0]) void exec("relink_clip", { clipId: clip.id, file: r.files[0] });
+            }}>⚠ relink</button>
+        )}
+        {takeLanes.length > 0 && <span className="take-count"> · {takeLanes.length} takes</span>}
+      </div>
       {takeLanes.length > 0 ? (
         <div className="take-lanes" data-testid="take-lanes" data-num-takes={takeLanes.length}>
           {takeLanes.map((ln) => (

@@ -211,6 +211,13 @@ public:
                                });
         mainWindow->shell().load();
 
+        // gap 1 — periodic auto-save once the GUI is live: every 30s, persist iff the
+        // Edit is dirty, so a window-close or crash never loses more than ~30s of work.
+        // Save-on-quit (shutdown) is the belt-and-suspenders. GUI-only — headless
+        // harnesses return/quit before reaching here, so the timer is never armed.
+        autoSave.onTick = [this] { if (engine != nullptr) engine->saveIfDirty(); };
+        autoSave.startTimer (30000);
+
         // Scripted Stage 3 demo: build a hosted-plugin session + open a native
         // editor, then leave the GUI running for visual verification.
         if (commandLine.contains ("--demo3"))
@@ -225,6 +232,11 @@ public:
 
     void shutdown() override
     {
+        autoSave.stopTimer();
+        // gap 1 — save-on-quit: persist any unsaved work before teardown (GUI only;
+        // headless harnesses have no mainWindow and manage their own isolated session).
+        if (engine != nullptr && mainWindow != nullptr)
+            engine->saveIfDirty();
         mainWindow.reset();
         remoteServer.reset();
         moshOps.reset();
@@ -234,10 +246,19 @@ public:
     void systemRequestedQuit() override { quit(); }
 
 private:
+    // GUI-only periodic auto-save (gap 1). Lambda-driven juce::Timer; armed after the
+    // window loads, stopped + flushed in shutdown().
+    struct AutoSaveTimer : juce::Timer
+    {
+        std::function<void()> onTick;
+        void timerCallback() override { if (onTick) onTick(); }
+    };
+
     std::unique_ptr<MoshEngine> engine;
     std::unique_ptr<MoshOps>    moshOps;
     std::unique_ptr<RemoteCompanionServer> remoteServer;
     std::unique_ptr<MainWindow> mainWindow;
+    AutoSaveTimer autoSave;
 };
 
 } // namespace mosh
