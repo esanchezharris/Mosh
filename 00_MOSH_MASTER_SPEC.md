@@ -1,5 +1,8 @@
 # Mosh — Master Build Spec (v0)
 
+> **Status:** Design spec — the source of truth for *how* Mosh v0 was built (all six stages PASSED). **New to the repo? Start with [ARCHITECTURE.md](ARCHITECTURE.md)** for the 2-minute on-ramp, then return here for depth. Current build/gate status lives in [CLAUDE.md](CLAUDE.md).
+> *Spec-set numbering note:* `02` lives at [docs/02_MOSHOPS_CONTRACT.md](docs/02_MOSHOPS_CONTRACT.md) (reconstructed); there is no standalone `03` — the WebView UI is covered by [ARCHITECTURE.md](ARCHITECTURE.md) plus `docs/02_MOSHOPS_CONTRACT.md`.
+
 *A native, hybrid digital audio workstation. Tracktion Engine + JUCE 8/C++20 for the audio + DAW core; a React/Vite arrangement UI in a JUCE 8 WebView; a typed command surface (**MoshOps**) as the single mutation API; traditional VST3 plugins alongside two neural tiers — real-time in-process inserts (NAM/Proteus/RAVE/DDSP) and an offline generative layer behind a model-neutral adapter (Stable Audio 3 first).*
 
 **This is the entry document.** It defines the vision, the locked decisions, the architecture, the module map, and the staged build plan. Each module has its own spec (`01`–`06`); this doc says what they are and the order to build them. Written to seed an autonomous overnight coding run — assume the implementing agent does **not** have the conversation that produced this.

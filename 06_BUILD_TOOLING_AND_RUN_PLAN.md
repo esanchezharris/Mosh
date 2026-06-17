@@ -1,5 +1,7 @@
 # 06 — Build Tooling & the Overnight Run Plan
 
+> **Status:** Design spec — source of truth for *how* the build/tooling was set up (v0, gate PASSED). New to the repo? Start with [ARCHITECTURE.md](ARCHITECTURE.md); build status is in [CLAUDE.md](CLAUDE.md).
+
 *Scope: the build system (Pamplejuce adapted to a standalone-app target + a Vite frontend), dependency acquisition/pinning, tests/CI, the model-service packaging/launch, and the staged plan an autonomous run follows with its gates. Read first.*
 
 **Depends on:** nothing (bootstrap). **Consumed by:** all modules.

@@ -1,5 +1,7 @@
 # 07 — Deferred Lanes & Model-Landscape Notes
 
+> **Status:** Context & parking-lot — model landscape, deferred lanes, license posture. **Not build work.** For what's actually built, see [ARCHITECTURE.md](ARCHITECTURE.md).
+
 *Durable home for the model-survey findings and the deferred lanes, so they live somewhere without bloating the build specs (`00`–`06`). Nothing here is v0 build work; it's context, parking lot, and the model inventory the adapter/host design must keep room for. Read for orientation, not as instructions.*
 
 > **Scope reminder:** this is **private personal research** and **macOS / Apple Silicon only** for v0. Two consequences run through this doc: (1) the licensing column below is recorded **for awareness only** — it does **not** gate any v0 choice (it only matters *if* the project later goes commercial); (2) Mac-only removes the main objection to Apple-Silicon-centric models like MRT2.

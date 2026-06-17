@@ -2,7 +2,9 @@
 
 *Flat, tick-through checklist for the autonomous build. Collapses the gates and `// VERIFY` items from specs `00`–`06`. Place at repo root so Claude Code auto-loads it. Specs are the source of truth for **how**; this file is the source of truth for **what's done / what's next**.*
 
-**Spec set:** `00_MOSH_MASTER_SPEC.md` (start) → `01_ENGINE_STATE_AND_SOURCE_GRAPH.md` → `02_MOSHOPS_AND_STATE_FEED.md` → `03_WEBVIEW_UI.md` → `04_PLUGIN_CHAIN_AND_REALTIME_NEURAL.md` → `05_GENERATIVE_LAYER.md` → `06_BUILD_TOOLING_AND_RUN_PLAN.md`. `07_DEFERRED_AND_MODEL_NOTES.md` is context/parking-lot (model landscape, deferred lanes, license posture) — not build work.
+> **New to the repo? Read [ARCHITECTURE.md](ARCHITECTURE.md) first** — the 2-minute map of what Mosh is (native app + WebView UI + native engine), where each module lives, and what the app can actually do. This manifest is just build status.
+
+**Spec set:** `00_MOSH_MASTER_SPEC.md` (start) → `01_ENGINE_STATE_AND_SOURCE_GRAPH.md` → **`02`** (lives at [`docs/02_MOSHOPS_CONTRACT.md`](docs/02_MOSHOPS_CONTRACT.md), reconstructed) → *(no standalone `03` — the WebView UI is covered by [ARCHITECTURE.md](ARCHITECTURE.md))* → `04_PLUGIN_CHAIN_AND_REALTIME_NEURAL.md` → `05_GENERATIVE_LAYER.md` → `06_BUILD_TOOLING_AND_RUN_PLAN.md`. `07_DEFERRED_AND_MODEL_NOTES.md` is context/parking-lot (model landscape, deferred lanes, license posture) — not build work.
 
 ---
 
@@ -71,33 +73,11 @@ Build the arrangement incrementally within Stage 2/6: static clips → drag/move
 
 ---
 
-## Consolidated `// VERIFY` (resolve against the pinned clone)
+## API resolutions & open questions
 
-**Engine / state (`01`)** — see `docs/ENGINE_API_NOTES.md` for exact signatures
-- [x] `createEmptyEdit` / `Edit` ctor / `insertNewAudioTrack` signatures. RESOLVED: `te::createEmptyEdit(engine, file)→unique_ptr<Edit>`; `edit.insertNewAudioTrack(TrackInsertPoint, SelectionManager*, bool)` or `ensureNumberOfAudioTracks`+`getAudioTracks(edit)[i]`; `insertWaveClip(name,file,ClipPosition,bool)`.
-- [x] Edit save call. RESOLVED: `te::EditFileOperations(edit).save(warn,force,offerDiscard)` / `.writeToFile(file,quick)` — NOT a bare `edit.save()`.
-- [ ] `MOSH_RENDERLAYER` parent: clip (default) vs track. (Decide at Stage 5; start under clip.)
+All `// VERIFY` items from specs `00`–`06` were resolved against the pinned `tracktion_engine` clone (`2877b621`). **Exact signatures + the file-based fallbacks taken (new-clip landing, `renderToFile`, peak-array waveforms, the latency delay-line) live in [`docs/ENGINE_API_NOTES.md`](docs/ENGINE_API_NOTES.md);** the runtime shape is summarized in [ARCHITECTURE.md](ARCHITECTURE.md) §3.
 
-**MoshOps / feed (`02`)**
-- [ ] Event-vs-snapshot granularity per surface; undo/redo as `snapshot_invalidated` resync vs precise inverse-deltas.
-- [ ] Whether selection is mirrored to backend (prefer explicit command target args).
-
-**WebView (`03`)**
-- [x] JUCE 8 WebView native-fn registration + C++→JS emit API. RESOLVED + working: `WebBrowserComponent::Options().withNativeIntegrationEnabled().withResourceProvider(...).withNativeFunction(id, fn)`; emit via `wb.emitEventIfBrowserIsVisible(id, var)`. UI imports JUCE's own vendored `getNativeFunction` (`ui/src/juce/`). `ping()` round-trips live.
-- [x] Waveform delivery — RESOLVED: peak array per clip via `get_clip_peaks` (backend reads source WAV, min/max per bucket) → `<canvas>` in the UI. No audio on the web thread.
-
-**Plugins / Tier A (`04`)**
-- [x] `ExternalPlugin` editor-window accessor. RESOLVED: `ExternalPlugin::getAudioPluginInstance()` → `createEditorIfNeeded()` / `GenericAudioProcessorEditor`; `te::Plugin::EditorComponent` + `PluginWindowState` (see `examples/common/PluginWindow.h`).
-- [x] `LatencyPlugin` latency pattern — RESOLVED + implemented: `getLatencySeconds()` returns `latencySamples/sampleRate`; an internal delay line of exactly that length applied to the output (even on bypass → constant latency). PDC null test confirms the impulse emerges at exactly the reported latency (no drift).
-- [ ] anira `InferenceHandler::process`/`prepare` — DEFERRED (anira gated; v0 uses a self-contained RT-safe MLP). Resolve when `MOSH_ENABLE_ANIRA` is turned on for RAVE/DDSP.
-- [x] NAM/Proteus inline vs via anira — DECIDED: inline (self-contained MLP, zero-latency, RT-safe, no heavy backend) ships; anira's pool reserved for RAVE/DDSP.
-- [x] Bypassed-plugin PDC (forum #53709) — TESTED: bypass passes audio through unchanged and keeps latency constant (delay applied regardless of `isEnabled`), so PDC stays correct across bypass toggles.
-
-**Generative (`05`)**
-- [x] Takes/comp add+promote — RESOLVED via the **new-clip-on-neural-lane fallback** (05 §3.1): `accept_render` lands the output as a `WaveAudioClip` on a "Neural Renders" lane, lineage via the RenderLayer link. (Take-injection into a clip stays a later enhancement.)
-- [x] `Renderer::Parameters` fields + `renderToFile` — RESOLVED: `{engine, tracksToDo (BigInteger), allowedClips, destFile, audioFormat, bitDepth, sampleRateForAudio, time (TimeRange), realTimeRender}`; `Renderer::renderToFile(desc, Parameters)`. v0 stages a wave clip's source directly (equivalent for no-upstream-FX); `renderToFile` is the general path.
-- [x] Render-to-file (preferred) vs -to-buffer — chose **file-based** (the input.wav/output.wav/manifest job protocol).
-- [x] SA3 carve-out external deps + two hardcoded paths (App. B) — RESOLVED: `SA3_MLX_DIR` (the MLX SA3 port `~/AI/stable-audio-3/optimized/mlx`, weights in HF cache) and `COLORRACK_DATA` (built from the spike's validated axes). Judges via `MOSH_JUDGES_PY` (`~/AI/judges_venv`). Engine carved from the spike's `mlx_inproc.py`; nothing re-implemented; weights not vendored.
+Design micro-questions settled by the shipped implementation: `MOSH_RENDERLAYER` is **clip-parented**; undo/redo and structural changes resync via **`snapshot_invalidated`** (not inverse-deltas); selection is **UI-local** (commands carry explicit target args — no mirrored backend selection). Still gated: anira `InferenceHandler` (RAVE/DDSP) — v0 ships the inline RT-safe MLP; SA3 carve-out paths are env-driven (`SA3_MLX_DIR`, `COLORRACK_DATA`, `MOSH_JUDGES_PY`).
 
 ---
 

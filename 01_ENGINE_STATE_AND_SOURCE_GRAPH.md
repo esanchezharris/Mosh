@@ -1,5 +1,7 @@
 # 01 — Engine Store & the Source-Graph / RenderLayer Model
 
+> **Status:** Design spec — source of truth for *how* this subsystem was built (v0, gate PASSED). New to the repo? Start with [ARCHITECTURE.md](ARCHITECTURE.md); build status is in [CLAUDE.md](CLAUDE.md).
+
 *Scope: bring up Tracktion Engine; create/load Edits; treat the engine's ValueTree + UndoManager as the **store and undo implementation** (mutation flows through MoshOps, `02`); wire transport and device; define the non-destructive source-graph / RenderLayer model.*
 
 **Depends on:** `06` (build/deps). **Consumed by:** `02` (commands wrap these calls), all others.
