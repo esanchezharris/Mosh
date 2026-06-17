@@ -163,6 +163,89 @@ void MoshOps::unregisterAllMeterClients()
     meterClients.clear();
 }
 
+// ── master spectral feed (Moshi reactivity) ──────────────────────────────────
+MasterSpectralTapPlugin* MoshOps::findMasterSpectralTap()
+{
+    for (auto* p : eng.edit().getMasterPluginList().getPlugins())
+        if (auto* t = dynamic_cast<MasterSpectralTapPlugin*> (p))
+            return t;
+    return nullptr;
+}
+
+MasterSpectralTapPlugin* MoshOps::ensureMasterSpectralTap()
+{
+    if (auto* t = findMasterSpectralTap()) return t;
+    auto plugin = eng.edit().getPluginCache().createNewPlugin (MasterSpectralTapPlugin::xmlTypeName, {});
+    if (plugin == nullptr) return nullptr;
+    auto* t = dynamic_cast<MasterSpectralTapPlugin*> (plugin.get());
+    auto& list = eng.edit().getMasterPluginList();
+    list.insertPlugin (plugin, list.getPlugins().size(), nullptr);   // append → taps the final master output
+    return t;
+}
+
+// Drain the tap (message thread), window + Goertzel into 12 log-spaced bands +
+// overall level + spectral flux, and emit the `spectrum` event (mirrors `levels`).
+void MoshOps::emitSpectrum (bool playing)
+{
+    if (! playing)
+    {
+        Array<var> z; for (int b = 0; b < 12; ++b) z.add (0.0f);
+        spectralPrevBands.fill (0.0f);
+        auto* zp = new DynamicObject(); zp->setProperty ("bands", z); zp->setProperty ("level", 0.0f); zp->setProperty ("flux", 0.0f);
+        emit ("spectrum", var (zp));
+        return;
+    }
+
+    auto* tap = ensureMasterSpectralTap();
+    if (tap == nullptr) return;
+
+    float scratch[2048];
+    const int got = tap->read (scratch, 2048);
+    for (int i = 0; i < got; ++i) { spectralRing[(size_t) spectralRingPos] = scratch[i]; if (++spectralRingPos >= 1024) spectralRingPos = 0; }
+
+    float win[1024];
+    double sumsq = 0.0;
+    for (int i = 0; i < 1024; ++i)
+    {
+        const int idx = (spectralRingPos + i) & 1023;
+        const float wnd = 0.5f - 0.5f * std::cos (juce::MathConstants<float>::twoPi * (float) i / 1023.0f);
+        const float s = spectralRing[(size_t) idx] * wnd;
+        win[i] = s; sumsq += (double) s * (double) s;
+    }
+    const float levelDb = 20.0f * std::log10 ((float) std::sqrt (sumsq / 1024.0) + 1e-9f);
+    const float level = juce::jlimit (0.0f, 1.0f, (levelDb + 60.0f) / 60.0f);
+
+    const double sr = tap->getSampleRate() > 0.0 ? tap->getSampleRate() : 48000.0;
+    static const float centers[12] = { 55, 80, 120, 180, 260, 380, 550, 800, 1200, 2000, 3500, 7000 };
+    Array<var> bandsVar; float flux = 0.0f;
+    for (int b = 0; b < 12; ++b)
+    {
+        const float f = centers[b] / (float) sr;
+        float nb = 0.0f;
+        if (f < 0.5f)
+        {
+            const double w = juce::MathConstants<double>::twoPi * (double) f;
+            const double coeff = 2.0 * std::cos (w);
+            double sp = 0.0, sp2 = 0.0;
+            for (int i = 0; i < 1024; ++i) { const double s = (double) win[i] + coeff * sp - sp2; sp2 = sp; sp = s; }
+            const double power = sp2 * sp2 + sp * sp - coeff * sp * sp2;
+            const double mag = std::sqrt (juce::jmax (0.0, power)) / 512.0;
+            const float db = 20.0f * std::log10 ((float) mag + 1e-9f);
+            nb = juce::jlimit (0.0f, 1.0f, (db + 66.0f) / 60.0f);
+        }
+        flux += juce::jmax (0.0f, nb - spectralPrevBands[(size_t) b]);
+        spectralPrevBands[(size_t) b] = nb;
+        bandsVar.add (nb);
+    }
+    flux = juce::jlimit (0.0f, 1.0f, flux / 3.0f);
+
+    auto* p = new DynamicObject();
+    p->setProperty ("bands", bandsVar);
+    p->setProperty ("level", level);
+    p->setProperty ("flux", flux);
+    emit ("spectrum", var (p));
+}
+
 void MoshOps::timerCallback()
 {
     // Push a decimated transport delta while playing (and once on the
@@ -209,6 +292,13 @@ void MoshOps::timerCallback()
         payload->setProperty ("master", var (master));
         emit ("levels", var (payload));
     }
+
+    // Master spectral feed (Moshi reactivity). Only live with a real playback context
+    // (an audio device) — headless / --selftest has none, so the tap is NEVER inserted
+    // and the edit state is untouched. One zero on the play→stop edge so Moshi settles.
+    const bool spectrumLive = playing && transport.getCurrentPlaybackContext() != nullptr;
+    if (spectrumLive)            { emitSpectrum (true);  spectrumActive = true; }
+    else if (spectrumActive)     { emitSpectrum (false); spectrumActive = false; }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

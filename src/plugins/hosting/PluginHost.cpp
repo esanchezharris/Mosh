@@ -1,5 +1,6 @@
 #include "PluginHost.h"
 #include "plugins/neural/NeuralInsertPlugin.h"
+#include "plugins/spectral/MasterSpectralTapPlugin.h"
 #include <thread>
 #include <unistd.h>   // getpid
 
@@ -146,6 +147,9 @@ void PluginHost::initialise()
 
     // Register Mosh's built-in Tier-A neural insert (04 §2.2) once.
     engine.getPluginManager().createBuiltInType<NeuralInsertPlugin>();
+    // Register the master spectral tap (Moshi reactivity) — a pure-measure passthrough
+    // appended to the master plugin list, drained at 30 Hz to feed Moshi's body.
+    engine.getPluginManager().createBuiltInType<MasterSpectralTapPlugin>();
 
     // A pedal left from the previous run means a component crashed mid-scan ->
     // quarantine it before we scan anything (INS-005 crash recovery).

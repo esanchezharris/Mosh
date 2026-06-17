@@ -1,11 +1,13 @@
 #pragma once
 
 #include <tracktion_engine/tracktion_engine.h>
+#include <array>
 #include <functional>
 #include <map>
 #include <memory>
 #include "engine/MoshEngine.h"
 #include "plugins/hosting/PluginHost.h"
+#include "plugins/spectral/MasterSpectralTapPlugin.h"
 #include "generative/GenerativeJobManager.h"
 
 namespace mosh
@@ -246,6 +248,18 @@ private:
     std::map<juce::String, std::unique_ptr<MeterTap>> meterClients;
     te::LevelMeasurer::Client masterClient;
     te::EditPlaybackContext*  lastSeenContext = nullptr;
+
+    // ── master spectral feed (Moshi reactivity) ── drain a pure-measure tap on the
+    // master plugin list at 30 Hz, window + Goertzel into 12 log-spaced bands, and
+    // emit the `spectrum` event (mirrors `levels`). All on the message thread.
+    MasterSpectralTapPlugin* ensureMasterSpectralTap();   // find on the master list or append
+    MasterSpectralTapPlugin* findMasterSpectralTap();
+    void  emitSpectrum (bool playing);                    // drain tap → Goertzel bands → emit
+    std::array<float, 1024> spectralRing {};              // rolling mono history
+    int   spectralRingPos = 0;
+    std::array<float, 12> spectralPrevBands {};           // for spectral flux
+    bool  spectrumActive = false;                         // emit one zero on the play→stop edge
+
     juce::var       pluginToVar (te::Plugin&, int index);
     juce::var       trackToVar (te::AudioTrack&, int index);
     juce::var       clipToVar  (te::Clip&);
