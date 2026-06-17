@@ -245,7 +245,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       const t = findTrack(str(args.trackId)) ?? snapshot.tracks[0];
       if (!t) return err(command, "no track");
       pushUndo();
-      const c = waveClip("tone", num(args.start, snapshot.transport.position), num(args.length, 2));
+      const c = waveClip("tone", num(args.start, snapshot.transport.position), num(args.seconds, 2));
       t.clips.push(c); invalidate(); return ok(command, { clipId: c.id });
     }
     case "import_clip": {
@@ -296,9 +296,9 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     }
     case "rename_clip": { const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found"); pushUndo(); f.clip.name = str(args.name, f.clip.name); invalidate(); return ok(command); }
     case "set_clip_mute": { const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found"); pushUndo(); f.clip.mute = Boolean(args.mute); invalidate(); return ok(command); }
-    case "set_clip_gain": { const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found"); pushUndo(); f.clip.gainDb = num(args.db); invalidate(); return ok(command); }
+    case "set_clip_gain": { const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found"); pushUndo(); f.clip.gainDb = num(args.gainDb); invalidate(); return ok(command); }
 
-    case "set_tempo": { pushUndo(); snapshot.session.tempo = Math.max(20, num(args.tempo, snapshot.session.tempo)); invalidate(); return ok(command); }
+    case "set_tempo": { pushUndo(); snapshot.session.tempo = Math.max(20, num(args.bpm, snapshot.session.tempo)); invalidate(); return ok(command); }
     case "set_key": { pushUndo(); snapshot.session.key = { tonic: str(args.tonic, snapshot.session.key?.tonic ?? "A"), mode: str(args.mode, snapshot.session.key?.mode ?? "minor") }; invalidate(); return ok(command); }
     case "set_master_volume": { pushUndo(); if (snapshot.master) snapshot.master.volumeDb = num(args.db); invalidate(); return ok(command); }
 
@@ -343,7 +343,14 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     });
     case "set_buffer_size": { if (snapshot.session) snapshot.session.bufferSize = num(args.bufferSize, 512); invalidate(); return ok(command); }
     case "set_audio_threads": { if (snapshot.session) { snapshot.session.audioThreads = num(args.threads, 8); snapshot.session.audioThreadsAuto = false; } invalidate(); return ok(command); }
-    case "set_audio_device": case "set_project_settings": case "new_project": case "open_project": case "save_as": case "set_metronome": case "set_time_signature": return ok(command);
+    case "set_audio_device": case "set_project_settings": case "new_project": case "open_project": case "save_as": return ok(command);
+    case "set_metronome": { pushUndo(); snapshot.session.metronome = Boolean(args.enabled); invalidate(); return ok(command); }
+    case "set_time_signature": {
+      pushUndo();
+      snapshot.session.timeSigNumerator = Math.max(1, num(args.numerator, snapshot.session.timeSigNumerator));
+      snapshot.session.timeSigDenominator = num(args.denominator, snapshot.session.timeSigDenominator);
+      invalidate(); return ok(command);
+    }
     case "export_audio": return ok(command, { file: str(args.file) || "/mock/mixdown." + str(args.format, "wav"), format: str(args.format, "wav"), bitDepth: num(args.bitDepth, 24), sampleRate: num(args.sampleRate, SR), bytes: 794000, renderMode: "offline" });
     case "get_command_log": {
       const limit = Math.max(1, num(args.limit, 50));
@@ -522,4 +529,16 @@ export function mockExecute<T = unknown>(command: unknown): Promise<T> {
 }
 export function mockSnapshot<T = unknown>(): Promise<T> {
   return Promise.resolve(clone(snapshot) as unknown as T);
+}
+
+// Test-only: re-seed the in-memory backend to a clean state between tests and
+// stop the 30 Hz play timer (so a set_transport toggle leaves no open handle).
+// This module is dev-mock only — a production `vite build` strips it entirely.
+export function __resetMockForTests(): void {
+  stopPlayback();
+  snapshot = seedSnapshot();
+  history.length = 0;
+  future.length = 0;
+  inBatch = false;
+  cmdLog.length = 0;
 }
