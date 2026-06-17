@@ -2,6 +2,16 @@ import { expect, test, type APIRequestContext, type Locator, type Page } from "@
 import fs from "node:fs";
 import path from "node:path";
 
+// End-to-end against the REAL MoshOps backend over HTTP (snapshot+command seam),
+// driving main's rebuilt WebView UI through the data-testids it actually ships.
+//
+// The HTTP fixture (/api/snapshot, /api/command, /api/events) is the swappable
+// seam and is unchanged. The UI selectors below are the rebuilt shell's: the
+// canonical grid (Arrange), the bottom Dock (plugin/neural rack + generative
+// drawer), the Topbar transport, and the Toolbar (track ops / tools / undo).
+// Controls without a testid are reached by their visible role+text, exactly as a
+// user would. See ui/src/ui/*.tsx for the source of every locator used here.
+
 type Snapshot = {
   schemaVersion: number;
   session: { tempo: number; sampleRate?: number; editFile?: string };
@@ -15,7 +25,17 @@ type Snapshot = {
       offset: number;
       renderLayer?: { id: string; status: string };
     }>;
-    plugins: Array<{ id: string; type: string; name: string; bypassed: boolean }>;
+    // Rebuilt snapshot plugin shape: chain-indexed, no opaque id; bypass is the
+    // inverse of `enabled`; neural inserts carry a `neural` descriptor.
+    plugins: Array<{
+      index: number;
+      name: string;
+      type: string;
+      enabled: boolean;
+      neural?: unknown;
+      builtin?: boolean;
+      external?: boolean;
+    }>;
   }>;
   transport: {
     position: number;
@@ -97,6 +117,22 @@ async function dragClipEdge(page: Page, clip: Locator, edge: "left" | "right", d
   await page.mouse.up();
 }
 
+// Loop region is set by a shift-drag across the ruler (Arrange.onRulerDown/Move
+// → set_transport{loop,loopStart,loopEnd}); there is no loop button. Drag near
+// the left edge so both endpoints stay on-screen regardless of zoom.
+async function shiftDragRuler(page: Page, ruler: Locator, fromPx: number, toPx: number) {
+  const box = await ruler.boundingBox();
+  expect(box).not.toBeNull();
+  const y = box!.y + box!.height / 2;
+  await page.keyboard.down("Shift");
+  await page.mouse.move(box!.x + fromPx, y);
+  await page.mouse.down();
+  await delay(60);
+  await page.mouse.move(box!.x + toPx, y, { steps: 12 });
+  await page.mouse.up();
+  await page.keyboard.up("Shift");
+}
+
 async function saveScreenshot(page: Page, name: string) {
   const dir = process.env.MOSH_E2E_ARTIFACT_DIR;
   if (!dir) return;
@@ -105,41 +141,48 @@ async function saveScreenshot(page: Page, name: string) {
 }
 
 test("Mosh drives the real MoshOps backend over HTTP", async ({ page, request }) => {
+  // Console errors / page errors are hard failures; warnings are noisy in the
+  // WebView (favicon, audio device) and only logged, not asserted.
   const consoleProblems: string[] = [];
   page.on("console", (message) => {
-    if (["error", "warning"].includes(message.type())) {
-      consoleProblems.push(`${message.type()}: ${message.text()}`);
-    }
+    if (message.type() === "error") consoleProblems.push(`error: ${message.text()}`);
   });
   page.on("pageerror", (error) => consoleProblems.push(`pageerror: ${error.message}`));
 
   await page.goto("/");
   await expect(page).toHaveTitle(/Mosh/i);
-  await expect(page.getByTestId("app-shell")).toBeVisible();
-  await expect(page.getByTestId("backend-badge")).toContainText("backend: juce");
-  await expect(page.getByTestId("status-state")).toContainText("state ready");
+  await expect(page.getByTestId("app")).toBeVisible();
+  // Shell is up once the cold snapshot renders the topbar transport + arrangement.
+  await expect(page.getByTestId("transport")).toBeVisible();
+  await expect(page.getByTestId("arrangement")).toBeVisible();
 
   let snap = await snapshot(request);
   expect(snap.schemaVersion).toBeGreaterThanOrEqual(1);
   expect(typeof snap.session.tempo).toBe("number");
+
+  // Reset to an empty edit: removing every track leaves zero track headers.
   for (const track of snap.tracks) {
     await command(request, "remove_track", { trackId: track.id });
   }
   snap = await waitForSnapshot(request, (s) => s.tracks.length === 0);
   expect(snap.tracks).toHaveLength(0);
-  await expect(page.getByTestId("status-tracks")).toContainText("tracks 0");
+  await expect(page.getByTestId("track-header")).toHaveCount(0);
 
-  await page.getByTestId("add-track").click();
+  // Add a track via the Toolbar (create_track).
+  await page.getByRole("button", { name: "+ Track", exact: true }).click();
   snap = await waitForSnapshot(request, (s) => s.tracks.length === 1);
   await expect(page.getByTestId("track-header")).toHaveCount(1);
-
-  const lane = page.getByTestId("lane").first();
-  await lane.click({ position: { x: 220, y: 42 } });
-  snap = await waitForSnapshot(request, (s) => s.tracks[0]?.clips.length === 1);
   const trackId = snap.tracks[0].id;
+
+  // Select the track (the +Test Tone button is disabled until a track is current),
+  // then drop a test-tone wave clip onto it (add_test_tone_clip).
+  await page.getByTestId("track-header").first().locator(".tname").click();
+  await page.getByRole("button", { name: "+ Test Tone", exact: true }).click();
+  snap = await waitForSnapshot(request, (s) => s.tracks[0]?.clips.length === 1);
   const firstClipId = snap.tracks[0].clips[0].id;
   await expect(page.getByTestId("clip")).toHaveCount(1);
 
+  // Drag the clip body → move_clip.
   const clip = page.getByTestId("clip").first();
   const beforeMove = snap.tracks[0].clips[0].start;
   await dragBy(page, clip, 90);
@@ -148,6 +191,7 @@ test("Mosh drives the real MoshOps backend over HTTP", async ({ page, request })
     (s) => (s.tracks[0]?.clips[0]?.start ?? beforeMove) > beforeMove + 0.5,
   );
 
+  // Drag the right trim handle inward → trim_clip (shortens).
   const movedLength = snap.tracks[0].clips[0].length;
   await dragClipEdge(page, page.getByTestId("clip").first(), "right", -60);
   snap = await waitForSnapshot(
@@ -155,6 +199,7 @@ test("Mosh drives the real MoshOps backend over HTTP", async ({ page, request })
     (s) => (s.tracks[0]?.clips[0]?.length ?? movedLength) < movedLength - 0.25,
   );
 
+  // Drag the left trim handle inward → trim_clip (moves start later).
   const movedStart = snap.tracks[0].clips[0].start;
   await dragClipEdge(page, page.getByTestId("clip").first(), "left", 56);
   snap = await waitForSnapshot(
@@ -162,11 +207,15 @@ test("Mosh drives the real MoshOps backend over HTTP", async ({ page, request })
     (s) => (s.tracks[0]?.clips[0]?.start ?? movedStart) > movedStart + 0.15,
   );
 
-  await clip.dblclick();
+  // Split: pick the Split tool, then a click on the clip splits it (split_clip).
+  await page.getByRole("button", { name: "Split", exact: true }).click();
+  await page.getByTestId("clip").first().click();
   snap = await waitForSnapshot(request, (s) => s.tracks[0]?.clips.length === 2);
   await expect(page.getByTestId("clip")).toHaveCount(2);
   expect(snap.tracks[0].clips.some((c) => c.id === firstClipId)).toBeTruthy();
+  await page.getByRole("button", { name: "Move", exact: true }).click();
 
+  // Transport: play → stop (back to 0).
   await page.getByTestId("transport-play").click();
   snap = await waitForSnapshot(request, (s) => s.transport.playing);
   expect(snap.transport.playing).toBe(true);
@@ -175,120 +224,139 @@ test("Mosh drives the real MoshOps backend over HTTP", async ({ page, request })
   snap = await waitForSnapshot(request, (s) => !s.transport.playing && s.transport.position === 0);
   expect(snap.transport.position).toBe(0);
 
+  // Ruler click → seek.
   await page.getByTestId("ruler").click({ position: { x: 260, y: 12 } });
   snap = await waitForSnapshot(request, (s) => s.transport.position > 0.5);
   expect(snap.transport.position).toBeGreaterThan(0.5);
 
-  await page.getByTestId("transport-loop").click();
+  // Ruler shift-drag → loop region.
+  await shiftDragRuler(page, page.getByTestId("ruler"), 4, 260);
   snap = await waitForSnapshot(request, (s) => s.transport.looping === true);
-  expect(snap.transport.loopStart).toBe(0);
-  expect(snap.transport.loopEnd).toBe(8);
+  expect(snap.transport.looping).toBe(true);
+  expect(snap.transport.loopEnd!).toBeGreaterThan(snap.transport.loopStart!);
+  await expect(page.getByTestId("loop-region")).toBeVisible();
 
-  const basePluginIds = new Set(snap.tracks[0].plugins.map((p) => p.id));
-  await page.getByTestId("plugin-add").first().click();
-  await page.getByTestId("plugin-add-effect").filter({ hasText: "EQ" }).click();
+  // ── Plugins (bottom Dock rack for the selected track) ──────────────────────
+  // Add a built-in effect: + Plugin opens the browser; pick "4-Band EQ"
+  // (Tracktion reports its name as "Equaliser") via load_builtin.
+  await page.getByRole("button", { name: "+ Plugin", exact: true }).click();
+  await expect(page.getByTestId("plugin-browser")).toBeVisible();
+  await page.getByTestId("plugin-browser").getByRole("button", { name: /4-Band EQ/ }).click();
   snap = await waitForSnapshot(
     request,
-    (s) => s.tracks[0]?.plugins.some((p) => !basePluginIds.has(p.id) && /equal/i.test(p.name)) ?? false,
+    (s) => s.tracks[0]?.plugins.some((p) => /equal/i.test(p.name)) ?? false,
   );
-  const eq = snap.tracks[0].plugins.find((p) => !basePluginIds.has(p.id) && /equal/i.test(p.name));
+  const eq = snap.tracks[0].plugins.find((p) => /equal/i.test(p.name));
   expect(eq).toBeTruthy();
-  const eqId = eq!.id;
-  expect(eq!.bypassed).toBe(false);
+  expect(eq!.enabled).toBe(true);
 
-  const eqChip = page.getByTestId("plugin-chip").filter({ hasText: /Equaliser/ }).first();
-  await eqChip.getByTestId("plugin-name").click();
+  const eqCard = page.getByTestId("plugin-card").filter({ hasText: /Equaliser/ });
+  // Bypass via the card's enable/bypass dot (bypass_plugin → enabled flips false).
+  await eqCard.locator(".pdot").click();
   snap = await waitForSnapshot(
     request,
-    (s) => s.tracks[0]?.plugins.find((p) => p.id === eqId)?.bypassed === true,
+    (s) => s.tracks[0]?.plugins.find((p) => /equal/i.test(p.name))?.enabled === false,
   );
 
-  await eqChip.getByTestId("plugin-remove").click();
+  // Remove via the card's ✕ (remove_plugin).
+  await eqCard.locator(".btn.x").click();
   snap = await waitForSnapshot(
     request,
-    (s) => s.tracks[0]?.plugins.every((p) => basePluginIds.has(p.id)) ?? false,
+    (s) => !(s.tracks[0]?.plugins.some((p) => /equal/i.test(p.name)) ?? false),
   );
 
-  await page.getByTestId("plugin-add").first().click();
-  await page.getByTestId("plugin-add-neural").click();
+  // Add the Tier-A neural insert directly (+ Neural → add_neural_insert).
+  await page.getByRole("button", { name: "+ Neural", exact: true }).click();
   snap = await waitForSnapshot(
     request,
-    (s) => s.tracks[0]?.plugins.some((p) => /neural/i.test(`${p.type} ${p.name}`)) ?? false,
+    (s) => s.tracks[0]?.plugins.some((p) => p.neural != null || /neural/i.test(p.type)) ?? false,
   );
 
-  const sourceClipId = snap.tracks[0].clips[0].id;
+  // ── Generative drawer (Stage 5) ────────────────────────────────────────────
+  // Create a render layer on the selected track's wave clip, render it, accept.
   const sourceClipCount = snap.tracks[0].clips.length;
-  await page.getByTestId("clip").first().getByTestId("clip-generate").click();
-  await expect(page.getByTestId("color-rack")).toBeVisible();
-  await page.getByTestId("color-rack-render").click();
-  await expect(page.getByTestId("layer-badge").filter({ hasText: /ready/ }).first()).toBeVisible({
-    timeout: 20_000,
-  });
+  await page.getByTestId("gen-create").click();
+  snap = await waitForSnapshot(
+    request,
+    (s) => s.tracks.find((t) => t.id === trackId)?.clips.some((c) => c.renderLayer) ?? false,
+  );
+  const sourceClipId = snap.tracks
+    .find((t) => t.id === trackId)!
+    .clips.find((c) => c.renderLayer)!.id;
 
-  await page.getByTestId("layer-accept").first().click();
+  await page.getByTestId("gen-render").click();
   snap = await waitForSnapshot(
     request,
     (s) =>
-      s.tracks.some((t) => t.name === "Neural" && t.clips.length === 1) &&
+      s.tracks
+        .find((t) => t.id === trackId)
+        ?.clips.find((c) => c.id === sourceClipId)?.renderLayer?.status === "ready",
+    20_000,
+  );
+  await expect(page.getByTestId("render-status")).toHaveText(/ready/);
+
+  // Accept lands a new clip on the dedicated "Neural Renders" lane; the source
+  // track is left untouched.
+  await page.getByTestId("gen-accept").click();
+  snap = await waitForSnapshot(
+    request,
+    (s) =>
+      s.tracks.some((t) => t.name === "Neural Renders" && t.clips.length === 1) &&
       s.tracks.find((t) => t.id === trackId)?.clips.length === sourceClipCount,
     20_000,
   );
-  const neuralTrack = snap.tracks.find((t) => t.name === "Neural");
-  expect(neuralTrack?.clips).toHaveLength(1);
+  expect(snap.tracks.find((t) => t.name === "Neural Renders")?.clips).toHaveLength(1);
   expect(snap.tracks.find((t) => t.id === trackId)?.clips).toHaveLength(sourceClipCount);
 
-  await page.getByTestId("clip").first().getByTestId("clip-generate").click();
-  await page.getByTestId("color-rack-render").click();
-  await expect(page.getByTestId("layer-badge").filter({ hasText: /ready/ }).last()).toBeVisible({
-    timeout: 20_000,
-  });
-  await page.getByTestId("layer-reject").last().click();
-  snap = await waitForSnapshot(
-    request,
-    (s) => s.tracks.find((t) => t.name === "Neural")?.clips.length === 1,
-  );
-
-  const cachedLayer = await command(request, "create_render_layer", {
-    clipId: sourceClipId,
-    mode: "reimagine",
-    prompt: "reimagine",
-  });
+  // Cache HIT — re-rendering the accepted layer with identical params reuses the
+  // artifact (full-fingerprint cache, 05 §5).
   const cachedRender = await command(request, "render_layer", {
-    layerId: cachedLayer.data.layerId,
-  });
-  expect(cachedRender.data.fromCache).toBe(true);
-
-  const missLayer = await command(request, "create_render_layer", {
     clipId: sourceClipId,
-    mode: "reimagine",
-    prompt: "reimagine",
-    seed: 999,
+    wait: true,
   });
-  const missRender = await command(request, "render_layer", {
-    layerId: missLayer.data.layerId,
-  });
-  expect(missRender.data.fromCache).not.toBe(true);
+  expect(cachedRender.data.cache).toBe("hit");
+
+  // Cache MISS — a new seed changes the fingerprint, so it re-renders.
+  await command(request, "set_render_param", { clipId: sourceClipId, seed: 999 });
+  const missRender = await command(request, "render_layer", { clipId: sourceClipId, wait: true });
+  expect(missRender.data.cache).toBe("miss");
   await waitForSnapshot(
     request,
     (s) =>
-      s.tracks.some((t) =>
-        t.clips.some((c) => c.renderLayer?.id === missLayer.data.layerId && c.renderLayer.status === "ready"),
-      ),
+      s.tracks
+        .find((t) => t.id === trackId)
+        ?.clips.find((c) => c.id === sourceClipId)?.renderLayer?.status === "ready",
     20_000,
   );
+  await expect(page.getByTestId("render-status")).toHaveText(/ready/);
 
+  // Reject the current render — it does not commit a clip; the Neural Renders
+  // lane keeps its single accepted clip.
+  await page.getByTestId("generative").getByRole("button", { name: "Reject", exact: true }).click();
+  snap = await waitForSnapshot(
+    request,
+    (s) =>
+      s.tracks
+        .find((t) => t.id === trackId)
+        ?.clips.find((c) => c.id === sourceClipId)?.renderLayer?.status === "dirty",
+  );
+  expect(snap.tracks.find((t) => t.name === "Neural Renders")?.clips).toHaveLength(1);
+
+  // The events feed always resyncs from a very old cursor.
   const eventResponse = await request.get("/api/events?since=-999999");
   expect(eventResponse.ok()).toBeTruthy();
   const eventBody = await eventResponse.json();
   expect(eventBody.resync).toBe(true);
 
-  await page.getByTestId("undo-button").click();
+  // Undo (Toolbar) reverts the reject; redo (keyboard) re-applies it. Both leave
+  // the arrangement intact, with the Neural Renders lane still present.
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
   snap = await waitForSnapshot(request, (s) => s.tracks.some((t) => t.clips.length > 0));
   expect(snap.tracks.length).toBeGreaterThanOrEqual(1);
 
   await page.keyboard.press("Control+Shift+Z");
-  snap = await waitForSnapshot(request, (s) => s.tracks.some((t) => t.clips.length > 0));
-  expect(snap.tracks.some((t) => t.name === "Neural")).toBeTruthy();
+  snap = await waitForSnapshot(request, (s) => s.tracks.some((t) => t.name === "Neural Renders"));
+  expect(snap.tracks.some((t) => t.name === "Neural Renders")).toBeTruthy();
 
   await saveScreenshot(page, "pc-build-e2e-final.png");
   expect(consoleProblems).toEqual([]);
