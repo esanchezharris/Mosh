@@ -93,8 +93,8 @@ const listeners = new Map<string, Set<Listener>>();
 
 // Mock command log (drives the CommandLog panel). Read-only commands don't log.
 const cmdLog: { command: string; ok: boolean; undoable: boolean; ts: number }[] = [];
-const READONLY = new Set(["get_snapshot", "get_clip_peaks", "get_command_log", "list_plugins", "list_builtins", "list_colors", "list_audio_devices", "list_wave_inputs", "list_track_outputs"]);
-const NON_UNDOABLE = new Set(["set_transport", "undo", "redo", "save", "reload", "render_layer", "open_plugin_editor", "set_plugin_param", "set_neural_param", "export_audio"]);
+const READONLY = new Set(["get_snapshot", "get_clip_peaks", "get_command_log", "list_plugins", "list_builtins", "list_colors", "list_audio_devices", "list_wave_inputs", "list_track_outputs", "list_takes"]);
+const NON_UNDOABLE = new Set(["set_transport", "arm_track", "set_input_monitor", "undo", "redo", "save", "reload", "render_layer", "open_plugin_editor", "set_plugin_param", "set_neural_param", "export_audio"]);
 function emit(type: string, payload?: unknown) {
   const ls = listeners.get("mosh_event");
   if (ls) for (const fn of ls) fn({ type, payload });
@@ -312,6 +312,77 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     case "set_clip_mute": { const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found"); pushUndo(); f.clip.mute = Boolean(args.mute); invalidate(); return ok(command); }
     case "set_clip_gain": { const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found"); pushUndo(); f.clip.gainDb = num(args.gainDb); invalidate(); return ok(command); }
 
+    // ── recording transport + take lanes (comp tree) ─────────────────────────
+    // No audio I/O in the browser dev mock, so "recording" is simulated against
+    // session state: arming flags the track; stop_recording lands a take on each
+    // armed track. Repeat recordings stack onto the same clip's native take tree
+    // (the UI shows lanes once a clip has ≥2 takes); set_current_take / keep_take
+    // act on that tree. arm/monitor mirror the backend's transport-config nature
+    // (non-undoable); landing/comping a take IS a document edit (undoable).
+    case "arm_track": {
+      const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found");
+      t.armed = Boolean(args.armed); invalidate(); return ok(command, { armed: t.armed });
+    }
+    case "set_input_monitor": {
+      const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found");
+      const mode = str(args.mode, "automatic");
+      t.monitor = mode === "off" || mode === "on" ? mode : "automatic";
+      invalidate(); return ok(command, { monitor: t.monitor });
+    }
+    case "stop_recording": {
+      stopPlayback();
+      snapshot.transport = { ...snapshot.transport, playing: false, recording: false };
+      emit("transport", snapshot.transport);
+      if (Boolean(args.discardRecordings)) { invalidate(); return ok(command, { clips: [] }); }
+      pushUndo(); // bracket only the actual take landing (the undoable document edit)
+      const armed = snapshot.tracks.filter((t) => t.armed);
+      const targets = armed.length ? armed : snapshot.tracks[0] ? [snapshot.tracks[0]] : [];
+      const landed: { id: string }[] = [];
+      for (const t of targets) {
+        // Stack onto an existing take-bearing clip if present, else start one.
+        const existing = t.clips.find((c) => c.takes && c.takes.length > 0);
+        if (existing && existing.takes) {
+          const idx = existing.takes.length;
+          existing.takes.forEach((tk) => (tk.isCurrent = false));
+          existing.takes.push({ index: idx, description: `Take ${idx + 1}`, isCurrent: true });
+          existing.numTakes = existing.takes.length;
+          existing.currentTakeIndex = idx;
+          landed.push({ id: existing.id });
+        } else {
+          const c = waveClip("take", Math.max(0, snapshot.transport.position - 2), 2);
+          c.takes = [{ index: 0, description: "Take 1", isCurrent: true }];
+          c.numTakes = 1; c.currentTakeIndex = 0;
+          t.clips.push(c);
+          landed.push({ id: c.id });
+        }
+      }
+      invalidate(); return ok(command, { clips: landed });
+    }
+    case "list_takes": {
+      const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found");
+      const takes = f.clip.takes ?? [];
+      return ok(command, { takes, numTakes: f.clip.numTakes ?? takes.length, currentTakeIndex: f.clip.currentTakeIndex ?? 0 });
+    }
+    case "set_current_take": {
+      const f = findClip(str(args.clipId)); if (!f?.clip.takes) return err(command, "clip has no takes");
+      const idx = num(args.takeIndex);
+      if (idx < 0 || idx >= f.clip.takes.length) return err(command, "take index out of range");
+      pushUndo();
+      f.clip.takes.forEach((tk) => (tk.isCurrent = tk.index === idx));
+      f.clip.currentTakeIndex = idx;
+      invalidate(); return ok(command);
+    }
+    case "keep_take": {
+      const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found");
+      if (!f.clip.takes || f.clip.takes.length === 0) return err(command, "clip has no takes");
+      pushUndo();
+      const cur = f.clip.currentTakeIndex ?? f.clip.takes.findIndex((tk) => tk.isCurrent);
+      const kept = f.clip.takes[cur >= 0 ? cur : 0] ?? f.clip.takes[0];
+      if (kept?.description) f.clip.name = kept.description; // flatten the comp to the kept take
+      delete f.clip.takes; delete f.clip.numTakes; delete f.clip.currentTakeIndex;
+      invalidate(); return ok(command);
+    }
+
     case "set_tempo": { pushUndo(); snapshot.session.tempo = Math.max(20, num(args.bpm, snapshot.session.tempo)); invalidate(); return ok(command); }
     case "set_key": { pushUndo(); snapshot.session.key = { tonic: str(args.tonic, snapshot.session.key?.tonic ?? "A"), mode: str(args.mode, snapshot.session.key?.mode ?? "minor") }; invalidate(); return ok(command); }
     case "set_master_volume": { pushUndo(); if (snapshot.master) snapshot.master.volumeDb = num(args.db); invalidate(); return ok(command); }
@@ -412,6 +483,16 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       invalidate(); return ok(command);
     }
     case "set_neural_lab_mode": { const f = findPlugin(str(args.trackId), num(args.index)); if (f?.track.plugins![f.idx].neural) { pushUndo(); f.track.plugins![f.idx].neural!.labMode = Boolean(args.on); invalidate(); } return ok(command); }
+    case "load_neural_model": {
+      const f = findPlugin(str(args.trackId), num(args.pluginIndex));
+      if (!f?.track.plugins![f.idx].neural) return err(command, "not a neural insert");
+      pushUndo();
+      const n = f.track.plugins![f.idx].neural!;
+      const p = str(args.path);
+      n.modelPath = p;
+      n.modelName = p.split("/").pop() || p; // describe() reports the loaded file's name
+      invalidate(); return ok(command, { modelName: n.modelName, modelPath: n.modelPath });
+    }
     case "reset_neural": case "open_plugin_editor": case "set_neural_latency": return ok(command);
 
     // ── parameter automation (buried editor) ─────────────────────────────────
