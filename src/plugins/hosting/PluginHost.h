@@ -1,6 +1,7 @@
 #pragma once
 
 #include <tracktion_engine/tracktion_engine.h>
+#include <atomic>
 
 namespace mosh
 {
@@ -43,10 +44,14 @@ public:
         AU-including scans to a background std::thread for this reason.
         VST3-only rescans (includeAU=false) are fast + safe on any thread.
         @param clearFirst  drop the existing types before scanning.
-        @param includeVST3  re-run the curated VST3 sweep (cheap, safe).
+        @param includeVST3  re-enumerate the VST3 plug-in folders.
         @param includeAU    also enumerate+catalog .component AudioUnits.
-        @returns the number of types in the catalog after the scan. */
-    int rescan (bool clearFirst, bool includeVST3, bool includeAU);
+        @param slowVST3    load modules for VST3 bundles without moduleinfo.json
+                           (catches plug-ins the fast path can't see); the dead-
+                           mans-pedal makes a crasher recoverable. Must NOT run on
+                           the message thread — MoshOps drives it on a background
+                           thread, like the AU path. */
+    int rescan (bool clearFirst, bool includeVST3, bool includeAU, bool slowVST3 = false);
 
     /** Available plugin descriptions (from the KnownPluginList). */
     juce::Array<juce::PluginDescription> available() const;
@@ -71,10 +76,11 @@ public:
 
 private:
     void scanFile (const juce::File&);                   // VST3 (path-based)
-    void scanCuratedVST3();                              // the curated VST3 sweep
+    void scanInstalledVST3();                            // enumerate the VST3 plug-in folders
     void scanAUComponents();                             // AudioUnit (.component) catalog (slow/risky)
     void loadCatalog();                                  // recreateFromXml if present
     void saveCatalog();                                  // createXml → plugin-catalog.xml
+    void checkpointCatalog();                            // periodic saveCatalog() during a rescan sweep
     void recoverFromDeadMansPedal();                     // blocklist a prior crasher, then clear
     juce::File catalogFile()   const;
     juce::File deadMansPedal() const;
@@ -84,6 +90,23 @@ private:
     juce::OwnedArray<juce::DocumentWindow> editorWindows;
     juce::HashMap<juce::String, juce::DocumentWindow*> windowByPlugin;
     bool initialised = false;
+    bool vst3SlowScan = false;   // set during a rescan(slowVST3=true): scanFile loads modules
+    // Bumped per plugin (scanFile + the AU sweep): a progress heartbeat the deep-scan
+    // watchdog polls. A hung out-of-process child stops this advancing, so the watchdog
+    // kills the child (te treats it as a crash -> blocklist -> continue).
+    std::atomic<int> scanFilesProcessed { 0 };
+    // Single-flight latch: only one rescan() runs at a time (a second concurrent scan
+    // would race the OOP flag, the watchdog, and the dead-mans-pedal).
+    std::atomic<bool> scanInProgress { false };
+    // Incremental catalog checkpoint: during a deep rescan() the catalog is re-saved
+    // every kCatalogCheckpointInterval plugins, so an interrupted sweep (the user
+    // killing a slow Waves AU scan, or a crash) keeps the progress made so far instead
+    // of discarding everything back to the last phase boundary. saveCatalog() writes
+    // atomically (temp file + rename), so a kill mid-write never corrupts the catalog.
+    // Touched only on the scan thread (rescan() seeds it; scanFile/scanAUComponents
+    // advance it in lock-step with scanFilesProcessed), so it needs no extra locking.
+    static constexpr int kCatalogCheckpointInterval = 20;
+    std::atomic<int> lastCatalogCheckpoint { 0 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PluginHost)
 };
