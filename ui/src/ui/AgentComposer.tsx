@@ -7,6 +7,8 @@ import { useRef, useState } from "react";
 import { useStore } from "../store";
 import { createBrain, type Brain } from "../agent/brain";
 import { runAgentBatch } from "../agent/executor";
+import { matchFastPath } from "../agent/fastPath";
+import { handleFast } from "../agent/performer";
 import { createVoiceInput, isVoiceSupported, type VoiceInput } from "../agent/voiceInput";
 
 export function AgentComposer() {
@@ -31,6 +33,22 @@ export function AgentComposer() {
     if (!text || useStore.getState().agentBusy) return;
     setInput(""); setSay(null); setAgentBusy(true);
     try {
+      // Deterministic fast path FIRST: an unambiguous, state-valid phrase runs locally
+      // (no API). Anything ambiguous returns null and falls through to the LLM brain.
+      const st = useStore.getState();
+      const fast = matchFastPath(text, {
+        mode: st.currentMode(),
+        tempo: st.snapshot?.session?.tempo ?? 120,
+        timeSigNum: st.snapshot?.session?.timeSigNumerator ?? 4,
+      });
+      if (fast) {
+        await handleFast(fast, {
+          runBatch: async (label, cmds) => { setAgentChangeSet(await runAgentBatch(label, cmds)); },
+          enterRecord: st.enterRecord, stopRecord: st.stopRecord, keepTake: st.keepTake, navTake: st.navTake,
+          utter: (intent, say) => { setSay(say ?? null); pushAgentUtter(intent, say); },
+        });
+        return;
+      }
       const reply = await brainRef.current!.send(text);
       setSay(reply.say ?? null);
       pushAgentUtter(reply.intent ?? "ACK_GOT_IT", reply.say);
@@ -77,6 +95,9 @@ export function AgentComposer() {
           data-testid="agent-mic"
           onPointerDown={(e) => {
             if (agentBusy || !voiceSupported) return;
+            // Holding the talk button to address Moshi STOPS an in-progress take first
+            // (performer mode → assistant mode), then listens.
+            if (useStore.getState().currentMode() === "recording") void useStore.getState().stopRecord();
             const v = ensureVoice(); if (!v) return;
             try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* noop */ }
             v.start();

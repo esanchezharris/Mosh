@@ -40,7 +40,20 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "set_tempo", desc: "Set the project tempo in BPM", args: [N("bpm")] },
   { command: "set_time_signature", desc: "Set the time signature", args: [N("numerator"), N("denominator")] },
   { command: "set_metronome", desc: "Toggle the metronome click", args: [B("enabled")] },
-  { command: "set_transport", desc: "Play/stop, optionally seek to a position", args: [B("playing"), N("position", false, "seconds")] },
+  { command: "set_transport", desc: "Transport: play/stop/record/seek", args: [S("action", false, '"play"|"toggle"|"stop"|"record"|"to_start"|"to_end"'), B("loop", false), N("position", false, "seconds")] },
+
+  // ── recording / takes ─────────────────────────────────────────────────────
+  { command: "arm_track", desc: "Arm/disarm a track's input for recording", args: [S("trackId"), B("armed")] },
+  { command: "stop_recording", desc: "Stop recording and land the take", args: [B("discardRecordings", false)] },
+  { command: "set_input_monitor", desc: "Set a track's input monitoring", args: [S("trackId"), S("mode", false, '"off"|"automatic"|"on"')] },
+  { command: "list_takes", desc: "List the take lanes on a clip", args: [S("clipId")] },
+  { command: "set_current_take", desc: "Select which take lane is active", args: [S("clipId"), N("takeIndex")] },
+  { command: "keep_take", desc: "Keep the current take lane, remove the rest", args: [S("clipId")] },
+
+  // ── history / session ─────────────────────────────────────────────────────
+  { command: "undo", desc: "Undo the last change", args: [] },
+  { command: "redo", desc: "Redo the last undone change", args: [] },
+  { command: "save", desc: "Save the session to disk", args: [] },
 
   // ── mixer ───────────────────────────────────────────────────────────────
   { command: "set_track_volume", desc: "Set a track's volume in dB", args: [S("trackId"), N("db")] },
@@ -119,7 +132,16 @@ export function describeCommand(command: string, args: Record<string, unknown>):
     case "set_tempo": return `Set tempo to ${a.bpm} BPM`;
     case "set_time_signature": return `Set time signature to ${a.numerator}/${a.denominator}`;
     case "set_metronome": return a.enabled ? `Turned the metronome on` : `Turned the metronome off`;
-    case "set_transport": return a.playing ? `Started playback` : `Stopped playback`;
+    case "set_transport": return a.action === "record" ? `Recording` : a.action === "stop" ? `Stopped` : a.action === "to_start" ? `Back to the start` : `Transport`;
+    case "arm_track": return a.armed ? `Armed a track` : `Disarmed a track`;
+    case "stop_recording": return `Stopped recording`;
+    case "set_input_monitor": return `Set input monitoring`;
+    case "list_takes": return `Listed the takes`;
+    case "set_current_take": return `Switched to take ${a.takeIndex}`;
+    case "keep_take": return `Kept the take`;
+    case "undo": return `Undid the last change`;
+    case "redo": return `Redid a change`;
+    case "save": return `Saved the session`;
     case "set_track_volume": return `Set track volume to ${a.db} dB`;
     case "set_track_pan": return `Set track pan to ${a.pan}`;
     case "set_track_mute": return a.mute ? `Muted a track` : `Unmuted a track`;

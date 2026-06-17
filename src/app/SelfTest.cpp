@@ -1514,6 +1514,17 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (armPref, "arm_track logged undoable:false (monitoring preference)");
         check (monPref, "set_input_monitor logged undoable:false (monitoring preference)");
 
+        // ── Take lanes (audio): the commands DISPATCH + degrade gracefully. Real takes
+        // need live recording (no input device headless), so we verify the surface is wired
+        // — a missing clip yields the HANDLER's error ("no wave clip"), not "unknown command".
+        {
+            auto lt = cmd (ops, "list_takes", objN ({{ "clipId", "no-such-clip" }}));
+            check (! ok (lt), "list_takes on a missing clip errors (dispatched, not unknown)");
+            check (lt["error"].toString().contains ("wave clip"), "list_takes error is the handler's (no wave clip)");
+            check (! ok (cmd (ops, "set_current_take", objN ({{ "clipId", "no-such-clip" }, { "takeIndex", 0 }}))), "set_current_take on a missing clip errors");
+            check (! ok (cmd (ops, "keep_take", objN ({{ "clipId", "no-such-clip" }}))), "keep_take on a missing clip errors");
+        }
+
         // ── CTL-001: live MIDI controller -> armed instrument track ──
         // Headless there is no MIDI input device enumerated (the engine only adds them
         // once CoreAudio/MIDI is up + ensurePlaybackContext enables them, both audio-

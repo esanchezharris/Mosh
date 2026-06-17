@@ -257,6 +257,9 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "arm_track")         return cmdArmTrack (args);
     if (name == "stop_recording")    return cmdStopRecording (args);
     if (name == "set_input_monitor") return cmdSetInputMonitor (args);
+    if (name == "list_takes")        return cmdListTakes (args);
+    if (name == "set_current_take")  return cmdSetCurrentTake (args);
+    if (name == "keep_take")         return cmdKeepTake (args);
     if (name == "set_master_volume") return cmdSetMasterVolume (args);
     if (name == "set_master_pan")    return cmdSetMasterPan (args);
     if (name == "enable_track_meter")  return cmdEnableTrackMeter (args);
@@ -4512,6 +4515,55 @@ juce::var MoshOps::trackToVar (te::AudioTrack& t, int index)
     return var (o);
 }
 
+// ── take lanes (audio) — expose Tracktion's native take tree ──────────────────
+juce::var MoshOps::cmdListTakes (const juce::var& args)
+{
+    auto* w = dynamic_cast<te::WaveAudioClip*> (findClip (args.getProperty ("clipId", var()).toString()));
+    if (w == nullptr) return errResult ("list_takes", "no wave clip");
+    auto descs = w->getTakeDescriptions();
+    juce::Array<juce::var> takes;
+    for (int i = 0; i < descs.size(); ++i)
+    {
+        auto* t = new juce::DynamicObject();
+        t->setProperty ("index", i);
+        t->setProperty ("description", descs[i]);
+        t->setProperty ("isCurrent", i == w->getCurrentTake());
+        takes.add (juce::var (t));
+    }
+    auto* o = new juce::DynamicObject();
+    o->setProperty ("clipId", w->itemID.toString());
+    o->setProperty ("numTakes", w->getNumTakes (false));
+    o->setProperty ("currentTakeIndex", w->getCurrentTake());
+    o->setProperty ("takes", takes);
+    return okResult ("list_takes", juce::var (o));   // read-only: no transaction / log
+}
+
+juce::var MoshOps::cmdSetCurrentTake (const juce::var& args)
+{
+    auto* w = dynamic_cast<te::WaveAudioClip*> (findClip (args.getProperty ("clipId", var()).toString()));
+    if (w == nullptr) return errResult ("set_current_take", "no wave clip");
+    const int n = w->getNumTakes (false);
+    if (n <= 0) return errResult ("set_current_take", "no takes");
+    const int idx = juce::jlimit (0, n - 1, (int) args.getProperty ("takeIndex", 0));
+    beginTxn ("set_current_take");
+    w->setCurrentTake (idx);
+    logLine ("set_current_take", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("set_current_take");
+}
+
+juce::var MoshOps::cmdKeepTake (const juce::var& args)
+{
+    auto* w = dynamic_cast<te::WaveAudioClip*> (findClip (args.getProperty ("clipId", var()).toString()));
+    if (w == nullptr) return errResult ("keep_take", "no wave clip");
+    if (! w->hasAnyTakes()) return errResult ("keep_take", "no takes to keep");
+    beginTxn ("keep_take");
+    w->deleteAllUnusedTakes (false);   // keep the current take; preserve source files → undo-safe
+    logLine ("keep_take", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("keep_take");
+}
+
 juce::var MoshOps::clipToVar (te::Clip& c)
 {
     auto pos = c.getPosition();
@@ -4536,6 +4588,25 @@ juce::var MoshOps::clipToVar (te::Clip& c)
             o->setProperty ("stretchMode", te::TimeStretcher::getNameOfMode (w->getTimeStretchMode()));
             auto info = w->getAudioFile().getInfo();
             o->setProperty ("sourceBpm", w->getLoopInfo().getBpm (info));
+        }
+        // Take lanes: recording over a region stacks takes in Tracktion's native take
+        // tree; the UI renders them as separate lanes (set_current_take / keep_take act
+        // on this). Only present when the clip actually has takes.
+        if (w->hasAnyTakes())
+        {
+            o->setProperty ("numTakes", w->getNumTakes (false));
+            o->setProperty ("currentTakeIndex", w->getCurrentTake());
+            auto descs = w->getTakeDescriptions();
+            juce::Array<juce::var> takes;
+            for (int i = 0; i < descs.size(); ++i)
+            {
+                auto* t = new juce::DynamicObject();
+                t->setProperty ("index", i);
+                t->setProperty ("description", descs[i]);
+                t->setProperty ("isCurrent", i == w->getCurrentTake());
+                takes.add (juce::var (t));
+            }
+            o->setProperty ("takes", takes);
         }
     }
     else if (auto* mc = dynamic_cast<te::MidiClip*> (&c))
