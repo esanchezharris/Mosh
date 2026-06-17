@@ -92,3 +92,57 @@ describe("knowHowBlock — an injected RECIPE card teaches the technique, not a 
     expect(out).not.toContain("add_note → add_note"); // the old command-name join
   });
 });
+
+// The injection redesign: recipe cards now inject a CONCRETE worked example (real
+// pitches/beats/params) — the content the old intent-only injection threw away — while
+// keeping the determinism + no-$token-leak + byte-identical-default invariants.
+describe("knowHowBlock — recipe cards inject a concrete worked example", () => {
+  const recipeCard: TechniqueCard = {
+    id: "rc1", source: "distill", skill_name: "Boom-bap drum pattern", task_type: "drum_programming",
+    genre_context: ["boom-bap"], producer_intent: "the classic boom-bap kick/snare/hat skeleton",
+    when: "programming a boom-bap pattern",
+    recipe: { kind: "recipe", commands: [
+      { command: "add_note", args: { clipId: "$drumClipId", pitch: 36, start: 0, length: 0.25, velocity: 110 } },
+      { command: "add_note", args: { clipId: "$drumClipId", pitch: 38, start: 1, length: 0.25, velocity: 100 } },
+      { command: "add_note", args: { clipId: "$drumClipId", pitch: 42, start: 0, length: 0.25, velocity: 80 } },
+    ] },
+    evidence: [], confidence: 0.7, status: "conformant",
+  };
+  const promptCard: TechniqueCard = {
+    id: "pc1", source: "distill", skill_name: "lo-fi prompt", task_type: "prompt_craft",
+    genre_context: ["lo-fi"], producer_intent: "name every element", when: "generating a lo-fi loop",
+    recipe: { kind: "prompt", guidance: "dusty boom-bap drums, MPC swing" },
+    evidence: [], confidence: 0.7, status: "validated",
+  };
+
+  it("renders the concrete pitches/beats by default, keeping the when + intent", () => {
+    const out = systemPrompt(null, [], [recipeCard]);
+    expect(out).toContain("kick(36)");
+    expect(out).toContain("snare(38)");
+    expect(out).toContain("programming a boom-bap pattern"); // retrieval trigger kept
+    expect(out).toContain("the classic boom-bap kick/snare/hat skeleton"); // intent kept
+  });
+
+  it("never leaks a $token id into the prompt", () => {
+    const out = systemPrompt(null, [], [recipeCard]);
+    expect(out).not.toContain("$drumClipId");
+    expect(out).not.toContain("$hatsClipId");
+  });
+
+  it("intent mode reproduces the OLD behaviour (intent only, no worked example)", () => {
+    const out = systemPrompt(null, [], [recipeCard], { recipeRender: "intent" });
+    expect(out).toContain("the classic boom-bap kick/snare/hat skeleton");
+    expect(out).not.toContain("kick(36)");
+  });
+
+  it("prompt-kind cards still inject guidance verbatim, with no worked example", () => {
+    const out = systemPrompt(null, [], [promptCard]);
+    expect(out).toContain("dusty boom-bap drums, MPC swing");
+    expect(out).not.toContain("kick(36)");
+  });
+
+  it("no cards → byte-identical default prompt (the swappable-seam invariant)", () => {
+    expect(systemPrompt(null, [], [])).toBe(systemPrompt(null));
+    expect(systemPrompt(null, [], [])).not.toContain("Producer know-how");
+  });
+});

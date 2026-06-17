@@ -5,20 +5,27 @@
 import { commandCatalogPrompt } from "./commands";
 import { promptGuidance } from "./promptcraft";
 import type { TechniqueCard } from "./knowledge/card";
+import { renderRecipeExample } from "./knowledge/renderRecipe";
 import type { Snapshot } from "../types";
+
+// How a recipe card is injected: "concrete" appends a worked example (real pitches/beats/
+// params); "intent" is the legacy producer_intent-only form (kept for the eval's control arm).
+export type RecipeRender = "concrete" | "intent";
 
 export const INTENTS = ["ACK_GOT_IT", "ACK_WORKING", "DONE", "HUH", "NUH", "UHOH", "GREET", "IDLE_MURMUR"];
 
 // Render the retrieved producer-knowledge cards into a compact prompt block. Empty
 // (no string) when nothing was retrieved, so the default prompt is byte-identical.
-function knowHowBlock(cards: TechniqueCard[]): string[] {
+function knowHowBlock(cards: TechniqueCard[], mode: RecipeRender = "concrete"): string[] {
   if (!cards.length) return [];
   const lines = cards.map((c) => {
-    // prompt cards: the literal guidance to append. recipe (in-the-box) cards: the
-    // producer INTENT (the technique in plain language) — not the raw command list,
-    // which is noise; the agent maps intent → commands via the catalog + Production moves.
-    const how = c.recipe.kind === "prompt" ? c.recipe.guidance : c.producer_intent;
-    return `- when ${c.when} → ${how}`;
+    // prompt cards: the literal guidance to append. recipe (in-the-box) cards: the producer
+    // INTENT, plus — in "concrete" mode — a WORKED EXAMPLE of the actual move (pitches/beats/
+    // params, $tokens delabeled). Intent alone is what the model already knows; the worked
+    // example is the content the old injection threw away. "intent" mode is the eval control.
+    if (c.recipe.kind === "prompt") return `- when ${c.when} → ${c.recipe.guidance}`;
+    const example = mode === "concrete" ? renderRecipeExample(c) : "";
+    return `- when ${c.when} → ${c.producer_intent}${example ? `. ${example}` : ""}`;
   });
   return ["Producer know-how (validated techniques — apply when they fit the request):", ...lines];
 }
@@ -63,7 +70,12 @@ function compactSnapshot(s: Snapshot): string {
   return `tempo ${s.session?.tempo ?? 120} BPM, ${s.session?.timeSigNumerator ?? 4}/${s.session?.timeSigDenominator ?? 4}${buses ? `\nbuses: ${buses}` : ""}\ntracks:\n${tracks || "  (none)"}`;
 }
 
-export function systemPrompt(snap: Snapshot | null, pluginNames: string[] = [], cards: TechniqueCard[] = []): string {
+export function systemPrompt(
+  snap: Snapshot | null,
+  pluginNames: string[] = [],
+  cards: TechniqueCard[] = [],
+  opts: { recipeRender?: RecipeRender } = {},
+): string {
   return [
     "You ARE Moshi — a small, warm, playful creature, the agent living inside a music app called Mosh.",
     "You mostly communicate by emoting + a SOUND (an INTENT), not words. Only add a short `say` when a precise message is truly needed.",
@@ -74,7 +86,7 @@ export function systemPrompt(snap: Snapshot | null, pluginNames: string[] = [], 
     ...(pluginNames.length
       ? [`Installed plugins (pass the exact name as load_plugin's pluginId): ${pluginNames.slice(0, 40).join(", ")}`]
       : []),
-    ...knowHowBlock(cards),
+    ...knowHowBlock(cards, opts.recipeRender ?? "concrete"),
     ...productionMoves(),
     "Rules:",
     "- Use the REAL ids from the session below for trackId/clipId. Never invent ids or commands.",

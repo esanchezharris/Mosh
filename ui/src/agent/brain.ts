@@ -24,8 +24,10 @@ export function createBrain(
     async send(text: string): Promise<BrainReply> {
       const snap = getSnapshot();
       history.push({ role: "user", content: text });
-      // Pull in any validated producer-knowledge cards relevant to THIS request.
-      const cards = retrieveCards(text);
+      // Pull in the single most relevant validated card for THIS request. Top-1, not
+      // top-3: the efficacy A/B showed top-3 floods (and degrades) weaker models, while
+      // top-1 is the proven no-harm floor. retrieve.ts keeps its k=3 default for other callers.
+      const cards = retrieveCards(text, 1);
       const messages = [{ role: "system", content: systemPrompt(snap, getPluginNames?.() ?? [], cards) }, ...history.slice(-8)];
       try {
         const { content } = await brainChat(messages);
