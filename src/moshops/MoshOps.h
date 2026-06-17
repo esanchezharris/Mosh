@@ -85,6 +85,10 @@ private:
     // Wave B — record-to-take (TRA-002 / MID-001 / ARE-003): stop the transport
     // KEEPING takes, drain the async clip-add, return the landed clip ids.
     juce::var cmdStopRecording  (const juce::var& args);
+    // Take lanes (audio): expose Tracktion's native take tree — list/select/keep.
+    juce::var cmdListTakes      (const juce::var& args);
+    juce::var cmdSetCurrentTake (const juce::var& args);
+    juce::var cmdKeepTake       (const juce::var& args);
     juce::var cmdSetMasterVolume (const juce::var& args);
     juce::var cmdSetMasterPan    (const juce::var& args);
     // Wave 9 — channel metering
