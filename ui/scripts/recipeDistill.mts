@@ -23,6 +23,7 @@ import { parseDistilledCards } from "../src/agent/knowledge/distill";
 import { IN_THE_BOX_COMMANDS, BASE_TOKENS, DISTILL_SYS, recipeCardRules } from "../src/agent/knowledge/distillPrompt";
 import { runCandidateThroughLoop, type Outcome } from "./recipeLoop.mts";
 import { upsertCards, writeCardsData, loadCards } from "./knowledgeStore.mts";
+import { moveSignature, isShippable } from "../src/agent/knowledge/card";
 import { type BaseSpec } from "./recipeBase.mts";
 
 const UI_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -75,7 +76,6 @@ async function main() {
   if (!candidates.length) { console.error("\nno runnable candidates — nothing to validate."); process.exit(0); }
 
   // ── stage 2: run each through the conformance loop (the CONFORMANCE gate) ─────────
-  const before = new Set(loadCards().map((c) => c.id));
   const outcomes: Outcome[] = [];
   for (const cand of candidates) {
     outcomes.push(await runCandidateThroughLoop(cand, ARRANGEMENTS, {
@@ -85,25 +85,35 @@ async function main() {
     }));
   }
 
+  // NOVELTY GATE: only bake candidates whose MOVE isn't already in the corpus (a re-derivation
+  // of an existing move under a new label is not new technique). Same gate as the YouTube miner.
+  const seenMoves = new Set(loadCards().filter(isShippable).map(moveSignature));
   const conformant = outcomes.filter((o) => o.card.status === "conformant").map((o) => o.card);
-  const novel = conformant.filter((c) => !before.has(c.id));
+  const novel: typeof conformant = [];
+  let dupes = 0;
+  for (const c of conformant) {
+    const sig = moveSignature(c);
+    if (seenMoves.has(sig)) { dupes++; console.error(`  ↺ dup move (already in corpus): ${c.skill_name.slice(0, 44)}`); continue; }
+    seenMoves.add(sig);
+    novel.push(c);
+  }
   let baked = 0;
-  if (conformant.length) { upsertCards(conformant); baked = writeCardsData(); }
+  if (novel.length) { upsertCards(novel); baked = writeCardsData(); }
 
-  console.error(`\n${conformant.length}/${outcomes.length} candidate(s) conformant · ${novel.length} NEW (not already in the KB) · ${baked} shippable baked`);
+  console.error(`\n${conformant.length} conformant candidate(s) → ${novel.length} NEW distinct move(s) · ${dupes} duplicate-of-existing skipped · ${baked} shippable baked`);
   for (const c of novel) console.error(`  ★ NEW conformant card: ${c.skill_name}`);
 
-  const md = report(brief, usedModel, outcomes, rejects, novel);
+  const md = report(brief, usedModel, outcomes, rejects, novel, dupes);
   writeFileSync(resolve(OUT_DIR, "report.md"), md);
   console.error(`Full report: ${resolve(OUT_DIR, "report.md")}`);
 }
 
-function report(brief: string, model: string, outcomes: Outcome[], rejects: { reason: string }[], novel: { id: string; skill_name: string }[]): string {
+function report(brief: string, model: string, outcomes: Outcome[], rejects: { reason: string }[], novel: { id: string; skill_name: string }[], dupes = 0): string {
   const L: string[] = [];
   const nConf = outcomes.filter((o) => o.card.status === "conformant").length;
   L.push(`# Recipe distiller — LLM in-the-box cards, validated by conformance\n`);
   L.push(`Brief: **${brief}**  ·  model: \`${model}\`  ·  ${outcomes.length} candidate(s) reached the loop, ${rejects.length} rejected at the shape gate.`);
-  L.push(`\n**${nConf}/${outcomes.length} conformant · ${novel.length} NEW · baked into the KB.**\n`);
+  L.push(`\n**${nConf} conformant candidate(s) → ${novel.length} NEW DISTINCT move(s) baked · ${dupes} duplicate-of-existing skipped.**\n`);
   L.push(`| card | task | ${ARRANGEMENTS.map((a) => a.baseId).join(" | ")} | verdict | new |`);
   L.push(`|------|------|${ARRANGEMENTS.map(() => "----").join("|")}|---------|-----|`);
   const novelIds = new Set(novel.map((c) => c.id));

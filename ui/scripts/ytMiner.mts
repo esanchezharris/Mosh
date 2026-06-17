@@ -20,6 +20,7 @@ import { IN_THE_BOX_COMMANDS, BASE_TOKENS, DISTILL_SYS } from "../src/agent/know
 import { parseTranscript, buildMinerUser, isPlaylistUrl, selectVideoUrls, videoIdFromUrl } from "../src/agent/knowledge/youtube";
 import { runCandidateThroughLoop, type Outcome } from "./recipeLoop.mts";
 import { upsertCards, writeCardsData, loadCards } from "./knowledgeStore.mts";
+import { moveSignature, isShippable } from "../src/agent/knowledge/card";
 import { type BaseSpec } from "./recipeBase.mts";
 
 const UI_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -94,7 +95,6 @@ async function main() {
   if (!urls.length) { console.error(`nothing to mine — ${candidateVideoUrls.length} candidate(s), all already mined or not videos (${seen.size} in the mined set). Delete ${SEEN_FILE} to re-mine.`); process.exit(0); }
   console.error(`\nYouTube miner · ${nPlaylists} playlist(s) + ${rawUrls.length - nPlaylists} direct → ${candidateVideoUrls.length} candidate video(s) → ${urls.length} NEW selected (cap ${cap}, ${seen.size} already mined) · providers=[${providers.map((p) => p.id).join(", ")}]\n`);
 
-  const before = new Set(loadCards().map((c) => c.id));
   const outcomes: MinedOutcome[] = [];
   const skipped: { url: string; title: string; reason: string }[] = [];
 
@@ -135,24 +135,38 @@ async function main() {
   for (const u of urls) { const id = videoIdFromUrl(u); if (id) seen.add(id); }
   saveSeen(seen);
 
+  // NOVELTY GATE: a conformant candidate whose MOVE (byte-identical commands) is already in
+  // the corpus is a relabel, not new technique — count it but don't bake a duplicate. This is
+  // what keeps mining-at-scale honest: e.g. 38 relabels of 6 moves bake as 6, not 38.
+  const seenMoves = new Set(loadCards().filter(isShippable).map(moveSignature));
   const conformant = outcomes.filter((o) => o.card.status === "conformant").map((o) => o.card);
-  const novel = conformant.filter((c) => !before.has(c.id));
+  const novel: typeof conformant = [];
+  let dupes = 0;
+  for (const c of conformant) {
+    const sig = moveSignature(c);
+    if (seenMoves.has(sig)) { dupes++; console.error(`     ↺ dup move (already in corpus): ${c.skill_name.slice(0, 44)}`); continue; }
+    seenMoves.add(sig);
+    novel.push(c);
+  }
   let baked = 0;
-  if (conformant.length) { upsertCards(conformant); baked = writeCardsData(); }
+  if (novel.length) { upsertCards(novel); baked = writeCardsData(); }
 
-  console.error(`\n${conformant.length}/${outcomes.length} mined candidate(s) conformant · ${novel.length} NEW · ${baked} shippable baked · ${skipped.length} url(s) yielded nothing`);
+  console.error(`\n${conformant.length} conformant candidate(s) → ${novel.length} NEW distinct move(s) · ${dupes} duplicate-of-existing skipped · ${baked} shippable baked · ${skipped.length} url(s) yielded nothing`);
   for (const c of novel) console.error(`  ★ NEW (youtube): ${c.skill_name}`);
 
-  writeFileSync(resolve(OUT_DIR, "report.md"), report(outcomes, skipped, novel));
+  writeFileSync(resolve(OUT_DIR, "report.md"), report(outcomes, skipped, novel, dupes));
   console.error(`Full report: ${resolve(OUT_DIR, "report.md")}`);
 }
 
-function report(outcomes: MinedOutcome[], skipped: { url: string; title: string; reason: string }[], novel: { id: string }[]): string {
+function report(outcomes: MinedOutcome[], skipped: { url: string; title: string; reason: string }[], novel: { id: string }[], dupes = 0): string {
   const L: string[] = [];
   const nConf = outcomes.filter((o) => o.card.status === "conformant").length;
   L.push(`# YouTube miner — recipe cards extracted from tutorial transcripts, validated by conformance\n`);
   L.push(`${outcomes.length} candidate(s) reached the loop from ${new Set(outcomes.map((o) => o.url)).size} url(s); ${skipped.length} url(s) yielded nothing.`);
-  L.push(`\n**${nConf}/${outcomes.length} conformant · ${novel.length} NEW · baked into the KB (source:"youtube").**\n`);
+  // Honest yield: NEW DISTINCT moves (the real number), not the relabeled candidate count. A
+  // candidate whose byte-identical move already exists is a duplicate, not a new technique.
+  L.push(`\n**${nConf} conformant candidate(s) → ${novel.length} NEW DISTINCT move(s) baked · ${dupes} duplicate-of-existing skipped (source:"youtube").**\n`);
+  L.push(`_Note: conformance is a RUNNABILITY bar (the move applies + reproduces), not a fidelity bar — it does not check the card matches what the tutorial taught. "N conformant" ≠ "N techniques learned"; the honest count is distinct moves._\n`);
   if (outcomes.length) {
     L.push(`| card | from | task | ${ARRANGEMENTS.map((a) => a.baseId).join(" | ")} | verdict |`);
     L.push(`|------|------|------|${ARRANGEMENTS.map(() => "----").join("|")}|---------|`);

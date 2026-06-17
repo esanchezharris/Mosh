@@ -70,12 +70,21 @@ function guardLine(scores: WavScore[]): string {
 }
 
 async function stage(limit: number): Promise<void> {
-  // limit <= 0 → stage EVERY conformant recipe card (the real seed set); a positive limit
-  // caps it for a quick demo.
+  // limit <= 0 → stage EVERY conformant recipe card; a positive limit caps it for a demo.
   const all = conformantRecipeCards();
   const cards = limit > 0 ? all.slice(0, limit) : all;
   if (!cards.length) { console.error("no conformant recipe cards in the KB to seed."); return; }
-  console.error(`\nQuality seed · staging ${cards.length} card(s) on ${ARR.baseId} · render → cleanliness guard → BLIND A/B\n`);
+  // HONEST GUARD (deferred 2026-06-17): these renders use a bare 4osc as a drum/hat stand-in
+  // (no sampler/sample/VST), on ~2s / one-bar clips. Measured before/after differences are
+  // BELOW the threshold of hearing (RMS Δ <1.2%), so a blind A/B here is NOT a valid taste
+  // signal — labeling it manufactures noise. The MERT taste-probe is deferred until the
+  // stimuli are real: a real drum sample (import_clip) + ≥8–16-bar looped renders + a bass/
+  // keys production context. Until then, symbolic conformance is the only honest gate.
+  console.error(`\n⚠ DEFERRED: quality-seed renders a 4osc STAND-IN (no real drums), one bar, ~2s.`);
+  console.error(`  Before/after differences are sub-threshold (RMS Δ <1.2%) → blind A/B is NOT a`);
+  console.error(`  valid taste signal yet. Do NOT label these. Real stimuli (samples + long loops)`);
+  console.error(`  are needed first. Staging anyway for inspection only.\n`);
+  console.error(`Quality seed · staging ${cards.length} card(s) on ${ARR.baseId} · render → guard → blind A/B\n`);
   for (const card of cards) {
     const dir = resolve(OUT_DIR, card.id); mkdirSync(dir, { recursive: true });
     const before = resolve(dir, "before.wav"), after = resolve(dir, "after.wav");

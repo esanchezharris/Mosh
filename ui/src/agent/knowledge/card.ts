@@ -118,7 +118,9 @@ export function judgeConformance(
 
 // Two cards perform the SAME move iff their recipe commands (or prompt guidance) are byte-
 // identical — the label/skill_name is just a description, not the identity of the technique.
-const moveKey = (c: TechniqueCard): string =>
+// This is the identity used BOTH by dedupByMove (bake) and the mining novelty gate (so a
+// move already in the corpus isn't re-mined under a new label).
+export const moveSignature = (c: TechniqueCard): string =>
   c.recipe.kind === "recipe" ? "r:" + JSON.stringify(c.recipe.commands) : "p:" + c.recipe.guidance;
 const statusRank = (s: CardStatus): number => (s === "preferred" ? 2 : s === "candidate" || s === "rejected" ? 0 : 1);
 
@@ -132,7 +134,7 @@ const statusRank = (s: CardStatus): number => (s === "preferred" ? 2 : s === "ca
 export function dedupByMove(cards: TechniqueCard[]): TechniqueCard[] {
   const groups = new Map<string, TechniqueCard[]>();
   for (const c of cards) {
-    const k = moveKey(c);
+    const k = moveSignature(c);
     const g = groups.get(k);
     if (g) g.push(c); else groups.set(k, [c]);
   }

@@ -1,5 +1,31 @@
 import { describe, it, expect } from "vitest";
-import { stableId, judgeAcceptance, judgeConformance, isShippable, deltaConfidence, dedupByMove, ACCEPT_MARGIN, type CardEvidence, type CardRecipe, type TechniqueCard } from "./card";
+import { stableId, judgeAcceptance, judgeConformance, isShippable, deltaConfidence, dedupByMove, moveSignature, ACCEPT_MARGIN, type CardEvidence, type CardRecipe, type TechniqueCard } from "./card";
+
+describe("moveSignature — identity of the actual move (drives dedup + the mining novelty gate)", () => {
+  const mk = (over: Partial<TechniqueCard>): TechniqueCard => ({
+    id: "x", source: "distill", skill_name: "s", task_type: "drum_programming",
+    genre_context: [], producer_intent: "p", when: "w",
+    recipe: { kind: "recipe", commands: [{ command: "quantize_notes", args: { clipId: "$hatsClipId", division: 0.5, swing: 0.58 } }] },
+    evidence: [], confidence: 0.75, status: "conformant", ...over,
+  });
+
+  it("is the same for identical commands under different labels, different for different commands", () => {
+    const a = mk({ id: "a", skill_name: "hat swing programming" });
+    const b = mk({ id: "b", skill_name: "Add swing to straight eighth-note hats" }); // same move, relabeled
+    const c = mk({ id: "c", recipe: { kind: "recipe", commands: [{ command: "quantize_notes", args: { clipId: "$hatsClipId", division: 0.5, swing: 0.62 } }] } });
+    expect(moveSignature(a)).toBe(moveSignature(b));
+    expect(moveSignature(a)).not.toBe(moveSignature(c));
+  });
+
+  it("the novelty gate: a move already in the corpus is NOT novel; a genuinely new move IS", () => {
+    const existing = mk({ id: "e" });
+    const seen = new Set([moveSignature(existing)]);
+    const dup = mk({ id: "d", skill_name: "boom bap hat swing programming" }); // re-extracted, same move
+    const novel = mk({ id: "n", recipe: { kind: "recipe", commands: [{ command: "humanize_notes", args: { clipId: "$keysClipId", timing: 0.2, seed: 42 } }] } });
+    expect(seen.has(moveSignature(dup))).toBe(true); // rejected — already have this move
+    expect(seen.has(moveSignature(novel))).toBe(false); // passes — a new move
+  });
+});
 
 describe("dedupByMove — collapse byte-identical moves in the shipped bundle", () => {
   const mk = (over: Partial<TechniqueCard>): TechniqueCard => ({
