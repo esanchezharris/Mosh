@@ -142,6 +142,16 @@ type State = {
   pushAgentUtter: (intent: string, say?: string) => void;
   setAgentListening: (b: boolean) => void;
 
+  // Performer mode (hands-free voice take recording). `recording` is derived from the
+  // live snapshot; `takeDecisionPending` marks "a just-recorded take awaits keep/redo".
+  takeDecisionPending: boolean;
+  lastTakeClipId: string | null;
+  currentMode: () => "idle" | "recording" | "reviewing";
+  enterRecord: (bar?: number) => Promise<void>;
+  stopRecord: () => Promise<void>;
+  keepTake: () => Promise<void>;
+  navTake: (delta: number) => Promise<void>;
+
   // UI scale (ACC-005) — pure UI-local view state (like theme): never a command,
   // never crosses the bridge. Applied via document zoom so the whole WebView reflows.
   uiScale: number;
@@ -455,6 +465,62 @@ export const useStore = create<State>((set, get) => ({
   pushAgentUtter: (intent, say) =>
     set((s) => ({ agentUtter: { intent, say, tick: (s.agentUtter?.tick ?? 0) + 1 } })),
   setAgentListening: (b) => set({ agentListening: b }),
+
+  takeDecisionPending: false,
+  lastTakeClipId: null,
+  currentMode: () => {
+    const s = get();
+    if (s.snapshot?.transport.recording) return "recording";
+    if (s.takeDecisionPending) return "reviewing";
+    return "idle";
+  },
+  enterRecord: async (bar) => {
+    const s = get();
+    const snap = s.snapshot;
+    const trackId = s.selectedTrackId ?? snap?.tracks.find((t) => t.type === "audio")?.id ?? snap?.tracks[0]?.id;
+    if (!trackId) { s.pushAgentUtter("HUH", "no track to record into"); return; }
+    const arm = await s.exec("arm_track", { trackId, armed: true });
+    if (!arm.ok) { s.pushAgentUtter("UHOH", "can't — no input"); return; }
+    if (bar && bar > 0 && snap) {
+      const tempo = snap.session?.tempo ?? 120;
+      const num = snap.session?.timeSigNumerator ?? 4;
+      await s.exec("set_transport", { position: (bar - 1) * num * (60 / tempo) });
+    }
+    await s.exec("set_transport", { action: "record" });
+    set({ takeDecisionPending: false });
+    await s.refresh();
+  },
+  stopRecord: async () => {
+    const s = get();
+    const trackOf = () => get().snapshot?.tracks.find((t) => t.id === get().selectedTrackId);
+    const before = new Set((trackOf()?.clips ?? []).map((c) => c.id));
+    const res = await s.exec("stop_recording", {});
+    await s.refresh();
+    const landed = (res.data as { clips?: { id: string }[] } | undefined)?.clips?.[0]?.id;
+    const after = trackOf()?.clips ?? [];
+    const fresh = after.find((c) => !before.has(c.id))?.id;
+    set({ takeDecisionPending: true, lastTakeClipId: landed ?? fresh ?? after[after.length - 1]?.id ?? null });
+  },
+  keepTake: async () => {
+    const s = get();
+    if (!s.lastTakeClipId) { s.pushAgentUtter("HUH", "nothing to keep"); return; }
+    const res = await s.exec("keep_take", { clipId: s.lastTakeClipId });
+    if (!res.ok) { s.pushAgentUtter("UHOH", "can't keep that yet"); return; }
+    set({ takeDecisionPending: false, lastTakeClipId: null });
+    await s.refresh();
+  },
+  navTake: async (delta) => {
+    const s = get();
+    const clipId = s.lastTakeClipId;
+    if (!clipId) { s.pushAgentUtter("HUH", "no takes"); return; }
+    const clip = s.snapshot?.tracks.flatMap((t) => t.clips).find((c) => c.id === clipId) as
+      (Clip & { currentTakeIndex?: number; numTakes?: number }) | undefined;
+    const next = Math.max(0, Math.min((clip?.numTakes ?? 1) - 1, (clip?.currentTakeIndex ?? 0) + delta));
+    const res = await s.exec("set_current_take", { clipId, takeIndex: next });
+    if (!res.ok) { s.pushAgentUtter("UHOH", "no other takes yet"); return; }
+    await s.exec("set_transport", { action: "to_start" });
+    await s.refresh();
+  },
 
   uiScale: 1,
   setUiScale: (n) =>
