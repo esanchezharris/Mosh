@@ -2524,7 +2524,12 @@ juce::var MoshOps::cmdRescanPlugins (const juce::var& args)
     const bool asyncIncludeVST3 = includeVST3 && ! wait;
     std::thread ([this, asyncClearFirst, asyncIncludeVST3, format]
     {
-        const int total = pluginHost.rescan (asyncClearFirst, asyncIncludeVST3, true);
+        // slowVST3=true: this is the deep, module-loading sweep on a BACKGROUND thread
+        // (never the message thread) — engage Tracktion's out-of-process scanner + the
+        // hang watchdog so a plugin that hangs the child (e.g. a WaveShell on the user's
+        // conflicting Waves install) gets killed → blocklisted → skipped, and the catalog
+        // is checkpointed mid-sweep so a kill keeps the progress so far.
+        const int total = pluginHost.rescan (asyncClearFirst, asyncIncludeVST3, true, /*slowVST3=*/true);
         juce::MessageManager::callAsync ([this, total, format]
         {
             emit ("plugin_scan_progress", [&] { auto* o = new juce::DynamicObject();
