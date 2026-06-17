@@ -123,10 +123,24 @@ function startPlayback() {
     if (t.looping && t.loopEnd > t.loopStart && pos >= t.loopEnd) pos = t.loopStart;
     snapshot.transport = { ...t, position: pos };
     emit("transport", snapshot.transport);
+
+    // Fake master spectrum (8 bands, low→high) so Moshi reacts in browser dev where
+    // there's no real audio. Animated off the playhead; a sharp ~2Hz flux pulse stands
+    // in for onsets, low end tilted louder like real music.
+    const N = 8;
+    const bands = Array.from({ length: N }, (_, i) => {
+      const base = 0.5 + 0.5 * Math.sin(pos * (1.5 + i * 0.45) + i * 1.7);
+      const tilt = 1 - i / (N * 1.5);
+      return Math.max(0, Math.min(1, base * tilt * 0.92));
+    });
+    const level = bands.reduce((a, b) => a + b, 0) / N;
+    const flux = Math.max(0, Math.sin(pos * Math.PI * 4)) ** 6;
+    emit("spectrum", { bands, level, flux });
   }, 1000 / 30);
 }
 function stopPlayback() {
   if (playTimer) { clearInterval(playTimer); playTimer = null; }
+  emit("spectrum", { bands: Array(8).fill(0), level: 0, flux: 0 }); // calm on stop
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────

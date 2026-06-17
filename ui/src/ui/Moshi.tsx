@@ -135,24 +135,37 @@ export function Moshi() {
     window.addEventListener("pointerdown", prime, { capture: true, once: true });
     window.addEventListener("keydown", prime, { capture: true, once: true });
 
-    // energy from the live mix — a rAF loop reads levels TRANSIENTLY (getState, no
-    // re-render) and feeds a single smoothed scalar, so his body swells with the
-    // actual loudness of the mix. O(1) per frame, no allocation.
-    let raf = 0, eMA = 0, lastDuck = -1;
+    // Moshi reacts to the LIVE SPECTRUM — a rAF loop reads the 30 Hz master Goertzel
+    // feed TRANSIENTLY (getState, no re-render) and integrates it into smoothed body
+    // scalars: bass + overall level swell his ENERGY (a flux transient adds a beat
+    // kick), treble drives HEAT (recording pins it hot). Idle settles to a slow breath
+    // so he's never fully still. O(1) per frame, no allocation.
+    const clamp = (x: number) => Math.max(0, Math.min(1, x));
+    const avg = (a: number[]) => (a.length ? a.reduce((p, c) => p + c, 0) / a.length : 0);
+    let raf = 0, energy = 0, heat = 0, breathPhase = 0, lastDuck = -1;
     const tick = () => {
       const m = apiRef.current;
       if (m) {
         const st = useStore.getState();
-        const lv = st.levels.master;
-        const db = Math.max(lv.l, lv.r);
-        const target = Math.max(0, Math.min(1, (db + 60) / 60));
-        eMA += (target - eMA) * 0.15;
+        const spec = st.spectrum;
+        const bands = spec.bands ?? [];
+        const low = avg(bands.slice(0, 3));
+        const high = avg(bands.slice(Math.max(0, bands.length - 3)));
+        const isPlaying = st.snapshot?.transport.playing ?? false;
+        const isRec = st.snapshot?.transport.recording ?? false;
+        breathPhase += 0.018;
+        const breath = 0.12 + 0.05 * Math.sin(breathPhase);
+        const energyT = clamp((isPlaying ? 0.25 + 0.7 * (0.55 * low + 0.45 * spec.level) : breath) + spec.flux * 0.3);
+        const heatT = clamp(isRec ? 0.9 : 0.1 + 0.5 * high);
+        energy += (energyT - energy) * 0.15;
+        heat += (heatT - heat) * 0.12;
         try {
-          m.set("energy", eMA);
+          m.set("energy", energy);
+          m.set("heat", heat);
           // duck the voice under a loud mix so his coos sit below the music
           const v = voiceRef.current;
           if (v) {
-            const duck = st.snapshot?.transport.playing && eMA > 0.4 ? 0.45 : 1;
+            const duck = isPlaying && energy > 0.4 ? 0.45 : 1;
             const want = st.voiceVol * duck;
             if (Math.abs(want - lastDuck) > 0.05) { v.setMaster(want); lastDuck = want; }
           }

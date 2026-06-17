@@ -80,6 +80,8 @@ if (MOSH_BUILD_APP)
         src/plugins/hosting/PluginHost.cpp
         # Stage 4 — Tier-A real-time neural insert (04 PART 2)
         src/plugins/neural/NeuralInsertPlugin.cpp
+        # Moshi reactivity — master-output spectral tap (pure measure)
+        src/plugins/spectral/MasterSpectralTapPlugin.cpp
         # Stage 5 — Tier-B generative layer (05)
         src/generative/GenerativeJobManager.cpp
         # iPhone companion remote control + phone-take ingest
