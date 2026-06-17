@@ -263,6 +263,11 @@ export const useStore = create<State>((set, get) => ({
     void notifyUiReady();
     void get().refresh();
     void get().refreshRemote();
+    // Start the live level meters: insert a post-fader LevelMeterPlugin on every track
+    // so the backend begins emitting the 30 Hz `levels` telemetry the meters draw. Once
+    // at init only — the command runs a Tracktion transaction, so re-issuing it on every
+    // structural change would clutter undo. (Mock returns ok; see bridge.mock.)
+    void get().exec("enable_all_meters");
   },
 
   refreshRemote: async () => {

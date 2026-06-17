@@ -31,6 +31,7 @@ ui/*.tsbuildinfo
 
 # Python service
 service/.venv/
+service/.sa3.env          # machine-local SA3 paths written by setup-sa3.sh
 service/__pycache__/
 **/__pycache__/
 *.pyc
