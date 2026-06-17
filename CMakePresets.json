@@ -2,32 +2,6 @@
   "version": 5,
   "configurePresets": [
     {
-      "name": "windows-pc-debug",
-      "displayName": "Windows PC Debug",
-      "generator": "Visual Studio 17 2022",
-      "architecture": "x64",
-      "binaryDir": "${sourceDir}/build-pc",
-      "cacheVariables": {
-        "MOSH_BUILD_APP": "ON",
-        "MOSH_BUILD_TESTS": "ON",
-        "MOSH_BUILD_UI": "ON",
-        "MOSH_BUILD_PLUGIN_FIXTURES": "ON"
-      }
-    },
-    {
-      "name": "windows-spine-debug",
-      "displayName": "Windows Spine Debug",
-      "generator": "Visual Studio 17 2022",
-      "architecture": "x64",
-      "binaryDir": "${sourceDir}/build-pc-spine",
-      "cacheVariables": {
-        "MOSH_BUILD_APP": "OFF",
-        "MOSH_BUILD_TESTS": "ON",
-        "MOSH_BUILD_UI": "OFF",
-        "MOSH_BUILD_PLUGIN_FIXTURES": "OFF"
-      }
-    },
-    {
       "name": "macos-arm64-debug",
       "displayName": "macOS Apple Silicon Debug",
       "generator": "Ninja",
@@ -43,42 +17,6 @@
     }
   ],
   "buildPresets": [
-    {
-      "name": "windows-pc-app",
-      "displayName": "Build Windows PC app",
-      "configurePreset": "windows-pc-debug",
-      "configuration": "Debug",
-      "targets": [
-        "Mosh"
-      ]
-    },
-    {
-      "name": "windows-pc-tests",
-      "displayName": "Build Windows PC tests",
-      "configurePreset": "windows-pc-debug",
-      "configuration": "Debug",
-      "targets": [
-        "MoshTests"
-      ]
-    },
-    {
-      "name": "windows-pc-plugin-fixture",
-      "displayName": "Build Windows PC plugin fixture",
-      "configurePreset": "windows-pc-debug",
-      "configuration": "Debug",
-      "targets": [
-        "MoshTestTonePlugin_VST3"
-      ]
-    },
-    {
-      "name": "windows-spine-tests",
-      "displayName": "Build Windows spine tests",
-      "configurePreset": "windows-spine-debug",
-      "configuration": "Debug",
-      "targets": [
-        "MoshTests"
-      ]
-    },
     {
       "name": "macos-arm64-app",
       "displayName": "Build macOS Apple Silicon app",
