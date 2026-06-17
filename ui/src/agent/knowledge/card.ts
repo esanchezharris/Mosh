@@ -116,6 +116,35 @@ export function judgeConformance(
   return { pass: true, reason: "move reproduced across arrangements, mix intact" };
 }
 
+// Two cards perform the SAME move iff their recipe commands (or prompt guidance) are byte-
+// identical — the label/skill_name is just a description, not the identity of the technique.
+const moveKey = (c: TechniqueCard): string =>
+  c.recipe.kind === "recipe" ? "r:" + JSON.stringify(c.recipe.commands) : "p:" + c.recipe.guidance;
+const statusRank = (s: CardStatus): number => (s === "preferred" ? 2 : s === "candidate" || s === "rejected" ? 0 : 1);
+
+// Collapse cards that perform the byte-identical move into ONE representative, unioning their
+// genre_context so retrieval still matches every context the move was mined under. Different
+// moves (e.g. distinct drum PATTERNS) are preserved — only true duplicates collapse. Applied
+// at BAKE time (writeCardsData) so the shipped bundle stays clean while cards.jsonl keeps the
+// full provenance. Mining at scale re-extracts the same core techniques across many tutorials;
+// without this, those land as dozens of near-identical cards (id = skill_name+commands, so a
+// re-label dodges the id collision). Pure + deterministic so it unit-tests.
+export function dedupByMove(cards: TechniqueCard[]): TechniqueCard[] {
+  const groups = new Map<string, TechniqueCard[]>();
+  for (const c of cards) {
+    const k = moveKey(c);
+    const g = groups.get(k);
+    if (g) g.push(c); else groups.set(k, [c]);
+  }
+  const out: TechniqueCard[] = [];
+  for (const group of groups.values()) {
+    if (group.length === 1) { out.push(group[0]); continue; }
+    const rep = [...group].sort((a, b) => statusRank(b.status) - statusRank(a.status) || b.confidence - a.confidence || (a.id < b.id ? -1 : 1))[0];
+    out.push({ ...rep, genre_context: [...new Set(group.flatMap((c) => c.genre_context))] });
+  }
+  return out;
+}
+
 // Map an accepted card's mean brief-match delta to a 0..1 confidence (bigger lift =
 // more confident, saturating). Used to rank cards when several match a request.
 export function deltaConfidence(evidence: CardEvidence[]): number {

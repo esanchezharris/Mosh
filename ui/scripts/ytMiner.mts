@@ -17,7 +17,7 @@ import { MOSH_BIN } from "./agentEngine.mts";
 import { loadEnvFiles, resolveProviders, callLLM } from "./llm.mts";
 import { parseDistilledCards } from "../src/agent/knowledge/distill";
 import { IN_THE_BOX_COMMANDS, BASE_TOKENS, DISTILL_SYS } from "../src/agent/knowledge/distillPrompt";
-import { parseTranscript, buildMinerUser } from "../src/agent/knowledge/youtube";
+import { parseTranscript, buildMinerUser, isPlaylistUrl, selectVideoUrls, videoIdFromUrl } from "../src/agent/knowledge/youtube";
 import { runCandidateThroughLoop, type Outcome } from "./recipeLoop.mts";
 import { upsertCards, writeCardsData, loadCards } from "./knowledgeStore.mts";
 import { type BaseSpec } from "./recipeBase.mts";
@@ -54,6 +54,24 @@ function fetchCaptions(url: string): { transcript: string; title: string } {
   return { transcript, title };
 }
 
+// Expand a playlist URL into its video watch-URLs via yt-dlp (flat list, no download).
+function expandPlaylist(url: string): string[] {
+  try {
+    const out = execFileSync("yt-dlp", ["--flat-playlist", "--no-warnings", "--print", "%(id)s", url], { encoding: "utf8", timeout: 180_000 });
+    return out.split(/\r?\n/).map((s) => s.trim()).filter(Boolean).map((id) => `https://www.youtube.com/watch?v=${id}`);
+  } catch (e) { console.error(`  ⃠ playlist expand failed (${url}): ${(e as Error).message.split("\n")[0]}`); return []; }
+}
+
+// Cross-run "already mined" video ids, so re-pointing at an overlapping playlist doesn't
+// re-pay the LLM for videos we've already attempted. Delete the file to force a re-mine.
+const SEEN_FILE = resolve(OUT_DIR, "mined-videos.json");
+function loadSeen(): Set<string> {
+  try { return new Set(JSON.parse(readFileSync(SEEN_FILE, "utf8")) as string[]); } catch { return new Set(); }
+}
+function saveSeen(seen: Set<string>): void {
+  writeFileSync(SEEN_FILE, JSON.stringify([...seen].sort()));
+}
+
 type MinedOutcome = Outcome & { url: string; title: string };
 
 async function main() {
@@ -62,11 +80,19 @@ async function main() {
   loadEnvFiles(UI_ROOT);
   const providers = resolveProviders(process.env.YT_MINE_PROVIDER);
   if (!providers.length) { console.error("no LLM provider — set keys in ui/.env.local"); process.exit(2); }
-  const urls = [...process.argv.slice(2).filter((a) => /^https?:\/\//.test(a)), ...(process.env.YT_URL ? [process.env.YT_URL] : [])];
-  if (!urls.length) { console.error('usage: npm run yt-mine -- "<youtube-url>" [more…]   (or YT_URL=…)'); process.exit(2); }
+  const rawUrls = [...process.argv.slice(2).filter((a) => /^https?:\/\//.test(a)), ...(process.env.YT_URL ? [process.env.YT_URL] : [])];
+  if (!rawUrls.length) { console.error('usage: npm run yt-mine -- "<youtube-url-or-playlist>" [more…]   (or YT_URL=…; cap a run with YT_MINE_MAX=N)'); process.exit(2); }
   try { execSync("pkill -f server.py", { stdio: "ignore" }); } catch { /* none */ }
   mkdirSync(OUT_DIR, { recursive: true });
-  console.error(`\nYouTube miner · ${urls.length} url(s) · providers=[${providers.map((p) => p.id).join(", ")}] · transcript-grounded (keys by reference)\n`);
+
+  // Expand any playlist URL into its videos, then dedup/skip-already-mined/cap.
+  const nPlaylists = rawUrls.filter(isPlaylistUrl).length;
+  const candidateVideoUrls = rawUrls.flatMap((u) => (isPlaylistUrl(u) ? expandPlaylist(u) : [u]));
+  const seen = loadSeen();
+  const cap = Number(process.env.YT_MINE_MAX || 12);
+  const urls = selectVideoUrls(candidateVideoUrls, { seen, cap });
+  if (!urls.length) { console.error(`nothing to mine — ${candidateVideoUrls.length} candidate(s), all already mined or not videos (${seen.size} in the mined set). Delete ${SEEN_FILE} to re-mine.`); process.exit(0); }
+  console.error(`\nYouTube miner · ${nPlaylists} playlist(s) + ${rawUrls.length - nPlaylists} direct → ${candidateVideoUrls.length} candidate video(s) → ${urls.length} NEW selected (cap ${cap}, ${seen.size} already mined) · providers=[${providers.map((p) => p.id).join(", ")}]\n`);
 
   const before = new Set(loadCards().map((c) => c.id));
   const outcomes: MinedOutcome[] = [];
@@ -103,6 +129,11 @@ async function main() {
       outcomes.push({ ...out, url, title });
     }
   }
+
+  // Mark every video we ATTEMPTED (fetched) as mined — including ones that yielded nothing —
+  // so a later run over an overlapping playlist doesn't re-pay for them.
+  for (const u of urls) { const id = videoIdFromUrl(u); if (id) seen.add(id); }
+  saveSeen(seen);
 
   const conformant = outcomes.filter((o) => o.card.status === "conformant").map((o) => o.card);
   const novel = conformant.filter((c) => !before.has(c.id));

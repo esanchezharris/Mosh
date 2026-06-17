@@ -5,24 +5,37 @@ import { BASE_TOKENS } from "./distillPrompt";
 import { AGENT_COMMAND_MAP } from "../commands";
 import type { TechniqueCard } from "./card";
 
-const byId = (id: string): TechniqueCard => {
-  const c = VALIDATED_CARDS.find((x) => x.id === id);
-  if (!c) throw new Error(`fixture card ${id} missing from cards.data`);
-  return c;
-};
-
-// The shipped recipe cards we render — one per family.
-const BOOMBAP = "card_12sr5ye"; // add_note grid (kick/snare/hat)
-const SWING = "card_ayxwyv"; // quantize_notes swing
-const HUMANIZE = "card_1mrax2f"; // humanize_notes
-const AUTOMATION = "card_7oekwz"; // add_automation_point sweep
-const SEND = "card_ip4mp1"; // create_bus + add_send
-const PROMPT_CARD = "card_7a0163"; // a kind:"prompt" card
+// Inline one-per-family fixtures (the real card shapes), so these logic tests don't couple to
+// which specific card id survives bake-time dedup. The guard/spot-check tests below DO iterate
+// the real shipped VALIDATED_CARDS for bundle coverage.
+const card = (commands: { command: string; args: Record<string, unknown> }[], over: Partial<TechniqueCard> = {}): TechniqueCard => ({
+  id: "t", source: "distill", skill_name: "t", task_type: "drum_programming",
+  genre_context: ["boom-bap"], producer_intent: "p", when: "w",
+  recipe: { kind: "recipe", commands }, evidence: [], confidence: 0.75, status: "conformant", ...over,
+});
+const BOOMBAP = card([
+  { command: "add_note", args: { clipId: "$drumClipId", pitch: 36, start: 0, length: 0.25, velocity: 110 } },
+  { command: "add_note", args: { clipId: "$drumClipId", pitch: 36, start: 2.5, length: 0.25, velocity: 110 } },
+  { command: "add_note", args: { clipId: "$drumClipId", pitch: 38, start: 1, length: 0.25, velocity: 100 } },
+  { command: "add_note", args: { clipId: "$drumClipId", pitch: 38, start: 3, length: 0.25, velocity: 100 } },
+  { command: "add_note", args: { clipId: "$drumClipId", pitch: 42, start: 0, length: 0.25, velocity: 80 } },
+]);
+const SWING = card([{ command: "quantize_notes", args: { clipId: "$hatsClipId", division: 0.5, strength: 1, swing: 0.58 } }]);
+const HUMANIZE = card([{ command: "humanize_notes", args: { clipId: "$keysClipId", timing: 0.2, velocity: 0.3, seed: 42 } }]);
+const AUTOMATION = card([
+  { command: "add_automation_point", args: { trackId: "$keysTrackId", pluginIndex: "$keysFilterPluginIndex", paramIndex: "$keysFilterParamIndex", time: 0, value: 0.2 } },
+  { command: "add_automation_point", args: { trackId: "$keysTrackId", pluginIndex: "$keysFilterPluginIndex", paramIndex: "$keysFilterParamIndex", time: 4, value: 0.9 } },
+]);
+const SEND = card([
+  { command: "create_bus", args: { name: "Reverb" } },
+  { command: "add_send", args: { trackId: "$keysTrackId", bus: "$busNumber", db: -12 } },
+]);
+const PROMPT_CARD = card([], { recipe: { kind: "prompt", guidance: "dusty boom-bap drums" } });
 
 describe("renderRecipeExample — turns a recipe card's commands into a worked example", () => {
   it("renders an add_note grid as one line per drum voice with names + beats", () => {
-    const out = renderRecipeExample(byId(BOOMBAP));
-    // kick(36) on beats 0 and 2.5, snare(38) on 1 and 3, hat(42) on every 8th
+    const out = renderRecipeExample(BOOMBAP);
+    // kick(36) on beats 0 and 2.5, snare(38) on 1 and 3, hat(42) at 0
     expect(out).toContain("kick(36)");
     expect(out).toContain("snare(38)");
     expect(out).toContain("hat(42)");
@@ -34,7 +47,7 @@ describe("renderRecipeExample — turns a recipe card's commands into a worked e
   });
 
   it("renders quantize_notes with the LITERAL numeric division (not a '1/8' string that fails validateCommand)", () => {
-    const out = renderRecipeExample(byId(SWING));
+    const out = renderRecipeExample(SWING);
     expect(out).toContain("division 0.5"); // the exact number arg the command takes
     expect(out).toContain("swing 0.58");
     expect(out).not.toContain("1/8"); // never show the fraction near a number arg — the model copies it as a string
@@ -42,7 +55,7 @@ describe("renderRecipeExample — turns a recipe card's commands into a worked e
   });
 
   it("renders humanize_notes with its concrete params", () => {
-    const out = renderRecipeExample(byId(HUMANIZE));
+    const out = renderRecipeExample(HUMANIZE);
     expect(out).toContain("timing 0.2");
     expect(out).toContain("velocity 0.3");
     expect(out).toContain("seed 42");
@@ -50,7 +63,7 @@ describe("renderRecipeExample — turns a recipe card's commands into a worked e
   });
 
   it("renders add_automation_point as a from→to sweep, index read from the snapshot", () => {
-    const out = renderRecipeExample(byId(AUTOMATION));
+    const out = renderRecipeExample(AUTOMATION);
     expect(out.toLowerCase()).toContain("automate");
     expect(out).toContain("0.2"); // first value
     expect(out).toContain("0.9"); // last value
@@ -60,14 +73,14 @@ describe("renderRecipeExample — turns a recipe card's commands into a worked e
   });
 
   it("renders create_bus + add_send as a shared-send clause", () => {
-    const out = renderRecipeExample(byId(SEND));
+    const out = renderRecipeExample(SEND);
     expect(out.toLowerCase()).toContain("send bus");
     expect(out).toContain("the keys track");
     expect(out).toContain("-12"); // db
   });
 
   it("returns an empty string for a prompt-kind card (only recipe cards render)", () => {
-    expect(renderRecipeExample(byId(PROMPT_CARD))).toBe("");
+    expect(renderRecipeExample(PROMPT_CARD)).toBe("");
   });
 
   it("labels a plugin sensibly even if a future card stores a NUMERIC pluginIndex", () => {

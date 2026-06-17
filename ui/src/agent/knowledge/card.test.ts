@@ -1,5 +1,43 @@
 import { describe, it, expect } from "vitest";
-import { stableId, judgeAcceptance, judgeConformance, isShippable, deltaConfidence, ACCEPT_MARGIN, type CardEvidence, type CardRecipe, type TechniqueCard } from "./card";
+import { stableId, judgeAcceptance, judgeConformance, isShippable, deltaConfidence, dedupByMove, ACCEPT_MARGIN, type CardEvidence, type CardRecipe, type TechniqueCard } from "./card";
+
+describe("dedupByMove — collapse byte-identical moves in the shipped bundle", () => {
+  const mk = (over: Partial<TechniqueCard>): TechniqueCard => ({
+    id: "x", source: "distill", skill_name: "s", task_type: "drum_programming",
+    genre_context: [], producer_intent: "p", when: "w",
+    recipe: { kind: "recipe", commands: [{ command: "quantize_notes", args: { clipId: "$hatsClipId", division: 0.5, swing: 0.58 } }] },
+    evidence: [], confidence: 0.75, status: "conformant", ...over,
+  });
+
+  it("collapses cards with identical commands into one, unioning their genres", () => {
+    const a = mk({ id: "a", skill_name: "hat swing programming", genre_context: ["boom-bap"] });
+    const b = mk({ id: "b", skill_name: "Add swing to hats", genre_context: ["lo-fi", "neo-soul"] });
+    const out = dedupByMove([a, b]);
+    expect(out.length).toBe(1);
+    expect([...out[0].genre_context].sort()).toEqual(["boom-bap", "lo-fi", "neo-soul"]);
+  });
+
+  it("keeps cards with DIFFERENT commands (pattern variety is preserved)", () => {
+    const a = mk({ id: "a", recipe: { kind: "recipe", commands: [{ command: "add_note", args: { clipId: "$drumClipId", pitch: 36, start: 0, length: 0.25 } }] } });
+    const b = mk({ id: "b", recipe: { kind: "recipe", commands: [{ command: "add_note", args: { clipId: "$drumClipId", pitch: 36, start: 1, length: 0.25 } }] } });
+    expect(dedupByMove([a, b]).length).toBe(2);
+  });
+
+  it("prefers a 'preferred' (ear-upgraded) representative over a conformant one", () => {
+    const conf = mk({ id: "a", skill_name: "conf", status: "conformant" });
+    const pref = mk({ id: "b", skill_name: "pref", status: "preferred" });
+    const out = dedupByMove([conf, pref]);
+    expect(out.length).toBe(1);
+    expect(out[0].skill_name).toBe("pref");
+  });
+
+  it("dedups prompt cards by guidance, keeping distinct guidance", () => {
+    const p1 = mk({ id: "p1", recipe: { kind: "prompt", guidance: "dusty drums" } });
+    const p2 = mk({ id: "p2", recipe: { kind: "prompt", guidance: "dusty drums" } });
+    const p3 = mk({ id: "p3", recipe: { kind: "prompt", guidance: "warm rhodes" } });
+    expect(dedupByMove([p1, p2, p3]).length).toBe(2);
+  });
+});
 
 const promptRecipe: CardRecipe = { kind: "prompt", guidance: "name every instrument" };
 

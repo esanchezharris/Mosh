@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseTranscript, buildMinerUser } from "./youtube";
+import { parseTranscript, buildMinerUser, videoIdFromUrl, isPlaylistUrl, selectVideoUrls } from "./youtube";
 
 describe("parseTranscript — WebVTT/SRT captions → clean prose", () => {
   it("strips the header, cue timings, inline tags, and dedups rolling auto-captions", () => {
@@ -57,5 +57,56 @@ describe("buildMinerUser — transcript-grounded recipe-card extraction", () => 
     const huge = "word ".repeat(20000);
     const user = buildMinerUser(huge, { title: "t" });
     expect(user.length).toBeLessThan(huge.length);
+  });
+});
+
+describe("videoIdFromUrl — extract a YouTube video id", () => {
+  it("reads the v= param of a watch URL (even with a &list=)", () => {
+    expect(videoIdFromUrl("https://www.youtube.com/watch?v=dQw4w9WgXcQ")).toBe("dQw4w9WgXcQ");
+    expect(videoIdFromUrl("https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PL123&index=4")).toBe("dQw4w9WgXcQ");
+  });
+  it("reads a youtu.be short URL and a /shorts/ URL", () => {
+    expect(videoIdFromUrl("https://youtu.be/dQw4w9WgXcQ?si=abc")).toBe("dQw4w9WgXcQ");
+    expect(videoIdFromUrl("https://www.youtube.com/shorts/dQw4w9WgXcQ")).toBe("dQw4w9WgXcQ");
+  });
+  it("returns null for a playlist-only URL or junk", () => {
+    expect(videoIdFromUrl("https://www.youtube.com/playlist?list=PL123")).toBeNull();
+    expect(videoIdFromUrl("not a url")).toBeNull();
+  });
+});
+
+describe("isPlaylistUrl — does this URL name a playlist to expand", () => {
+  it("is true for a playlist page or a watch URL carrying a list=", () => {
+    expect(isPlaylistUrl("https://www.youtube.com/playlist?list=PL123")).toBe(true);
+    expect(isPlaylistUrl("https://www.youtube.com/watch?v=abc&list=PL123")).toBe(true);
+  });
+  it("is false for a bare video URL or junk", () => {
+    expect(isPlaylistUrl("https://www.youtube.com/watch?v=abc")).toBe(false);
+    expect(isPlaylistUrl("https://youtu.be/abc")).toBe(false);
+    expect(isPlaylistUrl("nonsense")).toBe(false);
+  });
+});
+
+describe("selectVideoUrls — canonicalize, dedup, skip already-mined, cap", () => {
+  it("canonicalizes to a bare watch URL and dedups by video id", () => {
+    const out = selectVideoUrls([
+      "https://www.youtube.com/watch?v=AAA&list=PL1", // same id as below, different list
+      "https://youtu.be/AAA",
+      "https://www.youtube.com/watch?v=BBB",
+    ]);
+    expect(out).toEqual(["https://www.youtube.com/watch?v=AAA", "https://www.youtube.com/watch?v=BBB"]);
+  });
+  it("skips ids already mined (the cross-run seen set)", () => {
+    const out = selectVideoUrls(["https://www.youtube.com/watch?v=AAA", "https://www.youtube.com/watch?v=BBB"], { seen: new Set(["AAA"]) });
+    expect(out).toEqual(["https://www.youtube.com/watch?v=BBB"]);
+  });
+  it("caps the batch and drops non-video URLs", () => {
+    const out = selectVideoUrls([
+      "https://www.youtube.com/watch?v=AAA",
+      "https://www.youtube.com/playlist?list=PL1", // no video id → dropped
+      "https://www.youtube.com/watch?v=BBB",
+      "https://www.youtube.com/watch?v=CCC",
+    ], { cap: 2 });
+    expect(out).toEqual(["https://www.youtube.com/watch?v=AAA", "https://www.youtube.com/watch?v=BBB"]);
   });
 });

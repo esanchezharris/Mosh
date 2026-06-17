@@ -27,6 +27,46 @@ export function parseTranscript(captions: string): string {
   return out.join(" ");
 }
 
+// ── Playlist mining at scale ──────────────────────────────────────────────────
+// Pure URL helpers so the miner can take a whole tutorial PLAYLIST: classify a URL,
+// pull the video id, and select a deduped, capped batch. The yt-dlp expansion itself
+// (the I/O) lives in the script; this is the testable selection logic.
+
+/** The 11-ish-char YouTube video id from a watch / youtu.be / shorts URL, else null. */
+export function videoIdFromUrl(url: string): string | null {
+  try {
+    const u = new URL(url);
+    const v = u.searchParams.get("v");
+    if (v) return v;
+    if (u.hostname === "youtu.be" || u.hostname.endsWith(".youtu.be")) return u.pathname.replace(/^\/+/, "").split("/")[0] || null;
+    const m = u.pathname.match(/^\/(?:shorts|embed|v)\/([^/?#]+)/);
+    return m ? m[1] : null;
+  } catch { return null; }
+}
+
+/** True when a URL names a playlist to expand (a playlist page, or a watch URL with list=). */
+export function isPlaylistUrl(url: string): boolean {
+  try { return new URL(url).searchParams.has("list"); } catch { return false; }
+}
+
+const canonVideoUrl = (id: string) => `https://www.youtube.com/watch?v=${id}`;
+
+/** Canonicalize candidate video URLs to bare watch URLs, dedup by id (first wins), drop the
+ *  already-mined `seen` ids and anything without a video id, and cap the batch. Order kept. */
+export function selectVideoUrls(videoUrls: string[], opts: { seen?: Set<string>; cap?: number } = {}): string[] {
+  const seen = opts.seen ?? new Set<string>();
+  const used = new Set<string>();
+  const picked: string[] = [];
+  for (const url of videoUrls) {
+    const id = videoIdFromUrl(url);
+    if (!id || used.has(id) || seen.has(id)) continue;
+    used.add(id);
+    picked.push(canonVideoUrl(id));
+    if (opts.cap && picked.length >= opts.cap) break;
+  }
+  return picked;
+}
+
 const TRANSCRIPT_BUDGET = 8000; // chars — keep the prompt inside a comfortable context
 
 export function buildMinerUser(transcript: string, meta: { title?: string; url?: string }): string {

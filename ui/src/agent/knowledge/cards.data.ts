@@ -292,18 +292,24 @@ export const VALIDATED_CARDS: TechniqueCard[] = [
     "status": "conformant"
   },
   {
-    "id": "card_ayxwyv",
-    "source": "distill",
-    "skill_name": "MPC swing on the hats (~0.58)",
+    "id": "card_12c91bs",
+    "source": "youtube",
+    "skill_name": "Basic boom bap hat pocket with light swing",
     "task_type": "drum_programming",
     "genre_context": [
       "boom-bap",
       "lo-fi hip-hop",
       "hip-hop",
-      "neo-soul"
+      "neo-soul",
+      "boom bap",
+      "90s hip-hop",
+      "soulful sample beat",
+      "boom trap",
+      "J. Cole-type beat",
+      "hip hop"
     ],
-    "producer_intent": "push the off-beat 8ths late for that drunk MPC/boom-bap swing instead of a stiff straight grid",
-    "when": "the hats/drums feel too straight and need a swung, off-grid groove",
+    "producer_intent": "Keep hats simple but give them a small amount of swing so the groove feels less rigid.",
+    "when": "When programming a straight hat line and wanting the classic relaxed boom bap bounce.",
     "recipe": {
       "kind": "recipe",
       "commands": [
@@ -1258,16 +1264,119 @@ export const VALIDATED_CARDS: TechniqueCard[] = [
     "status": "conformant"
   },
   {
-    "id": "card_12c91bs",
+    "id": "card_14qb1z4",
     "source": "youtube",
-    "skill_name": "Basic boom bap hat pocket with light swing",
+    "skill_name": "Drum groove programming with kick layering around a break",
     "task_type": "drum_programming",
     "genre_context": [
       "boom bap",
-      "90s hip-hop"
+      "grimy hip-hop",
+      "Griselda-style",
+      "hip-hop",
+      "Westside Gunn",
+      "Griselda",
+      "griselda",
+      "hip hop"
     ],
-    "producer_intent": "Keep hats simple but give them a small amount of swing so the groove feels less rigid.",
-    "when": "When programming a straight hat line and wanting the classic relaxed boom bap bounce.",
+    "producer_intent": "Program a simple boom-bap drum pocket by placing kicks on the main backbeat while keeping a spare, punchier feel.",
+    "when": "When the beat needs extra punch layered over a drum break and the kicks should lock into the groove rather than sound rigid.",
+    "recipe": {
+      "kind": "recipe",
+      "commands": [
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 36,
+            "start": 0,
+            "length": 0.25,
+            "velocity": 100
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 38,
+            "start": 1,
+            "length": 0.25,
+            "velocity": 100
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 36,
+            "start": 2,
+            "length": 0.25,
+            "velocity": 100
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 38,
+            "start": 3,
+            "length": 0.25,
+            "velocity": 100
+          }
+        }
+      ],
+      "check": {
+        "kind": "pattern",
+        "clip": "$drumClipId",
+        "pattern": {
+          "hits": [
+            {
+              "pitch": 36,
+              "beats": [
+                0,
+                2
+              ]
+            },
+            {
+              "pitch": 38,
+              "beats": [
+                1,
+                3
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "evidence": [
+      {
+        "brief": "lofi-85-Am",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      },
+      {
+        "brief": "dark-70-Cm",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      }
+    ],
+    "confidence": 0.75,
+    "status": "conformant"
+  },
+  {
+    "id": "card_rhki7y",
+    "source": "youtube",
+    "skill_name": "Swinging programmed hats instead of hard quantization",
+    "task_type": "drum_programming",
+    "genre_context": [
+      "boom bap",
+      "grimy hip-hop"
+    ],
+    "producer_intent": "Keep the hats loose and musical by applying swing to a straight hat grid instead of forcing rigid timing.",
+    "when": "When a hat part already exists on 8ths and you want the tutorial-style swung feel without perfectly straight timing.",
     "recipe": {
       "kind": "recipe",
       "commands": [
@@ -1276,8 +1385,8 @@ export const VALIDATED_CARDS: TechniqueCard[] = [
           "args": {
             "clipId": "$hatsClipId",
             "division": 0.5,
-            "strength": 1,
-            "swing": 0.58
+            "swing": 0.58,
+            "strength": 1
           }
         }
       ],
@@ -1286,6 +1395,1277 @@ export const VALIDATED_CARDS: TechniqueCard[] = [
         "clip": "$hatsClipId",
         "division": 0.5,
         "swing": 0.58
+      }
+    },
+    "evidence": [
+      {
+        "brief": "lofi-85-Am",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      },
+      {
+        "brief": "dark-70-Cm",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      }
+    ],
+    "confidence": 0.75,
+    "status": "conformant"
+  },
+  {
+    "id": "card_h6i7m8",
+    "source": "youtube",
+    "skill_name": "Humanizing a simple melodic part to keep it behind the beat",
+    "task_type": "melody",
+    "genre_context": [
+      "boom bap",
+      "grimy hip-hop"
+    ],
+    "producer_intent": "Introduce small deterministic timing/velocity variation so the keys feel played rather than fully grid-locked.",
+    "when": "When the arp or melodic line should sit a little behind the pocket and avoid sounding robotic.",
+    "recipe": {
+      "kind": "recipe",
+      "commands": [
+        {
+          "command": "humanize_notes",
+          "args": {
+            "clipId": "$keysClipId",
+            "timing": 0.125,
+            "velocity": 0.1,
+            "seed": 2022
+          }
+        }
+      ],
+      "check": {
+        "kind": "humanize",
+        "clip": "$keysClipId",
+        "maxOffsetBeats": 0.125
+      }
+    },
+    "evidence": [
+      {
+        "brief": "lofi-85-Am",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      },
+      {
+        "brief": "dark-70-Cm",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      }
+    ],
+    "confidence": 0.75,
+    "status": "conformant"
+  },
+  {
+    "id": "card_1b19wvz",
+    "source": "youtube",
+    "skill_name": "Automate key filter cutoff for movement",
+    "task_type": "sound_design",
+    "genre_context": [
+      "boom bap",
+      "grimy hip-hop",
+      "arrangement movement",
+      "boom trap",
+      "J. Cole-type beat",
+      "hip hop"
+    ],
+    "producer_intent": "Use an EQ filter sweep to open or close the tonal space of the keys over time.",
+    "when": "When the tutorial-style move is to add some motion to a static melody or chop using EQ automation.",
+    "recipe": {
+      "kind": "recipe",
+      "commands": [
+        {
+          "command": "add_automation_point",
+          "args": {
+            "trackId": "$keysTrackId",
+            "pluginIndex": "$keysFilterPluginIndex",
+            "paramIndex": "$keysFilterParamIndex",
+            "time": 0,
+            "value": 0.2
+          }
+        },
+        {
+          "command": "add_automation_point",
+          "args": {
+            "trackId": "$keysTrackId",
+            "pluginIndex": "$keysFilterPluginIndex",
+            "paramIndex": "$keysFilterParamIndex",
+            "time": 8,
+            "value": 0.8
+          }
+        }
+      ],
+      "check": {
+        "kind": "automation",
+        "track": "$keysTrackId",
+        "pluginIndex": "$keysFilterPluginIndex",
+        "paramIndex": "$keysFilterParamIndex",
+        "direction": "up"
+      }
+    },
+    "evidence": [
+      {
+        "brief": "lofi-85-Am",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      },
+      {
+        "brief": "dark-70-Cm",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      }
+    ],
+    "confidence": 0.75,
+    "status": "conformant"
+  },
+  {
+    "id": "card_103di8z",
+    "source": "youtube",
+    "skill_name": "Shared ambience send for glue and section cohesion",
+    "task_type": "mixing",
+    "genre_context": [
+      "boom bap",
+      "grimy hip-hop"
+    ],
+    "producer_intent": "Route the keys into a shared return so the loop sits in a common space and feels more glued together.",
+    "when": "When the beat needs subtle space and cohesion rather than a dry, isolated loop.",
+    "recipe": {
+      "kind": "recipe",
+      "commands": [
+        {
+          "command": "create_bus",
+          "args": {
+            "name": "keys_verb"
+          }
+        },
+        {
+          "command": "add_send",
+          "args": {
+            "trackId": "$keysTrackId",
+            "bus": "$busNumber",
+            "db": -12
+          }
+        }
+      ],
+      "check": {
+        "kind": "send",
+        "track": "$keysTrackId",
+        "bus": "$busNumber",
+        "db": -12
+      }
+    },
+    "evidence": [
+      {
+        "brief": "lofi-85-Am",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      },
+      {
+        "brief": "dark-70-Cm",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      }
+    ],
+    "confidence": 0.75,
+    "status": "conformant"
+  },
+  {
+    "id": "card_1dm3b6k",
+    "source": "youtube",
+    "skill_name": "Program a simple boom-bap kick/snare backbeat",
+    "task_type": "drum_programming",
+    "genre_context": [
+      "boom bap",
+      "hard hip-hop"
+    ],
+    "producer_intent": "Lay down the core drum pocket with kick on beats 1 and 3 and snare on beats 2 and 4.",
+    "when": "After the sample chops are in place and before adding hats/open hats.",
+    "recipe": {
+      "kind": "recipe",
+      "commands": [
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 36,
+            "start": 0,
+            "length": 0.25,
+            "velocity": 100
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 36,
+            "start": 2,
+            "length": 0.25,
+            "velocity": 100
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 38,
+            "start": 1,
+            "length": 0.25,
+            "velocity": 105
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 38,
+            "start": 3,
+            "length": 0.25,
+            "velocity": 105
+          }
+        }
+      ],
+      "check": {
+        "kind": "pattern",
+        "clip": "$drumClipId",
+        "pattern": {
+          "hits": [
+            {
+              "pitch": 36,
+              "beats": [
+                0,
+                2
+              ]
+            },
+            {
+              "pitch": 38,
+              "beats": [
+                1,
+                3
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "evidence": [
+      {
+        "brief": "lofi-85-Am",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      },
+      {
+        "brief": "dark-70-Cm",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      }
+    ],
+    "confidence": 0.75,
+    "status": "conformant"
+  },
+  {
+    "id": "card_e7ka9a",
+    "source": "youtube",
+    "skill_name": "Humanize a programmed keys part",
+    "task_type": "melody",
+    "genre_context": [
+      "boom bap",
+      "sampled hip-hop",
+      "sample-based hip hop"
+    ],
+    "producer_intent": "Make the keys/arp feel less robotic by adding small deterministic timing and velocity variation.",
+    "when": "After the keys arp is in place and before finalizing the loop feel.",
+    "recipe": {
+      "kind": "recipe",
+      "commands": [
+        {
+          "command": "humanize_notes",
+          "args": {
+            "clipId": "$keysClipId",
+            "timing": 0.125,
+            "velocity": 0.1,
+            "seed": 42
+          }
+        }
+      ],
+      "check": {
+        "kind": "humanize",
+        "clip": "$keysClipId",
+        "maxOffsetBeats": 0.125
+      }
+    },
+    "evidence": [
+      {
+        "brief": "lofi-85-Am",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      },
+      {
+        "brief": "dark-70-Cm",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      }
+    ],
+    "confidence": 0.75,
+    "status": "conformant"
+  },
+  {
+    "id": "card_vfu4ht",
+    "source": "youtube",
+    "skill_name": "Humanize programmed MIDI for a natural piano feel",
+    "task_type": "melody",
+    "genre_context": [
+      "boom bap",
+      "sample-free beatmaking"
+    ],
+    "producer_intent": "Make a played-in piano part feel less robotic by adding deterministic timing and velocity variation.",
+    "when": "Use after entering or copying a MIDI piano part that was manually played and needs more human feel.",
+    "recipe": {
+      "kind": "recipe",
+      "commands": [
+        {
+          "command": "humanize_notes",
+          "args": {
+            "clipId": "$keysClipId",
+            "timing": 0.125,
+            "velocity": 0.125,
+            "seed": 1
+          }
+        }
+      ],
+      "check": {
+        "kind": "humanize",
+        "clip": "$keysClipId",
+        "maxOffsetBeats": 0.125
+      }
+    },
+    "evidence": [
+      {
+        "brief": "lofi-85-Am",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      },
+      {
+        "brief": "dark-70-Cm",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      }
+    ],
+    "confidence": 0.75,
+    "status": "conformant"
+  },
+  {
+    "id": "card_125xvtl",
+    "source": "youtube",
+    "skill_name": "layer_kick_into_drum_break",
+    "task_type": "drum_programming",
+    "genre_context": [
+      "boom bap",
+      "soulful sample beat"
+    ],
+    "producer_intent": "Add punch and low-end to a drum break by layering a complementary kick on the main backbeats so the drums knock harder without fighting the sample.",
+    "when": "When a drum break feels good but needs more punch and low-end body.",
+    "recipe": {
+      "kind": "recipe",
+      "commands": [
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 36,
+            "start": 0,
+            "length": 0.25,
+            "velocity": 100
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 36,
+            "start": 2,
+            "length": 0.25,
+            "velocity": 100
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 38,
+            "start": 1,
+            "length": 0.25,
+            "velocity": 96
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 38,
+            "start": 3,
+            "length": 0.25,
+            "velocity": 96
+          }
+        }
+      ],
+      "check": {
+        "kind": "pattern",
+        "clip": "$drumClipId",
+        "pattern": {
+          "hits": [
+            {
+              "pitch": 36,
+              "beats": [
+                0,
+                2
+              ]
+            },
+            {
+              "pitch": 38,
+              "beats": [
+                1,
+                3
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "evidence": [
+      {
+        "brief": "lofi-85-Am",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      },
+      {
+        "brief": "dark-70-Cm",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      }
+    ],
+    "confidence": 0.75,
+    "status": "conformant"
+  },
+  {
+    "id": "card_2et6nz",
+    "source": "youtube",
+    "skill_name": "simple boom-bap drum programming",
+    "task_type": "drum_programming",
+    "genre_context": [
+      "boom bap",
+      "grimy boom bap",
+      "no-samples boom bap"
+    ],
+    "producer_intent": "Lay down a minimal, hard-hitting kick/snare pocket with the classic boom-bap backbeat.",
+    "when": "After the melody is established and you want the drums to lock in without overcrowding the beat.",
+    "recipe": {
+      "kind": "recipe",
+      "commands": [
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 36,
+            "start": 0,
+            "length": 0.25,
+            "velocity": 100
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 36,
+            "start": 2,
+            "length": 0.25,
+            "velocity": 100
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 38,
+            "start": 1,
+            "length": 0.25,
+            "velocity": 110
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 38,
+            "start": 3,
+            "length": 0.25,
+            "velocity": 110
+          }
+        }
+      ],
+      "check": {
+        "kind": "pattern",
+        "clip": "$drumClipId",
+        "pattern": {
+          "hits": [
+            {
+              "pitch": 36,
+              "beats": [
+                0,
+                2
+              ]
+            },
+            {
+              "pitch": 38,
+              "beats": [
+                1,
+                3
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "evidence": [
+      {
+        "brief": "lofi-85-Am",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      },
+      {
+        "brief": "dark-70-Cm",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      }
+    ],
+    "confidence": 0.75,
+    "status": "conformant"
+  },
+  {
+    "id": "card_1b9kja4",
+    "source": "youtube",
+    "skill_name": "melody humanization for sloppy texture",
+    "task_type": "melody",
+    "genre_context": [
+      "boom bap",
+      "grimy sampleless hip-hop"
+    ],
+    "producer_intent": "Humanize a programmed melodic part so it feels played loosely and less robotic.",
+    "when": "After programming a melodic loop and before committing it as a rough, gritty texture.",
+    "recipe": {
+      "kind": "recipe",
+      "commands": [
+        {
+          "command": "humanize_notes",
+          "args": {
+            "clipId": "$keysClipId",
+            "timing": 0.125,
+            "velocity": 0.1,
+            "seed": 7
+          }
+        }
+      ],
+      "check": {
+        "kind": "humanize",
+        "clip": "$keysClipId",
+        "maxOffsetBeats": 0.125
+      }
+    },
+    "evidence": [
+      {
+        "brief": "lofi-85-Am",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      },
+      {
+        "brief": "dark-70-Cm",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      }
+    ],
+    "confidence": 0.75,
+    "status": "conformant"
+  },
+  {
+    "id": "card_ze0v1y",
+    "source": "youtube",
+    "skill_name": "shared send effects setup",
+    "task_type": "mixing",
+    "genre_context": [
+      "boom bap",
+      "texture layering"
+    ],
+    "producer_intent": "Route a track to a shared aux bus for glue, space, or parallel processing.",
+    "when": "When you want one layer to share a common effect path with other elements or get extra ambience without inserting it directly on the track.",
+    "recipe": {
+      "kind": "recipe",
+      "commands": [
+        {
+          "command": "create_bus",
+          "args": {
+            "name": "shared_fx"
+          }
+        },
+        {
+          "command": "add_send",
+          "args": {
+            "trackId": "$keysTrackId",
+            "bus": "$busNumber",
+            "db": -12
+          }
+        }
+      ],
+      "check": {
+        "kind": "send",
+        "track": "$keysTrackId",
+        "bus": "$busNumber",
+        "db": -12
+      }
+    },
+    "evidence": [
+      {
+        "brief": "lofi-85-Am",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      },
+      {
+        "brief": "dark-70-Cm",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      }
+    ],
+    "confidence": 0.75,
+    "status": "conformant"
+  },
+  {
+    "id": "card_ngdtwy",
+    "source": "youtube",
+    "skill_name": "Finger-drummed kick/snare boom-bap bounce",
+    "task_type": "drum_programming",
+    "genre_context": [
+      "boom trap",
+      "J. Cole-type beat",
+      "boom bap"
+    ],
+    "producer_intent": "Program a loose kick/snare backbone by playing freely instead of rigidly quantizing, so the groove feels more human and bounce-focused.",
+    "when": "When building the main drum pocket after the melody is set.",
+    "recipe": {
+      "kind": "recipe",
+      "commands": [
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 36,
+            "start": 0,
+            "length": 0.25,
+            "velocity": 100
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 38,
+            "start": 1,
+            "length": 0.25,
+            "velocity": 100
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 36,
+            "start": 2,
+            "length": 0.25,
+            "velocity": 96
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 38,
+            "start": 3,
+            "length": 0.25,
+            "velocity": 100
+          }
+        }
+      ],
+      "check": {
+        "kind": "pattern",
+        "clip": "$drumClipId",
+        "pattern": {
+          "hits": [
+            {
+              "pitch": 36,
+              "beats": [
+                0,
+                2
+              ]
+            },
+            {
+              "pitch": 38,
+              "beats": [
+                1,
+                3
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "evidence": [
+      {
+        "brief": "lofi-85-Am",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      },
+      {
+        "brief": "dark-70-Cm",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      }
+    ],
+    "confidence": 0.75,
+    "status": "conformant"
+  },
+  {
+    "id": "card_sv8ljl",
+    "source": "youtube",
+    "skill_name": "Melodic texture change-up with humanized timing",
+    "task_type": "melody",
+    "genre_context": [
+      "boom trap",
+      "J. Cole-type beat"
+    ],
+    "producer_intent": "Make the repeated musical phrase feel less static by slightly humanizing timing and velocity, matching the tutorial's emphasis on subtle movement.",
+    "when": "When adding variation to repeated chops/keys so the section feels less repetitive.",
+    "recipe": {
+      "kind": "recipe",
+      "commands": [
+        {
+          "command": "humanize_notes",
+          "args": {
+            "clipId": "$keysClipId",
+            "timing": 0.125,
+            "velocity": 0.08,
+            "seed": 2022
+          }
+        }
+      ],
+      "check": {
+        "kind": "humanize",
+        "clip": "$keysClipId",
+        "maxOffsetBeats": 0.125
+      }
+    },
+    "evidence": [
+      {
+        "brief": "lofi-85-Am",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      },
+      {
+        "brief": "dark-70-Cm",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      }
+    ],
+    "confidence": 0.75,
+    "status": "conformant"
+  },
+  {
+    "id": "card_xj5oy0",
+    "source": "youtube",
+    "skill_name": "Shared ambience send for glue",
+    "task_type": "mixing",
+    "genre_context": [
+      "boom trap",
+      "J. Cole-type beat"
+    ],
+    "producer_intent": "Send the keys to a shared bus to create cohesion and add space, like a common ambience return in a polished beat.",
+    "when": "When the keys need shared reverb/delay style depth in the arrangement.",
+    "recipe": {
+      "kind": "recipe",
+      "commands": [
+        {
+          "command": "create_bus",
+          "args": {
+            "name": "keys_ambience"
+          }
+        },
+        {
+          "command": "add_send",
+          "args": {
+            "trackId": "$keysTrackId",
+            "bus": "$busNumber",
+            "db": -12
+          }
+        }
+      ],
+      "check": {
+        "kind": "send",
+        "track": "$keysTrackId",
+        "bus": "$busNumber",
+        "db": -12
+      }
+    },
+    "evidence": [
+      {
+        "brief": "lofi-85-Am",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      },
+      {
+        "brief": "dark-70-Cm",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      }
+    ],
+    "confidence": 0.75,
+    "status": "conformant"
+  },
+  {
+    "id": "card_1j4qnri",
+    "source": "youtube",
+    "skill_name": "humanized off-grid glockenspiel feel",
+    "task_type": "melody",
+    "genre_context": [
+      "Westside Gunn",
+      "Griselda",
+      "boom bap"
+    ],
+    "producer_intent": "make a melodic MIDI part feel sloppy, swung, and performed rather than rigid",
+    "when": "when programming the glockenspiel-style melodic line",
+    "recipe": {
+      "kind": "recipe",
+      "commands": [
+        {
+          "command": "humanize_notes",
+          "args": {
+            "clipId": "$keysClipId",
+            "timing": 0.125,
+            "velocity": 12,
+            "seed": 42
+          }
+        }
+      ],
+      "check": {
+        "kind": "humanize",
+        "clip": "$keysClipId",
+        "maxOffsetBeats": 0.125
+      }
+    },
+    "evidence": [
+      {
+        "brief": "lofi-85-Am",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      },
+      {
+        "brief": "dark-70-Cm",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      }
+    ],
+    "confidence": 0.75,
+    "status": "conformant"
+  },
+  {
+    "id": "card_15gaelm",
+    "source": "youtube",
+    "skill_name": "shared ambience send for melodic glue",
+    "task_type": "mixing",
+    "genre_context": [
+      "Westside Gunn",
+      "Griselda",
+      "boom bap"
+    ],
+    "producer_intent": "route a melodic layer to a shared return for space and cohesion",
+    "when": "when the keys/synth layer needs shared ambience",
+    "recipe": {
+      "kind": "recipe",
+      "commands": [
+        {
+          "command": "create_bus",
+          "args": {
+            "name": "ambience"
+          }
+        },
+        {
+          "command": "add_send",
+          "args": {
+            "trackId": "$keysTrackId",
+            "bus": "$busNumber",
+            "db": -12
+          }
+        }
+      ],
+      "check": {
+        "kind": "send",
+        "track": "$keysTrackId",
+        "bus": "$busNumber",
+        "db": -12
+      }
+    },
+    "evidence": [
+      {
+        "brief": "lofi-85-Am",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      },
+      {
+        "brief": "dark-70-Cm",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      }
+    ],
+    "confidence": 0.75,
+    "status": "conformant"
+  },
+  {
+    "id": "card_14h1aaz",
+    "source": "youtube",
+    "skill_name": "Humanize melodic MIDI for a less robotic feel",
+    "task_type": "melody",
+    "genre_context": [
+      "boom bap",
+      "hip hop"
+    ],
+    "producer_intent": "Add small timing and velocity variation to a programmed arp so it feels performed rather than grid-locked.",
+    "when": "When the keys/arp loop sounds too mechanical after programming.",
+    "recipe": {
+      "kind": "recipe",
+      "commands": [
+        {
+          "command": "humanize_notes",
+          "args": {
+            "clipId": "$keysClipId",
+            "timing": 0.125,
+            "velocity": 0,
+            "seed": 7
+          }
+        }
+      ],
+      "check": {
+        "kind": "humanize",
+        "clip": "$keysClipId",
+        "maxOffsetBeats": 0.125
+      }
+    },
+    "evidence": [
+      {
+        "brief": "lofi-85-Am",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      },
+      {
+        "brief": "dark-70-Cm",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      }
+    ],
+    "confidence": 0.75,
+    "status": "conformant"
+  },
+  {
+    "id": "card_10iqmwc",
+    "source": "youtube",
+    "skill_name": "Level drums by starting with kick, then bring in snare and the rest while leaving headroom",
+    "task_type": "mixing",
+    "genre_context": [
+      "boom bap",
+      "hip hop"
+    ],
+    "producer_intent": "Set drum balance from the loudest anchor first so the beat knocks without clipping or eating headroom.",
+    "when": "When the drum clip is already programmed and you want the mix to hit harder before adding melodies/bass.",
+    "recipe": {
+      "kind": "recipe",
+      "commands": [
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 36,
+            "start": 0,
+            "length": 0.25,
+            "velocity": 100
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 38,
+            "start": 1,
+            "length": 0.25,
+            "velocity": 96
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 36,
+            "start": 2,
+            "length": 0.25,
+            "velocity": 100
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 38,
+            "start": 3,
+            "length": 0.25,
+            "velocity": 96
+          }
+        }
+      ],
+      "check": {
+        "kind": "pattern",
+        "clip": "$drumClipId",
+        "pattern": {
+          "hits": [
+            {
+              "pitch": 36,
+              "beats": [
+                0,
+                2
+              ]
+            },
+            {
+              "pitch": 38,
+              "beats": [
+                1,
+                3
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "evidence": [
+      {
+        "brief": "lofi-85-Am",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      },
+      {
+        "brief": "dark-70-Cm",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      }
+    ],
+    "confidence": 0.75,
+    "status": "conformant"
+  },
+  {
+    "id": "card_1rdqawr",
+    "source": "youtube",
+    "skill_name": "Create a shared aux send for keys ambience",
+    "task_type": "mixing",
+    "genre_context": [
+      "boom bap",
+      "hip hop"
+    ],
+    "producer_intent": "Route the keys to a shared bus so ambience can be blended without inserting an effect directly on the source.",
+    "when": "When the keys need shared parallel space or delay while staying in the beat mix.",
+    "recipe": {
+      "kind": "recipe",
+      "commands": [
+        {
+          "command": "create_bus",
+          "args": {
+            "name": "keys ambience"
+          }
+        },
+        {
+          "command": "add_send",
+          "args": {
+            "trackId": "$keysTrackId",
+            "bus": "$busNumber",
+            "db": -12
+          }
+        }
+      ],
+      "check": {
+        "kind": "send",
+        "track": "$keysTrackId",
+        "bus": "$busNumber",
+        "db": -12
+      }
+    },
+    "evidence": [
+      {
+        "brief": "lofi-85-Am",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      },
+      {
+        "brief": "dark-70-Cm",
+        "metric": "technique_conformance",
+        "withScore": 1,
+        "withoutScore": 0,
+        "delta": 1
+      }
+    ],
+    "confidence": 0.75,
+    "status": "conformant"
+  },
+  {
+    "id": "card_1wmiva3",
+    "source": "youtube",
+    "skill_name": "boom bap kick-snare grid",
+    "task_type": "drum_programming",
+    "genre_context": [
+      "boom bap",
+      "hip-hop"
+    ],
+    "producer_intent": "Program a simple backbeat with kick on beats 1 and 3 and snare on 2 and 4.",
+    "when": "When building the core drum pattern from scratch.",
+    "recipe": {
+      "kind": "recipe",
+      "commands": [
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 36,
+            "start": 0,
+            "length": 0.25,
+            "velocity": 100
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 38,
+            "start": 1,
+            "length": 0.25,
+            "velocity": 110
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 36,
+            "start": 2,
+            "length": 0.25,
+            "velocity": 100
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "$drumClipId",
+            "pitch": 38,
+            "start": 3,
+            "length": 0.25,
+            "velocity": 110
+          }
+        }
+      ],
+      "check": {
+        "kind": "pattern",
+        "clip": "$drumClipId",
+        "pattern": {
+          "hits": [
+            {
+              "pitch": 36,
+              "beats": [
+                0,
+                2
+              ]
+            },
+            {
+              "pitch": 38,
+              "beats": [
+                1,
+                3
+              ]
+            }
+          ]
+        }
       }
     },
     "evidence": [

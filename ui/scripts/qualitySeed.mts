@@ -70,7 +70,10 @@ function guardLine(scores: WavScore[]): string {
 }
 
 async function stage(limit: number): Promise<void> {
-  const cards = conformantRecipeCards().slice(0, limit);
+  // limit <= 0 → stage EVERY conformant recipe card (the real seed set); a positive limit
+  // caps it for a quick demo.
+  const all = conformantRecipeCards();
+  const cards = limit > 0 ? all.slice(0, limit) : all;
   if (!cards.length) { console.error("no conformant recipe cards in the KB to seed."); return; }
   console.error(`\nQuality seed · staging ${cards.length} card(s) on ${ARR.baseId} · render → cleanliness guard → BLIND A/B\n`);
   for (const card of cards) {
@@ -115,7 +118,7 @@ async function main() {
   const li = argv.indexOf("--label");
   if (li >= 0) { label(argv[li + 1], (argv[li + 2] || "equal") as AbLabel); return; }
   try { execSync("pkill -f server.py", { stdio: "ignore" }); } catch { /* none */ }
-  await stage(Number(process.env.QUALITY_SEED_LIMIT || 2));
+  await stage(Number(process.env.QUALITY_SEED_LIMIT || 0)); // 0 → stage all conformant cards
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });
