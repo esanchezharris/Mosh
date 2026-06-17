@@ -25,7 +25,6 @@ node_modules/
 ui/node_modules/
 ui/dist/
 ui/.vite/
-ui/playwright-report/
 ui/test-results/
 ui/.tsbuild-node/
 ui/*.tsbuildinfo
@@ -52,9 +51,7 @@ midi_data/
 midi_rag_database.pkl
 
 # Headless/browser QA artifacts
-.e2e-artifacts/
 .playwright-mcp/
-playwright-report/
 test-results/
 mosh-*.png
 
