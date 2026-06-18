@@ -4,11 +4,12 @@
 // an ask was typed or spoken.
 //
 // In a browser (Vite dev / preview) this rides the Web Speech API
-// (webkitSpeechRecognition). In the packaged JUCE WebView that API is typically
-// absent, so isVoiceSupported() returns false and the UI keeps the mic disabled and
-// falls back to typing (the "quiet type fallback"). A native whisper STT is the
-// future packaged-app path — it would feed onFinal() identically, mirroring the
-// native brain_chat proxy. Nothing downstream changes.
+// (webkitSpeechRecognition). In the packaged JUCE WebView that API is absent, so it
+// falls back to native macOS speech (SFSpeechRecognizer) over the bridge —
+// createNativeVoiceInput below, driven by voice_start / voice_stop and the
+// voice_event channel (see WebBridge + NativeSpeech). Both backends feed onFinal()
+// identically, so nothing downstream knows which produced the text. Only when neither
+// backend exists does the mic stay disabled and the user types (the type fallback).
 
 import { nativeVoiceAvailable, voiceStart, voiceStop, onEvent } from "../bridge";
 

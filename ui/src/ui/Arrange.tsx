@@ -22,6 +22,7 @@ import { pickFiles } from "../bridge";
 import { useStore, type Peaks } from "../store";
 import { tempoMapFrom, gridLines } from "../time";
 import { deriveTakeLanes } from "./takeLanes";
+import { Meter } from "./Meter";
 import type { Snapshot, Track, Clip } from "../types";
 
 const LANE_H = 76;
@@ -293,6 +294,7 @@ function TrackHeader({ track }: { track: Track }) {
           title={`Volume ${(track.volumeDb ?? 0).toFixed(1)} dB`}
           onChange={(e) => void exec("set_track_volume", { trackId: track.id, db: Number(e.target.value) })} />
       </div>
+      <Meter trackId={track.id} />
     </div>
   );
 }
