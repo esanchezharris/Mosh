@@ -16,8 +16,8 @@
 #   ./run-mosh.sh build     (re)build the app, then launch the GUI
 #   ./run-mosh.sh deploy    (re)build, then install ONE canonical /Applications/Mosh.app
 #
-# Env knobs: MOSH_BRAIN_ENV (override the dotenv path), MOSH_ENABLE_SA3 (default 0),
-#            MOSH_BRAIN_SMOKE_PROMPT (custom prompt for `smoke`).
+# Env knobs: MOSH_BRAIN_ENV (override the dotenv path), MOSH_ENABLE_SA3 (default 1;
+#            set 0 to force FakeAdapter), MOSH_BRAIN_SMOKE_PROMPT (prompt for `smoke`).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -34,14 +34,17 @@ resolve_app() {
   while IFS= read -r p; do
     t="$(stat -f '%m' "$p" 2>/dev/null || echo 0)"
     if [ "$t" -ge "$best" ]; then best="$t"; newest="$p"; fi
-  done < <(find "$ROOT/build-macos-arm64" "$ROOT/build" -maxdepth 3 -name 'Mosh.app' -type d 2>/dev/null)
+  done < <(find "$ROOT/build-macos-arm64-release" "$ROOT/build-macos-arm64" "$ROOT/build" -maxdepth 3 -name 'Mosh.app' -type d 2>/dev/null)
   printf '%s\n' "$newest"
 }
 
+# build_app [configurePreset] [buildPreset] — defaults to the Debug app preset for
+# fast iteration; `deploy` passes the Release presets so the installed app is optimized.
 build_app() {
-  echo "building Mosh (macos-arm64-debug preset)…"
-  cmake --preset macos-arm64-debug
-  cmake --build --preset macos-arm64-app
+  local cfg="${1:-macos-arm64-debug}" bld="${2:-macos-arm64-app}"
+  echo "building Mosh ($cfg → $bld)…"
+  cmake --preset "$cfg"
+  cmake --build --preset "$bld"
 }
 
 # --- load a dotenv file WITHOUT printing any values -------------------------------
@@ -64,8 +67,10 @@ load_dotenv() {
 }
 load_dotenv "$ENV_FILE"
 
-# A brain+voice smoke needs neither the generative service nor SA3.
-export MOSH_ENABLE_SA3="${MOSH_ENABLE_SA3:-0}"
+# SA3 "imagine" is on by default (the service auto-selects the MLX venv when the
+# model is installed, and falls back to FakeAdapter when it isn't). Set
+# MOSH_ENABLE_SA3=0 to force FakeAdapter even when the model is present.
+export MOSH_ENABLE_SA3="${MOSH_ENABLE_SA3:-1}"
 
 # --- report which providers are configured (names only, never values) -------------
 if [ -f "$ENV_FILE" ]; then echo "env: ${ENV_FILE#$ROOT/}"; else echo "env: shell only (no $ENV_FILE)"; fi
@@ -82,7 +87,7 @@ fi
 MODE="${1:-gui}"
 case "$MODE" in
   build)  build_app; MODE="gui" ;;
-  deploy) build_app ;;
+  deploy) build_app macos-arm64-release macos-arm64-release-app ;;
 esac
 
 APP="$(resolve_app)"
