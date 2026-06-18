@@ -12,6 +12,11 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+# Persisted setup from setup-sa3.sh (resolved paths + MOSH_ENABLE_SA3). Optional —
+# absent means the defaults below apply and SA3 stays off unless the venv happens to
+# exist. Sourced first so its exports seed the ${:-default} fallbacks.
+[[ -f .sa3.env ]] && source ./.sa3.env
+
 export SA3_MLX_DIR="${SA3_MLX_DIR:-$HOME/AI/stable-audio-3/optimized/mlx}"
 export COLORRACK_DATA="${COLORRACK_DATA:-$(pwd)/colors/COLORRACK_DATA}"
 

@@ -8,6 +8,7 @@ import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
 import type { MidiNote } from "../types";
 import { meterAt, tempoMapFrom, beatSeconds, snapStepBeats } from "../time";
+import { DrumSequencer } from "./DrumSequencer";
 
 const ROW_H = 15;
 const BEAT_PX = 42;
@@ -30,6 +31,7 @@ export function PianoRoll() {
 
   const clip = snapshot?.tracks.flatMap((t) => t.clips).find((c) => c.id === editingClipId) ?? null;
 
+  const [mode, setMode] = useState<"piano" | "drums">("piano");
   const [selectedNotes, setSelectedNotes] = useState<Set<number>>(() => new Set());
   const [preview, setPreview] = useState<MidiNote | null>(null);
   const [lasso, setLasso] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
@@ -40,6 +42,7 @@ export function PianoRoll() {
   const velocityDraftRef = useRef<number | null>(null);
 
   useEffect(() => { if (editingClipId && !clip) close(); }, [editingClipId, clip, close]);
+  useEffect(() => { setMode("piano"); }, [editingClipId]);
   useEffect(() => {
     setPreview(null); previewRef.current = null; setLasso(null); gridDragRef.current = null;
     setSelectedNotes((prev) => {
@@ -145,20 +148,27 @@ export function PianoRoll() {
     <div className="modal-backdrop" onClick={close}>
       <div className="pr" data-testid="piano-roll" onClick={(e) => e.stopPropagation()}>
         <div className="pr-head">
-          <strong className="display">Piano Roll · {clip.name}</strong>
+          <strong className="display">{mode === "drums" ? "Drum Machine" : "Piano Roll"} · {clip.name}</strong>
           <span className="pr-meta tc">{(clip.notes ?? []).length} notes · {m.tempo} BPM · {m.num}/{m.den}</span>
+          <div className="seg" role="group" aria-label="Editor mode">
+            <button className="btn" aria-pressed={mode === "piano"} onClick={() => setMode("piano")}>Piano</button>
+            <button className="btn" aria-pressed={mode === "drums"} onClick={() => setMode("drums")}>Drums</button>
+          </div>
           <span className="spacer" />
-          {selNote && (
+          {mode === "piano" && selNote && (
             <label className="pr-vel" title="Velocity of the selected note">vel
               <input aria-label="Selected note velocity" type="range" min={1} max={127} step={1} value={velocityValue}
                 onChange={(e) => setDraftVelocity(Number(e.target.value))} onPointerUp={commitVelocity} onKeyUp={commitVelocity} onBlur={commitVelocity} />
               <span className="tc">{velocityValue}</span>
             </label>
           )}
-          <button className="btn" onClick={() => exec("quantize_notes", { clipId: clip.id, division: snapStepBeats(m, snapDivision) })}>Quantize {snapDivision === "bar" ? "Bar" : snapDivision}</button>
+          {mode === "piano" && (
+            <button className="btn" onClick={() => exec("quantize_notes", { clipId: clip.id, division: snapStepBeats(m, snapDivision) })}>Quantize {snapDivision === "bar" ? "Bar" : snapDivision}</button>
+          )}
           <button className="btn x" onClick={close}>✕</button>
         </div>
-        <div className="pr-body">
+        {mode === "drums" ? <DrumSequencer clip={clip} /> : (
+        <><div className="pr-body">
           <div className="pr-keys">
             {pitches.map((p) => (
               <div key={p} className={`pr-key ${isBlack(p) ? "black" : "white"}`} style={{ height: ROW_H }}>{p % 12 === 0 && <span>{noteName(p)}</span>}</div>
@@ -186,7 +196,8 @@ export function PianoRoll() {
             </div>
           </div>
         </div>
-        <div className="pr-foot">click empty space to add · drag to move · drag right edge to resize · double-click to delete</div>
+        <div className="pr-foot">click empty space to add · drag to move · drag right edge to resize · double-click to delete</div></>
+        )}
       </div>
     </div>
   );

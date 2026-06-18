@@ -62,6 +62,36 @@ namespace
                                             && plugin.getAudioPluginInstance()->isNonRealtime());
     }
 
+    // Downsample a reader to `buckets` [min,max] pairs for a waveform overview.
+    // Shared by get_clip_peaks (clip source) and file_peaks (un-imported file).
+    juce::Array<juce::var> bucketedPeaks (juce::AudioFormatReader& reader, int buckets)
+    {
+        const auto total = (juce::int64) reader.lengthInSamples;
+        const int chans = (int) reader.numChannels;
+        const juce::int64 perBucket = juce::jmax ((juce::int64) 1, total / juce::jmax (1, buckets));
+
+        juce::Array<juce::var> peaks;
+        juce::AudioBuffer<float> buf (juce::jmax (1, chans), (int) juce::jmin (perBucket, (juce::int64) 65536));
+        for (int b = 0; b < buckets; ++b)
+        {
+            const juce::int64 startSample = (juce::int64) b * perBucket;
+            if (startSample >= total) break;
+            const int n = (int) juce::jmin (perBucket, total - startSample, (juce::int64) buf.getNumSamples());
+            buf.clear();
+            reader.read (&buf, 0, n, startSample, true, chans > 1);
+            float mn = 0.0f, mx = 0.0f;
+            for (int c = 0; c < buf.getNumChannels(); ++c)
+            {
+                auto r = juce::FloatVectorOperations::findMinAndMax (buf.getReadPointer (c), n);
+                mn = juce::jmin (mn, r.getStart());
+                mx = juce::jmax (mx, r.getEnd());
+            }
+            juce::Array<juce::var> pair; pair.add (mn); pair.add (mx);
+            peaks.add (juce::var (pair));
+        }
+        return peaks;
+    }
+
     String findSerumRealtimeRenderReason (te::Edit& edit)
     {
         for (auto* track : te::getAudioTracks (edit))
@@ -91,10 +121,17 @@ MoshOps::MoshOps (MoshEngine& engineToUse)
 {
     logFile = eng.sessionDir().getChildFile ("mosh-log.jsonl");
     pluginHost.initialise();                 // formats + curated VST3 scan
+    previewFormats.registerBasicFormats();   // audition (file preview) reader formats
     startTimerHz (30);                       // telemetry decimated to 30 Hz, never per-block
 }
 
-MoshOps::~MoshOps() { stopTimer(); unregisterAllMeterClients(); }
+MoshOps::~MoshOps()
+{
+    stopTimer();
+    unregisterAllMeterClients();
+    if (previewWired) adm().removeAudioCallback (&previewPlayer);   // stop audio-thread access first
+    stopAudition();
+}
 
 // ── Metering helpers (Wave 9) ────────────────────────────────────────────────
 te::LevelMeterPlugin* MoshOps::findTrackMeter (te::AudioTrack& t)
@@ -363,6 +400,7 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "remove_bus")        return cmdRemoveBus (args);
     if (name == "rename_bus")        return cmdRenameBus (args);
     if (name == "get_clip_peaks")    return cmdGetClipPeaks (args);
+    if (name == "file_peaks")        return cmdFilePeaks (args);
     if (name == "list_plugins")      return cmdListPlugins (args);
     if (name == "list_builtins")     return cmdListBuiltins (args);
     if (name == "load_plugin")       return cmdLoadPlugin (args);
@@ -410,6 +448,8 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "set_buffer_size")   return cmdSetBufferSize (args);
     if (name == "set_audio_threads") return cmdSetAudioThreads (args);
     if (name == "list_directory")    return cmdListDirectory (args);
+    if (name == "audition_file")     return cmdAuditionFile (args);
+    if (name == "stop_audition")     return cmdStopAudition (args);
     if (name == "new_project")       return cmdNewProject (args);
     if (name == "open_project")      return cmdOpenProject (args);
     if (name == "save_as")           return cmdSaveAs (args);
@@ -2373,35 +2413,77 @@ juce::var MoshOps::cmdGetClipPeaks (const juce::var& args)
     std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (file));
     if (reader == nullptr) return errResult ("get_clip_peaks", "cannot read source");
 
-    const auto total = (juce::int64) reader->lengthInSamples;
-    const int chans = (int) reader->numChannels;
-    const juce::int64 perBucket = juce::jmax ((juce::int64) 1, total / buckets);
-
-    juce::Array<var> peaks;
-    juce::AudioBuffer<float> buf (juce::jmax (1, chans), (int) juce::jmin (perBucket, (juce::int64) 65536));
-    for (int b = 0; b < buckets; ++b)
-    {
-        const juce::int64 startSample = (juce::int64) b * perBucket;
-        if (startSample >= total) break;
-        const int n = (int) juce::jmin (perBucket, total - startSample, (juce::int64) buf.getNumSamples());
-        buf.clear();
-        reader->read (&buf, 0, n, startSample, true, chans > 1);
-        float mn = 0.0f, mx = 0.0f;
-        for (int c = 0; c < buf.getNumChannels(); ++c)
-        {
-            auto r = juce::FloatVectorOperations::findMinAndMax (buf.getReadPointer (c), n);
-            mn = juce::jmin (mn, r.getStart());
-            mx = juce::jmax (mx, r.getEnd());
-        }
-        juce::Array<var> pair; pair.add (mn); pair.add (mx);
-        peaks.add (var (pair));
-    }
-
+    auto peaks = bucketedPeaks (*reader, buckets);
     auto* data = new DynamicObject();
     data->setProperty ("clipId", id);
     data->setProperty ("buckets", peaks.size());
-    data->setProperty ("peaks", peaks);
+    data->setProperty ("peaks", var (peaks));
     return okResult ("get_clip_peaks", var (data));
+}
+
+juce::var MoshOps::cmdFilePeaks (const juce::var& args)
+{
+    // Waveform peaks for an un-imported file (the sample-browser thumbnail). Like
+    // get_clip_peaks but path-addressed; read-only — no clip, transaction, or log.
+    const auto path = args.getProperty ("path", var()).toString();
+    if (path.isEmpty()) return errResult ("file_peaks", "missing 'path'");
+    juce::File file (path);
+    if (! file.existsAsFile()) return errResult ("file_peaks", "file not found: " + path);
+
+    const int buckets = juce::jlimit (16, 4000, (int) args.getProperty ("buckets", 200));
+    std::unique_ptr<juce::AudioFormatReader> reader (previewFormats.createReaderFor (file));
+    if (reader == nullptr) return errResult ("file_peaks", "cannot read: " + path);
+
+    auto peaks = bucketedPeaks (*reader, buckets);
+    auto* data = new DynamicObject();
+    data->setProperty ("path", path);
+    data->setProperty ("buckets", peaks.size());
+    data->setProperty ("peaks", var (peaks));
+    return okResult ("file_peaks", var (data));
+}
+
+juce::var MoshOps::cmdAuditionFile (const juce::var& args)
+{
+    // Standalone file preview (audition) — transient, NOT a mutation: no undo
+    // transaction, no JSONL line. One preview at a time; a new audition (or
+    // stop_audition / the destructor) releases the previous source. Headless
+    // (--selftest, no device) it can't sound, but it must start/stop cleanly.
+    const auto path = args.getProperty ("path", var()).toString();
+    if (path.isEmpty()) return errResult ("audition_file", "missing 'path'");
+    juce::File file (path);
+    if (! file.existsAsFile()) return errResult ("audition_file", "file not found: " + path);
+
+    stopAudition();
+
+    auto* reader = previewFormats.createReaderFor (file);
+    if (reader == nullptr) return errResult ("audition_file", "cannot read: " + path);
+
+    if (! previewThread.isThreadRunning()) previewThread.startThread();
+    previewReader.reset (new juce::AudioFormatReaderSource (reader, true));   // owns the reader
+    previewTransport.setSource (previewReader.get(), 32768, &previewThread, reader->sampleRate);
+    previewPlayer.setSource (&previewTransport);
+    if (! previewWired) { adm().addAudioCallback (&previewPlayer); previewWired = true; }
+    previewTransport.setPosition (0.0);
+    previewTransport.start();
+
+    auto* data = new DynamicObject();
+    data->setProperty ("path", path);
+    data->setProperty ("playing", adm().getCurrentAudioDevice() != nullptr);
+    return okResult ("audition_file", var (data));
+}
+
+juce::var MoshOps::cmdStopAudition (const juce::var&)
+{
+    stopAudition();
+    return okResult ("stop_audition");
+}
+
+void MoshOps::stopAudition()
+{
+    previewTransport.stop();
+    previewTransport.setSource (nullptr);
+    previewPlayer.setSource (nullptr);
+    previewReader.reset();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

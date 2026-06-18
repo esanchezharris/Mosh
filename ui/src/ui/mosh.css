@@ -231,6 +231,24 @@ body { background: var(--ink); color: var(--bone); font-family: var(--font-body)
 .thead input[type="range"] { flex: 1 1 auto; accent-color: var(--lime); }
 .thead .x { margin-left: auto; }
 
+/* Live peak meters (Wave 9 telemetry → 30 Hz `levels` event). A horizontal stereo
+   pair under each track header, plus the master pair in the topbar. The green→amber→red
+   gradient lives on the track; Meter.tsx animates a right-anchored mask (.mmask) to
+   reveal it as level rises, so the hot path writes one style per channel per frame. */
+.meter { display: flex; flex-direction: column; gap: 2px; }
+.meter .mbar {
+  position: relative; height: 3px; border-radius: 2px; overflow: hidden;
+  background: linear-gradient(90deg, var(--lime) 0%, var(--lime) 60%, var(--warn) 84%, var(--rec) 100%);
+}
+.meter .mmask { position: absolute; top: 0; right: 0; bottom: 0; width: 100%; background: var(--ink-deep); }
+.meter.clip .mbar { box-shadow: 0 0 5px var(--rec); }
+
+/* Master meter sits in the topbar transport cluster. */
+.master-meter { display: flex; align-items: center; gap: 5px; }
+.master-meter .mm-label { font-size: 9px; color: var(--bone-dim); letter-spacing: 0.06em; }
+.meter.master { width: 60px; }
+.meter.master .mbar { height: 4px; }
+
 /* moshi — the agent-creature as a FIXED dock panel on the right of the bottom dock
    (by the generative drawer, where his reactions happen). The GL character mounts
    its own canvas into .moshi-mount, rendered at full devicePixelRatio (crisp). */
@@ -416,6 +434,28 @@ body { background: var(--ink); color: var(--bone); font-family: var(--font-body)
 .pr-note-grip { position: absolute; right: 0; top: 0; bottom: 0; width: 5px; cursor: ew-resize; }
 .pr-lasso { position: absolute; background: var(--lime-faint); border: 1px solid var(--lime-dim); pointer-events: none; }
 .pr-foot { padding: 7px 14px; border-top: 1px solid var(--ink-line); font-size: 10px; color: var(--bone-dim); }
+
+/* drum step sequencer (a projection of a MIDI clip, inside the piano-roll modal) */
+.dr { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+.dr-toolbar { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-bottom: 1px solid var(--ink-line); }
+.dr-hint { font-size: 10px; color: var(--bone-dim); }
+.dr-grid { flex: 1 1 auto; overflow: auto; padding: 10px 14px; display: flex; flex-direction: column; gap: 4px; }
+.dr-row { display: flex; align-items: center; gap: 8px; }
+.dr-label { flex: 0 0 72px; text-align: right; font-size: 11px; color: var(--bone-dim); }
+.dr-steps { display: flex; gap: 3px; flex: 1 1 auto; }
+.dr-cell { flex: 1 1 0; height: 30px; min-width: 18px; padding: 0; background: var(--ink); border: 1px solid var(--ink-line); border-radius: 4px; cursor: pointer; }
+.dr-cell.beat { margin-left: 7px; }
+.dr-row .dr-steps .dr-cell:first-child { margin-left: 0; }
+.dr-cell:hover { border-color: var(--lime-dim); }
+.dr-cell.on { background: var(--lime); border-color: #97c01a; }
+
+/* sample browser filter input */
+.sb-search { width: 100%; box-sizing: border-box; margin: 6px 0; padding: 5px 8px; background: var(--ink); border: 1px solid var(--ink-line); color: var(--bone); border-radius: 6px; font-size: 12px; }
+.sb-search:focus { outline: none; border-color: var(--lime-dim); }
+.sb-audition { flex: 0 0 auto; width: 22px; height: 20px; padding: 0; background: transparent; border: 1px solid var(--ink-line); color: var(--bone-dim); border-radius: 5px; font-size: 9px; cursor: pointer; }
+.sb-audition:hover { border-color: var(--lime-dim); color: var(--bone); }
+.sb-audition[aria-pressed="true"] { background: var(--lime); border-color: var(--lime); color: var(--on-accent); }
+.sb-thumb { flex: 0 0 auto; color: var(--lime); opacity: 0.85; border-radius: 3px; }
 
 /* buried automation entry (small ⌁ in the chain header) */
 .rack-auto { margin-left: 8px; background: transparent; border: 1px solid var(--ink-line); color: var(--bone-dim); border-radius: 5px; width: 20px; height: 18px; font-size: 11px; cursor: pointer; vertical-align: middle; }

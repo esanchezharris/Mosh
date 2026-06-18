@@ -497,6 +497,47 @@ tempo restores it, an unwarped clip ignores tempo changes, and the stretch mode 
 **Still genuinely deferred (the honest tail):** free warp **markers** (per-transient nonlinear
 warping — a separate editing subsystem, orthogonal to auto-tempo).
 
+### 2026-06-18 · Plugin-hosting stability — runtime teardown aborts (INS-002/INS-005 addendum): finding + deferral 🔍
+
+While fixing a flaky `--selftest` we root-caused a real but **narrow** class of crash: a few
+plugins abort the whole process **on teardown at runtime** (host → remove), because hosting is
+in-process with no isolation. Two confirmed on this machine (macOS 26.4.1), both the same shape —
+an uncaught C++ exception reaching `std::terminate` → `abort`:
+
+- **SIR Audio Tools "StandardCLIP"** (a cracked VST3): its own `QueueControlThread` locks an
+  already-freed `std::mutex` after the instance is destroyed → `__throw_system_error`. Faults on
+  the *plugin's own thread* (its binary is in the backtrace). Crash report
+  `Mosh-2026-06-18-040322.ips`.
+- **Stock Apple AUs** (e.g. AUSampler / AUVectorPanner): a `CAEventReceiver` timer fires after
+  teardown with a cleared `std::function` → `bad_function_call`, on the **message thread** during a
+  *later, unrelated* command (`createAudioTrack` pumping `runDispatchLoopUntil`). The AU's code is
+  in Apple frameworks, not the backtrace; the crash is temporally divorced from the `remove_plugin`
+  that caused it. Crash report `Mosh-2026-06-18-061131.ips`.
+
+**Decision: no product mitigation built — deferred by design (YAGNI).** Rationale, on the evidence:
+(1) **Surfaced by the harness, not by use** — the selftest churns load→remove over arbitrary
+catalog plugins ([SelfTest.cpp](../src/app/SelfTest.cpp)); the fix was an `isHarnessHostablePlugin()`
+allowlist so the harness only hosts vetted plugins. No normal interactive session has been observed
+hitting either. (2) **Blast radius is bounded** — autosave + save-on-quit (gap 1,
+[MoshEngine.cpp](../src/engine/MoshEngine.cpp)) cap the loss to one autosave interval, not the
+session. (3) **Scanning is a different layer and already hardened** — the OOP child scanner +
+dead-man's-pedal + watchdog + persisted blocklist (Wave 17 above) handle scan-time crashes incl.
+the user's Waves install; this finding is *not* about Waves or scanning. (4) **A manual lever
+already exists** — `block_plugin` quarantines any misbehaving plugin by hand (resolves UI id →
+`fileOrIdentifier`; blocked plugins vanish from `list_plugins`).
+
+**Options considered and parked** (revisit only if real-world reports accumulate): (a) a runtime
+dead-man's-pedal via a `std::terminate` handler + `backtrace`/`dladdr` attribution that auto-
+blocklists a self-attributing crasher on next launch — works for the StandardCLIP class (plugin
+binary in the stack), best-effort only for the Apple-AU-timer class (system frameworks in the
+stack, crash divorced from the remove); rejected now as a whole subsystem running every session for
+a harness-only risk. (b) a baked-in known-bad denylist — fine for an unambiguous crack like
+StandardCLIP, but a global block of *stock* Apple AUs is likely macOS-version-specific and would
+remove a real instrument for everyone. (c) **out-of-process hosting** — the only true fix (survives
+all crash classes incl. hangs), but a major project (RT audio across a process boundary, editor
+reparenting, automation/preset marshalling); the OOP *scanner* proves the child-process model but
+live hosting is a continuous RT data plane, not request/response. **Needs sign-off before any work.**
+
 ## Coverage by category
 
 Per axis the three counts are **present ✓ / partial ◐ / missing ✗** (missing also folds in the one `not_applicable`).

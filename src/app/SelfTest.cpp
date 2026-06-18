@@ -2220,6 +2220,25 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (imp), "import_clip on a browsed file ok (reuses existing import path)");
         check (clipsOn (trkId) > clipsBefore, "browsed file imported as a real clip (browser -> import_clip seam)");
 
+        // ── file_peaks + audition (sample-browser thumbnail + preview seam) ──
+        // file_peaks: waveform peaks for an un-imported file (read-only, like
+        // get_clip_peaks but path-addressed). Drives the browser thumbnails.
+        auto fp = cmd (ops, "file_peaks", objN ({{ "path", wav.getFullPathName() }, { "buckets", 64 }}));
+        check (ok (fp), "file_peaks ok for a real wav");
+        check (fp["data"].getProperty ("peaks", var()).isArray()
+               && fp["data"].getProperty ("peaks", var()).size() > 0, "file_peaks returns a non-empty peak array");
+        check (! ok (cmd (ops, "file_peaks", objN ({{ "path", "/no/such/file.wav" }}))),
+               "file_peaks errors on a missing file");
+
+        // audition_file / stop_audition: a transient preview (no undo txn, no log).
+        // Headless has no device so it can't sound; the contract + clean start/stop
+        // (and graceful missing-file error) are what's asserted.
+        check (ok (cmd (ops, "audition_file", objN ({{ "path", wav.getFullPathName() }}))),
+               "audition_file ok for a real wav");
+        check (ok (cmd (ops, "stop_audition")), "stop_audition ok");
+        check (! ok (cmd (ops, "audition_file", objN ({{ "path", "/no/such/file.wav" }}))),
+               "audition_file errors on a missing file");
+
         browseDir.deleteRecursively();
         cmd (ops, "remove_track", args1 ("trackId", trkId));   // tidy up the probe track
     }

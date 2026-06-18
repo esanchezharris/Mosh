@@ -93,7 +93,7 @@ const listeners = new Map<string, Set<Listener>>();
 
 // Mock command log (drives the CommandLog panel). Read-only commands don't log.
 const cmdLog: { command: string; ok: boolean; undoable: boolean; ts: number }[] = [];
-const READONLY = new Set(["get_snapshot", "get_clip_peaks", "get_command_log", "list_plugins", "list_builtins", "list_colors", "list_audio_devices", "list_wave_inputs", "list_track_outputs", "list_takes"]);
+const READONLY = new Set(["get_snapshot", "get_clip_peaks", "file_peaks", "audition_file", "stop_audition", "get_command_log", "list_plugins", "list_builtins", "list_colors", "list_audio_devices", "list_wave_inputs", "list_track_outputs", "list_takes"]);
 const NON_UNDOABLE = new Set(["set_transport", "arm_track", "set_input_monitor", "undo", "redo", "save", "reload", "render_layer", "open_plugin_editor", "set_plugin_param", "set_neural_param", "export_audio"]);
 function emit(type: string, payload?: unknown) {
   const ls = listeners.get("mosh_event");
@@ -136,11 +136,27 @@ function startPlayback() {
     const level = bands.reduce((a, b) => a + b, 0) / N;
     const flux = Math.max(0, Math.sin(pos * Math.PI * 4)) ** 6;
     emit("spectrum", { bands, level, flux });
+
+    // Fake per-track + master peak levels (dBFS) so the meters move in browser dev,
+    // where there's no real audio. Wobbles per track off the playhead; muted tracks
+    // read the floor. Shape matches the native `levels` event the store hydrates.
+    const toDb = (g: number) => (g <= 0.001 ? -100 : -60 + Math.max(0, Math.min(1, g)) * 60);
+    const tracks = snapshot.tracks
+      .filter((t) => !t.isGroup)
+      .map((t, i) => {
+        const g = t.mute ? 0 : level * (0.6 + 0.4 * Math.abs(Math.sin(pos * 2.3 + i)));
+        const db = toDb(g);
+        return { id: t.id, l: db, r: toDb(g * 0.94) };
+      });
+    emit("levels", { tracks, master: { l: toDb(level), r: toDb(level * 0.96) } });
   }, 1000 / 30);
 }
 function stopPlayback() {
   if (playTimer) { clearInterval(playTimer); playTimer = null; }
   emit("spectrum", { bands: Array(8).fill(0), level: 0, flux: 0 }); // calm on stop
+  // Drop the meters to the floor when the transport stops.
+  const tracks = snapshot.tracks.filter((t) => !t.isGroup).map((t) => ({ id: t.id, l: -100, r: -100 }));
+  emit("levels", { tracks, master: { l: -100, r: -100 } });
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -267,7 +283,8 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       if (!t) return err(command, "no track");
       pushUndo();
       const name = str(args.name) || (str(args.file).split("/").pop() ?? "clip");
-      const c = waveClip(name.replace(/\.[^.]+$/, ""), num(args.start, 0), num(args.length, 4));
+      // Honor startSeconds (the real cmdImportClip contract); fall back to `start`.
+      const c = waveClip(name.replace(/\.[^.]+$/, ""), num(args.startSeconds, num(args.start, 0)), num(args.length, 4));
       t.clips.push(c); invalidate(); return ok(command, { clipId: c.id });
     }
     case "move_clip": {
@@ -411,6 +428,22 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       const peaks = makePeaks(f?.clip ?? null, buckets);
       return ok(command, { peaks });
     }
+    // file_peaks / audition — sample-browser thumbnail + preview seam. The mock can't
+    // read real files or play audio, so it returns a synthetic waveform + a no-sound
+    // ack (faithful to the backend's command shape; real audio lives in the app).
+    case "file_peaks": {
+      if (!str(args.path)) return err(command, "missing 'path'");
+      const buckets = Math.max(16, Math.min(4000, num(args.buckets, 200)));
+      const peaks = Array.from({ length: buckets }, (_, i) => {
+        const a = 0.15 + 0.8 * Math.abs(Math.sin(i / 5) * Math.cos(i / 17));
+        return [-a, a] as [number, number];
+      });
+      return ok(command, { path: str(args.path), buckets, peaks });
+    }
+    case "audition_file":
+      return str(args.path) ? ok(command, { path: str(args.path), playing: false }) : err(command, "missing 'path'");
+    case "stop_audition":
+      return ok(command);
 
     // ── plugins / neural rack ────────────────────────────────────────────────
     case "list_plugins": return ok(command, { plugins: VST3S, counts: { vst3: VST3S.length, au: 0, total: VST3S.length } });
