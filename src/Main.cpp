@@ -29,11 +29,13 @@ public:
         const bool undoSelfTest = commandLine.contains ("--selftest-undo");
         const bool liveAudioSmoke = commandLine.contains ("--live-audio-smoke");
         const bool scanDeep = commandLine.contains ("--scan-plugins-deep");
+        const bool pluginProbe = commandLine.contains ("--probe-plugin");
         const bool headless = undoSelfTest || commandLine.contains ("--selftest");
-        const bool noAudio = headless || scanDeep;   // device-free for the harnesses + the scan utility
+        const bool noAudio = headless || scanDeep || pluginProbe;   // device-free for the harnesses + diagnostics
         const juce::String freshSessionName = undoSelfTest ? "session-selftest-undo"
                                             : liveAudioSmoke ? "session-live-audio-smoke"
                                             : scanDeep ? "session-scan"
+                                            : pluginProbe ? "session-plugin-probe"
                                             : "session-selftest";
         // Headless: no audio device, and an isolated cold session so the harness is
         // idempotent (it saves/reloads itself) and never touches the GUI session.
@@ -70,6 +72,15 @@ public:
         {
             const int fails = runSelfTest (*engine, *moshOps);
             setApplicationReturnValue (fails);
+            quit();
+            return;
+        }
+
+        if (pluginProbe)
+        {
+            const auto needle = juce::SystemStats::getEnvironmentVariable ("MOSH_PROBE_PLUGIN_ID", {});
+            const int rc = runPluginProbe (*moshOps, needle);
+            setApplicationReturnValue (rc);
             quit();
             return;
         }

@@ -3103,6 +3103,82 @@ int runDeepPluginScan (MoshOps& ops)
     return scanned ? 0 : 1;
 }
 
+int runPluginProbe (MoshOps& ops, const juce::String& pluginNeedle)
+{
+    using namespace juce;
+
+    std::cerr << "===== Plugin load probe =====\n";
+    const auto needle = pluginNeedle.trim();
+    if (needle.isEmpty())
+    {
+        std::cerr << "  error: set MOSH_PROBE_PLUGIN_ID to a plugin id, name, or substring\n";
+        return 2;
+    }
+
+    if (SystemStats::getEnvironmentVariable ("MOSH_PROBE_RESCAN", {}) == "1")
+    {
+        auto scan = cmd (ops, "rescan_plugins",
+                         objN ({ { "format", "vst3" }, { "slow", true },
+                                 { "clearFirst", false }, { "wait", true } }));
+        std::cerr << "  preflight rescan_plugins: " << JSON::toString (scan, false).toStdString() << "\n";
+        if (! ok (scan))
+            return 1;
+    }
+
+    auto lp = cmd (ops, "list_plugins");
+    if (! ok (lp))
+    {
+        std::cerr << "  list_plugins failed: " << JSON::toString (lp, false).toStdString() << "\n";
+        return 1;
+    }
+
+    var chosen;
+    int matches = 0;
+    const auto plugins = lp["data"].getProperty ("plugins", var());
+    if (auto* arr = plugins.getArray())
+    {
+        for (auto& p : *arr)
+        {
+            const auto id = p.getProperty ("id", var()).toString();
+            const auto name = p.getProperty ("name", var()).toString();
+            const auto maker = p.getProperty ("manufacturer", var()).toString();
+            if (id.containsIgnoreCase (needle)
+                || name.containsIgnoreCase (needle)
+                || maker.containsIgnoreCase (needle))
+            {
+                ++matches;
+                std::cerr << "  match " << matches << ": " << name.toStdString()
+                          << " / " << maker.toStdString()
+                          << " id=" << id.toStdString() << "\n";
+
+                if (chosen.isVoid() || id == needle || name == needle)
+                    chosen = p;
+            }
+        }
+    }
+
+    if (chosen.isVoid())
+    {
+        std::cerr << "  no catalog entry matched: " << needle.toStdString() << "\n";
+        return 3;
+    }
+
+    const auto pluginId = chosen.getProperty ("id", var()).toString();
+    std::cerr << "  chosen: " << chosen.getProperty ("name", var()).toString().toStdString()
+              << " id=" << pluginId.toStdString() << "\n";
+
+    auto createTrack = cmd (ops, "create_track", args1 ("name", "Plugin Probe"));
+    std::cerr << "  create_track: " << JSON::toString (createTrack, false).toStdString() << "\n";
+    if (! ok (createTrack))
+        return 1;
+
+    const auto trackId = createTrack["data"].getProperty ("trackId", var()).toString();
+    auto load = cmd (ops, "load_plugin", objN ({ { "trackId", trackId }, { "pluginId", pluginId } }));
+    std::cerr << "  load_plugin: " << JSON::toString (load, false).toStdString() << "\n";
+    std::cerr << "===== plugin probe " << (ok (load) ? "OK" : "FAILED") << " =====\n";
+    return ok (load) ? 0 : 1;
+}
+
 void runPluginDemo (MoshOps& ops)
 {
     using namespace juce;

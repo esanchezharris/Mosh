@@ -33,3 +33,5 @@ target_link_libraries(MoshTests PRIVATE
     juce::juce_recommended_config_flags)
 
 add_test(NAME MoshTests COMMAND $<TARGET_FILE:MoshTests>)
+set_tests_properties(MoshTests PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")

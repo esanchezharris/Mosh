@@ -1,5 +1,7 @@
 #pragma once
 
+#include <juce_core/juce_core.h>
+
 namespace mosh
 {
 class MoshEngine;
@@ -24,6 +26,11 @@ int runLiveAudioSmoke (MoshEngine&, MoshOps&);
     (count, names, formats) and blocklist to stderr. Rebuilds the persisted catalog
     the GUI app reads. Returns 0 on success. */
 int runDeepPluginScan (MoshOps&);
+
+/** Diagnostic (`Mosh --probe-plugin` with MOSH_PROBE_PLUGIN_ID set): creates a
+    fresh headless track, resolves one catalog entry by id/name substring, and
+    attempts the normal load_plugin command. Returns 0 only if loading succeeds. */
+int runPluginProbe (MoshOps&, const juce::String& pluginNeedle);
 
 /** Scripted Stage 3 demo (`Mosh --demo3`): builds a session with a VST3 effect on
     a wave track and a VST3 synth on a MIDI track, and opens the synth's native
