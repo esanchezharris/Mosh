@@ -111,6 +111,7 @@ private:
     juce::var cmdRemoveBus      (const juce::var& args);
     juce::var cmdRenameBus      (const juce::var& args);
     juce::var cmdGetClipPeaks   (const juce::var& args);
+    juce::var cmdFilePeaks      (const juce::var& args);   // peaks for an un-imported file (read-only)
     // Stage 3 — VST3 hosting + MIDI
     juce::var cmdListPlugins    (const juce::var& args);
     juce::var cmdListBuiltins   (const juce::var& args);
@@ -170,6 +171,8 @@ private:
     juce::var cmdSetBufferSize    (const juce::var& args);   // thin wrapper over set_audio_device
     juce::var cmdSetAudioThreads  (const juce::var& args);   // PRF-001 multicore pref (undoable:false)
     juce::var cmdListDirectory    (const juce::var& args);   // BRW-001 read-only file browse (no log/transaction)
+    juce::var cmdAuditionFile     (const juce::var& args);   // standalone file preview (transient, no undo/log)
+    juce::var cmdStopAudition     (const juce::var& args);
     juce::var cmdNewProject       (const juce::var& args);   // replaces the Edit (undoable:false)
     juce::var cmdOpenProject      (const juce::var& args);   // replaces the Edit (undoable:false)
     juce::var cmdSaveAs           (const juce::var& args);   // persists + re-points (undoable:false)
@@ -291,6 +294,17 @@ private:
     // Applies a device-setup patch; returns the error string (empty == success). No
     // logging — callers log once under their own command name (one JSONL line / action).
     juce::String applyAudioDeviceSetup (const juce::var& args);
+
+    // ── Standalone audition (file preview): plays an arbitrary audio file through the
+    //    device, independent of the Edit (no undo, no log). Wired to the device manager
+    //    lazily on first audition; torn down in stopAudition()/the destructor. ──
+    juce::AudioFormatManager   previewFormats;
+    juce::TimeSliceThread      previewThread { "mosh-audition" };
+    juce::AudioTransportSource previewTransport;
+    juce::AudioSourcePlayer    previewPlayer;
+    std::unique_ptr<juce::AudioFormatReaderSource> previewReader;
+    bool previewWired = false;
+    void stopAudition();
 
     MoshEngine& eng;
     PluginHost  pluginHost;

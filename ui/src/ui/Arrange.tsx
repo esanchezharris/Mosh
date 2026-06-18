@@ -22,6 +22,7 @@ import { pickFiles } from "../bridge";
 import { useStore, type Peaks } from "../store";
 import { tempoMapFrom, gridLines } from "../time";
 import { deriveTakeLanes } from "./takeLanes";
+import { SAMPLE_DND_MIME, addRecentSample } from "./sampleBrowserUtil";
 import { Meter } from "./Meter";
 import type { Snapshot, Track, Clip } from "../types";
 
@@ -42,6 +43,7 @@ export function Arrange({ snapshot }: { snapshot: Snapshot }) {
   const select = useStore((s) => s.select);
   const clearSelection = useStore((s) => s.clearSelection);
   const exec = useStore((s) => s.exec);
+  const refresh = useStore((s) => s.refresh);
   const tool = useStore((s) => s.tool);
   const snapTime = useStore((s) => s.snapTime);
   const timeRange = useStore((s) => s.timeRange);
@@ -72,6 +74,25 @@ export function Arrange({ snapshot }: { snapshot: Snapshot }) {
   const lanesHeight = Math.max(LANE_H, tracks.length * LANE_H);
 
   const transport = snapshot.transport;
+
+  // Drag-to-arrange: a sample dragged from the browser lands as a clip on the
+  // dropped track at the dropped position (snapped). import_clip already takes
+  // trackId + startSeconds, so this is pure frontend.
+  const allowSampleDrop = (e: React.DragEvent) => {
+    if (!e.dataTransfer.types.includes(SAMPLE_DND_MIME)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+  };
+  const onSampleDrop = (trackId: string) => async (e: React.DragEvent<HTMLDivElement>) => {
+    const file = e.dataTransfer.getData(SAMPLE_DND_MIME) || e.dataTransfer.getData("text/plain");
+    if (!file) return;
+    e.preventDefault();
+    const x = e.clientX - e.currentTarget.getBoundingClientRect().left;
+    const startSeconds = snapTime(Math.max(0, pxToSec(x)));
+    await exec("import_clip", { file, trackId, startSeconds });
+    addRecentSample(file);
+    await refresh();
+  };
 
   // px within a full-width child element (scroll-correct: the element's rect.left
   // already shifts by -scrollLeft, so clientX - rect.left is the content offset).
@@ -238,6 +259,7 @@ export function Arrange({ snapshot }: { snapshot: Snapshot }) {
 
           {tracks.map((t, i) => (
             <div key={t.id} className="lane" data-testid="lane" data-track-id={t.id}
+              onDragOver={allowSampleDrop} onDrop={onSampleDrop(t.id)}
               style={{ position: "absolute", top: i * LANE_H, left: 0, right: 0, height: LANE_H }}>
               {t.clips.map((c) => (
                 <ClipBlock key={c.id} clip={c} selected={selection.has(c.id)}
