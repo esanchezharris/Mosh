@@ -20,11 +20,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { pickFiles } from "../bridge";
 import { useStore, type Peaks } from "../store";
-import { tempoMapFrom, gridLines } from "../time";
+import { tempoMapFrom, gridLines, meterAt, beatSeconds, type Meter as TimeMeter } from "../time";
+import { DRUM_LANES, laneIndexForPitch } from "./drumGrid";
 import { deriveTakeLanes } from "./takeLanes";
 import { SAMPLE_DND_MIME, addRecentSample } from "./sampleBrowserUtil";
 import { Meter } from "./Meter";
-import type { Snapshot, Track, Clip } from "../types";
+import type { Snapshot, Track, Clip, MidiNote } from "../types";
 
 const LANE_H = 76;
 const MIN_LEN = 0.05; // shortest clip / trim, seconds
@@ -264,6 +265,7 @@ export function Arrange({ snapshot }: { snapshot: Snapshot }) {
               {t.clips.map((c) => (
                 <ClipBlock key={c.id} clip={c} selected={selection.has(c.id)}
                   tool={tool} snapTime={snapTime} secToPx={secToPx} pxToSec={pxToSec}
+                  meter={meterAt(map, c.start)}
                   onSelect={(additive) => select([c.id], additive)} exec={exec} />
               ))}
             </div>
@@ -325,10 +327,11 @@ type ExecFn = (command: string, args?: Record<string, unknown>) => Promise<unkno
 type DragKind = "move" | "trim-l" | "trim-r";
 
 function ClipBlock({
-  clip, selected, tool, snapTime, secToPx, pxToSec, onSelect, exec,
+  clip, selected, tool, snapTime, secToPx, pxToSec, meter, onSelect, exec,
 }: {
   clip: Clip; selected: boolean; tool: string;
   snapTime: (t: number) => number; secToPx: (s: number) => number; pxToSec: (px: number) => number;
+  meter: TimeMeter;
   onSelect: (additive: boolean) => void; exec: ExecFn;
 }) {
   const ensurePeaks = useStore((s) => s.ensurePeaks);
@@ -431,9 +434,13 @@ function ClipBlock({
             </div>
           ))}
         </div>
-      ) : (
-        clip.type === "wave" && <ClipWave peaks={peaks} width={widthPx} />
-      )}
+      ) : clip.type === "wave" ? (
+        <ClipWave peaks={peaks} width={widthPx} />
+      ) : clip.type === "midi" ? (
+        isDrumClip(clip.notes)
+          ? <ClipDrumGrid notes={clip.notes} width={widthPx} meter={meter} secToPx={secToPx} />
+          : <ClipMidi notes={clip.notes} width={widthPx} meter={meter} secToPx={secToPx} />
+      ) : null}
       {tool === "move" && (
         <>
           <div className="trim l" title="Trim start" onPointerDown={beginDrag("trim-l")} onPointerMove={onMove} onPointerUp={onUp} />
@@ -462,5 +469,84 @@ function ClipWave({ peaks, width }: { peaks?: Peaks; width: number }) {
       ctx.fillRect(x, top, 1, Math.max(1, bot - top));
     }
   }, [peaks, width]);
+  return <canvas ref={ref} />;
+}
+
+// A MIDI clip reads as "drums" when most of its notes land on GM percussion keys
+// (the same lanes the drum sequencer uses); melodic clips get the piano preview.
+function isDrumClip(notes?: MidiNote[]): boolean {
+  const ns = notes ?? [];
+  if (ns.length === 0) return false;
+  const onLane = ns.filter((n) => laneIndexForPitch(n.pitch) >= 0).length;
+  return onLane >= ns.length * 0.7;
+}
+
+// Inline MIDI preview — pitch-mapped note blocks. Notes carry clip-local beats;
+// beatSeconds(meter) → seconds, then the shared secToPx scale lands them on the
+// same grid the ruler/playhead use. Double-click the clip still opens the PianoRoll.
+function ClipMidi({ notes, width, meter, secToPx }:
+  { notes?: MidiNote[]; width: number; meter: TimeMeter; secToPx: (s: number) => number }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const cv = ref.current; if (!cv) return;
+    const dpr = window.devicePixelRatio || 1;
+    const h = cv.clientHeight, w = cv.clientWidth;
+    cv.width = Math.max(1, Math.floor(w * dpr)); cv.height = Math.max(1, Math.floor(h * dpr));
+    const ctx = cv.getContext("2d"); if (!ctx) return;
+    ctx.scale(dpr, dpr); ctx.clearRect(0, 0, w, h);
+    const ns = notes ?? []; if (ns.length === 0) return;
+
+    // Vertical range from the clip's own pitches (padded); fixed window if degenerate.
+    let lo = Infinity, hi = -Infinity;
+    for (const n of ns) { if (n.pitch < lo) lo = n.pitch; if (n.pitch > hi) hi = n.pitch; }
+    if (hi - lo < 4) { const c = Math.round((lo + hi) / 2 || 60); lo = c - 6; hi = c + 6; }
+    else { lo -= 1; hi += 1; }
+    const span = Math.max(1, hi - lo);
+    const rowH = Math.max(2, Math.min(7, (h - 2) / span));
+    const bs = beatSeconds(meter);
+
+    ctx.fillStyle = "rgba(180,108,255,1)";   // violet — matches the .clip.midi identity
+    for (const n of ns) {
+      const x = secToPx(n.start * bs);
+      const wpx = Math.max(2, secToPx(n.length * bs) - 1);
+      const y = (1 - (n.pitch - lo) / span) * (h - rowH);   // high pitch toward top
+      ctx.globalAlpha = 0.45 + 0.55 * (Math.min(127, Math.max(1, n.velocity)) / 127);
+      ctx.fillRect(x, y, wpx, rowH);
+    }
+    ctx.globalAlpha = 1;
+  }, [notes, width, meter, secToPx]);
+  return <canvas ref={ref} />;
+}
+
+// Inline drum preview — fixed GM lanes (kick/snare/hat/…), FL-style steps. x stays
+// grid-aligned via secToPx(beats); y is the GM lane, not the pitch.
+function ClipDrumGrid({ notes, width, meter, secToPx }:
+  { notes?: MidiNote[]; width: number; meter: TimeMeter; secToPx: (s: number) => number }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const cv = ref.current; if (!cv) return;
+    const dpr = window.devicePixelRatio || 1;
+    const h = cv.clientHeight, w = cv.clientWidth;
+    cv.width = Math.max(1, Math.floor(w * dpr)); cv.height = Math.max(1, Math.floor(h * dpr));
+    const ctx = cv.getContext("2d"); if (!ctx) return;
+    ctx.scale(dpr, dpr); ctx.clearRect(0, 0, w, h);
+    const ns = notes ?? []; if (ns.length === 0) return;
+
+    const lanes = DRUM_LANES.length;
+    const laneH = h / lanes;
+    ctx.fillStyle = "rgba(180,108,255,0.14)";                // faint lane separators
+    for (let l = 1; l < lanes; l++) ctx.fillRect(0, Math.round(l * laneH), w, 1);
+
+    const bs = beatSeconds(meter);
+    for (const n of ns) {
+      const x = secToPx(n.start * bs);
+      const cell = Math.max(3, Math.min(secToPx(n.length * bs), laneH - 2));
+      const y = Math.max(0, laneIndexForPitch(n.pitch)) * laneH + 1;
+      ctx.globalAlpha = 0.5 + 0.5 * (Math.min(127, Math.max(1, n.velocity)) / 127);
+      ctx.fillStyle = "rgba(180,108,255,1)";
+      ctx.fillRect(x, y, cell, Math.max(2, laneH - 3));
+    }
+    ctx.globalAlpha = 1;
+  }, [notes, width, meter, secToPx]);
   return <canvas ref={ref} />;
 }
