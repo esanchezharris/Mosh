@@ -11,8 +11,10 @@ target_sources(MoshTests PRIVATE
     test_renderlayer.cpp
     test_astd.cpp
     test_remote_companion.cpp
+    test_training.cpp
     ${CMAKE_SOURCE_DIR}/src/remote/RemoteCompanionProtocol.cpp
-    ${CMAKE_SOURCE_DIR}/src/remote/RemoteCompanionServer.cpp)
+    ${CMAKE_SOURCE_DIR}/src/remote/RemoteCompanionServer.cpp
+    ${CMAKE_SOURCE_DIR}/src/training/TrainerRegistry.cpp)
 
 target_include_directories(MoshTests PRIVATE ${CMAKE_SOURCE_DIR}/src)
 
@@ -31,3 +33,7 @@ target_link_libraries(MoshTests PRIVATE
     juce::juce_recommended_config_flags)
 
 add_test(NAME MoshTests COMMAND $<TARGET_FILE:MoshTests>)
+# test_training.cpp shells out to service/training relative to the CWD, so ctest
+# must run the suite from the repo root.
+set_tests_properties(MoshTests PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")

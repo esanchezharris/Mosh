@@ -8,11 +8,11 @@ import { useEffect, useRef, useState } from "react";
 import * as QRCode from "qrcode";
 import { useStore } from "../store";
 import { pickFiles, pickSaveFile } from "../bridge";
-import type { Snapshot, ExportFormat, CommandLog as CommandLogData } from "../types";
+import type { Snapshot, ExportFormat, CommandLog as CommandLogData, TrainingState } from "../types";
 import { SampleBrowser } from "./SampleBrowser";
 
 // Small popover anchored under its trigger; closes on outside click / Esc.
-function Pop({ label, title, on, children }: { label: string; title: string; on?: boolean; children: (close: () => void) => React.ReactNode }) {
+function Pop({ label, title, on, className, children }: { label: string; title: string; on?: boolean; className?: string; children: (close: () => void) => React.ReactNode }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -23,7 +23,7 @@ function Pop({ label, title, on, children }: { label: string; title: string; on?
     return () => { document.removeEventListener("mousedown", onDoc); document.removeEventListener("keydown", onKey); };
   }, [open]);
   return (
-    <div className="pop-wrap" ref={ref}>
+    <div className={`pop-wrap${className ? " " + className : ""}`} ref={ref}>
       <button className={`btn${open || on ? " on" : ""}`} title={title} aria-expanded={open} onClick={() => setOpen((v) => !v)}>{label}</button>
       {open && <div className="pop" role="dialog">{children(() => setOpen(false))}</div>}
     </div>
@@ -39,11 +39,197 @@ export function TopbarTools({ snapshot }: { snapshot: Snapshot }) {
       <Pop label="🗀" title="Browse audio samples">{() => <SampleBrowser />}</Pop>
       <SettingsTool snapshot={snapshot} />
       <ExportTool audioEnabled={audioEnabled} />
+      <TrainingTool training={snapshot.training ?? null} />
       <CommandLogTool />
       <RemoteTool />
       <HelpTool />
       <button className="btn icon" title="Toggle theme" aria-label="Toggle light/dark theme" onClick={toggleTheme}>{theme === "dark" ? "☾" : "☀"}</button>
     </div>
+  );
+}
+
+function TrainingTool({ training }: { training: TrainingState | null }) {
+  const exec = useStore((s) => s.exec);
+  const refresh = useStore((s) => s.refresh);
+  const [title, setTitle] = useState("");
+  const [creator, setCreator] = useState("");
+  const [sourceUrl, setSourceUrl] = useState("");
+  const [localPath, setLocalPath] = useState("");
+  const [userClaimedLicense, setUserClaimedLicense] = useState("");
+  const [proofOfRights, setProofOfRights] = useState("");
+  const [bundlePath, setBundlePath] = useState("");
+  const [lastJobId, setLastJobId] = useState("");
+  const sources = training?.sources ?? [];
+  const adapters = training?.adapters ?? [];
+  const jobs = training?.jobs ?? [];
+  const blockedSources = sources.filter((s) => !s.eligible);
+  const readyToBuild = sources.length > 0 && blockedSources.length === 0;
+  const blockedReasons = blockedSources.map((s) => `${s.source_id}: ${s.blocked_reason || "Blocked"}`);
+  const missingSourceInput = localPath.trim().length === 0 && sourceUrl.trim().length === 0;
+  const sourceStatus = (s: TrainingState["sources"][number]) => {
+    if (s.eligible) return "Ready for training";
+    switch (s.blocked_reason) {
+      case "not approved_for_training": return "Needs approval";
+      case "missing proof_of_rights": return "Add rights proof";
+      case "missing local_path": return "Add a local file";
+      default: return s.blocked_reason ?? "Blocked";
+    }
+  };
+  const blockedReasonText = (reason: string) => {
+    switch (reason) {
+      case "missing source_id":
+        return "Missing source id";
+      case "missing title":
+        return "Add a title";
+      case "missing creator":
+        return "Add a creator";
+      case "missing user_claimed_license":
+        return "Add your claimed license text";
+      case "missing proof_of_rights":
+        return "Add rights proof";
+      case "missing source_url or local_path":
+      case "missing local file":
+        return "Add a local file";
+      default:
+        return reason ? `Missing: ${reason}` : "Needs review";
+    }
+  };
+  const canStartTraining = blockedSources.length === 0 && sources.length > 0;
+  const canAddSource = title.trim().length > 0
+    && creator.trim().length > 0
+    && userClaimedLicense.trim().length > 0
+    && proofOfRights.trim().length > 0
+    && (localPath.trim().length > 0 || sourceUrl.trim().length > 0);
+
+    const addSource = async () => {
+      const r = await exec("import_training_source", {
+        title,
+        creator,
+      sourceUrl,
+      localPath,
+      userClaimedLicense,
+      proofOfRights,
+      });
+      if (r.ok) {
+      setTitle(""); setCreator(""); setSourceUrl(""); setLocalPath(""); setUserClaimedLicense(""); setProofOfRights("");
+        await refresh();
+      }
+    };
+  const buildCorpus = async () => {
+    const r = await exec("build_training_corpus", {});
+    if (r.ok) {
+      setBundlePath((r.data as { bundlePath?: string } | undefined)?.bundlePath ?? "");
+      await refresh();
+    }
+  };
+  const submitJob = async () => {
+    if (!bundlePath) return;
+    const r = await exec("submit_training_job", {
+      corpusBundle: bundlePath,
+      config: { rank: 16, steps: 2000, lr: 0.0001, base_model: "type-beat-base" },
+    });
+    if (r.ok) {
+      const jobId = (r.data as { jobId?: string } | undefined)?.jobId ?? "";
+      setLastJobId(jobId);
+      await refresh();
+    }
+  };
+  const syncAdapter = async () => {
+    if (!lastJobId) return;
+    await exec("import_lora_adapter", { jobId: lastJobId });
+    await refresh();
+  };
+
+  return (
+    <Pop label="LoRA" title="Type-beat training" className="training-pop">
+      {() => (
+        <>
+          <div className="pop-head">Type-Beat Training</div>
+          <div className="pop-note">Use only music you can legally train on. YouTube is discovery/reference. Import local files for training.</div>
+          <div className="pop-group">
+            <div className="pop-label">Add source</div>
+            <label className="pop-row"><span>Beat title</span><input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Track/beat name" /></label>
+            <label className="pop-row"><span>Creator</span><input value={creator} onChange={(e) => setCreator(e.target.value)} placeholder="Creator/artist name" /></label>
+            <label className="pop-row"><span>Source URL</span><input value={sourceUrl} onChange={(e) => setSourceUrl(e.target.value)} placeholder="Discovery link (optional)" /></label>
+            <label className="pop-row"><span>Audio file</span><input value={localPath} onChange={(e) => setLocalPath(e.target.value)} placeholder="Local file path" /></label>
+            <div className="pop-actions">
+              <button className="btn" onClick={async () => {
+                const r = await pickFiles({ multiple: false, title: "Choose a source audio file" });
+                if (r.ok && r.files[0]) setLocalPath(r.files[0]);
+              }}>Pick file</button>
+              <button className="btn" disabled={!canAddSource} onClick={addSource}>Add source</button>
+            </div>
+            <label className="pop-row"><span>License claim</span><input value={userClaimedLicense} onChange={(e) => setUserClaimedLicense(e.target.value)} placeholder="Paste your rights claim text" /></label>
+            <label className="pop-row"><span>Rights proof</span><input value={proofOfRights} onChange={(e) => setProofOfRights(e.target.value)} placeholder="link + proof note" /></label>
+            {!canAddSource && missingSourceInput && <div className="pop-note">Add a source URL or a local file.</div>}
+            {!canAddSource && userClaimedLicense.trim().length === 0 && <div className="pop-note">Add your claimed license text.</div>}
+            {!canAddSource && proofOfRights.trim().length === 0 && <div className="pop-note">Add rights proof text.</div>}
+            {!canAddSource && title.trim().length === 0 && <div className="pop-note">Add the beat title.</div>}
+            {!canAddSource && creator.trim().length === 0 && <div className="pop-note">Add the creator name.</div>}
+          </div>
+          <div className="pop-group">
+            <div className="pop-label">Sources</div>
+            <div className="training-status" role="status">{canStartTraining ? "All sources ready for training" : `${blockedSources.length} source${blockedSources.length === 1 ? "" : "s"} need review`}</div>
+            <div className="modal-list training-list">
+              {sources.length === 0 && <div className="rack-empty">no sources yet</div>}
+              {sources.map((s) => (
+                <div key={s.source_id} className="plugin-row">
+                  <span className="pr-name">{s.title}</span>
+                  <span className={`cmdlog-badge${s.eligible ? "" : " err"}`}>{sourceStatus(s)}</span>
+                  {!s.approved_for_training && <button className="btn" onClick={() => void exec("approve_training_source", { sourceId: s.source_id, approved: true }).then(refresh)}>Approve</button>}
+                </div>
+              ))}
+            </div>
+            {blockedReasons.length > 0 && (
+              <div className="pop-note">
+                Blocked:
+                <ul className="training-blocker-list">
+                  {sources.filter((s) => !s.eligible).map((s) => (
+                    <li key={`blocked-${s.source_id}`}>
+                      {s.source_id}: {blockedReasonText(s.blocked_reason || "blocked")}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+          <div className="pop-group">
+            <div className="pop-label">Corpus</div>
+            <div className="pop-actions">
+              <button className="btn" disabled={!readyToBuild} onClick={buildCorpus}>Build</button>
+              <button className="btn" disabled={!bundlePath || !readyToBuild} onClick={submitJob}>Train</button>
+              <button className="btn" disabled={!lastJobId} onClick={syncAdapter}>Import adapter</button>
+            </div>
+            <div className="pop-note tc" title={bundlePath || ""}>{bundlePath ? `bundle: ${bundlePath}` : "no bundle yet"}</div>
+          </div>
+          <div className="pop-group">
+            <div className="pop-label">Adapters</div>
+            <div className="modal-list training-list">
+              {adapters.length === 0 && <div className="rack-empty">no adapters yet</div>}
+              {adapters.map((a) => (
+                <div key={a.adapterId} className="plugin-row">
+                  <span className="pr-name">{a.adapterId}{a.active ? " · active" : ""}</span>
+                  <button className="btn" onClick={() => void exec("activate_lora_adapter", { adapterId: a.adapterId }).then(refresh)}>Activate</button>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="pop-group">
+            <div className="pop-label">Jobs</div>
+            <div className="modal-list training-list">
+              {jobs.length === 0 && <div className="rack-empty">no jobs yet</div>}
+              {jobs.map((j) => (
+                <div key={j.jobId} className="plugin-row">
+                  <span className="pr-name">{j.jobId} · {j.status}</span>
+                  {j.status === "ready" && <button className="btn" onClick={() => void exec("import_lora_adapter", { jobId: j.jobId }).then(refresh)}>Import</button>}
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="pop-note tc">{training?.activeAdapterId ? `active adapter: ${training.activeAdapterId}` : "no active adapter"}</div>
+        </>
+      )}
+    </Pop>
   );
 }
 

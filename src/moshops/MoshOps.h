@@ -9,6 +9,8 @@
 #include "plugins/hosting/PluginHost.h"
 #include "plugins/spectral/MasterSpectralTapPlugin.h"
 #include "generative/GenerativeJobManager.h"
+#include "training/TrainerRegistry.h"
+#include "training/TrainingJobManager.h"
 
 namespace mosh
 {
@@ -201,6 +203,19 @@ private:
     juce::var cmdRemoveTempoChange   (const juce::var& args); // undoable (index>0)
     juce::var cmdInsertTimeSigChange (const juce::var& args); // undoable
     juce::var cmdRemoveTimeSigChange (const juce::var& args); // undoable (index>0)
+    // Stage 7 — rights-cleared type-beat LoRA training + rights registry. Catalog/
+    // job ops (NON-undoable: they touch the rights registry + the training service,
+    // not the Edit), so none take a Tracktion transaction.
+    juce::var cmdImportTrainingSource   (const juce::var& args);
+    juce::var cmdListTrainingSources    (const juce::var& args);
+    juce::var cmdApproveTrainingSource  (const juce::var& args);
+    juce::var cmdBuildTrainingCorpus    (const juce::var& args);
+    juce::var cmdSubmitTrainingJob      (const juce::var& args);
+    juce::var cmdTrainingJobStatus      (const juce::var& args);
+    juce::var cmdCancelTrainingJob      (const juce::var& args);
+    juce::var cmdImportLoraAdapter      (const juce::var& args);
+    juce::var cmdActivateLoraAdapter    (const juce::var& args);
+    juce::var cmdListLoraAdapters       (const juce::var& args);
 
     // The MOSH_PROJECT child of eng.edit().state, created (empty) on first read so
     // callers always get a valid tree. Pure storage accessor — no logging/transaction.
@@ -309,6 +324,8 @@ private:
     MoshEngine& eng;
     PluginHost  pluginHost;
     GenerativeJobManager jobManager;
+    TrainerRegistry      trainerRegistry;
+    TrainingJobManager   trainingJobManager;
     EventSink   eventSink;
     juce::int64 seq = 0;
     juce::File  logFile;
