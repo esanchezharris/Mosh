@@ -97,7 +97,7 @@ export function useFileDrop(): boolean {
               name: file.name,
               dataBase64,
               trackId: useStore.getState().selectedTrackId ?? undefined,
-              start: useStore.getState().snapshot?.transport.position ?? 0,
+              start: useStore.getState().transport.position,
             });
             imported += 1;
           } catch (err) {

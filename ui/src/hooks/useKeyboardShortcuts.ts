@@ -84,7 +84,7 @@ export function useKeyboardShortcuts() {
         case " ": // Space — play/stop
           e.preventDefault();
           void s.exec("set_transport", {
-            action: s.snapshot?.transport.playing ? "stop" : "play",
+            action: s.transport.playing ? "stop" : "play",
           });
           return;
         case "r":

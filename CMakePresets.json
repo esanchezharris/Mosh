@@ -14,6 +14,20 @@
         "MOSH_BUILD_UI": "ON",
         "MOSH_BUILD_PLUGIN_FIXTURES": "ON"
       }
+    },
+    {
+      "name": "macos-arm64-release",
+      "displayName": "macOS Apple Silicon Release",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build-macos-arm64-release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_OSX_ARCHITECTURES": "arm64",
+        "MOSH_BUILD_APP": "ON",
+        "MOSH_BUILD_TESTS": "ON",
+        "MOSH_BUILD_UI": "ON",
+        "MOSH_BUILD_PLUGIN_FIXTURES": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -39,6 +53,22 @@
       "configurePreset": "macos-arm64-debug",
       "targets": [
         "MoshTestTonePlugin_VST3"
+      ]
+    },
+    {
+      "name": "macos-arm64-release-app",
+      "displayName": "Build macOS Apple Silicon app (Release)",
+      "configurePreset": "macos-arm64-release",
+      "targets": [
+        "Mosh"
+      ]
+    },
+    {
+      "name": "macos-arm64-release-tests",
+      "displayName": "Build macOS Apple Silicon tests (Release)",
+      "configurePreset": "macos-arm64-release",
+      "targets": [
+        "MoshTests"
       ]
     }
   ]

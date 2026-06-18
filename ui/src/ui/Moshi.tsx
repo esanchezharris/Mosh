@@ -67,8 +67,8 @@ export function Moshi() {
   // the utter() funnel lives in a ref so the discrete-event effects can call it.
   const utterRef = useRef<(intent: string, o?: { affect?: Affect; seed?: number }) => void>(() => {});
 
-  const playing = useStore((s) => s.snapshot?.transport.playing ?? false);
-  const recording = useStore((s) => s.snapshot?.transport.recording ?? false);
+  const playing = useStore((s) => s.transport.playing);
+  const recording = useStore((s) => s.transport.recording);
   const rendering = useStore((s) => Object.keys(s.renderProgress).length > 0);
   const celebrateTick = useStore((s) => s.celebrateTick);
   const voiceOn = useStore((s) => s.voiceOn);
@@ -151,8 +151,8 @@ export function Moshi() {
         const bands = spec.bands ?? [];
         const low = avg(bands.slice(0, 3));
         const high = avg(bands.slice(Math.max(0, bands.length - 3)));
-        const isPlaying = st.snapshot?.transport.playing ?? false;
-        const isRec = st.snapshot?.transport.recording ?? false;
+        const isPlaying = st.transport.playing;
+        const isRec = st.transport.recording;
         breathPhase += 0.018;
         const breath = 0.12 + 0.05 * Math.sin(breathPhase);
         const energyT = clamp((isPlaying ? 0.25 + 0.7 * (0.55 * low + 0.45 * spec.level) : breath) + spec.flux * 0.3);
@@ -194,7 +194,7 @@ export function Moshi() {
     const scheduleNudge = () => {
       nudgeT = window.setTimeout(() => {
         const st = useStore.getState();
-        const busy = st.snapshot?.transport.playing || st.snapshot?.transport.recording
+        const busy = st.transport.playing || st.transport.recording
           || Object.keys(st.renderProgress).length > 0;
         if (!busy) {
           try { apiRef.current?.lookAt((Math.random() * 2 - 1) * 0.5, (Math.random() * 2 - 1) * 0.3); } catch { /* noop */ }

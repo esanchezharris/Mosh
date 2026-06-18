@@ -70,6 +70,12 @@ type State = {
   // like `levels`; never a command, no audio concepts leak across the seam (just numbers).
   spectrum: Spectrum;
 
+  // Live transport — fed by the 30Hz "transport" event (NOT folded into the
+  // snapshot, so a moving playhead never re-creates the snapshot object and the
+  // whole tree no longer re-renders 30×/s). Seeded from the snapshot on refresh
+  // for the structural fields (recording / loop region).
+  transport: Transport;
+
   // Clip clipboard — pure UI-local view state. The captured clip descriptor only
   // crosses the bridge on paste (paste_clip); copy/cut never touch the backend
   // (swappable-seam rule). v1 holds a single clip; multi-clip copy is optional.
@@ -196,13 +202,14 @@ export const useStore = create<State>((set, get) => ({
   trackOutputs: null,
   levels: { tracks: {}, master: { l: -100, r: -100 } },
   spectrum: { bands: [], level: 0, flux: 0 },
+  transport: { playing: false, recording: false, position: 0, looping: false, loopStart: 0, loopEnd: 0 },
   clipboard: null,
 
   refresh: async () => {
     if (!isNative()) return;
     try {
       const snap = await getSnapshot<Snapshot>();
-      set({ snapshot: snap, connected: true });
+      set({ snapshot: snap, connected: true, transport: snap.transport });
       // Prune selection / fetch peaks for current clips.
       const ids = new Set(snap.tracks.flatMap((t) => t.clips.map((c) => c.id)));
       set((s) => ({ selection: new Set([...s.selection].filter((id) => ids.has(id))) }));
@@ -229,8 +236,8 @@ export const useStore = create<State>((set, get) => ({
       if (ev.type === "snapshot_invalidated") {
         void get().refresh();
       } else if (ev.type === "transport") {
-        const t = ev.payload as Transport;
-        set((s) => (s.snapshot ? { snapshot: { ...s.snapshot, transport: t } } : {}));
+        // Targeted set — does NOT touch the snapshot (so the tree doesn't churn).
+        set({ transport: ev.payload as Transport });
       } else if (ev.type === "levels") {
         // Targeted set (no snapshot refetch) — same lightweight path as transport.
         const p = ev.payload as { tracks: { id: string; l: number; r: number }[]; master: Level };
@@ -348,11 +355,11 @@ export const useStore = create<State>((set, get) => ({
   },
 
   pasteClipboard: async () => {
-    const { clipboard, selectedTrackId, snapshot } = get();
+    const { clipboard, selectedTrackId } = get();
     if (!clipboard) return;
     await get().exec("paste_clip", {
       trackId: selectedTrackId ?? clipboard.sourceTrackId,
-      start: snapshot?.transport.position ?? 0,
+      start: get().transport.position,
       clip: clipboard.clip,
     });
     await get().refresh();
@@ -487,7 +494,7 @@ export const useStore = create<State>((set, get) => ({
   lastTakeClipId: null,
   currentMode: () => {
     const s = get();
-    if (s.snapshot?.transport.recording) return "recording";
+    if (s.transport.recording) return "recording";
     if (s.takeDecisionPending) return "reviewing";
     return "idle";
   },

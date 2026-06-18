@@ -12,7 +12,7 @@ import { MasterMeter } from "./Meter";
 
 export function Topbar({ snapshot }: { snapshot: Snapshot }) {
   const exec = useStore((s) => s.exec);
-  const t = snapshot.transport;
+  const t = useStore((s) => s.transport); // live 30Hz field, not the snapshot
   const map = tempoMapFrom(snapshot.session);
   const bbs = secondsToBBSMap(map, t.position);
   const playing = t.playing;

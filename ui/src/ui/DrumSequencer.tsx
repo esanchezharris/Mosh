@@ -14,7 +14,7 @@ export function DrumSequencer({ clip }: { clip: Clip }) {
   const m = meterAt(tempoMapFrom(snapshot?.session), clip.start);
   const sb = stepBeats(m.num);
   const grid = buildGrid(clip.notes ?? [], m.num);
-  const playing = snapshot?.transport.playing ?? false;
+  const playing = useStore((s) => s.transport.playing);
 
   const onCell = (lane: number, step: number, shift: boolean) => {
     const cell = grid[lane][step];

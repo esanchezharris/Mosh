@@ -17,10 +17,10 @@
 // Scroll-correctness: clip drag/trim use deltas (scroll-invariant); marquee/ruler
 // use rect-relative coords (getBoundingClientRect already folds in scrollLeft).
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { pickFiles } from "../bridge";
 import { useStore, type Peaks } from "../store";
-import { tempoMapFrom, gridLines, meterAt, beatSeconds, type Meter as TimeMeter } from "../time";
+import { tempoMapFrom, gridLines, meterAt, beatSeconds } from "../time";
 import { DRUM_LANES, laneIndexForPitch } from "./drumGrid";
 import { deriveTakeLanes } from "./takeLanes";
 import { SAMPLE_DND_MIME, addRecentSample } from "./sampleBrowserUtil";
@@ -62,19 +62,21 @@ export function Arrange({ snapshot }: { snapshot: Snapshot }) {
   const tracks = snapshot.tracks.filter((t) => !t.isGroup);
   const map = useMemo(() => tempoMapFrom(snapshot.session), [snapshot.session]);
 
+  // Timeline extent depends only on the snapshot's clips, not the per-render
+  // filtered `tracks` array (which is a fresh reference every render).
   const totalSec = useMemo(() => {
     let end = 16;
-    for (const t of tracks) for (const c of t.clips) end = Math.max(end, c.start + c.length);
+    for (const t of snapshot.tracks) for (const c of t.clips) end = Math.max(end, c.start + c.length);
     return end + 4;
-  }, [tracks]);
+  }, [snapshot.tracks]);
 
   const width = Math.ceil(totalSec * pxPerSec);
   const grid = useMemo(() => gridLines(map, 0, totalSec), [map, totalSec]);
-  const secToPx = (s: number) => s * pxPerSec;
-  const pxToSec = (px: number) => px / pxPerSec;
+  // Stable across renders (until the zoom changes) so memoized clip canvases can
+  // skip redraws when only an unrelated sibling re-renders.
+  const secToPx = useCallback((s: number) => s * pxPerSec, [pxPerSec]);
+  const pxToSec = useCallback((px: number) => px / pxPerSec, [pxPerSec]);
   const lanesHeight = Math.max(LANE_H, tracks.length * LANE_H);
-
-  const transport = snapshot.transport;
 
   // Drag-to-arrange: a sample dragged from the browser lands as a clip on the
   // dropped track at the dropped position (snapped). import_clip already takes
@@ -230,10 +232,7 @@ export function Arrange({ snapshot }: { snapshot: Snapshot }) {
           {grid.marks.map((m, i) => (
             <div key={`mk-${i}`} className="mark tc" style={{ left: secToPx(m.sec) }}>{m.label}</div>
           ))}
-          {transport.looping && transport.loopEnd > transport.loopStart && (
-            <div className="loop-tab" data-testid="loop-region"
-              style={{ left: secToPx(transport.loopStart), width: secToPx(transport.loopEnd - transport.loopStart) }} />
-          )}
+          <LoopTab secToPx={secToPx} />
         </div>
 
         <div
@@ -265,22 +264,20 @@ export function Arrange({ snapshot }: { snapshot: Snapshot }) {
               {t.clips.map((c) => (
                 <ClipBlock key={c.id} clip={c} selected={selection.has(c.id)}
                   tool={tool} snapTime={snapTime} secToPx={secToPx} pxToSec={pxToSec}
-                  meter={meterAt(map, c.start)}
+                  bs={beatSeconds(meterAt(map, c.start))}
                   onSelect={(additive) => select([c.id], additive)} exec={exec} />
               ))}
             </div>
           ))}
 
           {/* loop region + range band over the lanes (UI-local band reuses styling) */}
-          {transport.looping && transport.loopEnd > transport.loopStart && (
-            <div className="band loop" style={{ left: secToPx(transport.loopStart), width: secToPx(transport.loopEnd - transport.loopStart), height: lanesHeight }} />
-          )}
+          <LoopBand secToPx={secToPx} lanesHeight={lanesHeight} />
           {timeRange && timeRange.end > timeRange.start && (
             <div className="band range" data-testid="range-band"
               style={{ left: secToPx(timeRange.start), width: secToPx(timeRange.end - timeRange.start), height: lanesHeight }} />
           )}
 
-          <div className="playhead" data-testid="playhead" data-pos={transport.position.toFixed(3)} style={{ left: secToPx(transport.position) }} />
+          <Playhead secToPx={secToPx} />
 
           {marquee && (
             <div className="marquee" data-testid="marquee" style={{
@@ -294,11 +291,12 @@ export function Arrange({ snapshot }: { snapshot: Snapshot }) {
   );
 }
 
-function TrackHeader({ track }: { track: Track }) {
+const TrackHeader = memo(function TrackHeader({ track }: { track: Track }) {
   const exec = useStore((s) => s.exec);
-  const selectedTrackId = useStore((s) => s.selectedTrackId);
+  // Subscribe to the DERIVED boolean, not the raw selectedTrackId — a header whose
+  // selected-state is unchanged won't re-render when selection moves elsewhere.
+  const selected = useStore((s) => s.selectedTrackId === track.id);
   const setSelectedTrack = useStore((s) => s.setSelectedTrack);
-  const selected = selectedTrackId === track.id;
   return (
     <div className={`thead${selected ? " selected" : ""}`} data-testid="track-header" data-track-id={track.id}
       data-selected={selected} onPointerDown={() => setSelectedTrack(track.id)}>
@@ -321,17 +319,17 @@ function TrackHeader({ track }: { track: Track }) {
       <Meter trackId={track.id} />
     </div>
   );
-}
+});
 
 type ExecFn = (command: string, args?: Record<string, unknown>) => Promise<unknown>;
 type DragKind = "move" | "trim-l" | "trim-r";
 
 function ClipBlock({
-  clip, selected, tool, snapTime, secToPx, pxToSec, meter, onSelect, exec,
+  clip, selected, tool, snapTime, secToPx, pxToSec, bs, onSelect, exec,
 }: {
   clip: Clip; selected: boolean; tool: string;
   snapTime: (t: number) => number; secToPx: (s: number) => number; pxToSec: (px: number) => number;
-  meter: TimeMeter;
+  bs: number; // seconds per beat at this clip's start (for inline MIDI/drum previews)
   onSelect: (additive: boolean) => void; exec: ExecFn;
 }) {
   const ensurePeaks = useStore((s) => s.ensurePeaks);
@@ -438,8 +436,8 @@ function ClipBlock({
         <ClipWave peaks={peaks} width={widthPx} />
       ) : clip.type === "midi" ? (
         isDrumClip(clip.notes)
-          ? <ClipDrumGrid notes={clip.notes} width={widthPx} meter={meter} secToPx={secToPx} />
-          : <ClipMidi notes={clip.notes} width={widthPx} meter={meter} secToPx={secToPx} />
+          ? <ClipDrumGrid notes={clip.notes} width={widthPx} bs={bs} secToPx={secToPx} />
+          : <ClipMidi notes={clip.notes} width={widthPx} bs={bs} secToPx={secToPx} />
       ) : null}
       {tool === "move" && (
         <>
@@ -451,7 +449,7 @@ function ClipBlock({
   );
 }
 
-function ClipWave({ peaks, width }: { peaks?: Peaks; width: number }) {
+const ClipWave = memo(function ClipWave({ peaks, width }: { peaks?: Peaks; width: number }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const cv = ref.current; if (!cv || !peaks) return;
@@ -470,7 +468,7 @@ function ClipWave({ peaks, width }: { peaks?: Peaks; width: number }) {
     }
   }, [peaks, width]);
   return <canvas ref={ref} />;
-}
+});
 
 // A MIDI clip reads as "drums" when most of its notes land on GM percussion keys
 // (the same lanes the drum sequencer uses); melodic clips get the piano preview.
@@ -484,8 +482,8 @@ function isDrumClip(notes?: MidiNote[]): boolean {
 // Inline MIDI preview — pitch-mapped note blocks. Notes carry clip-local beats;
 // beatSeconds(meter) → seconds, then the shared secToPx scale lands them on the
 // same grid the ruler/playhead use. Double-click the clip still opens the PianoRoll.
-function ClipMidi({ notes, width, meter, secToPx }:
-  { notes?: MidiNote[]; width: number; meter: TimeMeter; secToPx: (s: number) => number }) {
+const ClipMidi = memo(function ClipMidi({ notes, width, bs, secToPx }:
+  { notes?: MidiNote[]; width: number; bs: number; secToPx: (s: number) => number }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const cv = ref.current; if (!cv) return;
@@ -503,7 +501,6 @@ function ClipMidi({ notes, width, meter, secToPx }:
     else { lo -= 1; hi += 1; }
     const span = Math.max(1, hi - lo);
     const rowH = Math.max(2, Math.min(7, (h - 2) / span));
-    const bs = beatSeconds(meter);
 
     ctx.fillStyle = "rgba(180,108,255,1)";   // violet — matches the .clip.midi identity
     for (const n of ns) {
@@ -514,14 +511,14 @@ function ClipMidi({ notes, width, meter, secToPx }:
       ctx.fillRect(x, y, wpx, rowH);
     }
     ctx.globalAlpha = 1;
-  }, [notes, width, meter, secToPx]);
+  }, [notes, width, bs, secToPx]);
   return <canvas ref={ref} />;
-}
+});
 
 // Inline drum preview — fixed GM lanes (kick/snare/hat/…), FL-style steps. x stays
 // grid-aligned via secToPx(beats); y is the GM lane, not the pitch.
-function ClipDrumGrid({ notes, width, meter, secToPx }:
-  { notes?: MidiNote[]; width: number; meter: TimeMeter; secToPx: (s: number) => number }) {
+const ClipDrumGrid = memo(function ClipDrumGrid({ notes, width, bs, secToPx }:
+  { notes?: MidiNote[]; width: number; bs: number; secToPx: (s: number) => number }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const cv = ref.current; if (!cv) return;
@@ -537,7 +534,6 @@ function ClipDrumGrid({ notes, width, meter, secToPx }:
     ctx.fillStyle = "rgba(180,108,255,0.14)";                // faint lane separators
     for (let l = 1; l < lanes; l++) ctx.fillRect(0, Math.round(l * laneH), w, 1);
 
-    const bs = beatSeconds(meter);
     for (const n of ns) {
       const x = secToPx(n.start * bs);
       const cell = Math.max(3, Math.min(secToPx(n.length * bs), laneH - 2));
@@ -547,6 +543,32 @@ function ClipDrumGrid({ notes, width, meter, secToPx }:
       ctx.fillRect(x, y, cell, Math.max(2, laneH - 3));
     }
     ctx.globalAlpha = 1;
-  }, [notes, width, meter, secToPx]);
+  }, [notes, width, bs, secToPx]);
   return <canvas ref={ref} />;
+});
+
+// ── Live-transport leaves: each subscribes to the 30Hz `transport` field directly,
+// so a moving playhead / loop edit re-renders only these tiny nodes, never the whole
+// arrangement tree (clips, grid and headers stay put during playback). ───────────
+function Playhead({ secToPx }: { secToPx: (s: number) => number }) {
+  const position = useStore((s) => s.transport.position);
+  return <div className="playhead" data-testid="playhead" data-pos={position.toFixed(3)} style={{ left: secToPx(position) }} />;
+}
+
+function LoopTab({ secToPx }: { secToPx: (s: number) => number }) {
+  const looping = useStore((s) => s.transport.looping);
+  const loopStart = useStore((s) => s.transport.loopStart);
+  const loopEnd = useStore((s) => s.transport.loopEnd);
+  if (!looping || loopEnd <= loopStart) return null;
+  return <div className="loop-tab" data-testid="loop-region"
+    style={{ left: secToPx(loopStart), width: secToPx(loopEnd - loopStart) }} />;
+}
+
+function LoopBand({ secToPx, lanesHeight }: { secToPx: (s: number) => number; lanesHeight: number }) {
+  const looping = useStore((s) => s.transport.looping);
+  const loopStart = useStore((s) => s.transport.loopStart);
+  const loopEnd = useStore((s) => s.transport.loopEnd);
+  if (!looping || loopEnd <= loopStart) return null;
+  return <div className="band loop"
+    style={{ left: secToPx(loopStart), width: secToPx(loopEnd - loopStart), height: lanesHeight }} />;
 }
