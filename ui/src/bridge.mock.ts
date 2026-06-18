@@ -267,7 +267,8 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       if (!t) return err(command, "no track");
       pushUndo();
       const name = str(args.name) || (str(args.file).split("/").pop() ?? "clip");
-      const c = waveClip(name.replace(/\.[^.]+$/, ""), num(args.start, 0), num(args.length, 4));
+      // Honor startSeconds (the real cmdImportClip contract); fall back to `start`.
+      const c = waveClip(name.replace(/\.[^.]+$/, ""), num(args.startSeconds, num(args.start, 0)), num(args.length, 4));
       t.clips.push(c); invalidate(); return ok(command, { clipId: c.id });
     }
     case "move_clip": {
