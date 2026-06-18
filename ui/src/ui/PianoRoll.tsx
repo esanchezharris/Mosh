@@ -9,6 +9,7 @@ import { useStore } from "../store";
 import type { MidiNote } from "../types";
 import { meterAt, tempoMapFrom, beatSeconds, snapStepBeats } from "../time";
 import { DrumSequencer } from "./DrumSequencer";
+import { centerScrollTopForNotes } from "./pianoRollScroll";
 
 const ROW_H = 15;
 const BEAT_PX = 42;
@@ -40,9 +41,27 @@ export function PianoRoll() {
   const gridDragRef = useRef<GridDrag | null>(null);
   const previewRef = useRef<MidiNote | null>(null);
   const velocityDraftRef = useRef<number | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const keysRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => { if (editingClipId && !clip) close(); }, [editingClipId, clip, close]);
   useEffect(() => { setMode("piano"); }, [editingClipId]);
+  // On open (and when returning to Piano from the Drums view), centre the
+  // vertical scroll on the clip's notes so off-screen material (e.g. a low
+  // bassline near E2/A2) is framed instead of an apparently empty grid scrolled
+  // to the top (C7). No-op in Drums mode (the scroll grid isn't mounted) and for
+  // empty clips. Keys column is synced to match.
+  useEffect(() => {
+    if (mode !== "piano") return;
+    const sc = scrollRef.current;
+    if (!sc) return;
+    const top = centerScrollTopForNotes(clip?.notes ?? [], {
+      high: HIGH, rowH: ROW_H, clientHeight: sc.clientHeight, scrollHeight: sc.scrollHeight,
+    });
+    if (top == null) return;
+    sc.scrollTop = top;
+    if (keysRef.current) keysRef.current.scrollTop = top;
+  }, [editingClipId, mode]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     setPreview(null); previewRef.current = null; setLasso(null); gridDragRef.current = null;
     setSelectedNotes((prev) => {
@@ -169,12 +188,12 @@ export function PianoRoll() {
         </div>
         {mode === "drums" ? <DrumSequencer clip={clip} /> : (
         <><div className="pr-body">
-          <div className="pr-keys">
+          <div className="pr-keys" ref={keysRef}>
             {pitches.map((p) => (
               <div key={p} className={`pr-key ${isBlack(p) ? "black" : "white"}`} style={{ height: ROW_H }}>{p % 12 === 0 && <span>{noteName(p)}</span>}</div>
             ))}
           </div>
-          <div className="pr-scroll">
+          <div className="pr-scroll" ref={scrollRef} onScroll={(e) => { if (keysRef.current) keysRef.current.scrollTop = e.currentTarget.scrollTop; }}>
             <div className="pr-grid" role="group" aria-label="Piano roll grid" style={{ width: gridW, height: pitches.length * ROW_H }}
               onPointerDown={onGridDown} onPointerMove={onGridMove} onPointerUp={onGridUp} onPointerCancel={onGridCancel} onLostPointerCapture={onGridCancel}>
               {pitches.map((p) => <div key={`r${p}`} className={`pr-row ${isBlack(p) ? "black" : ""}`} style={{ top: yOf(p), height: ROW_H }} />)}
