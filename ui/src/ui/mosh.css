@@ -231,6 +231,24 @@ body { background: var(--ink); color: var(--bone); font-family: var(--font-body)
 .thead input[type="range"] { flex: 1 1 auto; accent-color: var(--lime); }
 .thead .x { margin-left: auto; }
 
+/* Live peak meters (Wave 9 telemetry → 30 Hz `levels` event). A horizontal stereo
+   pair under each track header, plus the master pair in the topbar. The green→amber→red
+   gradient lives on the track; Meter.tsx animates a right-anchored mask (.mmask) to
+   reveal it as level rises, so the hot path writes one style per channel per frame. */
+.meter { display: flex; flex-direction: column; gap: 2px; }
+.meter .mbar {
+  position: relative; height: 3px; border-radius: 2px; overflow: hidden;
+  background: linear-gradient(90deg, var(--lime) 0%, var(--lime) 60%, var(--warn) 84%, var(--rec) 100%);
+}
+.meter .mmask { position: absolute; top: 0; right: 0; bottom: 0; width: 100%; background: var(--ink-deep); }
+.meter.clip .mbar { box-shadow: 0 0 5px var(--rec); }
+
+/* Master meter sits in the topbar transport cluster. */
+.master-meter { display: flex; align-items: center; gap: 5px; }
+.master-meter .mm-label { font-size: 9px; color: var(--bone-dim); letter-spacing: 0.06em; }
+.meter.master { width: 60px; }
+.meter.master .mbar { height: 4px; }
+
 /* moshi — the agent-creature as a FIXED dock panel on the right of the bottom dock
    (by the generative drawer, where his reactions happen). The GL character mounts
    its own canvas into .moshi-mount, rendered at full devicePixelRatio (crisp). */

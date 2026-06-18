@@ -136,11 +136,27 @@ function startPlayback() {
     const level = bands.reduce((a, b) => a + b, 0) / N;
     const flux = Math.max(0, Math.sin(pos * Math.PI * 4)) ** 6;
     emit("spectrum", { bands, level, flux });
+
+    // Fake per-track + master peak levels (dBFS) so the meters move in browser dev,
+    // where there's no real audio. Wobbles per track off the playhead; muted tracks
+    // read the floor. Shape matches the native `levels` event the store hydrates.
+    const toDb = (g: number) => (g <= 0.001 ? -100 : -60 + Math.max(0, Math.min(1, g)) * 60);
+    const tracks = snapshot.tracks
+      .filter((t) => !t.isGroup)
+      .map((t, i) => {
+        const g = t.mute ? 0 : level * (0.6 + 0.4 * Math.abs(Math.sin(pos * 2.3 + i)));
+        const db = toDb(g);
+        return { id: t.id, l: db, r: toDb(g * 0.94) };
+      });
+    emit("levels", { tracks, master: { l: toDb(level), r: toDb(level * 0.96) } });
   }, 1000 / 30);
 }
 function stopPlayback() {
   if (playTimer) { clearInterval(playTimer); playTimer = null; }
   emit("spectrum", { bands: Array(8).fill(0), level: 0, flux: 0 }); // calm on stop
+  // Drop the meters to the floor when the transport stops.
+  const tracks = snapshot.tracks.filter((t) => !t.isGroup).map((t) => ({ id: t.id, l: -100, r: -100 }));
+  emit("levels", { tracks, master: { l: -100, r: -100 } });
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────

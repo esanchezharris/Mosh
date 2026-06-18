@@ -87,7 +87,7 @@ What Mosh can actually do today, grouped for a producer. Status is honest: `work
 | Transport & timing | ✅ works | `set_transport` · `set_tempo` · `set_time_signature` · `set_metronome` · `set_key` | 30 Hz decimated playhead. |
 | Recording & takes | ✅ works | `arm_track` · `stop_recording` · `set_input_monitor` · `list_takes` · `set_current_take` · `keep_take` | Record-arm, monitoring, take lanes. |
 | Mixing | ✅ works | `set_track_volume`/`pan`/`mute`/`solo` · `set_master_volume`/`pan` | Faders + 30 Hz level meters. |
-| VST3/AU hosting | ✅ works | `load_plugin` · `load_builtin` · `remove_plugin` · `bypass_plugin` · `set_plugin_param` · `reorder_plugin` · `open_plugin_editor` | Scanned VST3+AU, native editor pop-out, 10 built-ins. |
+| VST3/AU hosting | ✅ works | `load_plugin` · `load_builtin` · `remove_plugin` · `bypass_plugin` · `set_plugin_param` · `reorder_plugin` · `open_plugin_editor` | Scanned VST3+AU, native editor pop-out, 10 built-ins. Hosting is in-process: a few misbehaving plugins (a cracked VST3, some stock AUs) can abort on teardown — harness-surfaced only, loss bounded by autosave, `block_plugin` is the manual lever; OOP hosting deferred. See `docs/FEATURE_AUDIT.md` 2026-06-18. |
 | Tier-A neural insert | ✅ works | `add_neural_insert` · `set_neural_param` · `set_neural_lab_mode` · `reset_neural` | RT-safe MLP waveshaper; ASTD 0–100 (Lab unlocks); PDC verified. |
 | Generative re-imagine (Tier-B) | ✅ works | `create_render_layer` · `set_render_param` · `render_layer` · `accept_render` · `reject_render` · `bypass_layer` · `freeze_layer` · `bounce_layer_to_clip` | SA3 + FakeAdapter fallback; async; cache by fingerprint; lands on a "Neural Renders" lane. |
 | Export | ✅ works | `export_audio` | WAV/AIFF/FLAC of the full signal chain. |

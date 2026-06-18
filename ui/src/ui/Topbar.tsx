@@ -8,6 +8,7 @@ import { tempoMapFrom, secondsToBBSMap, SNAP_DIVISIONS } from "../time";
 import type { Snapshot } from "../types";
 import { TONICS, MODES, DEFAULT_KEY } from "../musicalKey";
 import { TopbarTools } from "./TopbarTools";
+import { MasterMeter } from "./Meter";
 
 export function Topbar({ snapshot }: { snapshot: Snapshot }) {
   const exec = useStore((s) => s.exec);
@@ -45,6 +46,11 @@ export function Topbar({ snapshot }: { snapshot: Snapshot }) {
         <div className="read">
           <span className="pos tc" data-testid="position">{bbs}</span>
           <span className="bpm tc">{Math.round(snapshot.session.tempo)} BPM · {snapshot.session.timeSigNumerator ?? 4}/{snapshot.session.timeSigDenominator ?? 4}</span>
+        </div>
+
+        <div className="master-meter" title="Master output level">
+          <span className="mm-label tc">MST</span>
+          <MasterMeter />
         </div>
 
         <KeyControl snapshot={snapshot} />
