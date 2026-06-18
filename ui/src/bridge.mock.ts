@@ -14,7 +14,7 @@
 // behaviour the UI relies on is exercised, while audio/Tracktion concepts never
 // appear (the swappable seam holds on the web side too).
 
-import type { Snapshot, Clip, Track, Transport, CommandResult, RenderLayer } from "./types";
+import type { Snapshot, Clip, Track, Transport, CommandResult, RenderLayer, TrainingState } from "./types";
 
 export const MOCK_ENABLED: boolean =
   typeof import.meta !== "undefined" && Boolean(import.meta.env?.DEV);
@@ -93,8 +93,8 @@ const listeners = new Map<string, Set<Listener>>();
 
 // Mock command log (drives the CommandLog panel). Read-only commands don't log.
 const cmdLog: { command: string; ok: boolean; undoable: boolean; ts: number }[] = [];
-const READONLY = new Set(["get_snapshot", "get_clip_peaks", "file_peaks", "audition_file", "stop_audition", "get_command_log", "list_plugins", "list_builtins", "list_colors", "list_audio_devices", "list_wave_inputs", "list_track_outputs", "list_takes"]);
-const NON_UNDOABLE = new Set(["set_transport", "arm_track", "set_input_monitor", "undo", "redo", "save", "reload", "render_layer", "open_plugin_editor", "set_plugin_param", "set_neural_param", "export_audio"]);
+const READONLY = new Set(["get_snapshot", "get_clip_peaks", "file_peaks", "audition_file", "stop_audition", "get_command_log", "list_plugins", "list_builtins", "list_colors", "list_audio_devices", "list_wave_inputs", "list_track_outputs", "list_takes", "list_training_sources", "training_job_status", "list_lora_adapters"]);
+const NON_UNDOABLE = new Set(["set_transport", "arm_track", "set_input_monitor", "undo", "redo", "save", "reload", "render_layer", "open_plugin_editor", "set_plugin_param", "set_neural_param", "export_audio", "import_training_source", "approve_training_source", "build_training_corpus", "submit_training_job", "cancel_training_job", "import_lora_adapter", "activate_lora_adapter"]);
 function emit(type: string, payload?: unknown) {
   const ls = listeners.get("mosh_event");
   if (ls) for (const fn of ls) fn({ type, payload });
@@ -175,6 +175,22 @@ function pushUndo() { if (inBatch) return; history.push(clone(snapshot)); future
 
 const ok = (command: string, data?: unknown): CommandResult => ({ ok: true, command, data });
 const err = (command: string, error: string): CommandResult => ({ ok: false, command, error });
+
+function trainingState(): TrainingState {
+  if (!snapshot.training) {
+    snapshot.training = {
+      registryPath: "/mock/training/rights_registry.json",
+      statePath: "/mock/training/training_state.json",
+      activeAdapterId: "",
+      activeAdapterPath: "",
+      activeCorpusHash: "",
+      sources: [],
+      adapters: [],
+      jobs: [],
+    };
+  }
+  return snapshot.training as TrainingState;
+}
 
 // ── plugin / neural / generative catalog (dev-mock only) ─────────────────────
 const BUILTINS = [
@@ -627,6 +643,146 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
           { name: "vocal_take.wav", path: path + "/vocal_take.wav", isDir: false, size: 4200000 },
         ],
       });
+    }
+
+    // ── rights-cleared type-beat training ────────────────────────────────────
+    case "import_training_source": {
+      const state = trainingState();
+      const id = str(args.sourceId, `beat-${String(state.sources.length + 1).padStart(3, "0")}`);
+      const src = {
+        index: state.sources.length,
+        source_id: id,
+      title: str(args.title, "Untitled Type Beat"),
+      creator: str(args.creator, "Unknown"),
+      source_url: str(args.sourceUrl),
+      local_path: str(args.localPath),
+      user_claimed_license: str(args.userClaimedLicense, str(args.licenseName, "")),
+      license_name: str(args.userClaimedLicense, str(args.licenseName, "")),
+      proof_of_rights: str(args.proofOfRights),
+      approved_for_training: Boolean(args.approvedForTraining),
+        expiration: (typeof args.expiration === "string" && args.expiration) ? String(args.expiration) : null,
+        notes: str(args.notes, ""),
+      };
+      const existing = state.sources.findIndex((s) => s.source_id === id);
+      if (existing >= 0) state.sources[existing] = src; else state.sources.push(src);
+      invalidate();
+      return ok(command, { source: src });
+    }
+    case "list_training_sources": {
+      const state = trainingState();
+      return ok(command, { registryPath: state.registryPath, sources: state.sources, sourceCount: state.sources.length });
+    }
+    case "approve_training_source": {
+      const state = trainingState();
+      const src = state.sources.find((s) => s.source_id === str(args.sourceId));
+      if (!src) return err(command, "source not found");
+      src.approved_for_training = Boolean(args.approved ?? true);
+      invalidate();
+      return ok(command, { source: src });
+    }
+    case "build_training_corpus": {
+      const state = trainingState();
+      const eligible = state.sources.filter((s) => s.approved_for_training && s.local_path);
+      if (eligible.length === 0) return err(command, "no approved local sources available for training");
+      const bundleId = str(args.bundleName, `corpus-${String(eligible.length).padStart(3, "0")}`);
+      const bundleHash = `mock-${bundleId}-${eligible.length}`;
+      const bundlePath = `/mock/training/corpora/${bundleId}`;
+      const sources = eligible.map((s, index) => ({ ...s, index, copied_path: `${bundlePath}/sources/${String(index).padStart(3, "0")}-${s.source_id}.wav`, sha256: `mock-${s.source_id}`, bytes: 123456 }));
+      const bundle = { bundleId, bundleHash, bundlePath, manifestPath: `${bundlePath}/corpus.manifest.json`, indexPath: `${bundlePath}/bundle.index.json`, sourceCount: sources.length, sources, skippedSources: state.sources.filter((s) => !eligible.includes(s)).map((s) => ({ source_id: s.source_id, reason: s.approved_for_training ? "missing local file" : "not approved_for_training" })) };
+      state.activeCorpusHash = bundleHash;
+      invalidate();
+      return ok(command, bundle);
+    }
+    case "submit_training_job": {
+      const state = trainingState();
+      const bundlePath = str(args.corpusBundle);
+      if (!bundlePath) return err(command, "missing corpusBundle");
+      const jobId = `job-${Math.random().toString(36).slice(2, 8)}`;
+      const outputDir = str(args.outputDir, `${bundlePath}/training-output/${jobId}`);
+      const job = {
+        jobId,
+        status: "ready",
+        progress: 1,
+        bundlePath,
+        outputDir,
+        artifactPath: `${outputDir}/adapter.lora.json`,
+        manifestPath: `${outputDir}/adapter.manifest.json`,
+        error: "",
+        result: {
+          adapter_id: `adapter-${jobId}`,
+          artifact_path: `${outputDir}/adapter.lora.json`,
+          manifest_path: `${outputDir}/adapter.manifest.json`,
+          bundle_hash: `mock-${bundlePath}`,
+          quality: { stub: true },
+        },
+      };
+      state.jobs = [...state.jobs.filter((j) => j.jobId !== jobId), job].slice(-20);
+      state.adapters = [
+        ...state.adapters.filter((a) => a.adapterId !== `adapter-${jobId}`),
+        {
+          adapterId: `adapter-${jobId}`,
+          bundleHash: `mock-${bundlePath}`,
+          bundlePath,
+          artifactPath: job.artifactPath,
+          manifestPath: job.manifestPath,
+          active: false,
+          quality: { stub: true },
+        },
+      ];
+      invalidate();
+      return ok(command, { jobId, bundlePath, outputDir });
+    }
+    case "training_job_status": {
+      const state = trainingState();
+      const job = state.jobs.find((j) => j.jobId === str(args.jobId));
+      if (!job) return err(command, "unknown jobId");
+      return ok(command, job);
+    }
+    case "cancel_training_job": {
+      const state = trainingState();
+      const job = state.jobs.find((j) => j.jobId === str(args.jobId));
+      if (!job) return err(command, "unknown jobId");
+      job.status = "cancelled";
+      invalidate();
+      return ok(command);
+    }
+    case "import_lora_adapter": {
+      const state = trainingState();
+      const job = str(args.jobId) ? state.jobs.find((j) => j.jobId === str(args.jobId)) : null;
+      const result = (job?.result ?? {}) as { adapter_id?: string; bundle_hash?: string; quality?: Record<string, unknown> };
+      const artifactPath = str(args.artifactPath, job?.artifactPath ?? "");
+      const manifestPath = str(args.manifestPath, job?.manifestPath ?? "");
+      const adapterId = str(args.adapterId, result.adapter_id ?? `adapter-${state.adapters.length + 1}`);
+      const adapter = {
+        adapterId,
+        bundleHash: result.bundle_hash ?? `mock-${adapterId}`,
+        bundlePath: job?.bundlePath ?? "",
+        artifactPath,
+        manifestPath,
+        active: false,
+        quality: result.quality ?? { stub: true },
+      };
+      state.adapters = [...state.adapters.filter((a) => a.adapterId !== adapterId), adapter];
+      state.activeAdapterId = adapterId;
+      state.activeAdapterPath = artifactPath;
+      state.activeCorpusHash = adapter.bundleHash;
+      invalidate();
+      return ok(command, adapter);
+    }
+    case "activate_lora_adapter": {
+      const state = trainingState();
+      const adapter = state.adapters.find((a) => a.adapterId === str(args.adapterId));
+      if (!adapter) return err(command, "adapter not found");
+      state.activeAdapterId = adapter.adapterId;
+      state.activeAdapterPath = adapter.artifactPath;
+      state.activeCorpusHash = adapter.bundleHash;
+      state.adapters = state.adapters.map((a) => ({ ...a, active: a.adapterId === adapter.adapterId }));
+      invalidate();
+      return ok(command, { adapterId: adapter.adapterId, adapterPath: adapter.artifactPath, corpusHash: adapter.bundleHash });
+    }
+    case "list_lora_adapters": {
+      const state = trainingState();
+      return ok(command, { activeAdapterId: state.activeAdapterId, activeAdapterPath: state.activeAdapterPath, activeCorpusHash: state.activeCorpusHash, adapters: state.adapters });
     }
 
     default:

@@ -227,6 +227,56 @@ export type DirListing = {
 // mode ∈ voice.js SCALES — the two domains must match the voice module exactly.
 export type SessionKey = { tonic: string; mode: string };
 
+export type TrainingSource = {
+  index: number;
+  source_id: string;
+  title: string;
+  creator: string;
+  source_url: string;
+  local_path: string;
+  user_claimed_license: string;
+  license_name?: string;
+  proof_of_rights: string;
+  approved_for_training: boolean;
+  expiration?: string | null;
+  notes: string;
+  eligible?: boolean;
+  blocked_reason?: string;
+};
+
+export type TrainingAdapter = {
+  adapterId: string;
+  bundleHash: string;
+  bundlePath: string;
+  artifactPath: string;
+  manifestPath: string;
+  active: boolean;
+  quality?: Record<string, unknown>;
+};
+
+export type TrainingJob = {
+  jobId: string;
+  status: string;
+  progress: number;
+  bundlePath?: string;
+  outputDir?: string;
+  artifactPath?: string;
+  manifestPath?: string;
+  error?: string;
+  result?: Record<string, unknown> | null;
+};
+
+export type TrainingState = {
+  registryPath: string;
+  statePath: string;
+  activeAdapterId: string;
+  activeAdapterPath: string;
+  activeCorpusHash: string;
+  sources: TrainingSource[];
+  adapters: TrainingAdapter[];
+  jobs: TrainingJob[];
+};
+
 export type Snapshot = {
   schemaVersion: number;
   session: {
@@ -288,6 +338,7 @@ export type Snapshot = {
   master?: { volumeDb: number; pan: number };
   buses?: Bus[];
   audio?: AudioSelection;
+  training?: TrainingState;
 };
 
 export type CommandResult<T = unknown> = {

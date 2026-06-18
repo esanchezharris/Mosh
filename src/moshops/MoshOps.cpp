@@ -117,7 +117,8 @@ namespace
 }
 
 MoshOps::MoshOps (MoshEngine& engineToUse)
-    : eng (engineToUse), pluginHost (engineToUse.engine())
+    : eng (engineToUse), pluginHost (engineToUse.engine()),
+      trainerRegistry (engineToUse.sessionDir())
 {
     logFile = eng.sessionDir().getChildFile ("mosh-log.jsonl");
     pluginHost.initialise();                 // formats + curated VST3 scan
@@ -466,6 +467,17 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "remove_tempo_change")    return cmdRemoveTempoChange (args);
     if (name == "insert_time_sig_change") return cmdInsertTimeSigChange (args);
     if (name == "remove_time_sig_change") return cmdRemoveTimeSigChange (args);
+    // Stage 7 — type-beat LoRA training
+    if (name == "import_training_source")  return cmdImportTrainingSource (args);
+    if (name == "list_training_sources")   return cmdListTrainingSources (args);
+    if (name == "approve_training_source") return cmdApproveTrainingSource (args);
+    if (name == "build_training_corpus")   return cmdBuildTrainingCorpus (args);
+    if (name == "submit_training_job")     return cmdSubmitTrainingJob (args);
+    if (name == "training_job_status")     return cmdTrainingJobStatus (args);
+    if (name == "cancel_training_job")     return cmdCancelTrainingJob (args);
+    if (name == "import_lora_adapter")     return cmdImportLoraAdapter (args);
+    if (name == "activate_lora_adapter")   return cmdActivateLoraAdapter (args);
+    if (name == "list_lora_adapters")      return cmdListLoraAdapters (args);
 
     return errResult (name, "unknown command: " + name);
 }
@@ -3176,6 +3188,176 @@ juce::var MoshOps::cmdLoadNeuralModel (const juce::var& args)
     data->setProperty ("reason", "RTNeural not built");
     return okResult ("load_neural_model", var (data));
    #endif
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Stage 7 — rights-cleared type-beat LoRA training
+// ─────────────────────────────────────────────────────────────────────────────
+juce::var MoshOps::cmdImportTrainingSource (const juce::var& args)
+{
+    String error;
+    auto src = trainerRegistry.importSource (args, error);
+    if (! error.isEmpty()) return errResult ("import_training_source", error);
+    logLine ("import_training_source", args, true, {}, false);
+    emitSnapshotInvalidated();
+    return okResult ("import_training_source", src);
+}
+
+juce::var MoshOps::cmdListTrainingSources (const juce::var&)
+{
+    return okResult ("list_training_sources", trainerRegistry.listSources());
+}
+
+juce::var MoshOps::cmdApproveTrainingSource (const juce::var& args)
+{
+    String error;
+    const auto sourceId = args.getProperty ("sourceId", var()).toString();
+    if (sourceId.isEmpty()) return errResult ("approve_training_source", "missing sourceId");
+    const bool approved = (bool) args.getProperty ("approved", true);
+    auto src = trainerRegistry.approveSource (sourceId, approved, error);
+    if (! error.isEmpty()) return errResult ("approve_training_source", error);
+    logLine ("approve_training_source", args, true, {}, false);
+    emitSnapshotInvalidated();
+    return okResult ("approve_training_source", src);
+}
+
+juce::var MoshOps::cmdBuildTrainingCorpus (const juce::var& args)
+{
+    String error;
+    auto bundle = trainerRegistry.buildCorpus (args, error);
+    if (! error.isEmpty()) return errResult ("build_training_corpus", error);
+    logLine ("build_training_corpus", args, true, {}, false);
+    emitSnapshotInvalidated();
+    return okResult ("build_training_corpus", bundle);
+}
+
+juce::var MoshOps::cmdSubmitTrainingJob (const juce::var& args)
+{
+    if (! trainingJobManager.ensureServiceRunning())
+        return errResult ("submit_training_job", "training service unavailable");
+
+    const auto bundlePath = args.getProperty ("corpusBundle", var()).toString();
+    if (bundlePath.isEmpty())
+        return errResult ("submit_training_job", "missing corpusBundle");
+    const auto config = args.getProperty ("config", var());
+    const auto outputDir = args.getProperty ("outputDir", var()).toString();
+    const auto jobId = trainingJobManager.submitJob (bundlePath, config, outputDir);
+    if (jobId.isEmpty()) return errResult ("submit_training_job", "job submit failed");
+
+    auto* job = new DynamicObject();
+    job->setProperty ("jobId", jobId);
+    job->setProperty ("status", "queued");
+    job->setProperty ("progress", 0.0);
+    job->setProperty ("bundlePath", bundlePath);
+    job->setProperty ("outputDir", outputDir.isNotEmpty()
+                                    ? outputDir
+                                    : File (bundlePath).getChildFile ("training-output").getChildFile (jobId).getFullPathName());
+    job->setProperty ("config", config);
+    trainerRegistry.updateJob (var (job));
+
+    auto* data = new DynamicObject();
+    data->setProperty ("jobId", jobId);
+    data->setProperty ("bundlePath", bundlePath);
+    data->setProperty ("outputDir", job->getProperty ("outputDir"));
+    logLine ("submit_training_job", args, true, {}, false);
+    emitSnapshotInvalidated();
+    return okResult ("submit_training_job", var (data));
+}
+
+juce::var MoshOps::cmdTrainingJobStatus (const juce::var& args)
+{
+    const auto jobId = args.getProperty ("jobId", var()).toString();
+    if (jobId.isEmpty()) return errResult ("training_job_status", "missing jobId");
+    auto st = trainingJobManager.jobStatus (jobId);
+    if (! (bool) st.getProperty ("ok", false))
+        return errResult ("training_job_status", st.getProperty ("error", "job lookup failed").toString());
+
+    auto* job = new DynamicObject();
+    job->setProperty ("jobId", jobId);
+    job->setProperty ("status", st.getProperty ("status", "queued"));
+    job->setProperty ("progress", st.getProperty ("progress", 0.0));
+    job->setProperty ("error", st.getProperty ("error", var()));
+    job->setProperty ("result", st.getProperty ("result", var()));
+    trainerRegistry.updateJob (var (job));
+    return okResult ("training_job_status", st);
+}
+
+juce::var MoshOps::cmdCancelTrainingJob (const juce::var& args)
+{
+    const auto jobId = args.getProperty ("jobId", var()).toString();
+    if (jobId.isEmpty()) return errResult ("cancel_training_job", "missing jobId");
+    trainingJobManager.cancelJob (jobId);
+    auto* job = new DynamicObject();
+    job->setProperty ("jobId", jobId);
+    job->setProperty ("status", "cancelled");
+    job->setProperty ("progress", 0.0);
+    trainerRegistry.updateJob (var (job));
+    logLine ("cancel_training_job", args, true, {}, false);
+    emitSnapshotInvalidated();
+    return okResult ("cancel_training_job");
+}
+
+juce::var MoshOps::cmdImportLoraAdapter (const juce::var& args)
+{
+    const auto jobId = args.getProperty ("jobId", var()).toString();
+    auto artifactPath = args.getProperty ("artifactPath", var()).toString();
+    auto manifestPath = args.getProperty ("manifestPath", var()).toString();
+    auto adapterId = args.getProperty ("adapterId", var()).toString();
+
+    if (artifactPath.isEmpty() && jobId.isNotEmpty())
+    {
+        auto st = trainingJobManager.jobStatus (jobId);
+        if ((bool) st.getProperty ("ok", false))
+        {
+            auto result = st.getProperty ("result", var());
+            artifactPath = result.getProperty ("artifact_path", var()).toString();
+            manifestPath = result.getProperty ("manifest_path", var()).toString();
+            adapterId = result.getProperty ("adapter_id", var()).toString();
+        }
+    }
+
+    String error;
+    auto rec = trainerRegistry.importAdapter (artifactPath, manifestPath, adapterId, error);
+    if (! error.isEmpty()) return errResult ("import_lora_adapter", error);
+    logLine ("import_lora_adapter", args, true, {}, false);
+    emitSnapshotInvalidated();
+    return okResult ("import_lora_adapter", rec);
+}
+
+juce::var MoshOps::cmdActivateLoraAdapter (const juce::var& args)
+{
+    const auto adapterId = args.getProperty ("adapterId", var()).toString();
+    if (adapterId.isEmpty()) return errResult ("activate_lora_adapter", "missing adapterId");
+
+    auto adapters = trainerRegistry.listAdapters();
+    auto adapterList = adapters.getProperty ("adapters", Array<var>());
+    String adapterPath, corpusHash;
+    if (auto* arr = adapterList.getArray())
+        for (auto& a : *arr)
+            if (a.getProperty ("adapterId", var()).toString() == adapterId)
+            {
+                adapterPath = a.getProperty ("artifactPath", var()).toString();
+                corpusHash = a.getProperty ("bundleHash", var()).toString();
+                break;
+            }
+    if (adapterPath.isEmpty())
+        adapterPath = args.getProperty ("adapterPath", var()).toString();
+    if (corpusHash.isEmpty())
+        corpusHash = args.getProperty ("corpusHash", var()).toString();
+    if (adapterPath.isEmpty())
+        return errResult ("activate_lora_adapter", "adapter not found");
+
+    String error;
+    auto rec = trainerRegistry.activateAdapter (adapterId, adapterPath, corpusHash, error);
+    if (! error.isEmpty()) return errResult ("activate_lora_adapter", error);
+    logLine ("activate_lora_adapter", args, true, {}, false);
+    emitSnapshotInvalidated();
+    return okResult ("activate_lora_adapter", rec);
+}
+
+juce::var MoshOps::cmdListLoraAdapters (const juce::var&)
+{
+    return okResult ("list_lora_adapters", trainerRegistry.listAdapters());
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

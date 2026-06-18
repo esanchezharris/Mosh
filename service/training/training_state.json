@@ -1,0 +1,62 @@
+{
+  "activeAdapterId": "",
+  "activeAdapterPath": "",
+  "activeCorpusHash": "",
+  "adapters": [],
+  "jobs": [
+    {
+      "artifactPath": "/var/folders/ls/q_ndrnbd5bbgg0b9wj_9fw6h0000gn/T/tmpp4py_hkh/output/adapter.lora.json",
+      "bundleHash": "1f7af641e7591a393001009b201fa3bfe0783881c986c22a2050250a667f4296",
+      "bundlePath": "/var/folders/ls/q_ndrnbd5bbgg0b9wj_9fw6h0000gn/T/tmpp4py_hkh/corpora/corpus-2acd2a6fdf16",
+      "error": "",
+      "jobId": "3e56ce448145",
+      "manifestPath": "/var/folders/ls/q_ndrnbd5bbgg0b9wj_9fw6h0000gn/T/tmpp4py_hkh/output/adapter.manifest.json",
+      "outputDir": "/var/folders/ls/q_ndrnbd5bbgg0b9wj_9fw6h0000gn/T/tmpp4py_hkh/output",
+      "progress": 1.0,
+      "quality": {
+        "adapter_density": 0.125,
+        "backend": "fake",
+        "source_count": 1,
+        "stub": true
+      },
+      "status": "ready",
+      "updatedAt": 1781424885.8942678
+    },
+    {
+      "artifactPath": "/var/folders/ls/q_ndrnbd5bbgg0b9wj_9fw6h0000gn/T/tmpgrv7jvtb/out/adapter.lora.json",
+      "bundleHash": "66d30fb96a62255d190d9122e0a4dbe3e61602f0cff109977481273be7599347",
+      "bundlePath": "/var/folders/ls/q_ndrnbd5bbgg0b9wj_9fw6h0000gn/T/tmpgrv7jvtb/corpora/corpus-2acd2a6fdf16",
+      "error": "",
+      "jobId": "6563fdad0953",
+      "manifestPath": "/var/folders/ls/q_ndrnbd5bbgg0b9wj_9fw6h0000gn/T/tmpgrv7jvtb/out/adapter.manifest.json",
+      "outputDir": "/var/folders/ls/q_ndrnbd5bbgg0b9wj_9fw6h0000gn/T/tmpgrv7jvtb/out",
+      "progress": 1.0,
+      "quality": {
+        "adapter_density": 0.125,
+        "backend": "fake",
+        "source_count": 1,
+        "stub": true
+      },
+      "status": "ready",
+      "updatedAt": 1781424894.3988612
+    },
+    {
+      "artifactPath": "/var/folders/ls/q_ndrnbd5bbgg0b9wj_9fw6h0000gn/T/tmpnknrpu3z/output/adapter.lora.json",
+      "bundleHash": "e137220e93d2d20ab5c5bc3146ca6721ca4581a81fcac668d75c518d4461f20d",
+      "bundlePath": "/var/folders/ls/q_ndrnbd5bbgg0b9wj_9fw6h0000gn/T/tmpnknrpu3z/corpora/corpus-2acd2a6fdf16",
+      "error": "",
+      "jobId": "6c6fa2b637e4",
+      "manifestPath": "/var/folders/ls/q_ndrnbd5bbgg0b9wj_9fw6h0000gn/T/tmpnknrpu3z/output/adapter.manifest.json",
+      "outputDir": "/var/folders/ls/q_ndrnbd5bbgg0b9wj_9fw6h0000gn/T/tmpnknrpu3z/output",
+      "progress": 1.0,
+      "quality": {
+        "adapter_density": 0.125,
+        "backend": "fake",
+        "source_count": 1,
+        "stub": true
+      },
+      "status": "ready",
+      "updatedAt": 1781424901.690975
+    }
+  ]
+}
