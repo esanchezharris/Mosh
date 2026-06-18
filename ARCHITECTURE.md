@@ -102,7 +102,7 @@ What Mosh can actually do today, grouped for a producer. Status is honest: `work
 ## 5. Run, build, test
 
 - **Run the app / iterate the UI:** `./run-mosh.sh` (see the script header for flags). For live UI dev, set `MOSH_UI_DEV_SERVER` to the Vite dev URL so the WebView loads from Vite instead of the staged bundle.
-- **Verify the backend:** `Mosh --selftest` — the command-surface harness (98/98 with SA3 gated, 89/89 FakeAdapter-only). Run 3× for determinism (see memory `mosh-verification-conventions`). Visual demos: `Mosh --demo3`…`--demo6`.
+- **Verify the backend:** `Mosh --selftest` — the command-surface harness (**744 checks** on a machine where the optional local Serum-VST3 gate is present; a few fewer without it, and the heavy real-model path adds more behind `MOSH_SELFTEST_SA3=1`). Run 3× for determinism (see memory `mosh-verification-conventions`). Visual demos: `Mosh --demo3`…`--demo6`.
 - **Build:** CMake (JUCE 8 + Tracktion via submodule, pinned in `cmake/Dependencies.cmake`). Neural/SA3 deps are fetch-gated behind `-DMOSH_ENABLE_RTNEURAL=ON` / `-DMOSH_ENABLE_ANIRA=ON`; the generative service runs under its MLX venv when `MOSH_ENABLE_SA3=1`.
 - **UI tests:** `npm test` in `ui/` (vitest + jsdom). `commands.contract.test.ts` parses `MoshOps.cpp` so the agent command catalog can't drift from the backend.
 
