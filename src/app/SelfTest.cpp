@@ -196,6 +196,32 @@ int runDeepPluginScan (MoshOps& ops)
     return 0;
 }
 
+// The harness hosts a REAL external plugin to exercise VST3 hosting, but it must NEVER
+// host an arbitrary user-installed plugin. Many installed plugins destabilise the HOST
+// itself (not merely themselves) on teardown, aborting the whole Mosh process:
+//   • a cracked/badly-behaved VST3 spawns a background thread that outlives its instance
+//     and locks an already-freed std::mutex -> EINVAL -> uncaught std::system_error
+//     (observed: SIR Audio Tools "StandardCLIP" / its QueueControlThread);
+//   • a stock Apple AudioUnit leaves a CoreAudio CAEventReceiver timer whose std::function
+//     is cleared on teardown -> bad_function_call when the timer next fires during a
+//     message-loop pump (observed: AUSampler / AUVectorPanner).
+// The scanned-catalog order is not even stable run-to-run, so "the first installed effect"
+// was a different plugin each run -> a ~50% crash. (Root-caused 2026-06-18.) Rather than
+// blocklist each crasher (whack-a-mole), POSITIVELY allow only VST3s from a small set of
+// vendors verified to load + tear down cleanly. AudioUnits are excluded wholesale (their
+// teardown race is format-level). Extend the allowlist as more vendors are verified; an
+// unknown/cracked vendor is never hosted (the section then skips gracefully, like the
+// no-plugins-installed path).
+static bool isHarnessHostablePlugin (const juce::var& p)
+{
+    if (p.getProperty ("format", juce::var()).toString() != "VST3")
+        return false;
+    const auto m = p.getProperty ("manufacturer", juce::var()).toString();
+    return m == "Xfer Records"          // Serum 2 / Serum 2 FX / OTT
+        || m == "Vital Audio"           // Vital
+        || m == "Valhalla DSP, LLC";    // ValhallaVintageVerb / Room / UberMod / ...
+}
+
 int runSelfTest (MoshEngine& eng, MoshOps& ops)
 {
     using namespace juce;
@@ -446,6 +472,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     if (auto* arr = lp["data"].getProperty ("plugins", var()).getArray())
         for (auto& p : *arr)
         {
+            if (! isHarnessHostablePlugin (p)) continue;   // only host vetted, host-safe VST3s
             const bool inst = (bool) p.getProperty ("isInstrument", false);
             if (inst && instId.isEmpty()) instId = p.getProperty ("id", var()).toString();
             if (! inst && fxId.isEmpty()) fxId = p.getProperty ("id", var()).toString();
@@ -1156,7 +1183,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         String fxId2;
         { auto lp2 = cmd (ops, "list_plugins");
           if (auto* arr = lp2["data"].getProperty ("plugins", var()).getArray())
-            for (auto& p : *arr) if (! (bool) p.getProperty ("isInstrument", false) && fxId2.isEmpty())
+            for (auto& p : *arr) if (isHarnessHostablePlugin (p) && ! (bool) p.getProperty ("isInstrument", false) && fxId2.isEmpty())
                 fxId2 = p.getProperty ("id", var()).toString(); }
         if (fxId2.isNotEmpty())
             check (ok (cmd (ops, "load_plugin", objN ({{ "trackId", mt }, { "pluginId", fxId2 }}))), "host VST3 effect on the mix track");
@@ -1246,11 +1273,16 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     {
         String serumId;
         {
+            // Serum 2 ships BOTH a VST3 and an AudioUnit (same name/manufacturer/isInstrument).
+            // This section gates the VST3 render path (the file/identifier checks below require
+            // Serum2.vst3), so pin the format explicitly — otherwise list_plugins scan order
+            // non-deterministically hands back the AU twin and the metadata check flakes.
             auto lpSerum = cmd (ops, "list_plugins");
             if (auto* arr = lpSerum["data"].getProperty ("plugins", var()).getArray())
                 for (auto& p : *arr)
                     if (p.getProperty ("name", var()).toString() == "Serum 2"
                         && p.getProperty ("manufacturer", var()).toString() == "Xfer Records"
+                        && p.getProperty ("format", var()).toString() == "VST3"
                         && (bool) p.getProperty ("isInstrument", false))
                     {
                         serumId = p.getProperty ("id", var()).toString();
