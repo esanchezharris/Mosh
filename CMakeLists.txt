@@ -56,6 +56,9 @@ if (MOSH_BUILD_APP)
         PRODUCT_NAME "Mosh"
         BUNDLE_ID    "studio.mosh.app"
         COMPANY_NAME "Mosh"
+        # The Moshi face. JUCE converts this PNG to the bundle's AppIcon.icns at
+        # build time — it is the single source of truth for the app icon.
+        ICON_BIG     "${CMAKE_SOURCE_DIR}/resources/icon/MoshIcon.png"
         ${MOSH_APP_EXTRA_ARGS})
 
 # Source modules (00 §5). Added incrementally per build stage.

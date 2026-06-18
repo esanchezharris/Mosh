@@ -14,15 +14,35 @@
 #   ./run-mosh.sh           launch the GUI (talk/type to Moshi — tests voice + brain)
 #   ./run-mosh.sh smoke     non-interactive native brain round-trip; prints the reply
 #   ./run-mosh.sh build     (re)build the app, then launch the GUI
+#   ./run-mosh.sh deploy    (re)build, then install ONE canonical /Applications/Mosh.app
 #
 # Env knobs: MOSH_BRAIN_ENV (override the dotenv path), MOSH_ENABLE_SA3 (default 0),
 #            MOSH_BRAIN_SMOKE_PROMPT (custom prompt for `smoke`).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-APP="$ROOT/build/Mosh_artefacts/Release/Mosh.app"
-BIN="$APP/Contents/MacOS/Mosh"
 ENV_FILE="${MOSH_BRAIN_ENV:-$ROOT/ui/.env.local}"
+
+# Resolve the newest built Mosh.app. The documented build is the
+# `macos-arm64-debug` preset (-> build-macos-arm64/); we also check the legacy
+# build/ dir. (The old hardcoded build/.../Release/Mosh.app path was stale —
+# the preset never produced it.)
+resolve_app() {
+  # Newest Mosh.app by mtime. Pure-bash loop (no head/sort pipe) so it is safe
+  # under `set -o pipefail` — a truncating pipe would SIGPIPE and abort the script.
+  local p t best=0 newest=""
+  while IFS= read -r p; do
+    t="$(stat -f '%m' "$p" 2>/dev/null || echo 0)"
+    if [ "$t" -ge "$best" ]; then best="$t"; newest="$p"; fi
+  done < <(find "$ROOT/build-macos-arm64" "$ROOT/build" -maxdepth 3 -name 'Mosh.app' -type d 2>/dev/null)
+  printf '%s\n' "$newest"
+}
+
+build_app() {
+  echo "building Mosh (macos-arm64-debug preset)…"
+  cmake --preset macos-arm64-debug
+  cmake --build --preset macos-arm64-app
+}
 
 # --- load a dotenv file WITHOUT printing any values -------------------------------
 load_dotenv() {
@@ -60,18 +80,32 @@ if [ "$have_any" = 0 ]; then
 fi
 
 MODE="${1:-gui}"
-if [ "$MODE" = "build" ]; then
-  echo "building…"; cmake --build "$ROOT/build" -j8; MODE="gui"
-fi
+case "$MODE" in
+  build)  build_app; MODE="gui" ;;
+  deploy) build_app ;;
+esac
 
-if [ ! -x "$BIN" ]; then
-  echo "Mosh.app not built at: $BIN" >&2
-  echo "Build it first:  ./run-mosh.sh build   (or: cmake -B build && cmake --build build -j8)" >&2
+APP="$(resolve_app)"
+BIN="$APP/Contents/MacOS/Mosh"
+if [ -z "$APP" ] || [ ! -x "$BIN" ]; then
+  echo "Mosh.app not built. Build it first:  ./run-mosh.sh build" >&2
   exit 1
 fi
 
 case "$MODE" in
   smoke) exec "$BIN" --brain-smoke ;;
-  gui)   echo "launching Mosh…"; exec "$BIN" ;;
-  *)     echo "usage: $0 [gui|smoke|build]" >&2; exit 2 ;;
+  gui)   echo "launching Mosh ($APP)…"; exec "$BIN" ;;
+  deploy)
+    DEST="/Applications/Mosh.app"
+    echo "deploying $APP -> $DEST"
+    rm -rf "$DEST"
+    cp -R "$APP" "$DEST"
+    # Nudge the macOS icon cache so a changed icon refreshes.
+    touch "$DEST"
+    killall Finder 2>/dev/null || true
+    killall Dock   2>/dev/null || true
+    echo "deployed one canonical /Applications/Mosh.app."
+    echo "If macOS still shows an old icon, log out and back in (icon cache)."
+    ;;
+  *)     echo "usage: $0 [gui|smoke|build|deploy]" >&2; exit 2 ;;
 esac
