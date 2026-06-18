@@ -434,6 +434,10 @@ body { background: var(--ink); color: var(--bone); font-family: var(--font-body)
 /* sample browser filter input */
 .sb-search { width: 100%; box-sizing: border-box; margin: 6px 0; padding: 5px 8px; background: var(--ink); border: 1px solid var(--ink-line); color: var(--bone); border-radius: 6px; font-size: 12px; }
 .sb-search:focus { outline: none; border-color: var(--lime-dim); }
+.sb-audition { flex: 0 0 auto; width: 22px; height: 20px; padding: 0; background: transparent; border: 1px solid var(--ink-line); color: var(--bone-dim); border-radius: 5px; font-size: 9px; cursor: pointer; }
+.sb-audition:hover { border-color: var(--lime-dim); color: var(--bone); }
+.sb-audition[aria-pressed="true"] { background: var(--lime); border-color: var(--lime); color: var(--on-accent); }
+.sb-thumb { flex: 0 0 auto; color: var(--lime); opacity: 0.85; border-radius: 3px; }
 
 /* buried automation entry (small ⌁ in the chain header) */
 .rack-auto { margin-left: 8px; background: transparent; border: 1px solid var(--ink-line); color: var(--bone-dim); border-radius: 5px; width: 20px; height: 18px; font-size: 11px; cursor: pointer; vertical-align: middle; }
