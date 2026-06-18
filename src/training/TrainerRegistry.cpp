@@ -123,7 +123,8 @@ String TrainerRegistry::nextSourceId (const Array<var>& sources) const
 String TrainerRegistry::sanitize (const String& s) const
 {
     auto out = s;
-    out = out.replaceCharacters ("\\/:\r\n\t", "-----");
+    // replaceCharacters requires matching lengths: 6 path-hostile chars -> 6 dashes.
+    out = out.replaceCharacters ("\\/:\r\n\t", "------");
     out = out.retainCharacters ("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-");
     return out.isNotEmpty() ? out : "item";
 }
@@ -215,7 +216,6 @@ var TrainerRegistry::importSource (const var& args, String& error)
     error.clear();
     auto reg = registry();
     auto sources = toArray (reg.getProperty ("sources", Array<var>()));
-    auto* o = new DynamicObject();
     const auto requestedId = args.getProperty ("sourceId", var()).toString();
     const auto sid = requestedId.isNotEmpty() ? requestedId : nextSourceId (sources);
     const auto sourceUrl = args.getProperty ("sourceUrl", var()).toString();
@@ -225,6 +225,9 @@ var TrainerRegistry::importSource (const var& args, String& error)
         error = "missing sourceUrl or localPath";
         return {};
     }
+    // Allocate only after validation passes: on the early-return path above the
+    // raw DynamicObject would never be adopted into a var and would leak.
+    auto* o = new DynamicObject();
     o->setProperty ("source_id", sid);
     o->setProperty ("title", args.getProperty ("title", "Untitled Type Beat"));
     o->setProperty ("creator", args.getProperty ("creator", "Unknown"));
