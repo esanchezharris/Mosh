@@ -55,6 +55,7 @@ type State = {
   scanProgress: { format: string; done: boolean } | null; // transient rescan state
   browserOpen: boolean;
   renderProgress: Record<string, number>; // clipId → 0..1 (Tier-B render)
+  transcribing: Record<string, boolean>;  // source clipId → audio→MIDI in flight (Basic Pitch)
   availableColors: AvailableColor[];       // SA3 colour rack (from list_colors)
   labMode: boolean;                        // ASTD unlock for generative colours
   qaByClip: Record<string, RenderQA>;      // last render's quality readout
@@ -193,6 +194,7 @@ export const useStore = create<State>((set, get) => ({
   scanProgress: null,
   browserOpen: false,
   renderProgress: {},
+  transcribing: {},
   availableColors: [],
   labMode: false,
   qaByClip: {},
@@ -257,6 +259,17 @@ export const useStore = create<State>((set, get) => ({
         } else {
           set({ scanProgress: { format: p.format, done: false } });
         }
+      } else if (ev.type === "transcribe_status") {
+        // Audio→MIDI status for a SOURCE clip: working | done | error. On done the
+        // backend's snapshot_invalidated (from add_midi_clip) reveals the new track.
+        const p = ev.payload as { clipId: string; state: string; error?: string };
+        set((s) => {
+          const next = { ...s.transcribing };
+          if (p.state === "working") next[p.clipId] = true;
+          else delete next[p.clipId];
+          return { transcribing: next };
+        });
+        if (p.state === "error") set({ lastError: p.error ?? "transcription failed" });
       } else if (ev.type === "layer_render_progress") {
         const p = ev.payload as { clipId: string; progress: number };
         set((s) => ({ renderProgress: { ...s.renderProgress, [p.clipId]: p.progress } }));

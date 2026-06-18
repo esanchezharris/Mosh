@@ -537,6 +537,35 @@ body { background: var(--ink); color: var(--bone); font-family: var(--font-body)
 }
 .pop { transform-origin: top center; animation: mosh-pop-drop 150ms cubic-bezier(0.22, 1, 0.36, 1); }
 
+/* Right-click clip menu (audio→MIDI via Basic Pitch). Portaled to <body> and
+   cursor-positioned, so it isn't clipped by the lane's overflow. */
+.clip-menu {
+  position: fixed; z-index: 200; min-width: 170px;
+  background: var(--ink-raise); border: 1px solid var(--ink-line); border-radius: 10px;
+  padding: 6px; box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+  display: flex; flex-direction: column; gap: 2px;
+  transform-origin: top left; animation: mosh-pop-drop 130ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.clip-menu .cm-head {
+  font-family: var(--font-display); font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--bone-dim); padding: 4px 8px 2px;
+}
+.clip-menu .cm-item {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
+  background: transparent; border: 0; color: var(--bone); text-align: left;
+  font: inherit; font-size: 13px; padding: 7px 8px; border-radius: 6px; cursor: pointer;
+}
+.clip-menu .cm-item:hover { background: var(--lime-faint); color: var(--lime); }
+.clip-menu .cm-sub { font-size: 10px; color: var(--bone-dim); text-transform: lowercase; }
+
+/* "transcribing…" badge while Basic Pitch runs on a source clip */
+.clip-badge {
+  position: absolute; top: 3px; right: 4px; z-index: 5;
+  background: var(--lime); color: #111; font-size: 9px; font-weight: 700; letter-spacing: 0.04em;
+  padding: 1px 6px; border-radius: 999px; pointer-events: none; animation: mosh-pop-in 160ms ease-out;
+}
+.clip[data-transcribing="true"] { box-shadow: 0 0 0 1px var(--lime-dim) inset; }
+
 /* mount pop-in for the racks/strips/headers — they settle in rather than snapping */
 .pcard, .strip, .thead { animation: mosh-pop-in 160ms cubic-bezier(0.22, 1, 0.36, 1); }
 

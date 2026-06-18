@@ -18,6 +18,7 @@
 // use rect-relative coords (getBoundingClientRect already folds in scrollLeft).
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { pickFiles } from "../bridge";
 import { useStore, type Peaks } from "../store";
 import { tempoMapFrom, gridLines, meterAt, beatSeconds } from "../time";
@@ -324,6 +325,41 @@ const TrackHeader = memo(function TrackHeader({ track }: { track: Track }) {
 type ExecFn = (command: string, args?: Record<string, unknown>) => Promise<unknown>;
 type DragKind = "move" | "trim-l" | "trim-r";
 
+// Right-click clip menu — currently just audio→MIDI (Basic Pitch). Cursor-positioned
+// via a portal (so it isn't clipped by the lane's overflow), dismissed on outside
+// pointerdown or Escape. Stops propagation so a click inside doesn't also close it.
+function ClipMenu({ clipId, x, y, exec, onClose }:
+  { clipId: string; x: number; y: number; exec: ExecFn; onClose: () => void }) {
+  useEffect(() => {
+    const onDoc = () => onClose();
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    // Defer registration so the opening contextmenu gesture doesn't immediately close it.
+    const t = window.setTimeout(() => {
+      window.addEventListener("pointerdown", onDoc);
+      window.addEventListener("keydown", onKey);
+    }, 0);
+    return () => {
+      window.clearTimeout(t);
+      window.removeEventListener("pointerdown", onDoc);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [onClose]);
+  const run = (mode: "mono" | "poly") => { void exec("transcribe_clip", { clipId, mode }); onClose(); };
+  return createPortal(
+    <div className="clip-menu" role="menu" data-testid="clip-menu"
+      style={{ left: x, top: y }} onPointerDown={(e) => e.stopPropagation()}>
+      <div className="cm-head">Convert to MIDI</div>
+      <button className="cm-item" role="menuitem" data-testid="cm-mono" onClick={() => run("mono")}>
+        Melody <span className="cm-sub">mono</span>
+      </button>
+      <button className="cm-item" role="menuitem" data-testid="cm-poly" onClick={() => run("poly")}>
+        Polyphonic <span className="cm-sub">chords</span>
+      </button>
+    </div>,
+    document.body,
+  );
+}
+
 function ClipBlock({
   clip, selected, tool, snapTime, secToPx, pxToSec, bs, onSelect, exec,
 }: {
@@ -335,6 +371,9 @@ function ClipBlock({
   const ensurePeaks = useStore((s) => s.ensurePeaks);
   const peaks = useStore((s) => s.peaks[clip.id]);
   const openPianoRoll = useStore((s) => s.openPianoRoll);
+  const transcribing = useStore((s) => !!s.transcribing[clip.id]);
+  // Right-click → Convert to MIDI menu (wave clips only). Cursor-positioned.
+  const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
   useEffect(() => { if (clip.type === "wave") ensurePeaks(clip.id); }, [clip.id, clip.type, ensurePeaks]);
 
   // Optimistic preview during a drag; cleared when committed props arrive.
@@ -394,10 +433,16 @@ function ClipBlock({
       data-testid="clip" data-clip-id={clip.id} data-clip-start={pos.start} data-clip-length={pos.length}
       data-state={selected ? "selected" : "idle"} data-dragging={drag.current ? "true" : "false"}
       data-source-missing={clip.sourceMissing ? "true" : "false"}
+      data-transcribing={transcribing ? "true" : "false"}
       style={{ left, width: widthPx }}
       onPointerDown={beginDrag("move")} onPointerMove={onMove} onPointerUp={onUp}
       onDoubleClick={() => { if (clip.type === "midi") openPianoRoll(clip.id); }}
+      onContextMenu={(e) => { if (clip.type === "wave") { e.preventDefault(); setMenuPos({ x: e.clientX, y: e.clientY }); } }}
     >
+      {menuPos && (
+        <ClipMenu clipId={clip.id} x={menuPos.x} y={menuPos.y} exec={exec} onClose={() => setMenuPos(null)} />
+      )}
+      {transcribing && <div className="clip-badge" data-testid="clip-transcribing">transcribing…</div>}
       <div className="label">
         {clip.name}
         {clip.sourceMissing && (

@@ -610,6 +610,32 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       f.clip.notes.push({ i: f.clip.notes.length, pitch: num(args.pitch, 60), start: num(args.start, 0), length: num(args.length, 0.5), velocity: num(args.velocity, 100) });
       reindexNotes(f.clip); invalidate(); return ok(command);
     }
+    case "transcribe_clip": {
+      // Audio→MIDI (Basic Pitch) — async like the native path: emit working now, then
+      // after a simulated inference land a new time-aligned MIDI track + emit done.
+      const f = findClip(str(args.clipId));
+      if (!f || f.clip.type !== "wave") return err(command, "no wave clip");
+      const mode = str(args.mode, "mono");
+      const src = f.clip;
+      emit("transcribe_status", { clipId: src.id, state: "working", mode });
+      window.setTimeout(() => {
+        pushUndo();
+        const pitches = mode === "poly" ? [60, 64, 67] : [62, 64, 65, 67];
+        const t: Track = {
+          id: nextTrackId(), index: snapshot.tracks.length, name: "MIDI • " + src.name,
+          type: "audio", volumeDb: 0, pan: 0, mute: false, solo: false, clips: [], plugins: [],
+        };
+        t.clips.push({
+          id: nextClipId(), name: "MIDI • " + src.name, type: "midi",
+          start: src.start, length: Math.max(2, src.length), offset: 0, hasRenderLayer: false,
+          notes: pitches.map((pitch, k) => ({ i: k, pitch, start: k * 0.5, length: 0.5, velocity: 100 })),
+        });
+        snapshot.tracks.push(t);
+        emit("transcribe_status", { clipId: src.id, state: "done", noteCount: pitches.length });
+        invalidate();
+      }, 400);
+      return ok(command, { status: "started" });
+    }
     case "remove_note": {
       const f = findClip(str(args.clipId)); if (!f?.clip.notes) return err(command, "not a midi clip");
       pushUndo(); f.clip.notes.splice(num(args.noteIndex), 1); reindexNotes(f.clip); invalidate(); return ok(command);

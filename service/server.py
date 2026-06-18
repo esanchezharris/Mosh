@@ -21,6 +21,7 @@ import itertools
 import json
 import os
 import queue
+import subprocess
 import sys
 import threading
 import time
@@ -50,8 +51,23 @@ from training.trainer_job import train as train_lora  # noqa: E402
 
 SERVICE_VERSION = "0.3.0"
 START_TIME = time.time()
+SERVICE_DIR = os.path.dirname(os.path.abspath(__file__))
 SA3_ENABLED = os.environ.get("MOSH_ENABLE_SA3", "1") == "1" and stable_audio3_adapter.available()
 TRAINING_ENABLED = lora_trainer_adapter.available()
+
+
+def _basic_pitch_py() -> str:
+    """The dedicated transcribe venv's python (set by setup-transcribe.sh via
+    .transcribe.env -> BASIC_PITCH_PY), else the conventional default path."""
+    env = os.environ.get("BASIC_PITCH_PY", "").strip()
+    return env or os.path.join(SERVICE_DIR, "transcribe", ".venv", "bin", "python")
+
+
+def _transcribe_available() -> bool:
+    """True when the Basic Pitch venv exists (checked live so a freshly-run setup
+    works without a service restart). The /transcribe endpoint surfaces any deeper
+    import error from the subprocess itself."""
+    return os.path.isfile(_basic_pitch_py())
 
 
 def _colorrack_hash() -> str:
@@ -395,11 +411,13 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, {"ok": True, "service": "mosh-generative",
                              "version": SERVICE_VERSION, "build": SERVICE_BUILD,
                              "uptime_s": round(time.time() - START_TIME, 1),
-                             "adapters": adapters})
+                             "adapters": adapters, "transcribe": _transcribe_available()})
         elif path == "/capabilities":
             adapters = [FAKE_ADAPTER] + ([_sa3_descriptor()] if SA3_ENABLED else [])
             training = [_training_descriptor()] if TRAINING_ENABLED else []
-            self._send(200, {"ok": True, "adapters": adapters, "training": training, "service_build": SERVICE_BUILD})
+            self._send(200, {"ok": True, "adapters": adapters, "training": training,
+                             "transcribe": {"available": _transcribe_available(), "modes": ["mono", "poly"]},
+                             "service_build": SERVICE_BUILD})
         elif path == "/colors":
             try:
                 from colors import runtime as CR
@@ -501,6 +519,38 @@ class Handler(BaseHTTPRequestHandler):
                 if jid in _jobs:
                     _jobs[jid]["cancel"] = True
             self._send(200, {"ok": True})
+        elif path == "/transcribe":
+            # Audio -> MIDI via Basic Pitch, run as a subprocess under the dedicated
+            # transcribe venv so its deps stay isolated. Synchronous: the server is
+            # threaded (ThreadingHTTPServer), so one transcription doesn't block other
+            # requests, and inference on a short clip is ~1-3s. Returns notes in SECONDS.
+            input_wav = data.get("inputWav", "")
+            mode = data.get("mode", "mono")
+            if mode not in ("mono", "poly"):
+                mode = "mono"
+            if not input_wav or not os.path.exists(input_wav):
+                self._send(400, {"ok": False, "error": "inputWav missing or not found"})
+                return
+            py = _basic_pitch_py()
+            if not os.path.isfile(py):
+                self._send(503, {"ok": False, "error": "transcription_unavailable "
+                                 "(run service/transcribe/setup-transcribe.sh)"})
+                return
+            cli = os.path.join(SERVICE_DIR, "transcribe", "transcribe_cli.py")
+            try:
+                proc = subprocess.run([py, cli, input_wav, mode],
+                                      capture_output=True, text=True, timeout=180)
+            except subprocess.TimeoutExpired:
+                self._send(504, {"ok": False, "error": "transcription timed out"})
+                return
+            out = (proc.stdout or "").strip()
+            try:
+                payload = json.loads(out)
+            except (json.JSONDecodeError, ValueError):
+                tail = (proc.stderr or "").strip()[-400:]
+                self._send(500, {"ok": False, "error": f"transcription failed: {tail or 'no output'}"})
+                return
+            self._send(200 if payload.get("ok") else 500, payload)
         elif path == "/training/submit" or path == "/training/jobs":
             if not TRAINING_ENABLED:
                 self._send(503, {"ok": False, "error": "lora trainer unavailable"})

@@ -420,6 +420,7 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "clear_automation")        return cmdClearAutomation (args);
     if (name == "open_plugin_editor")return cmdOpenPluginEditor (args);
     if (name == "add_midi_clip")     return cmdAddMidiClip (args);
+    if (name == "transcribe_clip")   return cmdTranscribeClip (args);
     if (name == "add_note")          return cmdAddNote (args);
     if (name == "remove_note")       return cmdRemoveNote (args);
     if (name == "set_note")          return cmdSetNote (args);
@@ -2972,6 +2973,107 @@ juce::var MoshOps::cmdAddMidiClip (const juce::var& args)
     logLine ("add_midi_clip", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("add_midi_clip", var (data));
+}
+
+// Audio -> MIDI: transcribe a wave clip with Basic Pitch (out-of-process, via the
+// service /transcribe). ASYNC — inference is ~1-3s, so we run it off the message
+// thread and emit transcribe_status {working|done|error}; on success the result is
+// landed via the existing add_midi_clip mutation path (a new, time-aligned MIDI
+// track). v1 transcribes the whole SOURCE file and places notes from 0 (exact for an
+// untrimmed take; a trimmed/offset clip is a documented refinement).
+juce::var MoshOps::cmdTranscribeClip (const juce::var& args)
+{
+    const auto clipId = args.getProperty ("clipId", var()).toString();
+    auto mode = args.getProperty ("mode", "mono").toString();
+    if (mode != "mono" && mode != "poly") mode = "mono";
+
+    auto* w = dynamic_cast<te::WaveAudioClip*> (findClip (clipId));
+    if (w == nullptr) return errResult ("transcribe_clip", "no wave clip with that id");
+    const auto srcFile = w->getCurrentSourceFile();
+    if (! srcFile.existsAsFile()) return errResult ("transcribe_clip", "clip has no readable source audio");
+
+    const double clipStart = w->getPosition().getStart().inSeconds();
+    const auto srcName = w->getName();
+    auto& edit = eng.edit();
+    auto* tempo = edit.tempoSequence.getNumTempos() > 0 ? edit.tempoSequence.getTempo (0) : nullptr;
+    const double bpm = tempo != nullptr ? tempo->getBpm() : 120.0;
+
+    // Land a transcription result (notes in SECONDS) as a new, time-aligned MIDI track
+    // via the existing add_midi_clip mutation path. ALWAYS runs on the message thread
+    // (inline for wait:true; via callAsync for the async GUI path). Returns the
+    // command result so the synchronous caller (harness / agent) sees the new ids.
+    auto land = [this, clipId, srcName, clipStart, bpm] (bool ok, const juce::String& err, const juce::var& notesVar) -> juce::var
+    {
+        if (! ok || ! notesVar.isArray())
+        {
+            const auto msg = err.isNotEmpty() ? err : juce::String ("transcription unavailable");
+            emit ("transcribe_status", [&] { auto* o = new juce::DynamicObject();
+                o->setProperty ("clipId", clipId); o->setProperty ("state", "error");
+                o->setProperty ("error", msg); return juce::var (o); }());
+            return errResult ("transcribe_clip", msg);
+        }
+        // Convert seconds -> clip-local beats.
+        juce::Array<var> notes;
+        double maxEndS = 0.0;
+        for (auto& n : *notesVar.getArray())
+        {
+            const double s = (double) n.getProperty ("start", 0.0);
+            const double e = (double) n.getProperty ("end", 0.0);
+            auto* note = new juce::DynamicObject();
+            note->setProperty ("pitch", (int) n.getProperty ("pitch", 60));
+            note->setProperty ("start", s * bpm / 60.0);
+            note->setProperty ("length", juce::jmax (0.0625, (e - s) * bpm / 60.0));
+            note->setProperty ("velocity", (int) n.getProperty ("velocity", 100));
+            notes.add (juce::var (note));
+            maxEndS = juce::jmax (maxEndS, e);
+        }
+        auto* a = new juce::DynamicObject();
+        a->setProperty ("name", "MIDI \xe2\x80\xa2 " + srcName);   // "MIDI • <clip>"
+        a->setProperty ("start", clipStart);
+        a->setProperty ("length", juce::jmax (1.0, maxEndS + 0.1));
+        a->setProperty ("notes", juce::var (notes));
+        auto addRes = cmdAddMidiClip (juce::var (a));   // new track + clip + notes; emits snapshot_invalidated
+        auto addData = addRes.getProperty ("data", var());
+
+        emit ("transcribe_status", [&] { auto* o = new juce::DynamicObject();
+            o->setProperty ("clipId", clipId); o->setProperty ("state", "done");
+            o->setProperty ("noteCount", (int) notes.size()); return juce::var (o); }());
+
+        auto* d = new juce::DynamicObject();
+        d->setProperty ("status", "done");
+        d->setProperty ("noteCount", (int) notes.size());
+        d->setProperty ("trackId", addData.getProperty ("trackId", var()));
+        d->setProperty ("midiClipId", addData.getProperty ("clipId", var()));
+        return okResult ("transcribe_clip", juce::var (d));
+    };
+
+    emit ("transcribe_status", [&] { auto* o = new DynamicObject();
+        o->setProperty ("clipId", clipId); o->setProperty ("state", "working");
+        o->setProperty ("mode", mode); return var (o); }());
+    logLine ("transcribe_clip", args, true, {}, false);
+
+    // Synchronous mode (harness / agent): block on the transcription + land inline.
+    if ((bool) args.getProperty ("wait", false))
+    {
+        auto result = jobManager.transcribe (srcFile, mode);
+        return land ((bool) result.getProperty ("ok", false),
+                     result.getProperty ("error", var()).toString(),
+                     result.getProperty ("notes", var()));
+    }
+
+    // Async (GUI): inference off the message thread; land via callAsync.
+    std::thread ([this, srcFile, mode, land]
+    {
+        auto result = jobManager.transcribe (srcFile, mode);
+        const bool ok = (bool) result.getProperty ("ok", false);
+        const auto err = result.getProperty ("error", var()).toString();
+        auto notesVar = result.getProperty ("notes", var());
+        juce::MessageManager::callAsync ([land, ok, err, notesVar] { land (ok, err, notesVar); });
+    }).detach();
+
+    auto* data = new DynamicObject();
+    data->setProperty ("status", "started");
+    return okResult ("transcribe_clip", var (data));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

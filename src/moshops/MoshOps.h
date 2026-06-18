@@ -137,6 +137,7 @@ private:
     juce::var cmdClearAutomation        (const juce::var& args);
     juce::var cmdOpenPluginEditor (const juce::var& args);
     juce::var cmdAddMidiClip    (const juce::var& args);
+    juce::var cmdTranscribeClip (const juce::var& args);  // audio->MIDI (Basic Pitch)
     juce::var cmdAddNote        (const juce::var& args);
     juce::var cmdRemoveNote     (const juce::var& args);
     juce::var cmdSetNote        (const juce::var& args);
