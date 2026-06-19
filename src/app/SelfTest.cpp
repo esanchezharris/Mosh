@@ -3584,6 +3584,59 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                "applied track survives the undo (apply is outside the undo system)");
     }
 
+    section ("Multiplayer: lock guard at the mutation path (MP-001 P3)");
+    {
+        // The guard sits at the single chokepoint MoshOps::execute(). When a session
+        // is active, mutations to a track/clip/structure held by the OTHER peer are
+        // rejected; reads always pass; deactivating restores single-player edits.
+        cmd (ops, "create_track", args1 ("name", "Lock A"));
+        cmd (ops, "create_track", args1 ("name", "Lock B"));
+        juce::String aId, aLid, bId;
+        {
+            auto snap = ops.snapshot();
+            if (auto* arr = snap["tracks"].getArray())
+                for (auto& tv : *arr)
+                {
+                    const auto nm = tv.getProperty ("name", juce::var()).toString();
+                    if (nm == "Lock A") { aId = tv.getProperty ("id", juce::var()).toString();
+                                          aLid = tv.getProperty ("logicalId", juce::var()).toString(); }
+                    if (nm == "Lock B") { bId = tv.getProperty ("id", juce::var()).toString(); }
+                }
+        }
+        check (aLid.isNotEmpty() && bId.isNotEmpty(), "lock-test tracks resolved (logicalId + engine ids)");
+
+        // A clip on Lock A, added BEFORE locking, to exercise clip-scoped guarding.
+        auto addc = cmd (ops, "add_test_tone_clip", objN ({ { "trackId", aId }, { "seconds", 1.0 } }));
+        const auto aClipId = addc.getProperty ("data", juce::var()).getProperty ("clipId", juce::var()).toString();
+
+        // Activate: the OTHER peer holds Lock A AND the session (structural) lock.
+        auto* locks = new juce::DynamicObject();
+        locks->setProperty (aLid, "other");
+        locks->setProperty (LockManager::sessionKey(), "other");
+        check (ok (cmd (ops, "mp_sync_locks",
+                        objN ({ { "active", true }, { "selfPeer", "me" }, { "locks", juce::var (locks) } }))),
+               "mp_sync_locks activates the guard with peer-held locks");
+
+        check (! ok (cmd (ops, "rename_track", objN ({ { "trackId", aId }, { "name", "HAX" } }))),
+               "track mutation on a peer-locked track is BLOCKED");
+        check (ok (cmd (ops, "list_plugins")), "reads pass the guard");
+        check (ok (cmd (ops, "get_clip_peaks", args1 ("clipId", aClipId))),
+               "a clip read on a peer-locked track is allowed");
+        check (ok (cmd (ops, "rename_track", objN ({ { "trackId", bId }, { "name", "Lock B2" } }))),
+               "track mutation on a FREE track is allowed");
+        if (aClipId.isNotEmpty())
+            check (! ok (cmd (ops, "set_clip_gain", objN ({ { "clipId", aClipId }, { "gain", 0.5 } }))),
+                   "clip mutation on a peer-locked track's clip is BLOCKED (clip->track->logicalId)");
+        check (! ok (cmd (ops, "create_track", args1 ("name", "Nope"))),
+               "session-global op BLOCKED while the session lock is peer-held");
+
+        check (ok (cmd (ops, "mp_sync_locks", objN ({ { "active", false } }))), "mp_sync_locks deactivates");
+        check (ok (cmd (ops, "rename_track", objN ({ { "trackId", aId }, { "name", "Free Again" } }))),
+               "deactivating restores unguarded single-player track edits");
+        check (ok (cmd (ops, "create_track", args1 ("name", "Free Track"))),
+               "structural ops unblocked after deactivate (single-player regression safety)");
+    }
+
     // P2 — native↔relay transport, end to end over real HTTP. Gated (spawns a
     // relay + needs MOSH_RELAY_URL) so it stays OUT of the deterministic core run.
     if (std::getenv ("MOSH_SELFTEST_MP") != nullptr)

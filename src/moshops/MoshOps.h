@@ -10,6 +10,7 @@
 #include "plugins/spectral/MasterSpectralTapPlugin.h"
 #include "generative/GenerativeJobManager.h"
 #include "training/TrainerRegistry.h"
+#include "multiplayer/LockManager.h"
 #include "training/TrainingJobManager.h"
 
 namespace mosh
@@ -37,6 +38,10 @@ public:
     using EventSink = std::function<void (const juce::var& event)>;
     void setEventSink (EventSink s) { eventSink = std::move (s); }
 
+    /** MP-001 — the multiplayer lock guard's state (mirrors the relay lock table).
+        The live poll path keeps this in sync; the guard in execute() reads it. */
+    LockManager& lockManager() { return lockManager_; }
+
     /** The single entry point — bound to the WebView's execute_command. */
     juce::var execute (const juce::var& command);
 
@@ -55,9 +60,14 @@ private:
     juce::var cmdRemoveTrack    (const juce::var& args);
     // MP-001 — 2-player multiplayer commit/apply (backend-only; not in the agent
     // catalog). mp_serialize_track captures a track's portable blob; apply_remote_
-    // track rebuilds a peer's committed track (nullptr UndoManager, no relay echo).
+    // track rebuilds a peer's committed track (nullptr UndoManager, no relay echo);
+    // mp_sync_locks mirrors the relay lock table into the guard.
     juce::var cmdMpSerializeTrack (const juce::var& args);
     juce::var cmdApplyRemoteTrack (const juce::var& args);
+    juce::var cmdMpSyncLocks      (const juce::var& args);
+    // Resolve the lock key (the affected track's logicalId, or the session key) for
+    // a guarded command, given its scope + args. Engine-coupled (findTrack/findClip).
+    juce::String lockKeyFor (LockManager::Scope scope, const juce::var& args);
     juce::var cmdImportClip     (const juce::var& args);
     juce::var cmdImportClipData (const juce::var& args);
     juce::var cmdAddTestTone    (const juce::var& args);
@@ -364,6 +374,7 @@ private:
     TrainerRegistry      trainerRegistry;
     TrainingJobManager   trainingJobManager;
     EventSink   eventSink;
+    LockManager lockManager_;          // MP-001 — multiplayer lock guard state
     juce::int64 seq = 0;
     juce::File  logFile;
     bool        wasPlaying = false;

@@ -370,6 +370,21 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name.isEmpty())
         return errResult (name, "missing 'command'");
 
+    // MP-001 lock guard — the single chokepoint. When a multiplayer session is
+    // active, reject any mutation to a track / clip / structure currently locked by
+    // the OTHER peer (fail-closed: unclassified commands need the session lock).
+    // No session => no-op, so single-player behaviour is unchanged.
+    if (lockManager_.isActive())
+    {
+        const auto scope = LockManager::classify (name);
+        if (scope != LockManager::Scope::Unguarded)
+        {
+            const auto decision = lockManager_.decide (scope, lockKeyFor (scope, args));
+            if (! decision.allow)
+                return errResult (name, "blocked: " + decision.reason);
+        }
+    }
+
     if (name == "create_track")      return cmdCreateTrack (args);
     if (name == "rename_track")      return cmdRenameTrack (args);
     if (name == "remove_track")      return cmdRemoveTrack (args);
@@ -484,6 +499,7 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "create_group_track") return cmdCreateGroupTrack (args);
     if (name == "mp_serialize_track") return cmdMpSerializeTrack (args);
     if (name == "apply_remote_track") return cmdApplyRemoteTrack (args);
+    if (name == "mp_sync_locks")      return cmdMpSyncLocks (args);
     if (name == "ungroup_track")      return cmdUngroupTrack (args);
     if (name == "list_wave_inputs")   return cmdListWaveInputs (args);
     if (name == "set_track_input")    return cmdSetTrackInput (args);
@@ -1212,6 +1228,56 @@ juce::var MoshOps::cmdApplyRemoteTrack (const juce::var& args)
     o->setProperty ("logicalId", res.logicalId);
     o->setProperty ("mode", res.created ? "created" : "replaced");
     return okResult ("apply_remote_track", var (o));
+}
+
+juce::String MoshOps::lockKeyFor (LockManager::Scope scope, const juce::var& args)
+{
+    using Scope = LockManager::Scope;
+    if (scope == Scope::SessionGlobal)
+        return LockManager::sessionKey();
+
+    if (scope == Scope::Track)
+    {
+        if (auto* t = findTrack (args.getProperty ("trackId", var()).toString()))
+            return logicalid::track (t->state);
+        return {};   // unresolvable target -> empty key allows; the command itself will error
+    }
+
+    if (scope == Scope::Clip)
+    {
+        if (auto* c = findClip (args.getProperty ("clipId", var()).toString()))
+            if (auto* tr = c->getTrack())
+                return logicalid::track (tr->state);
+        return {};
+    }
+
+    return {};
+}
+
+juce::var MoshOps::cmdMpSyncLocks (const juce::var& args)
+{
+    // MP-001 — mirror the relay's session/lock state into the local guard. Driven
+    // by the live poll path; backend-only (Unguarded). active:false => single-player.
+    if (! (bool) args.getProperty ("active", false))
+    {
+        lockManager_.deactivate();
+        auto* o = new DynamicObject();
+        o->setProperty ("active", false);
+        return okResult ("mp_sync_locks", var (o));
+    }
+
+    lockManager_.activate (args.getProperty ("selfPeer", var()).toString());
+
+    std::map<juce::String, juce::String> locks;
+    if (auto* lo = args.getProperty ("locks", var()).getDynamicObject())
+        for (auto& kv : lo->getProperties())
+            locks[kv.name.toString()] = kv.value.toString();
+    lockManager_.setLocks (std::move (locks));
+
+    auto* o = new DynamicObject();
+    o->setProperty ("active", true);
+    o->setProperty ("selfPeer", lockManager_.selfPeer());
+    return okResult ("mp_sync_locks", var (o));
 }
 
 juce::var MoshOps::cmdUngroupTrack (const juce::var& args)
