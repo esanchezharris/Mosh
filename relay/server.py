@@ -28,7 +28,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
-from room import RoomRegistry, RoomError, RoomFull, UnknownPeer
+from room import RoomRegistry, RoomError, RoomFull, UnknownPeer, StaleCommit
 
 DEFAULT_PORT = 8771
 
@@ -64,7 +64,28 @@ class RelayState:
             room = self._reg.get(code)
             if room is None:
                 raise RoomError(f"no such room: {code}")
+            # Epoch fencing: a track commit must come from the lock's current owner
+            # carrying a non-stale epoch (a zombie holder whose lock was stolen is
+            # rejected so it cannot clobber the new owner's track).
+            if isinstance(msg, dict) and msg.get("type") == "commit":
+                key = msg.get("logicalId")
+                if key and not room.commit_allowed(peer_id, key, msg.get("epoch", 0)):
+                    raise StaleCommit(f"commit for {key} fenced (stale epoch / not owner)")
             return room.publish(peer_id, msg)["seq"]
+
+    def lock(self, code, peer_id, key, steal=False):
+        with self._lock:
+            room = self._reg.get(code)
+            if room is None:
+                raise RoomError(f"no such room: {code}")
+            return room.try_lock(peer_id, key, steal=steal)
+
+    def unlock(self, code, peer_id, key):
+        with self._lock:
+            room = self._reg.get(code)
+            if room is None:
+                raise RoomError(f"no such room: {code}")
+            return room.release_lock(peer_id, key)
 
     def events(self, code, peer_id, since):
         with self._lock:
@@ -75,6 +96,8 @@ class RelayState:
                 "frames": room.events_for(peer_id, since),
                 "latest": room.latest_seq(),
                 "resync": room.needs_resync(since),
+                "locks": room.locks(),
+                "peers": room.peers(),
             }
 
     def leave(self, code, peer_id):
@@ -142,9 +165,17 @@ def make_handler(state: RelayState):
                 if u.path == "/mp/publish":
                     seq = state.publish(b["code"], b["peerId"], b.get("msg", {}))
                     return self._send(200, {"seq": seq})
+                if u.path == "/mp/lock":
+                    res = state.lock(b["code"], b["peerId"], b["key"], bool(b.get("steal", False)))
+                    return self._send(200, res)
+                if u.path == "/mp/unlock":
+                    released = state.unlock(b["code"], b["peerId"], b["key"])
+                    return self._send(200, {"released": released})
                 if u.path == "/mp/leave":
                     state.leave(b["code"], b["peerId"])
                     return self._send(200, {"ok": True})
+            except StaleCommit as e:
+                return self._send(409, {"error": str(e), "stale": True})
             except RoomFull as e:
                 return self._send(409, {"error": str(e)})
             except (UnknownPeer, RoomError) as e:

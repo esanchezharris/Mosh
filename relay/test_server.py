@@ -98,6 +98,67 @@ def test_publish_by_non_member(relay):
     assert status == 404
 
 
+def test_lock_grant_deny_steal_over_http(relay):
+    _, b = _post(relay, "/mp/create", {"peerId": "a"})
+    code = b["code"]
+    _post(relay, "/mp/join", {"code": code, "peerId": "b"})
+
+    status, res = _post(relay, "/mp/lock", {"code": code, "peerId": "a", "key": "track-1"})
+    assert status == 200 and res["granted"] is True and res["epoch"] >= 1
+
+    status, res = _post(relay, "/mp/lock", {"code": code, "peerId": "b", "key": "track-1"})
+    assert status == 200 and res["granted"] is False and res["owner"] == "a"
+
+    status, res = _post(relay, "/mp/lock", {"code": code, "peerId": "b", "key": "track-1", "steal": True})
+    assert status == 200 and res["granted"] is True and res["owner"] == "b"
+
+
+def test_events_carry_lock_state(relay):
+    _, b = _post(relay, "/mp/create", {"peerId": "a"})
+    code = b["code"]
+    _post(relay, "/mp/join", {"code": code, "peerId": "b"})
+    _post(relay, "/mp/lock", {"code": code, "peerId": "a", "key": "track-1"})
+
+    _, ev = _get(relay, f"/mp/events?code={code}&peerId=b&since=0")
+    assert ev["locks"]["track-1"]["owner"] == "a"
+
+
+def test_unlock_frees(relay):
+    _, b = _post(relay, "/mp/create", {"peerId": "a"})
+    code = b["code"]
+    _post(relay, "/mp/lock", {"code": code, "peerId": "a", "key": "track-1"})
+    status, res = _post(relay, "/mp/unlock", {"code": code, "peerId": "a", "key": "track-1"})
+    assert status == 200 and res["released"] is True
+    _, ev = _get(relay, f"/mp/events?code={code}&peerId=a&since=0")
+    assert "track-1" not in ev["locks"]
+
+
+def test_commit_epoch_fencing_over_http(relay):
+    _, b = _post(relay, "/mp/create", {"peerId": "a"})
+    code = b["code"]
+    _post(relay, "/mp/join", {"code": code, "peerId": "b"})
+
+    _, lk = _post(relay, "/mp/lock", {"code": code, "peerId": "a", "key": "T1"})
+    held_epoch = lk["epoch"]
+
+    # b steals -> a is now stale.
+    _post(relay, "/mp/lock", {"code": code, "peerId": "b", "key": "T1", "steal": True})
+
+    # a's in-flight commit with the stale epoch is fenced (409).
+    status, res = _post(relay, "/mp/publish", {
+        "code": code, "peerId": "a",
+        "msg": {"type": "commit", "logicalId": "T1", "epoch": held_epoch, "blob": "x"}})
+    assert status == 409
+
+    # b's commit with the current epoch goes through.
+    _, ev = _get(relay, f"/mp/events?code={code}&peerId=b&since=0")  # learn current epoch
+    cur = ev["locks"]["T1"]["epoch"]
+    status, res = _post(relay, "/mp/publish", {
+        "code": code, "peerId": "b",
+        "msg": {"type": "commit", "logicalId": "T1", "epoch": cur, "blob": "y"}})
+    assert status == 200 and res["seq"] >= 1
+
+
 def test_leave_drops_empty_room(relay):
     _, b = _post(relay, "/mp/create", {"peerId": "a"})
     code = b["code"]

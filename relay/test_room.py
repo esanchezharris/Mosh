@@ -137,3 +137,85 @@ def test_registry_drop_removes_room():
     reg.drop("WXYZ")
     assert "WXYZ" not in reg.codes()
     assert reg.get("WXYZ") is None
+
+
+# ── Lock table (the relay is the sole arbiter) ──────────────────────────────
+
+def _two_peer_room():
+    r = Room("ABCD")
+    r.join("a")
+    r.join("b")
+    return r
+
+
+def test_lock_free_key_is_granted_with_epoch():
+    r = _two_peer_room()
+    res = r.try_lock("a", "track-1")
+    assert res["granted"] is True
+    assert res["owner"] == "a"
+    assert res["epoch"] >= 1
+    assert r.locks()["track-1"]["owner"] == "a"
+
+
+def test_lock_contended_key_is_denied_with_current_owner():
+    r = _two_peer_room()
+    r.try_lock("a", "track-1")
+    res = r.try_lock("b", "track-1")
+    assert res["granted"] is False
+    assert res["owner"] == "a"  # loser is told who holds it
+
+
+def test_relock_by_same_owner_is_idempotent():
+    r = _two_peer_room()
+    first = r.try_lock("a", "track-1")
+    again = r.try_lock("a", "track-1")
+    assert again["granted"] is True
+    assert again["epoch"] == first["epoch"]  # no churn for the same holder
+
+
+def test_steal_bumps_epoch_and_transfers_ownership():
+    r = _two_peer_room()
+    held = r.try_lock("a", "track-1")
+    stolen = r.try_lock("b", "track-1", steal=True)
+    assert stolen["granted"] is True
+    assert stolen["owner"] == "b"
+    assert stolen["epoch"] > held["epoch"]
+
+
+def test_release_by_owner_frees_only_for_owner():
+    r = _two_peer_room()
+    r.try_lock("a", "track-1")
+    assert r.release_lock("b", "track-1") is False  # non-owner cannot release
+    assert "track-1" in r.locks()
+    assert r.release_lock("a", "track-1") is True
+    assert "track-1" not in r.locks()
+
+
+def test_leave_auto_releases_a_peers_locks():
+    r = _two_peer_room()
+    r.try_lock("a", "track-1")
+    r.try_lock("a", "track-2")
+    r.try_lock("b", "track-3")
+    r.leave("a")
+    assert set(r.locks().keys()) == {"track-3"}  # a's locks gone, b's kept
+
+
+def test_lock_by_non_member_is_rejected():
+    r = _two_peer_room()
+    with pytest.raises(UnknownPeer):
+        r.try_lock("ghost", "track-1")
+
+
+def test_commit_epoch_fencing():
+    r = _two_peer_room()
+    held = r.try_lock("a", "track-1")
+    # The holder with a current epoch may commit.
+    assert r.commit_allowed("a", "track-1", held["epoch"]) is True
+    # b steals -> a is now a zombie holder whose in-flight commit is fenced out.
+    stolen = r.try_lock("b", "track-1", steal=True)
+    assert r.commit_allowed("a", "track-1", held["epoch"]) is False   # stale epoch
+    assert r.commit_allowed("b", "track-1", stolen["epoch"]) is True
+    # A non-member / non-owner cannot commit a locked key.
+    assert r.commit_allowed("a", "track-1", stolen["epoch"]) is False  # wrong owner
+    # An unlocked key (e.g. uncontended structural op) is allowed.
+    assert r.commit_allowed("a", "free-key", 0) is True

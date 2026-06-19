@@ -27,6 +27,11 @@ class UnknownPeer(RoomError):
     pass
 
 
+class StaleCommit(RoomError):
+    """A commit fenced out by epoch (its lock was stolen) — the caller must drop it."""
+    pass
+
+
 class Room:
     """One collaboration session. Holds <=2 peers, a monotonic seq, and a bounded
     ring of the most-recent frames for reconnect/late-join catch-up."""
@@ -38,6 +43,8 @@ class Room:
         self._peers = {}                       # peer_id -> {"name", "color"}
         self._seq = 0                          # monotonic, per-room
         self._ring = deque(maxlen=ring_capacity)  # frames, oldest -> newest
+        self._locks = {}                       # key -> {"owner", "epoch"}
+        self._lock_epoch = 0                   # monotonic per-room fencing token
 
     # ── membership ──────────────────────────────────────────────────────────
     def peer_count(self):
@@ -58,6 +65,53 @@ class Room:
 
     def leave(self, peer_id):
         self._peers.pop(peer_id, None)
+        self.release_all_for(peer_id)   # a disconnecting peer must not hold locks
+
+    # ── locks (the relay is the sole arbiter) ───────────────────────────────
+    def try_lock(self, peer_id, key, steal=False):
+        """Acquire `key` for `peer_id`. Granted if the key is free, already held by
+        this peer (idempotent), or `steal=True`. A grant mints a fresh monotonic
+        epoch (the fencing token); a re-acquire by the same owner keeps the epoch."""
+        if peer_id not in self._peers:
+            raise UnknownPeer(f"{peer_id} is not a member of room {self.code}")
+        cur = self._locks.get(key)
+        if cur is not None and cur["owner"] == peer_id:
+            return {"granted": True, "key": key, "owner": peer_id, "epoch": cur["epoch"]}
+        if cur is None or steal:
+            self._lock_epoch += 1
+            self._locks[key] = {"owner": peer_id, "epoch": self._lock_epoch}
+            res = {"granted": True, "key": key, "owner": peer_id, "epoch": self._lock_epoch}
+            if cur is not None:
+                res["stolen"] = True
+            return res
+        return {"granted": False, "key": key, "owner": cur["owner"], "epoch": cur["epoch"]}
+
+    def release_lock(self, peer_id, key):
+        cur = self._locks.get(key)
+        if cur is not None and cur["owner"] == peer_id:
+            del self._locks[key]
+            return True
+        return False
+
+    def release_all_for(self, peer_id):
+        for k in [k for k, v in self._locks.items() if v["owner"] == peer_id]:
+            del self._locks[k]
+
+    def locks(self):
+        return {k: dict(v) for k, v in self._locks.items()}
+
+    def lock_epoch(self, key):
+        cur = self._locks.get(key)
+        return cur["epoch"] if cur is not None else 0
+
+    def commit_allowed(self, peer_id, key, epoch):
+        """Epoch fencing: a commit for a LOCKED key is allowed only from its current
+        owner carrying an epoch >= the lock's epoch (a zombie holder whose lock was
+        stolen is fenced out). An unlocked key (uncontended/structural) is allowed."""
+        cur = self._locks.get(key)
+        if cur is None:
+            return True
+        return cur["owner"] == peer_id and epoch >= cur["epoch"]
 
     # ── frames / sequence / catch-up ────────────────────────────────────────
     def publish(self, sender_id, msg):
