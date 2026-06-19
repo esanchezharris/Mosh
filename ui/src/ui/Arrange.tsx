@@ -183,34 +183,9 @@ export function Arrange({ snapshot }: { snapshot: Snapshot }) {
     if (r && r.end - r.start < 1e-6) setTimeRange(null);
   };
 
-  // ── keyboard: Delete / Space / undo-redo (ignored while typing) ────────────
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const el = e.target as HTMLElement;
-      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable)) return;
-      const mod = e.metaKey || e.ctrlKey;
-      if (mod && e.key.toLowerCase() === "z") {
-        e.preventDefault();
-        void exec(e.shiftKey ? "redo" : "undo");
-      } else if (e.key === "Delete" || e.key === "Backspace") {
-        // While a clip editor modal is open (piano roll / automation), Delete belongs
-        // to that editor (delete selected NOTES/points) — not to the arrangement. Bail
-        // so we never silently remove the clip the user is editing.
-        const st = useStore.getState();
-        if (st.editingClipId || st.automationTrackId) return;
-        const sel = st.selection;
-        if (sel.size === 0) return;
-        e.preventDefault();
-        for (const id of sel) void exec("remove_clip", { clipId: id });
-        clearSelection();
-      } else if (e.code === "Space") {
-        e.preventDefault();
-        void exec("set_transport", { action: "toggle" });
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [exec, clearSelection]);
+  // Keyboard shortcuts (Delete / Space / undo-redo / clipboard / File ops) live in
+  // the single global layer — useKeyboardShortcuts (mounted from App). No window
+  // 'keydown' listener here, so accelerators can't double-fire (CTL-002).
 
   return (
     <div className="timeline" data-testid="arrangement" data-grid="single" data-tool={tool} data-px-per-sec={pxPerSec}>

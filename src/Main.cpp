@@ -1,6 +1,7 @@
 #include <juce_gui_extra/juce_gui_extra.h>
 #include <tracktion_engine/tracktion_engine.h>
 #include "app/MainWindow.h"
+#include "app/MenuController.h"
 #include "app/SelfTest.h"
 #include "engine/MoshEngine.h"
 #include "moshops/MoshOps.h"
@@ -203,11 +204,31 @@ public:
         bridge.setRemoteStartHandler ([this] (const juce::var& args) { return remoteServer->startPairing (args); });
         bridge.setRemoteStopHandler  ([this] (const juce::var&) { return remoteServer->stopServer(); });
         bridge.setRemoteStatusProvider ([this] { return remoteServer->status(); });
+
+        // Native macOS menu bar (File + Edit). It only forwards intents to the WebView
+        // over the bridge event channel — the UI's runAction dispatcher turns each into
+        // the matching MoshOps command (one definition of every command). The Recent
+        // submenu reads the live session snapshot. (GUI only — never in headless runs.)
+        auto* bridgePtr = &bridge;
+        menuController = std::make_unique<MenuController> (
+            [bridgePtr] (const juce::var& action) { bridgePtr->emitEvent (juce::Identifier ("mosh_menu"), action); },
+            [this]() -> juce::var
+            {
+                return moshOps != nullptr
+                     ? moshOps->snapshot().getProperty ("session", juce::var()).getProperty ("recentProjects", juce::var())
+                     : juce::var();
+            });
+
         moshOps->setEventSink ([&bridge, this] (const juce::var& e)
                                {
                                    bridge.emitEvent (juce::Identifier ("mosh_event"), e);
                                    if (remoteServer != nullptr)
                                        remoteServer->pushEvent (e);
+                                   // Keep the File ▸ Open Recent submenu fresh after any
+                                   // structural change (open/save-as/new updates the list).
+                                   if (menuController != nullptr
+                                       && e.getProperty ("type", {}).toString() == "snapshot_invalidated")
+                                       menuController->refresh();
                                });
         mainWindow->shell().load();
 
@@ -237,6 +258,7 @@ public:
         // headless harnesses have no mainWindow and manage their own isolated session).
         if (engine != nullptr && mainWindow != nullptr)
             engine->saveIfDirty();
+        menuController.reset();   // tears down the macOS main menu before the window
         mainWindow.reset();
         remoteServer.reset();
         moshOps.reset();
@@ -258,6 +280,7 @@ private:
     std::unique_ptr<MoshOps>    moshOps;
     std::unique_ptr<RemoteCompanionServer> remoteServer;
     std::unique_ptr<MainWindow> mainWindow;
+    std::unique_ptr<MenuController> menuController;
     AutoSaveTimer autoSave;
 };
 

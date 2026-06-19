@@ -4,10 +4,11 @@
 // resolve paths). In Vite dev the mock drives Settings/Export/Log; the iPhone
 // companion is real-backend only (the mock reports it unavailable).
 
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import * as QRCode from "qrcode";
 import { useStore } from "../store";
 import { pickFiles, pickSaveFile } from "../bridge";
+import { runAction, FILE_MENU, type ActionId } from "../menuActions";
 import type { Snapshot, ExportFormat, CommandLog as CommandLogData, TrainingState } from "../types";
 import { SampleBrowser } from "./SampleBrowser";
 
@@ -36,6 +37,7 @@ export function TopbarTools({ snapshot }: { snapshot: Snapshot }) {
   const audioEnabled = snapshot.session.audioEnabled ?? true;
   return (
     <div className="topbar-tools">
+      <FileMenu snapshot={snapshot} />
       <Pop label="🗀" title="Browse audio samples">{() => <SampleBrowser />}</Pop>
       <SettingsTool snapshot={snapshot} />
       <ExportTool audioEnabled={audioEnabled} />
@@ -45,6 +47,50 @@ export function TopbarTools({ snapshot }: { snapshot: Snapshot }) {
       <HelpTool />
       <button className="btn icon" title="Toggle theme" aria-label="Toggle light/dark theme" onClick={toggleTheme}>{theme === "dark" ? "☾" : "☀"}</button>
     </div>
+  );
+}
+
+// The WebView File menu — mirrors the native macOS File menu for users who live in
+// the WebView. Every item runs through the SAME runAction dispatcher the keyboard
+// layer and the native menu use, so there is one definition of each command. The
+// scattered New/Save/Save As/Open buttons that used to live in Settings are folded
+// in here (with Open Recent from session.recentProjects).
+function FileMenu({ snapshot }: { snapshot: Snapshot }) {
+  const s = snapshot.session;
+  const recents = (s.recentProjects ?? []).slice(0, 8);
+  const run = (id: ActionId, opts?: { file?: string }) =>
+    void runAction(id, { store: useStore.getState(), pickFiles, pickSaveFile }, opts);
+  return (
+    <Pop label="File" title="File menu" className="menu-pop">
+      {(close) => (
+        <div className="menu-list" role="menu" data-testid="file-menu">
+          {FILE_MENU.map((m) => (
+            <Fragment key={m.id}>
+              <button className="menu-item" role="menuitem" data-action={m.id}
+                      onClick={() => { run(m.id); close(); }}>
+                <span className="menu-label">{m.label}</span>
+                <span className="menu-accel tc">{m.accel}</span>
+              </button>
+              {m.id === "open_project" && (
+                <div className="menu-sub" data-testid="recent-projects">
+                  <div className="menu-sub-head">Open Recent</div>
+                  {recents.length === 0
+                    ? <div className="rack-empty">no recent projects</div>
+                    : recents.map((p) => (
+                        <button key={p.path} className="menu-item sub" role="menuitem" title={p.path}
+                                disabled={p.path === s.editFile}
+                                onClick={() => { run("open_project", { file: p.path }); close(); }}>
+                          <span className="menu-label">{p.path === s.editFile ? "● " : ""}{p.name}</span>
+                        </button>
+                      ))}
+                </div>
+              )}
+            </Fragment>
+          ))}
+          {s.dirty ? <div className="menu-foot pop-note">• unsaved changes (auto-saved)</div> : null}
+        </div>
+      )}
+    </Pop>
   );
 }
 
@@ -233,14 +279,18 @@ function TrainingTool({ training }: { training: TrainingState | null }) {
   );
 }
 
-// Keyboard-shortcut help — the bindings live in Arrange's keydown handler + the
-// ruler/clip pointer handlers; surfaced here so they're discoverable.
+// Keyboard-shortcut help — the keyboard bindings now live in ONE place (the keymap
+// + useKeyboardShortcuts); the ruler/clip pointer gestures live in Arrange. Surfaced
+// here so they're discoverable (and mirrored by the File/Edit menus).
 function HelpTool() {
   const SHORTCUTS: [string, string][] = [
+    ["⌘N · ⌘O", "New · Open project"],
+    ["⌘S · ⇧⌘S", "Save · Save As"],
+    ["⌘E", "Export audio"],
+    ["⌘Z · ⇧⌘Z", "Undo · Redo"],
+    ["⌘X · ⌘C · ⌘V", "Cut · Copy · Paste clip"],
     ["Space", "Play / pause"],
     ["Delete  ⌫", "Remove selected clip"],
-    ["⌘/Ctrl + Z", "Undo"],
-    ["⌘/Ctrl + ⇧ + Z", "Redo"],
     ["Drag clip", "Move · drag an edge to trim"],
     ["Click ruler", "Seek · ⇧-drag sets the loop"],
   ];
@@ -296,28 +346,6 @@ function SettingsTool({ snapshot }: { snapshot: Snapshot }) {
                 <button className="btn" disabled={uiScale >= 1.4} onClick={() => setUiScale(Math.round((uiScale + 0.1) * 10) / 10)}>+</button>
               </span>
             </div>
-          </div>
-          <div className="pop-group">
-            <div className="pop-label">Project{s.dirty ? <span className="pop-note" title="Unsaved changes (auto-saved)"> • unsaved</span> : null}</div>
-            <div className="pop-actions">
-              <button className="btn" onClick={() => void exec("new_project", {}).then(() => refresh())}>New</button>
-              <button className="btn" onClick={() => void exec("save", {})}>Save</button>
-              <button className="btn" onClick={async () => { const r = await pickSaveFile({ title: "Save project as" }); if (r.ok && r.file) void exec("save_as", { file: r.file }).then(() => refresh()); }}>Save As…</button>
-              <button className="btn" onClick={async () => { const r = await pickFiles({ title: "Open project" }); if (r.ok && r.files[0]) void exec("open_project", { file: r.files[0] }).then(() => refresh()); }}>Open…</button>
-            </div>
-            {(s.recentProjects?.length ?? 0) > 0 && (
-              <>
-                <div className="pop-label">Recent</div>
-                <div className="modal-list" data-testid="recent-projects" style={{ maxHeight: 160 }}>
-                  {s.recentProjects!.slice(0, 8).map((p) => (
-                    <button key={p.path} className="plugin-row" title={p.path} disabled={p.path === s.editFile}
-                            onClick={() => void exec("open_project", { file: p.path }).then(() => refresh())}>
-                      <span className="pr-name">{p.path === s.editFile ? "● " : ""}{p.name}</span>
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
           </div>
         </>
       )}

@@ -30,6 +30,11 @@ const realNative = (): boolean =>
  *  In a production `vite build` MOCK_ENABLED is false, so this is real-native only. */
 export const isNative = (): boolean => realNative() || MOCK_ENABLED;
 
+/** True ONLY in the packaged app, where a real macOS menu bar owns its accelerators.
+ *  The keyboard layer yields native-menu-owned shortcuts here (so they fire once, via
+ *  the menu) but keeps handling everything in Vite dev (no native menu). */
+export const nativeMenuPresent = (): boolean => realNative();
+
 // Lazily-bound native functions (created once the backend has registered them).
 const nativeCache = new Map<string, (...a: unknown[]) => Promise<unknown>>();
 function native(name: string) {

@@ -1,125 +1,56 @@
 import { useEffect } from "react";
 import { useStore } from "../store";
+import { pickFiles, pickSaveFile, nativeMenuPresent, onEvent } from "../bridge";
+import { matchShortcut } from "../keymap";
+import { runAction, type ActionCtx, type ActionId } from "../menuActions";
 
-// Global keyboard-shortcut layer (CTL-002). Mounted once from App via a window
-// 'keydown' listener. Every binding routes through the existing command surface
-// (exec) or the UI-local clipboard/tool actions — no new mutation path. This is the
-// SINGLE global key handler in the app: Delete/clip handling was consolidated here
-// from Arrangement.tsx, so add new bindings here (not a second window listener).
+// THE single keyboard-shortcut layer (CTL-002). Mounted once from App. Both the
+// keydown handler and the native-menu bridge route through the SAME data-driven
+// keymap + runAction dispatcher, so there is exactly ONE place that defines what a
+// shortcut does. (This replaces the old inline keydown handler that lived in
+// Arrange.tsx — there is no second window 'keydown' listener.)
 //
-// Shortcut map (Mod = Cmd on macOS / Ctrl elsewhere):
-//   Space            play/stop toggle
-//   R                record
-//   Mod+Z            undo            Mod+Shift+Z   redo
-//   Mod+S            save
-//   Delete/Backspace remove selected clip(s)
-//   Mod+C/X/V        copy / cut / paste clip
-//   Mod+D            duplicate selected clip(s)
-//   Mod+G            group the selected clips' tracks (submix)
-//   Home / End       transport to start / end
-//   1 / 2            move tool / split tool (pure-view)
+// Double-fire: in the packaged app a real NSMenu owns the File/Edit accelerators.
+// Native-menu-owned chords are YIELDED here (return without preventDefault) so the
+// keystroke falls through to the menu and fires exactly once; the menu then forwards
+// the action back over the "mosh_menu" event, which we dispatch through runAction —
+// the same path a click takes. In Vite dev (no native menu) we own everything.
+
+// A fresh action context per dispatch so selection/transport are read live.
+const ctx = (): ActionCtx => ({ store: useStore.getState(), pickFiles, pickSaveFile });
+
+const isEditable = (el: HTMLElement | null) =>
+  !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable);
+
 export function useKeyboardShortcuts() {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      // Never hijack typing: a track-name input, number-field drag, textarea,
-      // select, or any contentEditable element keeps full keyboard control.
-      const target = (e.target as HTMLElement | null) ?? null;
-      const active = document.activeElement as HTMLElement | null;
-      const isEditable = (el: HTMLElement | null) =>
-        !!el &&
-        (el.tagName === "INPUT" ||
-          el.tagName === "TEXTAREA" ||
-          el.tagName === "SELECT" ||
-          el.isContentEditable);
-      if (isEditable(target) || isEditable(active)) return;
+      const def = matchShortcut(e);
+      if (!def) return;
 
-      const s = useStore.getState();
-      const mod = e.metaKey || e.ctrlKey;
-      const selected = () => [...s.selection];
+      // Never hijack typing (track-name input, number-field, textarea, select…).
+      if (def.guardEditable !== false &&
+          (isEditable(e.target as HTMLElement | null) || isEditable(document.activeElement as HTMLElement | null)))
+        return;
 
-      // Modifier combos first (Mod = Cmd/Ctrl).
-      if (mod) {
-        switch (e.key.toLowerCase()) {
-          case "z":
-            e.preventDefault();
-            void s.exec(e.shiftKey ? "redo" : "undo");
-            return;
-          case "s":
-            e.preventDefault(); // stop the browser "Save page" dialog
-            void s.exec("save");
-            return;
-          case "c":
-            e.preventDefault();
-            s.copySelection();
-            return;
-          case "x":
-            e.preventDefault();
-            void s.cutSelection();
-            return;
-          case "v":
-            e.preventDefault();
-            void s.pasteClipboard();
-            return;
-          case "d":
-            e.preventDefault(); // stop the browser bookmark dialog
-            for (const id of selected()) void s.exec("duplicate_clip", { clipId: id });
-            return;
-          case "g": {
-            // MIX-008 — group the tracks of the selected clips into a submix.
-            e.preventDefault();
-            const sel = new Set(selected());
-            const trackIds =
-              s.snapshot?.tracks
-                .filter((t) => !t.isGroup && t.clips.some((c) => sel.has(c.id)))
-                .map((t) => t.id) ?? [];
-            if (trackIds.length > 0) void s.exec("create_group_track", { trackIds });
-            return;
-          }
-          default:
-            return; // leave other Mod combos to the browser
-        }
-      }
+      // Yield native-menu-owned accelerators to the real menu in the packaged app.
+      if (def.nativeMenuOwned && nativeMenuPresent()) return;
 
-      switch (e.key) {
-        case " ": // Space — play/stop
-          e.preventDefault();
-          void s.exec("set_transport", {
-            action: s.transport.playing ? "stop" : "play",
-          });
-          return;
-        case "r":
-        case "R":
-          void s.exec("set_transport", { action: "record" });
-          return;
-        case "Delete":
-        case "Backspace":
-          e.preventDefault();
-          for (const id of selected()) void s.exec("remove_clip", { clipId: id });
-          s.clearSelection(); // match the prior Arrangement behavior (clear after delete)
-          return;
-        case "Home":
-          e.preventDefault(); // the timeline is scrollable — keep Home as transport-only
-          void s.exec("set_transport", { action: "to_start" });
-          return;
-        case "End":
-          e.preventDefault();
-          void s.exec("set_transport", { action: "to_end" });
-          return;
-        case "1":
-          s.setTool("move");
-          return;
-        case "2":
-          s.setTool("split");
-          return;
-        case "3":
-          s.setTool("range");
-          return;
-        default:
-          return;
-      }
+      e.preventDefault();
+      void runAction(def.id, ctx());
     };
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  // Native menu bar → WebView: each File/Edit item (click or accelerator) forwards
+  // { action, file? } here so it runs through the same dispatcher as a shortcut.
+  useEffect(() => {
+    return onEvent("mosh_menu", (raw) => {
+      const p = (raw ?? {}) as { action?: ActionId; file?: string };
+      if (!p.action) return;
+      void runAction(p.action, ctx(), p.file ? { file: p.file } : {});
+    });
   }, []);
 }
