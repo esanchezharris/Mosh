@@ -286,6 +286,22 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       invalidate();
       return ok(command, { trackId: t.id, type, isInstrument: !!t.isInstrument });
     }
+    case "create_group_track": {
+      // MIX-008 — wrap the given tracks in a submix (group) track. Dispatched by the
+      // configurable keymap's GROUP action (Mod+G). Minimal mock: append a group track
+      // and reparent the members so the UI shows the submix.
+      const ids = (Array.isArray(args.trackIds) ? (args.trackIds as unknown[]) : []).map(String);
+      if (ids.length === 0) return err(command, "no trackIds");
+      pushUndo();
+      const g: Track = {
+        id: nextTrackId(), index: snapshot.tracks.length, name: "Group",
+        type: "group", isGroup: true, volumeDb: 0, pan: 0, mute: false, solo: false, clips: [], plugins: [],
+      };
+      snapshot.tracks.push(g);
+      for (const t of snapshot.tracks) if (ids.includes(t.id)) t.parentId = g.id;
+      invalidate();
+      return ok(command, { trackId: g.id });
+    }
     case "set_track_type": {
       const t = findTrack(str(args.trackId));
       if (!t) return err(command, "track not found");
