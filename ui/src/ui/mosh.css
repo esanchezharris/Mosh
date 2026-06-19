@@ -70,6 +70,14 @@
 html, body, #root { margin: 0; height: 100%; width: 100%; }
 body { background: var(--ink); color: var(--bone); font-family: var(--font-body); overflow: hidden; }
 
+/* No accidental text selection: a DAW surface should never highlight UI labels when
+   you drag a clip or double-click to open an editor. Selection is re-enabled only
+   where it's wanted — real form fields, contenteditable, and opt-in `.selectable`. */
+html, body, .app { user-select: none; -webkit-user-select: none; }
+input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .selectable * {
+  user-select: text; -webkit-user-select: text;
+}
+
 .tc { font-family: var(--font-mono); font-variant-numeric: tabular-nums; letter-spacing: 0.04em; }
 .display { font-family: var(--font-display); font-weight: 900; letter-spacing: -0.01em; text-transform: uppercase; }
 
@@ -130,6 +138,27 @@ body { background: var(--ink); color: var(--bone); font-family: var(--font-body)
 .toolbar .group { display: flex; gap: 6px; align-items: center; }
 .toolbar .sep { width: 1px; height: 20px; background: var(--ink-line); margin: 0 4px; }
 .toolbar label { font-size: 11px; color: var(--bone-dim); }
+
+/* ── responsive chrome ───────────────────────────────────────────────────────
+   On a narrow window the topbar/toolbar stay ONE row and degrade gracefully.
+   The rule that prevents label OVERLAP: nothing shrinks below its own content
+   (every item is flex:0 0 auto, only the spacer flexes) — so when the row can't
+   fit it SCROLLS horizontally instead of squashing items on top of each other.
+   Low-priority chrome (master meter, brand name, BPM detail) drops out at
+   breakpoints so scrolling is rarely needed. Scrollbars are hidden. */
+.topbar { overflow-x: auto; overflow-y: hidden; }
+.topbar > *, .transport > * { flex: 0 0 auto; }
+.spacer { flex: 1 1 0; min-width: 0; }
+.transport .read .pos, .transport .read .bpm, .brand .name { white-space: nowrap; }
+.toolbar { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; }
+.toolbar > * { flex: 0 0 auto; }
+.topbar::-webkit-scrollbar, .toolbar::-webkit-scrollbar { height: 0; width: 0; }
+.topbar, .toolbar { scrollbar-width: none; }
+
+@media (max-width: 1200px) { .topbar { gap: 10px; padding: 0 10px; } .transport { gap: 4px; } }
+@media (max-width: 1080px) { .topbar .master-meter { display: none; } }
+@media (max-width: 980px)  { .brand .name { display: none; } .topbar { gap: 8px; } }
+@media (max-width: 880px)  { .transport .read .bpm { display: none; } .key-ctl .key-mode { display: none; } }
 
 /* the scroll surface holds ruler + lanes so they share one horizontal scroll */
 .timeline { flex: 1 1 auto; display: flex; min-height: 0; }
@@ -375,11 +404,22 @@ body { background: var(--ink); color: var(--bone); font-family: var(--font-body)
 .modal-head .pr-meta { margin-left: auto; color: var(--bone-dim); font-size: 11px; }
 .modal-filters { display: flex; gap: 6px; padding: 10px 14px; border-bottom: 1px solid var(--ink-line-soft); }
 .modal-filters input { flex: 1 1 auto; background: var(--ink); border: 1px solid var(--ink-line); color: var(--bone); border-radius: 7px; padding: 6px 9px; }
-.modal-list { overflow: auto; padding: 8px 10px; }
+.modal-list { overflow: auto; padding: 8px 10px; flex: 1 1 auto; min-height: 0; }
 .plugin-group { margin-bottom: 10px; }
 .pg-label { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--bone-dim); margin: 6px 4px; }
-.plugin-row { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; width: 100%; text-align: left; background: var(--ink); border: 1px solid var(--ink-line); border-radius: 8px; padding: 8px 10px; margin-bottom: 4px; cursor: pointer; color: var(--bone); }
-.plugin-row:hover { border-color: var(--lime-dim); }
+.pg-count { color: var(--bone-dim); opacity: 0.7; font-weight: 400; }
+/* windowed list: rows are absolutely placed inside a tall spacer so only the
+   visible slice is mounted (an 800+ AU machine never mounts 800 nodes). */
+.vlist { width: 100%; }
+.vrow { position: absolute; left: 0; right: 0; display: flex; align-items: center; gap: 6px; }
+.pg-label.vrow { align-items: flex-end; padding-bottom: 3px; margin: 0; }
+.plugin-row { width: 100%; }
+.prow-load { flex: 1 1 auto; min-width: 0; height: 38px; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 1px; text-align: left; background: var(--ink); border: 1px solid var(--ink-line); border-radius: 8px; padding: 4px 10px; cursor: pointer; color: var(--bone); }
+.prow-load:hover { border-color: var(--lime-dim); }
+.prow-load .pr-name, .prow-load .pr-meta { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pf-star { flex: 0 0 auto; width: 34px; height: 38px; border: 1px solid var(--ink-line); background: var(--ink); border-radius: 8px; color: var(--bone-dim); cursor: pointer; font-size: 14px; line-height: 1; }
+.pf-star:hover { border-color: var(--lime-dim); color: var(--mist); }
+.pf-star.on { color: var(--lime); border-color: var(--lime-dim); }
 .pr-name { font-size: 13px; font-weight: 600; }
 .pr-meta { font-size: 10px; color: var(--bone-dim); }
 .scan-status { padding: 7px 14px; font-size: 11px; color: var(--warn); background: var(--ink); border-bottom: 1px solid var(--ink-line-soft); }

@@ -1,8 +1,18 @@
-// Modal plugin browser: engine built-ins (grouped by category, load_builtin) +
-// scanned VST3/AU (load_plugin) onto the selected track. Filter + kind tabs.
+// Modal plugin browser: engine built-ins (load_builtin) + scanned VST3/AU
+// (load_plugin) onto the selected track. Filter + kind tabs, plus Favorites /
+// Recent sections and vendor grouping. The list is windowed (only the visible
+// rows are mounted) so an 800+ AU machine stays smooth. All sectioning/grouping
+// lives in the pure pluginBrowserUtil (unit-tested); this component is just glue.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "../store";
+import {
+  builtinEntry, installedEntry, buildPluginRows, visibleRange,
+  loadFavorites, toggleFavorite, loadPluginRecents, addPluginRecent,
+  type PluginEntry, type PluginKind,
+} from "./pluginBrowserUtil";
+
+const ROW_H = 46; // uniform height for headers + plugin rows (drives the windowing)
 
 export function PluginBrowser() {
   const open = useStore((s) => s.browserOpen);
@@ -14,25 +24,53 @@ export function PluginBrowser() {
   const exec = useStore((s) => s.exec);
   const rescan = useStore((s) => s.rescanPlugins);
   const scanProgress = useStore((s) => s.scanProgress);
-  const [q, setQ] = useState("");
-  const [kind, setKind] = useState<"all" | "inst" | "fx">("all");
 
-  const matches = (name: string, isInstrument: boolean) => {
-    if (kind === "inst" && !isInstrument) return false;
-    if (kind === "fx" && isInstrument) return false;
-    return q === "" || name.toLowerCase().includes(q.toLowerCase());
-  };
-  const fBuiltins = useMemo(() => builtins.filter((b) => matches(b.name, b.isInstrument)), [builtins, q, kind]);
-  const fVst = useMemo(() => plugins.filter((p) => matches(p.name, p.isInstrument)), [plugins, q, kind]);
-  const byCategory = useMemo(() => {
-    const m = new Map<string, typeof fBuiltins>();
-    for (const b of fBuiltins) { const a = m.get(b.category) ?? []; a.push(b); m.set(b.category, a); }
-    return [...m.entries()];
-  }, [fBuiltins]);
+  const [q, setQ] = useState("");
+  const [kind, setKind] = useState<PluginKind>("all");
+  const [favorites, setFavorites] = useState<string[]>([]);
+  const [recents, setRecents] = useState<string[]>([]);
+  const [scrollTop, setScrollTop] = useState(0);
+  const [viewportH, setViewportH] = useState(420);
+  const listRef = useRef<HTMLDivElement>(null);
+
+  // Read favorites/recents from localStorage when the browser opens.
+  useEffect(() => {
+    if (!open) return;
+    setFavorites(loadFavorites());
+    setRecents(loadPluginRecents());
+    setScrollTop(0);
+  }, [open]);
+
+  // Track the scroll-viewport height so the window math stays accurate on resize.
+  useEffect(() => {
+    const el = listRef.current; if (!el) return;
+    const update = () => setViewportH(el.clientHeight);
+    update();
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(update); ro.observe(el);
+    return () => ro.disconnect();
+  }, [open]);
+
+  const bEntries = useMemo(() => builtins.map(builtinEntry), [builtins]);
+  const iEntries = useMemo(() => plugins.map(installedEntry), [plugins]);
+  const rows = useMemo(
+    () => buildPluginRows({ builtins: bEntries, installed: iEntries, favorites, recents, q, kind }),
+    [bEntries, iEntries, favorites, recents, q, kind],
+  );
 
   if (!open) return null;
-  const loadBuiltin = (type: string) => { if (selectedTrackId) void exec("load_builtin", { trackId: selectedTrackId, type }); close(); };
-  const loadVst = (id: string) => { if (selectedTrackId) void exec("load_plugin", { trackId: selectedTrackId, pluginId: id }); close(); };
+
+  const { start, end } = visibleRange(scrollTop, viewportH, ROW_H, rows.length);
+  const favSet = new Set(favorites);
+
+  const load = (e: PluginEntry) => {
+    if (!selectedTrackId) return;
+    if (e.loadKind === "builtin") void exec("load_builtin", { trackId: selectedTrackId, type: e.loadKey });
+    else void exec("load_plugin", { trackId: selectedTrackId, pluginId: e.loadKey });
+    addPluginRecent(e.uid);
+    close();
+  };
+  const toggleFav = (uid: string) => setFavorites(toggleFavorite(uid));
 
   return (
     <div className="modal-backdrop" onClick={close} data-testid="plugin-browser">
@@ -51,35 +89,42 @@ export function PluginBrowser() {
           </div>
         )}
         <div className="modal-filters">
-          <input autoFocus placeholder="Filter…" value={q} onChange={(e) => setQ(e.target.value)} />
+          <input autoFocus placeholder="Filter by name or vendor…" value={q} onChange={(e) => setQ(e.target.value)} />
           {(["all", "inst", "fx"] as const).map((k) => (
             <button key={k} className={`btn${kind === k ? " on" : ""}`} onClick={() => setKind(k)}>{k === "all" ? "All" : k === "inst" ? "Instruments" : "Effects"}</button>
           ))}
         </div>
-        <div className="modal-list">
-          {byCategory.map(([cat, items]) => (
-            <div className="plugin-group" key={cat}>
-              <div className="pg-label">{cat}</div>
-              {items.map((b) => (
-                <button key={b.type} className="plugin-row" onClick={() => loadBuiltin(b.type)}>
-                  <span className="pr-name">{b.name}</span>
-                  <span className="pr-meta">{b.isInstrument ? "instrument" : "effect"} · built-in</span>
-                </button>
-              ))}
-            </div>
-          ))}
-          {fVst.length > 0 && (
-            <div className="plugin-group">
-              <div className="pg-label">Installed (VST3 / AU)</div>
-              {fVst.map((p) => (
-                <button key={p.id} className="plugin-row" onClick={() => loadVst(p.id)}>
-                  <span className="pr-name">{p.name}</span>
-                  <span className="pr-meta">{p.isInstrument ? "instrument" : "effect"} · {p.format}{p.manufacturer ? ` · ${p.manufacturer}` : ""}</span>
-                </button>
-              ))}
+        <div className="modal-list" ref={listRef} onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}>
+          {rows.length === 0 ? (
+            <div className="rack-empty">nothing matches “{q}”</div>
+          ) : (
+            <div className="vlist" style={{ height: rows.length * ROW_H, position: "relative" }}>
+              {rows.slice(start, end).map((row, i) => {
+                const idx = start + i;
+                const style = { top: idx * ROW_H, height: ROW_H } as const;
+                if (row.kind === "header")
+                  return (
+                    <div key={row.key} className="pg-label vrow" style={style}>
+                      {row.label} <span className="pg-count">{row.count}</span>
+                    </div>
+                  );
+                const e = row.entry;
+                const fav = favSet.has(e.uid);
+                return (
+                  <div key={row.key} className="plugin-row vrow" style={style}>
+                    <button className="prow-load" onClick={() => load(e)} title={`Add ${e.name} to the selected track`}>
+                      <span className="pr-name">{e.name}</span>
+                      <span className="pr-meta">{e.meta}</span>
+                    </button>
+                    <button className={`pf-star${fav ? " on" : ""}`} aria-pressed={fav}
+                      title={fav ? "Remove from favorites" : "Add to favorites"}
+                      aria-label={fav ? `Unfavorite ${e.name}` : `Favorite ${e.name}`}
+                      onClick={() => toggleFav(e.uid)}>{fav ? "★" : "☆"}</button>
+                  </div>
+                );
+              })}
             </div>
           )}
-          {byCategory.length === 0 && fVst.length === 0 && <div className="rack-empty">nothing matches “{q}”</div>}
         </div>
       </div>
     </div>

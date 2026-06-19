@@ -193,7 +193,12 @@ export function Arrange({ snapshot }: { snapshot: Snapshot }) {
         e.preventDefault();
         void exec(e.shiftKey ? "redo" : "undo");
       } else if (e.key === "Delete" || e.key === "Backspace") {
-        const sel = useStore.getState().selection;
+        // While a clip editor modal is open (piano roll / automation), Delete belongs
+        // to that editor (delete selected NOTES/points) — not to the arrangement. Bail
+        // so we never silently remove the clip the user is editing.
+        const st = useStore.getState();
+        if (st.editingClipId || st.automationTrackId) return;
+        const sel = st.selection;
         if (sel.size === 0) return;
         e.preventDefault();
         for (const id of sel) void exec("remove_clip", { clipId: id });
@@ -436,7 +441,7 @@ function ClipBlock({
       data-transcribing={transcribing ? "true" : "false"}
       style={{ left, width: widthPx }}
       onPointerDown={beginDrag("move")} onPointerMove={onMove} onPointerUp={onUp}
-      onDoubleClick={() => { if (clip.type === "midi") openPianoRoll(clip.id); }}
+      onDoubleClick={(e) => { e.preventDefault(); if (clip.type === "midi") openPianoRoll(clip.id); }}
       onContextMenu={(e) => { if (clip.type === "wave") { e.preventDefault(); setMenuPos({ x: e.clientX, y: e.clientY }); } }}
     >
       {menuPos && (

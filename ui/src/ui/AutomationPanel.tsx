@@ -101,7 +101,7 @@ export function AutomationPanel() {
               return (
                 <circle key={i} cx={xOf(pt.t)} cy={yOf(pt.v)} r={5} className="auto-dot" data-testid="auto-dot"
                   onPointerDown={onDotDown(i)} onPointerMove={onMove} onPointerUp={onUp}
-                  onDoubleClick={(e) => { e.stopPropagation(); void exec("remove_automation_point", { ...target, pointIndex: i }); }} />
+                  onDoubleClick={(e) => { e.preventDefault(); e.stopPropagation(); void exec("remove_automation_point", { ...target, pointIndex: i }); }} />
               );
             })}
           </svg>

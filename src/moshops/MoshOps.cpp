@@ -2958,14 +2958,9 @@ juce::var MoshOps::cmdAddMidiClip (const juce::var& args)
                               tracktion::BeatDuration::fromBeats ((double) n.getProperty ("length", 1.0)),
                               (int) n.getProperty ("velocity", 100), 0, &undoManager());
     }
-    else
-    {
-        // Default: a C-major arpeggio so a synth has something to play (gate).
-        const int pattern[] = { 60, 64, 67, 72 };
-        for (int i = 0; i < 4; ++i)
-            sequence.addNote (pattern[i], tracktion::BeatPosition::fromBeats ((double) i),
-                              tracktion::BeatDuration::fromBeats (1.0), 100, 0, &undoManager());
-    }
+    // Otherwise the clip is left EMPTY: a new MIDI clip from the "+ MIDI" button has
+    // no notes — the user programs it in the piano roll. (No default arpeggio: that
+    // surprised users with phantom notes. Callers wanting seed content pass `notes`.)
 
     auto* data = new DynamicObject();
     data->setProperty ("clipId", clip->itemID.toString());

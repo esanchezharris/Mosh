@@ -72,6 +72,30 @@ export function PianoRoll() {
   }, [clip?.notes]);
   useEffect(() => { setVelocityDraft(null); velocityDraftRef.current = null; }, [editingClipId, selectedNotes]);
 
+  // Keyboard while the piano roll is open: Delete/Backspace removes the SELECTED
+  // NOTES (the arrangement's global handler bails when editingClipId is set, so the
+  // clip is never deleted here); Escape closes. Removing in descending index order
+  // keeps each noteIndex valid as the backend reindexes after every removal.
+  useEffect(() => {
+    if (!editingClipId || !clip) return;
+    const clipId = clip.id;
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable)) return;
+      if (e.key === "Delete" || e.key === "Backspace") {
+        if (selectedNotes.size === 0) return;
+        e.preventDefault(); e.stopPropagation();
+        const idxs = [...selectedNotes].sort((a, b) => b - a);
+        void (async () => { for (const i of idxs) await exec("remove_note", { clipId, noteIndex: i }); })();
+        setSelectedNotes(new Set());
+      } else if (e.key === "Escape") {
+        e.preventDefault(); close();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [editingClipId, clip, selectedNotes, exec, close]);
+
   if (!editingClipId || !clip) return null;
 
   const m = meterAt(tempoMapFrom(snapshot?.session), clip.start);
@@ -205,7 +229,7 @@ export function PianoRoll() {
                     aria-label={`${noteName(n.pitch)} note start ${n.start.toFixed(2)} length ${n.length.toFixed(2)} velocity ${n.velocity}`}
                     style={{ left: b.x, top: b.y, width: b.w, height: b.h }}
                     onPointerDown={onNoteDown("move", n)}
-                    onDoubleClick={(e) => { e.stopPropagation(); void exec("remove_note", { clipId: clip.id, noteIndex: n.i }); }}
+                    onDoubleClick={(e) => { e.preventDefault(); e.stopPropagation(); void exec("remove_note", { clipId: clip.id, noteIndex: n.i }); }}
                     title={`${noteName(n.pitch)} · vel ${n.velocity} · dbl-click to delete`}>
                     <span className="pr-note-grip" role="separator" aria-label={`Resize ${noteName(n.pitch)} note`} onPointerDown={onNoteDown("resize", n)} />
                   </div>
@@ -215,7 +239,7 @@ export function PianoRoll() {
             </div>
           </div>
         </div>
-        <div className="pr-foot">click empty space to add · drag to move · drag right edge to resize · double-click to delete</div></>
+        <div className="pr-foot">click empty space to add · drag to move · drag right edge to resize · double-click or Delete to remove · Esc to close</div></>
         )}
       </div>
     </div>
