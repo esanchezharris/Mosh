@@ -9,14 +9,17 @@
 // observable state. Mixer / plugin & neural racks / generative drawer / Moshi GL
 // are staged back in next (the legacy components remain on disk to port from).
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useStore } from "./store";
+import { useSettings } from "./settings/store";
 import { isNative } from "./bridge";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { Topbar, Toolbar } from "./ui/Topbar";
 import { Arrange } from "./ui/Arrange";
 import { Dock } from "./ui/Dock";
 import { DockShell } from "./ui/dock/DockShell";
+import { useDrumWindow } from "./ui/dock/useFloatingWindow";
+import { SampleBrowser } from "./ui/SampleBrowser";
 import { Mixer } from "./ui/Mixer";
 import { PluginBrowser } from "./ui/PluginBrowser";
 import { PianoRoll } from "./ui/PianoRoll";
@@ -32,6 +35,21 @@ export function App() {
 
   useEffect(() => { init(); }, [init]);
   useKeyboardShortcuts(); // the single keyboard layer + native-menu bridge (CTL-002)
+
+  // Layout = a template value (Phase 6). The FL layout pops the drum sequencer into
+  // its floating window: when the layout becomes "fl", open it for the first drum
+  // track that has a clip. Only on the transition (never auto-closes), so a manual
+  // open in another layout is untouched.
+  const layout = useSettings((s) => (s.values.layout ?? "mosh") as string);
+  const prevLayout = useRef<string | null>(null);
+  useEffect(() => {
+    if (!snapshot) return;
+    if (layout === "fl" && prevLayout.current !== "fl") {
+      const clip = snapshot.tracks.find((t) => t.type === "drum")?.clips.find((c) => c.type === "midi");
+      if (clip) useDrumWindow.getState().open(clip.id);
+    }
+    prevLayout.current = layout;
+  }, [layout, snapshot]);
 
   // Production build opened outside a backend (no JUCE WebView, no dev-mock).
   if (!isNative()) {
@@ -60,7 +78,7 @@ export function App() {
             <Mixer snapshot={snapshot} />
           </div>
         ) : (
-          <DockShell bottom={<Dock snapshot={snapshot} />}>
+          <DockShell left={<SampleBrowser />} bottom={<Dock snapshot={snapshot} />}>
             <Arrange snapshot={snapshot} />
           </DockShell>
         )

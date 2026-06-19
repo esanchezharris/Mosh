@@ -406,6 +406,14 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 .dock-divider:hover { background: var(--lime-dim); }
 .dock-collapsed { flex: 0 0 22px; height: 22px; width: 100%; border: none; border-top: 1px solid var(--ink-line); background: var(--ink-raise); color: var(--bone-dim); font: inherit; font-size: 11px; letter-spacing: 0.08em; cursor: pointer; }
 .dock-collapsed:hover { color: var(--lime); }
+/* Phase 6 dock shell: the main row holds the LEFT browser zone + the arrangement. */
+.dock-main { flex: 1 1 auto; min-height: 0; display: flex; }
+.dock-main .timeline { min-width: 0; }
+.dock-left { flex: 0 0 auto; min-width: 0; overflow: auto; border-right: 1px solid var(--ink-line); background: var(--ink-raise); }
+.dock-vdivider { flex: 0 0 6px; width: 6px; cursor: col-resize; background: var(--ink-line); touch-action: none; transition: background 120ms; }
+.dock-vdivider:hover { background: var(--lime-dim); }
+.dock-left-rail { flex: 0 0 18px; width: 18px; border: none; border-right: 1px solid var(--ink-line); background: var(--ink-raise); color: var(--bone-dim); cursor: pointer; font: inherit; font-size: 11px; padding: 0; }
+.dock-left-rail:hover { color: var(--lime); }
 .rack { flex: 1 1 auto; min-width: 0; overflow: auto; padding: 10px 12px; }
 .rack-label { font-size: 10px; letter-spacing: 0.12em; color: var(--bone-dim); margin-bottom: 8px; }
 .rack-label b { color: var(--bone); }

@@ -27,6 +27,12 @@ describe("built-in templates", () => {
     const skins = TEMPLATES.map((t) => t.values.skin);
     expect(new Set(skins).size).toBe(TEMPLATES.length);
   });
+
+  it("pins a panel layout per template (FL = its floating layout)", () => {
+    expect(template("mosh")?.values.layout).toBe("mosh");
+    expect(template("ableton")?.values.layout).toBe("ableton");
+    expect(template("fl")?.values.layout).toBe("fl");
+  });
 });
 
 describe("template lookup", () => {
