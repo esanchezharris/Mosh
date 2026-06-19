@@ -701,15 +701,24 @@ function ClipBlock({
   );
 }
 
+// Shared canvas setup: size the backing store to devicePixelRatio, scale the context,
+// and clear. Returns null until the canvas + 2D context are ready.
+function prepCanvas(cv: HTMLCanvasElement | null): { ctx: CanvasRenderingContext2D; w: number; h: number } | null {
+  if (!cv) return null;
+  const dpr = window.devicePixelRatio || 1;
+  const h = cv.clientHeight, w = cv.clientWidth;
+  cv.width = Math.max(1, Math.floor(w * dpr)); cv.height = Math.max(1, Math.floor(h * dpr));
+  const ctx = cv.getContext("2d"); if (!ctx) return null;
+  ctx.scale(dpr, dpr); ctx.clearRect(0, 0, w, h);
+  return { ctx, w, h };
+}
+
 const ClipWave = memo(function ClipWave({ peaks, width }: { peaks?: Peaks; width: number }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
-    const cv = ref.current; if (!cv || !peaks) return;
-    const dpr = window.devicePixelRatio || 1;
-    const h = cv.clientHeight, w = cv.clientWidth;
-    cv.width = Math.max(1, Math.floor(w * dpr)); cv.height = Math.max(1, Math.floor(h * dpr));
-    const ctx = cv.getContext("2d"); if (!ctx) return;
-    ctx.scale(dpr, dpr); ctx.clearRect(0, 0, w, h);
+    if (!peaks) return;
+    const prep = prepCanvas(ref.current); if (!prep) return;
+    const { ctx, w, h } = prep;
     ctx.fillStyle = "rgba(204,255,35,0.5)";
     const mid = h / 2, n = peaks.length;
     for (let x = 0; x < w; x++) {
@@ -738,12 +747,8 @@ const ClipMidi = memo(function ClipMidi({ notes, width, bs, secToPx }:
   { notes?: MidiNote[]; width: number; bs: number; secToPx: (s: number) => number }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
-    const cv = ref.current; if (!cv) return;
-    const dpr = window.devicePixelRatio || 1;
-    const h = cv.clientHeight, w = cv.clientWidth;
-    cv.width = Math.max(1, Math.floor(w * dpr)); cv.height = Math.max(1, Math.floor(h * dpr));
-    const ctx = cv.getContext("2d"); if (!ctx) return;
-    ctx.scale(dpr, dpr); ctx.clearRect(0, 0, w, h);
+    const prep = prepCanvas(ref.current); if (!prep) return;
+    const { ctx, h } = prep;
     const ns = notes ?? []; if (ns.length === 0) return;
 
     // Vertical range from the clip's own pitches (padded); fixed window if degenerate.
@@ -773,12 +778,8 @@ const ClipDrumGrid = memo(function ClipDrumGrid({ notes, width, bs, secToPx }:
   { notes?: MidiNote[]; width: number; bs: number; secToPx: (s: number) => number }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
-    const cv = ref.current; if (!cv) return;
-    const dpr = window.devicePixelRatio || 1;
-    const h = cv.clientHeight, w = cv.clientWidth;
-    cv.width = Math.max(1, Math.floor(w * dpr)); cv.height = Math.max(1, Math.floor(h * dpr));
-    const ctx = cv.getContext("2d"); if (!ctx) return;
-    ctx.scale(dpr, dpr); ctx.clearRect(0, 0, w, h);
+    const prep = prepCanvas(ref.current); if (!prep) return;
+    const { ctx, w, h } = prep;
     const ns = notes ?? []; if (ns.length === 0) return;
 
     const lanes = DRUM_LANES.length;

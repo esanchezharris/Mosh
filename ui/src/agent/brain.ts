@@ -10,8 +10,8 @@ import { mockBrainReply } from "./brainMock";
 import { systemPrompt, parseReply, type BrainReply } from "./brainCore";
 import type { Snapshot } from "../types";
 
-// Re-export the pure pieces so existing importers keep a single brain entry point.
-export { INTENTS, systemPrompt, parseReply } from "./brainCore";
+// Re-export the reply type so importers keep a single brain entry point (the pure
+// INTENTS/systemPrompt/parseReply are imported straight from brainCore by consumers).
 export type { BrainReply } from "./brainCore";
 
 export type Brain = { send: (text: string) => Promise<BrainReply>; clear: () => void };
@@ -29,7 +29,7 @@ export function createBrain(getSnapshot: () => Snapshot | null): Brain {
         return parseReply(content);
       } catch {
         // proxy unreachable / no key yet → demo mock so the loop still works
-        return { ...mockBrainReply(text, snap), mocked: true };
+        return mockBrainReply(text, snap);
       }
     },
     clear() { history.length = 0; },

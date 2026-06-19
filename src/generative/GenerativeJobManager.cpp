@@ -114,11 +114,6 @@ bool GenerativeJobManager::ensureServiceRunning()
     return isHealthy();
 }
 
-juce::var GenerativeJobManager::capabilities()
-{
-    return httpGet ("/capabilities");
-}
-
 juce::var GenerativeJobManager::listColors()
 {
     return httpGet ("/colors");

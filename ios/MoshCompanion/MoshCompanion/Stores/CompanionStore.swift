@@ -71,10 +71,6 @@ final class CompanionStore: ObservableObject {
         }
     }
 
-    func noteRenderTargetNeeded(_ action: String) {
-        receipts.insert("\(action.capitalized) render needs a selected render target.", at: 0)
-    }
-
     func runVoiceCommand(_ phrase: String) async {
         let command: (String, [String: Any])?
         if phrase.contains("play") { command = ("set_transport", ["action": "play"]) }

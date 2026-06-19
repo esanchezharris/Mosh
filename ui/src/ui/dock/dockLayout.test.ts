@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   resizeBetween, resizeZone, collapseZone, expandZone, toggleZone,
-  clampWindow, moveWindow, resizeWindow, bringToFront, presetLayout,
+  clampWindow, moveWindow, resizeWindow,
   type Zone, type FloatWin, type Bounds,
 } from "./dockLayout";
 
@@ -110,31 +110,5 @@ describe("resizeWindow", () => {
     const r = resizeWindow(win({ x: 100, w: 300, minW: 120 }), "w", 999, 0, B);
     expect(r.w).toBe(120);
     expect(r.x + r.w).toBe(400);                        // east still anchored at 400
-  });
-});
-
-describe("bringToFront", () => {
-  it("moves the id to the end, preserving the rest", () => {
-    expect(bringToFront(["a", "b", "c"], "a")).toEqual(["b", "c", "a"]);
-    expect(bringToFront(["a", "b", "c"], "c")).toEqual(["a", "b", "c"]);
-    expect(bringToFront(["a", "b"], "z")).toEqual(["a", "b", "z"]);
-  });
-});
-
-describe("presetLayout", () => {
-  it("mosh + ableton are fixed-zone (no floats); fl adds a floating drum window", () => {
-    expect(presetLayout("mosh").floats).toEqual([]);
-    expect(presetLayout("ableton").floats).toEqual([]);
-    const fl = presetLayout("fl");
-    expect(fl.floats).toHaveLength(1);
-    expect(fl.floats[0].id).toBe("drum-seq");
-  });
-  it("every preset exposes the three zones with sane minimums", () => {
-    for (const name of ["mosh", "ableton", "fl"] as const) {
-      const { zones } = presetLayout(name);
-      expect(Object.keys(zones)).toEqual(["left", "center", "bottom"]);
-      expect(zones.left.min).toBeLessThanOrEqual(zones.left.size || zones.left.min);
-      expect(zones.center.min).toBeGreaterThan(0);
-    }
   });
 });

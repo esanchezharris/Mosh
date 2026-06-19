@@ -20,7 +20,6 @@ export type SettingType =
   | "enum"
   | "bool"
   | "number"
-  | "color"
   | "key"
   | "gesture-table";
 
@@ -252,11 +251,6 @@ export function coerceSetting(id: string, value: SettingValue): SettingValue {
         v = Math.round(v * 1e6) / 1e6;
       }
       return v;
-    }
-    case "color": {
-      return typeof value === "string" && /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(value)
-        ? value
-        : def.default;
     }
     case "key":
     case "gesture-table":

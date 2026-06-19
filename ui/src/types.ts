@@ -121,9 +121,6 @@ export type AvailablePlugin = {
 // Per-format catalog counts (INS-005) — rides on the list_plugins result.
 export type PluginCounts = { vst3: number; au: number; total: number };
 
-// A quarantined plugin (INS-005) — crashed a scan or was blocked manually.
-export type PluginBlockEntry = { id: string; reason: string };
-
 // Engine built-in plugin (from list_builtins) — loaded via load_builtin by type.
 export type BuiltinPlugin = {
   type: string;

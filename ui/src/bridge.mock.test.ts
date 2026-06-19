@@ -18,8 +18,6 @@ const MOCK = path.join(SRC, "bridge.mock.ts");
 const ALLOWLIST = new Set<string>([
   // Live-only data with no dev-mock state to mutate (UI degrades gracefully):
   "rescan_plugins",
-  "get_plugin_blocklist",
-  "clear_plugin_blocklist",
   "import_clip_data", // dev imports via the import_clip path; bytes-over-bridge is native-only
   // KNOWN DEV-MOCK GAPS — these DO mutate session state, so the dev mock no-ops
   // where the real backend would change the arrangement. Tracked here so the guard

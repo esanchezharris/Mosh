@@ -304,26 +304,6 @@ def mouse_click(info: dict, x: float, y: float) -> None:
     time.sleep(0.35)
 
 
-def mouse_drag(info: dict, x1: float, y1: float, x2: float, y2: float) -> None:
-    activate()
-    gx1, gy1 = local_to_global(info, x1, y1)
-    gx2, gy2 = local_to_global(info, x2, y2)
-    source = Quartz.CGEventSourceCreate(Quartz.kCGEventSourceStateHIDSystemState)
-    down = Quartz.CGEventCreateMouseEvent(source, Quartz.kCGEventLeftMouseDown, Quartz.CGPoint(gx1, gy1), Quartz.kCGMouseButtonLeft)
-    Quartz.CGEventPost(Quartz.kCGHIDEventTap, down)
-    time.sleep(0.08)
-    for step in range(1, 16):
-        t = step / 15.0
-        x = gx1 + (gx2 - gx1) * t
-        y = gy1 + (gy2 - gy1) * t
-        move = Quartz.CGEventCreateMouseEvent(source, Quartz.kCGEventLeftMouseDragged, Quartz.CGPoint(x, y), Quartz.kCGMouseButtonLeft)
-        Quartz.CGEventPost(Quartz.kCGHIDEventTap, move)
-        time.sleep(0.02)
-    up = Quartz.CGEventCreateMouseEvent(source, Quartz.kCGEventLeftMouseUp, Quartz.CGPoint(gx2, gy2), Quartz.kCGMouseButtonLeft)
-    Quartz.CGEventPost(Quartz.kCGHIDEventTap, up)
-    time.sleep(0.5)
-
-
 def capture(info: dict, name: str) -> Image.Image:
     EVID.mkdir(parents=True, exist_ok=True)
     out = EVID / f"{name}.png"
@@ -494,11 +474,6 @@ def wait_for_ax(
     raise RuntimeError(f"timed out waiting for {detail}")
 
 
-def mean_brightness(img: Image.Image, box: tuple[int, int, int, int]) -> float:
-    crop = img.crop(box).convert("L")
-    return float(ImageStat.Stat(crop).mean[0])
-
-
 def mean_abs_diff(a: Image.Image, b: Image.Image, box: tuple[int, int, int, int]) -> float:
     diff = ImageChops.difference(a.crop(box), b.crop(box)).convert("L")
     return float(ImageStat.Stat(diff).mean[0])
@@ -549,21 +524,6 @@ def current_tempo_bpm() -> float:
 
 def is_snapped_seconds(value: float, step: float, tolerance: float = 0.035) -> bool:
     return abs(value - round(value / step) * step) <= tolerance
-
-
-def blue_centroid_x(img: Image.Image, box: tuple[int, int, int, int]) -> float:
-    crop = img.crop(box).convert("RGB")
-    total_x = 0.0
-    count = 0
-    for y in range(crop.height):
-        for x in range(crop.width):
-            r, g, b = crop.getpixel((x, y))
-            if b > 120 and g > 70 and r < 120:
-                total_x += x
-                count += 1
-    if count < 50:
-        raise RuntimeError(f"blue clip pixels not found in {box}; count={count}")
-    return box[0] + (total_x / count)
 
 
 def assert_condition(results: dict, key: str, ok: bool, detail: str) -> None:

@@ -69,16 +69,6 @@ function SettingControl({ def }: { def: SettingDef }) {
       );
     }
 
-    case "color":
-      return (
-        <input
-          type="color"
-          value={String(value)}
-          aria-label={def.label}
-          onChange={(e) => set(def.id, e.target.value)}
-        />
-      );
-
     case "key":
       return (
         <button

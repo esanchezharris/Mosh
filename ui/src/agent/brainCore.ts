@@ -7,7 +7,7 @@ import { commandCatalogPrompt } from "./commands";
 import type { Snapshot } from "../types";
 import type { AgentCommandCall } from "./executor";
 
-export type BrainReply = { say?: string; intent?: string; commands?: AgentCommandCall[]; mocked?: boolean };
+export type BrainReply = { say?: string; intent?: string; commands?: AgentCommandCall[] };
 
 export const INTENTS = ["ACK_GOT_IT", "ACK_WORKING", "DONE", "HUH", "NUH", "UHOH", "GREET", "IDLE_MURMUR"];
 

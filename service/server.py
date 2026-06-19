@@ -301,16 +301,11 @@ def _training_worker_loop() -> None:
             _training_q.task_done()
 
 
-def _normalize_training_submit(data: dict, *,
-                               accept_aliases: bool = True) -> dict:
-    if accept_aliases:
-        corpus_bundle = str(data.get("corpusBundle", data.get("corpus_bundle", ""))).strip()
-        priority = data.get("priority", 5)
-    else:
-        corpus_bundle = str(data.get("corpusBundle", "")).strip()
-        priority = data.get("priority", 5)
+def _normalize_training_submit(data: dict) -> dict:
+    corpus_bundle = str(data.get("corpusBundle", data.get("corpus_bundle", ""))).strip()
+    priority = data.get("priority", 5)
     output_dir = str(data.get("outputDir", "")).strip()
-    if not output_dir and accept_aliases:
+    if not output_dir:
         output_dir = str(data.get("output_dir", "")).strip()
     config = data.get("config", {})
     bundle_payload = data.get("bundle", {})

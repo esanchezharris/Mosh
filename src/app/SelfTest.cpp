@@ -3657,19 +3657,27 @@ int runLiveAudioSmoke (MoshEngine& eng, MoshOps& ops)
     return failures;
 }
 
+// Shared helpers for the visual --demoN walkthroughs below: build a command var and
+// run it through MoshOps, and build a small args object. The demos used to each carry
+// an identical copy of these as local lambdas.
+static juce::var moshDemoCmd (MoshOps& ops, const juce::String& n, juce::var a = juce::var())
+{
+    auto* c = new juce::DynamicObject(); c->setProperty ("command", n);
+    if (! a.isVoid()) c->setProperty ("args", a);
+    return ops.execute (juce::var (c));
+}
+static juce::var moshDemoObj (std::initializer_list<std::pair<const char*, juce::var>> kv)
+{
+    auto* o = new juce::DynamicObject();
+    for (auto& p : kv) o->setProperty (p.first, p.second);
+    return juce::var (o);
+}
+
 void runPluginDemo (MoshOps& ops)
 {
     using namespace juce;
-    auto cmd = [&] (const String& n, var a = var()) {
-        auto* c = new DynamicObject(); c->setProperty ("command", n);
-        if (! a.isVoid()) c->setProperty ("args", a);
-        return ops.execute (var (c));
-    };
-    auto obj = [] (std::initializer_list<std::pair<const char*, var>> kv) {
-        auto* o = new DynamicObject();
-        for (auto& p : kv) o->setProperty (p.first, p.second);
-        return var (o);
-    };
+    auto cmd = [&] (const String& n, var a = var()) { return moshDemoCmd (ops, n, a); };
+    auto obj = [] (std::initializer_list<std::pair<const char*, var>> kv) { return moshDemoObj (kv); };
 
     // Find an effect + an instrument from the scan. Prefer Serum 2 for demo3
     // when present because the UI gate verifies its native editor specifically.
@@ -3724,16 +3732,8 @@ int runNeuralAB (MoshEngine& eng, MoshOps& ops)
 {
     using namespace juce;
     ignoreUnused (eng);
-    auto cmd = [&] (const String& n, var a = var()) {
-        auto* c = new DynamicObject(); c->setProperty ("command", n);
-        if (! a.isVoid()) c->setProperty ("args", a);
-        return ops.execute (var (c));
-    };
-    auto obj = [] (std::initializer_list<std::pair<const char*, var>> kv) {
-        auto* o = new DynamicObject();
-        for (auto& p : kv) o->setProperty (p.first, p.second);
-        return var (o);
-    };
+    auto cmd = [&] (const String& n, var a = var()) { return moshDemoCmd (ops, n, a); };
+    auto obj = [] (std::initializer_list<std::pair<const char*, var>> kv) { return moshDemoObj (kv); };
     auto* mm = MessageManager::getInstanceWithoutCreating();
     auto pump = [&] (int ms) {
         const auto end = Time::getMillisecondCounter() + (uint32) jmax (0, ms);
@@ -3791,16 +3791,8 @@ int runNeuralAB (MoshEngine& eng, MoshOps& ops)
 void runNeuralDemo (MoshOps& ops)
 {
     using namespace juce;
-    auto cmd = [&] (const String& n, var a = var()) {
-        auto* c = new DynamicObject(); c->setProperty ("command", n);
-        if (! a.isVoid()) c->setProperty ("args", a);
-        return ops.execute (var (c));
-    };
-    auto obj = [] (std::initializer_list<std::pair<const char*, var>> kv) {
-        auto* o = new DynamicObject();
-        for (auto& p : kv) o->setProperty (p.first, p.second);
-        return var (o);
-    };
+    auto cmd = [&] (const String& n, var a = var()) { return moshDemoCmd (ops, n, a); };
+    auto obj = [] (std::initializer_list<std::pair<const char*, var>> kv) { return moshDemoObj (kv); };
 
     auto t = cmd ("create_track", obj ({{ "name", "Guitar" }}))["data"].getProperty ("trackId", var()).toString();
     cmd ("add_test_tone_clip", obj ({{ "trackId", t }, { "seconds", 3.0 }, { "freq", 110.0 }}));
@@ -3816,16 +3808,8 @@ void runNeuralDemo (MoshOps& ops)
 void runGenerativeDemo (MoshOps& ops)
 {
     using namespace juce;
-    auto cmd = [&] (const String& n, var a = var()) {
-        auto* c = new DynamicObject(); c->setProperty ("command", n);
-        if (! a.isVoid()) c->setProperty ("args", a);
-        return ops.execute (var (c));
-    };
-    auto obj = [] (std::initializer_list<std::pair<const char*, var>> kv) {
-        auto* o = new DynamicObject();
-        for (auto& p : kv) o->setProperty (p.first, p.second);
-        return var (o);
-    };
+    auto cmd = [&] (const String& n, var a = var()) { return moshDemoCmd (ops, n, a); };
+    auto obj = [] (std::initializer_list<std::pair<const char*, var>> kv) { return moshDemoObj (kv); };
 
     auto t = cmd ("create_track", obj ({{ "name", "Vox" }}))["data"].getProperty ("trackId", var()).toString();
     auto tone = cmd ("add_test_tone_clip", obj ({{ "trackId", t }, { "seconds", 2.0 }, { "freq", 147.0 }}));
@@ -3847,16 +3831,8 @@ void runGenerativeDemo (MoshOps& ops)
 void runConsolidationDemo (MoshOps& ops)
 {
     using namespace juce;
-    auto cmd = [&] (const String& n, var a = var()) {
-        auto* c = new DynamicObject(); c->setProperty ("command", n);
-        if (! a.isVoid()) c->setProperty ("args", a);
-        return ops.execute (var (c));
-    };
-    auto obj = [] (std::initializer_list<std::pair<const char*, var>> kv) {
-        auto* o = new DynamicObject();
-        for (auto& p : kv) o->setProperty (p.first, p.second);
-        return var (o);
-    };
+    auto cmd = [&] (const String& n, var a = var()) { return moshDemoCmd (ops, n, a); };
+    auto obj = [] (std::initializer_list<std::pair<const char*, var>> kv) { return moshDemoObj (kv); };
 
     // A "Gtr" track with BOTH tiers on it: a Tier-A neural insert + a Tier-B
     // generative RenderLayer on its clip.
