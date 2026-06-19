@@ -3894,6 +3894,19 @@ juce::var MoshOps::cmdAcceptRender (const juce::var& args)
     juce::File artifact (node[ids::cacheArtifact].toString());
     if (! artifact.existsAsFile()) return errResult ("accept_render", "nothing rendered to accept");
 
+    // Copy the render artifact into the project audio dir BEFORE any edit mutation.
+    // copyFileTo does not create parent dirs and can fail (disk full, perms); doing
+    // it up front and checking the result means a failed copy is a clean error
+    // rather than a clip pointing at a missing/partial file landing in the saved
+    // project. (createAudioTrack below is an undoable mutation, so we must not reach
+    // it on a copy failure.)
+    auto dest = eng.sessionDir().getChildFile ("audio")
+                    .getChildFile (node[ids::id].toString()).withFileExtension ("wav");
+    dest.getParentDirectory().createDirectory();
+    dest.deleteFile();
+    if (! artifact.copyFileTo (dest))
+        return errResult ("accept_render", "failed to copy render artifact");
+
     // Landing: new clip on a dedicated "neural" lane (the documented guaranteed
     // fallback, 05 §3.1 — ships as a user-selectable mode, not a defeat).
     beginTxn ("accept_render");
@@ -3906,11 +3919,6 @@ juce::var MoshOps::cmdAcceptRender (const juce::var& args)
         lane = createAudioTrack ("Neural Renders");
     }
     if (lane == nullptr) return errResult ("accept_render", "no lane");
-
-    auto dest = eng.sessionDir().getChildFile ("audio")
-                    .getChildFile (node[ids::id].toString()).withFileExtension ("wav");
-    dest.deleteFile();
-    artifact.copyFileTo (dest);
 
     auto pos = clip->getPosition();
     lane->insertWaveClip ("neural-" + clip->getName(), dest,
