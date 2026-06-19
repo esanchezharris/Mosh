@@ -16,6 +16,7 @@ import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { Topbar, Toolbar } from "./ui/Topbar";
 import { Arrange } from "./ui/Arrange";
 import { Dock } from "./ui/Dock";
+import { DockShell } from "./ui/dock/DockShell";
 import { Mixer } from "./ui/Mixer";
 import { PluginBrowser } from "./ui/PluginBrowser";
 import { PianoRoll } from "./ui/PianoRoll";
@@ -58,10 +59,9 @@ export function App() {
             <Mixer snapshot={snapshot} />
           </div>
         ) : (
-          <div className="view arrange-view" data-testid="view" data-view="arrange">
+          <DockShell bottom={<Dock snapshot={snapshot} />}>
             <Arrange snapshot={snapshot} />
-            <Dock snapshot={snapshot} />
-          </div>
+          </DockShell>
         )
       ) : (
         <div className="boot"><p>Loading snapshot…</p></div>
