@@ -43,36 +43,23 @@ add_custom_target(MoshUI DEPENDS "${MOSH_UI_DIST}/index.html")
 
 # Stage the built bundle where WebBridge can serve it after the app links.
 add_dependencies(Mosh MoshUI)
-if (APPLE)
-    add_custom_command(TARGET Mosh POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E rm -rf
-                "$<TARGET_BUNDLE_CONTENT_DIR:Mosh>/Resources/ui"
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-                "${MOSH_UI_DIST}"
-                "$<TARGET_BUNDLE_CONTENT_DIR:Mosh>/Resources/ui"
-        COMMENT "Staging UI bundle into Mosh.app/Contents/Resources/ui"
-        VERBATIM)
-else()
-    add_custom_command(TARGET Mosh POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E rm -rf
-                "$<TARGET_FILE_DIR:Mosh>/ui"
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-                "${MOSH_UI_DIST}"
-                "$<TARGET_FILE_DIR:Mosh>/ui"
-        COMMENT "Staging UI bundle next to Mosh executable"
-        VERBATIM)
-endif()
+# macOS-only project (CMakeLists.txt FATAL_ERRORs on non-Apple before this runs),
+# so the bundle is always Mosh.app/Contents/Resources/ui.
+add_custom_command(TARGET Mosh POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E rm -rf
+            "$<TARGET_BUNDLE_CONTENT_DIR:Mosh>/Resources/ui"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${MOSH_UI_DIST}"
+            "$<TARGET_BUNDLE_CONTENT_DIR:Mosh>/Resources/ui"
+    COMMENT "Staging UI bundle into Mosh.app/Contents/Resources/ui"
+    VERBATIM)
 
 # The POST_BUILD staging above only runs when the Mosh target itself relinks.
 # UI-only iterations (no C++ change) rebuild the bundle via MoshUI but never
 # relink Mosh, so the app would ship a STALE bundle. This ALL target always
 # restages the freshest dist after the app exists (it depends on Mosh + MoshUI),
 # closing that gap. Build it (or the default `all`) to guarantee a fresh bundle.
-if (APPLE)
-    set(MOSH_UI_STAGE_DIR "$<TARGET_BUNDLE_CONTENT_DIR:Mosh>/Resources/ui")
-else()
-    set(MOSH_UI_STAGE_DIR "$<TARGET_FILE_DIR:Mosh>/ui")
-endif()
+set(MOSH_UI_STAGE_DIR "$<TARGET_BUNDLE_CONTENT_DIR:Mosh>/Resources/ui")
 add_custom_target(MoshStageUI ALL
     COMMAND ${CMAKE_COMMAND} -E rm -rf "${MOSH_UI_STAGE_DIR}"
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${MOSH_UI_DIST}" "${MOSH_UI_STAGE_DIR}"

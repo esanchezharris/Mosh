@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  DRUM_LANES, STEPS, stepBeats, noteStart, laneIndexForPitch,
+  DRUM_LANES, STEPS, stepBeats, laneIndexForPitch,
   cellForNote, buildGrid, cycleVelocity,
   swingOffsetBeats, stepStartBeats, velocityFromFraction,
 } from "./drumGrid";
@@ -20,16 +20,12 @@ describe("drum lane table", () => {
   });
 });
 
-describe("stepBeats / noteStart", () => {
+describe("stepBeats", () => {
   it("splits a 4/4 bar into 16 quarter-step beats", () => {
     expect(stepBeats(4)).toBeCloseTo(0.25, 10);
   });
   it("splits a 3/4 bar into 16 steps", () => {
     expect(stepBeats(3)).toBeCloseTo(0.1875, 10);
-  });
-  it("noteStart(step) = step * stepBeats", () => {
-    expect(noteStart(4, 0.25)).toBeCloseTo(1.0, 10);
-    expect(noteStart(0, 0.25)).toBe(0);
   });
 });
 

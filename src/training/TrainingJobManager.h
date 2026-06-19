@@ -12,7 +12,6 @@ public:
 
     bool ensureServiceRunning();
     bool isHealthy();
-    juce::var capabilities();
 
     juce::String submitJob (const juce::String& corpusBundle,
                             const juce::var& config,

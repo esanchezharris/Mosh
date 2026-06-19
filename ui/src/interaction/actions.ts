@@ -52,24 +52,9 @@ export const EditorAction = {
 
 export type EditorAction = (typeof EditorAction)[keyof typeof EditorAction];
 
-export const ALL_ACTIONS: ReadonlySet<EditorAction> = new Set(
-  Object.values(EditorAction),
-);
-
-export function isEditorAction(v: unknown): v is EditorAction {
-  return typeof v === "string" && ALL_ACTIONS.has(v as EditorAction);
-}
-
 // ── Regions: formalised zones on the existing DOM. Dotted names form a hierarchy
 // (clip.header is a child of clip), which the gesture resolver uses for CSS-like
 // cascade: a rule on "clip" applies to "clip.header" as a less-specific fallback.
-export const REGIONS = [
-  "clip.header",
-  "clip.body",
-  "clip.edge",
-  "empty",
-  "ruler",
-] as const;
 export type Region = string; // open string — rules may target ancestors ("clip", "*")
 
 // ── Gestures: discrete pointer/key interactions the table is keyed by.

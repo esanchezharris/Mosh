@@ -14,6 +14,7 @@ import { useStore } from "./store";
 import { useSettings } from "./settings/store";
 import { isNative } from "./bridge";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
+import { useFileDrop } from "./hooks/useFileDrop";
 import { Topbar, Toolbar } from "./ui/Topbar";
 import { Arrange } from "./ui/Arrange";
 import { Dock } from "./ui/Dock";
@@ -35,6 +36,7 @@ export function App() {
 
   useEffect(() => { init(); }, [init]);
   useKeyboardShortcuts(); // the single keyboard layer + native-menu bridge (CTL-002)
+  const dragging = useFileDrop(); // BRW-007 drag-and-drop audio import (bytes-over-bridge)
 
   // Layout = a template value (Phase 6). The FL layout pops the drum sequencer into
   // its floating window: when the layout becomes "fl", open it for the first drum
@@ -91,6 +93,11 @@ export function App() {
       <AutomationPanel />
       <DrumWindow />
       <MonsterChanges />
+      {dragging && (
+        <div className="drop-overlay" role="status" aria-live="polite" data-testid="drop-overlay">
+          <span>Drop audio to import</span>
+        </div>
+      )}
     </div>
   );
 }

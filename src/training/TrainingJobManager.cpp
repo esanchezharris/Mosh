@@ -102,11 +102,6 @@ bool TrainingJobManager::ensureServiceRunning()
     return isHealthy();
 }
 
-var TrainingJobManager::capabilities()
-{
-    return httpGet ("/training/capabilities");
-}
-
 String TrainingJobManager::submitJob (const String& corpusBundle, const var& config, const String& outputDir)
 {
     auto* body = new DynamicObject();

@@ -7,7 +7,7 @@ import type {
   Snapshot, Transport, MoshEvent, CommandResult, AvailablePlugin,
   BuiltinPlugin, AvailableColor, RenderQA, Level, AudioDevices, Clip,
   WaveInput, TrackOutputs,
-  PluginCounts, PluginBlockEntry,
+  PluginCounts,
 } from "./types";
 import type { RemoteStatus } from "./bridge";
 import { type SnapDiv, snapTimeMap, tempoMapFrom } from "./time";
@@ -25,9 +25,6 @@ export type Spectrum = { bands: number[]; level: number; flux: number };
 // ARR-010 — a UI-local edit time-range [start,end] in seconds. Never a command;
 // only delete_time_range sends {start,end} across the bridge when invoked.
 export type TimeRange = { start: number; end: number };
-// AUT-003 — per-track inline-automation-lane param selection (which
-// AutomatableParameter the strip under each track draws). UI-local view state.
-export type InlineAutoSel = { pluginIndex: number; paramIndex: number };
 
 type State = {
   snapshot: Snapshot | null;
@@ -40,22 +37,18 @@ type State = {
   tool: Tool;
   snap: boolean;
   snapDivision: SnapDiv; // musical grid resolution (bar, 1/4, 1/8, …)
-  laneHeight: number;    // track-lane height in px (vertical zoom)
   selection: Set<string>;
   peaks: Record<string, Peaks>;
 
   // ARR-010 — the active edit time-range (UI-local; set by the Range tool, sent
   // to the backend only via delete_time_range). null when no range is drawn.
   timeRange: TimeRange | null;
-  // AUT-003 — per-track inline-lane param selection (trackId → which param).
-  inlineAuto: Record<string, InlineAutoSel>;
 
   // Stage 3: plugin browser
   selectedTrackId: string | null;
   availablePlugins: AvailablePlugin[];
   availableBuiltins: BuiltinPlugin[];
   pluginCounts: PluginCounts | null;          // per-format catalog counts (INS-005)
-  pluginBlocklist: PluginBlockEntry[];        // quarantined plugins (INS-005)
   scanProgress: { format: string; done: boolean } | null; // transient rescan state
   browserOpen: boolean;
   renderProgress: Record<string, number>; // clipId → 0..1 (Tier-B render)
@@ -97,7 +90,6 @@ type State = {
   setTool: (t: Tool) => void;
   setSnap: (b: boolean) => void;
   setSnapDivision: (d: SnapDiv) => void;
-  setLaneHeight: (h: number) => void;
   select: (ids: string[], additive?: boolean) => void;
   clearSelection: () => void;
   snapTime: (t: number) => number;
@@ -105,9 +97,6 @@ type State = {
 
   // ARR-010 — time-range view-state actions (never cross the bridge).
   setTimeRange: (r: TimeRange | null) => void;
-  clearTimeRange: () => void;
-  // AUT-003 — set which param the inline lane under a track draws.
-  setInlineAuto: (trackId: string, sel: InlineAutoSel) => void;
 
   // Clipboard actions (UI-local until paste). copy/cut capture a snapshot clip;
   // paste reconstructs it on the backend via the paste_clip command.
@@ -126,8 +115,6 @@ type State = {
   closeBrowser: () => void;
   // INS-005 — plugin scan / blocklist management (all via exec; UI-local view state otherwise).
   rescanPlugins: (format?: "vst3" | "au" | "all") => Promise<void>;
-  loadBlocklist: () => Promise<void>;
-  clearBlocklist: () => Promise<void>;
   refreshPluginList: () => Promise<void>;
   loadColors: () => void;
   loadAudioDevices: () => Promise<void>;   // lazy + on-demand (force re-fetch after a device change)
@@ -173,7 +160,6 @@ type State = {
   // UI scale (ACC-005) — pure UI-local view state (like theme): never a command,
   // never crosses the bridge. Applied via document zoom so the whole WebView reflows.
   uiScale: number;
-  setUiScale: (n: number) => void;
 };
 
 export const useStore = create<State>((set, get) => ({
@@ -185,16 +171,13 @@ export const useStore = create<State>((set, get) => ({
   tool: "move",
   snap: true,
   snapDivision: "1/4",
-  laneHeight: 84,
   selection: new Set<string>(),
   peaks: {},
   timeRange: null,
-  inlineAuto: {},
   selectedTrackId: null,
   availablePlugins: [],
   availableBuiltins: [],
   pluginCounts: null,
-  pluginBlocklist: [],
   scanProgress: null,
   browserOpen: false,
   renderProgress: {},
@@ -332,7 +315,6 @@ export const useStore = create<State>((set, get) => ({
   setTool: (t) => set({ tool: t }),
   setSnap: (b) => set({ snap: b }),
   setSnapDivision: (d) => set({ snapDivision: d }),
-  setLaneHeight: (h) => set({ laneHeight: Math.max(48, Math.min(220, h)) }),
   select: (ids, additive = false) =>
     set((s) => {
       const next = new Set(additive ? s.selection : []);
@@ -341,9 +323,6 @@ export const useStore = create<State>((set, get) => ({
     }),
   clearSelection: () => set({ selection: new Set<string>() }),
   setTimeRange: (r) => set({ timeRange: r }),
-  clearTimeRange: () => set({ timeRange: null }),
-  setInlineAuto: (trackId, sel) =>
-    set((s) => ({ inlineAuto: { ...s.inlineAuto, [trackId]: sel } })),
   snapTime: (t) => {
     const { snap, snapDivision, snapshot } = get();
     if (!snap) return t;
@@ -441,20 +420,6 @@ export const useStore = create<State>((set, get) => ({
       set({ scanProgress: null });
       await get().refreshPluginList();
     }
-  },
-
-  loadBlocklist: async () => {
-    const res = await executeCommand<CommandResult<{ blocklist: PluginBlockEntry[] }>>({
-      command: "get_plugin_blocklist",
-      args: {},
-    });
-    if (res.ok && res.data) set({ pluginBlocklist: res.data.blocklist });
-  },
-
-  clearBlocklist: async () => {
-    await get().exec("clear_plugin_blocklist");
-    await get().loadBlocklist();
-    await get().refreshPluginList();
   },
 
   loadColors: () => {
@@ -582,10 +547,4 @@ export const useStore = create<State>((set, get) => ({
   },
 
   uiScale: useSettings.getState().get("uiScale") as number,
-  setUiScale: (n) => {
-    // coerceSetting clamps to the schema's legible range + snaps to step, and the
-    // settings effect applies document zoom (reflows cleanly in the JUCE WebView).
-    useSettings.getState().set("uiScale", n);
-    set({ uiScale: useSettings.getState().get("uiScale") as number });
-  },
 }));

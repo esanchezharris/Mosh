@@ -115,7 +115,7 @@ case "$MODE" in
     SVC="$DEST/Contents/Resources/service"
     echo "bundling service → ${SVC#$ROOT/}"
     rm -rf "$SVC"; mkdir -p "$SVC/transcribe"
-    cp "$ROOT/service/server.py" "$ROOT/service/run.sh" "$ROOT/service/run.ps1" \
+    cp "$ROOT/service/server.py" "$ROOT/service/run.sh" \
        "$ROOT/service/quality_readout.py" "$ROOT/service/setup-sa3.sh" "$SVC/" 2>/dev/null || true
     for d in adapters colors sa3 scripts training; do
       [ -d "$ROOT/service/$d" ] && cp -R "$ROOT/service/$d" "$SVC/$d"

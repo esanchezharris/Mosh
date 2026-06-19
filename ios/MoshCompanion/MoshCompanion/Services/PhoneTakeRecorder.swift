@@ -60,19 +60,6 @@ final class PhoneTakeRecorder: ObservableObject {
         }
     }
 
-    func cancel(client: CompanionClientProtocol) async {
-        guard let takeId = activeTakeId else { return }
-        let sequencer = uploadSequencer
-        engine.inputNode.removeTap(onBus: 0)
-        engine.stop()
-        activeTakeId = nil
-        uploadSequencer = nil
-        isRecording = false
-        level = 0
-        sequencer?.cancel()
-        try? await client.cancelTake(takeId: takeId)
-    }
-
     nonisolated private static func pcm16Data(from buffer: AVAudioPCMBuffer, channels: Int) -> Data {
         guard let source = buffer.floatChannelData else { return Data() }
         let frames = Int(buffer.frameLength)
@@ -123,12 +110,6 @@ final class PhoneTakeRecorder: ObservableObject {
         func waitForUploads() async throws {
             for task in pendingTasks() {
                 try await task.value
-            }
-        }
-
-        func cancel() {
-            for task in pendingTasks() {
-                task.cancel()
             }
         }
 

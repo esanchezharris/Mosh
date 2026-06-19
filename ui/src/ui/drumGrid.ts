@@ -47,9 +47,6 @@ export const swingOffsetBeats = (step: number, sb: number, swing: number): numbe
 export const stepStartBeats = (step: number, sb: number, swing = 0): number =>
   step * sb + swingOffsetBeats(step, sb, swing);
 
-/** Back-compat alias (straight, no swing). */
-export const noteStart = (step: number, sb: number): number => step * sb;
-
 /** Row index of a GM drum pitch, or -1 if the pitch isn't a lane. */
 export const laneIndexForPitch = (pitch: number): number =>
   DRUM_LANES.findIndex((l) => l.pitch === pitch);

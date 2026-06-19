@@ -18,20 +18,6 @@ struct RemoteEnvelope<T: Decodable>: Decodable {
 
 struct EmptyRemoteData: Decodable {}
 
-struct RemotePairingInfo: Decodable, Equatable {
-    let host: String
-    let port: Int
-    let token: String
-    let expiresAtMs: Double
-    let pairingUrl: String
-}
-
-struct RemoteStatus: Decodable, Equatable {
-    let running: Bool
-    let port: Int
-    let pairing: RemotePairingInfo?
-}
-
 struct MoshSnapshot: Decodable, Equatable {
     var tracks: [MoshTrack]
     var transport: MoshTransport
@@ -45,9 +31,7 @@ struct MoshSnapshot: Decodable, Equatable {
                 return RenderTarget(
                     clipId: clip.id,
                     layerId: layer.id,
-                    title: "\(trackName) · \(clipName)",
-                    status: layer.status,
-                    adapter: layer.adapter
+                    title: "\(trackName) · \(clipName)"
                 )
             }
         }
@@ -108,8 +92,6 @@ struct RenderTarget: Identifiable, Equatable {
     let clipId: String
     let layerId: String
     let title: String
-    let status: String
-    let adapter: String
 
     var id: String { clipId }
 }

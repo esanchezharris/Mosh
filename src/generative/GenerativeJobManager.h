@@ -21,8 +21,6 @@ public:
     bool ensureServiceRunning();
     bool isHealthy();
 
-    juce::var capabilities();
-
     /** The available SA3 colours + their ASTD ceilings (GET /colors), for the UI. */
     juce::var listColors();
 

@@ -487,6 +487,12 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 .strip-db { font-size: 10px; color: var(--bone-dim); font-family: var(--font-mono); }
 .strip-ms { display: flex; gap: 5px; }
 
+/* ── drag-and-drop audio import affordance (BRW-007) ────────────────────────*/
+.drop-overlay { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center;
+  background: rgba(0,0,0,0.45); border: 3px dashed var(--lime); pointer-events: none; }
+.drop-overlay span { padding: 12px 22px; background: var(--ink-raise); color: var(--lime);
+  border: 1px solid var(--lime-dim); border-radius: 10px; font-size: 14px; letter-spacing: 0.04em; }
+
 /* ── modal plugin browser ───────────────────────────────────────────────────*/
 .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: grid; place-items: center; z-index: 50; }
 .modal { width: 460px; max-height: 70vh; display: flex; flex-direction: column; background: var(--ink-raise); border: 1px solid var(--ink-line); border-radius: 12px; overflow: hidden; }

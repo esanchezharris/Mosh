@@ -46,7 +46,6 @@ interface DockLayoutState {
   toggleBottom: () => void;
   resizeLeft: (deltaPx: number) => void;
   toggleLeft: () => void;
-  setLeftCollapsed: (collapsed: boolean) => void;
 }
 
 export const useDockLayout = create<DockLayoutState>((set, get) => {
@@ -57,10 +56,5 @@ export const useDockLayout = create<DockLayoutState>((set, get) => {
     toggleBottom: () => { set({ bottom: toggleZone(get().bottom, 0) }); persist(); },
     resizeLeft: (deltaPx) => { set({ left: resizeZone(get().left, deltaPx) }); persist(); },
     toggleLeft: () => { set({ left: toggleZone(get().left, 0) }); persist(); },
-    setLeftCollapsed: (collapsed) => {
-      const cur = get().left;
-      if (!!cur.collapsed === collapsed) return;
-      set({ left: toggleZone(cur, 0) }); persist();
-    },
   };
 });
