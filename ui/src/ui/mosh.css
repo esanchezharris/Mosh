@@ -66,6 +66,69 @@
 [data-theme="light"] .auto-line { stroke: #7c9a10; }
 [data-theme="light"] .error-bar { color: #a01228; }
 
+/* ── token SKINS ──────────────────────────────────────────────────────────────
+   Skin is an axis INDEPENDENT of light/dark. The 'mosh' skin IS the :root baseline
+   (PS2 ink+lime), so it needs no block. 'ableton' / 'fl' remap the brand accent +
+   ground tokens; every primitive already reads from these vars, so setting
+   <html data-skin="…"> reskins the whole UI. Because [data-skin] and [data-theme]
+   are equal-specificity attribute selectors, the per-skin DARK grounds sit here and
+   the per-skin LIGHT grounds use the combined [data-skin][data-theme="light"]
+   selector (specificity 0,2,0) so light always wins on a non-mosh skin. The accent
+   tokens are set once per skin and intentionally NOT re-set in the light blocks, so
+   the accent is constant across both themes. */
+
+/* Ableton — flat, high-contrast neutral grey chrome, amber accent. */
+[data-skin="ableton"] {
+  --ink: #1b1b1b;
+  --ink-raise: #2a2a2a;
+  --ink-deep: #141414;
+  --ink-line: #3a3a3a;
+  --ink-line-soft: #2f2f2f;
+  --bone: #f2f2f2;
+  --mist: #d8d8d8;
+  --bone-dim: rgba(242, 242, 242, 0.6);
+  --lime: #ffcf33;
+  --lime-glow: #ffd84d;
+  --lime-dim: rgba(255, 207, 51, 0.5);
+  --lime-faint: rgba(255, 207, 51, 0.14);
+}
+[data-skin="ableton"][data-theme="light"] {
+  --ink: #e9e9e9;
+  --ink-raise: #ffffff;
+  --ink-deep: #dcdcdc;
+  --ink-line: #c4c4c4;
+  --ink-line-soft: #d8d8d8;
+  --bone: #1a1a1a;
+  --mist: #333333;
+  --bone-dim: rgba(20, 20, 20, 0.6);
+}
+
+/* FL — darker than mosh, orange accent. */
+[data-skin="fl"] {
+  --ink: #07070a;
+  --ink-raise: #121218;
+  --ink-deep: #000000;
+  --ink-line: #20202a;
+  --ink-line-soft: #17171f;
+  --bone: #eef0f4;
+  --mist: #cdd0d8;
+  --bone-dim: rgba(238, 240, 244, 0.55);
+  --lime: #ff7a1a;
+  --lime-glow: #ff9445;
+  --lime-dim: rgba(255, 122, 26, 0.5);
+  --lime-faint: rgba(255, 122, 26, 0.14);
+}
+[data-skin="fl"][data-theme="light"] {
+  --ink: #ececee;
+  --ink-raise: #ffffff;
+  --ink-deep: #dedee2;
+  --ink-line: #c6c6cc;
+  --ink-line-soft: #dadade;
+  --bone: #15151a;
+  --mist: #2e2e36;
+  --bone-dim: rgba(21, 21, 26, 0.6);
+}
+
 * { box-sizing: border-box; }
 html, body, #root { margin: 0; height: 100%; width: 100%; }
 body { background: var(--ink); color: var(--bone); font-family: var(--font-body); overflow: hidden; }
@@ -463,6 +526,12 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 .menu-foot { padding: 6px 8px 2px; border-top: 1px solid var(--ink-line-soft); }
 
 .scale-ctl { display: flex; align-items: center; gap: 6px; }
+
+/* schema-driven Settings panel — a touch wider for the controls, scrolls if tall */
+.settings-pop .pop { width: min(94vw, 320px); max-height: min(80vh, 640px); overflow: auto; }
+.set-num { display: inline-flex; align-items: center; gap: 8px; }
+.set-num input[type="range"] { width: 120px; accent-color: var(--lime); }
+.set-num-val { min-width: 34px; text-align: right; color: var(--bone-dim); }
 .cmdlog-list { max-height: 240px; overflow: auto; display: flex; flex-direction: column; gap: 2px; }
 .cmdlog-row { display: flex; align-items: center; gap: 6px; font-size: 11px; padding: 2px 0; }
 .cmdlog-row.err { color: var(--danger); }

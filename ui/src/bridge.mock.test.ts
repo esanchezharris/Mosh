@@ -25,9 +25,8 @@ const ALLOWLIST = new Set<string>([
   // where the real backend would change the arrangement. Tracked here so the guard
   // stays green; give them real mock cases when dev-mode fidelity matters.
   "paste_clip",
-  // (create_group_track was only ever dispatched by the orphaned, never-mounted
-  //  keyboard hook; the CTL-002 shortcut consolidation removed that dead binding,
-  //  so the UI no longer dispatches it — entry dropped to keep this guard honest.)
+  // (create_group_track is dispatched by the configurable keymap's GROUP action and
+  //  now has a real mock case — so it's intentionally NOT allowlisted.)
 ]);
 
 function listSourceFiles(dir: string): string[] {
