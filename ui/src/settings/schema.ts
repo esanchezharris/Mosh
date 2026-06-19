@@ -12,6 +12,10 @@
 // (settings/SettingsPanel.tsx has one renderer per `type`). Start with app scope.
 // ============================================================================
 
+import { type EditorAction } from "../interaction/actions";
+import { REBINDABLE_ACTIONS } from "../interaction/keymap";
+import { FEEL_DEFAULTS } from "../interaction/feel";
+
 export type SettingType =
   | "enum"
   | "bool"
@@ -108,7 +112,62 @@ export const SETTINGS: SettingDef[] = [
     label: "Voice volume",
     constraints: { min: 0, max: 1, step: 0.05 },
   },
+  ...interactionSettings(),
 ];
+
+// ── Interaction settings (Phase: DAW-faithful controls). The gesture-table + keymap
+// SELECTORS pick a DAW preset; the feel sliders tune continuous behavior; the key.*
+// settings rebind individual actions (empty = inherit the keymap preset). All are
+// template values, so switching to the Ableton template loads its whole feel.
+// (Data lives inside the function so there's no temporal-dead-zone hazard from the
+// `...interactionSettings()` spread during the SETTINGS initializer above.)
+function interactionSettings(): SettingDef[] {
+  const DAW_OPTIONS: EnumOption[] = [
+    { value: "mosh", label: "Mosh" },
+    { value: "ableton", label: "Ableton" },
+    { value: "fl", label: "FL" },
+  ];
+  const FEEL_META: { id: keyof typeof FEEL_DEFAULTS; label: string; help: string; min: number; max: number; step: number }[] = [
+    { id: "dragThreshold", label: "Drag threshold (px)", help: "Movement before a click becomes a drag.", min: 0, max: 20, step: 1 },
+    { id: "doubleClickMs", label: "Double-click (ms)", help: "Max gap between two clicks to open a clip.", min: 150, max: 600, step: 10 },
+    { id: "edgeGrabPx", label: "Edge-grab zone (px)", help: "Width of the clip trim zones.", min: 2, max: 24, step: 1 },
+    { id: "snapStrength", label: "Snap strength", help: "0 = free, 1 = always snap to grid.", min: 0, max: 1, step: 0.05 },
+    { id: "zoomSensitivity", label: "Zoom sensitivity", help: "Wheel-zoom gain (Mod+wheel).", min: 0.25, max: 3, step: 0.05 },
+    { id: "scrollSensitivity", label: "Scroll sensitivity", help: "Wheel-scroll gain.", min: 0.25, max: 3, step: 0.05 },
+  ];
+  const KEY_LABELS: Partial<Record<EditorAction, string>> = {
+    play_pause: "Play / Pause", record: "Record", undo: "Undo", redo: "Redo",
+    save: "Save", delete: "Delete", copy: "Copy", cut: "Cut", paste: "Paste",
+    duplicate: "Duplicate", group: "Group", to_start: "To start", to_end: "To end",
+    split: "Split at playhead", tool_move: "Move tool", tool_split: "Split tool",
+    tool_range: "Range tool",
+  };
+  const selectors: SettingDef[] = [
+    {
+      id: "gestureTable", type: "enum", default: "mosh", scope: "app",
+      category: "Interaction", label: "Mouse gestures",
+      help: "Which DAW's clip/lane interaction model the mouse uses.",
+      constraints: { options: DAW_OPTIONS },
+    },
+    {
+      id: "keymap", type: "enum", default: "mosh", scope: "app",
+      category: "Interaction", label: "Keymap",
+      help: "Which DAW's keyboard shortcut set.",
+      constraints: { options: DAW_OPTIONS },
+    },
+  ];
+  const feel: SettingDef[] = FEEL_META.map((m) => ({
+    id: `feel.${m.id}`, type: "number", default: FEEL_DEFAULTS[m.id], scope: "app",
+    category: "Feel", label: m.label, help: m.help,
+    constraints: { min: m.min, max: m.max, step: m.step },
+  }));
+  const keys: SettingDef[] = REBINDABLE_ACTIONS.map((a) => ({
+    id: `key.${a}`, type: "key", default: "", scope: "app",
+    category: "Keys", label: KEY_LABELS[a] ?? a,
+    help: "Empty = use the keymap preset's binding.",
+  }));
+  return [...selectors, ...feel, ...keys];
+}
 
 export const SETTINGS_BY_ID: Record<string, SettingDef> = Object.fromEntries(
   SETTINGS.map((d) => [d.id, d]),

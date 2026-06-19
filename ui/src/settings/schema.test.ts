@@ -50,7 +50,9 @@ describe("defaultSettings", () => {
 describe("settingsByCategory", () => {
   it("groups settings, categories in first-appearance order", () => {
     const groups = settingsByCategory();
-    expect(groups.map((g) => g.category)).toEqual(["Appearance", "Moshi"]);
+    expect(groups.map((g) => g.category)).toEqual([
+      "Appearance", "Moshi", "Interaction", "Feel", "Keys",
+    ]);
   });
 
   it("keeps settings within a group in schema order", () => {

@@ -18,17 +18,32 @@ export const TEMPLATES: Template[] = [
   {
     name: "mosh",
     label: "Mosh",
-    values: { skin: "mosh", theme: "dark" },
+    // The native baseline — skin + interaction model + feel. Selecting Mosh restores
+    // the default feel even after individual tweaks.
+    values: {
+      skin: "mosh", theme: "dark",
+      gestureTable: "mosh", keymap: "mosh",
+      "feel.dragThreshold": 3, "feel.doubleClickMs": 300, "feel.edgeGrabPx": 7,
+      "feel.snapStrength": 1, "feel.zoomSensitivity": 1, "feel.scrollSensitivity": 1,
+    },
   },
   {
     name: "ableton",
     label: "Ableton",
-    values: { skin: "ableton", theme: "light" },
+    values: {
+      skin: "ableton", theme: "light",
+      gestureTable: "ableton", keymap: "ableton",
+      "feel.dragThreshold": 4, "feel.edgeGrabPx": 5, "feel.snapStrength": 1,
+    },
   },
   {
     name: "fl",
     label: "FL",
-    values: { skin: "fl", theme: "dark" },
+    values: {
+      skin: "fl", theme: "dark",
+      gestureTable: "fl", keymap: "fl",
+      "feel.dragThreshold": 3, "feel.edgeGrabPx": 8, "feel.snapStrength": 1,
+    },
   },
 ];
 

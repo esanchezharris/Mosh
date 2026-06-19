@@ -123,11 +123,12 @@ export const useSettings = create<SettingsState>((set, get) => {
       persist({ template: name, values });
     },
 
-    // Back to schema defaults (no template, no overrides) + re-apply effects. Used
-    // by tests and any "restore defaults" affordance.
+    // Back to schema defaults (no template, no overrides) — persisted, so a reload
+    // doesn't resurrect cleared overrides. Used by the "Reset" affordance + tests.
     reset: () => {
-      set({ template: null, values: {} });
-      applySettingEffects(effectiveAll({}));
+      const next: Persisted = { template: null, values: {} };
+      set(next);
+      persist(next);
     },
 
     // Load from localStorage and project onto the document. Call once on boot,

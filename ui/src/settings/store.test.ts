@@ -79,6 +79,22 @@ describe("template application + per-setting override", () => {
   });
 });
 
+describe("reset", () => {
+  it("clears overrides AND persists the cleared state (survives reload)", () => {
+    useSettings.getState().applyTemplate("ableton");
+    useSettings.getState().set("uiScale", 1.3);
+    useSettings.getState().reset();
+
+    expect(useSettings.getState().get("uiScale")).toBe(1); // back to default
+    expect(useSettings.getState().template).toBeNull();
+    // and a reload must NOT resurrect the old overrides
+    useSettings.setState({ template: "zzz", values: { uiScale: 1.3 } });
+    useSettings.getState().hydrate();
+    expect(useSettings.getState().get("uiScale")).toBe(1);
+    expect(useSettings.getState().template).toBeNull();
+  });
+});
+
 describe("DOM effects", () => {
   it("applies skin/theme to the root data-attributes and scale to zoom", () => {
     useSettings.getState().applyTemplate("fl");
@@ -112,6 +128,7 @@ describe("resilience", () => {
   });
 
   it("migrates the legacy mosh.voiceOn key when no unified settings exist", () => {
+    localStorage.clear(); // establish the precondition: NO unified settings persisted
     localStorage.setItem("mosh.voiceOn", "0");
     useSettings.getState().hydrate();
     expect(useSettings.getState().get("voiceOn")).toBe(false);

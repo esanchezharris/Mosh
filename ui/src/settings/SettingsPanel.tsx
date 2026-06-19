@@ -15,6 +15,7 @@ import type { Snapshot } from "../types";
 import { useSettings } from "./store";
 import { settingsByCategory, type SettingDef } from "./schema";
 import { TEMPLATES } from "./templates";
+import { eventToCombo } from "../interaction/keymap";
 
 // ── one renderer per setting type ───────────────────────────────────────────
 function SettingControl({ def }: { def: SettingDef }) {
@@ -83,12 +84,20 @@ function SettingControl({ def }: { def: SettingDef }) {
         <button
           className="btn tc"
           aria-label={def.label}
-          title="Click, then press a key"
+          title="Click to rebind · right-click to clear"
+          onContextMenu={(e) => { e.preventDefault(); set(def.id, ""); }} // clear → inherit preset
           onClick={(e) => {
             const btn = e.currentTarget;
             const onKey = (ev: KeyboardEvent) => {
+              // Swallow the capture keypress completely so it can't ALSO fire its live
+              // action (the global Arrange keydown listener is on window — without this,
+              // rebinding to e.g. Mod+Z would also undo).
               ev.preventDefault();
-              set(def.id, ev.key);
+              ev.stopPropagation();
+              ev.stopImmediatePropagation();
+              const combo = eventToCombo(ev);
+              if (!combo) return; // lone modifier — keep waiting for the real key
+              set(def.id, combo); // store the canonical combo (e.g. "Mod+P")
               window.removeEventListener("keydown", onKey, true);
               btn.classList.remove("on");
             };

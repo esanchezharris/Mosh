@@ -21,12 +21,29 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { pickFiles } from "../bridge";
 import { useStore, type Peaks } from "../store";
-import { tempoMapFrom, gridLines, meterAt, beatSeconds } from "../time";
+import { tempoMapFrom, gridLines, meterAt, beatSeconds, snapStep } from "../time";
 import { DRUM_LANES, laneIndexForPitch } from "./drumGrid";
 import { deriveTakeLanes } from "./takeLanes";
 import { SAMPLE_DND_MIME, addRecentSample } from "./sampleBrowserUtil";
 import { Meter } from "./Meter";
 import type { Snapshot, Track, Clip, MidiNote } from "../types";
+// Configurable interaction: gestures/keymap resolve through DAW-preset tables instead
+// of hardcoded branches; feel values (drag-threshold, edge-grab, snap, etc.) are read
+// live. All UI-local — nothing here crosses the bridge.
+import { EditorAction as EA, type Mods } from "../interaction/actions";
+import { resolveGesture } from "../interaction/gestures";
+import { classifyClipRegion } from "../interaction/region";
+import { resolveKey, isEditableTarget } from "../interaction/keymap";
+import { passedDragThreshold, isDoubleClick, magneticSnap } from "../interaction/feel";
+import { liveFeel, liveKeymap, liveGestureTable } from "../interaction/config";
+
+// Modifier state from a pointer/keyboard event, in the resolver's shape.
+const modsOf = (e: { shiftKey?: boolean; altKey?: boolean; metaKey?: boolean; ctrlKey?: boolean }): Mods =>
+  ({ shift: !!e.shiftKey, alt: !!e.altKey, meta: !!e.metaKey, ctrl: !!e.ctrlKey });
+
+// Height of a clip's header strip (the label bar) — the y-band that classifies as
+// clip.header. Only matters where a preset distinguishes header vs body (Ableton).
+const CLIP_HEADER_PX = 18;
 
 const LANE_H = 76;
 const MIN_LEN = 0.05; // shortest clip / trim, seconds
@@ -79,6 +96,18 @@ export function Arrange({ snapshot }: { snapshot: Snapshot }) {
   const pxToSec = useCallback((px: number) => px / pxPerSec, [pxPerSec]);
   const lanesHeight = Math.max(LANE_H, tracks.length * LANE_H);
 
+  // Feel-aware snap: honors the grid toggle + the Snap-strength feel slider. 1 →
+  // always snap to the nearest grid line; 0 → free; in between → magnetic within a
+  // fraction of the grid cell. Read live so a slider change applies to the next gesture.
+  const snapWithFeel = useCallback((raw: number) => {
+    const st = useStore.getState();
+    const f = liveFeel();
+    if (!st.snap || f.snapStrength <= 0) return raw;
+    const snapped = snapTime(raw);
+    const cell = snapStep(meterAt(map, raw), st.snapDivision);
+    return magneticSnap(raw, snapped, cell, f.snapStrength);
+  }, [snapTime, map]);
+
   // Drag-to-arrange: a sample dragged from the browser lands as a clip on the
   // dropped track at the dropped position (snapped). import_clip already takes
   // trackId + startSeconds, so this is pure frontend.
@@ -110,11 +139,15 @@ export function Arrange({ snapshot }: { snapshot: Snapshot }) {
   // ── ruler: seek (plain) / loop region (shift-drag) ─────────────────────────
   const onRulerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     const sec = Math.max(0, pxToSec(contentX(e.clientX, e.currentTarget)));
-    if (e.shiftKey) {
+    const table = liveGestureTable();
+    const mods = modsOf(e);
+    const drag = resolveGesture(table, { region: "ruler", gesture: "drag", mods });
+    const click = resolveGesture(table, { region: "ruler", gesture: "click", mods });
+    if (drag === EA.LOOP_REGION) {
       loopAnchor.current = sec;
       capturePointer(e.currentTarget, e.pointerId);
-    } else {
-      void exec("set_transport", { position: snapTime(sec) });
+    } else if (click === EA.SEEK) {
+      void exec("set_transport", { position: snapWithFeel(sec) });
     }
   };
   const onRulerMove = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -131,11 +164,13 @@ export function Arrange({ snapshot }: { snapshot: Snapshot }) {
     if ((e.target as HTMLElement).closest(".clip")) return;
     const el = lanesRef.current!;
     const x = contentX(e.clientX, el), y = e.clientY - el.getBoundingClientRect().top;
-    if (tool === "range") {
-      const sec = snapTime(Math.max(0, pxToSec(x)));
+    const drag = resolveGesture(liveGestureTable(), { region: "empty", gesture: "drag", mods: modsOf(e), tool });
+    if (drag === EA.TIME_SELECT) {
+      const sec = snapWithFeel(Math.max(0, pxToSec(x)));
       rangeAnchor.current = sec;
       setTimeRange({ start: sec, end: sec });
     } else {
+      // MARQUEE (and the click→DESELECT that precedes it on empty space)
       clearSelection();
       setMarquee({ x0: x, y0: y, x1: x, y1: y });
     }
@@ -146,7 +181,7 @@ export function Arrange({ snapshot }: { snapshot: Snapshot }) {
     const el = lanesRef.current!;
     const x = contentX(e.clientX, el), y = e.clientY - el.getBoundingClientRect().top;
     if (rangeAnchor.current != null) {
-      const sec = snapTime(Math.max(0, pxToSec(x)));
+      const sec = snapWithFeel(Math.max(0, pxToSec(x)));
       setTimeRange({ start: Math.min(rangeAnchor.current, sec), end: Math.max(rangeAnchor.current, sec) });
     } else if (marquee) {
       setMarquee({ ...marquee, x1: x, y1: y });
@@ -183,29 +218,85 @@ export function Arrange({ snapshot }: { snapshot: Snapshot }) {
     if (r && r.end - r.start < 1e-6) setTimeRange(null);
   };
 
-  // ── keyboard: Delete / Space / undo-redo (ignored while typing) ────────────
+  // ── keyboard: the SINGLE global key handler, keymap-driven. resolveKey looks up an
+  // action from the active keymap (preset + rebinds, read live); each action maps to
+  // its effect. Replaces the old inline branches + the never-mounted useKeyboardShortcuts.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const el = e.target as HTMLElement;
-      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable)) return;
-      const mod = e.metaKey || e.ctrlKey;
-      if (mod && e.key.toLowerCase() === "z") {
-        e.preventDefault();
-        void exec(e.shiftKey ? "redo" : "undo");
-      } else if (e.key === "Delete" || e.key === "Backspace") {
-        const sel = useStore.getState().selection;
-        if (sel.size === 0) return;
-        e.preventDefault();
-        for (const id of sel) void exec("remove_clip", { clipId: id });
-        clearSelection();
-      } else if (e.code === "Space") {
-        e.preventDefault();
-        void exec("set_transport", { action: "toggle" });
+      if (isEditableTarget(e.target)) return; // never hijack typing
+      const action = resolveKey(liveKeymap(), e);
+      if (!action) return;
+      const s = useStore.getState();
+      const prevent = () => e.preventDefault();
+      const eachSelected = (fn: (id: string) => void) => { for (const id of s.selection) fn(id); };
+      switch (action) {
+        case EA.UNDO: prevent(); void s.exec("undo"); break;
+        case EA.REDO: prevent(); void s.exec("redo"); break;
+        case EA.PLAY_PAUSE: prevent(); void s.exec("set_transport", { action: "toggle" }); break;
+        case EA.RECORD: prevent(); void s.exec("set_transport", { action: "record" }); break;
+        case EA.SAVE: prevent(); void s.exec("save"); break;
+        case EA.DELETE:
+          if (s.selection.size === 0) break;
+          prevent();
+          eachSelected((id) => void s.exec("remove_clip", { clipId: id }));
+          s.clearSelection();
+          break;
+        // only swallow copy/cut/paste when there's something to act on, so an empty
+        // selection lets the browser copy/paste normal page text
+        case EA.COPY: if (s.selection.size) { prevent(); s.copySelection(); } break;
+        case EA.CUT: if (s.selection.size) { prevent(); void s.cutSelection(); } break;
+        case EA.PASTE: if (s.clipboard) { prevent(); void s.pasteClipboard(); } break;
+        case EA.DUPLICATE: prevent(); eachSelected((id) => void s.exec("duplicate_clip", { clipId: id })); break;
+        case EA.GROUP: {
+          prevent();
+          const sel = new Set(s.selection);
+          const trackIds = s.snapshot?.tracks.filter((t) => !t.isGroup && t.clips.some((c) => sel.has(c.id))).map((t) => t.id) ?? [];
+          if (trackIds.length) void s.exec("create_group_track", { trackIds });
+          break;
+        }
+        case EA.TO_START: prevent(); void s.exec("set_transport", { action: "to_start" }); break;
+        case EA.TO_END: prevent(); void s.exec("set_transport", { action: "to_end" }); break;
+        case EA.TOOL_MOVE: s.setTool("move"); break;
+        case EA.TOOL_SPLIT: s.setTool("split"); break;
+        case EA.TOOL_RANGE: s.setTool("range"); break;
+        case EA.SPLIT: {
+          // split-at-playhead (Ableton/FL keymaps): split each selected clip the
+          // playhead currently passes through.
+          prevent();
+          const pos = s.transport.position;
+          for (const t of s.snapshot?.tracks ?? [])
+            for (const c of t.clips)
+              if (s.selection.has(c.id) && c.start < pos && pos < c.start + c.length)
+                void s.exec("split_clip", { clipId: c.id, time: pos });
+          break;
+        }
+        default: break;
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [exec, clearSelection]);
+  }, []);
+
+  // ── wheel: Mod+wheel zooms (zoomSensitivity), Shift+wheel scrolls horizontally
+  // (scrollSensitivity). Attached natively (non-passive) so preventDefault works; reads
+  // feel live. Plain wheel stays native vertical scroll.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      const f = liveFeel();
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        const st = useStore.getState();
+        st.setPxPerSec(st.pxPerSec * Math.exp(-e.deltaY * 0.0015 * f.zoomSensitivity));
+      } else if (e.shiftKey) {
+        e.preventDefault();
+        el.scrollLeft += e.deltaY * f.scrollSensitivity;
+      }
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
 
   return (
     <div className="timeline" data-testid="arrangement" data-grid="single" data-tool={tool} data-px-per-sec={pxPerSec}>
@@ -264,9 +355,10 @@ export function Arrange({ snapshot }: { snapshot: Snapshot }) {
               style={{ position: "absolute", top: i * LANE_H, left: 0, right: 0, height: LANE_H }}>
               {t.clips.map((c) => (
                 <ClipBlock key={c.id} clip={c} selected={selection.has(c.id)}
-                  tool={tool} snapTime={snapTime} secToPx={secToPx} pxToSec={pxToSec}
+                  tool={tool} snapTime={snapWithFeel} secToPx={secToPx} pxToSec={pxToSec}
                   bs={beatSeconds(meterAt(map, c.start))}
-                  onSelect={(additive) => select([c.id], additive)} exec={exec} />
+                  onSelect={(additive) => select([c.id], additive)}
+                  setTimeRange={setTimeRange} exec={exec} />
               ))}
             </div>
           ))}
@@ -323,7 +415,7 @@ const TrackHeader = memo(function TrackHeader({ track }: { track: Track }) {
 });
 
 type ExecFn = (command: string, args?: Record<string, unknown>) => Promise<unknown>;
-type DragKind = "move" | "trim-l" | "trim-r";
+type DragKind = "move" | "trim-l" | "trim-r" | "time";
 
 // Right-click clip menu — currently just audio→MIDI (Basic Pitch). Cursor-positioned
 // via a portal (so it isn't clipped by the lane's overflow), dismissed on outside
@@ -361,12 +453,14 @@ function ClipMenu({ clipId, x, y, exec, onClose }:
 }
 
 function ClipBlock({
-  clip, selected, tool, snapTime, secToPx, pxToSec, bs, onSelect, exec,
+  clip, selected, tool, snapTime, secToPx, pxToSec, bs, onSelect, setTimeRange, exec,
 }: {
-  clip: Clip; selected: boolean; tool: string;
+  clip: Clip; selected: boolean; tool: "move" | "split" | "range";
   snapTime: (t: number) => number; secToPx: (s: number) => number; pxToSec: (px: number) => number;
   bs: number; // seconds per beat at this clip's start (for inline MIDI/drum previews)
-  onSelect: (additive: boolean) => void; exec: ExecFn;
+  onSelect: (additive: boolean) => void;
+  setTimeRange: (r: { start: number; end: number } | null) => void;
+  exec: ExecFn;
 }) {
   const ensurePeaks = useStore((s) => s.ensurePeaks);
   const peaks = useStore((s) => s.peaks[clip.id]);
@@ -378,7 +472,10 @@ function ClipBlock({
 
   // Optimistic preview during a drag; cleared when committed props arrive.
   const [preview, setPreview] = useState<Pos | null>(null);
-  const drag = useRef<{ kind: DragKind; startX: number; orig: Pos } | null>(null);
+  const drag = useRef<
+    { kind: DragKind; startX: number; startY: number; engaged: boolean; orig: Pos; anchorSec: number } | null
+  >(null);
+  const lastUp = useRef<number | null>(null); // for manual (feel-driven) double-click
   useEffect(() => { setPreview(null); }, [clip.start, clip.length, clip.offset]);
 
   const pos: Pos = preview ?? { start: clip.start, length: clip.length, offset: clip.offset };
@@ -390,41 +487,109 @@ function ClipBlock({
   // (flatten to it). Empty unless the clip actually has ≥2 takes.
   const takeLanes = deriveTakeLanes(clip);
 
-  const beginDrag = (kind: DragKind) => (e: React.PointerEvent) => {
+  // Whether the active table trims on this clip's edge (drives the resize-cursor
+  // affordance). Mosh: only the move tool; Ableton/FL: always.
+  const edgeTrims = resolveGesture(liveGestureTable(), { region: "clip.edge", gesture: "drag", mods: {}, tool }) === EA.TRIM;
+  const edgeGrabWidth = liveFeel().edgeGrabPx;
+
+  // Classify which sub-region the pointer hit, then resolve the action from the
+  // active table — no hardcoded tool branches.
+  const regionAt = (e: React.MouseEvent): { region: string; localX: number; edgePx: number } => {
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const localX = e.clientX - rect.left, localY = e.clientY - rect.top;
+    const edgePx = liveFeel().edgeGrabPx;
+    const region = classifyClipRegion({ x: localX, y: localY, width: rect.width, height: rect.height, edgeGrabPx: edgePx, headerPx: CLIP_HEADER_PX });
+    return { region, localX, edgePx };
+  };
+
+  const onClipDown = (e: React.PointerEvent) => {
     e.stopPropagation();
-    if (tool === "split" && kind === "move") {
-      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-      void exec("split_clip", { clipId: clip.id, time: snapTime(clip.start + pxToSec(e.clientX - rect.left)) });
+    const { region, localX, edgePx } = regionAt(e);
+    const table = liveGestureTable();
+    const mods = modsOf(e);
+    const clickAction = resolveGesture(table, { region, gesture: "click", mods, tool });
+    const dragAction = resolveGesture(table, { region, gesture: "drag", mods, tool });
+
+    // split-at-click (Mosh split tool) is terminal — fire and bail.
+    if (clickAction === EA.SPLIT) {
+      void exec("split_clip", { clipId: clip.id, time: snapTime(clip.start + pxToSec(localX)) });
       return;
     }
-    onSelect(e.shiftKey || e.metaKey);
+    // selection fires on press (click selects, a subsequent drag moves/trims/selects time)
+    if (clickAction === EA.SELECT) onSelect(false);
+    else if (clickAction === EA.ADDITIVE_SELECT) onSelect(true);
+
+    let kind: DragKind | null = null;
+    if (dragAction === EA.MOVE) kind = "move";
+    else if (dragAction === EA.TRIM) kind = localX <= edgePx ? "trim-l" : "trim-r";
+    else if (dragAction === EA.TIME_SELECT) kind = "time";
+    if (!kind) return;
+
     capturePointer(e.target as HTMLElement, e.pointerId);
-    drag.current = { kind, startX: e.clientX, orig: { start: clip.start, length: clip.length, offset: clip.offset } };
+    drag.current = {
+      kind, startX: e.clientX, startY: e.clientY, engaged: false,
+      orig: { start: clip.start, length: clip.length, offset: clip.offset },
+      anchorSec: clip.start + pxToSec(localX),
+    };
   };
-  const onMove = (e: React.PointerEvent) => {
+
+  const onClipMove = (e: React.PointerEvent) => {
     const d = drag.current; if (!d) return;
-    const delta = pxToSec(e.clientX - d.startX), o = d.orig;
+    const dx = e.clientX - d.startX, dy = e.clientY - d.startY;
+    if (!d.engaged) {
+      if (!passedDragThreshold(dx, dy, liveFeel().dragThreshold)) return; // still a click
+      d.engaged = true;
+    }
+    const delta = pxToSec(dx), o = d.orig;
     if (d.kind === "move") {
       setPreview({ ...o, start: Math.max(0, snapTime(o.start + delta)) });
     } else if (d.kind === "trim-r") {
       const end = snapTime(o.start + o.length + delta);
       setPreview({ ...o, length: Math.max(MIN_LEN, end - o.start) });
-    } else { // trim-l: move start, shrink length, push offset
+    } else if (d.kind === "trim-l") {
       const start = Math.max(0, Math.min(o.start + o.length - MIN_LEN, snapTime(o.start + delta)));
       const used = start - o.start;
       setPreview({ start, length: o.length - used, offset: Math.max(0, o.offset + used) });
+    } else { // time selection across the clip body (Ableton)
+      const cur = snapTime(Math.max(0, d.anchorSec + delta));
+      setTimeRange({ start: Math.min(d.anchorSec, cur), end: Math.max(d.anchorSec, cur) });
     }
   };
-  const onUp = (e: React.PointerEvent) => {
+
+  const onClipUp = (e: React.PointerEvent) => {
     const d = drag.current; drag.current = null;
-    if (!d || !preview) return; // pure click (no movement) → selection already applied
     releasePointer(e.target as HTMLElement, e.pointerId);
-    if (d.kind === "move") {
-      if (Math.abs(preview.start - d.orig.start) > 1e-4) void exec("move_clip", { clipId: clip.id, start: preview.start });
-      else setPreview(null);
-    } else {
-      void exec("trim_clip", { clipId: clip.id, start: preview.start, length: preview.length, offset: preview.offset });
+    if (d && d.engaged) {
+      lastUp.current = null; // a drag breaks any pending double-click sequence
+      if (d.kind === "move") {
+        if (preview && Math.abs(preview.start - d.orig.start) > 1e-4) void exec("move_clip", { clipId: clip.id, start: preview.start });
+        else setPreview(null);
+      } else if (d.kind === "trim-l" || d.kind === "trim-r") {
+        if (preview) void exec("trim_clip", { clipId: clip.id, start: preview.start, length: preview.length, offset: preview.offset });
+      } else { // time
+        const r = useStore.getState().timeRange;
+        if (r && r.end - r.start < 1e-6) setTimeRange(null);
+      }
+      return;
     }
+    // pure click (no drag engaged) → manual double-click detection (feel.doubleClickMs)
+    const now = performance.now();
+    if (isDoubleClick(lastUp.current, now, liveFeel().doubleClickMs)) {
+      lastUp.current = null;
+      const { region } = regionAt(e);
+      const action = resolveGesture(liveGestureTable(), { region, gesture: "dblclick", mods: modsOf(e), tool });
+      if (action === EA.OPEN && clip.type === "midi") openPianoRoll(clip.id);
+    } else {
+      lastUp.current = now;
+    }
+  };
+
+  const onClipContext = (e: React.MouseEvent) => {
+    const { region } = regionAt(e);
+    const action = resolveGesture(liveGestureTable(), { region, gesture: "contextmenu", mods: modsOf(e), tool });
+    if (action !== EA.CONTEXT_MENU) return;
+    e.preventDefault(); // suppress the native browser menu on ANY clip (not just wave)
+    if (clip.type === "wave") setMenuPos({ x: e.clientX, y: e.clientY });
   };
 
   return (
@@ -435,9 +600,8 @@ function ClipBlock({
       data-source-missing={clip.sourceMissing ? "true" : "false"}
       data-transcribing={transcribing ? "true" : "false"}
       style={{ left, width: widthPx }}
-      onPointerDown={beginDrag("move")} onPointerMove={onMove} onPointerUp={onUp}
-      onDoubleClick={() => { if (clip.type === "midi") openPianoRoll(clip.id); }}
-      onContextMenu={(e) => { if (clip.type === "wave") { e.preventDefault(); setMenuPos({ x: e.clientX, y: e.clientY }); } }}
+      onPointerDown={onClipDown} onPointerMove={onClipMove} onPointerUp={onClipUp}
+      onContextMenu={onClipContext}
     >
       {menuPos && (
         <ClipMenu clipId={clip.id} x={menuPos.x} y={menuPos.y} exec={exec} onClose={() => setMenuPos(null)} />
@@ -484,10 +648,12 @@ function ClipBlock({
           ? <ClipDrumGrid notes={clip.notes} width={widthPx} bs={bs} secToPx={secToPx} />
           : <ClipMidi notes={clip.notes} width={widthPx} bs={bs} secToPx={secToPx} />
       ) : null}
-      {tool === "move" && (
+      {edgeTrims && (
         <>
-          <div className="trim l" title="Trim start" onPointerDown={beginDrag("trim-l")} onPointerMove={onMove} onPointerUp={onUp} />
-          <div className="trim r" title="Trim end" onPointerDown={beginDrag("trim-r")} onPointerMove={onMove} onPointerUp={onUp} />
+          {/* visual resize-cursor zones only — the clip's single handler classifies the
+              edge by position (width tracks the feel edge-grab) and pointerdown bubbles up */}
+          <div className="trim l" title="Trim start" style={{ width: edgeGrabWidth }} />
+          <div className="trim r" title="Trim end" style={{ width: edgeGrabWidth }} />
         </>
       )}
     </div>
