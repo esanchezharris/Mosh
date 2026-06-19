@@ -732,9 +732,22 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 
         check (ok (cmd (ops, "set_clip_mute", objN ({{ "clipId", cid }, { "mute", true }}))), "set_clip_mute ok");
         check ((bool) clipById (cid).getProperty ("mute", false), "clip mute reflects in snapshot");
+        // mute is undoable (was uncovered): undo unmutes, redo re-mutes.
+        check (ok (cmd (ops, "undo")), "undo set_clip_mute ok");
+        check (! (bool) clipById (cid).getProperty ("mute", true), "undo restores clip unmuted");
+        check (ok (cmd (ops, "redo")), "redo set_clip_mute ok");
+        check ((bool) clipById (cid).getProperty ("mute", false), "redo re-applies clip mute");
 
         check (ok (cmd (ops, "set_clip_gain", objN ({{ "clipId", cid }, { "gainDb", 6.0 }}))), "set_clip_gain ok");
         check (std::abs ((double) clipById (cid).getProperty ("gainDb", 0.0) - 6.0) < 0.5, "clip gain reflects in snapshot");
+        // gain clamps below quality-collapse (jlimit -48..+24) and is undoable — both uncovered.
+        check (ok (cmd (ops, "set_clip_gain", objN ({{ "clipId", cid }, { "gainDb", 999.0 }}))), "set_clip_gain (over-max) ok");
+        check (std::abs ((double) clipById (cid).getProperty ("gainDb", 0.0) - 24.0) < 0.5, "clip gain clamps to +24 dB");
+        check (ok (cmd (ops, "set_clip_gain", objN ({{ "clipId", cid }, { "gainDb", -999.0 }}))), "set_clip_gain (under-min) ok");
+        check (std::abs ((double) clipById (cid).getProperty ("gainDb", 0.0) - (-48.0)) < 0.5, "clip gain clamps to -48 dB");
+        check (ok (cmd (ops, "undo")), "undo set_clip_gain ok");
+        check (std::abs ((double) clipById (cid).getProperty ("gainDb", 0.0) - 24.0) < 0.5, "undo restores prior clip gain (+24)");
+        cmd (ops, "set_clip_gain", objN ({{ "clipId", cid }, { "gainDb", 6.0 }}));   // sane default for downstream
 
         const int before = trackById (et).getProperty ("clips", var()).size();
         auto dup = cmd (ops, "duplicate_clip", args1 ("clipId", cid));
@@ -742,6 +755,11 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (trackById (et).getProperty ("clips", var()).size() == before + 1, "duplicate adds a clip to the track");
         const auto newId = dup["data"].getProperty ("newClipId", var()).toString();
         check ((double) clipById (newId).getProperty ("start", 0.0) > 0.5, "duplicate lands after the original");
+        // duplicate is undoable (was uncovered): undo drops the copy, redo restores it.
+        check (ok (cmd (ops, "undo")), "undo duplicate_clip ok");
+        check (trackById (et).getProperty ("clips", var()).size() == before, "undo removes the duplicated clip");
+        check (ok (cmd (ops, "redo")), "redo duplicate_clip ok");
+        check (trackById (et).getProperty ("clips", var()).size() == before + 1, "redo restores the duplicated clip");
 
         check (ok (cmd (ops, "remove_clip", args1 ("clipId", cid))), "remove_clip ok");
         check (! clipById (cid).isObject(), "remove_clip deletes the clip");
@@ -1712,6 +1730,28 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
           if (auto* arr = bv.getArray()) for (auto& b : *arr) if (b.getProperty ("name", var()).toString() == "Reverb") found = true;
           check (found, "bus name persists across save/reload"); }
         check (sendsOf (gt).size() == 1, "send persists across save/reload");
+
+        // remove_send (was uncovered): drop the gt->bus0 send, undo restores it at its level.
+        check (ok (cmd (ops, "remove_send", objN ({{ "trackId", gt }, { "bus", bus0 }}))), "remove_send ok");
+        check (sendsOf (gt).size() == 0, "remove_send drops the send");
+        check (! ok (cmd (ops, "remove_send", objN ({{ "trackId", gt }, { "bus", bus0 }}))), "remove_send on a missing send errors");
+        check (ok (cmd (ops, "undo")), "undo remove_send ok");
+        check (sendsOf (gt).size() == 1 && std::abs ((double) sendsOf (gt)[0].getProperty ("db", 0.0) - (-6.0)) < 0.6,
+               "undo restores the send at its prior level");
+
+        // rename_bus (was uncovered): rename Reverb->Plate, undo reverts.
+        auto hasBusNamed = [&] (const String& nm) -> bool {
+            auto bv = buses();
+            if (auto* arr = bv.getArray())
+                for (auto& b : *arr) if (b.getProperty ("name", var()).toString() == nm) return true;
+            return false; };
+        check (ok (cmd (ops, "rename_bus", objN ({{ "bus", bus0 }, { "name", "Plate" }}))), "rename_bus ok");
+        check (hasBusNamed ("Plate") && ! hasBusNamed ("Reverb"), "bus name reflects rename");
+        check (! ok (cmd (ops, "rename_bus", objN ({{ "bus", 99 }, { "name", "X" }}))), "rename_bus on a missing bus errors");
+        // NB: the aux-bus *name* is not undoable (Tracktion's Edit::setAuxBusName writes
+        // with a nullptr UndoManager), so we don't assert undo here — restore by a
+        // forward rename instead. See docs ledger "Needs Emilio's call" (rename_bus undo).
+        cmd (ops, "rename_bus", objN ({{ "bus", bus0 }, { "name", "Reverb" }}));
 
         const int busesNow = buses().size();
         check (ok (cmd (ops, "remove_bus", args1 ("bus", bus0))), "remove_bus ok");
