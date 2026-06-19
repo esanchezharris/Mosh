@@ -1,6 +1,6 @@
 # Mosh — Architecture On-Ramp
 
-*The 2-minute map of the codebase. Read this first. For build/gate status see [CLAUDE.md](CLAUDE.md); for the detailed design of any subsystem see the numbered specs `00`–`07`. This file is verified against the code — if it drifts, fix it here.*
+*The 2-minute map of the codebase. Read this first. For the short current status handoff see [docs/CURRENT_STATUS.md](docs/CURRENT_STATUS.md); for build/gate status see [CLAUDE.md](CLAUDE.md); for the detailed design of any subsystem see the numbered specs `00`–`07`. This file is verified against the code — if it drifts, fix it here.*
 
 ---
 
