@@ -124,6 +124,7 @@ private:
     juce::var cmdSetTrackType   (const juce::var& args);
     juce::var cmdLoadDrumKit    (const juce::var& args);
     juce::var cmdAssignSample   (const juce::var& args);
+    juce::var cmdSetDrumLane    (const juce::var& args);
     juce::var cmdRemovePlugin   (const juce::var& args);
     juce::var cmdReorderPlugin  (const juce::var& args);
     juce::var cmdSetPluginParam (const juce::var& args);
@@ -268,6 +269,13 @@ private:
     // ensureSampler(): the track's existing te::SamplerPlugin, or a fresh one
     // inserted at the front of the chain (instrument-first).
     te::SamplerPlugin*   ensureSampler (te::AudioTrack&);
+    // findSampler(): the track's te::SamplerPlugin if present (never creates one).
+    te::SamplerPlugin*   findSampler (te::AudioTrack&) const;
+    // applyDrumLaneGains(): silence (gain -100) the sampler pads whose GM pitch is
+    // muted (or, when any lane is soloed, every pad EXCEPT the soloed ones); restore
+    // formerly-muted pads to 0 dB. Only touches pads crossing the mute threshold, so
+    // a non-muted pad's custom gain is left alone. Reads the drumMute/drumSolo props.
+    void                 applyDrumLaneGains (te::AudioTrack&);
     // loadDrumKitInto(): clear + load the 8 bundled pads onto a sampler, each
     // mapped to its GM pitch (keyNote==minNote==maxNote) and open-ended. Pumps the
     // sampler's async file load headless. Returns the number of pads loaded.

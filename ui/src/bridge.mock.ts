@@ -332,6 +332,22 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       invalidate();
       return ok(command, { trackId: t.id, note: num(args.note, 60), name: str(args.name, "Sample"), file });
     }
+    case "set_drum_lane": {
+      const t = findTrack(str(args.trackId));
+      if (!t) return err(command, "track not found");
+      const note = num(args.note, -1);
+      if (note < 0) return err(command, "note (0-127) required");
+      const toggle = (arr: number[] | undefined, on: boolean): number[] => {
+        const set = new Set(arr ?? []);
+        if (on) set.add(note); else set.delete(note);
+        return [...set].sort((a, b) => a - b);
+      };
+      pushUndo();
+      if ("mute" in args) t.drumMutedPitches = toggle(t.drumMutedPitches, Boolean(args.mute));
+      if ("solo" in args) t.drumSoloPitches = toggle(t.drumSoloPitches, Boolean(args.solo));
+      invalidate();
+      return ok(command, { trackId: t.id, note, muted: (t.drumMutedPitches ?? []).includes(note), solo: (t.drumSoloPitches ?? []).includes(note) });
+    }
     case "rename_track": {
       const t = findTrack(str(args.trackId));
       if (!t) return err(command, "track not found");
