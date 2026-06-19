@@ -7,9 +7,10 @@
 import { useEffect, useRef, useState } from "react";
 import * as QRCode from "qrcode";
 import { useStore } from "../store";
-import { pickFiles, pickSaveFile } from "../bridge";
+import { pickFiles } from "../bridge";
 import type { Snapshot, ExportFormat, CommandLog as CommandLogData, TrainingState } from "../types";
 import { SampleBrowser } from "./SampleBrowser";
+import { SettingsPanel } from "../settings/SettingsPanel";
 
 // Small popover anchored under its trigger; closes on outside click / Esc.
 function Pop({ label, title, on, className, children }: { label: string; title: string; on?: boolean; className?: string; children: (close: () => void) => React.ReactNode }) {
@@ -37,7 +38,7 @@ export function TopbarTools({ snapshot }: { snapshot: Snapshot }) {
   return (
     <div className="topbar-tools">
       <Pop label="🗀" title="Browse audio samples">{() => <SampleBrowser />}</Pop>
-      <SettingsTool snapshot={snapshot} />
+      <Pop label="⚙" title="Settings" className="settings-pop">{() => <SettingsPanel snapshot={snapshot} />}</Pop>
       <ExportTool audioEnabled={audioEnabled} />
       <TrainingTool training={snapshot.training ?? null} />
       <CommandLogTool />
@@ -255,70 +256,6 @@ function HelpTool() {
             ))}
           </div>
           <div className="pop-note">Tools (Move / Split / Range) &amp; Snap live in the toolbar.</div>
-        </>
-      )}
-    </Pop>
-  );
-}
-
-function SettingsTool({ snapshot }: { snapshot: Snapshot }) {
-  const exec = useStore((s) => s.exec);
-  const refresh = useStore((s) => s.refresh);
-  const uiScale = useStore((s) => s.uiScale);
-  const setUiScale = useStore((s) => s.setUiScale);
-  const s = snapshot.session;
-  return (
-    <Pop label="⚙" title="Settings">
-      {() => (
-        <>
-          <div className="pop-head">Settings</div>
-          <div className="pop-group">
-            <div className="pop-label">Audio</div>
-            <div className="pop-row"><span>Device</span><span className="tc">{s.audioDeviceName ?? (s.audioEnabled ? "default" : "—")}</span></div>
-            <div className="pop-row"><span>Sample rate</span><span className="tc">{s.sampleRate} Hz</span></div>
-            <label className="pop-row"><span>Buffer</span>
-              <select value={String(s.bufferSize ?? 512)} onChange={(e) => void exec("set_buffer_size", { bufferSize: Number(e.target.value) }).then(() => refresh())}>
-                {[128, 256, 512, 1024].map((b) => <option key={b} value={b}>{b}</option>)}
-              </select>
-            </label>
-            <label className="pop-row"><span>Threads</span>
-              <select value={String(s.audioThreads ?? s.availableCores ?? 8)} onChange={(e) => void exec("set_audio_threads", { threads: Number(e.target.value) }).then(() => refresh())}>
-                {Array.from({ length: s.availableCores ?? 8 }, (_, i) => i + 1).map((n) => <option key={n} value={n}>{n}{s.audioThreadsAuto && n === (s.audioThreads ?? n) ? " (auto)" : ""}</option>)}
-              </select>
-            </label>
-          </div>
-          <div className="pop-group">
-            <div className="pop-label">Interface</div>
-            <div className="pop-row"><span>UI scale</span>
-              <span className="scale-ctl">
-                <button className="btn" disabled={uiScale <= 0.8} onClick={() => setUiScale(Math.round((uiScale - 0.1) * 10) / 10)}>−</button>
-                <span className="tc">{Math.round(uiScale * 100)}%</span>
-                <button className="btn" disabled={uiScale >= 1.4} onClick={() => setUiScale(Math.round((uiScale + 0.1) * 10) / 10)}>+</button>
-              </span>
-            </div>
-          </div>
-          <div className="pop-group">
-            <div className="pop-label">Project{s.dirty ? <span className="pop-note" title="Unsaved changes (auto-saved)"> • unsaved</span> : null}</div>
-            <div className="pop-actions">
-              <button className="btn" onClick={() => void exec("new_project", {}).then(() => refresh())}>New</button>
-              <button className="btn" onClick={() => void exec("save", {})}>Save</button>
-              <button className="btn" onClick={async () => { const r = await pickSaveFile({ title: "Save project as" }); if (r.ok && r.file) void exec("save_as", { file: r.file }).then(() => refresh()); }}>Save As…</button>
-              <button className="btn" onClick={async () => { const r = await pickFiles({ title: "Open project" }); if (r.ok && r.files[0]) void exec("open_project", { file: r.files[0] }).then(() => refresh()); }}>Open…</button>
-            </div>
-            {(s.recentProjects?.length ?? 0) > 0 && (
-              <>
-                <div className="pop-label">Recent</div>
-                <div className="modal-list" data-testid="recent-projects" style={{ maxHeight: 160 }}>
-                  {s.recentProjects!.slice(0, 8).map((p) => (
-                    <button key={p.path} className="plugin-row" title={p.path} disabled={p.path === s.editFile}
-                            onClick={() => void exec("open_project", { file: p.path }).then(() => refresh())}>
-                      <span className="pr-name">{p.path === s.editFile ? "● " : ""}{p.name}</span>
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
         </>
       )}
     </Pop>

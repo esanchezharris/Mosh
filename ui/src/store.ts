@@ -12,6 +12,10 @@ import type {
 import type { RemoteStatus } from "./bridge";
 import { type SnapDiv, snapTimeMap, tempoMapFrom } from "./time";
 import type { ChangeSet } from "./agent/executor";
+// Schema-driven settings (UI-local, localStorage-backed). The store mirrors a few
+// of its values (theme/uiScale/voiceOn/voiceVol) so existing consumers stay reactive
+// while the SettingsPanel and these mutators both write through the single source.
+import { useSettings } from "./settings/store";
 
 export type Tool = "move" | "split" | "range";
 export type View = "arrange" | "mixer";
@@ -280,6 +284,22 @@ export const useStore = create<State>((set, get) => ({
         void get().refresh();
       }
     });
+    // Keep the mirrored settings fields in sync with the schema-driven settings
+    // store: the SettingsPanel writes through useSettings, so without this a theme
+    // or voice change made in the panel wouldn't reach Topbar/Moshi. Seed once
+    // (settings were hydrated from localStorage before render) then subscribe.
+    const mirrorSettings = () => {
+      const g = useSettings.getState();
+      set({
+        theme: g.get("theme") as "dark" | "light",
+        uiScale: g.get("uiScale") as number,
+        voiceOn: g.get("voiceOn") as boolean,
+        voiceVol: g.get("voiceVol") as number,
+      });
+    };
+    mirrorSettings();
+    useSettings.subscribe(mirrorSettings);
+
     void notifyUiReady();
     void get().refresh();
     void get().refreshRemote();
@@ -474,24 +494,26 @@ export const useStore = create<State>((set, get) => ({
   view: "arrange",
   setView: (v) => set({ view: v }),
 
-  theme: "dark",
-  toggleTheme: () =>
-    set((s) => {
-      const next = s.theme === "dark" ? "light" : "dark";
-      document.documentElement.setAttribute("data-theme", next);
-      return { theme: next };
-    }),
+  // theme / uiScale / voiceOn / voiceVol are now schema-driven settings (see
+  // settings/store). These fields MIRROR the settings store (synced in init via a
+  // subscription) so the many existing consumers keep their useStore subscriptions;
+  // the mutators write THROUGH useSettings, which persists + applies the DOM effect.
+  theme: useSettings.getState().get("theme") as "dark" | "light",
+  toggleTheme: () => {
+    const next = get().theme === "dark" ? "light" : "dark";
+    useSettings.getState().set("theme", next); // persists + applies data-theme
+    set({ theme: next });
+  },
 
   celebrateTick: 0,
-  voiceOn: !(typeof localStorage !== "undefined" && localStorage.getItem("mosh.voiceOn") === "0"),
-  voiceVol: 0.55,
+  voiceOn: useSettings.getState().get("voiceOn") as boolean,
+  voiceVol: useSettings.getState().get("voiceVol") as number,
   bumpCelebrate: () => set((s) => ({ celebrateTick: s.celebrateTick + 1 })),
-  toggleVoice: () =>
-    set((s) => {
-      const next = !s.voiceOn;
-      try { localStorage.setItem("mosh.voiceOn", next ? "1" : "0"); } catch { /* noop */ }
-      return { voiceOn: next };
-    }),
+  toggleVoice: () => {
+    const next = !get().voiceOn;
+    useSettings.getState().set("voiceOn", next); // persists through the settings store
+    set({ voiceOn: next });
+  },
 
   agentBusy: false,
   agentChangeSet: null,
@@ -559,13 +581,11 @@ export const useStore = create<State>((set, get) => ({
     await s.refresh();
   },
 
-  uiScale: 1,
-  setUiScale: (n) =>
-    set(() => {
-      // Clamp to a legible range; zoom reflows cleanly in the JUCE WebView (no
-      // transform-origin / scrollbar artifacts) so we drive it directly.
-      const next = Math.min(1.4, Math.max(0.8, Number.isFinite(n) ? n : 1));
-      (document.documentElement.style as CSSStyleDeclaration & { zoom?: string }).zoom = String(next);
-      return { uiScale: next };
-    }),
+  uiScale: useSettings.getState().get("uiScale") as number,
+  setUiScale: (n) => {
+    // coerceSetting clamps to the schema's legible range + snaps to step, and the
+    // settings effect applies document zoom (reflows cleanly in the JUCE WebView).
+    useSettings.getState().set("uiScale", n);
+    set({ uiScale: useSettings.getState().get("uiScale") as number });
+  },
 }));
