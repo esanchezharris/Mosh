@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  resizeBetween, collapseZone, expandZone, toggleZone,
+  resizeBetween, resizeZone, collapseZone, expandZone, toggleZone,
   clampWindow, moveWindow, resizeWindow, bringToFront, presetLayout,
   type Zone, type FloatWin, type Bounds,
 } from "./dockLayout";
@@ -33,6 +33,19 @@ describe("resizeBetween", () => {
     const a = zone(200); const b = zone(200);
     resizeBetween(a, b, 30);
     expect([a.size, b.size]).toEqual([200, 200]);
+  });
+});
+
+describe("resizeZone", () => {
+  it("clamps a single zone's size to [min,max]", () => {
+    expect(resizeZone(zone(200, 100, 400), 50).size).toBe(250);
+    expect(resizeZone(zone(200, 100, 400), 999).size).toBe(400);  // capped at max
+    expect(resizeZone(zone(200, 100, 400), -999).size).toBe(100); // floored at min
+  });
+  it("does not mutate the input", () => {
+    const z = zone(200);
+    resizeZone(z, 30);
+    expect(z.size).toBe(200);
   });
 });
 

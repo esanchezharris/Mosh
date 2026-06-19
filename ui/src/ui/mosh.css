@@ -399,7 +399,13 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 .view { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 
 /* ── bottom dock: plugin/neural rack + generative drawer ────────────────────*/
-.dock { flex: 0 0 auto; height: 196px; display: flex; border-top: 1px solid var(--ink-line); background: var(--ink-raise); }
+.dock { height: 100%; display: flex; background: var(--ink-raise); }
+/* Phase 6 dock shell: the bottom detail zone is resizable (divider) + collapsible. */
+.dock-host { flex: 0 0 auto; min-height: 0; overflow: hidden; }
+.dock-divider { flex: 0 0 6px; height: 6px; cursor: row-resize; background: var(--ink-line); touch-action: none; transition: background 120ms; }
+.dock-divider:hover { background: var(--lime-dim); }
+.dock-collapsed { flex: 0 0 22px; height: 22px; width: 100%; border: none; border-top: 1px solid var(--ink-line); background: var(--ink-raise); color: var(--bone-dim); font: inherit; font-size: 11px; letter-spacing: 0.08em; cursor: pointer; }
+.dock-collapsed:hover { color: var(--lime); }
 .rack { flex: 1 1 auto; min-width: 0; overflow: auto; padding: 10px 12px; }
 .rack-label { font-size: 10px; letter-spacing: 0.12em; color: var(--bone-dim); margin-bottom: 8px; }
 .rack-label b { color: var(--bone); }

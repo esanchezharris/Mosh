@@ -49,6 +49,15 @@ export function resizeBetween(a: Zone, b: Zone, deltaPx: number): [Zone, Zone] {
   return [{ ...a, size: a.size + d }, { ...b, size: b.size - d }];
 }
 
+/**
+ * Resize a single zone by `deltaPx`, clamped to its [min,max]. Used when a zone
+ * resizes against a flex-fill sibling (e.g. the bottom dock vs. the arrangement):
+ * there's no second fixed zone to trade with, so we just clamp this one.
+ */
+export function resizeZone(z: Zone, deltaPx: number): Zone {
+  return { ...z, size: clamp(z.size + deltaPx, z.min, z.max) };
+}
+
 export function collapseZone(z: Zone, collapsedSize = 0): Zone {
   if (z.collapsed) return z;
   return { ...z, collapsed: true, prevSize: z.size, size: collapsedSize };
