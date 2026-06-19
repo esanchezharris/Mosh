@@ -23,6 +23,7 @@ import { pickFiles, nativeMenuPresent } from "../bridge";
 import { useStore, type Peaks } from "../store";
 import { tempoMapFrom, gridLines, meterAt, beatSeconds, snapStep } from "../time";
 import { DRUM_LANES, laneIndexForPitch } from "./drumGrid";
+import { useDrumWindow } from "./dock/useFloatingWindow";
 import { deriveTakeLanes } from "./takeLanes";
 import { SAMPLE_DND_MIME, addRecentSample } from "./sampleBrowserUtil";
 import { Meter } from "./Meter";
@@ -411,15 +412,28 @@ const TrackHeader = memo(function TrackHeader({ track }: { track: Track }) {
   const instrument = track.plugins?.find((p) => p.isInstrument);
   const isDrum = track.type === "drum";
   const showBadge = isDrum || !!instrument;
+  // A drum track's badge opens the FL-style step sequencer in its floating window,
+  // bound to the track's MIDI clip (creating an empty one if the track has none).
+  const openSeq = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    let clipId = track.clips.find((c) => c.type === "midi")?.id;
+    if (!clipId) {
+      const r = (await exec("add_midi_clip", { trackId: track.id })) as { data?: { clipId?: string } };
+      clipId = r?.data?.clipId;
+    }
+    if (clipId) useDrumWindow.getState().open(String(clipId));
+  };
   return (
     <div className={`thead${selected ? " selected" : ""}`} data-testid="track-header" data-track-id={track.id}
       data-track-type={track.type} data-selected={selected} onPointerDown={() => setSelectedTrack(track.id)}>
       <div className="row1">
         {showBadge && (
-          <span className={`tbadge${isDrum ? " drum" : ""}`} data-testid="track-type-badge"
-            title={isDrum ? `Drum track${instrument ? ` · ${instrument.name}` : ""}` : `Instrument · ${instrument!.name}`}>
-            {isDrum ? "🥁" : "♪"}
-          </span>
+          isDrum ? (
+            <button className="tbadge drum" data-testid="open-drum-seq" title="Open the drum sequencer"
+              onPointerDown={(e) => e.stopPropagation()} onClick={openSeq}>🥁</button>
+          ) : (
+            <span className="tbadge" data-testid="track-type-badge" title={`Instrument · ${instrument!.name}`}>♪</span>
+          )
         )}
         <span className="tname" title={track.name}>{track.name}</span>
         <button className="msx x" title="Remove track" aria-label={`Remove ${track.name}`}

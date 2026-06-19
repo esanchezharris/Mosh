@@ -586,6 +586,30 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 .dr-cell:hover { border-color: var(--lime-dim); }
 .dr-cell.on { background: var(--lime); border-color: #97c01a; }
 
+/* Phase 6 — FL sequencer controls + velocity graph */
+button.tbadge { font: inherit; cursor: pointer; }
+button.tbadge:hover { border-color: var(--lime); color: var(--lime); }
+.dr-ctl { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--bone-dim); }
+.dr-ctl select, .dr-ctl input { font-size: 11px; }
+.dr-graph { flex: 1 1 auto; display: flex; gap: 8px; min-height: 0; padding: 10px 14px; overflow: auto; }
+.dr-graph-lanes { flex: 0 0 88px; display: flex; flex-direction: column; gap: 3px; }
+.dr-graph-lanes .btn { font-size: 10px; padding: 3px 6px; text-align: left; }
+.dr-bars { flex: 1 1 auto; display: flex; gap: 3px; align-items: stretch; min-height: 120px; }
+.dr-bar-slot { flex: 1 1 0; min-width: 14px; position: relative; background: var(--ink); border: 1px solid var(--ink-line); border-radius: 4px; cursor: ns-resize; display: flex; align-items: flex-end; overflow: hidden; touch-action: none; }
+.dr-bar-slot.beat { margin-left: 7px; }
+.dr-bars .dr-bar-slot:first-child { margin-left: 0; }
+.dr-bar-slot:hover { border-color: var(--lime-dim); }
+.dr-bar-fill { width: 100%; background: var(--lime); border-radius: 0 0 3px 3px; pointer-events: none; }
+
+/* Phase 6 — floating window (FL drum machine) */
+.floatwin { position: fixed; z-index: 70; display: flex; flex-direction: column; background: var(--ink-raise); border: 1px solid var(--ink-line); border-radius: 12px; box-shadow: 0 18px 50px rgba(0,0,0,0.5); overflow: hidden; }
+.floatwin-bar { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--ink-line); cursor: move; touch-action: none; background: var(--ink); }
+.floatwin-title { flex: 1 1 auto; font-size: 13px; }
+.floatwin-body { flex: 1 1 auto; min-height: 0; display: flex; overflow: hidden; }
+.floatwin-body .dr { flex: 1 1 auto; }
+.floatwin-resize { position: absolute; right: 0; bottom: 0; width: 16px; height: 16px; cursor: nwse-resize; touch-action: none; background: linear-gradient(135deg, transparent 50%, var(--ink-line) 50%); }
+.floatwin-resize:hover { background: linear-gradient(135deg, transparent 50%, var(--lime-dim) 50%); }
+
 /* sample browser filter input */
 .sb-search { width: 100%; box-sizing: border-box; margin: 6px 0; padding: 5px 8px; background: var(--ink); border: 1px solid var(--ink-line); color: var(--bone); border-radius: 6px; font-size: 12px; }
 .sb-search:focus { outline: none; border-color: var(--lime-dim); }
