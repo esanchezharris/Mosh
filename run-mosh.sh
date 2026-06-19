@@ -105,11 +105,35 @@ case "$MODE" in
     echo "deploying $APP -> $DEST"
     rm -rf "$DEST"
     cp -R "$APP" "$DEST"
+
+    # Bundle the Python service INTO the app so a Finder/Dock double-click (whose
+    # cwd is not the repo) can still find + spawn it — GenerativeJobManager looks for
+    # Contents/Resources/service/server.py. The model venvs (SA3 MLX + Basic Pitch,
+    # 100s of MB, machine-local) stay OUTSIDE: the bundled run.sh defaults SA3_MLX_DIR
+    # to ~/AI/... and reads BASIC_PITCH_PY from the machine-local .transcribe.env we
+    # copy in (so transcription + re-imagine work from the Dock, not just run-mosh.sh).
+    SVC="$DEST/Contents/Resources/service"
+    echo "bundling service → ${SVC#$ROOT/}"
+    rm -rf "$SVC"; mkdir -p "$SVC/transcribe"
+    cp "$ROOT/service/server.py" "$ROOT/service/run.sh" "$ROOT/service/run.ps1" \
+       "$ROOT/service/quality_readout.py" "$ROOT/service/setup-sa3.sh" "$SVC/" 2>/dev/null || true
+    for d in adapters colors sa3 scripts training; do
+      [ -d "$ROOT/service/$d" ] && cp -R "$ROOT/service/$d" "$SVC/$d"
+    done
+    cp "$ROOT/service/transcribe/transcribe_cli.py" \
+       "$ROOT/service/transcribe/setup-transcribe.sh" "$SVC/transcribe/"
+    # Machine-local venv pointers (gitignored) — let the bundled service reach the
+    # external venvs. Absent ones just fall back to run.sh's defaults.
+    [ -f "$ROOT/service/.sa3.env" ] && cp "$ROOT/service/.sa3.env" "$SVC/.sa3.env"
+    [ -f "$ROOT/service/transcribe/.transcribe.env" ] && cp "$ROOT/service/transcribe/.transcribe.env" "$SVC/transcribe/.transcribe.env"
+    # Keep the bundle lean (drop staged __pycache__).
+    find "$SVC" -name __pycache__ -type d -prune -exec rm -rf {} + 2>/dev/null || true
+
     # Nudge the macOS icon cache so a changed icon refreshes.
     touch "$DEST"
     killall Finder 2>/dev/null || true
     killall Dock   2>/dev/null || true
-    echo "deployed one canonical /Applications/Mosh.app."
+    echo "deployed one canonical /Applications/Mosh.app (service bundled)."
     echo "If macOS still shows an old icon, log out and back in (icon cache)."
     ;;
   *)     echo "usage: $0 [gui|smoke|build|deploy]" >&2; exit 2 ;;
