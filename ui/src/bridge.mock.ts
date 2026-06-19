@@ -600,8 +600,12 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     case "add_midi_clip": {
       const t = findTrack(str(args.trackId)) ?? snapshot.tracks[0]; if (!t) return err(command, "no track");
       pushUndo();
-      const c: Clip = { id: nextClipId(), name: "midi", type: "midi", start: num(args.start, snapshot.transport.position), length: 4, offset: 0, hasRenderLayer: false,
-        notes: [60, 64, 67, 72].map((pitch, k) => ({ i: k, pitch, start: k * 0.5, length: 0.5, velocity: 100 })) };
+      // Empty by default (matches the backend: "+ MIDI" makes an empty clip). A
+      // caller that passes `notes` seeds them; otherwise the clip starts blank.
+      const seed = Array.isArray(args.notes)
+        ? (args.notes as Array<Record<string, unknown>>).map((n, k) => ({ i: k, pitch: num(n.pitch, 60), start: num(n.start, 0), length: num(n.length, 0.5), velocity: num(n.velocity, 100) }))
+        : [];
+      const c: Clip = { id: nextClipId(), name: "midi", type: "midi", start: num(args.start, snapshot.transport.position), length: 4, offset: 0, hasRenderLayer: false, notes: seed };
       t.clips.push(c); invalidate(); return ok(command, { clipId: c.id });
     }
     case "add_note": {

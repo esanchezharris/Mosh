@@ -1463,6 +1463,23 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         cmd (ops, "save"); cmd (ops, "reload");
         check (clipNotes (mClip).size() == before - 1, "notes persist across save/reload");
         check (! ok (cmd (ops, "set_note", objN ({{ "clipId", mClip }, { "noteIndex", 999 }}))), "set_note rejects an out-of-range noteIndex");
+
+        // Phase 1: emptying a MIDI clip must NOT delete the clip. (The "clip vanishes
+        // when you delete all its notes" bug was a UI keyboard-handler issue, never a
+        // backend prune — this guards the backend contract: an empty clip persists.)
+        auto clipExists = [&] (const String& cid) -> bool {
+            auto snap = ops.snapshot();
+            if (auto* tarr = snap.getProperty ("tracks", var()).getArray())
+                for (auto& t : *tarr)
+                    if (auto* carr = t.getProperty ("clips", var()).getArray())
+                        for (auto& c : *carr)
+                            if (c.getProperty ("id", var()).toString() == cid) return true;
+            return false;
+        };
+        while (clipNotes (mClip).size() > 0)
+            cmd (ops, "remove_note", objN ({{ "clipId", mClip }, { "noteIndex", 0 }}));
+        check (clipNotes (mClip).size() == 0, "remove every note empties the sequence");
+        check (clipExists (mClip), "an emptied MIDI clip is NOT auto-deleted (stays in the arrangement)");
     }
 
     // ─── Wave 8: sends / returns / aux buses ───
