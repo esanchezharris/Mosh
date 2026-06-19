@@ -65,6 +65,7 @@ if (MOSH_BUILD_APP)
     target_sources(Mosh PRIVATE
         src/Main.cpp
         src/app/MainWindow.cpp
+        src/app/MenuController.cpp
         src/app/WebViewShell.cpp
         src/app/SelfTest.cpp
         src/webview/WebBridge.cpp

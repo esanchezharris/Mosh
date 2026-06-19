@@ -400,6 +400,25 @@ body { background: var(--ink); color: var(--bone); font-family: var(--font-body)
 .pop-row select { background: var(--ink); color: var(--bone); border: 1px solid var(--ink-line); border-radius: 6px; padding: 3px 6px; font-size: 11px; }
 .pop-actions { display: flex; flex-wrap: wrap; gap: 5px; }
 .pop-note { font-size: 10px; color: var(--bone-dim); word-break: break-all; }
+
+/* File menu (WebView mirror of the native macOS File menu). Anchored LEFT — it sits
+   at the left of the topbar tools, unlike the right-anchored utility popovers. */
+.menu-pop .pop { left: 0; right: auto; width: 232px; padding: 6px; gap: 2px; }
+.menu-list { display: flex; flex-direction: column; gap: 1px; }
+.menu-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  width: 100%; text-align: left; appearance: none; border: none; background: transparent;
+  color: var(--bone); padding: 6px 8px; border-radius: 6px; font-size: 12px; cursor: pointer;
+}
+.menu-item:hover:not(:disabled) { background: var(--lime-faint); color: var(--bone); }
+.menu-item:disabled { opacity: 0.5; cursor: default; }
+.menu-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.menu-accel { color: var(--bone-dim); font-size: 11px; flex: 0 0 auto; }
+.menu-sub { margin: 2px 0; padding: 4px 0; border-top: 1px solid var(--ink-line-soft); border-bottom: 1px solid var(--ink-line-soft); }
+.menu-sub-head { font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--bone-dim); padding: 2px 8px; }
+.menu-item.sub { padding-left: 18px; font-size: 11px; }
+.menu-foot { padding: 6px 8px 2px; border-top: 1px solid var(--ink-line-soft); }
+
 .scale-ctl { display: flex; align-items: center; gap: 6px; }
 .cmdlog-list { max-height: 240px; overflow: auto; display: flex; flex-direction: column; gap: 2px; }
 .cmdlog-row { display: flex; align-items: center; gap: 6px; font-size: 11px; padding: 2px 0; }

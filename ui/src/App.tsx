@@ -12,6 +12,7 @@
 import { useEffect } from "react";
 import { useStore } from "./store";
 import { isNative } from "./bridge";
+import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { Topbar, Toolbar } from "./ui/Topbar";
 import { Arrange } from "./ui/Arrange";
 import { Dock } from "./ui/Dock";
@@ -28,6 +29,7 @@ export function App() {
   const view = useStore((s) => s.view);
 
   useEffect(() => { init(); }, [init]);
+  useKeyboardShortcuts(); // the single keyboard layer + native-menu bridge (CTL-002)
 
   // Production build opened outside a backend (no JUCE WebView, no dev-mock).
   if (!isNative()) {
