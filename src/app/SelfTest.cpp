@@ -1,6 +1,7 @@
 #include "SelfTest.h"
 #include "engine/MoshEngine.h"
 #include "moshops/MoshOps.h"
+#include "multiplayer/MultiplayerClient.h"
 #include "plugins/neural/NeuralInsertPlugin.h"
 #include "brain/BrainProxy.h"
 #include "voice/NativeSpeech.h"
@@ -3581,6 +3582,71 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                "undo removed the sentinel track (apply was NOT on the undo stack)");
         check (trackByLogicalId (ops, lid).getProperty ("name", juce::var()).toString() == "RT Src",
                "applied track survives the undo (apply is outside the undo system)");
+    }
+
+    // P2 — native↔relay transport, end to end over real HTTP. Gated (spawns a
+    // relay + needs MOSH_RELAY_URL) so it stays OUT of the deterministic core run.
+    if (std::getenv ("MOSH_SELFTEST_MP") != nullptr)
+    {
+        section ("Multiplayer: native relay round-trip (P2, gated MOSH_SELFTEST_MP)");
+
+        MultiplayerClient a, b;   // both resolve the relay from MOSH_RELAY_URL
+        const auto code = a.createSession ("Ada", "#ff0000");
+        check (code.isNotEmpty(), "peer A created a session (got a room code) [" + a.lastError() + "]");
+        check (code.length() >= 16, "room code is a high-entropy bearer");
+        check (b.joinSession (code, "Bo", "#0000ff"), "peer B joined by code [" + b.lastError() + "]");
+
+        // A serializes a real track and publishes the commit over the wire.
+        check (ok (cmd (ops, "create_track", args1 ("name", "Net Src"))), "create Net Src");
+        juce::String netId;
+        {
+            auto snap = ops.snapshot();
+            if (auto* arr = snap["tracks"].getArray())
+                for (auto& tv : *arr)
+                    if (tv.getProperty ("name", juce::var()).toString() == "Net Src")
+                        netId = tv.getProperty ("id", juce::var()).toString();
+        }
+        cmd (ops, "add_test_tone_clip", objN ({ { "trackId", netId }, { "seconds", 1.0 } }));
+        auto ser = cmd (ops, "mp_serialize_track", args1 ("trackId", netId));
+        const auto blob = ser.getProperty ("data", juce::var()).getProperty ("blob", juce::var()).toString();
+        const auto lid  = ser.getProperty ("data", juce::var()).getProperty ("logicalId", juce::var()).toString();
+        check (blob.isNotEmpty(), "serialized Net Src to a commit blob");
+
+        auto* commit = new juce::DynamicObject();
+        commit->setProperty ("type", "commit");
+        commit->setProperty ("logicalId", lid);
+        commit->setProperty ("blob", blob);
+        const int seq = a.publish (juce::var (commit));
+        check (seq == 1, "peer A published the commit (seq 1) [" + a.lastError() + "]");
+
+        // B receives exactly that commit; A does not get its own back (no echo).
+        auto frames = b.poll();
+        check (frames.size() == 1, "peer B received exactly one frame [" + b.lastError() + "]");
+        juce::String gotBlob, gotLid;
+        if (frames.size() > 0)
+        {
+            gotBlob = frames[0].getProperty ("msg", juce::var()).getProperty ("blob", juce::var()).toString();
+            gotLid  = frames[0].getProperty ("msg", juce::var()).getProperty ("logicalId", juce::var()).toString();
+        }
+        check (gotBlob == blob && gotBlob.isNotEmpty(), "commit blob survived the relay round-trip byte-for-byte");
+        check (gotLid == lid, "commit logicalId survived the round-trip");
+        check (a.poll().isEmpty(), "peer A does not receive its own commit (no echo)");
+
+        // Apply the wire-delivered commit (after mutating) -> the track is restored.
+        cmd (ops, "rename_track", objN ({ { "trackId", netId }, { "name", "NET-MUTATED" } }));
+        check (ok (cmd (ops, "apply_remote_track", args1 ("blob", gotBlob))), "apply_remote_track (from wire) ok");
+        juce::String restoredName;
+        {
+            auto snap = ops.snapshot();
+            if (auto* arr = snap["tracks"].getArray())
+                for (auto& tv : *arr)
+                    if (tv.getProperty ("logicalId", juce::var()).toString() == lid)
+                        restoredName = tv.getProperty ("name", juce::var()).toString();
+        }
+        check (restoredName == "Net Src", "track restored from the relayed commit (end-to-end over HTTP)");
+
+        a.leave();
+        b.leave();
     }
 
     finishSection();

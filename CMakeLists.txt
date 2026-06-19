@@ -77,6 +77,7 @@ if (MOSH_BUILD_APP)
         src/moshops/MoshOps.cpp
         # MP-001 — 2-player multiplayer (track-lock + commit-on-move)
         src/multiplayer/TrackCommit.cpp
+        src/multiplayer/MultiplayerClient.cpp
         # Stage 3 — VST3 hosting (04 PART 1)
         src/plugins/hosting/PluginHost.cpp
         # Stage 4 — Tier-A real-time neural insert (04 PART 2)
