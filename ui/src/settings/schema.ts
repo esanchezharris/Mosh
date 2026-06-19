@@ -112,6 +112,22 @@ export const SETTINGS: SettingDef[] = [
     label: "Voice volume",
     constraints: { min: 0, max: 1, step: 0.05 },
   },
+  {
+    id: "layout",
+    type: "enum",
+    default: "mosh",
+    scope: "app",
+    category: "Layout",
+    label: "Panel layout",
+    help: "Fixed zones (browser-left · arrange-center · dock-bottom). FL also pops the drum sequencer into a floating window.",
+    constraints: {
+      options: [
+        { value: "mosh", label: "Mosh" },
+        { value: "ableton", label: "Ableton" },
+        { value: "fl", label: "FL" },
+      ],
+    },
+  },
   ...interactionSettings(),
 ];
 
