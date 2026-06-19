@@ -48,6 +48,8 @@ service/scripts/_sa3_e2e_out/
 *.wav
 *.aiff
 *.aif
+# …but the bundled default drum kit IS a committed app resource (DRM-001).
+!resources/drumkits/mosh-kit/*.wav
 mosh-sessions/
 service/jobs/
 _preserved_artifacts/

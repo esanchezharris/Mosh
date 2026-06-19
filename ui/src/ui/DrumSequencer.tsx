@@ -16,6 +16,11 @@ export function DrumSequencer({ clip }: { clip: Clip }) {
   const grid = buildGrid(clip.notes ?? [], m.num);
   const playing = useStore((s) => s.transport.playing);
 
+  // DRM-001 — these GM-pitch notes only make sound on a drum track (sampler + kit).
+  // If the clip lives on a plain track, offer to convert it so the beat is audible.
+  const track = snapshot?.tracks.find((t) => t.clips.some((c) => c.id === clip.id));
+  const isDrumTrack = track?.type === "drum";
+
   const onCell = (lane: number, step: number, shift: boolean) => {
     const cell = grid[lane][step];
     if (!cell.on)
@@ -45,8 +50,16 @@ export function DrumSequencer({ clip }: { clip: Clip }) {
           {playing ? "⏸ Stop" : "▶ Play"}
         </button>
         <button className="btn" onClick={() => void clearAll()}>Clear</button>
+        {track && !isDrumTrack && (
+          <button className="btn" data-testid="make-drum-track" title="Load a sampler + drum kit so these notes make sound"
+            onClick={() => void exec("set_track_type", { trackId: track.id, type: "drum" })}>
+            🥁 Make drum track
+          </button>
+        )}
         <span className="spacer" />
-        <span className="dr-hint tc">click a step to toggle · shift-click a step to cycle velocity</span>
+        <span className="dr-hint tc">
+          {track && !isDrumTrack ? "no kit on this track — make it a drum track to hear it" : "click a step to toggle · shift-click a step to cycle velocity"}
+        </span>
       </div>
       <div className="dr-grid" role="grid" aria-label="Drum step sequencer">
         {DRUM_LANES.map((lane, li) => (

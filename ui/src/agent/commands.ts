@@ -15,7 +15,7 @@ const B = (name: string, required = true, desc?: string): ArgSpec => ({ name, ty
 
 export const AGENT_COMMANDS: AgentCommand[] = [
   // ── tracks ──────────────────────────────────────────────────────────────
-  { command: "create_track", desc: "Add a new audio track", args: [S("name", false, "track name")] },
+  { command: "create_track", desc: "Add a new track — type 'drum' loads a sampler + drum kit so beats are audible immediately", args: [S("name", false, "track name"), S("type", false, '"audio" (default) | "drum"')] },
   { command: "rename_track", desc: "Rename a track", args: [S("trackId"), S("name")] },
   { command: "remove_track", desc: "Delete a track and its clips", args: [S("trackId")] },
 
@@ -67,6 +67,9 @@ export const AGENT_COMMANDS: AgentCommand[] = [
 
   // ── plugins ─────────────────────────────────────────────────────────────
   { command: "load_builtin", desc: "Add a built-in effect/instrument to a track (type from list_builtins)", args: [S("trackId"), N("index", false, "chain position"), S("type")] },
+  { command: "set_track_type", desc: "Set a track's type — 'drum' loads the working sampler + drum kit so its MIDI notes are audible", args: [S("trackId"), S("type", true, '"audio" | "drum"')] },
+  { command: "load_drum_kit", desc: "Load the built-in drum kit onto a track's sampler (kick/snare/clap/hats/toms/crash)", args: [S("trackId")] },
+  { command: "assign_sample", desc: "Map an audio file to one drum pad/note on a track's sampler (replaces that pad)", args: [S("trackId"), N("note", true, "MIDI pitch 0-127 of the pad"), S("file", true, "audio file path"), S("name", false, "pad label"), N("gainDb", false)] },
   { command: "load_plugin", desc: "Add a scanned VST3/AU plugin to a track (pluginId from list_plugins)", args: [S("trackId"), S("pluginId"), N("index", false, "chain position")] },
   { command: "set_plugin_param", desc: "Set a plugin parameter (0-1) by chain index + param index", args: [S("trackId"), N("index"), N("paramIndex"), N("value", true, "0-1")] },
   { command: "bypass_plugin", desc: "Bypass/enable a plugin in a track's chain", args: [S("trackId"), N("index"), B("bypassed")] },
@@ -125,7 +128,7 @@ export function commandCatalogPrompt(): string {
 export function describeCommand(command: string, args: Record<string, unknown>): string {
   const a = args as Record<string, string | number | boolean | undefined>;
   switch (command) {
-    case "create_track": return `Added track${a.name ? ` "${a.name}"` : ""}`;
+    case "create_track": return `Added ${a.type === "drum" ? "drum " : ""}track${a.name ? ` "${a.name}"` : ""}`;
     case "rename_track": return `Renamed track to "${a.name}"`;
     case "remove_track": return `Removed a track`;
     case "add_test_tone_clip": return `Added a test tone`;
@@ -163,6 +166,9 @@ export function describeCommand(command: string, args: Record<string, unknown>):
     case "set_master_volume": return `Set master volume to ${a.db} dB`;
     case "set_master_pan": return `Set master pan to ${a.pan}`;
     case "load_builtin": return `Added ${a.type}`;
+    case "set_track_type": return a.type === "drum" ? `Made it a drum track` : `Made it an audio track`;
+    case "load_drum_kit": return `Loaded the drum kit`;
+    case "assign_sample": return `Assigned a sample to a pad`;
     case "load_plugin": return `Added a plugin`;
     case "set_plugin_param": return `Tweaked a plugin parameter`;
     case "bypass_plugin": return a.bypassed ? `Bypassed a plugin` : `Enabled a plugin`;

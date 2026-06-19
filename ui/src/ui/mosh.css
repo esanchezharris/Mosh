@@ -253,6 +253,9 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 .thead.selected { background: var(--lime-faint); }
 .thead .row1 { display: flex; align-items: center; gap: 6px; }
 .thead .tname { flex: 1 1 auto; font-size: 12px; font-weight: 600; color: var(--bone); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* DRM-001 — track-type / instrument chip (drum 🥁 vs melodic ♪). */
+.thead .tbadge { flex: 0 0 auto; font-size: 11px; line-height: 1; padding: 2px 4px; border-radius: 5px; border: 1px solid var(--ink-line); background: var(--ink); color: var(--bone-dim); cursor: default; }
+.thead .tbadge.drum { border-color: var(--lime); color: var(--lime); }
 .thead .mix { display: flex; align-items: center; gap: 5px; }
 .thead .msx { width: 20px; height: 20px; border-radius: 5px; border: 1px solid var(--ink-line); background: var(--ink); color: var(--bone-dim); font-size: 10px; font-weight: 700; cursor: pointer; }
 .thead .msx.on.m { background: var(--mute); border-color: var(--mute); color: var(--on-accent); }

@@ -303,10 +303,22 @@ const TrackHeader = memo(function TrackHeader({ track }: { track: Track }) {
   // selected-state is unchanged won't re-render when selection moves elsewhere.
   const selected = useStore((s) => s.selectedTrackId === track.id);
   const setSelectedTrack = useStore((s) => s.setSelectedTrack);
+  // DRM-001 — surface the track type + auto-loaded instrument so the default-instrument
+  // policy is discoverable, not magic. A drum track shows 🥁; a melodic instrument
+  // track shows ♪ (with the instrument's name on hover).
+  const instrument = track.plugins?.find((p) => p.isInstrument);
+  const isDrum = track.type === "drum";
+  const showBadge = isDrum || !!instrument;
   return (
     <div className={`thead${selected ? " selected" : ""}`} data-testid="track-header" data-track-id={track.id}
-      data-selected={selected} onPointerDown={() => setSelectedTrack(track.id)}>
+      data-track-type={track.type} data-selected={selected} onPointerDown={() => setSelectedTrack(track.id)}>
       <div className="row1">
+        {showBadge && (
+          <span className={`tbadge${isDrum ? " drum" : ""}`} data-testid="track-type-badge"
+            title={isDrum ? `Drum track${instrument ? ` · ${instrument.name}` : ""}` : `Instrument · ${instrument!.name}`}>
+            {isDrum ? "🥁" : "♪"}
+          </span>
+        )}
         <span className="tname" title={track.name}>{track.name}</span>
         <button className="msx x" title="Remove track" aria-label={`Remove ${track.name}`}
           onClick={(e) => { e.stopPropagation(); void exec("remove_track", { trackId: track.id }); }}>×</button>

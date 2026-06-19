@@ -146,6 +146,16 @@ if (MOSH_BUILD_APP)
                     "$<TARGET_BUNDLE_DIR:Mosh>/Contents/Info.plist"
             COMMENT "Re-injecting Info.plist keys PLIST_TO_MERGE drops (speech + Bonjour)"
             VERBATIM)
+
+        # DRM-001 — stage the bundled drum kits into the app Resources so the native
+        # sampler (MoshOps::drumKitDir) can load them at runtime. run-mosh.sh `deploy`
+        # copies the whole .app, so the kit rides along to /Applications too.
+        add_custom_command(TARGET Mosh POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+                    "${CMAKE_SOURCE_DIR}/resources/drumkits"
+                    "$<TARGET_BUNDLE_DIR:Mosh>/Contents/Resources/drumkits"
+            COMMENT "Staging drum kits into Mosh.app/Contents/Resources/drumkits"
+            VERBATIM)
     endif()
 
     # ── UI bundle (Vite) ─────────────────────────────────────────────────────

@@ -171,6 +171,18 @@ function findClip(clipId: string): { track: Track; clip: Clip } | null {
 function findTrack(trackId: string): Track | null {
   return snapshot.tracks.find((t) => t.id === trackId) ?? null;
 }
+// DRM-001 — mirror the native default-instrument policy: a track that needs an
+// instrument gets the sane default (drum → sampler, melodic → 4OSC) unless it
+// already hosts one. Keeps UI tests honest about the auto-load behaviour.
+function ensureInstrument(t: Track, drum: boolean): void {
+  t.plugins = t.plugins ?? [];
+  if (!t.plugins.some((p) => p.isInstrument)) {
+    const b = drum ? { type: "sampler", name: "Sampler" } : { type: "4osc", name: "4OSC Synth" };
+    t.plugins.unshift({ index: 0, name: b.name, type: b.type, enabled: true, external: false, builtin: true, category: "Instrument", isInstrument: true, params: [] });
+    t.plugins.forEach((p, i) => (p.index = i));
+  }
+  t.isInstrument = t.plugins.some((p) => p.isInstrument);
+}
 function pushUndo() { if (inBatch) return; history.push(clone(snapshot)); future.length = 0; if (history.length > 100) history.shift(); }
 
 const ok = (command: string, data?: unknown): CommandResult => ({ ok: true, command, data });
@@ -262,13 +274,47 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
 
     case "create_track": {
       pushUndo();
+      // DRM-001 — type:"drum" auto-loads the sampler + kit (modelled here so UI tests
+      // see an instrument-bearing drum track, mirroring the native default policy).
+      const type = str(args.type, "audio") === "drum" ? "drum" : "audio";
       const t: Track = {
         id: nextTrackId(), index: snapshot.tracks.length, name: str(args.name, "Audio"),
-        type: "audio", volumeDb: 0, pan: 0, mute: false, solo: false, clips: [], plugins: [],
+        type, volumeDb: 0, pan: 0, mute: false, solo: false, clips: [], plugins: [],
       };
+      if (type === "drum") ensureInstrument(t, true);
       snapshot.tracks.push(t);
       invalidate();
-      return ok(command, { trackId: t.id });
+      return ok(command, { trackId: t.id, type, isInstrument: !!t.isInstrument });
+    }
+    case "set_track_type": {
+      const t = findTrack(str(args.trackId));
+      if (!t) return err(command, "track not found");
+      const type = str(args.type, "audio") === "drum" ? "drum" : "audio";
+      pushUndo();
+      t.type = type;
+      if (type === "drum") ensureInstrument(t, true);
+      invalidate();
+      return ok(command, { trackId: t.id, type, isInstrument: !!t.isInstrument });
+    }
+    case "load_drum_kit": {
+      const t = findTrack(str(args.trackId));
+      if (!t) return err(command, "track not found");
+      pushUndo();
+      ensureInstrument(t, true);
+      invalidate();
+      return ok(command, { trackId: t.id, pads: 8 });
+    }
+    case "assign_sample": {
+      const t = findTrack(str(args.trackId));
+      if (!t) return err(command, "track not found");
+      // Mirror the native guard: a sample is required (native also checks the file
+      // exists on disk, which the mock can't, so it only enforces a non-empty path).
+      const file = str(args.file);
+      if (!file) return err(command, "file not found: " + file);
+      pushUndo();
+      ensureInstrument(t, true);
+      invalidate();
+      return ok(command, { trackId: t.id, note: num(args.note, 60), name: str(args.name, "Sample"), file });
     }
     case "rename_track": {
       const t = findTrack(str(args.trackId));
@@ -600,8 +646,11 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     case "add_midi_clip": {
       const t = findTrack(str(args.trackId)) ?? snapshot.tracks[0]; if (!t) return err(command, "no track");
       pushUndo();
-      // Empty by default (matches the backend: "+ MIDI" makes an empty clip). A
-      // caller that passes `notes` seeds them; otherwise the clip starts blank.
+      // DRM-001 — default-instrument policy: a MIDI clip on an instrument-less track
+      // auto-loads the sane default so the notes are audible (drum track → sampler).
+      ensureInstrument(t, t.type === "drum");
+      // Phase 1 — empty by default (matches the backend: "+ MIDI" makes an empty
+      // clip). A caller that passes `notes` seeds them; otherwise the clip is blank.
       const seed = Array.isArray(args.notes)
         ? (args.notes as Array<Record<string, unknown>>).map((n, k) => ({ i: k, pitch: num(n.pitch, 60), start: num(n.start, 0), length: num(n.length, 0.5), velocity: num(n.velocity, 100) }))
         : [];
