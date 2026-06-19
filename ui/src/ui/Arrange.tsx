@@ -23,6 +23,7 @@ import { pickFiles, nativeMenuPresent } from "../bridge";
 import { useStore, type Peaks } from "../store";
 import { tempoMapFrom, gridLines, meterAt, beatSeconds, snapStep } from "../time";
 import { DRUM_LANES, laneIndexForPitch } from "./drumGrid";
+import { commitClipDrag } from "./clipDrag";
 import { useDrumWindow } from "./dock/useFloatingWindow";
 import { deriveTakeLanes } from "./takeLanes";
 import { SAMPLE_DND_MIME, addRecentSample } from "./sampleBrowserUtil";
@@ -602,11 +603,10 @@ function ClipBlock({
     releasePointer(e.target as HTMLElement, e.pointerId);
     if (d && d.engaged) {
       lastUp.current = null; // a drag breaks any pending double-click sequence
-      if (d.kind === "move") {
-        if (preview && Math.abs(preview.start - d.orig.start) > 1e-4) void exec("move_clip", { clipId: clip.id, start: preview.start });
-        else setPreview(null);
-      } else if (d.kind === "trim-l" || d.kind === "trim-r") {
-        if (preview) void exec("trim_clip", { clipId: clip.id, start: preview.start, length: preview.length, offset: preview.offset });
+      if (d.kind === "move" || d.kind === "trim-l" || d.kind === "trim-r") {
+        // Commit move/trim, reverting the optimistic preview if the command is
+        // rejected (else it stays stuck — there is no snapshot change to clear it).
+        commitClipDrag(d.kind, preview, d.orig.start, clip.id, exec, setPreview);
       } else { // time
         const r = useStore.getState().timeRange;
         if (r && r.end - r.start < 1e-6) setTimeRange(null);
