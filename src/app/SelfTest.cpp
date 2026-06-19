@@ -3411,6 +3411,178 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (! sp.isListening(), "voice: stop() while idle is a safe no-op");
     }
 
+    section ("Multiplayer: stable logical track IDs (MP-001)");
+    {
+        // The load-bearing multiplayer prerequisite: every track carries a stable
+        // cross-peer UUID (moshLogicalId) that is distinct, non-empty, and survives
+        // a save/reload — Tracktion's own EditItemID is allocator-dependent and so
+        // differs per peer, which is why we cannot address tracks across peers by it.
+        const int before = tracks (ops);
+        check (ok (cmd (ops, "create_track", args1 ("name", "MP One"))), "create_track MP One ok");
+        check (ok (cmd (ops, "create_track", args1 ("name", "MP Two"))), "create_track MP Two ok");
+
+        auto idByName = [] (MoshOps& o, const juce::String& name) -> juce::String
+        {
+            auto snap = o.snapshot();   // keep the temporary alive (no dangling array)
+            if (auto* arr = snap["tracks"].getArray())
+                for (auto& tv : *arr)
+                    if (tv.getProperty ("name", juce::var()).toString() == name)
+                        return tv.getProperty ("logicalId", juce::var()).toString();
+            return {};
+        };
+
+        check (tracks (ops) >= before + 2, "two MP tracks present in snapshot");
+        const auto id1 = idByName (ops, "MP One");
+        const auto id2 = idByName (ops, "MP Two");
+        check (id1.isNotEmpty(), "track 'MP One' has a non-empty logicalId");
+        check (id2.isNotEmpty(), "track 'MP Two' has a non-empty logicalId");
+        check (id1 != id2, "the two tracks have distinct logicalIds");
+        check (id1.length() >= 32, "logicalId looks like a juce::Uuid string");
+
+        // Identity is stable across a session reload (persisted on the track tree).
+        check (ok (cmd (ops, "save")),   "save ok (MP-001)");
+        check (ok (cmd (ops, "reload")), "reload ok (MP-001)");
+        check (idByName (ops, "MP One") == id1 && id1.isNotEmpty(), "logicalId of 'MP One' survives save/reload");
+        check (idByName (ops, "MP Two") == id2 && id2.isNotEmpty(), "logicalId of 'MP Two' survives save/reload");
+    }
+
+    section ("Multiplayer: track serialize/apply round-trip (P1b)");
+    {
+        // The core commit/apply mechanism, proven entirely in-process (no network):
+        // serialize a track -> mutate it -> apply the blob -> the track is restored
+        // byte-faithfully, WITHOUT touching the undo stack and WITHOUT emitting (so
+        // a remote apply never echoes back to the relay).
+
+        // Resolve the engine itemID of a track by display name (for command args).
+        auto trackIdByName = [] (MoshOps& o, const juce::String& name) -> juce::String
+        {
+            auto snap = o.snapshot();
+            if (auto* arr = snap["tracks"].getArray())
+                for (auto& tv : *arr)
+                    if (tv.getProperty ("name", juce::var()).toString() == name)
+                        return tv.getProperty ("id", juce::var()).toString();
+            return {};
+        };
+        // Fetch a whole track var by its stable logicalId (to read restored fields).
+        auto trackByLogicalId = [] (MoshOps& o, const juce::String& lid) -> juce::var
+        {
+            auto snap = o.snapshot();
+            if (auto* arr = snap["tracks"].getArray())
+                for (auto& tv : *arr)
+                    if (tv.getProperty ("logicalId", juce::var()).toString() == lid)
+                        return tv;
+            return {};
+        };
+
+        check (ok (cmd (ops, "create_track", args1 ("name", "RT Src"))), "create RT Src");
+        const auto srcId = trackIdByName (ops, "RT Src");
+        check (srcId.isNotEmpty(), "RT Src engine id resolved");
+
+        // Give it real content: a wave clip, a MIDI clip with a note, a set volume.
+        cmd (ops, "add_test_tone_clip", objN ({ { "trackId", srcId }, { "seconds", 1.0 } }));
+        cmd (ops, "set_track_volume",   objN ({ { "trackId", srcId }, { "db", -6.5 } }));
+        auto midiRes = cmd (ops, "add_midi_clip", objN ({ { "trackId", srcId } }));
+        const auto midiClipId = midiRes.getProperty ("data", juce::var()).getProperty ("clipId", juce::var()).toString();
+        check (midiClipId.isNotEmpty(), "RT Src midi clip created");
+        cmd (ops, "add_note", objN ({ { "clipId", midiClipId }, { "pitch", 60 },
+                                      { "beat", 0.0 }, { "length", 1.0 }, { "velocity", 100 } }));
+
+        // Capture the original shape (clip count) before we serialize.
+        auto clipCountOf = [] (const juce::var& tv) -> int
+        {
+            if (auto* a = tv["clips"].getArray()) return a->size();
+            return 0;
+        };
+        // Resolve the source track's stable logicalId (for restored-state lookups).
+        juce::String srcLid;
+        {
+            auto snap = ops.snapshot();
+            if (auto* arr = snap["tracks"].getArray())
+                for (auto& tv : *arr)
+                    if (tv.getProperty ("name", juce::var()).toString() == "RT Src")
+                        srcLid = tv.getProperty ("logicalId", juce::var()).toString();
+        }
+        const int origClipCount = clipCountOf (trackByLogicalId (ops, srcLid));
+        check (origClipCount == 2, "RT Src has 2 clips (wave + midi) before serialize");
+        const double srcVol = (double) trackByLogicalId (ops, srcLid).getProperty ("volumeDb", -99.0);
+        check (std::abs (srcVol - (-6.5)) < 0.05, "RT Src volume is -6.5 pre-serialize (got " + juce::String (srcVol, 3) + ")");
+
+        // 1) SERIALIZE
+        auto serRes = cmd (ops, "mp_serialize_track", args1 ("trackId", srcId));
+        check (ok (serRes), "mp_serialize_track ok");
+        const auto blob = serRes.getProperty ("data", juce::var()).getProperty ("blob", juce::var()).toString();
+        const auto lid  = serRes.getProperty ("data", juce::var()).getProperty ("logicalId", juce::var()).toString();
+        check (blob.isNotEmpty(), "serialize produced a non-empty blob");
+        check (lid == srcLid && lid.isNotEmpty(), "serialize reported the track's logicalId");
+
+        // 2) MUTATE the live track away from the serialized state.
+        cmd (ops, "rename_track",     objN ({ { "trackId", srcId }, { "name", "MUTATED" } }));
+        cmd (ops, "set_track_volume", objN ({ { "trackId", srcId }, { "db", 0.0 } }));
+        {   // remove every clip on RT Src
+            auto snap = ops.snapshot();
+            juce::StringArray clipIds;
+            if (auto* arr = snap["tracks"].getArray())
+                for (auto& tv : *arr)
+                    if (tv.getProperty ("id", juce::var()).toString() == srcId)
+                        if (auto* cs = tv["clips"].getArray())
+                            for (auto& cv : *cs)
+                                clipIds.add (cv.getProperty ("id", juce::var()).toString());
+            for (auto& cid : clipIds)
+                cmd (ops, "remove_clip", args1 ("clipId", cid));
+        }
+        check (clipCountOf (trackByLogicalId (ops, lid)) == 0, "mutate removed all clips");
+
+        // A sentinel: a freshly-created track is the TOP of the undo stack (create_
+        // track is proven undoable). If apply does NOT push an undoable action, a
+        // single undo after apply reverts THIS create, not the apply.
+        cmd (ops, "create_track", args1 ("name", "RT Sentinel"));
+        auto sentinelExists = [] (MoshOps& o) -> bool
+        {
+            auto snap = o.snapshot();
+            if (auto* arr = snap["tracks"].getArray())
+                for (auto& tv : *arr)
+                    if (tv.getProperty ("name", juce::var()).toString() == "RT Sentinel")
+                        return true;
+            return false;
+        };
+        check (sentinelExists (ops), "sentinel track present before apply");
+
+        // 3) APPLY — zero-emit guard: clear captured events, apply, assert silence.
+        eventTypes.clear();
+        auto appRes = cmd (ops, "apply_remote_track", args1 ("blob", blob));
+        check (ok (appRes), "apply_remote_track ok");
+        check (appRes.getProperty ("data", juce::var()).getProperty ("mode", juce::var()).toString() == "replaced",
+               "apply replaced the existing track (same logicalId)");
+        juce::String evDump; for (auto& e : eventTypes) evDump << e << ",";
+        bool emittedInvalidate = false;
+        for (auto& e : eventTypes) if (e == "snapshot_invalidated") emittedInvalidate = true;
+        check (! emittedInvalidate,
+               "apply_remote_track does NOT emit snapshot_invalidated (no relay echo) [saw: " + evDump + "]");
+
+        // 4) FIDELITY — the track is restored by logicalId.
+        auto restored = trackByLogicalId (ops, lid);
+        check (restored.isObject(), "restored track found by logicalId");
+        check (restored.getProperty ("name", juce::var()).toString() == "RT Src", "name restored");
+        const double rv = (double) restored.getProperty ("volumeDb", -99.0);
+        check (std::abs (rv - (-6.5)) < 0.05, "volume restored (got " + juce::String (rv, 3) + ")");
+        check (clipCountOf (restored) == origClipCount, "clip count restored (wave + midi)");
+        int restoredMidiNotes = 0;
+        if (auto* cs = restored["clips"].getArray())
+            for (auto& cv : *cs)
+                if (cv.getProperty ("type", juce::var()).toString() == "midi")
+                    if (auto* notes = cv["notes"].getArray())
+                        restoredMidiNotes = notes->size();
+        check (restoredMidiNotes >= 1, "deep content survived: the MIDI note round-tripped");
+
+        // 5) UNDO GUARD — apply was not undoable, so undo reverts the CONTROL track
+        // (top of the stack), not the applied track; the applied track survives.
+        check (ok (cmd (ops, "undo")), "undo ok");
+        check (! sentinelExists (ops),
+               "undo removed the sentinel track (apply was NOT on the undo stack)");
+        check (trackByLogicalId (ops, lid).getProperty ("name", juce::var()).toString() == "RT Src",
+               "applied track survives the undo (apply is outside the undo system)");
+    }
+
     finishSection();
     std::cerr << "===== " << (checks - failures) << "/" << checks
               << " checks passed, " << failures << " failed =====\n\n";

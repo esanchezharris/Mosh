@@ -53,6 +53,11 @@ private:
     juce::var cmdCreateTrack    (const juce::var& args);
     juce::var cmdRenameTrack    (const juce::var& args);
     juce::var cmdRemoveTrack    (const juce::var& args);
+    // MP-001 — 2-player multiplayer commit/apply (backend-only; not in the agent
+    // catalog). mp_serialize_track captures a track's portable blob; apply_remote_
+    // track rebuilds a peer's committed track (nullptr UndoManager, no relay echo).
+    juce::var cmdMpSerializeTrack (const juce::var& args);
+    juce::var cmdApplyRemoteTrack (const juce::var& args);
     juce::var cmdImportClip     (const juce::var& args);
     juce::var cmdImportClipData (const juce::var& args);
     juce::var cmdAddTestTone    (const juce::var& args);

@@ -75,6 +75,8 @@ if (MOSH_BUILD_APP)
         # Stage 1 — Engine + MoshOps spine + state feed (01, 02)
         src/engine/MoshEngine.cpp
         src/moshops/MoshOps.cpp
+        # MP-001 — 2-player multiplayer (track-lock + commit-on-move)
+        src/multiplayer/TrackCommit.cpp
         # Stage 3 — VST3 hosting (04 PART 1)
         src/plugins/hosting/PluginHost.cpp
         # Stage 4 — Tier-A real-time neural insert (04 PART 2)

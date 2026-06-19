@@ -1,6 +1,8 @@
 #include "MoshOps.h"
 #include "state/Ids.h"
 #include "state/RenderLayer.h"
+#include "multiplayer/LogicalId.h"
+#include "multiplayer/TrackCommit.h"
 #include "plugins/neural/NeuralInsertPlugin.h"
 #include <thread>
 
@@ -480,6 +482,8 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "set_project_settings") return cmdSetProjectSettings (args);
     if (name == "set_key")           return cmdSetKey (args);
     if (name == "create_group_track") return cmdCreateGroupTrack (args);
+    if (name == "mp_serialize_track") return cmdMpSerializeTrack (args);
+    if (name == "apply_remote_track") return cmdApplyRemoteTrack (args);
     if (name == "ungroup_track")      return cmdUngroupTrack (args);
     if (name == "list_wave_inputs")   return cmdListWaveInputs (args);
     if (name == "set_track_input")    return cmdSetTrackInput (args);
@@ -1134,6 +1138,8 @@ juce::var MoshOps::cmdCreateGroupTrack (const juce::var& args)
     if (folder == nullptr)
         return errResult ("create_group_track", "insertNewFolderTrack failed");
 
+    logicalid::ensureTrack (folder->state);   // MP-001 — stable cross-peer id for the submix
+
     const auto name = args.getProperty ("name", var()).toString();
     folder->setName (name.isNotEmpty() ? name : juce::String ("Group"));
 
@@ -1159,6 +1165,53 @@ juce::var MoshOps::cmdCreateGroupTrack (const juce::var& args)
     logLine ("create_group_track", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("create_group_track", var (data));
+}
+
+juce::var MoshOps::cmdMpSerializeTrack (const juce::var& args)
+{
+    // MP-001 — capture a track's portable blob for a peer commit. Read-only (no
+    // undo transaction, no event): flushState() so plugin chunks/state are in the
+    // tree, then serialize the whole track subtree.
+    const auto id = args.getProperty ("trackId", var()).toString();
+    auto* track = findTrack (id);
+    if (track == nullptr)
+        return errResult ("mp_serialize_track", "no track: " + id);
+
+    eng.edit().flushState();
+    const auto blob = trackcommit::serialize (*track);
+    if (blob.isEmpty())
+        return errResult ("mp_serialize_track", "serialize produced an empty blob");
+
+    auto* o = new DynamicObject();
+    o->setProperty ("blob", blob);
+    o->setProperty ("logicalId", logicalid::ensureTrack (track->state));
+    return okResult ("mp_serialize_track", var (o));
+}
+
+juce::var MoshOps::cmdApplyRemoteTrack (const juce::var& args)
+{
+    // MP-001 — apply a peer's committed track. Mutates via a nullptr UndoManager
+    // (never the local user's undo stack) and emits NOTHING (no relay echo); the
+    // local repaint is driven separately (P5). Backend-only / peer-origin.
+    const auto blob = args.getProperty ("blob", var()).toString();
+    if (blob.isEmpty())
+        return errResult ("apply_remote_track", "missing blob");
+
+    auto res = trackcommit::apply (eng.edit(), blob);
+    if (! res.ok)
+        return errResult ("apply_remote_track", res.error);
+
+    // NB: deliberately NO message-loop drain here. Tracktion's track list updates
+    // synchronously on the ValueTree child add/remove, so the snapshot already
+    // reflects the replaced track. Draining would (a) tick the 30 Hz metering /
+    // (b) advance the UndoManager's open transaction — both of which would leak
+    // into a remote apply that must be invisible to telemetry AND the undo stack.
+    eng.markDirty();   // the Edit genuinely changed (outside the undo system)
+
+    auto* o = new DynamicObject();
+    o->setProperty ("logicalId", res.logicalId);
+    o->setProperty ("mode", res.created ? "created" : "replaced");
+    return okResult ("apply_remote_track", var (o));
 }
 
 juce::var MoshOps::cmdUngroupTrack (const juce::var& args)
@@ -4707,6 +4760,10 @@ te::AudioTrack* MoshOps::createAudioTrack (const juce::String& name)
     if (track == nullptr)
         return nullptr;
 
+    // MP-001 — stamp the stable cross-peer logical id at creation (identity, not
+    // user state, so written without the undo manager; see LogicalId.h).
+    logicalid::ensureTrack (track->state);
+
     if (name.isNotEmpty())
         track->setName (name);
 
@@ -4969,6 +5026,7 @@ juce::var MoshOps::snapshot()
         {
             auto* g = new DynamicObject();
             g->setProperty ("id", ft->itemID.toString());
+            g->setProperty ("logicalId", logicalid::ensureTrack (ft->state));   // MP-001
             g->setProperty ("index", index++);
             g->setProperty ("name", ft->getName());
             g->setProperty ("type", "group");
@@ -5030,6 +5088,9 @@ juce::var MoshOps::trackToVar (te::AudioTrack& t, int index)
 
     auto* o = new DynamicObject();
     o->setProperty ("id", t.itemID.toString());
+    // MP-001 — stable cross-peer logical id (backfilled here for legacy/loaded
+    // edits whose tracks predate the stamp; ensure() is a no-op once present).
+    o->setProperty ("logicalId", logicalid::ensureTrack (t.state));
     o->setProperty ("index", index);
     o->setProperty ("name", t.getName());
     // DRM-001 — track type ("audio" | "drum"); absent on legacy edits ⇒ "audio".

@@ -11,6 +11,7 @@ target_sources(MoshTests PRIVATE
     test_renderlayer.cpp
     test_astd.cpp
     test_remote_companion.cpp
+    test_multiplayer_logical_id.cpp
     test_training.cpp
     ${CMAKE_SOURCE_DIR}/src/remote/RemoteCompanionProtocol.cpp
     ${CMAKE_SOURCE_DIR}/src/remote/RemoteCompanionServer.cpp
