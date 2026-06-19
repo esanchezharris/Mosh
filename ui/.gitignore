@@ -8,3 +8,10 @@ dist
 .vite
 .DS_Store
 *.log
+
+# playwright e2e
+/e2e-report
+/e2e-results
+/e2e-artifacts
+/test-results
+/playwright/.cache

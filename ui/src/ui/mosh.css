@@ -217,6 +217,16 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 .toolbar > * { flex: 0 0 auto; }
 .topbar::-webkit-scrollbar, .toolbar::-webkit-scrollbar { height: 0; width: 0; }
 .topbar, .toolbar { scrollbar-width: none; }
+/* The Arrange/Mixer switch is a primary control — pin it to the right edge so it
+   stays visible even when the secondary tool chrome overflows and scrolls under it
+   (the scrollbar is hidden, so an off-screen mode switch would be unreachable). */
+.topbar .view-toggle {
+  position: sticky; right: 0; z-index: 2;
+  /* opaque background masks the chrome scrolling under it; a translucent dark edge
+     fades it — a fixed rgba (not --ink-raise, which is white in the light theme and
+     would render an invisible/halo shadow) so the soft edge reads in every skin. */
+  background: var(--ink-raise); box-shadow: -10px 0 10px -6px rgba(0, 0, 0, 0.28);
+}
 
 @media (max-width: 1200px) { .topbar { gap: 10px; padding: 0 10px; } .transport { gap: 4px; } }
 @media (max-width: 1080px) { .topbar .master-meter { display: none; } }

@@ -7,6 +7,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
+import { useEscapeToClose } from "../hooks/useEscapeToClose";
 import type { AutoPoint } from "../types";
 
 const H = 220;
@@ -26,6 +27,7 @@ export function AutomationPanel() {
   const [paramIndex, setParamIndex] = useState(0);
   const [preview, setPreview] = useState<{ i: number; t: number; v: number } | null>(null);
   const dragRef = useRef<number | null>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!track) return;
@@ -34,6 +36,10 @@ export function AutomationPanel() {
     }
   }, [track, plugins, pluginIndex]);
   useEffect(() => { if (trackId && !track) close(); }, [trackId, track, close]);
+  useEscapeToClose(!!trackId, close); // Esc dismisses, like the other modals
+  // Move focus into the dialog on open so aria-modal is honest (the outside is inert)
+  // and keyboard users land inside, not on the trigger button behind the backdrop.
+  useEffect(() => { if (trackId) panelRef.current?.focus(); }, [trackId]);
 
   if (!trackId || !track) return null;
 
@@ -78,7 +84,9 @@ export function AutomationPanel() {
 
   return (
     <div className="modal-backdrop" onClick={close}>
-      <div className="auto-panel" data-testid="automation-panel" onClick={(e) => e.stopPropagation()}>
+      <div className="auto-panel" data-testid="automation-panel" role="dialog" aria-modal="true"
+        ref={panelRef} tabIndex={-1} style={{ outline: "none" }}
+        aria-label={`Automation · ${track.name}`} onClick={(e) => e.stopPropagation()}>
         <div className="auto-head">
           <strong className="display">Automation · {track.name}</strong>
           <select className="btn ghost" value={pluginIndex ?? ""} onChange={(e) => { setPluginIndex(Number(e.target.value)); setParamIndex(0); }}>

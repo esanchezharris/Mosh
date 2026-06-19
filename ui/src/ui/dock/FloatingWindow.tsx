@@ -44,7 +44,11 @@ export function FloatingWindow({
       <div className="floatwin-bar" data-testid="floatwin-bar"
         onPointerDown={begin("move")} onPointerMove={drag} onPointerUp={end}>
         <span className="floatwin-title display">{title}</span>
-        <button className="btn x" onClick={onClose} aria-label="Close window" title="Close">✕</button>
+        {/* Stop the pointerdown bubbling to the title-bar's begin("move") — otherwise the
+            bar captures the pointer and the close click is swallowed (the window won't
+            close, or a stray drag fires instead). */}
+        <button className="btn x" onPointerDown={(e) => e.stopPropagation()} onClick={onClose}
+          aria-label="Close window" title="Close">✕</button>
       </div>
       <div className="floatwin-body">{children}</div>
       <div className="floatwin-resize" data-testid="floatwin-resize" title="Resize"

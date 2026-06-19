@@ -6,6 +6,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "../store";
+import { useEscapeToClose } from "../hooks/useEscapeToClose";
 import {
   builtinEntry, installedEntry, buildPluginRows, visibleRange,
   loadFavorites, toggleFavorite, loadPluginRecents, addPluginRecent,
@@ -51,6 +52,8 @@ export function PluginBrowser() {
     return () => ro.disconnect();
   }, [open]);
 
+  useEscapeToClose(open, close); // Esc dismisses, like the piano roll / popovers
+
   const bEntries = useMemo(() => builtins.map(builtinEntry), [builtins]);
   const iEntries = useMemo(() => plugins.map(installedEntry), [plugins]);
   const rows = useMemo(
@@ -74,7 +77,7 @@ export function PluginBrowser() {
 
   return (
     <div className="modal-backdrop" onClick={close} data-testid="plugin-browser">
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+      <div className="modal" role="dialog" aria-modal="true" aria-label="Add plugin" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <strong className="display">Add plugin</strong>
           <span className="pr-meta tc">{counts ? `${counts.vst3} VST3 · ${counts.au} AU` : `${plugins.length} installed`}</span>

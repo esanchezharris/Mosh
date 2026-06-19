@@ -1,0 +1,7 @@
+{
+  // Typecheck the Playwright e2e harness (the headline of this change) under the same
+  // strict options as src/. Playwright transpiles specs at run time via esbuild — it
+  // does NOT typecheck them — so without this the harness would be outside the tsc gate.
+  "extends": "./tsconfig.json",
+  "include": ["e2e", "playwright.config.ts"]
+}
