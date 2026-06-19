@@ -21,6 +21,7 @@ import { Mixer } from "./ui/Mixer";
 import { PluginBrowser } from "./ui/PluginBrowser";
 import { PianoRoll } from "./ui/PianoRoll";
 import { AutomationPanel } from "./ui/AutomationPanel";
+import { DrumWindow } from "./ui/DrumWindow";
 import { MonsterChanges } from "./ui/MonsterChanges";
 
 export function App() {
@@ -70,6 +71,7 @@ export function App() {
       <PluginBrowser />
       <PianoRoll />
       <AutomationPanel />
+      <DrumWindow />
       <MonsterChanges />
     </div>
   );

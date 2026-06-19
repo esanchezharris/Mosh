@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   DRUM_LANES, STEPS, stepBeats, noteStart, laneIndexForPitch,
   cellForNote, buildGrid, cycleVelocity,
+  swingOffsetBeats, stepStartBeats, velocityFromFraction,
 } from "./drumGrid";
 import type { MidiNote } from "../types";
 
@@ -80,5 +81,58 @@ describe("cycleVelocity (shift-click accent cycle)", () => {
     expect(cycleVelocity(127)).toBe(90);
     expect(cycleVelocity(90)).toBe(50);
     expect(cycleVelocity(50)).toBe(127);
+  });
+});
+
+// ── Phase 6 (FL feel): pattern length · swing · velocity mapping ──────────────
+
+describe("pattern length (configurable step count)", () => {
+  it("stepBeats divides the bar by the step count", () => {
+    expect(stepBeats(4, 8)).toBeCloseTo(0.5, 10);
+    expect(stepBeats(4, 16)).toBeCloseTo(0.25, 10);
+    expect(stepBeats(4, 32)).toBeCloseTo(0.125, 10);
+    expect(stepBeats(4)).toBeCloseTo(0.25, 10); // default 16 unchanged
+  });
+  it("buildGrid honours the step count (row width)", () => {
+    expect(buildGrid([], 4, 8)[0]).toHaveLength(8);
+    expect(buildGrid([], 4, 32)[0]).toHaveLength(32);
+    expect(buildGrid([], 4)[0]).toHaveLength(STEPS);
+  });
+  it("cellForNote maps within a 32-step pattern", () => {
+    const sb = stepBeats(4, 32); // 0.125
+    expect(cellForNote(note({ pitch: 36, start: 0.125 }), sb, 32)).toEqual({ lane: laneIndexForPitch(36), step: 1 });
+    expect(cellForNote(note({ pitch: 36, start: 0.875 }), sb, 32)).toEqual({ lane: laneIndexForPitch(36), step: 7 });
+  });
+});
+
+describe("swing", () => {
+  const sb = stepBeats(4); // 0.25
+  it("leaves on-beats (even steps) put, delays off-beats (odd steps)", () => {
+    expect(swingOffsetBeats(0, sb, 0.5)).toBe(0);
+    expect(swingOffsetBeats(2, sb, 0.5)).toBe(0);
+    expect(swingOffsetBeats(1, sb, 0.5)).toBeGreaterThan(0);
+    expect(swingOffsetBeats(3, sb, 1)).toBeCloseTo(sb * (2 / 3), 10); // hard shuffle
+  });
+  it("is straight at swing 0", () => {
+    expect(swingOffsetBeats(1, sb, 0)).toBe(0);
+    expect(stepStartBeats(1, sb, 0)).toBeCloseTo(sb, 10);
+  });
+  it("stepStartBeats pushes the off-beat later under swing", () => {
+    expect(stepStartBeats(1, sb, 0.5)).toBeGreaterThan(sb);
+  });
+  it("a swung note still maps back to its step (round-trip)", () => {
+    const swing = 0.5;
+    const start = stepStartBeats(3, sb, swing);
+    expect(cellForNote(note({ pitch: 36, start }), sb, STEPS, swing)).toEqual({ lane: laneIndexForPitch(36), step: 3 });
+  });
+});
+
+describe("velocityFromFraction", () => {
+  it("maps a drag fraction (bottom→top) to 1..127, clamped", () => {
+    expect(velocityFromFraction(0)).toBe(1);     // never silent (min 1)
+    expect(velocityFromFraction(1)).toBe(127);
+    expect(velocityFromFraction(0.5)).toBe(64);  // round(63.5)
+    expect(velocityFromFraction(-5)).toBe(1);
+    expect(velocityFromFraction(9)).toBe(127);
   });
 });
