@@ -580,6 +580,15 @@ juce::var MoshOps::importWaveFileToTrack (const juce::String& command,
                                           const juce::var& logArgs)
 {
     auto& edit = eng.edit();
+
+    // Validate the audio file BEFORE any mutation. We may auto-create a track
+    // below; doing that (undoable) creation first and only then discovering the
+    // file is invalid would leave an orphan track in a failed command's undo
+    // transaction (partial mutation). Validate up front so an invalid import is a
+    // clean no-op.
+    te::AudioFile audioFile (edit.engine, file);
+    if (! audioFile.isValid()) return errResult (command, "invalid audio file");
+
     auto* track = trackId.isNotEmpty() ? findTrack (trackId) : nullptr;
     if (track == nullptr)
     {
@@ -591,9 +600,6 @@ juce::var MoshOps::importWaveFileToTrack (const juce::String& command,
     if (track == nullptr)
         track = createAudioTrack ({});
     if (track == nullptr) return errResult (command, "no track");
-
-    te::AudioFile audioFile (edit.engine, file);
-    if (! audioFile.isValid()) return errResult (command, "invalid audio file");
 
     const double len = audioFile.getLength();
     auto name = clipName;
