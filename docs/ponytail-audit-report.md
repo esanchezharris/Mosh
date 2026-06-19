@@ -19,7 +19,7 @@ Applied behind the full test gate: **tsc clean · vitest 324/324 · Playwright e
 - `RemoteCompanionServer` `pcm16Base64` wrapper — inlining triggers a TDZ `ReferenceError`; 1 line not worth the breakage.
 - iOS `BonjourBrowser.stop()` — defensible NWBrowser teardown symmetry, near-zero cost.
 
-**Caveat:** the iOS/Swift edits pass per-file syntax parse but have **no local Xcode build gate** — confirm on the next iOS build.
+**iOS/Swift:** build-verified — `xcodebuild` for the iOS Simulator (Xcode 26.5) compiles the app **and** the test target clean (`BUILD SUCCEEDED` / `TEST BUILD SUCCEEDED`).
 
 ## Confirmed findings
 
