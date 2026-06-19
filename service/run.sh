@@ -16,6 +16,10 @@ cd "$(dirname "$0")"
 # absent means the defaults below apply and SA3 stays off unless the venv happens to
 # exist. Sourced first so its exports seed the ${:-default} fallbacks.
 [[ -f .sa3.env ]] && source ./.sa3.env
+# Audio->MIDI (Basic Pitch) lives in its own venv; .transcribe.env (written by
+# transcribe/setup-transcribe.sh) exports BASIC_PITCH_PY. Absent → /transcribe
+# degrades gracefully to 503 transcription_unavailable.
+[[ -f transcribe/.transcribe.env ]] && source ./transcribe/.transcribe.env
 
 export SA3_MLX_DIR="${SA3_MLX_DIR:-$HOME/AI/stable-audio-3/optimized/mlx}"
 export COLORRACK_DATA="${COLORRACK_DATA:-$(pwd)/colors/COLORRACK_DATA}"

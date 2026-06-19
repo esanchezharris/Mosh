@@ -150,4 +150,25 @@ void GenerativeJobManager::cancelJob (const juce::String& jobId)
     httpPost ("/cancel", var (body));
 }
 
+juce::var GenerativeJobManager::transcribe (const juce::File& inputWav, const juce::String& mode)
+{
+    if (! ensureServiceRunning())
+        return {};
+
+    auto* body = new DynamicObject();
+    body->setProperty ("inputWav", inputWav.getFullPathName());
+    body->setProperty ("mode", mode.isNotEmpty() ? mode : juce::String ("mono"));
+
+    // Transcription runs a model-loading subprocess; give it a generous timeout
+    // (the service caps the subprocess at 180s). This blocks, so the caller runs it
+    // off the message thread.
+    URL url = URL (baseUrl + "/transcribe").withPOSTData (JSON::toString (var (body)));
+    auto opts = URL::InputStreamOptions (URL::ParameterHandling::inPostData)
+                    .withConnectionTimeoutMs (185000)
+                    .withExtraHeaders ("Content-Type: application/json");
+    if (auto s = url.createInputStream (opts))
+        return JSON::parse (s->readEntireStreamAsString());
+    return {};
+}
+
 } // namespace mosh

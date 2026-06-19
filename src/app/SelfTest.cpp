@@ -1382,6 +1382,31 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     else
         std::cerr << "  ..   (SA3 self-test skipped — set MOSH_SELFTEST_SA3=1 to exercise the real model)\n";
 
+    // --- Audio→MIDI (Basic Pitch): GATED on MOSH_SELFTEST_TRANSCRIBE (needs the
+    //     transcribe venv + service; ~3s inference, so opt in explicitly). ---
+    if (SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_TRANSCRIBE", "0") == "1")
+    {
+        section ("Audio→MIDI: real Basic Pitch transcription");
+        auto tct = cmd (ops, "create_track", args1 ("name", "TC"))["data"].getProperty ("trackId", var()).toString();
+        auto ttn = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", tct }, { "seconds", 2.0 }, { "freq", 220.0 }}));
+        const auto wcid = ttn["data"].getProperty ("clipId", var()).toString();
+        check (ok (ttn), "test-tone wave clip created for transcription");
+
+        const int tracksBefore = tracks (ops);
+        std::cerr << "  ..   transcribing a test tone with Basic Pitch (model load + inference; ~3s)...\n";
+        auto tr = cmd (ops, "transcribe_clip", objN ({{ "clipId", wcid }, { "mode", "mono" }, { "wait", true }}));
+        check (ok (tr), "transcribe_clip (wait) ok");
+        check (tr["data"].getProperty ("status", var()).toString() == "done", "transcription completed -> done");
+        check ((int) tr["data"].getProperty ("noteCount", 0) > 0, "transcription produced >=1 MIDI note");
+        check (tracks (ops) == tracksBefore + 1, "transcription landed a new MIDI track");
+
+        auto newTrack = ops.snapshot()["tracks"][tracksBefore];   // the just-added track
+        check (newTrack["clips"][0].getProperty ("type", var()).toString() == "midi", "new clip is a MIDI clip");
+        check (newTrack["clips"][0].getProperty ("notes", var()).size() > 0, "MIDI clip carries the transcribed notes");
+    }
+    else
+        std::cerr << "  ..   (transcribe self-test skipped — set MOSH_SELFTEST_TRANSCRIBE=1 to exercise Basic Pitch)\n";
+
     // Settle the generative service's async backlog before the downstream pure-command
     // blocks. The Tier-B render jobs above cancel in-flight HTTP requests whose completion
     // callbacks callAsync onto the message thread; if those land mid-block during a later

@@ -36,6 +36,12 @@ public:
     juce::var jobStatus (const juce::String& jobId);
     void cancelJob (const juce::String& jobId);
 
+    /** Audio->MIDI transcription via Basic Pitch (POST /transcribe). SYNCHRONOUS —
+        call on a BACKGROUND thread (model load + inference is ~1-3s). Returns
+        { ok, notes:[{pitch,start,end,velocity}] } (times in SECONDS), or a var whose
+        ok is false / {} on failure (service down, venv absent → 503). */
+    juce::var transcribe (const juce::File& inputWav, const juce::String& mode);
+
     juce::String serviceBuild() const { return svcBuild; }
 
 private:
