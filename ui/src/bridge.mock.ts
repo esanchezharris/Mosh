@@ -78,6 +78,17 @@ function seedSnapshot(): Snapshot {
   };
 }
 
+// A blank edit — what the native new_project (createEmptyEdit) yields: valid session
+// scaffolding, no tracks, transport parked at zero. Reuses seedSnapshot for the
+// session shape so the two stay in lockstep.
+function emptySession(): Snapshot {
+  const s = seedSnapshot();
+  s.tracks = [];
+  s.buses = [];
+  s.transport = { playing: false, recording: false, position: 0, looping: false, loopStart: 0, loopEnd: 0 };
+  return s;
+}
+
 let snapshot: Snapshot = seedSnapshot();
 const clone = (s: Snapshot): Snapshot => JSON.parse(JSON.stringify(s)) as Snapshot;
 const history: Snapshot[] = [];
@@ -94,7 +105,7 @@ const listeners = new Map<string, Set<Listener>>();
 // Mock command log (drives the CommandLog panel). Read-only commands don't log.
 const cmdLog: { command: string; ok: boolean; undoable: boolean; ts: number }[] = [];
 const READONLY = new Set(["get_snapshot", "get_clip_peaks", "file_peaks", "audition_file", "stop_audition", "get_command_log", "list_plugins", "list_builtins", "list_colors", "list_audio_devices", "list_wave_inputs", "list_track_outputs", "list_takes", "list_training_sources", "training_job_status", "list_lora_adapters"]);
-const NON_UNDOABLE = new Set(["set_transport", "arm_track", "set_input_monitor", "undo", "redo", "save", "reload", "render_layer", "open_plugin_editor", "set_plugin_param", "set_neural_param", "export_audio", "import_training_source", "approve_training_source", "build_training_corpus", "submit_training_job", "cancel_training_job", "import_lora_adapter", "activate_lora_adapter"]);
+const NON_UNDOABLE = new Set(["set_transport", "arm_track", "set_input_monitor", "undo", "redo", "save", "reload", "new_project", "render_layer", "open_plugin_editor", "set_plugin_param", "set_neural_param", "export_audio", "import_training_source", "approve_training_source", "build_training_corpus", "submit_training_job", "cancel_training_job", "import_lora_adapter", "activate_lora_adapter"]);
 function emit(type: string, payload?: unknown) {
   const ls = listeners.get("mosh_event");
   if (ls) for (const fn of ls) fn({ type, payload });
@@ -555,7 +566,16 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     });
     case "set_buffer_size": { if (snapshot.session) snapshot.session.bufferSize = num(args.bufferSize, 512); invalidate(); return ok(command); }
     case "set_audio_threads": { if (snapshot.session) { snapshot.session.audioThreads = num(args.threads, 8); snapshot.session.audioThreadsAuto = false; } invalidate(); return ok(command); }
-    case "set_audio_device": case "set_project_settings": case "new_project": case "open_project": case "save_as": return ok(command);
+    case "set_audio_device": case "set_project_settings": case "open_project": case "save_as": return ok(command);
+    // New project = a fresh empty edit (createEmptyEdit on the native side). Resets to a
+    // blank session and clears undo history — you can't undo across a New, same as a DAW.
+    case "new_project": {
+      snapshot = emptySession();
+      history.length = 0; future.length = 0;
+      stopPlayback();
+      invalidate();
+      return ok(command);
+    }
     case "relink_clip": return ok(command);   // gap 3 — re-point a missing wave source (mock no-op)
     case "set_metronome": { pushUndo(); snapshot.session.metronome = Boolean(args.enabled); invalidate(); return ok(command); }
     case "set_time_signature": {

@@ -68,8 +68,20 @@ describe("per-DAW keymaps", () => {
   it("getKeymap falls back to mosh for an unknown name", () => {
     expect(getKeymap("nope")).toBe(KEYMAPS.mosh);
   });
-  it("ableton binds split-at-playhead to Mod+E", () => {
+  it("ableton binds split-at-playhead to Mod+E; mosh leaves Mod+E unbound (split is tool-only)", () => {
     expect(resolveKey(getKeymap("ableton"), ev({ key: "e", metaKey: true }))).toBe(A.SPLIT);
+    expect(resolveKey(getKeymap("fl"), ev({ key: "e", metaKey: true }))).toBe(A.SPLIT);
+    expect(resolveKey(getKeymap("mosh"), ev({ key: "e", metaKey: true }))).toBeNull();
+  });
+  it("ableton moves record to F9 (R no longer records there)", () => {
+    expect(resolveKey(getKeymap("ableton"), ev({ key: "F9" }))).toBe(A.RECORD);
+    expect(resolveKey(getKeymap("ableton"), ev({ key: "r" }))).toBeNull();
+    expect(resolveKey(getKeymap("mosh"), ev({ key: "r" }))).toBe(A.RECORD);
+  });
+  it("fl remaps duplicate to Mod+B (Mod+D no longer duplicates there)", () => {
+    expect(resolveKey(getKeymap("fl"), ev({ key: "b", metaKey: true }))).toBe(A.DUPLICATE);
+    expect(resolveKey(getKeymap("fl"), ev({ key: "d", metaKey: true }))).toBeNull();
+    expect(resolveKey(getKeymap("mosh"), ev({ key: "d", metaKey: true }))).toBe(A.DUPLICATE);
   });
   it("every preset keeps undo on Mod+Z (shared core)", () => {
     for (const name of ["mosh", "ableton", "fl"])

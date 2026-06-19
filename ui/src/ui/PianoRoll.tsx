@@ -43,9 +43,13 @@ export function PianoRoll() {
   const velocityDraftRef = useRef<number | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const keysRef = useRef<HTMLDivElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => { if (editingClipId && !clip) close(); }, [editingClipId, clip, close]);
   useEffect(() => { setMode("piano"); }, [editingClipId]);
+  // Move focus into the dialog on open so aria-modal is honest (outside is inert) and
+  // keyboard users land inside the editor rather than on the trigger behind the backdrop.
+  useEffect(() => { if (editingClipId) panelRef.current?.focus(); }, [editingClipId]);
   // On open (and when returning to Piano from the Drums view), centre the
   // vertical scroll on the clip's notes so off-screen material (e.g. a low
   // bassline near E2/A2) is framed instead of an apparently empty grid scrolled
@@ -189,7 +193,9 @@ export function PianoRoll() {
 
   return (
     <div className="modal-backdrop" onClick={close}>
-      <div className="pr" data-testid="piano-roll" onClick={(e) => e.stopPropagation()}>
+      <div className="pr" data-testid="piano-roll" role="dialog" aria-modal="true"
+        ref={panelRef} tabIndex={-1} style={{ outline: "none" }}
+        aria-label={`${mode === "drums" ? "Drum machine" : "Piano roll"} · ${clip.name}`} onClick={(e) => e.stopPropagation()}>
         <div className="pr-head">
           <strong className="display">{mode === "drums" ? "Drum Machine" : "Piano Roll"} · {clip.name}</strong>
           <span className="pr-meta tc">{(clip.notes ?? []).length} notes · {m.tempo} BPM · {m.num}/{m.den}</span>

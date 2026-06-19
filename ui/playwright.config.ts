@@ -1,0 +1,38 @@
+import { defineConfig, devices } from "@playwright/test";
+
+// E2E harness — drives the REAL React WebView UI in a headless Chromium against the
+// Vite dev server. In dev, bridge.ts wires in the in-memory mock backend
+// (bridge.mock.ts, MOCK_ENABLED = import.meta.env.DEV), which speaks the same
+// execute_command + snapshot + events contract the native C++ MoshOps exposes. So
+// these tests exercise the whole frontend — store, gestures, keymap, templates,
+// optimistic previews — deterministically, with no native build, no audio device,
+// no Python service. The packaged app's own smoke path stays `Mosh --selftest`
+// (the WKWebView can't be driven by Playwright, and the command surface is identical).
+
+export default defineConfig({
+  testDir: "./e2e",
+  fullyParallel: true,
+  forbidOnly: !!process.env.CI,
+  retries: process.env.CI ? 1 : 0, // the mock is deterministic; no retries locally
+  workers: process.env.CI ? 2 : undefined,
+  reporter: [["list"], ["html", { outputFolder: "e2e-report", open: "never" }]],
+  outputDir: "e2e-results",
+  timeout: 30_000,
+  expect: { timeout: 7_000 },
+  use: {
+    baseURL: "http://localhost:5173",
+    viewport: { width: 1440, height: 900 },
+    trace: "retain-on-failure",
+    screenshot: "only-on-failure",
+    video: "off",
+  },
+  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  webServer: {
+    command: "npm run dev",
+    url: "http://localhost:5173",
+    reuseExistingServer: !process.env.CI,
+    timeout: 120_000,
+    stdout: "ignore",
+    stderr: "pipe",
+  },
+});
