@@ -427,6 +427,7 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "set_track_type")    return cmdSetTrackType (args);
     if (name == "load_drum_kit")     return cmdLoadDrumKit (args);
     if (name == "assign_sample")     return cmdAssignSample (args);
+    if (name == "set_drum_lane")     return cmdSetDrumLane (args);
     if (name == "remove_plugin")     return cmdRemovePlugin (args);
     if (name == "reorder_plugin")    return cmdReorderPlugin (args);
     if (name == "set_plugin_param")  return cmdSetPluginParam (args);
@@ -2661,6 +2662,7 @@ juce::var MoshOps::cmdLoadDrumKit (const juce::var& args)
     if (sampler == nullptr) return errResult ("load_drum_kit", "could not create sampler");
     const int pads = loadDrumKitInto (*sampler);
     if (pads == 0) return errResult ("load_drum_kit", "no kit samples found (is the kit bundled?)");
+    applyDrumLaneGains (*track);  // re-loaded pads land at 0 dB — re-silence muted lanes
 
     auto* data = new DynamicObject();
     data->setProperty ("trackId", track->itemID.toString());
@@ -2708,6 +2710,7 @@ juce::var MoshOps::cmdAssignSample (const juce::var& args)
     if (err.isNotEmpty()) return errResult ("assign_sample", err);
     sampler->setSoundParams (idx, note, note, note);
     sampler->setSoundOpenEnded (idx, true);   // one-shot: a short note rings the whole sample
+    applyDrumLaneGains (*track);               // keep a muted lane silent after a pad swap
     // The sampler loads its sample file on an AsyncUpdate (valueTreeChanged). Headless
     // there is no GUI dispatch between commands, so drain it now — the sound's audio
     // data must be resident before an export/render reads it (mirrors createAudioTrack).
@@ -5032,6 +5035,18 @@ juce::var MoshOps::trackToVar (te::AudioTrack& t, int index)
     // DRM-001 — track type ("audio" | "drum"); absent on legacy edits ⇒ "audio".
     o->setProperty ("type", t.state.getProperty (ids::trackType, "audio"));
     o->setProperty ("clips", clips);
+    // FL drum-lane mute/solo — the GM pitches whose pad is muted / soloed (empty when
+    // none). Lets the drum sequencer render per-lane M·S without a second model.
+    {
+        auto toArr = [] (const juce::String& s) {
+            Array<var> a;
+            for (auto& tok : juce::StringArray::fromTokens (s, ",", ""))
+                if (tok.trim().isNotEmpty()) a.add (tok.trim().getIntValue());
+            return a;
+        };
+        o->setProperty ("drumMutedPitches", toArr (t.state.getProperty (ids::drumMute, "").toString()));
+        o->setProperty ("drumSoloPitches",  toArr (t.state.getProperty (ids::drumSolo, "").toString()));
+    }
     // MIX-008 — a track nested under a group (submix folder) carries its parent's
     // id so the UI can indent it / show membership. Additive: flat consumers see
     // the same array, ungrouped tracks have no parentId.
@@ -5405,6 +5420,79 @@ te::SamplerPlugin* MoshOps::ensureSampler (te::AudioTrack& track)
     if (plugin == nullptr) return nullptr;
     track.pluginList.insertPlugin (plugin, 0, nullptr);   // front of chain
     return dynamic_cast<te::SamplerPlugin*> (plugin.get());
+}
+
+te::SamplerPlugin* MoshOps::findSampler (te::AudioTrack& track) const
+{
+    for (auto* p : track.pluginList.getPlugins())
+        if (auto* s = dynamic_cast<te::SamplerPlugin*> (p))
+            return s;
+    return nullptr;
+}
+
+// Parse / pack a comma-separated pitch set (the drumMute/drumSolo track props).
+static juce::SortedSet<int> parseLanePitches (const juce::String& s)
+{
+    juce::SortedSet<int> set;
+    for (auto& tok : juce::StringArray::fromTokens (s, ",", ""))
+        if (tok.trim().isNotEmpty()) set.add (tok.trim().getIntValue());
+    return set;
+}
+
+void MoshOps::applyDrumLaneGains (te::AudioTrack& track)
+{
+    auto* sampler = findSampler (track);
+    if (sampler == nullptr) return;
+
+    const auto muted = parseLanePitches (track.state.getProperty (ids::drumMute, "").toString());
+    const auto solo  = parseLanePitches (track.state.getProperty (ids::drumSolo, "").toString());
+    const bool soloActive = solo.size() > 0;
+
+    for (int i = 0; i < sampler->getNumSounds(); ++i)
+    {
+        const int   key = sampler->getKeyNote (i);
+        const bool  eff = soloActive ? ! solo.contains (key) : muted.contains (key);
+        const float cur = sampler->getSoundGainDb (i);
+        // Only touch a pad crossing the mute threshold — a non-muted pad keeps its own
+        // gain; a formerly-muted pad restores to 0 dB.
+        if (eff)                   { if (cur > -99.0f) sampler->setSoundGains (i, -100.0f, sampler->getSoundPan (i)); }
+        else if (cur <= -99.0f)                        sampler->setSoundGains (i,    0.0f, sampler->getSoundPan (i));
+    }
+}
+
+// FL drum-lane mute/solo. Stores the muted/soloed GM pitches on the track and applies
+// them as sampler pad gains (a muted lane's pad is silenced; soloing lanes silences
+// the rest). State persists with the Edit and rides the snapshot for the UI.
+juce::var MoshOps::cmdSetDrumLane (const juce::var& args)
+{
+    auto* track = findTrack (args.getProperty ("trackId", var()).toString());
+    if (track == nullptr) return errResult ("set_drum_lane", "no track");
+    const int note = juce::jlimit (-1, 127, (int) args.getProperty ("note", -1));
+    if (note < 0) return errResult ("set_drum_lane", "note (0-127) required");
+
+    auto pack = [] (const juce::SortedSet<int>& set) {
+        juce::StringArray a;
+        for (int i = 0; i < set.size(); ++i) a.add (juce::String (set[i]));
+        return a.joinIntoString (",");
+    };
+
+    beginTxn ("set_drum_lane");
+    auto muted = parseLanePitches (track->state.getProperty (ids::drumMute, "").toString());
+    auto solo  = parseLanePitches (track->state.getProperty (ids::drumSolo, "").toString());
+    if (args.hasProperty ("mute")) { if ((bool) args.getProperty ("mute", false)) muted.add (note); else muted.removeValue (note); }
+    if (args.hasProperty ("solo")) { if ((bool) args.getProperty ("solo", false)) solo.add (note);  else solo.removeValue (note); }
+    track->state.setProperty (ids::drumMute, pack (muted), &undoManager());
+    track->state.setProperty (ids::drumSolo, pack (solo),  &undoManager());
+    applyDrumLaneGains (*track);
+
+    auto* data = new DynamicObject();
+    data->setProperty ("trackId", track->itemID.toString());
+    data->setProperty ("note", note);
+    data->setProperty ("muted", muted.contains (note));
+    data->setProperty ("solo",  solo.contains (note));
+    logLine ("set_drum_lane", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("set_drum_lane", var (data));
 }
 
 // DRM-001 — clear a sampler and load the 8 bundled pads, each mapped to its GM

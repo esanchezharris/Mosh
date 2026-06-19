@@ -6,6 +6,7 @@
 
 import { useState } from "react";
 import { useStore } from "../store";
+import { pickFiles } from "../bridge";
 import type { Clip } from "../types";
 import { meterAt, tempoMapFrom } from "../time";
 import {
@@ -30,6 +31,18 @@ export function DrumSequencer({ clip }: { clip: Clip }) {
   // DRM-001 — these GM-pitch notes only make sound on a drum track (sampler + kit).
   const track = snapshot?.tracks.find((t) => t.clips.some((c) => c.id === clip.id));
   const isDrumTrack = track?.type === "drum";
+
+  // FL per-lane mute/solo + sample swap (set_drum_lane / assign_sample). State lives on
+  // the track (rides the snapshot); only meaningful on a drum track (the sampler).
+  const mutedSet = new Set(track?.drumMutedPitches ?? []);
+  const soloSet = new Set(track?.drumSoloPitches ?? []);
+  const toggleMute = (pitch: number) => { if (track) void exec("set_drum_lane", { trackId: track.id, note: pitch, mute: !mutedSet.has(pitch) }); };
+  const toggleSolo = (pitch: number) => { if (track) void exec("set_drum_lane", { trackId: track.id, note: pitch, solo: !soloSet.has(pitch) }); };
+  const swapSample = async (pitch: number) => {
+    if (!track) return;
+    const r = await pickFiles({ filters: "*.wav;*.aif;*.aiff;*.flac;*.mp3", title: "Choose a sample for this lane" });
+    if (r.ok && r.files[0]) void exec("assign_sample", { trackId: track.id, note: pitch, file: r.files[0] });
+  };
 
   const addStep = (li: number, si: number, velocity = 100) =>
     void exec("add_note", { clipId: clip.id, pitch: DRUM_LANES[li].pitch, start: stepStartBeats(si, sb, swing), length: sb, velocity });
@@ -95,7 +108,19 @@ export function DrumSequencer({ clip }: { clip: Clip }) {
         <div className="dr-grid" role="grid" aria-label="Drum step sequencer">
           {DRUM_LANES.map((laneObj, li) => (
             <div className="dr-row" role="row" key={laneObj.pitch}>
-              <div className="dr-label tc">{laneObj.name}</div>
+              <div className="dr-label tc">
+                <span className="dr-lane-name" title={laneObj.name}>{laneObj.name}</span>
+                {isDrumTrack && (
+                  <span className="dr-lane-ctl">
+                    <button className={`msx m${mutedSet.has(laneObj.pitch) ? " on" : ""}`} title="Mute lane"
+                      aria-pressed={mutedSet.has(laneObj.pitch)} onClick={() => toggleMute(laneObj.pitch)}>M</button>
+                    <button className={`msx s${soloSet.has(laneObj.pitch) ? " on" : ""}`} title="Solo lane"
+                      aria-pressed={soloSet.has(laneObj.pitch)} onClick={() => toggleSolo(laneObj.pitch)}>S</button>
+                    <button className="msx" title="Swap this lane's sample" aria-label={`Swap ${laneObj.name} sample`}
+                      onClick={() => void swapSample(laneObj.pitch)}>⋯</button>
+                  </span>
+                )}
+              </div>
               <div className="dr-steps">
                 {Array.from({ length: steps }, (_, si) => {
                   const cell = grid[li][si];

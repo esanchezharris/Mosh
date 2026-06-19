@@ -151,6 +151,10 @@ export type Track = {
   inputType?: "wave" | "midi";  // kind of the routed input (CTL-001)
   midiInputName?: string;       // name of the routed MIDI input device, when inputType=="midi"
   isInstrument?: boolean;       // hosts a synth/builtin instrument -> live MIDI armable (CTL-001)
+  // FL drum-lane mute/solo — the GM pitches whose sampler pad is muted / soloed on a
+  // drum track (set_drum_lane). Empty/absent = all lanes audible.
+  drumMutedPitches?: number[];
+  drumSoloPitches?: number[];
   sends?: Send[];
   isReturn?: boolean;
   returnBus?: number;

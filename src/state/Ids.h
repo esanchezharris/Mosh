@@ -49,6 +49,10 @@ namespace mosh::ids
     // the undo manager by set_track_type / create_track so undo restores the prior
     // type (and the same transaction's auto-loaded instrument) together.
     MOSH_DECLARE_ID (trackType)
+    // FL drum-lane mute/solo: comma-separated GM pitches whose sampler pad is muted /
+    // soloed on a drum track. Persisted on the track; applied as sampler pad gains.
+    MOSH_DECLARE_ID (drumMute)
+    MOSH_DECLARE_ID (drumSolo)
 
     MOSH_DECLARE_ID (id)
     MOSH_DECLARE_ID (inputRef)

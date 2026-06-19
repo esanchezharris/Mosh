@@ -1458,6 +1458,26 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         auto ld = cmd (ops, "load_drum_kit", args1 ("trackId", dt));
         check (ok (ld) && (int) ld["data"].getProperty ("pads", 0) == 8, "load_drum_kit (re)loads the 8-pad kit");
 
+        // FL drum-lane mute/solo (set_drum_lane): state rides the snapshot, persists,
+        // and silences the lane's sampler pad. (Audibility isn't asserted headlessly;
+        // the contract checked here is the snapshot/persist round-trip.)
+        auto laneHas = [&] (const String& tid, const char* key, int note) {
+            auto trk = trackById (tid);                      // hold the var (no dangling temporary)
+            auto arrVar = trk.getProperty (key, var());
+            if (auto* a = arrVar.getArray())
+                for (auto& v : *a) if ((int) v == note) return true;
+            return false;
+        };
+        check (ok (cmd (ops, "set_drum_lane", objN ({{ "trackId", dt }, { "note", 36 }, { "mute", true }}))), "set_drum_lane mute ok");
+        check (laneHas (dt, "drumMutedPitches", 36), "muted kick (36) rides the snapshot");
+        check (ok (cmd (ops, "set_drum_lane", objN ({{ "trackId", dt }, { "note", 38 }, { "solo", true }}))), "set_drum_lane solo ok");
+        check (laneHas (dt, "drumSoloPitches", 38), "soloed snare (38) rides the snapshot");
+        check (ok (cmd (ops, "set_drum_lane", objN ({{ "trackId", dt }, { "note", 36 }, { "mute", false }}))), "set_drum_lane unmute ok");
+        check (! laneHas (dt, "drumMutedPitches", 36), "unmuting clears the kick from the muted set");
+        cmd (ops, "save"); cmd (ops, "reload");
+        check (laneHas (dt, "drumSoloPitches", 38), "drum-lane solo persists across save/reload");
+        cmd (ops, "set_drum_lane", objN ({{ "trackId", dt }, { "note", 38 }, { "solo", false }})); // reset for later sections
+
         // set_track_type round-trip on a plain track; undo restores type + removes the kit.
         auto plain = cmd (ops, "create_track", args1 ("name", "FlipMe"))["data"].getProperty ("trackId", var()).toString();
         check (trackById (plain).getProperty ("type", var()).toString() == "audio", "new plain track is type audio");
