@@ -115,6 +115,8 @@ export function Toolbar() {
     <div className="toolbar" data-testid="toolbar">
       <div className="group">
         <button className="btn" onClick={() => void exec("create_track", { name: "Audio" })}>+ Track</button>
+        <button className="btn" data-testid="add-drum-track" title="New drum track (loads a sampler + drum kit)"
+          onClick={() => void exec("create_track", { name: "Drums", type: "drum" })}>+ Drums</button>
         <button className="btn" disabled={!selectedTrackId}
           onClick={() => void exec("add_test_tone_clip", { trackId: selectedTrackId })}>+ Test Tone</button>
         <button className="btn" disabled={!selectedTrackId}

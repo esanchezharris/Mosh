@@ -1338,6 +1338,173 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         std::cerr << "  ..   (Serum2.vst3 not installed — skipping Serum-specific local gate)\n";
     }
 
+    // --- DRM-001: drums make sound (working sampler + bundled kit + track type) ---
+    // Mirrors the neural "driven signal altered / silence stays silent" gate, but for
+    // the drum instrument: a programmed beat exports NON-SILENT audio, an empty drum
+    // clip exports SILENT. new_project isolates the render so the drum track is the
+    // ONLY track — the export then reflects exactly its sampler.
+    section ("Drums make sound (DRM-001)");
+    {
+        auto drumKitDir = [] () -> File
+        {
+            const auto env = SystemStats::getEnvironmentVariable ("MOSH_DRUMKIT_DIR", {});
+            if (env.isNotEmpty()) { File d (env); if (d.isDirectory()) return d; }
+            auto b = File::getSpecialLocation (File::currentApplicationFile)
+                         .getChildFile ("Contents/Resources/drumkits/mosh-kit");
+            if (b.isDirectory()) return b;
+            return File::getSpecialLocation (File::currentExecutableFile)
+                       .getParentDirectory().getChildFile ("drumkits/mosh-kit");
+        };
+
+        // Peak magnitude of a rendered WAV (mirrors the GAP2 readback).
+        auto wavMagnitude = [] (const File& f) -> float
+        {
+            AudioFormatManager fm; fm.registerBasicFormats();
+            if (std::unique_ptr<AudioFormatReader> reader { fm.createReaderFor (f) })
+            {
+                const int toRead = (int) jmin ((int64) 4'000'000, reader->lengthInSamples);
+                if (toRead > 0)
+                {
+                    AudioBuffer<float> buf ((int) reader->numChannels, toRead);
+                    reader->read (&buf, 0, toRead, 0, true, true);
+                    float mag = 0.0f;
+                    for (int ch = 0; ch < buf.getNumChannels(); ++ch)
+                        mag = jmax (mag, buf.getMagnitude (ch, 0, toRead));
+                    return mag;
+                }
+            }
+            return -1.0f;
+        };
+
+        check (drumKitDir().isDirectory(), "bundled drum kit is present (Resources/drumkits/mosh-kit)");
+
+        // Fresh edit so the export reflects ONLY the drum track we add below.
+        check (ok (cmd (ops, "new_project", args1 ("name", "drum-selftest"))), "new_project (drum render isolation) ok");
+
+        // A drum track auto-loads the working sampler + kit at creation.
+        auto mk = cmd (ops, "create_track", objN ({{ "name", "Beat" }, { "type", "drum" }}));
+        check (ok (mk), "create_track type:drum ok");
+        const auto dt = mk["data"].getProperty ("trackId", var()).toString();
+        check (mk["data"].getProperty ("type", var()).toString() == "drum", "create_track reports type drum");
+        check ((bool) mk["data"].getProperty ("isInstrument", false), "drum track auto-loaded an instrument");
+
+        // Snapshot serialises the type + the hosted sampler.
+        {
+            auto trk = trackById (dt);
+            check (trk.getProperty ("type", var()).toString() == "drum", "snapshot serialises track type drum");
+            check ((bool) trk.getProperty ("isInstrument", false), "snapshot marks the drum track as an instrument host");
+            bool hasSampler = false;
+            if (auto* arr = trk.getProperty ("plugins", var()).getArray())
+                for (auto& p : *arr)
+                    if (p.getProperty ("type", var()).toString() == "sampler") hasSampler = true;
+            check (hasSampler, "drum track hosts the built-in sampler");
+        }
+
+        // Empty drum clip → export is SILENT (the "silence stays silent" control).
+        auto mc = cmd (ops, "add_midi_clip", objN ({{ "trackId", dt }, { "length", 2.0 }, { "notes", var (Array<var>()) }}));
+        check (ok (mc), "empty drum MIDI clip added");
+        const auto dc = mc["data"].getProperty ("clipId", var()).toString();
+
+        auto silentFile = eng.sessionDir().getChildFile ("exports").getChildFile ("drum-silent.wav");
+        check (ok (cmd (ops, "export_audio", objN ({{ "file", silentFile.getFullPathName() }, { "format", "wav" }, { "bitDepth", 16 }}))),
+               "export of the empty drum track ok");
+        check (wavMagnitude (silentFile) < 0.001f, "empty drum clip renders SILENT (no phantom drum sound)");
+
+        // Program a beat: kick (36) four-on-the-floor + snare (38) on beats 2 and 4.
+        for (int b = 0; b < 4; ++b)
+            cmd (ops, "add_note", objN ({{ "clipId", dc }, { "pitch", 36 }, { "start", (double) b }, { "length", 0.5 }, { "velocity", 122 }}));
+        cmd (ops, "add_note", objN ({{ "clipId", dc }, { "pitch", 38 }, { "start", 1.0 }, { "length", 0.5 }, { "velocity", 110 }}));
+        cmd (ops, "add_note", objN ({{ "clipId", dc }, { "pitch", 38 }, { "start", 3.0 }, { "length", 0.5 }, { "velocity", 110 }}));
+
+        auto beatFile = eng.sessionDir().getChildFile ("exports").getChildFile ("drum-beat.wav");
+        check (ok (cmd (ops, "export_audio", objN ({{ "file", beatFile.getFullPathName() }, { "format", "wav" }, { "bitDepth", 16 }}))),
+               "export of the programmed beat ok");
+        check (wavMagnitude (beatFile) > 0.02f, "programmed drum beat renders NON-SILENT (sampler+kit actually sounds)");
+
+        // Persistence: the trackType flag + the sampler's kit sounds serialize into the
+        // .tracktionedit and survive save/reload — the beat still renders afterwards (the
+        // sampler reconstructs its sounds from the persisted state on load). Done here
+        // while the drum track is the only track, so the re-export stays isolated.
+        {
+            check (ok (cmd (ops, "save")), "save before reload ok");
+            check (ok (cmd (ops, "reload")), "reload ok");
+            // The sampler reloads its sample files on an AsyncUpdate; drain it before render.
+            if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
+                mm->runDispatchLoopUntil (50);
+            auto rtrk = trackById (dt);   // item ids are persisted, so dt still resolves
+            check (rtrk.getProperty ("type", var()).toString() == "drum", "drum track type survives save/reload");
+            bool hasSampler = false;
+            if (auto* arr = rtrk.getProperty ("plugins", var()).getArray())
+                for (auto& p : *arr)
+                    if (p.getProperty ("type", var()).toString() == "sampler") hasSampler = true;
+            check (hasSampler, "the sampler survives save/reload");
+            auto reloadFile = eng.sessionDir().getChildFile ("exports").getChildFile ("drum-reload.wav");
+            check (ok (cmd (ops, "export_audio", objN ({{ "file", reloadFile.getFullPathName() }, { "format", "wav" }, { "bitDepth", 16 }}))),
+                   "re-export after reload ok");
+            check (wavMagnitude (reloadFile) > 0.02f, "drum beat still NON-SILENT after save/reload (sampler sounds restored)");
+            reloadFile.deleteFile();
+        }
+
+        // assign_sample: map a kit sample onto a fresh pad/note and confirm it lands.
+        if (auto crash = drumKitDir().getChildFile ("crash.wav"); crash.existsAsFile())
+        {
+            auto as = cmd (ops, "assign_sample", objN ({{ "trackId", dt }, { "note", 60 },
+                                                        { "file", crash.getFullPathName() }, { "name", "Crash@60" }}));
+            check (ok (as), "assign_sample maps a sample to a pad/note");
+            check ((int) as["data"].getProperty ("sounds", 0) > 8, "assign_sample added a 9th pad");
+        }
+
+        // load_drum_kit re-loads the 8 pads onto a track's sampler.
+        auto ld = cmd (ops, "load_drum_kit", args1 ("trackId", dt));
+        check (ok (ld) && (int) ld["data"].getProperty ("pads", 0) == 8, "load_drum_kit (re)loads the 8-pad kit");
+
+        // set_track_type round-trip on a plain track; undo restores type + removes the kit.
+        auto plain = cmd (ops, "create_track", args1 ("name", "FlipMe"))["data"].getProperty ("trackId", var()).toString();
+        check (trackById (plain).getProperty ("type", var()).toString() == "audio", "new plain track is type audio");
+        check (ok (cmd (ops, "set_track_type", objN ({{ "trackId", plain }, { "type", "drum" }}))), "set_track_type drum ok");
+        check (trackById (plain).getProperty ("type", var()).toString() == "drum", "set_track_type flips the snapshot type");
+        check ((bool) trackById (plain).getProperty ("isInstrument", false), "set_track_type drum auto-loads the kit");
+        cmd (ops, "undo");
+        check (trackById (plain).getProperty ("type", var()).toString() == "audio", "undo reverts set_track_type to audio");
+        check (! (bool) trackById (plain).getProperty ("isInstrument", true), "undo removes the auto-loaded kit");
+
+        // Default-instrument policy: a MIDI clip on a plain audio track auto-loads 4OSC.
+        auto mel = cmd (ops, "create_track", args1 ("name", "Mel"))["data"].getProperty ("trackId", var()).toString();
+        cmd (ops, "add_midi_clip", objN ({{ "trackId", mel }, { "length", 1.0 }}));
+        {
+            auto trk = trackById (mel);
+            check ((bool) trk.getProperty ("isInstrument", false), "MIDI clip on a plain track auto-loads a default instrument");
+            bool has4osc = false;
+            if (auto* arr = trk.getProperty ("plugins", var()).getArray())
+                for (auto& p : *arr)
+                    if (p.getProperty ("type", var()).toString() == "4osc") has4osc = true;
+            check (has4osc, "the melodic default instrument is 4OSC");
+        }
+
+        // Regression (DRM-001): a MIDI clip on a track that ALREADY holds wave audio must
+        // NOT auto-insert a front-of-chain synth — that would clear the track buffer and
+        // silence the wave clips. The default-instrument policy skips such tracks.
+        {
+            auto wav = cmd (ops, "create_track", args1 ("name", "WaveTrack"))["data"].getProperty ("trackId", var()).toString();
+            cmd (ops, "add_test_tone_clip", objN ({{ "trackId", wav }, { "seconds", 1.0 }, { "freq", 220.0 }}));
+            cmd (ops, "add_midi_clip", objN ({{ "trackId", wav }, { "length", 1.0 }}));
+            check (! (bool) trackById (wav).getProperty ("isInstrument", false),
+                   "MIDI clip on a wave track does NOT auto-load an instrument (wave audio preserved)");
+        }
+
+        // QA: keep the real engine-rendered beat for an audible listen when asked
+        // (MOSH_DRUM_DEMO_DIR=<dir> Mosh --selftest → <dir>/mosh-drum-beat.wav).
+        if (const auto demoDir = SystemStats::getEnvironmentVariable ("MOSH_DRUM_DEMO_DIR", {}); demoDir.isNotEmpty())
+        {
+            File dir (demoDir); dir.createDirectory();
+            beatFile.copyFileTo (dir.getChildFile ("mosh-drum-beat.wav"));
+            std::cerr << "  ..   kept rendered beat → " << dir.getChildFile ("mosh-drum-beat.wav").getFullPathName() << "\n";
+        }
+
+        silentFile.deleteFile();
+        beatFile.deleteFile();
+    }
+
     // --- Stage 5 (SA3): the real StableAudio3Adapter - GATED on MOSH_SELFTEST_SA3 ---
     // (separate from MOSH_ENABLE_SA3, which now defaults on: real model + judge QA is
     //  ~30s, too heavy for the default --selftest. Opt in explicitly to exercise it.)
@@ -2003,6 +2170,11 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         const auto poolSrc = File (firstTrack (ops)["clips"][0].getProperty ("sourceFile", var()).toString());
         check (poolSrc.isAChildOf (poolAudio), "clip audio starts in the shared session pool");
 
+        // DRM-001 — a drum track's sampler sounds (the bundled kit, stored as ABSOLUTE
+        // bundle paths) must ALSO consolidate into the portable project, or the project
+        // breaks when moved to another machine/install.
+        check (ok (cmd (ops, "create_track", objN ({ { "name", "Kit" }, { "type", "drum" } }))), "drum track for portability ok");
+
         // Save As to a standalone dir OUTSIDE the pool → consolidation copies audio local.
         auto destDir  = File::getSpecialLocation (File::tempDirectory).getChildFile ("mosh-portable-src");
         destDir.deleteRecursively(); destDir.createDirectory();
@@ -2010,10 +2182,15 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (cmd (ops, "save_as", args1 ("file", destEdit.getFullPathName()))), "save_as ok");
         check (destDir.getChildFile ("audio").isDirectory(), "save_as created a project-local audio/ dir");
         check (destDir.getChildFile ("audio").getNumberOfChildFiles (File::findFiles) >= 1, "save_as consolidated audio into the project");
+        // The drum kit's sample (e.g. kick.wav) must be copied into the project audio/ too.
+        check (destDir.getChildFile ("audio").getChildFile ("kick.wav").existsAsFile(),
+               "save_as consolidated the drum-kit sampler sounds into the project");
 
         // On-disk edit must reference audio RELATIVELY (portable), never the shared pool.
         const auto xml = destEdit.loadFileAsString();
         check (! xml.contains (poolAudio.getFullPathName()), "saved edit has no shared-pool absolute audio path");
+        check (! xml.contains ("Resources/drumkits"),
+               "saved edit references the kit by a relative path, not the absolute app-bundle path");
         check (xml.contains ("audio/") && ! xml.contains ("../audio"), "saved edit references audio by a co-located relative path (no ../)");
 
         // PROVE portability: copy the whole project elsewhere, hide the ORIGINAL pool source

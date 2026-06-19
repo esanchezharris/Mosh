@@ -119,6 +119,11 @@ private:
     juce::var cmdListBuiltins   (const juce::var& args);
     juce::var cmdLoadPlugin     (const juce::var& args);
     juce::var cmdLoadBuiltin    (const juce::var& args);
+    // DRM-001 — drum instruments: a working sampler+kit, per-pad sample assignment,
+    // and the track-type flag a drum track binds to (see Ids.h trackType).
+    juce::var cmdSetTrackType   (const juce::var& args);
+    juce::var cmdLoadDrumKit    (const juce::var& args);
+    juce::var cmdAssignSample   (const juce::var& args);
     juce::var cmdRemovePlugin   (const juce::var& args);
     juce::var cmdReorderPlugin  (const juce::var& args);
     juce::var cmdSetPluginParam (const juce::var& args);
@@ -253,6 +258,24 @@ private:
     // instrument) — the same test pluginToVar uses for the "isInstrument" flag.
     // arm_track routes live MIDI (not wave) to such tracks (CTL-001).
     bool            trackHasInstrument (te::AudioTrack&);
+    // DRM-001 — drum-kit helpers.
+    // drumKitDir(): the bundled default kit dir (env MOSH_DRUMKIT_DIR overrides;
+    // else Mosh.app/Contents/Resources/drumkits/mosh-kit; else next to the exe).
+    juce::File           drumKitDir() const;
+    // True when at least one bundled pad is resolvable — guard mutations that load
+    // the kit so a missing/broken kit is a clean no-op, not a partial insert/wipe.
+    bool                 drumKitAvailable() const;
+    // ensureSampler(): the track's existing te::SamplerPlugin, or a fresh one
+    // inserted at the front of the chain (instrument-first).
+    te::SamplerPlugin*   ensureSampler (te::AudioTrack&);
+    // loadDrumKitInto(): clear + load the 8 bundled pads onto a sampler, each
+    // mapped to its GM pitch (keyNote==minNote==maxNote) and open-ended. Pumps the
+    // sampler's async file load headless. Returns the number of pads loaded.
+    int                  loadDrumKitInto (te::SamplerPlugin&);
+    // ensureDefaultInstrument(): if the track has no instrument, auto-load the sane
+    // default — drum track → sampler+kit; melodic → 4OSC — so MIDI notes are
+    // audible immediately. No-op when an instrument is already present.
+    void                 ensureDefaultInstrument (te::AudioTrack&, bool drum);
     te::Plugin*     findPlugin (const juce::String& trackId, int index);
     te::AutomatableParameter* findParam (const juce::var& args);
     te::AuxReturnPlugin* firstAuxReturnOn (te::AudioTrack&);

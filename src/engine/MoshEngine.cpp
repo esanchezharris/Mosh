@@ -401,23 +401,45 @@ void MoshEngine::consolidateAudioInto (const juce::File& projectDir)
 {
     auto audioDir = projectDir.getChildFile ("audio");
     audioDir.createDirectory();
+
+    // Copy an external source into audio/ (de-duping by name+size) and return the
+    // local destination, or {} if the source is missing / already local. Shared by
+    // the wave-clip and sampler-sound passes below.
+    auto localiseInto = [&] (const juce::File& src) -> juce::File
+    {
+        if (! src.existsAsFile() || src.isAChildOf (projectDir))
+            return {};                                    // missing (relink) or already local
+        auto dest = audioDir.getChildFile (src.getFileName());
+        for (int n = 2; dest.existsAsFile() && dest.getSize() != src.getSize(); ++n)
+            dest = audioDir.getChildFile (src.getFileNameWithoutExtension()
+                                          + "_" + juce::String (n) + src.getFileExtension());
+        if (! dest.existsAsFile())
+            src.copyFileTo (dest);
+        return dest;
+    };
+
     for (auto* t : te::getAudioTracks (*editPtr))
-        if (t != nullptr)
-            for (auto* c : t->getClips())
-                if (auto* w = dynamic_cast<te::WaveAudioClip*> (c))
+    {
+        if (t == nullptr) continue;
+
+        for (auto* c : t->getClips())
+            if (auto* w = dynamic_cast<te::WaveAudioClip*> (c))
+                if (auto dest = localiseInto (w->getCurrentSourceFile()); dest != juce::File())
                 {
-                    const auto src = w->getCurrentSourceFile();
-                    if (! src.existsAsFile() || src.isAChildOf (projectDir))
-                        continue;                         // missing (relink) or already local
-                    auto dest = audioDir.getChildFile (src.getFileName());
-                    for (int n = 2; dest.existsAsFile() && dest.getSize() != src.getSize(); ++n)
-                        dest = audioDir.getChildFile (src.getFileNameWithoutExtension()
-                                                      + "_" + juce::String (n) + src.getFileExtension());
-                    if (! dest.existsAsFile())
-                        src.copyFileTo (dest);
-                    c->getSourceFileReference().setToDirectFileReference (dest, true);   // relative
-                    c->sourceMediaChanged();          // refresh the clip's cached source file
+                    w->getSourceFileReference().setToDirectFileReference (dest, true);   // relative
+                    w->sourceMediaChanged();          // refresh the clip's cached source file
                 }
+
+        // DRM-001 — also consolidate SamplerPlugin sounds (the bundled drum kit and any
+        // assign_sample'd user files), re-pointing each to a path RELATIVE to the edit
+        // so a drum project is portable wholesale. The absolute bundled-kit paths would
+        // otherwise break when the project is moved to another machine/install.
+        for (auto* p : t->pluginList.getPlugins())
+            if (auto* s = dynamic_cast<te::SamplerPlugin*> (p))
+                for (int i = 0; i < s->getNumSounds(); ++i)
+                    if (auto dest = localiseInto (s->getSoundFile (i).getFile()); dest != juce::File())
+                        s->setSoundMedia (i, dest.getRelativePathFrom (editPath.getParentDirectory()));
+    }
 }
 
 void MoshEngine::reloadFromFile()

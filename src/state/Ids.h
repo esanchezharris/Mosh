@@ -42,6 +42,14 @@ namespace mosh::ids
     // preference (written without the undo manager, like monitor mode).
     MOSH_DECLARE_ID (moshInputDevice)
 
+    // DRM-001 — the track's TYPE ("audio" | "drum"). A plain property on the
+    // track's own state tree (like moshInputDevice), so it saves/reloads with the
+    // edit. A "drum" track defaults to the working sampler + bundled kit and is the
+    // binding point for the FL-style drum window. Absent ⇒ "audio". Written WITH
+    // the undo manager by set_track_type / create_track so undo restores the prior
+    // type (and the same transaction's auto-loaded instrument) together.
+    MOSH_DECLARE_ID (trackType)
+
     MOSH_DECLARE_ID (id)
     MOSH_DECLARE_ID (inputRef)
     MOSH_DECLARE_ID (timeRangeStart)
