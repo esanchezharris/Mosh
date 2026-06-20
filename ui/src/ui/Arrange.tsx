@@ -28,6 +28,7 @@ import { useDrumWindow } from "./dock/useFloatingWindow";
 import { deriveTakeLanes } from "./takeLanes";
 import { SAMPLE_DND_MIME, addRecentSample } from "./sampleBrowserUtil";
 import { Meter } from "./Meter";
+import { lockOwnerOfTrack } from "../multiplayer/sync";
 import type { Snapshot, Track, Clip, MidiNote } from "../types";
 // Configurable interaction: gestures/keymap resolve through DAW-preset tables instead
 // of hardcoded branches; feel values (drag-threshold, edge-grab, snap, etc.) are read
@@ -413,6 +414,13 @@ const TrackHeader = memo(function TrackHeader({ track }: { track: Track }) {
   const instrument = track.plugins?.find((p) => p.isInstrument);
   const isDrum = track.type === "drum";
   const showBadge = isDrum || !!instrument;
+  // MP-001 — when a peer holds this track, mark it read-only + show who has it.
+  const locksByLogicalId = useStore((s) => s.locksByLogicalId);
+  const selfPeer = useStore((s) => s.mp.selfPeer);
+  const peers = useStore((s) => s.peers);
+  const lockOwner = lockOwnerOfTrack(track, locksByLogicalId);
+  const lockedByOther = lockOwner !== null && lockOwner !== selfPeer;
+  const lockPeer = lockedByOther ? peers[lockOwner] : undefined;
   // A drum track's badge opens the FL-style step sequencer in its floating window,
   // bound to the track's MIDI clip (creating an empty one if the track has none).
   const openSeq = async (e: React.MouseEvent) => {
@@ -425,7 +433,8 @@ const TrackHeader = memo(function TrackHeader({ track }: { track: Track }) {
     if (clipId) useDrumWindow.getState().open(String(clipId));
   };
   return (
-    <div className={`thead${selected ? " selected" : ""}`} data-testid="track-header" data-track-id={track.id}
+    <div className={`thead${selected ? " selected" : ""}${lockedByOther ? " locked" : ""}`}
+      data-testid="track-header" data-track-id={track.id} data-locked={lockedByOther || undefined}
       data-track-type={track.type} data-selected={selected} onPointerDown={() => setSelectedTrack(track.id)}>
       <div className="row1">
         {showBadge && (
@@ -437,6 +446,10 @@ const TrackHeader = memo(function TrackHeader({ track }: { track: Track }) {
           )
         )}
         <span className="tname" title={track.name}>{track.name}</span>
+        {lockedByOther && (
+          <span className="tlock" data-testid="track-lock" title={`Locked by ${lockPeer?.name ?? lockOwner}`}
+            style={{ color: lockPeer?.color }}>🔒 {lockPeer?.name ?? lockOwner}</span>
+        )}
         <button className="msx x" title="Remove track" aria-label={`Remove ${track.name}`}
           onClick={(e) => { e.stopPropagation(); void exec("remove_track", { trackId: track.id }); }}>×</button>
       </div>

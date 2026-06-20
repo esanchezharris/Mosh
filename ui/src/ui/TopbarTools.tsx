@@ -12,6 +12,7 @@ import { runAction, FILE_MENU, type ActionId } from "../menuActions";
 import type { Snapshot, ExportFormat, CommandLog as CommandLogData, TrainingState } from "../types";
 import { SampleBrowser } from "./SampleBrowser";
 import { SettingsPanel } from "../settings/SettingsPanel";
+import { MultiplayerPanel } from "./MultiplayerPanel";
 
 // Small popover anchored under its trigger; closes on outside click / Esc.
 function Pop({ label, title, on, className, children }: { label: string; title: string; on?: boolean; className?: string; children: (close: () => void) => React.ReactNode }) {
@@ -45,6 +46,7 @@ export function TopbarTools({ snapshot }: { snapshot: Snapshot }) {
       <TrainingTool training={snapshot.training ?? null} />
       <CommandLogTool />
       <RemoteTool />
+      <MultiplayerTool />
       <HelpTool />
       <button className="btn icon" title="Toggle theme" aria-label="Toggle light/dark theme" onClick={toggleTheme}>{theme === "dark" ? "☾" : "☀"}</button>
     </div>
@@ -381,6 +383,18 @@ function CommandLogTool() {
           </>
         );
       }}
+    </Pop>
+  );
+}
+
+// MP-001 — 2-player session entry (the reserved B-5 slot). `on` lights when a
+// session is active so the topbar shows the live-collaboration state at a glance.
+function MultiplayerTool() {
+  const active = useStore((s) => s.mp.active);
+  const peerCount = useStore((s) => Object.keys(s.peers).length);
+  return (
+    <Pop label={active ? `Live · ${peerCount}` : "Multiplayer"} title="2-player session" on={active} className="mp-pop">
+      {() => <MultiplayerPanel />}
     </Pop>
   );
 }

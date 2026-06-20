@@ -54,6 +54,18 @@ namespace mosh::ids
     MOSH_DECLARE_ID (drumMute)
     MOSH_DECLARE_ID (drumSolo)
 
+    // MP-001 (multiplayer) — STABLE LOGICAL IDs that survive across two peers'
+    // independent engines. Tracktion's own te::EditItemID is allocator-dependent
+    // and so differs per process; these UUIDs are the cross-peer identity used to
+    // address a track on commit/apply (and a bus, whose integer busNumber is a
+    // local-scan counter that races between peers). Plain properties on the
+    // track's / bus's own state tree (like trackType / moshInputDevice) so they
+    // save/reload with the .tracktionedit. Stamped once at creation (and lazily
+    // backfilled on load); identity is NOT user state, so written WITHOUT the undo
+    // manager. Absent ⇒ stamp on next access. See [[finish-prototype-roadmap]].
+    MOSH_DECLARE_ID (moshLogicalId)   // stable per-track UUID (cross-peer track identity)
+    MOSH_DECLARE_ID (mpBusId)         // stable per-bus UUID (cross-peer bus identity)
+
     MOSH_DECLARE_ID (id)
     MOSH_DECLARE_ID (inputRef)
     MOSH_DECLARE_ID (timeRangeStart)
