@@ -241,6 +241,11 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     check (tracks (ops) == 0, "cold snapshot has no tracks");
     check ((int) ops.snapshot().getProperty ("schemaVersion", 0) == 1, "snapshot schemaVersion == 1");
 
+    // 1a. MOSH_SELFTEST_SESSION isolation: when set, the harness must run in its
+    // own private session dir (so concurrent worktree runs don't clobber each other).
+    if (const auto s = SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SESSION", {}).trim(); s.isNotEmpty())
+        check (eng.sessionDir().getFileName() == s, "MOSH_SELFTEST_SESSION isolates the session dir (" + s + ")");
+
     // 2. create_track
     auto r = cmd (ops, "create_track", args1 ("name", "Drums"));
     check (ok (r), "create_track ok");
