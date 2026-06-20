@@ -38,7 +38,9 @@ function useHandsFree(): { pauseForPushToTalk: () => void; resumeAfterPushToTalk
       dispatch: async (action) => {
         const s = useStore.getState();
         await handleFast(action, {
-          runBatch: async (label, cmds) => { s.setAgentChangeSet(await runAgentBatch(label, cmds)); },
+          // hands-free voice turn: the transcript isn't threaded here, so the
+          // utterance falls back to the action label; source is tagged "voice".
+          runBatch: async (label, cmds) => { s.setAgentChangeSet(await runAgentBatch(label, cmds, { source: "voice" })); },
           enterRecord: s.enterRecord, stopRecord: s.stopRecord, keepTake: s.keepTake, navTake: s.navTake,
           utter: (intent, say) => { s.pushAgentUtter(intent, say); },
         });
@@ -123,7 +125,7 @@ export function AgentComposer() {
       });
       if (fast) {
         await handleFast(fast, {
-          runBatch: async (label, cmds) => { setAgentChangeSet(await runAgentBatch(label, cmds)); },
+          runBatch: async (label, cmds) => { setAgentChangeSet(await runAgentBatch(label, cmds, { utterance: text, source: "fastpath" })); },
           enterRecord: st.enterRecord, stopRecord: st.stopRecord, keepTake: st.keepTake, navTake: st.navTake,
           utter: (intent, say) => { setSay(say ?? null); pushAgentUtter(intent, say); },
         });
@@ -133,7 +135,7 @@ export function AgentComposer() {
       setSay(reply.say ?? null);
       pushAgentUtter(reply.intent ?? "ACK_GOT_IT", reply.say);
       if (reply.commands && reply.commands.length > 0) {
-        const cs = await runAgentBatch(reply.say || text, reply.commands);
+        const cs = await runAgentBatch(reply.say || text, reply.commands, { utterance: text, source: "brain_chat" });
         setAgentChangeSet(cs);
       }
     } catch {
