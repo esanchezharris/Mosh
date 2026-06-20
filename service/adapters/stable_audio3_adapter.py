@@ -64,6 +64,7 @@ def render(input_wav: str, output_wav: str, params: dict) -> dict:
         raise RuntimeError("stable_audio3 unavailable (no MLX or Windows CUDA backend found)")
 
     output_wav = os.path.abspath(output_wav)
+    os.makedirs(os.path.dirname(output_wav), exist_ok=True)   # clean success on a fresh dest dir
     input_wav = os.path.abspath(input_wav) if input_wav else input_wav
 
     prompt = params.get("prompt") or ""

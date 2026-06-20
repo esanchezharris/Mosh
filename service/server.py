@@ -213,7 +213,15 @@ def _run_job(job_id: str) -> None:
                 _jobs[job_id]["progress"] = 0.3   # coarse: real model render is one shot
 
         ad = _adapter_for(adapter_id)
+        # Honor a cancel that arrived in the window between the last progress check
+        # and this (potentially seconds-long) render — otherwise the job runs to
+        # completion and writes output the user asked to discard.
+        with _lock:
+            if _jobs[job_id].get("cancel"):
+                _jobs[job_id]["status"] = "cancelled"
+                return
         manifest = ad.render(job["input_wav"], job["output_wav"], job["params"])
+        os.makedirs(os.path.dirname(os.path.abspath(job["manifest"])), exist_ok=True)
         with open(job["manifest"], "w") as f:
             json.dump(manifest, f)
         with _lock:
@@ -537,6 +545,9 @@ class Handler(BaseHTTPRequestHandler):
                                       capture_output=True, text=True, timeout=180)
             except subprocess.TimeoutExpired:
                 self._send(504, {"ok": False, "error": "transcription timed out"})
+                return
+            except OSError as e:  # bad interpreter / unexecutable cli / spawn failure
+                self._send(500, {"ok": False, "error": f"transcription failed to start: {e}"})
                 return
             out = (proc.stdout or "").strip()
             try:

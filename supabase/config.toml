@@ -1,0 +1,10 @@
+# Supabase project config for the Mosh multiplayer cloud relay.
+# Project ref: tpvkqaqydafpgockzchm (org "moshpit").
+project_id = "tpvkqaqydafpgockzchm"
+
+[functions.relay]
+# The room code (a ~128-bit bearer) is the auth boundary, enforced inside the RPCs
+# — NOT Supabase Auth — so the gateway must not require a JWT. The function reads
+# the service-role key from the auto-injected Deno.env; the native client sends only
+# the publishable apikey.
+verify_jwt = false

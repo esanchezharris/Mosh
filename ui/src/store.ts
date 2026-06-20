@@ -16,6 +16,11 @@ import type { ChangeSet } from "./agent/executor";
 // of its values (theme/uiScale/voiceOn/voiceVol) so existing consumers stay reactive
 // while the SettingsPanel and these mutators both write through the single source.
 import { useSettings } from "./settings/store";
+// MP-001 — multiplayer presence + the commit-on-move trigger (pure helpers).
+import {
+  deriveActiveTrackId, computeSyncActions,
+  type MpSession, type PeerInfo, type PeerSelection,
+} from "./multiplayer/sync";
 
 export type Tool = "move" | "split" | "range";
 export type View = "arrange" | "mixer";
@@ -78,6 +83,19 @@ type State = {
   // crosses the bridge on paste (paste_clip); copy/cut never touch the backend
   // (swappable-seam rule). v1 holds a single clip; multi-clip copy is optional.
   clipboard: { clip: Clip; sourceTrackId: string } | null;
+
+  // MP-001 — multiplayer presence, fed by the peer_* / mp_state events (off the
+  // snapshot, like transport/levels). All UI-local reactions; mutations still flow
+  // through commands. Inactive in single-player, so these stay empty/no-op.
+  mp: MpSession;
+  peers: Record<string, PeerInfo>;                 // peerId -> name/color/online
+  peerSelection: Record<string, PeerSelection>;    // peerId -> their current selection
+  locksByLogicalId: Record<string, string>;        // logicalId -> ownerPeerId
+  activeTrackId: string | null;                    // derived; the commit-on-move trigger
+  mpCreateSession: (name?: string, color?: string) => Promise<void>;
+  mpJoinSession: (code: string, name?: string, color?: string) => Promise<void>;
+  mpLeaveSession: () => Promise<void>;
+  syncActiveTrack: () => Promise<void>;            // recompute activeTrack; commit+claim on change
 
   refresh: () => Promise<void>;
   exec: (command: string, args?: Record<string, unknown>) => Promise<CommandResult>;
@@ -201,6 +219,11 @@ export const useStore = create<State>((set, get) => ({
   spectrum: { bands: [], level: 0, flux: 0 },
   transport: { playing: false, recording: false, position: 0, looping: false, loopStart: 0, loopEnd: 0 },
   clipboard: null,
+  mp: { active: false, roomCode: null, selfPeer: null, connected: false },
+  peers: {},
+  peerSelection: {},
+  locksByLogicalId: {},
+  activeTrackId: null,
 
   refresh: async () => {
     if (!isNative()) return;
@@ -273,6 +296,27 @@ export const useStore = create<State>((set, get) => ({
         if (p?.clipId && p.qa)
           set((s) => ({ qaByClip: { ...s.qaByClip, [p.clipId!]: p.qa as RenderQA } }));
         void get().refresh();
+      } else if (ev.type === "mp_state") {
+        // MP-001 — session + roster + lock table (the native poll loop pushes the
+        // relay's {peers, locks} here). Targeted set, no snapshot refetch.
+        const p = ev.payload as {
+          active: boolean; roomCode?: string | null; selfPeer?: string | null;
+          peers?: Record<string, Partial<PeerInfo>>; locks?: Record<string, string>;
+        };
+        const peers: Record<string, PeerInfo> = {};
+        for (const [id, v] of Object.entries(p.peers ?? {}))
+          peers[id] = { name: v.name ?? id, color: v.color ?? "#888888", online: v.online ?? true };
+        set({
+          mp: { active: p.active, roomCode: p.roomCode ?? null, selfPeer: p.selfPeer ?? null, connected: p.active },
+          peers,
+          locksByLogicalId: p.locks ?? {},
+        });
+      } else if (ev.type === "peer_selection") {
+        // The other peer's current track/clip selection (the highlight we draw).
+        const p = ev.payload as { peerId: string; trackId?: string | null; clipId?: string | null };
+        set((s) => ({
+          peerSelection: { ...s.peerSelection, [p.peerId]: { trackId: p.trackId ?? null, clipId: p.clipId ?? null } },
+        }));
       }
     });
     // Keep the mirrored settings fields in sync with the schema-driven settings
@@ -325,13 +369,15 @@ export const useStore = create<State>((set, get) => ({
   setTool: (t) => set({ tool: t }),
   setSnap: (b) => set({ snap: b }),
   setSnapDivision: (d) => set({ snapDivision: d }),
-  select: (ids, additive = false) =>
+  select: (ids, additive = false) => {
     set((s) => {
       const next = new Set(additive ? s.selection : []);
       for (const id of ids) next.add(id);
       return { selection: next };
-    }),
-  clearSelection: () => set({ selection: new Set<string>() }),
+    });
+    void get().syncActiveTrack();
+  },
+  clearSelection: () => { set({ selection: new Set<string>() }); void get().syncActiveTrack(); },
   setTimeRange: (r) => set({ timeRange: r }),
   snapTime: (t) => {
     const { snap, snapDivision, snapshot } = get();
@@ -387,7 +433,40 @@ export const useStore = create<State>((set, get) => ({
     await get().refresh();
   },
 
-  setSelectedTrack: (id) => set({ selectedTrackId: id }),
+  setSelectedTrack: (id) => { set({ selectedTrackId: id }); void get().syncActiveTrack(); },
+
+  // MP-001 — session entry. The native session manager creates/joins the relay
+  // room and starts the poll loop (which emits mp_state / commits / peer_selection).
+  mpCreateSession: async (name = "", color = "") => {
+    const r = await get().exec("mp_create_session", { name, color });
+    if (!r.ok) set({ lastError: r.error ?? "create session failed" });
+  },
+  mpJoinSession: async (code, name = "", color = "") => {
+    const r = await get().exec("mp_join_session", { code, name, color });
+    if (!r.ok) set({ lastError: r.error ?? "join session failed" });
+  },
+  mpLeaveSession: async () => {
+    await get().exec("mp_leave_session");
+    set({ mp: { active: false, roomCode: null, selfPeer: null, connected: false },
+          peers: {}, peerSelection: {}, locksByLogicalId: {}, activeTrackId: null });
+  },
+
+  // Commit-on-move: when the actively-edited track changes, commit+release the
+  // previous track (serialize -> publish) and claim the next, then broadcast our
+  // selection. No-op in single-player (mp inactive). Selection is only a hint; the
+  // native idle checkpoint backstops a long edit that never moves off a track.
+  syncActiveTrack: async () => {
+    const s = get();
+    if (!s.mp.active) return;
+    const next = deriveActiveTrackId(s.selection, s.selectedTrackId, s.snapshot);
+    const prev = s.activeTrackId;
+    if (prev === next) return;
+    set({ activeTrackId: next });
+    const { release, claim } = computeSyncActions(prev, next);
+    if (release) await s.exec("mp_commit_track", { trackId: release });
+    if (claim) await s.exec("mp_claim_track", { trackId: claim });
+    await s.exec("mp_broadcast_selection", { trackId: next, clipId: [...s.selection][0] ?? null });
+  },
   editingClipId: null,
   openPianoRoll: (clipId) => set({ editingClipId: clipId }),
   closePianoRoll: () => set({ editingClipId: null }),

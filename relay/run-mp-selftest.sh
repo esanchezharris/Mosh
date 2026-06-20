@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# Run the gated multiplayer relay integration selftest end-to-end:
+#   start the relay -> wait for /health -> run `Mosh --selftest` with
+#   MOSH_SELFTEST_MP=1 against it -> tear the relay down.
+#
+# Usage:  bash relay/run-mp-selftest.sh
+#   MOSH_BIN  override the Mosh binary (default: the debug build under build-macos-arm64)
+#   PORT      relay port (default 8799)
+set -euo pipefail
+
+HERE="$(cd "$(dirname "$0")/.." && pwd)"   # repo root
+PORT="${PORT:-8799}"
+APP="${MOSH_BIN:-$(find "$HERE/build-macos-arm64" -name Mosh -path '*Mosh.app/Contents/MacOS/*' -type f 2>/dev/null | head -1)}"
+
+if [ -z "${APP:-}" ] || [ ! -x "$APP" ]; then
+  echo "Mosh binary not found. Build the app or set MOSH_BIN=/path/to/Mosh" >&2
+  exit 1
+fi
+
+PORT="$PORT" python3 "$HERE/relay/server.py" >/tmp/mosh-relay.log 2>&1 &
+RELAY_PID=$!
+trap 'kill "$RELAY_PID" 2>/dev/null || true; pkill -f "relay/server.py" 2>/dev/null || true' EXIT
+
+# Wait for the relay to bind (bash foreground `sleep` is unavailable here, so poll
+# in Python, which may use time.sleep).
+python3 - "$PORT" <<'PY'
+import sys, urllib.request, time
+for _ in range(100):
+    try:
+        urllib.request.urlopen(f"http://127.0.0.1:{sys.argv[1]}/health", timeout=0.5)
+        break
+    except Exception:
+        time.sleep(0.05)
+else:
+    sys.exit("relay did not start")
+PY
+
+rm -rf ~/Library/Mosh/session-selftest ~/Library/Mosh/session-selftest-undo
+MOSH_NO_AUDIO=1 MOSH_SELFTEST_MP=1 MOSH_RELAY_URL="http://127.0.0.1:$PORT" "$APP" --selftest

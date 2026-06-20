@@ -10,6 +10,8 @@
 #include "plugins/spectral/MasterSpectralTapPlugin.h"
 #include "generative/GenerativeJobManager.h"
 #include "training/TrainerRegistry.h"
+#include "multiplayer/LockManager.h"
+#include "multiplayer/MultiplayerSession.h"
 #include "training/TrainingJobManager.h"
 
 namespace mosh
@@ -37,6 +39,10 @@ public:
     using EventSink = std::function<void (const juce::var& event)>;
     void setEventSink (EventSink s) { eventSink = std::move (s); }
 
+    /** MP-001 — the multiplayer lock guard's state (mirrors the relay lock table).
+        The live poll path keeps this in sync; the guard in execute() reads it. */
+    LockManager& lockManager() { return lockManager_; }
+
     /** The single entry point — bound to the WebView's execute_command. */
     juce::var execute (const juce::var& command);
 
@@ -53,6 +59,32 @@ private:
     juce::var cmdCreateTrack    (const juce::var& args);
     juce::var cmdRenameTrack    (const juce::var& args);
     juce::var cmdRemoveTrack    (const juce::var& args);
+    // MP-001 — 2-player multiplayer commit/apply (backend-only; not in the agent
+    // catalog). mp_serialize_track captures a track's portable blob; apply_remote_
+    // track rebuilds a peer's committed track (nullptr UndoManager, no relay echo);
+    // mp_sync_locks mirrors the relay lock table into the guard.
+    juce::var cmdMpSerializeTrack (const juce::var& args);
+    juce::var cmdApplyRemoteTrack (const juce::var& args);
+    juce::var cmdMpSyncLocks      (const juce::var& args);
+    // The live session control plane (drives MultiplayerSession + its poll loop).
+    juce::var cmdMpCreateSession  (const juce::var& args);
+    juce::var cmdMpJoinSession    (const juce::var& args);
+    juce::var cmdMpLeaveSession   (const juce::var& args);
+    juce::var cmdMpClaimTrack     (const juce::var& args);
+    juce::var cmdMpCommitTrack    (const juce::var& args);
+    juce::var cmdMpBroadcastSelection (const juce::var& args);
+    // P6 bootstrap — serialize the WHOLE project (all tracks) for a late-joiner,
+    // and adopt a received bundle (clear local tracks, rebuild from the bundle).
+    juce::var cmdMpSerializeProject (const juce::var& args);
+    juce::var cmdMpApplyBootstrap   (const juce::var& args);
+    // Structural channel — scalar session-global ops (tempo/timesig/master/key)
+    // broadcast to the peer; mp_apply_structural re-executes a peer's op locally,
+    // guard-bypassed + without re-broadcasting (echo-free). Buses/groups deferred.
+    juce::var broadcastStructuralIfActive (const juce::String& name, const juce::var& args, juce::var result);
+    juce::var cmdMpApplyStructural  (const juce::var& args);
+    // Resolve the lock key (the affected track's logicalId, or the session key) for
+    // a guarded command, given its scope + args. Engine-coupled (findTrack/findClip).
+    juce::String lockKeyFor (LockManager::Scope scope, const juce::var& args);
     juce::var cmdImportClip     (const juce::var& args);
     juce::var cmdImportClipData (const juce::var& args);
     juce::var cmdAddTestTone    (const juce::var& args);
@@ -359,6 +391,9 @@ private:
     TrainerRegistry      trainerRegistry;
     TrainingJobManager   trainingJobManager;
     EventSink   eventSink;
+    LockManager lockManager_;          // MP-001 — multiplayer lock guard state
+    std::unique_ptr<MultiplayerSession> mpSession_;   // MP-001 — live session + poll loop
+    bool applyingRemote_ = false;      // MP-001 — true while applying a peer's structural op
     juce::int64 seq = 0;
     juce::File  logFile;
     bool        wasPlaying = false;

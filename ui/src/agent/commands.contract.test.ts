@@ -9,6 +9,9 @@
 //
 // How it works (MoshOps.cpp shape, verified):
 //   • dispatch:  if (name == "cmd") return cmdHandler (args);
+//                or wrapped — if (name == "cmd") return wrapper (name, args, cmdHandler (args));
+//                (some ops route the handler through a wrapper, e.g. an MP structural
+//                 broadcast — parseDispatch picks the inner cmdXxx(args) either way)
 //   • arg reads: args.getProperty ("key", …) / args.hasProperty ("key")
 //                (no args["key"] style anywhere in the file)
 
@@ -22,10 +25,19 @@ const here = dirname(fileURLToPath(import.meta.url)); // ui/src/agent
 const CPP_PATH = resolve(here, "../../../src/moshops/MoshOps.cpp");
 const src = readFileSync(CPP_PATH, "utf8");
 
-// command name → handler function (from the dispatch table)
-const dispatch = new Map<string, string>();
-for (const m of src.matchAll(/if \(name == "([a-z0-9_]+)"\)\s*return (cmd[A-Za-z0-9]+)/g))
-  dispatch.set(m[1], m[2]);
+// command name → handler function (from the dispatch table). The handler is the
+// cmdXxx(args) call — either bare after `return`, or nested inside a wrapper such as
+// `return wrapper (name, args, cmdXxx (args));`. `[^;]*?` stays within the single
+// dispatch statement (each ends with `;`) and the non-greedy match lands on the inner
+// cmdXxx(args) regardless of any wrapper.
+export function parseDispatch(cpp: string): Map<string, string> {
+  const d = new Map<string, string>();
+  for (const m of cpp.matchAll(/if \(name == "([a-z0-9_]+)"\)\s*return [^;]*?(cmd[A-Za-z0-9]+)\s*\(args\)/g))
+    d.set(m[1], m[2]);
+  return d;
+}
+
+const dispatch = parseDispatch(src);
 
 // Slice a handler's source span: from its definition to the next function
 // definition (or EOF). This can only ever ATTRIBUTE EXTRA keys (a false pass),
@@ -46,6 +58,20 @@ describe("agent catalog ⇄ MoshOps.cpp argument contract", () => {
   it("found the dispatch table", () => {
     // Sanity: if this drops to ~0 the regex/file moved and every test below is meaningless.
     expect(dispatch.size).toBeGreaterThan(50);
+  });
+
+  it("parseDispatch resolves the handler for BOTH bare and wrapper-nested dispatch", () => {
+    // The old `return (cmd...)` regex only matched a handler IMMEDIATELY after `return`,
+    // so a dispatch that routes the handler through a wrapper — e.g. a structural
+    // broadcast — silently dropped out of the table and every arg check for it failed
+    // with a spurious "no dispatch entry". This guards the wrapper form.
+    const snippet = [
+      '    if (name == "set_track_volume")  return cmdSetTrackVolume (args);',
+      '    if (name == "set_tempo")         return broadcastStructuralIfActive (name, args, cmdSetTempo (args));',
+    ].join("\n");
+    const d = parseDispatch(snippet);
+    expect(d.get("set_track_volume")).toBe("cmdSetTrackVolume"); // bare form
+    expect(d.get("set_tempo")).toBe("cmdSetTempo");              // wrapper-nested (red on the old regex)
   });
 
   for (const cmd of AGENT_COMMANDS) {

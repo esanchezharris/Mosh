@@ -112,11 +112,22 @@ public:
             setenv ("MOSH_SCAN_AU", "1", 1);
         }
 
-        const juce::String freshSessionName = undoSelfTest ? "session-selftest-undo"
+        juce::String freshSessionName = undoSelfTest ? "session-selftest-undo"
                                             : (neuralAB ? "session-neural-ab"
                                             : (liveAudioSmoke ? "session-live-audio-smoke"
                                             : (scanDeep ? "session-scan"
                                                               : "session-selftest")));
+        // Concurrent harness runs (e.g. parallel git worktrees each looping
+        // --selftest) otherwise share the global session-selftest dir + freshSession
+        // wipes it at startup, so one run clobbers another mid-test. MOSH_SELFTEST_SESSION
+        // overrides the leaf so each run gets a private session dir (pair with a
+        // distinct MOSH_SERVICE_PORT for full isolation). Only honored for headless
+        // harnesses, which already use a freshSession.
+        if (headless)
+            if (const auto s = juce::SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SESSION", {});
+                s.trim().isNotEmpty())
+                freshSessionName = s.trim();
+
         // Headless: no audio device, and an isolated cold session so the harness is
         // idempotent (it saves/reloads itself) and never touches the GUI session.
         engine  = std::make_unique<MoshEngine> ((! noAudio) || liveAudio,

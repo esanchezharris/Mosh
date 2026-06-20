@@ -1,6 +1,8 @@
 #include "MoshOps.h"
 #include "state/Ids.h"
 #include "state/RenderLayer.h"
+#include "multiplayer/LogicalId.h"
+#include "multiplayer/TrackCommit.h"
 #include "plugins/neural/NeuralInsertPlugin.h"
 #include <thread>
 
@@ -142,6 +144,40 @@ MoshOps::MoshOps (MoshEngine& engineToUse)
     pluginHost.initialise();                 // formats + curated VST3 scan
     previewFormats.registerBasicFormats();   // audition (file preview) reader formats
     startTimerHz (30);                       // telemetry decimated to 30 Hz, never per-block
+
+    // MP-001 — the live session. Its background poll loop calls back here (on the
+    // message thread) to apply peer commits, feed the lock guard, and push presence
+    // to the WebView. No relay echo: a remote apply repaints locally only.
+    mpSession_ = std::make_unique<MultiplayerSession> (
+        [this] (const juce::var& msg)
+        {
+            // P4 — fetch any by-hash stems this commit references (into the local
+            // edit's audio/by-hash/, so the relative refs resolve), then apply.
+            auto byHashDir = eng.editFile().getParentDirectory().getChildFile ("audio").getChildFile ("by-hash");
+            if (auto* arr = msg.getProperty ("audioRefs", var()).getArray())
+                for (auto& a : *arr)
+                {
+                    const auto h = a.getProperty ("hash", var()).toString();
+                    const auto e = a.getProperty ("ext", var()).toString();
+                    if (h.isEmpty()) continue;
+                    if (auto dest = byHashDir.getChildFile (h + "." + e); ! dest.existsAsFile())
+                        mpSession_->downloadBlob (h, e, dest);
+                }
+            if (trackcommit::apply (eng.edit(), msg.getProperty ("blob", var()).toString()).ok)
+            {
+                eng.markDirty();
+                emitSnapshotInvalidated();
+            }
+        },
+        [this] (const juce::String& type, juce::var payload) { emit (type, payload); },
+        [this] (bool active, const juce::String& self, const std::map<juce::String, juce::String>& locks)
+        {
+            if (active) { lockManager_.activate (self); lockManager_.setLocks (locks); }
+            else        { lockManager_.deactivate(); }
+        },
+        [this] { return cmdMpSerializeProject (var()).getProperty ("data", var()); },   // provide
+        [this] (const juce::var& bundle) { cmdMpApplyBootstrap (bundle); },             // adopt
+        [this] (const juce::var& msg) { cmdMpApplyStructural (msg); });                 // structural
 }
 
 MoshOps::~MoshOps()
@@ -368,6 +404,23 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name.isEmpty())
         return errResult (name, "missing 'command'");
 
+    // MP-001 lock guard — the single chokepoint. When a multiplayer session is
+    // active, reject any mutation to a track / clip / structure currently locked by
+    // the OTHER peer (fail-closed: unclassified commands need the session lock).
+    // No session => no-op, so single-player behaviour is unchanged. A REMOTE apply
+    // (applyingRemote_) bypasses the guard — it is the peer's change landing, not a
+    // local edit, so it must not be blocked by the peer's own lock.
+    if (lockManager_.isActive() && ! applyingRemote_)
+    {
+        const auto scope = LockManager::classify (name);
+        if (scope != LockManager::Scope::Unguarded)
+        {
+            const auto decision = lockManager_.decide (scope, lockKeyFor (scope, args));
+            if (! decision.allow)
+                return errResult (name, "blocked: " + decision.reason);
+        }
+    }
+
     if (name == "create_track")      return cmdCreateTrack (args);
     if (name == "rename_track")      return cmdRenameTrack (args);
     if (name == "remove_track")      return cmdRemoveTrack (args);
@@ -375,9 +428,9 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "import_clip_data")  return cmdImportClipData (args);
     if (name == "add_test_tone_clip")return cmdAddTestTone (args);
     if (name == "set_transport")     return cmdSetTransport (args);
-    if (name == "set_tempo")         return cmdSetTempo (args);
-    if (name == "set_time_signature")return cmdSetTimeSignature (args);
-    if (name == "set_metronome")     return cmdSetMetronome (args);
+    if (name == "set_tempo")         return broadcastStructuralIfActive (name, args, cmdSetTempo (args));
+    if (name == "set_time_signature")return broadcastStructuralIfActive (name, args, cmdSetTimeSignature (args));
+    if (name == "set_metronome")     return broadcastStructuralIfActive (name, args, cmdSetMetronome (args));
     if (name == "undo")              return cmdUndo (args);
     if (name == "redo")              return cmdRedo (args);
     if (name == "batch_begin")       return cmdBatchBegin (args);
@@ -407,8 +460,8 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "list_takes")        return cmdListTakes (args);
     if (name == "set_current_take")  return cmdSetCurrentTake (args);
     if (name == "keep_take")         return cmdKeepTake (args);
-    if (name == "set_master_volume") return cmdSetMasterVolume (args);
-    if (name == "set_master_pan")    return cmdSetMasterPan (args);
+    if (name == "set_master_volume") return broadcastStructuralIfActive (name, args, cmdSetMasterVolume (args));
+    if (name == "set_master_pan")    return broadcastStructuralIfActive (name, args, cmdSetMasterPan (args));
     if (name == "enable_track_meter")  return cmdEnableTrackMeter (args);
     if (name == "disable_track_meter") return cmdDisableTrackMeter (args);
     if (name == "enable_all_meters")   return cmdEnableAllMeters (args);
@@ -478,8 +531,20 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "open_project")      return cmdOpenProject (args);
     if (name == "save_as")           return cmdSaveAs (args);
     if (name == "set_project_settings") return cmdSetProjectSettings (args);
-    if (name == "set_key")           return cmdSetKey (args);
+    if (name == "set_key")           return broadcastStructuralIfActive (name, args, cmdSetKey (args));
     if (name == "create_group_track") return cmdCreateGroupTrack (args);
+    if (name == "mp_serialize_track") return cmdMpSerializeTrack (args);
+    if (name == "apply_remote_track") return cmdApplyRemoteTrack (args);
+    if (name == "mp_sync_locks")      return cmdMpSyncLocks (args);
+    if (name == "mp_create_session")  return cmdMpCreateSession (args);
+    if (name == "mp_join_session")    return cmdMpJoinSession (args);
+    if (name == "mp_leave_session")   return cmdMpLeaveSession (args);
+    if (name == "mp_claim_track")     return cmdMpClaimTrack (args);
+    if (name == "mp_commit_track")    return cmdMpCommitTrack (args);
+    if (name == "mp_broadcast_selection") return cmdMpBroadcastSelection (args);
+    if (name == "mp_serialize_project") return cmdMpSerializeProject (args);
+    if (name == "mp_apply_bootstrap")   return cmdMpApplyBootstrap (args);
+    if (name == "mp_apply_structural")  return cmdMpApplyStructural (args);
     if (name == "ungroup_track")      return cmdUngroupTrack (args);
     if (name == "list_wave_inputs")   return cmdListWaveInputs (args);
     if (name == "set_track_input")    return cmdSetTrackInput (args);
@@ -580,6 +645,15 @@ juce::var MoshOps::importWaveFileToTrack (const juce::String& command,
                                           const juce::var& logArgs)
 {
     auto& edit = eng.edit();
+
+    // Validate the audio file BEFORE any mutation. We may auto-create a track
+    // below; doing that (undoable) creation first and only then discovering the
+    // file is invalid would leave an orphan track in a failed command's undo
+    // transaction (partial mutation). Validate up front so an invalid import is a
+    // clean no-op.
+    te::AudioFile audioFile (edit.engine, file);
+    if (! audioFile.isValid()) return errResult (command, "invalid audio file");
+
     auto* track = trackId.isNotEmpty() ? findTrack (trackId) : nullptr;
     if (track == nullptr)
     {
@@ -591,9 +665,6 @@ juce::var MoshOps::importWaveFileToTrack (const juce::String& command,
     if (track == nullptr)
         track = createAudioTrack ({});
     if (track == nullptr) return errResult (command, "no track");
-
-    te::AudioFile audioFile (edit.engine, file);
-    if (! audioFile.isValid()) return errResult (command, "invalid audio file");
 
     const double len = audioFile.getLength();
     auto name = clipName;
@@ -1134,6 +1205,8 @@ juce::var MoshOps::cmdCreateGroupTrack (const juce::var& args)
     if (folder == nullptr)
         return errResult ("create_group_track", "insertNewFolderTrack failed");
 
+    logicalid::ensureTrack (folder->state);   // MP-001 — stable cross-peer id for the submix
+
     const auto name = args.getProperty ("name", var()).toString();
     folder->setName (name.isNotEmpty() ? name : juce::String ("Group"));
 
@@ -1159,6 +1232,280 @@ juce::var MoshOps::cmdCreateGroupTrack (const juce::var& args)
     logLine ("create_group_track", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("create_group_track", var (data));
+}
+
+juce::var MoshOps::cmdMpSerializeTrack (const juce::var& args)
+{
+    // MP-001 — capture a track's portable blob for a peer commit. Read-only (no
+    // undo transaction, no event): flushState() so plugin chunks/state are in the
+    // tree, then serialize the whole track subtree.
+    const auto id = args.getProperty ("trackId", var()).toString();
+    auto* track = findTrack (id);
+    if (track == nullptr)
+        return errResult ("mp_serialize_track", "no track: " + id);
+
+    eng.edit().flushState();
+    const auto blob = trackcommit::serialize (*track);
+    if (blob.isEmpty())
+        return errResult ("mp_serialize_track", "serialize produced an empty blob");
+
+    auto* o = new DynamicObject();
+    o->setProperty ("blob", blob);
+    o->setProperty ("logicalId", logicalid::ensureTrack (track->state));
+    return okResult ("mp_serialize_track", var (o));
+}
+
+juce::var MoshOps::cmdApplyRemoteTrack (const juce::var& args)
+{
+    // MP-001 — apply a peer's committed track. Mutates via a nullptr UndoManager
+    // (never the local user's undo stack) and emits NOTHING (no relay echo); the
+    // local repaint is driven separately (P5). Backend-only / peer-origin.
+    const auto blob = args.getProperty ("blob", var()).toString();
+    if (blob.isEmpty())
+        return errResult ("apply_remote_track", "missing blob");
+
+    auto res = trackcommit::apply (eng.edit(), blob);
+    if (! res.ok)
+        return errResult ("apply_remote_track", res.error);
+
+    // NB: deliberately NO message-loop drain here. Tracktion's track list updates
+    // synchronously on the ValueTree child add/remove, so the snapshot already
+    // reflects the replaced track. Draining would (a) tick the 30 Hz metering /
+    // (b) advance the UndoManager's open transaction — both of which would leak
+    // into a remote apply that must be invisible to telemetry AND the undo stack.
+    eng.markDirty();   // the Edit genuinely changed (outside the undo system)
+
+    auto* o = new DynamicObject();
+    o->setProperty ("logicalId", res.logicalId);
+    o->setProperty ("mode", res.created ? "created" : "replaced");
+    return okResult ("apply_remote_track", var (o));
+}
+
+juce::String MoshOps::lockKeyFor (LockManager::Scope scope, const juce::var& args)
+{
+    using Scope = LockManager::Scope;
+    if (scope == Scope::SessionGlobal)
+        return LockManager::sessionKey();
+
+    if (scope == Scope::Track)
+    {
+        if (auto* t = findTrack (args.getProperty ("trackId", var()).toString()))
+            return logicalid::track (t->state);
+        return {};   // unresolvable target -> empty key allows; the command itself will error
+    }
+
+    if (scope == Scope::Clip)
+    {
+        if (auto* c = findClip (args.getProperty ("clipId", var()).toString()))
+            if (auto* tr = c->getTrack())
+                return logicalid::track (tr->state);
+        return {};
+    }
+
+    return {};
+}
+
+juce::var MoshOps::cmdMpSyncLocks (const juce::var& args)
+{
+    // MP-001 — mirror the relay's session/lock state into the local guard. Driven
+    // by the live poll path; backend-only (Unguarded). active:false => single-player.
+    if (! (bool) args.getProperty ("active", false))
+    {
+        lockManager_.deactivate();
+        auto* o = new DynamicObject();
+        o->setProperty ("active", false);
+        return okResult ("mp_sync_locks", var (o));
+    }
+
+    lockManager_.activate (args.getProperty ("selfPeer", var()).toString());
+
+    std::map<juce::String, juce::String> locks;
+    if (auto* lo = args.getProperty ("locks", var()).getDynamicObject())
+        for (auto& kv : lo->getProperties())
+            locks[kv.name.toString()] = kv.value.toString();
+    lockManager_.setLocks (std::move (locks));
+
+    auto* o = new DynamicObject();
+    o->setProperty ("active", true);
+    o->setProperty ("selfPeer", lockManager_.selfPeer());
+    return okResult ("mp_sync_locks", var (o));
+}
+
+juce::var MoshOps::cmdMpCreateSession (const juce::var& args)
+{
+    const auto code = mpSession_->createSession (args.getProperty ("name", var()).toString(),
+                                                 args.getProperty ("color", var()).toString());
+    if (code.isEmpty())
+        return errResult ("mp_create_session", "could not reach the relay (MOSH_RELAY_URL)");
+    auto* o = new DynamicObject();
+    o->setProperty ("code", code);
+    o->setProperty ("selfPeer", mpSession_->selfPeer());
+    return okResult ("mp_create_session", var (o));
+}
+
+juce::var MoshOps::cmdMpJoinSession (const juce::var& args)
+{
+    if (! mpSession_->joinSession (args.getProperty ("code", var()).toString(),
+                                   args.getProperty ("name", var()).toString(),
+                                   args.getProperty ("color", var()).toString()))
+        return errResult ("mp_join_session", "join failed (bad code / relay unreachable)");
+    auto* o = new DynamicObject();
+    o->setProperty ("selfPeer", mpSession_->selfPeer());
+    return okResult ("mp_join_session", var (o));
+}
+
+juce::var MoshOps::cmdMpLeaveSession (const juce::var&)
+{
+    mpSession_->leaveSession();
+    return okResult ("mp_leave_session");
+}
+
+juce::var MoshOps::cmdMpClaimTrack (const juce::var& args)
+{
+    auto* t = findTrack (args.getProperty ("trackId", var()).toString());
+    if (t == nullptr)
+        return errResult ("mp_claim_track", "no track");
+    const auto lid = logicalid::ensureTrack (t->state);
+    const int epoch = mpSession_->claim (lid);
+    auto* o = new DynamicObject();
+    o->setProperty ("granted", epoch >= 0);
+    o->setProperty ("logicalId", lid);
+    return okResult ("mp_claim_track", var (o));
+}
+
+juce::var MoshOps::cmdMpCommitTrack (const juce::var& args)
+{
+    auto* t = findTrack (args.getProperty ("trackId", var()).toString());
+    if (t == nullptr)
+        return errResult ("mp_commit_track", "no track");
+
+    // P4 — content-address each wave clip's audio into <editDir>/audio/by-hash/ and
+    // rewrite the clip to that RELATIVE ref, so the serialized state + the peer
+    // resolve the same path once the bytes are fetched.
+    auto byHashDir = eng.editFile().getParentDirectory().getChildFile ("audio").getChildFile ("by-hash");
+    Array<var> audioRefs;
+    for (auto* c : t->getClips())
+        if (auto* w = dynamic_cast<te::WaveAudioClip*> (c))
+        {
+            auto src = w->getCurrentSourceFile();
+            if (! src.existsAsFile()) continue;
+            juce::FileInputStream fis (src);
+            if (! fis.openedOk()) continue;
+            const auto hash = juce::SHA256 (fis).toHexString();
+            const auto ext  = src.getFileExtension().removeCharacters (".");
+            auto dest = byHashDir.getChildFile (hash + "." + ext);
+            if (! dest.existsAsFile())
+            {
+                byHashDir.createDirectory();
+                src.copyFileTo (dest);
+            }
+            if (src != dest)
+            {
+                w->getSourceFileReference().setToDirectFileReference (dest, true);   // relative by-hash ref
+                w->sourceMediaChanged();
+            }
+            auto* r = new DynamicObject(); r->setProperty ("hash", hash); r->setProperty ("ext", ext);
+            audioRefs.add (var (r));
+        }
+
+    eng.edit().flushState();
+    const auto blob = trackcommit::serialize (*t);
+    const auto lid  = logicalid::ensureTrack (t->state);
+
+    // Upload the stems (server-side content-addressed dedup), then publish the
+    // commit carrying their hashes so the peer can fetch what it lacks.
+    for (auto& r : audioRefs)
+    {
+        const auto h = r.getProperty ("hash", var()).toString();
+        const auto e = r.getProperty ("ext", var()).toString();
+        mpSession_->uploadBlob (h, e, byHashDir.getChildFile (h + "." + e));
+    }
+    if (blob.isNotEmpty())
+        mpSession_->commit (lid, blob, var (audioRefs));
+
+    auto* o = new DynamicObject();
+    o->setProperty ("logicalId", lid);
+    o->setProperty ("audioRefs", var (audioRefs));
+    return okResult ("mp_commit_track", var (o));
+}
+
+juce::var MoshOps::cmdMpBroadcastSelection (const juce::var& args)
+{
+    mpSession_->broadcastSelection (args.getProperty ("trackId", var()).toString(),
+                                    args.getProperty ("clipId", var()).toString());
+    return okResult ("mp_broadcast_selection");
+}
+
+juce::var MoshOps::broadcastStructuralIfActive (const juce::String& name, const juce::var& args, juce::var result)
+{
+    // Mirror a successful local session-global scalar op to the peer (LWW). Skipped
+    // when single-player, or while applying a peer's op (echo-free).
+    if (mpSession_ != nullptr && mpSession_->active() && ! applyingRemote_
+        && (bool) result.getProperty ("ok", false))
+        mpSession_->broadcastStructural (name, args);
+    return result;
+}
+
+juce::var MoshOps::cmdMpApplyStructural (const juce::var& args)
+{
+    // Re-execute a peer's structural op locally: applyingRemote_ bypasses the lock
+    // guard (it is incoming history) AND short-circuits broadcastStructuralIfActive
+    // (no echo). The inner command's own emit repaints the UI.
+    auto* c = new DynamicObject();
+    c->setProperty ("command", args.getProperty ("command", var()));
+    c->setProperty ("args", args.getProperty ("args", var()));
+
+    applyingRemote_ = true;
+    auto r = execute (var (c));
+    applyingRemote_ = false;
+    return okResult ("mp_apply_structural", r);
+}
+
+juce::var MoshOps::cmdMpSerializeProject (const juce::var&)
+{
+    // P6 — the whole project as a bundle of per-track blobs, for a late-joiner.
+    eng.edit().flushState();
+    juce::Array<var> tracks;
+    for (auto* t : te::getAudioTracks (eng.edit()))
+    {
+        if (t == nullptr) continue;
+        auto* o = new DynamicObject();
+        o->setProperty ("logicalId", logicalid::ensureTrack (t->state));
+        o->setProperty ("blob", trackcommit::serialize (*t));
+        tracks.add (var (o));
+    }
+    auto* d = new DynamicObject();
+    d->setProperty ("tracks", tracks);
+    d->setProperty ("count", tracks.size());
+    return okResult ("mp_serialize_project", var (d));
+}
+
+juce::var MoshOps::cmdMpApplyBootstrap (const juce::var& args)
+{
+    // P6 — adopt a peer's project: drop our local tracks, rebuild from the bundle.
+    // nullptr UndoManager + no relay echo (this is incoming history, like a commit).
+    auto& edit = eng.edit();
+    for (auto* t : te::getAudioTracks (edit))
+        if (t != nullptr)
+        {
+            auto st = t->state;
+            st.getParent().removeChild (st, nullptr);
+        }
+
+    int applied = 0;
+    if (auto* arr = args.getProperty ("tracks", var()).getArray())
+        for (auto& tv : *arr)
+        {
+            const auto blob = tv.getProperty ("blob", var()).toString();
+            if (blob.isNotEmpty() && trackcommit::apply (edit, blob).ok)
+                ++applied;
+        }
+
+    eng.markDirty();
+    emitSnapshotInvalidated();
+    auto* d = new DynamicObject();
+    d->setProperty ("applied", applied);
+    return okResult ("mp_apply_bootstrap", var (d));
 }
 
 juce::var MoshOps::cmdUngroupTrack (const juce::var& args)
@@ -2437,11 +2784,17 @@ juce::var MoshOps::cmdRenameBus (const juce::var& args)
     const int bus = (int) args.getProperty ("bus", -1);
     auto* returnTrack = findReturnTrackForBus (bus);
     if (returnTrack == nullptr) return errResult ("rename_bus", "no such bus");
-    beginTxn ("rename_bus");
     const auto name = args.getProperty ("name", var()).toString();
+    // A bus name is a NON-undoable label (mirrors set_key / project settings): Tracktion's
+    // Edit::setAuxBusName writes the AUXBUSNAMES tree with a nullptr UndoManager, so the bus
+    // name — the snapshot's authoritative source (getAuxBusName) — cannot be undone. Write
+    // the return-track name directly (IDs::name, nullptr) rather than via Track::setName
+    // (which records through the UndoManager) so the WHOLE command is consistently
+    // non-undoable, with no partial-undo (name half-reverting). markDirty + undoable:false.
     eng.edit().setAuxBusName (bus, name);
-    returnTrack->setName (name);
-    logLine ("rename_bus", args, true, {}, true);
+    returnTrack->state.setProperty (ids::name, name, nullptr);
+    eng.markDirty();
+    logLine ("rename_bus", args, true, {}, false);
     emitSnapshotInvalidated();
     return okResult ("rename_bus");
 }
@@ -3894,6 +4247,19 @@ juce::var MoshOps::cmdAcceptRender (const juce::var& args)
     juce::File artifact (node[ids::cacheArtifact].toString());
     if (! artifact.existsAsFile()) return errResult ("accept_render", "nothing rendered to accept");
 
+    // Copy the render artifact into the project audio dir BEFORE any edit mutation.
+    // copyFileTo does not create parent dirs and can fail (disk full, perms); doing
+    // it up front and checking the result means a failed copy is a clean error
+    // rather than a clip pointing at a missing/partial file landing in the saved
+    // project. (createAudioTrack below is an undoable mutation, so we must not reach
+    // it on a copy failure.)
+    auto dest = eng.sessionDir().getChildFile ("audio")
+                    .getChildFile (node[ids::id].toString()).withFileExtension ("wav");
+    dest.getParentDirectory().createDirectory();
+    dest.deleteFile();
+    if (! artifact.copyFileTo (dest))
+        return errResult ("accept_render", "failed to copy render artifact");
+
     // Landing: new clip on a dedicated "neural" lane (the documented guaranteed
     // fallback, 05 §3.1 — ships as a user-selectable mode, not a defeat).
     beginTxn ("accept_render");
@@ -3906,11 +4272,6 @@ juce::var MoshOps::cmdAcceptRender (const juce::var& args)
         lane = createAudioTrack ("Neural Renders");
     }
     if (lane == nullptr) return errResult ("accept_render", "no lane");
-
-    auto dest = eng.sessionDir().getChildFile ("audio")
-                    .getChildFile (node[ids::id].toString()).withFileExtension ("wav");
-    dest.deleteFile();
-    artifact.copyFileTo (dest);
 
     auto pos = clip->getPosition();
     lane->insertWaveClip ("neural-" + clip->getName(), dest,
@@ -4707,6 +5068,10 @@ te::AudioTrack* MoshOps::createAudioTrack (const juce::String& name)
     if (track == nullptr)
         return nullptr;
 
+    // MP-001 — stamp the stable cross-peer logical id at creation (identity, not
+    // user state, so written without the undo manager; see LogicalId.h).
+    logicalid::ensureTrack (track->state);
+
     if (name.isNotEmpty())
         track->setName (name);
 
@@ -4969,6 +5334,7 @@ juce::var MoshOps::snapshot()
         {
             auto* g = new DynamicObject();
             g->setProperty ("id", ft->itemID.toString());
+            g->setProperty ("logicalId", logicalid::ensureTrack (ft->state));   // MP-001
             g->setProperty ("index", index++);
             g->setProperty ("name", ft->getName());
             g->setProperty ("type", "group");
@@ -5030,6 +5396,9 @@ juce::var MoshOps::trackToVar (te::AudioTrack& t, int index)
 
     auto* o = new DynamicObject();
     o->setProperty ("id", t.itemID.toString());
+    // MP-001 — stable cross-peer logical id (backfilled here for legacy/loaded
+    // edits whose tracks predate the stamp; ensure() is a no-op once present).
+    o->setProperty ("logicalId", logicalid::ensureTrack (t.state));
     o->setProperty ("index", index);
     o->setProperty ("name", t.getName());
     // DRM-001 — track type ("audio" | "drum"); absent on legacy edits ⇒ "audio".

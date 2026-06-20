@@ -9,6 +9,7 @@ StableAudio3Adapter swaps in later behind the same job protocol.
 from __future__ import annotations
 
 import math
+import os
 import struct
 import wave
 
@@ -68,9 +69,12 @@ def render(input_wav: str, output_wav: str, params: dict) -> dict:
 
     out = _transform_samples(samples, n_channels, seed, nl, drive)
 
-    # Encode back to 16-bit PCM and write.
+    # Encode back to 16-bit PCM and write. Ensure the destination directory exists
+    # so a render into a not-yet-created path is a clean success, not an unhandled
+    # FileNotFoundError surfaced to the native client as a cryptic job error.
     clamped = [int(max(-32768, min(32767, round(s * 32767.0)))) for s in out]
     body = struct.pack("<%dh" % len(clamped), *clamped)
+    os.makedirs(os.path.dirname(os.path.abspath(output_wav)), exist_ok=True)
     with wave.open(output_wav, "wb") as w:
         w.setnchannels(n_channels)
         w.setsampwidth(2)
