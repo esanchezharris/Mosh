@@ -1106,11 +1106,20 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (cmd (ops, "accept_render", args1 ("clipId", gcid))), "accept_render ok");
         check (tracks (ops) == tracksBefore + 1, "accept landed a new clip on a neural lane");
         bool laneHasClip = false;
+        String acceptedSource;
         { auto snap = ops.snapshot();
           if (auto* arr = snap["tracks"].getArray())
             for (auto& t : *arr) if (t.getProperty ("name", var()).toString() == "Neural Renders")
-                laneHasClip = trackClips (t) >= 1; }
+            {
+                laneHasClip = trackClips (t) >= 1;
+                if (laneHasClip) acceptedSource = t["clips"][0].getProperty ("sourceFile", var()).toString();
+            } }
         check (laneHasClip, "neural lane carries the accepted render");
+        // accept_render must land a clip pointing at a real, non-empty file — the
+        // copy of the render artifact is now checked, so a failed copy can never
+        // leave a broken clip in the (saved) project.
+        check (File (acceptedSource).existsAsFile() && File (acceptedSource).getSize() > 44,
+               "accepted clip's source file exists and is non-empty (no broken clip)");
 
         // JSONL records accept/reject as TASTE LABELS (05 §9).
         auto renderLogText = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
