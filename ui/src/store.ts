@@ -478,8 +478,12 @@ export const useStore = create<State>((set, get) => ({
     };
     // Chain after the previous run so two rapid selection changes can't interleave
     // their relay calls. Read state at RUN time (inside `run`), so a burst collapses
-    // to the latest active track rather than replaying stale intermediates.
+    // to the latest active track rather than replaying stale intermediates. `run` is
+    // both the fulfil AND reject handler, so a failed link self-heals (the next run
+    // still fires); the terminal .catch absorbs the LAST link's rejection (exec can
+    // reject at the bridge level) so a trailing failure isn't an unhandledrejection.
     mpSyncChain = mpSyncChain.then(run, run);
+    void mpSyncChain.catch(() => {});
     return mpSyncChain;
   },
   editingClipId: null,

@@ -17,13 +17,16 @@ const svc = createClient(
 )
 const BUCKET = 'mp-stems'
 
-// ── Abuse limits ────────────────────────────────────────────────────────────
+// ── Abuse limits (BOTH best-effort; the platform is the real backstop) ───────
 // The control plane carries only small JSON (audio bytes go straight to Storage
-// via signed URLs, never through here), so a few MB is a generous body ceiling.
-// The rate limit is BEST-EFFORT: Edge Functions run as multiple isolates, so this
-// in-memory window throttles per-isolate, not globally — it blunts one hammering
-// client, not a distributed flood (the real DoS backstops are deny-all RLS, the
-// 24h room expiry, and the platform gateway). Both are env-tunable; 0 disables.
+// via signed URLs, never through here). The body check below only inspects the
+// declared Content-Length, so it constrains honest clients but is bypassable by a
+// chunked/streamed request — the true hard ceiling is the Supabase platform
+// request-size limit. The rate limit is in-memory, and Edge Functions run as
+// multiple isolates, so it throttles per-isolate, not globally — it blunts one
+// hammering client, not a distributed flood. The real DoS backstops are deny-all
+// RLS, the 24h room expiry, and the platform gateway. Both are env-tunable; 0
+// disables.
 const MAX_BODY_BYTES = Number(Deno.env.get('MP_MAX_BODY') ?? 8 * 1024 * 1024)
 const RATE_LIMIT = Number(Deno.env.get('MP_RATE_LIMIT') ?? 600)
 const RATE_WINDOW_MS = Number(Deno.env.get('MP_RATE_WINDOW_MS') ?? 60_000)

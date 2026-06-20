@@ -177,6 +177,8 @@ def make_handler(state: RelayState, limiter: "FixedWindowLimiter | None" = None)
             self.send_response(code)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
+            if self.close_connection:   # tell a keep-alive client in-band the socket ends (e.g. 413)
+                self.send_header("Connection", "close")
             self.end_headers()
             self.wfile.write(body)
 
@@ -190,17 +192,23 @@ def make_handler(state: RelayState, limiter: "FixedWindowLimiter | None" = None)
             return limiter.allow(ip)
 
         def _body(self):
-            n = int(self.headers.get("Content-Length", 0) or 0)
-            if n > MAX_BODY_BYTES:
-                raise BodyTooLarge(f"body {n} exceeds {MAX_BODY_BYTES} bytes")
-            if n <= 0:
+            try:
+                n = int(self.headers.get("Content-Length", 0) or 0)
+            except ValueError:
+                raise BodyTooLarge("invalid Content-Length")   # -> 413 + close, not a silent empty body
+            if n < 0 or n > MAX_BODY_BYTES:
+                raise BodyTooLarge(f"bad/oversize body length {n} (cap {MAX_BODY_BYTES})")
+            if n == 0:
                 return {}
             return json.loads(self.rfile.read(n).decode("utf-8") or "{}")
 
         def do_GET(self):
-            if not self._rate_ok():
-                return self._send(429, {"error": "rate_limited"})
             u = urlparse(self.path)
+            # The /mp/events long-poll is the designed steady-state heartbeat (~4/s per
+            # peer); throttling it would blank a legitimate session's presence. Only
+            # rate-limit the burst-prone endpoints (create + the mutating POSTs).
+            if u.path != "/mp/events" and not self._rate_ok():
+                return self._send(429, {"error": "rate_limited"})
             if u.path == "/health":
                 return self._send(200, {"ok": True, "rooms": state.room_count()})
             if u.path == "/mp/events":

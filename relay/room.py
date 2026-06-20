@@ -119,12 +119,16 @@ class Room:
             del self._locks[k]
 
     def touch(self, peer_id):
-        """Refresh the lease on every lock held by an ACTIVE peer. Called when that
-        peer polls or publishes (its liveness heartbeat), mirroring the Supabase
-        relay's last_seen refresh. A peer that goes silent lets its locks lapse."""
-        deadline = self._now() + self._lease_s
+        """Refresh the lease on every STILL-LIVE lock held by an ACTIVE peer. Called
+        when that peer polls or publishes (its liveness heartbeat). touch is a
+        keep-alive, NOT a reviver: a lock whose lease already lapsed stays dead (it is
+        the relay's to re-grant), so a reconnecting peer resuming its poll can't
+        resurrect a track the relay already advertised as free. Mirrors the Supabase
+        backend, where a lapsed lease is revived only by an explicit mp_try_lock."""
+        now = self._now()
+        deadline = now + self._lease_s
         for v in self._locks.values():
-            if v["owner"] == peer_id:
+            if v["owner"] == peer_id and v["expires"] > now:
                 v["expires"] = deadline
 
     def sweep_locks(self):

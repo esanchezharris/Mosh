@@ -190,7 +190,7 @@ def test_oversized_body_is_rejected_413(monkeypatch):
         status, body = _post(f"http://127.0.0.1:{port}", "/mp/create",
                              {"peerId": "a", "blob": "x" * 1024})
         assert status == 413
-        assert "exceeds" in body["error"]
+        assert "oversize" in body["error"] or "cap" in body["error"]
     finally:
         httpd.shutdown()
         httpd.server_close()

@@ -157,6 +157,18 @@ juce::Array<juce::var> MultiplayerClient::poll()
     }
 
     auto res = JSON::parse (s->readEntireStreamAsString());
+
+    // Only a successful events payload carries "latest"; an error/throttle response
+    // (404 dead room, 429 rate_limited, anything malformed) does NOT — and createInputStream
+    // returns a non-null stream for 4xx on macOS. Treat such a response like the "no relay"
+    // branch above: report it but DON'T overwrite lastLocks_/lastPeers_/haveSeq_, so a
+    // transient error can't blank the guard's lock mirror or the presence roster.
+    if (! res.hasProperty ("latest") || res.hasProperty ("error"))
+    {
+        setError ("poll: " + JSON::toString (res));
+        return out;
+    }
+
     if (auto* arr = res.getProperty ("frames", var()).getArray())
         for (auto& f : *arr)
             out.add (f);

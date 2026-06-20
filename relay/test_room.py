@@ -279,3 +279,17 @@ def test_sweep_locks_reclaims_expired_memory():
     clk[0] += 91
     assert r.sweep_locks() == 2
     assert r.locks() == {}
+
+
+def test_touch_does_not_revive_a_lapsed_lock():
+    # A reconnecting peer resuming its poll must NOT resurrect a lock the relay
+    # already advertised as free — touch is a keep-alive, not a reviver.
+    r, clk = _clocked_room()
+    r.try_lock("a", "t1")
+    clk[0] += 91                                   # a's lease lapsed -> t1 is free
+    assert "t1" not in r.locks()
+    assert r.commit_allowed("b", "t1", 0) is True
+    r.touch("a")                                   # a polls again
+    assert "t1" not in r.locks()                   # still free (not revived)
+    assert r.commit_allowed("b", "t1", 0) is True  # b is NOT fenced out
+    assert r.try_lock("b", "t1")["granted"] is True  # b can still take it

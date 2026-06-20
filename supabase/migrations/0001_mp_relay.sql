@@ -117,7 +117,11 @@ declare
   v_msg_epoch bigint := nullif(p_msg->>'epoch','')::bigint;
   v_owner text; v_cur_epoch bigint; v_seq bigint;
 begin
-  perform 1 from mp.rooms where code = p_code and expires_at > now();
+  -- Row-lock the room FIRST (before mp.locks below), so this RPC acquires its locks
+  -- in the SAME rooms -> locks order as mp_try_lock (which row-locks mp.rooms via its
+  -- epoch_counter UPDATE before touching mp.locks). Consistent ordering means a
+  -- concurrent commit + steal cannot form an AB-BA deadlock (40P01).
+  perform 1 from mp.rooms where code = p_code and expires_at > now() for update;
   if not found then return jsonb_build_object('error','no_such_room','http_status',410); end if;
   if v_type = 'commit' and v_key is not null then
     -- FOR UPDATE row-locks the lock so a concurrent mp_try_lock(steal) cannot commit

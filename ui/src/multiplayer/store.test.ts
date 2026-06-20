@@ -99,4 +99,40 @@ describe("multiplayer presence (store + mock peer)", () => {
       "mp_broadcast_selection:T3",
     ]);
   });
+
+  // A bridge-level exec rejection on the LAST run must not surface as an unhandled
+  // rejection (callers `void` the promise), and the chain must still self-heal.
+  it("a rejecting exec self-heals the sync chain without an unhandled rejection", async () => {
+    await useStore.getState().syncActiveTrack();   // settle the module chain
+
+    const unhandled: string[] = [];
+    const onUnhandled = (e: unknown) => unhandled.push(String((e as Error)?.message ?? e));
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      let n = 0;
+      const execMock = () => {
+        n += 1;
+        return n === 1 ? Promise.reject(new Error("bridge down")) : Promise.resolve({ ok: true });
+      };
+      useStore.setState({
+        mp: { active: true, roomCode: "R", selfPeer: "me", connected: true },
+        selection: new Set<string>(), selectedTrackId: "T2", activeTrackId: "T1",
+        snapshot: null, exec: execMock as never,
+      });
+
+      // run1's first exec (commit T1) rejects; caller discards the promise (prod pattern).
+      void useStore.getState().syncActiveTrack();
+      await new Promise((r) => setTimeout(r, 0));
+
+      // Self-heal: a subsequent run still fires despite the prior rejection.
+      useStore.setState({ selectedTrackId: "T3", activeTrackId: "T2" });
+      await useStore.getState().syncActiveTrack();
+      expect(n).toBeGreaterThan(1);
+
+      await new Promise((r) => setTimeout(r, 0));
+      expect(unhandled.some((m) => m.includes("bridge down"))).toBe(false);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
+  });
 });
