@@ -65,17 +65,28 @@ Implemented first screens:
 Local simulator gate:
 
 ```sh
+scripts/iphone-companion-sim-gate.sh          # build + CompanionClientTests
+MOSH_IOS_SIM_GATE_MODE=build scripts/iphone-companion-sim-gate.sh   # build-only smoke
+```
+
+The script is the hardware-free, CI-ready gate: it auto-selects an available
+iPhone simulator, then runs the equivalent of
+
+```sh
 xcodebuild test -project ios/MoshCompanion/MoshCompanion.xcodeproj \
   -scheme MoshCompanion -configuration Debug \
   -destination 'platform=iOS Simulator,name=iPhone 17' \
   CODE_SIGNING_ALLOWED=NO
 ```
 
-The simulator is the required local gate for ordinary companion hardening. It
-covers app launch, deep-link pairing, local server connectivity, stale/offline
-recovery, receipts, command suppression, and non-hardware UI flow. Physical
-iPhone proof remains a manual hardware gate for camera QR scan, real microphone
-takes, real on-device Speech behavior, and acoustic monitoring.
+with code signing disabled, so it needs no Apple Account, provisioning profile,
+or device. It catches the real compile/typecheck and Swift 6 concurrency errors
+that `swiftc -parse` cannot (parse only checks syntax, not cross-file symbol
+resolution). The simulator is the required local gate for ordinary companion
+hardening. It covers app launch, deep-link pairing, local server connectivity,
+stale/offline recovery, receipts, command suppression, and non-hardware UI flow.
+Physical iPhone proof remains a manual hardware gate for camera QR scan, real
+microphone takes, real on-device Speech behavior, and acoustic monitoring.
 
 Physical device gate:
 
