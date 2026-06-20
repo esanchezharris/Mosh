@@ -149,9 +149,21 @@ MoshOps::MoshOps (MoshEngine& engineToUse)
     // message thread) to apply peer commits, feed the lock guard, and push presence
     // to the WebView. No relay echo: a remote apply repaints locally only.
     mpSession_ = std::make_unique<MultiplayerSession> (
-        [this] (const juce::String& blob)
+        [this] (const juce::var& msg)
         {
-            if (trackcommit::apply (eng.edit(), blob).ok)
+            // P4 — fetch any by-hash stems this commit references (into the local
+            // edit's audio/by-hash/, so the relative refs resolve), then apply.
+            auto byHashDir = eng.editFile().getParentDirectory().getChildFile ("audio").getChildFile ("by-hash");
+            if (auto* arr = msg.getProperty ("audioRefs", var()).getArray())
+                for (auto& a : *arr)
+                {
+                    const auto h = a.getProperty ("hash", var()).toString();
+                    const auto e = a.getProperty ("ext", var()).toString();
+                    if (h.isEmpty()) continue;
+                    if (auto dest = byHashDir.getChildFile (h + "." + e); ! dest.existsAsFile())
+                        mpSession_->downloadBlob (h, e, dest);
+                }
+            if (trackcommit::apply (eng.edit(), msg.getProperty ("blob", var()).toString()).ok)
             {
                 eng.markDirty();
                 emitSnapshotInvalidated();
@@ -1360,13 +1372,54 @@ juce::var MoshOps::cmdMpCommitTrack (const juce::var& args)
     auto* t = findTrack (args.getProperty ("trackId", var()).toString());
     if (t == nullptr)
         return errResult ("mp_commit_track", "no track");
+
+    // P4 — content-address each wave clip's audio into <editDir>/audio/by-hash/ and
+    // rewrite the clip to that RELATIVE ref, so the serialized state + the peer
+    // resolve the same path once the bytes are fetched.
+    auto byHashDir = eng.editFile().getParentDirectory().getChildFile ("audio").getChildFile ("by-hash");
+    Array<var> audioRefs;
+    for (auto* c : t->getClips())
+        if (auto* w = dynamic_cast<te::WaveAudioClip*> (c))
+        {
+            auto src = w->getCurrentSourceFile();
+            if (! src.existsAsFile()) continue;
+            juce::FileInputStream fis (src);
+            if (! fis.openedOk()) continue;
+            const auto hash = juce::SHA256 (fis).toHexString();
+            const auto ext  = src.getFileExtension().removeCharacters (".");
+            auto dest = byHashDir.getChildFile (hash + "." + ext);
+            if (! dest.existsAsFile())
+            {
+                byHashDir.createDirectory();
+                src.copyFileTo (dest);
+            }
+            if (src != dest)
+            {
+                w->getSourceFileReference().setToDirectFileReference (dest, true);   // relative by-hash ref
+                w->sourceMediaChanged();
+            }
+            auto* r = new DynamicObject(); r->setProperty ("hash", hash); r->setProperty ("ext", ext);
+            audioRefs.add (var (r));
+        }
+
     eng.edit().flushState();
     const auto blob = trackcommit::serialize (*t);
     const auto lid  = logicalid::ensureTrack (t->state);
+
+    // Upload the stems (server-side content-addressed dedup), then publish the
+    // commit carrying their hashes so the peer can fetch what it lacks.
+    for (auto& r : audioRefs)
+    {
+        const auto h = r.getProperty ("hash", var()).toString();
+        const auto e = r.getProperty ("ext", var()).toString();
+        mpSession_->uploadBlob (h, e, byHashDir.getChildFile (h + "." + e));
+    }
     if (blob.isNotEmpty())
-        mpSession_->commit (lid, blob);
+        mpSession_->commit (lid, blob, var (audioRefs));
+
     auto* o = new DynamicObject();
     o->setProperty ("logicalId", lid);
+    o->setProperty ("audioRefs", var (audioRefs));
     return okResult ("mp_commit_track", var (o));
 }
 

@@ -27,7 +27,9 @@ namespace mosh
 class MultiplayerSession
 {
 public:
-    using ApplyCommitFn = std::function<void (const juce::String& blob)>;
+    // The full commit message ({logicalId, epoch, blob, audioRefs}) so the receiver
+    // can fetch any referenced stems before applying.
+    using ApplyCommitFn = std::function<void (const juce::var& commitMsg)>;
     using EmitFn        = std::function<void (const juce::String& type, juce::var payload)>;
     using SyncLocksFn   = std::function<void (bool active, const juce::String& selfPeer,
                                               const std::map<juce::String, juce::String>& locks)>;
@@ -57,12 +59,16 @@ public:
     /** Claim `logicalId` on the relay (the lock arbiter). Returns the granted epoch,
         or -1 if denied. Remembers the epoch so a later commit() is not fenced. */
     int  claim (const juce::String& logicalId);
-    /** Serialize-published commit of a track we hold, then release the lock. */
-    void commit (const juce::String& logicalId, const juce::String& blob);
+    /** Serialize-published commit of a track we hold (carrying its stem hashes),
+        then release the lock. */
+    void commit (const juce::String& logicalId, const juce::String& blob, const juce::var& audioRefs);
     /** Publish our current selection (presence) to the room. */
     void broadcastSelection (const juce::String& trackId, const juce::String& clipId);
     /** Mirror a session-global scalar op ({command, args}) to the peer. */
     void broadcastStructural (const juce::String& command, const juce::var& args);
+    /** P4 — upload/download a content-addressed stem via the relay's signed URLs. */
+    bool uploadBlob (const juce::String& hash, const juce::String& ext, const juce::File& file);
+    bool downloadBlob (const juce::String& hash, const juce::String& ext, const juce::File& dest);
 
 private:
     void startPoll();

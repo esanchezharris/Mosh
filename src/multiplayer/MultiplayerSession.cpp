@@ -62,7 +62,7 @@ int MultiplayerSession::claim (const String& logicalId)
     return -1;
 }
 
-void MultiplayerSession::commit (const String& logicalId, const String& blob)
+void MultiplayerSession::commit (const String& logicalId, const String& blob, const var& audioRefs)
 {
     auto* msg = new DynamicObject();
     msg->setProperty ("type", "commit");
@@ -70,9 +70,20 @@ void MultiplayerSession::commit (const String& logicalId, const String& blob)
     const auto it = heldEpochs_.find (logicalId);
     msg->setProperty ("epoch", it != heldEpochs_.end() ? it->second : 0);
     msg->setProperty ("blob", blob);
+    msg->setProperty ("audioRefs", audioRefs);
     client_.publish (var (msg));
     client_.releaseLock (logicalId);
     heldEpochs_.erase (logicalId);
+}
+
+bool MultiplayerSession::uploadBlob (const String& hash, const String& ext, const File& file)
+{
+    return client_.uploadBlob (hash, ext, file);
+}
+
+bool MultiplayerSession::downloadBlob (const String& hash, const String& ext, const File& dest)
+{
+    return client_.downloadBlob (hash, ext, dest);
 }
 
 void MultiplayerSession::broadcastSelection (const String& trackId, const String& clipId)
@@ -140,7 +151,7 @@ void MultiplayerSession::pollLoop()
                 const auto type = msg.getProperty ("type", var()).toString();
                 if (type == "commit")
                 {
-                    applyCommit_ (msg.getProperty ("blob", var()).toString());
+                    applyCommit_ (msg);   // full msg: {logicalId, epoch, blob, audioRefs}
                 }
                 else if (type == "selection")
                 {

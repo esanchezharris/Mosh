@@ -53,6 +53,14 @@ public:
     /** Leave the room (best-effort). */
     void leave();
 
+    // ── P4 audio blobs (cloud relay only; the local self-host relay has no
+    //    /mp/blob/* endpoints, so these return false gracefully there) ──
+    /** Upload `file` as the content-addressed stem <hash>.<ext>, skipping if the
+        relay reports it already exists (dedup). Returns true on success/already-there. */
+    bool uploadBlob (const juce::String& hash, const juce::String& ext, const juce::File& file);
+    /** Download the stem <hash>.<ext> to `dest` via a signed URL. */
+    bool downloadBlob (const juce::String& hash, const juce::String& ext, const juce::File& dest);
+
 private:
     juce::var httpGet  (const juce::String& path);
     juce::var httpPost (const juce::String& path, const juce::var& body);

@@ -184,6 +184,73 @@ bool MultiplayerClient::releaseLock (const String& key)
     return (bool) httpPost ("/mp/unlock", var (o)).getProperty ("released", false);
 }
 
+bool MultiplayerClient::uploadBlob (const String& hash, const String& ext, const File& file)
+{
+    if (roomCode_.isEmpty() || ! file.existsAsFile())
+        return false;
+
+    auto body = [&] { auto* o = new DynamicObject();
+        o->setProperty ("code", roomCode_); o->setProperty ("peerId", peerId_);
+        o->setProperty ("hash", hash); o->setProperty ("ext", ext); return var (o); };
+
+    if ((bool) httpPost ("/mp/blob/head", body()).getProperty ("exists", false))
+        return true;   // already on the server (content-addressed dedup)
+
+    const auto putUrl = httpPost ("/mp/blob/put-url", body()).getProperty ("url", var()).toString();
+    if (putUrl.isEmpty())
+    {
+        lastError_ = "no put-url (cloud relay only)";
+        return false;
+    }
+
+    MemoryBlock mb;
+    if (! file.loadFileAsData (mb))
+        return false;
+    URL u = URL (putUrl).withPOSTData (mb);
+    // inAddress (NOT inPostData) so the signed URL's ?token=… stays in the address;
+    // the file bytes still go in the body (postData is set). httpRequestCmd -> PUT.
+    auto opts = URL::InputStreamOptions (URL::ParameterHandling::inAddress)
+                    .withConnectionTimeoutMs (60000)
+                    .withHttpRequestCmd ("PUT")
+                    .withExtraHeaders ("content-type: application/octet-stream");
+    if (auto s = u.createInputStream (opts))
+    {
+        s->readEntireStreamAsString();   // drain the small JSON ack
+        return true;
+    }
+    lastError_ = "blob PUT failed";
+    return false;
+}
+
+bool MultiplayerClient::downloadBlob (const String& hash, const String& ext, const File& dest)
+{
+    if (roomCode_.isEmpty())
+        return false;
+
+    auto* o = new DynamicObject();
+    o->setProperty ("code", roomCode_); o->setProperty ("peerId", peerId_);
+    o->setProperty ("hash", hash); o->setProperty ("ext", ext);
+    const auto getUrl = httpPost ("/mp/blob/get-url", var (o)).getProperty ("url", var()).toString();
+    if (getUrl.isEmpty())
+        return false;
+
+    auto opts = URL::InputStreamOptions (URL::ParameterHandling::inAddress).withConnectionTimeoutMs (60000);
+    if (auto s = URL (getUrl).createInputStream (opts))
+    {
+        dest.getParentDirectory().createDirectory();
+        dest.deleteFile();
+        FileOutputStream os (dest);
+        if (os.openedOk())
+        {
+            os.writeFromInputStream (*s, -1);
+            os.flush();
+            return dest.existsAsFile() && dest.getSize() > 0;
+        }
+    }
+    lastError_ = "blob GET failed";
+    return false;
+}
+
 void MultiplayerClient::leave()
 {
     if (roomCode_.isEmpty())

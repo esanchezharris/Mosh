@@ -3791,6 +3791,48 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                "native session returned a room code");
         check (ok (cmd (ops, "mp_leave_session")), "mp_leave_session ok (poll thread joined)");
 
+        // P4 — audio stems. Content-addressing + the by-hash rewrite run on any
+        // relay; the upload/peer-download round-trip only on the cloud relay (the
+        // local self-host relay has no /mp/blob/* storage).
+        const juce::String relayUrl (std::getenv ("MOSH_RELAY_URL") ? std::getenv ("MOSH_RELAY_URL") : "");
+        const bool cloudRelay = relayUrl.contains ("supabase");
+
+        auto sess = cmd (ops, "mp_create_session", objN ({ { "name", "Hz" }, { "color", "#ffff00" } }));
+        check (ok (sess), "mp_create_session (audio)");
+        const auto sessCode = sess.getProperty ("data", juce::var()).getProperty ("code", juce::var()).toString();
+        cmd (ops, "create_track", args1 ("name", "Stem Trk"));
+        juce::String stemTrk;
+        {
+            auto snap = ops.snapshot();
+            if (auto* arr = snap["tracks"].getArray())
+                for (auto& tv : *arr)
+                    if (tv.getProperty ("name", juce::var()).toString() == "Stem Trk")
+                        stemTrk = tv.getProperty ("id", juce::var()).toString();
+        }
+        cmd (ops, "add_test_tone_clip", objN ({ { "trackId", stemTrk }, { "seconds", 1.0 } }));
+
+        auto commitRes = cmd (ops, "mp_commit_track", args1 ("trackId", stemTrk));
+        check (ok (commitRes), "mp_commit_track ok (with audio)");
+        auto refs = commitRes.getProperty ("data", juce::var()).getProperty ("audioRefs", juce::var());
+        check (refs.isArray() && refs.size() >= 1, "commit content-addressed the clip's stem");
+        const auto h0 = (refs.isArray() && refs.size() > 0) ? refs[0].getProperty ("hash", juce::var()).toString() : juce::String();
+        const auto e0 = (refs.isArray() && refs.size() > 0) ? refs[0].getProperty ("ext", juce::var()).toString() : juce::String();
+        check (h0.length() == 64, "stem hash is a sha256");
+
+        if (cloudRelay)
+        {
+            MultiplayerClient peer;
+            check (peer.joinSession (sessCode, "Peer", "#00ffff"), "peer joined the audio session");
+            auto tmp = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                           .getChildFile ("mosh-mp-stem-" + h0 + "." + e0);
+            tmp.deleteFile();
+            check (peer.downloadBlob (h0, e0, tmp), "peer fetched the stem from cloud storage [" + peer.lastError() + "]");
+            check (tmp.existsAsFile() && tmp.getSize() > 0, "fetched stem is non-empty (" + juce::String (tmp.getSize()) + " bytes)");
+            tmp.deleteFile();
+            peer.leave();
+        }
+        cmd (ops, "mp_leave_session");
+
         a.leave();
         b.leave();
     }

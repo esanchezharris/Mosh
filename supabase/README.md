@@ -51,9 +51,18 @@ The relay is short-poll (the Edge Function returns immediately). The only lever 
 the native poll cadence vs the Free-tier 500K invocations/month — keep the idle poll
 interval at ~3–5s (back off when quiet) for casual sessions.
 
-## Audio (P4 — not yet wired)
+## Audio (P4 — done)
 
-Private bucket `mp-stems`, content-addressed `<sha256>.<ext>`. The Python service
-uploads with the service-role key; the receiver gets a signed download URL minted by
-a `/mp/blob/get-url` endpoint (gated on room membership), bare-GETs it, and the
-existing `clip.sourceMissing` → `relink_clip` path lands the file.
+Private bucket `mp-stems`, content-addressed `<sha256>.<ext>` (`migrations/0002_mp_blob.sql`).
+On commit, each wave clip's audio is hashed + consolidated into the edit's
+`audio/by-hash/` (a relative ref both peers resolve), and the bytes are uploaded
+via a **signed upload URL** minted by `/mp/blob/put-url`; the commit JSON carries
+just the hashes. On apply, the receiver fetches any missing stems via a **signed
+download URL** from `/mp/blob/get-url` into its own `audio/by-hash/`, so the
+relative refs resolve. Both endpoints are gated on room membership (`mp_is_member`)
+and the native client never holds the service-role key — the Edge Function mints
+the signed URLs. `/mp/blob/head` is the dedup check (skip upload if already there).
+
+Verified end to end over the internet by the gated `MOSH_SELFTEST_MP` selftest
+against the cloud relay: a real WAV stem is hashed, uploaded, and fetched back by
+a second peer (877/877). Per-file cap 50 MB (Free tier) — prefer FLAC/short stems.
