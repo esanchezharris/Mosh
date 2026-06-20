@@ -3753,7 +3753,9 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         commit->setProperty ("logicalId", lid);
         commit->setProperty ("blob", blob);
         const int seq = a.publish (juce::var (commit));
-        check (seq == 1, "peer A published the commit (seq 1) [" + a.lastError() + "]");
+        // seq is monotonic but its absolute value is backend-specific (a fresh local
+        // relay starts at 1; the cloud relay's seq is a global serial), so assert >=1.
+        check (seq >= 1, "peer A published the commit (seq " + juce::String (seq) + ") [" + a.lastError() + "]");
 
         // B receives exactly that commit; A does not get its own back (no echo).
         auto frames = b.poll();

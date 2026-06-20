@@ -56,8 +56,13 @@ public:
 private:
     juce::var httpGet  (const juce::String& path);
     juce::var httpPost (const juce::String& path, const juce::var& body);
+    // Extra request headers. Adds the Supabase `apikey` (from MOSH_RELAY_APIKEY)
+    // when set — required by the cloud Edge Function relay, harmlessly ignored by
+    // the local self-host relay, so one binary targets either backend via env.
+    juce::String extraHeaders (bool includeContentType) const;
 
     juce::String base_;
+    juce::String apiKey_;
     juce::String peerId_;
     juce::String roomCode_;
     int          haveSeq_     = 0;

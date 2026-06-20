@@ -21,13 +21,24 @@ MultiplayerClient::MultiplayerClient (const String& relayBaseUrl)
     // Strip a trailing slash so base_ + "/mp/..." never doubles up.
     if (base_.endsWithChar ('/'))
         base_ = base_.dropLastCharacters (1);
+    if (auto* k = std::getenv ("MOSH_RELAY_APIKEY"); k != nullptr)
+        apiKey_ = String (k);
+}
+
+juce::String MultiplayerClient::extraHeaders (bool includeContentType) const
+{
+    StringArray h;
+    if (includeContentType) h.add ("Content-Type: application/json");
+    if (apiKey_.isNotEmpty()) h.add ("apikey: " + apiKey_);
+    return h.joinIntoString ("\r\n");
 }
 
 juce::var MultiplayerClient::httpGet (const String& path)
 {
     URL url (base_ + path);
     auto opts = URL::InputStreamOptions (URL::ParameterHandling::inAddress)
-                    .withConnectionTimeoutMs (5000);
+                    .withConnectionTimeoutMs (5000)
+                    .withExtraHeaders (extraHeaders (false));
     if (auto s = url.createInputStream (opts))
         return JSON::parse (s->readEntireStreamAsString());
     lastError_ = "GET " + path + " failed (no relay?)";
@@ -39,7 +50,7 @@ juce::var MultiplayerClient::httpPost (const String& path, const juce::var& body
     URL url = URL (base_ + path).withPOSTData (JSON::toString (body));
     auto opts = URL::InputStreamOptions (URL::ParameterHandling::inPostData)
                     .withConnectionTimeoutMs (5000)
-                    .withExtraHeaders ("Content-Type: application/json");
+                    .withExtraHeaders (extraHeaders (true));
     if (auto s = url.createInputStream (opts))
         return JSON::parse (s->readEntireStreamAsString());
     lastError_ = "POST " + path + " failed (no relay?)";
@@ -121,7 +132,8 @@ juce::Array<juce::var> MultiplayerClient::poll()
                   .withParameter ("peerId", peerId_)
                   .withParameter ("since", String (haveSeq_));
     auto opts = URL::InputStreamOptions (URL::ParameterHandling::inAddress)
-                    .withConnectionTimeoutMs (5000);
+                    .withConnectionTimeoutMs (5000)
+                    .withExtraHeaders (extraHeaders (false));
 
     std::unique_ptr<InputStream> s (url.createInputStream (opts));
     if (s == nullptr)
