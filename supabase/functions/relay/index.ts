@@ -62,9 +62,14 @@ Deno.serve(async (req) => {
   const ep  = url.pathname.split('/').pop()
   if (ep === 'health') return J({ ok: true })
 
-  // Abuse guards (health is exempt so platform probes always pass).
+  // Abuse guards (health is exempt so platform probes always pass). The 'events'
+  // long-poll is the designed steady-state heartbeat (~4/s per peer), so it is also
+  // exempt from the request-count limiter — throttling it would blank a legitimate
+  // (e.g. co-NAT'd) session's presence. This mirrors the stdlib relay (server.py),
+  // which likewise rate-limits only create + the mutating POSTs. The body cap still
+  // applies to everything (events is a GET with no body, so it's a no-op there).
   const ip = (req.headers.get('x-forwarded-for') ?? '').split(',')[0].trim()
-  if (!rateOk(ip)) return J({ error: 'rate_limited' }, 429)
+  if (ep !== 'events' && !rateOk(ip)) return J({ error: 'rate_limited' }, 429)
   if (Number(req.headers.get('content-length') ?? 0) > MAX_BODY_BYTES)
     return J({ error: 'body_too_large' }, 413)
 
