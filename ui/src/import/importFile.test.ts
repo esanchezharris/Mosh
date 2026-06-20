@@ -8,10 +8,11 @@ describe("importBuffer dispatch", () => {
     expect(ir.session.tempo).toBe(90);
   });
 
-  it("flags .flp as not-yet-implemented without throwing", () => {
+  it("routes a .flp buffer to a graceful empty IR (needs a path → importPath)", () => {
     const ir = importBuffer("x.flp", Buffer.from([0, 1, 2]));
     expect(ir.format).toBe("flp");
-    expect(ir.unmappable.join(" ")).toMatch(/not implemented/i);
+    expect(ir.session.tracks).toHaveLength(0);
+    expect(ir.unmappable.join(" ")).toMatch(/file path|importPath/i);
   });
 
   it("throws on an unsupported extension", () => {

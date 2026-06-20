@@ -36,6 +36,9 @@ service/.sa3.env
 # Basic Pitch venv (100s of MB) + machine-local BASIC_PITCH_PY (setup-transcribe.sh)
 service/transcribe/.venv/
 service/transcribe/.transcribe.env
+# PyFLP venv + machine-local FLP_PY (setup-flp.sh)
+service/flp/.venv/
+service/flp/.flp.env
 service/__pycache__/
 **/__pycache__/
 *.pyc
