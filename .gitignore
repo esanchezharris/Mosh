@@ -13,6 +13,9 @@
 build/
 build-*/
 cmake-build-*/
+
+# Share-for-friend packaging artifacts (scripts/package-for-sharing.sh)
+dist/
 out/
 
 # CPM / fetched deps cache (kept out of repo; pinned by commit in CMake)

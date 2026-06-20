@@ -6,11 +6,21 @@ using namespace juce;
 
 namespace
 {
+    // The live cloud relay (Supabase Edge Function) is the BUILT-IN default so a
+    // double-clicked Mosh.app reaches multiplayer with zero setup. Point at a local
+    // self-host relay instead with:  MOSH_RELAY_URL=http://127.0.0.1:8771
+    constexpr const char* kCloudRelayUrl = "https://tpvkqaqydafpgockzchm.supabase.co/functions/v1/relay";
+    // Supabase anon (publishable) key — safe to embed: it is a CLIENT key. The room
+    // code (a ~128-bit bearer), deny-all RLS on the mp.* tables, and service-role-only
+    // RPCs are the real auth boundary, not this key. Override with MOSH_RELAY_APIKEY.
+    constexpr const char* kCloudRelayApiKey =
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRwdmtxYXF5ZGFmcGdvY2t6Y2htIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg2OTIzNDcsImV4cCI6MjA5NDI2ODM0N30.AD_DZddse2ozoGx3yhzAp8ivE7d6JgFdRUs3aB97wuo";
+
     String defaultRelayUrl()
     {
         if (auto* env = std::getenv ("MOSH_RELAY_URL"); env != nullptr && std::strlen (env) > 0)
             return String (env);
-        return "http://127.0.0.1:8771";
+        return kCloudRelayUrl;
     }
 }
 
@@ -21,8 +31,10 @@ MultiplayerClient::MultiplayerClient (const String& relayBaseUrl)
     // Strip a trailing slash so base_ + "/mp/..." never doubles up.
     if (base_.endsWithChar ('/'))
         base_ = base_.dropLastCharacters (1);
-    if (auto* k = std::getenv ("MOSH_RELAY_APIKEY"); k != nullptr)
+    if (auto* k = std::getenv ("MOSH_RELAY_APIKEY"); k != nullptr && std::strlen (k) > 0)
         apiKey_ = String (k);
+    else
+        apiKey_ = String (kCloudRelayApiKey);   // bake the cloud key so a Dock launch authenticates
 }
 
 void MultiplayerClient::setError (const String& e)
