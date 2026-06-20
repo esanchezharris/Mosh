@@ -25,12 +25,58 @@ import json
 import os
 import secrets
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 from room import RoomRegistry, RoomError, RoomFull, UnknownPeer, StaleCommit
 
 DEFAULT_PORT = 8771
+
+# ── Abuse limits (env-tunable). The control plane carries only small JSON (audio
+# bytes go out-of-band), so a few MB is a generous ceiling that still blocks a
+# memory-exhaustion / slow-POST body. The rate limit is per remote IP over a
+# fixed window; LOOPBACK IS EXEMPT (the self-host relay's own selftest hammers
+# 127.0.0.1, and the limiter's job is to blunt remote abuse). 0 disables. ──
+MAX_BODY_BYTES = int(os.environ.get("MOSH_RELAY_MAX_BODY", 8 * 1024 * 1024))
+RATE_LIMIT = int(os.environ.get("MOSH_RELAY_RATE_LIMIT", 600))     # requests / window / IP
+RATE_WINDOW_S = float(os.environ.get("MOSH_RELAY_RATE_WINDOW", 60))
+SOCKET_TIMEOUT_S = float(os.environ.get("MOSH_RELAY_SOCKET_TIMEOUT", 30))  # slow-loris guard
+_LOOPBACK = {"127.0.0.1", "::1", "::ffff:127.0.0.1"}
+
+
+class BodyTooLarge(Exception):
+    pass
+
+
+class FixedWindowLimiter:
+    """A tiny thread-safe per-key fixed-window rate limiter. `allow(key)` returns
+    False once `limit` calls land within `window_s`; the window then resets. limit<=0
+    disables it. Memory is bounded by pruning windows that have fully elapsed."""
+
+    def __init__(self, limit, window_s, now_fn=None):
+        self.limit = limit
+        self.window = window_s
+        self._now = now_fn if now_fn is not None else time.monotonic
+        self._buckets = {}     # key -> [window_start, count]
+        self._lock = threading.Lock()
+
+    def allow(self, key):
+        if self.limit <= 0:
+            return True
+        now = self._now()
+        with self._lock:
+            if len(self._buckets) > 4096:   # crude unbounded-growth backstop
+                self._buckets = {k: w for k, w in self._buckets.items()
+                                 if now - w[0] < self.window}
+            w = self._buckets.get(key)
+            if w is None or now - w[0] >= self.window:
+                self._buckets[key] = [now, 1]
+                return True
+            if w[1] >= self.limit:
+                return False
+            w[1] += 1
+            return True
 
 
 def _new_code():
@@ -71,6 +117,7 @@ class RelayState:
                 key = msg.get("logicalId")
                 if key and not room.commit_allowed(peer_id, key, msg.get("epoch", 0)):
                     raise StaleCommit(f"commit for {key} fenced (stale epoch / not owner)")
+            room.touch(peer_id)   # publishing is liveness — refresh this peer's lock leases
             return room.publish(peer_id, msg)["seq"]
 
     def lock(self, code, peer_id, key, steal=False):
@@ -92,6 +139,8 @@ class RelayState:
             room = self._reg.get(code)
             if room is None:
                 raise RoomError(f"no such room: {code}")
+            room.touch(peer_id)    # polling is the peer's liveness heartbeat (keeps its locks)
+            room.sweep_locks()     # lazy GC: reclaim any lapsed (crashed-owner) locks
             return {
                 "frames": room.events_for(peer_id, since),
                 "latest": room.latest_seq(),
@@ -113,9 +162,12 @@ class RelayState:
             return len(self._reg.codes())
 
 
-def make_handler(state: RelayState):
+def make_handler(state: RelayState, limiter: "FixedWindowLimiter | None" = None):
+    limiter = limiter if limiter is not None else FixedWindowLimiter(RATE_LIMIT, RATE_WINDOW_S)
+
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
+        timeout = SOCKET_TIMEOUT_S   # drop a connection that dribbles bytes (slow-loris)
 
         def log_message(self, *args):
             pass  # quiet
@@ -125,17 +177,38 @@ def make_handler(state: RelayState):
             self.send_response(code)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
+            if self.close_connection:   # tell a keep-alive client in-band the socket ends (e.g. 413)
+                self.send_header("Connection", "close")
             self.end_headers()
             self.wfile.write(body)
 
+        def _client_ip(self):
+            return self.client_address[0] if self.client_address else ""
+
+        def _rate_ok(self):
+            ip = self._client_ip()
+            if ip in _LOOPBACK:          # self-host / selftest traffic is never throttled
+                return True
+            return limiter.allow(ip)
+
         def _body(self):
-            n = int(self.headers.get("Content-Length", 0) or 0)
-            if n <= 0:
+            try:
+                n = int(self.headers.get("Content-Length", 0) or 0)
+            except ValueError:
+                raise BodyTooLarge("invalid Content-Length")   # -> 413 + close, not a silent empty body
+            if n < 0 or n > MAX_BODY_BYTES:
+                raise BodyTooLarge(f"bad/oversize body length {n} (cap {MAX_BODY_BYTES})")
+            if n == 0:
                 return {}
             return json.loads(self.rfile.read(n).decode("utf-8") or "{}")
 
         def do_GET(self):
             u = urlparse(self.path)
+            # The /mp/events long-poll is the designed steady-state heartbeat (~4/s per
+            # peer); throttling it would blank a legitimate session's presence. Only
+            # rate-limit the burst-prone endpoints (create + the mutating POSTs).
+            if u.path != "/mp/events" and not self._rate_ok():
+                return self._send(429, {"error": "rate_limited"})
             if u.path == "/health":
                 return self._send(200, {"ok": True, "rooms": state.room_count()})
             if u.path == "/mp/events":
@@ -150,9 +223,17 @@ def make_handler(state: RelayState):
             return self._send(404, {"error": "not found"})
 
         def do_POST(self):
+            if not self._rate_ok():
+                return self._send(429, {"error": "rate_limited"})
             u = urlparse(self.path)
             try:
                 b = self._body()
+            except BodyTooLarge as e:
+                # We deliberately did NOT drain the oversized body, so the keep-alive
+                # stream is desynced — close the connection rather than mis-frame the
+                # next request on it.
+                self.close_connection = True
+                return self._send(413, {"error": str(e)})
             except Exception as e:  # noqa: BLE001
                 return self._send(400, {"error": f"bad json: {e}"})
             try:
@@ -187,11 +268,11 @@ def make_handler(state: RelayState):
     return Handler
 
 
-def make_server(port=0, state=None):
+def make_server(port=0, state=None, limiter=None):
     """Build a ThreadingHTTPServer bound to `port` (0 = ephemeral, for tests).
-    Returns (httpd, actual_port)."""
+    Returns (httpd, actual_port). `limiter` overrides the default per-IP rate limit."""
     state = state or RelayState()
-    httpd = ThreadingHTTPServer(("127.0.0.1", port), make_handler(state))
+    httpd = ThreadingHTTPServer(("127.0.0.1", port), make_handler(state, limiter))
     return httpd, httpd.server_address[1]
 
 

@@ -219,3 +219,77 @@ def test_commit_epoch_fencing():
     assert r.commit_allowed("a", "track-1", stolen["epoch"]) is False  # wrong owner
     # An unlocked key (e.g. uncontended structural op) is allowed.
     assert r.commit_allowed("a", "free-key", 0) is True
+
+
+# ── Lock lease / expiry / GC (a crashed peer must not deadlock a track) ──────
+
+def _clocked_room(start=1000.0, lease=90):
+    clk = [start]
+    r = Room("ABCD", now_fn=lambda: clk[0], lock_lease_s=lease)
+    r.join("a")
+    r.join("b")
+    return r, clk
+
+
+def test_lock_lapses_after_lease_and_key_becomes_free():
+    r, clk = _clocked_room()
+    held = r.try_lock("a", "t1")
+    assert r.locks()["t1"]["owner"] == "a"
+    clk[0] += 91                                   # lease (90s) lapsed
+    assert "t1" not in r.locks()                   # not presented to clients
+    assert r.commit_allowed("a", "t1", held["epoch"]) is True   # lapsed == unlocked
+    # b takes it WITHOUT stealing — a lapsed lock is just free.
+    res = r.try_lock("b", "t1")
+    assert res["granted"] is True and res["owner"] == "b"
+    assert "stolen" not in res
+
+
+def test_active_owner_keeps_lease_via_touch():
+    r, clk = _clocked_room()
+    r.try_lock("a", "t1")
+    for _ in range(10):                            # 300s of activity, refreshed each poll
+        clk[0] += 30
+        r.touch("a")
+    assert r.locks()["t1"]["owner"] == "a"         # still held
+
+
+def test_silent_owner_loses_lock_despite_other_peer_touch():
+    r, clk = _clocked_room()
+    r.try_lock("a", "t1")
+    for _ in range(10):
+        clk[0] += 30
+        r.touch("b")                               # only b is active; a is silent
+    assert "t1" not in r.locks()                   # a's lease lapsed -> freed
+
+
+def test_reclaim_by_same_owner_renews_lease_and_keeps_epoch():
+    r, clk = _clocked_room()
+    e1 = r.try_lock("a", "t1")["epoch"]
+    clk[0] += 80
+    e2 = r.try_lock("a", "t1")["epoch"]            # re-claim renews
+    assert e2 == e1
+    clk[0] += 80                                   # 160s total, but renewed at 80s
+    assert "t1" in r.locks()                       # still live
+
+
+def test_sweep_locks_reclaims_expired_memory():
+    r, clk = _clocked_room()
+    r.try_lock("a", "t1")
+    r.try_lock("a", "t2")
+    clk[0] += 91
+    assert r.sweep_locks() == 2
+    assert r.locks() == {}
+
+
+def test_touch_does_not_revive_a_lapsed_lock():
+    # A reconnecting peer resuming its poll must NOT resurrect a lock the relay
+    # already advertised as free — touch is a keep-alive, not a reviver.
+    r, clk = _clocked_room()
+    r.try_lock("a", "t1")
+    clk[0] += 91                                   # a's lease lapsed -> t1 is free
+    assert "t1" not in r.locks()
+    assert r.commit_allowed("b", "t1", 0) is True
+    r.touch("a")                                   # a polls again
+    assert "t1" not in r.locks()                   # still free (not revived)
+    assert r.commit_allowed("b", "t1", 0) is True  # b is NOT fenced out
+    assert r.try_lock("b", "t1")["granted"] is True  # b can still take it

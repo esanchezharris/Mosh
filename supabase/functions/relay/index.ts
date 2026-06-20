@@ -17,6 +17,31 @@ const svc = createClient(
 )
 const BUCKET = 'mp-stems'
 
+// ── Abuse limits (BOTH best-effort; the platform is the real backstop) ───────
+// The control plane carries only small JSON (audio bytes go straight to Storage
+// via signed URLs, never through here). The body check below only inspects the
+// declared Content-Length, so it constrains honest clients but is bypassable by a
+// chunked/streamed request — the true hard ceiling is the Supabase platform
+// request-size limit. The rate limit is in-memory, and Edge Functions run as
+// multiple isolates, so it throttles per-isolate, not globally — it blunts one
+// hammering client, not a distributed flood. The real DoS backstops are deny-all
+// RLS, the 24h room expiry, and the platform gateway. Both are env-tunable; 0
+// disables.
+const MAX_BODY_BYTES = Number(Deno.env.get('MP_MAX_BODY') ?? 8 * 1024 * 1024)
+const RATE_LIMIT = Number(Deno.env.get('MP_RATE_LIMIT') ?? 600)
+const RATE_WINDOW_MS = Number(Deno.env.get('MP_RATE_WINDOW_MS') ?? 60_000)
+const _hits = new Map<string, { start: number; n: number }>()
+function rateOk(ip: string): boolean {
+  if (RATE_LIMIT <= 0 || !ip) return true
+  const now = Date.now()
+  if (_hits.size > 4096)
+    for (const [k, w] of _hits) if (now - w.start >= RATE_WINDOW_MS) _hits.delete(k)
+  const w = _hits.get(ip)
+  if (!w || now - w.start >= RATE_WINDOW_MS) { _hits.set(ip, { start: now, n: 1 }); return true }
+  if (w.n >= RATE_LIMIT) return false
+  w.n++; return true
+}
+
 const J = (o: unknown, s = 200) =>
   new Response(JSON.stringify(o), { status: s, headers: { 'content-type': 'application/json' } })
 const S = (v: unknown) => (typeof v === 'string' ? v : '')
@@ -36,6 +61,12 @@ Deno.serve(async (req) => {
   const url = new URL(req.url)
   const ep  = url.pathname.split('/').pop()
   if (ep === 'health') return J({ ok: true })
+
+  // Abuse guards (health is exempt so platform probes always pass).
+  const ip = (req.headers.get('x-forwarded-for') ?? '').split(',')[0].trim()
+  if (!rateOk(ip)) return J({ error: 'rate_limited' }, 429)
+  if (Number(req.headers.get('content-length') ?? 0) > MAX_BODY_BYTES)
+    return J({ error: 'body_too_large' }, 413)
 
   try {
     // ---- audio blob (signed URLs, membership-gated) ----

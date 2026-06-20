@@ -9,10 +9,16 @@ src/remote/RemoteCompanionServer.cpp (pushEvent + eventsSince, ring rolls at 256
 """
 from __future__ import annotations
 
+import time
 from collections import deque
 
 RING_CAPACITY = 256
 MAX_PEERS = 2
+# A lock auto-expires this many seconds after its last activity (claim/re-claim or
+# the owner's poll/publish "touch"). A peer that crashes without /mp/leave stops
+# refreshing, so its lock frees itself — matching the Supabase relay's
+# `lease_expires_at` (mp.locks, 90s) so both backends behave identically.
+LOCK_LEASE_S = 90
 
 
 class RoomError(Exception):
@@ -36,15 +42,18 @@ class Room:
     """One collaboration session. Holds <=2 peers, a monotonic seq, and a bounded
     ring of the most-recent frames for reconnect/late-join catch-up."""
 
-    def __init__(self, code, capacity=MAX_PEERS, ring_capacity=RING_CAPACITY):
+    def __init__(self, code, capacity=MAX_PEERS, ring_capacity=RING_CAPACITY,
+                 now_fn=None, lock_lease_s=LOCK_LEASE_S):
         self.code = code
         self.capacity = capacity
         self.ring_capacity = ring_capacity
         self._peers = {}                       # peer_id -> {"name", "color"}
         self._seq = 0                          # monotonic, per-room
         self._ring = deque(maxlen=ring_capacity)  # frames, oldest -> newest
-        self._locks = {}                       # key -> {"owner", "epoch"}
+        self._locks = {}                       # key -> {"owner", "epoch", "expires"}
         self._lock_epoch = 0                   # monotonic per-room fencing token
+        self._now = now_fn if now_fn is not None else time.monotonic  # injectable clock (tests)
+        self._lease_s = lock_lease_s
 
     # ── membership ──────────────────────────────────────────────────────────
     def peer_count(self):
@@ -68,26 +77,38 @@ class Room:
         self.release_all_for(peer_id)   # a disconnecting peer must not hold locks
 
     # ── locks (the relay is the sole arbiter) ───────────────────────────────
+    def _live_lock(self, key):
+        """The lock on `key` if it is held AND its lease has not lapsed, else None.
+        An expired lock counts as free (a crashed owner cannot deadlock the key).
+        Read-only/lazy — sweep_locks() reclaims the dead entry's memory."""
+        cur = self._locks.get(key)
+        if cur is None or cur["expires"] <= self._now():
+            return None
+        return cur
+
     def try_lock(self, peer_id, key, steal=False):
-        """Acquire `key` for `peer_id`. Granted if the key is free, already held by
-        this peer (idempotent), or `steal=True`. A grant mints a fresh monotonic
-        epoch (the fencing token); a re-acquire by the same owner keeps the epoch."""
+        """Acquire `key` for `peer_id`. Granted if the key is free (or its lease
+        lapsed), already held by this peer (idempotent), or `steal=True`. A grant
+        mints a fresh monotonic epoch (the fencing token); a re-acquire by the same
+        owner keeps the epoch. Every grant/re-grant refreshes the lease."""
         if peer_id not in self._peers:
             raise UnknownPeer(f"{peer_id} is not a member of room {self.code}")
-        cur = self._locks.get(key)
+        cur = self._live_lock(key)
         if cur is not None and cur["owner"] == peer_id:
+            cur["expires"] = self._now() + self._lease_s   # renew on re-claim
             return {"granted": True, "key": key, "owner": peer_id, "epoch": cur["epoch"]}
         if cur is None or steal:
             self._lock_epoch += 1
-            self._locks[key] = {"owner": peer_id, "epoch": self._lock_epoch}
+            self._locks[key] = {"owner": peer_id, "epoch": self._lock_epoch,
+                                "expires": self._now() + self._lease_s}
             res = {"granted": True, "key": key, "owner": peer_id, "epoch": self._lock_epoch}
             if cur is not None:
-                res["stolen"] = True
+                res["stolen"] = True   # only a live lock is "stolen"; an expired one is just free
             return res
         return {"granted": False, "key": key, "owner": cur["owner"], "epoch": cur["epoch"]}
 
     def release_lock(self, peer_id, key):
-        cur = self._locks.get(key)
+        cur = self._locks.get(key)   # an owner may release even a lapsed lock
         if cur is not None and cur["owner"] == peer_id:
             del self._locks[key]
             return True
@@ -97,18 +118,44 @@ class Room:
         for k in [k for k, v in self._locks.items() if v["owner"] == peer_id]:
             del self._locks[k]
 
+    def touch(self, peer_id):
+        """Refresh the lease on every STILL-LIVE lock held by an ACTIVE peer. Called
+        when that peer polls or publishes (its liveness heartbeat). touch is a
+        keep-alive, NOT a reviver: a lock whose lease already lapsed stays dead (it is
+        the relay's to re-grant), so a reconnecting peer resuming its poll can't
+        resurrect a track the relay already advertised as free. Mirrors the Supabase
+        backend, where a lapsed lease is revived only by an explicit mp_try_lock."""
+        now = self._now()
+        deadline = now + self._lease_s
+        for v in self._locks.values():
+            if v["owner"] == peer_id and v["expires"] > now:
+                v["expires"] = deadline
+
+    def sweep_locks(self):
+        """Reclaim lapsed locks (lazy GC). Returns the count swept."""
+        now = self._now()
+        dead = [k for k, v in self._locks.items() if v["expires"] <= now]
+        for k in dead:
+            del self._locks[k]
+        return len(dead)
+
     def locks(self):
-        return {k: dict(v) for k, v in self._locks.items()}
+        # Present only LIVE locks (shape preserved: key -> {owner, epoch}); a lapsed
+        # lease is invisible to clients, so no stale lock badge survives its lease.
+        now = self._now()
+        return {k: {"owner": v["owner"], "epoch": v["epoch"]}
+                for k, v in self._locks.items() if v["expires"] > now}
 
     def lock_epoch(self, key):
-        cur = self._locks.get(key)
+        cur = self._live_lock(key)
         return cur["epoch"] if cur is not None else 0
 
     def commit_allowed(self, peer_id, key, epoch):
-        """Epoch fencing: a commit for a LOCKED key is allowed only from its current
-        owner carrying an epoch >= the lock's epoch (a zombie holder whose lock was
-        stolen is fenced out). An unlocked key (uncontended/structural) is allowed."""
-        cur = self._locks.get(key)
+        """Epoch fencing: a commit for a LOCKED (live) key is allowed only from its
+        current owner carrying an epoch >= the lock's epoch (a zombie holder whose
+        lock was stolen is fenced out). An unlocked OR lapsed key (uncontended /
+        structural) is allowed."""
+        cur = self._live_lock(key)
         if cur is None:
             return True
         return cur["owner"] == peer_id and epoch >= cur["epoch"]

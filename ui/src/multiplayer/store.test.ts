@@ -48,4 +48,91 @@ describe("multiplayer presence (store + mock peer)", () => {
     expect(Object.keys(s.locksByLogicalId)).toHaveLength(0);
     expect(s.activeTrackId).toBeNull();
   });
+
+  // Regression: rapid selection changes used to fire syncActiveTrack concurrently,
+  // letting a commit race ahead of (or behind) its own claim. The runs are now
+  // serialized — each run's commit/claim/broadcast must be contiguous.
+  it("serializes overlapping syncActiveTrack runs (no interleaved relay calls)", async () => {
+    await useStore.getState().syncActiveTrack();   // settle the module sync chain (mp inactive => no-op)
+
+    const calls: string[] = [];
+    const resolvers: Array<() => void> = [];
+    const execMock = (cmd: string, args?: Record<string, unknown>) => {
+      calls.push(`${cmd}:${String(args?.trackId)}`);
+      return new Promise((res) => resolvers.push(() => res({ ok: true })));
+    };
+    useStore.setState({
+      mp: { active: true, roomCode: "R", selfPeer: "me", connected: true },
+      selection: new Set<string>(),
+      selectedTrackId: "T1",
+      activeTrackId: "T1",
+      snapshot: null,
+      exec: execMock as never,
+    });
+
+    // run1 (T1 -> T2): starts and parks on its first exec (commit T1).
+    useStore.setState({ selectedTrackId: "T2" });
+    const p1 = useStore.getState().syncActiveTrack();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // run2 (T2 -> T3) is queued behind run1; it must NOT have started yet.
+    useStore.setState({ selectedTrackId: "T3" });
+    const p2 = useStore.getState().syncActiveTrack();
+    await Promise.resolve();
+    expect(calls).toEqual(["mp_commit_track:T1"]);
+
+    // Drain parked execs, flushing a microtask each tick so the chain advances
+    // (don't stop on a transient empty moment during the run1 -> run2 hand-off).
+    for (let i = 0; i < 60; i++) {
+      if (resolvers.length) resolvers.shift()!();
+      await Promise.resolve();
+    }
+    await Promise.all([p1, p2]);
+
+    expect(calls).toEqual([
+      "mp_commit_track:T1",
+      "mp_claim_track:T2",
+      "mp_broadcast_selection:T2",
+      "mp_commit_track:T2",
+      "mp_claim_track:T3",
+      "mp_broadcast_selection:T3",
+    ]);
+  });
+
+  // A bridge-level exec rejection on the LAST run must not surface as an unhandled
+  // rejection (callers `void` the promise), and the chain must still self-heal.
+  it("a rejecting exec self-heals the sync chain without an unhandled rejection", async () => {
+    await useStore.getState().syncActiveTrack();   // settle the module chain
+
+    const unhandled: string[] = [];
+    const onUnhandled = (e: unknown) => unhandled.push(String((e as Error)?.message ?? e));
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      let n = 0;
+      const execMock = () => {
+        n += 1;
+        return n === 1 ? Promise.reject(new Error("bridge down")) : Promise.resolve({ ok: true });
+      };
+      useStore.setState({
+        mp: { active: true, roomCode: "R", selfPeer: "me", connected: true },
+        selection: new Set<string>(), selectedTrackId: "T2", activeTrackId: "T1",
+        snapshot: null, exec: execMock as never,
+      });
+
+      // run1's first exec (commit T1) rejects; caller discards the promise (prod pattern).
+      void useStore.getState().syncActiveTrack();
+      await new Promise((r) => setTimeout(r, 0));
+
+      // Self-heal: a subsequent run still fires despite the prior rejection.
+      useStore.setState({ selectedTrackId: "T3", activeTrackId: "T2" });
+      await useStore.getState().syncActiveTrack();
+      expect(n).toBeGreaterThan(1);
+
+      await new Promise((r) => setTimeout(r, 0));
+      expect(unhandled.some((m) => m.includes("bridge down"))).toBe(false);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
+  });
 });
