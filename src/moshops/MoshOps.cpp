@@ -162,7 +162,9 @@ MoshOps::MoshOps (MoshEngine& engineToUse)
         {
             if (active) { lockManager_.activate (self); lockManager_.setLocks (locks); }
             else        { lockManager_.deactivate(); }
-        });
+        },
+        [this] { return cmdMpSerializeProject (var()).getProperty ("data", var()); },   // provide
+        [this] (const juce::var& bundle) { cmdMpApplyBootstrap (bundle); });             // adopt
 }
 
 MoshOps::~MoshOps()
@@ -525,6 +527,8 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "mp_claim_track")     return cmdMpClaimTrack (args);
     if (name == "mp_commit_track")    return cmdMpCommitTrack (args);
     if (name == "mp_broadcast_selection") return cmdMpBroadcastSelection (args);
+    if (name == "mp_serialize_project") return cmdMpSerializeProject (args);
+    if (name == "mp_apply_bootstrap")   return cmdMpApplyBootstrap (args);
     if (name == "ungroup_track")      return cmdUngroupTrack (args);
     if (name == "list_wave_inputs")   return cmdListWaveInputs (args);
     if (name == "set_track_input")    return cmdSetTrackInput (args);
@@ -1367,6 +1371,53 @@ juce::var MoshOps::cmdMpBroadcastSelection (const juce::var& args)
     mpSession_->broadcastSelection (args.getProperty ("trackId", var()).toString(),
                                     args.getProperty ("clipId", var()).toString());
     return okResult ("mp_broadcast_selection");
+}
+
+juce::var MoshOps::cmdMpSerializeProject (const juce::var&)
+{
+    // P6 — the whole project as a bundle of per-track blobs, for a late-joiner.
+    eng.edit().flushState();
+    juce::Array<var> tracks;
+    for (auto* t : te::getAudioTracks (eng.edit()))
+    {
+        if (t == nullptr) continue;
+        auto* o = new DynamicObject();
+        o->setProperty ("logicalId", logicalid::ensureTrack (t->state));
+        o->setProperty ("blob", trackcommit::serialize (*t));
+        tracks.add (var (o));
+    }
+    auto* d = new DynamicObject();
+    d->setProperty ("tracks", tracks);
+    d->setProperty ("count", tracks.size());
+    return okResult ("mp_serialize_project", var (d));
+}
+
+juce::var MoshOps::cmdMpApplyBootstrap (const juce::var& args)
+{
+    // P6 — adopt a peer's project: drop our local tracks, rebuild from the bundle.
+    // nullptr UndoManager + no relay echo (this is incoming history, like a commit).
+    auto& edit = eng.edit();
+    for (auto* t : te::getAudioTracks (edit))
+        if (t != nullptr)
+        {
+            auto st = t->state;
+            st.getParent().removeChild (st, nullptr);
+        }
+
+    int applied = 0;
+    if (auto* arr = args.getProperty ("tracks", var()).getArray())
+        for (auto& tv : *arr)
+        {
+            const auto blob = tv.getProperty ("blob", var()).toString();
+            if (blob.isNotEmpty() && trackcommit::apply (edit, blob).ok)
+                ++applied;
+        }
+
+    eng.markDirty();
+    emitSnapshotInvalidated();
+    auto* d = new DynamicObject();
+    d->setProperty ("applied", applied);
+    return okResult ("mp_apply_bootstrap", var (d));
 }
 
 juce::var MoshOps::cmdUngroupTrack (const juce::var& args)

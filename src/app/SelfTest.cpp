@@ -3637,6 +3637,62 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                "structural ops unblocked after deactivate (single-player regression safety)");
     }
 
+    section ("Multiplayer: project bootstrap (P6)");
+    {
+        // A late-joiner adopts the host's whole project. Proven in-process: build a
+        // known project -> serialize the bundle -> wipe -> apply -> it comes back
+        // with the same logicalIds + content (the join handshake rides this).
+        auto lidByName = [] (MoshOps& o, const juce::String& nm) -> juce::String
+        {
+            auto snap = o.snapshot();
+            if (auto* arr = snap["tracks"].getArray())
+                for (auto& tv : *arr)
+                    if (tv.getProperty ("name", juce::var()).toString() == nm)
+                        return tv.getProperty ("logicalId", juce::var()).toString();
+            return {};
+        };
+
+        check (ok (cmd (ops, "new_project", args1 ("name", "mp-boot-src"))), "new_project (bootstrap source) ok");
+        check (tracks (ops) == 0, "fresh project is empty");
+        cmd (ops, "create_track", args1 ("name", "Boot A"));
+        cmd (ops, "create_track", args1 ("name", "Boot B"));
+        juce::String aId;
+        {
+            auto snap = ops.snapshot();
+            if (auto* arr = snap["tracks"].getArray())
+                for (auto& tv : *arr)
+                    if (tv.getProperty ("name", juce::var()).toString() == "Boot A")
+                        aId = tv.getProperty ("id", juce::var()).toString();
+        }
+        cmd (ops, "add_test_tone_clip", objN ({ { "trackId", aId }, { "seconds", 1.0 } }));
+        const auto lidA = lidByName (ops, "Boot A");
+        const auto lidB = lidByName (ops, "Boot B");
+
+        auto ser = cmd (ops, "mp_serialize_project");
+        check (ok (ser), "mp_serialize_project ok");
+        auto bundle = ser.getProperty ("data", juce::var());
+        check ((int) bundle.getProperty ("count", 0) == 2, "serialized a 2-track project bundle");
+
+        check (ok (cmd (ops, "new_project", args1 ("name", "mp-boot-dst"))), "new_project (joiner wipe) ok");
+        check (tracks (ops) == 0, "joiner starts empty before bootstrap");
+
+        auto app = cmd (ops, "mp_apply_bootstrap", objN ({ { "tracks", bundle.getProperty ("tracks", juce::var()) } }));
+        check (ok (app), "mp_apply_bootstrap ok");
+        check ((int) app.getProperty ("data", juce::var()).getProperty ("applied", 0) == 2, "bootstrap applied 2 tracks");
+        check (tracks (ops) == 2, "joiner now holds the host's 2 tracks");
+        check (lidByName (ops, "Boot A") == lidA && lidA.isNotEmpty(), "Boot A logicalId preserved across bootstrap");
+        check (lidByName (ops, "Boot B") == lidB && lidB.isNotEmpty(), "Boot B logicalId preserved across bootstrap");
+        int aClips = 0;
+        {
+            auto snap = ops.snapshot();
+            if (auto* arr = snap["tracks"].getArray())
+                for (auto& tv : *arr)
+                    if (tv.getProperty ("name", juce::var()).toString() == "Boot A")
+                        if (auto* cs = tv["clips"].getArray()) aClips = cs->size();
+        }
+        check (aClips == 1, "Boot A's clip survived the bootstrap (deep content)");
+    }
+
     // P2 — native↔relay transport, end to end over real HTTP. Gated (spawns a
     // relay + needs MOSH_RELAY_URL) so it stays OUT of the deterministic core run.
     if (std::getenv ("MOSH_SELFTEST_MP") != nullptr)

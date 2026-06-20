@@ -31,8 +31,13 @@ public:
     using EmitFn        = std::function<void (const juce::String& type, juce::var payload)>;
     using SyncLocksFn   = std::function<void (bool active, const juce::String& selfPeer,
                                               const std::map<juce::String, juce::String>& locks)>;
+    // P6 bootstrap: host serializes the whole project (returns the bundle);
+    // joiner adopts a received bundle.
+    using ProvideBootstrapFn = std::function<juce::var()>;
+    using ApplyBootstrapFn   = std::function<void (const juce::var& bundle)>;
 
-    MultiplayerSession (ApplyCommitFn applyCommit, EmitFn emit, SyncLocksFn syncLocks);
+    MultiplayerSession (ApplyCommitFn applyCommit, EmitFn emit, SyncLocksFn syncLocks,
+                        ProvideBootstrapFn provideBootstrap, ApplyBootstrapFn applyBootstrap);
     ~MultiplayerSession();
 
     /** Create a room (this peer joins) + start polling. Returns the code, or "". */
@@ -60,9 +65,11 @@ private:
     void pollLoop();
 
     MultiplayerClient client_;
-    ApplyCommitFn     applyCommit_;
-    EmitFn            emit_;
-    SyncLocksFn       syncLocks_;
+    ApplyCommitFn      applyCommit_;
+    EmitFn             emit_;
+    SyncLocksFn        syncLocks_;
+    ProvideBootstrapFn provideBootstrap_;
+    ApplyBootstrapFn   applyBootstrap_;
     std::map<juce::String, int> heldEpochs_;   // logicalId -> granted epoch (commit fencing)
     std::thread        pollThread_;
     std::atomic<bool>  running_ { false };

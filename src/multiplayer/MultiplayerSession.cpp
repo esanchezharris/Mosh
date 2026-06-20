@@ -5,8 +5,10 @@ namespace mosh
 {
 using namespace juce;
 
-MultiplayerSession::MultiplayerSession (ApplyCommitFn applyCommit, EmitFn emit, SyncLocksFn syncLocks)
-    : applyCommit_ (std::move (applyCommit)), emit_ (std::move (emit)), syncLocks_ (std::move (syncLocks))
+MultiplayerSession::MultiplayerSession (ApplyCommitFn applyCommit, EmitFn emit, SyncLocksFn syncLocks,
+                                        ProvideBootstrapFn provideBootstrap, ApplyBootstrapFn applyBootstrap)
+    : applyCommit_ (std::move (applyCommit)), emit_ (std::move (emit)), syncLocks_ (std::move (syncLocks)),
+      provideBootstrap_ (std::move (provideBootstrap)), applyBootstrap_ (std::move (applyBootstrap))
 {
 }
 
@@ -28,6 +30,11 @@ bool MultiplayerSession::joinSession (const String& code, const String& name, co
     if (! client_.joinSession (code, name, color))
         return false;
     startPoll();
+    // P6 — ask the host for the full project so a late-joiner starts from their
+    // state (the host answers in its poll loop with a bootstrap_state).
+    auto* req = new DynamicObject();
+    req->setProperty ("type", "bootstrap_request");
+    client_.publish (var (req));
     return true;
 }
 
@@ -121,6 +128,21 @@ void MultiplayerSession::pollLoop()
                     p->setProperty ("trackId", msg.getProperty ("trackId", var()));
                     p->setProperty ("clipId", msg.getProperty ("clipId", var()));
                     emit_ ("peer_selection", var (p));
+                }
+                else if (type == "bootstrap_request")
+                {
+                    // A late-joiner wants our project: serialize it + reply. (One-time,
+                    // small JSON; the brief publish on the message thread is fine.)
+                    auto bundle = provideBootstrap_ ? provideBootstrap_() : var();
+                    auto* msgOut = new DynamicObject();
+                    msgOut->setProperty ("type", "bootstrap_state");
+                    msgOut->setProperty ("tracks", bundle.getProperty ("tracks", var()));
+                    client_.publish (var (msgOut));
+                }
+                else if (type == "bootstrap_state")
+                {
+                    if (applyBootstrap_)
+                        applyBootstrap_ (msg);   // adopt the host's project
                 }
             }
 
