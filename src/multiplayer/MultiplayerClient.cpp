@@ -132,6 +132,8 @@ juce::Array<juce::var> MultiplayerClient::poll()
 
     auto res = JSON::parse (s->readEntireStreamAsString());
     needsResync_ = (bool) res.getProperty ("resync", false);
+    lastLocks_ = res.getProperty ("locks", var());
+    lastPeers_ = res.getProperty ("peers", var());
 
     if (auto* arr = res.getProperty ("frames", var()).getArray())
         for (auto& f : *arr)
@@ -142,6 +144,32 @@ juce::Array<juce::var> MultiplayerClient::poll()
     const int latest = (int) res.getProperty ("latest", haveSeq_);
     haveSeq_ = jmax (haveSeq_, latest);
     return out;
+}
+
+juce::var MultiplayerClient::tryLock (const String& key, bool steal)
+{
+    if (roomCode_.isEmpty())
+    {
+        lastError_ = "lock: not in a room";
+        return {};
+    }
+    auto* o = new DynamicObject();
+    o->setProperty ("code", roomCode_);
+    o->setProperty ("peerId", peerId_);
+    o->setProperty ("key", key);
+    o->setProperty ("steal", steal);
+    return httpPost ("/mp/lock", var (o));
+}
+
+bool MultiplayerClient::releaseLock (const String& key)
+{
+    if (roomCode_.isEmpty())
+        return false;
+    auto* o = new DynamicObject();
+    o->setProperty ("code", roomCode_);
+    o->setProperty ("peerId", peerId_);
+    o->setProperty ("key", key);
+    return (bool) httpPost ("/mp/unlock", var (o)).getProperty ("released", false);
 }
 
 void MultiplayerClient::leave()

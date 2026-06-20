@@ -3698,6 +3698,14 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         }
         check (restoredName == "Net Src", "track restored from the relayed commit (end-to-end over HTTP)");
 
+        // Exercise the NATIVE session command path (MultiplayerSession lifecycle:
+        // create -> background poll thread starts -> leave -> thread joins).
+        auto created = cmd (ops, "mp_create_session", objN ({ { "name", "Cy" }, { "color", "#00ff88" } }));
+        check (ok (created), "mp_create_session (native session) ok");
+        check (created.getProperty ("data", juce::var()).getProperty ("code", juce::var()).toString().isNotEmpty(),
+               "native session returned a room code");
+        check (ok (cmd (ops, "mp_leave_session")), "mp_leave_session ok (poll thread joined)");
+
         a.leave();
         b.leave();
     }

@@ -11,6 +11,7 @@
 #include "generative/GenerativeJobManager.h"
 #include "training/TrainerRegistry.h"
 #include "multiplayer/LockManager.h"
+#include "multiplayer/MultiplayerSession.h"
 #include "training/TrainingJobManager.h"
 
 namespace mosh
@@ -65,6 +66,13 @@ private:
     juce::var cmdMpSerializeTrack (const juce::var& args);
     juce::var cmdApplyRemoteTrack (const juce::var& args);
     juce::var cmdMpSyncLocks      (const juce::var& args);
+    // The live session control plane (drives MultiplayerSession + its poll loop).
+    juce::var cmdMpCreateSession  (const juce::var& args);
+    juce::var cmdMpJoinSession    (const juce::var& args);
+    juce::var cmdMpLeaveSession   (const juce::var& args);
+    juce::var cmdMpClaimTrack     (const juce::var& args);
+    juce::var cmdMpCommitTrack    (const juce::var& args);
+    juce::var cmdMpBroadcastSelection (const juce::var& args);
     // Resolve the lock key (the affected track's logicalId, or the session key) for
     // a guarded command, given its scope + args. Engine-coupled (findTrack/findClip).
     juce::String lockKeyFor (LockManager::Scope scope, const juce::var& args);
@@ -375,6 +383,7 @@ private:
     TrainingJobManager   trainingJobManager;
     EventSink   eventSink;
     LockManager lockManager_;          // MP-001 — multiplayer lock guard state
+    std::unique_ptr<MultiplayerSession> mpSession_;   // MP-001 — live session + poll loop
     juce::int64 seq = 0;
     juce::File  logFile;
     bool        wasPlaying = false;

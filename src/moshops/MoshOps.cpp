@@ -144,6 +144,25 @@ MoshOps::MoshOps (MoshEngine& engineToUse)
     pluginHost.initialise();                 // formats + curated VST3 scan
     previewFormats.registerBasicFormats();   // audition (file preview) reader formats
     startTimerHz (30);                       // telemetry decimated to 30 Hz, never per-block
+
+    // MP-001 — the live session. Its background poll loop calls back here (on the
+    // message thread) to apply peer commits, feed the lock guard, and push presence
+    // to the WebView. No relay echo: a remote apply repaints locally only.
+    mpSession_ = std::make_unique<MultiplayerSession> (
+        [this] (const juce::String& blob)
+        {
+            if (trackcommit::apply (eng.edit(), blob).ok)
+            {
+                eng.markDirty();
+                emitSnapshotInvalidated();
+            }
+        },
+        [this] (const juce::String& type, juce::var payload) { emit (type, payload); },
+        [this] (bool active, const juce::String& self, const std::map<juce::String, juce::String>& locks)
+        {
+            if (active) { lockManager_.activate (self); lockManager_.setLocks (locks); }
+            else        { lockManager_.deactivate(); }
+        });
 }
 
 MoshOps::~MoshOps()
@@ -500,6 +519,12 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "mp_serialize_track") return cmdMpSerializeTrack (args);
     if (name == "apply_remote_track") return cmdApplyRemoteTrack (args);
     if (name == "mp_sync_locks")      return cmdMpSyncLocks (args);
+    if (name == "mp_create_session")  return cmdMpCreateSession (args);
+    if (name == "mp_join_session")    return cmdMpJoinSession (args);
+    if (name == "mp_leave_session")   return cmdMpLeaveSession (args);
+    if (name == "mp_claim_track")     return cmdMpClaimTrack (args);
+    if (name == "mp_commit_track")    return cmdMpCommitTrack (args);
+    if (name == "mp_broadcast_selection") return cmdMpBroadcastSelection (args);
     if (name == "ungroup_track")      return cmdUngroupTrack (args);
     if (name == "list_wave_inputs")   return cmdListWaveInputs (args);
     if (name == "set_track_input")    return cmdSetTrackInput (args);
@@ -1278,6 +1303,70 @@ juce::var MoshOps::cmdMpSyncLocks (const juce::var& args)
     o->setProperty ("active", true);
     o->setProperty ("selfPeer", lockManager_.selfPeer());
     return okResult ("mp_sync_locks", var (o));
+}
+
+juce::var MoshOps::cmdMpCreateSession (const juce::var& args)
+{
+    const auto code = mpSession_->createSession (args.getProperty ("name", var()).toString(),
+                                                 args.getProperty ("color", var()).toString());
+    if (code.isEmpty())
+        return errResult ("mp_create_session", "could not reach the relay (MOSH_RELAY_URL)");
+    auto* o = new DynamicObject();
+    o->setProperty ("code", code);
+    o->setProperty ("selfPeer", mpSession_->selfPeer());
+    return okResult ("mp_create_session", var (o));
+}
+
+juce::var MoshOps::cmdMpJoinSession (const juce::var& args)
+{
+    if (! mpSession_->joinSession (args.getProperty ("code", var()).toString(),
+                                   args.getProperty ("name", var()).toString(),
+                                   args.getProperty ("color", var()).toString()))
+        return errResult ("mp_join_session", "join failed (bad code / relay unreachable)");
+    auto* o = new DynamicObject();
+    o->setProperty ("selfPeer", mpSession_->selfPeer());
+    return okResult ("mp_join_session", var (o));
+}
+
+juce::var MoshOps::cmdMpLeaveSession (const juce::var&)
+{
+    mpSession_->leaveSession();
+    return okResult ("mp_leave_session");
+}
+
+juce::var MoshOps::cmdMpClaimTrack (const juce::var& args)
+{
+    auto* t = findTrack (args.getProperty ("trackId", var()).toString());
+    if (t == nullptr)
+        return errResult ("mp_claim_track", "no track");
+    const auto lid = logicalid::ensureTrack (t->state);
+    const int epoch = mpSession_->claim (lid);
+    auto* o = new DynamicObject();
+    o->setProperty ("granted", epoch >= 0);
+    o->setProperty ("logicalId", lid);
+    return okResult ("mp_claim_track", var (o));
+}
+
+juce::var MoshOps::cmdMpCommitTrack (const juce::var& args)
+{
+    auto* t = findTrack (args.getProperty ("trackId", var()).toString());
+    if (t == nullptr)
+        return errResult ("mp_commit_track", "no track");
+    eng.edit().flushState();
+    const auto blob = trackcommit::serialize (*t);
+    const auto lid  = logicalid::ensureTrack (t->state);
+    if (blob.isNotEmpty())
+        mpSession_->commit (lid, blob);
+    auto* o = new DynamicObject();
+    o->setProperty ("logicalId", lid);
+    return okResult ("mp_commit_track", var (o));
+}
+
+juce::var MoshOps::cmdMpBroadcastSelection (const juce::var& args)
+{
+    mpSession_->broadcastSelection (args.getProperty ("trackId", var()).toString(),
+                                    args.getProperty ("clipId", var()).toString());
+    return okResult ("mp_broadcast_selection");
 }
 
 juce::var MoshOps::cmdUngroupTrack (const juce::var& args)

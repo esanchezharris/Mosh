@@ -38,8 +38,18 @@ public:
     /** Publish a message to the room. Returns the assigned seq, or -1 on error. */
     int  publish (const juce::var& msg);
     /** Fetch new frames since the last seen seq (own frames excluded). Advances the
-        internal cursor and updates needsResync(). */
+        internal cursor, updates needsResync(), and captures the room's current
+        lock table + roster (lastLocks()/lastPeers()). */
     juce::Array<juce::var> poll();
+    /** Claim a lock on `key` (a track's logicalId, or the session key). Returns the
+        relay's result object {granted, owner, epoch}. */
+    juce::var tryLock (const juce::String& key, bool steal = false);
+    /** Release a lock on `key`. Returns true if it was ours and is now free. */
+    bool releaseLock (const juce::String& key);
+    /** The lock table / roster from the most recent poll (objects: key->owner /
+        peerId->{name,color,online}). Updated by poll() only (single-threaded). */
+    juce::var lastLocks() const { return lastLocks_; }
+    juce::var lastPeers() const { return lastPeers_; }
     /** Leave the room (best-effort). */
     void leave();
 
@@ -52,6 +62,8 @@ private:
     juce::String roomCode_;
     int          haveSeq_     = 0;
     bool         needsResync_ = false;
+    juce::var    lastLocks_;
+    juce::var    lastPeers_;
     juce::String lastError_;
 };
 

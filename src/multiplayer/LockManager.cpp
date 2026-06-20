@@ -27,6 +27,8 @@ LockManager::Scope LockManager::classify (const juce::String& command)
         "set_project_settings", "set_key", "rescan_plugins", "get_plugin_blocklist",
         "clear_plugin_blocklist", "block_plugin", "open_plugin_editor",
         "mp_serialize_track", "apply_remote_track", "mp_sync_locks",
+        "mp_create_session", "mp_join_session", "mp_leave_session",
+        "mp_claim_track", "mp_commit_track", "mp_broadcast_selection",
         "import_training_source", "approve_training_source", "build_training_corpus",
         "submit_training_job", "training_job_status", "cancel_training_job",
         "import_lora_adapter", "activate_lora_adapter",
