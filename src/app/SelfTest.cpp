@@ -883,6 +883,44 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // checks live in the separate runUndoSelfTest with its own fresh engine.
     }
 
+    // ─── reorder_plugin: chain ordering + undo + out-of-bounds clamp (was 0-ref) ───
+    section ("PLG reorder: plugin chain ordering (reorder_plugin)");
+    {
+        auto effectOrder = [&] (const String& tid) -> StringArray {
+            StringArray order; auto trk = trackById (tid);
+            if (auto* arr = trk.getProperty ("plugins", var()).getArray())
+                for (auto& p : *arr)
+                { auto ty = p.getProperty ("type", var()).toString();
+                  if (ty == "compressor" || ty == "reverb" || ty == "delay") order.add (ty); }
+            return order;
+        };
+        auto idxOf = [&] (const String& tid, const String& type) -> int {
+            auto trk = trackById (tid);
+            if (auto* arr = trk.getProperty ("plugins", var()).getArray())
+                for (auto& p : *arr) if (p.getProperty ("type", var()).toString() == type) return (int) p.getProperty ("index", -1);
+            return -1;
+        };
+
+        auto rt = cmd (ops, "create_track", args1 ("name", "Reorder"))["data"].getProperty ("trackId", var()).toString();
+        check (ok (cmd (ops, "load_builtin", objN ({{ "trackId", rt }, { "type", "compressor" }}))), "reorder: load compressor");
+        check (ok (cmd (ops, "load_builtin", objN ({{ "trackId", rt }, { "type", "reverb" }}))),     "reorder: load reverb");
+        check (ok (cmd (ops, "load_builtin", objN ({{ "trackId", rt }, { "type", "delay" }}))),      "reorder: load delay");
+        check (effectOrder (rt) == StringArray ({ "compressor", "reverb", "delay" }), "effects load in chain order C,R,D");
+
+        // Move compressor to the end via an out-of-bounds toIndex — Tracktion's
+        // insertPlugin clamps an out-of-range index to append (no crash / no error).
+        const int compIdx = idxOf (rt, "compressor");
+        check (ok (cmd (ops, "reorder_plugin", objN ({{ "trackId", rt }, { "index", compIdx }, { "toIndex", 99 }}))),
+               "reorder_plugin with an out-of-bounds toIndex clamps to append (ok, no crash)");
+        check (effectOrder (rt) == StringArray ({ "reverb", "delay", "compressor" }), "compressor moved to the end of the chain");
+
+        check (ok (cmd (ops, "undo")), "undo reorder_plugin ok");
+        check (effectOrder (rt) == StringArray ({ "compressor", "reverb", "delay" }), "undo restores the prior plugin order");
+
+        check (! ok (cmd (ops, "reorder_plugin", objN ({{ "trackId", rt }, { "index", 99 }, { "toIndex", 0 }}))),
+               "reorder_plugin with a bad from-index errors");
+    }
+
     // ─── Stage 4: Tier-A real-time neural insert ───
     section ("Stage 4: Tier-A neural insert (RT-safe / PDC / ASTD)");
     {
