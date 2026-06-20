@@ -43,15 +43,20 @@ add_custom_target(MoshUI DEPENDS "${MOSH_UI_DIST}/index.html")
 
 # Stage the built bundle where WebBridge can serve it after the app links.
 add_dependencies(Mosh MoshUI)
-# macOS-only project (CMakeLists.txt FATAL_ERRORs on non-Apple before this runs),
-# so the bundle is always Mosh.app/Contents/Resources/ui.
+
+# Where WebBridge (src/webview/WebBridge.cpp) looks for the bundle:
+#   • macOS   → Mosh.app/Contents/Resources/ui   (app bundle)
+#   • Windows → <exe dir>/ui                      (flat .exe layout; exeDir/ui fallback)
+if (APPLE)
+    set(MOSH_UI_STAGE_DIR "$<TARGET_BUNDLE_CONTENT_DIR:Mosh>/Resources/ui")
+else()
+    set(MOSH_UI_STAGE_DIR "$<TARGET_FILE_DIR:Mosh>/ui")
+endif()
+
 add_custom_command(TARGET Mosh POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E rm -rf
-            "$<TARGET_BUNDLE_CONTENT_DIR:Mosh>/Resources/ui"
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${MOSH_UI_DIST}"
-            "$<TARGET_BUNDLE_CONTENT_DIR:Mosh>/Resources/ui"
-    COMMENT "Staging UI bundle into Mosh.app/Contents/Resources/ui"
+    COMMAND ${CMAKE_COMMAND} -E rm -rf "${MOSH_UI_STAGE_DIR}"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${MOSH_UI_DIST}" "${MOSH_UI_STAGE_DIR}"
+    COMMENT "Staging UI bundle → ${MOSH_UI_STAGE_DIR}"
     VERBATIM)
 
 # The POST_BUILD staging above only runs when the Mosh target itself relinks.
@@ -59,7 +64,6 @@ add_custom_command(TARGET Mosh POST_BUILD
 # relink Mosh, so the app would ship a STALE bundle. This ALL target always
 # restages the freshest dist after the app exists (it depends on Mosh + MoshUI),
 # closing that gap. Build it (or the default `all`) to guarantee a fresh bundle.
-set(MOSH_UI_STAGE_DIR "$<TARGET_BUNDLE_CONTENT_DIR:Mosh>/Resources/ui")
 add_custom_target(MoshStageUI ALL
     COMMAND ${CMAKE_COMMAND} -E rm -rf "${MOSH_UI_STAGE_DIR}"
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${MOSH_UI_DIST}" "${MOSH_UI_STAGE_DIR}"

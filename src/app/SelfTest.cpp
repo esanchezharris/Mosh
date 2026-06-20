@@ -5,6 +5,7 @@
 #include "plugins/neural/NeuralInsertPlugin.h"
 #include "brain/BrainProxy.h"
 #include "voice/NativeSpeech.h"
+#include "util/Env.h"
 #include <atomic>
 #include <cstdlib>
 #include <cstring>
@@ -3484,14 +3485,14 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     section ("Moshi brain proxy + native voice (packaged-app pieces)");
     {
         // Deterministic provider resolution — set known env, no network calls.
-        ::setenv ("DEEPSEEK_BASE_URL", "https://api.deepseek.test", 1);
-        ::setenv ("DEEPSEEK_MODEL", "deepseek-test", 1);
-        ::setenv ("DEEPSEEK_API_KEY", "sk-test-deepseek", 1);
-        ::setenv ("XAI_BASE_URL", "https://api.x.test", 1);
-        ::setenv ("XAI_MODEL", "grok-test", 1);
-        ::setenv ("XAI_API_KEY", "sk-test-xai", 1);
-        ::unsetenv ("OPENAI_API_KEY");          // leave openai incomplete
-        ::setenv ("MOSHI_BRAIN_PROVIDER", "xai", 1);
+        mosh::setEnvVar ("DEEPSEEK_BASE_URL", "https://api.deepseek.test");
+        mosh::setEnvVar ("DEEPSEEK_MODEL", "deepseek-test");
+        mosh::setEnvVar ("DEEPSEEK_API_KEY", "sk-test-deepseek");
+        mosh::setEnvVar ("XAI_BASE_URL", "https://api.x.test");
+        mosh::setEnvVar ("XAI_MODEL", "grok-test");
+        mosh::setEnvVar ("XAI_API_KEY", "sk-test-xai");
+        mosh::unsetEnvVar ("OPENAI_API_KEY");          // leave openai incomplete
+        mosh::setEnvVar ("MOSHI_BRAIN_PROVIDER", "xai");
 
         auto info  = BrainProxy::providersInfo();
         auto provs = info.getProperty ("providers", var());
@@ -3516,7 +3517,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                "brain: chat() rejects a non-array messages payload with an error shape");
 
         // Clear every key → no provider resolves and chat() errors cleanly (no network).
-        ::unsetenv ("DEEPSEEK_API_KEY"); ::unsetenv ("XAI_API_KEY"); ::unsetenv ("MOSHI_BRAIN_PROVIDER");
+        mosh::unsetEnvVar ("DEEPSEEK_API_KEY"); mosh::unsetEnvVar ("XAI_API_KEY"); mosh::unsetEnvVar ("MOSHI_BRAIN_PROVIDER");
         check (! BrainProxy::resolve().isComplete(), "brain: nothing resolves when no key is set");
         auto noProv = BrainProxy::chat (var (Array<var>{}), {});
         check (! (bool) noProv.getProperty ("ok", true),

@@ -7,6 +7,7 @@
 #include "moshops/MoshOps.h"
 #include "remote/RemoteCompanionServer.h"
 #include "brain/BrainProxy.h"
+#include "util/Env.h"
 #include <iostream>
 #include <thread>
 
@@ -108,8 +109,8 @@ public:
         // the AU sweep in — a deep scan is the full VST3 + AU catalog.)
         if (scanDeep)
         {
-            setenv ("MOSH_ENABLE_SA3", "0", 1);
-            setenv ("MOSH_SCAN_AU", "1", 1);
+            mosh::setEnvVar ("MOSH_ENABLE_SA3", "0");
+            mosh::setEnvVar ("MOSH_SCAN_AU", "1");
         }
 
         juce::String freshSessionName = undoSelfTest ? "session-selftest-undo"
