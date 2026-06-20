@@ -61,6 +61,7 @@ midi_rag_database.pkl
 .playwright-mcp/
 test-results/
 mosh-*.png
+verify-artifacts/
 
 # Local agent/runtime scratch
 .gstack/

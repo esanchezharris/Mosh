@@ -15,6 +15,16 @@ int runSelfTest (MoshEngine&, MoshOps&);
     Keeps assertion debugging separate from plugin hosting and generative jobs. */
 int runUndoSelfTest (MoshEngine&, MoshOps&);
 
+/** Headless batch command runner (`Mosh --run-script`). Reads a JSONL command
+    script from MOSH_RUN_SCRIPT — one {"command","args"} object per line; blank lines
+    and #/// comments are skipped; {"command":"__wait","args":{"ms":N}} pumps the
+    message loop so async work (e.g. a generative render job) can complete — executes
+    each via MoshOps::execute against an isolated headless session, and writes each
+    result as one JSONL line to stdout (and to MOSH_RUN_SCRIPT_OUT if set). Returns the
+    number of failed commands. Composed with `export_audio`, this is the driver behind
+    the offline render-to-WAV hardware-verification harness. */
+int runCommandScript (MoshEngine&, MoshOps&);
+
 /** Opens the real audio device path, plays a deterministic tone briefly, and
     exits. Used by the BlackHole virtual loopback gate. */
 int runLiveAudioSmoke (MoshEngine&, MoshOps&);
