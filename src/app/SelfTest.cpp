@@ -246,6 +246,20 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     if (const auto s = SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SESSION", {}).trim(); s.isNotEmpty())
         check (eng.sessionDir().getFileName() == s, "MOSH_SELFTEST_SESSION isolates the session dir (" + s + ")");
 
+    // 1b. import-error integrity (no partial mutation): importing an INVALID audio
+    // file onto an edit with no audio tracks must NOT auto-create a stray track.
+    // importWaveFileToTrack used to begin its undo transaction + create the track
+    // BEFORE validating the file, so a failed import left an orphan track in a
+    // "failed" command's transaction. Regression guard for validate-before-mutate.
+    {
+        auto badFile = eng.sessionDir().getChildFile ("selftest-not-audio.txt");
+        badFile.replaceWithText ("this is plainly not a wav/aiff file");
+        auto badImp = cmd (ops, "import_clip", args1 ("file", badFile.getFullPathName()));
+        check (! ok (badImp), "import_clip of an invalid file fails");
+        check (tracks (ops) == 0, "failed invalid import created no stray track (no partial mutation)");
+        badFile.deleteFile();
+    }
+
     // 2. create_track
     auto r = cmd (ops, "create_track", args1 ("name", "Drums"));
     check (ok (r), "create_track ok");
