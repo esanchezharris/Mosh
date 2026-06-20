@@ -15,6 +15,7 @@ struct TakeRecorderView: View {
                         .symbolRenderingMode(.hierarchical)
                         .foregroundStyle(store.recorder.isRecording ? .red : .primary)
                 }
+                .disabled(!store.canSendCommands && !store.recorder.isRecording)
 
                 ProgressView(value: Double(store.recorder.level), total: 1)
                     .padding(.horizontal)

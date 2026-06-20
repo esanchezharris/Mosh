@@ -115,6 +115,59 @@ final class CompanionClientTests: XCTestCase {
         XCTAssertTrue(store.receipts.first?.contains("needs a rendered clip") == true)
     }
 
+    func testStoreMarksOfflineKeepsSnapshotAndSuppressesCommands() async {
+        let client = MockCompanionClient()
+        client.snapshotValue = MoshSnapshot(
+            tracks: [
+                MoshTrack(id: "track-1", index: 0, name: "Vox", clips: [])
+            ],
+            transport: MoshTransport(playing: false, recording: false, position: 42, looping: false)
+        )
+        let store = CompanionStore(client: client)
+
+        await store.refresh()
+        XCTAssertTrue(store.canSendCommands)
+
+        client.snapshotError = CompanionError.server("Mac companion server unreachable")
+        await store.refresh()
+
+        guard case let .offline(message, lastOnline) = store.connectionState else {
+            XCTFail("Expected offline connection state")
+            return
+        }
+        XCTAssertEqual(message, "Mac companion server unreachable")
+        XCTAssertNotNil(lastOnline)
+        XCTAssertEqual(store.snapshot?.transport.position, 42)
+        XCTAssertFalse(store.canSendCommands)
+
+        store.setTransport("play")
+        XCTAssertTrue(client.commands.isEmpty)
+        XCTAssertTrue(store.receipts.first?.contains("MOSH is offline") == true)
+    }
+
+    func testForgetPairingClearsSessionState() async {
+        let client = MockCompanionClient()
+        client.snapshotValue = MoshSnapshot(
+            tracks: [
+                MoshTrack(id: "track-1", index: 0, name: "Vox", clips: [])
+            ],
+            transport: MoshTransport(playing: false, recording: false, position: 0, looping: false)
+        )
+        let store = CompanionStore(client: client)
+
+        await store.refresh()
+        XCTAssertNotNil(store.snapshot)
+
+        store.forgetPairing()
+
+        XCTAssertTrue(client.didClearPairing)
+        XCTAssertFalse(store.isPaired)
+        XCTAssertNil(store.snapshot)
+        XCTAssertNil(store.selectedTrackId)
+        XCTAssertTrue(store.receipts.isEmpty)
+        XCTAssertEqual(store.connectionState, .unpaired)
+    }
+
     func testMonitoringMetricsEstimateLatencyAndDetectAcousticOnset() {
         let samples = [
             MonitoringClockSample(macSendMs: 0, macReceiveMs: 12, phoneReceiveMs: 10, phoneSendMs: 12),
@@ -154,13 +207,24 @@ private final class MockCompanionClient: CompanionClientProtocol {
         tracks: [],
         transport: MoshTransport(playing: false, recording: false, position: 0, looping: false)
     )
+    var snapshotError: Error?
     var commands: [Command] = []
-    var isPaired: Bool { true }
+    var paired = true
+    var didClearPairing = false
+    var isPaired: Bool { paired }
 
-    func configure(pairing: PairingPayload) {}
+    func configure(pairing: PairingPayload) {
+        paired = true
+    }
+
+    func clearPairing() {
+        paired = false
+        didClearPairing = true
+    }
 
     func snapshot() async throws -> MoshSnapshot {
-        snapshotValue
+        if let snapshotError { throw snapshotError }
+        return snapshotValue
     }
 
     func execute(_ command: String, args: [String: Any]) async throws -> CommandResult {

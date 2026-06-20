@@ -6,6 +6,8 @@ final class CompanionStore: ObservableObject {
     @Published private(set) var snapshot: MoshSnapshot?
     @Published private(set) var receipts: [String] = []
     @Published private(set) var errorText: String?
+    @Published private(set) var connectionState: CompanionConnectionState
+    @Published private(set) var paired: Bool
     @Published var selectedTrackId: String?
     @Published var selectedRenderClipId: String?
 
@@ -16,12 +18,20 @@ final class CompanionStore: ObservableObject {
 
     private let client: CompanionClientProtocol
     private var eventSeq = 0
+    private var lastOnlineAt: Date?
 
     init(client: CompanionClientProtocol = CompanionClient()) {
         self.client = client
+        self.paired = client.isPaired
+        self.connectionState = client.isPaired ? .connecting : .unpaired
     }
 
-    var isPaired: Bool { client.isPaired }
+    var isPaired: Bool { paired }
+    var canSendCommands: Bool {
+        guard paired else { return false }
+        if case .online = connectionState { return true }
+        return false
+    }
     var transport: MoshTransport? { snapshot?.transport }
     var tracks: [MoshTrack] { snapshot?.tracks ?? [] }
     var renderTargets: [RenderTarget] { snapshot?.renderTargets ?? [] }
@@ -29,6 +39,9 @@ final class CompanionStore: ObservableObject {
     func start() {
         browser.start()
         Task { await speech.refreshAvailability() }
+        if paired {
+            connectionState = .connecting
+        }
     }
 
     func pairFromText() {
@@ -39,6 +52,8 @@ final class CompanionStore: ObservableObject {
         do {
             let payload = try CompanionClient.parsePairingURL(raw)
             client.configure(pairing: payload)
+            paired = true
+            connectionState = .connecting
             receipts.insert("Paired with \(payload.host)", at: 0)
             Task { await refresh() }
         } catch {
@@ -47,6 +62,15 @@ final class CompanionStore: ObservableObject {
     }
 
     func refresh() async {
+        guard paired else {
+            connectionState = .unpaired
+            return
+        }
+
+        if snapshot == nil {
+            connectionState = .connecting
+        }
+
         do {
             snapshot = try await client.snapshot()
             if selectedTrackId == nil { selectedTrackId = snapshot?.tracks.first?.id }
@@ -54,12 +78,17 @@ final class CompanionStore: ObservableObject {
             let poll = try? await client.pollEvents(since: eventSeq)
             if let poll { eventSeq = poll.latestSeq }
             errorText = nil
+            let now = Date()
+            lastOnlineAt = now
+            connectionState = .online(lastUpdated: now)
         } catch {
-            errorText = error.localizedDescription
+            markOffline(error.localizedDescription)
         }
     }
 
     func setTransport(_ action: String) {
+        guard ensureOnlineForCommand() else { return }
+
         Task {
             do {
                 let result = try await client.execute("set_transport", args: ["action": action])
@@ -90,6 +119,8 @@ final class CompanionStore: ObservableObject {
             return
         }
 
+        guard ensureOnlineForCommand() else { return }
+
         do {
             _ = try await client.execute(command.0, args: command.1)
             receipts.insert("Voice: \(phrase)", at: 0)
@@ -104,6 +135,8 @@ final class CompanionStore: ObservableObject {
     }
 
     func runRenderDecision(_ decision: RenderDecision) async {
+        guard ensureOnlineForCommand() else { return }
+
         guard let clipId = selectedRenderClipId else {
             receipts.insert("\(decision.receiptVerb) render needs a rendered clip.", at: 0)
             return
@@ -140,6 +173,7 @@ final class CompanionStore: ObservableObject {
                     receipts.insert("Phone take imported", at: 0)
                     await refresh()
                 } else {
+                    guard ensureOnlineForCommand() else { return }
                     try await recorder.start(client: client, trackId: selectedTrackId, name: "Phone Take")
                     receipts.insert("Phone take recording", at: 0)
                 }
@@ -150,7 +184,27 @@ final class CompanionStore: ObservableObject {
     }
 
     func runMonitoringDiagnostics() {
+        guard ensureOnlineForCommand() else { return }
         Task { await monitoring.run(client: client) }
+    }
+
+    func forgetPairing() {
+        if recorder.isRecording {
+            Task { await recorder.cancel(client: client) }
+        }
+
+        client.clearPairing()
+        paired = false
+        pairingText = ""
+        snapshot = nil
+        receipts.removeAll()
+        errorText = nil
+        selectedTrackId = nil
+        selectedRenderClipId = nil
+        eventSeq = 0
+        lastOnlineAt = nil
+        connectionState = .unpaired
+        browser.start()
     }
 
     private func reconcileRenderTargetSelection() {
@@ -159,5 +213,20 @@ final class CompanionStore: ObservableObject {
             return
         }
         selectedRenderClipId = targets.first?.clipId
+    }
+
+    private func markOffline(_ message: String) {
+        errorText = message
+        connectionState = .offline(message: message, lastOnline: lastOnlineAt)
+    }
+
+    private func ensureOnlineForCommand() -> Bool {
+        guard canSendCommands else {
+            let message = "MOSH is offline. Tap Refresh before sending commands."
+            errorText = message
+            receipts.insert(message, at: 0)
+            return false
+        }
+        return true
     }
 }
