@@ -118,6 +118,16 @@ void MultiplayerSession::pollLoop()
         const auto code = client_.roomCode();
         const auto self = client_.peerId();
 
+        // Reconnect self-heal: if we fell behind the relay's ring (e.g. after being
+        // offline), the incremental frames can't catch us up — re-request the full
+        // project. poll() has already jumped haveSeq to latest, so this fires once.
+        if (running_.load() && client_.needsResync())
+        {
+            auto* req = new DynamicObject();
+            req->setProperty ("type", "bootstrap_request");
+            client_.publish (var (req));
+        }
+
         // Marshal everything to the message thread (engine + WebView live there).
         MessageManager::callAsync ([this, frames, locks, peers, code, self]
         {
