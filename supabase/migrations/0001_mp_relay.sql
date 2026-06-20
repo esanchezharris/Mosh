@@ -120,7 +120,12 @@ begin
   perform 1 from mp.rooms where code = p_code and expires_at > now();
   if not found then return jsonb_build_object('error','no_such_room','http_status',410); end if;
   if v_type = 'commit' and v_key is not null then
-    select owner, epoch into v_owner, v_cur_epoch from mp.locks where code = p_code and key = v_key;
+    -- FOR UPDATE row-locks the lock so a concurrent mp_try_lock(steal) cannot commit
+    -- BETWEEN this fence read and the message insert (TOCTOU): we block until any
+    -- in-flight steal commits, then read the fresh owner/epoch and fence correctly.
+    -- (No row => unlocked/lapsed key => nothing to lock => commit allowed, as before.)
+    select owner, epoch into v_owner, v_cur_epoch
+      from mp.locks where code = p_code and key = v_key for update;
     if v_owner is not null and (v_owner is distinct from p_peer or v_msg_epoch is null or v_msg_epoch < v_cur_epoch) then
       return jsonb_build_object('error','stale_commit','http_status',409,'owner', v_owner, 'epoch', v_cur_epoch);
     end if;

@@ -10,7 +10,7 @@ import urllib.request
 sys.path.insert(0, os.path.dirname(__file__))
 
 import pytest  # noqa: E402
-from server import make_server  # noqa: E402
+from server import make_server, FixedWindowLimiter  # noqa: E402
 
 
 @pytest.fixture()
@@ -172,3 +172,48 @@ def test_leave_drops_empty_room(relay):
         assert False, "expected 404"
     except urllib.error.HTTPError as e:
         assert e.code == 404
+
+
+# ── Abuse limits (body cap, rate limiter, loopback exemption) ────────────────
+
+def test_oversized_body_is_rejected_413(monkeypatch):
+    # A Content-Length above the cap is refused before the body is read, so a huge
+    # /slow POST can't exhaust memory. (The body cap applies to everyone — loopback
+    # is exempt only from the rate limiter.) Use a tiny cap so the over-cap body
+    # still flushes fully before the client reads the 413 (no broken pipe).
+    import server as srv
+    monkeypatch.setattr(srv, "MAX_BODY_BYTES", 256)
+    httpd, port = srv.make_server(0)
+    t = threading.Thread(target=httpd.serve_forever, daemon=True)
+    t.start()
+    try:
+        status, body = _post(f"http://127.0.0.1:{port}", "/mp/create",
+                             {"peerId": "a", "blob": "x" * 1024})
+        assert status == 413
+        assert "exceeds" in body["error"]
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
+def test_loopback_is_never_rate_limited(relay):
+    # The selftest hammers 127.0.0.1; loopback must sail past the limiter. A burst
+    # of creates from loopback all succeed (no 429).
+    for _ in range(40):
+        status, _b = _post(relay, "/mp/create", {"peerId": "a"})
+        assert status == 200
+
+
+def test_fixed_window_limiter_allows_then_blocks_then_resets():
+    clk = [0.0]
+    lim = FixedWindowLimiter(limit=3, window_s=10, now_fn=lambda: clk[0])
+    assert [lim.allow("1.2.3.4") for _ in range(3)] == [True, True, True]
+    assert lim.allow("1.2.3.4") is False          # 4th in-window -> blocked
+    assert lim.allow("9.9.9.9") is True           # a different IP has its own window
+    clk[0] += 10                                   # window elapsed
+    assert lim.allow("1.2.3.4") is True           # reset
+
+
+def test_fixed_window_limiter_disabled_when_limit_nonpositive():
+    lim = FixedWindowLimiter(limit=0, window_s=10)
+    assert all(lim.allow("1.2.3.4") for _ in range(1000))

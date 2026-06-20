@@ -18,7 +18,7 @@ import type { ChangeSet } from "./agent/executor";
 import { useSettings } from "./settings/store";
 // MP-001 — multiplayer presence + the commit-on-move trigger (pure helpers).
 import {
-  deriveActiveTrackId, computeSyncActions,
+  deriveActiveTrackId, computeSyncActions, pruneOfflineLocks,
   type MpSession, type PeerInfo, type PeerSelection,
 } from "./multiplayer/sync";
 
@@ -188,6 +188,12 @@ type State = {
   uiScale: number;
 };
 
+// Serializes overlapping syncActiveTrack() runs (rapid selection changes) so their
+// commit/claim/broadcast relay round-trips never interleave — a commit must never
+// race ahead of (or behind) its own claim. Each run is chained after the previous;
+// `run` is used as both fulfil and reject handler so a failed link can't wedge it.
+let mpSyncChain: Promise<void> = Promise.resolve();
+
 export const useStore = create<State>((set, get) => ({
   snapshot: null,
   connected: isNative(),
@@ -309,7 +315,9 @@ export const useStore = create<State>((set, get) => ({
         set({
           mp: { active: p.active, roomCode: p.roomCode ?? null, selfPeer: p.selfPeer ?? null, connected: p.active },
           peers,
-          locksByLogicalId: p.locks ?? {},
+          // Drop a lock whose owner has dropped/gone offline so no stale read-only
+          // badge survives the owner (defense-in-depth with the relay's lease GC).
+          locksByLogicalId: pruneOfflineLocks(p.locks ?? {}, peers, p.selfPeer ?? null),
         });
       } else if (ev.type === "peer_selection") {
         // The other peer's current track/clip selection (the highlight we draw).
@@ -455,17 +463,24 @@ export const useStore = create<State>((set, get) => ({
   // previous track (serialize -> publish) and claim the next, then broadcast our
   // selection. No-op in single-player (mp inactive). Selection is only a hint; the
   // native idle checkpoint backstops a long edit that never moves off a track.
-  syncActiveTrack: async () => {
-    const s = get();
-    if (!s.mp.active) return;
-    const next = deriveActiveTrackId(s.selection, s.selectedTrackId, s.snapshot);
-    const prev = s.activeTrackId;
-    if (prev === next) return;
-    set({ activeTrackId: next });
-    const { release, claim } = computeSyncActions(prev, next);
-    if (release) await s.exec("mp_commit_track", { trackId: release });
-    if (claim) await s.exec("mp_claim_track", { trackId: claim });
-    await s.exec("mp_broadcast_selection", { trackId: next, clipId: [...s.selection][0] ?? null });
+  syncActiveTrack: () => {
+    const run = async () => {
+      const s = get();
+      if (!s.mp.active) return;
+      const next = deriveActiveTrackId(s.selection, s.selectedTrackId, s.snapshot);
+      const prev = s.activeTrackId;
+      if (prev === next) return;
+      set({ activeTrackId: next });
+      const { release, claim } = computeSyncActions(prev, next);
+      if (release) await s.exec("mp_commit_track", { trackId: release });
+      if (claim) await s.exec("mp_claim_track", { trackId: claim });
+      await s.exec("mp_broadcast_selection", { trackId: next, clipId: [...s.selection][0] ?? null });
+    };
+    // Chain after the previous run so two rapid selection changes can't interleave
+    // their relay calls. Read state at RUN time (inside `run`), so a burst collapses
+    // to the latest active track rather than replaying stale intermediates.
+    mpSyncChain = mpSyncChain.then(run, run);
+    return mpSyncChain;
   },
   editingClipId: null,
   openPianoRoll: (clipId) => set({ editingClipId: clipId }),

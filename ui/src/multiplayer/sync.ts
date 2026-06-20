@@ -59,3 +59,21 @@ export function isTrackLockedByOther(
   const owner = lockOwnerOfTrack(track, locksByLogicalId);
   return owner !== null && owner !== selfPeer;
 }
+
+/** Drop locks held by a peer who is no longer present-and-online. The relay's lock
+ *  table can briefly outlive a peer (a crashed owner's lock lingers until its lease
+ *  lapses, and a poll's {peers, locks} can disagree for a tick), which would paint a
+ *  stale read-only badge. Our own locks are always kept; a lock is kept only if its
+ *  owner is a current, online peer. Purely PRESENTATIONAL — the backend lock guard
+ *  remains the real arbiter; this just keeps the badge honest. */
+export function pruneOfflineLocks(
+  locksByLogicalId: Record<string, string>,
+  peers: Record<string, { online: boolean }>,
+  selfPeer: string | null,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [logicalId, owner] of Object.entries(locksByLogicalId)) {
+    if (owner === selfPeer || peers[owner]?.online) out[logicalId] = owner;
+  }
+  return out;
+}

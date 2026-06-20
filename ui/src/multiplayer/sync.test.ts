@@ -5,6 +5,7 @@ import {
   logicalIdOf,
   lockOwnerOfTrack,
   isTrackLockedByOther,
+  pruneOfflineLocks,
 } from "./sync";
 import type { Snapshot } from "../types";
 
@@ -69,5 +70,21 @@ describe("lock ownership", () => {
     expect(isTrackLockedByOther({ logicalId: "L1" }, locks, "me")).toBe(true);
     expect(isTrackLockedByOther({ logicalId: "L2" }, locks, "me")).toBe(false); // ours
     expect(isTrackLockedByOther({ logicalId: "L9" }, locks, "me")).toBe(false); // free
+  });
+});
+
+describe("pruneOfflineLocks (no stale lock badge from a gone peer)", () => {
+  it("keeps locks held by an online peer and our own; drops offline/absent owners", () => {
+    const locks = { L1: "bo", L2: "me", L3: "ghost", L4: "zoe" };
+    const peers = { me: { online: true }, bo: { online: true }, zoe: { online: false } };
+    // bo online -> kept; me is self -> kept; ghost absent from roster -> dropped;
+    // zoe present but offline -> dropped.
+    expect(pruneOfflineLocks(locks, peers, "me")).toEqual({ L1: "bo", L2: "me" });
+  });
+  it("keeps our own lock even if we are somehow not in the roster", () => {
+    expect(pruneOfflineLocks({ L2: "me" }, {}, "me")).toEqual({ L2: "me" });
+  });
+  it("is a no-op on an empty lock table", () => {
+    expect(pruneOfflineLocks({}, { bo: { online: true } }, "me")).toEqual({});
   });
 });
