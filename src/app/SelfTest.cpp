@@ -4442,4 +4442,128 @@ void runConsolidationDemo (MoshOps& ops)
     cmd ("add_test_tone_clip", obj ({{ "trackId", t2 }, { "seconds", 4.0 }, { "freq", 196.0 }}));
 }
 
+// ── Headless batch command runner (`Mosh --run-script`) ─────────────────────────
+// Replays a JSONL command script through the one mutation path (MoshOps::execute)
+// against an isolated headless session. The driver behind the offline render-to-WAV
+// verification harness: a script ends with an export_audio command, and the harness
+// then analyses the WAV the chain rendered. Pure replay of the public command
+// surface — no privileged backdoor.
+int runCommandScript (MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+    ignoreUnused (eng);
+
+    const auto scriptPath = SystemStats::getEnvironmentVariable ("MOSH_RUN_SCRIPT", {}).trim();
+    if (scriptPath.isEmpty())
+    {
+        std::cerr << "run-script: set MOSH_RUN_SCRIPT=<path to a JSONL command script>\n";
+        return 2;
+    }
+    const File scriptFile (scriptPath);
+    if (! scriptFile.existsAsFile())
+    {
+        std::cerr << "run-script: no such file: " << scriptPath.toStdString() << "\n";
+        return 2;
+    }
+
+    const auto outPath = SystemStats::getEnvironmentVariable ("MOSH_RUN_SCRIPT_OUT", {}).trim();
+
+    auto* mm = MessageManager::getInstanceWithoutCreating();
+    auto pump = [mm] (int ms)
+    {
+        const auto end = Time::getMillisecondCounter() + (uint32) jmax (0, ms);
+        while (Time::getMillisecondCounter() < end)
+        {
+            if (mm != nullptr) mm->runDispatchLoopUntil (50);
+            else Thread::sleep (50);
+        }
+    };
+
+    // Captured variables: a command may "capture":{"VAR":"dataField"} a field of its
+    // result.data, and any later string arg of the exact form "${VAR}" is replaced with
+    // the captured value. This keeps scripts self-contained and robust to engine-assigned
+    // ids (trackId/clipId/index) without hard-coding them.
+    HashMap<String, var> vars;
+    auto subst = [&vars] (const var& v) -> var
+    {
+        if (v.isString())
+        {
+            const auto s = v.toString();
+            if (s.startsWith ("${") && s.endsWith ("}"))
+            {
+                const auto key = s.substring (2, s.length() - 1);
+                if (vars.contains (key)) return vars[key];
+            }
+        }
+        return v;
+    };
+
+    StringArray outLines;
+    const auto lines = StringArray::fromLines (scriptFile.loadFileAsString());
+    int executed = 0, failures = 0;
+
+    for (const auto& raw : lines)
+    {
+        const auto line = raw.trim();
+        if (line.isEmpty() || line.startsWith ("#") || line.startsWith ("//"))
+            continue;
+
+        const auto command = JSON::parse (line);
+        if (! command.isObject())
+        {
+            std::cerr << "run-script: not a JSON object, skipping: " << line.toStdString() << "\n";
+            ++failures;
+            continue;
+        }
+
+        const auto name = command.getProperty ("command", var()).toString();
+
+        // __wait pseudo-command: pump the message loop so async work (a generative
+        // render job, any callAsync) can progress between commands. Not a MoshOps
+        // command — handled here, emits no result line.
+        if (name == "__wait")
+        {
+            pump ((int) command.getProperty ("args", var()).getProperty ("ms", 1000));
+            continue;
+        }
+
+        // Substitute ${VAR} references in the (top-level) args before executing.
+        var argsOut = command.getProperty ("args", var());
+        if (auto* ao = argsOut.getDynamicObject())
+        {
+            auto* na = new DynamicObject();
+            for (const auto& p : ao->getProperties())
+                na->setProperty (p.name, subst (p.value));
+            argsOut = var (na);
+        }
+        auto* co = new DynamicObject();
+        co->setProperty ("command", name);
+        co->setProperty ("args", argsOut);
+
+        const auto result = ops.execute (var (co));
+        ++executed;
+        if (! (bool) result.getProperty ("ok", false))
+            ++failures;
+
+        // Capture requested result.data fields into the variable map.
+        if (const auto capV = command.getProperty ("capture", var()); capV.isObject())
+        {
+            const auto data = result.getProperty ("data", var());
+            if (auto* cap = capV.getDynamicObject())
+                for (const auto& p : cap->getProperties())
+                    vars.set (p.name.toString(), data.getProperty (Identifier (p.value.toString()), var()));
+        }
+
+        const auto resultLine = JSON::toString (result, true);
+        outLines.add (resultLine);
+        std::cout << resultLine.toStdString() << std::endl;
+    }
+
+    if (outPath.isNotEmpty())
+        File (outPath).replaceWithText (outLines.joinIntoString ("\n") + "\n");
+
+    std::cerr << "run-script: " << executed << " command(s), " << failures << " failure(s)\n";
+    return failures;
+}
+
 } // namespace mosh
