@@ -26,35 +26,37 @@ Only a few checks are inherently live (mic/voice, two-window multiplayer sync).
 
 ## The harness
 
-`scripts/verify-hardware/` (built in the verification pass):
-- a driver that runs the binary headlessly to render evidence WAVs into `verify-artifacts/`, and
-- a numpy/`wave` analyzer that asserts each WAV's properties and prints a pass/fail report.
+`scripts/verify-hardware/` (a driver that runs `Mosh --run-script` headlessly to render
+evidence WAVs into `verify-artifacts/`, plus a numpy/`wave` analyzer that asserts each WAV and
+prints a pass/fail report — see [`scripts/verify-hardware/README.md`](../scripts/verify-hardware/README.md)):
 
 ```bash
-# offline render-to-WAV checks (self-driven, deterministic):
-scripts/verify-hardware/run.sh                 # renders + analyzes; writes verify-artifacts/
-# live checks (owner-driven) are listed per-row below.
+python3 scripts/verify-hardware/verify.py          # offline checks (1,2,3,5) — self-driven, deterministic
+python3 scripts/verify-hardware/verify.py --sa3     # also the real SA3 transform (needs service/setup-sa3.sh)
+# live checks (6,7,8 — owner-driven) are listed per-row below.
 ```
 
 ## Checks
 
-| # | Check | Kind | How | Asserts | Status |
-| --- | --- | --- | --- | --- | --- |
-| 1 | Makes sound | offline | test-tone project → `export_audio` | non-silent, right duration/peak | ⏳ pending |
-| 2 | Drums audible | offline | drum track + pattern → render | non-silent (guards the silent-drums regression) | ⏳ pending |
-| 3 | Tier-A neural A/B | offline | same source, insert bypassed vs active → 2 WAVs | active differs from source > threshold; bypass ≈ passthrough | ⏳ pending |
-| 4 | SA3 transform | offline | `render_layer` (grit) → accept → bounce | output differs from source; quality readout (`pq`) present | ⏳ pending |
-| 5 | Full producer loop | offline | arrange + VST3 + neural + SA3 + mix → `export_audio` | non-silent, expected length | ⏳ pending |
-| 6 | Realtime output path | live | `--live-audio-smoke` + one GUI double-click | device opens, non-silent capture; transport plays out loud | ⏳ pending |
-| 7 | Voice (mock brain) | live | GUI: grant mic, hold-to-talk + 👂 hands-free + barge-in (`MOSH_VOICE_BARGE_IN=1`) | STT transcribes; earcons fire | ⏳ pending |
-| 8 | Multiplayer (2-process) | live | `relay/run-mp-selftest.sh` + two GUIs on the local relay | automated protocol green; track-lock + clip-move sync visible | ⏳ pending |
+Results below from the 2026-06-20 pass (offline checks are deterministic — WAV checksums stable
+across runs).
 
-Evidence WAVs and the analyzer report land in `verify-artifacts/` (git-ignored); a summary of
-results is recorded here and reconciled against the "honest gap" notes in `CLAUDE.md` as each row
-closes.
+| # | Check | Kind | Asserts | Status |
+| --- | --- | --- | --- | --- |
+| 1 | Makes sound | offline | non-silent, right duration/level | ✅ 2.0s stereo, peak 0.18, RMS 0.12 |
+| 2 | Drums audible | offline | non-silent (silent-drums regression guard) | ✅ 4.0s, peak 0.91, RMS 0.088 |
+| 3 | Tier-A neural A/B | offline | neural-active differs measurably from the dry render | ✅ dry RMS 0.125 → wet 0.606, **diff-RMS 0.485** |
+| 4 | SA3 transform | offline | real model renders, quality readout present, differs from input | ✅ `adapter: stable_audio3`, **`pq 6.933`**, non-silent |
+| 5 | Full producer loop | offline | multi-track + neural + mix exports non-silent | ✅ 2.0s, peak 0.83, RMS 0.55 |
+| 6 | Realtime output path | live | device opens; audio frames flow | ✅ `--live-audio-smoke` **14/14** (MacBook Pro Speakers, CoreAudio 48k) — by-ear out-loud confirm still owner-side |
+| 7 | Voice (mock brain) | live | STT transcribes; earcons fire | ⏳ owner: grant mic, hold-to-talk + 👂 hands-free + barge-in (`MOSH_VOICE_BARGE_IN=1`) |
+| 8 | Multiplayer (2-process) | live | protocol green; track-lock + clip-move sync | ✅ `relay/run-mp-selftest.sh` **911/911** — two-window *visual* sync still owner-side |
+
+Evidence WAVs + the analyzer `report.json` land in `verify-artifacts/` (git-ignored). The
+`--run-script` runner and the harness live in PR #80; this runbook in #78.
 
 ## Re-running
 
-The offline checks (1–5) are deterministic — re-run `scripts/verify-hardware/run.sh` any time
-(e.g. after a change that could affect the signal chain) as a render-level regression guard on top
-of `--selftest`.
+The offline checks (1–5) are deterministic — re-run `python3 scripts/verify-hardware/verify.py`
+(add `--sa3`) any time a change could affect the signal chain, as a render-level regression guard
+on top of `--selftest`.
