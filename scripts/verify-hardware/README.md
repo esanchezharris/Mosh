@@ -35,6 +35,25 @@ Artifacts (WAVs + `report.json`) land in `verify-artifacts/` at the repo root
 (git-ignored). The live, hands-on checks (realtime output, mic/voice, two-process
 multiplayer) are listed in [`docs/VERIFICATION.md`](../../docs/VERIFICATION.md).
 
+## Voice (speech-to-text)
+
+`Mosh --voice-smoke` synthesizes a known phrase with macOS `say`, transcribes it
+through the same `SFSpeechRecognizer` the app uses, and asserts the words — proving
+STT with nobody speaking.
+
+- **FILE mode** (default): reads a `say`-rendered file. No mic, no BlackHole — needs
+  only a one-time **Speech Recognition** grant.
+- **MIC / loopback mode**: `scripts/verify-hardware/voice-loopback.sh` routes the
+  default input + output to **BlackHole 2ch** and runs `--voice-smoke` in MIC mode, so
+  `say` plays digitally into the mic the recognizer reads (reliable, no room noise).
+  Needs **Speech + Microphone** grants.
+
+The grant is the one manual step: a headless run can't raise the macOS permission
+prompt, so `--voice-smoke` checks the auth status and **skips cleanly (exit 2) with
+guidance** until it's granted. Grant once via the GUI (launch the app, use voice), then
+`--voice-smoke` passes and is a repeatable regression guard like `--live-audio-smoke`.
+Tune with `MOSH_VOICE_SMOKE_PHRASE` / `MOSH_VOICE_SMOKE_TIMEOUT_MS`.
+
 ## How `--run-script` works
 
 `Mosh --run-script` reads JSONL from `MOSH_RUN_SCRIPT` (results to stdout and

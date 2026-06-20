@@ -4565,4 +4565,129 @@ int runCommandScript (MoshEngine& eng, MoshOps& ops)
     return failures;
 }
 
+// ── Voice STT smoke (`Mosh --voice-smoke`) ──────────────────────────────────────
+// Synthesizes a known phrase with macOS `say`, transcribes it through the SAME
+// SFSpeechRecognizer the app uses, and asserts the transcript — proving speech-to-text
+// end-to-end with nobody speaking. FILE mode (default) reads a `say`-rendered file (no
+// mic; needs only a Speech grant). MIC mode (MOSH_VOICE_SMOKE_MIC=1) drives the live
+// mic recognizer while `say` plays into the default input — set that input to BlackHole
+// for a reliable digital loopback. Returns 0 on a matching transcript.
+int runVoiceSmoke (MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+    ignoreUnused (eng, ops);
+
+    const auto phrase   = SystemStats::getEnvironmentVariable ("MOSH_VOICE_SMOKE_PHRASE", "create a drum track");
+    const bool micMode  = SystemStats::getEnvironmentVariable ("MOSH_VOICE_SMOKE_MIC", "0") == "1";
+    const int  timeoutMs = jmax (4000, SystemStats::getEnvironmentVariable ("MOSH_VOICE_SMOKE_TIMEOUT_MS", "25000").getIntValue());
+
+    std::cerr << "===== Mosh voice smoke (" << (micMode ? "MIC / loopback" : "FILE") << ") =====\n";
+    std::cerr << "  phrase: \"" << phrase.toStdString() << "\"\n";
+
+    if (! NativeSpeech::isSupported())
+    {
+        std::cerr << "  FAIL: native speech-to-text is unsupported here\n";
+        return 1;
+    }
+
+    // Gate on the SYNCHRONOUS auth status. A headless process can't raise the system
+    // Speech/Mic prompt (those need a GUI app context), and entering the async
+    // recognition path unauthorized risks a teardown-time crash — so skip cleanly.
+    const int auth = NativeSpeech::authorizationStatus();
+    if (auth != 3)   // 3 = authorized
+    {
+        const char* why = auth == 0 ? "not yet granted (notDetermined)"
+                        : auth == 1 ? "denied"
+                        : auth == 2 ? "restricted"
+                                    : "unavailable";
+        std::cerr << "  SKIP: Speech Recognition is " << why << " (status " << auth << ").\n"
+                     "  Grant it ONCE via the GUI — launch the app, use voice (the 👂 cap / hold-to-talk),\n"
+                     "  approve the Speech" << (micMode ? " + Microphone" : "") << " prompt — then re-run this. A headless\n"
+                     "  run can't surface the system prompt. Returning 2 (skipped, not a failure).\n";
+        return 2;
+    }
+    std::cerr << "  Speech Recognition authorized ✓\n";
+
+    auto* mm = MessageManager::getInstanceWithoutCreating();
+    auto pump = [mm] (int ms)
+    {
+        const auto end = Time::getMillisecondCounter() + (uint32) jmax (0, ms);
+        while (Time::getMillisecondCounter() < end) { if (mm != nullptr) mm->runDispatchLoopUntil (50); else Thread::sleep (50); }
+    };
+
+    // Lowercase + non-alphanumerics → spaces, so word matching ignores punctuation/case.
+    auto norm = [] (const String& s)
+    {
+        const auto low = s.toLowerCase();
+        String out;
+        for (int i = 0; i < low.length(); ++i)
+            out += (CharacterFunctions::isLetterOrDigit (low[i]) ? String::charToString (low[i]) : String (" "));
+        return out;
+    };
+
+    NativeSpeech speech;
+    String transcript, error;
+    std::atomic<bool> finished { false }, gotFinal { false };
+    NativeSpeech::Callbacks cb;
+    cb.onStart = []                       { std::cerr << "  recognizer started…\n"; };
+    cb.onFinal = [&] (const String& t)    { transcript = t; gotFinal = true; };
+    cb.onError = [&] (const String& e)    { error = e; };
+    cb.onStop  = [&]                      { finished = true; };
+
+    if (! micMode)
+    {
+        auto aiff = File::getSpecialLocation (File::tempDirectory).getChildFile ("mosh-voice-smoke.aiff");
+        aiff.deleteFile();
+        ChildProcess say;
+        say.start (StringArray { "say", "-o", aiff.getFullPathName(), phrase });
+        say.waitForProcessToFinish (15000);
+        if (! aiff.existsAsFile() || aiff.getSize() == 0)
+        {
+            std::cerr << "  FAIL: `say` produced no audio at " << aiff.getFullPathName().toStdString() << "\n";
+            return 1;
+        }
+        std::cerr << "  synthesized " << aiff.getSize() << " bytes via `say`, transcribing…\n";
+        speech.transcribeFile (aiff.getFullPathName(), cb);
+    }
+    else
+    {
+        std::cerr << "  (MIC mode: set the default input to BlackHole 2ch and route `say` there for a clean loopback)\n";
+        speech.startContinuous (cb);
+        pump (2000);   // let auth + the AVAudioEngine come up before speaking
+        ChildProcess say;
+        say.start (StringArray { "say", phrase });
+        say.waitForProcessToFinish (15000);
+    }
+
+    const auto deadline = Time::getMillisecondCounter() + (uint32) timeoutMs;
+    while (! gotFinal && ! finished && Time::getMillisecondCounter() < deadline) pump (100);
+    pump (200);
+    if (micMode) speech.stopContinuous();
+
+    if (! gotFinal)
+    {
+        if (error.isNotEmpty())
+        {
+            std::cerr << "  FAIL: " << error.toStdString() << "\n";
+            if (error.containsIgnoreCase ("not authorized"))
+                std::cerr << "  → Speech Recognition is not granted yet. Approve it once (the prompt, or System\n"
+                             "    Settings › Privacy & Security › Speech Recognition) and re-run.\n";
+        }
+        else
+            std::cerr << "  FAIL: no transcript within " << timeoutMs << "ms\n";
+        return 1;
+    }
+
+    std::cerr << "  transcript: \"" << transcript.toStdString() << "\"\n";
+
+    const auto nt = " " + norm (transcript) + " ";
+    auto words = StringArray::fromTokens (norm (phrase), " ", "");
+    words.removeEmptyStrings();
+    int hits = 0;
+    for (const auto& w : words) if (nt.containsIgnoreCase (" " + w + " ")) ++hits;
+    const bool pass = words.size() > 0 && hits >= jmax (1, (words.size() * 2) / 3);   // ≥ 2/3 of the words
+    std::cerr << "  matched " << hits << "/" << words.size() << " phrase words → " << (pass ? "PASS" : "FAIL") << "\n";
+    return pass ? 0 : 1;
+}
+
 } // namespace mosh
