@@ -2443,11 +2443,17 @@ juce::var MoshOps::cmdRenameBus (const juce::var& args)
     const int bus = (int) args.getProperty ("bus", -1);
     auto* returnTrack = findReturnTrackForBus (bus);
     if (returnTrack == nullptr) return errResult ("rename_bus", "no such bus");
-    beginTxn ("rename_bus");
     const auto name = args.getProperty ("name", var()).toString();
+    // A bus name is a NON-undoable label (mirrors set_key / project settings): Tracktion's
+    // Edit::setAuxBusName writes the AUXBUSNAMES tree with a nullptr UndoManager, so the bus
+    // name — the snapshot's authoritative source (getAuxBusName) — cannot be undone. Write
+    // the return-track name directly (IDs::name, nullptr) rather than via Track::setName
+    // (which records through the UndoManager) so the WHOLE command is consistently
+    // non-undoable, with no partial-undo (name half-reverting). markDirty + undoable:false.
     eng.edit().setAuxBusName (bus, name);
-    returnTrack->setName (name);
-    logLine ("rename_bus", args, true, {}, true);
+    returnTrack->state.setProperty (ids::name, name, nullptr);
+    eng.markDirty();
+    logLine ("rename_bus", args, true, {}, false);
     emitSnapshotInvalidated();
     return okResult ("rename_bus");
 }
