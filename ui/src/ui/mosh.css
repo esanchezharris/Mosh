@@ -877,3 +877,27 @@ button.tbadge:hover { border-color: var(--lime); color: var(--lime); }
   .training-pop .training-blocker-list { margin-left: 12px; }
   .training-list { max-height: 140px; }
 }
+
+/* MP-001 — multiplayer session panel + presence cues */
+.mp-pop .pop { min-width: 220px; }
+.mp-panel { display: flex; flex-direction: column; gap: 8px; }
+.mp-head { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.mp-field { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--bone-dim); }
+.mp-field input { font: inherit; padding: 4px 6px; }
+.mp-field.mp-color { flex-direction: row; align-items: center; gap: 8px; }
+.mp-code { font-family: var(--font-mono); font-size: 11px; }
+.mp-roster { display: flex; flex-direction: column; gap: 4px; padding: 4px 0; }
+.mp-peer { display: flex; align-items: center; gap: 7px; font-size: 12px; }
+.mp-peer-name { flex: 1; }
+.mp-swatch { width: 11px; height: 11px; border-radius: 3px; flex: none; }
+.mp-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-line); flex: none; }
+.mp-dot.on { background: var(--lime); box-shadow: 0 0 5px var(--lime-dim); }
+.mp-sep { font-size: 10px; color: var(--bone-dim); text-transform: uppercase; letter-spacing: .04em; text-align: center; }
+.mp-join { display: flex; gap: 6px; }
+.mp-join input { flex: 1; min-width: 0; font: inherit; padding: 4px 6px; }
+
+/* A peer-held track: dim + a coloured lock chip; not editable here (the backend
+   guard is the real enforcement, this is the visual affordance). */
+.thead.locked { opacity: .72; }
+.thead.locked .tname { color: var(--bone-dim); }
+.tlock { font-size: 10px; font-weight: 600; margin-left: 4px; white-space: nowrap; opacity: .9; }

@@ -916,6 +916,39 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       return ok(command, { activeAdapterId: state.activeAdapterId, activeAdapterPath: state.activeAdapterPath, activeCorpusHash: state.activeCorpusHash, adapters: state.adapters });
     }
 
+    // MP-001 — multiplayer (mock peer harness). Simulates a 2-peer session where a
+    // peer "Bo" holds the 2nd track and has it selected, so the UI shows a peer
+    // roster, a locked-by badge, and a remote selection highlight without a relay.
+    case "mp_create_session":
+    case "mp_join_session": {
+      for (const t of snapshot.tracks) if (!t.logicalId) t.logicalId = "lid-" + t.id;
+      const code = command === "mp_create_session" ? "MOCK-ROOM-abcdef0123456789" : str(args.code);
+      const locked = snapshot.tracks[1];
+      const locks: Record<string, string> = {};
+      if (locked?.logicalId) locks[locked.logicalId] = "bo";
+      emit("mp_state", {
+        active: true,
+        roomCode: code,
+        selfPeer: "me",
+        peers: {
+          me: { name: str(args.name) || "You", color: str(args.color) || "#3aa0ff", online: true },
+          bo: { name: "Bo", color: "#e0457b", online: true },
+        },
+        locks,
+      });
+      if (locked) emit("peer_selection", { peerId: "bo", trackId: locked.id, clipId: locked.clips[0]?.id ?? null });
+      invalidate();   // surface the freshly-stamped logicalIds to the UI snapshot
+      return ok(command, { code });
+    }
+    case "mp_leave_session": {
+      emit("mp_state", { active: false, peers: {}, locks: {} });
+      return ok(command);
+    }
+    case "mp_commit_track":
+    case "mp_claim_track":
+    case "mp_broadcast_selection":
+      return ok(command);
+
     default:
       return ok(command);
   }

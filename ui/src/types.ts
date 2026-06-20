@@ -133,6 +133,9 @@ export type BuiltinPlugin = {
 export type Send = { bus: number; db: number; mute: boolean };
 export type Track = {
   id: string;
+  // MP-001 — stable cross-peer logical id (the relay's lock key). Present once the
+  // backend stamps it; used to map a track to its multiplayer lock owner.
+  logicalId?: string;
   index: number;
   name: string;
   type: string;
