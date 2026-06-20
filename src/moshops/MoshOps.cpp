@@ -164,7 +164,8 @@ MoshOps::MoshOps (MoshEngine& engineToUse)
             else        { lockManager_.deactivate(); }
         },
         [this] { return cmdMpSerializeProject (var()).getProperty ("data", var()); },   // provide
-        [this] (const juce::var& bundle) { cmdMpApplyBootstrap (bundle); });             // adopt
+        [this] (const juce::var& bundle) { cmdMpApplyBootstrap (bundle); },             // adopt
+        [this] (const juce::var& msg) { cmdMpApplyStructural (msg); });                 // structural
 }
 
 MoshOps::~MoshOps()
@@ -394,8 +395,10 @@ juce::var MoshOps::execute (const juce::var& command)
     // MP-001 lock guard — the single chokepoint. When a multiplayer session is
     // active, reject any mutation to a track / clip / structure currently locked by
     // the OTHER peer (fail-closed: unclassified commands need the session lock).
-    // No session => no-op, so single-player behaviour is unchanged.
-    if (lockManager_.isActive())
+    // No session => no-op, so single-player behaviour is unchanged. A REMOTE apply
+    // (applyingRemote_) bypasses the guard — it is the peer's change landing, not a
+    // local edit, so it must not be blocked by the peer's own lock.
+    if (lockManager_.isActive() && ! applyingRemote_)
     {
         const auto scope = LockManager::classify (name);
         if (scope != LockManager::Scope::Unguarded)
@@ -413,9 +416,9 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "import_clip_data")  return cmdImportClipData (args);
     if (name == "add_test_tone_clip")return cmdAddTestTone (args);
     if (name == "set_transport")     return cmdSetTransport (args);
-    if (name == "set_tempo")         return cmdSetTempo (args);
-    if (name == "set_time_signature")return cmdSetTimeSignature (args);
-    if (name == "set_metronome")     return cmdSetMetronome (args);
+    if (name == "set_tempo")         return broadcastStructuralIfActive (name, args, cmdSetTempo (args));
+    if (name == "set_time_signature")return broadcastStructuralIfActive (name, args, cmdSetTimeSignature (args));
+    if (name == "set_metronome")     return broadcastStructuralIfActive (name, args, cmdSetMetronome (args));
     if (name == "undo")              return cmdUndo (args);
     if (name == "redo")              return cmdRedo (args);
     if (name == "batch_begin")       return cmdBatchBegin (args);
@@ -445,8 +448,8 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "list_takes")        return cmdListTakes (args);
     if (name == "set_current_take")  return cmdSetCurrentTake (args);
     if (name == "keep_take")         return cmdKeepTake (args);
-    if (name == "set_master_volume") return cmdSetMasterVolume (args);
-    if (name == "set_master_pan")    return cmdSetMasterPan (args);
+    if (name == "set_master_volume") return broadcastStructuralIfActive (name, args, cmdSetMasterVolume (args));
+    if (name == "set_master_pan")    return broadcastStructuralIfActive (name, args, cmdSetMasterPan (args));
     if (name == "enable_track_meter")  return cmdEnableTrackMeter (args);
     if (name == "disable_track_meter") return cmdDisableTrackMeter (args);
     if (name == "enable_all_meters")   return cmdEnableAllMeters (args);
@@ -516,7 +519,7 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "open_project")      return cmdOpenProject (args);
     if (name == "save_as")           return cmdSaveAs (args);
     if (name == "set_project_settings") return cmdSetProjectSettings (args);
-    if (name == "set_key")           return cmdSetKey (args);
+    if (name == "set_key")           return broadcastStructuralIfActive (name, args, cmdSetKey (args));
     if (name == "create_group_track") return cmdCreateGroupTrack (args);
     if (name == "mp_serialize_track") return cmdMpSerializeTrack (args);
     if (name == "apply_remote_track") return cmdApplyRemoteTrack (args);
@@ -529,6 +532,7 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "mp_broadcast_selection") return cmdMpBroadcastSelection (args);
     if (name == "mp_serialize_project") return cmdMpSerializeProject (args);
     if (name == "mp_apply_bootstrap")   return cmdMpApplyBootstrap (args);
+    if (name == "mp_apply_structural")  return cmdMpApplyStructural (args);
     if (name == "ungroup_track")      return cmdUngroupTrack (args);
     if (name == "list_wave_inputs")   return cmdListWaveInputs (args);
     if (name == "set_track_input")    return cmdSetTrackInput (args);
@@ -1371,6 +1375,31 @@ juce::var MoshOps::cmdMpBroadcastSelection (const juce::var& args)
     mpSession_->broadcastSelection (args.getProperty ("trackId", var()).toString(),
                                     args.getProperty ("clipId", var()).toString());
     return okResult ("mp_broadcast_selection");
+}
+
+juce::var MoshOps::broadcastStructuralIfActive (const juce::String& name, const juce::var& args, juce::var result)
+{
+    // Mirror a successful local session-global scalar op to the peer (LWW). Skipped
+    // when single-player, or while applying a peer's op (echo-free).
+    if (mpSession_ != nullptr && mpSession_->active() && ! applyingRemote_
+        && (bool) result.getProperty ("ok", false))
+        mpSession_->broadcastStructural (name, args);
+    return result;
+}
+
+juce::var MoshOps::cmdMpApplyStructural (const juce::var& args)
+{
+    // Re-execute a peer's structural op locally: applyingRemote_ bypasses the lock
+    // guard (it is incoming history) AND short-circuits broadcastStructuralIfActive
+    // (no echo). The inner command's own emit repaints the UI.
+    auto* c = new DynamicObject();
+    c->setProperty ("command", args.getProperty ("command", var()));
+    c->setProperty ("args", args.getProperty ("args", var()));
+
+    applyingRemote_ = true;
+    auto r = execute (var (c));
+    applyingRemote_ = false;
+    return okResult ("mp_apply_structural", r);
 }
 
 juce::var MoshOps::cmdMpSerializeProject (const juce::var&)

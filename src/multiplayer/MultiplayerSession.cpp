@@ -6,9 +6,11 @@ namespace mosh
 using namespace juce;
 
 MultiplayerSession::MultiplayerSession (ApplyCommitFn applyCommit, EmitFn emit, SyncLocksFn syncLocks,
-                                        ProvideBootstrapFn provideBootstrap, ApplyBootstrapFn applyBootstrap)
+                                        ProvideBootstrapFn provideBootstrap, ApplyBootstrapFn applyBootstrap,
+                                        ApplyStructuralFn applyStructural)
     : applyCommit_ (std::move (applyCommit)), emit_ (std::move (emit)), syncLocks_ (std::move (syncLocks)),
-      provideBootstrap_ (std::move (provideBootstrap)), applyBootstrap_ (std::move (applyBootstrap))
+      provideBootstrap_ (std::move (provideBootstrap)), applyBootstrap_ (std::move (applyBootstrap)),
+      applyStructural_ (std::move (applyStructural))
 {
 }
 
@@ -82,6 +84,15 @@ void MultiplayerSession::broadcastSelection (const String& trackId, const String
     client_.publish (var (msg));
 }
 
+void MultiplayerSession::broadcastStructural (const String& command, const var& args)
+{
+    auto* msg = new DynamicObject();
+    msg->setProperty ("type", "structural");
+    msg->setProperty ("command", command);
+    msg->setProperty ("args", args);
+    client_.publish (var (msg));
+}
+
 void MultiplayerSession::startPoll()
 {
     if (running_.exchange (true))
@@ -143,6 +154,11 @@ void MultiplayerSession::pollLoop()
                 {
                     if (applyBootstrap_)
                         applyBootstrap_ (msg);   // adopt the host's project
+                }
+                else if (type == "structural")
+                {
+                    if (applyStructural_)
+                        applyStructural_ (msg);  // mirror a peer's tempo/master/key op
                 }
             }
 

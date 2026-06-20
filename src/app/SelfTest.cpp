@@ -3693,6 +3693,33 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (aClips == 1, "Boot A's clip survived the bootstrap (deep content)");
     }
 
+    section ("Multiplayer: structural sync (scalar session-global ops)");
+    {
+        auto tempoNow = [] (MoshOps& o) { return (double) o.snapshot()["session"].getProperty ("tempo", 0.0); };
+        cmd (ops, "set_tempo", objN ({ { "bpm", 120.0 } }));
+        check (std::abs (tempoNow (ops) - 120.0) < 0.01, "baseline tempo is 120");
+
+        // The peer holds the SESSION (structural) lock.
+        auto* locks = new juce::DynamicObject();
+        locks->setProperty (LockManager::sessionKey(), "other");
+        check (ok (cmd (ops, "mp_sync_locks",
+                        objN ({ { "active", true }, { "selfPeer", "me" }, { "locks", juce::var (locks) } }))),
+               "session active, peer holds the session lock");
+
+        // A LOCAL structural change is blocked by the guard.
+        check (! ok (cmd (ops, "set_tempo", objN ({ { "bpm", 140.0 } }))),
+               "local tempo change blocked while the peer holds the session lock");
+        check (std::abs (tempoNow (ops) - 120.0) < 0.01, "tempo unchanged after the blocked local change");
+
+        // Applying the PEER's structural op bypasses the guard and lands (echo-free).
+        check (ok (cmd (ops, "mp_apply_structural",
+                        objN ({ { "command", "set_tempo" }, { "args", objN ({ { "bpm", 145.0 } }) } }))),
+               "mp_apply_structural ok");
+        check (std::abs (tempoNow (ops) - 145.0) < 0.01, "peer's tempo change applied (guard bypassed)");
+
+        check (ok (cmd (ops, "mp_sync_locks", objN ({ { "active", false } }))), "session deactivated");
+    }
+
     // P2 — native↔relay transport, end to end over real HTTP. Gated (spawns a
     // relay + needs MOSH_RELAY_URL) so it stays OUT of the deterministic core run.
     if (std::getenv ("MOSH_SELFTEST_MP") != nullptr)

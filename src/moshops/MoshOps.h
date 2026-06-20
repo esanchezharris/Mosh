@@ -77,6 +77,11 @@ private:
     // and adopt a received bundle (clear local tracks, rebuild from the bundle).
     juce::var cmdMpSerializeProject (const juce::var& args);
     juce::var cmdMpApplyBootstrap   (const juce::var& args);
+    // Structural channel — scalar session-global ops (tempo/timesig/master/key)
+    // broadcast to the peer; mp_apply_structural re-executes a peer's op locally,
+    // guard-bypassed + without re-broadcasting (echo-free). Buses/groups deferred.
+    juce::var broadcastStructuralIfActive (const juce::String& name, const juce::var& args, juce::var result);
+    juce::var cmdMpApplyStructural  (const juce::var& args);
     // Resolve the lock key (the affected track's logicalId, or the session key) for
     // a guarded command, given its scope + args. Engine-coupled (findTrack/findClip).
     juce::String lockKeyFor (LockManager::Scope scope, const juce::var& args);
@@ -388,6 +393,7 @@ private:
     EventSink   eventSink;
     LockManager lockManager_;          // MP-001 — multiplayer lock guard state
     std::unique_ptr<MultiplayerSession> mpSession_;   // MP-001 — live session + poll loop
+    bool applyingRemote_ = false;      // MP-001 — true while applying a peer's structural op
     juce::int64 seq = 0;
     juce::File  logFile;
     bool        wasPlaying = false;

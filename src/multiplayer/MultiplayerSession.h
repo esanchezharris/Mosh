@@ -35,9 +35,12 @@ public:
     // joiner adopts a received bundle.
     using ProvideBootstrapFn = std::function<juce::var()>;
     using ApplyBootstrapFn   = std::function<void (const juce::var& bundle)>;
+    // Apply a peer's session-global scalar op ({command, args}) locally.
+    using ApplyStructuralFn  = std::function<void (const juce::var& msg)>;
 
     MultiplayerSession (ApplyCommitFn applyCommit, EmitFn emit, SyncLocksFn syncLocks,
-                        ProvideBootstrapFn provideBootstrap, ApplyBootstrapFn applyBootstrap);
+                        ProvideBootstrapFn provideBootstrap, ApplyBootstrapFn applyBootstrap,
+                        ApplyStructuralFn applyStructural);
     ~MultiplayerSession();
 
     /** Create a room (this peer joins) + start polling. Returns the code, or "". */
@@ -58,6 +61,8 @@ public:
     void commit (const juce::String& logicalId, const juce::String& blob);
     /** Publish our current selection (presence) to the room. */
     void broadcastSelection (const juce::String& trackId, const juce::String& clipId);
+    /** Mirror a session-global scalar op ({command, args}) to the peer. */
+    void broadcastStructural (const juce::String& command, const juce::var& args);
 
 private:
     void startPoll();
@@ -70,6 +75,7 @@ private:
     SyncLocksFn        syncLocks_;
     ProvideBootstrapFn provideBootstrap_;
     ApplyBootstrapFn   applyBootstrap_;
+    ApplyStructuralFn  applyStructural_;
     std::map<juce::String, int> heldEpochs_;   // logicalId -> granted epoch (commit fencing)
     std::thread        pollThread_;
     std::atomic<bool>  running_ { false };
