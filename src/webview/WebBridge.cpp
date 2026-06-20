@@ -231,6 +231,48 @@ juce::WebBrowserComponent::Options WebBridge::buildOptions()
                 ok->setProperty ("ok", true);
                 completion (juce::var (ok));
             })
+        // Always-on (hands-free) speech. Same `voice_event` channel + five types as
+        // hold-to-talk, but a continuous session yields MANY `final`s and only stops on
+        // voice_listen_stop / a fatal error — so the UI's continuous controller keeps its
+        // subscription open and treats each `final` as one command candidate.
+        .withNativeFunction (
+            juce::Identifier ("voice_listen_start"),
+            [this] (const juce::Array<juce::var>&,
+                    juce::WebBrowserComponent::NativeFunctionCompletion completion)
+            {
+                if (speech == nullptr)
+                    speech = std::make_unique<NativeSpeech>();
+
+                auto emit = [this] (const char* type, const juce::String& text, bool hasText)
+                {
+                    auto* o = new juce::DynamicObject();
+                    o->setProperty ("type", juce::String (type));
+                    if (hasText) o->setProperty ("text", text);
+                    emitEvent (juce::Identifier ("voice_event"), juce::var (o));
+                };
+
+                NativeSpeech::Callbacks cb;
+                cb.onStart   = [emit] { emit ("start", {}, false); };
+                cb.onInterim = [emit] (const juce::String& t) { emit ("interim", t, true); };
+                cb.onFinal   = [emit] (const juce::String& t) { emit ("final", t, true); };
+                cb.onStop    = [emit] { emit ("stop", {}, false); };
+                cb.onError   = [emit] (const juce::String& e) { emit ("error", e, true); };
+                speech->startContinuous (std::move (cb));
+
+                auto* ok = new juce::DynamicObject();
+                ok->setProperty ("ok", true);
+                completion (juce::var (ok));
+            })
+        .withNativeFunction (
+            juce::Identifier ("voice_listen_stop"),
+            [this] (const juce::Array<juce::var>&,
+                    juce::WebBrowserComponent::NativeFunctionCompletion completion)
+            {
+                if (speech != nullptr) speech->stopContinuous();
+                auto* ok = new juce::DynamicObject();
+                ok->setProperty ("ok", true);
+                completion (juce::var (ok));
+            })
         .withNativeFunction (
             juce::Identifier ("remote_start_pairing"),
             [this] (const juce::Array<juce::var>& args,

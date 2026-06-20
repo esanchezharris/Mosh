@@ -42,13 +42,30 @@ public:
     static bool isSupported();
 
     /** Request permission (once) and begin capturing + transcribing. Safe to call
-        again while idle; a no-op while already listening. */
+        again while idle; a no-op while already listening. Single-shot: the recognizer
+        ends on the first endpointed phrase (onFinal → onStop). Drives hold-to-talk. */
     void start (Callbacks cb);
+
+    /** Like start(), but ALWAYS-ON: emits Callbacks::onFinal once per endpointed phrase
+        and keeps listening (recycling the recognition request after each phrase / the
+        ~1-min request cap) until stopContinuous(). Drives hands-free mode. The mic +
+        AVAudioEngine tap persist across recycles, so this can run concurrently with the
+        DAW's own audio input (barge-in) — see Callbacks. */
+    void startContinuous (Callbacks cb);
 
     /** Stop capture; the final transcript is delivered via Callbacks::onFinal. */
     void stop();
 
+    /** Stop an always-on (continuous) session and release the mic. */
+    void stopContinuous();
+
     bool isListening() const;
+
+    /** Number of microphone buffers the capture tap has processed this session — a
+        diagnostic the barge-in live-smoke uses to prove the recognizer actually captured
+        audio CONCURRENTLY with the DAW's own input recording (not merely that the engine
+        started). Reset on each start()/startContinuous(). 0 on non-macOS. */
+    unsigned long tapBufferCount() const;
 
 private:
     struct Impl;

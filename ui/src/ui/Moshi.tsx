@@ -297,6 +297,8 @@ export function Moshi() {
   }, [agentListening]);
 
   const toggleVoice = useStore((s) => s.toggleVoice);
+  const handsFreeOn = useStore((s) => s.handsFreeOn);
+  const setHandsFree = useStore((s) => s.setHandsFree);
   const stateLabel = recording ? "● rec" : rendering ? "working…" : playing ? "listening" : "idle";
   // One-word mood derived from the same live state. `mood` keys the mount's
   // state-tinted glow (box-shadow only — no transform/filter on the canvas wrapper);
@@ -310,9 +312,19 @@ export function Moshi() {
     <div className="moshi-dock" data-testid="moshi-stage">
       <div className="moshi-cap">
         <span className="moshi-state tc">{stateLabel}</span>
+        {/* Hands-free always-on listening. ON = mic hot, command phrases act without
+            holding the talk button. The `on` class + agentListening pulse the 👂. */}
+        <button className={`moshi-handsfree${handsFreeOn ? " on" : ""}${handsFreeOn && agentListening ? " hot" : ""}`}
+          data-testid="moshi-handsfree" aria-pressed={handsFreeOn}
+          title={handsFreeOn ? "Hands-free listening on — tap to turn off" : "Hands-free listening off — tap for always-on voice"}
+          aria-label={handsFreeOn ? "Turn off hands-free listening" : "Turn on hands-free listening"}
+          onClick={() => setHandsFree(!handsFreeOn)}>👂</button>
         <button className="moshi-mute" data-testid="moshi-mute" aria-pressed={!voiceOn}
           title={voiceOn ? "Mute Moshi" : "Unmute Moshi"} aria-label={voiceOn ? "Mute Moshi" : "Unmute Moshi"}
           onClick={() => toggleVoice()}>{voiceOn ? "🔊" : "🔇"}</button>
+        <span className="moshi-handsfree-status" role="status" aria-live="polite" data-testid="handsfree-status">
+          {handsFreeOn ? "hands-free on" : ""}
+        </span>
       </div>
       {/* data-mood drives ONLY a box-shadow tint on this canvas wrapper (HARD RULE:
           never transform/filter the live-GL .moshi-mount). */}

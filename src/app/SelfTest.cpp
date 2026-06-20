@@ -3613,11 +3613,52 @@ int runLiveAudioSmoke (MoshEngine& eng, MoshOps& ops)
         check (ok (cmd (ops, "set_transport", args1 ("position", 0.0))), "GAP2: seek to 0 ok");
         check (ok (cmd (ops, "set_transport", args1 ("action", "record"))), "GAP2: set_transport record ok");
 
-        const auto recEnd = Time::getMillisecondCounter() + (uint32) 1200;
+        // ── GAP 4 — barge-in: run the CONTINUOUS recognizer WHILE the take records ──
+        // THE core hands-free unknown: can macOS Speech (AVAudioEngine input tap) and
+        // Tracktion's recording (JUCE AudioDeviceManager) capture the SAME mic at once?
+        // Gated on MOSH_VOICE_BARGE_IN=1 (needs Speech authorization + a real mic) so the
+        // plain GAP-2 recording smoke still runs without it. `speech` is declared AFTER the
+        // captured locals so it (and its callbacks) tear down BEFORE them.
+        const bool bargeIn = SystemStats::getEnvironmentVariable ("MOSH_VOICE_BARGE_IN", "0").getIntValue() != 0;
+        std::atomic<bool> voiceStarted { false };
+        std::atomic<int>  voiceErrors  { 0 };
+        String voiceErr;
+        std::unique_ptr<NativeSpeech> speech;
+        if (bargeIn)
+        {
+            section ("GAP 4 — barge-in (continuous speech sharing the mic with a live take)");
+            check (NativeSpeech::isSupported(), "GAP4: macOS Speech available");
+            speech = std::make_unique<NativeSpeech>();
+            NativeSpeech::Callbacks cb;
+            cb.onStart = [&voiceStarted] { voiceStarted.store (true); };
+            cb.onError = [&voiceErrors, &voiceErr] (const String& e) { voiceErrors.fetch_add (1); voiceErr = e; };
+            speech->startContinuous (std::move (cb));   // async: auth + AVAudioEngine on the message thread
+        }
+
+        // Longer window under barge-in so the async auth + engine-start + a few mic buffers
+        // all land while the take is still recording.
+        const auto recEnd = Time::getMillisecondCounter() + (uint32) (bargeIn ? 2500 : 1200);
         while (Time::getMillisecondCounter() < recEnd)
         {
             if (mm != nullptr) mm->runDispatchLoopUntil (50);
             else Thread::sleep (50);
+        }
+
+        if (bargeIn && speech != nullptr)
+        {
+            // The take is STILL recording here. Assert the recognizer opened its OWN input
+            // client and actually pulled mic buffers CONCURRENTLY (the simultaneous-capture
+            // proof — stronger than "the engine started"), then release it before the take is
+            // stopped + checked for non-silence (which then proves the voice client didn't
+            // starve/glitch the DAW capture).
+            check (eng.edit().getTransport().isRecording(), "GAP4: DAW transport still recording while voice ran");
+            if (voiceErrors.load() > 0) std::cerr << "  ..   GAP4 voice error: " << voiceErr << "\n";
+            check (voiceErrors.load() == 0, "GAP4: continuous voice started without error (grant Speech permission if this fails)");
+            check (voiceStarted.load(), "GAP4: AVAudioEngine started while the take recorded (two simultaneous input clients)");
+            check (speech->isListening(), "GAP4: continuous recognizer listening during the take");
+            std::cerr << "  ..   GAP4 diag: tapBuffers=" << speech->tapBufferCount() << "\n";
+            check (speech->tapBufferCount() > 0, "GAP4: mic tap captured audio buffers concurrently with the take");
+            speech->stopContinuous();
         }
 
         auto stop = cmd (ops, "stop_recording");

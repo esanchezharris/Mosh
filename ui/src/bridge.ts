@@ -138,6 +138,10 @@ export async function voiceSupported(): Promise<boolean> {
 }
 export async function voiceStart(): Promise<void> { if (realNative()) await native("voice_start")(); }
 export async function voiceStop(): Promise<void> { if (realNative()) await native("voice_stop")(); }
+// Always-on (hands-free) variants — a continuous session emits MANY `final`s on the same
+// voice_event channel and only ends on voice_listen_stop / a fatal error.
+export async function voiceListenStart(): Promise<void> { if (realNative()) await native("voice_listen_start")(); }
+export async function voiceListenStop(): Promise<void> { if (realNative()) await native("voice_listen_stop")(); }
 
 export async function startRemotePairing(): Promise<RemoteResult<RemoteStatus>> {
   if (!realNative()) return { ok: false, error: "remote companion unavailable in dev" };

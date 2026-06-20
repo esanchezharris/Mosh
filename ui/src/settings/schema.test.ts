@@ -60,7 +60,7 @@ describe("settingsByCategory", () => {
     const appearance = groups.find((g) => g.category === "Appearance")!;
     expect(appearance.settings.map((s) => s.id)).toEqual(["skin", "theme", "uiScale"]);
     const moshi = groups.find((g) => g.category === "Moshi")!;
-    expect(moshi.settings.map((s) => s.id)).toEqual(["voiceOn", "voiceVol"]);
+    expect(moshi.settings.map((s) => s.id)).toEqual(["voiceOn", "voiceVol", "handsFree", "handsFreePauseOnRecord"]);
   });
 
   it("covers every setting exactly once", () => {

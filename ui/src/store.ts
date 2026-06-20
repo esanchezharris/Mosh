@@ -135,6 +135,14 @@ type State = {
   voiceOn: boolean;
   voiceVol: number;
   toggleVoice: () => void;
+  // Hands-free always-on listening (UI-local + persisted, exactly like voiceOn). When
+  // true, AgentComposer's useHandsFree hook engages the continuous recognizer and
+  // command phrases act without holding the mic; the mic is hot only while this is on.
+  handsFreeOn: boolean;
+  setHandsFree: (b: boolean) => void;
+  // Fallback (default off): when true, hands-free listening pauses while a take records
+  // (for inputs that can't be shared); off keeps barge-in. UI-local + persisted.
+  handsFreePauseOnRecord: boolean;
 
   // Agent (Moshi running the session) — UI-local. agentChangeSet drives Monster
   // changes; agentUtter signals the creature to react (voice + pose) to a reply.
@@ -278,6 +286,8 @@ export const useStore = create<State>((set, get) => ({
         uiScale: g.get("uiScale") as number,
         voiceOn: g.get("voiceOn") as boolean,
         voiceVol: g.get("voiceVol") as number,
+        handsFreeOn: g.get("handsFree") as boolean,
+        handsFreePauseOnRecord: g.get("handsFreePauseOnRecord") as boolean,
       });
     };
     mirrorSettings();
@@ -479,6 +489,12 @@ export const useStore = create<State>((set, get) => ({
     useSettings.getState().set("voiceOn", next); // persists through the settings store
     set({ voiceOn: next });
   },
+  handsFreeOn: useSettings.getState().get("handsFree") as boolean,
+  setHandsFree: (b) => {
+    useSettings.getState().set("handsFree", b); // persists through the settings store
+    set({ handsFreeOn: b });
+  },
+  handsFreePauseOnRecord: useSettings.getState().get("handsFreePauseOnRecord") as boolean,
 
   agentBusy: false,
   agentChangeSet: null,
