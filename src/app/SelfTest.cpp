@@ -1805,19 +1805,33 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (sendsOf (gt).size() == 1 && std::abs ((double) sendsOf (gt)[0].getProperty ("db", 0.0) - (-6.0)) < 0.6,
                "undo restores the send at its prior level");
 
-        // rename_bus (was uncovered): rename Reverb->Plate, undo reverts.
+        // rename_bus: renames the bus (and its return track) and is NON-undoable.
         auto hasBusNamed = [&] (const String& nm) -> bool {
             auto bv = buses();
             if (auto* arr = bv.getArray())
                 for (auto& b : *arr) if (b.getProperty ("name", var()).toString() == nm) return true;
             return false; };
+        auto returnTrackName = [&] (int b) -> String {
+            auto snap = ops.snapshot();
+            if (auto* arr = snap["tracks"].getArray())
+                for (auto& t : *arr)
+                    if ((bool) t.getProperty ("isReturn", false) && (int) t.getProperty ("returnBus", -1) == b)
+                        return t.getProperty ("name", var()).toString();
+            return {}; };
+
         check (ok (cmd (ops, "rename_bus", objN ({{ "bus", bus0 }, { "name", "Plate" }}))), "rename_bus ok");
         check (hasBusNamed ("Plate") && ! hasBusNamed ("Reverb"), "bus name reflects rename");
+        check (returnTrackName (bus0) == "Plate", "rename_bus updates the return track name too");
         check (! ok (cmd (ops, "rename_bus", objN ({{ "bus", 99 }, { "name", "X" }}))), "rename_bus on a missing bus errors");
-        // NB: the aux-bus *name* is not undoable (Tracktion's Edit::setAuxBusName writes
-        // with a nullptr UndoManager), so we don't assert undo here — restore by a
-        // forward rename instead. See docs ledger "Needs Emilio's call" (rename_bus undo).
-        cmd (ops, "rename_bus", objN ({{ "bus", bus0 }, { "name", "Reverb" }}));
+
+        // rename_bus is a NON-undoable preference (like set_key): the bus name is non-undoable
+        // in Tracktion (Edit::setAuxBusName uses a nullptr UndoManager), so the WHOLE command
+        // is non-undoable — undo must NOT revert it, and crucially must NOT HALF-revert (the
+        // return-track name reverting while the bus name doesn't = the old partial-undo bug).
+        check (ok (cmd (ops, "undo")), "undo after rename_bus ok");
+        check (hasBusNamed ("Plate") && returnTrackName (bus0) == "Plate",
+               "undo does NOT revert rename_bus — bus name AND return-track name both stay (non-undoable, no partial-undo)");
+        cmd (ops, "rename_bus", objN ({{ "bus", bus0 }, { "name", "Reverb" }}));   // restore for downstream remove_bus
 
         const int busesNow = buses().size();
         check (ok (cmd (ops, "remove_bus", args1 ("bus", bus0))), "remove_bus ok");
