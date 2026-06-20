@@ -9,7 +9,7 @@
 
 import { gunzipSync } from "node:zlib";
 import { XMLParser } from "fast-xml-parser";
-import { emptyIR, type ImportIR, type IRTrack, type IRClip } from "./moshIR";
+import { emptyIR, type ImportIR, type IRTrack, type IRClip, type IRNote } from "./moshIR";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type XmlNode = Record<string, any>;
@@ -40,6 +40,25 @@ function linToDb(v: number): number {
 }
 const clamp = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, x));
 
+// Ableton groups a MIDI clip's notes by pitch: Notes>KeyTracks>KeyTrack, each
+// KeyTrack carrying a MidiKey (the pitch) and its MidiNoteEvents. Time/Duration
+// are already in beats relative to the clip; Velocity is a float we round+clamp.
+function notesFromMidiClip(clip: XmlNode): IRNote[] {
+  const notes: IRNote[] = [];
+  for (const kt of asArray(clip?.Notes?.KeyTracks?.KeyTrack)) {
+    const pitch = Number(kt?.MidiKey?.[VAL]);
+    if (!Number.isFinite(pitch)) continue;
+    for (const ev of asArray(kt?.Notes?.MidiNoteEvent)) {
+      const time = Number(ev?.["@_Time"]);
+      const dur = Number(ev?.["@_Duration"]);
+      if (!Number.isFinite(time) || !Number.isFinite(dur)) continue;
+      const velocity = clamp(Math.round(Number(ev?.["@_Velocity"]) || 0), 1, 127);
+      notes.push({ pitch, start: time, length: Math.max(0, dur), velocity });
+    }
+  }
+  return notes;
+}
+
 function clipsFrom(track: XmlNode, tempo: number, ir: ImportIR, trackName: string): IRClip[] {
   const out: IRClip[] = [];
   const beatsToSec = (b: number) => (b * 60) / (tempo || 120);
@@ -55,8 +74,9 @@ function clipsFrom(track: XmlNode, tempo: number, ir: ImportIR, trackName: strin
       const length = Math.max(0, beatsToSec(Number(ce) - Number(cs)));
       const name = clip?.Name?.[VAL];
       if (kind === "midi") {
-        out.push({ kind: "midi", name, start, length, notes: [] });
-        ir.unmappable.push(`ALS MIDI clip "${name ?? "?"}" on "${trackName}": note extraction not implemented`);
+        const notes = notesFromMidiClip(clip);
+        out.push({ kind: "midi", name, start, length, notes });
+        if (notes.length === 0) ir.unmappable.push(`ALS MIDI clip "${name ?? "?"}" on "${trackName}": no notes parsed`);
       } else {
         out.push({ kind: "wave", name, start, length });
       }

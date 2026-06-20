@@ -6,7 +6,7 @@
 // NAME/VOLPAN/MUTESOLO, ITEM POSITION/LENGTH/NAME/SOURCE). Everything else (FX
 // chains, envelopes, sends) is logged as unmappable.
 
-import { emptyIR, type ImportIR, type IRTrack, type IRClip } from "./moshIR";
+import { emptyIR, type ImportIR, type IRTrack, type IRNote } from "./moshIR";
 
 type Attr = { token: string; vals: string[] };
 type Node = { tag: string; head: string[]; attrs: Attr[]; children: Node[] };
@@ -69,6 +69,41 @@ function linToDb(v: number): number {
 }
 const clamp = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, x));
 
+// REAPER stores MIDI inside a <SOURCE MIDI> block as delta-PPQ event lines:
+//   E/e <deltaTicks(dec)> <statusHex> <data1Hex> <data2Hex>
+// `E` = unselected, `e` = selected — both are real events. The status high-nibble
+// is 0x9 (note-on) or 0x8 (note-off); a note-on with velocity 0 is a note-off.
+// Deltas are relative to the previous event, so we keep a running tick. PPQ comes
+// from `HASDATA <flag> <ppq> QN` (default 960). Times convert ticks→beats; the
+// emitter (emit.ts) turns each note into an add_note relative to the clip start.
+function notesFromMidiSource(src: Node, ppq: number): IRNote[] {
+  const notes: IRNote[] = [];
+  const pending = new Map<number, { tick: number; velocity: number }[]>(); // pitch → FIFO of onsets
+  let tick = 0;
+  for (const a of src.attrs) {
+    if (a.token !== "E" && a.token !== "e") continue; // only channel-voice events carry the delta clock we track
+    const vals = a.vals;
+    if (vals.length < 4) continue;
+    tick += Number(vals[0]) || 0;
+    const status = parseInt(vals[1], 16);
+    const hi = status & 0xf0;
+    if (hi !== 0x90 && hi !== 0x80) continue; // CC / pitch-bend / etc. — advance the clock, emit nothing
+    const pitch = parseInt(vals[2], 16);
+    const velocity = parseInt(vals[3], 16);
+    const isOn = hi === 0x90 && velocity > 0;
+    if (isOn) {
+      const q = pending.get(pitch) ?? [];
+      q.push({ tick, velocity });
+      pending.set(pitch, q);
+    } else {
+      const q = pending.get(pitch);
+      const on = q?.shift();
+      if (on) notes.push({ pitch, start: on.tick / ppq, length: Math.max(0, (tick - on.tick) / ppq), velocity: on.velocity });
+    }
+  }
+  return notes;
+}
+
 export function parseRpp(text: string, source = "project.rpp"): ImportIR {
   const ir = emptyIR("rpp", source);
   const lines = text.split(/\r?\n/);
@@ -108,9 +143,10 @@ export function parseRpp(text: string, source = "project.rpp"): ImportIR {
       const iname = attr(it, "NAME")?.[0];
       const src = child(it, "SOURCE");
       if (src?.head[0] === "MIDI") {
-        const clip: IRClip = { kind: "midi", name: iname, start, length, notes: [] };
-        track.clips.push(clip);
-        ir.unmappable.push(`RPP MIDI item "${iname ?? "?"}": note extraction not implemented`);
+        const ppq = Number(attr(src, "HASDATA")?.[1]) || 960;
+        const notes = notesFromMidiSource(src, ppq);
+        track.clips.push({ kind: "midi", name: iname, start, length, notes });
+        if (notes.length === 0) ir.unmappable.push(`RPP MIDI item "${iname ?? "?"}": no notes parsed`);
       } else {
         track.clips.push({ kind: "wave", name: iname, start, length, sourceFile: src ? attr(src, "FILE")?.[0] : undefined });
       }
