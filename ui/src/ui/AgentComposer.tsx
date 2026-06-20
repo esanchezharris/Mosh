@@ -3,13 +3,92 @@
 // runs the edits as ONE undo step, and the result lands in Monster changes. Voice
 // and text feed the very same run() funnel; nothing downstream knows the difference.
 
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
 import { useStore } from "../store";
 import { createBrain, type Brain } from "../agent/brain";
 import { runAgentBatch } from "../agent/executor";
 import { matchFastPath } from "../agent/fastPath";
 import { handleFast } from "../agent/performer";
-import { createVoiceInput, isVoiceSupported, type VoiceInput } from "../agent/voiceInput";
+import { createVoiceInput, createContinuousVoiceInput, isVoiceSupported, type VoiceInput } from "../agent/voiceInput";
+import { createHandsFree, type HandsFree } from "../agent/handsFree";
+
+// Hands-free always-on listening. Owns the lifetime of the CONTINUOUS recognizer:
+// engages when the `handsFreeOn` toggle is true (and the tab is visible), disengages
+// otherwise. Every final transcript routes through the SAME matcher/performer as the
+// composer — but DROPS anything unknown (never the brain). Returns pause/resume so
+// hold-to-talk can temporarily own the mic for an open-ended (LLM) ask, then hand it
+// back. The controller is pure; this hook is just its React lifecycle + store wiring.
+function useHandsFree(): { pauseForPushToTalk: () => void; resumeAfterPushToTalk: () => void } {
+  const handsFreeOn = useStore((s) => s.handsFreeOn);
+  const ctrlRef = useRef<HandsFree | null>(null);
+  const pausedRef = useRef(false);
+
+  if (!ctrlRef.current) {
+    ctrlRef.current = createHandsFree({
+      getCtx: () => {
+        const s = useStore.getState();
+        return {
+          mode: s.currentMode(),
+          tempo: s.snapshot?.session?.tempo ?? 120,
+          timeSigNum: s.snapshot?.session?.timeSigNumerator ?? 4,
+        };
+      },
+      isBusy: () => useStore.getState().agentBusy,
+      setBusy: (b) => useStore.getState().setAgentBusy(b),
+      dispatch: async (action) => {
+        const s = useStore.getState();
+        await handleFast(action, {
+          runBatch: async (label, cmds) => { s.setAgentChangeSet(await runAgentBatch(label, cmds)); },
+          enterRecord: s.enterRecord, stopRecord: s.stopRecord, keepTake: s.keepTake, navTake: s.navTake,
+          utter: (intent, say) => { s.pushAgentUtter(intent, say); },
+        });
+      },
+      makeSource: (cb) => createContinuousVoiceInput(cb),
+      setListening: (b) => useStore.getState().setAgentListening(b),
+    });
+  }
+
+  // Engage/disengage with the toggle (and tear down on unmount → mic goes cold).
+  useEffect(() => {
+    const ctrl = ctrlRef.current!;
+    if (handsFreeOn) ctrl.engage(); else ctrl.disengage();
+    return () => ctrl.disengage();
+  }, [handsFreeOn]);
+
+  // Defense-in-depth privacy: release the mic whenever the WebView is hidden.
+  useEffect(() => {
+    const onVis = () => {
+      const ctrl = ctrlRef.current; if (!ctrl) return;
+      if (document.hidden) ctrl.disengage();
+      else if (useStore.getState().handsFreeOn && !pausedRef.current) ctrl.engage();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, []);
+
+  // Fallback (opt-in): on inputs that can't be shared, pause hands-free WHILE a take
+  // records and resume when it ends — the UI-driven alternative to barge-in. Off by
+  // default (barge-in is the default), so this effect is inert unless enabled.
+  const pauseOnRecord = useStore((s) => s.handsFreePauseOnRecord);
+  const recording = useStore((s) => s.transport.recording);
+  useEffect(() => {
+    if (!handsFreeOn || !pauseOnRecord) return;
+    const ctrl = ctrlRef.current; if (!ctrl) return;
+    if (recording) ctrl.disengage(); else ctrl.engage();
+  }, [handsFreeOn, pauseOnRecord, recording]);
+
+  return {
+    pauseForPushToTalk: () => {
+      const ctrl = ctrlRef.current;
+      if (ctrl?.engaged) { pausedRef.current = true; ctrl.disengage(); }
+    },
+    resumeAfterPushToTalk: () => {
+      if (!pausedRef.current) return;
+      pausedRef.current = false;
+      if (useStore.getState().handsFreeOn) ctrlRef.current?.engage();
+    },
+  };
+}
 
 export function AgentComposer() {
   const agentBusy = useStore((s) => s.agentBusy);
@@ -27,6 +106,7 @@ export function AgentComposer() {
   const voiceSupported = isVoiceSupported();
   // undefined = not yet built; null = platform has no speech API.
   const voiceRef = useRef<VoiceInput | null | undefined>(undefined);
+  const handsFree = useHandsFree();
 
   // The single funnel: typed text and final speech both arrive here.
   const run = async (text: string) => {
@@ -73,9 +153,9 @@ export function AgentComposer() {
       voiceRef.current = createVoiceInput({
         onStart: () => { setListening(true); setAgentListening(true); setInput(""); },
         onInterim: (t) => setInput(t),
-        onStop: () => { setListening(false); setAgentListening(false); },
+        onStop: () => { setListening(false); setAgentListening(false); handsFree.resumeAfterPushToTalk(); },
         onFinal: (t) => void run(t),
-        onError: () => { setListening(false); setAgentListening(false); setSay("didn't catch that"); },
+        onError: () => { setListening(false); setAgentListening(false); handsFree.resumeAfterPushToTalk(); setSay("didn't catch that"); },
       });
     }
     return voiceRef.current;
@@ -95,8 +175,10 @@ export function AgentComposer() {
           data-testid="agent-mic"
           onPointerDown={(e) => {
             if (agentBusy || !voiceSupported) return;
-            // Holding the talk button to address Moshi STOPS an in-progress take first
-            // (performer mode → assistant mode), then listens.
+            // Holding the talk button to address Moshi pauses always-on hands-free (so the
+            // two recognizers never fight for the mic; it resumes on release) and STOPS an
+            // in-progress take first (performer mode → assistant mode), then listens.
+            handsFree.pauseForPushToTalk();
             if (useStore.getState().currentMode() === "recording") void useStore.getState().stopRecord();
             const v = ensureVoice(); if (!v) return;
             try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* noop */ }
