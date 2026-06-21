@@ -26,6 +26,8 @@ let clipSeq = 100;
 let trackSeq = 10;
 const nextClipId = () => String(++clipSeq);
 const nextTrackId = () => String(++trackSeq);
+let sectionSeq = 3; // seed uses sec-1..3
+const nextSectionId = () => "sec-" + ++sectionSeq;
 
 function waveClip(name: string, start: number, length: number): Clip {
   return {
@@ -75,6 +77,11 @@ function seedSnapshot(): Snapshot {
     transport: { playing: false, recording: false, position: 0, looping: false, loopStart: 0, loopEnd: 0 },
     master: { volumeDb: 0, pan: 0 },
     buses: [],
+    sections: [
+      { id: "sec-1", name: "Intro", startBeat: 0, endBeat: 8, color: "#9fe1cb" },
+      { id: "sec-2", name: "Verse", startBeat: 8, endBeat: 24, color: "#b5d4f4" },
+      { id: "sec-3", name: "Hook", startBeat: 24, endBeat: 40, color: "#f4c0d1" },
+    ],
   };
 }
 
@@ -85,6 +92,7 @@ function emptySession(): Snapshot {
   const s = seedSnapshot();
   s.tracks = [];
   s.buses = [];
+  s.sections = [];
   s.transport = { playing: false, recording: false, position: 0, looping: false, loopStart: 0, loopEnd: 0 };
   return s;
 }
@@ -375,6 +383,29 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     case "set_track_pan":    { const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found"); pushUndo(); t.pan = num(args.pan); invalidate(); return ok(command); }
     case "set_track_mute":   { const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found"); pushUndo(); t.mute = Boolean(args.mute); invalidate(); return ok(command); }
     case "set_track_solo":   { const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found"); pushUndo(); t.solo = Boolean(args.solo); invalidate(); return ok(command); }
+    case "create_section": {
+      pushUndo();
+      const start = num(args.startBeat, 0);
+      const sec = { id: nextSectionId(), name: str(args.name, "Section"), startBeat: start, endBeat: num(args.endBeat, start + 16), color: str(args.color) || undefined };
+      (snapshot.sections ??= []).push(sec);
+      invalidate(); return ok(command, { sectionId: sec.id });
+    }
+    case "rename_section": {
+      const sec = (snapshot.sections ?? []).find((x) => x.id === str(args.sectionId));
+      if (!sec) return err(command, "section not found");
+      pushUndo(); sec.name = str(args.name, sec.name); invalidate(); return ok(command);
+    }
+    case "move_section": {
+      const sec = (snapshot.sections ?? []).find((x) => x.id === str(args.sectionId));
+      if (!sec) return err(command, "section not found");
+      pushUndo(); sec.startBeat = num(args.startBeat, sec.startBeat); sec.endBeat = num(args.endBeat, sec.endBeat); invalidate(); return ok(command);
+    }
+    case "remove_section": {
+      const list = snapshot.sections ?? [];
+      const idx = list.findIndex((x) => x.id === str(args.sectionId));
+      if (idx < 0) return err(command, "section not found");
+      pushUndo(); list.splice(idx, 1); invalidate(); return ok(command);
+    }
 
     case "add_test_tone_clip": {
       const t = findTrack(str(args.trackId)) ?? snapshot.tracks[0];

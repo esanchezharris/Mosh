@@ -86,3 +86,20 @@ test("flag off (default): no bottom prompt bar (prompt stays in the Moshi dock)"
   await expect(page.getByTestId("arrangement")).toBeVisible();
   await expect(page.getByTestId("promptbar")).toHaveCount(0);
 });
+
+test("flag on: section navigator shows sections, adds one, and has zoom presets", async ({ page }) => {
+  await bootRedesign(page);
+  const nav = page.getByTestId("section-nav");
+  await expect(nav).toBeVisible();
+  await expect(page.getByTestId("section-seg")).toHaveCount(3); // seeded Intro / Verse / Hook
+  await page.getByTestId("section-add").click();
+  await expect(page.getByTestId("section-seg")).toHaveCount(4);
+  await expect(nav.getByRole("button", { name: "8B", exact: true })).toBeVisible();
+});
+
+test("flag off (default): no section navigator", async ({ page }) => {
+  await page.addInitScript(() => window.localStorage.clear());
+  await page.goto("/");
+  await expect(page.getByTestId("arrangement")).toBeVisible();
+  await expect(page.getByTestId("section-nav")).toHaveCount(0);
+});

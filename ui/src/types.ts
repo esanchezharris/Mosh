@@ -281,6 +281,18 @@ export type TrainingState = {
   jobs: TrainingJob[];
 };
 
+// A named song-structure region (Intro / Verse / Hook / …). Beat-based so it's
+// tempo-independent; used by the section navigator and (later) as an agent scope
+// handle ("rework the hook"). Frontend-first against the mock; the real backend is
+// a MOSH_SECTIONS ValueTree + create/rename/move/remove_section commands.
+export type Section = {
+  id: string;
+  name: string;
+  startBeat: number;
+  endBeat: number;
+  color?: string;
+};
+
 export type Snapshot = {
   schemaVersion: number;
   session: {
@@ -341,6 +353,7 @@ export type Snapshot = {
   transport: Transport;
   master?: { volumeDb: number; pan: number };
   buses?: Bus[];
+  sections?: Section[];
   audio?: AudioSelection;
   training?: TrainingState;
 };

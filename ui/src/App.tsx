@@ -29,6 +29,7 @@ import { DrumWindow } from "./ui/DrumWindow";
 import { MonsterChanges } from "./ui/MonsterChanges";
 import { Inspector } from "./ui/Inspector";
 import { AgentComposer } from "./ui/AgentComposer";
+import { SectionNavigator } from "./ui/SectionNavigator";
 
 export function App() {
   const init = useStore((s) => s.init);
@@ -76,6 +77,8 @@ export function App() {
         <div className="error-bar" role="status" aria-live="polite">⚠ No audio device — playback/record/export disabled.</div>
       )}
       {lastError && <div className="error-bar" data-testid="error" role="alert">⚠ {lastError}</div>}
+
+      {redesign && snapshot && <SectionNavigator snapshot={snapshot} />}
 
       {snapshot ? (
         view === "mixer" ? (
