@@ -29,6 +29,15 @@ int runCommandScript (MoshEngine&, MoshOps&);
     exits. Used by the BlackHole virtual loopback gate. */
 int runLiveAudioSmoke (MoshEngine&, MoshOps&);
 
+/** Voice STT smoke (`Mosh --voice-smoke`): synthesizes a known phrase with macOS
+    `say`, transcribes it through SFSpeechRecognizer, and asserts the transcript
+    matches — proving the speech-to-text path end-to-end with nobody speaking. FILE
+    mode (default) needs only Speech-Recognition auth (no mic). MIC mode
+    (MOSH_VOICE_SMOKE_MIC=1) drives the live mic recognizer while `say` plays into the
+    default input — pair with a BlackHole input for a reliable digital loopback. Needs
+    a one-time Speech (and, for MIC, Microphone) grant; reports clearly if ungranted. */
+int runVoiceSmoke (MoshEngine&, MoshOps&);
+
 /** Audible A/B of a real Tier-A neural model (`Mosh --neural-ab`): imports a DI clip
     (MOSH_NEURAL_AB_WAV), loads a real RTNeural model (MOSH_NEURAL_AB_MODEL) into a
     neural insert, and plays it through the device alternating amp-on / bypassed so a

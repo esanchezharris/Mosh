@@ -41,6 +41,12 @@ public:
         Does NOT imply the user has granted permission (that is requested on start). */
     static bool isSupported();
 
+    /** Current Speech-Recognition authorization, SYNCHRONOUS (no prompt). Maps
+        SFSpeechRecognizerAuthorizationStatus: 0 notDetermined · 1 denied · 2 restricted
+        · 3 authorized. -1 on non-macOS. Lets a headless caller bail cleanly when the
+        grant is missing instead of entering the async path. */
+    static int authorizationStatus();
+
     /** Request permission (once) and begin capturing + transcribing. Safe to call
         again while idle; a no-op while already listening. Single-shot: the recognizer
         ends on the first endpointed phrase (onFinal → onStop). Drives hold-to-talk. */
@@ -66,6 +72,13 @@ public:
         audio CONCURRENTLY with the DAW's own input recording (not merely that the engine
         started). Reset on each start()/startContinuous(). 0 on non-macOS. */
     unsigned long tapBufferCount() const;
+
+    /** One-shot FILE transcription (SFSpeechURLRecognitionRequest) for the headless
+        voice smoke (`Mosh --voice-smoke`). Transcribes an audio file on-device and
+        delivers the text via Callbacks::onFinal (or onError), on the message thread.
+        Needs Speech-Recognition authorization but NO microphone — it proves the STT
+        engine end-to-end on a known phrase with nobody speaking. No-op on non-macOS. */
+    void transcribeFile (const juce::String& audioPath, Callbacks cb);
 
 private:
     struct Impl;
