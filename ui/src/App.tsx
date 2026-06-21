@@ -30,6 +30,7 @@ import { MonsterChanges } from "./ui/MonsterChanges";
 import { SessionRail } from "./ui/SessionRail";
 import { AgentComposer } from "./ui/AgentComposer";
 import { SectionNavigator } from "./ui/SectionNavigator";
+import { FileOptions } from "./ui/FileOptions";
 
 export function App() {
   const init = useStore((s) => s.init);
@@ -96,6 +97,7 @@ export function App() {
 
       {redesign && snapshot && (
         <div className="promptbar" data-testid="promptbar">
+          <FileOptions snapshot={snapshot} />
           <AgentComposer />
         </div>
       )}

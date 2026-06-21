@@ -129,3 +129,36 @@ test("flag off (default): the bottom dock is present", async ({ page }) => {
   await expect(page.getByTestId("arrangement")).toBeVisible();
   await expect(page.getByTestId("dock")).toBeVisible();
 });
+
+test('flag on: the "+" control consolidates file/options/export (topbar drops File + Export)', async ({ page }) => {
+  await bootRedesign(page);
+  const plus = page.getByTestId("file-options");
+  await expect(plus).toBeVisible();
+  // The classic topbar File menu + Export popover are gone — the "+" owns them now.
+  await expect(page.locator(".topbar-tools").getByRole("button", { name: "File", exact: true })).toHaveCount(0);
+
+  await plus.click();
+  const menu = page.getByTestId("file-options-menu");
+  await expect(menu.getByText("New", { exact: true })).toBeVisible();
+  await expect(menu.getByText("Save", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("export-run")).toBeVisible(); // shared Export controls
+});
+
+test('flag on: the "+" Settings sub-panel swaps in and back', async ({ page }) => {
+  await bootRedesign(page);
+  await page.getByTestId("file-options").click();
+  await page.getByTestId("fo-settings").click();
+  const head = page.locator(".fo-sub-head");
+  await expect(head).toContainText("Settings");
+  await head.getByRole("button", { name: "Back" }).click();
+  // Back to the file actions.
+  await expect(page.getByTestId("file-options-menu")).toBeVisible();
+});
+
+test('flag off (default): no "+" control; the topbar keeps File + Export', async ({ page }) => {
+  await page.addInitScript(() => window.localStorage.clear());
+  await page.goto("/");
+  await expect(page.getByTestId("arrangement")).toBeVisible();
+  await expect(page.getByTestId("file-options")).toHaveCount(0);
+  await expect(page.locator(".topbar-tools").getByRole("button", { name: "File", exact: true })).toBeVisible();
+});

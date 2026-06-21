@@ -7,12 +7,14 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import * as QRCode from "qrcode";
 import { useStore } from "../store";
+import { useSettings } from "../settings/store";
 import { pickFiles, pickSaveFile } from "../bridge";
 import { runAction, FILE_MENU, type ActionId } from "../menuActions";
-import type { Snapshot, ExportFormat, CommandLog as CommandLogData, TrainingState } from "../types";
+import type { Snapshot, CommandLog as CommandLogData, TrainingState } from "../types";
 import { SampleBrowser } from "./SampleBrowser";
 import { SettingsPanel } from "../settings/SettingsPanel";
 import { MultiplayerPanel } from "./MultiplayerPanel";
+import { ExportControls } from "./ExportControls";
 
 // Small popover anchored under its trigger; closes on outside click / Esc.
 function Pop({ label, title, on, className, children }: { label: string; title: string; on?: boolean; className?: string; children: (close: () => void) => React.ReactNode }) {
@@ -36,13 +38,15 @@ function Pop({ label, title, on, className, children }: { label: string; title: 
 export function TopbarTools({ snapshot }: { snapshot: Snapshot }) {
   const theme = useStore((s) => s.theme);
   const toggleTheme = useStore((s) => s.toggleTheme);
+  const redesign = useSettings((s) => Boolean(s.values.redesignShell));
   const audioEnabled = snapshot.session.audioEnabled ?? true;
   return (
     <div className="topbar-tools">
-      <FileMenu snapshot={snapshot} />
+      {/* In the redesign the File menu + Export move into the bottom-left "+" control. */}
+      {!redesign && <FileMenu snapshot={snapshot} />}
       <Pop label="🗀" title="Browse audio samples">{() => <SampleBrowser />}</Pop>
       <Pop label="⚙" title="Settings" className="settings-pop">{() => <SettingsPanel snapshot={snapshot} />}</Pop>
-      <ExportTool audioEnabled={audioEnabled} />
+      {!redesign && <ExportTool audioEnabled={audioEnabled} />}
       <TrainingTool training={snapshot.training ?? null} />
       <CommandLogTool />
       <RemoteTool />
@@ -314,44 +318,10 @@ function HelpTool() {
   );
 }
 
-const FORMATS: { value: ExportFormat; depths: number[] }[] = [
-  { value: "wav", depths: [16, 24, 32] }, { value: "aiff", depths: [16, 24, 32] }, { value: "flac", depths: [16, 24] },
-];
-
 function ExportTool({ audioEnabled }: { audioEnabled: boolean }) {
-  const exec = useStore((s) => s.exec);
-  const [format, setFormat] = useState<ExportFormat>("wav");
-  const [bitDepth, setBitDepth] = useState(24);
-  const [busy, setBusy] = useState(false);
-  const [done, setDone] = useState("");
-  const depths = FORMATS.find((f) => f.value === format)!.depths;
-  const onExport = async () => {
-    setBusy(true); setDone("");
-    const r = await exec("export_audio", { format, bitDepth });
-    setBusy(false);
-    if (r.ok) setDone((r.data as { file?: string } | undefined)?.file ?? "exported");
-  };
   return (
     <Pop label="⤓" title={audioEnabled ? "Export the mix" : "No audio device — export disabled"}>
-      {() => (
-        <>
-          <div className="pop-head">Export</div>
-          <div className="pop-group">
-            <label className="pop-row"><span>Format</span>
-              <select value={format} onChange={(e) => { const f = e.target.value as ExportFormat; setFormat(f); const d = FORMATS.find((x) => x.value === f)!.depths; if (!d.includes(bitDepth)) setBitDepth(d.includes(24) ? 24 : d[0]); }}>
-                {FORMATS.map((f) => <option key={f.value} value={f.value}>{f.value.toUpperCase()}</option>)}
-              </select>
-            </label>
-            <label className="pop-row"><span>Bit depth</span>
-              <select value={String(bitDepth)} onChange={(e) => setBitDepth(Number(e.target.value))}>{depths.map((d) => <option key={d} value={d}>{d}-bit</option>)}</select>
-            </label>
-          </div>
-          <div className="pop-actions">
-            <button className="btn" data-testid="export-run" disabled={busy || !audioEnabled} onClick={onExport}>{busy ? "Exporting…" : "Export"}</button>
-          </div>
-          {done && <div className="pop-note tc" title={done}>Exported: {done}</div>}
-        </>
-      )}
+      {() => <ExportControls audioEnabled={audioEnabled} />}
     </Pop>
   );
 }
