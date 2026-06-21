@@ -18,10 +18,14 @@ import { createHandsFree, type HandsFree } from "../agent/handsFree";
 // composer — but DROPS anything unknown (never the brain). Returns pause/resume so
 // hold-to-talk can temporarily own the mic for an open-ended (LLM) ask, then hand it
 // back. The controller is pure; this hook is just its React lifecycle + store wiring.
-function useHandsFree(): { pauseForPushToTalk: () => void; resumeAfterPushToTalk: () => void } {
+function useHandsFree(onUnknown: (text: string) => void): { pauseForPushToTalk: () => void; resumeAfterPushToTalk: () => void } {
   const handsFreeOn = useStore((s) => s.handsFreeOn);
   const ctrlRef = useRef<HandsFree | null>(null);
   const pausedRef = useRef(false);
+  // The controller is built once; keep the latest onUnknown closure in a ref so the
+  // caption it flashes always uses the current component state.
+  const onUnknownRef = useRef(onUnknown);
+  onUnknownRef.current = onUnknown;
 
   if (!ctrlRef.current) {
     ctrlRef.current = createHandsFree({
@@ -47,6 +51,7 @@ function useHandsFree(): { pauseForPushToTalk: () => void; resumeAfterPushToTalk
       },
       makeSource: (cb) => createContinuousVoiceInput(cb),
       setListening: (b) => useStore.getState().setAgentListening(b),
+      onUnknown: (text) => onUnknownRef.current(text),
     });
   }
 
@@ -105,10 +110,20 @@ export function AgentComposer() {
   const brainRef = useRef<Brain | null>(null);
   if (!brainRef.current) brainRef.current = createBrain(() => useStore.getState().snapshot);
 
+  // A brief, self-clearing caption. Used for the hands-free "heard but not a command"
+  // acknowledgement so an always-on mic isn't a silent black box.
+  const sayTimer = useRef<number | undefined>(undefined);
+  const flashSay = (text: string) => {
+    setSay(text);
+    if (sayTimer.current !== undefined) clearTimeout(sayTimer.current);
+    sayTimer.current = window.setTimeout(() => setSay((cur) => (cur === text ? null : cur)), 3200);
+  };
+  useEffect(() => () => { if (sayTimer.current !== undefined) clearTimeout(sayTimer.current); }, []);
+
   const voiceSupported = isVoiceSupported();
   // undefined = not yet built; null = platform has no speech API.
   const voiceRef = useRef<VoiceInput | null | undefined>(undefined);
-  const handsFree = useHandsFree();
+  const handsFree = useHandsFree((heard) => flashSay(`“${heard}” (not a command)`));
 
   // The single funnel: typed text and final speech both arrive here.
   const run = async (text: string) => {

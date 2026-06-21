@@ -22,6 +22,7 @@ function harness(opts: { mode?: Mode; busy?: boolean } = {}) {
   };
   const makeSource = vi.fn((c: VoiceCallbacks): VoiceInput => { cb = c; return source; });
   const dispatch = vi.fn(async (a: FastAction) => { dispatched.push(a); });
+  const onUnknown = vi.fn();
   const hf = createHandsFree({
     getCtx: () => ({ mode, tempo: 120, timeSigNum: 4 }),
     isBusy: () => busy,
@@ -29,10 +30,11 @@ function harness(opts: { mode?: Mode; busy?: boolean } = {}) {
     dispatch,
     makeSource,
     setListening,
+    onUnknown,
     now: () => now,
   });
   return {
-    hf, dispatched, makeSource, setListening, dispatch,
+    hf, dispatched, makeSource, setListening, dispatch, onUnknown,
     pushFinal: (t: string): Promise<void> => Promise.resolve(cb.onFinal?.(t) as unknown as void),
     advance: (ms: number) => { now += ms; },
     forceBusy: (b: boolean) => { busy = b; },
@@ -56,6 +58,33 @@ describe("createHandsFree", () => {
     await h.pushFinal("make the bass warmer and add some reverb");
     expect(h.dispatched).toHaveLength(0);
     expect(h.dispatch).not.toHaveBeenCalled();
+  });
+
+  it("reports the heard phrase via onUnknown when it is not a command (so it's not silent)", async () => {
+    const h = harness();
+    h.hf.engage();
+    await h.pushFinal("make the bass warmer and add some reverb");
+    expect(h.onUnknown).toHaveBeenCalledTimes(1);
+    expect(h.onUnknown).toHaveBeenCalledWith("make the bass warmer and add some reverb");
+  });
+
+  it("does NOT call onUnknown for a known command (it dispatches instead)", async () => {
+    const h = harness();
+    h.hf.engage();
+    await h.pushFinal("play it");
+    expect(h.dispatched).toHaveLength(1);
+    expect(h.onUnknown).not.toHaveBeenCalled();
+  });
+
+  it("does NOT call onUnknown while busy or for a deduped repeat", async () => {
+    const h = harness({ busy: true });
+    h.hf.engage();
+    await h.pushFinal("make the bass warmer"); // busy → dropped silently, no caption spam
+    expect(h.onUnknown).not.toHaveBeenCalled();
+    h.forceBusy(false);
+    await h.pushFinal("some other thing");
+    await h.pushFinal("some other thing");    // duplicate inside the dedupe window
+    expect(h.onUnknown).toHaveBeenCalledTimes(1);
   });
 
   it("resolves commands against the LIVE performer mode (barge-in 'stop')", async () => {

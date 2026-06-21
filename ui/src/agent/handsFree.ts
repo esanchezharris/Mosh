@@ -28,6 +28,9 @@ export type HandsFreeDeps = {
   makeSource: (cb: VoiceCallbacks) => VoiceInput | null;
   /** Reflect the hot-mic indicator. */
   setListening: (b: boolean) => void;
+  /** A heard phrase that ISN'T a command — surface a brief "(not a command)" caption
+      so an always-on mic isn't a silent black box. Never routed to the brain. */
+  onUnknown?: (text: string) => void;
   /** Surface a fatal recognizer error (optional). */
   onError?: (msg: string) => void;
   /** Injectable clock for the dedupe window (defaults to Date.now). */
@@ -61,7 +64,7 @@ export function createHandsFree(deps: HandsFreeDeps): HandsFree {
     lastText = text;
     lastAt = t;
     const action = matchFastPath(text, deps.getCtx());
-    if (!action) return; // unknown phrase — ignore; NEVER falls through to the brain
+    if (!action) { deps.onUnknown?.(text); return; } // unknown — flash a caption, NEVER the brain
     deps.setBusy(true);
     try {
       await deps.dispatch(action);
