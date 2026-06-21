@@ -31,6 +31,9 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "set_clip_gain", desc: "Set a clip's gain in dB", args: [S("clipId"), N("gainDb")] },
   { command: "set_clip_mute", desc: "Mute/unmute a clip", args: [S("clipId"), B("mute")] },
 
+  // ── embodied capture (Sketch, Phase 0) ───────────────────────────────────
+  { command: "sketch_beatbox", desc: "Transduce a recorded beatbox WAV into an editable drum clip at a known BPM (kick/snare/hat on a 16th grid)", args: [S("file", true, "path to the beatbox WAV"), N("bpm", true, "known tempo"), N("bars", false, "loop length, 1-2 bars")] },
+
   // ── MIDI notes ──────────────────────────────────────────────────────────
   { command: "add_note", desc: "Add a MIDI note (pitch 0-127) to a MIDI clip", args: [S("clipId"), N("pitch"), N("start", true, "beats"), N("length", true, "beats"), N("velocity", false, "0-127")] },
   { command: "remove_note", desc: "Remove a MIDI note by index", args: [S("clipId"), N("noteIndex")] },
@@ -141,6 +144,7 @@ export function describeCommand(command: string, args: Record<string, unknown>):
     case "rename_clip": return `Renamed a clip to "${a.name}"`;
     case "set_clip_gain": return `Set clip gain to ${a.gainDb} dB`;
     case "set_clip_mute": return a.mute ? `Muted a clip` : `Unmuted a clip`;
+    case "sketch_beatbox": return `Turned a beatbox into a drum clip`;
     case "add_note": return `Added a note`;
     case "remove_note": return `Removed a note`;
     case "set_note": return `Edited a note`;

@@ -20,6 +20,10 @@ cd "$(dirname "$0")"
 # transcribe/setup-transcribe.sh) exports BASIC_PITCH_PY. Absent → /transcribe
 # degrades gracefully to 503 transcription_unavailable.
 [[ -f transcribe/.transcribe.env ]] && source ./transcribe/.transcribe.env
+# Sketch (beatbox -> drum MoshOps) lives in its own venv; .sketch.env (written by
+# sketch/setup-sketch.sh) exports SKETCH_PY. Absent → /sketch degrades gracefully to
+# 503 sketch_unavailable.
+[[ -f sketch/.sketch.env ]] && source ./sketch/.sketch.env
 
 export SA3_MLX_DIR="${SA3_MLX_DIR:-$HOME/AI/stable-audio-3/optimized/mlx}"
 export COLORRACK_DATA="${COLORRACK_DATA:-$(pwd)/colors/COLORRACK_DATA}"
