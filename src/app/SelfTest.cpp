@@ -4659,13 +4659,28 @@ int runVoiceSmoke (MoshEngine& eng, MoshOps& ops)
     const bool micMode  = SystemStats::getEnvironmentVariable ("MOSH_VOICE_SMOKE_MIC", "0") == "1";
     const int  timeoutMs = jmax (4000, SystemStats::getEnvironmentVariable ("MOSH_VOICE_SMOKE_TIMEOUT_MS", "25000").getIntValue());
 
+    // Also write the verdict to a fixed file. TCC attributes a shell-launched binary to
+    // the terminal (not the granted Mosh.app), so the smoke must be `open`-launched to
+    // see the Speech/Mic grant — and an `open` run can't return its stderr, so the
+    // driver reads this file instead.
+    auto resultFile = File::getSpecialLocation (File::userHomeDirectory)
+                          .getChildFile ("Library/Mosh/voice-smoke-result.txt");
+    resultFile.getParentDirectory().createDirectory();
+    resultFile.deleteFile();
+    auto finish = [&resultFile] (int rc, const String& summary)
+    {
+        resultFile.replaceWithText (String (rc) + "\t" + summary + "\n");
+        std::cerr << "  [result] rc=" << rc << "  " << summary.toStdString() << "\n";
+        return rc;
+    };
+
     std::cerr << "===== Mosh voice smoke (" << (micMode ? "MIC / loopback" : "FILE") << ") =====\n";
     std::cerr << "  phrase: \"" << phrase.toStdString() << "\"\n";
 
     if (! NativeSpeech::isSupported())
     {
         std::cerr << "  FAIL: native speech-to-text is unsupported here\n";
-        return 1;
+        return finish (1, "native speech-to-text unsupported");
     }
 
     // Gate on the SYNCHRONOUS auth status. A headless process can't raise the system
@@ -4682,7 +4697,7 @@ int runVoiceSmoke (MoshEngine& eng, MoshOps& ops)
                      "  Grant it ONCE via the GUI — launch the app, use voice (the 👂 cap / hold-to-talk),\n"
                      "  approve the Speech" << (micMode ? " + Microphone" : "") << " prompt — then re-run this. A headless\n"
                      "  run can't surface the system prompt. Returning 2 (skipped, not a failure).\n";
-        return 2;
+        return finish (2, "skip: speech auth status " + String (auth));
     }
     std::cerr << "  Speech Recognition authorized ✓\n";
 
@@ -4722,7 +4737,7 @@ int runVoiceSmoke (MoshEngine& eng, MoshOps& ops)
         if (! aiff.existsAsFile() || aiff.getSize() == 0)
         {
             std::cerr << "  FAIL: `say` produced no audio at " << aiff.getFullPathName().toStdString() << "\n";
-            return 1;
+            return finish (1, "say produced no audio");
         }
         std::cerr << "  synthesized " << aiff.getSize() << " bytes via `say`, transcribing…\n";
         speech.transcribeFile (aiff.getFullPathName(), cb);
@@ -4753,7 +4768,7 @@ int runVoiceSmoke (MoshEngine& eng, MoshOps& ops)
         }
         else
             std::cerr << "  FAIL: no transcript within " << timeoutMs << "ms\n";
-        return 1;
+        return finish (1, error.isNotEmpty() ? ("error: " + error) : "no transcript within timeout");
     }
 
     std::cerr << "  transcript: \"" << transcript.toStdString() << "\"\n";
@@ -4765,7 +4780,7 @@ int runVoiceSmoke (MoshEngine& eng, MoshOps& ops)
     for (const auto& w : words) if (nt.containsIgnoreCase (" " + w + " ")) ++hits;
     const bool pass = words.size() > 0 && hits >= jmax (1, (words.size() * 2) / 3);   // ≥ 2/3 of the words
     std::cerr << "  matched " << hits << "/" << words.size() << " phrase words → " << (pass ? "PASS" : "FAIL") << "\n";
-    return pass ? 0 : 1;
+    return finish (pass ? 0 : 1, "transcript=\"" + transcript + "\"; matched " + String (hits) + "/" + String (words.size()) + " words");
 }
 
 } // namespace mosh
