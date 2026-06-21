@@ -3,18 +3,52 @@ import Foundation
 import Speech
 
 @MainActor
+protocol SpeechCommandSource: AnyObject {
+    func refreshAvailability() async -> Bool
+    func start(onCommand: @escaping (String) -> Void) throws
+    func stop()
+}
+
+@MainActor
 final class SpeechCommandRecognizer: ObservableObject {
     @Published private(set) var isListening = false
     @Published private(set) var isAvailable = false
 
+    private let commandSource: SpeechCommandSource
+
+    init(commandSource: SpeechCommandSource = AppleSpeechCommandSource()) {
+        self.commandSource = commandSource
+    }
+
+    func refreshAvailability() async {
+        isAvailable = await commandSource.refreshAvailability()
+    }
+
+    func start(onCommand: @escaping (String) -> Void) throws {
+        guard isAvailable else { throw CompanionError.speechUnavailable }
+        stop()
+        try commandSource.start { phrase in
+            onCommand(phrase.lowercased())
+        }
+        isListening = true
+    }
+
+    func stop() {
+        commandSource.stop()
+        isListening = false
+    }
+}
+
+@MainActor
+private final class AppleSpeechCommandSource: SpeechCommandSource {
     private let recognizer = SFSpeechRecognizer()
     private let engine = AVAudioEngine()
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
 
-    func refreshAvailability() async {
+    func refreshAvailability() async -> Bool {
         let auth = await Self.requestAuthorizationStatus()
-        isAvailable = auth == .authorized && (recognizer?.supportsOnDeviceRecognition ?? false)
+        return auth == .authorized && (recognizer?.supportsOnDeviceRecognition ?? false)
     }
 
     nonisolated private static func requestAuthorizationStatus() async -> SFSpeechRecognizerAuthorizationStatus {
@@ -26,7 +60,6 @@ final class SpeechCommandRecognizer: ObservableObject {
     }
 
     func start(onCommand: @escaping (String) -> Void) throws {
-        guard isAvailable else { throw CompanionError.speechUnavailable }
         stop()
 
         let session = AVAudioSession.sharedInstance()
@@ -51,7 +84,6 @@ final class SpeechCommandRecognizer: ObservableObject {
 
         engine.prepare()
         try engine.start()
-        isListening = true
     }
 
     func stop() {
@@ -63,6 +95,5 @@ final class SpeechCommandRecognizer: ObservableObject {
         task?.cancel()
         request = nil
         task = nil
-        isListening = false
     }
 }

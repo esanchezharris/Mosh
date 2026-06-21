@@ -67,6 +67,7 @@ Local simulator gate:
 ```sh
 scripts/iphone-companion-sim-gate.sh          # build + CompanionClientTests
 MOSH_IOS_SIM_GATE_MODE=build scripts/iphone-companion-sim-gate.sh   # build-only smoke
+scripts/iphone-companion-sim-media-gate.sh    # QR/app-handoff + media seam ladder
 ```
 
 The script is the hardware-free, CI-ready gate: it auto-selects an available
@@ -85,8 +86,13 @@ that `swiftc -parse` cannot (parse only checks syntax, not cross-file symbol
 resolution). The simulator is the required local gate for ordinary companion
 hardening. It covers app launch, deep-link pairing, local server connectivity,
 stale/offline recovery, receipts, command suppression, and non-hardware UI flow.
-Physical iPhone proof remains a manual hardware gate for camera QR scan, real
-microphone takes, real on-device Speech behavior, and acoustic monitoring.
+`scripts/iphone-companion-sim-media-gate.sh` adds the hardware-dependency
+ladder: it renders and decodes a QR PNG for the native pairing URL, opens that
+same URL into the installed simulator app against a local Mac stub server, and
+runs the fixture-backed recorder, transcript, and synthetic monitoring tests.
+Physical iPhone proof remains a manual hardware gate for camera focus/scanning,
+real microphone takes, Apple on-device Speech behavior, and acoustic monitoring
+through the actual iPhone speaker/mic path.
 
 Physical device gate:
 
