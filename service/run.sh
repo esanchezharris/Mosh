@@ -24,6 +24,10 @@ cd "$(dirname "$0")"
 # sketch/setup-sketch.sh) exports SKETCH_PY. Absent → /sketch degrades gracefully to
 # 503 sketch_unavailable.
 [[ -f sketch/.sketch.env ]] && source ./sketch/.sketch.env
+# Phase-4 SFT lane lives in its own mlx-lm venv; .sft.env (written by
+# sft/setup-sft.sh) exports SFT_PY for the trainer CLI. Absent → the SFT lane is
+# simply unavailable; the rest of the service is unaffected.
+[[ -f sft/.sft.env ]] && source ./sft/.sft.env
 
 export SA3_MLX_DIR="${SA3_MLX_DIR:-$HOME/AI/stable-audio-3/optimized/mlx}"
 export COLORRACK_DATA="${COLORRACK_DATA:-$(pwd)/colors/COLORRACK_DATA}"
