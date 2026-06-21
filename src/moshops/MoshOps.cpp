@@ -3542,7 +3542,7 @@ juce::var MoshOps::cmdTranscribeClip (const juce::var& args)
             maxEndS = juce::jmax (maxEndS, e);
         }
         auto* a = new juce::DynamicObject();
-        a->setProperty ("name", "MIDI \xe2\x80\xa2 " + srcName);   // "MIDI • <clip>"
+        a->setProperty ("name", juce::String (juce::CharPointer_UTF8 ("MIDI \xe2\x80\xa2 ")) + srcName);   // "MIDI • <clip>"
         a->setProperty ("start", clipStart);
         a->setProperty ("length", juce::jmax (1.0, maxEndS + 0.1));
         a->setProperty ("notes", juce::var (notes));
@@ -3608,7 +3608,7 @@ juce::var MoshOps::cmdSketchBeatbox (const juce::var& args)
     if (file.isEmpty() || ! wav.existsAsFile())
         return errResult ("sketch_beatbox", "no readable audio file: " + file);
     if (bpm < 20.0 || bpm > 300.0)
-        return errResult ("sketch_beatbox", "bpm must be 20-300 (the tempo is known — box to a click)");
+        return errResult ("sketch_beatbox", juce::String (juce::CharPointer_UTF8 ("bpm must be 20-300 (the tempo is known — box to a click)")));
 
     const auto srcName = wav.getFileNameWithoutExtension();
 
@@ -3690,7 +3690,7 @@ juce::var MoshOps::cmdSketchBeatbox (const juce::var& args)
         juce::String clipId;
         { auto* a = new juce::DynamicObject();
           a->setProperty ("trackId", trackId);
-          a->setProperty ("name", "Sketch \xe2\x80\xa2 " + srcName);   // "Sketch • <file>" (parity with transcribe)
+          a->setProperty ("name", juce::String (juce::CharPointer_UTF8 ("Sketch \xe2\x80\xa2 ")) + srcName);   // "Sketch • <file>" (parity with transcribe)
           a->setProperty ("start", 0.0);
           a->setProperty ("length", loopSeconds);
           a->setProperty ("notes", juce::var (notes));
@@ -4334,8 +4334,10 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
     const bool wait = (bool) args.getProperty ("wait", false);
     if (wait)
     {
+        const auto adapter = node[ids::modelAdapter].toString();
+        const auto defaultWaitMs = (adapter == "stable_audio3" || adapter == "sa3") ? "360000" : "120000";
         const int waitTimeoutMs = juce::jmax (1000, juce::SystemStats::getEnvironmentVariable (
-            "MOSH_RENDER_WAIT_TIMEOUT_MS", "120000").getIntValue());
+            "MOSH_RENDER_WAIT_TIMEOUT_MS", defaultWaitMs).getIntValue());
         const int maxPolls = juce::jmax (1, waitTimeoutMs / 50);
         for (int i = 0; i < maxPolls; ++i)   // default ~120s; PC CUDA cold loads can opt into longer waits
         {
@@ -4344,7 +4346,12 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
             emit ("layer_render_progress", [&] { auto* o = new DynamicObject();
                 o->setProperty ("clipId", clipId); o->setProperty ("jobId", jobId);
                 o->setProperty ("progress", st.getProperty ("progress", 0.0)); return var (o); }());
-            if (status == "ready" || status == "error" || status == "cancelled") break;
+            // The file+manifest pair is the durable job contract. Real SA3 can finish
+            // and write both files while /status is already unreachable during process
+            // teardown, so don't turn a completed render into a false timeout.
+            if (status == "ready" || (output.existsAsFile() && manifest.existsAsFile())
+                || status == "error" || status == "cancelled")
+                break;
             juce::Thread::sleep (50);
         }
         finalizeRender (clipId, output, manifest, fp);
@@ -4369,7 +4376,9 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
                     o->setProperty ("clipId", clipId); o->setProperty ("jobId", jobId);
                     o->setProperty ("progress", progress); return juce::var (o); }());
             });
-            if (status == "ready" || status == "error" || status == "cancelled") break;
+            if (status == "ready" || (output.existsAsFile() && manifest.existsAsFile())
+                || status == "error" || status == "cancelled")
+                break;
             juce::Thread::sleep (100);
         }
         juce::MessageManager::callAsync ([this, clipId, output, manifest, fp]

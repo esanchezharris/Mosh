@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-APP="${MOSH_APP_BIN:-$REPO/build/Mosh_artefacts/Debug/Mosh.app/Contents/MacOS/Mosh}"
+APP="${MOSH_APP_BIN:-$REPO/build-macos-arm64/Mosh_artefacts/Debug/Mosh.app/Contents/MacOS/Mosh}"
 DEVICE="${MOSH_AUDIO_OUTPUT_DEVICE:-BlackHole 2ch}"
 FFMPEG="${FFMPEG:-ffmpeg}"
 EVID="${MOSH_EVID:-$REPO/_preserved_artifacts/2026-06-08-consolidation/claudemosh/blackhole-live-audio-$(date +%Y%m%d-%H%M%S)}"

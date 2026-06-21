@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-MANIFEST="${1:-$REPO/docs/consolidation/2026-06-08-preservation-manifest.tsv}"
+MANIFEST="${1:-$REPO/docs/archive/consolidation/2026-06-08-preservation-manifest.tsv}"
 
 if [[ ! -f "$MANIFEST" ]]; then
   echo "missing manifest: $MANIFEST" >&2

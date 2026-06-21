@@ -55,6 +55,11 @@ namespace
         std::cerr << "--- " << name.toStdString() << " ---" << std::endl;
     }
 
+    void section (const char* name)
+    {
+        section (juce::String (juce::CharPointer_UTF8 (name)));
+    }
+
     void check (bool cond, const juce::String& what)
     {
         ++checks;
@@ -63,6 +68,11 @@ namespace
             std::cerr << "[" << activeSection.toStdString() << "] ";
         std::cerr << what << std::endl;  // flush each line
         if (! cond) ++failures;
+    }
+
+    void check (bool cond, const char* what)
+    {
+        check (cond, juce::String (juce::CharPointer_UTF8 (what)));
     }
 
     juce::var cmd (MoshOps& ops, const juce::String& name, juce::var args = juce::var())
@@ -1707,31 +1717,64 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             auto bb = cmd (ops, "sketch_beatbox", objN ({{ "file", boombap.getFullPathName() },
                                                          { "bpm", 90.0 }, { "bars", 1 }, { "wait", true }}));
             check (ok (bb), "sketch_beatbox (boombap, wait) ok");
-            check (bb["data"].getProperty ("status", var()).toString() == "done", "transduction completed -> done");
-            check ((int) bb["data"].getProperty ("noteCount", 0) > 0, "boom-bap produced >=1 drum note");
+            const auto bbData = bb.getProperty ("data", var());
+            if (! ok (bb))
+                check (false, "sketch_beatbox failed without crashing: " + bb.getProperty ("error", var()).toString());
+            check (bbData.getProperty ("status", var()).toString() == "done", "transduction completed -> done");
+            check ((int) bbData.getProperty ("noteCount", 0) > 0, "boom-bap produced >=1 drum note");
             check (tracks (ops) == before + 1, "boom-bap landed a new drum track");
-            check (hasPitch (bb["data"], 36), "boom-bap has a kick (GM 36)");
-            check (hasPitch (bb["data"], 38), "boom-bap has a snare (GM 38)");
-            check (hasPitch (bb["data"], 42), "boom-bap has a hat (GM 42)");
+            check (hasPitch (bbData, 36), "boom-bap has a kick (GM 36)");
+            check (hasPitch (bbData, 38), "boom-bap has a snare (GM 38)");
+            check (hasPitch (bbData, 42), "boom-bap has a hat (GM 42)");
 
             // Emitted PURELY as MoshOps: the first op is set_tempo carrying the known bpm.
-            auto op0 = bb["data"].getProperty ("moshops", var())[0];
-            check (op0.getProperty ("command", var()).toString() == "set_tempo", "first emitted op is set_tempo");
-            check ((double) op0.getProperty ("args", var()).getProperty ("bpm", 0.0) == 90.0, "set_tempo carries the known bpm (90)");
+            auto moshopsVar = bbData.getProperty ("moshops", var());
+            auto* moshops = moshopsVar.getArray();
+            if (moshops != nullptr && ! moshops->isEmpty())
+            {
+                auto op0 = moshops->getReference (0);
+                check (op0.getProperty ("command", var()).toString() == "set_tempo", "first emitted op is set_tempo");
+                check ((double) op0.getProperty ("args", var()).getProperty ("bpm", 0.0) == 90.0, "set_tempo carries the known bpm (90)");
+            }
+            else
+            {
+                check (false, "sketch result carries emitted MoshOps");
+            }
 
             // The clip is real + editable: it shows up in the snapshot as a MIDI clip with notes.
-            auto newTrack = ops.snapshot()["tracks"][before];
-            check (newTrack["clips"][0].getProperty ("type", var()).toString() == "midi", "landed clip is a MIDI clip");
-            check (newTrack["clips"][0].getProperty ("notes", var()).size() > 0, "drum clip carries the transduced notes");
+            auto snapAfterSketch = ops.snapshot();
+            auto tracksAfterSketch = snapAfterSketch["tracks"];
+            if (tracksAfterSketch.isArray() && tracksAfterSketch.size() > before)
+            {
+                auto newTrack = tracksAfterSketch[before];
+                auto clipsVar = newTrack["clips"];
+                if (clipsVar.isArray() && clipsVar.size() > 0)
+                {
+                    auto firstClip = clipsVar[0];
+                    check (firstClip.getProperty ("type", var()).toString() == "midi", "landed clip is a MIDI clip");
+                    check (firstClip.getProperty ("notes", var()).size() > 0, "drum clip carries the transduced notes");
+                }
+                else
+                {
+                    check (false, "landed sketch track carries a clip");
+                    check (false, "drum clip carries the transduced notes");
+                }
+            }
+            else
+            {
+                check (false, "landed clip is a MIDI clip");
+                check (false, "drum clip carries the transduced notes");
+            }
 
             // Determinism: same WAV + same bpm + same bars → byte-identical hits + notes.
             auto bb2 = cmd (ops, "sketch_beatbox", objN ({{ "file", boombap.getFullPathName() },
                                                           { "bpm", 90.0 }, { "bars", 1 }, { "wait", true }}));
-            const auto hits1 = juce::JSON::toString (bb ["data"].getProperty ("hits", var()));
-            const auto hits2 = juce::JSON::toString (bb2["data"].getProperty ("hits", var()));
+            const auto bb2Data = bb2.getProperty ("data", var());
+            const auto hits1 = juce::JSON::toString (bbData.getProperty ("hits", var()));
+            const auto hits2 = juce::JSON::toString (bb2Data.getProperty ("hits", var()));
             check (hits1.isNotEmpty() && hits1 == hits2, "determinism: identical transduced hits across 2 runs");
-            const auto notes1 = juce::JSON::toString (bb ["data"].getProperty ("notes", var()));
-            const auto notes2 = juce::JSON::toString (bb2["data"].getProperty ("notes", var()));
+            const auto notes1 = juce::JSON::toString (bbData.getProperty ("notes", var()));
+            const auto notes2 = juce::JSON::toString (bb2Data.getProperty ("notes", var()));
             check (notes1 == notes2, "determinism: identical emitted notes across 2 runs");
 
             // A second, different genre/tempo (trap @ 140) also yields all three roles, and
@@ -1744,7 +1787,8 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             auto tp = cmd (ops, "sketch_beatbox", objN ({{ "file", trap.getFullPathName() },
                                                          { "bpm", 140.0 }, { "bars", 1 }, { "wait", true }}));
             check (ok (tp), "sketch_beatbox (trap, wait) ok");
-            check (hasPitch (tp["data"], 36) && hasPitch (tp["data"], 38) && hasPitch (tp["data"], 42),
+            const auto tpData = tp.getProperty ("data", var());
+            check (hasPitch (tpData, 36) && hasPitch (tpData, 38) && hasPitch (tpData, 42),
                    "trap pattern has kick + snare + hat");
             check (tracks (ops) == beforeTrap + 1, "trap landed exactly one new drum track");
             check (std::abs (tempoNow() - 140.0) < 0.5, "tempo set to 140");
@@ -3596,7 +3640,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // Clear every key → no provider resolves and chat() errors cleanly (no network).
         mosh::unsetEnvVar ("DEEPSEEK_API_KEY"); mosh::unsetEnvVar ("XAI_API_KEY"); mosh::unsetEnvVar ("MOSHI_BRAIN_PROVIDER");
         check (! BrainProxy::resolve().isComplete(), "brain: nothing resolves when no key is set");
-        auto noProv = BrainProxy::chat (var (Array<var>{}), {});
+        auto noProv = BrainProxy::chat (var (Array<var>{}), juce::String());
         check (! (bool) noProv.getProperty ("ok", true),
                "brain: chat() with no provider returns { ok:false } (no crash, no network)");
 

@@ -11,6 +11,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")/.." && pwd)"   # repo root
 PORT="${PORT:-8799}"
 APP="${MOSH_BIN:-$(find "$HERE/build-macos-arm64" -name Mosh -path '*Mosh.app/Contents/MacOS/*' -type f 2>/dev/null | head -1)}"
+SESSION="${MOSH_SELFTEST_SESSION:-session-mp-selftest-$(date +%Y%m%d%H%M%S)-$$}"
 
 if [ -z "${APP:-}" ] || [ ! -x "$APP" ]; then
   echo "Mosh binary not found. Build the app or set MOSH_BIN=/path/to/Mosh" >&2
@@ -35,5 +36,12 @@ else:
     sys.exit("relay did not start")
 PY
 
-rm -rf ~/Library/Mosh/session-selftest ~/Library/Mosh/session-selftest-undo
-MOSH_NO_AUDIO=1 MOSH_SELFTEST_MP=1 MOSH_RELAY_URL="http://127.0.0.1:$PORT" "$APP" --selftest
+rm -rf "$HOME/Library/Mosh/$SESSION" ~/Library/Mosh/session-selftest-undo
+LOG="$(mktemp -t mosh-mp-selftest.XXXXXX.log)"
+MOSH_NO_AUDIO=1 MOSH_SELFTEST_SESSION="$SESSION" MOSH_SELFTEST_MP=1 MOSH_RELAY_URL="http://127.0.0.1:$PORT" "$APP" --selftest 2>&1 | tee "$LOG"
+status=${PIPESTATUS[0]}
+if rg -n 'JUCE Assertion failure|Leaked objects detected' "$LOG" >/dev/null; then
+  rg -n 'JUCE Assertion failure|Leaked objects detected' "$LOG" >&2
+  exit 1
+fi
+exit "$status"

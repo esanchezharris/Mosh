@@ -104,6 +104,46 @@ test("the Arrange/Mixer toggle stays on-screen even when the topbar OVERFLOWS", 
   await expect(page.getByTestId("mixer")).toBeVisible();
 });
 
+test("primary topbar controls stay inside the viewport at installed narrow width", async ({ page }) => {
+  const VW = 1440;
+  await page.setViewportSize({ width: VW, height: 858 });
+  await boot(page);
+
+  const controls = [
+    page.getByRole("button", { name: "File", exact: true }),
+    page.locator('button[title="Browse audio samples"]'),
+    page.locator('button[title="Settings"]'),
+    page.locator('button[title="Export the mix"]'),
+    page.getByRole("button", { name: "Arrange", exact: true }),
+    page.getByRole("button", { name: "Mixer", exact: true }),
+  ];
+
+  for (const control of controls) {
+    await expect(control).toBeVisible();
+    const box = (await control.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(VW + 1);
+  }
+});
+
+test("track header controls stay left of the arrangement lane", async ({ page }) => {
+  await boot(page);
+  await selectTrack(page, 0);
+  await addMidiClip(page);
+
+  const volume = page.getByTestId("track-header").first().locator('input[type="range"]');
+  const laneClip = page.getByTestId("clip").first();
+  await expect(volume).toBeVisible();
+  await expect(laneClip).toBeVisible();
+
+  const volumeBox = (await volume.boundingBox())!;
+  const laneBox = (await page.getByTestId("lane").first().boundingBox())!;
+  const clipBox = (await laneClip.boundingBox())!;
+
+  expect(volumeBox.x + volumeBox.width, "volume control must not intrude into lane hit area").toBeLessThanOrEqual(laneBox.x - 2);
+  expect(clipBox.x, "first clip must render inside the lane, not under the track header").toBeGreaterThanOrEqual(laneBox.x);
+});
+
 test.describe("narrow window", () => {
   test.use({ viewport: { width: 820, height: 720 } });
 
@@ -117,5 +157,23 @@ test.describe("narrow window", () => {
     // the File menu still opens (not clipped off-screen)
     await page.getByRole("button", { name: "File", exact: true }).click();
     await expect(page.getByTestId("file-menu")).toBeVisible();
+  });
+
+  test("toolbar actions do not clip off the right edge at 820px", async ({ page }) => {
+    await boot(page);
+    const toolbar = page.getByTestId("toolbar");
+    await expect(toolbar).toBeVisible();
+
+    const overflow = await toolbar.evaluate((el) => el.scrollWidth - el.clientWidth);
+    expect(overflow, "toolbar should wrap visible controls instead of horizontal clipping").toBeLessThanOrEqual(1);
+
+    for (const name of ["Undo", "Redo"]) {
+      const button = page.getByRole("button", { name, exact: true });
+      await expect(button).toBeVisible();
+      const box = await button.boundingBox();
+      expect(box, `${name} button must have a layout box`).not.toBeNull();
+      expect(box!.x).toBeGreaterThanOrEqual(0);
+      expect(box!.x + box!.width, `${name} right edge must be inside the viewport`).toBeLessThanOrEqual(821);
+    }
   });
 });
