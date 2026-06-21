@@ -464,12 +464,17 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:  # noqa: BLE001
                 self._send(503, {"ok": False, "error": f"colors unavailable: {e}", "colors": []})
         elif path == "/transform_targets":
-            # Route B discovery: the curated fake target list + free-text allowed. The
-            # real backend replaces this with its installed model/instrument set.
-            self._send(200, {"ok": True,
-                             "targets": ["violin", "flute", "choir", "strings",
-                                         "orchestra", "synth pad", "music box", "brass"],
-                             "freeText": True})
+            # Route C discovery: when the REAL RAVE backend is installed, list the
+            # installed .ts model stems (concrete targets, no free-text). Otherwise the
+            # Route B curated fake list + free-text.
+            from adapters import transform_adapter as _tx
+            if _tx.available():
+                self._send(200, {"ok": True, "targets": _tx.installed_targets(), "freeText": False})
+            else:
+                self._send(200, {"ok": True,
+                                 "targets": ["violin", "flute", "choir", "strings",
+                                             "orchestra", "synth pad", "music box", "brass"],
+                                 "freeText": True})
         elif path == "/training/health":
             self._send(200, {
                 "ok": True,

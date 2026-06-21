@@ -250,6 +250,7 @@ def main():
     ap = argparse.ArgumentParser(description="Mosh offline render-to-WAV verification")
     ap.add_argument("--bin", help="path to the Mosh binary (default: newest local build)")
     ap.add_argument("--sa3", action="store_true", help="also run the SA3 generative-transform check (needs the service)")
+    ap.add_argument("--rave", action="store_true", help="also run the real RAVE transform-path check (needs service/transform/.venv)")
     args = ap.parse_args()
 
     ART.mkdir(exist_ok=True)
@@ -268,6 +269,13 @@ def main():
     if args.sa3:
         from sa3_check import check_sa3_transform   # noqa: lazy import, optional
         r = check_sa3_transform(ctx, ART, run_script, stats, diff_rms, failed_commands)
+        rows.append(r)
+        print(f"  [{'PASS' if r['pass'] else 'FAIL'}] {r['check']}")
+        print(f"         {json.dumps(r['detail'])}")
+
+    if args.rave:
+        from rave_check import check_rave   # noqa: lazy import, optional
+        r = check_rave(ctx)
         rows.append(r)
         print(f"  [{'PASS' if r['pass'] else 'FAIL'}] {r['check']}")
         print(f"         {json.dumps(r['detail'])}")

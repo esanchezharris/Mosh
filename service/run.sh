@@ -24,6 +24,10 @@ cd "$(dirname "$0")"
 # sketch/setup-sketch.sh) exports SKETCH_PY. Absent → /sketch degrades gracefully to
 # 503 sketch_unavailable.
 [[ -f sketch/.sketch.env ]] && source ./sketch/.sketch.env
+# Transform (RAVE timbre transfer, Route C) lives in its own venv; .transform.env
+# (written by transform/setup-transform.sh) exports TRANSFORM_PY + RAVE_MODEL_DIR.
+# Absent → the `transform` adapter falls back to the deterministic fake (Route B).
+[[ -f transform/.transform.env ]] && source ./transform/.transform.env
 
 export SA3_MLX_DIR="${SA3_MLX_DIR:-$HOME/AI/stable-audio-3/optimized/mlx}"
 export COLORRACK_DATA="${COLORRACK_DATA:-$(pwd)/colors/COLORRACK_DATA}"

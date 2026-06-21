@@ -15,19 +15,40 @@ this deterministic fake (mirrors how `stable_audio3` degrades to `fake_adapter`)
 """
 from __future__ import annotations
 
+import json
 import math
 import os
 import struct
+import subprocess
 import wave
 
 
+def _cli_path() -> str:
+    return os.path.join(os.path.dirname(__file__), "..", "transform", "transform_cli.py")
+
+
+def _model_dir() -> str:
+    return os.environ.get("RAVE_MODEL_DIR", "")
+
+
+def installed_targets() -> list:
+    """RAVE model stems (the `target` names) present in RAVE_MODEL_DIR, sorted."""
+    d = _model_dir()
+    if not d or not os.path.isdir(d):
+        return []
+    return sorted(f[:-3] for f in os.listdir(d) if f.endswith(".ts"))
+
+
 def available() -> bool:
-    """True once a real transform backend (RAVE/MelodyFlow) is installed. Stub: False."""
-    return False
+    """True when the REAL RAVE backend is installed: the transform venv python exists
+    (TRANSFORM_PY, written by setup-transform.sh) AND at least one .ts model is present.
+    Otherwise the deterministic fake transform runs (mirrors stable_audio3 → fake)."""
+    py = os.environ.get("TRANSFORM_PY", "")
+    return bool(py and os.path.exists(py) and installed_targets())
 
 
 def backend_name() -> str:
-    return "fake-transform"
+    return "rave" if available() else "fake-transform"
 
 
 def _stable_int(text: str) -> int:
@@ -95,7 +116,7 @@ def _transform_samples(samples, n_channels, target: str, strength: float, seed: 
     return out
 
 
-def render(input_wav: str, output_wav: str, params: dict) -> dict:
+def _render_fake(input_wav: str, output_wav: str, params: dict) -> dict:
     """Read input_wav, apply the deterministic transform keyed on target+strength+seed,
     write output_wav, return an output manifest."""
     target = str(params.get("target", "") or "")
@@ -123,3 +144,49 @@ def render(input_wav: str, output_wav: str, params: dict) -> dict:
         "sample_rate": framerate,
         "channels": n_channels,
     }
+
+
+def _render_real(input_wav: str, output_wav: str, params: dict) -> dict:
+    """Drive the RAVE model under the dedicated transform venv (subprocess; torch stays
+    out of the service interpreter). Raises on failure so the job surfaces an error."""
+    target = str(params.get("target", "") or "")
+    strength = float(params.get("strength", 65.0))
+    seed = int(params.get("seed", 0))
+    py = os.environ.get("TRANSFORM_PY", "")
+    proc = subprocess.run(
+        [py, _cli_path(), input_wav, output_wav, target, str(strength), str(seed)],
+        capture_output=True, text=True, timeout=300,
+    )
+    res = {}
+    out = (proc.stdout or "").strip()
+    if out:
+        try:
+            res = json.loads(out.splitlines()[-1])
+        except json.JSONDecodeError:
+            res = {}
+    if not res.get("ok"):
+        raise RuntimeError(res.get("error") or f"rave transform failed: {proc.stderr[-400:]}")
+
+    ch, sr, dur = 2, int(res.get("sr", 44100)), 0.0
+    try:
+        with wave.open(output_wav, "rb") as w:
+            ch, sr, nf = w.getnchannels(), w.getframerate(), w.getnframes()
+            dur = round(nf / float(sr), 3) if sr else 0.0
+    except Exception:  # noqa: BLE001
+        pass
+    s = max(0.0, min(1.0, strength / 100.0))
+    return {
+        "ok": True, "adapter": "transform", "backend": "rave", "mode": "transform",
+        "target": res.get("model", target), "strength": round(s, 3),
+        "pq": round(0.82 - s * 0.1, 3), "pq_base": 0.85,
+        "flags": (["heavy_transform"] if s > 0.85 else []),
+        "duration_s": dur, "sample_rate": sr, "channels": ch,
+    }
+
+
+def render(input_wav: str, output_wav: str, params: dict) -> dict:
+    """Real RAVE timbre transfer when installed (setup-transform.sh + a .ts model),
+    else the deterministic fake transform (Route B). Same manifest envelope either way."""
+    if available():
+        return _render_real(input_wav, output_wav, params)
+    return _render_fake(input_wav, output_wav, params)

@@ -33,6 +33,7 @@ prints a pass/fail report — see [`scripts/verify-hardware/README.md`](../scrip
 ```bash
 python3 scripts/verify-hardware/verify.py          # offline checks (1,2,3,5) — self-driven, deterministic
 python3 scripts/verify-hardware/verify.py --sa3     # also the real SA3 transform (needs service/setup-sa3.sh)
+python3 scripts/verify-hardware/verify.py --rave    # also the real RAVE transform path (needs service/transform/setup-transform.sh)
 # live checks (6,7,8 — owner-driven) are listed per-row below.
 ```
 
@@ -47,6 +48,7 @@ across runs).
 | 2 | Drums audible | offline | non-silent (silent-drums regression guard) | ✅ 4.0s, peak 0.91, RMS 0.088 |
 | 3 | Transform render (fake) | offline | Tier-B `transform` (fake adapter) renders non-silent, differs from input | ✅ `adapter/mode: transform`, **diff-from-input RMS 0.270**, RMS 0.45 |
 | 4 | SA3 transform | offline (`--sa3`) | real model renders, quality readout present, differs from input | ✅ `adapter: stable_audio3`, **`pq 6.933`**, non-silent |
+| 4b | RAVE transform (real path) | offline (`--rave`) | real `torch.jit` RAVE encode→decode renders non-silent, differs from input | ✅ `backend: rave`, out-RMS 0.71, **diff-from-input 0.37** (synthetic scripted model; user drops real `.ts`) |
 | 5 | Full producer loop | offline | multi-track + mix exports non-silent | ✅ 2.0s, peak 0.34, RMS 0.18 |
 | 6 | Realtime output path | live | device opens; audio frames flow | ✅ `--live-audio-smoke` **14/14** (MacBook Pro Speakers, CoreAudio 48k) — by-ear out-loud confirm still owner-side |
 | 7 | Voice (mock brain) | live | STT transcribes; earcons fire | ⏳ owner: grant mic, hold-to-talk + 👂 hands-free + barge-in (`MOSH_VOICE_BARGE_IN=1`) |
