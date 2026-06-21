@@ -13,6 +13,9 @@
 build/
 build-*/
 cmake-build-*/
+
+# Share-for-friend packaging artifacts (scripts/package-for-sharing.sh)
+dist/
 out/
 
 # CPM / fetched deps cache (kept out of repo; pinned by commit in CMake)
@@ -36,6 +39,9 @@ service/.sa3.env
 # Basic Pitch venv (100s of MB) + machine-local BASIC_PITCH_PY (setup-transcribe.sh)
 service/transcribe/.venv/
 service/transcribe/.transcribe.env
+# Sketch (librosa) venv + machine-local SKETCH_PY (setup-sketch.sh)
+service/sketch/.venv/
+service/sketch/.sketch.env
 # PyFLP venv + machine-local FLP_PY (setup-flp.sh)
 service/flp/.venv/
 service/flp/.flp.env
@@ -53,6 +59,9 @@ service/scripts/_sa3_e2e_out/
 *.aif
 # …but the bundled default drum kit IS a committed app resource (DRM-001).
 !resources/drumkits/mosh-kit/*.wav
+# …and the Sketch Phase-0 test fixtures ARE committed (synthesised, not recordings;
+# the build/selftest must not depend on Python to regenerate them).
+!service/sketch/fixtures/*.wav
 mosh-sessions/
 service/jobs/
 _preserved_artifacts/
@@ -64,6 +73,7 @@ midi_rag_database.pkl
 .playwright-mcp/
 test-results/
 mosh-*.png
+verify-artifacts/
 
 # Local agent/runtime scratch
 .gstack/

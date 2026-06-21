@@ -15,9 +15,28 @@ int runSelfTest (MoshEngine&, MoshOps&);
     Keeps assertion debugging separate from plugin hosting and generative jobs. */
 int runUndoSelfTest (MoshEngine&, MoshOps&);
 
+/** Headless batch command runner (`Mosh --run-script`). Reads a JSONL command
+    script from MOSH_RUN_SCRIPT — one {"command","args"} object per line; blank lines
+    and #/// comments are skipped; {"command":"__wait","args":{"ms":N}} pumps the
+    message loop so async work (e.g. a generative render job) can complete — executes
+    each via MoshOps::execute against an isolated headless session, and writes each
+    result as one JSONL line to stdout (and to MOSH_RUN_SCRIPT_OUT if set). Returns the
+    number of failed commands. Composed with `export_audio`, this is the driver behind
+    the offline render-to-WAV hardware-verification harness. */
+int runCommandScript (MoshEngine&, MoshOps&);
+
 /** Opens the real audio device path, plays a deterministic tone briefly, and
     exits. Used by the BlackHole virtual loopback gate. */
 int runLiveAudioSmoke (MoshEngine&, MoshOps&);
+
+/** Voice STT smoke (`Mosh --voice-smoke`): synthesizes a known phrase with macOS
+    `say`, transcribes it through SFSpeechRecognizer, and asserts the transcript
+    matches — proving the speech-to-text path end-to-end with nobody speaking. FILE
+    mode (default) needs only Speech-Recognition auth (no mic). MIC mode
+    (MOSH_VOICE_SMOKE_MIC=1) drives the live mic recognizer while `say` plays into the
+    default input — pair with a BlackHole input for a reliable digital loopback. Needs
+    a one-time Speech (and, for MIC, Microphone) grant; reports clearly if ungranted. */
+int runVoiceSmoke (MoshEngine&, MoshOps&);
 
 /** Audible A/B of a real Tier-A neural model (`Mosh --neural-ab`): imports a DI clip
     (MOSH_NEURAL_AB_WAV), loads a real RTNeural model (MOSH_NEURAL_AB_MODEL) into a

@@ -200,6 +200,15 @@ bool NativeSpeech::isSupported()
     return false;
 }
 
+int NativeSpeech::authorizationStatus()
+{
+   #if JUCE_MAC
+    if (@available (macOS 10.15, *))
+        return (int) [SFSpeechRecognizer authorizationStatus];   // 0 notDet · 1 denied · 2 restricted · 3 authorized
+   #endif
+    return -1;
+}
+
 void NativeSpeech::stop()
 {
    #if JUCE_MAC
@@ -233,6 +242,78 @@ void NativeSpeech::startContinuous (Callbacks cb)
     impl->begin (/*continuousMode=*/ true);    // always-on — recycles after each phrase
    #else
     if (cb.onError) cb.onError ("native speech-to-text is unsupported on this platform");
+   #endif
+}
+
+void NativeSpeech::transcribeFile (const juce::String& audioPath, Callbacks cbIn)
+{
+   #if JUCE_MAC
+    impl->cb = std::move (cbIn);
+    Impl* self = impl.get();
+    const juce::String path = audioPath;
+
+    if (@available (macOS 10.15, *))
+    {
+        // Same on-device recognizer as the live path, but reading a FILE instead of the
+        // mic — so the smoke proves STT end-to-end with nobody speaking. Permission is
+        // async + may fire off-thread; marshal everything to the message thread.
+        [SFSpeechRecognizer requestAuthorization:^(SFSpeechRecognizerAuthorizationStatus status)
+        {
+            juce::MessageManager::callAsync ([self, status, path]
+            {
+                if (status != SFSpeechRecognizerAuthorizationStatusAuthorized)
+                {
+                    if (self->cb.onError)
+                        self->cb.onError ("speech recognition not authorized — grant it once "
+                                          "(System Settings › Privacy & Security › Speech Recognition)");
+                    return;
+                }
+                SFSpeechRecognizer* rec = [[SFSpeechRecognizer alloc] init];
+                if (rec == nil || ! rec.isAvailable)
+                {
+                    if (self->cb.onError) self->cb.onError ("no speech recognizer available for the current locale");
+                    return;
+                }
+                NSURL* url = [NSURL fileURLWithPath:[NSString stringWithUTF8String:path.toRawUTF8()]];
+                SFSpeechURLRecognitionRequest* req = [[SFSpeechURLRecognitionRequest alloc] initWithURL:url];
+                if (rec.supportsOnDeviceRecognition)
+                    req.requiresOnDeviceRecognition = YES;   // on-device + dodge net rate limits
+
+                if (self->cb.onStart) self->cb.onStart();
+
+                [rec recognitionTaskWithRequest:req
+                    resultHandler:^(SFSpeechRecognitionResult* result, NSError* error)
+                {
+                    const bool hasResult = (result != nil);
+                    juce::String text = hasResult ? juce::String ([[[result bestTranscription] formattedString] UTF8String])
+                                                  : juce::String();
+                    const bool isFinal  = hasResult && [result isFinal];
+                    const bool hadError = (error != nil);
+                    juce::String emsg   = hadError ? juce::String ([[error localizedDescription] UTF8String]) : juce::String();
+
+                    juce::MessageManager::callAsync ([self, text, isFinal, hadError, emsg]
+                    {
+                        if (isFinal)
+                        {
+                            if (self->cb.onFinal) self->cb.onFinal (text);
+                            if (self->cb.onStop)  self->cb.onStop();
+                        }
+                        else if (hadError)
+                        {
+                            if (self->cb.onError) self->cb.onError (emsg);
+                            if (self->cb.onStop)  self->cb.onStop();
+                        }
+                    });
+                }];
+            });
+        }];
+    }
+    else if (cbIn.onError)
+    {
+        cbIn.onError ("speech recognition needs macOS 10.15 or later");
+    }
+   #else
+    if (cbIn.onError) cbIn.onError ("native speech-to-text is unsupported on this platform");
    #endif
 }
 

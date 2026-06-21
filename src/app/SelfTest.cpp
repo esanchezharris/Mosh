@@ -1679,6 +1679,83 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     else
         std::cerr << "  ..   (transcribe self-test skipped — set MOSH_SELFTEST_TRANSCRIBE=1 to exercise Basic Pitch)\n";
 
+    // --- Sketch Phase 0 (beatbox → drum MoshOps): GATED on MOSH_SELFTEST_SKETCH (needs
+    //     the sketch venv + service + the committed fixture WAVs; point MOSH_SKETCH_FIXTURE_DIR
+    //     at service/sketch/fixtures). Proves: recognisable kick/snare/hat hits land in a real
+    //     editable clip, the tempo is set, and the transduction is byte-identical across runs. ---
+    if (SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SKETCH", "0") == "1")
+    {
+        section ("Sketch: beatbox WAV → drum MoshOps (real librosa transduction)");
+        juce::File fixDir (SystemStats::getEnvironmentVariable ("MOSH_SKETCH_FIXTURE_DIR", {}));
+        const auto boombap = fixDir.getChildFile ("boombap_90.wav");
+        const auto trap    = fixDir.getChildFile ("trap_140.wav");
+        check (boombap.existsAsFile() && trap.existsAsFile(),
+               "MOSH_SKETCH_FIXTURE_DIR points at the committed fixtures (boombap_90 + trap_140)");
+
+        if (boombap.existsAsFile() && trap.existsAsFile())
+        {
+            // does the returned note array contain a note at this GM pitch?
+            auto hasPitch = [] (const juce::var& data, int pitch) {
+                if (auto* arr = data.getProperty ("notes", var()).getArray())
+                    for (auto& n : *arr) if ((int) n.getProperty ("pitch", 0) == pitch) return true;
+                return false;
+            };
+
+            const int before = tracks (ops);
+            std::cerr << "  ..   transducing a boom-bap beatbox via librosa (onset + 3-class heuristic)...\n";
+            auto bb = cmd (ops, "sketch_beatbox", objN ({{ "file", boombap.getFullPathName() },
+                                                         { "bpm", 90.0 }, { "bars", 1 }, { "wait", true }}));
+            check (ok (bb), "sketch_beatbox (boombap, wait) ok");
+            check (bb["data"].getProperty ("status", var()).toString() == "done", "transduction completed -> done");
+            check ((int) bb["data"].getProperty ("noteCount", 0) > 0, "boom-bap produced >=1 drum note");
+            check (tracks (ops) == before + 1, "boom-bap landed a new drum track");
+            check (hasPitch (bb["data"], 36), "boom-bap has a kick (GM 36)");
+            check (hasPitch (bb["data"], 38), "boom-bap has a snare (GM 38)");
+            check (hasPitch (bb["data"], 42), "boom-bap has a hat (GM 42)");
+
+            // Emitted PURELY as MoshOps: the first op is set_tempo carrying the known bpm.
+            auto op0 = bb["data"].getProperty ("moshops", var())[0];
+            check (op0.getProperty ("command", var()).toString() == "set_tempo", "first emitted op is set_tempo");
+            check ((double) op0.getProperty ("args", var()).getProperty ("bpm", 0.0) == 90.0, "set_tempo carries the known bpm (90)");
+
+            // The clip is real + editable: it shows up in the snapshot as a MIDI clip with notes.
+            auto newTrack = ops.snapshot()["tracks"][before];
+            check (newTrack["clips"][0].getProperty ("type", var()).toString() == "midi", "landed clip is a MIDI clip");
+            check (newTrack["clips"][0].getProperty ("notes", var()).size() > 0, "drum clip carries the transduced notes");
+
+            // Determinism: same WAV + same bpm + same bars → byte-identical hits + notes.
+            auto bb2 = cmd (ops, "sketch_beatbox", objN ({{ "file", boombap.getFullPathName() },
+                                                          { "bpm", 90.0 }, { "bars", 1 }, { "wait", true }}));
+            const auto hits1 = juce::JSON::toString (bb ["data"].getProperty ("hits", var()));
+            const auto hits2 = juce::JSON::toString (bb2["data"].getProperty ("hits", var()));
+            check (hits1.isNotEmpty() && hits1 == hits2, "determinism: identical transduced hits across 2 runs");
+            const auto notes1 = juce::JSON::toString (bb ["data"].getProperty ("notes", var()));
+            const auto notes2 = juce::JSON::toString (bb2["data"].getProperty ("notes", var()));
+            check (notes1 == notes2, "determinism: identical emitted notes across 2 runs");
+
+            // A second, different genre/tempo (trap @ 140) also yields all three roles, and
+            // proves the whole sketch is ONE atomic undo step (set_tempo + track + clip
+            // coalesced): a single undo restores both the track count and the prior tempo.
+            std::cerr << "  ..   transducing a trap-hat beatbox @ 140 BPM...\n";
+            auto tempoNow = [&] { return (double) ops.snapshot().getProperty ("session", var()).getProperty ("tempo", 0.0); };
+            const int beforeTrap = tracks (ops);
+            const double tempoBeforeTrap = tempoNow();
+            auto tp = cmd (ops, "sketch_beatbox", objN ({{ "file", trap.getFullPathName() },
+                                                         { "bpm", 140.0 }, { "bars", 1 }, { "wait", true }}));
+            check (ok (tp), "sketch_beatbox (trap, wait) ok");
+            check (hasPitch (tp["data"], 36) && hasPitch (tp["data"], 38) && hasPitch (tp["data"], 42),
+                   "trap pattern has kick + snare + hat");
+            check (tracks (ops) == beforeTrap + 1, "trap landed exactly one new drum track");
+            check (std::abs (tempoNow() - 140.0) < 0.5, "tempo set to 140");
+            cmd (ops, "undo");
+            check (tracks (ops) == beforeTrap, "ONE undo reverts the whole sketch (atomic: track removed)");
+            check (std::abs (tempoNow() - tempoBeforeTrap) < 0.5,
+                   "ONE undo also restores the prior tempo (atomic: set_tempo coalesced)");
+        }
+    }
+    else
+        std::cerr << "  ..   (sketch self-test skipped — set MOSH_SELFTEST_SKETCH=1 + MOSH_SKETCH_FIXTURE_DIR to exercise the beatbox transduction)\n";
+
     // Settle the generative service's async backlog before the downstream pure-command
     // blocks. The Tier-B render jobs above cancel in-flight HTTP requests whose completion
     // callbacks callAsync onto the message thread; if those land mid-block during a later
@@ -4439,6 +4516,255 @@ void runConsolidationDemo (MoshOps& ops)
     // A second track so the arrangement looks like a session.
     auto t2 = cmd ("create_track", obj ({{ "name", "Pad" }}))["data"].getProperty ("trackId", var()).toString();
     cmd ("add_test_tone_clip", obj ({{ "trackId", t2 }, { "seconds", 4.0 }, { "freq", 196.0 }}));
+}
+
+// ── Headless batch command runner (`Mosh --run-script`) ─────────────────────────
+// Replays a JSONL command script through the one mutation path (MoshOps::execute)
+// against an isolated headless session. The driver behind the offline render-to-WAV
+// verification harness: a script ends with an export_audio command, and the harness
+// then analyses the WAV the chain rendered. Pure replay of the public command
+// surface — no privileged backdoor.
+int runCommandScript (MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+    ignoreUnused (eng);
+
+    const auto scriptPath = SystemStats::getEnvironmentVariable ("MOSH_RUN_SCRIPT", {}).trim();
+    if (scriptPath.isEmpty())
+    {
+        std::cerr << "run-script: set MOSH_RUN_SCRIPT=<path to a JSONL command script>\n";
+        return 2;
+    }
+    const File scriptFile (scriptPath);
+    if (! scriptFile.existsAsFile())
+    {
+        std::cerr << "run-script: no such file: " << scriptPath.toStdString() << "\n";
+        return 2;
+    }
+
+    const auto outPath = SystemStats::getEnvironmentVariable ("MOSH_RUN_SCRIPT_OUT", {}).trim();
+
+    auto* mm = MessageManager::getInstanceWithoutCreating();
+    auto pump = [mm] (int ms)
+    {
+        const auto end = Time::getMillisecondCounter() + (uint32) jmax (0, ms);
+        while (Time::getMillisecondCounter() < end)
+        {
+            if (mm != nullptr) mm->runDispatchLoopUntil (50);
+            else Thread::sleep (50);
+        }
+    };
+
+    // Captured variables: a command may "capture":{"VAR":"dataField"} a field of its
+    // result.data, and any later string arg of the exact form "${VAR}" is replaced with
+    // the captured value. This keeps scripts self-contained and robust to engine-assigned
+    // ids (trackId/clipId/index) without hard-coding them.
+    HashMap<String, var> vars;
+    auto subst = [&vars] (const var& v) -> var
+    {
+        if (v.isString())
+        {
+            const auto s = v.toString();
+            if (s.startsWith ("${") && s.endsWith ("}"))
+            {
+                const auto key = s.substring (2, s.length() - 1);
+                if (vars.contains (key)) return vars[key];
+            }
+        }
+        return v;
+    };
+
+    StringArray outLines;
+    const auto lines = StringArray::fromLines (scriptFile.loadFileAsString());
+    int executed = 0, failures = 0;
+
+    for (const auto& raw : lines)
+    {
+        const auto line = raw.trim();
+        if (line.isEmpty() || line.startsWith ("#") || line.startsWith ("//"))
+            continue;
+
+        const auto command = JSON::parse (line);
+        if (! command.isObject())
+        {
+            std::cerr << "run-script: not a JSON object, skipping: " << line.toStdString() << "\n";
+            ++failures;
+            continue;
+        }
+
+        const auto name = command.getProperty ("command", var()).toString();
+
+        // __wait pseudo-command: pump the message loop so async work (a generative
+        // render job, any callAsync) can progress between commands. Not a MoshOps
+        // command — handled here, emits no result line.
+        if (name == "__wait")
+        {
+            pump ((int) command.getProperty ("args", var()).getProperty ("ms", 1000));
+            continue;
+        }
+
+        // Substitute ${VAR} references in the (top-level) args before executing.
+        var argsOut = command.getProperty ("args", var());
+        if (auto* ao = argsOut.getDynamicObject())
+        {
+            auto* na = new DynamicObject();
+            for (const auto& p : ao->getProperties())
+                na->setProperty (p.name, subst (p.value));
+            argsOut = var (na);
+        }
+        auto* co = new DynamicObject();
+        co->setProperty ("command", name);
+        co->setProperty ("args", argsOut);
+
+        const auto result = ops.execute (var (co));
+        ++executed;
+        if (! (bool) result.getProperty ("ok", false))
+            ++failures;
+
+        // Capture requested result.data fields into the variable map.
+        if (const auto capV = command.getProperty ("capture", var()); capV.isObject())
+        {
+            const auto data = result.getProperty ("data", var());
+            if (auto* cap = capV.getDynamicObject())
+                for (const auto& p : cap->getProperties())
+                    vars.set (p.name.toString(), data.getProperty (Identifier (p.value.toString()), var()));
+        }
+
+        const auto resultLine = JSON::toString (result, true);
+        outLines.add (resultLine);
+        std::cout << resultLine.toStdString() << std::endl;
+    }
+
+    if (outPath.isNotEmpty())
+        File (outPath).replaceWithText (outLines.joinIntoString ("\n") + "\n");
+
+    std::cerr << "run-script: " << executed << " command(s), " << failures << " failure(s)\n";
+    return failures;
+}
+
+// ── Voice STT smoke (`Mosh --voice-smoke`) ──────────────────────────────────────
+// Synthesizes a known phrase with macOS `say`, transcribes it through the SAME
+// SFSpeechRecognizer the app uses, and asserts the transcript — proving speech-to-text
+// end-to-end with nobody speaking. FILE mode (default) reads a `say`-rendered file (no
+// mic; needs only a Speech grant). MIC mode (MOSH_VOICE_SMOKE_MIC=1) drives the live
+// mic recognizer while `say` plays into the default input — set that input to BlackHole
+// for a reliable digital loopback. Returns 0 on a matching transcript.
+int runVoiceSmoke (MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+    ignoreUnused (eng, ops);
+
+    const auto phrase   = SystemStats::getEnvironmentVariable ("MOSH_VOICE_SMOKE_PHRASE", "create a drum track");
+    const bool micMode  = SystemStats::getEnvironmentVariable ("MOSH_VOICE_SMOKE_MIC", "0") == "1";
+    const int  timeoutMs = jmax (4000, SystemStats::getEnvironmentVariable ("MOSH_VOICE_SMOKE_TIMEOUT_MS", "25000").getIntValue());
+
+    std::cerr << "===== Mosh voice smoke (" << (micMode ? "MIC / loopback" : "FILE") << ") =====\n";
+    std::cerr << "  phrase: \"" << phrase.toStdString() << "\"\n";
+
+    if (! NativeSpeech::isSupported())
+    {
+        std::cerr << "  FAIL: native speech-to-text is unsupported here\n";
+        return 1;
+    }
+
+    // Gate on the SYNCHRONOUS auth status. A headless process can't raise the system
+    // Speech/Mic prompt (those need a GUI app context), and entering the async
+    // recognition path unauthorized risks a teardown-time crash — so skip cleanly.
+    const int auth = NativeSpeech::authorizationStatus();
+    if (auth != 3)   // 3 = authorized
+    {
+        const char* why = auth == 0 ? "not yet granted (notDetermined)"
+                        : auth == 1 ? "denied"
+                        : auth == 2 ? "restricted"
+                                    : "unavailable";
+        std::cerr << "  SKIP: Speech Recognition is " << why << " (status " << auth << ").\n"
+                     "  Grant it ONCE via the GUI — launch the app, use voice (the 👂 cap / hold-to-talk),\n"
+                     "  approve the Speech" << (micMode ? " + Microphone" : "") << " prompt — then re-run this. A headless\n"
+                     "  run can't surface the system prompt. Returning 2 (skipped, not a failure).\n";
+        return 2;
+    }
+    std::cerr << "  Speech Recognition authorized ✓\n";
+
+    auto* mm = MessageManager::getInstanceWithoutCreating();
+    auto pump = [mm] (int ms)
+    {
+        const auto end = Time::getMillisecondCounter() + (uint32) jmax (0, ms);
+        while (Time::getMillisecondCounter() < end) { if (mm != nullptr) mm->runDispatchLoopUntil (50); else Thread::sleep (50); }
+    };
+
+    // Lowercase + non-alphanumerics → spaces, so word matching ignores punctuation/case.
+    auto norm = [] (const String& s)
+    {
+        const auto low = s.toLowerCase();
+        String out;
+        for (int i = 0; i < low.length(); ++i)
+            out += (CharacterFunctions::isLetterOrDigit (low[i]) ? String::charToString (low[i]) : String (" "));
+        return out;
+    };
+
+    NativeSpeech speech;
+    String transcript, error;
+    std::atomic<bool> finished { false }, gotFinal { false };
+    NativeSpeech::Callbacks cb;
+    cb.onStart = []                       { std::cerr << "  recognizer started…\n"; };
+    cb.onFinal = [&] (const String& t)    { transcript = t; gotFinal = true; };
+    cb.onError = [&] (const String& e)    { error = e; };
+    cb.onStop  = [&]                      { finished = true; };
+
+    if (! micMode)
+    {
+        auto aiff = File::getSpecialLocation (File::tempDirectory).getChildFile ("mosh-voice-smoke.aiff");
+        aiff.deleteFile();
+        ChildProcess say;
+        say.start (StringArray { "say", "-o", aiff.getFullPathName(), phrase });
+        say.waitForProcessToFinish (15000);
+        if (! aiff.existsAsFile() || aiff.getSize() == 0)
+        {
+            std::cerr << "  FAIL: `say` produced no audio at " << aiff.getFullPathName().toStdString() << "\n";
+            return 1;
+        }
+        std::cerr << "  synthesized " << aiff.getSize() << " bytes via `say`, transcribing…\n";
+        speech.transcribeFile (aiff.getFullPathName(), cb);
+    }
+    else
+    {
+        std::cerr << "  (MIC mode: set the default input to BlackHole 2ch and route `say` there for a clean loopback)\n";
+        speech.startContinuous (cb);
+        pump (2000);   // let auth + the AVAudioEngine come up before speaking
+        ChildProcess say;
+        say.start (StringArray { "say", phrase });
+        say.waitForProcessToFinish (15000);
+    }
+
+    const auto deadline = Time::getMillisecondCounter() + (uint32) timeoutMs;
+    while (! gotFinal && ! finished && Time::getMillisecondCounter() < deadline) pump (100);
+    pump (200);
+    if (micMode) speech.stopContinuous();
+
+    if (! gotFinal)
+    {
+        if (error.isNotEmpty())
+        {
+            std::cerr << "  FAIL: " << error.toStdString() << "\n";
+            if (error.containsIgnoreCase ("not authorized"))
+                std::cerr << "  → Speech Recognition is not granted yet. Approve it once (the prompt, or System\n"
+                             "    Settings › Privacy & Security › Speech Recognition) and re-run.\n";
+        }
+        else
+            std::cerr << "  FAIL: no transcript within " << timeoutMs << "ms\n";
+        return 1;
+    }
+
+    std::cerr << "  transcript: \"" << transcript.toStdString() << "\"\n";
+
+    const auto nt = " " + norm (transcript) + " ";
+    auto words = StringArray::fromTokens (norm (phrase), " ", "");
+    words.removeEmptyStrings();
+    int hits = 0;
+    for (const auto& w : words) if (nt.containsIgnoreCase (" " + w + " ")) ++hits;
+    const bool pass = words.size() > 0 && hits >= jmax (1, (words.size() * 2) / 3);   // ≥ 2/3 of the words
+    std::cerr << "  matched " << hits << "/" << words.size() << " phrase words → " << (pass ? "PASS" : "FAIL") << "\n";
+    return pass ? 0 : 1;
 }
 
 } // namespace mosh

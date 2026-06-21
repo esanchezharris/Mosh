@@ -5,6 +5,7 @@ protocol CompanionClientProtocol: AnyObject {
     var isPaired: Bool { get }
 
     func configure(pairing: PairingPayload)
+    func clearPairing()
     func snapshot() async throws -> MoshSnapshot
     func execute(_ command: String, args: [String: Any]) async throws -> CommandResult
     func pollEvents(since: Int) async throws -> EventPoll
@@ -34,6 +35,11 @@ final class CompanionClient: CompanionClientProtocol {
     func configure(pairing: PairingPayload) {
         self.pairing = pairing
         KeychainPairingStore.save(pairing)
+    }
+
+    func clearPairing() {
+        pairing = nil
+        KeychainPairingStore.delete()
     }
 
     static func parsePairingURL(_ raw: String) throws -> PairingPayload {

@@ -15,12 +15,14 @@ struct SessionView: View {
                                   systemImage: store.transport?.playing == true ? "stop.fill" : "play.fill")
                         }
                         .buttonStyle(.borderedProminent)
+                        .disabled(!store.canSendCommands)
 
                         Button {
                             store.setTransport("stop")
                         } label: {
                             Label("Return", systemImage: "backward.end.fill")
                         }
+                        .disabled(!store.canSendCommands)
                     }
                     Text(positionText)
                         .font(.system(.title2, design: .monospaced))
@@ -52,14 +54,14 @@ struct SessionView: View {
                         } label: {
                             Label("Accept", systemImage: "checkmark.circle")
                         }
-                        .disabled(store.selectedRenderClipId == nil)
+                        .disabled(store.selectedRenderClipId == nil || !store.canSendCommands)
 
                         Button {
                             Task { await store.runRenderDecision(.reject) }
                         } label: {
                             Label("Reject", systemImage: "xmark.circle")
                         }
-                        .disabled(store.selectedRenderClipId == nil)
+                        .disabled(store.selectedRenderClipId == nil || !store.canSendCommands)
                     }
                 }
 
@@ -67,6 +69,15 @@ struct SessionView: View {
             }
             .refreshable { await store.refresh() }
             .navigationTitle("MOSH Session")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        store.forgetPairing()
+                    } label: {
+                        Label("Forget Pairing", systemImage: "link.badge.minus")
+                    }
+                }
+            }
         }
     }
 

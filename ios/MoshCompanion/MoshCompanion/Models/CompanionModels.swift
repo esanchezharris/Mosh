@@ -18,6 +18,13 @@ struct RemoteEnvelope<T: Decodable>: Decodable {
 
 struct EmptyRemoteData: Decodable {}
 
+enum CompanionConnectionState: Equatable {
+    case unpaired
+    case connecting
+    case online(lastUpdated: Date)
+    case offline(message: String, lastOnline: Date?)
+}
+
 struct MoshSnapshot: Decodable, Equatable {
     var tracks: [MoshTrack]
     var transport: MoshTransport

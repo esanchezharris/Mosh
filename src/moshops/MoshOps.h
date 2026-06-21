@@ -176,6 +176,7 @@ private:
     juce::var cmdOpenPluginEditor (const juce::var& args);
     juce::var cmdAddMidiClip    (const juce::var& args);
     juce::var cmdTranscribeClip (const juce::var& args);  // audio->MIDI (Basic Pitch)
+    juce::var cmdSketchBeatbox  (const juce::var& args);  // Sketch P0: beatbox->drum MoshOps
     juce::var cmdAddNote        (const juce::var& args);
     juce::var cmdRemoveNote     (const juce::var& args);
     juce::var cmdSetNote        (const juce::var& args);

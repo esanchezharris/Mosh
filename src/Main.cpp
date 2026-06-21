@@ -98,9 +98,11 @@ public:
         const bool liveAudioSmoke = commandLine.contains ("--live-audio-smoke");
         const bool neuralAB = commandLine.contains ("--neural-ab");
         const bool scanDeep = commandLine.contains ("--scan-plugins-deep");
+        const bool runScript = commandLine.contains ("--run-script");   // headless batch command runner
+        const bool voiceSmoke = commandLine.contains ("--voice-smoke"); // headless speech-to-text smoke
         const bool liveAudio = liveAudioSmoke || neuralAB;   // opens the real device, fresh cold session
         const bool headless = undoSelfTest || commandLine.contains ("--selftest");
-        const bool noAudio = headless || scanDeep;           // device-free harnesses + the scan utility
+        const bool noAudio = headless || scanDeep || runScript || voiceSmoke;  // device-free harnesses + scan/script/voice utilities
 
         // SCAN GUARD (tier wall): a deep scan must NEVER warm the generative service.
         // Force MOSH_ENABLE_SA3=0 for THIS process BEFORE MoshOps (and thus jobManager)
@@ -116,14 +118,16 @@ public:
                                             : (neuralAB ? "session-neural-ab"
                                             : (liveAudioSmoke ? "session-live-audio-smoke"
                                             : (scanDeep ? "session-scan"
-                                                              : "session-selftest")));
+                                            : (runScript ? "session-run-script"
+                                            : (voiceSmoke ? "session-voice-smoke"
+                                                              : "session-selftest")))));
         // Concurrent harness runs (e.g. parallel git worktrees each looping
         // --selftest) otherwise share the global session-selftest dir + freshSession
         // wipes it at startup, so one run clobbers another mid-test. MOSH_SELFTEST_SESSION
         // overrides the leaf so each run gets a private session dir (pair with a
         // distinct MOSH_SERVICE_PORT for full isolation). Only honored for headless
         // harnesses, which already use a freshSession.
-        if (headless)
+        if (headless || runScript || voiceSmoke)
             if (const auto s = juce::SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SESSION", {});
                 s.trim().isNotEmpty())
                 freshSessionName = s.trim();
@@ -182,6 +186,18 @@ public:
             return;
         }
 
+        // Headless batch command runner (`Mosh --run-script`): execute a JSONL command
+        // script against this isolated session, then exit. Composed with export_audio,
+        // this drives the offline render-to-WAV verification harness. noAudio above, so
+        // export_audio renders the chain offline (no device needed).
+        if (runScript)
+        {
+            const int rc = runCommandScript (*engine, *moshOps);
+            setApplicationReturnValue (rc);
+            quit();
+            return;
+        }
+
         if (headless)
         {
             const int fails = runSelfTest (*engine, *moshOps);
@@ -201,6 +217,18 @@ public:
         if (neuralAB)
         {
             const int rc = runNeuralAB (*engine, *moshOps);
+            setApplicationReturnValue (rc);
+            quit();
+            return;
+        }
+
+        // Headless speech-to-text smoke (`Mosh --voice-smoke`): synthesize a phrase
+        // with `say`, transcribe it via SFSpeechRecognizer, assert the text. Needs only
+        // a one-time Speech grant (FILE mode); MOSH_VOICE_SMOKE_MIC=1 drives the live
+        // mic path (pair with a BlackHole input for a reliable digital loopback).
+        if (voiceSmoke)
+        {
+            const int rc = runVoiceSmoke (*engine, *moshOps);
             setApplicationReturnValue (rc);
             quit();
             return;

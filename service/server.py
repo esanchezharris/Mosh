@@ -70,6 +70,20 @@ def _transcribe_available() -> bool:
     return os.path.isfile(_basic_pitch_py())
 
 
+def _sketch_py() -> str:
+    """The dedicated sketch venv's python (set by setup-sketch.sh via .sketch.env ->
+    SKETCH_PY), else the conventional default path."""
+    env = os.environ.get("SKETCH_PY", "").strip()
+    return env or os.path.join(SERVICE_DIR, "sketch", ".venv", "bin", "python")
+
+
+def _sketch_available() -> bool:
+    """True when the Sketch (librosa) venv exists (checked live so a freshly-run setup
+    works without a service restart). The /sketch endpoint surfaces any deeper import
+    error from the subprocess itself."""
+    return os.path.isfile(_sketch_py())
+
+
 def _colorrack_hash() -> str:
     try:
         from colors import runtime as CR
@@ -414,12 +428,15 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, {"ok": True, "service": "mosh-generative",
                              "version": SERVICE_VERSION, "build": SERVICE_BUILD,
                              "uptime_s": round(time.time() - START_TIME, 1),
-                             "adapters": adapters, "transcribe": _transcribe_available()})
+                             "adapters": adapters, "transcribe": _transcribe_available(),
+                             "sketch": _sketch_available()})
         elif path == "/capabilities":
             adapters = [FAKE_ADAPTER] + ([_sa3_descriptor()] if SA3_ENABLED else [])
             training = [_training_descriptor()] if TRAINING_ENABLED else []
             self._send(200, {"ok": True, "adapters": adapters, "training": training,
                              "transcribe": {"available": _transcribe_available(), "modes": ["mono", "poly"]},
+                             "sketch": {"available": _sketch_available(), "vocab": ["kick", "snare", "hat"],
+                                        "grid": "16th", "bars": [1, 2]},
                              "service_build": SERVICE_BUILD})
         elif path == "/colors":
             try:
@@ -555,6 +572,49 @@ class Handler(BaseHTTPRequestHandler):
             except (json.JSONDecodeError, ValueError):
                 tail = (proc.stderr or "").strip()[-400:]
                 self._send(500, {"ok": False, "error": f"transcription failed: {tail or 'no output'}"})
+                return
+            self._send(200 if payload.get("ok") else 500, payload)
+        elif path == "/sketch":
+            # Sketch Phase 0: beatbox WAV -> 3-class drum hits on a 16th grid, run as a
+            # subprocess under the dedicated sketch venv so librosa's deps stay isolated.
+            # Synchronous (ThreadingHTTPServer => other requests are unaffected); onset
+            # analysis on a 1-2 bar take is sub-second. DETERMINISTIC for (wav, bpm, bars).
+            input_wav = data.get("inputWav", "")
+            try:
+                bpm = float(data.get("bpm", 0))
+            except (TypeError, ValueError):
+                bpm = 0.0
+            try:
+                bars = int(data.get("bars", 1) or 1)
+            except (TypeError, ValueError):
+                bars = 1
+            if not input_wav or not os.path.exists(input_wav):
+                self._send(400, {"ok": False, "error": "inputWav missing or not found"})
+                return
+            if bpm < 20.0 or bpm > 300.0:
+                self._send(400, {"ok": False, "error": "bpm must be 20-300 (known tempo)"})
+                return
+            py = _sketch_py()
+            if not os.path.isfile(py):
+                self._send(503, {"ok": False, "error": "sketch_unavailable "
+                                 "(run service/sketch/setup-sketch.sh)"})
+                return
+            cli = os.path.join(SERVICE_DIR, "sketch", "beatbox_cli.py")
+            try:
+                proc = subprocess.run([py, cli, input_wav, repr(bpm), str(bars)],
+                                      capture_output=True, text=True, timeout=120)
+            except subprocess.TimeoutExpired:
+                self._send(504, {"ok": False, "error": "sketch analysis timed out"})
+                return
+            except OSError as e:  # bad interpreter / unexecutable cli / spawn failure
+                self._send(500, {"ok": False, "error": f"sketch failed to start: {e}"})
+                return
+            out = (proc.stdout or "").strip()
+            try:
+                payload = json.loads(out)
+            except (json.JSONDecodeError, ValueError):
+                tail = (proc.stderr or "").strip()[-400:]
+                self._send(500, {"ok": False, "error": f"sketch failed: {tail or 'no output'}"})
                 return
             self._send(200 if payload.get("ok") else 500, payload)
         elif path == "/training/submit" or path == "/training/jobs":

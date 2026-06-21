@@ -113,7 +113,7 @@ What Mosh can actually do today, grouped for a producer. Status is honest: `work
 
 - **`CLAUDE.md`** — the run manifest: prime directives + per-stage gate ledger (what's done / next). Auto-loads every session.
 - **Specs `00`–`07`** (repo root) — the detailed design, "source of truth for *how*." Each carries a status banner. *(Numbering: `02` is `docs/02_MOSHOPS_CONTRACT.md`; there is no `03` — the WebView UI is covered here + by `02`.)*
-- **`docs/`** — live reference: `02_MOSHOPS_CONTRACT.md`, `ENGINE_API_NOTES.md`, `PROGRESS.md`, `FEATURE_AUDIT.md`, `IPHONE_COMPANION.md`, plans, and the `superpowers/` specs.
-- **`docs/archive/`** — dated point-in-time reports (consolidation, hardening). Frozen by design; kept for history.
+- **`docs/`** — live reference: `INDEX.md` (the doc map — start here), `02_MOSHOPS_CONTRACT.md`, `ENGINE_API_NOTES.md`, `PROGRESS.md`, `FEATURE_AUDIT.md`, `IPHONE_COMPANION.md`, and the `plans/` wave roadmap.
+- **`docs/archive/`** — dated point-in-time reports, frozen by design; kept for history: `consolidation/`, `hardening/`, `superpowers/` (design-sprint specs), `test-iterate-loop/`, `ponytail-audit-report.md`.
 - **`design-lab/`** — the Moshi-character design taste reference (`HOUSE_STYLE.md`, `LOOKBOOK.md`).
 - **Agent memory** (`~/.claude/.../memory/`) — cross-session facts; e.g. `project-file-management-state.md` records the verified save/open behavior summarized in §4.
