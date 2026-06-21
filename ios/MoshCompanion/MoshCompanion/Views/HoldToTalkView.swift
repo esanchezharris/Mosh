@@ -15,7 +15,7 @@ struct HoldToTalkView: View {
                         .font(.system(size: 88))
                         .symbolRenderingMode(.hierarchical)
                 }
-                .disabled(!store.speech.isAvailable)
+                .disabled(!store.speech.isAvailable || !store.canSendCommands)
 
                 Text(store.speech.isAvailable ? "Hold-to-talk ready" : "On-device speech unavailable")
                     .foregroundStyle(.secondary)

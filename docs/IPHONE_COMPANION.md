@@ -62,7 +62,15 @@ Implemented first screens:
 - Diagnostics: DEBUG-only latency spike runner that reports network/playout and
   acoustic loopback summaries; it is not product monitoring UI.
 
-Local build smoke:
+Local simulator gate:
+
+```sh
+scripts/iphone-companion-sim-gate.sh          # build + CompanionClientTests
+MOSH_IOS_SIM_GATE_MODE=build scripts/iphone-companion-sim-gate.sh   # build-only smoke
+```
+
+The script is the hardware-free, CI-ready gate: it auto-selects an available
+iPhone simulator, then runs the equivalent of
 
 ```sh
 xcodebuild test -project ios/MoshCompanion/MoshCompanion.xcodeproj \
@@ -71,11 +79,25 @@ xcodebuild test -project ios/MoshCompanion/MoshCompanion.xcodeproj \
   CODE_SIGNING_ALLOWED=NO
 ```
 
+with code signing disabled, so it needs no Apple Account, provisioning profile,
+or device. It catches the real compile/typecheck and Swift 6 concurrency errors
+that `swiftc -parse` cannot (parse only checks syntax, not cross-file symbol
+resolution). The simulator is the required local gate for ordinary companion
+hardening. It covers app launch, deep-link pairing, local server connectivity,
+stale/offline recovery, receipts, command suppression, and non-hardware UI flow.
+Physical iPhone proof remains a manual hardware gate for camera QR scan, real
+microphone takes, real on-device Speech behavior, and acoustic monitoring.
+
 Physical device gate:
 
 ```sh
 scripts/iphone-companion-device-gate.sh
 ```
+
+After the phone has been paired with this Mac for development, the gate can use
+CoreDevice over the local network; the iPhone does not need to stay plugged in
+as long as Xcode can see it as a paired local-network device. A cable may still
+be needed for first-time pairing, trust prompts, charging, or network recovery.
 
 The script keeps the personal team ID out of git. It first tries to auto-detect
 a team ID from an existing Apple Development certificate, which works for the
@@ -89,9 +111,57 @@ scripts/iphone-companion-device-gate.sh
 
 Paid Apple Developer Program enrollment is not required for a local Xcode
 Personal Team install, but Xcode still needs a normal Apple Account added under
-Settings > Accounts. The script verifies Developer Mode, builds to
-`build/ios-device`, installs with `devicectl`, and launches
-`studio.mosh.companion`.
+Settings > Accounts. The script verifies Developer Mode, builds with DerivedData
+under the local temp directory by default, installs with `devicectl`, and
+launches `studio.mosh.companion`. This keeps device signing away from
+file-provider metadata that can make `codesign` reject app bundles. Set
+`MOSH_IOS_DERIVED_DATA=/path/to/derived-data` only when you need a retained
+device build directory.
+
+### Wireless Device Troubleshooting
+
+Use the simulator as the required local regression gate, then use the physical
+phone only for manual hardware proof. A paired iPhone can be installed and
+launched wirelessly when CoreDevice can establish a local-network tunnel:
+
+```sh
+xcrun devicectl list devices
+xcrun devicectl device info details --device <device-identifier>
+xcrun devicectl device info lockState --device <device-identifier>
+```
+
+Healthy signs:
+
+- `connectionProperties.transportType` is `localNetwork`.
+- `connectionProperties.pairingState` is `paired`.
+- `connectionProperties.tunnelState` is `connected`.
+- `deviceProperties.developerModeStatus` is `enabled`.
+- `device info details` lists `Install Application` and `Launch Application`
+  capabilities.
+
+If wireless launch fails:
+
+- Unlock the iPhone once after boot and leave it nearby on the same network.
+- Open iPhone Mirroring only after locking the iPhone; Apple requires the phone
+  to be nearby and locked for mirrored control.
+- Re-run `scripts/iphone-companion-device-gate.sh`; it uses CoreDevice and does
+  not require USB after pairing.
+- Plug in over USB only for first-time trust/pairing, charging, or when the
+  local-network tunnel stays disconnected.
+- If signing fails with resource-fork or Finder metadata errors, keep
+  DerivedData out of the synced `Documents` tree or set
+  `MOSH_IOS_DERIVED_DATA` to a clean local path.
+
+For URL-based pairing without scanning a QR, launch the installed app with a
+payload URL:
+
+```sh
+xcrun devicectl device process launch \
+  --device <device-identifier> \
+  --terminate-existing \
+  --payload-url 'mosh://pair?payload=<base64-json>' \
+  studio.mosh.companion
+```
 
 ## Safari Web Companion Fallback
 
