@@ -72,3 +72,17 @@ test("flag off (default): no per-track FX toggle", async ({ page }) => {
   await expect(page.getByTestId("arrangement")).toBeVisible();
   await expect(page.getByTestId("track-fx-toggle")).toHaveCount(0);
 });
+
+test("flag on: the agent prompt lives in a dedicated bottom bar", async ({ page }) => {
+  await bootRedesign(page);
+  const bar = page.getByTestId("promptbar");
+  await expect(bar).toBeVisible();
+  await expect(bar.locator(".agent-composer")).toBeVisible();
+});
+
+test("flag off (default): no bottom prompt bar (prompt stays in the Moshi dock)", async ({ page }) => {
+  await page.addInitScript(() => window.localStorage.clear());
+  await page.goto("/");
+  await expect(page.getByTestId("arrangement")).toBeVisible();
+  await expect(page.getByTestId("promptbar")).toHaveCount(0);
+});

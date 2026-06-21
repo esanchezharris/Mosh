@@ -28,6 +28,7 @@ import { AutomationPanel } from "./ui/AutomationPanel";
 import { DrumWindow } from "./ui/DrumWindow";
 import { MonsterChanges } from "./ui/MonsterChanges";
 import { Inspector } from "./ui/Inspector";
+import { AgentComposer } from "./ui/AgentComposer";
 
 export function App() {
   const init = useStore((s) => s.init);
@@ -88,6 +89,12 @@ export function App() {
         )
       ) : (
         <div className="boot"><p>Loading snapshot…</p></div>
+      )}
+
+      {redesign && snapshot && (
+        <div className="promptbar" data-testid="promptbar">
+          <AgentComposer />
+        </div>
       )}
 
       <PluginBrowser />
