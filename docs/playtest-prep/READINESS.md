@@ -41,15 +41,22 @@ Give them [`docs/PLAYTEST_SETUP.md`](../PLAYTEST_SETUP.md): AirDrop `Mosh.app` �
   zero audio transfer and is the most-tested path.
 - Each person takes a **track** (one editor per track; move off it to flush to your peer).
 - Try a **real SA3 "re-imagine"** on a clip (the host, who has SA3 bundled) — it lands as a
-  new audio clip and syncs to the guest over the cloud relay.
+  new audio clip and syncs to the guest over the cloud relay. ⚠️ Treat SA3/audio clips as
+  *auditioning* — don't rely on **exporting** a mix that contains an MP-committed audio clip
+  (it hangs; see caveats). For the final bounce, keep the song MIDI + instruments.
 - Each person plays back **locally** (independent playheads); talk over Discord.
 
 ## Honest unproven / caveats (read these)
 - **Two humans, two machines, live, by ear** — not yet done; the dry run is the proxy. Code +
   two-process headless sync are proven; the live UI feel (latency, lock responsiveness) is
   empirical. You're the first real test.
-- **A joined GUEST hangs on `export_audio`** (host export is fine). Workaround: **the host does
-  any export/bounce.** Confirm in the GUI during the dry run. Details: [`followups.md`](followups.md).
+- **Export hangs if the mix contains an MP-committed AUDIO clip** (host *and* guest — once a
+  wave/recorded/SA3 clip is committed it's consolidated to a by-hash source, and rendering it
+  spins the graph traversal). **MIDI + instrument content is unaffected and exports fine.**
+  Rule: **build anything you'll export from MIDI + instruments**; use audio/SA3 clips for
+  auditioning only. (A candidate fix was tried, disproven, and reverted — C++ is pristine.)
+  Root cause + evidence: [`followups.md`](followups.md) §A. Also verify in the GUI dry run
+  whether *playback* of a committed audio clip is affected, not just export.
 - **Pre-join audio:** a guest who joins *after* clips already exist sees those audio clips as
   `sourceMissing` until the host re-commits that track (MIDI is fine). Commits made *after* the
   guest is present DO deliver audio (proven). Workaround: host nudges audio tracks post-join.
@@ -60,5 +67,6 @@ Give them [`docs/PLAYTEST_SETUP.md`](../PLAYTEST_SETUP.md): AirDrop `Mosh.app` �
 ## What this pass changed (all additive, on the branch — NOT merged)
 - New docs: `docs/MULTIPLAYER.md`, `docs/PLAYTEST_SETUP.md`, `docs/playtest-prep/*`.
 - New scripts: `scripts/playtest/{preflight,mp-live-smoke,unquarantine}.sh`.
-- Doc links added to `ARCHITECTURE.md` + `docs/INDEX.md`. **Zero C++/engine changes.**
+- Doc links added to `ARCHITECTURE.md` + `docs/INDEX.md`. **Zero C++/engine changes** (an
+  export-hang fix was attempted, disproven by a controlled test, and reverted — see followups §A).
 - Deployed a clean `/Applications/Mosh.app` (main `f8295fb`, SA3 bundled) for the dry run + distribution.

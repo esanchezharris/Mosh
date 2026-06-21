@@ -25,9 +25,11 @@
 - Render-to-WAV (`verify.py --sa3`): **5/5** incl. real SA3 (pq 6.933).
 - `preflight.sh`: 🟢 GO (4/4).
 
-## The one real finding
-A **joined guest hangs on `export_audio`** (host export is fine). Workaround: host does exports.
-Verify in GUI dry run. See [`followups.md`](followups.md) §A.
+## The one real finding (root-caused; fix attempted, disproven, reverted → C++ pristine)
+`export_audio` hangs when the mix contains an **MP-committed AUDIO clip** (consolidated to a
+by-hash source) — affects **host and guest**; **MIDI/instruments are fine**. Tried a
+`getAudioTracks` fix, a controlled test disproved it, reverted. Workaround: build exportable
+songs from MIDI + instruments; treat audio/SA3 clips as auditioning. See [`followups.md`](followups.md) §A.
 
 ## Owner's remaining manual steps (only a human can)
 1. `bash scripts/playtest/preflight.sh` (expect 🟢).

@@ -42,21 +42,17 @@ restored from the relayed commit (end-to-end over HTTP)"*).
 
 ## One real finding: a joined GUEST hangs on `export_audio`
 
-While building the smoke, an earlier version had B `export_audio` after joining — **B hung
-indefinitely in `export_audio`** (0-byte file, never returned). Characterization:
+While building the smoke, B `export_audio` after joining **hung**. Deep investigation
+(stack samples + controlled before/after runs) root-caused it precisely — and it is **not**
+guest-specific: `export_audio` spins whenever the edit contains a wave/audio clip that went
+through `mp_commit_track` (consolidated to a by-hash relative source). It hits the
+**committing host too**, not just the guest. **MIDI/instrument content is unaffected.**
+Full table, root cause (the `getNodes`/`ArrangerLauncherSwitchingNode` traversal cycle), and
+the disproven-and-reverted fix attempt are in [`followups.md`](followups.md) §A.
 
-| Scenario | export_audio |
-|---|---|
-| No session (plain producer loop, `verify.py`) | ✅ completes |
-| **Host** session (created, not joined) + export | ✅ completes (265 KB WAV, `renderMode: fast`) |
-| **Guest** session (joined) + export | ❌ **hangs** |
-
-So it's **specific to a joined guest**, not export-in-a-session generally. Root cause
-undetermined (likely the apply/poll machinery interacting with the synchronous render — and
-possibly amplified by the headless `--run-script` manual message-pump). Logged in
-[`followups.md`](followups.md). **Workaround for tonight: the HOST does any export/bounce**, or
-a guest leaves the session before exporting. **Verify in the GUI during the dry run** (the
-GUI's real thread model may or may not reproduce it).
+**Workaround:** build anything you'll **export** from MIDI + instruments (these commit +
+export fine); treat audio/SA3 clips as auditioning. Verify in the GUI dry run whether
+*playback* of a committed audio clip is also affected.
 
 ## What still needs a HUMAN
 
