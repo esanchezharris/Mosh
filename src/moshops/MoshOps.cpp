@@ -4294,6 +4294,43 @@ juce::String MoshOps::computeFingerprint (const juce::ValueTree& node, const juc
                                      jobManager.serviceBuild());
 }
 
+// Slice [srcStartSec, srcEndSec] of an audio file into destWav (raw, no FX) — the
+// staged input for a section-scoped render. Returns false (caller errors) if the
+// source can't be read or the range is degenerate, so a failed slice never silently
+// renders the wrong (whole-clip) audio for a section request.
+static bool stageWavRegion (const juce::File& sourceFile, double srcStartSec, double srcEndSec,
+                            const juce::File& destWav)
+{
+    if (srcEndSec <= srcStartSec) return false;
+    juce::AudioFormatManager fm; fm.registerBasicFormats();
+    std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (sourceFile));
+    if (reader == nullptr || reader->sampleRate <= 0.0) return false;
+
+    const double sr = reader->sampleRate;
+    const juce::int64 total = reader->lengthInSamples;
+    juce::int64 startSamp = juce::jlimit ((juce::int64) 0, total, (juce::int64) std::floor (srcStartSec * sr));
+    juce::int64 endSamp   = juce::jlimit (startSamp,       total, (juce::int64) std::ceil  (srcEndSec   * sr));
+    const int numSamps = (int) (endSamp - startSamp);
+    if (numSamps <= 0) return false;
+
+    const int numCh = (int) juce::jmax ((unsigned) 1, reader->numChannels);
+    juce::AudioBuffer<float> buf (numCh, numSamps);
+    if (! reader->read (&buf, 0, numSamps, startSamp, true, true)) return false;
+
+    destWav.deleteFile();
+    std::unique_ptr<juce::FileOutputStream> os (destWav.createOutputStream());
+    if (os == nullptr) return false;
+    juce::WavAudioFormat wav;
+    std::unique_ptr<juce::AudioFormatWriter> writer (
+        wav.createWriterFor (os.get(), sr, (unsigned) numCh,
+                             juce::jmax (16, (int) reader->bitsPerSample), {}, 0));
+    if (writer == nullptr) return false;
+    os.release();   // the writer owns the stream now
+    const bool wrote = writer->writeFromAudioSampleBuffer (buf, 0, numSamps);
+    writer.reset(); // flush + close before the caller reads the file back
+    return wrote;
+}
+
 juce::var MoshOps::cmdCreateRenderLayer (const juce::var& args)
 {
     const auto clipId = args.getProperty ("clipId", var()).toString();
@@ -4304,8 +4341,20 @@ juce::var MoshOps::cmdCreateRenderLayer (const juce::var& args)
 
     beginTxn ("create_render_layer");
     auto pos = clip->getPosition();
+    double rStart = pos.getStart().inSeconds();
+    double rEnd   = pos.getEnd().inSeconds();
+    // Section-scoped render (agent "rework the hook"): an explicit sub-region — beats
+    // resolved to seconds by the caller — bounds the layer to part of the clip. Clamp
+    // to the clip's own range; ignore a degenerate range and fall back to the whole clip.
+    if (args.hasProperty ("regionStart") && args.hasProperty ("regionEnd"))
+    {
+        const double cs = rStart, ce = rEnd;
+        const double qs = juce::jlimit (cs, ce, (double) args.getProperty ("regionStart", cs));
+        const double qe = juce::jlimit (cs, ce, (double) args.getProperty ("regionEnd",   ce));
+        if (juce::jmax (qs, qe) - juce::jmin (qs, qe) > 1.0e-3) { rStart = juce::jmin (qs, qe); rEnd = juce::jmax (qs, qe); }
+    }
     auto node = RenderLayer::create ("rl-" + String (Time::getCurrentTime().toMilliseconds()),
-        clipId, pos.getStart().inSeconds(), pos.getEnd().inSeconds(),
+        clipId, rStart, rEnd,
         args.getProperty ("adapter", "fake").toString());
     if (args.hasProperty ("mode"))         node.setProperty (ids::mode, args.getProperty ("mode", "reimagine"), nullptr);
     if (args.hasProperty ("modelVariant")) node.setProperty (ids::modelVariant, args.getProperty ("modelVariant", ""), nullptr);
@@ -4374,7 +4423,30 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
     auto output = jobDir.getChildFile ("output.wav");
     auto manifest = jobDir.getChildFile ("output_manifest.json");
     input.deleteFile();
-    if (! wave->getCurrentSourceFile().copyFileTo (input))
+
+    // Stage the render input. Section-scoped layers carry a sub-region tighter than the
+    // clip (timeRange < clip span) — slice JUST that region of the raw source so the
+    // model only re-imagines the section's audio. The v0 default (region == whole clip)
+    // copies the source file wholesale, unchanged.
+    auto cpos = clip->getPosition();
+    const double rs = (double) node[ids::timeRangeStart];
+    const double re = (double) node[ids::timeRangeEnd];
+    const double cs = cpos.getStart().inSeconds(), ce = cpos.getEnd().inSeconds();
+    const bool subRegion = (rs > cs + 1.0e-3) || (re < ce - 1.0e-3);
+    bool staged = false;
+    if (subRegion)
+    {
+        const bool sliceable = std::abs (wave->getSpeedRatio() - 1.0) < 1.0e-6
+                               && ! wave->isLooping() && ! wave->getAutoTempo();
+        if (sliceable)
+        {
+            const double off = cpos.getOffset().inSeconds();
+            staged = stageWavRegion (wave->getCurrentSourceFile(), rs - cs + off, re - cs + off, input);
+        }
+        if (! staged)   // never fall back to the whole clip for a section request
+            return errResult ("render_layer", "section render needs an un-stretched, non-looping wave clip");
+    }
+    if (! staged && ! wave->getCurrentSourceFile().copyFileTo (input))
         return errResult ("render_layer", "could not stage source region");
 
     // Ensure the service first so its build/version is part of EVERY fingerprint
@@ -4567,9 +4639,23 @@ juce::var MoshOps::cmdAcceptRender (const juce::var& args)
     }
     if (lane == nullptr) return errResult ("accept_render", "no lane");
 
+    // Land at the layer's region — for a section-scoped render that is the section's
+    // sub-range, not the whole clip; for a normal layer the region IS the clip span,
+    // so this is identical to the clip position.
     auto pos = clip->getPosition();
+    auto landStart = pos.getStart();
+    auto landLen   = pos.getLength();
+    {
+        const double rs = (double) node[ids::timeRangeStart];
+        const double re = (double) node[ids::timeRangeEnd];
+        if (re > rs + 1.0e-6)
+        {
+            landStart = tracktion::TimePosition::fromSeconds (rs);
+            landLen   = tracktion::TimeDuration::fromSeconds (re - rs);
+        }
+    }
     lane->insertWaveClip ("neural-" + clip->getName(), dest,
-        { { pos.getStart(), pos.getLength() }, {} }, false);
+        { { landStart, landLen }, {} }, false);
 
     node.setProperty (ids::userKept, true, &undoManager());
     node.setProperty (ids::status, "ready", &undoManager());
@@ -5976,6 +6062,10 @@ juce::var MoshOps::clipToVar (te::Clip& c)
         r->setProperty ("seed", (int) rl[ids::seed]);
         r->setProperty ("userKept", rl[ids::userKept]);
         r->setProperty ("hasArtifact", juce::File (rl[ids::cacheArtifact].toString()).existsAsFile());
+        // The render's time scope (seconds). For a section-scoped render this is the
+        // section's sub-range; for a whole-clip render it equals the clip span.
+        r->setProperty ("regionStart", (double) rl[ids::timeRangeStart]);
+        r->setProperty ("regionEnd",   (double) rl[ids::timeRangeEnd]);
         if (auto params = rl.getChildWithName (ids::PARAMS); params.isValid())
         {
             r->setProperty ("prompt", params[ids::prompt]);

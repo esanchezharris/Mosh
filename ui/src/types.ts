@@ -13,6 +13,10 @@ export type RenderLayer = {
   prompt?: string;
   nl?: number;
   colors?: RenderColor[];
+  // The render's time scope (seconds). A section-scoped render carries a sub-range of
+  // the clip; a whole-clip render's range equals the clip span.
+  regionStart?: number;
+  regionEnd?: number;
 };
 
 // SA3 colour-rack metadata from GET /colors (via list_colors).

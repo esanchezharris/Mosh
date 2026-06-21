@@ -9,6 +9,7 @@ import { createBrain, type Brain } from "../agent/brain";
 import { runAgentBatch } from "../agent/executor";
 import { matchFastPath } from "../agent/fastPath";
 import { handleFast } from "../agent/performer";
+import { resolveSectionRework, planSectionRework } from "../agent/sectionScope";
 import { createVoiceInput, createContinuousVoiceInput, isVoiceSupported, type VoiceInput } from "../agent/voiceInput";
 import { createHandsFree, type HandsFree } from "../agent/handsFree";
 
@@ -146,6 +147,22 @@ export function AgentComposer() {
         });
         return;
       }
+
+      // Section scope: "rework the hook" → a render bounded to that section's beat range.
+      // Deterministic (no LLM arithmetic): resolve the section + its clip locally, then
+      // run the real render commands as one undo batch.
+      const rework = resolveSectionRework(text, st.snapshot);
+      if (rework) {
+        if (rework.kind === "empty") {
+          setSay(rework.reason); pushAgentUtter("HUH", rework.reason);
+          return;
+        }
+        const label = `rework the ${rework.section.name}`;
+        setAgentChangeSet(await runAgentBatch(label, planSectionRework(rework), { utterance: text, source: "section_scope" }));
+        setSay(`reworking the ${rework.section.name}`); pushAgentUtter("ACK_WORKING", `reworking the ${rework.section.name}`);
+        return;
+      }
+
       const reply = await brainRef.current!.send(text);
       setSay(reply.say ?? null);
       pushAgentUtter(reply.intent ?? "ACK_GOT_IT", reply.say);

@@ -1265,6 +1265,69 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                "JSONL records remove_render_layer");
     }
 
+    // ─── Section-scoped render (the agent "rework the hook" path) ───
+    // A render layer with an explicit sub-region renders ONLY that region's audio and
+    // lands the result bounded to the region — proving create_render_layer
+    // regionStart/regionEnd → a sliced input.wav → a region-bounded landing.
+    section ("Section-scoped render (rework-the-hook)");
+    {
+        auto st = cmd (ops, "create_track", args1 ("name", "Scoped"))["data"].getProperty ("trackId", var()).toString();
+        auto tone = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", st }, { "seconds", 2.0 }, { "freq", 220.0 }}));
+        const auto scid = tone["data"].getProperty ("clipId", var()).toString();
+
+        // Scope to a 0.5 s sub-region [0.5, 1.0] of the 2 s clip.
+        auto crl = cmd (ops, "create_render_layer", objN ({{ "clipId", scid }, { "adapter", "fake" },
+                                                           { "regionStart", 0.5 }, { "regionEnd", 1.0 }}));
+        check (ok (crl), "create_render_layer with a sub-region ok");
+        const auto layerId = crl["data"].getProperty ("layerId", var()).toString();
+
+        // The snapshot reports the clamped sub-region, not the whole clip span.
+        auto layerVar = [&] () -> var {
+            auto trk = trackById (st);
+            if (auto* arr = trk.getProperty ("clips", var()).getArray())
+                for (auto& c : *arr) if (c.getProperty ("id", var()).toString() == scid)
+                    return c.getProperty ("renderLayer", var());
+            return {};
+        };
+        check (std::abs ((double) layerVar().getProperty ("regionStart", -1.0) - 0.5) < 1e-3, "layer region start = 0.5 s");
+        check (std::abs ((double) layerVar().getProperty ("regionEnd",   -1.0) - 1.0) < 1e-3, "layer region end   = 1.0 s");
+
+        auto rr = cmd (ops, "render_layer", objN ({{ "clipId", scid }, { "wait", true }}));
+        check (ok (rr), "section-scoped render_layer ok");
+
+        // The staged input.wav was SLICED to ~0.5 s — not the whole 2 s clip.
+        auto inputWav = eng.sessionDir().getChildFile ("renders").getChildFile (layerId).getChildFile ("input.wav");
+        double inputDur = -1.0;
+        { AudioFormatManager fm; fm.registerBasicFormats();
+          if (std::unique_ptr<AudioFormatReader> rd { fm.createReaderFor (inputWav) }; rd && rd->sampleRate > 0.0)
+              inputDur = (double) rd->lengthInSamples / rd->sampleRate; }
+        check (inputWav.existsAsFile(), "section render staged an input.wav");
+        check (inputDur > 0.3 && inputDur < 0.8, "input.wav is the SECTION region (~0.5 s), not the whole clip (2 s)");
+
+        // Accept lands the render bounded to the region: start ~0.5 s, length ~0.5 s.
+        check (ok (cmd (ops, "accept_render", args1 ("clipId", scid))), "section-scoped accept_render ok");
+        bool scopedLanding = false;
+        { auto snap = ops.snapshot();
+          if (auto* arr = snap["tracks"].getArray())
+            for (auto& t : *arr) if (t.getProperty ("name", var()).toString() == "Neural Renders")
+                if (auto* cs = t.getProperty ("clips", var()).getArray())
+                    for (auto& c : *cs)
+                    {
+                        const double cstart = (double) c.getProperty ("start", -1.0);
+                        const double clen   = (double) c.getProperty ("length", -1.0);
+                        if (std::abs (cstart - 0.5) < 0.05 && std::abs (clen - 0.5) < 0.1) scopedLanding = true;
+                    } }
+        check (scopedLanding, "accepted render landed bounded to the section (start ~0.5 s, length ~0.5 s)");
+
+        // A whole-clip render (no region) still works — guards the default path.
+        auto st2 = cmd (ops, "create_track", args1 ("name", "Whole"))["data"].getProperty ("trackId", var()).toString();
+        auto tone2 = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", st2 }, { "seconds", 1.0 }, { "freq", 180.0 }}));
+        const auto wcid = tone2["data"].getProperty ("clipId", var()).toString();
+        cmd (ops, "create_render_layer", objN ({{ "clipId", wcid }, { "adapter", "fake" }}));
+        check (ok (cmd (ops, "render_layer", objN ({{ "clipId", wcid }, { "wait", true }}))),
+               "whole-clip render (no region) still renders (default path unchanged)");
+    }
+
     // --- Stage 6: full producer loop -> export, undo/redo correct throughout ---
     section ("Stage 6: full producer loop + export");
     {
