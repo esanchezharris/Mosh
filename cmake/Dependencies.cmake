@@ -5,9 +5,6 @@
 #   tracktion_engine  2877b621f2fbee564d0696a616b86bf8ba8c8ab0
 #   JUCE 8            7c89e11f6b7316c369f3d3f22227c60e816e738b  (tracktion's modules/juce submodule)
 #
-# Neural pins (Stage 4, fetched only when MOSH_ENABLE_NEURAL=ON):
-#   anira / RTNeural / chowdsp_utils  — see below.
-#
 # NOTE: tracktion's JUCE submodule URL is SSH (git@github.com:…). A global
 # `git config --global url."https://github.com/".insteadOf "git@github.com:"`
 # makes the recursive submodule fetch work without SSH keys.
@@ -46,42 +43,3 @@ if (MOSH_BUILD_TESTS)
     CPMAddPackage("gh:catchorg/Catch2@3.7.1")
 endif()
 
-# ── Tier-A neural backends ──────────────────────────────────────────────────
-# Split by weight: RTNeural is light (Eigen/XSIMD, header-heavy) and carries the
-# SHIPPING models (NAM/Proteus run inline, RT-safe — 04 §2.3). anira pulls a heavy
-# runtime (LibTorch/ONNX) and only the GATED RAVE/DDSP path needs it, so it sits
-# behind a second opt-in to keep the default neural build tractable.
-option(MOSH_ENABLE_ANIRA "Also fetch anira + LibTorch/ONNX (RAVE/DDSP, heavy)" OFF)
-
-if (MOSH_ENABLE_RTNEURAL)
-    # RTNeural — small-model inference (NAM/Proteus, inline RT-safe).
-    CPMAddPackage(
-        NAME              RTNeural
-        GITHUB_REPOSITORY jatinchowdhury18/RTNeural
-        GIT_TAG           1fb1f075a5d66e85bfc8f488c3f3626840cb3a1d
-        OPTIONS           "RTNEURAL_EIGEN ON")
-
-    add_library(mosh_neural_backends INTERFACE)
-    target_link_libraries(mosh_neural_backends INTERFACE RTNeural)
-    # Compile-time switch: code behind #if MOSH_HAVE_RTNEURAL only builds when the
-    # RTNeural backend is present (mirrors MOSH_HAVE_ANIRA below). The DEFAULT build
-    # (MOSH_ENABLE_RTNEURAL=OFF) never links this target, so MOSH_HAVE_RTNEURAL is
-    # undefined and the neural insert falls back to its self-contained inline MLP.
-    #
-    # MOSH_REPO_SOURCE_DIR lets the RTNeural-ON selftest locate the in-repo model
-    # fixture (assets/neural_waveshaper.json) without an env var, so the numeric A/B is
-    # CI-runnable. Only the RTNeural build needs it (propagated to Mosh via the existing
-    # target_link_libraries(Mosh PRIVATE mosh_neural_backends) in CMakeLists.txt).
-    target_compile_definitions(mosh_neural_backends INTERFACE
-        MOSH_HAVE_RTNEURAL=1
-        MOSH_REPO_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-
-    if (MOSH_ENABLE_ANIRA)
-        CPMAddPackage(
-            NAME              anira
-            GITHUB_REPOSITORY anira-project/anira
-            GIT_TAG           main)
-        target_link_libraries(mosh_neural_backends INTERFACE anira)
-        target_compile_definitions(mosh_neural_backends INTERFACE MOSH_HAVE_ANIRA=1)
-    endif()
-endif()

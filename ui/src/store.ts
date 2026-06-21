@@ -5,7 +5,7 @@ import {
 } from "./bridge";
 import type {
   Snapshot, Transport, MoshEvent, CommandResult, AvailablePlugin,
-  BuiltinPlugin, AvailableColor, RenderQA, Level, AudioDevices, Clip,
+  BuiltinPlugin, AvailableColor, AvailableTransformTarget, RenderQA, Level, AudioDevices, Clip,
   WaveInput, TrackOutputs,
   PluginCounts,
 } from "./types";
@@ -59,6 +59,8 @@ type State = {
   renderProgress: Record<string, number>; // clipId → 0..1 (Tier-B render)
   transcribing: Record<string, boolean>;  // source clipId → audio→MIDI in flight (Basic Pitch)
   availableColors: AvailableColor[];       // SA3 colour rack (from list_colors)
+  availableTransformTargets: AvailableTransformTarget[]; // Route B targets (from list_transform_targets)
+  transformFreeText: boolean;              // Route B: does the transform tier allow free-text targets
   labMode: boolean;                        // ASTD unlock for generative colours
   qaByClip: Record<string, RenderQA>;      // last render's quality readout
   remoteStatus: RemoteStatus | null;       // iPhone companion server state
@@ -135,6 +137,7 @@ type State = {
   rescanPlugins: (format?: "vst3" | "au" | "all") => Promise<void>;
   refreshPluginList: () => Promise<void>;
   loadColors: () => void;
+  loadTransformTargets: () => void;        // Route B: fetch transform targets (lazy)
   loadAudioDevices: () => Promise<void>;   // lazy + on-demand (force re-fetch after a device change)
   loadRouting: () => Promise<void>;        // RTG-001/002 — wave inputs + track outputs
   setLab: (b: boolean) => void;
@@ -215,6 +218,8 @@ export const useStore = create<State>((set, get) => ({
   renderProgress: {},
   transcribing: {},
   availableColors: [],
+  availableTransformTargets: [],
+  transformFreeText: true,
   labMode: false,
   qaByClip: {},
   remoteStatus: null,
@@ -537,6 +542,20 @@ export const useStore = create<State>((set, get) => ({
       args: {},
     }).then((res) => {
       if (res.ok && res.data?.colors) set({ availableColors: res.data.colors });
+    });
+  },
+
+  loadTransformTargets: () => {
+    if (get().availableTransformTargets.length > 0) return;
+    void executeCommand<CommandResult<{ targets: string[]; freeText: boolean }>>({
+      command: "list_transform_targets",
+      args: {},
+    }).then((res) => {
+      if (res.ok && res.data?.targets)
+        set({
+          availableTransformTargets: res.data.targets.map((name) => ({ name })),
+          transformFreeText: res.data.freeText !== false,
+        });
     });
   },
 

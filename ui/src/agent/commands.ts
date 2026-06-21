@@ -81,15 +81,9 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "open_plugin_editor", desc: "Pop out a plugin's native editor window", args: [S("trackId"), N("index")] },
   { command: "remove_plugin", desc: "Remove a plugin from a track's chain", args: [S("trackId"), N("index")] },
 
-  // ── neural (Tier-A) ─────────────────────────────────────────────────────
-  { command: "add_neural_insert", desc: "Add the real-time neural insert to a track", args: [S("trackId"), N("index", false)] },
-  { command: "set_neural_param", desc: "Set a neural insert param (0-100, ASTD-clamped) by chain index", args: [S("trackId"), N("index", true, "chain position of the neural insert"), S("paramId", true, '"drive" | "tone" | "mix"'), N("value", true, "0-100")] },
-  { command: "set_neural_lab_mode", desc: "Unlock the raw (Lab) range on a neural insert", args: [S("trackId"), N("index"), B("on")] },
-  { command: "reset_neural", desc: "Reset a neural insert's model state", args: [S("trackId"), N("index")] },
-
   // ── generative (Tier-B) ─────────────────────────────────────────────────
   { command: "create_render_layer", desc: "Attach a generative re-imagine layer to a wave clip", args: [S("clipId"), S("adapter", false)] },
-  { command: "set_render_param", desc: "Set a render-layer parameter (prompt/noise/seed)", args: [S("clipId"), S("prompt", false), N("nl", false, "noise level 0-1"), N("seed", false)] },
+  { command: "set_render_param", desc: "Set a render-layer parameter (prompt/noise/seed, or transform target/strength)", args: [S("clipId"), S("prompt", false), N("nl", false, "noise level 0-1"), N("seed", false), S("target", false, "transform target instrument or free-text"), N("strength", false, "transform strength 0-100")] },
   { command: "render_layer", desc: "Run the generative render on a clip's layer", args: [S("clipId")] },
   { command: "accept_render", desc: "Accept a finished render (lands it as a clip)", args: [S("clipId")] },
   { command: "reject_render", desc: "Reject a render", args: [S("clipId")] },
@@ -181,10 +175,6 @@ export function describeCommand(command: string, args: Record<string, unknown>):
     case "reorder_plugin": return `Reordered a plugin`;
     case "open_plugin_editor": return `Opened a plugin editor`;
     case "remove_plugin": return `Removed a plugin`;
-    case "add_neural_insert": return `Added a neural insert`;
-    case "set_neural_param": return `Set neural ${a.paramId} to ${a.value}`;
-    case "set_neural_lab_mode": return a.on ? `Unlocked neural Lab mode` : `Locked neural Lab mode`;
-    case "reset_neural": return `Reset the neural insert`;
     case "create_render_layer": return `Attached a generative layer`;
     case "set_render_param": return `Set a render parameter`;
     case "render_layer": return `Started a render`;

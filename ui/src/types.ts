@@ -13,6 +13,8 @@ export type RenderLayer = {
   prompt?: string;
   nl?: number;
   colors?: RenderColor[];
+  target?: string;    // Route B: transform target (instrument or free-text)
+  strength?: number;  // Route B: transform strength (0–100)
 };
 
 // SA3 colour-rack metadata from GET /colors (via list_colors).
@@ -24,6 +26,9 @@ export type AvailableColor = {
   verdict: string;
   no_stack_with: string[];
 };
+
+// Route B transform target from GET /transform_targets (via list_transform_targets).
+export type AvailableTransformTarget = { name: string };
 
 // Quality readout from a completed render's manifest (judge panel, 05 §7).
 export type RenderQA = { pq?: number | null; pq_base?: number | null; flags?: string[]; adapter?: string };
@@ -82,20 +87,6 @@ export type PluginParam = {
   points?: AutoPoint[];
 };
 
-export type NeuralParam = { id: string; ui: number; safeMaxUi: number };
-export type NeuralInsert = {
-  model: string;
-  labMode: boolean;
-  latencySamples: number;
-  latencySeconds: number;
-  params: NeuralParam[];
-  // load_neural_model{trackId,pluginIndex,path} populates these on describe(): the
-  // human-readable name of the loaded model file and its on-disk path. Absent until
-  // a model is loaded (the host's self-contained default reports neither).
-  modelName?: string;
-  modelPath?: string;
-};
-
 export type Plugin = {
   index: number;
   name: string;
@@ -106,8 +97,6 @@ export type Plugin = {
   category?: string;
   isInstrument: boolean;
   params: PluginParam[];
-  neural?: NeuralInsert;
-  labMode?: boolean;
 };
 
 export type AvailablePlugin = {

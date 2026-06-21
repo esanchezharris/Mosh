@@ -1,5 +1,4 @@
 #include "PluginHost.h"
-#include "plugins/neural/NeuralInsertPlugin.h"
 #include "plugins/spectral/MasterSpectralTapPlugin.h"
 #include <thread>
 #if ! JUCE_WINDOWS
@@ -158,8 +157,6 @@ void PluginHost::initialise()
     if (engine.getPluginManager().pluginFormatManager.getNumFormats() == 0)
         engine.getPluginManager().initialise();
 
-    // Register Mosh's built-in Tier-A neural insert (04 §2.2) once.
-    engine.getPluginManager().createBuiltInType<NeuralInsertPlugin>();
     // Register the master spectral tap (Moshi reactivity) — a pure-measure passthrough
     // appended to the master plugin list, drained at 30 Hz to feed Moshi's body.
     engine.getPluginManager().createBuiltInType<MasterSpectralTapPlugin>();

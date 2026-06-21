@@ -26,7 +26,7 @@ TEST_CASE ("classify: single-track mutations are track-scoped", "[multiplayer][l
     REQUIRE (LockManager::classify ("set_track_volume") == Scope::Track);
     REQUIRE (LockManager::classify ("load_plugin")      == Scope::Track);
     REQUIRE (LockManager::classify ("set_plugin_param") == Scope::Track);
-    REQUIRE (LockManager::classify ("add_neural_insert")== Scope::Track);
+    REQUIRE (LockManager::classify ("reorder_plugin")   == Scope::Track);
     REQUIRE (LockManager::classify ("add_midi_clip")    == Scope::Track);
 }
 

@@ -38,12 +38,6 @@ int runLiveAudioSmoke (MoshEngine&, MoshOps&);
     a one-time Speech (and, for MIC, Microphone) grant; reports clearly if ungranted. */
 int runVoiceSmoke (MoshEngine&, MoshOps&);
 
-/** Audible A/B of a real Tier-A neural model (`Mosh --neural-ab`): imports a DI clip
-    (MOSH_NEURAL_AB_WAV), loads a real RTNeural model (MOSH_NEURAL_AB_MODEL) into a
-    neural insert, and plays it through the device alternating amp-on / bypassed so a
-    human can hear the difference. Needs a real output device + an RTNeural-ON build. */
-int runNeuralAB (MoshEngine&, MoshOps&);
-
 /** Headless deep plugin scan (`Mosh --scan-plugins-deep`): a synchronous out-of-
     process VST3 + AudioUnit catalog sweep with the hang-watchdog engaged, then
     prints the catalog + the quarantine list. Returns 0 on success. */
@@ -53,10 +47,6 @@ int runDeepPluginScan (MoshOps&);
     a wave track and a VST3 synth on a MIDI track, and opens the synth's native
     editor — then leaves the GUI running (for visual verification of the gate). */
 void runPluginDemo (MoshOps&);
-
-/** Scripted Stage 4 demo (`Mosh --demo4`): a track + tone + a Tier-A neural
-    insert with the drive driven up — for visual verification of the neural rack. */
-void runNeuralDemo (MoshOps&);
 
 /** Scripted Stage 5 demo (`Mosh --demo5`): a track + tone + a generative
     RenderLayer with a completed FakeAdapter render — for visual verification of

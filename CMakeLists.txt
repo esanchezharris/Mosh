@@ -21,11 +21,6 @@ endif()
 set(CPM_SOURCE_CACHE "${CMAKE_SOURCE_DIR}/.cpm-cache" CACHE PATH "CPM dep cache")
 set(FETCHCONTENT_BASE_DIR "${CMAKE_SOURCE_DIR}/.cpm-cache/_fc" CACHE PATH "")
 
-# The Tier-A neural insert (Stage 4) is self-contained (a real RT-safe MLP) and
-# ALWAYS built. The heavy external inference backends used to load standard model
-# captures (RTNeural for NAM/Proteus, anira+LibTorch for RAVE/DDSP) are pinned in
-# cmake/Dependencies.cmake and fetched only behind their own opt-in flags.
-option(MOSH_ENABLE_RTNEURAL "Fetch RTNeural (load real NAM/Proteus captures)" OFF)
 option(MOSH_BUILD_APP "Build the standalone JUCE app" ON)
 option(MOSH_BUILD_UI "Build the React/Vite UI bundle as part of CMake" ON)
 option(MOSH_BUILD_TESTS "Build the Catch2 + command-surface test target" ON)
@@ -95,8 +90,6 @@ if (MOSH_BUILD_APP)
         src/multiplayer/MultiplayerSession.cpp
         # Stage 3 — VST3 hosting (04 PART 1)
         src/plugins/hosting/PluginHost.cpp
-        # Stage 4 — Tier-A real-time neural insert (04 PART 2)
-        src/plugins/neural/NeuralInsertPlugin.cpp
         # Moshi reactivity — master-output spectral tap (pure measure)
         src/plugins/spectral/MasterSpectralTapPlugin.cpp
         # Stage 5 — Tier-B generative layer (05)
@@ -137,10 +130,6 @@ if (MOSH_BUILD_APP)
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags)
-
-    if (MOSH_ENABLE_RTNEURAL AND TARGET mosh_neural_backends)
-        target_link_libraries(Mosh PRIVATE mosh_neural_backends)
-    endif()
 
     # ── Native voice: macOS Speech (SFSpeechRecognizer + AVAudioEngine) ───────
     # Obj-C++ with ARC; the browser Web Speech API covers the Vite dev path.

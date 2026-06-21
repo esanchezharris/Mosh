@@ -8,9 +8,9 @@ checks) plus the UI suites (vitest + Playwright). Those prove the *plumbing*. Th
 the parts that only real hardware (or real audio rendering) can confirm.
 
 **Primary proof vehicle = offline render-to-WAV.** Rather than live-listening or BlackHole
-loopback, we bounce the real signal chain to a file (`export_audio` / `bounce_layer_to_clip`, and
-`--neural-ab`'s `MOSH_NEURAL_AB_WAV` dump) and assert on the WAV's contents programmatically
-(non-silent? expected level? does neural-ON differ from neural-OFF? did SA3 actually transform it?).
+loopback, we bounce the real signal chain to a file (`export_audio` / `bounce_layer_to_clip`, plus the
+render-layer job artifacts) and assert on the WAV's contents programmatically
+(non-silent? expected level? did the Tier-B transform / SA3 actually change the audio vs its input?).
 This is deterministic, headless, and needs no one present — you can audition the saved WAVs later.
 Only a few checks are inherently live (mic/voice, two-window multiplayer sync).
 
@@ -45,9 +45,9 @@ across runs).
 | --- | --- | --- | --- | --- |
 | 1 | Makes sound | offline | non-silent, right duration/level | ✅ 2.0s stereo, peak 0.18, RMS 0.12 |
 | 2 | Drums audible | offline | non-silent (silent-drums regression guard) | ✅ 4.0s, peak 0.91, RMS 0.088 |
-| 3 | Tier-A neural A/B | offline | neural-active differs measurably from the dry render | ✅ dry RMS 0.125 → wet 0.606, **diff-RMS 0.485** |
-| 4 | SA3 transform | offline | real model renders, quality readout present, differs from input | ✅ `adapter: stable_audio3`, **`pq 6.933`**, non-silent |
-| 5 | Full producer loop | offline | multi-track + neural + mix exports non-silent | ✅ 2.0s, peak 0.83, RMS 0.55 |
+| 3 | Transform render (fake) | offline | Tier-B `transform` (fake adapter) renders non-silent, differs from input | ✅ `adapter/mode: transform`, **diff-from-input RMS 0.270**, RMS 0.45 |
+| 4 | SA3 transform | offline (`--sa3`) | real model renders, quality readout present, differs from input | ✅ `adapter: stable_audio3`, **`pq 6.933`**, non-silent |
+| 5 | Full producer loop | offline | multi-track + mix exports non-silent | ✅ 2.0s, peak 0.34, RMS 0.18 |
 | 6 | Realtime output path | live | device opens; audio frames flow | ✅ `--live-audio-smoke` **14/14** (MacBook Pro Speakers, CoreAudio 48k) — by-ear out-loud confirm still owner-side |
 | 7 | Voice (mock brain) | live | STT transcribes; earcons fire | ⏳ owner: grant mic, hold-to-talk + 👂 hands-free + barge-in (`MOSH_VOICE_BARGE_IN=1`) |
 | 8 | Multiplayer (2-process) | live | protocol green; track-lock + clip-move sync | ✅ `relay/run-mp-selftest.sh` **911/911** — two-window *visual* sync still owner-side |

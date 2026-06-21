@@ -95,6 +95,8 @@ namespace mosh::ids
     MOSH_DECLARE_ID (cfg)
     MOSH_DECLARE_ID (steps)
     MOSH_DECLARE_ID (nl)               // init_noise_level (reimagine)
+    MOSH_DECLARE_ID (target)           // Route B transform target (instrument or free-text)
+    MOSH_DECLARE_ID (strength)         // Route B transform strength (0–100 ASTD UI value)
 
 #undef MOSH_DECLARE_ID
 } // namespace mosh::ids

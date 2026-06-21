@@ -22,8 +22,7 @@ export function Dock({ snapshot }: { snapshot: Snapshot }) {
 function Rack({ track }: { track: Track | null }) {
   const openBrowser = useStore((s) => s.openBrowser);
   const openAutomation = useStore((s) => s.openAutomation);
-  const exec = useStore((s) => s.exec);
-  const plugins = (track?.plugins ?? []).filter((p) => p.external || p.neural || p.builtin);
+  const plugins = (track?.plugins ?? []).filter((p) => p.external || p.builtin);
   return (
     <div className="rack" data-testid="rack">
       <div className="rack-label">
@@ -31,9 +30,8 @@ function Rack({ track }: { track: Track | null }) {
       </div>
       <div className="rack-chain">
         {track && plugins.map((p) => <PluginCard key={p.index} plugin={p} trackId={track.id} />)}
-        {track && plugins.length === 0 && <span className="rack-empty">No effects yet — add a plugin or neural insert.</span>}
+        {track && plugins.length === 0 && <span className="rack-empty">No effects yet — add a plugin.</span>}
         {track && <button className="btn rack-add" onClick={openBrowser}>+ Plugin</button>}
-        {track && <button className="btn rack-add" onClick={() => void exec("add_neural_insert", { trackId: track.id, modelId: "nam" })}>+ Neural</button>}
         {track && <button className="btn rack-add" data-testid="open-automation" title="Parameter automation" aria-label="Open parameter automation" onClick={() => openAutomation(track.id)}>⌁ Automation</button>}
       </div>
     </div>
@@ -42,20 +40,18 @@ function Rack({ track }: { track: Track | null }) {
 
 function PluginCard({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
   const exec = useStore((s) => s.exec);
-  const isNeural = !!plugin.neural, isBuiltin = !!plugin.builtin;
+  const isBuiltin = !!plugin.builtin;
   return (
-    <div className={`pcard${plugin.enabled ? "" : " bypassed"}${isNeural ? " neural" : ""}`} data-testid="plugin-card" data-plugin-index={plugin.index} data-enabled={plugin.enabled}>
+    <div className={`pcard${plugin.enabled ? "" : " bypassed"}`} data-testid="plugin-card" data-plugin-index={plugin.index} data-enabled={plugin.enabled}>
       <div className="pcard-head">
         <button className={`pdot${plugin.enabled ? " on" : ""}`} title={plugin.enabled ? "Bypass" : "Enable"}
           aria-pressed={!plugin.enabled}
           onClick={() => void exec("bypass_plugin", { trackId, index: plugin.index, bypassed: plugin.enabled })} />
-        <span className="pname">{isNeural ? `Neural · ${plugin.neural!.model}` : plugin.name}</span>
+        <span className="pname">{plugin.name}</span>
         {plugin.isInstrument && <span className="ibadge">inst</span>}
-        {isNeural && <span className="ibadge nbadge">Tier A</span>}
         {isBuiltin && !plugin.isInstrument && <span className="ibadge">{plugin.category}</span>}
       </div>
-      {isNeural ? <NeuralBody plugin={plugin} trackId={trackId} />
-        : isBuiltin ? <ParamBody plugin={plugin} trackId={trackId} />
+      {isBuiltin ? <ParamBody plugin={plugin} trackId={trackId} />
         : (
           <div className="pcard-actions">
             <button className="btn" onClick={() => void exec("open_plugin_editor", { trackId, index: plugin.index })}>Edit</button>
@@ -91,62 +87,29 @@ function ParamBody({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
   );
 }
 
-function NeuralBody({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
-  const exec = useStore((s) => s.exec);
-  const n = plugin.neural!;
-  // Load a model file into this neural insert (load_neural_model{trackId,pluginIndex,path}).
-  // No native file picker on the bridge, so prompt for a path; describe() then reports
-  // modelName/modelPath, shown below. A blank/cancelled prompt is a no-op.
-  const loadModel = () => {
-    const path = window.prompt("Model file path (NAM/RTNeural capture):", n.modelPath ?? "");
-    if (path && path.trim()) void exec("load_neural_model", { trackId, pluginIndex: plugin.index, path: path.trim() });
-  };
-  return (
-    <div className="pbody">
-      {n.modelName && (
-        <div className="neural-model tc" title={n.modelPath ?? n.modelName} data-testid="neural-model-name">{n.modelName}</div>
-      )}
-      {n.params.map((p) => (
-        <label key={p.id} className="nparam">
-          <span className="nlabel">{p.id}</span>
-          <span className="nslider">
-            <input type="range" min={0} max={100} step={1} value={Math.round(p.ui)}
-              onChange={(e) => void exec("set_neural_param", { trackId, index: plugin.index, paramId: p.id, value: Number(e.target.value) })} />
-            {!n.labMode && p.safeMaxUi < 100 && <span className="astd-mark" style={{ left: `${p.safeMaxUi}%` }} title="ASTD safe limit" />}
-          </span>
-          <span className="nval">{Math.round(p.ui)}</span>
-        </label>
-      ))}
-      <div className="neural-row">
-        <button className="btn" data-testid="neural-load-model" title="Load a model file (NAM / RTNeural capture)" onClick={loadModel}>Load model…</button>
-        <button className={`btn${n.labMode ? " on" : ""}`} title="Lab mode — unlock past the ASTD clamp" aria-pressed={n.labMode}
-          onClick={() => void exec("set_neural_lab_mode", { trackId, index: plugin.index, on: !n.labMode })}>{n.labMode ? "⚠ LAB" : "Lab"}</button>
-        <button className="btn" onClick={() => void exec("reset_neural", { trackId, index: plugin.index })}>Reset</button>
-        <span className="nlat tc">{(n.latencySeconds * 1000).toFixed(1)} ms</span>
-        <button className="btn x" onClick={() => void exec("remove_plugin", { trackId, index: plugin.index })}>✕</button>
-      </div>
-    </div>
-  );
-}
-
 function GenDrawer({ track }: { track: Track }) {
   const exec = useStore((s) => s.exec);
   const colorsAvail = useStore((s) => s.availableColors);
   const loadColors = useStore((s) => s.loadColors);
+  const loadTransformTargets = useStore((s) => s.loadTransformTargets);
   const qaByClip = useStore((s) => s.qaByClip);
-  useEffect(() => { loadColors(); }, [loadColors]);
+  useEffect(() => { loadColors(); loadTransformTargets(); }, [loadColors, loadTransformTargets]);
 
   const clip = track.clips.find((c) => c.type === "wave");
-  if (!clip) return <div className="gen" data-testid="generative"><div className="gen-head"><span className="gen-title">⃝ GENERATIVE</span></div><span className="rack-empty">Add or import an audio clip on this track to re-imagine it.</span></div>;
+  if (!clip) return <div className="gen" data-testid="generative"><div className="gen-head"><span className="gen-title">⃝ GENERATIVE</span></div><span className="rack-empty">Add or import an audio clip on this track to re-imagine or transform it.</span></div>;
   const rl = clip.renderLayer;
   const sa3 = colorsAvail.length > 0;
 
   return (
     <div className="gen" data-testid="generative">
-      <div className="gen-head"><span className="gen-title">⃝ GENERATIVE</span><span className="gen-clip">{sa3 ? "stable audio 3" : "fake"} · {clip.name}</span></div>
+      <div className="gen-head"><span className="gen-title">⃝ GENERATIVE</span><span className="gen-clip">{rl?.mode === "transform" ? "transform" : sa3 ? "stable audio 3" : "fake"} · {clip.name}</span></div>
       {!rl ? (
-        <button className="btn rack-add" data-testid="gen-create"
-          onClick={() => void exec("create_render_layer", { clipId: clip.id, adapter: sa3 ? "stable_audio3" : "fake", mode: "reimagine", modelVariant: sa3 ? "sa3-medium" : "" })}>+ Render layer</button>
+        <div className="gen-create-row">
+          <button className="btn rack-add" data-testid="gen-create"
+            onClick={() => void exec("create_render_layer", { clipId: clip.id, adapter: sa3 ? "stable_audio3" : "fake", mode: "reimagine", modelVariant: sa3 ? "sa3-medium" : "" })}>+ Re-imagine</button>
+          <button className="btn rack-add" data-testid="gen-create-transform"
+            onClick={() => void exec("create_render_layer", { clipId: clip.id, adapter: "transform", mode: "transform" })}>+ Transform</button>
+        </div>
       ) : (
         <GenBody clip={clip} qa={qaByClip[clip.id]} />
       )}
@@ -167,9 +130,11 @@ function GenBody({ clip, qa }: { clip: Clip; qa?: { pq?: number | null; pq_base?
   const setColors = (next: RenderColor[]) => exec("set_render_param", { clipId: clip.id, colors: next.slice(0, 3), lab: labMode });
   const blockedBy = (name: string) => (colorsAvail.find((c) => c.name === name)?.no_stack_with ?? []).some((n) => active.some((a) => a.name === n));
   const addable = colorsAvail.filter((c) => !active.some((a) => a.name === c.name) && !blockedBy(c.name));
+  const isTransform = rl.mode === "transform";
 
   return (
     <div className="gen-body" data-render-status={rl.status}>
+      {isTransform ? <TransformControls clip={clip} /> : (<>
       {active.map((c) => {
         const meta = colorsAvail.find((m) => m.name === c.name);
         return (
@@ -187,6 +152,7 @@ function GenBody({ clip, qa }: { clip: Clip; qa?: { pq?: number | null; pq_base?
           {addable.map((c) => <option key={c.name} value={c.name}>{c.name}{c.verdict === "WEAK" ? " (weak)" : ""}</option>)}
         </select>
       )}
+      </>)}
       <div className="gen-status" role="status" aria-live="polite">
         <span className={`gen-badge st-${rl.status}`} data-testid="render-status">{rl.status}</span>
         <span className="gen-seed tc">seed {rl.seed}</span>
@@ -212,6 +178,48 @@ function GenBody({ clip, qa }: { clip: Clip; qa?: { pq?: number | null; pq_base?
         <button className="btn" title="new take" onClick={() => void exec("set_render_param", { clipId: clip.id, seed: Number(rl.seed) + 1 })}>⟳ seed</button>
         <button className="btn x" title="remove layer" onClick={() => void exec("remove_render_layer", { clipId: clip.id })}>✕</button>
       </div>
+    </div>
+  );
+}
+
+// Route B — the transform control surface (model-agnostic): a target instrument
+// picker + a free-text override (when the tier allows it) + a strength slider. Writes
+// through the same set_render_param command the colours UI uses.
+function TransformControls({ clip }: { clip: Clip }) {
+  const exec = useStore((s) => s.exec);
+  const targets = useStore((s) => s.availableTransformTargets);
+  const freeText = useStore((s) => s.transformFreeText);
+  const rl = clip.renderLayer!;
+  const target = rl.target ?? "";
+  const strength = rl.strength ?? 65;
+  const known = targets.some((t) => t.name === target);
+  const setTarget = (t: string) => void exec("set_render_param", { clipId: clip.id, target: t });
+  return (
+    <div className="xform-controls">
+      <label className="nparam">
+        <span className="nlabel">target</span>
+        <select className="btn ghost" data-testid="xform-target" value={known ? target : ""}
+          onChange={(e) => e.target.value && setTarget(e.target.value)}>
+          <option value="">{target && !known ? `(${target})` : "pick instrument…"}</option>
+          {targets.map((t) => <option key={t.name} value={t.name}>{t.name}</option>)}
+        </select>
+      </label>
+      {freeText && (
+        <label className="nparam">
+          <span className="nlabel">or text</span>
+          <input className="xform-text" type="text" data-testid="xform-text" placeholder="e.g. lush orchestra"
+            defaultValue={known ? "" : target}
+            onBlur={(e) => setTarget(e.target.value.trim())}
+            onKeyDown={(e) => { if (e.key === "Enter") setTarget((e.target as HTMLInputElement).value.trim()); }} />
+        </label>
+      )}
+      <label className="nparam">
+        <span className="nlabel">strength</span>
+        <span className="nslider"><input type="range" min={0} max={100} step={1} value={Math.round(strength)}
+          data-testid="xform-strength"
+          onChange={(e) => void exec("set_render_param", { clipId: clip.id, strength: Number(e.target.value) })} /></span>
+        <span className="nval">{Math.round(strength)}</span>
+      </label>
     </div>
   );
 }

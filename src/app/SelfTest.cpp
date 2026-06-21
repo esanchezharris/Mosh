@@ -2,7 +2,6 @@
 #include "engine/MoshEngine.h"
 #include "moshops/MoshOps.h"
 #include "multiplayer/MultiplayerClient.h"
-#include "plugins/neural/NeuralInsertPlugin.h"
 #include "brain/BrainProxy.h"
 #include "voice/NativeSpeech.h"
 #include "util/Env.h"
@@ -933,176 +932,6 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                "reorder_plugin with a bad from-index errors");
     }
 
-    // ─── Stage 4: Tier-A real-time neural insert ───
-    section ("Stage 4: Tier-A neural insert (RT-safe / PDC / ASTD)");
-    {
-        auto nt = cmd (ops, "create_track", args1 ("name", "Neural"))["data"].getProperty ("trackId", var()).toString();
-        auto ar = cmd (ops, "add_neural_insert", objN ({{ "trackId", nt }, { "modelId", "nam" }}));
-        check (ok (ar), "add_neural_insert ok");
-        const int nidx = (int) ar["data"].getProperty ("index", -1);
-
-        NeuralInsertPlugin* n = nullptr;
-        if (auto* t = te::findAudioTrackForID (eng.edit(), te::EditItemID::fromString (nt)))
-            for (auto* p : t->pluginList.getPlugins())
-                if (auto* nn = dynamic_cast<NeuralInsertPlugin*> (p)) n = nn;
-        check (n != nullptr, "neural insert is in the track chain (built-in type registered)");
-
-        if (n != nullptr)
-        {
-            n->initialise ({ {}, 44100.0, 512 });   // alloc delay line + warm up
-
-            auto process = [&] (float amp, int len) {
-                AudioBuffer<float> buf (2, len); buf.clear();
-                buf.setSample (0, 0, amp); buf.setSample (1, 0, amp);
-                te::MidiMessageArray midi;
-                te::PluginRenderContext ctx (&buf, AudioChannelSet::stereo(), 0, len, &midi, 0.0,
-                                             tracktion::TimeRange(), true, false, false, false);
-                n->applyToBuffer (ctx);
-                return buf;
-            };
-
-            cmd (ops, "set_neural_param", objN ({{ "trackId", nt }, { "index", nidx }, { "paramId", "drive" }, { "value", 100.0 }}));
-            cmd (ops, "set_neural_param", objN ({{ "trackId", nt }, { "index", nidx }, { "paramId", "mix" }, { "value", 100.0 }}));
-            {
-                auto out = process (0.5f, 64);
-                check (std::abs (out.getSample (0, 0) - 0.5f) > 0.1f, "neural model alters the driven signal (real inference)");
-                check (std::abs (out.getSample (0, 10)) < 1e-4f, "silence stays silent (no DC injected by the net)");
-            }
-
-            // Bypass: the known inverted-logic bug (04 §2.4): bypassed -> passthrough.
-            cmd (ops, "bypass_plugin", objN ({{ "trackId", nt }, { "index", nidx }, { "bypassed", true }}));
-            {
-                auto out = process (0.5f, 64);
-                check (std::abs (out.getSample (0, 0) - 0.5f) < 1e-5f, "bypass passes audio through unchanged");
-            }
-            cmd (ops, "bypass_plugin", objN ({{ "trackId", nt }, { "index", nidx }, { "bypassed", false }}));
-
-            // ASTD clamp + Lab unlock (read raw via the param's normalised value).
-            cmd (ops, "set_neural_param", objN ({{ "trackId", nt }, { "index", nidx }, { "paramId", "drive" }, { "value", 100.0 }}));
-            const float normClamped = n->getAutomatableParameter (0)->getCurrentNormalisedValue();
-            check (std::abs (normClamped - (12.0f - 1.0f) / (25.0f - 1.0f)) < 0.02f, "ASTD clamps drive UI=100 below quality-collapse (not raw max)");
-            cmd (ops, "set_neural_lab_mode", objN ({{ "trackId", nt }, { "index", nidx }, { "on", true }}));
-            cmd (ops, "set_neural_param", objN ({{ "trackId", nt }, { "index", nidx }, { "paramId", "drive" }, { "value", 100.0 }}));
-            const float normLab = n->getAutomatableParameter (0)->getCurrentNormalisedValue();
-            check (normLab > normClamped + 0.1f, "Lab mode unlocks drive beyond the clamp");
-            check (std::abs (normLab - 1.0f) < 0.02f, "Lab UI=100 reaches the full raw range");
-
-            // PDC: true latency + delay-line correctness (no drift vs dry).
-            n->resetModel();
-            cmd (ops, "set_neural_latency", objN ({{ "trackId", nt }, { "index", nidx }, { "samples", 128 }}));
-            check (std::abs (n->getLatencySeconds() - 128.0 / 44100.0) < 1e-9, "getLatencySeconds() reports the TRUE delay (PDC)");
-            cmd (ops, "set_neural_param", objN ({{ "trackId", nt }, { "index", nidx }, { "paramId", "drive" }, { "value", 50.0 }}));
-            {
-                auto out = process (0.5f, 256);
-                check (std::abs (out.getSample (0, 0)) < 1e-4f && std::abs (out.getSample (0, 64)) < 1e-4f, "no output before the reported latency");
-                check (std::abs (out.getSample (0, 128)) > 0.05f, "impulse emerges at exactly the reported latency (delay == reported, no drift)");
-            }
-
-            // ── GAP 1 — real Tier-A model load (load_neural_model) ──
-            // Return latency to 0 + full mix/drive so we compare model-vs-inline on the
-            // SAME first sample with no delay-line offset.
-            cmd (ops, "set_neural_latency", objN ({{ "trackId", nt }, { "index", nidx }, { "samples", 0 }}));
-            cmd (ops, "set_neural_param", objN ({{ "trackId", nt }, { "index", nidx }, { "paramId", "mix" }, { "value", 100.0 }}));
-            cmd (ops, "set_neural_param", objN ({{ "trackId", nt }, { "index", nidx }, { "paramId", "drive" }, { "value", 50.0 }}));
-            n->resetModel();
-
-            // Capture the inline-MLP output for the driven probe BEFORE loading any model.
-            const float inlineY = process (0.5f, 8).getSample (0, 0);
-
-           #if MOSH_HAVE_RTNEURAL
-            // CI-runnable: the in-repo fixture path (compile-time repo dir), env override
-            // MOSH_SELFTEST_RTNEURAL_MODEL wins when set.
-            juce::String fixturePath = juce::SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_RTNEURAL_MODEL", {});
-            if (fixturePath.isEmpty())
-                fixturePath = juce::String (MOSH_REPO_SOURCE_DIR) + "/assets/neural_waveshaper.json";
-            const juce::File fixture (fixturePath);
-            check (fixture.existsAsFile(), "RTNeural model fixture present (assets/neural_waveshaper.json)");
-
-            auto lm = cmd (ops, "load_neural_model", objN ({{ "trackId", nt }, { "pluginIndex", nidx }, { "path", fixturePath }}));
-            check (ok (lm), "load_neural_model ok (RTNeural built)");
-            check ((bool) lm["data"].getProperty ("applied", false), "load_neural_model applied:true (RTNeural built)");
-
-            n->resetModel();
-            {
-                auto out = process (0.5f, 8);
-                const float modelY = out.getSample (0, 0);
-                check (std::abs (modelY - inlineY) > 1e-3f, "RTNeural model output DIFFERS numerically from the inline MLP (same input)");
-                // silence-in → silence-out with the model loaded.
-                check (std::abs (out.getSample (0, 4)) < 1e-4f, "silence stays silent with the RTNeural model loaded");
-            }
-
-            // Persisted model path survives save/reload (re-loads the file on restore).
-            check (n->describe().getProperty ("modelPath", var()).toString() == fixturePath, "describe() reports the loaded modelPath");
-            check (n->describe().getProperty ("modelName", var()).toString().isNotEmpty(), "describe() reports a modelName");
-            check (ok (cmd (ops, "save")),   "save (neural model path) ok");
-            check (ok (cmd (ops, "reload")), "reload (neural model path) ok");
-            {
-                // Re-find the plugin after reload (the Edit was reconstructed).
-                NeuralInsertPlugin* n2 = nullptr;
-                if (auto* t = te::findAudioTrackForID (eng.edit(), te::EditItemID::fromString (nt)))
-                    for (auto* p : t->pluginList.getPlugins())
-                        if (auto* nn = dynamic_cast<NeuralInsertPlugin*> (p)) n2 = nn;
-                check (n2 != nullptr, "neural insert still present after reload");
-                if (n2 != nullptr)
-                {
-                    check (n2->describe().getProperty ("modelPath", var()).toString() == fixturePath, "model path restored after save+reload");
-                    // initialise() is the deterministic re-load hook (loads the persisted
-                    // model file on the message thread once the plugin is prepared).
-                    n2->initialise ({ {}, 44100.0, 512 });
-                    check ((bool) n2->describe().getProperty ("modelLoaded", false), "RTNeural model re-loaded on reload (file re-read from persisted path)");
-                    // Find the neural plugin's index in the reloaded chain so the param
-                    // set targets the right plugin (the volume plugin sits at index 0).
-                    int nidx2 = -1;
-                    if (auto* t = te::findAudioTrackForID (eng.edit(), te::EditItemID::fromString (nt)))
-                    {
-                        const auto& plugs = t->pluginList.getPlugins();
-                        for (int i = 0; i < plugs.size(); ++i)
-                            if (dynamic_cast<NeuralInsertPlugin*> (plugs[i].get()) != nullptr) nidx2 = i;
-                    }
-                    auto procN2 = [&] (float amp, int len) {
-                        AudioBuffer<float> buf (2, len); buf.clear();
-                        buf.setSample (0, 0, amp); buf.setSample (1, 0, amp);
-                        te::MidiMessageArray midi;
-                        te::PluginRenderContext ctx (&buf, AudioChannelSet::stereo(), 0, len, &midi, 0.0,
-                                                     tracktion::TimeRange(), true, false, false, false);
-                        n2->applyToBuffer (ctx);
-                        return buf;
-                    };
-                    cmd (ops, "set_neural_param", objN ({{ "trackId", nt }, { "index", nidx2 }, { "paramId", "drive" }, { "value", 50.0 }}));
-                    cmd (ops, "set_neural_param", objN ({{ "trackId", nt }, { "index", nidx2 }, { "paramId", "mix" }, { "value", 100.0 }}));
-                    n2->resetModel();
-                    const float reloadedY = procN2 (0.5f, 8).getSample (0, 0);
-                    check (std::abs (reloadedY - inlineY) > 1e-3f, "reloaded model still transforms differently from the inline MLP (path re-loaded)");
-
-                    // PDC null test still holds with the model loaded.
-                    n2->resetModel();
-                    cmd (ops, "set_neural_latency", objN ({{ "trackId", nt }, { "index", nidx2 }, { "samples", 128 }}));
-                    auto outL = procN2 (0.5f, 256);
-                    check (std::abs (outL.getSample (0, 0)) < 1e-4f && std::abs (outL.getSample (0, 64)) < 1e-4f, "PDC: no output before latency with model loaded");
-                    check (std::abs (outL.getSample (0, 128)) > 0.02f, "PDC: impulse emerges at the reported latency with model loaded");
-                }
-            }
-           #else
-            // DEFAULT build (no RTNeural): load_neural_model is a graceful no-op, and the
-            // inline MLP still does real inference (alters the driven signal, silence stays
-            // silent). This keeps the default selftest green.
-            juce::ignoreUnused (inlineY);
-            auto lm = cmd (ops, "load_neural_model",
-                           objN ({{ "trackId", nt }, { "pluginIndex", nidx }, { "path", juce::String ("/does/not/matter.json") }}));
-            check (ok (lm), "load_neural_model returns ok (graceful, RTNeural not built)");
-            check (! (bool) lm["data"].getProperty ("applied", true), "load_neural_model applied:false (RTNeural not built)");
-            check (lm["data"].getProperty ("reason", var()).toString() == "RTNeural not built", "load_neural_model reason: RTNeural not built");
-            {
-                // Inline MLP still alters a driven signal + keeps silence silent.
-                cmd (ops, "set_neural_latency", objN ({{ "trackId", nt }, { "index", nidx }, { "samples", 0 }}));
-                auto out = process (0.5f, 8);
-                check (std::abs (out.getSample (0, 0) - 0.5f) > 0.05f, "inline MLP still alters the driven signal (default build)");
-                check (std::abs (out.getSample (0, 4)) < 1e-4f, "inline MLP keeps silence silent (default build)");
-            }
-           #endif
-        }
-    }
-
     // ─── MON-004: total plugin delay compensation (PDC) readout in the snapshot ───
     section ("MON-004: PDC / reported-latency readout");
     {
@@ -1265,6 +1094,57 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                "JSONL records remove_render_layer");
     }
 
+    // --- Route B: Tier-B transform render mode (FakeTransformAdapter) ---
+    // Same job protocol / cache / accept-landing as SA3 re-imagine, exercised on the
+    // new mode:"transform" with the model-agnostic target+strength surface. Runs in the
+    // default build (the fake transform is stdlib-only).
+    section ("Route B: transform render mode (fake)");
+    {
+        auto xt = cmd (ops, "create_track", args1 ("name", "Xform"))["data"].getProperty ("trackId", var()).toString();
+        auto xtone = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", xt }, { "seconds", 1.5 }, { "freq", 207.0 }}));
+        const auto xcid = xtone["data"].getProperty ("clipId", var()).toString();
+
+        auto crl = cmd (ops, "create_render_layer", objN ({{ "clipId", xcid }, { "adapter", "transform" }, { "mode", "transform" }}));
+        check (ok (crl), "create_render_layer (transform) ok");
+        cmd (ops, "set_render_param", objN ({{ "clipId", xcid }, { "target", "flute" }, { "strength", 70 }, { "seed", 1 }}));
+
+        auto r1 = cmd (ops, "render_layer", objN ({{ "clipId", xcid }, { "wait", true }}));
+        check (ok (r1), "transform render_layer ok (fake transform ran)");
+        check (r1["data"].getProperty ("cache", var()).toString() == "miss", "first transform render is a cache MISS");
+        check (r1["data"].getProperty ("status", var()).toString() == "ready", "transform render completed -> ready");
+        bool xHasArtifact = false;
+        { auto trk = trackById (xt);
+          if (auto* arr = trk.getProperty ("clips", var()).getArray())
+            for (auto& c : *arr) if (c.getProperty ("id", var()).toString() == xcid)
+                xHasArtifact = (bool) c.getProperty ("renderLayer", var()).getProperty ("hasArtifact", false); }
+        check (xHasArtifact, "transform produced a cached artifact (output.wav)");
+
+        auto r2 = cmd (ops, "render_layer", objN ({{ "clipId", xcid }, { "wait", true }}));
+        check (r2["data"].getProperty ("cache", var()).toString() == "hit", "identical transform re-render is a cache HIT");
+
+        // The target is in the fingerprint: changing it must invalidate the cache.
+        cmd (ops, "set_render_param", objN ({{ "clipId", xcid }, { "target", "violin" }}));
+        auto r3 = cmd (ops, "render_layer", objN ({{ "clipId", xcid }, { "wait", true }}));
+        check (r3["data"].getProperty ("cache", var()).toString() == "miss", "changing transform target -> cache MISS");
+
+        // Strength is in the fingerprint too.
+        cmd (ops, "set_render_param", objN ({{ "clipId", xcid }, { "strength", 95 }}));
+        auto r4 = cmd (ops, "render_layer", objN ({{ "clipId", xcid }, { "wait", true }}));
+        check (r4["data"].getProperty ("cache", var()).toString() == "miss", "changing transform strength -> cache MISS");
+
+        // Accept -> appends a clip to the existing "Neural Renders" lane (reuses the SA3 landing).
+        check (ok (cmd (ops, "accept_render", args1 ("clipId", xcid))), "accept_render (transform) ok");
+        bool xLaneHasClip = false; String xAcceptedSource;
+        { auto snap = ops.snapshot();
+          if (auto* arr = snap["tracks"].getArray())
+            for (auto& t : *arr) if (t.getProperty ("name", var()).toString() == "Neural Renders")
+              if (auto* ca = t["clips"].getArray(); ca != nullptr && ca->size() > 0)
+              { xLaneHasClip = true; xAcceptedSource = ca->getLast().getProperty ("sourceFile", var()).toString(); } }
+        check (xLaneHasClip, "transform accept landed a clip on the Neural Renders lane");
+        check (File (xAcceptedSource).existsAsFile() && File (xAcceptedSource).getSize() > 44,
+               "accepted transform clip points at a real non-empty file");
+    }
+
     // --- Stage 6: full producer loop -> export, undo/redo correct throughout ---
     section ("Stage 6: full producer loop + export");
     {
@@ -1283,11 +1163,6 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                 fxId2 = p.getProperty ("id", var()).toString(); }
         if (fxId2.isNotEmpty())
             check (ok (cmd (ops, "load_plugin", objN ({{ "trackId", mt }, { "pluginId", fxId2 }}))), "host VST3 effect on the mix track");
-
-        // Tier-A neural insert
-        auto an = cmd (ops, "add_neural_insert", objN ({{ "trackId", mt }, { "modelId", "nam" }}));
-        const int ni = (int) an["data"].getProperty ("index", -1);
-        cmd (ops, "set_neural_param", objN ({{ "trackId", mt }, { "index", ni }, { "paramId", "drive" }, { "value", 55.0 }}));
 
         // generative transform (Tier B)
         cmd (ops, "create_render_layer", objN ({{ "clipId", mcid }, { "adapter", "fake" }}));
@@ -1435,7 +1310,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     }
 
     // --- DRM-001: drums make sound (working sampler + bundled kit + track type) ---
-    // Mirrors the neural "driven signal altered / silence stays silent" gate, but for
+    // Same shape as the SA3 "differs from input / silence stays silent" gate, but for
     // the drum instrument: a programmed beat exports NON-SILENT audio, an empty drum
     // clip exports SILENT. new_project isolates the render so the drum track is the
     // ONLY track — the export then reflects exactly its sampler.
@@ -4432,88 +4307,6 @@ void runPluginDemo (MoshOps& ops)
     }
 }
 
-// Audible A/B of a REAL Tier-A neural model (`Mosh --neural-ab`). Imports a DI clip,
-// inserts a neural plugin, loads a real RTNeural model (MOSH_NEURAL_AB_MODEL), then
-// plays the clip through the device alternating WET (amp on) / DRY (bypassed) so a
-// human can A/B it. Needs a real output device (MOSH_AUDIO_OUTPUT_DEVICE) + the model
-// and DI paths via env. Returns 0 when the model loaded, 1 otherwise.
-int runNeuralAB (MoshEngine& eng, MoshOps& ops)
-{
-    using namespace juce;
-    ignoreUnused (eng);
-    auto cmd = [&] (const String& n, var a = var()) { return moshDemoCmd (ops, n, a); };
-    auto obj = [] (std::initializer_list<std::pair<const char*, var>> kv) { return moshDemoObj (kv); };
-    auto* mm = MessageManager::getInstanceWithoutCreating();
-    auto pump = [&] (int ms) {
-        const auto end = Time::getMillisecondCounter() + (uint32) jmax (0, ms);
-        while (Time::getMillisecondCounter() < end)
-        { if (mm != nullptr) mm->runDispatchLoopUntil (50); else Thread::sleep (50); }
-    };
-
-    const auto modelPath = SystemStats::getEnvironmentVariable ("MOSH_NEURAL_AB_MODEL", {});
-    const auto wavPath   = SystemStats::getEnvironmentVariable ("MOSH_NEURAL_AB_WAV", {});
-    const int  secs      = jlimit (1, 30, SystemStats::getEnvironmentVariable ("MOSH_NEURAL_AB_SECS", "6").getIntValue());
-    std::cerr << "\n===== Mosh neural A/B (real Tier-A model) =====\n";
-    if (modelPath.isEmpty() || wavPath.isEmpty())
-    {
-        std::cerr << "  set MOSH_NEURAL_AB_MODEL=<model.json> and MOSH_NEURAL_AB_WAV=<di.wav>\n";
-        return 1;
-    }
-    std::cerr << "  model: " << modelPath << "\n  input: " << wavPath << "\n";
-
-    auto t = cmd ("create_track", obj ({{ "name", "Amp A/B" }}))["data"].getProperty ("trackId", var()).toString();
-    std::cerr << "  import_clip: " << (ok (cmd ("import_clip", obj ({{ "file", wavPath }, { "trackId", t }}))) ? "ok" : "FAILED") << "\n";
-    const int idx = (int) cmd ("add_neural_insert", obj ({{ "trackId", t }, { "modelId", "nam" }}))["data"].getProperty ("index", -1);
-    auto loadArgs = obj ({{ "trackId", t }, { "index", idx }, { "path", modelPath }});
-    const auto skipEnv = SystemStats::getEnvironmentVariable ("MOSH_NEURAL_AB_SKIP", {});   // ""=self-describe, 0/1=force
-    if (skipEnv.isNotEmpty())
-        loadArgs.getDynamicObject()->setProperty ("skip", skipEnv.getIntValue() != 0);
-    auto lm = cmd ("load_neural_model", loadArgs);
-    const bool applied   = (bool) lm["data"].getProperty ("applied", false);
-    const auto modelName = lm["data"].getProperty ("describe", var()).getProperty ("modelName", var()).toString();
-    std::cerr << "  load_neural_model: applied=" << (applied ? "true" : "false")
-              << (modelName.isNotEmpty() ? ("  model=" + modelName) : String()) << "\n";
-    if (! applied)
-        std::cerr << "  (model did not load — build with -DMOSH_ENABLE_RTNEURAL=ON and an RTNeural-native JSON)\n";
-    cmd ("set_neural_param", obj ({{ "trackId", t }, { "index", idx }, { "paramId", "mix" }, { "value", 100.0 }}));
-
-    for (int cycle = 0; cycle < 2; ++cycle)
-    {
-        cmd ("bypass_plugin", obj ({{ "trackId", t }, { "index", idx }, { "bypassed", false }}));
-        std::cerr << "  >> WET  — amp ON  (" << (modelName.isNotEmpty() ? modelName : String ("model")) << ") — listen...\n";
-        cmd ("set_transport", obj ({{ "position", 0.0 }}));
-        cmd ("set_transport", obj ({{ "action", "play" }}));
-        pump (secs * 1000);
-        cmd ("set_transport", obj ({{ "action", "stop" }}));
-
-        cmd ("bypass_plugin", obj ({{ "trackId", t }, { "index", idx }, { "bypassed", true }}));
-        std::cerr << "  >> DRY  — bypassed (clean DI) — listen...\n";
-        cmd ("set_transport", obj ({{ "position", 0.0 }}));
-        cmd ("set_transport", obj ({{ "action", "play" }}));
-        pump (secs * 1000);
-        cmd ("set_transport", obj ({{ "action", "stop" }}));
-    }
-    std::cerr << "===== neural A/B done =====\n";
-    return applied ? 0 : 1;
-}
-
-void runNeuralDemo (MoshOps& ops)
-{
-    using namespace juce;
-    auto cmd = [&] (const String& n, var a = var()) { return moshDemoCmd (ops, n, a); };
-    auto obj = [] (std::initializer_list<std::pair<const char*, var>> kv) { return moshDemoObj (kv); };
-
-    auto t = cmd ("create_track", obj ({{ "name", "Guitar" }}))["data"].getProperty ("trackId", var()).toString();
-    cmd ("add_test_tone_clip", obj ({{ "trackId", t }, { "seconds", 3.0 }, { "freq", 110.0 }}));
-    auto r = cmd ("add_neural_insert", obj ({{ "trackId", t }, { "modelId", "nam" }}));
-    const int idx = (int) r["data"].getProperty ("index", -1);
-    if (idx >= 0)
-    {
-        cmd ("set_neural_param", obj ({{ "trackId", t }, { "index", idx }, { "paramId", "drive" }, { "value", 72.0 }}));
-        cmd ("set_neural_param", obj ({{ "trackId", t }, { "index", idx }, { "paramId", "mix" }, { "value", 85.0 }}));
-    }
-}
-
 void runGenerativeDemo (MoshOps& ops)
 {
     using namespace juce;
@@ -4543,16 +4336,10 @@ void runConsolidationDemo (MoshOps& ops)
     auto cmd = [&] (const String& n, var a = var()) { return moshDemoCmd (ops, n, a); };
     auto obj = [] (std::initializer_list<std::pair<const char*, var>> kv) { return moshDemoObj (kv); };
 
-    // A "Gtr" track with BOTH tiers on it: a Tier-A neural insert + a Tier-B
-    // generative RenderLayer on its clip.
+    // A "Gtr" track with a Tier-B generative RenderLayer on its clip.
     auto t = cmd ("create_track", obj ({{ "name", "Gtr" }}))["data"].getProperty ("trackId", var()).toString();
     auto tone = cmd ("add_test_tone_clip", obj ({{ "trackId", t }, { "seconds", 2.5 }, { "freq", 131.0 }}));
     auto cid = tone["data"].getProperty ("clipId", var()).toString();
-
-    auto an = cmd ("add_neural_insert", obj ({{ "trackId", t }, { "modelId", "nam" }}));
-    const int idx = (int) an["data"].getProperty ("index", -1);
-    if (idx >= 0)
-        cmd ("set_neural_param", obj ({{ "trackId", t }, { "index", idx }, { "paramId", "drive" }, { "value", 68.0 }}));
 
     cmd ("create_render_layer", obj ({{ "clipId", cid }, { "adapter", "fake" }}));
     Array<var> colors; { auto* c = new DynamicObject(); c->setProperty ("name", "grit"); c->setProperty ("value", 62); colors.add (var (c)); }
