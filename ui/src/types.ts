@@ -87,6 +87,16 @@ export type PluginParam = {
   points?: AutoPoint[];
 };
 
+// Route C.2 — the real-time RAVE insert's snapshot view (present iff this plugin is one).
+export type RaveInsert = {
+  model: string;
+  modelName?: string;
+  modelPath?: string;
+  modelLoaded: boolean;
+  mix: number;             // 0–100 dry/wet
+  latencySeconds: number;
+};
+
 export type Plugin = {
   index: number;
   name: string;
@@ -97,6 +107,7 @@ export type Plugin = {
   category?: string;
   isInstrument: boolean;
   params: PluginParam[];
+  rave?: RaveInsert;       // present iff this is a real-time RAVE insert (anira build)
 };
 
 export type AvailablePlugin = {
@@ -278,6 +289,7 @@ export type Snapshot = {
     timeSigNumerator?: number;
     timeSigDenominator?: number;
     metronome?: boolean;
+    raveAvailable?: boolean;   // Route C.2 — anira build hosts the real-time RAVE insert
     // Musical key (set_key command writes it; always defaulted on the backend).
     key: SessionKey;
     length?: number;

@@ -92,6 +92,10 @@ if (MOSH_BUILD_APP)
         src/plugins/hosting/PluginHost.cpp
         # Moshi reactivity — master-output spectral tap (pure measure)
         src/plugins/spectral/MasterSpectralTapPlugin.cpp
+        # Route C.2 — real-time RAVE insert (gated; compiles to nothing without anira).
+        # Torch lives ONLY in RaveEngine.cpp to isolate the LibTorch↔JUCE headers.
+        src/plugins/transform/RaveEngine.cpp
+        src/plugins/transform/RaveInsertPlugin.cpp
         # Stage 5 — Tier-B generative layer (05)
         src/generative/GenerativeJobManager.cpp
         # Stage 7 — rights-cleared type-beat LoRA training
@@ -130,6 +134,11 @@ if (MOSH_BUILD_APP)
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags)
+
+    # Route C.2 — real-time RAVE insert via anira + LibTorch (gated; default build OFF).
+    if (MOSH_ENABLE_ANIRA AND TARGET mosh_neural_backends)
+        target_link_libraries(Mosh PRIVATE mosh_neural_backends)
+    endif()
 
     # ── Native voice: macOS Speech (SFSpeechRecognizer + AVAudioEngine) ───────
     # Obj-C++ with ARC; the browser Web Speech API covers the Vite dev path.

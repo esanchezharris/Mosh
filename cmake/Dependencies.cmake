@@ -43,3 +43,28 @@ if (MOSH_BUILD_TESTS)
     CPMAddPackage("gh:catchorg/Catch2@3.7.1")
 endif()
 
+# ── Real-time neural backend (Route C.2 — RAVE via anira + LibTorch) ──────────
+# HEAVY + GATED: fetched ONLY when MOSH_ENABLE_ANIRA=ON. anira downloads its LibTorch
+# backend (~hundreds of MB) at configure time from the anira-project/backends release.
+# The DEFAULT build never touches this — the option is OFF, so configure is unchanged.
+option(MOSH_ENABLE_ANIRA "Fetch anira + LibTorch for the real-time RAVE insert (heavy)" OFF)
+
+if (MOSH_ENABLE_ANIRA)
+    # LibTorch only (skip the other inference backends to keep the download tractable).
+    set(ANIRA_WITH_LIBTORCH    ON  CACHE BOOL "" FORCE)
+    set(ANIRA_WITH_ONNXRUNTIME OFF CACHE BOOL "" FORCE)
+    set(ANIRA_WITH_TFLITE      OFF CACHE BOOL "" FORCE)
+    set(ANIRA_WITH_LITERT      OFF CACHE BOOL "" FORCE)
+    set(ANIRA_WITH_BENCHMARK   OFF CACHE BOOL "" FORCE)
+    set(ANIRA_WITH_EXAMPLES    OFF CACHE BOOL "" FORCE)
+    set(ANIRA_WITH_TESTS       OFF CACHE BOOL "" FORCE)
+    CPMAddPackage(
+        NAME              anira
+        GITHUB_REPOSITORY anira-project/anira
+        GIT_TAG           v2.1.0)
+
+    add_library(mosh_neural_backends INTERFACE)
+    target_link_libraries(mosh_neural_backends INTERFACE anira::anira)
+    target_compile_definitions(mosh_neural_backends INTERFACE MOSH_HAVE_ANIRA=1)
+endif()
+

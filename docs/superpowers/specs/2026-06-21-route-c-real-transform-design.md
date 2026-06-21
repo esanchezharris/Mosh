@@ -1,7 +1,7 @@
 # Route C — real RAVE/MelodyFlow transform backend + real-time anira insert
 
 **Date:** 2026-06-21
-**Status:** Design approved (standing authorization); C.1 implementing, C.2 scoped.
+**Status:** ✅ LANDED 2026-06-21 — C.1 (real RAVE Tier-B backend) + C.2 (real-time RAVE insert via anira+LibTorch, gated `MOSH_ENABLE_ANIRA`). Both proven; default build unaffected. Plan: `docs/superpowers/plans/2026-06-21-route-c2-rave-anira-insert.md`.
 **Context:** Route B shipped the Tier-B `transform` render mode with a deterministic **fake**
 adapter behind the model-agnostic contract. Route C swaps in the **real** model — first as an
 offline Tier-B backend (C.1), then as a real-time Tier-A insert (C.2). Both behind the existing

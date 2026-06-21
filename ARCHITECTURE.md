@@ -36,7 +36,7 @@ There are five layers, and exactly two things connect the UI to the engine:
 - **WebView UI layer** — `ui/` (React + Vite + Zustand). Pure view; all mutations go through the seam.
 - **The seam** — `src/webview` (WebBridge) + `src/moshops` (MoshOps). The *only* coupling between UI and backend.
 - **Native engine** — `src/engine` (MoshEngine) owns one Tracktion `Engine` + `Edit` for the app's life.
-- **In-process plugins/DSP** — `src/plugins/*` (VST3/AU hosting, spectral tap). *(The synthetic Tier-A neural insert was removed — see CLAUDE.md note. Real-time neural is a future, model-justified rebuild; see `docs/plans/`.)*
+- **In-process plugins/DSP** — `src/plugins/*` (VST3/AU hosting, spectral tap, and the **gated** real-time RAVE insert `src/plugins/transform/` — built only with `-DMOSH_ENABLE_ANIRA=ON`, torch isolated in `RaveEngine.cpp`). *(The old synthetic Tier-A neural insert was removed; the real-time RAVE insert (Route C.2) replaces it as a real, model-justified Tier-A — off in the default build.)*
 - **Out-of-process generative service** — `service/` (Python), driven by `src/generative` over local HTTP. This is the "tier wall": heavy generative models never run on the audio thread.
 
 ---

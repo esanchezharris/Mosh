@@ -3,6 +3,9 @@
 #include "state/RenderLayer.h"
 #include "multiplayer/LogicalId.h"
 #include "multiplayer/TrackCommit.h"
+#if MOSH_HAVE_ANIRA
+ #include "plugins/transform/RaveInsertPlugin.h"
+#endif
 #include <thread>
 
 namespace mosh
@@ -11,6 +14,9 @@ using namespace juce;
 
 namespace
 {
+   #if MOSH_HAVE_ANIRA
+    RaveInsertPlugin* asRave (te::Plugin* p) { return dynamic_cast<RaveInsertPlugin*> (p); }
+   #endif
     // Tracktion's compiled-in built-in plugin palette (registered unconditionally
     // by PluginManager). These ship inside the engine — no scan, no third-party
     // dependency — so the FX palette and built-in instruments are pure surface
@@ -510,6 +516,12 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "remove_render_layer") return cmdRemoveRenderLayer (args);
     if (name == "list_colors")       return cmdListColors (args);
     if (name == "list_transform_targets") return cmdListTransformTargets (args);
+   #if MOSH_HAVE_ANIRA
+    if (name == "add_rave_insert")   return cmdAddRaveInsert (args);
+    if (name == "set_rave_param")    return cmdSetRaveParam (args);
+    if (name == "load_rave_model")   return cmdLoadRaveModel (args);
+    if (name == "reset_rave")        return cmdResetRave (args);
+   #endif
     if (name == "export_audio")      return cmdExportAudio (args);
     if (name == "list_audio_devices")return cmdListAudioDevices (args);
     if (name == "list_midi_inputs")  return cmdListMidiInputs (args);
@@ -4313,6 +4325,91 @@ juce::var MoshOps::cmdListTransformTargets (const juce::var&)
     return okResult ("list_transform_targets", r);
 }
 
+#if MOSH_HAVE_ANIRA
+// ─────────────────────────────────────────────────────────────────────────────
+// Route C.2 — real-time RAVE insert (Tier-A; only built with anira+LibTorch)
+// ─────────────────────────────────────────────────────────────────────────────
+static juce::String raveModelPathFor (const juce::String& target)
+{
+    if (target.isEmpty()) return {};
+    const auto dir = juce::SystemStats::getEnvironmentVariable ("RAVE_MODEL_DIR",
+                         juce::File::getSpecialLocation (juce::File::userHomeDirectory)
+                             .getChildFile ("AI").getChildFile ("rave-models").getFullPathName());
+    return juce::File (dir).getChildFile (target + ".ts").getFullPathName();
+}
+
+juce::var MoshOps::cmdAddRaveInsert (const juce::var& args)
+{
+    auto* track = findTrack (args.getProperty ("trackId", var()).toString());
+    if (track == nullptr) return errResult ("add_rave_insert", "no track");
+
+    beginTxn ("add_rave_insert");
+    auto plugin = eng.edit().getPluginCache().createNewPlugin (RaveInsertPlugin::xmlTypeName, {});
+    if (plugin == nullptr) return errResult ("add_rave_insert", "create failed");
+    int index = (int) args.getProperty ("index", -1);
+    if (index < 0) index = track->pluginList.getPlugins().size();
+    track->pluginList.insertPlugin (plugin, index, nullptr);
+
+    juce::String path = args.getProperty ("path", var()).toString();
+    if (path.isEmpty()) path = raveModelPathFor (args.getProperty ("target", var()).toString());
+    bool loaded = false;
+    if (path.isNotEmpty())
+        if (auto* r = asRave (plugin.get()))
+            loaded = r->loadModelFromFile (juce::File (path));
+
+    auto* data = new DynamicObject();
+    data->setProperty ("index", track->pluginList.indexOf (plugin.get()));
+    data->setProperty ("modelLoaded", loaded);
+    logLine ("add_rave_insert", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("add_rave_insert", var (data));
+}
+
+juce::var MoshOps::cmdSetRaveParam (const juce::var& args)
+{
+    auto* r = asRave (findPlugin (args.getProperty ("trackId", var()).toString(),
+                                  (int) args.getProperty ("index", -1)));
+    if (r == nullptr) return errResult ("set_rave_param", "no rave insert");
+    beginTxn ("set_rave_param");
+    if (args.getProperty ("paramId", "mix").toString() == "mix")
+        r->setMixUi ((float) (double) args.getProperty ("value", 100.0));   // 0–100 dry/wet
+    logLine ("set_rave_param", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("set_rave_param");
+}
+
+juce::var MoshOps::cmdLoadRaveModel (const juce::var& args)
+{
+    const auto trackId = args.getProperty ("trackId", var()).toString();
+    const int idx = args.hasProperty ("pluginIndex") ? (int) args.getProperty ("pluginIndex", -1)
+                                                     : (int) args.getProperty ("index", -1);
+    auto* r = asRave (findPlugin (trackId, idx));
+    if (r == nullptr) return errResult ("load_rave_model", "no rave insert");
+    juce::String path = args.getProperty ("path", var()).toString();
+    if (path.isEmpty()) path = raveModelPathFor (args.getProperty ("target", var()).toString());
+    if (path.isEmpty()) return errResult ("load_rave_model", "path or target required");
+    if (! juce::File (path).existsAsFile()) return errResult ("load_rave_model", "model file not found: " + path);
+    const bool ok = r->loadModelFromFile (juce::File (path));
+    logLine ("load_rave_model", args, ok, ok ? juce::String() : juce::String ("load failed"), false);
+    emitSnapshotInvalidated();
+    if (! ok) return errResult ("load_rave_model", "could not load model: " + path);
+    auto* data = new DynamicObject();
+    data->setProperty ("applied", true);
+    data->setProperty ("describe", r->describe());
+    return okResult ("load_rave_model", var (data));
+}
+
+juce::var MoshOps::cmdResetRave (const juce::var& args)
+{
+    auto* r = asRave (findPlugin (args.getProperty ("trackId", var()).toString(),
+                                  (int) args.getProperty ("index", -1)));
+    if (r == nullptr) return errResult ("reset_rave", "no rave insert");
+    r->resetModel();
+    logLine ("reset_rave", args, true, {}, false);
+    return okResult ("reset_rave");
+}
+#endif // MOSH_HAVE_ANIRA
+
 juce::var MoshOps::cmdCancelRender (const juce::var& args)
 {
     jobManager.cancelJob (args.getProperty ("jobId", var()).toString());
@@ -5201,6 +5298,10 @@ juce::var MoshOps::pluginToVar (te::Plugin& p, int index)
         o->setProperty ("category", bspec->category);
     if (ext != nullptr)
         addExternalPluginMetadata (*o, *ext);
+   #if MOSH_HAVE_ANIRA
+    if (auto* r = asRave (&p))
+        o->setProperty ("rave", r->describe());
+   #endif
 
     juce::Array<var> params;
     const int n = juce::jmin (16, p.getNumAutomatableParameters());
@@ -5240,6 +5341,13 @@ juce::var MoshOps::snapshot()
     auto& edit = eng.edit();
 
     auto* session = new DynamicObject();
+    // Route C.2 — true only in the anira build; gates the UI "+ RAVE" affordance so the
+    // real-time RAVE insert is only offered where it can actually be hosted.
+   #if MOSH_HAVE_ANIRA
+    session->setProperty ("raveAvailable", true);
+   #else
+    session->setProperty ("raveAvailable", false);
+   #endif
     session->setProperty ("sampleRate", eng.engine().getDeviceManager().getSampleRate());
     session->setProperty ("tempo", edit.tempoSequence.getBpmAt (tracktion::TimePosition()));
     if (auto* ts = edit.tempoSequence.getTimeSig (0))

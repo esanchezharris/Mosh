@@ -1,5 +1,8 @@
 #include "PluginHost.h"
 #include "plugins/spectral/MasterSpectralTapPlugin.h"
+#if MOSH_HAVE_ANIRA
+ #include "plugins/transform/RaveInsertPlugin.h"
+#endif
 #include <thread>
 #if ! JUCE_WINDOWS
  #include <unistd.h>   // getpid (POSIX scan-watchdog kill)
@@ -160,6 +163,10 @@ void PluginHost::initialise()
     // Register the master spectral tap (Moshi reactivity) — a pure-measure passthrough
     // appended to the master plugin list, drained at 30 Hz to feed Moshi's body.
     engine.getPluginManager().createBuiltInType<MasterSpectralTapPlugin>();
+   #if MOSH_HAVE_ANIRA
+    // Route C.2 — the real-time RAVE insert (only registered in the anira build).
+    engine.getPluginManager().createBuiltInType<RaveInsertPlugin>();
+   #endif
 
     // A pedal left from the previous run means a component crashed mid-scan ->
     // quarantine it before we scan anything (INS-005 crash recovery).

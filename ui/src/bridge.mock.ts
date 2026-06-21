@@ -66,6 +66,7 @@ function seedSnapshot(): Snapshot {
     schemaVersion: 1,
     session: {
       sampleRate: SR, tempo: 120, timeSigNumerator: 4, timeSigDenominator: 4,
+      raveAvailable: true,   // Route C.2 — exercise the "+ RAVE" affordance in dev/e2e
       metronome: false, length: 16, editFile: "/mock/session.mosh",
       audioEnabled: true, bitDepth: 24, bufferSize: 512,
       availableCores: 8, audioThreads: 8, audioThreadsAuto: true,
@@ -620,6 +621,30 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       invalidate(); return ok(command);
     }
     case "open_plugin_editor": return ok(command);
+
+    // Route C.2 — real-time RAVE insert (dev-mock; the real one is anira+LibTorch).
+    case "add_rave_insert": {
+      const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found");
+      pushUndo(); t.plugins = t.plugins ?? [];
+      t.plugins.push({ index: t.plugins.length, name: "RAVE", type: "rave", enabled: true, external: false, isInstrument: false, params: [],
+        rave: { model: "rave", modelName: "", modelLoaded: false, mix: 100, latencySeconds: 2048 / SR } });
+      invalidate(); return ok(command, { index: t.plugins.length - 1, modelLoaded: false });
+    }
+    case "set_rave_param": {
+      const f = findPlugin(str(args.trackId), num(args.index)); if (!f?.track.plugins![f.idx].rave) return err(command, "not a rave insert");
+      if (str(args.paramId, "mix") === "mix") f.track.plugins![f.idx].rave!.mix = num(args.value);
+      invalidate(); return ok(command);
+    }
+    case "load_rave_model": {
+      const f = findPlugin(str(args.trackId), num(args.pluginIndex)); if (!f?.track.plugins![f.idx].rave) return err(command, "not a rave insert");
+      pushUndo(); const r = f.track.plugins![f.idx].rave!;
+      const p = str(args.path) || str(args.target);
+      r.modelPath = str(args.path) || undefined;
+      r.modelName = (p.split("/").pop() || p).replace(/\.ts$/, "");
+      r.model = r.modelName; r.modelLoaded = true;
+      invalidate(); return ok(command, { applied: true });
+    }
+    case "reset_rave": return ok(command);
 
     // ── parameter automation (buried editor) ─────────────────────────────────
     case "add_automation_point": case "set_automation_point": case "remove_automation_point": case "clear_automation": {

@@ -22,7 +22,9 @@ export function Dock({ snapshot }: { snapshot: Snapshot }) {
 function Rack({ track }: { track: Track | null }) {
   const openBrowser = useStore((s) => s.openBrowser);
   const openAutomation = useStore((s) => s.openAutomation);
-  const plugins = (track?.plugins ?? []).filter((p) => p.external || p.builtin);
+  const exec = useStore((s) => s.exec);
+  const raveAvailable = useStore((s) => s.snapshot?.session?.raveAvailable ?? false);
+  const plugins = (track?.plugins ?? []).filter((p) => p.external || p.builtin || p.rave);
   return (
     <div className="rack" data-testid="rack">
       <div className="rack-label">
@@ -32,6 +34,8 @@ function Rack({ track }: { track: Track | null }) {
         {track && plugins.map((p) => <PluginCard key={p.index} plugin={p} trackId={track.id} />)}
         {track && plugins.length === 0 && <span className="rack-empty">No effects yet — add a plugin.</span>}
         {track && <button className="btn rack-add" onClick={openBrowser}>+ Plugin</button>}
+        {/* Route C.2 — only offered where the anira build can host a real-time RAVE model. */}
+        {track && raveAvailable && <button className="btn rack-add" data-testid="rack-add-rave" onClick={() => void exec("add_rave_insert", { trackId: track.id })}>+ RAVE</button>}
         {track && <button className="btn rack-add" data-testid="open-automation" title="Parameter automation" aria-label="Open parameter automation" onClick={() => openAutomation(track.id)}>⌁ Automation</button>}
       </div>
     </div>
@@ -41,17 +45,20 @@ function Rack({ track }: { track: Track | null }) {
 function PluginCard({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
   const exec = useStore((s) => s.exec);
   const isBuiltin = !!plugin.builtin;
+  const isRave = !!plugin.rave;
   return (
-    <div className={`pcard${plugin.enabled ? "" : " bypassed"}`} data-testid="plugin-card" data-plugin-index={plugin.index} data-enabled={plugin.enabled}>
+    <div className={`pcard${plugin.enabled ? "" : " bypassed"}${isRave ? " neural" : ""}`} data-testid="plugin-card" data-plugin-index={plugin.index} data-enabled={plugin.enabled}>
       <div className="pcard-head">
         <button className={`pdot${plugin.enabled ? " on" : ""}`} title={plugin.enabled ? "Bypass" : "Enable"}
           aria-pressed={!plugin.enabled}
           onClick={() => void exec("bypass_plugin", { trackId, index: plugin.index, bypassed: plugin.enabled })} />
-        <span className="pname">{plugin.name}</span>
+        <span className="pname">{isRave ? `RAVE · ${plugin.rave!.model}` : plugin.name}</span>
         {plugin.isInstrument && <span className="ibadge">inst</span>}
+        {isRave && <span className="ibadge nbadge">RAVE</span>}
         {isBuiltin && !plugin.isInstrument && <span className="ibadge">{plugin.category}</span>}
       </div>
-      {isBuiltin ? <ParamBody plugin={plugin} trackId={trackId} />
+      {isRave ? <RaveBody plugin={plugin} trackId={trackId} />
+        : isBuiltin ? <ParamBody plugin={plugin} trackId={trackId} />
         : (
           <div className="pcard-actions">
             <button className="btn" onClick={() => void exec("open_plugin_editor", { trackId, index: plugin.index })}>Edit</button>
@@ -60,6 +67,39 @@ function PluginCard({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
             <button className="btn x" onClick={() => void exec("remove_plugin", { trackId, index: plugin.index })}>✕</button>
           </div>
         )}
+    </div>
+  );
+}
+
+// Route C.2 — the real-time RAVE insert's rack card: model name + dry/wet + latency.
+function RaveBody({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
+  const exec = useStore((s) => s.exec);
+  const r = plugin.rave!;
+  const loadModel = () => {
+    const v = window.prompt("RAVE model — a .ts path, or a target name in RAVE_MODEL_DIR:", r.modelPath ?? "")?.trim();
+    if (!v) return;
+    void exec("load_rave_model", v.endsWith(".ts")
+      ? { trackId, pluginIndex: plugin.index, path: v }
+      : { trackId, pluginIndex: plugin.index, target: v });
+  };
+  return (
+    <div className="pbody">
+      <div className="neural-model tc" title={r.modelPath ?? r.modelName} data-testid="rave-model-name">
+        {r.modelLoaded ? (r.modelName || r.model) : "no model loaded"}
+      </div>
+      <label className="nparam">
+        <span className="nlabel">mix</span>
+        <span className="nslider"><input type="range" min={0} max={100} step={1} value={Math.round(r.mix)}
+          data-testid="rave-mix"
+          onChange={(e) => void exec("set_rave_param", { trackId, index: plugin.index, paramId: "mix", value: Number(e.target.value) })} /></span>
+        <span className="nval">{Math.round(r.mix)}</span>
+      </label>
+      <div className="neural-row">
+        <button className="btn" data-testid="rave-load-model" title="Load a RAVE .ts model" onClick={loadModel}>Load model…</button>
+        <button className="btn" onClick={() => void exec("reset_rave", { trackId, index: plugin.index })}>Reset</button>
+        <span className="nlat tc">{(r.latencySeconds * 1000).toFixed(1)} ms</span>
+        <button className="btn x" onClick={() => void exec("remove_plugin", { trackId, index: plugin.index })}>✕</button>
+      </div>
     </div>
   );
 }

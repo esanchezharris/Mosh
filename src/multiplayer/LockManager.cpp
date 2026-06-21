@@ -44,6 +44,7 @@ LockManager::Scope LockManager::classify (const juce::String& command)
         "set_track_solo", "arm_track", "set_input_monitor", "set_current_take",
         "keep_take", "load_plugin", "load_builtin", "remove_plugin", "reorder_plugin",
         "set_plugin_param", "bypass_plugin",
+        "add_rave_insert", "set_rave_param", "load_rave_model", "reset_rave",
         "set_track_type", "load_drum_kit", "assign_sample", "set_drum_lane",
         "add_midi_clip", "set_track_input", "set_track_output", "add_send",
         "set_send_level", "remove_send", "add_automation_point", "remove_automation_point",
