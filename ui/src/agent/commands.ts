@@ -21,6 +21,7 @@ export const AGENT_COMMANDS: AgentCommand[] = [
 
   // ── clips ───────────────────────────────────────────────────────────────
   { command: "add_test_tone_clip", desc: "Drop a test-tone clip on a track (lands at 0)", args: [S("trackId", false), N("seconds", false, "duration in seconds"), N("freq", false, "Hz")] },
+  { command: "import_clip", desc: "Import an audio file onto a track at a given time", args: [S("file"), S("trackId", false), S("name", false), N("startSeconds", false, "seconds on the timeline")] },
   { command: "add_midi_clip", desc: "Add an empty MIDI clip", args: [S("trackId"), N("start", false, "seconds"), N("length", false, "seconds")] },
   { command: "move_clip", desc: "Move a clip to a new start time (and optionally another track)", args: [S("clipId"), S("trackId", false), N("start", true, "seconds")] },
   { command: "trim_clip", desc: "Set a clip's start and length", args: [S("clipId"), N("start"), N("length")] },
@@ -132,6 +133,7 @@ export function describeCommand(command: string, args: Record<string, unknown>):
     case "rename_track": return `Renamed track to "${a.name}"`;
     case "remove_track": return `Removed a track`;
     case "add_test_tone_clip": return `Added a test tone`;
+    case "import_clip": return `Imported audio ${a.file ? String(a.file).split("/").pop() : "clip"}${a.startSeconds ? ` at ${a.startSeconds}s` : ""}`;
     case "add_midi_clip": return `Added a MIDI clip`;
     case "move_clip": return `Moved a clip to ${a.start}s`;
     case "trim_clip": return `Trimmed a clip`;

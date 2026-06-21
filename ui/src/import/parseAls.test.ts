@@ -99,6 +99,36 @@ const ALS_MIDI = `<?xml version="1.0" encoding="UTF-8"?>
   </Tracks>
 </LiveSet></Ableton>`;
 
+// An AudioClip with a SampleRef → FileRef carrying the sample path (absolute Path
+// preferred, RelativePath as fallback) — what real Ableton projects store.
+const ALS_AUDIO = `<?xml version="1.0" encoding="UTF-8"?>
+<Ableton><LiveSet>
+  <MainTrack><DeviceChain><Mixer><Tempo><Manual Value="120"/></Tempo></Mixer></DeviceChain></MainTrack>
+  <Tracks>
+    <AudioTrack Id="0">
+      <Name><EffectiveName Value="Vox"/></Name>
+      <DeviceChain><MainSequencer><Sample><ArrangerAutomation><Events>
+        <AudioClip Id="1" Time="0">
+          <Name Value="vox"/><CurrentStart Value="4"/><CurrentEnd Value="8"/>
+          <SampleRef><FileRef>
+            <RelativePath Value="Samples/Imported/vox.wav"/>
+            <Path Value="/Users/me/proj/Samples/Imported/vox.wav"/>
+          </FileRef></SampleRef>
+        </AudioClip>
+      </Events></ArrangerAutomation></Sample></MainSequencer></DeviceChain>
+    </AudioTrack>
+  </Tracks>
+</LiveSet></Ableton>`;
+
+describe("parseAls audio sample paths", () => {
+  it("extracts the SampleRef FileRef Path (absolute preferred) onto the wave clip", () => {
+    const { session } = parseAls(Buffer.from(ALS_AUDIO), "demo.als");
+    const clip = session.tracks[0].clips[0];
+    expect(clip.kind).toBe("wave");
+    expect(clip.sourceFile).toBe("/Users/me/proj/Samples/Imported/vox.wav");
+  });
+});
+
 describe("parseAls MIDI notes", () => {
   it("extracts notes grouped by KeyTrack pitch, in beats, velocity rounded+clamped", () => {
     const { session } = parseAls(Buffer.from(ALS_MIDI), "midi.als");
