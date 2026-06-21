@@ -1,13 +1,14 @@
-# Moshi Trajectory Format — Phase 0 (harvester + verifier)
+# Moshi Trajectory Format — Phase 0 (harvester + verifier) + Phase 2 (live loop)
 
 The closed-loop dataset Moshi trains on is a stream of **`(snapshotBefore, utterance,
 command-sequence, snapshotAfter, outcome)`** tuples distilled from the app's MoshOps
 JSONL command log. This doc is the source of truth for the tuple format, the turn
-marker it depends on, the outcome-inference rules, and the verifier verdict.
+marker it depends on, the outcome-inference rules, the verifier verdict, and the
+live-loop watcher that turns running sessions into tuples (§7).
 
 Code: [`ui/src/harvest/`](../ui/src/harvest/) — `tupleSchema.ts`, `verifier.ts`,
-`harvester.ts`, `outcome.ts`, `cli.ts`. All TypeScript, runs headless (no native
-build, no audio, no Python) over the JS mock backend ([`bridge.mock.ts`](../ui/src/bridge.mock.ts)).
+`harvester.ts`, `outcome.ts`, `liveHarvest.ts`, `cli.ts`. All TypeScript, runs headless
+(no native build, no audio, no Python) over the JS mock backend ([`bridge.mock.ts`](../ui/src/bridge.mock.ts)).
 
 ---
 
@@ -156,6 +157,12 @@ cd ui
 # ~/Library/Mosh/session/mosh-log.jsonl when no path is given)
 npm run harvest -- [<mosh-log.jsonl>] -o tuples.jsonl
 
+# LIVE LOOP (Phase 2): tail the log, append new tuples as turns complete
+npm run harvest -- --watch [<log>] [-o tuples.jsonl]   # default out: …/session/tuples.jsonl
+
+# One-shot health rollup: clean / engine-fail / contract-fail (no tuple output)
+npm run harvest -- --report [<log>]
+
 # Verify a command sequence: [ {command,args}, ... ] or { commands, target? }
 npm run verify -- <commands.json> [--target snapshot.json]
 #   exit 0 = clean-validate + clean-apply (+ diff.equal if a target was given), else 1
@@ -164,3 +171,31 @@ npm run verify -- <commands.json> [--target snapshot.json]
 npm test            # vitest: harvest suites + the rest of the UI
 npm run typecheck   # tsc (src) + tsc (e2e)
 ```
+
+---
+
+## 7. Phase 2 — the live loop
+
+**Goal (spec):** ensure every agent interaction lands in the corpus — a live request
+("make this trap beat hit harder") becomes a tuple with its utterance, command sequence,
+and accept/reject/undo outcome; engine-down / contract-mismatch is detected and reported.
+
+**Design — instrument, don't rebuild.** The native app already writes every command to
+`~/Library/Mosh/session/mosh-log.jsonl` synchronously, including the `batch_begin` turn
+marker (§1). The WebView can't read the filesystem, so the loop is closed by a **Node-side
+watcher** ([`liveHarvest.ts`](../ui/src/harvest/liveHarvest.ts) + `harvest --watch`) that
+reuses `harvest()` wholesale — **zero app / C++ change**:
+
+1. On start it harvests the existing log, then `watchFile`s it.
+2. On each change it re-harvests the whole (idempotent) log, **dedupes by `turnId`**
+   (`collectFresh`), and appends only newly-completed turns to `tuples.jsonl`.
+3. Each flush prints `liveReport`, which splits the harvester's two failure signals:
+   - **engine-fail** — a command returned `ok:false` live (`appliedClean=false`): the
+     engine rejected the op / was down. The offending command + error are listed.
+   - **contract-fail** — replay diverged from the live run (`replayClean=false`): the
+     mock/allowlist contract has drifted from the engine. The non-agent-callable (or
+     otherwise diverging) commands are listed.
+
+`liveReport` / `collectFresh` are pure functions (unit-tested); the watch loop in
+`cli.ts` is a thin `watchFile` wrapper around them. Re-harvesting the whole log per
+change is O(n) but logs are small; incremental tailing is a future optimization.
