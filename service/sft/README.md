@@ -71,6 +71,27 @@ recommended, unambiguous path.)
 
 All of `.venv/`, `.sft-data/`, `.adapters/`, `.fused/`, `.sft.env` are gitignored.
 
+## Cloud (CUDA) run — RunPod / Vast.ai
+
+mlx-lm is Apple-Silicon only; a rented NVIDIA box trains with **trl + peft**
+instead, consuming the **same** chat-JSONL (`build-sft` output is portable). Flow:
+
+```bash
+# on the box (Linux + NVIDIA), after uploading the dataset dir + these scripts:
+bash setup-sft-cuda.sh
+python sft_cuda_train.py --data ./sft-v2 --out ./adapter --epochs 1        # 80GB: bf16 LoRA
+#   40GB card → add --4bit (QLoRA).  short test → --max-steps 200
+# serve OpenAI-compatible:
+vllm serve Qwen/Qwen3-4B-Instruct-2507 --enable-lora --lora-modules sft=./adapter --port 8000
+```
+Then eval from the Mac against the box (same metric, same eval set, vs the 0.757 baseline):
+```bash
+cd ui && OPENAI_BASE_URL=http://<box-ip>:8000/v1 OPENAI_API_KEY=x \
+  npm run eval-sft -- --eval ../service/sft/.sft-data/sft-v2/test.eval.jsonl --n 150 --model sft --tag finetuned-cuda
+```
+This is the multi-epoch run the local Mac can't do — the real test of whether the
+100k-arrangement corpus closes the content-generation gap.
+
 ## Data-rights
 The corpus derives arrangements/note data from third-party projects → **internal-only
 cold-start**. Do not redistribute fine-tuned weights without a rights review
