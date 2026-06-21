@@ -154,6 +154,11 @@ If wireless launch fails:
   not require USB after pairing.
 - Plug in over USB only for first-time trust/pairing, charging, or when the
   local-network tunnel stays disconnected.
+- If `device info details` reports `ddiServicesAvailable: false`, or
+  `xcodebuild` says the developer disk image could not be mounted, unlock the
+  phone, connect it over USB, open Xcode's Devices window once, and wait for
+  device preparation to finish before retrying the gate. A healthy local-network
+  tunnel is not enough when CoreDevice cannot mount the developer disk image.
 - If signing fails with resource-fork or Finder metadata errors, keep
   DerivedData out of the synced `Documents` tree or set
   `MOSH_IOS_DERIVED_DATA` to a clean local path.
