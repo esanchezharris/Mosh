@@ -8,6 +8,8 @@ the offline checks never depend on the model being installed.
 """
 import glob
 import json
+import os
+import sys
 from pathlib import Path
 
 SESSION = "verify-sa3"
@@ -33,7 +35,15 @@ def check_sa3_transform(ctx, ART, run_script, stats, diff_rms, failed_commands):
     render_result = next((r for r in results if r.get("command") == "render_layer"), None)
 
     # The adapter stages input.wav and writes output.wav + manifest in the job dir.
-    renders_dir = Path.home() / "Library" / "Mosh" / SESSION / "renders"
+    # Mosh's session base is OS-specific (JUCE userApplicationDataDirectory):
+    #   macOS  ~/Library/Mosh   ·   Windows  %APPDATA%\Mosh   ·   Linux  ~/.local/share/Mosh
+    if sys.platform == "darwin":
+        mosh_base = Path.home() / "Library" / "Mosh"
+    elif sys.platform.startswith("win"):
+        mosh_base = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming")) / "Mosh"
+    else:
+        mosh_base = Path.home() / ".local" / "share" / "Mosh"
+    renders_dir = mosh_base / SESSION / "renders"
     outputs = sorted(glob.glob(str(renders_dir / "*" / "output.wav")))
     inputs = sorted(glob.glob(str(renders_dir / "*" / "output_manifest.json")))
 

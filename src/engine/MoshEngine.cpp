@@ -426,7 +426,12 @@ void MoshEngine::consolidateAudioInto (const juce::File& projectDir)
             if (auto* w = dynamic_cast<te::WaveAudioClip*> (c))
                 if (auto dest = localiseInto (w->getCurrentSourceFile()); dest != juce::File())
                 {
-                    w->getSourceFileReference().setToDirectFileReference (dest, true);   // relative
+                    auto& srcRef = w->getSourceFileReference();
+                    srcRef.setToDirectFileReference (dest, true);   // relative
+                    // Store forward slashes so the edit is portable across OSes: a project
+                    // saved on Windows must open on a friend's Mac. Windows resolves '/' fine,
+                    // and on macOS this is a no-op (no backslashes to replace).
+                    srcRef.source = srcRef.source.get().replaceCharacter ('\\', '/');
                     w->sourceMediaChanged();          // refresh the clip's cached source file
                 }
 
@@ -438,7 +443,8 @@ void MoshEngine::consolidateAudioInto (const juce::File& projectDir)
             if (auto* s = dynamic_cast<te::SamplerPlugin*> (p))
                 for (int i = 0; i < s->getNumSounds(); ++i)
                     if (auto dest = localiseInto (s->getSoundFile (i).getFile()); dest != juce::File())
-                        s->setSoundMedia (i, dest.getRelativePathFrom (editPath.getParentDirectory()));
+                        s->setSoundMedia (i, dest.getRelativePathFrom (editPath.getParentDirectory())
+                                                 .replaceCharacter ('\\', '/'));   // portable separators (cross-OS)
     }
 }
 

@@ -59,7 +59,7 @@ function Invoke-MoshSelfTest {
     $saved = @{}
     foreach ($k in "MOSH_NO_AUDIO","MOSH_ENABLE_SA3","MOSH_SELFTEST_SA3","MOSH_SERVICE_PYTHON",
                     "MOSH_SA3_MODEL_DIR","MOSH_SERVICE_PORT","MOSH_RENDER_WAIT_TIMEOUT_MS") {
-        $saved[$k] = (Get-Item -Path "env:$k" -ErrorAction SilentlyContinue).Value
+        $saved[$k] = [Environment]::GetEnvironmentVariable($k)   # $null when unset; StrictMode-safe
     }
     try {
         $env:MOSH_NO_AUDIO = "1"                       # device-free harness

@@ -34,9 +34,11 @@ FetchContent_Declare(tracktion_engine
     GIT_SHALLOW         FALSE
     GIT_SUBMODULES_RECURSE TRUE
     GIT_PROGRESS        TRUE
-    # Idempotent: skip when already applied (reverse-check succeeds), else apply. Runs in
-    # the tracktion source dir (a git clone) on a fresh fetch.
-    PATCH_COMMAND       bash -c "git apply -R --check '${MOSH_TRACKTION_PATCH}' 2>/dev/null && echo 'tracktion createNewItemID patch already applied' || git apply '${MOSH_TRACKTION_PATCH}'")
+    # Idempotent + cross-platform: a `cmake -P` helper applies the patch with native
+    # git (reverse-check to skip when already applied, else apply). Runs in the
+    # tracktion source dir on a fresh fetch. Replaces a `bash -c "git apply ..."`,
+    # which broke on Windows where bash resolves to WSL and cannot open a C:/ path.
+    PATCH_COMMAND       ${CMAKE_COMMAND} -DPATCH=${MOSH_TRACKTION_PATCH} -P ${CMAKE_CURRENT_LIST_DIR}/apply-tracktion-patch.cmake)
 FetchContent_MakeAvailable(tracktion_engine)
 
 # ── Catch2 (tests) ──────────────────────────────────────────────────────────
