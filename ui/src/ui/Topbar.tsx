@@ -4,15 +4,18 @@
 // gate that couldn't tell the UI had entered a Stop state.
 
 import { useStore } from "../store";
+import { useSettings } from "../settings/store";
 import { tempoMapFrom, secondsToBBSMap, SNAP_DIVISIONS } from "../time";
 import type { Snapshot } from "../types";
 import { TONICS, MODES, DEFAULT_KEY } from "../musicalKey";
 import { TopbarTools } from "./TopbarTools";
+import { PresenceCluster } from "./PresenceCluster";
 import { MasterMeter } from "./Meter";
 
 export function Topbar({ snapshot }: { snapshot: Snapshot }) {
   const exec = useStore((s) => s.exec);
   const t = useStore((s) => s.transport); // live 30Hz field, not the snapshot
+  const redesign = useSettings((s) => Boolean(s.values.redesignShell));
   const map = tempoMapFrom(snapshot.session);
   const bbs = secondsToBBSMap(map, t.position);
   const playing = t.playing;
@@ -57,6 +60,7 @@ export function Topbar({ snapshot }: { snapshot: Snapshot }) {
       </div>
 
       <div className="spacer" />
+      {redesign && <PresenceCluster />}
       <TopbarTools snapshot={snapshot} />
       <ViewToggle />
     </header>

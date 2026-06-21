@@ -28,3 +28,17 @@ test("flag off (default): no Inspector rail", async ({ page }) => {
   await expect(page.getByTestId("arrangement")).toBeVisible();
   await expect(page.getByTestId("inspector-expand")).toHaveCount(0);
 });
+
+test("flag on: top-right presence cluster (AI pill + Share)", async ({ page }) => {
+  await bootRedesign(page);
+  await expect(page.getByTestId("presence")).toBeVisible();
+  await expect(page.getByTestId("ai-pill")).toBeVisible();
+  await expect(page.getByTestId("share")).toBeVisible();
+});
+
+test("flag off (default): no presence cluster", async ({ page }) => {
+  await page.addInitScript(() => window.localStorage.clear());
+  await page.goto("/");
+  await expect(page.getByTestId("arrangement")).toBeVisible();
+  await expect(page.getByTestId("presence")).toHaveCount(0);
+});
