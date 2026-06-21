@@ -86,7 +86,7 @@ export function App() {
             <Mixer snapshot={snapshot} />
           </div>
         ) : (
-          <DockShell left={<SampleBrowser />} right={redesign ? <SessionRail snapshot={snapshot} /> : undefined} bottom={<Dock snapshot={snapshot} />}>
+          <DockShell left={<SampleBrowser />} right={redesign ? <SessionRail snapshot={snapshot} /> : undefined} bottom={redesign ? undefined : <Dock snapshot={snapshot} />}>
             <Arrange snapshot={snapshot} />
           </DockShell>
         )

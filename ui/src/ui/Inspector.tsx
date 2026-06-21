@@ -5,6 +5,7 @@
 import type { Snapshot } from "../types";
 import { useStore } from "../store";
 import { Meter } from "./Meter";
+import { GenDrawer } from "./Dock";
 
 export function Inspector({ snapshot }: { snapshot: Snapshot }) {
   const selectedTrackId = useStore((s) => s.selectedTrackId);
@@ -49,6 +50,7 @@ export function Inspector({ snapshot }: { snapshot: Snapshot }) {
           onChange={(e) => void exec("set_track_pan", { trackId: track.id, pan: Number(e.target.value) })} />
         <span className="insp-val tc">{panLabel}</span>
       </label>
+      <GenDrawer track={track} />
     </div>
   );
 }

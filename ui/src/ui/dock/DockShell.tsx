@@ -9,7 +9,7 @@
 import { useRef, type ReactNode } from "react";
 import { useDockLayout } from "./useDockLayout";
 
-export function DockShell({ left, children, right, bottom }: { left: ReactNode; children: ReactNode; right?: ReactNode; bottom: ReactNode }) {
+export function DockShell({ left, children, right, bottom }: { left: ReactNode; children: ReactNode; right?: ReactNode; bottom?: ReactNode }) {
   const bottomZone = useDockLayout((s) => s.bottom);
   const leftZone = useDockLayout((s) => s.left);
   const rightZone = useDockLayout((s) => s.right);
@@ -75,7 +75,7 @@ export function DockShell({ left, children, right, bottom }: { left: ReactNode; 
           </>
         )}
       </div>
-      {bottomZone.collapsed ? (
+      {bottom && (bottomZone.collapsed ? (
         <button className="dock-collapsed" data-testid="dock-expand" onClick={toggleBottom}
           title="Show the detail panel">▴ Panel</button>
       ) : (
@@ -85,7 +85,7 @@ export function DockShell({ left, children, right, bottom }: { left: ReactNode; 
             onPointerDown={begin("bottom")} onPointerMove={drag} onPointerUp={end} onDoubleClick={toggleBottom} />
           <div className="dock-host" style={{ height: bottomZone.size }}>{bottom}</div>
         </>
-      )}
+      ))}
     </div>
   );
 }

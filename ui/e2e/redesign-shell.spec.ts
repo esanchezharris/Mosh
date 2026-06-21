@@ -116,3 +116,16 @@ test("flag on: collapsing the Session rail keeps Moshi mounted (not torn down)",
   await expect(page.getByTestId("dock-right")).toBeVisible();
   await expect(page.getByTestId("moshi-stage")).toHaveCount(1);
 });
+
+test("flag on: the bottom dock is gone; generative lives in the Inspector", async ({ page }) => {
+  await bootRedesign(page);
+  await expect(page.getByTestId("dock")).toHaveCount(0); // bottom dock removed
+  await expect(page.getByTestId("inspector").getByTestId("generative")).toBeVisible();
+});
+
+test("flag off (default): the bottom dock is present", async ({ page }) => {
+  await page.addInitScript(() => window.localStorage.clear());
+  await page.goto("/");
+  await expect(page.getByTestId("arrangement")).toBeVisible();
+  await expect(page.getByTestId("dock")).toBeVisible();
+});

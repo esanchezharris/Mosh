@@ -132,7 +132,7 @@ function NeuralBody({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
   );
 }
 
-function GenDrawer({ track }: { track: Track }) {
+export function GenDrawer({ track }: { track: Track }) {
   const exec = useStore((s) => s.exec);
   const colorsAvail = useStore((s) => s.availableColors);
   const loadColors = useStore((s) => s.loadColors);
