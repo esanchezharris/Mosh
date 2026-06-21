@@ -11,7 +11,26 @@ export type AgentCommandCall = { command: string; args?: Record<string, unknown>
 export type ChangeEntry = { summary: string; ok: boolean; error?: string };
 export type ChangeSet = { label: string; entries: ChangeEntry[]; applied: number };
 
-export async function runAgentBatch(label: string, calls: AgentCommandCall[]): Promise<ChangeSet> {
+// Provenance for the harvested-trajectory dataset (Phase 0). It rides the
+// existing batch_begin args — which the backend logs verbatim — so the harvester
+// can group a turn's commands under the utterance that triggered them. Pure
+// metadata on the existing log path: not a new command, not a second log.
+export type TurnMeta = { utterance?: string; source?: string };
+
+function newTurnId(): string {
+  try {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  } catch {
+    /* fall through to the non-crypto id below */
+  }
+  return `turn-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+export async function runAgentBatch(
+  label: string,
+  calls: AgentCommandCall[],
+  meta: TurnMeta = {},
+): Promise<ChangeSet> {
   const { exec, refresh } = useStore.getState();
   const entries: ChangeEntry[] = [];
   const valid: AgentCommandCall[] = [];
@@ -23,7 +42,12 @@ export async function runAgentBatch(label: string, calls: AgentCommandCall[]): P
   }
 
   if (valid.length > 0) {
-    await exec("batch_begin", { name: label });
+    await exec("batch_begin", {
+      name: label, // still the undo-transaction label
+      turn_id: newTurnId(),
+      utterance: meta.utterance ?? label,
+      source: meta.source ?? "brain_chat",
+    });
     for (const c of valid) {
       const res = await exec(c.command, c.args ?? {});
       entries.push({

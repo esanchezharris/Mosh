@@ -13,7 +13,9 @@
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:report": "playwright show-report e2e-report",
-    "brain-bench": "tsx scripts/brainBench.mts"
+    "brain-bench": "tsx scripts/brainBench.mts",
+    "harvest": "tsx src/harvest/cli.ts harvest",
+    "verify": "tsx src/harvest/cli.ts verify"
   },
   "dependencies": {
     "qrcode": "^1.5.4",
