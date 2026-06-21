@@ -4425,13 +4425,16 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
     input.deleteFile();
 
     // Stage the render input. Section-scoped layers carry a sub-region tighter than the
-    // clip (timeRange < clip span) — slice JUST that region of the raw source so the
-    // model only re-imagines the section's audio. The v0 default (region == whole clip)
-    // copies the source file wholesale, unchanged.
+    // clip — slice JUST that region of the raw source so the model only re-imagines the
+    // section's audio. The stored timeRange is absolute timeline seconds frozen at create;
+    // CLAMP it to the clip's LIVE position so a clip moved/trimmed since then can't
+    // mis-stage — a stale range that no longer overlaps collapses to the whole clip,
+    // matching the v0 default of copying the source wholesale.
     auto cpos = clip->getPosition();
-    const double rs = (double) node[ids::timeRangeStart];
-    const double re = (double) node[ids::timeRangeEnd];
     const double cs = cpos.getStart().inSeconds(), ce = cpos.getEnd().inSeconds();
+    double rs = juce::jlimit (cs, ce, (double) node[ids::timeRangeStart]);
+    double re = juce::jlimit (cs, ce, (double) node[ids::timeRangeEnd]);
+    if (re <= rs + 1.0e-3) { rs = cs; re = ce; }   // stale/degenerate after a move → whole clip
     const bool subRegion = (rs > cs + 1.0e-3) || (re < ce - 1.0e-3);
     bool staged = false;
     if (subRegion)
@@ -4639,16 +4642,18 @@ juce::var MoshOps::cmdAcceptRender (const juce::var& args)
     }
     if (lane == nullptr) return errResult ("accept_render", "no lane");
 
-    // Land at the layer's region — for a section-scoped render that is the section's
-    // sub-range, not the whole clip; for a normal layer the region IS the clip span,
-    // so this is identical to the clip position.
+    // Land the render. Anchor to the clip's LIVE position; only when the layer carries a
+    // genuine sub-region (tighter than the current clip span) do we land that sub-range.
+    // The stored timeRange is frozen at create, so clamp it to the live clip — a clip
+    // moved/trimmed since render lands over its current self, not a stale spot.
     auto pos = clip->getPosition();
+    const double cs = pos.getStart().inSeconds(), ce = pos.getEnd().inSeconds();
     auto landStart = pos.getStart();
     auto landLen   = pos.getLength();
     {
-        const double rs = (double) node[ids::timeRangeStart];
-        const double re = (double) node[ids::timeRangeEnd];
-        if (re > rs + 1.0e-6)
+        const double rs = juce::jlimit (cs, ce, (double) node[ids::timeRangeStart]);
+        const double re = juce::jlimit (cs, ce, (double) node[ids::timeRangeEnd]);
+        if (re > rs + 1.0e-3 && (re - rs) < (ce - cs) - 1.0e-3)   // genuine sub-region of the live clip
         {
             landStart = tracktion::TimePosition::fromSeconds (rs);
             landLen   = tracktion::TimeDuration::fromSeconds (re - rs);

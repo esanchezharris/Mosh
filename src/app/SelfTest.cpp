@@ -1326,6 +1326,27 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         cmd (ops, "create_render_layer", objN ({{ "clipId", wcid }, { "adapter", "fake" }}));
         check (ok (cmd (ops, "render_layer", objN ({{ "clipId", wcid }, { "wait", true }}))),
                "whole-clip render (no region) still renders (default path unchanged)");
+
+        // REGRESSION (review): the stored timeRange is frozen at create. A WHOLE-clip
+        // layer whose clip is MOVED after creation must still render (whole source) and
+        // land at the clip's LIVE position — the staging/landing clamp to the live clip
+        // prevents a stale-region mis-stage (hard error) or a stale landing.
+        auto mvt = cmd (ops, "create_track", args1 ("name", "Moved"))["data"].getProperty ("trackId", var()).toString();
+        auto mvtone = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", mvt }, { "seconds", 1.0 }, { "freq", 175.0 }}));
+        const auto mvcid = mvtone["data"].getProperty ("clipId", var()).toString();
+        cmd (ops, "create_render_layer", objN ({{ "clipId", mvcid }, { "adapter", "fake" }}));   // whole-clip, no region
+        cmd (ops, "move_clip", objN ({{ "clipId", mvcid }, { "start", 3.0 }}));                  // move AFTER create
+        check (ok (cmd (ops, "render_layer", objN ({{ "clipId", mvcid }, { "wait", true }}))),
+               "whole-clip layer still renders after the clip moved (no stale-region error)");
+        check (ok (cmd (ops, "accept_render", args1 ("clipId", mvcid))), "accept after move ok");
+        bool landedAtLive = false;
+        { auto snap = ops.snapshot();
+          if (auto* arr = snap["tracks"].getArray())
+            for (auto& t : *arr) if (t.getProperty ("name", var()).toString() == "Neural Renders")
+                if (auto* cs2 = t.getProperty ("clips", var()).getArray())
+                    for (auto& c : *cs2)
+                        if (std::abs ((double) c.getProperty ("start", -1.0) - 3.0) < 0.05) landedAtLive = true; }
+        check (landedAtLive, "moved whole-clip render lands at the clip's LIVE position (3.0 s), not the stale create spot");
     }
 
     // --- Stage 6: full producer loop -> export, undo/redo correct throughout ---

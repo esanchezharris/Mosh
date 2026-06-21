@@ -33,23 +33,29 @@ function escapeRegex(s: string): string {
 
 /** The section the utterance refers to (by name or a known alias), or null. */
 export function matchSection(norm: string, sections: Section[]): Section | null {
-  let best: { sec: Section; score: number } | null = null;
+  let best: { sec: Section; score: number; isName: boolean } | null = null;
   for (const sec of sections) {
     const name = normalize(sec.name);
     if (!name) continue;
-    const labels = [name, ...(ALIASES[name] ?? [])];
-    for (const label of labels) {
-      const l = normalize(label);
-      if (!l) continue;
-      if (new RegExp(`\\b${escapeRegex(l)}\\b`).test(norm) && (!best || l.length > best.score))
-        best = { sec, score: l.length };
+    const labels = [{ l: name, isName: true }, ...(ALIASES[name] ?? []).map((a) => ({ l: normalize(a), isName: false }))];
+    for (const { l, isName } of labels) {
+      if (!l || !new RegExp(`\\b${escapeRegex(l)}\\b`).test(norm)) continue;
+      // A literal section-NAME match always beats an alias match (so a section actually
+      // named "Hook" wins over another section that merely aliases "hook"); among equals,
+      // the longer label wins.
+      const better = !best || (isName && !best.isName) || (isName === best.isName && l.length > best.score);
+      if (better) best = { sec, score: l.length, isName };
     }
   }
   return best?.sec ?? null;
 }
 
-/** The wave clip with the largest overlap of [startSec, endSec), or null. */
+/** The wave clip with the largest MEANINGFUL overlap of [startSec, endSec), or null. */
 function overlapClip(snapshot: Snapshot, startSec: number, endSec: number) {
+  // Require a non-trivial overlap (50 ms floor, or 10% of the section) so a clip that
+  // merely grazes the section boundary by a few ms isn't treated as "the" section clip —
+  // a sliver would otherwise drive a degenerate near-empty render.
+  const minOverlap = Math.max(0.05, (endSec - startSec) * 0.1);
   let best: { clip: Clip; trackId: string; overlap: number } | null = null;
   for (const t of snapshot.tracks ?? [])
     for (const c of t.clips ?? []) {
@@ -57,16 +63,18 @@ function overlapClip(snapshot: Snapshot, startSec: number, endSec: number) {
       const cs = c.start;
       const ce = c.start + c.length;
       const overlap = Math.min(ce, endSec) - Math.max(cs, startSec);
-      if (overlap > 1e-3 && (!best || overlap > best.overlap)) best = { clip: c, trackId: t.id, overlap };
+      if (overlap > minOverlap && (!best || overlap > best.overlap)) best = { clip: c, trackId: t.id, overlap };
     }
   return best ? { clip: best.clip, trackId: best.trackId } : null;
 }
 
 // An optional steer pulled from the tail of the utterance: "rework the hook INTO
-// something darker" → "something darker". Conservative — only a few lead-ins, so a bare
-// "rework the hook" stays prompt-less (the model re-imagines without a text steer).
+// something darker" → "something darker". Only UNAMBIGUOUS transformation introducers —
+// bare "as"/"like"/"more" are ordinary connectives ("...like the verse", "...as it
+// repeats") that would capture sentence tails as garbage steers, so a bare "rework the
+// hook" (and those phrasings) stay prompt-less and the model re-imagines without a steer.
 function extractPrompt(text: string): string | undefined {
-  const m = String(text ?? "").match(/\b(?:into|to be|to sound|as|like|make it|more)\b\s+(.{2,80}?)\s*$/i);
+  const m = String(text ?? "").match(/\b(?:into|to be|to sound)\b\s+(.{2,80}?)\s*$/i);
   const p = m?.[1]?.trim();
   return p && p.length >= 2 ? p : undefined;
 }
@@ -130,9 +138,11 @@ export function planSectionRework(r: Extract<SectionRework, { kind: "ok" }>): Ag
   });
   if (r.prompt) cmds.push({ command: "set_render_param", args: { clipId: r.clip.id, prompt: r.prompt } });
   cmds.push({ command: "render_layer", args: { clipId: r.clip.id } });
+  // Park the transport over the section and actually ENABLE looping so it auditions on
+  // play (position alone seeks; `loop` turns looping on). Transport is non-undoable.
   cmds.push({
     command: "set_transport",
-    args: { action: "seek", position: r.regionStart, loopStart: r.regionStart, loopEnd: r.regionEnd },
+    args: { loop: true, position: r.regionStart, loopStart: r.regionStart, loopEnd: r.regionEnd },
   });
   return cmds;
 }

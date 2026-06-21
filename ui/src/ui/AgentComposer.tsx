@@ -131,9 +131,28 @@ export function AgentComposer() {
     if (!text || useStore.getState().agentBusy) return;
     setInput(""); setSay(null); setAgentBusy(true);
     try {
-      // Deterministic fast path FIRST: an unambiguous, state-valid phrase runs locally
-      // (no API). Anything ambiguous returns null and falls through to the LLM brain.
       const st = useStore.getState();
+
+      // Section scope FIRST: "rework the hook" → a render bounded to that section's beat
+      // range. Deterministic (no LLM arithmetic). It runs BEFORE the fast path because a
+      // named-section rework like "redo the hook" would otherwise be stolen by the fast
+      // path's global "redo" (undo-history) rule. It claims a turn ONLY when the utterance
+      // is a rework verb that names an existing section, so bare "redo"/"undo" still fall
+      // through to the fast path untouched.
+      const rework = resolveSectionRework(text, st.snapshot);
+      if (rework) {
+        if (rework.kind === "empty") {
+          setSay(rework.reason); pushAgentUtter("HUH", rework.reason);
+          return;
+        }
+        const label = `rework the ${rework.section.name}`;
+        setAgentChangeSet(await runAgentBatch(label, planSectionRework(rework), { utterance: text, source: "section_scope" }));
+        setSay(`reworking the ${rework.section.name}`); pushAgentUtter("ACK_WORKING", `reworking the ${rework.section.name}`);
+        return;
+      }
+
+      // Deterministic fast path: an unambiguous, state-valid phrase runs locally (no API).
+      // Anything ambiguous returns null and falls through to the LLM brain.
       const fast = matchFastPath(text, {
         mode: st.currentMode(),
         tempo: st.snapshot?.session?.tempo ?? 120,
@@ -145,21 +164,6 @@ export function AgentComposer() {
           enterRecord: st.enterRecord, stopRecord: st.stopRecord, keepTake: st.keepTake, navTake: st.navTake,
           utter: (intent, say) => { setSay(say ?? null); pushAgentUtter(intent, say); },
         });
-        return;
-      }
-
-      // Section scope: "rework the hook" → a render bounded to that section's beat range.
-      // Deterministic (no LLM arithmetic): resolve the section + its clip locally, then
-      // run the real render commands as one undo batch.
-      const rework = resolveSectionRework(text, st.snapshot);
-      if (rework) {
-        if (rework.kind === "empty") {
-          setSay(rework.reason); pushAgentUtter("HUH", rework.reason);
-          return;
-        }
-        const label = `rework the ${rework.section.name}`;
-        setAgentChangeSet(await runAgentBatch(label, planSectionRework(rework), { utterance: text, source: "section_scope" }));
-        setSay(`reworking the ${rework.section.name}`); pushAgentUtter("ACK_WORKING", `reworking the ${rework.section.name}`);
         return;
       }
 
