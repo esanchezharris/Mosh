@@ -234,6 +234,11 @@ public:
         // mic path (pair with a BlackHole input for a reliable digital loopback).
         if (voiceSmoke)
         {
+            // `--mic` selects loopback mode via the command line too, so an `open
+            // --args --voice-smoke --mic` launch (which drops env vars but carries the
+            // granted Mosh.app TCC identity) still reaches MIC mode.
+            if (commandLine.contains ("--mic"))
+                mosh::setEnvVar ("MOSH_VOICE_SMOKE_MIC", "1");
             const int rc = runVoiceSmoke (*engine, *moshOps);
             setApplicationReturnValue (rc);
             quit();
