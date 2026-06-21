@@ -4079,6 +4079,50 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         b.leave();
     }
 
+    // ── SEC-001 — named song sections (MOSH_SECTIONS) end-to-end ─────────────
+    {
+        section ("Song sections (MOSH_SECTIONS)");
+        auto sectionsArr = [&] { return ops.snapshot().getProperty ("sections", var()); };
+        auto findSec = [&] (const juce::String& id) -> juce::var
+        {
+            auto arr = sectionsArr();
+            for (int i = 0; i < arr.size(); ++i)
+                if (arr[i].getProperty ("id", var()).toString() == id) return arr[i];
+            return {};
+        };
+        const int before = sectionsArr().size();
+
+        auto created = cmd (ops, "create_section",
+                            objN ({ { "name", "Hook" }, { "startBeat", 24.0 }, { "endBeat", 40.0 }, { "color", "#f4c0d1" } }));
+        check (ok (created), "create_section ok");
+        const auto secId = created.getProperty ("data", var()).getProperty ("sectionId", var()).toString();
+        check (secId.isNotEmpty(), "create_section returns a sectionId");
+        check (sectionsArr().size() == before + 1, "snapshot.sections grew by one");
+        check (findSec (secId).getProperty ("name", var()).toString() == "Hook", "new section name is Hook");
+        check (std::abs ((double) findSec (secId).getProperty ("startBeat", -1.0) - 24.0) < 1e-6, "section startBeat is 24");
+
+        check (ok (cmd (ops, "rename_section", objN ({ { "sectionId", secId }, { "name", "Chorus" } }))), "rename_section ok");
+        check (findSec (secId).getProperty ("name", var()).toString() == "Chorus", "rename reflected in snapshot");
+
+        check (ok (cmd (ops, "move_section", objN ({ { "sectionId", secId }, { "startBeat", 32.0 }, { "endBeat", 48.0 } }))), "move_section ok");
+        check (std::abs ((double) findSec (secId).getProperty ("endBeat", -1.0) - 48.0) < 1e-6, "move reflected in snapshot");
+
+        // Undo reverts only the last edit (the move), before save/reload resets history.
+        check (ok (cmd (ops, "undo")), "undo (move_section) ok");
+        check (std::abs ((double) findSec (secId).getProperty ("endBeat", -1.0) - 40.0) < 1e-6, "undo restores the prior range");
+        check (findSec (secId).getProperty ("name", var()).toString() == "Chorus", "undo leaves the rename intact");
+
+        // Persists across save/reload (a plain child of the Edit's own ValueTree).
+        check (ok (cmd (ops, "save")),   "save (sections) ok");
+        check (ok (cmd (ops, "reload")), "reload (sections) ok");
+        check (findSec (secId).getProperty ("name", var()).toString() == "Chorus", "section persists across save/reload");
+        check (std::abs ((double) findSec (secId).getProperty ("endBeat", -1.0) - 40.0) < 1e-6, "section range persists across save/reload");
+
+        check (ok (cmd (ops, "remove_section", objN ({ { "sectionId", secId } }))), "remove_section ok");
+        check (! findSec (secId).isObject(), "section gone from snapshot after remove");
+        check (! ok (cmd (ops, "rename_section", objN ({ { "sectionId", secId }, { "name", "Ghost" } }))), "rename of a removed section fails cleanly");
+    }
+
     finishSection();
     std::cerr << "===== " << (checks - failures) << "/" << checks
               << " checks passed, " << failures << " failed =====\n\n";

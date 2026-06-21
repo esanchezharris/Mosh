@@ -1,6 +1,7 @@
 #include "MoshOps.h"
 #include "state/Ids.h"
 #include "state/RenderLayer.h"
+#include "state/Section.h"
 #include "multiplayer/LogicalId.h"
 #include "multiplayer/TrackCommit.h"
 #include "plugins/neural/NeuralInsertPlugin.h"
@@ -423,6 +424,10 @@ juce::var MoshOps::execute (const juce::var& command)
 
     if (name == "create_track")      return cmdCreateTrack (args);
     if (name == "rename_track")      return cmdRenameTrack (args);
+    if (name == "create_section")    return cmdCreateSection (args);
+    if (name == "rename_section")    return cmdRenameSection (args);
+    if (name == "move_section")      return cmdMoveSection (args);
+    if (name == "remove_section")    return cmdRemoveSection (args);
     if (name == "remove_track")      return cmdRemoveTrack (args);
     if (name == "import_clip")       return cmdImportClip (args);
     if (name == "import_clip_data")  return cmdImportClipData (args);
@@ -630,6 +635,100 @@ juce::var MoshOps::cmdRemoveTrack (const juce::var& args)
     logLine ("remove_track", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("remove_track");
+}
+
+// ── SEC-001 — named song sections (MOSH_SECTIONS tree on the Edit) ────────────
+// Beat-range regions with a name + colour; create/rename/move/remove are undoable
+// writes to the Edit's own ValueTree, so they save/reload with the .tracktionedit
+// and ride the one undo system. Section ids are engine-assigned UUIDs.
+juce::var MoshOps::cmdCreateSection (const juce::var& args)
+{
+    const auto name = args.getProperty ("name", var()).toString();
+    const double startBeat = (double) args.getProperty ("startBeat", 0.0);
+    const double endBeat = (double) args.getProperty ("endBeat", startBeat + 16.0);
+    const auto color = args.getProperty ("color", var()).toString();
+
+    beginTxn ("create_section");
+    auto state = eng.edit().state;
+    auto sections = state.getChildWithName (ids::MOSH_SECTIONS);
+    if (! sections.isValid())
+    {
+        sections = juce::ValueTree (ids::MOSH_SECTIONS);
+        state.appendChild (sections, &undoManager());
+    }
+    const auto sectionId = juce::Uuid().toString();
+    sections.appendChild (mosh::Section::create (sectionId, name, startBeat, endBeat, color), &undoManager());
+
+    auto* data = new DynamicObject(); data->setProperty ("sectionId", sectionId);
+    logLine ("create_section", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("create_section", var (data));
+}
+
+juce::var MoshOps::cmdRenameSection (const juce::var& args)
+{
+    const auto sectionId = args.getProperty ("sectionId", var()).toString();
+    const auto name = args.getProperty ("name", var()).toString();
+    auto sections = eng.edit().state.getChildWithName (ids::MOSH_SECTIONS);
+    auto node = sections.getChildWithProperty (ids::id, sectionId);
+    if (! node.isValid()) return errResult ("rename_section", "no section: " + sectionId);
+
+    beginTxn ("rename_section");
+    node.setProperty (ids::sectionName, name, &undoManager());
+    logLine ("rename_section", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("rename_section");
+}
+
+juce::var MoshOps::cmdMoveSection (const juce::var& args)
+{
+    const auto sectionId = args.getProperty ("sectionId", var()).toString();
+    const double startBeat = (double) args.getProperty ("startBeat", 0.0);
+    const double endBeat = (double) args.getProperty ("endBeat", 0.0);
+    auto sections = eng.edit().state.getChildWithName (ids::MOSH_SECTIONS);
+    auto node = sections.getChildWithProperty (ids::id, sectionId);
+    if (! node.isValid()) return errResult ("move_section", "no section: " + sectionId);
+
+    beginTxn ("move_section");
+    node.setProperty (ids::sectionStartBeat, startBeat, &undoManager());
+    node.setProperty (ids::sectionEndBeat, endBeat, &undoManager());
+    logLine ("move_section", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("move_section");
+}
+
+juce::var MoshOps::cmdRemoveSection (const juce::var& args)
+{
+    const auto sectionId = args.getProperty ("sectionId", var()).toString();
+    auto sections = eng.edit().state.getChildWithName (ids::MOSH_SECTIONS);
+    auto node = sections.getChildWithProperty (ids::id, sectionId);
+    if (! node.isValid()) return errResult ("remove_section", "no section: " + sectionId);
+
+    beginTxn ("remove_section");
+    sections.removeChild (node, &undoManager());
+    logLine ("remove_section", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("remove_section");
+}
+
+juce::var MoshOps::sectionsToVar()
+{
+    Array<var> out;
+    auto sections = eng.edit().state.getChildWithName (ids::MOSH_SECTIONS);
+    if (sections.isValid())
+        for (int i = 0; i < sections.getNumChildren(); ++i)
+        {
+            auto s = sections.getChild (i);
+            auto* o = new DynamicObject();
+            o->setProperty ("id", s[ids::id].toString());
+            o->setProperty ("name", s[ids::sectionName].toString());
+            o->setProperty ("startBeat", (double) s[ids::sectionStartBeat]);
+            o->setProperty ("endBeat", (double) s[ids::sectionEndBeat]);
+            if (s.hasProperty (ids::sectionColor))
+                o->setProperty ("color", s[ids::sectionColor].toString());
+            out.add (var (o));
+        }
+    return out;
 }
 
 // Shared wave-file insertion path used by both import_clip (path-based) and
@@ -5570,6 +5669,9 @@ juce::var MoshOps::snapshot()
                 buses.add (var (bo));
             }
     root->setProperty ("buses", buses);
+
+    // SEC-001 — named song sections (Intro/Verse/Hook/…) from the MOSH_SECTIONS tree.
+    root->setProperty ("sections", sectionsToVar());
 
     // Master bus (Wave 5) — the edit's master VolumeAndPan, always present.
     if (auto mvp = edit.getMasterVolumePlugin())

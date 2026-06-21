@@ -18,6 +18,11 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "create_track", desc: "Add a new track — type 'drum' loads a sampler + drum kit so beats are audible immediately", args: [S("name", false, "track name"), S("type", false, '"audio" (default) | "drum"')] },
   { command: "rename_track", desc: "Rename a track", args: [S("trackId"), S("name")] },
   { command: "remove_track", desc: "Delete a track and its clips", args: [S("trackId")] },
+  // ── song sections (Intro/Verse/Hook/…) — scope handles for "rework the hook" ──
+  { command: "create_section", desc: "Add a named song section (beats)", args: [S("name"), N("startBeat"), N("endBeat"), S("color", false)] },
+  { command: "rename_section", desc: "Rename a song section", args: [S("sectionId"), S("name")] },
+  { command: "move_section", desc: "Move/resize a song section (in beats)", args: [S("sectionId"), N("startBeat"), N("endBeat")] },
+  { command: "remove_section", desc: "Remove a song section", args: [S("sectionId")] },
 
   // ── clips ───────────────────────────────────────────────────────────────
   { command: "add_test_tone_clip", desc: "Drop a test-tone clip on a track (lands at 0)", args: [S("trackId", false), N("seconds", false, "duration in seconds"), N("freq", false, "Hz")] },

@@ -66,6 +66,19 @@ namespace mosh::ids
     MOSH_DECLARE_ID (moshLogicalId)   // stable per-track UUID (cross-peer track identity)
     MOSH_DECLARE_ID (mpBusId)         // stable per-bus UUID (cross-peer bus identity)
 
+    // SEC-001 — named SONG SECTIONS (Intro/Verse/Hook/…). A MOSH_SECTIONS container
+    // child of the Edit's own ValueTree (mirrors MOSH_PROJECT's parenting) holding
+    // MOSH_SECTION nodes — each a BEAT-range region with a name + colour, so it's
+    // tempo-independent. Plain ValueTree data parented under the Edit ⇒ it saves/
+    // reloads with the .tracktionedit and is UNDOABLE when written with the undo
+    // manager. Drives the section navigator + (later) agent scope handles.
+    MOSH_DECLARE_ID (MOSH_SECTIONS)
+    MOSH_DECLARE_ID (MOSH_SECTION)
+    MOSH_DECLARE_ID (sectionName)
+    MOSH_DECLARE_ID (sectionStartBeat)
+    MOSH_DECLARE_ID (sectionEndBeat)
+    MOSH_DECLARE_ID (sectionColor)
+
     MOSH_DECLARE_ID (id)
     MOSH_DECLARE_ID (inputRef)
     MOSH_DECLARE_ID (timeRangeStart)
