@@ -5,9 +5,11 @@
 // tracks/clips by LOGICAL refs ("$t0", "$c0_1") that the binder (bindReplay.ts)
 // resolves at replay time — mirroring the native --run-script ${VAR} capture.
 //
-// Lossy by design where no agent command exists: there is no agent audio-import
-// command, so wave clips become positioned test-tone placeholders (logged), and
-// plugins/automation/sends carried by the IR's `unmappable` list pass through.
+// Lossy only where no agent command exists: a wave clip with a captured source
+// path becomes a real positioned import_clip; one without a path falls back to a
+// positioned test-tone placeholder (logged). import_clip models no trim (the
+// engine imports the whole file), so a clip's `length` is not carried over.
+// Plugins/automation/sends in the IR's `unmappable` list pass through.
 
 import { dirname, isAbsolute, resolve } from "node:path";
 import type { ImportIR } from "./moshIR";
@@ -65,10 +67,13 @@ export function emitCommands(ir: ImportIR): ImportProgram {
             args: { clipId: `$${cref}`, pitch: n.pitch, start: n.start, length: n.length, velocity: n.velocity },
           });
       } else if (c.sourceFile) {
-        // Real positioned audio import (agent-callable import_clip; honors startSeconds).
+        // Real positioned audio import. import_clip honors startSeconds but not a
+        // clip length (cmdImportClip imports the whole file, and `length` isn't in
+        // the catalog), so c.length is intentionally dropped — the clip spans the
+        // file. Trimmed-clip fidelity would need real trim support in cmdImportClip.
         commands.push({
           command: "import_clip",
-          args: { trackId: `$${tref}`, file: resolveAudioPath(ir.source, c.sourceFile), startSeconds: c.start, length: c.length, name: c.name },
+          args: { trackId: `$${tref}`, file: resolveAudioPath(ir.source, c.sourceFile), startSeconds: c.start, name: c.name },
         });
       } else {
         // No source path captured → positioned test-tone placeholder (content lost, logged).

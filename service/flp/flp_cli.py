@@ -77,6 +77,20 @@ def _sg(obj, attr, default=None):
         return default
 
 
+def _pat_key(pat):
+    """Stable identity for a pattern, used to track which patterns the playlist
+    walk already placed. FL's pattern index is intrinsic; the NAME is not (FL
+    allows duplicate names, and unnamed patterns all read back as None) — keying
+    the dedup by name silently treats a *different* same-name pattern as already
+    placed and drops it. Prefer the index; fall back to object identity, which
+    over-includes (a duplicate, appended sequentially) rather than silently
+    dropping when the index can't be read."""
+    idx = _sg(pat, "index")
+    if isinstance(idx, int) and not isinstance(idx, bool):
+        return ("i", idx)
+    return ("o", id(pat))
+
+
 # FL stores sample paths with backslashes and FL env-var roots. Best-effort map to
 # absolute macOS paths so the importer emits a real import_clip (files may still be
 # missing → relink territory; factory/user roots are install-specific guesses).
@@ -215,7 +229,7 @@ def main() -> "None":
 
     placements = 0  # note-bearing pattern placements
     audio_items = 0
-    placed_names = set()
+    placed_keys = set()  # _pat_key of every pattern the walk placed
     walk_completed = True
     if arr is not None:
         try:
@@ -235,7 +249,7 @@ def main() -> "None":
                             continue  # empty pattern placement (spacer) — nothing to emit
                         place_pattern(pat, pnotes, start_beats, len_beats if len_beats else pattern_len_beats(pnotes))
                         placements += 1
-                        placed_names.add(_sg(pat, "name"))
+                        placed_keys.add(_pat_key(pat))
                     elif ch is not None:
                         sp = _norm_sample_path(_sg(ch, "sample_path"))
                         rc = _sg(ch, "iid")
@@ -262,7 +276,7 @@ def main() -> "None":
     elif not walk_completed:
         # Partial playlist (crashed mid-walk): patterns we never reached would otherwise be
         # dropped, so append the unplaced remainder sequentially after the placed content.
-        remainder = [(p, ns) for p, ns in note_patterns if _sg(p, "name") not in placed_names]
+        remainder = [(p, ns) for p, ns in note_patterns if _pat_key(p) not in placed_keys]
         lay_sequential(remainder, placed_end_beats())
         unmappable.append(
             f"FL playlist: {placements} placement(s) + {audio_items} audio clip(s) positioned before the read stopped; "
@@ -271,7 +285,7 @@ def main() -> "None":
     else:
         # Complete read → the playlist is authoritative; patterns it never references are
         # sketches (logged, not imported).
-        unplaced = sum(1 for p, _ in note_patterns if _sg(p, "name") not in placed_names)
+        unplaced = sum(1 for p, _ in note_patterns if _pat_key(p) not in placed_keys)
         unmappable.append(f"FL playlist: {placements} pattern placement(s) + {audio_items} audio clip(s) positioned from the arrangement")
         if unplaced:
             unmappable.append(f"{unplaced} note-bearing pattern(s) not on the playlist (not imported)")

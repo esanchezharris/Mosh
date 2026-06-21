@@ -60,8 +60,7 @@ describe("emitCommands", () => {
       trackId: "$t0",
       file: "/abs/loop.wav", // absolute path passes through unchanged
       startSeconds: 4,
-      length: 4,
-      name: "loop",
+      name: "loop", // no `length` — import_clip imports the whole file (cmdImportClip models no trim)
     });
     // a real import, not a logged loss
     expect(program.unmappable.some((u) => /placeholder/.test(u))).toBe(false);
