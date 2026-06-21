@@ -19,7 +19,7 @@
 - [x] **Cache by full fingerprint:** Tier-B reuse keyed by the complete fingerprint (`05 §5`), never just source+params. (Harness: HIT/MISS verified.)
 - [x] **FakeAdapter before SA3:** generative orchestration proven with the stub (81/81); SA3 swaps in last (deferred/gated).
 - [x] **VERIFY before relying:** resolved against the **pinned `tracktion_engine` clone** (`2877b621`); documented file-based fallbacks taken (new-clip landing, render-to-file). See `docs/ENGINE_API_NOTES.md`.
-- [x] **macOS / Apple Silicon (arm64) ONLY for v0.** No Windows/Linux/CUDA paths.
+- [x] **macOS / Apple Silicon (arm64) + MLX is canonical; Windows + NVIDIA/CUDA is an additive port.** Every platform fork is `#if`/`if(WIN32)`-guarded so the macOS path stays behaviour-equivalent (proven: the macOS `--selftest` passes unchanged after the port). The generative tier swaps MLX→PyTorch/CUDA behind the same adapter contract. No Linux build path is exercised yet.
 - [x] **Gate discipline:** never advanced past a failing gate; reported against concrete gates (all six PASSED).
 - [x] **Always leave an artifact:** `docs/PROGRESS.md` + per-gate commits + this manifest kept current.
 
@@ -83,7 +83,8 @@ Design micro-questions settled by the shipped implementation: `MOSH_RENDERLAYER`
 
 ## Working notes
 
-- **macOS / Apple Silicon (arm64) only** (matches the MLX service). Unified-memory zero-copy is the load-bearing neural advantage; no cross-platform code paths in v0.
+- **macOS / Apple Silicon (arm64) + MLX is canonical** — unified-memory zero-copy is the load-bearing neural advantage on the Mac.
+- **PC port (Windows + NVIDIA/CUDA):** parallel target, one codebase. Build with the `windows-x64-debug`/`-release` CMake presets (Visual Studio 17 2022 generator, WebView2-backed WebView, AU hosting off, VST3 only). The generative tier runs Stable Audio 3 under PyTorch/CUDA via `service/adapters/stable_audio3_cuda.py`, auto-selected by `stable_audio3_adapter` when MLX is absent (point `MOSH_SERVICE_PYTHON` at the CUDA venv + `MOSH_SA3_MODEL_DIR` at the weights — `service/setup-sa3-cuda.ps1` validates). Build/run/verify on Windows: `run-mosh.ps1`, `scripts/verify-pc-build.ps1`. Native voice / macOS menu bar / Bonjour-companion are stubbed on Windows (deferred). See [ARCHITECTURE.md](ARCHITECTURE.md) for the platform matrix.
 - **Spine first:** MoshOps + snapshot/events is the highest-leverage early work — UI and both neural tiers are clients of it.
 - **The swappability gate (Stage 2)** is non-negotiable: rebuild the React bundle, zero backend change.
 - **FakeAdapter before SA3** (Stage 5) — prove orchestration with the stub.

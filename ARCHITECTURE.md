@@ -6,7 +6,7 @@
 
 ## 1. What Mosh is
 
-**Mosh is a native macOS app** (Apple Silicon / arm64). `Mosh.app` is a native C++ binary built with JUCE 8 + Tracktion Engine. The audio engine, plugin hosting, neural DSP, file I/O, window and menus are all native.
+**Mosh is a native desktop app.** macOS (Apple Silicon / arm64) is canonical; a **Windows + NVIDIA/CUDA** build is an additive port of the same codebase (see §Platforms below). `Mosh.app` / `Mosh.exe` is a native C++ binary built with JUCE 8 + Tracktion Engine. The audio engine, plugin hosting, neural DSP, file I/O, window and menus are all native.
 
 The one nuance that trips everyone up: the **visual UI is not drawn with native Cocoa controls** — it's a React app rendered inside an embedded JUCE `WebBrowserComponent` (a "WebView"), shipped *inside* the app bundle at `Mosh.app/Contents/Resources/ui`. It talks to the C++ core through an **in-process bridge**, never over a network.
 
@@ -105,7 +105,26 @@ What Mosh can actually do today, grouped for a producer. Status is honest: `work
 - **Verify the backend:** `Mosh --selftest` — the command-surface harness (**744 checks** on a machine where the optional local Serum-VST3 gate is present; a few fewer without it, and the heavy real-model path adds more behind `MOSH_SELFTEST_SA3=1`). Run 3× for determinism (see memory `mosh-verification-conventions`). Visual demos: `Mosh --demo3`…`--demo6`.
 - **Build:** CMake (JUCE 8 + Tracktion via submodule, pinned in `cmake/Dependencies.cmake`). Neural/SA3 deps are fetch-gated behind `-DMOSH_ENABLE_RTNEURAL=ON` / `-DMOSH_ENABLE_ANIRA=ON`; the generative service runs under its MLX venv when `MOSH_ENABLE_SA3=1`.
 - **UI tests:** `npm test` in `ui/` (vitest + jsdom). `commands.contract.test.ts` parses `MoshOps.cpp` so the agent command catalog can't drift from the backend.
-- **UI e2e:** `npm run test:e2e` in `ui/` (Playwright + headless Chromium). Specs in `ui/e2e/` drive the real React WebView against the Vite dev server, where `bridge.ts` wires in the in-memory mock backend (`bridge.mock.ts`) — the same `execute_command`+snapshot+events contract the C++ MoshOps exposes — so the whole frontend (store, gestures, keymap, templates, optimistic previews) is exercised deterministically with no native build / audio / Python service. Coverage: the full producer loop, per-template regression (Mosh/Ableton/FL), keyboard-a11y / empty-state / narrow-window polish, and a per-skin screenshot walkthrough (`e2e-artifacts/`). The packaged WKWebView app can't be Playwright-driven (and its command surface is identical), so its smoke path stays `Mosh --selftest`.
+- **UI e2e:** `npm run test:e2e` in `ui/` (Playwright + headless Chromium). Specs in `ui/e2e/` drive the real React WebView against the Vite dev server, where `bridge.ts` wires in the in-memory mock backend (`bridge.mock.ts`) — the same `execute_command`+snapshot+events contract the C++ MoshOps exposes — so the whole frontend (store, gestures, keymap, templates, optimistic previews) is exercised deterministically with no native build / audio / Python service. Coverage: the full producer loop, per-template regression (Mosh/Ableton/FL), keyboard-a11y / empty-state / narrow-window polish, and a per-skin screenshot walkthrough (`e2e-artifacts/`). The packaged WebView app can't be Playwright-driven (and its command surface is identical), so its smoke path stays `Mosh --selftest`.
+
+### Platforms (macOS canonical · Windows/CUDA additive)
+
+One codebase, platform-guarded. JUCE + Tracktion + the whole MoshOps/snapshot/events spine + the React UI are cross-platform; only a thin OS-integration shell and the generative backend differ.
+
+| Concern | macOS (canonical) | Windows (NVIDIA/CUDA) |
+|---|---|---|
+| Build | `cmake --preset macos-arm64-{debug,release}` (Ninja) → `Mosh.app` | `cmake --preset windows-x64-{debug,release}` (VS 17 2022) → `Mosh.exe` |
+| Layout | `.app` bundle; UI at `Contents/Resources/ui` | flat: `ui/` + `drumkits/` staged next to `Mosh.exe`; `service/` via `MOSH_SERVICE_SCRIPT` |
+| WebView | WKWebView | **WebView2** (Edge Chromium; `NEEDS_WEBVIEW2`/`JUCE_USE_WIN_WEBVIEW2=1`) |
+| Audio | CoreAudio (JUCE auto) | WASAPI (JUCE auto; ASIO deferred) |
+| Plugins | VST3 + AudioUnit | **VST3 only** (`MOSH_PLUGINHOST_AU=0`) |
+| Generative tier | Stable Audio 3 via **MLX** (`sa3/engine.py`) | Stable Audio 3 via **PyTorch/CUDA** (`adapters/stable_audio3_cuda.py`) — auto-selected by `stable_audio3_adapter` when MLX is absent; `MOSH_SERVICE_PYTHON` → CUDA venv, `MOSH_SA3_MODEL_DIR` → weights |
+| Voice / menu / iPhone-companion | SFSpeechRecognizer / macOS menu bar / Bonjour | **stubbed/skipped** (`NativeSpeech_stub.cpp`; deferred) |
+| Run / verify | `run-mosh.sh` | `run-mosh.ps1`, `service/setup-sa3-cuda.ps1`, `scripts/verify-pc-build.ps1` |
+
+The generative adapter contract (`available()`/`backend_name()`/`render(input_wav, output_wav, params) → manifest`) is identical across MLX, CUDA, and the FakeAdapter — the service dispatches MLX-if-present-else-CUDA-else-Fake, so the manifest only differs by its `backend` field.
+
+- **Build:** CMake (JUCE 8 + Tracktion via submodule, pinned in `cmake/Dependencies.cmake`). Neural/SA3 deps are fetch-gated behind `-DMOSH_ENABLE_RTNEURAL=ON` / `-DMOSH_ENABLE_ANIRA=ON`.
 
 ---
 

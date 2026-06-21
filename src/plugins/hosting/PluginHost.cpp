@@ -2,7 +2,9 @@
 #include "plugins/neural/NeuralInsertPlugin.h"
 #include "plugins/spectral/MasterSpectralTapPlugin.h"
 #include <thread>
-#include <unistd.h>   // getpid
+#if ! JUCE_WINDOWS
+ #include <unistd.h>   // getpid (POSIX scan-watchdog kill)
+#endif
 
 namespace mosh
 {
@@ -21,11 +23,22 @@ namespace
     // master is in-process, so its worker is always our direct child.
     void killScanWorkers()
     {
+       #if JUCE_WINDOWS
+        // The POSIX `pkill -P <pid>` watchdog has no safe one-liner on Windows:
+        // Tracktion relaunches THIS executable as the scan child, so killing by
+        // image name would also kill the parent, and taskkill cannot filter by
+        // command line. The precise equivalent is a Toolhelp32 snapshot that
+        // TerminateProcess()es only direct children (th32ParentProcessID ==
+        // GetCurrentProcessId()) — deferred. Until then the deep `--scan-plugins-deep`
+        // hang-watchdog is a no-op on Windows; core scanning + --selftest never hit
+        // this path (they use the in-process VST3 scan).
+       #else
         juce::ChildProcess pk;
         pk.start (juce::StringArray { "/usr/bin/pkill", "-9",
                                       "-P", juce::String ((int) getpid()),
                                       "-f", "PluginScan:" });
         pk.waitForProcessToFinish (2000);
+       #endif
     }
 
     // A native plugin-editor pop-out (03 §4) that notifies on close.
@@ -184,10 +197,24 @@ void PluginHost::scanInstalledVST3()
     // module load) unless MOSH_SCAN_SLOW_VST3=1, and honors the blocklist, so this
     // stays in-process and crash-safe. Bundles without moduleinfo still need the
     // slow-scan opt-in (Debug shutdown noise is why it is not the default).
+    // Standard VST3 install locations, per platform.
+   #if JUCE_WINDOWS
+    juce::Array<File> roots;
+    {
+        const auto common = juce::SystemStats::getEnvironmentVariable (
+            "CommonProgramFiles", "C:\\Program Files\\Common Files");
+        roots.add (File (common).getChildFile ("VST3"));
+        if (const auto local = juce::SystemStats::getEnvironmentVariable ("LOCALAPPDATA", {});
+            local.isNotEmpty())
+            roots.add (File (local).getChildFile ("Programs").getChildFile ("Common").getChildFile ("VST3"));
+    }
+   #else
     const File sysDir ("/Library/Audio/Plug-Ins/VST3");
     const File usrDir (File::getSpecialLocation (File::userHomeDirectory)
                            .getChildFile ("Library/Audio/Plug-Ins/VST3"));
-    for (const auto& root : { sysDir, usrDir })
+    const juce::Array<File> roots { sysDir, usrDir };
+   #endif
+    for (const auto& root : roots)
     {
         if (! root.isDirectory())
             continue;

@@ -28,6 +28,32 @@
         "MOSH_BUILD_UI": "ON",
         "MOSH_BUILD_PLUGIN_FIXTURES": "ON"
       }
+    },
+    {
+      "name": "windows-x64-debug",
+      "displayName": "Windows x64 Debug (NVIDIA/CUDA)",
+      "generator": "Visual Studio 17 2022",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build-windows-x64",
+      "cacheVariables": {
+        "MOSH_BUILD_APP": "ON",
+        "MOSH_BUILD_TESTS": "ON",
+        "MOSH_BUILD_UI": "ON",
+        "MOSH_BUILD_PLUGIN_FIXTURES": "ON"
+      }
+    },
+    {
+      "name": "windows-x64-release",
+      "displayName": "Windows x64 Release (NVIDIA/CUDA)",
+      "generator": "Visual Studio 17 2022",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build-windows-x64-release",
+      "cacheVariables": {
+        "MOSH_BUILD_APP": "ON",
+        "MOSH_BUILD_TESTS": "ON",
+        "MOSH_BUILD_UI": "ON",
+        "MOSH_BUILD_PLUGIN_FIXTURES": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -71,6 +97,62 @@
       "configurePreset": "macos-arm64-release",
       "targets": [
         "MoshTests"
+      ]
+    },
+    {
+      "name": "windows-x64-app",
+      "displayName": "Build Windows x64 app (Debug)",
+      "configurePreset": "windows-x64-debug",
+      "configuration": "Debug",
+      "targets": [
+        "Mosh",
+        "MoshStageUI"
+      ]
+    },
+    {
+      "name": "windows-x64-tests",
+      "displayName": "Build Windows x64 tests (Debug)",
+      "configurePreset": "windows-x64-debug",
+      "configuration": "Debug",
+      "targets": [
+        "MoshTests"
+      ]
+    },
+    {
+      "name": "windows-x64-plugin-fixture",
+      "displayName": "Build Windows x64 plugin fixture (Debug)",
+      "configurePreset": "windows-x64-debug",
+      "configuration": "Debug",
+      "targets": [
+        "MoshTestTonePlugin_VST3"
+      ]
+    },
+    {
+      "name": "windows-x64-release-app",
+      "displayName": "Build Windows x64 app (Release)",
+      "configurePreset": "windows-x64-release",
+      "configuration": "Release",
+      "targets": [
+        "Mosh",
+        "MoshStageUI"
+      ]
+    },
+    {
+      "name": "windows-x64-release-tests",
+      "displayName": "Build Windows x64 tests (Release)",
+      "configurePreset": "windows-x64-release",
+      "configuration": "Release",
+      "targets": [
+        "MoshTests"
+      ]
+    },
+    {
+      "name": "windows-x64-release-plugin-fixture",
+      "displayName": "Build Windows x64 plugin fixture (Release)",
+      "configurePreset": "windows-x64-release",
+      "configuration": "Release",
+      "targets": [
+        "MoshTestTonePlugin_VST3"
       ]
     }
   ]

@@ -19,6 +19,11 @@ namespace
         auto app = File::getSpecialLocation (File::currentApplicationFile);
         auto bundled = app.getChildFile ("Contents/Resources/service/server.py");
         if (bundled.existsAsFile()) return bundled;
+
+        // flat layout (Windows): service/ staged next to the executable.
+        auto beside = File::getSpecialLocation (File::currentExecutableFile)
+                          .getParentDirectory().getChildFile ("service/server.py");
+        if (beside.existsAsFile()) return beside;
         return {};
     }
 }
