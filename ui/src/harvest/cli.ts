@@ -3,20 +3,25 @@
 //   npm run harvest -- [<mosh-log.jsonl>] [-o tuples.jsonl]
 //   npm run verify  -- <commands.json> [--target snapshot.json]
 //
-// harvest: read a MoshOps log → versioned trajectory tuples (JSONL).
+// harvest: read a MoshOps log → versioned trajectory tuples (JSONL). With --watch
+//          it tails the live log and appends new tuples as turns complete (Phase 2);
+//          with --report it prints the clean/engine-fail/contract-fail rollup.
 // verify:  replay a command sequence through the deterministic mock backend and
 //          print the verdict (clean-validate / clean-apply / optional snapshot diff).
 // Both are audio-free, Python-free, native-build-free.
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, unwatchFile, watchFile, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { harvest } from "./harvester";
+import { collectFresh, formatLiveReport, liveReport } from "./liveHarvest";
 import { replay } from "./verifier";
 import type { CommandCall } from "./tupleSchema";
 import type { Snapshot } from "../types";
 
-const DEFAULT_LOG = join(homedir(), "Library", "Mosh", "session", "mosh-log.jsonl");
+const SESSION_DIR = join(homedir(), "Library", "Mosh", "session");
+const DEFAULT_LOG = join(SESSION_DIR, "mosh-log.jsonl");
+const DEFAULT_TUPLES = join(SESSION_DIR, "tuples.jsonl");
 
 function parseArgs(argv: string[], valueFlags: string[]): { positional: string[]; flags: Record<string, string> } {
   const positional: string[] = [];
@@ -35,6 +40,9 @@ async function cmdHarvest(argv: string[]): Promise<number> {
   const logPath = positional[0] ?? DEFAULT_LOG;
   const out = flags["-o"] || flags["--out"] || "";
 
+  // --watch: Phase-2 live loop — tail the log, append new tuples as turns complete.
+  if ("--watch" in flags) return watchHarvest(logPath, out || DEFAULT_TUPLES);
+
   let text: string;
   try {
     text = readFileSync(logPath, "utf8");
@@ -42,8 +50,14 @@ async function cmdHarvest(argv: string[]): Promise<number> {
     console.error(`harvest: cannot read log: ${logPath}\n  ${(e as Error).message}`);
     return 1;
   }
-
   const tuples = await harvest(text, { logPath });
+
+  // --report: just the clean / engine-fail / contract-fail rollup (no tuple output).
+  if ("--report" in flags) {
+    console.log(formatLiveReport(liveReport(tuples)));
+    return 0;
+  }
+
   const jsonl = tuples.map((t) => JSON.stringify(t)).join("\n") + (tuples.length ? "\n" : "");
   if (out) writeFileSync(out, jsonl);
   else process.stdout.write(jsonl);
@@ -56,6 +70,61 @@ async function cmdHarvest(argv: string[]): Promise<number> {
       ` · ${undone} undone · ${taste} with taste labels · ${dirty} not-applied-clean`,
   );
   return 0;
+}
+
+// Tail the live MoshOps log: re-harvest on every change (the harvest is idempotent),
+// dedupe by turnId, and append only newly-completed turns to the tuples file. The log
+// is the single source of truth (the native app writes it synchronously), so this is
+// a pure Node sidecar — zero app/C++ change. Runs until Ctrl-C.
+async function watchHarvest(logPath: string, outPath: string): Promise<number> {
+  const seen = new Set<string>();
+  let dirEnsured = false;
+  let running = false;
+  let pending = false;
+
+  const flush = async (): Promise<void> => {
+    if (running) {
+      pending = true; // coalesce a change that lands mid-harvest
+      return;
+    }
+    running = true;
+    try {
+      let text: string;
+      try {
+        text = readFileSync(logPath, "utf8");
+      } catch {
+        return; // log not created yet — watchFile will fire when it appears
+      }
+      const tuples = await harvest(text, { logPath });
+      const fresh = collectFresh(tuples, seen);
+      if (fresh.length) {
+        if (!dirEnsured) {
+          mkdirSync(dirname(outPath), { recursive: true });
+          dirEnsured = true;
+        }
+        appendFileSync(outPath, fresh.map((t) => JSON.stringify(t)).join("\n") + "\n");
+      }
+      const stamp = new Date().toISOString().slice(11, 19);
+      console.error(`[${stamp}] +${fresh.length} new tuple(s) → ${outPath}`);
+      console.error(formatLiveReport(liveReport(tuples)));
+    } finally {
+      running = false;
+      if (pending) {
+        pending = false;
+        void flush();
+      }
+    }
+  };
+
+  console.error(`watching ${logPath}\n  → ${outPath}  (Ctrl-C to stop)`);
+  await flush(); // catch up on whatever's already in the log
+  watchFile(logPath, { interval: 1000 }, () => void flush());
+  process.on("SIGINT", () => {
+    unwatchFile(logPath);
+    console.error("\nstopped.");
+    process.exit(0);
+  });
+  return new Promise<number>(() => {}); // never resolves; lives until SIGINT
 }
 
 async function cmdVerify(argv: string[]): Promise<number> {
@@ -106,6 +175,8 @@ async function main(): Promise<number> {
   console.error(
     "usage:\n" +
       "  harvest [<mosh-log.jsonl>] [-o tuples.jsonl]   (default log: ~/Library/Mosh/session/mosh-log.jsonl)\n" +
+      "  harvest --watch [<log>] [-o tuples.jsonl]      (tail the live log → append new tuples; default out: …/session/tuples.jsonl)\n" +
+      "  harvest --report [<log>]                       (print the clean / engine-fail / contract-fail rollup)\n" +
       "  verify  <commands.json> [--target snapshot.json]",
   );
   return 2;
