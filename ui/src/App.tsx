@@ -27,7 +27,7 @@ import { PianoRoll } from "./ui/PianoRoll";
 import { AutomationPanel } from "./ui/AutomationPanel";
 import { DrumWindow } from "./ui/DrumWindow";
 import { MonsterChanges } from "./ui/MonsterChanges";
-import { Inspector } from "./ui/Inspector";
+import { SessionRail } from "./ui/SessionRail";
 import { AgentComposer } from "./ui/AgentComposer";
 import { SectionNavigator } from "./ui/SectionNavigator";
 
@@ -86,7 +86,7 @@ export function App() {
             <Mixer snapshot={snapshot} />
           </div>
         ) : (
-          <DockShell left={<SampleBrowser />} right={redesign ? <Inspector snapshot={snapshot} /> : undefined} bottom={<Dock snapshot={snapshot} />}>
+          <DockShell left={<SampleBrowser />} right={redesign ? <SessionRail snapshot={snapshot} /> : undefined} bottom={<Dock snapshot={snapshot} />}>
             <Arrange snapshot={snapshot} />
           </DockShell>
         )

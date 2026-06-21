@@ -4,17 +4,20 @@
 
 import { useEffect } from "react";
 import { useStore } from "../store";
+import { useSettings } from "../settings/store";
 import type { Snapshot, Plugin, Track, Clip, RenderColor } from "../types";
 import { Moshi } from "./Moshi";
 
 export function Dock({ snapshot }: { snapshot: Snapshot }) {
   const selectedTrackId = useStore((s) => s.selectedTrackId);
   const track = snapshot.tracks.find((t) => t.id === selectedTrackId) ?? null;
+  // In the redesign, Moshi is a participant in the Session rail, not in the dock.
+  const redesign = useSettings((s) => Boolean(s.values.redesignShell));
   return (
     <div className="dock" data-testid="dock">
       <Rack track={track} />
       {track && <GenDrawer track={track} />}
-      <Moshi />
+      {!redesign && <Moshi />}
     </div>
   );
 }

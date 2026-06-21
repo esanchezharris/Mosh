@@ -14,9 +14,10 @@ const DEFAULT_BOTTOM: Zone = { id: "detail", size: 196, min: 120, max: 520 };
 // prevSize seeds the FIRST expand (toggleZone restores prevSize ?? min) so the
 // browser opens at a comfortable 240px rather than snapping to its minimum.
 const DEFAULT_LEFT: Zone = { id: "browser", size: 240, min: 170, max: 420, collapsed: true, prevSize: 240 };
-// The Inspector (right) rail mirrors the browser: opt-in, collapsed to an edge tab
-// by default so it never disrupts the existing layout; pin it open and width persists.
-const DEFAULT_RIGHT: Zone = { id: "inspector", size: 280, min: 200, max: 460, collapsed: true, prevSize: 280 };
+// The right "Session" rail (participants + inspector). Open by default in the
+// redesign so the agent (Moshi) + collaborators are present; collapsible to an edge
+// tab for more arrange space. Only ever rendered when the redesign flag is on.
+const DEFAULT_RIGHT: Zone = { id: "inspector", size: 300, min: 220, max: 480, collapsed: false, prevSize: 300 };
 
 type Stored = { size: number; collapsed?: boolean; prevSize?: number };
 function readZone(raw: unknown, def: Zone): Zone {

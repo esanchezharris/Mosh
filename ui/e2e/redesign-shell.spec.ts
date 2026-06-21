@@ -13,13 +13,12 @@ async function bootRedesign(page: Page): Promise<void> {
   await expect(page.getByTestId("arrangement")).toBeVisible();
 }
 
-test("flag on: Inspector right rail starts collapsed and expands on click", async ({ page }) => {
+test("flag on: the Session rail is open by default with Moshi + inspector", async ({ page }) => {
   await bootRedesign(page);
-  const tab = page.getByTestId("inspector-expand");
-  await expect(tab).toBeVisible();
-  await expect(page.getByTestId("dock-right")).toHaveCount(0);
-  await tab.click();
   await expect(page.getByTestId("dock-right")).toBeVisible();
+  await expect(page.getByTestId("session-rail")).toBeVisible();
+  await expect(page.getByTestId("participant-moshi")).toBeVisible();
+  await expect(page.getByTestId("inspector")).toBeVisible();
 });
 
 test("flag off (default): no Inspector rail", async ({ page }) => {
@@ -31,7 +30,6 @@ test("flag off (default): no Inspector rail", async ({ page }) => {
 
 test("flag on: Inspector shows the selected track's mix controls", async ({ page }) => {
   await bootRedesign(page);
-  await page.getByTestId("inspector-expand").click();
   await page.getByTestId("track-header").first().click();
   const insp = page.getByTestId("inspector");
   await expect(insp).toBeVisible();
