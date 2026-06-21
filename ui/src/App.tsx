@@ -27,12 +27,14 @@ import { PianoRoll } from "./ui/PianoRoll";
 import { AutomationPanel } from "./ui/AutomationPanel";
 import { DrumWindow } from "./ui/DrumWindow";
 import { MonsterChanges } from "./ui/MonsterChanges";
+import { Inspector } from "./ui/Inspector";
 
 export function App() {
   const init = useStore((s) => s.init);
   const snapshot = useStore((s) => s.snapshot);
   const lastError = useStore((s) => s.lastError);
   const view = useStore((s) => s.view);
+  const redesign = useSettings((s) => Boolean(s.values.redesignShell));
 
   useEffect(() => { init(); }, [init]);
   useKeyboardShortcuts(); // the single keyboard layer + native-menu bridge (CTL-002)
@@ -66,7 +68,7 @@ export function App() {
   const audioEnabled = snapshot?.session.audioEnabled ?? true;
 
   return (
-    <div className="app" data-testid="app">
+    <div className="app" data-testid="app" data-redesign={redesign ? "on" : undefined}>
       {snapshot && <Topbar snapshot={snapshot} />}
       <Toolbar />
       {!audioEnabled && (
@@ -80,7 +82,7 @@ export function App() {
             <Mixer snapshot={snapshot} />
           </div>
         ) : (
-          <DockShell left={<SampleBrowser />} bottom={<Dock snapshot={snapshot} />}>
+          <DockShell left={<SampleBrowser />} right={redesign ? <Inspector snapshot={snapshot} /> : undefined} bottom={<Dock snapshot={snapshot} />}>
             <Arrange snapshot={snapshot} />
           </DockShell>
         )

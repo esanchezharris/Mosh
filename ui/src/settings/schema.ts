@@ -145,6 +145,15 @@ export const SETTINGS: SettingDef[] = [
       ],
     },
   },
+  {
+    id: "redesignShell",
+    type: "bool",
+    default: false,
+    scope: "app",
+    category: "Layout",
+    label: "Redesign shell (preview)",
+    help: "Opt into the agent-first shell: an Inspector right rail + side gutters. Off by default while it's built out.",
+  },
   ...interactionSettings(),
 ];
 
