@@ -12,6 +12,8 @@ across Fake, Mac SA3, and future PC adapters.
 - `POST /submit`
 - `GET /status?jobId=...`
 - `POST /cancel`
+- `POST /transcribe` — audio→MIDI (Basic Pitch); isolated venv, 503 if absent
+- `POST /sketch` — beatbox→drum hits (Sketch Phase 0); isolated venv, 503 if absent
 
 The canonical adapter id is `stable_audio3`. The dependency-free `fake` adapter is
 always available and is the default for PC gates unless real SA3 is explicitly

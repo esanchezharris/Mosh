@@ -166,4 +166,26 @@ juce::var GenerativeJobManager::transcribe (const juce::File& inputWav, const ju
     return {};
 }
 
+juce::var GenerativeJobManager::sketchBeatbox (const juce::File& inputWav, double bpm, int bars)
+{
+    if (! ensureServiceRunning())
+        return {};
+
+    auto* body = new DynamicObject();
+    body->setProperty ("inputWav", inputWav.getFullPathName());
+    body->setProperty ("bpm", bpm);
+    body->setProperty ("bars", bars);
+
+    // Onset analysis runs in a subprocess under the dedicated sketch venv; it is
+    // model-free but still spawns a process, so give it a generous timeout and run it
+    // off the message thread. Mirrors transcribe().
+    URL url = URL (baseUrl + "/sketch").withPOSTData (JSON::toString (var (body)));
+    auto opts = URL::InputStreamOptions (URL::ParameterHandling::inPostData)
+                    .withConnectionTimeoutMs (60000)
+                    .withExtraHeaders ("Content-Type: application/json");
+    if (auto s = url.createInputStream (opts))
+        return JSON::parse (s->readEntireStreamAsString());
+    return {};
+}
+
 } // namespace mosh

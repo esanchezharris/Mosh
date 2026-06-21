@@ -51,6 +51,18 @@ across runs).
 | 6 | Realtime output path | live | device opens; audio frames flow | ✅ `--live-audio-smoke` **14/14** (MacBook Pro Speakers, CoreAudio 48k) — by-ear out-loud confirm still owner-side |
 | 7 | Voice (mock brain) | live | STT transcribes; earcons fire | ⏳ owner: grant mic, hold-to-talk + 👂 hands-free + barge-in (`MOSH_VOICE_BARGE_IN=1`) |
 | 8 | Multiplayer (2-process) | live | protocol green; track-lock + clip-move sync | ✅ `relay/run-mp-selftest.sh` **911/911** — two-window *visual* sync still owner-side |
+| 9 | Sketch (beatbox→drums) | gated | recognizable kick/snare/hat land in a real editable clip; tempo set; byte-identical across runs | ✅ `MOSH_SELFTEST_SKETCH=1` **16/16** on the committed fixtures (boom-bap 90 + trap 140), determinism asserted; CLI stdout byte-identical across runs |
+
+**Sketch gated selftest** (needs `service/sketch/setup-sketch.sh` first):
+
+```bash
+MOSH_SELFTEST_SKETCH=1 MOSH_SKETCH_FIXTURE_DIR="$PWD/service/sketch/fixtures" \
+  build-macos-arm64/Mosh_artefacts/Debug/Mosh.app/Contents/MacOS/Mosh --selftest   # run from the repo root
+```
+
+The default `Mosh --selftest` (no env) stays **893/893** whether or not the librosa venv is present
+(graceful degradation). Remaining hands-on for Sketch: the by-ear "does it groove" confirm and a
+real beatbox-from-your-mouth take (the fixtures are synthesised, not recorded) — owner-side.
 
 Evidence WAVs + the analyzer `report.json` land in `verify-artifacts/` (git-ignored). The
 `--run-script` runner and the harness live in PR #80; this runbook in #78.

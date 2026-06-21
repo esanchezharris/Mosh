@@ -1679,6 +1679,83 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     else
         std::cerr << "  ..   (transcribe self-test skipped — set MOSH_SELFTEST_TRANSCRIBE=1 to exercise Basic Pitch)\n";
 
+    // --- Sketch Phase 0 (beatbox → drum MoshOps): GATED on MOSH_SELFTEST_SKETCH (needs
+    //     the sketch venv + service + the committed fixture WAVs; point MOSH_SKETCH_FIXTURE_DIR
+    //     at service/sketch/fixtures). Proves: recognisable kick/snare/hat hits land in a real
+    //     editable clip, the tempo is set, and the transduction is byte-identical across runs. ---
+    if (SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SKETCH", "0") == "1")
+    {
+        section ("Sketch: beatbox WAV → drum MoshOps (real librosa transduction)");
+        juce::File fixDir (SystemStats::getEnvironmentVariable ("MOSH_SKETCH_FIXTURE_DIR", {}));
+        const auto boombap = fixDir.getChildFile ("boombap_90.wav");
+        const auto trap    = fixDir.getChildFile ("trap_140.wav");
+        check (boombap.existsAsFile() && trap.existsAsFile(),
+               "MOSH_SKETCH_FIXTURE_DIR points at the committed fixtures (boombap_90 + trap_140)");
+
+        if (boombap.existsAsFile() && trap.existsAsFile())
+        {
+            // does the returned note array contain a note at this GM pitch?
+            auto hasPitch = [] (const juce::var& data, int pitch) {
+                if (auto* arr = data.getProperty ("notes", var()).getArray())
+                    for (auto& n : *arr) if ((int) n.getProperty ("pitch", 0) == pitch) return true;
+                return false;
+            };
+
+            const int before = tracks (ops);
+            std::cerr << "  ..   transducing a boom-bap beatbox via librosa (onset + 3-class heuristic)...\n";
+            auto bb = cmd (ops, "sketch_beatbox", objN ({{ "file", boombap.getFullPathName() },
+                                                         { "bpm", 90.0 }, { "bars", 1 }, { "wait", true }}));
+            check (ok (bb), "sketch_beatbox (boombap, wait) ok");
+            check (bb["data"].getProperty ("status", var()).toString() == "done", "transduction completed -> done");
+            check ((int) bb["data"].getProperty ("noteCount", 0) > 0, "boom-bap produced >=1 drum note");
+            check (tracks (ops) == before + 1, "boom-bap landed a new drum track");
+            check (hasPitch (bb["data"], 36), "boom-bap has a kick (GM 36)");
+            check (hasPitch (bb["data"], 38), "boom-bap has a snare (GM 38)");
+            check (hasPitch (bb["data"], 42), "boom-bap has a hat (GM 42)");
+
+            // Emitted PURELY as MoshOps: the first op is set_tempo carrying the known bpm.
+            auto op0 = bb["data"].getProperty ("moshops", var())[0];
+            check (op0.getProperty ("command", var()).toString() == "set_tempo", "first emitted op is set_tempo");
+            check ((double) op0.getProperty ("args", var()).getProperty ("bpm", 0.0) == 90.0, "set_tempo carries the known bpm (90)");
+
+            // The clip is real + editable: it shows up in the snapshot as a MIDI clip with notes.
+            auto newTrack = ops.snapshot()["tracks"][before];
+            check (newTrack["clips"][0].getProperty ("type", var()).toString() == "midi", "landed clip is a MIDI clip");
+            check (newTrack["clips"][0].getProperty ("notes", var()).size() > 0, "drum clip carries the transduced notes");
+
+            // Determinism: same WAV + same bpm + same bars → byte-identical hits + notes.
+            auto bb2 = cmd (ops, "sketch_beatbox", objN ({{ "file", boombap.getFullPathName() },
+                                                          { "bpm", 90.0 }, { "bars", 1 }, { "wait", true }}));
+            const auto hits1 = juce::JSON::toString (bb ["data"].getProperty ("hits", var()));
+            const auto hits2 = juce::JSON::toString (bb2["data"].getProperty ("hits", var()));
+            check (hits1.isNotEmpty() && hits1 == hits2, "determinism: identical transduced hits across 2 runs");
+            const auto notes1 = juce::JSON::toString (bb ["data"].getProperty ("notes", var()));
+            const auto notes2 = juce::JSON::toString (bb2["data"].getProperty ("notes", var()));
+            check (notes1 == notes2, "determinism: identical emitted notes across 2 runs");
+
+            // A second, different genre/tempo (trap @ 140) also yields all three roles, and
+            // proves the whole sketch is ONE atomic undo step (set_tempo + track + clip
+            // coalesced): a single undo restores both the track count and the prior tempo.
+            std::cerr << "  ..   transducing a trap-hat beatbox @ 140 BPM...\n";
+            auto tempoNow = [&] { return (double) ops.snapshot().getProperty ("session", var()).getProperty ("tempo", 0.0); };
+            const int beforeTrap = tracks (ops);
+            const double tempoBeforeTrap = tempoNow();
+            auto tp = cmd (ops, "sketch_beatbox", objN ({{ "file", trap.getFullPathName() },
+                                                         { "bpm", 140.0 }, { "bars", 1 }, { "wait", true }}));
+            check (ok (tp), "sketch_beatbox (trap, wait) ok");
+            check (hasPitch (tp["data"], 36) && hasPitch (tp["data"], 38) && hasPitch (tp["data"], 42),
+                   "trap pattern has kick + snare + hat");
+            check (tracks (ops) == beforeTrap + 1, "trap landed exactly one new drum track");
+            check (std::abs (tempoNow() - 140.0) < 0.5, "tempo set to 140");
+            cmd (ops, "undo");
+            check (tracks (ops) == beforeTrap, "ONE undo reverts the whole sketch (atomic: track removed)");
+            check (std::abs (tempoNow() - tempoBeforeTrap) < 0.5,
+                   "ONE undo also restores the prior tempo (atomic: set_tempo coalesced)");
+        }
+    }
+    else
+        std::cerr << "  ..   (sketch self-test skipped — set MOSH_SELFTEST_SKETCH=1 + MOSH_SKETCH_FIXTURE_DIR to exercise the beatbox transduction)\n";
+
     // Settle the generative service's async backlog before the downstream pure-command
     // blocks. The Tier-B render jobs above cancel in-flight HTTP requests whose completion
     // callbacks callAsync onto the message thread; if those land mid-block during a later

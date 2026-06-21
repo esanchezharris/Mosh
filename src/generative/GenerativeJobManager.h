@@ -40,6 +40,13 @@ public:
         ok is false / {} on failure (service down, venv absent → 503). */
     juce::var transcribe (const juce::File& inputWav, const juce::String& mode);
 
+    /** Sketch Phase 0 — beatbox → drum hits via librosa (POST /sketch). SYNCHRONOUS —
+        call on a BACKGROUND thread (model-free, but a subprocess + onset analysis is
+        ~0.5-2s). Deterministic given (inputWav, bpm, bars). Returns
+        { ok, bpm, bars, hits:[{step,role,velocity}] }, or a var whose ok is false / {}
+        on failure (service down, venv absent → 503). */
+    juce::var sketchBeatbox (const juce::File& inputWav, double bpm, int bars);
+
     juce::String serviceBuild() const { return svcBuild; }
 
 private:

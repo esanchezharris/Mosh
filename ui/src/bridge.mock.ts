@@ -741,6 +741,46 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       }, 400);
       return ok(command, { status: "started" });
     }
+    case "sketch_beatbox": {
+      // Sketch Phase 0 — beatbox WAV → drum MoshOps. Async like the native path:
+      // emit working now, then after a simulated transduction set the tempo and land a
+      // drum track carrying kick/snare/hat notes on the 16th grid. No audio analysis
+      // here (no librosa); the mock plays a fixed, recognisable boom-bap so UI tests
+      // exercise the same command contract the native cmdSketchBeatbox drives.
+      const file = str(args.file, "");
+      if (!file) return err(command, "no audio file");
+      const bpm = num(args.bpm, 120);
+      const bars = num(args.bars, 1) >= 2 ? 2 : 1;
+      emit("sketch_status", { file, state: "working", bpm, bars });
+      window.setTimeout(() => {
+        pushUndo();
+        snapshot.session.tempo = Math.max(20, bpm);
+        // role → GM pitch (mirrors kDefaultKit: kick 36, snare 38, closed hat 42).
+        const PITCH: Record<string, number> = { kick: 36, snare: 38, hat: 42 };
+        const hits: Array<{ step: number; role: string; velocity: number }> = [];
+        for (let bar = 0; bar < bars; bar++) {
+          const base = bar * 16;
+          for (const s of [0, 8]) hits.push({ step: base + s, role: "kick", velocity: 112 });
+          for (const s of [4, 12]) hits.push({ step: base + s, role: "snare", velocity: 100 });
+          for (const s of [0, 2, 4, 6, 8, 10, 12, 14]) hits.push({ step: base + s, role: "hat", velocity: 80 });
+        }
+        const t: Track = {
+          id: nextTrackId(), index: snapshot.tracks.length, name: "Sketch",
+          type: "drum", volumeDb: 0, pan: 0, mute: false, solo: false, clips: [], plugins: [],
+        };
+        ensureInstrument(t, true);
+        t.clips.push({
+          id: nextClipId(), name: "Sketch", type: "midi",
+          // Loop length mirrors the native cmdSketchBeatbox exactly: bars*4 beats * 60/bpm, no floor.
+          start: 0, length: bars * 4 * 60 / Math.max(20, bpm), offset: 0, hasRenderLayer: false,
+          notes: hits.map((h, k) => ({ i: k, pitch: PITCH[h.role], start: h.step / 4, length: 0.25, velocity: h.velocity })),
+        });
+        snapshot.tracks.push(t);
+        emit("sketch_status", { file, state: "done", hitCount: hits.length });
+        invalidate();
+      }, 400);
+      return ok(command, { status: "started" });
+    }
     case "remove_note": {
       const f = findClip(str(args.clipId)); if (!f?.clip.notes) return err(command, "not a midi clip");
       pushUndo(); f.clip.notes.splice(num(args.noteIndex), 1); reindexNotes(f.clip); invalidate(); return ok(command);

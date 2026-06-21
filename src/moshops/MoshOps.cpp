@@ -496,6 +496,7 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "open_plugin_editor")return cmdOpenPluginEditor (args);
     if (name == "add_midi_clip")     return cmdAddMidiClip (args);
     if (name == "transcribe_clip")   return cmdTranscribeClip (args);
+    if (name == "sketch_beatbox")    return cmdSketchBeatbox (args);
     if (name == "add_note")          return cmdAddNote (args);
     if (name == "remove_note")       return cmdRemoveNote (args);
     if (name == "set_note")          return cmdSetNote (args);
@@ -3587,6 +3588,191 @@ juce::var MoshOps::cmdTranscribeClip (const juce::var& args)
     auto* data = new DynamicObject();
     data->setProperty ("status", "started");
     return okResult ("transcribe_clip", var (data));
+}
+
+// Sketch Phase 0 (the embodied-capture wedge): a recorded beatbox WAV + a KNOWN bpm
+// becomes a real, editable drum clip, emitted PURELY as MoshOps. The transduction
+// (onset detect → kick/snare/hat heuristic → 16th-grid quantise → velocity) runs
+// out-of-process under the dedicated sketch venv via the service /sketch; the result
+// is landed through the existing command bodies (set_tempo → create_track{drum} →
+// add_midi_clip). Deterministic: same WAV + same bpm + same bars → same hits → same
+// notes (the CLI fixes its analysis params and uses no RNG). Mirrors cmdTranscribeClip.
+juce::var MoshOps::cmdSketchBeatbox (const juce::var& args)
+{
+    const auto file = args.getProperty ("file", var()).toString();
+    const double bpm = (double) args.getProperty ("bpm", 0.0);
+    const int    bars = juce::jlimit (1, 2, (int) args.getProperty ("bars", 1));
+    const bool   wait = (bool) args.getProperty ("wait", false);
+
+    juce::File wav (file);
+    if (file.isEmpty() || ! wav.existsAsFile())
+        return errResult ("sketch_beatbox", "no readable audio file: " + file);
+    if (bpm < 20.0 || bpm > 300.0)
+        return errResult ("sketch_beatbox", "bpm must be 20-300 (the tempo is known — box to a click)");
+
+    const auto srcName = wav.getFileNameWithoutExtension();
+
+    // Land transduced hits ({step,role,velocity}) as drum MoshOps. ALWAYS on the message
+    // thread (inline for wait:true; via callAsync for the async GUI path). Returns the
+    // command result so the synchronous caller (harness / agent) sees the new ids + the
+    // deterministic transduction artifacts (hits/notes) for an across-runs equality check.
+    auto land = [this, file, bpm, bars, srcName] (bool ok, const juce::String& err, const juce::var& hitsVar) -> juce::var
+    {
+        if (! ok || ! hitsVar.isArray())
+        {
+            const auto msg = err.isNotEmpty() ? err : juce::String ("beatbox transduction unavailable");
+            emit ("sketch_status", [&] { auto* o = new juce::DynamicObject();
+                o->setProperty ("file", file); o->setProperty ("state", "error");
+                o->setProperty ("error", msg); return juce::var (o); }());
+            return errResult ("sketch_beatbox", msg);
+        }
+
+        // role → GM percussion pitch (mirrors kDefaultKit: kick 36, snare 38, closed hat 42).
+        auto rolePitch = [] (const juce::String& r) -> int {
+            if (r == "snare") return 38;
+            if (r == "hat")   return 42;
+            return 36;   // kick (and the safe default)
+        };
+
+        const double sixteenth  = 0.25;            // beats — one 16th on the grid
+        const double loopBeats  = bars * 4.0;      // 4/4
+        const double loopSeconds = loopBeats * 60.0 / bpm;
+
+        // Musical events (in clip-local BEATS) + a normalised copy of the hits. Neither
+        // carries engine ids, so both are byte-identical across runs for the same input.
+        juce::Array<var> notes, hitsOut;
+        for (auto& h : *hitsVar.getArray())
+        {
+            const int step = (int) h.getProperty ("step", 0);
+            const auto role = h.getProperty ("role", "kick").toString();
+            const int vel  = juce::jlimit (1, 127, (int) h.getProperty ("velocity", 100));
+
+            auto* note = new juce::DynamicObject();
+            note->setProperty ("pitch", rolePitch (role));
+            note->setProperty ("start", step * sixteenth);
+            note->setProperty ("length", sixteenth);
+            note->setProperty ("velocity", vel);
+            notes.add (juce::var (note));
+
+            auto* ho = new juce::DynamicObject();
+            ho->setProperty ("step", step);
+            ho->setProperty ("role", role);
+            ho->setProperty ("velocity", vel);
+            hitsOut.add (juce::var (ho));
+        }
+
+        auto recordOp = [] (const char* cmd, const juce::var& a) {
+            auto* o = new juce::DynamicObject();
+            o->setProperty ("command", cmd);
+            o->setProperty ("args", a);
+            return juce::var (o);
+        };
+
+        // Emit PURELY as MoshOps, via the existing command bodies (the one mutation path).
+        // Coalesce the trio into ONE undo transaction so a single Ctrl-Z reverts the whole
+        // "sketch a beatbox" action (otherwise it fragments into 3 steps and a partial undo
+        // strands an empty drum track + altered tempo). Reuse the batch flag the agent uses
+        // (beginTxn skips its own beginNewTransaction while inBatch); respect an outer batch.
+        const bool ownBatch = ! inBatch;
+        if (ownBatch) { undoManager().beginNewTransaction ("sketch_beatbox"); inBatch = true; }
+
+        juce::Array<var> emitted;
+
+        { auto* a = new juce::DynamicObject(); a->setProperty ("bpm", bpm);
+          juce::var av (a); cmdSetTempo (av); emitted.add (recordOp ("set_tempo", av)); }
+
+        juce::String trackId;
+        { auto* a = new juce::DynamicObject(); a->setProperty ("type", "drum"); a->setProperty ("name", "Sketch");
+          juce::var av (a); auto r = cmdCreateTrack (av);
+          trackId = r.getProperty ("data", var()).getProperty ("trackId", var()).toString();
+          emitted.add (recordOp ("create_track", av)); }
+
+        juce::String clipId;
+        { auto* a = new juce::DynamicObject();
+          a->setProperty ("trackId", trackId);
+          a->setProperty ("name", "Sketch \xe2\x80\xa2 " + srcName);   // "Sketch • <file>" (parity with transcribe)
+          a->setProperty ("start", 0.0);
+          a->setProperty ("length", loopSeconds);
+          a->setProperty ("notes", juce::var (notes));
+          juce::var av (a); auto r = cmdAddMidiClip (av);
+          clipId = r.getProperty ("data", var()).getProperty ("clipId", var()).toString();
+          emitted.add (recordOp ("add_midi_clip", av)); }
+
+        if (ownBatch) inBatch = false;
+
+        // §6 training byproduct — append the session tuple (RETAIN the user's own audio
+        // ref: it is clean, owned provenance). Cheap to log now, expensive to reconstruct.
+        {
+            auto* t = new juce::DynamicObject();
+            t->setProperty ("ts", juce::Time::getCurrentTime().toMilliseconds());
+            t->setProperty ("tempo_bpm", bpm);
+            t->setProperty ("bars", bars);
+            juce::Array<var> mods; mods.add ("drums");
+            t->setProperty ("modalities", juce::var (mods));
+            auto* in = new juce::DynamicObject(); in->setProperty ("audio_ref", file);
+            t->setProperty ("input", juce::var (in));
+            auto* prim = new juce::DynamicObject(); prim->setProperty ("drums", juce::var (hitsOut));
+            t->setProperty ("transduced_primitives", juce::var (prim));
+            t->setProperty ("emitted_moshops", juce::var (emitted));
+            auto* res = new juce::DynamicObject();
+            res->setProperty ("trackId", trackId);
+            res->setProperty ("midiClipId", clipId);
+            res->setProperty ("noteCount", notes.size());
+            t->setProperty ("result", juce::var (res));
+            eng.sessionDir().getChildFile ("sketch-sessions.jsonl")
+                .appendText (juce::JSON::toString (juce::var (t), true) + "\n");
+        }
+
+        emit ("sketch_status", [&] { auto* o = new juce::DynamicObject();
+            o->setProperty ("file", file); o->setProperty ("state", "done");
+            o->setProperty ("hitCount", (int) hitsOut.size());
+            o->setProperty ("noteCount", (int) notes.size()); return juce::var (o); }());
+
+        auto* d = new juce::DynamicObject();
+        d->setProperty ("status", "done");
+        d->setProperty ("bpm", bpm);
+        d->setProperty ("bars", bars);
+        d->setProperty ("trackId", trackId);
+        d->setProperty ("midiClipId", clipId);
+        d->setProperty ("hitCount", (int) hitsOut.size());
+        d->setProperty ("noteCount", (int) notes.size());
+        d->setProperty ("hits", juce::var (hitsOut));   // transduced primitives (deterministic)
+        d->setProperty ("notes", juce::var (notes));    // musical events in beats (deterministic)
+        d->setProperty ("moshops", juce::var (emitted));
+        return okResult ("sketch_beatbox", juce::var (d));
+    };
+
+    // sketch_status {working|done|error} mirrors transcribe_status for a future capture UI
+    // (Phase 4). In Phase 0 the only caller is the agent/harness via wait:true, which surfaces
+    // any failure directly in the command RESULT (errResult) — so an error is never swallowed;
+    // the async branch's event is purely forward-looking until that UI lands.
+    emit ("sketch_status", [&] { auto* o = new DynamicObject();
+        o->setProperty ("file", file); o->setProperty ("state", "working");
+        o->setProperty ("bpm", bpm); o->setProperty ("bars", bars); return var (o); }());
+    logLine ("sketch_beatbox", args, true, {}, false);
+
+    // Synchronous (harness / agent): block on the transduction + land inline.
+    if (wait)
+    {
+        auto result = jobManager.sketchBeatbox (wav, bpm, bars);
+        return land ((bool) result.getProperty ("ok", false),
+                     result.getProperty ("error", var()).toString(),
+                     result.getProperty ("hits", var()));
+    }
+
+    // Async (GUI): onset analysis off the message thread; land via callAsync.
+    std::thread ([this, wav, bpm, bars, land]
+    {
+        auto result = jobManager.sketchBeatbox (wav, bpm, bars);
+        const bool ok = (bool) result.getProperty ("ok", false);
+        const auto err = result.getProperty ("error", var()).toString();
+        auto hitsVar = result.getProperty ("hits", var());
+        juce::MessageManager::callAsync ([land, ok, err, hitsVar] { land (ok, err, hitsVar); });
+    }).detach();
+
+    auto* data = new DynamicObject();
+    data->setProperty ("status", "started");
+    return okResult ("sketch_beatbox", var (data));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
