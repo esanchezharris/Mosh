@@ -29,6 +29,16 @@ test("flag off (default): no Inspector rail", async ({ page }) => {
   await expect(page.getByTestId("inspector-expand")).toHaveCount(0);
 });
 
+test("flag on: Inspector shows the selected track's mix controls", async ({ page }) => {
+  await bootRedesign(page);
+  await page.getByTestId("inspector-expand").click();
+  await page.getByTestId("track-header").first().click();
+  const insp = page.getByTestId("inspector");
+  await expect(insp).toBeVisible();
+  await expect(insp.getByText("Volume", { exact: true })).toBeVisible();
+  await expect(insp.getByText("Pan", { exact: true })).toBeVisible();
+});
+
 test("flag on: top-right presence cluster (AI pill + Share)", async ({ page }) => {
   await bootRedesign(page);
   await expect(page.getByTestId("presence")).toBeVisible();

@@ -449,6 +449,13 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 .dock-right-rail:hover { color: var(--lime); }
 .inspector { padding: 10px 12px; color: var(--bone-dim); font-size: 12px; }
 .inspector-head { color: var(--lime); letter-spacing: 0.08em; text-transform: uppercase; font-size: 11px; margin-bottom: 8px; }
+.insp-track { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.insp-name { flex: 1 1 auto; min-width: 0; font-size: 13px; font-weight: 600; color: var(--bone); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.insp-row { display: flex; gap: 6px; margin-bottom: 10px; }
+.insp-field { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.insp-field > span:first-child { flex: 0 0 48px; color: var(--bone-dim); }
+.insp-field input[type="range"] { flex: 1 1 auto; min-width: 0; accent-color: var(--lime); }
+.insp-val { flex: 0 0 auto; min-width: 34px; text-align: right; color: var(--bone); }
 .app[data-redesign="on"] .dock-main { padding: 0 8px; }
 .presence { display: flex; align-items: center; gap: 8px; }
 .presence-avatars { display: flex; }
