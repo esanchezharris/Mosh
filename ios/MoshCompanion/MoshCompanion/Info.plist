@@ -38,6 +38,11 @@
   </array>
   <key>NSLocalNetworkUsageDescription</key>
   <string>Mosh Companion connects to your nearby Mac to control MOSH and upload phone mic takes.</string>
+  <key>NSAppTransportSecurity</key>
+  <dict>
+    <key>NSAllowsLocalNetworking</key>
+    <true/>
+  </dict>
   <key>NSMicrophoneUsageDescription</key>
   <string>Mosh Companion uses the iPhone microphone for hold-to-talk commands and phone mic takes.</string>
   <key>NSSpeechRecognitionUsageDescription</key>

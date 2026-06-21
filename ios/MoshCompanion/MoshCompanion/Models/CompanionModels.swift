@@ -8,6 +8,17 @@ struct PairingPayload: Codable, Equatable {
     var baseURL: URL? {
         URL(string: "http://\(host):\(port)")
     }
+
+    var companionDeepLinkURL: URL? {
+        guard let data = try? JSONEncoder().encode(self) else { return nil }
+        var components = URLComponents()
+        components.scheme = "mosh"
+        components.host = "pair"
+        components.queryItems = [
+            URLQueryItem(name: "payload", value: data.base64EncodedString())
+        ]
+        return components.url
+    }
 }
 
 struct RemoteEnvelope<T: Decodable>: Decodable {

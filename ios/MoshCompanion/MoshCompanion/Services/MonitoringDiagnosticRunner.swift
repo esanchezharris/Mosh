@@ -70,6 +70,46 @@ final class MonitoringDiagnosticRunner: ObservableObject {
         }
     }
 
+    func runSynthetic(client: CompanionClientProtocol,
+                      sessionId: String,
+                      clockSamples: [MonitoringClockSample],
+                      playbackSamples: [MonitoringPlaybackSample],
+                      acousticSamples: [Float],
+                      acousticSampleRate: Double,
+                      acousticThreshold: Float) async {
+        guard !isRunning else { return }
+        isRunning = true
+        errorText = nil
+        defer { isRunning = false }
+
+        let offset = MonitoringMetrics.estimateClockOffsetMs(samples: clockSamples)
+        let network = MonitoringMetrics.playoutSummary(samples: playbackSamples, clockOffsetMs: offset)
+        let acousticLatency = MonitoringMetrics.detectAcousticOnsetMs(
+            samples: acousticSamples,
+            sampleRate: acousticSampleRate,
+            threshold: acousticThreshold
+        )
+        let acoustic = MonitoringMetrics.acousticSummary(onsetDeltasMs: acousticLatency.map { [$0] } ?? [])
+
+        let report = MonitoringReportPayload(
+            sessionId: sessionId,
+            networkMedianMs: network.medianMs,
+            networkP95Ms: network.p95Ms,
+            networkJitterMs: network.jitterMs,
+            acousticMedianMs: acoustic.medianMs,
+            acousticP95Ms: acoustic.p95Ms,
+            acousticJitterMs: acoustic.jitterMs
+        )
+
+        do {
+            let ack = try await client.reportMonitor(report)
+            lastReport = report
+            lastReportFile = ack.reportFile
+        } catch {
+            errorText = error.localizedDescription
+        }
+    }
+
     private func collectClockSamples(client: CompanionClientProtocol) async throws -> [MonitoringClockSample] {
         var samples: [MonitoringClockSample] = []
         for _ in 0..<6 {

@@ -114,8 +114,9 @@ Then add the matching real-surface proof:
 - Plugin-hosting changes: separate deterministic harness checks from slow
   full-library scans; hostile or unknown installed plugins are an environment
   risk, not a selftest dependency.
-- iPhone companion: keep simulator, physical install/launch, and real mic
-  workflow proof as separate gates.
+- iPhone companion: run `scripts/iphone-companion-sim-gate.sh` plus
+  `scripts/iphone-companion-sim-media-gate.sh` for simulator coverage, then keep
+  physical install/launch and real mic workflow proof as separate hardware gates.
 
 ## Known Open Risks
 
