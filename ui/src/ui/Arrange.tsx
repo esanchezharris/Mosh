@@ -29,6 +29,9 @@ import { deriveTakeLanes } from "./takeLanes";
 import { SAMPLE_DND_MIME, addRecentSample } from "./sampleBrowserUtil";
 import { Meter } from "./Meter";
 import { lockOwnerOfTrack } from "../multiplayer/sync";
+import { useSettings } from "../settings/store";
+import { laneRows, lanesTotal } from "./laneLayout";
+import { TrackFxDrawer } from "./TrackFxDrawer";
 import type { Snapshot, Track, Clip, MidiNote } from "../types";
 // Configurable interaction: gestures/keymap resolve through DAW-preset tables instead
 // of hardcoded branches; feel values (drag-threshold, edge-grab, snap, etc.) are read
@@ -54,6 +57,7 @@ const NATIVE_MENU_ACTIONS = new Set<string>([EA.UNDO, EA.REDO, EA.CUT, EA.COPY, 
 const CLIP_HEADER_PX = 18;
 
 const LANE_H = 76;
+const FX_DRAWER_H = 132; // extra height a track row gains when its inline FX drawer is open
 const MIN_LEN = 0.05; // shortest clip / trim, seconds
 
 // Pointer capture keeps a drag tracking when the cursor leaves the element.
@@ -75,6 +79,8 @@ export function Arrange({ snapshot }: { snapshot: Snapshot }) {
   const snapTime = useStore((s) => s.snapTime);
   const timeRange = useStore((s) => s.timeRange);
   const setTimeRange = useStore((s) => s.setTimeRange);
+  const expandedTracks = useStore((s) => s.expandedTracks);
+  const redesign = useSettings((s) => Boolean(s.values.redesignShell));
 
   const headersRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -102,7 +108,12 @@ export function Arrange({ snapshot }: { snapshot: Snapshot }) {
   // skip redraws when only an unrelated sibling re-renders.
   const secToPx = useCallback((s: number) => s * pxPerSec, [pxPerSec]);
   const pxToSec = useCallback((px: number) => px / pxPerSec, [pxPerSec]);
-  const lanesHeight = Math.max(LANE_H, tracks.length * LANE_H);
+  // Per-track row heights: base lane + the FX drawer when a track is expanded (redesign
+  // only). With nothing expanded every height is LANE_H → laneRows gives i*LANE_H tops,
+  // so the fixed-grid layout is unchanged.
+  const rowHeights = tracks.map((t) => LANE_H + (redesign && expandedTracks.has(t.id) ? FX_DRAWER_H : 0));
+  const rows = laneRows(rowHeights);
+  const lanesHeight = Math.max(LANE_H, lanesTotal(rowHeights));
 
   // Feel-aware snap: honors the grid toggle + the Snap-strength feel slider. 1 →
   // always snap to the nearest grid line; 0 → free; in between → magnetic within a
@@ -207,8 +218,8 @@ export function Arrange({ snapshot }: { snapshot: Snapshot }) {
     const yMin = Math.min(marquee.y0, marquee.y1), yMax = Math.max(marquee.y0, marquee.y1);
     const hit: string[] = [];
     tracks.forEach((tr, row) => {
-      const top = row * LANE_H;
-      if (top + LANE_H < yMin || top > yMax) return;
+      const r = rows[row];
+      if (r.top + r.height < yMin || r.top > yMax) return;
       for (const c of tr.clips) {
         const cl = secToPx(c.start), cr = secToPx(c.start + c.length);
         if (cr >= xMin && cl <= xMax) hit.push(c.id);
@@ -321,7 +332,7 @@ export function Arrange({ snapshot }: { snapshot: Snapshot }) {
       {/* left: track headers (vertical scroll synced with lanes) */}
       <div className="headers" ref={headersRef}>
         <div className="ruler-corner"><span className="display">TRACKS</span></div>
-        {tracks.map((t) => <TrackHeader key={t.id} track={t} />)}
+        {tracks.map((t, i) => <TrackHeader key={t.id} track={t} height={rows[i].height} />)}
       </div>
 
       {/* right: ruler + lanes on one shared horizontal scroll */}
@@ -370,7 +381,7 @@ export function Arrange({ snapshot }: { snapshot: Snapshot }) {
           {tracks.map((t, i) => (
             <div key={t.id} className="lane" data-testid="lane" data-track-id={t.id}
               onDragOver={allowSampleDrop} onDrop={onSampleDrop(t.id)}
-              style={{ position: "absolute", top: i * LANE_H, left: 0, right: 0, height: LANE_H }}>
+              style={{ position: "absolute", top: rows[i].top, left: 0, right: 0, height: rows[i].height }}>
               {t.clips.map((c) => (
                 <ClipBlock key={c.id} clip={c} selected={selection.has(c.id)}
                   tool={tool} snapTime={snapWithFeel} secToPx={secToPx} pxToSec={pxToSec}
@@ -402,12 +413,16 @@ export function Arrange({ snapshot }: { snapshot: Snapshot }) {
   );
 }
 
-const TrackHeader = memo(function TrackHeader({ track }: { track: Track }) {
+const TrackHeader = memo(function TrackHeader({ track, height }: { track: Track; height: number }) {
   const exec = useStore((s) => s.exec);
   // Subscribe to the DERIVED boolean, not the raw selectedTrackId — a header whose
   // selected-state is unchanged won't re-render when selection moves elsewhere.
   const selected = useStore((s) => s.selectedTrackId === track.id);
   const setSelectedTrack = useStore((s) => s.setSelectedTrack);
+  const redesign = useSettings((s) => Boolean(s.values.redesignShell));
+  const expanded = useStore((s) => s.expandedTracks.has(track.id));
+  const toggleExpanded = useStore((s) => s.toggleTrackExpanded);
+  const fxCount = (track.plugins ?? []).filter((p) => p.external || p.neural || p.builtin).length;
   // DRM-001 — surface the track type + auto-loaded instrument so the default-instrument
   // policy is discoverable, not magic. A drum track shows 🥁; a melodic instrument
   // track shows ♪ (with the instrument's name on hover).
@@ -435,7 +450,8 @@ const TrackHeader = memo(function TrackHeader({ track }: { track: Track }) {
   return (
     <div className={`thead${selected ? " selected" : ""}${lockedByOther ? " locked" : ""}`}
       data-testid="track-header" data-track-id={track.id} data-locked={lockedByOther || undefined}
-      data-track-type={track.type} data-selected={selected} onPointerDown={() => setSelectedTrack(track.id)}>
+      data-track-type={track.type} data-selected={selected} style={{ height }}
+      onPointerDown={() => setSelectedTrack(track.id)}>
       <div className="row1">
         {showBadge && (
           isDrum ? (
@@ -449,6 +465,12 @@ const TrackHeader = memo(function TrackHeader({ track }: { track: Track }) {
         {lockedByOther && (
           <span className="tlock" data-testid="track-lock" title={`Locked by ${lockPeer?.name ?? lockOwner}`}
             style={{ color: lockPeer?.color }}>🔒 {lockPeer?.name ?? lockOwner}</span>
+        )}
+        {redesign && (
+          <button className={`tfx${expanded ? " on" : ""}`} data-testid="track-fx-toggle"
+            aria-pressed={expanded} aria-expanded={expanded} title="Effects chain"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => { e.stopPropagation(); toggleExpanded(track.id); }}>fx{fxCount ? ` ${fxCount}` : ""}</button>
         )}
         <button className="msx x" title="Remove track" aria-label={`Remove ${track.name}`}
           onClick={(e) => { e.stopPropagation(); void exec("remove_track", { trackId: track.id }); }}>×</button>
@@ -465,6 +487,7 @@ const TrackHeader = memo(function TrackHeader({ track }: { track: Track }) {
           onChange={(e) => void exec("set_track_volume", { trackId: track.id, db: Number(e.target.value) })} />
       </div>
       <Meter trackId={track.id} />
+      {redesign && expanded && <TrackFxDrawer track={track} />}
     </div>
   );
 });

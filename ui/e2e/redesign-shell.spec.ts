@@ -42,3 +42,23 @@ test("flag off (default): no presence cluster", async ({ page }) => {
   await expect(page.getByTestId("arrangement")).toBeVisible();
   await expect(page.getByTestId("presence")).toHaveCount(0);
 });
+
+test("flag on: a track's FX drawer opens from the header and collapses again", async ({ page }) => {
+  await bootRedesign(page);
+  const toggle = page.getByTestId("track-fx-toggle").first();
+  await expect(toggle).toBeVisible();
+  await expect(page.getByTestId("fx-drawer")).toHaveCount(0);
+  await toggle.click();
+  const drawer = page.getByTestId("fx-drawer").first();
+  await expect(drawer).toBeVisible();
+  await expect(drawer.getByRole("button", { name: "+ Plugin", exact: true })).toBeVisible();
+  await toggle.click();
+  await expect(page.getByTestId("fx-drawer")).toHaveCount(0);
+});
+
+test("flag off (default): no per-track FX toggle", async ({ page }) => {
+  await page.addInitScript(() => window.localStorage.clear());
+  await page.goto("/");
+  await expect(page.getByTestId("arrangement")).toBeVisible();
+  await expect(page.getByTestId("track-fx-toggle")).toHaveCount(0);
+});

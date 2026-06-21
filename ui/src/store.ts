@@ -51,6 +51,7 @@ type State = {
 
   // Stage 3: plugin browser
   selectedTrackId: string | null;
+  expandedTracks: Set<string>;            // UI-local: tracks whose inline FX drawer is open
   availablePlugins: AvailablePlugin[];
   availableBuiltins: BuiltinPlugin[];
   pluginCounts: PluginCounts | null;          // per-format catalog counts (INS-005)
@@ -123,6 +124,7 @@ type State = {
   pasteClipboard: () => Promise<void>;
 
   setSelectedTrack: (id: string | null) => void;
+  toggleTrackExpanded: (id: string) => void;
   editingClipId: string | null;            // MIDI clip open in the piano-roll
   openPianoRoll: (clipId: string) => void;
   closePianoRoll: () => void;
@@ -207,6 +209,7 @@ export const useStore = create<State>((set, get) => ({
   peaks: {},
   timeRange: null,
   selectedTrackId: null,
+  expandedTracks: new Set(),
   availablePlugins: [],
   availableBuiltins: [],
   pluginCounts: null,
@@ -442,6 +445,11 @@ export const useStore = create<State>((set, get) => ({
   },
 
   setSelectedTrack: (id) => { set({ selectedTrackId: id }); void get().syncActiveTrack(); },
+  toggleTrackExpanded: (id) => set((s) => {
+    const next = new Set(s.expandedTracks);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return { expandedTracks: next };
+  }),
 
   // MP-001 — session entry. The native session manager creates/joins the relay
   // room and starts the poll loop (which emits mp_state / commits / peer_selection).

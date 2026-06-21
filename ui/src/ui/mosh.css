@@ -457,6 +457,17 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 .ai-pill { font-size: 11px; letter-spacing: 0.06em; padding: 3px 9px; border-radius: 11px; border: 1px solid var(--ink-line); color: var(--bone-dim); white-space: nowrap; }
 .ai-pill[data-state="active"] { color: var(--ink); background: var(--lime); border-color: var(--lime); }
 .share-btn { white-space: nowrap; }
+.thead .tfx { flex: 0 0 auto; font-size: 10px; letter-spacing: 0.04em; padding: 1px 6px; border-radius: 5px; border: 1px solid var(--ink-line); background: transparent; color: var(--bone-dim); cursor: pointer; }
+.thead .tfx:hover { color: var(--lime); }
+.thead .tfx.on { color: var(--ink); background: var(--lime); border-color: var(--lime); }
+.fxdrawer { flex: 1 1 auto; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 4px; margin-top: 2px; border-top: 1px solid var(--ink-line-soft); padding-top: 6px; }
+.fx-empty { font-size: 11px; color: var(--bone-dim); }
+.fx-row { display: flex; align-items: center; gap: 5px; }
+.fx-row.bypassed .fx-name { opacity: 0.5; text-decoration: line-through; }
+.fx-name { flex: 1 1 auto; min-width: 0; font-size: 11px; color: var(--bone); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fx-open { padding: 0 5px; }
+.fx-add { display: flex; gap: 4px; margin-top: 2px; }
+.fx-add .btn { font-size: 10px; padding: 2px 6px; }
 .rack { flex: 1 1 auto; min-width: 0; overflow: auto; padding: 10px 12px; }
 .rack-label { font-size: 10px; letter-spacing: 0.12em; color: var(--bone-dim); margin-bottom: 8px; }
 .rack-label b { color: var(--bone); }
