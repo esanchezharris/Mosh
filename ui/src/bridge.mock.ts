@@ -389,7 +389,10 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       pushUndo();
       const name = str(args.name) || (str(args.file).split("/").pop() ?? "clip");
       // Honor startSeconds (the real cmdImportClip contract); fall back to `start`.
-      const c = waveClip(name.replace(/\.[^.]+$/, ""), num(args.startSeconds, num(args.start, 0)), num(args.length, 4));
+      // The real engine imports the whole file at its own duration and models no
+      // trim, so use a fixed placeholder length here rather than an args.length the
+      // engine would ignore (matching cmdImportClip, not faking a trimmed clip).
+      const c = waveClip(name.replace(/\.[^.]+$/, ""), num(args.startSeconds, num(args.start, 0)), 4);
       t.clips.push(c); invalidate(); return ok(command, { clipId: c.id });
     }
     case "move_clip": {

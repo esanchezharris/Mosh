@@ -21,7 +21,7 @@ export type IRClip = {
   kind: "wave" | "midi";
   start: number; // seconds on the timeline
   length: number; // seconds
-  sourceFile?: string; // wave only — informational (no agent import_clip command)
+  sourceFile?: string; // wave only — audio path (absolute or project-relative); emit.ts resolves it to absolute and emits import_clip
   notes?: IRNote[]; // midi only
 };
 
