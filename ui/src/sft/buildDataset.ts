@@ -33,7 +33,7 @@ export type RawExample = {
   intent: string;
 };
 
-export type SliceOptions = { maxStart?: number; max?: number };
+export type SliceOptions = { maxStart?: number; max?: number; maxNotes?: number };
 
 const MIXER: Record<string, (name: string, args: Record<string, unknown>) => string> = {
   set_track_volume: (n, a) => `turn the "${n}" track ${Number(a.db) >= 0 ? "up" : "down"} a little`,
@@ -51,6 +51,7 @@ const MIXER: Record<string, (name: string, args: Record<string, unknown>) => str
 export function sliceProgramFull(program: ImportProgram, sourceId: string, opts: SliceOptions = {}): RawExample[] {
   const maxStart = opts.maxStart ?? 50;
   const max = opts.max ?? 1000;
+  const maxNotes = opts.maxNotes ?? 64; // cap a populate target so MIDI's long note runs don't make giant examples
   const cmds = program.commands;
   const out: RawExample[] = [];
 
@@ -82,7 +83,7 @@ export function sliceProgramFull(program: ImportProgram, sourceId: string, opts:
       push(`add a MIDI clip to the "${name}" track`, i, [c]);
       // populate: the clip exists (this add_midi_clip is in the setup); target = its notes.
       const notes: BoundCommand[] = [];
-      for (let j = i + 1; j < cmds.length && cmds[j].command === "add_note"; j++) notes.push(cmds[j]);
+      for (let j = i + 1; j < cmds.length && cmds[j].command === "add_note" && notes.length < maxNotes; j++) notes.push(cmds[j]);
       if (notes.length) push(`write a short pattern into the clip on the "${name}" track`, i + 1, notes);
     }
   }
