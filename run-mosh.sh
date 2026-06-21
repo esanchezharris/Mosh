@@ -114,7 +114,7 @@ case "$MODE" in
     # copy in (so transcription + re-imagine work from the Dock, not just run-mosh.sh).
     SVC="$DEST/Contents/Resources/service"
     echo "bundling service → ${SVC#$ROOT/}"
-    rm -rf "$SVC"; mkdir -p "$SVC/transcribe"
+    rm -rf "$SVC"; mkdir -p "$SVC/transcribe" "$SVC/sketch"
     cp "$ROOT/service/server.py" "$ROOT/service/run.sh" \
        "$ROOT/service/quality_readout.py" "$ROOT/service/setup-sa3.sh" "$SVC/" 2>/dev/null || true
     for d in adapters colors sa3 scripts training; do
@@ -122,10 +122,16 @@ case "$MODE" in
     done
     cp "$ROOT/service/transcribe/transcribe_cli.py" \
        "$ROOT/service/transcribe/setup-transcribe.sh" "$SVC/transcribe/"
+    cp "$ROOT/service/sketch/beatbox_cli.py" \
+       "$ROOT/service/sketch/make_fixtures.py" \
+       "$ROOT/service/sketch/setup-sketch.sh" \
+       "$ROOT/service/sketch/README.md" "$SVC/sketch/"
+    [ -d "$ROOT/service/sketch/fixtures" ] && cp -R "$ROOT/service/sketch/fixtures" "$SVC/sketch/fixtures"
     # Machine-local venv pointers (gitignored) — let the bundled service reach the
     # external venvs. Absent ones just fall back to run.sh's defaults.
     [ -f "$ROOT/service/.sa3.env" ] && cp "$ROOT/service/.sa3.env" "$SVC/.sa3.env"
     [ -f "$ROOT/service/transcribe/.transcribe.env" ] && cp "$ROOT/service/transcribe/.transcribe.env" "$SVC/transcribe/.transcribe.env"
+    [ -f "$ROOT/service/sketch/.sketch.env" ] && cp "$ROOT/service/sketch/.sketch.env" "$SVC/sketch/.sketch.env"
     # Keep the bundle lean (drop staged __pycache__).
     find "$SVC" -name __pycache__ -type d -prune -exec rm -rf {} + 2>/dev/null || true
 

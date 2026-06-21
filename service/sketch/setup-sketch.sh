@@ -51,6 +51,14 @@ else
   "$PYBIN" -m pip install --quiet "librosa>=0.10" "numpy"
 fi
 
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  say "repairing macOS signatures for native wheels …"
+  while IFS= read -r -d '' lib; do
+    xattr -d com.apple.quarantine "$lib" 2>/dev/null || true
+    codesign --force --sign - "$lib" >/dev/null 2>&1 || true
+  done < <(find "$VENV" \( -name '*.so' -o -name '*.dylib' \) -print0)
+fi
+
 # 4. Sanity: the venv must import librosa + numpy and expose onset_detect.
 "$PYBIN" - <<'PY' || fail "the venv cannot import librosa — install failed; inspect service/sketch/.venv"
 import importlib.util, sys

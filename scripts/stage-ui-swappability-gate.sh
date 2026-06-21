@@ -5,11 +5,11 @@
 # snapshot/events feed, so a UI rebuild must not change a single backend byte.
 #
 # Usage: scripts/stage-ui-swappability-gate.sh
-# Env:   MOSH_APP_BUNDLE (default build/Mosh_artefacts/Debug/Mosh.app)
+# Env:   MOSH_APP_BUNDLE (default build-macos-arm64/Mosh_artefacts/Debug/Mosh.app)
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-APP="${MOSH_APP_BUNDLE:-$REPO/build/Mosh_artefacts/Debug/Mosh.app}"
+APP="${MOSH_APP_BUNDLE:-$REPO/build-macos-arm64/Mosh_artefacts/Debug/Mosh.app}"
 BIN="$APP/Contents/MacOS/Mosh"
 STAGE="$APP/Contents/Resources/ui"
 

@@ -36,7 +36,7 @@
   --font-body: -apple-system, "SF Pro Text", "Helvetica Neue", sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
 
-  --head-w: 176px;
+  --head-w: 208px;
   --lane-h: 76px;
   --ruler-h: 30px;
   --topbar-h: 52px;
@@ -202,13 +202,6 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 .toolbar .sep { width: 1px; height: 20px; background: var(--ink-line); margin: 0 4px; }
 .toolbar label { font-size: 11px; color: var(--bone-dim); }
 
-/* ── responsive chrome ───────────────────────────────────────────────────────
-   On a narrow window the topbar/toolbar stay ONE row and degrade gracefully.
-   The rule that prevents label OVERLAP: nothing shrinks below its own content
-   (every item is flex:0 0 auto, only the spacer flexes) — so when the row can't
-   fit it SCROLLS horizontally instead of squashing items on top of each other.
-   Low-priority chrome (master meter, brand name, BPM detail) drops out at
-   breakpoints so scrolling is rarely needed. Scrollbars are hidden. */
 .topbar { overflow-x: auto; overflow-y: hidden; }
 .topbar > *, .transport > * { flex: 0 0 auto; }
 .spacer { flex: 1 1 0; min-width: 0; }
@@ -231,6 +224,12 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 @media (max-width: 1200px) { .topbar { gap: 10px; padding: 0 10px; } .transport { gap: 4px; } }
 @media (max-width: 1080px) { .topbar .master-meter { display: none; } }
 @media (max-width: 980px)  { .brand .name { display: none; } .topbar { gap: 8px; } }
+@media (max-width: 1500px) { .topbar-tools .training-pop { display: none; } }
+@media (max-width: 1320px) { .topbar-tools .mp-pop, .topbar-tools .remote-pop, .topbar-tools .help-pop { display: none; } }
+@media (max-width: 900px)  {
+  .toolbar { flex-wrap: wrap; overflow-x: hidden; row-gap: 6px; padding: 6px 8px; }
+  .toolbar .sep { margin: 0 2px; }
+}
 @media (max-width: 880px)  { .transport .read .bpm { display: none; } .key-ctl .key-mode { display: none; } }
 
 /* the scroll surface holds ruler + lanes so they share one horizontal scroll */

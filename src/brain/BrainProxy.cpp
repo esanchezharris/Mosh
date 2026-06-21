@@ -62,7 +62,7 @@ var BrainProxy::chat (const var& messages, const String& requested)
 {
     const auto p = resolve (requested);
     if (! p.isComplete())
-        return makeError ("no brain provider configured — set <PROVIDER>_API_KEY / _BASE_URL / _MODEL "
+        return makeError ("no brain provider configured - set <PROVIDER>_API_KEY / _BASE_URL / _MODEL "
                           "in the environment (deepseek | openai | xai)");
 
     if (! messages.isArray())
@@ -97,7 +97,7 @@ var BrainProxy::chat (const var& messages, const String& requested)
     const auto t0 = Time::getMillisecondCounter();
     auto stream = url.createInputStream (opts);
     if (stream == nullptr)
-        return makeError ("brain request failed — could not reach " + p.url + " (network / provider down)");
+        return makeError ("brain request failed - could not reach " + p.url + " (network / provider down)");
 
     const auto bodyStr = stream->readEntireStreamAsString();
     const auto ms = (int) (Time::getMillisecondCounter() - t0);

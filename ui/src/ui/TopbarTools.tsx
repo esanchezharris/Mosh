@@ -298,7 +298,7 @@ function HelpTool() {
     ["Click ruler", "Seek · ⇧-drag sets the loop"],
   ];
   return (
-    <Pop label="?" title="Keyboard shortcuts">
+    <Pop label="?" title="Keyboard shortcuts" className="help-pop">
       {() => (
         <>
           <div className="pop-head">Shortcuts</div>
@@ -407,7 +407,7 @@ function RemoteTool() {
   const pairing = remote?.pairing;
   const running = remote?.running ?? false;
   return (
-    <Pop label="iPhone" title="Pair iPhone companion" on={running}>
+    <Pop label="iPhone" title="Pair iPhone companion" on={running} className="remote-pop">
       {() => (
         <>
           <div className="pop-head">iPhone Companion</div>

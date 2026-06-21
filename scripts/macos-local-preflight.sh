@@ -171,7 +171,11 @@ esac
 
 check_dir "$SA3_DIR" "SA3_MLX_DIR"
 check_dir "$COLOR_DIR" "COLORRACK_DATA"
-check_dir "$LEGACY_SA3_BUNDLE" "MOSH_LEGACY_SA3_BUNDLE"
+if [[ -d "$LEGACY_SA3_BUNDLE" ]]; then
+  pass "MOSH_LEGACY_SA3_BUNDLE exists: $LEGACY_SA3_BUNDLE"
+else
+  warn "MOSH_LEGACY_SA3_BUNDLE absent: $LEGACY_SA3_BUNDLE (legacy SA3 color comparison will be skipped; current SA3/COLORRACK_DATA checks remain required)"
+fi
 
 if [[ -d "/Library/Audio/Plug-Ins/VST3" || -d "$HOME/Library/Audio/Plug-Ins/VST3" ]]; then
   pass "at least one VST3 plugin directory exists"
@@ -221,7 +225,8 @@ Checked:
 - BlackHole CoreAudio and ffmpeg AVFoundation visibility
 - Mosh service port ownership
 - SA3 and color-rack local assets
-- Legacy SA3 color bundle for strict comparison
+- Current SA3 and Color Rack local assets
+- Legacy SA3 color bundle for optional historical comparison
 - VST3 plugin directory presence
 - Strict gate lock contention
 - Local preservation state for \`assets/grit_demo\`

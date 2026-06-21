@@ -101,6 +101,10 @@ public:
         const bool scanDeep = commandLine.contains ("--scan-plugins-deep");
         const bool runScript = commandLine.contains ("--run-script");   // headless batch command runner
         const bool voiceSmoke = commandLine.contains ("--voice-smoke"); // headless speech-to-text smoke
+        const bool demoGui = commandLine.contains ("--demo3")
+                          || commandLine.contains ("--demo4")
+                          || commandLine.contains ("--demo5")
+                          || commandLine.contains ("--demo6");
         const bool liveAudio = liveAudioSmoke || neuralAB;   // opens the real device, fresh cold session
         const bool headless = undoSelfTest || commandLine.contains ("--selftest");
         const bool noAudio = headless || scanDeep || runScript || voiceSmoke;  // device-free harnesses + scan/script/voice utilities
@@ -120,15 +124,16 @@ public:
                                             : (liveAudioSmoke ? "session-live-audio-smoke"
                                             : (scanDeep ? "session-scan"
                                             : (runScript ? "session-run-script"
+                                            : (demoGui ? "session-demo"
                                             : (voiceSmoke ? "session-voice-smoke"
-                                                              : "session-selftest")))));
+                                                              : "session-selftest"))))));
         // Concurrent harness runs (e.g. parallel git worktrees each looping
         // --selftest) otherwise share the global session-selftest dir + freshSession
         // wipes it at startup, so one run clobbers another mid-test. MOSH_SELFTEST_SESSION
         // overrides the leaf so each run gets a private session dir (pair with a
-        // distinct MOSH_SERVICE_PORT for full isolation). Only honored for headless
-        // harnesses, which already use a freshSession.
-        if (headless || runScript || voiceSmoke)
+        // distinct MOSH_SERVICE_PORT for full isolation). Also honored for scripted
+        // GUI demos so UI automation never mutates or reads the owner's GUI session.
+        if (headless || runScript || voiceSmoke || demoGui)
             if (const auto s = juce::SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SESSION", {});
                 s.trim().isNotEmpty())
                 freshSessionName = s.trim();
@@ -136,7 +141,7 @@ public:
         // Headless: no audio device, and an isolated cold session so the harness is
         // idempotent (it saves/reloads itself) and never touches the GUI session.
         engine  = std::make_unique<MoshEngine> ((! noAudio) || liveAudio,
-                                                /*freshSession=*/ noAudio || liveAudio,
+                                                /*freshSession=*/ noAudio || liveAudio || demoGui,
                                                 freshSessionName);
         moshOps = std::make_unique<MoshOps> (*engine);
         remoteServer = std::make_unique<RemoteCompanionServer> (
