@@ -28,6 +28,8 @@ const nextClipId = () => String(++clipSeq);
 const nextTrackId = () => String(++trackSeq);
 let sectionSeq = 3; // seed uses sec-1..3
 const nextSectionId = () => "sec-" + ++sectionSeq;
+let annotationSeq = 1; // seed uses ann-1
+const nextAnnotationId = () => "ann-" + ++annotationSeq;
 
 function waveClip(name: string, start: number, length: number): Clip {
   return {
@@ -82,6 +84,9 @@ function seedSnapshot(): Snapshot {
       { id: "sec-2", name: "Verse", startBeat: 8, endBeat: 24, color: "#b5d4f4" },
       { id: "sec-3", name: "Hook", startBeat: 24, endBeat: 40, color: "#f4c0d1" },
     ],
+    annotations: [
+      { id: "ann-1", text: "tighten this transition", beat: 24, color: "#ffd166", author: "you" },
+    ],
   };
 }
 
@@ -93,6 +98,7 @@ function emptySession(): Snapshot {
   s.tracks = [];
   s.buses = [];
   s.sections = [];
+  s.annotations = [];
   s.transport = { playing: false, recording: false, position: 0, looping: false, loopStart: 0, loopEnd: 0 };
   return s;
 }
@@ -404,6 +410,32 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       const list = snapshot.sections ?? [];
       const idx = list.findIndex((x) => x.id === str(args.sectionId));
       if (idx < 0) return err(command, "section not found");
+      pushUndo(); list.splice(idx, 1); invalidate(); return ok(command);
+    }
+
+    case "create_annotation": {
+      pushUndo();
+      const ann = { id: str(args.annotationId) || nextAnnotationId(), text: str(args.text, ""), beat: num(args.beat, 0), color: str(args.color) || undefined, author: str(args.author) || "you" };
+      (snapshot.annotations ??= []).push(ann);
+      invalidate(); return ok(command, { annotationId: ann.id });
+    }
+    case "edit_annotation": {
+      const ann = (snapshot.annotations ?? []).find((x) => x.id === str(args.annotationId));
+      if (!ann) return err(command, "annotation not found");
+      pushUndo();
+      if (args.text != null) ann.text = str(args.text, ann.text);
+      if (args.color != null) ann.color = str(args.color) || undefined;
+      invalidate(); return ok(command);
+    }
+    case "move_annotation": {
+      const ann = (snapshot.annotations ?? []).find((x) => x.id === str(args.annotationId));
+      if (!ann) return err(command, "annotation not found");
+      pushUndo(); ann.beat = num(args.beat, ann.beat); invalidate(); return ok(command);
+    }
+    case "remove_annotation": {
+      const list = snapshot.annotations ?? [];
+      const idx = list.findIndex((x) => x.id === str(args.annotationId));
+      if (idx < 0) return err(command, "annotation not found");
       pushUndo(); list.splice(idx, 1); invalidate(); return ok(command);
     }
 

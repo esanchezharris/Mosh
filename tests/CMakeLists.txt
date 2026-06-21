@@ -10,6 +10,7 @@ target_sources(MoshTests PRIVATE
     test_sanity.cpp
     test_renderlayer.cpp
     test_sections.cpp
+    test_annotations.cpp
     test_astd.cpp
     test_remote_companion.cpp
     test_multiplayer_logical_id.cpp

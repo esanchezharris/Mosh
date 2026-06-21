@@ -79,6 +79,21 @@ namespace mosh::ids
     MOSH_DECLARE_ID (sectionEndBeat)
     MOSH_DECLARE_ID (sectionColor)
 
+    // ANN-001 — timeline ANNOTATIONS (lightweight, authored comment pins). A
+    // MOSH_ANNOTATIONS container child of the Edit's own ValueTree (mirrors
+    // MOSH_SECTIONS) holding MOSH_ANNOTATION nodes — each a BEAT-anchored note with
+    // text + colour + author, so it stays on its musical spot across tempo edits.
+    // Plain ValueTree data parented under the Edit ⇒ saves/reloads with the
+    // .tracktionedit and is UNDOABLE when written with the undo manager. Unlike
+    // sections, annotations BROADCAST over multiplayer (a shared collaborator comment),
+    // so the create handler mints a stable cross-peer id and broadcasts it.
+    MOSH_DECLARE_ID (MOSH_ANNOTATIONS)
+    MOSH_DECLARE_ID (MOSH_ANNOTATION)
+    MOSH_DECLARE_ID (annotationText)
+    MOSH_DECLARE_ID (annotationBeat)
+    MOSH_DECLARE_ID (annotationColor)
+    MOSH_DECLARE_ID (annotationAuthor)
+
     MOSH_DECLARE_ID (id)
     MOSH_DECLARE_ID (inputRef)
     MOSH_DECLARE_ID (timeRangeStart)

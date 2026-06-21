@@ -4207,6 +4207,55 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (! ok (cmd (ops, "rename_section", objN ({ { "sectionId", secId }, { "name", "Ghost" } }))), "rename of a removed section fails cleanly");
     }
 
+    // ─── ANN-001: authored timeline annotations (MOSH_ANNOTATIONS) ───
+    {
+        section ("Timeline annotations (MOSH_ANNOTATIONS)");
+        auto annsArr = [&] { return ops.snapshot().getProperty ("annotations", var()); };
+        auto findAnn = [&] (const juce::String& id) -> juce::var
+        {
+            auto arr = annsArr();
+            for (int i = 0; i < arr.size(); ++i)
+                if (arr[i].getProperty ("id", var()).toString() == id) return arr[i];
+            return {};
+        };
+        const int before = annsArr().size();
+
+        auto created = cmd (ops, "create_annotation",
+                            objN ({ { "text", "fix this transition" }, { "beat", 24.0 }, { "color", "#ffd166" }, { "author", "alice" } }));
+        check (ok (created), "create_annotation ok");
+        const auto annId = created.getProperty ("data", var()).getProperty ("annotationId", var()).toString();
+        check (annId.isNotEmpty(), "create_annotation returns an annotationId");
+        check (annsArr().size() == before + 1, "snapshot.annotations grew by one");
+        check (findAnn (annId).getProperty ("text", var()).toString() == "fix this transition", "annotation text round-trips");
+        check (findAnn (annId).getProperty ("author", var()).toString() == "alice", "annotation carries its author");
+        check (std::abs ((double) findAnn (annId).getProperty ("beat", -1.0) - 24.0) < 1e-6, "annotation beat is 24");
+
+        check (ok (cmd (ops, "edit_annotation", objN ({ { "annotationId", annId }, { "text", "smooth the drop" } }))), "edit_annotation ok");
+        check (findAnn (annId).getProperty ("text", var()).toString() == "smooth the drop", "edit reflected in snapshot");
+
+        check (ok (cmd (ops, "move_annotation", objN ({ { "annotationId", annId }, { "beat", 32.0 } }))), "move_annotation ok");
+        check (std::abs ((double) findAnn (annId).getProperty ("beat", -1.0) - 32.0) < 1e-6, "move reflected in snapshot");
+
+        // Undo reverts only the last edit (the move), before save/reload resets history.
+        check (ok (cmd (ops, "undo")), "undo (move_annotation) ok");
+        check (std::abs ((double) findAnn (annId).getProperty ("beat", -1.0) - 24.0) < 1e-6, "undo restores the prior beat");
+        check (findAnn (annId).getProperty ("text", var()).toString() == "smooth the drop", "undo leaves the edit intact");
+
+        // Persists across save/reload (a plain child of the Edit's own ValueTree).
+        check (ok (cmd (ops, "save")),   "save (annotations) ok");
+        check (ok (cmd (ops, "reload")), "reload (annotations) ok");
+        check (findAnn (annId).getProperty ("text", var()).toString() == "smooth the drop", "annotation persists across save/reload");
+        check (findAnn (annId).getProperty ("author", var()).toString() == "alice", "annotation author persists across save/reload");
+
+        // Caller-supplied id is honoured (this is how the MP broadcast keeps ids stable).
+        check (ok (cmd (ops, "create_annotation", objN ({ { "annotationId", "ann-fixed" }, { "text", "shared note" }, { "beat", 4.0 } }))), "create_annotation with an explicit id ok");
+        check (findAnn ("ann-fixed").getProperty ("text", var()).toString() == "shared note", "explicit-id annotation lands with that id");
+
+        check (ok (cmd (ops, "remove_annotation", objN ({ { "annotationId", annId } }))), "remove_annotation ok");
+        check (! findAnn (annId).isObject(), "annotation gone from snapshot after remove");
+        check (! ok (cmd (ops, "edit_annotation", objN ({ { "annotationId", annId }, { "text", "ghost" } }))), "edit of a removed annotation fails cleanly");
+    }
+
     finishSection();
     std::cerr << "===== " << (checks - failures) << "/" << checks
               << " checks passed, " << failures << " failed =====\n\n";

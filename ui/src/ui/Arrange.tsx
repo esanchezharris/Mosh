@@ -32,6 +32,7 @@ import { lockOwnerOfTrack } from "../multiplayer/sync";
 import { useSettings } from "../settings/store";
 import { laneRows, lanesTotal } from "./laneLayout";
 import { TrackFxDrawer } from "./TrackFxDrawer";
+import { AnnotationRuler } from "./AnnotationRuler";
 import type { Snapshot, Track, Clip, MidiNote } from "../types";
 // Configurable interaction: gestures/keymap resolve through DAW-preset tables instead
 // of hardcoded branches; feel values (drag-threshold, edge-grab, snap, etc.) are read
@@ -109,6 +110,11 @@ export function Arrange({ snapshot }: { snapshot: Snapshot }) {
   // skip redraws when only an unrelated sibling re-renders.
   const secToPx = useCallback((s: number) => s * pxPerSec, [pxPerSec]);
   const pxToSec = useCallback((px: number) => px / pxPerSec, [pxPerSec]);
+  // Beat ↔ px for annotation pins (beat-anchored). Flat seconds-per-beat from the base
+  // meter — matches the section navigator; exact at constant tempo.
+  const baseBeatSec = beatSeconds(meterAt(map, 0));
+  const beatToPx = useCallback((beat: number) => secToPx(beat * baseBeatSec), [secToPx, baseBeatSec]);
+  const pxToBeat = useCallback((px: number) => pxToSec(px) / baseBeatSec, [pxToSec, baseBeatSec]);
   // Per-track row heights: base lane + the FX drawer when a track is expanded (redesign
   // only). With nothing expanded every height is LANE_H → laneRows gives i*LANE_H tops,
   // so the fixed-grid layout is unchanged.
@@ -355,6 +361,9 @@ export function Arrange({ snapshot }: { snapshot: Snapshot }) {
             <div key={`mk-${i}`} className="mark tc" style={{ left: secToPx(m.sec) }}>{m.label}</div>
           ))}
           <LoopTab secToPx={secToPx} />
+          {redesign && (
+            <AnnotationRuler annotations={snapshot.annotations ?? []} beatToPx={beatToPx} pxToBeat={pxToBeat} />
+          )}
         </div>
 
         <div

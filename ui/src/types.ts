@@ -297,6 +297,16 @@ export type Section = {
   color?: string;
 };
 
+// ANN-001 — an authored timeline comment pin, beat-anchored. Synced over multiplayer
+// with `author` (who flagged it).
+export type Annotation = {
+  id: string;
+  text: string;
+  beat: number;
+  color?: string;
+  author?: string;
+};
+
 export type Snapshot = {
   schemaVersion: number;
   session: {
@@ -358,6 +368,7 @@ export type Snapshot = {
   master?: { volumeDb: number; pan: number };
   buses?: Bus[];
   sections?: Section[];
+  annotations?: Annotation[];
   audio?: AudioSelection;
   training?: TrainingState;
 };

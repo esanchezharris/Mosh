@@ -162,3 +162,32 @@ test('flag off (default): no "+" control; the topbar keeps File + Export', async
   await expect(page.getByTestId("file-options")).toHaveCount(0);
   await expect(page.locator(".topbar-tools").getByRole("button", { name: "File", exact: true })).toBeVisible();
 });
+
+test("flag on: annotation ruler shows the seeded pin and a double-click adds one", async ({ page }) => {
+  await bootRedesign(page);
+  const strip = page.getByTestId("annotation-ruler");
+  await expect(strip).toBeVisible();
+  await expect(page.getByTestId("annotation-pin")).toHaveCount(1); // seeded "tighten this transition"
+
+  page.once("dialog", (d) => d.accept("smooth the build")); // window.prompt for the new note
+  await strip.dblclick({ position: { x: 300, y: 6 } });
+  await expect(page.getByTestId("annotation-pin")).toHaveCount(2);
+});
+
+test("flag on: clicking a pin opens it with its author and can delete it", async ({ page }) => {
+  await bootRedesign(page);
+  await page.getByTestId("annotation-pin").first().locator(".annotation-flag").click();
+  const pop = page.locator(".annotation-pop");
+  await expect(pop).toBeVisible();
+  await expect(pop).toContainText("tighten this transition");
+  await expect(pop).toContainText("you"); // author tag
+  await pop.getByRole("button", { name: "Delete" }).click();
+  await expect(page.getByTestId("annotation-pin")).toHaveCount(0);
+});
+
+test("flag off (default): no annotation ruler", async ({ page }) => {
+  await page.addInitScript(() => window.localStorage.clear());
+  await page.goto("/");
+  await expect(page.getByTestId("arrangement")).toBeVisible();
+  await expect(page.getByTestId("annotation-ruler")).toHaveCount(0);
+});

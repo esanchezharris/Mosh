@@ -64,6 +64,12 @@ private:
     juce::var cmdRenameSection  (const juce::var& args);
     juce::var cmdMoveSection    (const juce::var& args);
     juce::var cmdRemoveSection  (const juce::var& args);
+    // ANN-001 — authored timeline annotations (MOSH_ANNOTATIONS tree; undoable +
+    // multiplayer-broadcast). create self-broadcasts its resolved cross-peer id.
+    juce::var cmdCreateAnnotation (const juce::var& args);
+    juce::var cmdEditAnnotation   (const juce::var& args);
+    juce::var cmdMoveAnnotation   (const juce::var& args);
+    juce::var cmdRemoveAnnotation (const juce::var& args);
     // MP-001 — 2-player multiplayer commit/apply (backend-only; not in the agent
     // catalog). mp_serialize_track captures a track's portable blob; apply_remote_
     // track rebuilds a peer's committed track (nullptr UndoManager, no relay echo);
@@ -273,6 +279,7 @@ private:
     // SEC-001 — the MOSH_SECTIONS container as a snapshot array (read-only; never
     // creates the tree). Each entry: { id, name, startBeat, endBeat, color? }.
     juce::var sectionsToVar();
+    juce::var annotationsToVar();
 
     // KEY-001 — the default musical key surfaced in the snapshot before any set_key
     // (A/minor — matches the voice's neutral A4 tonic + SCALES.minor in voice.js).

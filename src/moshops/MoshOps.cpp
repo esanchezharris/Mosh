@@ -2,6 +2,7 @@
 #include "state/Ids.h"
 #include "state/RenderLayer.h"
 #include "state/Section.h"
+#include "state/Annotation.h"
 #include "multiplayer/LogicalId.h"
 #include "multiplayer/TrackCommit.h"
 #include "plugins/neural/NeuralInsertPlugin.h"
@@ -428,6 +429,12 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "rename_section")    return cmdRenameSection (args);
     if (name == "move_section")      return cmdMoveSection (args);
     if (name == "remove_section")    return cmdRemoveSection (args);
+    // Annotations broadcast over MP (shared collaborator comments). create self-broadcasts
+    // its resolved cross-peer id; the rest address by that id via the generic wrapper.
+    if (name == "create_annotation") return cmdCreateAnnotation (args);
+    if (name == "edit_annotation")   return broadcastStructuralIfActive (name, args, cmdEditAnnotation (args));
+    if (name == "move_annotation")   return broadcastStructuralIfActive (name, args, cmdMoveAnnotation (args));
+    if (name == "remove_annotation") return broadcastStructuralIfActive (name, args, cmdRemoveAnnotation (args));
     if (name == "remove_track")      return cmdRemoveTrack (args);
     if (name == "import_clip")       return cmdImportClip (args);
     if (name == "import_clip_data")  return cmdImportClipData (args);
@@ -726,6 +733,110 @@ juce::var MoshOps::sectionsToVar()
             o->setProperty ("endBeat", (double) s[ids::sectionEndBeat]);
             if (s.hasProperty (ids::sectionColor))
                 o->setProperty ("color", s[ids::sectionColor].toString());
+            out.add (var (o));
+        }
+    return out;
+}
+
+// ── ANN-001: authored timeline annotations (mirror the sections CRUD; multiplayer-
+// broadcast so collaborators share comments). ───────────────────────────────────────
+juce::var MoshOps::cmdCreateAnnotation (const juce::var& args)
+{
+    const auto text   = args.getProperty ("text", var()).toString();
+    const double beat = (double) args.getProperty ("beat", 0.0);
+    const auto color  = args.getProperty ("color", var()).toString();
+    const auto author = args.getProperty ("author", var()).toString();
+    // Stable cross-peer id: reuse the caller's if supplied (the broadcast re-exec passes
+    // it back), else mint one. Broadcasting the RESOLVED id keeps both peers' ids equal so
+    // edit/move/remove address the same annotation.
+    auto annId = args.getProperty ("annotationId", var()).toString();
+    if (annId.isEmpty()) annId = juce::Uuid().toString();
+
+    beginTxn ("create_annotation");
+    auto state = eng.edit().state;
+    auto anns = state.getChildWithName (ids::MOSH_ANNOTATIONS);
+    if (! anns.isValid())
+    {
+        anns = juce::ValueTree (ids::MOSH_ANNOTATIONS);
+        state.appendChild (anns, &undoManager());
+    }
+    anns.appendChild (mosh::Annotation::create (annId, text, beat, color, author), &undoManager());
+
+    auto* data = new DynamicObject(); data->setProperty ("annotationId", annId);
+    logLine ("create_annotation", args, true, {}, true);
+    emitSnapshotInvalidated();
+
+    // Broadcast with the RESOLVED id (the generic wrapper would re-mint on the peer).
+    if (mpSession_ != nullptr && mpSession_->active() && ! applyingRemote_)
+    {
+        auto* ba = new DynamicObject();
+        ba->setProperty ("annotationId", annId);
+        ba->setProperty ("text", text);
+        ba->setProperty ("beat", beat);
+        if (color.isNotEmpty())  ba->setProperty ("color", color);
+        if (author.isNotEmpty()) ba->setProperty ("author", author);
+        mpSession_->broadcastStructural ("create_annotation", var (ba));
+    }
+    return okResult ("create_annotation", var (data));
+}
+
+juce::var MoshOps::cmdEditAnnotation (const juce::var& args)
+{
+    const auto annId = args.getProperty ("annotationId", var()).toString();
+    auto anns = eng.edit().state.getChildWithName (ids::MOSH_ANNOTATIONS);
+    auto node = anns.getChildWithProperty (ids::id, annId);
+    if (! node.isValid()) return errResult ("edit_annotation", "no annotation: " + annId);
+
+    beginTxn ("edit_annotation");
+    if (args.hasProperty ("text"))  node.setProperty (ids::annotationText, args.getProperty ("text", var()), &undoManager());
+    if (args.hasProperty ("color")) node.setProperty (ids::annotationColor, args.getProperty ("color", var()), &undoManager());
+    logLine ("edit_annotation", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("edit_annotation");
+}
+
+juce::var MoshOps::cmdMoveAnnotation (const juce::var& args)
+{
+    const auto annId = args.getProperty ("annotationId", var()).toString();
+    auto anns = eng.edit().state.getChildWithName (ids::MOSH_ANNOTATIONS);
+    auto node = anns.getChildWithProperty (ids::id, annId);
+    if (! node.isValid()) return errResult ("move_annotation", "no annotation: " + annId);
+
+    beginTxn ("move_annotation");
+    node.setProperty (ids::annotationBeat, (double) args.getProperty ("beat", 0.0), &undoManager());
+    logLine ("move_annotation", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("move_annotation");
+}
+
+juce::var MoshOps::cmdRemoveAnnotation (const juce::var& args)
+{
+    const auto annId = args.getProperty ("annotationId", var()).toString();
+    auto anns = eng.edit().state.getChildWithName (ids::MOSH_ANNOTATIONS);
+    auto node = anns.getChildWithProperty (ids::id, annId);
+    if (! node.isValid()) return errResult ("remove_annotation", "no annotation: " + annId);
+
+    beginTxn ("remove_annotation");
+    anns.removeChild (node, &undoManager());
+    logLine ("remove_annotation", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("remove_annotation");
+}
+
+juce::var MoshOps::annotationsToVar()
+{
+    Array<var> out;
+    auto anns = eng.edit().state.getChildWithName (ids::MOSH_ANNOTATIONS);
+    if (anns.isValid())
+        for (int i = 0; i < anns.getNumChildren(); ++i)
+        {
+            auto a = anns.getChild (i);
+            auto* o = new DynamicObject();
+            o->setProperty ("id", a[ids::id].toString());
+            o->setProperty ("text", a[ids::annotationText].toString());
+            o->setProperty ("beat", (double) a[ids::annotationBeat]);
+            if (a.hasProperty (ids::annotationColor))  o->setProperty ("color", a[ids::annotationColor].toString());
+            if (a.hasProperty (ids::annotationAuthor)) o->setProperty ("author", a[ids::annotationAuthor].toString());
             out.add (var (o));
         }
     return out;
@@ -5763,6 +5874,7 @@ juce::var MoshOps::snapshot()
 
     // SEC-001 — named song sections (Intro/Verse/Hook/…) from the MOSH_SECTIONS tree.
     root->setProperty ("sections", sectionsToVar());
+    root->setProperty ("annotations", annotationsToVar());
 
     // Master bus (Wave 5) — the edit's master VolumeAndPan, always present.
     if (auto mvp = edit.getMasterVolumePlugin())

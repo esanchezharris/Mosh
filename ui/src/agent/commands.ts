@@ -23,6 +23,11 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "rename_section", desc: "Rename a song section", args: [S("sectionId"), S("name")] },
   { command: "move_section", desc: "Move/resize a song section (in beats)", args: [S("sectionId"), N("startBeat"), N("endBeat")] },
   { command: "remove_section", desc: "Remove a song section", args: [S("sectionId")] },
+  // ── timeline annotations (authored comment pins; shared with collaborators) ──
+  { command: "create_annotation", desc: "Drop a comment pin on the timeline at a beat (flag something for the producer/collaborators)", args: [S("text"), N("beat"), S("color", false), S("author", false)] },
+  { command: "edit_annotation", desc: "Change an annotation's text or colour", args: [S("annotationId"), S("text", false), S("color", false)] },
+  { command: "move_annotation", desc: "Move an annotation to a new beat", args: [S("annotationId"), N("beat")] },
+  { command: "remove_annotation", desc: "Remove a timeline annotation", args: [S("annotationId")] },
 
   // ── clips ───────────────────────────────────────────────────────────────
   { command: "add_test_tone_clip", desc: "Drop a test-tone clip on a track (lands at 0)", args: [S("trackId", false), N("seconds", false, "duration in seconds"), N("freq", false, "Hz")] },
