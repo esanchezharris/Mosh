@@ -42,6 +42,9 @@ service/transcribe/.transcribe.env
 # Sketch (librosa) venv + machine-local SKETCH_PY (setup-sketch.sh)
 service/sketch/.venv/
 service/sketch/.sketch.env
+# PyFLP venv + machine-local FLP_PY (setup-flp.sh)
+service/flp/.venv/
+service/flp/.flp.env
 service/__pycache__/
 **/__pycache__/
 *.pyc

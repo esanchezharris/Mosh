@@ -1,4 +1,4 @@
-# Moshi Phase 1 — DAW project-file importers (RPP/ALS → MoshIR → MoshOps)
+# Moshi Phase 1 — DAW project-file importers (RPP/ALS/FLP → MoshIR → MoshOps)
 
 Turn existing DAW project files into ordered **agent-callable MoshOps command
 sequences** that reconstruct the session as a Tracktion `Edit`. This is bulk
@@ -11,13 +11,16 @@ Code: [`ui/src/import/`](../ui/src/import/). Run: `cd ui && npm run import -- <f
 
 ```
 .rpp ─┐
-.als ─┼─►  parser frontend  ──►  MoshIR  ──►  emitter  ──►  agent commands  ──►  Phase-0 verifier
-.flp ─┘   (parseRpp/parseAls)   (moshIR.ts)  (emit.ts)     (BoundCommand[])      (bindReplay.ts)
+.als ─┼─►  parser frontend       ──►  MoshIR  ──►  emitter  ──►  agent commands  ──►  Phase-0 verifier
+.flp ─┘   (parseRpp/Als/Flp)         (moshIR.ts)  (emit.ts)     (BoundCommand[])      (bindReplay.ts)
 ```
 
 - **MoshIR** ([moshIR.ts](../ui/src/import/moshIR.ts)) — a small normalized session:
   tempo/timeSig/key, tracks (name/type/vol/pan/mute/solo), clips (wave|midi,
-  start/length, notes). Adding a format = one parser to this shape.
+  start/length, **notes**). Adding a format = one parser to this shape.
+- **Parsers** — `.rpp` (text) and `.als` (gzipped XML) parse from bytes in pure TS.
+  `.flp` is binary: [parseFlp.ts](../ui/src/import/parseFlp.ts) shells out to a PyFLP
+  sidecar (`service/flp/`) and wraps its JSON into the same MoshIR.
 - **Emitter** ([emit.ts](../ui/src/import/emit.ts)) — MoshIR → `BoundCommand[]`. Only the
   **agent-callable subset** is emitted (Moshi can call nothing else). Engine ids
   aren't known until create time, so commands reference tracks/clips by **logical
@@ -34,7 +37,7 @@ Code: [`ui/src/import/`](../ui/src/import/). Run: `cd ui && npm run import -- <f
 | tempo / time sig / key | `set_tempo` / `set_time_signature` / `set_key` | |
 | track + name + type | `create_track` | |
 | track volume/pan/mute/solo | `set_track_volume` / `_pan` / `_mute` / `_solo` | linear gain → dB |
-| MIDI clip | `add_midi_clip` (+ `add_note`) | |
+| MIDI clip + **notes** | `add_midi_clip` + `add_note` | RPP delta-PPQ `E`/`e` events; ALS `MidiNoteEvent`s; FLP pattern notes (grouped by `rack_channel`) → pitch/start/length(beats)/velocity |
 | **audio clip** | `add_test_tone_clip` (positioned) | **lossy** — no agent audio-import command; content becomes a placeholder, logged |
 | plugins / FX chains | — | logged (no agent plugin-by-name command) |
 | sends / return / group tracks | — | logged (flattened) |
@@ -43,31 +46,43 @@ Code: [`ui/src/import/`](../ui/src/import/). Run: `cd ui && npm run import -- <f
 Per the spec, unmappable features are **logged explicitly, never silently
 dropped** — `program.unmappable` lists every one.
 
-## Demo results (real fixtures, 100% clean-apply)
+## Demo results (real fixtures + local catalog, 100% clean-apply)
 
-`npm run import -- <file>` (verified):
+`npm run import -- <file>` (verified). `add_note` counts match the source exactly:
 
-| File | Format | Tracks | Clips | Commands | clean-apply |
+| File | Format | Tracks | Commands | `add_note` | clean-apply |
 |---|---|---|---|---|---|
-| griffin-with-external-files.rpp | RPP | 19 | 88 | 151 | **151/151** |
-| tb303-reaper-project-VST.RPP | RPP | 1 | 0 | 5 | **5/5** |
-| 233.als (local) | ALS | 9 | 77 | 105 | **105/105** |
-| theen.als (local) | ALS | 9 | 127 | 155 | **155/155** |
+| griffin-with-external-files.rpp | RPP | 19 | 1046 | 895 | **1046/1046** |
+| BY MYSELF … DECONSTRUCTED.als (local) | ALS | 109 | 5575 | 1429 | **5575/5575** |
+| Gravitas Catalyst Demo.als (local) | ALS | 32 | 1681 | 1307 | **1681/1681** |
+| Shazy 4342.flp (local) | FLP | 17 | 665 | 614 | **665/665** |
+| pyflp-FL-20.8.4.flp (fixture) | FLP | 12 | 85 | 48 | **85/85** |
 
-Demo fixtures (parser test fixtures + own-catalog locals) and their provenance
-live in `~/mosh-demo-projects/` — **kept local/internal, never redistributed**
-(spec data-rights posture: importer-derived data is imitation-only cold-start).
+Before note extraction, griffin imported as 151 commands of positioned *empty*
+clips; it is now 1046 commands carrying 895 real notes. Demo fixtures and locals
+(provenance in `~/mosh-demo-projects/`) are **kept local/internal, never
+redistributed** (spec data-rights: importer-derived data is imitation-only cold-start).
+
+## FLP setup (PyFLP carve)
+
+`.flp` is binary and parsed by [PyFLP](https://github.com/demberto/PyFLP) (MIT) in a
+dedicated venv — **one-time**: `service/flp/setup-flp.sh`. It pins **Python 3.10**
+(PyFLP 2.2.1's enum base breaks on 3.11+) — `uv` fetches a standalone 3.10 if needed.
+The frontend reads the venv path from `service/flp/.flp.env`; absent it, `.flp`
+degrades to an empty IR that logs how to enable it. FL's channel-rack/pattern model
+is flattened to linear tracks: channels→tracks, pattern notes grouped by
+`rack_channel`, patterns laid **sequentially** (playlist repeats/placement logged,
+not reconstructed).
 
 ## Known gaps / follow-ups
 
-- **MIDI note extraction** — RPP inline MIDI events and ALS `MidiNoteEvent`s are
-  not yet parsed; MIDI clips import as positioned empty clips (logged). The note
-  primitive (`add_note`) and the emitter path already exist — only the per-format
-  note read is pending.
 - **Audio content** — there is no agent-callable audio-import command, so audio
   clips are positioned test-tone placeholders. Closing this needs either an
   agent-callable `import_clip` or a positioned-audio command in the catalog.
-- **FLP** — binary; needs a Python/PyFLP frontend emitting the same MoshIR
-  (the `.flp` path is dispatched and logged as not-implemented today).
+- **FLP playlist arrangement** — patterns are laid out sequentially; absolute
+  placement, repeats, and audio/automation playlist clips are logged, not
+  reconstructed. Channel volume (FL's internal taper) and time signature unmapped.
+- **Clip loop/offset** — RPP/ALS note `start` is the clip-internal beat position;
+  loop start-offset trimming is not modeled (v1).
 - **Provenance per session** — record source + format + rights status alongside
   emitted programs when this feeds the training corpus at volume.

@@ -48,7 +48,13 @@ describe("emitCommands", () => {
     expect(names).toContain("add_note");
     expect(names).toContain("add_test_tone_clip");
     expect(program.commands.find((c) => c.command === "add_midi_clip")!.bind).toBe("c0_0");
-    expect(program.commands.find((c) => c.command === "add_note")!.args.clipId).toBe("$c0_0");
+    expect(program.commands.find((c) => c.command === "add_note")!.args).toEqual({
+      clipId: "$c0_0",
+      pitch: 36,
+      start: 0,
+      length: 1,
+      velocity: 100,
+    });
     expect(program.unmappable.some((u) => /placeholder/.test(u))).toBe(true);
   });
 });
