@@ -426,6 +426,8 @@ while time.time() < deadline:
 raise SystemExit(f"Timed out waiting for simulator app to call /snapshot and /events. Seen: {sorted(seen)}")
 PY
 
+xcrun simctl openurl "$SIM_UDID" "$PAIRING_URL" | tee "$OUT/sim-openurl-screenshot.log"
+sleep 2
 xcrun simctl io "$SIM_UDID" screenshot "$OUT/paired-session.png" | tee "$OUT/sim-screenshot.log"
 
 python3 - "$SUMMARY_JSON" "$SIM_NAME" "$SIM_UDID" "$SIM_RUNTIME" "$PAIRING_URL" "$QR_PNG" "$QR_DECODED_JSON" "$EVENTS" "$OUT" "$PROJECT" <<'PY'
