@@ -242,6 +242,12 @@ export const useStore = create<State>((set, get) => ({
       // Prune selection / fetch peaks for current clips.
       const ids = new Set(snap.tracks.flatMap((t) => t.clips.map((c) => c.id)));
       set((s) => ({ selection: new Set([...s.selection].filter((id) => ids.has(id))) }));
+      // Prune the inline-FX expand set against current tracks (mirror the selection
+      // prune) so a removed track's id can't make a later id-reused track open by itself.
+      const trackIds = new Set(snap.tracks.map((t) => t.id));
+      set((s) => ([...s.expandedTracks].every((id) => trackIds.has(id))
+        ? {}
+        : { expandedTracks: new Set([...s.expandedTracks].filter((id) => trackIds.has(id))) }));
       // Auto-select a track for the rack if none is selected.
       set((s) => {
         const exists = snap.tracks.some((t) => t.id === s.selectedTrackId);

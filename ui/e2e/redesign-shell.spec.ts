@@ -101,3 +101,18 @@ test("flag off (default): no section navigator", async ({ page }) => {
   await expect(page.getByTestId("arrangement")).toBeVisible();
   await expect(page.getByTestId("section-nav")).toHaveCount(0);
 });
+
+test("flag on: collapsing the Session rail keeps Moshi mounted (not torn down)", async ({ page }) => {
+  await bootRedesign(page);
+  await expect(page.getByTestId("participant-moshi")).toBeVisible();
+  await expect(page.getByTestId("moshi-stage")).toHaveCount(1);
+  // Collapse via the divider double-click.
+  await page.getByTestId("dock-rdivider").dblclick();
+  await expect(page.getByTestId("inspector-expand")).toBeVisible(); // collapsed → edge tab
+  await expect(page.getByTestId("dock-right")).toBeHidden();         // panel hidden, NOT removed
+  await expect(page.getByTestId("moshi-stage")).toHaveCount(1);      // Moshi survives the collapse
+  // Re-expand.
+  await page.getByTestId("inspector-expand").click();
+  await expect(page.getByTestId("dock-right")).toBeVisible();
+  await expect(page.getByTestId("moshi-stage")).toHaveCount(1);
+});

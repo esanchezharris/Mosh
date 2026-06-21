@@ -58,17 +58,22 @@ export function DockShell({ left, children, right, bottom }: { left: ReactNode; 
           </>
         )}
         {children}
-        {right && (rightZone.collapsed ? (
-          <button className="dock-right-rail" data-testid="inspector-expand" onClick={toggleRight}
-            title="Show the inspector">◂</button>
-        ) : (
+        {right && (
           <>
-            <div className="dock-vdivider" data-testid="dock-rdivider" role="separator" aria-orientation="vertical"
-              aria-label="Resize the inspector" title="Drag to resize · double-click to collapse"
-              onPointerDown={begin("right")} onPointerMove={drag} onPointerUp={end} onDoubleClick={toggleRight} />
-            <div className="dock-right" data-testid="dock-right" style={{ width: rightZone.size }}>{right}</div>
+            {rightZone.collapsed ? (
+              <button className="dock-right-rail" data-testid="inspector-expand" onClick={toggleRight}
+                title="Show the session panel">◂</button>
+            ) : (
+              <div className="dock-vdivider" data-testid="dock-rdivider" role="separator" aria-orientation="vertical"
+                aria-label="Resize the session panel" title="Drag to resize · double-click to collapse"
+                onPointerDown={begin("right")} onPointerMove={drag} onPointerUp={end} onDoubleClick={toggleRight} />
+            )}
+            {/* Keep the panel MOUNTED when collapsed (hidden, not removed) so a live
+                participant — Moshi's GL + Web Audio voice — isn't torn down on collapse. */}
+            <div className="dock-right" data-testid="dock-right" hidden={rightZone.collapsed}
+              style={{ width: rightZone.collapsed ? 0 : rightZone.size }}>{right}</div>
           </>
-        ))}
+        )}
       </div>
       {bottomZone.collapsed ? (
         <button className="dock-collapsed" data-testid="dock-expand" onClick={toggleBottom}

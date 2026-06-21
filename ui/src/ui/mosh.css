@@ -495,7 +495,7 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 .app[data-redesign="on"] .inspector-head { color: var(--bone-dim); }
 /* PS2 CRT scanline — static, subtle, non-interactive, over the whole chrome */
 .app[data-redesign="on"]::after {
-  content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 200;
+  content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 40;
   background: repeating-linear-gradient(0deg, rgba(0,0,0,0.06) 0px, rgba(0,0,0,0.06) 1px, transparent 1px, transparent 3px);
   opacity: 0.7;
 }

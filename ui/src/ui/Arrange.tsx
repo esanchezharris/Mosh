@@ -56,8 +56,9 @@ const NATIVE_MENU_ACTIONS = new Set<string>([EA.UNDO, EA.REDO, EA.CUT, EA.COPY, 
 // clip.header. Only matters where a preset distinguishes header vs body (Ableton).
 const CLIP_HEADER_PX = 18;
 
-const LANE_H = 76;
-const FX_DRAWER_H = 132; // extra height a track row gains when its inline FX drawer is open
+const LANE_H = 76;          // MUST equal the CSS --lane-h token (mosh.css): track headers
+                           // now take their height inline from this, so the two can't drift.
+const FX_DRAWER_H = 132;    // extra height a track row gains when its inline FX drawer is open
 const MIN_LEN = 0.05; // shortest clip / trim, seconds
 
 // Pointer capture keeps a drag tracking when the cursor leaves the element.
