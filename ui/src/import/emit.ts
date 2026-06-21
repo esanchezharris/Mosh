@@ -9,6 +9,7 @@
 // command, so wave clips become positioned test-tone placeholders (logged), and
 // plugins/automation/sends carried by the IR's `unmappable` list pass through.
 
+import { dirname, isAbsolute, resolve } from "node:path";
 import type { ImportIR } from "./moshIR";
 
 export type BoundCommand = {
@@ -16,6 +17,20 @@ export type BoundCommand = {
   args: Record<string, unknown>;
   bind?: string; // logical id to capture from the result (trackId/clipId)
 };
+
+// Resolve an audio clip's source path to something the engine can open: an
+// absolute path passes through; a project-relative one (REAPER "Media/x.wav",
+// Ableton RelativePath) resolves against the project file's directory. Format
+// frontends that already produce absolute paths (the FLP carve) are unaffected.
+// Projects authored on Windows carry backslash separators and drive-letter
+// absolutes (e.g. "D:\\x.wav") — a foreign absolute path can't be relocated here,
+// so it passes through; a relative one has its separators normalized first.
+function resolveAudioPath(projectSource: string, sourceFile: string): string {
+  if (/^[A-Za-z]:[\\/]/.test(sourceFile)) return sourceFile; // foreign Windows drive-letter absolute
+  if (/^[\\/]{2}/.test(sourceFile)) return sourceFile; // foreign UNC path (\\server\share) — backslash form would be corrupted by normalize
+  if (isAbsolute(sourceFile)) return sourceFile; // POSIX absolute
+  return resolve(dirname(projectSource), sourceFile.replace(/\\/g, "/"));
+}
 
 export type ImportProgram = {
   commands: BoundCommand[];
@@ -49,10 +64,16 @@ export function emitCommands(ir: ImportIR): ImportProgram {
             command: "add_note",
             args: { clipId: `$${cref}`, pitch: n.pitch, start: n.start, length: n.length, velocity: n.velocity },
           });
+      } else if (c.sourceFile) {
+        // Real positioned audio import (agent-callable import_clip; honors startSeconds).
+        commands.push({
+          command: "import_clip",
+          args: { trackId: `$${tref}`, file: resolveAudioPath(ir.source, c.sourceFile), startSeconds: c.start, length: c.length, name: c.name },
+        });
       } else {
-        // No agent audio-import command → positioned test-tone placeholder (content lost).
+        // No source path captured → positioned test-tone placeholder (content lost, logged).
         commands.push({ command: "add_test_tone_clip", args: { trackId: `$${tref}`, start: c.start, seconds: c.length } });
-        unmappable.push(`audio clip "${c.name ?? c.sourceFile ?? "?"}" → test-tone placeholder (no agent audio-import command)`);
+        unmappable.push(`audio clip "${c.name ?? "?"}" → test-tone placeholder (no source path captured)`);
       }
     });
   });

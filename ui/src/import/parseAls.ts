@@ -59,6 +59,17 @@ function notesFromMidiClip(clip: XmlNode): IRNote[] {
   return notes;
 }
 
+// An AudioClip's sample lives in SampleRef>FileRef. Prefer the absolute Path; fall
+// back to the project-relative RelativePath (emit resolves it against the project dir).
+function sampleRefPath(clip: XmlNode): string | undefined {
+  const fileRef = clip?.SampleRef?.FileRef;
+  const abs = fileRef?.Path?.[VAL];
+  const rel = fileRef?.RelativePath?.[VAL];
+  if (typeof abs === "string" && abs.length) return abs;
+  if (typeof rel === "string" && rel.length) return rel;
+  return undefined;
+}
+
 function clipsFrom(track: XmlNode, tempo: number, ir: ImportIR, trackName: string): IRClip[] {
   const out: IRClip[] = [];
   const beatsToSec = (b: number) => (b * 60) / (tempo || 120);
@@ -78,7 +89,7 @@ function clipsFrom(track: XmlNode, tempo: number, ir: ImportIR, trackName: strin
         out.push({ kind: "midi", name, start, length, notes });
         if (notes.length === 0) ir.unmappable.push(`ALS MIDI clip "${name ?? "?"}" on "${trackName}": no notes parsed`);
       } else {
-        out.push({ kind: "wave", name, start, length });
+        out.push({ kind: "wave", name, start, length, sourceFile: sampleRefPath(clip) });
       }
     }
   }
