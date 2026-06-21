@@ -34,6 +34,8 @@ prints a pass/fail report — see [`scripts/verify-hardware/README.md`](../scrip
 python3 scripts/verify-hardware/verify.py          # offline checks (1,2,3,5) — self-driven, deterministic
 python3 scripts/verify-hardware/verify.py --sa3     # also the real SA3 transform (needs service/setup-sa3.sh)
 python3 scripts/verify-hardware/verify.py --rave    # also the real RAVE transform path (needs service/transform/setup-transform.sh)
+python3 scripts/verify-hardware/verify.py --rave-insert --bin build-anira/Mosh_artefacts/Release/Mosh.app/Contents/MacOS/Mosh
+                                                    # the real-time RAVE insert offline render (anira build + transform venv); asserts gap-free
 # live checks (6,7,8 — owner-driven) are listed per-row below.
 ```
 
@@ -49,7 +51,7 @@ across runs).
 | 3 | Transform render (fake) | offline | Tier-B `transform` (fake adapter) renders non-silent, differs from input | ✅ `adapter/mode: transform`, **diff-from-input RMS 0.270**, RMS 0.45 |
 | 4 | SA3 transform | offline (`--sa3`) | real model renders, quality readout present, differs from input | ✅ `adapter: stable_audio3`, **`pq 6.933`**, non-silent |
 | 4b | RAVE transform (real path) | offline (`--rave`) | real `torch.jit` RAVE encode→decode renders non-silent, differs from input | ✅ `backend: rave`, out-RMS 0.71, **diff-from-input 0.37** (synthetic scripted model; user drops real `.ts`) |
-| 4c | RAVE insert, real-time (Route C.2) | anira build (`-DMOSH_ENABLE_ANIRA=ON`) | a RAVE insert in the live render graph transforms audio (offline render of the insert: wet ≠ dry, non-silent) | ✅ anira 2.1.0 + LibTorch 2.4.1 link; `add_rave_insert modelLoaded:true`; **dry vs wet diff-RMS 0.547** via `--run-script` |
+| 4c | RAVE insert, real-time (Route C.2) | anira build (`-DMOSH_ENABLE_ANIRA=ON`), offline (`--rave-insert`) | a RAVE insert in the render graph transforms audio AND the offline export is **gap-free** (the C.2 follow-up: anira switches to non-real-time/blocking mode when `PluginRenderContext::isRendering`, so a faster-than-real-time render never drops blocks) | ✅ anira 2.1.0 + LibTorch 2.4.1; `add_rave_insert modelLoaded:true`; wet ≠ dry (**diff-from-dry RMS 0.396**), non-silent, **max exact-zero run = 1 sample** (threshold 256 → no missing-sample gaps); synthetic scripted model, user drops a real `.ts` |
 | 5 | Full producer loop | offline | multi-track + mix exports non-silent | ✅ 2.0s, peak 0.34, RMS 0.18 |
 | 6 | Realtime output path | live | device opens; audio frames flow | ✅ `--live-audio-smoke` **14/14** (MacBook Pro Speakers, CoreAudio 48k) — by-ear out-loud confirm still owner-side |
 | 7 | Voice (mock brain) | live | STT transcribes; earcons fire | ⏳ owner: grant mic, hold-to-talk + 👂 hands-free + barge-in (`MOSH_VOICE_BARGE_IN=1`) |

@@ -72,6 +72,20 @@ void RaveInsertPlugin::applyToBuffer (const te::PluginRenderContext& fc)
     const int start = fc.bufferStartSample;
     const bool enabled = isEnabled();
 
+    // Offline render → put anira in non-real-time (blocking) mode so every inference
+    // block completes; live playback stays real-time (non-blocking). Without this a
+    // faster-than-real-time export outruns the inference thread and drops samples
+    // (block-boundary gaps). Toggle only on the render↔live transition. The mode does
+    // NOT change anira's reported latency, so the dry-delay alignment below stays valid.
+    // (set_non_realtime + its only reader, anira's new_data_request, both run on THIS
+    // render thread — no cross-thread race.) Done BEFORE the model-ready check so the
+    // engine remembers the mode and a model that loads mid-render inherits it on build.
+    if (fc.isRendering != engineNonRealtime)
+    {
+        engine.setNonRealtime (fc.isRendering);
+        engineNonRealtime = fc.isRendering;
+    }
+
     // No model ready → clean passthrough (getLatencySeconds reports 0, so PDC is a no-op).
     if (! (modelLoaded.load() && engine.ready()))
         return;

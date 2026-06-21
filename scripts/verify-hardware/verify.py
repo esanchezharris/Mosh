@@ -251,6 +251,7 @@ def main():
     ap.add_argument("--bin", help="path to the Mosh binary (default: newest local build)")
     ap.add_argument("--sa3", action="store_true", help="also run the SA3 generative-transform check (needs the service)")
     ap.add_argument("--rave", action="store_true", help="also run the real RAVE transform-path check (needs service/transform/.venv)")
+    ap.add_argument("--rave-insert", action="store_true", help="also run the real-time RAVE insert offline-render check (needs an anira build + service/transform/.venv)")
     args = ap.parse_args()
 
     ART.mkdir(exist_ok=True)
@@ -276,6 +277,13 @@ def main():
     if args.rave:
         from rave_check import check_rave   # noqa: lazy import, optional
         r = check_rave(ctx)
+        rows.append(r)
+        print(f"  [{'PASS' if r['pass'] else 'FAIL'}] {r['check']}")
+        print(f"         {json.dumps(r['detail'])}")
+
+    if args.rave_insert:
+        from rave_insert_check import check_rave_insert   # noqa: lazy import, optional
+        r = check_rave_insert(ctx, ART, run_script, stats, diff_rms, failed_commands)
         rows.append(r)
         print(f"  [{'PASS' if r['pass'] else 'FAIL'}] {r['check']}")
         print(f"         {json.dumps(r['detail'])}")

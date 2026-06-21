@@ -35,6 +35,16 @@ public:
     // ready — the caller handles dry passthrough.
     void process (float* mono, int n);
 
+    // Switch anira between real-time (non-blocking; live playback) and non-real-time
+    // (blocking; offline render) scheduling. In non-real-time mode process() awaits
+    // every inference block, so a faster-than-real-time offline render never drops
+    // samples (no "missing samples"/block-boundary gaps in the export). The reported
+    // latency is UNCHANGED by the mode (anira's queue/timestamps are identical), so the
+    // caller's dry/wet alignment stays valid. Cheap (sets one bool inside anira) — call
+    // only on transition. No-op when not built with anira. A model loaded later inherits
+    // the current mode.
+    void setNonRealtime (bool nonRealtime);
+
     void reset();                       // message thread: clear the pipeline state
 
 private:

@@ -75,13 +75,18 @@ RAVE timbre-transfer JUCE plugin), Neutone FX/SDK, anira's own `nn-inference-tem
 - **Mitigation:** everything is behind the gate; the default build/app are never at risk. The bring-up
   is opt-in and isolated. If LibTorch integration stalls, C.1 already delivers real transform value.
 
-## Known follow-up (post-landing)
-- **Offline-export quality:** during a faster-than-realtime ("fast") Tracktion render, anira (in realtime
-  mode) logs "missing samples / catch-up" and the export has block-boundary artifacts (it still
-  transforms — verified diff-RMS 0.547). Fix: expose `RaveEngine::setNonRealtime(bool)` →
-  `InferenceHandler::set_non_realtime`, and have the plugin either declare itself realtime-only (so
-  Tracktion renders export in realtime mode) or toggle non-realtime when it detects an offline render.
-  **Live playback (the insert's purpose) is already correct** — anira keeps up in realtime.
+## Known follow-up (post-landing) — ✅ DONE 2026-06-21
+- **Offline-export quality — FIXED.** Previously, during a faster-than-realtime ("fast") Tracktion
+  render, anira (in realtime mode) logged "missing samples / catch-up" and the export had
+  block-boundary gaps (it still transformed — diff-RMS 0.547). Now `RaveEngine::setNonRealtime(bool)`
+  forwards to `InferenceHandler::set_non_realtime`, and `RaveInsertPlugin::applyToBuffer` toggles it on
+  the `PluginRenderContext::isRendering` transition (done before the model-ready check so a model that
+  loads mid-render inherits the mode via `build()`). anira's non-realtime path BLOCKS until each
+  inference completes, so no blocks are dropped. The mode does NOT change anira's reported latency
+  (queue/timestamps are identical), so the dry/wet alignment is unaffected. set_non_realtime + its only
+  reader (anira's `new_data_request`) both run on the render thread — no cross-thread race. Verified:
+  `verify.py --rave-insert` shows the offline export gap-free (**max exact-zero run = 1 sample**,
+  diff-from-dry RMS 0.396, non-silent). Live playback was already correct (anira keeps up in realtime).
 
 ## Recommended sequencing
 Task 1 (gate, verifiable now, low-risk) → then the LONG LibTorch build + Tasks 2–5 as a focused

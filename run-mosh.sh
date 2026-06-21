@@ -15,6 +15,8 @@
 #   ./run-mosh.sh smoke     non-interactive native brain round-trip; prints the reply
 #   ./run-mosh.sh build     (re)build the app, then launch the GUI
 #   ./run-mosh.sh deploy    (re)build, then install ONE canonical /Applications/Mosh.app
+#   ./run-mosh.sh deploy-anira  build the gated anira (real-time RAVE) target + install
+#                               it self-contained (LibTorch bundled) to /Applications
 #
 # Env knobs: MOSH_BRAIN_ENV (override the dotenv path), MOSH_ENABLE_SA3 (default 1;
 #            set 0 to force FakeAdapter), MOSH_BRAIN_SMOKE_PROMPT (prompt for `smoke`).
@@ -84,67 +86,134 @@ if [ "$have_any" = 0 ]; then
   echo "    the brain falls back to the offline mock without a key)"
 fi
 
+# --- deploy helpers ---------------------------------------------------------------
+# Bundle the Python service INTO the app so a Finder/Dock double-click (whose cwd is
+# not the repo) can still find + spawn it — GenerativeJobManager looks for
+# Contents/Resources/service/server.py. The model venvs (SA3 MLX + Basic Pitch + the
+# RAVE transform venv, 100s of MB–GBs, machine-local) stay OUTSIDE: the bundled run.sh
+# defaults SA3_MLX_DIR to ~/AI/... and reads the machine-local .*.env pointers we copy
+# in (so transcription + re-imagine + RAVE transform work from the Dock, not just here).
+bundle_service() {                              # $1 = installed app
+  local DEST="$1" SVC="$1/Contents/Resources/service"
+  echo "bundling service → ${SVC#$ROOT/}"
+  rm -rf "$SVC"; mkdir -p "$SVC/transcribe" "$SVC/sketch" "$SVC/transform"
+  cp "$ROOT/service/server.py" "$ROOT/service/run.sh" \
+     "$ROOT/service/quality_readout.py" "$ROOT/service/setup-sa3.sh" "$SVC/" 2>/dev/null || true
+  for d in adapters colors sa3 scripts training; do
+    [ -d "$ROOT/service/$d" ] && cp -R "$ROOT/service/$d" "$SVC/$d"
+  done
+  cp "$ROOT/service/transcribe/transcribe_cli.py" \
+     "$ROOT/service/transcribe/setup-transcribe.sh" "$SVC/transcribe/"
+  cp "$ROOT/service/sketch/beatbox_cli.py" \
+     "$ROOT/service/sketch/make_fixtures.py" \
+     "$ROOT/service/sketch/setup-sketch.sh" \
+     "$ROOT/service/sketch/README.md" "$SVC/sketch/"
+  [ -d "$ROOT/service/sketch/fixtures" ] && cp -R "$ROOT/service/sketch/fixtures" "$SVC/sketch/fixtures"
+  # Route C transform (RAVE): the CLI + setup only — NEVER the .venv (torch, GBs).
+  cp "$ROOT/service/transform/transform_cli.py" \
+     "$ROOT/service/transform/setup-transform.sh" "$SVC/transform/" 2>/dev/null || true
+  # Machine-local venv pointers (gitignored). Absent ones fall back to run.sh defaults.
+  [ -f "$ROOT/service/.sa3.env" ] && cp "$ROOT/service/.sa3.env" "$SVC/.sa3.env"
+  [ -f "$ROOT/service/transcribe/.transcribe.env" ] && cp "$ROOT/service/transcribe/.transcribe.env" "$SVC/transcribe/.transcribe.env"
+  [ -f "$ROOT/service/sketch/.sketch.env" ] && cp "$ROOT/service/sketch/.sketch.env" "$SVC/sketch/.sketch.env"
+  [ -f "$ROOT/service/transform/.transform.env" ] && cp "$ROOT/service/transform/.transform.env" "$SVC/transform/.transform.env"
+  find "$SVC" -name __pycache__ -type d -prune -exec rm -rf {} + 2>/dev/null || true
+}
+
+install_app() {                                 # $1 = source app, $2 = dest
+  echo "deploying $1 -> $2"
+  rm -rf "$2"; cp -R "$1" "$2"
+}
+
+# Make an anira-built app self-contained: copy libanira + the needed LibTorch dylibs
+# into Contents/Frameworks, point an @executable_path rpath there, DROP the build-tree
+# rpaths, and re-sign ad-hoc — so the installed app keeps working after the (throwaway)
+# build tree is cleaned. The torch dylibs we actually link: libtorch (umbrella),
+# libtorch_cpu (~180 MB), libc10; libtorch_python/shm/global_deps are NOT referenced.
+selfcontain_anira() {                           # $1 = installed app
+  local DEST="$1" BIN="$1/Contents/MacOS/Mosh" FW="$1/Contents/Frameworks"
+  mkdir -p "$FW"
+  local rp anira_dir="" torch_dir=""
+  while IFS= read -r rp; do
+    [ -e "$rp/libanira.2.dylib" ]    && anira_dir="$rp"
+    [ -e "$rp/libtorch_cpu.dylib" ]  && torch_dir="$rp"
+  done < <(otool -l "$BIN" | awk '/LC_RPATH/{f=1} f&&/ path /{print $2; f=0}')
+  if [ -z "$anira_dir" ] || [ -z "$torch_dir" ]; then
+    echo "selfcontain: could not find anira/libtorch in rpaths (anira='$anira_dir' torch='$torch_dir')" >&2
+    return 1
+  fi
+  echo "self-containing dylibs → ${FW#$ROOT/}"
+  cp -RP "$anira_dir"/libanira*.dylib "$FW/"                       # real file + symlinks
+  local l; for l in libtorch.dylib libtorch_cpu.dylib libc10.dylib; do cp "$torch_dir/$l" "$FW/"; done
+  install_name_tool -add_rpath @executable_path/../Frameworks "$BIN" 2>/dev/null || true
+  install_name_tool -delete_rpath "$anira_dir" "$BIN" 2>/dev/null || true
+  install_name_tool -delete_rpath "$torch_dir" "$BIN" 2>/dev/null || true
+  # install_name_tool invalidated the seal → re-sign. Strip xattr detritus first
+  # (cp -R carries Finder info that codesign rejects), then deep ad-hoc re-sign the
+  # whole bundle (--deep re-signs the bundled dylibs + the main exe and regenerates
+  # the resource seal in one consistent pass).
+  xattr -cr "$DEST" 2>/dev/null || true
+  codesign --force --deep --sign - "$DEST"
+  codesign --verify --deep --strict "$DEST" && echo "  signature: valid (ad-hoc, self-contained)"
+  echo "self-contained: $(cd "$FW" && ls | tr '\n' ' ')"
+}
+
+# Build the gated anira (real-time RAVE) target into build-anira/. First configure
+# pulls LibTorch (~hundreds of MB, long); after that it's an incremental rebuild.
+build_anira() {
+  local dir="$ROOT/build-anira"
+  if [ ! -f "$dir/CMakeCache.txt" ]; then
+    echo "configuring anira build (first run downloads LibTorch — long)…"
+    cmake -S "$ROOT" -B "$dir" -G Ninja -DCMAKE_BUILD_TYPE=Release \
+      -DMOSH_ENABLE_ANIRA=ON -DCPM_SOURCE_CACHE="$ROOT/.cpm-cache" \
+      ${FETCHCONTENT_SOURCE_DIR_TRACKTION_ENGINE:+-DFETCHCONTENT_SOURCE_DIR_TRACKTION_ENGINE="$FETCHCONTENT_SOURCE_DIR_TRACKTION_ENGINE"}
+  fi
+  echo "building Mosh (anira → $dir)…"
+  cmake --build "$dir"
+}
+
+refresh_icon_cache() { touch "$1"; killall Finder 2>/dev/null || true; killall Dock 2>/dev/null || true; }
+
 MODE="${1:-gui}"
 case "$MODE" in
-  build)  build_app; MODE="gui" ;;
-  deploy) build_app macos-arm64-release macos-arm64-release-app ;;
-esac
+  smoke|gui|build)
+    [ "$MODE" = build ] && { build_app; MODE="gui"; }
+    APP="$(resolve_app)"; BIN="$APP/Contents/MacOS/Mosh"
+    if [ -z "$APP" ] || [ ! -x "$BIN" ]; then
+      echo "Mosh.app not built. Build it first:  ./run-mosh.sh build" >&2; exit 1
+    fi
+    case "$MODE" in
+      smoke) exec "$BIN" --brain-smoke ;;
+      gui)   echo "launching Mosh ($APP)…"; exec "$BIN" ;;
+    esac
+    ;;
 
-APP="$(resolve_app)"
-BIN="$APP/Contents/MacOS/Mosh"
-if [ -z "$APP" ] || [ ! -x "$BIN" ]; then
-  echo "Mosh.app not built. Build it first:  ./run-mosh.sh build" >&2
-  exit 1
-fi
-
-case "$MODE" in
-  smoke) exec "$BIN" --brain-smoke ;;
-  gui)   echo "launching Mosh ($APP)…"; exec "$BIN" ;;
   deploy)
+    build_app macos-arm64-release macos-arm64-release-app
+    APP="$(resolve_app)"
+    [ -n "$APP" ] || { echo "no built app to deploy" >&2; exit 1; }
     DEST="/Applications/Mosh.app"
-    echo "deploying $APP -> $DEST"
-    rm -rf "$DEST"
-    cp -R "$APP" "$DEST"
-
-    # Bundle the Python service INTO the app so a Finder/Dock double-click (whose
-    # cwd is not the repo) can still find + spawn it — GenerativeJobManager looks for
-    # Contents/Resources/service/server.py. The model venvs (SA3 MLX + Basic Pitch,
-    # 100s of MB, machine-local) stay OUTSIDE: the bundled run.sh defaults SA3_MLX_DIR
-    # to ~/AI/... and reads BASIC_PITCH_PY from the machine-local .transcribe.env we
-    # copy in (so transcription + re-imagine work from the Dock, not just run-mosh.sh).
-    SVC="$DEST/Contents/Resources/service"
-    echo "bundling service → ${SVC#$ROOT/}"
-    rm -rf "$SVC"; mkdir -p "$SVC/transcribe" "$SVC/sketch" "$SVC/transform"
-    cp "$ROOT/service/server.py" "$ROOT/service/run.sh" \
-       "$ROOT/service/quality_readout.py" "$ROOT/service/setup-sa3.sh" "$SVC/" 2>/dev/null || true
-    for d in adapters colors sa3 scripts training; do
-      [ -d "$ROOT/service/$d" ] && cp -R "$ROOT/service/$d" "$SVC/$d"
-    done
-    cp "$ROOT/service/transcribe/transcribe_cli.py" \
-       "$ROOT/service/transcribe/setup-transcribe.sh" "$SVC/transcribe/"
-    cp "$ROOT/service/sketch/beatbox_cli.py" \
-       "$ROOT/service/sketch/make_fixtures.py" \
-       "$ROOT/service/sketch/setup-sketch.sh" \
-       "$ROOT/service/sketch/README.md" "$SVC/sketch/"
-    [ -d "$ROOT/service/sketch/fixtures" ] && cp -R "$ROOT/service/sketch/fixtures" "$SVC/sketch/fixtures"
-    # Route C transform (RAVE): the CLI + setup only — NEVER the .venv (torch, GBs).
-    cp "$ROOT/service/transform/transform_cli.py" \
-       "$ROOT/service/transform/setup-transform.sh" "$SVC/transform/" 2>/dev/null || true
-    # Machine-local venv pointers (gitignored) — let the bundled service reach the
-    # external venvs. Absent ones just fall back to run.sh's defaults.
-    [ -f "$ROOT/service/.sa3.env" ] && cp "$ROOT/service/.sa3.env" "$SVC/.sa3.env"
-    [ -f "$ROOT/service/transcribe/.transcribe.env" ] && cp "$ROOT/service/transcribe/.transcribe.env" "$SVC/transcribe/.transcribe.env"
-    [ -f "$ROOT/service/sketch/.sketch.env" ] && cp "$ROOT/service/sketch/.sketch.env" "$SVC/sketch/.sketch.env"
-    [ -f "$ROOT/service/transform/.transform.env" ] && cp "$ROOT/service/transform/.transform.env" "$SVC/transform/.transform.env"
-    # Keep the bundle lean (drop staged __pycache__).
-    find "$SVC" -name __pycache__ -type d -prune -exec rm -rf {} + 2>/dev/null || true
-
-    # Nudge the macOS icon cache so a changed icon refreshes.
-    touch "$DEST"
-    killall Finder 2>/dev/null || true
-    killall Dock   2>/dev/null || true
-    echo "deployed one canonical /Applications/Mosh.app (service bundled)."
+    install_app "$APP" "$DEST"
+    bundle_service "$DEST"
+    refresh_icon_cache "$DEST"
+    echo "deployed one canonical /Applications/Mosh.app (default build; service bundled)."
     echo "If macOS still shows an old icon, log out and back in (icon cache)."
     ;;
-  *)     echo "usage: $0 [gui|smoke|build|deploy]" >&2; exit 2 ;;
+
+  deploy-anira)
+    build_anira
+    APP=""
+    while IFS= read -r p; do APP="$p"; break; done \
+      < <(find "$ROOT/build-anira" -maxdepth 4 -name 'Mosh.app' -type d 2>/dev/null)
+    [ -n "$APP" ] || { echo "anira app not found under build-anira/ (build failed?)" >&2; exit 1; }
+    DEST="/Applications/Mosh.app"
+    install_app "$APP" "$DEST"
+    bundle_service "$DEST"
+    selfcontain_anira "$DEST"
+    refresh_icon_cache "$DEST"
+    echo "deployed anira /Applications/Mosh.app (real-time RAVE + service bundled; LibTorch self-contained)."
+    echo "drop a real RAVE <target>.ts into ~/AI/rave-models — the '+ RAVE' rack button then hosts it live."
+    ;;
+
+  *)     echo "usage: $0 [gui|smoke|build|deploy|deploy-anira]" >&2; exit 2 ;;
 esac

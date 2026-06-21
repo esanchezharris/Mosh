@@ -35,6 +35,7 @@ struct RaveEngine::Impl
 {
     double sr = 44100.0;
     int    block = 512;
+    bool   nonRealtime = false;   // current scheduling mode (a new model inherits it)
 
     std::unique_ptr<RavePipeline> activeOwned;   // current (audio thread reads via activePtr)
     std::unique_ptr<RavePipeline> retiredOwned;  // previous, kept alive one swap
@@ -66,6 +67,7 @@ struct RaveEngine::Impl
         p->handler = std::make_unique<anira::InferenceHandler> (*p->pp, *p->config);
         p->handler->prepare (anira::HostConfig ((float) block, (float) sr));
         p->handler->set_inference_backend (anira::InferenceBackend::LIBTORCH);
+        p->handler->set_non_realtime (nonRealtime);   // inherit the current scheduling mode
         return p;
     }
 };
@@ -122,6 +124,14 @@ void RaveEngine::process (float* mono, int n)
     p->handler->process (chans, (size_t) n);   // RT-safe (anira); in-place, latency-delayed
 }
 
+void RaveEngine::setNonRealtime (bool nonRealtime)
+{
+    impl->nonRealtime = nonRealtime;
+    if (auto* p = impl->activePtr.load (std::memory_order_acquire))
+        if (p->handler)
+            p->handler->set_non_realtime (nonRealtime);   // just sets a bool inside anira
+}
+
 void RaveEngine::reset()
 {
     if (impl->activeOwned && impl->activeOwned->handler)
@@ -138,6 +148,7 @@ bool RaveEngine::loadModel (const std::string&) { return false; }
 bool RaveEngine::ready() const { return false; }
 int  RaveEngine::latencySamples() const { return 0; }
 void RaveEngine::process (float*, int) {}
+void RaveEngine::setNonRealtime (bool) {}
 void RaveEngine::reset() {}
 
 #endif

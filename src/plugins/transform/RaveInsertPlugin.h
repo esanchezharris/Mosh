@@ -54,6 +54,7 @@ private:
     double sr = 44100.0;
     int    blockSize = 512;
     std::atomic<bool> modelLoaded { false };
+    bool   engineNonRealtime = false;   // mirrors anira's scheduling mode; flip on render↔live transition
 
     // Preallocated: dry-delay ring (align dry to anira's latency) + mono scratch buffers.
     juce::AudioBuffer<float> dryRing, monoBuf, dryAligned;
