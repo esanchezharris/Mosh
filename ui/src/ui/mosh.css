@@ -465,6 +465,51 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 .peer-avatar { flex: 0 0 auto; width: 24px; height: 24px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; color: var(--ink); }
 .peer-name { flex: 1 1 auto; min-width: 0; font-size: 12px; color: var(--bone); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .peer-video-stub { flex: 0 0 auto; color: var(--bone-dim); }
+
+/* ── Redesign motion + PS2 polish (flag-gated; flag-off UI untouched) ─────────
+   More life, less lime. Purposeful motion only — entrances + interaction feedback;
+   high-frequency clip editing stays un-animated. PS2 nostalgia via a static CRT
+   scanline + springy easings. Everything respects prefers-reduced-motion. */
+.app[data-redesign="on"] {
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-back: cubic-bezier(0.34, 1.56, 0.64, 1);
+  position: relative;
+}
+@keyframes mosh-in { from { opacity: 0; transform: translateY(8px); filter: blur(4px); } to { opacity: 1; transform: translateY(0); filter: blur(0); } }
+.app[data-redesign="on"] .section-nav { animation: mosh-in 420ms var(--ease-out) both; }
+.app[data-redesign="on"] .dock-right { animation: mosh-in 420ms var(--ease-out) both; }
+.app[data-redesign="on"] .promptbar { animation: mosh-in 380ms var(--ease-out) both; }
+.app[data-redesign="on"] .presence { animation: mosh-in 360ms var(--ease-out) both; }
+.app[data-redesign="on"] .fxdrawer { animation: mosh-in 260ms var(--ease-out) both; transform-origin: top; }
+.app[data-redesign="on"] .participant-peer { animation: mosh-in 320ms var(--ease-out) both; }
+/* Tactile, springy interaction feedback */
+.app[data-redesign="on"] .btn { transition: transform 130ms var(--ease-back), background 140ms ease, color 140ms ease; }
+.app[data-redesign="on"] .btn:hover { transform: translateY(-1px); }
+.app[data-redesign="on"] .btn:active { transform: translateY(0) scale(0.95); }
+.app[data-redesign="on"] .section-seg { transition: transform 180ms var(--ease-back), filter 160ms ease; }
+.app[data-redesign="on"] .section-seg:hover { transform: translateY(-2px); filter: brightness(1.1); }
+.app[data-redesign="on"] .tfx, .app[data-redesign="on"] .dock-right-rail, .app[data-redesign="on"] .dock-left-rail { transition: transform 160ms var(--ease-back), color 140ms ease, background 140ms ease; }
+.app[data-redesign="on"] .tfx:active { transform: scale(0.92); }
+/* Less lime: soften the rail/section headers; lime stays for active/selected only */
+.app[data-redesign="on"] .participants-head,
+.app[data-redesign="on"] .inspector-head { color: var(--bone-dim); }
+/* PS2 CRT scanline — static, subtle, non-interactive, over the whole chrome */
+.app[data-redesign="on"]::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 200;
+  background: repeating-linear-gradient(0deg, rgba(0,0,0,0.06) 0px, rgba(0,0,0,0.06) 1px, transparent 1px, transparent 3px);
+  opacity: 0.7;
+}
+@media (prefers-reduced-motion: reduce) {
+  .app[data-redesign="on"] .section-nav,
+  .app[data-redesign="on"] .dock-right,
+  .app[data-redesign="on"] .promptbar,
+  .app[data-redesign="on"] .presence,
+  .app[data-redesign="on"] .fxdrawer,
+  .app[data-redesign="on"] .participant-peer { animation: none; }
+  .app[data-redesign="on"] .btn,
+  .app[data-redesign="on"] .section-seg,
+  .app[data-redesign="on"] .tfx { transition: none; }
+}
 .app[data-redesign="on"] .dock-main { padding: 0 8px; }
 .presence { display: flex; align-items: center; gap: 8px; }
 .presence-avatars { display: flex; }
