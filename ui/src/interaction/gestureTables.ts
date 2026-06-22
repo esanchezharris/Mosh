@@ -66,10 +66,39 @@ const FL: GestureTable = [
   ...RULER_RULES,
 ];
 
+// ── Pro Tools — the Smart Tool: top of clip = Grabber (move), lower = Selector
+// (time-select), edges = Trim. Same shape as Ableton's header/body split.
+const PROTOOLS: GestureTable = [
+  { region: "clip.header", gesture: "click", action: A.SELECT },
+  { region: "clip.header", gesture: "drag", action: A.MOVE },
+  { region: "clip.body", gesture: "click", action: A.SELECT },
+  { region: "clip.body", gesture: "drag", action: A.TIME_SELECT },
+  { region: "clip.body", gesture: "dblclick", action: A.OPEN },
+  { region: "clip.edge", gesture: "drag", action: A.TRIM },
+  { region: "empty", gesture: "click", action: A.DESELECT },
+  { region: "empty", gesture: "drag", action: A.MARQUEE },
+  ...RULER_RULES,
+];
+
+// ── Logic — the default Pointer tool: dragging a region moves it (whole clip).
+// Marquee (Logic's range tool) is out of scope here. Edge trims; empty marquees.
+const LOGIC: GestureTable = [
+  { region: "clip", gesture: "click", action: A.SELECT },
+  { region: "clip", gesture: "drag", action: A.MOVE },
+  { region: "clip", gesture: "dblclick", action: A.OPEN },
+  { region: "clip", gesture: "contextmenu", action: A.CONTEXT_MENU },
+  { region: "clip.edge", gesture: "drag", action: A.TRIM },
+  { region: "empty", gesture: "click", action: A.DESELECT },
+  { region: "empty", gesture: "drag", action: A.MARQUEE },
+  ...RULER_RULES,
+];
+
 export const GESTURE_TABLES: Record<string, GestureTable> = {
   mosh: MOSH,
   ableton: ABLETON,
   fl: FL,
+  protools: PROTOOLS,
+  logic: LOGIC,
 };
 
 export function getGestureTable(name: string): GestureTable {

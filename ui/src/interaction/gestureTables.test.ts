@@ -17,6 +17,8 @@ describe("getGestureTable", () => {
     expect(getGestureTable("ableton")).toBe(GESTURE_TABLES.ableton);
     expect(getGestureTable("fl")).toBe(GESTURE_TABLES.fl);
     expect(getGestureTable("mosh")).toBe(GESTURE_TABLES.mosh);
+    expect(getGestureTable("protools")).toBe(GESTURE_TABLES.protools);
+    expect(getGestureTable("logic")).toBe(GESTURE_TABLES.logic);
     expect(getGestureTable("nope")).toBe(GESTURE_TABLES.mosh);
   });
 });
@@ -50,6 +52,24 @@ describe("fl preset", () => {
   });
   it("clip.edge → drag TRIM", () => {
     expect(r("fl", { region: "clip.edge", gesture: "drag" })).toBe(A.TRIM);
+  });
+});
+
+describe("pro tools preset (Smart Tool)", () => {
+  it("clip.header drag MOVE; clip.body drag TIME_SELECT, dblclick OPEN; edge TRIM", () => {
+    expect(r("protools", { region: "clip.header", gesture: "drag" })).toBe(A.MOVE);
+    expect(r("protools", { region: "clip.body", gesture: "drag" })).toBe(A.TIME_SELECT);
+    expect(r("protools", { region: "clip.body", gesture: "dblclick" })).toBe(A.OPEN);
+    expect(r("protools", { region: "clip.edge", gesture: "drag" })).toBe(A.TRIM);
+  });
+});
+
+describe("logic preset (Pointer)", () => {
+  it("whole clip drag MOVE (the key Logic distinction), edge TRIM, empty MARQUEE", () => {
+    expect(r("logic", { region: "clip.body", gesture: "drag" })).toBe(A.MOVE);
+    expect(r("logic", { region: "clip.body", gesture: "click" })).toBe(A.SELECT);
+    expect(r("logic", { region: "clip.edge", gesture: "drag" })).toBe(A.TRIM);
+    expect(r("logic", { region: "empty", gesture: "drag" })).toBe(A.MARQUEE);
   });
 });
 
@@ -92,7 +112,7 @@ describe("mosh preset — current behavior preserved", () => {
 
 describe("all presets share the ruler transport surface", () => {
   it("seek + loop work in every DAW", () => {
-    for (const name of ["mosh", "ableton", "fl"]) {
+    for (const name of ["mosh", "ableton", "fl", "protools", "logic"]) {
       expect(r(name, { region: "ruler", gesture: "click" })).toBe(A.SEEK);
       expect(r(name, { region: "ruler", gesture: "drag", mods: { shift: true } })).toBe(A.LOOP_REGION);
     }
