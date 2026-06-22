@@ -57,6 +57,9 @@ interface DockLayoutState {
   toggleLeft: () => void;
   resizeRight: (deltaPx: number) => void;
   toggleRight: () => void;
+  // Seed zones from a template's layout preset (DAW templates). Merges the given
+  // collapsed/size onto each named zone + persists; untouched zones are left as-is.
+  applyPreset: (p: { left?: Partial<Zone>; right?: Partial<Zone>; bottom?: Partial<Zone> }) => void;
 }
 
 export const useDockLayout = create<DockLayoutState>((set, get) => {
@@ -69,5 +72,13 @@ export const useDockLayout = create<DockLayoutState>((set, get) => {
     toggleLeft: () => { set({ left: toggleZone(get().left, 0) }); persist(); },
     resizeRight: (deltaPx) => { set({ right: resizeZone(get().right, deltaPx) }); persist(); },
     toggleRight: () => { set({ right: toggleZone(get().right, 0) }); persist(); },
+    applyPreset: (p) => {
+      set((s) => ({
+        left: p.left ? { ...s.left, ...p.left } : s.left,
+        right: p.right ? { ...s.right, ...p.right } : s.right,
+        bottom: p.bottom ? { ...s.bottom, ...p.bottom } : s.bottom,
+      }));
+      persist();
+    },
   };
 });

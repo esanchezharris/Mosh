@@ -20,6 +20,8 @@ import { Arrange } from "./ui/Arrange";
 import { Dock } from "./ui/Dock";
 import { DockShell } from "./ui/dock/DockShell";
 import { useDrumWindow } from "./ui/dock/useFloatingWindow";
+import { useDockLayout } from "./ui/dock/useDockLayout";
+import { applyLayoutArrangement } from "./settings/layoutPresets";
 import { SampleBrowser } from "./ui/SampleBrowser";
 import { Mixer } from "./ui/Mixer";
 import { PluginBrowser } from "./ui/PluginBrowser";
@@ -43,17 +45,21 @@ export function App() {
   useKeyboardShortcuts(); // the single keyboard layer + native-menu bridge (CTL-002)
   const dragging = useFileDrop(); // BRW-007 drag-and-drop audio import (bytes-over-bridge)
 
-  // Layout = a template value (Phase 6). The FL layout pops the drum sequencer into
-  // its floating window: when the layout becomes "fl", open it for the first drum
-  // track that has a clip. Only on the transition (never auto-closes), so a manual
-  // open in another layout is untouched.
+  // Layout = a template value (Phase 6). Selecting a template restructures the dock to
+  // that DAW's resting shape (which rails open + the FL floating drum window) — see
+  // layoutPresets. Applied ON SWITCH only (skip the initial mount: prevLayout starts
+  // null) so a reload never clobbers the user's persisted dock drags.
   const layout = useSettings((s) => (s.values.layout ?? "mosh") as string);
   const prevLayout = useRef<string | null>(null);
   useEffect(() => {
     if (!snapshot) return;
-    if (layout === "fl" && prevLayout.current !== "fl") {
-      const clip = snapshot.tracks.find((t) => t.type === "drum")?.clips.find((c) => c.type === "midi");
-      if (clip) useDrumWindow.getState().open(clip.id);
+    if (prevLayout.current !== null && layout !== prevLayout.current) {
+      applyLayoutArrangement(layout, {
+        applyDock: useDockLayout.getState().applyPreset,
+        openDrumWindow: useDrumWindow.getState().open,
+        closeDrumWindow: useDrumWindow.getState().close,
+        snapshot,
+      });
     }
     prevLayout.current = layout;
   }, [layout, snapshot]);
