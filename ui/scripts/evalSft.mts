@@ -10,9 +10,9 @@
 // Writes eval_results.<tag>.json next to the eval set. Run both tags over the SAME
 // eval file → the Phase-4 DoD: baseline-vs-fine-tuned clean-apply.
 
-import { readFileSync, existsSync, writeFileSync } from "node:fs";
+import { readFileSync, existsSync, writeFileSync, openSync, writeSync, closeSync } from "node:fs";
 import { resolve, dirname, join } from "node:path";
-import { evaluate } from "../src/gepa/metric";
+import { evaluate, buildExamplePrompt, scoreReply } from "../src/gepa/metric";
 import { DEFAULT_RULES } from "../src/agent/brainCore";
 import type { EvalExample } from "../src/gepa/evalset";
 import type { ChatMessage } from "../src/harvest/genTurns";
@@ -52,8 +52,43 @@ const tag = flag("tag", "eval") as string;
 const evalPath = flag("eval");
 if (!evalPath || !existsSync(evalPath)) { console.error(`--eval <test.eval.jsonl> required (got ${evalPath})`); process.exit(1); }
 
-const examples: EvalExample[] = readFileSync(evalPath, "utf8").split("\n").filter((s) => s.trim()).map((l) => JSON.parse(l) as EvalExample);
+let examples: EvalExample[] = readFileSync(evalPath, "utf8").split("\n").filter((s) => s.trim()).map((l) => JSON.parse(l) as EvalExample);
 if (examples.length === 0) { console.error("empty eval set"); process.exit(1); }
+// Cap the eval to a deterministic subsample (the full eval set can be ~12k → too
+// many metered calls). Same seed → same subset for baseline vs finetuned.
+const nCap = Number(flag("n", "0")) || 0;
+if (nCap > 0 && examples.length > nCap) {
+  const h = (s: string) => { let x = 5381; for (let i = 0; i < s.length; i++) x = ((x << 5) + x + s.charCodeAt(i)) >>> 0; return x; };
+  examples = [...examples].sort((a, b) => h(a.id) - h(b.id)).slice(0, nCap);
+}
+
+// ── offline modes (robust to flaky remote serving) ──────────────────────────
+// --dump FILE : write {id, messages} per example (the prompts a model should answer).
+// --replies FILE : score pre-generated {id, content} replies (no live model needed).
+const dumpPath = flag("dump");
+if (dumpPath) {
+  const fd = openSync(dumpPath, "w");
+  for (const ex of examples) writeSync(fd, JSON.stringify({ id: ex.id, messages: await buildExamplePrompt(DEFAULT_RULES, ex) }) + "\n");
+  closeSync(fd);
+  console.log(`dumped ${examples.length} prompts → ${dumpPath}`);
+  process.exit(0);
+}
+const repliesPath = flag("replies");
+if (repliesPath) {
+  const replies = new Map<string, string>();
+  for (const l of readFileSync(repliesPath, "utf8").split("\n").filter((s) => s.trim())) { const o = JSON.parse(l); replies.set(o.id, o.content ?? ""); }
+  const perExample = [];
+  for (const ex of examples) perExample.push(await scoreReply(ex, replies.get(ex.id) ?? ""));
+  const mean = perExample.length ? perExample.reduce((s, e) => s + e.score, 0) / perExample.length : 0;
+  const deferrals = perExample.filter((e) => e.deferred).length;
+  const out = { tag, mode: "offline", examples: examples.length, cleanApply: mean, deferrals, perExample };
+  const outPath = join(dirname(repliesPath), `eval_results.${tag}.json`);
+  writeFileSync(outPath, JSON.stringify(out, null, 2) + "\n");
+  console.log(`================= EVAL RESULT =================`);
+  console.log(`[${tag}] clean-apply score : ${mean.toFixed(3)}  (${deferrals} deferral(s) / ${examples.length})`);
+  console.log(`wrote ${outPath}`);
+  process.exit(0);
+}
 
 const isReasoning = provider === "openai" && /^(gpt-5|gpt-6|o[0-9])/.test(model);
 let calls = 0;

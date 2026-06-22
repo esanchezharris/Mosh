@@ -109,6 +109,47 @@ export async function scoreExample(
   return { id: ex.id, score, deferred: false, feedback };
 }
 
+// ── offline eval (dump prompts here, generate replies elsewhere, score here) ──
+// For flaky/remote serving: build the exact prompts the model should answer, then
+// score model replies WITHOUT a live endpoint. Same verifier, same numbers.
+
+/** The system+user messages for an example (what a served model would receive). */
+export async function buildExamplePrompt(rules: string, ex: EvalExample): Promise<{ role: string; content: string }[]> {
+  __resetMockForTests();
+  await mockExecute<CommandResult>({ command: "new_project", args: {} });
+  const env = new Map<string, string>();
+  await runBound(ex.startCommands, env);
+  const snap = await mockSnapshot<Snapshot>();
+  return [
+    { role: "system", content: buildSystemPrompt(rules, snap) },
+    { role: "user", content: ex.utterance },
+  ];
+}
+
+/** Score a pre-generated reply for an example (the offline analog of scoreExample). */
+export async function scoreReply(ex: EvalExample, content: string): Promise<ExampleScore> {
+  __resetMockForTests();
+  await mockExecute<CommandResult>({ command: "new_project", args: {} });
+  const env = new Map<string, string>();
+  await runBound(ex.startCommands, env);
+  const cmds = parseReply(content).commands ?? [];
+  if (cmds.length === 0) {
+    return { id: ex.id, score: 0, deferred: true, feedback: `DEFERRED on "${ex.utterance}" — expected ${ex.goldCommandNames.join(", ")}` };
+  }
+  let ok = 0;
+  const errors: string[] = [];
+  for (const c of cmds) {
+    const verr = validateCommand(c.command, c.args ?? {});
+    if (verr) { errors.push(`${c.command}: ${verr}`); continue; }
+    const res = await mockExecute<CommandResult>({ command: c.command, args: c.args ?? {} });
+    if (res.ok) ok++; else errors.push(`${c.command}: ${res.error}`);
+  }
+  const recall = nameRecall(ex.goldCommandNames, cmds.map((c) => c.command));
+  const missing = recall < 1 ? `missing ${ex.goldCommandNames.join(",")} vs got ${cmds.map((c) => c.command).join(",")}` : "";
+  const feedback = [errors.length ? `apply errors: ${errors.join("; ")}` : "", missing].filter(Boolean).join(" | ") || "ok";
+  return { id: ex.id, score: (ok / cmds.length) * recall, deferred: false, feedback };
+}
+
 export type EvalReport = { mean: number; deferrals: number; perExample: ExampleScore[] };
 
 /** Score `rules` across all examples; returns the mean + per-example detail. */
