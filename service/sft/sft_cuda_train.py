@@ -34,6 +34,8 @@ def main():
     ap.add_argument("--max-seq-len", type=int, default=2048)
     ap.add_argument("--4bit", dest="bit4", action="store_true", help="QLoRA (fits a 40GB card); omit on 80GB for bf16 LoRA")
     ap.add_argument("--no-assistant-loss", action="store_true", help="train on the full sequence instead of assistant turns only")
+    ap.add_argument("--no-grad-ckpt", action="store_true", help="disable gradient checkpointing (faster; fine on 80GB)")
+    ap.add_argument("--save-steps", type=int, default=0, help="checkpoint every N steps (0 = only at end; set >0 so SSH drops can't lose work)")
     a = ap.parse_args()
 
     import torch
@@ -61,7 +63,9 @@ def main():
     dtype = torch.bfloat16
     if a.bit4:
         quant = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type="nf4", bnb_4bit_compute_dtype=dtype, bnb_4bit_use_double_quant=True)
-    model = AutoModelForCausalLM.from_pretrained(a.model, quantization_config=quant, torch_dtype=dtype, device_map="auto")
+    # transformers 5.x renamed torch_dtype -> dtype; passing the old name is silently
+    # ignored and the model loads in fp32 (2x memory -> OOM). Use dtype.
+    model = AutoModelForCausalLM.from_pretrained(a.model, quantization_config=quant, dtype=dtype, device_map="auto")
 
     peft_cfg = LoraConfig(r=a.lora_r, lora_alpha=a.lora_r * 2, lora_dropout=0.05, bias="none", task_type="CAUSAL_LM", target_modules="all-linear")
 
@@ -76,7 +80,8 @@ def main():
         warmup_ratio=0.03,
         bf16=True,
         logging_steps=20,
-        save_strategy="epoch",
+        save_strategy=("steps" if a.save_steps > 0 else "epoch"),
+        save_steps=(a.save_steps if a.save_steps > 0 else 500),
         eval_strategy="no",
         max_length=a.max_seq_len,
         # loss on the assistant turns only — Moshi's system prompt dominates each
@@ -84,7 +89,7 @@ def main():
         # with generation tags; --no-assistant-loss falls back to full-sequence.
         assistant_only_loss=not a.no_assistant_loss,
         packing=False,
-        gradient_checkpointing=True,
+        gradient_checkpointing=not a.no_grad_ckpt,
         report_to=[],
     )
 
