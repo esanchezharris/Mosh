@@ -104,6 +104,15 @@ void MultiplayerSession::broadcastStructural (const String& command, const var& 
     client_.publish (var (msg));
 }
 
+void MultiplayerSession::sendSignal (const String& toPeer, const var& payload)
+{
+    auto* msg = new DynamicObject();
+    msg->setProperty ("type", "webrtc");
+    msg->setProperty ("to", toPeer);     // the relay fans out; the addressed peer filters
+    msg->setProperty ("payload", payload);
+    client_.publish (var (msg));
+}
+
 void MultiplayerSession::startPoll()
 {
     if (running_.exchange (true))
@@ -181,6 +190,17 @@ void MultiplayerSession::pollLoop()
                 {
                     if (applyStructural_)
                         applyStructural_ (msg);  // mirror a peer's tempo/master/key op
+                }
+                else if (type == "webrtc")
+                {
+                    // Point-to-point video handshake: deliver only the frames addressed to us.
+                    if (msg.getProperty ("to", var()).toString() == self)
+                    {
+                        auto* p = new DynamicObject();
+                        p->setProperty ("from", f.getProperty ("from", var()));
+                        p->setProperty ("payload", msg.getProperty ("payload", var()));
+                        emit_ ("webrtc_signal", var (p));
+                    }
                 }
             }
 

@@ -12,6 +12,10 @@ import type {
 import type { RemoteStatus } from "./bridge";
 import { type SnapDiv, snapTimeMap, tempoMapFrom } from "./time";
 import type { ChangeSet } from "./agent/executor";
+// Collaborator video (redesign). The store routes inbound WebRTC signaling + presence
+// changes into the video room; the room couples back to the seam only via mp_send_signal.
+import { useVideo } from "./webrtc/useVideo";
+import type { SignalMessage } from "./webrtc/signal";
 // Schema-driven settings (UI-local, localStorage-backed). The store mirrors a few
 // of its values (theme/uiScale/voiceOn/voiceVol) so existing consumers stay reactive
 // while the SettingsPanel and these mutators both write through the single source.
@@ -328,6 +332,14 @@ export const useStore = create<State>((set, get) => ({
           // badge survives the owner (defense-in-depth with the relay's lease GC).
           locksByLogicalId: pruneOfflineLocks(p.locks ?? {}, peers, p.selfPeer ?? null),
         });
+        // Keep the video room's peer set in lockstep with presence (open links to new
+        // collaborators, drop departed ones); tear it down entirely when the session ends.
+        if (p.active) useVideo.getState().syncPeers(Object.keys(peers));
+        else useVideo.getState().teardown();
+      } else if (ev.type === "webrtc_signal") {
+        // Inbound SDP/ICE from a peer (relayed point-to-point) → the video room.
+        const p = ev.payload as { from?: string; payload?: SignalMessage };
+        if (p?.from && p.payload) useVideo.getState().onSignal(p.from, p.payload);
       } else if (ev.type === "peer_selection") {
         // The other peer's current track/clip selection (the highlight we draw).
         const p = ev.payload as { peerId: string; trackId?: string | null; clipId?: string | null };

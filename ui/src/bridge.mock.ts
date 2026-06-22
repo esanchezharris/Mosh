@@ -1053,6 +1053,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     case "mp_commit_track":
     case "mp_claim_track":
     case "mp_broadcast_selection":
+    case "mp_send_signal": // WebRTC handshake passthrough — no loopback peer in the mock
       return ok(command);
 
     default:

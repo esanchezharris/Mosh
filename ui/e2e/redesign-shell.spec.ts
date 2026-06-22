@@ -199,3 +199,26 @@ test("flag off (default): no annotation ruler", async ({ page }) => {
   await expect(page.getByTestId("arrangement")).toBeVisible();
   await expect(page.getByTestId("annotation-ruler")).toHaveCount(0);
 });
+
+test("flag on: camera is off by default; toggling it shows a self-preview tile, toggling again hides it", async ({ page }) => {
+  await bootRedesign(page);
+  const toggle = page.getByTestId("camera-toggle");
+  await expect(toggle).toBeVisible();
+  await expect(toggle).toHaveAttribute("aria-pressed", "false"); // off by default (privacy)
+  await expect(page.getByTestId("participant-self")).toHaveCount(0);
+
+  await toggle.click(); // grants the fake camera, starts the local stream
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("participant-self").getByTestId("video-tile")).toBeVisible();
+
+  await toggle.click(); // release the camera
+  await expect(toggle).toHaveAttribute("aria-pressed", "false");
+  await expect(page.getByTestId("participant-self")).toHaveCount(0);
+});
+
+test("flag off (default): no camera toggle", async ({ page }) => {
+  await page.addInitScript(() => window.localStorage.clear());
+  await page.goto("/");
+  await expect(page.getByTestId("arrangement")).toBeVisible();
+  await expect(page.getByTestId("camera-toggle")).toHaveCount(0);
+});

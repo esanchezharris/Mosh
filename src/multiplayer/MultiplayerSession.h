@@ -66,6 +66,10 @@ public:
     void broadcastSelection (const juce::String& trackId, const juce::String& clipId);
     /** Mirror a session-global scalar op ({command, args}) to the peer. */
     void broadcastStructural (const juce::String& command, const juce::var& args);
+    /** Point-to-point WebRTC signaling passthrough (SDP/ICE) to one peer. The relay is
+        a fan-out, so the message carries `to`; receivers filter on it. Media is P2P —
+        only the handshake rides the relay. */
+    void sendSignal (const juce::String& toPeer, const juce::var& payload);
     /** P4 — upload/download a content-addressed stem via the relay's signed URLs. */
     bool uploadBlob (const juce::String& hash, const juce::String& ext, const juce::File& file);
     bool downloadBlob (const juce::String& hash, const juce::String& ext, const juce::File& dest);

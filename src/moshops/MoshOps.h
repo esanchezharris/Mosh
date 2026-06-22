@@ -84,6 +84,7 @@ private:
     juce::var cmdMpClaimTrack     (const juce::var& args);
     juce::var cmdMpCommitTrack    (const juce::var& args);
     juce::var cmdMpBroadcastSelection (const juce::var& args);
+    juce::var cmdMpSendSignal   (const juce::var& args);   // WebRTC video signaling passthrough
     // P6 bootstrap — serialize the WHOLE project (all tracks) for a late-joiner,
     // and adopt a received bundle (clear local tracks, rebuild from the bundle).
     juce::var cmdMpSerializeProject (const juce::var& args);

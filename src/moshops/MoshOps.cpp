@@ -555,6 +555,7 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "mp_claim_track")     return cmdMpClaimTrack (args);
     if (name == "mp_commit_track")    return cmdMpCommitTrack (args);
     if (name == "mp_broadcast_selection") return cmdMpBroadcastSelection (args);
+    if (name == "mp_send_signal")    return cmdMpSendSignal (args);
     if (name == "mp_serialize_project") return cmdMpSerializeProject (args);
     if (name == "mp_apply_bootstrap")   return cmdMpApplyBootstrap (args);
     if (name == "mp_apply_structural")  return cmdMpApplyStructural (args);
@@ -1648,6 +1649,15 @@ juce::var MoshOps::cmdMpBroadcastSelection (const juce::var& args)
     mpSession_->broadcastSelection (args.getProperty ("trackId", var()).toString(),
                                     args.getProperty ("clipId", var()).toString());
     return okResult ("mp_broadcast_selection");
+}
+
+juce::var MoshOps::cmdMpSendSignal (const juce::var& args)
+{
+    // Point-to-point WebRTC handshake (SDP/ICE) to one peer — the UI's video room owns
+    // the negotiation; this only ferries the opaque payload over the relay.
+    mpSession_->sendSignal (args.getProperty ("to", var()).toString(),
+                            args.getProperty ("payload", var()));
+    return okResult ("mp_send_signal");
 }
 
 juce::var MoshOps::broadcastStructuralIfActive (const juce::String& name, const juce::var& args, juce::var result)
