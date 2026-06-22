@@ -145,6 +145,15 @@ export const SETTINGS: SettingDef[] = [
       ],
     },
   },
+  {
+    id: "redesignShell",
+    type: "bool",
+    default: true,
+    scope: "app",
+    category: "Layout",
+    label: "Redesign shell",
+    help: "The agent-first shell: Session rail (Moshi + collaborators + Inspector), section navigator, per-track FX drawers, the bottom prompt bar + the “+” file/options control, timeline annotations, and collaborator video. On by default; turn it off for the classic layout.",
+  },
   ...interactionSettings(),
 ];
 

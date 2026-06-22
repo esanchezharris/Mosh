@@ -18,6 +18,16 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "create_track", desc: "Add a new track — type 'drum' loads a sampler + drum kit so beats are audible immediately", args: [S("name", false, "track name"), S("type", false, '"audio" (default) | "drum"')] },
   { command: "rename_track", desc: "Rename a track", args: [S("trackId"), S("name")] },
   { command: "remove_track", desc: "Delete a track and its clips", args: [S("trackId")] },
+  // ── song sections (Intro/Verse/Hook/…) — scope handles for "rework the hook" ──
+  { command: "create_section", desc: "Add a named song section (beats)", args: [S("name"), N("startBeat"), N("endBeat"), S("color", false)] },
+  { command: "rename_section", desc: "Rename a song section", args: [S("sectionId"), S("name")] },
+  { command: "move_section", desc: "Move/resize a song section (in beats)", args: [S("sectionId"), N("startBeat"), N("endBeat")] },
+  { command: "remove_section", desc: "Remove a song section", args: [S("sectionId")] },
+  // ── timeline annotations (authored comment pins; shared with collaborators) ──
+  { command: "create_annotation", desc: "Drop a comment pin on the timeline at a beat (flag something for the producer/collaborators)", args: [S("text"), N("beat"), S("color", false), S("author", false)] },
+  { command: "edit_annotation", desc: "Change an annotation's text or colour", args: [S("annotationId"), S("text", false), S("color", false)] },
+  { command: "move_annotation", desc: "Move an annotation to a new beat", args: [S("annotationId"), N("beat")] },
+  { command: "remove_annotation", desc: "Remove a timeline annotation", args: [S("annotationId")] },
 
   // ── clips ───────────────────────────────────────────────────────────────
   { command: "add_test_tone_clip", desc: "Drop a test-tone clip on a track (lands at 0)", args: [S("trackId", false), N("seconds", false, "duration in seconds"), N("freq", false, "Hz")] },
@@ -88,7 +98,7 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "reset_neural", desc: "Reset a neural insert's model state", args: [S("trackId"), N("index")] },
 
   // ── generative (Tier-B) ─────────────────────────────────────────────────
-  { command: "create_render_layer", desc: "Attach a generative re-imagine layer to a wave clip", args: [S("clipId"), S("adapter", false)] },
+  { command: "create_render_layer", desc: "Attach a generative re-imagine layer to a wave clip (optionally scoped to a beat range, in seconds)", args: [S("clipId"), S("adapter", false), N("regionStart", false, "scope start in seconds"), N("regionEnd", false, "scope end in seconds")] },
   { command: "set_render_param", desc: "Set a render-layer parameter (prompt/noise/seed)", args: [S("clipId"), S("prompt", false), N("nl", false, "noise level 0-1"), N("seed", false)] },
   { command: "render_layer", desc: "Run the generative render on a clip's layer", args: [S("clipId")] },
   { command: "accept_render", desc: "Accept a finished render (lands it as a clip)", args: [S("clipId")] },

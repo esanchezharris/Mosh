@@ -71,6 +71,20 @@ test.describe("template applied", () => {
     await expect(page.getByTestId("floating-window")).toBeVisible();
     await expect(page.getByTestId("drum-sequencer")).toBeVisible();
   });
+
+  // The template now restructures the dock: Ableton/FL bring the browser forward; Mosh
+  // tucks it back to the minimal default. (Applied on switch only.)
+  test("ableton/fl open the browser rail; mosh tucks it away", async ({ page }) => {
+    await expect(page.getByTestId("browser-expand")).toBeVisible(); // mosh default: browser collapsed
+    await applyTemplate(page, "ableton");
+    await expect(page.getByTestId("dock-left")).toBeVisible(); // browser opened
+    await applyTemplate(page, "fl");
+    await expect(page.getByTestId("dock-left")).toBeVisible(); // FL keeps it open
+    await expect(page.getByTestId("floating-window")).toHaveCount(0); // no stray drum float on a no-drum project
+    await applyTemplate(page, "mosh");
+    await expect(page.getByTestId("browser-expand")).toBeVisible(); // back to the rail
+    await expect(page.getByTestId("dock-left")).toHaveCount(0);
+  });
 });
 
 test("template choice persists across reload", async ({ page }) => {

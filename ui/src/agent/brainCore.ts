@@ -21,7 +21,10 @@ function compactSnapshot(s: Snapshot): string {
       return `  "${t.id}" "${t.name}" ${t.volumeDb ?? 0}dB${t.mute ? " muted" : ""}${t.solo ? " solo" : ""} clips:[${clips}]`;
     })
     .join("\n");
-  return `tempo ${s.session?.tempo ?? 120} BPM, ${s.session?.timeSigNumerator ?? 4}/${s.session?.timeSigDenominator ?? 4}\ntracks:\n${tracks || "  (none)"}`;
+  const sections = (s.sections ?? [])
+    .map((x) => `${x.id} "${x.name}" beats ${x.startBeat}-${x.endBeat}`)
+    .join("; ");
+  return `tempo ${s.session?.tempo ?? 120} BPM, ${s.session?.timeSigNumerator ?? 4}/${s.session?.timeSigDenominator ?? 4}\nsections: ${sections || "(none)"}\ntracks:\n${tracks || "  (none)"}`;
 }
 
 // The fixed persona/format preamble. Not optimized — it defines the reply contract.
@@ -41,6 +44,7 @@ export const DEFAULT_RULES = [
   "- Use the REAL ids from the session below for trackId/clipId. Never invent ids or commands.",
   '- trackId/clipId are STRING ids: match one from the session exactly and pass it as a JSON string, e.g. "trackId": "17" — never the bare number 17, and never with extra quote characters inside the value.',
   "- One request can produce several commands (they apply together as one undoable change).",
+  "- To re-imagine PART of the song (e.g. \"rework the hook\"), scope a render to that SECTION: create_render_layer on the wave clip under the section with regionStart/regionEnd in SECONDS (beats × 60 ÷ tempo), then render_layer.",
   "- If the request is unclear or needs info you don't have, set intent HUH and ask in `say` — don't guess.",
   "- After making edits use intent ACK_GOT_IT (or DONE for a finishing flourish).",
   "- Stay in character. Never mention JSON, models, commands, or that you're an AI.",

@@ -14,11 +14,18 @@ export const TEMPLATE_SKIN: Record<TemplateName, { skin: string; theme: string; 
   fl: { skin: "fl", theme: "dark", label: "FL" },
 };
 
-/** Load the app with a clean localStorage (default Mosh/dark template) and wait for the
- *  cold snapshot to render. addInitScript runs before the page's own scripts, so the
- *  settings store hydrates from an empty store → deterministic defaults every test. */
+/** Load the app in the CLASSIC shell (Mosh/dark template) and wait for the cold snapshot.
+ *  The agent-first redesign is the shipping default now (redesignShell defaults true), so
+ *  these core/template/producer specs — which drive the topbar File/Export menus the
+ *  redesign relocates into the "+" control — explicitly opt OUT to keep exercising the
+ *  classic layout (the supported fallback). The redesign default is covered by
+ *  redesign-shell.spec. addInitScript runs before the page's scripts, so the settings
+ *  store hydrates from this seed → deterministic every test. */
 export async function boot(page: Page): Promise<void> {
-  await page.addInitScript(() => window.localStorage.clear());
+  await page.addInitScript(() => {
+    window.localStorage.clear();
+    window.localStorage.setItem("mosh.settings", JSON.stringify({ version: 1, template: null, values: { redesignShell: false } }));
+  });
   await page.goto("/");
   await expect(page.getByTestId("app")).toBeVisible();
   await expect(page.getByTestId("arrangement")).toBeVisible();

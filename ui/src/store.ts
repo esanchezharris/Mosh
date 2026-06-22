@@ -12,6 +12,10 @@ import type {
 import type { RemoteStatus } from "./bridge";
 import { type SnapDiv, snapTimeMap, tempoMapFrom } from "./time";
 import type { ChangeSet } from "./agent/executor";
+// Collaborator video (redesign). The store routes inbound WebRTC signaling + presence
+// changes into the video room; the room couples back to the seam only via mp_send_signal.
+import { useVideo } from "./webrtc/useVideo";
+import type { SignalMessage } from "./webrtc/signal";
 // Schema-driven settings (UI-local, localStorage-backed). The store mirrors a few
 // of its values (theme/uiScale/voiceOn/voiceVol) so existing consumers stay reactive
 // while the SettingsPanel and these mutators both write through the single source.
@@ -51,6 +55,7 @@ type State = {
 
   // Stage 3: plugin browser
   selectedTrackId: string | null;
+  expandedTracks: Set<string>;            // UI-local: tracks whose inline FX drawer is open
   availablePlugins: AvailablePlugin[];
   availableBuiltins: BuiltinPlugin[];
   pluginCounts: PluginCounts | null;          // per-format catalog counts (INS-005)
@@ -123,6 +128,7 @@ type State = {
   pasteClipboard: () => Promise<void>;
 
   setSelectedTrack: (id: string | null) => void;
+  toggleTrackExpanded: (id: string) => void;
   editingClipId: string | null;            // MIDI clip open in the piano-roll
   openPianoRoll: (clipId: string) => void;
   closePianoRoll: () => void;
@@ -207,6 +213,7 @@ export const useStore = create<State>((set, get) => ({
   peaks: {},
   timeRange: null,
   selectedTrackId: null,
+  expandedTracks: new Set(),
   availablePlugins: [],
   availableBuiltins: [],
   pluginCounts: null,
@@ -239,6 +246,12 @@ export const useStore = create<State>((set, get) => ({
       // Prune selection / fetch peaks for current clips.
       const ids = new Set(snap.tracks.flatMap((t) => t.clips.map((c) => c.id)));
       set((s) => ({ selection: new Set([...s.selection].filter((id) => ids.has(id))) }));
+      // Prune the inline-FX expand set against current tracks (mirror the selection
+      // prune) so a removed track's id can't make a later id-reused track open by itself.
+      const trackIds = new Set(snap.tracks.map((t) => t.id));
+      set((s) => ([...s.expandedTracks].every((id) => trackIds.has(id))
+        ? {}
+        : { expandedTracks: new Set([...s.expandedTracks].filter((id) => trackIds.has(id))) }));
       // Auto-select a track for the rack if none is selected.
       set((s) => {
         const exists = snap.tracks.some((t) => t.id === s.selectedTrackId);
@@ -319,6 +332,18 @@ export const useStore = create<State>((set, get) => ({
           // badge survives the owner (defense-in-depth with the relay's lease GC).
           locksByLogicalId: pruneOfflineLocks(p.locks ?? {}, peers, p.selfPeer ?? null),
         });
+        // Keep the video room's peer set in lockstep with presence (open links to new
+        // collaborators, drop departed ones); tear it down entirely when the session ends.
+        if (p.active) useVideo.getState().syncPeers(Object.keys(peers));
+        else useVideo.getState().teardown();
+      } else if (ev.type === "webrtc_signal") {
+        // Inbound SDP/ICE from a peer (relayed point-to-point) → the video room. Video is
+        // a redesign-only feature, so a flag-off client must NOT silently negotiate /
+        // hold a peer connection it has no UI for (prime directive: flag-off == unchanged).
+        if (Boolean(useSettings.getState().get("redesignShell"))) {
+          const p = ev.payload as { from?: string; payload?: SignalMessage };
+          if (p?.from && p.payload) useVideo.getState().onSignal(p.from, p.payload);
+        }
       } else if (ev.type === "peer_selection") {
         // The other peer's current track/clip selection (the highlight we draw).
         const p = ev.payload as { peerId: string; trackId?: string | null; clipId?: string | null };
@@ -442,6 +467,11 @@ export const useStore = create<State>((set, get) => ({
   },
 
   setSelectedTrack: (id) => { set({ selectedTrackId: id }); void get().syncActiveTrack(); },
+  toggleTrackExpanded: (id) => set((s) => {
+    const next = new Set(s.expandedTracks);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return { expandedTracks: next };
+  }),
 
   // MP-001 — session entry. The native session manager creates/joins the relay
   // room and starts the poll loop (which emits mp_state / commits / peer_selection).
