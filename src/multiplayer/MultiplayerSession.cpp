@@ -169,6 +169,7 @@ void MultiplayerSession::pollLoop()
                     auto* msgOut = new DynamicObject();
                     msgOut->setProperty ("type", "bootstrap_state");
                     msgOut->setProperty ("tracks", bundle.getProperty ("tracks", var()));
+                    msgOut->setProperty ("annotations", bundle.getProperty ("annotations", var()));
                     client_.publish (var (msgOut));
                 }
                 else if (type == "bootstrap_state")

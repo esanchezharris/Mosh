@@ -5,7 +5,7 @@
 // (create/edit/move/remove_annotation), which the backend broadcasts to collaborators —
 // the author tag is the local session name. Lives ON the ruler (no extra row) so the
 // track-header/lane vertical alignment is untouched.
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
 import type { Annotation } from "../types";
 
@@ -25,6 +25,18 @@ export function AnnotationRuler({
   const selfName = (mpActive && selfPeer && peers[selfPeer]?.name) || "you";
   const [openId, setOpenId] = useState<string | null>(null);
   const stripRef = useRef<HTMLDivElement>(null);
+  const popRef = useRef<HTMLDivElement>(null);
+
+  // Dismiss the open popover on outside-click / Escape — matches the app's popover
+  // convention (ClipMenu, Pop, FileOptions). Deferred so the opening click doesn't
+  // immediately close it.
+  useEffect(() => {
+    if (!openId) return;
+    const onDoc = (e: PointerEvent) => { if (popRef.current && !popRef.current.contains(e.target as Node)) setOpenId(null); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpenId(null); };
+    const t = window.setTimeout(() => { document.addEventListener("pointerdown", onDoc); document.addEventListener("keydown", onKey); }, 0);
+    return () => { clearTimeout(t); document.removeEventListener("pointerdown", onDoc); document.removeEventListener("keydown", onKey); };
+  }, [openId]);
 
   const addAt = (clientX: number) => {
     const rect = stripRef.current?.getBoundingClientRect();
@@ -47,9 +59,10 @@ export function AnnotationRuler({
       className="annotation-ruler"
       data-testid="annotation-ruler"
       title="Double-click to drop a note"
-      // Own the pointer so the strip never triggers the ruler's seek/loop gesture.
-      onPointerDown={(e) => e.stopPropagation()}
-      onDoubleClick={(e) => { e.stopPropagation(); addAt(e.clientX); }}
+      // Bare-strip pointer events bubble to the ruler (so seek/loop still work across the
+      // full ruler height); only PINS swallow their pointer (below) so a pin-click reads
+      // the note instead of seeking. Double-click the bare strip to drop a note.
+      onDoubleClick={(e) => addAt(e.clientX)}
     >
       {annotations.map((a) => (
         <div key={a.id} className="annotation-pin" data-testid="annotation-pin" style={{ left: beatToPx(a.beat) }}>
@@ -58,12 +71,13 @@ export function AnnotationRuler({
             style={{ background: a.color ?? "var(--lime-dim)" }}
             title={`${a.text}${a.author ? " — " + a.author : ""}`}
             aria-label={`Annotation: ${a.text}`}
+            onPointerDown={(e) => e.stopPropagation()}
             onClick={() => setOpenId((cur) => (cur === a.id ? null : a.id))}
           >
             <span aria-hidden="true">📍</span>
           </button>
           {openId === a.id && (
-            <div className="annotation-pop" role="dialog" aria-label="Annotation">
+            <div className="annotation-pop" role="dialog" aria-label="Annotation" ref={popRef}>
               <div className="annotation-text">{a.text}</div>
               {a.author && <div className="annotation-author tc">— {a.author}</div>}
               <div className="annotation-actions">

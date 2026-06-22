@@ -415,7 +415,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
 
     case "create_annotation": {
       pushUndo();
-      const ann = { id: str(args.annotationId) || nextAnnotationId(), text: str(args.text, ""), beat: num(args.beat, 0), color: str(args.color) || undefined, author: str(args.author) || "you" };
+      const ann = { id: str(args.annotationId) || nextAnnotationId(), text: str(args.text, ""), beat: num(args.beat, 0), color: str(args.color) || undefined, author: args.author != null ? str(args.author) : undefined };
       (snapshot.annotations ??= []).push(ann);
       invalidate(); return ok(command, { annotationId: ann.id });
     }

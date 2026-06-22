@@ -185,6 +185,14 @@ test("flag on: clicking a pin opens it with its author and can delete it", async
   await expect(page.getByTestId("annotation-pin")).toHaveCount(0);
 });
 
+test("flag on: clicking the annotation strip still seeks the ruler beneath it (no dead-zone)", async ({ page }) => {
+  await bootRedesign(page);
+  await expect(page.getByTestId("position")).toHaveText("1.1.1"); // parked at start
+  // A bare-strip click must bubble through to the ruler's seek (the strip only swallows pins).
+  await page.getByTestId("annotation-ruler").click({ position: { x: 420, y: 6 } });
+  await expect(page.getByTestId("position")).not.toHaveText("1.1.1");
+});
+
 test("flag off (default): no annotation ruler", async ({ page }) => {
   await page.addInitScript(() => window.localStorage.clear());
   await page.goto("/");

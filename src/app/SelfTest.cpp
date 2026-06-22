@@ -3993,17 +3993,31 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         cmd (ops, "add_test_tone_clip", objN ({ { "trackId", aId }, { "seconds", 1.0 } }));
         const auto lidA = lidByName (ops, "Boot A");
         const auto lidB = lidByName (ops, "Boot B");
+        // A pre-existing annotation on the host must travel in the bootstrap bundle (it's a
+        // top-level Edit child, not inside a track blob) so a late-joiner sees it too.
+        cmd (ops, "create_annotation", objN ({ { "annotationId", "boot-ann" }, { "text", "host note" }, { "beat", 12.0 }, { "author", "host" } }));
 
         auto ser = cmd (ops, "mp_serialize_project");
         check (ok (ser), "mp_serialize_project ok");
         auto bundle = ser.getProperty ("data", juce::var());
         check ((int) bundle.getProperty ("count", 0) == 2, "serialized a 2-track project bundle");
+        check (bundle.getProperty ("annotations", juce::var()).toString().isNotEmpty(), "bundle carries the annotations subtree");
 
         check (ok (cmd (ops, "new_project", args1 ("name", "mp-boot-dst"))), "new_project (joiner wipe) ok");
         check (tracks (ops) == 0, "joiner starts empty before bootstrap");
 
-        auto app = cmd (ops, "mp_apply_bootstrap", objN ({ { "tracks", bundle.getProperty ("tracks", juce::var()) } }));
+        auto app = cmd (ops, "mp_apply_bootstrap", objN ({ { "tracks", bundle.getProperty ("tracks", juce::var()) },
+                                                           { "annotations", bundle.getProperty ("annotations", juce::var()) } }));
         check (ok (app), "mp_apply_bootstrap ok");
+        // The joiner adopts the host's annotation (id + author + text preserved).
+        bool joinerHasAnn = false;
+        { auto arr = ops.snapshot().getProperty ("annotations", juce::var());
+          for (int i = 0; i < arr.size(); ++i)
+              if (arr[i].getProperty ("id", juce::var()).toString() == "boot-ann"
+                  && arr[i].getProperty ("text", juce::var()).toString() == "host note"
+                  && arr[i].getProperty ("author", juce::var()).toString() == "host")
+                  joinerHasAnn = true; }
+        check (joinerHasAnn, "joiner adopts the host's pre-existing annotation via bootstrap");
         check ((int) app.getProperty ("data", juce::var()).getProperty ("applied", 0) == 2, "bootstrap applied 2 tracks");
         check (tracks (ops) == 2, "joiner now holds the host's 2 tracks");
         check (lidByName (ops, "Boot A") == lidA && lidA.isNotEmpty(), "Boot A logicalId preserved across bootstrap");

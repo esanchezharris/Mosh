@@ -760,7 +760,10 @@ juce::var MoshOps::cmdCreateAnnotation (const juce::var& args)
         anns = juce::ValueTree (ids::MOSH_ANNOTATIONS);
         state.appendChild (anns, &undoManager());
     }
-    anns.appendChild (mosh::Annotation::create (annId, text, beat, color, author), &undoManager());
+    // Idempotent on the resolved id: a re-applied create (the only ADDITIVE op broadcast
+    // over MP) must not append a duplicate node.
+    if (! anns.getChildWithProperty (ids::id, annId).isValid())
+        anns.appendChild (mosh::Annotation::create (annId, text, beat, color, author), &undoManager());
 
     auto* data = new DynamicObject(); data->setProperty ("annotationId", annId);
     logLine ("create_annotation", args, true, {}, true);
@@ -1688,6 +1691,12 @@ juce::var MoshOps::cmdMpSerializeProject (const juce::var&)
     auto* d = new DynamicObject();
     d->setProperty ("tracks", tracks);
     d->setProperty ("count", tracks.size());
+    // Annotations are a top-level Edit child (a sibling of the tracks), so the per-track
+    // blobs above don't carry them — serialize the subtree so a late-joiner adopts the
+    // host's existing pins, not just the ones created live after they join.
+    if (auto a = eng.edit().state.getChildWithName (ids::MOSH_ANNOTATIONS); a.isValid())
+        if (auto xml = a.createXml())
+            d->setProperty ("annotations", xml->toString());
     return okResult ("mp_serialize_project", var (d));
 }
 
@@ -1711,6 +1720,16 @@ juce::var MoshOps::cmdMpApplyBootstrap (const juce::var& args)
             if (blob.isNotEmpty() && trackcommit::apply (edit, blob).ok)
                 ++applied;
         }
+
+    // Adopt the host's annotations (a top-level Edit child, outside the per-track blobs):
+    // drop ours, graft the host's subtree. nullptr UndoManager — incoming history, like
+    // the track splices above.
+    if (auto existing = edit.state.getChildWithName (ids::MOSH_ANNOTATIONS); existing.isValid())
+        edit.state.removeChild (existing, nullptr);
+    if (const auto annXml = args.getProperty ("annotations", var()).toString(); annXml.isNotEmpty())
+        if (auto xml = juce::parseXML (annXml))
+            if (auto vt = juce::ValueTree::fromXml (*xml); vt.isValid())
+                edit.state.appendChild (vt, nullptr);
 
     eng.markDirty();
     emitSnapshotInvalidated();
