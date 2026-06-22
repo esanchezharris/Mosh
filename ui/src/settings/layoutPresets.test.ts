@@ -7,12 +7,13 @@ const deps = (snapshot: Snapshot | null = null) => ({
   applyDock: vi.fn(),
   openDrumWindow: vi.fn(),
   closeDrumWindow: vi.fn(),
+  setMainView: vi.fn(),
   snapshot,
 });
 
 describe("LAYOUT_PRESETS", () => {
-  it("ships exactly the three v1 templates", () => {
-    expect(Object.keys(LAYOUT_PRESETS).sort()).toEqual(["ableton", "fl", "mosh"]);
+  it("ships the five v1 templates", () => {
+    expect(Object.keys(LAYOUT_PRESETS).sort()).toEqual(["ableton", "fl", "logic", "mosh", "protools"]);
   });
   it("mosh tucks the browser; ableton/fl open it (the per-DAW IA difference)", () => {
     expect(LAYOUT_PRESETS.mosh.left).toEqual({ collapsed: true });
@@ -25,7 +26,7 @@ describe("applyLayoutArrangement", () => {
   it("ableton: opens the browser, closes any drum window", () => {
     const d = deps();
     applyLayoutArrangement("ableton", d);
-    expect(d.applyDock).toHaveBeenCalledWith({ left: { collapsed: false, size: 260 } });
+    expect(d.applyDock).toHaveBeenCalledWith({ left: { collapsed: false, size: 260 }, right: { collapsed: false } });
     expect(d.closeDrumWindow).toHaveBeenCalled();
     expect(d.openDrumWindow).not.toHaveBeenCalled();
   });
@@ -33,7 +34,7 @@ describe("applyLayoutArrangement", () => {
   it("mosh: collapses the browser, closes any drum window", () => {
     const d = deps();
     applyLayoutArrangement("mosh", d);
-    expect(d.applyDock).toHaveBeenCalledWith({ left: { collapsed: true } });
+    expect(d.applyDock).toHaveBeenCalledWith({ left: { collapsed: true }, right: { collapsed: false } });
     expect(d.closeDrumWindow).toHaveBeenCalled();
   });
 
@@ -52,8 +53,29 @@ describe("applyLayoutArrangement", () => {
 
   it("an unknown layout falls back to mosh (minimal)", () => {
     const d = deps();
-    applyLayoutArrangement("protools", d);
-    expect(d.applyDock).toHaveBeenCalledWith({ left: { collapsed: true } });
+    applyLayoutArrangement("cubase", d);
+    expect(d.applyDock).toHaveBeenCalledWith({ left: { collapsed: true }, right: { collapsed: false } });
     expect(d.closeDrumWindow).toHaveBeenCalled();
+  });
+});
+
+describe("Pro Tools & Logic presets", () => {
+  it("pro tools: collapses both rails and opens the Edit (arrange) view", () => {
+    const d = deps();
+    applyLayoutArrangement("protools", d);
+    expect(d.applyDock).toHaveBeenCalledWith({ left: { collapsed: true }, right: { collapsed: true } });
+    expect(d.setMainView).toHaveBeenCalledWith("arrange");
+    expect(d.closeDrumWindow).toHaveBeenCalled();
+  });
+  it("logic: opens Library (left) + Inspector (right), arrange view", () => {
+    const d = deps();
+    applyLayoutArrangement("logic", d);
+    expect(d.applyDock).toHaveBeenCalledWith({ left: { collapsed: false, size: 230 }, right: { collapsed: false, size: 300 } });
+    expect(d.setMainView).toHaveBeenCalledWith("arrange");
+  });
+  it("a preset without mainView (mosh) does not force the view", () => {
+    const d = deps();
+    applyLayoutArrangement("mosh", d);
+    expect(d.setMainView).not.toHaveBeenCalled();
   });
 });
