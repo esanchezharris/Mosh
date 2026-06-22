@@ -60,15 +60,24 @@ A sampled reply for *"write a short pattern into the clip on the BASS track"*:
 A clean four-on-the-floor bassline on the right clip — the hard part (act, target the
 right clip, emit valid notes) is solved.
 
-## Honest residual — pattern length
+## Honest residual — pattern length (it's training *volume*, not target length)
 
 v3 emits ~4 notes; the fair floor for full credit is 8, and baseline emits ~6. So v3 is
 *reliable* (0 deferrals) but *short*, landing populate at 0.434 vs baseline's 0.503 (and
-baseline only gets there by acting richly the 27/40 times it doesn't defer). This is a
-**training-amount / target-alignment** knob, not a capability gap: the source targets are
-64-note clips, but the model learns to stop after a few notes. The principled lever is to
-train on short-pattern targets (cap to ~16 notes — aligned with both the "short pattern"
-ask and the fair floor) and/or the multi-epoch cloud run. Pursued as a follow-up.
+baseline only reaches 0.503 by acting richly the 27/40 times it doesn't defer — when it
+acts it's ~6 notes, but it defers a third of the time, which v3 never does).
+
+**Tested hypothesis — target-length alignment (negative result).** Natural guess: the
+model learns to stop early because its targets are 64-note source clips. So `buildSft`
+gained a `--max-notes` knob and a second model (**v4**) trained on a dataset capped at 16
+notes — short-pattern targets aligned with both the "short pattern" ask and the fair
+floor. Result on the *same* eval set: **overall 0.776, populate 0.434** — statistically
+identical to v3 (0.769 / 0.434); v4 still emits ~3-4 notes. So target length is *not* the
+lever. The model has a strong "emit a few commands then stop" prior that ~200-250 iters
+(a small fraction of one epoch over 100k examples) doesn't override for the populate
+minority. The real lever is **training volume** — the multi-epoch cloud run
+(`sft_cuda_train.py`, now with working assistant masking), which exposes the model to far
+more populate examples. That, not a dataset trick, is the path to a richer pattern.
 
 ## Reproduce
 

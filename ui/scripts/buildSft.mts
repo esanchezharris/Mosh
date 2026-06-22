@@ -48,6 +48,7 @@ const huhFrac = Number(flag("huh", "0.05"));
 const maxPerFile = Number(flag("max", "1000"));
 const sampleN = Number(flag("sample", "0")) || Infinity;  // cap files processed
 const limitN = Number(flag("limit", "0")) || Infinity;    // cap rendered examples
+const maxNotes = Number(flag("max-notes", "0")) || undefined; // cap a populate target's note count (default 64 in the slicer) — align "short pattern" targets with the fair-metric floor
 
 const EXT = /\.(rpp|als|flp|mid|midi)$/i;
 function findProjects(dir: string, out: string[] = []): string[] {
@@ -78,7 +79,7 @@ for (const f of files) {
   if (rendered.length >= limitN) break;
   processed++;
   let raws: RawExample[] = [];
-  try { raws = sliceProgramFull(emitCommands(importPath(f)), `${basename(f)}@${hashStr(f) % 100000}`, { max: maxPerFile }); }
+  try { raws = sliceProgramFull(emitCommands(importPath(f)), `${basename(f)}@${hashStr(f) % 100000}`, { max: maxPerFile, maxNotes }); }
   catch { /* unparseable file — skip */ }
   let contributed = false;
   for (const r of raws) {
@@ -124,12 +125,12 @@ writeRows(join(outDir, "valid.jsonl"), split.valid, chatLine);
 writeRows(join(outDir, "test.jsonl"), split.test, chatLine);
 writeRows(join(outDir, "test.eval.jsonl"), evalRaws, (r) => JSON.stringify({ id: r.id, utterance: r.utterance, startCommands: r.startCommands, goldCommandNames: r.goldCommandNames }));
 
-const datasetVersion = `sft-${createHash("sha256").update(`${corpora.join("|")}:${seed}:${trR}/${vaR}/${teR}:${sampleN}:${limitN}:${used.length}`).digest("hex").slice(0, 12)}`;
+const datasetVersion = `sft-${createHash("sha256").update(`${corpora.join("|")}:${seed}:${trR}/${vaR}/${teR}:${sampleN}:${limitN}:${maxNotes ?? "all"}:${used.length}`).digest("hex").slice(0, 12)}`;
 const manifest = {
   datasetVersion, createdFrom: corpora,
   counts: { train: split.train.length, valid: split.valid.length, test: split.test.length, evalSet: evalRaws.length, importer: rendered.length, tuples: tupleExamples.length, huh: huh.length },
   corpus: { filesFound: allFiles.length, filesProcessed: processed, filesUsed: used.length },
-  split: { ratios: [trR, vaR, teR], seed, sample: sampleN === Infinity ? "all" : sampleN, limit: limitN === Infinity ? "none" : limitN },
+  split: { ratios: [trR, vaR, teR], seed, sample: sampleN === Infinity ? "all" : sampleN, limit: limitN === Infinity ? "none" : limitN, maxNotes: maxNotes ?? "all" },
 };
 writeFileSync(join(outDir, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
 
