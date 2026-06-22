@@ -1,0 +1,20 @@
+# Reference mlx-lm LoRA config for the Moshi command-emission SFT smoke-train.
+# sft_cli.py passes these as flags; this file documents the knobs and can be used
+# directly:  python -m mlx_lm lora --config service/sft/config.yaml
+#
+# Knobs are deliberately SMALL — this is a plumbing proof on the Mac, not a final
+# model. Scale iters/num-layers/batch-size up (or move to RunPod) for real quality.
+
+model: "mlx-community/Qwen3-4B-Instruct-2507-4bit"  # 4-bit base; Qwen/Qwen3-4B-Instruct-2507 (Apache-2.0)
+train: true
+data: ".sft-data/sft-v1"        # dir with train.jsonl / valid.jsonl (chat format from `npm run build-sft`)
+adapter_path: ".adapters/sft-v1"
+
+fine_tune_type: lora
+num_layers: 8                   # how many top transformer layers get LoRA
+iters: 300
+batch_size: 1
+learning_rate: 1.0e-5
+max_seq_length: 2048            # caps memory; Moshi's system prompt is large
+grad_checkpoint: true           # trade compute for memory (fits smaller Macs)
+mask_prompt: true               # loss on the assistant completion only (system prompt dominates each example)
