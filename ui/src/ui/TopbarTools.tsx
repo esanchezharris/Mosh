@@ -38,7 +38,7 @@ function Pop({ label, title, on, className, children }: { label: string; title: 
 export function TopbarTools({ snapshot }: { snapshot: Snapshot }) {
   const theme = useStore((s) => s.theme);
   const toggleTheme = useStore((s) => s.toggleTheme);
-  const redesign = useSettings((s) => Boolean(s.values.redesignShell));
+  const redesign = useSettings((s) => Boolean(s.get("redesignShell")));
   const audioEnabled = snapshot.session.audioEnabled ?? true;
   return (
     <div className="topbar-tools">

@@ -12,7 +12,7 @@ export function Dock({ snapshot }: { snapshot: Snapshot }) {
   const selectedTrackId = useStore((s) => s.selectedTrackId);
   const track = snapshot.tracks.find((t) => t.id === selectedTrackId) ?? null;
   // In the redesign, Moshi is a participant in the Session rail, not in the dock.
-  const redesign = useSettings((s) => Boolean(s.values.redesignShell));
+  const redesign = useSettings((s) => Boolean(s.get("redesignShell")));
   return (
     <div className="dock" data-testid="dock">
       <Rack track={track} />

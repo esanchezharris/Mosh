@@ -1,8 +1,8 @@
 import { test, expect, type Page } from "@playwright/test";
 
-// The redesign shell (Inspector right rail) is gated behind the default-off
-// `redesignShell` setting. Seed it on before boot, the way hands-free.spec seeds a
-// single setting override.
+// The redesign shell is the SHIPPING DEFAULT now (redesignShell defaults true), so a
+// clean boot lands in it. bootRedesign seeds it explicitly (belt-and-suspenders);
+// bootClassic seeds the opt-OUT so the "flag off" tests still cover the classic fallback.
 async function bootRedesign(page: Page): Promise<void> {
   await page.addInitScript(() => {
     window.localStorage.clear();
@@ -13,6 +13,23 @@ async function bootRedesign(page: Page): Promise<void> {
   await expect(page.getByTestId("arrangement")).toBeVisible();
 }
 
+async function bootClassic(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    window.localStorage.clear();
+    window.localStorage.setItem("mosh.settings", JSON.stringify({ version: 1, template: null, values: { redesignShell: false } }));
+  });
+  await page.goto("/");
+  await expect(page.getByTestId("arrangement")).toBeVisible();
+}
+
+test("default (no settings): boots the redesign shell", async ({ page }) => {
+  await page.addInitScript(() => window.localStorage.clear()); // clean storage → schema defaults
+  await page.goto("/");
+  await expect(page.getByTestId("arrangement")).toBeVisible();
+  await expect(page.getByTestId("session-rail")).toBeVisible(); // redesign is the default now
+  await expect(page.getByTestId("promptbar")).toBeVisible();
+});
+
 test("flag on: the Session rail is open by default with Moshi + inspector", async ({ page }) => {
   await bootRedesign(page);
   await expect(page.getByTestId("dock-right")).toBeVisible();
@@ -21,10 +38,8 @@ test("flag on: the Session rail is open by default with Moshi + inspector", asyn
   await expect(page.getByTestId("inspector")).toBeVisible();
 });
 
-test("flag off (default): no Inspector rail", async ({ page }) => {
-  await page.addInitScript(() => window.localStorage.clear());
-  await page.goto("/");
-  await expect(page.getByTestId("arrangement")).toBeVisible();
+test("flag off (classic): no Inspector rail", async ({ page }) => {
+  await bootClassic(page);
   await expect(page.getByTestId("inspector-expand")).toHaveCount(0);
 });
 
@@ -44,10 +59,8 @@ test("flag on: top-right presence cluster (AI pill + Share)", async ({ page }) =
   await expect(page.getByTestId("share")).toBeVisible();
 });
 
-test("flag off (default): no presence cluster", async ({ page }) => {
-  await page.addInitScript(() => window.localStorage.clear());
-  await page.goto("/");
-  await expect(page.getByTestId("arrangement")).toBeVisible();
+test("flag off (classic): no presence cluster", async ({ page }) => {
+  await bootClassic(page);
   await expect(page.getByTestId("presence")).toHaveCount(0);
 });
 
@@ -64,10 +77,8 @@ test("flag on: a track's FX drawer opens from the header and collapses again", a
   await expect(page.getByTestId("fx-drawer")).toHaveCount(0);
 });
 
-test("flag off (default): no per-track FX toggle", async ({ page }) => {
-  await page.addInitScript(() => window.localStorage.clear());
-  await page.goto("/");
-  await expect(page.getByTestId("arrangement")).toBeVisible();
+test("flag off (classic): no per-track FX toggle", async ({ page }) => {
+  await bootClassic(page);
   await expect(page.getByTestId("track-fx-toggle")).toHaveCount(0);
 });
 
@@ -78,10 +89,8 @@ test("flag on: the agent prompt lives in a dedicated bottom bar", async ({ page 
   await expect(bar.locator(".agent-composer")).toBeVisible();
 });
 
-test("flag off (default): no bottom prompt bar (prompt stays in the Moshi dock)", async ({ page }) => {
-  await page.addInitScript(() => window.localStorage.clear());
-  await page.goto("/");
-  await expect(page.getByTestId("arrangement")).toBeVisible();
+test("flag off (classic): no bottom prompt bar (prompt stays in the Moshi dock)", async ({ page }) => {
+  await bootClassic(page);
   await expect(page.getByTestId("promptbar")).toHaveCount(0);
 });
 
@@ -95,10 +104,8 @@ test("flag on: section navigator shows sections, adds one, and has zoom presets"
   await expect(nav.getByRole("button", { name: "8B", exact: true })).toBeVisible();
 });
 
-test("flag off (default): no section navigator", async ({ page }) => {
-  await page.addInitScript(() => window.localStorage.clear());
-  await page.goto("/");
-  await expect(page.getByTestId("arrangement")).toBeVisible();
+test("flag off (classic): no section navigator", async ({ page }) => {
+  await bootClassic(page);
   await expect(page.getByTestId("section-nav")).toHaveCount(0);
 });
 
@@ -123,10 +130,8 @@ test("flag on: the bottom dock is gone; generative lives in the Inspector", asyn
   await expect(page.getByTestId("inspector").getByTestId("generative")).toBeVisible();
 });
 
-test("flag off (default): the bottom dock is present", async ({ page }) => {
-  await page.addInitScript(() => window.localStorage.clear());
-  await page.goto("/");
-  await expect(page.getByTestId("arrangement")).toBeVisible();
+test("flag off (classic): the bottom dock is present", async ({ page }) => {
+  await bootClassic(page);
   await expect(page.getByTestId("dock")).toBeVisible();
 });
 
@@ -155,10 +160,8 @@ test('flag on: the "+" Settings sub-panel swaps in and back', async ({ page }) =
   await expect(page.getByTestId("file-options-menu")).toBeVisible();
 });
 
-test('flag off (default): no "+" control; the topbar keeps File + Export', async ({ page }) => {
-  await page.addInitScript(() => window.localStorage.clear());
-  await page.goto("/");
-  await expect(page.getByTestId("arrangement")).toBeVisible();
+test('flag off (classic): no "+" control; the topbar keeps File + Export', async ({ page }) => {
+  await bootClassic(page);
   await expect(page.getByTestId("file-options")).toHaveCount(0);
   await expect(page.locator(".topbar-tools").getByRole("button", { name: "File", exact: true })).toBeVisible();
 });
@@ -193,10 +196,8 @@ test("flag on: clicking the annotation strip still seeks the ruler beneath it (n
   await expect(page.getByTestId("position")).not.toHaveText("1.1.1");
 });
 
-test("flag off (default): no annotation ruler", async ({ page }) => {
-  await page.addInitScript(() => window.localStorage.clear());
-  await page.goto("/");
-  await expect(page.getByTestId("arrangement")).toBeVisible();
+test("flag off (classic): no annotation ruler", async ({ page }) => {
+  await bootClassic(page);
   await expect(page.getByTestId("annotation-ruler")).toHaveCount(0);
 });
 
@@ -228,9 +229,7 @@ test("flag on: hiding the WebView releases the camera; returning restores it (pr
   await expect(page.getByTestId("participant-self")).toBeVisible();
 });
 
-test("flag off (default): no camera toggle", async ({ page }) => {
-  await page.addInitScript(() => window.localStorage.clear());
-  await page.goto("/");
-  await expect(page.getByTestId("arrangement")).toBeVisible();
+test("flag off (classic): no camera toggle", async ({ page }) => {
+  await bootClassic(page);
   await expect(page.getByTestId("camera-toggle")).toHaveCount(0);
 });

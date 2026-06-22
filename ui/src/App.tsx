@@ -39,7 +39,7 @@ export function App() {
   const snapshot = useStore((s) => s.snapshot);
   const lastError = useStore((s) => s.lastError);
   const view = useStore((s) => s.view);
-  const redesign = useSettings((s) => Boolean(s.values.redesignShell));
+  const redesign = useSettings((s) => Boolean(s.get("redesignShell")));
 
   useEffect(() => { init(); }, [init]);
   useKeyboardShortcuts(); // the single keyboard layer + native-menu bridge (CTL-002)

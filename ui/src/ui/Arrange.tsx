@@ -82,7 +82,7 @@ export function Arrange({ snapshot }: { snapshot: Snapshot }) {
   const timeRange = useStore((s) => s.timeRange);
   const setTimeRange = useStore((s) => s.setTimeRange);
   const expandedTracks = useStore((s) => s.expandedTracks);
-  const redesign = useSettings((s) => Boolean(s.values.redesignShell));
+  const redesign = useSettings((s) => Boolean(s.get("redesignShell")));
 
   const headersRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -429,7 +429,7 @@ const TrackHeader = memo(function TrackHeader({ track, height }: { track: Track;
   // selected-state is unchanged won't re-render when selection moves elsewhere.
   const selected = useStore((s) => s.selectedTrackId === track.id);
   const setSelectedTrack = useStore((s) => s.setSelectedTrack);
-  const redesign = useSettings((s) => Boolean(s.values.redesignShell));
+  const redesign = useSettings((s) => Boolean(s.get("redesignShell")));
   const expanded = useStore((s) => s.expandedTracks.has(track.id));
   const toggleExpanded = useStore((s) => s.toggleTrackExpanded);
   const fxCount = (track.plugins ?? []).filter((p) => p.external || p.neural || p.builtin).length;

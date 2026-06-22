@@ -302,7 +302,7 @@ export function Moshi() {
   const setHandsFree = useStore((s) => s.setHandsFree);
   // In the redesign shell the prompt lives in a dedicated bottom bar (App), so it's
   // not mounted here — mounted in exactly one place either way (no double mount).
-  const redesign = useSettings((s) => Boolean(s.values.redesignShell));
+  const redesign = useSettings((s) => Boolean(s.get("redesignShell")));
   const stateLabel = recording ? "● rec" : rendering ? "working…" : playing ? "listening" : "idle";
   // One-word mood derived from the same live state. `mood` keys the mount's
   // state-tinted glow (box-shadow only — no transform/filter on the canvas wrapper);
