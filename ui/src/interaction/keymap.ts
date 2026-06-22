@@ -115,7 +115,25 @@ const MOSH: Keymap = {
 const ABLETON: Keymap = { ...MOSH, [A.SPLIT]: "Mod+E", [A.RECORD]: "F9" };
 const FL: Keymap = { ...MOSH, [A.SPLIT]: "Mod+E", [A.DUPLICATE]: "Mod+B" };
 
-export const KEYMAPS: Record<string, Keymap> = { mosh: MOSH, ableton: ABLETON, fl: FL };
+// Pro Tools — Separate Clip = ⌘E; Selector = F7, Grabber = F8; Record = ⌘Space
+// (PT also uses numpad 3); Return = back to start.
+const PROTOOLS: Keymap = {
+  ...MOSH,
+  [A.SPLIT]: "Mod+E",
+  [A.RECORD]: "Mod+Space",
+  [A.TOOL_RANGE]: "F7",
+  [A.TOOL_MOVE]: "F8",
+  [A.TO_START]: "Enter",
+};
+
+// Logic — Split at Playhead = ⌘T; Record stays R (mosh core); Return = back to start.
+const LOGIC: Keymap = {
+  ...MOSH,
+  [A.SPLIT]: "Mod+T",
+  [A.TO_START]: "Enter",
+};
+
+export const KEYMAPS: Record<string, Keymap> = { mosh: MOSH, ableton: ABLETON, fl: FL, protools: PROTOOLS, logic: LOGIC };
 
 export function getKeymap(name: string): Keymap {
   return KEYMAPS[name] ?? KEYMAPS.mosh;
@@ -128,5 +146,7 @@ export const REBINDABLE_ACTIONS: Action[] = Array.from(
     ...(Object.keys(MOSH) as Action[]),
     ...(Object.keys(ABLETON) as Action[]),
     ...(Object.keys(FL) as Action[]),
+    ...(Object.keys(PROTOOLS) as Action[]),
+    ...(Object.keys(LOGIC) as Action[]),
   ]),
 );
