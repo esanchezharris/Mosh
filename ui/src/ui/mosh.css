@@ -129,6 +129,58 @@
   --bone-dim: rgba(21, 21, 26, 0.6);
 }
 
+/* Pro Tools — flat neutral charcoal, teal-green accent (PT's edit-selection green). */
+[data-skin="protools"] {
+  --ink: #1b1c1e;
+  --ink-raise: #27282b;
+  --ink-deep: #121315;
+  --ink-line: #34363a;
+  --ink-line-soft: #25272a;
+  --bone: #e9eaec;
+  --mist: #c9cbcf;
+  --bone-dim: rgba(233, 234, 236, 0.55);
+  --lime: #34c3a4;
+  --lime-glow: #4fd9bb;
+  --lime-dim: rgba(52, 195, 164, 0.5);
+  --lime-faint: rgba(52, 195, 164, 0.14);
+}
+[data-skin="protools"][data-theme="light"] {
+  --ink: #eceef0;
+  --ink-raise: #ffffff;
+  --ink-deep: #dfe2e5;
+  --ink-line: #cdd1d6;
+  --ink-line-soft: #dde0e4;
+  --bone: #1b1c1e;
+  --mist: #3a3d42;
+  --bone-dim: rgba(27, 28, 30, 0.6);
+}
+
+/* Logic — warm graphite, azure-blue accent (Logic's transport/selection blue). */
+[data-skin="logic"] {
+  --ink: #1d1e22;
+  --ink-raise: #2a2b30;
+  --ink-deep: #141519;
+  --ink-line: #383a40;
+  --ink-line-soft: #292b30;
+  --bone: #e8e9ed;
+  --mist: #c8cad0;
+  --bone-dim: rgba(232, 233, 237, 0.55);
+  --lime: #4d8df0;
+  --lime-glow: #6ba3f6;
+  --lime-dim: rgba(77, 141, 240, 0.5);
+  --lime-faint: rgba(77, 141, 240, 0.14);
+}
+[data-skin="logic"][data-theme="light"] {
+  --ink: #e9eaee;
+  --ink-raise: #ffffff;
+  --ink-deep: #dcdee3;
+  --ink-line: #c9ccd2;
+  --ink-line-soft: #d9dbe0;
+  --bone: #1d1e22;
+  --mist: #3a3c42;
+  --bone-dim: rgba(29, 30, 34, 0.6);
+}
+
 * { box-sizing: border-box; }
 html, body, #root { margin: 0; height: 100%; width: 100%; }
 body { background: var(--ink); color: var(--bone); font-family: var(--font-body); overflow: hidden; }

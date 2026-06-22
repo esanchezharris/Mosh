@@ -5,13 +5,15 @@ import { type Page, type Locator, expect } from "@playwright/test";
 // arrangement exposes for structural (non-pixel) reads; gestures use real pointer
 // events so the configurable interaction layer (gestures/keymap/feel) is exercised.
 
-export const TEMPLATES = ["mosh", "ableton", "fl"] as const;
+export const TEMPLATES = ["mosh", "ableton", "fl", "protools", "logic"] as const;
 export type TemplateName = (typeof TEMPLATES)[number];
 
 export const TEMPLATE_SKIN: Record<TemplateName, { skin: string; theme: string; label: string }> = {
   mosh: { skin: "mosh", theme: "dark", label: "Mosh" },
   ableton: { skin: "ableton", theme: "light", label: "Ableton" },
   fl: { skin: "fl", theme: "dark", label: "FL" },
+  protools: { skin: "protools", theme: "dark", label: "Pro Tools" },
+  logic: { skin: "logic", theme: "dark", label: "Logic" },
 };
 
 /** Load the app in the CLASSIC shell (Mosh/dark template) and wait for the cold snapshot.
@@ -25,6 +27,19 @@ export async function boot(page: Page): Promise<void> {
   await page.addInitScript(() => {
     window.localStorage.clear();
     window.localStorage.setItem("mosh.settings", JSON.stringify({ version: 1, template: null, values: { redesignShell: false } }));
+  });
+  await page.goto("/");
+  await expect(page.getByTestId("app")).toBeVisible();
+  await expect(page.getByTestId("arrangement")).toBeVisible();
+}
+
+/** Boot in the agent-first REDESIGN shell (the shipping default) so the right
+ *  Session/Inspector rail is present — needed to observe the PT/Logic right-rail
+ *  restructure. (redesign-shell.spec has its own local copy; this is the shared one.) */
+export async function bootRedesign(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    window.localStorage.clear();
+    window.localStorage.setItem("mosh.settings", JSON.stringify({ version: 1, template: null, values: { redesignShell: true } }));
   });
   await page.goto("/");
   await expect(page.getByTestId("app")).toBeVisible();
