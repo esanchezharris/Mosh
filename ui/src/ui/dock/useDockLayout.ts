@@ -5,7 +5,19 @@
 // store + the user actions.
 
 import { create } from "zustand";
-import { resizeZone, toggleZone, type Zone } from "./dockLayout";
+import { resizeZone, toggleZone, collapseZone, expandZone, type Zone } from "./dockLayout";
+
+// Merge a layout-preset's {collapsed,size} onto a zone THROUGH the collapse/expand
+// engine, so a preset-driven collapse stashes the live width into prevSize (and a later
+// expand restores it) instead of a raw spread that leaves size/prevSize desynced.
+function mergePreset(z: Zone, p?: Partial<Zone>): Zone {
+  if (!p) return z;
+  if (p.collapsed === true) return collapseZone(z); // stash prevSize, size→0 (ignore any preset size)
+  let next = p.collapsed === false ? expandZone(z) : z; // expand restores prevSize (no-op if already open)
+  if (typeof p.size === "number") next = { ...next, size: clampSize(next, p.size) };
+  return next;
+}
+const clampSize = (z: Zone, s: number) => Math.max(z.min, Math.min(z.max, s));
 
 const KEY = "mosh.dockLayout";
 const DEFAULT_BOTTOM: Zone = { id: "detail", size: 196, min: 120, max: 520 };
@@ -74,9 +86,9 @@ export const useDockLayout = create<DockLayoutState>((set, get) => {
     toggleRight: () => { set({ right: toggleZone(get().right, 0) }); persist(); },
     applyPreset: (p) => {
       set((s) => ({
-        left: p.left ? { ...s.left, ...p.left } : s.left,
-        right: p.right ? { ...s.right, ...p.right } : s.right,
-        bottom: p.bottom ? { ...s.bottom, ...p.bottom } : s.bottom,
+        left: mergePreset(s.left, p.left),
+        right: mergePreset(s.right, p.right),
+        bottom: mergePreset(s.bottom, p.bottom),
       }));
       persist();
     },

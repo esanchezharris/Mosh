@@ -80,6 +80,7 @@ test.describe("template applied", () => {
     await expect(page.getByTestId("dock-left")).toBeVisible(); // browser opened
     await applyTemplate(page, "fl");
     await expect(page.getByTestId("dock-left")).toBeVisible(); // FL keeps it open
+    await expect(page.getByTestId("floating-window")).toHaveCount(0); // no stray drum float on a no-drum project
     await applyTemplate(page, "mosh");
     await expect(page.getByTestId("browser-expand")).toBeVisible(); // back to the rail
     await expect(page.getByTestId("dock-left")).toHaveCount(0);

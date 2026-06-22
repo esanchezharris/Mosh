@@ -21,7 +21,7 @@ import { Dock } from "./ui/Dock";
 import { DockShell } from "./ui/dock/DockShell";
 import { useDrumWindow } from "./ui/dock/useFloatingWindow";
 import { useDockLayout } from "./ui/dock/useDockLayout";
-import { applyLayoutArrangement } from "./settings/layoutPresets";
+import { applyLayoutArrangement, LAYOUT_PRESETS } from "./settings/layoutPresets";
 import { SampleBrowser } from "./ui/SampleBrowser";
 import { Mixer } from "./ui/Mixer";
 import { PluginBrowser } from "./ui/PluginBrowser";
@@ -53,7 +53,17 @@ export function App() {
   const prevLayout = useRef<string | null>(null);
   useEffect(() => {
     if (!snapshot) return;
-    if (prevLayout.current !== null && layout !== prevLayout.current) {
+    if (prevLayout.current === null) {
+      // Boot/reload: the dock rails restore from their OWN persistence, so don't re-apply
+      // them (that would clobber the user's saved drags). But the floating drum window is
+      // NOT persisted — re-open it for a layout that wants it (FL), matching its in-session
+      // behaviour, so a reload-into-FL still pops the channel rack.
+      if (LAYOUT_PRESETS[layout]?.drumWindow === "open") {
+        const clip = snapshot.tracks.find((t) => t.type === "drum")?.clips.find((c) => c.type === "midi");
+        if (clip) useDrumWindow.getState().open(clip.id);
+      }
+    } else if (layout !== prevLayout.current) {
+      // A real template switch: restructure the dock to that DAW's resting shape.
       applyLayoutArrangement(layout, {
         applyDock: useDockLayout.getState().applyPreset,
         openDrumWindow: useDrumWindow.getState().open,
