@@ -1,30 +1,34 @@
 # AGENTS.md
 
 **Trunk:** `main` is the only development trunk (per
-`docs/archive/consolidation/2026-06-09-mac-canonical-baseline-adr.md`). As of
-2026-06-11 it carries the wave line: the 266-feature conformance audit
-(`docs/FEATURE_AUDIT.md`, must-tier 82/82), the tracktion itemID patch
-(`patches/`), tempo ramps + audio warp, AU hosting, the iOS companion.
+`docs/archive/consolidation/2026-06-09-mac-canonical-baseline-adr.md`). It carries
+the full v0 DAW slice plus the post-v0 work merged through 2026-06-20: the wave
+line (266-feature conformance audit, `docs/FEATURE_AUDIT.md`, must-tier 82/82), the
+tracktion itemID patch (`patches/`), tempo ramps + audio warp, AU hosting, the iOS
+companion, **2-player multiplayer** (PR #74), **always-on voice** (PR #71), the DAW
+project-file importers (`ui/src/import/`), audio→MIDI (`/transcribe`), and the
+additive **Windows + NVIDIA/CUDA port** (commit `962a03f`, unverified on hardware).
+For the live status read `docs/CURRENT_STATUS.md`.
 
-**Mission for this phase:** intensive testing, verification, and hardening
-of the DAW. No new features unless a bug demands one.
+**Mission:** keep the DAW correct and verified — intensive testing, verification,
+and hardening. New features land additively (snapshot/events stay
+backward-compatible) and behind the same MoshOps seam.
 
-**PAUSED (2026-06-12):** read `docs/archive/hardening/2026-06-12-pause-alignment.md`
-immediately after this file — it is the pause marker: seat map, last green
-battery, parked side branches, resume procedures, and the owner's open items.
+**History:** the 2026-06-12 pause marker
+(`docs/archive/hardening/2026-06-12-pause-alignment.md`) is **archived/historical** —
+useful for old branch boundaries and parked work, not current status.
 
 ## Verify before any merge
 ```sh
 cmake --build build
 APP=build/Mosh_artefacts/Debug/Mosh.app/Contents/MacOS/Mosh
-MOSH_NO_AUDIO=1 "$APP" --selftest        # 650/650, 0 failed, 0 JUCE assertions
-MOSH_NO_AUDIO=1 "$APP" --selftest-undo   # 18/18
+MOSH_NO_AUDIO=1 "$APP" --selftest        # ≈893 checks (gate-dependent), 0 failed, 0 JUCE assertions
+MOSH_NO_AUDIO=1 "$APP" --selftest-undo   # focused undo battery
 ```
-The LOCAL battery above is THE merge gate — run it and paste the tallies
-in the PR/commit. CI (`.github/workflows/macos-ci.yml`) is manual-only
-(`workflow_dispatch`): hosted macOS runners are paid (10x minute
-multiplier) and this project does not depend on paid GitHub features.
-If automated CI is ever wanted, use a self-hosted runner on the studio
+Run it 3× for determinism and paste the tallies in the PR/commit — the LOCAL
+battery is THE merge gate. **There is no hosted CI:** GitHub Actions were removed
+on 2026-06-15 by owner decision (hosted macOS runners are paid, 10x minute
+multiplier). If automated CI is ever wanted, use a self-hosted runner on the studio
 Mac — never re-enable hosted triggers without a budget decision.
 
 ## Hard rules (line-independent)

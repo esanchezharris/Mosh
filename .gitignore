@@ -45,6 +45,12 @@ service/sketch/.sketch.env
 # PyFLP venv + machine-local FLP_PY (setup-flp.sh)
 service/flp/.venv/
 service/flp/.flp.env
+# SFT lane: mlx-lm venv + machine-local SFT_PY + generated dataset/adapters (setup-sft.sh)
+service/sft/.venv/
+service/sft/.sft.env
+service/sft/.sft-data/
+service/sft/.adapters/
+service/sft/.fused/
 service/__pycache__/
 **/__pycache__/
 *.pyc

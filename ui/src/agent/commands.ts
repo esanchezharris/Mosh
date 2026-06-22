@@ -1,5 +1,5 @@
-// The curated tool catalog Moshi's brain is allowed to call. Phase 1 deliberately
-// exposes a high-value, low-blast-radius subset of the ~93 MoshOps commands — no
+// The curated tool catalog Moshi's brain is allowed to call. It deliberately
+// exposes a high-value, low-blast-radius subset (~63 of the ~147 MoshOps commands) — no
 // project IO, device settings, scans, or anything that could lose the user's work.
 // Each entry feeds two consumers: (1) the LLM system prompt (so the brain knows
 // what it can do), and (2) client-side validation, so a malformed or unknown
