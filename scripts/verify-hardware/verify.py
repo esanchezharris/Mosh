@@ -195,7 +195,11 @@ def check_transform(ctx):
         {"command": "accept_render", "args": {"clipId": "${C}"}},
         {"command": "export_audio", "args": {"file": str(out)}},
     ]
-    results, proc = run_script(ctx.bin, cmds, SESSION, extra_env={"MOSH_SERVICE_PORT": "8795"})
+    # MOSH_ENABLE_TRANSFORM=0 pins the FAKE transform adapter so this deterministic check
+    # is unaffected by any real RAVE models installed in RAVE_MODEL_DIR (the real path is
+    # covered by --rave). Mirrors the selftest's hermetic gate.
+    results, proc = run_script(ctx.bin, cmds, SESSION,
+                               extra_env={"MOSH_SERVICE_PORT": "8795", "MOSH_ENABLE_TRANSFORM": "0"})
     fails = failed_commands(results)
     outputs = sorted(glob.glob(str(_mosh_session_base() / SESSION / "renders" / "*" / "output.wav")))
     if fails or not outputs:
@@ -242,7 +246,37 @@ def check_full_loop(ctx):
     return row("Full producer loop", ok, {"wav": str(out), **st})
 
 
-OFFLINE_CHECKS = [check_makes_sound, check_drums, check_transform, check_full_loop]
+def check_relative_ref_export(ctx):
+    """Regression guard for the export-on-MP-audio-clip hang. A wave clip relinked to a
+    co-located source on an unsaved edit stores a RELATIVE reference (the same shape
+    mp_commit_track produces). Before the fix that ref mis-resolved to a non-existent
+    path → the offline render recursed forever (ArrangerLauncherSwitchingNode) and
+    export never returned. Asserts the export COMPLETES (no hang — a regression shows as
+    a timeout) and is non-silent. Engine-only (no service / no models)."""
+    SESSION = "verify-relref"
+    out = ART / "06_relative_ref_export.wav"
+    tone = _mosh_session_base() / SESSION / "audio" / "tone.wav"   # add_test_tone_clip writes here
+    cmds = [
+        {"command": "create_track", "args": {"name": "A"}, "capture": {"T": "trackId"}},
+        {"command": "add_test_tone_clip", "args": {"trackId": "${T}", "seconds": 2.0, "freq": 220.0, "name": "tone"}, "capture": {"C": "clipId"}},
+        {"command": "relink_clip", "args": {"clipId": "${C}", "file": str(tone)}},   # co-located → RELATIVE ref
+        {"command": "export_audio", "args": {"file": str(out)}},
+    ]
+    try:
+        results, proc = run_script(ctx.bin, cmds, SESSION, timeout=90)
+    except subprocess.TimeoutExpired:
+        return row("Relative-ref export (MP-hang guard)", False,
+                   {"error": "export HUNG (timed out) — the MP/relative-source export hang regressed"})
+    fails = failed_commands(results)
+    if fails or not out.exists():
+        return row("Relative-ref export (MP-hang guard)", False,
+                   {"failed_commands": fails, "exists": out.exists(), "stderr": proc.stderr[-300:]})
+    st = stats(out)
+    ok = st["rms"] > 0.001 and st["peak"] > 0.01
+    return row("Relative-ref export (MP-hang guard)", ok, {"wav": str(out), **st})
+
+
+OFFLINE_CHECKS = [check_makes_sound, check_drums, check_transform, check_full_loop, check_relative_ref_export]
 
 
 # ── main ────────────────────────────────────────────────────────────────────────

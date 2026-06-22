@@ -388,7 +388,27 @@ void MoshEngine::wireEditResolvers()
     {
         if (juce::File::isAbsolutePath (path))
             return juce::File (path);
-        return editPath.getParentDirectory().getChildFile (path);
+
+        // Resolve a relative ref against the edit file's directory. NOTE the asymmetry we
+        // must absorb: Tracktion's setToDirectFileReference (used by relink_clip /
+        // mp_commit_track / consolidateAudioInto) stores the string via
+        // getRelativePathFrom(editFileRetriever()), and getRelativePathFrom treats the
+        // edit *file* path as a *directory* — so it emits one extra "../" (e.g.
+        // "../audio/by-hash/<sha>.wav" rather than "audio/by-hash/<sha>.wav"). Resolving
+        // that against the file's parent then lands one level too high → a NON-EXISTENT
+        // path → the clip reads as source-missing and the offline render HANGS
+        // (RenderTask -> getNodes -> ArrangerLauncherSwitchingNode). This was the
+        // "export hangs on a multiplayer-consolidated audio clip" bug. So resolve against
+        // the parent first (legacy / already-correct refs), then fall back to the
+        // edit-file-as-directory base (which matches how the string was computed).
+        // (Aside: the WRITE side — setToDirectFileReference on an unsaved edit — trips a
+        // Debug-only jassert in Tracktion's findPathFromFile; benign, fires in Debug only,
+        // and is the very condition this resolver heals at read time.)
+        if (auto byParent = editPath.getParentDirectory().getChildFile (path); byParent.existsAsFile())
+            return byParent;
+        if (auto byEditAsDir = editPath.getChildFile (path); byEditAsDir.existsAsFile())
+            return byEditAsDir;
+        return editPath.getParentDirectory().getChildFile (path);   // unchanged default for a genuinely-missing source
     };
 }
 

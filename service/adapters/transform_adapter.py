@@ -42,7 +42,11 @@ def installed_targets() -> list:
 def available() -> bool:
     """True when the REAL RAVE backend is installed: the transform venv python exists
     (TRANSFORM_PY, written by setup-transform.sh) AND at least one .ts model is present.
-    Otherwise the deterministic fake transform runs (mirrors stable_audio3 → fake)."""
+    Otherwise the deterministic fake transform runs (mirrors stable_audio3 → fake).
+    MOSH_ENABLE_TRANSFORM=0 forces the fake even when models are installed — used by the
+    deterministic selftest so locally-present RAVE models can't change its outcome."""
+    if os.environ.get("MOSH_ENABLE_TRANSFORM", "1") == "0":
+        return False
     py = os.environ.get("TRANSFORM_PY", "")
     return bool(py and os.path.exists(py) and installed_targets())
 

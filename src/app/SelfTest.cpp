@@ -238,6 +238,13 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     using namespace juce;
     failures = 0; checks = 0;
     resetSections();
+    // Pin the FAKE transform adapter for the deterministic selftest, regardless of whether
+    // real RAVE models happen to be installed in RAVE_MODEL_DIR on this machine (the
+    // spawned generative service inherits this env). The "Route B: transform (fake)"
+    // section asserts the deterministic fake adapter; without this it would hit the real
+    // RAVE backend if models are present and break. Mirrors how SA3 stays fake here. The
+    // real transform path is covered separately by scripts/verify-hardware/verify.py --rave.
+    mosh::setEnvVar ("MOSH_ENABLE_TRANSFORM", "0");
     std::cerr << "\n===== Mosh Stage 1 command-surface harness =====\n";
     section ("Stage 1: command surface / cold snapshot");
 
