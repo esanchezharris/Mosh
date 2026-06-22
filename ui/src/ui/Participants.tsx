@@ -15,11 +15,20 @@ export function Participants() {
   const localStream = useVideo((s) => s.localStream);
   const remoteStreams = useVideo((s) => s.remoteStreams);
   const toggleCamera = useVideo((s) => s.toggleCamera);
+  const setHidden = useVideo((s) => s.setHidden);
   const teardown = useVideo((s) => s.teardown);
   const others = mp.active ? Object.entries(peers).filter(([id]) => id !== mp.selfPeer) : [];
 
   // Release the camera when the rail unmounts (defense-in-depth on top of toggle-off).
   useEffect(() => () => teardown(), [teardown]);
+
+  // …and whenever the WebView is hidden/backgrounded — the camera light must not stay on
+  // behind an invisible window (mirrors the mic release in AgentComposer).
+  useEffect(() => {
+    const onVis = () => void setHidden(document.hidden);
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, [setHidden]);
 
   return (
     <div className="participants" data-testid="participants">

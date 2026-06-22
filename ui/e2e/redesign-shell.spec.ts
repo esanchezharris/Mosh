@@ -216,6 +216,18 @@ test("flag on: camera is off by default; toggling it shows a self-preview tile, 
   await expect(page.getByTestId("participant-self")).toHaveCount(0);
 });
 
+test("flag on: hiding the WebView releases the camera; returning restores it (privacy)", async ({ page }) => {
+  await bootRedesign(page);
+  await page.getByTestId("camera-toggle").click();
+  await expect(page.getByTestId("participant-self")).toBeVisible();
+  // Background the tab → the camera track must be released (self-tile disappears).
+  await page.evaluate(() => { Object.defineProperty(document, "hidden", { value: true, configurable: true }); document.dispatchEvent(new Event("visibilitychange")); });
+  await expect(page.getByTestId("participant-self")).toHaveCount(0);
+  // Return to the foreground → re-acquired (the user had it on).
+  await page.evaluate(() => { Object.defineProperty(document, "hidden", { value: false, configurable: true }); document.dispatchEvent(new Event("visibilitychange")); });
+  await expect(page.getByTestId("participant-self")).toBeVisible();
+});
+
 test("flag off (default): no camera toggle", async ({ page }) => {
   await page.addInitScript(() => window.localStorage.clear());
   await page.goto("/");

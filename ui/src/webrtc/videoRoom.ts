@@ -12,7 +12,7 @@ export class VideoRoom {
   private localStream: MediaStream | null = null;
 
   constructor(
-    private readonly selfId: string,
+    readonly selfId: string,
     private readonly transport: SignalTransport,
     private readonly onRemoteStream: (peerId: string, stream: MediaStream | null) => void,
     private readonly config: RTCConfiguration = DEFAULT_RTC_CONFIG,

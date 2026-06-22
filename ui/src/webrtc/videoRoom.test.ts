@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { VideoRoom } from "./videoRoom";
+import { PeerConn } from "./peerConnection";
 import type { SignalMessage, SignalTransport } from "./signal";
 
 // A minimal fake RTCPeerConnection: enough of the SDP/ICE state machine to exercise the
@@ -28,6 +29,11 @@ class FakePC {
     this.signalingState = d.type === "offer" ? "have-local-offer" : "stable";
   }
   async setRemoteDescription(d: { type: string; sdp: string }) {
+    // Faithful to the real state machine: a remote ANSWER is only legal in
+    // have-local-offer — otherwise InvalidStateError (a stale/duplicate answer). This is
+    // what makes the suite actually catch a missing answer-state guard.
+    if (d.type === "answer" && this.signalingState !== "have-local-offer")
+      throw new DOMException("Called in wrong state", "InvalidStateError");
     this.remoteDescription = d;
     this.signalingState = d.type === "offer" ? "have-remote-offer" : "stable";
     if (d.sdp.includes("track")) this.ontrack?.({ streams: [{ id: "remote" } as unknown as MediaStream] });
@@ -112,5 +118,23 @@ describe("VideoRoom", () => {
     await flush();
     A.close();
     expect(remote["A>B"]).toBeNull();
+  });
+
+  it("turning the camera OFF clears the peer's tile (sends bye)", async () => {
+    const { A, remote } = pair();
+    A.setLocalStream(stream());
+    await flush();
+    expect(remote["B>A"]).toBeTruthy(); // B sees A
+    A.setLocalStream(null); // camera off → bye → B drops A's tile
+    await flush();
+    expect(remote["B>A"]).toBeNull();
+  });
+});
+
+describe("PeerConn robustness", () => {
+  it("ignores a stale answer received in 'stable' state (no throw / unhandled rejection)", async () => {
+    const pc = new PeerConn(true, () => {}, () => {}, {});
+    // No local offer was made → state is 'stable'; a stray answer must be dropped, not applied.
+    await expect(pc.onSignal({ kind: "answer", sdp: "v=answer" })).resolves.toBeUndefined();
   });
 });

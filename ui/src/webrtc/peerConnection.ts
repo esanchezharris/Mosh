@@ -38,16 +38,23 @@ export class PeerConn {
     this.pc.ontrack = ({ streams }) => this.onRemoteStream(streams[0] ?? null);
 
     this.pc.onconnectionstatechange = () => {
-      if (["failed", "disconnected", "closed"].includes(this.pc.connectionState)) this.onRemoteStream(null);
+      // Only TERMINAL states clear the tile. "disconnected" is transient (Wi-Fi roam /
+      // NAT rebind) and usually recovers to "connected" with the media intact — clearing
+      // on it would permanently blank a tile after a momentary blip.
+      if (["failed", "closed"].includes(this.pc.connectionState)) this.onRemoteStream(null);
     };
   }
 
-  /** Add / swap / drop our outgoing camera track. Adding the first track renegotiates. */
+  /** Add / swap / drop our outgoing camera track. Adding the first track renegotiates;
+      dropping it (camera off) emits a "bye" so the peer clears our tile (replaceTrack(null)
+      alone neither renegotiates nor fires the remote's ontrack — the frame would freeze). */
   setLocalStream(stream: MediaStream | null): void {
     const track = stream?.getVideoTracks()[0] ?? null;
     const sender = this.pc.getSenders().find((s) => !s.track || s.track.kind === "video");
     if (sender) {
+      const wasSending = !!sender.track;
       void sender.replaceTrack(track); // swap (camera flip) or drop (track=null) — no renegotiation
+      if (!track && wasSending) this.send({ kind: "bye" }); // "I stopped sharing" → peer drops our tile
     } else if (track && stream) {
       this.pc.addTrack(track, stream); // first track → onnegotiationneeded fires
     }
@@ -55,14 +62,21 @@ export class PeerConn {
 
   async onSignal(msg: SignalMessage): Promise<void> {
     if (msg.kind === "offer" || msg.kind === "answer") {
-      const offerCollision = msg.kind === "offer" && (this.makingOffer || this.pc.signalingState !== "stable");
-      this.ignoreOffer = !this.polite && offerCollision;
-      if (this.ignoreOffer) return; // impolite peer wins the glare — drop the colliding offer
-      await this.pc.setRemoteDescription({ type: msg.kind, sdp: msg.sdp });
-      if (msg.kind === "offer") {
-        const answer = await this.pc.createAnswer();
-        await this.pc.setLocalDescription(answer);
-        if (this.pc.localDescription) this.send({ kind: "answer", sdp: this.pc.localDescription.sdp });
+      try {
+        const offerCollision = msg.kind === "offer" && (this.makingOffer || this.pc.signalingState !== "stable");
+        this.ignoreOffer = !this.polite && offerCollision;
+        if (this.ignoreOffer) return; // impolite peer wins the glare — drop the colliding offer
+        // Drop a stale/duplicate answer that no longer matches our state (e.g. relay
+        // re-delivery on reconnect, or two answers interleaved) — applying it would throw.
+        if (msg.kind === "answer" && this.pc.signalingState !== "have-local-offer") return;
+        await this.pc.setRemoteDescription({ type: msg.kind, sdp: msg.sdp });
+        if (msg.kind === "offer") {
+          const answer = await this.pc.createAnswer();
+          await this.pc.setLocalDescription(answer);
+          if (this.pc.localDescription) this.send({ kind: "answer", sdp: this.pc.localDescription.sdp });
+        }
+      } catch {
+        /* out-of-state / stale SDP — ignore; onnegotiationneeded recovers if needed */
       }
     } else if (msg.kind === "ice") {
       try {

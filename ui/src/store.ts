@@ -337,9 +337,13 @@ export const useStore = create<State>((set, get) => ({
         if (p.active) useVideo.getState().syncPeers(Object.keys(peers));
         else useVideo.getState().teardown();
       } else if (ev.type === "webrtc_signal") {
-        // Inbound SDP/ICE from a peer (relayed point-to-point) → the video room.
-        const p = ev.payload as { from?: string; payload?: SignalMessage };
-        if (p?.from && p.payload) useVideo.getState().onSignal(p.from, p.payload);
+        // Inbound SDP/ICE from a peer (relayed point-to-point) → the video room. Video is
+        // a redesign-only feature, so a flag-off client must NOT silently negotiate /
+        // hold a peer connection it has no UI for (prime directive: flag-off == unchanged).
+        if (Boolean(useSettings.getState().values.redesignShell)) {
+          const p = ev.payload as { from?: string; payload?: SignalMessage };
+          if (p?.from && p.payload) useVideo.getState().onSignal(p.from, p.payload);
+        }
       } else if (ev.type === "peer_selection") {
         // The other peer's current track/clip selection (the highlight we draw).
         const p = ev.payload as { peerId: string; trackId?: string | null; clipId?: string | null };
