@@ -17,7 +17,8 @@
     "harvest": "tsx src/harvest/cli.ts harvest",
     "verify": "tsx src/harvest/cli.ts verify",
     "import": "tsx src/import/cli.ts",
-    "gen-turns": "tsx scripts/genTurns.mts"
+    "gen-turns": "tsx scripts/genTurns.mts",
+    "gepa": "tsx scripts/gepa.mts"
   },
   "dependencies": {
     "qrcode": "^1.5.4",
