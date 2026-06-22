@@ -21,6 +21,11 @@ The map of Mosh's documentation. **New here? Read [`../ARCHITECTURE.md`](../ARCH
 - [`PROGRESS.md`](PROGRESS.md) — chronological milestone log (newest at bottom).
 - [`VERIFICATION.md`](VERIFICATION.md) — the hardware-verification runbook (does it make sound,
   mic/voice, two-peer multiplayer) and its results.
+- [`MULTIPLAYER.md`](MULTIPLAYER.md) — the 2-player collaboration model: what syncs vs. stays
+  local (independent playheads), track locks + commit-on-move, audio-clip/SA3 stem sync, the
+  connect/join UX, and known limits. Read before a live session.
+- [`PLAYTEST_SETUP.md`](PLAYTEST_SETUP.md) — guest-facing setup for a live playtest (install an
+  unsigned build past Gatekeeper, join a session).
 
 ## Specs (the detailed design — "how")
 
