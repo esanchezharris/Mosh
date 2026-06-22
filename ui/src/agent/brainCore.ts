@@ -14,8 +14,11 @@ export const INTENTS = ["ACK_GOT_IT", "ACK_WORKING", "DONE", "HUH", "NUH", "UHOH
 function compactSnapshot(s: Snapshot): string {
   const tracks = (s.tracks ?? [])
     .map((t) => {
-      const clips = (t.clips ?? []).map((c) => `${c.id}:${c.type}@${c.start}s`).join(", ");
-      return `  ${t.id} "${t.name}" ${t.volumeDb ?? 0}dB${t.mute ? " muted" : ""}${t.solo ? " solo" : ""} clips:[${clips}]`;
+      // ids are QUOTED so the model copies them as JSON strings — an unquoted
+      // numeric-looking id (e.g. 17) gets emitted as the number 17, which fails
+      // the string-typed trackId/clipId validation and the command is dropped.
+      const clips = (t.clips ?? []).map((c) => `"${c.id}":${c.type}@${c.start}s`).join(", ");
+      return `  "${t.id}" "${t.name}" ${t.volumeDb ?? 0}dB${t.mute ? " muted" : ""}${t.solo ? " solo" : ""} clips:[${clips}]`;
     })
     .join("\n");
   return `tempo ${s.session?.tempo ?? 120} BPM, ${s.session?.timeSigNumerator ?? 4}/${s.session?.timeSigDenominator ?? 4}\ntracks:\n${tracks || "  (none)"}`;
@@ -31,6 +34,7 @@ export function systemPrompt(snap: Snapshot | null): string {
     commandCatalogPrompt(),
     "Rules:",
     "- Use the REAL ids from the session below for trackId/clipId. Never invent ids or commands.",
+    '- trackId/clipId are STRING ids: match one from the session exactly and pass it as a JSON string, e.g. "trackId": "17" — never the bare number 17, and never with extra quote characters inside the value.',
     "- One request can produce several commands (they apply together as one undoable change).",
     "- If the request is unclear or needs info you don't have, set intent HUH and ask in `say` — don't guess.",
     "- After making edits use intent ACK_GOT_IT (or DONE for a finishing flourish).",
