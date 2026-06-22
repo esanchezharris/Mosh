@@ -43,7 +43,7 @@ There are five layers, and exactly two things connect the UI to the engine:
 
 ## 2. Module map — where everything lives
 
-Every row verified against the source (2026-06-17). "Start here" is the file to open first.
+Every row verified against the source (2026-06-21). "Start here" is the file to open first.
 
 | Path | What it does | Start here | Status |
 |---|---|---|---|
@@ -59,8 +59,12 @@ Every row verified against the source (2026-06-17). "Start here" is the file to 
 | `src/brain` | Native OpenAI-compatible LLM proxy for the Moshi brain in the packaged app (deepseek/openai/xai via env). | `src/brain/BrainProxy.cpp` | current |
 | `src/voice` | macOS `SFSpeechRecognizer` hold-to-talk STT → `voice_event` to the UI composer. | `src/voice/NativeSpeech.mm` | current |
 | `src/remote` | HTTP server for the iPhone companion: pairing, phone-take recording, command/event forwarding. | `src/remote/RemoteCompanionServer.h` | current |
+| `src/multiplayer` | 2-player collaboration over the same spine: stable `logicalId`s, the MoshOps lock guard (epoch-fenced, fail-closed), track-commit serialize/apply (no-echo), HTTP long-poll relay client. | `src/multiplayer/MultiplayerSession.h` | current |
+| `src/training` | Type-beat LoRA trainer scaffold: rights/eligibility gate + corpus bundler + job orchestration over `/training/*` (behind a **fake** backend; real on-device training deferred). | `src/training/TrainerRegistry.h` | scaffold |
 | `ui/` | React arrangement UI in the WebView. Arrange (drag/trim/split), mix, plugins, neural, generative drawer, Moshi agent + voice. | `ui/src/App.tsx`, `ui/src/bridge.ts` | current |
-| `service/` | Python generative job broker: FakeAdapter stub + Stable Audio 3 (MLX), colour-steering DSL, quality readout. | `service/server.py` | current |
+| `ui/src/import` | DAW project-file importer: parses `.rpp`/`.als`/`.flp` → a `moshIR` intermediate → replays as MoshOps commands (the `.flp` path shells to a PyFLP sidecar in `service/flp/`). | `ui/src/import/importFile.ts` | current |
+| `ui/src/harvest` | Agent-training data path: replays `mosh-log.jsonl` through the mock backend to reconstruct per-turn snapshots → versioned `(before, utterance, commands, after, outcome)` tuples. | `ui/src/harvest/harvester.ts` | current |
+| `service/` | Python generative job broker: FakeAdapter stub + Stable Audio 3 (MLX/CUDA), colour-steering DSL, quality readout; also `/transcribe` (audio→MIDI via Basic Pitch) and `/sketch` (beatbox→drums) on isolated venvs. | `service/server.py` | current |
 
 ---
 
@@ -95,6 +99,10 @@ What Mosh can actually do today, grouped for a producer. Status is honest: `work
 | **Project save / open / new** | ⚠️ **known-gap** | `save` · `new_project` · `open_project` · `save_as` | Commands work + multiple projects coexist, **but:** (a) **no auto-save / no save-on-quit / no unsaved-changes prompt** → quit without ⌘S loses work; (b) relaunch always loads the fixed `~/Library/Mosh/session/session.tracktionedit`, never your last project (no Recent list); (c) projects **not portable** — absolute audio paths in one shared session pool; Save As doesn't consolidate audio. *Fix-session scoped separately.* |
 | Automation / buses / sends / tempo-map | 🟡 partial | `add_automation_point` · `create_bus` · `add_send` · `insert_tempo_change` … | Backend routing exists; **no UI yet**; some agent-exposed on production rungs only. |
 | Plugin discovery, device/IO, file browse | ✅ works (backend) | `list_plugins` · `rescan_plugins` · `set_audio_device` · `set_buffer_size` · `list_directory` … | Backend queries; **not agent-callable** (safety). |
+| 2-player multiplayer | ✅ works (gated) | `mp_claim_track` · `mp_commit_track` · `mp_sync_locks` · `apply_remote_track` · `mp_serialize_project` · `mp_apply_bootstrap` … | Track-lock + commit-on-move; HTTP long-poll relay (local stdlib or Supabase, one binary via env); epoch-fenced, fail-closed. See `src/multiplayer/`. |
+| DAW project import | ✅ works (UI/tooling) | *(no MoshOps command — `ui/src/import` replays existing commands)* | `.rpp`/`.als`/`.flp` → `moshIR` → MoshOps replay. Agent-callable subset only; `.flp` via PyFLP sidecar. See `docs/MOSHI_IMPORTERS.md`. |
+| Audio → MIDI | ✅ works (gated) | `transcribe_clip` | Right-click wave clip → Convert to MIDI (Basic Pitch); `/transcribe` on an isolated venv (503 if absent). |
+| Type-beat LoRA training | 🟡 scaffold | `training_*` (`/training/*`) | Rights gate + corpus bundler + job orchestration behind a **fake** backend; real on-device training deferred. See `docs/type-beat-trainer.md`. |
 | Pooled RAVE/DDSP neural models | ⛔ gated | `load_neural_model` | Deferred (anira + LibTorch). v0 ships the inline MLP only. |
 
 ---
@@ -102,7 +110,7 @@ What Mosh can actually do today, grouped for a producer. Status is honest: `work
 ## 5. Run, build, test
 
 - **Run the app / iterate the UI:** `./run-mosh.sh` (see the script header for flags). For live UI dev, set `MOSH_UI_DEV_SERVER` to the Vite dev URL so the WebView loads from Vite instead of the staged bundle.
-- **Verify the backend:** `Mosh --selftest` — the command-surface harness (**744 checks** on a machine where the optional local Serum-VST3 gate is present; a few fewer without it, and the heavy real-model path adds more behind `MOSH_SELFTEST_SA3=1`). Run 3× for determinism (see memory `mosh-verification-conventions`). Visual demos: `Mosh --demo3`…`--demo6`.
+- **Verify the backend:** `Mosh --selftest` — the command-surface harness (**≈893 checks** with no audio / SA3 off; the count is **gate-dependent** — the optional local Serum-VST3 gate and the heavy real-model path behind `MOSH_SELFTEST_SA3=1` add more). Run 3× for determinism (see memory `mosh-verification-conventions`). Visual demos: `Mosh --demo3`…`--demo6`. (Batch/offline audio proofs: `Mosh --run-script` + `scripts/verify-hardware/`, see `docs/VERIFICATION.md`.)
 - **Build:** CMake (JUCE 8 + Tracktion via submodule, pinned in `cmake/Dependencies.cmake`). Neural/SA3 deps are fetch-gated behind `-DMOSH_ENABLE_RTNEURAL=ON` / `-DMOSH_ENABLE_ANIRA=ON`; the generative service runs under its MLX venv when `MOSH_ENABLE_SA3=1`.
 - **UI tests:** `npm test` in `ui/` (vitest + jsdom). `commands.contract.test.ts` parses `MoshOps.cpp` so the agent command catalog can't drift from the backend.
 - **UI e2e:** `npm run test:e2e` in `ui/` (Playwright + headless Chromium). Specs in `ui/e2e/` drive the real React WebView against the Vite dev server, where `bridge.ts` wires in the in-memory mock backend (`bridge.mock.ts`) — the same `execute_command`+snapshot+events contract the C++ MoshOps exposes — so the whole frontend (store, gestures, keymap, templates, optimistic previews) is exercised deterministically with no native build / audio / Python service. Coverage: the full producer loop, per-template regression (Mosh/Ableton/FL), keyboard-a11y / empty-state / narrow-window polish, and a per-skin screenshot walkthrough (`e2e-artifacts/`). The packaged WebView app can't be Playwright-driven (and its command surface is identical), so its smoke path stays `Mosh --selftest`.
@@ -132,7 +140,7 @@ The generative adapter contract (`available()`/`backend_name()`/`render(input_wa
 
 - **`CLAUDE.md`** — the run manifest: prime directives + per-stage gate ledger (what's done / next). Auto-loads every session.
 - **Specs `00`–`07`** (repo root) — the detailed design, "source of truth for *how*." Each carries a status banner. *(Numbering: `02` is `docs/02_MOSHOPS_CONTRACT.md`; there is no `03` — the WebView UI is covered here + by `02`.)*
-- **`docs/`** — live reference: `INDEX.md` (the doc map — start here), `02_MOSHOPS_CONTRACT.md`, `ENGINE_API_NOTES.md`, `MULTIPLAYER.md` (the 2-player collaboration model — what syncs vs. local, locks, audio-clip sync), `PROGRESS.md`, `FEATURE_AUDIT.md`, `IPHONE_COMPANION.md`, and the `plans/` wave roadmap.
+- **`docs/`** — live reference: `INDEX.md` (the doc map — start here), `02_MOSHOPS_CONTRACT.md`, `ENGINE_API_NOTES.md`, `MULTIPLAYER.md` (the 2-player collaboration model — what syncs vs. local, locks, audio-clip sync), `PROGRESS.md`, `FEATURE_AUDIT.md`, `IPHONE_COMPANION.md`, `VERIFICATION.md` (hardware runbook), `MOSHI_IMPORTERS.md` (the DAW-import pipeline), `MOSHI_TRAJECTORY_FORMAT.md` (the training-harvest tuple format), `type-beat-trainer.md`, and the `plans/` wave roadmap. Subsystem READMEs: [`service/README.md`](service/README.md) (generative service endpoints), [`supabase/README.md`](supabase/README.md) (the cloud multiplayer relay).
 - **`docs/archive/`** — dated point-in-time reports, frozen by design; kept for history: `consolidation/`, `hardening/`, `superpowers/` (design-sprint specs), `test-iterate-loop/`, `ponytail-audit-report.md`.
 - **`design-lab/`** — the Moshi-character design taste reference (`HOUSE_STYLE.md`, `LOOKBOOK.md`).
 - **Agent memory** (`~/.claude/.../memory/`) — cross-session facts; e.g. `project-file-management-state.md` records the verified save/open behavior summarized in §4.

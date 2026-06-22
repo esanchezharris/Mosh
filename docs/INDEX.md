@@ -49,6 +49,14 @@ Repo root, each with a status banner. `02` lives here in `docs/`; there is no st
 - [`IPHONE_COMPANION.md`](IPHONE_COMPANION.md) — the remote companion architecture + endpoints.
 - [`type-beat-trainer.md`](type-beat-trainer.md) — the LoRA type-beat trainer (scaffold + fake
   backend; real on-device training deferred).
+- [`MOSHI_IMPORTERS.md`](MOSHI_IMPORTERS.md) — the DAW project-file importer (`.rpp`/`.als`/`.flp`
+  → `moshIR` → MoshOps replay; code in `ui/src/import/`).
+- [`MOSHI_TRAJECTORY_FORMAT.md`](MOSHI_TRAJECTORY_FORMAT.md) — the agent-training tuple format +
+  the JSONL-log harvester / live loop (code in `ui/src/harvest/`).
+- [`../service/README.md`](../service/README.md) — the generative service endpoints
+  (`/submit`, `/colors`, `/transcribe`, `/sketch`) across Fake / Mac-SA3 / PC-CUDA adapters.
+- [`../supabase/README.md`](../supabase/README.md) — the cloud multiplayer relay
+  (Postgres + Edge Function); local stdlib relay lives in `relay/`. Native side: `src/multiplayer/`.
 - [`FEATURE_AUDIT.md`](FEATURE_AUDIT.md) / [`FEATURE_AUDIT.json`](FEATURE_AUDIT.json) +
   [`audit/`](audit/) — the 2026-06-09 capability/surface dashboard (historical baseline + deltas).
 
