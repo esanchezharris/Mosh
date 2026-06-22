@@ -92,6 +92,33 @@ cd ui && OPENAI_BASE_URL=http://<box-ip>:8000/v1 OPENAI_API_KEY=x \
 This is the multi-epoch run the local Mac can't do — the real test of whether the
 100k-arrangement corpus closes the content-generation gap.
 
+## Note-population — the content-quality fixes
+
+The first runs nailed the deterministic ops (tempo, mixer, add-clip) but failed the
+one task that needs real content generation: *"write a short pattern into the clip."*
+Three separate bugs stacked up, each fixed here:
+
+1. **Unfair metric.** The eval graded a populate reply by multiset recall against the
+   source clip's *exact* note count (often 64), so a perfectly good 6-note pattern
+   scored 6/64 ≈ 0.09. `ui/src/gepa/metric.ts` now uses `fairRecall`, which caps the
+   required multiplicity of any one command at `SHORT_PATTERN_NOTES` (8) — a "short
+   pattern" gets full credit; deterministic single-op gold is graded exactly as before.
+2. **Truncated targets.** `max_seq_length` was 2048, but Moshi's system prompt is ~3k
+   tokens — the note target was truncated off the end and the model never saw a full
+   pattern (it collapsed to ~3 notes). Default is now **4096** (fits prompt + pattern).
+3. **No assistant masking on CUDA.** trl's `assistant_only_loss` needs a chat template
+   with `{% generation %}` tags; Qwen3's lacks them, so the first cloud run fell back to
+   full-sequence loss — the ~3k-token system prompt dominated the gradient and the model
+   learned to **defer** on note population. `sft_cuda_train.py` now injects the tags into
+   the real template (byte-identical render → no train/serve skew). The mlx lane already
+   masks via `--mask-prompt`.
+
+Verify the masking fix GPU-free (tokenizer only):
+```bash
+source service/sft/.sft.env && "$SFT_PY" service/sft/verify_mask.py
+# → OK  no skew · assistant mask = …/… tokens — loss on the completion only
+```
+
 ## Data-rights
 The corpus derives arrangements/note data from third-party projects → **internal-only
 cold-start**. Do not redistribute fine-tuned weights without a rights review

@@ -15,6 +15,8 @@ num_layers: 8                   # how many top transformer layers get LoRA
 iters: 300
 batch_size: 1
 learning_rate: 1.0e-5
-max_seq_length: 2048            # caps memory; Moshi's system prompt is large
+max_seq_length: 4096            # MUST exceed the ~3k-token system prompt + a full note
+                                # target; at 2048 the target was truncated off the end
+                                # and the model collapsed to a ~3-note pattern.
 grad_checkpoint: true           # trade compute for memory (fits smaller Macs)
 mask_prompt: true               # loss on the assistant completion only (system prompt dominates each example)

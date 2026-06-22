@@ -20,6 +20,41 @@ def log(*a):
     print(*a, file=sys.stderr, flush=True)
 
 
+def manifest_hash(data_dir):
+    """sha256 (first 16 hex) of the dataset's manifest.json, or None if absent —
+    the corpus-version fingerprint recorded in sft_run.json (matches the mlx lane)."""
+    import hashlib
+    p = os.path.join(data_dir, "manifest.json")
+    if not os.path.isfile(p):
+        return None
+    with open(p, "rb") as f:
+        return hashlib.sha256(f.read()).hexdigest()[:16]
+
+
+# trl's assistant_only_loss needs the chat template to mark the assistant turn with
+# {% generation %}…{% endgeneration %} so the tokenizer can emit an assistant-token
+# mask. Qwen3's stock template has no such tags — so assistant_only_loss=True errored
+# and the first cloud run fell back to full-sequence loss (the system prompt then
+# dominates the gradient and the model learns to defer on note population). We inject
+# the tags into the REAL template, preserving every other byte, so the rendered text
+# is byte-identical to what the model is served with (no train/serve skew) — only the
+# mask is added.
+ASSISTANT_OPEN = '{%- elif message.role == "assistant" %}'
+TOOL_OPEN = '{%- elif message.role == "tool" %}'
+
+
+def inject_generation_tags(template: str) -> str:
+    if "{%- generation %}" in template:
+        return template
+    if template.count(ASSISTANT_OPEN) != 1 or template.count(TOOL_OPEN) != 1:
+        raise ValueError("chat template shape unexpected — cannot inject generation tags")
+    # Leading-strip markers ({%- … %}) and no added newlines, so the tags emit nothing
+    # and the rendered text stays byte-identical to the stock template (verify_mask.py).
+    template = template.replace(ASSISTANT_OPEN, ASSISTANT_OPEN + "{%- generation %}", 1)
+    template = template.replace(TOOL_OPEN, "{%- endgeneration %}" + TOOL_OPEN, 1)
+    return template
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", required=True, help="dir with train.jsonl / valid.jsonl")
@@ -31,7 +66,12 @@ def main():
     ap.add_argument("--grad-accum", type=int, default=2)
     ap.add_argument("--lr", type=float, default=2e-4)
     ap.add_argument("--lora-r", type=int, default=16)
-    ap.add_argument("--max-seq-len", type=int, default=2048)
+    # 4096, not 2048: Moshi's system prompt is ~3k tokens, so a 2048 cap truncated
+    # the note-population target off the end entirely — the model never saw a full
+    # pattern. 4096 fits the system prompt + a real pattern (a few long outliers
+    # still clip their tail, which is harmless: the fair metric only needs a short
+    # pattern's worth of notes).
+    ap.add_argument("--max-seq-len", type=int, default=4096)
     ap.add_argument("--4bit", dest="bit4", action="store_true", help="QLoRA (fits a 40GB card); omit on 80GB for bf16 LoRA")
     ap.add_argument("--no-assistant-loss", action="store_true", help="train on the full sequence instead of assistant turns only")
     ap.add_argument("--no-grad-ckpt", action="store_true", help="disable gradient checkpointing (faster; fine on 80GB)")
@@ -58,6 +98,21 @@ def main():
     tok = AutoTokenizer.from_pretrained(a.model)
     if tok.pad_token is None:
         tok.pad_token = tok.eos_token
+
+    # Make assistant-only (completion) loss actually work on Qwen3 by injecting the
+    # generation tags into its chat template; degrade cleanly to full-sequence loss
+    # if the template ever changes shape.
+    if not a.no_assistant_loss:
+        try:
+            tok.chat_template = inject_generation_tags(tok.chat_template)
+            log("assistant_only_loss: injected {% generation %} tags into the chat template")
+        except ValueError as e:
+            # Do NOT silently degrade to full-sequence loss — that's the exact bug
+            # this fix exists to prevent (the model learns to defer on note
+            # population). Hard-fail; the user can opt into full-sequence on purpose.
+            print(json.dumps({"ok": False, "error": f"cannot enable assistant_only_loss: {e}. "
+                              "Pass --no-assistant-loss to train full-sequence deliberately."}))
+            sys.exit(1)
 
     quant = None
     dtype = torch.bfloat16
@@ -103,6 +158,7 @@ def main():
 
     run = {
         "schema_version": 1, "base_model": a.model, "adapter_path": a.out, "dataset_dir": a.data,
+        "dataset_manifest_sha256": manifest_hash(a.data),
         "config": {"epochs": a.epochs, "max_steps": a.max_steps, "batch_size": a.batch_size, "grad_accum": a.grad_accum,
                    "lr": a.lr, "lora_r": a.lora_r, "max_seq_len": a.max_seq_len, "qlora_4bit": a.bit4,
                    "assistant_only_loss": not a.no_assistant_loss},
