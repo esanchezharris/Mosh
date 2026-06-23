@@ -116,7 +116,8 @@ Three separate bugs stacked up, each fixed here:
 Verify the masking fix GPU-free (tokenizer only):
 ```bash
 source service/sft/.sft.env && "$SFT_PY" service/sft/verify_mask.py
-# → OK  no skew · assistant mask = …/… tokens — loss on the completion only
+# → OK  Qwen/Qwen3-4B-Instruct-2507  ·  no skew · mask = …/… tokens, EOS in span — loss on the completion only
+# → OK  mlx-community/Qwen3-4B-Instruct-2507-4bit  ·  no skew · mask = …/… tokens, EOS in span — loss on the completion only
 ```
 
 ## Data-rights
