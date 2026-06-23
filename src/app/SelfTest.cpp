@@ -4141,6 +4141,116 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (cmd (ops, "save")), "re-persist the edit after the mp-commit-export probe");
     }
 
+    // Regression: export after relink_clip to a project-LOCAL copy. relink_clip rewrites a
+    // wave clip's source via setToDirectFileReference(newFile, /*useRelativePath*/ local).
+    // When the new file lives under the project dir (local==true), that computes the path
+    // relative to the edit FILE — and if the edit file isn't on disk, JUCE treats the edit
+    // file's own path as a directory, yielding a spurious leading "../" (e.g. "../audio/
+    // foo.wav"). Mosh's filePathResolver (MoshEngine::wireEditResolvers) resolves relative
+    // to the edit file's PARENT dir, so that "../" escapes the session dir to a path that
+    // doesn't exist → the offline-render WaveNode can never open the source → export_audio
+    // spins forever. This is the exact mechanism PR #104 fixed for mp_commit_track. Guards:
+    // the relinked ref has no "../", resolves to an existing file, export COMPLETES (the
+    // render loop is bounded too), and renders NON-SILENT.
+    {
+        section ("Relink: export after relink to a local copy (guards the export hang)");
+
+        check (ok (cmd (ops, "new_project", args1 ("name", "relink-export-selftest"))),
+               "new_project (relink export isolation) ok");
+
+        auto mkt = cmd (ops, "create_track", objN ({ { "name", "Aud" } }));
+        check (ok (mkt), "create_track (audio) ok");
+        const auto tid = mkt["data"].getProperty ("trackId", var()).toString();
+
+        // A clip whose source lives OUTSIDE the project dir (the shared session pool), so
+        // relinking to a project-local copy exercises the relative-ref rewrite.
+        check (ok (cmd (ops, "add_test_tone_clip", objN ({ { "trackId", tid }, { "seconds", 1.0 }, { "freq", 440 } }))),
+               "add_test_tone_clip ok");
+
+        auto firstClipOnTrack = [&] () -> var
+        {
+            auto trks = ops.snapshot().getProperty ("tracks", var());
+            for (int i = 0; i < trks.size(); ++i)
+                if (trks[i].getProperty ("id", var()).toString() == tid)
+                    return trks[i].getProperty ("clips", var())[0];
+            return var();
+        };
+        const auto clipId = firstClipOnTrack().getProperty ("id", var()).toString();
+        check (clipId.isNotEmpty(), "probe clip present");
+
+        const File origSrc (firstClipOnTrack().getProperty ("sourceFile", var()).toString());
+        const auto projectDir = eng.editFile().getParentDirectory();
+        check (! origSrc.isAChildOf (projectDir), "probe clip's source starts OUTSIDE the project dir");
+
+        // Copy the source to a project-LOCAL path and relink to it (local => relative ref).
+        auto localCopy = projectDir.getChildFile ("audio").getChildFile ("relinked.wav");
+        localCopy.getParentDirectory().createDirectory();
+        localCopy.deleteFile();
+        check (origSrc.copyFileTo (localCopy), "copied source to a project-local file");
+        check (localCopy.isAChildOf (projectDir), "relink target is under the project dir (=> relative ref)");
+
+        // Force the precondition that actually triggers the bug: an edit not yet on disk.
+        // setToDirectFileReference(file, /*relative*/ true) -> findPathFromFile ->
+        // file.getRelativePathFrom(editFileRetriever()), and JUCE's getRelativePathFrom uses
+        // the base's PARENT only when the base existsAsFile() — otherwise it treats the edit
+        // file's own path as a directory and emits the spurious leading "../". A real user
+        // hits this when relinking on a fresh arrangement before its first save (the
+        // cold-start session edit). new_project persists the edit, so we remove it here to
+        // model the unsaved state deterministically. (Without this the relative ref resolves
+        // fine and the bug stays hidden — which is exactly why it lay latent.)
+        const auto editFile = eng.editFile();
+        editFile.deleteFile();
+        check (! editFile.existsAsFile(), "edit file is absent at relink time (the bug's precondition)");
+
+        check (ok (cmd (ops, "relink_clip", objN ({ { "clipId", clipId }, { "file", localCopy.getFullPathName() } }))),
+               "relink_clip to the local copy ok");
+
+        juce::String storedRef;
+        bool resolvedExists = false;
+        for (auto* tr : te::getAllTracks (eng.edit()))
+            if (auto* at = dynamic_cast<te::AudioTrack*> (tr))
+                for (auto* c : at->getClips())
+                    if (auto* w = dynamic_cast<te::WaveAudioClip*> (c))
+                    {
+                        storedRef      = w->state.getProperty (juce::Identifier ("source")).toString();
+                        resolvedExists = w->getCurrentSourceFile().existsAsFile();
+                    }
+        check (! storedRef.startsWith ("../") && ! storedRef.contains ("/../"),
+               "relinked ref has no spurious '../' so it resolves inside the session (" + storedRef + ")");
+        check (resolvedExists, "relinked clip's resolved source exists on disk");
+
+        auto wavMag = [] (const File& f) -> float
+        {
+            AudioFormatManager fm; fm.registerBasicFormats();
+            if (std::unique_ptr<AudioFormatReader> reader { fm.createReaderFor (f) })
+            {
+                const int toRead = (int) jmin ((int64) 4'000'000, reader->lengthInSamples);
+                if (toRead > 0)
+                {
+                    AudioBuffer<float> buf ((int) reader->numChannels, toRead);
+                    reader->read (&buf, 0, toRead, 0, true, true);
+                    float mag = 0.0f;
+                    for (int ch = 0; ch < buf.getNumChannels(); ++ch)
+                        mag = jmax (mag, buf.getMagnitude (ch, 0, toRead));
+                    return mag;
+                }
+            }
+            return -1.0f;
+        };
+
+        auto outFile = eng.sessionDir().getChildFile ("exports").getChildFile ("relink-export.wav");
+        outFile.deleteFile();
+        check (ok (cmd (ops, "export_audio", objN ({ { "file", outFile.getFullPathName() },
+                                                     { "format", "wav" }, { "bitDepth", 16 } }))),
+               "export_audio after relink_clip COMPLETES (no hang)");
+        check (wavMag (outFile) > 0.02f,
+               "exported relinked audio is NON-SILENT (the relinked source actually rendered)");
+        outFile.deleteFile();
+
+        // Restore the on-disk edit we removed above so later sections see a persisted edit.
+        check (ok (cmd (ops, "save")), "re-persist the edit after the relink-export probe");
+    }
+
     // P2 — native↔relay transport, end to end over real HTTP. Gated (spawns a
     // relay + needs MOSH_RELAY_URL) so it stays OUT of the deterministic core run.
     if (std::getenv ("MOSH_SELFTEST_MP") != nullptr)
