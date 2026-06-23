@@ -149,6 +149,12 @@ if (MOSH_BUILD_APP)
         set_source_files_properties(src/voice/NativeSpeech.mm PROPERTIES COMPILE_FLAGS "-fobjc-arc")
         target_link_libraries(Mosh PRIVATE "-framework Speech" "-framework AVFoundation")
 
+        # Native WKWebView media-capture permission delegate (collaborator video
+        # getUserMedia) — Obj-C++ with ARC; mirrors the NativeSpeech.mm pattern.
+        target_sources(Mosh PRIVATE src/webview/WebViewCameraPermission.mm)
+        set_source_files_properties(src/webview/WebViewCameraPermission.mm PROPERTIES COMPILE_FLAGS "-fobjc-arc")
+        target_link_libraries(Mosh PRIVATE "-framework WebKit")
+
         # JUCE's PLIST_TO_MERGE is honoured ONLY by the Xcode generator; under the
         # Makefiles/Ninja generator this repo uses, those merged keys are silently
         # dropped from the bundle Info.plist. Re-inject the ones we depend on after

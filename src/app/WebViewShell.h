@@ -9,7 +9,8 @@ namespace mosh
     the WebBridge (the swappable seam). In dev, set MOSH_UI_DEV_SERVER (e.g.
     http://localhost:5173) to point at the Vite dev server; otherwise the staged
     bundle is served via the bridge's resource provider. */
-class WebViewShell : public juce::Component
+class WebViewShell : public juce::Component,
+                     private juce::Timer
 {
 public:
     WebViewShell();
@@ -21,7 +22,10 @@ public:
     void resized() override;
 
 private:
+    void timerCallback() override;
+
     bool loaded = false;
+    int camPermAttempts = 0;
     WebBridge webBridge;
     std::unique_ptr<juce::WebBrowserComponent> webView;
 
