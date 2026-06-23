@@ -4069,6 +4069,13 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // stayed false and export_audio spun FOREVER. Guards: the ref has no "../", resolves to an
     // existing file, export COMPLETES (the render loop is also bounded now), and renders
     // NON-SILENT audio. (mpSession_ exists unconditionally, so this needs no relay.)
+    //
+    // The "../" is only emitted when the edit file is NOT on disk at rewrite time: JUCE's
+    // getRelativePathFrom strips to the base's parent only when the base existsAsFile(), else
+    // it treats the edit file's own path as a directory and prepends "../". new_project
+    // persists the edit, so we remove it here to model the unsaved state (a fresh arrangement
+    // before its first save) deterministically — WITHOUT this the rewrite resolves fine and
+    // the section passes even on the buggy code, i.e. it would not actually guard the fix.
     {
         section ("Multiplayer: export after commit (by-hash ref resolves — guards the export hang)");
 
@@ -4079,6 +4086,11 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         const auto st = mkt["data"].getProperty ("trackId", var()).toString();
         check (ok (cmd (ops, "add_test_tone_clip", objN ({ { "trackId", st }, { "seconds", 1.0 } }))),
                "add_test_tone_clip ok");
+
+        // Force the bug's precondition: an edit not yet on disk at the rewrite (see above).
+        const auto mpEditFile = eng.editFile();
+        mpEditFile.deleteFile();
+        check (! mpEditFile.existsAsFile(), "edit file is absent at commit time (the bug's precondition)");
 
         check (ok (cmd (ops, "mp_commit_track", args1 ("trackId", st))), "mp_commit_track (audio) ok");
 
@@ -4124,6 +4136,9 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (wavMag (outFile) > 0.02f,
                "exported MP-committed audio is NON-SILENT (the stem actually rendered)");
         outFile.deleteFile();
+
+        // Restore the on-disk edit we removed above so later sections see a persisted edit.
+        check (ok (cmd (ops, "save")), "re-persist the edit after the mp-commit-export probe");
     }
 
     // P2 — native↔relay transport, end to end over real HTTP. Gated (spawns a
