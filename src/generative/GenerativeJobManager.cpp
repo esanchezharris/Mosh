@@ -124,6 +124,11 @@ juce::var GenerativeJobManager::listColors()
     return httpGet ("/colors");
 }
 
+juce::var GenerativeJobManager::listTransformTargets()
+{
+    return httpGet ("/transform_targets");
+}
+
 juce::String GenerativeJobManager::submitJob (const juce::String& adapter,
                                               const juce::File& inputWav, const juce::File& outputWav,
                                               const juce::File& manifest, const juce::var& params)

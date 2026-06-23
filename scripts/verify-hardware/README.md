@@ -27,8 +27,8 @@ Release, then `/Applications/Mosh.app`). For `--sa3`, wire the model first with
 | --- | --- | --- |
 | 1 | Makes sound | a test-tone export is non-silent, right duration/level |
 | 2 | Drums audible | a drum-track MIDI pattern renders non-silent (the silent-drums regression guard) |
-| 3 | Tier-A neural A/B | the same source rendered with the neural insert active differs measurably from the dry render |
-| 5 | Full producer loop | a multi-track + neural + mix chain exports non-silent at the expected length |
+| 3 | Transform render (fake) | a Tier-B `transform` render (fake adapter, offline) produces non-silent audio that differs from its input (`mode: transform`) |
+| 5 | Full producer loop | a multi-track + mix chain exports non-silent at the expected length |
 | 4 | SA3 generative transform | a real `stable_audio3` re-imagine renders (`status: ready`), carries a quality readout (`pq`), differs from its input, and exports as audible audio |
 
 Artifacts (WAVs + `report.json`) land in `verify-artifacts/` at the repo root

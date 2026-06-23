@@ -48,6 +48,8 @@ struct RenderLayer
         params.setProperty (ids::cfg, 7.0, nullptr);
         params.setProperty (ids::steps, 30, nullptr);
         params.setProperty (ids::nl, 0.4, nullptr);
+        params.setProperty (ids::target, "", nullptr);       // Route B transform target
+        params.setProperty (ids::strength, 65.0, nullptr);   // Route B transform strength (0–100)
         params.appendChild (juce::ValueTree (ids::COLORS), nullptr);
         v.appendChild (params, nullptr);
         return v;
@@ -89,6 +91,8 @@ struct RenderLayer
             v[ids::modelVariant].toString(),       // size/decoder — part of key
             v[ids::mode].toString(),               // transform route — part of key
             params[ids::prompt].toString(),
+            params[ids::target].toString(),        // Route B transform target — part of key
+            params[ids::strength].toString(),      // Route B transform strength — part of key
             colorsKey,
             v[ids::seed].toString(),
             params[ids::cfg].toString() + "/" + params[ids::steps].toString() + "/" + params[ids::nl].toString(),

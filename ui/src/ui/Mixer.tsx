@@ -33,7 +33,7 @@ function Strip({ track }: { track: Track }) {
   const exec = useStore((s) => s.exec);
   const selectedTrackId = useStore((s) => s.selectedTrackId);
   const setSelectedTrack = useStore((s) => s.setSelectedTrack);
-  const fxCount = (track.plugins ?? []).filter((p) => p.external || p.neural || p.builtin).length;
+  const fxCount = (track.plugins ?? []).filter((p) => p.external || p.builtin).length;
   const selected = selectedTrackId === track.id;
   return (
     <div className={`strip${selected ? " sel" : ""}`} data-testid="channel-strip" data-track-id={track.id} data-selected={selected}

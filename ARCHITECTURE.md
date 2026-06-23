@@ -6,7 +6,7 @@
 
 ## 1. What Mosh is
 
-**Mosh is a native desktop app.** macOS (Apple Silicon / arm64) is canonical; a **Windows + NVIDIA/CUDA** build is an additive port of the same codebase (see §Platforms below). `Mosh.app` / `Mosh.exe` is a native C++ binary built with JUCE 8 + Tracktion Engine. The audio engine, plugin hosting, neural DSP, file I/O, window and menus are all native.
+**Mosh is a native desktop app.** macOS (Apple Silicon / arm64) is canonical; a **Windows + NVIDIA/CUDA** build is an additive port of the same codebase (see §Platforms below). `Mosh.app` / `Mosh.exe` is a native C++ binary built with JUCE 8 + Tracktion Engine. The audio engine, plugin hosting, DSP, file I/O, window and menus are all native.
 
 The one nuance that trips everyone up: the **visual UI is not drawn with native Cocoa controls** — it's a React app rendered inside an embedded JUCE `WebBrowserComponent` (a "WebView"), shipped *inside* the app bundle at `Mosh.app/Contents/Resources/ui`. It talks to the C++ core through an **in-process bridge**, never over a network.
 
@@ -36,7 +36,7 @@ There are five layers, and exactly two things connect the UI to the engine:
 - **WebView UI layer** — `ui/` (React + Vite + Zustand). Pure view; all mutations go through the seam.
 - **The seam** — `src/webview` (WebBridge) + `src/moshops` (MoshOps). The *only* coupling between UI and backend.
 - **Native engine** — `src/engine` (MoshEngine) owns one Tracktion `Engine` + `Edit` for the app's life.
-- **In-process plugins/DSP** — `src/plugins/*` (VST3/AU hosting, Tier-A neural insert, spectral tap).
+- **In-process plugins/DSP** — `src/plugins/*` (VST3/AU hosting, spectral tap, and the **gated** real-time RAVE insert `src/plugins/transform/` — built only with `-DMOSH_ENABLE_ANIRA=ON`, torch isolated in `RaveEngine.cpp`). *(The old synthetic Tier-A neural insert was removed; the real-time RAVE insert (Route C.2) replaces it as a real, model-justified Tier-A — off in the default build.)*
 - **Out-of-process generative service** — `service/` (Python), driven by `src/generative` over local HTTP. This is the "tier wall": heavy generative models never run on the audio thread.
 
 ---
@@ -52,7 +52,6 @@ Every row verified against the source (2026-06-21). "Start here" is the file to 
 | `src/moshops` | **The one mutation path.** `execute(command)` → validate → undo txn → mutate → JSONL log → emit events → result. Also builds `snapshot()`. 130+ commands. | `src/moshops/MoshOps.h` | current |
 | `src/state` | ValueTree schema ids + the `RenderLayer` cache fingerprint (SHA-256 over route/seed/params/service-build). | `src/state/RenderLayer.h` | current |
 | `src/plugins/hosting` | VST3/AU discovery + catalog + native editor pop-out. Child-process-isolated scan (survives hostile Waves installs). | `src/plugins/hosting/PluginHost.h` | current |
-| `src/plugins/neural` | Tier-A real-time neural insert: self-contained 2-layer MLP waveshaper, RT-safe, ASTD-clamped, PDC-correct latency. | `src/plugins/neural/NeuralInsertPlugin.h` | current |
 | `src/plugins/spectral` | Lock-free master-output tap; drains the live spectrum to the UI at 30 Hz to animate the Moshi character. | `src/plugins/spectral/MasterSpectralTapPlugin.h` | current |
 | `src/generative` | HTTP client for the Tier-B service: spawn/health/submit/poll/cancel over `localhost:8770`. | `src/generative/GenerativeJobManager.h` | current |
 | `src/webview` | The bridge: registers WebView native fns (`execute_command`, `get_snapshot`, `pick_files`/`pick_save_file`, `brain_chat`, `voice_*`, `remote_*`), serves `ui/`, emits events. | `src/webview/WebBridge.cpp` | current |
@@ -92,8 +91,7 @@ What Mosh can actually do today, grouped for a producer. Status is honest: `work
 | Recording & takes | ✅ works | `arm_track` · `stop_recording` · `set_input_monitor` · `list_takes` · `set_current_take` · `keep_take` | Record-arm, monitoring, take lanes. |
 | Mixing | ✅ works | `set_track_volume`/`pan`/`mute`/`solo` · `set_master_volume`/`pan` | Faders + 30 Hz level meters. |
 | VST3/AU hosting | ✅ works | `load_plugin` · `load_builtin` · `remove_plugin` · `bypass_plugin` · `set_plugin_param` · `reorder_plugin` · `open_plugin_editor` | Scanned VST3+AU, native editor pop-out, 10 built-ins. Hosting is in-process: a few misbehaving plugins (a cracked VST3, some stock AUs) can abort on teardown — harness-surfaced only, loss bounded by autosave, `block_plugin` is the manual lever; OOP hosting deferred. See `docs/FEATURE_AUDIT.md` 2026-06-18. |
-| Tier-A neural insert | ✅ works | `add_neural_insert` · `set_neural_param` · `set_neural_lab_mode` · `reset_neural` | RT-safe MLP waveshaper; ASTD 0–100 (Lab unlocks); PDC verified. |
-| Generative re-imagine (Tier-B) | ✅ works | `create_render_layer` · `set_render_param` · `render_layer` · `accept_render` · `reject_render` · `bypass_layer` · `freeze_layer` · `bounce_layer_to_clip` | SA3 + FakeAdapter fallback; async; cache by fingerprint; lands on a "Neural Renders" lane. |
+| Generative re-imagine / transform (Tier-B) | ✅ works | `create_render_layer` · `set_render_param` · `render_layer` · `accept_render` · `reject_render` · `bypass_layer` · `freeze_layer` · `bounce_layer_to_clip` · `list_transform_targets` | Two modes behind one model-agnostic contract: SA3 **re-imagine** (text/colours) + **`transform`** (timbre/instrument transfer via `target`+`strength`; fake adapter ships, RAVE/MelodyFlow swaps in behind the same `transform` id). FakeAdapter fallback; async; cache by fingerprint; lands on a "Neural Renders" lane. |
 | Export | ✅ works | `export_audio` | WAV/AIFF/FLAC of the full signal chain. |
 | Undo / redo | ✅ works | `undo` · `redo` | Tracktion UndoManager, one txn/command. |
 | **Project save / open / new** | ⚠️ **known-gap** | `save` · `new_project` · `open_project` · `save_as` | Commands work + multiple projects coexist, **but:** (a) **no auto-save / no save-on-quit / no unsaved-changes prompt** → quit without ⌘S loses work; (b) relaunch always loads the fixed `~/Library/Mosh/session/session.tracktionedit`, never your last project (no Recent list); (c) projects **not portable** — absolute audio paths in one shared session pool; Save As doesn't consolidate audio. *Fix-session scoped separately.* |
@@ -103,7 +101,7 @@ What Mosh can actually do today, grouped for a producer. Status is honest: `work
 | DAW project import | ✅ works (UI/tooling) | *(no MoshOps command — `ui/src/import` replays existing commands)* | `.rpp`/`.als`/`.flp` → `moshIR` → MoshOps replay. Agent-callable subset only; `.flp` via PyFLP sidecar. See `docs/MOSHI_IMPORTERS.md`. |
 | Audio → MIDI | ✅ works (gated) | `transcribe_clip` | Right-click wave clip → Convert to MIDI (Basic Pitch); `/transcribe` on an isolated venv (503 if absent). |
 | Type-beat LoRA training | 🟡 scaffold | `training_*` (`/training/*`) | Rights gate + corpus bundler + job orchestration behind a **fake** backend; real on-device training deferred. See `docs/type-beat-trainer.md`. |
-| Pooled RAVE/DDSP neural models | ⛔ gated | `load_neural_model` | Deferred (anira + LibTorch). v0 ships the inline MLP only. |
+| Real-time RAVE insert (Tier-A) | ⛔ gated (`MOSH_ENABLE_ANIRA`, OFF by default) | `add_rave_insert` · `set_rave_param` · `load_rave_model` · `reset_rave` | A `te::Plugin` running a real RAVE `.ts` live via anira + LibTorch (torch isolated in `RaveEngine.cpp`). Default build byte-unaffected. The *offline* RAVE timbre transfer needs no gate — see the generative transform row. The old synthetic MLP insert was removed (2026-06-21). See `docs/superpowers/specs/2026-06-21-route-c-*`. |
 
 ---
 

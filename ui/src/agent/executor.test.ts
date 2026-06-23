@@ -110,12 +110,10 @@ describe("agent command contract — catalog args must match the seam", () => {
     // The corrected names pass client-side validation…
     expect(validateCommand("set_transport", { action: "toggle" })).toBeNull();
     expect(validateCommand("split_clip", { clipId: "1", time: 1 })).toBeNull();
-    expect(validateCommand("set_neural_param", { trackId: "1", index: 0, paramId: "drive", value: 50 })).toBeNull();
     // …and seam-mismatched calls are rejected — either a wrong type, or the renamed
     // positional now missing as a required arg. (set_transport is all-optional by
     // design — seek/loop calls carry no action — so its guard is the arg type.)
     expect(validateCommand("set_transport", { action: 5 })).not.toBeNull();                                    // action must be a string
     expect(validateCommand("split_clip", { clipId: "1", position: 1 })).not.toBeNull();                         // old "position" → missing required "time"
-    expect(validateCommand("set_neural_param", { trackId: "1", paramId: "drive", uiValue: 50 })).not.toBeNull(); // missing required index/value
   });
 });

@@ -111,6 +111,19 @@ FAKE_ADAPTER = {
     "service_build": SERVICE_BUILD,
 }
 
+# Route B — the transform tier (timbre/style transfer). Same job protocol as the
+# others; the fake backend ships, the real RAVE/MelodyFlow swaps in behind it.
+TRANSFORM_ADAPTER = {
+    "id": "transform", "version": "0.0.1",
+    "generation_modes": ["transform"],
+    "conditioning_inputs": ["init_audio", "target", "strength"],
+    "duration_limits": {"min": 0.1, "max": 600.0},
+    "sample_rates": [44100], "channel_modes": ["stereo"],
+    "runtime_requirements": ["cpu"], "packaging_mode": "python_service",
+    "supports_seed": True, "supports_semantic_controls": False,
+    "service_build": SERVICE_BUILD,
+}
+
 
 def _sa3_descriptor() -> dict:
     return {
@@ -201,6 +214,11 @@ def _adapter_for(adapter_id: str):
     if adapter_id in ("stable_audio3", "sa3"):
         from adapters import stable_audio3_adapter as ad
         return ad
+    if adapter_id == "transform":
+        # Real RAVE/MelodyFlow backend swaps in here when available; until then the
+        # deterministic fake transform (mirrors stable_audio3 → fake_adapter).
+        from adapters import transform_adapter as ad
+        return ad
     return fake_adapter
 
 
@@ -213,7 +231,7 @@ def _run_job(job_id: str) -> None:
         job["status"] = "rendering"
         adapter_id = job.get("adapter", "fake")
     try:
-        if adapter_id == "fake":
+        if adapter_id in ("fake", "transform"):
             # Stepped progress for the cheap stub (debounced renders are slow IRL).
             for step in range(1, 6):
                 with _lock:
@@ -424,14 +442,14 @@ class Handler(BaseHTTPRequestHandler):
                     query[k] = v
 
         if path == "/health":
-            adapters = ["fake"] + (["stable_audio3"] if SA3_ENABLED else [])
+            adapters = ["fake", "transform"] + (["stable_audio3"] if SA3_ENABLED else [])
             self._send(200, {"ok": True, "service": "mosh-generative",
                              "version": SERVICE_VERSION, "build": SERVICE_BUILD,
                              "uptime_s": round(time.time() - START_TIME, 1),
                              "adapters": adapters, "transcribe": _transcribe_available(),
                              "sketch": _sketch_available()})
         elif path == "/capabilities":
-            adapters = [FAKE_ADAPTER] + ([_sa3_descriptor()] if SA3_ENABLED else [])
+            adapters = [FAKE_ADAPTER, TRANSFORM_ADAPTER] + ([_sa3_descriptor()] if SA3_ENABLED else [])
             training = [_training_descriptor()] if TRAINING_ENABLED else []
             self._send(200, {"ok": True, "adapters": adapters, "training": training,
                              "transcribe": {"available": _transcribe_available(), "modes": ["mono", "poly"]},
@@ -445,6 +463,18 @@ class Handler(BaseHTTPRequestHandler):
                                  "lab_alpha_max": CR._meta().get("lab_alpha_max", 0.4)})
             except Exception as e:  # noqa: BLE001
                 self._send(503, {"ok": False, "error": f"colors unavailable: {e}", "colors": []})
+        elif path == "/transform_targets":
+            # Route C discovery: when the REAL RAVE backend is installed, list the
+            # installed .ts model stems (concrete targets, no free-text). Otherwise the
+            # Route B curated fake list + free-text.
+            from adapters import transform_adapter as _tx
+            if _tx.available():
+                self._send(200, {"ok": True, "targets": _tx.installed_targets(), "freeText": False})
+            else:
+                self._send(200, {"ok": True,
+                                 "targets": ["violin", "flute", "choir", "strings",
+                                             "orchestra", "synth pad", "music box", "brass"],
+                                 "freeText": True})
         elif path == "/training/health":
             self._send(200, {
                 "ok": True,

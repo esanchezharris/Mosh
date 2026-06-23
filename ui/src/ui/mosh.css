@@ -490,7 +490,7 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 /* ── view container (arrange = timeline + dock; mixer = strips) ──────────────*/
 .view { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 
-/* ── bottom dock: plugin/neural rack + generative drawer ────────────────────*/
+/* ── bottom dock: plugin rack + generative drawer ────────────────────*/
 .dock { height: 100%; display: flex; background: var(--ink-raise); }
 /* Phase 6 dock shell: the bottom detail zone is resizable (divider) + collapsible. */
 .dock-host { flex: 0 0 auto; min-height: 0; overflow: hidden; }
@@ -628,14 +628,14 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 .rack-empty { color: var(--bone-dim); font-size: 12px; padding: 6px 0; }
 
 .pcard { min-width: 170px; max-width: 230px; background: var(--ink); border: 1px solid var(--ink-line); border-radius: 9px; padding: 7px 8px; }
-.pcard.neural { border-color: rgba(204, 255, 35, 0.35); }
+.pcard.neural { border-color: rgba(204, 255, 35, 0.35); }   /* Route C.2 RAVE insert card */
 .pcard.bypassed { opacity: 0.5; }
 .pcard-head { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
 .pdot { width: 11px; height: 11px; border-radius: 50%; border: 1px solid var(--ink-line); background: transparent; cursor: pointer; flex: 0 0 auto; }
 .pdot.on { background: var(--lime); border-color: var(--lime); box-shadow: 0 0 6px var(--lime-dim); }
 .pname { font-size: 12px; font-weight: 600; flex: 1 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ibadge { font-size: 8px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink); background: var(--bone-dim); border-radius: 4px; padding: 1px 4px; }
-.ibadge.nbadge { background: var(--lime); color: var(--on-accent); }
+.ibadge.nbadge { background: var(--lime); color: var(--on-accent); }   /* RAVE Tier-A badge */
 .pbody { display: flex; flex-direction: column; gap: 4px; }
 .nparam { display: flex; align-items: center; gap: 6px; font-size: 11px; }
 .nlabel { flex: 0 0 56px; color: var(--bone-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -645,7 +645,7 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 .astd-mark { position: absolute; top: -2px; width: 2px; height: 16px; background: var(--warn); pointer-events: none; }
 .nval { flex: 0 0 26px; text-align: right; font-family: var(--font-mono); color: var(--bone-dim); }
 .neural-row { display: flex; align-items: center; gap: 5px; margin-top: 4px; flex-wrap: wrap; }
-.nlat { font-size: 10px; color: var(--bone-dim); margin-left: auto; }
+.nlat { font-size: 10px; color: var(--bone-dim); margin-left: auto; }   /* RAVE latency readout */
 .neural-model { font-size: 10px; color: var(--lime); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 2px; }
 .pcard-actions { display: flex; gap: 5px; }
 .btn.x, .msx.x { color: var(--danger); }
@@ -669,6 +669,10 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 .gen-actions { display: flex; flex-wrap: wrap; gap: 5px; }
 .gen-actions .btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .color-add { font-size: 11px; }
+/* Route B — transform create row + control surface. */
+.gen-create-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.xform-controls { display: flex; flex-direction: column; gap: 4px; }
+.xform-text { flex: 1 1 auto; min-width: 0; background: var(--ink); color: var(--bone); border: 1px solid var(--ink-line); border-radius: 5px; padding: 2px 6px; font: inherit; font-size: 11px; }
 
 /* ── mixer ──────────────────────────────────────────────────────────────────*/
 .mixer { flex: 1 1 auto; display: flex; gap: 10px; padding: 14px; overflow: auto; background: var(--ink); }

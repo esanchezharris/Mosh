@@ -62,4 +62,14 @@ TEST_CASE ("full cache fingerprint is sensitive to route/variant/seed (05 §5)",
         v.setProperty (ids::seed, 2, nullptr);
         REQUIRE (RenderLayer::fingerprint (v, "upstreamHashAAA", "120bpm/Cmaj", 44100, 2, "svc-1") != base);
     }
+    SECTION ("changing the transform target → different key (Route B)")
+    {
+        v.getChildWithName (ids::PARAMS).setProperty (ids::target, "violin", nullptr);
+        REQUIRE (RenderLayer::fingerprint (v, "upstreamHashAAA", "120bpm/Cmaj", 44100, 2, "svc-1") != base);
+    }
+    SECTION ("changing the transform strength → different key (Route B)")
+    {
+        v.getChildWithName (ids::PARAMS).setProperty (ids::strength, 90.0, nullptr);
+        REQUIRE (RenderLayer::fingerprint (v, "upstreamHashAAA", "120bpm/Cmaj", 44100, 2, "svc-1") != base);
+    }
 }

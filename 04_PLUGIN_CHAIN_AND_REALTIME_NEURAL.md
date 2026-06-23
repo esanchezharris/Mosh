@@ -1,6 +1,6 @@
 # 04 — The Plugin Chain: VST3 Hosting & Real-Time Neural Inserts (Tier A)
 
-> **Status:** Design spec — source of truth for *how* this subsystem was built (v0, gate PASSED). New to the repo? Start with [ARCHITECTURE.md](ARCHITECTURE.md); build status is in [CLAUDE.md](CLAUDE.md).
+> **Status:** Design spec. **The Part-2 Tier-A real-time neural insert was REMOVED 2026-06-21** (it shipped only a synthetic, untrained MLP saturator — see [CLAUDE.md](CLAUDE.md) Stage 4). **Part 1 (VST3/AU hosting) is current and unaffected.** The neural-insert sections below are retained as historical design + the basis for a future model-justified rebuild (real-time RAVE via anira). New to the repo? Start with [ARCHITECTURE.md](ARCHITECTURE.md); build status is in [CLAUDE.md](CLAUDE.md).
 
 *Scope: everything in a track's `pluginList` — traditional VST3 plugins (`ExternalPlugin`) and Mosh's real-time, in-process neural insert (a custom `tracktion::engine::Plugin` backed by anira). Includes PDC, RT-safety, and the ASTD safety clamp with a Lab-mode escape hatch. All of it is driven through MoshOps commands (`02`).*
 

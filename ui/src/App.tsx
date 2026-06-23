@@ -6,7 +6,7 @@
 // iterable in a plain browser with real DOM introspection.
 //
 // This is the from-scratch rebuild: one canonical grid, ink+lime register,
-// observable state. Mixer / plugin & neural racks / generative drawer / Moshi GL
+// observable state. Mixer / plugin racks / generative drawer / Moshi GL
 // are staged back in next (the legacy components remain on disk to port from).
 
 import { useEffect, useRef } from "react";

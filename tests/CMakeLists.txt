@@ -11,7 +11,6 @@ target_sources(MoshTests PRIVATE
     test_renderlayer.cpp
     test_sections.cpp
     test_annotations.cpp
-    test_astd.cpp
     test_remote_companion.cpp
     test_multiplayer_logical_id.cpp
     test_multiplayer_lock_manager.cpp

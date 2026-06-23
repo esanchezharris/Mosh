@@ -6,7 +6,9 @@
 #include "state/Annotation.h"
 #include "multiplayer/LogicalId.h"
 #include "multiplayer/TrackCommit.h"
-#include "plugins/neural/NeuralInsertPlugin.h"
+#if MOSH_HAVE_ANIRA
+ #include "plugins/transform/RaveInsertPlugin.h"
+#endif
 #include <thread>
 
 namespace mosh
@@ -15,8 +17,9 @@ using namespace juce;
 
 namespace
 {
-    NeuralInsertPlugin* asNeural (te::Plugin* p) { return dynamic_cast<NeuralInsertPlugin*> (p); }
-
+   #if MOSH_HAVE_ANIRA
+    RaveInsertPlugin* asRave (te::Plugin* p) { return dynamic_cast<RaveInsertPlugin*> (p); }
+   #endif
     // Tracktion's compiled-in built-in plugin palette (registered unconditionally
     // by PluginManager). These ship inside the engine — no scan, no third-party
     // dependency — so the FX palette and built-in instruments are pure surface
@@ -514,12 +517,6 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "remove_note")       return cmdRemoveNote (args);
     if (name == "set_note")          return cmdSetNote (args);
     if (name == "quantize_notes")    return cmdQuantizeNotes (args);
-    if (name == "add_neural_insert") return cmdAddNeuralInsert (args);
-    if (name == "set_neural_param")  return cmdSetNeuralParam (args);
-    if (name == "set_neural_lab_mode") return cmdSetNeuralLabMode (args);
-    if (name == "set_neural_latency")return cmdSetNeuralLatency (args);
-    if (name == "reset_neural")      return cmdResetNeural (args);
-    if (name == "load_neural_model") return cmdLoadNeuralModel (args);
     if (name == "create_render_layer") return cmdCreateRenderLayer (args);
     if (name == "set_render_param")  return cmdSetRenderParam (args);
     if (name == "render_layer")      return cmdRenderLayer (args);
@@ -531,6 +528,13 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "bounce_layer_to_clip") return cmdBounceLayerToClip (args);
     if (name == "remove_render_layer") return cmdRemoveRenderLayer (args);
     if (name == "list_colors")       return cmdListColors (args);
+    if (name == "list_transform_targets") return cmdListTransformTargets (args);
+   #if MOSH_HAVE_ANIRA
+    if (name == "add_rave_insert")   return cmdAddRaveInsert (args);
+    if (name == "set_rave_param")    return cmdSetRaveParam (args);
+    if (name == "load_rave_model")   return cmdLoadRaveModel (args);
+    if (name == "reset_rave")        return cmdResetRave (args);
+   #endif
     if (name == "export_audio")      return cmdExportAudio (args);
     if (name == "list_audio_devices")return cmdListAudioDevices (args);
     if (name == "list_midi_inputs")  return cmdListMidiInputs (args);
@@ -4118,125 +4122,6 @@ juce::var MoshOps::cmdQuantizeNotes (const juce::var& args)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Stage 4 — Tier-A real-time neural insert
-// ─────────────────────────────────────────────────────────────────────────────
-juce::var MoshOps::cmdAddNeuralInsert (const juce::var& args)
-{
-    auto* track = findTrack (args.getProperty ("trackId", var()).toString());
-    if (track == nullptr) return errResult ("add_neural_insert", "no track");
-
-    beginTxn ("add_neural_insert");
-    auto plugin = eng.edit().getPluginCache().createNewPlugin (NeuralInsertPlugin::xmlTypeName, {});
-    if (plugin == nullptr) return errResult ("add_neural_insert", "create failed");
-    if (auto* n = asNeural (plugin.get()))
-        n->selectModel (args.getProperty ("modelId", "nam").toString());
-
-    int index = (int) args.getProperty ("index", -1);
-    if (index < 0) index = track->pluginList.getPlugins().size();
-    track->pluginList.insertPlugin (plugin, index, nullptr);
-
-    auto* data = new DynamicObject();
-    data->setProperty ("index", track->pluginList.indexOf (plugin.get()));
-    logLine ("add_neural_insert", args, true, {}, true);
-    emitSnapshotInvalidated();
-    return okResult ("add_neural_insert", var (data));
-}
-
-juce::var MoshOps::cmdSetNeuralParam (const juce::var& args)
-{
-    auto* n = asNeural (findPlugin (args.getProperty ("trackId", var()).toString(),
-                                    (int) args.getProperty ("index", -1)));
-    if (n == nullptr) return errResult ("set_neural_param", "no neural insert");
-    beginTxn ("set_neural_param");
-    n->setNeuralParamUi (args.getProperty ("paramId", "drive").toString(),
-                         (float) (double) args.getProperty ("value", 0.0));   // 0–100 UI
-    logLine ("set_neural_param", args, true, {}, true);
-    emitSnapshotInvalidated();
-    return okResult ("set_neural_param");
-}
-
-juce::var MoshOps::cmdSetNeuralLabMode (const juce::var& args)
-{
-    auto* n = asNeural (findPlugin (args.getProperty ("trackId", var()).toString(),
-                                    (int) args.getProperty ("index", -1)));
-    if (n == nullptr) return errResult ("set_neural_lab_mode", "no neural insert");
-    beginTxn ("set_neural_lab_mode");
-    n->setLabMode ((bool) args.getProperty ("on", false));
-    logLine ("set_neural_lab_mode", args, true, {}, true);
-    emitSnapshotInvalidated();
-    return okResult ("set_neural_lab_mode", n->describe());
-}
-
-juce::var MoshOps::cmdSetNeuralLatency (const juce::var& args)
-{
-    auto* n = asNeural (findPlugin (args.getProperty ("trackId", var()).toString(),
-                                    (int) args.getProperty ("index", -1)));
-    if (n == nullptr) return errResult ("set_neural_latency", "no neural insert");
-    n->setLatencySamples ((int) args.getProperty ("samples", 0));
-    logLine ("set_neural_latency", args, true, {}, true);
-    emitSnapshotInvalidated();
-    return okResult ("set_neural_latency", n->describe());
-}
-
-juce::var MoshOps::cmdResetNeural (const juce::var& args)
-{
-    auto* n = asNeural (findPlugin (args.getProperty ("trackId", var()).toString(),
-                                    (int) args.getProperty ("index", -1)));
-    if (n == nullptr) return errResult ("reset_neural", "no neural insert");
-    n->resetModel();
-    logLine ("reset_neural", args, true, {}, false);
-    return okResult ("reset_neural");
-}
-
-juce::var MoshOps::cmdLoadNeuralModel (const juce::var& args)
-{
-    // GAP 1 — load a real Tier-A model (RTNeural JSON) into a neural insert. The
-    // contract field is pluginIndex; we also accept the neural surface's usual "index"
-    // for consistency. Model loading is operational (file → model), NOT an undoable
-    // session edit — but the path IS persisted on the plugin's own state (CachedValue
-    // modelPath), so it rides save/reload. Logged undoable:false (like reset_neural).
-    const auto trackId = args.getProperty ("trackId", var()).toString();
-    const int pluginIndex = args.hasProperty ("pluginIndex")
-                                ? (int) args.getProperty ("pluginIndex", -1)
-                                : (int) args.getProperty ("index", -1);
-    auto* n = asNeural (findPlugin (trackId, pluginIndex));
-    if (n == nullptr) return errResult ("load_neural_model", "no neural insert");
-
-    const auto path = args.getProperty ("path", var()).toString();
-    if (path.isEmpty())
-        return errResult ("load_neural_model", "path required");
-
-   #if MOSH_HAVE_RTNEURAL
-    const juce::File file (path);
-    if (! file.existsAsFile())
-        return errResult ("load_neural_model", "model file not found: " + path);
-
-    // Optional skip/residual override; default (-1) lets the model self-describe via its
-    // own "mosh_skip" field (GuitarML/NeuralPi captures are residual, AIDA-X are not).
-    const int forceSkip = args.hasProperty ("skip")
-                              ? ((bool) args.getProperty ("skip", false) ? 1 : 0) : -1;
-    const bool loaded = n->loadModelFromFile (file, forceSkip);
-    logLine ("load_neural_model", args, loaded, loaded ? juce::String() : juce::String ("model load failed"), false);
-    emitSnapshotInvalidated();
-    if (! loaded)
-        return errResult ("load_neural_model", "could not parse model file: " + path);
-    auto* data = new DynamicObject();
-    data->setProperty ("applied", true);
-    data->setProperty ("describe", n->describe());
-    return okResult ("load_neural_model", var (data));
-   #else
-    // Graceful no-op when the RTNeural backend isn't built — mirrors the arm/record
-    // posture (ok result, applied:false, reason) so the DEFAULT build's selftest stays
-    // green. The command still validates the target + path above.
-    logLine ("load_neural_model", args, true, {}, false);
-    auto* data = new DynamicObject();
-    data->setProperty ("applied", false);
-    data->setProperty ("reason", "RTNeural not built");
-    return okResult ("load_neural_model", var (data));
-   #endif
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Stage 7 — rights-cleared type-beat LoRA training
 // ─────────────────────────────────────────────────────────────────────────────
 juce::var MoshOps::cmdImportTrainingSource (const juce::var& args)
@@ -4524,6 +4409,8 @@ juce::var MoshOps::cmdSetRenderParam (const juce::var& args)
     if (args.hasProperty ("cfg"))    params.setProperty (ids::cfg, args.getProperty ("cfg", 7.0), &undoManager());
     if (args.hasProperty ("steps"))  params.setProperty (ids::steps, args.getProperty ("steps", 30), &undoManager());
     if (args.hasProperty ("nl"))     params.setProperty (ids::nl, args.getProperty ("nl", 0.4), &undoManager());
+    if (args.hasProperty ("target"))   params.setProperty (ids::target, args.getProperty ("target", ""), &undoManager());      // Route B
+    if (args.hasProperty ("strength")) params.setProperty (ids::strength, args.getProperty ("strength", 65.0), &undoManager());  // Route B
     if (args.hasProperty ("seed"))   node.setProperty (ids::seed, args.getProperty ("seed", 0), &undoManager());
     if (args.hasProperty ("mode"))   node.setProperty (ids::mode, args.getProperty ("mode", "reimagine"), &undoManager());
     if (args.hasProperty ("modelVariant")) node.setProperty (ids::modelVariant, args.getProperty ("modelVariant", ""), &undoManager());
@@ -4626,6 +4513,9 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
     p->setProperty ("nl", params[ids::nl]);
     p->setProperty ("cfg", params[ids::cfg]);
     p->setProperty ("steps", params[ids::steps]);
+    p->setProperty ("mode", node[ids::mode]);          // Route B: route the adapter (reimagine|generate|transform)
+    p->setProperty ("target", params[ids::target]);    // Route B transform target
+    p->setProperty ("strength", params[ids::strength]); // Route B transform strength (0–100)
     Array<var> colors;
     if (auto cs = params.getChildWithName (ids::COLORS); cs.isValid())
         for (int i = 0; i < cs.getNumChildren(); ++i)
@@ -4742,6 +4632,103 @@ juce::var MoshOps::cmdListColors (const juce::var&)
         return okResult ("list_colors", [] { auto* o = new DynamicObject(); o->setProperty ("colors", Array<var>{}); return var (o); }());
     return okResult ("list_colors", r);
 }
+
+juce::var MoshOps::cmdListTransformTargets (const juce::var&)
+{
+    // Route B: the transform target list (instruments / models) for the generative UI.
+    if (! jobManager.ensureServiceRunning())
+        return errResult ("list_transform_targets", "generative service unavailable");
+    auto r = jobManager.listTransformTargets();
+    if (! (bool) r.getProperty ("ok", false))
+        return okResult ("list_transform_targets", [] { auto* o = new DynamicObject();
+            o->setProperty ("targets", Array<var>{}); o->setProperty ("freeText", true); return var (o); }());
+    return okResult ("list_transform_targets", r);
+}
+
+#if MOSH_HAVE_ANIRA
+// ─────────────────────────────────────────────────────────────────────────────
+// Route C.2 — real-time RAVE insert (Tier-A; only built with anira+LibTorch)
+// ─────────────────────────────────────────────────────────────────────────────
+static juce::String raveModelPathFor (const juce::String& target)
+{
+    if (target.isEmpty()) return {};
+    const auto dir = juce::SystemStats::getEnvironmentVariable ("RAVE_MODEL_DIR",
+                         juce::File::getSpecialLocation (juce::File::userHomeDirectory)
+                             .getChildFile ("AI").getChildFile ("rave-models").getFullPathName());
+    return juce::File (dir).getChildFile (target + ".ts").getFullPathName();
+}
+
+juce::var MoshOps::cmdAddRaveInsert (const juce::var& args)
+{
+    auto* track = findTrack (args.getProperty ("trackId", var()).toString());
+    if (track == nullptr) return errResult ("add_rave_insert", "no track");
+
+    beginTxn ("add_rave_insert");
+    auto plugin = eng.edit().getPluginCache().createNewPlugin (RaveInsertPlugin::xmlTypeName, {});
+    if (plugin == nullptr) return errResult ("add_rave_insert", "create failed");
+    int index = (int) args.getProperty ("index", -1);
+    if (index < 0) index = track->pluginList.getPlugins().size();
+    track->pluginList.insertPlugin (plugin, index, nullptr);
+
+    juce::String path = args.getProperty ("path", var()).toString();
+    if (path.isEmpty()) path = raveModelPathFor (args.getProperty ("target", var()).toString());
+    bool loaded = false;
+    if (path.isNotEmpty())
+        if (auto* r = asRave (plugin.get()))
+            loaded = r->loadModelFromFile (juce::File (path));
+
+    auto* data = new DynamicObject();
+    data->setProperty ("index", track->pluginList.indexOf (plugin.get()));
+    data->setProperty ("modelLoaded", loaded);
+    logLine ("add_rave_insert", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("add_rave_insert", var (data));
+}
+
+juce::var MoshOps::cmdSetRaveParam (const juce::var& args)
+{
+    auto* r = asRave (findPlugin (args.getProperty ("trackId", var()).toString(),
+                                  (int) args.getProperty ("index", -1)));
+    if (r == nullptr) return errResult ("set_rave_param", "no rave insert");
+    beginTxn ("set_rave_param");
+    if (args.getProperty ("paramId", "mix").toString() == "mix")
+        r->setMixUi ((float) (double) args.getProperty ("value", 100.0));   // 0–100 dry/wet
+    logLine ("set_rave_param", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("set_rave_param");
+}
+
+juce::var MoshOps::cmdLoadRaveModel (const juce::var& args)
+{
+    const auto trackId = args.getProperty ("trackId", var()).toString();
+    const int idx = args.hasProperty ("pluginIndex") ? (int) args.getProperty ("pluginIndex", -1)
+                                                     : (int) args.getProperty ("index", -1);
+    auto* r = asRave (findPlugin (trackId, idx));
+    if (r == nullptr) return errResult ("load_rave_model", "no rave insert");
+    juce::String path = args.getProperty ("path", var()).toString();
+    if (path.isEmpty()) path = raveModelPathFor (args.getProperty ("target", var()).toString());
+    if (path.isEmpty()) return errResult ("load_rave_model", "path or target required");
+    if (! juce::File (path).existsAsFile()) return errResult ("load_rave_model", "model file not found: " + path);
+    const bool ok = r->loadModelFromFile (juce::File (path));
+    logLine ("load_rave_model", args, ok, ok ? juce::String() : juce::String ("load failed"), false);
+    emitSnapshotInvalidated();
+    if (! ok) return errResult ("load_rave_model", "could not load model: " + path);
+    auto* data = new DynamicObject();
+    data->setProperty ("applied", true);
+    data->setProperty ("describe", r->describe());
+    return okResult ("load_rave_model", var (data));
+}
+
+juce::var MoshOps::cmdResetRave (const juce::var& args)
+{
+    auto* r = asRave (findPlugin (args.getProperty ("trackId", var()).toString(),
+                                  (int) args.getProperty ("index", -1)));
+    if (r == nullptr) return errResult ("reset_rave", "no rave insert");
+    r->resetModel();
+    logLine ("reset_rave", args, true, {}, false);
+    return okResult ("reset_rave");
+}
+#endif // MOSH_HAVE_ANIRA
 
 juce::var MoshOps::cmdCancelRender (const juce::var& args)
 {
@@ -5672,11 +5659,10 @@ juce::var MoshOps::pluginToVar (te::Plugin& p, int index)
         o->setProperty ("category", bspec->category);
     if (ext != nullptr)
         addExternalPluginMetadata (*o, *ext);
-    if (auto* n = asNeural (&p))
-    {
-        o->setProperty ("neural", n->describe());
-        o->setProperty ("labMode", n->isLabMode());
-    }
+   #if MOSH_HAVE_ANIRA
+    if (auto* r = asRave (&p))
+        o->setProperty ("rave", r->describe());
+   #endif
 
     juce::Array<var> params;
     const int n = juce::jmin (16, p.getNumAutomatableParameters());
@@ -5716,6 +5702,13 @@ juce::var MoshOps::snapshot()
     auto& edit = eng.edit();
 
     auto* session = new DynamicObject();
+    // Route C.2 — true only in the anira build; gates the UI "+ RAVE" affordance so the
+    // real-time RAVE insert is only offered where it can actually be hosted.
+   #if MOSH_HAVE_ANIRA
+    session->setProperty ("raveAvailable", true);
+   #else
+    session->setProperty ("raveAvailable", false);
+   #endif
     session->setProperty ("sampleRate", eng.engine().getDeviceManager().getSampleRate());
     session->setProperty ("tempo", edit.tempoSequence.getBpmAt (tracktion::TimePosition()));
     if (auto* ts = edit.tempoSequence.getTimeSig (0))
@@ -6247,6 +6240,8 @@ juce::var MoshOps::clipToVar (te::Clip& c)
         {
             r->setProperty ("prompt", params[ids::prompt]);
             r->setProperty ("nl", (double) params[ids::nl]);
+            r->setProperty ("target", params[ids::target]);        // Route B transform target
+            r->setProperty ("strength", (double) params[ids::strength]); // Route B transform strength
             Array<var> colors;
             if (auto cs = params.getChildWithName (ids::COLORS); cs.isValid())
                 for (int i = 0; i < cs.getNumChildren(); ++i)

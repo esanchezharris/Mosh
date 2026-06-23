@@ -10,7 +10,8 @@ export function TrackFxDrawer({ track }: { track: Track }) {
   const exec = useStore((s) => s.exec);
   const openBrowser = useStore((s) => s.openBrowser);
   const setSelectedTrack = useStore((s) => s.setSelectedTrack);
-  const plugins = (track.plugins ?? []).filter((p) => p.external || p.neural || p.builtin);
+  const raveAvailable = useStore((s) => s.snapshot?.session?.raveAvailable ?? false);
+  const plugins = (track.plugins ?? []).filter((p) => p.external || p.rave || p.builtin);
 
   return (
     <div className="fxdrawer" data-testid="fx-drawer" data-track-id={track.id}>
@@ -20,7 +21,7 @@ export function TrackFxDrawer({ track }: { track: Track }) {
           <button className={`pdot${p.enabled ? " on" : ""}`} title={p.enabled ? "Bypass" : "Enable"}
             aria-pressed={!p.enabled}
             onClick={() => void exec("bypass_plugin", { trackId: track.id, index: p.index, bypassed: p.enabled })} />
-          <span className="fx-name" title={p.name}>{p.neural ? `Neural · ${p.neural.model}` : p.name}</span>
+          <span className="fx-name" title={p.name}>{p.rave ? `RAVE · ${p.rave.model}` : p.name}</span>
           <button className="btn fx-open" title="Open plugin window" aria-label={`Open ${p.name}`}
             onClick={() => void exec("open_plugin_editor", { trackId: track.id, index: p.index })}>⤢</button>
           <button className="btn x" title="Remove" aria-label={`Remove ${p.name}`}
@@ -29,7 +30,10 @@ export function TrackFxDrawer({ track }: { track: Track }) {
       ))}
       <div className="fx-add">
         <button className="btn" onClick={() => { setSelectedTrack(track.id); openBrowser(); }}>+ Plugin</button>
-        <button className="btn" onClick={() => void exec("add_neural_insert", { trackId: track.id, modelId: "nam" })}>+ Neural</button>
+        {raveAvailable && (
+          <button className="btn" data-testid="fx-add-rave" title="Add a real-time RAVE timbre-transfer insert"
+            onClick={() => void exec("add_rave_insert", { trackId: track.id })}>+ RAVE</button>
+        )}
       </div>
     </div>
   );

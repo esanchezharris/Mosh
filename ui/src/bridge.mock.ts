@@ -70,6 +70,7 @@ function seedSnapshot(): Snapshot {
     schemaVersion: 1,
     session: {
       sampleRate: SR, tempo: 120, timeSigNumerator: 4, timeSigDenominator: 4,
+      raveAvailable: true,   // Route C.2 — exercise the "+ RAVE" affordance in dev/e2e
       metronome: false, length: 16, editFile: "/mock/session.mosh",
       audioEnabled: true, bitDepth: 24, bufferSize: 512,
       availableCores: 8, audioThreads: 8, audioThreadsAuto: true,
@@ -119,7 +120,7 @@ const listeners = new Map<string, Set<Listener>>();
 // Mock command log (drives the CommandLog panel). Read-only commands don't log.
 const cmdLog: { command: string; ok: boolean; undoable: boolean; ts: number }[] = [];
 const READONLY = new Set(["get_snapshot", "get_clip_peaks", "file_peaks", "audition_file", "stop_audition", "get_command_log", "list_plugins", "list_builtins", "list_colors", "list_audio_devices", "list_wave_inputs", "list_track_outputs", "list_takes", "list_training_sources", "training_job_status", "list_lora_adapters"]);
-const NON_UNDOABLE = new Set(["set_transport", "arm_track", "set_input_monitor", "undo", "redo", "save", "reload", "new_project", "render_layer", "open_plugin_editor", "set_plugin_param", "set_neural_param", "export_audio", "import_training_source", "approve_training_source", "build_training_corpus", "submit_training_job", "cancel_training_job", "import_lora_adapter", "activate_lora_adapter"]);
+const NON_UNDOABLE = new Set(["set_transport", "arm_track", "set_input_monitor", "undo", "redo", "save", "reload", "new_project", "render_layer", "open_plugin_editor", "set_plugin_param", "export_audio", "import_training_source", "approve_training_source", "build_training_corpus", "submit_training_job", "cancel_training_job", "import_lora_adapter", "activate_lora_adapter"]);
 function emit(type: string, payload?: unknown) {
   const ls = listeners.get("mosh_event");
   if (ls) for (const fn of ls) fn({ type, payload });
@@ -229,7 +230,7 @@ function trainingState(): TrainingState {
   return snapshot.training as TrainingState;
 }
 
-// ── plugin / neural / generative catalog (dev-mock only) ─────────────────────
+// ── plugin / generative catalog (dev-mock only) ─────────────────────
 const BUILTINS = [
   { type: "4osc", name: "4OSC", category: "Instruments", isInstrument: true, builtin: true as const },
   { type: "reverb", name: "Reverb", category: "Effects", isInstrument: false, builtin: true as const },
@@ -616,7 +617,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     case "stop_audition":
       return ok(command);
 
-    // ── plugins / neural rack ────────────────────────────────────────────────
+    // ── plugins ────────────────────────────────────────────────
     case "list_plugins": return ok(command, { plugins: VST3S, counts: { vst3: VST3S.length, au: 0, total: VST3S.length } });
     case "list_builtins": return ok(command, { plugins: BUILTINS });
     case "set_master_pan": { pushUndo(); if (snapshot.master) snapshot.master.pan = num(args.pan); invalidate(); return ok(command); }
@@ -670,15 +671,6 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       t.plugins.push({ index: t.plugins.length, name: v.name, type: v.format, enabled: true, external: true, isInstrument: v.isInstrument, params: mkParams(6) });
       invalidate(); return ok(command);
     }
-    case "add_neural_insert": {
-      const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found");
-      pushUndo(); t.plugins = t.plugins ?? [];
-      const model = str(args.modelId, "nam");
-      t.plugins.push({ index: t.plugins.length, name: `Neural · ${model}`, type: "neural", enabled: true, external: false, isInstrument: false, params: [],
-        neural: { model, labMode: false, latencySamples: 64, latencySeconds: 64 / SR,
-          params: [{ id: "drive", ui: 40, safeMaxUi: 70 }, { id: "tone", ui: 50, safeMaxUi: 100 }, { id: "mix", ui: 100, safeMaxUi: 100 }] } });
-      invalidate(); return ok(command);
-    }
     case "bypass_plugin": { const f = findPlugin(str(args.trackId), num(args.index)); if (!f) return err(command, "plugin not found"); pushUndo(); f.track.plugins![f.idx].enabled = !Boolean(args.bypassed); invalidate(); return ok(command); }
     case "remove_plugin": { const f = findPlugin(str(args.trackId), num(args.index)); if (!f) return err(command, "plugin not found"); pushUndo(); f.track.plugins!.splice(f.idx, 1); reindex(f.track); invalidate(); return ok(command); }
     case "reorder_plugin": {
@@ -691,23 +683,31 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       const p = f.track.plugins![f.idx].params?.find((x) => x.index === num(args.paramIndex)); if (p) p.value = num(args.value);
       invalidate(); return ok(command);
     }
-    case "set_neural_param": {
-      const f = findPlugin(str(args.trackId), num(args.index)); if (!f?.track.plugins![f.idx].neural) return err(command, "not a neural insert");
-      const np = f.track.plugins![f.idx].neural!.params.find((x) => x.id === str(args.paramId)); if (np) np.ui = num(args.value);
+    case "open_plugin_editor": return ok(command);
+
+    // Route C.2 — real-time RAVE insert (dev-mock; the real one is anira+LibTorch).
+    case "add_rave_insert": {
+      const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found");
+      pushUndo(); t.plugins = t.plugins ?? [];
+      t.plugins.push({ index: t.plugins.length, name: "RAVE", type: "rave", enabled: true, external: false, isInstrument: false, params: [],
+        rave: { model: "rave", modelName: "", modelLoaded: false, mix: 100, latencySeconds: 2048 / SR } });
+      invalidate(); return ok(command, { index: t.plugins.length - 1, modelLoaded: false });
+    }
+    case "set_rave_param": {
+      const f = findPlugin(str(args.trackId), num(args.index)); if (!f?.track.plugins![f.idx].rave) return err(command, "not a rave insert");
+      if (str(args.paramId, "mix") === "mix") f.track.plugins![f.idx].rave!.mix = num(args.value);
       invalidate(); return ok(command);
     }
-    case "set_neural_lab_mode": { const f = findPlugin(str(args.trackId), num(args.index)); if (f?.track.plugins![f.idx].neural) { pushUndo(); f.track.plugins![f.idx].neural!.labMode = Boolean(args.on); invalidate(); } return ok(command); }
-    case "load_neural_model": {
-      const f = findPlugin(str(args.trackId), num(args.pluginIndex));
-      if (!f?.track.plugins![f.idx].neural) return err(command, "not a neural insert");
-      pushUndo();
-      const n = f.track.plugins![f.idx].neural!;
-      const p = str(args.path);
-      n.modelPath = p;
-      n.modelName = p.split("/").pop() || p; // describe() reports the loaded file's name
-      invalidate(); return ok(command, { modelName: n.modelName, modelPath: n.modelPath });
+    case "load_rave_model": {
+      const f = findPlugin(str(args.trackId), num(args.pluginIndex)); if (!f?.track.plugins![f.idx].rave) return err(command, "not a rave insert");
+      pushUndo(); const r = f.track.plugins![f.idx].rave!;
+      const p = str(args.path) || str(args.target);
+      r.modelPath = str(args.path) || undefined;
+      r.modelName = (p.split("/").pop() || p).replace(/\.ts$/, "");
+      r.model = r.modelName; r.modelLoaded = true;
+      invalidate(); return ok(command, { applied: true });
     }
-    case "reset_neural": case "open_plugin_editor": case "set_neural_latency": return ok(command);
+    case "reset_rave": return ok(command);
 
     // ── parameter automation (buried editor) ─────────────────────────────────
     case "add_automation_point": case "set_automation_point": case "remove_automation_point": case "clear_automation": {
@@ -726,11 +726,15 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
 
     // ── generative (Tier-B) render layers ────────────────────────────────────
     case "list_colors": return ok(command, { colors: COLORS });
+    case "list_transform_targets":
+      return ok(command, { targets: ["violin", "flute", "choir", "strings", "orchestra", "synth pad", "music box", "brass"], freeText: true });
     case "create_render_layer": {
       const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found");
       pushUndo();
       f.clip.hasRenderLayer = true;
-      f.clip.renderLayer = { id: "rl-" + f.clip.id, status: "dirty", adapter: str(args.adapter, "fake"), mode: str(args.mode, "reimagine"), seed: 1, userKept: false, hasArtifact: false, nl: 0.45, colors: [] };
+      const mode = str(args.mode, "reimagine");
+      f.clip.renderLayer = { id: "rl-" + f.clip.id, status: "dirty", adapter: str(args.adapter, "fake"), mode, seed: 1, userKept: false, hasArtifact: false, nl: 0.45, colors: [],
+        ...(mode === "transform" ? { target: "", strength: 65 } : {}) };
       invalidate(); return ok(command);
     }
     case "set_render_param": {
@@ -739,6 +743,8 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       if ("colors" in args) rl.colors = args.colors as RenderLayer["colors"];
       if ("nl" in args) rl.nl = num(args.nl, rl.nl);
       if ("seed" in args) rl.seed = num(args.seed, rl.seed);
+      if ("target" in args) rl.target = str(args.target, rl.target ?? "");
+      if ("strength" in args) rl.strength = num(args.strength, rl.strength ?? 65);
       rl.status = "dirty"; rl.hasArtifact = false;
       invalidate(); return ok(command);
     }

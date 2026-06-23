@@ -432,7 +432,7 @@ const TrackHeader = memo(function TrackHeader({ track, height }: { track: Track;
   const redesign = useSettings((s) => Boolean(s.get("redesignShell")));
   const expanded = useStore((s) => s.expandedTracks.has(track.id));
   const toggleExpanded = useStore((s) => s.toggleTrackExpanded);
-  const fxCount = (track.plugins ?? []).filter((p) => p.external || p.neural || p.builtin).length;
+  const fxCount = (track.plugins ?? []).filter((p) => p.external || p.rave || p.builtin).length;
   // DRM-001 — surface the track type + auto-loaded instrument so the default-instrument
   // policy is discoverable, not magic. A drum track shows 🥁; a melodic instrument
   // track shows ♪ (with the instrument's name on hover).

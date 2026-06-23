@@ -97,15 +97,13 @@ public:
 
         const bool undoSelfTest = commandLine.contains ("--selftest-undo");
         const bool liveAudioSmoke = commandLine.contains ("--live-audio-smoke");
-        const bool neuralAB = commandLine.contains ("--neural-ab");
         const bool scanDeep = commandLine.contains ("--scan-plugins-deep");
         const bool runScript = commandLine.contains ("--run-script");   // headless batch command runner
         const bool voiceSmoke = commandLine.contains ("--voice-smoke"); // headless speech-to-text smoke
         const bool demoGui = commandLine.contains ("--demo3")
-                          || commandLine.contains ("--demo4")
                           || commandLine.contains ("--demo5")
                           || commandLine.contains ("--demo6");
-        const bool liveAudio = liveAudioSmoke || neuralAB;   // opens the real device, fresh cold session
+        const bool liveAudio = liveAudioSmoke;   // opens the real device, fresh cold session
         const bool headless = undoSelfTest || commandLine.contains ("--selftest");
         const bool noAudio = headless || scanDeep || runScript || voiceSmoke;  // device-free harnesses + scan/script/voice utilities
 
@@ -120,13 +118,12 @@ public:
         }
 
         juce::String freshSessionName = undoSelfTest ? "session-selftest-undo"
-                                            : (neuralAB ? "session-neural-ab"
                                             : (liveAudioSmoke ? "session-live-audio-smoke"
                                             : (scanDeep ? "session-scan"
                                             : (runScript ? "session-run-script"
                                             : (demoGui ? "session-demo"
                                             : (voiceSmoke ? "session-voice-smoke"
-                                                              : "session-selftest"))))));
+                                                              : "session-selftest")))));
         // Concurrent harness runs (e.g. parallel git worktrees each looping
         // --selftest) otherwise share the global session-selftest dir + freshSession
         // wipes it at startup, so one run clobbers another mid-test. MOSH_SELFTEST_SESSION
@@ -220,14 +217,6 @@ public:
             return;
         }
 
-        if (neuralAB)
-        {
-            const int rc = runNeuralAB (*engine, *moshOps);
-            setApplicationReturnValue (rc);
-            quit();
-            return;
-        }
-
         // Headless speech-to-text smoke (`Mosh --voice-smoke`): synthesize a phrase
         // with `say`, transcribe it via SFSpeechRecognizer, assert the text. Needs only
         // a one-time Speech grant (FILE mode); MOSH_VOICE_SMOKE_MIC=1 drives the live
@@ -293,8 +282,6 @@ public:
         // editor, then leave the GUI running for visual verification.
         if (commandLine.contains ("--demo3"))
             juce::MessageManager::callAsync ([this] { runPluginDemo (*moshOps); });
-        if (commandLine.contains ("--demo4"))
-            juce::MessageManager::callAsync ([this] { runNeuralDemo (*moshOps); });
         if (commandLine.contains ("--demo5"))
             juce::MessageManager::callAsync ([this] { runGenerativeDemo (*moshOps); });
         if (commandLine.contains ("--demo6"))

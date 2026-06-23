@@ -24,6 +24,10 @@ cd "$(dirname "$0")"
 # sketch/setup-sketch.sh) exports SKETCH_PY. Absent → /sketch degrades gracefully to
 # 503 sketch_unavailable.
 [[ -f sketch/.sketch.env ]] && source ./sketch/.sketch.env
+# Transform (RAVE timbre transfer, Route C) lives in its own venv; .transform.env
+# (written by transform/setup-transform.sh) exports TRANSFORM_PY + RAVE_MODEL_DIR.
+# Absent → the `transform` adapter falls back to the deterministic fake (Route B).
+[[ -f transform/.transform.env ]] && source ./transform/.transform.env
 # Phase-4 SFT lane lives in its own mlx-lm venv; .sft.env (written by
 # sft/setup-sft.sh) exports SFT_PY for the trainer CLI. Absent → the SFT lane is
 # simply unavailable; the rest of the service is unaffected.

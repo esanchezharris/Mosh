@@ -193,16 +193,6 @@ private:
     juce::var cmdRemoveNote     (const juce::var& args);
     juce::var cmdSetNote        (const juce::var& args);
     juce::var cmdQuantizeNotes  (const juce::var& args);
-    // Stage 4 — Tier-A real-time neural insert
-    juce::var cmdAddNeuralInsert (const juce::var& args);
-    juce::var cmdSetNeuralParam  (const juce::var& args);
-    juce::var cmdSetNeuralLabMode(const juce::var& args);
-    juce::var cmdSetNeuralLatency(const juce::var& args);
-    juce::var cmdResetNeural     (const juce::var& args);
-    // GAP 1 — load a real Tier-A model file (RTNeural JSON) into a neural insert. When
-    // MOSH_HAVE_RTNEURAL is NOT built this returns ok with { applied:false,
-    // reason:"RTNeural not built" } — a graceful no-op so the default build stays green.
-    juce::var cmdLoadNeuralModel (const juce::var& args);
     // Stage 5 — Tier-B generative layer (RenderLayer flow)
     juce::var cmdCreateRenderLayer (const juce::var& args);
     juce::var cmdSetRenderParam   (const juce::var& args);
@@ -215,6 +205,14 @@ private:
     juce::var cmdBounceLayerToClip(const juce::var& args);
     juce::var cmdRemoveRenderLayer(const juce::var& args);
     juce::var cmdListColors       (const juce::var& args);
+    juce::var cmdListTransformTargets (const juce::var& args);   // Route B discovery
+   #if MOSH_HAVE_ANIRA
+    // Route C.2 — real-time RAVE insert (built only with anira+LibTorch).
+    juce::var cmdAddRaveInsert    (const juce::var& args);
+    juce::var cmdSetRaveParam     (const juce::var& args);
+    juce::var cmdLoadRaveModel    (const juce::var& args);
+    juce::var cmdResetRave        (const juce::var& args);
+   #endif
     // Stage 6 — consolidation
     juce::var cmdExportAudio      (const juce::var& args);
     // Wave: settings — audio device picker + project lifecycle (both NON-undoable)
