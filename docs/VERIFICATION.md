@@ -72,3 +72,29 @@ Evidence WAVs + the analyzer `report.json` land in `verify-artifacts/` (git-igno
 The offline checks (1–5) are deterministic — re-run `python3 scripts/verify-hardware/verify.py`
 (add `--sa3`) any time a change could affect the signal chain, as a render-level regression guard
 on top of `--selftest`.
+
+## Collaborator video — two machines (hardware-gated)
+
+The WebRTC + signaling layer is built and unit-tested (`ui/src/webrtc/*.test.ts`,
+`relay/run-mp-selftest.sh`); the macOS 12+ camera permission delegate
+(`src/webview/WebViewCameraPermission.mm`) unblocks `getUserMedia` in the packaged app.
+This is the operator procedure to prove peer video on real hardware.
+
+1. **Build/deploy** Mosh on both Macs: `./run-mosh.sh deploy` (or copy `/Applications/Mosh.app`).
+2. **Relay** — pick one:
+   - *Cloud (default, zero-config):* nothing to do; the Supabase relay is baked in.
+   - *Local:* on Mac A run `PORT=8771 python3 relay/server.py`; on **both** Macs
+     `export MOSH_RELAY_URL=http://<MacA-LAN-IP>:8771` before launching.
+3. **Session** — host creates a session (gets a room code); guest joins with that code.
+   Confirm each Mac shows the other in the presence cluster.
+4. **Camera** — on each Mac, accept the macOS camera prompt (first time), then click the
+   camera toggle. Expect: each sees the other's live tile in the Session rail; toggling
+   off removes the remote tile and the camera light goes out.
+5. **Same-Mac smoke (optional)** — two Mosh instances on one Mac (sharing the one camera)
+   partially checks signaling + tiles without a second machine.
+6. **Troubleshooting** — no remote video:
+   - System Settings → Privacy & Security → Camera → ensure Mosh is enabled.
+   - Relay reachability: `curl <MOSH_RELAY_URL>` from both Macs.
+   - The Console log line `[webview] camera permission delegate installed` confirms the
+     delegate attached (absent → it didn't find the WKWebView; camera will fail).
+   - Same-LAN works with STUN only; cross-NAT may need a TURN server (out of scope).
