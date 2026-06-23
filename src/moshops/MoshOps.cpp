@@ -1616,7 +1616,18 @@ juce::var MoshOps::cmdMpCommitTrack (const juce::var& args)
             }
             if (src != dest)
             {
-                w->getSourceFileReference().setToDirectFileReference (dest, true);   // relative by-hash ref
+                auto& srcRef = w->getSourceFileReference();
+                srcRef.setToDirectFileReference (dest, true);   // relative by-hash ref
+                // setToDirectFileReference computes the path relative to the edit FILE, which
+                // yields a spurious leading "../" (e.g. "../audio/by-hash/<sha>.wav"). Our
+                // filePathResolver (MoshEngine::wireEditResolvers) resolves relative to the
+                // edit file's PARENT directory, so that "../" escapes the session dir to a
+                // path that does not exist → the offline render's WaveNode can never create a
+                // reader → export spins forever (jobNeedsRunningAgain). Re-point the ref
+                // relative to the parent dir (matching the save_as consolidation), with
+                // portable separators so a peer on another OS resolves the same stem.
+                srcRef.source = dest.getRelativePathFrom (eng.editFile().getParentDirectory())
+                                    .replaceCharacter ('\\', '/');
                 w->sourceMediaChanged();
             }
             auto* r = new DynamicObject(); r->setProperty ("hash", hash); r->setProperty ("ext", ext);
@@ -5061,8 +5072,33 @@ juce::var MoshOps::cmdExportAudio (const juce::var& args)
             && ! params.destFile.isDirectory())
         {
             te::Renderer::RenderTask task ("Mosh export", params, nullptr, nullptr);
+
+            // Defense-in-depth: bound the render loop. runJob() returns jobNeedsRunningAgain
+            // once per block; if a leaf node can NEVER become ready (e.g. a clip whose source
+            // file can't be opened), progress stalls and this loop would otherwise spin
+            // forever. A no-progress watchdog + an absolute deadline (scaled to the edit
+            // length to allow legitimate realtime renders) turn any such stall into a clean
+            // error instead of an app hang.
+            const double editSeconds  = edit.getLength().inSeconds();
+            const juce::uint32 startMs    = juce::Time::getMillisecondCounter();
+            const juce::uint32 deadlineMs = (juce::uint32) juce::jmax (60000.0, editSeconds * 8000.0 + 60000.0);
+            const juce::uint32 stallMs    = 20000;   // abort if progress doesn't advance for 20s
+            float  lastProgress   = -1.0f;
+            juce::uint32 lastProgressMs = startMs;
+
             while (task.runJob() == juce::ThreadPoolJob::jobNeedsRunningAgain)
-            {}
+            {
+                const juce::uint32 nowMs = juce::Time::getMillisecondCounter();
+                const float p = task.getCurrentTaskProgress();
+                if (p > lastProgress) { lastProgress = p; lastProgressMs = nowMs; }
+
+                if (nowMs - lastProgressMs > stallMs || nowMs - startMs > deadlineMs)
+                {
+                    if (task.errorMessage.isEmpty())
+                        task.errorMessage = "export render stalled (a clip's audio source could not be read)";
+                    break;
+                }
+            }
 
             te::Renderer::turnOffAllPlugins (edit);
 

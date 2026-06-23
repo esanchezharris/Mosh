@@ -4060,6 +4060,72 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (cmd (ops, "mp_sync_locks", objN ({ { "active", false } }))), "session deactivated");
     }
 
+    // Regression: export after mp_commit_track. The commit content-addresses a wave clip's
+    // audio to <session>/audio/by-hash/<sha>.wav and rewrites the clip to a RELATIVE ref.
+    // The ref was previously computed relative to the edit FILE (setToDirectFileReference),
+    // which produced a spurious leading "../" — but the filePathResolver resolves relative
+    // to the edit file's PARENT dir, so the "../" escaped the session dir to a non-existent
+    // path. The offline-render WaveNode could then never open the stem, so isReadyToProcess()
+    // stayed false and export_audio spun FOREVER. Guards: the ref has no "../", resolves to an
+    // existing file, export COMPLETES (the render loop is also bounded now), and renders
+    // NON-SILENT audio. (mpSession_ exists unconditionally, so this needs no relay.)
+    {
+        section ("Multiplayer: export after commit (by-hash ref resolves — guards the export hang)");
+
+        check (ok (cmd (ops, "new_project", args1 ("name", "mp-export-selftest"))), "new_project (mp export isolation) ok");
+
+        auto mkt = cmd (ops, "create_track", objN ({ { "name", "Stem" } }));
+        check (ok (mkt), "create_track (audio) ok");
+        const auto st = mkt["data"].getProperty ("trackId", var()).toString();
+        check (ok (cmd (ops, "add_test_tone_clip", objN ({ { "trackId", st }, { "seconds", 1.0 } }))),
+               "add_test_tone_clip ok");
+
+        check (ok (cmd (ops, "mp_commit_track", args1 ("trackId", st))), "mp_commit_track (audio) ok");
+
+        juce::String storedRef;
+        bool resolvedExists = false;
+        for (auto* tr : te::getAllTracks (eng.edit()))
+            if (auto* at = dynamic_cast<te::AudioTrack*> (tr))
+                for (auto* c : at->getClips())
+                    if (auto* w = dynamic_cast<te::WaveAudioClip*> (c))
+                    {
+                        storedRef      = w->state.getProperty (juce::Identifier ("source")).toString();
+                        resolvedExists = w->getCurrentSourceFile().existsAsFile();
+                    }
+        check (storedRef.contains ("by-hash"), "committed clip points at the by-hash stem");
+        check (! storedRef.startsWith ("../") && ! storedRef.contains ("/../"),
+               "by-hash ref has no spurious '../' so it resolves inside the session (" + storedRef + ")");
+        check (resolvedExists, "committed clip's resolved source exists on disk");
+
+        auto wavMag = [] (const File& f) -> float
+        {
+            AudioFormatManager fm; fm.registerBasicFormats();
+            if (std::unique_ptr<AudioFormatReader> reader { fm.createReaderFor (f) })
+            {
+                const int toRead = (int) jmin ((int64) 4'000'000, reader->lengthInSamples);
+                if (toRead > 0)
+                {
+                    AudioBuffer<float> buf ((int) reader->numChannels, toRead);
+                    reader->read (&buf, 0, toRead, 0, true, true);
+                    float mag = 0.0f;
+                    for (int ch = 0; ch < buf.getNumChannels(); ++ch)
+                        mag = jmax (mag, buf.getMagnitude (ch, 0, toRead));
+                    return mag;
+                }
+            }
+            return -1.0f;
+        };
+
+        auto outFile = eng.sessionDir().getChildFile ("exports").getChildFile ("mp-commit-export.wav");
+        outFile.deleteFile();
+        check (ok (cmd (ops, "export_audio", objN ({ { "file", outFile.getFullPathName() },
+                                                     { "format", "wav" }, { "bitDepth", 16 } }))),
+               "export_audio after mp_commit_track COMPLETES (no hang)");
+        check (wavMag (outFile) > 0.02f,
+               "exported MP-committed audio is NON-SILENT (the stem actually rendered)");
+        outFile.deleteFile();
+    }
+
     // P2 — native↔relay transport, end to end over real HTTP. Gated (spawns a
     // relay + needs MOSH_RELAY_URL) so it stays OUT of the deterministic core run.
     if (std::getenv ("MOSH_SELFTEST_MP") != nullptr)
