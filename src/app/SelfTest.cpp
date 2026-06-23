@@ -3885,6 +3885,32 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check ((int) bundle.getProperty ("count", 0) == 2, "serialized a 2-track project bundle");
         check (bundle.getProperty ("annotations", juce::var()).toString().isNotEmpty(), "bundle carries the annotations subtree");
 
+        // REGRESSION (bootstrap audio late-join): the bundle must carry per-track by-hash
+        // audioRefs so a late-joiner can fetch PRE-EXISTING audio, not just structure/MIDI.
+        // Before the fix mp_serialize_project never content-addressed/uploaded → the bundle
+        // had no refs and the joiner's clip stayed sourceMissing until a host re-commit.
+        juce::var bootAudioRefs;
+        if (auto* tarr = bundle.getProperty ("tracks", juce::var()).getArray())
+            for (auto& tv : *tarr)
+                if (auto rr = tv.getProperty ("audioRefs", juce::var()); rr.isArray() && rr.size() > 0)
+                    bootAudioRefs = rr;
+        check (bootAudioRefs.isArray() && bootAudioRefs.size() >= 1, "bootstrap bundle carries per-track audioRefs (audio late-join)");
+        check (bootAudioRefs.size() > 0 && bootAudioRefs[0].getProperty ("hash", juce::var()).toString().length() == 64,
+               "bootstrap audioRef hash is a sha256");
+        {
+            // The host's Boot A clip was content-addressed + repointed to a by-hash stem at
+            // serialize time (the by-hash form, no spurious "../" — inherits the PR #104 helper).
+            juce::String hostRef;
+            for (auto* tr : te::getAllTracks (eng.edit()))
+                if (auto* at = dynamic_cast<te::AudioTrack*> (tr))
+                    for (auto* c : at->getClips())
+                        if (auto* w = dynamic_cast<te::WaveAudioClip*> (c))
+                            hostRef = w->state.getProperty (juce::Identifier ("source")).toString();
+            check (hostRef.contains ("by-hash"), "serialize content-addressed the host audio clip to a by-hash stem");
+            check (! hostRef.startsWith ("../") && ! hostRef.contains ("/../"),
+                   "bootstrap by-hash ref has no spurious '../' (" + hostRef + ")");
+        }
+
         check (ok (cmd (ops, "new_project", args1 ("name", "mp-boot-dst"))), "new_project (joiner wipe) ok");
         check (tracks (ops) == 0, "joiner starts empty before bootstrap");
 
@@ -3913,6 +3939,19 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                         if (auto* cs = tv["clips"].getArray()) aClips = cs->size();
         }
         check (aClips == 1, "Boot A's clip survived the bootstrap (deep content)");
+        {
+            // The repointed by-hash ref rode the bundle onto the joiner (proves the wire
+            // round-trip of the audio ref). The bytes themselves ride the cloud relay's blob
+            // store via the download loop that mirrors the proven commit-apply path; the
+            // cloud-relay selftest branch exercises that fetch end-to-end.
+            juce::String joinRef;
+            for (auto* tr : te::getAllTracks (eng.edit()))
+                if (auto* at = dynamic_cast<te::AudioTrack*> (tr))
+                    for (auto* c : at->getClips())
+                        if (auto* w = dynamic_cast<te::WaveAudioClip*> (c))
+                            joinRef = w->state.getProperty (juce::Identifier ("source")).toString();
+            check (joinRef.contains ("by-hash"), "joiner's bootstrapped clip references the by-hash stem");
+        }
     }
 
     section ("Multiplayer: structural sync (scalar session-global ops)");

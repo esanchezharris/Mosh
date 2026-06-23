@@ -39,7 +39,13 @@ inline void repointWaveClipSource (tracktion::engine::WaveAudioClip& clip,
                                    bool relative)
 {
     auto& srcRef = clip.getSourceFileReference();
-    srcRef.setToDirectFileReference (target, relative);   // direct-file mode (absolute path when !relative)
+    // Seed via the ABSOLUTE form (useRelativePath=false). setToDirectFileReference is just
+    // `source = findPathFromFile(...)`, and findPathFromFile(useRelativePath=true) jassert-fires
+    // when the edit file isn't on disk yet (a fresh, unsaved arrangement — exactly the case the
+    // by-hash repoint must still work for). For the relative case we overwrite `source` below
+    // with our own PARENT-relative computation anyway, so the relative seed buys nothing but a
+    // spurious debug assertion. !relative keeps the absolute path verbatim.
+    srcRef.setToDirectFileReference (target, false);
     if (relative)
         srcRef.source = target.getRelativePathFrom (editFileParentDir).replaceCharacter ('\\', '/');
     clip.sourceMediaChanged();                            // refresh the clip's cached source file

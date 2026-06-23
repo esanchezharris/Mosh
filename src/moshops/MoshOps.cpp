@@ -1694,15 +1694,58 @@ juce::var MoshOps::cmdMpApplyStructural (const juce::var& args)
 juce::var MoshOps::cmdMpSerializeProject (const juce::var&)
 {
     // P6 — the whole project as a bundle of per-track blobs, for a late-joiner.
-    eng.edit().flushState();
+    // Each track's wave clips are content-addressed into <editDir>/audio/by-hash/ and
+    // uploaded (server-side dedup) before serialize, with the by-hash refs attached to
+    // the track entry — so a guest who joins mid-session adopts pre-existing AUDIO, not
+    // just structure/MIDI. Mirrors the commit path (cmdMpCommitTrack); closes the old
+    // "bootstrap audio not wired" gap. Graceful on the local relay (uploadBlob no-ops).
+    auto byHashDir = eng.editFile().getParentDirectory().getChildFile ("audio").getChildFile ("by-hash");
     juce::Array<var> tracks;
     for (auto* t : te::getAudioTracks (eng.edit()))
     {
         if (t == nullptr) continue;
+
+        Array<var> audioRefs;
+        for (auto* c : t->getClips())
+            if (auto* w = dynamic_cast<te::WaveAudioClip*> (c))
+            {
+                auto src = w->getCurrentSourceFile();
+                if (! src.existsAsFile()) continue;
+                juce::FileInputStream fis (src);
+                if (! fis.openedOk()) continue;
+                const auto hash = juce::SHA256 (fis).toHexString();
+                const auto ext  = src.getFileExtension().removeCharacters (".");
+                auto dest = byHashDir.getChildFile (hash + "." + ext);
+                if (! dest.existsAsFile())
+                {
+                    byHashDir.createDirectory();
+                    src.copyFileTo (dest);
+                }
+                if (src != dest)
+                    // Relative by-hash ref (repointWaveClipSource's PARENT-relative form, not
+                    // setToDirectFileReference's edit-FILE-relative "../" — PR #104), so the
+                    // serialized blob + the joiner resolve the same path once bytes are fetched.
+                    repointWaveClipSource (*w, dest, eng.editFile().getParentDirectory(), true);
+                auto* r = new DynamicObject(); r->setProperty ("hash", hash); r->setProperty ("ext", ext);
+                audioRefs.add (var (r));
+            }
+
+        eng.edit().flushState();   // AFTER the repoints, so the serialized state carries the by-hash refs
         auto* o = new DynamicObject();
         o->setProperty ("logicalId", logicalid::ensureTrack (t->state));
         o->setProperty ("blob", trackcommit::serialize (*t));
+        // Refs ride INSIDE the track entry: MultiplayerSession's bootstrap marshaling copies
+        // only `tracks`/`annotations`, so a top-level refs field would be dropped on the wire.
+        o->setProperty ("audioRefs", var (audioRefs));
         tracks.add (var (o));
+
+        // Upload the stems (content-addressed dedup) so the joiner can fetch what it lacks.
+        for (auto& r : audioRefs)
+        {
+            const auto h = r.getProperty ("hash", var()).toString();
+            const auto e = r.getProperty ("ext", var()).toString();
+            mpSession_->uploadBlob (h, e, byHashDir.getChildFile (h + "." + e));
+        }
     }
     auto* d = new DynamicObject();
     d->setProperty ("tracks", tracks);
@@ -1729,9 +1772,22 @@ juce::var MoshOps::cmdMpApplyBootstrap (const juce::var& args)
         }
 
     int applied = 0;
+    auto byHashDir = eng.editFile().getParentDirectory().getChildFile ("audio").getChildFile ("by-hash");
     if (auto* arr = args.getProperty ("tracks", var()).getArray())
         for (auto& tv : *arr)
         {
+            // Fetch any by-hash stems this track references (into audio/by-hash/) BEFORE
+            // applying, so its pre-existing wave clips resolve without a host re-commit —
+            // the late-join analogue of the commit-apply download. No-op on the local relay.
+            if (auto* refs = tv.getProperty ("audioRefs", var()).getArray())
+                for (auto& a : *refs)
+                {
+                    const auto h = a.getProperty ("hash", var()).toString();
+                    const auto e = a.getProperty ("ext", var()).toString();
+                    if (h.isEmpty()) continue;
+                    if (auto dest = byHashDir.getChildFile (h + "." + e); ! dest.existsAsFile())
+                        mpSession_->downloadBlob (h, e, dest);
+                }
             const auto blob = tv.getProperty ("blob", var()).toString();
             if (blob.isNotEmpty() && trackcommit::apply (edit, blob).ok)
                 ++applied;
