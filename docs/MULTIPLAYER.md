@@ -96,12 +96,16 @@ The session control lives in the topbar's **2-player (B-5) pop**
   `PORT=8771 python3 relay/server.py`. Note: **no blob endpoints** → no audio-clip sync.
 - `MOSH_RELAY_APIKEY` overrides the cloud relay's anon key (rarely needed).
 
-## Known limits (true as of 2026-06-21)
+## Known limits (true as of 2026-06-23)
 
-- **Bootstrap audio not wired:** a guest who joins an in-progress session gets the project
-  *structure*, but pre-existing **audio clips** land as `sourceMissing` until the host
-  re-commits the track that holds them (re-select it / nudge it). MIDI/instrument parts
-  appear immediately. Workaround: host touches each audio-bearing track after the guest joins.
+- **Bootstrap audio rides the cloud relay:** a guest who joins an in-progress session now
+  receives pre-existing **audio clips** automatically — on serialize the host content-addresses
+  + uploads each stem, and the joiner downloads them as it adopts the bundle (the same by-hash
+  path as a commit). Two caveats remain: the transfer runs on the message thread, so a session
+  with several audio clips briefly **freezes both windows** while stems move (keep imported clips
+  modest); and the **local self-host relay has no blob store**, so on it audio still won't
+  transfer — do a MIDI-first jam, or nudge each audio track after the guest joins. MIDI/instrument
+  parts always appear immediately.
 - **Stem transfer briefly blocks the UI:** upload/download runs on the message thread, so a
   large audio file can freeze the window for a few seconds. Keep imported clips modest.
 - **Stale lock badge (~250 ms):** after a peer disconnects, their lock chip can linger
