@@ -1,11 +1,27 @@
-# Playtest-prep — follow-ups (root-caused; NOT fixed; de-risk-only pass)
+# Playtest-prep — follow-ups
 
-Logged on `claude/playtest-prep-0621`, 2026-06-21. The export bug below was investigated
-deeply (stack samples + controlled before/after tests). A candidate fix was tried and
-**disproven, then reverted** — the C++ is pristine (`git diff src/` is empty). The right
-fix is engine-level and not safe to rush before the playtest; the workaround is clean.
+Logged on `claude/playtest-prep-0621`, 2026-06-21. **Update 2026-06-22: item A (the export
+hang) is now ROOT-CAUSED CORRECTLY and FIXED** — see the resolution block below. The
+remaining items in §B are pre-existing multiplayer limits, still candidates.
 
-## A. Export hangs on a multiplayer-consolidated AUDIO clip  ⚠️ playtest-relevant
+## A. Export hangs on a multiplayer-consolidated AUDIO clip  ✅ FIXED (2026-06-22)
+
+> **RESOLUTION (2026-06-22).** Fixed in `MoshOps::cmdMpCommitTrack`. The "deep-recursion /
+> render-graph cycle" hypothesis below was **wrong** — a fresh stack sample showed the hang
+> was a **spin**, not infinite recursion (1862 samples in `sleep_for` inside `runJob()`; the
+> `VisitNodesWithRecord` traversal was a normal ~5-deep finite walk). The real cause: the
+> commit stored the by-hash source ref relative to the edit **file** (`setToDirectFileReference`),
+> producing a spurious leading `../` (`../audio/by-hash/<sha>.wav`). Mosh's `filePathResolver`
+> resolves relative to the edit file's **parent dir**, so the `../` escaped the session dir to
+> a non-existent path → the offline-render `WaveNode` could never open the stem →
+> `isReadyToProcess()` stayed false → `cmdExportAudio`'s `while (runJob()==jobNeedsRunningAgain)`
+> loop (no `shouldExit`) spun forever. `save_as` escaped it because save/reload normalizes the
+> ref. Fix = store the ref relative to the parent dir (matching the `save_as` consolidation),
+> plus a defense-in-depth no-progress watchdog on the export loop so any never-ready leaf
+> yields a clean error instead of a hang. Guarded by a default-path selftest section
+> ("export after commit"). The historical investigation below is kept for the record.
+
+**Symptom:** `export_audio` spins forever (CPU-bound, never returns) when the edit contains
 
 **Symptom:** `export_audio` spins forever (CPU-bound, never returns) when the edit contains
 a **wave/audio clip that has been through `mp_commit_track`** (which content-addresses the
@@ -40,7 +56,7 @@ the rebuilt binary) **still hung** → the arranger node is per-audio-track, pre
 address how a consolidated/relative-ref clip's source resolves in the render graph
 (engine-level) — out of scope for a pre-playtest de-risk pass.
 
-**Workaround for tonight (clean + aligns with the architecture):**
+**Workaround (no longer required as of the 2026-06-22 fix — kept for historical context):**
 > In a multiplayer session, build anything you intend to **export** from **MIDI + built-in
 > instruments** (drums kit, 4OSC, hosted synths). These sync instantly, need no audio
 > transfer, and **export fine**. Use wave/recorded/**SA3** audio clips for auditioning/sound-
