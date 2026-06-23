@@ -59,6 +59,17 @@ private:
     juce::var cmdCreateTrack    (const juce::var& args);
     juce::var cmdRenameTrack    (const juce::var& args);
     juce::var cmdRemoveTrack    (const juce::var& args);
+    // SEC-001 — named song sections (MOSH_SECTIONS tree on the Edit; undoable).
+    juce::var cmdCreateSection  (const juce::var& args);
+    juce::var cmdRenameSection  (const juce::var& args);
+    juce::var cmdMoveSection    (const juce::var& args);
+    juce::var cmdRemoveSection  (const juce::var& args);
+    // ANN-001 — authored timeline annotations (MOSH_ANNOTATIONS tree; undoable +
+    // multiplayer-broadcast). create self-broadcasts its resolved cross-peer id.
+    juce::var cmdCreateAnnotation (const juce::var& args);
+    juce::var cmdEditAnnotation   (const juce::var& args);
+    juce::var cmdMoveAnnotation   (const juce::var& args);
+    juce::var cmdRemoveAnnotation (const juce::var& args);
     // MP-001 — 2-player multiplayer commit/apply (backend-only; not in the agent
     // catalog). mp_serialize_track captures a track's portable blob; apply_remote_
     // track rebuilds a peer's committed track (nullptr UndoManager, no relay echo);
@@ -73,6 +84,7 @@ private:
     juce::var cmdMpClaimTrack     (const juce::var& args);
     juce::var cmdMpCommitTrack    (const juce::var& args);
     juce::var cmdMpBroadcastSelection (const juce::var& args);
+    juce::var cmdMpSendSignal   (const juce::var& args);   // WebRTC video signaling passthrough
     // P6 bootstrap — serialize the WHOLE project (all tracks) for a late-joiner,
     // and adopt a received bundle (clear local tracks, rebuild from the bundle).
     juce::var cmdMpSerializeProject (const juce::var& args);
@@ -262,6 +274,11 @@ private:
     // INTENT where set, falling back to the live device readout when a field is
     // unset (timeBase falls back to "seconds"). Used by the snapshot + cmd result.
     juce::var projectSettingsToVar();
+
+    // SEC-001 — the MOSH_SECTIONS container as a snapshot array (read-only; never
+    // creates the tree). Each entry: { id, name, startBeat, endBeat, color? }.
+    juce::var sectionsToVar();
+    juce::var annotationsToVar();
 
     // KEY-001 — the default musical key surfaced in the snapshot before any set_key
     // (A/minor — matches the voice's neutral A4 tonic + SCALES.minor in voice.js).

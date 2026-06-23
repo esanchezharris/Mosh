@@ -1152,6 +1152,90 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                "accepted transform clip points at a real non-empty file");
     }
 
+    // ─── Section-scoped render (the agent "rework the hook" path) ───
+    // A render layer with an explicit sub-region renders ONLY that region's audio and
+    // lands the result bounded to the region — proving create_render_layer
+    // regionStart/regionEnd → a sliced input.wav → a region-bounded landing.
+    section ("Section-scoped render (rework-the-hook)");
+    {
+        auto st = cmd (ops, "create_track", args1 ("name", "Scoped"))["data"].getProperty ("trackId", var()).toString();
+        auto tone = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", st }, { "seconds", 2.0 }, { "freq", 220.0 }}));
+        const auto scid = tone["data"].getProperty ("clipId", var()).toString();
+
+        // Scope to a 0.5 s sub-region [0.5, 1.0] of the 2 s clip.
+        auto crl = cmd (ops, "create_render_layer", objN ({{ "clipId", scid }, { "adapter", "fake" },
+                                                           { "regionStart", 0.5 }, { "regionEnd", 1.0 }}));
+        check (ok (crl), "create_render_layer with a sub-region ok");
+        const auto layerId = crl["data"].getProperty ("layerId", var()).toString();
+
+        // The snapshot reports the clamped sub-region, not the whole clip span.
+        auto layerVar = [&] () -> var {
+            auto trk = trackById (st);
+            if (auto* arr = trk.getProperty ("clips", var()).getArray())
+                for (auto& c : *arr) if (c.getProperty ("id", var()).toString() == scid)
+                    return c.getProperty ("renderLayer", var());
+            return {};
+        };
+        check (std::abs ((double) layerVar().getProperty ("regionStart", -1.0) - 0.5) < 1e-3, "layer region start = 0.5 s");
+        check (std::abs ((double) layerVar().getProperty ("regionEnd",   -1.0) - 1.0) < 1e-3, "layer region end   = 1.0 s");
+
+        auto rr = cmd (ops, "render_layer", objN ({{ "clipId", scid }, { "wait", true }}));
+        check (ok (rr), "section-scoped render_layer ok");
+
+        // The staged input.wav was SLICED to ~0.5 s — not the whole 2 s clip.
+        auto inputWav = eng.sessionDir().getChildFile ("renders").getChildFile (layerId).getChildFile ("input.wav");
+        double inputDur = -1.0;
+        { AudioFormatManager fm; fm.registerBasicFormats();
+          if (std::unique_ptr<AudioFormatReader> rd { fm.createReaderFor (inputWav) }; rd && rd->sampleRate > 0.0)
+              inputDur = (double) rd->lengthInSamples / rd->sampleRate; }
+        check (inputWav.existsAsFile(), "section render staged an input.wav");
+        check (inputDur > 0.3 && inputDur < 0.8, "input.wav is the SECTION region (~0.5 s), not the whole clip (2 s)");
+
+        // Accept lands the render bounded to the region: start ~0.5 s, length ~0.5 s.
+        check (ok (cmd (ops, "accept_render", args1 ("clipId", scid))), "section-scoped accept_render ok");
+        bool scopedLanding = false;
+        { auto snap = ops.snapshot();
+          if (auto* arr = snap["tracks"].getArray())
+            for (auto& t : *arr) if (t.getProperty ("name", var()).toString() == "Neural Renders")
+                if (auto* cs = t.getProperty ("clips", var()).getArray())
+                    for (auto& c : *cs)
+                    {
+                        const double cstart = (double) c.getProperty ("start", -1.0);
+                        const double clen   = (double) c.getProperty ("length", -1.0);
+                        if (std::abs (cstart - 0.5) < 0.05 && std::abs (clen - 0.5) < 0.1) scopedLanding = true;
+                    } }
+        check (scopedLanding, "accepted render landed bounded to the section (start ~0.5 s, length ~0.5 s)");
+
+        // A whole-clip render (no region) still works — guards the default path.
+        auto st2 = cmd (ops, "create_track", args1 ("name", "Whole"))["data"].getProperty ("trackId", var()).toString();
+        auto tone2 = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", st2 }, { "seconds", 1.0 }, { "freq", 180.0 }}));
+        const auto wcid = tone2["data"].getProperty ("clipId", var()).toString();
+        cmd (ops, "create_render_layer", objN ({{ "clipId", wcid }, { "adapter", "fake" }}));
+        check (ok (cmd (ops, "render_layer", objN ({{ "clipId", wcid }, { "wait", true }}))),
+               "whole-clip render (no region) still renders (default path unchanged)");
+
+        // REGRESSION (review): the stored timeRange is frozen at create. A WHOLE-clip
+        // layer whose clip is MOVED after creation must still render (whole source) and
+        // land at the clip's LIVE position — the staging/landing clamp to the live clip
+        // prevents a stale-region mis-stage (hard error) or a stale landing.
+        auto mvt = cmd (ops, "create_track", args1 ("name", "Moved"))["data"].getProperty ("trackId", var()).toString();
+        auto mvtone = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", mvt }, { "seconds", 1.0 }, { "freq", 175.0 }}));
+        const auto mvcid = mvtone["data"].getProperty ("clipId", var()).toString();
+        cmd (ops, "create_render_layer", objN ({{ "clipId", mvcid }, { "adapter", "fake" }}));   // whole-clip, no region
+        cmd (ops, "move_clip", objN ({{ "clipId", mvcid }, { "start", 3.0 }}));                  // move AFTER create
+        check (ok (cmd (ops, "render_layer", objN ({{ "clipId", mvcid }, { "wait", true }}))),
+               "whole-clip layer still renders after the clip moved (no stale-region error)");
+        check (ok (cmd (ops, "accept_render", args1 ("clipId", mvcid))), "accept after move ok");
+        bool landedAtLive = false;
+        { auto snap = ops.snapshot();
+          if (auto* arr = snap["tracks"].getArray())
+            for (auto& t : *arr) if (t.getProperty ("name", var()).toString() == "Neural Renders")
+                if (auto* cs2 = t.getProperty ("clips", var()).getArray())
+                    for (auto& c : *cs2)
+                        if (std::abs ((double) c.getProperty ("start", -1.0) - 3.0) < 0.05) landedAtLive = true; }
+        check (landedAtLive, "moved whole-clip render lands at the clip's LIVE position (3.0 s), not the stale create spot");
+    }
+
     // --- Stage 6: full producer loop -> export, undo/redo correct throughout ---
     section ("Stage 6: full producer loop + export");
     {
@@ -3791,17 +3875,31 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         cmd (ops, "add_test_tone_clip", objN ({ { "trackId", aId }, { "seconds", 1.0 } }));
         const auto lidA = lidByName (ops, "Boot A");
         const auto lidB = lidByName (ops, "Boot B");
+        // A pre-existing annotation on the host must travel in the bootstrap bundle (it's a
+        // top-level Edit child, not inside a track blob) so a late-joiner sees it too.
+        cmd (ops, "create_annotation", objN ({ { "annotationId", "boot-ann" }, { "text", "host note" }, { "beat", 12.0 }, { "author", "host" } }));
 
         auto ser = cmd (ops, "mp_serialize_project");
         check (ok (ser), "mp_serialize_project ok");
         auto bundle = ser.getProperty ("data", juce::var());
         check ((int) bundle.getProperty ("count", 0) == 2, "serialized a 2-track project bundle");
+        check (bundle.getProperty ("annotations", juce::var()).toString().isNotEmpty(), "bundle carries the annotations subtree");
 
         check (ok (cmd (ops, "new_project", args1 ("name", "mp-boot-dst"))), "new_project (joiner wipe) ok");
         check (tracks (ops) == 0, "joiner starts empty before bootstrap");
 
-        auto app = cmd (ops, "mp_apply_bootstrap", objN ({ { "tracks", bundle.getProperty ("tracks", juce::var()) } }));
+        auto app = cmd (ops, "mp_apply_bootstrap", objN ({ { "tracks", bundle.getProperty ("tracks", juce::var()) },
+                                                           { "annotations", bundle.getProperty ("annotations", juce::var()) } }));
         check (ok (app), "mp_apply_bootstrap ok");
+        // The joiner adopts the host's annotation (id + author + text preserved).
+        bool joinerHasAnn = false;
+        { auto arr = ops.snapshot().getProperty ("annotations", juce::var());
+          for (int i = 0; i < arr.size(); ++i)
+              if (arr[i].getProperty ("id", juce::var()).toString() == "boot-ann"
+                  && arr[i].getProperty ("text", juce::var()).toString() == "host note"
+                  && arr[i].getProperty ("author", juce::var()).toString() == "host")
+                  joinerHasAnn = true; }
+        check (joinerHasAnn, "joiner adopts the host's pre-existing annotation via bootstrap");
         check ((int) app.getProperty ("data", juce::var()).getProperty ("applied", 0) == 2, "bootstrap applied 2 tracks");
         check (tracks (ops) == 2, "joiner now holds the host's 2 tracks");
         check (lidByName (ops, "Boot A") == lidA && lidA.isNotEmpty(), "Boot A logicalId preserved across bootstrap");
@@ -3959,6 +4057,99 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 
         a.leave();
         b.leave();
+    }
+
+    // ── SEC-001 — named song sections (MOSH_SECTIONS) end-to-end ─────────────
+    {
+        section ("Song sections (MOSH_SECTIONS)");
+        auto sectionsArr = [&] { return ops.snapshot().getProperty ("sections", var()); };
+        auto findSec = [&] (const juce::String& id) -> juce::var
+        {
+            auto arr = sectionsArr();
+            for (int i = 0; i < arr.size(); ++i)
+                if (arr[i].getProperty ("id", var()).toString() == id) return arr[i];
+            return {};
+        };
+        const int before = sectionsArr().size();
+
+        auto created = cmd (ops, "create_section",
+                            objN ({ { "name", "Hook" }, { "startBeat", 24.0 }, { "endBeat", 40.0 }, { "color", "#f4c0d1" } }));
+        check (ok (created), "create_section ok");
+        const auto secId = created.getProperty ("data", var()).getProperty ("sectionId", var()).toString();
+        check (secId.isNotEmpty(), "create_section returns a sectionId");
+        check (sectionsArr().size() == before + 1, "snapshot.sections grew by one");
+        check (findSec (secId).getProperty ("name", var()).toString() == "Hook", "new section name is Hook");
+        check (std::abs ((double) findSec (secId).getProperty ("startBeat", -1.0) - 24.0) < 1e-6, "section startBeat is 24");
+
+        check (ok (cmd (ops, "rename_section", objN ({ { "sectionId", secId }, { "name", "Chorus" } }))), "rename_section ok");
+        check (findSec (secId).getProperty ("name", var()).toString() == "Chorus", "rename reflected in snapshot");
+
+        check (ok (cmd (ops, "move_section", objN ({ { "sectionId", secId }, { "startBeat", 32.0 }, { "endBeat", 48.0 } }))), "move_section ok");
+        check (std::abs ((double) findSec (secId).getProperty ("endBeat", -1.0) - 48.0) < 1e-6, "move reflected in snapshot");
+
+        // Undo reverts only the last edit (the move), before save/reload resets history.
+        check (ok (cmd (ops, "undo")), "undo (move_section) ok");
+        check (std::abs ((double) findSec (secId).getProperty ("endBeat", -1.0) - 40.0) < 1e-6, "undo restores the prior range");
+        check (findSec (secId).getProperty ("name", var()).toString() == "Chorus", "undo leaves the rename intact");
+
+        // Persists across save/reload (a plain child of the Edit's own ValueTree).
+        check (ok (cmd (ops, "save")),   "save (sections) ok");
+        check (ok (cmd (ops, "reload")), "reload (sections) ok");
+        check (findSec (secId).getProperty ("name", var()).toString() == "Chorus", "section persists across save/reload");
+        check (std::abs ((double) findSec (secId).getProperty ("endBeat", -1.0) - 40.0) < 1e-6, "section range persists across save/reload");
+
+        check (ok (cmd (ops, "remove_section", objN ({ { "sectionId", secId } }))), "remove_section ok");
+        check (! findSec (secId).isObject(), "section gone from snapshot after remove");
+        check (! ok (cmd (ops, "rename_section", objN ({ { "sectionId", secId }, { "name", "Ghost" } }))), "rename of a removed section fails cleanly");
+    }
+
+    // ─── ANN-001: authored timeline annotations (MOSH_ANNOTATIONS) ───
+    {
+        section ("Timeline annotations (MOSH_ANNOTATIONS)");
+        auto annsArr = [&] { return ops.snapshot().getProperty ("annotations", var()); };
+        auto findAnn = [&] (const juce::String& id) -> juce::var
+        {
+            auto arr = annsArr();
+            for (int i = 0; i < arr.size(); ++i)
+                if (arr[i].getProperty ("id", var()).toString() == id) return arr[i];
+            return {};
+        };
+        const int before = annsArr().size();
+
+        auto created = cmd (ops, "create_annotation",
+                            objN ({ { "text", "fix this transition" }, { "beat", 24.0 }, { "color", "#ffd166" }, { "author", "alice" } }));
+        check (ok (created), "create_annotation ok");
+        const auto annId = created.getProperty ("data", var()).getProperty ("annotationId", var()).toString();
+        check (annId.isNotEmpty(), "create_annotation returns an annotationId");
+        check (annsArr().size() == before + 1, "snapshot.annotations grew by one");
+        check (findAnn (annId).getProperty ("text", var()).toString() == "fix this transition", "annotation text round-trips");
+        check (findAnn (annId).getProperty ("author", var()).toString() == "alice", "annotation carries its author");
+        check (std::abs ((double) findAnn (annId).getProperty ("beat", -1.0) - 24.0) < 1e-6, "annotation beat is 24");
+
+        check (ok (cmd (ops, "edit_annotation", objN ({ { "annotationId", annId }, { "text", "smooth the drop" } }))), "edit_annotation ok");
+        check (findAnn (annId).getProperty ("text", var()).toString() == "smooth the drop", "edit reflected in snapshot");
+
+        check (ok (cmd (ops, "move_annotation", objN ({ { "annotationId", annId }, { "beat", 32.0 } }))), "move_annotation ok");
+        check (std::abs ((double) findAnn (annId).getProperty ("beat", -1.0) - 32.0) < 1e-6, "move reflected in snapshot");
+
+        // Undo reverts only the last edit (the move), before save/reload resets history.
+        check (ok (cmd (ops, "undo")), "undo (move_annotation) ok");
+        check (std::abs ((double) findAnn (annId).getProperty ("beat", -1.0) - 24.0) < 1e-6, "undo restores the prior beat");
+        check (findAnn (annId).getProperty ("text", var()).toString() == "smooth the drop", "undo leaves the edit intact");
+
+        // Persists across save/reload (a plain child of the Edit's own ValueTree).
+        check (ok (cmd (ops, "save")),   "save (annotations) ok");
+        check (ok (cmd (ops, "reload")), "reload (annotations) ok");
+        check (findAnn (annId).getProperty ("text", var()).toString() == "smooth the drop", "annotation persists across save/reload");
+        check (findAnn (annId).getProperty ("author", var()).toString() == "alice", "annotation author persists across save/reload");
+
+        // Caller-supplied id is honoured (this is how the MP broadcast keeps ids stable).
+        check (ok (cmd (ops, "create_annotation", objN ({ { "annotationId", "ann-fixed" }, { "text", "shared note" }, { "beat", 4.0 } }))), "create_annotation with an explicit id ok");
+        check (findAnn ("ann-fixed").getProperty ("text", var()).toString() == "shared note", "explicit-id annotation lands with that id");
+
+        check (ok (cmd (ops, "remove_annotation", objN ({ { "annotationId", annId } }))), "remove_annotation ok");
+        check (! findAnn (annId).isObject(), "annotation gone from snapshot after remove");
+        check (! ok (cmd (ops, "edit_annotation", objN ({ { "annotationId", annId }, { "text", "ghost" } }))), "edit of a removed annotation fails cleanly");
     }
 
     finishSection();

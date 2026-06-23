@@ -6,8 +6,9 @@ VST3/AU plugins, mix, and export, plus two neural tiers: real-time neural insert
 generative "re-imagine" render layer with semantic controls. A voice character (**Moshi**) and
 2-player multiplayer ride on the same command spine.
 
-> **macOS / Apple Silicon (arm64) only.** v0 has no Windows/Linux/CUDA paths — the unified-memory
-> MLX generative service is the load-bearing reason.
+> **macOS / Apple Silicon (arm64) is canonical.** A Windows + NVIDIA/CUDA build is an additive,
+> platform-guarded port (in-tree, built but **not yet verified on hardware**); no Linux path. The
+> unified-memory MLX generative service is why the Mac stays the load-bearing target.
 
 ## What it's made of
 

@@ -252,6 +252,16 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 .ruler .bar-num { position: absolute; top: 4px; font-size: 10px; color: var(--bone-dim); padding-left: 4px; }
 .ruler .mark { position: absolute; top: 4px; font-size: 9px; color: var(--lime-dim); padding-left: 4px; }
 
+/* ANN-001 — authored annotation pins along the ruler's bottom edge (redesign). */
+.annotation-ruler { position: absolute; left: 0; bottom: 0; height: 13px; width: 100%; z-index: 6; }
+.annotation-pin { position: absolute; bottom: 0; transform: translateX(-50%); }
+.annotation-flag { appearance: none; border: none; background: transparent; cursor: pointer; padding: 0; font-size: 11px; line-height: 1; filter: drop-shadow(0 1px 1px rgba(0,0,0,0.6)); transition: transform 120ms var(--ease-out, ease); }
+.annotation-flag:hover { transform: translateY(-1px); }
+.annotation-pop { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); z-index: 60; min-width: 150px; max-width: 240px; background: var(--ink-raise); border: 1px solid var(--ink-line); border-radius: 8px; padding: 8px; box-shadow: 0 12px 40px rgba(0,0,0,0.5); display: flex; flex-direction: column; gap: 6px; }
+.annotation-text { font-size: 12px; color: var(--bone); white-space: normal; }
+.annotation-author { font-size: 10px; color: var(--bone-dim); }
+.annotation-actions { display: flex; gap: 5px; }
+
 /* THE ONE GRID — bar + beat lines, absolutely positioned from time.ts gridLines */
 .grid { position: absolute; inset: 0; pointer-events: none; z-index: 0; }
 .grid .line { position: absolute; top: 0; bottom: 0; width: 1px; }
@@ -444,6 +454,120 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 .dock-vdivider:hover { background: var(--lime-dim); }
 .dock-left-rail { flex: 0 0 18px; width: 18px; border: none; border-right: 1px solid var(--ink-line); background: var(--ink-raise); color: var(--bone-dim); cursor: pointer; font: inherit; font-size: 11px; padding: 0; }
 .dock-left-rail:hover { color: var(--lime); }
+.dock-right { flex: 0 0 auto; min-width: 0; overflow: auto; border-left: 1px solid var(--ink-line); background: var(--ink-raise); }
+.dock-right-rail { flex: 0 0 18px; width: 18px; border: none; border-left: 1px solid var(--ink-line); background: var(--ink-raise); color: var(--bone-dim); cursor: pointer; font: inherit; font-size: 11px; padding: 0; }
+.dock-right-rail:hover { color: var(--lime); }
+.inspector { padding: 10px 12px; color: var(--bone-dim); font-size: 12px; }
+.inspector-head { color: var(--lime); letter-spacing: 0.08em; text-transform: uppercase; font-size: 11px; margin-bottom: 8px; }
+.insp-track { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.insp-name { flex: 1 1 auto; min-width: 0; font-size: 13px; font-weight: 600; color: var(--bone); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.insp-row { display: flex; gap: 6px; margin-bottom: 10px; }
+.insp-field { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.insp-field > span:first-child { flex: 0 0 48px; color: var(--bone-dim); }
+.insp-field input[type="range"] { flex: 1 1 auto; min-width: 0; accent-color: var(--lime); }
+.insp-val { flex: 0 0 auto; min-width: 34px; text-align: right; color: var(--bone); }
+.session-rail { display: flex; flex-direction: column; height: 100%; min-height: 0; overflow: auto; }
+.participants { padding: 10px 12px; border-bottom: 1px solid var(--ink-line); flex: 0 0 auto; }
+.participants-head { color: var(--lime); letter-spacing: 0.08em; text-transform: uppercase; font-size: 11px; margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; }
+.cam-toggle { font-size: 13px; line-height: 1; }
+.cam-toggle.on { border-color: var(--lime); color: var(--lime); }
+/* Collaborator video tiles (redesign). Mirror flip for self-preview so it reads natural. */
+.participant-self { display: flex; align-items: center; gap: 8px; padding: 6px 2px; }
+.video-tile { width: 100%; max-width: 220px; aspect-ratio: 4 / 3; border-radius: 8px; background: #000; object-fit: cover; }
+.participant-self .video-tile { width: 96px; transform: scaleX(-1); }
+.participant-peer .video-tile { width: 96px; }
+.participant-moshi { border-radius: 8px; overflow: hidden; }
+.participant-moshi .moshi-dock { width: 100%; }
+.participant-peer { display: flex; align-items: center; gap: 8px; padding: 6px 2px; }
+.peer-avatar { flex: 0 0 auto; width: 24px; height: 24px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; color: var(--ink); }
+.peer-name { flex: 1 1 auto; min-width: 0; font-size: 12px; color: var(--bone); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.peer-video-stub { flex: 0 0 auto; color: var(--bone-dim); }
+
+/* ── Redesign motion + PS2 polish (flag-gated; flag-off UI untouched) ─────────
+   More life, less lime. Purposeful motion only — entrances + interaction feedback;
+   high-frequency clip editing stays un-animated. PS2 nostalgia via a static CRT
+   scanline + springy easings. Everything respects prefers-reduced-motion. */
+.app[data-redesign="on"] {
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-back: cubic-bezier(0.34, 1.56, 0.64, 1);
+  position: relative;
+}
+@keyframes mosh-in { from { opacity: 0; transform: translateY(8px); filter: blur(4px); } to { opacity: 1; transform: translateY(0); filter: blur(0); } }
+.app[data-redesign="on"] .section-nav { animation: mosh-in 420ms var(--ease-out) both; }
+.app[data-redesign="on"] .dock-right { animation: mosh-in 420ms var(--ease-out) both; }
+.app[data-redesign="on"] .promptbar { animation: mosh-in 380ms var(--ease-out) both; }
+.app[data-redesign="on"] .presence { animation: mosh-in 360ms var(--ease-out) both; }
+.app[data-redesign="on"] .fxdrawer { animation: mosh-in 260ms var(--ease-out) both; transform-origin: top; }
+.app[data-redesign="on"] .participant-peer { animation: mosh-in 320ms var(--ease-out) both; }
+/* Tactile, springy interaction feedback */
+.app[data-redesign="on"] .btn { transition: transform 130ms var(--ease-back), background 140ms ease, color 140ms ease; }
+.app[data-redesign="on"] .btn:hover { transform: translateY(-1px); }
+.app[data-redesign="on"] .btn:active { transform: translateY(0) scale(0.95); }
+.app[data-redesign="on"] .section-seg { transition: transform 180ms var(--ease-back), filter 160ms ease; }
+.app[data-redesign="on"] .section-seg:hover { transform: translateY(-2px); filter: brightness(1.1); }
+.app[data-redesign="on"] .tfx, .app[data-redesign="on"] .dock-right-rail, .app[data-redesign="on"] .dock-left-rail { transition: transform 160ms var(--ease-back), color 140ms ease, background 140ms ease; }
+.app[data-redesign="on"] .tfx:active { transform: scale(0.92); }
+/* Less lime: soften the rail/section headers; lime stays for active/selected only */
+.app[data-redesign="on"] .participants-head,
+.app[data-redesign="on"] .inspector-head { color: var(--bone-dim); }
+/* PS2 CRT scanline — static, subtle, non-interactive, over the whole chrome */
+.app[data-redesign="on"]::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 40;
+  background: repeating-linear-gradient(0deg, rgba(0,0,0,0.06) 0px, rgba(0,0,0,0.06) 1px, transparent 1px, transparent 3px);
+  opacity: 0.7;
+}
+@media (prefers-reduced-motion: reduce) {
+  .app[data-redesign="on"] .section-nav,
+  .app[data-redesign="on"] .dock-right,
+  .app[data-redesign="on"] .promptbar,
+  .app[data-redesign="on"] .presence,
+  .app[data-redesign="on"] .fxdrawer,
+  .app[data-redesign="on"] .participant-peer { animation: none; }
+  .app[data-redesign="on"] .btn,
+  .app[data-redesign="on"] .section-seg,
+  .app[data-redesign="on"] .tfx { transition: none; }
+}
+.app[data-redesign="on"] .dock-main { padding: 0 8px; }
+.presence { display: flex; align-items: center; gap: 8px; }
+.presence-avatars { display: flex; }
+.presence-avatars .avatar { width: 22px; height: 22px; border-radius: 50%; margin-left: -6px; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; color: var(--ink); border: 1.5px solid var(--ink); }
+.presence-avatars .avatar:first-child { margin-left: 0; }
+.ai-pill { font-size: 11px; letter-spacing: 0.06em; padding: 3px 9px; border-radius: 11px; border: 1px solid var(--ink-line); color: var(--bone-dim); white-space: nowrap; }
+.ai-pill[data-state="active"] { color: var(--ink); background: var(--lime); border-color: var(--lime); }
+.share-btn { white-space: nowrap; }
+.thead .tfx { flex: 0 0 auto; font-size: 10px; letter-spacing: 0.04em; padding: 1px 6px; border-radius: 5px; border: 1px solid var(--ink-line); background: transparent; color: var(--bone-dim); cursor: pointer; }
+.thead .tfx:hover { color: var(--lime); }
+.thead .tfx.on { color: var(--ink); background: var(--lime); border-color: var(--lime); }
+.fxdrawer { flex: 1 1 auto; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 4px; margin-top: 2px; border-top: 1px solid var(--ink-line-soft); padding-top: 6px; }
+.fx-empty { font-size: 11px; color: var(--bone-dim); }
+.fx-row { display: flex; align-items: center; gap: 5px; }
+.fx-row.bypassed .fx-name { opacity: 0.5; text-decoration: line-through; }
+.fx-name { flex: 1 1 auto; min-width: 0; font-size: 11px; color: var(--bone); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fx-open { padding: 0 5px; }
+.fx-add { display: flex; gap: 4px; margin-top: 2px; }
+.fx-add .btn { font-size: 10px; padding: 2px 6px; }
+.promptbar { flex: 0 0 auto; display: flex; align-items: center; padding: 8px 14px; border-top: 1px solid var(--ink-line); background: var(--ink-raise); }
+.promptbar .agent-composer { flex: 1 1 auto; min-width: 0; }
+
+/* The bottom-left "+" file/options/export control. Its popover opens UPWARD (it sits in
+   the bottom bar) and anchors left. */
+.promptbar .file-options { flex: 0 0 auto; position: relative; margin-right: 10px; align-self: stretch; display: flex; align-items: center; }
+.fo-trigger { font-size: 17px; line-height: 1; width: 38px; height: 38px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+.fo-pop.pop { top: auto; bottom: calc(100% + 8px); left: 0; right: auto; width: 268px; max-height: min(72vh, 560px); overflow: auto; transform-origin: bottom center; }
+.fo-sub-head { justify-content: flex-start; gap: 8px; }
+.fo-back { font-size: 16px; width: 22px; height: 22px; }
+.fo-sub-body { max-height: 52vh; overflow: auto; }
+.fo-options { padding-top: 8px; border-top: 1px solid var(--ink-line-soft); }
+.section-nav { display: flex; align-items: center; gap: 10px; padding: 6px 14px; border-bottom: 1px solid var(--ink-line); background: var(--ink-raise); }
+.section-track { position: relative; flex: 1 1 auto; height: 26px; min-width: 0; }
+.section-seg { position: absolute; top: 0; height: 100%; display: flex; align-items: center; border-radius: 5px; overflow: hidden; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.25); }
+.section-jump { flex: 1 1 auto; min-width: 0; height: 100%; border: none; background: transparent; color: var(--ink); font: inherit; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; cursor: pointer; padding: 0 8px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.section-label { pointer-events: none; }
+.section-x { flex: 0 0 auto; border: none; background: transparent; color: var(--ink); opacity: 0; cursor: pointer; padding: 0 5px; font-size: 10px; transition: opacity 120ms; }
+.section-seg:hover .section-x { opacity: 0.7; }
+.section-empty { font-size: 11px; color: var(--bone-dim); }
+.section-add { font-size: 11px; flex: 0 0 auto; }
+.section-zoom { flex: 0 0 auto; }
 .rack { flex: 1 1 auto; min-width: 0; overflow: auto; padding: 10px 12px; }
 .rack-label { font-size: 10px; letter-spacing: 0.12em; color: var(--bone-dim); margin-bottom: 8px; }
 .rack-label b { color: var(--bone); }

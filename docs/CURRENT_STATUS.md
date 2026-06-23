@@ -1,6 +1,6 @@
 # Mosh Current Status And Architecture Map
 
-Updated: 2026-06-18
+Updated: 2026-06-21
 
 This is the short handoff for the current `main`/`codex/docs` program seat in
 `/Users/emiliosanchez-harris/Documents/ClaudeMosh`. It points to the live docs
@@ -48,15 +48,19 @@ work is in-process and real-time safe; Tier-B generation is an async job through
 
 ## Current Status
 
-- Trunk is macOS/Apple Silicon only. Windows/PC portability remnants were removed
-  on 2026-06-17.
+- Trunk is macOS/Apple Silicon canonical. The PC portability remnants removed on
+  2026-06-17 were re-landed as a deliberate additive Windows + NVIDIA/CUDA port on
+  2026-06-20 (commit `962a03f`); it is built but **not yet verified on Windows
+  hardware**. No Linux path. (Note: README and ARCHITECTURE §Platforms are the
+  authoritative platform matrix.)
 - The command surface has grown from the original six-stage v0 into a fuller DAW
   slice: arrange editing, MIDI piano roll, transport/tempo/key, mixer, buses,
   sends, meters, recording arm/monitoring, project lifecycle, import/export,
   plugin hosting, automation, render-layer management, iPhone companion, brain
-  proxy, voice, and type-beat LoRA trainer scaffold.
-- The current default selftest target documented in the newest progress entries
-  is 744 command-surface checks on the local machine. The latest hardening work
+  proxy, voice, 2-player multiplayer, DAW project import (RPP/ALS/FLP),
+  audio→MIDI transcription, and the type-beat LoRA trainer scaffold.
+- The current default selftest target is ≈893 command-surface checks on the local
+  machine (gate-dependent — Serum-VST3 and SA3 gates add more). The hardening work
   fixed Serum VST3/AU ambiguity and selftest teardown crashes from arbitrary
   installed plugins by constraining harness-hosted plugins to a known-clean VST3
   allowlist.
@@ -78,6 +82,9 @@ work is in-process and real-time safe; Tier-B generation is an async job through
 | Build/run plan | `06_BUILD_TOOLING_AND_RUN_PLAN.md` | `CMakeLists.txt`, `cmake/Dependencies.cmake`, `run-mosh.sh` |
 | iPhone companion | `docs/IPHONE_COMPANION.md` | `src/remote/RemoteCompanionServer.h`, `ios/MoshCompanion/` |
 | Type-beat LoRA scaffold | `docs/type-beat-trainer.md` | `src/training/`, `service/training/` |
+| 2-player multiplayer | `supabase/README.md` | `src/multiplayer/`, `relay/server.py` |
+| DAW project import | `docs/MOSHI_IMPORTERS.md` | `ui/src/import/`, `service/flp/` |
+| Training-harvest format | `docs/MOSHI_TRAJECTORY_FORMAT.md` | `ui/src/harvest/`, `service/server.py` |
 
 ## Branch And Worktree Boundaries
 

@@ -163,7 +163,12 @@ if (MOSH_BUILD_APP)
                     "$<TARGET_BUNDLE_DIR:Mosh>/Contents/Info.plist"
             COMMAND /usr/bin/plutil -replace NSBonjourServices -json "[\"_moshcompanion._tcp\"]"
                     "$<TARGET_BUNDLE_DIR:Mosh>/Contents/Info.plist"
-            COMMENT "Re-injecting Info.plist keys PLIST_TO_MERGE drops (speech + Bonjour)"
+            # Camera: collaborator video tiles (getUserMedia in the WebView surfaces the
+            # macOS permission dialog on first use). Camera is off by default in the UI.
+            COMMAND /usr/bin/plutil -replace NSCameraUsageDescription
+                    -string "Mosh shares your camera with the collaborators in your session, so you can see each other while you produce."
+                    "$<TARGET_BUNDLE_DIR:Mosh>/Contents/Info.plist"
+            COMMENT "Re-injecting Info.plist keys PLIST_TO_MERGE drops (speech + Bonjour + camera)"
             VERBATIM)
 
         # DRM-001 — stage the bundled drum kits into the app Resources so the native

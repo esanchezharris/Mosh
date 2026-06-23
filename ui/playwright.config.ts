@@ -26,7 +26,16 @@ export default defineConfig({
     screenshot: "only-on-failure",
     video: "off",
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  projects: [{
+    name: "chromium",
+    use: {
+      ...devices["Desktop Chrome"],
+      // Collaborator-video tests: a fake camera so getUserMedia resolves with a real
+      // MediaStream and the permission prompt is auto-granted (headless, deterministic).
+      permissions: ["camera"],
+      launchOptions: { args: ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"] },
+    },
+  }],
   webServer: {
     command: "npm run dev",
     url: "http://localhost:5173",

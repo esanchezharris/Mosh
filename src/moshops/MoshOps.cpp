@@ -1,6 +1,8 @@
 #include "MoshOps.h"
 #include "state/Ids.h"
 #include "state/RenderLayer.h"
+#include "state/Section.h"
+#include "state/Annotation.h"
 #include "multiplayer/LogicalId.h"
 #include "multiplayer/TrackCommit.h"
 #if MOSH_HAVE_ANIRA
@@ -426,6 +428,16 @@ juce::var MoshOps::execute (const juce::var& command)
 
     if (name == "create_track")      return cmdCreateTrack (args);
     if (name == "rename_track")      return cmdRenameTrack (args);
+    if (name == "create_section")    return cmdCreateSection (args);
+    if (name == "rename_section")    return cmdRenameSection (args);
+    if (name == "move_section")      return cmdMoveSection (args);
+    if (name == "remove_section")    return cmdRemoveSection (args);
+    // Annotations broadcast over MP (shared collaborator comments). create self-broadcasts
+    // its resolved cross-peer id; the rest address by that id via the generic wrapper.
+    if (name == "create_annotation") return cmdCreateAnnotation (args);
+    if (name == "edit_annotation")   return broadcastStructuralIfActive (name, args, cmdEditAnnotation (args));
+    if (name == "move_annotation")   return broadcastStructuralIfActive (name, args, cmdMoveAnnotation (args));
+    if (name == "remove_annotation") return broadcastStructuralIfActive (name, args, cmdRemoveAnnotation (args));
     if (name == "remove_track")      return cmdRemoveTrack (args);
     if (name == "import_clip")       return cmdImportClip (args);
     if (name == "import_clip_data")  return cmdImportClipData (args);
@@ -547,6 +559,7 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "mp_claim_track")     return cmdMpClaimTrack (args);
     if (name == "mp_commit_track")    return cmdMpCommitTrack (args);
     if (name == "mp_broadcast_selection") return cmdMpBroadcastSelection (args);
+    if (name == "mp_send_signal")    return cmdMpSendSignal (args);
     if (name == "mp_serialize_project") return cmdMpSerializeProject (args);
     if (name == "mp_apply_bootstrap")   return cmdMpApplyBootstrap (args);
     if (name == "mp_apply_structural")  return cmdMpApplyStructural (args);
@@ -634,6 +647,207 @@ juce::var MoshOps::cmdRemoveTrack (const juce::var& args)
     logLine ("remove_track", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("remove_track");
+}
+
+// ── SEC-001 — named song sections (MOSH_SECTIONS tree on the Edit) ────────────
+// Beat-range regions with a name + colour; create/rename/move/remove are undoable
+// writes to the Edit's own ValueTree, so they save/reload with the .tracktionedit
+// and ride the one undo system. Section ids are engine-assigned UUIDs.
+juce::var MoshOps::cmdCreateSection (const juce::var& args)
+{
+    const auto name = args.getProperty ("name", var()).toString();
+    const double startBeat = (double) args.getProperty ("startBeat", 0.0);
+    const double endBeat = (double) args.getProperty ("endBeat", startBeat + 16.0);
+    const auto color = args.getProperty ("color", var()).toString();
+
+    beginTxn ("create_section");
+    auto state = eng.edit().state;
+    auto sections = state.getChildWithName (ids::MOSH_SECTIONS);
+    if (! sections.isValid())
+    {
+        sections = juce::ValueTree (ids::MOSH_SECTIONS);
+        state.appendChild (sections, &undoManager());
+    }
+    const auto sectionId = juce::Uuid().toString();
+    sections.appendChild (mosh::Section::create (sectionId, name, startBeat, endBeat, color), &undoManager());
+
+    auto* data = new DynamicObject(); data->setProperty ("sectionId", sectionId);
+    logLine ("create_section", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("create_section", var (data));
+}
+
+juce::var MoshOps::cmdRenameSection (const juce::var& args)
+{
+    const auto sectionId = args.getProperty ("sectionId", var()).toString();
+    const auto name = args.getProperty ("name", var()).toString();
+    auto sections = eng.edit().state.getChildWithName (ids::MOSH_SECTIONS);
+    auto node = sections.getChildWithProperty (ids::id, sectionId);
+    if (! node.isValid()) return errResult ("rename_section", "no section: " + sectionId);
+
+    beginTxn ("rename_section");
+    node.setProperty (ids::sectionName, name, &undoManager());
+    logLine ("rename_section", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("rename_section");
+}
+
+juce::var MoshOps::cmdMoveSection (const juce::var& args)
+{
+    const auto sectionId = args.getProperty ("sectionId", var()).toString();
+    const double startBeat = (double) args.getProperty ("startBeat", 0.0);
+    const double endBeat = (double) args.getProperty ("endBeat", 0.0);
+    auto sections = eng.edit().state.getChildWithName (ids::MOSH_SECTIONS);
+    auto node = sections.getChildWithProperty (ids::id, sectionId);
+    if (! node.isValid()) return errResult ("move_section", "no section: " + sectionId);
+
+    beginTxn ("move_section");
+    node.setProperty (ids::sectionStartBeat, startBeat, &undoManager());
+    node.setProperty (ids::sectionEndBeat, endBeat, &undoManager());
+    logLine ("move_section", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("move_section");
+}
+
+juce::var MoshOps::cmdRemoveSection (const juce::var& args)
+{
+    const auto sectionId = args.getProperty ("sectionId", var()).toString();
+    auto sections = eng.edit().state.getChildWithName (ids::MOSH_SECTIONS);
+    auto node = sections.getChildWithProperty (ids::id, sectionId);
+    if (! node.isValid()) return errResult ("remove_section", "no section: " + sectionId);
+
+    beginTxn ("remove_section");
+    sections.removeChild (node, &undoManager());
+    logLine ("remove_section", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("remove_section");
+}
+
+juce::var MoshOps::sectionsToVar()
+{
+    Array<var> out;
+    auto sections = eng.edit().state.getChildWithName (ids::MOSH_SECTIONS);
+    if (sections.isValid())
+        for (int i = 0; i < sections.getNumChildren(); ++i)
+        {
+            auto s = sections.getChild (i);
+            auto* o = new DynamicObject();
+            o->setProperty ("id", s[ids::id].toString());
+            o->setProperty ("name", s[ids::sectionName].toString());
+            o->setProperty ("startBeat", (double) s[ids::sectionStartBeat]);
+            o->setProperty ("endBeat", (double) s[ids::sectionEndBeat]);
+            if (s.hasProperty (ids::sectionColor))
+                o->setProperty ("color", s[ids::sectionColor].toString());
+            out.add (var (o));
+        }
+    return out;
+}
+
+// ── ANN-001: authored timeline annotations (mirror the sections CRUD; multiplayer-
+// broadcast so collaborators share comments). ───────────────────────────────────────
+juce::var MoshOps::cmdCreateAnnotation (const juce::var& args)
+{
+    const auto text   = args.getProperty ("text", var()).toString();
+    const double beat = (double) args.getProperty ("beat", 0.0);
+    const auto color  = args.getProperty ("color", var()).toString();
+    const auto author = args.getProperty ("author", var()).toString();
+    // Stable cross-peer id: reuse the caller's if supplied (the broadcast re-exec passes
+    // it back), else mint one. Broadcasting the RESOLVED id keeps both peers' ids equal so
+    // edit/move/remove address the same annotation.
+    auto annId = args.getProperty ("annotationId", var()).toString();
+    if (annId.isEmpty()) annId = juce::Uuid().toString();
+
+    beginTxn ("create_annotation");
+    auto state = eng.edit().state;
+    auto anns = state.getChildWithName (ids::MOSH_ANNOTATIONS);
+    if (! anns.isValid())
+    {
+        anns = juce::ValueTree (ids::MOSH_ANNOTATIONS);
+        state.appendChild (anns, &undoManager());
+    }
+    // Idempotent on the resolved id: a re-applied create (the only ADDITIVE op broadcast
+    // over MP) must not append a duplicate node.
+    if (! anns.getChildWithProperty (ids::id, annId).isValid())
+        anns.appendChild (mosh::Annotation::create (annId, text, beat, color, author), &undoManager());
+
+    auto* data = new DynamicObject(); data->setProperty ("annotationId", annId);
+    logLine ("create_annotation", args, true, {}, true);
+    emitSnapshotInvalidated();
+
+    // Broadcast with the RESOLVED id (the generic wrapper would re-mint on the peer).
+    if (mpSession_ != nullptr && mpSession_->active() && ! applyingRemote_)
+    {
+        auto* ba = new DynamicObject();
+        ba->setProperty ("annotationId", annId);
+        ba->setProperty ("text", text);
+        ba->setProperty ("beat", beat);
+        if (color.isNotEmpty())  ba->setProperty ("color", color);
+        if (author.isNotEmpty()) ba->setProperty ("author", author);
+        mpSession_->broadcastStructural ("create_annotation", var (ba));
+    }
+    return okResult ("create_annotation", var (data));
+}
+
+juce::var MoshOps::cmdEditAnnotation (const juce::var& args)
+{
+    const auto annId = args.getProperty ("annotationId", var()).toString();
+    auto anns = eng.edit().state.getChildWithName (ids::MOSH_ANNOTATIONS);
+    auto node = anns.getChildWithProperty (ids::id, annId);
+    if (! node.isValid()) return errResult ("edit_annotation", "no annotation: " + annId);
+
+    beginTxn ("edit_annotation");
+    if (args.hasProperty ("text"))  node.setProperty (ids::annotationText, args.getProperty ("text", var()), &undoManager());
+    if (args.hasProperty ("color")) node.setProperty (ids::annotationColor, args.getProperty ("color", var()), &undoManager());
+    logLine ("edit_annotation", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("edit_annotation");
+}
+
+juce::var MoshOps::cmdMoveAnnotation (const juce::var& args)
+{
+    const auto annId = args.getProperty ("annotationId", var()).toString();
+    auto anns = eng.edit().state.getChildWithName (ids::MOSH_ANNOTATIONS);
+    auto node = anns.getChildWithProperty (ids::id, annId);
+    if (! node.isValid()) return errResult ("move_annotation", "no annotation: " + annId);
+
+    beginTxn ("move_annotation");
+    node.setProperty (ids::annotationBeat, (double) args.getProperty ("beat", 0.0), &undoManager());
+    logLine ("move_annotation", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("move_annotation");
+}
+
+juce::var MoshOps::cmdRemoveAnnotation (const juce::var& args)
+{
+    const auto annId = args.getProperty ("annotationId", var()).toString();
+    auto anns = eng.edit().state.getChildWithName (ids::MOSH_ANNOTATIONS);
+    auto node = anns.getChildWithProperty (ids::id, annId);
+    if (! node.isValid()) return errResult ("remove_annotation", "no annotation: " + annId);
+
+    beginTxn ("remove_annotation");
+    anns.removeChild (node, &undoManager());
+    logLine ("remove_annotation", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("remove_annotation");
+}
+
+juce::var MoshOps::annotationsToVar()
+{
+    Array<var> out;
+    auto anns = eng.edit().state.getChildWithName (ids::MOSH_ANNOTATIONS);
+    if (anns.isValid())
+        for (int i = 0; i < anns.getNumChildren(); ++i)
+        {
+            auto a = anns.getChild (i);
+            auto* o = new DynamicObject();
+            o->setProperty ("id", a[ids::id].toString());
+            o->setProperty ("text", a[ids::annotationText].toString());
+            o->setProperty ("beat", (double) a[ids::annotationBeat]);
+            if (a.hasProperty (ids::annotationColor))  o->setProperty ("color", a[ids::annotationColor].toString());
+            if (a.hasProperty (ids::annotationAuthor)) o->setProperty ("author", a[ids::annotationAuthor].toString());
+            out.add (var (o));
+        }
+    return out;
 }
 
 // Shared wave-file insertion path used by both import_clip (path-based) and
@@ -1441,6 +1655,15 @@ juce::var MoshOps::cmdMpBroadcastSelection (const juce::var& args)
     return okResult ("mp_broadcast_selection");
 }
 
+juce::var MoshOps::cmdMpSendSignal (const juce::var& args)
+{
+    // Point-to-point WebRTC handshake (SDP/ICE) to one peer — the UI's video room owns
+    // the negotiation; this only ferries the opaque payload over the relay.
+    mpSession_->sendSignal (args.getProperty ("to", var()).toString(),
+                            args.getProperty ("payload", var()));
+    return okResult ("mp_send_signal");
+}
+
 juce::var MoshOps::broadcastStructuralIfActive (const juce::String& name, const juce::var& args, juce::var result)
 {
     // Mirror a successful local session-global scalar op to the peer (LWW). Skipped
@@ -1482,6 +1705,12 @@ juce::var MoshOps::cmdMpSerializeProject (const juce::var&)
     auto* d = new DynamicObject();
     d->setProperty ("tracks", tracks);
     d->setProperty ("count", tracks.size());
+    // Annotations are a top-level Edit child (a sibling of the tracks), so the per-track
+    // blobs above don't carry them — serialize the subtree so a late-joiner adopts the
+    // host's existing pins, not just the ones created live after they join.
+    if (auto a = eng.edit().state.getChildWithName (ids::MOSH_ANNOTATIONS); a.isValid())
+        if (auto xml = a.createXml())
+            d->setProperty ("annotations", xml->toString());
     return okResult ("mp_serialize_project", var (d));
 }
 
@@ -1505,6 +1734,16 @@ juce::var MoshOps::cmdMpApplyBootstrap (const juce::var& args)
             if (blob.isNotEmpty() && trackcommit::apply (edit, blob).ok)
                 ++applied;
         }
+
+    // Adopt the host's annotations (a top-level Edit child, outside the per-track blobs):
+    // drop ours, graft the host's subtree. nullptr UndoManager — incoming history, like
+    // the track splices above.
+    if (auto existing = edit.state.getChildWithName (ids::MOSH_ANNOTATIONS); existing.isValid())
+        edit.state.removeChild (existing, nullptr);
+    if (const auto annXml = args.getProperty ("annotations", var()).toString(); annXml.isNotEmpty())
+        if (auto xml = juce::parseXML (annXml))
+            if (auto vt = juce::ValueTree::fromXml (*xml); vt.isValid())
+                edit.state.appendChild (vt, nullptr);
 
     eng.markDirty();
     emitSnapshotInvalidated();
@@ -4080,6 +4319,43 @@ juce::String MoshOps::computeFingerprint (const juce::ValueTree& node, const juc
                                      jobManager.serviceBuild());
 }
 
+// Slice [srcStartSec, srcEndSec] of an audio file into destWav (raw, no FX) — the
+// staged input for a section-scoped render. Returns false (caller errors) if the
+// source can't be read or the range is degenerate, so a failed slice never silently
+// renders the wrong (whole-clip) audio for a section request.
+static bool stageWavRegion (const juce::File& sourceFile, double srcStartSec, double srcEndSec,
+                            const juce::File& destWav)
+{
+    if (srcEndSec <= srcStartSec) return false;
+    juce::AudioFormatManager fm; fm.registerBasicFormats();
+    std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (sourceFile));
+    if (reader == nullptr || reader->sampleRate <= 0.0) return false;
+
+    const double sr = reader->sampleRate;
+    const juce::int64 total = reader->lengthInSamples;
+    juce::int64 startSamp = juce::jlimit ((juce::int64) 0, total, (juce::int64) std::floor (srcStartSec * sr));
+    juce::int64 endSamp   = juce::jlimit (startSamp,       total, (juce::int64) std::ceil  (srcEndSec   * sr));
+    const int numSamps = (int) (endSamp - startSamp);
+    if (numSamps <= 0) return false;
+
+    const int numCh = (int) juce::jmax ((unsigned) 1, reader->numChannels);
+    juce::AudioBuffer<float> buf (numCh, numSamps);
+    if (! reader->read (&buf, 0, numSamps, startSamp, true, true)) return false;
+
+    destWav.deleteFile();
+    std::unique_ptr<juce::FileOutputStream> os (destWav.createOutputStream());
+    if (os == nullptr) return false;
+    juce::WavAudioFormat wav;
+    std::unique_ptr<juce::AudioFormatWriter> writer (
+        wav.createWriterFor (os.get(), sr, (unsigned) numCh,
+                             juce::jmax (16, (int) reader->bitsPerSample), {}, 0));
+    if (writer == nullptr) return false;
+    os.release();   // the writer owns the stream now
+    const bool wrote = writer->writeFromAudioSampleBuffer (buf, 0, numSamps);
+    writer.reset(); // flush + close before the caller reads the file back
+    return wrote;
+}
+
 juce::var MoshOps::cmdCreateRenderLayer (const juce::var& args)
 {
     const auto clipId = args.getProperty ("clipId", var()).toString();
@@ -4090,8 +4366,20 @@ juce::var MoshOps::cmdCreateRenderLayer (const juce::var& args)
 
     beginTxn ("create_render_layer");
     auto pos = clip->getPosition();
+    double rStart = pos.getStart().inSeconds();
+    double rEnd   = pos.getEnd().inSeconds();
+    // Section-scoped render (agent "rework the hook"): an explicit sub-region — beats
+    // resolved to seconds by the caller — bounds the layer to part of the clip. Clamp
+    // to the clip's own range; ignore a degenerate range and fall back to the whole clip.
+    if (args.hasProperty ("regionStart") && args.hasProperty ("regionEnd"))
+    {
+        const double cs = rStart, ce = rEnd;
+        const double qs = juce::jlimit (cs, ce, (double) args.getProperty ("regionStart", cs));
+        const double qe = juce::jlimit (cs, ce, (double) args.getProperty ("regionEnd",   ce));
+        if (juce::jmax (qs, qe) - juce::jmin (qs, qe) > 1.0e-3) { rStart = juce::jmin (qs, qe); rEnd = juce::jmax (qs, qe); }
+    }
     auto node = RenderLayer::create ("rl-" + String (Time::getCurrentTime().toMilliseconds()),
-        clipId, pos.getStart().inSeconds(), pos.getEnd().inSeconds(),
+        clipId, rStart, rEnd,
         args.getProperty ("adapter", "fake").toString());
     if (args.hasProperty ("mode"))         node.setProperty (ids::mode, args.getProperty ("mode", "reimagine"), nullptr);
     if (args.hasProperty ("modelVariant")) node.setProperty (ids::modelVariant, args.getProperty ("modelVariant", ""), nullptr);
@@ -4162,7 +4450,33 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
     auto output = jobDir.getChildFile ("output.wav");
     auto manifest = jobDir.getChildFile ("output_manifest.json");
     input.deleteFile();
-    if (! wave->getCurrentSourceFile().copyFileTo (input))
+
+    // Stage the render input. Section-scoped layers carry a sub-region tighter than the
+    // clip — slice JUST that region of the raw source so the model only re-imagines the
+    // section's audio. The stored timeRange is absolute timeline seconds frozen at create;
+    // CLAMP it to the clip's LIVE position so a clip moved/trimmed since then can't
+    // mis-stage — a stale range that no longer overlaps collapses to the whole clip,
+    // matching the v0 default of copying the source wholesale.
+    auto cpos = clip->getPosition();
+    const double cs = cpos.getStart().inSeconds(), ce = cpos.getEnd().inSeconds();
+    double rs = juce::jlimit (cs, ce, (double) node[ids::timeRangeStart]);
+    double re = juce::jlimit (cs, ce, (double) node[ids::timeRangeEnd]);
+    if (re <= rs + 1.0e-3) { rs = cs; re = ce; }   // stale/degenerate after a move → whole clip
+    const bool subRegion = (rs > cs + 1.0e-3) || (re < ce - 1.0e-3);
+    bool staged = false;
+    if (subRegion)
+    {
+        const bool sliceable = std::abs (wave->getSpeedRatio() - 1.0) < 1.0e-6
+                               && ! wave->isLooping() && ! wave->getAutoTempo();
+        if (sliceable)
+        {
+            const double off = cpos.getOffset().inSeconds();
+            staged = stageWavRegion (wave->getCurrentSourceFile(), rs - cs + off, re - cs + off, input);
+        }
+        if (! staged)   // never fall back to the whole clip for a section request
+            return errResult ("render_layer", "section render needs an un-stretched, non-looping wave clip");
+    }
+    if (! staged && ! wave->getCurrentSourceFile().copyFileTo (input))
         return errResult ("render_layer", "could not stage source region");
 
     // Ensure the service first so its build/version is part of EVERY fingerprint
@@ -4455,9 +4769,25 @@ juce::var MoshOps::cmdAcceptRender (const juce::var& args)
     }
     if (lane == nullptr) return errResult ("accept_render", "no lane");
 
+    // Land the render. Anchor to the clip's LIVE position; only when the layer carries a
+    // genuine sub-region (tighter than the current clip span) do we land that sub-range.
+    // The stored timeRange is frozen at create, so clamp it to the live clip — a clip
+    // moved/trimmed since render lands over its current self, not a stale spot.
     auto pos = clip->getPosition();
+    const double cs = pos.getStart().inSeconds(), ce = pos.getEnd().inSeconds();
+    auto landStart = pos.getStart();
+    auto landLen   = pos.getLength();
+    {
+        const double rs = juce::jlimit (cs, ce, (double) node[ids::timeRangeStart]);
+        const double re = juce::jlimit (cs, ce, (double) node[ids::timeRangeEnd]);
+        if (re > rs + 1.0e-3 && (re - rs) < (ce - cs) - 1.0e-3)   // genuine sub-region of the live clip
+        {
+            landStart = tracktion::TimePosition::fromSeconds (rs);
+            landLen   = tracktion::TimeDuration::fromSeconds (re - rs);
+        }
+    }
     lane->insertWaveClip ("neural-" + clip->getName(), dest,
-        { { pos.getStart(), pos.getLength() }, {} }, false);
+        { { landStart, landLen }, {} }, false);
 
     node.setProperty (ids::userKept, true, &undoManager());
     node.setProperty (ids::status, "ready", &undoManager());
@@ -5564,6 +5894,10 @@ juce::var MoshOps::snapshot()
             }
     root->setProperty ("buses", buses);
 
+    // SEC-001 — named song sections (Intro/Verse/Hook/…) from the MOSH_SECTIONS tree.
+    root->setProperty ("sections", sectionsToVar());
+    root->setProperty ("annotations", annotationsToVar());
+
     // Master bus (Wave 5) — the edit's master VolumeAndPan, always present.
     if (auto mvp = edit.getMasterVolumePlugin())
     {
@@ -5867,6 +6201,10 @@ juce::var MoshOps::clipToVar (te::Clip& c)
         r->setProperty ("seed", (int) rl[ids::seed]);
         r->setProperty ("userKept", rl[ids::userKept]);
         r->setProperty ("hasArtifact", juce::File (rl[ids::cacheArtifact].toString()).existsAsFile());
+        // The render's time scope (seconds). For a section-scoped render this is the
+        // section's sub-range; for a whole-clip render it equals the clip span.
+        r->setProperty ("regionStart", (double) rl[ids::timeRangeStart]);
+        r->setProperty ("regionEnd",   (double) rl[ids::timeRangeEnd]);
         if (auto params = rl.getChildWithName (ids::PARAMS); params.isValid())
         {
             r->setProperty ("prompt", params[ids::prompt]);

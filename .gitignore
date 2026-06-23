@@ -48,6 +48,12 @@ service/flp/.flp.env
 # RAVE transform venv (torch, GBs) + machine-local TRANSFORM_PY/RAVE_MODEL_DIR (setup-transform.sh)
 service/transform/.venv/
 service/transform/.transform.env
+# SFT lane: mlx-lm venv + machine-local SFT_PY + generated dataset/adapters (setup-sft.sh)
+service/sft/.venv/
+service/sft/.sft.env
+service/sft/.sft-data/
+service/sft/.adapters/
+service/sft/.fused/
 service/__pycache__/
 **/__pycache__/
 *.pyc

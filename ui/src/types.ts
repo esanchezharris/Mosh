@@ -15,6 +15,10 @@ export type RenderLayer = {
   colors?: RenderColor[];
   target?: string;    // Route B: transform target (instrument or free-text)
   strength?: number;  // Route B: transform strength (0–100)
+  // The render's time scope (seconds). A section-scoped render carries a sub-range of
+  // the clip; a whole-clip render's range equals the clip span.
+  regionStart?: number;
+  regionEnd?: number;
 };
 
 // SA3 colour-rack metadata from GET /colors (via list_colors).
@@ -281,6 +285,28 @@ export type TrainingState = {
   jobs: TrainingJob[];
 };
 
+// A named song-structure region (Intro / Verse / Hook / …). Beat-based so it's
+// tempo-independent; used by the section navigator and (later) as an agent scope
+// handle ("rework the hook"). Frontend-first against the mock; the real backend is
+// a MOSH_SECTIONS ValueTree + create/rename/move/remove_section commands.
+export type Section = {
+  id: string;
+  name: string;
+  startBeat: number;
+  endBeat: number;
+  color?: string;
+};
+
+// ANN-001 — an authored timeline comment pin, beat-anchored. Synced over multiplayer
+// with `author` (who flagged it).
+export type Annotation = {
+  id: string;
+  text: string;
+  beat: number;
+  color?: string;
+  author?: string;
+};
+
 export type Snapshot = {
   schemaVersion: number;
   session: {
@@ -342,6 +368,8 @@ export type Snapshot = {
   transport: Transport;
   master?: { volumeDb: number; pan: number };
   buses?: Bus[];
+  sections?: Section[];
+  annotations?: Annotation[];
   audio?: AudioSelection;
   training?: TrainingState;
 };

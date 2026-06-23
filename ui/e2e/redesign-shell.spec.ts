@@ -1,0 +1,235 @@
+import { test, expect, type Page } from "@playwright/test";
+
+// The redesign shell is the SHIPPING DEFAULT now (redesignShell defaults true), so a
+// clean boot lands in it. bootRedesign seeds it explicitly (belt-and-suspenders);
+// bootClassic seeds the opt-OUT so the "flag off" tests still cover the classic fallback.
+async function bootRedesign(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    window.localStorage.clear();
+    window.localStorage.setItem("mosh.settings", JSON.stringify({ version: 1, template: null, values: { redesignShell: true } }));
+  });
+  await page.goto("/");
+  await expect(page.getByTestId("app")).toBeVisible();
+  await expect(page.getByTestId("arrangement")).toBeVisible();
+}
+
+async function bootClassic(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    window.localStorage.clear();
+    window.localStorage.setItem("mosh.settings", JSON.stringify({ version: 1, template: null, values: { redesignShell: false } }));
+  });
+  await page.goto("/");
+  await expect(page.getByTestId("arrangement")).toBeVisible();
+}
+
+test("default (no settings): boots the redesign shell", async ({ page }) => {
+  await page.addInitScript(() => window.localStorage.clear()); // clean storage → schema defaults
+  await page.goto("/");
+  await expect(page.getByTestId("arrangement")).toBeVisible();
+  await expect(page.getByTestId("session-rail")).toBeVisible(); // redesign is the default now
+  await expect(page.getByTestId("promptbar")).toBeVisible();
+});
+
+test("flag on: the Session rail is open by default with Moshi + inspector", async ({ page }) => {
+  await bootRedesign(page);
+  await expect(page.getByTestId("dock-right")).toBeVisible();
+  await expect(page.getByTestId("session-rail")).toBeVisible();
+  await expect(page.getByTestId("participant-moshi")).toBeVisible();
+  await expect(page.getByTestId("inspector")).toBeVisible();
+});
+
+test("flag off (classic): no Inspector rail", async ({ page }) => {
+  await bootClassic(page);
+  await expect(page.getByTestId("inspector-expand")).toHaveCount(0);
+});
+
+test("flag on: Inspector shows the selected track's mix controls", async ({ page }) => {
+  await bootRedesign(page);
+  await page.getByTestId("track-header").first().click();
+  const insp = page.getByTestId("inspector");
+  await expect(insp).toBeVisible();
+  await expect(insp.getByText("Volume", { exact: true })).toBeVisible();
+  await expect(insp.getByText("Pan", { exact: true })).toBeVisible();
+});
+
+test("flag on: top-right presence cluster (AI pill + Share)", async ({ page }) => {
+  await bootRedesign(page);
+  await expect(page.getByTestId("presence")).toBeVisible();
+  await expect(page.getByTestId("ai-pill")).toBeVisible();
+  await expect(page.getByTestId("share")).toBeVisible();
+});
+
+test("flag off (classic): no presence cluster", async ({ page }) => {
+  await bootClassic(page);
+  await expect(page.getByTestId("presence")).toHaveCount(0);
+});
+
+test("flag on: a track's FX drawer opens from the header and collapses again", async ({ page }) => {
+  await bootRedesign(page);
+  const toggle = page.getByTestId("track-fx-toggle").first();
+  await expect(toggle).toBeVisible();
+  await expect(page.getByTestId("fx-drawer")).toHaveCount(0);
+  await toggle.click();
+  const drawer = page.getByTestId("fx-drawer").first();
+  await expect(drawer).toBeVisible();
+  await expect(drawer.getByRole("button", { name: "+ Plugin", exact: true })).toBeVisible();
+  await toggle.click();
+  await expect(page.getByTestId("fx-drawer")).toHaveCount(0);
+});
+
+test("flag off (classic): no per-track FX toggle", async ({ page }) => {
+  await bootClassic(page);
+  await expect(page.getByTestId("track-fx-toggle")).toHaveCount(0);
+});
+
+test("flag on: the agent prompt lives in a dedicated bottom bar", async ({ page }) => {
+  await bootRedesign(page);
+  const bar = page.getByTestId("promptbar");
+  await expect(bar).toBeVisible();
+  await expect(bar.locator(".agent-composer")).toBeVisible();
+});
+
+test("flag off (classic): no bottom prompt bar (prompt stays in the Moshi dock)", async ({ page }) => {
+  await bootClassic(page);
+  await expect(page.getByTestId("promptbar")).toHaveCount(0);
+});
+
+test("flag on: section navigator shows sections, adds one, and has zoom presets", async ({ page }) => {
+  await bootRedesign(page);
+  const nav = page.getByTestId("section-nav");
+  await expect(nav).toBeVisible();
+  await expect(page.getByTestId("section-seg")).toHaveCount(3); // seeded Intro / Verse / Hook
+  await page.getByTestId("section-add").click();
+  await expect(page.getByTestId("section-seg")).toHaveCount(4);
+  await expect(nav.getByRole("button", { name: "8B", exact: true })).toBeVisible();
+});
+
+test("flag off (classic): no section navigator", async ({ page }) => {
+  await bootClassic(page);
+  await expect(page.getByTestId("section-nav")).toHaveCount(0);
+});
+
+test("flag on: collapsing the Session rail keeps Moshi mounted (not torn down)", async ({ page }) => {
+  await bootRedesign(page);
+  await expect(page.getByTestId("participant-moshi")).toBeVisible();
+  await expect(page.getByTestId("moshi-stage")).toHaveCount(1);
+  // Collapse via the divider double-click.
+  await page.getByTestId("dock-rdivider").dblclick();
+  await expect(page.getByTestId("inspector-expand")).toBeVisible(); // collapsed → edge tab
+  await expect(page.getByTestId("dock-right")).toBeHidden();         // panel hidden, NOT removed
+  await expect(page.getByTestId("moshi-stage")).toHaveCount(1);      // Moshi survives the collapse
+  // Re-expand.
+  await page.getByTestId("inspector-expand").click();
+  await expect(page.getByTestId("dock-right")).toBeVisible();
+  await expect(page.getByTestId("moshi-stage")).toHaveCount(1);
+});
+
+test("flag on: the bottom dock is gone; generative lives in the Inspector", async ({ page }) => {
+  await bootRedesign(page);
+  await expect(page.getByTestId("dock")).toHaveCount(0); // bottom dock removed
+  await expect(page.getByTestId("inspector").getByTestId("generative")).toBeVisible();
+});
+
+test("flag off (classic): the bottom dock is present", async ({ page }) => {
+  await bootClassic(page);
+  await expect(page.getByTestId("dock")).toBeVisible();
+});
+
+test('flag on: the "+" control consolidates file/options/export (topbar drops File + Export)', async ({ page }) => {
+  await bootRedesign(page);
+  const plus = page.getByTestId("file-options");
+  await expect(plus).toBeVisible();
+  // The classic topbar File menu + Export popover are gone — the "+" owns them now.
+  await expect(page.locator(".topbar-tools").getByRole("button", { name: "File", exact: true })).toHaveCount(0);
+
+  await plus.click();
+  const menu = page.getByTestId("file-options-menu");
+  await expect(menu.getByText("New", { exact: true })).toBeVisible();
+  await expect(menu.getByText("Save", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("export-run")).toBeVisible(); // shared Export controls
+});
+
+test('flag on: the "+" Settings sub-panel swaps in and back', async ({ page }) => {
+  await bootRedesign(page);
+  await page.getByTestId("file-options").click();
+  await page.getByTestId("fo-settings").click();
+  const head = page.locator(".fo-sub-head");
+  await expect(head).toContainText("Settings");
+  await head.getByRole("button", { name: "Back" }).click();
+  // Back to the file actions.
+  await expect(page.getByTestId("file-options-menu")).toBeVisible();
+});
+
+test('flag off (classic): no "+" control; the topbar keeps File + Export', async ({ page }) => {
+  await bootClassic(page);
+  await expect(page.getByTestId("file-options")).toHaveCount(0);
+  await expect(page.locator(".topbar-tools").getByRole("button", { name: "File", exact: true })).toBeVisible();
+});
+
+test("flag on: annotation ruler shows the seeded pin and a double-click adds one", async ({ page }) => {
+  await bootRedesign(page);
+  const strip = page.getByTestId("annotation-ruler");
+  await expect(strip).toBeVisible();
+  await expect(page.getByTestId("annotation-pin")).toHaveCount(1); // seeded "tighten this transition"
+
+  page.once("dialog", (d) => d.accept("smooth the build")); // window.prompt for the new note
+  await strip.dblclick({ position: { x: 300, y: 6 } });
+  await expect(page.getByTestId("annotation-pin")).toHaveCount(2);
+});
+
+test("flag on: clicking a pin opens it with its author and can delete it", async ({ page }) => {
+  await bootRedesign(page);
+  await page.getByTestId("annotation-pin").first().locator(".annotation-flag").click();
+  const pop = page.locator(".annotation-pop");
+  await expect(pop).toBeVisible();
+  await expect(pop).toContainText("tighten this transition");
+  await expect(pop).toContainText("you"); // author tag
+  await pop.getByRole("button", { name: "Delete" }).click();
+  await expect(page.getByTestId("annotation-pin")).toHaveCount(0);
+});
+
+test("flag on: clicking the annotation strip still seeks the ruler beneath it (no dead-zone)", async ({ page }) => {
+  await bootRedesign(page);
+  await expect(page.getByTestId("position")).toHaveText("1.1.1"); // parked at start
+  // A bare-strip click must bubble through to the ruler's seek (the strip only swallows pins).
+  await page.getByTestId("annotation-ruler").click({ position: { x: 420, y: 6 } });
+  await expect(page.getByTestId("position")).not.toHaveText("1.1.1");
+});
+
+test("flag off (classic): no annotation ruler", async ({ page }) => {
+  await bootClassic(page);
+  await expect(page.getByTestId("annotation-ruler")).toHaveCount(0);
+});
+
+test("flag on: camera is off by default; toggling it shows a self-preview tile, toggling again hides it", async ({ page }) => {
+  await bootRedesign(page);
+  const toggle = page.getByTestId("camera-toggle");
+  await expect(toggle).toBeVisible();
+  await expect(toggle).toHaveAttribute("aria-pressed", "false"); // off by default (privacy)
+  await expect(page.getByTestId("participant-self")).toHaveCount(0);
+
+  await toggle.click(); // grants the fake camera, starts the local stream
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("participant-self").getByTestId("video-tile")).toBeVisible();
+
+  await toggle.click(); // release the camera
+  await expect(toggle).toHaveAttribute("aria-pressed", "false");
+  await expect(page.getByTestId("participant-self")).toHaveCount(0);
+});
+
+test("flag on: hiding the WebView releases the camera; returning restores it (privacy)", async ({ page }) => {
+  await bootRedesign(page);
+  await page.getByTestId("camera-toggle").click();
+  await expect(page.getByTestId("participant-self")).toBeVisible();
+  // Background the tab → the camera track must be released (self-tile disappears).
+  await page.evaluate(() => { Object.defineProperty(document, "hidden", { value: true, configurable: true }); document.dispatchEvent(new Event("visibilitychange")); });
+  await expect(page.getByTestId("participant-self")).toHaveCount(0);
+  // Return to the foreground → re-acquired (the user had it on).
+  await page.evaluate(() => { Object.defineProperty(document, "hidden", { value: false, configurable: true }); document.dispatchEvent(new Event("visibilitychange")); });
+  await expect(page.getByTestId("participant-self")).toBeVisible();
+});
+
+test("flag off (classic): no camera toggle", async ({ page }) => {
+  await bootClassic(page);
+  await expect(page.getByTestId("camera-toggle")).toHaveCount(0);
+});

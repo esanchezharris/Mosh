@@ -28,6 +28,10 @@ cd "$(dirname "$0")"
 # (written by transform/setup-transform.sh) exports TRANSFORM_PY + RAVE_MODEL_DIR.
 # Absent → the `transform` adapter falls back to the deterministic fake (Route B).
 [[ -f transform/.transform.env ]] && source ./transform/.transform.env
+# Phase-4 SFT lane lives in its own mlx-lm venv; .sft.env (written by
+# sft/setup-sft.sh) exports SFT_PY for the trainer CLI. Absent → the SFT lane is
+# simply unavailable; the rest of the service is unaffected.
+[[ -f sft/.sft.env ]] && source ./sft/.sft.env
 
 export SA3_MLX_DIR="${SA3_MLX_DIR:-$HOME/AI/stable-audio-3/optimized/mlx}"
 export COLORRACK_DATA="${COLORRACK_DATA:-$(pwd)/colors/COLORRACK_DATA}"
