@@ -63,8 +63,9 @@ def run_train(a):
         "--learning-rate", str(a.lr),
         "--fine-tune-type", "lora",
         "--adapter-path", out,
-        "--grad-checkpoint",
     ]
+    if not a.no_grad_checkpoint:
+        cmd += ["--grad-checkpoint"]  # trade compute for memory; drop it on a big-RAM Mac for ~2-3x speed
     if a.max_seq_length:
         cmd += ["--max-seq-length", str(a.max_seq_length)]
     if not a.no_mask_prompt:
@@ -87,7 +88,7 @@ def run_train(a):
         "config": {
             "iters": a.iters, "batch_size": a.batch_size, "num_layers": a.num_layers,
             "learning_rate": a.lr, "fine_tune_type": "lora",
-            "mask_prompt": not a.no_mask_prompt, "max_seq_length": a.max_seq_length, "grad_checkpoint": True,
+            "mask_prompt": not a.no_mask_prompt, "max_seq_length": a.max_seq_length, "grad_checkpoint": not a.no_grad_checkpoint,
         },
         "mlx_lm_version": mlx_lm_version(),
         "seconds": dur,
@@ -120,8 +121,12 @@ def main():
     t.add_argument("--batch-size", type=int, default=1)
     t.add_argument("--num-layers", type=int, default=8)
     t.add_argument("--lr", type=float, default=1e-5)
-    t.add_argument("--max-seq-length", type=int, default=2048)
+    # 4096, not 2048: the system prompt is ~3k tokens, so 2048 truncated the note
+    # target off the end and the model only ever saw a few notes (it collapsed to a
+    # ~3-note pattern). 4096 fits the system prompt + a full pattern target.
+    t.add_argument("--max-seq-length", type=int, default=4096)
     t.add_argument("--no-mask-prompt", action="store_true")
+    t.add_argument("--no-grad-checkpoint", action="store_true", help="disable gradient checkpointing (faster; needs more RAM)")
     t.set_defaults(fn=run_train)
 
     f = sub.add_parser("fuse")

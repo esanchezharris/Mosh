@@ -82,7 +82,9 @@ if (repliesPath) {
   const mean = perExample.length ? perExample.reduce((s, e) => s + e.score, 0) / perExample.length : 0;
   const deferrals = perExample.filter((e) => e.deferred).length;
   const out = { tag, mode: "offline", examples: examples.length, cleanApply: mean, deferrals, perExample };
-  const outPath = join(dirname(repliesPath), `eval_results.${tag}.json`);
+  // next to the EVAL set (matching the live path + this file's header), not the
+  // replies file — in the dump-remotely/score-locally flow they're in different dirs.
+  const outPath = join(dirname(evalPath), `eval_results.${tag}.json`);
   writeFileSync(outPath, JSON.stringify(out, null, 2) + "\n");
   console.log(`================= EVAL RESULT =================`);
   console.log(`[${tag}] clean-apply score : ${mean.toFixed(3)}  (${deferrals} deferral(s) / ${examples.length})`);

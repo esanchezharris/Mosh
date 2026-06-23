@@ -52,7 +52,8 @@ export async function runBound(
   return { applied, total: cmds.length, errors };
 }
 
-/** multiset recall of `gold` names covered by `got` names (0..1). */
+/** multiset recall of `gold` names covered by `got` names (0..1). The strict
+ *  primitive — content-batch tasks (note population) should use fairRecall. */
 export function nameRecall(gold: string[], got: string[]): number {
   if (gold.length === 0) return 1;
   const need = new Map<string, number>();
@@ -64,6 +65,32 @@ export function nameRecall(gold: string[], got: string[]): number {
     if (used < (need.get(c) ?? 0)) { covered++; seen.set(c, used + 1); }
   }
   return covered / gold.length;
+}
+
+/** A "short pattern" — the most notes a populate ask ("write a short pattern")
+ *  is fairly required to produce. A one-bar 8th-note figure. Beyond this, more
+ *  notes neither help nor hurt the content score. */
+export const SHORT_PATTERN_NOTES = 8;
+
+/** Content-fair recall: like nameRecall, but the required multiplicity of any one
+ *  command name is capped at SHORT_PATTERN_NOTES. Deterministic ops (gold count 1)
+ *  grade identically; a note-population gold of N `add_note`s only requires a short
+ *  pattern's worth — so "write a short pattern" is no longer graded against the
+ *  source clip's exact note count (the bug that zeroed valid short patterns). */
+export function fairRecall(gold: string[], got: string[]): number {
+  if (gold.length === 0) return 1;
+  const need = new Map<string, number>();
+  for (const g of gold) need.set(g, (need.get(g) ?? 0) + 1);
+  const gotCount = new Map<string, number>();
+  for (const c of got) gotCount.set(c, (gotCount.get(c) ?? 0) + 1);
+  let required = 0;
+  let covered = 0;
+  for (const [name, n] of need) {
+    const req = Math.min(n, SHORT_PATTERN_NOTES);
+    required += req;
+    covered += Math.min(gotCount.get(name) ?? 0, req);
+  }
+  return required === 0 ? 1 : covered / required;
 }
 
 /** Score one example: set up its start state, render the candidate `rules` +
@@ -101,7 +128,7 @@ export async function scoreExample(
     if (res.ok) ok++; else errors.push(`${c.command}: ${res.error}`);
   }
   const cleanRate = ok / cmds.length;
-  const recall = nameRecall(ex.goldCommandNames, cmds.map((c) => c.command));
+  const recall = fairRecall(ex.goldCommandNames, cmds.map((c) => c.command));
   const score = cleanRate * recall;
 
   const missing = recall < 1 ? `missing ${ex.goldCommandNames.join(",")} vs got ${cmds.map((c) => c.command).join(",")}` : "";
@@ -144,7 +171,7 @@ export async function scoreReply(ex: EvalExample, content: string): Promise<Exam
     const res = await mockExecute<CommandResult>({ command: c.command, args: c.args ?? {} });
     if (res.ok) ok++; else errors.push(`${c.command}: ${res.error}`);
   }
-  const recall = nameRecall(ex.goldCommandNames, cmds.map((c) => c.command));
+  const recall = fairRecall(ex.goldCommandNames, cmds.map((c) => c.command));
   const missing = recall < 1 ? `missing ${ex.goldCommandNames.join(",")} vs got ${cmds.map((c) => c.command).join(",")}` : "";
   const feedback = [errors.length ? `apply errors: ${errors.join("; ")}` : "", missing].filter(Boolean).join(" | ") || "ok";
   return { id: ex.id, score: (ok / cmds.length) * recall, deferred: false, feedback };

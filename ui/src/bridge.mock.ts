@@ -1098,6 +1098,12 @@ export function mockSnapshot<T = unknown>(): Promise<T> {
 // This module is dev-mock only — a production `vite build` strips it entirely.
 export function __resetMockForTests(): void {
   stopPlayback();
+  // Reset the id counters too, so a fresh test session is fully deterministic —
+  // two resets in one process now mint the same ids (mirroring the separate
+  // processes the --dump / --replies offline flow runs in). Without this, the
+  // seq climbs across resets and cross-call id matching silently breaks.
+  clipSeq = 100;
+  trackSeq = 10;
   snapshot = seedSnapshot();
   history.length = 0;
   future.length = 0;
