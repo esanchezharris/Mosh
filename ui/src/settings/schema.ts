@@ -65,6 +65,8 @@ export const SETTINGS: SettingDef[] = [
         { value: "mosh", label: "Mosh" },
         { value: "ableton", label: "Ableton" },
         { value: "fl", label: "FL" },
+        { value: "protools", label: "Pro Tools" },
+        { value: "logic", label: "Logic" },
       ],
     },
   },
@@ -142,6 +144,8 @@ export const SETTINGS: SettingDef[] = [
         { value: "mosh", label: "Mosh" },
         { value: "ableton", label: "Ableton" },
         { value: "fl", label: "FL" },
+        { value: "protools", label: "Pro Tools" },
+        { value: "logic", label: "Logic" },
       ],
     },
   },
@@ -168,6 +172,8 @@ function interactionSettings(): SettingDef[] {
     { value: "mosh", label: "Mosh" },
     { value: "ableton", label: "Ableton" },
     { value: "fl", label: "FL" },
+    { value: "protools", label: "Pro Tools" },
+    { value: "logic", label: "Logic" },
   ];
   const FEEL_META: { id: keyof typeof FEEL_DEFAULTS; label: string; help: string; min: number; max: number; step: number }[] = [
     { id: "dragThreshold", label: "Drag threshold (px)", help: "Movement before a click becomes a drag.", min: 0, max: 20, step: 1 },

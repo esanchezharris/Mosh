@@ -83,8 +83,27 @@ describe("per-DAW keymaps", () => {
     expect(resolveKey(getKeymap("fl"), ev({ key: "d", metaKey: true }))).toBeNull();
     expect(resolveKey(getKeymap("mosh"), ev({ key: "d", metaKey: true }))).toBe(A.DUPLICATE);
   });
+  it("pro tools: ⌘E separates, ⌘Space records, F7/F8 pick Selector/Grabber, Return → start", () => {
+    const pt = getKeymap("protools");
+    expect(resolveKey(pt, ev({ key: "e", metaKey: true }))).toBe(A.SPLIT);
+    expect(resolveKey(pt, ev({ key: " ", metaKey: true }))).toBe(A.RECORD);
+    expect(resolveKey(pt, ev({ key: "F7" }))).toBe(A.TOOL_RANGE);
+    expect(resolveKey(pt, ev({ key: "F8" }))).toBe(A.TOOL_MOVE);
+    expect(resolveKey(pt, ev({ key: "Enter" }))).toBe(A.TO_START);
+    // differs from mosh: F7 unbound, Home → start, plain R still records on mosh
+    expect(resolveKey(getKeymap("mosh"), ev({ key: "F7" }))).toBeNull();
+    expect(resolveKey(getKeymap("mosh"), ev({ key: "Home" }))).toBe(A.TO_START);
+  });
+  it("logic: ⌘T splits at playhead, Return → start, R still records (from mosh core)", () => {
+    const lg = getKeymap("logic");
+    expect(resolveKey(lg, ev({ key: "t", metaKey: true }))).toBe(A.SPLIT);
+    expect(resolveKey(lg, ev({ key: "Enter" }))).toBe(A.TO_START);
+    expect(resolveKey(lg, ev({ key: "r" }))).toBe(A.RECORD);
+    // logic does NOT use ⌘E (only ...MOSH, which leaves it unbound)
+    expect(resolveKey(lg, ev({ key: "e", metaKey: true }))).toBeNull();
+  });
   it("every preset keeps undo on Mod+Z (shared core)", () => {
-    for (const name of ["mosh", "ableton", "fl"])
+    for (const name of ["mosh", "ableton", "fl", "protools", "logic"])
       expect(resolveKey(getKeymap(name), ev({ key: "z", metaKey: true }))).toBe(A.UNDO);
   });
 });

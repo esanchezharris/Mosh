@@ -96,6 +96,13 @@ describe("coerceSetting", () => {
     expect(coerceSetting("skin", "ableton")).toBe("ableton");
   });
 
+  it("accepts the Pro Tools / Logic enum values across the DAW selectors", () => {
+    for (const id of ["skin", "layout", "gestureTable", "keymap"]) {
+      expect(coerceSetting(id, "protools")).toBe("protools");
+      expect(coerceSetting(id, "logic")).toBe("logic");
+    }
+  });
+
   it("coerces a boolean, falling back to default on garbage", () => {
     expect(coerceSetting("voiceOn", false)).toBe(false);
     expect(coerceSetting("voiceOn", true)).toBe(true);

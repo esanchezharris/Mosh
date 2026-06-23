@@ -7,8 +7,8 @@ import { settingDef, coerceSetting } from "./schema";
 // "select a template" can never write garbage into the store.
 
 describe("built-in templates", () => {
-  it("ships the three built-ins", () => {
-    expect(TEMPLATES.map((t) => t.name).sort()).toEqual(["ableton", "fl", "mosh"]);
+  it("ships the five built-ins", () => {
+    expect(TEMPLATES.map((t) => t.name).sort()).toEqual(["ableton", "fl", "logic", "mosh", "protools"]);
   });
 
   it("references only valid schema ids", () => {
@@ -32,6 +32,8 @@ describe("built-in templates", () => {
     expect(template("mosh")?.values.layout).toBe("mosh");
     expect(template("ableton")?.values.layout).toBe("ableton");
     expect(template("fl")?.values.layout).toBe("fl");
+    expect(template("protools")?.values.layout).toBe("protools");
+    expect(template("logic")?.values.layout).toBe("logic");
   });
 });
 

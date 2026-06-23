@@ -45,6 +45,24 @@ export const TEMPLATES: Template[] = [
       "feel.dragThreshold": 3, "feel.edgeGrabPx": 8, "feel.snapStrength": 1,
     },
   },
+  {
+    name: "protools",
+    label: "Pro Tools",
+    values: {
+      skin: "protools", theme: "dark", layout: "protools",
+      gestureTable: "protools", keymap: "protools",
+      "feel.dragThreshold": 3, "feel.edgeGrabPx": 6, "feel.snapStrength": 1,
+    },
+  },
+  {
+    name: "logic",
+    label: "Logic",
+    values: {
+      skin: "logic", theme: "dark", layout: "logic",
+      gestureTable: "logic", keymap: "logic",
+      "feel.dragThreshold": 3, "feel.edgeGrabPx": 7, "feel.snapStrength": 1,
+    },
+  },
 ];
 
 const BY_NAME: Record<string, Template> = Object.fromEntries(

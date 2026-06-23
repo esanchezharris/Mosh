@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import {
-  boot, newProject, TEMPLATES, TEMPLATE_SKIN,
+  boot, bootRedesign, newProject, TEMPLATES, TEMPLATE_SKIN,
   addAudioTrack, addDrumTrack, selectTrack, addMidiClip, clipsOnTrack,
   dragClipBy, dragClipHeaderBy, clipNum,
 } from "./helpers";
@@ -10,7 +10,7 @@ import {
 // muscle-memory gestures. (The keymap/gesture TABLE divergence is unit-tested in
 // src/interaction/*.test.ts; here we prove it through the live UI.)
 
-const LIME: Record<string, string> = { mosh: "#ccff23", ableton: "#ffcf33", fl: "#ff7a1a" };
+const LIME: Record<string, string> = { mosh: "#ccff23", ableton: "#ffcf33", fl: "#ff7a1a", protools: "#34c3a4", logic: "#4d8df0" };
 
 test.describe("template applied", () => {
   test.beforeEach(async ({ page }) => {
@@ -39,7 +39,7 @@ test.describe("template applied", () => {
 
   // Core gesture muscle-memory: under Mosh & FL the whole clip body drags to move;
   // under Ableton the body time-selects and only the header moves.
-  for (const name of ["mosh", "fl"] as const) {
+  for (const name of ["mosh", "fl", "logic"] as const) {
     test(`${name}: clip body drag moves the clip`, async ({ page }) => {
       await applyTemplate(page, name);
       const clip = await singleMidiClip(page);
@@ -57,6 +57,16 @@ test.describe("template applied", () => {
     await expect(page.getByTestId("range-band")).toBeVisible();
     expect(await clipNum(clip, "data-clip-start")).toBe(0);
     // header drag → the clip moves
+    await dragClipHeaderBy(page, clip, 120);
+    await expect.poll(() => clipNum(clip, "data-clip-start")).toBeGreaterThan(0);
+  });
+
+  test("pro tools: clip body time-selects, header moves (Smart Tool)", async ({ page }) => {
+    await applyTemplate(page, "protools");
+    const clip = await singleMidiClip(page);
+    await dragClipBy(page, clip, 140);
+    await expect(page.getByTestId("range-band")).toBeVisible();
+    expect(await clipNum(clip, "data-clip-start")).toBe(0);
     await dragClipHeaderBy(page, clip, 120);
     await expect.poll(() => clipNum(clip, "data-clip-start")).toBeGreaterThan(0);
   });
@@ -84,6 +94,21 @@ test.describe("template applied", () => {
     await applyTemplate(page, "mosh");
     await expect(page.getByTestId("browser-expand")).toBeVisible(); // back to the rail
     await expect(page.getByTestId("dock-left")).toHaveCount(0);
+  });
+});
+
+test.describe("dock restructure (redesign shell)", () => {
+  test("Pro Tools tucks both rails; Logic opens Library + Inspector", async ({ page }) => {
+    await bootRedesign(page);
+    await expect(page.getByTestId("dock-right")).toBeVisible(); // redesign default: Inspector open
+    // Pro Tools → Edit window: both rails collapse to tabs
+    await applyTemplate(page, "protools");
+    await expect(page.getByTestId("inspector-expand")).toBeVisible(); // right collapsed
+    await expect(page.getByTestId("browser-expand")).toBeVisible();   // left collapsed
+    // Logic → Library + Inspector open
+    await applyTemplate(page, "logic");
+    await expect(page.getByTestId("dock-right")).toBeVisible();        // Inspector back
+    await expect(page.getByTestId("dock-left")).toBeVisible();         // Library open
   });
 });
 

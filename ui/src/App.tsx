@@ -68,6 +68,7 @@ export function App() {
         applyDock: useDockLayout.getState().applyPreset,
         openDrumWindow: useDrumWindow.getState().open,
         closeDrumWindow: useDrumWindow.getState().close,
+        setMainView: useStore.getState().setView,
         snapshot,
       });
     }
