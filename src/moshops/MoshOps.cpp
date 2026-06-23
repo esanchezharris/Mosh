@@ -1,4 +1,5 @@
 #include "MoshOps.h"
+#include "engine/SourceRef.h"
 #include "state/Ids.h"
 #include "state/RenderLayer.h"
 #include "state/Section.h"
@@ -1615,21 +1616,11 @@ juce::var MoshOps::cmdMpCommitTrack (const juce::var& args)
                 src.copyFileTo (dest);
             }
             if (src != dest)
-            {
-                auto& srcRef = w->getSourceFileReference();
-                srcRef.setToDirectFileReference (dest, true);   // relative by-hash ref
-                // setToDirectFileReference computes the path relative to the edit FILE, which
-                // yields a spurious leading "../" (e.g. "../audio/by-hash/<sha>.wav"). Our
-                // filePathResolver (MoshEngine::wireEditResolvers) resolves relative to the
-                // edit file's PARENT directory, so that "../" escapes the session dir to a
-                // path that does not exist → the offline render's WaveNode can never create a
-                // reader → export spins forever (jobNeedsRunningAgain). Re-point the ref
-                // relative to the parent dir (matching the save_as consolidation), with
-                // portable separators so a peer on another OS resolves the same stem.
-                srcRef.source = dest.getRelativePathFrom (eng.editFile().getParentDirectory())
-                                    .replaceCharacter ('\\', '/');
-                w->sourceMediaChanged();
-            }
+                // Relative by-hash ref so the serialized state + the peer resolve the same
+                // stem. repointWaveClipSource stores it relative to the edit file's PARENT
+                // dir (not setToDirectFileReference's edit-FILE-relative "../" form, which
+                // would escape the session dir and hang a later export — PR #104).
+                repointWaveClipSource (*w, dest, eng.editFile().getParentDirectory(), true);
             auto* r = new DynamicObject(); r->setProperty ("hash", hash); r->setProperty ("ext", ext);
             audioRefs.add (var (r));
         }
@@ -2199,9 +2190,13 @@ juce::var MoshOps::cmdRelinkClip (const juce::var& args)
     if (w == nullptr) return errResult ("relink_clip", "wave clip not found: " + id);
 
     beginTxn ("relink_clip");
+    // Relative ref iff the new file lives under the project dir (keeps a relinked-to-local
+    // file portable), else absolute. repointWaveClipSource stores the relative form against
+    // the edit file's PARENT dir — NOT setToDirectFileReference's edit-FILE-relative "../"
+    // form, which (when the edit isn't yet on disk) escapes the session dir and would hang a
+    // later offline export (the same mechanism PR #104 fixed for mp_commit_track).
     const bool local = newFile.isAChildOf (eng.editFile().getParentDirectory());
-    w->getSourceFileReference().setToDirectFileReference (newFile, local);
-    w->sourceMediaChanged();                    // refresh the clip's cached source file
+    repointWaveClipSource (*w, newFile, eng.editFile().getParentDirectory(), local);
     logLine ("relink_clip", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("relink_clip");

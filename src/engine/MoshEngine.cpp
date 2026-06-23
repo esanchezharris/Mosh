@@ -1,4 +1,5 @@
 #include "MoshEngine.h"
+#include "SourceRef.h"
 
 namespace mosh
 {
@@ -425,15 +426,12 @@ void MoshEngine::consolidateAudioInto (const juce::File& projectDir)
         for (auto* c : t->getClips())
             if (auto* w = dynamic_cast<te::WaveAudioClip*> (c))
                 if (auto dest = localiseInto (w->getCurrentSourceFile()); dest != juce::File())
-                {
-                    auto& srcRef = w->getSourceFileReference();
-                    srcRef.setToDirectFileReference (dest, true);   // relative
-                    // Store forward slashes so the edit is portable across OSes: a project
-                    // saved on Windows must open on a friend's Mac. Windows resolves '/' fine,
-                    // and on macOS this is a no-op (no backslashes to replace).
-                    srcRef.source = srcRef.source.get().replaceCharacter ('\\', '/');
-                    w->sourceMediaChanged();          // refresh the clip's cached source file
-                }
+                    // Re-point to a RELATIVE ref so the project dir moves/copies wholesale.
+                    // The shared helper stores the path relative to the edit file's PARENT dir
+                    // with portable '/' separators (a project saved on Windows must open on a
+                    // friend's Mac) — matching the SamplerPlugin sounds below and the
+                    // relink/commit paths, and never the edit-FILE-relative "../" form.
+                    repointWaveClipSource (*w, dest, editPath.getParentDirectory(), true);
 
         // DRM-001 — also consolidate SamplerPlugin sounds (the bundled drum kit and any
         // assign_sample'd user files), re-pointing each to a path RELATIVE to the edit
