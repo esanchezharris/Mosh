@@ -217,3 +217,58 @@ def test_fixed_window_limiter_allows_then_blocks_then_resets():
 def test_fixed_window_limiter_disabled_when_limit_nonpositive():
     lim = FixedWindowLimiter(limit=0, window_s=10)
     assert all(lim.allow("1.2.3.4") for _ in range(1000))
+
+
+def _raw_request(host, port, raw_bytes):
+    """Speak raw HTTP over a socket (urllib won't stream a hand-rolled chunked
+    body). Returns the decoded response head + first body chunk we can read."""
+    import socket
+    s = socket.create_connection((host, port), timeout=5)
+    try:
+        s.sendall(raw_bytes)
+        s.settimeout(5)
+        chunks = []
+        while True:
+            try:
+                d = s.recv(4096)
+            except socket.timeout:
+                break
+            if not d:
+                break
+            chunks.append(d)
+            if b"\r\n\r\n" in b"".join(chunks):  # got at least the head
+                break
+        return b"".join(chunks)
+    finally:
+        s.close()
+
+
+def test_chunked_body_is_rejected_not_silently_emptied(relay):
+    # A POST with Transfer-Encoding: chunked carries NO Content-Length, so the
+    # body-cap (which keys off Content-Length) can't bound it — an attacker could
+    # stream an unbounded chunked body (slow-POST / memory pressure) AND the unread
+    # body desyncs the keep-alive stream. The relay's control plane only ever sends
+    # small Content-Length JSON, so chunked requests are refused outright (411) and
+    # the connection closed, rather than parsed as a silent empty {} success.
+    host, port = relay.replace("http://", "").split(":")
+    port = int(port)
+    raw = (
+        b"POST /mp/create HTTP/1.1\r\n"
+        b"Host: 127.0.0.1\r\n"
+        b"Transfer-Encoding: chunked\r\n"
+        b"Content-Type: application/json\r\n"
+        b"Connection: keep-alive\r\n"
+        b"\r\n"
+        b"5\r\nhello\r\n"        # one chunk; we never send the 0-terminator
+    )
+    resp = _raw_request(host, port, raw)
+    head = resp.split(b"\r\n\r\n", 1)[0].decode("latin-1")
+    status_line = head.splitlines()[0]
+    # Must NOT be a 200 (a silently-emptied body would create a room and 200).
+    assert " 200 " not in status_line, f"chunked body silently accepted: {status_line!r}"
+    assert " 411 " in status_line, f"expected 411 Length Required, got: {status_line!r}"
+    # And the relay must signal the connection is ending (can't trust the framing).
+    assert "connection: close" in head.lower()
+    # The half-open chunked stream never created a room.
+    _, health = _get(relay, "/health")
+    assert health["rooms"] == 0
