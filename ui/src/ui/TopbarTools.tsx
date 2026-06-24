@@ -15,6 +15,7 @@ import { SampleBrowser } from "./SampleBrowser";
 import { SettingsPanel } from "../settings/SettingsPanel";
 import { MultiplayerPanel } from "./MultiplayerPanel";
 import { ExportControls } from "./ExportControls";
+import { deriveTrainingJob } from "./trainingJobView";
 
 // Small popover anchored under its trigger; closes on outside click / Esc.
 function Pop({ label, title, on, className, children }: { label: string; title: string; on?: boolean; className?: string; children: (close: () => void) => React.ReactNode }) {
@@ -271,12 +272,24 @@ function TrainingTool({ training }: { training: TrainingState | null }) {
             <div className="pop-label">Jobs</div>
             <div className="modal-list training-list">
               {jobs.length === 0 && <div className="rack-empty">no jobs yet</div>}
-              {jobs.map((j) => (
-                <div key={j.jobId} className="plugin-row">
-                  <span className="pr-name">{j.jobId} · {j.status}</span>
-                  {j.status === "ready" && <button className="btn" onClick={() => void exec("import_lora_adapter", { jobId: j.jobId }).then(refresh)}>Import</button>}
-                </div>
-              ))}
+              {jobs.map((j) => {
+                const v = deriveTrainingJob(j);
+                return (
+                  <div key={j.jobId} className={`training-job phase-${v.phase}`} data-testid={`training-job-${j.jobId}`}>
+                    <div className="plugin-row">
+                      <span className="pr-name" title={j.jobId}>{j.jobId}</span>
+                      <span className={`cmdlog-badge${v.phase === "error" ? " err" : ""}`}>{v.label}</span>
+                      {v.canImport && <button className="btn" onClick={() => void exec("import_lora_adapter", { jobId: j.jobId }).then(refresh)}>Import</button>}
+                    </div>
+                    {v.showProgress && (
+                      <div className="training-progress" role="progressbar" aria-valuenow={v.progressPct} aria-valuemin={0} aria-valuemax={100} aria-label={`Training ${j.jobId}`}>
+                        <div className="training-progress-fill" style={{ width: `${v.progressPct}%` }} />
+                      </div>
+                    )}
+                    {v.errorText && <div className="pop-note training-job-error" role="alert">{v.errorText}</div>}
+                  </div>
+                );
+              })}
             </div>
           </div>
           <div className="pop-note tc">{training?.activeAdapterId ? `active adapter: ${training.activeAdapterId}` : "no active adapter"}</div>
