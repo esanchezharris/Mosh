@@ -326,8 +326,95 @@ def check_bypass_layer(ctx):
                 "original": str(orig), "rendered": str(rendered), "bypassed": str(bypassed)})
 
 
+def _data_field(results, command, field):
+    """Pull result.data[field] from the matching command in a run-script result set.
+    The MoshOps result envelope carries `command` + `data` (okResult)."""
+    for r in results:
+        if r.get("ok") and r.get("command") == command and isinstance(r.get("data"), dict):
+            v = r["data"].get(field)
+            if v is not None:
+                return v
+    return None
+
+
+def check_render_artifact_portability(ctx):
+    """AL-009 — Save-As consolidates a Tier-B render layer's cacheArtifact into the
+    project's audio/renders/ and re-points it RELATIVE, so freeze_layer / re-accept survive
+    a project move. Mirrors check_relative_ref_export (the wave-clip portability guard) for
+    render artifacts: render a fake layer (cacheArtifact lands in the session pool as an
+    absolute path), save_as to a standalone dir, then DELETE the pool render so resolution
+    can only succeed via the consolidated co-located copy, reopen, and prove the
+    artifact-gated ops (freeze_layer / accept_render) still work + the on-disk edit
+    references the artifact relatively (no absolute pool path). Uses the fake adapter so it
+    runs offline alongside check_transform."""
+    import shutil
+    SESSION = "verify-renderport"
+    ENV = {"MOSH_SERVICE_PORT": "8796", "MOSH_ENABLE_TRANSFORM": "0"}
+    dest_dir = ART / "al009-project"
+    dest_edit = dest_dir / "renders.tracktionedit"
+    out = ART / "07_render_portability.wav"
+    pool_renders = _mosh_session_base() / SESSION / "renders"
+    shutil.rmtree(dest_dir, ignore_errors=True)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    # 1) render a fake layer, then save_as OUTSIDE the session pool. clipId is captured into
+    #    the result lines (add_test_tone_clip emits data.clipId).
+    cmds = [
+        {"command": "create_track", "args": {"name": "Gen"}, "capture": {"T": "trackId"}},
+        {"command": "add_test_tone_clip", "args": {"trackId": "${T}", "seconds": 1.0, "freq": 196.0}, "capture": {"C": "clipId"}},
+        {"command": "create_render_layer", "args": {"clipId": "${C}", "adapter": "fake"}},
+        {"command": "set_render_param", "args": {"clipId": "${C}", "seed": 7}},
+        {"command": "render_layer", "args": {"clipId": "${C}", "wait": True}},
+        {"command": "save_as", "args": {"file": str(dest_edit)}},
+    ]
+    try:
+        results, proc = run_script(ctx.bin, cmds, SESSION, extra_env=ENV, timeout=120)
+    except subprocess.TimeoutExpired:
+        return row("Render-artifact portability (AL-009)", False, {"error": "render/save_as HUNG (timed out)"})
+    fails = failed_commands(results)
+    # add_test_tone_clip dispatches to import_clip internally, so the result envelope's
+    # `command` is "import_clip" (with data.clipId) — match by the clipId field, not the
+    # command name, so the extraction can't break on that internal dispatch.
+    clip_id = next((r["data"]["clipId"] for r in results
+                    if r.get("ok") and isinstance(r.get("data"), dict) and r["data"].get("clipId")), None)
+    renders_dir = dest_dir / "audio" / "renders"
+    consolidated = renders_dir.is_dir() and any(renders_dir.glob("*.wav"))
+    xml = dest_edit.read_text() if dest_edit.exists() else ""
+    pool_abs = str(_mosh_session_base() / SESSION)
+    rel_ok = ("audio/renders/" in xml) and ("../audio/renders/" not in xml) and (pool_abs not in xml)
+    if fails or not clip_id or not consolidated or not rel_ok:
+        return row("Render-artifact portability (AL-009)", False,
+                   {"failed_commands": fails, "clip_id": clip_id, "consolidated": consolidated,
+                    "relative_ref": rel_ok, "stderr": proc.stderr[-400:]})
+
+    # 2) move the project, DELETE the pool render so only the co-located copy can resolve,
+    #    reopen, and prove the artifact-gated ops still work (clip ids are preserved on open).
+    moved = ART / "al009-moved"
+    shutil.rmtree(moved, ignore_errors=True)
+    shutil.copytree(dest_dir, moved)
+    shutil.rmtree(pool_renders, ignore_errors=True)
+    moved_edit = moved / "renders.tracktionedit"
+    cmds2 = [
+        {"command": "open_project", "args": {"file": str(moved_edit)}},
+        {"command": "freeze_layer", "args": {"clipId": clip_id}},
+        {"command": "accept_render", "args": {"clipId": clip_id}},
+        {"command": "export_audio", "args": {"file": str(out)}},
+    ]
+    try:
+        res2, proc2 = run_script(ctx.bin, cmds2, SESSION + "-moved", extra_env=ENV, timeout=120)
+    except subprocess.TimeoutExpired:
+        return row("Render-artifact portability (AL-009)", False, {"error": "moved-project ops HUNG (timed out)"})
+    fails2 = failed_commands(res2)
+    st = stats(out) if out.exists() else {}
+    non_silent = bool(st) and st.get("rms", 0) > 0.001
+    ok = (not fails2) and out.exists() and non_silent
+    return row("Render-artifact portability (AL-009)", ok,
+               {"consolidated": consolidated, "relative_ref": rel_ok,
+                "failed_after_move": fails2, "wav": str(out), **st})
+
+
 OFFLINE_CHECKS = [check_makes_sound, check_drums, check_transform, check_full_loop,
-                  check_relative_ref_export, check_bypass_layer]
+                  check_relative_ref_export, check_bypass_layer, check_render_artifact_portability]
 
 
 # ── main ────────────────────────────────────────────────────────────────────────

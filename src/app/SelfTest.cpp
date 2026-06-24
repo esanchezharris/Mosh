@@ -2542,6 +2542,103 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         destDir.deleteRecursively(); moved.deleteRecursively();
     }
 
+    // ─── AL-009 — Save-As render-artifact consolidation + portability ───
+    // A Tier-B render layer's cacheArtifact (the file freeze_layer / re-accept_render
+    // depend on) is written by finalizeRender as an ABSOLUTE path into the shared session
+    // pool, NOT the project dir — so before AL-009 a Save-As'd + moved project's render
+    // either pointed back at a pool that no longer exists (freeze/accept failed) or simply
+    // wasn't portable. The fix consolidates each render artifact into the project's
+    // audio/renders/ on Save-As, re-points cacheArtifact RELATIVE, and resolves it
+    // move-aware at every read. This proves the rendered audio survives a project move.
+    section ("AL-009: Save-As render-artifact consolidation + portability");
+    {
+        const auto sessionEdit = eng.editFile();
+        const auto poolDir     = eng.sessionDir();
+
+        auto trackById2 = [&] (const String& tid) -> var {
+            auto trks = ops.snapshot().getProperty ("tracks", var());
+            for (int i = 0; i < trks.size(); ++i)
+                if (trks[i].getProperty ("id", var()).toString() == tid) return trks[i];
+            return var();
+        };
+        auto renderLayerOf = [&] (const String& tid, const String& cid) -> var {
+            auto trk = trackById2 (tid);
+            if (auto* arr = trk.getProperty ("clips", var()).getArray())
+                for (auto& c : *arr)
+                    if (c.getProperty ("id", var()).toString() == cid)
+                        return c.getProperty ("renderLayer", var());
+            return {};
+        };
+        // Find the (only) clip carrying a render layer, by scanning the live snapshot — robust
+        // to any clip-id reassignment a reload might do (the open-the-moved-project step below).
+        auto clipWithRenderLayer = [&] () -> String {
+            auto trks = ops.snapshot().getProperty ("tracks", var());
+            for (int i = 0; i < trks.size(); ++i)
+                if (auto* arr = trks[i].getProperty ("clips", var()).getArray())
+                    for (auto& c : *arr)
+                        if ((bool) c.getProperty ("hasRenderLayer", false))
+                            return c.getProperty ("id", var()).toString();
+            return {};
+        };
+
+        // Fresh project with a clip that carries a rendered layer (fake adapter, deterministic).
+        check (ok (cmd (ops, "new_project", args1 ("name", "renders-portable"))), "new_project renders-portable ok");
+        const auto rt  = cmd (ops, "create_track", args1 ("name", "Gen"))["data"].getProperty ("trackId", var()).toString();
+        const auto rcid = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", rt }, { "seconds", 1.0 }, { "freq", 196.0 }}))["data"]
+                              .getProperty ("clipId", var()).toString();
+        check (ok (cmd (ops, "create_render_layer", objN ({{ "clipId", rcid }, { "adapter", "fake" }}))), "create_render_layer (fake) ok");
+        cmd (ops, "set_render_param", objN ({{ "clipId", rcid }, { "seed", 7 }}));
+        auto rr = cmd (ops, "render_layer", objN ({{ "clipId", rcid }, { "wait", true }}));
+        check (ok (rr), "render_layer ok (artifact produced in the session pool)");
+        check ((bool) renderLayerOf (rt, rcid).getProperty ("hasArtifact", false), "render produced a cached artifact");
+
+        // Save As to a standalone dir OUTSIDE the pool → render artifacts consolidate local.
+        auto destDir  = File::getSpecialLocation (File::tempDirectory).getChildFile ("mosh-renders-portable");
+        destDir.deleteRecursively(); destDir.createDirectory();
+        auto destEdit = destDir.getChildFile ("renders.tracktionedit");
+        check (ok (cmd (ops, "save_as", args1 ("file", destEdit.getFullPathName()))), "save_as ok");
+        auto rendersDir = destDir.getChildFile ("audio").getChildFile ("renders");
+        check (rendersDir.isDirectory(), "save_as created a project-local audio/renders/ dir");
+        check (rendersDir.getNumberOfChildFiles (File::findFiles) >= 1, "save_as consolidated the render artifact into the project");
+        check ((bool) renderLayerOf (rt, rcid).getProperty ("hasArtifact", false), "render artifact still resolves after consolidation (relative)");
+
+        // The on-disk edit must reference the render artifact RELATIVELY (portable), never
+        // the absolute session pool — otherwise the move below would break.
+        const auto xml = destEdit.loadFileAsString();
+        check (! xml.contains (poolDir.getFullPathName()), "saved edit has no absolute session-pool render path");
+        check (xml.contains ("audio/renders/") && ! xml.contains ("../audio/renders/"),
+               "saved edit references the render artifact by a co-located relative path (no ../)");
+
+        // PROVE portability: copy the whole project elsewhere, DELETE the original pool
+        // render so resolution can ONLY succeed via the co-located copy, then open the copy
+        // and prove freeze/accept (the artifact-gated ops) still work — the AL-009 payoff.
+        auto moved = File::getSpecialLocation (File::tempDirectory).getChildFile ("mosh-renders-moved");
+        moved.deleteRecursively();
+        check (destDir.copyDirectoryTo (moved), "copied the render project to a new location");
+        poolDir.getChildFile ("renders").deleteRecursively();   // hide the original pool artifact
+        check (ok (cmd (ops, "open_project", args1 ("file", moved.getChildFile ("renders.tracktionedit").getFullPathName()))), "open the moved render project ok");
+        const auto mcid = clipWithRenderLayer();   // re-derive from the reloaded project (id-reassign safe)
+        check (mcid.isNotEmpty(), "moved project restored the clip + its render layer");
+        bool movedHasArtifact = false;
+        { auto trks = ops.snapshot().getProperty ("tracks", var());
+          for (int i = 0; i < trks.size() && ! movedHasArtifact; ++i)
+            if (auto* arr = trks[i].getProperty ("clips", var()).getArray())
+                for (auto& c : *arr)
+                    if (c.getProperty ("id", var()).toString() == mcid)
+                        movedHasArtifact = (bool) c.getProperty ("renderLayer", var()).getProperty ("hasArtifact", false); }
+        check (movedHasArtifact, "moved project's render artifact resolves to the co-located copy (portable)");
+        check (ok (cmd (ops, "freeze_layer", args1 ("clipId", mcid))),
+               "freeze_layer succeeds on the moved project (artifact survived the move)");
+        const int tracksBeforeAccept = tracks (ops);
+        check (ok (cmd (ops, "accept_render", args1 ("clipId", mcid))),
+               "accept_render succeeds on the moved project (lands the consolidated artifact)");
+        check (tracks (ops) == tracksBeforeAccept + 1, "accept landed a new clip on the neural lane from the moved artifact");
+
+        // teardown — restore the session edit for later sections.
+        check (ok (cmd (ops, "open_project", args1 ("file", sessionEdit.getFullPathName()))), "restored the session edit (AL-009 teardown)");
+        destDir.deleteRecursively(); moved.deleteRecursively();
+    }
+
     // ─── PRF-001 — multicore audio thread preference + readout ───
     // A GENUINE, load-bearing knob (drives EngineBehaviour::getNumberOfCPUsToUseForAudio()
     // -> setNumThreads(N-1) on the parallel graph), valid headless (no audio device).

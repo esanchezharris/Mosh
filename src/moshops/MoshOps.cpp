@@ -1,5 +1,6 @@
 #include "MoshOps.h"
 #include "engine/SourceRef.h"
+#include "engine/RenderArtifacts.h"
 #include "state/Ids.h"
 #include "state/RenderLayer.h"
 #include "state/Section.h"
@@ -4501,9 +4502,10 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
 
     const auto fp = computeFingerprint (node, input);
 
-    // Cache by FULL fingerprint (05 §5) — reuse only on an exact match.
+    // Cache by FULL fingerprint (05 §5) — reuse only on an exact match. Resolve the
+    // artifact move-aware (AL-009): a Save-As'd project stores cacheArtifact relative.
     if (node[ids::cacheKey].toString() == fp
-        && juce::File (node[ids::cacheArtifact].toString()).existsAsFile())
+        && mosh::resolveCacheArtifact (node, eng.editFile().getParentDirectory()).existsAsFile())
     {
         node.setProperty (ids::status, "ready", nullptr);
         emit ("layer_status", [&] { auto* o = new DynamicObject();
@@ -4755,7 +4757,8 @@ juce::var MoshOps::cmdAcceptRender (const juce::var& args)
     auto* clip = findClip (clipId);
     auto node = findRenderLayer (clipId);
     if (clip == nullptr || ! node.isValid()) return errResult ("accept_render", "no render layer");
-    juce::File artifact (node[ids::cacheArtifact].toString());
+    // Resolve move-aware (AL-009): a Save-As'd project stores cacheArtifact relative.
+    juce::File artifact = mosh::resolveCacheArtifact (node, eng.editFile().getParentDirectory());
     if (! artifact.existsAsFile()) return errResult ("accept_render", "nothing rendered to accept");
 
     // Copy the render artifact into the project audio dir BEFORE any edit mutation.
@@ -4859,7 +4862,8 @@ juce::var MoshOps::cmdFreezeLayer (const juce::var& args)
     // Freeze = commit the cached render as the durable audio (already a file).
     auto node = findRenderLayer (args.getProperty ("clipId", var()).toString());
     if (! node.isValid()) return errResult ("freeze_layer", "no render layer");
-    if (! juce::File (node[ids::cacheArtifact].toString()).existsAsFile())
+    // Resolve move-aware (AL-009): a Save-As'd project stores cacheArtifact relative.
+    if (! mosh::resolveCacheArtifact (node, eng.editFile().getParentDirectory()).existsAsFile())
         return errResult ("freeze_layer", "nothing rendered to freeze");
     beginTxn ("freeze_layer");
     node.setProperty (ids::status, "frozen", &undoManager());
@@ -5650,9 +5654,19 @@ juce::var MoshOps::cmdSaveAs (const juce::var& args)
     if (file.getFileExtension().isEmpty())
         file = file.withFileExtension ("tracktionedit");
 
-    const bool didSave = eng.saveProjectAs (file);   // saveAs + adopt the new backing file
+    const bool didSave = eng.saveProjectAs (file);   // saveAs + adopt the new backing file + consolidate wave/sampler audio
     logLine ("save_as", args, didSave, didSave ? String() : String ("saveAs failed"), false);
     if (! didSave) return errResult ("save_as", "saveAs failed");
+
+    // AL-009 — consolidate Tier-B render-layer artifacts too. eng.saveProjectAs localises
+    // wave-clip sources + sampler sounds, but a render layer's cacheArtifact (the file
+    // freeze_layer / re-accept_render depend on) is written by finalizeRender as an
+    // ABSOLUTE path into the shared session pool, NOT the project dir. Copy each into the
+    // project's audio/renders/ and re-point with a portable RELATIVE ref so the rendered
+    // audio survives a project move, then persist the rewritten refs. Kept here (not in
+    // MoshEngine, a prime-directive seam) and after the engine consolidation.
+    mosh::consolidateRenderArtifacts (eng.edit().state, eng.editFile().getParentDirectory());
+    eng.save();
     emitSnapshotInvalidated();
 
     auto* data = new DynamicObject();
@@ -6287,7 +6301,7 @@ juce::var MoshOps::clipToVar (te::Clip& c)
         r->setProperty ("mode", rl[ids::mode]);
         r->setProperty ("seed", (int) rl[ids::seed]);
         r->setProperty ("userKept", rl[ids::userKept]);
-        r->setProperty ("hasArtifact", juce::File (rl[ids::cacheArtifact].toString()).existsAsFile());
+        r->setProperty ("hasArtifact", mosh::resolveCacheArtifact (rl, eng.editFile().getParentDirectory()).existsAsFile());
         // The render's time scope (seconds). For a section-scoped render this is the
         // section's sub-range; for a whole-clip render it equals the clip span.
         r->setProperty ("regionStart", (double) rl[ids::timeRangeStart]);
