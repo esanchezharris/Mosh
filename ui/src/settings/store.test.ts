@@ -48,8 +48,12 @@ describe("set + localStorage persistence round-trip", () => {
   });
 
   it("savePersisted/loadPersisted are an exact round-trip", () => {
-    savePersisted(localStorage, { template: "fl", values: { theme: "light" } });
-    expect(loadPersisted(localStorage)).toEqual({ template: "fl", values: { theme: "light" } });
+    savePersisted(localStorage, { template: "fl", values: { theme: "light" }, keyOverrides: {} });
+    expect(loadPersisted(localStorage)).toEqual({
+      template: "fl",
+      values: { theme: "light" },
+      keyOverrides: {},
+    });
   });
 });
 
@@ -92,6 +96,88 @@ describe("reset", () => {
     useSettings.getState().hydrate();
     expect(useSettings.getState().get("uiScale")).toBe(1);
     expect(useSettings.getState().template).toBeNull();
+  });
+});
+
+describe("per-template (per-keymap) rebind persistence (AL-002)", () => {
+  it("scopes a key.* rebind to the active keymap — it doesn't bleed into another", () => {
+    // On the Ableton keymap, rebind Undo.
+    useSettings.getState().set("keymap", "ableton");
+    useSettings.getState().set("key.undo", "Mod+P");
+    expect(useSettings.getState().get("key.undo")).toBe("Mod+P");
+
+    // Switch to the Mosh keymap — the Ableton rebind must NOT carry over.
+    useSettings.getState().set("keymap", "mosh");
+    expect(useSettings.getState().get("key.undo")).toBe("");
+
+    // Switch back to Ableton — its own rebind returns.
+    useSettings.getState().set("keymap", "ableton");
+    expect(useSettings.getState().get("key.undo")).toBe("Mod+P");
+  });
+
+  it("round-trips per-keymap rebinds across a reload", () => {
+    useSettings.getState().set("keymap", "ableton");
+    useSettings.getState().set("key.undo", "Mod+P");
+    useSettings.getState().set("keymap", "fl");
+    useSettings.getState().set("key.undo", "Mod+J");
+
+    // Simulate a reload: blow away in-memory state, re-hydrate from localStorage.
+    useSettings.setState({ template: null, values: {}, keyOverrides: {} });
+    useSettings.getState().hydrate();
+
+    useSettings.getState().set("keymap", "ableton");
+    expect(useSettings.getState().get("key.undo")).toBe("Mod+P");
+    useSettings.getState().set("keymap", "fl");
+    expect(useSettings.getState().get("key.undo")).toBe("Mod+J");
+    // a keymap that was never rebound still inherits the preset
+    useSettings.getState().set("keymap", "mosh");
+    expect(useSettings.getState().get("key.undo")).toBe("");
+  });
+
+  it("clearing a rebind to '' removes the per-keymap entry (back to inherit)", () => {
+    useSettings.getState().set("keymap", "ableton");
+    useSettings.getState().set("key.undo", "Mod+P");
+    useSettings.getState().set("key.undo", ""); // the SettingsPanel right-click clear
+
+    expect(useSettings.getState().get("key.undo")).toBe("");
+    // and the entry is gone from the persisted per-keymap map (no empty-string shadow)
+    const { keyOverrides } = loadPersisted(localStorage);
+    expect(keyOverrides.ableton?.["key.undo"]).toBeUndefined();
+  });
+
+  it("reset clears per-keymap rebinds and they don't survive reload", () => {
+    useSettings.getState().set("keymap", "ableton");
+    useSettings.getState().set("key.undo", "Mod+P");
+    useSettings.getState().reset();
+
+    expect(useSettings.getState().get("key.undo")).toBe("");
+    useSettings.getState().hydrate();
+    useSettings.getState().set("keymap", "ableton");
+    expect(useSettings.getState().get("key.undo")).toBe("");
+  });
+
+  it("savePersisted/loadPersisted round-trip keyOverrides exactly", () => {
+    savePersisted(localStorage, {
+      template: "ableton",
+      values: { keymap: "ableton" },
+      keyOverrides: { ableton: { "key.undo": "Mod+P" } },
+    });
+    expect(loadPersisted(localStorage)).toEqual({
+      template: "ableton",
+      values: { keymap: "ableton" },
+      keyOverrides: { ableton: { "key.undo": "Mod+P" } },
+    });
+  });
+
+  it("falls back to a legacy global key.* override (v1 blobs had no keyOverrides)", () => {
+    // A v1-shaped blob: a global key override lives in `values`, no keyOverrides field.
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ version: 1, template: null, values: { "key.undo": "Mod+P" } }),
+    );
+    useSettings.getState().hydrate();
+    // still resolves via the global fallback so no rebind is silently lost
+    expect(useSettings.getState().get("key.undo")).toBe("Mod+P");
   });
 });
 
