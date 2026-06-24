@@ -1052,11 +1052,27 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                "reject_render did NOT remove the layer (still present)");
         check (layerStatus (gcid) == "dirty", "reject_render set status=dirty (re-roll, not remove)");
 
-        // bypass_layer toggles status ready<->bypassed.
+        // bypass_layer toggles status ready<->bypassed AND re-routes the real audio
+        // (AL-008): the accepted render landed a clip on the "Neural Renders" lane, and
+        // bypassing must MUTE that clip so the mix falls back to the original source —
+        // not merely flip a status flag. Read the lane clip's mute state from the snapshot.
+        auto neuralClipMuted = [&] () -> bool {
+            auto snap = ops.snapshot();
+            if (auto* arr = snap["tracks"].getArray())
+                for (auto& t : *arr)
+                    if (t.getProperty ("name", var()).toString() == "Neural Renders")
+                        if (auto* cs = t.getProperty ("clips", var()).getArray())
+                            for (auto& c : *cs)
+                                return (bool) c.getProperty ("mute", false);   // single landed clip
+            return false;
+        };
+        check (! neuralClipMuted(), "before bypass the landed neural clip plays (un-muted)");
         check (ok (cmd (ops, "bypass_layer", objN ({{ "clipId", gcid }, { "bypassed", true }}))), "bypass_layer ok");
         check (layerStatus (gcid) == "bypassed", "bypass_layer{true} -> status bypassed");
+        check (neuralClipMuted(), "bypass_layer{true} MUTES the landed neural clip (real audio re-route, not just a flag)");
         cmd (ops, "bypass_layer", objN ({{ "clipId", gcid }, { "bypassed", false }}));
         check (layerStatus (gcid) == "ready", "bypass_layer{false} -> status ready");
+        check (! neuralClipMuted(), "bypass_layer{false} un-mutes the landed neural clip (render audible again)");
 
         // Re-render so a cached artifact exists for freeze/bounce (cache HIT path).
         cmd (ops, "render_layer", objN ({{ "clipId", gcid }, { "wait", true }}));
