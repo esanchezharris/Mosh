@@ -20,6 +20,14 @@ namespace
    #if MOSH_HAVE_ANIRA
     RaveInsertPlugin* asRave (te::Plugin* p) { return dynamic_cast<RaveInsertPlugin*> (p); }
    #endif
+
+    // AL-008 — the id of the wave clip a render-layer landed on the "Neural Renders"
+    // lane via accept_render. Stored on the MOSH_RENDERLAYER node so bypass_layer can
+    // mute/un-mute THAT clip (the real audio re-route), not just flip a status flag.
+    // File-local on purpose: this is a MoshOps mechanism detail, not a schema field in
+    // src/state (the RenderLayer node is an open ValueTree; an extra string property is
+    // round-trip-safe through save/load and ignored by the fingerprint).
+    const juce::Identifier kLandedClipId ("landedClipId");
     // Tracktion's compiled-in built-in plugin palette (registered unconditionally
     // by PluginManager). These ship inside the engine — no scan, no third-party
     // dependency — so the FX palette and built-in instruments are pure surface
@@ -4793,11 +4801,16 @@ juce::var MoshOps::cmdAcceptRender (const juce::var& args)
             landLen   = tracktion::TimeDuration::fromSeconds (re - rs);
         }
     }
-    lane->insertWaveClip ("neural-" + clip->getName(), dest,
+    auto landed = lane->insertWaveClip ("neural-" + clip->getName(), dest,
         { { landStart, landLen }, {} }, false);
 
     node.setProperty (ids::userKept, true, &undoManager());
     node.setProperty (ids::status, "ready", &undoManager());
+    // Record the landed neural clip so bypass_layer can re-route real audio (AL-008):
+    // bypassing mutes THIS clip → the mix falls back to the original (pre-render) source.
+    // A re-accept after bypass must start un-bypassed, so the new landed clip plays.
+    if (landed != nullptr)
+        node.setProperty (kLandedClipId, landed->itemID.toString(), &undoManager());
 
     // JSONL TASTE LABEL (05 §9): accept feeds the taste flywheel.
     auto* tl = new DynamicObject();
@@ -4824,8 +4837,18 @@ juce::var MoshOps::cmdBypassLayer (const juce::var& args)
 {
     auto node = findRenderLayer (args.getProperty ("clipId", var()).toString());
     if (! node.isValid()) return errResult ("bypass_layer", "no render layer");
+    const bool bypassed = (bool) args.getProperty ("bypassed", false);
     beginTxn ("bypass_layer");
-    node.setProperty (ids::status, (bool) args.getProperty ("bypassed", false) ? "bypassed" : "ready", &undoManager());
+    node.setProperty (ids::status, bypassed ? "bypassed" : "ready", &undoManager());
+
+    // AL-008 — re-route REAL audio, not just the status flag: mute the landed neural
+    // clip when bypassed so the mix falls back to the original (pre-render) source, and
+    // un-mute it when re-enabled. Only meaningful once the layer was accepted (it has a
+    // landed clip); a bypass before accept is a pure status toggle (nothing to route).
+    if (auto landedId = node[kLandedClipId].toString(); landedId.isNotEmpty())
+        if (auto* landedClip = findClip (landedId))
+            landedClip->setMuted (bypassed);
+
     logLine ("bypass_layer", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("bypass_layer");

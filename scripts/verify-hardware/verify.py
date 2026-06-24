@@ -276,7 +276,58 @@ def check_relative_ref_export(ctx):
     return row("Relative-ref export (MP-hang guard)", ok, {"wav": str(out), **st})
 
 
-OFFLINE_CHECKS = [check_makes_sound, check_drums, check_transform, check_full_loop, check_relative_ref_export]
+def check_bypass_layer(ctx):
+    """AL-008: bypass_layer must RE-ROUTE real audio, not just flip a ValueTree flag.
+
+    A/B over three exports of the SAME edit:
+      A (original)  — export the bare tone before any render layer exists.
+      B (rendered)  — accept the transform render so the neural clip lands and PLAYS;
+                      the mix now differs from the original (the model coloured it).
+      C (bypassed)  — bypass_layer{true} mutes the landed neural clip; the mix must
+                      collapse BACK to the original tone.
+
+    Asserts: C ≈ A  (bypass restores the original — diff-RMS ~0)  AND
+             B ≠ A  (the accepted render genuinely changed the audio — diff-RMS >> 0).
+    Before the fix bypass_layer only set status=bypassed, so the landed neural clip
+    kept playing → C still differed from A and this check FAILS (the RED that proves
+    it). Uses the stdlib fake transform adapter (offline, MOSH_ENABLE_TRANSFORM=0)."""
+    SESSION = "verify-bypass"
+    orig = ART / "07a_bypass_original.wav"
+    rendered = ART / "07b_bypass_rendered.wav"
+    bypassed = ART / "07c_bypass_bypassed.wav"
+    cmds = [
+        {"command": "create_track", "args": {"name": "Byp"}, "capture": {"T": "trackId"}},
+        {"command": "add_test_tone_clip", "args": {"trackId": "${T}", "seconds": 2.0, "freq": 220.0}, "capture": {"C": "clipId"}},
+        {"command": "export_audio", "args": {"file": str(orig)}},                                      # A: original
+        {"command": "create_render_layer", "args": {"clipId": "${C}", "adapter": "transform", "mode": "transform"}},
+        {"command": "set_render_param", "args": {"clipId": "${C}", "target": "flute", "strength": 80, "seed": 1}},
+        {"command": "render_layer", "args": {"clipId": "${C}", "wait": True}},
+        {"command": "accept_render", "args": {"clipId": "${C}"}},
+        {"command": "export_audio", "args": {"file": str(rendered)}},                                  # B: rendered plays
+        {"command": "bypass_layer", "args": {"clipId": "${C}", "bypassed": True}},
+        {"command": "export_audio", "args": {"file": str(bypassed)}},                                  # C: bypassed -> original
+    ]
+    results, proc = run_script(ctx.bin, cmds, SESSION,
+                               extra_env={"MOSH_SERVICE_PORT": "8796", "MOSH_ENABLE_TRANSFORM": "0"})
+    fails = failed_commands(results)
+    if fails or not (orig.exists() and rendered.exists() and bypassed.exists()):
+        return row("Bypass layer re-route (A/B)", False,
+                   {"failed_commands": fails,
+                    "exists": {"orig": orig.exists(), "rendered": rendered.exists(), "bypassed": bypassed.exists()},
+                    "stderr": proc.stderr[-500:]})
+    rendered_vs_orig = diff_rms(str(orig), str(rendered))   # B vs A — the render changed it
+    bypass_vs_orig = diff_rms(str(orig), str(bypassed))     # C vs A — bypass restored it
+    # The accepted render must move the audio well clear of the original; bypass must
+    # snap it back to within a hair of the original (mute is exact, so ~0).
+    ok = (rendered_vs_orig > 0.01 and bypass_vs_orig < 0.001
+          and bypass_vs_orig < rendered_vs_orig)
+    return row("Bypass layer re-route (A/B)", ok,
+               {"rendered_vs_orig_rms": rendered_vs_orig, "bypass_vs_orig_rms": bypass_vs_orig,
+                "original": str(orig), "rendered": str(rendered), "bypassed": str(bypassed)})
+
+
+OFFLINE_CHECKS = [check_makes_sound, check_drums, check_transform, check_full_loop,
+                  check_relative_ref_export, check_bypass_layer]
 
 
 # ── main ────────────────────────────────────────────────────────────────────────
