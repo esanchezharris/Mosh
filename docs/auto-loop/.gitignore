@@ -1,0 +1,6 @@
+# Runtime sentinels / locks / live state — machine-local, never committed (so the
+# loop's own `git pull --ff-only` after a merge is never blocked by a dirty tree).
+STOP
+PAUSE
+.merge-queue.lock
+state.json
