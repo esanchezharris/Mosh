@@ -28,3 +28,18 @@ approves. Fail-closed: anything else → PR left open, labeled `needs-human`, lo
 ## Rounds
 
 _(entries appended below by the loop)_
+
+### 2026-06-23 21:45:24 PDT — PR #116: claude/auto-al-001  [MERGED ✅]
+- **Branch:** claude/auto-al-001 → PR #116
+- **Base:** origin/main @ b909e8a → squash-merged as cacb65c
+- **Class:** cheap · gate: typecheck/vitest/e2e/swappability all ok (rebased + re-gated at merge time)
+- **Review:** diffs read by Emilio's agent + loop independent adversarial review = APPROVE
+- **Item:** AL-001 shared Escape stack (Esc closes only the topmost overlay)
+- _Note: finalize reported a false failure (gh --delete-branch can't delete a worktree-checked-out branch); the merge itself succeeded. Fixed in merge-one.sh._
+
+### 2026-06-23 21:45:24 PDT — PR #115: claude/auto-al-002  [MERGED ✅]
+- **Branch:** claude/auto-al-002 → PR #115
+- **Base:** origin/main @ cacb65c → squash-merged as bda1681
+- **Class:** cheap · gate: typecheck:ok,vitest:ok,e2e:ok,swappability:ok (re-gated onto AL-001-merged main)
+- **Review:** diffs read by Emilio's agent + loop adversarial review = APPROVE
+- **Item:** AL-002 per-keymap rebind persistence (no cross-keymap bleed; v1→v2 migration)

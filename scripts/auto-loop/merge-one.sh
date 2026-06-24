@@ -43,7 +43,7 @@ cmd_prepare() {
   # Rebase onto latest origin/main — no stale-green merges.
   if ! git -C "$wt" rebase origin/main >/dev/null 2>&1; then
     git -C "$wt" rebase --abort >/dev/null 2>&1 || true
-    jq -nc --arg b "$base_sha" '{ready:false,phase:"prepare",reason:"rebase conflict",conflict:true,base_sha:$b}'
+    jq -nc --arg b "$base_sha" '{ready:false,phase:"prepare",reason:"rebase conflict",conflict:true,baseSha:$b}'
     return
   fi
   local head_sha; head_sha="$(git -C "$wt" rev-parse HEAD)"
@@ -56,12 +56,12 @@ cmd_prepare() {
   diff_empty="$(echo "$cj" | jq -r .diff_empty)"
 
   if [ "$diff_empty" = true ]; then
-    jq -nc --arg b "$base_sha" '{ready:false,phase:"prepare",reason:"empty diff vs main (already merged/subsumed)",base_sha:$b}'
+    jq -nc --arg b "$base_sha" '{ready:false,phase:"prepare",reason:"empty diff vs main (already merged/subsumed)",baseSha:$b}'
     return
   fi
   if [ "$excluded" = true ]; then
     jq -nc --argjson c "$cj" --arg b "$base_sha" \
-      '{ready:false,phase:"prepare",reason:"touches hard-exclusion list",excluded:true,classify:$c,base_sha:$b}'
+      '{ready:false,phase:"prepare",reason:"touches hard-exclusion list",excluded:true,classify:$c,baseSha:$b}'
     return
   fi
 
@@ -73,19 +73,24 @@ cmd_prepare() {
   gate_json="$("$SELF_DIR/gate.sh" "$class" "$wt" origin/main)"; gate_rc=$?
   local ready=false; [ "$gate_rc" -eq 0 ] && ready=true
 
+  # One-line digest of the gate result for the ledger / reviewer.
+  local gsum
+  gsum="$(echo "$gate_json" | jq -r '"\(.class) pass=\(.pass) " + ([.steps[]?|"\(.name):\(if .ok then "ok" else "FAIL" end)"]|join(",")) + (if (.selftest|length)>0 then " selftest=\(.selftest)" else "" end)' 2>/dev/null)"
+
+  # camelCase keys match the Workflow's PREPARE_SCHEMA + finalize arg (baseSha/headSha).
   jq -nc \
     --argjson ready "$ready" --arg class "$class" \
     --arg base "$base_sha" --arg head "$head_sha" \
-    --argjson gate "$gate_json" \
+    --arg gsum "$gsum" --argjson gate "$gate_json" \
     '{ready:$ready, phase:"prepare", class:$class, excluded:false,
-      base_sha:$base, head_sha:$head, gate:$gate,
+      baseSha:$base, headSha:$head, gateSummary:$gsum, gate:$gate,
       reason: (if $ready then "gate green — awaiting adversarial review" else "gate failed" end)}'
 }
 
 # ── finalize ─────────────────────────────────────────────────────────────────────
 cmd_finalize() {
   local slug="$1" pr="$2" base_sha="$3" note="${4:-}"
-  local wt; wt="$(slug_wt "$slug")" br; br="$(branch_of "$slug")"
+  local wt br; wt="$(slug_wt "$slug")"; br="$(branch_of "$slug")"
 
   # Single-flight: never let two finalizes overlap (backstop to the serial queue).
   exec 9>"$LOCK"
@@ -102,7 +107,11 @@ cmd_finalize() {
   fi
 
   local mlog; mlog="$(mktemp)"
-  gh pr merge "$pr" --squash --admin --delete-branch >"$mlog" 2>&1
+  gh pr ready "$pr" >/dev/null 2>&1 || true   # a draft PR can't be merged
+  # NOT --delete-branch: the branch is checked out in a worktree, so gh's delete step
+  # returns non-zero even though the MERGE succeeded (a false failure). We delete it
+  # ourselves after removing the worktree, below.
+  gh pr merge "$pr" --squash --admin >"$mlog" 2>&1
   local mrc=$?
   if [ "$mrc" -ne 0 ]; then
     jq -nc --arg log "$(LC_ALL=C tr -cd '[:print:] ' <"$mlog")" '{merged:false,phase:"finalize",reason:"gh pr merge failed",log:$log}'
@@ -118,9 +127,14 @@ cmd_finalize() {
 - **Branch:** $br → PR #$pr
 - **Base:** origin/main @ ${base_sha:0:9} → squash-merged as ${merge_sha:0:9}
 - **Review:** ${note:-APPROVE (adversarial self-review)}
-- **Outcome:** auto-merged by the unattended loop; branch deleted
+- **Outcome:** auto-merged by the unattended loop; branch + worktree removed
 "
-  "$SELF_DIR/rm-worktree.sh" "$slug" >/dev/null 2>&1 || al_warn "worktree cleanup failed for auto-$slug"
+  # Cleanup — PR is CONFIRMED merged, so force-remove regardless of squash ancestry
+  # (rm-worktree.sh's is-ancestor guard would refuse, since a squash commit isn't an
+  # ancestor of the branch tip).
+  git -C "$MAIN" worktree remove --force "$wt" 2>/dev/null || al_warn "worktree remove failed: auto-$slug"
+  git -C "$MAIN" branch -D "$br" 2>/dev/null || true
+  git -C "$MAIN" push origin --delete "$br" 2>/dev/null || true
 
   jq -nc --arg m "$merge_sha" '{merged:true,phase:"finalize",merge_sha:$m}'
 }

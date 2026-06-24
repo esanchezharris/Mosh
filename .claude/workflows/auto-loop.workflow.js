@@ -13,6 +13,10 @@ export const meta = {
 }
 
 // ── config (override via Workflow args) ─────────────────────────────────────────
+// args may arrive as an object OR a JSON-encoded string (depending on the caller);
+// accept both so config like {dryRun:false,maxCycles:1} actually applies.
+let _args = args
+if (typeof _args === 'string') { try { _args = JSON.parse(_args) } catch (e) { _args = {} } }
 const cfg = Object.assign({
   maxItems: 3,            // implement agents per cycle (≤ concurrency cap)
   maxNativeInFlight: 1,   // cap parallel native items (bounds the serial build queue)
@@ -23,7 +27,7 @@ const cfg = Object.assign({
   baselineN: null,        // if set, skip the heavy preflight baseline build
   refill: true,           // run auto-discovery when ready < maxItems
   ts: 'unset',            // caller-supplied timestamp string (Date.now is banned in workflows)
-}, (args && typeof args === 'object') ? args : {})
+}, (_args && typeof _args === 'object') ? _args : {})
 
 const ROOT = 'scripts/auto-loop'
 const RUN = `cd "$(git rev-parse --show-toplevel)" &&`   // agents run shell from repo root
