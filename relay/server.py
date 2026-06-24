@@ -49,6 +49,12 @@ class BodyTooLarge(Exception):
     pass
 
 
+class LengthRequired(Exception):
+    """A request carried a chunked/streamed body with no Content-Length, so the
+    body cap can't bound it — refuse it (411) rather than silently empty it."""
+    pass
+
+
 class FixedWindowLimiter:
     """A tiny thread-safe per-key fixed-window rate limiter. `allow(key)` returns
     False once `limit` calls land within `window_s`; the window then resets. limit<=0
@@ -192,6 +198,13 @@ def make_handler(state: RelayState, limiter: "FixedWindowLimiter | None" = None)
             return limiter.allow(ip)
 
         def _body(self):
+            # A chunked/streamed body carries no Content-Length, so MAX_BODY_BYTES
+            # can't bound it (slow-POST / memory pressure) AND leaving it unread
+            # desyncs the keep-alive stream. The relay's control plane only ever
+            # sends small Content-Length JSON, so refuse a framed-without-length
+            # body outright (411 + close).
+            if self.headers.get("Transfer-Encoding"):
+                raise LengthRequired("chunked/streamed bodies are not accepted")
             try:
                 n = int(self.headers.get("Content-Length", 0) or 0)
             except ValueError:
@@ -228,6 +241,11 @@ def make_handler(state: RelayState, limiter: "FixedWindowLimiter | None" = None)
             u = urlparse(self.path)
             try:
                 b = self._body()
+            except LengthRequired as e:
+                # The streamed body is unbounded/unread — the framing is untrustworthy,
+                # so close the connection rather than try to parse the next request on it.
+                self.close_connection = True
+                return self._send(411, {"error": str(e)})
             except BodyTooLarge as e:
                 # We deliberately did NOT drain the oversized body, so the keep-alive
                 # stream is desynced — close the connection rather than mis-frame the
