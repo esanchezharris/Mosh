@@ -110,7 +110,10 @@ parse_selftest_tally() {
                    "$(printf '%s' "$line" | grep -Eo '[0-9]+ failed' | grep -Eo '^[0-9]+')"
 }
 
-count_juce_asserts() { grep -c 'JUCE Assertion' "$1" 2>/dev/null || echo 0; }
+# `grep -c` prints "0" but EXITS 1 on zero matches; a `|| echo 0` would then append a
+# SECOND "0" → "0\n0", which breaks numeric comparisons downstream. Capture the count
+# (already "0" on no match) and ignore the exit code instead.
+count_juce_asserts() { local c; c="$(grep -c 'JUCE Assertion' "$1" 2>/dev/null)"; printf '%s\n' "${c:-0}"; }
 
 # ── ledger ───────────────────────────────────────────────────────────────────────
 # Append a raw markdown block to the ledger (creates the dir if needed). The caller
