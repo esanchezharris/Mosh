@@ -30,8 +30,23 @@ cmd_list() {
   if [ -n "$status" ]; then _all | jq -c --arg s "$status" 'map(select(.status==$s))';
   else _all; fi
 }
-cmd_ready()       { _all | jq -c 'map(select(.status=="ready")) | sort_by(.order)'; }
-cmd_count_ready() { _all | jq '[.[]|select(.status=="ready")] | length'; }
+
+# IDs of items that already have a MERGED PR (title "auto(AL-XXX): …"). This is the
+# DURABLE done-record — GitHub is the source of truth, so a fresh-worktree restart
+# never re-picks an already-merged item even if its local backlog status wasn't flipped.
+# Empty (no exclusions) if gh is unavailable/offline — the local `status` field still guards.
+_merged_ids() {
+  gh pr list --state merged --limit 300 --json title -q '.[].title' 2>/dev/null \
+    | grep -oE 'auto\(AL-[0-9]+\)' | grep -oE 'AL-[0-9]+' | sort -u
+}
+cmd_ready() {
+  local done; done="$(_merged_ids)"
+  _all | jq -c --arg done "$done" '
+    ($done | split("\n") | map(select(length>0))) as $d
+    | map(select(.status=="ready" and ((.id) as $i | ($d | index($i)) | not)))
+    | sort_by(.order)'
+}
+cmd_count_ready() { cmd_ready | jq 'length'; }
 
 cmd_next_id() {
   local n; n="$(_all | jq -r '[.[].id | capture("AL-(?<n>[0-9]+)").n | tonumber] | (max // -1) + 1')"
