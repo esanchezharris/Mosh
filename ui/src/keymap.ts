@@ -6,6 +6,6 @@
 /** Every logical action a menu item or shortcut can trigger. `menuActions.runAction`
  *  is the single dispatcher that maps each id → its MoshOps command(s). */
 export type ActionId =
-  | "new_project" | "open_project" | "save" | "save_as" | "export_audio"
+  | "new_project" | "open_project" | "open_recent" | "save" | "save_as" | "export_audio"
   | "undo" | "redo" | "cut" | "copy" | "paste" | "delete"
   | "play_pause";

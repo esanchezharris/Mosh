@@ -547,6 +547,7 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "stop_audition")     return cmdStopAudition (args);
     if (name == "new_project")       return cmdNewProject (args);
     if (name == "open_project")      return cmdOpenProject (args);
+    if (name == "open_recent")       return cmdOpenRecent (args);
     if (name == "save_as")           return cmdSaveAs (args);
     if (name == "set_project_settings") return cmdSetProjectSettings (args);
     if (name == "set_key")           return broadcastStructuralIfActive (name, args, cmdSetKey (args));
@@ -5565,6 +5566,24 @@ juce::var MoshOps::cmdNewProject (const juce::var& args)
     return okResult ("new_project", var (data));
 }
 
+// Shared open-by-path body for open_project / open_recent. The caller has already
+// validated the file exists; this performs the identical Edit-swap dance both ops
+// need (one mutation path). `commandName` tags the log/result so each op stays
+// distinguishable in the JSONL + the structured envelope.
+juce::var MoshOps::openProjectFile (const File& file, const juce::var& args, const char* commandName)
+{
+    unregisterAllMeterClients();           // old measurers valid here; dead after the swap
+    eng.openProject (file);                // stops transport + frees ctx before swap, re-points retriever
+    lastSeenContext = nullptr;             // old ctx freed; force master-meter re-attach to the new ctx
+    logFile = eng.sessionDir().getChildFile ("mosh-log.jsonl");
+    logLine (commandName, args, true, {}, false);  // replaces the Edit — not undoable
+    emitSnapshotInvalidated();
+
+    auto* data = new DynamicObject();
+    data->setProperty ("editFile", eng.editFile().getFullPathName());
+    return okResult (commandName, var (data));
+}
+
 juce::var MoshOps::cmdOpenProject (const juce::var& args)
 {
     const auto path = args.getProperty ("file", var()).toString();
@@ -5573,16 +5592,30 @@ juce::var MoshOps::cmdOpenProject (const juce::var& args)
     File file (path);
     if (! file.existsAsFile()) return errResult ("open_project", "file not found: " + path);
 
-    unregisterAllMeterClients();           // old measurers valid here; dead after the swap
-    eng.openProject (file);                // stops transport + frees ctx before swap, re-points retriever
-    lastSeenContext = nullptr;             // old ctx freed; force master-meter re-attach to the new ctx
-    logFile = eng.sessionDir().getChildFile ("mosh-log.jsonl");
-    logLine ("open_project", args, true, {}, false);  // replaces the Edit — not undoable
-    emitSnapshotInvalidated();
+    return openProjectFile (file, args, "open_project");
+}
 
-    auto* data = new DynamicObject();
-    data->setProperty ("editFile", eng.editFile().getFullPathName());
-    return okResult ("open_project", var (data));
+// PRJ — Open Recent by position in the recent list (0 = most-recent). The backend
+// owns the resolution so the UI never round-trips a stale path: the index is mapped
+// against the SAME existing-file Recent list the snapshot exposes (eng.recentProjects),
+// which is already filtered to files that exist. Out-of-range indices and an
+// already-pruned entry degrade to a clean error result. Replaces the Edit — not undoable.
+juce::var MoshOps::cmdOpenRecent (const juce::var& args)
+{
+    if (! args.hasProperty ("index")) return errResult ("open_recent", "missing 'index'");
+    const int index = (int) args.getProperty ("index", var (0));
+    if (index < 0) return errResult ("open_recent", "index out of range: " + String (index));
+
+    const auto recents = eng.recentProjects();   // newest-first, existing files only
+    if (! recents.isArray() || index >= recents.size())
+        return errResult ("open_recent", "no recent project at index " + String (index));
+
+    const auto path = recents[index].getProperty ("path", var()).toString();
+    File file (path);
+    if (path.isEmpty() || ! file.existsAsFile())
+        return errResult ("open_recent", "recent project no longer on disk: " + path);
+
+    return openProjectFile (file, args, "open_recent");
 }
 
 juce::var MoshOps::cmdSaveAs (const juce::var& args)

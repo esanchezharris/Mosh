@@ -33,7 +33,7 @@ export function FileOptions({ snapshot }: { snapshot: Snapshot }) {
   const s = snapshot.session;
   const audioEnabled = s.audioEnabled ?? true;
   const recents = (s.recentProjects ?? []).slice(0, 8);
-  const run = (id: ActionId, opts?: { file?: string }) =>
+  const run = (id: ActionId, opts?: { file?: string; index?: number }) =>
     void runAction(id, { store: useStore.getState(), pickFiles, pickSaveFile }, opts);
 
   useEffect(() => {
@@ -74,10 +74,10 @@ export function FileOptions({ snapshot }: { snapshot: Snapshot }) {
                 {recents.length > 0 && (
                   <div className="menu-sub" data-testid="fo-recent">
                     <div className="menu-sub-head">Open Recent</div>
-                    {recents.map((p) => (
+                    {recents.map((p, i) => (
                       <button key={p.path} className="menu-item sub" role="menuitem" title={p.path}
                         disabled={p.path === s.editFile}
-                        onClick={() => { run("open_project", { file: p.path }); close(); }}>
+                        onClick={() => { run("open_recent", { index: i }); close(); }}>
                         <span className="menu-label">{p.path === s.editFile ? "● " : ""}{p.name}</span>
                       </button>
                     ))}

@@ -2380,6 +2380,59 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         probe.deleteFile();
     }
 
+    // ─── Project safety: open_recent by index (AL-007) ───
+    // The Recent list (snapshot.session.recentProjects) needs a first-class "open the
+    // Nth recent project" command so the UI / agent reopen by position without
+    // round-tripping a path that may have been pruned. open_recent resolves the index
+    // against the SAME existing-file Recent list the snapshot exposes; out-of-range and
+    // already-deleted entries degrade to clean error results. It is NOT undoable (it
+    // replaces the whole Edit, like open_project).
+    section ("Project safety: open_recent by index (AL-007)");
+    {
+        const auto sessionEdit = eng.editFile();
+
+        // Seed two distinct projects so the Recent list has a stable newest-first order:
+        // open A then B → recent[0]=B (current, newest), recent[1]=A.
+        check (ok (cmd (ops, "new_project", args1 ("name", "recent-A"))), "new_project recent-A ok");
+        const auto editA = eng.editFile();
+        check (ok (cmd (ops, "new_project", args1 ("name", "recent-B"))), "new_project recent-B ok");
+        const auto editB = eng.editFile();
+
+        auto recents = ops.snapshot().getProperty ("session", var()).getProperty ("recentProjects", var());
+        check (recents.isArray() && recents.size() >= 2, "recentProjects has >= 2 entries for the index test");
+        check (recents[0].getProperty ("path", var()).toString() == editB.getFullPathName(), "recent[0] is the newest project (B)");
+
+        // (a) open_recent index 1 reopens the OLDER project (A) — proves index→path resolution.
+        check (ok (cmd (ops, "open_recent", args1 ("index", 1))), "open_recent index 1 ok");
+        check (eng.editFile() == editA, "open_recent index 1 opened the older project (A)");
+        check (eng.startupEditFile() == editA, "open_recent updates the remembered last project");
+
+        // (b) index 0 reopens the most-recent. After (a), opening A bumped it to recent[0],
+        //     so index 0 now re-resolves to A (the live list, not a stale snapshot).
+        check (ok (cmd (ops, "open_recent", args1 ("index", 0))), "open_recent index 0 ok");
+        check (eng.editFile() == editA, "open_recent index 0 opened the most-recent project");
+
+        // (c) validation: missing / negative / out-of-range index → clean error, no swap.
+        const auto before = eng.editFile();
+        check (! ok (cmd (ops, "open_recent", var (new DynamicObject()))), "open_recent without an index errors");
+        check (! ok (cmd (ops, "open_recent", args1 ("index", -1))), "open_recent with a negative index errors");
+        check (! ok (cmd (ops, "open_recent", args1 ("index", 999))), "open_recent with an out-of-range index errors");
+        check (eng.editFile() == before, "a rejected open_recent leaves the current Edit untouched");
+
+        // (d) a pruned (no-longer-on-disk) recent entry is skipped by recentProjects, so an
+        //     index that pointed at it now resolves past it or errors — never opens a ghost.
+        editB.deleteFile();
+        auto pruned = ops.snapshot().getProperty ("session", var()).getProperty ("recentProjects", var());
+        bool ghostListed = false;
+        for (int i = 0; i < pruned.size(); ++i)
+            if (pruned[i].getProperty ("path", var()).toString() == editB.getFullPathName())
+                ghostListed = true;
+        check (! ghostListed, "a deleted project is dropped from recentProjects (no ghost index)");
+
+        // teardown: restore the harness session edit for later sections.
+        check (ok (cmd (ops, "open_project", args1 ("file", sessionEdit.getFullPathName()))), "restored the session edit (AL-007 teardown)");
+    }
+
     // ─── Project safety: portable projects + relink (gap 3) ───
     // Projects shared one absolute-path audio pool (~/Library/Mosh/session), so a saved/
     // copied .tracktionedit pointed back at the pool and broke when moved. The fix sets a

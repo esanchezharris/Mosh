@@ -633,7 +633,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     });
     case "set_buffer_size": { if (snapshot.session) snapshot.session.bufferSize = num(args.bufferSize, 512); invalidate(); return ok(command); }
     case "set_audio_threads": { if (snapshot.session) { snapshot.session.audioThreads = num(args.threads, 8); snapshot.session.audioThreadsAuto = false; } invalidate(); return ok(command); }
-    case "set_audio_device": case "set_project_settings": case "open_project": case "save_as": return ok(command);
+    case "set_audio_device": case "set_project_settings": case "open_project": case "open_recent": case "save_as": return ok(command);
     // New project = a fresh empty edit (createEmptyEdit on the native side). Resets to a
     // blank session and clears undo history — you can't undo across a New, same as a DAW.
     case "new_project": {

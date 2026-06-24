@@ -227,6 +227,10 @@ private:
     juce::var cmdStopAudition     (const juce::var& args);
     juce::var cmdNewProject       (const juce::var& args);   // replaces the Edit (undoable:false)
     juce::var cmdOpenProject      (const juce::var& args);   // replaces the Edit (undoable:false)
+    juce::var cmdOpenRecent       (const juce::var& args);   // open by recent-list index (undoable:false)
+    // Shared Edit-swap body for open_project / open_recent (one mutation path). Caller
+    // pre-validates the file exists; commandName tags the log + result envelope.
+    juce::var openProjectFile     (const juce::File& file, const juce::var& args, const char* commandName);
     juce::var cmdSaveAs           (const juce::var& args);   // persists + re-points (undoable:false)
     // PRJ-008 — per-project format / time-base intent (undoable:false preference,
     // stored on a MOSH_PROJECT child of the Edit tree; saves/reloads with the edit).
