@@ -372,7 +372,11 @@ def check_render_artifact_portability(ctx):
     except subprocess.TimeoutExpired:
         return row("Render-artifact portability (AL-009)", False, {"error": "render/save_as HUNG (timed out)"})
     fails = failed_commands(results)
-    clip_id = _data_field(results, "add_test_tone_clip", "clipId")
+    # add_test_tone_clip dispatches to import_clip internally, so the result envelope's
+    # `command` is "import_clip" (with data.clipId) — match by the clipId field, not the
+    # command name, so the extraction can't break on that internal dispatch.
+    clip_id = next((r["data"]["clipId"] for r in results
+                    if r.get("ok") and isinstance(r.get("data"), dict) and r["data"].get("clipId")), None)
     renders_dir = dest_dir / "audio" / "renders"
     consolidated = renders_dir.is_dir() and any(renders_dir.glob("*.wav"))
     xml = dest_edit.read_text() if dest_edit.exists() else ""
