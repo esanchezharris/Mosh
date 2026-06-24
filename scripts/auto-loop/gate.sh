@@ -64,7 +64,7 @@ run_step() {
 SELFTEST_NS="[]"; SELFTEST_FMAX=0; SELFTEST_AMAX=0
 run_selftest_x3() {
   local bin="$1" i rc n f a det=true
-  local ns="" deterministic=true baseline_ok=true
+  local ns="" deterministic=true baseline_ok=true rc_nonzero=""
   local first_n=""
   for i in 1 2 3; do
     local sess="${SESS_BASE}-r$i" log; log="$(mktemp)"
@@ -79,7 +79,11 @@ run_selftest_x3() {
     read n f < <(parse_selftest_tally "$log")
     a="$(count_juce_asserts "$log")"
     ns="$ns $n"
-    [ "$rc" -ne 0 ] && det=false
+    # Strict, fail-closed: a run is bad on any of a non-zero exit, a failing check (f>0), a
+    # JUCE assertion (a>0), or a missing summary (n=-1, i.e. it crashed before printing).
+    # rc is also recorded for diagnostics. (The native-gate false-reject was NOT rc — it
+    # was count_juce_asserts doubling "0" on zero matches; fixed in lib.sh.)
+    [ "$rc" -ne 0 ] && { rc_nonzero="$rc_nonzero r$i:rc=$rc"; det=false; }
     [ "$f" != "0" ] && det=false
     [ "$a" != "0" ] && det=false
     [ "$n" = "-1" ] && det=false
@@ -101,8 +105,8 @@ run_selftest_x3() {
   emit_step "selftest_x3" "$ok" "$(jq -nc \
       --argjson ns "$SELFTEST_NS" --argjson fmax "$SELFTEST_FMAX" --argjson amax "$SELFTEST_AMAX" \
       --argjson deterministic "$deterministic" --argjson baseline_ok "$baseline_ok" \
-      --arg baseline "${MOSH_SELFTEST_BASELINE:-unset}" \
-      '{checks:$ns, failed_max:$fmax, asserts_max:$amax, deterministic:$deterministic, baseline:$baseline, baseline_ok:$baseline_ok}')"
+      --arg baseline "${MOSH_SELFTEST_BASELINE:-unset}" --arg rcnz "$rc_nonzero" \
+      '{checks:$ns, failed_max:$fmax, asserts_max:$amax, deterministic:$deterministic, baseline:$baseline, baseline_ok:$baseline_ok, nonzero_exit:($rcnz|if .=="" then "none" else .|ltrimstr(" ") end)}')"
   [ "$ok" = true ]
 }
 
