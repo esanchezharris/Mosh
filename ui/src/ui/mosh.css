@@ -1069,6 +1069,31 @@ button.tbadge:hover { border-color: var(--lime); color: var(--lime); }
 .training-pop .training-blocker-list li { margin: 0; padding: 0; }
 .training-list { max-height: 160px; }
 
+/* AL-003 — per-job progress + error states in the LoRA popover Jobs list */
+.training-job { display: flex; flex-direction: column; gap: 4px; padding: 4px 0; }
+.training-job .plugin-row { gap: 6px; }
+.training-progress {
+  height: 5px;
+  border-radius: 3px;
+  background: var(--lime-faint);
+  border: 1px solid var(--ink-line);
+  overflow: hidden;
+}
+.training-progress-fill {
+  height: 100%;
+  background: var(--lime);
+  box-shadow: 0 0 5px var(--lime-dim);
+  transition: width 0.18s ease;
+}
+.training-job-error {
+  color: var(--danger);
+  background: var(--danger-deep);
+  border: 1px solid var(--danger-line);
+  border-radius: 4px;
+  padding: 4px 6px;
+  word-break: break-word;
+}
+
 @media (max-width: 520px) {
   .training-pop .pop-note { word-break: break-word; }
   .training-pop .pop-actions { align-items: stretch; }
