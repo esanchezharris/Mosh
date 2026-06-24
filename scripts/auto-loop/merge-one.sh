@@ -132,9 +132,11 @@ cmd_finalize() {
   # Cleanup — PR is CONFIRMED merged, so force-remove regardless of squash ancestry
   # (rm-worktree.sh's is-ancestor guard would refuse, since a squash commit isn't an
   # ancestor of the branch tip).
-  git -C "$MAIN" worktree remove --force "$wt" 2>/dev/null || al_warn "worktree remove failed: auto-$slug"
-  git -C "$MAIN" branch -D "$br" 2>/dev/null || true
-  git -C "$MAIN" push origin --delete "$br" 2>/dev/null || true
+  # Silence STDOUT too: `git branch -D` prints "Deleted branch …" to stdout, which would
+  # pollute this function's JSON result (the Workflow's finalize agent parses it).
+  git -C "$MAIN" worktree remove --force "$wt" >/dev/null 2>&1 || al_warn "worktree remove failed: auto-$slug"
+  git -C "$MAIN" branch -D "$br" >/dev/null 2>&1 || true
+  git -C "$MAIN" push origin --delete "$br" >/dev/null 2>&1 || true
 
   jq -nc --arg m "$merge_sha" '{merged:true,phase:"finalize",merge_sha:$m}'
 }
