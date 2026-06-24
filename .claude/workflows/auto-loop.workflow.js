@@ -102,8 +102,9 @@ PROTOCOL (use the named superpowers skills): ${skills}, then verification-before
 Report JSON ONLY: {id:"${item.id}", slug:"${slug}", class:"${item.class}", ready:true|false, prNumber:<n|null>, summary:"<1-2 lines>", reason:"<if not ready, why>"}.`
 }
 
-const preparePrompt = (it) => `${RUN} ${ROOT}/merge-one.sh prepare ${slugOf(it.id)} ${it.prNumber} origin/main
-Run EXACTLY that command. It rebases the branch onto origin/main, checks the hard-exclusion list, and runs
+const preparePrompt = (it) => `${RUN} MOSH_SELFTEST_BASELINE=${baseline} ${ROOT}/merge-one.sh prepare ${slugOf(it.id)} ${it.prNumber} origin/main
+Run EXACTLY that command (keep the MOSH_SELFTEST_BASELINE prefix — it enforces the native selftest
+check-count floor). It rebases the branch onto origin/main, checks the hard-exclusion list, and runs
 the authoritative gate (native: build + ctest + selftest ×3 deterministic + verify.py; cheap: typecheck +
 vitest + e2e). Return its JSON verbatim as: {ready, class, excluded, baseSha, headSha, reason, gateSummary, conflict}.
 Set gateSummary to a one-line digest of the gate result. Do not edit any files.`

@@ -68,9 +68,14 @@ run_selftest_x3() {
   local first_n=""
   for i in 1 2 3; do
     local sess="${SESS_BASE}-r$i" log; log="$(mktemp)"
-    kill_stray_services "$PORT"
-    MOSH_SELFTEST_SESSION="$sess" MOSH_SERVICE_PORT="$PORT" "$bin" --selftest >"$log" 2>&1
+    # A FRESH service port per run: reusing one port across the 3 runs raced on service
+    # teardown and intermittently produced a non-zero exit even with 0 failed checks
+    # (a false gate-red). unique_port skips any still-alive prior service.
+    local sport; sport="$(unique_port)"
+    kill_stray_services "$sport"
+    MOSH_SELFTEST_SESSION="$sess" MOSH_SERVICE_PORT="$sport" "$bin" --selftest >"$log" 2>&1
     rc=$?
+    kill_stray_services "$sport"; sleep 1   # let this run's service die before the next
     read n f < <(parse_selftest_tally "$log")
     a="$(count_juce_asserts "$log")"
     ns="$ns $n"

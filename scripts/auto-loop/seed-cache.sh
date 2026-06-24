@@ -31,17 +31,21 @@ fi
 al_log "seeding dep cache in MAIN worktree: $MAIN (first run downloads JUCE+tracktion — long)…"
 ( cd "$MAIN" && cmake --preset macos-arm64-release -DCPM_SOURCE_CACHE="$CACHE" )
 
-# Find the fetched tracktion source dir (FetchContent convention: _deps/<name>-src).
+# Find the fetched tracktion source dir. With CPM_SOURCE_CACHE set, FetchContent's base
+# is redirected INTO the cache, so the source lands at <cache>/_fc/<name>-src — NOT the
+# default build-dir _deps/ location. Check both (cache first), then fall back to a search.
 TRK=""
 for c in \
+  "$CACHE/_fc/tracktion_engine-src" \
+  "$CACHE/_fc/tracktion-src" \
   "$MAIN/build-macos-arm64-release/_deps/tracktion_engine-src" \
   "$MAIN/build-macos-arm64-release/_deps/tracktion-src"; do
   [ -d "$c" ] && { TRK="$c"; break; }
 done
 if [ -z "$TRK" ]; then
-  TRK="$(find "$MAIN/build-macos-arm64-release/_deps" -maxdepth 1 -type d -iname '*tracktion*-src' 2>/dev/null | head -1 || true)"
+  TRK="$( { find "$CACHE/_fc" "$MAIN/build-macos-arm64-release/_deps" -maxdepth 1 -type d -iname '*tracktion*-src' 2>/dev/null; } | head -1 || true)"
 fi
-[ -n "$TRK" ] && [ -d "$TRK" ] || al_die "could not locate the fetched tracktion source under _deps/"
+[ -n "$TRK" ] && [ -d "$TRK" ] || al_die "could not locate the fetched tracktion source (looked in $CACHE/_fc and _deps/)"
 
 cat > "$AL_ENV" <<EOF
 # Written by scripts/auto-loop/seed-cache.sh on $(al_now). Machine-local; shared by
