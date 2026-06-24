@@ -184,9 +184,9 @@ function ProjectSettings({ snapshot }: { snapshot: Snapshot }) {
         <>
           <div className="pop-label">Recent</div>
           <div className="modal-list" data-testid="recent-projects" style={{ maxHeight: 160 }}>
-            {s.recentProjects!.slice(0, 8).map((p) => (
+            {s.recentProjects!.slice(0, 8).map((p, i) => (
               <button key={p.path} className="plugin-row" title={p.path} disabled={p.path === s.editFile}
-                      onClick={() => void exec("open_project", { file: p.path }).then(() => refresh())}>
+                      onClick={() => void exec("open_recent", { index: i }).then(() => refresh())}>
                 <span className="pr-name">{p.path === s.editFile ? "● " : ""}{p.name}</span>
               </button>
             ))}

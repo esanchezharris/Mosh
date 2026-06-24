@@ -66,7 +66,7 @@ export function TopbarTools({ snapshot }: { snapshot: Snapshot }) {
 function FileMenu({ snapshot }: { snapshot: Snapshot }) {
   const s = snapshot.session;
   const recents = (s.recentProjects ?? []).slice(0, 8);
-  const run = (id: ActionId, opts?: { file?: string }) =>
+  const run = (id: ActionId, opts?: { file?: string; index?: number }) =>
     void runAction(id, { store: useStore.getState(), pickFiles, pickSaveFile }, opts);
   return (
     <Pop label="File" title="File menu" className="menu-pop">
@@ -84,10 +84,10 @@ function FileMenu({ snapshot }: { snapshot: Snapshot }) {
                   <div className="menu-sub-head">Open Recent</div>
                   {recents.length === 0
                     ? <div className="rack-empty">no recent projects</div>
-                    : recents.map((p) => (
+                    : recents.map((p, i) => (
                         <button key={p.path} className="menu-item sub" role="menuitem" title={p.path}
                                 disabled={p.path === s.editFile}
-                                onClick={() => { run("open_project", { file: p.path }); close(); }}>
+                                onClick={() => { run("open_recent", { index: i }); close(); }}>
                           <span className="menu-label">{p.path === s.editFile ? "● " : ""}{p.name}</span>
                         </button>
                       ))}

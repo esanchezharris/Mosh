@@ -67,6 +67,20 @@ describe("runAction — File", () => {
     expect(execCalls.some((c) => c.command === "open_project")).toBe(false);
   });
 
+  it("open_recent opens by recent-list index (no picker), then refreshes", async () => {
+    const { ctx, store, execCalls } = makeCtx();
+    await runAction("open_recent", ctx, { index: 2 });
+    expect(ctx.pickFiles).not.toHaveBeenCalled();
+    expect(execCalls).toContainEqual({ command: "open_recent", args: { index: 2 } });
+    expect(store.refresh).toHaveBeenCalled();
+  });
+
+  it("open_recent defaults to the most-recent project (index 0) when none is given", async () => {
+    const { ctx, execCalls } = makeCtx();
+    await runAction("open_recent", ctx);
+    expect(execCalls).toContainEqual({ command: "open_recent", args: { index: 0 } });
+  });
+
   it("save_as pops the save picker, then exec('save_as', {file})", async () => {
     const { ctx, execCalls } = makeCtx();
     await runAction("save_as", ctx);

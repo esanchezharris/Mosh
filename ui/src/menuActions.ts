@@ -40,9 +40,10 @@ function formatForFile(path: string): "wav" | "aiff" | "flac" {
   return "wav";
 }
 
-/** Dispatch a logical action. `opts.file` lets Open Recent open a known path without
- *  popping the picker. Returns a promise so callers can await structural changes. */
-export async function runAction(id: ActionId, ctx: ActionCtx, opts: { file?: string } = {}): Promise<void> {
+/** Dispatch a logical action. `opts.file` lets `open_project` open a known path without
+ *  popping the picker; `opts.index` selects which entry `open_recent` reopens (0 = newest).
+ *  Returns a promise so callers can await structural changes. */
+export async function runAction(id: ActionId, ctx: ActionCtx, opts: { file?: string; index?: number } = {}): Promise<void> {
   const { store } = ctx;
   switch (id) {
     case "new_project":
@@ -58,6 +59,17 @@ export async function runAction(id: ActionId, ctx: ActionCtx, opts: { file?: str
         file = r.files[0];
       }
       await store.exec("open_project", { file });
+      await store.refresh();
+      return;
+    }
+
+    // Open Recent — reopen a project by its position in session.recentProjects
+    // (0 = most-recent). The backend resolves the index to a path itself, so the
+    // UI never has to round-trip a stale path; out-of-range degrades to an error
+    // result the seam reports. Replaces the Edit, so refresh() resyncs the snapshot.
+    case "open_recent": {
+      const index = opts.index ?? 0;
+      await store.exec("open_recent", { index });
       await store.refresh();
       return;
     }
