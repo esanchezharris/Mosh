@@ -23,11 +23,13 @@ git -C "$MAIN" fetch --quiet origin || al_warn "git fetch origin failed (offline
 if [ -d "$WT" ]; then
   al_log "worktree exists, reusing: $WT"
 else
-  # Fresh branch off BASE_REF. If the branch already exists, reuse it.
+  # Fresh branch off BASE_REF. If the branch already exists, reuse it. Redirect git's
+  # output to stderr — `git worktree add -b` off a REMOTE ref prints "branch '…' set up to
+  # track …" to STDOUT, which would pollute the worktree path this script echoes.
   if git -C "$MAIN" show-ref --verify --quiet "refs/heads/$BR"; then
-    git -C "$MAIN" worktree add "$WT" "$BR"
+    git -C "$MAIN" worktree add "$WT" "$BR" 1>&2
   else
-    git -C "$MAIN" worktree add -b "$BR" "$WT" "$BASE_REF"
+    git -C "$MAIN" worktree add -b "$BR" "$WT" "$BASE_REF" 1>&2
   fi
 fi
 
