@@ -17,8 +17,18 @@ few-second clip — safe to run inline in the job service without touching torch
 """
 from __future__ import annotations
 
-import numpy as np
-import soundfile as sf
+# numpy + soundfile are needed ONLY by analyze_wav() (the signal-hygiene path). judge_reasoning()
+# is pure-python (no deps), and the stdlib-only FakeAdapter calls ONLY judge_reasoning — so guard
+# these imports: server.py imports fake_adapter (→ quality_readout) unconditionally at boot, and the
+# FakeAdapter must stay reachable with ZERO install (a prime-directive graceful-degradation fallback).
+# analyze_wav raises a clear error if called without them (only the real-judge path, which always has
+# the SA3 venv, ever calls it).
+try:
+    import numpy as np
+    import soundfile as sf
+except ImportError:  # pragma: no cover - exercised only in the minimal FakeAdapter environment
+    np = None
+    sf = None
 
 EPS = 1e-12
 
@@ -88,6 +98,8 @@ def judge_reasoning(axes=None, flags=None) -> str:
 
 def analyze_wav(path: str) -> dict:
     """Return {pq: float[0,10], metrics: {...}, flags: [str, ...]} for a WAV file."""
+    if np is None or sf is None:
+        raise RuntimeError("quality_readout.analyze_wav needs numpy + soundfile (install the SA3 venv)")
     x, sr = sf.read(path, always_2d=True, dtype="float64")  # [n, ch]
     return analyze_array(x, sr)
 
