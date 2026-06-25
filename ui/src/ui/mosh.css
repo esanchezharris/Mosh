@@ -663,7 +663,9 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 .gen-badge.st-rendering, .gen-badge.st-queued { color: var(--on-accent); background: var(--warn); border-color: var(--warn); }
 .gen-badge.st-error { color: #fff; background: var(--rec); }
 .gen-seed { font-size: 10px; color: var(--bone-dim); }
-.gen-qa { font-size: 11px; color: var(--lime); display: flex; gap: 8px; align-items: center; }
+.gen-qa { font-size: 11px; color: var(--lime); display: flex; flex-direction: column; gap: 3px; }
+.gen-qa-line { display: flex; gap: 8px; align-items: center; }
+.gen-qa-reasoning { font-size: 10px; color: var(--bone-dim); font-style: italic; line-height: 1.3; }
 .qa-flag { font-size: 9px; color: var(--bone-dim); border: 1px solid var(--ink-line); border-radius: 4px; padding: 0 4px; }
 .qa-flag.warn { color: var(--warn); border-color: var(--warn); }
 .gen-actions { display: flex; flex-wrap: wrap; gap: 5px; }

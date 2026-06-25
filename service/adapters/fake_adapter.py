@@ -11,7 +11,13 @@ from __future__ import annotations
 import math
 import os
 import struct
+import sys
 import wave
+
+# Share the judge-reasoning helper with the real Audiobox path (service/quality_readout.py)
+# so the stub's manifest surfaces the same "reasoning" field the drawer renders (AL-006).
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # service/
+import quality_readout  # noqa: E402
 
 
 def _transform_samples(samples, n_channels, seed, nl, drive):
@@ -83,12 +89,19 @@ def render(input_wav: str, output_wav: str, params: dict) -> dict:
 
     # A QA readout (judge-panel stand-in, 05 §7): the stub reports a plausible
     # production-quality score vs the source so the UI can show degradation.
+    pq = round(0.82 - drive * 0.1, 3)
+    flags = ["heavy_drive"] if drive > 0.7 else []
+    # AL-006: synthesize the judge's reasoning the same way the real path does, so the
+    # default (FakeAdapter) green path also surfaces it. The stub's pq is a 0–1 score, so
+    # scale to the judge's 0–10 axis for the shared reasoning helper.
+    reasoning = quality_readout.judge_reasoning(axes={"PQ": pq * 10.0}, flags=flags)
     return {
         "ok": True,
         "adapter": "fake",
-        "pq": round(0.82 - drive * 0.1, 3),
+        "pq": pq,
         "pq_base": 0.85,
-        "flags": (["heavy_drive"] if drive > 0.7 else []),
+        "flags": flags,
+        "reasoning": reasoning,
         "duration_s": round(n_frames / float(framerate), 3),
         "sample_rate": framerate,
         "channels": n_channels,

@@ -83,6 +83,10 @@ def main():
         check("adapter manifest ok", man.get("ok") is True, str(man.get("adapter")))
         check("manifest carries pq readout", isinstance(man.get("pq"), (int, float)), f"pq={man.get('pq')}")
         check("heavy_drive flag at grit=90", "heavy_drive" in man.get("flags", []), str(man.get("flags")))
+        # AL-006: the judge reasoning surfaces in the manifest (a non-empty sentence)
+        # so the generative drawer can explain the score, not just print pq.
+        check("manifest carries judge reasoning", isinstance(man.get("reasoning"), str) and len(man.get("reasoning", "")) > 0,
+              f"reasoning={man.get('reasoning')!r}")
         check("output wav written", os.path.exists(out_a) and os.path.getsize(out_a) > 44)
 
         fake_adapter.render(src, out_b, params)

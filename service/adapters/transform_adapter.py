@@ -20,7 +20,13 @@ import math
 import os
 import struct
 import subprocess
+import sys
 import wave
+
+# Shared judge-reasoning helper (service/quality_readout.py) so the transform manifest
+# carries the same human-readable `reasoning` field the drawer renders (AL-006).
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # service/
+import quality_readout  # noqa: E402
 
 
 def _cli_path() -> str:
@@ -134,6 +140,7 @@ def _render_fake(input_wav: str, output_wav: str, params: dict) -> dict:
     # QA readout (judge-panel stand-in): the stub reports a plausible production-quality
     # score that dips with heavier strength so the UI can show degradation.
     pq = round(0.83 - strength * 0.12, 3)
+    flags = ["heavy_transform"] if strength > 0.85 else []
     return {
         "ok": True,
         "adapter": "transform",
@@ -143,7 +150,8 @@ def _render_fake(input_wav: str, output_wav: str, params: dict) -> dict:
         "strength": round(strength, 3),
         "pq": pq,
         "pq_base": 0.85,
-        "flags": (["heavy_transform"] if strength > 0.85 else []),
+        "flags": flags,
+        "reasoning": quality_readout.judge_reasoning(axes={"PQ": pq * 10.0}, flags=flags),
         "duration_s": round(n_frames / float(framerate), 3) if framerate else 0.0,
         "sample_rate": framerate,
         "channels": n_channels,
@@ -179,11 +187,14 @@ def _render_real(input_wav: str, output_wav: str, params: dict) -> dict:
     except Exception:  # noqa: BLE001
         pass
     s = max(0.0, min(1.0, strength / 100.0))
+    pq = round(0.82 - s * 0.1, 3)
+    flags = ["heavy_transform"] if s > 0.85 else []
     return {
         "ok": True, "adapter": "transform", "backend": "rave", "mode": "transform",
         "target": res.get("model", target), "strength": round(s, 3),
-        "pq": round(0.82 - s * 0.1, 3), "pq_base": 0.85,
-        "flags": (["heavy_transform"] if s > 0.85 else []),
+        "pq": pq, "pq_base": 0.85,
+        "flags": flags,
+        "reasoning": quality_readout.judge_reasoning(axes={"PQ": pq * 10.0}, flags=flags),
         "duration_s": dur, "sample_rate": sr, "channels": ch,
     }
 
