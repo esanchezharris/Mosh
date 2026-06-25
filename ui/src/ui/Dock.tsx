@@ -5,8 +5,9 @@
 import { useEffect } from "react";
 import { useStore } from "../store";
 import { useSettings } from "../settings/store";
-import type { Snapshot, Plugin, Track, Clip, RenderColor } from "../types";
+import type { Snapshot, Plugin, Track, Clip, RenderColor, RenderQA } from "../types";
 import { Moshi } from "./Moshi";
+import { qaReadoutView } from "./qaReadout";
 
 export function Dock({ snapshot }: { snapshot: Snapshot }) {
   const selectedTrackId = useStore((s) => s.selectedTrackId);
@@ -160,7 +161,8 @@ export function GenDrawer({ track }: { track: Track }) {
   );
 }
 
-function GenBody({ clip, qa }: { clip: Clip; qa?: { pq?: number | null; pq_base?: number | null; flags?: string[] } }) {
+function GenBody({ clip, qa }: { clip: Clip; qa?: RenderQA }) {
+  const qaView = qaReadoutView(qa);
   const exec = useStore((s) => s.exec);
   const colorsAvail = useStore((s) => s.availableColors);
   const labMode = useStore((s) => s.labMode);
@@ -207,10 +209,15 @@ function GenBody({ clip, qa }: { clip: Clip; qa?: { pq?: number | null; pq_base?
           <span style={{ width: `${Math.round((progress ?? 0) * 100)}%` }} />
         </div>
       )}
-      {qa && qa.pq != null && (
+      {qaView && (
         <div className="gen-qa tc" title="judge-panel production quality">
-          pq {qa.pq}{qa.pq_base != null ? ` / ${qa.pq_base}` : ""}
-          {qa.flags?.map((f) => <span key={f} className={`qa-flag${f === "quality_degraded" ? " warn" : ""}`}>{f}</span>)}
+          <div className="gen-qa-line">
+            {qaView.pqText}
+            {qaView.flags.map((f) => <span key={f.label} className={`qa-flag${f.warn ? " warn" : ""}`}>{f.label}</span>)}
+          </div>
+          {qaView.reasoning && (
+            <div className="gen-qa-reasoning" data-testid="qa-reasoning">{qaView.reasoning}</div>
+          )}
         </div>
       )}
       <div className="gen-actions">

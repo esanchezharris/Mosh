@@ -35,7 +35,16 @@ export type AvailableColor = {
 export type AvailableTransformTarget = { name: string };
 
 // Quality readout from a completed render's manifest (judge panel, 05 §7).
-export type RenderQA = { pq?: number | null; pq_base?: number | null; flags?: string[]; adapter?: string };
+// `reasoning` is the Audiobox judge's one-line explanation of the score; `axes` are its
+// raw aesthetic axes (PQ/CE/CU/PC on a 0–10 scale). Both are best-effort (AL-006).
+export type RenderQA = {
+  pq?: number | null;
+  pq_base?: number | null;
+  flags?: string[];
+  adapter?: string;
+  reasoning?: string | null;
+  axes?: Record<string, number> | null;
+};
 
 // One entry in a wave clip's native take tree (Tracktion). Present on the clip
 // only when it has takes (recording over a region stacks takes); the UI renders

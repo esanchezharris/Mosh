@@ -11,7 +11,11 @@ it): the sidecar prints `@@MOSH@@{...}` lines to stdout; everything else (incl. 
 model's own prints) is redirected to stderr.
   • on load:    @@MOSH@@{"ready": true}
   • request  →  {"paths": ["/a.wav", "/b.wav"]}   (one JSON object per line, on stdin)
-  • response ←  @@MOSH@@{"/a.wav": 5.7, "/b.wav": 5.66}
+  • response ←  @@MOSH@@{"/a.wav": {"PQ": 5.7, "CE": 6.1, "CU": 5.9, "PC": 4.2}, ...}
+
+The per-path value carries ALL of Audiobox's aesthetic axes (production quality PQ,
+content enjoyment CE, content usefulness CU, production complexity PC) so the caller can
+both keep the bare `pq` number AND build a human-readable judge reasoning (AL-006).
 """
 import json
 import sys
@@ -40,7 +44,12 @@ def main():
             req = json.loads(line)
             paths = req.get("paths", [])
             out = pred.forward([{"path": p} for p in paths])
-            _emit({p: float(o["PQ"]) for p, o in zip(paths, out)}, real_out)
+            # Carry every aesthetic axis the model reports (PQ/CE/CU/PC), coerced to float.
+            payload = {}
+            for p, o in zip(paths, out):
+                payload[p] = {k: float(v) for k, v in o.items()
+                              if k in ("PQ", "CE", "CU", "PC") and v is not None}
+            _emit(payload, real_out)
         except Exception as e:  # noqa: BLE001
             _emit({"error": str(e)}, real_out)
 

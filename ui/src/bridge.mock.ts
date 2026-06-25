@@ -751,7 +751,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     case "render_layer": {
       const f = findClip(str(args.clipId)); if (!f?.clip.renderLayer) return err(command, "no render layer");
       f.clip.renderLayer.status = "ready"; f.clip.renderLayer.hasArtifact = true;
-      emit("layer_status", { clipId: f.clip.id, qa: { pq: 5.1, pq_base: 5.66, flags: ["quality_degraded"], adapter: f.clip.renderLayer.adapter } });
+      emit("layer_status", { clipId: f.clip.id, qa: { pq: 5.1, pq_base: 5.66, flags: ["quality_degraded"], adapter: f.clip.renderLayer.adapter, reasoning: "Fair production quality (5.1/10); fair enjoyment; flagged: quality_degraded." } });
       invalidate(); return ok(command);
     }
     case "accept_render": case "freeze_layer": case "bounce_layer_to_clip": {

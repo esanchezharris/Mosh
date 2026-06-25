@@ -17,8 +17,18 @@ few-second clip — safe to run inline in the job service without touching torch
 """
 from __future__ import annotations
 
-import numpy as np
-import soundfile as sf
+# numpy + soundfile are needed ONLY by analyze_wav() (the signal-hygiene path). judge_reasoning()
+# is pure-python (no deps), and the stdlib-only FakeAdapter calls ONLY judge_reasoning — so guard
+# these imports: server.py imports fake_adapter (→ quality_readout) unconditionally at boot, and the
+# FakeAdapter must stay reachable with ZERO install (a prime-directive graceful-degradation fallback).
+# analyze_wav raises a clear error if called without them (only the real-judge path, which always has
+# the SA3 venv, ever calls it).
+try:
+    import numpy as np
+    import soundfile as sf
+except ImportError:  # pragma: no cover - exercised only in the minimal FakeAdapter environment
+    np = None
+    sf = None
 
 EPS = 1e-12
 
@@ -31,8 +41,65 @@ def _clamp(v: float, lo: float = 0.0, hi: float = 1.0) -> float:
     return max(lo, min(hi, v))
 
 
+# Audiobox-Aesthetics axes (10-point scale): production quality, content enjoyment,
+# content usefulness, production complexity. The judge sidecar reports these; this maps
+# each to a short clause so the drawer can show *why* the score is what it is (AL-006).
+_AXIS_LABEL = {
+    "PQ": "production quality",
+    "CE": "enjoyment",
+    "CU": "usefulness",
+    "PC": "complexity",
+}
+
+
+def _grade(v: float) -> str:
+    """One-word verdict for a 0–10 aesthetic score."""
+    if v >= 7.5:
+        return "strong"
+    if v >= 6.0:
+        return "good"
+    if v >= 4.0:
+        return "fair"
+    return "weak"
+
+
+def judge_reasoning(axes=None, flags=None) -> str:
+    """Synthesize the judge's one-line reasoning from its aesthetic axes + flags.
+
+    Pure + dependency-free so it is shared by the real Audiobox path (sa3/qa.py) and the
+    fake adapter, and unit-tested directly. `axes` is the Audiobox dict (PQ/CE/CU/PC on a
+    0–10 scale); any subset is fine and `None` is tolerated. `flags` are the human-readable
+    hygiene warnings (e.g. "clipping: …"); their leading token is appended so the listener
+    sees the concrete reason a score is low. Always returns a usable sentence."""
+    axes = axes or {}
+    flags = flags or []
+    parts = []
+
+    pq = axes.get("PQ")
+    if pq is not None:
+        parts.append(f"{_grade(float(pq)).capitalize()} production quality ({float(pq):.1f}/10)")
+        # Add the most salient secondary axis (the lowest-scoring of CE/CU/PC) as colour.
+        secondary = [(k, float(axes[k])) for k in ("CE", "CU", "PC") if axes.get(k) is not None]
+        if secondary:
+            worst_k, worst_v = min(secondary, key=lambda kv: kv[1])
+            parts.append(f"{_grade(worst_v)} {_AXIS_LABEL.get(worst_k, worst_k.lower())}")
+
+    if flags:
+        # Surface the flag *names* (the token before the colon) — e.g. "clipping", "muddy".
+        names = [str(f).split(":", 1)[0].strip() for f in flags if str(f).strip()]
+        names = [n for n in names if n]
+        if names:
+            parts.append("flagged: " + ", ".join(names))
+
+    if not parts:
+        return "No judge readout available."
+    return "; ".join(parts) + "."
+
+
 def analyze_wav(path: str) -> dict:
     """Return {pq: float[0,10], metrics: {...}, flags: [str, ...]} for a WAV file."""
+    if np is None or sf is None:
+        raise RuntimeError("quality_readout.analyze_wav needs numpy + soundfile (install the SA3 venv)")
     x, sr = sf.read(path, always_2d=True, dtype="float64")  # [n, ch]
     return analyze_array(x, sr)
 

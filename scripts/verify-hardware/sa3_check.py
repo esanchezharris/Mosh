@@ -58,20 +58,21 @@ def check_sa3_transform(ctx, ART, run_script, stats, diff_rms, failed_commands):
     so = stats(sa3_out)
     transformed = diff_rms(str(sa3_in), sa3_out) if sa3_in.exists() else None
 
-    pq = adapter = None
+    pq = adapter = reasoning = None
     manifest = job_dir / "output_manifest.json"
     if manifest.exists():
         try:
             m = json.loads(manifest.read_text())
             pq = m.get("pq", m.get("quality", {}).get("pq") if isinstance(m.get("quality"), dict) else None)
             adapter = m.get("adapter")
+            reasoning = m.get("reasoning")   # AL-006: judge's human-readable readout
         except json.JSONDecodeError:
             pass
 
     final = stats(out) if out.exists() else None
     ok = (so["rms"] > 0.001) and (transformed is None or transformed > 0.001) and (final and final["rms"] > 0.001)
     detail.update({
-        "adapter": adapter, "pq": pq,
+        "adapter": adapter, "pq": pq, "reasoning": reasoning,
         "sa3_output": so, "diff_from_input_rms": transformed,
         "final_export": str(out), "final_export_stats": final,
     })

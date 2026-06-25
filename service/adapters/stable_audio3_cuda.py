@@ -57,12 +57,17 @@ def _quality(wav_out, sr, src_2d, in_sr):
     try:
         import quality_readout as judge
         q = judge.analyze_array(wav_out, sr)
+        flags = q.get("flags", [])
         out = {
             "pq": q.get("pq"),
             "pq_base": None,
-            "flags": q.get("flags", []),
+            "flags": flags,
             "metrics": q.get("metrics", {}),
             "judge": "dsp",
+            # AL-006: human-readable readout. The DSP path is a 0–10 pq + flags (no Audiobox
+            # axes), so feed those into the shared reasoning helper.
+            "reasoning": judge.judge_reasoning(
+                axes={"PQ": q["pq"]} if q.get("pq") is not None else None, flags=flags),
         }
         if src_2d is not None:
             try:

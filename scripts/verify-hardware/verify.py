@@ -210,20 +210,26 @@ def check_transform(ctx):
     xin = job_dir / "input.wav"
     so = stats(xout)
     transformed = diff_rms(str(xin), xout) if xin.exists() else None
-    mode = adapter = None
+    mode = adapter = reasoning = None
     manifest = job_dir / "output_manifest.json"
     if manifest.exists():
         try:
             m = json.loads(manifest.read_text())
             mode, adapter = m.get("mode"), m.get("adapter")
+            reasoning = m.get("reasoning")   # AL-006: judge's human-readable readout
         except json.JSONDecodeError:
             pass
     final = stats(out) if out.exists() else None
+    # AL-006: the judge-panel reasoning must ride the manifest so the drawer can explain
+    # the score (not just print pq). Asserted on the offline fake path that the native
+    # gate always exercises.
+    has_reasoning = isinstance(reasoning, str) and len(reasoning) > 0
     ok = (so["rms"] > 0.001 and (transformed is None or transformed > 0.001)
-          and mode == "transform" and (final and final["rms"] > 0.001))
+          and mode == "transform" and has_reasoning and (final and final["rms"] > 0.001))
     return row("Transform render (fake)", ok,
                {"wav": str(xout), **so, "diff_from_input_rms": transformed,
-                "mode": mode, "adapter": adapter, "final_export": str(out)})
+                "mode": mode, "adapter": adapter, "reasoning": reasoning,
+                "final_export": str(out)})
 
 
 def check_full_loop(ctx):

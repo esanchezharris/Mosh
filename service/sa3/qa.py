@@ -17,8 +17,14 @@ import json
 import os
 import queue
 import subprocess
+import sys
 import threading
 import time
+
+# `quality_readout` lives in service/ (one level up). Ensure it's importable regardless
+# of how the adapter set up sys.path so the judge reasoning helper is always available.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # service/
+import quality_readout  # noqa: E402
 
 JUDGES_PY = os.environ.get(
     "MOSH_JUDGES_PY", os.path.expanduser("~/AI/judges_venv/bin/python"))
@@ -153,6 +159,18 @@ def _shutdown() -> None:
     _reset()
 
 
+def _pq_of(entry):
+    """Extract the bare PQ score from a sidecar entry. The sidecar returns a per-path
+    axes dict ({"PQ":…, "CE":…}); tolerate a legacy bare float too."""
+    if isinstance(entry, dict):
+        v = entry.get("PQ")
+        return float(v) if v is not None else None
+    try:
+        return float(entry)
+    except (TypeError, ValueError):
+        return None
+
+
 def augment_manifest(manifest: dict, output_wav: str, source_wav=None) -> None:
     if os.environ.get("MOSH_SA3_QA", "1") != "1":          # QA opt-out (fast renders)
         manifest.setdefault("flags", []).append("qa_disabled")
@@ -161,9 +179,20 @@ def augment_manifest(manifest: dict, output_wav: str, source_wav=None) -> None:
     if not scores:
         manifest.setdefault("flags", []).append("qa_unavailable")
         return
-    if output_wav in scores:
-        manifest["pq"] = round(scores[output_wav], 3)
+    out_pq = _pq_of(scores.get(output_wav))
+    if out_pq is not None:
+        manifest["pq"] = round(out_pq, 3)
     if source_wav and source_wav in scores:
-        manifest["pq_base"] = round(scores[source_wav], 3)
-        if manifest.get("pq") is not None and manifest["pq_base"] - manifest["pq"] > 0.5:
-            manifest.setdefault("flags", []).append("quality_degraded")
+        base_pq = _pq_of(scores.get(source_wav))
+        if base_pq is not None:
+            manifest["pq_base"] = round(base_pq, 3)
+            if manifest.get("pq") is not None and manifest["pq_base"] - manifest["pq"] > 0.5:
+                manifest.setdefault("flags", []).append("quality_degraded")
+
+    # AL-006: surface the judge's human-readable reasoning (+ the full axes) so the
+    # generative drawer can explain the score, not just print it.
+    out_axes = scores.get(output_wav)
+    if isinstance(out_axes, dict) and out_axes:
+        manifest["axes"] = {k: round(float(v), 3) for k, v in out_axes.items()}
+        manifest["reasoning"] = quality_readout.judge_reasoning(
+            axes=out_axes, flags=manifest.get("flags"))
