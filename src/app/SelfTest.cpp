@@ -169,6 +169,16 @@ namespace
     juce::var firstTrack (MoshOps& ops) { return ops.snapshot()["tracks"][0]; }
     int trackClips (const juce::var& t) { return t.getProperty ("clips", juce::var()).size(); }
 
+    juce::var trackSnapshotByLogicalId (MoshOps& ops, const juce::String& logicalId)
+    {
+        auto snapshot = ops.snapshot();
+        if (auto* arr = snapshot.getProperty ("tracks", juce::var()).getArray())
+            for (auto& track : *arr)
+                if (track.getProperty ("logicalId", juce::var()).toString() == logicalId)
+                    return track;
+        return {};
+    }
+
     class GoldenCanonicalizer
     {
     public:
@@ -347,6 +357,61 @@ int runGoldenSelfTest (MoshEngine& eng, MoshOps& ops)
     check (actual.isNotEmpty(), "canonical XML produced");
     if (actual.isNotEmpty())
         checkGoldenXml (eng.sessionDir(), "moshop_create_track.xml", actual);
+
+    section ("Layer 3: peer apply committed track ValueTree golden");
+    MoshEngine receiverEng (false, true, "session-golden-selftest-receiver");
+    MoshOps receiverOps (receiverEng);
+
+    const auto senderCreate = cmd (ops, "create_track", args1 ("name", "Peer Sender"));
+    check (ok (senderCreate), "sender create_track ok");
+    const auto senderTrackId = senderCreate.getProperty ("data", var()).getProperty ("trackId", var()).toString();
+    check (senderTrackId.isNotEmpty(), "sender trackId resolved");
+
+    const auto senderTone = cmd (ops, "add_test_tone_clip",
+                                 objN ({ { "trackId", senderTrackId },
+                                         { "seconds", 1.0 },
+                                         { "freq", 220.0 } }));
+    check (ok (senderTone), "sender add_test_tone_clip ok");
+
+    const auto senderCommit = cmd (ops, "mp_serialize_track", args1 ("trackId", senderTrackId));
+    check (ok (senderCommit), "sender mp_serialize_track ok");
+    const auto senderBlob = senderCommit.getProperty ("data", var()).getProperty ("blob", var()).toString();
+    check (senderBlob.isNotEmpty(), "sender commit blob produced");
+
+    const auto apply = cmd (receiverOps, "apply_remote_track", args1 ("blob", senderBlob));
+    check (ok (apply), "receiver apply_remote_track ok");
+    check (apply.getProperty ("data", var()).getProperty ("mode", var()).toString() == "created",
+           "receiver created the incoming peer track");
+    const auto peerLogicalId = apply.getProperty ("data", var()).getProperty ("logicalId", var()).toString();
+    check (peerLogicalId.isNotEmpty(), "receiver apply returned logicalId");
+
+    auto receiverTrack = trackSnapshotByLogicalId (receiverOps, peerLogicalId);
+    check (receiverTrack.isObject(), "receiver track found by logicalId");
+    bool hasResolvedWave = false;
+    bool hasCleanPendingWave = false;
+    if (auto* clips = receiverTrack.getProperty ("clips", var()).getArray())
+        for (auto& clip : *clips)
+            if (clip.getProperty ("type", var()).toString() == "wave")
+            {
+                const auto sourceFile = clip.getProperty ("sourceFile", var()).toString();
+                const bool missing = (bool) clip.getProperty ("sourceMissing", false);
+                hasResolvedWave = hasResolvedWave || (sourceFile.isNotEmpty() && juce::File (sourceFile).existsAsFile());
+                hasCleanPendingWave = hasCleanPendingWave || missing;
+            }
+    check (hasResolvedWave || hasCleanPendingWave, "receiver wave source resolves locally or is cleanly pending");
+
+    const auto receiverTrackId = receiverTrack.getProperty ("id", var()).toString();
+    check (receiverTrackId.isNotEmpty(), "receiver engine trackId resolved");
+    const auto receiverSerialized = cmd (receiverOps, "mp_serialize_track", args1 ("trackId", receiverTrackId));
+    check (ok (receiverSerialized), "receiver mp_serialize_track ok");
+    const auto receiverBlob = receiverSerialized.getProperty ("data", var()).getProperty ("blob", var()).toString();
+    check (receiverBlob.isNotEmpty(), "receiver serialized XML produced");
+
+    GoldenCanonicalizer peerCanonicalizer;
+    const auto peerActual = peerCanonicalizer.canonicalizeXml (receiverBlob);
+    check (peerActual.isNotEmpty(), "receiver canonical XML produced");
+    if (peerActual.isNotEmpty())
+        checkGoldenXml (eng.sessionDir(), "peer_apply_committed_track.xml", peerActual);
 
     finishSection();
     std::cerr << "===== golden selftest complete: " << checks << " checks, "
