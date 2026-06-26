@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <map>
 #include <thread>
 #include <vector>
 
@@ -167,6 +168,122 @@ namespace
 
     juce::var firstTrack (MoshOps& ops) { return ops.snapshot()["tracks"][0]; }
     int trackClips (const juce::var& t) { return t.getProperty ("clips", juce::var()).size(); }
+
+    class GoldenCanonicalizer
+    {
+    public:
+        juce::String canonicalizeXml (const juce::String& raw)
+        {
+            auto xml = juce::parseXML (raw);
+            if (xml == nullptr)
+                return {};
+
+            canonicalizeElement (*xml);
+            auto text = xml->toString();
+            text = text.replace ("\r\n", "\n");
+            return text.trimEnd() + "\n";
+        }
+
+    private:
+        juce::String canonicalId (const juce::String& value)
+        {
+            const auto key = value.trim();
+            if (key.isEmpty())
+                return key;
+
+            auto it = ids.find (key);
+            if (it != ids.end())
+                return it->second;
+
+            const auto token = "ID_" + juce::String (++nextId).paddedLeft ('0', 3);
+            ids.emplace (key, token);
+            return token;
+        }
+
+        juce::String canonicalPath (const juce::String& value)
+        {
+            const auto key = value.trim();
+            if (key.isEmpty())
+                return key;
+
+            auto it = paths.find (key);
+            if (it != paths.end())
+                return it->second;
+
+            const auto token = "PATH_" + juce::String (++nextPath).paddedLeft ('0', 3);
+            paths.emplace (key, token);
+            return token;
+        }
+
+        void canonicalizeElement (juce::XmlElement& xml)
+        {
+            for (int i = 0; i < xml.getNumAttributes(); ++i)
+            {
+                const auto attr = xml.getAttributeName (i);
+                const auto lower = attr.toLowerCase();
+                const auto value = xml.getStringAttribute (attr);
+
+                if (lower.contains ("id"))
+                    xml.setAttribute (attr, canonicalId (value));
+                else if (lower.contains ("path")
+                         || lower.contains ("file")
+                         || lower == "source"
+                         || lower.endsWith ("source"))
+                    xml.setAttribute (attr, canonicalPath (value));
+            }
+
+            for (auto* child = xml.getFirstChildElement(); child != nullptr; child = child->getNextElement())
+                canonicalizeElement (*child);
+        }
+
+        std::map<juce::String, juce::String> ids;
+        std::map<juce::String, juce::String> paths;
+        int nextId = 0;
+        int nextPath = 0;
+    };
+
+    juce::File goldenDir()
+    {
+        const auto env = juce::SystemStats::getEnvironmentVariable ("MOSH_GOLDEN_DIR", {}).trim();
+        if (env.isNotEmpty())
+        {
+            const juce::File asFile (env.startsWithChar (juce::File::getSeparatorChar())
+                                         ? env
+                                         : juce::File::getCurrentWorkingDirectory().getChildFile (env).getFullPathName());
+            return asFile;
+        }
+        return juce::File::getCurrentWorkingDirectory().getChildFile ("tests/golden");
+    }
+
+    void checkGoldenXml (const juce::File& sessionDir,
+                         const juce::String& fixtureName,
+                         const juce::String& actual)
+    {
+        const auto expectedFile = goldenDir().getChildFile (fixtureName);
+        const auto actualFile = sessionDir.getChildFile (fixtureName + ".actual.xml");
+        actualFile.getParentDirectory().createDirectory();
+
+        if (! expectedFile.existsAsFile())
+        {
+            actualFile.replaceWithText (actual);
+            check (false, "missing golden fixture " + expectedFile.getFullPathName()
+                        + " (wrote " + actualFile.getFullPathName() + ")");
+            return;
+        }
+
+        const auto expected = expectedFile.loadFileAsString().replace ("\r\n", "\n").trimEnd() + "\n";
+        if (expected != actual)
+        {
+            actualFile.replaceWithText (actual);
+            check (false, "golden mismatch for " + fixtureName
+                        + " (wrote " + actualFile.getFullPathName() + ")");
+            return;
+        }
+
+        if (actualFile.existsAsFile())
+            actualFile.deleteFile();
+        check (true, "golden fixture matched: " + fixtureName);
+    }
 }
 
 // Headless deep plugin scan (--scan-plugins-deep): a synchronous out-of-process
@@ -205,6 +322,36 @@ int runDeepPluginScan (MoshOps& ops)
 
     std::cerr << "===== deep scan complete =====\n";
     return 0;
+}
+
+int runGoldenSelfTest (MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+    failures = 0; checks = 0;
+    resetSections();
+    std::cerr << "===== Golden selftest: command ValueTree fixtures =====\n";
+
+    section ("Layer 1: create_track ValueTree golden");
+    const auto create = cmd (ops, "create_track", args1 ("name", "Golden Track"));
+    check (ok (create), "create_track ok");
+    const auto trackId = create.getProperty ("data", var()).getProperty ("trackId", var()).toString();
+    check (trackId.isNotEmpty(), "create_track returned trackId");
+
+    const auto serialized = cmd (ops, "mp_serialize_track", args1 ("trackId", trackId));
+    check (ok (serialized), "mp_serialize_track ok");
+    const auto blob = serialized.getProperty ("data", var()).getProperty ("blob", var()).toString();
+    check (blob.isNotEmpty(), "mp_serialize_track produced XML");
+
+    GoldenCanonicalizer canonicalizer;
+    const auto actual = canonicalizer.canonicalizeXml (blob);
+    check (actual.isNotEmpty(), "canonical XML produced");
+    if (actual.isNotEmpty())
+        checkGoldenXml (eng.sessionDir(), "moshop_create_track.xml", actual);
+
+    finishSection();
+    std::cerr << "===== golden selftest complete: " << checks << " checks, "
+              << failures << " failed =====\n";
+    return failures;
 }
 
 // The harness hosts a REAL external plugin to exercise VST3 hosting, but it must NEVER
