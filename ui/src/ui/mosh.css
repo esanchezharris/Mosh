@@ -372,6 +372,33 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 
 /* playhead — one element, mapped through the same sec→px as the grid */
 .playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--lime); z-index: 4; pointer-events: none; box-shadow: 0 0 6px var(--lime-dim); }
+.remote-playhead {
+  position: absolute;
+  top: 0;
+  width: 2px;
+  background: var(--peer-color);
+  z-index: 3;
+  pointer-events: none;
+  box-shadow: 0 0 7px color-mix(in srgb, var(--peer-color) 55%, transparent);
+}
+.remote-playhead.playing { opacity: .92; }
+.remote-playhead.recording { width: 3px; }
+.remote-playhead-label {
+  position: absolute;
+  top: 4px;
+  left: 5px;
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 1px solid color-mix(in srgb, var(--peer-color) 70%, var(--ink-line));
+  background: color-mix(in srgb, var(--coal) 88%, var(--peer-color));
+  color: var(--bone);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 10px;
+  line-height: 14px;
+}
 
 /* loop region (ruler tab + lane band) and the Range tool's UI-local band */
 .ruler .loop-tab { position: absolute; top: 0; bottom: 0; background: var(--lime-faint); border-left: 1px solid var(--lime); border-right: 1px solid var(--lime); }

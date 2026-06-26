@@ -12,7 +12,7 @@ describe("multiplayer presence (store + mock peer)", () => {
     __resetMockForTests();
     useStore.setState({
       mp: { active: false, roomCode: null, selfPeer: null, connected: false },
-      peers: {}, peerSelection: {}, locksByLogicalId: {}, activeTrackId: null,
+      peers: {}, peerSelection: {}, peerPresence: {}, locksByLogicalId: {}, activeTrackId: null,
     });
     useStore.getState().init();
   });
@@ -28,6 +28,9 @@ describe("multiplayer presence (store + mock peer)", () => {
     expect(Object.values(s.locksByLogicalId)).toContain("bo");
     expect(s.peerSelection.bo).toBeTruthy();
     expect(s.peerSelection.bo.trackId).toBeTruthy();
+    expect(s.peerPresence.bo).toBeTruthy();
+    expect(s.peerPresence.bo.position).toBe(5.25);
+    expect(s.peerPresence.bo.playing).toBe(true);
   });
 
   it("a peer-held track reads as locked-by-other (but not our own / free tracks)", async () => {
@@ -46,6 +49,7 @@ describe("multiplayer presence (store + mock peer)", () => {
     expect(s.mp.active).toBe(false);
     expect(Object.keys(s.peers)).toHaveLength(0);
     expect(Object.keys(s.locksByLogicalId)).toHaveLength(0);
+    expect(Object.keys(s.peerPresence)).toHaveLength(0);
     expect(s.activeTrackId).toBeNull();
   });
 

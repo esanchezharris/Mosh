@@ -95,6 +95,16 @@ void MultiplayerSession::broadcastSelection (const String& trackId, const String
     client_.publish (var (msg));
 }
 
+void MultiplayerSession::broadcastPresence (double position, bool playing, bool recording)
+{
+    auto* msg = new DynamicObject();
+    msg->setProperty ("type", "presence");
+    msg->setProperty ("position", position);
+    msg->setProperty ("playing", playing);
+    msg->setProperty ("recording", recording);
+    client_.publish (var (msg));
+}
+
 void MultiplayerSession::broadcastStructural (const String& command, const var& args)
 {
     auto* msg = new DynamicObject();
@@ -169,6 +179,19 @@ void MultiplayerSession::pollLoop()
                     p->setProperty ("trackId", msg.getProperty ("trackId", var()));
                     p->setProperty ("clipId", msg.getProperty ("clipId", var()));
                     emit_ ("peer_selection", var (p));
+                }
+                else if (type == "presence")
+                {
+                    const auto from = f.getProperty ("from", var()).toString();
+                    if (from != self)
+                    {
+                        auto* p = new DynamicObject();
+                        p->setProperty ("peerId", from);
+                        p->setProperty ("position", msg.getProperty ("position", 0.0));
+                        p->setProperty ("playing", msg.getProperty ("playing", false));
+                        p->setProperty ("recording", msg.getProperty ("recording", false));
+                        emit_ ("peer_presence", var (p));
+                    }
                 }
                 else if (type == "bootstrap_request")
                 {

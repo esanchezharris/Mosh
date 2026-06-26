@@ -428,6 +428,7 @@ private:
     juce::File  logFile;
     bool        wasPlaying = false;
     bool        inBatch    = false;   // true between batch_begin / batch_end (agent batch = one undo step)
+    double      lastPresenceBroadcastMs = 0.0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MoshOps)
 };
