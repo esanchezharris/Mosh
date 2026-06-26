@@ -41,7 +41,7 @@ function Bars({ read, className }: { read: ReadLevel; className?: string }) {
       if (isClip(v.l) || isClip(v.r)) clipUntil = t + 900;
       paint(lMask.current, lPct);
       paint(rMask.current, rPct);
-      wrap.current?.classList.toggle("clip", t < clipUntil);
+      wrap.current?.classList.toggle("meter-clip", t < clipUntil);
       raf = requestAnimationFrame(tick);
     };
 
