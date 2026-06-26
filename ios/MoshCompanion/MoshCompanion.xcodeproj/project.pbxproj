@@ -26,10 +26,18 @@
 		100000000000000000000011 /* MonitoringMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000014 /* MonitoringMetrics.swift */; };
 		100000000000000000000012 /* MonitoringDiagnosticRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000015 /* MonitoringDiagnosticRunner.swift */; };
 		100000000000000000000013 /* DiagnosticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000016 /* DiagnosticsView.swift */; };
+		100000000000000000000014 /* ControllerUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000017 /* ControllerUITests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
 		550000000000000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 600000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 500000000000000000000001;
+			remoteInfo = MoshCompanion;
+		};
+		550000000000000000000002 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 600000000000000000000001 /* Project object */;
 			proxyType = 1;
@@ -61,6 +69,8 @@
 		200000000000000000000014 /* MonitoringMetrics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonitoringMetrics.swift; sourceTree = "<group>"; };
 		200000000000000000000015 /* MonitoringDiagnosticRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonitoringDiagnosticRunner.swift; sourceTree = "<group>"; };
 		200000000000000000000016 /* DiagnosticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsView.swift; sourceTree = "<group>"; };
+		200000000000000000000017 /* ControllerUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ControllerUITests.swift; sourceTree = "<group>"; };
+		200000000000000000000018 /* MoshCompanionUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MoshCompanionUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -78,6 +88,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		300000000000000000000003 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -86,6 +103,7 @@
 			children = (
 				400000000000000000000002 /* MoshCompanion */,
 				400000000000000000000009 /* MoshCompanionTests */,
+				40000000000000000000000A /* MoshCompanionUITests */,
 				400000000000000000000008 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -161,6 +179,7 @@
 			children = (
 				200000000000000000000010 /* MoshCompanion.app */,
 				200000000000000000000012 /* MoshCompanionTests.xctest */,
+				200000000000000000000018 /* MoshCompanionUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -171,6 +190,14 @@
 				200000000000000000000011 /* CompanionClientTests.swift */,
 			);
 			path = MoshCompanionTests;
+			sourceTree = "<group>";
+		};
+		40000000000000000000000A /* MoshCompanionUITests */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000017 /* ControllerUITests.swift */,
+			);
+			path = MoshCompanionUITests;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -209,6 +236,23 @@
 			productReference = 200000000000000000000012 /* MoshCompanionTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
+		500000000000000000000003 /* MoshCompanionUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 900000000000000000000005 /* Build configuration list for PBXNativeTarget "MoshCompanionUITests" */;
+			buildPhases = (
+				700000000000000000000003 /* Sources */,
+				300000000000000000000003 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				560000000000000000000002 /* PBXTargetDependency */,
+			);
+			name = MoshCompanionUITests;
+			productName = MoshCompanionUITests;
+			productReference = 200000000000000000000018 /* MoshCompanionUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -223,6 +267,10 @@
 						CreatedOnToolsVersion = 26.5;
 					};
 					500000000000000000000002 = {
+						CreatedOnToolsVersion = 26.5;
+						TestTargetID = 500000000000000000000001;
+					};
+					500000000000000000000003 = {
 						CreatedOnToolsVersion = 26.5;
 						TestTargetID = 500000000000000000000001;
 					};
@@ -243,6 +291,7 @@
 			targets = (
 				500000000000000000000001 /* MoshCompanion */,
 				500000000000000000000002 /* MoshCompanionTests */,
+				500000000000000000000003 /* MoshCompanionUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -281,6 +330,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		700000000000000000000003 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				100000000000000000000014 /* ControllerUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -288,6 +345,11 @@
 			isa = PBXTargetDependency;
 			target = 500000000000000000000001 /* MoshCompanion */;
 			targetProxy = 550000000000000000000001 /* PBXContainerItemProxy */;
+		};
+		560000000000000000000002 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 500000000000000000000001 /* MoshCompanion */;
+			targetProxy = 550000000000000000000002 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -431,6 +493,50 @@
 			};
 			name = Release;
 		};
+		800000000000000000000007 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = studio.mosh.companion.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_TARGET_NAME = MoshCompanion;
+			};
+			name = Debug;
+		};
+		800000000000000000000008 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = studio.mosh.companion.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_TARGET_NAME = MoshCompanion;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -457,6 +563,15 @@
 			buildConfigurations = (
 				800000000000000000000005 /* Debug */,
 				800000000000000000000006 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		900000000000000000000005 /* Build configuration list for PBXNativeTarget "MoshCompanionUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				800000000000000000000007 /* Debug */,
+				800000000000000000000008 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

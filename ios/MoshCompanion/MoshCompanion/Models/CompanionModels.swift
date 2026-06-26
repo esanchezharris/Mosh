@@ -39,6 +39,7 @@ enum CompanionConnectionState: Equatable {
 struct MoshSnapshot: Decodable, Equatable {
     var tracks: [MoshTrack]
     var transport: MoshTransport
+    var controller: MoshControllerState?
 
     var renderTargets: [RenderTarget] {
         tracks.flatMap { track in
@@ -54,6 +55,102 @@ struct MoshSnapshot: Decodable, Equatable {
             }
         }
     }
+}
+
+enum ControllerEvent: String, CaseIterable, Equatable {
+    case transportToggle = "TRANSPORT_TOGGLE"
+    case transportScrub = "TRANSPORT_SCRUB"
+    case takeListen = "TAKE_LISTEN"
+    case takeKeep = "TAKE_KEEP"
+    case takeRedo = "TAKE_REDO"
+    case takeMark = "TAKE_MARK"
+}
+
+enum ControllerMode: String, Equatable {
+    case capture
+    case judgment
+}
+
+struct MoshControllerState: Decodable, Equatable {
+    var mode: String
+    var record: String
+    var take: MoshControllerTake?
+    var agent: String
+
+    var displayMode: ControllerMode {
+        mode == "capture" ? .capture : .judgment
+    }
+
+    static func derived(from snapshot: MoshSnapshot?) -> MoshControllerState {
+        let transport = snapshot?.transport
+        var latestTrack: MoshTrack?
+        var latestClip: MoshClip?
+        var latestEnd = -Double.greatestFiniteMagnitude
+
+        for track in snapshot?.tracks ?? [] {
+            for clip in track.clips where clip.type == "wave" {
+                let end = clip.start + clip.length
+                if latestClip == nil || end >= latestEnd {
+                    latestTrack = track
+                    latestClip = clip
+                    latestEnd = end
+                }
+            }
+        }
+
+        var take = MoshControllerTake.empty
+        if let latestTrack, let latestClip {
+            let numTakes = latestClip.numTakes ?? 0
+            take = MoshControllerTake(
+                exists: true,
+                clipId: latestClip.id,
+                trackId: latestTrack.id,
+                name: latestClip.name,
+                start: latestClip.start,
+                length: latestClip.length,
+                hasLanes: numTakes > 0,
+                canKeep: numTakes > 0,
+                kept: numTakes == 0,
+                numTakes: latestClip.numTakes,
+                currentTakeIndex: latestClip.currentTakeIndex
+            )
+        }
+
+        return MoshControllerState(
+            mode: transport?.recording == true ? "capture" : "judgment",
+            record: transport?.recording == true ? "recording" : "idle",
+            take: take,
+            agent: "idle"
+        )
+    }
+}
+
+struct MoshControllerTake: Decodable, Equatable {
+    var exists: Bool
+    var clipId: String?
+    var trackId: String?
+    var name: String?
+    var start: Double?
+    var length: Double?
+    var hasLanes: Bool?
+    var canKeep: Bool?
+    var kept: Bool?
+    var numTakes: Int?
+    var currentTakeIndex: Int?
+
+    static let empty = MoshControllerTake(
+        exists: false,
+        clipId: nil,
+        trackId: nil,
+        name: nil,
+        start: nil,
+        length: nil,
+        hasLanes: nil,
+        canKeep: nil,
+        kept: nil,
+        numTakes: nil,
+        currentTakeIndex: nil
+    )
 }
 
 struct MoshTrack: Decodable, Identifiable, Equatable {
@@ -78,6 +175,8 @@ struct MoshClip: Decodable, Identifiable, Equatable {
     let length: Double
     let hasRenderLayer: Bool
     let renderLayer: MoshRenderLayer?
+    let numTakes: Int?
+    let currentTakeIndex: Int?
 
     init(id: String,
          name: String,
@@ -85,7 +184,9 @@ struct MoshClip: Decodable, Identifiable, Equatable {
          start: Double,
          length: Double,
          hasRenderLayer: Bool,
-         renderLayer: MoshRenderLayer?) {
+         renderLayer: MoshRenderLayer?,
+         numTakes: Int? = nil,
+         currentTakeIndex: Int? = nil) {
         self.id = id
         self.name = name
         self.type = type
@@ -93,6 +194,8 @@ struct MoshClip: Decodable, Identifiable, Equatable {
         self.length = length
         self.hasRenderLayer = hasRenderLayer
         self.renderLayer = renderLayer
+        self.numTakes = numTakes
+        self.currentTakeIndex = currentTakeIndex
     }
 }
 
@@ -119,6 +222,22 @@ struct MoshTransport: Decodable, Equatable {
     let recording: Bool
     let position: Double
     let looping: Bool
+    let loopStart: Double?
+    let loopEnd: Double?
+
+    init(playing: Bool,
+         recording: Bool,
+         position: Double,
+         looping: Bool,
+         loopStart: Double? = nil,
+         loopEnd: Double? = nil) {
+        self.playing = playing
+        self.recording = recording
+        self.position = position
+        self.looping = looping
+        self.loopStart = loopStart
+        self.loopEnd = loopEnd
+    }
 }
 
 struct CommandResult: Decodable, Equatable {

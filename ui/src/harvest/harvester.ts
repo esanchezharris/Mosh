@@ -15,11 +15,14 @@ import { computeUndoneTurns, type UndoEvent } from "./outcome";
 import {
   TUPLE_SCHEMA_VERSION,
   isAgentCallable,
+  type ControllerEventRecord,
+  type ControllerLabel,
   type Tuple,
   type TupleCommand,
   type TasteEvent,
   type TurnSource,
 } from "./tupleSchema";
+import type { ControllerEventName } from "../types";
 
 export type LogLine = {
   ts: number;
@@ -33,6 +36,15 @@ export type LogLine = {
 
 const STRUCTURAL = new Set(["batch_begin", "batch_end"]);
 const TASTE = new Set(["accept_render", "reject_render"]);
+const CONTROLLER_EVENTS = new Set<ControllerEventName>([
+  "TRANSPORT_TOGGLE",
+  "TRANSPORT_SCRUB",
+  "TAKE_LISTEN",
+  "TAKE_KEEP",
+  "TAKE_REDO",
+  "TAKE_MARK",
+]);
+const CONTROLLER_LABELS = new Set<ControllerLabel>(["kept", "undone", "flagged"]);
 
 /** Parse a mosh-log.jsonl into typed records, tolerant of blank/garbage lines. */
 export function parseLog(text: string): LogLine[] {
@@ -80,6 +92,21 @@ type WorkingTurn = {
 
 function asSource(v: unknown): TurnSource {
   return v === "brain_chat" || v === "voice" || v === "fastpath" ? v : "unknown";
+}
+
+function asControllerEvent(v: unknown): ControllerEventName | null {
+  return typeof v === "string" && CONTROLLER_EVENTS.has(v as ControllerEventName) ? (v as ControllerEventName) : null;
+}
+
+function controllerLabelFor(event: ControllerEventName, args: Record<string, unknown>): ControllerLabel | undefined {
+  const explicit = args.controllerLabel;
+  if (typeof explicit === "string" && CONTROLLER_LABELS.has(explicit as ControllerLabel)) {
+    return explicit as ControllerLabel;
+  }
+  if (event === "TAKE_KEEP") return "kept";
+  if (event === "TAKE_REDO") return "undone";
+  if (event === "TAKE_MARK") return "flagged";
+  return undefined;
 }
 
 /** Read a mosh-log.jsonl (text) and emit one tuple per tagged agent turn. */
@@ -217,4 +244,51 @@ export async function harvest(
     },
     provenance: { logPath, harvestedAt },
   }));
+}
+
+export async function harvestControllerEvents(
+  text: string,
+  opts: { logPath?: string; harvestedAt?: string } = {},
+): Promise<ControllerEventRecord[]> {
+  const lines = parseLog(text);
+  const logPath = opts.logPath ?? "";
+  const harvestedAt = opts.harvestedAt ?? new Date().toISOString();
+
+  __resetMockForTests();
+
+  const records: ControllerEventRecord[] = [];
+  for (const ln of lines) {
+    const snapshotBefore = await mockSnapshot<Snapshot>();
+    const res = await mockExecute<CommandResult>({ command: ln.command, args: ln.args });
+    const snapshotAfter = await mockSnapshot<Snapshot>();
+
+    if (ln.args.source !== "phone_controller") continue;
+    const event = asControllerEvent(ln.args.controllerEvent);
+    if (!event) continue;
+
+    records.push({
+      schemaVersion: TUPLE_SCHEMA_VERSION,
+      kind: "controller_event",
+      event,
+      label: controllerLabelFor(event, ln.args),
+      ts: ln.ts,
+      seq: ln.seq,
+      command: {
+        command: ln.command,
+        args: ln.args,
+        ok: ln.ok,
+        error: ln.error,
+        agentCallable: isAgentCallable(ln.command),
+      },
+      snapshotBefore,
+      snapshotAfter,
+      provenance: { logPath, harvestedAt },
+    });
+
+    if (!res.ok && ln.ok) {
+      records[records.length - 1].command.error = res.error;
+    }
+  }
+
+  return records;
 }

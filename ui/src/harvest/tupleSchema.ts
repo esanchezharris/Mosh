@@ -9,7 +9,7 @@
 // The shape is intentionally flat JSON so it round-trips through JSONL and feeds
 // the Python SFT/GEPA/GRPO drivers downstream without a parser.
 
-import type { Snapshot } from "../types";
+import type { ControllerEventName, Snapshot } from "../types";
 import { AGENT_COMMAND_MAP } from "../agent/commands";
 
 export const TUPLE_SCHEMA_VERSION = 1 as const;
@@ -64,6 +64,21 @@ export type Tuple = {
   snapshotAfter: Snapshot;
   commands: TupleCommand[];
   outcome: TupleOutcome;
+  provenance: { logPath: string; harvestedAt: string };
+};
+
+export type ControllerLabel = "kept" | "undone" | "flagged";
+
+export type ControllerEventRecord = {
+  schemaVersion: typeof TUPLE_SCHEMA_VERSION;
+  kind: "controller_event";
+  event: ControllerEventName;
+  label?: ControllerLabel;
+  ts: number;
+  seq: number;
+  command: TupleCommand;
+  snapshotBefore: Snapshot;
+  snapshotAfter: Snapshot;
   provenance: { logPath: string; harvestedAt: string };
 };
 

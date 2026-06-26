@@ -35,6 +35,8 @@ final class CompanionStore: ObservableObject {
     var transport: MoshTransport? { snapshot?.transport }
     var tracks: [MoshTrack] { snapshot?.tracks ?? [] }
     var renderTargets: [RenderTarget] { snapshot?.renderTargets ?? [] }
+    var controller: MoshControllerState { snapshot?.controller ?? MoshControllerState.derived(from: snapshot) }
+    var controllerMode: ControllerMode { controller.displayMode }
 
     func start() {
         browser.start()
@@ -97,6 +99,19 @@ final class CompanionStore: ObservableObject {
             } catch {
                 errorText = error.localizedDescription
             }
+        }
+    }
+
+    func runControllerEvent(_ event: ControllerEvent, scrubPosition: Double? = nil) async {
+        guard ensureOnlineForCommand() else { return }
+        guard let command = controllerCommand(for: event, scrubPosition: scrubPosition) else { return }
+
+        do {
+            let result = try await client.execute(command.name, args: command.args)
+            receipts.insert(result.ok ? receipt(for: event) : (result.error ?? "\(event.rawValue) failed"), at: 0)
+            await refresh()
+        } catch {
+            errorText = error.localizedDescription
         }
     }
 
@@ -218,6 +233,66 @@ final class CompanionStore: ObservableObject {
     private func markOffline(_ message: String) {
         errorText = message
         connectionState = .offline(message: message, lastOnline: lastOnlineAt)
+    }
+
+    private func controllerCommand(for event: ControllerEvent, scrubPosition: Double?) -> (name: String, args: [String: Any])? {
+        var args: [String: Any] = [
+            "source": "phone_controller",
+            "controllerEvent": event.rawValue,
+            "issuedAtPhoneMs": Date().timeIntervalSince1970 * 1000.0
+        ]
+
+        if let clipId = controller.take?.clipId {
+            args["clipId"] = clipId
+        }
+
+        switch event {
+        case .transportToggle:
+            args["action"] = "toggle"
+            return ("set_transport", args)
+        case .transportScrub:
+            args["position"] = scrubPosition ?? transport?.position ?? 0
+            return ("set_transport", args)
+        case .takeListen:
+            guard controller.take?.exists == true else {
+                receipts.insert("LISTEN needs a recorded take.", at: 0)
+                return nil
+            }
+            args["action"] = "play"
+            args["position"] = controller.take?.start ?? transport?.position ?? 0
+            return ("set_transport", args)
+        case .takeKeep:
+            guard controller.take?.exists == true, controller.take?.clipId != nil, controller.take?.canKeep == true else {
+                receipts.insert("KEEP needs an active take lane.", at: 0)
+                return nil
+            }
+            args["controllerLabel"] = "kept"
+            return ("keep_take", args)
+        case .takeRedo:
+            args["controllerLabel"] = "undone"
+            return ("undo", args)
+        case .takeMark:
+            args["controllerLabel"] = "flagged"
+            args["position"] = transport?.position ?? 0
+            return ("mark_take", args)
+        }
+    }
+
+    private func receipt(for event: ControllerEvent) -> String {
+        switch event {
+        case .transportToggle:
+            return transport?.playing == true ? "Transport stopped" : "Transport started"
+        case .transportScrub:
+            return "Scrubbed"
+        case .takeListen:
+            return "Listening"
+        case .takeKeep:
+            return "Kept take"
+        case .takeRedo:
+            return "Redo take"
+        case .takeMark:
+            return "Marked take"
+        }
     }
 
     private func ensureOnlineForCommand() -> Bool {

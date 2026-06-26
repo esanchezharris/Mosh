@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { harvest, parseLog } from "./harvester";
+import { harvest, harvestControllerEvents, parseLog } from "./harvester";
 
 // Build a synthetic mosh-log.jsonl exercising: turn grouping, an interleaved
 // manual command, an undo that reverts a turn, a render+taste flow, and a legacy
@@ -136,5 +136,30 @@ describe("harvest", () => {
     const tuples = await harvest(log);
     expect(tuples.map((t) => t.turnId)).toEqual(["t2"]); // t1 dropped, not merged into t2
     expect(tuples[0].commands).toHaveLength(1); // only B's command — no leakage from t1
+  });
+
+  it("emits additive phone-controller event records with labels and snapshots", async () => {
+    let seq = 0;
+    let ts = 4000;
+    const line = (command: string, args: Record<string, unknown>, ok = true, undoable = false) =>
+      JSON.stringify({ ts: ts++, seq: ++seq, command, args, ok, undoable });
+    const log =
+      [
+        line("set_transport", { source: "phone_controller", controllerEvent: "TRANSPORT_TOGGLE", issuedAtPhoneMs: 1, action: "toggle" }),
+        line("keep_take", { source: "phone_controller", controllerEvent: "TAKE_KEEP", controllerLabel: "kept", clipId: "C1" }, true, true),
+        line("undo", { source: "phone_controller", controllerEvent: "TAKE_REDO", controllerLabel: "undone" }),
+        line("mark_take", { source: "phone_controller", controllerEvent: "TAKE_MARK", controllerLabel: "flagged", position: 2.5 }),
+        line("set_transport", { source: "keyboard", controllerEvent: "TRANSPORT_TOGGLE", action: "toggle" }),
+      ].join("\n") + "\n";
+
+    const records = await harvestControllerEvents(log, { logPath: "/tmp/mosh-log.jsonl", harvestedAt: "now" });
+
+    expect(records.map((r) => r.event)).toEqual(["TRANSPORT_TOGGLE", "TAKE_KEEP", "TAKE_REDO", "TAKE_MARK"]);
+    expect(records.map((r) => r.label)).toEqual([undefined, "kept", "undone", "flagged"]);
+    expect(records[0].kind).toBe("controller_event");
+    expect(records[0].schemaVersion).toBe(1);
+    expect(records[0].snapshotBefore.transport.playing).toBe(false);
+    expect(records[0].snapshotAfter.transport.playing).toBe(true);
+    expect(records[0].provenance.logPath).toBe("/tmp/mosh-log.jsonl");
   });
 });
