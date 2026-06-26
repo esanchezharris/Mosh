@@ -19,7 +19,7 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { pickFiles, nativeMenuPresent } from "../bridge";
+import { pickFiles } from "../bridge";
 import { useStore, type Peaks } from "../store";
 import { tempoMapFrom, gridLines, meterAt, beatSeconds, snapStep } from "../time";
 import { DRUM_LANES, laneIndexForPitch } from "./drumGrid";
@@ -40,18 +40,12 @@ import type { Snapshot, Track, Clip, MidiNote } from "../types";
 import { EditorAction as EA, type Mods } from "../interaction/actions";
 import { resolveGesture } from "../interaction/gestures";
 import { classifyClipRegion } from "../interaction/region";
-import { resolveKey, isEditableTarget } from "../interaction/keymap";
 import { passedDragThreshold, isDoubleClick, magneticSnap } from "../interaction/feel";
-import { liveFeel, liveKeymap, liveGestureTable } from "../interaction/config";
+import { liveFeel, liveGestureTable } from "../interaction/config";
 
 // Modifier state from a pointer/keyboard event, in the resolver's shape.
 const modsOf = (e: { shiftKey?: boolean; altKey?: boolean; metaKey?: boolean; ctrlKey?: boolean }): Mods =>
   ({ shift: !!e.shiftKey, alt: !!e.altKey, meta: !!e.metaKey, ctrl: !!e.ctrlKey });
-
-// Actions the native macOS menu owns (File + Edit accelerators). In the packaged app
-// these fire via the NSMenu (forwarded back through the mosh_menu bridge → runAction),
-// so the in-app keymap handler yields them to avoid a double-fire. Dev has no menu.
-const NATIVE_MENU_ACTIONS = new Set<string>([EA.UNDO, EA.REDO, EA.CUT, EA.COPY, EA.PASTE, EA.DELETE, EA.SAVE]);
 
 // Height of a clip's header strip (the label bar) — the y-band that classifies as
 // clip.header. Only matters where a preset distinguishes header vs body (Ableton).
@@ -243,75 +237,6 @@ export function Arrange({ snapshot }: { snapshot: Snapshot }) {
     const r = useStore.getState().timeRange;
     if (r && r.end - r.start < 1e-6) setTimeRange(null);
   };
-
-  // ── keyboard: the SINGLE global key handler, keymap-driven. resolveKey looks up an
-  // action from the active keymap (preset + rebinds, read live); each action maps to
-  // its effect. Replaces the old inline branches + the once-separate useKeyboardShortcuts
-  // (now only the native-menu bridge).
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (isEditableTarget(e.target)) return; // never hijack typing
-      const action = resolveKey(liveKeymap(), e);
-      if (!action) return;
-      // In the packaged app the native NSMenu owns the File/Edit accelerators and
-      // fires each once (forwarded back via the mosh_menu bridge → runAction). Yield
-      // those chords here so they don't ALSO fire in-app (double undo/delete). In
-      // Vite dev (no native menu) we own everything.
-      if (nativeMenuPresent() && NATIVE_MENU_ACTIONS.has(action)) return;
-      const s = useStore.getState();
-      const prevent = () => e.preventDefault();
-      const eachSelected = (fn: (id: string) => void) => { for (const id of s.selection) fn(id); };
-      switch (action) {
-        case EA.UNDO: prevent(); void s.exec("undo"); break;
-        case EA.REDO: prevent(); void s.exec("redo"); break;
-        case EA.PLAY_PAUSE: prevent(); void s.exec("set_transport", { action: "toggle" }); break;
-        case EA.RECORD: prevent(); void s.exec("set_transport", { action: "record" }); break;
-        case EA.SAVE: prevent(); void s.exec("save"); break;
-        case EA.DELETE:
-          // While a clip-editor modal is open (piano roll / automation), Delete belongs
-          // to that editor (delete selected notes/points), not the arrangement — bail
-          // so we never silently remove the clip being edited (Phase 1 fix).
-          if (s.editingClipId || s.automationTrackId) break;
-          if (s.selection.size === 0) break;
-          prevent();
-          eachSelected((id) => void s.exec("remove_clip", { clipId: id }));
-          s.clearSelection();
-          break;
-        // only swallow copy/cut/paste when there's something to act on, so an empty
-        // selection lets the browser copy/paste normal page text
-        case EA.COPY: if (s.selection.size) { prevent(); s.copySelection(); } break;
-        case EA.CUT: if (s.selection.size) { prevent(); void s.cutSelection(); } break;
-        case EA.PASTE: if (s.clipboard) { prevent(); void s.pasteClipboard(); } break;
-        case EA.DUPLICATE: prevent(); eachSelected((id) => void s.exec("duplicate_clip", { clipId: id })); break;
-        case EA.GROUP: {
-          prevent();
-          const sel = new Set(s.selection);
-          const trackIds = s.snapshot?.tracks.filter((t) => !t.isGroup && t.clips.some((c) => sel.has(c.id))).map((t) => t.id) ?? [];
-          if (trackIds.length) void s.exec("create_group_track", { trackIds });
-          break;
-        }
-        case EA.TO_START: prevent(); void s.exec("set_transport", { action: "to_start" }); break;
-        case EA.TO_END: prevent(); void s.exec("set_transport", { action: "to_end" }); break;
-        case EA.TOOL_MOVE: s.setTool("move"); break;
-        case EA.TOOL_SPLIT: s.setTool("split"); break;
-        case EA.TOOL_RANGE: s.setTool("range"); break;
-        case EA.SPLIT: {
-          // split-at-playhead (Ableton/FL keymaps): split each selected clip the
-          // playhead currently passes through.
-          prevent();
-          const pos = s.transport.position;
-          for (const t of s.snapshot?.tracks ?? [])
-            for (const c of t.clips)
-              if (s.selection.has(c.id) && c.start < pos && pos < c.start + c.length)
-                void s.exec("split_clip", { clipId: c.id, time: pos });
-          break;
-        }
-        default: break;
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
 
   // ── wheel: Mod+wheel zooms (zoomSensitivity), Shift+wheel scrolls horizontally
   // (scrollSensitivity). Attached natively (non-passive) so preventDefault works; reads

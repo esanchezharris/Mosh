@@ -12,10 +12,14 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+REQUESTED_MOSH_ENABLE_SA3="${MOSH_ENABLE_SA3:-}"
+export PYTHONDONTWRITEBYTECODE="${PYTHONDONTWRITEBYTECODE:-1}"
+
 # Persisted setup from setup-sa3.sh (resolved paths + MOSH_ENABLE_SA3). Optional —
 # absent means the defaults below apply and SA3 stays off unless the venv happens to
 # exist. Sourced first so its exports seed the ${:-default} fallbacks.
 [[ -f .sa3.env ]] && source ./.sa3.env
+[[ -n "$REQUESTED_MOSH_ENABLE_SA3" ]] && export MOSH_ENABLE_SA3="$REQUESTED_MOSH_ENABLE_SA3"
 # Audio->MIDI (Basic Pitch) lives in its own venv; .transcribe.env (written by
 # transcribe/setup-transcribe.sh) exports BASIC_PITCH_PY. Absent → /transcribe
 # degrades gracefully to 503 transcription_unavailable.

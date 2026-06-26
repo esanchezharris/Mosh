@@ -1,8 +1,8 @@
 // The keymap layer — {action: keyCombo} dictionaries, one per DAW, plus the pure
-// resolver that looks up an action from a keyboard event. Replaces the two hardcoded
-// keydown handlers (Arrange's inline listener + the never-mounted useKeyboardShortcuts)
-// with one table-driven lookup. Combos are platform-neutral ("Mod" = Cmd or Ctrl) and
-// rebindable through the settings schema's 'key' type.
+// resolver that looks up an action from a keyboard event. useKeyboardShortcuts mounts
+// the single app-level keydown handler and dispatches through this table-driven lookup.
+// Combos are platform-neutral ("Mod" = Cmd or Ctrl) and rebindable through the settings
+// schema's 'key' type.
 
 import { EditorAction, type EditorAction as Action } from "./actions";
 

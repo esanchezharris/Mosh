@@ -24,6 +24,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="${MOSH_BRAIN_ENV:-$ROOT/ui/.env.local}"
+MODE="${1:-gui}"
 
 # Resolve the newest built Mosh.app. The documented build is the
 # `macos-arm64-debug` preset (-> build-macos-arm64/); we also check the legacy
@@ -73,6 +74,56 @@ load_dotenv "$ENV_FILE"
 # model is installed, and falls back to FakeAdapter when it isn't). Set
 # MOSH_ENABLE_SA3=0 to force FakeAdapter even when the model is present.
 export MOSH_ENABLE_SA3="${MOSH_ENABLE_SA3:-1}"
+
+if [[ "$MODE" == "deploy" || "$MODE" == "deploy-anira" ]] && [[ "${MOSH_DEPLOY_INNER:-0}" != "1" ]]; then
+  MOSH_DEPLOY_INNER=1 "$0" "$@"
+  DEPLOY_RC=$?
+  if [[ "$DEPLOY_RC" == "0" ]]; then
+    DEST="/Applications/Mosh.app"
+    XATTR_OUT="$(mktemp /tmp/mosh-deploy-xattrs.XXXXXX)"
+    XATTR_LABEL="studio.mosh.deploy-xattrs.$$.$RANDOM"
+    if launchctl submit -l "$XATTR_LABEL" -- /bin/bash -lc '
+      set -euo pipefail
+      DEST="$1"
+      OUT="$2"
+      sleep 1
+      xattr -cr "$DEST" 2>/dev/null || true
+      {
+        codesign --verify --deep --strict "$DEST" && echo "  signature: valid after final xattr cleanup"
+        XATTR_COUNT=$(find "$DEST" -xattr -print | wc -l | tr -d " ")
+        if [[ "$XATTR_COUNT" == "0" ]]; then
+          echo "  xattrs: stripped"
+        else
+          echo "  xattrs: ${XATTR_COUNT} residual attribute-bearing paths (run from Terminal/Full Disk Access if provenance is protected)"
+        fi
+      } > "$OUT" 2>&1
+    ' mosh-deploy-finalize "$DEST" "$XATTR_OUT" >/dev/null 2>&1; then
+      for _ in {1..80}; do
+        [[ -s "$XATTR_OUT" ]] && break
+        sleep 0.25
+      done
+      cat "$XATTR_OUT"
+      launchctl remove "$XATTR_LABEL" >/dev/null 2>&1 || true
+      rm -f "$XATTR_OUT"
+    else
+      rm -f "$XATTR_OUT"
+      /bin/bash -lc '
+        set -euo pipefail
+        DEST="$1"
+        sleep 1
+        xattr -cr "$DEST" 2>/dev/null || true
+        codesign --verify --deep --strict "$DEST" && echo "  signature: valid after final xattr cleanup"
+        XATTR_COUNT=$(find "$DEST" -xattr -print | wc -l | tr -d " ")
+        if [[ "$XATTR_COUNT" == "0" ]]; then
+          echo "  xattrs: stripped"
+        else
+          echo "  xattrs: ${XATTR_COUNT} residual attribute-bearing paths (run from Terminal/Full Disk Access if provenance is protected)"
+        fi
+      ' mosh-deploy-finalize "$DEST"
+    fi
+  fi
+  exit "$DEPLOY_RC"
+fi
 
 # --- report which providers are configured (names only, never values) -------------
 if [ -f "$ENV_FILE" ]; then echo "env: ${ENV_FILE#$ROOT/}"; else echo "env: shell only (no $ENV_FILE)"; fi
@@ -148,6 +199,22 @@ install_app() {                                 # $1 = source app, $2 = dest
   rm -rf "$2"; cp -R "$1" "$2"
 }
 
+sign_app() {
+  local DEST="$1" LABEL="${2:-ad-hoc}"
+  xattr -cr "$DEST" 2>/dev/null || true
+  codesign --force --deep --sign - "$DEST"
+  # macOS may attach protected provenance immediately after a copy/sign burst.
+  # Give the metadata writer a moment, then strip again before final verification.
+  sleep 1
+  xattr -cr "$DEST" 2>/dev/null || true
+  codesign --verify --deep --strict "$DEST" && echo "  signature: valid ($LABEL)"
+}
+
+finish_deployed_app() {
+  local DEST="$1"
+  refresh_icon_cache "$DEST"
+}
+
 # Make an anira-built app self-contained: copy libanira + the needed LibTorch dylibs
 # into Contents/Frameworks, point an @executable_path rpath there, DROP the build-tree
 # rpaths, and re-sign ad-hoc — so the installed app keeps working after the (throwaway)
@@ -171,13 +238,7 @@ selfcontain_anira() {                           # $1 = installed app
   install_name_tool -add_rpath @executable_path/../Frameworks "$BIN" 2>/dev/null || true
   install_name_tool -delete_rpath "$anira_dir" "$BIN" 2>/dev/null || true
   install_name_tool -delete_rpath "$torch_dir" "$BIN" 2>/dev/null || true
-  # install_name_tool invalidated the seal → re-sign. Strip xattr detritus first
-  # (cp -R carries Finder info that codesign rejects), then deep ad-hoc re-sign the
-  # whole bundle (--deep re-signs the bundled dylibs + the main exe and regenerates
-  # the resource seal in one consistent pass).
-  xattr -cr "$DEST" 2>/dev/null || true
-  codesign --force --deep --sign - "$DEST"
-  codesign --verify --deep --strict "$DEST" && echo "  signature: valid (ad-hoc, self-contained)"
+  sign_app "$DEST" "ad-hoc, self-contained"
   echo "self-contained: $(cd "$FW" && ls | tr '\n' ' ')"
 }
 
@@ -197,7 +258,6 @@ build_anira() {
 
 refresh_icon_cache() { touch "$1"; killall Finder 2>/dev/null || true; killall Dock 2>/dev/null || true; }
 
-MODE="${1:-gui}"
 case "$MODE" in
   smoke|gui|build)
     [ "$MODE" = build ] && { build_app; MODE="gui"; }
@@ -219,7 +279,8 @@ case "$MODE" in
     install_app "$APP" "$DEST"
     bundle_service "$DEST"
     bundle_brain_key "$DEST"
-    refresh_icon_cache "$DEST"
+    sign_app "$DEST" "ad-hoc"        # re-seal after service + brain-key edits (covers brain.env)
+    finish_deployed_app "$DEST"
     echo "deployed one canonical /Applications/Mosh.app (default build; service bundled)."
     echo "If macOS still shows an old icon, log out and back in (icon cache)."
     ;;
@@ -235,7 +296,7 @@ case "$MODE" in
     bundle_service "$DEST"
     bundle_brain_key "$DEST"
     selfcontain_anira "$DEST"
-    refresh_icon_cache "$DEST"
+    finish_deployed_app "$DEST"
     echo "deployed anira /Applications/Mosh.app (real-time RAVE + service bundled; LibTorch self-contained)."
     echo "drop a real RAVE <target>.ts into ~/AI/rave-models — the '+ RAVE' rack button then hosts it live."
     ;;

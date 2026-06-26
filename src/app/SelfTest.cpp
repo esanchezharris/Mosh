@@ -245,6 +245,8 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // RAVE backend if models are present and break. Mirrors how SA3 stays fake here. The
     // real transform path is covered separately by scripts/verify-hardware/verify.py --rave.
     mosh::setEnvVar ("MOSH_ENABLE_TRANSFORM", "0");
+    if (SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SA3", "0") != "1")
+        mosh::setEnvVar ("MOSH_ENABLE_SA3", "0");
     std::cerr << "\n===== Mosh Stage 1 command-surface harness =====\n";
     section ("Stage 1: command surface / cold snapshot");
 

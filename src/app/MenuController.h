@@ -5,14 +5,14 @@
 
 namespace mosh
 {
-/** The native macOS menu bar (File + Edit). It does NOT mutate Tracktion or call
+/** The native macOS menu bar (File, Edit, Transport). It does NOT mutate Tracktion or call
     MoshOps directly: every item forwards a `{ action, file? }` intent to the WebView
     over the bridge's event channel, and the UI's single runAction dispatcher turns
     it into the corresponding MoshOps command (reusing the existing native file
     pickers for Open/Save As/Export). That keeps ONE definition of each command and
     matches the swappable-seam rule — the menu is just another client of the seam.
 
-    Accelerators (⌘N/⌘O/⌘S/⇧⌘S/⌘E, ⌘Z/⇧⌘Z/⌘X/⌘C/⌘V) are real NSMenu key-equivalents;
+    Accelerators (⌘N/⌘O/⌘S/⇧⌘S/⌘E, ⌘Z/⇧⌘Z/⌘X/⌘C/⌘V, Space) are real NSMenu key-equivalents;
     the WebView keyboard layer YIELDS those chords when a native menu is present, so a
     keystroke fires exactly once (via the menu → forwarded here → runAction). Delete is
     intentionally NOT given a key-equivalent (it would hijack ⌫ in text fields) — the
