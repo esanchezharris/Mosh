@@ -6,7 +6,47 @@ using namespace juce;
 
 namespace
 {
-    String env (const char* name) { return SystemStats::getEnvironmentVariable (name, {}); }
+    // A bundled brain config (key=value lines) read from Contents/Resources/brain.env,
+    // used ONLY as a FALLBACK when the OS environment doesn't carry the value. The deploy
+    // writes the user's key there so a Finder/Dock launch (which inherits no shell env, so
+    // run-mosh.sh's exports are absent) still has a working brain. In dev the file doesn't
+    // exist, so behaviour is unchanged (env wins). Loaded once.
+    const StringPairArray& bundledBrainConfig()
+    {
+        static const StringPairArray cfg = []
+        {
+            StringPairArray m;
+            const auto f = File::getSpecialLocation (File::currentExecutableFile)
+                               .getParentDirectory()       // Contents/MacOS
+                               .getParentDirectory()       // Contents
+                               .getChildFile ("Resources")
+                               .getChildFile ("brain.env");
+            if (f.existsAsFile())
+            {
+                StringArray lines;
+                f.readLines (lines);
+                for (auto line : lines)
+                {
+                    line = line.trim();
+                    if (line.isEmpty() || line.startsWithChar ('#')) continue;
+                    const auto eq = line.indexOfChar ('=');
+                    if (eq <= 0) continue;
+                    auto v = line.substring (eq + 1).trim();
+                    if (v.startsWithChar ('"') && v.endsWithChar ('"') && v.length() >= 2)
+                        v = v.substring (1, v.length() - 1);
+                    m.set (line.substring (0, eq).trim(), v);
+                }
+            }
+            return m;
+        }();
+        return cfg;
+    }
+
+    String env (const char* name)
+    {
+        const auto v = SystemStats::getEnvironmentVariable (name, {});
+        return v.isNotEmpty() ? v : bundledBrainConfig().getValue (name, {});
+    }
 
     // OpenAI reasoning models (gpt-5/6, o-series) reject `temperature` and use
     // `max_completion_tokens`. Mirrors the dev proxy's /^(gpt-5|gpt-6|o[0-9])/.

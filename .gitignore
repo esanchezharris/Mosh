@@ -103,3 +103,7 @@ ios/MoshCompanion/build/
 !ios/MoshCompanion/MoshCompanion.xcodeproj/xcshareddata/
 !ios/MoshCompanion/MoshCompanion.xcodeproj/xcshareddata/xcschemes/
 !ios/MoshCompanion/MoshCompanion.xcodeproj/xcshareddata/xcschemes/MoshCompanion.xcscheme
+
+# Bundled Moshi brain key — only ever lives in the deployed .app, never in git.
+brain.env
+**/brain.env
