@@ -54,9 +54,16 @@ TEST_CASE ("remote companion server rejects unauthenticated commands and routes 
     RemoteCompanionServer server (root);
     int calls = 0;
     juce::String routedCommand;
+    juce::String routedAction;
+    juce::String routedSource;
+    bool routedArgsObject = false;
     server.setCommandHandler ([&] (const juce::var& command) {
         ++calls;
         routedCommand = command.getProperty ("command", {}).toString();
+        const auto routedArgs = command.getProperty ("args", {});
+        routedArgsObject = routedArgs.isObject();
+        routedAction = routedArgs.getProperty ("action", {}).toString();
+        routedSource = routedArgs.getProperty ("source", {}).toString();
         auto* result = new juce::DynamicObject();
         result->setProperty ("ok", true);
         result->setProperty ("command", routedCommand);
@@ -75,7 +82,8 @@ TEST_CASE ("remote companion server rejects unauthenticated commands and routes 
     juce::var command (commandObject);
     commandObject->setProperty ("command", "set_transport");
     auto* args = new juce::DynamicObject();
-    args->setProperty ("action", "play");
+    args->setProperty ("action", "record");
+    args->setProperty ("source", "phone_controller");
     commandObject->setProperty ("args", juce::var (args));
 
     auto* unauthBody = new juce::DynamicObject();
@@ -91,6 +99,9 @@ TEST_CASE ("remote companion server rejects unauthenticated commands and routes 
     REQUIRE ((bool) authed.getProperty ("ok", false));
     REQUIRE (calls == 1);
     REQUIRE (routedCommand == "set_transport");
+    REQUIRE (routedArgsObject);
+    REQUIRE (routedAction == "record");
+    REQUIRE (routedSource == "phone_controller");
     server.stopServer();
 }
 

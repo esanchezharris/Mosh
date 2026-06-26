@@ -358,6 +358,25 @@ int runGoldenSelfTest (MoshEngine& eng, MoshOps& ops)
     if (actual.isNotEmpty())
         checkGoldenXml (eng.sessionDir(), "moshop_create_track.xml", actual);
 
+    section ("Layer 2: phone command body routes through MoshOps");
+    auto* phoneArgs = new DynamicObject();
+    phoneArgs->setProperty ("action", "record");
+    phoneArgs->setProperty ("source", "phone_controller");
+    auto* phoneCommand = new DynamicObject();
+    phoneCommand->setProperty ("command", "set_transport");
+    phoneCommand->setProperty ("args", var (phoneArgs));
+    auto* phoneBody = new DynamicObject();
+    phoneBody->setProperty ("command", var (phoneCommand));
+    const var phoneEnvelope (phoneBody);
+    const auto phonePayload = phoneEnvelope.getProperty ("command", var());
+    check (phonePayload.isObject(), "phone body carries the standard command object");
+    const auto phoneResult = ops.execute (phonePayload);
+    check (ok (phoneResult), "phone set_transport record applies through MoshOps");
+    check (phoneResult.getProperty ("command", var()).toString() == "set_transport",
+           "phone command keeps the normal set_transport command name");
+    const auto phoneLog = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
+    check (phoneLog.contains ("\"source\": \"phone_controller\""), "phone source survives into the command log");
+
     section ("Layer 3: peer apply committed track ValueTree golden");
     MoshEngine receiverEng (false, true, "session-golden-selftest-receiver");
     MoshOps receiverOps (receiverEng);
