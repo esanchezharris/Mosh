@@ -120,6 +120,29 @@ bundle_service() {                              # $1 = installed app
   find "$SVC" -name __pycache__ -type d -prune -exec rm -rf {} + 2>/dev/null || true
 }
 
+# Bundle the Moshi brain key(s) INTO the app so a Finder/Dock double-click (which inherits
+# NO shell env, so run-mosh.sh's exports are absent) still has a working brain — BrainProxy
+# reads Contents/Resources/brain.env as a fallback when the env var is missing. Keys come
+# from ui/.env.local (already loaded above); brain.env is gitignored and lives ONLY in the
+# bundle, never in git. (Security: anyone with the .app can read the key — don't share it.)
+bundle_brain_key() {                            # $1 = installed app
+  local DEST="$1" BF="$1/Contents/Resources/brain.env" v
+  : > "$BF"
+  for v in MOSHI_BRAIN_PROVIDER \
+           OPENAI_BASE_URL OPENAI_MODEL OPENAI_API_KEY \
+           DEEPSEEK_BASE_URL DEEPSEEK_MODEL DEEPSEEK_API_KEY \
+           XAI_BASE_URL XAI_MODEL XAI_API_KEY; do
+    [ -n "${!v:-}" ] && printf '%s=%s\n' "$v" "${!v}" >> "$BF"
+  done
+  chmod 600 "$BF" 2>/dev/null || true
+  if [ -s "$BF" ]; then
+    echo "bundled brain key → Contents/Resources/brain.env ($(grep -c '_API_KEY=' "$BF") provider key(s); Moshi has a brain on any launch)"
+  else
+    rm -f "$BF"
+    echo "no brain key in env — skipped brain.env (paste one into ui/.env.local to bundle it)"
+  fi
+}
+
 install_app() {                                 # $1 = source app, $2 = dest
   echo "deploying $1 -> $2"
   rm -rf "$2"; cp -R "$1" "$2"
@@ -195,6 +218,7 @@ case "$MODE" in
     DEST="/Applications/Mosh.app"
     install_app "$APP" "$DEST"
     bundle_service "$DEST"
+    bundle_brain_key "$DEST"
     refresh_icon_cache "$DEST"
     echo "deployed one canonical /Applications/Mosh.app (default build; service bundled)."
     echo "If macOS still shows an old icon, log out and back in (icon cache)."
@@ -209,6 +233,7 @@ case "$MODE" in
     DEST="/Applications/Mosh.app"
     install_app "$APP" "$DEST"
     bundle_service "$DEST"
+    bundle_brain_key "$DEST"
     selfcontain_anira "$DEST"
     refresh_icon_cache "$DEST"
     echo "deployed anira /Applications/Mosh.app (real-time RAVE + service bundled; LibTorch self-contained)."
