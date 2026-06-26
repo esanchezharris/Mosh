@@ -27,6 +27,7 @@ libs/_deps/
 node_modules/
 ui/node_modules/
 ui/dist/
+ui/storybook-static/
 ui/.vite/
 ui/test-results/
 ui/.tsbuild-node/
