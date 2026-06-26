@@ -1,0 +1,21 @@
+[0/2] Re-checking globbed directories...
+[1/3] Building Mosh UI (Vite) → ui/dist
+
+up to date in 400ms
+
+> mosh-ui@0.0.1 build
+> tsc --noEmit && vite build
+
+vite v5.4.21 building for production...
+transforming...
+✓ 204 modules transformed.
+src/juce/check_native_interop.js (41:2): Use of eval in "src/juce/check_native_interop.js" is strongly discouraged as it poses security risks and may cause issues with minification.
+rendering chunks...
+[plugin vite:singlefile] 
+
+[plugin vite:singlefile] Inlining: index-B-wcMl2c.js
+[plugin vite:singlefile] Inlining: style-C8Pdw5-6.css
+computing gzip size...
+dist/index.html  591.27 kB │ gzip: 189.39 kB
+✓ built in 799ms
+[2/3] Restaging UI bundle into the app (UI-only-safe)

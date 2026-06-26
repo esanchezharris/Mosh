@@ -1,0 +1,19 @@
+
+> mosh-ui@0.0.1 test
+> vitest run src/ui/Meter.test.ts src/ui/meterGeom.test.ts src/interaction/keymap.test.ts src/interaction/config.test.ts src/menuActions.test.ts src/hooks/useKeyboardShortcuts.test.ts
+
+
+ RUN  v2.1.9 /Users/emiliosanchez-harris/Documents/ClaudeMosh/ui
+
+ ✓ src/ui/meterGeom.test.ts (6 tests) 4ms
+ ✓ src/menuActions.test.ts (14 tests) 9ms
+ ✓ src/interaction/keymap.test.ts (16 tests) 4ms
+ ✓ src/interaction/config.test.ts (6 tests) 4ms
+ ✓ src/ui/Meter.test.ts (2 tests) 26ms
+ ✓ src/hooks/useKeyboardShortcuts.test.ts (5 tests) 28ms
+
+ Test Files  6 passed (6)
+      Tests  49 passed (49)
+   Start at  15:25:44
+   Duration  2.17s (transform 727ms, setup 0ms, collect 1.48s, tests 75ms, environment 5.76s, prepare 698ms)
+

@@ -1,0 +1,4 @@
+2026-06-25 15:26:11 /Applications/Mosh.app
+2026-06-25 15:26:11 /Applications/Mosh.app/Contents/MacOS/Mosh
+2026-06-25 15:26:11 /Applications/Mosh.app/Contents/Resources/ui/index.html
+2026-06-25 15:26:11 /Applications/Mosh.app/Contents/Resources/service/run.sh

@@ -1,0 +1,15 @@
+
+> mosh-ui@0.0.1 build
+> tsc --noEmit && vite build
+
+vite v5.4.21 building for production...
+transforming...
+✓ 204 modules transformed.
+rendering chunks...
+[plugin vite:singlefile] 
+
+[plugin vite:singlefile] Inlining: index-B-wcMl2c.js
+[plugin vite:singlefile] Inlining: style-C8Pdw5-6.css
+computing gzip size...
+dist/index.html  591.27 kB │ gzip: 189.39 kB
+✓ built in 886ms

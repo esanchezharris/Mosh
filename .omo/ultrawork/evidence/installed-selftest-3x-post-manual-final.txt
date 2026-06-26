@@ -1,0 +1,6 @@
+installed selftest run 1
+installed selftest run 1 complete
+installed selftest run 2
+installed selftest run 2 complete
+installed selftest run 3
+installed selftest run 3 complete

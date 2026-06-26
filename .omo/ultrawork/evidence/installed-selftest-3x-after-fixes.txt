@@ -1,0 +1,3399 @@
+== installed selftest run 1 ==
+Settings file: /Users/emiliosanchez-harris/Library/Mosh/Settings.xml
+Creating Default Controllers...
+
+===== Mosh Stage 1 command-surface harness =====
+--- Stage 1: command surface / cold snapshot ---
+  ok   cold snapshot has no tracks
+  ok   snapshot schemaVersion == 1
+  ok   import_clip of an invalid file fails
+  ok   failed invalid import created no stray track (no partial mutation)
+  ok   create_track ok
+  ok   snapshot has 1 track after create_track
+  ok   track name == Drums
+  ok   create_track emitted snapshot_invalidated
+  ok   add_test_tone_clip ok
+  ok   track has 1 clip
+  ok   clip type == wave
+  ok   clip length ~= 2.0s
+  ok   clip source WAV exists on disk
+  ok   set_transport play ok
+  ..   (no-audio headless run — live-playback checks done via the GUI)
+  ok   seek to 1.0s reflected in snapshot
+  ok   set_transport emitted a transport event
+  ok   add_render_layer ok
+  ok   clip now hasRenderLayer
+  ok   undo removed the render layer
+  ok   undo removed the clip
+  ok   undo removed the track
+  ok   redo restored the track
+  ok   redo restored the clip
+  ok   render layer restored by redo
+  ok   save ok
+  ok   reload ok
+  ok   reload restored 1 track
+  ok   reload restored 1 clip
+  ok   reload restored MOSH_RENDERLAYER node
+  ok   JSONL log file exists
+  ok   JSONL records create_track
+  ok   JSONL records import_clip
+  ok   JSONL records set_transport
+  ok   JSONL records undo
+  ..   section "Stage 1: command surface / cold snapshot" completed in 0.024s (34 checks, 0 failed)
+--- Agent batch: N edits = one undo step ---
+  ok   batch_begin ok
+  ok   second batch_begin errors (already open)
+  ok   two tracks created inside the batch
+  ok   batch_end ok
+  ok   second batch_end errors (none open)
+  ok   one undo reverts the whole batch (both tracks gone)
+  ok   one redo restores the whole batch
+  ok   batch undone again — clean state for Stage 2
+  ..   section "Agent batch: N edits = one undo step" completed in 0.004s (8 checks, 0 failed)
+--- Stage 2: arrangement + mixer ---
+  ok   move_clip ok
+  ok   clip moved to 2.0s
+  ok   trim_clip ok
+  ok   clip trimmed to 1.0s
+  ok   split_clip ok
+  ok   split produced 2 clips
+  ok   set_track_volume ok
+  ok   track volume ~= -6 dB
+  ok   track pan ~= 0.5
+  ok   track muted
+  ok   track soloed
+  ok   get_clip_peaks ok
+  ok   peaks array non-empty
+  ..   section "Stage 2: arrangement + mixer" completed in 0.002s (13 checks, 0 failed)
+--- BRW-007: import_clip_data (bytes-over-bridge) ---
+  ok   have a real source WAV for import_clip_data
+  ok   WAV base64-encoded
+  ok   import_clip_data ok
+  ok   import_clip_data added a clip
+  ok   found the imported clip by its source path
+  ok   imported clip length matches the true source duration
+  ok   imported file exists under sessionDir/imports
+  ok   undo removed the imported clip
+  ok   redo restored the imported clip
+  ok   import_clip_data undone (clean state for later tests)
+  ok   import_clip_data rejects invalid base64
+  ok   import_clip_data rejects non-audio bytes
+  ok   non-audio import added no clip
+  ok   non-audio temp file was deleted (no garbage)
+  ok   import_clip_data rejects missing name
+  ok   import_clip_data rejects missing dataBase64
+  ..   section "BRW-007: import_clip_data (bytes-over-bridge)" completed in 0.035s (16 checks, 0 failed)
+--- Stage 3: VST3 hosting + MIDI ---
+  ok   list_plugins ok
+  ..    813 VST3 plugin(s) scanned
+  ok   load_plugin (effect) on wave track ok
+  ok   effect appears in the plugin chain
+  ok   set_plugin_param ok
+  ok   bypass_plugin disabled the plugin
+  ok   hosted plugin persists across save/reload
+  ok   remove_plugin ok
+  ok   plugin removed from chain
+  ok   add_midi_clip ok
+  ok   MIDI clip on synth track
+  ok   clip type == midi
+  ok   load_plugin (instrument) on MIDI track ok
+  ok   instrument appears in the synth track chain
+  ..   section "Stage 3: VST3 hosting + MIDI" completed in 0.090s (13 checks, 0 failed)
+--- INS-002/INS-005: AU hosting + scan / blocklist ---
+  ok   AudioUnit format registered in the format manager
+  ok   list_plugins ok (INS-005)
+  ok   list_plugins payload carries a counts object
+  ok   counts.total == plugins array size
+  ok   counts.vst3 and counts.au are present
+  ok   every list_plugins entry has a non-empty format field
+  ok   rescan_plugins (vst3) ok
+  ok   rescan_plugins reports a count (>= prior total)
+  ok   get_plugin_blocklist ok
+  ok   get_plugin_blocklist returns an array
+  ok   block_plugin rejects an unresolvable id with errResult
+  ok   block_plugin ok (real catalog entry or raw AU id)
+  ok   blocked id appears in get_plugin_blocklist
+  ok   blocked VST3 removed from list_plugins immediately
+  ok   clear_plugin_blocklist ok
+  ok   blocklist empty after clear_plugin_blocklist
+  ok   get_plugin_blocklist is READ-ONLY (not logged)
+  ..   section "INS-002/INS-005: AU hosting + scan / blocklist" completed in 0.025s (17 checks, 0 failed)
+--- Wave 2: tempo / meter / metronome / nav ---
+  ok   set_tempo ok
+  ok   snapshot tempo reflects set_tempo
+  ok   set_tempo clamps absurd BPM to <= 999
+  ok   set_time_signature ok
+  ok   snapshot numerator == 3
+  ok   snapshot denominator == 4
+  ok   set_time_signature rejects non-power-of-two denominator
+  ok   metronome enabled in snapshot
+  ok   metronome disabled in snapshot
+  ok   to_end moves the playhead to the edit length
+  ok   to_start returns the playhead to 0
+  ..   section "Wave 2: tempo / meter / metronome / nav" completed in 0.001s (11 checks, 0 failed)
+--- Wave 5: mixer / master / pan ---
+  ok   snapshot exposes a master bus
+  ok   set_master_volume ok
+  ok   master volume reflects in snapshot
+  ok   set_master_pan ok
+  ok   master pan reflects in snapshot
+  ok   set_track_pan ok
+  ok   track pan reflects in snapshot
+  ..   section "Wave 5: mixer / master / pan" completed in 0.001s (7 checks, 0 failed)
+--- Wave 6: clip editing ---
+  ok   tone clip created for editing
+  ok   rename_clip ok
+  ok   clip name reflects rename
+  ok   set_clip_mute ok
+  ok   clip mute reflects in snapshot
+  ok   undo set_clip_mute ok
+  ok   undo restores clip unmuted
+  ok   redo set_clip_mute ok
+  ok   redo re-applies clip mute
+  ok   set_clip_gain ok
+  ok   clip gain reflects in snapshot
+  ok   set_clip_gain (over-max) ok
+  ok   clip gain clamps to +24 dB
+  ok   set_clip_gain (under-min) ok
+  ok   clip gain clamps to -48 dB
+  ok   undo set_clip_gain ok
+  ok   undo restores prior clip gain (+24)
+  ok   duplicate_clip ok
+  ok   duplicate adds a clip to the track
+  ok   duplicate lands after the original
+  ok   undo duplicate_clip ok
+  ok   undo removes the duplicated clip
+  ok   redo duplicate_clip ok
+  ok   redo restores the duplicated clip
+  ok   remove_clip ok
+  ok   remove_clip deletes the clip
+  ..   section "Wave 6: clip editing" completed in 0.008s (26 checks, 0 failed)
+--- Wave 7: parameter automation ---
+  ok   compressor loaded for automation
+  ok   add_automation_point ok
+  ok   second automation point ok
+  ok   snapshot serialises 2 automation points
+  ok   param flagged automated
+  ok   automation point values round-trip 0..1
+  ok   set_automation_point ok
+  ok   remove_automation_point ok
+  ok   remove drops an automation point
+  ok   clear_automation ok
+  ok   clear_automation removes all points
+  ..   section "Wave 7: parameter automation" completed in 0.003s (11 checks, 0 failed)
+--- Wave 1: built-in plugin palette ---
+  ok   list_builtins ok
+  ok   built-in palette has the full catalog
+  ok   catalog includes compressor (effect)
+  ok   catalog includes 4osc (instrument)
+  ok   load_builtin (compressor) ok
+  ok   compressor appears in the chain
+  ok   built-in plugin flagged builtin=true in snapshot
+  ok   built-in plugin carries its category
+  ok   set_plugin_param on a built-in ok
+  ok   load_builtin (4osc synth) ok
+  ok   built-in 4osc flagged as an instrument
+  ok   built-in plugin persists across save/reload
+  ok   load_builtin rejects unknown type
+  ..   section "Wave 1: built-in plugin palette" completed in 0.106s (13 checks, 0 failed)
+--- PLG reorder: plugin chain ordering (reorder_plugin) ---
+  ok   reorder: load compressor
+  ok   reorder: load reverb
+  ok   reorder: load delay
+  ok   effects load in chain order C,R,D
+  ok   reorder_plugin with an out-of-bounds toIndex clamps to append (ok, no crash)
+  ok   compressor moved to the end of the chain
+  ok   undo reorder_plugin ok
+  ok   undo restores the prior plugin order
+  ok   reorder_plugin with a bad from-index errors
+  ..   section "PLG reorder: plugin chain ordering (reorder_plugin)" completed in 0.010s (9 checks, 0 failed)
+--- MON-004: PDC / reported-latency readout ---
+  ok   session.totalLatencySamples present
+  ok   session.totalLatencyMs present
+  ok   session.latencyContextReady present
+  ok   totalLatencySamples is non-negative
+  ok   totalLatencyMs is non-negative
+  ok   totalLatencyMs == samples / sampleRate * 1000 (consistent)
+  ok   no-audio headless -> latencyContextReady=false (honest, not a false 0.0 ms)
+  ok   no-audio headless -> totalLatencySamples=0
+  ..   section "MON-004: PDC / reported-latency readout" completed in 0.000s (8 checks, 0 failed)
+--- Stage 5: generative layer (FakeAdapter, full loop) ---
+  ok   create_render_layer ok
+  ok   render_layer ok (service spawned, job ran)
+  ok   first render is a cache MISS
+  ok   render completed -> status ready
+  ok   render produced a cached artifact (output.wav)
+  ok   identical re-render is a cache HIT (full fingerprint)
+  ok   param change -> dirty -> re-render (cache MISS)
+  ok   accept_render ok
+  ok   accept landed a new clip on a neural lane
+  ok   neural lane carries the accepted render
+  ok   accepted clip's source file exists and is non-empty (no broken clip)
+  ok   JSONL records accept_render (taste label)
+  ok   JSONL records reject_render (taste label)
+  ..   section "Stage 5: generative layer (FakeAdapter, full loop)" completed in 0.862s (13 checks, 0 failed)
+--- NRL-004: render-layer management ---
+  ok   reject_render did NOT remove the layer (still present)
+  ok   reject_render set status=dirty (re-roll, not remove)
+  ok   before bypass the landed neural clip plays (un-muted)
+  ok   bypass_layer ok
+  ok   bypass_layer{true} -> status bypassed
+  ok   bypass_layer{true} MUTES the landed neural clip (real audio re-route, not just a flag)
+  ok   bypass_layer{false} -> status ready
+  ok   bypass_layer{false} un-mutes the landed neural clip (render audible again)
+  ok   freeze_layer ok (artifact present)
+  ok   freeze_layer -> status frozen
+  ok   bounce_layer_to_clip ok
+  ok   bounce_layer_to_clip -> status bounced
+  ok   bounce landed audio on the neural lane (no track lost)
+  ok   freeze_layer on un-rendered layer errors (nothing to freeze)
+  ok   layer present before remove_render_layer
+  ok   remove_render_layer ok
+  ok   remove_render_layer cleared MOSH_RENDERLAYER (hasRenderLayer=false)
+  ok   create_render_layer succeeds again after remove (no 'already has a layer')
+  ok   remove_render_layer is undoable (layer restored)
+  ok   JSONL records remove_render_layer
+  ..   section "NRL-004: render-layer management" completed in 0.019s (20 checks, 0 failed)
+--- Route B: transform render mode (fake) ---
+  ok   create_render_layer (transform) ok
+  ok   transform render_layer ok (fake transform ran)
+  ok   first transform render is a cache MISS
+  ok   transform render completed -> ready
+  ok   transform produced a cached artifact (output.wav)
+  ok   identical transform re-render is a cache HIT
+  ok   changing transform target -> cache MISS
+  ok   changing transform strength -> cache MISS
+  ok   accept_render (transform) ok
+  ok   transform accept landed a clip on the Neural Renders lane
+  ok   accepted transform clip points at a real non-empty file
+  ..   section "Route B: transform render mode (fake)" completed in 0.887s (11 checks, 0 failed)
+--- Section-scoped render (rework-the-hook) ---
+  ok   create_render_layer with a sub-region ok
+  ok   layer region start = 0.5 s
+  ok   layer region end   = 1.0 s
+  ok   section-scoped render_layer ok
+  ok   section render staged an input.wav
+  ok   input.wav is the SECTION region (~0.5 s), not the whole clip (2 s)
+  ok   section-scoped accept_render ok
+  ok   accepted render landed bounded to the section (start ~0.5 s, length ~0.5 s)
+  ok   whole-clip render (no region) still renders (default path unchanged)
+  ok   whole-clip layer still renders after the clip moved (no stale-region error)
+  ok   accept after move ok
+  ok   moved whole-clip render lands at the clip's LIVE position (3.0 s), not the stale create spot
+  ..   section "Section-scoped render (rework-the-hook)" completed in 1.892s (12 checks, 0 failed)
+--- Stage 6: full producer loop + export ---
+  ok   host VST3 effect on the mix track
+  ok   generative transform rendered
+  ok   export_audio ok
+  ok   export produced a non-empty WAV (full producer loop)
+  ok   mix volume applied (-4 dB)
+  ok   rename applied
+  ok   undo reverted the rename
+  ok   redo restored the rename
+  ..   section "Stage 6: full producer loop + export" completed in 1.030s (8 checks, 0 failed)
+--- Export format / depth options (IOX-002, IOX-007) ---
+  ok   export_audio wav 16-bit ok
+  ok   wav export produced a non-empty .wav file
+  ok   wav export reports format wav
+  ok   wav export reports bitDepth 16
+  ok   export_audio aiff 24-bit ok
+  ok   aiff export produced a non-empty .aiff file
+  ok   aiff export reports format aiff
+  ok   aiff export reports bitDepth 24 (depth arg honored for non-wav)
+  ok   export_audio rejects an unsupported format (mp3)
+  ok   export_audio rejects an unsupported bit depth (wav 7)
+  ..   section "Export format / depth options (IOX-002, IOX-007)" completed in 0.960s (10 checks, 0 failed)
+--- Serum render compatibility (optional local plugin gate) ---
+  ok   Serum 2 VST3 is discoverable by exact name/manufacturer
+  ok   Serum probe MIDI clip added
+  ok   Serum 2 loaded by exact plugin id
+  ok   snapshot exposes hosted Serum metadata and realtime diagnostics
+  ok   Serum auto export ok
+  ok   Serum auto export selects realtime render mode
+  ok   Serum auto export reports the compatibility reason
+  ok   explicit fast export remains available with Serum
+  ok   explicit fast export reports fast render mode
+  ..   section "Serum render compatibility (optional local plugin gate)" completed in 2.829s (9 checks, 0 failed)
+--- Drums make sound (DRM-001) ---
+  ok   bundled drum kit is present (Resources/drumkits/mosh-kit)
+  ok   new_project (drum render isolation) ok
+  ok   create_track type:drum ok
+  ok   create_track reports type drum
+  ok   drum track auto-loaded an instrument
+  ok   snapshot serialises track type drum
+  ok   snapshot marks the drum track as an instrument host
+  ok   drum track hosts the built-in sampler
+  ok   empty drum MIDI clip added
+  ok   export of the empty drum track ok
+  ok   empty drum clip renders SILENT (no phantom drum sound)
+  ok   export of the programmed beat ok
+  ok   programmed drum beat renders NON-SILENT (sampler+kit actually sounds)
+  ok   save before reload ok
+  ok   reload ok
+  ok   drum track type survives save/reload
+  ok   the sampler survives save/reload
+  ok   re-export after reload ok
+  ok   drum beat still NON-SILENT after save/reload (sampler sounds restored)
+  ok   assign_sample maps a sample to a pad/note
+  ok   assign_sample added a 9th pad
+  ok   load_drum_kit (re)loads the 8-pad kit
+  ok   set_drum_lane mute ok
+  ok   muted kick (36) rides the snapshot
+  ok   set_drum_lane solo ok
+  ok   soloed snare (38) rides the snapshot
+  ok   set_drum_lane unmute ok
+  ok   unmuting clears the kick from the muted set
+  ok   drum-lane solo persists across save/reload
+  ok   new plain track is type audio
+  ok   set_track_type drum ok
+  ok   set_track_type flips the snapshot type
+  ok   set_track_type drum auto-loads the kit
+  ok   undo reverts set_track_type to audio
+  ok   undo removes the auto-loaded kit
+  ok   MIDI clip on a plain track auto-loads a default instrument
+  ok   the melodic default instrument is 4OSC
+  ok   MIDI clip on a wave track does NOT auto-load an instrument (wave audio preserved)
+  ..   (SA3 self-test skipped — set MOSH_SELFTEST_SA3=1 to exercise the real model)
+  ..   (transcribe self-test skipped — set MOSH_SELFTEST_TRANSCRIBE=1 to exercise Basic Pitch)
+  ..   (sketch self-test skipped — set MOSH_SELFTEST_SKETCH=1 + MOSH_SKETCH_FIXTURE_DIR to exercise the beatbox transduction)
+  ..   section "Drums make sound (DRM-001)" completed in 1.907s (38 checks, 0 failed)
+--- Wave 4: MIDI note editing ---
+  ok   MIDI clip serialises its 3 notes into the snapshot
+  ok   add_note ok
+  ok   add_note adds a note
+  ok   set_note ok
+  ok   set_note edits pitch + velocity
+  ok   quantize_notes ok
+  ok   quantize_notes snaps every note onto the beat grid
+  ok   remove_note ok
+  ok   remove_note removes a note
+  ok   notes persist across save/reload
+  ok   set_note rejects an out-of-range noteIndex
+  ok   remove every note empties the sequence
+  ok   an emptied MIDI clip is NOT auto-deleted (stays in the arrangement)
+  ..   section "Wave 4: MIDI note editing" completed in 0.011s (13 checks, 0 failed)
+--- Wave 8: sends / returns / aux buses ---
+  ok   create_bus ok
+  ok   snapshot lists the new bus
+  ok   return track flagged isReturn
+  ok   return track carries the bus number
+  ok   return track carries an auxreturn plugin
+  ok   second bus gets the next number
+  ok   add_send ok
+  ok   send appears with the right bus + dB
+  ok   duplicate send to a bus rejected
+  ok   send to a nonexistent bus rejected
+  ok   set_send_level ok
+  ok   send level reflects the new dB
+  ok   send mutes at -100 dB
+  ok   bus name persists across save/reload
+  ok   send persists across save/reload
+  ok   remove_send ok
+  ok   remove_send drops the send
+  ok   remove_send on a missing send errors
+  ok   undo remove_send ok
+  ok   undo restores the send at its prior level
+  ok   rename_bus ok
+  ok   bus name reflects rename
+  ok   rename_bus updates the return track name too
+  ok   rename_bus on a missing bus errors
+  ok   undo after rename_bus ok
+  ok   undo does NOT revert rename_bus — bus name AND return-track name both stay (non-undoable, no partial-undo)
+  ok   remove_bus ok
+  ok   remove_bus drops the bus
+  ok   remove_bus sweeps orphan sends
+  ..   section "Wave 8: sends / returns / aux buses" completed in 0.015s (29 checks, 0 failed)
+--- Wave 9: channel metering ---
+  ok   enable_track_meter ok
+  ok   track reports meterEnabled
+  ok   meter tap is hidden from the plugin rack
+  ok   enable_track_meter is idempotent
+  ok   still metered after idempotent enable
+  ok   enable_all_meters meters every track
+  ok   disable_track_meter ok
+  ok   meter removed after disable
+  ok   re-enabled before undo
+  ok   undo removes the meter tap
+  ok   redo restores the meter tap
+  ..   section "Wave 9: channel metering" completed in 0.002s (11 checks, 0 failed)
+--- Wave: recording (arm / input monitor) ---
+  ok   snapshot track has armed field
+  ok   snapshot track has monitor field
+  ok   snapshot track has hasInput field
+  ok   armed defaults false headless
+  ok   hasInput defaults false headless
+  ok   monitor defaults automatic headless
+  ok   arm_track ok (graceful)
+  ok   arm_track applied:false headless (no input device)
+  ok   arm_track emitted snapshot_invalidated
+  ok   track still not armed headless (no instance)
+  ok   arm_track bad trackId errors
+  ok   set_input_monitor mode:on ok (graceful)
+  ok   set_input_monitor applied:false headless
+  ok   set_input_monitor emitted snapshot_invalidated
+  ok   set_input_monitor bad mode errors
+  ok   set_input_monitor bad trackId errors
+  ok   arm_track disarm ok
+  ok   undo after arm_track ok (no crash)
+  ok   snapshot still well-formed after arm-then-undo
+  ok   JSONL records arm_track
+  ok   JSONL records set_input_monitor
+  ok   arm_track logged undoable:false (monitoring preference)
+  ok   set_input_monitor logged undoable:false (monitoring preference)
+  ok   list_takes on a missing clip errors (dispatched, not unknown)
+  ok   list_takes error is the handler's (no wave clip)
+  ok   set_current_take on a missing clip errors
+  ok   keep_take on a missing clip errors
+  ok   list_midi_inputs ok
+  ok   list_midi_inputs returns an inputs array
+  ok   list_midi_inputs reports audioEnabled gate
+  ok   list_midi_inputs is not logged (read-only)
+  ok   load 4OSC instrument ok
+  ok   instrument track reports isInstrument:true
+  ok   snapshot track has inputType field
+  ok   inputType defaults wave (no routed input headless)
+  ok   plain track reports isInstrument:false
+  ok   arm_track on instrument track ok (graceful)
+  ok   arm_track instrument applied:false headless (no MIDI device)
+  ok   arm_track (instrument) emitted snapshot_invalidated
+  ok   instrument track still not armed headless (no MIDI instance)
+  ok   arm_track (instrument) disarm ok
+  ok   undo after instrument arm_track ok (no crash)
+  ok   arm_track (MIDI path) logged undoable:false (preference)
+  ..   section "Wave: recording (arm / input monitor)" completed in 0.022s (43 checks, 0 failed)
+--- Wave B: record-to-take landing (stop_recording) ---
+  ok   arm_track (wave) ok for record-to-take
+  ok   set_transport record ok (graceful headless)
+  ok   set_transport record emitted a transport event
+  ok   stop_recording ok (graceful)
+  ok   stop_recording applied:false headless (no playback context)
+  ok   stop_recording lands no clips headless (clips:[])
+  ok   stop_recording reports a reason headless
+  ok   stop_recording emitted a transport event
+  ok   stop_recording emitted snapshot_invalidated
+  ok   stop_recording discardRecordings:true ok (graceful)
+  ok   stop_recording discard lands no clips headless
+  ok   stop_recording echoes discarded:true
+  ok   stop_recording when not recording is a no-op ok
+  ok   JSONL records stop_recording
+  ok   stop_recording logged undoable:false (recording-lifecycle op)
+  ok   arm_track (wave) disarm after record-to-take ok
+  ..   section "Wave B: record-to-take landing (stop_recording)" completed in 0.007s (16 checks, 0 failed)
+--- MON-003: monitoring round-trip latency readout ---
+  ok   session.roundTripLatencyMs present
+  ok   session.roundTripLatencySamples present
+  ok   roundTripLatencyMs is non-negative
+  ok   roundTripLatencySamples is non-negative
+  ok   no-audio headless -> roundTripLatencyMs=0 (honest, not a false value)
+  ok   no-audio headless -> roundTripLatencySamples=0
+  ok   session.bufferSize still present (no regression)
+  ok   session.outputLatencyMs still present (no regression)
+  ..   section "MON-003: monitoring round-trip latency readout" completed in 0.000s (8 checks, 0 failed)
+--- Wave: settings (audio gate / device / project lifecycle) ---
+  ok   snapshot session has audioEnabled gate field
+  ok   audioEnabled is false headless (no device)
+  ok   snapshot session has bitDepth readout
+  ok   snapshot session has bufferSize readout
+  ok   snapshot session has outputLatencyMs readout
+  ok   snapshot session has audioDeviceName readout
+  ok   snapshot exposes the audio selection block
+  ok   list_audio_devices ok
+  ok   list_audio_devices audioEnabled:false headless
+  ok   list_audio_devices types is an array (shape, possibly empty headless)
+  ok   list_audio_devices sampleRates is an array (empty with no open device)
+  ok   set_audio_device returns graceful error with no device
+  ok   set_audio_device error mentions no audio device
+  ok   set_buffer_size returns graceful error with no device
+  ok   session has tracks before new_project (sanity)
+  ok   new_project ok
+  ok   new_project starts with zero tracks
+  ok   new_project changed session.editFile path
+  ok   new_project wrote a fresh non-empty .tracktionedit
+  ok   create_track in new project ok
+  ok   new project has 1 track after create_track
+  ok   save new project ok
+  ok   second new_project ok
+  ok   second new project is empty
+  ok   open_project ok
+  ok   open_project round-trips the saved track count
+  ok   save_as ok
+  ok   save_as wrote a non-empty file
+  ok   save_as re-points session.editFile to the new path
+  ok   subsequent save (after save_as) ok
+  ok   open_project missing file errors
+  ok   create_track undo probe ok
+  ok   create_track added a track
+  ok   undo ok
+  ok   undo reverted the create_track (count dropped by 1)
+  ok   re-open saved project ok
+  ok   undo on freshly-opened project ok
+  ok   undo is a no-op after open_project (no stray transaction leaked)
+  ok   snapshot still well-formed after project-undo isolation
+  ok   JSONL records set_audio_device
+  ok   JSONL records new_project
+  ok   JSONL records save_as
+  ok   set_audio_device logged undoable:false (machine preference)
+  ok   new_project logged undoable:false (whole-Edit replacement)
+  ok   save_as logged undoable:false (whole-Edit persist)
+  ok   restored the session edit (clean teardown)
+  ..   section "Wave: settings (audio gate / device / project lifecycle)" completed in 0.071s (46 checks, 0 failed)
+--- Project safety: auto-save / dirty flag (gap 1) ---
+  ok   save establishes a clean baseline
+  ok   engine clean immediately after save
+  ok   snapshot.session.dirty false when clean
+  ok   create_track ok
+  ok   mutating command marks the engine dirty
+  ok   snapshot.session.dirty true when dirty
+  ok   saveIfDirty saves when dirty (returns true)
+  ok   engine clean after saveIfDirty
+  ok   saveIfDirty is a no-op when clean (returns false)
+  ok   second mutation ok
+  ok   dirty again after another mutation
+  ok   save command ok
+  ok   save command clears the dirty flag
+  ok   undo probe 2
+  ok   undo probe 1
+  ok   probe tracks reverted (clean teardown)
+  ..   section "Project safety: auto-save / dirty flag (gap 1)" completed in 0.016s (16 checks, 0 failed)
+--- Project safety: reopen last project on relaunch (gap 2) ---
+  ok   rememberProject writes last-project.json
+  ok   startupEditFile resolves to the remembered project (relaunch reopens it)
+  ok   startupEditFile falls back to session.tracktionedit when the last project is missing
+  ok   new_project relaunch-A ok
+  ok   new_project updates the remembered last project
+  ok   new_project relaunch-B ok
+  ok   snapshot.session.recentProjects lists projects
+  ok   recentProjects is newest-first (relaunch-B first)
+  ok   open_project relaunch-A ok
+  ok   open_project updates the remembered last project
+  ok   restored the session edit (gap2 teardown)
+  ..   section "Project safety: reopen last project on relaunch (gap 2)" completed in 0.029s (11 checks, 0 failed)
+--- Project safety: open_recent by index (AL-007) ---
+  ok   new_project recent-A ok
+  ok   new_project recent-B ok
+  ok   recentProjects has >= 2 entries for the index test
+  ok   recent[0] is the newest project (B)
+  ok   open_recent index 1 ok
+  ok   open_recent index 1 opened the older project (A)
+  ok   open_recent updates the remembered last project
+  ok   open_recent index 0 ok
+  ok   open_recent index 0 opened the most-recent project
+  ok   open_recent without an index errors
+  ok   open_recent with a negative index errors
+  ok   open_recent with an out-of-range index errors
+  ok   a rejected open_recent leaves the current Edit untouched
+  ok   a deleted project is dropped from recentProjects (no ghost index)
+  ok   restored the session edit (AL-007 teardown)
+  ..   section "Project safety: open_recent by index (AL-007)" completed in 0.034s (15 checks, 0 failed)
+--- Project safety: portable projects + relink (gap 3) ---
+  ok   new_project portable-src ok
+  ok   create_track returned a trackId
+  ok   add_test_tone_clip ok
+  ok   clip audio starts in the shared session pool
+  ok   drum track for portability ok
+  ok   save_as ok
+  ok   save_as created a project-local audio/ dir
+  ok   save_as consolidated audio into the project
+  ok   save_as consolidated the drum-kit sampler sounds into the project
+  ok   saved edit has no shared-pool absolute audio path
+  ok   saved edit references the kit by a relative path, not the absolute app-bundle path
+  ok   saved edit references audio by a co-located relative path (no ../)
+  ok   copied the project dir to a new location
+  ok   open the moved project ok
+  ok   moved project's clip resolves to co-located audio (portable)
+  ok   resolved source is inside the moved project dir
+  ok   reopened session edit
+  ok   add relink probe clip ok
+  ok   relink probe clip initially present
+  ok   deleted source reports sourceMissing
+  ok   relink_clip ok
+  ok   relink_clip clears sourceMissing
+  ok   restored the session edit (gap3 teardown)
+  ..   section "Project safety: portable projects + relink (gap 3)" completed in 0.062s (23 checks, 0 failed)
+--- AL-009: Save-As render-artifact consolidation + portability ---
+  ok   new_project renders-portable ok
+  ok   create_render_layer (fake) ok
+  ok   render_layer ok (artifact produced in the session pool)
+  ok   render produced a cached artifact
+  ok   save_as ok
+  ok   save_as created a project-local audio/renders/ dir
+  ok   save_as consolidated the render artifact into the project
+  ok   render artifact still resolves after consolidation (relative)
+  ok   saved edit has no absolute session-pool render path
+  ok   saved edit references the render artifact by a co-located relative path (no ../)
+  ok   copied the render project to a new location
+  ok   open the moved render project ok
+  ok   moved project restored the clip + its render layer
+  ok   moved project's render artifact resolves to the co-located copy (portable)
+  ok   freeze_layer succeeds on the moved project (artifact survived the move)
+  ok   accept_render succeeds on the moved project (lands the consolidated artifact)
+  ok   accept landed a new clip on the neural lane from the moved artifact
+  ok   restored the session edit (AL-009 teardown)
+  ..   section "AL-009: Save-As render-artifact consolidation + portability" completed in 0.439s (18 checks, 0 failed)
+--- PRF-001 (multicore audio threads) ---
+  ok   snapshot session has availableCores readout
+  ok   availableCores >= 1
+  ok   snapshot session has audioThreads readout
+  ok   audioThreads within [1..availableCores]
+  ok   audioThreads defaults to auto (resolved core count)
+  ok   set_audio_threads ok with no audio device (not device-gated)
+  ok   set_audio_threads echoes availableCores
+  ok   set_audio_threads echoes the resolved audioThreads
+  ok   snapshot reflects new audioThreads after set
+  ok   audioThreadsAuto is false after an explicit set
+  ok   set_audio_threads threads=0 errors gracefully
+  ok   set_audio_threads threads=99999 errors gracefully
+  ok   set_audio_threads cores+1 ok (clamps)
+  ok   set_audio_threads clamps cores+1 down to availableCores
+  ok   set_audio_threads missing threads errors
+  ok   JSONL records set_audio_threads
+  ok   set_audio_threads logged undoable:false (machine preference)
+  ok   snapshot does not log set_audio_threads (read-only readout)
+  ok   restore set_audio_threads to all cores ok
+  ..   section "PRF-001 (multicore audio threads)" completed in 0.014s (19 checks, 0 failed)
+--- BRW-001 (content browser / list_directory) ---
+  ok   seeded a real .wav into the browse dir
+  ok   list_directory ok
+  ok   list_directory exists:true for a real dir
+  ok   list_directory path round-trips (normalized)
+  ok   list_directory roots is a non-empty array
+  ok   list_directory roots includes a Home pointing at a real directory
+  ok   list_directory entries is an array
+  ok   wav entry isDir:false
+  ok   wav entry size > 0
+  ok   list_directory lists the seeded .wav (extension filter passes audio)
+  ok   list_directory filters out the .txt (extension filter excludes non-audio)
+  ok   list_directory lists the subfolder (isDir:true)
+  ok   list_directory into subfolder exists:true
+  ok   list_directory subfolder parent points back to the parent dir
+  ok   list_directory missing path still ok (graceful shape)
+  ok   list_directory missing path exists:false
+  ok   list_directory missing path has an error string
+  ok   list_directory still returns roots on a missing path
+  ok   list_directory missing path has empty entries
+  ok   list_directory relative path returns ok (graceful)
+  ok   list_directory relative path exists:false (not resolved against cwd)
+  ok   list_directory with no path defaults to a real Home dir
+  ok   list_directory is READ-ONLY (not logged)
+  ok   list_directory emits no snapshot_invalidated (read-only)
+  ok   create track for browse import ok
+  ok   import_clip on a browsed file ok (reuses existing import path)
+  ok   browsed file imported as a real clip (browser -> import_clip seam)
+  ok   file_peaks ok for a real wav
+  ok   file_peaks returns a non-empty peak array
+  ok   file_peaks errors on a missing file
+  ok   audition_file ok for a real wav
+  ok   stop_audition ok
+  ok   audition_file errors on a missing file
+  ..   section "BRW-001 (content browser / list_directory)" completed in 1.089s (33 checks, 0 failed)
+--- Wave: clip clipboard / paste_clip (AED-001) ---
+  ok   create track A ok
+  ok   add_test_tone_clip on A ok
+  ok   captured A's clip descriptor from the snapshot
+  ok   captured descriptor is a wave clip
+  ok   create track B ok
+  ok   paste_clip onto B ok
+  ok   B has exactly one clip after paste_clip
+  ok   pasted clip length matches the source clip
+  ok   pasted clip has a name
+  ok   pasted clip starts at the requested time
+  ok   source clip on A untouched (copy, not move)
+  ok   undo after paste_clip ok
+  ok   undo removed the pasted clip from B (paste_clip is undoable)
+  ok   add_midi_clip ok
+  ok   add_note 1 ok
+  ok   add_note 2 ok
+  ok   captured the MIDI clip descriptor
+  ok   source MIDI clip carries 2 notes
+  ok   paste_clip (midi) onto another track ok
+  ok   MIDI destination has one pasted clip
+  ok   pasted MIDI clip carries the same note count
+  ok   paste_clip with missing trackId errors
+  ok   paste_clip with missing clip errors
+  ok   paste_clip with unknown clip type errors
+  ok   paste_clip wave with missing source errors
+  ok   failed wave paste left no orphan clip (zero side effects)
+  ok   JSONL records paste_clip
+  ok   paste_clip logged undoable:true (genuine edit)
+  ..   section "Wave: clip clipboard / paste_clip (AED-001)" completed in 0.019s (28 checks, 0 failed)
+--- Wave: command-log inspector (AGT-001) ---
+  ok   create_track LogProbe ok
+  ok   found the LogProbe track id
+  ok   rename_track LogProbe2 ok (this is the most-recent command before get_command_log)
+  ok   get_command_log ok
+  ok   get_command_log entries is an array
+  ok   get_command_log total grew by at least the 2 commands issued (create_track + rename_track)
+  ok   get_command_log honours limit (<= 5 entries)
+  ok   get_command_log returned at least one entry
+  ok   most-recent-first: entry[0].command == rename_track (the last command issued)
+  ok   every entry has command (non-empty), ok (bool), undoable (bool)
+  ok   get_command_log is READ-ONLY: it does NOT appear in the log it returns
+  ok   get_command_log with zero limit still ok (default applies)
+  ok   get_command_log zero-limit entries is a well-formed array
+  ok   get_command_log tolerates malformed/partial lines (no crash)
+  ok   malformed / non-object lines are skipped (total unchanged)
+  ok   mosh-log.jsonl contains NO get_command_log token (read-only confirmed at the file)
+  ..   section "Wave: command-log inspector (AGT-001)" completed in 14.357s (16 checks, 0 failed)
+--- Wave A: project format (PRJ-008) / device prefs (PRE-001) / record latency (ARE-003) ---
+  ok   snapshot session.project block present
+  ok   session.project has sampleRate
+  ok   session.project has bitDepth
+  ok   session.project has timeBase
+  ok   session.project.timeBase defaults to seconds
+  ok   set_project_settings rejects sampleRate < 7000
+  ok   set_project_settings rejects bitDepth not in {16,24,32}
+  ok   set_project_settings rejects unknown timeBase
+  ok   set_project_settings ok
+  ok   session.project.sampleRate == 96000 after set
+  ok   session.project.bitDepth == 16 after set
+  ok   session.project.timeBase == barsBeats after set
+  ok   save (project settings) ok
+  ok   reload (project settings) ok
+  ok   session.project.sampleRate survived save+reload
+  ok   session.project.bitDepth survived save+reload
+  ok   session.project.timeBase survived save+reload
+  ok   set_project_settings logged undoable:false (preference)
+  ok   create renderable seed track for export-default ok
+  ok   seed a renderable clip for export-default ok
+  ok   export_audio (with a renderable seed clip) ok
+  ok   export_audio defaults bitDepth from project setting (16)
+  ok   export_audio defaults sampleRate from project setting (96000)
+  ok   set_project_settings restore defaults ok
+  ok   PRE-001: list_audio_devices ok headless
+  ok   PRE-001: list_audio_devices audioEnabled:false headless
+  ok   PRE-001: set_audio_device returns graceful error with no device
+  ok   PRE-001: set_audio_device error mentions no audio device
+  ok   ARE-003: session has totalLatencyMs readout
+  ok   ARE-003: session has latencyContextReady readout
+  ok   ARE-003: latencyContextReady false headless (no prepared graph)
+  ok   ARE-003: set_transport record degrades gracefully headless (no crash)
+  ok   ARE-003: not recording headless (no audio device)
+  ..   section "Wave A: project format (PRJ-008) / device prefs (PRE-001) / record latency (ARE-003)" completed in 3.236s (33 checks, 0 failed)
+--- KEY-001: musical key (set_key, snapshot.project.key, persistence) ---
+  ok   snapshot session.project.key block present
+  ok   session.project.key has tonic
+  ok   session.project.key has mode
+  ok   session.project.key.tonic defaults to A
+  ok   session.project.key.mode defaults to minor
+  ok   set_key (F# dorian) ok
+  ok   session.project.key.tonic == F# after set
+  ok   session.project.key.mode == dorian after set
+  ok   set_key rejects a tonic outside NOTE_PC
+  ok   rejected tonic left storage untouched (still F#)
+  ok   set_key rejects a mode outside SCALES
+  ok   rejected mode left storage untouched (still dorian)
+  ok   save (musical key) ok
+  ok   reload (musical key) ok
+  ok   session.project.key.tonic survived save+reload
+  ok   session.project.key.mode survived save+reload
+  ok   set_key logged undoable:false (preference)
+  ok   undo after set_key does NOT revert the key (non-undoable)
+  ok   set_key restore default (A minor) ok
+  ..   section "KEY-001: musical key (set_key, snapshot.project.key, persistence)" completed in 0.047s (19 checks, 0 failed)
+--- itemID allocator regression (engine patch) ---
+  ok   id-probe: create_track ok
+  ok   id-probe: found the probe track
+  ok   id-probe: load built-in effect ok
+  ok   id-probe: save ok
+  ok   id-probe: reload ok
+  ok   id-probe: probe track survived reload
+  ok   id-probe: remove_plugin ok
+  ok   id-probe: load a second plugin after remove (no duplicate-itemID assert)
+  ..   section "itemID allocator regression (engine patch)" completed in 0.050s (8 checks, 0 failed)
+--- Wave C: delete_time_range (ARR-010) ---
+  ok   range: track created
+  ok   range: 0..4s tone clip created
+  ok   range: track has 1 clip before delete
+  ok   range: start>end errors
+  ok   range: start==end errors
+  ok   range: errored delete left the clip untouched
+  ok   range: delete_time_range [1,2] ok
+  ok   range: clip split into 2 segments
+  ok   range: left segment is 0..1s
+  ok   range: right segment is 2..4s (1..2s gap)
+  ok   range: undo ok
+  ok   range: undo restored a single clip
+  ok   range: restored clip spans 0..4s
+  ok   range: no-overlap range is ok (no-op)
+  ok   range: no-overlap removed nothing
+  ok   range: no-overlap left the clip whole
+  ok   range: empty-track delete is ok (no-op)
+  ok   range: empty track removed nothing
+  ok   range: enclosed clip present before delete
+  ok   range: enclosing-range delete ok
+  ok   range: clip fully inside was removed whole
+  ok   range: track empty after enclosing delete
+  ..   section "Wave C: delete_time_range (ARR-010)" completed in 0.057s (22 checks, 0 failed)
+--- Wave D: group / submix tracks (MIX-008) ---
+  ok   group: two member tracks created
+  ok   group: create_group_track ok
+  ok   group: returned a groupId
+  ok   group: moved both member tracks
+  ok   group: snapshot entry has type group
+  ok   group: snapshot entry flagged isGroup
+  ok   group: snapshot entry carries the name
+  ok   group: snapshot entry has a real fader (submix VolumeAndPan)
+  ok   group: member A carries parentId
+  ok   group: member B carries parentId
+  ok   group: set_track_volume on the group ok
+  ok   group: group fader reflects -6 dB
+  ok   group: rename_track on the group ok
+  ok   group: rename reflects
+  ok   group: undo (create_group_track) ok
+  ok   group: undo removed the group entry
+  ok   group: undo restored A to top level
+  ok   group: redo ok
+  ok   group: redo re-grouped A
+  ok   group: ungroup_track ok
+  ok   group: ungroup hoisted both members
+  ok   group: A back at top level
+  ok   group: both members survived the ungroup
+  ok   group: group entry gone after ungroup
+  ok   group: undo (ungroup) ok
+  ok   group: undo restored the grouping
+  ok   group: ungroup bad id errors
+  ok   group: unknown member ids are skipped, not fatal
+  ok   group: nothing moved for unknown ids
+  ok   group: unknown ids reported
+  ok   group: create_group_track logged undoable:true
+  ok   group: ungroup_track logged undoable:true
+  ..   section "Wave D: group / submix tracks (MIX-008)" completed in 0.075s (32 checks, 0 failed)
+--- Wave R: routing (RTG-001 inputs / RTG-002 outputs) ---
+  ok   routing: list_wave_inputs ok
+  ok   routing: list_wave_inputs inputs is an array (empty headless)
+  ok   routing: list_track_outputs ok
+  ok   routing: list_track_outputs outputs is an array
+  ok   routing: list_track_outputs lists candidate tracks
+  ok   routing: list commands are READ-ONLY (not logged)
+  ok   routing: two tracks created
+  ok   routing: set_track_input ok (graceful headless)
+  ok   routing: applied:false headless (choice stored)
+  ok   routing: chosen input deviceID in the snapshot
+  ok   routing: set_track_input missing deviceID errors
+  ok   routing: set_track_input bad trackId errors
+  ok   routing: save+reload ok
+  ok   routing: input choice persists across save/reload
+  ok   routing: default output emits no output field
+  ok   routing: set_track_output A->B ok
+  ok   routing: output isTrack
+  ok   routing: output destId == B
+  ok   routing: B->A rejected (cycle)
+  ok   routing: A->A rejected (self)
+  ok   routing: save+reload ok (output)
+  ok   routing: A->B routing persists across save/reload
+  ok   routing: reset to default ok
+  ok   routing: reset removed the output field
+  ok   routing: undo (reset) ok
+  ok   routing: undo restored the A->B routing
+  ok   routing: set_track_output with no destination errors
+  ok   routing: set_track_input logged undoable:false (preference)
+  ok   routing: set_track_output logged undoable:true (Edit mutation)
+  ..   section "Wave R: routing (RTG-001 inputs / RTG-002 outputs)" completed in 0.153s (29 checks, 0 failed)
+--- Wave T: tempo map (SES-001) ---
+  ok   tempo: base 120 ok
+  ok   tempo: insert 140 at 10s ok
+  ok   tempo: insert 90 at 20s ok
+  ok   tempo: two points added
+  ok   tempo: engine bpm at 5s == 120
+  ok   tempo: engine bpm at 15s == 140 (step, no ramp)
+  ok   tempo: engine bpm at 25s == 90
+  ok   tempo: engine bpm just before the change == 120 (hold)
+  ok   tempo: beats<->seconds round-trip across the map
+  ok   tempo: snapshot tempoMap has all points
+  ok   tempo: snapshot last point is the 90 BPM change
+  ok   tempo: session.tempo still reports point 0 (back-compat)
+  ok   tempo: insert 3/4 at 30s ok
+  ok   tempo: time-sig point added
+  ok   tempo: snapshot timeSigMap serialized
+  ok   tempo: last sig point is 3/4
+  ok   tempo: save+reload ok
+  ok   tempo: map survives save/reload (140 at 15s)
+  ok   tempo: remove middle point ok
+  ok   tempo: bpm at 15s reverts after removal
+  ok   tempo: undo (remove) ok
+  ok   tempo: undo restored the 140 change
+  ok   tempo: removing point 0 rejected
+  ok   tempo: out-of-range index rejected
+  ok   tempo: negative time rejected
+  ok   tempo: absurd bpm rejected
+  ok   tempo: removing sig point 0 rejected
+  ok   tempo: non-power-of-two denominator rejected
+  ok   tempo: insert_tempo_change logged undoable:true
+  ok   tempo: remove_tempo_change logged undoable:true
+  ok   tempo: insert_time_sig_change logged undoable:true
+  ..   section "Wave T: tempo map (SES-001)" completed in 0.121s (31 checks, 0 failed)
+--- Wave V: tempo ramps (curves) ---
+  ok   ramp: base 120 ok
+  ok   ramp: insert 60 at 8s ok (step by default)
+  ok   ramp: step span holds 120 mid-way
+  ok   ramp: step-only map emits NO tempoSections (lean snapshot)
+  ok   ramp: set_tempo_curve index 0 -> linear ok
+  ok   ramp: engine bpm mid-ramp is strictly between 60 and 120
+  ok   ramp: engine bpm decreases monotonically across the ramp
+  ok   ramp: tempoMap[0].curve == 0 serialized
+  ok   ramp: fine tempoSections emitted (more than the points)
+  ok   ramp: section times strictly increasing
+  ok   ramp: undo (set_tempo_curve) ok
+  ok   ramp: undo restored the step (120 mid-way)
+  ok   ramp: undo removed tempoSections
+  ok   ramp: redo ok
+  ok   ramp: redo restored the ramp
+  ok   ramp: insert with curve arg ok
+  ok   ramp: inserted point carries curve 0
+  ok   ramp: bad index rejected
+  ok   ramp: missing curve rejected
+  ok   ramp: set_tempo_curve logged undoable:true
+  ..   section "Wave V: tempo ramps (curves)" completed in 0.022s (20 checks, 0 failed)
+--- Wave V: audio warp (auto-tempo) ---
+  ok   warp: 2s tone clip ok
+  ok   warp: clip starts at 2.0s
+  ok   warp: enable ok
+  ok   warp: stretch mode is SoundTouch (vendored stretcher compiled in)
+  ok   warp: enabling at the same tempo is a 1:1 no-op
+  ok   warp: snapshot clip carries autoTempo
+  ok   warp: sourceBpm defaulted to the map tempo (120)
+  ok   warp: tempo 120 -> 60 ok
+  ok   warp: half tempo DOUBLES the clip length (4.0s)
+  ok   warp: tempo back to 120 ok
+  ok   warp: restoring tempo restores the length (2.0s)
+  ok   warp: disable ok
+  ok   warp: unwarped clip ignores the tempo change
+  ok   warp: missing autoTempo rejected
+  ok   warp: bad clipId rejected
+  ok   warp: set_clip_warp logged undoable:true
+  ..   section "Wave V: audio warp (auto-tempo)" completed in 0.047s (16 checks, 0 failed)
+--- Moshi brain proxy + native voice (packaged-app pieces) ---
+  ok   brain: three providers enumerated (deepseek/openai/xai)
+  ok   brain: MOSHI_BRAIN_PROVIDER selects the default provider
+  ok   brain: resolved provider carries its env url/model
+  ok   brain: an explicit complete provider is honoured over the default
+  ok   brain: an incomplete requested provider falls back to a configured one
+  ok   brain: chat() rejects a non-array messages payload with an error shape
+  ok   brain: nothing resolves when no key is set
+  ok   brain: chat() with no provider returns { ok:false } (no crash, no network)
+  ok   voice: macOS Speech available (SFSpeechRecognizer present)
+  ok   voice: a fresh NativeSpeech is idle
+  ok   voice: stop() while idle is a safe no-op
+  ..   section "Moshi brain proxy + native voice (packaged-app pieces)" completed in 0.007s (11 checks, 0 failed)
+--- Multiplayer: stable logical track IDs (MP-001) ---
+  ok   create_track MP One ok
+  ok   create_track MP Two ok
+  ok   two MP tracks present in snapshot
+  ok   track 'MP One' has a non-empty logicalId
+  ok   track 'MP Two' has a non-empty logicalId
+  ok   the two tracks have distinct logicalIds
+  ok   logicalId looks like a juce::Uuid string
+  ok   save ok (MP-001)
+  ok   reload ok (MP-001)
+  ok   logicalId of 'MP One' survives save/reload
+  ok   logicalId of 'MP Two' survives save/reload
+  ..   section "Multiplayer: stable logical track IDs (MP-001)" completed in 0.040s (11 checks, 0 failed)
+--- Multiplayer: track serialize/apply round-trip (P1b) ---
+  ok   create RT Src
+  ok   RT Src engine id resolved
+  ok   RT Src midi clip created
+  ok   RT Src has 2 clips (wave + midi) before serialize
+  ok   RT Src volume is -6.5 pre-serialize (got -6.500)
+  ok   mp_serialize_track ok
+  ok   serialize produced a non-empty blob
+  ok   serialize reported the track's logicalId
+  ok   mutate removed all clips
+  ok   sentinel track present before apply
+  ok   apply_remote_track ok
+  ok   apply replaced the existing track (same logicalId)
+  ok   apply_remote_track does NOT emit snapshot_invalidated (no relay echo) [saw: ]
+  ok   restored track found by logicalId
+  ok   name restored
+  ok   volume restored (got -6.500)
+  ok   clip count restored (wave + midi)
+  ok   deep content survived: the MIDI note round-tripped
+  ok   undo ok
+  ok   undo removed the sentinel track (apply was NOT on the undo stack)
+  ok   applied track survives the undo (apply is outside the undo system)
+  ..   section "Multiplayer: track serialize/apply round-trip (P1b)" completed in 0.036s (21 checks, 0 failed)
+--- Multiplayer: lock guard at the mutation path (MP-001 P3) ---
+  ok   lock-test tracks resolved (logicalId + engine ids)
+  ok   mp_sync_locks activates the guard with peer-held locks
+  ok   track mutation on a peer-locked track is BLOCKED
+  ok   reads pass the guard
+  ok   a clip read on a peer-locked track is allowed
+  ok   track mutation on a FREE track is allowed
+  ok   clip mutation on a peer-locked track's clip is BLOCKED (clip->track->logicalId)
+  ok   session-global op BLOCKED while the session lock is peer-held
+  ok   mp_sync_locks deactivates
+  ok   deactivating restores unguarded single-player track edits
+  ok   structural ops unblocked after deactivate (single-player regression safety)
+  ..   section "Multiplayer: lock guard at the mutation path (MP-001 P3)" completed in 0.035s (11 checks, 0 failed)
+--- Multiplayer: project bootstrap (P6) ---
+  ok   new_project (bootstrap source) ok
+  ok   fresh project is empty
+  ok   mp_serialize_project ok
+  ok   serialized a 2-track project bundle
+  ok   bundle carries the annotations subtree
+  ok   bootstrap bundle carries per-track audioRefs (audio late-join)
+  ok   bootstrap audioRef hash is a sha256
+  ok   serialize content-addressed the host audio clip to a by-hash stem
+  ok   bootstrap by-hash ref has no spurious '../' (audio/by-hash/466160b910c61d3952d6b5feeacd0fd525e8abb9f27adaf3f71499d21f5523c0.wav)
+  ok   new_project (joiner wipe) ok
+  ok   joiner starts empty before bootstrap
+  ok   mp_apply_bootstrap ok
+  ok   joiner adopts the host's pre-existing annotation via bootstrap
+  ok   bootstrap applied 2 tracks
+  ok   joiner now holds the host's 2 tracks
+  ok   Boot A logicalId preserved across bootstrap
+  ok   Boot B logicalId preserved across bootstrap
+  ok   Boot A's clip survived the bootstrap (deep content)
+  ok   joiner's bootstrapped clip references the by-hash stem
+  ..   section "Multiplayer: project bootstrap (P6)" completed in 0.066s (19 checks, 0 failed)
+--- Multiplayer: structural sync (scalar session-global ops) ---
+  ok   baseline tempo is 120
+  ok   session active, peer holds the session lock
+  ok   local tempo change blocked while the peer holds the session lock
+  ok   tempo unchanged after the blocked local change
+  ok   mp_apply_structural ok
+  ok   peer's tempo change applied (guard bypassed)
+  ok   session deactivated
+  ..   section "Multiplayer: structural sync (scalar session-global ops)" completed in 0.003s (7 checks, 0 failed)
+--- Multiplayer: export after commit (by-hash ref resolves — guards the export hang) ---
+  ok   new_project (mp export isolation) ok
+  ok   create_track (audio) ok
+  ok   add_test_tone_clip ok
+  ok   edit file is absent at commit time (the bug's precondition)
+  ok   mp_commit_track (audio) ok
+  ok   committed clip points at the by-hash stem
+  ok   by-hash ref has no spurious '../' so it resolves inside the session (audio/by-hash/466160b910c61d3952d6b5feeacd0fd525e8abb9f27adaf3f71499d21f5523c0.wav)
+  ok   committed clip's resolved source exists on disk
+  ok   export_audio after mp_commit_track COMPLETES (no hang)
+  ok   exported MP-committed audio is NON-SILENT (the stem actually rendered)
+  ok   re-persist the edit after the mp-commit-export probe
+  ..   section "Multiplayer: export after commit (by-hash ref resolves — guards the export hang)" completed in 0.508s (11 checks, 0 failed)
+--- Relink: export after relink to a local copy (guards the export hang) ---
+  ok   new_project (relink export isolation) ok
+  ok   create_track (audio) ok
+  ok   add_test_tone_clip ok
+  ok   probe clip present
+  ok   probe clip's source starts OUTSIDE the project dir
+  ok   copied source to a project-local file
+  ok   relink target is under the project dir (=> relative ref)
+  ok   edit file is absent at relink time (the bug's precondition)
+  ok   relink_clip to the local copy ok
+  ok   relinked ref has no spurious '../' so it resolves inside the session (audio/relinked.wav)
+  ok   relinked clip's resolved source exists on disk
+  ok   export_audio after relink_clip COMPLETES (no hang)
+  ok   exported relinked audio is NON-SILENT (the relinked source actually rendered)
+  ok   re-persist the edit after the relink-export probe
+  ..   section "Relink: export after relink to a local copy (guards the export hang)" completed in 0.462s (14 checks, 0 failed)
+--- Song sections (MOSH_SECTIONS) ---
+  ok   create_section ok
+  ok   create_section returns a sectionId
+  ok   snapshot.sections grew by one
+  ok   new section name is Hook
+  ok   section startBeat is 24
+  ok   rename_section ok
+  ok   rename reflected in snapshot
+  ok   move_section ok
+  ok   move reflected in snapshot
+  ok   undo (move_section) ok
+  ok   undo restores the prior range
+  ok   undo leaves the rename intact
+  ok   save (sections) ok
+  ok   reload (sections) ok
+  ok   section persists across save/reload
+  ok   section range persists across save/reload
+  ok   remove_section ok
+  ok   section gone from snapshot after remove
+  ok   rename of a removed section fails cleanly
+  ..   section "Song sections (MOSH_SECTIONS)" completed in 0.007s (19 checks, 0 failed)
+--- Timeline annotations (MOSH_ANNOTATIONS) ---
+  ok   create_annotation ok
+  ok   create_annotation returns an annotationId
+  ok   snapshot.annotations grew by one
+  ok   annotation text round-trips
+  ok   annotation carries its author
+  ok   annotation beat is 24
+  ok   edit_annotation ok
+  ok   edit reflected in snapshot
+  ok   move_annotation ok
+  ok   move reflected in snapshot
+  ok   undo (move_annotation) ok
+  ok   undo restores the prior beat
+  ok   undo leaves the edit intact
+  ok   save (annotations) ok
+  ok   reload (annotations) ok
+  ok   annotation persists across save/reload
+  ok   annotation author persists across save/reload
+  ok   create_annotation with an explicit id ok
+  ok   explicit-id annotation lands with that id
+  ok   remove_annotation ok
+  ok   annotation gone from snapshot after remove
+  ok   edit of a removed annotation fails cleanly
+  ..   section "Timeline annotations (MOSH_ANNOTATIONS)" completed in 0.007s (22 checks, 0 failed)
+===== 1008/1008 checks passed, 0 failed =====
+
+Cleaning up temp files..
+== installed selftest run 2 ==
+Settings file: /Users/emiliosanchez-harris/Library/Mosh/Settings.xml
+Creating Default Controllers...
+
+===== Mosh Stage 1 command-surface harness =====
+--- Stage 1: command surface / cold snapshot ---
+  ok   cold snapshot has no tracks
+  ok   snapshot schemaVersion == 1
+  ok   import_clip of an invalid file fails
+  ok   failed invalid import created no stray track (no partial mutation)
+  ok   create_track ok
+  ok   snapshot has 1 track after create_track
+  ok   track name == Drums
+  ok   create_track emitted snapshot_invalidated
+  ok   add_test_tone_clip ok
+  ok   track has 1 clip
+  ok   clip type == wave
+  ok   clip length ~= 2.0s
+  ok   clip source WAV exists on disk
+  ok   set_transport play ok
+  ..   (no-audio headless run — live-playback checks done via the GUI)
+  ok   seek to 1.0s reflected in snapshot
+  ok   set_transport emitted a transport event
+  ok   add_render_layer ok
+  ok   clip now hasRenderLayer
+  ok   undo removed the render layer
+  ok   undo removed the clip
+  ok   undo removed the track
+  ok   redo restored the track
+  ok   redo restored the clip
+  ok   render layer restored by redo
+  ok   save ok
+  ok   reload ok
+  ok   reload restored 1 track
+  ok   reload restored 1 clip
+  ok   reload restored MOSH_RENDERLAYER node
+  ok   JSONL log file exists
+  ok   JSONL records create_track
+  ok   JSONL records import_clip
+  ok   JSONL records set_transport
+  ok   JSONL records undo
+  ..   section "Stage 1: command surface / cold snapshot" completed in 0.023s (34 checks, 0 failed)
+--- Agent batch: N edits = one undo step ---
+  ok   batch_begin ok
+  ok   second batch_begin errors (already open)
+  ok   two tracks created inside the batch
+  ok   batch_end ok
+  ok   second batch_end errors (none open)
+  ok   one undo reverts the whole batch (both tracks gone)
+  ok   one redo restores the whole batch
+  ok   batch undone again — clean state for Stage 2
+  ..   section "Agent batch: N edits = one undo step" completed in 0.004s (8 checks, 0 failed)
+--- Stage 2: arrangement + mixer ---
+  ok   move_clip ok
+  ok   clip moved to 2.0s
+  ok   trim_clip ok
+  ok   clip trimmed to 1.0s
+  ok   split_clip ok
+  ok   split produced 2 clips
+  ok   set_track_volume ok
+  ok   track volume ~= -6 dB
+  ok   track pan ~= 0.5
+  ok   track muted
+  ok   track soloed
+  ok   get_clip_peaks ok
+  ok   peaks array non-empty
+  ..   section "Stage 2: arrangement + mixer" completed in 0.001s (13 checks, 0 failed)
+--- BRW-007: import_clip_data (bytes-over-bridge) ---
+  ok   have a real source WAV for import_clip_data
+  ok   WAV base64-encoded
+  ok   import_clip_data ok
+  ok   import_clip_data added a clip
+  ok   found the imported clip by its source path
+  ok   imported clip length matches the true source duration
+  ok   imported file exists under sessionDir/imports
+  ok   undo removed the imported clip
+  ok   redo restored the imported clip
+  ok   import_clip_data undone (clean state for later tests)
+  ok   import_clip_data rejects invalid base64
+  ok   import_clip_data rejects non-audio bytes
+  ok   non-audio import added no clip
+  ok   non-audio temp file was deleted (no garbage)
+  ok   import_clip_data rejects missing name
+  ok   import_clip_data rejects missing dataBase64
+  ..   section "BRW-007: import_clip_data (bytes-over-bridge)" completed in 0.033s (16 checks, 0 failed)
+--- Stage 3: VST3 hosting + MIDI ---
+  ok   list_plugins ok
+  ..    813 VST3 plugin(s) scanned
+  ok   load_plugin (effect) on wave track ok
+  ok   effect appears in the plugin chain
+  ok   set_plugin_param ok
+  ok   bypass_plugin disabled the plugin
+  ok   hosted plugin persists across save/reload
+  ok   remove_plugin ok
+  ok   plugin removed from chain
+  ok   add_midi_clip ok
+  ok   MIDI clip on synth track
+  ok   clip type == midi
+  ok   load_plugin (instrument) on MIDI track ok
+  ok   instrument appears in the synth track chain
+  ..   section "Stage 3: VST3 hosting + MIDI" completed in 0.125s (13 checks, 0 failed)
+--- INS-002/INS-005: AU hosting + scan / blocklist ---
+  ok   AudioUnit format registered in the format manager
+  ok   list_plugins ok (INS-005)
+  ok   list_plugins payload carries a counts object
+  ok   counts.total == plugins array size
+  ok   counts.vst3 and counts.au are present
+  ok   every list_plugins entry has a non-empty format field
+  ok   rescan_plugins (vst3) ok
+  ok   rescan_plugins reports a count (>= prior total)
+  ok   get_plugin_blocklist ok
+  ok   get_plugin_blocklist returns an array
+  ok   block_plugin rejects an unresolvable id with errResult
+  ok   block_plugin ok (real catalog entry or raw AU id)
+  ok   blocked id appears in get_plugin_blocklist
+  ok   blocked VST3 removed from list_plugins immediately
+  ok   clear_plugin_blocklist ok
+  ok   blocklist empty after clear_plugin_blocklist
+  ok   get_plugin_blocklist is READ-ONLY (not logged)
+  ..   section "INS-002/INS-005: AU hosting + scan / blocklist" completed in 0.025s (17 checks, 0 failed)
+--- Wave 2: tempo / meter / metronome / nav ---
+  ok   set_tempo ok
+  ok   snapshot tempo reflects set_tempo
+  ok   set_tempo clamps absurd BPM to <= 999
+  ok   set_time_signature ok
+  ok   snapshot numerator == 3
+  ok   snapshot denominator == 4
+  ok   set_time_signature rejects non-power-of-two denominator
+  ok   metronome enabled in snapshot
+  ok   metronome disabled in snapshot
+  ok   to_end moves the playhead to the edit length
+  ok   to_start returns the playhead to 0
+  ..   section "Wave 2: tempo / meter / metronome / nav" completed in 0.001s (11 checks, 0 failed)
+--- Wave 5: mixer / master / pan ---
+  ok   snapshot exposes a master bus
+  ok   set_master_volume ok
+  ok   master volume reflects in snapshot
+  ok   set_master_pan ok
+  ok   master pan reflects in snapshot
+  ok   set_track_pan ok
+  ok   track pan reflects in snapshot
+  ..   section "Wave 5: mixer / master / pan" completed in 0.000s (7 checks, 0 failed)
+--- Wave 6: clip editing ---
+  ok   tone clip created for editing
+  ok   rename_clip ok
+  ok   clip name reflects rename
+  ok   set_clip_mute ok
+  ok   clip mute reflects in snapshot
+  ok   undo set_clip_mute ok
+  ok   undo restores clip unmuted
+  ok   redo set_clip_mute ok
+  ok   redo re-applies clip mute
+  ok   set_clip_gain ok
+  ok   clip gain reflects in snapshot
+  ok   set_clip_gain (over-max) ok
+  ok   clip gain clamps to +24 dB
+  ok   set_clip_gain (under-min) ok
+  ok   clip gain clamps to -48 dB
+  ok   undo set_clip_gain ok
+  ok   undo restores prior clip gain (+24)
+  ok   duplicate_clip ok
+  ok   duplicate adds a clip to the track
+  ok   duplicate lands after the original
+  ok   undo duplicate_clip ok
+  ok   undo removes the duplicated clip
+  ok   redo duplicate_clip ok
+  ok   redo restores the duplicated clip
+  ok   remove_clip ok
+  ok   remove_clip deletes the clip
+  ..   section "Wave 6: clip editing" completed in 0.008s (26 checks, 0 failed)
+--- Wave 7: parameter automation ---
+  ok   compressor loaded for automation
+  ok   add_automation_point ok
+  ok   second automation point ok
+  ok   snapshot serialises 2 automation points
+  ok   param flagged automated
+  ok   automation point values round-trip 0..1
+  ok   set_automation_point ok
+  ok   remove_automation_point ok
+  ok   remove drops an automation point
+  ok   clear_automation ok
+  ok   clear_automation removes all points
+  ..   section "Wave 7: parameter automation" completed in 0.002s (11 checks, 0 failed)
+--- Wave 1: built-in plugin palette ---
+  ok   list_builtins ok
+  ok   built-in palette has the full catalog
+  ok   catalog includes compressor (effect)
+  ok   catalog includes 4osc (instrument)
+  ok   load_builtin (compressor) ok
+  ok   compressor appears in the chain
+  ok   built-in plugin flagged builtin=true in snapshot
+  ok   built-in plugin carries its category
+  ok   set_plugin_param on a built-in ok
+  ok   load_builtin (4osc synth) ok
+  ok   built-in 4osc flagged as an instrument
+  ok   built-in plugin persists across save/reload
+  ok   load_builtin rejects unknown type
+  ..   section "Wave 1: built-in plugin palette" completed in 0.075s (13 checks, 0 failed)
+--- PLG reorder: plugin chain ordering (reorder_plugin) ---
+  ok   reorder: load compressor
+  ok   reorder: load reverb
+  ok   reorder: load delay
+  ok   effects load in chain order C,R,D
+  ok   reorder_plugin with an out-of-bounds toIndex clamps to append (ok, no crash)
+  ok   compressor moved to the end of the chain
+  ok   undo reorder_plugin ok
+  ok   undo restores the prior plugin order
+  ok   reorder_plugin with a bad from-index errors
+  ..   section "PLG reorder: plugin chain ordering (reorder_plugin)" completed in 0.003s (9 checks, 0 failed)
+--- MON-004: PDC / reported-latency readout ---
+  ok   session.totalLatencySamples present
+  ok   session.totalLatencyMs present
+  ok   session.latencyContextReady present
+  ok   totalLatencySamples is non-negative
+  ok   totalLatencyMs is non-negative
+  ok   totalLatencyMs == samples / sampleRate * 1000 (consistent)
+  ok   no-audio headless -> latencyContextReady=false (honest, not a false 0.0 ms)
+  ok   no-audio headless -> totalLatencySamples=0
+  ..   section "MON-004: PDC / reported-latency readout" completed in 0.000s (8 checks, 0 failed)
+--- Stage 5: generative layer (FakeAdapter, full loop) ---
+  ok   create_render_layer ok
+  ok   render_layer ok (service spawned, job ran)
+  ok   first render is a cache MISS
+  ok   render completed -> status ready
+  ok   render produced a cached artifact (output.wav)
+  ok   identical re-render is a cache HIT (full fingerprint)
+  ok   param change -> dirty -> re-render (cache MISS)
+  ok   accept_render ok
+  ok   accept landed a new clip on a neural lane
+  ok   neural lane carries the accepted render
+  ok   accepted clip's source file exists and is non-empty (no broken clip)
+  ok   JSONL records accept_render (taste label)
+  ok   JSONL records reject_render (taste label)
+  ..   section "Stage 5: generative layer (FakeAdapter, full loop)" completed in 0.948s (13 checks, 0 failed)
+--- NRL-004: render-layer management ---
+  ok   reject_render did NOT remove the layer (still present)
+  ok   reject_render set status=dirty (re-roll, not remove)
+  ok   before bypass the landed neural clip plays (un-muted)
+  ok   bypass_layer ok
+  ok   bypass_layer{true} -> status bypassed
+  ok   bypass_layer{true} MUTES the landed neural clip (real audio re-route, not just a flag)
+  ok   bypass_layer{false} -> status ready
+  ok   bypass_layer{false} un-mutes the landed neural clip (render audible again)
+  ok   freeze_layer ok (artifact present)
+  ok   freeze_layer -> status frozen
+  ok   bounce_layer_to_clip ok
+  ok   bounce_layer_to_clip -> status bounced
+  ok   bounce landed audio on the neural lane (no track lost)
+  ok   freeze_layer on un-rendered layer errors (nothing to freeze)
+  ok   layer present before remove_render_layer
+  ok   remove_render_layer ok
+  ok   remove_render_layer cleared MOSH_RENDERLAYER (hasRenderLayer=false)
+  ok   create_render_layer succeeds again after remove (no 'already has a layer')
+  ok   remove_render_layer is undoable (layer restored)
+  ok   JSONL records remove_render_layer
+  ..   section "NRL-004: render-layer management" completed in 0.017s (20 checks, 0 failed)
+--- Route B: transform render mode (fake) ---
+  ok   create_render_layer (transform) ok
+  ok   transform render_layer ok (fake transform ran)
+  ok   first transform render is a cache MISS
+  ok   transform render completed -> ready
+  ok   transform produced a cached artifact (output.wav)
+  ok   identical transform re-render is a cache HIT
+  ok   changing transform target -> cache MISS
+  ok   changing transform strength -> cache MISS
+  ok   accept_render (transform) ok
+  ok   transform accept landed a clip on the Neural Renders lane
+  ok   accepted transform clip points at a real non-empty file
+  ..   section "Route B: transform render mode (fake)" completed in 0.862s (11 checks, 0 failed)
+--- Section-scoped render (rework-the-hook) ---
+  ok   create_render_layer with a sub-region ok
+  ok   layer region start = 0.5 s
+  ok   layer region end   = 1.0 s
+  ok   section-scoped render_layer ok
+  ok   section render staged an input.wav
+  ok   input.wav is the SECTION region (~0.5 s), not the whole clip (2 s)
+  ok   section-scoped accept_render ok
+  ok   accepted render landed bounded to the section (start ~0.5 s, length ~0.5 s)
+  ok   whole-clip render (no region) still renders (default path unchanged)
+  ok   whole-clip layer still renders after the clip moved (no stale-region error)
+  ok   accept after move ok
+  ok   moved whole-clip render lands at the clip's LIVE position (3.0 s), not the stale create spot
+  ..   section "Section-scoped render (rework-the-hook)" completed in 2.026s (12 checks, 0 failed)
+--- Stage 6: full producer loop + export ---
+  ok   host VST3 effect on the mix track
+  ok   generative transform rendered
+  ok   export_audio ok
+  ok   export produced a non-empty WAV (full producer loop)
+  ok   mix volume applied (-4 dB)
+  ok   rename applied
+  ok   undo reverted the rename
+  ok   redo restored the rename
+  ..   section "Stage 6: full producer loop + export" completed in 2.818s (8 checks, 0 failed)
+--- Export format / depth options (IOX-002, IOX-007) ---
+  ok   export_audio wav 16-bit ok
+  ok   wav export produced a non-empty .wav file
+  ok   wav export reports format wav
+  ok   wav export reports bitDepth 16
+  ok   export_audio aiff 24-bit ok
+  ok   aiff export produced a non-empty .aiff file
+  ok   aiff export reports format aiff
+  ok   aiff export reports bitDepth 24 (depth arg honored for non-wav)
+  ok   export_audio rejects an unsupported format (mp3)
+  ok   export_audio rejects an unsupported bit depth (wav 7)
+  ..   section "Export format / depth options (IOX-002, IOX-007)" completed in 4.521s (10 checks, 0 failed)
+--- Serum render compatibility (optional local plugin gate) ---
+  ok   Serum 2 VST3 is discoverable by exact name/manufacturer
+  ok   Serum probe MIDI clip added
+  ok   Serum 2 loaded by exact plugin id
+  ok   snapshot exposes hosted Serum metadata and realtime diagnostics
+  ok   Serum auto export ok
+  ok   Serum auto export selects realtime render mode
+  ok   Serum auto export reports the compatibility reason
+  ok   explicit fast export remains available with Serum
+  ok   explicit fast export reports fast render mode
+  ..   section "Serum render compatibility (optional local plugin gate)" completed in 2.810s (9 checks, 0 failed)
+--- Drums make sound (DRM-001) ---
+  ok   bundled drum kit is present (Resources/drumkits/mosh-kit)
+  ok   new_project (drum render isolation) ok
+  ok   create_track type:drum ok
+  ok   create_track reports type drum
+  ok   drum track auto-loaded an instrument
+  ok   snapshot serialises track type drum
+  ok   snapshot marks the drum track as an instrument host
+  ok   drum track hosts the built-in sampler
+  ok   empty drum MIDI clip added
+  ok   export of the empty drum track ok
+  ok   empty drum clip renders SILENT (no phantom drum sound)
+  ok   export of the programmed beat ok
+  ok   programmed drum beat renders NON-SILENT (sampler+kit actually sounds)
+  ok   save before reload ok
+  ok   reload ok
+  ok   drum track type survives save/reload
+  ok   the sampler survives save/reload
+  ok   re-export after reload ok
+  ok   drum beat still NON-SILENT after save/reload (sampler sounds restored)
+  ok   assign_sample maps a sample to a pad/note
+  ok   assign_sample added a 9th pad
+  ok   load_drum_kit (re)loads the 8-pad kit
+  ok   set_drum_lane mute ok
+  ok   muted kick (36) rides the snapshot
+  ok   set_drum_lane solo ok
+  ok   soloed snare (38) rides the snapshot
+  ok   set_drum_lane unmute ok
+  ok   unmuting clears the kick from the muted set
+  ok   drum-lane solo persists across save/reload
+  ok   new plain track is type audio
+  ok   set_track_type drum ok
+  ok   set_track_type flips the snapshot type
+  ok   set_track_type drum auto-loads the kit
+  ok   undo reverts set_track_type to audio
+  ok   undo removes the auto-loaded kit
+  ok   MIDI clip on a plain track auto-loads a default instrument
+  ok   the melodic default instrument is 4OSC
+  ok   MIDI clip on a wave track does NOT auto-load an instrument (wave audio preserved)
+  ..   (SA3 self-test skipped — set MOSH_SELFTEST_SA3=1 to exercise the real model)
+  ..   (transcribe self-test skipped — set MOSH_SELFTEST_TRANSCRIBE=1 to exercise Basic Pitch)
+  ..   (sketch self-test skipped — set MOSH_SELFTEST_SKETCH=1 + MOSH_SKETCH_FIXTURE_DIR to exercise the beatbox transduction)
+  ..   section "Drums make sound (DRM-001)" completed in 1.903s (38 checks, 0 failed)
+--- Wave 4: MIDI note editing ---
+  ok   MIDI clip serialises its 3 notes into the snapshot
+  ok   add_note ok
+  ok   add_note adds a note
+  ok   set_note ok
+  ok   set_note edits pitch + velocity
+  ok   quantize_notes ok
+  ok   quantize_notes snaps every note onto the beat grid
+  ok   remove_note ok
+  ok   remove_note removes a note
+  ok   notes persist across save/reload
+  ok   set_note rejects an out-of-range noteIndex
+  ok   remove every note empties the sequence
+  ok   an emptied MIDI clip is NOT auto-deleted (stays in the arrangement)
+  ..   section "Wave 4: MIDI note editing" completed in 0.013s (13 checks, 0 failed)
+--- Wave 8: sends / returns / aux buses ---
+  ok   create_bus ok
+  ok   snapshot lists the new bus
+  ok   return track flagged isReturn
+  ok   return track carries the bus number
+  ok   return track carries an auxreturn plugin
+  ok   second bus gets the next number
+  ok   add_send ok
+  ok   send appears with the right bus + dB
+  ok   duplicate send to a bus rejected
+  ok   send to a nonexistent bus rejected
+  ok   set_send_level ok
+  ok   send level reflects the new dB
+  ok   send mutes at -100 dB
+  ok   bus name persists across save/reload
+  ok   send persists across save/reload
+  ok   remove_send ok
+  ok   remove_send drops the send
+  ok   remove_send on a missing send errors
+  ok   undo remove_send ok
+  ok   undo restores the send at its prior level
+  ok   rename_bus ok
+  ok   bus name reflects rename
+  ok   rename_bus updates the return track name too
+  ok   rename_bus on a missing bus errors
+  ok   undo after rename_bus ok
+  ok   undo does NOT revert rename_bus — bus name AND return-track name both stay (non-undoable, no partial-undo)
+  ok   remove_bus ok
+  ok   remove_bus drops the bus
+  ok   remove_bus sweeps orphan sends
+  ..   section "Wave 8: sends / returns / aux buses" completed in 0.016s (29 checks, 0 failed)
+--- Wave 9: channel metering ---
+  ok   enable_track_meter ok
+  ok   track reports meterEnabled
+  ok   meter tap is hidden from the plugin rack
+  ok   enable_track_meter is idempotent
+  ok   still metered after idempotent enable
+  ok   enable_all_meters meters every track
+  ok   disable_track_meter ok
+  ok   meter removed after disable
+  ok   re-enabled before undo
+  ok   undo removes the meter tap
+  ok   redo restores the meter tap
+  ..   section "Wave 9: channel metering" completed in 0.003s (11 checks, 0 failed)
+--- Wave: recording (arm / input monitor) ---
+  ok   snapshot track has armed field
+  ok   snapshot track has monitor field
+  ok   snapshot track has hasInput field
+  ok   armed defaults false headless
+  ok   hasInput defaults false headless
+  ok   monitor defaults automatic headless
+  ok   arm_track ok (graceful)
+  ok   arm_track applied:false headless (no input device)
+  ok   arm_track emitted snapshot_invalidated
+  ok   track still not armed headless (no instance)
+  ok   arm_track bad trackId errors
+  ok   set_input_monitor mode:on ok (graceful)
+  ok   set_input_monitor applied:false headless
+  ok   set_input_monitor emitted snapshot_invalidated
+  ok   set_input_monitor bad mode errors
+  ok   set_input_monitor bad trackId errors
+  ok   arm_track disarm ok
+  ok   undo after arm_track ok (no crash)
+  ok   snapshot still well-formed after arm-then-undo
+  ok   JSONL records arm_track
+  ok   JSONL records set_input_monitor
+  ok   arm_track logged undoable:false (monitoring preference)
+  ok   set_input_monitor logged undoable:false (monitoring preference)
+  ok   list_takes on a missing clip errors (dispatched, not unknown)
+  ok   list_takes error is the handler's (no wave clip)
+  ok   set_current_take on a missing clip errors
+  ok   keep_take on a missing clip errors
+  ok   list_midi_inputs ok
+  ok   list_midi_inputs returns an inputs array
+  ok   list_midi_inputs reports audioEnabled gate
+  ok   list_midi_inputs is not logged (read-only)
+  ok   load 4OSC instrument ok
+  ok   instrument track reports isInstrument:true
+  ok   snapshot track has inputType field
+  ok   inputType defaults wave (no routed input headless)
+  ok   plain track reports isInstrument:false
+  ok   arm_track on instrument track ok (graceful)
+  ok   arm_track instrument applied:false headless (no MIDI device)
+  ok   arm_track (instrument) emitted snapshot_invalidated
+  ok   instrument track still not armed headless (no MIDI instance)
+  ok   arm_track (instrument) disarm ok
+  ok   undo after instrument arm_track ok (no crash)
+  ok   arm_track (MIDI path) logged undoable:false (preference)
+  ..   section "Wave: recording (arm / input monitor)" completed in 0.027s (43 checks, 0 failed)
+--- Wave B: record-to-take landing (stop_recording) ---
+  ok   arm_track (wave) ok for record-to-take
+  ok   set_transport record ok (graceful headless)
+  ok   set_transport record emitted a transport event
+  ok   stop_recording ok (graceful)
+  ok   stop_recording applied:false headless (no playback context)
+  ok   stop_recording lands no clips headless (clips:[])
+  ok   stop_recording reports a reason headless
+  ok   stop_recording emitted a transport event
+  ok   stop_recording emitted snapshot_invalidated
+  ok   stop_recording discardRecordings:true ok (graceful)
+  ok   stop_recording discard lands no clips headless
+  ok   stop_recording echoes discarded:true
+  ok   stop_recording when not recording is a no-op ok
+  ok   JSONL records stop_recording
+  ok   stop_recording logged undoable:false (recording-lifecycle op)
+  ok   arm_track (wave) disarm after record-to-take ok
+  ..   section "Wave B: record-to-take landing (stop_recording)" completed in 0.009s (16 checks, 0 failed)
+--- MON-003: monitoring round-trip latency readout ---
+  ok   session.roundTripLatencyMs present
+  ok   session.roundTripLatencySamples present
+  ok   roundTripLatencyMs is non-negative
+  ok   roundTripLatencySamples is non-negative
+  ok   no-audio headless -> roundTripLatencyMs=0 (honest, not a false value)
+  ok   no-audio headless -> roundTripLatencySamples=0
+  ok   session.bufferSize still present (no regression)
+  ok   session.outputLatencyMs still present (no regression)
+  ..   section "MON-003: monitoring round-trip latency readout" completed in 0.000s (8 checks, 0 failed)
+--- Wave: settings (audio gate / device / project lifecycle) ---
+  ok   snapshot session has audioEnabled gate field
+  ok   audioEnabled is false headless (no device)
+  ok   snapshot session has bitDepth readout
+  ok   snapshot session has bufferSize readout
+  ok   snapshot session has outputLatencyMs readout
+  ok   snapshot session has audioDeviceName readout
+  ok   snapshot exposes the audio selection block
+  ok   list_audio_devices ok
+  ok   list_audio_devices audioEnabled:false headless
+  ok   list_audio_devices types is an array (shape, possibly empty headless)
+  ok   list_audio_devices sampleRates is an array (empty with no open device)
+  ok   set_audio_device returns graceful error with no device
+  ok   set_audio_device error mentions no audio device
+  ok   set_buffer_size returns graceful error with no device
+  ok   session has tracks before new_project (sanity)
+  ok   new_project ok
+  ok   new_project starts with zero tracks
+  ok   new_project changed session.editFile path
+  ok   new_project wrote a fresh non-empty .tracktionedit
+  ok   create_track in new project ok
+  ok   new project has 1 track after create_track
+  ok   save new project ok
+  ok   second new_project ok
+  ok   second new project is empty
+  ok   open_project ok
+  ok   open_project round-trips the saved track count
+  ok   save_as ok
+  ok   save_as wrote a non-empty file
+  ok   save_as re-points session.editFile to the new path
+  ok   subsequent save (after save_as) ok
+  ok   open_project missing file errors
+  ok   create_track undo probe ok
+  ok   create_track added a track
+  ok   undo ok
+  ok   undo reverted the create_track (count dropped by 1)
+  ok   re-open saved project ok
+  ok   undo on freshly-opened project ok
+  ok   undo is a no-op after open_project (no stray transaction leaked)
+  ok   snapshot still well-formed after project-undo isolation
+  ok   JSONL records set_audio_device
+  ok   JSONL records new_project
+  ok   JSONL records save_as
+  ok   set_audio_device logged undoable:false (machine preference)
+  ok   new_project logged undoable:false (whole-Edit replacement)
+  ok   save_as logged undoable:false (whole-Edit persist)
+  ok   restored the session edit (clean teardown)
+  ..   section "Wave: settings (audio gate / device / project lifecycle)" completed in 0.072s (46 checks, 0 failed)
+--- Project safety: auto-save / dirty flag (gap 1) ---
+  ok   save establishes a clean baseline
+  ok   engine clean immediately after save
+  ok   snapshot.session.dirty false when clean
+  ok   create_track ok
+  ok   mutating command marks the engine dirty
+  ok   snapshot.session.dirty true when dirty
+  ok   saveIfDirty saves when dirty (returns true)
+  ok   engine clean after saveIfDirty
+  ok   saveIfDirty is a no-op when clean (returns false)
+  ok   second mutation ok
+  ok   dirty again after another mutation
+  ok   save command ok
+  ok   save command clears the dirty flag
+  ok   undo probe 2
+  ok   undo probe 1
+  ok   probe tracks reverted (clean teardown)
+  ..   section "Project safety: auto-save / dirty flag (gap 1)" completed in 0.016s (16 checks, 0 failed)
+--- Project safety: reopen last project on relaunch (gap 2) ---
+  ok   rememberProject writes last-project.json
+  ok   startupEditFile resolves to the remembered project (relaunch reopens it)
+  ok   startupEditFile falls back to session.tracktionedit when the last project is missing
+  ok   new_project relaunch-A ok
+  ok   new_project updates the remembered last project
+  ok   new_project relaunch-B ok
+  ok   snapshot.session.recentProjects lists projects
+  ok   recentProjects is newest-first (relaunch-B first)
+  ok   open_project relaunch-A ok
+  ok   open_project updates the remembered last project
+  ok   restored the session edit (gap2 teardown)
+  ..   section "Project safety: reopen last project on relaunch (gap 2)" completed in 0.029s (11 checks, 0 failed)
+--- Project safety: open_recent by index (AL-007) ---
+  ok   new_project recent-A ok
+  ok   new_project recent-B ok
+  ok   recentProjects has >= 2 entries for the index test
+  ok   recent[0] is the newest project (B)
+  ok   open_recent index 1 ok
+  ok   open_recent index 1 opened the older project (A)
+  ok   open_recent updates the remembered last project
+  ok   open_recent index 0 ok
+  ok   open_recent index 0 opened the most-recent project
+  ok   open_recent without an index errors
+  ok   open_recent with a negative index errors
+  ok   open_recent with an out-of-range index errors
+  ok   a rejected open_recent leaves the current Edit untouched
+  ok   a deleted project is dropped from recentProjects (no ghost index)
+  ok   restored the session edit (AL-007 teardown)
+  ..   section "Project safety: open_recent by index (AL-007)" completed in 0.035s (15 checks, 0 failed)
+--- Project safety: portable projects + relink (gap 3) ---
+  ok   new_project portable-src ok
+  ok   create_track returned a trackId
+  ok   add_test_tone_clip ok
+  ok   clip audio starts in the shared session pool
+  ok   drum track for portability ok
+  ok   save_as ok
+  ok   save_as created a project-local audio/ dir
+  ok   save_as consolidated audio into the project
+  ok   save_as consolidated the drum-kit sampler sounds into the project
+  ok   saved edit has no shared-pool absolute audio path
+  ok   saved edit references the kit by a relative path, not the absolute app-bundle path
+  ok   saved edit references audio by a co-located relative path (no ../)
+  ok   copied the project dir to a new location
+  ok   open the moved project ok
+  ok   moved project's clip resolves to co-located audio (portable)
+  ok   resolved source is inside the moved project dir
+  ok   reopened session edit
+  ok   add relink probe clip ok
+  ok   relink probe clip initially present
+  ok   deleted source reports sourceMissing
+  ok   relink_clip ok
+  ok   relink_clip clears sourceMissing
+  ok   restored the session edit (gap3 teardown)
+  ..   section "Project safety: portable projects + relink (gap 3)" completed in 0.064s (23 checks, 0 failed)
+--- AL-009: Save-As render-artifact consolidation + portability ---
+  ok   new_project renders-portable ok
+  ok   create_render_layer (fake) ok
+  ok   render_layer ok (artifact produced in the session pool)
+  ok   render produced a cached artifact
+  ok   save_as ok
+  ok   save_as created a project-local audio/renders/ dir
+  ok   save_as consolidated the render artifact into the project
+  ok   render artifact still resolves after consolidation (relative)
+  ok   saved edit has no absolute session-pool render path
+  ok   saved edit references the render artifact by a co-located relative path (no ../)
+  ok   copied the render project to a new location
+  ok   open the moved render project ok
+  ok   moved project restored the clip + its render layer
+  ok   moved project's render artifact resolves to the co-located copy (portable)
+  ok   freeze_layer succeeds on the moved project (artifact survived the move)
+  ok   accept_render succeeds on the moved project (lands the consolidated artifact)
+  ok   accept landed a new clip on the neural lane from the moved artifact
+  ok   restored the session edit (AL-009 teardown)
+  ..   section "AL-009: Save-As render-artifact consolidation + portability" completed in 0.429s (18 checks, 0 failed)
+--- PRF-001 (multicore audio threads) ---
+  ok   snapshot session has availableCores readout
+  ok   availableCores >= 1
+  ok   snapshot session has audioThreads readout
+  ok   audioThreads within [1..availableCores]
+  ok   audioThreads defaults to auto (resolved core count)
+  ok   set_audio_threads ok with no audio device (not device-gated)
+  ok   set_audio_threads echoes availableCores
+  ok   set_audio_threads echoes the resolved audioThreads
+  ok   snapshot reflects new audioThreads after set
+  ok   audioThreadsAuto is false after an explicit set
+  ok   set_audio_threads threads=0 errors gracefully
+  ok   set_audio_threads threads=99999 errors gracefully
+  ok   set_audio_threads cores+1 ok (clamps)
+  ok   set_audio_threads clamps cores+1 down to availableCores
+  ok   set_audio_threads missing threads errors
+  ok   JSONL records set_audio_threads
+  ok   set_audio_threads logged undoable:false (machine preference)
+  ok   snapshot does not log set_audio_threads (read-only readout)
+  ok   restore set_audio_threads to all cores ok
+  ..   section "PRF-001 (multicore audio threads)" completed in 0.015s (19 checks, 0 failed)
+--- BRW-001 (content browser / list_directory) ---
+  ok   seeded a real .wav into the browse dir
+  ok   list_directory ok
+  ok   list_directory exists:true for a real dir
+  ok   list_directory path round-trips (normalized)
+  ok   list_directory roots is a non-empty array
+  ok   list_directory roots includes a Home pointing at a real directory
+  ok   list_directory entries is an array
+  ok   wav entry isDir:false
+  ok   wav entry size > 0
+  ok   list_directory lists the seeded .wav (extension filter passes audio)
+  ok   list_directory filters out the .txt (extension filter excludes non-audio)
+  ok   list_directory lists the subfolder (isDir:true)
+  ok   list_directory into subfolder exists:true
+  ok   list_directory subfolder parent points back to the parent dir
+  ok   list_directory missing path still ok (graceful shape)
+  ok   list_directory missing path exists:false
+  ok   list_directory missing path has an error string
+  ok   list_directory still returns roots on a missing path
+  ok   list_directory missing path has empty entries
+  ok   list_directory relative path returns ok (graceful)
+  ok   list_directory relative path exists:false (not resolved against cwd)
+  ok   list_directory with no path defaults to a real Home dir
+  ok   list_directory is READ-ONLY (not logged)
+  ok   list_directory emits no snapshot_invalidated (read-only)
+  ok   create track for browse import ok
+  ok   import_clip on a browsed file ok (reuses existing import path)
+  ok   browsed file imported as a real clip (browser -> import_clip seam)
+  ok   file_peaks ok for a real wav
+  ok   file_peaks returns a non-empty peak array
+  ok   file_peaks errors on a missing file
+  ok   audition_file ok for a real wav
+  ok   stop_audition ok
+  ok   audition_file errors on a missing file
+  ..   section "BRW-001 (content browser / list_directory)" completed in 1.180s (33 checks, 0 failed)
+--- Wave: clip clipboard / paste_clip (AED-001) ---
+  ok   create track A ok
+  ok   add_test_tone_clip on A ok
+  ok   captured A's clip descriptor from the snapshot
+  ok   captured descriptor is a wave clip
+  ok   create track B ok
+  ok   paste_clip onto B ok
+  ok   B has exactly one clip after paste_clip
+  ok   pasted clip length matches the source clip
+  ok   pasted clip has a name
+  ok   pasted clip starts at the requested time
+  ok   source clip on A untouched (copy, not move)
+  ok   undo after paste_clip ok
+  ok   undo removed the pasted clip from B (paste_clip is undoable)
+  ok   add_midi_clip ok
+  ok   add_note 1 ok
+  ok   add_note 2 ok
+  ok   captured the MIDI clip descriptor
+  ok   source MIDI clip carries 2 notes
+  ok   paste_clip (midi) onto another track ok
+  ok   MIDI destination has one pasted clip
+  ok   pasted MIDI clip carries the same note count
+  ok   paste_clip with missing trackId errors
+  ok   paste_clip with missing clip errors
+  ok   paste_clip with unknown clip type errors
+  ok   paste_clip wave with missing source errors
+  ok   failed wave paste left no orphan clip (zero side effects)
+  ok   JSONL records paste_clip
+  ok   paste_clip logged undoable:true (genuine edit)
+  ..   section "Wave: clip clipboard / paste_clip (AED-001)" completed in 0.021s (28 checks, 0 failed)
+--- Wave: command-log inspector (AGT-001) ---
+  ok   create_track LogProbe ok
+  ok   found the LogProbe track id
+  ok   rename_track LogProbe2 ok (this is the most-recent command before get_command_log)
+  ok   get_command_log ok
+  ok   get_command_log entries is an array
+  ok   get_command_log total grew by at least the 2 commands issued (create_track + rename_track)
+  ok   get_command_log honours limit (<= 5 entries)
+  ok   get_command_log returned at least one entry
+  ok   most-recent-first: entry[0].command == rename_track (the last command issued)
+  ok   every entry has command (non-empty), ok (bool), undoable (bool)
+  ok   get_command_log is READ-ONLY: it does NOT appear in the log it returns
+  ok   get_command_log with zero limit still ok (default applies)
+  ok   get_command_log zero-limit entries is a well-formed array
+  ok   get_command_log tolerates malformed/partial lines (no crash)
+  ok   malformed / non-object lines are skipped (total unchanged)
+  ok   mosh-log.jsonl contains NO get_command_log token (read-only confirmed at the file)
+  ..   section "Wave: command-log inspector (AGT-001)" completed in 3.803s (16 checks, 0 failed)
+--- Wave A: project format (PRJ-008) / device prefs (PRE-001) / record latency (ARE-003) ---
+  ok   snapshot session.project block present
+  ok   session.project has sampleRate
+  ok   session.project has bitDepth
+  ok   session.project has timeBase
+  ok   session.project.timeBase defaults to seconds
+  ok   set_project_settings rejects sampleRate < 7000
+  ok   set_project_settings rejects bitDepth not in {16,24,32}
+  ok   set_project_settings rejects unknown timeBase
+  ok   set_project_settings ok
+  ok   session.project.sampleRate == 96000 after set
+  ok   session.project.bitDepth == 16 after set
+  ok   session.project.timeBase == barsBeats after set
+  ok   save (project settings) ok
+  ok   reload (project settings) ok
+  ok   session.project.sampleRate survived save+reload
+  ok   session.project.bitDepth survived save+reload
+  ok   session.project.timeBase survived save+reload
+  ok   set_project_settings logged undoable:false (preference)
+  ok   create renderable seed track for export-default ok
+  ok   seed a renderable clip for export-default ok
+  ok   export_audio (with a renderable seed clip) ok
+  ok   export_audio defaults bitDepth from project setting (16)
+  ok   export_audio defaults sampleRate from project setting (96000)
+  ok   set_project_settings restore defaults ok
+  ok   PRE-001: list_audio_devices ok headless
+  ok   PRE-001: list_audio_devices audioEnabled:false headless
+  ok   PRE-001: set_audio_device returns graceful error with no device
+  ok   PRE-001: set_audio_device error mentions no audio device
+  ok   ARE-003: session has totalLatencyMs readout
+  ok   ARE-003: session has latencyContextReady readout
+  ok   ARE-003: latencyContextReady false headless (no prepared graph)
+  ok   ARE-003: set_transport record degrades gracefully headless (no crash)
+  ok   ARE-003: not recording headless (no audio device)
+  ..   section "Wave A: project format (PRJ-008) / device prefs (PRE-001) / record latency (ARE-003)" completed in 4.131s (33 checks, 0 failed)
+--- KEY-001: musical key (set_key, snapshot.project.key, persistence) ---
+  ok   snapshot session.project.key block present
+  ok   session.project.key has tonic
+  ok   session.project.key has mode
+  ok   session.project.key.tonic defaults to A
+  ok   session.project.key.mode defaults to minor
+  ok   set_key (F# dorian) ok
+  ok   session.project.key.tonic == F# after set
+  ok   session.project.key.mode == dorian after set
+  ok   set_key rejects a tonic outside NOTE_PC
+  ok   rejected tonic left storage untouched (still F#)
+  ok   set_key rejects a mode outside SCALES
+  ok   rejected mode left storage untouched (still dorian)
+  ok   save (musical key) ok
+  ok   reload (musical key) ok
+  ok   session.project.key.tonic survived save+reload
+  ok   session.project.key.mode survived save+reload
+  ok   set_key logged undoable:false (preference)
+  ok   undo after set_key does NOT revert the key (non-undoable)
+  ok   set_key restore default (A minor) ok
+  ..   section "KEY-001: musical key (set_key, snapshot.project.key, persistence)" completed in 0.016s (19 checks, 0 failed)
+--- itemID allocator regression (engine patch) ---
+  ok   id-probe: create_track ok
+  ok   id-probe: found the probe track
+  ok   id-probe: load built-in effect ok
+  ok   id-probe: save ok
+  ok   id-probe: reload ok
+  ok   id-probe: probe track survived reload
+  ok   id-probe: remove_plugin ok
+  ok   id-probe: load a second plugin after remove (no duplicate-itemID assert)
+  ..   section "itemID allocator regression (engine patch)" completed in 0.202s (8 checks, 0 failed)
+--- Wave C: delete_time_range (ARR-010) ---
+  ok   range: track created
+  ok   range: 0..4s tone clip created
+  ok   range: track has 1 clip before delete
+  ok   range: start>end errors
+  ok   range: start==end errors
+  ok   range: errored delete left the clip untouched
+  ok   range: delete_time_range [1,2] ok
+  ok   range: clip split into 2 segments
+  ok   range: left segment is 0..1s
+  ok   range: right segment is 2..4s (1..2s gap)
+  ok   range: undo ok
+  ok   range: undo restored a single clip
+  ok   range: restored clip spans 0..4s
+  ok   range: no-overlap range is ok (no-op)
+  ok   range: no-overlap removed nothing
+  ok   range: no-overlap left the clip whole
+  ok   range: empty-track delete is ok (no-op)
+  ok   range: empty track removed nothing
+  ok   range: enclosed clip present before delete
+  ok   range: enclosing-range delete ok
+  ok   range: clip fully inside was removed whole
+  ok   range: track empty after enclosing delete
+  ..   section "Wave C: delete_time_range (ARR-010)" completed in 0.017s (22 checks, 0 failed)
+--- Wave D: group / submix tracks (MIX-008) ---
+  ok   group: two member tracks created
+  ok   group: create_group_track ok
+  ok   group: returned a groupId
+  ok   group: moved both member tracks
+  ok   group: snapshot entry has type group
+  ok   group: snapshot entry flagged isGroup
+  ok   group: snapshot entry carries the name
+  ok   group: snapshot entry has a real fader (submix VolumeAndPan)
+  ok   group: member A carries parentId
+  ok   group: member B carries parentId
+  ok   group: set_track_volume on the group ok
+  ok   group: group fader reflects -6 dB
+  ok   group: rename_track on the group ok
+  ok   group: rename reflects
+  ok   group: undo (create_group_track) ok
+  ok   group: undo removed the group entry
+  ok   group: undo restored A to top level
+  ok   group: redo ok
+  ok   group: redo re-grouped A
+  ok   group: ungroup_track ok
+  ok   group: ungroup hoisted both members
+  ok   group: A back at top level
+  ok   group: both members survived the ungroup
+  ok   group: group entry gone after ungroup
+  ok   group: undo (ungroup) ok
+  ok   group: undo restored the grouping
+  ok   group: ungroup bad id errors
+  ok   group: unknown member ids are skipped, not fatal
+  ok   group: nothing moved for unknown ids
+  ok   group: unknown ids reported
+  ok   group: create_group_track logged undoable:true
+  ok   group: ungroup_track logged undoable:true
+  ..   section "Wave D: group / submix tracks (MIX-008)" completed in 0.018s (32 checks, 0 failed)
+--- Wave R: routing (RTG-001 inputs / RTG-002 outputs) ---
+  ok   routing: list_wave_inputs ok
+  ok   routing: list_wave_inputs inputs is an array (empty headless)
+  ok   routing: list_track_outputs ok
+  ok   routing: list_track_outputs outputs is an array
+  ok   routing: list_track_outputs lists candidate tracks
+  ok   routing: list commands are READ-ONLY (not logged)
+  ok   routing: two tracks created
+  ok   routing: set_track_input ok (graceful headless)
+  ok   routing: applied:false headless (choice stored)
+  ok   routing: chosen input deviceID in the snapshot
+  ok   routing: set_track_input missing deviceID errors
+  ok   routing: set_track_input bad trackId errors
+  ok   routing: save+reload ok
+  ok   routing: input choice persists across save/reload
+  ok   routing: default output emits no output field
+  ok   routing: set_track_output A->B ok
+  ok   routing: output isTrack
+  ok   routing: output destId == B
+  ok   routing: B->A rejected (cycle)
+  ok   routing: A->A rejected (self)
+  ok   routing: save+reload ok (output)
+  ok   routing: A->B routing persists across save/reload
+  ok   routing: reset to default ok
+  ok   routing: reset removed the output field
+  ok   routing: undo (reset) ok
+  ok   routing: undo restored the A->B routing
+  ok   routing: set_track_output with no destination errors
+  ok   routing: set_track_input logged undoable:false (preference)
+  ok   routing: set_track_output logged undoable:true (Edit mutation)
+  ..   section "Wave R: routing (RTG-001 inputs / RTG-002 outputs)" completed in 0.032s (29 checks, 0 failed)
+--- Wave T: tempo map (SES-001) ---
+  ok   tempo: base 120 ok
+  ok   tempo: insert 140 at 10s ok
+  ok   tempo: insert 90 at 20s ok
+  ok   tempo: two points added
+  ok   tempo: engine bpm at 5s == 120
+  ok   tempo: engine bpm at 15s == 140 (step, no ramp)
+  ok   tempo: engine bpm at 25s == 90
+  ok   tempo: engine bpm just before the change == 120 (hold)
+  ok   tempo: beats<->seconds round-trip across the map
+  ok   tempo: snapshot tempoMap has all points
+  ok   tempo: snapshot last point is the 90 BPM change
+  ok   tempo: session.tempo still reports point 0 (back-compat)
+  ok   tempo: insert 3/4 at 30s ok
+  ok   tempo: time-sig point added
+  ok   tempo: snapshot timeSigMap serialized
+  ok   tempo: last sig point is 3/4
+  ok   tempo: save+reload ok
+  ok   tempo: map survives save/reload (140 at 15s)
+  ok   tempo: remove middle point ok
+  ok   tempo: bpm at 15s reverts after removal
+  ok   tempo: undo (remove) ok
+  ok   tempo: undo restored the 140 change
+  ok   tempo: removing point 0 rejected
+  ok   tempo: out-of-range index rejected
+  ok   tempo: negative time rejected
+  ok   tempo: absurd bpm rejected
+  ok   tempo: removing sig point 0 rejected
+  ok   tempo: non-power-of-two denominator rejected
+  ok   tempo: insert_tempo_change logged undoable:true
+  ok   tempo: remove_tempo_change logged undoable:true
+  ok   tempo: insert_time_sig_change logged undoable:true
+  ..   section "Wave T: tempo map (SES-001)" completed in 0.018s (31 checks, 0 failed)
+--- Wave V: tempo ramps (curves) ---
+  ok   ramp: base 120 ok
+  ok   ramp: insert 60 at 8s ok (step by default)
+  ok   ramp: step span holds 120 mid-way
+  ok   ramp: step-only map emits NO tempoSections (lean snapshot)
+  ok   ramp: set_tempo_curve index 0 -> linear ok
+  ok   ramp: engine bpm mid-ramp is strictly between 60 and 120
+  ok   ramp: engine bpm decreases monotonically across the ramp
+  ok   ramp: tempoMap[0].curve == 0 serialized
+  ok   ramp: fine tempoSections emitted (more than the points)
+  ok   ramp: section times strictly increasing
+  ok   ramp: undo (set_tempo_curve) ok
+  ok   ramp: undo restored the step (120 mid-way)
+  ok   ramp: undo removed tempoSections
+  ok   ramp: redo ok
+  ok   ramp: redo restored the ramp
+  ok   ramp: insert with curve arg ok
+  ok   ramp: inserted point carries curve 0
+  ok   ramp: bad index rejected
+  ok   ramp: missing curve rejected
+  ok   ramp: set_tempo_curve logged undoable:true
+  ..   section "Wave V: tempo ramps (curves)" completed in 0.006s (20 checks, 0 failed)
+--- Wave V: audio warp (auto-tempo) ---
+  ok   warp: 2s tone clip ok
+  ok   warp: clip starts at 2.0s
+  ok   warp: enable ok
+  ok   warp: stretch mode is SoundTouch (vendored stretcher compiled in)
+  ok   warp: enabling at the same tempo is a 1:1 no-op
+  ok   warp: snapshot clip carries autoTempo
+  ok   warp: sourceBpm defaulted to the map tempo (120)
+  ok   warp: tempo 120 -> 60 ok
+  ok   warp: half tempo DOUBLES the clip length (4.0s)
+  ok   warp: tempo back to 120 ok
+  ok   warp: restoring tempo restores the length (2.0s)
+  ok   warp: disable ok
+  ok   warp: unwarped clip ignores the tempo change
+  ok   warp: missing autoTempo rejected
+  ok   warp: bad clipId rejected
+  ok   warp: set_clip_warp logged undoable:true
+  ..   section "Wave V: audio warp (auto-tempo)" completed in 0.010s (16 checks, 0 failed)
+--- Moshi brain proxy + native voice (packaged-app pieces) ---
+  ok   brain: three providers enumerated (deepseek/openai/xai)
+  ok   brain: MOSHI_BRAIN_PROVIDER selects the default provider
+  ok   brain: resolved provider carries its env url/model
+  ok   brain: an explicit complete provider is honoured over the default
+  ok   brain: an incomplete requested provider falls back to a configured one
+  ok   brain: chat() rejects a non-array messages payload with an error shape
+  ok   brain: nothing resolves when no key is set
+  ok   brain: chat() with no provider returns { ok:false } (no crash, no network)
+  ok   voice: macOS Speech available (SFSpeechRecognizer present)
+  ok   voice: a fresh NativeSpeech is idle
+  ok   voice: stop() while idle is a safe no-op
+  ..   section "Moshi brain proxy + native voice (packaged-app pieces)" completed in 0.002s (11 checks, 0 failed)
+--- Multiplayer: stable logical track IDs (MP-001) ---
+  ok   create_track MP One ok
+  ok   create_track MP Two ok
+  ok   two MP tracks present in snapshot
+  ok   track 'MP One' has a non-empty logicalId
+  ok   track 'MP Two' has a non-empty logicalId
+  ok   the two tracks have distinct logicalIds
+  ok   logicalId looks like a juce::Uuid string
+  ok   save ok (MP-001)
+  ok   reload ok (MP-001)
+  ok   logicalId of 'MP One' survives save/reload
+  ok   logicalId of 'MP Two' survives save/reload
+  ..   section "Multiplayer: stable logical track IDs (MP-001)" completed in 0.014s (11 checks, 0 failed)
+--- Multiplayer: track serialize/apply round-trip (P1b) ---
+  ok   create RT Src
+  ok   RT Src engine id resolved
+  ok   RT Src midi clip created
+  ok   RT Src has 2 clips (wave + midi) before serialize
+  ok   RT Src volume is -6.5 pre-serialize (got -6.500)
+  ok   mp_serialize_track ok
+  ok   serialize produced a non-empty blob
+  ok   serialize reported the track's logicalId
+  ok   mutate removed all clips
+  ok   sentinel track present before apply
+  ok   apply_remote_track ok
+  ok   apply replaced the existing track (same logicalId)
+  ok   apply_remote_track does NOT emit snapshot_invalidated (no relay echo) [saw: ]
+  ok   restored track found by logicalId
+  ok   name restored
+  ok   volume restored (got -6.500)
+  ok   clip count restored (wave + midi)
+  ok   deep content survived: the MIDI note round-tripped
+  ok   undo ok
+  ok   undo removed the sentinel track (apply was NOT on the undo stack)
+  ok   applied track survives the undo (apply is outside the undo system)
+  ..   section "Multiplayer: track serialize/apply round-trip (P1b)" completed in 0.009s (21 checks, 0 failed)
+--- Multiplayer: lock guard at the mutation path (MP-001 P3) ---
+  ok   lock-test tracks resolved (logicalId + engine ids)
+  ok   mp_sync_locks activates the guard with peer-held locks
+  ok   track mutation on a peer-locked track is BLOCKED
+  ok   reads pass the guard
+  ok   a clip read on a peer-locked track is allowed
+  ok   track mutation on a FREE track is allowed
+  ok   clip mutation on a peer-locked track's clip is BLOCKED (clip->track->logicalId)
+  ok   session-global op BLOCKED while the session lock is peer-held
+  ok   mp_sync_locks deactivates
+  ok   deactivating restores unguarded single-player track edits
+  ok   structural ops unblocked after deactivate (single-player regression safety)
+  ..   section "Multiplayer: lock guard at the mutation path (MP-001 P3)" completed in 0.008s (11 checks, 0 failed)
+--- Multiplayer: project bootstrap (P6) ---
+  ok   new_project (bootstrap source) ok
+  ok   fresh project is empty
+  ok   mp_serialize_project ok
+  ok   serialized a 2-track project bundle
+  ok   bundle carries the annotations subtree
+  ok   bootstrap bundle carries per-track audioRefs (audio late-join)
+  ok   bootstrap audioRef hash is a sha256
+  ok   serialize content-addressed the host audio clip to a by-hash stem
+  ok   bootstrap by-hash ref has no spurious '../' (audio/by-hash/466160b910c61d3952d6b5feeacd0fd525e8abb9f27adaf3f71499d21f5523c0.wav)
+  ok   new_project (joiner wipe) ok
+  ok   joiner starts empty before bootstrap
+  ok   mp_apply_bootstrap ok
+  ok   joiner adopts the host's pre-existing annotation via bootstrap
+  ok   bootstrap applied 2 tracks
+  ok   joiner now holds the host's 2 tracks
+  ok   Boot A logicalId preserved across bootstrap
+  ok   Boot B logicalId preserved across bootstrap
+  ok   Boot A's clip survived the bootstrap (deep content)
+  ok   joiner's bootstrapped clip references the by-hash stem
+  ..   section "Multiplayer: project bootstrap (P6)" completed in 0.028s (19 checks, 0 failed)
+--- Multiplayer: structural sync (scalar session-global ops) ---
+  ok   baseline tempo is 120
+  ok   session active, peer holds the session lock
+  ok   local tempo change blocked while the peer holds the session lock
+  ok   tempo unchanged after the blocked local change
+  ok   mp_apply_structural ok
+  ok   peer's tempo change applied (guard bypassed)
+  ok   session deactivated
+  ..   section "Multiplayer: structural sync (scalar session-global ops)" completed in 0.000s (7 checks, 0 failed)
+--- Multiplayer: export after commit (by-hash ref resolves — guards the export hang) ---
+  ok   new_project (mp export isolation) ok
+  ok   create_track (audio) ok
+  ok   add_test_tone_clip ok
+  ok   edit file is absent at commit time (the bug's precondition)
+  ok   mp_commit_track (audio) ok
+  ok   committed clip points at the by-hash stem
+  ok   by-hash ref has no spurious '../' so it resolves inside the session (audio/by-hash/466160b910c61d3952d6b5feeacd0fd525e8abb9f27adaf3f71499d21f5523c0.wav)
+  ok   committed clip's resolved source exists on disk
+  ok   export_audio after mp_commit_track COMPLETES (no hang)
+  ok   exported MP-committed audio is NON-SILENT (the stem actually rendered)
+  ok   re-persist the edit after the mp-commit-export probe
+  ..   section "Multiplayer: export after commit (by-hash ref resolves — guards the export hang)" completed in 0.464s (11 checks, 0 failed)
+--- Relink: export after relink to a local copy (guards the export hang) ---
+  ok   new_project (relink export isolation) ok
+  ok   create_track (audio) ok
+  ok   add_test_tone_clip ok
+  ok   probe clip present
+  ok   probe clip's source starts OUTSIDE the project dir
+  ok   copied source to a project-local file
+  ok   relink target is under the project dir (=> relative ref)
+  ok   edit file is absent at relink time (the bug's precondition)
+  ok   relink_clip to the local copy ok
+  ok   relinked ref has no spurious '../' so it resolves inside the session (audio/relinked.wav)
+  ok   relinked clip's resolved source exists on disk
+  ok   export_audio after relink_clip COMPLETES (no hang)
+  ok   exported relinked audio is NON-SILENT (the relinked source actually rendered)
+  ok   re-persist the edit after the relink-export probe
+  ..   section "Relink: export after relink to a local copy (guards the export hang)" completed in 0.457s (14 checks, 0 failed)
+--- Song sections (MOSH_SECTIONS) ---
+  ok   create_section ok
+  ok   create_section returns a sectionId
+  ok   snapshot.sections grew by one
+  ok   new section name is Hook
+  ok   section startBeat is 24
+  ok   rename_section ok
+  ok   rename reflected in snapshot
+  ok   move_section ok
+  ok   move reflected in snapshot
+  ok   undo (move_section) ok
+  ok   undo restores the prior range
+  ok   undo leaves the rename intact
+  ok   save (sections) ok
+  ok   reload (sections) ok
+  ok   section persists across save/reload
+  ok   section range persists across save/reload
+  ok   remove_section ok
+  ok   section gone from snapshot after remove
+  ok   rename of a removed section fails cleanly
+  ..   section "Song sections (MOSH_SECTIONS)" completed in 0.007s (19 checks, 0 failed)
+--- Timeline annotations (MOSH_ANNOTATIONS) ---
+  ok   create_annotation ok
+  ok   create_annotation returns an annotationId
+  ok   snapshot.annotations grew by one
+  ok   annotation text round-trips
+  ok   annotation carries its author
+  ok   annotation beat is 24
+  ok   edit_annotation ok
+  ok   edit reflected in snapshot
+  ok   move_annotation ok
+  ok   move reflected in snapshot
+  ok   undo (move_annotation) ok
+  ok   undo restores the prior beat
+  ok   undo leaves the edit intact
+  ok   save (annotations) ok
+  ok   reload (annotations) ok
+  ok   annotation persists across save/reload
+  ok   annotation author persists across save/reload
+  ok   create_annotation with an explicit id ok
+  ok   explicit-id annotation lands with that id
+  ok   remove_annotation ok
+  ok   annotation gone from snapshot after remove
+  ok   edit of a removed annotation fails cleanly
+  ..   section "Timeline annotations (MOSH_ANNOTATIONS)" completed in 0.007s (22 checks, 0 failed)
+===== 1008/1008 checks passed, 0 failed =====
+
+Cleaning up temp files..
+== installed selftest run 3 ==
+Settings file: /Users/emiliosanchez-harris/Library/Mosh/Settings.xml
+Creating Default Controllers...
+
+===== Mosh Stage 1 command-surface harness =====
+--- Stage 1: command surface / cold snapshot ---
+  ok   cold snapshot has no tracks
+  ok   snapshot schemaVersion == 1
+  ok   import_clip of an invalid file fails
+  ok   failed invalid import created no stray track (no partial mutation)
+  ok   create_track ok
+  ok   snapshot has 1 track after create_track
+  ok   track name == Drums
+  ok   create_track emitted snapshot_invalidated
+  ok   add_test_tone_clip ok
+  ok   track has 1 clip
+  ok   clip type == wave
+  ok   clip length ~= 2.0s
+  ok   clip source WAV exists on disk
+  ok   set_transport play ok
+  ..   (no-audio headless run — live-playback checks done via the GUI)
+  ok   seek to 1.0s reflected in snapshot
+  ok   set_transport emitted a transport event
+  ok   add_render_layer ok
+  ok   clip now hasRenderLayer
+  ok   undo removed the render layer
+  ok   undo removed the clip
+  ok   undo removed the track
+  ok   redo restored the track
+  ok   redo restored the clip
+  ok   render layer restored by redo
+  ok   save ok
+  ok   reload ok
+  ok   reload restored 1 track
+  ok   reload restored 1 clip
+  ok   reload restored MOSH_RENDERLAYER node
+  ok   JSONL log file exists
+  ok   JSONL records create_track
+  ok   JSONL records import_clip
+  ok   JSONL records set_transport
+  ok   JSONL records undo
+  ..   section "Stage 1: command surface / cold snapshot" completed in 0.025s (34 checks, 0 failed)
+--- Agent batch: N edits = one undo step ---
+  ok   batch_begin ok
+  ok   second batch_begin errors (already open)
+  ok   two tracks created inside the batch
+  ok   batch_end ok
+  ok   second batch_end errors (none open)
+  ok   one undo reverts the whole batch (both tracks gone)
+  ok   one redo restores the whole batch
+  ok   batch undone again — clean state for Stage 2
+  ..   section "Agent batch: N edits = one undo step" completed in 0.003s (8 checks, 0 failed)
+--- Stage 2: arrangement + mixer ---
+  ok   move_clip ok
+  ok   clip moved to 2.0s
+  ok   trim_clip ok
+  ok   clip trimmed to 1.0s
+  ok   split_clip ok
+  ok   split produced 2 clips
+  ok   set_track_volume ok
+  ok   track volume ~= -6 dB
+  ok   track pan ~= 0.5
+  ok   track muted
+  ok   track soloed
+  ok   get_clip_peaks ok
+  ok   peaks array non-empty
+  ..   section "Stage 2: arrangement + mixer" completed in 0.001s (13 checks, 0 failed)
+--- BRW-007: import_clip_data (bytes-over-bridge) ---
+  ok   have a real source WAV for import_clip_data
+  ok   WAV base64-encoded
+  ok   import_clip_data ok
+  ok   import_clip_data added a clip
+  ok   found the imported clip by its source path
+  ok   imported clip length matches the true source duration
+  ok   imported file exists under sessionDir/imports
+  ok   undo removed the imported clip
+  ok   redo restored the imported clip
+  ok   import_clip_data undone (clean state for later tests)
+  ok   import_clip_data rejects invalid base64
+  ok   import_clip_data rejects non-audio bytes
+  ok   non-audio import added no clip
+  ok   non-audio temp file was deleted (no garbage)
+  ok   import_clip_data rejects missing name
+  ok   import_clip_data rejects missing dataBase64
+  ..   section "BRW-007: import_clip_data (bytes-over-bridge)" completed in 0.034s (16 checks, 0 failed)
+--- Stage 3: VST3 hosting + MIDI ---
+  ok   list_plugins ok
+  ..    813 VST3 plugin(s) scanned
+  ok   load_plugin (effect) on wave track ok
+  ok   effect appears in the plugin chain
+  ok   set_plugin_param ok
+  ok   bypass_plugin disabled the plugin
+  ok   hosted plugin persists across save/reload
+  ok   remove_plugin ok
+  ok   plugin removed from chain
+  ok   add_midi_clip ok
+  ok   MIDI clip on synth track
+  ok   clip type == midi
+  ok   load_plugin (instrument) on MIDI track ok
+  ok   instrument appears in the synth track chain
+  ..   section "Stage 3: VST3 hosting + MIDI" completed in 0.089s (13 checks, 0 failed)
+--- INS-002/INS-005: AU hosting + scan / blocklist ---
+  ok   AudioUnit format registered in the format manager
+  ok   list_plugins ok (INS-005)
+  ok   list_plugins payload carries a counts object
+  ok   counts.total == plugins array size
+  ok   counts.vst3 and counts.au are present
+  ok   every list_plugins entry has a non-empty format field
+  ok   rescan_plugins (vst3) ok
+  ok   rescan_plugins reports a count (>= prior total)
+  ok   get_plugin_blocklist ok
+  ok   get_plugin_blocklist returns an array
+  ok   block_plugin rejects an unresolvable id with errResult
+  ok   block_plugin ok (real catalog entry or raw AU id)
+  ok   blocked id appears in get_plugin_blocklist
+  ok   blocked VST3 removed from list_plugins immediately
+  ok   clear_plugin_blocklist ok
+  ok   blocklist empty after clear_plugin_blocklist
+  ok   get_plugin_blocklist is READ-ONLY (not logged)
+  ..   section "INS-002/INS-005: AU hosting + scan / blocklist" completed in 0.032s (17 checks, 0 failed)
+--- Wave 2: tempo / meter / metronome / nav ---
+  ok   set_tempo ok
+  ok   snapshot tempo reflects set_tempo
+  ok   set_tempo clamps absurd BPM to <= 999
+  ok   set_time_signature ok
+  ok   snapshot numerator == 3
+  ok   snapshot denominator == 4
+  ok   set_time_signature rejects non-power-of-two denominator
+  ok   metronome enabled in snapshot
+  ok   metronome disabled in snapshot
+  ok   to_end moves the playhead to the edit length
+  ok   to_start returns the playhead to 0
+  ..   section "Wave 2: tempo / meter / metronome / nav" completed in 0.002s (11 checks, 0 failed)
+--- Wave 5: mixer / master / pan ---
+  ok   snapshot exposes a master bus
+  ok   set_master_volume ok
+  ok   master volume reflects in snapshot
+  ok   set_master_pan ok
+  ok   master pan reflects in snapshot
+  ok   set_track_pan ok
+  ok   track pan reflects in snapshot
+  ..   section "Wave 5: mixer / master / pan" completed in 0.001s (7 checks, 0 failed)
+--- Wave 6: clip editing ---
+  ok   tone clip created for editing
+  ok   rename_clip ok
+  ok   clip name reflects rename
+  ok   set_clip_mute ok
+  ok   clip mute reflects in snapshot
+  ok   undo set_clip_mute ok
+  ok   undo restores clip unmuted
+  ok   redo set_clip_mute ok
+  ok   redo re-applies clip mute
+  ok   set_clip_gain ok
+  ok   clip gain reflects in snapshot
+  ok   set_clip_gain (over-max) ok
+  ok   clip gain clamps to +24 dB
+  ok   set_clip_gain (under-min) ok
+  ok   clip gain clamps to -48 dB
+  ok   undo set_clip_gain ok
+  ok   undo restores prior clip gain (+24)
+  ok   duplicate_clip ok
+  ok   duplicate adds a clip to the track
+  ok   duplicate lands after the original
+  ok   undo duplicate_clip ok
+  ok   undo removes the duplicated clip
+  ok   redo duplicate_clip ok
+  ok   redo restores the duplicated clip
+  ok   remove_clip ok
+  ok   remove_clip deletes the clip
+  ..   section "Wave 6: clip editing" completed in 0.008s (26 checks, 0 failed)
+--- Wave 7: parameter automation ---
+  ok   compressor loaded for automation
+  ok   add_automation_point ok
+  ok   second automation point ok
+  ok   snapshot serialises 2 automation points
+  ok   param flagged automated
+  ok   automation point values round-trip 0..1
+  ok   set_automation_point ok
+  ok   remove_automation_point ok
+  ok   remove drops an automation point
+  ok   clear_automation ok
+  ok   clear_automation removes all points
+  ..   section "Wave 7: parameter automation" completed in 0.002s (11 checks, 0 failed)
+--- Wave 1: built-in plugin palette ---
+  ok   list_builtins ok
+  ok   built-in palette has the full catalog
+  ok   catalog includes compressor (effect)
+  ok   catalog includes 4osc (instrument)
+  ok   load_builtin (compressor) ok
+  ok   compressor appears in the chain
+  ok   built-in plugin flagged builtin=true in snapshot
+  ok   built-in plugin carries its category
+  ok   set_plugin_param on a built-in ok
+  ok   load_builtin (4osc synth) ok
+  ok   built-in 4osc flagged as an instrument
+  ok   built-in plugin persists across save/reload
+  ok   load_builtin rejects unknown type
+  ..   section "Wave 1: built-in plugin palette" completed in 0.102s (13 checks, 0 failed)
+--- PLG reorder: plugin chain ordering (reorder_plugin) ---
+  ok   reorder: load compressor
+  ok   reorder: load reverb
+  ok   reorder: load delay
+  ok   effects load in chain order C,R,D
+  ok   reorder_plugin with an out-of-bounds toIndex clamps to append (ok, no crash)
+  ok   compressor moved to the end of the chain
+  ok   undo reorder_plugin ok
+  ok   undo restores the prior plugin order
+  ok   reorder_plugin with a bad from-index errors
+  ..   section "PLG reorder: plugin chain ordering (reorder_plugin)" completed in 0.009s (9 checks, 0 failed)
+--- MON-004: PDC / reported-latency readout ---
+  ok   session.totalLatencySamples present
+  ok   session.totalLatencyMs present
+  ok   session.latencyContextReady present
+  ok   totalLatencySamples is non-negative
+  ok   totalLatencyMs is non-negative
+  ok   totalLatencyMs == samples / sampleRate * 1000 (consistent)
+  ok   no-audio headless -> latencyContextReady=false (honest, not a false 0.0 ms)
+  ok   no-audio headless -> totalLatencySamples=0
+  ..   section "MON-004: PDC / reported-latency readout" completed in 0.000s (8 checks, 0 failed)
+--- Stage 5: generative layer (FakeAdapter, full loop) ---
+  ok   create_render_layer ok
+  ok   render_layer ok (service spawned, job ran)
+  ok   first render is a cache MISS
+  ok   render completed -> status ready
+  ok   render produced a cached artifact (output.wav)
+  ok   identical re-render is a cache HIT (full fingerprint)
+  ok   param change -> dirty -> re-render (cache MISS)
+  ok   accept_render ok
+  ok   accept landed a new clip on a neural lane
+  ok   neural lane carries the accepted render
+  ok   accepted clip's source file exists and is non-empty (no broken clip)
+  ok   JSONL records accept_render (taste label)
+  ok   JSONL records reject_render (taste label)
+  ..   section "Stage 5: generative layer (FakeAdapter, full loop)" completed in 0.935s (13 checks, 0 failed)
+--- NRL-004: render-layer management ---
+  ok   reject_render did NOT remove the layer (still present)
+  ok   reject_render set status=dirty (re-roll, not remove)
+  ok   before bypass the landed neural clip plays (un-muted)
+  ok   bypass_layer ok
+  ok   bypass_layer{true} -> status bypassed
+  ok   bypass_layer{true} MUTES the landed neural clip (real audio re-route, not just a flag)
+  ok   bypass_layer{false} -> status ready
+  ok   bypass_layer{false} un-mutes the landed neural clip (render audible again)
+  ok   freeze_layer ok (artifact present)
+  ok   freeze_layer -> status frozen
+  ok   bounce_layer_to_clip ok
+  ok   bounce_layer_to_clip -> status bounced
+  ok   bounce landed audio on the neural lane (no track lost)
+  ok   freeze_layer on un-rendered layer errors (nothing to freeze)
+  ok   layer present before remove_render_layer
+  ok   remove_render_layer ok
+  ok   remove_render_layer cleared MOSH_RENDERLAYER (hasRenderLayer=false)
+  ok   create_render_layer succeeds again after remove (no 'already has a layer')
+  ok   remove_render_layer is undoable (layer restored)
+  ok   JSONL records remove_render_layer
+  ..   section "NRL-004: render-layer management" completed in 0.018s (20 checks, 0 failed)
+--- Route B: transform render mode (fake) ---
+  ok   create_render_layer (transform) ok
+  ok   transform render_layer ok (fake transform ran)
+  ok   first transform render is a cache MISS
+  ok   transform render completed -> ready
+  ok   transform produced a cached artifact (output.wav)
+  ok   identical transform re-render is a cache HIT
+  ok   changing transform target -> cache MISS
+  ok   changing transform strength -> cache MISS
+  ok   accept_render (transform) ok
+  ok   transform accept landed a clip on the Neural Renders lane
+  ok   accepted transform clip points at a real non-empty file
+  ..   section "Route B: transform render mode (fake)" completed in 0.849s (11 checks, 0 failed)
+--- Section-scoped render (rework-the-hook) ---
+  ok   create_render_layer with a sub-region ok
+  ok   layer region start = 0.5 s
+  ok   layer region end   = 1.0 s
+  ok   section-scoped render_layer ok
+  ok   section render staged an input.wav
+  ok   input.wav is the SECTION region (~0.5 s), not the whole clip (2 s)
+  ok   section-scoped accept_render ok
+  ok   accepted render landed bounded to the section (start ~0.5 s, length ~0.5 s)
+  ok   whole-clip render (no region) still renders (default path unchanged)
+  ok   whole-clip layer still renders after the clip moved (no stale-region error)
+  ok   accept after move ok
+  ok   moved whole-clip render lands at the clip's LIVE position (3.0 s), not the stale create spot
+  ..   section "Section-scoped render (rework-the-hook)" completed in 1.972s (12 checks, 0 failed)
+--- Stage 6: full producer loop + export ---
+  ok   host VST3 effect on the mix track
+  ok   generative transform rendered
+  ok   export_audio ok
+  ok   export produced a non-empty WAV (full producer loop)
+  ok   mix volume applied (-4 dB)
+  ok   rename applied
+  ok   undo reverted the rename
+  ok   redo restored the rename
+  ..   section "Stage 6: full producer loop + export" completed in 1.039s (8 checks, 0 failed)
+--- Export format / depth options (IOX-002, IOX-007) ---
+  ok   export_audio wav 16-bit ok
+  ok   wav export produced a non-empty .wav file
+  ok   wav export reports format wav
+  ok   wav export reports bitDepth 16
+  ok   export_audio aiff 24-bit ok
+  ok   aiff export produced a non-empty .aiff file
+  ok   aiff export reports format aiff
+  ok   aiff export reports bitDepth 24 (depth arg honored for non-wav)
+  ok   export_audio rejects an unsupported format (mp3)
+  ok   export_audio rejects an unsupported bit depth (wav 7)
+  ..   section "Export format / depth options (IOX-002, IOX-007)" completed in 0.981s (10 checks, 0 failed)
+--- Serum render compatibility (optional local plugin gate) ---
+  ok   Serum 2 VST3 is discoverable by exact name/manufacturer
+  ok   Serum probe MIDI clip added
+  ok   Serum 2 loaded by exact plugin id
+  ok   snapshot exposes hosted Serum metadata and realtime diagnostics
+  ok   Serum auto export ok
+  ok   Serum auto export selects realtime render mode
+  ok   Serum auto export reports the compatibility reason
+  ok   explicit fast export remains available with Serum
+  ok   explicit fast export reports fast render mode
+  ..   section "Serum render compatibility (optional local plugin gate)" completed in 2.834s (9 checks, 0 failed)
+--- Drums make sound (DRM-001) ---
+  ok   bundled drum kit is present (Resources/drumkits/mosh-kit)
+  ok   new_project (drum render isolation) ok
+  ok   create_track type:drum ok
+  ok   create_track reports type drum
+  ok   drum track auto-loaded an instrument
+  ok   snapshot serialises track type drum
+  ok   snapshot marks the drum track as an instrument host
+  ok   drum track hosts the built-in sampler
+  ok   empty drum MIDI clip added
+  ok   export of the empty drum track ok
+  ok   empty drum clip renders SILENT (no phantom drum sound)
+  ok   export of the programmed beat ok
+  ok   programmed drum beat renders NON-SILENT (sampler+kit actually sounds)
+  ok   save before reload ok
+  ok   reload ok
+  ok   drum track type survives save/reload
+  ok   the sampler survives save/reload
+  ok   re-export after reload ok
+  ok   drum beat still NON-SILENT after save/reload (sampler sounds restored)
+  ok   assign_sample maps a sample to a pad/note
+  ok   assign_sample added a 9th pad
+  ok   load_drum_kit (re)loads the 8-pad kit
+  ok   set_drum_lane mute ok
+  ok   muted kick (36) rides the snapshot
+  ok   set_drum_lane solo ok
+  ok   soloed snare (38) rides the snapshot
+  ok   set_drum_lane unmute ok
+  ok   unmuting clears the kick from the muted set
+  ok   drum-lane solo persists across save/reload
+  ok   new plain track is type audio
+  ok   set_track_type drum ok
+  ok   set_track_type flips the snapshot type
+  ok   set_track_type drum auto-loads the kit
+  ok   undo reverts set_track_type to audio
+  ok   undo removes the auto-loaded kit
+  ok   MIDI clip on a plain track auto-loads a default instrument
+  ok   the melodic default instrument is 4OSC
+  ok   MIDI clip on a wave track does NOT auto-load an instrument (wave audio preserved)
+  ..   (SA3 self-test skipped — set MOSH_SELFTEST_SA3=1 to exercise the real model)
+  ..   (transcribe self-test skipped — set MOSH_SELFTEST_TRANSCRIBE=1 to exercise Basic Pitch)
+  ..   (sketch self-test skipped — set MOSH_SELFTEST_SKETCH=1 + MOSH_SKETCH_FIXTURE_DIR to exercise the beatbox transduction)
+  ..   section "Drums make sound (DRM-001)" completed in 1.904s (38 checks, 0 failed)
+--- Wave 4: MIDI note editing ---
+  ok   MIDI clip serialises its 3 notes into the snapshot
+  ok   add_note ok
+  ok   add_note adds a note
+  ok   set_note ok
+  ok   set_note edits pitch + velocity
+  ok   quantize_notes ok
+  ok   quantize_notes snaps every note onto the beat grid
+  ok   remove_note ok
+  ok   remove_note removes a note
+  ok   notes persist across save/reload
+  ok   set_note rejects an out-of-range noteIndex
+  ok   remove every note empties the sequence
+  ok   an emptied MIDI clip is NOT auto-deleted (stays in the arrangement)
+  ..   section "Wave 4: MIDI note editing" completed in 0.014s (13 checks, 0 failed)
+--- Wave 8: sends / returns / aux buses ---
+  ok   create_bus ok
+  ok   snapshot lists the new bus
+  ok   return track flagged isReturn
+  ok   return track carries the bus number
+  ok   return track carries an auxreturn plugin
+  ok   second bus gets the next number
+  ok   add_send ok
+  ok   send appears with the right bus + dB
+  ok   duplicate send to a bus rejected
+  ok   send to a nonexistent bus rejected
+  ok   set_send_level ok
+  ok   send level reflects the new dB
+  ok   send mutes at -100 dB
+  ok   bus name persists across save/reload
+  ok   send persists across save/reload
+  ok   remove_send ok
+  ok   remove_send drops the send
+  ok   remove_send on a missing send errors
+  ok   undo remove_send ok
+  ok   undo restores the send at its prior level
+  ok   rename_bus ok
+  ok   bus name reflects rename
+  ok   rename_bus updates the return track name too
+  ok   rename_bus on a missing bus errors
+  ok   undo after rename_bus ok
+  ok   undo does NOT revert rename_bus — bus name AND return-track name both stay (non-undoable, no partial-undo)
+  ok   remove_bus ok
+  ok   remove_bus drops the bus
+  ok   remove_bus sweeps orphan sends
+  ..   section "Wave 8: sends / returns / aux buses" completed in 0.017s (29 checks, 0 failed)
+--- Wave 9: channel metering ---
+  ok   enable_track_meter ok
+  ok   track reports meterEnabled
+  ok   meter tap is hidden from the plugin rack
+  ok   enable_track_meter is idempotent
+  ok   still metered after idempotent enable
+  ok   enable_all_meters meters every track
+  ok   disable_track_meter ok
+  ok   meter removed after disable
+  ok   re-enabled before undo
+  ok   undo removes the meter tap
+  ok   redo restores the meter tap
+  ..   section "Wave 9: channel metering" completed in 0.003s (11 checks, 0 failed)
+--- Wave: recording (arm / input monitor) ---
+  ok   snapshot track has armed field
+  ok   snapshot track has monitor field
+  ok   snapshot track has hasInput field
+  ok   armed defaults false headless
+  ok   hasInput defaults false headless
+  ok   monitor defaults automatic headless
+  ok   arm_track ok (graceful)
+  ok   arm_track applied:false headless (no input device)
+  ok   arm_track emitted snapshot_invalidated
+  ok   track still not armed headless (no instance)
+  ok   arm_track bad trackId errors
+  ok   set_input_monitor mode:on ok (graceful)
+  ok   set_input_monitor applied:false headless
+  ok   set_input_monitor emitted snapshot_invalidated
+  ok   set_input_monitor bad mode errors
+  ok   set_input_monitor bad trackId errors
+  ok   arm_track disarm ok
+  ok   undo after arm_track ok (no crash)
+  ok   snapshot still well-formed after arm-then-undo
+  ok   JSONL records arm_track
+  ok   JSONL records set_input_monitor
+  ok   arm_track logged undoable:false (monitoring preference)
+  ok   set_input_monitor logged undoable:false (monitoring preference)
+  ok   list_takes on a missing clip errors (dispatched, not unknown)
+  ok   list_takes error is the handler's (no wave clip)
+  ok   set_current_take on a missing clip errors
+  ok   keep_take on a missing clip errors
+  ok   list_midi_inputs ok
+  ok   list_midi_inputs returns an inputs array
+  ok   list_midi_inputs reports audioEnabled gate
+  ok   list_midi_inputs is not logged (read-only)
+  ok   load 4OSC instrument ok
+  ok   instrument track reports isInstrument:true
+  ok   snapshot track has inputType field
+  ok   inputType defaults wave (no routed input headless)
+  ok   plain track reports isInstrument:false
+  ok   arm_track on instrument track ok (graceful)
+  ok   arm_track instrument applied:false headless (no MIDI device)
+  ok   arm_track (instrument) emitted snapshot_invalidated
+  ok   instrument track still not armed headless (no MIDI instance)
+  ok   arm_track (instrument) disarm ok
+  ok   undo after instrument arm_track ok (no crash)
+  ok   arm_track (MIDI path) logged undoable:false (preference)
+  ..   section "Wave: recording (arm / input monitor)" completed in 0.025s (43 checks, 0 failed)
+--- Wave B: record-to-take landing (stop_recording) ---
+  ok   arm_track (wave) ok for record-to-take
+  ok   set_transport record ok (graceful headless)
+  ok   set_transport record emitted a transport event
+  ok   stop_recording ok (graceful)
+  ok   stop_recording applied:false headless (no playback context)
+  ok   stop_recording lands no clips headless (clips:[])
+  ok   stop_recording reports a reason headless
+  ok   stop_recording emitted a transport event
+  ok   stop_recording emitted snapshot_invalidated
+  ok   stop_recording discardRecordings:true ok (graceful)
+  ok   stop_recording discard lands no clips headless
+  ok   stop_recording echoes discarded:true
+  ok   stop_recording when not recording is a no-op ok
+  ok   JSONL records stop_recording
+  ok   stop_recording logged undoable:false (recording-lifecycle op)
+  ok   arm_track (wave) disarm after record-to-take ok
+  ..   section "Wave B: record-to-take landing (stop_recording)" completed in 0.008s (16 checks, 0 failed)
+--- MON-003: monitoring round-trip latency readout ---
+  ok   session.roundTripLatencyMs present
+  ok   session.roundTripLatencySamples present
+  ok   roundTripLatencyMs is non-negative
+  ok   roundTripLatencySamples is non-negative
+  ok   no-audio headless -> roundTripLatencyMs=0 (honest, not a false value)
+  ok   no-audio headless -> roundTripLatencySamples=0
+  ok   session.bufferSize still present (no regression)
+  ok   session.outputLatencyMs still present (no regression)
+  ..   section "MON-003: monitoring round-trip latency readout" completed in 0.000s (8 checks, 0 failed)
+--- Wave: settings (audio gate / device / project lifecycle) ---
+  ok   snapshot session has audioEnabled gate field
+  ok   audioEnabled is false headless (no device)
+  ok   snapshot session has bitDepth readout
+  ok   snapshot session has bufferSize readout
+  ok   snapshot session has outputLatencyMs readout
+  ok   snapshot session has audioDeviceName readout
+  ok   snapshot exposes the audio selection block
+  ok   list_audio_devices ok
+  ok   list_audio_devices audioEnabled:false headless
+  ok   list_audio_devices types is an array (shape, possibly empty headless)
+  ok   list_audio_devices sampleRates is an array (empty with no open device)
+  ok   set_audio_device returns graceful error with no device
+  ok   set_audio_device error mentions no audio device
+  ok   set_buffer_size returns graceful error with no device
+  ok   session has tracks before new_project (sanity)
+  ok   new_project ok
+  ok   new_project starts with zero tracks
+  ok   new_project changed session.editFile path
+  ok   new_project wrote a fresh non-empty .tracktionedit
+  ok   create_track in new project ok
+  ok   new project has 1 track after create_track
+  ok   save new project ok
+  ok   second new_project ok
+  ok   second new project is empty
+  ok   open_project ok
+  ok   open_project round-trips the saved track count
+  ok   save_as ok
+  ok   save_as wrote a non-empty file
+  ok   save_as re-points session.editFile to the new path
+  ok   subsequent save (after save_as) ok
+  ok   open_project missing file errors
+  ok   create_track undo probe ok
+  ok   create_track added a track
+  ok   undo ok
+  ok   undo reverted the create_track (count dropped by 1)
+  ok   re-open saved project ok
+  ok   undo on freshly-opened project ok
+  ok   undo is a no-op after open_project (no stray transaction leaked)
+  ok   snapshot still well-formed after project-undo isolation
+  ok   JSONL records set_audio_device
+  ok   JSONL records new_project
+  ok   JSONL records save_as
+  ok   set_audio_device logged undoable:false (machine preference)
+  ok   new_project logged undoable:false (whole-Edit replacement)
+  ok   save_as logged undoable:false (whole-Edit persist)
+  ok   restored the session edit (clean teardown)
+  ..   section "Wave: settings (audio gate / device / project lifecycle)" completed in 0.067s (46 checks, 0 failed)
+--- Project safety: auto-save / dirty flag (gap 1) ---
+  ok   save establishes a clean baseline
+  ok   engine clean immediately after save
+  ok   snapshot.session.dirty false when clean
+  ok   create_track ok
+  ok   mutating command marks the engine dirty
+  ok   snapshot.session.dirty true when dirty
+  ok   saveIfDirty saves when dirty (returns true)
+  ok   engine clean after saveIfDirty
+  ok   saveIfDirty is a no-op when clean (returns false)
+  ok   second mutation ok
+  ok   dirty again after another mutation
+  ok   save command ok
+  ok   save command clears the dirty flag
+  ok   undo probe 2
+  ok   undo probe 1
+  ok   probe tracks reverted (clean teardown)
+  ..   section "Project safety: auto-save / dirty flag (gap 1)" completed in 0.017s (16 checks, 0 failed)
+--- Project safety: reopen last project on relaunch (gap 2) ---
+  ok   rememberProject writes last-project.json
+  ok   startupEditFile resolves to the remembered project (relaunch reopens it)
+  ok   startupEditFile falls back to session.tracktionedit when the last project is missing
+  ok   new_project relaunch-A ok
+  ok   new_project updates the remembered last project
+  ok   new_project relaunch-B ok
+  ok   snapshot.session.recentProjects lists projects
+  ok   recentProjects is newest-first (relaunch-B first)
+  ok   open_project relaunch-A ok
+  ok   open_project updates the remembered last project
+  ok   restored the session edit (gap2 teardown)
+  ..   section "Project safety: reopen last project on relaunch (gap 2)" completed in 0.028s (11 checks, 0 failed)
+--- Project safety: open_recent by index (AL-007) ---
+  ok   new_project recent-A ok
+  ok   new_project recent-B ok
+  ok   recentProjects has >= 2 entries for the index test
+  ok   recent[0] is the newest project (B)
+  ok   open_recent index 1 ok
+  ok   open_recent index 1 opened the older project (A)
+  ok   open_recent updates the remembered last project
+  ok   open_recent index 0 ok
+  ok   open_recent index 0 opened the most-recent project
+  ok   open_recent without an index errors
+  ok   open_recent with a negative index errors
+  ok   open_recent with an out-of-range index errors
+  ok   a rejected open_recent leaves the current Edit untouched
+  ok   a deleted project is dropped from recentProjects (no ghost index)
+  ok   restored the session edit (AL-007 teardown)
+  ..   section "Project safety: open_recent by index (AL-007)" completed in 0.034s (15 checks, 0 failed)
+--- Project safety: portable projects + relink (gap 3) ---
+  ok   new_project portable-src ok
+  ok   create_track returned a trackId
+  ok   add_test_tone_clip ok
+  ok   clip audio starts in the shared session pool
+  ok   drum track for portability ok
+  ok   save_as ok
+  ok   save_as created a project-local audio/ dir
+  ok   save_as consolidated audio into the project
+  ok   save_as consolidated the drum-kit sampler sounds into the project
+  ok   saved edit has no shared-pool absolute audio path
+  ok   saved edit references the kit by a relative path, not the absolute app-bundle path
+  ok   saved edit references audio by a co-located relative path (no ../)
+  ok   copied the project dir to a new location
+  ok   open the moved project ok
+  ok   moved project's clip resolves to co-located audio (portable)
+  ok   resolved source is inside the moved project dir
+  ok   reopened session edit
+  ok   add relink probe clip ok
+  ok   relink probe clip initially present
+  ok   deleted source reports sourceMissing
+  ok   relink_clip ok
+  ok   relink_clip clears sourceMissing
+  ok   restored the session edit (gap3 teardown)
+  ..   section "Project safety: portable projects + relink (gap 3)" completed in 0.063s (23 checks, 0 failed)
+--- AL-009: Save-As render-artifact consolidation + portability ---
+  ok   new_project renders-portable ok
+  ok   create_render_layer (fake) ok
+  ok   render_layer ok (artifact produced in the session pool)
+  ok   render produced a cached artifact
+  ok   save_as ok
+  ok   save_as created a project-local audio/renders/ dir
+  ok   save_as consolidated the render artifact into the project
+  ok   render artifact still resolves after consolidation (relative)
+  ok   saved edit has no absolute session-pool render path
+  ok   saved edit references the render artifact by a co-located relative path (no ../)
+  ok   copied the render project to a new location
+  ok   open the moved render project ok
+  ok   moved project restored the clip + its render layer
+  ok   moved project's render artifact resolves to the co-located copy (portable)
+  ok   freeze_layer succeeds on the moved project (artifact survived the move)
+  ok   accept_render succeeds on the moved project (lands the consolidated artifact)
+  ok   accept landed a new clip on the neural lane from the moved artifact
+  ok   restored the session edit (AL-009 teardown)
+  ..   section "AL-009: Save-As render-artifact consolidation + portability" completed in 0.435s (18 checks, 0 failed)
+--- PRF-001 (multicore audio threads) ---
+  ok   snapshot session has availableCores readout
+  ok   availableCores >= 1
+  ok   snapshot session has audioThreads readout
+  ok   audioThreads within [1..availableCores]
+  ok   audioThreads defaults to auto (resolved core count)
+  ok   set_audio_threads ok with no audio device (not device-gated)
+  ok   set_audio_threads echoes availableCores
+  ok   set_audio_threads echoes the resolved audioThreads
+  ok   snapshot reflects new audioThreads after set
+  ok   audioThreadsAuto is false after an explicit set
+  ok   set_audio_threads threads=0 errors gracefully
+  ok   set_audio_threads threads=99999 errors gracefully
+  ok   set_audio_threads cores+1 ok (clamps)
+  ok   set_audio_threads clamps cores+1 down to availableCores
+  ok   set_audio_threads missing threads errors
+  ok   JSONL records set_audio_threads
+  ok   set_audio_threads logged undoable:false (machine preference)
+  ok   snapshot does not log set_audio_threads (read-only readout)
+  ok   restore set_audio_threads to all cores ok
+  ..   section "PRF-001 (multicore audio threads)" completed in 0.015s (19 checks, 0 failed)
+--- BRW-001 (content browser / list_directory) ---
+  ok   seeded a real .wav into the browse dir
+  ok   list_directory ok
+  ok   list_directory exists:true for a real dir
+  ok   list_directory path round-trips (normalized)
+  ok   list_directory roots is a non-empty array
+  ok   list_directory roots includes a Home pointing at a real directory
+  ok   list_directory entries is an array
+  ok   wav entry isDir:false
+  ok   wav entry size > 0
+  ok   list_directory lists the seeded .wav (extension filter passes audio)
+  ok   list_directory filters out the .txt (extension filter excludes non-audio)
+  ok   list_directory lists the subfolder (isDir:true)
+  ok   list_directory into subfolder exists:true
+  ok   list_directory subfolder parent points back to the parent dir
+  ok   list_directory missing path still ok (graceful shape)
+  ok   list_directory missing path exists:false
+  ok   list_directory missing path has an error string
+  ok   list_directory still returns roots on a missing path
+  ok   list_directory missing path has empty entries
+  ok   list_directory relative path returns ok (graceful)
+  ok   list_directory relative path exists:false (not resolved against cwd)
+  ok   list_directory with no path defaults to a real Home dir
+  ok   list_directory is READ-ONLY (not logged)
+  ok   list_directory emits no snapshot_invalidated (read-only)
+  ok   create track for browse import ok
+  ok   import_clip on a browsed file ok (reuses existing import path)
+  ok   browsed file imported as a real clip (browser -> import_clip seam)
+  ok   file_peaks ok for a real wav
+  ok   file_peaks returns a non-empty peak array
+  ok   file_peaks errors on a missing file
+  ok   audition_file ok for a real wav
+  ok   stop_audition ok
+  ok   audition_file errors on a missing file
+  ..   section "BRW-001 (content browser / list_directory)" completed in 1.175s (33 checks, 0 failed)
+--- Wave: clip clipboard / paste_clip (AED-001) ---
+  ok   create track A ok
+  ok   add_test_tone_clip on A ok
+  ok   captured A's clip descriptor from the snapshot
+  ok   captured descriptor is a wave clip
+  ok   create track B ok
+  ok   paste_clip onto B ok
+  ok   B has exactly one clip after paste_clip
+  ok   pasted clip length matches the source clip
+  ok   pasted clip has a name
+  ok   pasted clip starts at the requested time
+  ok   source clip on A untouched (copy, not move)
+  ok   undo after paste_clip ok
+  ok   undo removed the pasted clip from B (paste_clip is undoable)
+  ok   add_midi_clip ok
+  ok   add_note 1 ok
+  ok   add_note 2 ok
+  ok   captured the MIDI clip descriptor
+  ok   source MIDI clip carries 2 notes
+  ok   paste_clip (midi) onto another track ok
+  ok   MIDI destination has one pasted clip
+  ok   pasted MIDI clip carries the same note count
+  ok   paste_clip with missing trackId errors
+  ok   paste_clip with missing clip errors
+  ok   paste_clip with unknown clip type errors
+  ok   paste_clip wave with missing source errors
+  ok   failed wave paste left no orphan clip (zero side effects)
+  ok   JSONL records paste_clip
+  ok   paste_clip logged undoable:true (genuine edit)
+  ..   section "Wave: clip clipboard / paste_clip (AED-001)" completed in 0.022s (28 checks, 0 failed)
+--- Wave: command-log inspector (AGT-001) ---
+  ok   create_track LogProbe ok
+  ok   found the LogProbe track id
+  ok   rename_track LogProbe2 ok (this is the most-recent command before get_command_log)
+  ok   get_command_log ok
+  ok   get_command_log entries is an array
+  ok   get_command_log total grew by at least the 2 commands issued (create_track + rename_track)
+  ok   get_command_log honours limit (<= 5 entries)
+  ok   get_command_log returned at least one entry
+  ok   most-recent-first: entry[0].command == rename_track (the last command issued)
+  ok   every entry has command (non-empty), ok (bool), undoable (bool)
+  ok   get_command_log is READ-ONLY: it does NOT appear in the log it returns
+  ok   get_command_log with zero limit still ok (default applies)
+  ok   get_command_log zero-limit entries is a well-formed array
+  ok   get_command_log tolerates malformed/partial lines (no crash)
+  ok   malformed / non-object lines are skipped (total unchanged)
+  ok   mosh-log.jsonl contains NO get_command_log token (read-only confirmed at the file)
+  ..   section "Wave: command-log inspector (AGT-001)" completed in 3.069s (16 checks, 0 failed)
+--- Wave A: project format (PRJ-008) / device prefs (PRE-001) / record latency (ARE-003) ---
+  ok   snapshot session.project block present
+  ok   session.project has sampleRate
+  ok   session.project has bitDepth
+  ok   session.project has timeBase
+  ok   session.project.timeBase defaults to seconds
+  ok   set_project_settings rejects sampleRate < 7000
+  ok   set_project_settings rejects bitDepth not in {16,24,32}
+  ok   set_project_settings rejects unknown timeBase
+  ok   set_project_settings ok
+  ok   session.project.sampleRate == 96000 after set
+  ok   session.project.bitDepth == 16 after set
+  ok   session.project.timeBase == barsBeats after set
+  ok   save (project settings) ok
+  ok   reload (project settings) ok
+  ok   session.project.sampleRate survived save+reload
+  ok   session.project.bitDepth survived save+reload
+  ok   session.project.timeBase survived save+reload
+  ok   set_project_settings logged undoable:false (preference)
+  ok   create renderable seed track for export-default ok
+  ok   seed a renderable clip for export-default ok
+  ok   export_audio (with a renderable seed clip) ok
+  ok   export_audio defaults bitDepth from project setting (16)
+  ok   export_audio defaults sampleRate from project setting (96000)
+  ok   set_project_settings restore defaults ok
+  ok   PRE-001: list_audio_devices ok headless
+  ok   PRE-001: list_audio_devices audioEnabled:false headless
+  ok   PRE-001: set_audio_device returns graceful error with no device
+  ok   PRE-001: set_audio_device error mentions no audio device
+  ok   ARE-003: session has totalLatencyMs readout
+  ok   ARE-003: session has latencyContextReady readout
+  ok   ARE-003: latencyContextReady false headless (no prepared graph)
+  ok   ARE-003: set_transport record degrades gracefully headless (no crash)
+  ok   ARE-003: not recording headless (no audio device)
+  ..   section "Wave A: project format (PRJ-008) / device prefs (PRE-001) / record latency (ARE-003)" completed in 1.098s (33 checks, 0 failed)
+--- KEY-001: musical key (set_key, snapshot.project.key, persistence) ---
+  ok   snapshot session.project.key block present
+  ok   session.project.key has tonic
+  ok   session.project.key has mode
+  ok   session.project.key.tonic defaults to A
+  ok   session.project.key.mode defaults to minor
+  ok   set_key (F# dorian) ok
+  ok   session.project.key.tonic == F# after set
+  ok   session.project.key.mode == dorian after set
+  ok   set_key rejects a tonic outside NOTE_PC
+  ok   rejected tonic left storage untouched (still F#)
+  ok   set_key rejects a mode outside SCALES
+  ok   rejected mode left storage untouched (still dorian)
+  ok   save (musical key) ok
+  ok   reload (musical key) ok
+  ok   session.project.key.tonic survived save+reload
+  ok   session.project.key.mode survived save+reload
+  ok   set_key logged undoable:false (preference)
+  ok   undo after set_key does NOT revert the key (non-undoable)
+  ok   set_key restore default (A minor) ok
+  ..   section "KEY-001: musical key (set_key, snapshot.project.key, persistence)" completed in 0.015s (19 checks, 0 failed)
+--- itemID allocator regression (engine patch) ---
+  ok   id-probe: create_track ok
+  ok   id-probe: found the probe track
+  ok   id-probe: load built-in effect ok
+  ok   id-probe: save ok
+  ok   id-probe: reload ok
+  ok   id-probe: probe track survived reload
+  ok   id-probe: remove_plugin ok
+  ok   id-probe: load a second plugin after remove (no duplicate-itemID assert)
+  ..   section "itemID allocator regression (engine patch)" completed in 0.012s (8 checks, 0 failed)
+--- Wave C: delete_time_range (ARR-010) ---
+  ok   range: track created
+  ok   range: 0..4s tone clip created
+  ok   range: track has 1 clip before delete
+  ok   range: start>end errors
+  ok   range: start==end errors
+  ok   range: errored delete left the clip untouched
+  ok   range: delete_time_range [1,2] ok
+  ok   range: clip split into 2 segments
+  ok   range: left segment is 0..1s
+  ok   range: right segment is 2..4s (1..2s gap)
+  ok   range: undo ok
+  ok   range: undo restored a single clip
+  ok   range: restored clip spans 0..4s
+  ok   range: no-overlap range is ok (no-op)
+  ok   range: no-overlap removed nothing
+  ok   range: no-overlap left the clip whole
+  ok   range: empty-track delete is ok (no-op)
+  ok   range: empty track removed nothing
+  ok   range: enclosed clip present before delete
+  ok   range: enclosing-range delete ok
+  ok   range: clip fully inside was removed whole
+  ok   range: track empty after enclosing delete
+  ..   section "Wave C: delete_time_range (ARR-010)" completed in 0.017s (22 checks, 0 failed)
+--- Wave D: group / submix tracks (MIX-008) ---
+  ok   group: two member tracks created
+  ok   group: create_group_track ok
+  ok   group: returned a groupId
+  ok   group: moved both member tracks
+  ok   group: snapshot entry has type group
+  ok   group: snapshot entry flagged isGroup
+  ok   group: snapshot entry carries the name
+  ok   group: snapshot entry has a real fader (submix VolumeAndPan)
+  ok   group: member A carries parentId
+  ok   group: member B carries parentId
+  ok   group: set_track_volume on the group ok
+  ok   group: group fader reflects -6 dB
+  ok   group: rename_track on the group ok
+  ok   group: rename reflects
+  ok   group: undo (create_group_track) ok
+  ok   group: undo removed the group entry
+  ok   group: undo restored A to top level
+  ok   group: redo ok
+  ok   group: redo re-grouped A
+  ok   group: ungroup_track ok
+  ok   group: ungroup hoisted both members
+  ok   group: A back at top level
+  ok   group: both members survived the ungroup
+  ok   group: group entry gone after ungroup
+  ok   group: undo (ungroup) ok
+  ok   group: undo restored the grouping
+  ok   group: ungroup bad id errors
+  ok   group: unknown member ids are skipped, not fatal
+  ok   group: nothing moved for unknown ids
+  ok   group: unknown ids reported
+  ok   group: create_group_track logged undoable:true
+  ok   group: ungroup_track logged undoable:true
+  ..   section "Wave D: group / submix tracks (MIX-008)" completed in 0.018s (32 checks, 0 failed)
+--- Wave R: routing (RTG-001 inputs / RTG-002 outputs) ---
+  ok   routing: list_wave_inputs ok
+  ok   routing: list_wave_inputs inputs is an array (empty headless)
+  ok   routing: list_track_outputs ok
+  ok   routing: list_track_outputs outputs is an array
+  ok   routing: list_track_outputs lists candidate tracks
+  ok   routing: list commands are READ-ONLY (not logged)
+  ok   routing: two tracks created
+  ok   routing: set_track_input ok (graceful headless)
+  ok   routing: applied:false headless (choice stored)
+  ok   routing: chosen input deviceID in the snapshot
+  ok   routing: set_track_input missing deviceID errors
+  ok   routing: set_track_input bad trackId errors
+  ok   routing: save+reload ok
+  ok   routing: input choice persists across save/reload
+  ok   routing: default output emits no output field
+  ok   routing: set_track_output A->B ok
+  ok   routing: output isTrack
+  ok   routing: output destId == B
+  ok   routing: B->A rejected (cycle)
+  ok   routing: A->A rejected (self)
+  ok   routing: save+reload ok (output)
+  ok   routing: A->B routing persists across save/reload
+  ok   routing: reset to default ok
+  ok   routing: reset removed the output field
+  ok   routing: undo (reset) ok
+  ok   routing: undo restored the A->B routing
+  ok   routing: set_track_output with no destination errors
+  ok   routing: set_track_input logged undoable:false (preference)
+  ok   routing: set_track_output logged undoable:true (Edit mutation)
+  ..   section "Wave R: routing (RTG-001 inputs / RTG-002 outputs)" completed in 0.031s (29 checks, 0 failed)
+--- Wave T: tempo map (SES-001) ---
+  ok   tempo: base 120 ok
+  ok   tempo: insert 140 at 10s ok
+  ok   tempo: insert 90 at 20s ok
+  ok   tempo: two points added
+  ok   tempo: engine bpm at 5s == 120
+  ok   tempo: engine bpm at 15s == 140 (step, no ramp)
+  ok   tempo: engine bpm at 25s == 90
+  ok   tempo: engine bpm just before the change == 120 (hold)
+  ok   tempo: beats<->seconds round-trip across the map
+  ok   tempo: snapshot tempoMap has all points
+  ok   tempo: snapshot last point is the 90 BPM change
+  ok   tempo: session.tempo still reports point 0 (back-compat)
+  ok   tempo: insert 3/4 at 30s ok
+  ok   tempo: time-sig point added
+  ok   tempo: snapshot timeSigMap serialized
+  ok   tempo: last sig point is 3/4
+  ok   tempo: save+reload ok
+  ok   tempo: map survives save/reload (140 at 15s)
+  ok   tempo: remove middle point ok
+  ok   tempo: bpm at 15s reverts after removal
+  ok   tempo: undo (remove) ok
+  ok   tempo: undo restored the 140 change
+  ok   tempo: removing point 0 rejected
+  ok   tempo: out-of-range index rejected
+  ok   tempo: negative time rejected
+  ok   tempo: absurd bpm rejected
+  ok   tempo: removing sig point 0 rejected
+  ok   tempo: non-power-of-two denominator rejected
+  ok   tempo: insert_tempo_change logged undoable:true
+  ok   tempo: remove_tempo_change logged undoable:true
+  ok   tempo: insert_time_sig_change logged undoable:true
+  ..   section "Wave T: tempo map (SES-001)" completed in 0.018s (31 checks, 0 failed)
+--- Wave V: tempo ramps (curves) ---
+  ok   ramp: base 120 ok
+  ok   ramp: insert 60 at 8s ok (step by default)
+  ok   ramp: step span holds 120 mid-way
+  ok   ramp: step-only map emits NO tempoSections (lean snapshot)
+  ok   ramp: set_tempo_curve index 0 -> linear ok
+  ok   ramp: engine bpm mid-ramp is strictly between 60 and 120
+  ok   ramp: engine bpm decreases monotonically across the ramp
+  ok   ramp: tempoMap[0].curve == 0 serialized
+  ok   ramp: fine tempoSections emitted (more than the points)
+  ok   ramp: section times strictly increasing
+  ok   ramp: undo (set_tempo_curve) ok
+  ok   ramp: undo restored the step (120 mid-way)
+  ok   ramp: undo removed tempoSections
+  ok   ramp: redo ok
+  ok   ramp: redo restored the ramp
+  ok   ramp: insert with curve arg ok
+  ok   ramp: inserted point carries curve 0
+  ok   ramp: bad index rejected
+  ok   ramp: missing curve rejected
+  ok   ramp: set_tempo_curve logged undoable:true
+  ..   section "Wave V: tempo ramps (curves)" completed in 0.006s (20 checks, 0 failed)
+--- Wave V: audio warp (auto-tempo) ---
+  ok   warp: 2s tone clip ok
+  ok   warp: clip starts at 2.0s
+  ok   warp: enable ok
+  ok   warp: stretch mode is SoundTouch (vendored stretcher compiled in)
+  ok   warp: enabling at the same tempo is a 1:1 no-op
+  ok   warp: snapshot clip carries autoTempo
+  ok   warp: sourceBpm defaulted to the map tempo (120)
+  ok   warp: tempo 120 -> 60 ok
+  ok   warp: half tempo DOUBLES the clip length (4.0s)
+  ok   warp: tempo back to 120 ok
+  ok   warp: restoring tempo restores the length (2.0s)
+  ok   warp: disable ok
+  ok   warp: unwarped clip ignores the tempo change
+  ok   warp: missing autoTempo rejected
+  ok   warp: bad clipId rejected
+  ok   warp: set_clip_warp logged undoable:true
+  ..   section "Wave V: audio warp (auto-tempo)" completed in 0.009s (16 checks, 0 failed)
+--- Moshi brain proxy + native voice (packaged-app pieces) ---
+  ok   brain: three providers enumerated (deepseek/openai/xai)
+  ok   brain: MOSHI_BRAIN_PROVIDER selects the default provider
+  ok   brain: resolved provider carries its env url/model
+  ok   brain: an explicit complete provider is honoured over the default
+  ok   brain: an incomplete requested provider falls back to a configured one
+  ok   brain: chat() rejects a non-array messages payload with an error shape
+  ok   brain: nothing resolves when no key is set
+  ok   brain: chat() with no provider returns { ok:false } (no crash, no network)
+  ok   voice: macOS Speech available (SFSpeechRecognizer present)
+  ok   voice: a fresh NativeSpeech is idle
+  ok   voice: stop() while idle is a safe no-op
+  ..   section "Moshi brain proxy + native voice (packaged-app pieces)" completed in 0.002s (11 checks, 0 failed)
+--- Multiplayer: stable logical track IDs (MP-001) ---
+  ok   create_track MP One ok
+  ok   create_track MP Two ok
+  ok   two MP tracks present in snapshot
+  ok   track 'MP One' has a non-empty logicalId
+  ok   track 'MP Two' has a non-empty logicalId
+  ok   the two tracks have distinct logicalIds
+  ok   logicalId looks like a juce::Uuid string
+  ok   save ok (MP-001)
+  ok   reload ok (MP-001)
+  ok   logicalId of 'MP One' survives save/reload
+  ok   logicalId of 'MP Two' survives save/reload
+  ..   section "Multiplayer: stable logical track IDs (MP-001)" completed in 0.014s (11 checks, 0 failed)
+--- Multiplayer: track serialize/apply round-trip (P1b) ---
+  ok   create RT Src
+  ok   RT Src engine id resolved
+  ok   RT Src midi clip created
+  ok   RT Src has 2 clips (wave + midi) before serialize
+  ok   RT Src volume is -6.5 pre-serialize (got -6.500)
+  ok   mp_serialize_track ok
+  ok   serialize produced a non-empty blob
+  ok   serialize reported the track's logicalId
+  ok   mutate removed all clips
+  ok   sentinel track present before apply
+  ok   apply_remote_track ok
+  ok   apply replaced the existing track (same logicalId)
+  ok   apply_remote_track does NOT emit snapshot_invalidated (no relay echo) [saw: ]
+  ok   restored track found by logicalId
+  ok   name restored
+  ok   volume restored (got -6.500)
+  ok   clip count restored (wave + midi)
+  ok   deep content survived: the MIDI note round-tripped
+  ok   undo ok
+  ok   undo removed the sentinel track (apply was NOT on the undo stack)
+  ok   applied track survives the undo (apply is outside the undo system)
+  ..   section "Multiplayer: track serialize/apply round-trip (P1b)" completed in 0.008s (21 checks, 0 failed)
+--- Multiplayer: lock guard at the mutation path (MP-001 P3) ---
+  ok   lock-test tracks resolved (logicalId + engine ids)
+  ok   mp_sync_locks activates the guard with peer-held locks
+  ok   track mutation on a peer-locked track is BLOCKED
+  ok   reads pass the guard
+  ok   a clip read on a peer-locked track is allowed
+  ok   track mutation on a FREE track is allowed
+  ok   clip mutation on a peer-locked track's clip is BLOCKED (clip->track->logicalId)
+  ok   session-global op BLOCKED while the session lock is peer-held
+  ok   mp_sync_locks deactivates
+  ok   deactivating restores unguarded single-player track edits
+  ok   structural ops unblocked after deactivate (single-player regression safety)
+  ..   section "Multiplayer: lock guard at the mutation path (MP-001 P3)" completed in 0.008s (11 checks, 0 failed)
+--- Multiplayer: project bootstrap (P6) ---
+  ok   new_project (bootstrap source) ok
+  ok   fresh project is empty
+  ok   mp_serialize_project ok
+  ok   serialized a 2-track project bundle
+  ok   bundle carries the annotations subtree
+  ok   bootstrap bundle carries per-track audioRefs (audio late-join)
+  ok   bootstrap audioRef hash is a sha256
+  ok   serialize content-addressed the host audio clip to a by-hash stem
+  ok   bootstrap by-hash ref has no spurious '../' (audio/by-hash/466160b910c61d3952d6b5feeacd0fd525e8abb9f27adaf3f71499d21f5523c0.wav)
+  ok   new_project (joiner wipe) ok
+  ok   joiner starts empty before bootstrap
+  ok   mp_apply_bootstrap ok
+  ok   joiner adopts the host's pre-existing annotation via bootstrap
+  ok   bootstrap applied 2 tracks
+  ok   joiner now holds the host's 2 tracks
+  ok   Boot A logicalId preserved across bootstrap
+  ok   Boot B logicalId preserved across bootstrap
+  ok   Boot A's clip survived the bootstrap (deep content)
+  ok   joiner's bootstrapped clip references the by-hash stem
+  ..   section "Multiplayer: project bootstrap (P6)" completed in 0.026s (19 checks, 0 failed)
+--- Multiplayer: structural sync (scalar session-global ops) ---
+  ok   baseline tempo is 120
+  ok   session active, peer holds the session lock
+  ok   local tempo change blocked while the peer holds the session lock
+  ok   tempo unchanged after the blocked local change
+  ok   mp_apply_structural ok
+  ok   peer's tempo change applied (guard bypassed)
+  ok   session deactivated
+  ..   section "Multiplayer: structural sync (scalar session-global ops)" completed in 0.000s (7 checks, 0 failed)
+--- Multiplayer: export after commit (by-hash ref resolves — guards the export hang) ---
+  ok   new_project (mp export isolation) ok
+  ok   create_track (audio) ok
+  ok   add_test_tone_clip ok
+  ok   edit file is absent at commit time (the bug's precondition)
+  ok   mp_commit_track (audio) ok
+  ok   committed clip points at the by-hash stem
+  ok   by-hash ref has no spurious '../' so it resolves inside the session (audio/by-hash/466160b910c61d3952d6b5feeacd0fd525e8abb9f27adaf3f71499d21f5523c0.wav)
+  ok   committed clip's resolved source exists on disk
+  ok   export_audio after mp_commit_track COMPLETES (no hang)
+  ok   exported MP-committed audio is NON-SILENT (the stem actually rendered)
+  ok   re-persist the edit after the mp-commit-export probe
+  ..   section "Multiplayer: export after commit (by-hash ref resolves — guards the export hang)" completed in 0.468s (11 checks, 0 failed)
+--- Relink: export after relink to a local copy (guards the export hang) ---
+  ok   new_project (relink export isolation) ok
+  ok   create_track (audio) ok
+  ok   add_test_tone_clip ok
+  ok   probe clip present
+  ok   probe clip's source starts OUTSIDE the project dir
+  ok   copied source to a project-local file
+  ok   relink target is under the project dir (=> relative ref)
+  ok   edit file is absent at relink time (the bug's precondition)
+  ok   relink_clip to the local copy ok
+  ok   relinked ref has no spurious '../' so it resolves inside the session (audio/relinked.wav)
+  ok   relinked clip's resolved source exists on disk
+  ok   export_audio after relink_clip COMPLETES (no hang)
+  ok   exported relinked audio is NON-SILENT (the relinked source actually rendered)
+  ok   re-persist the edit after the relink-export probe
+  ..   section "Relink: export after relink to a local copy (guards the export hang)" completed in 0.460s (14 checks, 0 failed)
+--- Song sections (MOSH_SECTIONS) ---
+  ok   create_section ok
+  ok   create_section returns a sectionId
+  ok   snapshot.sections grew by one
+  ok   new section name is Hook
+  ok   section startBeat is 24
+  ok   rename_section ok
+  ok   rename reflected in snapshot
+  ok   move_section ok
+  ok   move reflected in snapshot
+  ok   undo (move_section) ok
+  ok   undo restores the prior range
+  ok   undo leaves the rename intact
+  ok   save (sections) ok
+  ok   reload (sections) ok
+  ok   section persists across save/reload
+  ok   section range persists across save/reload
+  ok   remove_section ok
+  ok   section gone from snapshot after remove
+  ok   rename of a removed section fails cleanly
+  ..   section "Song sections (MOSH_SECTIONS)" completed in 0.010s (19 checks, 0 failed)
+--- Timeline annotations (MOSH_ANNOTATIONS) ---
+  ok   create_annotation ok
+  ok   create_annotation returns an annotationId
+  ok   snapshot.annotations grew by one
+  ok   annotation text round-trips
+  ok   annotation carries its author
+  ok   annotation beat is 24
+  ok   edit_annotation ok
+  ok   edit reflected in snapshot
+  ok   move_annotation ok
+  ok   move reflected in snapshot
+  ok   undo (move_annotation) ok
+  ok   undo restores the prior beat
+  ok   undo leaves the edit intact
+  ok   save (annotations) ok
+  ok   reload (annotations) ok
+  ok   annotation persists across save/reload
+  ok   annotation author persists across save/reload
+  ok   create_annotation with an explicit id ok
+  ok   explicit-id annotation lands with that id
+  ok   remove_annotation ok
+  ok   annotation gone from snapshot after remove
+  ok   edit of a removed annotation fails cleanly
+  ..   section "Timeline annotations (MOSH_ANNOTATIONS)" completed in 0.007s (22 checks, 0 failed)
+===== 1008/1008 checks passed, 0 failed =====
+
+Cleaning up temp files..

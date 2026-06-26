@@ -1,0 +1,48 @@
+env: shell only (no /Users/emiliosanchez-harris/Documents/ClaudeMosh/ui/.env.local)
+  • DEEPSEEK: key present
+  • OPENAI: key present
+building Mosh (macos-arm64-release → macos-arm64-release-app)…
+CMake Warning at cmake/CPM.cmake:76 (message):
+  CPM: Your project is using an unstable development version of CPM.cmake.
+  Please update to a recent release if possible.  See
+  https://github.com/cpm-cmake/CPM.cmake for details.
+Call Stack (most recent call first):
+  CMakeLists.txt:29 (include)
+
+
+-- Configuring juceaide
+-- Building juceaide
+-- Exporting juceaide
+-- Testing juceaide
+-- Finished setting up juceaide
+-- CPM: Adding package Catch2@3.7.1 (v3.7.1 at /Users/emiliosanchez-harris/Documents/ClaudeMosh/.cpm-cache/catch2/1b2c19d23bca710b0cab412b221d18c1a5b6e30e)
+-- Configuring done (3.1s)
+-- Generating done (0.2s)
+-- Build files have been written to: /Users/emiliosanchez-harris/Documents/ClaudeMosh/build-macos-arm64-release
+[0/2] Re-checking globbed directories...
+[1/3] Building Mosh UI (Vite) → ui/dist
+
+up to date in 313ms
+
+> mosh-ui@0.0.1 build
+> tsc --noEmit && vite build
+
+vite v5.4.21 building for production...
+transforming...
+✓ 204 modules transformed.
+src/juce/check_native_interop.js (41:2): Use of eval in "src/juce/check_native_interop.js" is strongly discouraged as it poses security risks and may cause issues with minification.
+rendering chunks...
+[plugin vite:singlefile] 
+
+[plugin vite:singlefile] Inlining: index-BOtLiUMK.js
+[plugin vite:singlefile] Inlining: style-C8Pdw5-6.css
+computing gzip size...
+dist/index.html  591.27 kB │ gzip: 189.39 kB
+✓ built in 826ms
+[2/3] Restaging UI bundle into the app (UI-only-safe)
+deploying /Users/emiliosanchez-harris/Documents/ClaudeMosh/build-macos-arm64-release/Mosh_artefacts/Release/Mosh.app -> /Applications/Mosh.app
+bundling service → /Applications/Mosh.app/Contents/Resources/service
+/Applications/Mosh.app: replacing existing signature
+  signature: valid (ad-hoc)
+deployed one canonical /Applications/Mosh.app (default build; service bundled).
+If macOS still shows an old icon, log out and back in (icon cache).

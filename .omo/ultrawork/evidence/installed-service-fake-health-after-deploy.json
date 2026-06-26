@@ -1,0 +1,1 @@
+{"ok": true, "service": "mosh-generative", "version": "0.3.0", "build": "fake-0.1.0", "uptime_s": 0.1, "adapters": ["fake", "transform"], "transcribe": true, "sketch": true}

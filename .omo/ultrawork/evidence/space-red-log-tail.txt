@@ -1,0 +1,3 @@
+{"ts": 1782423142011, "seq": 11, "command": "set_transport", "args": {"action": "stop", "position": 0}, "ok": true, "undoable": false}
+{"ts": 1782423558705, "seq": 1, "command": "enable_all_meters", "args": {}, "ok": true, "undoable": true}
+{"ts": 1782423581949, "seq": 2, "command": "set_transport", "args": {"action": "toggle"}, "ok": true, "undoable": false}

@@ -1,0 +1,17 @@
+
+> mosh-ui@0.0.1 test
+> vitest run src/ui/Meter.test.ts
+
+
+ RUN  v2.1.9 /Users/emiliosanchez-harris/Documents/ClaudeMosh/ui
+
+stderr | src/ui/Meter.test.ts
+The 'window.__JUCE__' object is undefined. Native integration features will not work. Defining a placeholder 'window.__JUCE__' object.
+
+ ✓ src/ui/Meter.test.ts (2 tests) 28ms
+
+ Test Files  1 passed (1)
+      Tests  2 passed (2)
+   Start at  14:52:47
+   Duration  1.27s (transform 174ms, setup 0ms, collect 250ms, tests 28ms, environment 507ms, prepare 57ms)
+

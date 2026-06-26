@@ -407,7 +407,7 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
   background: linear-gradient(90deg, var(--lime) 0%, var(--lime) 60%, var(--warn) 84%, var(--rec) 100%);
 }
 .meter .mmask { position: absolute; top: 0; right: 0; bottom: 0; width: 100%; background: var(--ink-deep); }
-.meter.clip .mbar { box-shadow: 0 0 5px var(--rec); }
+.meter.meter-clip .mbar { box-shadow: 0 0 5px var(--rec); }
 
 /* Master meter sits in the topbar transport cluster. */
 .master-meter { display: flex; align-items: center; gap: 5px; }

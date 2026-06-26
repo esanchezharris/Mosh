@@ -20,6 +20,7 @@ namespace
         editCopy,
         editPaste,
         editDelete,
+        transportPlayPause,
     };
 
     constexpr int recentBaseID = 0x6e00; // Open Recent items: recentBaseID + index
@@ -49,7 +50,7 @@ MenuController::~MenuController()
 
 juce::StringArray MenuController::getMenuBarNames()
 {
-    return { "File", "Edit" };
+    return { "File", "Edit", "Transport" };
 }
 
 juce::PopupMenu MenuController::getMenuForIndex (int topLevelMenuIndex, const juce::String&)
@@ -100,6 +101,10 @@ juce::PopupMenu MenuController::getMenuForIndex (int topLevelMenuIndex, const ju
         menu.addSeparator();
         menu.addCommandItem (&commands, editDelete);
     }
+    else if (topLevelMenuIndex == 2)
+    {
+        menu.addCommandItem (&commands, transportPlayPause);
+    }
 
     return menu;
 }
@@ -123,7 +128,8 @@ void MenuController::menuItemSelected (int menuItemID, int /*topLevelMenuIndex*/
 void MenuController::getAllCommands (juce::Array<juce::CommandID>& c)
 {
     c.addArray ({ fileNew, fileOpen, fileSave, fileSaveAs, fileExport, fileClose,
-                  editUndo, editRedo, editCut, editCopy, editPaste, editDelete });
+                  editUndo, editRedo, editCut, editCopy, editPaste, editDelete,
+                  transportPlayPause });
 }
 
 void MenuController::getCommandInfo (juce::CommandID commandID, juce::ApplicationCommandInfo& result)
@@ -152,6 +158,10 @@ void MenuController::getCommandInfo (juce::CommandID commandID, juce::Applicatio
         // Delete: no key-equivalent on purpose (⌫ must keep working in text fields);
         // the WebView keyboard layer owns the Delete/Backspace shortcut.
         case editDelete:  result.setInfo ("Delete", "Remove the selected clip", "Edit", 0);    break;
+        case transportPlayPause:
+            result.setInfo ("Play/Pause", "Toggle playback", "Transport", 0);
+            result.addDefaultKeypress (KeyPress::spaceKey, 0);
+            break;
         default: break;
     }
 }
@@ -176,6 +186,7 @@ bool MenuController::perform (const juce::ApplicationCommandTarget::InvocationIn
         case editCopy:    fire ("copy");   return true;
         case editPaste:   fire ("paste");  return true;
         case editDelete:  fire ("delete"); return true;
+        case transportPlayPause: fire ("play_pause"); return true;
         default: return false;
     }
 }

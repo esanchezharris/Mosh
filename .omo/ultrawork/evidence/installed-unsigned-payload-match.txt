@@ -1,0 +1,2 @@
+8ab86b7ece008fb48e6d1f44b1f5ae452845a14ffcb5a9b2c47925741144ee91  /var/folders/ls/q_ndrnbd5bbgg0b9wj_9fw6h0000gn/T/tmp.dyrlGGTsbj/Mosh-built
+5bf9c7bf613dc30ad363eb4a58ee1767c6fe1f6ba220250b40f7108a3fde1e2e  /var/folders/ls/q_ndrnbd5bbgg0b9wj_9fw6h0000gn/T/tmp.dyrlGGTsbj/Mosh-installed

@@ -1,0 +1,26 @@
+Settings file: /Users/emiliosanchez-harris/Library/Mosh/Settings.xml
+Creating Default Controllers...
+
+===== Mosh focused undo harness =====
+--- focused undo transaction coverage ---
+  ok   create_track ok
+  ok   track exists after create_track
+  ok   add_test_tone_clip ok
+  ok   clip exists after add_test_tone_clip
+  ok   add_render_layer ok
+  ok   render layer exists
+  ok   undo render layer command ok
+  ok   undo removed render layer
+  ok   undo clip command ok
+  ok   undo removed clip
+  ok   undo track command ok
+  ok   undo removed track
+  ok   redo track command ok
+  ok   redo restored track
+  ok   redo clip command ok
+  ok   redo restored clip
+  ok   redo render layer command ok
+  ok   redo restored render layer
+  ..   section "focused undo transaction coverage" completed in 0.015s (18 checks, 0 failed)
+===== 18/18 focused undo checks passed, 0 failed =====
+Cleaning up temp files..

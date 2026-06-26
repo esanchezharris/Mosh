@@ -1,0 +1,7 @@
+Test project /Users/emiliosanchez-harris/Documents/ClaudeMosh/build-macos-arm64-release
+    Start 1: MoshTests
+1/1 Test #1: MoshTests ........................   Passed    0.39 sec
+
+100% tests passed, 0 tests failed out of 1
+
+Total Test time (real) =   0.39 sec

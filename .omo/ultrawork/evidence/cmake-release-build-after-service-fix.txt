@@ -1,0 +1,217 @@
+[0/2] Re-checking globbed directories...
+[1/4] Building CXX object CMakeFiles/Mosh.dir/src/app/SelfTest.cpp.o
+In file included from /Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:2:
+In file included from /Users/emiliosanchez-harris/Documents/ClaudeMosh/src/engine/MoshEngine.h:3:
+In file included from /Users/emiliosanchez-harris/Documents/ClaudeMosh/.cpm-cache/_fc/tracktion_engine-src/modules/tracktion_engine/tracktion_engine.h:272:
+In file included from /Users/emiliosanchez-harris/Documents/ClaudeMosh/.cpm-cache/_fc/tracktion_engine-src/modules/tracktion_engine/../tracktion_core/tracktion_core.h:48:
+In file included from /Users/emiliosanchez-harris/Documents/ClaudeMosh/.cpm-cache/_fc/tracktion_engine-src/modules/tracktion_engine/../tracktion_core/audio/tracktion_AudioReader.h:19:
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/.cpm-cache/_fc/tracktion_engine-src/modules/tracktion_engine/../tracktion_core/audio/../utilities/tracktion_Time.h:470:39: warning: implicit conversion from 'long long' to 'double' may lose precision [-Wimplicit-int-float-conversion]
+  470 |     return TimePosition::fromSeconds (samplePosition / sampleRate);
+      |                                       ^~~~~~~~~~~~~~ ~
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/.cpm-cache/_fc/tracktion_engine-src/modules/tracktion_engine/../tracktion_core/utilities/tracktion_TimeRange.h:217:28: note: in instantiation of function template specialization 'tracktion::TimePosition::fromSamples<long long>' requested here
+  217 |     return { TimePosition::fromSamples (r.getStart(), sampleRate),
+      |                            ^
+In file included from /Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:2:
+In file included from /Users/emiliosanchez-harris/Documents/ClaudeMosh/src/engine/MoshEngine.h:3:
+In file included from /Users/emiliosanchez-harris/Documents/ClaudeMosh/.cpm-cache/_fc/tracktion_engine-src/modules/tracktion_engine/tracktion_engine.h:393:
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/.cpm-cache/_fc/tracktion_engine-src/modules/tracktion_engine/../tracktion_graph/utilities/tracktion_PerformanceMeasurement.h:303:28: warning: implicit conversion from 'uint64_t' (aka 'unsigned long long') to 'double' may lose precision [-Wimplicit-int-float-conversion]
+  303 |         const auto delta = cyclesElapsed - meanCycles;
+      |                            ^~~~~~~~~~~~~ ~
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/.cpm-cache/_fc/tracktion_engine-src/modules/tracktion_engine/../tracktion_graph/utilities/tracktion_PerformanceMeasurement.h:305:31: warning: implicit conversion from 'uint64_t' (aka 'unsigned long long') to 'double' may lose precision [-Wimplicit-int-float-conversion]
+  305 |         const double delta2 = cyclesElapsed - meanCycles;
+      |                               ^~~~~~~~~~~~~ ~
+In file included from /Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:2:
+In file included from /Users/emiliosanchez-harris/Documents/ClaudeMosh/src/engine/MoshEngine.h:3:
+In file included from /Users/emiliosanchez-harris/Documents/ClaudeMosh/.cpm-cache/_fc/tracktion_engine-src/modules/tracktion_engine/tracktion_engine.h:415:
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/.cpm-cache/_fc/tracktion_engine-src/modules/tracktion_engine/utilities/tracktion_BackgroundJobs.h:200:48: warning: implicit conversion from 'int' to 'float' may lose precision [-Wimplicit-int-float-conversion]
+  200 |         newTotal = (numJobs > 0) ? (newTotal / numJobs) : 1.0f;
+      |                                              ~ ^~~~~~~
+In file included from /Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:2:
+In file included from /Users/emiliosanchez-harris/Documents/ClaudeMosh/src/engine/MoshEngine.h:3:
+In file included from /Users/emiliosanchez-harris/Documents/ClaudeMosh/.cpm-cache/_fc/tracktion_engine-src/modules/tracktion_engine/tracktion_engine.h:487:
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/.cpm-cache/_fc/tracktion_engine-src/modules/tracktion_engine/plugins/external/tracktion_VSTXML.h:199:37: warning: implicit conversion from 'int' to 'float' may lose precision [-Wimplicit-int-float-conversion]
+  199 |                 entry->range.low  = curEntry / (float) numEntries;
+      |                                     ^~~~~~~~ ~
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/.cpm-cache/_fc/tracktion_engine-src/modules/tracktion_engine/plugins/external/tracktion_VSTXML.h:200:47: warning: implicit conversion from 'int' to 'float' may lose precision [-Wimplicit-int-float-conversion]
+  200 |                 entry->range.high = (curEntry + 1) / (float) numEntries;
+      |                                      ~~~~~~~~~^~~  ~
+In file included from /Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:2:
+In file included from /Users/emiliosanchez-harris/Documents/ClaudeMosh/src/engine/MoshEngine.h:3:
+In file included from /Users/emiliosanchez-harris/Documents/ClaudeMosh/.cpm-cache/_fc/tracktion_engine-src/modules/tracktion_engine/tracktion_engine.h:522:
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/.cpm-cache/_fc/tracktion_engine-src/modules/tracktion_engine/audio_files/tracktion_AudioFile.h:41:20: warning: implicit conversion from 'const SampleCount' (aka 'const long long') to 'double' may lose precision [-Wimplicit-int-float-conversion]
+   41 |             return lengthInSamples / sampleRate;
+      |                    ^~~~~~~~~~~~~~~ ~
+In file included from /Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:2:
+In file included from /Users/emiliosanchez-harris/Documents/ClaudeMosh/src/engine/MoshEngine.h:3:
+In file included from /Users/emiliosanchez-harris/Documents/ClaudeMosh/.cpm-cache/_fc/tracktion_engine-src/modules/tracktion_engine/tracktion_engine.h:540:
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/.cpm-cache/_fc/tracktion_engine-src/modules/tracktion_engine/audio_files/tracktion_AudioFileUtils.h:146:92: warning: implicit conversion from 'int64' (aka 'long long') to 'float' may lose precision [-Wimplicit-int-float-conversion]
+  146 |                                 updateProgress (static_cast<float> (startSample) / reader->lengthInSamples);
+      |                                                                                  ~ ~~~~~~~~^~~~~~~~~~~~~~~
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:755:44: warning: declaration shadows a local variable [-Wshadow-uncaptured-local]
+  755 |         auto clipById = [&] (const String& cid) -> var {
+      |                                            ^
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:378:16: note: previous declaration is here
+  378 |     const auto cid = firstTrack (ops)["clips"][0].getProperty ("id", var()).toString();
+      |                ^
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:766:14: warning: declaration shadows a local variable [-Wshadow]
+  766 |         auto cid = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", et }, { "seconds", 1.0 }, { "freq", 330.0 }}))["data"].getProperty ("clipId", var()).toString();
+      |              ^
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:378:16: note: previous declaration is here
+  378 |     const auto cid = firstTrack (ops)["clips"][0].getProperty ("id", var()).toString();
+      |                ^
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:909:47: warning: declaration shadows a local variable [-Wshadow-uncaptured-local]
+  909 |         auto effectOrder = [&] (const String& tid) -> StringArray {
+      |                                               ^
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:379:16: note: previous declaration is here
+  379 |     const auto tid = firstTrack (ops).getProperty ("id", var()).toString();
+      |                ^
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:917:41: warning: declaration shadows a local variable [-Wshadow-uncaptured-local]
+  917 |         auto idxOf = [&] (const String& tid, const String& type) -> int {
+      |                                         ^
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:379:16: note: previous declaration is here
+  379 |     const auto tid = firstTrack (ops).getProperty ("id", var()).toString();
+      |                ^
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:924:14: warning: declaration shadows a local variable [-Wshadow]
+  924 |         auto rt = cmd (ops, "create_track", args1 ("name", "Reorder"))["data"].getProperty ("trackId", var()).toString();
+      |              ^
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:294:10: note: previous declaration is here
+  294 |     auto rt = cmd (ops, "add_test_tone_clip", var (toneArgs));
+      |          ^
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:1041:43: warning: declaration shadows a local variable [-Wshadow-uncaptured-local]
+ 1041 |         auto layerOf = [&] (const String& cid) -> var {
+      |                                           ^
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:378:16: note: previous declaration is here
+  378 |     const auto cid = firstTrack (ops)["clips"][0].getProperty ("id", var()).toString();
+      |                ^
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:1049:47: warning: declaration shadows a local variable [-Wshadow-uncaptured-local]
+ 1049 |         auto layerStatus = [&] (const String& cid) { return layerOf (cid).getProperty ("status", var()).toString(); };
+      |                                               ^
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:378:16: note: previous declaration is here
+  378 |     const auto cid = firstTrack (ops)["clips"][0].getProperty ("id", var()).toString();
+      |                ^
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:1067:29: warning: loop will run at most once (loop increment never executed) [-Wunreachable-code-loop-increment]
+ 1067 |                             for (auto& c : *cs)
+      |                             ^~~
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:1101:44: warning: declaration shadows a local variable [-Wshadow-uncaptured-local]
+ 1101 |         auto layerOf2 = [&] (const String& cid) -> bool {
+      |                                            ^
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:378:16: note: previous declaration is here
+  378 |     const auto cid = firstTrack (ops)["clips"][0].getProperty ("id", var()).toString();
+      |                ^
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:1544:43: warning: declaration shadows a local variable [-Wshadow-uncaptured-local]
+ 1544 |         auto laneHas = [&] (const String& tid, const char* key, int note) {
+      |                                           ^
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:379:16: note: previous declaration is here
+  379 |     const auto tid = firstTrack (ops).getProperty ("id", var()).toString();
+      |                ^
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:1799:45: warning: declaration shadows a local variable [-Wshadow-uncaptured-local]
+ 1799 |         auto clipNotes = [&] (const String& cid) -> var {
+      |                                             ^
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:378:16: note: previous declaration is here
+  378 |     const auto cid = firstTrack (ops)["clips"][0].getProperty ("id", var()).toString();
+      |                ^
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:1848:46: warning: declaration shadows a local variable [-Wshadow-uncaptured-local]
+ 1848 |         auto clipExists = [&] (const String& cid) -> bool {
+      |                                              ^
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:378:16: note: previous declaration is here
+  378 |     const auto cid = firstTrack (ops)["clips"][0].getProperty ("id", var()).toString();
+      |                ^
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:1867:43: warning: declaration shadows a local variable [-Wshadow-uncaptured-local]
+ 1867 |         auto sendsOf = [&] (const String& tid) -> var { return trackById (tid).getProperty ("sends", var()); };
+      |                                           ^
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:379:16: note: previous declaration is here
+  379 |     const auto tid = firstTrack (ops).getProperty ("id", var()).toString();
+      |                ^
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:1878:16: warning: declaration shadows a local variable [-Wshadow]
+ 1878 |           auto rt = trackById (rtid);                          // bind to a local (no dangling temporary)
+      |                ^
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:294:10: note: previous declaration is here
+  294 |     auto rt = cmd (ops, "add_test_tone_clip", var (toneArgs));
+      |          ^
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:1952:43: warning: declaration shadows a local variable [-Wshadow-uncaptured-local]
+ 1952 |         auto meterOn = [&] (const String& tid) { return (bool) trackById (tid).getProperty ("meterEnabled", false); };
+      |                                           ^
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:379:16: note: previous declaration is here
+  379 |     const auto tid = firstTrack (ops).getProperty ("id", var()).toString();
+      |                ^
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:1953:50: warning: declaration shadows a local variable [-Wshadow-uncaptured-local]
+ 1953 |         auto hasLevelInRack = [&] (const String& tid) -> bool {
+      |                                                  ^
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:379:16: note: previous declaration is here
+  379 |     const auto tid = firstTrack (ops).getProperty ("id", var()).toString();
+      |                ^
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:1991:14: warning: declaration shadows a local variable [-Wshadow]
+ 1991 |         auto rt = cmd (ops, "create_track", args1 ("name", "RecTrack"))["data"].getProperty ("trackId", var()).toString();
+      |              ^
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:294:10: note: previous declaration is here
+  294 |     auto rt = cmd (ops, "add_test_tone_clip", var (toneArgs));
+      |          ^
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:2465:44: warning: declaration shadows a local variable [-Wshadow-uncaptured-local]
+ 2465 |         auto trackVar = [&] (const String& tid) -> var {
+      |                                            ^
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:379:16: note: previous declaration is here
+  379 |     const auto tid = firstTrack (ops).getProperty ("id", var()).toString();
+      |                ^
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:2471:44: warning: declaration shadows a local variable [-Wshadow-uncaptured-local]
+ 2471 |         auto clipById = [&] (const String& cid) -> var {
+      |                                            ^
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:378:16: note: previous declaration is here
+  378 |     const auto cid = firstTrack (ops)["clips"][0].getProperty ("id", var()).toString();
+      |                ^
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:2560:46: warning: declaration shadows a local variable [-Wshadow-uncaptured-local]
+ 2560 |         auto trackById2 = [&] (const String& tid) -> var {
+      |                                              ^
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:379:16: note: previous declaration is here
+  379 |     const auto tid = firstTrack (ops).getProperty ("id", var()).toString();
+      |                ^
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:2566:49: warning: declaration shadows a local variable [-Wshadow-uncaptured-local]
+ 2566 |         auto renderLayerOf = [&] (const String& tid, const String& cid) -> var {
+      |                                                 ^
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:379:16: note: previous declaration is here
+  379 |     const auto tid = firstTrack (ops).getProperty ("id", var()).toString();
+      |                ^
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:2566:68: warning: declaration shadows a local variable [-Wshadow-uncaptured-local]
+ 2566 |         auto renderLayerOf = [&] (const String& tid, const String& cid) -> var {
+      |                                                                    ^
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:378:16: note: previous declaration is here
+  378 |     const auto cid = firstTrack (ops)["clips"][0].getProperty ("id", var()).toString();
+      |                ^
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:2588:20: warning: declaration shadows a local variable [-Wshadow]
+ 2588 |         const auto rt  = cmd (ops, "create_track", args1 ("name", "Gen"))["data"].getProperty ("trackId", var()).toString();
+      |                    ^
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:294:10: note: previous declaration is here
+  294 |     auto rt = cmd (ops, "add_test_tone_clip", var (toneArgs));
+      |          ^
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:2758:28: warning: declaration shadows a local variable [-Wshadow]
+ 2758 |                 for (auto& r : *ra)
+      |                            ^
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:284:10: note: previous declaration is here
+  284 |     auto r = cmd (ops, "create_track", args1 ("name", "Drums"));
+      |          ^
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:3907:24: warning: declaration shadows a local variable [-Wshadow]
+ 3907 |             for (auto& cid : clipIds)
+      |                        ^
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:378:16: note: previous declaration is here
+  378 |     const auto cid = firstTrack (ops)["clips"][0].getProperty ("id", var()).toString();
+      |                ^
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:4252:20: warning: declaration shadows a local variable [-Wshadow]
+ 4252 |         const auto tid = mkt["data"].getProperty ("trackId", var()).toString();
+      |                    ^
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:379:16: note: previous declaration is here
+  379 |     const auto tid = firstTrack (ops).getProperty ("id", var()).toString();
+      |                ^
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:4267:20: warning: declaration shadows a local variable [-Wshadow]
+ 4267 |         const auto clipId = firstClipOnTrack().getProperty ("id", var()).toString();
+      |                    ^
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:301:16: note: previous declaration is here
+  301 |     const auto clipId = clip0.getProperty ("id", var()).toString();
+      |                ^
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:5007:23: warning: declaration shadows a variable in namespace 'mosh::(anonymous)' [-Wshadow]
+ 5007 |     int executed = 0, failures = 0;
+      |                       ^
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/src/app/SelfTest.cpp:19:9: note: previous declaration is here
+   19 |     int failures = 0;
+      |         ^
+36 warnings generated.
+[2/4] Linking CXX executable Mosh_artefacts/Release/Mosh.app/Contents/MacOS/Mosh; Re-injecting Info.plist keys PLIST_TO_MERGE drops (speech + Bonjour + camera); Staging drum kits into Mosh.app/Contents/Resources/drumkits; Staging UI bundle → /Users/emiliosanchez-harris/Documents/ClaudeMosh/build-macos-arm64-release/Mosh_artefacts/Release/Mosh.app/Contents/Resources/ui
+[3/4] Restaging UI bundle into the app (UI-only-safe)

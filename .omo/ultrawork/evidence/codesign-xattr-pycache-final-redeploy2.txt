@@ -1,0 +1,5 @@
+codesign verify passed after final-redeploy2 gates
+xattr count: 0
+pycache count: 0
+service run.sh: executable
+service server.py: present

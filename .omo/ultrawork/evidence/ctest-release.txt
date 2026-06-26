@@ -1,0 +1,42 @@
+Test project /Users/emiliosanchez-harris/Documents/ClaudeMosh/build-macos-arm64-release
+    Start 1: MoshTests
+Could not find executable /Users/emiliosanchez-harris/Documents/ClaudeMosh/build-macos-arm64-release/tests/MoshTests_artefacts/Release/MoshTests
+Looked in the following places:
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/build-macos-arm64-release/tests/MoshTests_artefacts/Release/MoshTests
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/build-macos-arm64-release/tests/MoshTests_artefacts/Release/MoshTests
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/build-macos-arm64-release/tests/MoshTests_artefacts/Release/Release/MoshTests
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/build-macos-arm64-release/tests/MoshTests_artefacts/Release/Release/MoshTests
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/build-macos-arm64-release/tests/MoshTests_artefacts/Release/Debug/MoshTests
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/build-macos-arm64-release/tests/MoshTests_artefacts/Release/Debug/MoshTests
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/build-macos-arm64-release/tests/MoshTests_artefacts/Release/MinSizeRel/MoshTests
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/build-macos-arm64-release/tests/MoshTests_artefacts/Release/MinSizeRel/MoshTests
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/build-macos-arm64-release/tests/MoshTests_artefacts/Release/RelWithDebInfo/MoshTests
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/build-macos-arm64-release/tests/MoshTests_artefacts/Release/RelWithDebInfo/MoshTests
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/build-macos-arm64-release/tests/MoshTests_artefacts/Release/Deployment/MoshTests
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/build-macos-arm64-release/tests/MoshTests_artefacts/Release/Deployment/MoshTests
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/build-macos-arm64-release/tests/MoshTests_artefacts/Release/Development/MoshTests
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/build-macos-arm64-release/tests/MoshTests_artefacts/Release/Development/MoshTests
+Users/emiliosanchez-harris/Documents/ClaudeMosh/build-macos-arm64-release/tests/MoshTests_artefacts/Release/MoshTests
+Users/emiliosanchez-harris/Documents/ClaudeMosh/build-macos-arm64-release/tests/MoshTests_artefacts/Release/MoshTests
+Users/emiliosanchez-harris/Documents/ClaudeMosh/build-macos-arm64-release/tests/MoshTests_artefacts/Release/Release/MoshTests
+Users/emiliosanchez-harris/Documents/ClaudeMosh/build-macos-arm64-release/tests/MoshTests_artefacts/Release/Release/MoshTests
+Users/emiliosanchez-harris/Documents/ClaudeMosh/build-macos-arm64-release/tests/MoshTests_artefacts/Release/Debug/MoshTests
+Users/emiliosanchez-harris/Documents/ClaudeMosh/build-macos-arm64-release/tests/MoshTests_artefacts/Release/Debug/MoshTests
+Users/emiliosanchez-harris/Documents/ClaudeMosh/build-macos-arm64-release/tests/MoshTests_artefacts/Release/MinSizeRel/MoshTests
+Users/emiliosanchez-harris/Documents/ClaudeMosh/build-macos-arm64-release/tests/MoshTests_artefacts/Release/MinSizeRel/MoshTests
+Users/emiliosanchez-harris/Documents/ClaudeMosh/build-macos-arm64-release/tests/MoshTests_artefacts/Release/RelWithDebInfo/MoshTests
+Users/emiliosanchez-harris/Documents/ClaudeMosh/build-macos-arm64-release/tests/MoshTests_artefacts/Release/RelWithDebInfo/MoshTests
+Users/emiliosanchez-harris/Documents/ClaudeMosh/build-macos-arm64-release/tests/MoshTests_artefacts/Release/Deployment/MoshTests
+Users/emiliosanchez-harris/Documents/ClaudeMosh/build-macos-arm64-release/tests/MoshTests_artefacts/Release/Deployment/MoshTests
+Users/emiliosanchez-harris/Documents/ClaudeMosh/build-macos-arm64-release/tests/MoshTests_artefacts/Release/Development/MoshTests
+Users/emiliosanchez-harris/Documents/ClaudeMosh/build-macos-arm64-release/tests/MoshTests_artefacts/Release/Development/MoshTests
+Unable to find executable: /Users/emiliosanchez-harris/Documents/ClaudeMosh/build-macos-arm64-release/tests/MoshTests_artefacts/Release/MoshTests
+1/1 Test #1: MoshTests ........................***Not Run   0.00 sec
+
+0% tests passed, 1 tests failed out of 1
+
+Total Test time (real) =   0.00 sec
+
+The following tests FAILED:
+	  1 - MoshTests (Not Run)
+Errors while running CTest

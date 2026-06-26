@@ -1,0 +1,16 @@
+
+> mosh-ui@0.0.1 build
+> tsc --noEmit && vite build
+
+vite v5.4.21 building for production...
+transforming...
+✓ 204 modules transformed.
+src/juce/check_native_interop.js (41:2): Use of eval in "src/juce/check_native_interop.js" is strongly discouraged as it poses security risks and may cause issues with minification.
+rendering chunks...
+[plugin vite:singlefile] 
+
+[plugin vite:singlefile] Inlining: index-D5CLL7hL.js
+[plugin vite:singlefile] Inlining: style-C8Pdw5-6.css
+computing gzip size...
+dist/index.html  591.10 kB │ gzip: 189.31 kB
+✓ built in 1.07s

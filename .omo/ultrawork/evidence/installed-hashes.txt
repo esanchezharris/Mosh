@@ -1,0 +1,2 @@
+64f41b08f6dab7922a829b06a42245fd63a9b0af378b4478a26d8a69991510c0  build-macos-arm64-release/Mosh_artefacts/Release/Mosh.app/Contents/MacOS/Mosh
+946a612bec0929c02c23d00ed00dd88603d5d95f898991ba4aaf71245c25db4b  /Applications/Mosh.app/Contents/MacOS/Mosh

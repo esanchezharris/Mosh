@@ -1,0 +1,66 @@
+[0/2] Re-checking globbed directories...
+[1/6] Building Mosh UI (Vite) → ui/dist
+
+up to date in 255ms
+
+> mosh-ui@0.0.1 build
+> tsc --noEmit && vite build
+
+vite v5.4.21 building for production...
+transforming...
+✓ 204 modules transformed.
+src/juce/check_native_interop.js (41:2): Use of eval in "src/juce/check_native_interop.js" is strongly discouraged as it poses security risks and may cause issues with minification.
+rendering chunks...
+[plugin vite:singlefile] 
+
+[plugin vite:singlefile] Inlining: index-PYI_UQ79.js
+[plugin vite:singlefile] Inlining: style-C8Pdw5-6.css
+computing gzip size...
+dist/index.html  591.29 kB │ gzip: 189.40 kB
+✓ built in 1.06s
+[2/6] Building CXX object CMakeFiles/Mosh.dir/src/app/MenuController.cpp.o
+[3/6] Building CXX object CMakeFiles/Mosh.dir/src/Main.cpp.o
+In file included from /Users/emiliosanchez-harris/Documents/ClaudeMosh/src/Main.cpp:2:
+In file included from /Users/emiliosanchez-harris/Documents/ClaudeMosh/.cpm-cache/_fc/tracktion_engine-src/modules/tracktion_engine/tracktion_engine.h:272:
+In file included from /Users/emiliosanchez-harris/Documents/ClaudeMosh/.cpm-cache/_fc/tracktion_engine-src/modules/tracktion_engine/../tracktion_core/tracktion_core.h:48:
+In file included from /Users/emiliosanchez-harris/Documents/ClaudeMosh/.cpm-cache/_fc/tracktion_engine-src/modules/tracktion_engine/../tracktion_core/audio/tracktion_AudioReader.h:19:
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/.cpm-cache/_fc/tracktion_engine-src/modules/tracktion_engine/../tracktion_core/audio/../utilities/tracktion_Time.h:470:39: warning: implicit conversion from 'long long' to 'double' may lose precision [-Wimplicit-int-float-conversion]
+  470 |     return TimePosition::fromSeconds (samplePosition / sampleRate);
+      |                                       ^~~~~~~~~~~~~~ ~
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/.cpm-cache/_fc/tracktion_engine-src/modules/tracktion_engine/../tracktion_core/utilities/tracktion_TimeRange.h:217:28: note: in instantiation of function template specialization 'tracktion::TimePosition::fromSamples<long long>' requested here
+  217 |     return { TimePosition::fromSamples (r.getStart(), sampleRate),
+      |                            ^
+In file included from /Users/emiliosanchez-harris/Documents/ClaudeMosh/src/Main.cpp:2:
+In file included from /Users/emiliosanchez-harris/Documents/ClaudeMosh/.cpm-cache/_fc/tracktion_engine-src/modules/tracktion_engine/tracktion_engine.h:393:
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/.cpm-cache/_fc/tracktion_engine-src/modules/tracktion_engine/../tracktion_graph/utilities/tracktion_PerformanceMeasurement.h:303:28: warning: implicit conversion from 'uint64_t' (aka 'unsigned long long') to 'double' may lose precision [-Wimplicit-int-float-conversion]
+  303 |         const auto delta = cyclesElapsed - meanCycles;
+      |                            ^~~~~~~~~~~~~ ~
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/.cpm-cache/_fc/tracktion_engine-src/modules/tracktion_engine/../tracktion_graph/utilities/tracktion_PerformanceMeasurement.h:305:31: warning: implicit conversion from 'uint64_t' (aka 'unsigned long long') to 'double' may lose precision [-Wimplicit-int-float-conversion]
+  305 |         const double delta2 = cyclesElapsed - meanCycles;
+      |                               ^~~~~~~~~~~~~ ~
+In file included from /Users/emiliosanchez-harris/Documents/ClaudeMosh/src/Main.cpp:2:
+In file included from /Users/emiliosanchez-harris/Documents/ClaudeMosh/.cpm-cache/_fc/tracktion_engine-src/modules/tracktion_engine/tracktion_engine.h:415:
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/.cpm-cache/_fc/tracktion_engine-src/modules/tracktion_engine/utilities/tracktion_BackgroundJobs.h:200:48: warning: implicit conversion from 'int' to 'float' may lose precision [-Wimplicit-int-float-conversion]
+  200 |         newTotal = (numJobs > 0) ? (newTotal / numJobs) : 1.0f;
+      |                                              ~ ^~~~~~~
+In file included from /Users/emiliosanchez-harris/Documents/ClaudeMosh/src/Main.cpp:2:
+In file included from /Users/emiliosanchez-harris/Documents/ClaudeMosh/.cpm-cache/_fc/tracktion_engine-src/modules/tracktion_engine/tracktion_engine.h:487:
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/.cpm-cache/_fc/tracktion_engine-src/modules/tracktion_engine/plugins/external/tracktion_VSTXML.h:199:37: warning: implicit conversion from 'int' to 'float' may lose precision [-Wimplicit-int-float-conversion]
+  199 |                 entry->range.low  = curEntry / (float) numEntries;
+      |                                     ^~~~~~~~ ~
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/.cpm-cache/_fc/tracktion_engine-src/modules/tracktion_engine/plugins/external/tracktion_VSTXML.h:200:47: warning: implicit conversion from 'int' to 'float' may lose precision [-Wimplicit-int-float-conversion]
+  200 |                 entry->range.high = (curEntry + 1) / (float) numEntries;
+      |                                      ~~~~~~~~~^~~  ~
+In file included from /Users/emiliosanchez-harris/Documents/ClaudeMosh/src/Main.cpp:2:
+In file included from /Users/emiliosanchez-harris/Documents/ClaudeMosh/.cpm-cache/_fc/tracktion_engine-src/modules/tracktion_engine/tracktion_engine.h:522:
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/.cpm-cache/_fc/tracktion_engine-src/modules/tracktion_engine/audio_files/tracktion_AudioFile.h:41:20: warning: implicit conversion from 'const SampleCount' (aka 'const long long') to 'double' may lose precision [-Wimplicit-int-float-conversion]
+   41 |             return lengthInSamples / sampleRate;
+      |                    ^~~~~~~~~~~~~~~ ~
+In file included from /Users/emiliosanchez-harris/Documents/ClaudeMosh/src/Main.cpp:2:
+In file included from /Users/emiliosanchez-harris/Documents/ClaudeMosh/.cpm-cache/_fc/tracktion_engine-src/modules/tracktion_engine/tracktion_engine.h:540:
+/Users/emiliosanchez-harris/Documents/ClaudeMosh/.cpm-cache/_fc/tracktion_engine-src/modules/tracktion_engine/audio_files/tracktion_AudioFileUtils.h:146:92: warning: implicit conversion from 'int64' (aka 'long long') to 'float' may lose precision [-Wimplicit-int-float-conversion]
+  146 |                                 updateProgress (static_cast<float> (startSample) / reader->lengthInSamples);
+      |                                                                                  ~ ~~~~~~~~^~~~~~~~~~~~~~~
+8 warnings generated.
+[4/6] Linking CXX executable Mosh_artefacts/Release/Mosh.app/Contents/MacOS/Mosh; Re-injecting Info.plist keys PLIST_TO_MERGE drops (speech + Bonjour + camera); Staging drum kits into Mosh.app/Contents/Resources/drumkits; Staging UI bundle → /Users/emiliosanchez-harris/Documents/ClaudeMosh/build-macos-arm64-release/Mosh_artefacts/Release/Mosh.app/Contents/Resources/ui
+[5/6] Restaging UI bundle into the app (UI-only-safe)

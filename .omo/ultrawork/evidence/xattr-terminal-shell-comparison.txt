@@ -1,0 +1,3 @@
+bash_count:       0
+zsh_count:       0
+codesign_ok

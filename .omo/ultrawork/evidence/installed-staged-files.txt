@@ -1,0 +1,3 @@
+/Applications/Mosh.app/Contents/Resources/service/run.sh
+/Applications/Mosh.app/Contents/Resources/service/server.py
+/Applications/Mosh.app/Contents/Resources/ui/index.html

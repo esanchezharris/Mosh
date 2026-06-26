@@ -1,0 +1,2 @@
+terminal xattr count:        0
+codesign_ok

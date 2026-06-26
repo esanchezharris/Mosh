@@ -1,0 +1,3 @@
+codesign verify passed after final launchctl gates
+xattr count: 0
+pycache count: 0

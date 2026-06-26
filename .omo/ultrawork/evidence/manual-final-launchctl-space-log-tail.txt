@@ -1,0 +1,12 @@
+{"ts": 1782423558705, "seq": 1, "command": "enable_all_meters", "args": {}, "ok": true, "undoable": true}
+{"ts": 1782423581949, "seq": 2, "command": "set_transport", "args": {"action": "toggle"}, "ok": true, "undoable": false}
+{"ts": 1782425525424, "seq": 1, "command": "enable_all_meters", "args": {}, "ok": true, "undoable": true}
+{"ts": 1782425672682, "seq": 1, "command": "enable_all_meters", "args": {}, "ok": true, "undoable": true}
+{"ts": 1782425922153, "seq": 1, "command": "enable_all_meters", "args": {}, "ok": true, "undoable": true}
+{"ts": 1782426041297, "seq": 2, "command": "set_transport", "args": {"action": "toggle"}, "ok": true, "undoable": false}
+{"ts": 1782426056114, "seq": 3, "command": "set_transport", "args": {"action": "stop", "position": 0}, "ok": true, "undoable": false}
+{"ts": 1782426393527, "seq": 1, "command": "enable_all_meters", "args": {}, "ok": true, "undoable": true}
+{"ts": 1782426423130, "seq": 2, "command": "set_transport", "args": {"action": "toggle"}, "ok": true, "undoable": false}
+{"ts": 1782426435681, "seq": 3, "command": "set_transport", "args": {"action": "stop", "position": 0}, "ok": true, "undoable": false}
+{"ts": 1782427091345, "seq": 1, "command": "enable_all_meters", "args": {}, "ok": true, "undoable": true}
+{"ts": 1782427102316, "seq": 2, "command": "set_transport", "args": {"action": "toggle"}, "ok": true, "undoable": false}

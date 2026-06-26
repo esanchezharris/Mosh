@@ -1,0 +1,1 @@
+codesign after service launch: exit 0

@@ -1,0 +1,1 @@
+codesign --verify --deep --strict /Applications/Mosh.app: exit 0

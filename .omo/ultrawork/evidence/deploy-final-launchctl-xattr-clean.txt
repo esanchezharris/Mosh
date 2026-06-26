@@ -1,0 +1,22 @@
+env: shell only (no /Users/emiliosanchez-harris/Documents/ClaudeMosh/ui/.env.local)
+  • DEEPSEEK: key present
+  • OPENAI: key present
+building Mosh (macos-arm64-release → macos-arm64-release-app)…
+-- Configuring juceaide
+-- Building juceaide
+-- Exporting juceaide
+-- Testing juceaide
+-- Finished setting up juceaide
+-- CPM: Adding package Catch2@3.7.1 (v3.7.1 at /Users/emiliosanchez-harris/Documents/ClaudeMosh/.cpm-cache/catch2/1b2c19d23bca710b0cab412b221d18c1a5b6e30e)
+-- Configuring done (2.6s)
+-- Generating done (0.2s)
+-- Build files have been written to: /Users/emiliosanchez-harris/Documents/ClaudeMosh/build-macos-arm64-release
+[0/2] Re-checking globbed directories...
+[1/2] Restaging UI bundle into the app (UI-only-safe)
+deploying /Users/emiliosanchez-harris/Documents/ClaudeMosh/build-macos-arm64-release/Mosh_artefacts/Release/Mosh.app -> /Applications/Mosh.app
+bundling service → /Applications/Mosh.app/Contents/Resources/service
+  signature: valid (ad-hoc)
+deployed one canonical /Applications/Mosh.app (default build; service bundled).
+If macOS still shows an old icon, log out and back in (icon cache).
+  signature: valid after final xattr cleanup
+  xattrs: stripped

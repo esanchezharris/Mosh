@@ -1,0 +1,45 @@
+
+> mosh-ui@0.0.1 test
+> vitest run src/hooks/useKeyboardShortcuts.test.ts
+
+
+ RUN  v2.1.9 /Users/emiliosanchez-harris/Documents/ClaudeMosh/ui
+
+stderr | src/hooks/useKeyboardShortcuts.test.ts
+The 'window.__JUCE__' object is undefined. Native integration features will not work. Defining a placeholder 'window.__JUCE__' object.
+
+ ❯ src/hooks/useKeyboardShortcuts.test.ts (1 test | 1 failed) 15ms
+   × useKeyboardShortcuts > dispatches Space to the transport from the app-level shortcut hook 15ms
+     → expected [] to deep equally contain { command: 'set_transport', …(1) }
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/hooks/useKeyboardShortcuts.test.ts > useKeyboardShortcuts > dispatches Space to the transport from the app-level shortcut hook
+AssertionError: expected [] to deep equally contain { command: 'set_transport', …(1) }
+
+- Expected: 
+Object {
+  "args": Object {
+    "action": "toggle",
+  },
+  "command": "set_transport",
+}
+
++ Received: 
+Array []
+
+ ❯ src/hooks/useKeyboardShortcuts.test.ts:60:23
+     58|     });
+     59| 
+     60|     expect(execCalls).toContainEqual({ command: "set_transport", args:…
+       |                       ^
+     61|   });
+     62| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+   Start at  14:55:55
+   Duration  1.43s (transform 180ms, setup 0ms, collect 234ms, tests 15ms, environment 691ms, prepare 131ms)
+

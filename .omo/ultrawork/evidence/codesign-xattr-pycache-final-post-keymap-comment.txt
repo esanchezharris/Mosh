@@ -1,0 +1,5 @@
+codesign verify passed after final-post-keymap-comment gates
+xattr count: 0
+pycache count: 0
+service run.sh: executable
+service server.py: present

@@ -1,0 +1,17 @@
+
+> mosh-ui@0.0.1 test
+> vitest run src/hooks/useKeyboardShortcuts.test.ts
+
+
+ RUN  v2.1.9 /Users/emiliosanchez-harris/Documents/ClaudeMosh/ui
+
+stderr | src/hooks/useKeyboardShortcuts.test.ts
+The 'window.__JUCE__' object is undefined. Native integration features will not work. Defining a placeholder 'window.__JUCE__' object.
+
+ ✓ src/hooks/useKeyboardShortcuts.test.ts (3 tests) 17ms
+
+ Test Files  1 passed (1)
+      Tests  3 passed (3)
+   Start at  15:13:43
+   Duration  1.23s (transform 166ms, setup 0ms, collect 227ms, tests 17ms, environment 583ms, prepare 79ms)
+

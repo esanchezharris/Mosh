@@ -1,0 +1,25 @@
+
+> mosh-ui@0.0.1 test
+> vitest run src/ui/meterGeom.test.ts src/ui/Meter.test.ts src/interaction/keymap.test.ts src/interaction/config.test.ts src/menuActions.test.ts src/hooks/useKeyboardShortcuts.test.ts
+
+
+ RUN  v2.1.9 /Users/emiliosanchez-harris/Documents/ClaudeMosh/ui
+
+ ✓ src/menuActions.test.ts (14 tests) 9ms
+ ✓ src/interaction/keymap.test.ts (16 tests) 5ms
+ ✓ src/ui/meterGeom.test.ts (6 tests) 2ms
+stderr | src/ui/Meter.test.ts
+The 'window.__JUCE__' object is undefined. Native integration features will not work. Defining a placeholder 'window.__JUCE__' object.
+
+stderr | src/hooks/useKeyboardShortcuts.test.ts
+The 'window.__JUCE__' object is undefined. Native integration features will not work. Defining a placeholder 'window.__JUCE__' object.
+
+ ✓ src/interaction/config.test.ts (6 tests) 4ms
+ ✓ src/ui/Meter.test.ts (2 tests) 24ms
+ ✓ src/hooks/useKeyboardShortcuts.test.ts (5 tests) 24ms
+
+ Test Files  6 passed (6)
+      Tests  49 passed (49)
+   Start at  15:45:16
+   Duration  2.09s (transform 957ms, setup 0ms, collect 1.86s, tests 68ms, environment 5.71s, prepare 676ms)
+

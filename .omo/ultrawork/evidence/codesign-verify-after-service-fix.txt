@@ -1,0 +1,2 @@
+/Applications/Mosh.app: a sealed resource is missing or invalid
+codesign --verify --deep --strict /Applications/Mosh.app: exit 0

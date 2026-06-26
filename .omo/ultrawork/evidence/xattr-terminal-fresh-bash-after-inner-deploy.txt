@@ -1,0 +1,5 @@
+26:/Applications/Mosh.app: replacing existing signature
+27:  signature: valid (ad-hoc)
+28:deployed one canonical /Applications/Mosh.app (default build; service bundled).
+30:fresh_bash_count:       0
+31:fresh_bash_codesign_ok

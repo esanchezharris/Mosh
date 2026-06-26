@@ -1,0 +1,1 @@
+{"ok": true, "service": "mosh-generative", "version": "0.3.0", "build": "sa3-1.0.0+mlx+colors5a954c5b+sec8.0", "uptime_s": 0.1, "adapters": ["fake", "transform", "stable_audio3"], "transcribe": true, "sketch": true}
