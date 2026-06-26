@@ -31,6 +31,9 @@ SERVER_LOG="$OUT/stub-server.log"
 QR_PNG="$OUT/pairing-qr.png"
 QR_DECODED_JSON="$OUT/qr-decoded-payload.json"
 SUMMARY_JSON="$OUT/summary.json"
+CONTROLLER_COMMANDS_JSON="$OUT/controller-command-events.json"
+CONTROLLER_UI_BUILD_LOG="$OUT/controller-ui-build-for-testing.log"
+CONTROLLER_UI_TEST_LOG="$OUT/controller-ui-tap-xcodebuild.log"
 SERVER_PID=""
 
 mkdir -p "$OUT"
@@ -204,6 +207,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 port = int(sys.argv[1])
 token = sys.argv[2]
 events_path = sys.argv[3]
+controller_state = {"mode": "judgment"}
 
 def write_event(path, body):
     event = {
@@ -264,6 +268,7 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
 
         if path == "/snapshot":
+            controller_mode = controller_state["mode"]
             self.envelope(
                 {
                     "tracks": [
@@ -288,15 +293,37 @@ class Handler(BaseHTTPRequestHandler):
                                         "userKept": False,
                                         "hasArtifact": True,
                                     },
+                                    "numTakes": 2,
+                                    "currentTakeIndex": 0,
                                 }
                             ],
                         }
                     ],
                     "transport": {
                         "playing": False,
-                        "recording": False,
+                        "recording": controller_mode == "capture",
                         "position": 0,
                         "looping": False,
+                        "loopStart": 0,
+                        "loopEnd": 2.5,
+                    },
+                    "controller": {
+                        "mode": controller_mode,
+                        "record": "recording" if controller_mode == "capture" else "idle",
+                        "agent": "idle",
+                        "take": {
+                            "exists": True,
+                            "clipId": "clip-1",
+                            "trackId": "track-1",
+                            "name": "Rendered Lead",
+                            "start": 0,
+                            "length": 2.5,
+                            "hasLanes": True,
+                            "canKeep": True,
+                            "kept": False,
+                            "numTakes": 2,
+                            "currentTakeIndex": 0,
+                        },
                     },
                 }
             )
@@ -304,6 +331,8 @@ class Handler(BaseHTTPRequestHandler):
             self.envelope({"latestSeq": int(body.get("since", 0))})
         elif path == "/command":
             command = body.get("command", {})
+            if command.get("command") == "undo":
+                controller_state["mode"] = "capture"
             self.envelope({"ok": True, "command": command.get("command"), "error": None})
         elif path == "/take/start":
             self.envelope({"takeId": "sim-take-1"})
@@ -430,19 +459,109 @@ xcrun simctl openurl "$SIM_UDID" "$PAIRING_URL" | tee "$OUT/sim-openurl-screensh
 sleep 2
 xcrun simctl io "$SIM_UDID" screenshot "$OUT/paired-session.png" | tee "$OUT/sim-screenshot.log"
 
-python3 - "$SUMMARY_JSON" "$SIM_NAME" "$SIM_UDID" "$SIM_RUNTIME" "$PAIRING_URL" "$QR_PNG" "$QR_DECODED_JSON" "$EVENTS" "$OUT" "$PROJECT" <<'PY'
+xcodebuild build-for-testing \
+  -project "$PROJECT" \
+  -scheme MoshCompanionControllerGate \
+  -configuration Debug \
+  -destination "platform=iOS Simulator,id=$SIM_UDID" \
+  -derivedDataPath "$DERIVED" \
+  CODE_SIGNING_ALLOWED=NO | tee "$CONTROLLER_UI_BUILD_LOG"
+
+xcrun simctl install "$SIM_UDID" "$APP" | tee "$OUT/controller-ui-install.log"
+SIMCTL_CHILD_MOSH_COMPANION_PAIRING_URL="$PAIRING_URL" \
+  xcrun simctl launch --terminate-running-process "$SIM_UDID" "$BUNDLE_ID" | tee "$OUT/controller-ui-launch.log"
+sleep 2
+
+xcodebuild test-without-building \
+  -project "$PROJECT" \
+  -scheme MoshCompanionControllerGate \
+  -configuration Debug \
+  -destination "platform=iOS Simulator,id=$SIM_UDID" \
+  -derivedDataPath "$DERIVED" \
+  CODE_SIGNING_ALLOWED=NO | tee "$CONTROLLER_UI_TEST_LOG"
+
+python3 - "$EVENTS" "$CONTROLLER_COMMANDS_JSON" <<'PY'
+import json
+import os
+import sys
+
+events_path, out_path = sys.argv[1:]
+expected = [
+    ("keep_take", "TAKE_KEEP", "kept"),
+    ("undo", "TAKE_REDO", "undone"),
+    ("mark_take", "TAKE_MARK", "flagged"),
+]
+
+events = []
+if os.path.exists(events_path):
+    with open(events_path, "r", encoding="utf-8") as handle:
+        events = [json.loads(line) for line in handle if line.strip()]
+
+matched = []
+cursor = 0
+command_summaries = []
+for event in events:
+    if event.get("path") != "/command":
+        continue
+    command = event.get("body", {}).get("command", {})
+    args = command.get("args", {})
+    summary = {
+        "timeMs": event.get("timeMs"),
+        "command": command.get("command"),
+        "controllerEvent": args.get("controllerEvent"),
+        "controllerLabel": args.get("controllerLabel"),
+        "source": args.get("source"),
+        "clipId": args.get("clipId"),
+    }
+    command_summaries.append(summary)
+    if cursor >= len(expected):
+        continue
+    wanted_command, wanted_event, wanted_label = expected[cursor]
+    if (
+        summary["command"] == wanted_command
+        and summary["controllerEvent"] == wanted_event
+        and summary["controllerLabel"] == wanted_label
+        and summary["source"] == "phone_controller"
+    ):
+        matched.append(summary)
+        cursor += 1
+
+result = {
+    "expected": [
+        {"command": command, "controllerEvent": event, "controllerLabel": label}
+        for command, event, label in expected
+    ],
+    "matched": matched,
+    "commands": command_summaries,
+}
+with open(out_path, "w", encoding="utf-8") as handle:
+    json.dump(result, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+
+if cursor != len(expected):
+    raise SystemExit(
+        "Controller UI tap gate did not observe KEEP, REDO, MARK /command sequence. "
+        f"Observed: {command_summaries}"
+    )
+PY
+
+python3 - "$SUMMARY_JSON" "$SIM_NAME" "$SIM_UDID" "$SIM_RUNTIME" "$PAIRING_URL" "$QR_PNG" "$QR_DECODED_JSON" "$EVENTS" "$CONTROLLER_COMMANDS_JSON" "$CONTROLLER_UI_BUILD_LOG" "$CONTROLLER_UI_TEST_LOG" "$OUT" "$PROJECT" <<'PY'
 from collections import Counter
 import json
 import os
 import sys
 
-summary_path, sim_name, sim_udid, sim_runtime, pairing_url, qr_png, decoded_json, events_path, out_dir, project = sys.argv[1:]
+summary_path, sim_name, sim_udid, sim_runtime, pairing_url, qr_png, decoded_json, events_path, controller_commands_path, controller_ui_build_log, controller_ui_test_log, out_dir, project = sys.argv[1:]
 
 events = []
 if os.path.exists(events_path):
     with open(events_path, "r", encoding="utf-8") as handle:
         events = [json.loads(line) for line in handle if line.strip()]
 counts = Counter(event["path"] for event in events)
+controller_commands = {}
+if os.path.exists(controller_commands_path):
+    with open(controller_commands_path, "r", encoding="utf-8") as handle:
+        controller_commands = json.load(handle)
 
 summary = {
     "status": "passed",
@@ -457,6 +576,11 @@ summary = {
         "qrPNG": qr_png,
         "qrDecodedPayload": decoded_json,
         "stubEvents": events_path,
+        "controllerCommandEvents": controller_commands_path,
+        "controllerUIBuildLog": controller_ui_build_log,
+        "controllerUITestLog": controller_ui_test_log,
+        "controllerUIInstallLog": os.path.join(out_dir, "controller-ui-install.log"),
+        "controllerUILaunchLog": os.path.join(out_dir, "controller-ui-launch.log"),
         "xcodebuildTestLog": os.path.join(out_dir, "xcodebuild-test.log"),
         "screenshot": os.path.join(out_dir, "paired-session.png"),
     },
@@ -475,6 +599,14 @@ summary = {
                 "paired app called the local Mac stub /snapshot and /events endpoints",
             ],
             "stub_endpoint_counts": dict(sorted(counts.items())),
+        },
+        "controller_ui_taps": {
+            "proved": [
+                "XCUITest tapped KEEP, REDO, and MARK on the native controller UI",
+                "local Mac stub observed keep_take, undo, and mark_take through /command",
+                "controller source and KEEP/REDO/MARK labels were present in command args",
+            ],
+            "matched_commands": controller_commands.get("matched", []),
         },
         "real_mic_takes": {
             "proved": [

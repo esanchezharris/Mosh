@@ -66,6 +66,40 @@ final class CompanionClientTests: XCTestCase {
         XCTAssertEqual(snapshot.tracks.first?.clips.first?.renderLayer?.hasArtifact, true)
     }
 
+    func testSnapshotDecodesControllerState() throws {
+        let json = """
+        {
+          "tracks": [],
+          "transport": { "playing": false, "recording": false, "position": 12, "looping": false },
+          "controller": {
+            "mode": "judgment",
+            "record": "idle",
+            "agent": "idle",
+            "take": {
+              "exists": true,
+              "clipId": "clip-9",
+              "trackId": "track-1",
+              "name": "Take 2",
+              "start": 8,
+              "length": 4,
+              "hasLanes": true,
+              "canKeep": true,
+              "kept": false,
+              "numTakes": 2,
+              "currentTakeIndex": 1
+            }
+          }
+        }
+        """
+
+        let snapshot = try JSONDecoder().decode(MoshSnapshot.self, from: Data(json.utf8))
+
+        XCTAssertEqual(snapshot.controller?.displayMode, .judgment)
+        XCTAssertEqual(snapshot.controller?.take?.clipId, "clip-9")
+        XCTAssertEqual(snapshot.controller?.take?.numTakes, 2)
+        XCTAssertEqual(snapshot.controller?.take?.canKeep, true)
+    }
+
     func testStoreAcceptRejectSendSelectedRenderCommands() async {
         let client = MockCompanionClient()
         client.snapshotValue = MoshSnapshot(
@@ -165,6 +199,108 @@ final class CompanionClientTests: XCTestCase {
         XCTAssertFalse(store.canSendCommands)
 
         store.setTransport("play")
+        XCTAssertTrue(client.commands.isEmpty)
+        XCTAssertTrue(store.receipts.first?.contains("MOSH is offline") == true)
+    }
+
+    func testDerivedControllerStateUsesRecordingModeAndLatestWaveClip() async {
+        let client = MockCompanionClient()
+        client.snapshotValue = MoshSnapshot(
+            tracks: [
+                MoshTrack(
+                    id: "track-1",
+                    index: 0,
+                    name: "Vox",
+                    clips: [
+                        MoshClip(
+                            id: "clip-1",
+                            name: "First",
+                            type: "wave",
+                            start: 0,
+                            length: 2,
+                            hasRenderLayer: false,
+                            renderLayer: nil,
+                            numTakes: 1,
+                            currentTakeIndex: 0
+                        ),
+                        MoshClip(
+                            id: "clip-2",
+                            name: "Latest",
+                            type: "wave",
+                            start: 8,
+                            length: 4,
+                            hasRenderLayer: false,
+                            renderLayer: nil,
+                            numTakes: 2,
+                            currentTakeIndex: 1
+                        )
+                    ]
+                )
+            ],
+            transport: MoshTransport(playing: true, recording: true, position: 9, looping: false)
+        )
+        let store = CompanionStore(client: client)
+
+        await store.refresh()
+
+        XCTAssertEqual(store.controllerMode, .capture)
+        XCTAssertEqual(store.controller.take?.clipId, "clip-2")
+        XCTAssertEqual(store.controller.take?.canKeep, true)
+    }
+
+    func testControllerEventsSendPhoneMetadataAndLabels() async {
+        let client = MockCompanionClient()
+        client.snapshotValue = MoshSnapshot(
+            tracks: [],
+            transport: MoshTransport(playing: false, recording: false, position: 4, looping: false),
+            controller: MoshControllerState(
+                mode: "judgment",
+                record: "idle",
+                take: MoshControllerTake(
+                    exists: true,
+                    clipId: "clip-1",
+                    trackId: "track-1",
+                    name: "Take 2",
+                    start: 4,
+                    length: 3,
+                    hasLanes: true,
+                    canKeep: true,
+                    kept: false,
+                    numTakes: 2,
+                    currentTakeIndex: 1
+                ),
+                agent: "idle"
+            )
+        )
+        let store = CompanionStore(client: client)
+
+        await store.refresh()
+        await store.runControllerEvent(.takeKeep)
+        await store.runControllerEvent(.takeRedo)
+        await store.runControllerEvent(.takeMark)
+        await store.runControllerEvent(.takeListen)
+        await store.runControllerEvent(.transportScrub, scrubPosition: 6.5)
+
+        XCTAssertEqual(client.commands.map(\.command), ["keep_take", "undo", "mark_take", "set_transport", "set_transport"])
+        XCTAssertEqual(client.commands[0].args["controllerEvent"] as? String, "TAKE_KEEP")
+        XCTAssertEqual(client.commands[0].args["controllerLabel"] as? String, "kept")
+        XCTAssertEqual(client.commands[1].args["controllerLabel"] as? String, "undone")
+        XCTAssertEqual(client.commands[2].args["controllerLabel"] as? String, "flagged")
+        XCTAssertEqual(client.commands[3].args["action"] as? String, "play")
+        XCTAssertEqual(client.commands[3].args["position"] as? Double, 4)
+        XCTAssertEqual(client.commands[4].args["position"] as? Double, 6.5)
+        XCTAssertTrue(client.commands.allSatisfy { $0.args["source"] as? String == "phone_controller" })
+        XCTAssertTrue(client.commands.allSatisfy { $0.args["issuedAtPhoneMs"] is Double })
+    }
+
+    func testOfflineControllerEventIsSuppressed() async {
+        let client = MockCompanionClient()
+        let store = CompanionStore(client: client)
+        client.snapshotError = CompanionError.server("offline")
+
+        await store.refresh()
+        await store.runControllerEvent(.transportToggle)
+
         XCTAssertTrue(client.commands.isEmpty)
         XCTAssertTrue(store.receipts.first?.contains("MOSH is offline") == true)
     }

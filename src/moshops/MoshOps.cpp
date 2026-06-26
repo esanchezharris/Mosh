@@ -485,6 +485,7 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "list_takes")        return cmdListTakes (args);
     if (name == "set_current_take")  return cmdSetCurrentTake (args);
     if (name == "keep_take")         return cmdKeepTake (args);
+    if (name == "mark_take")         return cmdMarkTake (args);
     if (name == "set_master_volume") return broadcastStructuralIfActive (name, args, cmdSetMasterVolume (args));
     if (name == "set_master_pan")    return broadcastStructuralIfActive (name, args, cmdSetMasterPan (args));
     if (name == "enable_track_meter")  return cmdEnableTrackMeter (args);
@@ -6030,6 +6031,7 @@ juce::var MoshOps::snapshot()
     root->setProperty ("session", var (session));
     root->setProperty ("tracks", tracks);
     root->setProperty ("transport", transportToVar());
+    root->setProperty ("controller", controllerToVar());
 
     // Lightweight current audio-device selection summary for the settings edit form
     // (duplicates session.sampleRate intentionally). Full lists stay on-demand.
@@ -6279,6 +6281,13 @@ juce::var MoshOps::cmdKeepTake (const juce::var& args)
     return okResult ("keep_take");
 }
 
+juce::var MoshOps::cmdMarkTake (const juce::var& args)
+{
+    logLine ("mark_take", args, true, {}, false);
+    emit ("controller_event", args);
+    return okResult ("mark_take");
+}
+
 juce::var MoshOps::clipToVar (te::Clip& c)
 {
     auto pos = c.getPosition();
@@ -6396,6 +6405,58 @@ juce::var MoshOps::transportToVar()
     o->setProperty ("loopStart", loop.getStart().inSeconds());
     o->setProperty ("loopEnd", loop.getEnd().inSeconds());
     return var (o);
+}
+
+juce::var MoshOps::controllerToVar()
+{
+    auto& transport = eng.edit().getTransport();
+
+    te::WaveAudioClip* latestWave = nullptr;
+    juce::String latestTrackId;
+    double latestEnd = -1.0;
+
+    for (auto* track : te::getAudioTracks (eng.edit()))
+        if (track != nullptr)
+            for (auto* clip : track->getClips())
+                if (auto* wave = dynamic_cast<te::WaveAudioClip*> (clip))
+                {
+                    const auto pos = wave->getPosition();
+                    const double end = pos.getEnd().inSeconds();
+                    if (latestWave == nullptr || end >= latestEnd)
+                    {
+                        latestWave = wave;
+                        latestTrackId = track->itemID.toString();
+                        latestEnd = end;
+                    }
+                }
+
+    auto* take = new DynamicObject();
+    take->setProperty ("exists", latestWave != nullptr);
+    if (latestWave != nullptr)
+    {
+        const auto pos = latestWave->getPosition();
+        const bool hasLanes = latestWave->hasAnyTakes();
+        take->setProperty ("clipId", latestWave->itemID.toString());
+        take->setProperty ("trackId", latestTrackId);
+        take->setProperty ("name", latestWave->getName());
+        take->setProperty ("start", pos.getStart().inSeconds());
+        take->setProperty ("length", pos.getLength().inSeconds());
+        take->setProperty ("hasLanes", hasLanes);
+        take->setProperty ("canKeep", hasLanes);
+        take->setProperty ("kept", ! hasLanes);
+        if (hasLanes)
+        {
+            take->setProperty ("numTakes", latestWave->getNumTakes (false));
+            take->setProperty ("currentTakeIndex", latestWave->getCurrentTake());
+        }
+    }
+
+    auto* controller = new DynamicObject();
+    controller->setProperty ("mode", transport.isRecording() ? "capture" : "judgment");
+    controller->setProperty ("record", transport.isRecording() ? "recording" : "idle");
+    controller->setProperty ("agent", "idle");
+    controller->setProperty ("take", var (take));
+    return var (controller);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

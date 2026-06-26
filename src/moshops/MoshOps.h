@@ -143,6 +143,7 @@ private:
     juce::var cmdListTakes      (const juce::var& args);
     juce::var cmdSetCurrentTake (const juce::var& args);
     juce::var cmdKeepTake       (const juce::var& args);
+    juce::var cmdMarkTake       (const juce::var& args);
     juce::var cmdSetMasterVolume (const juce::var& args);
     juce::var cmdSetMasterPan    (const juce::var& args);
     // Wave 9 — channel metering
@@ -367,6 +368,7 @@ private:
     juce::var       trackToVar (te::AudioTrack&, int index);
     juce::var       clipToVar  (te::Clip&);
     juce::var       transportToVar();
+    juce::var       controllerToVar();
 
     void  timerCallback() override;          // decimated playhead/meters (02 §4.2)
 

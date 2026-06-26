@@ -91,6 +91,35 @@ export type Clip = {
   takes?: ClipTake[];
 };
 
+export type ControllerEventName =
+  | "TRANSPORT_TOGGLE"
+  | "TRANSPORT_SCRUB"
+  | "TAKE_LISTEN"
+  | "TAKE_KEEP"
+  | "TAKE_REDO"
+  | "TAKE_MARK";
+
+export type ControllerTake = {
+  exists: boolean;
+  clipId?: string;
+  trackId?: string;
+  name?: string;
+  start?: number;
+  length?: number;
+  hasLanes?: boolean;
+  canKeep?: boolean;
+  kept?: boolean;
+  numTakes?: number;
+  currentTakeIndex?: number;
+};
+
+export type ControllerState = {
+  mode: "capture" | "judgment";
+  record: "idle" | "armed" | "recording";
+  take: ControllerTake;
+  agent: "idle" | "working" | "done" | "confused";
+};
+
 export type AutoPoint = { t: number; v: number }; // t seconds, v normalised 0..1
 export type PluginParam = {
   index: number;
@@ -375,6 +404,7 @@ export type Snapshot = {
   };
   tracks: Track[];
   transport: Transport;
+  controller?: ControllerState;
   master?: { volumeDb: number; pan: number };
   buses?: Bus[];
   sections?: Section[];

@@ -2050,6 +2050,20 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             check (lt["error"].toString().contains ("wave clip"), "list_takes error is the handler's (no wave clip)");
             check (! ok (cmd (ops, "set_current_take", objN ({{ "clipId", "no-such-clip" }, { "takeIndex", 0 }}))), "set_current_take on a missing clip errors");
             check (! ok (cmd (ops, "keep_take", objN ({{ "clipId", "no-such-clip" }}))), "keep_take on a missing clip errors");
+            auto mark = cmd (ops, "mark_take", objN ({
+                { "source", "phone_controller" },
+                { "controllerEvent", "TAKE_MARK" },
+                { "controllerLabel", "flagged" }
+            }));
+            check (ok (mark), "mark_take logs a phone controller label");
+            auto controller = ops.snapshot().getProperty ("controller", var());
+            check (controller.isObject(), "snapshot exposes additive controller block");
+            check (controller.getProperty ("agent", var()).toString() == "idle", "controller agent state defaults idle");
+            check (controller.getProperty ("take", var()).getProperty ("exists", true).isBool(), "controller take state exposes exists");
+            auto controllerLog = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
+            check (controllerLog.contains ("\"command\": \"mark_take\""), "JSONL records mark_take");
+            check (controllerLog.contains ("\"source\": \"phone_controller\""), "mark_take records phone_controller source");
+            check (controllerLog.contains ("\"controllerLabel\": \"flagged\""), "mark_take records flagged label");
         }
 
         // ── CTL-001: live MIDI controller -> armed instrument track ──

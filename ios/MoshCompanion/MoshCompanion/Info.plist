@@ -32,6 +32,8 @@
   </array>
   <key>CFBundleVersion</key>
   <string>$(CURRENT_PROJECT_VERSION)</string>
+  <key>UILaunchScreen</key>
+  <dict/>
   <key>NSBonjourServices</key>
   <array>
     <string>_moshcompanion._tcp</string>
