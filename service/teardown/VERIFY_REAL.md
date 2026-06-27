@@ -24,6 +24,7 @@ The binary is auto-detected at `/Applications/Mosh.app/Contents/MacOS/Mosh` (ove
 | § | Verifier | What it proves | Result |
 |---|----------|----------------|--------|
 | 8 | `synthmatch/verify_live.py` | CMA-ES recovers a known **Serum** patch via render-in-the-loop, scored in the §6 embedding space | screen → idx18 (swing 0.97)+idx3 (0.16) audible; seed dist **0.93 → ~0.00** in 90 real renders; dominant param err **0.051** |
+| 8-sub | `synthmatch/verify_substitute.py` | the **substitute** regime (§13: core) — approximate a FOREIGN synth's tone (Vital) with an OWNED synth (Serum) | default-patch dist **0.987 → ~0.00** (Serum approximated the Vital tone); `status=substituted` |
 | 9 | `render/verify_execute.py` | a Recipe compiles → MoshOps → **non-silent render** + measured `yield.actual` written back | 10/10 cmds ok, rms **0.209**, MIDI resolved from SMF, yield.overall **0.889**, class `inferred` |
 | 11 | `flywheel/verify_reward.py` | a music-native encoder (**MERT**) beats the engineered baseline at preserving the ablation ordering, held out on real audio | 2443 samples → 40 real triplets → **MERT 0.938 vs engineered 0.812** |
 | 13 | `measurement_checkpoint.py [N]` | readability census over real tutorials — how often DAW/piano-roll/synth-GUI are seen → **scopes §8** | n=8: piano-roll **88%**, synth GUI **50%**, DAW id **0%** → "mixed regime; §8-substitute is core" |
