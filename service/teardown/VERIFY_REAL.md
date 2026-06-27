@@ -30,7 +30,7 @@ The binary is auto-detected at `/Applications/Mosh.app/Contents/MacOS/Mosh` (ove
 | 7→9 | `render/verify_extraction.py` | the EXTRACTION-regime spine (anchor corpus): real loop → §7 slice → §1 match → §9 **timeline** reconstruction | 9 hits → 9/9 matched → **9 clips on the timeline**, non-silent rms **0.206** |
 | sys | `system_smoke.py` | WHOLE chain end to end: build→§7→§1→§9 render→§12 reward | **5/5 legs** green (pull 0.576) |
 | 11 | `flywheel/train_reward.py [N]` / `verify_reward.py` | train + save the MERT reward head; held-out ordering on **disjoint (unseen) timbres** | **combined (spectral+timing): MERT 0.970 vs eng 0.909**; spectral-only MERT 0.933/0.867; timing-only MERT 1.000/0.938 (`train_reward_musical.py`) — MERT wins every axis |
-| 5b | `synth_from_screen/verify_synthgui.py` | read a patch off a REAL synth GUI via a calibrated profile (captured Vital myself: CV-detected knobs → `profiles/vital.json`) | reads ENV1 ADSR off the committed Vital fixture; **sustain correctly highest** (relative structure right; absolute §8-refined). `VITAL_LIVE_CAPTURE=1` re-captures live |
+| 5b | `synth_from_screen/verify_synthgui.py` | read patches off REAL synth GUIs via calibrated profiles — **Vital** (`profiles/vital.json`, captured from the standalone) AND **Serum 2** (`profiles/serum.json`, captured via the Mosh host: `Mosh --demo3` → `open_plugin_editor` → screencapture the 'Serum 2' window). The **white-pointer** reader isolates the colourless pointer line from the colour fill-arc → ABSOLUTE accuracy | both ENV1 ADSRs: **SUSTAIN reads ~1.000** (full on the Init patch, was 0.593 when the arc masked it), at-min knobs ~0.000, conf 0.75. `<SYNTH>_LIVE_CAPTURE=1` re-captures live |
 | 13 | `measurement_checkpoint.py [N]` | readability census over real tutorials — how often DAW/piano-roll/synth-GUI are seen → **scopes §8** | n=8: piano-roll **88%**, synth GUI **50%**, DAW id **0%** → "mixed regime; §8-substitute is core" |
 | 4 | `video2recipe/cli.py --url <id> --section A B` | a real tutorial → schema-valid Recipe skeleton (frames + OCR + scenes) | e.g. `fw4Ms26mdmc` → piano-roll + "Pigments" detected, valid recipe |
 
@@ -56,10 +56,20 @@ PYTHONPATH=service python3 service/teardown/render/verify_execute.py
   to ship it).
 - **§9 timeline placement — LANDED.** `Element.onsets` + per-onset clips on one track
   (`from_extraction.py` groups §7 slices); proven end-to-end (verify_extraction.py).
-- **§5b knob VALUES — CALIBRATED (Vital).** `profiles/vital.json` from a real GUI capture;
-  `verify_synthgui.py` reads ENV1 ADSR (sustain highest). Remaining: more synths (Serum has
-  no standalone — needs the Mosh-hosted editor in a GUI session), more controls, and
-  absolute-accuracy tuning for Vital's fill-arc knob style.
+- **§5b knob VALUES — CALIBRATED + ABSOLUTE (Vital + Serum 2).** `profiles/vital.json` and
+  `profiles/serum.json` from real GUI captures (Serum via the Mosh host's `--demo3` editor pop-out
+  — the no-standalone path). The **white-pointer** read (bright + low-saturation pointer line,
+  ignoring the colour fill-arc) fixed the absolute accuracy: a full SUSTAIN now reads ~1.0 instead
+  of ~0.5 (the fill-arc's centroid trap). `verify_synthgui.py` asserts both synths' ENV1 ADSR
+  absolutely (sustain ~full, at-min knobs ~0, conf 0.75). Remaining: more controls per synth
+  (oscillator/filter pages), graphic/curve params (still §8-refined), more synths via profiles.
+- **§1 role classifier — BAND-ENERGY rewrite.** Replaced the single-centroid rule (which dumped
+  ~52% of real one-shots to "other" and collapsed overlapping loop slices) with per-band energy
+  fractions on the attack transient + a dominant-band fallback. On a 566-file real-library sample
+  the **"other" rate fell from ~52% → 0.5%**; kick-vs-808 now split by a sustain ratio (an 808
+  rings, a kick decays) so real kick one-shot files no longer all mis-read as 808; overlapping
+  mixtures (kick+hat → kick, snare+hat → snare) classify by their foundation instead of "other".
+  Guarded in `drummatch_test.py` (mixture cases + the silent→other invariant).
 - **Teardown UI — LANDED.** v2 browser-drawer "Teardown" tab (`TeardownPanel.tsx`) +
   `teardown_analyze`/`teardown_render` MoshOps proxy commands + `/teardown/recipe` &
   `/teardown/execute` service routes. The deployed app bundles the lane code; `/teardown/*`

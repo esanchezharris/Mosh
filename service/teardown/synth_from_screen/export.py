@@ -58,7 +58,9 @@ def read_patch(img: np.ndarray, profile: dict) -> dict:
         if kind == "knob":
             r = read_knob(gray, spec["cx"], spec["cy"], spec["r"],
                           sweep_deg=spec.get("sweep_deg", 270.0),
-                          dark_pointer=spec.get("dark_pointer", True))
+                          dark_pointer=spec.get("dark_pointer", True),
+                          img_bgr=img if img.ndim == 3 else None,
+                          pointer=spec.get("pointer"))
             lo, hi = spec.get("range", [0.0, 1.0])
             params[name] = round(lo + r["value"] * (hi - lo), 4)
             conf[name] = r["confidence"]

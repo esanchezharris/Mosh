@@ -48,6 +48,43 @@ for v in [0.0, 0.25, 0.5, 0.75, 1.0]:
     rv = read_knob(gray, 60, 60, 40)["value"]
     check(f"knob value {v} recovered (±0.08)", abs(rv - v) < 0.08, f"got {rv}")
 
+# ── white-pointer mode: a colourless pointer drawn over a SATURATED fill-arc ──────
+# This is the Vital/Serum case. Reading all bright pixels would fold the arc into the
+# centroid (a full arc's centroid sits at the top → reads ~0.5); "white" mode must isolate
+# the desaturated pointer and recover the TRUE value even at full fill.
+def draw_arc_knob(img, cx, cy, r, value, sweep=270.0, arc_bgr=(180, 200, 40)):
+    cv2.circle(img, (cx, cy), r, (40, 40, 40), -1)             # dark body
+    a0 = -sweep / 2                                            # start (down-left)
+    a1 = -sweep / 2 + value * sweep                            # up to the value
+    # teal/cyan fill-arc from start to value (saturated colour)
+    for deg in np.arange(a0, a1, 1.0):
+        rad = math.radians(deg)
+        ex = int(cx + math.sin(rad) * r * 0.85)
+        ey = int(cy - math.cos(rad) * r * 0.85)
+        cv2.circle(img, (ex, ey), max(2, r // 12), arc_bgr, -1)
+    # the white pointer line AT the value angle (colourless, bright)
+    radv = math.radians(a1)
+    ex = int(cx + math.sin(radv) * r * 0.9)
+    ey = int(cy - math.cos(radv) * r * 0.9)
+    cv2.line(img, (cx, cy), (ex, ey), (245, 245, 245), 3)
+
+
+for v in [0.0, 0.3, 0.6, 1.0]:
+    panelw = np.full((160, 160, 3), 25, np.uint8)
+    draw_arc_knob(panelw, 80, 80, 55, v)
+    rv = read_knob(cv2.cvtColor(panelw, cv2.COLOR_BGR2GRAY), 80, 80, 55,
+                   img_bgr=panelw, pointer="white")
+    check(f"white-pointer over fill-arc: value {v} (±0.08)", abs(rv["value"] - v) < 0.08,
+          f"got {rv['value']} conf {rv['confidence']}")
+# the regression that motivated this: a FULL arc must NOT read ~0.5 (the centroid trap)
+panelf = np.full((160, 160, 3), 25, np.uint8)
+draw_arc_knob(panelf, 80, 80, 55, 1.0)
+naive = read_knob(cv2.cvtColor(panelf, cv2.COLOR_BGR2GRAY), 80, 80, 55, dark_pointer=False)["value"]
+white = read_knob(cv2.cvtColor(panelf, cv2.COLOR_BGR2GRAY), 80, 80, 55, img_bgr=panelf, pointer="white")["value"]
+check("naive bright-pixel read is fooled by a full arc (~0.5)", naive < 0.8, f"naive={naive}")
+check("white-pointer read recovers full value (~1.0)", white > 0.9, f"white={white}")
+
+
 # ── read_patch over a 2-knob profile ─────────────────────────────────────────
 panel = np.full((120, 260, 3), 30, np.uint8)
 draw_knob(panel, 60, 60, 40, 0.3)
@@ -77,6 +114,13 @@ check("read_knob deterministic x3", len({read_knob(g6, 60, 60, 40)["value"] for 
 from teardown.synth_from_screen.export import list_profiles, load_profile  # noqa: E402
 
 check("vital profile is registered", "vital" in list_profiles(), str(list_profiles()))
+check("serum profile is registered", "serum" in list_profiles(), str(list_profiles()))
+# both profiles use white-pointer ADSR knobs; serum's ENV1 has no delay (5 knobs vs vital's 6)
+sp = load_profile("serum", 2380, 1544)
+check("serum profile loads 5 white-pointer knobs",
+      len(sp) == 5 and sp["env1_sustain"].get("pointer") == "white", str(list(sp)))
+check("vital profile uses white-pointer mode",
+      load_profile("vital", 2342, 1436)["env1_sustain"].get("pointer") == "white")
 # reference_size in vital.json is 2342x1436; loading at the SAME size is identity
 ref = load_profile("vital", 2342, 1436)
 check("profile loads its controls", len(ref) == 6 and "env1_sustain" in ref)

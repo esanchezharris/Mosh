@@ -1,0 +1,12 @@
+{
+  "synth": "Serum 2",
+  "note": "Calibrated from a real Serum 2 editor captured via the Mosh host (Mosh --demo3 → open_plugin_editor → screencapture the 'Serum 2' window), Init patch. Coords are in the reference_size pixel space (a retina capture); load_profile() scales them to the actual frame. Serum draws a WHITE pointer mark over a small blue arc; pointer=\"white\" reads the colourless pointer (bright + low-saturation) for accurate absolute values (full SUSTAIN reads ~1.0). ENV 1 has no DELAY knob (unlike Vital): ATK/HOLD/DEC/SUS/REL. Extend by adding controls.",
+  "reference_size": [2380, 1544],
+  "controls": {
+    "env1_attack":  {"type": "knob", "cx": 403, "cy": 1289, "r": 34, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]},
+    "env1_hold":    {"type": "knob", "cx": 509, "cy": 1289, "r": 34, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]},
+    "env1_decay":   {"type": "knob", "cx": 615, "cy": 1289, "r": 34, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]},
+    "env1_sustain": {"type": "knob", "cx": 721, "cy": 1289, "r": 34, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]},
+    "env1_release": {"type": "knob", "cx": 827, "cy": 1289, "r": 34, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]}
+  }
+}

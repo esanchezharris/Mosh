@@ -1,14 +1,20 @@
 #!/usr/bin/env python3
-"""REAL §5b proof — read a patch off an ACTUAL synth GUI via a calibrated profile.
+"""REAL §5b proof — read patches off ACTUAL synth GUIs via calibrated profiles.
 
-Captures the Vital standalone GUI (Init Preset), loads the calibrated profile
-(profiles/vital.json, scaled to the frame), and reads ENV1's ADSR. The read is APPROXIMATE
-by design (the §5b/§8 thesis: the screen gives a picture, §8 refines it) — so the assertion
-is on the RELATIVE structure that a real read must get right: on the Init Preset, SUSTAIN is
-the highest ADSR value, and every value is a valid normalized [0,1] with a confidence.
+Covers both calibrated synths:
+  • Vital  — captured from the free standalone (open -a Vital).
+  • Serum 2 — captured via the Mosh HOST (Mosh --demo3 loads Serum 2 + opens its native
+              editor; we screencapture the 'Serum 2' window). Serum has no standalone, so the
+              hosted editor IS the capture path the owner asked for.
 
-Needs cv2 (teardown venv) + Vital.app (for the capture) OR a pre-captured frame via
-VITAL_FRAME=<png>. Absent either → SKIP (exit 0).
+Each synth reads its ENV 1 ADSR off a frame and asserts the read is ABSOLUTELY correct on the
+Init patch: SUSTAIN is the highest ADSR value AND reads ~full (~1.0), and the at-minimum knobs
+read ~0. This is the white-pointer read (the colourless pointer line, ignoring the colour
+fill-arc) — the fix that stopped a full arc's centroid from reading ~0.5.
+
+Frame source per synth, in order: explicit <SYNTH>_FRAME=<png> → a fresh live capture (set
+<SYNTH>_LIVE_CAPTURE=1; needs cv2 + Quartz + the app) → the committed reference fixture. Absent
+all → SKIP (exit 0), so this never breaks the deterministic suite.
 
     source service/teardown/.teardown.env
     PYTHONPATH=service "$TEARDOWN_PY" service/teardown/synth_from_screen/verify_synthgui.py
@@ -24,104 +30,152 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 VITAL_APP = "/Applications/Vital.app"
+MOSH_BIN = os.environ.get("MOSH_BIN", "").strip() or "/Applications/Mosh.app/Contents/MacOS/Mosh"
+HERE = os.path.dirname(os.path.abspath(__file__))
 
 
-def _vital_window_id():
-    """The Vital GUI window id via Quartz (no Accessibility), or None. Skips tiny chrome
-    windows (the real GUI is large)."""
+def _window_id(name_substr: str, by_title: bool, min_w: int = 700, min_h: int = 400):
+    """Largest on-screen window whose owner (or title) matches, via Quartz (no Accessibility)."""
     try:
         import Quartz
         opt = Quartz.kCGWindowListOptionOnScreenOnly | Quartz.kCGWindowListExcludeDesktopElements
         wins = Quartz.CGWindowListCopyWindowInfo(opt, Quartz.kCGNullWindowID)
-        vit = [w for w in wins if "vital" in str(w.get("kCGWindowOwnerName", "")).lower()
-               and w.get("kCGWindowBounds", {}).get("Width", 0) >= 700
-               and w.get("kCGWindowBounds", {}).get("Height", 0) >= 400]
-        vit.sort(key=lambda w: -(w.get("kCGWindowBounds", {}).get("Width", 0)
-                                 * w.get("kCGWindowBounds", {}).get("Height", 0)))
-        return vit[0].get("kCGWindowNumber") if vit else None
+        key = "kCGWindowName" if by_title else "kCGWindowOwnerName"
+        hits = [w for w in wins if name_substr.lower() in str(w.get(key, "")).lower()
+                and w.get("kCGWindowBounds", {}).get("Width", 0) >= min_w
+                and w.get("kCGWindowBounds", {}).get("Height", 0) >= min_h]
+        hits.sort(key=lambda w: -(w.get("kCGWindowBounds", {}).get("Width", 0)
+                                  * w.get("kCGWindowBounds", {}).get("Height", 0)))
+        return hits[0].get("kCGWindowNumber") if hits else None
     except Exception:
         return None
 
 
-def capture_vital() -> str | None:
-    """Open Vital, capture ONLY its GUI window (Quartz window-id). Polls up to ~30s for the
-    window to render; returns None (→ SKIP) if it can't get a window-targeted shot — a
-    full-screen fallback would misalign the window-calibrated profile, so we never do that."""
-    if not os.path.isdir(VITAL_APP):
-        return None
-    subprocess.run(["open", "-a", "Vital"], check=False)
+def _capture_window(launch, owner_or_title, by_title, quit_app, tries=15, gap=2.0) -> str | None:
+    """Launch an app, poll for its target window, screencapture ONLY that window, quit. Never
+    falls back to a full-screen grab (that would misalign the window-calibrated profile)."""
+    launch()
     wid = None
-    for _ in range(15):                       # ~30s: Vital can be slow to first-render
-        time.sleep(2)
-        wid = _vital_window_id()
+    for _ in range(tries):
+        time.sleep(gap)
+        wid = _window_id(owner_or_title, by_title)
         if wid:
-            time.sleep(1)                     # let it finish drawing
+            time.sleep(2)
             break
-    out = os.path.join(tempfile.mkdtemp(prefix="vital-cap-"), "vital.png")
+    out = os.path.join(tempfile.mkdtemp(prefix="synthgui-"), "frame.png")
     if wid:
         subprocess.run(["screencapture", "-x", "-o", f"-l{wid}", out], check=False)
-    subprocess.run(["osascript", "-e", 'quit app "Vital"'], check=False)
-    if wid and os.path.isfile(out) and os.path.getsize(out) > 0:
-        return out
-    return None
+    quit_app()
+    return out if (wid and os.path.isfile(out) and os.path.getsize(out) > 0) else None
+
+
+def capture_vital() -> str | None:
+    if not os.path.isdir(VITAL_APP):
+        return None
+    return _capture_window(lambda: subprocess.run(["open", "-a", "Vital"], check=False),
+                           "vital", by_title=False,
+                           quit_app=lambda: subprocess.run(["osascript", "-e", 'quit app "Vital"'], check=False))
+
+
+def capture_serum() -> str | None:
+    if not os.path.isfile(MOSH_BIN):
+        return None
+    env = dict(os.environ, MOSH_ENABLE_SA3="0")
+    proc = subprocess.Popen([MOSH_BIN, "--demo3"], env=env)  # loads Serum 2 + opens its editor
+    out = _capture_window(lambda: None, "Serum", by_title=True, tries=20,
+                          quit_app=lambda: subprocess.run(["osascript", "-e", 'quit app "Mosh"'], check=False))
+    try:
+        proc.terminate(); time.sleep(1); proc.kill()
+    except Exception:
+        pass
+    return out
+
+
+# per-synth config: (fixture, capture fn, env prefix, ADSR keys in order, absolute expectations)
+SYNTHS = {
+    "vital": dict(
+        fixture="vital_init.png", capture=capture_vital, env="VITAL",
+        adsr=["env1_delay", "env1_attack", "env1_hold", "env1_decay", "env1_sustain", "env1_release"],
+        at_min=["env1_delay", "env1_hold"], near_min=["env1_attack"]),
+    "serum": dict(
+        fixture="serum_init.png", capture=capture_serum, env="SERUM",
+        adsr=["env1_attack", "env1_hold", "env1_decay", "env1_sustain", "env1_release"],
+        at_min=["env1_hold"], near_min=["env1_attack"]),
+}
+
+
+def _frame_for(cfg) -> str | None:
+    fixture = os.path.join(HERE, "fixtures", cfg["fixture"])
+    explicit = os.environ.get(f"{cfg['env']}_FRAME", "").strip() or None
+    if explicit and os.path.isfile(explicit):
+        return explicit
+    if os.environ.get(f"{cfg['env']}_LIVE_CAPTURE") == "1":
+        live = cfg["capture"]()
+        if live:
+            return live
+    return fixture if os.path.isfile(fixture) else None
+
+
+def _check_one(name: str, cfg: dict) -> int:
+    """Returns 0 (pass/skip) or 1 (fail) for one synth."""
+    import cv2
+    from teardown.synth_from_screen.export import load_profile, read_patch
+
+    frame = _frame_for(cfg)
+    if not frame:
+        print(f"[{name}] SKIP  no frame (fixture missing; install the app + {cfg['env']}_LIVE_CAPTURE=1)")
+        return 0
+    img = cv2.imread(frame)
+    if img is None:
+        print(f"[{name}] SKIP  could not read frame {frame}")
+        return 0
+    h, w = img.shape[:2]
+    profile = load_profile(name, w, h)
+    out = read_patch(img, profile)
+    adsr = {k: out["params"][k] for k in cfg["adsr"] if k in out["params"]}
+    print(f"[{name}] frame {w}x{h}; profile ({len(profile)} controls)")
+    for k in cfg["adsr"]:
+        if k in adsr:
+            print(f"    {k:16s} = {adsr[k]:.3f}  conf {out['confidence'][k]:.2f}")
+
+    fails = []
+    if len(adsr) < len(cfg["adsr"]):
+        fails.append(f"profile did not read all {len(cfg['adsr'])} ADSR knobs ({list(adsr)})")
+    if adsr and not all(0.0 <= v <= 1.0 for v in adsr.values()):
+        fails.append("a value left the normalized [0,1] range")
+    if adsr and max(adsr, key=adsr.get) != "env1_sustain":
+        fails.append(f"sustain not the highest ADSR value (got {max(adsr, key=adsr.get)})")
+    if "env1_sustain" in adsr and adsr["env1_sustain"] < 0.90:
+        fails.append(f"sustain absolute read too low ({adsr['env1_sustain']:.3f}; Init patch is "
+                     f"full → expected ≥0.90 — the fill-arc is masking the pointer)")
+    for k in cfg["at_min"]:
+        if k in adsr and adsr[k] > 0.12:
+            fails.append(f"{k} should sit at minimum on the Init patch (got {adsr[k]:.3f})")
+    for k in cfg["near_min"]:
+        if k in adsr and adsr[k] > 0.25:
+            fails.append(f"{k} should be near-min on the Init patch (got {adsr[k]:.3f})")
+    if adsr and min(out["confidence"][k] for k in adsr) < 0.6:
+        fails.append("white-pointer read confidence below 0.6 — pointer not cleanly isolated")
+
+    if fails:
+        print(f"[{name}] FAIL: " + "; ".join(fails))
+        return 1
+    print(f"[{name}] PASS — white-pointer read recovers ABSOLUTE values (SUSTAIN ~full, at-min "
+          f"knobs ~0); the colour fill-arc no longer masks the pointer.")
+    return 0
 
 
 def main() -> int:
     try:
-        import cv2
-        from teardown.synth_from_screen.export import load_profile, read_patch
+        import cv2  # noqa: F401
+        from teardown.synth_from_screen.export import load_profile  # noqa: F401
     except Exception as e:  # noqa: BLE001
         print(f"  SKIP  cv2/§5b unavailable ({e})")
         return 0
-
-    # frame source, in order: explicit VITAL_FRAME → a fresh live window capture →
-    # the committed reference fixture (a clean Vital window shot, so this is reproducible
-    # even when live capture is flaky / Vital isn't installed).
-    fixture = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "vital_init.png")
-    frame = os.environ.get("VITAL_FRAME", "").strip() or None
-    if frame and not os.path.isfile(frame):
-        frame = None
-    if not frame and os.environ.get("VITAL_LIVE_CAPTURE") == "1":
-        frame = capture_vital()
-    if not frame and os.path.isfile(fixture):
-        frame = fixture
-        print("  (using committed reference fixture; set VITAL_LIVE_CAPTURE=1 to re-capture live)")
-    if not frame:
-        print("  SKIP  no Vital frame (fixture missing; install Vital.app + VITAL_LIVE_CAPTURE=1)")
-        return 0
-
-    img = cv2.imread(frame)
-    if img is None:
-        print(f"  SKIP  could not read frame {frame}")
-        return 0
-    h, w = img.shape[:2]
-    profile = load_profile("vital", w, h)
-    print(f"  frame {w}x{h}; profile 'vital' ({len(profile)} controls)")
-    out = read_patch(img, profile)
-
-    adsr = {k: out["params"][k] for k in
-            ("env1_delay", "env1_attack", "env1_hold", "env1_decay", "env1_sustain", "env1_release")
-            if k in out["params"]}
-    for k, v in adsr.items():
-        print(f"    {k:16s} = {v:.3f}  conf {out['confidence'][k]:.2f}")
-
-    fails = []
-    if len(adsr) < 6:
-        fails.append(f"profile did not read all 6 ADSR knobs ({list(adsr)})")
-    if adsr and not all(0.0 <= v <= 1.0 for v in adsr.values()):
-        fails.append("a value left the normalized [0,1] range")
-    if adsr and max(adsr, key=adsr.get) != "env1_sustain":
-        fails.append(f"sustain not the highest ADSR value (got {max(adsr, key=adsr.get)}) — "
-                     f"relative read wrong")
-    if not all(0.0 <= c <= 1.0 for c in out["confidence"].values()):
-        fails.append("a confidence left [0,1]")
-
-    if fails:
-        print("\n  FAIL: " + "; ".join(fails))
-        return 1
-    print("\n  PASS — §5b read a REAL Vital GUI via the calibrated profile; ENV1 sustain is the "
-          "highest ADSR value (relative structure correct; absolute values are §8-refined).")
-    return 0
+    rc = 0
+    for name, cfg in SYNTHS.items():
+        rc |= _check_one(name, cfg)
+    return rc
 
 
 if __name__ == "__main__":

@@ -205,6 +205,43 @@ _808 = (_808 / (np.max(np.abs(_808)) or 1.0) * 0.9).astype(np.float32)
 check("short low tone → kick", classify_role(_kick, SR) == "kick", classify_role(_kick, SR))
 check("sustained low tone → 808", classify_role(_808, SR) == "808", classify_role(_808, SR))
 check("hat still classifies as hat", classify_role(synth("hat", 2), SR) == "hat", classify_role(synth("hat", 2), SR))
+check("snare classifies as snare", classify_role(synth("snare", 3), SR) in ("snare", "clap"),
+      classify_role(synth("snare", 3), SR))
+
+
+# ── overlapping-loop-slice robustness (the polish target) ─────────────────────
+# A sliced loop hit is a MIXTURE: a downbeat is kick+hat, a backbeat snare+hat, and the
+# previous hit's tail bleeds in. The old single-centroid rule smeared all of these to
+# "other" → one undifferentiated element. Band energies read them by their foundation.
+def _mix(*parts: np.ndarray) -> np.ndarray:
+    n = max(len(p) for p in parts)
+    buf = np.zeros(n, np.float32)
+    for p in parts:
+        buf[: len(p)] += p
+    return (buf / (np.max(np.abs(buf)) or 1.0) * 0.9).astype(np.float32)
+
+
+_kick3, _snare3, _hat3, _clap3 = (synth("kick", 5), synth("snare", 6),
+                                  synth("hat", 7), synth("clap", 8))
+mixtures = {
+    "kick+hat → kick": (_mix(_kick3, _hat3), "kick"),         # downbeat: read the low foundation
+    "snare+hat → snare": (_mix(_snare3, _hat3), ("snare", "clap")),
+    "808+hat → 808": (_mix(_808, _hat3), "808"),
+}
+for nm, (sig, want) in mixtures.items():
+    got = classify_role(sig, SR)
+    ok = got in want if isinstance(want, tuple) else got == want
+    check(nm, ok, f"got {got}")
+# the headline guarantee: NO real overlapping hit collapses to "other"
+no_other = all(classify_role(s, SR) != "other"
+               for s in (_mix(_kick3, _hat3), _mix(_snare3, _hat3), _mix(_808, _hat3),
+                         _mix(_kick3, _hat3, _snare3), _mix(_clap3, _hat3)))
+check("no overlapping mixture collapses to 'other'", no_other)
+# and a real silent/degenerate slice still → "other" (the only legitimate use of it)
+check("silent slice → other", classify_role(np.zeros(SR // 4, np.float32), SR) == "other")
+# deterministic x3 on a mixture (the repo's bar)
+check("classify_role deterministic x3 on a mixture",
+      len({classify_role(_mix(_kick3, _hat3), SR) for _ in range(3)}) == 1)
 
 print(f"\n{'ALL PASS' if not fails else 'FAILURES: ' + ', '.join(fails)}  ({len(fails)} failure(s))")
 sys.exit(len(fails))
