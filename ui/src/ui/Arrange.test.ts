@@ -124,7 +124,6 @@ describe("Arrange clip open routing", () => {
     expect(useDrumWindow.getState().clipId).toBe("c-beat");
     expect(useStore.getState().editingClipId).toBeNull();
   });
-
   it("keeps melodic MIDI clips in the piano roll", () => {
     const track: Track = {
       id: "t-keys",
