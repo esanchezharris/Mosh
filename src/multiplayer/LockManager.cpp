@@ -55,6 +55,8 @@ LockManager::Scope LockManager::classify (const juce::String& command)
         // LYR-L2 — generation + proposal review also target one track's sheet.
         "complete_lyrics", "fill_lyric_gap", "suggest_next_line", "regenerate_lyric",
         "cancel_lyric_job", "accept_lyric_proposal", "reject_lyric_proposal",
+        // LYR-L1 — analysis lands a transient blob on one track's sheet.
+        "analyze_lyrics",
     };
 
     // Clip-scoped: mutate one clip (args carry a clipId). Key = the clip's track

@@ -742,6 +742,19 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, payload)
             except Exception as e:  # noqa: BLE001
                 self._send(500, {"ok": False, "error": f"lyric generation error: {e}"})
+        elif path == "/analyze_lyrics":
+            # Precise per-line phonology (Finish-My-Song L1): syllables, stress contour,
+            # rhyme grade vs the group anchor, per-word slots — the flow-visualizer feed.
+            # IN-PROCESS, deterministic, no LLM. Reuses the same gate as generation.
+            spec = data.get("spec", {})
+            if not isinstance(spec, dict) or not spec.get("lines"):
+                self._send(400, {"ok": False, "error": "spec.lines required"})
+                return
+            try:
+                from lyrics import core as lyr
+                self._send(200, lyr.analyze(spec))
+            except Exception as e:  # noqa: BLE001
+                self._send(500, {"ok": False, "error": f"lyric analysis error: {e}"})
         elif path == "/training/submit" or path == "/training/jobs":
             if not TRAINING_ENABLED:
                 self._send(503, {"ok": False, "error": "lora trainer unavailable"})

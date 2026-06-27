@@ -543,6 +543,7 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "cancel_lyric_job")     return cmdCancelLyricJob (args);
     if (name == "accept_lyric_proposal") return cmdAcceptLyricProposal (args);
     if (name == "reject_lyric_proposal") return cmdRejectLyricProposal (args);
+    if (name == "analyze_lyrics")       return cmdAnalyzeLyrics (args);
     // Annotations broadcast over MP (shared collaborator comments). create self-broadcasts
     // its resolved cross-peer id; the rest address by that id via the generic wrapper.
     if (name == "create_annotation") return cmdCreateAnnotation (args);
@@ -1049,6 +1050,12 @@ juce::var MoshOps::lyricSheetToVar (te::AudioTrack& t)
         }
         if (l.hasProperty (ids::lyricRegen))
             lo->setProperty ("regen", (int) l[ids::lyricRegen]);
+        // L1 — transient precise phonology (a JSON object; absent ⇒ not yet analysed).
+        if (l.hasProperty (ids::lyricAnalysis))
+        {
+            auto parsed = juce::JSON::parse (l[ids::lyricAnalysis].toString());
+            if (parsed.isObject()) lo->setProperty ("analysis", parsed);
+        }
         lines.add (var (lo));
     }
     o->setProperty ("lines", lines);
@@ -1253,6 +1260,58 @@ juce::var MoshOps::cmdRejectLyricProposal (const juce::var& args)
     logLine ("reject_lyric_proposal", args, true, {}, false);      // TASTE label (negative)
     emitSnapshotInvalidated();
     return okResult ("reject_lyric_proposal");
+}
+
+// LYR-L1 — precise per-line phonology for the flow visualizer. Service-backed (no LLM),
+// idempotent + read-only: the analysis is a recomputable JSON blob landed per line →
+// snapshot. NON-undoable; no epoch guard (landing a stale analysis is harmless — it just
+// re-marks the same content, and a missing line is skipped on re-lookup).
+juce::var MoshOps::cmdAnalyzeLyrics (const juce::var& args)
+{
+    const auto trackId = args.getProperty ("trackId", var()).toString();
+    auto* t = findTrack (trackId);
+    if (t == nullptr) return errResult ("analyze_lyrics", "no track: " + trackId);
+    if (! t->state.getChildWithName (ids::MOSH_LYRICSHEET).isValid())
+        return errResult ("analyze_lyrics", "track has no lyric sheet");
+
+    const auto spec = lyricSpecForTrack (*t);
+
+    auto land = [this, trackId] (const juce::var& result) -> juce::var
+    {
+        auto* tt = findTrack (trackId);
+        auto sheet = tt != nullptr ? tt->state.getChildWithName (ids::MOSH_LYRICSHEET) : juce::ValueTree();
+        if (! sheet.isValid()) return errResult ("analyze_lyrics", "lyric sheet gone");
+        if (! result.isObject() || ! (bool) result.getProperty ("ok", false))
+            return errResult ("analyze_lyrics", "lyric service unavailable (start the generative service)");
+        auto lines = mosh::LyricSheet::lines (sheet);
+        auto resLines = result.getProperty ("lines", var());
+        int n = 0;
+        if (resLines.isArray())
+            for (auto& rl : *resLines.getArray())
+            {
+                auto node = lines.getChildWithProperty (ids::lyricIndex, (int) rl.getProperty ("index", -1));
+                if (! node.isValid()) continue;
+                node.setProperty (ids::lyricAnalysis, juce::JSON::toString (rl.getProperty ("analysis", var())), nullptr);
+                ++n;
+            }
+        emitSnapshotInvalidated();
+        auto* d = new DynamicObject(); d->setProperty ("status", "analyzed"); d->setProperty ("lineCount", n);
+        return okResult ("analyze_lyrics", var (d));
+    };
+
+    logLine ("analyze_lyrics", args, true, {}, false);
+
+    if ((bool) args.getProperty ("wait", false))
+        return land (jobManager.analyzeLyrics (spec));
+
+    std::thread ([this, spec, land]
+    {
+        auto result = jobManager.analyzeLyrics (spec);
+        juce::MessageManager::callAsync ([land, result] { land (result); });
+    }).detach();
+
+    auto* d = new DynamicObject(); d->setProperty ("status", "analyzing");
+    return okResult ("analyze_lyrics", var (d));
 }
 
 // ── ANN-001: authored timeline annotations (mirror the sections CRUD; multiplayer-

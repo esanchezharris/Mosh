@@ -112,3 +112,25 @@ test("suggest line appends a new line with proposals", async ({ page }) => {
   await expect(page.getByTestId("lyric-line-0")).toBeVisible();
   await expect(page.getByTestId("lyric-proposals-0")).toBeVisible();
 });
+
+// ── L1: the precise flow visualizer — Analyze flow → stress + rhyme grade per line ──
+
+test("Analyze flow draws precise per-line phonology (syllables + rhyme grade)", async ({ page }) => {
+  await bootV2(page);
+  await openLyrics(page);
+  await page.getByTestId("lyric-create").click();
+  await page.getByTestId("lyric-add-line").click();
+  await page.getByTestId("lyric-line-0").getByLabel("line 1", { exact: true }).fill("lighting up the flame");
+  await page.getByTestId("lyric-panel").getByText("Lyrics", { exact: true }).click(); // blur
+  // No visualizer before analysis…
+  await expect(page.getByTestId("flow-viz-0")).toHaveCount(0);
+  await page.getByTestId("lyric-analyze").click();
+  // …then the precise read appears: the syllable count and the visualizer row. The
+  // editor commits typed bars to the SEED (finalized text is set only on accept), so
+  // a typed line analyzes as "seed".
+  const viz = page.getByTestId("flow-viz-0");
+  await expect(viz).toBeVisible();
+  await expect(page.getByTestId("flow-syl-0")).toContainText("/16");
+  await expect(viz).toHaveAttribute("data-analyzed", "seed");
+  await expect(page.getByTestId("v2-error")).toHaveCount(0);
+});

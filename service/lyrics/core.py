@@ -342,3 +342,84 @@ def fill_gap(spec: dict, line_index: int, regen: Optional[Dict[int, int]] = None
 def suggest_next_line(spec: dict, after_index: int, regen: Optional[Dict[int, int]] = None, backend: Optional[str] = None) -> dict:
     """Single-bar ghost suggestion — proposals for the line after `after_index`."""
     return _run(spec, indices=[int(after_index) + 1], regen=regen, backend=backend)
+
+
+# ── L1 — precise per-line ANALYSIS (the flow-visualizer feed; no LLM) ─────────────
+
+def _group_anchors(by_index: List[dict]) -> Dict[str, str]:
+    """The fixed (locked / finalized) end word that anchors each rhyme group — the same
+    pre-scan the generation loop uses, so analysis and generation agree on the target."""
+    anchors: Dict[str, str] = {}
+    for l in by_index:
+        g, fe = l.get("rhymeGroup") or "", _fixed_end_word(l)
+        if g and fe and g not in anchors:
+            anchors[g] = fe
+    return anchors
+
+
+def _analyze_line(line: dict, spec: dict, anchor: Optional[str]) -> dict:
+    """Precise phonology for one line: syllables, stress contour, per-word slots, the
+    rhyme grade vs the group anchor. Reuses _evaluate() so its pass marks are IDENTICAL
+    to what the generation gate would accept — the visualizer never disagrees with the
+    loop. Analyzes finalized text if present, else the seed's written words (gaps dropped)."""
+    target = _target(line, spec)
+    tol = int(line.get("syllableTol", 1) or 1)
+    strict = _strictness(line, spec)
+    txt = (line.get("text") or "").strip()
+    seed = line.get("seedText") or ""
+    has_gap = _has_gap(seed)
+    if txt:
+        content, analyzed = txt, "text"
+    elif seed.strip():
+        content, analyzed = " ".join(t["w"] for t in _tokens(seed) if not t["gap"]), "seed"
+    else:
+        content, analyzed = "", "empty"
+
+    base = _evaluate(content, line, spec, anchor, target, tol, strict)
+    base.pop("grade", None)   # _evaluate's grade is a generation shortcut (see below)
+    words = re.findall(r"[A-Za-z']+", content)
+    per_word = [{"w": w, "syllables": _P.syllables(w), "stress": _P.stress(w),
+                 "inDict": _P.phones(w) is not None} for w in words]
+    end = base["endWord"]
+
+    # Analysis-specific, anchor-aware rhyme grade. _evaluate() reports "anchor" for ANY
+    # line with a fixed end word (it won't grade a producer-locked line as a rhyme
+    # attempt) — right for generation, but analysis must say honestly whether a FINALIZED
+    # line actually rhymes with its group anchor. Only the line whose end == the anchor
+    # is the anchor; the rest are graded against it.
+    is_anchor = anchor is not None and end != "" and end.lower() == anchor.lower()
+    if is_anchor:
+        grade, rhyme_ok = "anchor", True
+    elif anchor and end:
+        grade = phon.rhyme_grade(_P.phones(end) or [], _P.phones(anchor) or [])
+        rhyme_ok = _P.rhyme(end, anchor, strict)
+    else:
+        grade, rhyme_ok = "free", True
+    base["rhymeOk"] = rhyme_ok
+    base["passes"] = bool(base["syllableOk"] and rhyme_ok and base["lockedOk"])
+
+    base.update({
+        "target": target, "tol": tol,
+        "rhymeGroup": line.get("rhymeGroup") or "",
+        "rhymeAnchor": anchor or "",
+        "rhymeGrade": grade,
+        "stress": "".join(pw["stress"] for pw in per_word),
+        "words": per_word,
+        "hasGap": has_gap,
+        "analyzed": analyzed,
+        "complete": analyzed == "text" and not has_gap,
+        "endInDict": bool(end) and _P.phones(end) is not None,
+    })
+    return base
+
+
+def analyze(spec: dict) -> dict:
+    """Precise per-line phonology for EVERY line in the sheet (locked + finalized too) —
+    the flow visualizer's feed. Deterministic, no LLM; the rhyme anchor per group matches
+    the generation loop's pre-scan."""
+    by_index = sorted(spec.get("lines", []), key=lambda l: int(l.get("index", 0)))
+    anchors = _group_anchors(by_index)
+    out = [{"index": l["index"],
+            "analysis": _analyze_line(l, spec, anchors.get(l.get("rhymeGroup") or ""))}
+           for l in by_index]
+    return {"ok": True, "lines": out}

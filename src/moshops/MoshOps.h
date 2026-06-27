@@ -80,6 +80,9 @@ private:
     juce::var cmdCancelLyricJob     (const juce::var& args);
     juce::var cmdAcceptLyricProposal (const juce::var& args);  // undoable (commits chosen text) + taste label
     juce::var cmdRejectLyricProposal (const juce::var& args);  // clears proposals + taste label
+    // LYR-L1 — precise per-line phonology (service; not undoable), analysis lands on the
+    // line as a transient JSON blob → snapshot → the flow visualizer.
+    juce::var cmdAnalyzeLyrics       (const juce::var& args);
     // ANN-001 — authored timeline annotations (MOSH_ANNOTATIONS tree; undoable +
     // multiplayer-broadcast). create self-broadcasts its resolved cross-peer id.
     juce::var cmdCreateAnnotation (const juce::var& args);

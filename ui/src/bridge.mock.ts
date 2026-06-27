@@ -163,7 +163,7 @@ const cmdLog: { command: string; ok: boolean; undoable: boolean; ts: number }[] 
 const READONLY = new Set(["get_snapshot", "get_clip_peaks", "file_peaks", "audition_file", "stop_audition", "get_command_log", "list_plugins", "list_builtins", "list_colors", "list_audio_devices", "list_wave_inputs", "list_track_outputs", "list_takes", "list_training_sources", "training_job_status", "list_lora_adapters"]);
 const NON_UNDOABLE = new Set(["set_transport", "arm_track", "set_input_monitor", "undo", "redo", "save", "reload", "new_project", "render_layer", "open_plugin_editor", "set_plugin_param", "export_audio", "mark_take", "import_training_source", "approve_training_source", "build_training_corpus", "submit_training_job", "cancel_training_job", "import_lora_adapter", "activate_lora_adapter", "get_rhymes",
   "complete_lyrics", "fill_lyric_gap", "suggest_next_line", "regenerate_lyric",
-  "cancel_lyric_job", "reject_lyric_proposal"]);  // accept_lyric_proposal IS undoable
+  "cancel_lyric_job", "reject_lyric_proposal", "analyze_lyrics"]);  // accept_lyric_proposal IS undoable
 
 // LYR-001 — a tiny deterministic rhyme map so the rhyme tool returns something in
 // browser dev / e2e (the real path is the phonology service). Suffix fallback keeps
@@ -226,6 +226,44 @@ function mockProposals(line: LyricLine, sheet: LyricSheet) {
 }
 function mockFillable(l: LyricLine): boolean {
   return !l.locked && (!l.text.trim() || /_{2,}/.test(l.seedText));
+}
+// L1 — deterministic mock phonology analysis (the real path is the service). Mirrors the
+// shape of core.analyze: per-word slots, a per-line stress contour, the rhyme grade vs the
+// group anchor. Stress alternates (X x X …) — a plausible stand-in for the precise contour.
+function mockRhymeGrade(end: string, anchor: string): string {
+  if (!anchor || !end) return "free";
+  if (end.toLowerCase() === anchor.toLowerCase()) return "anchor";
+  const a = end.toLowerCase().replace(/[^a-z]/g, "");
+  const b = anchor.toLowerCase().replace(/[^a-z]/g, "");
+  if (a.slice(-2) === b.slice(-2)) return "perfect";
+  if (a.slice(-1) === b.slice(-1)) return "slant";
+  return "none";
+}
+function mockAnalysis(line: LyricLine, sheet: LyricSheet) {
+  const txt = (line.text || "").trim();
+  const seed = line.seedText || "";
+  const hasGap = /_{2,}/.test(seed);
+  const analyzed = txt ? "text" : seed.trim() ? "seed" : "empty";
+  const content = txt || (seed.split(/\s+/).filter((t) => t && !isGap(t)).join(" "));
+  const wordToks = content.split(/\s+/).filter(Boolean);
+  const words = wordToks.map((w) => {
+    const n = syllablesForWord(w);
+    return { w, syllables: n, stress: Array.from({ length: n }, (_, i) => (i === 0 ? "X" : "x")).join(""), inDict: true };
+  });
+  const syllables = words.reduce((s, x) => s + x.syllables, 0);
+  const target = line.syllableTarget > 0 ? line.syllableTarget : (sheet.grid === "1/4" ? 4 : sheet.grid === "1/8" ? 8 : 16);
+  const tol = line.syllableTol || 1;
+  const endWord = wordToks.length ? wordToks[wordToks.length - 1].replace(/[^A-Za-z']/g, "") : "";
+  const anchor = line.rhymeGroup ? mockGroupAnchor(sheet, line.rhymeGroup) : "";
+  const isAnchor = !!anchor && !!endWord && endWord.toLowerCase() === anchor.toLowerCase();
+  const grade = isAnchor ? "anchor" : mockRhymeGrade(endWord, anchor);
+  const rhymeOk = isAnchor || !anchor || !endWord || grade === "perfect" || grade === "slant";
+  return {
+    syllables, target, tol, syllableOk: Math.abs(syllables - target) <= tol, endWord,
+    rhymeGroup: line.rhymeGroup || "", rhymeAnchor: anchor, rhymeGrade: grade, rhymeOk,
+    stress: words.map((x) => x.stress).join(""), words, hasGap, analyzed,
+    complete: analyzed === "text" && !hasGap, endInDict: !!endWord,
+  };
 }
 function emit(type: string, payload?: unknown) {
   const ls = listeners.get("mosh_event");
@@ -681,6 +719,14 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       l.status = l.text || l.seedText ? "seed" : "empty";
       invalidate();
       return ok(command);
+    }
+    case "analyze_lyrics": {
+      const t = findTrack(str(args.trackId));
+      if (!t?.lyricSheet) return err(command, "track has no lyric sheet");
+      const sheet = t.lyricSheet;
+      sheet.lines.forEach((l) => { l.analysis = mockAnalysis(l, sheet); });
+      invalidate();
+      return ok(command, { status: "analyzed", lineCount: sheet.lines.length });
     }
 
     case "create_annotation": {

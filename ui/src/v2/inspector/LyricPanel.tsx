@@ -7,7 +7,7 @@
 import { useState } from "react";
 import { useStore } from "../../store";
 import { countSyllables, gridTarget, flowStatus, parseSeed } from "../../lyrics/flowMeter";
-import type { Track, LyricLine, LyricProposal, RhymeCandidate } from "../../types";
+import type { Track, LyricLine, LyricProposal, RhymeCandidate, LyricAnalysis } from "../../types";
 
 export function LyricPanel({ track }: { track: Track }) {
   const exec = useStore((s) => s.exec);
@@ -63,6 +63,9 @@ export function LyricPanel({ track }: { track: Track }) {
       <div className="v2-lyric-actions">
         <button className="v2-btn primary" data-testid="lyric-finish" disabled={busy || sheet.lines.length === 0}
           onClick={() => void run("complete_lyrics", {})}>{busy ? "…" : "✨ Finish gaps"}</button>
+        <button className="v2-btn" data-testid="lyric-analyze" disabled={busy || sheet.lines.length === 0}
+          title="Precise phonology — syllables, stress, rhyme (dictionary, no LLM)"
+          onClick={() => void run("analyze_lyrics", {})}>Analyze flow</button>
       </div>
 
       <ol className="v2-lyric-lines" data-testid="lyric-lines">
@@ -115,6 +118,7 @@ function LyricLineRow({ trackId, line, grid, busy, run }: {
         <button className="btn x" data-testid={`lyric-rm-${line.index}`} title="remove line" aria-label={`Remove line ${line.index + 1}`}
           onClick={() => void exec("remove_lyric_line", { trackId, lineIndex: line.index })}>✕</button>
       </div>
+      {line.analysis && <FlowViz index={line.index} a={line.analysis} />}
       {!!line.proposals?.length && (
         <div className="v2-lyric-proposals" data-testid={`lyric-proposals-${line.index}`} role="group" aria-label={`Proposals for line ${line.index + 1}`}>
           {line.proposals.map((p: LyricProposal, j) => (
@@ -136,6 +140,37 @@ function LyricLineRow({ trackId, line, grid, busy, run }: {
         </div>
       )}
     </li>
+  );
+}
+
+// L1 — the precise flow visualizer. Draws the dictionary stress contour as a row of
+// per-word dots (● stressed, · unstressed), the precise syllable count vs target, and the
+// rhyme grade vs the group anchor. Distinct from the live local meter (an instant
+// estimate) — this is the phonology service's exact read, so it can disagree and correct.
+function FlowViz({ index, a }: { index: number; a: LyricAnalysis }) {
+  return (
+    <div className="v2-flow-viz" data-testid={`flow-viz-${index}`}
+      data-analyzed={a.analyzed} data-complete={a.complete} data-syl-ok={a.syllableOk}>
+      <span className="v2-flow-stress" aria-label={`stress ${a.stress || "n/a"}`}>
+        {a.words.length === 0 ? <span className="v2-flow-empty">—</span> : a.words.map((w, i) => (
+          <span key={i} className="v2-flow-word" data-in-dict={w.inDict}
+            title={`${w.w} · ${w.syllables} syllable${w.syllables === 1 ? "" : "s"}${w.inDict ? "" : " (estimated)"}`}>
+            {Array.from(w.stress).map((s, j) => (
+              <span key={j} className={`v2-flow-dot${s === "X" ? " on" : ""}`} aria-hidden="true">{s === "X" ? "●" : "·"}</span>
+            ))}
+          </span>
+        ))}
+      </span>
+      <span className={`v2-flow-syl${a.syllableOk ? " ok" : " off"}`} data-testid={`flow-syl-${index}`}
+        title={`precise: ${a.syllables} syllables vs target ${a.target}±${a.tol}`}>{a.syllables}/{a.target}</span>
+      {a.rhymeGroup && (
+        <span className={`v2-flow-rhyme st-${a.rhymeGrade}`} data-testid={`flow-rhyme-${index}`} data-ok={a.rhymeOk}
+          title={a.rhymeAnchor && a.rhymeGrade !== "anchor" ? `${a.rhymeGrade} rhyme vs "${a.rhymeAnchor}"` : a.rhymeGrade}>
+          {a.rhymeGrade === "anchor" ? "⚓ anchor" : a.rhymeGrade}
+          {a.rhymeAnchor && a.rhymeGrade !== "anchor" ? ` →${a.rhymeAnchor}` : ""}
+        </span>
+      )}
+    </div>
   );
 }
 

@@ -113,6 +113,7 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "suggest_next_line", desc: "Suggest the next lyric line (a ghost line after the given index)", args: [S("trackId"), N("afterIndex")] },
   { command: "regenerate_lyric", desc: "Re-generate proposals for one lyric line with a fresh sample", args: [S("trackId"), N("lineIndex")] },
   { command: "accept_lyric_proposal", desc: "Accept a generated lyric proposal (commits its text into the line)", args: [S("trackId"), N("lineIndex"), N("proposalIndex", false, "default 0 = top-ranked")] },
+  { command: "analyze_lyrics", desc: "Precise per-line phonology (syllables, stress contour, rhyme grade vs the group anchor) for the flow visualizer — no LLM", args: [S("trackId")] },
 ];
 
 export const AGENT_COMMAND_MAP = new Map(AGENT_COMMANDS.map((c) => [c.command, c]));
