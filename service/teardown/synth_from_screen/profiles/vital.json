@@ -1,0 +1,13 @@
+{
+  "synth": "Vital",
+  "note": "Calibrated from a real Vital standalone GUI capture (Init Preset). Coords are in the reference_size pixel space; load_profile() scales them to the actual frame. Vital's indicator is a bright fill-arc (dark_pointer=false); the read is APPROXIMATE (relative structure is reliable — e.g. sustain reads highest — absolute values are §8-refined). Extend by adding controls.",
+  "reference_size": [2342, 1436],
+  "controls": {
+    "env1_delay":   {"type": "knob", "cx": 1534, "cy": 426, "r": 30, "sweep_deg": 270.0, "dark_pointer": false, "range": [0.0, 1.0]},
+    "env1_attack":  {"type": "knob", "cx": 1676, "cy": 426, "r": 30, "sweep_deg": 270.0, "dark_pointer": false, "range": [0.0, 1.0]},
+    "env1_hold":    {"type": "knob", "cx": 1820, "cy": 426, "r": 30, "sweep_deg": 270.0, "dark_pointer": false, "range": [0.0, 1.0]},
+    "env1_decay":   {"type": "knob", "cx": 1964, "cy": 426, "r": 30, "sweep_deg": 270.0, "dark_pointer": false, "range": [0.0, 1.0]},
+    "env1_sustain": {"type": "knob", "cx": 2106, "cy": 426, "r": 30, "sweep_deg": 270.0, "dark_pointer": false, "range": [0.0, 1.0]},
+    "env1_release": {"type": "knob", "cx": 2250, "cy": 426, "r": 30, "sweep_deg": 270.0, "dark_pointer": false, "range": [0.0, 1.0]}
+  }
+}

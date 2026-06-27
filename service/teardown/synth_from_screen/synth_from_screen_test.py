@@ -73,5 +73,21 @@ draw_knob(img6, 60, 60, 40, 0.6)
 g6 = cv2.cvtColor(img6, cv2.COLOR_BGR2GRAY)
 check("read_knob deterministic x3", len({read_knob(g6, 60, 60, 40)["value"] for _ in range(3)}) == 1)
 
+# ── per-synth profiles: load + resolution-scaling (the calibrated Vital profile) ──────
+from teardown.synth_from_screen.export import list_profiles, load_profile  # noqa: E402
+
+check("vital profile is registered", "vital" in list_profiles(), str(list_profiles()))
+# reference_size in vital.json is 2342x1436; loading at the SAME size is identity
+ref = load_profile("vital", 2342, 1436)
+check("profile loads its controls", len(ref) == 6 and "env1_sustain" in ref)
+check("identity load keeps reference coords", ref["env1_sustain"]["cx"] == 2106 and ref["env1_sustain"]["cy"] == 426)
+# loading at HALF size scales coords by ~0.5 (so one profile works at any capture res)
+half = load_profile("vital", 1171, 718)
+check("half-size load scales cx", abs(half["env1_sustain"]["cx"] - 1053) <= 1, str(half["env1_sustain"]["cx"]))
+check("half-size load scales cy", abs(half["env1_sustain"]["cy"] - 213) <= 1, str(half["env1_sustain"]["cy"]))
+check("half-size load scales radius", abs(half["env1_sustain"]["r"] - 15) <= 1, str(half["env1_sustain"]["r"]))
+
+print(f"\n{'ALL PASS' if not fails else 'FAILURES: ' + ', '.join(fails)}  ({len(fails)} failure(s))")
+
 print(f"\n{'ALL PASS' if not fails else 'FAILURES: ' + ', '.join(fails)}  ({len(fails)} failure(s))")
 sys.exit(len(fails))
