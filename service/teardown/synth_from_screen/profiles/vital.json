@@ -2,6 +2,12 @@
   "synth": "Vital",
   "note": "Calibrated from a real Vital standalone GUI capture (Init Preset). Coords are in the reference_size pixel space; load_profile() scales them to the actual frame. Vital draws a WHITE pointer line over a teal fill-arc; pointer=\"white\" reads the colourless pointer (bright + low-saturation) and ignores the arc, so absolute values are accurate (full SUSTAIN reads ~1.0). Extend by adding controls.",
   "reference_size": [2342, 1436],
+  "tabs": {
+    "band": [48, 90],
+    "highlight": "saturated",
+    "x_min": 110, "x_max": 720,
+    "anchors": {"VOICE": 149, "EFFECTS": 312, "MATRIX": 475, "ADVANCED": 637}
+  },
   "controls": {
     "env1_delay":   {"type": "knob", "cx": 1534, "cy": 426, "r": 30, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]},
     "env1_attack":  {"type": "knob", "cx": 1676, "cy": 426, "r": 30, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]},

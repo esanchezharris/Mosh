@@ -27,9 +27,13 @@ new reader" — except for the dynamic/tabular pages noted below.
 | **Modulation matrix** | Serum MATRIX, Vital MATRIX | tabular: rows of source → (bipolar/stereo/morph) → amount → destination. Read with OCR + the amount knob/field, not knob-angle CV | **needs a table reader** |
 | **Settings / menus** | Serum GLOBAL, Vital ADVANCED | toggles + dropdowns + a few knobs; OCR labels + `read_toggle`/`read_menu` | low priority |
 
-A prerequisite for all of the above: **page/tab detection** — read which top tab is active
-(the highlighted tab / coloured dot) so the reader loads the right page profile. Cheap: the
-active tab has a distinct highlight; OCR the tab labels + find the highlighted one.
+A prerequisite for all of the above — **page/tab detection** — is **BUILT** (`page_detect.py`):
+`detect_active_tab(img, synth)` reads the active-tab indicator (Serum's green dot, Vital's
+coloured underline) from the tab strip and maps it to the nearest tab anchor; `identify_synth`
+picks the synth whose highlight is cleanest. Pure CV (no OCR), resolution-independent (the tab
+strip is declared in each profile's `"tabs"` block in reference-pixel space, scaled like the
+control coords), and verified 5/5 on the real committed panels (Serum OSC + all four Vital
+tabs) plus synthetic strips. Calibrated synths: Serum 2, Vital (Serum 1 once installed).
 
 ## Serum 2  (installed — real captures)
 
@@ -91,11 +95,12 @@ MATRIX · GLOBAL** (no MIX tab). Same white-pointer knobs (white line + blue tic
 
 ## Next rungs (in priority order)
 
-1. **OSC + FILTER profiles** for Serum 2 and Vital from the committed captures (fixed knobs,
+1. ~~**Tab/page detection**~~ — **DONE** (`page_detect.py`; see above).
+2. **OSC + FILTER profiles** for Serum 2 and Vital from the committed captures (fixed knobs,
    white-pointer) — the highest-value still-buildable-now addition (filter cutoff/res/drive and
    osc unison/detune are ubiquitous in tutorials).
-2. **Tab/page detection** (which page is shown) — gates loading the right page profile.
-3. **Rack-aware FX reader** (detect enabled-effect headers → read knobs relative to each) for
+3. **Serum 1 profile** — now installed; capture its default page live (same hosted-editor route
+   as Serum 2), calibrate the ENV/OSC + the `tabs` block, FX/etc from references.
+4. **Rack-aware FX reader** (detect enabled-effect headers → read knobs relative to each) for
    the dynamic FX pages of all three synths.
-4. **Matrix table reader** (OCR routing rows).
-5. **Serum 1 profile** once it's installed (or a verified live capture is available).
+5. **Matrix table reader** (OCR routing rows).

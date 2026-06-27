@@ -149,7 +149,43 @@ check("half-size load scales cx", abs(half["env1_sustain"]["cx"] - 1053) <= 1, s
 check("half-size load scales cy", abs(half["env1_sustain"]["cy"] - 213) <= 1, str(half["env1_sustain"]["cy"]))
 check("half-size load scales radius", abs(half["env1_sustain"]["r"] - 15) <= 1, str(half["env1_sustain"]["r"]))
 
-print(f"\n{'ALL PASS' if not fails else 'FAILURES: ' + ', '.join(fails)}  ({len(fails)} failure(s))")
+# ── tab/page detection (which page of the synth is shown) ─────────────────────
+from teardown.synth_from_screen.page_detect import detect_active_tab, identify_synth  # noqa: E402
+
+# synthetic Serum-style strip: a green dot over the active tab, grey dots over the rest. The
+# detector must pick the tab nearest the green dot, at ANY resolution (profile scales coords).
+def make_serum_strip(active_x_ref, w=2380, h=1544):
+    img = np.full((h, w, 3), 30, np.uint8)
+    for name, x in {"OSC": 395, "MIX": 533, "FX": 670, "MATRIX": 807, "GLOBAL": 944}.items():
+        col = (60, 230, 90) if x == active_x_ref else (90, 90, 90)   # BGR: green vs grey
+        cv2.circle(img, (x, 110), 7, col, -1)
+    return img
+
+for want, ax in [("OSC", 395), ("FX", 670), ("GLOBAL", 944)]:
+    r = detect_active_tab(make_serum_strip(ax), "serum")
+    check(f"synthetic serum strip: green dot → {want}", r["tab"] == want, str(r))
+# resolution independence: same strip at half size still resolves
+r_half = detect_active_tab(cv2.resize(make_serum_strip(670), (1190, 772)), "serum")
+check("tab detection is resolution-independent (half-size FX)", r_half["tab"] == "FX", str(r_half))
+# a blank frame (no GUI) yields no tab, never a crash
+check("blank frame → no tab", detect_active_tab(np.full((400, 400, 3), 20, np.uint8), "serum")["tab"] is None)
+check("unknown synth → no tab", detect_active_tab(make_serum_strip(395), "nope")["tab"] is None)
+
+# real committed panels (downscaled own-captures): each must detect its own active tab + synth
+PANELS = os.path.join(_HERE, "fixtures", "panels")
+panel_cases = [("serum2_osc.png", "serum", "OSC"), ("vital_voice.png", "vital", "VOICE"),
+               ("vital_effects.png", "vital", "EFFECTS"), ("vital_matrix.png", "vital", "MATRIX"),
+               ("vital_advanced.png", "vital", "ADVANCED")]
+for fn, synth, want in panel_cases:
+    p = os.path.join(PANELS, fn)
+    if not os.path.isfile(p):
+        continue   # a deploy bundle may strip large reference fixtures; repo always has them
+    im = cv2.imread(p)
+    r = detect_active_tab(im, synth)
+    check(f"real panel {fn}: active tab → {want}", r["tab"] == want, str(r))
+    ids = identify_synth(im, ["serum", "vital"])
+    check(f"real panel {fn}: identify_synth → {synth}/{want}",
+          ids["synth"] == synth and ids["tab"] == want, str(ids))
 
 print(f"\n{'ALL PASS' if not fails else 'FAILURES: ' + ', '.join(fails)}  ({len(fails)} failure(s))")
 sys.exit(len(fails))
