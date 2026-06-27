@@ -85,6 +85,40 @@ check("naive bright-pixel read is fooled by a full arc (~0.5)", naive < 0.8, f"n
 check("white-pointer read recovers full value (~1.0)", white > 0.9, f"white={white}")
 
 
+# ── white mode is SKIN-RELATIVE: light-grey body + colored arc must not flood the read ──
+# (review finding: absolute brightness thresholds let a light knob body flood the centroid)
+def draw_skin_knob(body_bgr, ptr_bgr, value, sweep=270.0):
+    img = np.full((160, 160, 3), 25, np.uint8)
+    cv2.circle(img, (80, 80), 55, body_bgr, -1)
+    a0 = -sweep / 2; a1 = -sweep / 2 + value * sweep
+    for deg in np.arange(a0, a1, 1.0):     # saturated blue fill-arc (must be ignored)
+        rad = math.radians(deg)
+        cv2.circle(img, (int(80 + math.sin(rad) * 55 * 0.85), int(80 - math.cos(rad) * 55 * 0.85)),
+                   max(2, 55 // 12), (200, 120, 40), -1)
+    radv = math.radians(a1)
+    cv2.line(img, (80, 80), (int(80 + math.sin(radv) * 55 * 0.9), int(80 - math.cos(radv) * 55 * 0.9)), ptr_bgr, 3)
+    return img
+
+for tag, body, ptr in [("light body + white ptr", (180, 180, 180), (245, 245, 245)),
+                       ("dark body + white ptr", (40, 40, 40), (245, 245, 245)),
+                       ("light body + dark ptr", (195, 195, 195), (25, 25, 25))]:
+    for v in [0.2, 0.85]:
+        im = draw_skin_knob(body, ptr, v)
+        rv = read_knob(cv2.cvtColor(im, cv2.COLOR_BGR2GRAY), 80, 80, 55, img_bgr=im, pointer="white")
+        check(f"skin-relative read: {tag} v={v}", abs(rv["value"] - v) < 0.08, f"got {rv['value']}")
+
+# ── read_patch must not crash on a malformed control spec (missing geometry) ──────
+malformed = {
+    "good": {"type": "knob", "cx": 60, "cy": 60, "r": 40, "range": [0.0, 1.0]},
+    "no_cx": {"type": "knob", "cy": 60, "r": 40},           # missing cx → skip, not crash
+    "no_bbox": {"type": "toggle"},                          # missing bbox → skip, not crash
+}
+mp = np.full((120, 120, 3), 30, np.uint8)
+draw_knob(mp, 60, 60, 40, 0.5)
+res_mal = read_patch(mp, malformed)
+check("read_patch skips malformed specs without crashing", "good" in res_mal["params"] and "no_cx" not in res_mal["params"],
+      str(res_mal["params"]))
+
 # ── white mode hardening: invalid img_bgr must NOT crash, falls back to grayscale ──
 panelg = np.full((160, 160, 3), 25, np.uint8)
 draw_arc_knob(panelg, 80, 80, 55, 0.5)

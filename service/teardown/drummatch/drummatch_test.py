@@ -237,6 +237,13 @@ no_other = all(classify_role(s, SR) != "other"
                for s in (_mix(_kick3, _hat3), _mix(_snare3, _hat3), _mix(_808, _hat3),
                          _mix(_kick3, _hat3, _snare3), _mix(_clap3, _hat3)))
 check("no overlapping mixture collapses to 'other'", no_other)
+# a low-mid-dominant hit with only MODERATE sub must read perc, not kick/808 (the sub-dominance
+# gate must compare against lowmid too — review finding: a tom/low-perc body at 250-800 Hz).
+_t2 = np.arange(int(0.5 * SR)) / SR
+_perc = ((0.40 * np.sin(2 * np.pi * 90 * _t2) + 0.70 * np.sin(2 * np.pi * 450 * _t2)) * np.exp(-3 * _t2)).astype(np.float32)
+_perc = (_perc / (np.max(np.abs(_perc)) or 1.0) * 0.9).astype(np.float32)
+check("low-mid-dominant + moderate-sub → not kick/808", classify_role(_perc, SR) not in ("kick", "808"),
+      classify_role(_perc, SR))
 # and a real silent/degenerate slice still → "other" (the only legitimate use of it)
 check("silent slice → other", classify_role(np.zeros(SR // 4, np.float32), SR) == "other")
 # deterministic x3 on a mixture (the repo's bar)

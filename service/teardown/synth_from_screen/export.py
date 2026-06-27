@@ -55,7 +55,11 @@ def read_patch(img: np.ndarray, profile: dict) -> dict:
     conf: dict = {}
     for name, spec in profile.items():
         kind = spec.get("type")
+        # malformed control specs (missing geometry) are skipped, not fatal — a profile typo
+        # must not crash the whole read.
         if kind == "knob":
+            if not all(k in spec for k in ("cx", "cy", "r")):
+                continue
             r = read_knob(gray, spec["cx"], spec["cy"], spec["r"],
                           sweep_deg=spec.get("sweep_deg", 270.0),
                           dark_pointer=spec.get("dark_pointer", True),
@@ -65,10 +69,14 @@ def read_patch(img: np.ndarray, profile: dict) -> dict:
             params[name] = round(lo + r["value"] * (hi - lo), 4)
             conf[name] = r["confidence"]
         elif kind == "toggle":
+            if "bbox" not in spec:
+                continue
             r = read_toggle(gray, tuple(spec["bbox"]), spec.get("on_thresh", 128.0))
             params[name] = bool(r["on"])
             conf[name] = r["confidence"]
         elif kind == "menu":
+            if "bbox" not in spec:
+                continue
             r = read_menu(img, tuple(spec["bbox"]))
             params[name] = r["text"]
             conf[name] = r["confidence"]

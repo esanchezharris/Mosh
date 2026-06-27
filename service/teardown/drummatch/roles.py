@@ -102,7 +102,8 @@ def classify_role(y: np.ndarray, sr: int) -> str:
     #    masquerading as a kick (real snares carry their fundamental there with little sub).
     #    A loud kick layered under a hat/snare still dominates the sub band → mixtures read as
     #    kick (the foundational hit of that beat), which is what we want.
-    if sub >= 0.25 or (sub >= 0.18 and sub >= low and sub >= mid and sub >= high and sub >= vhigh):
+    if sub >= 0.25 or (sub >= 0.18 and sub >= low and sub >= lowmid
+                       and sub >= mid and sub >= high and sub >= vhigh):
         return kick_or_808()
 
     # 3) body family — snare / clap / perc (mid/high content, no deep sub).

@@ -13,7 +13,10 @@ of them with the method in "Reproduction" below.
 Serum 1, Serum 2 **and** Vital all draw a knob as a **white pointer line** over a coloured
 arc/tick (teal in Vital, blue in Serum). That means `controls.read_knob(..., pointer="white")`
 — which isolates the colourless pointer from the saturated arc — is the correct reader for
-**every** knob on **every** page of **all three** synths. The ENV-ADSR profiles
+**every** knob on **every** page of **all three** synths. The isolation is **skin-relative**
+(the pointer is read as the colourless feature deviating most from the knob's own body
+brightness, either polarity) so it works on dark-bodied knobs (Vital / Serum 2) AND lighter
+skins / dark-on-light pointers (Serum 1) without assuming an absolute brightness. The ENV-ADSR profiles
 (`profiles/vital.json`, `profiles/serum.json`) already use it and read absolute values
 correctly (full SUSTAIN ≈ 1.0). Extending coverage is "add more control entries," not "write a
 new reader" — except for the dynamic/tabular pages noted below.

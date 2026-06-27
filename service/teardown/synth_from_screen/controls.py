@@ -53,26 +53,39 @@ def read_knob(gray: np.ndarray, cx: int, cy: int, r: int, sweep_deg: float = 270
         sub = img_bgr[y0:y1, x0:x1].astype(np.float32)
         b, g, rc = sub[..., 0], sub[..., 1], sub[..., 2]
         mx = np.maximum(np.maximum(b, g), rc)
-        mn = np.minimum(np.minimum(b, g), rc)
-        # white/light-grey pointer: bright AND low chroma. The teal/blue/orange fill-arc is
-        # saturated (mx-mn large) → excluded; the dark knob body is dim (mx low) → excluded.
-        mask = (mx >= 150.0) & ((mx - mn) <= 55.0) & within
-        # if the desaturation gate is too strict (theme/AA), relax once before giving up
-        if int(mask.sum()) < 4:
-            mask = (mx >= 130.0) & ((mx - mn) <= 80.0) & within
-        if int(mask.sum()) < 3:
+        chroma = mx - np.minimum(np.minimum(b, g), rc)
+        # The pointer is COLOURLESS (low chroma) → this excludes the saturated colour fill-arc.
+        # Crucially we do NOT assume an absolute pointer brightness: the pointer is read RELATIVE
+        # to the knob's own body brightness, so a white pointer on a dark body (Vital/Serum 2)
+        # AND a dark pointer on a light body (light skins / Serum 1) both work. Reading an
+        # absolute-bright mask would let a light-grey knob body flood the centroid → wrong value.
+        lowchroma = (chroma <= 60.0) & within
+        if int(lowchroma.sum()) < 4:
             return {"value": 0.5, "confidence": 0.0}
-        # weight by how white each pixel is so the brightest core of the line dominates
-        wgt = np.clip(mx, 0, 255) * (1.0 - np.clip((mx - mn) / 80.0, 0, 1))
-        wgt = np.where(mask, wgt, 0.0)
+        body = float(np.median(mx[lowchroma]))            # the dominant knob-face brightness
+        dev_signed = np.where(lowchroma, mx - body, 0.0)
+        pos_peak = float(dev_signed.max())                # brightest colourless pixel above body
+        neg_peak = float(-dev_signed.min())               # darkest colourless pixel below body
+        # choose the pointer's polarity (bright pointer on a dark body, OR dark pointer on a light
+        # body) by whichever extreme is stronger, then keep only the pointer CORE — pixels within
+        # ~60% of that extreme. That excludes the knob's mid-level 3D rim/shadow shading (which a
+        # naive |dev| mask would fold in and skew the angle).
+        if pos_peak >= neg_peak:
+            thr = max(30.0, 0.6 * pos_peak)
+            pmask = lowchroma & (dev_signed >= thr)
+        else:
+            thr = max(30.0, 0.6 * neg_peak)
+            pmask = lowchroma & (dev_signed <= -thr)
+        if int(pmask.sum()) < 3:
+            return {"value": 0.5, "confidence": 0.0}
+        wgt = np.where(pmask, np.abs(dev_signed), 0.0)
         tot = float(wgt.sum()) or 1.0
         mxr = float((dx * wgt).sum() / tot)
         myr = float((dy * wgt).sum() / tot)
         value = _angle_value(mxr, myr, sweep_deg)
-        # confidence scales with how concentrated the pointer pixels are (a clean line reads
-        # surely; a smear reads weakly). Capped — a screen read is still §8-refined.
-        n = int(mask.sum())
-        conf = 0.75 if 6 <= n <= 0.25 * within.sum() else 0.6
+        # confidence falls if the deviating set is too large (a flood, not a clean line).
+        n = int(pmask.sum())
+        conf = 0.75 if 6 <= n <= 0.3 * float(within.sum()) else 0.6
         return {"value": round(value, 3), "confidence": conf}
 
     sub = gray[y0:y1, x0:x1].astype(np.float32)

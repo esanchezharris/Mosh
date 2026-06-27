@@ -47,26 +47,28 @@ def _load_tabs(synth: str, frame_w: int, frame_h: int) -> dict | None:
 
 
 def _highlight_columns(img: np.ndarray, band: list[int], kind: str) -> np.ndarray:
-    """Per-column count of active-indicator pixels in the tab-strip band."""
+    """Per-column count of active-indicator pixels in the tab-strip band. The saturation cutoff is
+    ADAPTIVE (band-median + margin) rather than a fixed absolute, so it stands out the accent
+    indicator across skins/accent strengths instead of assuming one brightness."""
     import cv2
 
     y0, y1 = max(0, band[0]), min(img.shape[0], band[1])
-    if y1 <= y0:
-        return np.zeros(img.shape[1])
-    hsv = cv2.cvtColor(img[y0:y1], cv2.COLOR_BGR2HSV) if img.ndim == 3 else None
-    if hsv is None:
-        return np.zeros(img.shape[1])
+    if y1 <= y0 or img.ndim != 3:
+        return np.zeros(img.shape[1] if img.ndim >= 2 else 1, np.float32)
+    hsv = cv2.cvtColor(img[y0:y1], cv2.COLOR_BGR2HSV)
     H, S, V = hsv[..., 0].astype(np.float32), hsv[..., 1].astype(np.float32), hsv[..., 2].astype(np.float32)
+    s_thr = max(45.0, float(np.median(S)) + 35.0)        # adaptive: the indicator out-saturates the strip
     if kind == "green":
-        mask = (S > 70) & (V > 95) & (H > 30) & (H < 95)
-    else:  # "saturated" — any vivid hue (the accent underline) vs the grey inactive tabs
-        mask = (S > 60) & (V > 80)
+        mask = (S > s_thr) & (V > 60.0) & (H > 30.0) & (H < 95.0)
+    else:  # "saturated" — the accent underline vs the grey inactive tabs
+        mask = (S > s_thr) & (V > 60.0)
     return mask.sum(axis=0).astype(np.float32)
 
 
 def detect_active_tab(img: np.ndarray, synth: str) -> dict:
     """Which tab is active in this `synth` frame. {"tab", "confidence", "peak_x"}; tab=None if
-    no indicator is found (wrong synth / occluded / not a GUI frame)."""
+    no indicator is found (wrong synth / occluded / not a GUI frame). The x-window keeps the synth
+    logo / preset area out; the saturation cutoff is adaptive (see _highlight_columns)."""
     cfg = _load_tabs(synth, img.shape[1], img.shape[0])
     if not cfg:
         return {"tab": None, "confidence": 0.0, "peak_x": None}
@@ -79,7 +81,6 @@ def detect_active_tab(img: np.ndarray, synth: str) -> dict:
         return {"tab": None, "confidence": 0.0, "peak_x": None}
     peak_x = int(np.argmax(cols))
     name, dist = min(((n, abs(peak_x - x)) for n, x in cfg["anchors"].items()), key=lambda t: t[1])
-    # spacing sets the "is it clearly this tab" scale; confidence falls off with distance.
     xs = sorted(cfg["anchors"].values())
     spacing = min((b - a for a, b in zip(xs, xs[1:])), default=float(img.shape[1]))
     conf = max(0.0, min(1.0, 1.0 - (dist / (0.5 * spacing)))) if spacing > 0 else 0.0
