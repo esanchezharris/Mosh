@@ -688,6 +688,12 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 .strip .fader { writing-mode: vertical-lr; direction: rtl; height: 150px; accent-color: var(--lime); }
 .strip-db { font-size: 10px; color: var(--bone-dim); font-family: var(--font-mono); }
 .strip-ms { display: flex; gap: 5px; }
+/* G8 — per-track output routing selector */
+.strip-out { display: flex; flex-direction: column; align-items: center; gap: 2px; width: 100%; }
+.strip-out-lbl { font-size: 9px; color: var(--bone-dim); letter-spacing: 0.04em; }
+.strip-out select { width: 100%; max-width: 76px; font-size: 10px; font-family: var(--font-mono);
+  background: var(--ink); color: var(--bone); border: 1px solid var(--ink-line); border-radius: 6px;
+  padding: 2px 4px; cursor: pointer; accent-color: var(--lime); }
 
 /* ── drag-and-drop audio import affordance (BRW-007) ────────────────────────*/
 .drop-overlay { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center;

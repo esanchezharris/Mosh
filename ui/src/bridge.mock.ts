@@ -430,6 +430,28 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     case "set_track_pan":    { const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found"); pushUndo(); t.pan = num(args.pan); invalidate(); return ok(command); }
     case "set_track_mute":   { const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found"); pushUndo(); t.mute = Boolean(args.mute); invalidate(); return ok(command); }
     case "set_track_solo":   { const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found"); pushUndo(); t.solo = Boolean(args.solo); invalidate(); return ok(command); }
+    // RTG-002 — per-track output routing (mirrors the native set_track_output
+    // contract: default | another track (destTrackId) | hardware out (deviceID);
+    // self rejected). Dev/test only — keeps the dev-mock honest with the engine.
+    case "set_track_output": {
+      const t = findTrack(str(args.trackId));
+      if (!t) return err(command, "track not found");
+      pushUndo();
+      if (str(args.output) === "default") { delete t.output; invalidate(); return ok(command); }
+      if (args.destTrackId != null) {
+        const destId = str(args.destTrackId);
+        if (destId === t.id) return err(command, "cannot route a track into itself");
+        const dest = findTrack(destId);
+        if (!dest) return err(command, "destination track not found");
+        t.output = { isTrack: true, destId, name: dest.name };
+        invalidate(); return ok(command);
+      }
+      if (args.deviceID != null) {
+        t.output = { isTrack: false, deviceID: str(args.deviceID), name: str(args.deviceID) };
+        invalidate(); return ok(command);
+      }
+      return err(command, "set_track_output needs a destination");
+    }
     case "create_section": {
       pushUndo();
       const start = num(args.startBeat, 0);
