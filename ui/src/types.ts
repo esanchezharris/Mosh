@@ -24,6 +24,17 @@ export type RenderLayer = {
 // LYR-001 — Finish-My-Song lyric sheet (per-track), from MoshOps.lyricSheetToVar().
 // One line carries its constraint spec (§5); the v2 Lyrics tab renders the flow meter
 // + rhyme tool from this. Transient generation output (proposals) arrives in L2.
+// L2 — one ranked generation proposal for a line (constraint-checked by phonology).
+export type LyricProposal = {
+  text: string;
+  endWord: string;
+  syllables: number;
+  passes: boolean;           // meets all hard constraints (syllables within tol + rhyme)
+  syllableOk?: boolean;
+  rhymeOk?: boolean;
+  grade?: string;            // "perfect" | "slant" | "anchor" | "free" | "none"
+  score?: number;
+};
 export type LyricLine = {
   index: number;
   role: "verse" | "hook" | "bridge" | "adlib" | string;
@@ -36,7 +47,9 @@ export type LyricLine = {
   rhymeStrictness: string;   // "perfect"|"slant"|"free" ("" ⇒ inherit sheet)
   locked: boolean;
   sectionId: string;
-  status: "empty" | "seed" | "proposed" | "accepted" | "locked" | string;
+  status: "empty" | "seed" | "generating" | "proposed" | "accepted" | "locked" | string;
+  proposals?: LyricProposal[];  // L2 — transient ranked proposals (cleared on accept/reject)
+  regen?: number;
 };
 export type LyricSheet = {
   id: string;

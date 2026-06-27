@@ -14,8 +14,8 @@
 // behaviour the UI relies on is exercised, while audio/Tracktion concepts never
 // appear (the swappable seam holds on the web side too).
 
-import type { Snapshot, Clip, Track, Transport, CommandResult, RenderLayer, TrainingState, MidiNote, PluginParam, MoshFxReadout, LyricSheet } from "./types";
-import { syllablesForWord } from "./lyrics/flowMeter";
+import type { Snapshot, Clip, Track, Transport, CommandResult, RenderLayer, TrainingState, MidiNote, PluginParam, MoshFxReadout, LyricSheet, LyricLine } from "./types";
+import { syllablesForWord, countSyllables } from "./lyrics/flowMeter";
 
 export const MOCK_ENABLED: boolean =
   typeof import.meta !== "undefined" && Boolean(import.meta.env?.DEV);
@@ -161,7 +161,9 @@ const listeners = new Map<string, Set<Listener>>();
 // Mock command log (drives the CommandLog panel). Read-only commands don't log.
 const cmdLog: { command: string; ok: boolean; undoable: boolean; ts: number }[] = [];
 const READONLY = new Set(["get_snapshot", "get_clip_peaks", "file_peaks", "audition_file", "stop_audition", "get_command_log", "list_plugins", "list_builtins", "list_colors", "list_audio_devices", "list_wave_inputs", "list_track_outputs", "list_takes", "list_training_sources", "training_job_status", "list_lora_adapters"]);
-const NON_UNDOABLE = new Set(["set_transport", "arm_track", "set_input_monitor", "undo", "redo", "save", "reload", "new_project", "render_layer", "open_plugin_editor", "set_plugin_param", "export_audio", "mark_take", "import_training_source", "approve_training_source", "build_training_corpus", "submit_training_job", "cancel_training_job", "import_lora_adapter", "activate_lora_adapter", "get_rhymes"]);
+const NON_UNDOABLE = new Set(["set_transport", "arm_track", "set_input_monitor", "undo", "redo", "save", "reload", "new_project", "render_layer", "open_plugin_editor", "set_plugin_param", "export_audio", "mark_take", "import_training_source", "approve_training_source", "build_training_corpus", "submit_training_job", "cancel_training_job", "import_lora_adapter", "activate_lora_adapter", "get_rhymes",
+  "complete_lyrics", "fill_lyric_gap", "suggest_next_line", "regenerate_lyric",
+  "cancel_lyric_job", "reject_lyric_proposal"]);  // accept_lyric_proposal IS undoable
 
 // LYR-001 — a tiny deterministic rhyme map so the rhyme tool returns something in
 // browser dev / e2e (the real path is the phonology service). Suffix fallback keeps
@@ -179,6 +181,51 @@ function mockRhymes(word: string, maxN: number, syllables: number) {
     .map((w) => ({ word: w, syllables: syllablesForWord(w), grade: "perfect" as const }))
     .filter((c) => syllables <= 0 || c.syllables === syllables)
     .slice(0, maxN > 0 ? maxN : 50);
+}
+
+// L2 — deterministic mock generation for browser dev / e2e (the real loop is the
+// service). Builds plausible, constraint-flavoured proposals; the rhyme group's anchor
+// (an earlier line's end word) drives the candidate end words.
+const FILLER = ["over", "alone", "again", "inside", "tonight", "rising"];
+const isGap = (t: string) => /^_{2,}$/.test(t);
+// The group's rhyme anchor = the first group line's FIXED end word (final text last
+// word, or the seed's last token when it's a word, not a gap).
+function mockGroupAnchor(sheet: LyricSheet, group: string): string {
+  for (const l of sheet.lines) {
+    if (l.rhymeGroup !== group) continue;
+    const txt = (l.text || "").trim();
+    if (txt) return (txt.split(/\s+/).pop() ?? "").replace(/[^A-Za-z']/g, "");
+    const toks = (l.seedText || "").split(/\s+/).filter(Boolean);
+    if (toks.length && !isGap(toks[toks.length - 1])) return toks[toks.length - 1].replace(/[^A-Za-z']/g, "");
+  }
+  return "";
+}
+// Mirror the real assembler: keep the producer's words, fill interior gaps with
+// filler, and only APPEND a rhyme end word when the line ends in a gap (else keep
+// the fixed end).
+function mockProposals(line: LyricLine, sheet: LyricSheet) {
+  const anchor = line.rhymeGroup ? mockGroupAnchor(sheet, line.rhymeGroup) : "";
+  const ends = (anchor && MOCK_RHYMES[anchor.toLowerCase()]) || ["flow", "time", "grind", "light"];
+  const toks = (line.seedText || "").split(/\s+/).filter(Boolean);
+  const ownEnd = toks.length === 0 || isGap(toks[toks.length - 1]);
+  const out = [];
+  for (let v = 0; v < 3; v++) {
+    const words: string[] = [];
+    toks.forEach((tk, i) => {
+      if (isGap(tk)) { if (i !== toks.length - 1) words.push(FILLER[(v + i) % FILLER.length]); }
+      else words.push(tk);
+    });
+    const end = ownEnd ? ends[(v + (line.regen ?? 0)) % ends.length] : words[words.length - 1] ?? "";
+    if (ownEnd) words.push(end);
+    const text = words.join(" ").replace(/\s+/g, " ").trim();
+    const rhymeOk = ownEnd ? !!anchor : true;
+    out.push({ text, endWord: end, syllables: countSyllables(text), passes: true,
+               syllableOk: true, rhymeOk, grade: ownEnd ? (anchor ? "slant" : "free") : "anchor", score: 1 - v * 0.1 });
+  }
+  return out;
+}
+function mockFillable(l: LyricLine): boolean {
+  return !l.locked && (!l.text.trim() || /_{2,}/.test(l.seedText));
 }
 function emit(type: string, payload?: unknown) {
   const ls = listeners.get("mosh_event");
@@ -582,6 +629,58 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       if (!["perfect", "slant", "free"].includes(strictness)) strictness = "slant";
       const candidates = mockRhymes(word, num(args.maxN, 50), num(args.syllables, 0));
       return ok(command, { ok: true, word, strictness, inDict: word.toLowerCase() in MOCK_RHYMES, candidates });
+    }
+    case "complete_lyrics":
+    case "fill_lyric_gap":
+    case "suggest_next_line":
+    case "regenerate_lyric": {
+      const t = findTrack(str(args.trackId));
+      if (!t?.lyricSheet) return err(command, "track has no lyric sheet");
+      const sheet = t.lyricSheet;
+      let targets: LyricLine[];
+      if (command === "complete_lyrics") targets = sheet.lines.filter(mockFillable);
+      else if (command === "suggest_next_line") targets = sheet.lines.filter((l) => l.index === num(args.afterIndex, -1) + 1 && mockFillable(l));
+      else { // fill_lyric_gap / regenerate_lyric
+        const l = sheet.lines.find((x) => x.index === num(args.lineIndex, -1));
+        if (command === "regenerate_lyric" && l) l.regen = (l.regen ?? 0) + 1;
+        targets = l && mockFillable(l) ? [l] : [];
+      }
+      const lines = targets.map((l) => {
+        l.proposals = mockProposals(l, sheet);
+        l.status = "proposed";
+        return { index: l.index, proposals: l.proposals };
+      });
+      invalidate();
+      return ok(command, { status: "proposed", lineCount: lines.length, lines });
+    }
+    case "cancel_lyric_job": {
+      const t = findTrack(str(args.trackId));
+      if (t?.lyricSheet) t.lyricSheet.lines.forEach((l) => { if (l.status === "generating") l.status = l.text || l.seedText ? "seed" : "empty"; });
+      invalidate();
+      return ok(command);
+    }
+    case "accept_lyric_proposal": {
+      const t = findTrack(str(args.trackId));
+      const l = t?.lyricSheet?.lines.find((x) => x.index === num(args.lineIndex, -1));
+      const pi = num(args.proposalIndex, 0);
+      if (!l) return err(command, "no line at index");
+      const p = l.proposals?.[pi];
+      if (!p) return err(command, "no proposal at that index");
+      pushUndo();
+      l.text = p.text;
+      l.status = "accepted";
+      delete l.proposals;
+      invalidate();
+      return ok(command, { text: p.text });
+    }
+    case "reject_lyric_proposal": {
+      const t = findTrack(str(args.trackId));
+      const l = t?.lyricSheet?.lines.find((x) => x.index === num(args.lineIndex, -1));
+      if (!l) return err(command, "no line at index");
+      delete l.proposals;
+      l.status = l.text || l.seedText ? "seed" : "empty";
+      invalidate();
+      return ok(command);
     }
 
     case "create_annotation": {

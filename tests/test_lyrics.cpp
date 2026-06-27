@@ -54,6 +54,31 @@ TEST_CASE ("a sheet of ordered, id-addressable lines persists through XML", "[ly
     REQUIRE_FALSE (backLines.getChildWithProperty (ids::id, "missing").isValid());
 }
 
+TEST_CASE ("L2 transient proposals (JSON blob) + regen round-trip on a line", "[lyrics][l2]")
+{
+    auto line = LyricLine::create ("ln-1", 0, "verse");
+    line.setProperty (ids::lyricSeedText, "they counted me out ___ ___", nullptr);
+    // The command lands the ranked proposals as a JSON-string blob (non-undoable) +
+    // a regen counter; both must survive serialization with the .tracktionedit.
+    line.setProperty (ids::lyricProposals,
+                      "[{\"text\":\"they counted me out over flame\",\"syllables\":8,\"passes\":true,\"grade\":\"slant\",\"endWord\":\"flame\"}]",
+                      nullptr);
+    line.setProperty (ids::lyricRegen, 2, nullptr);
+
+    auto back = juce::ValueTree::fromXml (line.toXmlString());
+    REQUIRE ((int) back[ids::lyricRegen] == 2);
+    auto parsed = juce::JSON::parse (back[ids::lyricProposals].toString());
+    REQUIRE (parsed.isArray());
+    REQUIRE (parsed.size() == 1);
+    REQUIRE (parsed[0].getProperty ("endWord", juce::var()).toString() == "flame");
+    REQUIRE ((bool) parsed[0].getProperty ("passes", false) == true);
+
+    // A fresh line carries NEITHER (proposals are added only by the generation loop).
+    auto fresh = LyricLine::create ("ln-2", 1, "verse");
+    REQUIRE_FALSE (fresh.hasProperty (ids::lyricProposals));
+    REQUIRE_FALSE (fresh.hasProperty (ids::lyricRegen));
+}
+
 TEST_CASE ("lineFingerprint is stable + sensitive to every constraint input", "[lyrics][cache]")
 {
     auto sheet = LyricSheet::create ("ls-3");

@@ -52,6 +52,9 @@ LockManager::Scope LockManager::classify (const juce::String& command)
         // LYR-001 — lyric sheet mutations target a track (args carry trackId).
         "create_lyric_sheet", "remove_lyric_sheet", "set_lyric_constraint",
         "set_lyric_line", "remove_lyric_line",
+        // LYR-L2 — generation + proposal review also target one track's sheet.
+        "complete_lyrics", "fill_lyric_gap", "suggest_next_line", "regenerate_lyric",
+        "cancel_lyric_job", "accept_lyric_proposal", "reject_lyric_proposal",
     };
 
     // Clip-scoped: mutate one clip (args carry a clipId). Key = the clip's track

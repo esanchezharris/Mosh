@@ -108,6 +108,11 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "set_lyric_line", desc: "Write/update one lyric line by index — text, role, seed (___ = gap), syllable target, rhyme group, lock", args: [S("trackId"), N("lineIndex"), S("text", false), S("role", false, '"verse"|"hook"|"bridge"|"adlib"'), S("seedText", false, "partial line; ___ marks a gap"), N("syllableTarget", false, "0 ⇒ infer from grid"), N("syllableTol", false), S("stress", false, "contour, e.g. xXxxxXxxx"), S("rhymeGroup", false, "lines sharing a group must rhyme"), S("rhymeStrictness", false), B("locked", false), S("sectionId", false)] },
   { command: "remove_lyric_line", desc: "Remove a lyric line by index (remaining lines re-index)", args: [S("trackId"), N("lineIndex")] },
   { command: "get_rhymes", desc: "Phonology rhyme search for a word (perfect/slant, phoneme-based), filterable by syllable count — no LLM", args: [S("word"), S("strictness", false, '"perfect"|"slant"|"free"'), N("syllables", false, "filter to this syllable count"), N("maxN", false)] },
+  { command: "complete_lyrics", desc: "Fill all the gaps in a track's lyric sheet — returns ranked proposals per line (constraint-checked: syllables + rhyme)", args: [S("trackId")] },
+  { command: "fill_lyric_gap", desc: "Fill one lyric line's gaps — ranked proposals for that line", args: [S("trackId"), N("lineIndex")] },
+  { command: "suggest_next_line", desc: "Suggest the next lyric line (a ghost line after the given index)", args: [S("trackId"), N("afterIndex")] },
+  { command: "regenerate_lyric", desc: "Re-generate proposals for one lyric line with a fresh sample", args: [S("trackId"), N("lineIndex")] },
+  { command: "accept_lyric_proposal", desc: "Accept a generated lyric proposal (commits its text into the line)", args: [S("trackId"), N("lineIndex"), N("proposalIndex", false, "default 0 = top-ranked")] },
 ];
 
 export const AGENT_COMMAND_MAP = new Map(AGENT_COMMANDS.map((c) => [c.command, c]));

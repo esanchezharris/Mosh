@@ -536,6 +536,13 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "set_lyric_line")       return cmdSetLyricLine (args);
     if (name == "remove_lyric_line")    return cmdRemoveLyricLine (args);
     if (name == "get_rhymes")           return cmdGetRhymes (args);
+    if (name == "complete_lyrics")      return cmdCompleteLyrics (args);
+    if (name == "fill_lyric_gap")       return cmdFillLyricGap (args);
+    if (name == "suggest_next_line")    return cmdSuggestNextLine (args);
+    if (name == "regenerate_lyric")     return cmdRegenerateLyric (args);
+    if (name == "cancel_lyric_job")     return cmdCancelLyricJob (args);
+    if (name == "accept_lyric_proposal") return cmdAcceptLyricProposal (args);
+    if (name == "reject_lyric_proposal") return cmdRejectLyricProposal (args);
     // Annotations broadcast over MP (shared collaborator comments). create self-broadcasts
     // its resolved cross-peer id; the rest address by that id via the generic wrapper.
     if (name == "create_annotation") return cmdCreateAnnotation (args);
@@ -1034,10 +1041,218 @@ juce::var MoshOps::lyricSheetToVar (te::AudioTrack& t)
         lo->setProperty ("locked",          (bool) l[ids::lyricLocked]);
         lo->setProperty ("sectionId",       l[ids::lyricSectionId].toString());
         lo->setProperty ("status",          l[ids::status].toString());
+        // L2 — transient ranked proposals (a JSON blob; absent ⇒ none) + regen counter.
+        if (l.hasProperty (ids::lyricProposals))
+        {
+            auto parsed = juce::JSON::parse (l[ids::lyricProposals].toString());
+            if (parsed.isArray()) lo->setProperty ("proposals", parsed);
+        }
+        if (l.hasProperty (ids::lyricRegen))
+            lo->setProperty ("regen", (int) l[ids::lyricRegen]);
         lines.add (var (lo));
     }
     o->setProperty ("lines", lines);
     return var (o);
+}
+
+// ── LYR-L2 — the generation loop (propose → validate → retry → rank), fake-first ──
+
+juce::var MoshOps::lyricSpecForTrack (te::AudioTrack& t)
+{
+    auto sheet = t.state.getChildWithName (ids::MOSH_LYRICSHEET);
+    if (! sheet.isValid()) return {};
+    auto* o = new DynamicObject();
+    o->setProperty ("grid",            sheet[ids::lyricGrid].toString());
+    o->setProperty ("topic",           sheet[ids::lyricTopic].toString());
+    o->setProperty ("mood",            sheet[ids::lyricMood].toString());
+    o->setProperty ("explicit",        sheet[ids::lyricExplicit].toString());
+    o->setProperty ("rhymeStrictness", sheet[ids::lyricRhymeStrictness].toString());
+    Array<var> lines;
+    auto container = mosh::LyricSheet::lines (sheet);
+    for (int i = 0; i < container.getNumChildren(); ++i)
+    {
+        auto l = container.getChild (i);
+        auto* lo = new DynamicObject();
+        lo->setProperty ("index",           (int) l[ids::lyricIndex]);
+        lo->setProperty ("role",            l[ids::lyricRole].toString());
+        lo->setProperty ("seedText",        l[ids::lyricSeedText].toString());
+        lo->setProperty ("text",            l[ids::lyricText].toString());
+        lo->setProperty ("syllableTarget",  (int) l[ids::lyricSyllableTarget]);
+        lo->setProperty ("syllableTol",     (int) l[ids::lyricSyllableTol]);
+        lo->setProperty ("stress",          l[ids::lyricStress].toString());
+        lo->setProperty ("rhymeGroup",      l[ids::lyricRhymeGroup].toString());
+        lo->setProperty ("rhymeStrictness", l[ids::lyricRhymeStrictness].toString());
+        lo->setProperty ("locked",          (bool) l[ids::lyricLocked]);
+        lines.add (var (lo));
+    }
+    o->setProperty ("lines", lines);
+    return var (o);
+}
+
+juce::var MoshOps::lyricRegenForTrack (te::AudioTrack& t)
+{
+    auto sheet = t.state.getChildWithName (ids::MOSH_LYRICSHEET);
+    auto* o = new DynamicObject();
+    if (sheet.isValid())
+    {
+        auto container = mosh::LyricSheet::lines (sheet);
+        for (int i = 0; i < container.getNumChildren(); ++i)
+        {
+            auto l = container.getChild (i);
+            if (l.hasProperty (ids::lyricRegen) && (int) l[ids::lyricRegen] > 0)
+                o->setProperty (juce::Identifier (l[ids::lyricIndex].toString()), (int) l[ids::lyricRegen]);
+        }
+    }
+    return var (o);
+}
+
+juce::var MoshOps::runLyricGeneration (const juce::String& cmdName, const juce::String& mode,
+                                       const juce::String& trackId, int lineIndex, int afterIndex,
+                                       const juce::var& args)
+{
+    auto* t = findTrack (trackId);
+    if (t == nullptr) return errResult (cmdName, "no track: " + trackId);
+    if (! t->state.getChildWithName (ids::MOSH_LYRICSHEET).isValid())
+        return errResult (cmdName, "track has no lyric sheet");
+
+    const auto spec  = lyricSpecForTrack (*t);
+    const auto regen = lyricRegenForTrack (*t);
+
+    // Land proposals (a JSON blob per line) on the message thread; re-look-up the sheet
+    // (it may have changed) and write only lines the service returned. NON-undoable
+    // (ephemeral generation output); accept/reject is the user's commit.
+    auto land = [this, cmdName, trackId] (const juce::var& result) -> juce::var
+    {
+        auto* tt = findTrack (trackId);
+        auto sheet = tt != nullptr ? tt->state.getChildWithName (ids::MOSH_LYRICSHEET) : juce::ValueTree();
+        if (! sheet.isValid()) return errResult (cmdName, "lyric sheet gone");
+        if (! result.isObject() || ! (bool) result.getProperty ("ok", false))
+            return errResult (cmdName, "lyric service unavailable (start the generative service)");
+        auto lines = mosh::LyricSheet::lines (sheet);
+        auto resLines = result.getProperty ("lines", var());
+        int n = 0;
+        if (resLines.isArray())
+            for (auto& rl : *resLines.getArray())
+            {
+                auto node = lines.getChildWithProperty (ids::lyricIndex, (int) rl.getProperty ("index", -1));
+                if (! node.isValid()) continue;
+                node.setProperty (ids::lyricProposals, juce::JSON::toString (rl.getProperty ("proposals", var())), nullptr);
+                node.setProperty (ids::status, "proposed", nullptr);
+                ++n;
+            }
+        emitSnapshotInvalidated();
+        auto* d = new DynamicObject(); d->setProperty ("status", "proposed"); d->setProperty ("lineCount", n);
+        return okResult (cmdName, var (d));
+    };
+
+    logLine (cmdName, args, true, {}, false);
+
+    // Synchronous (harness / agent): block on generation + land inline.
+    if ((bool) args.getProperty ("wait", false))
+        return land (jobManager.generateLyrics (mode, spec, lineIndex, afterIndex, regen));
+
+    // Async (GUI): generate off the message thread; land via callAsync, skipping if a
+    // cancel bumped the epoch in the meantime.
+    const int epoch = ++lyricGenEpoch_;   // capture; a later launch or cancel supersedes
+    std::thread ([this, mode, spec, lineIndex, afterIndex, regen, land, epoch]
+    {
+        auto result = jobManager.generateLyrics (mode, spec, lineIndex, afterIndex, regen);
+        juce::MessageManager::callAsync ([this, land, result, epoch]
+        {
+            if (epoch != lyricGenEpoch_) return;   // cancelled / superseded
+            land (result);
+        });
+    }).detach();
+
+    auto* d = new DynamicObject(); d->setProperty ("status", "generating");
+    return okResult (cmdName, var (d));
+}
+
+juce::var MoshOps::cmdCompleteLyrics (const juce::var& args)
+{
+    const auto trackId = args.getProperty ("trackId", var()).toString();
+    return runLyricGeneration ("complete_lyrics", "complete", trackId, -1, -1, args);
+}
+
+juce::var MoshOps::cmdFillLyricGap (const juce::var& args)
+{
+    const auto trackId = args.getProperty ("trackId", var()).toString();
+    const int lineIndex = (int) args.getProperty ("lineIndex", -1);
+    return runLyricGeneration ("fill_lyric_gap", "fill", trackId, lineIndex, -1, args);
+}
+
+juce::var MoshOps::cmdSuggestNextLine (const juce::var& args)
+{
+    const auto trackId = args.getProperty ("trackId", var()).toString();
+    const int afterIndex = (int) args.getProperty ("afterIndex", -1);
+    return runLyricGeneration ("suggest_next_line", "next", trackId, -1, afterIndex, args);
+}
+
+juce::var MoshOps::cmdRegenerateLyric (const juce::var& args)
+{
+    const auto trackId = args.getProperty ("trackId", var()).toString();
+    const int lineIndex = (int) args.getProperty ("lineIndex", -1);
+    auto* t = findTrack (trackId);
+    if (t == nullptr) return errResult ("regenerate_lyric", "no track: " + trackId);
+    auto sheet = t->state.getChildWithName (ids::MOSH_LYRICSHEET);
+    if (! sheet.isValid()) return errResult ("regenerate_lyric", "track has no lyric sheet");
+    auto node = mosh::LyricSheet::lines (sheet).getChildWithProperty (ids::lyricIndex, lineIndex);
+    if (! node.isValid()) return errResult ("regenerate_lyric", "no line at index " + juce::String (lineIndex));
+    // Bump the line's regen counter (non-undoable) so the service draws a fresh sample.
+    node.setProperty (ids::lyricRegen, (int) node.getProperty (ids::lyricRegen, 0) + 1, nullptr);
+    return runLyricGeneration ("regenerate_lyric", "fill", trackId, lineIndex, -1, args);
+}
+
+juce::var MoshOps::cmdCancelLyricJob (const juce::var& args)
+{
+    const auto trackId = args.getProperty ("trackId", var()).toString();
+    ++lyricGenEpoch_;   // any in-flight async land for the prior epoch is skipped
+    logLine ("cancel_lyric_job", args, true, {}, false);
+    return okResult ("cancel_lyric_job");
+}
+
+juce::var MoshOps::cmdAcceptLyricProposal (const juce::var& args)
+{
+    const auto trackId = args.getProperty ("trackId", var()).toString();
+    const int lineIndex = (int) args.getProperty ("lineIndex", -1);
+    const int proposalIndex = (int) args.getProperty ("proposalIndex", 0);
+    auto* t = findTrack (trackId);
+    if (t == nullptr) return errResult ("accept_lyric_proposal", "no track: " + trackId);
+    auto sheet = t->state.getChildWithName (ids::MOSH_LYRICSHEET);
+    if (! sheet.isValid()) return errResult ("accept_lyric_proposal", "track has no lyric sheet");
+    auto node = mosh::LyricSheet::lines (sheet).getChildWithProperty (ids::lyricIndex, lineIndex);
+    if (! node.isValid()) return errResult ("accept_lyric_proposal", "no line at index " + juce::String (lineIndex));
+    auto props = juce::JSON::parse (node.getProperty (ids::lyricProposals, "").toString());
+    if (! props.isArray() || proposalIndex < 0 || proposalIndex >= props.size())
+        return errResult ("accept_lyric_proposal", "no proposal at that index");
+    const auto chosen = props[proposalIndex].getProperty ("text", var()).toString();
+
+    beginTxn ("accept_lyric_proposal");
+    node.setProperty (ids::lyricText, chosen, &undoManager());     // the COMMIT (undoable)
+    node.setProperty (ids::status, "accepted", &undoManager());
+    node.removeProperty (ids::lyricProposals, nullptr);            // clear the ephemeral proposals
+    logLine ("accept_lyric_proposal", args, true, {}, true);       // explicit TASTE label (positive)
+    emitSnapshotInvalidated();
+    auto* d = new DynamicObject(); d->setProperty ("text", chosen);
+    return okResult ("accept_lyric_proposal", var (d));
+}
+
+juce::var MoshOps::cmdRejectLyricProposal (const juce::var& args)
+{
+    const auto trackId = args.getProperty ("trackId", var()).toString();
+    const int lineIndex = (int) args.getProperty ("lineIndex", -1);
+    auto* t = findTrack (trackId);
+    if (t == nullptr) return errResult ("reject_lyric_proposal", "no track: " + trackId);
+    auto sheet = t->state.getChildWithName (ids::MOSH_LYRICSHEET);
+    if (! sheet.isValid()) return errResult ("reject_lyric_proposal", "track has no lyric sheet");
+    auto node = mosh::LyricSheet::lines (sheet).getChildWithProperty (ids::lyricIndex, lineIndex);
+    if (! node.isValid()) return errResult ("reject_lyric_proposal", "no line at index " + juce::String (lineIndex));
+    node.removeProperty (ids::lyricProposals, nullptr);
+    node.setProperty (ids::status, node[ids::lyricText].toString().isNotEmpty()
+                                       || node[ids::lyricSeedText].toString().isNotEmpty() ? "seed" : "empty", nullptr);
+    logLine ("reject_lyric_proposal", args, true, {}, false);      // TASTE label (negative)
+    emitSnapshotInvalidated();
+    return okResult ("reject_lyric_proposal");
 }
 
 // ── ANN-001: authored timeline annotations (mirror the sections CRUD; multiplayer-

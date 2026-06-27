@@ -59,6 +59,15 @@ public:
     juce::var getRhymes (const juce::String& word, const juce::String& strictness,
                          int maxN, int syllables);
 
+    /** Lyric generation loop (POST /complete_lyrics | /fill_lyric_gap | /suggest_next_line)
+        — Finish-My-Song L2. `mode` ∈ "complete"|"fill"|"next". SYNCHRONOUS — call on a
+        BACKGROUND thread (mirrors transcribe()). `spec` is the lyric-sheet constraint
+        spec; `regen` is an optional {lineIndex:counter} object. Returns
+        { ok, lines:[{index, proposals:[{text,score,syllables,passes,grade,endWord,...}]}] },
+        or {} on failure (service down). */
+    juce::var generateLyrics (const juce::String& mode, const juce::var& spec,
+                              int lineIndex, int afterIndex, const juce::var& regen);
+
     juce::String serviceBuild() const { return svcBuild; }
 
 private:

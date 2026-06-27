@@ -135,6 +135,13 @@ namespace mosh::ids
     MOSH_DECLARE_ID (lyricRhymeStrictness) // "perfect" | "slant" | "free" ("" ⇒ inherit sheet)
     MOSH_DECLARE_ID (lyricLocked)          // hard-fixed line (don't regenerate)
     MOSH_DECLARE_ID (lyricSectionId)       // optional link to a MOSH_SECTION
+    // L2 generation — TRANSIENT, non-undoable: the ranked top-N proposals for a line
+    // as a JSON-string blob (the service result's per-line proposals array), plus a
+    // regen counter that varies the LLM/fake sample. accept copies the chosen
+    // proposal's text into lyricText (undoable) and clears these; reject just clears.
+    // status flows empty→seed→generating→proposed→accepted.
+    MOSH_DECLARE_ID (lyricProposals)       // JSON array string of {text,score,syllables,passes,grade,endWord,...}
+    MOSH_DECLARE_ID (lyricRegen)           // int — bumped by regenerate_lyric
 
     MOSH_DECLARE_ID (id)
     MOSH_DECLARE_ID (inputRef)

@@ -69,3 +69,46 @@ test("a lyric line can be removed", async ({ page }) => {
   await expect(page.getByTestId("lyric-lines").getByRole("listitem")).toHaveCount(1);
   await expect(page.getByTestId("v2-error")).toHaveCount(0);
 });
+
+// ── L2: the generation loop — Finish gaps → proposals → accept/reject/regenerate ──
+
+async function seedGappedLine(page: Page) {
+  await page.getByTestId("lyric-create").click();
+  await page.getByTestId("lyric-add-line").click();
+  await page.getByTestId("lyric-line-0").getByLabel("line 1", { exact: true }).fill("they counted me out ___ ___");
+  await page.getByTestId("lyric-panel").getByText("Lyrics", { exact: true }).click(); // blur
+}
+
+test("Finish gaps generates ranked proposals; accept commits one", async ({ page }) => {
+  await bootV2(page);
+  await openLyrics(page);
+  await seedGappedLine(page);
+  await page.getByTestId("lyric-finish").click();
+  const props = page.getByTestId("lyric-proposals-0");
+  await expect(props).toBeVisible();
+  await expect(props.getByTestId(/lyric-prop-0-/)).not.toHaveCount(0);
+  // accept the top proposal → it commits into the line and the proposals clear
+  await page.getByTestId("lyric-accept-0-0").click();
+  await expect(page.getByTestId("lyric-line-0")).toHaveAttribute("data-status", "accepted");
+  await expect(page.getByTestId("lyric-proposals-0")).toHaveCount(0);
+  await expect(page.getByTestId("v2-error")).toHaveCount(0);
+});
+
+test("reject clears the proposals", async ({ page }) => {
+  await bootV2(page);
+  await openLyrics(page);
+  await seedGappedLine(page);
+  await page.getByTestId("lyric-finish").click();
+  await expect(page.getByTestId("lyric-proposals-0")).toBeVisible();
+  await page.getByTestId("lyric-reject-0").click();
+  await expect(page.getByTestId("lyric-proposals-0")).toHaveCount(0);
+});
+
+test("suggest line appends a new line with proposals", async ({ page }) => {
+  await bootV2(page);
+  await openLyrics(page);
+  await page.getByTestId("lyric-create").click();
+  await page.getByTestId("lyric-suggest").click();
+  await expect(page.getByTestId("lyric-line-0")).toBeVisible();
+  await expect(page.getByTestId("lyric-proposals-0")).toBeVisible();
+});

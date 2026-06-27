@@ -716,6 +716,32 @@ class Handler(BaseHTTPRequestHandler):
                     self._send(200, payload)
                 except Exception as e:  # noqa: BLE001
                     self._send(500, {"ok": False, "error": f"phonology error: {e}"})
+        elif path in ("/complete_lyrics", "/fill_lyric_gap", "/suggest_next_line"):
+            # Lyric generation loop (Finish-My-Song L2, fake-first): propose →
+            # validate(phonology) → retry → rank → top-N. Runs IN-PROCESS (the core is
+            # stdlib + the phonology core); deterministic with the fake backend. The
+            # native side builds `spec` from the lyric sheet and lands the proposals.
+            spec = data.get("spec", {})
+            if not isinstance(spec, dict) or not spec.get("lines"):
+                self._send(400, {"ok": False, "error": "spec.lines required"})
+                return
+            regen = {}
+            for k, v in (data.get("regen", {}) or {}).items():
+                try:
+                    regen[int(k)] = int(v)
+                except (TypeError, ValueError):
+                    pass
+            try:
+                from lyrics import core as lyr
+                if path == "/complete_lyrics":
+                    payload = lyr.complete(spec, regen=regen)
+                elif path == "/fill_lyric_gap":
+                    payload = lyr.fill_gap(spec, int(data.get("lineIndex", 0)), regen=regen)
+                else:
+                    payload = lyr.suggest_next_line(spec, int(data.get("afterIndex", -1)), regen=regen)
+                self._send(200, payload)
+            except Exception as e:  # noqa: BLE001
+                self._send(500, {"ok": False, "error": f"lyric generation error: {e}"})
         elif path == "/training/submit" or path == "/training/jobs":
             if not TRAINING_ENABLED:
                 self._send(503, {"ok": False, "error": "lora trainer unavailable"})
