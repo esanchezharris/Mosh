@@ -13,8 +13,6 @@ import { TrackLaneList } from "./lanes/TrackLaneList";
 import { RightRail } from "./RightRail";
 import { Composer } from "./Composer";
 import { LeftDrawer } from "./LeftDrawer";
-import { RightInspectorDrawer } from "./RightInspectorDrawer";
-import { useHasPeers } from "./usePresence";
 import { PianoRoll } from "../ui/PianoRoll";
 import { AutomationPanel } from "../ui/AutomationPanel";
 import { DrumWindow } from "../ui/DrumWindow";
@@ -24,10 +22,6 @@ import "./shell.css";
 export function AppV2() {
   const snapshot = useStore((s) => s.snapshot);
   const lastError = useStore((s) => s.lastError);
-  // Two modes (see usePresence): with collaborators the right rail holds the agent +
-  // their video tiles, as today; solo, the rail collapses for a full-width timeline, the
-  // agent rides the prompt bar, and the Inspector lives in a right-edge drawer.
-  const hasPeers = useHasPeers();
 
   useKeyboardShortcuts(); // the single keyboard layer + native-menu bridge
   const dragging = useFileDrop(); // drag-and-drop audio import (bytes over the bridge)
@@ -49,7 +43,9 @@ export function AppV2() {
       {snapshot && <TopBar snapshot={snapshot} />}
       {lastError && <div className="v2-errbar" role="alert" data-testid="v2-error">⚠ {lastError}</div>}
 
-      <div className={`v2-body${hasPeers ? "" : " solo"}`}>
+      {/* compact 3-zone body: a center column (section-nav · arrangement · prompt bar)
+          and an ALWAYS-ON right rail (maximized agent · collaborators · inspector). */}
+      <div className="v2-body">
         <div className="v2-main">
           {snapshot
             ? <TrackLaneList snapshot={snapshot} dragging={dragging} />
@@ -61,16 +57,15 @@ export function AppV2() {
             )}
           <Composer />
         </div>
-        {hasPeers && <RightRail />}
+        <RightRail />
       </div>
 
-      {/* edge docks — pull-tabs ride the SCREEN edge (mounted at the shell, not the stage).
-          Left = browser (samples + PLUGINS — "+ Plugin" routes here; there's no plugin
-          modal in v2, the dock is the one surface); right = the Inspector when solo. */}
+      {/* left browser — a CONFINED pull-tab overlay: its tab rides the screen edge and the
+          panel ends above the prompt bar, so it never covers the agent (samples + PLUGINS;
+          "+ Plugin" opens it on the Plugins tab — the one plugin surface, no modal). */}
       <LeftDrawer />
-      {!hasPeers && <RightInspectorDrawer />}
 
-      {/* floating / modal surfaces — opened via disclosure in later slices */}
+      {/* floating / modal surfaces — opened via disclosure */}
       <PianoRoll />
       <AutomationPanel />
       <DrumWindow />

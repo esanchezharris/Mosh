@@ -57,13 +57,14 @@ test("left browser drawer: pull-tab opens it, tabs switch, close dismisses", asy
   await expect(page.getByTestId("v2-browser-tab-sounds")).toHaveCount(0);
 });
 
-test("boots the v2 shell with topbar, tracks, the bar-agent and composer", async ({ page }) => {
+test("boots the v2 shell with topbar, tracks, composer and the always-on rail", async ({ page }) => {
   await bootV2(page);
   await expect(page.getByTestId("v2-topbar")).toBeVisible();
   await expect(page.getByTestId("v2-track-header")).toHaveCount(3);
   await expect(page.getByTestId("v2-composer")).toBeVisible();
-  // solo (no collaborators): the agent minimizes onto the prompt bar
-  await expect(page.locator('[data-testid="v2-composer-agent"] canvas')).toBeVisible(); // Moshi GL on the bar
+  // the agent lives "maximized" in the always-on right rail (its only live WebGL mount)
+  await expect(page.getByTestId("v2-rail")).toBeVisible();
+  await expect(page.locator('[data-testid="v2-mosh-card"] canvas')).toBeVisible();
 });
 
 test("transport play toggles", async ({ page }) => {
@@ -76,11 +77,10 @@ test("transport play toggles", async ({ page }) => {
   await expect(transport).toHaveAttribute("data-playing", "false");
 });
 
-test("solo: the inspector drawer reveals Mix/FX/Gen for the selected track", async ({ page }) => {
+test("the rail inspector reveals Mix/FX/Gen for the selected track", async ({ page }) => {
   await bootV2(page);
   await page.getByTestId("v2-track-header").first().click();
-  await page.getByTestId("v2-inspector-pull").click(); // open the right-edge inspector dock
-  await expect(page.getByTestId("v2-inspector")).toBeVisible();
+  await expect(page.getByTestId("v2-inspector")).toBeVisible(); // always-on rail
   await page.getByTestId("v2-insp-tab-fx").click();
   await expect(page.locator('[data-testid="v2-insp-body"] [data-testid="rack"]')).toBeVisible();
   await page.getByTestId("v2-insp-tab-gen").click();
@@ -92,8 +92,7 @@ test("generative runs on a MIDI/drum track (any track, via the backend auto-boun
   // The seeded Drums track is a MIDI drum clip (no wave clip) — generative must still
   // offer create/render/accept (the native backend auto-bounces it to audio first).
   await page.getByTestId("v2-track-header").first().click();
-  await page.getByTestId("v2-inspector-pull").click(); // solo: open the right-edge inspector dock
-  await expect(page.getByTestId("v2-inspector")).toBeVisible();
+  await expect(page.getByTestId("v2-inspector")).toBeVisible(); // always-on rail
   await page.getByTestId("v2-insp-tab-gen").click();
   const gen = page.getByTestId("generative");
   await expect(gen).toBeVisible();
@@ -142,8 +141,7 @@ test("the agent toast appears on a command and self-dismisses", async ({ page })
 test("plugin picker: + Plugin opens the dock — collections, vendor filter, search, add", async ({ page }) => {
   await bootV2(page);
   await page.getByTestId("v2-track-header").first().click();
-  await page.getByTestId("v2-inspector-pull").click(); // solo: open the right-edge inspector dock
-  await expect(page.getByTestId("v2-inspector")).toBeVisible();
+  await expect(page.getByTestId("v2-inspector")).toBeVisible(); // always-on rail
   await page.getByTestId("v2-insp-tab-fx").click();
   // No plugin modal in v2: "+ Plugin" opens the LEFT browser drawer on the Plugins tab.
   await page.locator('[data-testid="v2-insp-body"]').getByRole("button", { name: "+ Plugin" }).click();
@@ -186,15 +184,17 @@ test("with collaborators present, the right rail shows the agent + camera/invite
   await expect(page.getByTestId("v2-collab-peer")).toBeVisible(); // Ava
 });
 
-test("presence drives the layout: solo bar-agent ↔ rail with collaborators", async ({ page }) => {
+test("the right rail is always present; peers add collaborator tiles", async ({ page }) => {
   await bootV2(page);
-  // solo: no rail, the agent rides the bar
-  await expect(page.getByTestId("v2-rail")).toHaveCount(0);
-  await expect(page.getByTestId("v2-composer-agent")).toBeVisible();
-  // a collaborator joins → the rail appears and the bar-agent is reclaimed by the rail
-  await enterPeersMode(page);
+  // the rail is always on — even alone (the collaborators card shows just the invite cue)
   await expect(page.getByTestId("v2-rail")).toBeVisible();
+  await expect(page.getByTestId("v2-invite")).toBeVisible();
+  await expect(page.getByTestId("v2-collab-peer")).toHaveCount(0);
+  // the agent never rides the prompt bar anymore (it's maximized in the rail)
   await expect(page.getByTestId("v2-composer-agent")).toHaveCount(0);
+  // a collaborator joins → their tile appears in the same rail
+  await enterPeersMode(page);
+  await expect(page.getByTestId("v2-collab-peer")).toBeVisible();
 });
 
 test("section ribbon: '+' creates a section and opens it for rename", async ({ page }) => {
