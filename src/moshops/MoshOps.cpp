@@ -3457,6 +3457,10 @@ juce::var MoshOps::cmdLoadPlugin (const juce::var& args)
     auto* data = new DynamicObject();
     data->setProperty ("index", track->pluginList.indexOf (plugin.get()));
     data->setProperty ("name", plugin->getName());
+    // Echo the engine ids so callers can associate a load with its track+plugin BY ID rather
+    // than by result order (the §9 describe-params probe chains pluginId→trackId→params).
+    data->setProperty ("trackId", track->itemID.toString());
+    data->setProperty ("pluginId", pluginId);
     if (auto* ext = dynamic_cast<te::ExternalPlugin*> (plugin.get()))
         addExternalPluginMetadata (*data, *ext);
     logLine ("load_plugin", args, true, {}, true);
@@ -3523,6 +3527,9 @@ juce::var MoshOps::cmdDescribePlugin (const juce::var& args)
     if (plugin == nullptr) return errResult ("describe_plugin", "no plugin");
 
     auto* o = new DynamicObject();
+    // Echo the trackId so callers can associate this param map with its probe BY ID rather
+    // than by result order (the §9 describe-params bridge chains pluginId→trackId→params).
+    o->setProperty ("trackId", args.getProperty ("trackId", var()).toString());
     o->setProperty ("name", plugin->getName());
     o->setProperty ("type", plugin->getPluginType());
     const int total = plugin->getNumAutomatableParameters();

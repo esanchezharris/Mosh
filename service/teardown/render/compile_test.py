@@ -194,5 +194,115 @@ check("yield_actual midi tracks resolved notes", ya_sound["midi"] == 1.0, str(ya
 check("reconstruction_class downgrades with unresolved present",
       reconstruction_class_for(rec_midi, ya_sound, [{"issue": "x"}]) in ("inferred", "partial"))
 
+# ── §9 execute: _describe_params binds each plugin's param map by ID, not order ──
+# describe_plugin doesn't echo back the pluginId/trackId, so association is fragile. The
+# binary now echoes engine ids — load_plugin → data.{trackId,pluginId}, describe_plugin →
+# data.trackId — and _describe_params chains pid→trackId→params (order-free, immune to a
+# reordered/dropped describe line). When the binary echoes no ids (an OLDER /Applications
+# build) it falls back to POSITIONAL association, which must still be failure-safe: a probed
+# plugin whose load fails (cracked/missing VST3) still emits an ok:false describe line, so
+# keeping EVERY describe (not just ok ones) preserves the 1:1 order with the sorted ids —
+# filtering to ok-only would shift every later map onto the WRONG pluginId.
+import teardown.render.execute as _ex  # noqa: E402
+from teardown.render.execute import _describe_params  # noqa: E402
+
+_GOOD_PARAMS = {
+    "id-good": [{"name": "Cutoff", "index": 7}, {"name": "Reso", "index": 9}],
+    "id-good2": [{"name": "Drive", "index": 3}],
+}
+
+
+def _fake_run_capture(fail_ids: set, *, echo_ids: bool = True, reorder: bool = False,
+                      drop_describe: int = 0):
+    """Mirror `Mosh --run-script`: one result line per command, IN ORDER, every command
+    (incl. failures) carrying its own `command` name. `echo_ids=True` models the binary that
+    echoes engine ids (load_plugin → data.{trackId,pluginId}, describe_plugin → data.trackId)
+    enabling id-based association; `echo_ids=False` models an OLD build (no ids → positional
+    fallback). `reorder` reverses the describe results among their slots (engine returned them
+    out of probe order); `drop_describe` omits trailing describe lines (a truncated run). A
+    load on a `fail_ids` plugin is ok:false and its describe is ok:false (cracked/missing)."""
+    def fake(binp, cmds, session_dir, timeout_s):
+        results, describe_slots = [], []
+        cur_tid = cur_pid = None
+        probe_n = described = 0
+        n_describe = sum(1 for c in cmds if c.get("command") == "describe_plugin")
+        for c in cmds:
+            name = c.get("command")
+            if name == "create_track":
+                cur_tid = f"track-{probe_n}"; probe_n += 1
+                results.append({"command": "create_track", "ok": True, "data": {"trackId": cur_tid}})
+            elif name == "load_plugin":
+                cur_pid = (c.get("args") or {}).get("pluginId")
+                ok = cur_pid not in fail_ids
+                r = {"command": "load_plugin", "ok": ok}
+                if ok and echo_ids:
+                    r["data"] = {"trackId": cur_tid, "pluginId": cur_pid}
+                results.append(r)
+            elif name == "describe_plugin":
+                described += 1
+                if drop_describe and described > n_describe - drop_describe:
+                    continue  # truncated run — this describe line is never written
+                if cur_pid in fail_ids:
+                    r = {"command": "describe_plugin", "ok": False}
+                else:
+                    data = {"params": _GOOD_PARAMS[cur_pid]}
+                    if echo_ids:
+                        data["trackId"] = cur_tid
+                    r = {"command": "describe_plugin", "ok": True, "data": data}
+                describe_slots.append(len(results))
+                results.append(r)
+            else:
+                results.append({"command": name, "ok": True})
+        if reorder:  # engine returned the describes out of probe order — id-based must still bind
+            vals = [results[i] for i in describe_slots][::-1]
+            for i, v in zip(describe_slots, vals):
+                results[i] = v
+        return results
+    return fake
+
+
+_orig_run_capture = _ex._run_capture
+try:
+    # (1) the headline case: the FIRST of two probed plugins fails load+describe. The
+    #     surviving plugin's map must stay keyed to ITS OWN pluginId; the failed one carries
+    #     no params. (Under the old dropped-ok-filter bug the survivor's map shifted off-by-one.)
+    _ex._run_capture = _fake_run_capture({"id-fail"})
+    m = _describe_params("bin", {"id-fail", "id-good"}, None, 1)  # sorted → ['id-fail','id-good']
+    check("partial-fail: surviving plugin's map is keyed to ITS pluginId",
+          m.get("id-good") == {"cutoff": 7, "reso": 9}, str(m))
+    check("partial-fail: failed plugin carries no params (not the survivor's map)",
+          m.get("id-fail", {}) == {}, str(m))
+
+    # (2) BELT-AND-SUSPENDERS: the engine returns the describe results OUT OF probe order.
+    #     id-based matching (pid→trackId→params) must still bind each map to the right plugin;
+    #     a pure positional zip would transpose the two maps.
+    _ex._run_capture = _fake_run_capture(set(), reorder=True)
+    mr = _describe_params("bin", {"id-good", "id-good2"}, None, 1)
+    check("reordered describes: id-matching keeps each map on its own plugin",
+          mr.get("id-good") == {"cutoff": 7, "reso": 9} and mr.get("id-good2") == {"drive": 3},
+          str(mr))
+
+    # (3) both succeed, in order → each pluginId gets its OWN distinct map.
+    _ex._run_capture = _fake_run_capture(set())
+    m2 = _describe_params("bin", {"id-good", "id-good2"}, None, 1)
+    check("both-ok: each pluginId gets its own param map",
+          m2.get("id-good") == {"cutoff": 7, "reso": 9} and m2.get("id-good2") == {"drive": 3},
+          str(m2))
+
+    # (4) BACK-COMPAT: an OLD binary echoing no ids → positional fallback, still failure-safe
+    #     (first-of-two fails → survivor keyed correctly via the 1:1 order with sorted ids).
+    _ex._run_capture = _fake_run_capture({"id-fail"}, echo_ids=False)
+    mo = _describe_params("bin", {"id-fail", "id-good"}, None, 1)
+    check("old-binary fallback: positional binding still keys the survivor correctly",
+          mo.get("id-good") == {"cutoff": 7, "reso": 9} and mo.get("id-fail", {}) == {}, str(mo))
+
+    # (5) OLD binary + truncated run (describe lines ≠ ids) → degrade to empty maps for every id.
+    _ex._run_capture = _fake_run_capture(set(), echo_ids=False, drop_describe=1)
+    m3 = _describe_params("bin", {"id-good", "id-good2"}, None, 1)
+    check("old-binary count-mismatch: degrades to empty maps for every id (no misalignment)",
+          m3 == {"id-good": {}, "id-good2": {}}, str(m3))
+finally:
+    _ex._run_capture = _orig_run_capture
+
 print(f"\n{'ALL PASS' if not fails else 'FAILURES: ' + ', '.join(fails)}  ({len(fails)} failure(s))")
 sys.exit(len(fails))

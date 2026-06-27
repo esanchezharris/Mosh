@@ -527,7 +527,12 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         if (fxId.isNotEmpty())
         {
             { auto* a = new DynamicObject(); a->setProperty ("trackId", tid); a->setProperty ("pluginId", fxId);
-              check (ok (cmd (ops, "load_plugin", var (a))), "load_plugin (effect) on wave track ok"); }
+              auto lr = cmd (ops, "load_plugin", var (a));
+              check (ok (lr), "load_plugin (effect) on wave track ok");
+              auto ld = lr.getProperty ("data", var());
+              check (ld.getProperty ("trackId", juce::String()).toString() == tid
+                     && ld.getProperty ("pluginId", juce::String()).toString() == fxId,
+                     "load_plugin echoes trackId+pluginId (id-based association)"); }
             int idx = externalPluginIndex (trackById (tid));
             check (idx >= 0, "effect appears in the plugin chain");
             if (idx >= 0)
@@ -540,6 +545,8 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                   auto r = cmd (ops, "describe_plugin", var (a));
                   check (ok (r), "describe_plugin ok");
                   auto data = r.getProperty ("data", var());
+                  check (data.getProperty ("trackId", juce::String()).toString() == tid,
+                         "describe_plugin echoes its trackId (id-based association)");
                   check ((int) data.getProperty ("paramCount", 0) > 0, "describe_plugin returns a param count");
                   auto* parr = data.getProperty ("params", var()).getArray();
                   check (parr != nullptr && parr->size() > 0

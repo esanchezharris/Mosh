@@ -130,13 +130,22 @@ def _resolve_plugin_id(name: str, name2id: dict) -> Optional[str]:
     return None
 
 
+def _params_map(r: dict) -> dict:
+    """describe_plugin result → {param_name_lower: index}."""
+    return {p["name"].lower(): p["index"] for p in (r.get("data") or {}).get("params", [])}
+
+
 def _describe_params(binp: str, plugin_ids: set, session_dir: Optional[str], timeout_s: int) -> dict:
     """{pluginId: {param_name_lower: index}} by loading each synth once + describe_plugin.
 
-    Association is POSITIONAL (describe_plugin doesn't echo the pluginId), so we keep EVERY
-    describe_plugin result — including ok:false (a failed load → no-plugin describe) — to
-    preserve the 1:1 order with `ids`. Filtering to ok-only would shift the zip and bind a
-    param map to the wrong plugin. ids is sorted for determinism."""
+    Association is BY ID when the binary echoes engine ids: load_plugin → data.{trackId,
+    pluginId} and describe_plugin → data.trackId, so we chain pid→trackId→params — order-free,
+    immune to a reordered/dropped describe line. When the binary echoes no ids (an older
+    build) we fall back to POSITIONAL association: keep EVERY describe_plugin result —
+    including ok:false (a failed load → no-plugin describe) — to preserve the 1:1 order with
+    `ids` (filtering to ok-only would shift the zip onto the wrong plugin); if the describe
+    count is off (a truncated/crashed run) the mapping is unsafe → degrade to empty maps. ids
+    is sorted for determinism."""
     out: dict = {}
     ids = sorted(plugin_ids)
     cmds = []
@@ -148,14 +157,26 @@ def _describe_params(binp: str, plugin_ids: set, session_dir: Optional[str], tim
             {"command": "describe_plugin", "args": {"trackId": f"${{P{k}}}", "index": 0, "limit": 1024}},
         ]
     results = _run_capture(binp, cmds, session_dir, timeout_s)
+
+    # Primary: id-based. Echoed engine ids let each param map bind to its plugin regardless of
+    # result order (belt-and-suspenders vs the positional shift).
+    pid2tid = {}
+    for r in results:
+        if r.get("command") == "load_plugin" and r.get("ok"):
+            d = r.get("data") or {}
+            if d.get("pluginId") and d.get("trackId"):
+                pid2tid[d["pluginId"]] = d["trackId"]
+    ok_desc = [r for r in results if r.get("command") == "describe_plugin" and r.get("ok")]
+    if pid2tid and ok_desc and all((r.get("data") or {}).get("trackId") for r in ok_desc):
+        tid2params = {r["data"]["trackId"]: _params_map(r) for r in ok_desc}
+        return {pid: tid2params.get(pid2tid.get(pid), {}) for pid in ids}
+
+    # Fallback: positional (older binary that doesn't echo ids).
     desc = [r for r in results if r.get("command") == "describe_plugin"]
     if len(desc) != len(ids):
-        # one describe result per probe is expected even on failure; if the count is off the
-        # positional mapping is unsafe → degrade to empty maps (params land in unresolved).
         return {pid: {} for pid in ids}
     for pid, r in zip(ids, desc):
-        out[pid] = ({p["name"].lower(): p["index"] for p in (r.get("data") or {}).get("params", [])}
-                    if r.get("ok") else {})
+        out[pid] = _params_map(r) if r.get("ok") else {}
     return out
 
 
