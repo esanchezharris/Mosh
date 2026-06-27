@@ -41,10 +41,7 @@ public:
 private:
     juce::CachedValue<float> rootValue, scaleValue, retuneValue, amountValue, rangeValue, mixValue, outputValue;
     te::AutomatableParameter::Ptr rootParam, scaleParam, retuneParam, amountParam, rangeParam, mixParam, outputParam;
-    double processSampleRate = 48000.0;
-    std::vector<float> scratchIn;
-    std::array<double, 8> synthPhase {};
-    std::array<double, 8> smoothedCorrectionCents {};
+    std::array<moshfx::AutoTuneCore, 8> cores;
     std::atomic<double> lastInputHz { 0.0 };
     std::atomic<double> lastTargetHz { 0.0 };
     std::atomic<double> lastCorrectionCents { 0.0 };

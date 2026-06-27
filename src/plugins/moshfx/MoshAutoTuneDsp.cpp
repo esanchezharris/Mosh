@@ -167,51 +167,66 @@ AutoTuneResult analyseAutoTuneBlock (const float* input, int numSamples,
     return result;
 }
 
-AutoTuneResult processAutoTuneBlock (const float* input, float* output, int numSamples,
-                                     double sampleRate, const AutoTuneSettings& settings)
+void AutoTuneCore::prepare (double newSampleRate)
 {
-    AutoTuneResult result;
-    if (input == nullptr || output == nullptr || numSamples <= 0)
-        return result;
-
-    const auto outputGain = dbToGain (settings.outputDb);
-
-    auto copyDry = [&]
-    {
-        for (int i = 0; i < numSamples; ++i)
-            output[i] = softLimit (input[i] * outputGain);
-    };
-
-    result = analyseAutoTuneBlock (input, numSamples, sampleRate, settings);
-    const auto blockSeconds = sampleRate > 0.0 ? (double) numSamples / sampleRate : 0.0;
-    result.correctionCents *= retuneCoefficient (blockSeconds, settings.retuneMs);
-    result.corrected = std::abs (result.correctionCents) > 0.05;
-
-    if (! result.corrected)
-    {
-        copyDry();
-        return result;
-    }
-
-    const auto ratio = std::pow (2.0, result.correctionCents / 1200.0);
-    const auto mix = clamp01 (settings.mix);
-    for (int i = 0; i < numSamples; ++i)
-    {
-        const auto pos = (double) i * ratio;
-        const int i0 = std::clamp ((int) std::floor (pos), 0, std::max (0, numSamples - 1));
-        const int i1 = std::min (i0 + 1, numSamples - 1);
-        const auto frac = (float) (pos - (double) i0);
-        const auto wet = input[i0] + (input[i1] - input[i0]) * frac;
-        output[i] = softLimit ((input[i] + (wet - input[i]) * mix) * outputGain);
-    }
-
-    return result;
+    sampleRate = newSampleRate > 0.0 ? newSampleRate : 48000.0;
+    reset();
 }
 
-AutoTuneResult processAutoTuneBlock (const std::vector<float>& input, std::vector<float>& output,
-                                     double sampleRate, const AutoTuneSettings& settings)
+void AutoTuneCore::reset()
 {
-    output.assign (input.size(), 0.0f);
-    return processAutoTuneBlock (input.data(), output.data(), (int) input.size(), sampleRate, settings);
+    synthPhase = 0.0;
+    smoothedCorrectionCents = 0.0;
+    synthFrequencyHz = 0.0;
+    synthAmplitude = 0.0f;
+    wetEnvelope = 0.0f;
+}
+
+AutoTuneResult AutoTuneCore::processBlock (float* samples, int numSamples, const AutoTuneSettings& settings)
+{
+    AutoTuneResult result;
+    if (samples == nullptr || numSamples <= 0)
+        return result;
+
+    result = analyseAutoTuneBlock (samples, numSamples, sampleRate, settings);
+
+    const double blockSeconds = sampleRate > 0.0 ? (double) numSamples / sampleRate : 0.0;
+    const double response = retuneCoefficient (blockSeconds, settings.retuneMs);
+    const bool engaged = result.corrected;
+
+    if (engaged)
+    {
+        smoothedCorrectionCents += (result.correctionCents - smoothedCorrectionCents) * response;
+        synthFrequencyHz = result.input.frequencyHz * std::pow (2.0, smoothedCorrectionCents / 1200.0);
+    }
+    // When unvoiced we freeze the correction and frequency and let the envelope
+    // ring the tone down — the held values keep the fade-out tail in tune.
+    result.correctionCents = smoothedCorrectionCents;
+    result.corrected = engaged && std::abs (smoothedCorrectionCents) > 0.05;
+
+    const float outputGain = dbToGain (settings.outputDb);
+    const float mix = clamp01 (settings.mix);
+
+    // Per-sample one-pole envelopes (fixed ~5 ms) so the resynthesized tone fades
+    // in/out across voiced boundaries instead of snapping. wetEnvelope gates the
+    // dry/wet blend (-> dry when idle); synthAmplitude tracks the held tone level
+    // so the tail rings down cleanly rather than jumping to zero.
+    const float fadeCoeff = (float) std::exp (-1.0 / std::max (sampleRate * 0.005, 1.0));
+    const float wetTarget = engaged ? 1.0f : 0.0f;
+    const float ampTarget = engaged ? (float) (result.input.rms * std::sqrt (2.0)) : synthAmplitude;
+    const double inc = 2.0 * kPi * synthFrequencyHz / sampleRate;
+
+    for (int i = 0; i < numSamples; ++i)
+    {
+        synthAmplitude = ampTarget + (synthAmplitude - ampTarget) * fadeCoeff;
+        wetEnvelope = wetTarget + (wetEnvelope - wetTarget) * fadeCoeff;
+        const float wet = synthAmplitude * (float) std::sin (synthPhase);
+        const float dry = samples[i];
+        samples[i] = softLimit ((dry + (wet - dry) * (mix * wetEnvelope)) * outputGain);
+        synthPhase += inc;
+        if (synthPhase >= 2.0 * kPi)
+            synthPhase -= 2.0 * kPi;
+    }
+    return result;
 }
 }
