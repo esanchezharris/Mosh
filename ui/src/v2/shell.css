@@ -631,6 +631,8 @@
 
 @media (prefers-reduced-motion: reduce) {
   .v2-shell .v2-tbtn, .v2-shell .v2-btn { transition: none; }
+  /* neutralize the hover lift too — transition:none still left the 1px jump */
+  .v2-shell .v2-tbtn:hover, .v2-shell .v2-btn:hover { transform: none; }
   .v2-shell .v2-pill .led.busy { animation: none; }
 }
 
@@ -695,3 +697,19 @@
 .v2-pdock .v2-pb-list { flex: 1 1 auto; min-height: 0; }
 /* the list rows in the dock sit on the drawer's own surface (no separate panel bg) */
 .v2-pdock .v2-pb-listhead { background: var(--v2-surface-2); }
+
+/* ─────────────────────────── KEYBOARD FOCUS RINGS ────────────────────────────
+   Every interactive control gets a visible :focus-visible ring for keyboard nav
+   (mouse/touch focus stays ringless). Outline follows the control's border-radius
+   and adds no layout shift; the 2px offset lifts it onto the surrounding surface so
+   even lime-filled controls (play, active tabs/chips) still show a clear ring. */
+.v2-shell button:focus-visible,
+.v2-shell a:focus-visible,
+.v2-shell input:focus-visible,
+.v2-shell select:focus-visible,
+.v2-shell textarea:focus-visible,
+.v2-shell [role="tab"]:focus-visible,
+.v2-shell [tabindex]:focus-visible {
+  outline: 2px solid var(--v2-accent);
+  outline-offset: 2px;
+}
