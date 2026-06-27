@@ -10,7 +10,10 @@ from typing import Optional
 from ..vision.synthgui import SYNTH_SIGNS
 
 _TEMPO = re.compile(r"(\d{2,3})\s*bpm", re.I)
-_KEY = re.compile(r"\b([A-Ga-g][#b]?)\s*[- ]?\s*(maj(?:or)?|min(?:or)?|m)\b", re.I)
+# Note letter is UPPERCASE-only (DAW key labels read as 'Am', 'F# Minor'); the mode is
+# case-insensitive via a scoped flag. Uppercase-only kills prose false-positives where the
+# bare 'm' arm matched lowercase words ("I am…"→"A minor", "dm me"→"D minor", "fm radio"→…).
+_KEY = re.compile(r"\b([A-G][#b]?)\s*[- ]?\s*((?i:maj(?:or)?|min(?:or)?|m))\b")
 
 
 def parse_tempo(text: str) -> Optional[int]:

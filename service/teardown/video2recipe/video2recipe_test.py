@@ -38,6 +38,10 @@ check("key 'F# Minor'", parse_key("Key: F# Minor") == "F# minor")
 check("key 'C maj'", parse_key("in C maj") == "C major")
 check("key 'Am' (bare minor)", parse_key("A m vibe") == "A minor" or parse_key("Am") == "A minor")
 check("no key → None", parse_key("just text") is None)
+check("key rejects English prose (uppercase-note guard)",
+      parse_key("I am at 140 BPM") is None and parse_key("dm me on insta") is None
+      and parse_key("check the fm radio") is None)
+check("key still reads uppercase DAW labels", parse_key("Am") == "A minor" and parse_key("F#m") == "F# minor")
 check("plugins finds Serum + Vital", set(parse_plugins("loaded Serum then VITAL")) == {"Serum", "Vital"})
 check("plugins empty when none", parse_plugins("no synths named") == [])
 

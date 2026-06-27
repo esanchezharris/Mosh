@@ -87,6 +87,14 @@ partial = compile_recipe(R.Recipe(elements=[R.Element(element_id="bare", role="o
 check("a content-less element → create_track + an unresolved", any(
     c["command"] == "create_track" for c in partial.commands) and any(
     u["element_id"] == "bare" for u in partial.unresolved))
+check("content-less element gets EXACTLY ONE unresolved (no double-defer)",
+      len([u for u in partial.unresolved if u["element_id"] == "bare"]) == 1,
+      str([u["issue"] for u in partial.unresolved if u["element_id"] == "bare"]))
+unavail = compile_recipe(R.Recipe(elements=[R.Element(element_id="u1", role="lead",
+                                                      synth_patch=R.SynthPatch(status="unavailable"))]))
+check("unavailable element gets EXACTLY ONE unresolved",
+      len([u for u in unavail.unresolved if u["element_id"] == "u1"]) == 1,
+      str([u["issue"] for u in unavail.unresolved if u["element_id"] == "u1"]))
 
 # ── determinism ──────────────────────────────────────────────────────────────
 import json  # noqa: E402

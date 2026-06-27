@@ -116,5 +116,17 @@ except ValueError:
     raised_noexp = True
 check("resolve: export_audio without args.file raises", raised_noexp)
 
+# ── 7. render surfaces a nonzero engine exit (no silent stale/partial-WAV scoring) ──
+with tempfile.TemporaryDirectory() as td:
+    fake = Path(td) / "fakemosh"
+    fake.write_text("#!/bin/sh\necho 'engine boom' >&2\nexit 3\n")
+    fake.chmod(0o755)
+    raised_exit = False
+    try:
+        Oracle(bin_path=str(fake)).render([{"command": "create_track", "args": {}}])
+    except RuntimeError as e:
+        raised_exit = "exit 3" in str(e)
+    check("render() raises on a nonzero engine exit (exit 3)", raised_exit)
+
 print(f"\n{'ALL PASS' if not fails else 'FAILURES: ' + ', '.join(fails)}  ({len(fails)} failure(s))")
 sys.exit(len(fails))

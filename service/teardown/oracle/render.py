@@ -84,10 +84,16 @@ class Oracle:
                 for c in cmds:
                     f.write(json.dumps(c) + "\n")
             env = dict(os.environ, MOSH_RUN_SCRIPT=script)
-            subprocess.run([self.bin, "--run-script"], env=env, capture_output=True,
-                           text=True, timeout=self.timeout_s, check=False)
-            if not out.exists():
-                raise RuntimeError("render produced no output wav (script must reach export_audio)")
+            proc = subprocess.run([self.bin, "--run-script"], env=env, capture_output=True,
+                                  text=True, timeout=self.timeout_s, check=False)
+            # --run-script returns the command-failure count as its exit code: nonzero means a
+            # command in the rollout failed → the render is invalid, don't silently score a
+            # stale/partial WAV (reward corruption for the RL oracle).
+            if proc.returncode != 0:
+                raise RuntimeError(f"Mosh render failed (exit {proc.returncode}): "
+                                   f"{(proc.stderr or '').strip()[-400:]!r}")
+            if not out.exists() or out.stat().st_size == 0:
+                raise RuntimeError("render produced no/empty output wav (script must reach export_audio)")
             data, sr = sf.read(str(out), dtype="float32", always_2d=True)
             return data.mean(axis=1).astype(np.float32), sr
         finally:

@@ -131,8 +131,9 @@ def compile_recipe(recipe) -> CompileResult:
         elif sp.status in ("unavailable", "unknown") and not placed:
             defer(_u("no sample/patch — Tier-B render-layer fallback", el.element_id,
                      "execute: create_render_layer + set_render_param on a placeholder clip"))
-
-        if not placed and not (sp.plugin.name):
+        elif not placed and not sp.plugin.name:
+            # chained (elif) so an unplaced element gets exactly ONE deferral, never both this
+            # and the Tier-B fallback above.
             defer(_u("element has no compilable content", el.element_id,
                      "fill sample_match / midi / synth_patch"))
 
