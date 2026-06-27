@@ -20,6 +20,8 @@ SUITE = [
     ("render-and-compare oracle (§6)", HERE / "oracle" / "oracle_test.py"),
     ("render compiler (§9)", HERE / "render" / "compile_test.py"),
     ("sourcing (§3)", HERE / "sourcing" / "sourcing_test.py"),
+    ("vision detectors (§2)", HERE / "vision" / "vision_test.py"),
+    ("video→skeleton (§4)", HERE / "video2recipe" / "video2recipe_test.py"),
 ]
 
 fails: list[str] = []

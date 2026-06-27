@@ -19,9 +19,11 @@ HERE="$(pwd)"
 
 WITH_CLAP=0
 WITH_SOURCING=0
+WITH_VIDEO=0
 for a in "$@"; do
   [[ "$a" == "--with-clap" ]] && WITH_CLAP=1
   [[ "$a" == "--with-sourcing" ]] && WITH_SOURCING=1
+  [[ "$a" == "--with-video" ]] && WITH_VIDEO=1
 done
 
 say()  { printf '  %s\n' "$*"; }
@@ -79,6 +81,20 @@ if [[ "$WITH_SOURCING" == "1" ]]; then
   else
     "$PYBIN" -m pip install --quiet yt-dlp
   fi
+fi
+
+# 4c. Optional video→recipe (§2/§4): CV + OCR + STT + scene detection. Needs the system
+#     binaries ffmpeg + tesseract (brew install ffmpeg tesseract) for frame I/O + OCR.
+if [[ "$WITH_VIDEO" == "1" ]]; then
+  say "installing video stack (opencv/pytesseract/scenedetect/faster-whisper/Pillow) …"
+  VID_PKGS=(opencv-python-headless pytesseract scenedetect faster-whisper Pillow)
+  if command -v uv >/dev/null 2>&1; then
+    VIRTUAL_ENV="$VENV" uv pip install --python "$PYBIN" --quiet "${VID_PKGS[@]}"
+  else
+    "$PYBIN" -m pip install --quiet "${VID_PKGS[@]}"
+  fi
+  command -v ffmpeg   >/dev/null 2>&1 || say "  ⚠ ffmpeg not on PATH — brew install ffmpeg"
+  command -v tesseract >/dev/null 2>&1 || say "  ⚠ tesseract not on PATH — brew install tesseract"
 fi
 
 # 5. Sanity: the venv must import the baseline stack.
