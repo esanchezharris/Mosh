@@ -48,10 +48,28 @@ double nearestScaleFrequency (double frequencyHz, int rootSemitone, ScaleKind sc
 double retuneCoefficient (double blockSeconds, float retuneMs);
 AutoTuneResult analyseAutoTuneBlock (const float* input, int numSamples,
                                      double sampleRate, const AutoTuneSettings& settings);
-AutoTuneResult processAutoTuneBlock (const std::vector<float>& input, std::vector<float>& output,
-                                     double sampleRate, const AutoTuneSettings& settings);
-AutoTuneResult processAutoTuneBlock (const float* input, float* output, int numSamples,
-                                     double sampleRate, const AutoTuneSettings& settings);
+
+// The live AutoTune voice: one per channel, stateful (persistent synth phase,
+// retune-smoothed correction, and a one-pole wet envelope so the resynthesized
+// tone fades in/out across voiced boundaries). processBlock works in place over
+// the whole block — analysis reads the block before any sample is written, so
+// there is no scratch buffer and no block-size cap. This is the single core the
+// plugin runs and the tests exercise.
+class AutoTuneCore
+{
+public:
+    void prepare (double newSampleRate);
+    void reset();
+    AutoTuneResult processBlock (float* samples, int numSamples, const AutoTuneSettings& settings);
+
+private:
+    double sampleRate = 48000.0;
+    double synthPhase = 0.0;
+    double smoothedCorrectionCents = 0.0;
+    double synthFrequencyHz = 0.0;
+    float synthAmplitude = 0.0f;
+    float wetEnvelope = 0.0f;
+};
 
 struct OTTSettings
 {

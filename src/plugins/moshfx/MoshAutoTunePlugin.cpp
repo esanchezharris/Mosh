@@ -39,11 +39,6 @@ namespace
         s.outputDb = output;
         return s;
     }
-
-    float audioGainFromDb (float db)
-    {
-        return std::pow (10.0f, db / 20.0f);
-    }
 }
 
 MoshAutoTunePlugin::MoshAutoTunePlugin (te::PluginCreationInfo info) : te::Plugin (info)
@@ -88,17 +83,15 @@ MoshAutoTunePlugin::~MoshAutoTunePlugin()
 
 void MoshAutoTunePlugin::initialise (const te::PluginInitialisationInfo& info)
 {
-    processSampleRate = info.sampleRate > 0.0 ? info.sampleRate : 48000.0;
-    const auto block = jmax (info.blockSizeSamples, 512);
-    scratchIn.assign ((size_t) jmin (block, 8192), 0.0f);
-    synthPhase.fill (0.0);
-    smoothedCorrectionCents.fill (0.0);
+    const auto sr = info.sampleRate > 0.0 ? info.sampleRate : 48000.0;
+    for (auto& c : cores)
+        c.prepare (sr);
 }
 
 void MoshAutoTunePlugin::deinitialise()
 {
-    scratchIn.clear();
-    smoothedCorrectionCents.fill (0.0);
+    for (auto& c : cores)
+        c.reset();
 }
 
 void MoshAutoTunePlugin::applyToBuffer (const te::PluginRenderContext& fc)
@@ -107,33 +100,15 @@ void MoshAutoTunePlugin::applyToBuffer (const te::PluginRenderContext& fc)
     if (buf == nullptr || ! isEnabled())
         return;
 
-    const int n = jmin (fc.bufferNumSamples, (int) scratchIn.size());
-    if (n <= 0)
-        return;
-
     const auto settings = autoTuneSettings (rootValue.get(), scaleValue.get(), retuneValue.get(),
                                             amountValue.get(), rangeValue.get(), mixValue.get(),
                                             outputValue.get());
-    const int start = fc.bufferStartSample;
-    const int channels = jmin (buf->getNumChannels(), 8);
+    const int channels = jmin (buf->getNumChannels(), (int) cores.size());
 
     for (int ch = 0; ch < channels; ++ch)
     {
-        auto* data = buf->getWritePointer (ch);
-        for (int i = 0; i < n; ++i)
-            scratchIn[(size_t) i] = data[start + i];
-
-        auto result = moshfx::analyseAutoTuneBlock (scratchIn.data(), n, processSampleRate, settings);
-        const auto blockSeconds = processSampleRate > 0.0 ? (double) n / processSampleRate : 0.0;
-        const auto response = moshfx::retuneCoefficient (blockSeconds, settings.retuneMs);
-        const auto outputGain = audioGainFromDb (settings.outputDb);
-        const auto mix = jlimit (0.0f, 1.0f, settings.mix);
-        auto& smoothed = smoothedCorrectionCents[(size_t) ch];
-
-        smoothed = result.corrected ? smoothed + (result.correctionCents - smoothed) * response : 0.0;
-        result.correctionCents = smoothed;
-        result.corrected = std::abs (result.correctionCents) > 0.05;
-
+        const auto result = cores[(size_t) ch].processBlock (buf->getWritePointer (ch, fc.bufferStartSample),
+                                                             fc.bufferNumSamples, settings);
         if (ch == 0)
         {
             lastInputHz.store (result.input.frequencyHz);
@@ -141,28 +116,6 @@ void MoshAutoTunePlugin::applyToBuffer (const te::PluginRenderContext& fc)
             lastCorrectionCents.store (result.correctionCents);
             lastConfidence.store ((float) result.input.confidence);
         }
-
-        if (! result.corrected)
-        {
-            for (int i = 0; i < n; ++i)
-                data[start + i] = jlimit (-0.999f, 0.999f, scratchIn[(size_t) i] * outputGain);
-            continue;
-        }
-
-        const auto correctedHz = result.input.frequencyHz * std::pow (2.0, result.correctionCents / 1200.0);
-        const auto inc = MathConstants<double>::twoPi * correctedHz / processSampleRate;
-        const auto amp = (float) (result.input.rms * 1.4142135623730951);
-        auto phase = synthPhase[(size_t) ch];
-        for (int i = 0; i < n; ++i)
-        {
-            const auto wet = amp * (float) std::sin (phase);
-            const auto dry = scratchIn[(size_t) i];
-            data[start + i] = jlimit (-0.999f, 0.999f, (dry + (wet - dry) * mix) * outputGain);
-            phase += inc;
-            if (phase >= MathConstants<double>::twoPi)
-                phase -= MathConstants<double>::twoPi;
-        }
-        synthPhase[(size_t) ch] = phase;
     }
 }
 
