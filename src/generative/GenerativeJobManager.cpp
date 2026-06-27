@@ -363,4 +363,41 @@ juce::var GenerativeJobManager::analyzeLyrics (const juce::var& spec)
     return {};
 }
 
+int GenerativeJobManager::styleCorpusAdd (const juce::StringArray& lines, const juce::String& source)
+{
+    // NON-SPAWNING contract: only POST if the service is ALREADY up. isHealthy() pings
+    // /health and never spawns (only ensureServiceRunning does) — so when the service is
+    // down (e.g. during --selftest) this is a pure no-op. Do NOT route this through
+    // ensureServiceRunning or any spawn path.
+    if (lines.isEmpty() || ! isHealthy())
+        return -1;
+
+    Array<var> arr;
+    for (auto& l : lines)
+        if (l.trim().isNotEmpty())
+            arr.add (l);
+    if (arr.isEmpty())
+        return -1;
+
+    auto* body = new DynamicObject();
+    body->setProperty ("action", "add");
+    body->setProperty ("lines", arr);
+    body->setProperty ("source", source.isNotEmpty() ? source : juce::String ("accept"));
+
+    auto r = httpPost ("/style_corpus", var (body));   // 10s timeout; already healthy
+    if (! (bool) r.getProperty ("ok", false))
+        return -1;
+    return (int) r.getProperty ("lines", -1);          // post-add corpus total
+}
+
+int GenerativeJobManager::styleCorpusStats()
+{
+    if (! isHealthy())                                 // NON-SPAWNING (counts only)
+        return -1;
+    auto* body = new DynamicObject();
+    body->setProperty ("action", "stats");
+    auto r = httpPost ("/style_corpus", var (body));
+    return (bool) r.getProperty ("ok", false) ? (int) r.getProperty ("lines", -1) : -1;
+}
+
 } // namespace mosh

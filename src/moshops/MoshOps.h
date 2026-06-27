@@ -83,6 +83,9 @@ private:
     // LYR-L1 — precise per-line phonology (service; not undoable), analysis lands on the
     // line as a transient JSON blob → snapshot → the flow visualizer.
     juce::var cmdAnalyzeLyrics       (const juce::var& args);
+    // §7 — read-only corpus size for the "it's learning my voice" cue (non-undoable,
+    // non-agent, NON-SPAWNING; counts only — the backend-only safety wall).
+    juce::var cmdGetLyricCorpusStats (const juce::var& args);
     // ANN-001 — authored timeline annotations (MOSH_ANNOTATIONS tree; undoable +
     // multiplayer-broadcast). create self-broadcasts its resolved cross-peer id.
     juce::var cmdCreateAnnotation (const juce::var& args);

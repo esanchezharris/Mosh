@@ -762,3 +762,12 @@
   cursor: pointer;
 }
 .v2-lyric-stylebias input { accent-color: var(--v2-accent); }
+.v2-lyric-corpus {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--v2-accent-soft);
+  color: var(--v2-accent);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+}

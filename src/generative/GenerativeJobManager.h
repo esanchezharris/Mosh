@@ -76,6 +76,20 @@ public:
         or {} on failure (service down). */
     juce::var analyzeLyrics (const juce::var& spec);
 
+    /** §7 style-RAG flywheel — push finalized lyric line(s) into the PERSISTED cross-song
+        voice corpus (POST /style_corpus action:add). **NON-SPAWNING + best-effort**: probes
+        isHealthy() first and silently no-ops (returns -1) when the service is DOWN — it NEVER
+        calls ensureServiceRunning(), so it can be fired from `accept_lyric_proposal` without
+        spawning the service (keeps --selftest hermetic) and without blocking accept. Returns
+        the corpus line count after the add, or -1 if unreachable / failed. Swallows failures;
+        safe on a detached background thread. */
+    int styleCorpusAdd (const juce::StringArray& lines, const juce::String& source);
+
+    /** §7 — corpus size for a UI readout (POST /style_corpus action:stats). NON-SPAWNING
+        (isHealthy()-gated); returns -1 when the service is down. Counts only — never the
+        content (the backend-only safety wall). */
+    int styleCorpusStats();
+
     juce::String serviceBuild() const { return svcBuild; }
 
 private:

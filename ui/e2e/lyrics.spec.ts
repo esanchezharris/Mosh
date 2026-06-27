@@ -147,3 +147,16 @@ test("the style-RAG 'Sound like me' opt-in toggles on", async ({ page }) => {
   await expect(box).toBeChecked();
   await expect(page.getByTestId("v2-error")).toHaveCount(0);
 });
+
+test("accepting a proposal grows the 'in your voice' corpus count", async ({ page }) => {
+  await bootV2(page);
+  await openLyrics(page);
+  await seedGappedLine(page);
+  // No corpus chip before any accept.
+  await expect(page.getByTestId("lyric-corpus-count")).toHaveCount(0);
+  await page.getByTestId("lyric-finish").click();
+  await page.getByTestId("lyric-accept-0-0").click();
+  // The accept auto-accumulates → the readout appears.
+  await expect(page.getByTestId("lyric-corpus-count")).toContainText("in your voice");
+  await expect(page.getByTestId("v2-error")).toHaveCount(0);
+});
