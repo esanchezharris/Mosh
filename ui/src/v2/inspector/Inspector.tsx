@@ -11,6 +11,7 @@ import { useShell, type InspectorTab } from "../shellState";
 import { Rack, GenDrawer } from "../../ui/Dock";
 import { deriveTakeLanes } from "../../ui/takeLanes";
 import { useDrumWindow } from "../../ui/dock/useFloatingWindow";
+import { clipInspectorModel, GAIN_MIN_DB, GAIN_MAX_DB } from "./clipInspector";
 import type { Clip, Track } from "../../types";
 
 export function Inspector() {
@@ -30,6 +31,7 @@ export function Inspector() {
 
   const tabs: { id: InspectorTab; label: string }[] = [
     { id: "mix", label: "Mix" },
+    ...(clip ? [{ id: "clip" as const, label: "Clip" }] : []),
     { id: "fx", label: "FX" },
     { id: "gen", label: "Gen" },
     ...(isMidi ? [{ id: "midi" as const, label: "MIDI" }] : []),
@@ -48,6 +50,7 @@ export function Inspector() {
       </div>
       <div className="v2-insp-body" data-testid="v2-insp-body">
         {active === "mix" && <MixTab track={track} />}
+        {active === "clip" && clip && <ClipTab clip={clip} />}
         {active === "fx" && <Rack track={track} />}
         {active === "gen" && <GenDrawer track={track} selectedClipId={selectedClipId ?? undefined} />}
         {active === "midi" && clip && <MidiTab clip={clip} drum={track.type === "drum"} />}
@@ -76,6 +79,56 @@ function MixTab({ track }: { track: Track }) {
       <div className="v2-mix-btns">
         <button className={track.mute ? "on" : ""} onClick={() => void exec("set_track_mute", { trackId: track.id, mute: !track.mute })}>Mute</button>
         <button className={track.solo ? "on" : ""} onClick={() => void exec("set_track_solo", { trackId: track.id, solo: !track.solo })}>Solo</button>
+      </div>
+    </div>
+  );
+}
+
+// G4a — per-clip inspector: rename / mute / gain, each a single MoshOps command via
+// the pure clipInspectorModel. Gain is shown only for wave (audio) clips, matching the
+// backend (set_clip_gain rejects non-audio clips).
+function ClipTab({ clip }: { clip: Clip }) {
+  const exec = useStore((s) => s.exec);
+  const m = clipInspectorModel(clip);
+  const run = (cmd: { command: string; args: Record<string, unknown> } | null) => {
+    if (cmd) void exec(cmd.command, cmd.args);
+  };
+  return (
+    <div className="v2-mix" data-testid="v2-clip-inspector">
+      <label className="v2-field">
+        <span>Name</span>
+        {/* commit on blur / Enter so we emit one rename_clip per edit, not per keystroke */}
+        <input
+          type="text"
+          data-testid="v2-clip-name"
+          defaultValue={m.name}
+          key={clip.id + ":" + m.name}
+          onBlur={(e) => { if (e.target.value !== m.name) run(m.rename(e.target.value)); }}
+          onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+        />
+      </label>
+      {m.canSetGain && (
+        <label className="v2-field">
+          <span>Gain</span>
+          <input
+            type="range"
+            data-testid="v2-clip-gain"
+            min={GAIN_MIN_DB}
+            max={GAIN_MAX_DB}
+            step={0.5}
+            value={m.gainDb}
+            onChange={(e) => run(m.setGain(Number(e.target.value)))}
+          />
+          <span className="v2-val">{m.gainDb.toFixed(1)}</span>
+        </label>
+      )}
+      <div className="v2-mix-btns">
+        <button
+          className={m.muted ? "on" : ""}
+          data-testid="v2-clip-mute"
+          aria-pressed={m.muted}
+          onClick={() => run(m.toggleMute())}
+        >Mute</button>
       </div>
     </div>
   );

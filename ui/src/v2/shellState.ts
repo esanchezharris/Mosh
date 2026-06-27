@@ -6,7 +6,7 @@
 
 import { create } from "zustand";
 
-export type InspectorTab = "mix" | "fx" | "gen" | "midi" | "takes";
+export type InspectorTab = "mix" | "clip" | "fx" | "gen" | "midi" | "takes";
 export type SectionZoom = "8b" | "16b" | "full";
 
 interface ShellState {
@@ -33,9 +33,11 @@ export const useShell = create<ShellState>((set) => ({
   sectionZoom: "16b",
   activityOpen: false,
 
-  // Selecting a clip opens the inspector; deselecting leaves it as-is (the user can
-  // pin/close it explicitly). Track selection is NOT here — route it through useStore.
-  setSelectedClip: (id) => set(id ? { selectedClipId: id, inspectorOpen: true } : { selectedClipId: null }),
+  // Selecting a clip opens the inspector AND focuses the per-clip Clip tab (G4a —
+  // rename/mute/gain) so the controls are immediately reachable; deselecting leaves it
+  // as-is (the user can pin/close it explicitly). Track selection is NOT here — route
+  // it through useStore.
+  setSelectedClip: (id) => set(id ? { selectedClipId: id, inspectorOpen: true, inspectorTab: "clip" } : { selectedClipId: null }),
   setInspectorTab: (t) => set({ inspectorTab: t }),
   setInspectorOpen: (b) => set({ inspectorOpen: b }),
   setRailCollapsed: (b) => set({ railCollapsed: b }),

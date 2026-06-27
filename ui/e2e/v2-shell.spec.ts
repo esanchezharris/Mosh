@@ -86,6 +86,47 @@ test("right-click → split increases the clip count", async ({ page }) => {
   await expect(page.getByTestId("v2-clip")).toHaveCount(before + 1);
 });
 
+test("clip inspector: selecting a clip exposes rename / mute / gain (G4a)", async ({ page }) => {
+  await bootV2(page);
+  // The seed's last clip is the Keys track's wave clip ("chords") — gain applies only to
+  // audio clips, so target a wave clip to exercise the full rename/mute/gain set.
+  const wave = page.getByTestId("v2-clip").last();
+  await wave.click();
+
+  // Selecting a clip opens the inspector AND focuses the Clip tab.
+  await expect(page.getByTestId("v2-insp-tab-clip")).toBeVisible();
+  const insp = page.getByTestId("v2-clip-inspector");
+  await expect(insp).toBeVisible();
+
+  // Rename → rename_clip; the clip's title reflects the new name after the snapshot.
+  const name = insp.getByTestId("v2-clip-name");
+  await name.fill("Verse chords");
+  await name.press("Enter");
+  await expect(page.getByTestId("v2-clip").last()).toHaveAttribute("title", "Verse chords");
+
+  // Mute toggle → set_clip_mute; the button reflects the pressed state.
+  const mute = insp.getByTestId("v2-clip-mute");
+  await expect(mute).toHaveAttribute("aria-pressed", "false");
+  await mute.click();
+  await expect(insp.getByTestId("v2-clip-mute")).toHaveAttribute("aria-pressed", "true");
+
+  // Gain slider is present for the wave clip → set_clip_gain (no v2-error surfaced).
+  await expect(insp.getByTestId("v2-clip-gain")).toBeVisible();
+  await expect(page.getByTestId("v2-error")).toHaveCount(0);
+});
+
+test("clip inspector: gain is hidden for a MIDI clip (G4a)", async ({ page }) => {
+  await bootV2(page);
+  // The first clip is the Drums track's MIDI clip — set_clip_gain rejects non-audio, so
+  // the gain control must not be offered.
+  await page.getByTestId("v2-clip").first().click();
+  const insp = page.getByTestId("v2-clip-inspector");
+  await expect(insp).toBeVisible();
+  await expect(insp.getByTestId("v2-clip-name")).toBeVisible();
+  await expect(insp.getByTestId("v2-clip-mute")).toBeVisible();
+  await expect(insp.getByTestId("v2-clip-gain")).toHaveCount(0);
+});
+
 test("the agent toast appears on a command and self-dismisses", async ({ page }) => {
   await bootV2(page);
   await page.getByTestId("agent-input").fill("play");
