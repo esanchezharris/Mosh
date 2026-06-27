@@ -65,3 +65,30 @@ Leverage order: stranded-backend UI wiring first (G5/G6/G8/G9/G3 — cheap), the
 absences (G14 gain-undo, G1 export range/tail, G7 stems, G4 clip inspector+fades, G2
 record UX/count-in), then nice-tier (G11/G13/G10/G12). G14 was **discovered** by the
 conformance harness (set_track_volume/pan bypass the UndoManager — undo doesn't restore).
+
+
+## De-slop campaign findings
+
+These items came from the 2026-06-26 read-only native/UI/service/scripts/verification
+audit. Only PR-sized, gate-verifiable findings are `ready`; gate/rulebook/deploy
+changes are `needs-human` because the loop must not silently rewrite its own controls.
+
+| order | id | item | class | size | status |
+|---|---|---|---|---|---|
+| 100 | AL-010 | Route live multiplayer commits through the MoshOps seam | native | M | ready |
+| 110 | AL-011 | Cover multiplayer lock-classifier drift | native | S | ready |
+| 120 | AL-012 | Reject WebBridge UI resource traversal | native | S | ready |
+| 130 | AL-013 | Return the replaced training source index | native | S | ready |
+| 140 | AL-014 | Reject malformed training registry imports | cheap | S | ready |
+| 150 | AL-015 | Preserve corrupt training state diagnostics | cheap | M | ready |
+| 160 | AL-016 | Stream training source SHA-256 hashing | native | S | ready |
+| 170 | AL-017 | Make bridge.mock fail closed for unhandled mutating commands | cheap | S | ready |
+| 180 | AL-018 | Unify duplicated UI project action dispatch | cheap | M | ready |
+| 190 | AL-019 | Remove CommandLogTool render-time side effects | cheap | S | ready |
+| 200 | AL-020 | Fail mp-live-smoke on PARTIAL | cheap | S | ready |
+| 210 | AL-021 | Harden auto-loop de-slop review and gate artifacts | cheap | M | needs-human |
+| 220 | AL-022 | Add RAVE load diagnostics without changing command contracts | native | M | ready |
+| 230 | AL-023 | Make deploy replacement staged and non-destructive | native | M | needs-human |
+| 240 | AL-024 | Stop default provider-key bundling during deploy | native | M | needs-human |
+| 250 | AL-025 | Fail Anira self-containment on install_name_tool errors | native | M | needs-human |
+| 260 | AL-026 | Repair installed-app gate blockers | native | M | needs-human |
