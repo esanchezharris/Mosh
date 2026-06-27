@@ -341,7 +341,8 @@
   display: grid; place-items: center; font-size: 12px; line-height: 1; border: none; cursor: pointer;
   background: transparent; color: var(--v2-faint); opacity: 0; transition: opacity 90ms linear, color 90ms linear;
 }
-.v2-seg:hover .v2-seg-rm { opacity: 1; }
+.v2-seg:hover .v2-seg-rm, .v2-seg:focus-within .v2-seg-rm,
+.v2-seg-rm:focus-visible { opacity: 1; }
 .v2-seg-rm:hover { color: var(--v2-accent); background: var(--v2-surface-2); }
 .v2-seg.editing .v2-seg-rm { display: none; }
 /* ghost "add section" chip, parked just after the last section (scrolls with content) */
@@ -672,7 +673,8 @@
 .v2-pb-meta { flex: 1 1 auto; color: var(--v2-faint); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .v2-pb-star { flex: 0 0 auto; width: 30px; height: 30px; border: none; background: transparent; color: var(--v2-faint);
   font-size: 14px; cursor: pointer; opacity: 0; transition: opacity 90ms linear, color 90ms linear; }
-.v2-pb-row:hover .v2-pb-star, .v2-pb-star.on { opacity: 1; }
+.v2-pb-row:hover .v2-pb-star, .v2-pb-row:focus-within .v2-pb-star,
+.v2-pb-star:focus-visible, .v2-pb-star.on { opacity: 1; }
 .v2-pb-star.on { color: var(--v2-accent); }
 .v2-pb-star:hover { color: var(--v2-accent); }
 @media (prefers-reduced-motion: reduce) {
