@@ -84,6 +84,27 @@ def _sketch_available() -> bool:
     return os.path.isfile(_sketch_py())
 
 
+def _teardown_py() -> str:
+    """The dedicated teardown venv's python (set by setup-teardown.sh via .teardown.env
+    -> TEARDOWN_PY), else the conventional default path. The drum matcher's baseline
+    needs numpy/scipy/soundfile/librosa; CLAP/faiss are optional within the same venv."""
+    env = os.environ.get("TEARDOWN_PY", "").strip()
+    return env or os.path.join(SERVICE_DIR, "teardown", ".venv", "bin", "python")
+
+
+def _teardown_available() -> bool:
+    """True when the teardown venv exists (checked live). /teardown/* surface deeper
+    import errors from the subprocess itself."""
+    return os.path.isfile(_teardown_py())
+
+
+def _teardown_index_dir() -> str:
+    """Where the one-shot index lives (TEARDOWN_INDEX_DIR), else a default under the
+    teardown dir."""
+    env = os.environ.get("TEARDOWN_INDEX_DIR", "").strip()
+    return env or os.path.join(SERVICE_DIR, "teardown", ".index")
+
+
 def _colorrack_hash() -> str:
     try:
         from colors import runtime as CR
@@ -645,6 +666,85 @@ class Handler(BaseHTTPRequestHandler):
             except (json.JSONDecodeError, ValueError):
                 tail = (proc.stderr or "").strip()[-400:]
                 self._send(500, {"ok": False, "error": f"sketch failed: {tail or 'no output'}"})
+                return
+            self._send(200 if payload.get("ok") else 500, payload)
+        elif path == "/teardown/match":
+            # Drum-sample vector match (§1): find the owner's nearest one-shots to a
+            # query clip, run as a subprocess under the dedicated teardown venv so its
+            # deps (librosa/numpy, optionally CLAP/faiss) stay isolated. Synchronous;
+            # a warm query is well under a second.
+            input_wav = data.get("inputWav", "")
+            role = str(data.get("role", "") or "")
+            try:
+                k = int(data.get("k", 5) or 5)
+            except (TypeError, ValueError):
+                k = 5
+            index_dir = data.get("index", "") or _teardown_index_dir()
+            if not input_wav or not os.path.exists(input_wav):
+                self._send(400, {"ok": False, "error": "inputWav missing or not found"})
+                return
+            py = _teardown_py()
+            if not os.path.isfile(py):
+                self._send(503, {"ok": False, "error": "teardown_unavailable "
+                                 "(run service/teardown/setup-teardown.sh)"})
+                return
+            if not os.path.isdir(index_dir):
+                self._send(409, {"ok": False, "error": "index_not_built "
+                                 "(POST /teardown/index first)"})
+                return
+            cli = os.path.join(SERVICE_DIR, "teardown", "drummatch", "cli.py")
+            margs = [py, cli, "match", "--index", index_dir, "--audio", input_wav, "--k", str(k)]
+            if role:
+                margs += ["--role", role]
+            try:
+                proc = subprocess.run(margs, capture_output=True, text=True, timeout=60)
+            except subprocess.TimeoutExpired:
+                self._send(504, {"ok": False, "error": "sample match timed out"})
+                return
+            except OSError as e:  # bad interpreter / unexecutable cli / spawn failure
+                self._send(500, {"ok": False, "error": f"sample match failed to start: {e}"})
+                return
+            out = (proc.stdout or "").strip()
+            try:
+                payload = json.loads(out)
+            except (json.JSONDecodeError, ValueError):
+                tail = (proc.stderr or "").strip()[-400:]
+                self._send(500, {"ok": False, "error": f"sample match failed: {tail or 'no output'}"})
+                return
+            self._send(200 if payload.get("ok") else 500, payload)
+        elif path == "/teardown/index":
+            # Build/refresh the one-shot index over a library root (§1). Synchronous with
+            # a generous cap; a very large library should move to the async job path later.
+            library = data.get("library", "")
+            out_dir = data.get("out", "") or _teardown_index_dir()
+            embedder = data.get("embedder", "engineered")
+            if embedder not in ("engineered", "clap"):
+                embedder = "engineered"
+            if not library or not os.path.isdir(library):
+                self._send(400, {"ok": False, "error": "library missing or not a directory"})
+                return
+            py = _teardown_py()
+            if not os.path.isfile(py):
+                self._send(503, {"ok": False, "error": "teardown_unavailable "
+                                 "(run service/teardown/setup-teardown.sh)"})
+                return
+            cli = os.path.join(SERVICE_DIR, "teardown", "drummatch", "cli.py")
+            try:
+                proc = subprocess.run([py, cli, "build", "--library", library,
+                                       "--out", out_dir, "--embedder", embedder],
+                                      capture_output=True, text=True, timeout=900)
+            except subprocess.TimeoutExpired:
+                self._send(504, {"ok": False, "error": "index build timed out"})
+                return
+            except OSError as e:  # bad interpreter / unexecutable cli / spawn failure
+                self._send(500, {"ok": False, "error": f"index build failed to start: {e}"})
+                return
+            out = (proc.stdout or "").strip()
+            try:
+                payload = json.loads(out)
+            except (json.JSONDecodeError, ValueError):
+                tail = (proc.stderr or "").strip()[-400:]
+                self._send(500, {"ok": False, "error": f"index build failed: {tail or 'no output'}"})
                 return
             self._send(200 if payload.get("ok") else 500, payload)
         elif path == "/training/submit" or path == "/training/jobs":

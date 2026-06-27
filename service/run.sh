@@ -32,6 +32,10 @@ export PYTHONDONTWRITEBYTECODE="${PYTHONDONTWRITEBYTECODE:-1}"
 # (written by transform/setup-transform.sh) exports TRANSFORM_PY + RAVE_MODEL_DIR.
 # Absent → the `transform` adapter falls back to the deterministic fake (Route B).
 [[ -f transform/.transform.env ]] && source ./transform/.transform.env
+# Teardown (drum-sample match, §1) lives in its own venv; .teardown.env (written by
+# teardown/setup-teardown.sh) exports TEARDOWN_PY [+ TEARDOWN_INDEX_DIR]. Absent →
+# /teardown/* degrade gracefully to 503 teardown_unavailable.
+[[ -f teardown/.teardown.env ]] && source ./teardown/.teardown.env
 # Phase-4 SFT lane lives in its own mlx-lm venv; .sft.env (written by
 # sft/setup-sft.sh) exports SFT_PY for the trainer CLI. Absent → the SFT lane is
 # simply unavailable; the rest of the service is unaffected.

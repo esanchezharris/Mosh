@@ -1,0 +1,679 @@
+{
+  "$defs": {
+    "Alternate": {
+      "additionalProperties": false,
+      "properties": {
+        "distance": {
+          "default": 0.0,
+          "minimum": 0.0,
+          "title": "Distance",
+          "type": "number"
+        },
+        "path": {
+          "default": "",
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "title": "Alternate",
+      "type": "object"
+    },
+    "Arrangement": {
+      "additionalProperties": false,
+      "properties": {
+        "sections": {
+          "items": {
+            "$ref": "#/$defs/Section"
+          },
+          "title": "Sections",
+          "type": "array"
+        }
+      },
+      "title": "Arrangement",
+      "type": "object"
+    },
+    "Element": {
+      "additionalProperties": false,
+      "properties": {
+        "audio_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Audio Ref"
+        },
+        "confidence": {
+          "default": 0.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "element_id": {
+          "title": "Element Id",
+          "type": "string"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/Evidence"
+          },
+          "title": "Evidence",
+          "type": "array"
+        },
+        "label": {
+          "default": "",
+          "title": "Label",
+          "type": "string"
+        },
+        "midi": {
+          "$ref": "#/$defs/Midi"
+        },
+        "role": {
+          "$ref": "#/$defs/Role",
+          "default": "other"
+        },
+        "sample_match": {
+          "$ref": "#/$defs/SampleMatch"
+        },
+        "synth_patch": {
+          "$ref": "#/$defs/SynthPatch"
+        }
+      },
+      "title": "Element",
+      "type": "object"
+    },
+    "Evidence": {
+      "additionalProperties": false,
+      "properties": {
+        "ocr_text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ocr Text"
+        },
+        "ref": {
+          "default": "",
+          "title": "Ref",
+          "type": "string"
+        },
+        "t_s": {
+          "default": 0.0,
+          "minimum": 0.0,
+          "title": "T S",
+          "type": "number"
+        },
+        "type": {
+          "default": "screenshot",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "title": "Evidence",
+      "type": "object"
+    },
+    "License": {
+      "enum": [
+        "youtube",
+        "creativeCommon",
+        "unknown"
+      ],
+      "title": "License",
+      "type": "string"
+    },
+    "Meta": {
+      "additionalProperties": false,
+      "properties": {
+        "daw": {
+          "$ref": "#/$defs/MetaField"
+        },
+        "key": {
+          "$ref": "#/$defs/MetaField"
+        },
+        "tempo_bpm": {
+          "$ref": "#/$defs/MetaField"
+        },
+        "time_signature": {
+          "$ref": "#/$defs/MetaField"
+        }
+      },
+      "title": "Meta",
+      "type": "object"
+    },
+    "MetaField": {
+      "additionalProperties": false,
+      "description": "An inferred scalar that carries its own confidence + evidence (shot@t).",
+      "properties": {
+        "confidence": {
+          "default": 0.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "evidence": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Evidence",
+          "type": "array"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        }
+      },
+      "title": "MetaField",
+      "type": "object"
+    },
+    "Midi": {
+      "additionalProperties": false,
+      "properties": {
+        "confidence": {
+          "default": 0.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "midi_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Midi Ref"
+        },
+        "note_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Note Count",
+          "type": "integer"
+        },
+        "status": {
+          "$ref": "#/$defs/MidiStatus",
+          "default": "unknown"
+        }
+      },
+      "title": "Midi",
+      "type": "object"
+    },
+    "MidiStatus": {
+      "enum": [
+        "extracted",
+        "partial",
+        "absent",
+        "unknown"
+      ],
+      "title": "MidiStatus",
+      "type": "string"
+    },
+    "Plugin": {
+      "additionalProperties": false,
+      "properties": {
+        "available_locally": {
+          "default": false,
+          "title": "Available Locally",
+          "type": "boolean"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        }
+      },
+      "title": "Plugin",
+      "type": "object"
+    },
+    "ReconstructionClass": {
+      "enum": [
+        "deterministic",
+        "inferred",
+        "partial"
+      ],
+      "title": "ReconstructionClass",
+      "type": "string"
+    },
+    "Role": {
+      "enum": [
+        "kick",
+        "snare",
+        "hat",
+        "clap",
+        "perc",
+        "808",
+        "bass",
+        "lead",
+        "pad",
+        "pluck",
+        "fx",
+        "vocal",
+        "other"
+      ],
+      "title": "Role",
+      "type": "string"
+    },
+    "SampleMatch": {
+      "additionalProperties": false,
+      "properties": {
+        "alternates": {
+          "items": {
+            "$ref": "#/$defs/Alternate"
+          },
+          "title": "Alternates",
+          "type": "array"
+        },
+        "distance": {
+          "default": 0.0,
+          "minimum": 0.0,
+          "title": "Distance",
+          "type": "number"
+        },
+        "matched_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Matched Path"
+        },
+        "status": {
+          "$ref": "#/$defs/SampleStatus",
+          "default": "none"
+        }
+      },
+      "title": "SampleMatch",
+      "type": "object"
+    },
+    "SampleStatus": {
+      "enum": [
+        "matched",
+        "candidate",
+        "none"
+      ],
+      "title": "SampleStatus",
+      "type": "string"
+    },
+    "Section": {
+      "additionalProperties": false,
+      "properties": {
+        "confidence": {
+          "default": 0.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "end_s": {
+          "default": 0.0,
+          "minimum": 0.0,
+          "title": "End S",
+          "type": "number"
+        },
+        "name": {
+          "default": "",
+          "title": "Name",
+          "type": "string"
+        },
+        "start_s": {
+          "default": 0.0,
+          "minimum": 0.0,
+          "title": "Start S",
+          "type": "number"
+        }
+      },
+      "title": "Section",
+      "type": "object"
+    },
+    "Source": {
+      "additionalProperties": false,
+      "properties": {
+        "channel": {
+          "default": "",
+          "title": "Channel",
+          "type": "string"
+        },
+        "content_hash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Content Hash"
+        },
+        "duration_s": {
+          "default": 0.0,
+          "minimum": 0.0,
+          "title": "Duration S",
+          "type": "number"
+        },
+        "license": {
+          "$ref": "#/$defs/License",
+          "default": "unknown"
+        },
+        "platform": {
+          "default": "youtube",
+          "title": "Platform",
+          "type": "string"
+        },
+        "retrieved_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Retrieved At"
+        },
+        "title": {
+          "default": "",
+          "title": "Title",
+          "type": "string"
+        },
+        "url": {
+          "default": "",
+          "title": "Url",
+          "type": "string"
+        },
+        "video_id": {
+          "default": "",
+          "title": "Video Id",
+          "type": "string"
+        }
+      },
+      "title": "Source",
+      "type": "object"
+    },
+    "Substitute": {
+      "additionalProperties": false,
+      "properties": {
+        "note": {
+          "default": "approximation",
+          "title": "Note",
+          "type": "string"
+        },
+        "plugin": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Plugin"
+        },
+        "preset_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Preset Ref"
+        }
+      },
+      "title": "Substitute",
+      "type": "object"
+    },
+    "SynthMatch": {
+      "additionalProperties": false,
+      "properties": {
+        "confidence": {
+          "default": 0.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "method": {
+          "default": "sound_match",
+          "title": "Method",
+          "type": "string"
+        },
+        "target_audio_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target Audio Ref"
+        }
+      },
+      "title": "SynthMatch",
+      "type": "object"
+    },
+    "SynthPatch": {
+      "additionalProperties": false,
+      "properties": {
+        "match": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SynthMatch"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "params": {
+          "additionalProperties": true,
+          "title": "Params",
+          "type": "object"
+        },
+        "plugin": {
+          "$ref": "#/$defs/Plugin"
+        },
+        "status": {
+          "$ref": "#/$defs/SynthStatus",
+          "default": "unknown"
+        },
+        "substitute": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Substitute"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "SynthPatch",
+      "type": "object"
+    },
+    "SynthStatus": {
+      "enum": [
+        "params_visible",
+        "matched",
+        "substituted",
+        "unavailable",
+        "unknown"
+      ],
+      "title": "SynthStatus",
+      "type": "string"
+    },
+    "Unresolved": {
+      "additionalProperties": false,
+      "properties": {
+        "element_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Element Id"
+        },
+        "issue": {
+          "default": "",
+          "title": "Issue",
+          "type": "string"
+        },
+        "suggested_action": {
+          "default": "",
+          "title": "Suggested Action",
+          "type": "string"
+        }
+      },
+      "title": "Unresolved",
+      "type": "object"
+    },
+    "YieldBlock": {
+      "additionalProperties": false,
+      "properties": {
+        "actual": {
+          "$ref": "#/$defs/YieldScores"
+        },
+        "predicted": {
+          "$ref": "#/$defs/YieldScores"
+        }
+      },
+      "title": "YieldBlock",
+      "type": "object"
+    },
+    "YieldScores": {
+      "additionalProperties": false,
+      "properties": {
+        "arrangement": {
+          "default": 0.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Arrangement",
+          "type": "number"
+        },
+        "drums": {
+          "default": 0.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Drums",
+          "type": "number"
+        },
+        "midi": {
+          "default": 0.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Midi",
+          "type": "number"
+        },
+        "overall": {
+          "default": 0.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Overall",
+          "type": "number"
+        },
+        "synth": {
+          "default": 0.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Synth",
+          "type": "number"
+        }
+      },
+      "title": "YieldScores",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "arrangement": {
+      "$ref": "#/$defs/Arrangement"
+    },
+    "elements": {
+      "items": {
+        "$ref": "#/$defs/Element"
+      },
+      "title": "Elements",
+      "type": "array"
+    },
+    "meta": {
+      "$ref": "#/$defs/Meta"
+    },
+    "recipe_id": {
+      "title": "Recipe Id",
+      "type": "string"
+    },
+    "reconstruction_class": {
+      "$ref": "#/$defs/ReconstructionClass",
+      "default": "partial"
+    },
+    "schema_version": {
+      "const": "2.0",
+      "default": "2.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "source": {
+      "$ref": "#/$defs/Source"
+    },
+    "unresolved": {
+      "items": {
+        "$ref": "#/$defs/Unresolved"
+      },
+      "title": "Unresolved",
+      "type": "array"
+    },
+    "yield": {
+      "$ref": "#/$defs/YieldBlock"
+    }
+  },
+  "title": "Recipe",
+  "type": "object"
+}
