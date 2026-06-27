@@ -172,9 +172,11 @@ gate_native() {
   if [ -z "$bin" ]; then emit_step "selftest_x3" false '{"error":"Mosh binary not found after build"}'; return; fi
   run_selftest_x3 "$bin"
 
-  # verify.py — offline render-to-WAV proof. Needs numpy; a missing env is a gate
-  # infra failure → fail-closed (a human installs it) rather than a silent skip.
-  run_step "verify_py" bash -c "python3 scripts/verify-hardware/verify.py --bin '$bin'"
+  # verify.py — offline render-to-WAV proof + golden-audio checksum gate (--gate). Needs
+  # numpy; a missing env is a gate infra failure → fail-closed (a human installs it) rather
+  # than a silent skip. A golden checksum miss reds the merge (intentional DSP/adapter
+  # changes regenerate the baseline with --update-golden).
+  run_step "verify_py" bash -c "python3 scripts/verify-hardware/verify.py --gate --bin '$bin'"
 
   # DAW-conformance — the gathered reality-pack eval suite (docs/reality-pack/) replayed
   # through the real command surface. Fails ONLY on an in-scope regression (known gaps are

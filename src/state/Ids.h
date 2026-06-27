@@ -27,6 +27,15 @@ namespace mosh::ids
     MOSH_DECLARE_ID (projectBitDepth)
     MOSH_DECLARE_ID (timeBase)         // "seconds" | "barsBeats"
 
+    // PRJ-FMT — the Mosh PROJECT FORMAT version (int, >= 1). Stored on the same
+    // MOSH_PROJECT node so it saves/reloads with the .tracktionedit and survives
+    // Save-As/consolidate. The schema version of Mosh's OWN ValueTree state — distinct
+    // from Tracktion's free-form Edit appVersion (which we don't control) and from the
+    // C++→UI snapshot wire contract. Stamped on every save (see state/Migrations.h);
+    // absent ⇒ a pre-versioning (v0/legacy) file. Drives forward-migration on open and
+    // a graceful "made by a newer Mosh" refusal. NON-undoable (a format stamp).
+    MOSH_DECLARE_ID (moshFormatVersion)
+
     // KEY-001 — the project's MUSICAL KEY (tonic pitch-class + scale mode), stored
     // on the same MOSH_PROJECT node next to timeBase. Producer intent that the song
     // is "in" this key; it feeds the RenderLayer fingerprint (a key change is a

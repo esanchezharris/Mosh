@@ -1,5 +1,6 @@
 #include "MoshEngine.h"
 #include "SourceRef.h"
+#include "state/Migrations.h"
 
 namespace mosh
 {
@@ -66,6 +67,10 @@ MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession, const juce::Str
         session.deleteRecursively();
     session.createDirectory();
     session.getChildFile ("audio").createDirectory();
+    // A2 — latch the prior session's liveness sentinel BEFORE this run overwrites it. Present
+    // ⇒ the last GUI session didn't shut down cleanly (crashed). Wiped freshSession dirs
+    // (headless harnesses) never have it, so they always read clean.
+    uncleanAtStartup = session.getChildFile ("session.running").existsAsFile();
     // gap 2 — reopen the last project on relaunch (GUI path). The harness keeps the fixed
     // session file: a freshSession dir is wiped above, so last-project.json never exists
     // there and startupEditFile() would fall back anyway — we short-circuit it explicitly.
@@ -79,16 +84,30 @@ MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession, const juce::Str
     if (freshSession)
         editPath.deleteFile();
 
+    bool loadedFromFile = false;
     if (editPath.existsAsFile())
     {
         // Persisted session: load it (tracks/clips/RenderLayers come back).
         editPtr = te::loadEditFromFile (*enginePtr, editPath);
+        // PRJ-FMT — gate BEFORE the engine uses the Edit (before wireEditResolvers).
+        auto mr = mosh::migrateOrRefuse (editPtr->state);
+        if (mr.ok)
+            loadedFromFile = true;
+        else
+        {
+            // Refused: a newer-format file. Fall through to a SAFE empty Edit, record the
+            // reason (surfaced via snapshot.session.loadError), and DON'T persist over the
+            // newer file — save() is a no-op while loadError is set.
+            loadError = mr.error;
+            editPtr.reset();
+        }
     }
-    else
+
+    if (! loadedFromFile)
     {
-        // Fresh session. createEmptyEdit seeds a default audio track; Mosh starts
-        // empty so every track is an explicit create_track command (clean undo +
-        // gate semantics).
+        // Fresh session (or a refused newer-format file). createEmptyEdit seeds a default
+        // audio track; Mosh starts empty so every track is an explicit create_track command
+        // (clean undo + gate semantics).
         editPtr = te::createEmptyEdit (*enginePtr, editPath);
         juce::Array<te::AudioTrack*> defaults (te::getAudioTracks (*editPtr));
         for (auto* t : defaults)
@@ -313,8 +332,23 @@ juce::File MoshEngine::generateTestTone (double seconds, double freqHz, const ju
     return file;
 }
 
+// PRJ-FMT — stamp the current project format version on the MOSH_PROJECT node so on-disk
+// files are always current. Written without the undo manager (a format stamp, like the
+// other MOSH_PROJECT preferences). Idempotent.
+void MoshEngine::stampFormatVersion()
+{
+    mosh::stampFormatVersion (editPtr->state);
+}
+
 bool MoshEngine::save()
 {
+    // PRJ-FMT — a refused (newer-format) project is loaded READ-ONLY: never overwrite the
+    // newer file on disk with this build's fallback/empty Edit. Saving resumes only once a
+    // different project is loaded (which clears loadError).
+    if (loadError.isNotEmpty())
+        return false;
+
+    stampFormatVersion();                  // PRJ-FMT — always current on disk
     const bool ok = te::EditFileOperations (edit()).save (false, true, false);
     if (ok) dirty = false;                 // on-disk now matches in-memory (gap 1)
     return ok;
@@ -325,6 +359,12 @@ bool MoshEngine::save()
 void MoshEngine::markDirty() { dirty = true; }
 bool MoshEngine::isDirty() const { return dirty; }
 bool MoshEngine::saveIfDirty() { return dirty ? save() : false; }
+
+// A2 — liveness sentinel. Written once the GUI window is live; deleted last on a clean quit.
+// Its presence at the next launch (captured by uncleanAtStartup in the ctor) means the prior
+// session crashed. A plain empty file — its mere existence is the signal.
+void MoshEngine::markSessionRunning()  { session.getChildFile ("session.running").create(); }
+void MoshEngine::clearSessionRunning() { session.getChildFile ("session.running").deleteFile(); }
 
 // gap 2 — reopen-last-project. last-project.json = { "last": <abs>, "recent": [<abs>…] }
 // in the session dir. The recent list is newest-first, deduped, capped at 10.
@@ -466,14 +506,22 @@ void MoshEngine::consolidateAudioInto (const juce::File& projectDir)
     }
 }
 
-void MoshEngine::reloadFromFile()
+juce::String MoshEngine::reloadFromFile()
 {
     save();
+    // PRJ-FMT — temp-load → gate → swap-on-success so a newer-format file on disk never
+    // clobbers the live Edit. On refusal keep the current Edit and RETURN the error (the
+    // command surfaces it); on success swap it in.
+    auto fresh = te::loadEditFromFile (*enginePtr, editPath);
+    auto mr = mosh::migrateOrRefuse (fresh->state);
+    if (! mr.ok) return mr.error;           // current Edit kept; not latched (it's still valid + saveable)
+    loadError.clear();                      // any prior cold-start refusal is now resolved
+
     editPtr->getTransport().stop (false, false);
-    editPtr.reset();
-    editPtr = te::loadEditFromFile (*enginePtr, editPath);
+    editPtr = std::move (fresh);
     wireEditResolvers();
     dirty = false;                          // freshly loaded from disk (gap 1)
+    return {};
 }
 
 void MoshEngine::adoptEditFile (const juce::File& file)
@@ -507,21 +555,30 @@ void MoshEngine::newProject (const juce::File& file)
         mm->runDispatchLoopUntil (1);
 
     editPtr->getUndoManager().clearUndoHistory();
+    loadError.clear();                       // PRJ-FMT — a brand-new empty project is valid; resume saving
     adoptEditFile (file);
     save();                                  // write the new empty .tracktionedit to disk
     rememberProject (file);                  // gap 2 — record as last/recent project
 }
 
-void MoshEngine::openProject (const juce::File& file)
+juce::String MoshEngine::openProject (const juce::File& file)
 {
     save();
+    // PRJ-FMT — temp-load → gate → swap-on-success. On refusal (newer-format file) keep the
+    // CURRENT project loaded + playing and RETURN the error; the open_project command turns
+    // that into an error envelope the UI shows. The current project stays saveable.
+    auto fresh = te::loadEditFromFile (*enginePtr, file);
+    auto mr = mosh::migrateOrRefuse (fresh->state);
+    if (! mr.ok) return mr.error;            // current project kept; not latched
+    loadError.clear();                       // any prior cold-start refusal is now resolved
+
     editPtr->getTransport().stop (false, false);
     editPtr->getTransport().freePlaybackContext();
-    editPtr.reset();
-    editPtr = te::loadEditFromFile (*enginePtr, file);
+    editPtr = std::move (fresh);
     adoptEditFile (file);
     save();                                  // gap 2 — parity with newProject: persist on adopt (also clears dirty)
     rememberProject (file);                  // gap 2 — record as last/recent project
+    return {};
 }
 
 bool MoshEngine::saveProjectAs (const juce::File& file)

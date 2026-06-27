@@ -345,6 +345,28 @@ export type Annotation = {
   author?: string;
 };
 
+// PRJ-FMT — the snapshot WIRE-CONTRACT version this UI build expects. If the backend
+// reports a higher snapshot.schemaVersion, the UI is older than its engine and shows a
+// soft "please update the app" banner (it keeps running, degraded). DISTINCT from the
+// project file format version (which the backend refuses outright when too new). Bump in
+// lockstep with kSnapshotSchemaVersion in src/state/Migrations.h.
+export const EXPECTED_SNAPSHOT_SCHEMA = 1;
+
+// PRJ-FMT — the version-banner decision, pure + testable. Two distinct cases, both via the
+// store's lastError:
+//  • file-format refusal (cold start): the launch session file was made by a NEWER Mosh,
+//    so the backend loaded a safe empty fallback — a BLOCKING "update Mosh" message.
+//  • snapshot wire-contract mismatch: this UI build is older than its engine — a SOFT advisory.
+// Returns null when neither applies. Structural param so it's trivial to unit-test.
+export function versionBannerError(
+  snap: { schemaVersion: number; session: { loadError?: string } },
+): string | null {
+  if (snap.session.loadError) return snap.session.loadError;
+  if (snap.schemaVersion > EXPECTED_SNAPSHOT_SCHEMA)
+    return "This Mosh app is older than its engine. Please update the app.";
+  return null;
+}
+
 export type Snapshot = {
   schemaVersion: number;
   session: {
@@ -359,6 +381,13 @@ export type Snapshot = {
     length?: number;
     editFile: string;
     dirty?: boolean;           // gap 1 — unsaved changes (drives auto-save; advisory in UI)
+    // PRJ-FMT — cold-start refusal: the launch session file was made by a NEWER Mosh than
+    // this build. A safe empty fallback is live; this is the blocking "please update Mosh"
+    // reason the UI surfaces. Absent ⇒ the project loaded fine.
+    loadError?: string;
+    // A2 — the prior session ended uncleanly (crashed); autosave already restored the last
+    // good save. Drives a one-time, dismissable recovery notice. Absent ⇒ clean last exit.
+    recoveryAvailable?: boolean;
     recentProjects?: { path: string; name: string }[]; // gap 2 — Recent list (newest-first)
     projectExtension?: string; // backend-owned project container extension (no leading dot)
     // SES-001 — the tempo MAP (additive; tempo/timeSig* above stay point 0).

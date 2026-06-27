@@ -9,7 +9,10 @@
 // unnoticed.
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { runAgentBatch } from "./executor";
+import {
+  runAgentBatch, isDestructiveCommand, screenDestructive,
+  MAX_DESTRUCTIVE_PER_BATCH, DESTRUCTIVE_BLOCK_REASON,
+} from "./executor";
 import { validateCommand } from "./commands";
 import { useStore } from "../store";
 import { __resetMockForTests } from "../bridge.mock";
@@ -115,5 +118,44 @@ describe("agent command contract — catalog args must match the seam", () => {
     // design — seek/loop calls carry no action — so its guard is the arg type.)
     expect(validateCommand("set_transport", { action: 5 })).not.toBeNull();                                    // action must be a string
     expect(validateCommand("split_clip", { clipId: "1", position: 1 })).not.toBeNull();                         // old "position" → missing required "time"
+  });
+});
+
+describe("agent destructive-command scope limit (safety)", () => {
+  beforeEach(async () => {
+    __resetMockForTests();
+    await useStore.getState().refresh();
+  });
+
+  it("isDestructiveCommand flags removes + the remove/delete/clear_ prefix, not constructive ops", () => {
+    expect(isDestructiveCommand("remove_track")).toBe(true);
+    expect(isDestructiveCommand("remove_note")).toBe(true);
+    expect(isDestructiveCommand("delete_everything")).toBe(true);   // prefix catch-all (future-proof)
+    expect(isDestructiveCommand("clear_track")).toBe(true);
+    expect(isDestructiveCommand("create_track")).toBe(false);
+    expect(isDestructiveCommand("set_transport")).toBe(false);
+  });
+
+  it("screenDestructive allows a batch at the limit", () => {
+    const calls = Array.from({ length: MAX_DESTRUCTIVE_PER_BATCH }, () => ({ command: "remove_clip", args: { clipId: "x" } }));
+    const { allowed, blocked } = screenDestructive(calls);
+    expect(blocked).toHaveLength(0);
+    expect(allowed).toHaveLength(MAX_DESTRUCTIVE_PER_BATCH);
+  });
+
+  it("screenDestructive blocks ALL destructive calls over the limit but keeps constructive ones", () => {
+    const removes = Array.from({ length: MAX_DESTRUCTIVE_PER_BATCH + 1 }, () => ({ command: "remove_clip", args: { clipId: "x" } }));
+    const { allowed, blocked } = screenDestructive([{ command: "create_track", args: {} }, ...removes]);
+    expect(blocked).toHaveLength(MAX_DESTRUCTIVE_PER_BATCH + 1);
+    expect(allowed).toEqual([{ command: "create_track", args: {} }]);
+  });
+
+  it("runAgentBatch blocks an over-limit delete spree before it reaches the seam, but applies constructive work", async () => {
+    const removes = Array.from({ length: MAX_DESTRUCTIVE_PER_BATCH + 1 }, (_, i) => ({ command: "remove_clip", args: { clipId: `c${i}` } }));
+    const cs = await runAgentBatch("wipe", [{ command: "create_track", args: { name: "Survivor" } }, ...removes]);
+
+    const blocked = cs.entries.filter((e) => !e.ok && e.error === DESTRUCTIVE_BLOCK_REASON);
+    expect(blocked).toHaveLength(MAX_DESTRUCTIVE_PER_BATCH + 1);   // every remove blocked
+    expect(cs.applied).toBeGreaterThanOrEqual(1);                 // create_track still ran
   });
 });

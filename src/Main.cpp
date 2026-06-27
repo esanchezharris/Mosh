@@ -271,6 +271,12 @@ public:
                                });
         mainWindow->shell().load();
 
+        // A2 — write the liveness sentinel now the GUI is up. If we crash before shutdown()
+        // deletes it, the next launch detects the unclean exit (uncleanAtStartup) and the UI
+        // surfaces a recovery notice. Must come AFTER the engine ctor latched the prior value.
+        if (engine != nullptr)
+            engine->markSessionRunning();
+
         // gap 1 — periodic auto-save once the GUI is live: every 30s, persist iff the
         // Edit is dirty, so a window-close or crash never loses more than ~30s of work.
         // Save-on-quit (shutdown) is the belt-and-suspenders. GUI-only — headless
@@ -294,7 +300,10 @@ public:
         // gap 1 — save-on-quit: persist any unsaved work before teardown (GUI only;
         // headless harnesses have no mainWindow and manage their own isolated session).
         if (engine != nullptr && mainWindow != nullptr)
+        {
             engine->saveIfDirty();
+            engine->clearSessionRunning();   // A2 — clean exit: drop the sentinel LAST (after the save)
+        }
         menuController.reset();   // tears down the macOS main menu before the window
         mainWindow.reset();
         remoteServer.reset();

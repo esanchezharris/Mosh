@@ -36,8 +36,17 @@ python3 scripts/verify-hardware/verify.py --sa3     # also the real SA3 transfor
 python3 scripts/verify-hardware/verify.py --rave    # also the real RAVE transform path (needs service/transform/setup-transform.sh)
 python3 scripts/verify-hardware/verify.py --rave-insert --bin build-anira/Mosh_artefacts/Release/Mosh.app/Contents/MacOS/Mosh
                                                     # the real-time RAVE insert offline render (anira build + transform venv); asserts gap-free
+python3 scripts/verify-hardware/verify.py --gate    # also enforce the golden-audio checksum baselines (the pre-merge gate runs this)
+python3 scripts/verify-hardware/verify.py --update-golden  # regenerate baselines after an INTENTIONAL DSP/adapter change
 # live checks (6,7,8 — owner-driven) are listed per-row below.
 ```
+
+**Golden-audio gate (`--gate`).** Beyond the RMS/peak BOUNDS each check already asserts, the
+deterministic renders (`makes_sound`, `drums`, `transform_fake`, `full_loop`) are pinned to a
+committed PCM-checksum baseline ([`golden/manifest.json`](../scripts/verify-hardware/golden/README.md)) —
+so a code change that silently alters the SAMPLES reds the gate (with a feature-diff naming
+which of `peak`/`rms`/`centroid_hz` moved), not just "still within bounds". `scripts/auto-loop/gate.sh`
+runs `--gate`; an intentional DSP/adapter change regenerates the baseline with `--update-golden`.
 
 ## Checks
 

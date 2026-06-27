@@ -9,6 +9,7 @@ import type {
   WaveInput, TrackOutputs,
   PluginCounts,
 } from "./types";
+import { versionBannerError } from "./types";
 import type { RemoteStatus } from "./bridge";
 import { type SnapDiv, snapTimeMap, tempoMapFrom } from "./time";
 import type { ChangeSet } from "./agent/executor";
@@ -42,6 +43,10 @@ type State = {
   snapshot: Snapshot | null;
   connected: boolean;
   lastError: string | null;
+  // A2 — UI-local: the crash-recovery notice is dismissed for this session (view state, not
+  // a command — the prime directive keeps pure view state off the bridge).
+  recoveryDismissed: boolean;
+  dismissRecovery: () => void;
 
   // UI-local view state (NOT commands — the swappable-seam rule: zoom, tool,
   // snap, selection never cross the bridge).
@@ -211,6 +216,8 @@ export const useStore = create<State>((set, get) => ({
   snapshot: null,
   connected: isNative(),
   lastError: null,
+  recoveryDismissed: false,
+  dismissRecovery: () => set({ recoveryDismissed: true }),
 
   pxPerSec: 80,
   tool: "move",
@@ -252,6 +259,9 @@ export const useStore = create<State>((set, get) => ({
     try {
       const snap = await getSnapshot<Snapshot>();
       set({ snapshot: snap, connected: true, transport: snap.transport });
+      // PRJ-FMT — surface a version banner (file-format refusal or snapshot-schema mismatch).
+      const banner = versionBannerError(snap);
+      if (banner) set({ lastError: banner });
       // Prune selection / fetch peaks for current clips.
       const ids = new Set(snap.tracks.flatMap((t) => t.clips.map((c) => c.id)));
       set((s) => ({ selection: new Set([...s.selection].filter((id) => ids.has(id))) }));

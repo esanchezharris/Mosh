@@ -56,6 +56,13 @@ private:
     juce::var httpGet (const juce::String& path);
     juce::var httpPost (const juce::String& path, const juce::var& body);
 
+    // C2 — reap an orphaned/wedged service (a crashed Mosh leaves a multi-GB MLX process
+    // squatting the port) via the PID handshake file before spawning a fresh one.
+    void reapStaleService();
+    // C3 — adopt the actual bound port the service wrote (it may differ from the requested
+    // one if a non-Mosh process held it).
+    void adoptPortFromHandshake();
+
     juce::String baseUrl;
     juce::ChildProcess serviceProcess;
     bool spawnedByUs = false;

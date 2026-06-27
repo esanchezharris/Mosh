@@ -1,6 +1,7 @@
 #include "SelfTest.h"
 #include "engine/MoshEngine.h"
 #include "moshops/MoshOps.h"
+#include "state/Migrations.h"
 #include "multiplayer/MultiplayerClient.h"
 #include "brain/BrainProxy.h"
 #include "voice/NativeSpeech.h"
@@ -3299,6 +3300,80 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (! (bool) ops.snapshot().getProperty ("transport", var()).getProperty ("recording", false), "ARE-003: not recording headless (no audio device)");
     }
 
+    // ─── PRJ-FMT — project FORMAT version + migration + newer-file refusal ───
+    // The Mosh format version is stamped on the MOSH_PROJECT node on every save
+    // (state/Migrations.h). On open, an OLDER (or unversioned) file migrates forward; a
+    // NEWER file is REFUSED outright and the current project is kept loaded + saveable. This
+    // section is self-contained and self-restoring (it ends by reopening the original edit)
+    // so it does not disturb later sections.
+    section ("PRJ-FMT: project format version + migration + newer-file refusal");
+    {
+        auto sess = [&] { return ops.snapshot().getProperty ("session", var()); };
+        auto proj = [&] { return sess().getProperty ("project", var()); };
+        auto fmtVersion = [&] { return (int) proj().getProperty ("formatVersion", var (-1)); };
+
+        const auto origFile = eng.editFile();
+
+        // Save → the stamp lands on disk and the snapshot reports the current version.
+        check (ok (cmd (ops, "save")), "PRJ-FMT: save ok");
+        check (fmtVersion() == kMoshFormatVersion, "PRJ-FMT: snapshot reports current formatVersion after save");
+
+        // Save → reload → the version round-trips with the .tracktionedit.
+        check (ok (cmd (ops, "reload")), "PRJ-FMT: reload ok");
+        check (fmtVersion() == kMoshFormatVersion, "PRJ-FMT: formatVersion survived save+reload");
+
+        // Fabricate a NEWER-format file (copy the saved edit, bump moshFormatVersion) →
+        // open_project REFUSES it and keeps the current project loaded.
+        auto bumpFile = eng.sessionDir().getChildFile ("prjfmt-newer.tracktionedit");
+        if (auto xml = juce::XmlDocument::parse (origFile))
+        {
+            if (auto* mp = xml->getChildByName ("MOSH_PROJECT"))
+                mp->setAttribute ("moshFormatVersion", kMoshFormatVersion + 1);
+            bumpFile.replaceWithText (xml->toString());
+        }
+        auto refused = cmd (ops, "open_project", args1 ("file", bumpFile.getFullPathName()));
+        check (! ok (refused), "PRJ-FMT: open_project REFUSES a newer-format file");
+        check (refused.getProperty ("error", var()).toString().contains ("newer version of Mosh"),
+               "PRJ-FMT: refusal error names a newer Mosh version");
+        check (eng.editFile() == origFile, "PRJ-FMT: refused open kept the current project loaded");
+
+        // Fabricate a LEGACY file (strip the stamp ⇒ v0) → open_project MIGRATES it forward.
+        auto legacyFile = eng.sessionDir().getChildFile ("prjfmt-legacy.tracktionedit");
+        if (auto xml = juce::XmlDocument::parse (origFile))
+        {
+            if (auto* mp = xml->getChildByName ("MOSH_PROJECT"))
+                mp->removeAttribute ("moshFormatVersion");
+            legacyFile.replaceWithText (xml->toString());
+        }
+        check (ok (cmd (ops, "open_project", args1 ("file", legacyFile.getFullPathName()))),
+               "PRJ-FMT: open_project accepts a legacy (unversioned) file");
+        check (fmtVersion() == kMoshFormatVersion, "PRJ-FMT: legacy file migrated forward to current version");
+
+        // Restore the original session edit so later sections are undisturbed.
+        check (ok (cmd (ops, "open_project", args1 ("file", origFile.getFullPathName()))),
+               "PRJ-FMT: restore original project ok");
+        bumpFile.deleteFile();
+        legacyFile.deleteFile();
+    }
+
+    // ─── A2 — crash-recovery liveness sentinel ───
+    // The GUI writes a session.running sentinel once the window is live and deletes it on a
+    // clean quit; its presence at the next launch flags an unclean exit (a prior crash). The
+    // headless harness uses a wiped freshSession dir + never marks it, so it always reads
+    // clean. We exercise the mark/clear primitives + the clean-start read directly (the
+    // ctor latch is GUI-only). Self-contained: leaves the sentinel cleared.
+    section ("A2: crash-recovery liveness sentinel");
+    {
+        auto sentinel = eng.sessionDir().getChildFile ("session.running");
+        check (! eng.wasUncleanShutdown(), "A2: fresh headless start reads clean (no prior sentinel)");
+        check (! ops.snapshot().getProperty ("session", var()).hasProperty ("recoveryAvailable"),
+               "A2: snapshot omits recoveryAvailable on a clean start");
+        eng.markSessionRunning();
+        check (sentinel.existsAsFile(), "A2: markSessionRunning writes the sentinel");
+        eng.clearSessionRunning();
+        check (! sentinel.existsAsFile(), "A2: clearSessionRunning removes the sentinel (clean-quit path)");
+    }
+
     // ─── KEY-001 — the project's musical key (tonic + mode) ───
     // Stored on the same MOSH_PROJECT node as the format/time-base prefs (saves/reloads
     // with the .tracktionedit). set_key is a NON-undoable preference (cmdSetProjectSettings
@@ -5152,6 +5227,33 @@ int runCommandScript (MoshEngine& eng, MoshOps& ops)
             const auto snapLine = JSON::toString (var (so), true);
             outLines.add (snapLine);
             std::cout << snapLine.toStdString() << std::endl;
+            continue;
+        }
+
+        // __bench_snapshot pseudo-command (D1): time ops.snapshot() (build + JSON marshal,
+        // the per-edit cost the WebView pays on every snapshot_invalidated) over N iterations
+        // and report avg ms + serialized bytes. A MEASUREMENT to decide whether snapshot()
+        // needs scoped invalidation at scale — not itself a fix. Read-only.
+        if (name == "__bench_snapshot")
+        {
+            const int iters = jmax (1, (int) command.getProperty ("args", var()).getProperty ("iterations", 20));
+            const auto t0 = Time::getMillisecondCounterHiRes();
+            int bytes = 0;
+            for (int i = 0; i < iters; ++i)
+                bytes = JSON::toString (ops.snapshot(), false).getNumBytesAsUTF8();
+            const auto totalMs = Time::getMillisecondCounterHiRes() - t0;
+            auto* d = new DynamicObject();
+            d->setProperty ("iterations", iters);
+            d->setProperty ("totalMs", totalMs);
+            d->setProperty ("avgMs", totalMs / (double) iters);
+            d->setProperty ("jsonBytes", bytes);
+            auto* bo = new DynamicObject();
+            bo->setProperty ("command", "__bench_snapshot");
+            bo->setProperty ("ok", true);
+            bo->setProperty ("data", var (d));
+            const auto bl = JSON::toString (var (bo), true);
+            outLines.add (bl);
+            std::cout << bl.toStdString() << std::endl;
             continue;
         }
 
