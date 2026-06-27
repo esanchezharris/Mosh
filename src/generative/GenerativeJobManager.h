@@ -43,6 +43,21 @@ public:
         ok is false / {} on failure (service down, venv absent → 503). */
     juce::var transcribe (const juce::File& inputWav, const juce::String& mode);
 
+    /** Word-level speech transcription via Whisper (POST /transcribe_words) — the lyric
+        "mumble take" word path. SYNCHRONOUS — call on a BACKGROUND thread. Returns
+        { ok, words:[{word,start,end,confidence}] } (times in SECONDS). When Whisper isn't
+        installed the service degrades to { ok:true, words:[] } (the rhythm sheet still
+        builds; never invented words). {} on a dead service. */
+    juce::var transcribeWords (const juce::File& inputWav);
+
+    /** Mumble-take spec builder (POST /mumble_spec) — Finish-My-Song Phase 3. Note onsets +
+        confidence-gated words → a lyric constraint spec (syllables/bar + stress + word
+        anchors/gaps). Fast + deterministic (in-process note/word math, no model). SYNCHRONOUS.
+        Returns { ok, grid, lines:[{index,role,seedText,syllableTarget,syllableTol,stress,
+        rhymeGroup}] } or { ok:false, error:"no_melody_detected" }; {} on a dead service. */
+    juce::var mumbleSpec (const juce::var& notes, const juce::var& words, double bpm,
+                          int tsNum, int tsDen, double confThreshold);
+
     /** Sketch Phase 0 — beatbox → drum hits via librosa (POST /sketch). SYNCHRONOUS —
         call on a BACKGROUND thread (model-free, but a subprocess + onset analysis is
         ~0.5-2s). Deterministic given (inputWav, bpm, bars). Returns

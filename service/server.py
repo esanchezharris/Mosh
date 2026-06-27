@@ -70,6 +70,19 @@ def _transcribe_available() -> bool:
     return os.path.isfile(_basic_pitch_py())
 
 
+def _whisper_py() -> str:
+    """The dedicated whisper venv's python (set by setup-whisper.sh via .whisper.env ->
+    WHISPER_PY), else the conventional default path."""
+    env = os.environ.get("WHISPER_PY", "").strip()
+    return env or os.path.join(SERVICE_DIR, "whisper", ".venv", "bin", "python")
+
+
+def _whisper_available() -> bool:
+    """True when the Whisper venv exists (checked live). When absent, /transcribe_words
+    degrades to EMPTY words (the mumble-take rhythm sheet still builds) — never a 503."""
+    return os.path.isfile(_whisper_py())
+
+
 def _sketch_py() -> str:
     """The dedicated sketch venv's python (set by setup-sketch.sh via .sketch.env ->
     SKETCH_PY), else the conventional default path."""
@@ -465,6 +478,7 @@ class Handler(BaseHTTPRequestHandler):
                              "uptime_s": round(time.time() - START_TIME, 1),
                              "adapters": adapters, "transcribe": _transcribe_available(),
                              "sketch": _sketch_available(),
+                             "whisper": _whisper_available(),
                              "phonology": _phonology_available()})
         elif path == "/capabilities":
             adapters = [FAKE_ADAPTER, TRANSFORM_ADAPTER] + ([_sa3_descriptor()] if SA3_ENABLED else [])
@@ -473,6 +487,7 @@ class Handler(BaseHTTPRequestHandler):
                              "transcribe": {"available": _transcribe_available(), "modes": ["mono", "poly"]},
                              "sketch": {"available": _sketch_available(), "vocab": ["kick", "snare", "hat"],
                                         "grid": "16th", "bars": [1, 2]},
+                             "whisper": {"available": _whisper_available()},
                              "service_build": SERVICE_BUILD})
         elif path == "/colors":
             try:
@@ -622,6 +637,59 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(500, {"ok": False, "error": f"transcription failed: {tail or 'no output'}"})
                 return
             self._send(200 if payload.get("ok") else 500, payload)
+        elif path == "/transcribe_words":
+            # Word-level speech transcription via Whisper (the mumble-take word path), run as
+            # a subprocess under the dedicated whisper venv. Returns words with per-word
+            # confidence (times in SECONDS). When the venv is ABSENT we degrade to EMPTY
+            # words (NOT a 503, NOT invented words): the mumble-take rhythm sheet still builds
+            # and every slot becomes a gap the loop fills — misrecognized lyrics would be
+            # worse than gaps.
+            input_wav = data.get("inputWav", "")
+            if not input_wav or not os.path.exists(input_wav):
+                self._send(400, {"ok": False, "error": "inputWav missing or not found"})
+                return
+            py = _whisper_py()
+            if not os.path.isfile(py):
+                self._send(200, {"ok": True, "words": [], "backend": "unavailable"})
+                return
+            cli = os.path.join(SERVICE_DIR, "whisper", "whisper_cli.py")
+            try:
+                proc = subprocess.run([py, cli, input_wav], capture_output=True, text=True, timeout=180)
+            except subprocess.TimeoutExpired:
+                self._send(504, {"ok": False, "error": "word transcription timed out"})
+                return
+            except OSError as e:
+                self._send(500, {"ok": False, "error": f"word transcription failed to start: {e}"})
+                return
+            wout = (proc.stdout or "").strip()
+            try:
+                payload = json.loads(wout)
+            except (json.JSONDecodeError, ValueError):
+                tail = (proc.stderr or "").strip()[-400:]
+                self._send(500, {"ok": False, "error": f"word transcription failed: {tail or 'no output'}"})
+                return
+            if payload.get("ok"):
+                payload.setdefault("backend", "whisper")
+            self._send(200 if payload.get("ok") else 500, payload)
+        elif path == "/mumble_spec":
+            # Mumble-take spec builder (Finish-My-Song Phase 3): note onsets + confidence-gated
+            # words → a lyric constraint spec (syllables/bar + stress + word anchors/gaps).
+            # IN-PROCESS + deterministic (stdlib note/word math). The native side already has
+            # the notes (Basic Pitch) + words (Whisper); this only does the binning.
+            try:
+                from lyrics import mumble
+                notes = data.get("notes", []) or []
+                words = data.get("words", []) or []
+                bpm = float(data.get("bpm", 120) or 120)
+                ts = data.get("timeSig", [4, 4]) or [4, 4]
+                conf = float(data.get("confThreshold", 0.6) or 0.6)
+                grid = str(data.get("grid", "1/16") or "1/16")
+                self._send(200, mumble.build_spec_from_take(
+                    notes, words, bpm, time_sig=(int(ts[0]), int(ts[1])),
+                    conf_threshold=conf, grid=grid,
+                    topic=str(data.get("topic", "")), mood=str(data.get("mood", ""))))
+            except Exception as e:  # noqa: BLE001
+                self._send(500, {"ok": False, "error": f"mumble spec error: {e}"})
         elif path == "/sketch":
             # Sketch Phase 0: beatbox WAV -> 3-class drum hits on a 16th grid, run as a
             # subprocess under the dedicated sketch venv so librosa's deps stay isolated.

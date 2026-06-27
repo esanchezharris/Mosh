@@ -181,6 +181,10 @@ function ClipMenu({ clip, x, y, time, onClose }: { clip: Clip; x: number; y: num
       {clip.type === "wave" && (
         <button role="menuitem" onClick={() => run(() => void exec("transcribe_clip", { clipId: clip.id, mode: "mono" }))}>Convert to MIDI</button>
       )}
+      {clip.type === "wave" && (
+        <button role="menuitem" data-testid="clip-build-lyrics"
+          onClick={() => run(() => void exec("build_lyrics_from_clip", { clipId: clip.id }))}>Build lyrics from this take</button>
+      )}
       <div className="v2-clipmenu-sep" />
       <button role="menuitem" className="danger" onClick={() => run(() => void exec("remove_clip", { clipId: clip.id }))}>Remove</button>
     </div>,

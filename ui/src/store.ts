@@ -71,6 +71,7 @@ type State = {
   browserOpen: boolean;
   renderProgress: Record<string, number>; // clipId → 0..1 (Tier-B render)
   transcribing: Record<string, boolean>;  // source clipId → audio→MIDI in flight (Basic Pitch)
+  buildingLyrics: Record<string, boolean>; // source clipId → mumble-take lyric build in flight
   availableColors: AvailableColor[];       // SA3 colour rack (from list_colors)
   availableTransformTargets: AvailableTransformTarget[]; // Route B targets (from list_transform_targets)
   transformFreeText: boolean;              // Route B: does the transform tier allow free-text targets
@@ -236,6 +237,7 @@ export const useStore = create<State>((set, get) => ({
   browserOpen: false,
   renderProgress: {},
   transcribing: {},
+  buildingLyrics: {},
   availableColors: [],
   availableTransformTargets: [],
   transformFreeText: true,
@@ -328,6 +330,17 @@ export const useStore = create<State>((set, get) => ({
           return { transcribing: next };
         });
         if (p.state === "error") set({ lastError: p.error ?? "transcription failed" });
+      } else if (ev.type === "build_lyrics_status") {
+        // Mumble-take status for a SOURCE clip: working | done | error. On done the
+        // backend's snapshot_invalidated reveals the new lyric sheet (Inspector → Lyrics).
+        const p = ev.payload as { clipId: string; state: string; error?: string };
+        set((s) => {
+          const next = { ...s.buildingLyrics };
+          if (p.state === "working") next[p.clipId] = true;
+          else delete next[p.clipId];
+          return { buildingLyrics: next };
+        });
+        if (p.state === "error") set({ lastError: p.error ?? "could not build lyrics from the take" });
       } else if (ev.type === "layer_render_progress") {
         const p = ev.payload as { clipId: string; progress: number };
         set((s) => ({ renderProgress: { ...s.renderProgress, [p.clipId]: p.progress } }));

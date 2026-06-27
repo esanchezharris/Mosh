@@ -66,6 +66,7 @@ LockManager::Scope LockManager::classify (const juce::String& command)
         "set_clip_mute", "set_clip_gain", "relink_clip", "set_clip_warp",
         "duplicate_clip", "add_note", "remove_note", "set_note", "quantize_notes",
         "transcribe_clip", "create_render_layer",
+        "build_lyrics_from_clip",   // LYR Phase 3 — mumble take (lands a sheet on the clip's track)
     };
 
     if (unguarded.count (command)) return Scope::Unguarded;

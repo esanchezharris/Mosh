@@ -148,6 +148,30 @@ test("the style-RAG 'Sound like me' opt-in toggles on", async ({ page }) => {
   await expect(page.getByTestId("v2-error")).toHaveCount(0);
 });
 
+// ── Phase 3: the audio "mumble take" — right-click a vocal take → auto-build a sheet ──
+
+test("right-click a wave take → Build lyrics from this take → a sheet appears", async ({ page }) => {
+  await bootV2(page);
+  // The seed's only wave clip is "chords" (on track index 2); the menu item is wave-only.
+  await page.locator('[data-testid="v2-clip"][title="chords"]').click({ button: "right" });
+  await expect(page.getByTestId("v2-clip-menu")).toBeVisible();
+  await expect(page.getByTestId("clip-build-lyrics")).toBeVisible();
+  await page.getByTestId("clip-build-lyrics").click();
+  // The mock transcribes+analyzes, then lands a sheet on the clip's OWN track. Open it.
+  await page.getByTestId("v2-track-header").nth(2).click();
+  await page.getByTestId("v2-insp-tab-lyrics").click();
+  await expect(page.getByTestId("lyric-panel")).toHaveAttribute("data-has-sheet", "true");
+  await expect(page.getByTestId("lyric-lines").getByRole("listitem")).toHaveCount(2);
+  await expect(page.getByTestId("v2-error")).toHaveCount(0);
+});
+
+test("a MIDI clip does NOT offer 'Build lyrics from this take'", async ({ page }) => {
+  await bootV2(page);
+  await page.locator('[data-testid="v2-clip"][title="loop"]').click({ button: "right" });
+  await expect(page.getByTestId("v2-clip-menu")).toBeVisible();
+  await expect(page.getByTestId("clip-build-lyrics")).toHaveCount(0);
+});
+
 test("accepting a proposal grows the 'in your voice' corpus count", async ({ page }) => {
   await bootV2(page);
   await openLyrics(page);

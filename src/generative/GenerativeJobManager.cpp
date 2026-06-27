@@ -271,6 +271,49 @@ juce::var GenerativeJobManager::transcribe (const juce::File& inputWav, const ju
     return {};
 }
 
+juce::var GenerativeJobManager::transcribeWords (const juce::File& inputWav)
+{
+    if (! ensureServiceRunning())
+        return {};
+
+    auto* body = new DynamicObject();
+    body->setProperty ("inputWav", inputWav.getFullPathName());
+
+    // Whisper loads a model in a subprocess (generous timeout; the service caps at 180s).
+    // Blocks → off the message thread. Mirrors transcribe(). Empty words when Whisper absent.
+    URL url = URL (baseUrl + "/transcribe_words").withPOSTData (JSON::toString (var (body)));
+    auto opts = URL::InputStreamOptions (URL::ParameterHandling::inPostData)
+                    .withConnectionTimeoutMs (185000)
+                    .withExtraHeaders ("Content-Type: application/json");
+    if (auto s = url.createInputStream (opts))
+        return JSON::parse (s->readEntireStreamAsString());
+    return {};
+}
+
+juce::var GenerativeJobManager::mumbleSpec (const juce::var& notes, const juce::var& words,
+                                            double bpm, int tsNum, int tsDen, double confThreshold)
+{
+    if (! ensureServiceRunning())
+        return {};
+
+    Array<var> ts; ts.add (tsNum > 0 ? tsNum : 4); ts.add (tsDen > 0 ? tsDen : 4);
+    auto* body = new DynamicObject();
+    body->setProperty ("notes", notes);
+    body->setProperty ("words", words);
+    body->setProperty ("bpm", bpm > 0 ? bpm : 120.0);
+    body->setProperty ("timeSig", var (ts));
+    body->setProperty ("confThreshold", confThreshold > 0 ? confThreshold : 0.6);
+
+    // In-process deterministic note/word math — fast; a short timeout. Off the message thread.
+    URL url = URL (baseUrl + "/mumble_spec").withPOSTData (JSON::toString (var (body)));
+    auto opts = URL::InputStreamOptions (URL::ParameterHandling::inPostData)
+                    .withConnectionTimeoutMs (30000)
+                    .withExtraHeaders ("Content-Type: application/json");
+    if (auto s = url.createInputStream (opts))
+        return JSON::parse (s->readEntireStreamAsString());
+    return {};
+}
+
 juce::var GenerativeJobManager::sketchBeatbox (const juce::File& inputWav, double bpm, int bars)
 {
     if (! ensureServiceRunning())
