@@ -12,6 +12,9 @@ import { TopBar } from "./TopBar";
 import { TrackLaneList } from "./lanes/TrackLaneList";
 import { RightRail } from "./RightRail";
 import { Composer } from "./Composer";
+import { LeftDrawer } from "./LeftDrawer";
+import { RightInspectorDrawer } from "./RightInspectorDrawer";
+import { useHasPeers } from "./usePresence";
 import { PluginBrowser } from "../ui/PluginBrowser";
 import { PianoRoll } from "../ui/PianoRoll";
 import { AutomationPanel } from "../ui/AutomationPanel";
@@ -22,6 +25,10 @@ import "./shell.css";
 export function AppV2() {
   const snapshot = useStore((s) => s.snapshot);
   const lastError = useStore((s) => s.lastError);
+  // Two modes (see usePresence): with collaborators the right rail holds the agent +
+  // their video tiles, as today; solo, the rail collapses for a full-width timeline, the
+  // agent rides the prompt bar, and the Inspector lives in a right-edge drawer.
+  const hasPeers = useHasPeers();
 
   useKeyboardShortcuts(); // the single keyboard layer + native-menu bridge
   const dragging = useFileDrop(); // drag-and-drop audio import (bytes over the bridge)
@@ -43,12 +50,16 @@ export function AppV2() {
       {snapshot && <TopBar snapshot={snapshot} />}
       {lastError && <div className="v2-errbar" role="alert" data-testid="v2-error">⚠ {lastError}</div>}
 
-      <div className="v2-body">
+      <div className={`v2-body${hasPeers ? "" : " solo"}`}>
         <div className="v2-main">
           <div className="v2-stage">
             {snapshot
               ? <TrackLaneList snapshot={snapshot} />
               : <div className="v2-empty">Loading session…</div>}
+            {/* left browser dock (samples + plugins), slides in on a pull-tab over the timeline */}
+            <LeftDrawer />
+            {/* solo: the Inspector docks on the right edge so the rail can disappear */}
+            {!hasPeers && <RightInspectorDrawer />}
             {dragging && (
               <div className="v2-drop" role="status" aria-live="polite" data-testid="v2-drop">
                 <span>Drop audio to import</span>
@@ -57,7 +68,7 @@ export function AppV2() {
           </div>
           <Composer />
         </div>
-        <RightRail />
+        {hasPeers && <RightRail />}
       </div>
 
       {/* floating / modal surfaces — opened via disclosure in later slices */}

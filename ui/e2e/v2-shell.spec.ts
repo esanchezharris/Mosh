@@ -15,13 +15,51 @@ async function bootV2(page: Page): Promise<void> {
   await expect(page.getByTestId("v2-timeline")).toBeVisible();
 }
 
-test("boots the v2 shell with topbar, tracks, Moshi and composer", async ({ page }) => {
+// Drive multiplayer presence directly (the in-memory mock has no relay) via the dev-only
+// store handle, so we can exercise the "collaborators present" layout mode.
+async function enterPeersMode(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const store = (window as unknown as { __moshStore?: { setState: (s: object) => void } }).__moshStore;
+    store?.setState({
+      mp: { active: true, roomCode: "TEST", selfPeer: "me", connected: true },
+      peers: { ava: { name: "Ava", color: "#c2f53f", online: true } },
+    });
+  });
+}
+
+test("defaults to the cream (light) theme when nothing is persisted", async ({ page }) => {
+  // No theme override here (bootV2 pins dark) — exercise the shipped default.
+  await page.addInitScript(() => { window.localStorage.clear(); });
+  await page.goto("/?shell=v2");
+  await expect(page.getByTestId("v2-shell")).toBeVisible();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+});
+
+test("left browser drawer: pull-tab opens it, tabs switch, close dismisses", async ({ page }) => {
+  await bootV2(page);
+  // parked: only the pull-tab is present, no tab buttons mounted
+  await expect(page.getByTestId("v2-browser-pull")).toBeVisible();
+  await expect(page.getByTestId("v2-browser-tab-sounds")).toHaveCount(0);
+  // open → Sounds tab shows the sample browser list
+  await page.getByTestId("v2-browser-pull").click();
+  await expect(page.getByTestId("v2-browser-tab-sounds")).toBeVisible();
+  await expect(page.getByTestId("v2-browser-drawer").getByTestId("content-browser")).toBeVisible();
+  // switch to Plugins → the plugin filter surface appears (sample browser unmounts)
+  await page.getByTestId("v2-browser-tab-plugins").click();
+  await expect(page.getByPlaceholder("Filter by name or vendor…")).toBeVisible();
+  await expect(page.getByTestId("v2-browser-drawer").getByTestId("content-browser")).toHaveCount(0);
+  // close
+  await page.getByTestId("v2-browser-close").click();
+  await expect(page.getByTestId("v2-browser-tab-sounds")).toHaveCount(0);
+});
+
+test("boots the v2 shell with topbar, tracks, the bar-agent and composer", async ({ page }) => {
   await bootV2(page);
   await expect(page.getByTestId("v2-topbar")).toBeVisible();
   await expect(page.getByTestId("v2-track-header")).toHaveCount(3);
-  await expect(page.getByTestId("v2-mosh-card")).toBeVisible();
-  await expect(page.locator('[data-testid="v2-mosh-card"] canvas')).toBeVisible(); // Moshi GL reused
   await expect(page.getByTestId("v2-composer")).toBeVisible();
+  // solo (no collaborators): the agent minimizes onto the prompt bar
+  await expect(page.locator('[data-testid="v2-composer-agent"] canvas')).toBeVisible(); // Moshi GL on the bar
 });
 
 test("transport play toggles", async ({ page }) => {
@@ -34,9 +72,10 @@ test("transport play toggles", async ({ page }) => {
   await expect(transport).toHaveAttribute("data-playing", "false");
 });
 
-test("selecting a track opens the inspector; tabs reveal the FX rack + generative drawer", async ({ page }) => {
+test("solo: the inspector drawer reveals Mix/FX/Gen for the selected track", async ({ page }) => {
   await bootV2(page);
   await page.getByTestId("v2-track-header").first().click();
+  await page.getByTestId("v2-inspector-pull").click(); // open the right-edge inspector dock
   await expect(page.getByTestId("v2-inspector")).toBeVisible();
   await page.getByTestId("v2-insp-tab-fx").click();
   await expect(page.locator('[data-testid="v2-insp-body"] [data-testid="rack"]')).toBeVisible();
@@ -76,10 +115,26 @@ test("the agent toast appears on a command and self-dismisses", async ({ page })
   await expect(page.getByTestId("v2-change-toast")).toHaveCount(0, { timeout: 12_000 });
 });
 
-test("collaborators card exposes the camera toggle + invite", async ({ page }) => {
+test("with collaborators present, the right rail shows the agent + camera/invite + peer tile", async ({ page }) => {
   await bootV2(page);
+  await enterPeersMode(page);
+  await expect(page.getByTestId("v2-rail")).toBeVisible();
+  await expect(page.getByTestId("v2-mosh-card")).toBeVisible();
+  await expect(page.locator('[data-testid="v2-mosh-card"] canvas')).toBeVisible(); // Moshi GL in the rail
   await expect(page.getByTestId("v2-camera-toggle")).toBeVisible();
   await expect(page.getByTestId("v2-invite")).toBeVisible();
+  await expect(page.getByTestId("v2-collab-peer")).toBeVisible(); // Ava
+});
+
+test("presence drives the layout: solo bar-agent ↔ rail with collaborators", async ({ page }) => {
+  await bootV2(page);
+  // solo: no rail, the agent rides the bar
+  await expect(page.getByTestId("v2-rail")).toHaveCount(0);
+  await expect(page.getByTestId("v2-composer-agent")).toBeVisible();
+  // a collaborator joins → the rail appears and the bar-agent is reclaimed by the rail
+  await enterPeersMode(page);
+  await expect(page.getByTestId("v2-rail")).toBeVisible();
+  await expect(page.getByTestId("v2-composer-agent")).toHaveCount(0);
 });
 
 test("section ribbon: '+' creates a section and opens it for rename", async ({ page }) => {

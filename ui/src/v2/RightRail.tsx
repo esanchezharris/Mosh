@@ -9,6 +9,7 @@ import { useStore } from "../store";
 import { Moshi } from "../ui/Moshi";
 import { useVideo } from "../webrtc/useVideo";
 import { VideoTile } from "../ui/VideoTile";
+import { PresenceMeter } from "./PresenceMeter";
 import { Inspector } from "./inspector/Inspector";
 
 export function RightRail() {
@@ -78,22 +79,32 @@ function CollaboratorsCard() {
           {cameraOn ? "📹" : "📷"}
         </button>
       </div>
-      <div className="v2-collab-list">
+      <div className="v2-presence">
         {cameraOn && localStream && (
-          <div className="v2-collab" data-testid="v2-collab-self">
+          <div className="v2-pcard" data-testid="v2-collab-self">
             <VideoTile stream={localStream} muted label="Your camera" />
-            <span className="nm">You</span>
+            <div className="v2-pcard-meta">
+              <span className="dot" />
+              <span className="nm">You</span>
+            </div>
           </div>
         )}
-        {others.map(([id, p]) => (
-          <div className="v2-collab" key={id} data-testid="v2-collab-peer">
-            {remoteStreams[id]
-              ? <VideoTile stream={remoteStreams[id]} label={`${p.name}'s camera`} />
-              : <span className="av" style={{ background: p.color }}>{(p.name || "?").charAt(0).toUpperCase()}</span>}
-            <span className="nm" title={p.name}>{p.name}</span>
-            <span className="pulse">⩘</span>
-          </div>
-        ))}
+        {others.map(([id, p]) => {
+          const stream = remoteStreams[id];
+          const offline = p.online === false;
+          return (
+            <div className="v2-pcard" key={id} data-testid="v2-collab-peer" data-cam={stream ? "on" : "off"}>
+              {stream
+                ? <VideoTile stream={stream} label={`${p.name}'s camera`} />
+                : <span className="v2-pcard-av" style={{ background: p.color }}>{(p.name || "?").charAt(0).toUpperCase()}</span>}
+              <div className="v2-pcard-meta">
+                <span className={`dot${offline ? " off" : ""}`} />
+                <span className="nm" title={p.name}>{p.name}</span>
+                {stream && <PresenceMeter stream={stream} />}
+              </div>
+            </div>
+          );
+        })}
         <button className="v2-invite" data-testid="v2-invite" onClick={() => { if (!mp.active) void mpCreate(); }}>
           ＋ Invite collaborator
         </button>

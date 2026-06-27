@@ -1,6 +1,7 @@
-// v2 top bar: project meta (name · key · tempo · time-sig), the transport cluster,
-// the timecode/loop readout, an AI-status pill, Share (multiplayer), and an overflow
-// menu for app/session concerns (save/export/theme/switch-shell). Transport reads the
+// v2 top bar (concept layout): the chrome floats on the cream page — a brand mark +
+// project meta on the left, a dark transport PILL and a light time CARD in the center,
+// and an AI pill + collaborator avatar cluster + invite + overflow on the right. The bar
+// itself is transparent; each cluster is its own floating surface. Transport reads the
 // live 30Hz store field; every mutation is an existing command through store.exec.
 
 import { useState } from "react";
@@ -9,6 +10,7 @@ import { useSettings } from "../settings/store";
 import { tempoMapFrom, secondsToBBSMap, meterFrom, barSeconds } from "../time";
 import { TONICS, MODES, DEFAULT_KEY } from "../musicalKey";
 import { TrainingTool, CommandLogTool, RemoteTool, MultiplayerTool, HelpTool } from "../ui/TopbarTools";
+import { MoshMark } from "./MoshMark";
 import type { Snapshot } from "../types";
 
 function projectName(editFile: string): string {
@@ -33,35 +35,40 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
 
   return (
     <header className="v2-topbar" data-testid="v2-topbar">
-      <div className="v2-proj">
-        <span className="v2-proj-name" title={snapshot.session.editFile}>{projectName(snapshot.session.editFile)}</span>
-        <div className="v2-proj-meta">
-          <select className="v2-chip" aria-label="Key tonic" value={key.tonic}
-            onChange={(e) => void exec("set_key", { tonic: e.target.value, mode: key.mode })}>
-            {TONICS.map((tn) => <option key={tn} value={tn}>{tn}</option>)}
-          </select>
-          <select className="v2-chip" aria-label="Key mode" value={key.mode}
-            onChange={(e) => void exec("set_key", { tonic: key.tonic, mode: e.target.value })}>
-            {MODES.map((m) => <option key={m} value={m}>{m}</option>)}
-          </select>
-          <input className="v2-chip v2-chip-num" type="number" aria-label="Tempo" min={20} max={300}
-            defaultValue={Math.round(snapshot.session.tempo)}
-            onBlur={(e) => void exec("set_tempo", { bpm: Number(e.target.value) })}
-            onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
-          <span className="v2-chip" title="Time signature">{meter.num}/{meter.den}</span>
+      <div className="v2-brand">
+        <MoshMark size={30} />
+        <div className="v2-proj">
+          <span className="v2-proj-name" title={snapshot.session.editFile}>{projectName(snapshot.session.editFile)}</span>
+          <div className="v2-proj-meta">
+            <select className="v2-chip" aria-label="Key tonic" value={key.tonic}
+              onChange={(e) => void exec("set_key", { tonic: e.target.value, mode: key.mode })}>
+              {TONICS.map((tn) => <option key={tn} value={tn}>{tn}</option>)}
+            </select>
+            <select className="v2-chip" aria-label="Key mode" value={key.mode}
+              onChange={(e) => void exec("set_key", { tonic: key.tonic, mode: e.target.value })}>
+              {MODES.map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
+            <input className="v2-chip v2-chip-num" type="number" aria-label="Tempo" min={20} max={300}
+              defaultValue={Math.round(snapshot.session.tempo)}
+              onBlur={(e) => void exec("set_tempo", { bpm: Number(e.target.value) })}
+              onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
+            <span className="v2-chip" title="Time signature">{meter.num}/{meter.den}</span>
+          </div>
         </div>
       </div>
 
-      <div className="v2-transport" data-testid="v2-transport" data-playing={t.playing} data-recording={t.recording}>
-        <button className="v2-tbtn" title="To start" aria-label="To start"
-          onClick={() => void exec("set_transport", { action: "stop", position: 0 })}>⏮</button>
-        <button className="v2-tbtn play" data-on={t.playing} data-testid="v2-play"
-          aria-pressed={t.playing} aria-label={t.playing ? "Pause" : "Play"} title={t.playing ? "Pause" : "Play"}
-          onClick={() => void exec("set_transport", { action: "toggle" })}>{t.playing ? "⏸" : "▶"}</button>
-        <button className="v2-tbtn" title="Stop" aria-label="Stop" data-testid="v2-stop"
-          onClick={() => void exec("set_transport", { action: "stop", position: 0 })}>⏹</button>
-        <button className="v2-tbtn rec" data-on={t.recording} title="Record" aria-label="Record" data-testid="v2-record"
-          onClick={() => void exec("set_transport", { action: "record" })}><span className="dot" /></button>
+      <div className="v2-center">
+        <div className="v2-transport" data-testid="v2-transport" data-playing={t.playing} data-recording={t.recording}>
+          <button className="v2-tbtn" title="To start" aria-label="To start"
+            onClick={() => void exec("set_transport", { action: "stop", position: 0 })}>⏮</button>
+          <button className="v2-tbtn play" data-on={t.playing} data-testid="v2-play"
+            aria-pressed={t.playing} aria-label={t.playing ? "Pause" : "Play"} title={t.playing ? "Pause" : "Play"}
+            onClick={() => void exec("set_transport", { action: "toggle" })}>{t.playing ? "⏸" : "▶"}</button>
+          <button className="v2-tbtn" title="Stop" aria-label="Stop" data-testid="v2-stop"
+            onClick={() => void exec("set_transport", { action: "stop", position: 0 })}>⏹</button>
+          <button className="v2-tbtn rec" data-on={t.recording} title="Record" aria-label="Record" data-testid="v2-record"
+            onClick={() => void exec("set_transport", { action: "record" })}><span className="dot" /></button>
+        </div>
 
         <div className="v2-readout">
           <span className="v2-time" data-testid="v2-time">{bbs}</span>
@@ -72,34 +79,59 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
         </div>
       </div>
 
-      <div className="v2-spacer" />
+      <div className="v2-top-right">
+        <span className="v2-pill" title="Moshi is in the session">
+          <span className={`led${agentBusy ? " busy" : ""}`} />
+          AI {agentBusy ? "working" : "active"}
+        </span>
 
-      <span className="v2-pill" title="Moshi is in the session">
-        <span className={`led${agentBusy ? " busy" : ""}`} />
-        AI {agentBusy ? "working" : "active"}
-      </span>
+        <AvatarCluster />
 
-      <button className="v2-btn" data-testid="v2-share" onClick={() => { if (!mpActive) void mpCreate(); }}>
-        ⤴ {mpActive ? "Shared" : "Share"}
-      </button>
+        <button className="v2-btn v2-invite-btn" data-testid="v2-share" onClick={() => { if (!mpActive) void mpCreate(); }}>
+          ＋ {mpActive ? "shared" : "invite"}
+        </button>
 
-      {/* app/session tools reused from the classic cluster — every feature keeps a home */}
-      <div className="v2-tools" data-testid="v2-tools">
-        <MultiplayerTool />
-        <TrainingTool training={snapshot.training ?? null} />
-        <CommandLogTool />
-        <RemoteTool />
-        <HelpTool />
+        {/* app/session tools reused from the classic cluster — every feature keeps a home */}
+        <div className="v2-tools" data-testid="v2-tools">
+          <MultiplayerTool />
+          <TrainingTool training={snapshot.training ?? null} />
+          <CommandLogTool />
+          <RemoteTool />
+          <HelpTool />
+        </div>
+
+        <OverflowMenu />
       </div>
-
-      <OverflowMenu />
     </header>
+  );
+}
+
+// Compact collaborator preview near the invite button — initials circles tinted with each
+// peer's color, mirroring the full Collaborators rail. Reads the same store.peers; hidden
+// solo (renders nothing until someone else is in the session).
+function AvatarCluster() {
+  const peers = useStore((s) => s.peers);
+  const selfPeer = useStore((s) => s.mp.selfPeer);
+  const others = Object.entries(peers).filter(([id]) => id !== selfPeer);
+  if (others.length === 0) return null;
+  const shown = others.slice(0, 4);
+  const extra = others.length - shown.length;
+  return (
+    <div className="v2-avatars" data-testid="v2-avatars" title={`${others.length} in the session`}>
+      {shown.map(([id, p]) => (
+        <span key={id} className="v2-avatar" style={{ background: p.color }} title={p.name} aria-label={p.name}>
+          {(p.name || "?").charAt(0).toUpperCase()}
+        </span>
+      ))}
+      {extra > 0 && <span className="v2-avatar more" aria-label={`${extra} more`}>+{extra}</span>}
+    </div>
   );
 }
 
 function OverflowMenu() {
   const [open, setOpen] = useState(false);
   const exec = useStore((s) => s.exec);
+  const theme = useStore((s) => s.theme);
   const toggleTheme = useStore((s) => s.toggleTheme);
   const setShell = useSettings((s) => s.set);
   const item = (label: string, fn: () => void, kbd?: string) => (
@@ -117,7 +149,7 @@ function OverflowMenu() {
             {item("Undo", () => void exec("undo"), "⌘Z")}
             {item("Redo", () => void exec("redo"), "⇧⌘Z")}
             <div className="v2-menu-sep" />
-            {item("Toggle theme", () => toggleTheme())}
+            {item(theme === "light" ? "Dark mode" : "Light mode", () => toggleTheme())}
             {item("Switch to Classic UI", () => setShell("uiShell", "classic"))}
           </div>
         </>
