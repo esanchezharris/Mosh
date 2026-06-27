@@ -111,9 +111,23 @@ run_selftest_x3() {
 }
 
 # ── npm helpers ──────────────────────────────────────────────────────────────────
+# Install ui deps if they're absent OR have drifted from ui/package-lock.json. The drift
+# check (deps_need_install, lib.sh) is the fix for the shared-node_modules trap: worktrees
+# symlink ui/node_modules to a shared cache, so a bare `[ -e node_modules ]` check can't tell
+# that a merged PR changed the lockfile out from under it — and the gate would run `tsc`/tests
+# against stale deps. The check is a cheap hash compare on the common no-change path.
 ensure_node_modules() {
-  if [ ! -e "$WT/ui/node_modules" ]; then
-    run_step "npm_ci" bash -c 'cd ui && (npm ci || npm install)'
+  deps_need_install "$WT/ui" || return 0
+  # Drift (or absent). If node_modules is a symlink into the shared cache, unlink it FIRST so
+  # the reinstall builds a fresh LOCAL node_modules for this worktree rather than mutating the
+  # cache other live worktrees still share (avoids cross-worktree reinstall thrash). This only
+  # removes our own symlink — the shared cache dir is untouched.
+  if [ -L "$WT/ui/node_modules" ]; then
+    al_log "ui/node_modules symlink is stale vs package-lock.json — unlinking for a local install"
+    rm -f "$WT/ui/node_modules"
+  fi
+  if run_step "npm_ci" bash -c 'cd ui && (npm ci || npm install)'; then
+    deps_write_stamp "$WT/ui"
   fi
 }
 
