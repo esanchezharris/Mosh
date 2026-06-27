@@ -67,6 +67,13 @@ test("boots the v2 shell with topbar, tracks, composer and the always-on rail", 
   await expect(page.locator('[data-testid="v2-mosh-card"] canvas')).toBeVisible();
 });
 
+test("the decorative glyph in the Mosh status live region is aria-hidden", async ({ page }) => {
+  await bootV2(page);
+  // role=status/aria-live=polite re-announces on every status change — the leading ⩘ is
+  // purely decorative, so it must be hidden from screen readers (matches ChangeToast).
+  await expect(page.locator('[data-testid="v2-mosh-status"] .wave')).toHaveAttribute("aria-hidden", "true");
+});
+
 test("transport play toggles", async ({ page }) => {
   await bootV2(page);
   const transport = page.getByTestId("v2-transport");
