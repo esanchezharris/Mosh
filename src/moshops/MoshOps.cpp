@@ -7,6 +7,7 @@
 #include "state/Annotation.h"
 #include "multiplayer/LogicalId.h"
 #include "multiplayer/TrackCommit.h"
+#include "plugins/moshfx/MoshFxPlugins.h"
 #if MOSH_HAVE_ANIRA
  #include "plugins/transform/RaveInsertPlugin.h"
 #endif
@@ -46,6 +47,9 @@ namespace
         { "phaser",       "Phaser",                "Modulation", false },
         { "lowpass",      "Low / High-Pass Filter","Filter",     false },
         { "pitchShifter", "Pitch Shifter",         "Pitch",      false },
+        { "moshAutoTune", "Mosh AutoTune",         "Mosh FX",    false },
+        { "moshOTT",      "Mosh OTT",              "Mosh FX",    false },
+        { "moshXFeedback","Mosh X-FDBK",           "Mosh FX",    false },
     };
 
     const BuiltinSpec* findBuiltin (const juce::String& type)
@@ -54,6 +58,75 @@ namespace
             if (type == b.type)
                 return &b;
         return nullptr;
+    }
+
+    juce::var feedbackCandidatesToVar (const std::vector<moshfx::FeedbackCandidate>& candidates,
+                                       bool includeDepth)
+    {
+        juce::Array<juce::var> arr;
+        for (const auto& c : candidates)
+        {
+            auto* o = new juce::DynamicObject();
+            o->setProperty ("frequencyHz", c.frequencyHz);
+            o->setProperty ("score", c.score);
+            if (includeDepth)
+                o->setProperty ("depthDb", c.depthDb);
+            arr.add (juce::var (o));
+        }
+        return juce::var (arr);
+    }
+
+    std::vector<float> readXFeedbackPreviewSamples (te::AudioTrack& track, double& sampleRate)
+    {
+        sampleRate = 0.0;
+        for (auto* clip : track.getClips())
+            if (auto* wave = dynamic_cast<te::WaveAudioClip*> (clip))
+            {
+                juce::AudioFormatManager fm;
+                fm.registerBasicFormats();
+                std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (wave->getCurrentSourceFile()));
+                if (reader == nullptr || reader->sampleRate <= 0.0 || reader->lengthInSamples <= 0)
+                    continue;
+
+                const int samples = juce::jlimit (0, 16384, (int) reader->lengthInSamples);
+                juce::AudioBuffer<float> buffer (1, samples);
+                if (! reader->read (&buffer, 0, samples, 0, true, true))
+                    continue;
+
+                sampleRate = reader->sampleRate;
+                std::vector<float> out ((size_t) samples);
+                std::copy (buffer.getReadPointer (0), buffer.getReadPointer (0) + samples, out.begin());
+                return out;
+            }
+
+        return {};
+    }
+
+    juce::var xFeedbackPreviewReadout (te::AudioTrack& track, te::Plugin& plugin)
+    {
+        auto normParam = [&plugin] (int index, float fallback)
+        {
+            if (auto p = plugin.getAutomatableParameter (index))
+                return p->getCurrentNormalisedValue();
+            return fallback;
+        };
+
+        moshfx::XFeedbackSettings settings;
+        settings.sensitivity = normParam (0, 0.65f);
+        settings.maxCuts = juce::jlimit (1, 4, juce::roundToInt (1.0f + normParam (1, 1.0f / 3.0f) * 3.0f));
+        settings.maxDepthDb = 3.0f + normParam (2, 15.0f / 33.0f) * 33.0f;
+        settings.autoSuppress = normParam (4, 0.0f) >= 0.5f;
+
+        double sampleRate = 0.0;
+        auto samples = readXFeedbackPreviewSamples (track, sampleRate);
+        auto candidates = moshfx::detectFeedbackCandidates (samples.data(), (int) samples.size(), sampleRate, settings);
+
+        auto* o = new juce::DynamicObject();
+        o->setProperty ("kind", "feedback");
+        o->setProperty ("candidates", feedbackCandidatesToVar (candidates, false));
+        o->setProperty ("activeCuts", settings.autoSuppress ? feedbackCandidatesToVar (candidates, true)
+                                                            : juce::var (juce::Array<juce::var>()));
+        return juce::var (o);
     }
 
     // DRM-001 — the bundled default drum kit. Each pad is a synthesised one-shot
@@ -5915,7 +5988,7 @@ te::VolumeAndPanPlugin* MoshOps::ensureVolumePlugin (te::AudioTrack& track)
     return nullptr;
 }
 
-juce::var MoshOps::pluginToVar (te::Plugin& p, int index)
+juce::var MoshOps::pluginToVar (te::Plugin& p, int index, te::AudioTrack* owner)
 {
     auto* o = new DynamicObject();
     o->setProperty ("index", index);
@@ -5936,6 +6009,17 @@ juce::var MoshOps::pluginToVar (te::Plugin& p, int index)
     if (auto* r = asRave (&p))
         o->setProperty ("rave", r->describe());
    #endif
+    if (auto* mfx = dynamic_cast<MoshFxDescribable*> (&p))
+    {
+        auto readout = mfx->describeMoshFx();
+        if (owner != nullptr && p.getPluginType() == MoshXFeedbackPlugin::xmlTypeName)
+        {
+            const auto activeCuts = readout.getProperty ("activeCuts", var());
+            if (activeCuts.size() == 0)
+                readout = xFeedbackPreviewReadout (*owner, p);
+        }
+        o->setProperty ("moshFx", readout);
+    }
 
     juce::Array<var> params;
     const int n = juce::jmin (16, p.getNumAutomatableParameters());
@@ -6296,7 +6380,7 @@ juce::var MoshOps::trackToVar (te::AudioTrack& t, int index)
     auto pl = t.pluginList.getPlugins();
     for (int i = 0; i < pl.size(); ++i)
         if (pl[i] != nullptr && dynamic_cast<te::LevelMeterPlugin*> (pl[i].get()) == nullptr)
-            plugins.add (pluginToVar (*pl[i], i));
+            plugins.add (pluginToVar (*pl[i], i, &t));
     o->setProperty ("plugins", plugins);
     // DRM-001/CTL-001 — does the track host an instrument (synth or builtin)? Lets the
     // header surface the auto-loaded default and label the track MIDI-armable.

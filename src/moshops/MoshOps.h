@@ -372,7 +372,7 @@ private:
     std::array<float, 12> spectralPrevBands {};           // for spectral flux
     bool  spectrumActive = false;                         // emit one zero on the play→stop edge
 
-    juce::var       pluginToVar (te::Plugin&, int index);
+    juce::var       pluginToVar (te::Plugin&, int index, te::AudioTrack* owner = nullptr);
     juce::var       trackToVar (te::AudioTrack&, int index);
     juce::var       clipToVar  (te::Clip&);
     juce::var       transportToVar();

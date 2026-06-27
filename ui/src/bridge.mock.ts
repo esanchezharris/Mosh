@@ -14,7 +14,7 @@
 // behaviour the UI relies on is exercised, while audio/Tracktion concepts never
 // appear (the swappable seam holds on the web side too).
 
-import type { Snapshot, Clip, Track, Transport, CommandResult, RenderLayer, TrainingState, MidiNote } from "./types";
+import type { Snapshot, Clip, Track, Transport, CommandResult, RenderLayer, TrainingState, MidiNote, PluginParam, MoshFxReadout } from "./types";
 
 export const MOCK_ENABLED: boolean =
   typeof import.meta !== "undefined" && Boolean(import.meta.env?.DEV);
@@ -276,6 +276,9 @@ const BUILTINS = [
   { type: "reverb", name: "Reverb", category: "Effects", isInstrument: false, builtin: true as const },
   { type: "delay", name: "Delay", category: "Effects", isInstrument: false, builtin: true as const },
   { type: "eq", name: "4-Band EQ", category: "Effects", isInstrument: false, builtin: true as const },
+  { type: "moshAutoTune", name: "Mosh AutoTune", category: "Mosh FX", isInstrument: false, builtin: true as const },
+  { type: "moshOTT", name: "Mosh OTT", category: "Mosh FX", isInstrument: false, builtin: true as const },
+  { type: "moshXFeedback", name: "Mosh X-FDBK", category: "Mosh FX", isInstrument: false, builtin: true as const },
 ];
 const VST3S = [
   { id: "vital", name: "Vital", format: "VST3", manufacturer: "Vital Audio", isInstrument: true },
@@ -296,6 +299,30 @@ function findPlugin(trackId: string, index: number): { track: Track; idx: number
 }
 function mkParams(n: number) {
   return Array.from({ length: n }, (_, i) => ({ index: i, name: ["Drive", "Tone", "Mix", "Decay", "Size", "Rate", "Depth", "Gain"][i] ?? `P${i}`, value: 0.5 }));
+}
+function params(names: string[], values: number[]): PluginParam[] {
+  return names.map((name, index) => ({ index, name, value: values[index] ?? 0.5 }));
+}
+function mkBuiltinParams(type: string, isInstrument: boolean): PluginParam[] {
+  if (isInstrument) return [];
+  if (type === "moshAutoTune") return params(["Root", "Scale", "Retune", "Amount", "Range", "Mix", "Output"], [0, 0, 0.32, 0.35, 0.33, 1, 0.75]);
+  if (type === "moshOTT") return params(["Amount", "Time", "Low Gain", "Mid Gain", "High Gain", "Mix", "Output"], [0.12, 0.24, 0.5, 0.5, 0.5, 1, 0.71]);
+  if (type === "moshXFeedback") return params(["Sensitivity", "Max Cuts", "Max Depth", "Release", "Auto Suppress", "Mix", "Output"], [0.62, 0.5, 0.55, 0.38, 1, 0.8, 0.5]);
+  return mkParams(4);
+}
+function mkMoshFx(type: string): MoshFxReadout | undefined {
+  if (type === "moshAutoTune") return { kind: "autotune", inputHz: 449.0, targetHz: 440.0, correctionCents: -34.4, confidence: 0.91 };
+  if (type === "moshOTT") return { kind: "ott", amount: 0.12, timeMs: 120.0 };
+  if (type !== "moshXFeedback") return undefined;
+  return {
+    kind: "feedback",
+    candidates: [
+      { frequencyHz: 1260, score: 0.82, depthDb: 5.5 },
+      { frequencyHz: 2510, score: 0.74, depthDb: 4.2 },
+      { frequencyHz: 3875, score: 0.61, depthDb: 3.4 },
+    ],
+    activeCuts: [],
+  };
 }
 
 // ── command dispatch ─────────────────────────────────────────────────────────
@@ -705,7 +732,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found");
       const b = BUILTINS.find((x) => x.type === str(args.type)); if (!b) return err(command, "unknown builtin");
       pushUndo(); t.plugins = t.plugins ?? [];
-      t.plugins.push({ index: t.plugins.length, name: b.name, type: b.type, enabled: true, external: false, builtin: true, category: b.category, isInstrument: b.isInstrument, params: mkParams(b.isInstrument ? 0 : 4) });
+      t.plugins.push({ index: t.plugins.length, name: b.name, type: b.type, enabled: true, external: false, builtin: true, category: b.category, isInstrument: b.isInstrument, params: mkBuiltinParams(b.type, b.isInstrument), moshFx: mkMoshFx(b.type) });
       invalidate(); return ok(command);
     }
     case "load_plugin": {

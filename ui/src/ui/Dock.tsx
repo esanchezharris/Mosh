@@ -127,12 +127,36 @@ function ParamBody({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
         </label>
       ))}
       {params.length === 0 && <span className="rack-empty">no params</span>}
+      {plugin.moshFx?.kind === "feedback" && <XFeedbackReadout plugin={plugin} />}
       <div className="neural-row">
         <button className="btn" onClick={() => void exec("reorder_plugin", { trackId, index: plugin.index, toIndex: plugin.index - 1 })}>‹</button>
         <button className="btn" onClick={() => void exec("reorder_plugin", { trackId, index: plugin.index, toIndex: plugin.index + 1 })}>›</button>
         <button className="btn x" onClick={() => void exec("remove_plugin", { trackId, index: plugin.index })}>✕</button>
       </div>
     </div>
+  );
+}
+
+function XFeedbackReadout({ plugin }: { plugin: Plugin }) {
+  const candidates = plugin.moshFx?.candidates ?? [];
+  const activeCuts = plugin.moshFx?.activeCuts ?? [];
+  return (
+    <>
+      <span className="rack-empty">candidates</span>
+      {candidates.slice(0, 3).map((c) => (
+        <div key={`${c.frequencyHz}-${c.depthDb ?? 0}`} className="nparam">
+          <span className="nlabel">{Math.round(c.frequencyHz)} Hz</span>
+          <span className="nval">{Math.round((c.score ?? 0) * 100)}</span>
+          <span className="rack-empty">{(c.depthDb ?? 0).toFixed(1)} dB</span>
+        </div>
+      ))}
+      <div className="nparam">
+        <span className="nlabel">active cuts</span>
+        <span className="rack-empty">
+          {activeCuts.length === 0 ? "none" : activeCuts.map((c) => `${Math.round(c.frequencyHz)} Hz ${(c.depthDb ?? 0).toFixed(1)} dB`).join(", ")}
+        </span>
+      </div>
+    </>
   );
 }
 
