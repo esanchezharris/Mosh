@@ -74,6 +74,16 @@ test("the decorative glyph in the Mosh status live region is aria-hidden", async
   await expect(page.locator('[data-testid="v2-mosh-status"] .wave')).toHaveAttribute("aria-hidden", "true");
 });
 
+test("the topbar overflow menu exposes its items as role=menuitem (a11y)", async ({ page }) => {
+  await bootV2(page);
+  // The menu declares role="menu"; its children must carry role="menuitem" or the menu
+  // announces zero operable items (matches the ClipView clip menu precedent).
+  await expect(page.getByRole("menuitem")).toHaveCount(0); // closed → nothing mounted
+  await page.getByTestId("v2-overflow").click();
+  // Undo/Redo + Mute-Moshi + Hands-free + theme + Switch-to-Classic = at least 6 items.
+  await expect(page.getByRole("menuitem")).toHaveCount(6);
+});
+
 test("transport play toggles", async ({ page }) => {
   await bootV2(page);
   const transport = page.getByTestId("v2-transport");

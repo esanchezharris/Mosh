@@ -139,7 +139,7 @@ function OverflowMenu() {
   const setHandsFree = useStore((s) => s.setHandsFree);
   const setShell = useSettings((s) => s.set);
   const item = (label: string, fn: () => void, kbd?: string) => (
-    <button onClick={() => { setOpen(false); fn(); }}>{label}{kbd && <kbd>{kbd}</kbd>}</button>
+    <button role="menuitem" onClick={() => { setOpen(false); fn(); }}>{label}{kbd && <kbd>{kbd}</kbd>}</button>
   );
 
   return (
