@@ -194,6 +194,10 @@ class Element(_Base):
     midi: Midi = Field(default_factory=Midi)
     sample_match: SampleMatch = Field(default_factory=SampleMatch)
     synth_patch: SynthPatch = Field(default_factory=SynthPatch)
+    # Onset times (seconds) where this element fires. Empty → a single placement at 0
+    # (back-compat). Non-empty → §9 sequences one clip per onset on ONE track, so a §7
+    # drum-slice group reconstructs faithfully on the timeline instead of stacking at 0.
+    onsets: list[float] = Field(default_factory=list)
     evidence: list[Evidence] = Field(default_factory=list)
     confidence: float = Field(0.0, ge=0.0, le=1.0)
 

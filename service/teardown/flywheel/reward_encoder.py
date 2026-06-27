@@ -10,6 +10,8 @@ gates it exactly like SA3/RAVE; callers fall back to the engineered embedder whe
 from __future__ import annotations
 
 import functools
+import json
+import os
 from typing import Optional
 
 import numpy as np
@@ -85,6 +87,45 @@ class MertEncoder:
             v = vec.detach().cpu().numpy().astype(np.float32)
         n = float(np.linalg.norm(v)) or 1.0
         return v / n
+
+
+HEAD_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "reward_head.json")
+
+
+class TrainedRewardHead:
+    """The TRAINED §11 head as a §12 `pull`: embed with MERT, measure trained-diagonal-weighted
+    proximity to good exemplars → 0..1 (closer ⇒ higher). Loads the reward_head.json artifact
+    train_reward.py writes. Falls back gracefully (pull ≈ 0.5) with no exemplars."""
+
+    def __init__(self, head_path: str = HEAD_PATH, encoder: Optional["MertEncoder"] = None) -> None:
+        with open(head_path) as f:
+            self.head = json.load(f)
+        self.w = np.asarray(self.head["weights"], dtype=np.float64)
+        self.version = f"trained-{self.head.get('encoder', 'mert')}"
+        self.encoder = encoder or MertEncoder()
+        self._exemplars: list = []
+
+    @staticmethod
+    def available(head_path: str = HEAD_PATH) -> bool:
+        return MertEncoder.available() and os.path.isfile(head_path)
+
+    def add_exemplars(self, audios) -> int:
+        """audios: list of (audio, sr) good references — the 'sounds like good music' anchors."""
+        for a in audios:
+            au, sr = a if isinstance(a, tuple) else (a, 44100)
+            self._exemplars.append(self.encoder.embed(au, sr))
+        return len(self._exemplars)
+
+    def _wdist(self, a: np.ndarray, b: np.ndarray) -> float:
+        d = a.astype(np.float64) - b.astype(np.float64)
+        return float(np.sqrt(np.sum(self.w * d * d)) + 1e-9)
+
+    def pull(self, audio, sr: int = 44100) -> float:
+        if not self._exemplars:
+            return 0.5
+        v = self.encoder.embed(audio, sr)
+        d = min(self._wdist(v, e) for e in self._exemplars)
+        return float(1.0 / (1.0 + d))
 
 
 def get_encoder(prefer: Optional[str] = None):

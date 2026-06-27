@@ -73,6 +73,13 @@
         "midi": {
           "$ref": "#/$defs/Midi"
         },
+        "onsets": {
+          "items": {
+            "type": "number"
+          },
+          "title": "Onsets",
+          "type": "array"
+        },
         "role": {
           "$ref": "#/$defs/Role",
           "default": "other"

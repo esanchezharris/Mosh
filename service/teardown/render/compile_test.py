@@ -80,6 +80,26 @@ check("unparseable key → unresolved, no command",
 check("unparseable time sig → unresolved, no command",
       not any(c["command"] == "set_time_signature" for c in bad.commands) and any("time signature" in u["issue"] for u in bad.unresolved))
 
+# ── §9 timeline placement: onsets → one clip per fire time on ONE track ──────
+tl = compile_recipe(R.Recipe(elements=[
+    R.Element(element_id="hat", role="hat", label="Hat",
+              sample_match=R.SampleMatch(status="matched", matched_path="lib/h.wav", distance=0.1),
+              onsets=[0.0, 0.5, 1.0, 1.5])]))
+hat_tracks = [c for c in tl.commands if c["command"] == "create_track"]
+hat_clips = [c for c in tl.commands if c["command"] == "import_clip"]
+check("onsets → exactly ONE track", len(hat_tracks) == 1, str(len(hat_tracks)))
+check("onsets → one import_clip per fire time", len(hat_clips) == 4, str(len(hat_clips)))
+check("onsets placed at the right start times",
+      [c["args"]["startSeconds"] for c in hat_clips] == [0.0, 0.5, 1.0, 1.5],
+      str([c["args"]["startSeconds"] for c in hat_clips]))
+check("onset clips all reference the SAME captured track",
+      len({c["args"]["trackId"] for c in hat_clips}) == 1)
+# back-compat: no onsets → a single placement at 0
+nob = compile_recipe(R.Recipe(elements=[R.Element(element_id="k", role="kick",
+        sample_match=R.SampleMatch(status="matched", matched_path="lib/k.wav", distance=0.1))]))
+check("no onsets → single clip at 0 (back-compat)",
+      len([c for c in nob.commands if c["command"] == "import_clip"]) == 1)
+
 # ── graceful empty / partial ─────────────────────────────────────────────────
 empty = compile_recipe(R.Recipe())
 check("empty recipe → no commands, no unresolved", empty.commands == [] and empty.unresolved == [])
@@ -133,6 +153,35 @@ with tempfile.TemporaryDirectory() as td:
     check("inline_midi attached notes to the right clip", len(mc["args"].get("notes", [])) == 3)
     check("inline_midi leaves non-midi commands untouched",
           any(c["command"] == "import_clip" for c in inlined))
+
+# ── §7→§9 bridge: recipe_from_extraction groups slices by role into timeline elements ──
+from teardown.render.from_extraction import recipe_from_extraction  # noqa: E402
+
+ex_matches = [
+    {"t_s": 0.0, "role": "kick", "match": "lib/k1.wav", "distance": 0.1},
+    {"t_s": 1.0, "role": "kick", "match": "lib/k2.wav", "distance": 0.2},   # same role, farther
+    {"t_s": 0.5, "role": "snare", "match": "lib/s1.wav", "distance": 0.15},
+    {"t_s": 1.5, "role": "snare", "match": "lib/s1.wav", "distance": 0.15},
+    {"t_s": 0.25, "role": "hat", "match": None, "distance": None},          # unmatched → dropped
+    {"t_s": 0.75, "role": "perc", "match": "lib/p.wav", "distance": 0.9},   # over threshold → dropped
+]
+exrec = recipe_from_extraction(ex_matches, meta_signals={"tempo": 140})
+roles = sorted(e.role.value for e in exrec.elements)
+check("extraction → one element per matched role", roles == ["kick", "snare"], str(roles))
+kick_el = next(e for e in exrec.elements if e.role.value == "kick")
+check("kick element collects both onsets", kick_el.onsets == [0.0, 1.0], str(kick_el.onsets))
+check("kick rep sample is the CLOSEST match", kick_el.sample_match.matched_path == "lib/k1.wav",
+      kick_el.sample_match.matched_path)
+check("unmatched + over-threshold slices dropped", all(e.role.value != "hat" and e.role.value != "perc"
+                                                       for e in exrec.elements))
+check("extraction recipe carries tempo signal", exrec.meta.tempo_bpm.value == 140)
+check("extraction recipe is class=inferred", exrec.reconstruction_class == R.ReconstructionClass.inferred)
+check("extraction recipe round-trips", R.from_json(R.to_json(exrec)) == exrec)
+# the bridged recipe compiles to a real timeline (clips per onset)
+exc = compile_recipe(exrec)
+check("extraction recipe compiles to per-onset clips",
+      len([c for c in exc.commands if c["command"] == "import_clip"]) == 4,
+      str(len([c for c in exc.commands if c["command"] == "import_clip"])))
 
 # yield_actual is honest: silent render → 0 regardless of clean command application
 ok_results = [{"ok": True, "command": "create_track"}, {"ok": True, "command": "create_track"},

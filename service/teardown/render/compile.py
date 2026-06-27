@@ -106,10 +106,15 @@ def compile_recipe(recipe) -> CompileResult:
         tref = f"${{{tvar}}}"
         placed = False
 
-        # matched owned sample → place it as an audio clip (the one fully-clean content map)
+        # matched owned sample → place it as an audio clip (the one fully-clean content map).
+        # onsets present → one clip per fire time on this single track (faithful timeline,
+        # e.g. a §7 drum-slice group); empty → a single placement at 0 (back-compat).
         if el.sample_match.status == "matched" and el.sample_match.matched_path:
-            add({"command": "import_clip",
-                 "args": {"file": el.sample_match.matched_path, "trackId": tref, "startSeconds": 0}})
+            onsets = list(el.onsets) if el.onsets else [0.0]
+            for t in onsets:
+                add({"command": "import_clip",
+                     "args": {"file": el.sample_match.matched_path, "trackId": tref,
+                              "startSeconds": round(float(t), 4)}})
             placed = True
 
         # MIDI: emit the clip container now; the notes (in midi_ref) are parsed at execute
