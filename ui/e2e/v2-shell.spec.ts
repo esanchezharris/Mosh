@@ -92,6 +92,24 @@ test("keyboard focus shows a visible focus ring (:focus-visible)", async ({ page
   expect(outline).toBe("solid");                // a control received the lime focus ring
 });
 
+test("the track header is keyboard-focusable and Enter selects it (a11y)", async ({ page }) => {
+  await bootV2(page);
+  const head = page.getByTestId("v2-track-header").first();
+  await expect(head).toHaveAttribute("role", "button");
+  await expect(head).toHaveAttribute("tabindex", "0");
+  const name = (await head.locator(".v2-lname").textContent())?.trim();
+  await expect(head).toHaveAttribute("aria-label", `Select track ${name}`);
+  // Focus via keyboard modality → the existing [tabindex]:focus-visible lime ring applies.
+  await head.focus();
+  await expect(head).toBeFocused();
+  await expect
+    .poll(() => head.evaluate((el) => getComputedStyle(el).outlineStyle))
+    .toBe("solid");
+  // Enter activates selection (no mouse) → the always-on inspector binds to that track.
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("v2-inspector")).toContainText(`Inspector · ${name}`);
+});
+
 test("the rail inspector reveals Mix/FX/Gen for the selected track", async ({ page }) => {
   await bootV2(page);
   await page.getByTestId("v2-track-header").first().click();
