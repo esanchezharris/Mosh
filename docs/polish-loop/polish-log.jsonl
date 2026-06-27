@@ -1,0 +1,1 @@
+{"id":"focus-visible-rings","title":"keyboard :focus-visible rings + reduced-motion hover fix","pr":151,"files":["ui/src/v2/shell.css","ui/e2e/v2-shell.spec.ts"],"date":"2026-06-27","scope":"a11y","by":"worked-example (hand)"}
