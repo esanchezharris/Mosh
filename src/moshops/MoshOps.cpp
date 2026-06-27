@@ -545,6 +545,7 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "reject_lyric_proposal") return cmdRejectLyricProposal (args);
     if (name == "analyze_lyrics")       return cmdAnalyzeLyrics (args);
     if (name == "get_lyric_corpus_stats") return cmdGetLyricCorpusStats (args);
+    if (name == "build_lyrics_from_clip") return cmdBuildLyricsFromClip (args);
     // Annotations broadcast over MP (shared collaborator comments). create self-broadcasts
     // its resolved cross-peer id; the rest address by that id via the generic wrapper.
     if (name == "create_annotation") return cmdCreateAnnotation (args);
@@ -1351,6 +1352,126 @@ juce::var MoshOps::cmdGetLyricCorpusStats (const juce::var& args)
     const int lines = jobManager.styleCorpusStats();
     auto* d = new DynamicObject(); d->setProperty ("lines", lines);
     return okResult ("get_lyric_corpus_stats", var (d));
+}
+
+// LYR Phase 3 — audio "mumble take". A recorded vocal take → Basic Pitch note onsets (the
+// reliable RHYTHM) + Whisper confidence-gated words → a lyric constraint sheet on the clip's
+// OWN track, so the producer doesn't hand-type the flow; the L2/L3 loop fills the gaps.
+// Mirrors cmdTranscribeClip's async-on-the-snapshot-rail shape (clip-scoped, service-spawning).
+juce::var MoshOps::cmdBuildLyricsFromClip (const juce::var& args)
+{
+    const auto clipId = args.getProperty ("clipId", var()).toString();
+    const double confThreshold = (double) args.getProperty ("confThreshold", 0.6);
+
+    auto* w = dynamic_cast<te::WaveAudioClip*> (findClip (clipId));
+    if (w == nullptr) return errResult ("build_lyrics_from_clip", "no wave clip with that id");
+    const auto srcFile = w->getCurrentSourceFile();
+    if (! srcFile.existsAsFile()) return errResult ("build_lyrics_from_clip", "clip has no readable source audio");
+
+    auto* track = dynamic_cast<te::AudioTrack*> (w->getTrack());
+    if (track == nullptr) return errResult ("build_lyrics_from_clip", "clip is not on an audio track");
+    const auto trackId = track->itemID.toString();
+    if (track->state.getChildWithName (ids::MOSH_LYRICSHEET).isValid())
+        return errResult ("build_lyrics_from_clip", "track already has a lyric sheet");
+
+    auto& edit = eng.edit();
+    auto* tempo = edit.tempoSequence.getNumTempos() > 0 ? edit.tempoSequence.getTempo (0) : nullptr;
+    const double bpm = tempo != nullptr ? tempo->getBpm() : 120.0;
+    auto* tsig = edit.tempoSequence.getNumTimeSigs() > 0 ? edit.tempoSequence.getTimeSig (0) : nullptr;
+    const int tsNum = tsig != nullptr ? tsig->numerator.get() : 4;
+    const int tsDen = tsig != nullptr ? tsig->denominator.get() : 4;
+
+    // Land the built spec as a MOSH_LYRICSHEET on the clip's OWN track in ONE undo txn —
+    // written via the state helpers directly (re-invoking create/set sub-commands would make
+    // N undo steps + emit nested logs/events). Always on the message thread.
+    auto land = [this, clipId, trackId] (const juce::var& spec) -> juce::var
+    {
+        auto* tt = findTrack (trackId);
+        if (tt == nullptr) return errResult ("build_lyrics_from_clip", "track gone");
+        if (tt->state.getChildWithName (ids::MOSH_LYRICSHEET).isValid())
+            return errResult ("build_lyrics_from_clip", "track already has a lyric sheet");
+
+        auto linesVar = spec.isObject() ? spec.getProperty ("lines", var()) : var();
+        if (! spec.isObject() || ! (bool) spec.getProperty ("ok", false) || ! linesVar.isArray() || linesVar.size() == 0)
+        {
+            const auto err = spec.isObject() ? spec.getProperty ("error", var()).toString() : juce::String();
+            const auto msg = err == "no_melody_detected" ? juce::String ("no melody detected in the take")
+                           : err.isNotEmpty() ? err : juce::String ("lyric service unavailable (start the generative service)");
+            emit ("build_lyrics_status", [&] { auto* o = new DynamicObject();
+                o->setProperty ("clipId", clipId); o->setProperty ("state", "error");
+                o->setProperty ("error", msg); return var (o); }());
+            return errResult ("build_lyrics_from_clip", msg);
+        }
+
+        beginTxn ("build_lyrics_from_clip");
+        const auto sheetId = juce::Uuid().toString();
+        auto sheet = mosh::LyricSheet::create (sheetId, spec.getProperty ("grid", "1/16").toString());
+        if (spec.getProperty ("topic", var()).toString().isNotEmpty())
+            sheet.setProperty (ids::lyricTopic, spec.getProperty ("topic", var()), nullptr);
+        auto container = mosh::LyricSheet::lines (sheet);
+        for (auto& lv : *linesVar.getArray())
+        {
+            auto line = mosh::LyricLine::create (juce::Uuid().toString(),
+                                                 (int) lv.getProperty ("index", 0),
+                                                 lv.getProperty ("role", "verse").toString());
+            line.setProperty (ids::lyricSeedText,       lv.getProperty ("seedText", var()), nullptr);
+            line.setProperty (ids::lyricSyllableTarget, (int) lv.getProperty ("syllableTarget", 0), nullptr);
+            line.setProperty (ids::lyricSyllableTol,    (int) lv.getProperty ("syllableTol", 1), nullptr);
+            line.setProperty (ids::lyricStress,         lv.getProperty ("stress", var()), nullptr);
+            line.setProperty (ids::lyricRhymeGroup,     lv.getProperty ("rhymeGroup", var()), nullptr);
+            line.setProperty (ids::status,              "seed", nullptr);
+            container.appendChild (line, nullptr);
+        }
+        tt->state.appendChild (sheet, &undoManager());
+
+        emit ("build_lyrics_status", [&] { auto* o = new DynamicObject();
+            o->setProperty ("clipId", clipId); o->setProperty ("state", "done");
+            o->setProperty ("lineCount", linesVar.size()); return var (o); }());
+        emitSnapshotInvalidated();
+
+        auto* d = new DynamicObject();
+        d->setProperty ("status", "done");
+        d->setProperty ("sheetId", sheetId);
+        d->setProperty ("trackId", trackId);
+        d->setProperty ("lineCount", linesVar.size());
+        return okResult ("build_lyrics_from_clip", var (d));
+    };
+
+    emit ("build_lyrics_status", [&] { auto* o = new DynamicObject();
+        o->setProperty ("clipId", clipId); o->setProperty ("state", "working"); return var (o); }());
+    logLine ("build_lyrics_from_clip", args, true, {}, false);
+
+    // Off the message thread (or inline for wait:true): notes (Basic Pitch) → words (Whisper,
+    // possibly empty) → mumble_spec. Absent notes (dead service / no Basic Pitch) ⇒ a
+    // no_melody_detected spec so `land` surfaces a friendly error.
+    auto fetchSpec = [this, srcFile, bpm, tsNum, tsDen, confThreshold] () -> juce::var
+    {
+        auto notesRes = jobManager.transcribe (srcFile, "mono");
+        auto notes = notesRes.isObject() ? notesRes.getProperty ("notes", var()) : var();
+        if (! notesRes.isObject() || ! (bool) notesRes.getProperty ("ok", false) || ! notes.isArray() || notes.size() == 0)
+        {
+            auto* e = new DynamicObject(); e->setProperty ("ok", false);
+            e->setProperty ("error", "no_melody_detected"); e->setProperty ("lines", var (Array<var>{}));
+            return var (e);
+        }
+        auto wordsRes = jobManager.transcribeWords (srcFile);
+        auto words = wordsRes.isObject() ? wordsRes.getProperty ("words", var()) : var();
+        if (! words.isArray()) words = var (Array<var>{});
+        return jobManager.mumbleSpec (notes, words, bpm, tsNum, tsDen, confThreshold);
+    };
+
+    if ((bool) args.getProperty ("wait", false))
+        return land (fetchSpec());
+
+    std::thread ([this, fetchSpec, land]
+    {
+        auto spec = fetchSpec();
+        juce::MessageManager::callAsync ([land, spec] { land (spec); });
+    }).detach();
+
+    auto* data = new DynamicObject();
+    data->setProperty ("status", "started");
+    return okResult ("build_lyrics_from_clip", var (data));
 }
 
 // ── ANN-001: authored timeline annotations (mirror the sections CRUD; multiplayer-

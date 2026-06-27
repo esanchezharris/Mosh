@@ -1138,6 +1138,36 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       }, 400);
       return ok(command, { status: "started" });
     }
+    case "build_lyrics_from_clip": {
+      // Mumble take (Phase 3) — async like the native path: emit working now, then after a
+      // simulated transcribe+analyze land a deterministic lyric sheet on the clip's OWN
+      // track (gapped seeds + one anchored word) + emit done. The Lyrics tab picks it up via
+      // the snapshot. No real audio analysis here; the mock drives the same command contract.
+      const f = findClip(str(args.clipId));
+      if (!f || f.clip.type !== "wave") return err(command, "no wave clip");
+      if (f.track.lyricSheet) return err(command, "track already has a lyric sheet");
+      const clipId = f.clip.id;
+      const trk = f.track;
+      emit("build_lyrics_status", { clipId, state: "working" });
+      window.setTimeout(() => {
+        pushUndo();
+        const mk = (index: number, seedText: string, rg: string, target: number, stress: string): LyricLine => ({
+          index, role: "verse", seedText, text: "", syllableTarget: target, syllableTol: 1,
+          stress, rhymeGroup: rg, rhymeStrictness: "", locked: false, sectionId: "", status: "seed",
+        });
+        trk.lyricSheet = {
+          id: `ls-${trk.id}`, grid: "1/16", language: "en", topic: "", mood: "",
+          explicit: "allow", rhymeStrictness: "slant", styleBias: false, specVersion: 1,
+          lines: [
+            mk(0, "___ ___ ___ fire", "A", 4, "XxxX"),
+            mk(1, "___ ___ ___", "B", 3, "XxX"),
+          ],
+        };
+        emit("build_lyrics_status", { clipId, state: "done", lineCount: 2 });
+        invalidate();
+      }, 400);
+      return ok(command, { status: "started" });
+    }
     case "sketch_beatbox": {
       // Sketch Phase 0 — beatbox WAV → drum MoshOps. Async like the native path:
       // emit working now, then after a simulated transduction set the tempo and land a
