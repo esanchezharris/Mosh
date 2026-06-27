@@ -103,6 +103,39 @@ namespace mosh::ids
     MOSH_DECLARE_ID (annotationColor)
     MOSH_DECLARE_ID (annotationAuthor)
 
+    // LYR-001 — Finish-My-Song LYRIC SHEET. A MOSH_LYRICSHEET node parented under a
+    // TRACK's own state (the vocal track) — one sheet per track, mirroring how
+    // moshInputDevice/trackType ride the track. It holds a LYRIC_LINES container of
+    // MOSH_LYRICLINE nodes, each a constraint-bearing line (role, syllable target,
+    // stress contour, rhyme group, locked words, seed text with ___ gaps). Plain
+    // ValueTree data ⇒ it saves/reloads with the .tracktionedit and is UNDOABLE when
+    // written with the undo manager. A purely ADDITIVE optional node (absent ⇒ no
+    // sheet), so it needs no format-version bump. Lines optionally reference a
+    // MOSH_SECTION via lyricSectionId. The constraint spec (§5) is materialised as
+    // these structured props, not an opaque blob.
+    MOSH_DECLARE_ID (MOSH_LYRICSHEET)
+    MOSH_DECLARE_ID (MOSH_LYRICLINE)
+    MOSH_DECLARE_ID (LYRIC_LINES)
+    // sheet-level
+    MOSH_DECLARE_ID (lyricGrid)            // "1/4" | "1/8" | "1/16" — bar subdivision for syllable inference
+    MOSH_DECLARE_ID (lyricLanguage)        // phonology language tag, e.g. "en"
+    MOSH_DECLARE_ID (lyricTopic)
+    MOSH_DECLARE_ID (lyricMood)
+    MOSH_DECLARE_ID (lyricExplicit)        // "allow" | "clean" | "mild"
+    MOSH_DECLARE_ID (lyricSpecVersion)     // constraint-spec schema version (int, >= 1)
+    // per-line
+    MOSH_DECLARE_ID (lyricIndex)           // 0-based line order
+    MOSH_DECLARE_ID (lyricRole)            // "verse" | "hook" | "bridge" | "adlib"
+    MOSH_DECLARE_ID (lyricSeedText)        // partial line with ___ gaps
+    MOSH_DECLARE_ID (lyricText)            // finalized line text
+    MOSH_DECLARE_ID (lyricSyllableTarget)  // 0 ⇒ infer from the beat grid
+    MOSH_DECLARE_ID (lyricSyllableTol)     // +/- tolerance on the target
+    MOSH_DECLARE_ID (lyricStress)          // contour string, e.g. "xXxxxXxxx" ('?' = free)
+    MOSH_DECLARE_ID (lyricRhymeGroup)      // lines sharing a group must rhyme ("A","B",…)
+    MOSH_DECLARE_ID (lyricRhymeStrictness) // "perfect" | "slant" | "free" ("" ⇒ inherit sheet)
+    MOSH_DECLARE_ID (lyricLocked)          // hard-fixed line (don't regenerate)
+    MOSH_DECLARE_ID (lyricSectionId)       // optional link to a MOSH_SECTION
+
     MOSH_DECLARE_ID (id)
     MOSH_DECLARE_ID (inputRef)
     MOSH_DECLARE_ID (timeRangeStart)

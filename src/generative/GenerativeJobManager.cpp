@@ -293,4 +293,29 @@ juce::var GenerativeJobManager::sketchBeatbox (const juce::File& inputWav, doubl
     return {};
 }
 
+juce::var GenerativeJobManager::getRhymes (const juce::String& word, const juce::String& strictness,
+                                           int maxN, int syllables)
+{
+    if (! ensureServiceRunning())
+        return {};
+
+    auto* body = new DynamicObject();
+    body->setProperty ("word", word);
+    body->setProperty ("strictness", strictness.isNotEmpty() ? strictness : juce::String ("slant"));
+    body->setProperty ("maxN", maxN > 0 ? maxN : 50);
+    if (syllables > 0)
+        body->setProperty ("syllables", syllables);
+
+    // Fast + deterministic; the service caps the (optional) phonology subprocess at
+    // 60s. A short timeout keeps an on-demand lookup snappy. Blocks → off the message
+    // thread (or accept a brief block for an explicit lookup). Mirrors transcribe().
+    URL url = URL (baseUrl + "/get_rhymes").withPOSTData (JSON::toString (var (body)));
+    auto opts = URL::InputStreamOptions (URL::ParameterHandling::inPostData)
+                    .withConnectionTimeoutMs (15000)
+                    .withExtraHeaders ("Content-Type: application/json");
+    if (auto s = url.createInputStream (opts))
+        return JSON::parse (s->readEntireStreamAsString());
+    return {};
+}
+
 } // namespace mosh

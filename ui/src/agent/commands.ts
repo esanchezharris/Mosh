@@ -101,6 +101,13 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "freeze_layer", desc: "Freeze a clip's render layer (commit the rendered audio)", args: [S("clipId")] },
   { command: "bounce_layer_to_clip", desc: "Bounce a render layer down to a plain clip", args: [S("clipId")] },
   { command: "remove_render_layer", desc: "Remove a clip's render layer", args: [S("clipId")] },
+
+  // ── lyrics (Finish My Song) ───────────────────────────────────────────────
+  { command: "create_lyric_sheet", desc: "Start a per-track lyric sheet for lyric completion (the vocal track)", args: [S("trackId"), S("grid", false, '"1/4"|"1/8"|"1/16" — bar subdivision for syllable inference'), S("language", false), S("topic", false), S("mood", false), S("explicit", false, '"allow"|"clean"|"mild"')] },
+  { command: "set_lyric_constraint", desc: "Set sheet-level lyric constraints (grid/topic/mood/explicit/default rhyme strictness)", args: [S("trackId"), S("grid", false), S("topic", false), S("mood", false), S("explicit", false), S("rhymeStrictness", false, '"perfect"|"slant"|"free"')] },
+  { command: "set_lyric_line", desc: "Write/update one lyric line by index — text, role, seed (___ = gap), syllable target, rhyme group, lock", args: [S("trackId"), N("lineIndex"), S("text", false), S("role", false, '"verse"|"hook"|"bridge"|"adlib"'), S("seedText", false, "partial line; ___ marks a gap"), N("syllableTarget", false, "0 ⇒ infer from grid"), N("syllableTol", false), S("stress", false, "contour, e.g. xXxxxXxxx"), S("rhymeGroup", false, "lines sharing a group must rhyme"), S("rhymeStrictness", false), B("locked", false), S("sectionId", false)] },
+  { command: "remove_lyric_line", desc: "Remove a lyric line by index (remaining lines re-index)", args: [S("trackId"), N("lineIndex")] },
+  { command: "get_rhymes", desc: "Phonology rhyme search for a word (perfect/slant, phoneme-based), filterable by syllable count — no LLM", args: [S("word"), S("strictness", false, '"perfect"|"slant"|"free"'), N("syllables", false, "filter to this syllable count"), N("maxN", false)] },
 ];
 
 export const AGENT_COMMAND_MAP = new Map(AGENT_COMMANDS.map((c) => [c.command, c]));

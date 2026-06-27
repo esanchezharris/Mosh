@@ -21,6 +21,37 @@ export type RenderLayer = {
   regionEnd?: number;
 };
 
+// LYR-001 — Finish-My-Song lyric sheet (per-track), from MoshOps.lyricSheetToVar().
+// One line carries its constraint spec (§5); the v2 Lyrics tab renders the flow meter
+// + rhyme tool from this. Transient generation output (proposals) arrives in L2.
+export type LyricLine = {
+  index: number;
+  role: "verse" | "hook" | "bridge" | "adlib" | string;
+  seedText: string;          // partial line with ___ gaps
+  text: string;              // finalized line
+  syllableTarget: number;    // 0 ⇒ infer from the grid
+  syllableTol: number;
+  stress: string;            // contour, e.g. "xXxxxX" ('?' = free)
+  rhymeGroup: string;        // lines sharing a group must rhyme
+  rhymeStrictness: string;   // "perfect"|"slant"|"free" ("" ⇒ inherit sheet)
+  locked: boolean;
+  sectionId: string;
+  status: "empty" | "seed" | "proposed" | "accepted" | "locked" | string;
+};
+export type LyricSheet = {
+  id: string;
+  grid: string;              // "1/4" | "1/8" | "1/16"
+  language: string;
+  topic: string;
+  mood: string;
+  explicit: "allow" | "clean" | "mild" | string;
+  rhymeStrictness: "perfect" | "slant" | "free" | string;
+  specVersion: number;
+  lines: LyricLine[];
+};
+// A ranked rhyme candidate from get_rhymes (phonology, no LLM).
+export type RhymeCandidate = { word: string; syllables: number; grade: "perfect" | "slant" | "none" | string };
+
 // SA3 colour-rack metadata from GET /colors (via list_colors).
 export type AvailableColor = {
   name: string;
@@ -228,6 +259,9 @@ export type Track = {
   // the track's destination (absent = default out; isTrack = routed into a track).
   input?: { deviceID: string; name?: string };
   output?: { isTrack: boolean; destId?: string; name: string; deviceID?: string };
+  // LYR-001 — the per-track lyric sheet (absent ⇒ no sheet; the Lyrics tab shows its
+  // empty state). Additive + optional.
+  lyricSheet?: LyricSheet;
 };
 
 // RTG-001/002 — routing enumerations (read-only, on-demand like AudioDevices).

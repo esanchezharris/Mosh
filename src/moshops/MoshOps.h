@@ -64,6 +64,13 @@ private:
     juce::var cmdRenameSection  (const juce::var& args);
     juce::var cmdMoveSection    (const juce::var& args);
     juce::var cmdRemoveSection  (const juce::var& args);
+    // LYR-001 — Finish-My-Song lyric sheet (MOSH_LYRICSHEET on a track; undoable).
+    juce::var cmdCreateLyricSheet  (const juce::var& args);
+    juce::var cmdRemoveLyricSheet  (const juce::var& args);
+    juce::var cmdSetLyricConstraint (const juce::var& args);
+    juce::var cmdSetLyricLine       (const juce::var& args);
+    juce::var cmdRemoveLyricLine    (const juce::var& args);
+    juce::var cmdGetRhymes          (const juce::var& args);  // phonology read (service); not undoable
     // ANN-001 — authored timeline annotations (MOSH_ANNOTATIONS tree; undoable +
     // multiplayer-broadcast). create self-broadcasts its resolved cross-peer id.
     juce::var cmdCreateAnnotation (const juce::var& args);
@@ -288,6 +295,13 @@ private:
     // creates the tree). Each entry: { id, name, startBeat, endBeat, color? }.
     juce::var sectionsToVar();
     juce::var annotationsToVar();
+
+    // LYR-001 — a track's MOSH_LYRICSHEET as a snapshot object (read-only; never
+    // creates the tree). { id, grid, language, topic, mood, explicit, rhymeStrictness,
+    // specVersion, lines:[{ index, role, seedText, text, syllableTarget, syllableTol,
+    // stress, rhymeGroup, rhymeStrictness, locked, sectionId, status }] }, or a null
+    // var when the track has no sheet.
+    juce::var lyricSheetToVar (te::AudioTrack& t);
 
     // KEY-001 — the default musical key surfaced in the snapshot before any set_key
     // (A/minor — matches the voice's neutral A4 tonic + SCALES.minor in voice.js).

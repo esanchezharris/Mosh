@@ -36,6 +36,10 @@ export PYTHONDONTWRITEBYTECODE="${PYTHONDONTWRITEBYTECODE:-1}"
 # sft/setup-sft.sh) exports SFT_PY for the trainer CLI. Absent → the SFT lane is
 # simply unavailable; the rest of the service is unaffected.
 [[ -f sft/.sft.env ]] && source ./sft/.sft.env
+# Phonology (lyric rhyme/syllable/stress) lives in its own venv; .phonology.env
+# (written by phonology/setup-phonology.sh) exports PHONOLOGY_PY. Absent → /get_rhymes
+# runs in-process (precise if cmudict is importable, else a stdlib vowel-group heuristic).
+[[ -f phonology/.phonology.env ]] && source ./phonology/.phonology.env
 
 export SA3_MLX_DIR="${SA3_MLX_DIR:-$HOME/AI/stable-audio-3/optimized/mlx}"
 export COLORRACK_DATA="${COLORRACK_DATA:-$(pwd)/colors/COLORRACK_DATA}"

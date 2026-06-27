@@ -6,6 +6,7 @@
 #include "state/Migrations.h"
 #include "state/Section.h"
 #include "state/Annotation.h"
+#include "state/Lyrics.h"
 #include "multiplayer/LogicalId.h"
 #include "multiplayer/TrackCommit.h"
 #include "plugins/moshfx/MoshFxPlugins.h"
@@ -528,6 +529,13 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "rename_section")    return cmdRenameSection (args);
     if (name == "move_section")      return cmdMoveSection (args);
     if (name == "remove_section")    return cmdRemoveSection (args);
+    // LYR-001 — Finish-My-Song lyric sheet (per-track).
+    if (name == "create_lyric_sheet")   return cmdCreateLyricSheet (args);
+    if (name == "remove_lyric_sheet")   return cmdRemoveLyricSheet (args);
+    if (name == "set_lyric_constraint") return cmdSetLyricConstraint (args);
+    if (name == "set_lyric_line")       return cmdSetLyricLine (args);
+    if (name == "remove_lyric_line")    return cmdRemoveLyricLine (args);
+    if (name == "get_rhymes")           return cmdGetRhymes (args);
     // Annotations broadcast over MP (shared collaborator comments). create self-broadcasts
     // its resolved cross-peer id; the rest address by that id via the generic wrapper.
     if (name == "create_annotation") return cmdCreateAnnotation (args);
@@ -839,6 +847,197 @@ juce::var MoshOps::sectionsToVar()
             out.add (var (o));
         }
     return out;
+}
+
+// ── LYR-001 — Finish-My-Song lyric sheet (per-track MOSH_LYRICSHEET) ───────────
+
+juce::var MoshOps::cmdCreateLyricSheet (const juce::var& args)
+{
+    const auto trackId = args.getProperty ("trackId", var()).toString();
+    auto* t = findTrack (trackId);
+    if (t == nullptr) return errResult ("create_lyric_sheet", "no track: " + trackId);
+    if (t->state.getChildWithName (ids::MOSH_LYRICSHEET).isValid())
+        return errResult ("create_lyric_sheet", "track already has a lyric sheet");
+
+    const auto grid     = args.getProperty ("grid", "1/16").toString();
+    const auto language = args.getProperty ("language", "en").toString();
+
+    beginTxn ("create_lyric_sheet");
+    const auto sheetId = juce::Uuid().toString();
+    auto sheet = mosh::LyricSheet::create (sheetId, grid, language);
+    if (args.hasProperty ("topic"))    sheet.setProperty (ids::lyricTopic,    args.getProperty ("topic", var()), nullptr);
+    if (args.hasProperty ("mood"))     sheet.setProperty (ids::lyricMood,     args.getProperty ("mood", var()), nullptr);
+    if (args.hasProperty ("explicit")) sheet.setProperty (ids::lyricExplicit, args.getProperty ("explicit", var()), nullptr);
+    t->state.appendChild (sheet, &undoManager());
+
+    auto* data = new DynamicObject();
+    data->setProperty ("sheetId", sheetId);
+    data->setProperty ("trackId", trackId);
+    logLine ("create_lyric_sheet", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("create_lyric_sheet", var (data));
+}
+
+juce::var MoshOps::cmdRemoveLyricSheet (const juce::var& args)
+{
+    const auto trackId = args.getProperty ("trackId", var()).toString();
+    auto* t = findTrack (trackId);
+    if (t == nullptr) return errResult ("remove_lyric_sheet", "no track: " + trackId);
+    auto sheet = t->state.getChildWithName (ids::MOSH_LYRICSHEET);
+    if (! sheet.isValid()) return errResult ("remove_lyric_sheet", "track has no lyric sheet");
+
+    beginTxn ("remove_lyric_sheet");
+    t->state.removeChild (sheet, &undoManager());
+    logLine ("remove_lyric_sheet", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("remove_lyric_sheet");
+}
+
+juce::var MoshOps::cmdSetLyricConstraint (const juce::var& args)
+{
+    const auto trackId = args.getProperty ("trackId", var()).toString();
+    auto* t = findTrack (trackId);
+    if (t == nullptr) return errResult ("set_lyric_constraint", "no track: " + trackId);
+    auto sheet = t->state.getChildWithName (ids::MOSH_LYRICSHEET);
+    if (! sheet.isValid()) return errResult ("set_lyric_constraint", "track has no lyric sheet");
+
+    beginTxn ("set_lyric_constraint");
+    if (args.hasProperty ("grid"))            sheet.setProperty (ids::lyricGrid,            args.getProperty ("grid", var()), &undoManager());
+    if (args.hasProperty ("topic"))           sheet.setProperty (ids::lyricTopic,           args.getProperty ("topic", var()), &undoManager());
+    if (args.hasProperty ("mood"))            sheet.setProperty (ids::lyricMood,            args.getProperty ("mood", var()), &undoManager());
+    if (args.hasProperty ("explicit"))        sheet.setProperty (ids::lyricExplicit,        args.getProperty ("explicit", var()), &undoManager());
+    if (args.hasProperty ("rhymeStrictness")) sheet.setProperty (ids::lyricRhymeStrictness, args.getProperty ("rhymeStrictness", var()), &undoManager());
+    logLine ("set_lyric_constraint", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("set_lyric_constraint");
+}
+
+juce::var MoshOps::cmdSetLyricLine (const juce::var& args)
+{
+    const auto trackId = args.getProperty ("trackId", var()).toString();
+    auto* t = findTrack (trackId);
+    if (t == nullptr) return errResult ("set_lyric_line", "no track: " + trackId);
+    auto sheet = t->state.getChildWithName (ids::MOSH_LYRICSHEET);
+    if (! sheet.isValid()) return errResult ("set_lyric_line", "track has no lyric sheet");
+    auto lines = mosh::LyricSheet::lines (sheet);
+
+    const int lineIndex = (int) args.getProperty ("lineIndex", -1);
+    if (lineIndex < 0) return errResult ("set_lyric_line", "lineIndex required (>= 0)");
+    if (lineIndex > lines.getNumChildren())
+        return errResult ("set_lyric_line", "lineIndex out of range (lines are kept dense)");
+
+    beginTxn ("set_lyric_line");
+    auto line = lines.getChildWithProperty (ids::lyricIndex, lineIndex);
+    if (! line.isValid())
+    {
+        // Append a new line at the next index (lineIndex == current count).
+        const auto role = args.getProperty ("role", "verse").toString();
+        line = mosh::LyricLine::create (juce::Uuid().toString(), lineIndex, role);
+        lines.appendChild (line, &undoManager());
+    }
+    if (args.hasProperty ("text"))            line.setProperty (ids::lyricText,            args.getProperty ("text", var()), &undoManager());
+    if (args.hasProperty ("role"))            line.setProperty (ids::lyricRole,            args.getProperty ("role", var()), &undoManager());
+    if (args.hasProperty ("seedText"))        line.setProperty (ids::lyricSeedText,        args.getProperty ("seedText", var()), &undoManager());
+    if (args.hasProperty ("syllableTarget"))  line.setProperty (ids::lyricSyllableTarget,  (int) args.getProperty ("syllableTarget", 0), &undoManager());
+    if (args.hasProperty ("syllableTol"))     line.setProperty (ids::lyricSyllableTol,     (int) args.getProperty ("syllableTol", 1), &undoManager());
+    if (args.hasProperty ("stress"))          line.setProperty (ids::lyricStress,          args.getProperty ("stress", var()), &undoManager());
+    if (args.hasProperty ("rhymeGroup"))      line.setProperty (ids::lyricRhymeGroup,      args.getProperty ("rhymeGroup", var()), &undoManager());
+    if (args.hasProperty ("rhymeStrictness")) line.setProperty (ids::lyricRhymeStrictness, args.getProperty ("rhymeStrictness", var()), &undoManager());
+    if (args.hasProperty ("locked"))          line.setProperty (ids::lyricLocked,          (bool) args.getProperty ("locked", false), &undoManager());
+    if (args.hasProperty ("sectionId"))       line.setProperty (ids::lyricSectionId,       args.getProperty ("sectionId", var()), &undoManager());
+    // A line carrying a seed/text is no longer "empty" (richer statuses arrive with the
+    // generation loop in L2).
+    if (line[ids::lyricText].toString().isNotEmpty() || line[ids::lyricSeedText].toString().isNotEmpty())
+        line.setProperty (ids::status, "seed", &undoManager());
+
+    auto* data = new DynamicObject();
+    data->setProperty ("lineIndex", lineIndex);
+    data->setProperty ("lineId", line[ids::id].toString());
+    logLine ("set_lyric_line", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("set_lyric_line", var (data));
+}
+
+juce::var MoshOps::cmdRemoveLyricLine (const juce::var& args)
+{
+    const auto trackId = args.getProperty ("trackId", var()).toString();
+    auto* t = findTrack (trackId);
+    if (t == nullptr) return errResult ("remove_lyric_line", "no track: " + trackId);
+    auto sheet = t->state.getChildWithName (ids::MOSH_LYRICSHEET);
+    if (! sheet.isValid()) return errResult ("remove_lyric_line", "track has no lyric sheet");
+    auto lines = mosh::LyricSheet::lines (sheet);
+
+    const int lineIndex = (int) args.getProperty ("lineIndex", -1);
+    auto line = lines.getChildWithProperty (ids::lyricIndex, lineIndex);
+    if (! line.isValid()) return errResult ("remove_lyric_line", "no line at index " + juce::String (lineIndex));
+
+    beginTxn ("remove_lyric_line");
+    lines.removeChild (line, &undoManager());
+    // Keep indices dense: renumber the surviving lines by their child order.
+    for (int i = 0; i < lines.getNumChildren(); ++i)
+        lines.getChild (i).setProperty (ids::lyricIndex, i, &undoManager());
+    logLine ("remove_lyric_line", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("remove_lyric_line");
+}
+
+juce::var MoshOps::cmdGetRhymes (const juce::var& args)
+{
+    const auto word = args.getProperty ("word", var()).toString().trim();
+    if (word.isEmpty()) return errResult ("get_rhymes", "word required");
+    auto strictness = args.getProperty ("strictness", "slant").toString();
+    if (strictness != "perfect" && strictness != "slant" && strictness != "free")
+        strictness = "slant";
+    const int syllables = (int) args.getProperty ("syllables", 0);
+    const int maxN      = (int) args.getProperty ("maxN", 50);
+
+    // Phonology read — a fast, deterministic SERVICE call (no LLM, not undoable, no
+    // state change). Blocks briefly; this is an explicit on-demand lookup.
+    auto res = jobManager.getRhymes (word, strictness, maxN, syllables);
+    const bool ok = res.isObject() && (bool) res.getProperty ("ok", false);
+    logLine ("get_rhymes", args, ok, ok ? juce::String() : juce::String ("phonology service unavailable"), false);
+    if (! ok)
+        return errResult ("get_rhymes", "phonology service unavailable (start the generative service)");
+    return okResult ("get_rhymes", res);
+}
+
+juce::var MoshOps::lyricSheetToVar (te::AudioTrack& t)
+{
+    auto sheet = t.state.getChildWithName (ids::MOSH_LYRICSHEET);
+    if (! sheet.isValid()) return {};
+
+    auto* o = new DynamicObject();
+    o->setProperty ("id",              sheet[ids::id].toString());
+    o->setProperty ("grid",            sheet[ids::lyricGrid].toString());
+    o->setProperty ("language",        sheet[ids::lyricLanguage].toString());
+    o->setProperty ("topic",           sheet[ids::lyricTopic].toString());
+    o->setProperty ("mood",            sheet[ids::lyricMood].toString());
+    o->setProperty ("explicit",        sheet[ids::lyricExplicit].toString());
+    o->setProperty ("rhymeStrictness", sheet[ids::lyricRhymeStrictness].toString());
+    o->setProperty ("specVersion",     (int) sheet[ids::lyricSpecVersion]);
+
+    Array<var> lines;
+    auto container = mosh::LyricSheet::lines (sheet);
+    for (int i = 0; i < container.getNumChildren(); ++i)
+    {
+        auto l = container.getChild (i);
+        auto* lo = new DynamicObject();
+        lo->setProperty ("index",           (int) l[ids::lyricIndex]);
+        lo->setProperty ("role",            l[ids::lyricRole].toString());
+        lo->setProperty ("seedText",        l[ids::lyricSeedText].toString());
+        lo->setProperty ("text",            l[ids::lyricText].toString());
+        lo->setProperty ("syllableTarget",  (int) l[ids::lyricSyllableTarget]);
+        lo->setProperty ("syllableTol",     (int) l[ids::lyricSyllableTol]);
+        lo->setProperty ("stress",          l[ids::lyricStress].toString());
+        lo->setProperty ("rhymeGroup",      l[ids::lyricRhymeGroup].toString());
+        lo->setProperty ("rhymeStrictness", l[ids::lyricRhymeStrictness].toString());
+        lo->setProperty ("locked",          (bool) l[ids::lyricLocked]);
+        lo->setProperty ("sectionId",       l[ids::lyricSectionId].toString());
+        lo->setProperty ("status",          l[ids::status].toString());
+        lines.add (var (lo));
+    }
+    o->setProperty ("lines", lines);
+    return var (o);
 }
 
 // ── ANN-001: authored timeline annotations (mirror the sections CRUD; multiplayer-
@@ -6505,6 +6704,10 @@ juce::var MoshOps::trackToVar (te::AudioTrack& t, int index)
         o->setProperty ("isReturn", true);
         o->setProperty ("returnBus", r->busNumber.get());
     }
+    // LYR-001 — the per-track lyric sheet (absent ⇒ no property; the v2 Lyrics tab
+    // shows its empty state). Additive + optional: flat consumers ignore it.
+    if (auto sheet = lyricSheetToVar (t); ! sheet.isVoid())
+        o->setProperty ("lyricSheet", sheet);
     return var (o);
 }
 

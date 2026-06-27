@@ -14,7 +14,8 @@
 // behaviour the UI relies on is exercised, while audio/Tracktion concepts never
 // appear (the swappable seam holds on the web side too).
 
-import type { Snapshot, Clip, Track, Transport, CommandResult, RenderLayer, TrainingState, MidiNote, PluginParam, MoshFxReadout } from "./types";
+import type { Snapshot, Clip, Track, Transport, CommandResult, RenderLayer, TrainingState, MidiNote, PluginParam, MoshFxReadout, LyricSheet } from "./types";
+import { syllablesForWord } from "./lyrics/flowMeter";
 
 export const MOCK_ENABLED: boolean =
   typeof import.meta !== "undefined" && Boolean(import.meta.env?.DEV);
@@ -160,7 +161,25 @@ const listeners = new Map<string, Set<Listener>>();
 // Mock command log (drives the CommandLog panel). Read-only commands don't log.
 const cmdLog: { command: string; ok: boolean; undoable: boolean; ts: number }[] = [];
 const READONLY = new Set(["get_snapshot", "get_clip_peaks", "file_peaks", "audition_file", "stop_audition", "get_command_log", "list_plugins", "list_builtins", "list_colors", "list_audio_devices", "list_wave_inputs", "list_track_outputs", "list_takes", "list_training_sources", "training_job_status", "list_lora_adapters"]);
-const NON_UNDOABLE = new Set(["set_transport", "arm_track", "set_input_monitor", "undo", "redo", "save", "reload", "new_project", "render_layer", "open_plugin_editor", "set_plugin_param", "export_audio", "mark_take", "import_training_source", "approve_training_source", "build_training_corpus", "submit_training_job", "cancel_training_job", "import_lora_adapter", "activate_lora_adapter"]);
+const NON_UNDOABLE = new Set(["set_transport", "arm_track", "set_input_monitor", "undo", "redo", "save", "reload", "new_project", "render_layer", "open_plugin_editor", "set_plugin_param", "export_audio", "mark_take", "import_training_source", "approve_training_source", "build_training_corpus", "submit_training_job", "cancel_training_job", "import_lora_adapter", "activate_lora_adapter", "get_rhymes"]);
+
+// LYR-001 — a tiny deterministic rhyme map so the rhyme tool returns something in
+// browser dev / e2e (the real path is the phonology service). Suffix fallback keeps
+// it non-empty for unknown words.
+const MOCK_RHYMES: Record<string, string[]> = {
+  flame: ["name", "blame", "game", "frame", "same", "claim", "aim", "tame"],
+  cat: ["hat", "bat", "rat", "sat", "flat", "mat", "that", "chat"],
+  light: ["night", "sight", "fight", "right", "tight", "bright", "might"],
+  back: ["track", "rap", "attack", "stack", "black", "crack", "rack"],
+  flow: ["go", "low", "show", "know", "glow", "slow", "though"],
+};
+function mockRhymes(word: string, maxN: number, syllables: number) {
+  const base = MOCK_RHYMES[word.toLowerCase()] ?? [`${word}er`, `${word}in`, `${word}o`];
+  return base
+    .map((w) => ({ word: w, syllables: syllablesForWord(w), grade: "perfect" as const }))
+    .filter((c) => syllables <= 0 || c.syllables === syllables)
+    .slice(0, maxN > 0 ? maxN : 50);
+}
 function emit(type: string, payload?: unknown) {
   const ls = listeners.get("mosh_event");
   if (ls) for (const fn of ls) fn({ type, payload });
@@ -479,6 +498,90 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       const idx = list.findIndex((x) => x.id === str(args.sectionId));
       if (idx < 0) return err(command, "section not found");
       pushUndo(); list.splice(idx, 1); invalidate(); return ok(command);
+    }
+
+    // ── LYR-001 — lyric sheet (per-track) ────────────────────────────────────
+    case "create_lyric_sheet": {
+      const t = findTrack(str(args.trackId));
+      if (!t) return err(command, "track not found");
+      if (t.lyricSheet) return err(command, "track already has a lyric sheet");
+      pushUndo();
+      const sheet: LyricSheet = {
+        id: `ls-${t.id}`,
+        grid: str(args.grid, "1/16"),
+        language: str(args.language, "en"),
+        topic: str(args.topic, ""),
+        mood: str(args.mood, ""),
+        explicit: str(args.explicit, "allow"),
+        rhymeStrictness: "slant",
+        specVersion: 1,
+        lines: [],
+      };
+      t.lyricSheet = sheet;
+      invalidate();
+      return ok(command, { sheetId: sheet.id, trackId: t.id });
+    }
+    case "remove_lyric_sheet": {
+      const t = findTrack(str(args.trackId));
+      if (!t?.lyricSheet) return err(command, "track has no lyric sheet");
+      pushUndo(); delete t.lyricSheet; invalidate(); return ok(command);
+    }
+    case "set_lyric_constraint": {
+      const t = findTrack(str(args.trackId));
+      if (!t?.lyricSheet) return err(command, "track has no lyric sheet");
+      pushUndo();
+      const s = t.lyricSheet;
+      if (args.grid != null) s.grid = str(args.grid, s.grid);
+      if (args.topic != null) s.topic = str(args.topic, s.topic);
+      if (args.mood != null) s.mood = str(args.mood, s.mood);
+      if (args.explicit != null) s.explicit = str(args.explicit, s.explicit);
+      if (args.rhymeStrictness != null) s.rhymeStrictness = str(args.rhymeStrictness, s.rhymeStrictness);
+      invalidate(); return ok(command);
+    }
+    case "set_lyric_line": {
+      const t = findTrack(str(args.trackId));
+      if (!t?.lyricSheet) return err(command, "track has no lyric sheet");
+      const idx = num(args.lineIndex, -1);
+      if (idx < 0) return err(command, "lineIndex required");
+      const lines = t.lyricSheet.lines;
+      if (idx > lines.length) return err(command, "lineIndex out of range");
+      pushUndo();
+      let line = lines.find((l) => l.index === idx);
+      if (!line) {
+        line = { index: idx, role: str(args.role, "verse"), seedText: "", text: "", syllableTarget: 0, syllableTol: 1, stress: "", rhymeGroup: "", rhymeStrictness: "", locked: false, sectionId: "", status: "empty" };
+        lines.push(line);
+      }
+      if (args.text != null) line.text = str(args.text, line.text);
+      if (args.role != null) line.role = str(args.role, line.role);
+      if (args.seedText != null) line.seedText = str(args.seedText, line.seedText);
+      if (args.syllableTarget != null) line.syllableTarget = num(args.syllableTarget, line.syllableTarget);
+      if (args.syllableTol != null) line.syllableTol = num(args.syllableTol, line.syllableTol);
+      if (args.stress != null) line.stress = str(args.stress, line.stress);
+      if (args.rhymeGroup != null) line.rhymeGroup = str(args.rhymeGroup, line.rhymeGroup);
+      if (args.rhymeStrictness != null) line.rhymeStrictness = str(args.rhymeStrictness, line.rhymeStrictness);
+      if (args.locked != null) line.locked = Boolean(args.locked);
+      if (args.sectionId != null) line.sectionId = str(args.sectionId, line.sectionId);
+      if (line.text || line.seedText) line.status = "seed";
+      invalidate(); return ok(command, { lineIndex: idx });
+    }
+    case "remove_lyric_line": {
+      const t = findTrack(str(args.trackId));
+      if (!t?.lyricSheet) return err(command, "track has no lyric sheet");
+      const idx = num(args.lineIndex, -1);
+      const at = t.lyricSheet.lines.findIndex((l) => l.index === idx);
+      if (at < 0) return err(command, "no line at index " + idx);
+      pushUndo();
+      t.lyricSheet.lines.splice(at, 1);
+      t.lyricSheet.lines.forEach((l, i) => (l.index = i)); // keep dense
+      invalidate(); return ok(command);
+    }
+    case "get_rhymes": {
+      const word = str(args.word).trim();
+      if (!word) return err(command, "word required");
+      let strictness = str(args.strictness, "slant");
+      if (!["perfect", "slant", "free"].includes(strictness)) strictness = "slant";
+      const candidates = mockRhymes(word, num(args.maxN, 50), num(args.syllables, 0));
+      return ok(command, { ok: true, word, strictness, inDict: word.toLowerCase() in MOCK_RHYMES, candidates });
     }
 
     case "create_annotation": {

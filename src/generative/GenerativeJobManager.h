@@ -50,6 +50,15 @@ public:
         on failure (service down, venv absent → 503). */
     juce::var sketchBeatbox (const juce::File& inputWav, double bpm, int bars);
 
+    /** Phonology rhyme search (POST /get_rhymes) — Finish-My-Song rung 1. Fast +
+        deterministic, no LLM. SYNCHRONOUS — call on a BACKGROUND thread (or accept a
+        brief block on the message thread for an explicit on-demand lookup). Returns
+        { ok, word, inDict, candidates:[{word,syllables,grade}] }, or a var whose ok is
+        false / {} on failure (service down → {}). `strictness` ∈ perfect|slant|free;
+        `syllables` 0 ⇒ no syllable filter. */
+    juce::var getRhymes (const juce::String& word, const juce::String& strictness,
+                         int maxN, int syllables);
+
     juce::String serviceBuild() const { return svcBuild; }
 
 private:

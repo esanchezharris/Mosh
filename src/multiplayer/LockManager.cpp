@@ -20,7 +20,7 @@ LockManager::Scope LockManager::classify (const juce::String& command)
         "list_wave_inputs", "list_track_outputs", "list_takes", "list_colors",
         "list_directory", "list_training_sources", "list_lora_adapters",
         "get_clip_peaks", "file_peaks", "get_command_log", "audition_file",
-        "list_transform_targets",
+        "list_transform_targets", "get_rhymes",
         "stop_audition", "export_audio", "save", "reload", "save_as", "new_project",
         "open_project", "set_transport", "stop_recording", "undo", "redo",
         "mark_take", "batch_begin", "batch_end", "enable_track_meter", "disable_track_meter",
@@ -49,6 +49,9 @@ LockManager::Scope LockManager::classify (const juce::String& command)
         "add_midi_clip", "set_track_input", "set_track_output", "add_send",
         "set_send_level", "remove_send", "add_automation_point", "remove_automation_point",
         "set_automation_point", "clear_automation",
+        // LYR-001 — lyric sheet mutations target a track (args carry trackId).
+        "create_lyric_sheet", "remove_lyric_sheet", "set_lyric_constraint",
+        "set_lyric_line", "remove_lyric_line",
     };
 
     // Clip-scoped: mutate one clip (args carry a clipId). Key = the clip's track
