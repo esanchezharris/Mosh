@@ -300,23 +300,12 @@
 }
 /* Shell reactivity (#10): --lvl (0..1, set imperatively from per-track levels) drives a
    lime glow on the track icon + a faint inner glow on the lane, so each track lights up
-   with its own audio while playing — alongside Moshi reacting to the master spectrum.
-   --pulse (0..1, decays itself from the pulseBus) layers a brief edit-FLASH on top, so a
-   lane reacts when a command lands on it (mute, drag, plugin add, an agent batch move…)
-   even when stopped. Both vars combine in one box-shadow (last rule wins, so they share). */
-.v2-lhead .v2-licon { box-shadow: 0 0 calc(var(--lvl, 0) * 22px + var(--pulse, 0) * 18px) rgba(204, 255, 54, calc(var(--lvl, 0) * 0.9 + var(--pulse, 0) * 0.85)); }
+   with its own audio while playing — alongside Moshi reacting to the master spectrum. */
+.v2-lhead .v2-licon { box-shadow: 0 0 calc(var(--lvl, 0) * 22px) rgba(204, 255, 54, calc(var(--lvl, 0) * 0.9)); }
 .v2-lane { transition: box-shadow 90ms linear; }
-.v2-lane[data-track-id] {
-  box-shadow:
-    inset 2px 0 0 rgba(204, 255, 54, calc(var(--lvl, 0) * 0.85 + var(--pulse, 0) * 0.95)),
-    inset 0 0 38px rgba(204, 255, 54, calc(var(--lvl, 0) * 0.13 + var(--pulse, 0) * 0.2));
-}
-/* Header edit-flash via a lime background wash (not box-shadow — that slot is the
-   selection bar, which must survive a pulse). Alpha is driven per-frame, so it eases. */
-.v2-lhead[data-track-id] { background-image: linear-gradient(0deg, rgba(204, 255, 54, calc(var(--pulse, 0) * 0.14)), rgba(204, 255, 54, calc(var(--pulse, 0) * 0.14))); }
+.v2-lane[data-track-id] { box-shadow: inset 2px 0 0 rgba(204, 255, 54, calc(var(--lvl, 0) * 0.85)), inset 0 0 38px rgba(204, 255, 54, calc(var(--lvl, 0) * 0.13)); }
 @media (prefers-reduced-motion: reduce) {
   .v2-lhead .v2-licon, .v2-lane[data-track-id] { box-shadow: none; transition: none; }
-  .v2-lhead[data-track-id] { background-image: none; }
 }
 .v2-lmeta { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .v2-lname { display: block; font-size: 13px; color: var(--v2-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

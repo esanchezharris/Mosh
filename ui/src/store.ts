@@ -23,7 +23,6 @@ import { useSettings } from "./settings/store";
 // Which shell is active — the v2 shell also surfaces collaborator video, so the
 // webrtc_signal gate must honor it (not just the legacy redesignShell flag).
 import { isV2Active } from "./v2/shellFlag";
-import { markPulse } from "./v2/pulseBus";
 // MP-001 — multiplayer presence + the commit-on-move trigger (pure helpers).
 import {
   deriveActiveTrackId, computeSyncActions, pruneOfflineLocks,
@@ -207,19 +206,6 @@ type State = {
 // `run` is used as both fulfil and reject handler so a failed link can't wedge it.
 let mpSyncChain: Promise<void> = Promise.resolve();
 
-// Which track(s) a command's args refer to, for the v2 edit-pulse: a direct trackId,
-// and/or the track that owns a referenced clipId. Tolerant of missing args / null
-// snapshot; returns [] for app/transport-level commands that touch no track.
-function pulseTargets(args: Record<string, unknown>, snapshot: Snapshot | null): string[] {
-  const ids = new Set<string>();
-  if (typeof args.trackId === "string") ids.add(args.trackId);
-  if (typeof args.clipId === "string" && snapshot) {
-    for (const t of snapshot.tracks)
-      if (t.clips.some((c) => c.id === args.clipId)) { ids.add(t.id); break; }
-  }
-  return [...ids];
-}
-
 export const useStore = create<State>((set, get) => ({
   snapshot: null,
   connected: isNative(),
@@ -288,10 +274,6 @@ export const useStore = create<State>((set, get) => ({
   exec: async (command, args = {}) => {
     const res = await executeCommand<CommandResult>({ command, args });
     if (!res.ok) set({ lastError: res.error ?? `${command} failed` });
-    // Edit-pulse (v2): flash the lane(s) a successful command touched, so the shell
-    // reacts to structural edits the way Moshi reacts to sound. Imperative + cheap
-    // (no React state); gated to v2 so the classic shell pays nothing.
-    else if (isV2Active()) for (const id of pulseTargets(args, get().snapshot)) markPulse(id);
     return res;
   },
 

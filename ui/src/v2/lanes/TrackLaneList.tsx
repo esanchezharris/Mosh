@@ -14,7 +14,6 @@ import { BarRuler } from "../timeline/BarRuler";
 import { Playhead } from "../timeline/Playhead";
 import { ClipView } from "./ClipView";
 import { meterOf, contentSeconds, HEAD_W } from "../timeline/geom";
-import { pulseLevel } from "../pulseBus";
 
 const TYPE_ICON: Record<string, string> = { drum: "▦", audio: "≈", group: "▤" };
 
@@ -49,16 +48,14 @@ export function TrackLaneList({ snapshot }: { snapshot: Snapshot }) {
   }, [fit]);
 
   // Shell reactivity (#10): each lane glows with its OWN live audio level while playing,
-  // in concert with Moshi (who reacts to the master spectrum), AND flashes briefly when a
-  // command lands on it (the edit-pulse — mute, drag, plugin add, an agent batch move…).
-  // Driven imperatively from the 30Hz `levels` feed + the pulseBus via a rAF loop that
-  // sets `--lvl` (audio) and `--pulse` (edit) CSS vars on every [data-track-id] node
-  // (header + lane) — no React re-renders, eased for smoothness. Pure presentation off
-  // telemetry; never touches the audio thread.
+  // in concert with Moshi (who reacts to the master spectrum). Driven imperatively from
+  // the 30Hz `levels` feed via a rAF loop that sets a `--lvl` CSS var on every
+  // [data-track-id] node (header icon + lane) — no React re-renders, eased for smoothness.
+  // Pure presentation off telemetry; never touches the audio thread.
   useEffect(() => {
     let raf = 0;
     const cur = new Map<string, number>();
-    const tick = (now: number) => {
+    const tick = () => {
       const st = useStore.getState();
       const playing = st.transport.playing;
       const levels = st.levels.tracks;
@@ -73,11 +70,7 @@ export function TrackLaneList({ snapshot }: { snapshot: Snapshot }) {
           if (playing && lv) { const db = Math.max(lv.l, lv.r); target = Math.sqrt(Math.max(0, Math.min(1, (db + 54) / 50))); }
           const next = (cur.get(id) ?? 0) + (target - (cur.get(id) ?? 0)) * 0.28;
           cur.set(id, next);
-          const pulse = pulseLevel(id, now); // already eased; decays itself
-          root.querySelectorAll<HTMLElement>(`[data-track-id="${id}"]`).forEach((n) => {
-            n.style.setProperty("--lvl", next.toFixed(3));
-            n.style.setProperty("--pulse", pulse.toFixed(3));
-          });
+          root.querySelectorAll<HTMLElement>(`[data-track-id="${id}"]`).forEach((n) => n.style.setProperty("--lvl", next.toFixed(3)));
         });
       }
       raf = requestAnimationFrame(tick);
