@@ -17,12 +17,20 @@ import { meterOf, contentSeconds, HEAD_W } from "../timeline/geom";
 
 const TYPE_ICON: Record<string, string> = { drum: "▦", audio: "≈", group: "▤" };
 
-export function TrackLaneList({ snapshot }: { snapshot: Snapshot }) {
+export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; dragging?: boolean }) {
   const pxPerSec = useStore((s) => s.pxPerSec);
   const setPxPerSec = useStore((s) => s.setPxPerSec);
   const sectionZoom = useShell((s) => s.sectionZoom);
   const setSectionZoom = useShell((s) => s.setSectionZoom);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const navTrackRef = useRef<HTMLDivElement>(null);
+  // The section navigator is now its OWN panel above the arrangement (concept-style
+  // separation). It shares the timeline's x-axis but is a separate scroll context, so
+  // translate its track to track the arrangement's scrollLeft and stay bar-aligned.
+  const syncNav = useCallback(() => {
+    const sl = scrollRef.current?.scrollLeft ?? 0;
+    if (navTrackRef.current) navTrackRef.current.style.transform = `translateX(${-sl}px)`;
+  }, []);
 
   const tracks = snapshot.tracks.filter((t) => !t.isGroup);
   const contentW = contentSeconds(snapshot) * pxPerSec;
@@ -46,6 +54,8 @@ export function TrackLaneList({ snapshot }: { snapshot: Snapshot }) {
     ro.observe(el);
     return () => ro.disconnect();
   }, [fit]);
+  // Re-align the navigator after a zoom (pxPerSec change resizes the content width).
+  useEffect(() => { syncNav(); }, [pxPerSec, syncNav]);
 
   // Shell reactivity (#10): each lane glows with its OWN live audio level while playing,
   // in concert with Moshi (who reacts to the master spectrum). Driven imperatively from
@@ -80,32 +90,57 @@ export function TrackLaneList({ snapshot }: { snapshot: Snapshot }) {
   }, []);
 
   if (tracks.length === 0) {
-    return <div className="v2-empty" data-testid="v2-empty">No tracks yet — ask Mosh to start a beat.</div>;
+    return (
+      <>
+        <div className="v2-nav" data-testid="v2-navigator" />
+        <div className="v2-stage">
+          <div className="v2-empty" data-testid="v2-empty">No tracks yet — ask Mosh to start a beat.</div>
+        </div>
+      </>
+    );
   }
 
   return (
-    <div className="v2-tl-scroll" ref={scrollRef} data-testid="v2-timeline">
-      <div className="v2-tl">
-        {/* ribbon row */}
-        <div className="v2-corner v2-corner-ribbon"><ZoomToggle value={sectionZoom} onChange={setSectionZoom} /></div>
-        <div className="v2-ribbon-cell"><SectionRibbon snapshot={snapshot} width={contentW} /></div>
-        {/* ruler row */}
-        <div className="v2-corner v2-corner-ruler" />
-        <div className="v2-ruler-cell"><BarRuler snapshot={snapshot} width={contentW} /></div>
-        {/* lanes */}
-        {tracks.map((t) => (
-          <Fragment key={t.id}>
-            <TrackLaneHeader track={t} />
-            <div className="v2-lane" data-track-id={t.id} data-testid="v2-lane" style={{ width: contentW, "--beat-px": `${beatPx}px` } as React.CSSProperties}>
-              {t.clips.map((c) => (
-                <ClipView key={c.id} clip={c} trackType={t.type} snapshot={snapshot} />
-              ))}
-            </div>
-          </Fragment>
-        ))}
-        <Playhead />
+    <>
+      {/* SECTION NAVIGATOR — its own panel above the arrangement (separated, concept-style).
+          Shares the timeline x-axis; the inner track is translated to follow the scroll. */}
+      <div className="v2-nav" data-testid="v2-navigator">
+        <div className="v2-nav-gutter"><ZoomToggle value={sectionZoom} onChange={setSectionZoom} /></div>
+        <div className="v2-nav-clip">
+          <div className="v2-nav-track" ref={navTrackRef} style={{ width: contentW }}>
+            <SectionRibbon snapshot={snapshot} width={contentW} />
+          </div>
+        </div>
       </div>
-    </div>
+
+      {/* ARRANGEMENT — the dark timeline: detail ruler + lanes (no section ribbon now). */}
+      <div className="v2-stage">
+        <div className="v2-tl-scroll" ref={scrollRef} data-testid="v2-timeline" onScroll={syncNav}>
+          <div className="v2-tl">
+            {/* ruler row (now the top row) */}
+            <div className="v2-corner v2-corner-ruler" />
+            <div className="v2-ruler-cell"><BarRuler snapshot={snapshot} width={contentW} /></div>
+            {/* lanes */}
+            {tracks.map((t) => (
+              <Fragment key={t.id}>
+                <TrackLaneHeader track={t} />
+                <div className="v2-lane" data-track-id={t.id} data-testid="v2-lane" style={{ width: contentW, "--beat-px": `${beatPx}px` } as React.CSSProperties}>
+                  {t.clips.map((c) => (
+                    <ClipView key={c.id} clip={c} trackType={t.type} snapshot={snapshot} />
+                  ))}
+                </div>
+              </Fragment>
+            ))}
+            <Playhead />
+          </div>
+        </div>
+        {dragging && (
+          <div className="v2-drop" role="status" aria-live="polite" data-testid="v2-drop">
+            <span>Drop audio to import</span>
+          </div>
+        )}
+      </div>
+    </>
   );
 }
 

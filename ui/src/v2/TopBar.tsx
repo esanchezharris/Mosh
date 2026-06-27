@@ -133,6 +133,10 @@ function OverflowMenu() {
   const exec = useStore((s) => s.exec);
   const theme = useStore((s) => s.theme);
   const toggleTheme = useStore((s) => s.toggleTheme);
+  const voiceOn = useStore((s) => s.voiceOn);
+  const toggleVoice = useStore((s) => s.toggleVoice);
+  const handsFreeOn = useStore((s) => s.handsFreeOn);
+  const setHandsFree = useStore((s) => s.setHandsFree);
   const setShell = useSettings((s) => s.set);
   const item = (label: string, fn: () => void, kbd?: string) => (
     <button onClick={() => { setOpen(false); fn(); }}>{label}{kbd && <kbd>{kbd}</kbd>}</button>
@@ -148,6 +152,10 @@ function OverflowMenu() {
           <div className="v2-menu" role="menu">
             {item("Undo", () => void exec("undo"), "⌘Z")}
             {item("Redo", () => void exec("redo"), "⇧⌘Z")}
+            <div className="v2-menu-sep" />
+            {/* Moshi's voice controls live here now (off the prompt bar) */}
+            {item(voiceOn ? "Mute Moshi" : "Unmute Moshi", () => toggleVoice())}
+            {item(handsFreeOn ? "Hands-free: on" : "Hands-free: off", () => setHandsFree(!handsFreeOn))}
             <div className="v2-menu-sep" />
             {item(theme === "light" ? "Dark mode" : "Light mode", () => toggleTheme())}
             {item("Switch to Classic UI", () => setShell("uiShell", "classic"))}

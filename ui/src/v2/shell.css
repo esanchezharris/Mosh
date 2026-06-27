@@ -254,7 +254,7 @@
 }
 .v2-main {
   display: grid;
-  grid-template-rows: 1fr auto;
+  grid-template-rows: auto 1fr auto;  /* navigator · arrangement · composer */
   gap: var(--v2-gap);
   min-width: 0; min-height: 0;
 }
@@ -267,6 +267,22 @@
   overflow: hidden;
   min-height: 0;
 }
+
+/* ── section navigator — its OWN panel above the arrangement (concept-style separation,
+     a cream gap shows between it and the dark timeline). Shares the timeline x-axis. ── */
+.v2-nav {
+  display: flex; align-items: stretch; height: var(--v2-ribbon-h);
+  background: var(--v2-surface); border: 1px solid var(--v2-line);
+  border-radius: var(--v2-radius-sm); box-shadow: var(--v2-glow); overflow: hidden;
+}
+.v2-nav-gutter {
+  flex: 0 0 var(--v2-head-w); display: flex; align-items: center; justify-content: flex-end;
+  padding: 0 10px; border-right: 1px solid var(--v2-line); background: var(--v2-surface-2);
+}
+.v2-nav-clip { position: relative; flex: 1 1 auto; min-width: 0; overflow: hidden; }
+.v2-nav-track { position: absolute; inset: 0; will-change: transform; }
+/* the section ribbon fills the nav panel — the panel is its frame, so drop its own chrome */
+.v2-nav .v2-ribbon { height: 100%; background: transparent; border-bottom: none; }
 
 /* ── timeline (sticky-header grid: ribbon + ruler stick top, headers stick left) ── */
 .v2-tl-scroll { position: absolute; inset: 0; overflow: auto; }
@@ -289,10 +305,10 @@
   background: var(--v2-surface-sunken); border: 1px solid var(--v2-line); color: var(--v2-dim); cursor: pointer;
 }
 .v2-zoom button.on { background: var(--v2-accent); color: var(--v2-accent-ink); border-color: transparent; }
-.v2-corner-ruler { top: var(--v2-ribbon-h); z-index: 7; height: var(--v2-ruler-h); }
+.v2-corner-ruler { top: 0; z-index: 7; height: var(--v2-ruler-h); }
 /* content header cells stick to the top only (scroll horizontally with the lanes) */
 .v2-ribbon-cell { position: sticky; top: 0; z-index: 4; }
-.v2-ruler-cell { position: sticky; top: var(--v2-ribbon-h); z-index: 4; }
+.v2-ruler-cell { position: sticky; top: 0; z-index: 4; }
 
 /* section ribbon */
 .v2-ribbon {
@@ -501,6 +517,8 @@
 
 /* ─────────────────────────────── COMPOSER ────────────────────────────────── */
 .v2-composer {
+  position: relative; /* anchors the seated agent (solo) to the BAR, not the window */
+  overflow: visible;  /* let Moshi rise up over the top edge */
   display: flex; align-items: center; gap: 10px; padding: 8px 12px;
   background: var(--v2-surface); border: 1px solid var(--v2-line); border-radius: 16px;
   box-shadow: var(--v2-glow);
@@ -519,10 +537,10 @@
 .v2-composer .v2-composer-host { flex: 1 1 auto; min-width: 0; }
 
 /* ─────────────────────────── LEFT BROWSER DRAWER ─────────────────────────── */
-/* An FL/Ableton-style dock that slides in over the timeline on a pull-tab. Lives inside
-   the stage so it never covers the composer; clipped to the stage bounds. */
+/* An FL/Ableton-style dock that slides in on a pull-tab. Mounted at the SHELL so the tab
+   rides the screen edge (not the arrangement panel); spans the timeline band. */
 .v2-drawer {
-  position: absolute; top: 0; bottom: 0; left: 0; width: 336px; z-index: 12; display: flex;
+  position: absolute; top: 90px; bottom: 80px; left: 0; width: 336px; z-index: 30; display: flex;
   transform: translateX(-336px);
   transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1);
 }
@@ -563,26 +581,25 @@
 /* The right rail isn't rendered solo, so the body is a single full-width column. */
 .v2-body.solo { grid-template-columns: 1fr; }
 
-/* the agent minimizes onto the prompt bar — the live Moshi rides the bar's left edge,
-   stripped of its dock chrome (transparent canvas, no capsule) so just the creature
-   shows, poking up over the bar like the concept art. */
-.v2-composer.solo { padding-left: 76px; }
-.v2-composer-agent { position: absolute; left: 12px; bottom: 1px; width: 60px; height: 74px; z-index: 3; }
-.v2-shell .v2-composer-agent .moshi-dock { width: 100%; height: 100%; border: none; background: transparent; padding: 0; gap: 0; position: relative; }
+/* the agent minimizes onto the prompt bar — the live Moshi PERCHES on it: oversized and
+   overflowing the top + left edges (transparent canvas, no capsule) so he sits on top
+   like the concept art. Anchored to the composer (position:relative above), not the window.
+   His voice/hands-free controls move to the ⋯ menu so the bar stays clean. */
+.v2-composer.solo { padding-left: 96px; }
+.v2-composer-agent { position: absolute; left: -6px; bottom: 4px; width: 112px; height: 132px; z-index: 3; pointer-events: auto; }
+.v2-shell .v2-composer-agent .moshi-dock { width: 100%; height: 100%; border: none; background: transparent; padding: 0; gap: 0; }
+.v2-shell .v2-composer-agent .moshi-cap,
 .v2-shell .v2-composer-agent .moshi-state,
 .v2-shell .v2-composer-agent .moshi-mood { display: none; }
 .v2-shell .v2-composer-agent .moshi-mount {
   width: 100%; height: 100%; min-height: 0; border-radius: 0; overflow: visible;
   background: transparent; box-shadow: none;
 }
-/* keep his voice + hands-free toggles reachable as a tiny cluster on the seated creature */
-.v2-shell .v2-composer-agent .moshi-cap { position: absolute; top: -3px; right: -10px; width: auto; gap: 0; z-index: 4; }
-.v2-shell .v2-composer-agent .moshi-cap .moshi-handsfree,
-.v2-shell .v2-composer-agent .moshi-cap .moshi-mute { font-size: 11px; padding: 1px 2px; }
 
-/* the Inspector's solo home — a right-edge drawer mirroring the left browser dock. */
+/* the Inspector's solo home — a right-edge drawer mirroring the left browser dock,
+   mounted at the SHELL so its pull-tab rides the screen edge. */
 .v2-rdrawer {
-  position: absolute; top: 0; bottom: 0; right: 0; width: 320px; z-index: 12; display: flex;
+  position: absolute; top: 90px; bottom: 80px; right: 0; width: 320px; z-index: 30; display: flex;
   transform: translateX(320px);
   transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1);
 }

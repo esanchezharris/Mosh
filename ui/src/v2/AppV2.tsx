@@ -52,24 +52,23 @@ export function AppV2() {
 
       <div className={`v2-body${hasPeers ? "" : " solo"}`}>
         <div className="v2-main">
-          <div className="v2-stage">
-            {snapshot
-              ? <TrackLaneList snapshot={snapshot} />
-              : <div className="v2-empty">Loading session…</div>}
-            {/* left browser dock (samples + plugins), slides in on a pull-tab over the timeline */}
-            <LeftDrawer />
-            {/* solo: the Inspector docks on the right edge so the rail can disappear */}
-            {!hasPeers && <RightInspectorDrawer />}
-            {dragging && (
-              <div className="v2-drop" role="status" aria-live="polite" data-testid="v2-drop">
-                <span>Drop audio to import</span>
-              </div>
+          {snapshot
+            ? <TrackLaneList snapshot={snapshot} dragging={dragging} />
+            : (
+              <>
+                <div className="v2-nav" />
+                <div className="v2-stage"><div className="v2-empty">Loading session…</div></div>
+              </>
             )}
-          </div>
           <Composer />
         </div>
         {hasPeers && <RightRail />}
       </div>
+
+      {/* edge docks — pull-tabs ride the SCREEN edge (mounted at the shell, not the stage).
+          Left = browser (samples + plugins); right = the Inspector when solo. */}
+      <LeftDrawer />
+      {!hasPeers && <RightInspectorDrawer />}
 
       {/* floating / modal surfaces — opened via disclosure in later slices */}
       <PluginBrowser />
