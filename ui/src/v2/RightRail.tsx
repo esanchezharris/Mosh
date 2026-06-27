@@ -43,7 +43,7 @@ function MoshStatusLine() {
   const text = say || (recording ? "recording…" : rendering ? "rendering…" : playing ? "listening" : "ready when you are");
   return (
     <div className="v2-mosh-status" role="status" aria-live="polite" data-testid="v2-mosh-status">
-      <span className="wave">⩘</span>
+      <span className="wave" aria-hidden>⩘</span>
       <span>{text}</span>
     </div>
   );
