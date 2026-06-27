@@ -43,13 +43,13 @@ There are five layers, and exactly two things connect the UI to the engine:
 
 ## 2. Module map — where everything lives
 
-Every row verified against the source (2026-06-21). "Start here" is the file to open first.
+Every row verified against the source (2026-06-27). "Start here" is the file to open first.
 
 | Path | What it does | Start here | Status |
 |---|---|---|---|
 | `src/app` | App lifecycle, the window, and the CLI harness (`--selftest`, `--demo3‑6`, `--scan-plugins-deep`, `--brain-smoke`). Hosts the WebView. | `src/Main.cpp` | current |
 | `src/engine` | Owns the **single** Tracktion `Engine` + `Edit`. Device init, playback context, new/open/save project, session persistence. | `src/engine/MoshEngine.cpp` | current |
-| `src/moshops` | **The one mutation path.** `execute(command)` → validate → undo txn → mutate → JSONL log → emit events → result. Also builds `snapshot()`. 130+ commands. | `src/moshops/MoshOps.h` | current |
+| `src/moshops` | **The one mutation path.** `execute(command)` → validate → undo txn → mutate → JSONL log → emit events → result. Also builds `snapshot()`. 150+ commands. | `src/moshops/MoshOps.h` | current |
 | `src/state` | ValueTree schema ids + the `RenderLayer` cache fingerprint (SHA-256 over route/seed/params/service-build). | `src/state/RenderLayer.h` | current |
 | `src/plugins/hosting` | VST3/AU discovery + catalog + native editor pop-out. Child-process-isolated scan (survives hostile Waves installs). | `src/plugins/hosting/PluginHost.h` | current |
 | `src/plugins/spectral` | Lock-free master-output tap; drains the live spectrum to the UI at 30 Hz to animate the Moshi character. | `src/plugins/spectral/MasterSpectralTapPlugin.h` | current |
@@ -60,7 +60,7 @@ Every row verified against the source (2026-06-21). "Start here" is the file to 
 | `src/remote` | HTTP server for the iPhone companion: pairing, phone-take recording, command/event forwarding. | `src/remote/RemoteCompanionServer.h` | current |
 | `src/multiplayer` | 2-player collaboration over the same spine: stable `logicalId`s, the MoshOps lock guard (epoch-fenced, fail-closed), track-commit serialize/apply (no-echo), HTTP long-poll relay client. | `src/multiplayer/MultiplayerSession.h` | current |
 | `src/training` | Type-beat LoRA trainer scaffold: rights/eligibility gate + corpus bundler + job orchestration over `/training/*` (behind a **fake** backend; real on-device training deferred). | `src/training/TrainerRegistry.h` | scaffold |
-| `ui/` | React arrangement UI in the WebView. Arrange (drag/trim/split), mix, plugins, neural, generative drawer, Moshi agent + voice. | `ui/src/App.tsx`, `ui/src/bridge.ts` | current |
+| `ui/` | React UI in the WebView. Two shells behind a thin router (`uiShell` setting, default **v2**; classic preserved verbatim in `AppLegacy.tsx`): arrange (drag/trim/split), mix, plugins, generative drawer, Moshi agent + voice. | `ui/src/App.tsx`, `ui/src/v2/AppV2.tsx` | current |
 | `ui/src/import` | DAW project-file importer: parses `.rpp`/`.als`/`.flp` → a `moshIR` intermediate → replays as MoshOps commands (the `.flp` path shells to a PyFLP sidecar in `service/flp/`). | `ui/src/import/importFile.ts` | current |
 | `ui/src/harvest` | Agent-training data path: replays `mosh-log.jsonl` through the mock backend to reconstruct per-turn snapshots → versioned `(before, utterance, commands, after, outcome)` tuples. | `ui/src/harvest/harvester.ts` | current |
 | `service/` | Python generative job broker: FakeAdapter stub + Stable Audio 3 (MLX/CUDA), colour-steering DSL, quality readout; also `/transcribe` (audio→MIDI via Basic Pitch) and `/sketch` (beatbox→drums) on isolated venvs. | `service/server.py` | current |
@@ -108,7 +108,7 @@ What Mosh can actually do today, grouped for a producer. Status is honest: `work
 ## 5. Run, build, test
 
 - **Run the app / iterate the UI:** `./run-mosh.sh` (see the script header for flags). For live UI dev, set `MOSH_UI_DEV_SERVER` to the Vite dev URL so the WebView loads from Vite instead of the staged bundle.
-- **Verify the backend:** `Mosh --selftest` — the command-surface harness (**≈893 checks** with no audio / SA3 off; the count is **gate-dependent** — the optional local Serum-VST3 gate and the heavy real-model path behind `MOSH_SELFTEST_SA3=1` add more). Run 3× for determinism (see memory `mosh-verification-conventions`). Visual demos: `Mosh --demo3`…`--demo6`. (Batch/offline audio proofs: `Mosh --run-script` + `scripts/verify-hardware/`, see `docs/VERIFICATION.md`.)
+- **Verify the backend:** `Mosh --selftest` — the command-surface harness (**1032 checks** with no audio / SA3 off; the count is **gate-dependent** — the optional local Serum-VST3 gate and the heavy real-model path behind `MOSH_SELFTEST_SA3=1` add more). Run 3× for determinism (see memory `mosh-verification-conventions`). Visual demos: `Mosh --demo3`…`--demo6`. (Batch/offline audio proofs: `Mosh --run-script` + `scripts/verify-hardware/`, see `docs/VERIFICATION.md`.)
 - **Build:** CMake (JUCE 8 + Tracktion via submodule, pinned in `cmake/Dependencies.cmake`). Neural/SA3 deps are fetch-gated behind `-DMOSH_ENABLE_RTNEURAL=ON` / `-DMOSH_ENABLE_ANIRA=ON`; the generative service runs under its MLX venv when `MOSH_ENABLE_SA3=1`.
 - **UI tests:** `npm test` in `ui/` (vitest + jsdom). `commands.contract.test.ts` parses `MoshOps.cpp` so the agent command catalog can't drift from the backend.
 - **UI e2e:** `npm run test:e2e` in `ui/` (Playwright + headless Chromium). Specs in `ui/e2e/` drive the real React WebView against the Vite dev server, where `bridge.ts` wires in the in-memory mock backend (`bridge.mock.ts`) — the same `execute_command`+snapshot+events contract the C++ MoshOps exposes — so the whole frontend (store, gestures, keymap, templates, optimistic previews) is exercised deterministically with no native build / audio / Python service. Coverage: the full producer loop, per-template regression (Mosh/Ableton/FL), keyboard-a11y / empty-state / narrow-window polish, and a per-skin screenshot walkthrough (`e2e-artifacts/`). The packaged WebView app can't be Playwright-driven (and its command surface is identical), so its smoke path stays `Mosh --selftest`.

@@ -1,6 +1,7 @@
 # 06 — Build Tooling & the Overnight Run Plan
 
 > **Status:** Design spec — source of truth for *how* the build/tooling was set up (v0, gate PASSED). New to the repo? Start with [ARCHITECTURE.md](ARCHITECTURE.md); build status is in [CLAUDE.md](CLAUDE.md).
+> *Since-v0 note: the Tier-A neural insert (`plugins/neural`, `NeuralInsertPlugin`, the RTNeural/anira `mosh_neural_backends` gate) was **removed 2026-06-21**; the real-time RAVE insert (`plugins/transform`, `MOSH_ENABLE_ANIRA`, off by default) replaces it. References to `plugins/neural` / `NeuralInsertPlugin` below are historical v0 design — see [CLAUDE.md](CLAUDE.md).*
 
 *Scope: the build system (Pamplejuce adapted to a standalone-app target + a Vite frontend), dependency acquisition/pinning, tests/CI, the model-service packaging/launch, and the staged plan an autonomous run follows with its gates. Read first.*
 
