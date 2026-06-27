@@ -4368,9 +4368,14 @@ juce::ValueTree MoshOps::findRenderLayer (const juce::String& clipId)
     return {};
 }
 
-juce::String MoshOps::computeFingerprint (const juce::ValueTree& node, const juce::File& inputWav)
+juce::String MoshOps::computeFingerprint (const juce::ValueTree& node, const juce::File& inputWav,
+                                         const juce::String& upstreamOverride)
 {
-    const auto upstreamHash = juce::MD5 (inputWav).toHexString();   // full upstream audio hash
+    // Wave clips hash the staged audio. MIDI/drum clips are auto-bounced, but the bounce
+    // isn't bit-deterministic (a synth's free-running phase), so they pass a stable source
+    // signature instead (notes + instrument/FX state) — identical source → cache HIT.
+    const auto upstreamHash = upstreamOverride.isNotEmpty() ? upstreamOverride
+                                                            : juce::MD5 (inputWav).toHexString();
 
     // KEY-001 — feed the LIVE tempo/key context into the fingerprint (was the
     // hardcoded "120bpm/Cmaj" placeholder). bpm is the playback bpm at the start of
@@ -4504,6 +4509,113 @@ juce::var MoshOps::cmdSetRenderParam (const juce::var& args)
     return okResult ("set_render_param");
 }
 
+// A stable, deterministic signature of a clip's GENERATIVE SOURCE — its MIDI note content
+// plus the owning track's instrument + insert-FX names and param VALUES. Used as the
+// render-cache upstream hash for non-wave clips, whose bounced audio isn't bit-stable.
+// Editing a note OR an instrument/FX param changes this → cache MISS; an unchanged source
+// → identical signature → cache HIT. Deliberately hashes note fields + param values, NOT
+// the clip/plugin `state` ValueTrees — a synth scribbles its free-running phase into its
+// opaque state chunk during render, which would make the signature differ every render.
+static juce::String stableSourceSig (te::Clip& clip)
+{
+    juce::MemoryOutputStream mos;
+    if (auto* m = dynamic_cast<te::MidiClip*> (&clip))
+    {
+        auto& seq = m->getSequence();
+        for (int i = 0; i < seq.getNumNotes(); ++i)
+            if (auto* n = seq.getNote (i))
+            {
+                mos.writeInt (n->getNoteNumber());
+                mos.writeDouble (n->getStartBeat().inBeats());
+                mos.writeDouble (n->getLengthBeats().inBeats());
+                mos.writeInt (n->getVelocity());
+            }
+    }
+    if (auto* tr = clip.getTrack())
+        for (auto* p : tr->pluginList.getPlugins())
+            if (p != nullptr)
+            {
+                mos.writeString (p->getName());                         // instrument/FX identity
+                const int np = p->getNumAutomatableParameters();
+                for (int i = 0; i < np; ++i)
+                    if (auto par = p->getAutomatableParameter (i))
+                        mos.writeFloat ((float) par->getCurrentNormalisedValue());  // user settings, not state chunk
+            }
+    return juce::MD5 (mos.getMemoryBlock()).toHexString();
+}
+
+bool MoshOps::bounceClipToWav (te::Clip& clip, double startSec, double endSec, const juce::File& destWav)
+{
+    auto* track = clip.getTrack();
+    if (track == nullptr || endSec <= startSec + 1.0e-4) return false;
+
+    auto& edit = eng.edit();
+
+    // Render exclusivity (01 §5): detach the Edit from the device before an offline
+    // render (Tracktion asserts otherwise). Mirror cmdExportAudio's teardown so the
+    // master meter re-attaches to the NEXT context (no ABA reuse). No-op when headless.
+    unregisterAllMeterClients();
+    edit.getTransport().stop (false, false);
+    edit.getTransport().freePlaybackContext();
+    lastSeenContext = nullptr;
+
+    destWav.getParentDirectory().createDirectory();
+    destWav.deleteFile();
+
+    te::Renderer::Parameters params (edit);
+    params.destFile = destWav;
+    params.audioFormat = edit.engine.getAudioFileFormatManager().getWavFormat();
+    params.bitDepth = 24;
+    params.sampleRateForAudio = 44100.0;   // match computeFingerprint's claimed SR/ch (44100/2)
+    params.blockSizeForAudio = edit.engine.getDeviceManager().getBlockSize();
+    if (params.blockSizeForAudio <= 0) params.blockSizeForAudio = 512;
+    params.time = { tracktion::TimePosition::fromSeconds (startSec),
+                    tracktion::TimePosition::fromSeconds (endSec) };       // the clip's edit-time window
+    juce::Array<te::Track*> just; just.add (track);
+    params.tracksToDo = te::toBitSet (just);                              // ONLY this clip's track — no bleed
+    params.usePlugins = true;            // we WANT the instrument + insert FX (that's the clip's sound)
+    params.useMasterPlugins = false;     // bounce the track's own signal, not the full master mix
+    params.createMidiFile = false;
+    // Realtime-only hosted synths (e.g. Serum) can't render offline — reuse the export guard.
+    params.realTimeRender = findSerumRealtimeRenderReason (edit).isNotEmpty();
+
+    juce::String renderError;
+    {
+        const te::Edit::ScopedRenderStatus srs (edit, true);
+        te::TransportControl::stopAllTransports (edit.engine, false, true);
+        te::Renderer::turnOffAllPlugins (edit);
+
+        if (params.tracksToDo.countNumberOfSetBits() > 0 && ! params.destFile.isDirectory())
+        {
+            te::Renderer::RenderTask task ("Mosh bounce", params, nullptr, nullptr);
+
+            // Same no-progress watchdog + absolute deadline cmdExportAudio uses, so a
+            // stuck bounce (e.g. an unreadable source) errors cleanly instead of hanging.
+            const double secs = juce::jmax (0.1, endSec - startSec);
+            const juce::uint32 startMs    = juce::Time::getMillisecondCounter();
+            const juce::uint32 deadlineMs = (juce::uint32) juce::jmax (60000.0, secs * 8000.0 + 60000.0);
+            const juce::uint32 stallMs    = 20000;
+            float  lastProgress   = -1.0f;
+            juce::uint32 lastProgressMs = startMs;
+            while (task.runJob() == juce::ThreadPoolJob::jobNeedsRunningAgain)
+            {
+                const juce::uint32 nowMs = juce::Time::getMillisecondCounter();
+                const float p = task.getCurrentTaskProgress();
+                if (p > lastProgress) { lastProgress = p; lastProgressMs = nowMs; }
+                if (nowMs - lastProgressMs > stallMs || nowMs - startMs > deadlineMs)
+                {
+                    if (task.errorMessage.isEmpty()) task.errorMessage = "bounce render stalled";
+                    break;
+                }
+            }
+            te::Renderer::turnOffAllPlugins (edit);
+            if (task.errorMessage.isNotEmpty()) { renderError = task.errorMessage; destWav.deleteFile(); }
+        }
+        else renderError = "no renderable track for bounce";
+    }
+    return renderError.isEmpty() && destWav.existsAsFile() && destWav.getSize() > 0;
+}
+
 juce::var MoshOps::cmdRenderLayer (const juce::var& args)
 {
     const auto clipId = args.getProperty ("clipId", var()).toString();
@@ -4511,12 +4623,10 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
     auto node = findRenderLayer (clipId);
     if (clip == nullptr || ! node.isValid()) return errResult ("render_layer", "no render layer");
 
-    auto* wave = dynamic_cast<te::WaveAudioClip*> (clip);
-    if (wave == nullptr) return errResult ("render_layer", "only wave clips renderable in v0");
-
-    // Prepare the job dir + render the source region to input.wav. For a wave
-    // clip with no upstream FX this is the source audio; the general path is
-    // te::Renderer::renderToFile (render-to-file preferred, 05 §3 // VERIFY).
+    // Prepare the job dir + stage the render input as input.wav. Wave clips stage their
+    // source audio (whole or a sliced sub-region); MIDI/drum (any non-wave) clips are
+    // auto-BOUNCED to audio first (their instrument output) so the audio→audio generative
+    // pipeline can run on ANY track — the model never sees MIDI.
     auto jobDir = eng.sessionDir().getChildFile ("renders").getChildFile (node[ids::id].toString());
     jobDir.createDirectory();
     auto input = jobDir.getChildFile ("input.wav");
@@ -4524,40 +4634,57 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
     auto manifest = jobDir.getChildFile ("output_manifest.json");
     input.deleteFile();
 
-    // Stage the render input. Section-scoped layers carry a sub-region tighter than the
-    // clip — slice JUST that region of the raw source so the model only re-imagines the
-    // section's audio. The stored timeRange is absolute timeline seconds frozen at create;
-    // CLAMP it to the clip's LIVE position so a clip moved/trimmed since then can't
-    // mis-stage — a stale range that no longer overlaps collapses to the whole clip,
-    // matching the v0 default of copying the source wholesale.
+    // Section-scoped layers carry a sub-region tighter than the clip. The stored timeRange
+    // is absolute timeline seconds frozen at create; CLAMP it to the clip's LIVE position
+    // so a clip moved/trimmed since then can't mis-stage — a stale range that no longer
+    // overlaps collapses to the whole clip. Computed for ALL clip types (the bounce path
+    // renders [rs,re] directly via params.time; the wave path slices it).
     auto cpos = clip->getPosition();
     const double cs = cpos.getStart().inSeconds(), ce = cpos.getEnd().inSeconds();
     double rs = juce::jlimit (cs, ce, (double) node[ids::timeRangeStart]);
     double re = juce::jlimit (cs, ce, (double) node[ids::timeRangeEnd]);
     if (re <= rs + 1.0e-3) { rs = cs; re = ce; }   // stale/degenerate after a move → whole clip
     const bool subRegion = (rs > cs + 1.0e-3) || (re < ce - 1.0e-3);
-    bool staged = false;
-    if (subRegion)
+
+    // Non-wave clips fingerprint their stable source (notes + instrument/FX), not the
+    // non-deterministic bounced audio. Captured BEFORE the bounce so render side-effects
+    // can't perturb it. Empty for wave clips → computeFingerprint hashes input.wav.
+    juce::String upstreamOverride;
+
+    if (auto* wave = dynamic_cast<te::WaveAudioClip*> (clip))
     {
-        const bool sliceable = std::abs (wave->getSpeedRatio() - 1.0) < 1.0e-6
-                               && ! wave->isLooping() && ! wave->getAutoTempo();
-        if (sliceable)
+        bool staged = false;
+        if (subRegion)
         {
-            const double off = cpos.getOffset().inSeconds();
-            staged = stageWavRegion (wave->getCurrentSourceFile(), rs - cs + off, re - cs + off, input);
+            const bool sliceable = std::abs (wave->getSpeedRatio() - 1.0) < 1.0e-6
+                                   && ! wave->isLooping() && ! wave->getAutoTempo();
+            if (sliceable)
+            {
+                const double off = cpos.getOffset().inSeconds();
+                staged = stageWavRegion (wave->getCurrentSourceFile(), rs - cs + off, re - cs + off, input);
+            }
+            if (! staged)   // never fall back to the whole clip for a section request
+                return errResult ("render_layer", "section render needs an un-stretched, non-looping wave clip");
         }
-        if (! staged)   // never fall back to the whole clip for a section request
-            return errResult ("render_layer", "section render needs an un-stretched, non-looping wave clip");
+        if (! staged && ! wave->getCurrentSourceFile().copyFileTo (input))
+            return errResult ("render_layer", "could not stage source region");
     }
-    if (! staged && ! wave->getCurrentSourceFile().copyFileTo (input))
-        return errResult ("render_layer", "could not stage source region");
+    else
+    {
+        // MIDI/drum (any non-wave) clip: fingerprint the stable source first, then bounce
+        // its instrument output for [rs,re] to input.wav. params.time handles whole-clip
+        // AND section renders, so no slicing.
+        upstreamOverride = stableSourceSig (*clip);
+        if (! bounceClipToWav (*clip, rs, re, input))
+            return errResult ("render_layer", "could not bounce clip to audio (add an instrument, or the render failed)");
+    }
 
     // Ensure the service first so its build/version is part of EVERY fingerprint
     // (else the first render hashes an empty build and the cache never hits).
     if (! jobManager.ensureServiceRunning())
         return errResult ("render_layer", "generative service unavailable");
 
-    const auto fp = computeFingerprint (node, input);
+    const auto fp = computeFingerprint (node, input, upstreamOverride);
 
     // Cache by FULL fingerprint (05 §5) — reuse only on an exact match. Resolve the
     // artifact move-aware (AL-009): a Save-As'd project stores cacheArtifact relative.
