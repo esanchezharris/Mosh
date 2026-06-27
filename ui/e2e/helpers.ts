@@ -26,7 +26,7 @@ export const TEMPLATE_SKIN: Record<TemplateName, { skin: string; theme: string; 
 export async function boot(page: Page): Promise<void> {
   await page.addInitScript(() => {
     window.localStorage.clear();
-    window.localStorage.setItem("mosh.settings", JSON.stringify({ version: 1, template: null, values: { redesignShell: false } }));
+    window.localStorage.setItem("mosh.settings", JSON.stringify({ version: 1, template: null, values: { redesignShell: false, uiShell: "classic" } }));
   });
   await page.goto("/");
   await expect(page.getByTestId("app")).toBeVisible();
@@ -39,7 +39,7 @@ export async function boot(page: Page): Promise<void> {
 export async function bootRedesign(page: Page): Promise<void> {
   await page.addInitScript(() => {
     window.localStorage.clear();
-    window.localStorage.setItem("mosh.settings", JSON.stringify({ version: 1, template: null, values: { redesignShell: true } }));
+    window.localStorage.setItem("mosh.settings", JSON.stringify({ version: 1, template: null, values: { redesignShell: true, uiShell: "classic" } }));
   });
   await page.goto("/");
   await expect(page.getByTestId("app")).toBeVisible();

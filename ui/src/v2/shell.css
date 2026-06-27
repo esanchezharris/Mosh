@@ -1,0 +1,461 @@
+/* ============================================================================
+   MOSH v2 SHELL — the from-scratch demo-driven interface. ONE Mosh-native design:
+   dark "Midnight Drive" neon is the hero; light is a glass token-swap (same layout).
+   All tokens + rules are scoped under .v2-shell so this never touches the legacy
+   shell's :root tokens (both bundles coexist until cutover). Theme axis only — no
+   skin axis (effects.ts pins data-skin=mosh while v2 is active).
+   ============================================================================ */
+
+.v2-shell {
+  /* ── geometry ── */
+  --v2-head-w: 212px;
+  --v2-lane-h: 92px;
+  --v2-ribbon-h: 48px;
+  --v2-ruler-h: 26px;
+  --v2-radius: 16px;
+  --v2-radius-sm: 10px;
+  --v2-gap: 14px;
+
+  /* ── dark hero — near-black ink + lime, matching the classic shell. Minimal blue:
+       surfaces are neutral warm-black, the only saturated color is the lime accent;
+       clips are desaturated slate so the canvas reads black, not blue. ── */
+  --v2-bg: radial-gradient(130% 90% at 50% -10%, #161616 0%, #0c0c0c 52%, #050505 100%);
+  --v2-ink: #0a0a0a;
+  --v2-surface: rgba(24, 24, 25, 0.64);
+  --v2-surface-2: rgba(33, 33, 35, 0.74);
+  --v2-surface-sunken: rgba(12, 12, 13, 0.62);
+  --v2-line: rgba(255, 255, 255, 0.09);
+  --v2-line-strong: rgba(255, 255, 255, 0.18);
+  --v2-text: #ededee;
+  --v2-dim: rgba(232, 232, 234, 0.56);
+  --v2-faint: rgba(220, 220, 224, 0.34);
+  --v2-accent: #ccff36;             /* lime — play / active / live / selection */
+  --v2-accent-ink: #0a0f04;         /* text on the lime fill */
+  --v2-accent-soft: rgba(204, 255, 54, 0.13);
+  --v2-blue: #9aa0b4;               /* desaturated slate — track icons only */
+  --v2-clip-wave: linear-gradient(180deg, rgba(78, 82, 96, 0.92), rgba(54, 57, 68, 0.82));
+  --v2-clip-midi: rgba(196, 202, 220, 0.82);
+  --v2-clip-drum: rgba(204, 255, 54, 0.7);
+  --v2-clip-block: linear-gradient(180deg, rgba(70, 72, 84, 0.9), rgba(50, 52, 62, 0.8));
+  --v2-playhead: #ccff36;           /* lime scrub line (matches the classic shell) */
+  --v2-rec: #ff3b5c;
+  --v2-shadow: 0 18px 50px rgba(0, 0, 0, 0.6);
+  --v2-glow: 0 0 0 1px var(--v2-line), inset 0 1px 0 rgba(255, 255, 255, 0.03);
+
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  background: var(--v2-bg);
+  color: var(--v2-text);
+  font-family: var(--font-body);
+  overflow: hidden;
+}
+
+/* ── light "bright glass" — token swap only, identical layout ── */
+[data-theme="light"] .v2-shell {
+  --v2-bg: radial-gradient(135% 95% at 50% -10%, #dbe9ff 0%, #c5dbf6 45%, #b6cdef 100%);
+  --v2-ink: #eaf1fb;
+  --v2-surface: rgba(255, 255, 255, 0.46);
+  --v2-surface-2: rgba(255, 255, 255, 0.62);
+  --v2-surface-sunken: rgba(255, 255, 255, 0.34);
+  --v2-line: rgba(40, 70, 130, 0.16);
+  --v2-line-strong: rgba(40, 70, 130, 0.3);
+  --v2-text: #16223b;
+  --v2-dim: rgba(28, 44, 78, 0.66);
+  --v2-faint: rgba(40, 60, 100, 0.4);
+  --v2-accent: #9bcc14;
+  --v2-accent-ink: #0c1206;
+  --v2-accent-soft: rgba(155, 204, 20, 0.2);
+  --v2-blue: #5566e6;
+  --v2-clip-wave: linear-gradient(180deg, rgba(120, 138, 255, 0.95), rgba(96, 112, 232, 0.85));
+  --v2-clip-midi: rgba(96, 112, 235, 0.9);
+  --v2-clip-drum: rgba(110, 126, 240, 0.95);
+  --v2-clip-block: linear-gradient(180deg, rgba(118, 134, 246, 0.9), rgba(92, 108, 220, 0.78));
+  --v2-playhead: #f2b705;
+  --v2-shadow: 0 18px 44px rgba(40, 70, 130, 0.22);
+}
+/* glass cards get a real backdrop blur in the light theme */
+[data-theme="light"] .v2-shell .v2-card,
+[data-theme="light"] .v2-shell .v2-topbar,
+[data-theme="light"] .v2-shell .v2-composer {
+  backdrop-filter: blur(18px) saturate(1.3);
+}
+
+/* generic card surface */
+.v2-shell .v2-card {
+  background: var(--v2-surface);
+  border: 1px solid var(--v2-line);
+  border-radius: var(--v2-radius);
+  box-shadow: var(--v2-glow);
+}
+
+/* ─────────────────────────────── TOP BAR ─────────────────────────────────── */
+.v2-topbar {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  height: 64px;
+  padding: 0 18px;
+  margin: 12px 14px 0;
+  background: var(--v2-surface);
+  border: 1px solid var(--v2-line);
+  border-radius: var(--v2-radius);
+  box-shadow: var(--v2-glow);
+}
+.v2-proj { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.v2-proj-name {
+  font-family: var(--font-display);
+  font-size: 17px; letter-spacing: 0.01em; color: var(--v2-text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 240px;
+}
+.v2-proj-meta { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--v2-dim); }
+.v2-chip {
+  appearance: none; background: var(--v2-surface-sunken); border: 1px solid var(--v2-line);
+  color: var(--v2-dim); font: inherit; font-size: 11px; padding: 2px 8px; border-radius: 999px;
+  cursor: pointer; line-height: 1.6;
+}
+.v2-chip:hover { color: var(--v2-text); border-color: var(--v2-line-strong); }
+.v2-chip-num { width: 52px; text-align: center; -moz-appearance: textfield; }
+.v2-chip-num::-webkit-outer-spin-button, .v2-chip-num::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.v2-chip-sel { background: var(--v2-surface-sunken); }
+
+.v2-transport { display: flex; align-items: center; gap: 6px; margin: 0 auto; }
+.v2-tbtn {
+  appearance: none; width: 36px; height: 36px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--v2-surface-sunken); border: 1px solid var(--v2-line);
+  color: var(--v2-text); font-size: 13px; cursor: pointer;
+  transition: transform 120ms cubic-bezier(0.34, 1.56, 0.64, 1), background 140ms, color 140ms, box-shadow 140ms;
+}
+.v2-tbtn:hover { transform: translateY(-1px); border-color: var(--v2-line-strong); }
+.v2-tbtn:active { transform: scale(0.94); }
+.v2-tbtn.play[data-on="true"], .v2-tbtn.play:hover {
+  background: var(--v2-accent); color: var(--v2-accent-ink); border-color: transparent;
+  box-shadow: 0 0 22px var(--v2-accent-soft);
+}
+.v2-tbtn.play { background: var(--v2-accent); color: var(--v2-accent-ink); border-color: transparent; }
+.v2-tbtn.rec[data-on="true"] { color: var(--v2-rec); border-color: var(--v2-rec); box-shadow: 0 0 18px rgba(255, 71, 106, 0.3); }
+.v2-tbtn .dot { width: 11px; height: 11px; border-radius: 50%; background: currentColor; }
+
+.v2-readout { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding-left: 12px; border-left: 1px solid var(--v2-line); }
+.v2-time { font-family: var(--font-mono); font-size: 20px; letter-spacing: 0.04em; color: var(--v2-text); line-height: 1; }
+.v2-bars { display: flex; align-items: center; gap: 8px; font-size: 10px; letter-spacing: 0.12em; color: var(--v2-dim); text-transform: uppercase; }
+.v2-loop-on { color: var(--v2-accent); }
+
+.v2-spacer { flex: 1 1 auto; }
+.v2-pill {
+  display: inline-flex; align-items: center; gap: 7px; padding: 7px 12px; border-radius: 999px;
+  background: var(--v2-surface-sunken); border: 1px solid var(--v2-line); font-size: 11px; color: var(--v2-dim);
+  letter-spacing: 0.06em; text-transform: uppercase;
+}
+.v2-pill .led { width: 7px; height: 7px; border-radius: 50%; background: var(--v2-accent); box-shadow: 0 0 8px var(--v2-accent); }
+.v2-pill .led.busy { animation: v2-blink 1s infinite; }
+@keyframes v2-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+.v2-btn {
+  appearance: none; display: inline-flex; align-items: center; gap: 7px;
+  background: var(--v2-surface-sunken); border: 1px solid var(--v2-line); color: var(--v2-text);
+  font: inherit; font-size: 13px; padding: 8px 14px; border-radius: 11px; cursor: pointer;
+  transition: transform 120ms cubic-bezier(0.34, 1.56, 0.64, 1), background 140ms, border-color 140ms;
+}
+.v2-btn:hover { transform: translateY(-1px); border-color: var(--v2-line-strong); }
+.v2-btn:active { transform: scale(0.96); }
+.v2-btn.primary { background: var(--v2-accent); color: var(--v2-accent-ink); border-color: transparent; font-weight: 700; }
+.v2-btn.icon { padding: 8px 10px; }
+
+/* reused classic tool popovers (training/log/remote/help/multiplayer) — subtle ghost
+   icons in the v2 topbar so every feature keeps a home without loud chrome. */
+.v2-tools { display: flex; align-items: center; gap: 1px; }
+.v2-shell .v2-tools .btn {
+  background: transparent; border: 1px solid transparent; color: var(--v2-dim);
+  border-radius: 9px; padding: 6px 8px; font-size: 13px; line-height: 1; cursor: pointer;
+}
+.v2-shell .v2-tools .btn:hover, .v2-shell .v2-tools .btn.on { color: var(--v2-text); background: var(--v2-surface-sunken); border-color: var(--v2-line); }
+
+/* overflow menu */
+.v2-menu-wrap { position: relative; }
+.v2-menu {
+  position: absolute; top: calc(100% + 8px); right: 0; z-index: 60; min-width: 200px;
+  background: var(--v2-surface-2); border: 1px solid var(--v2-line-strong); border-radius: 12px;
+  box-shadow: var(--v2-shadow); padding: 6px; backdrop-filter: blur(20px);
+}
+.v2-menu button {
+  display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 12px;
+  background: transparent; border: none; color: var(--v2-text); font: inherit; font-size: 13px;
+  padding: 9px 10px; border-radius: 8px; cursor: pointer; text-align: left;
+}
+.v2-menu button:hover { background: var(--v2-accent-soft); }
+.v2-menu .v2-menu-sep { height: 1px; background: var(--v2-line); margin: 5px 4px; }
+.v2-menu kbd { color: var(--v2-faint); font-family: var(--font-mono); font-size: 11px; }
+
+/* ─────────────────────────────── BODY ────────────────────────────────────── */
+.v2-body {
+  display: grid;
+  grid-template-columns: 1fr 332px;
+  gap: var(--v2-gap);
+  padding: var(--v2-gap) 14px 14px;
+  min-height: 0;
+}
+.v2-main {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  gap: var(--v2-gap);
+  min-width: 0; min-height: 0;
+}
+.v2-stage {
+  position: relative;
+  background: var(--v2-surface);
+  border: 1px solid var(--v2-line);
+  border-radius: var(--v2-radius);
+  box-shadow: var(--v2-glow);
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* ── timeline (sticky-header grid: ribbon + ruler stick top, headers stick left) ── */
+.v2-tl-scroll { position: absolute; inset: 0; overflow: auto; }
+.v2-tl {
+  display: grid;
+  grid-template-columns: var(--v2-head-w) max-content;
+  position: relative;        /* anchors the absolute playhead overlay */
+  min-width: 100%;
+}
+/* corner cells stick in BOTH axes (over headers + over ruler/ribbon) */
+.v2-corner {
+  position: sticky; left: 0;
+  background: var(--v2-surface-2);
+  border-right: 1px solid var(--v2-line); border-bottom: 1px solid var(--v2-line);
+}
+.v2-corner-ribbon { top: 0; z-index: 7; height: var(--v2-ribbon-h); display: flex; align-items: center; justify-content: flex-end; }
+.v2-zoom { display: flex; align-items: center; gap: 3px; padding: 0 8px; }
+.v2-zoom button {
+  font: inherit; font-size: 10px; padding: 3px 7px; border-radius: 6px;
+  background: var(--v2-surface-sunken); border: 1px solid var(--v2-line); color: var(--v2-dim); cursor: pointer;
+}
+.v2-zoom button.on { background: var(--v2-accent); color: var(--v2-accent-ink); border-color: transparent; }
+.v2-corner-ruler { top: var(--v2-ribbon-h); z-index: 7; height: var(--v2-ruler-h); }
+/* content header cells stick to the top only (scroll horizontally with the lanes) */
+.v2-ribbon-cell { position: sticky; top: 0; z-index: 4; }
+.v2-ruler-cell { position: sticky; top: var(--v2-ribbon-h); z-index: 4; }
+
+/* section ribbon */
+.v2-ribbon {
+  position: relative; height: var(--v2-ribbon-h);
+  background: var(--v2-surface-2); border-bottom: 1px solid var(--v2-line);
+}
+.v2-seg {
+  position: absolute; top: 0; bottom: 0; display: flex; align-items: center; padding: 0 12px;
+  border-left: 1px solid var(--v2-line); font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--v2-dim); white-space: nowrap; overflow: hidden; cursor: pointer;
+}
+.v2-seg:hover { color: var(--v2-text); }
+.v2-seg-bar { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; opacity: 0.7; }
+
+/* bar ruler */
+.v2-ruler {
+  position: relative; height: var(--v2-ruler-h);
+  background: var(--v2-surface-sunken); border-bottom: 1px solid var(--v2-line); cursor: pointer;
+}
+.v2-ruler-bar { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--v2-line); }
+.v2-ruler-num { position: absolute; top: 5px; font-family: var(--font-mono); font-size: 10px; color: var(--v2-faint); transform: translateX(4px); }
+.v2-ruler-num.cur { color: var(--v2-playhead); }
+
+/* track lane header */
+.v2-lane-row { height: var(--v2-lane-h); }
+.v2-lhead {
+  position: sticky; left: 0; z-index: 3;
+  height: var(--v2-lane-h); display: flex; align-items: center; gap: 10px; padding: 0 12px;
+  background: var(--v2-surface-2); border-right: 1px solid var(--v2-line); border-bottom: 1px solid var(--v2-line);
+  cursor: pointer;
+}
+.v2-lhead.sel { box-shadow: inset 3px 0 0 var(--v2-accent); }
+.v2-licon {
+  flex: 0 0 auto; width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center;
+  background: var(--v2-surface-sunken); border: 1px solid var(--v2-line); color: var(--v2-blue); font-size: 15px;
+  transition: box-shadow 90ms linear, color 120ms linear;
+}
+/* Shell reactivity (#10): --lvl (0..1, set imperatively from per-track levels) drives a
+   lime glow on the track icon + a faint inner glow on the lane, so each track lights up
+   with its own audio while playing — alongside Moshi reacting to the master spectrum. */
+.v2-lhead .v2-licon { box-shadow: 0 0 calc(var(--lvl, 0) * 22px) rgba(204, 255, 54, calc(var(--lvl, 0) * 0.9)); }
+.v2-lane { transition: box-shadow 90ms linear; }
+.v2-lane[data-track-id] { box-shadow: inset 2px 0 0 rgba(204, 255, 54, calc(var(--lvl, 0) * 0.85)), inset 0 0 38px rgba(204, 255, 54, calc(var(--lvl, 0) * 0.13)); }
+@media (prefers-reduced-motion: reduce) {
+  .v2-lhead .v2-licon, .v2-lane[data-track-id] { box-shadow: none; transition: none; }
+}
+.v2-lmeta { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.v2-lname { display: block; font-size: 13px; color: var(--v2-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v2-lpreset { display: block; font-size: 11px; color: var(--v2-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v2-ms { display: flex; flex-direction: column; gap: 4px; }
+.v2-ms button {
+  width: 22px; height: 20px; border-radius: 6px; font-size: 10px; font-weight: 700;
+  background: var(--v2-surface-sunken); border: 1px solid var(--v2-line); color: var(--v2-dim); cursor: pointer;
+}
+.v2-ms button.on.m { background: var(--mute, #ffb454); color: #1a1206; border-color: transparent; }
+.v2-ms button.on.s { background: var(--v2-accent); color: var(--v2-accent-ink); border-color: transparent; }
+
+/* lane content */
+.v2-lane {
+  position: relative; height: var(--v2-lane-h);
+  border-bottom: 1px solid var(--v2-line);
+  background:
+    repeating-linear-gradient(90deg, transparent 0, transparent calc(var(--beat-px, 40px) - 1px), var(--v2-line) calc(var(--beat-px, 40px) - 1px), var(--v2-line) var(--beat-px, 40px));
+}
+.v2-clip {
+  position: absolute; top: 8px; bottom: 8px; border-radius: 8px; overflow: hidden;
+  background: var(--v2-clip-block); border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.35); cursor: pointer; min-width: 4px;
+}
+.v2-clip { cursor: grab; }
+.v2-clip:active { cursor: grabbing; }
+.v2-clip.sel { outline: 2px solid var(--v2-accent); outline-offset: -1px; }
+.v2-trim { position: absolute; top: 0; bottom: 0; cursor: ew-resize; }
+.v2-trim.l { left: 0; }
+.v2-trim.r { right: 0; }
+
+/* clip context menu (portal) */
+.v2-clipmenu {
+  position: fixed; z-index: 90; min-width: 170px;
+  background: var(--v2-surface-2); border: 1px solid var(--v2-line-strong); border-radius: 11px;
+  box-shadow: var(--v2-shadow); padding: 5px; backdrop-filter: blur(20px);
+}
+.v2-clipmenu button {
+  display: block; width: 100%; text-align: left; background: transparent; border: none;
+  color: var(--v2-text); font: inherit; font-size: 13px; padding: 8px 10px; border-radius: 7px; cursor: pointer;
+}
+.v2-clipmenu button:hover { background: var(--v2-accent-soft); }
+.v2-clipmenu button.danger:hover { background: rgba(255, 59, 92, 0.16); color: #ffb3c1; }
+.v2-clipmenu-sep { height: 1px; background: var(--v2-line); margin: 4px 4px; }
+.v2-clip.wave { background: var(--v2-clip-wave); }
+.v2-clip.midi { background: rgba(26, 26, 28, 0.66); border-color: rgba(255, 255, 255, 0.16); }
+.v2-clip.drum { background: rgba(24, 24, 26, 0.6); border-color: rgba(204, 255, 54, 0.3); }
+.v2-clip-label { position: absolute; left: 8px; top: 5px; font-size: 10px; color: rgba(255, 255, 255, 0.92); text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5); pointer-events: none; }
+.v2-clip canvas { display: block; width: 100%; height: 100%; }
+
+/* playhead overlay */
+.v2-playhead-line {
+  position: absolute; top: 0; bottom: 0; width: 2px; background: var(--v2-playhead);
+  box-shadow: 0 0 10px var(--v2-playhead); z-index: 7; pointer-events: none;
+}
+.v2-playhead-line::before {
+  content: ""; position: absolute; top: 0; left: -4px; border: 5px solid transparent;
+  border-top-color: var(--v2-playhead); border-bottom: none;
+}
+
+.v2-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--v2-faint); font-size: 13px; }
+
+/* ─────────────────────────────── RIGHT RAIL ──────────────────────────────── */
+.v2-rail { display: flex; flex-direction: column; gap: var(--v2-gap); min-height: 0; overflow: auto; }
+.v2-card-head {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--v2-dim);
+  padding: 12px 14px 0;
+}
+.v2-live { display: inline-flex; align-items: center; gap: 6px; color: var(--v2-accent); font-size: 10px; }
+.v2-live .led { width: 7px; height: 7px; border-radius: 50%; background: var(--v2-accent); box-shadow: 0 0 8px var(--v2-accent); }
+
+.v2-mosh-card { padding-bottom: 12px; }
+.v2-mosh-stage { display: grid; place-items: center; padding: 6px 0 2px; }
+.v2-shell .v2-mosh-stage .moshi-dock { width: 100%; border-left: none; background: transparent; padding: 4px; }
+.v2-mosh-status { display: flex; align-items: center; gap: 8px; padding: 4px 14px 0; color: var(--v2-dim); font-size: 12px; }
+.v2-mosh-status .wave { color: var(--v2-accent); }
+
+/* contextual inspector */
+.v2-insp-tabs { display: flex; gap: 3px; padding: 8px 12px 0; flex-wrap: wrap; }
+.v2-insp-tabs button {
+  font: inherit; font-size: 11px; padding: 5px 11px; border-radius: 9px;
+  background: transparent; border: 1px solid transparent; color: var(--v2-dim); cursor: pointer;
+}
+.v2-insp-tabs button.on { color: var(--v2-text); background: var(--v2-surface-sunken); border-color: var(--v2-line); }
+.v2-insp-body { padding: 10px 12px 12px; }
+.v2-mix { display: flex; flex-direction: column; gap: 10px; }
+.v2-field { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--v2-dim); }
+.v2-field > span:first-child { flex: 0 0 30px; }
+.v2-field input[type="range"] { flex: 1 1 auto; min-width: 0; accent-color: var(--v2-accent); }
+.v2-val { flex: 0 0 40px; text-align: right; color: var(--v2-text); font-family: var(--font-mono); font-size: 11px; }
+.v2-mix-btns { display: flex; gap: 8px; }
+.v2-mix-btns button {
+  flex: 1 1 auto; padding: 7px; border-radius: 8px; font: inherit; font-size: 12px;
+  background: var(--v2-surface-sunken); border: 1px solid var(--v2-line); color: var(--v2-dim); cursor: pointer;
+}
+.v2-mix-btns button.on { background: var(--v2-accent); color: var(--v2-accent-ink); border-color: transparent; }
+.v2-takes { display: flex; flex-direction: column; gap: 6px; }
+.v2-take {
+  display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; border-radius: 8px;
+  font: inherit; font-size: 12px; background: var(--v2-surface-sunken); border: 1px solid var(--v2-line); color: var(--v2-text); cursor: pointer;
+}
+.v2-take.on { border-color: var(--v2-accent); }
+.v2-take .cur { color: var(--v2-accent); }
+/* reused classic Rack/GenDrawer flow full-width inside the narrow rail */
+.v2-insp-body .rack, .v2-insp-body .gen { width: 100%; min-width: 0; }
+.v2-insp-body .rack-chain { flex-wrap: wrap; }
+
+.v2-collab-list { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px 12px; }
+.v2-collab {
+  display: flex; align-items: center; gap: 10px; padding: 7px; border-radius: 12px;
+  background: var(--v2-surface-sunken); border: 1px solid var(--v2-line);
+}
+.v2-collab .av { flex: 0 0 auto; width: 40px; height: 40px; border-radius: 9px; display: grid; place-items: center; font-weight: 700; color: var(--v2-accent-ink); }
+.v2-cam { appearance: none; background: var(--v2-surface-sunken); border: 1px solid var(--v2-line); border-radius: 8px; padding: 3px 8px; font-size: 13px; line-height: 1; cursor: pointer; color: var(--v2-dim); }
+.v2-cam.on { border-color: var(--v2-accent); color: var(--v2-accent); }
+.v2-shell .v2-collab .video-tile { flex: 0 0 auto; width: 58px; height: 44px; max-width: none; aspect-ratio: auto; border-radius: 8px; object-fit: cover; background: #000; }
+.v2-shell [data-testid="v2-collab-self"] .video-tile { transform: scaleX(-1); }
+.v2-collab .nm { flex: 1 1 auto; font-size: 13px; color: var(--v2-text); }
+.v2-collab .pulse { color: var(--v2-accent); font-size: 14px; }
+.v2-invite {
+  display: flex; align-items: center; gap: 8px; width: 100%; justify-content: center;
+  background: transparent; border: 1px dashed var(--v2-line-strong); color: var(--v2-dim);
+  font: inherit; font-size: 13px; padding: 10px; border-radius: 12px; cursor: pointer;
+}
+.v2-invite:hover { color: var(--v2-text); border-color: var(--v2-accent); }
+
+/* ─────────────────────────────── COMPOSER ────────────────────────────────── */
+.v2-composer {
+  display: flex; align-items: center; gap: 10px; padding: 8px 10px 8px 16px;
+  background: var(--v2-surface); border: 1px solid var(--v2-line); border-radius: 16px;
+  box-shadow: var(--v2-glow);
+}
+.v2-composer .spark { flex: 0 0 auto; width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: var(--v2-accent-soft); color: var(--v2-accent); font-size: 16px; }
+.v2-composer-plus { flex: 0 0 auto; position: relative; }
+.v2-shell .v2-composer-plus .fo-trigger {
+  width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center;
+  background: var(--v2-accent-soft); color: var(--v2-accent); border: 1px solid var(--v2-line); font-size: 18px; cursor: pointer;
+}
+.v2-shell .v2-composer-plus .fo-trigger:hover { border-color: var(--v2-accent); }
+/* The reused AgentComposer renders its own input/form; let it fill the bar. */
+.v2-composer .v2-composer-host { flex: 1 1 auto; min-width: 0; }
+
+/* error + drop overlay (reuse legacy semantics, restyled) */
+.v2-errbar { margin: 0 14px; padding: 7px 14px; background: rgba(255, 71, 106, 0.14); color: #ffb3c1; border: 1px solid rgba(255, 71, 106, 0.4); border-radius: 10px; font-size: 12px; }
+.v2-drop { position: absolute; inset: 0; z-index: 80; display: grid; place-items: center; background: rgba(5, 8, 20, 0.7); color: var(--v2-accent); font-size: 16px; border: 2px dashed var(--v2-accent); border-radius: var(--v2-radius); }
+
+/* agent-change toast — self-dismissing, with an Undo grace window (hover to pause) */
+.v2-toast {
+  position: fixed; left: 50%; bottom: 92px; transform: translateX(-50%); z-index: 85;
+  display: flex; align-items: center; gap: 10px; padding: 10px 12px 10px 14px;
+  background: var(--v2-surface-2); border: 1px solid var(--v2-line-strong); border-radius: 12px;
+  box-shadow: var(--v2-shadow); backdrop-filter: blur(20px); color: var(--v2-text); font-size: 13px;
+  animation: v2-toast-in 240ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.v2-toast.out { animation: v2-toast-out 240ms ease forwards; }
+.v2-toast.err { border-color: rgba(255, 59, 92, 0.45); }
+.v2-toast-dot { color: var(--v2-accent); }
+.v2-toast.err .v2-toast-dot { color: var(--v2-rec); }
+.v2-toast-text { color: var(--v2-dim); max-width: 320px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v2-toast-undo {
+  background: transparent; border: 1px solid var(--v2-line); color: var(--v2-text); font: inherit; font-size: 12px;
+  padding: 4px 11px; border-radius: 8px; cursor: pointer;
+}
+.v2-toast-undo:hover { border-color: var(--v2-accent); color: var(--v2-accent); }
+@keyframes v2-toast-in { from { opacity: 0; transform: translateX(-50%) translateY(10px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
+@keyframes v2-toast-out { to { opacity: 0; transform: translateX(-50%) translateY(8px); } }
+@media (prefers-reduced-motion: reduce) { .v2-toast, .v2-toast.out { animation: none; } }
+
+.v2-boot { display: grid; place-items: center; height: 100%; color: var(--v2-dim); gap: 8px; }
+.v2-boot h2 { font-family: var(--font-display); font-size: 40px; color: var(--v2-text); margin: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  .v2-shell .v2-tbtn, .v2-shell .v2-btn { transition: none; }
+  .v2-shell .v2-pill .led.busy { animation: none; }
+}

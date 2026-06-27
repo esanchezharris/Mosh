@@ -25,9 +25,11 @@ describe("mock transform render layer (Route B)", () => {
 
   it("create transform layer → set target/strength → render → accept", async () => {
     const s = await snap();
-    const trackWithClip = s.tracks.find((t) => t.clips.length > 0);
-    expect(trackWithClip).toBeTruthy();
-    const clipId = trackWithClip!.clips[0].id;
+    // Transform is an audio operation — target a WAVE clip explicitly (the seed now also
+    // carries typed MIDI/drum clips).
+    const wave = s.tracks.flatMap((t) => t.clips).find((c) => c.type === "wave");
+    expect(wave).toBeTruthy();
+    const clipId = wave!.id;
 
     expect((await exec("create_render_layer", { clipId, adapter: "transform", mode: "transform" })).ok).toBe(true);
     expect((await clipById(clipId))?.renderLayer?.mode).toBe("transform");

@@ -14,7 +14,7 @@
 // behaviour the UI relies on is exercised, while audio/Tracktion concepts never
 // appear (the swappable seam holds on the web side too).
 
-import type { Snapshot, Clip, Track, Transport, CommandResult, RenderLayer, TrainingState } from "./types";
+import type { Snapshot, Clip, Track, Transport, CommandResult, RenderLayer, TrainingState, MidiNote } from "./types";
 
 export const MOCK_ENABLED: boolean =
   typeof import.meta !== "undefined" && Boolean(import.meta.env?.DEV);
@@ -45,18 +45,58 @@ function waveClip(name: string, start: number, length: number): Clip {
   };
 }
 
+function midiClip(name: string, start: number, length: number, notes: MidiNote[]): Clip {
+  return { id: nextClipId(), name, type: "midi", start, length, offset: 0, hasRenderLayer: false, notes };
+}
+
+// A recognizable 4/4 rock pattern in GM drum pitches (kick 36 / snare 38 / closed-hat 42)
+// so the lane renders as a real drum step-grid (isDrumClip → ClipDrumGrid). start/length
+// are in BEATS within the clip (the renderers convert beats→seconds via the tempo map).
+function drumPattern(bars: number): MidiNote[] {
+  const notes: MidiNote[] = [];
+  let i = 0;
+  for (let bar = 0; bar < bars; bar++) {
+    const b = bar * 4;
+    notes.push({ i: i++, pitch: 36, start: b, length: 0.25, velocity: 112 });       // kick — beat 1
+    notes.push({ i: i++, pitch: 36, start: b + 2, length: 0.25, velocity: 96 });     // kick — beat 3
+    notes.push({ i: i++, pitch: 38, start: b + 1, length: 0.25, velocity: 104 });    // snare — backbeat
+    notes.push({ i: i++, pitch: 38, start: b + 3, length: 0.25, velocity: 104 });    // snare — backbeat
+    for (let h = 0; h < 8; h++) notes.push({ i: i++, pitch: 42, start: b + h * 0.5, length: 0.2, velocity: 64 }); // hats — 8ths
+  }
+  return notes;
+}
+
+// A simple melodic bass line. Pitches stay BELOW the GM drum range (36–49) so isDrumClip
+// is false → the lane renders as MIDI note blocks (ClipMidi), not a drum grid.
+function bassLine(bars: number): MidiNote[] {
+  const roots = [28, 28, 33, 31]; // E1 · E1 · A1 · G1 (A-minor feel), all < 36
+  const notes: MidiNote[] = [];
+  let i = 0;
+  for (let bar = 0; bar < bars; bar++) {
+    const b = bar * 4;
+    const p = roots[bar % roots.length];
+    notes.push({ i: i++, pitch: p, start: b, length: 1.5, velocity: 102 });
+    notes.push({ i: i++, pitch: p, start: b + 2, length: 1, velocity: 90 });
+    notes.push({ i: i++, pitch: p + 2, start: b + 3, length: 0.5, velocity: 80 }); // passing tone (stays < 36, off the drum lanes)
+  }
+  return notes;
+}
+
 function seedSnapshot(): Snapshot {
+  // Demo-accurate typed seed (dev/preview only): Drums = a drum step-grid (MIDI on a
+  // drum track), Bass = MIDI note blocks, Keys = an audio waveform. 8s clips = 16 beats
+  // = 4 bars at 120 BPM. Keep exactly 3 tracks (smoke asserts 3).
   const tracks: Track[] = [
     {
-      id: nextTrackId(), index: 0, name: "Drums", type: "audio",
-      volumeDb: 0, pan: 0, mute: false, solo: false,
-      clips: [waveClip("loop", 0, 4), waveClip("fill", 6, 2)],
+      id: nextTrackId(), index: 0, name: "Drums", type: "drum",
+      volumeDb: 0, pan: 0, mute: false, solo: false, isInstrument: true,
+      clips: [midiClip("loop", 0, 8, drumPattern(4))],
       plugins: [],
     },
     {
       id: nextTrackId(), index: 1, name: "Bass", type: "audio",
-      volumeDb: -3, pan: 0, mute: false, solo: false,
-      clips: [waveClip("sub", 0, 8)],
+      volumeDb: -3, pan: 0, mute: false, solo: false, isInstrument: true,
+      clips: [midiClip("sub", 0, 8, bassLine(4))],
       plugins: [],
     },
     {

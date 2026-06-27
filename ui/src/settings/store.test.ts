@@ -183,6 +183,9 @@ describe("per-template (per-keymap) rebind persistence (AL-002)", () => {
 
 describe("DOM effects", () => {
   it("applies skin/theme to the root data-attributes and scale to zoom", () => {
+    // The skin axis only applies in the classic shell — the v2 shell (now the default)
+    // pins data-skin=mosh (effects.ts). Opt into classic to exercise the skin effect.
+    useSettings.getState().set("uiShell", "classic");
     useSettings.getState().applyTemplate("fl");
     const root = document.documentElement;
     expect(root.getAttribute("data-skin")).toBe("fl");

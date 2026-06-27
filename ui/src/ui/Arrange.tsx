@@ -684,7 +684,7 @@ function prepCanvas(cv: HTMLCanvasElement | null): { ctx: CanvasRenderingContext
   return { ctx, w, h };
 }
 
-const ClipWave = memo(function ClipWave({ peaks, width }: { peaks?: Peaks; width: number }) {
+export const ClipWave = memo(function ClipWave({ peaks, width }: { peaks?: Peaks; width: number }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     if (!peaks) return;
@@ -704,7 +704,7 @@ const ClipWave = memo(function ClipWave({ peaks, width }: { peaks?: Peaks; width
 
 // A MIDI clip reads as "drums" when most of its notes land on GM percussion keys
 // (the same lanes the drum sequencer uses); melodic clips get the piano preview.
-function isDrumClip(notes?: MidiNote[]): boolean {
+export function isDrumClip(notes?: MidiNote[]): boolean {
   const ns = notes ?? [];
   if (ns.length === 0) return false;
   const onLane = ns.filter((n) => laneIndexForPitch(n.pitch) >= 0).length;
@@ -714,7 +714,7 @@ function isDrumClip(notes?: MidiNote[]): boolean {
 // Inline MIDI preview — pitch-mapped note blocks. Notes carry clip-local beats;
 // beatSeconds(meter) → seconds, then the shared secToPx scale lands them on the
 // same grid the ruler/playhead use. Double-click the clip still opens the PianoRoll.
-const ClipMidi = memo(function ClipMidi({ notes, width, bs, secToPx }:
+export const ClipMidi = memo(function ClipMidi({ notes, width, bs, secToPx }:
   { notes?: MidiNote[]; width: number; bs: number; secToPx: (s: number) => number }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
@@ -745,7 +745,7 @@ const ClipMidi = memo(function ClipMidi({ notes, width, bs, secToPx }:
 
 // Inline drum preview — fixed GM lanes (kick/snare/hat/…), FL-style steps. x stays
 // grid-aligned via secToPx(beats); y is the GM lane, not the pitch.
-const ClipDrumGrid = memo(function ClipDrumGrid({ notes, width, bs, secToPx }:
+export const ClipDrumGrid = memo(function ClipDrumGrid({ notes, width, bs, secToPx }:
   { notes?: MidiNote[]; width: number; bs: number; secToPx: (s: number) => number }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {

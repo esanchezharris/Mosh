@@ -8,6 +8,7 @@
 import { useEffect, useRef } from "react";
 import { useStore } from "../store";
 import { useSettings } from "../settings/store";
+import { useIsV2 } from "../v2/shellFlag";
 import { DEFAULT_KEY } from "../musicalKey";
 import { AgentComposer } from "./AgentComposer";
 import "../vendor/moshi.js";
@@ -300,9 +301,12 @@ export function Moshi() {
   const toggleVoice = useStore((s) => s.toggleVoice);
   const handsFreeOn = useStore((s) => s.handsFreeOn);
   const setHandsFree = useStore((s) => s.setHandsFree);
-  // In the redesign shell the prompt lives in a dedicated bottom bar (App), so it's
-  // not mounted here — mounted in exactly one place either way (no double mount).
+  // In the redesign AND v2 shells the prompt lives in a dedicated bottom bar, so it's
+  // not mounted here — mounted in exactly one place either way (no double mount). Only
+  // the classic non-redesign layout owns the composer inside Moshi's dock.
   const redesign = useSettings((s) => Boolean(s.get("redesignShell")));
+  const inV2 = useIsV2();
+  const ownComposer = !redesign && !inV2;
   const stateLabel = recording ? "● rec" : rendering ? "working…" : playing ? "listening" : "idle";
   // One-word mood derived from the same live state. `mood` keys the mount's
   // state-tinted glow (box-shadow only — no transform/filter on the canvas wrapper);
@@ -340,7 +344,7 @@ export function Moshi() {
       <span className="moshi-mood display" data-mood={mood}
         data-celebrate={celebrateTick > 0 ? (celebrateTick % 2 === 0 ? "a" : "b") : "off"}
         data-testid="moshi-mood">{moodWord}</span>
-      {!redesign && <AgentComposer />}
+      {ownComposer && <AgentComposer />}
     </div>
   );
 }

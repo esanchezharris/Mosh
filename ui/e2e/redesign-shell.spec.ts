@@ -6,7 +6,7 @@ import { test, expect, type Page } from "@playwright/test";
 async function bootRedesign(page: Page): Promise<void> {
   await page.addInitScript(() => {
     window.localStorage.clear();
-    window.localStorage.setItem("mosh.settings", JSON.stringify({ version: 1, template: null, values: { redesignShell: true } }));
+    window.localStorage.setItem("mosh.settings", JSON.stringify({ version: 1, template: null, values: { redesignShell: true, uiShell: "classic" } }));
   });
   await page.goto("/");
   await expect(page.getByTestId("app")).toBeVisible();
@@ -16,18 +16,19 @@ async function bootRedesign(page: Page): Promise<void> {
 async function bootClassic(page: Page): Promise<void> {
   await page.addInitScript(() => {
     window.localStorage.clear();
-    window.localStorage.setItem("mosh.settings", JSON.stringify({ version: 1, template: null, values: { redesignShell: false } }));
+    window.localStorage.setItem("mosh.settings", JSON.stringify({ version: 1, template: null, values: { redesignShell: false, uiShell: "classic" } }));
   });
   await page.goto("/");
   await expect(page.getByTestId("arrangement")).toBeVisible();
 }
 
-test("default (no settings): boots the redesign shell", async ({ page }) => {
+test("default (no settings): boots the v2 shell", async ({ page }) => {
   await page.addInitScript(() => window.localStorage.clear()); // clean storage → schema defaults
   await page.goto("/");
-  await expect(page.getByTestId("arrangement")).toBeVisible();
-  await expect(page.getByTestId("session-rail")).toBeVisible(); // redesign is the default now
-  await expect(page.getByTestId("promptbar")).toBeVisible();
+  // Post-cutover the v2 shell is the schema default (uiShell="v2"). The classic
+  // redesign layout below stays reachable by seeding uiShell="classic".
+  await expect(page.getByTestId("v2-shell")).toBeVisible();
+  await expect(page.getByTestId("v2-timeline")).toBeVisible();
 });
 
 test("flag on: the Session rail is open by default with Moshi + inspector", async ({ page }) => {
