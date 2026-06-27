@@ -40,7 +40,7 @@ export function Inspector() {
   return (
     <section className="v2-card v2-inspector" data-testid="v2-inspector">
       <div className="v2-card-head"><span>Inspector · {track.name}</span></div>
-      <div className="v2-insp-tabs" role="tablist">
+      <div className="v2-insp-tabs" role="tablist" aria-label="Inspector tabs">
         {tabs.map((t) => (
           <button key={t.id} role="tab" aria-selected={active === t.id} className={active === t.id ? "on" : ""}
             data-testid={`v2-insp-tab-${t.id}`} onClick={() => setTab(t.id)}>{t.label}</button>
