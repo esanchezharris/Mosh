@@ -54,11 +54,16 @@ PYTHONPATH=service python3 service/teardown/render/verify_execute.py
   catalog-present run), vitest **591**, functional Serum probe + the §9-synth proof. Built
   into `build-macos-arm64-release` (not yet deployed to /Applications — `run-mosh.sh deploy`
   to ship it).
-- **§9 timeline placement** — `compile.py` places a matched sample at `startSeconds=0`
-  (one element per track). Sequencing multiple slices on one track at their onset times is
-  a compiler extension needed for a faithful drum reconstruction from §7 slices.
-- **§5b knob VALUES** — the census measures whether a synth GUI is *seen*; reading the
-  actual knob values needs calibrated per-synth profiles (`synth_from_screen/profiles/`).
+- **§9 timeline placement — LANDED.** `Element.onsets` + per-onset clips on one track
+  (`from_extraction.py` groups §7 slices); proven end-to-end (verify_extraction.py).
+- **§5b knob VALUES — CALIBRATED (Vital).** `profiles/vital.json` from a real GUI capture;
+  `verify_synthgui.py` reads ENV1 ADSR (sustain highest). Remaining: more synths (Serum has
+  no standalone — needs the Mosh-hosted editor in a GUI session), more controls, and
+  absolute-accuracy tuning for Vital's fill-arc knob style.
+- **Teardown UI — LANDED.** v2 browser-drawer "Teardown" tab (`TeardownPanel.tsx`) +
+  `teardown_analyze`/`teardown_render` MoshOps proxy commands + `/teardown/recipe` &
+  `/teardown/execute` service routes. The deployed app bundles the lane code; `/teardown/*`
+  503 gracefully until `setup-teardown.sh` provisions the venv in a stable location.
 - **§2 DAW detection is weak** — the census identified the DAW in 0/8 tutorials: the OCR
   title-bar heuristic doesn't fire on mid-tutorial frames (the DAW chrome isn't on screen
   while editing). Piano-roll + plugin-name detection both work well (88% / 50%), so this is

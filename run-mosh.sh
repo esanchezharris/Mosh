@@ -163,6 +163,15 @@ bundle_service() {                              # $1 = installed app
   # Route C transform (RAVE): the CLI + setup only — NEVER the .venv (torch, GBs).
   cp "$ROOT/service/transform/transform_cli.py" \
      "$ROOT/service/transform/setup-transform.sh" "$SVC/transform/" 2>/dev/null || true
+  # Teardown lane (§1/§4/§9 CLIs the /teardown/* routes shell): the whole package MINUS the
+  # venv (torch/transformers, GBs) + caches. Absent venv → /teardown/* return 503 gracefully.
+  if [ -d "$ROOT/service/teardown" ]; then
+    cp -R "$ROOT/service/teardown" "$SVC/teardown"
+    rm -rf "$SVC/teardown/.venv" "$SVC/teardown/.index" 2>/dev/null || true
+    find "$SVC/teardown" -name '*.png' -path '*/fixtures/*' -size +200k -delete 2>/dev/null || true
+  fi
+  # (teardown's .teardown.env is NOT bundled — it points at this worktree's .venv, which is
+  #  cleaned up; the deployed /teardown/* return 503 until the user runs setup-teardown.sh.)
   # Machine-local venv pointers (gitignored). Absent ones fall back to run.sh defaults.
   [ -f "$ROOT/service/.sa3.env" ] && cp "$ROOT/service/.sa3.env" "$SVC/.sa3.env"
   [ -f "$ROOT/service/transcribe/.transcribe.env" ] && cp "$ROOT/service/transcribe/.transcribe.env" "$SVC/transcribe/.transcribe.env"
