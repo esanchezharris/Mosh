@@ -1,0 +1,1081 @@
+{
+  "version": "0.1",
+  "project": "Mosh",
+  "assistant": "Monster",
+  "contract": "natural language -> typed commands -> DAW core execution -> UI reflection -> event log",
+  "commands": [
+    {
+      "type": "PLAY",
+      "family": "transport",
+      "examples": [
+        "play",
+        "start from here"
+      ],
+      "required": [],
+      "optional": [
+        "positionBeat"
+      ],
+      "preconditions": [
+        "audio engine ready"
+      ],
+      "stateChanges": [
+        "transport.state=playing"
+      ],
+      "undo": "not undoable; transport action logged"
+    },
+    {
+      "type": "STOP",
+      "family": "transport",
+      "examples": [
+        "stop",
+        "pause"
+      ],
+      "required": [],
+      "optional": [
+        "returnToStart"
+      ],
+      "preconditions": [
+        "session loaded"
+      ],
+      "stateChanges": [
+        "transport.state=stopped"
+      ],
+      "undo": "not undoable"
+    },
+    {
+      "type": "SEEK",
+      "family": "transport",
+      "examples": [
+        "go to bar 9",
+        "jump to the hook"
+      ],
+      "required": [
+        "positionBeat|markerId"
+      ],
+      "optional": [],
+      "preconditions": [
+        "position valid"
+      ],
+      "stateChanges": [
+        "transport.playheadBeat set"
+      ],
+      "undo": "not undoable"
+    },
+    {
+      "type": "SET_LOOP_RANGE",
+      "family": "transport",
+      "examples": [
+        "loop these 8 bars",
+        "loop the hook"
+      ],
+      "required": [
+        "startBeat",
+        "endBeat"
+      ],
+      "optional": [
+        "enabled"
+      ],
+      "preconditions": [
+        "range valid"
+      ],
+      "stateChanges": [
+        "loop range updated"
+      ],
+      "undo": "undoable"
+    },
+    {
+      "type": "SET_TEMPO",
+      "family": "transport",
+      "examples": [
+        "set bpm to 140",
+        "make it 92 bpm"
+      ],
+      "required": [
+        "bpm"
+      ],
+      "optional": [
+        "preserveAudioPitch"
+      ],
+      "preconditions": [
+        "bpm in range"
+      ],
+      "stateChanges": [
+        "session.tempo updated"
+      ],
+      "undo": "undoable"
+    },
+    {
+      "type": "CREATE_TRACK",
+      "family": "track",
+      "examples": [
+        "add a vocal track",
+        "make a drum track"
+      ],
+      "required": [
+        "trackType",
+        "name"
+      ],
+      "optional": [
+        "color",
+        "input"
+      ],
+      "preconditions": [
+        "track limit not exceeded"
+      ],
+      "stateChanges": [
+        "track and mixer channel created"
+      ],
+      "undo": "delete created track"
+    },
+    {
+      "type": "RENAME_TRACK",
+      "family": "track",
+      "examples": [
+        "rename this lead vocal",
+        "call this beat"
+      ],
+      "required": [
+        "trackId",
+        "name"
+      ],
+      "optional": [],
+      "preconditions": [
+        "track exists"
+      ],
+      "stateChanges": [
+        "track.name updated"
+      ],
+      "undo": "restore old name"
+    },
+    {
+      "type": "ARM_TRACK",
+      "family": "recording",
+      "examples": [
+        "arm my mic",
+        "record on vocal track"
+      ],
+      "required": [
+        "trackId",
+        "armed"
+      ],
+      "optional": [
+        "inputDeviceId"
+      ],
+      "preconditions": [
+        "track can record"
+      ],
+      "stateChanges": [
+        "track.armed updated"
+      ],
+      "undo": "restore armed state"
+    },
+    {
+      "type": "START_RECORDING",
+      "family": "recording",
+      "examples": [
+        "record me",
+        "start recording after count-in"
+      ],
+      "required": [
+        "trackId"
+      ],
+      "optional": [
+        "countInBars",
+        "inputDeviceId"
+      ],
+      "preconditions": [
+        "mic permission and track armed/recordable"
+      ],
+      "stateChanges": [
+        "recording session starts"
+      ],
+      "undo": "not until clip committed"
+    },
+    {
+      "type": "STOP_RECORDING",
+      "family": "recording",
+      "examples": [
+        "stop recording",
+        "keep that take"
+      ],
+      "required": [
+        "recordingId"
+      ],
+      "optional": [
+        "clipName"
+      ],
+      "preconditions": [
+        "recording active"
+      ],
+      "stateChanges": [
+        "asset and clip created"
+      ],
+      "undo": "remove placed clip; preserve/discard asset by policy"
+    },
+    {
+      "type": "IMPORT_AUDIO",
+      "family": "browser/import",
+      "examples": [
+        "import this beat",
+        "drop this sample on track 2"
+      ],
+      "required": [
+        "assetSource",
+        "trackId",
+        "startBeat"
+      ],
+      "optional": [
+        "warpToTempo",
+        "name"
+      ],
+      "preconditions": [
+        "asset decodable and accessible"
+      ],
+      "stateChanges": [
+        "asset and audio clip created"
+      ],
+      "undo": "remove clip; preserve asset if user library item"
+    },
+    {
+      "type": "MOVE_CLIP",
+      "family": "clip",
+      "examples": [
+        "move that to the hook",
+        "put the vocal at bar 17"
+      ],
+      "required": [
+        "clipId",
+        "startBeat"
+      ],
+      "optional": [
+        "trackId",
+        "snapMode"
+      ],
+      "preconditions": [
+        "clip exists; target valid"
+      ],
+      "stateChanges": [
+        "clip.startBeat/trackId updated"
+      ],
+      "undo": "restore previous position"
+    },
+    {
+      "type": "TRIM_CLIP",
+      "family": "clip",
+      "examples": [
+        "trim the front",
+        "cut the ending tighter"
+      ],
+      "required": [
+        "clipId",
+        "edge",
+        "newBoundary"
+      ],
+      "optional": [
+        "snapMode"
+      ],
+      "preconditions": [
+        "boundary valid"
+      ],
+      "stateChanges": [
+        "clip boundary/offset updated"
+      ],
+      "undo": "restore previous boundaries"
+    },
+    {
+      "type": "SPLIT_CLIP",
+      "family": "clip",
+      "examples": [
+        "split here",
+        "cut this at bar 9"
+      ],
+      "required": [
+        "clipId",
+        "positionBeat"
+      ],
+      "optional": [],
+      "preconditions": [
+        "position inside clip"
+      ],
+      "stateChanges": [
+        "two clips reference same source"
+      ],
+      "undo": "merge back to original clip state"
+    },
+    {
+      "type": "DUPLICATE_CLIP",
+      "family": "clip",
+      "examples": [
+        "duplicate the hook",
+        "copy this right after itself"
+      ],
+      "required": [
+        "clipId"
+      ],
+      "optional": [
+        "targetStartBeat",
+        "count"
+      ],
+      "preconditions": [
+        "clip exists"
+      ],
+      "stateChanges": [
+        "new clip instance(s) created"
+      ],
+      "undo": "delete duplicate(s)"
+    },
+    {
+      "type": "SET_CLIP_MUTE",
+      "family": "clip",
+      "examples": [
+        "mute that take",
+        "unmute the adlib"
+      ],
+      "required": [
+        "clipId",
+        "muted"
+      ],
+      "optional": [],
+      "preconditions": [
+        "clip exists"
+      ],
+      "stateChanges": [
+        "clip.muted updated"
+      ],
+      "undo": "restore previous"
+    },
+    {
+      "type": "SET_CLIP_GAIN",
+      "family": "clip",
+      "examples": [
+        "turn that clip down",
+        "make this take louder only"
+      ],
+      "required": [
+        "clipId",
+        "gainDb|deltaDb"
+      ],
+      "optional": [],
+      "preconditions": [
+        "clip exists"
+      ],
+      "stateChanges": [
+        "clip.gainDb updated"
+      ],
+      "undo": "restore previous"
+    },
+    {
+      "type": "SET_TRACK_GAIN",
+      "family": "mixer",
+      "examples": [
+        "turn my vocal up",
+        "beat down 2 dB"
+      ],
+      "required": [
+        "trackId",
+        "gainDb|deltaDb"
+      ],
+      "optional": [
+        "safeLimitDb"
+      ],
+      "preconditions": [
+        "track exists"
+      ],
+      "stateChanges": [
+        "track.mixer.gainDb updated"
+      ],
+      "undo": "restore previous"
+    },
+    {
+      "type": "SET_TRACK_PAN",
+      "family": "mixer",
+      "examples": [
+        "pan the guitar left",
+        "center the vocal"
+      ],
+      "required": [
+        "trackId",
+        "pan"
+      ],
+      "optional": [],
+      "preconditions": [
+        "track exists"
+      ],
+      "stateChanges": [
+        "track.pan updated"
+      ],
+      "undo": "restore previous"
+    },
+    {
+      "type": "SET_TRACK_MUTE",
+      "family": "mixer",
+      "examples": [
+        "mute drums",
+        "unmute the beat"
+      ],
+      "required": [
+        "trackId",
+        "muted"
+      ],
+      "optional": [],
+      "preconditions": [
+        "track exists"
+      ],
+      "stateChanges": [
+        "track.mute updated"
+      ],
+      "undo": "restore previous"
+    },
+    {
+      "type": "SET_TRACK_SOLO",
+      "family": "mixer",
+      "examples": [
+        "solo my vocal",
+        "unsolo everything"
+      ],
+      "required": [
+        "trackId|all",
+        "solo"
+      ],
+      "optional": [
+        "soloMode"
+      ],
+      "preconditions": [
+        "track exists or all"
+      ],
+      "stateChanges": [
+        "solo states updated"
+      ],
+      "undo": "restore previous solo set"
+    },
+    {
+      "type": "ADD_EFFECT",
+      "family": "effects",
+      "examples": [
+        "add reverb to my vocal",
+        "put delay on the hook"
+      ],
+      "required": [
+        "trackId",
+        "effectKind"
+      ],
+      "optional": [
+        "preset",
+        "position"
+      ],
+      "preconditions": [
+        "effect available"
+      ],
+      "stateChanges": [
+        "effect instance inserted"
+      ],
+      "undo": "remove effect"
+    },
+    {
+      "type": "SET_EFFECT_PARAM",
+      "family": "effects",
+      "examples": [
+        "more reverb",
+        "make delay quarter notes"
+      ],
+      "required": [
+        "effectId",
+        "parameterId",
+        "value|delta"
+      ],
+      "optional": [],
+      "preconditions": [
+        "effect and parameter exist"
+      ],
+      "stateChanges": [
+        "parameter updated"
+      ],
+      "undo": "restore previous"
+    },
+    {
+      "type": "BYPASS_EFFECT",
+      "family": "effects",
+      "examples": [
+        "turn off the delay",
+        "bypass compressor"
+      ],
+      "required": [
+        "effectId",
+        "bypassed"
+      ],
+      "optional": [],
+      "preconditions": [
+        "effect exists"
+      ],
+      "stateChanges": [
+        "effect.enabled updated"
+      ],
+      "undo": "restore previous"
+    },
+    {
+      "type": "CREATE_SEND",
+      "family": "routing",
+      "examples": [
+        "send vocal to room reverb",
+        "add delay send"
+      ],
+      "required": [
+        "sourceTrackId",
+        "returnTrackId",
+        "level"
+      ],
+      "optional": [
+        "prePost"
+      ],
+      "preconditions": [
+        "tracks exist"
+      ],
+      "stateChanges": [
+        "send created/updated"
+      ],
+      "undo": "remove/restore send"
+    },
+    {
+      "type": "CREATE_PATTERN",
+      "family": "midi/pattern",
+      "examples": [
+        "make a drum pattern",
+        "create 8 bar bass pattern"
+      ],
+      "required": [
+        "trackId",
+        "lengthBeats"
+      ],
+      "optional": [
+        "scale",
+        "instrumentId"
+      ],
+      "preconditions": [
+        "instrument track exists"
+      ],
+      "stateChanges": [
+        "pattern clip created"
+      ],
+      "undo": "delete pattern clip"
+    },
+    {
+      "type": "ADD_MIDI_NOTES",
+      "family": "midi/pattern",
+      "examples": [
+        "add a simple bassline",
+        "put kick on every beat"
+      ],
+      "required": [
+        "clipId",
+        "notes"
+      ],
+      "optional": [
+        "quantize",
+        "velocity"
+      ],
+      "preconditions": [
+        "midi/pattern clip exists"
+      ],
+      "stateChanges": [
+        "notes inserted"
+      ],
+      "undo": "remove inserted notes"
+    },
+    {
+      "type": "QUANTIZE_NOTES",
+      "family": "midi/pattern",
+      "examples": [
+        "quantize the hats",
+        "tighten the melody"
+      ],
+      "required": [
+        "clipId",
+        "grid"
+      ],
+      "optional": [
+        "strength"
+      ],
+      "preconditions": [
+        "notes exist"
+      ],
+      "stateChanges": [
+        "note times adjusted"
+      ],
+      "undo": "restore note times"
+    },
+    {
+      "type": "CREATE_AUTOMATION",
+      "family": "automation",
+      "examples": [
+        "fade this out",
+        "make the filter open up"
+      ],
+      "required": [
+        "targetId",
+        "parameterId",
+        "points"
+      ],
+      "optional": [
+        "laneId",
+        "clipId"
+      ],
+      "preconditions": [
+        "target parameter automatable"
+      ],
+      "stateChanges": [
+        "automation created/updated"
+      ],
+      "undo": "restore previous automation"
+    },
+    {
+      "type": "DELETE_AUTOMATION",
+      "family": "automation",
+      "examples": [
+        "remove that volume automation",
+        "clear the filter sweep"
+      ],
+      "required": [
+        "automationId|targetId"
+      ],
+      "optional": [],
+      "preconditions": [
+        "automation exists"
+      ],
+      "stateChanges": [
+        "automation removed"
+      ],
+      "undo": "restore automation"
+    },
+    {
+      "type": "LAUNCH_CLIP",
+      "family": "clip_grid",
+      "examples": [
+        "launch this loop",
+        "play scene 2 clip on drums"
+      ],
+      "required": [
+        "clipSlotId"
+      ],
+      "optional": [
+        "quantize"
+      ],
+      "preconditions": [
+        "clip slot loaded"
+      ],
+      "stateChanges": [
+        "clip queued/playing"
+      ],
+      "undo": "stop/revert launch state not timeline edit"
+    },
+    {
+      "type": "LAUNCH_SCENE",
+      "family": "clip_grid",
+      "examples": [
+        "start the hook scene",
+        "launch verse"
+      ],
+      "required": [
+        "sceneId"
+      ],
+      "optional": [
+        "quantize"
+      ],
+      "preconditions": [
+        "scene exists"
+      ],
+      "stateChanges": [
+        "scene clips queued/playing"
+      ],
+      "undo": "stop/revert launch state"
+    },
+    {
+      "type": "CREATE_SCENE",
+      "family": "clip_grid",
+      "examples": [
+        "make this the hook scene",
+        "save current loops as scene"
+      ],
+      "required": [
+        "name"
+      ],
+      "optional": [
+        "clipSlotIds",
+        "color"
+      ],
+      "preconditions": [
+        "session loaded"
+      ],
+      "stateChanges": [
+        "scene created"
+      ],
+      "undo": "delete scene"
+    },
+    {
+      "type": "RENDER_MIX",
+      "family": "export",
+      "examples": [
+        "bounce this",
+        "render the room loop"
+      ],
+      "required": [
+        "range"
+      ],
+      "optional": [
+        "format",
+        "includeTails",
+        "normalize"
+      ],
+      "preconditions": [
+        "audio engine/render engine ready"
+      ],
+      "stateChanges": [
+        "render asset created"
+      ],
+      "undo": "delete render asset"
+    },
+    {
+      "type": "SUBMIT_MIX",
+      "family": "arena",
+      "examples": [
+        "submit this",
+        "lock my entry"
+      ],
+      "required": [
+        "battleId",
+        "range|renderId"
+      ],
+      "optional": [
+        "title"
+      ],
+      "preconditions": [
+        "battle phase accepts submissions"
+      ],
+      "stateChanges": [
+        "submission created/locked"
+      ],
+      "undo": "only before deadline if policy allows"
+    },
+    {
+      "type": "CAST_VOTE",
+      "family": "arena",
+      "examples": [
+        "vote for A",
+        "give this one my vote"
+      ],
+      "required": [
+        "submissionId",
+        "voterId"
+      ],
+      "optional": [
+        "score",
+        "reaction"
+      ],
+      "preconditions": [
+        "voting phase; voter eligible"
+      ],
+      "stateChanges": [
+        "vote recorded"
+      ],
+      "undo": "policy-dependent"
+    },
+    {
+      "type": "UNDO",
+      "family": "history",
+      "examples": [
+        "undo that",
+        "take back what Monster just did"
+      ],
+      "required": [
+        "targetEditId|last"
+      ],
+      "optional": [],
+      "preconditions": [
+        "undoable edit exists"
+      ],
+      "stateChanges": [
+        "inverse command applied"
+      ],
+      "undo": "redo available"
+    },
+    {
+      "type": "REDO",
+      "family": "history",
+      "examples": [
+        "redo that",
+        "put it back"
+      ],
+      "required": [
+        "editId|lastUndone"
+      ],
+      "optional": [],
+      "preconditions": [
+        "redo exists"
+      ],
+      "stateChanges": [
+        "edit reapplied"
+      ],
+      "undo": "undo available"
+    },
+    {
+      "type": "EXPLAIN_STATE",
+      "family": "assistant",
+      "examples": [
+        "what did you just change?",
+        "why is there no sound?"
+      ],
+      "required": [],
+      "optional": [
+        "focus"
+      ],
+      "preconditions": [
+        "session state readable"
+      ],
+      "stateChanges": [
+        "none"
+      ],
+      "undo": "not applicable"
+    },
+    {
+      "type": "SET_METRONOME",
+      "family": "transport",
+      "examples": [
+        "turn on the click"
+      ],
+      "required": [
+        "context-dependent"
+      ],
+      "optional": [],
+      "preconditions": [
+        "valid session context"
+      ],
+      "stateChanges": [
+        "context-dependent"
+      ],
+      "undo": "context-dependent"
+    },
+    {
+      "type": "SET_COUNT_IN",
+      "family": "recording",
+      "examples": [
+        "give me a one bar count-in"
+      ],
+      "required": [
+        "context-dependent"
+      ],
+      "optional": [],
+      "preconditions": [
+        "valid session context"
+      ],
+      "stateChanges": [
+        "context-dependent"
+      ],
+      "undo": "context-dependent"
+    },
+    {
+      "type": "SET_INPUT_MONITOR",
+      "family": "recording",
+      "examples": [
+        "let me hear myself"
+      ],
+      "required": [
+        "context-dependent"
+      ],
+      "optional": [],
+      "preconditions": [
+        "valid session context"
+      ],
+      "stateChanges": [
+        "context-dependent"
+      ],
+      "undo": "context-dependent"
+    },
+    {
+      "type": "DELETE_CLIP",
+      "family": "clip",
+      "examples": [
+        "delete that mistake"
+      ],
+      "required": [
+        "context-dependent"
+      ],
+      "optional": [],
+      "preconditions": [
+        "valid session context"
+      ],
+      "stateChanges": [
+        "context-dependent"
+      ],
+      "undo": "context-dependent"
+    },
+    {
+      "type": "CROP_CLIP",
+      "family": "clip",
+      "examples": [
+        "crop to this section"
+      ],
+      "required": [
+        "context-dependent"
+      ],
+      "optional": [],
+      "preconditions": [
+        "valid session context"
+      ],
+      "stateChanges": [
+        "context-dependent"
+      ],
+      "undo": "context-dependent"
+    },
+    {
+      "type": "SET_CLIP_LOOP",
+      "family": "clip",
+      "examples": [
+        "loop this clip"
+      ],
+      "required": [
+        "context-dependent"
+      ],
+      "optional": [],
+      "preconditions": [
+        "valid session context"
+      ],
+      "stateChanges": [
+        "context-dependent"
+      ],
+      "undo": "context-dependent"
+    },
+    {
+      "type": "NORMALIZE_CLIP",
+      "family": "clip",
+      "examples": [
+        "normalize this clip"
+      ],
+      "required": [
+        "context-dependent"
+      ],
+      "optional": [],
+      "preconditions": [
+        "valid session context"
+      ],
+      "stateChanges": [
+        "context-dependent"
+      ],
+      "undo": "context-dependent"
+    },
+    {
+      "type": "CREATE_MARKER",
+      "family": "arrangement",
+      "examples": [
+        "mark this as the hook"
+      ],
+      "required": [
+        "context-dependent"
+      ],
+      "optional": [],
+      "preconditions": [
+        "valid session context"
+      ],
+      "stateChanges": [
+        "context-dependent"
+      ],
+      "undo": "context-dependent"
+    },
+    {
+      "type": "MOVE_SECTION",
+      "family": "arrangement",
+      "examples": [
+        "move the hook earlier"
+      ],
+      "required": [
+        "context-dependent"
+      ],
+      "optional": [],
+      "preconditions": [
+        "valid session context"
+      ],
+      "stateChanges": [
+        "context-dependent"
+      ],
+      "undo": "context-dependent"
+    },
+    {
+      "type": "DUPLICATE_SECTION",
+      "family": "arrangement",
+      "examples": [
+        "copy the chorus"
+      ],
+      "required": [
+        "context-dependent"
+      ],
+      "optional": [],
+      "preconditions": [
+        "valid session context"
+      ],
+      "stateChanges": [
+        "context-dependent"
+      ],
+      "undo": "context-dependent"
+    },
+    {
+      "type": "SET_MASTER_GAIN",
+      "family": "mixer",
+      "examples": [
+        "turn the whole mix down"
+      ],
+      "required": [
+        "context-dependent"
+      ],
+      "optional": [],
+      "preconditions": [
+        "valid session context"
+      ],
+      "stateChanges": [
+        "context-dependent"
+      ],
+      "undo": "context-dependent"
+    }
+  ],
+  "ambiguityRules": [
+    [
+      "Act immediately",
+      "Selected target is clear, operation is reversible, and magnitude can use safe default.",
+      "\u201cturn this vocal up\u201d while vocal track is selected \u2192 +2 dB"
+    ],
+    [
+      "Ask clarification",
+      "Multiple plausible targets and wrong target would be annoying or destructive.",
+      "\u201cdelete that\u201d with no selected clip and several recent clips"
+    ],
+    [
+      "Suggest options",
+      "Creative direction is underspecified and multiple useful routes exist.",
+      "\u201cmake this sound better\u201d \u2192 offer vocal clarity / louder / reverb / tighter timing"
+    ],
+    [
+      "Preview first",
+      "Operation changes timing, pitch, destructive cleanup, or large arrangement structure.",
+      "\u201cfix my timing\u201d or \u201ccut all silence\u201d"
+    ],
+    [
+      "Refuse/descope",
+      "Request depends on unavailable plugin/model, copyrighted copying, or impossible browser behavior.",
+      "\u201cload Auto-Tune Pro\u201d when not installed"
+    ],
+    [
+      "Apply + explain",
+      "Command is safe but non-obvious.",
+      "\u201cadd room reverb\u201d \u2192 creates/uses Room Reverb send and sets vocal send level"
+    ]
+  ],
+  "antiHallucinationRules": [
+    "Monster must not say \u201cdone\u201d unless the command executor returns success.",
+    "Monster must not infer nonexistent tracks, clips, samples, plugins, or collaborators.",
+    "Monster must use stable track/clip IDs internally; display names are only labels.",
+    "Monster must include an undo affordance for every edit command that changes session state.",
+    "Monster must distinguish \u201cI suggest\u201d from \u201cI applied.\u201d",
+    "Monster must not promise latency-free recording in a browser.",
+    "Monster must not claim professional plugin hosting unless the effect actually exists in the runtime.",
+    "Monster must validate render/submission range before submitting.",
+    "Monster must preserve source assets when doing non-destructive edits.",
+    "Monster must report partial failure when a batch command succeeds on some targets and fails on others."
+  ]
+}

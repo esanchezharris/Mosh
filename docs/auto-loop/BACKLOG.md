@@ -53,3 +53,15 @@ Both may need to edit `src/engine/MoshEngine.{cpp,h}`, which is on the **hard-ex
 list** (a prime-directive seam). Prefer isolating new logic in helper files + `MoshOps`
 so the PR stays auto-mergeable; if `MoshEngine.cpp` must change, the loop will open the
 PR but route it to `needs-human` (it will not auto-merge an exclusion-list change).
+
+## DAW-parity items (G*) — added 2026-06-27
+
+Seeded from the gathered reality-pack conformance pass. Source of truth for status is the
+scoreboard `docs/FEATURE_AUDIT.md` (regenerated from `scripts/daw-conformance/conformance.py`).
+Each `G*` row in `backlog.jsonl` maps to a reality-model invariant + an eval-suite area; the
+native gate runs `conformance.py`, so closing a gap flips its scenario from `gap` → `pass`.
+
+Leverage order: stranded-backend UI wiring first (G5/G6/G8/G9/G3 — cheap), then native
+absences (G14 gain-undo, G1 export range/tail, G7 stems, G4 clip inspector+fades, G2
+record UX/count-in), then nice-tier (G11/G13/G10/G12). G14 was **discovered** by the
+conformance harness (set_track_volume/pan bypass the UndoManager — undo doesn't restore).

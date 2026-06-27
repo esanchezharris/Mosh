@@ -5135,6 +5135,26 @@ int runCommandScript (MoshEngine& eng, MoshOps& ops)
             continue;
         }
 
+        // __snapshot pseudo-command: emit the current session snapshot as a result line
+        // (read-only — no mutation, no transaction, no JSONL log; mirrors get_command_log's
+        // read-only posture). Lets the DAW-conformance harness assert expected_state / undo
+        // without a privileged backdoor — it replays the SAME snapshot() the WebView sees.
+        // An optional args.label rides through so the harness can correlate which step a
+        // snapshot belongs to. Emits a result line, runs no MoshOps command.
+        if (name == "__snapshot")
+        {
+            auto* so = new DynamicObject();
+            so->setProperty ("command", "__snapshot");
+            so->setProperty ("ok", true);
+            if (auto lbl = command.getProperty ("args", var()).getProperty ("label", var()); ! lbl.isVoid())
+                so->setProperty ("label", lbl);
+            so->setProperty ("data", ops.snapshot());
+            const auto snapLine = JSON::toString (var (so), true);
+            outLines.add (snapLine);
+            std::cout << snapLine.toStdString() << std::endl;
+            continue;
+        }
+
         // Substitute ${VAR} references in the (top-level) args before executing.
         var argsOut = command.getProperty ("args", var());
         if (auto* ao = argsOut.getDynamicObject())
