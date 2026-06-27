@@ -45,10 +45,26 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
             {MODES.map((m) => <option key={m} value={m}>{m}</option>)}
           </select>
           <input className="v2-chip v2-chip-num" type="number" aria-label="Tempo" min={20} max={300}
+            key={`bpm-${Math.round(snapshot.session.tempo)}`}
             defaultValue={Math.round(snapshot.session.tempo)}
             onBlur={(e) => void exec("set_tempo", { bpm: Number(e.target.value) })}
             onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
-          <span className="v2-chip" title="Time signature">{meter.num}/{meter.den}</span>
+          <span className="v2-timesig" title="Time signature">
+            <input className="v2-chip v2-chip-num" type="number" aria-label="Time signature numerator" min={1} max={32}
+              key={`ts-num-${meter.num}`}
+              defaultValue={meter.num}
+              onBlur={(e) => void exec("set_time_signature", { numerator: Number(e.target.value), denominator: meter.den })}
+              onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
+            <span className="v2-timesig-slash">/</span>
+            <input className="v2-chip v2-chip-num" type="number" aria-label="Time signature denominator" min={1} max={32}
+              key={`ts-den-${meter.den}`}
+              defaultValue={meter.den}
+              onBlur={(e) => void exec("set_time_signature", { numerator: meter.num, denominator: Number(e.target.value) })}
+              onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
+          </span>
+          <button className="v2-chip v2-chip-toggle" aria-label="Metronome" aria-pressed={Boolean(snapshot.session.metronome)}
+            data-on={Boolean(snapshot.session.metronome)} title="Metronome click"
+            onClick={() => void exec("set_metronome", { enabled: !snapshot.session.metronome })}>♩</button>
         </div>
       </div>
 
