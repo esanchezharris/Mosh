@@ -44,7 +44,12 @@ def read_knob(gray: np.ndarray, cx: int, cy: int, r: int, sweep_deg: float = 270
     rr = dx * dx + dy * dy
     within = (rr <= r * r) & (rr > (0.30 * r) ** 2)        # exclude the hub
 
-    if pointer == "white" and img_bgr is not None:
+    # white mode needs a 3-channel colour frame whose geometry matches `gray` (so the bbox and
+    # the `within` mask line up); anything else falls through to the grayscale path rather than
+    # raising on a shape/channel mismatch.
+    white_ok = (pointer == "white" and img_bgr is not None and img_bgr.ndim == 3
+                and img_bgr.shape[:2] == gray.shape[:2])
+    if white_ok:
         sub = img_bgr[y0:y1, x0:x1].astype(np.float32)
         b, g, rc = sub[..., 0], sub[..., 1], sub[..., 2]
         mx = np.maximum(np.maximum(b, g), rc)

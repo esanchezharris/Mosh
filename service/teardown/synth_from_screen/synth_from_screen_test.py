@@ -85,6 +85,24 @@ check("naive bright-pixel read is fooled by a full arc (~0.5)", naive < 0.8, f"n
 check("white-pointer read recovers full value (~1.0)", white > 0.9, f"white={white}")
 
 
+# ── white mode hardening: invalid img_bgr must NOT crash, falls back to grayscale ──
+panelg = np.full((160, 160, 3), 25, np.uint8)
+draw_arc_knob(panelg, 80, 80, 55, 0.5)
+g = cv2.cvtColor(panelg, cv2.COLOR_BGR2GRAY)
+# (a) pointer="white" but img_bgr is 2D (grayscale) → no IndexError, grayscale fallback
+r_2d = read_knob(g, 80, 80, 55, dark_pointer=False, img_bgr=g, pointer="white")
+check("white mode with a 2D img_bgr does not crash (falls back)", 0.0 <= r_2d["value"] <= 1.0, str(r_2d))
+# (b) pointer="white" but img_bgr spatial dims differ from gray → no broadcast error
+big = np.full((320, 320, 3), 25, np.uint8)
+r_mismatch = read_knob(g, 80, 80, 55, dark_pointer=False, img_bgr=big, pointer="white")
+check("white mode with a mismatched-size img_bgr does not crash", 0.0 <= r_mismatch["value"] <= 1.0, str(r_mismatch))
+
+# ── classify-free knob edge cases must never raise (degenerate inputs) ────────
+tiny = np.full((4, 4, 3), 25, np.uint8)
+check("knob on a tiny frame returns gracefully",
+      read_knob(cv2.cvtColor(tiny, cv2.COLOR_BGR2GRAY), 2, 2, 3, img_bgr=tiny, pointer="white")["confidence"] == 0.0)
+
+
 # ── read_patch over a 2-knob profile ─────────────────────────────────────────
 panel = np.full((120, 260, 3), 30, np.uint8)
 draw_knob(panel, 60, 60, 40, 0.3)
