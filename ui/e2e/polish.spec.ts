@@ -47,9 +47,11 @@ test.describe("keyboard a11y — every modal closes on Escape", () => {
     await expect.poll(() => focusInside("automation-panel")).toBe(true);
     await page.keyboard.press("Escape");
 
-    // piano roll — same
-    await addMidiClip(page);
-    await page.locator('[data-testid="lane"] .clip.midi').first().dblclick();
+    // piano roll — opening a MELODIC midi clip opens the piano roll modal. (A drum clip
+    // routes to the drum sequencer instead — see #159 — and the drum sequencer is not a
+    // dialog.) The seed's Bass lane (index 1) is melodic (isDrumClip=false), so
+    // double-clicking its clip opens the piano-roll.
+    await page.locator('[data-testid="lane"]').nth(1).locator(".clip.midi").first().dblclick();
     await expect(page.getByTestId("piano-roll")).toBeVisible();
     await expect.poll(() => focusInside("piano-roll")).toBe(true);
   });
