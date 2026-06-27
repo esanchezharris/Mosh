@@ -4536,10 +4536,22 @@ static juce::String stableSourceSig (te::Clip& clip)
             if (p != nullptr)
             {
                 mos.writeString (p->getName());                         // instrument/FX identity
+                mos.writeBool (p->isEnabled());                         // bypass changes the bounced audio
                 const int np = p->getNumAutomatableParameters();
                 for (int i = 0; i < np; ++i)
                     if (auto par = p->getAutomatableParameter (i))
-                        mos.writeFloat ((float) par->getCurrentNormalisedValue());  // user settings, not state chunk
+                    {
+                        mos.writeFloat ((float) par->getCurrentNormalisedValue());  // base value (user setting)
+                        if (par->hasAutomationPoints())                 // + the automation curve shape, if any
+                        {
+                            auto& curve = par->getCurve();
+                            for (int j = 0; j < curve.getNumPoints(); ++j)
+                            {
+                                mos.writeDouble (curve.getPointTime (j).inSeconds());
+                                mos.writeFloat ((float) par->valueRange.convertTo0to1 (curve.getPointValue (j)));
+                            }
+                        }
+                    }
             }
     return juce::MD5 (mos.getMemoryBlock()).toHexString();
 }
@@ -4572,7 +4584,8 @@ bool MoshOps::bounceClipToWav (te::Clip& clip, double startSec, double endSec, c
     params.time = { tracktion::TimePosition::fromSeconds (startSec),
                     tracktion::TimePosition::fromSeconds (endSec) };       // the clip's edit-time window
     juce::Array<te::Track*> just; just.add (track);
-    params.tracksToDo = te::toBitSet (just);                              // ONLY this clip's track — no bleed
+    params.tracksToDo = te::toBitSet (just);                              // ONLY this clip's track…
+    params.allowedClips.add (&clip);                                      // …and ONLY this clip (no neighbour bleed)
     params.usePlugins = true;            // we WANT the instrument + insert FX (that's the clip's sound)
     params.useMasterPlugins = false;     // bounce the track's own signal, not the full master mix
     params.createMidiFile = false;
@@ -4673,8 +4686,14 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
     {
         // MIDI/drum (any non-wave) clip: fingerprint the stable source first, then bounce
         // its instrument output for [rs,re] to input.wav. params.time handles whole-clip
-        // AND section renders, so no slicing.
-        upstreamOverride = stableSourceSig (*clip);
+        // AND section renders, so no slicing. Fold the bounce window — as CLIP-RELATIVE
+        // offsets — into the signature so a section render busts the cache when the clip is
+        // moved/trimmed (the absolute window then covers different notes). Whole-clip stays
+        // move-invariant (rs-cs=0, re-cs=clipLen). Mirrors the wave path's self-correction.
+        upstreamOverride = stableSourceSig (*clip)
+            + ":" + juce::String (rs - cs, 4)
+            + ":" + juce::String (re - cs, 4)
+            + ":" + juce::String (cpos.getOffset().inSeconds(), 4);
         if (! bounceClipToWav (*clip, rs, re, input))
             return errResult ("render_layer", "could not bounce clip to audio (add an instrument, or the render failed)");
     }

@@ -1173,8 +1173,10 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // ─── NRL-MIDI: generative on a MIDI clip (auto-bounce → audio → model) ───
     // "Generative on ANY track": render_layer on a MIDI clip BOUNCES the track's
     // instrument output to audio first, then runs the same FakeAdapter pipeline. The
-    // source MIDI is untouched; the bounce folds notes + instrument state into the cache
-    // fingerprint (MD5 of the staged input.wav), so editing either busts the cache.
+    // source MIDI is untouched. Because the bounce isn't bit-deterministic, the cache
+    // fingerprint hashes a STABLE SOURCE SIGNATURE (MIDI note fields + instrument/FX
+    // names, enabled state, param values + automation), NOT the bounced input.wav — so an
+    // identical source HITs and editing a note/instrument busts the cache.
     section ("NRL-MIDI: generative on a MIDI clip (auto-bounce)");
     {
         auto mt = cmd (ops, "create_track", args1 ("name", "MidiGen"))["data"].getProperty ("trackId", var()).toString();
@@ -1229,11 +1231,24 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         auto r2 = cmd (ops, "render_layer", objN ({{ "clipId", mcid }, { "wait", true }}));
         check (r2["data"].getProperty ("cache", var()).toString() == "hit", "identical MIDI re-render is a cache HIT");
 
-        // Editing a NOTE changes the bounced audio -> different input.wav hash -> MISS.
-        // (Proves bounce-then-hash folds MIDI content into the existing fingerprint.)
+        // Editing a NOTE changes the stable source signature -> cache MISS.
+        // (Proves the source-signature fingerprint folds MIDI note content in.)
         cmd (ops, "add_note", objN ({{ "clipId", mcid }, { "pitch", 72 }, { "start", 0.0 }, { "length", 0.5 }, { "velocity", 100 }}));
         auto r3 = cmd (ops, "render_layer", objN ({{ "clipId", mcid }, { "wait", true }}));
-        check (r3["data"].getProperty ("cache", var()).toString() == "miss", "editing a note -> different bounce -> cache MISS");
+        check (r3["data"].getProperty ("cache", var()).toString() == "miss", "editing a note -> source signature changed -> cache MISS");
+
+        // Bypassing the instrument changes the bounced audio AND the source signature ->
+        // cache MISS. Guards the enabled-state coverage: a stale render must NOT survive a
+        // bypass (the dangerous "serves the wrong audio" direction).
+        int instIdx = -1;
+        { auto trk = trackById (mt);
+          if (auto* arr = trk.getProperty ("plugins", var()).getArray())
+            for (auto& pl : *arr) if ((bool) pl.getProperty ("isInstrument", false))
+                { instIdx = (int) pl.getProperty ("index", -1); break; } }
+        check (instIdx >= 0, "MIDI track has an instrument plugin to bypass");
+        cmd (ops, "bypass_plugin", objN ({{ "trackId", mt }, { "index", instIdx }, { "bypassed", true } }));
+        auto rb = cmd (ops, "render_layer", objN ({{ "clipId", mcid }, { "wait", true }}));
+        check (rb["data"].getProperty ("cache", var()).toString() == "miss", "bypassing the instrument -> cache MISS (no stale render served)");
 
         // Accept -> lands a clip on the "Neural Renders" lane (same as the wave path).
         check (ok (cmd (ops, "accept_render", args1 ("clipId", mcid))), "accept_render (MIDI-sourced) ok");
