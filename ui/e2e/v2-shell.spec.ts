@@ -154,6 +154,13 @@ test("the rail inspector reveals Mix/FX/Gen for the selected track", async ({ pa
   await expect(page.locator('[data-testid="v2-insp-body"] [data-testid="generative"]')).toBeVisible();
 });
 
+test("the inspector tablist carries an accessible name (a11y, matches sibling v2 tablists)", async ({ page }) => {
+  await bootV2(page);
+  await page.getByTestId("v2-track-header").first().click(); // bind the always-on inspector
+  await expect(page.getByTestId("v2-inspector")).toBeVisible();
+  await expect(page.locator('[data-testid="v2-inspector"] [role="tablist"]')).toHaveAttribute("aria-label", "Inspector tabs");
+});
+
 test("inspector Mix tab: Mute/Solo are toggles (aria-pressed reflects state)", async ({ page }) => {
   await bootV2(page);
   await page.getByTestId("v2-track-header").first().click();
