@@ -4962,6 +4962,50 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         }
         cmd (ops, "mp_leave_session");
 
+        // Async outbox (anti-jank): a fire-and-forget broadcast does NOT block the
+        // message thread on HTTP — it enqueues, and the background poll thread drains
+        // + publishes it. Prove the round-trip: a watcher peer eventually receives a
+        // selection we broadcast through the live session.
+        {
+            auto host = cmd (ops, "mp_create_session", objN ({ { "name", "Sel" }, { "color", "#abcdef" } }));
+            check (ok (host), "mp_create_session (outbox path) ok");
+            const auto hostCode = host.getProperty ("data", juce::var()).getProperty ("code", juce::var()).toString();
+
+            MultiplayerClient watcher;
+            check (watcher.joinSession (hostCode, "Watch", "#123456"), "watcher joined the outbox session [" + watcher.lastError() + "]");
+
+            // Returns immediately (enqueue only — no synchronous HTTP on this thread).
+            check (ok (cmd (ops, "mp_broadcast_selection", objN ({ { "trackId", "trk-7" }, { "clipId", "clip-9" } }))),
+                   "mp_broadcast_selection returns without blocking");
+
+            // Poll the watcher until the poll thread has drained + published it (bounded
+            // so a stall fails the gate rather than hanging). Pump the message loop so
+            // the session's callAsyncs drain too.
+            auto* mm = juce::MessageManager::getInstanceWithoutCreating();
+            bool gotSel = false;
+            const auto deadline = juce::Time::getMillisecondCounter() + (juce::uint32) 6000;
+            while (! gotSel && juce::Time::getMillisecondCounter() < deadline)
+            {
+                for (auto& f : watcher.poll())
+                {
+                    auto msg = f.getProperty ("msg", juce::var());
+                    if (msg.getProperty ("type", juce::var()).toString() == "selection"
+                        && msg.getProperty ("trackId", juce::var()).toString() == "trk-7"
+                        && msg.getProperty ("clipId", juce::var()).toString() == "clip-9")
+                        gotSel = true;
+                }
+                if (! gotSel)
+                {
+                    if (mm != nullptr) mm->runDispatchLoopUntil (100);
+                    else juce::Thread::sleep (100);
+                }
+            }
+            check (gotSel, "selection broadcast reached a peer via the async outbox (poll thread published it)");
+
+            cmd (ops, "mp_leave_session");
+            watcher.leave();
+        }
+
         a.leave();
         b.leave();
     }
