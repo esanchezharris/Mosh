@@ -267,6 +267,11 @@
   box-shadow: var(--v2-glow);
   overflow: hidden;
   min-height: 0;
+  /* shrink-wrap to content (set per track-count in TrackLaneList): a stretched grid item
+     clamped by max-height caps + top-aligns, so sparse sessions reveal cream below and the
+     panel grows lane-by-lane until it hits the available height, then scrolls internally.
+     Fallback height covers the loading/empty placeholder. */
+  max-height: var(--v2-stage-h, calc(var(--v2-ruler-h) + 4 * var(--v2-lane-h)));
 }
 
 /* ── section navigator — its OWN panel above the arrangement (concept-style separation,
@@ -439,6 +444,18 @@
 }
 
 .v2-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--v2-faint); font-size: 13px; }
+
+/* trailing add-track row — the "one more track" of room. The header cell is sticky-left
+   (always visible like the real headers); the lane cell is the droppable blackspace. */
+.v2-lhead-add {
+  cursor: pointer; color: var(--v2-faint); background: var(--v2-surface-2);
+  border-bottom-color: transparent; gap: 10px;
+}
+.v2-lhead-add:hover { color: var(--v2-accent); }
+.v2-lhead-add .v2-licon { background: transparent; border-style: dashed; color: inherit; }
+.v2-lhead-add:hover .v2-licon { border-color: var(--v2-accent); }
+.v2-lane.v2-lane-add { background: transparent; border-bottom: none; }
+.v2-lane.v2-lane-add:hover { background: var(--v2-accent-soft); }   /* hint: droppable */
 
 /* ─────────────────────────────── RIGHT RAIL ──────────────────────────────── */
 .v2-rail { display: flex; flex-direction: column; gap: var(--v2-gap); min-height: 0; overflow: auto; }

@@ -20,6 +20,7 @@ const TYPE_ICON: Record<string, string> = { drum: "▦", audio: "≈", group: "�
 export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; dragging?: boolean }) {
   const pxPerSec = useStore((s) => s.pxPerSec);
   const setPxPerSec = useStore((s) => s.setPxPerSec);
+  const exec = useStore((s) => s.exec);
   const sectionZoom = useShell((s) => s.sectionZoom);
   const setSectionZoom = useShell((s) => s.setSectionZoom);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -113,8 +114,14 @@ export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; drag
         </div>
       </div>
 
-      {/* ARRANGEMENT — the dark timeline: detail ruler + lanes (no section ribbon now). */}
-      <div className="v2-stage">
+      {/* ARRANGEMENT — the dark timeline: detail ruler + lanes (no section ribbon now). The
+          panel SHRINK-WRAPS to its content (ruler + N lanes + one trailing add-track row) so
+          sparse sessions show cream below it; once the tracks would overflow the available
+          height it caps there and scrolls internally (the prompt bar stays put). */}
+      <div
+        className="v2-stage"
+        style={{ "--v2-stage-h": `calc(var(--v2-ruler-h) + ${tracks.length + 1} * (var(--v2-lane-h) + 1px) + 16px)` } as React.CSSProperties}
+      >
         <div className="v2-tl-scroll" ref={scrollRef} data-testid="v2-timeline" onScroll={syncNav}>
           <div className="v2-tl">
             {/* ruler row (now the top row) */}
@@ -131,6 +138,18 @@ export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; drag
                 </div>
               </Fragment>
             ))}
+            {/* the "one more track" of room: a sticky-left add row — click the header to add
+                a track, or drop an audio file onto the blackspace (the global drop imports). */}
+            <button
+              className="v2-lhead v2-lhead-add"
+              data-testid="v2-track-add"
+              title="Add a track (or drop an audio file below)"
+              onClick={() => void exec("create_track", { name: "Audio" })}
+            >
+              <span className="v2-licon">＋</span>
+              <span className="v2-lname">New track</span>
+            </button>
+            <div className="v2-lane v2-lane-add" style={{ width: contentW }} aria-hidden />
             <Playhead />
           </div>
         </div>

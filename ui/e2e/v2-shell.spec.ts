@@ -130,6 +130,21 @@ test("right-click → split increases the clip count", async ({ page }) => {
   await expect(page.getByTestId("v2-clip")).toHaveCount(before + 1);
 });
 
+test("the arrangement shrink-wraps to its tracks; the add-track row creates a track", async ({ page }) => {
+  await bootV2(page);
+  // sparse session: the stage is content-sized (shorter than the body) so cream shows below it
+  const sb = await page.locator(".v2-stage").boundingBox();
+  const bb = await page.locator(".v2-body").boundingBox();
+  if (!sb || !bb) throw new Error("no bounds");
+  expect(sb.height).toBeLessThan(bb.height - 100);
+  // the trailing "+ New track" row adds a track (and the panel grows by a lane)
+  const before = await page.getByTestId("v2-track-header").count();
+  const h0 = sb.height;
+  await page.getByTestId("v2-track-add").click();
+  await expect(page.getByTestId("v2-track-header")).toHaveCount(before + 1);
+  await expect.poll(async () => (await page.locator(".v2-stage").boundingBox())?.height ?? 0).toBeGreaterThan(h0);
+});
+
 test("the agent toast appears on a command and self-dismisses", async ({ page }) => {
   await bootV2(page);
   await page.getByTestId("agent-input").fill("play");
