@@ -29,7 +29,7 @@ The binary is auto-detected at `/Applications/Mosh.app/Contents/MacOS/Mosh` (ove
 | 9-synth | `render/verify_synth_execute.py` | §9 loads a synth **by name** + sets patch params **by name** (via `describe_plugin`) + MIDI → audible synth line | Serum loaded, **2 params set by name** (Main Vol/Main Tuning), MIDI resolved, rms **0.038**, yield **0.833** |
 | 7→9 | `render/verify_extraction.py` | the EXTRACTION-regime spine (anchor corpus): real loop → §7 slice → §1 match → §9 **timeline** reconstruction | 9 hits → 9/9 matched → **9 clips on the timeline**, non-silent rms **0.206** |
 | sys | `system_smoke.py` | WHOLE chain end to end: build→§7→§1→§9 render→§12 reward | **5/5 legs** green (pull 0.576) |
-| 11 | `flywheel/train_reward.py [N]` / `verify_reward.py` | train + save the MERT reward head; held-out ordering on **disjoint (unseen) timbres** | spectral: **MERT 0.933 vs eng 0.867**; timing: **MERT 1.000 vs eng 0.938** (`train_reward_musical.py`) — MERT wins both axes |
+| 11 | `flywheel/train_reward.py [N]` / `verify_reward.py` | train + save the MERT reward head; held-out ordering on **disjoint (unseen) timbres** | **combined (spectral+timing): MERT 0.970 vs eng 0.909**; spectral-only MERT 0.933/0.867; timing-only MERT 1.000/0.938 (`train_reward_musical.py`) — MERT wins every axis |
 | 13 | `measurement_checkpoint.py [N]` | readability census over real tutorials — how often DAW/piano-roll/synth-GUI are seen → **scopes §8** | n=8: piano-roll **88%**, synth GUI **50%**, DAW id **0%** → "mixed regime; §8-substitute is core" |
 | 4 | `video2recipe/cli.py --url <id> --section A B` | a real tutorial → schema-valid Recipe skeleton (frames + OCR + scenes) | e.g. `fw4Ms26mdmc` → piano-roll + "Pigments" detected, valid recipe |
 

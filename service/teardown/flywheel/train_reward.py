@@ -54,11 +54,25 @@ def render_pattern(sample, positions):
     n = int(BAR_S * SR)
     buf = np.zeros(n, np.float32)
     for pos in positions:
-        i = int(pos * SR)
+        i = int(max(0.0, pos) * SR)
         seg = sample[: n - i]
-        if seg.size:
+        if i < n and seg.size:
             buf[i:i + seg.size] += seg
     return buf
+
+
+def render_pattern_mix(samples: dict, positions: dict) -> np.ndarray:
+    """Sum each role's sample at its (possibly shifted) positions → a full mix buffer."""
+    n = int(BAR_S * SR)
+    buf = np.zeros(n, np.float32)
+    for role, samp in samples.items():
+        for pos in positions.get(role, []):
+            i = int(max(0.0, pos) * SR)
+            seg = samp[: n - i]
+            if i < n and seg.size:
+                buf[i:i + seg.size] += seg
+    peak = float(np.max(np.abs(buf))) or 1.0
+    return (buf / peak * 0.9).astype(np.float32)
 
 
 def main() -> int:
@@ -121,8 +135,13 @@ def main() -> int:
     mert = MertEncoder()
     t0 = time.time()
 
+    def _shift(positions, dt):
+        return [p + dt for p in positions]
+
     def build(pool: dict, count: int):
-        """count triplets drawn ONLY from `pool` (samples + same-role swaps)."""
+        """count triplets drawn ONLY from `pool`. COMBINED ablations: even k = a SPECTRAL
+        sample-swap, odd k = a MUSICAL timing shift (same samples, groove pushed) — so the
+        trained head captures BOTH the spectral and the micro-timing axis of quality."""
         e_out, m_out = [], []
         for k in range(count):
             chosen = {r: pool[r][int(rng.integers(len(pool[r])))] for r in base_roles}
@@ -130,18 +149,32 @@ def main() -> int:
             if any(s.size == 0 or float(np.max(np.abs(s))) == 0 for s in samples.values()):
                 continue
             stems = {r: render_pattern(samples[r], PATTERNS.get(r, [0.0])) for r in base_roles}
-            pair = pairs[k % len(pairs)]
-            pair = (pair[0] if pair[0] in base_roles else base_roles[0],
-                    pair[1] if pair[1] in base_roles else base_roles[1])
 
-            def swap_fn(_stem, role, _c=chosen):
-                cands = [p for p in pool[role] if p != _c[role]]
-                npath = cands[int(rng.integers(len(cands)))] if cands else _c[role]
-                return render_pattern(aud(npath), PATTERNS.get(role, [0.0]))
+            if k % 2 == 0:                                   # SPECTRAL: swap one/two samples
+                pair = pairs[k % len(pairs)]
+                pair = (pair[0] if pair[0] in base_roles else base_roles[0],
+                        pair[1] if pair[1] in base_roles else base_roles[1])
 
-            trip = AblationEngine(swap_fn).make_triplet(stems, roles_to_swap=pair, sr=SR)
-            e_out.append((eng_emb.embed(trip.ref, SR), eng_emb.embed(trip.near, SR), eng_emb.embed(trip.far, SR)))
-            m_out.append((mert.embed(trip.ref, SR), mert.embed(trip.near, SR), mert.embed(trip.far, SR)))
+                def swap_fn(_stem, role, _c=chosen):
+                    cands = [p for p in pool[role] if p != _c[role]]
+                    npath = cands[int(rng.integers(len(cands)))] if cands else _c[role]
+                    return render_pattern(aud(npath), PATTERNS.get(role, [0.0]))
+
+                trip = AblationEngine(swap_fn).make_triplet(stems, roles_to_swap=pair, sr=SR)
+                ref_a, near_a, far_a = trip.ref, trip.near, trip.far
+            else:                                            # MUSICAL: shift one role's groove
+                role = base_roles[k % len(base_roles)]
+                sign = 1.0 if (k // 2) % 2 == 0 else -1.0
+                near_pos = {r: PATTERNS.get(r, [0.0]) for r in base_roles}
+                far_pos = {r: PATTERNS.get(r, [0.0]) for r in base_roles}
+                near_pos[role] = _shift(near_pos[role], sign * 0.02)
+                far_pos[role] = _shift(far_pos[role], sign * 0.09)
+                ref_a = render_pattern_mix(samples, {r: PATTERNS.get(r, [0.0]) for r in base_roles})
+                near_a = render_pattern_mix(samples, near_pos)
+                far_a = render_pattern_mix(samples, far_pos)
+
+            e_out.append((eng_emb.embed(ref_a, SR), eng_emb.embed(near_a, SR), eng_emb.embed(far_a, SR)))
+            m_out.append((mert.embed(ref_a, SR), mert.embed(near_a, SR), mert.embed(far_a, SR)))
         return e_out, m_out
 
     n_train, n_test = int(n_mixes * 0.7), max(20, int(n_mixes * 0.3))
@@ -170,6 +203,7 @@ def main() -> int:
         "ordering_acc": {"mert_raw": m_raw, "mert_trained": m_acc,
                          "engineered_raw": e_raw, "engineered_trained": e_acc},
         "roles": base_roles, "swap_pairs": [list(p) for p in pairs],
+        "ablations": ["spectral_swap", "timing_shift"],
         "schema": "reward_head_v1",
     }
     with open(HEAD_OUT, "w") as f:
