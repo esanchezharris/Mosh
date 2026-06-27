@@ -86,14 +86,27 @@ def main() -> int:
     pools: dict = {}
     for p, r in zip(idx.paths, idx.roles):
         pools.setdefault(r, []).append(p)
-    roles = [r for r in ("kick", "snare", "hat", "808", "clap", "perc") if len(pools.get(r, [])) >= 4]
+    roles = [r for r in ("kick", "snare", "hat", "808", "clap", "perc") if len(pools.get(r, [])) >= 8]
     pairs = [(a, b) for a, b in SWAP_PAIRS if a in roles and b in roles]
     if len(roles) < 3 or not pairs:
-        print(f"  SKIP  insufficient role variety (roles={roles})")
+        print(f"  SKIP  insufficient role variety (need ≥8/role; roles={roles})")
         return 0
-    print(f"  roles={roles}  swap-pairs={pairs}  target mixes={n_mixes}", flush=True)
 
+    # DISJOINT train/test sample pools per role → "held out" means UNSEEN timbres, not just
+    # new arrangements of seen ones (the leakage the review caught). Samples AND swaps for a
+    # test mix come only from the test half.
     rng = np.random.default_rng(0)
+    split_rng = np.random.default_rng(42)
+    train_pools, test_pools = {}, {}
+    for r in roles:
+        ps = list(pools[r]); split_rng.shuffle(ps)
+        h = len(ps) // 2
+        train_pools[r], test_pools[r] = ps[:h], ps[h:]
+    base_roles = roles[:3]
+    print(f"  roles={roles} base={base_roles} swap-pairs={pairs}  "
+          f"disjoint pools (train {[len(train_pools[r]) for r in base_roles]} / "
+          f"test {[len(test_pools[r]) for r in base_roles]} per role)", flush=True)
+
     cache: dict = {}
 
     def aud(path):
@@ -104,48 +117,43 @@ def main() -> int:
                 cache[path] = np.zeros(int(0.4 * SR), np.float32)
         return cache[path]
 
-    def nearest_diff(path, role):
-        try:
-            for m in idx.query(aud(path), role=role, k=5):
-                if m.path != path:
-                    return m.path
-        except Exception:
-            pass
-        cands = [p for p in pools[role] if p != path]
-        return cands[int(rng.integers(len(cands)))] if cands else path
-
     eng_emb = EngineeredEmbedder()
     mert = MertEncoder()
-    eng_trips, mert_trips = [], []
     t0 = time.time()
-    base_roles = roles[:3]
-    for k in range(n_mixes):
-        chosen = {r: pools[r][int(rng.integers(len(pools[r])))] for r in base_roles}
-        samples = {r: aud(p) for r, p in chosen.items()}
-        if any(s.size == 0 or float(np.max(np.abs(s))) == 0 for s in samples.values()):
-            continue
-        stems = {r: render_pattern(samples[r], PATTERNS.get(r, [0.0])) for r in base_roles}
-        pair = pairs[k % len(pairs)]
-        pair = (pair[0] if pair[0] in base_roles else base_roles[0],
-                pair[1] if pair[1] in base_roles else base_roles[1])
 
-        def swap_fn(_stem, role, _c=chosen):
-            return render_pattern(aud(nearest_diff(_c[role], role)), PATTERNS.get(role, [0.0]))
+    def build(pool: dict, count: int):
+        """count triplets drawn ONLY from `pool` (samples + same-role swaps)."""
+        e_out, m_out = [], []
+        for k in range(count):
+            chosen = {r: pool[r][int(rng.integers(len(pool[r])))] for r in base_roles}
+            samples = {r: aud(p) for r, p in chosen.items()}
+            if any(s.size == 0 or float(np.max(np.abs(s))) == 0 for s in samples.values()):
+                continue
+            stems = {r: render_pattern(samples[r], PATTERNS.get(r, [0.0])) for r in base_roles}
+            pair = pairs[k % len(pairs)]
+            pair = (pair[0] if pair[0] in base_roles else base_roles[0],
+                    pair[1] if pair[1] in base_roles else base_roles[1])
 
-        trip = AblationEngine(swap_fn).make_triplet(stems, roles_to_swap=pair, sr=SR)
-        eng_trips.append((eng_emb.embed(trip.ref, SR), eng_emb.embed(trip.near, SR), eng_emb.embed(trip.far, SR)))
-        mert_trips.append((mert.embed(trip.ref, SR), mert.embed(trip.near, SR), mert.embed(trip.far, SR)))
-        if (k + 1) % 40 == 0:
-            print(f"    {k+1}/{n_mixes} triplets ({time.time()-t0:.0f}s)", flush=True)
-    built = len(mert_trips)
-    print(f"  built {built} triplets in {time.time()-t0:.0f}s", flush=True)
-    if built < 20:
+            def swap_fn(_stem, role, _c=chosen):
+                cands = [p for p in pool[role] if p != _c[role]]
+                npath = cands[int(rng.integers(len(cands)))] if cands else _c[role]
+                return render_pattern(aud(npath), PATTERNS.get(role, [0.0]))
+
+            trip = AblationEngine(swap_fn).make_triplet(stems, roles_to_swap=pair, sr=SR)
+            e_out.append((eng_emb.embed(trip.ref, SR), eng_emb.embed(trip.near, SR), eng_emb.embed(trip.far, SR)))
+            m_out.append((mert.embed(trip.ref, SR), mert.embed(trip.near, SR), mert.embed(trip.far, SR)))
+        return e_out, m_out
+
+    n_train, n_test = int(n_mixes * 0.7), max(20, int(n_mixes * 0.3))
+    e_tr, m_tr = build(train_pools, n_train)
+    e_te, m_te = build(test_pools, n_test)
+    built = len(m_tr) + len(m_te)
+    print(f"  built {len(m_tr)} train + {len(m_te)} test triplets (disjoint timbres) in "
+          f"{time.time()-t0:.0f}s", flush=True)
+    if len(m_tr) < 15 or len(m_te) < 10:
         print("  SKIP  too few triplets")
         return 1
 
-    cut = int(built * 0.7)
-    e_tr, e_te = eng_trips[:cut], eng_trips[cut:]
-    m_tr, m_te = mert_trips[:cut], mert_trips[cut:]
     e_raw, m_raw = ordering_accuracy(e_te), ordering_accuracy(m_te)
     e_w = train_reward_head(e_tr)
     m_w = train_reward_head(m_tr)

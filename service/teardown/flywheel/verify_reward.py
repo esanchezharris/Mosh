@@ -127,57 +127,47 @@ def main() -> int:
                 audio_cache[path] = np.zeros(int(0.5 * SR), np.float32)
         return audio_cache[path]
 
-    def nearest_diff(path: str, role: str) -> str:
-        """§1 nearest same-role neighbour that isn't `path` (the realistic substitution)."""
-        try:
-            res = idx.query(get_audio(path), role=role, k=5)
-            for m in res:
-                if m.path != path:
-                    return m.path
-        except Exception:
-            pass
-        cands = [p for p in pools[role] if p != path]
-        return cands[int(rng.integers(len(cands)))] if cands else path
-
-    # build mixes + triplets
+    # build mixes + triplets — DISJOINT train/test sample pools (held-out = unseen timbres,
+    # not just new arrangements of seen ones).
     eng_emb = EngineeredEmbedder()
     mert = MertEncoder()
     base_roles = [r for r in ("kick", "snare", "hat") if r in roles_have] or roles_have[:3]
     swap_pair = base_roles[:2]
+    split_rng = np.random.default_rng(42)
+    train_pools, test_pools = {}, {}
+    for r in roles_have:
+        ps = list(pools[r]); split_rng.shuffle(ps)
+        h = len(ps) // 2
+        train_pools[r], test_pools[r] = ps[:h] or ps, ps[h:] or ps
 
-    eng_trips: list = []
-    mert_trips: list = []
+    def build(pool, count):
+        e_out, m_out = [], []
+        for _ in range(count):
+            chosen = {r: pool[r][int(rng.integers(len(pool[r])))] for r in base_roles}
+            samples = {r: get_audio(p) for r, p in chosen.items()}
+            if any(s.size == 0 or float(np.max(np.abs(s))) == 0 for s in samples.values()):
+                continue
+            stems = {r: render_pattern(samples[r], PATTERNS.get(r, [0.0])) for r in base_roles}
+
+            def swap_fn(_stem, role, _c=chosen):
+                cands = [p for p in pool[role] if p != _c[role]]
+                npath = cands[int(rng.integers(len(cands)))] if cands else _c[role]
+                return render_pattern(get_audio(npath), PATTERNS.get(role, [0.0]))
+
+            trip = AblationEngine(swap_fn).make_triplet(stems, roles_to_swap=swap_pair, sr=SR)
+            e_out.append((eng_emb.embed(trip.ref, SR), eng_emb.embed(trip.near, SR), eng_emb.embed(trip.far, SR)))
+            m_out.append((mert.embed(trip.ref, SR), mert.embed(trip.near, SR), mert.embed(trip.far, SR)))
+        return e_out, m_out
+
     t0 = time.time()
-    built = 0
-    for _ in range(N_MIXES):
-        chosen = {r: pools[r][int(rng.integers(len(pools[r])))] for r in base_roles}
-        samples = {r: get_audio(p) for r, p in chosen.items()}
-        if any(s.size == 0 or float(np.max(np.abs(s))) == 0 for s in samples.values()):
-            continue
-        stems = {r: render_pattern(samples[r], PATTERNS.get(r, [0.0])) for r in base_roles}
-
-        def swap_fn(_stem, role, _chosen=chosen):
-            new_path = nearest_diff(_chosen[role], role)
-            return render_pattern(get_audio(new_path), PATTERNS.get(role, [0.0]))
-
-        trip = AblationEngine(swap_fn).make_triplet(stems, roles_to_swap=swap_pair, sr=SR)
-        eng_trips.append((eng_emb.embed(trip.ref, SR), eng_emb.embed(trip.near, SR),
-                          eng_emb.embed(trip.far, SR)))
-        mert_trips.append((mert.embed(trip.ref, SR), mert.embed(trip.near, SR),
-                           mert.embed(trip.far, SR)))
-        built += 1
-    print(f"  built {built} real ablation triplets in {time.time()-t0:.0f}s "
-          f"(swap pair: {swap_pair})", flush=True)
-    if built < 8:
+    e_tr, m_tr = build(train_pools, int(N_MIXES * 0.6))
+    e_te, m_te = build(test_pools, max(8, int(N_MIXES * 0.4)))
+    built = len(m_tr) + len(m_te)
+    print(f"  built {len(m_tr)} train + {len(m_te)} test triplets (disjoint timbres) in "
+          f"{time.time()-t0:.0f}s (swap pair: {swap_pair})", flush=True)
+    if len(m_tr) < 5 or len(m_te) < 5:
         print("  SKIP  too few triplets")
         return 0
-
-    # held-out split by mix
-    cut = int(built * 0.6)
-    def split(trips):
-        return trips[:cut], trips[cut:]
-    e_tr, e_te = split(eng_trips)
-    m_tr, m_te = split(mert_trips)
 
     e_raw = ordering_accuracy(e_te)
     m_raw = ordering_accuracy(m_te)

@@ -104,16 +104,30 @@ class TrainedRewardHead:
         self.version = f"trained-{self.head.get('encoder', 'mert')}"
         self.encoder = encoder or MertEncoder()
         self._exemplars: list = []
+        # the head's weights are dimensioned for the encoder it was trained on; a mismatch
+        # would silently broadcast/garble the weighted distance. Validate up front.
+        if int(self.head.get("dim", len(self.w))) != len(self.w):
+            raise ValueError(f"reward_head dim {self.head.get('dim')} != weights len {len(self.w)}")
+        if self.head.get("encoder") and self.head["encoder"] != self.encoder.version:
+            print(f"  [reward] WARNING: head trained on {self.head['encoder']!r} but live encoder "
+                  f"is {self.encoder.version!r} — weights may not apply", flush=True)
 
     @staticmethod
     def available(head_path: str = HEAD_PATH) -> bool:
         return MertEncoder.available() and os.path.isfile(head_path)
 
+    @staticmethod
+    def _finite(v: np.ndarray) -> bool:
+        return bool(v.size) and bool(np.all(np.isfinite(v)))
+
     def add_exemplars(self, audios) -> int:
-        """audios: list of (audio, sr) good references — the 'sounds like good music' anchors."""
+        """audios: list of (audio, sr) good references — the 'sounds like good music' anchors.
+        NaN/Inf or wrong-dim embeddings are skipped (a poisoned exemplar would wreck pull())."""
         for a in audios:
             au, sr = a if isinstance(a, tuple) else (a, 44100)
-            self._exemplars.append(self.encoder.embed(au, sr))
+            v = self.encoder.embed(au, sr)
+            if v.shape == self.w.shape and self._finite(v):
+                self._exemplars.append(v)
         return len(self._exemplars)
 
     def _wdist(self, a: np.ndarray, b: np.ndarray) -> float:
@@ -124,8 +138,10 @@ class TrainedRewardHead:
         if not self._exemplars:
             return 0.5
         v = self.encoder.embed(audio, sr)
+        if v.shape != self.w.shape or not self._finite(v):
+            return 0.0                                   # broken embedding → no reward, never NaN
         d = min(self._wdist(v, e) for e in self._exemplars)
-        return float(1.0 / (1.0 + d))
+        return float(1.0 / (1.0 + d)) if np.isfinite(d) else 0.0
 
 
 def get_encoder(prefer: Optional[str] = None):

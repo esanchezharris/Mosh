@@ -27,9 +27,13 @@ The binary is auto-detected at `/Applications/Mosh.app/Contents/MacOS/Mosh` (ove
 | 8-sub | `synthmatch/verify_substitute.py` | the **substitute** regime (§13: core) — approximate a FOREIGN synth's tone (Vital) with an OWNED synth (Serum) | default-patch dist **0.987 → ~0.00** (Serum approximated the Vital tone); `status=substituted` |
 | 9 | `render/verify_execute.py` | a Recipe compiles → MoshOps → **non-silent render** + measured `yield.actual` written back | 10/10 cmds ok, rms **0.209**, MIDI resolved from SMF, yield.overall **0.889**, class `inferred` |
 | 9-synth | `render/verify_synth_execute.py` | §9 loads a synth **by name** + sets patch params **by name** (via `describe_plugin`) + MIDI → audible synth line | Serum loaded, **2 params set by name** (Main Vol/Main Tuning), MIDI resolved, rms **0.038**, yield **0.833** |
-| 11 | `flywheel/verify_reward.py` | a music-native encoder (**MERT**) beats the engineered baseline at preserving the ablation ordering, held out on real audio | 2443 samples → 40 real triplets → **MERT 0.938 vs engineered 0.812** |
+| 7→9 | `render/verify_extraction.py` | the EXTRACTION-regime spine (anchor corpus): real loop → §7 slice → §1 match → §9 **timeline** reconstruction | 9 hits → 9/9 matched → **9 clips on the timeline**, non-silent rms **0.206** |
+| sys | `system_smoke.py` | WHOLE chain end to end: build→§7→§1→§9 render→§12 reward | **5/5 legs** green (pull 0.576) |
+| 11 | `flywheel/train_reward.py [N]` / `verify_reward.py` | train + save the MERT reward head; held-out ordering on **disjoint (unseen) timbres** | spectral: **MERT 0.933 vs eng 0.867**; timing: **MERT 1.000 vs eng 0.938** (`train_reward_musical.py`) — MERT wins both axes |
 | 13 | `measurement_checkpoint.py [N]` | readability census over real tutorials — how often DAW/piano-roll/synth-GUI are seen → **scopes §8** | n=8: piano-roll **88%**, synth GUI **50%**, DAW id **0%** → "mixed regime; §8-substitute is core" |
 | 4 | `video2recipe/cli.py --url <id> --section A B` | a real tutorial → schema-valid Recipe skeleton (frames + OCR + scenes) | e.g. `fw4Ms26mdmc` → piano-roll + "Pigments" detected, valid recipe |
+
+**Reward-head training note:** held-out is on **disjoint sample pools** (train/test timbres never overlap) — an earlier mix-only split leaked timbres and *understated* MERT's edge; the honest disjoint numbers above are stronger. MERT beats the engineered baseline on both the spectral (sample-swap) and the musical (micro-timing/groove) axis, where engineered features are largely blind. The trained head saves to `reward_head.json` (gitignored) and loads as the §12 `Reward` pull via `TrainedRewardHead`.
 
 Run any of them with the teardown python, e.g.:
 

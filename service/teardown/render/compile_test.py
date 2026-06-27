@@ -147,8 +147,8 @@ with tempfile.TemporaryDirectory() as td:
                   sample_match=R.SampleMatch(status="matched", matched_path="/x/k.wav", distance=0.1)),
     ])
     cmds = compile_recipe(rec_midi).commands
-    inlined, nres = inline_midi(cmds, rec_midi, asset_root=None)
-    check("inline_midi resolved one clip", nres == 1, f"resolved {nres}")
+    inlined, mids = inline_midi(cmds, rec_midi, asset_root=None)
+    check("inline_midi resolved one clip", len(mids) == 1 and mids == ["lead"], f"resolved {mids}")
     mc = next(c for c in inlined if c["command"] == "add_midi_clip")
     check("inline_midi attached notes to the right clip", len(mc["args"].get("notes", [])) == 3)
     check("inline_midi leaves non-midi commands untouched",

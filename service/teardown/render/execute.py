@@ -69,7 +69,7 @@ def inline_midi(commands: list, recipe, asset_root: Optional[str] = None) -> tup
     """Fill each add_midi_clip's `notes` from its element's midi_ref SMF. Pure: maps a
     clip's `${Ti}` trackId back to recipe.elements[i]. Returns (commands, n_resolved)."""
     out = []
-    resolved = 0
+    resolved_ids: list = []
     for c in commands:
         c = dict(c)
         if c.get("command") == "add_midi_clip":
@@ -86,9 +86,9 @@ def inline_midi(commands: list, recipe, asset_root: Optional[str] = None) -> tup
                             notes = []
                         if notes:
                             c["args"] = dict(c["args"], notes=notes)
-                            resolved += 1
+                            resolved_ids.append(recipe.elements[i].element_id)
         out.append(c)
-    return out, resolved
+    return out, resolved_ids
 
 
 def _run_capture(binp: str, cmds: list, session_dir: Optional[str], timeout_s: int) -> list:
@@ -118,20 +118,27 @@ def _list_instruments(binp: str, session_dir: Optional[str], timeout_s: int) -> 
 
 
 def _resolve_plugin_id(name: str, name2id: dict) -> Optional[str]:
-    """Exact then prefix match (recipe says 'Serum'; the scan says 'Serum 2')."""
+    """Exact then forward-prefix match only (recipe 'Serum' → catalog 'Serum 2'). The reverse
+    direction (catalog name a prefix of the recipe name) is dropped — it mismatches short
+    catalog names against longer recipe names. Deterministic (sorted)."""
     n = name.lower()
     if n in name2id:
         return name2id[n]
-    for k, v in name2id.items():
-        if k.startswith(n) or n.startswith(k):
-            return v
+    for k in sorted(name2id):
+        if k.startswith(n):
+            return name2id[k]
     return None
 
 
 def _describe_params(binp: str, plugin_ids: set, session_dir: Optional[str], timeout_s: int) -> dict:
-    """{pluginId: {param_name_lower: index}} by loading each synth once + describe_plugin."""
+    """{pluginId: {param_name_lower: index}} by loading each synth once + describe_plugin.
+
+    Association is POSITIONAL (describe_plugin doesn't echo the pluginId), so we keep EVERY
+    describe_plugin result — including ok:false (a failed load → no-plugin describe) — to
+    preserve the 1:1 order with `ids`. Filtering to ok-only would shift the zip and bind a
+    param map to the wrong plugin. ids is sorted for determinism."""
     out: dict = {}
-    ids = list(plugin_ids)
+    ids = sorted(plugin_ids)
     cmds = []
     for k, pid in enumerate(ids):
         cmds += [
@@ -141,22 +148,28 @@ def _describe_params(binp: str, plugin_ids: set, session_dir: Optional[str], tim
             {"command": "describe_plugin", "args": {"trackId": f"${{P{k}}}", "index": 0, "limit": 1024}},
         ]
     results = _run_capture(binp, cmds, session_dir, timeout_s)
-    desc = [r for r in results if r.get("command") == "describe_plugin" and r.get("ok")]
+    desc = [r for r in results if r.get("command") == "describe_plugin"]
+    if len(desc) != len(ids):
+        # one describe result per probe is expected even on failure; if the count is off the
+        # positional mapping is unsafe → degrade to empty maps (params land in unresolved).
+        return {pid: {} for pid in ids}
     for pid, r in zip(ids, desc):
-        out[pid] = {p["name"].lower(): p["index"] for p in (r.get("data") or {}).get("params", [])}
+        out[pid] = ({p["name"].lower(): p["index"] for p in (r.get("data") or {}).get("params", [])}
+                    if r.get("ok") else {})
     return out
 
 
 def resolve_synths(commands: list, recipe, binp: str, session_dir: Optional[str],
-                   timeout_s: int) -> tuple[list, int, int, list]:
+                   timeout_s: int) -> tuple[list, int, int, list, list]:
     """Inject load_plugin (resolve id by name) + set_plugin_param (map patch param NAMES→
     indices via describe_plugin) after each synth element's create_track. Returns
-    (commands, synths_loaded, params_set, unresolved_params). Needs describe_plugin."""
+    (commands, synths_loaded, params_set, unresolved_params, loaded_element_ids). Needs
+    describe_plugin."""
     synth_idx = {i for i, e in enumerate(recipe.elements)
                  if e.synth_patch.plugin.name and e.synth_patch.status in
                  ("params_visible", "matched", "substituted")}
     if not synth_idx:
-        return commands, 0, 0, []
+        return commands, 0, 0, [], []
 
     name2id = _list_instruments(binp, session_dir, timeout_s)
     resolved = {}
@@ -187,14 +200,22 @@ def resolve_synths(commands: list, recipe, binp: str, session_dir: Optional[str]
             pmap = pmaps.get(pid, {})
             for pname, pval in (recipe.elements[i].synth_patch.params or {}).items():
                 idx = pmap.get(str(pname).lower())
-                if idx is not None and isinstance(pval, (int, float)):
+                # set_plugin_param treats value as NORMALIZED 0..1 and clamps. A §5b read may
+                # carry a denormalized real (e.g. cutoff in Hz) → silently clamped-to-1 = wrong.
+                # Only apply values already in [0,1]; out-of-range / unmapped → unresolved.
+                if idx is None:
+                    unresolved.append({"element_id": recipe.elements[i].element_id,
+                                       "param": pname, "reason": "param name not on plugin"})
+                elif not (isinstance(pval, (int, float)) and 0.0 <= float(pval) <= 1.0):
+                    unresolved.append({"element_id": recipe.elements[i].element_id,
+                                       "param": pname, "reason": f"value {pval!r} not normalized [0,1]"})
+                else:
                     out.append({"command": "set_plugin_param",
                                 "args": {"trackId": tref, "index": 0, "paramIndex": idx,
                                          "value": float(pval)}})
                     n_set += 1
-                else:
-                    unresolved.append({"element_id": recipe.elements[i].element_id, "param": pname})
-    return out, n_load, n_set, unresolved
+    loaded_ids = [recipe.elements[i].element_id for i in resolved]
+    return out, n_load, n_set, unresolved, loaded_ids
 
 
 def _ok_by_command(results: list) -> dict:
@@ -268,7 +289,8 @@ def execute_recipe(recipe, bin_path: Optional[str] = None, out_wav: Optional[str
     Needs the built binary."""
     binp = _bin(bin_path)
     cr = compile_recipe(recipe)
-    cmds, notes_resolved = inline_midi(list(cr.commands), recipe, asset_root)
+    cmds, midi_resolved_ids = inline_midi(list(cr.commands), recipe, asset_root)
+    notes_resolved = len(midi_resolved_ids)
 
     work = Path(session_dir) if session_dir else Path(tempfile.mkdtemp(prefix="td-execute-"))
     work.mkdir(parents=True, exist_ok=True)
@@ -282,10 +304,19 @@ def execute_recipe(recipe, bin_path: Optional[str] = None, out_wav: Optional[str
         return res
 
     # resolve synths (needs the binary: list_plugins + describe_plugin probes)
+    synth_unres: list = []
+    synth_loaded_ids: list = []
     if resolve_synth_patches:
-        cmds, res.synths_loaded, res.synth_params_set, synth_unres = resolve_synths(
+        cmds, res.synths_loaded, res.synth_params_set, synth_unres, synth_loaded_ids = resolve_synths(
             cmds, recipe, binp, str(work), timeout_s)
-        res.unresolved = list(cr.unresolved) + synth_unres
+
+    # RESIDUAL unresolved = compile deferrals execute did NOT handle + synth param misses.
+    # (compile.py always defers MIDI notes + synth load; execute resolves them here, so the
+    # stale compile list must not be what gates reconstruction_class — else `deterministic`
+    # is unreachable for any MIDI/synth recipe.)
+    handled = set(midi_resolved_ids) | set(synth_loaded_ids)
+    residual = [u for u in cr.unresolved if u.get("element_id") not in handled] + synth_unres
+    res.unresolved = residual
 
     cmds = cmds + [{"command": "export_audio", "args": {"file": str(out)}}]
     res.commands = cmds
@@ -309,5 +340,5 @@ def execute_recipe(recipe, bin_path: Optional[str] = None, out_wav: Optional[str
     if write_back:
         from teardown.recipe import YieldScores
         recipe.yield_.actual = YieldScores(**res.yield_actual)
-        recipe.reconstruction_class = reconstruction_class_for(recipe, res.yield_actual, cr.unresolved)
+        recipe.reconstruction_class = reconstruction_class_for(recipe, res.yield_actual, residual)
     return res
