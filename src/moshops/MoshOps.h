@@ -198,6 +198,10 @@ private:
     juce::var cmdCreateRenderLayer (const juce::var& args);
     juce::var cmdSetRenderParam   (const juce::var& args);
     juce::var cmdRenderLayer      (const juce::var& args);
+    // Render a single clip's instrument output (its track, over [startSec,endSec]) to a
+    // WAV — the auto-bounce that lets generative render layers run on MIDI/drum clips
+    // (the model is audio→audio). Offline, synchronous, mirrors cmdExportAudio's render.
+    bool bounceClipToWav (te::Clip& clip, double startSec, double endSec, const juce::File& destWav);
     juce::var cmdCancelRender     (const juce::var& args);
     juce::var cmdAcceptRender     (const juce::var& args);
     juce::var cmdRejectRender     (const juce::var& args);
@@ -291,7 +295,11 @@ private:
     static const char* const kDefaultKeyMode;
 
     juce::ValueTree findRenderLayer (const juce::String& clipId);
-    juce::String    computeFingerprint (const juce::ValueTree& node, const juce::File& inputWav);
+    // upstreamOverride: when non-empty, use it as the upstream hash instead of MD5(inputWav).
+    // Wave clips hash their staged audio; MIDI/drum clips pass a stable source signature
+    // (notes + instrument/FX state) since their bounced audio isn't bit-deterministic.
+    juce::String    computeFingerprint (const juce::ValueTree& node, const juce::File& inputWav,
+                                        const juce::String& upstreamOverride = {});
     void            finalizeRender (const juce::String& clipId, const juce::File& outputWav,
                                     const juce::File& manifestFile, const juce::String& cacheKey);
 

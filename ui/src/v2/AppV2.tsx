@@ -15,7 +15,7 @@ import { Composer } from "./Composer";
 import { LeftDrawer } from "./LeftDrawer";
 import { RightInspectorDrawer } from "./RightInspectorDrawer";
 import { useHasPeers } from "./usePresence";
-import { PluginBrowser } from "../ui/PluginBrowser";
+import { PluginBrowser } from "./PluginBrowser";
 import { PianoRoll } from "../ui/PianoRoll";
 import { AutomationPanel } from "../ui/AutomationPanel";
 import { DrumWindow } from "../ui/DrumWindow";

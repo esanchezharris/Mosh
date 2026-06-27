@@ -8,6 +8,7 @@ import { useSettings } from "../settings/store";
 import type { Snapshot, Plugin, Track, Clip, RenderColor, RenderQA } from "../types";
 import { Moshi } from "./Moshi";
 import { qaReadoutView } from "./qaReadout";
+import { pickGenClip } from "./genClip";
 
 export function Dock({ snapshot }: { snapshot: Snapshot }) {
   const selectedTrackId = useStore((s) => s.selectedTrackId);
@@ -131,7 +132,7 @@ function ParamBody({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
   );
 }
 
-export function GenDrawer({ track }: { track: Track }) {
+export function GenDrawer({ track, selectedClipId }: { track: Track; selectedClipId?: string }) {
   const exec = useStore((s) => s.exec);
   const colorsAvail = useStore((s) => s.availableColors);
   const loadColors = useStore((s) => s.loadColors);
@@ -139,8 +140,11 @@ export function GenDrawer({ track }: { track: Track }) {
   const qaByClip = useStore((s) => s.qaByClip);
   useEffect(() => { loadColors(); loadTransformTargets(); }, [loadColors, loadTransformTargets]);
 
-  const clip = track.clips.find((c) => c.type === "wave");
-  if (!clip) return <div className="gen" data-testid="generative"><div className="gen-head"><span className="gen-title">⃝ GENERATIVE</span></div><span className="rack-empty">Add or import an audio clip on this track to re-imagine or transform it.</span></div>;
+  // Generative runs on ANY clip type — a MIDI/drum clip is auto-bounced to audio by the
+  // backend before the model. Target the SELECTED clip when it's on this track, else the
+  // track's first clip; the empty-state shows only when the track has no clips at all.
+  const clip = pickGenClip(track, selectedClipId);
+  if (!clip) return <div className="gen" data-testid="generative"><div className="gen-head"><span className="gen-title">⃝ GENERATIVE</span></div><span className="rack-empty">Add a clip on this track to re-imagine or transform it.</span></div>;
   const rl = clip.renderLayer;
   const sa3 = colorsAvail.length > 0;
 

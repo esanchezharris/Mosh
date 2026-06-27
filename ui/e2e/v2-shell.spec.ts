@@ -83,6 +83,24 @@ test("solo: the inspector drawer reveals Mix/FX/Gen for the selected track", asy
   await expect(page.locator('[data-testid="v2-insp-body"] [data-testid="generative"]')).toBeVisible();
 });
 
+test("generative runs on a MIDI/drum track (any track, via the backend auto-bounce)", async ({ page }) => {
+  await bootV2(page);
+  // The seeded Drums track is a MIDI drum clip (no wave clip) — generative must still
+  // offer create/render/accept (the native backend auto-bounces it to audio first).
+  await page.getByTestId("v2-track-header").first().click();
+  await page.getByTestId("v2-insp-tab-gen").click();
+  const gen = page.getByTestId("generative");
+  await expect(gen).toBeVisible();
+  await expect(gen.getByTestId("gen-create")).toBeVisible(); // create offered on a non-wave clip
+  await gen.getByTestId("gen-create").click();
+  await gen.getByTestId("gen-render").click();
+  await expect(gen.getByTestId("render-status")).toHaveText("ready");
+  const accept = gen.getByTestId("gen-accept");
+  await expect(accept).toBeEnabled();
+  await accept.click();
+  await expect(page.getByTestId("v2-error")).toHaveCount(0);
+});
+
 test("a clip drags to a new position", async ({ page }) => {
   await bootV2(page);
   const clip = page.getByTestId("v2-clip").first();
@@ -113,6 +131,37 @@ test("the agent toast appears on a command and self-dismisses", async ({ page })
   await page.getByTestId("agent-send").click();
   await expect(page.getByTestId("v2-change-toast")).toBeVisible();
   await expect(page.getByTestId("v2-change-toast")).toHaveCount(0, { timeout: 12_000 });
+});
+
+test("plugin browser: two-pane picker — collections, vendor filter, search, add", async ({ page }) => {
+  await bootV2(page);
+  await page.getByTestId("v2-track-header").first().click();
+  await page.getByTestId("v2-insp-tab-fx").click();
+  await page.locator('[data-testid="v2-insp-body"]').getByRole("button", { name: "+ Plugin" }).click();
+
+  const pb = page.getByTestId("v2-pb");
+  await expect(pb).toBeVisible();
+  // left rail collections: All + kind filters + a "Built-in" vendor group (no duplicate
+  // Instruments/Effects vendor rows — built-ins collapse under one maker).
+  await expect(page.getByTestId("v2-pb-collection")).not.toHaveCount(0);
+  await expect(pb.locator('[data-collection="all"]')).toContainText("All Plugins");
+  await expect(pb.locator('[data-collection="v:Built-in"]')).toContainText("Built-in");
+
+  // vendor filter narrows the list header + rows
+  await pb.locator('[data-collection="v:Xfer"]').click();
+  await expect(pb.locator(".v2-pb-listhead")).toContainText("Xfer");
+  await expect(page.getByTestId("v2-pb-row")).toHaveCount(1);
+
+  // search narrows within the current view
+  await pb.locator('[data-collection="all"]').click();
+  await page.getByTestId("v2-pb-search").fill("ott");
+  await expect(page.getByTestId("v2-pb-row")).toHaveCount(1);
+  await expect(page.getByTestId("v2-pb-row")).toContainText("OTT");
+
+  // adding an effect closes the browser and the plugin lands in the FX rack
+  await page.getByTestId("v2-pb-row").click();
+  await expect(pb).toHaveCount(0);
+  await expect(page.locator('[data-testid="v2-insp-body"]')).toContainText("OTT");
 });
 
 test("with collaborators present, the right rail shows the agent + camera/invite + peer tile", async ({ page }) => {

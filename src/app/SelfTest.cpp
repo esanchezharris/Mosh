@@ -1170,6 +1170,96 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                "accepted transform clip points at a real non-empty file");
     }
 
+    // ─── NRL-MIDI: generative on a MIDI clip (auto-bounce → audio → model) ───
+    // "Generative on ANY track": render_layer on a MIDI clip BOUNCES the track's
+    // instrument output to audio first, then runs the same FakeAdapter pipeline. The
+    // source MIDI is untouched. Because the bounce isn't bit-deterministic, the cache
+    // fingerprint hashes a STABLE SOURCE SIGNATURE (MIDI note fields + instrument/FX
+    // names, enabled state, param values + automation), NOT the bounced input.wav — so an
+    // identical source HITs and editing a note/instrument busts the cache.
+    section ("NRL-MIDI: generative on a MIDI clip (auto-bounce)");
+    {
+        auto mt = cmd (ops, "create_track", args1 ("name", "MidiGen"))["data"].getProperty ("trackId", var()).toString();
+        // A MIDI clip with audible notes (add_midi_clip auto-loads a 4OSC instrument).
+        Array<var> notes;
+        for (int i = 0; i < 4; ++i) { auto* n = new DynamicObject();
+            n->setProperty ("pitch", 60 + i * 2); n->setProperty ("start", (double) i * 0.5);
+            n->setProperty ("length", 0.5); n->setProperty ("velocity", 100); notes.add (var (n)); }
+        auto mc = cmd (ops, "add_midi_clip", objN ({{ "trackId", mt }, { "length", 2.0 }, { "notes", notes }}));
+        check (ok (mc), "add_midi_clip (with notes) ok");
+        const auto mcid = mc["data"].getProperty ("clipId", var()).toString();
+
+        auto noteCount = [&] (const String& cid) -> int {
+            auto trk = trackById (mt);
+            if (auto* arr = trk.getProperty ("clips", var()).getArray())
+                for (auto& c : *arr) if (c.getProperty ("id", var()).toString() == cid)
+                    return (int) c.getProperty ("notes", var()).size();
+            return -1;
+        };
+        const int notesBefore = noteCount (mcid);
+        check (notesBefore == 4, "midi clip has 4 notes before render");
+
+        auto crl = cmd (ops, "create_render_layer", objN ({{ "clipId", mcid }, { "adapter", "fake" }}));
+        check (ok (crl), "create_render_layer on a MIDI clip ok");
+        const auto layerId = crl["data"].getProperty ("layerId", var()).toString();
+        cmd (ops, "set_render_param", objN ({{ "clipId", mcid }, { "seed", 7 }, { "nl", 0.3 }}));
+
+        // The headline: render SUCCEEDS on a MIDI clip (previously errored "only wave
+        // clips renderable") — the auto-bounce staged input.wav and the model ran.
+        auto r1 = cmd (ops, "render_layer", objN ({{ "clipId", mcid }, { "wait", true }}));
+        check (ok (r1), "render_layer on a MIDI clip ok (auto-bounced to audio, model ran)");
+        check (r1["data"].getProperty ("status", var()).toString() == "ready", "MIDI render -> status ready");
+        check (r1["data"].getProperty ("cache", var()).toString() == "miss", "first MIDI render is a cache MISS");
+
+        // The bounce wrote a real, non-trivial input.wav (audio, not MIDI).
+        auto input = eng.sessionDir().getChildFile ("renders").getChildFile (layerId).getChildFile ("input.wav");
+        check (input.existsAsFile() && input.getSize() > 1000, "auto-bounce wrote a non-trivial input.wav");
+
+        bool mHasArtifact = false; bool stillMidi = false;
+        { auto trk = trackById (mt);
+          if (auto* arr = trk.getProperty ("clips", var()).getArray())
+            for (auto& c : *arr) if (c.getProperty ("id", var()).toString() == mcid)
+            { mHasArtifact = (bool) c.getProperty ("renderLayer", var()).getProperty ("hasArtifact", false);
+              stillMidi = c.getProperty ("type", var()).toString() == "midi"; } }
+        check (mHasArtifact, "MIDI render produced a cached artifact (output.wav)");
+
+        // The SOURCE clip is untouched — still MIDI, same notes (non-destructive).
+        check (stillMidi, "source clip is still a MIDI clip after render");
+        check (noteCount (mcid) == notesBefore, "source MIDI clip notes unchanged after render");
+
+        // Identical re-render -> cache HIT (the builtin-synth bounce is deterministic).
+        auto r2 = cmd (ops, "render_layer", objN ({{ "clipId", mcid }, { "wait", true }}));
+        check (r2["data"].getProperty ("cache", var()).toString() == "hit", "identical MIDI re-render is a cache HIT");
+
+        // Editing a NOTE changes the stable source signature -> cache MISS.
+        // (Proves the source-signature fingerprint folds MIDI note content in.)
+        cmd (ops, "add_note", objN ({{ "clipId", mcid }, { "pitch", 72 }, { "start", 0.0 }, { "length", 0.5 }, { "velocity", 100 }}));
+        auto r3 = cmd (ops, "render_layer", objN ({{ "clipId", mcid }, { "wait", true }}));
+        check (r3["data"].getProperty ("cache", var()).toString() == "miss", "editing a note -> source signature changed -> cache MISS");
+
+        // Bypassing the instrument changes the bounced audio AND the source signature ->
+        // cache MISS. Guards the enabled-state coverage: a stale render must NOT survive a
+        // bypass (the dangerous "serves the wrong audio" direction).
+        int instIdx = -1;
+        { auto trk = trackById (mt);
+          if (auto* arr = trk.getProperty ("plugins", var()).getArray())
+            for (auto& pl : *arr) if ((bool) pl.getProperty ("isInstrument", false))
+                { instIdx = (int) pl.getProperty ("index", -1); break; } }
+        check (instIdx >= 0, "MIDI track has an instrument plugin to bypass");
+        cmd (ops, "bypass_plugin", objN ({{ "trackId", mt }, { "index", instIdx }, { "bypassed", true } }));
+        auto rb = cmd (ops, "render_layer", objN ({{ "clipId", mcid }, { "wait", true }}));
+        check (rb["data"].getProperty ("cache", var()).toString() == "miss", "bypassing the instrument -> cache MISS (no stale render served)");
+
+        // Accept -> lands a clip on the "Neural Renders" lane (same as the wave path).
+        check (ok (cmd (ops, "accept_render", args1 ("clipId", mcid))), "accept_render (MIDI-sourced) ok");
+        bool mLane = false;
+        { auto snap = ops.snapshot();
+          if (auto* arr = snap["tracks"].getArray())
+            for (auto& t : *arr) if (t.getProperty ("name", var()).toString() == "Neural Renders")
+              if (auto* ca = t["clips"].getArray(); ca != nullptr && ca->size() > 0) mLane = true; }
+        check (mLane, "MIDI-sourced render landed on the Neural Renders lane");
+    }
+
     // ─── Section-scoped render (the agent "rework the hook" path) ───
     // A render layer with an explicit sub-region renders ONLY that region's audio and
     // lands the result bounded to the region — proving create_render_layer

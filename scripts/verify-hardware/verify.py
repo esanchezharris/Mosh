@@ -419,7 +419,44 @@ def check_render_artifact_portability(ctx):
                 "failed_after_move": fails2, "wav": str(out), **st})
 
 
-OFFLINE_CHECKS = [check_makes_sound, check_drums, check_transform, check_full_loop,
+def check_midi_render(ctx):
+    """Generative on ANY track: a render layer on a MIDI clip auto-BOUNCES the clip's
+    instrument output to audio (input.wav) first, then the fake transform alters it.
+    Proves the feature end-to-end on real rendered audio — the bounce is non-silent and
+    the render differs from the dry bounce. Offline + deterministic (4OSC + fake adapter),
+    so it joins the default set like check_transform."""
+    SESSION = "verify-midi-render"
+    notes = [{"pitch": 60 + i * 2, "start": i * 0.5, "length": 0.5, "velocity": 100} for i in range(4)]
+    cmds = [
+        {"command": "create_track", "args": {"name": "MidiGen"}, "capture": {"T": "trackId"}},
+        {"command": "add_midi_clip", "args": {"trackId": "${T}", "length": 2.0, "notes": notes}, "capture": {"C": "clipId"}},
+        {"command": "create_render_layer", "args": {"clipId": "${C}", "adapter": "transform", "mode": "transform"}},
+        {"command": "set_render_param", "args": {"clipId": "${C}", "target": "flute", "strength": 80, "seed": 1}},
+        {"command": "render_layer", "args": {"clipId": "${C}", "wait": True}},   # auto-bounces, then renders
+        {"command": "accept_render", "args": {"clipId": "${C}"}},
+    ]
+    results, proc = run_script(ctx.bin, cmds, SESSION,
+                              extra_env={"MOSH_SERVICE_PORT": "8796", "MOSH_ENABLE_TRANSFORM": "0"})
+    fails = failed_commands(results)
+    outputs = sorted(glob.glob(str(_mosh_session_base() / SESSION / "renders" / "*" / "output.wav")))
+    if fails or not outputs:
+        return row("Generative on MIDI (auto-bounce)", False,
+                   {"failed_commands": fails, "exists": bool(outputs), "stderr": proc.stderr[-500:]})
+    xout = outputs[0]
+    job = Path(xout).parent
+    xin = job / "input.wav"
+    bounce = stats(str(xin)) if xin.exists() else None
+    out_s = stats(xout)
+    altered = diff_rms(str(xin), xout) if xin.exists() else None
+    ok = (bounce is not None and bounce["rms"] > 0.001       # the MIDI bounce is non-silent audio
+          and out_s["rms"] > 0.001                            # the render is non-silent
+          and altered is not None and altered > 0.001)        # the model changed the bounced audio
+    return row("Generative on MIDI (auto-bounce)", ok,
+               {"bounce_input": str(xin), "bounce_rms": bounce["rms"] if bounce else None,
+                "out_rms": out_s["rms"], "render_vs_bounce_rms": altered})
+
+
+OFFLINE_CHECKS = [check_makes_sound, check_drums, check_transform, check_midi_render, check_full_loop,
                   check_relative_ref_export, check_bypass_layer, check_render_artifact_portability]
 
 
