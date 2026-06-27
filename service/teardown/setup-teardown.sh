@@ -20,10 +20,12 @@ HERE="$(pwd)"
 WITH_CLAP=0
 WITH_SOURCING=0
 WITH_VIDEO=0
+WITH_EXTRACT=0
 for a in "$@"; do
   [[ "$a" == "--with-clap" ]] && WITH_CLAP=1
   [[ "$a" == "--with-sourcing" ]] && WITH_SOURCING=1
   [[ "$a" == "--with-video" ]] && WITH_VIDEO=1
+  [[ "$a" == "--with-extract" ]] && WITH_EXTRACT=1
 done
 
 say()  { printf '  %s\n' "$*"; }
@@ -95,6 +97,17 @@ if [[ "$WITH_VIDEO" == "1" ]]; then
   fi
   command -v ffmpeg   >/dev/null 2>&1 || say "  ⚠ ffmpeg not on PATH — brew install ffmpeg"
   command -v tesseract >/dev/null 2>&1 || say "  ⚠ tesseract not on PATH — brew install tesseract"
+fi
+
+# 4d. Optional extraction (§7): demucs stem separation (torch). Heavy first-run model
+#     download (~80MB). librosa pitch/slicing are already in the baseline.
+if [[ "$WITH_EXTRACT" == "1" ]]; then
+  say "installing demucs (extraction §7; torch + ~80MB model on first use) …"
+  if command -v uv >/dev/null 2>&1; then
+    VIRTUAL_ENV="$VENV" uv pip install --python "$PYBIN" --quiet demucs
+  else
+    "$PYBIN" -m pip install --quiet demucs
+  fi
 fi
 
 # 5. Sanity: the venv must import the baseline stack.
