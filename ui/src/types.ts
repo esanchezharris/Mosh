@@ -21,6 +21,50 @@ export type RenderLayer = {
   regionEnd?: number;
 };
 
+// LYR-001 — Finish-My-Song lyric sheet (per-track), from MoshOps.lyricSheetToVar().
+// One line carries its constraint spec (§5); the v2 Lyrics tab renders the flow meter
+// + rhyme tool from this. Transient generation output (proposals) arrives in L2.
+// L2 — one ranked generation proposal for a line (constraint-checked by phonology).
+export type LyricProposal = {
+  text: string;
+  endWord: string;
+  syllables: number;
+  passes: boolean;           // meets all hard constraints (syllables within tol + rhyme)
+  syllableOk?: boolean;
+  rhymeOk?: boolean;
+  grade?: string;            // "perfect" | "slant" | "anchor" | "free" | "none"
+  score?: number;
+};
+export type LyricLine = {
+  index: number;
+  role: "verse" | "hook" | "bridge" | "adlib" | string;
+  seedText: string;          // partial line with ___ gaps
+  text: string;              // finalized line
+  syllableTarget: number;    // 0 ⇒ infer from the grid
+  syllableTol: number;
+  stress: string;            // contour, e.g. "xXxxxX" ('?' = free)
+  rhymeGroup: string;        // lines sharing a group must rhyme
+  rhymeStrictness: string;   // "perfect"|"slant"|"free" ("" ⇒ inherit sheet)
+  locked: boolean;
+  sectionId: string;
+  status: "empty" | "seed" | "generating" | "proposed" | "accepted" | "locked" | string;
+  proposals?: LyricProposal[];  // L2 — transient ranked proposals (cleared on accept/reject)
+  regen?: number;
+};
+export type LyricSheet = {
+  id: string;
+  grid: string;              // "1/4" | "1/8" | "1/16"
+  language: string;
+  topic: string;
+  mood: string;
+  explicit: "allow" | "clean" | "mild" | string;
+  rhymeStrictness: "perfect" | "slant" | "free" | string;
+  specVersion: number;
+  lines: LyricLine[];
+};
+// A ranked rhyme candidate from get_rhymes (phonology, no LLM).
+export type RhymeCandidate = { word: string; syllables: number; grade: "perfect" | "slant" | "none" | string };
+
 // SA3 colour-rack metadata from GET /colors (via list_colors).
 export type AvailableColor = {
   name: string;
@@ -139,6 +183,24 @@ export type RaveInsert = {
   latencySeconds: number;
 };
 
+export type MoshFxCut = {
+  frequencyHz: number;
+  score?: number;
+  depthDb?: number;
+};
+
+export type MoshFxReadout = {
+  kind: "autotune" | "ott" | "feedback";
+  inputHz?: number;
+  targetHz?: number;
+  correctionCents?: number;
+  confidence?: number;
+  amount?: number;
+  timeMs?: number;
+  candidates?: MoshFxCut[];
+  activeCuts?: MoshFxCut[];
+};
+
 export type Plugin = {
   index: number;
   name: string;
@@ -150,6 +212,7 @@ export type Plugin = {
   isInstrument: boolean;
   params: PluginParam[];
   rave?: RaveInsert;       // present iff this is a real-time RAVE insert (anira build)
+  moshFx?: MoshFxReadout;
 };
 
 export type AvailablePlugin = {
@@ -209,6 +272,9 @@ export type Track = {
   // the track's destination (absent = default out; isTrack = routed into a track).
   input?: { deviceID: string; name?: string };
   output?: { isTrack: boolean; destId?: string; name: string; deviceID?: string };
+  // LYR-001 — the per-track lyric sheet (absent ⇒ no sheet; the Lyrics tab shows its
+  // empty state). Additive + optional.
+  lyricSheet?: LyricSheet;
 };
 
 // RTG-001/002 — routing enumerations (read-only, on-demand like AudioDevices).
@@ -345,6 +411,28 @@ export type Annotation = {
   author?: string;
 };
 
+// PRJ-FMT — the snapshot WIRE-CONTRACT version this UI build expects. If the backend
+// reports a higher snapshot.schemaVersion, the UI is older than its engine and shows a
+// soft "please update the app" banner (it keeps running, degraded). DISTINCT from the
+// project file format version (which the backend refuses outright when too new). Bump in
+// lockstep with kSnapshotSchemaVersion in src/state/Migrations.h.
+export const EXPECTED_SNAPSHOT_SCHEMA = 1;
+
+// PRJ-FMT — the version-banner decision, pure + testable. Two distinct cases, both via the
+// store's lastError:
+//  • file-format refusal (cold start): the launch session file was made by a NEWER Mosh,
+//    so the backend loaded a safe empty fallback — a BLOCKING "update Mosh" message.
+//  • snapshot wire-contract mismatch: this UI build is older than its engine — a SOFT advisory.
+// Returns null when neither applies. Structural param so it's trivial to unit-test.
+export function versionBannerError(
+  snap: { schemaVersion: number; session: { loadError?: string } },
+): string | null {
+  if (snap.session.loadError) return snap.session.loadError;
+  if (snap.schemaVersion > EXPECTED_SNAPSHOT_SCHEMA)
+    return "This Mosh app is older than its engine. Please update the app.";
+  return null;
+}
+
 export type Snapshot = {
   schemaVersion: number;
   session: {
@@ -359,6 +447,13 @@ export type Snapshot = {
     length?: number;
     editFile: string;
     dirty?: boolean;           // gap 1 — unsaved changes (drives auto-save; advisory in UI)
+    // PRJ-FMT — cold-start refusal: the launch session file was made by a NEWER Mosh than
+    // this build. A safe empty fallback is live; this is the blocking "please update Mosh"
+    // reason the UI surfaces. Absent ⇒ the project loaded fine.
+    loadError?: string;
+    // A2 — the prior session ended uncleanly (crashed); autosave already restored the last
+    // good save. Drives a one-time, dismissable recovery notice. Absent ⇒ clean last exit.
+    recoveryAvailable?: boolean;
     recentProjects?: { path: string; name: string }[]; // gap 2 — Recent list (newest-first)
     projectExtension?: string; // backend-owned project container extension (no leading dot)
     // SES-001 — the tempo MAP (additive; tempo/timeSig* above stay point 0).

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<TRACK id="ID_001" moshLogicalId="ID_002" name="Golden Track">
+  <MODIFIERS/>
+  <OUTPUTDEVICES>
+    <DEVICE name="(default audio output)"/>
+  </OUTPUTDEVICES>
+  <CLIPSLOTS/>
+</TRACK>

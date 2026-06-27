@@ -14,7 +14,8 @@
 // behaviour the UI relies on is exercised, while audio/Tracktion concepts never
 // appear (the swappable seam holds on the web side too).
 
-import type { Snapshot, Clip, Track, Transport, CommandResult, RenderLayer, TrainingState, MidiNote } from "./types";
+import type { Snapshot, Clip, Track, Transport, CommandResult, RenderLayer, TrainingState, MidiNote, PluginParam, MoshFxReadout, LyricSheet, LyricLine } from "./types";
+import { syllablesForWord, countSyllables } from "./lyrics/flowMeter";
 
 export const MOCK_ENABLED: boolean =
   typeof import.meta !== "undefined" && Boolean(import.meta.env?.DEV);
@@ -160,7 +161,72 @@ const listeners = new Map<string, Set<Listener>>();
 // Mock command log (drives the CommandLog panel). Read-only commands don't log.
 const cmdLog: { command: string; ok: boolean; undoable: boolean; ts: number }[] = [];
 const READONLY = new Set(["get_snapshot", "get_clip_peaks", "file_peaks", "audition_file", "stop_audition", "get_command_log", "list_plugins", "list_builtins", "list_colors", "list_audio_devices", "list_wave_inputs", "list_track_outputs", "list_takes", "list_training_sources", "training_job_status", "list_lora_adapters"]);
-const NON_UNDOABLE = new Set(["set_transport", "arm_track", "set_input_monitor", "undo", "redo", "save", "reload", "new_project", "render_layer", "open_plugin_editor", "set_plugin_param", "export_audio", "mark_take", "import_training_source", "approve_training_source", "build_training_corpus", "submit_training_job", "cancel_training_job", "import_lora_adapter", "activate_lora_adapter"]);
+const NON_UNDOABLE = new Set(["set_transport", "arm_track", "set_input_monitor", "undo", "redo", "save", "reload", "new_project", "render_layer", "open_plugin_editor", "set_plugin_param", "export_audio", "mark_take", "import_training_source", "approve_training_source", "build_training_corpus", "submit_training_job", "cancel_training_job", "import_lora_adapter", "activate_lora_adapter", "get_rhymes",
+  "complete_lyrics", "fill_lyric_gap", "suggest_next_line", "regenerate_lyric",
+  "cancel_lyric_job", "reject_lyric_proposal"]);  // accept_lyric_proposal IS undoable
+
+// LYR-001 — a tiny deterministic rhyme map so the rhyme tool returns something in
+// browser dev / e2e (the real path is the phonology service). Suffix fallback keeps
+// it non-empty for unknown words.
+const MOCK_RHYMES: Record<string, string[]> = {
+  flame: ["name", "blame", "game", "frame", "same", "claim", "aim", "tame"],
+  cat: ["hat", "bat", "rat", "sat", "flat", "mat", "that", "chat"],
+  light: ["night", "sight", "fight", "right", "tight", "bright", "might"],
+  back: ["track", "rap", "attack", "stack", "black", "crack", "rack"],
+  flow: ["go", "low", "show", "know", "glow", "slow", "though"],
+};
+function mockRhymes(word: string, maxN: number, syllables: number) {
+  const base = MOCK_RHYMES[word.toLowerCase()] ?? [`${word}er`, `${word}in`, `${word}o`];
+  return base
+    .map((w) => ({ word: w, syllables: syllablesForWord(w), grade: "perfect" as const }))
+    .filter((c) => syllables <= 0 || c.syllables === syllables)
+    .slice(0, maxN > 0 ? maxN : 50);
+}
+
+// L2 — deterministic mock generation for browser dev / e2e (the real loop is the
+// service). Builds plausible, constraint-flavoured proposals; the rhyme group's anchor
+// (an earlier line's end word) drives the candidate end words.
+const FILLER = ["over", "alone", "again", "inside", "tonight", "rising"];
+const isGap = (t: string) => /^_{2,}$/.test(t);
+// The group's rhyme anchor = the first group line's FIXED end word (final text last
+// word, or the seed's last token when it's a word, not a gap).
+function mockGroupAnchor(sheet: LyricSheet, group: string): string {
+  for (const l of sheet.lines) {
+    if (l.rhymeGroup !== group) continue;
+    const txt = (l.text || "").trim();
+    if (txt) return (txt.split(/\s+/).pop() ?? "").replace(/[^A-Za-z']/g, "");
+    const toks = (l.seedText || "").split(/\s+/).filter(Boolean);
+    if (toks.length && !isGap(toks[toks.length - 1])) return toks[toks.length - 1].replace(/[^A-Za-z']/g, "");
+  }
+  return "";
+}
+// Mirror the real assembler: keep the producer's words, fill interior gaps with
+// filler, and only APPEND a rhyme end word when the line ends in a gap (else keep
+// the fixed end).
+function mockProposals(line: LyricLine, sheet: LyricSheet) {
+  const anchor = line.rhymeGroup ? mockGroupAnchor(sheet, line.rhymeGroup) : "";
+  const ends = (anchor && MOCK_RHYMES[anchor.toLowerCase()]) || ["flow", "time", "grind", "light"];
+  const toks = (line.seedText || "").split(/\s+/).filter(Boolean);
+  const ownEnd = toks.length === 0 || isGap(toks[toks.length - 1]);
+  const out = [];
+  for (let v = 0; v < 3; v++) {
+    const words: string[] = [];
+    toks.forEach((tk, i) => {
+      if (isGap(tk)) { if (i !== toks.length - 1) words.push(FILLER[(v + i) % FILLER.length]); }
+      else words.push(tk);
+    });
+    const end = ownEnd ? ends[(v + (line.regen ?? 0)) % ends.length] : words[words.length - 1] ?? "";
+    if (ownEnd) words.push(end);
+    const text = words.join(" ").replace(/\s+/g, " ").trim();
+    const rhymeOk = ownEnd ? !!anchor : true;
+    out.push({ text, endWord: end, syllables: countSyllables(text), passes: true,
+               syllableOk: true, rhymeOk, grade: ownEnd ? (anchor ? "slant" : "free") : "anchor", score: 1 - v * 0.1 });
+  }
+  return out;
+}
+function mockFillable(l: LyricLine): boolean {
+  return !l.locked && (!l.text.trim() || /_{2,}/.test(l.seedText));
+}
 function emit(type: string, payload?: unknown) {
   const ls = listeners.get("mosh_event");
   if (ls) for (const fn of ls) fn({ type, payload });
@@ -276,6 +342,9 @@ const BUILTINS = [
   { type: "reverb", name: "Reverb", category: "Effects", isInstrument: false, builtin: true as const },
   { type: "delay", name: "Delay", category: "Effects", isInstrument: false, builtin: true as const },
   { type: "eq", name: "4-Band EQ", category: "Effects", isInstrument: false, builtin: true as const },
+  { type: "moshAutoTune", name: "Mosh AutoTune", category: "Mosh FX", isInstrument: false, builtin: true as const },
+  { type: "moshOTT", name: "Mosh OTT", category: "Mosh FX", isInstrument: false, builtin: true as const },
+  { type: "moshXFeedback", name: "Mosh X-FDBK", category: "Mosh FX", isInstrument: false, builtin: true as const },
 ];
 const VST3S = [
   { id: "vital", name: "Vital", format: "VST3", manufacturer: "Vital Audio", isInstrument: true },
@@ -296,6 +365,30 @@ function findPlugin(trackId: string, index: number): { track: Track; idx: number
 }
 function mkParams(n: number) {
   return Array.from({ length: n }, (_, i) => ({ index: i, name: ["Drive", "Tone", "Mix", "Decay", "Size", "Rate", "Depth", "Gain"][i] ?? `P${i}`, value: 0.5 }));
+}
+function params(names: string[], values: number[]): PluginParam[] {
+  return names.map((name, index) => ({ index, name, value: values[index] ?? 0.5 }));
+}
+function mkBuiltinParams(type: string, isInstrument: boolean): PluginParam[] {
+  if (isInstrument) return [];
+  if (type === "moshAutoTune") return params(["Root", "Scale", "Retune", "Amount", "Range", "Mix", "Output"], [0, 0, 0.32, 0.35, 0.33, 1, 0.75]);
+  if (type === "moshOTT") return params(["Amount", "Time", "Low Gain", "Mid Gain", "High Gain", "Mix", "Output"], [0.12, 0.24, 0.5, 0.5, 0.5, 1, 0.71]);
+  if (type === "moshXFeedback") return params(["Sensitivity", "Max Cuts", "Max Depth", "Release", "Auto Suppress", "Mix", "Output"], [0.62, 0.5, 0.55, 0.38, 1, 0.8, 0.5]);
+  return mkParams(4);
+}
+function mkMoshFx(type: string): MoshFxReadout | undefined {
+  if (type === "moshAutoTune") return { kind: "autotune", inputHz: 449.0, targetHz: 440.0, correctionCents: -34.4, confidence: 0.91 };
+  if (type === "moshOTT") return { kind: "ott", amount: 0.12, timeMs: 120.0 };
+  if (type !== "moshXFeedback") return undefined;
+  return {
+    kind: "feedback",
+    candidates: [
+      { frequencyHz: 1260, score: 0.82, depthDb: 5.5 },
+      { frequencyHz: 2510, score: 0.74, depthDb: 4.2 },
+      { frequencyHz: 3875, score: 0.61, depthDb: 3.4 },
+    ],
+    activeCuts: [],
+  };
 }
 
 // ── command dispatch ─────────────────────────────────────────────────────────
@@ -452,6 +545,142 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       const idx = list.findIndex((x) => x.id === str(args.sectionId));
       if (idx < 0) return err(command, "section not found");
       pushUndo(); list.splice(idx, 1); invalidate(); return ok(command);
+    }
+
+    // ── LYR-001 — lyric sheet (per-track) ────────────────────────────────────
+    case "create_lyric_sheet": {
+      const t = findTrack(str(args.trackId));
+      if (!t) return err(command, "track not found");
+      if (t.lyricSheet) return err(command, "track already has a lyric sheet");
+      pushUndo();
+      const sheet: LyricSheet = {
+        id: `ls-${t.id}`,
+        grid: str(args.grid, "1/16"),
+        language: str(args.language, "en"),
+        topic: str(args.topic, ""),
+        mood: str(args.mood, ""),
+        explicit: str(args.explicit, "allow"),
+        rhymeStrictness: "slant",
+        specVersion: 1,
+        lines: [],
+      };
+      t.lyricSheet = sheet;
+      invalidate();
+      return ok(command, { sheetId: sheet.id, trackId: t.id });
+    }
+    case "remove_lyric_sheet": {
+      const t = findTrack(str(args.trackId));
+      if (!t?.lyricSheet) return err(command, "track has no lyric sheet");
+      pushUndo(); delete t.lyricSheet; invalidate(); return ok(command);
+    }
+    case "set_lyric_constraint": {
+      const t = findTrack(str(args.trackId));
+      if (!t?.lyricSheet) return err(command, "track has no lyric sheet");
+      pushUndo();
+      const s = t.lyricSheet;
+      if (args.grid != null) s.grid = str(args.grid, s.grid);
+      if (args.topic != null) s.topic = str(args.topic, s.topic);
+      if (args.mood != null) s.mood = str(args.mood, s.mood);
+      if (args.explicit != null) s.explicit = str(args.explicit, s.explicit);
+      if (args.rhymeStrictness != null) s.rhymeStrictness = str(args.rhymeStrictness, s.rhymeStrictness);
+      invalidate(); return ok(command);
+    }
+    case "set_lyric_line": {
+      const t = findTrack(str(args.trackId));
+      if (!t?.lyricSheet) return err(command, "track has no lyric sheet");
+      const idx = num(args.lineIndex, -1);
+      if (idx < 0) return err(command, "lineIndex required");
+      const lines = t.lyricSheet.lines;
+      if (idx > lines.length) return err(command, "lineIndex out of range");
+      pushUndo();
+      let line = lines.find((l) => l.index === idx);
+      if (!line) {
+        line = { index: idx, role: str(args.role, "verse"), seedText: "", text: "", syllableTarget: 0, syllableTol: 1, stress: "", rhymeGroup: "", rhymeStrictness: "", locked: false, sectionId: "", status: "empty" };
+        lines.push(line);
+      }
+      if (args.text != null) line.text = str(args.text, line.text);
+      if (args.role != null) line.role = str(args.role, line.role);
+      if (args.seedText != null) line.seedText = str(args.seedText, line.seedText);
+      if (args.syllableTarget != null) line.syllableTarget = num(args.syllableTarget, line.syllableTarget);
+      if (args.syllableTol != null) line.syllableTol = num(args.syllableTol, line.syllableTol);
+      if (args.stress != null) line.stress = str(args.stress, line.stress);
+      if (args.rhymeGroup != null) line.rhymeGroup = str(args.rhymeGroup, line.rhymeGroup);
+      if (args.rhymeStrictness != null) line.rhymeStrictness = str(args.rhymeStrictness, line.rhymeStrictness);
+      if (args.locked != null) line.locked = Boolean(args.locked);
+      if (args.sectionId != null) line.sectionId = str(args.sectionId, line.sectionId);
+      if (line.text || line.seedText) line.status = "seed";
+      invalidate(); return ok(command, { lineIndex: idx });
+    }
+    case "remove_lyric_line": {
+      const t = findTrack(str(args.trackId));
+      if (!t?.lyricSheet) return err(command, "track has no lyric sheet");
+      const idx = num(args.lineIndex, -1);
+      const at = t.lyricSheet.lines.findIndex((l) => l.index === idx);
+      if (at < 0) return err(command, "no line at index " + idx);
+      pushUndo();
+      t.lyricSheet.lines.splice(at, 1);
+      t.lyricSheet.lines.forEach((l, i) => (l.index = i)); // keep dense
+      invalidate(); return ok(command);
+    }
+    case "get_rhymes": {
+      const word = str(args.word).trim();
+      if (!word) return err(command, "word required");
+      let strictness = str(args.strictness, "slant");
+      if (!["perfect", "slant", "free"].includes(strictness)) strictness = "slant";
+      const candidates = mockRhymes(word, num(args.maxN, 50), num(args.syllables, 0));
+      return ok(command, { ok: true, word, strictness, inDict: word.toLowerCase() in MOCK_RHYMES, candidates });
+    }
+    case "complete_lyrics":
+    case "fill_lyric_gap":
+    case "suggest_next_line":
+    case "regenerate_lyric": {
+      const t = findTrack(str(args.trackId));
+      if (!t?.lyricSheet) return err(command, "track has no lyric sheet");
+      const sheet = t.lyricSheet;
+      let targets: LyricLine[];
+      if (command === "complete_lyrics") targets = sheet.lines.filter(mockFillable);
+      else if (command === "suggest_next_line") targets = sheet.lines.filter((l) => l.index === num(args.afterIndex, -1) + 1 && mockFillable(l));
+      else { // fill_lyric_gap / regenerate_lyric
+        const l = sheet.lines.find((x) => x.index === num(args.lineIndex, -1));
+        if (command === "regenerate_lyric" && l) l.regen = (l.regen ?? 0) + 1;
+        targets = l && mockFillable(l) ? [l] : [];
+      }
+      const lines = targets.map((l) => {
+        l.proposals = mockProposals(l, sheet);
+        l.status = "proposed";
+        return { index: l.index, proposals: l.proposals };
+      });
+      invalidate();
+      return ok(command, { status: "proposed", lineCount: lines.length, lines });
+    }
+    case "cancel_lyric_job": {
+      const t = findTrack(str(args.trackId));
+      if (t?.lyricSheet) t.lyricSheet.lines.forEach((l) => { if (l.status === "generating") l.status = l.text || l.seedText ? "seed" : "empty"; });
+      invalidate();
+      return ok(command);
+    }
+    case "accept_lyric_proposal": {
+      const t = findTrack(str(args.trackId));
+      const l = t?.lyricSheet?.lines.find((x) => x.index === num(args.lineIndex, -1));
+      const pi = num(args.proposalIndex, 0);
+      if (!l) return err(command, "no line at index");
+      const p = l.proposals?.[pi];
+      if (!p) return err(command, "no proposal at that index");
+      pushUndo();
+      l.text = p.text;
+      l.status = "accepted";
+      delete l.proposals;
+      invalidate();
+      return ok(command, { text: p.text });
+    }
+    case "reject_lyric_proposal": {
+      const t = findTrack(str(args.trackId));
+      const l = t?.lyricSheet?.lines.find((x) => x.index === num(args.lineIndex, -1));
+      if (!l) return err(command, "no line at index");
+      delete l.proposals;
+      l.status = l.text || l.seedText ? "seed" : "empty";
+      invalidate();
+      return ok(command);
     }
 
     case "create_annotation": {
@@ -705,7 +934,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found");
       const b = BUILTINS.find((x) => x.type === str(args.type)); if (!b) return err(command, "unknown builtin");
       pushUndo(); t.plugins = t.plugins ?? [];
-      t.plugins.push({ index: t.plugins.length, name: b.name, type: b.type, enabled: true, external: false, builtin: true, category: b.category, isInstrument: b.isInstrument, params: mkParams(b.isInstrument ? 0 : 4) });
+      t.plugins.push({ index: t.plugins.length, name: b.name, type: b.type, enabled: true, external: false, builtin: true, category: b.category, isInstrument: b.isInstrument, params: mkBuiltinParams(b.type, b.isInstrument), moshFx: mkMoshFx(b.type) });
       invalidate(); return ok(command);
     }
     case "load_plugin": {
@@ -1093,6 +1322,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
         locks,
       });
       if (locked) emit("peer_selection", { peerId: "bo", trackId: locked.id, clipId: locked.clips[0]?.id ?? null });
+      emit("peer_presence", { peerId: "bo", position: 5.25, playing: true, recording: false });
       invalidate();   // surface the freshly-stamped logicalIds to the UI snapshot
       return ok(command, { code });
     }

@@ -15,6 +15,8 @@ int runSelfTest (MoshEngine&, MoshOps&);
     Keeps assertion debugging separate from plugin hosting and generative jobs. */
 int runUndoSelfTest (MoshEngine&, MoshOps&);
 
+int runGoldenSelfTest (MoshEngine&, MoshOps&);
+
 /** Headless batch command runner (`Mosh --run-script`). Reads a JSONL command
     script from MOSH_RUN_SCRIPT — one {"command","args"} object per line; blank lines
     and #/// comments are skipped; {"command":"__wait","args":{"ms":N}} pumps the

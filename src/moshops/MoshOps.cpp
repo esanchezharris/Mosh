@@ -3,10 +3,13 @@
 #include "engine/RenderArtifacts.h"
 #include "state/Ids.h"
 #include "state/RenderLayer.h"
+#include "state/Migrations.h"
 #include "state/Section.h"
 #include "state/Annotation.h"
+#include "state/Lyrics.h"
 #include "multiplayer/LogicalId.h"
 #include "multiplayer/TrackCommit.h"
+#include "plugins/moshfx/MoshFxPlugins.h"
 #if MOSH_HAVE_ANIRA
  #include "plugins/transform/RaveInsertPlugin.h"
 #endif
@@ -46,6 +49,9 @@ namespace
         { "phaser",       "Phaser",                "Modulation", false },
         { "lowpass",      "Low / High-Pass Filter","Filter",     false },
         { "pitchShifter", "Pitch Shifter",         "Pitch",      false },
+        { "moshAutoTune", "Mosh AutoTune",         "Mosh FX",    false },
+        { "moshOTT",      "Mosh OTT",              "Mosh FX",    false },
+        { "moshXFeedback","Mosh X-FDBK",           "Mosh FX",    false },
     };
 
     const BuiltinSpec* findBuiltin (const juce::String& type)
@@ -54,6 +60,75 @@ namespace
             if (type == b.type)
                 return &b;
         return nullptr;
+    }
+
+    juce::var feedbackCandidatesToVar (const std::vector<moshfx::FeedbackCandidate>& candidates,
+                                       bool includeDepth)
+    {
+        juce::Array<juce::var> arr;
+        for (const auto& c : candidates)
+        {
+            auto* o = new juce::DynamicObject();
+            o->setProperty ("frequencyHz", c.frequencyHz);
+            o->setProperty ("score", c.score);
+            if (includeDepth)
+                o->setProperty ("depthDb", c.depthDb);
+            arr.add (juce::var (o));
+        }
+        return juce::var (arr);
+    }
+
+    std::vector<float> readXFeedbackPreviewSamples (te::AudioTrack& track, double& sampleRate)
+    {
+        sampleRate = 0.0;
+        for (auto* clip : track.getClips())
+            if (auto* wave = dynamic_cast<te::WaveAudioClip*> (clip))
+            {
+                juce::AudioFormatManager fm;
+                fm.registerBasicFormats();
+                std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (wave->getCurrentSourceFile()));
+                if (reader == nullptr || reader->sampleRate <= 0.0 || reader->lengthInSamples <= 0)
+                    continue;
+
+                const int samples = juce::jlimit (0, 16384, (int) reader->lengthInSamples);
+                juce::AudioBuffer<float> buffer (1, samples);
+                if (! reader->read (&buffer, 0, samples, 0, true, true))
+                    continue;
+
+                sampleRate = reader->sampleRate;
+                std::vector<float> out ((size_t) samples);
+                std::copy (buffer.getReadPointer (0), buffer.getReadPointer (0) + samples, out.begin());
+                return out;
+            }
+
+        return {};
+    }
+
+    juce::var xFeedbackPreviewReadout (te::AudioTrack& track, te::Plugin& plugin)
+    {
+        auto normParam = [&plugin] (int index, float fallback)
+        {
+            if (auto p = plugin.getAutomatableParameter (index))
+                return p->getCurrentNormalisedValue();
+            return fallback;
+        };
+
+        moshfx::XFeedbackSettings settings;
+        settings.sensitivity = normParam (0, 0.65f);
+        settings.maxCuts = juce::jlimit (1, 4, juce::roundToInt (1.0f + normParam (1, 1.0f / 3.0f) * 3.0f));
+        settings.maxDepthDb = 3.0f + normParam (2, 15.0f / 33.0f) * 33.0f;
+        settings.autoSuppress = normParam (4, 0.0f) >= 0.5f;
+
+        double sampleRate = 0.0;
+        auto samples = readXFeedbackPreviewSamples (track, sampleRate);
+        auto candidates = moshfx::detectFeedbackCandidates (samples.data(), (int) samples.size(), sampleRate, settings);
+
+        auto* o = new juce::DynamicObject();
+        o->setProperty ("kind", "feedback");
+        o->setProperty ("candidates", feedbackCandidatesToVar (candidates, false));
+        o->setProperty ("activeCuts", settings.autoSuppress ? feedbackCandidatesToVar (candidates, true)
+                                                            : juce::var (juce::Array<juce::var>()));
+        return juce::var (o);
     }
 
     // DRM-001 — the bundled default drum kit. Each pad is a synthesised one-shot
@@ -363,6 +438,18 @@ void MoshOps::timerCallback()
         emit ("transport", transportToVar());
     wasPlaying = playing;
 
+    if (mpSession_ != nullptr && mpSession_->active())
+    {
+        const auto nowMs = Time::getMillisecondCounterHiRes();
+        if (nowMs - lastPresenceBroadcastMs >= 250.0)
+        {
+            lastPresenceBroadcastMs = nowMs;
+            mpSession_->broadcastPresence (transport.getPosition().inSeconds(),
+                                           transport.isPlaying(),
+                                           transport.isRecording());
+        }
+    }
+
     // Decimated level meters (Wave 9). Reconcile first (undo/redo-safe), then each
     // client reports the peak since the last read (getAndClear resets to -100);
     // master comes from the playback context's measurer (null headless → -100).
@@ -442,6 +529,20 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "rename_section")    return cmdRenameSection (args);
     if (name == "move_section")      return cmdMoveSection (args);
     if (name == "remove_section")    return cmdRemoveSection (args);
+    // LYR-001 — Finish-My-Song lyric sheet (per-track).
+    if (name == "create_lyric_sheet")   return cmdCreateLyricSheet (args);
+    if (name == "remove_lyric_sheet")   return cmdRemoveLyricSheet (args);
+    if (name == "set_lyric_constraint") return cmdSetLyricConstraint (args);
+    if (name == "set_lyric_line")       return cmdSetLyricLine (args);
+    if (name == "remove_lyric_line")    return cmdRemoveLyricLine (args);
+    if (name == "get_rhymes")           return cmdGetRhymes (args);
+    if (name == "complete_lyrics")      return cmdCompleteLyrics (args);
+    if (name == "fill_lyric_gap")       return cmdFillLyricGap (args);
+    if (name == "suggest_next_line")    return cmdSuggestNextLine (args);
+    if (name == "regenerate_lyric")     return cmdRegenerateLyric (args);
+    if (name == "cancel_lyric_job")     return cmdCancelLyricJob (args);
+    if (name == "accept_lyric_proposal") return cmdAcceptLyricProposal (args);
+    if (name == "reject_lyric_proposal") return cmdRejectLyricProposal (args);
     // Annotations broadcast over MP (shared collaborator comments). create self-broadcasts
     // its resolved cross-peer id; the rest address by that id via the generic wrapper.
     if (name == "create_annotation") return cmdCreateAnnotation (args);
@@ -753,6 +854,405 @@ juce::var MoshOps::sectionsToVar()
             out.add (var (o));
         }
     return out;
+}
+
+// ── LYR-001 — Finish-My-Song lyric sheet (per-track MOSH_LYRICSHEET) ───────────
+
+juce::var MoshOps::cmdCreateLyricSheet (const juce::var& args)
+{
+    const auto trackId = args.getProperty ("trackId", var()).toString();
+    auto* t = findTrack (trackId);
+    if (t == nullptr) return errResult ("create_lyric_sheet", "no track: " + trackId);
+    if (t->state.getChildWithName (ids::MOSH_LYRICSHEET).isValid())
+        return errResult ("create_lyric_sheet", "track already has a lyric sheet");
+
+    const auto grid     = args.getProperty ("grid", "1/16").toString();
+    const auto language = args.getProperty ("language", "en").toString();
+
+    beginTxn ("create_lyric_sheet");
+    const auto sheetId = juce::Uuid().toString();
+    auto sheet = mosh::LyricSheet::create (sheetId, grid, language);
+    if (args.hasProperty ("topic"))    sheet.setProperty (ids::lyricTopic,    args.getProperty ("topic", var()), nullptr);
+    if (args.hasProperty ("mood"))     sheet.setProperty (ids::lyricMood,     args.getProperty ("mood", var()), nullptr);
+    if (args.hasProperty ("explicit")) sheet.setProperty (ids::lyricExplicit, args.getProperty ("explicit", var()), nullptr);
+    t->state.appendChild (sheet, &undoManager());
+
+    auto* data = new DynamicObject();
+    data->setProperty ("sheetId", sheetId);
+    data->setProperty ("trackId", trackId);
+    logLine ("create_lyric_sheet", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("create_lyric_sheet", var (data));
+}
+
+juce::var MoshOps::cmdRemoveLyricSheet (const juce::var& args)
+{
+    const auto trackId = args.getProperty ("trackId", var()).toString();
+    auto* t = findTrack (trackId);
+    if (t == nullptr) return errResult ("remove_lyric_sheet", "no track: " + trackId);
+    auto sheet = t->state.getChildWithName (ids::MOSH_LYRICSHEET);
+    if (! sheet.isValid()) return errResult ("remove_lyric_sheet", "track has no lyric sheet");
+
+    beginTxn ("remove_lyric_sheet");
+    t->state.removeChild (sheet, &undoManager());
+    logLine ("remove_lyric_sheet", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("remove_lyric_sheet");
+}
+
+juce::var MoshOps::cmdSetLyricConstraint (const juce::var& args)
+{
+    const auto trackId = args.getProperty ("trackId", var()).toString();
+    auto* t = findTrack (trackId);
+    if (t == nullptr) return errResult ("set_lyric_constraint", "no track: " + trackId);
+    auto sheet = t->state.getChildWithName (ids::MOSH_LYRICSHEET);
+    if (! sheet.isValid()) return errResult ("set_lyric_constraint", "track has no lyric sheet");
+
+    beginTxn ("set_lyric_constraint");
+    if (args.hasProperty ("grid"))            sheet.setProperty (ids::lyricGrid,            args.getProperty ("grid", var()), &undoManager());
+    if (args.hasProperty ("topic"))           sheet.setProperty (ids::lyricTopic,           args.getProperty ("topic", var()), &undoManager());
+    if (args.hasProperty ("mood"))            sheet.setProperty (ids::lyricMood,            args.getProperty ("mood", var()), &undoManager());
+    if (args.hasProperty ("explicit"))        sheet.setProperty (ids::lyricExplicit,        args.getProperty ("explicit", var()), &undoManager());
+    if (args.hasProperty ("rhymeStrictness")) sheet.setProperty (ids::lyricRhymeStrictness, args.getProperty ("rhymeStrictness", var()), &undoManager());
+    logLine ("set_lyric_constraint", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("set_lyric_constraint");
+}
+
+juce::var MoshOps::cmdSetLyricLine (const juce::var& args)
+{
+    const auto trackId = args.getProperty ("trackId", var()).toString();
+    auto* t = findTrack (trackId);
+    if (t == nullptr) return errResult ("set_lyric_line", "no track: " + trackId);
+    auto sheet = t->state.getChildWithName (ids::MOSH_LYRICSHEET);
+    if (! sheet.isValid()) return errResult ("set_lyric_line", "track has no lyric sheet");
+    auto lines = mosh::LyricSheet::lines (sheet);
+
+    const int lineIndex = (int) args.getProperty ("lineIndex", -1);
+    if (lineIndex < 0) return errResult ("set_lyric_line", "lineIndex required (>= 0)");
+    if (lineIndex > lines.getNumChildren())
+        return errResult ("set_lyric_line", "lineIndex out of range (lines are kept dense)");
+
+    beginTxn ("set_lyric_line");
+    auto line = lines.getChildWithProperty (ids::lyricIndex, lineIndex);
+    if (! line.isValid())
+    {
+        // Append a new line at the next index (lineIndex == current count).
+        const auto role = args.getProperty ("role", "verse").toString();
+        line = mosh::LyricLine::create (juce::Uuid().toString(), lineIndex, role);
+        lines.appendChild (line, &undoManager());
+    }
+    if (args.hasProperty ("text"))            line.setProperty (ids::lyricText,            args.getProperty ("text", var()), &undoManager());
+    if (args.hasProperty ("role"))            line.setProperty (ids::lyricRole,            args.getProperty ("role", var()), &undoManager());
+    if (args.hasProperty ("seedText"))        line.setProperty (ids::lyricSeedText,        args.getProperty ("seedText", var()), &undoManager());
+    if (args.hasProperty ("syllableTarget"))  line.setProperty (ids::lyricSyllableTarget,  (int) args.getProperty ("syllableTarget", 0), &undoManager());
+    if (args.hasProperty ("syllableTol"))     line.setProperty (ids::lyricSyllableTol,     (int) args.getProperty ("syllableTol", 1), &undoManager());
+    if (args.hasProperty ("stress"))          line.setProperty (ids::lyricStress,          args.getProperty ("stress", var()), &undoManager());
+    if (args.hasProperty ("rhymeGroup"))      line.setProperty (ids::lyricRhymeGroup,      args.getProperty ("rhymeGroup", var()), &undoManager());
+    if (args.hasProperty ("rhymeStrictness")) line.setProperty (ids::lyricRhymeStrictness, args.getProperty ("rhymeStrictness", var()), &undoManager());
+    if (args.hasProperty ("locked"))          line.setProperty (ids::lyricLocked,          (bool) args.getProperty ("locked", false), &undoManager());
+    if (args.hasProperty ("sectionId"))       line.setProperty (ids::lyricSectionId,       args.getProperty ("sectionId", var()), &undoManager());
+    // A line carrying a seed/text is no longer "empty" (richer statuses arrive with the
+    // generation loop in L2).
+    if (line[ids::lyricText].toString().isNotEmpty() || line[ids::lyricSeedText].toString().isNotEmpty())
+        line.setProperty (ids::status, "seed", &undoManager());
+
+    auto* data = new DynamicObject();
+    data->setProperty ("lineIndex", lineIndex);
+    data->setProperty ("lineId", line[ids::id].toString());
+    logLine ("set_lyric_line", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("set_lyric_line", var (data));
+}
+
+juce::var MoshOps::cmdRemoveLyricLine (const juce::var& args)
+{
+    const auto trackId = args.getProperty ("trackId", var()).toString();
+    auto* t = findTrack (trackId);
+    if (t == nullptr) return errResult ("remove_lyric_line", "no track: " + trackId);
+    auto sheet = t->state.getChildWithName (ids::MOSH_LYRICSHEET);
+    if (! sheet.isValid()) return errResult ("remove_lyric_line", "track has no lyric sheet");
+    auto lines = mosh::LyricSheet::lines (sheet);
+
+    const int lineIndex = (int) args.getProperty ("lineIndex", -1);
+    auto line = lines.getChildWithProperty (ids::lyricIndex, lineIndex);
+    if (! line.isValid()) return errResult ("remove_lyric_line", "no line at index " + juce::String (lineIndex));
+
+    beginTxn ("remove_lyric_line");
+    lines.removeChild (line, &undoManager());
+    // Keep indices dense: renumber the surviving lines by their child order.
+    for (int i = 0; i < lines.getNumChildren(); ++i)
+        lines.getChild (i).setProperty (ids::lyricIndex, i, &undoManager());
+    logLine ("remove_lyric_line", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("remove_lyric_line");
+}
+
+juce::var MoshOps::cmdGetRhymes (const juce::var& args)
+{
+    const auto word = args.getProperty ("word", var()).toString().trim();
+    if (word.isEmpty()) return errResult ("get_rhymes", "word required");
+    auto strictness = args.getProperty ("strictness", "slant").toString();
+    if (strictness != "perfect" && strictness != "slant" && strictness != "free")
+        strictness = "slant";
+    const int syllables = (int) args.getProperty ("syllables", 0);
+    const int maxN      = (int) args.getProperty ("maxN", 50);
+
+    // Phonology read — a fast, deterministic SERVICE call (no LLM, not undoable, no
+    // state change). Blocks briefly; this is an explicit on-demand lookup.
+    auto res = jobManager.getRhymes (word, strictness, maxN, syllables);
+    const bool ok = res.isObject() && (bool) res.getProperty ("ok", false);
+    logLine ("get_rhymes", args, ok, ok ? juce::String() : juce::String ("phonology service unavailable"), false);
+    if (! ok)
+        return errResult ("get_rhymes", "phonology service unavailable (start the generative service)");
+    return okResult ("get_rhymes", res);
+}
+
+juce::var MoshOps::lyricSheetToVar (te::AudioTrack& t)
+{
+    auto sheet = t.state.getChildWithName (ids::MOSH_LYRICSHEET);
+    if (! sheet.isValid()) return {};
+
+    auto* o = new DynamicObject();
+    o->setProperty ("id",              sheet[ids::id].toString());
+    o->setProperty ("grid",            sheet[ids::lyricGrid].toString());
+    o->setProperty ("language",        sheet[ids::lyricLanguage].toString());
+    o->setProperty ("topic",           sheet[ids::lyricTopic].toString());
+    o->setProperty ("mood",            sheet[ids::lyricMood].toString());
+    o->setProperty ("explicit",        sheet[ids::lyricExplicit].toString());
+    o->setProperty ("rhymeStrictness", sheet[ids::lyricRhymeStrictness].toString());
+    o->setProperty ("specVersion",     (int) sheet[ids::lyricSpecVersion]);
+
+    Array<var> lines;
+    auto container = mosh::LyricSheet::lines (sheet);
+    for (int i = 0; i < container.getNumChildren(); ++i)
+    {
+        auto l = container.getChild (i);
+        auto* lo = new DynamicObject();
+        lo->setProperty ("index",           (int) l[ids::lyricIndex]);
+        lo->setProperty ("role",            l[ids::lyricRole].toString());
+        lo->setProperty ("seedText",        l[ids::lyricSeedText].toString());
+        lo->setProperty ("text",            l[ids::lyricText].toString());
+        lo->setProperty ("syllableTarget",  (int) l[ids::lyricSyllableTarget]);
+        lo->setProperty ("syllableTol",     (int) l[ids::lyricSyllableTol]);
+        lo->setProperty ("stress",          l[ids::lyricStress].toString());
+        lo->setProperty ("rhymeGroup",      l[ids::lyricRhymeGroup].toString());
+        lo->setProperty ("rhymeStrictness", l[ids::lyricRhymeStrictness].toString());
+        lo->setProperty ("locked",          (bool) l[ids::lyricLocked]);
+        lo->setProperty ("sectionId",       l[ids::lyricSectionId].toString());
+        lo->setProperty ("status",          l[ids::status].toString());
+        // L2 — transient ranked proposals (a JSON blob; absent ⇒ none) + regen counter.
+        if (l.hasProperty (ids::lyricProposals))
+        {
+            auto parsed = juce::JSON::parse (l[ids::lyricProposals].toString());
+            if (parsed.isArray()) lo->setProperty ("proposals", parsed);
+        }
+        if (l.hasProperty (ids::lyricRegen))
+            lo->setProperty ("regen", (int) l[ids::lyricRegen]);
+        lines.add (var (lo));
+    }
+    o->setProperty ("lines", lines);
+    return var (o);
+}
+
+// ── LYR-L2 — the generation loop (propose → validate → retry → rank), fake-first ──
+
+juce::var MoshOps::lyricSpecForTrack (te::AudioTrack& t)
+{
+    auto sheet = t.state.getChildWithName (ids::MOSH_LYRICSHEET);
+    if (! sheet.isValid()) return {};
+    auto* o = new DynamicObject();
+    o->setProperty ("grid",            sheet[ids::lyricGrid].toString());
+    o->setProperty ("topic",           sheet[ids::lyricTopic].toString());
+    o->setProperty ("mood",            sheet[ids::lyricMood].toString());
+    o->setProperty ("explicit",        sheet[ids::lyricExplicit].toString());
+    o->setProperty ("rhymeStrictness", sheet[ids::lyricRhymeStrictness].toString());
+    Array<var> lines;
+    auto container = mosh::LyricSheet::lines (sheet);
+    for (int i = 0; i < container.getNumChildren(); ++i)
+    {
+        auto l = container.getChild (i);
+        auto* lo = new DynamicObject();
+        lo->setProperty ("index",           (int) l[ids::lyricIndex]);
+        lo->setProperty ("role",            l[ids::lyricRole].toString());
+        lo->setProperty ("seedText",        l[ids::lyricSeedText].toString());
+        lo->setProperty ("text",            l[ids::lyricText].toString());
+        lo->setProperty ("syllableTarget",  (int) l[ids::lyricSyllableTarget]);
+        lo->setProperty ("syllableTol",     (int) l[ids::lyricSyllableTol]);
+        lo->setProperty ("stress",          l[ids::lyricStress].toString());
+        lo->setProperty ("rhymeGroup",      l[ids::lyricRhymeGroup].toString());
+        lo->setProperty ("rhymeStrictness", l[ids::lyricRhymeStrictness].toString());
+        lo->setProperty ("locked",          (bool) l[ids::lyricLocked]);
+        lines.add (var (lo));
+    }
+    o->setProperty ("lines", lines);
+    return var (o);
+}
+
+juce::var MoshOps::lyricRegenForTrack (te::AudioTrack& t)
+{
+    auto sheet = t.state.getChildWithName (ids::MOSH_LYRICSHEET);
+    auto* o = new DynamicObject();
+    if (sheet.isValid())
+    {
+        auto container = mosh::LyricSheet::lines (sheet);
+        for (int i = 0; i < container.getNumChildren(); ++i)
+        {
+            auto l = container.getChild (i);
+            if (l.hasProperty (ids::lyricRegen) && (int) l[ids::lyricRegen] > 0)
+                o->setProperty (juce::Identifier (l[ids::lyricIndex].toString()), (int) l[ids::lyricRegen]);
+        }
+    }
+    return var (o);
+}
+
+juce::var MoshOps::runLyricGeneration (const juce::String& cmdName, const juce::String& mode,
+                                       const juce::String& trackId, int lineIndex, int afterIndex,
+                                       const juce::var& args)
+{
+    auto* t = findTrack (trackId);
+    if (t == nullptr) return errResult (cmdName, "no track: " + trackId);
+    if (! t->state.getChildWithName (ids::MOSH_LYRICSHEET).isValid())
+        return errResult (cmdName, "track has no lyric sheet");
+
+    const auto spec  = lyricSpecForTrack (*t);
+    const auto regen = lyricRegenForTrack (*t);
+
+    // Land proposals (a JSON blob per line) on the message thread; re-look-up the sheet
+    // (it may have changed) and write only lines the service returned. NON-undoable
+    // (ephemeral generation output); accept/reject is the user's commit.
+    auto land = [this, cmdName, trackId] (const juce::var& result) -> juce::var
+    {
+        auto* tt = findTrack (trackId);
+        auto sheet = tt != nullptr ? tt->state.getChildWithName (ids::MOSH_LYRICSHEET) : juce::ValueTree();
+        if (! sheet.isValid()) return errResult (cmdName, "lyric sheet gone");
+        if (! result.isObject() || ! (bool) result.getProperty ("ok", false))
+            return errResult (cmdName, "lyric service unavailable (start the generative service)");
+        auto lines = mosh::LyricSheet::lines (sheet);
+        auto resLines = result.getProperty ("lines", var());
+        int n = 0;
+        if (resLines.isArray())
+            for (auto& rl : *resLines.getArray())
+            {
+                auto node = lines.getChildWithProperty (ids::lyricIndex, (int) rl.getProperty ("index", -1));
+                if (! node.isValid()) continue;
+                node.setProperty (ids::lyricProposals, juce::JSON::toString (rl.getProperty ("proposals", var())), nullptr);
+                node.setProperty (ids::status, "proposed", nullptr);
+                ++n;
+            }
+        emitSnapshotInvalidated();
+        auto* d = new DynamicObject(); d->setProperty ("status", "proposed"); d->setProperty ("lineCount", n);
+        return okResult (cmdName, var (d));
+    };
+
+    logLine (cmdName, args, true, {}, false);
+
+    // Synchronous (harness / agent): block on generation + land inline.
+    if ((bool) args.getProperty ("wait", false))
+        return land (jobManager.generateLyrics (mode, spec, lineIndex, afterIndex, regen));
+
+    // Async (GUI): generate off the message thread; land via callAsync, skipping if a
+    // cancel bumped the epoch in the meantime.
+    const int epoch = ++lyricGenEpoch_;   // capture; a later launch or cancel supersedes
+    std::thread ([this, mode, spec, lineIndex, afterIndex, regen, land, epoch]
+    {
+        auto result = jobManager.generateLyrics (mode, spec, lineIndex, afterIndex, regen);
+        juce::MessageManager::callAsync ([this, land, result, epoch]
+        {
+            if (epoch != lyricGenEpoch_) return;   // cancelled / superseded
+            land (result);
+        });
+    }).detach();
+
+    auto* d = new DynamicObject(); d->setProperty ("status", "generating");
+    return okResult (cmdName, var (d));
+}
+
+juce::var MoshOps::cmdCompleteLyrics (const juce::var& args)
+{
+    const auto trackId = args.getProperty ("trackId", var()).toString();
+    return runLyricGeneration ("complete_lyrics", "complete", trackId, -1, -1, args);
+}
+
+juce::var MoshOps::cmdFillLyricGap (const juce::var& args)
+{
+    const auto trackId = args.getProperty ("trackId", var()).toString();
+    const int lineIndex = (int) args.getProperty ("lineIndex", -1);
+    return runLyricGeneration ("fill_lyric_gap", "fill", trackId, lineIndex, -1, args);
+}
+
+juce::var MoshOps::cmdSuggestNextLine (const juce::var& args)
+{
+    const auto trackId = args.getProperty ("trackId", var()).toString();
+    const int afterIndex = (int) args.getProperty ("afterIndex", -1);
+    return runLyricGeneration ("suggest_next_line", "next", trackId, -1, afterIndex, args);
+}
+
+juce::var MoshOps::cmdRegenerateLyric (const juce::var& args)
+{
+    const auto trackId = args.getProperty ("trackId", var()).toString();
+    const int lineIndex = (int) args.getProperty ("lineIndex", -1);
+    auto* t = findTrack (trackId);
+    if (t == nullptr) return errResult ("regenerate_lyric", "no track: " + trackId);
+    auto sheet = t->state.getChildWithName (ids::MOSH_LYRICSHEET);
+    if (! sheet.isValid()) return errResult ("regenerate_lyric", "track has no lyric sheet");
+    auto node = mosh::LyricSheet::lines (sheet).getChildWithProperty (ids::lyricIndex, lineIndex);
+    if (! node.isValid()) return errResult ("regenerate_lyric", "no line at index " + juce::String (lineIndex));
+    // Bump the line's regen counter (non-undoable) so the service draws a fresh sample.
+    node.setProperty (ids::lyricRegen, (int) node.getProperty (ids::lyricRegen, 0) + 1, nullptr);
+    return runLyricGeneration ("regenerate_lyric", "fill", trackId, lineIndex, -1, args);
+}
+
+juce::var MoshOps::cmdCancelLyricJob (const juce::var& args)
+{
+    const auto trackId = args.getProperty ("trackId", var()).toString();
+    ++lyricGenEpoch_;   // any in-flight async land for the prior epoch is skipped
+    logLine ("cancel_lyric_job", args, true, {}, false);
+    return okResult ("cancel_lyric_job");
+}
+
+juce::var MoshOps::cmdAcceptLyricProposal (const juce::var& args)
+{
+    const auto trackId = args.getProperty ("trackId", var()).toString();
+    const int lineIndex = (int) args.getProperty ("lineIndex", -1);
+    const int proposalIndex = (int) args.getProperty ("proposalIndex", 0);
+    auto* t = findTrack (trackId);
+    if (t == nullptr) return errResult ("accept_lyric_proposal", "no track: " + trackId);
+    auto sheet = t->state.getChildWithName (ids::MOSH_LYRICSHEET);
+    if (! sheet.isValid()) return errResult ("accept_lyric_proposal", "track has no lyric sheet");
+    auto node = mosh::LyricSheet::lines (sheet).getChildWithProperty (ids::lyricIndex, lineIndex);
+    if (! node.isValid()) return errResult ("accept_lyric_proposal", "no line at index " + juce::String (lineIndex));
+    auto props = juce::JSON::parse (node.getProperty (ids::lyricProposals, "").toString());
+    if (! props.isArray() || proposalIndex < 0 || proposalIndex >= props.size())
+        return errResult ("accept_lyric_proposal", "no proposal at that index");
+    const auto chosen = props[proposalIndex].getProperty ("text", var()).toString();
+
+    beginTxn ("accept_lyric_proposal");
+    node.setProperty (ids::lyricText, chosen, &undoManager());     // the COMMIT (undoable)
+    node.setProperty (ids::status, "accepted", &undoManager());
+    node.removeProperty (ids::lyricProposals, nullptr);            // clear the ephemeral proposals
+    logLine ("accept_lyric_proposal", args, true, {}, true);       // explicit TASTE label (positive)
+    emitSnapshotInvalidated();
+    auto* d = new DynamicObject(); d->setProperty ("text", chosen);
+    return okResult ("accept_lyric_proposal", var (d));
+}
+
+juce::var MoshOps::cmdRejectLyricProposal (const juce::var& args)
+{
+    const auto trackId = args.getProperty ("trackId", var()).toString();
+    const int lineIndex = (int) args.getProperty ("lineIndex", -1);
+    auto* t = findTrack (trackId);
+    if (t == nullptr) return errResult ("reject_lyric_proposal", "no track: " + trackId);
+    auto sheet = t->state.getChildWithName (ids::MOSH_LYRICSHEET);
+    if (! sheet.isValid()) return errResult ("reject_lyric_proposal", "track has no lyric sheet");
+    auto node = mosh::LyricSheet::lines (sheet).getChildWithProperty (ids::lyricIndex, lineIndex);
+    if (! node.isValid()) return errResult ("reject_lyric_proposal", "no line at index " + juce::String (lineIndex));
+    node.removeProperty (ids::lyricProposals, nullptr);
+    node.setProperty (ids::status, node[ids::lyricText].toString().isNotEmpty()
+                                       || node[ids::lyricSeedText].toString().isNotEmpty() ? "seed" : "empty", nullptr);
+    logLine ("reject_lyric_proposal", args, true, {}, false);      // TASTE label (negative)
+    emitSnapshotInvalidated();
+    return okResult ("reject_lyric_proposal");
 }
 
 // ── ANN-001: authored timeline annotations (mirror the sections CRUD; multiplayer-
@@ -1303,6 +1803,9 @@ juce::var MoshOps::projectSettingsToVar()
     o->setProperty ("bitDepth", bd);
     o->setProperty ("timeBase", tb);
     o->setProperty ("key", var (key));
+    // PRJ-FMT — the stamped project format version (0 ⇒ legacy/unsaved). Lets the UI and
+    // the selftest observe the on-tree stamp without reading the .tracktionedit directly.
+    o->setProperty ("formatVersion", mosh::readFileVersion (eng.edit().state));
     return var (o);
 }
 
@@ -2110,7 +2613,13 @@ juce::var MoshOps::cmdSave (const juce::var& args)
 juce::var MoshOps::cmdReload (const juce::var& args)
 {
     unregisterAllMeterClients();        // old measurers are still valid here
-    eng.reloadFromFile();               // reconcileMeterClients() re-registers on the next frame
+    // PRJ-FMT — a newer-format file on disk is refused; the current Edit is kept untouched.
+    if (auto refusal = eng.reloadFromFile(); refusal.isNotEmpty())   // reconcileMeterClients() re-registers next frame
+    {
+        logLine ("reload", args, false, refusal, false);
+        emitSnapshotInvalidated();
+        return errResult ("reload", refusal);
+    }
     logFile = eng.sessionDir().getChildFile ("mosh-log.jsonl");
     logLine ("reload", args, true, {}, false);
     emitSnapshotInvalidated();
@@ -3260,6 +3769,7 @@ juce::var MoshOps::cmdListBuiltins (const juce::var&)
 
 juce::var MoshOps::cmdLoadBuiltin (const juce::var& args)
 {
+    eng.saveIfDirty();   // A2 — pre-risky-op save (recovery point if instantiation crashes)
     auto* track = findTrack (args.getProperty ("trackId", var()).toString());
     if (track == nullptr) return errResult ("load_builtin", "no track");
 
@@ -3401,6 +3911,10 @@ juce::var MoshOps::cmdAssignSample (const juce::var& args)
 
 juce::var MoshOps::cmdLoadPlugin (const juce::var& args)
 {
+    // A2 — persist any unsaved work BEFORE an op that can crash the process in-place
+    // (hosting a third-party VST3/AU is the #1 in-process-teardown crash). The on-disk save
+    // becomes the recovery point, making the crash near-lossless without the full replay.
+    eng.saveIfDirty();
     auto* track = findTrack (args.getProperty ("trackId", var()).toString());
     if (track == nullptr) return errResult ("load_plugin", "no track");
 
@@ -3432,6 +3946,7 @@ juce::var MoshOps::cmdLoadPlugin (const juce::var& args)
 
 juce::var MoshOps::cmdRemovePlugin (const juce::var& args)
 {
+    eng.saveIfDirty();   // A2 — pre-risky-op save (plugin teardown can crash in-process)
     auto* plugin = findPlugin (args.getProperty ("trackId", var()).toString(),
                                (int) args.getProperty ("index", -1));
     if (plugin == nullptr) return errResult ("remove_plugin", "no plugin");
@@ -4956,6 +5471,7 @@ juce::var MoshOps::cmdCancelRender (const juce::var& args)
 
 juce::var MoshOps::cmdAcceptRender (const juce::var& args)
 {
+    eng.saveIfDirty();   // A2 — pre-risky-op save (commits a generative render into the arrangement)
     const auto clipId = args.getProperty ("clipId", var()).toString();
     auto* clip = findClip (clipId);
     auto node = findRenderLayer (clipId);
@@ -5062,6 +5578,7 @@ juce::var MoshOps::cmdBypassLayer (const juce::var& args)
 
 juce::var MoshOps::cmdFreezeLayer (const juce::var& args)
 {
+    eng.saveIfDirty();   // A2 — pre-risky-op save (commits the cached render as durable audio)
     // Freeze = commit the cached render as the durable audio (already a file).
     auto node = findRenderLayer (args.getProperty ("clipId", var()).toString());
     if (! node.isValid()) return errResult ("freeze_layer", "no render layer");
@@ -5077,6 +5594,7 @@ juce::var MoshOps::cmdFreezeLayer (const juce::var& args)
 
 juce::var MoshOps::cmdBounceLayerToClip (const juce::var& args)
 {
+    eng.saveIfDirty();   // A2 — pre-risky-op save (bounce commits the render to a clip)
     // Bounce = accept_render then mark the layer bounced (the render becomes a
     // plain clip on the neural lane; lineage stays in the RenderLayer link).
     auto r = cmdAcceptRender (args);
@@ -5803,7 +6321,13 @@ juce::var MoshOps::cmdNewProject (const juce::var& args)
 juce::var MoshOps::openProjectFile (const File& file, const juce::var& args, const char* commandName)
 {
     unregisterAllMeterClients();           // old measurers valid here; dead after the swap
-    eng.openProject (file);                // stops transport + frees ctx before swap, re-points retriever
+    // PRJ-FMT — a newer-format file is refused; the current project stays loaded + saveable.
+    if (auto refusal = eng.openProject (file); refusal.isNotEmpty())  // else: stops transport + frees ctx before swap
+    {
+        logLine (commandName, args, false, refusal, false);
+        emitSnapshotInvalidated();         // re-attaches meters to the unchanged context
+        return errResult (commandName, refusal);
+    }
     lastSeenContext = nullptr;             // old ctx freed; force master-meter re-attach to the new ctx
     logFile = eng.sessionDir().getChildFile ("mosh-log.jsonl");
     logLine (commandName, args, true, {}, false);  // replaces the Edit — not undoable
@@ -5915,7 +6439,7 @@ te::VolumeAndPanPlugin* MoshOps::ensureVolumePlugin (te::AudioTrack& track)
     return nullptr;
 }
 
-juce::var MoshOps::pluginToVar (te::Plugin& p, int index)
+juce::var MoshOps::pluginToVar (te::Plugin& p, int index, te::AudioTrack* owner)
 {
     auto* o = new DynamicObject();
     o->setProperty ("index", index);
@@ -5936,6 +6460,17 @@ juce::var MoshOps::pluginToVar (te::Plugin& p, int index)
     if (auto* r = asRave (&p))
         o->setProperty ("rave", r->describe());
    #endif
+    if (auto* mfx = dynamic_cast<MoshFxDescribable*> (&p))
+    {
+        auto readout = mfx->describeMoshFx();
+        if (owner != nullptr && p.getPluginType() == MoshXFeedbackPlugin::xmlTypeName)
+        {
+            const auto activeCuts = readout.getProperty ("activeCuts", var());
+            if (activeCuts.size() == 0)
+                readout = xFeedbackPreviewReadout (*owner, p);
+        }
+        o->setProperty ("moshFx", readout);
+    }
 
     juce::Array<var> params;
     const int n = juce::jmin (16, p.getNumAutomatableParameters());
@@ -6064,6 +6599,15 @@ juce::var MoshOps::snapshot()
     session->setProperty ("length", edit.getLength().inSeconds());
     session->setProperty ("editFile", eng.editFile().getFullPathName());
     session->setProperty ("dirty", eng.isDirty());   // unsaved-changes flag (gap 1)
+    // PRJ-FMT — cold-start refusal: the launch session file was made by a newer Mosh, so a
+    // safe empty fallback is live. The UI shows this as a blocking "please update Mosh" banner.
+    if (eng.hasProjectLoadError())
+        session->setProperty ("loadError", eng.projectLoadError());
+    // A2 — the prior GUI session ended uncleanly (crashed). The UI shows a one-time recovery
+    // notice; autosave already restored the last good save (≤30s of loss). Phase 2 (JSONL
+    // replay) tightens this to ~0. Only true on the GUI path that marks the liveness sentinel.
+    if (eng.wasUncleanShutdown())
+        session->setProperty ("recoveryAvailable", true);
     session->setProperty ("recentProjects", eng.recentProjects());   // Recent list (gap 2)
     // Project container extension, backend-owned (keeps the storage format out of the
     // UI — the file-dialog filter is built from this, not a hard-coded constant).
@@ -6173,7 +6717,7 @@ juce::var MoshOps::snapshot()
         }
 
     auto* root = new DynamicObject();
-    root->setProperty ("schemaVersion", 1);
+    root->setProperty ("schemaVersion", mosh::kSnapshotSchemaVersion);  // C++→UI wire contract (≠ file format)
     root->setProperty ("session", var (session));
     root->setProperty ("tracks", tracks);
     root->setProperty ("transport", transportToVar());
@@ -6296,7 +6840,7 @@ juce::var MoshOps::trackToVar (te::AudioTrack& t, int index)
     auto pl = t.pluginList.getPlugins();
     for (int i = 0; i < pl.size(); ++i)
         if (pl[i] != nullptr && dynamic_cast<te::LevelMeterPlugin*> (pl[i].get()) == nullptr)
-            plugins.add (pluginToVar (*pl[i], i));
+            plugins.add (pluginToVar (*pl[i], i, &t));
     o->setProperty ("plugins", plugins);
     // DRM-001/CTL-001 — does the track host an instrument (synth or builtin)? Lets the
     // header surface the auto-loaded default and label the track MIDI-armable.
@@ -6375,6 +6919,10 @@ juce::var MoshOps::trackToVar (te::AudioTrack& t, int index)
         o->setProperty ("isReturn", true);
         o->setProperty ("returnBus", r->busNumber.get());
     }
+    // LYR-001 — the per-track lyric sheet (absent ⇒ no property; the v2 Lyrics tab
+    // shows its empty state). Additive + optional: flat consumers ignore it.
+    if (auto sheet = lyricSheetToVar (t); ! sheet.isVoid())
+        o->setProperty ("lyricSheet", sheet);
     return var (o);
 }
 

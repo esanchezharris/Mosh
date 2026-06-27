@@ -50,11 +50,36 @@ public:
         on failure (service down, venv absent → 503). */
     juce::var sketchBeatbox (const juce::File& inputWav, double bpm, int bars);
 
+    /** Phonology rhyme search (POST /get_rhymes) — Finish-My-Song rung 1. Fast +
+        deterministic, no LLM. SYNCHRONOUS — call on a BACKGROUND thread (or accept a
+        brief block on the message thread for an explicit on-demand lookup). Returns
+        { ok, word, inDict, candidates:[{word,syllables,grade}] }, or a var whose ok is
+        false / {} on failure (service down → {}). `strictness` ∈ perfect|slant|free;
+        `syllables` 0 ⇒ no syllable filter. */
+    juce::var getRhymes (const juce::String& word, const juce::String& strictness,
+                         int maxN, int syllables);
+
+    /** Lyric generation loop (POST /complete_lyrics | /fill_lyric_gap | /suggest_next_line)
+        — Finish-My-Song L2. `mode` ∈ "complete"|"fill"|"next". SYNCHRONOUS — call on a
+        BACKGROUND thread (mirrors transcribe()). `spec` is the lyric-sheet constraint
+        spec; `regen` is an optional {lineIndex:counter} object. Returns
+        { ok, lines:[{index, proposals:[{text,score,syllables,passes,grade,endWord,...}]}] },
+        or {} on failure (service down). */
+    juce::var generateLyrics (const juce::String& mode, const juce::var& spec,
+                              int lineIndex, int afterIndex, const juce::var& regen);
+
     juce::String serviceBuild() const { return svcBuild; }
 
 private:
     juce::var httpGet (const juce::String& path);
     juce::var httpPost (const juce::String& path, const juce::var& body);
+
+    // C2 — reap an orphaned/wedged service (a crashed Mosh leaves a multi-GB MLX process
+    // squatting the port) via the PID handshake file before spawning a fresh one.
+    void reapStaleService();
+    // C3 — adopt the actual bound port the service wrote (it may differ from the requested
+    // one if a non-Mosh process held it).
+    void adoptPortFromHandshake();
 
     juce::String baseUrl;
     juce::ChildProcess serviceProcess;

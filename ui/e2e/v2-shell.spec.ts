@@ -67,6 +67,23 @@ test("boots the v2 shell with topbar, tracks, composer and the always-on rail", 
   await expect(page.locator('[data-testid="v2-mosh-card"] canvas')).toBeVisible();
 });
 
+test("the decorative glyph in the Mosh status live region is aria-hidden", async ({ page }) => {
+  await bootV2(page);
+  // role=status/aria-live=polite re-announces on every status change — the leading ⩘ is
+  // purely decorative, so it must be hidden from screen readers (matches ChangeToast).
+  await expect(page.locator('[data-testid="v2-mosh-status"] .wave')).toHaveAttribute("aria-hidden", "true");
+});
+
+test("the topbar overflow menu exposes its items as role=menuitem (a11y)", async ({ page }) => {
+  await bootV2(page);
+  // The menu declares role="menu"; its children must carry role="menuitem" or the menu
+  // announces zero operable items (matches the ClipView clip menu precedent).
+  await expect(page.getByRole("menuitem")).toHaveCount(0); // closed → nothing mounted
+  await page.getByTestId("v2-overflow").click();
+  // Undo/Redo + Mute-Moshi + Hands-free + theme + Switch-to-Classic = at least 6 items.
+  await expect(page.getByRole("menuitem")).toHaveCount(6);
+});
+
 test("transport play toggles", async ({ page }) => {
   await bootV2(page);
   const transport = page.getByTestId("v2-transport");
@@ -92,6 +109,41 @@ test("keyboard focus shows a visible focus ring (:focus-visible)", async ({ page
   expect(outline).toBe("solid");                // a control received the lime focus ring
 });
 
+test("hover-only plugin-dock favorite star reveals on keyboard focus (a11y)", async ({ page }) => {
+  await bootV2(page);
+  // open the plugin dock (same path the drawer test uses)
+  await page.getByTestId("v2-browser-pull").click();
+  await page.getByTestId("v2-browser-tab-plugins").click();
+  await expect(page.getByTestId("v2-plugin-dock")).toBeVisible();
+  // an unfavorited star is opacity:0 (revealed only on row hover) — focusing it must reveal it,
+  // else the global :focus-visible ring lands on an invisible glyph.
+  const star = page.locator(".v2-pb-star:not(.on)").first();
+  await expect(star).toHaveCount(1);
+  await star.focus();
+  await expect(star).toBeFocused();
+  await expect
+    .poll(() => star.evaluate((el) => getComputedStyle(el).opacity))
+    .toBe("1");
+});
+
+test("the track header is keyboard-focusable and Enter selects it (a11y)", async ({ page }) => {
+  await bootV2(page);
+  const head = page.getByTestId("v2-track-header").first();
+  await expect(head).toHaveAttribute("role", "button");
+  await expect(head).toHaveAttribute("tabindex", "0");
+  const name = (await head.locator(".v2-lname").textContent())?.trim();
+  await expect(head).toHaveAttribute("aria-label", `Select track ${name}`);
+  // Focus via keyboard modality → the existing [tabindex]:focus-visible lime ring applies.
+  await head.focus();
+  await expect(head).toBeFocused();
+  await expect
+    .poll(() => head.evaluate((el) => getComputedStyle(el).outlineStyle))
+    .toBe("solid");
+  // Enter activates selection (no mouse) → the always-on inspector binds to that track.
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("v2-inspector")).toContainText(`Inspector · ${name}`);
+});
+
 test("the rail inspector reveals Mix/FX/Gen for the selected track", async ({ page }) => {
   await bootV2(page);
   await page.getByTestId("v2-track-header").first().click();
@@ -100,6 +152,30 @@ test("the rail inspector reveals Mix/FX/Gen for the selected track", async ({ pa
   await expect(page.locator('[data-testid="v2-insp-body"] [data-testid="rack"]')).toBeVisible();
   await page.getByTestId("v2-insp-tab-gen").click();
   await expect(page.locator('[data-testid="v2-insp-body"] [data-testid="generative"]')).toBeVisible();
+});
+
+test("the inspector tablist carries an accessible name (a11y, matches sibling v2 tablists)", async ({ page }) => {
+  await bootV2(page);
+  await page.getByTestId("v2-track-header").first().click(); // bind the always-on inspector
+  await expect(page.getByTestId("v2-inspector")).toBeVisible();
+  await expect(page.locator('[data-testid="v2-inspector"] [role="tablist"]')).toHaveAttribute("aria-label", "Inspector tabs");
+});
+
+test("inspector Mix tab: Mute/Solo are toggles (aria-pressed reflects state)", async ({ page }) => {
+  await bootV2(page);
+  await page.getByTestId("v2-track-header").first().click();
+  const inspector = page.getByTestId("v2-inspector");
+  await expect(inspector).toBeVisible(); // always-on rail; Mix is the default tab
+  // Matches the track-header M/S toggles: each carries aria-pressed against the same
+  // set_track_mute/set_track_solo command, off to start.
+  const mute = inspector.getByRole("button", { name: "Mute" });
+  const solo = inspector.getByRole("button", { name: "Solo" });
+  await expect(mute).toHaveAttribute("aria-pressed", "false");
+  await expect(solo).toHaveAttribute("aria-pressed", "false");
+  await mute.click();
+  await expect(mute).toHaveAttribute("aria-pressed", "true");
+  await solo.click();
+  await expect(solo).toHaveAttribute("aria-pressed", "true");
 });
 
 test("generative runs on a MIDI/drum track (any track, via the backend auto-bounce)", async ({ page }) => {
@@ -180,6 +256,9 @@ test("plugin picker: + Plugin opens the dock — collections, vendor filter, sea
   await expect(dock).toBeVisible();
   await expect(page.getByTestId("v2-browser-tab-plugins")).toHaveAttribute("aria-selected", "true");
 
+  // the search field carries an accessible name (its icon is aria-hidden, a placeholder is not a name)
+  await expect(dock.getByRole("textbox", { name: "Search plugins" })).toBeVisible();
+
   // collection chips: All + kind filters + a "Built-in" vendor group (no duplicate
   // Instruments/Effects vendor rows — built-ins collapse under one maker).
   await expect(dock.getByTestId("v2-pb-collection")).not.toHaveCount(0);
@@ -191,9 +270,10 @@ test("plugin picker: + Plugin opens the dock — collections, vendor filter, sea
   await expect(dock.locator(".v2-pb-listhead")).toContainText("Xfer");
   await expect(dock.getByTestId("v2-pb-row")).toHaveCount(1);
 
-  // search narrows within the current view
+  // search narrows within the current view (use a term unique to one plugin —
+  // bare "ott" now matches both Xfer OTT and the built-in Mosh OTT)
   await dock.locator('[data-collection="all"]').click();
-  await dock.getByTestId("v2-pb-search").fill("ott");
+  await dock.getByTestId("v2-pb-search").fill("mosh ott");
   await expect(dock.getByTestId("v2-pb-row")).toHaveCount(1);
   await expect(dock.getByTestId("v2-pb-row")).toContainText("OTT");
 
@@ -256,6 +336,15 @@ test("section ribbon: ✕ removes a section", async ({ page }) => {
   await expect(page.getByTestId("v2-section")).toHaveCount(3);
   await page.getByTestId("v2-section").first().getByTestId("v2-section-remove").click();
   await expect(page.getByTestId("v2-section")).toHaveCount(2);
+});
+
+test("section ribbon: the icon-only +/× buttons carry an accessible name (a11y)", async ({ page }) => {
+  await bootV2(page);
+  // The glyphs alone ("+"/"×") are meaningless to a screen reader — both must expose
+  // an aria-label, matching the topbar/overflow/drawer-close icon-button convention.
+  await expect(page.getByTestId("v2-section-add")).toHaveAttribute("aria-label", "Add section");
+  await expect(page.getByTestId("v2-section").first().getByTestId("v2-section-remove"))
+    .toHaveAttribute("aria-label", "Remove section");
 });
 
 test("section ribbon: a quick click across two sections seeks (does not spuriously rename)", async ({ page }) => {

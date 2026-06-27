@@ -8,17 +8,27 @@ juce_add_console_app(MoshTests PRODUCT_NAME "MoshTests")
 
 target_sources(MoshTests PRIVATE
     test_sanity.cpp
+    test_moshfx_dsp.cpp
     test_renderlayer.cpp
+    test_migrations.cpp
     test_sections.cpp
+    test_lyrics.cpp
     test_annotations.cpp
     test_remote_companion.cpp
     test_multiplayer_logical_id.cpp
     test_multiplayer_lock_manager.cpp
+    test_multiplayer_outbox.cpp
     test_training.cpp
+    test_rt_guard.cpp
+    ${CMAKE_SOURCE_DIR}/src/audio/RealtimeAudioGuard.cpp
     ${CMAKE_SOURCE_DIR}/src/multiplayer/LockManager.cpp
+    ${CMAKE_SOURCE_DIR}/src/multiplayer/OutboundQueue.cpp
     ${CMAKE_SOURCE_DIR}/src/remote/RemoteCompanionProtocol.cpp
     ${CMAKE_SOURCE_DIR}/src/remote/RemoteCompanionServer.cpp
-    ${CMAKE_SOURCE_DIR}/src/training/TrainerRegistry.cpp)
+    ${CMAKE_SOURCE_DIR}/src/training/TrainerRegistry.cpp
+    ${CMAKE_SOURCE_DIR}/src/plugins/moshfx/MoshAutoTuneDsp.cpp
+    ${CMAKE_SOURCE_DIR}/src/plugins/moshfx/MoshOTTDsp.cpp
+    ${CMAKE_SOURCE_DIR}/src/plugins/moshfx/MoshXFeedbackDsp.cpp)
 
 target_include_directories(MoshTests PRIVATE ${CMAKE_SOURCE_DIR}/src)
 
@@ -26,7 +36,9 @@ target_compile_definitions(MoshTests PRIVATE
     JUCE_USE_CURL=0
     JUCE_WEB_BROWSER=0
     JUCE_STANDALONE_APPLICATION=1
-    MOSH_TESTING=1)
+    MOSH_TESTING=1
+    # RT-safety tripwire active in the test target so test_rt_guard.cpp can exercise it.
+    MOSH_RT_GUARD=1)
 
 target_link_libraries(MoshTests PRIVATE
     Catch2::Catch2WithMain

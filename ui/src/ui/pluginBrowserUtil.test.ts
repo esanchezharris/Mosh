@@ -67,6 +67,17 @@ describe("buildPluginRows", () => {
     expect(names(q)).toEqual(["Serum"]);
   });
 
+  it("groups the native Mosh FX suite as built-in effects", () => {
+    const moshFx = [
+      builtinEntry(bi("moshAutoTune", "Mosh AutoTune", "Mosh FX")),
+      builtinEntry(bi("moshOTT", "Mosh OTT", "Mosh FX")),
+      builtinEntry(bi("moshXFeedback", "Mosh X-FDBK", "Mosh FX")),
+    ];
+    const rows = buildPluginRows({ builtins: moshFx, installed: [], favorites: [], recents: [], q: "mosh", kind: "fx" });
+    expect(headers(rows)).toEqual(["Mosh FX"]);
+    expect(names(rows)).toEqual(["Mosh AutoTune", "Mosh OTT", "Mosh X-FDBK"]);
+  });
+
   it("Other vendor sorts after named vendors", () => {
     const list = [installedEntry(vst("a", "Zeta", "")), installedEntry(vst("b", "Alpha", "ACME"))];
     const rows = buildPluginRows({ builtins: [], installed: list, favorites: [], recents: [], q: "", kind: "all" });

@@ -1,6 +1,7 @@
 #include "SelfTest.h"
 #include "engine/MoshEngine.h"
 #include "moshops/MoshOps.h"
+#include "state/Migrations.h"
 #include "multiplayer/MultiplayerClient.h"
 #include "brain/BrainProxy.h"
 #include "voice/NativeSpeech.h"
@@ -9,6 +10,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <map>
 #include <thread>
 #include <vector>
 
@@ -167,6 +169,132 @@ namespace
 
     juce::var firstTrack (MoshOps& ops) { return ops.snapshot()["tracks"][0]; }
     int trackClips (const juce::var& t) { return t.getProperty ("clips", juce::var()).size(); }
+
+    juce::var trackSnapshotByLogicalId (MoshOps& ops, const juce::String& logicalId)
+    {
+        auto snapshot = ops.snapshot();
+        if (auto* arr = snapshot.getProperty ("tracks", juce::var()).getArray())
+            for (auto& track : *arr)
+                if (track.getProperty ("logicalId", juce::var()).toString() == logicalId)
+                    return track;
+        return {};
+    }
+
+    class GoldenCanonicalizer
+    {
+    public:
+        juce::String canonicalizeXml (const juce::String& raw)
+        {
+            auto xml = juce::parseXML (raw);
+            if (xml == nullptr)
+                return {};
+
+            canonicalizeElement (*xml);
+            auto text = xml->toString();
+            text = text.replace ("\r\n", "\n");
+            return text.trimEnd() + "\n";
+        }
+
+    private:
+        juce::String canonicalId (const juce::String& value)
+        {
+            const auto key = value.trim();
+            if (key.isEmpty())
+                return key;
+
+            auto it = ids.find (key);
+            if (it != ids.end())
+                return it->second;
+
+            const auto token = "ID_" + juce::String (++nextId).paddedLeft ('0', 3);
+            ids.emplace (key, token);
+            return token;
+        }
+
+        juce::String canonicalPath (const juce::String& value)
+        {
+            const auto key = value.trim();
+            if (key.isEmpty())
+                return key;
+
+            auto it = paths.find (key);
+            if (it != paths.end())
+                return it->second;
+
+            const auto token = "PATH_" + juce::String (++nextPath).paddedLeft ('0', 3);
+            paths.emplace (key, token);
+            return token;
+        }
+
+        void canonicalizeElement (juce::XmlElement& xml)
+        {
+            for (int i = 0; i < xml.getNumAttributes(); ++i)
+            {
+                const auto attr = xml.getAttributeName (i);
+                const auto lower = attr.toLowerCase();
+                const auto value = xml.getStringAttribute (attr);
+
+                if (lower.contains ("id"))
+                    xml.setAttribute (attr, canonicalId (value));
+                else if (lower.contains ("path")
+                         || lower.contains ("file")
+                         || lower == "source"
+                         || lower.endsWith ("source"))
+                    xml.setAttribute (attr, canonicalPath (value));
+            }
+
+            for (auto* child = xml.getFirstChildElement(); child != nullptr; child = child->getNextElement())
+                canonicalizeElement (*child);
+        }
+
+        std::map<juce::String, juce::String> ids;
+        std::map<juce::String, juce::String> paths;
+        int nextId = 0;
+        int nextPath = 0;
+    };
+
+    juce::File goldenDir()
+    {
+        const auto env = juce::SystemStats::getEnvironmentVariable ("MOSH_GOLDEN_DIR", {}).trim();
+        if (env.isNotEmpty())
+        {
+            const juce::File asFile (env.startsWithChar (juce::File::getSeparatorChar())
+                                         ? env
+                                         : juce::File::getCurrentWorkingDirectory().getChildFile (env).getFullPathName());
+            return asFile;
+        }
+        return juce::File::getCurrentWorkingDirectory().getChildFile ("tests/golden");
+    }
+
+    void checkGoldenXml (const juce::File& sessionDir,
+                         const juce::String& fixtureName,
+                         const juce::String& actual)
+    {
+        const auto expectedFile = goldenDir().getChildFile (fixtureName);
+        const auto actualFile = sessionDir.getChildFile (fixtureName + ".actual.xml");
+        actualFile.getParentDirectory().createDirectory();
+
+        if (! expectedFile.existsAsFile())
+        {
+            actualFile.replaceWithText (actual);
+            check (false, "missing golden fixture " + expectedFile.getFullPathName()
+                        + " (wrote " + actualFile.getFullPathName() + ")");
+            return;
+        }
+
+        const auto expected = expectedFile.loadFileAsString().replace ("\r\n", "\n").trimEnd() + "\n";
+        if (expected != actual)
+        {
+            actualFile.replaceWithText (actual);
+            check (false, "golden mismatch for " + fixtureName
+                        + " (wrote " + actualFile.getFullPathName() + ")");
+            return;
+        }
+
+        if (actualFile.existsAsFile())
+            actualFile.deleteFile();
+        check (true, "golden fixture matched: " + fixtureName);
+    }
 }
 
 // Headless deep plugin scan (--scan-plugins-deep): a synchronous out-of-process
@@ -205,6 +333,110 @@ int runDeepPluginScan (MoshOps& ops)
 
     std::cerr << "===== deep scan complete =====\n";
     return 0;
+}
+
+int runGoldenSelfTest (MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+    failures = 0; checks = 0;
+    resetSections();
+    std::cerr << "===== Golden selftest: command ValueTree fixtures =====\n";
+
+    section ("Layer 1: create_track ValueTree golden");
+    const auto create = cmd (ops, "create_track", args1 ("name", "Golden Track"));
+    check (ok (create), "create_track ok");
+    const auto trackId = create.getProperty ("data", var()).getProperty ("trackId", var()).toString();
+    check (trackId.isNotEmpty(), "create_track returned trackId");
+
+    const auto serialized = cmd (ops, "mp_serialize_track", args1 ("trackId", trackId));
+    check (ok (serialized), "mp_serialize_track ok");
+    const auto blob = serialized.getProperty ("data", var()).getProperty ("blob", var()).toString();
+    check (blob.isNotEmpty(), "mp_serialize_track produced XML");
+
+    GoldenCanonicalizer canonicalizer;
+    const auto actual = canonicalizer.canonicalizeXml (blob);
+    check (actual.isNotEmpty(), "canonical XML produced");
+    if (actual.isNotEmpty())
+        checkGoldenXml (eng.sessionDir(), "moshop_create_track.xml", actual);
+
+    section ("Layer 2: phone command body routes through MoshOps");
+    auto* phoneArgs = new DynamicObject();
+    phoneArgs->setProperty ("action", "record");
+    phoneArgs->setProperty ("source", "phone_controller");
+    auto* phoneCommand = new DynamicObject();
+    phoneCommand->setProperty ("command", "set_transport");
+    phoneCommand->setProperty ("args", var (phoneArgs));
+    auto* phoneBody = new DynamicObject();
+    phoneBody->setProperty ("command", var (phoneCommand));
+    const var phoneEnvelope (phoneBody);
+    const auto phonePayload = phoneEnvelope.getProperty ("command", var());
+    check (phonePayload.isObject(), "phone body carries the standard command object");
+    const auto phoneResult = ops.execute (phonePayload);
+    check (ok (phoneResult), "phone set_transport record applies through MoshOps");
+    check (phoneResult.getProperty ("command", var()).toString() == "set_transport",
+           "phone command keeps the normal set_transport command name");
+    const auto phoneLog = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
+    check (phoneLog.contains ("\"source\": \"phone_controller\""), "phone source survives into the command log");
+
+    section ("Layer 3: peer apply committed track ValueTree golden");
+    MoshEngine receiverEng (false, true, "session-golden-selftest-receiver");
+    MoshOps receiverOps (receiverEng);
+
+    const auto senderCreate = cmd (ops, "create_track", args1 ("name", "Peer Sender"));
+    check (ok (senderCreate), "sender create_track ok");
+    const auto senderTrackId = senderCreate.getProperty ("data", var()).getProperty ("trackId", var()).toString();
+    check (senderTrackId.isNotEmpty(), "sender trackId resolved");
+
+    const auto senderTone = cmd (ops, "add_test_tone_clip",
+                                 objN ({ { "trackId", senderTrackId },
+                                         { "seconds", 1.0 },
+                                         { "freq", 220.0 } }));
+    check (ok (senderTone), "sender add_test_tone_clip ok");
+
+    const auto senderCommit = cmd (ops, "mp_serialize_track", args1 ("trackId", senderTrackId));
+    check (ok (senderCommit), "sender mp_serialize_track ok");
+    const auto senderBlob = senderCommit.getProperty ("data", var()).getProperty ("blob", var()).toString();
+    check (senderBlob.isNotEmpty(), "sender commit blob produced");
+
+    const auto apply = cmd (receiverOps, "apply_remote_track", args1 ("blob", senderBlob));
+    check (ok (apply), "receiver apply_remote_track ok");
+    check (apply.getProperty ("data", var()).getProperty ("mode", var()).toString() == "created",
+           "receiver created the incoming peer track");
+    const auto peerLogicalId = apply.getProperty ("data", var()).getProperty ("logicalId", var()).toString();
+    check (peerLogicalId.isNotEmpty(), "receiver apply returned logicalId");
+
+    auto receiverTrack = trackSnapshotByLogicalId (receiverOps, peerLogicalId);
+    check (receiverTrack.isObject(), "receiver track found by logicalId");
+    bool hasResolvedWave = false;
+    bool hasCleanPendingWave = false;
+    if (auto* clips = receiverTrack.getProperty ("clips", var()).getArray())
+        for (auto& clip : *clips)
+            if (clip.getProperty ("type", var()).toString() == "wave")
+            {
+                const auto sourceFile = clip.getProperty ("sourceFile", var()).toString();
+                const bool missing = (bool) clip.getProperty ("sourceMissing", false);
+                hasResolvedWave = hasResolvedWave || (sourceFile.isNotEmpty() && juce::File (sourceFile).existsAsFile());
+                hasCleanPendingWave = hasCleanPendingWave || missing;
+            }
+    check (hasResolvedWave || hasCleanPendingWave, "receiver wave source resolves locally or is cleanly pending");
+
+    const auto receiverTrackId = receiverTrack.getProperty ("id", var()).toString();
+    check (receiverTrackId.isNotEmpty(), "receiver engine trackId resolved");
+    const auto receiverSerialized = cmd (receiverOps, "mp_serialize_track", args1 ("trackId", receiverTrackId));
+    check (ok (receiverSerialized), "receiver mp_serialize_track ok");
+    const auto receiverBlob = receiverSerialized.getProperty ("data", var()).getProperty ("blob", var()).toString();
+    check (receiverBlob.isNotEmpty(), "receiver serialized XML produced");
+
+    GoldenCanonicalizer peerCanonicalizer;
+    const auto peerActual = peerCanonicalizer.canonicalizeXml (receiverBlob);
+    check (peerActual.isNotEmpty(), "receiver canonical XML produced");
+    if (peerActual.isNotEmpty())
+        checkGoldenXml (eng.sessionDir(), "peer_apply_committed_track.xml", peerActual);
+
+    finishSection();
+    std::cerr << "===== golden selftest complete: " << checks << " checks, "
+              << failures << " failed =====\n";
+    return failures;
 }
 
 // The harness hosts a REAL external plugin to exercise VST3 hosting, but it must NEVER
@@ -855,17 +1087,23 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         auto lb = cmd (ops, "list_builtins");
         check (ok (lb), "list_builtins ok");
         const int nB = lb["data"].getProperty ("plugins", var()).size();
-        check (nB >= 10, "built-in palette has the full catalog");
-        bool sawComp = false, sawSynth = false;
+        check (nB >= 13, "built-in palette has the full catalog plus Mosh FX");
+        bool sawComp = false, sawSynth = false, sawAutoTune = false, sawOTT = false, sawXFeedback = false;
         if (auto* arr = lb["data"].getProperty ("plugins", var()).getArray())
             for (auto& p : *arr)
             {
                 if (p.getProperty ("type", var()).toString() == "compressor") sawComp = true;
                 if (p.getProperty ("type", var()).toString() == "4osc"
                     && (bool) p.getProperty ("isInstrument", false)) sawSynth = true;
+                if (p.getProperty ("type", var()).toString() == "moshAutoTune") sawAutoTune = true;
+                if (p.getProperty ("type", var()).toString() == "moshOTT") sawOTT = true;
+                if (p.getProperty ("type", var()).toString() == "moshXFeedback") sawXFeedback = true;
             }
         check (sawComp, "catalog includes compressor (effect)");
         check (sawSynth, "catalog includes 4osc (instrument)");
+        check (sawAutoTune, "catalog includes Mosh AutoTune");
+        check (sawOTT, "catalog includes Mosh OTT");
+        check (sawXFeedback, "catalog includes Mosh X-FDBK");
 
         auto bt = cmd (ops, "create_track", args1 ("name", "Built-ins"))["data"].getProperty ("trackId", var()).toString();
 
@@ -894,9 +1132,102 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                 hasBuiltinInst = (bool) p.getProperty ("isInstrument", false); }
         check (hasBuiltinInst, "built-in 4osc flagged as an instrument");
 
+        const char* moshFxTypes[] = { "moshAutoTune", "moshOTT", "moshXFeedback" };
+        for (auto* type : moshFxTypes)
+        {
+            const String typeId (type);
+            check (ok (cmd (ops, "load_builtin", objN ({{ "trackId", bt }, { "type", type }}))), String ("load_builtin (") + typeId + ") ok");
+            const int midx = builtinIndex (trackById (bt), type);
+            check (midx >= 0, typeId + " appears in the chain");
+            bool hasMoshCategory = false, hasParams = false, hasReadout = false;
+            { auto trk = trackById (bt);
+              if (auto* arr = trk.getProperty ("plugins", var()).getArray())
+                for (auto& p : *arr) if ((int) p.getProperty ("index", -1) == midx)
+                {
+                    hasMoshCategory = p.getProperty ("category", var()).toString() == "Mosh FX";
+                    hasParams = p.getProperty ("params", var()).size() >= 6;
+                    auto mfx = p.getProperty ("moshFx", var());
+                    if (typeId == "moshAutoTune")
+                        hasReadout = mfx.getProperty ("kind", var()).toString() == "autotune"
+                                     && mfx.hasProperty ("inputHz")
+                                     && mfx.hasProperty ("targetHz")
+                                     && mfx.hasProperty ("correctionCents")
+                                     && mfx.hasProperty ("confidence");
+                    else if (typeId == "moshOTT")
+                        hasReadout = mfx.getProperty ("kind", var()).toString() == "ott"
+                                     && mfx.hasProperty ("amount")
+                                     && mfx.hasProperty ("timeMs");
+                    else if (typeId == "moshXFeedback")
+                        hasReadout = mfx.getProperty ("kind", var()).toString() == "feedback"
+                                     && mfx.hasProperty ("candidates")
+                                     && mfx.hasProperty ("activeCuts");
+                } }
+            check (hasMoshCategory, typeId + " carries Mosh FX category");
+            check (hasParams, typeId + " exposes generic rack params");
+            check (hasReadout, typeId + " exposes additive moshFx readout");
+            if (midx >= 0)
+                check (ok (cmd (ops, "set_plugin_param", objN ({{ "trackId", bt }, { "index", midx }, { "paramIndex", 0 }, { "value", 0.55 }}))),
+                       String ("set_plugin_param on ") + typeId + " ok");
+        }
+
+        auto xfTrack = cmd (ops, "create_track", args1 ("name", "X-FDBK Readout"))["data"].getProperty ("trackId", var()).toString();
+        check (ok (cmd (ops, "add_test_tone_clip", objN ({{ "trackId", xfTrack }, { "seconds", 1.0 }, { "freq", 2600.0 }}))),
+               "X-FDBK readout tone created");
+        auto xfLoad = cmd (ops, "load_builtin", objN ({{ "trackId", xfTrack }, { "type", "moshXFeedback" }}));
+        const int xfIdx = (int) xfLoad["data"].getProperty ("index", -1);
+        check (ok (xfLoad), "X-FDBK readout plugin loaded");
+        check (ok (cmd (ops, "set_plugin_param", objN ({{ "trackId", xfTrack }, { "index", xfIdx }, { "paramIndex", 0 }, { "value", 0.85 }}))),
+               "X-FDBK readout sensitivity set");
+        check (ok (cmd (ops, "set_plugin_param", objN ({{ "trackId", xfTrack }, { "index", xfIdx }, { "paramIndex", 4 }, { "value", 1.0 }}))),
+               "X-FDBK readout auto-suppress enabled");
+        auto xfOut = File::getSpecialLocation (File::tempDirectory).getChildFile ("mosh-xfeedback-readout.wav");
+        xfOut.deleteFile();
+        check (ok (cmd (ops, "export_audio", objN ({{ "file", xfOut.getFullPathName() }, { "format", "wav" }, { "bitDepth", 24 }}))),
+               "X-FDBK readout export ok");
+        bool activeCutHasScore = false, activeCutHasDepth = false;
+        { auto trk = trackById (xfTrack);
+          if (auto* arr = trk.getProperty ("plugins", var()).getArray())
+            for (auto& p : *arr) if ((int) p.getProperty ("index", -1) == xfIdx)
+            {
+                auto cuts = p.getProperty ("moshFx", var()).getProperty ("activeCuts", var());
+                if (auto* ca = cuts.getArray(); ca != nullptr && ! ca->isEmpty())
+                {
+                    const auto first = ca->getReference (0);
+                    activeCutHasScore = (double) first.getProperty ("score", 0.0) > 0.0;
+                    activeCutHasDepth = (double) first.getProperty ("depthDb", 0.0) > 0.0;
+                }
+            } }
+        check (activeCutHasScore, "X-FDBK active cut readout carries its own score");
+        check (activeCutHasDepth, "X-FDBK active cut readout carries depth");
+
+        const int autoIdx = builtinIndex (trackById (bt), "moshAutoTune");
+        if (autoIdx >= 0)
+        {
+            check (ok (cmd (ops, "bypass_plugin", objN ({{ "trackId", bt }, { "index", autoIdx }, { "bypassed", true }}))),
+                   "bypass_plugin on Mosh AutoTune ok");
+            bool bypassed = false;
+            { auto trk = trackById (bt);
+              if (auto* arr = trk.getProperty ("plugins", var()).getArray())
+                for (auto& p : *arr) if ((int) p.getProperty ("index", -1) == autoIdx)
+                    bypassed = ! (bool) p.getProperty ("enabled", true); }
+            check (bypassed, "Mosh AutoTune bypass reflected in snapshot");
+            check (ok (cmd (ops, "undo")), "undo Mosh AutoTune bypass ok");
+        }
+
         // Persistence + validation.
         cmd (ops, "save"); cmd (ops, "reload");
         check (builtinIndex (trackById (bt), "compressor") >= 0, "built-in plugin persists across save/reload");
+        check (builtinIndex (trackById (bt), "moshAutoTune") >= 0, "Mosh AutoTune persists across save/reload");
+        check (builtinIndex (trackById (bt), "moshOTT") >= 0, "Mosh OTT persists across save/reload");
+        check (builtinIndex (trackById (bt), "moshXFeedback") >= 0, "Mosh X-FDBK persists across save/reload");
+        const int ottIdx = builtinIndex (trackById (bt), "moshOTT");
+        if (ottIdx >= 0)
+        {
+            check (ok (cmd (ops, "remove_plugin", objN ({{ "trackId", bt }, { "index", ottIdx }}))), "remove_plugin on Mosh OTT ok");
+            check (builtinIndex (trackById (bt), "moshOTT") < 0, "Mosh OTT removed from chain");
+            check (ok (cmd (ops, "undo")), "undo Mosh OTT remove ok");
+            check (builtinIndex (trackById (bt), "moshOTT") >= 0, "undo restores Mosh OTT");
+        }
         check (! ok (cmd (ops, "load_builtin", objN ({{ "trackId", bt }, { "type", "no_such_plugin" }}))), "load_builtin rejects unknown type");
         // The scratch "Built-ins" track is left in place: the only later count
         // check in this run is relative (tracksBefore+1), and absolute-count
@@ -3299,6 +3630,80 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (! (bool) ops.snapshot().getProperty ("transport", var()).getProperty ("recording", false), "ARE-003: not recording headless (no audio device)");
     }
 
+    // ─── PRJ-FMT — project FORMAT version + migration + newer-file refusal ───
+    // The Mosh format version is stamped on the MOSH_PROJECT node on every save
+    // (state/Migrations.h). On open, an OLDER (or unversioned) file migrates forward; a
+    // NEWER file is REFUSED outright and the current project is kept loaded + saveable. This
+    // section is self-contained and self-restoring (it ends by reopening the original edit)
+    // so it does not disturb later sections.
+    section ("PRJ-FMT: project format version + migration + newer-file refusal");
+    {
+        auto sess = [&] { return ops.snapshot().getProperty ("session", var()); };
+        auto proj = [&] { return sess().getProperty ("project", var()); };
+        auto fmtVersion = [&] { return (int) proj().getProperty ("formatVersion", var (-1)); };
+
+        const auto origFile = eng.editFile();
+
+        // Save → the stamp lands on disk and the snapshot reports the current version.
+        check (ok (cmd (ops, "save")), "PRJ-FMT: save ok");
+        check (fmtVersion() == kMoshFormatVersion, "PRJ-FMT: snapshot reports current formatVersion after save");
+
+        // Save → reload → the version round-trips with the .tracktionedit.
+        check (ok (cmd (ops, "reload")), "PRJ-FMT: reload ok");
+        check (fmtVersion() == kMoshFormatVersion, "PRJ-FMT: formatVersion survived save+reload");
+
+        // Fabricate a NEWER-format file (copy the saved edit, bump moshFormatVersion) →
+        // open_project REFUSES it and keeps the current project loaded.
+        auto bumpFile = eng.sessionDir().getChildFile ("prjfmt-newer.tracktionedit");
+        if (auto xml = juce::XmlDocument::parse (origFile))
+        {
+            if (auto* mp = xml->getChildByName ("MOSH_PROJECT"))
+                mp->setAttribute ("moshFormatVersion", kMoshFormatVersion + 1);
+            bumpFile.replaceWithText (xml->toString());
+        }
+        auto refused = cmd (ops, "open_project", args1 ("file", bumpFile.getFullPathName()));
+        check (! ok (refused), "PRJ-FMT: open_project REFUSES a newer-format file");
+        check (refused.getProperty ("error", var()).toString().contains ("newer version of Mosh"),
+               "PRJ-FMT: refusal error names a newer Mosh version");
+        check (eng.editFile() == origFile, "PRJ-FMT: refused open kept the current project loaded");
+
+        // Fabricate a LEGACY file (strip the stamp ⇒ v0) → open_project MIGRATES it forward.
+        auto legacyFile = eng.sessionDir().getChildFile ("prjfmt-legacy.tracktionedit");
+        if (auto xml = juce::XmlDocument::parse (origFile))
+        {
+            if (auto* mp = xml->getChildByName ("MOSH_PROJECT"))
+                mp->removeAttribute ("moshFormatVersion");
+            legacyFile.replaceWithText (xml->toString());
+        }
+        check (ok (cmd (ops, "open_project", args1 ("file", legacyFile.getFullPathName()))),
+               "PRJ-FMT: open_project accepts a legacy (unversioned) file");
+        check (fmtVersion() == kMoshFormatVersion, "PRJ-FMT: legacy file migrated forward to current version");
+
+        // Restore the original session edit so later sections are undisturbed.
+        check (ok (cmd (ops, "open_project", args1 ("file", origFile.getFullPathName()))),
+               "PRJ-FMT: restore original project ok");
+        bumpFile.deleteFile();
+        legacyFile.deleteFile();
+    }
+
+    // ─── A2 — crash-recovery liveness sentinel ───
+    // The GUI writes a session.running sentinel once the window is live and deletes it on a
+    // clean quit; its presence at the next launch flags an unclean exit (a prior crash). The
+    // headless harness uses a wiped freshSession dir + never marks it, so it always reads
+    // clean. We exercise the mark/clear primitives + the clean-start read directly (the
+    // ctor latch is GUI-only). Self-contained: leaves the sentinel cleared.
+    section ("A2: crash-recovery liveness sentinel");
+    {
+        auto sentinel = eng.sessionDir().getChildFile ("session.running");
+        check (! eng.wasUncleanShutdown(), "A2: fresh headless start reads clean (no prior sentinel)");
+        check (! ops.snapshot().getProperty ("session", var()).hasProperty ("recoveryAvailable"),
+               "A2: snapshot omits recoveryAvailable on a clean start");
+        eng.markSessionRunning();
+        check (sentinel.existsAsFile(), "A2: markSessionRunning writes the sentinel");
+        eng.clearSessionRunning();
+        check (! sentinel.existsAsFile(), "A2: clearSessionRunning removes the sentinel (clean-quit path)");
+    }
+
     // ─── KEY-001 — the project's musical key (tonic + mode) ───
     // Stored on the same MOSH_PROJECT node as the format/time-base prefs (saves/reloads
     // with the .tracktionedit). set_key is a NON-undoable preference (cmdSetProjectSettings
@@ -4557,6 +4962,50 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         }
         cmd (ops, "mp_leave_session");
 
+        // Async outbox (anti-jank): a fire-and-forget broadcast does NOT block the
+        // message thread on HTTP — it enqueues, and the background poll thread drains
+        // + publishes it. Prove the round-trip: a watcher peer eventually receives a
+        // selection we broadcast through the live session.
+        {
+            auto host = cmd (ops, "mp_create_session", objN ({ { "name", "Sel" }, { "color", "#abcdef" } }));
+            check (ok (host), "mp_create_session (outbox path) ok");
+            const auto hostCode = host.getProperty ("data", juce::var()).getProperty ("code", juce::var()).toString();
+
+            MultiplayerClient watcher;
+            check (watcher.joinSession (hostCode, "Watch", "#123456"), "watcher joined the outbox session [" + watcher.lastError() + "]");
+
+            // Returns immediately (enqueue only — no synchronous HTTP on this thread).
+            check (ok (cmd (ops, "mp_broadcast_selection", objN ({ { "trackId", "trk-7" }, { "clipId", "clip-9" } }))),
+                   "mp_broadcast_selection returns without blocking");
+
+            // Poll the watcher until the poll thread has drained + published it (bounded
+            // so a stall fails the gate rather than hanging). Pump the message loop so
+            // the session's callAsyncs drain too.
+            auto* mm = juce::MessageManager::getInstanceWithoutCreating();
+            bool gotSel = false;
+            const auto deadline = juce::Time::getMillisecondCounter() + (juce::uint32) 6000;
+            while (! gotSel && juce::Time::getMillisecondCounter() < deadline)
+            {
+                for (auto& f : watcher.poll())
+                {
+                    auto msg = f.getProperty ("msg", juce::var());
+                    if (msg.getProperty ("type", juce::var()).toString() == "selection"
+                        && msg.getProperty ("trackId", juce::var()).toString() == "trk-7"
+                        && msg.getProperty ("clipId", juce::var()).toString() == "clip-9")
+                        gotSel = true;
+                }
+                if (! gotSel)
+                {
+                    if (mm != nullptr) mm->runDispatchLoopUntil (100);
+                    else juce::Thread::sleep (100);
+                }
+            }
+            check (gotSel, "selection broadcast reached a peer via the async outbox (poll thread published it)");
+
+            cmd (ops, "mp_leave_session");
+            watcher.leave();
+        }
+
         a.leave();
         b.leave();
     }
@@ -4652,6 +5101,97 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (cmd (ops, "remove_annotation", objN ({ { "annotationId", annId } }))), "remove_annotation ok");
         check (! findAnn (annId).isObject(), "annotation gone from snapshot after remove");
         check (! ok (cmd (ops, "edit_annotation", objN ({ { "annotationId", annId }, { "text", "ghost" } }))), "edit of a removed annotation fails cleanly");
+    }
+
+    // ─── LYR-001: Finish-My-Song lyric sheet (MOSH_LYRICSHEET, per-track) ───
+    // State spine only (in-process, deterministic). get_rhymes is a SERVICE path
+    // (covered by the Python golden test + an HTTP smoke); exercising it here would
+    // spawn the generative service and break selftest isolation, so it's omitted.
+    {
+        section ("Lyric sheet (MOSH_LYRICSHEET)");
+        auto trk = cmd (ops, "create_track", objN ({ { "name", "Vocals" } }));
+        check (ok (trk), "create_track (vocals) ok");
+        const auto trackId = trk.getProperty ("data", var()).getProperty ("trackId", var()).toString();
+
+        auto sheetOf = [&] (const juce::String& tid) -> juce::var
+        {
+            auto tracks = ops.snapshot().getProperty ("tracks", var());
+            for (int i = 0; i < tracks.size(); ++i)
+                if (tracks[i].getProperty ("id", var()).toString() == tid)
+                    return tracks[i].getProperty ("lyricSheet", var());
+            return {};
+        };
+        auto linesOf = [&] (const juce::String& tid) { return sheetOf (tid).getProperty ("lines", var()); };
+
+        check (! sheetOf (trackId).isObject(), "track starts with no lyric sheet");
+
+        auto created = cmd (ops, "create_lyric_sheet",
+                            objN ({ { "trackId", trackId }, { "grid", "1/16" }, { "topic", "comeback" } }));
+        check (ok (created), "create_lyric_sheet ok");
+        check (created.getProperty ("data", var()).getProperty ("sheetId", var()).toString().isNotEmpty(),
+               "create_lyric_sheet returns a sheetId");
+        check (sheetOf (trackId).isObject(), "snapshot.track.lyricSheet present");
+        check (sheetOf (trackId).getProperty ("grid", var()).toString() == "1/16", "sheet grid is 1/16");
+        check (sheetOf (trackId).getProperty ("topic", var()).toString() == "comeback", "sheet topic round-trips");
+        check (sheetOf (trackId).getProperty ("rhymeStrictness", var()).toString() == "slant",
+               "default rhyme strictness is slant (rap)");
+        check (! ok (cmd (ops, "create_lyric_sheet", objN ({ { "trackId", trackId } }))),
+               "double create_lyric_sheet fails cleanly");
+
+        // Append a line carrying the constraint spec (seed with ___ gaps).
+        check (ok (cmd (ops, "set_lyric_line", objN ({ { "trackId", trackId }, { "lineIndex", 0 },
+                                                       { "role", "hook" }, { "seedText", "yeah I came back ___ ___ the ___" },
+                                                       { "syllableTarget", 9 }, { "rhymeGroup", "A" } }))),
+               "set_lyric_line (append line 0) ok");
+        check (linesOf (trackId).size() == 1, "sheet has one line");
+        check (linesOf (trackId)[0].getProperty ("seedText", var()).toString() == "yeah I came back ___ ___ the ___",
+               "line seedText round-trips WITH gaps");
+        check ((int) linesOf (trackId)[0].getProperty ("syllableTarget", -1) == 9, "line syllableTarget is 9");
+        check (linesOf (trackId)[0].getProperty ("role", var()).toString() == "hook", "line role is hook");
+
+        check (ok (cmd (ops, "set_lyric_line", objN ({ { "trackId", trackId }, { "lineIndex", 1 },
+                                                       { "role", "verse" }, { "seedText", "___ on the grind" } }))),
+               "set_lyric_line (append line 1) ok");
+        check (linesOf (trackId).size() == 2, "sheet has two lines");
+        check (! ok (cmd (ops, "set_lyric_line", objN ({ { "trackId", trackId }, { "lineIndex", 9 } }))),
+               "set_lyric_line out-of-range fails (lines stay dense)");
+
+        // Finalize line 0's text → status flips off "empty".
+        check (ok (cmd (ops, "set_lyric_line", objN ({ { "trackId", trackId }, { "lineIndex", 0 },
+                                                       { "text", "yeah I came back lit the flame" } }))),
+               "set_lyric_line (edit text) ok");
+        check (linesOf (trackId)[0].getProperty ("text", var()).toString() == "yeah I came back lit the flame",
+               "line text updated");
+        check (linesOf (trackId)[0].getProperty ("status", var()).toString() == "seed",
+               "a line carrying text is no longer empty");
+
+        // Sheet-level constraint + undo.
+        check (ok (cmd (ops, "set_lyric_constraint", objN ({ { "trackId", trackId }, { "mood", "defiant" }, { "rhymeStrictness", "perfect" } }))),
+               "set_lyric_constraint ok");
+        check (sheetOf (trackId).getProperty ("mood", var()).toString() == "defiant", "sheet mood updated");
+        check (sheetOf (trackId).getProperty ("rhymeStrictness", var()).toString() == "perfect", "sheet strictness updated");
+        check (ok (cmd (ops, "undo")), "undo (set_lyric_constraint) ok");
+        check (sheetOf (trackId).getProperty ("rhymeStrictness", var()).toString() == "slant",
+               "undo restores the prior strictness");
+
+        // Persists across save/reload (a plain child of the track's own ValueTree).
+        check (ok (cmd (ops, "save")),   "save (lyrics) ok");
+        check (ok (cmd (ops, "reload")), "reload (lyrics) ok");
+        check (sheetOf (trackId).isObject(), "lyric sheet persists across save/reload");
+        check (linesOf (trackId).size() == 2, "lines persist across save/reload");
+        check (linesOf (trackId)[0].getProperty ("text", var()).toString() == "yeah I came back lit the flame",
+               "line text persists across save/reload");
+
+        // remove_lyric_line keeps indices dense.
+        check (ok (cmd (ops, "remove_lyric_line", objN ({ { "trackId", trackId }, { "lineIndex", 0 } }))),
+               "remove_lyric_line ok");
+        check (linesOf (trackId).size() == 1, "one line after remove");
+        check ((int) linesOf (trackId)[0].getProperty ("index", -1) == 0, "remaining line re-indexed to 0");
+
+        check (ok (cmd (ops, "remove_lyric_sheet", objN ({ { "trackId", trackId } }))), "remove_lyric_sheet ok");
+        check (! sheetOf (trackId).isObject(), "lyric sheet gone from snapshot after remove");
+        check (! ok (cmd (ops, "set_lyric_line", objN ({ { "trackId", trackId }, { "lineIndex", 0 }, { "text", "ghost" } }))),
+               "set_lyric_line on a sheetless track fails cleanly");
     }
 
     finishSection();
@@ -5152,6 +5692,33 @@ int runCommandScript (MoshEngine& eng, MoshOps& ops)
             const auto snapLine = JSON::toString (var (so), true);
             outLines.add (snapLine);
             std::cout << snapLine.toStdString() << std::endl;
+            continue;
+        }
+
+        // __bench_snapshot pseudo-command (D1): time ops.snapshot() (build + JSON marshal,
+        // the per-edit cost the WebView pays on every snapshot_invalidated) over N iterations
+        // and report avg ms + serialized bytes. A MEASUREMENT to decide whether snapshot()
+        // needs scoped invalidation at scale — not itself a fix. Read-only.
+        if (name == "__bench_snapshot")
+        {
+            const int iters = jmax (1, (int) command.getProperty ("args", var()).getProperty ("iterations", 20));
+            const auto t0 = Time::getMillisecondCounterHiRes();
+            int bytes = 0;
+            for (int i = 0; i < iters; ++i)
+                bytes = JSON::toString (ops.snapshot(), false).getNumBytesAsUTF8();
+            const auto totalMs = Time::getMillisecondCounterHiRes() - t0;
+            auto* d = new DynamicObject();
+            d->setProperty ("iterations", iters);
+            d->setProperty ("totalMs", totalMs);
+            d->setProperty ("avgMs", totalMs / (double) iters);
+            d->setProperty ("jsonBytes", bytes);
+            auto* bo = new DynamicObject();
+            bo->setProperty ("command", "__bench_snapshot");
+            bo->setProperty ("ok", true);
+            bo->setProperty ("data", var (d));
+            const auto bl = JSON::toString (var (bo), true);
+            outLines.add (bl);
+            std::cout << bl.toStdString() << std::endl;
             continue;
         }
 

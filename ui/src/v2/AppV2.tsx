@@ -14,6 +14,7 @@ import { RightRail } from "./RightRail";
 import { Composer } from "./Composer";
 import { LeftDrawer } from "./LeftDrawer";
 import { PianoRoll } from "../ui/PianoRoll";
+import { RecoveryNotice } from "../ui/RecoveryNotice";
 import { AutomationPanel } from "../ui/AutomationPanel";
 import { DrumWindow } from "../ui/DrumWindow";
 import { ChangeToast } from "./ChangeToast";
@@ -42,6 +43,7 @@ export function AppV2() {
     <div className="v2-shell" data-testid="v2-shell">
       {snapshot && <TopBar snapshot={snapshot} />}
       {lastError && <div className="v2-errbar" role="alert" data-testid="v2-error">⚠ {lastError}</div>}
+      <RecoveryNotice />
 
       {/* compact 3-zone body: a center column (section-nav · arrangement · prompt bar)
           and an ALWAYS-ON right rail (maximized agent · collaborators · inspector). */}

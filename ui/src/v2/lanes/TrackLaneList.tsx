@@ -185,7 +185,14 @@ function TrackLaneHeader({ track }: { track: Track }) {
   return (
     <div
       className={`v2-lhead${sel ? " sel" : ""}`}
+      role="button"
+      tabIndex={0}
+      aria-label={`Select track ${track.name}`}
+      aria-pressed={sel}
       onClick={() => setSelectedTrack(track.id)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelectedTrack(track.id); }
+      }}
       data-testid="v2-track-header"
       data-track-id={track.id}
     >

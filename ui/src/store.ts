@@ -9,6 +9,7 @@ import type {
   WaveInput, TrackOutputs,
   PluginCounts,
 } from "./types";
+import { versionBannerError } from "./types";
 import type { RemoteStatus } from "./bridge";
 import { type SnapDiv, snapTimeMap, tempoMapFrom } from "./time";
 import type { ChangeSet } from "./agent/executor";
@@ -26,7 +27,7 @@ import { isV2Active } from "./v2/shellFlag";
 // MP-001 — multiplayer presence + the commit-on-move trigger (pure helpers).
 import {
   deriveActiveTrackId, computeSyncActions, pruneOfflineLocks,
-  type MpSession, type PeerInfo, type PeerSelection,
+  type MpSession, type PeerInfo, type PeerSelection, type PeerPresence,
 } from "./multiplayer/sync";
 
 export type Tool = "move" | "split" | "range";
@@ -42,6 +43,10 @@ type State = {
   snapshot: Snapshot | null;
   connected: boolean;
   lastError: string | null;
+  // A2 — UI-local: the crash-recovery notice is dismissed for this session (view state, not
+  // a command — the prime directive keeps pure view state off the bridge).
+  recoveryDismissed: boolean;
+  dismissRecovery: () => void;
 
   // UI-local view state (NOT commands — the swappable-seam rule: zoom, tool,
   // snap, selection never cross the bridge).
@@ -100,6 +105,7 @@ type State = {
   mp: MpSession;
   peers: Record<string, PeerInfo>;                 // peerId -> name/color/online
   peerSelection: Record<string, PeerSelection>;    // peerId -> their current selection
+  peerPresence: Record<string, PeerPresence>;
   locksByLogicalId: Record<string, string>;        // logicalId -> ownerPeerId
   activeTrackId: string | null;                    // derived; the commit-on-move trigger
   mpCreateSession: (name?: string, color?: string) => Promise<void>;
@@ -211,6 +217,8 @@ export const useStore = create<State>((set, get) => ({
   snapshot: null,
   connected: isNative(),
   lastError: null,
+  recoveryDismissed: false,
+  dismissRecovery: () => set({ recoveryDismissed: true }),
 
   pxPerSec: 80,
   tool: "move",
@@ -244,6 +252,7 @@ export const useStore = create<State>((set, get) => ({
   mp: { active: false, roomCode: null, selfPeer: null, connected: false },
   peers: {},
   peerSelection: {},
+  peerPresence: {},
   locksByLogicalId: {},
   activeTrackId: null,
 
@@ -252,6 +261,9 @@ export const useStore = create<State>((set, get) => ({
     try {
       const snap = await getSnapshot<Snapshot>();
       set({ snapshot: snap, connected: true, transport: snap.transport });
+      // PRJ-FMT — surface a version banner (file-format refusal or snapshot-schema mismatch).
+      const banner = versionBannerError(snap);
+      if (banner) set({ lastError: banner });
       // Prune selection / fetch peaks for current clips.
       const ids = new Set(snap.tracks.flatMap((t) => t.clips.map((c) => c.id)));
       set((s) => ({ selection: new Set([...s.selection].filter((id) => ids.has(id))) }));
@@ -334,12 +346,20 @@ export const useStore = create<State>((set, get) => ({
         const peers: Record<string, PeerInfo> = {};
         for (const [id, v] of Object.entries(p.peers ?? {}))
           peers[id] = { name: v.name ?? id, color: v.color ?? "#888888", online: v.online ?? true };
-        set({
-          mp: { active: p.active, roomCode: p.roomCode ?? null, selfPeer: p.selfPeer ?? null, connected: p.active },
-          peers,
-          // Drop a lock whose owner has dropped/gone offline so no stale read-only
-          // badge survives the owner (defense-in-depth with the relay's lease GC).
-          locksByLogicalId: pruneOfflineLocks(p.locks ?? {}, peers, p.selfPeer ?? null),
+        set((s) => {
+          const peerPresence: Record<string, PeerPresence> = {};
+          if (p.active) {
+            for (const [peerId, presence] of Object.entries(s.peerPresence))
+              if (peers[peerId]?.online) peerPresence[peerId] = presence;
+          }
+          return {
+            mp: { active: p.active, roomCode: p.roomCode ?? null, selfPeer: p.selfPeer ?? null, connected: p.active },
+            peers,
+            peerPresence,
+            // Drop a lock whose owner has dropped/gone offline so no stale read-only
+            // badge survives the owner (defense-in-depth with the relay's lease GC).
+            locksByLogicalId: pruneOfflineLocks(p.locks ?? {}, peers, p.selfPeer ?? null),
+          };
         });
         // Keep the video room's peer set in lockstep with presence (open links to new
         // collaborators, drop departed ones); tear it down entirely when the session ends.
@@ -359,6 +379,24 @@ export const useStore = create<State>((set, get) => ({
         set((s) => ({
           peerSelection: { ...s.peerSelection, [p.peerId]: { trackId: p.trackId ?? null, clipId: p.clipId ?? null } },
         }));
+      } else if (ev.type === "peer_presence") {
+        const p = ev.payload as { peerId?: string; position?: number; playing?: boolean; recording?: boolean };
+        const peerId = p.peerId;
+        if (!peerId) return;
+        set((s) => {
+          if (peerId === s.mp.selfPeer) return {};
+          return {
+            peerPresence: {
+              ...s.peerPresence,
+              [peerId]: {
+                position: Number(p.position ?? 0),
+                playing: Boolean(p.playing),
+                recording: Boolean(p.recording),
+                updatedAtMs: Date.now(),
+              },
+            },
+          };
+        });
       }
     });
     // Keep the mirrored settings fields in sync with the schema-driven settings
@@ -495,7 +533,7 @@ export const useStore = create<State>((set, get) => ({
   mpLeaveSession: async () => {
     await get().exec("mp_leave_session");
     set({ mp: { active: false, roomCode: null, selfPeer: null, connected: false },
-          peers: {}, peerSelection: {}, locksByLogicalId: {}, activeTrackId: null });
+          peers: {}, peerSelection: {}, peerPresence: {}, locksByLogicalId: {}, activeTrackId: null });
   },
 
   // Commit-on-move: when the actively-edited track changes, commit+release the

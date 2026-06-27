@@ -33,6 +33,7 @@ import { useSettings } from "../settings/store";
 import { laneRows, lanesTotal } from "./laneLayout";
 import { TrackFxDrawer } from "./TrackFxDrawer";
 import { AnnotationRuler } from "./AnnotationRuler";
+import { RemotePlayheads } from "./RemotePlayheads";
 import type { Snapshot, Track, Clip, MidiNote } from "../types";
 // Configurable interaction: gestures/keymap resolve through DAW-preset tables instead
 // of hardcoded branches; feel values (drag-threshold, edge-grab, snap, etc.) are read
@@ -318,7 +319,7 @@ export function Arrange({ snapshot }: { snapshot: Snapshot }) {
               onDragOver={allowSampleDrop} onDrop={onSampleDrop(t.id)}
               style={{ position: "absolute", top: rows[i].top, left: 0, right: 0, height: rows[i].height }}>
               {t.clips.map((c) => (
-                <ClipBlock key={c.id} clip={c} selected={selection.has(c.id)}
+                <ClipBlock key={c.id} clip={c} track={t} selected={selection.has(c.id)}
                   tool={tool} snapTime={snapWithFeel} secToPx={secToPx} pxToSec={pxToSec}
                   bs={beatSeconds(meterAt(map, c.start))}
                   onSelect={(additive) => select([c.id], additive)}
@@ -335,6 +336,7 @@ export function Arrange({ snapshot }: { snapshot: Snapshot }) {
           )}
 
           <Playhead secToPx={secToPx} />
+          <RemotePlayheads secToPx={secToPx} lanesHeight={lanesHeight} />
 
           {marquee && (
             <div className="marquee" data-testid="marquee" style={{
@@ -466,9 +468,9 @@ function ClipMenu({ clipId, x, y, exec, onClose }:
 }
 
 function ClipBlock({
-  clip, selected, tool, snapTime, secToPx, pxToSec, bs, onSelect, setTimeRange, exec,
+  clip, track, selected, tool, snapTime, secToPx, pxToSec, bs, onSelect, setTimeRange, exec,
 }: {
-  clip: Clip; selected: boolean; tool: "move" | "split" | "range";
+  clip: Clip; track: Track; selected: boolean; tool: "move" | "split" | "range";
   snapTime: (t: number) => number; secToPx: (s: number) => number; pxToSec: (px: number) => number;
   bs: number; // seconds per beat at this clip's start (for inline MIDI/drum previews)
   onSelect: (additive: boolean) => void;
@@ -590,7 +592,10 @@ function ClipBlock({
       lastUp.current = null;
       const { region } = regionAt(e);
       const action = resolveGesture(liveGestureTable(), { region, gesture: "dblclick", mods: modsOf(e), tool });
-      if (action === EA.OPEN && clip.type === "midi") openPianoRoll(clip.id);
+      if (action === EA.OPEN && clip.type === "midi") {
+        if (track.type === "drum" || isDrumClip(clip.notes)) useDrumWindow.getState().open(clip.id);
+        else openPianoRoll(clip.id);
+      }
     } else {
       lastUp.current = now;
     }

@@ -111,9 +111,23 @@ run_selftest_x3() {
 }
 
 # ── npm helpers ──────────────────────────────────────────────────────────────────
+# Install ui deps if they're absent OR have drifted from ui/package-lock.json. The drift
+# check (deps_need_install, lib.sh) is the fix for the shared-node_modules trap: worktrees
+# symlink ui/node_modules to a shared cache, so a bare `[ -e node_modules ]` check can't tell
+# that a merged PR changed the lockfile out from under it — and the gate would run `tsc`/tests
+# against stale deps. The check is a cheap hash compare on the common no-change path.
 ensure_node_modules() {
-  if [ ! -e "$WT/ui/node_modules" ]; then
-    run_step "npm_ci" bash -c 'cd ui && (npm ci || npm install)'
+  deps_need_install "$WT/ui" || return 0
+  # Drift (or absent). If node_modules is a symlink into the shared cache, unlink it FIRST so
+  # the reinstall builds a fresh LOCAL node_modules for this worktree rather than mutating the
+  # cache other live worktrees still share (avoids cross-worktree reinstall thrash). This only
+  # removes our own symlink — the shared cache dir is untouched.
+  if [ -L "$WT/ui/node_modules" ]; then
+    al_log "ui/node_modules symlink is stale vs package-lock.json — unlinking for a local install"
+    rm -f "$WT/ui/node_modules"
+  fi
+  if run_step "npm_ci" bash -c 'cd ui && (npm ci || npm install)'; then
+    deps_write_stamp "$WT/ui"
   fi
 }
 
@@ -172,9 +186,11 @@ gate_native() {
   if [ -z "$bin" ]; then emit_step "selftest_x3" false '{"error":"Mosh binary not found after build"}'; return; fi
   run_selftest_x3 "$bin"
 
-  # verify.py — offline render-to-WAV proof. Needs numpy; a missing env is a gate
-  # infra failure → fail-closed (a human installs it) rather than a silent skip.
-  run_step "verify_py" bash -c "python3 scripts/verify-hardware/verify.py --bin '$bin'"
+  # verify.py — offline render-to-WAV proof + golden-audio checksum gate (--gate). Needs
+  # numpy; a missing env is a gate infra failure → fail-closed (a human installs it) rather
+  # than a silent skip. A golden checksum miss reds the merge (intentional DSP/adapter
+  # changes regenerate the baseline with --update-golden).
+  run_step "verify_py" bash -c "python3 scripts/verify-hardware/verify.py --gate --bin '$bin'"
 
   # DAW-conformance — the gathered reality-pack eval suite (docs/reality-pack/) replayed
   # through the real command surface. Fails ONLY on an in-scope regression (known gaps are

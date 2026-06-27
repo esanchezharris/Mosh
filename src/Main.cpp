@@ -96,6 +96,7 @@ public:
         }
 
         const bool undoSelfTest = commandLine.contains ("--selftest-undo");
+        const bool goldenSelfTest = commandLine.contains ("--golden-selftest");
         const bool liveAudioSmoke = commandLine.contains ("--live-audio-smoke");
         const bool scanDeep = commandLine.contains ("--scan-plugins-deep");
         const bool runScript = commandLine.contains ("--run-script");   // headless batch command runner
@@ -104,7 +105,7 @@ public:
                           || commandLine.contains ("--demo5")
                           || commandLine.contains ("--demo6");
         const bool liveAudio = liveAudioSmoke;   // opens the real device, fresh cold session
-        const bool headless = undoSelfTest || commandLine.contains ("--selftest");
+        const bool headless = undoSelfTest || goldenSelfTest || commandLine.contains ("--selftest");
         const bool noAudio = headless || scanDeep || runScript || voiceSmoke;  // device-free harnesses + scan/script/voice utilities
 
         // SCAN GUARD (tier wall): a deep scan must NEVER warm the generative service.
@@ -118,12 +119,13 @@ public:
         }
 
         juce::String freshSessionName = undoSelfTest ? "session-selftest-undo"
+                                            : (goldenSelfTest ? "session-golden-selftest"
                                             : (liveAudioSmoke ? "session-live-audio-smoke"
                                             : (scanDeep ? "session-scan"
                                             : (runScript ? "session-run-script"
                                             : (demoGui ? "session-demo"
                                             : (voiceSmoke ? "session-voice-smoke"
-                                                              : "session-selftest")))));
+                                                              : "session-selftest"))))));
         // Concurrent harness runs (e.g. parallel git worktrees each looping
         // --selftest) otherwise share the global session-selftest dir + freshSession
         // wipes it at startup, so one run clobbers another mid-test. MOSH_SELFTEST_SESSION
@@ -161,6 +163,14 @@ public:
         if (undoSelfTest)
         {
             const int fails = runUndoSelfTest (*engine, *moshOps);
+            setApplicationReturnValue (fails);
+            quit();
+            return;
+        }
+
+        if (goldenSelfTest)
+        {
+            const int fails = runGoldenSelfTest (*engine, *moshOps);
             setApplicationReturnValue (fails);
             quit();
             return;
@@ -271,6 +281,12 @@ public:
                                });
         mainWindow->shell().load();
 
+        // A2 — write the liveness sentinel now the GUI is up. If we crash before shutdown()
+        // deletes it, the next launch detects the unclean exit (uncleanAtStartup) and the UI
+        // surfaces a recovery notice. Must come AFTER the engine ctor latched the prior value.
+        if (engine != nullptr)
+            engine->markSessionRunning();
+
         // gap 1 — periodic auto-save once the GUI is live: every 30s, persist iff the
         // Edit is dirty, so a window-close or crash never loses more than ~30s of work.
         // Save-on-quit (shutdown) is the belt-and-suspenders. GUI-only — headless
@@ -294,7 +310,10 @@ public:
         // gap 1 — save-on-quit: persist any unsaved work before teardown (GUI only;
         // headless harnesses have no mainWindow and manage their own isolated session).
         if (engine != nullptr && mainWindow != nullptr)
+        {
             engine->saveIfDirty();
+            engine->clearSessionRunning();   // A2 — clean exit: drop the sentinel LAST (after the save)
+        }
         menuController.reset();   // tears down the macOS main menu before the window
         mainWindow.reset();
         remoteServer.reset();

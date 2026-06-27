@@ -14,6 +14,7 @@ Usage:
 """
 import argparse
 import glob
+import hashlib
 import json
 import os
 import subprocess
@@ -25,6 +26,8 @@ import numpy as np
 
 REPO = Path(__file__).resolve().parents[2]
 ART = REPO / "verify-artifacts"
+GOLDEN_DIR = Path(__file__).resolve().parent / "golden"
+GOLDEN_MANIFEST = GOLDEN_DIR / "manifest.json"
 
 
 # ── driving the binary ──────────────────────────────────────────────────────────
@@ -119,6 +122,114 @@ def diff_rms(a, b):
     if n == 0:
         return 0.0
     return round(float(np.sqrt(np.mean((ma[:n] - mb[:n]) ** 2))), 5)
+
+
+# ── golden-audio gate ─────────────────────────────────────────────────────────
+# `--selftest` proves commands dispatch; it does NOT prove the SAMPLES are right.
+# This turns the offline renders into a regression GATE: bit-deterministic engine/stdlib
+# paths get an exact SHA-256 baseline; every case also carries a small feature vector so a
+# checksum miss is DIAGNOSABLE (which feature moved) instead of opaque. Model paths (real
+# SA3 / real RAVE) are never checksummed — they stay on the perceptual bounds in their own
+# checks. Regenerate intentionally on a real DSP/adapter change with `--update-golden`
+# (human-eyeballed diff). WAVs are gitignored; we commit checksums + features, never audio.
+def pcm_sha256(path):
+    """SHA-256 of the decoded PCM FRAMES only — deliberately excludes the WAV header. JUCE
+    writes a non-deterministic header (a bext/timestamp chunk varies run-to-run by ~784
+    bytes), but the audio SAMPLES are bit-deterministic, so the frames are the honest
+    fingerprint of "did the render change"."""
+    with wave.open(str(path), "rb") as w:
+        frames = w.readframes(w.getnframes())
+    return hashlib.sha256(frames).hexdigest()
+
+
+def spectral_centroid(m, sr):
+    """Magnitude-weighted mean frequency (Hz) over a Hann-windowed whole-signal rFFT — a
+    cheap, stable tonal feature that explains a checksum miss a bare RMS can't."""
+    if m.size < 2 or not sr:
+        return 0.0
+    spec = np.abs(np.fft.rfft(m * np.hanning(m.size)))
+    freqs = np.fft.rfftfreq(m.size, d=1.0 / sr)
+    tot = float(spec.sum())
+    return round(float((freqs * spec).sum() / tot), 1) if tot > 0 else 0.0
+
+
+def wav_features(path):
+    data, sr, _ = load_wav(path)
+    m = mono(data)
+    return {
+        "frames": int(m.size),
+        "peak": round(float(np.max(np.abs(m))) if m.size else 0.0, 5),
+        "rms": round(float(np.sqrt(np.mean(m ** 2))) if m.size else 0.0, 5),
+        "centroid_hz": spectral_centroid(m, sr),
+    }
+
+
+# Bit-deterministic offline renders → checksum baselines. Keyed by a stable case name; the
+# WAV is the one the matching OFFLINE check writes. Relational checks (bypass/relref/
+# portability) and the non-deterministic synth-bounce (midi_render) are deliberately NOT
+# checksum-gated. transform_fake is keyed to the fake adapter's stdlib determinism.
+GOLDEN_SPEC = {
+    "makes_sound":    ART / "01_makes_sound.wav",
+    "drums":          ART / "02_drums.wav",
+    "transform_fake": ART / "03_transform.wav",
+    "full_loop":      ART / "05_full_loop.wav",
+}
+# Per-feature absolute tolerances for the diagnostic readout on a checksum miss.
+FEATURE_TOL = {"peak": 0.002, "rms": 0.002, "centroid_hz": 3.0, "frames": 0}
+
+
+def _feature_diff(now, base):
+    out = {}
+    for k, v in now.items():
+        b = base.get(k)
+        if b is None:
+            out[k] = {"now": v, "golden": None}
+            continue
+        delta = round(abs(v - b), 5)
+        if delta > FEATURE_TOL.get(k, 0):
+            out[k] = {"now": v, "golden": b, "delta": delta, "tol": FEATURE_TOL.get(k, 0)}
+    return out
+
+
+def run_golden_gate(update=False):
+    """Compare each produced deterministic WAV to its committed baseline (or rewrite the
+    baseline when update=True). Returns (rows, manifest) — rows fold into the main verdict."""
+    golden = {}
+    if GOLDEN_MANIFEST.exists():
+        try:
+            golden = json.loads(GOLDEN_MANIFEST.read_text()).get("cases", {})
+        except json.JSONDecodeError:
+            golden = {}
+
+    rows, new_cases = [], {}
+    for key, wav in GOLDEN_SPEC.items():
+        if not Path(wav).exists():
+            rows.append(row(f"golden:{key}", False, {"error": "WAV not produced (its check failed?)", "wav": str(wav)}))
+            continue
+        sha, feats = pcm_sha256(wav), wav_features(wav)
+        new_cases[key] = {"kind": "checksum", "pcm_sha256": sha, "features": feats}
+        if update:
+            rows.append(row(f"golden:{key}", True, {"updated": True, "sha": sha[:12], **feats}))
+            continue
+        g = golden.get(key)
+        if not g:
+            rows.append(row(f"golden:{key}", False, {"error": "no baseline — run verify.py --update-golden", "sha": sha[:12]}))
+            continue
+        ok = sha == g.get("pcm_sha256")
+        detail = {"match": ok, "sha": sha[:12], "golden_sha": str(g.get("pcm_sha256"))[:12]}
+        if not ok:
+            detail["feature_diff"] = _feature_diff(feats, g.get("features", {}))
+        rows.append(row(f"golden:{key}", ok, detail))
+
+    if update:
+        GOLDEN_DIR.mkdir(exist_ok=True)
+        manifest = {
+            "schemaVersion": 1,
+            "engine": {"sampleRate": 44100, "blockSize": 512, "note": "canonical macOS arm64 build"},
+            "cases": new_cases,
+        }
+        GOLDEN_MANIFEST.write_text(json.dumps(manifest, indent=2) + "\n")
+    return rows
 
 
 # ── scenarios ───────────────────────────────────────────────────────────────────
@@ -467,6 +578,8 @@ def main():
     ap.add_argument("--sa3", action="store_true", help="also run the SA3 generative-transform check (needs the service)")
     ap.add_argument("--rave", action="store_true", help="also run the real RAVE transform-path check (needs service/transform/.venv)")
     ap.add_argument("--rave-insert", action="store_true", help="also run the real-time RAVE insert offline-render check (needs an anira build + service/transform/.venv)")
+    ap.add_argument("--gate", action="store_true", help="also enforce the golden-audio checksum baselines (pre-merge gate)")
+    ap.add_argument("--update-golden", action="store_true", help="regenerate the golden baselines from this run (intentional DSP/adapter change)")
     args = ap.parse_args()
 
     ART.mkdir(exist_ok=True)
@@ -502,6 +615,17 @@ def main():
         rows.append(r)
         print(f"  [{'PASS' if r['pass'] else 'FAIL'}] {r['check']}")
         print(f"         {json.dumps(r['detail'])}")
+
+    # Golden-audio gate: compare each deterministic render to its committed checksum (or
+    # rewrite the baselines with --update-golden). Runs after the offline checks have
+    # produced their WAVs. --update-golden implies the gate so the run also reports.
+    if args.gate or args.update_golden:
+        for r in run_golden_gate(update=args.update_golden):
+            rows.append(r)
+            print(f"  [{'PASS' if r['pass'] else 'FAIL'}] {r['check']}")
+            print(f"         {json.dumps(r['detail'])}")
+        if args.update_golden:
+            print(f"\n  golden baselines written → {GOLDEN_MANIFEST}")
 
     report = ART / "report.json"
     report.write_text(json.dumps(rows, indent=2) + "\n")

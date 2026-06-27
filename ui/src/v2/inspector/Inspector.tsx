@@ -9,6 +9,7 @@
 import { useStore } from "../../store";
 import { useShell, type InspectorTab } from "../shellState";
 import { Rack, GenDrawer } from "../../ui/Dock";
+import { LyricPanel } from "./LyricPanel";
 import { deriveTakeLanes } from "../../ui/takeLanes";
 import { useDrumWindow } from "../../ui/dock/useFloatingWindow";
 import type { Clip, Track } from "../../types";
@@ -32,6 +33,7 @@ export function Inspector() {
     { id: "mix", label: "Mix" },
     { id: "fx", label: "FX" },
     { id: "gen", label: "Gen" },
+    { id: "lyrics", label: "Lyrics" },
     ...(isMidi ? [{ id: "midi" as const, label: "MIDI" }] : []),
     ...(hasTakes ? [{ id: "takes" as const, label: "Takes" }] : []),
   ];
@@ -40,7 +42,7 @@ export function Inspector() {
   return (
     <section className="v2-card v2-inspector" data-testid="v2-inspector">
       <div className="v2-card-head"><span>Inspector · {track.name}</span></div>
-      <div className="v2-insp-tabs" role="tablist">
+      <div className="v2-insp-tabs" role="tablist" aria-label="Inspector tabs">
         {tabs.map((t) => (
           <button key={t.id} role="tab" aria-selected={active === t.id} className={active === t.id ? "on" : ""}
             data-testid={`v2-insp-tab-${t.id}`} onClick={() => setTab(t.id)}>{t.label}</button>
@@ -50,6 +52,7 @@ export function Inspector() {
         {active === "mix" && <MixTab track={track} />}
         {active === "fx" && <Rack track={track} onAddPlugin={() => useShell.getState().openBrowserTab("plugins")} />}
         {active === "gen" && <GenDrawer track={track} selectedClipId={selectedClipId ?? undefined} />}
+        {active === "lyrics" && <LyricPanel track={track} />}
         {active === "midi" && clip && <MidiTab clip={clip} drum={track.type === "drum"} />}
         {active === "takes" && clip && <TakesTab clip={clip} />}
       </div>
@@ -74,8 +77,8 @@ function MixTab({ track }: { track: Track }) {
         <span className="v2-val">{Math.round((track.pan ?? 0) * 100)}</span>
       </label>
       <div className="v2-mix-btns">
-        <button className={track.mute ? "on" : ""} onClick={() => void exec("set_track_mute", { trackId: track.id, mute: !track.mute })}>Mute</button>
-        <button className={track.solo ? "on" : ""} onClick={() => void exec("set_track_solo", { trackId: track.id, solo: !track.solo })}>Solo</button>
+        <button className={track.mute ? "on" : ""} aria-pressed={!!track.mute} onClick={() => void exec("set_track_mute", { trackId: track.id, mute: !track.mute })}>Mute</button>
+        <button className={track.solo ? "on" : ""} aria-pressed={!!track.solo} onClick={() => void exec("set_track_solo", { trackId: track.id, solo: !track.solo })}>Solo</button>
       </div>
     </div>
   );

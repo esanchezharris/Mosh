@@ -16,6 +16,7 @@ import { isNative } from "./bridge";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useFileDrop } from "./hooks/useFileDrop";
 import { Topbar, Toolbar } from "./ui/Topbar";
+import { RecoveryNotice } from "./ui/RecoveryNotice";
 import { Arrange } from "./ui/Arrange";
 import { Dock } from "./ui/Dock";
 import { DockShell } from "./ui/dock/DockShell";
@@ -94,6 +95,7 @@ export function AppLegacy() {
         <div className="error-bar" role="status" aria-live="polite">⚠ No audio device — playback/record/export disabled.</div>
       )}
       {lastError && <div className="error-bar" data-testid="error" role="alert">⚠ {lastError}</div>}
+      <RecoveryNotice />
 
       {redesign && snapshot && <SectionNavigator snapshot={snapshot} />}
 

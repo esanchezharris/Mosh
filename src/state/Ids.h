@@ -27,6 +27,15 @@ namespace mosh::ids
     MOSH_DECLARE_ID (projectBitDepth)
     MOSH_DECLARE_ID (timeBase)         // "seconds" | "barsBeats"
 
+    // PRJ-FMT — the Mosh PROJECT FORMAT version (int, >= 1). Stored on the same
+    // MOSH_PROJECT node so it saves/reloads with the .tracktionedit and survives
+    // Save-As/consolidate. The schema version of Mosh's OWN ValueTree state — distinct
+    // from Tracktion's free-form Edit appVersion (which we don't control) and from the
+    // C++→UI snapshot wire contract. Stamped on every save (see state/Migrations.h);
+    // absent ⇒ a pre-versioning (v0/legacy) file. Drives forward-migration on open and
+    // a graceful "made by a newer Mosh" refusal. NON-undoable (a format stamp).
+    MOSH_DECLARE_ID (moshFormatVersion)
+
     // KEY-001 — the project's MUSICAL KEY (tonic pitch-class + scale mode), stored
     // on the same MOSH_PROJECT node next to timeBase. Producer intent that the song
     // is "in" this key; it feeds the RenderLayer fingerprint (a key change is a
@@ -93,6 +102,46 @@ namespace mosh::ids
     MOSH_DECLARE_ID (annotationBeat)
     MOSH_DECLARE_ID (annotationColor)
     MOSH_DECLARE_ID (annotationAuthor)
+
+    // LYR-001 — Finish-My-Song LYRIC SHEET. A MOSH_LYRICSHEET node parented under a
+    // TRACK's own state (the vocal track) — one sheet per track, mirroring how
+    // moshInputDevice/trackType ride the track. It holds a LYRIC_LINES container of
+    // MOSH_LYRICLINE nodes, each a constraint-bearing line (role, syllable target,
+    // stress contour, rhyme group, locked words, seed text with ___ gaps). Plain
+    // ValueTree data ⇒ it saves/reloads with the .tracktionedit and is UNDOABLE when
+    // written with the undo manager. A purely ADDITIVE optional node (absent ⇒ no
+    // sheet), so it needs no format-version bump. Lines optionally reference a
+    // MOSH_SECTION via lyricSectionId. The constraint spec (§5) is materialised as
+    // these structured props, not an opaque blob.
+    MOSH_DECLARE_ID (MOSH_LYRICSHEET)
+    MOSH_DECLARE_ID (MOSH_LYRICLINE)
+    MOSH_DECLARE_ID (LYRIC_LINES)
+    // sheet-level
+    MOSH_DECLARE_ID (lyricGrid)            // "1/4" | "1/8" | "1/16" — bar subdivision for syllable inference
+    MOSH_DECLARE_ID (lyricLanguage)        // phonology language tag, e.g. "en"
+    MOSH_DECLARE_ID (lyricTopic)
+    MOSH_DECLARE_ID (lyricMood)
+    MOSH_DECLARE_ID (lyricExplicit)        // "allow" | "clean" | "mild"
+    MOSH_DECLARE_ID (lyricSpecVersion)     // constraint-spec schema version (int, >= 1)
+    // per-line
+    MOSH_DECLARE_ID (lyricIndex)           // 0-based line order
+    MOSH_DECLARE_ID (lyricRole)            // "verse" | "hook" | "bridge" | "adlib"
+    MOSH_DECLARE_ID (lyricSeedText)        // partial line with ___ gaps
+    MOSH_DECLARE_ID (lyricText)            // finalized line text
+    MOSH_DECLARE_ID (lyricSyllableTarget)  // 0 ⇒ infer from the beat grid
+    MOSH_DECLARE_ID (lyricSyllableTol)     // +/- tolerance on the target
+    MOSH_DECLARE_ID (lyricStress)          // contour string, e.g. "xXxxxXxxx" ('?' = free)
+    MOSH_DECLARE_ID (lyricRhymeGroup)      // lines sharing a group must rhyme ("A","B",…)
+    MOSH_DECLARE_ID (lyricRhymeStrictness) // "perfect" | "slant" | "free" ("" ⇒ inherit sheet)
+    MOSH_DECLARE_ID (lyricLocked)          // hard-fixed line (don't regenerate)
+    MOSH_DECLARE_ID (lyricSectionId)       // optional link to a MOSH_SECTION
+    // L2 generation — TRANSIENT, non-undoable: the ranked top-N proposals for a line
+    // as a JSON-string blob (the service result's per-line proposals array), plus a
+    // regen counter that varies the LLM/fake sample. accept copies the chosen
+    // proposal's text into lyricText (undoable) and clears these; reject just clears.
+    // status flows empty→seed→generating→proposed→accepted.
+    MOSH_DECLARE_ID (lyricProposals)       // JSON array string of {text,score,syllables,passes,grade,endWord,...}
+    MOSH_DECLARE_ID (lyricRegen)           // int — bumped by regenerate_lyric
 
     MOSH_DECLARE_ID (id)
     MOSH_DECLARE_ID (inputRef)

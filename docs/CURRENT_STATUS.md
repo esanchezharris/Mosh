@@ -61,7 +61,8 @@ RAVE insert gated behind `-DMOSH_ENABLE_ANIRA` (off in the default build).
   sends, meters, recording arm/monitoring, project lifecycle, import/export,
   plugin hosting, automation, render-layer management, iPhone companion, brain
   proxy, voice, 2-player multiplayer, DAW project import (RPP/ALS/FLP),
-  audio→MIDI transcription, and the type-beat LoRA trainer scaffold. The
+  audio→MIDI transcription, the type-beat LoRA trainer scaffold, and the first
+  Mosh-native FX built-ins (`moshAutoTune`, `moshOTT`, `moshXFeedback`). The
   generative render layer now works on **any** track — MIDI/drum clips auto-bounce
   to audio first (re-imagine + timbre transform behind one model-agnostic adapter).
 - **Landed 2026-06-21 → 06-27:** a from-scratch **v2 UI shell** is now the default
@@ -73,7 +74,7 @@ RAVE insert gated behind `-DMOSH_ENABLE_ANIRA` (off in the default build).
   always has a brain; a native Transport menu + deploy re-sign; iPhone-companion
   controller + latency gates; and an autonomous deferred-work loop (`docs/auto-loop/`)
   that cleared nine backlog items.
-- The current default selftest target is **1032 command-surface checks** on the local
+- The current default selftest target is **1046 command-surface checks** on the local
   machine, run 3× for determinism (gate-dependent — Serum-VST3 and SA3 gates add
   more). The UI side gates on vitest (584) + Playwright e2e (92), and a DAW-parity
   conformance run (`scripts/daw-conformance/`) replays a 152-invariant eval suite
@@ -120,12 +121,12 @@ Use the local gate that matches the surface changed. For documentation-only
 changes, link/lint review is normally enough. For code merges, start with:
 
 ```sh
-cmake --build build
-APP=build/Mosh_artefacts/Debug/Mosh.app/Contents/MacOS/Mosh
+cmake --build build-macos-arm64
+APP=build-macos-arm64/Mosh_artefacts/Debug/Mosh.app/Contents/MacOS/Mosh
 MOSH_NO_AUDIO=1 "$APP" --selftest
 MOSH_NO_AUDIO=1 "$APP" --selftest-undo
-ctest --test-dir build --output-on-failure
-scripts/validate-command-log-contract.sh
+ctest --test-dir build-macos-arm64 --output-on-failure
+scripts/validate-command-log-contract.sh "$HOME/Library/Mosh/session-run-script/mosh-log.jsonl" 500
 ```
 
 Then add the matching real-surface proof:

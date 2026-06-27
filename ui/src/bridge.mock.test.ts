@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { __resetMockForTests, mockExecute, mockSnapshot } from "./bridge.mock";
+import type { CommandResult, Snapshot } from "./types";
 
 // ── Mock-vs-contract drift guard ─────────────────────────────────────────────
 // bridge.mock.ts is the in-memory dev backend (Vite dev / no JUCE). Its dispatch
@@ -85,5 +87,87 @@ describe("bridge.mock contract drift", () => {
     expect(stale, `ALLOWLIST entries no longer dispatched by the UI — remove them:\n  ${stale.join("\n  ")}`).toEqual(
       [],
     );
+  });
+});
+
+describe("bridge.mock Mosh FX built-ins", () => {
+  it("lists the native Mosh FX suite in the built-in catalog", async () => {
+    __resetMockForTests();
+    const res = await mockExecute<CommandResult<{ plugins: Array<{ type: string; category: string; isInstrument: boolean }> }>>({
+      command: "list_builtins",
+      args: {},
+    });
+
+    expect(res.ok).toBe(true);
+    const moshFx = res.data?.plugins.filter((p) => p.category === "Mosh FX") ?? [];
+    expect(moshFx.map((p) => p.type).sort()).toEqual(["moshAutoTune", "moshOTT", "moshXFeedback"].sort());
+    expect(moshFx.every((p) => !p.isInstrument)).toBe(true);
+  });
+
+  it("loads X-FDBK through the mock seam with additive moshFx readout", async () => {
+    __resetMockForTests();
+    const created = await mockExecute<CommandResult<{ trackId: string }>>({
+      command: "create_track",
+      args: { name: "Feedback Bus" },
+    });
+    const trackId = created.data?.trackId ?? "";
+    expect(trackId).not.toBe("");
+
+    const loaded = await mockExecute<CommandResult>({
+      command: "load_builtin",
+      args: { trackId, type: "moshXFeedback" },
+    });
+    expect(loaded.ok).toBe(true);
+
+    const snap = await mockSnapshot<Snapshot>();
+    const track = snap.tracks.find((t) => t.id === trackId);
+    const plugin = track?.plugins?.find((p) => p.type === "moshXFeedback");
+    expect(plugin?.params.map((p) => p.name)).toEqual([
+      "Sensitivity",
+      "Max Cuts",
+      "Max Depth",
+      "Release",
+      "Auto Suppress",
+      "Mix",
+      "Output",
+    ]);
+    expect(plugin?.moshFx?.kind).toBe("feedback");
+    expect(plugin?.moshFx?.candidates?.[0]?.frequencyHz).toBeGreaterThan(1000);
+    expect(plugin?.moshFx?.activeCuts).toEqual([]);
+  });
+
+  it("keeps mock Mosh FX readouts aligned with the native additive schema", async () => {
+    __resetMockForTests();
+    const created = await mockExecute<CommandResult<{ trackId: string }>>({
+      command: "create_track",
+      args: { name: "Mosh FX Readouts" },
+    });
+    const trackId = created.data?.trackId ?? "";
+
+    for (const type of ["moshAutoTune", "moshOTT"] as const) {
+      const loaded = await mockExecute<CommandResult>({
+        command: "load_builtin",
+        args: { trackId, type },
+      });
+      expect(loaded.ok).toBe(true);
+    }
+
+    const snap = await mockSnapshot<Snapshot>();
+    const plugins = snap.tracks.find((t) => t.id === trackId)?.plugins ?? [];
+    const autoTune = plugins.find((p) => p.type === "moshAutoTune")?.moshFx;
+    const ott = plugins.find((p) => p.type === "moshOTT")?.moshFx;
+
+    expect(autoTune).toMatchObject({
+      kind: "autotune",
+      inputHz: expect.any(Number),
+      targetHz: expect.any(Number),
+      correctionCents: expect.any(Number),
+      confidence: expect.any(Number),
+    });
+    expect(ott).toMatchObject({
+      kind: "ott",
+      amount: expect.any(Number),
+      timeMs: expect.any(Number),
+    });
   });
 });
