@@ -486,6 +486,10 @@ export type Snapshot = {
     // A2 — the prior session ended uncleanly (crashed); autosave already restored the last
     // good save. Drives a one-time, dismissable recovery notice. Absent ⇒ clean last exit.
     recoveryAvailable?: boolean;
+    // A3 — how many unsaved arrangement commands the crash-recovery journal can replay
+    // (recover_session) to restore work done since the last save. 0 ⇒ nothing to replay
+    // (the notice is purely informational).
+    recoverableCount?: number;
     recentProjects?: { path: string; name: string }[]; // gap 2 — Recent list (newest-first)
     projectExtension?: string; // backend-owned project container extension (no leading dot)
     // SES-001 — the tempo MAP (additive; tempo/timeSig* above stay point 0).

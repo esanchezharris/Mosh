@@ -189,7 +189,35 @@ void PluginHost::initialise()
     {
         scanInstalledVST3();
         if (SystemStats::getEnvironmentVariable ("MOSH_SCAN_AU", {}) == "1")
+        {
+            // D2 — protect the cold-start AU sweep the same way rescan() does: persist the
+            // VST3 catalog first, then load each AU OUT-OF-PROCESS with the stall watchdog, so
+            // a HANGING AudioUnit is killed (~25 s) instead of freezing the app at first launch.
+            // (The dead-mans-pedal already makes a CRASH recoverable; this covers an in-session
+            // HANG.) AU is opt-in + cold-catalog-only, so the default/cached launch is untouched.
+            saveCatalog();
+            auto& pm = engine.getPluginManager();
+            std::atomic<bool> scanRunning { true };
+            pm.setUsesSeparateProcessForScanning (true);
+            std::thread watchdog ([this, &scanRunning]
+            {
+                constexpr int kStallMs = 25000;
+                int last = scanFilesProcessed.load (std::memory_order_relaxed);
+                auto lastAdvance = juce::Time::getMillisecondCounter();
+                while (scanRunning.load (std::memory_order_relaxed))
+                {
+                    juce::Thread::sleep (500);
+                    const int now = scanFilesProcessed.load (std::memory_order_relaxed);
+                    const auto t = juce::Time::getMillisecondCounter();
+                    if (now != last) { last = now; lastAdvance = t; continue; }
+                    if (t - lastAdvance > (juce::uint32) kStallMs) { killScanWorkers(); lastAdvance = t; }
+                }
+            });
             scanAUComponents();
+            scanRunning.store (false, std::memory_order_relaxed);
+            if (watchdog.joinable()) watchdog.join();
+            pm.setUsesSeparateProcessForScanning (false);
+        }
         saveCatalog();
     }
 

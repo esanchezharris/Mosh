@@ -21,6 +21,9 @@ const ALLOWLIST = new Set<string>([
   // Live-only data with no dev-mock state to mutate (UI degrades gracefully):
   "rescan_plugins",
   "import_clip_data", // dev imports via the import_clip path; bytes-over-bridge is native-only
+  // A3 crash recovery is a native-only flow (no crash journal in the in-memory dev mock):
+  "recover_session",
+  "discard_recovery",
   // KNOWN DEV-MOCK GAPS — these DO mutate session state, so the dev mock no-ops
   // where the real backend would change the arrangement. Tracked here so the guard
   // stays green; give them real mock cases when dev-mode fidelity matters.

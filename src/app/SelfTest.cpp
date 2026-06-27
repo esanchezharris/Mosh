@@ -485,9 +485,11 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     std::cerr << "\n===== Mosh Stage 1 command-surface harness =====\n";
     section ("Stage 1: command surface / cold snapshot");
 
-    // Capture emitted events.
+    // Capture emitted events (type history + the latest full event, so a scoped-invalidation
+    // check can inspect the payload).
     std::vector<String> eventTypes;
-    ops.setEventSink ([&] (const var& e) { eventTypes.push_back (e.getProperty ("type", var()).toString()); });
+    var lastEvent;
+    ops.setEventSink ([&] (const var& e) { eventTypes.push_back (e.getProperty ("type", var()).toString()); lastEvent = e; });
 
     auto hadEvent = [&] (const String& t) {
         for (auto& e : eventTypes) if (e == t) return true; return false; };
@@ -3839,6 +3841,66 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (! sentinel.existsAsFile(), "A2: clearSessionRunning removes the sentinel (clean-quit path)");
     }
 
+    // ─── Scoped snapshot invalidation (D1-justified) ───
+    // A track-local mutation (mixer volume/pan/mute, plugin param) emits snapshot_invalidated
+    // carrying JUST that track's var, so the UI patches one track instead of re-pulling the
+    // whole snapshot (measured 330 ms / 3.7 MiB at 100 tracks). Structural changes still emit
+    // a payload-less FULL invalidation.
+    section ("Scoped invalidation: track-local mutations emit a scoped patch");
+    {
+        auto t = cmd (ops, "create_track", args1 ("name", "ScopeT"));
+        check (ok (t), "scoped: create track ok");
+        const auto trackId = t["data"].getProperty ("trackId", var()).toString();
+
+        // create_track is structural → FULL invalidation (no scope payload).
+        check (lastEvent.getProperty ("type", var()).toString() == "snapshot_invalidated",
+               "scoped: create_track emitted snapshot_invalidated");
+        check (! lastEvent.getProperty ("payload", var()).getProperty ("scope", var()).isString(),
+               "scoped: create_track is a FULL invalidation (no scope)");
+
+        // set_track_volume is track-local → SCOPED patch carrying this track's var.
+        check (ok (cmd (ops, "set_track_volume", objN ({{ "trackId", trackId }, { "db", -6.0 }}))),
+               "scoped: set_track_volume ok");
+        auto payload = lastEvent.getProperty ("payload", var());
+        check (payload.getProperty ("scope", var()).toString() == "track", "scoped: set_track_volume emits scope=track");
+        check (payload.getProperty ("trackId", var()).toString() == trackId, "scoped: patch carries the changed trackId");
+        check (payload.getProperty ("track", var()).isObject(), "scoped: patch carries the track var");
+        check (payload.getProperty ("track", var()).getProperty ("id", var()).toString() == trackId,
+               "scoped: patch track var has the right id");
+
+        cmd (ops, "remove_track", args1 ("trackId", trackId));   // tidy
+    }
+
+    // ─── A3 — recovery-journal mechanics (allowlist + truncate-on-save) ───
+    // execute() journals only REPLAYABLE arrangement commands to recovery-journal.jsonl; every
+    // save truncates it (the saved edit supersedes the unsaved tail). The full cross-restart
+    // replay + id-rebinding is proven by verify.py's check_crash_recovery (KEEP_SESSION + __crash).
+    section ("A3: recovery journal mechanics");
+    {
+        auto journal = eng.sessionDir().getChildFile ("recovery-journal.jsonl");
+        auto journalLines = [&] {
+            if (! journal.existsAsFile()) return 0;
+            int n = 0;
+            for (auto& l : juce::StringArray::fromLines (journal.loadFileAsString())) if (l.trim().isNotEmpty()) ++n;
+            return n;
+        };
+
+        check (ok (cmd (ops, "save")), "A3: save ok");
+        check (journalLines() == 0, "A3: journal empty after save");
+
+        auto jt = cmd (ops, "create_track", args1 ("name", "JT"));
+        const auto jid = jt["data"].getProperty ("trackId", var()).toString();
+        check (journalLines() == 1, "A3: a replayable command (create_track) is journaled");
+
+        cmd (ops, "set_transport", args1 ("action", "stop"));   // not in the replay allowlist
+        check (journalLines() == 1, "A3: a non-replayable command (set_transport) is NOT journaled");
+
+        check (ok (cmd (ops, "save")), "A3: save again ok");
+        check (journalLines() == 0, "A3: save truncates the journal (saved edit supersedes the tail)");
+
+        cmd (ops, "remove_track", args1 ("trackId", jid));   // tidy
+    }
+
     // ─── KEY-001 — the project's musical key (tonic + mode) ───
     // Stored on the same MOSH_PROJECT node as the format/time-base prefs (saves/reloads
     // with the .tracktionedit). set_key is a NON-undoable preference (cmdSetProjectSettings
@@ -5868,6 +5930,17 @@ int runCommandScript (MoshEngine& eng, MoshOps& ops)
             outLines.add (bl);
             std::cout << bl.toStdString() << std::endl;
             continue;
+        }
+
+        // __crash pseudo-command (A3 test): simulate an UNCLEAN exit — set the session-running
+        // sentinel and STOP without saving. A subsequent MOSH_RUNSCRIPT_KEEP_SESSION run then
+        // detects the crash + replays the recovery-journal tail (recover_session). Runs no
+        // MoshOps command; ends the script here (the "crash").
+        if (name == "__crash")
+        {
+            eng.markSessionRunning();
+            std::cout << "{\"command\":\"__crash\",\"ok\":true}" << std::endl;
+            break;
         }
 
         // Substitute ${VAR} references in the (top-level) args before executing.

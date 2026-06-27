@@ -284,6 +284,7 @@ MoshOps::MoshOps (MoshEngine& engineToUse)
       trainerRegistry (engineToUse.sessionDir())
 {
     logFile = eng.sessionDir().getChildFile ("mosh-log.jsonl");
+    initRecoveryJournal();                    // A3 — read a crashed tail into memory, then start fresh
     pluginHost.initialise();                 // formats + curated VST3 scan
     previewFormats.registerBasicFormats();   // audition (file preview) reader formats
     startTimerHz (30);                       // telemetry decimated to 30 Hz, never per-block
@@ -553,6 +554,16 @@ void MoshOps::timerCallback()
 // ─────────────────────────────────────────────────────────────────────────────
 juce::var MoshOps::execute (const juce::var& command)
 {
+    auto result = executeImpl (command);
+    // A3 — feed the crash-recovery journal (single chokepoint; skipped during a replay).
+    if (! replayingRecovery_)
+        appendRecoveryJournal (command.getProperty ("command", var()).toString(),
+                               command.getProperty ("args", var()), result);
+    return result;
+}
+
+juce::var MoshOps::executeImpl (const juce::var& command)
+{
     const auto name = command.getProperty ("command", var()).toString();
     const auto args = command.getProperty ("args", var (new DynamicObject()));
 
@@ -621,6 +632,8 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "batch_end")         return cmdBatchEnd (args);
     if (name == "save")              return cmdSave (args);
     if (name == "reload")            return cmdReload (args);
+    if (name == "recover_session")   return cmdRecoverSession (args);   // A3 — replay the crash tail
+    if (name == "discard_recovery")  return cmdDiscardRecovery (args);  // A3 — drop the crash tail
     if (name == "add_render_layer")  return cmdAddRenderLayer (args);
     if (name == "move_clip")         return cmdMoveClip (args);
     if (name == "trim_clip")         return cmdTrimClip (args);
@@ -3521,8 +3534,9 @@ juce::var MoshOps::cmdSetTrackVolume (const juce::var& args)
 {
     const auto id = args.getProperty ("trackId", var()).toString();
     te::VolumeAndPanPlugin* vp = nullptr;
+    te::AudioTrack* audioTrack = nullptr;
     if (auto* track = findTrack (id))
-        vp = ensureVolumePlugin (*track);
+        { audioTrack = track; vp = ensureVolumePlugin (*track); }
     else if (auto* group = findGroupTrack (id))   // MIX-008: group fader (submix VolumeAndPan)
         vp = group->getVolumePlugin();
     if (vp == nullptr) return errResult ("set_track_volume", "no track");
@@ -3531,7 +3545,8 @@ juce::var MoshOps::cmdSetTrackVolume (const juce::var& args)
     // G14 — route the fader change through the UndoManager (setVolumeDb alone bypasses it).
     undoManager().perform (new SetFaderValueAction (*vp, false, (float) (double) args.getProperty ("db", 0.0)));
     logLine ("set_track_volume", args, true, {}, true);
-    emitSnapshotInvalidated();
+    if (audioTrack != nullptr) emitTrackPatch (*audioTrack);   // scoped (group fader → full below)
+    else emitSnapshotInvalidated();
     return okResult ("set_track_volume");
 }
 
@@ -3547,7 +3562,7 @@ juce::var MoshOps::cmdSetTrackPan (const juce::var& args)
     undoManager().perform (new SetFaderValueAction (*vp, true,
         juce::jlimit (-1.0f, 1.0f, (float) (double) args.getProperty ("pan", 0.0))));
     logLine ("set_track_pan", args, true, {}, true);
-    emitSnapshotInvalidated();
+    emitTrackPatch (*track);   // scoped — pan is purely track-local
     return okResult ("set_track_pan");
 }
 
@@ -3558,7 +3573,7 @@ juce::var MoshOps::cmdSetTrackMute (const juce::var& args)
     beginTxn ("set_track_mute");
     track->setMute ((bool) args.getProperty ("mute", false));
     logLine ("set_track_mute", args, true, {}, true);
-    emitSnapshotInvalidated();
+    emitTrackPatch (*track);   // scoped — mute is purely track-local (unlike solo, which dims others)
     return okResult ("set_track_mute");
 }
 
@@ -4438,8 +4453,8 @@ juce::var MoshOps::cmdReorderPlugin (const juce::var& args)
 
 juce::var MoshOps::cmdSetPluginParam (const juce::var& args)
 {
-    auto* plugin = findPlugin (args.getProperty ("trackId", var()).toString(),
-                               (int) args.getProperty ("index", -1));
+    const auto trackId = args.getProperty ("trackId", var()).toString();
+    auto* plugin = findPlugin (trackId, (int) args.getProperty ("index", -1));
     if (plugin == nullptr) return errResult ("set_plugin_param", "no plugin");
     const int pi = (int) args.getProperty ("paramIndex", -1);
     if (pi < 0 || pi >= plugin->getNumAutomatableParameters())
@@ -4450,7 +4465,11 @@ juce::var MoshOps::cmdSetPluginParam (const juce::var& args)
     beginTxn ("set_plugin_param");
     param->setParameter (param->valueRange.convertFrom0to1 (norm), juce::sendNotification);
     logLine ("set_plugin_param", args, true, {}, true);
-    emitSnapshotInvalidated();
+    // Scoped — param tweaks are the other rapid-fire case. A param that changes plugin
+    // LATENCY leaves the session PDC readout briefly stale (self-corrects on the next
+    // structural edit); the arrangement is unaffected. Group-track plugins → full.
+    if (auto* track = findTrack (trackId)) emitTrackPatch (*track);
+    else emitSnapshotInvalidated();
     reactiveTouchTrack (args.getProperty ("trackId", var()).toString());   // Phase 3 — param change → re-bounce
     return okResult ("set_plugin_param");
 }
@@ -7698,11 +7717,14 @@ juce::var MoshOps::snapshot()
     // safe empty fallback is live. The UI shows this as a blocking "please update Mosh" banner.
     if (eng.hasProjectLoadError())
         session->setProperty ("loadError", eng.projectLoadError());
-    // A2 — the prior GUI session ended uncleanly (crashed). The UI shows a one-time recovery
-    // notice; autosave already restored the last good save (≤30s of loss). Phase 2 (JSONL
-    // replay) tightens this to ~0. Only true on the GUI path that marks the liveness sentinel.
+    // A2/A3 — the prior GUI session ended uncleanly (crashed). recoveryAvailable drives a
+    // one-time notice; recoverableCount is how many unsaved arrangement commands the A3 journal
+    // can replay (recover_session) to tighten the ≤30s autosave loss toward ~0.
     if (eng.wasUncleanShutdown())
+    {
         session->setProperty ("recoveryAvailable", true);
+        session->setProperty ("recoverableCount", pendingRecovery_.size());
+    }
     session->setProperty ("recentProjects", eng.recentProjects());   // Recent list (gap 2)
     // Project container extension, backend-owned (keeps the storage format out of the
     // UI — the file-dialog filter is built from this, not a hard-coded constant).
@@ -8504,6 +8526,7 @@ te::Plugin* MoshOps::findPlugin (const juce::String& trackId, int index)
 
 void MoshOps::emit (const juce::String& type, juce::var payload)
 {
+    if (replayingRecovery_) return;   // A3 — suppress per-command events; one final invalidate after replay
     if (! eventSink) return;
     auto* e = new DynamicObject();
     e->setProperty ("type", type);
@@ -8514,6 +8537,17 @@ void MoshOps::emit (const juce::String& type, juce::var payload)
 void MoshOps::emitSnapshotInvalidated()
 {
     emit ("snapshot_invalidated");
+}
+
+void MoshOps::emitTrackPatch (te::AudioTrack& track)
+{
+    if (eventSink == nullptr) { return; }   // (no sink ⇒ nothing to scope)
+    const int idx = te::getAudioTracks (eng.edit()).indexOf (&track);
+    auto* p = new DynamicObject();
+    p->setProperty ("scope", "track");                  // the UI patches one track, not the world
+    p->setProperty ("trackId", track.itemID.toString());
+    p->setProperty ("track", trackToVar (track, idx));
+    emit ("snapshot_invalidated", var (p));
 }
 
 void MoshOps::logLine (const juce::String& command, const juce::var& args,
@@ -8528,6 +8562,118 @@ void MoshOps::logLine (const juce::String& command, const juce::var& args,
     if (error.isNotEmpty()) o->setProperty ("error", error);
     o->setProperty ("undoable", undoable);
     logFile.appendText (JSON::toString (var (o), true) + "\n");
+}
+
+// ── A3 — crash-recovery journal ───────────────────────────────────────────────
+void MoshOps::initRecoveryJournal()
+{
+    recoveryJournalFile = eng.sessionDir().getChildFile ("recovery-journal.jsonl");
+    if (eng.wasUncleanShutdown() && recoveryJournalFile.existsAsFile())
+    {
+        // Read the crashed session's unsaved tail into memory BEFORE the first save can
+        // truncate the file — so save-truncation can never race recovery.
+        for (auto& l : juce::StringArray::fromLines (recoveryJournalFile.loadFileAsString()))
+            if (l.trim().isNotEmpty()) pendingRecovery_.add (l.trim());
+    }
+    recoveryJournalFile.deleteFile();   // start THIS session's journal fresh
+}
+
+// Only deterministic, replayable arrangement mutations are journaled — NOT plugin ops (the
+// in-process-crash culprits; replaying one would re-crash) nor renders/admin/transport/IO.
+// An ALLOWLIST (conservative): an unknown command is simply not recovered, never misapplied.
+bool MoshOps::isReplayableCommand (const juce::String& name) const
+{
+    static const juce::StringArray replayable {
+        "create_track", "rename_track", "remove_track", "set_track_type",
+        "import_clip", "add_test_tone_clip", "add_midi_clip",
+        "move_clip", "trim_clip", "split_clip", "remove_clip", "rename_clip",
+        "set_clip_mute", "set_clip_gain", "relink_clip", "set_clip_warp",
+        "duplicate_clip", "delete_time_range", "paste_clip",
+        "set_track_volume", "set_track_pan", "set_track_mute", "set_track_solo",
+        "create_section", "rename_section", "move_section", "remove_section",
+        "create_annotation", "edit_annotation", "move_annotation", "remove_annotation",
+        "set_tempo", "set_time_signature", "set_metronome", "set_key", "set_project_settings" };
+    return replayable.contains (name);
+}
+
+void MoshOps::appendRecoveryJournal (const juce::String& name, const juce::var& args, const juce::var& result)
+{
+    if (! (bool) result.getProperty ("ok", false)) return;     // only successful commands
+    if (! isReplayableCommand (name)) return;
+    auto* o = new DynamicObject();
+    o->setProperty ("c", name);
+    o->setProperty ("a", args);
+    o->setProperty ("r", result.getProperty ("data", var()));  // assigned ids → id-rebinding on replay
+    recoveryJournalFile.appendText (JSON::toString (var (o), true) + "\n");
+}
+
+// Replace any top-level string arg whose VALUE is a journaled id with its freshly-assigned
+// id (value-based, since different commands carry the id under different keys).
+juce::var MoshOps::substituteRecoveryIds (const juce::var& args, const juce::HashMap<juce::String, juce::String>& idMap)
+{
+    auto* in = args.getDynamicObject();
+    if (in == nullptr) return args;
+    auto* out = new DynamicObject();
+    for (auto& p : in->getProperties())
+    {
+        auto v = p.value;
+        if (v.isString()) { const auto s = v.toString(); if (idMap.contains (s)) v = idMap[s]; }
+        out->setProperty (p.name, v);
+    }
+    return var (out);
+}
+
+juce::var MoshOps::cmdRecoverSession (const juce::var& args)
+{
+    juce::HashMap<juce::String, juce::String> idMap;
+    static const juce::StringArray idFields {
+        "trackId", "clipId", "newClipId", "layerId", "busId", "groupTrackId", "sectionId", "annotationId" };
+
+    int recovered = 0; bool halted = false;
+    replayingRecovery_ = true;       // guards re-journaling AND per-command event emits
+    for (int i = 0; i < pendingRecovery_.size(); ++i)
+    {
+        auto entry = JSON::parse (pendingRecovery_[i]);
+        if (! entry.isObject()) continue;
+        const auto name      = entry.getProperty ("c", var()).toString();
+        const auto oldResult = entry.getProperty ("r", var());
+
+        auto* co = new DynamicObject();
+        co->setProperty ("command", name);
+        co->setProperty ("args", substituteRecoveryIds (entry.getProperty ("a", var()), idMap));
+        const auto result = executeImpl (var (co));
+        if (! (bool) result.getProperty ("ok", false)) { halted = true; break; }   // halt; keep prior
+        ++recovered;
+
+        // Map this command's old→new assigned ids so later references rebind.
+        const auto newData = result.getProperty ("data", var());
+        for (auto& f : idFields)
+        {
+            const auto oldV = oldResult.getProperty (f, var()).toString();
+            const auto newV = newData.getProperty (f, var()).toString();
+            if (oldV.isNotEmpty() && newV.isNotEmpty() && oldV != newV) idMap.set (oldV, newV);
+        }
+    }
+    replayingRecovery_ = false;
+
+    pendingRecovery_.clear();
+    if (recovered > 0) { eng.markDirty(); eng.save(); }   // persist recovered work (also truncates)
+    emitSnapshotInvalidated();
+    logLine ("recover_session", args, true, {}, false);
+
+    auto* d = new DynamicObject();
+    d->setProperty ("recovered", recovered);
+    d->setProperty ("halted", halted);
+    return okResult ("recover_session", var (d));
+}
+
+juce::var MoshOps::cmdDiscardRecovery (const juce::var& args)
+{
+    pendingRecovery_.clear();
+    recoveryJournalFile.deleteFile();
+    logLine ("discard_recovery", args, true, {}, false);
+    emitSnapshotInvalidated();
+    return okResult ("discard_recovery");
 }
 
 juce::var MoshOps::okResult (const juce::String& command, juce::var data)
