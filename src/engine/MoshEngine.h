@@ -57,8 +57,30 @@ public:
     bool saveIfDirty();          // save() iff dirty; returns true iff a save happened
 
     /** Reload the Edit from its file (proves save/reload restore). Replaces the
-        Edit object; callers must re-read edit() afterwards. */
-    void reloadFromFile();
+        Edit object; callers must re-read edit() afterwards. PRJ-FMT: returns a
+        non-empty error if the on-disk file is a NEWER format than this build — in
+        which case the CURRENT Edit is kept untouched and the caller surfaces the
+        message; an empty return means success. */
+    juce::String reloadFromFile();
+
+    /** PRJ-FMT — the COLD-START project-format outcome. Empty ⇒ the launch Edit loaded
+        fine. Non-empty ⇒ the session file on launch was made by a NEWER Mosh than this
+        build: the load was REFUSED, the live Edit is a safe empty fallback backed by that
+        newer file's path, and save() is a no-op until a different project is loaded — so
+        we never clobber the newer file. Surfaced via snapshot.session.loadError. (A
+        mid-session open/reload refusal does NOT latch this — the prior valid project stays
+        loaded and saveable; that refusal rides the command result instead.) */
+    juce::String projectLoadError() const { return loadError; }
+    bool         hasProjectLoadError() const { return loadError.isNotEmpty(); }
+
+    /** A2 — unclean-shutdown detection. The GUI writes a `session.running` sentinel after
+        the window loads and deletes it last on a clean quit; if it is still present at the
+        NEXT launch, the prior session crashed (e.g. an in-process plugin teardown). The
+        latch is captured in the ctor BEFORE markSessionRunning() overwrites it. Headless
+        harnesses use a wiped freshSession dir and never mark it, so they always read clean. */
+    bool wasUncleanShutdown() const { return uncleanAtStartup; }
+    void markSessionRunning();   // GUI: write the sentinel once the window is live
+    void clearSessionRunning();  // GUI: delete the sentinel on clean shutdown (after the final save)
 
     /** Project lifecycle (wave: settings). Each replaces the live Edit object, so
         callers must re-read edit() and refetch any cached track/clip pointers
@@ -67,7 +89,7 @@ public:
         device/Edit-mismatch asserts (matches the export render-exclusivity dance).
         editPath + editFileRetriever are re-pointed to the new file. */
     void newProject (const juce::File& file);   // save current, then a fresh empty Edit at file
-    void openProject (const juce::File& file);  // save current, then load the Edit at file
+    juce::String openProject (const juce::File& file);  // save current, then load the Edit at file (PRJ-FMT: non-empty ⇒ refused, current kept)
     bool saveProjectAs (const juce::File& file); // saveAs to file + adopt it as the backing file
 
     /** gap 2 — reopen the last project on relaunch. rememberProject persists the
@@ -116,8 +138,11 @@ private:
     void applyRequestedAudioOutputDevice();
     void wireEditResolvers();                                  // gap 3 — editFileRetriever + filePathResolver
     void consolidateAudioInto (const juce::File& projectDir);  // gap 3 — copy referenced audio project-local
+    void stampFormatVersion();                                 // PRJ-FMT — write moshFormatVersion on save
     bool       audioOpen = false;
     bool       dirty = false;              // unsaved-changes flag (gap 1)
+    bool       uncleanAtStartup = false;   // A2 — the session.running sentinel existed at launch (prior crash)
+    juce::String loadError;                // PRJ-FMT — non-empty ⇒ a refused (newer-format) load is live
     bool       inputsConfigured = false;   // one-time wave-input enablement latch (audio-only)
     juce::String audioError;
 

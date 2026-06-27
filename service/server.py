@@ -685,6 +685,28 @@ class Handler(BaseHTTPRequestHandler):
         sys.stderr.write("[service] " + (fmt % args) + "\n")
 
 
+def _write_quietly(path: str, text: str) -> None:
+    if not path:
+        return
+    try:
+        with open(path, "w") as f:
+            f.write(text)
+    except OSError:
+        pass
+
+
+def _bind_with_fallback(host: str, port: int, tries: int = 10):
+    """Bind ThreadingHTTPServer on `port`, falling back to the next few ports on collision
+    (a non-Mosh squatter we must not kill). Returns (httpd, actual_port)."""
+    last = None
+    for p in range(port, port + tries):
+        try:
+            return ThreadingHTTPServer((host, p), Handler), p
+        except OSError as e:  # EADDRINUSE (and friends) → try the next port
+            last = e
+    raise last
+
+
 def main() -> int:
     host = os.environ.get("MOSH_SERVICE_HOST", "127.0.0.1")
     port = int(os.environ.get("MOSH_SERVICE_PORT", "8770"))
@@ -695,7 +717,19 @@ def main() -> int:
         # is ~1–2s, not ~25s. Background + best-effort: never blocks /health.
         from sa3 import qa  # noqa: PLC0415
         threading.Thread(target=qa.warm, daemon=True).start()
-    httpd = ThreadingHTTPServer((host, port), Handler)
+    httpd, port = _bind_with_fallback(host, port)
+    # C3 — tell the host which port we actually bound (it may differ from the requested one
+    # if a non-Mosh process held it). The host adopts this for its base URL.
+    _write_quietly(os.environ.get("MOSH_SERVICE_PORTFILE", "").strip(), str(port))
+    # C2 — record our PID *and bound port* so a future Mosh launch can REAP us if we're
+    # orphaned/wedged (a crashed Mosh leaves a multi-GB MLX process squatting the port). The
+    # port lets the reaper kill ONLY a stale service on the port it actually needs (so a
+    # second instance on a different port never kills a healthy one). Removed on exit.
+    pidfile = os.environ.get("MOSH_SERVICE_PIDFILE", "").strip()
+    if pidfile:
+        _write_quietly(pidfile, f"{os.getpid()} {port}")
+        import atexit  # noqa: PLC0415
+        atexit.register(lambda: os.path.exists(pidfile) and os.remove(pidfile))
     mode = "FakeAdapter + StableAudio3" if SA3_ENABLED else "FakeAdapter"
     sys.stderr.write(f"[service] Mosh generative service v{SERVICE_VERSION} "
                      f"on http://{host}:{port} ({mode}) build={SERVICE_BUILD}\n")

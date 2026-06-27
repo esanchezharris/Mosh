@@ -3,6 +3,7 @@
 #include "engine/RenderArtifacts.h"
 #include "state/Ids.h"
 #include "state/RenderLayer.h"
+#include "state/Migrations.h"
 #include "state/Section.h"
 #include "state/Annotation.h"
 #include "multiplayer/LogicalId.h"
@@ -1376,6 +1377,9 @@ juce::var MoshOps::projectSettingsToVar()
     o->setProperty ("bitDepth", bd);
     o->setProperty ("timeBase", tb);
     o->setProperty ("key", var (key));
+    // PRJ-FMT — the stamped project format version (0 ⇒ legacy/unsaved). Lets the UI and
+    // the selftest observe the on-tree stamp without reading the .tracktionedit directly.
+    o->setProperty ("formatVersion", mosh::readFileVersion (eng.edit().state));
     return var (o);
 }
 
@@ -2183,7 +2187,13 @@ juce::var MoshOps::cmdSave (const juce::var& args)
 juce::var MoshOps::cmdReload (const juce::var& args)
 {
     unregisterAllMeterClients();        // old measurers are still valid here
-    eng.reloadFromFile();               // reconcileMeterClients() re-registers on the next frame
+    // PRJ-FMT — a newer-format file on disk is refused; the current Edit is kept untouched.
+    if (auto refusal = eng.reloadFromFile(); refusal.isNotEmpty())   // reconcileMeterClients() re-registers next frame
+    {
+        logLine ("reload", args, false, refusal, false);
+        emitSnapshotInvalidated();
+        return errResult ("reload", refusal);
+    }
     logFile = eng.sessionDir().getChildFile ("mosh-log.jsonl");
     logLine ("reload", args, true, {}, false);
     emitSnapshotInvalidated();
@@ -3333,6 +3343,7 @@ juce::var MoshOps::cmdListBuiltins (const juce::var&)
 
 juce::var MoshOps::cmdLoadBuiltin (const juce::var& args)
 {
+    eng.saveIfDirty();   // A2 — pre-risky-op save (recovery point if instantiation crashes)
     auto* track = findTrack (args.getProperty ("trackId", var()).toString());
     if (track == nullptr) return errResult ("load_builtin", "no track");
 
@@ -3474,6 +3485,10 @@ juce::var MoshOps::cmdAssignSample (const juce::var& args)
 
 juce::var MoshOps::cmdLoadPlugin (const juce::var& args)
 {
+    // A2 — persist any unsaved work BEFORE an op that can crash the process in-place
+    // (hosting a third-party VST3/AU is the #1 in-process-teardown crash). The on-disk save
+    // becomes the recovery point, making the crash near-lossless without the full replay.
+    eng.saveIfDirty();
     auto* track = findTrack (args.getProperty ("trackId", var()).toString());
     if (track == nullptr) return errResult ("load_plugin", "no track");
 
@@ -3505,6 +3520,7 @@ juce::var MoshOps::cmdLoadPlugin (const juce::var& args)
 
 juce::var MoshOps::cmdRemovePlugin (const juce::var& args)
 {
+    eng.saveIfDirty();   // A2 — pre-risky-op save (plugin teardown can crash in-process)
     auto* plugin = findPlugin (args.getProperty ("trackId", var()).toString(),
                                (int) args.getProperty ("index", -1));
     if (plugin == nullptr) return errResult ("remove_plugin", "no plugin");
@@ -5029,6 +5045,7 @@ juce::var MoshOps::cmdCancelRender (const juce::var& args)
 
 juce::var MoshOps::cmdAcceptRender (const juce::var& args)
 {
+    eng.saveIfDirty();   // A2 — pre-risky-op save (commits a generative render into the arrangement)
     const auto clipId = args.getProperty ("clipId", var()).toString();
     auto* clip = findClip (clipId);
     auto node = findRenderLayer (clipId);
@@ -5135,6 +5152,7 @@ juce::var MoshOps::cmdBypassLayer (const juce::var& args)
 
 juce::var MoshOps::cmdFreezeLayer (const juce::var& args)
 {
+    eng.saveIfDirty();   // A2 — pre-risky-op save (commits the cached render as durable audio)
     // Freeze = commit the cached render as the durable audio (already a file).
     auto node = findRenderLayer (args.getProperty ("clipId", var()).toString());
     if (! node.isValid()) return errResult ("freeze_layer", "no render layer");
@@ -5150,6 +5168,7 @@ juce::var MoshOps::cmdFreezeLayer (const juce::var& args)
 
 juce::var MoshOps::cmdBounceLayerToClip (const juce::var& args)
 {
+    eng.saveIfDirty();   // A2 — pre-risky-op save (bounce commits the render to a clip)
     // Bounce = accept_render then mark the layer bounced (the render becomes a
     // plain clip on the neural lane; lineage stays in the RenderLayer link).
     auto r = cmdAcceptRender (args);
@@ -5876,7 +5895,13 @@ juce::var MoshOps::cmdNewProject (const juce::var& args)
 juce::var MoshOps::openProjectFile (const File& file, const juce::var& args, const char* commandName)
 {
     unregisterAllMeterClients();           // old measurers valid here; dead after the swap
-    eng.openProject (file);                // stops transport + frees ctx before swap, re-points retriever
+    // PRJ-FMT — a newer-format file is refused; the current project stays loaded + saveable.
+    if (auto refusal = eng.openProject (file); refusal.isNotEmpty())  // else: stops transport + frees ctx before swap
+    {
+        logLine (commandName, args, false, refusal, false);
+        emitSnapshotInvalidated();         // re-attaches meters to the unchanged context
+        return errResult (commandName, refusal);
+    }
     lastSeenContext = nullptr;             // old ctx freed; force master-meter re-attach to the new ctx
     logFile = eng.sessionDir().getChildFile ("mosh-log.jsonl");
     logLine (commandName, args, true, {}, false);  // replaces the Edit — not undoable
@@ -6148,6 +6173,15 @@ juce::var MoshOps::snapshot()
     session->setProperty ("length", edit.getLength().inSeconds());
     session->setProperty ("editFile", eng.editFile().getFullPathName());
     session->setProperty ("dirty", eng.isDirty());   // unsaved-changes flag (gap 1)
+    // PRJ-FMT — cold-start refusal: the launch session file was made by a newer Mosh, so a
+    // safe empty fallback is live. The UI shows this as a blocking "please update Mosh" banner.
+    if (eng.hasProjectLoadError())
+        session->setProperty ("loadError", eng.projectLoadError());
+    // A2 — the prior GUI session ended uncleanly (crashed). The UI shows a one-time recovery
+    // notice; autosave already restored the last good save (≤30s of loss). Phase 2 (JSONL
+    // replay) tightens this to ~0. Only true on the GUI path that marks the liveness sentinel.
+    if (eng.wasUncleanShutdown())
+        session->setProperty ("recoveryAvailable", true);
     session->setProperty ("recentProjects", eng.recentProjects());   // Recent list (gap 2)
     // Project container extension, backend-owned (keeps the storage format out of the
     // UI — the file-dialog filter is built from this, not a hard-coded constant).
@@ -6257,7 +6291,7 @@ juce::var MoshOps::snapshot()
         }
 
     auto* root = new DynamicObject();
-    root->setProperty ("schemaVersion", 1);
+    root->setProperty ("schemaVersion", mosh::kSnapshotSchemaVersion);  // C++→UI wire contract (≠ file format)
     root->setProperty ("session", var (session));
     root->setProperty ("tracks", tracks);
     root->setProperty ("transport", transportToVar());

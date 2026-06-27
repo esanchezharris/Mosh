@@ -80,6 +80,8 @@ if (MOSH_BUILD_APP)
         # Moshi's brain (server-side LLM proxy) + native voice (macOS Speech) — the
         # packaged-app equivalents of the Vite dev brain proxy + browser Web Speech.
         src/brain/BrainProxy.cpp
+        # RT-safety tripwire (debug-only; compiles to nothing in Release — see MOSH_RT_GUARD)
+        src/audio/RealtimeAudioGuard.cpp
         # Stage 1 — Engine + MoshOps spine + state feed (01, 02)
         src/engine/MoshEngine.cpp
         src/moshops/MoshOps.cpp
@@ -131,7 +133,11 @@ if (MOSH_BUILD_APP)
         # clips genuinely time-stretch instead of Mode::disabled varispeed.
         TRACKTION_ENABLE_TIMESTRETCH_SOUNDTOUCH=1
         # Mosh build identity / stage flags
-        MOSH_VERSION_STRING="${PROJECT_VERSION}")
+        MOSH_VERSION_STRING="${PROJECT_VERSION}"
+        # RT-safety tripwire — Debug ONLY. Release leaves MOSH_RT_GUARD undefined so the
+        # guard header collapses to inline no-ops and RealtimeAudioGuard.cpp compiles to
+        # nothing (no global operator new override) → Release binary byte-unaffected.
+        $<$<CONFIG:Debug>:MOSH_RT_GUARD=1>)
 
     target_link_libraries(Mosh PRIVATE
         tracktion::tracktion_engine

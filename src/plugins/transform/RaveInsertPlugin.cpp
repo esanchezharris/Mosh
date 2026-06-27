@@ -2,6 +2,8 @@
 
 #if MOSH_HAVE_ANIRA
 
+#include "audio/RealtimeAudioGuard.h"
+
 namespace mosh
 {
 using namespace juce;
@@ -64,6 +66,7 @@ double RaveInsertPlugin::getLatencySeconds()
 
 void RaveInsertPlugin::applyToBuffer (const te::PluginRenderContext& fc)
 {
+    MOSH_RT_SCOPE();   // RT-safety tripwire (debug): assert no alloc/lock/IO on this thread
     auto* buf = fc.destBuffer;
     if (buf == nullptr) return;
 

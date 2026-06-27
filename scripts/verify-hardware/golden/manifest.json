@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "engine": {
+    "sampleRate": 44100,
+    "blockSize": 512,
+    "note": "canonical macOS arm64 build"
+  },
+  "cases": {
+    "makes_sound": {
+      "kind": "checksum",
+      "pcm_sha256": "5c5ef31fe448a19f8cbbd0fdb338c54fb47d5d51da915c36ab7c2011038e10b7",
+      "features": {
+        "frames": 88200,
+        "peak": 0.17699,
+        "rms": 0.12473,
+        "centroid_hz": 220.1
+      }
+    },
+    "drums": {
+      "kind": "checksum",
+      "pcm_sha256": "fc200364bc0c80c9d5e0ea2c5b45061a07ead7769d50413030b35fb5d6a568f0",
+      "features": {
+        "frames": 176400,
+        "peak": 0.9112,
+        "rms": 0.08755,
+        "centroid_hz": 8641.4
+      }
+    },
+    "transform_fake": {
+      "kind": "checksum",
+      "pcm_sha256": "eda1ae831b609b3ad362502934787d21397e95d4c56d2c7024532dc0c15a99f3",
+      "features": {
+        "frames": 88200,
+        "peak": 0.60427,
+        "rms": 0.44007,
+        "centroid_hz": 240.6
+      }
+    },
+    "full_loop": {
+      "kind": "checksum",
+      "pcm_sha256": "f8d950ff1b17fc660547c607a2fbef0825b9647221d042260158fd6f31be8582",
+      "features": {
+        "frames": 88200,
+        "peak": 0.33733,
+        "rms": 0.17643,
+        "centroid_hz": 275.1
+      }
+    }
+  }
+}

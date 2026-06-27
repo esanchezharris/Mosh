@@ -1,4 +1,5 @@
 #include "MasterSpectralTapPlugin.h"
+#include "audio/RealtimeAudioGuard.h"
 
 namespace mosh
 {
@@ -10,6 +11,7 @@ MasterSpectralTapPlugin::MasterSpectralTapPlugin (te::PluginCreationInfo info)
 
 void MasterSpectralTapPlugin::applyToBuffer (const te::PluginRenderContext& fc)
 {
+    MOSH_RT_SCOPE();   // RT-safety tripwire (debug): assert no alloc/lock/IO on this thread
     auto* buf = fc.destBuffer;
     if (buf == nullptr) return;
 

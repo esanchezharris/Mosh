@@ -1,4 +1,5 @@
 #include "GenerativeJobManager.h"
+#include <cstdlib>
 
 namespace mosh
 {
@@ -6,6 +7,47 @@ using namespace juce;
 
 namespace
 {
+    // Stable, spawner-agnostic handshake locations in the Mosh app-data dir (matches
+    // MoshEngine's session base) so a FRESH launch can find a PRIOR run's service.
+    File serviceStateDir()  { return File::getSpecialLocation (File::userApplicationDataDirectory).getChildFile ("Mosh"); }
+    File servicePidFile()   { return serviceStateDir().getChildFile ("service.pid"); }
+    File servicePortFile()  { return serviceStateDir().getChildFile ("service.port"); }
+
+    void setEnvVar (const char* k, const String& v)
+    {
+       #if JUCE_WINDOWS
+        _putenv_s (k, v.toRawUTF8());
+       #else
+        ::setenv (k, v.toRawUTF8(), 1);
+       #endif
+    }
+
+    // Is `pid` a live process whose command line looks like OUR python service? (Guards
+    // against killing an unrelated process that happens to have reused the recorded PID.)
+    bool isLiveMoshService (int pid)
+    {
+        if (pid <= 0) return false;
+        ChildProcess ps;
+       #if JUCE_WINDOWS
+        if (ps.start ("tasklist /FI \"PID eq " + String (pid) + "\" /FO csv /NH"))
+            return ps.readAllProcessOutput().containsIgnoreCase ("python");
+       #else
+        if (ps.start (StringArray { "/bin/ps", "-p", String (pid), "-o", "command=" }))
+            return ps.readAllProcessOutput().contains ("server.py");
+       #endif
+        return false;
+    }
+
+    void killPid (int pid)
+    {
+        ChildProcess k;
+       #if JUCE_WINDOWS
+        k.start ("taskkill /F /PID " + String (pid));
+       #else
+        k.start (StringArray { "/bin/kill", "-9", String (pid) });
+       #endif
+    }
+
     File locateServiceScript()
     {
         if (auto env = SystemStats::getEnvironmentVariable ("MOSH_SERVICE_SCRIPT", {}); env.isNotEmpty())
@@ -39,6 +81,45 @@ GenerativeJobManager::~GenerativeJobManager()
 {
     if (spawnedByUs && serviceProcess.isRunning())
         serviceProcess.kill();        // cancel-on-close (05 §4)
+    if (spawnedByUs)                  // C2 — clean shutdown clears the handshake files
+    {
+        servicePidFile().deleteFile();
+        servicePortFile().deleteFile();
+    }
+}
+
+void GenerativeJobManager::reapStaleService()
+{
+    auto pf = servicePidFile();
+    if (! pf.existsAsFile()) return;
+
+    // pidfile holds "<pid> <boundPort>". Only reap a stale service that squats OUR target
+    // port — so a second instance on a different port never kills a healthy one.
+    auto toks = StringArray::fromTokens (pf.loadFileAsString().trim(), " ", {});
+    const int pid = toks.size() > 0 ? toks[0].getIntValue() : 0;
+    const int stalePort = toks.size() > 1 ? toks[1].getIntValue() : 0;
+    const int targetPort = SystemStats::getEnvironmentVariable ("MOSH_SERVICE_PORT", "8770").getIntValue();
+
+    if (pid > 0
+        && (stalePort == 0 || stalePort == targetPort)
+        && isLiveMoshService (pid))
+    {
+        killPid (pid);
+        Thread::sleep (300);          // let the OS release the squatted port
+    }
+    pf.deleteFile();
+    servicePortFile().deleteFile();
+}
+
+void GenerativeJobManager::adoptPortFromHandshake()
+{
+    auto pf = servicePortFile();
+    if (! pf.existsAsFile()) return;
+    const int p = pf.loadFileAsString().trim().getIntValue();
+    if (p <= 0) return;
+    const auto host = SystemStats::getEnvironmentVariable ("MOSH_SERVICE_HOST", "127.0.0.1");
+    auto want = "http://" + host + ":" + String (p);
+    if (want != baseUrl) baseUrl = want;
 }
 
 juce::var GenerativeJobManager::httpGet (const juce::String& path)
@@ -77,8 +158,21 @@ bool GenerativeJobManager::ensureServiceRunning()
 {
     if (isHealthy()) return true;
 
+    // C2 — health failed: a wedged/orphaned service from a crashed Mosh may be squatting the
+    // port. Reap it (PID handshake + identity check) before spawning a fresh one.
+    reapStaleService();
+    if (isHealthy()) return true;     // (another instance may have raced in)
+
     auto script = locateServiceScript();
     if (! script.existsAsFile()) return false;
+
+    // Hand the child the handshake paths: it records its PID (C2, so a future launch can reap
+    // it) and the actual bound port (C3). Set in our env so the child inherits them on both
+    // platforms. Clear any stale portfile so we don't adopt a dead port.
+    serviceStateDir().createDirectory();
+    servicePortFile().deleteFile();
+    setEnvVar ("MOSH_SERVICE_PIDFILE", servicePidFile().getFullPathName());
+    setEnvVar ("MOSH_SERVICE_PORTFILE", servicePortFile().getFullPathName());
 
     bool started = false;
 #if JUCE_WINDOWS
@@ -113,6 +207,7 @@ bool GenerativeJobManager::ensureServiceRunning()
         for (int i = 0; i < 60; ++i)     // up to ~12s for warmup
         {
             Thread::sleep (200);
+            adoptPortFromHandshake();     // C3 — switch to the actual bound port if it differs
             if (isHealthy()) return true;
         }
     }
