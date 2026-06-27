@@ -26,6 +26,8 @@ SUITE = [
     ("orchestrator (§10)", HERE / "orchestrate" / "orchestrate_test.py"),
     ("synth-match (§8)", HERE / "synthmatch" / "synthmatch_test.py"),
     ("flywheel + RL bridge (§11/§12)", HERE / "flywheel" / "flywheel_test.py"),
+    ("MIDI-from-screen (§5)", HERE / "midi_from_screen" / "midi_from_screen_test.py"),
+    ("GUI patch-reader (§5b)", HERE / "synth_from_screen" / "synth_from_screen_test.py"),
 ]
 
 fails: list[str] = []
