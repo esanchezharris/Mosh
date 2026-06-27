@@ -544,6 +544,7 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "accept_lyric_proposal") return cmdAcceptLyricProposal (args);
     if (name == "reject_lyric_proposal") return cmdRejectLyricProposal (args);
     if (name == "analyze_lyrics")       return cmdAnalyzeLyrics (args);
+    if (name == "get_lyric_corpus_stats") return cmdGetLyricCorpusStats (args);
     // Annotations broadcast over MP (shared collaborator comments). create self-broadcasts
     // its resolved cross-peer id; the rest address by that id via the generic wrapper.
     if (name == "create_annotation") return cmdCreateAnnotation (args);
@@ -1250,6 +1251,24 @@ juce::var MoshOps::cmdAcceptLyricProposal (const juce::var& args)
     node.removeProperty (ids::lyricProposals, nullptr);            // clear the ephemeral proposals
     logLine ("accept_lyric_proposal", args, true, {}, true);       // explicit TASTE label (positive)
     emitSnapshotInvalidated();
+
+    // §7 style-RAG flywheel — auto-accumulate the accepted line into the PERSISTED
+    // cross-song voice corpus so future songs sound more like the artist. Fire-and-forget
+    // on a detached thread: styleCorpusAdd is NON-SPAWNING (isHealthy-gated) + best-effort,
+    // so accept NEVER blocks/fails on it and a service-down state is a silent no-op (keeps
+    // --selftest hermetic). NON-undoable by design: undo pulls the text from the sheet but
+    // not the corpus — acceptable, the corpus is a "lines I liked" accumulation (add_lines
+    // dedups + the near-verbatim guard handles redundancy). Mirrors cmdAnalyzeLyrics's
+    // detached-thread idiom.
+    if (chosen.trim().isNotEmpty())
+    {
+        const juce::String line = chosen;
+        std::thread ([this, line]
+        {
+            jobManager.styleCorpusAdd (juce::StringArray { line }, "accept");
+        }).detach();
+    }
+
     auto* d = new DynamicObject(); d->setProperty ("text", chosen);
     return okResult ("accept_lyric_proposal", var (d));
 }
@@ -1322,6 +1341,16 @@ juce::var MoshOps::cmdAnalyzeLyrics (const juce::var& args)
 
     auto* d = new DynamicObject(); d->setProperty ("status", "analyzing");
     return okResult ("analyze_lyrics", var (d));
+}
+
+// §7 — read-only corpus size ("N lines in your voice"). NON-SPAWNING (styleCorpusStats is
+// isHealthy-gated) → returns lines:-1 when the service is down (the UI shows nothing). Counts
+// only; the corpus content is never exposed (the backend-only safety wall).
+juce::var MoshOps::cmdGetLyricCorpusStats (const juce::var& args)
+{
+    const int lines = jobManager.styleCorpusStats();
+    auto* d = new DynamicObject(); d->setProperty ("lines", lines);
+    return okResult ("get_lyric_corpus_stats", var (d));
 }
 
 // ── ANN-001: authored timeline annotations (mirror the sections CRUD; multiplayer-

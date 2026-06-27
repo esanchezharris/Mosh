@@ -4,7 +4,7 @@
 //   L2: the generation loop — Finish gaps / fill a line / suggest the next, then review
 //       the ranked proposals (accept / reject / regenerate), constraint-checked by phonology.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useStore } from "../../store";
 import { countSyllables, gridTarget, flowStatus, parseSeed } from "../../lyrics/flowMeter";
 import type { Track, LyricLine, LyricProposal, RhymeCandidate, LyricAnalysis } from "../../types";
@@ -13,6 +13,19 @@ export function LyricPanel({ track }: { track: Track }) {
   const exec = useStore((s) => s.exec);
   const sheet = track.lyricSheet;
   const [busy, setBusy] = useState(false);
+  // §7 — "it's learning my voice" cue: the cross-song corpus count (counts only; grows as
+  // accepted lines accumulate). Pulled on demand (never via the snapshot — that would spawn
+  // the service); -1/absent ⇒ service down ⇒ shown as nothing.
+  const [corpusLines, setCorpusLines] = useState<number | null>(null);
+  const acceptedCount = sheet?.lines.filter((l) => l.status === "accepted").length ?? 0;
+  useEffect(() => {
+    if (!sheet) return;
+    let alive = true;
+    void exec("get_lyric_corpus_stats", {}).then((r) => {
+      if (alive && r.ok) setCorpusLines((r.data as { lines?: number })?.lines ?? null);
+    });
+    return () => { alive = false; };
+  }, [exec, sheet?.id, acceptedCount]);
 
   if (!sheet) {
     return (
@@ -60,10 +73,14 @@ export function LyricPanel({ track }: { track: Track }) {
         aria-label="Topic" defaultValue={sheet.topic}
         onBlur={(e) => { if (e.target.value !== sheet.topic) void exec("set_lyric_constraint", { trackId: track.id, topic: e.target.value }); }} />
 
-      <label className="v2-lyric-stylebias" data-testid="lyric-stylebias" title="§7 — bias generation toward your own voice (this song's accepted lines)">
+      <label className="v2-lyric-stylebias" data-testid="lyric-stylebias" title="§7 — bias generation toward your own voice (this song's accepted lines + your accumulated corpus)">
         <input type="checkbox" checked={!!sheet.styleBias} aria-label="Bias to my voice"
           onChange={(e) => void exec("set_lyric_constraint", { trackId: track.id, styleBias: e.target.checked })} />
         <span>Sound like me</span>
+        {corpusLines != null && corpusLines > 0 && (
+          <span className="v2-lyric-corpus" data-testid="lyric-corpus-count"
+            title="lines accumulated in your voice corpus — grows each time you accept a line">{corpusLines} in your voice</span>
+        )}
       </label>
 
       <div className="v2-lyric-actions">
