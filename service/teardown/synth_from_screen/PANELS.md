@@ -1,0 +1,101 @@
+# §5b — Synth-GUI panel catalog (what can show up in a tutorial)
+
+A visual reconnaissance of the synth GUIs the patch-reader (§5b) has to handle, so profiles
+can be built for every page a tutorial might show — not just the default ENV row. Built from
+**real captures of the installed plugins** (Serum 2 via the Mosh host, Vital standalone) plus
+**reference study of Serum 1** (not installed on this machine).
+
+Reference frames (own-captures of licensed plugins) live in `fixtures/panels/`. Recapture any
+of them with the method in "Reproduction" below.
+
+## The one thing that's universal: the white-pointer knob
+
+Serum 1, Serum 2 **and** Vital all draw a knob as a **white pointer line** over a coloured
+arc/tick (teal in Vital, blue in Serum). That means `controls.read_knob(..., pointer="white")`
+— which isolates the colourless pointer from the saturated arc — is the correct reader for
+**every** knob on **every** page of **all three** synths. The ENV-ADSR profiles
+(`profiles/vital.json`, `profiles/serum.json`) already use it and read absolute values
+correctly (full SUSTAIN ≈ 1.0). Extending coverage is "add more control entries," not "write a
+new reader" — except for the dynamic/tabular pages noted below.
+
+## Page types (and how the reader must treat each)
+
+| Page type | Where | Reader strategy | Status |
+|-----------|-------|-----------------|--------|
+| **Fixed knob grid** | OSC/filter/ENV/LFO on the main page; always-visible ENV column | fixed (cx,cy,r) per control in the profile, `pointer="white"` | ENV done; OSC/filter **buildable now** from the captures |
+| **Dynamic FX rack** | Serum FX tab, Vital EFFECTS tab | NOT fixed — knob positions shift with which effects are enabled + their order. Must (1) detect each enabled effect's header (label OCR + colour highlight), (2) read its knobs *relative* to that module's box | **needs a rack-aware reader** (next rung) |
+| **Modulation matrix** | Serum MATRIX, Vital MATRIX | tabular: rows of source → (bipolar/stereo/morph) → amount → destination. Read with OCR + the amount knob/field, not knob-angle CV | **needs a table reader** |
+| **Settings / menus** | Serum GLOBAL, Vital ADVANCED | toggles + dropdowns + a few knobs; OCR labels + `read_toggle`/`read_menu` | low priority |
+
+A prerequisite for all of the above: **page/tab detection** — read which top tab is active
+(the highlighted tab / coloured dot) so the reader loads the right page profile. Cheap: the
+active tab has a distinct highlight; OCR the tab labels + find the highlighted one.
+
+## Serum 2  (installed — real captures)
+
+Tabs: **OSC · MIX · FX · MATRIX · GLOBAL** (Serum 2 added MIX vs Serum 1). Dark skin.
+- **OSC** (`fixtures/panels/serum2_osc.png`): OSC A/B/C + SUB + NOISE across the top; two
+  FILTER columns on the right; a row of fixed knobs per oscillator (PAN, WT POS, UNISON,
+  DETUNE, BLEND, WARP, LEVEL) and per filter (CUTOFF, RES, DRIVE, FAT, PAN, MIX); ENV 1 ADSR
+  (ATK/HOLD/DEC/SUS/REL — **no DELAY knob**) + LFO row at the bottom; MACROS column on the
+  left. **All fixed-position → directly profilable** (the ENV row already is).
+- **FX**: dynamic rack (Hyper/Dimension, Distortion, Flanger, Phaser, Chorus, Delay,
+  Compressor, Reverb, EQ, Filter). Each enabled effect shows its own knob set.
+- **MIX**: per-oscillator level/pan mixer (Serum-2-only tab).
+- **MATRIX**: mod-routing table. **GLOBAL**: global/voicing settings.
+- ⚠️ **Constraint:** Serum has no standalone, so it's hosted in Mosh — and the hosted VST3
+  editor does **not** accept synthetic tab clicks (both computer-use and raw CGEvent are
+  swallowed by the editor NSView; the default page captures fine because that's read-only).
+  So the **non-default Serum tabs can't be auto-navigated** for live calibration. Options:
+  the owner navigates to a tab manually and we screencapture it, or we calibrate from a
+  reference image (resolution-approximate until verified live).
+
+## Vital  (installed — real captures, all tabs)
+
+Tabs: **VOICE · EFFECTS · MATRIX · ADVANCED**. Dark skin. The **ENV/LFO modulator column on
+the right is visible on every tab** → the ADSR profile is robust regardless of page.
+- **VOICE** (`vital_voice.png`): OSC 1/2/3 + SMP (sampler), each with a wavetable display,
+  UNISON/PHASE knobs, LEVEL/PAN, FILTER; two filters at the bottom; ENV 1 ADSR
+  (DELAY/ATTACK/HOLD/DECAY/SUSTAIN/RELEASE) + LFO on the right. Fixed-position.
+- **EFFECTS** (`vital_effects.png`, shown with Chorus+Delay enabled): dynamic rack — Chorus,
+  Compressor, Delay, Distortion, EQ, Filter, Flanger, Phaser, Reverb. Enabled modules expand
+  inline to their knobs (FEEDBACK/MIX/DEPTH/CUTOFF/SPREAD…). Positions depend on what's on.
+- **MATRIX** (`vital_matrix.png`): SOURCE/BIPOLAR/STEREO/MORPH/AMOUNT/DESTINATION table + a
+  Mod-Remap curve.
+- **ADVANCED** (`vital_advanced.png`): per-oscillator advanced (unison stack, detune range,
+  stereo/table spread), VOICE (round-robin, note priority, tuning), OVERSAMPLING, DISPLAY.
+- Vital standalone **does** accept synthetic clicks → fully auto-navigable for live capture.
+
+## Serum 1  (NOT installed — reference study only)
+
+The original Serum (lots of tutorials still use it). Lighter grey skin; **4 tabs: OSC · FX ·
+MATRIX · GLOBAL** (no MIX tab). Same white-pointer knobs (white line + blue tick).
+- **OSC**: OSC A + OSC B side-by-side, each with a wavetable display + UNISON/DETUNE/BLEND/
+  PHASE/RAND (top row) and WT POS/OFF/PAN/LEVEL (bottom row); SUB + NOISE; one filter; ENV +
+  LFO. Layout differs from Serum 2 (2 main oscillators vs 3, different positions).
+- **FX**: dynamic rack (Hyper/Dimension, Distortion, Flanger, Phaser, Chorus, Delay,
+  Compressor, Reverb, EQ, Filter) — same structure as Serum 2's FX.
+- **MATRIX / GLOBAL**: routing table / global settings.
+- ⚠️ A **real Serum 1 profile needs the plugin installed** (pixel coords differ from Serum 2
+  and from web reference images). Until then it's documented here, not profiled.
+
+## Reproduction (how these were captured)
+
+- **Vital** (standalone, auto-navigable): `open -a Vital`; computer-use clicks the tab
+  (VOICE/EFFECTS/MATRIX/ADVANCED); `screencapture -x -o -l<windowId>` grabs the clean window
+  (Quartz window id by owner "Vital"). For EFFECTS, enable a module first to expose its knobs.
+- **Serum 2** (hosted, default page only): `Mosh --demo3` loads Serum 2 + opens its editor;
+  `screencapture -l<id>` of the "Serum 2" window. Non-default tabs need manual navigation
+  (see the constraint above).
+- `verify_synthgui.py` reads the committed ENV fixtures and asserts absolute ADSR values.
+
+## Next rungs (in priority order)
+
+1. **OSC + FILTER profiles** for Serum 2 and Vital from the committed captures (fixed knobs,
+   white-pointer) — the highest-value still-buildable-now addition (filter cutoff/res/drive and
+   osc unison/detune are ubiquitous in tutorials).
+2. **Tab/page detection** (which page is shown) — gates loading the right page profile.
+3. **Rack-aware FX reader** (detect enabled-effect headers → read knobs relative to each) for
+   the dynamic FX pages of all three synths.
+4. **Matrix table reader** (OCR routing rows).
+5. **Serum 1 profile** once it's installed (or a verified live capture is available).
