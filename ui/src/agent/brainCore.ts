@@ -3,7 +3,7 @@
 // Node, scripts/brainBench.mts) as well as the app. brain.ts adds the bridge-coupled
 // createBrain() on top of this; the benchmark scores the EXACT prompt + parser here.
 
-import { commandCatalogPrompt } from "./commands";
+import { commandCatalogPrompt, AGENT_COMMAND_MAP } from "./commands";
 import type { Snapshot } from "../types";
 import type { AgentCommandCall } from "./executor";
 
@@ -66,16 +66,48 @@ export function systemPrompt(snap: Snapshot | null): string {
   return buildSystemPrompt(DEFAULT_RULES, snap);
 }
 
+// Coerce a string token ("17", 132, true) to the type an arg expects.
+function coerceArg(tok: string, type: "string" | "number" | "boolean"): unknown {
+  let raw = tok.trim();
+  if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) raw = raw.slice(1, -1);
+  if (type === "number") { const n = Number(raw); return Number.isFinite(n) ? n : raw; }
+  if (type === "boolean") return raw === "true" ? true : raw === "false" ? false : raw;
+  return raw;
+}
+
+// Some models emit commands in the catalog's function-call FORM — a string like
+// `add_midi_clip("17")` — instead of the {command,args} object (it mimics
+// commandCatalogPrompt()). Normalize that back to the object contract by mapping the
+// positional args onto the command's declared arg names. Returns null if unusable.
+function normalizeCommand(c: unknown): AgentCommandCall | null {
+  if (c && typeof c === "object" && typeof (c as AgentCommandCall).command === "string") {
+    const o = c as AgentCommandCall;
+    return { command: o.command, args: (o.args && typeof o.args === "object" ? o.args : {}) as Record<string, unknown> };
+  }
+  if (typeof c !== "string") return null;
+  const m = c.match(/^\s*([a-zA-Z_]\w*)\s*(?:\(([\s\S]*)\))?\s*;?\s*$/);
+  if (!m) return null;
+  const spec = AGENT_COMMAND_MAP.get(m[1]);
+  if (!spec) return null;
+  const args: Record<string, unknown> = {};
+  const inner = (m[2] ?? "").trim();
+  if (inner) inner.split(",").forEach((tok, i) => { const a = spec.args[i]; if (a) args[a.name] = coerceArg(tok, a.type); });
+  return { command: m[1], args };
+}
+
 export function parseReply(content: string): BrainReply {
   let s = String(content ?? "").trim().replace(/^```(?:json)?\s*/i, "").replace(/```$/i, "").trim();
   const a = s.indexOf("{"), b = s.lastIndexOf("}");
   if (a >= 0 && b > a) s = s.slice(a, b + 1);
   try {
     const o = JSON.parse(s) as BrainReply;
+    const commands = Array.isArray(o.commands)
+      ? o.commands.map(normalizeCommand).filter((c): c is AgentCommandCall => c !== null)
+      : undefined;
     return {
       say: typeof o.say === "string" ? o.say : undefined,
       intent: typeof o.intent === "string" ? o.intent : undefined,
-      commands: Array.isArray(o.commands) ? o.commands.filter((c) => c && typeof c.command === "string") : undefined,
+      commands,
     };
   } catch {
     return { say: undefined, intent: "HUH" };
