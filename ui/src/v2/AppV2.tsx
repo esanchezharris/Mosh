@@ -12,7 +12,7 @@ import { TopBar } from "./TopBar";
 import { TrackLaneList } from "./lanes/TrackLaneList";
 import { RightRail } from "./RightRail";
 import { Composer } from "./Composer";
-import { PluginBrowser } from "../ui/PluginBrowser";
+import { PluginBrowser } from "./PluginBrowser";
 import { PianoRoll } from "../ui/PianoRoll";
 import { AutomationPanel } from "../ui/AutomationPanel";
 import { DrumWindow } from "../ui/DrumWindow";
