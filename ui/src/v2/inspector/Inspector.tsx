@@ -48,7 +48,7 @@ export function Inspector() {
       </div>
       <div className="v2-insp-body" data-testid="v2-insp-body">
         {active === "mix" && <MixTab track={track} />}
-        {active === "fx" && <Rack track={track} />}
+        {active === "fx" && <Rack track={track} onAddPlugin={() => useShell.getState().openBrowserTab("plugins")} />}
         {active === "gen" && <GenDrawer track={track} selectedClipId={selectedClipId ?? undefined} />}
         {active === "midi" && clip && <MidiTab clip={clip} drum={track.type === "drum"} />}
         {active === "takes" && clip && <TakesTab clip={clip} />}

@@ -19,7 +19,7 @@ describe("defaults from schema", () => {
     const defs = defaultSettings();
     for (const id of Object.keys(defs)) expect(s.get(id)).toEqual(defs[id]);
     expect(s.get("skin")).toBe("mosh");
-    expect(s.get("theme")).toBe("dark");
+    expect(s.get("theme")).toBe("light"); // v2 default: warm cream + dark panels
     expect(s.get("uiScale")).toBe(1);
     expect(s.get("voiceOn")).toBe(true);
   });
@@ -203,7 +203,7 @@ describe("resilience", () => {
   it("falls back to defaults when localStorage holds garbage", () => {
     localStorage.setItem(STORAGE_KEY, "{not json");
     useSettings.getState().hydrate();
-    expect(useSettings.getState().get("theme")).toBe("dark");
+    expect(useSettings.getState().get("theme")).toBe("light");
   });
 
   it("drops unknown ids and out-of-range values found in storage", () => {

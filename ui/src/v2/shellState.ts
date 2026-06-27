@@ -8,6 +8,7 @@ import { create } from "zustand";
 
 export type InspectorTab = "mix" | "fx" | "gen" | "midi" | "takes";
 export type SectionZoom = "8b" | "16b" | "full";
+export type BrowserTab = "sounds" | "plugins";
 
 interface ShellState {
   selectedClipId: string | null;   // clip-level selection for the contextual Inspector
@@ -16,6 +17,8 @@ interface ShellState {
   railCollapsed: boolean;
   sectionZoom: SectionZoom;
   activityOpen: boolean;
+  browserOpen: boolean;            // left browser drawer (sounds + plugins), pull-tab toggled
+  browserTab: BrowserTab;
 
   setSelectedClip: (id: string | null) => void;
   setInspectorTab: (t: InspectorTab) => void;
@@ -23,6 +26,9 @@ interface ShellState {
   setRailCollapsed: (b: boolean) => void;
   setSectionZoom: (z: SectionZoom) => void;
   setActivityOpen: (b: boolean) => void;
+  setBrowserOpen: (b: boolean) => void;
+  toggleBrowser: () => void;
+  openBrowserTab: (t: BrowserTab) => void;  // open the drawer ON a tab (used by "+ plugin")
 }
 
 export const useShell = create<ShellState>((set) => ({
@@ -32,6 +38,8 @@ export const useShell = create<ShellState>((set) => ({
   railCollapsed: false,
   sectionZoom: "16b",
   activityOpen: false,
+  browserOpen: false,
+  browserTab: "sounds",
 
   // Selecting a clip opens the inspector; deselecting leaves it as-is (the user can
   // pin/close it explicitly). Track selection is NOT here — route it through useStore.
@@ -41,4 +49,7 @@ export const useShell = create<ShellState>((set) => ({
   setRailCollapsed: (b) => set({ railCollapsed: b }),
   setSectionZoom: (z) => set({ sectionZoom: z }),
   setActivityOpen: (b) => set({ activityOpen: b }),
+  setBrowserOpen: (b) => set({ browserOpen: b }),
+  toggleBrowser: () => set((s) => ({ browserOpen: !s.browserOpen })),
+  openBrowserTab: (t) => set({ browserOpen: true, browserTab: t }),
 }));

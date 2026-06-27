@@ -73,11 +73,11 @@ export const SETTINGS: SettingDef[] = [
   {
     id: "theme",
     type: "enum",
-    default: "dark",
+    default: "light",
     scope: "app",
     category: "Appearance",
     label: "Theme",
-    help: "Light or dark ground. An axis independent of skin.",
+    help: "Light (warm cream + dark panels) or dark (Midnight Drive neon). An axis independent of skin.",
     constraints: {
       options: [
         { value: "dark", label: "Dark" },

@@ -24,12 +24,16 @@ export function Dock({ snapshot }: { snapshot: Snapshot }) {
   );
 }
 
-export function Rack({ track }: { track: Track | null }) {
+export function Rack({ track, onAddPlugin }: { track: Track | null; onAddPlugin?: () => void }) {
   const openBrowser = useStore((s) => s.openBrowser);
   const openAutomation = useStore((s) => s.openAutomation);
   const exec = useStore((s) => s.exec);
   const raveAvailable = useStore((s) => s.snapshot?.session?.raveAvailable ?? false);
   const plugins = (track?.plugins ?? []).filter((p) => p.external || p.builtin || p.rave);
+  // The "+ Plugin" target is injectable: the classic shell opens the modal browser
+  // (store.openBrowser); the v2 shell routes it to its left browser dock instead so the
+  // plugin picker lives on ONE surface. Default preserves the classic modal behavior.
+  const addPlugin = onAddPlugin ?? openBrowser;
   return (
     <div className="rack" data-testid="rack">
       <div className="rack-label">
@@ -38,7 +42,7 @@ export function Rack({ track }: { track: Track | null }) {
       <div className="rack-chain">
         {track && plugins.map((p) => <PluginCard key={p.index} plugin={p} trackId={track.id} />)}
         {track && plugins.length === 0 && <span className="rack-empty">No effects yet — add a plugin.</span>}
-        {track && <button className="btn rack-add" onClick={openBrowser}>+ Plugin</button>}
+        {track && <button className="btn rack-add" onClick={addPlugin}>+ Plugin</button>}
         {/* Route C.2 — only offered where the anira build can host a real-time RAVE model. */}
         {track && raveAvailable && <button className="btn rack-add" data-testid="rack-add-rave" onClick={() => void exec("add_rave_insert", { trackId: track.id })}>+ RAVE</button>}
         {track && <button className="btn rack-add" data-testid="open-automation" title="Parameter automation" aria-label="Open parameter automation" onClick={() => openAutomation(track.id)}>⌁ Automation</button>}

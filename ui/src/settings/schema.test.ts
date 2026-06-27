@@ -87,7 +87,7 @@ describe("coerceSetting", () => {
   });
 
   it("rejects an out-of-set enum value, returning the default", () => {
-    expect(coerceSetting("theme", "chartreuse")).toBe("dark");
+    expect(coerceSetting("theme", "chartreuse")).toBe("light");
     expect(coerceSetting("skin", "cubase")).toBe("mosh");
   });
 

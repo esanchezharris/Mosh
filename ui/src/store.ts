@@ -142,6 +142,7 @@ type State = {
   closeAutomation: () => void;
   openBrowser: () => void;
   closeBrowser: () => void;
+  ensurePluginCatalog: () => void;          // lazy-load the plugin list + built-ins (shared by the modal + the v2 drawer)
   // INS-005 — plugin scan / blocklist management (all via exec; UI-local view state otherwise).
   rescanPlugins: (format?: "vst3" | "au" | "all") => Promise<void>;
   refreshPluginList: () => Promise<void>;
@@ -530,8 +531,7 @@ export const useStore = create<State>((set, get) => ({
   automationTrackId: null,
   openAutomation: (trackId) => set({ automationTrackId: trackId }),
   closeAutomation: () => set({ automationTrackId: null }),
-  openBrowser: () => {
-    set({ browserOpen: true });
+  ensurePluginCatalog: () => {
     if (get().availablePlugins.length === 0) void get().refreshPluginList();
     // Built-in palette (instruments + effects shipped inside the engine).
     if (get().availableBuiltins.length === 0)
@@ -542,6 +542,7 @@ export const useStore = create<State>((set, get) => ({
         if (res.ok && res.data) set({ availableBuiltins: res.data.plugins });
       });
   },
+  openBrowser: () => { set({ browserOpen: true }); get().ensurePluginCatalog(); },
   closeBrowser: () => set({ browserOpen: false }),
 
   // Fetch the scanned catalog + per-format counts (INS-005). Always overwrites —
@@ -714,3 +715,9 @@ export const useStore = create<State>((set, get) => ({
 
   uiScale: useSettings.getState().get("uiScale") as number,
 }));
+
+// Dev-only: expose the store so Playwright e2e can drive state the in-memory mock can't
+// reproduce — notably multiplayer presence (no relay in dev). Stripped from prod builds.
+if (import.meta.env.DEV && typeof window !== "undefined") {
+  (window as unknown as { __moshStore?: typeof useStore }).__moshStore = useStore;
+}

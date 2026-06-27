@@ -12,7 +12,7 @@ import { TopBar } from "./TopBar";
 import { TrackLaneList } from "./lanes/TrackLaneList";
 import { RightRail } from "./RightRail";
 import { Composer } from "./Composer";
-import { PluginBrowser } from "./PluginBrowser";
+import { LeftDrawer } from "./LeftDrawer";
 import { PianoRoll } from "../ui/PianoRoll";
 import { AutomationPanel } from "../ui/AutomationPanel";
 import { DrumWindow } from "../ui/DrumWindow";
@@ -43,25 +43,29 @@ export function AppV2() {
       {snapshot && <TopBar snapshot={snapshot} />}
       {lastError && <div className="v2-errbar" role="alert" data-testid="v2-error">⚠ {lastError}</div>}
 
+      {/* compact 3-zone body: a center column (section-nav · arrangement · prompt bar)
+          and an ALWAYS-ON right rail (maximized agent · collaborators · inspector). */}
       <div className="v2-body">
         <div className="v2-main">
-          <div className="v2-stage">
-            {snapshot
-              ? <TrackLaneList snapshot={snapshot} />
-              : <div className="v2-empty">Loading session…</div>}
-            {dragging && (
-              <div className="v2-drop" role="status" aria-live="polite" data-testid="v2-drop">
-                <span>Drop audio to import</span>
-              </div>
+          {snapshot
+            ? <TrackLaneList snapshot={snapshot} dragging={dragging} />
+            : (
+              <>
+                <div className="v2-nav" />
+                <div className="v2-stage"><div className="v2-empty">Loading session…</div></div>
+              </>
             )}
-          </div>
           <Composer />
         </div>
         <RightRail />
       </div>
 
-      {/* floating / modal surfaces — opened via disclosure in later slices */}
-      <PluginBrowser />
+      {/* left browser — a CONFINED pull-tab overlay: its tab rides the screen edge and the
+          panel ends above the prompt bar, so it never covers the agent (samples + PLUGINS;
+          "+ Plugin" opens it on the Plugins tab — the one plugin surface, no modal). */}
+      <LeftDrawer />
+
+      {/* floating / modal surfaces — opened via disclosure */}
       <PianoRoll />
       <AutomationPanel />
       <DrumWindow />
