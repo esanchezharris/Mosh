@@ -88,6 +88,8 @@ test("generative runs on a MIDI/drum track (any track, via the backend auto-boun
   // The seeded Drums track is a MIDI drum clip (no wave clip) — generative must still
   // offer create/render/accept (the native backend auto-bounces it to audio first).
   await page.getByTestId("v2-track-header").first().click();
+  await page.getByTestId("v2-inspector-pull").click(); // solo: open the right-edge inspector dock
+  await expect(page.getByTestId("v2-inspector")).toBeVisible();
   await page.getByTestId("v2-insp-tab-gen").click();
   const gen = page.getByTestId("generative");
   await expect(gen).toBeVisible();
@@ -136,6 +138,8 @@ test("the agent toast appears on a command and self-dismisses", async ({ page })
 test("plugin browser: two-pane picker — collections, vendor filter, search, add", async ({ page }) => {
   await bootV2(page);
   await page.getByTestId("v2-track-header").first().click();
+  await page.getByTestId("v2-inspector-pull").click(); // solo: open the right-edge inspector dock
+  await expect(page.getByTestId("v2-inspector")).toBeVisible();
   await page.getByTestId("v2-insp-tab-fx").click();
   await page.locator('[data-testid="v2-insp-body"]').getByRole("button", { name: "+ Plugin" }).click();
 
