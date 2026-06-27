@@ -256,6 +256,9 @@ test("plugin picker: + Plugin opens the dock — collections, vendor filter, sea
   await expect(dock).toBeVisible();
   await expect(page.getByTestId("v2-browser-tab-plugins")).toHaveAttribute("aria-selected", "true");
 
+  // the search field carries an accessible name (its icon is aria-hidden, a placeholder is not a name)
+  await expect(dock.getByRole("textbox", { name: "Search plugins" })).toBeVisible();
+
   // collection chips: All + kind filters + a "Built-in" vendor group (no duplicate
   // Instruments/Effects vendor rows — built-ins collapse under one maker).
   await expect(dock.getByTestId("v2-pb-collection")).not.toHaveCount(0);
