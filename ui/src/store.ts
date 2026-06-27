@@ -670,7 +670,18 @@ export const useStore = create<State>((set, get) => ({
     const trackId = s.selectedTrackId ?? snap?.tracks.find((t) => t.type === "audio")?.id ?? snap?.tracks[0]?.id;
     if (!trackId) { s.pushAgentUtter("HUH", "no track to record into"); return; }
     const arm = await s.exec("arm_track", { trackId, armed: true });
-    if (!arm.ok) { s.pushAgentUtter("UHOH", "can't — no input"); return; }
+    // No-input / mic-permission UX (G2a): arming fails in two distinct ways —
+    // ok:false (a live device rejected the target) OR ok:true with applied:false
+    // (the graceful headless/no-device no-op proven by the "no fake clip" conformance
+    // invariant). Either way, surface a clear, persistent error and DON'T start a
+    // doomed record (which would land nothing and leave the user with no feedback).
+    const armApplied = (arm.data as { applied?: boolean } | undefined)?.applied;
+    if (!arm.ok || armApplied === false) {
+      s.pushAgentUtter("UHOH", "can't — no input");
+      set({ lastError: "No audio input available — check your microphone connection and permissions." });
+      return;
+    }
+    set({ lastError: null }); // armed cleanly — clear any stale no-input error
     if (bar && bar > 0 && snap) {
       const tempo = snap.session?.tempo ?? 120;
       const num = snap.session?.timeSigNumerator ?? 4;
