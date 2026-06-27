@@ -18,7 +18,11 @@ cd "$(dirname "$0")"          # service/teardown/
 HERE="$(pwd)"
 
 WITH_CLAP=0
-for a in "$@"; do [[ "$a" == "--with-clap" ]] && WITH_CLAP=1; done
+WITH_SOURCING=0
+for a in "$@"; do
+  [[ "$a" == "--with-clap" ]] && WITH_CLAP=1
+  [[ "$a" == "--with-sourcing" ]] && WITH_SOURCING=1
+done
 
 say()  { printf '  %s\n' "$*"; }
 fail() { printf '\n✗ %s\n' "$*" >&2; exit 1; }
@@ -63,6 +67,17 @@ if [[ "$WITH_CLAP" == "1" ]]; then
     VIRTUAL_ENV="$VENV" uv pip install --python "$PYBIN" --quiet laion-clap faiss-cpu
   else
     "$PYBIN" -m pip install --quiet laion-clap faiss-cpu
+  fi
+fi
+
+# 4b. Optional sourcing (§3): yt-dlp for search-based discovery + the transient media
+#     cache (no Data API key needed). Light, pure-Python.
+if [[ "$WITH_SOURCING" == "1" ]]; then
+  say "installing yt-dlp (sourcing §3) …"
+  if command -v uv >/dev/null 2>&1; then
+    VIRTUAL_ENV="$VENV" uv pip install --python "$PYBIN" --quiet yt-dlp
+  else
+    "$PYBIN" -m pip install --quiet yt-dlp
   fi
 fi
 
