@@ -60,6 +60,12 @@ export function LyricPanel({ track }: { track: Track }) {
         aria-label="Topic" defaultValue={sheet.topic}
         onBlur={(e) => { if (e.target.value !== sheet.topic) void exec("set_lyric_constraint", { trackId: track.id, topic: e.target.value }); }} />
 
+      <label className="v2-lyric-stylebias" data-testid="lyric-stylebias" title="§7 — bias generation toward your own voice (this song's accepted lines)">
+        <input type="checkbox" checked={!!sheet.styleBias} aria-label="Bias to my voice"
+          onChange={(e) => void exec("set_lyric_constraint", { trackId: track.id, styleBias: e.target.checked })} />
+        <span>Sound like me</span>
+      </label>
+
       <div className="v2-lyric-actions">
         <button className="v2-btn primary" data-testid="lyric-finish" disabled={busy || sheet.lines.length === 0}
           onClick={() => void run("complete_lyrics", {})}>{busy ? "…" : "✨ Finish gaps"}</button>

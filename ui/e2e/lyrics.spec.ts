@@ -134,3 +134,16 @@ test("Analyze flow draws precise per-line phonology (syllables + rhyme grade)", 
   await expect(viz).toHaveAttribute("data-analyzed", "seed");
   await expect(page.getByTestId("v2-error")).toHaveCount(0);
 });
+
+// ── §7: the "Sound like me" style-RAG opt-in toggles + persists ────────────────────
+
+test("the style-RAG 'Sound like me' opt-in toggles on", async ({ page }) => {
+  await bootV2(page);
+  await openLyrics(page);
+  await page.getByTestId("lyric-create").click();
+  const box = page.getByTestId("lyric-stylebias").getByRole("checkbox");
+  await expect(box).not.toBeChecked();
+  await box.check();
+  await expect(box).toBeChecked();
+  await expect(page.getByTestId("v2-error")).toHaveCount(0);
+});

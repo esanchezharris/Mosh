@@ -80,6 +80,7 @@ export type LyricSheet = {
   mood: string;
   explicit: "allow" | "clean" | "mild" | string;
   rhymeStrictness: "perfect" | "slant" | "free" | string;
+  styleBias?: boolean;       // §7 style-RAG — bias generation toward the artist's own voice
   specVersion: number;
   lines: LyricLine[];
 };

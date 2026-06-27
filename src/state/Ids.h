@@ -122,6 +122,7 @@ namespace mosh::ids
     MOSH_DECLARE_ID (lyricTopic)
     MOSH_DECLARE_ID (lyricMood)
     MOSH_DECLARE_ID (lyricExplicit)        // "allow" | "clean" | "mild"
+    MOSH_DECLARE_ID (lyricStyleBias)       // bool — §7 style-RAG: bias generation toward the artist's own voice
     MOSH_DECLARE_ID (lyricSpecVersion)     // constraint-spec schema version (int, >= 1)
     // per-line
     MOSH_DECLARE_ID (lyricIndex)           // 0-based line order

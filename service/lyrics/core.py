@@ -21,6 +21,7 @@ from typing import Dict, List, Optional
 
 import brain_client
 from phonology import core as phon
+from lyrics import style_corpus
 
 _P = phon.Pronouncer()  # real cmudict if importable, else a stdlib heuristic
 
@@ -208,6 +209,31 @@ def _fake_propose_line(line: dict, spec: dict, anchor: Optional[str], regen: int
     return _rank(cands)
 
 
+# ── style-RAG (§7): retrieve the artist's own voice + guard against parroting it ──
+
+def _style_query(spec: dict) -> str:
+    """The 'voice' query: topic + mood + whatever's already written in the sheet."""
+    parts = [str(spec.get("topic", "")), str(spec.get("mood", ""))]
+    for l in spec.get("lines", []):
+        parts.append(str(l.get("text", "")))
+        parts.append(re.sub(r"_{2,}", " ", str(l.get("seedText", ""))))  # gaps → spaces
+    return " ".join(p for p in parts if p)
+
+
+def _style_corpus(spec: dict) -> List[dict]:
+    """The retrieval pool when style biasing is opted in (else empty → loop unchanged).
+    The persisted user corpus PLUS any inline lines the request carried (the track's own
+    accepted lyrics). Gated on spec['styleBias'] so the default path is byte-identical."""
+    if not spec.get("styleBias"):
+        return []
+    return style_corpus.load_corpus(spec.get("styleCorpus"))
+
+
+def _style_exemplars(spec: dict, k: int = 3) -> List[str]:
+    corpus = _style_corpus(spec)
+    return style_corpus.retrieve(corpus, _style_query(spec), k=k) if corpus else []
+
+
 # ── the LLM backend (L3): prompt → validate → re-prompt with the SPECIFIC failure ──
 
 def _build_messages(line: dict, spec: dict, anchor: Optional[str], target: int,
@@ -228,6 +254,13 @@ def _build_messages(line: dict, spec: dict, anchor: Optional[str], target: int,
         rules.append(f"Mood: {spec['mood']}.")
     if spec.get("explicit") == "clean":
         rules.append("Keep it clean — no profanity.")
+    # Style-RAG (§7): bias toward the artist's OWN voice with retrieved exemplars, but
+    # forbid copying them verbatim — the model is steered by style, not by parroting.
+    exemplars = _style_exemplars(spec)
+    if exemplars:
+        rules.append("Write in THIS voice (the artist's own lines) — match the phrasing, "
+                     "imagery and vocabulary, but write NEW lines; do NOT copy them verbatim: "
+                     + " / ".join(f"\"{e}\"" for e in exemplars) + ".")
     sys = ("You are a skilled rap lyricist. Reply with ONLY a JSON object "
            '{"lines": ["...", "...", "..."]} of candidate lines. No commentary.')
     usr = " ".join(rules) + (f" Your previous attempt failed: {feedback} Fix it." if feedback else "")
@@ -264,14 +297,23 @@ def _failure_reason(d: dict, target: int, tol: int, anchor: Optional[str], stric
 
 def _llm_propose_line(line: dict, spec: dict, anchor: Optional[str], regen: int) -> List[dict]:
     target, tol, strict = _target(line, spec), int(line.get("syllableTol", 1) or 1), _strictness(line, spec)
+    corpus = _style_corpus(spec)   # non-empty only when style biasing is opted in
     cands: List[dict] = []
     feedback: Optional[str] = None
     for _ in range(3):  # budget the retries (re-prompt with the specific phonology failure)
         resp = brain_client.chat_json(_build_messages(line, spec, anchor, target, tol, strict, feedback))
         if not resp.get("ok"):
             break
-        fresh = [_evaluate(tx, line, spec, anchor, target, tol, strict)
-                 for tx in _parse_lines(resp.get("content", ""))]
+        raw = _parse_lines(resp.get("content", ""))
+        # Style-RAG novelty wall: drop lines that parrot a corpus exemplar verbatim — bias
+        # by style, not by copying. If that empties the batch, re-prompt for a fresh line.
+        if corpus:
+            kept = [t for t in raw if style_corpus.near_verbatim(t, corpus) is None]
+            if not kept and raw:
+                feedback = "that was almost word-for-word the reference — write a NEW line in the same voice."
+                continue
+            raw = kept
+        fresh = [_evaluate(tx, line, spec, anchor, target, tol, strict) for tx in raw]
         cands.extend(fresh)
         if sum(1 for c in cands if c["passes"]) >= 2:
             break

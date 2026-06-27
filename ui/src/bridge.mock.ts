@@ -599,6 +599,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
         mood: str(args.mood, ""),
         explicit: str(args.explicit, "allow"),
         rhymeStrictness: "slant",
+        styleBias: false,
         specVersion: 1,
         lines: [],
       };
@@ -621,6 +622,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       if (args.mood != null) s.mood = str(args.mood, s.mood);
       if (args.explicit != null) s.explicit = str(args.explicit, s.explicit);
       if (args.rhymeStrictness != null) s.rhymeStrictness = str(args.rhymeStrictness, s.rhymeStrictness);
+      if (args.styleBias != null) s.styleBias = !!args.styleBias;
       invalidate(); return ok(command);
     }
     case "set_lyric_line": {
