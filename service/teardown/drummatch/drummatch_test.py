@@ -27,6 +27,7 @@ if _SERVICE not in sys.path:
 from teardown import recipe as R  # noqa: E402
 from teardown.drummatch import DrumMatcher, SampleIndex  # noqa: E402
 from teardown.drummatch.embed import load_audio  # noqa: E402
+from teardown.drummatch.roles import classify_role  # noqa: E402
 
 SR = 44100
 fails: list[str] = []
@@ -193,6 +194,17 @@ with tempfile.TemporaryDirectory() as td:
     rec2 = R.Recipe(elements=[R.Element(element_id="g1", role="kick", audio_ref="/no/such/file.wav")])
     dm.match_into(rec2, "g1")
     check("match_into on a missing ref → none, no crash", rec2.elements[0].sample_match.status == R.SampleStatus.none)
+
+# ── 808 vs kick role split (duration is the discriminator) ────────────────────
+# punchy short low tone → kick; the same low pitch sustained → 808 (the rule that pulled
+# 808s out of the kick/perc/other scatter on real libraries).
+_kick = synth("kick", 1)                                            # 0.35 s low sine
+_t = np.arange(int(1.4 * SR)) / SR                                  # sustained 1.4 s 808
+_808 = (np.sin(2 * np.pi * 52 * _t) * np.exp(-_t / 0.9)).astype(np.float32)
+_808 = (_808 / (np.max(np.abs(_808)) or 1.0) * 0.9).astype(np.float32)
+check("short low tone → kick", classify_role(_kick, SR) == "kick", classify_role(_kick, SR))
+check("sustained low tone → 808", classify_role(_808, SR) == "808", classify_role(_808, SR))
+check("hat still classifies as hat", classify_role(synth("hat", 2), SR) == "hat", classify_role(synth("hat", 2), SR))
 
 print(f"\n{'ALL PASS' if not fails else 'FAILURES: ' + ', '.join(fails)}  ({len(fails)} failure(s))")
 sys.exit(len(fails))

@@ -64,6 +64,18 @@ check("refine beats the seed", res["distance"] < d_seed, f"opt={res['distance']}
 check("history is monotonically non-increasing", all(res["history"][i] >= res["history"][i + 1]
                                                      for i in range(len(res["history"]) - 1)))
 
+# batched eval (the live render-in-the-loop path) must match per-individual eval exactly:
+# same seed, same ES math, just a whole generation rendered per call.
+batch_render = lambda dicts: [synth.render(d) for d in dicts]  # noqa: E731
+res_seq = match_patch(target, synth, scorer, ["cutoff", "decay"], [(0, 1), (0, 1)],
+                      iters=20, popsize=6, seed=3)
+res_batch = match_patch(target, renderer=None, scorer=scorer, param_names=["cutoff", "decay"],
+                        bounds=[(0, 1), (0, 1)], iters=20, popsize=6, seed=3,
+                        batch_render=batch_render)
+check("batched eval == per-individual eval (same seed)",
+      res_batch["params"] == res_seq["params"] and res_batch["distance"] == res_seq["distance"],
+      f"batch={res_batch['distance']} seq={res_seq['distance']}")
+
 # substitute: nearest preset is the exact one
 presets = [{"cutoff": 0.1, "decay": 0.1}, {"cutoff": 0.6, "decay": 0.3}, {"cutoff": 0.95, "decay": 0.9}]
 sub = substitute(target, synth, scorer, presets)

@@ -108,7 +108,7 @@ def _teardown_index_dir() -> str:
 # Roles the drum-sample index actually classifies (teardown/drummatch/roles.py). Kept as
 # a literal here so server import never depends on the teardown venv. Filtering by a role
 # outside this set can only return empty, so reject it with a 400 rather than a silent [].
-TEARDOWN_ROLES = {"kick", "snare", "hat", "clap", "perc", "other"}
+TEARDOWN_ROLES = {"kick", "808", "snare", "hat", "clap", "perc", "other"}
 
 
 def _colorrack_hash() -> str:

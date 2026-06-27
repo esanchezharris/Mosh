@@ -53,6 +53,9 @@ service/sft/.venv/
 service/sft/.sft.env
 service/sft/.sft-data/
 service/sft/.adapters/
+# Teardown lane: venv (torch/transformers, GBs) + machine-local TEARDOWN_PY (setup-teardown.sh)
+service/teardown/.venv/
+service/teardown/.teardown.env
 service/sft/.fused/
 service/__pycache__/
 **/__pycache__/

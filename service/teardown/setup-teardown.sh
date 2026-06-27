@@ -21,11 +21,13 @@ WITH_CLAP=0
 WITH_SOURCING=0
 WITH_VIDEO=0
 WITH_EXTRACT=0
+WITH_REWARD=0
 for a in "$@"; do
   [[ "$a" == "--with-clap" ]] && WITH_CLAP=1
   [[ "$a" == "--with-sourcing" ]] && WITH_SOURCING=1
   [[ "$a" == "--with-video" ]] && WITH_VIDEO=1
   [[ "$a" == "--with-extract" ]] && WITH_EXTRACT=1
+  [[ "$a" == "--with-reward" ]] && WITH_REWARD=1
 done
 
 say()  { printf '  %s\n' "$*"; }
@@ -110,6 +112,19 @@ if [[ "$WITH_EXTRACT" == "1" ]]; then
   fi
 fi
 
+# 4e. Optional reward encoder (§11): MERT (music-native) via torch + transformers. Heavy
+#     (pulls torch); the 95M weights download on first use. With it, the reward head trains
+#     on MERT features (beats the engineered baseline at the ablation-ordering keystone —
+#     see flywheel/verify_reward.py). Absent → reward falls back to the engineered embedder.
+if [[ "$WITH_REWARD" == "1" ]]; then
+  say "installing reward encoder MERT (torch + transformers + nnAudio; heavy) …"
+  if command -v uv >/dev/null 2>&1; then
+    VIRTUAL_ENV="$VENV" uv pip install --python "$PYBIN" --quiet torch torchaudio transformers nnAudio
+  else
+    "$PYBIN" -m pip install --quiet torch torchaudio transformers nnAudio
+  fi
+fi
+
 # 5. Sanity: the venv must import the baseline stack.
 "$PYBIN" - <<'PY' || fail "the venv cannot import the baseline stack — inspect service/teardown/.venv"
 import importlib, sys
@@ -119,6 +134,7 @@ sys.exit(0)
 PY
 say "venv ✓ (baseline importable)"
 [[ "$WITH_CLAP" == "1" ]] && "$PYBIN" -c "import laion_clap, faiss" 2>/dev/null && say "CLAP + faiss ✓"
+[[ "$WITH_REWARD" == "1" ]] && "$PYBIN" -c "import torch, transformers" 2>/dev/null && say "reward encoder (torch + transformers) ✓"
 
 # 6. Persist the resolved interpreter + a default index location.
 ENVFILE="$HERE/.teardown.env"
@@ -128,6 +144,7 @@ cat > "$ENVFILE" <<EOF
 export TEARDOWN_PY="$PYBIN"
 export TEARDOWN_INDEX_DIR="$HERE/.index"
 EOF
+[[ "$WITH_REWARD" == "1" ]] && echo 'export TEARDOWN_REWARD_ENCODER="mert"' >> "$ENVFILE"
 say "wrote $ENVFILE"
 
 printf '\n✓ Teardown ready. Build a sample index: POST /teardown/index {"library": "<dir>"}\n'
