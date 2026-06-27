@@ -293,4 +293,55 @@ juce::var GenerativeJobManager::sketchBeatbox (const juce::File& inputWav, doubl
     return {};
 }
 
+juce::var GenerativeJobManager::getRhymes (const juce::String& word, const juce::String& strictness,
+                                           int maxN, int syllables)
+{
+    if (! ensureServiceRunning())
+        return {};
+
+    auto* body = new DynamicObject();
+    body->setProperty ("word", word);
+    body->setProperty ("strictness", strictness.isNotEmpty() ? strictness : juce::String ("slant"));
+    body->setProperty ("maxN", maxN > 0 ? maxN : 50);
+    if (syllables > 0)
+        body->setProperty ("syllables", syllables);
+
+    // Fast + deterministic; the service caps the (optional) phonology subprocess at
+    // 60s. A short timeout keeps an on-demand lookup snappy. Blocks → off the message
+    // thread (or accept a brief block for an explicit lookup). Mirrors transcribe().
+    URL url = URL (baseUrl + "/get_rhymes").withPOSTData (JSON::toString (var (body)));
+    auto opts = URL::InputStreamOptions (URL::ParameterHandling::inPostData)
+                    .withConnectionTimeoutMs (15000)
+                    .withExtraHeaders ("Content-Type: application/json");
+    if (auto s = url.createInputStream (opts))
+        return JSON::parse (s->readEntireStreamAsString());
+    return {};
+}
+
+juce::var GenerativeJobManager::generateLyrics (const juce::String& mode, const juce::var& spec,
+                                                int lineIndex, int afterIndex, const juce::var& regen)
+{
+    if (! ensureServiceRunning())
+        return {};
+
+    const juce::String path = mode == "fill" ? "/fill_lyric_gap"
+                            : mode == "next" ? "/suggest_next_line"
+                                             : "/complete_lyrics";
+    auto* body = new DynamicObject();
+    body->setProperty ("spec", spec);
+    if (mode == "fill") body->setProperty ("lineIndex", lineIndex);
+    if (mode == "next") body->setProperty ("afterIndex", afterIndex);
+    if (regen.isObject()) body->setProperty ("regen", regen);
+
+    // Fake backend is fast; a real LLM (L3) takes seconds — generous timeout, and the
+    // caller runs this off the message thread (mirrors transcribe()).
+    URL url = URL (baseUrl + path).withPOSTData (JSON::toString (var (body)));
+    auto opts = URL::InputStreamOptions (URL::ParameterHandling::inPostData)
+                    .withConnectionTimeoutMs (120000)
+                    .withExtraHeaders ("Content-Type: application/json");
+    if (auto s = url.createInputStream (opts))
+        return JSON::parse (s->readEntireStreamAsString());
+    return {};
+}
+
 } // namespace mosh

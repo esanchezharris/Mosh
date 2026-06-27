@@ -64,6 +64,22 @@ private:
     juce::var cmdRenameSection  (const juce::var& args);
     juce::var cmdMoveSection    (const juce::var& args);
     juce::var cmdRemoveSection  (const juce::var& args);
+    // LYR-001 — Finish-My-Song lyric sheet (MOSH_LYRICSHEET on a track; undoable).
+    juce::var cmdCreateLyricSheet  (const juce::var& args);
+    juce::var cmdRemoveLyricSheet  (const juce::var& args);
+    juce::var cmdSetLyricConstraint (const juce::var& args);
+    juce::var cmdSetLyricLine       (const juce::var& args);
+    juce::var cmdRemoveLyricLine    (const juce::var& args);
+    juce::var cmdGetRhymes          (const juce::var& args);  // phonology read (service); not undoable
+    // LYR-L2 — generation loop (propose→validate→retry→rank; service, not undoable),
+    // proposals land on the line as a transient JSON blob → snapshot.
+    juce::var cmdCompleteLyrics     (const juce::var& args);
+    juce::var cmdFillLyricGap       (const juce::var& args);
+    juce::var cmdSuggestNextLine    (const juce::var& args);
+    juce::var cmdRegenerateLyric    (const juce::var& args);
+    juce::var cmdCancelLyricJob     (const juce::var& args);
+    juce::var cmdAcceptLyricProposal (const juce::var& args);  // undoable (commits chosen text) + taste label
+    juce::var cmdRejectLyricProposal (const juce::var& args);  // clears proposals + taste label
     // ANN-001 — authored timeline annotations (MOSH_ANNOTATIONS tree; undoable +
     // multiplayer-broadcast). create self-broadcasts its resolved cross-peer id.
     juce::var cmdCreateAnnotation (const juce::var& args);
@@ -288,6 +304,24 @@ private:
     // creates the tree). Each entry: { id, name, startBeat, endBeat, color? }.
     juce::var sectionsToVar();
     juce::var annotationsToVar();
+
+    // LYR-001 — a track's MOSH_LYRICSHEET as a snapshot object (read-only; never
+    // creates the tree). { id, grid, language, topic, mood, explicit, rhymeStrictness,
+    // specVersion, lines:[{ index, role, seedText, text, syllableTarget, syllableTol,
+    // stress, rhymeGroup, rhymeStrictness, locked, sectionId, status }] }, or a null
+    // var when the track has no sheet.
+    juce::var lyricSheetToVar (te::AudioTrack& t);
+    // LYR-L2 — the constraint spec (§5) the generation service consumes, built from a
+    // track's sheet (sheet-level + per-line fields + a {index:regen} object).
+    juce::var lyricSpecForTrack (te::AudioTrack& t);
+    juce::var lyricRegenForTrack (te::AudioTrack& t);
+    // Shared body for complete/fill/next/regenerate — builds the spec, runs the service
+    // (inline for wait:true, else off-thread + callAsync), lands proposals as a JSON blob
+    // on each line node, emits snapshot_invalidated. `epoch` guards a cancelled async land.
+    juce::var runLyricGeneration (const juce::String& cmdName, const juce::String& mode,
+                                  const juce::String& trackId, int lineIndex, int afterIndex,
+                                  const juce::var& args);
+    int lyricGenEpoch_ = 0;  // bumped by cancel_lyric_job; a stale async land is skipped
 
     // KEY-001 — the default musical key surfaced in the snapshot before any set_key
     // (A/minor — matches the voice's neutral A4 tonic + SCALES.minor in voice.js).

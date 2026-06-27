@@ -5103,6 +5103,97 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (! ok (cmd (ops, "edit_annotation", objN ({ { "annotationId", annId }, { "text", "ghost" } }))), "edit of a removed annotation fails cleanly");
     }
 
+    // ─── LYR-001: Finish-My-Song lyric sheet (MOSH_LYRICSHEET, per-track) ───
+    // State spine only (in-process, deterministic). get_rhymes is a SERVICE path
+    // (covered by the Python golden test + an HTTP smoke); exercising it here would
+    // spawn the generative service and break selftest isolation, so it's omitted.
+    {
+        section ("Lyric sheet (MOSH_LYRICSHEET)");
+        auto trk = cmd (ops, "create_track", objN ({ { "name", "Vocals" } }));
+        check (ok (trk), "create_track (vocals) ok");
+        const auto trackId = trk.getProperty ("data", var()).getProperty ("trackId", var()).toString();
+
+        auto sheetOf = [&] (const juce::String& tid) -> juce::var
+        {
+            auto tracks = ops.snapshot().getProperty ("tracks", var());
+            for (int i = 0; i < tracks.size(); ++i)
+                if (tracks[i].getProperty ("id", var()).toString() == tid)
+                    return tracks[i].getProperty ("lyricSheet", var());
+            return {};
+        };
+        auto linesOf = [&] (const juce::String& tid) { return sheetOf (tid).getProperty ("lines", var()); };
+
+        check (! sheetOf (trackId).isObject(), "track starts with no lyric sheet");
+
+        auto created = cmd (ops, "create_lyric_sheet",
+                            objN ({ { "trackId", trackId }, { "grid", "1/16" }, { "topic", "comeback" } }));
+        check (ok (created), "create_lyric_sheet ok");
+        check (created.getProperty ("data", var()).getProperty ("sheetId", var()).toString().isNotEmpty(),
+               "create_lyric_sheet returns a sheetId");
+        check (sheetOf (trackId).isObject(), "snapshot.track.lyricSheet present");
+        check (sheetOf (trackId).getProperty ("grid", var()).toString() == "1/16", "sheet grid is 1/16");
+        check (sheetOf (trackId).getProperty ("topic", var()).toString() == "comeback", "sheet topic round-trips");
+        check (sheetOf (trackId).getProperty ("rhymeStrictness", var()).toString() == "slant",
+               "default rhyme strictness is slant (rap)");
+        check (! ok (cmd (ops, "create_lyric_sheet", objN ({ { "trackId", trackId } }))),
+               "double create_lyric_sheet fails cleanly");
+
+        // Append a line carrying the constraint spec (seed with ___ gaps).
+        check (ok (cmd (ops, "set_lyric_line", objN ({ { "trackId", trackId }, { "lineIndex", 0 },
+                                                       { "role", "hook" }, { "seedText", "yeah I came back ___ ___ the ___" },
+                                                       { "syllableTarget", 9 }, { "rhymeGroup", "A" } }))),
+               "set_lyric_line (append line 0) ok");
+        check (linesOf (trackId).size() == 1, "sheet has one line");
+        check (linesOf (trackId)[0].getProperty ("seedText", var()).toString() == "yeah I came back ___ ___ the ___",
+               "line seedText round-trips WITH gaps");
+        check ((int) linesOf (trackId)[0].getProperty ("syllableTarget", -1) == 9, "line syllableTarget is 9");
+        check (linesOf (trackId)[0].getProperty ("role", var()).toString() == "hook", "line role is hook");
+
+        check (ok (cmd (ops, "set_lyric_line", objN ({ { "trackId", trackId }, { "lineIndex", 1 },
+                                                       { "role", "verse" }, { "seedText", "___ on the grind" } }))),
+               "set_lyric_line (append line 1) ok");
+        check (linesOf (trackId).size() == 2, "sheet has two lines");
+        check (! ok (cmd (ops, "set_lyric_line", objN ({ { "trackId", trackId }, { "lineIndex", 9 } }))),
+               "set_lyric_line out-of-range fails (lines stay dense)");
+
+        // Finalize line 0's text → status flips off "empty".
+        check (ok (cmd (ops, "set_lyric_line", objN ({ { "trackId", trackId }, { "lineIndex", 0 },
+                                                       { "text", "yeah I came back lit the flame" } }))),
+               "set_lyric_line (edit text) ok");
+        check (linesOf (trackId)[0].getProperty ("text", var()).toString() == "yeah I came back lit the flame",
+               "line text updated");
+        check (linesOf (trackId)[0].getProperty ("status", var()).toString() == "seed",
+               "a line carrying text is no longer empty");
+
+        // Sheet-level constraint + undo.
+        check (ok (cmd (ops, "set_lyric_constraint", objN ({ { "trackId", trackId }, { "mood", "defiant" }, { "rhymeStrictness", "perfect" } }))),
+               "set_lyric_constraint ok");
+        check (sheetOf (trackId).getProperty ("mood", var()).toString() == "defiant", "sheet mood updated");
+        check (sheetOf (trackId).getProperty ("rhymeStrictness", var()).toString() == "perfect", "sheet strictness updated");
+        check (ok (cmd (ops, "undo")), "undo (set_lyric_constraint) ok");
+        check (sheetOf (trackId).getProperty ("rhymeStrictness", var()).toString() == "slant",
+               "undo restores the prior strictness");
+
+        // Persists across save/reload (a plain child of the track's own ValueTree).
+        check (ok (cmd (ops, "save")),   "save (lyrics) ok");
+        check (ok (cmd (ops, "reload")), "reload (lyrics) ok");
+        check (sheetOf (trackId).isObject(), "lyric sheet persists across save/reload");
+        check (linesOf (trackId).size() == 2, "lines persist across save/reload");
+        check (linesOf (trackId)[0].getProperty ("text", var()).toString() == "yeah I came back lit the flame",
+               "line text persists across save/reload");
+
+        // remove_lyric_line keeps indices dense.
+        check (ok (cmd (ops, "remove_lyric_line", objN ({ { "trackId", trackId }, { "lineIndex", 0 } }))),
+               "remove_lyric_line ok");
+        check (linesOf (trackId).size() == 1, "one line after remove");
+        check ((int) linesOf (trackId)[0].getProperty ("index", -1) == 0, "remaining line re-indexed to 0");
+
+        check (ok (cmd (ops, "remove_lyric_sheet", objN ({ { "trackId", trackId } }))), "remove_lyric_sheet ok");
+        check (! sheetOf (trackId).isObject(), "lyric sheet gone from snapshot after remove");
+        check (! ok (cmd (ops, "set_lyric_line", objN ({ { "trackId", trackId }, { "lineIndex", 0 }, { "text", "ghost" } }))),
+               "set_lyric_line on a sheetless track fails cleanly");
+    }
+
     finishSection();
     std::cerr << "===== " << (checks - failures) << "/" << checks
               << " checks passed, " << failures << " failed =====\n\n";

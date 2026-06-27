@@ -1,0 +1,124 @@
+#!/usr/bin/env python3
+"""Golden tests for the lyric generation loop (Finish-My-Song §6, L2, fake-first).
+
+The loop is propose → validate(phonology) → retry/repair → rank → top-N. The FAKE
+backend is deterministic (constraint-aware template filler) so the whole loop — and
+the automatable quality FLOOR (the validator pass-rate) — runs with zero LLM/venv and
+is reproducible (run 3x -> identical). Stdlib + the phonology core only.
+
+This proves FIT (syllables within tol, rhyme group end-words rhyme, locked words kept),
+not taste — taste is the human gate (spec §11).
+
+Run:  python3 service/lyrics/lyric_gen_test.py     (exit 0 = all pass)
+"""
+import os
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+SERVICE = os.path.dirname(HERE)
+sys.path.insert(0, SERVICE)
+
+from lyrics import core  # noqa: E402
+
+fails = []
+
+
+def check(name, ok, detail=""):
+    print(f"[{'PASS' if ok else 'FAIL'}] {name}" + (f" — {detail}" if detail else ""))
+    if not ok:
+        fails.append(name)
+
+
+# A "comeback" verse/hook seed: line 0 has a FIXED end word ("flame") that anchors
+# rhyme group A; lines 1–2 must rhyme to it. Line 3 is LOCKED (never regenerated).
+SPEC = {
+    "bpm": 142, "grid": "1/16", "topic": "comeback", "mood": "defiant",
+    "explicit": "allow", "rhymeStrictness": "slant",
+    "lines": [
+        {"index": 0, "role": "hook", "seedText": "yeah I came back ___ ___ the flame",
+         "text": "", "syllableTarget": 9, "syllableTol": 1, "stress": "",
+         "rhymeGroup": "A", "rhymeStrictness": "slant", "locked": False},
+        {"index": 1, "role": "verse", "seedText": "they counted me out ___ ___",
+         "text": "", "syllableTarget": 8, "syllableTol": 1, "stress": "",
+         "rhymeGroup": "A", "rhymeStrictness": "slant", "locked": False},
+        {"index": 2, "role": "verse", "seedText": "",
+         "text": "", "syllableTarget": 8, "syllableTol": 1, "stress": "",
+         "rhymeGroup": "A", "rhymeStrictness": "slant", "locked": False},
+        {"index": 3, "role": "verse", "seedText": "", "text": "this one stays exactly as I wrote it",
+         "syllableTarget": 10, "syllableTol": 1, "stress": "",
+         "rhymeGroup": "B", "rhymeStrictness": "slant", "locked": True},
+    ],
+}
+
+
+def syl(word_or_line):
+    return core.syllables(word_or_line)
+
+
+# ── 1. complete() returns proposals for the fillable lines; skips the locked one ──
+res = core.complete(SPEC, backend="fake")
+check("complete ok", res.get("ok") is True)
+lines = {l["index"]: l for l in res.get("lines", [])}
+check("proposes for line 0 (fixed-end anchor)", 0 in lines and len(lines[0]["proposals"]) >= 1)
+check("proposes for line 1", 1 in lines and len(lines[1]["proposals"]) >= 1)
+check("proposes for line 2 (empty seed, generate from scratch)", 2 in lines and len(lines[2]["proposals"]) >= 1)
+check("does NOT propose for the LOCKED line 3", 3 not in lines)
+
+# ── 2. Each top proposal hits its syllable target within tolerance ───────────────
+def top(idx):
+    return lines[idx]["proposals"][0]
+
+for idx, tgt, tol in [(0, 9, 1), (1, 8, 1), (2, 8, 1)]:
+    p = top(idx)
+    n = p["syllables"]
+    check(f"line {idx} top proposal hits {tgt}±{tol} syllables (got {n})", abs(n - tgt) <= tol, p["text"])
+    check(f"line {idx} top proposal reports syllableOk", p.get("syllableOk") is True)
+
+# ── 3. The producer's locked seed words survive in line 0 + its fixed end is kept ─
+check("line 0 keeps the fixed end word 'flame'", top(0)["endWord"] == "flame", top(0)["text"])
+check("line 0 keeps a locked seed word ('came')", "came" in top(0)["text"].lower().split(), top(0)["text"])
+
+# ── 4. Rhyme group A: lines 1 & 2 rhyme to the anchor end word ('flame') ─────────
+for idx in (1, 2):
+    p = top(idx)
+    check(f"line {idx} end word rhymes with the group-A anchor 'flame'",
+          core.rhymes(p["endWord"], "flame", "slant"),
+          f"{p['endWord']} :: {p['text']}")
+    check(f"line {idx} top proposal reports rhymeOk", p.get("rhymeOk") is True)
+
+# ── 5. Determinism: identical spec -> identical proposals, 3x ─────────────────────
+a = core.complete(SPEC, backend="fake")
+b = core.complete(SPEC, backend="fake")
+check("complete is deterministic (run a == run b)",
+      [ [pp["text"] for pp in l["proposals"]] for l in a["lines"] ]
+      == [ [pp["text"] for pp in l["proposals"]] for l in b["lines"] ])
+
+# ── 6. Validator PASS-RATE floor — the automatable quality floor (spec §11) ──────
+top_props = [top(i) for i in (0, 1, 2)]
+passed = sum(1 for p in top_props if p.get("passes"))
+rate = passed / len(top_props)
+check(f"validator pass-rate >= 0.8 over the top proposals (got {rate:.2f})", rate >= 0.8)
+
+# ── 7. regenerate (a different seed) varies the proposal for one line ─────────────
+r0 = core.complete(SPEC, regen={2: 0}, backend="fake")
+r1 = core.complete(SPEC, regen={2: 1}, backend="fake")
+check("a different regen counter varies line 2's proposal",
+      r0["lines"][[l["index"] for l in r0["lines"]].index(2)]["proposals"][0]["text"]
+      != r1["lines"][[l["index"] for l in r1["lines"]].index(2)]["proposals"][0]["text"])
+
+# ── 8. fill_gap() returns just one line; suggest_next_line() the line after ───────
+fg = core.fill_gap(SPEC, 1, backend="fake")
+check("fill_gap(1) returns exactly line 1", [l["index"] for l in fg["lines"]] == [1])
+sn = core.suggest_next_line(SPEC, after_index=0, backend="fake")
+check("suggest_next_line(after=0) returns line 1", [l["index"] for l in sn["lines"]] == [1])
+
+# ── 9. grid-inferred target when a line leaves syllableTarget at 0 ───────────────
+spec2 = {"grid": "1/8", "rhymeStrictness": "slant", "topic": "night",
+         "lines": [{"index": 0, "role": "verse", "seedText": "", "text": "",
+                    "syllableTarget": 0, "syllableTol": 2, "rhymeGroup": "", "locked": False}]}
+res2 = core.complete(spec2, backend="fake")
+p2 = res2["lines"][0]["proposals"][0]
+check("grid 1/8 ⇒ inferred ~8-syllable target", abs(p2["syllables"] - 8) <= 2, p2["text"])
+
+print(f"\n{'OK' if not fails else 'FAILED'}: {len(fails)} failure(s)")
+sys.exit(len(fails))

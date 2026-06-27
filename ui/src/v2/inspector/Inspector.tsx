@@ -9,6 +9,7 @@
 import { useStore } from "../../store";
 import { useShell, type InspectorTab } from "../shellState";
 import { Rack, GenDrawer } from "../../ui/Dock";
+import { LyricPanel } from "./LyricPanel";
 import { deriveTakeLanes } from "../../ui/takeLanes";
 import { useDrumWindow } from "../../ui/dock/useFloatingWindow";
 import type { Clip, Track } from "../../types";
@@ -32,6 +33,7 @@ export function Inspector() {
     { id: "mix", label: "Mix" },
     { id: "fx", label: "FX" },
     { id: "gen", label: "Gen" },
+    { id: "lyrics", label: "Lyrics" },
     ...(isMidi ? [{ id: "midi" as const, label: "MIDI" }] : []),
     ...(hasTakes ? [{ id: "takes" as const, label: "Takes" }] : []),
   ];
@@ -50,6 +52,7 @@ export function Inspector() {
         {active === "mix" && <MixTab track={track} />}
         {active === "fx" && <Rack track={track} onAddPlugin={() => useShell.getState().openBrowserTab("plugins")} />}
         {active === "gen" && <GenDrawer track={track} selectedClipId={selectedClipId ?? undefined} />}
+        {active === "lyrics" && <LyricPanel track={track} />}
         {active === "midi" && clip && <MidiTab clip={clip} drum={track.type === "drum"} />}
         {active === "takes" && clip && <TakesTab clip={clip} />}
       </div>

@@ -84,6 +84,23 @@ def _sketch_available() -> bool:
     return os.path.isfile(_sketch_py())
 
 
+def _phonology_py() -> str:
+    """The dedicated phonology venv's python (set by setup-phonology.sh via
+    .phonology.env -> PHONOLOGY_PY), else the conventional default path."""
+    env = os.environ.get("PHONOLOGY_PY", "").strip()
+    return env or os.path.join(SERVICE_DIR, "phonology", ".venv", "bin", "python")
+
+
+def _phonology_available() -> bool:
+    """True when phonology can produce DICTIONARY-backed rhymes — either the dedicated
+    venv exists OR cmudict is importable in the service interpreter. False ⇒ /get_rhymes
+    still answers, but from the stdlib vowel-group heuristic only."""
+    if os.path.isfile(_phonology_py()):
+        return True
+    import importlib.util
+    return importlib.util.find_spec("cmudict") is not None
+
+
 def _colorrack_hash() -> str:
     try:
         from colors import runtime as CR
@@ -447,7 +464,8 @@ class Handler(BaseHTTPRequestHandler):
                              "version": SERVICE_VERSION, "build": SERVICE_BUILD,
                              "uptime_s": round(time.time() - START_TIME, 1),
                              "adapters": adapters, "transcribe": _transcribe_available(),
-                             "sketch": _sketch_available()})
+                             "sketch": _sketch_available(),
+                             "phonology": _phonology_available()})
         elif path == "/capabilities":
             adapters = [FAKE_ADAPTER, TRANSFORM_ADAPTER] + ([_sa3_descriptor()] if SA3_ENABLED else [])
             training = [_training_descriptor()] if TRAINING_ENABLED else []
@@ -647,6 +665,83 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(500, {"ok": False, "error": f"sketch failed: {tail or 'no output'}"})
                 return
             self._send(200 if payload.get("ok") else 500, payload)
+        elif path == "/get_rhymes":
+            # Phonology rhyme search (Finish-My-Song rung 1). Fast + deterministic; no
+            # LLM. Prefer the dedicated phonology venv (so the precise cmudict path works
+            # even when the service interpreter lacks it); otherwise run the core
+            # in-process (precise if cmudict is importable here, else a stdlib heuristic).
+            word = str(data.get("word", "")).strip()
+            if not word:
+                self._send(400, {"ok": False, "error": "word missing"})
+                return
+            strictness = data.get("strictness", "slant")
+            if strictness not in ("perfect", "slant", "free"):
+                strictness = "slant"
+            try:
+                max_n = int(data.get("maxN", 50))
+            except (TypeError, ValueError):
+                max_n = 50
+            max_n = max(1, min(max_n, 200))
+            syllables = data.get("syllables", None)
+            try:
+                syllables = int(syllables) if syllables not in (None, "", 0) else None
+            except (TypeError, ValueError):
+                syllables = None
+            py = _phonology_py()
+            if os.path.isfile(py):
+                cli = os.path.join(SERVICE_DIR, "phonology", "phonology_cli.py")
+                argv = [py, cli, "get_rhymes", word, strictness, str(max_n),
+                        str(syllables if syllables is not None else "")]
+                try:
+                    proc = subprocess.run(argv, capture_output=True, text=True, timeout=60)
+                except subprocess.TimeoutExpired:
+                    self._send(504, {"ok": False, "error": "rhyme lookup timed out"})
+                    return
+                except OSError as e:
+                    self._send(500, {"ok": False, "error": f"rhyme lookup failed to start: {e}"})
+                    return
+                out = (proc.stdout or "").strip()
+                try:
+                    payload = json.loads(out)
+                except (json.JSONDecodeError, ValueError):
+                    tail = (proc.stderr or "").strip()[-400:]
+                    self._send(500, {"ok": False, "error": f"rhyme lookup failed: {tail or 'no output'}"})
+                    return
+                self._send(200 if payload.get("ok") else 500, payload)
+            else:
+                try:
+                    from phonology import core as _ph
+                    payload = _ph.get_rhymes(word, strictness=strictness,
+                                             max_n=max_n, syllables=syllables)
+                    self._send(200, payload)
+                except Exception as e:  # noqa: BLE001
+                    self._send(500, {"ok": False, "error": f"phonology error: {e}"})
+        elif path in ("/complete_lyrics", "/fill_lyric_gap", "/suggest_next_line"):
+            # Lyric generation loop (Finish-My-Song L2, fake-first): propose →
+            # validate(phonology) → retry → rank → top-N. Runs IN-PROCESS (the core is
+            # stdlib + the phonology core); deterministic with the fake backend. The
+            # native side builds `spec` from the lyric sheet and lands the proposals.
+            spec = data.get("spec", {})
+            if not isinstance(spec, dict) or not spec.get("lines"):
+                self._send(400, {"ok": False, "error": "spec.lines required"})
+                return
+            regen = {}
+            for k, v in (data.get("regen", {}) or {}).items():
+                try:
+                    regen[int(k)] = int(v)
+                except (TypeError, ValueError):
+                    pass
+            try:
+                from lyrics import core as lyr
+                if path == "/complete_lyrics":
+                    payload = lyr.complete(spec, regen=regen)
+                elif path == "/fill_lyric_gap":
+                    payload = lyr.fill_gap(spec, int(data.get("lineIndex", 0)), regen=regen)
+                else:
+                    payload = lyr.suggest_next_line(spec, int(data.get("afterIndex", -1)), regen=regen)
+                self._send(200, payload)
+            except Exception as e:  # noqa: BLE001
+                self._send(500, {"ok": False, "error": f"lyric generation error: {e}"})
         elif path == "/training/submit" or path == "/training/jobs":
             if not TRAINING_ENABLED:
                 self._send(503, {"ok": False, "error": "lora trainer unavailable"})
