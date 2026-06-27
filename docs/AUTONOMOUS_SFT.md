@@ -91,11 +91,42 @@ export MOSHI_BRAIN_PROVIDER=openai OPENAI_BASE_URL=http://127.0.0.1:8080/v1 \
 - `service/sft/.fused/sft-v1/` — standalone served model.
 - `service/sft/.sft-data/sft-v1/eval_results.{baseline,finetuned}.json` — the DoD comparison.
 
-## Results
+## Results (first full run, 2026-06-27)
 
-<!-- RESULTS: filled after the first full run -->
-_(populated by the first `autotrain.sh` run — baseline (cloud `gpt-5.4-mini`) vs finetuned
-(local Qwen3-4B LoRA) clean-apply over the frozen eval set)_
+The loop runs end-to-end and **balanced training is a real, measured win**, but the local 4B is
+**behind** the cloud — honest numbers below. (Earlier in this run a "0.89, beats cloud" figure
+appeared; it was a **serving artifact** — see the tokenizer gotcha — not the model's real score.)
+
+Decode-fair clean-apply (`metric.ts` = clean-apply × gold-command-name recall) on the frozen,
+**balanced** v2 eval set (`--max-tokens 2500`, n=300, identical subsample):
+
+| model | clean-apply | deferrals |
+|---|---:|---:|
+| original unbalanced LoRA (iter-200) | 0.416 | 51 |
+| **balanced LoRA (v2, iter-400, correct tokenizer)** | **0.619** | 57 |
+| cloud `gpt-5.4-mini` | **0.875** | 18 |
+
+What balancing fixed (vs the unbalanced run): capping note-population at 8 and giving each command
+type comparable exposure drove **arg-type errors 77 → 17** and lifted the model **0.42 → 0.62**.
+Remaining gap (of 300): **57 "acts-shy"** (acknowledges a question-phrased ask — "Can you bump the
+tempo?" — without emitting the command), **66 wrong-command**, **17 arg-type**. These are
+content/behavior gaps that need more/targeted training (question-form utterances, command-selection
+signal), not a decode trick — a 4B closing on a frontier cloud model is a real hill.
+
+**Dataset:** v2 = 7,315 balanced train examples (add_midi_clip 96→1,350, mixer ~1,476,
+tempo/timesig ~2,800, populate ~1,300 capped at 8), built from `~/mosh-corpus` (179k Lakh MIDI +
+~73 parseable DAW projects) with brain back-translation (~12 shapes, ~22 brain calls).
+**Training:** batch 1, 16 layers, lr 2e-5, max-seq 2560, ~9 s/iter on an M1 Max, converged by
+iter-400 (~1 h). Harvest = best checkpoint by the clean-apply metric (early-stop on metric, not loss).
+
+### ⚠️ Serving gotcha — tokenizer must match training
+`mlx_lm.server`, when **online**, can resolve `/v1/models` to a *similarly-named* HF model and load
+**its** chat template (here it grabbed `Huihui-Qwen3.5-4B-...`, whose template differs from our
+`Qwen3-4B-Instruct-2507-4bit` base by a few chars). A mismatched template silently swings the score
+(it inflated 0.62 → 0.89 by nudging the model to act). **Always serve with the model's own tokenizer:**
+run the server with `HF_HUB_OFFLINE=1` (the fused model carries the correct, byte-identical template),
+and verify `/v1/models` reports `mlx-community/Qwen3-4B-Instruct-2507-4bit`. Eval/serve flakiness was
+also caused by **two mlx servers colliding on port 8080** — run one eval at a time, clean.
 
 ## Continuously autonomous (next)
 
