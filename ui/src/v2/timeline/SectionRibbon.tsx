@@ -142,7 +142,7 @@ export function SectionRibbon({ snapshot, width }: { snapshot: Snapshot; width: 
 
   return (
     <div className="v2-ribbon" style={{ width }} data-testid="v2-section-ribbon">
-      <button className="v2-seg-add" title="Add section" data-testid="v2-section-add" style={{ left: addLeft }} onClick={() => void createSection()}>+</button>
+      <button className="v2-seg-add" title="Add section" aria-label="Add section" data-testid="v2-section-add" style={{ left: addLeft }} onClick={() => void createSection()}>+</button>
       {sections.map((sec, i) => {
         const p = preview && preview.id === sec.id ? preview : sec;
         const left = beatToSec(snapshot, p.startBeat) * pxPerSec;
@@ -179,7 +179,7 @@ export function SectionRibbon({ snapshot, width }: { snapshot: Snapshot; width: 
               <span className="v2-seg-name">{sec.name}</span>
             )}
             <button
-              className="v2-seg-rm" title="Remove section" data-testid="v2-section-remove"
+              className="v2-seg-rm" title="Remove section" aria-label="Remove section" data-testid="v2-section-remove"
               onPointerDown={(e) => e.stopPropagation()}
               onPointerUp={(e) => e.stopPropagation()}
               onClick={(e) => { e.stopPropagation(); void exec("remove_section", { sectionId: sec.id }); }}

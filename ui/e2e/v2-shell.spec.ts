@@ -328,6 +328,15 @@ test("section ribbon: ✕ removes a section", async ({ page }) => {
   await expect(page.getByTestId("v2-section")).toHaveCount(2);
 });
 
+test("section ribbon: the icon-only +/× buttons carry an accessible name (a11y)", async ({ page }) => {
+  await bootV2(page);
+  // The glyphs alone ("+"/"×") are meaningless to a screen reader — both must expose
+  // an aria-label, matching the topbar/overflow/drawer-close icon-button convention.
+  await expect(page.getByTestId("v2-section-add")).toHaveAttribute("aria-label", "Add section");
+  await expect(page.getByTestId("v2-section").first().getByTestId("v2-section-remove"))
+    .toHaveAttribute("aria-label", "Remove section");
+});
+
 test("section ribbon: a quick click across two sections seeks (does not spuriously rename)", async ({ page }) => {
   await bootV2(page);
   // Click Intro, then quickly Verse — a shared double-click timer must not treat two
