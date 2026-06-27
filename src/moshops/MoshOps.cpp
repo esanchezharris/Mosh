@@ -437,6 +437,18 @@ void MoshOps::timerCallback()
         emit ("transport", transportToVar());
     wasPlaying = playing;
 
+    if (mpSession_ != nullptr && mpSession_->active())
+    {
+        const auto nowMs = Time::getMillisecondCounterHiRes();
+        if (nowMs - lastPresenceBroadcastMs >= 250.0)
+        {
+            lastPresenceBroadcastMs = nowMs;
+            mpSession_->broadcastPresence (transport.getPosition().inSeconds(),
+                                           transport.isPlaying(),
+                                           transport.isRecording());
+        }
+    }
+
     // Decimated level meters (Wave 9). Reconcile first (undo/redo-safe), then each
     // client reports the peak since the last read (getAndClear resets to -100);
     // master comes from the playback context's measurer (null headless → -100).

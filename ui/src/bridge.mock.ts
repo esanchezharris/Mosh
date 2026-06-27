@@ -1120,6 +1120,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
         locks,
       });
       if (locked) emit("peer_selection", { peerId: "bo", trackId: locked.id, clipId: locked.clips[0]?.id ?? null });
+      emit("peer_presence", { peerId: "bo", position: 5.25, playing: true, recording: false });
       invalidate();   // surface the freshly-stamped logicalIds to the UI snapshot
       return ok(command, { code });
     }

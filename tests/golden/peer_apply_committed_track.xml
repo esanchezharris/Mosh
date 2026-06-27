@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<TRACK id="ID_001" moshLogicalId="ID_002" name="Peer Sender">
+  <MODIFIERS/>
+  <CLIPSLOTS/>
+  <AUDIOCLIP name="tone-220" start="0.0" length="1.0" offset="0.0" id="ID_003"
+             source="PATH_001" sync="0" elastiqueMode="0" pan="0.0" colour="ff00ff00"
+             proxyAllowed="1" resamplingQuality="lagrange">
+    <LOOPINFO rootNote="-1" numBeats="2.0" oneShot="0" denominator="4" numerator="4"
+              bpm="0.0" inMarker="0" outMarker="-1"/>
+    <AUTOMATIONCURVES/>
+  </AUDIOCLIP>
+  <OUTPUTDEVICES>
+    <DEVICE name="(default audio output)"/>
+  </OUTPUTDEVICES>
+</TRACK>

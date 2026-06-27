@@ -64,6 +64,7 @@ public:
     void commit (const juce::String& logicalId, const juce::String& blob, const juce::var& audioRefs);
     /** Publish our current selection (presence) to the room. */
     void broadcastSelection (const juce::String& trackId, const juce::String& clipId);
+    void broadcastPresence (double position, bool playing, bool recording);
     /** Mirror a session-global scalar op ({command, args}) to the peer. */
     void broadcastStructural (const juce::String& command, const juce::var& args);
     /** Point-to-point WebRTC signaling passthrough (SDP/ICE) to one peer. The relay is

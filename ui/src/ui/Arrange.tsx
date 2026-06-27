@@ -33,6 +33,7 @@ import { useSettings } from "../settings/store";
 import { laneRows, lanesTotal } from "./laneLayout";
 import { TrackFxDrawer } from "./TrackFxDrawer";
 import { AnnotationRuler } from "./AnnotationRuler";
+import { RemotePlayheads } from "./RemotePlayheads";
 import type { Snapshot, Track, Clip, MidiNote } from "../types";
 // Configurable interaction: gestures/keymap resolve through DAW-preset tables instead
 // of hardcoded branches; feel values (drag-threshold, edge-grab, snap, etc.) are read
@@ -335,6 +336,7 @@ export function Arrange({ snapshot }: { snapshot: Snapshot }) {
           )}
 
           <Playhead secToPx={secToPx} />
+          <RemotePlayheads secToPx={secToPx} lanesHeight={lanesHeight} />
 
           {marquee && (
             <div className="marquee" data-testid="marquee" style={{

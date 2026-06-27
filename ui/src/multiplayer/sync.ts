@@ -9,6 +9,7 @@ export const SESSION_KEY = "__session__";
 export type PeerInfo = { name: string; color: string; online: boolean };
 export type MpSession = { active: boolean; roomCode: string | null; selfPeer: string | null; connected: boolean };
 export type PeerSelection = { trackId: string | null; clipId: string | null };
+export type PeerPresence = { position: number; playing: boolean; recording: boolean; updatedAtMs: number };
 export type SyncActions = { release: string | null; claim: string | null };
 
 /** The track the local user is "actively editing" — the trigger for commit-on-move.

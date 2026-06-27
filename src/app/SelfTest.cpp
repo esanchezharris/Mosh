@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <map>
 #include <thread>
 #include <vector>
 
@@ -168,6 +169,132 @@ namespace
 
     juce::var firstTrack (MoshOps& ops) { return ops.snapshot()["tracks"][0]; }
     int trackClips (const juce::var& t) { return t.getProperty ("clips", juce::var()).size(); }
+
+    juce::var trackSnapshotByLogicalId (MoshOps& ops, const juce::String& logicalId)
+    {
+        auto snapshot = ops.snapshot();
+        if (auto* arr = snapshot.getProperty ("tracks", juce::var()).getArray())
+            for (auto& track : *arr)
+                if (track.getProperty ("logicalId", juce::var()).toString() == logicalId)
+                    return track;
+        return {};
+    }
+
+    class GoldenCanonicalizer
+    {
+    public:
+        juce::String canonicalizeXml (const juce::String& raw)
+        {
+            auto xml = juce::parseXML (raw);
+            if (xml == nullptr)
+                return {};
+
+            canonicalizeElement (*xml);
+            auto text = xml->toString();
+            text = text.replace ("\r\n", "\n");
+            return text.trimEnd() + "\n";
+        }
+
+    private:
+        juce::String canonicalId (const juce::String& value)
+        {
+            const auto key = value.trim();
+            if (key.isEmpty())
+                return key;
+
+            auto it = ids.find (key);
+            if (it != ids.end())
+                return it->second;
+
+            const auto token = "ID_" + juce::String (++nextId).paddedLeft ('0', 3);
+            ids.emplace (key, token);
+            return token;
+        }
+
+        juce::String canonicalPath (const juce::String& value)
+        {
+            const auto key = value.trim();
+            if (key.isEmpty())
+                return key;
+
+            auto it = paths.find (key);
+            if (it != paths.end())
+                return it->second;
+
+            const auto token = "PATH_" + juce::String (++nextPath).paddedLeft ('0', 3);
+            paths.emplace (key, token);
+            return token;
+        }
+
+        void canonicalizeElement (juce::XmlElement& xml)
+        {
+            for (int i = 0; i < xml.getNumAttributes(); ++i)
+            {
+                const auto attr = xml.getAttributeName (i);
+                const auto lower = attr.toLowerCase();
+                const auto value = xml.getStringAttribute (attr);
+
+                if (lower.contains ("id"))
+                    xml.setAttribute (attr, canonicalId (value));
+                else if (lower.contains ("path")
+                         || lower.contains ("file")
+                         || lower == "source"
+                         || lower.endsWith ("source"))
+                    xml.setAttribute (attr, canonicalPath (value));
+            }
+
+            for (auto* child = xml.getFirstChildElement(); child != nullptr; child = child->getNextElement())
+                canonicalizeElement (*child);
+        }
+
+        std::map<juce::String, juce::String> ids;
+        std::map<juce::String, juce::String> paths;
+        int nextId = 0;
+        int nextPath = 0;
+    };
+
+    juce::File goldenDir()
+    {
+        const auto env = juce::SystemStats::getEnvironmentVariable ("MOSH_GOLDEN_DIR", {}).trim();
+        if (env.isNotEmpty())
+        {
+            const juce::File asFile (env.startsWithChar (juce::File::getSeparatorChar())
+                                         ? env
+                                         : juce::File::getCurrentWorkingDirectory().getChildFile (env).getFullPathName());
+            return asFile;
+        }
+        return juce::File::getCurrentWorkingDirectory().getChildFile ("tests/golden");
+    }
+
+    void checkGoldenXml (const juce::File& sessionDir,
+                         const juce::String& fixtureName,
+                         const juce::String& actual)
+    {
+        const auto expectedFile = goldenDir().getChildFile (fixtureName);
+        const auto actualFile = sessionDir.getChildFile (fixtureName + ".actual.xml");
+        actualFile.getParentDirectory().createDirectory();
+
+        if (! expectedFile.existsAsFile())
+        {
+            actualFile.replaceWithText (actual);
+            check (false, "missing golden fixture " + expectedFile.getFullPathName()
+                        + " (wrote " + actualFile.getFullPathName() + ")");
+            return;
+        }
+
+        const auto expected = expectedFile.loadFileAsString().replace ("\r\n", "\n").trimEnd() + "\n";
+        if (expected != actual)
+        {
+            actualFile.replaceWithText (actual);
+            check (false, "golden mismatch for " + fixtureName
+                        + " (wrote " + actualFile.getFullPathName() + ")");
+            return;
+        }
+
+        if (actualFile.existsAsFile())
+            actualFile.deleteFile();
+        check (true, "golden fixture matched: " + fixtureName);
+    }
 }
 
 // Headless deep plugin scan (--scan-plugins-deep): a synchronous out-of-process
@@ -206,6 +333,110 @@ int runDeepPluginScan (MoshOps& ops)
 
     std::cerr << "===== deep scan complete =====\n";
     return 0;
+}
+
+int runGoldenSelfTest (MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+    failures = 0; checks = 0;
+    resetSections();
+    std::cerr << "===== Golden selftest: command ValueTree fixtures =====\n";
+
+    section ("Layer 1: create_track ValueTree golden");
+    const auto create = cmd (ops, "create_track", args1 ("name", "Golden Track"));
+    check (ok (create), "create_track ok");
+    const auto trackId = create.getProperty ("data", var()).getProperty ("trackId", var()).toString();
+    check (trackId.isNotEmpty(), "create_track returned trackId");
+
+    const auto serialized = cmd (ops, "mp_serialize_track", args1 ("trackId", trackId));
+    check (ok (serialized), "mp_serialize_track ok");
+    const auto blob = serialized.getProperty ("data", var()).getProperty ("blob", var()).toString();
+    check (blob.isNotEmpty(), "mp_serialize_track produced XML");
+
+    GoldenCanonicalizer canonicalizer;
+    const auto actual = canonicalizer.canonicalizeXml (blob);
+    check (actual.isNotEmpty(), "canonical XML produced");
+    if (actual.isNotEmpty())
+        checkGoldenXml (eng.sessionDir(), "moshop_create_track.xml", actual);
+
+    section ("Layer 2: phone command body routes through MoshOps");
+    auto* phoneArgs = new DynamicObject();
+    phoneArgs->setProperty ("action", "record");
+    phoneArgs->setProperty ("source", "phone_controller");
+    auto* phoneCommand = new DynamicObject();
+    phoneCommand->setProperty ("command", "set_transport");
+    phoneCommand->setProperty ("args", var (phoneArgs));
+    auto* phoneBody = new DynamicObject();
+    phoneBody->setProperty ("command", var (phoneCommand));
+    const var phoneEnvelope (phoneBody);
+    const auto phonePayload = phoneEnvelope.getProperty ("command", var());
+    check (phonePayload.isObject(), "phone body carries the standard command object");
+    const auto phoneResult = ops.execute (phonePayload);
+    check (ok (phoneResult), "phone set_transport record applies through MoshOps");
+    check (phoneResult.getProperty ("command", var()).toString() == "set_transport",
+           "phone command keeps the normal set_transport command name");
+    const auto phoneLog = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
+    check (phoneLog.contains ("\"source\": \"phone_controller\""), "phone source survives into the command log");
+
+    section ("Layer 3: peer apply committed track ValueTree golden");
+    MoshEngine receiverEng (false, true, "session-golden-selftest-receiver");
+    MoshOps receiverOps (receiverEng);
+
+    const auto senderCreate = cmd (ops, "create_track", args1 ("name", "Peer Sender"));
+    check (ok (senderCreate), "sender create_track ok");
+    const auto senderTrackId = senderCreate.getProperty ("data", var()).getProperty ("trackId", var()).toString();
+    check (senderTrackId.isNotEmpty(), "sender trackId resolved");
+
+    const auto senderTone = cmd (ops, "add_test_tone_clip",
+                                 objN ({ { "trackId", senderTrackId },
+                                         { "seconds", 1.0 },
+                                         { "freq", 220.0 } }));
+    check (ok (senderTone), "sender add_test_tone_clip ok");
+
+    const auto senderCommit = cmd (ops, "mp_serialize_track", args1 ("trackId", senderTrackId));
+    check (ok (senderCommit), "sender mp_serialize_track ok");
+    const auto senderBlob = senderCommit.getProperty ("data", var()).getProperty ("blob", var()).toString();
+    check (senderBlob.isNotEmpty(), "sender commit blob produced");
+
+    const auto apply = cmd (receiverOps, "apply_remote_track", args1 ("blob", senderBlob));
+    check (ok (apply), "receiver apply_remote_track ok");
+    check (apply.getProperty ("data", var()).getProperty ("mode", var()).toString() == "created",
+           "receiver created the incoming peer track");
+    const auto peerLogicalId = apply.getProperty ("data", var()).getProperty ("logicalId", var()).toString();
+    check (peerLogicalId.isNotEmpty(), "receiver apply returned logicalId");
+
+    auto receiverTrack = trackSnapshotByLogicalId (receiverOps, peerLogicalId);
+    check (receiverTrack.isObject(), "receiver track found by logicalId");
+    bool hasResolvedWave = false;
+    bool hasCleanPendingWave = false;
+    if (auto* clips = receiverTrack.getProperty ("clips", var()).getArray())
+        for (auto& clip : *clips)
+            if (clip.getProperty ("type", var()).toString() == "wave")
+            {
+                const auto sourceFile = clip.getProperty ("sourceFile", var()).toString();
+                const bool missing = (bool) clip.getProperty ("sourceMissing", false);
+                hasResolvedWave = hasResolvedWave || (sourceFile.isNotEmpty() && juce::File (sourceFile).existsAsFile());
+                hasCleanPendingWave = hasCleanPendingWave || missing;
+            }
+    check (hasResolvedWave || hasCleanPendingWave, "receiver wave source resolves locally or is cleanly pending");
+
+    const auto receiverTrackId = receiverTrack.getProperty ("id", var()).toString();
+    check (receiverTrackId.isNotEmpty(), "receiver engine trackId resolved");
+    const auto receiverSerialized = cmd (receiverOps, "mp_serialize_track", args1 ("trackId", receiverTrackId));
+    check (ok (receiverSerialized), "receiver mp_serialize_track ok");
+    const auto receiverBlob = receiverSerialized.getProperty ("data", var()).getProperty ("blob", var()).toString();
+    check (receiverBlob.isNotEmpty(), "receiver serialized XML produced");
+
+    GoldenCanonicalizer peerCanonicalizer;
+    const auto peerActual = peerCanonicalizer.canonicalizeXml (receiverBlob);
+    check (peerActual.isNotEmpty(), "receiver canonical XML produced");
+    if (peerActual.isNotEmpty())
+        checkGoldenXml (eng.sessionDir(), "peer_apply_committed_track.xml", peerActual);
+
+    finishSection();
+    std::cerr << "===== golden selftest complete: " << checks << " checks, "
+              << failures << " failed =====\n";
+    return failures;
 }
 
 // The harness hosts a REAL external plugin to exercise VST3 hosting, but it must NEVER
