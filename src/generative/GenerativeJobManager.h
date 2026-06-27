@@ -50,6 +50,12 @@ public:
         on failure (service down, venv absent → 503). */
     juce::var sketchBeatbox (const juce::File& inputWav, double bpm, int bars);
 
+    /** §1 drum-sample match (POST /teardown/match). SYNCHRONOUS — call off the message
+        thread. Returns { ok, matches:[{path,distance,role_guess,kind}] }, or a var whose
+        ok is false / {} on failure (service down, teardown venv absent → 503, index
+        not built → 409). */
+    juce::var findSimilarSamples (const juce::File& inputWav, const juce::String& role, int k);
+
     juce::String serviceBuild() const { return svcBuild; }
 
 private:

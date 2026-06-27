@@ -660,6 +660,21 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       return str(args.path) ? ok(command, { path: str(args.path), playing: false }) : err(command, "missing 'path'");
     case "stop_audition":
       return ok(command);
+    case "find_similar_sample": {
+      // §1 drum match — deterministic fake neighbours so the dev/e2e harness exercises
+      // the happy path (the real result comes from the teardown service /teardown/match).
+      if (!str(args.path)) return err(command, "missing 'path'");
+      const k = Math.max(1, Math.min(50, num(args.k, 5)));
+      const role = str(args.role);
+      const dir = str(args.path).replace(/[^/]*$/, "");
+      const matches = Array.from({ length: Math.min(k, 4) }, (_, i) => ({
+        path: `${dir}similar_${i + 1}.wav`,
+        distance: 0.05 + i * 0.13,
+        role_guess: role || "kick",
+        kind: "one_shot",
+      }));
+      return ok(command, { path: str(args.path), available: true, matches });
+    }
 
     // ── plugins ────────────────────────────────────────────────
     case "list_plugins": return ok(command, { plugins: VST3S, counts: { vst3: VST3S.length, au: 0, total: VST3S.length } });

@@ -45,6 +45,9 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   // ── embodied capture (Sketch, Phase 0) ───────────────────────────────────
   { command: "sketch_beatbox", desc: "Transduce a recorded beatbox WAV into an editable drum clip at a known BPM (kick/snare/hat on a 16th grid)", args: [S("file", true, "path to the beatbox WAV"), N("bpm", true, "known tempo"), N("bars", false, "loop length, 1-2 bars")] },
 
+  // ── teardown §1: find owned samples nearest to a query one-shot ───────────
+  { command: "find_similar_sample", desc: "Find the drum one-shots you OWN nearest to a query sample (perceptual vector match; needs the teardown index built)", args: [S("path", true, "query one-shot file"), S("role", false, "kick|snare|hat|clap|perc|other to filter"), N("k", false, "how many results (1-50)")] },
+
   // ── MIDI notes ──────────────────────────────────────────────────────────
   { command: "add_note", desc: "Add a MIDI note (pitch 0-127) to a MIDI clip", args: [S("clipId"), N("pitch"), N("start", true, "beats"), N("length", true, "beats"), N("velocity", false, "0-127")] },
   { command: "remove_note", desc: "Remove a MIDI note by index", args: [S("clipId"), N("noteIndex")] },

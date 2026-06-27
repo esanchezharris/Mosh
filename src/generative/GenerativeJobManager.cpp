@@ -198,4 +198,26 @@ juce::var GenerativeJobManager::sketchBeatbox (const juce::File& inputWav, doubl
     return {};
 }
 
+juce::var GenerativeJobManager::findSimilarSamples (const juce::File& inputWav, const juce::String& role, int k)
+{
+    if (! ensureServiceRunning())
+        return {};
+
+    auto* body = new DynamicObject();
+    body->setProperty ("inputWav", inputWav.getFullPathName());
+    if (role.isNotEmpty()) body->setProperty ("role", role);
+    body->setProperty ("k", k > 0 ? k : 5);
+
+    // The teardown match runs in a dedicated venv subprocess; the service caps it at 60s.
+    // Synchronous — the caller runs it off the message thread (a warm query is sub-second;
+    // the first call may spawn the service). Mirrors transcribe()/sketchBeatbox().
+    URL url = URL (baseUrl + "/teardown/match").withPOSTData (JSON::toString (var (body)));
+    auto opts = URL::InputStreamOptions (URL::ParameterHandling::inPostData)
+                    .withConnectionTimeoutMs (65000)
+                    .withExtraHeaders ("Content-Type: application/json");
+    if (auto s = url.createInputStream (opts))
+        return JSON::parse (s->readEntireStreamAsString());
+    return {};
+}
+
 } // namespace mosh

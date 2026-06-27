@@ -2959,6 +2959,11 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (! ok (cmd (ops, "audition_file", objN ({{ "path", "/no/such/file.wav" }}))),
                "audition_file errors on a missing file");
 
+        // find_similar_sample (§1 drum match): a missing file errors BEFORE any service
+        // call — keeps this hermetic (no teardown venv / service spawn in --selftest).
+        check (! ok (cmd (ops, "find_similar_sample", objN ({{ "path", "/no/such/file.wav" }}))),
+               "find_similar_sample errors on a missing file");
+
         browseDir.deleteRecursively();
         cmd (ops, "remove_track", args1 ("trackId", trkId));   // tidy up the probe track
     }

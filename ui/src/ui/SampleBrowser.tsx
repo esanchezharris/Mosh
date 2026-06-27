@@ -7,7 +7,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
 import type { DirListing } from "../types";
-import { filterEntries, loadRecents, addRecentSample, SAMPLE_DND_MIME } from "./sampleBrowserUtil";
+import { filterEntries, loadRecents, addRecentSample, SAMPLE_DND_MIME,
+  parseSimilarResult, similarityPct, type SimilarResult } from "./sampleBrowserUtil";
 
 const baseName = (p: string) => p.split("/").pop() ?? p;
 
@@ -47,6 +48,9 @@ export function SampleBrowser() {
   const [query, setQuery] = useState("");
   const [recents, setRecents] = useState<string[]>(() => loadRecents());
   const [auditioning, setAuditioning] = useState<string | null>(null);
+  const [similarFor, setSimilarFor] = useState<string | null>(null);
+  const [similar, setSimilar] = useState<SimilarResult | null>(null);
+  const [similarBusy, setSimilarBusy] = useState(false);
 
   const navigate = async (path?: string) => {
     const r = await exec("list_directory", path ? { path } : {});
@@ -65,6 +69,16 @@ export function SampleBrowser() {
   const toggleAudition = (path: string) => async () => {
     if (auditioning === path) { await exec("stop_audition"); setAuditioning(null); }
     else { const r = await exec("audition_file", { path }); if (r.ok) setAuditioning(path); }
+  };
+
+  // Find the owner's nearest one-shots to this sample (§1). Toggles an inline panel;
+  // graceful when the teardown index isn't built (available:false → a setup hint).
+  const toggleSimilar = (path: string) => async () => {
+    if (similarFor === path) { setSimilarFor(null); setSimilar(null); return; }
+    setSimilarFor(path); setSimilar(null); setSimilarBusy(true);
+    const r = await exec("find_similar_sample", { path, k: 6 });
+    setSimilarBusy(false);
+    setSimilar(r.ok && r.data ? parseSimilarResult(r.data) : { available: false, matches: [], reason: "unavailable" });
   };
 
   const onDragStart = (path: string) => (e: React.DragEvent) => {
@@ -110,12 +124,35 @@ export function SampleBrowser() {
         {files.length > 0 && (
           <div className="plugin-group"><div className="pg-label">Audio files</div>
             {files.map((f) => (
-              <div key={f.path} className="plugin-row cb-file" data-testid="sample-row" draggable onDragStart={onDragStart(f.path)}
-                title="Drag onto a track, or Import">
-                {auditionBtn(f.path)}
-                <SampleThumb path={f.path} />
-                <span className="pr-name">{f.name}</span>
-                <button className="btn cb-import" onClick={() => void onImport(f.path)}>Import</button>
+              <div key={f.path}>
+                <div className="plugin-row cb-file" data-testid="sample-row" draggable onDragStart={onDragStart(f.path)}
+                  title="Drag onto a track, or Import">
+                  {auditionBtn(f.path)}
+                  <SampleThumb path={f.path} />
+                  <span className="pr-name">{f.name}</span>
+                  <button className="btn cb-similar" data-testid="find-similar" onClick={toggleSimilar(f.path)}
+                    aria-pressed={similarFor === f.path} aria-label="Find similar samples you own"
+                    title="Find similar (samples you own)">≈</button>
+                  <button className="btn cb-import" onClick={() => void onImport(f.path)}>Import</button>
+                </div>
+                {similarFor === f.path && (
+                  <div className="sb-similar" data-testid="similar-results">
+                    {similarBusy && <div className="rack-empty">finding…</div>}
+                    {!similarBusy && similar && !similar.available && (
+                      <div className="rack-empty">index not ready{similar.reason ? ` — ${similar.reason}` : " — run setup-teardown.sh, then build the index"}</div>
+                    )}
+                    {!similarBusy && similar && similar.available && similar.matches.length === 0 && (
+                      <div className="rack-empty">no similar samples found</div>
+                    )}
+                    {!similarBusy && similar && similar.available && similar.matches.map((m) => (
+                      <div key={m.path} className="plugin-row cb-file sb-similar-row" draggable onDragStart={onDragStart(m.path)} title={m.path}>
+                        {auditionBtn(m.path)}
+                        <span className="pr-name">≈ {baseName(m.path)} <span className="sb-sim-pct">{similarityPct(m.distance)}%</span></span>
+                        <button className="btn cb-import" onClick={() => void onImport(m.path)}>Import</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             ))}
           </div>

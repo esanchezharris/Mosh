@@ -539,6 +539,7 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "remove_render_layer") return cmdRemoveRenderLayer (args);
     if (name == "list_colors")       return cmdListColors (args);
     if (name == "list_transform_targets") return cmdListTransformTargets (args);
+    if (name == "find_similar_sample") return cmdFindSimilarSample (args);
    #if MOSH_HAVE_ANIRA
     if (name == "add_rave_insert")   return cmdAddRaveInsert (args);
     if (name == "set_rave_param")    return cmdSetRaveParam (args);
@@ -3195,6 +3196,38 @@ juce::var MoshOps::cmdStopAudition (const juce::var&)
 {
     stopAudition();
     return okResult ("stop_audition");
+}
+
+juce::var MoshOps::cmdFindSimilarSample (const juce::var& args)
+{
+    // §1 drum-sample match: the nearest one-shots the owner OWNS to a query file, via the
+    // teardown service (POST /teardown/match). Read-only — no clip, transaction, or log.
+    // Synchronous (a warm query is sub-second). The service / teardown venv / index may be
+    // absent → a graceful { available:false, reason } rather than an error, so the UI can
+    // hint at setup instead of failing. (A missing query file IS an error — caught before
+    // any service call, which also keeps --selftest hermetic: no service spawn.)
+    const auto path = args.getProperty ("path", var()).toString();
+    if (path.isEmpty()) return errResult ("find_similar_sample", "missing 'path'");
+    juce::File file (path);
+    if (! file.existsAsFile()) return errResult ("find_similar_sample", "file not found: " + path);
+
+    const auto role = args.getProperty ("role", var()).toString();
+    const int  k    = juce::jlimit (1, 50, (int) args.getProperty ("k", 5));
+
+    auto result = jobManager.findSimilarSamples (file, role, k);
+    auto* data = new DynamicObject();
+    data->setProperty ("path", path);
+    if (! (bool) result.getProperty ("ok", false))
+    {
+        // service down / teardown venv absent (503) / index not built (409) → graceful
+        data->setProperty ("available", false);
+        data->setProperty ("reason", result.getProperty ("error", var()));
+        data->setProperty ("matches", var (juce::Array<var>()));
+        return okResult ("find_similar_sample", var (data));
+    }
+    data->setProperty ("available", true);
+    data->setProperty ("matches", result.getProperty ("matches", var (juce::Array<var>())));
+    return okResult ("find_similar_sample", var (data));
 }
 
 void MoshOps::stopAudition()
