@@ -1,13 +1,13 @@
 // The left BROWSER drawer — an FL/Ableton-style dock that slides in from the left edge
 // on a pull-tab. One surface for both halves of "what do I drop in?": SOUNDS (the file
 // browser → drag onto a lane / import) and PLUGINS (built-ins + scanned VST3/AU → load
-// onto the selected track). Both bodies are the EXISTING components reused verbatim
-// (SampleBrowser + the extracted PluginBrowserContent), so there's no new command surface
-// and no second copy of the browse/load logic. Open/tab state is UI-local (shellState).
+// onto the selected track). SOUNDS reuses SampleBrowser; PLUGINS hosts PluginDock — the
+// compact form of the same plugin picker the "+ Plugin" modal uses (shared collections +
+// list, just a chip row instead of a wide rail). Open/tab state is UI-local (shellState).
 
 import { useShell } from "./shellState";
 import { SampleBrowser } from "../ui/SampleBrowser";
-import { PluginBrowserContent } from "../ui/PluginBrowser";
+import { PluginDock } from "./PluginBrowser";
 
 export function LeftDrawer() {
   const open = useShell((s) => s.browserOpen);
@@ -31,7 +31,7 @@ export function LeftDrawer() {
               <button className="v2-drawer-close" data-testid="v2-browser-close" aria-label="Close browser" title="Close" onClick={() => setOpen(false)}>✕</button>
             </div>
             <div className="v2-drawer-body">
-              {tab === "sounds" ? <SampleBrowser /> : <PluginBrowserContent />}
+              {tab === "sounds" ? <SampleBrowser /> : <PluginDock />}
             </div>
           </>
         )}

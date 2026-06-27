@@ -44,9 +44,13 @@ test("left browser drawer: pull-tab opens it, tabs switch, close dismisses", asy
   await page.getByTestId("v2-browser-pull").click();
   await expect(page.getByTestId("v2-browser-tab-sounds")).toBeVisible();
   await expect(page.getByTestId("v2-browser-drawer").getByTestId("content-browser")).toBeVisible();
-  // switch to Plugins → the plugin filter surface appears (sample browser unmounts)
+  // switch to Plugins → the compact plugin dock appears (the shared picker; sample browser unmounts)
   await page.getByTestId("v2-browser-tab-plugins").click();
-  await expect(page.getByPlaceholder("Filter by name or vendor…")).toBeVisible();
+  const dock = page.getByTestId("v2-plugin-dock");
+  await expect(dock).toBeVisible();
+  await expect(dock.getByPlaceholder("Search by name or vendor…")).toBeVisible();
+  await expect(dock.getByTestId("v2-pb-collection").first()).toBeVisible(); // collection chips
+  await expect(dock.getByTestId("v2-pb-row").first()).toBeVisible();        // plugin rows
   await expect(page.getByTestId("v2-browser-drawer").getByTestId("content-browser")).toHaveCount(0);
   // close
   await page.getByTestId("v2-browser-close").click();
