@@ -1,6 +1,7 @@
 #pragma once
 
 #include "MultiplayerClient.h"
+#include "OutboundQueue.h"
 #include <juce_events/juce_events.h>
 #include <atomic>
 #include <functional>
@@ -21,9 +22,12 @@ namespace mosh
       - emit(type,payload) : push mp_state / peer_selection to the WebView
       - syncLocks(...)      : feed the relay lock table into the local guard
 
-    The command-driven calls (create/join/leave/claim/commit/broadcastSelection)
-    run on the message thread from the MoshOps mp_* commands; they each do a single
-    short HTTP round-trip. Only the continuous poll lives on the background thread. */
+    Fire-and-forget broadcasts (presence/selection/structural/webrtc) do NOT do HTTP
+    on the message thread: they enqueue onto outbox_ in O(1) and the poll thread
+    drains + publishes them, so a remote/slow relay never janks the UI (the #157
+    250ms periodic presence broadcast made this matter). The result-bearing calls
+    (create/join/leave/claim/commit) still run a short synchronous round-trip on the
+    message thread from the MoshOps mp_* commands. */
 class MultiplayerSession
 {
 public:
@@ -88,6 +92,7 @@ private:
     ApplyBootstrapFn   applyBootstrap_;
     ApplyStructuralFn  applyStructural_;
     std::map<juce::String, int> heldEpochs_;   // logicalId -> granted epoch (commit fencing)
+    OutboundQueue      outbox_;                 // message thread enqueues; poll thread publishes
     std::thread        pollThread_;
     std::atomic<bool>  running_ { false };
 

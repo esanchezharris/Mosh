@@ -86,13 +86,19 @@ bool MultiplayerSession::downloadBlob (const String& hash, const String& ext, co
     return client_.downloadBlob (hash, ext, dest);
 }
 
+// All four broadcasts below are fire-and-forget (their publish result is ignored), so
+// they ENQUEUE rather than block the message thread on HTTP — the poll thread drains
+// outbox_ and publishes. presence/selection are "current state", so they COALESCE
+// (latest wins) to collapse any backlog during a slow round-trip; structural/webrtc
+// are ordered ops, so they go FIFO (every distinct op preserved, in order).
+
 void MultiplayerSession::broadcastSelection (const String& trackId, const String& clipId)
 {
     auto* msg = new DynamicObject();
     msg->setProperty ("type", "selection");
     msg->setProperty ("trackId", trackId);
     msg->setProperty ("clipId", clipId);
-    client_.publish (var (msg));
+    outbox_.pushCoalesced ("selection", var (msg));
 }
 
 void MultiplayerSession::broadcastPresence (double position, bool playing, bool recording)
@@ -102,7 +108,7 @@ void MultiplayerSession::broadcastPresence (double position, bool playing, bool 
     msg->setProperty ("position", position);
     msg->setProperty ("playing", playing);
     msg->setProperty ("recording", recording);
-    client_.publish (var (msg));
+    outbox_.pushCoalesced ("presence", var (msg));
 }
 
 void MultiplayerSession::broadcastStructural (const String& command, const var& args)
@@ -111,7 +117,7 @@ void MultiplayerSession::broadcastStructural (const String& command, const var& 
     msg->setProperty ("type", "structural");
     msg->setProperty ("command", command);
     msg->setProperty ("args", args);
-    client_.publish (var (msg));
+    outbox_.pushFifo (var (msg));
 }
 
 void MultiplayerSession::sendSignal (const String& toPeer, const var& payload)
@@ -120,7 +126,7 @@ void MultiplayerSession::sendSignal (const String& toPeer, const var& payload)
     msg->setProperty ("type", "webrtc");
     msg->setProperty ("to", toPeer);     // the relay fans out; the addressed peer filters
     msg->setProperty ("payload", payload);
-    client_.publish (var (msg));
+    outbox_.pushFifo (var (msg));
 }
 
 void MultiplayerSession::startPoll()
@@ -142,6 +148,13 @@ void MultiplayerSession::pollLoop()
 {
     while (running_.load())
     {
+        // Flush the fire-and-forget publishes the message thread queued (presence/
+        // selection/structural/webrtc). The blocking HTTP runs HERE, off the message
+        // thread — coalesced presence collapses to its latest frame, so even a slow
+        // relay sends one frame per tick, never a stale burst.
+        for (auto& m : outbox_.drain())
+            client_.publish (m);
+
         auto frames = client_.poll();
         auto locks  = client_.lastLocks();
         auto peers  = client_.lastPeers();
