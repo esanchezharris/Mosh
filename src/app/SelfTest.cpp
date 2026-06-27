@@ -536,6 +536,16 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                   a->setProperty ("paramIndex", 0); a->setProperty ("value", 0.5);
                   check (ok (cmd (ops, "set_plugin_param", var (a))), "set_plugin_param ok"); }
                 { auto* a = new DynamicObject(); a->setProperty ("trackId", tid); a->setProperty ("index", idx);
+                  a->setProperty ("limit", 8);
+                  auto r = cmd (ops, "describe_plugin", var (a));
+                  check (ok (r), "describe_plugin ok");
+                  auto data = r.getProperty ("data", var());
+                  check ((int) data.getProperty ("paramCount", 0) > 0, "describe_plugin returns a param count");
+                  auto* parr = data.getProperty ("params", var()).getArray();
+                  check (parr != nullptr && parr->size() > 0
+                         && (*parr)[0].getProperty ("name", juce::String()).toString().isNotEmpty(),
+                         "describe_plugin params carry names"); }
+                { auto* a = new DynamicObject(); a->setProperty ("trackId", tid); a->setProperty ("index", idx);
                   a->setProperty ("bypassed", true);
                   cmd (ops, "bypass_plugin", var (a)); }
                 // enabled==false reflected

@@ -114,13 +114,15 @@ class LiveSynthRenderer:
     def render(self, params: dict) -> tuple[np.ndarray, int]:
         return self.render_batch([params])[0]
 
-    def snapshot_params(self) -> list[dict]:
-        """Load the synth and return its first-16 automatable params [{index,name,value}].
-        One launch; used to discover real param names/indices before optimizing."""
+    def describe_params(self, limit: int = 512) -> list[dict]:
+        """Load the synth and return its automatable params [{index,name,value}] via the
+        describe_plugin command (uncapped, unlike the bridge snapshot's 16). One launch;
+        gives §8 the NAMED param map so recovery reports patch params by name, not bare index."""
         if not self.available():
             raise RuntimeError(f"Mosh binary not found at {self.bin!r} (set MOSH_BIN)")
-        work = Path(tempfile.mkdtemp(prefix="live-snap-"))
-        cmds = self._base_cmds() + [{"command": "get_snapshot", "args": {}}]
+        work = Path(tempfile.mkdtemp(prefix="live-desc-"))
+        cmds = self._base_cmds() + [{"command": "describe_plugin",
+                                     "args": {"trackId": "${T}", "index": 0, "limit": limit}}]
         script = work / "s.jsonl"
         results = work / "r.jsonl"
         with open(script, "w") as f:
@@ -132,21 +134,14 @@ class LiveSynthRenderer:
         proc = subprocess.run([self.bin, "--run-script"], env=env, capture_output=True,
                               text=True, timeout=self.timeout_s, check=False)
         if proc.returncode != 0:
-            raise RuntimeError(f"snapshot failed (exit {proc.returncode}): "
+            raise RuntimeError(f"describe_plugin failed (exit {proc.returncode}): "
                                f"{(proc.stderr or '').strip()[-300:]!r}")
-        snap = None
         for ln in results.read_text().splitlines():
             if not ln.strip():
                 continue
             r = json.loads(ln)
-            if r.get("command") == "get_snapshot":
-                snap = r.get("data")
-        if not snap:
-            raise RuntimeError("no snapshot in results")
-        for trk in snap.get("tracks", []):
-            for pl in trk.get("plugins", []):
-                if pl.get("params"):
-                    return pl["params"]
+            if r.get("command") == "describe_plugin" and r.get("ok"):
+                return (r.get("data") or {}).get("params", [])
         return []
 
 

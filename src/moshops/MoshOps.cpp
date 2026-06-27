@@ -510,6 +510,7 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "remove_plugin")     return cmdRemovePlugin (args);
     if (name == "reorder_plugin")    return cmdReorderPlugin (args);
     if (name == "set_plugin_param")  return cmdSetPluginParam (args);
+    if (name == "describe_plugin")   return cmdDescribePlugin (args);
     if (name == "bypass_plugin")     return cmdBypassPlugin (args);
     if (name == "rescan_plugins")        return cmdRescanPlugins (args);
     if (name == "get_plugin_blocklist")  return cmdGetPluginBlocklist (args);
@@ -3510,6 +3511,37 @@ juce::var MoshOps::cmdSetPluginParam (const juce::var& args)
     logLine ("set_plugin_param", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("set_plugin_param");
+}
+
+juce::var MoshOps::cmdDescribePlugin (const juce::var& args)
+{
+    // Read-only (no txn, no log — mirrors list_plugins): return the plugin's automatable
+    // params [{index,name,value}] UNCAPPED (snapshot caps at 16 for payload size; §8/§9 need
+    // the full named map to recover/load patches by name, not by bare index).
+    auto* plugin = findPlugin (args.getProperty ("trackId", var()).toString(),
+                               (int) args.getProperty ("index", -1));
+    if (plugin == nullptr) return errResult ("describe_plugin", "no plugin");
+
+    auto* o = new DynamicObject();
+    o->setProperty ("name", plugin->getName());
+    o->setProperty ("type", plugin->getPluginType());
+    const int total = plugin->getNumAutomatableParameters();
+    o->setProperty ("paramCount", total);
+    const int limit = juce::jlimit (1, 4096, (int) args.getProperty ("limit", 512));
+    const int n = juce::jmin (limit, total);
+    juce::Array<var> params;
+    for (int i = 0; i < n; ++i)
+    {
+        auto param = plugin->getAutomatableParameter (i);
+        auto* po = new DynamicObject();
+        po->setProperty ("index", i);
+        po->setProperty ("name", param->getParameterName());
+        po->setProperty ("value", param->getCurrentNormalisedValue());
+        params.add (var (po));
+    }
+    o->setProperty ("params", params);
+    o->setProperty ("returned", n);
+    return okResult ("describe_plugin", var (o));
 }
 
 juce::var MoshOps::cmdBypassPlugin (const juce::var& args)

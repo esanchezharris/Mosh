@@ -46,6 +46,8 @@ class ExecuteResult:
     audio_rms: float = 0.0
     nonsilent: bool = False
     notes_resolved: int = 0
+    synths_loaded: int = 0
+    synth_params_set: int = 0
     yield_actual: dict = field(default_factory=dict)
     ran: bool = False
     error: Optional[str] = None
@@ -87,6 +89,112 @@ def inline_midi(commands: list, recipe, asset_root: Optional[str] = None) -> tup
                             resolved += 1
         out.append(c)
     return out, resolved
+
+
+def _run_capture(binp: str, cmds: list, session_dir: Optional[str], timeout_s: int) -> list:
+    """Run a read-only probe rollout and return the per-command results (no export)."""
+    work = Path(tempfile.mkdtemp(prefix="td-probe-"))
+    script = work / "s.jsonl"
+    results = work / "r.jsonl"
+    script.write_text("\n".join(json.dumps(c) for c in cmds) + "\n")
+    env = dict(os.environ, MOSH_RUN_SCRIPT=str(script), MOSH_RUN_SCRIPT_OUT=str(results),
+               MOSH_SESSION_DIR=str(session_dir or work))
+    subprocess.run([binp, "--run-script"], env=env, capture_output=True, text=True,
+                   timeout=timeout_s, check=False)
+    if not results.exists():
+        return []
+    return [json.loads(ln) for ln in results.read_text().splitlines() if ln.strip()]
+
+
+def _list_instruments(binp: str, session_dir: Optional[str], timeout_s: int) -> dict:
+    """name (lowercased) → VST3 instrument pluginId, for resolving a recipe's synth by name."""
+    out: dict = {}
+    for r in _run_capture(binp, [{"command": "list_plugins", "args": {}}], session_dir, timeout_s):
+        if r.get("command") == "list_plugins":
+            for p in (r.get("data") or {}).get("plugins", []):
+                if p.get("isInstrument") and p.get("format") == "VST3":
+                    out.setdefault(p["name"].lower(), p["id"])
+    return out
+
+
+def _resolve_plugin_id(name: str, name2id: dict) -> Optional[str]:
+    """Exact then prefix match (recipe says 'Serum'; the scan says 'Serum 2')."""
+    n = name.lower()
+    if n in name2id:
+        return name2id[n]
+    for k, v in name2id.items():
+        if k.startswith(n) or n.startswith(k):
+            return v
+    return None
+
+
+def _describe_params(binp: str, plugin_ids: set, session_dir: Optional[str], timeout_s: int) -> dict:
+    """{pluginId: {param_name_lower: index}} by loading each synth once + describe_plugin."""
+    out: dict = {}
+    ids = list(plugin_ids)
+    cmds = []
+    for k, pid in enumerate(ids):
+        cmds += [
+            {"command": "create_track", "args": {"name": f"probe{k}", "type": "audio"},
+             "capture": {f"P{k}": "trackId"}},
+            {"command": "load_plugin", "args": {"trackId": f"${{P{k}}}", "pluginId": pid, "index": 0}},
+            {"command": "describe_plugin", "args": {"trackId": f"${{P{k}}}", "index": 0, "limit": 1024}},
+        ]
+    results = _run_capture(binp, cmds, session_dir, timeout_s)
+    desc = [r for r in results if r.get("command") == "describe_plugin" and r.get("ok")]
+    for pid, r in zip(ids, desc):
+        out[pid] = {p["name"].lower(): p["index"] for p in (r.get("data") or {}).get("params", [])}
+    return out
+
+
+def resolve_synths(commands: list, recipe, binp: str, session_dir: Optional[str],
+                   timeout_s: int) -> tuple[list, int, int, list]:
+    """Inject load_plugin (resolve id by name) + set_plugin_param (map patch param NAMES→
+    indices via describe_plugin) after each synth element's create_track. Returns
+    (commands, synths_loaded, params_set, unresolved_params). Needs describe_plugin."""
+    synth_idx = {i for i, e in enumerate(recipe.elements)
+                 if e.synth_patch.plugin.name and e.synth_patch.status in
+                 ("params_visible", "matched", "substituted")}
+    if not synth_idx:
+        return commands, 0, 0, []
+
+    name2id = _list_instruments(binp, session_dir, timeout_s)
+    resolved = {}
+    for i in synth_idx:
+        pid = _resolve_plugin_id(recipe.elements[i].synth_patch.plugin.name, name2id)
+        if pid:
+            resolved[i] = pid
+    pmaps = _describe_params(binp, set(resolved.values()), session_dir, timeout_s) if resolved else {}
+
+    out: list = []
+    n_load = n_set = 0
+    unresolved: list = []
+    for c in commands:
+        out.append(c)
+        if c.get("command") == "create_track" and c.get("capture"):
+            tvar = next(iter(c["capture"]))
+            m = re.match(r"^T(\d+)$", tvar)
+            if not m:
+                continue
+            i = int(m.group(1))
+            if i not in resolved:
+                continue
+            pid = resolved[i]
+            tref = f"${{{tvar}}}"
+            out.append({"command": "load_plugin",
+                        "args": {"trackId": tref, "pluginId": pid, "index": 0}})
+            n_load += 1
+            pmap = pmaps.get(pid, {})
+            for pname, pval in (recipe.elements[i].synth_patch.params or {}).items():
+                idx = pmap.get(str(pname).lower())
+                if idx is not None and isinstance(pval, (int, float)):
+                    out.append({"command": "set_plugin_param",
+                                "args": {"trackId": tref, "index": 0, "paramIndex": idx,
+                                         "value": float(pval)}})
+                    n_set += 1
+                else:
+                    unresolved.append({"element_id": recipe.elements[i].element_id, "param": pname})
+    return out, n_load, n_set, unresolved
 
 
 def _ok_by_command(results: list) -> dict:
@@ -153,9 +261,11 @@ def _measure(out: Path) -> tuple[float, bool]:
 
 def execute_recipe(recipe, bin_path: Optional[str] = None, out_wav: Optional[str] = None,
                    asset_root: Optional[str] = None, session_dir: Optional[str] = None,
-                   timeout_s: int = 300, write_back: bool = True) -> ExecuteResult:
-    """Compile → resolve MIDI → run through MoshOps → render → measure yield. Writes
-    recipe.yield.actual + reconstruction_class (write_back). Needs the built binary."""
+                   timeout_s: int = 300, write_back: bool = True,
+                   resolve_synth_patches: bool = True) -> ExecuteResult:
+    """Compile → resolve MIDI → (resolve synths via describe_plugin) → run through MoshOps →
+    render → measure yield. Writes recipe.yield.actual + reconstruction_class (write_back).
+    Needs the built binary."""
     binp = _bin(bin_path)
     cr = compile_recipe(recipe)
     cmds, notes_resolved = inline_midi(list(cr.commands), recipe, asset_root)
@@ -163,13 +273,22 @@ def execute_recipe(recipe, bin_path: Optional[str] = None, out_wav: Optional[str
     work = Path(session_dir) if session_dir else Path(tempfile.mkdtemp(prefix="td-execute-"))
     work.mkdir(parents=True, exist_ok=True)
     out = Path(out_wav) if out_wav else work / "render.wav"
-    cmds = cmds + [{"command": "export_audio", "args": {"file": str(out)}}]
 
-    res = ExecuteResult(commands=cmds, unresolved=list(cr.unresolved),
-                        out_wav=str(out), notes_resolved=notes_resolved)
+    res = ExecuteResult(unresolved=list(cr.unresolved), out_wav=str(out),
+                        notes_resolved=notes_resolved)
     if not os.path.isfile(binp):
+        res.commands = cmds + [{"command": "export_audio", "args": {"file": str(out)}}]
         res.error = f"Mosh binary not found at {binp!r} (set MOSH_BIN)"
         return res
+
+    # resolve synths (needs the binary: list_plugins + describe_plugin probes)
+    if resolve_synth_patches:
+        cmds, res.synths_loaded, res.synth_params_set, synth_unres = resolve_synths(
+            cmds, recipe, binp, str(work), timeout_s)
+        res.unresolved = list(cr.unresolved) + synth_unres
+
+    cmds = cmds + [{"command": "export_audio", "args": {"file": str(out)}}]
+    res.commands = cmds
 
     script = work / "rollout.jsonl"
     results_path = work / "results.jsonl"

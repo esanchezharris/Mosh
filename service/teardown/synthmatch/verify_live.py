@@ -82,11 +82,20 @@ def main() -> int:
     rend = LiveSynthRenderer(synth, name="LiveMatch", session_dir="/tmp/td-live-match",
                              midi_length=4.0)
 
+    # 0. real param NAMES (describe_plugin) so recovery reports a patch, not bare indices
+    try:
+        names = {p["index"]: p["name"] for p in rend.describe_params(limit=64)}
+    except Exception:
+        names = {}
+
+    def nm(idx):
+        return f"{names.get(idx, '?')}(idx{idx})" if names else f"idx{idx}"
+
     # 1. screen for the audible params (one launch)
     t0 = time.time()
     ranked = screen_audible(rend, scorer, range(0, 24), lo=0.15, hi=0.85)
     audible = [idx for idx, d in ranked if d > 0.03][:3]
-    print(f"  screen: audible params {[(i, round(d, 3)) for i, d in ranked if d > 0.03][:3]} "
+    print(f"  screen: audible params {[(nm(i), round(d, 3)) for i, d in ranked if d > 0.03][:3]} "
           f"({time.time() - t0:.0f}s)")
     if not audible:
         print("  SKIP  no audible params in the screened window — cannot run a recovery proof")
@@ -116,10 +125,10 @@ def main() -> int:
     drop = (d0 - dfinal) / d0 * 100 if d0 > 0 else 0.0
     dom = audible[0]  # dominant (largest swing)
     dom_err = abs(recovered[dom] - true_vals[dom])
-    print(f"  recovered: { {k: round(v,3) for k,v in recovered.items()} }")
+    print(f"  recovered patch: { {nm(k): round(v,3) for k,v in recovered.items()} }")
     print(f"  distance: {d0:.4f} -> {dfinal:.4f}  ({drop:.0f}% closer)  in {dt:.0f}s "
           f"({(res['iters']+1)*6} renders)")
-    print(f"  dominant param idx{dom}: true={true_vals[dom]:.3f} recovered={recovered[dom]:.3f} "
+    print(f"  dominant param {nm(dom)}: true={true_vals[dom]:.3f} recovered={recovered[dom]:.3f} "
           f"err={dom_err:.3f}")
 
     fails = []

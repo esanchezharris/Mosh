@@ -89,6 +89,7 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "assign_sample", desc: "Map an audio file to one drum pad/note on a track's sampler (replaces that pad)", args: [S("trackId"), N("note", true, "MIDI pitch 0-127 of the pad"), S("file", true, "audio file path"), S("name", false, "pad label"), N("gainDb", false)] },
   { command: "load_plugin", desc: "Add a scanned VST3/AU plugin to a track (pluginId from list_plugins)", args: [S("trackId"), S("pluginId"), N("index", false, "chain position")] },
   { command: "set_plugin_param", desc: "Set a plugin parameter (0-1) by chain index + param index", args: [S("trackId"), N("index"), N("paramIndex"), N("value", true, "0-1")] },
+  { command: "describe_plugin", desc: "Read a plugin's automatable parameters (index, name, value) — uncapped, for patch recovery/loading by name", args: [S("trackId"), N("index", false, "chain position"), N("limit", false, "max params to return (default 512)")] },
   { command: "bypass_plugin", desc: "Bypass/enable a plugin in a track's chain", args: [S("trackId"), N("index"), B("bypassed")] },
   { command: "reorder_plugin", desc: "Move a plugin to a new chain position", args: [S("trackId"), N("index"), N("toIndex")] },
   { command: "open_plugin_editor", desc: "Pop out a plugin's native editor window", args: [S("trackId"), N("index")] },

@@ -23,9 +23,10 @@ The binary is auto-detected at `/Applications/Mosh.app/Contents/MacOS/Mosh` (ove
 
 | § | Verifier | What it proves | Result |
 |---|----------|----------------|--------|
-| 8 | `synthmatch/verify_live.py` | CMA-ES recovers a known **Serum** patch via render-in-the-loop, scored in the §6 embedding space | screen → idx18 (swing 0.97)+idx3 (0.16) audible; seed dist **0.93 → ~0.00** in 90 real renders; dominant param err **0.051** |
+| 8 | `synthmatch/verify_live.py` | CMA-ES recovers a known **Serum** patch via render-in-the-loop, scored in the §6 embedding space; params reported by NAME (describe_plugin) | screen → "Bypass"(idx18, swing 0.97) + "Main Tuning"(idx3, 0.16); seed dist **0.93 → ~0.00** in 90 real renders; dominant err **0.051**. (describe_plugin revealed the top screen param is the Bypass toggle — a real diagnostic.) |
 | 8-sub | `synthmatch/verify_substitute.py` | the **substitute** regime (§13: core) — approximate a FOREIGN synth's tone (Vital) with an OWNED synth (Serum) | default-patch dist **0.987 → ~0.00** (Serum approximated the Vital tone); `status=substituted` |
 | 9 | `render/verify_execute.py` | a Recipe compiles → MoshOps → **non-silent render** + measured `yield.actual` written back | 10/10 cmds ok, rms **0.209**, MIDI resolved from SMF, yield.overall **0.889**, class `inferred` |
+| 9-synth | `render/verify_synth_execute.py` | §9 loads a synth **by name** + sets patch params **by name** (via `describe_plugin`) + MIDI → audible synth line | Serum loaded, **2 params set by name** (Main Vol/Main Tuning), MIDI resolved, rms **0.038**, yield **0.833** |
 | 11 | `flywheel/verify_reward.py` | a music-native encoder (**MERT**) beats the engineered baseline at preserving the ablation ordering, held out on real audio | 2443 samples → 40 real triplets → **MERT 0.938 vs engineered 0.812** |
 | 13 | `measurement_checkpoint.py [N]` | readability census over real tutorials — how often DAW/piano-roll/synth-GUI are seen → **scopes §8** | n=8: piano-roll **88%**, synth GUI **50%**, DAW id **0%** → "mixed regime; §8-substitute is core" |
 | 4 | `video2recipe/cli.py --url <id> --section A B` | a real tutorial → schema-valid Recipe skeleton (frames + OCR + scenes) | e.g. `fw4Ms26mdmc` → piano-roll + "Pigments" detected, valid recipe |
@@ -41,12 +42,13 @@ PYTHONPATH=service python3 service/teardown/render/verify_execute.py
 
 ## Known gaps (the next rungs, deliberately deferred)
 
-- **`describe_plugin` MoshOps command** — §8 currently recovers param *indices* (audible
-  ones found by a sensitivity screen) and §9 defers synth-param mapping, because the engine
-  exposes per-plugin param **names** only via the bridge snapshot, not as a `--run-script`
-  command. Adding `describe_plugin {trackId,index} → params[]` (uncapped) unblocks named
-  patch recovery in §8 and synth load+param resolution in §9. Needs a C++ rebuild + the
-  full selftest (run isolated — see the verification-conventions memory).
+- **`describe_plugin` MoshOps command — LANDED.** `describe_plugin {trackId,index,limit} →
+  params[{index,name,value}]` (uncapped; Serum 2 exposes 543) is now a read-only command.
+  §8 reports recovered patch params by NAME, and §9 resolves synth load + param-name→index
+  mapping (see 9-synth above). Verified: selftest **1036/1036 ×3** (the new check guards a
+  catalog-present run), vitest **591**, functional Serum probe + the §9-synth proof. Built
+  into `build-macos-arm64-release` (not yet deployed to /Applications — `run-mosh.sh deploy`
+  to ship it).
 - **§9 timeline placement** — `compile.py` places a matched sample at `startSeconds=0`
   (one element per track). Sequencing multiple slices on one track at their onset times is
   a compiler extension needed for a faithful drum reconstruction from §7 slices.

@@ -159,7 +159,7 @@ const listeners = new Map<string, Set<Listener>>();
 
 // Mock command log (drives the CommandLog panel). Read-only commands don't log.
 const cmdLog: { command: string; ok: boolean; undoable: boolean; ts: number }[] = [];
-const READONLY = new Set(["get_snapshot", "get_clip_peaks", "file_peaks", "audition_file", "stop_audition", "get_command_log", "list_plugins", "list_builtins", "list_colors", "list_audio_devices", "list_wave_inputs", "list_track_outputs", "list_takes", "list_training_sources", "training_job_status", "list_lora_adapters"]);
+const READONLY = new Set(["get_snapshot", "get_clip_peaks", "file_peaks", "audition_file", "stop_audition", "get_command_log", "list_plugins", "list_builtins", "describe_plugin", "list_colors", "list_audio_devices", "list_wave_inputs", "list_track_outputs", "list_takes", "list_training_sources", "training_job_status", "list_lora_adapters"]);
 const NON_UNDOABLE = new Set(["set_transport", "arm_track", "set_input_monitor", "undo", "redo", "save", "reload", "new_project", "render_layer", "open_plugin_editor", "set_plugin_param", "export_audio", "mark_take", "import_training_source", "approve_training_source", "build_training_corpus", "submit_training_job", "cancel_training_job", "import_lora_adapter", "activate_lora_adapter"]);
 function emit(type: string, payload?: unknown) {
   const ls = listeners.get("mosh_event");
@@ -741,6 +741,14 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       const f = findPlugin(str(args.trackId), num(args.index)); if (!f) return err(command, "plugin not found");
       const p = f.track.plugins![f.idx].params?.find((x) => x.index === num(args.paramIndex)); if (p) p.value = num(args.value);
       invalidate(); return ok(command);
+    }
+    case "describe_plugin": {
+      const f = findPlugin(str(args.trackId), num(args.index)); if (!f) return err(command, "plugin not found");
+      const pl = f.track.plugins![f.idx];
+      const params = pl.params ?? mkParams(6);
+      const limit = args.limit != null ? num(args.limit) : params.length;
+      const out = params.slice(0, Math.max(1, limit));
+      return ok(command, { name: pl.name, type: pl.type, paramCount: params.length, returned: out.length, params: out });
     }
     case "open_plugin_editor": return ok(command);
 
