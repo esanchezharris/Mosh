@@ -44,6 +44,24 @@ test("selecting a track opens the inspector; tabs reveal the FX rack + generativ
   await expect(page.locator('[data-testid="v2-insp-body"] [data-testid="generative"]')).toBeVisible();
 });
 
+test("generative runs on a MIDI/drum track (any track, via the backend auto-bounce)", async ({ page }) => {
+  await bootV2(page);
+  // The seeded Drums track is a MIDI drum clip (no wave clip) — generative must still
+  // offer create/render/accept (the native backend auto-bounces it to audio first).
+  await page.getByTestId("v2-track-header").first().click();
+  await page.getByTestId("v2-insp-tab-gen").click();
+  const gen = page.getByTestId("generative");
+  await expect(gen).toBeVisible();
+  await expect(gen.getByTestId("gen-create")).toBeVisible(); // create offered on a non-wave clip
+  await gen.getByTestId("gen-create").click();
+  await gen.getByTestId("gen-render").click();
+  await expect(gen.getByTestId("render-status")).toHaveText("ready");
+  const accept = gen.getByTestId("gen-accept");
+  await expect(accept).toBeEnabled();
+  await accept.click();
+  await expect(page.getByTestId("v2-error")).toHaveCount(0);
+});
+
 test("a clip drags to a new position", async ({ page }) => {
   await bootV2(page);
   const clip = page.getByTestId("v2-clip").first();
