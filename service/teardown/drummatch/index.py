@@ -211,7 +211,12 @@ class DrumMatcher:
         if not el.audio_ref:
             return
         role = el.role.value if el.role.value in ROLE_VALUES else None
-        matches = self.query(el.audio_ref, role=role, k=k)
+        try:
+            matches = self.query(el.audio_ref, role=role, k=k)
+        except (OSError, ValueError, RuntimeError):  # missing/undecodable/silent ref → degrade, never crash
+            # (soundfile.LibsndfileError is a RuntimeError; load_audio raises ValueError for silent/empty)
+            el.sample_match.status = SampleStatus.none
+            return
         if not matches:
             el.sample_match.status = SampleStatus.none
             return

@@ -105,6 +105,12 @@ def _teardown_index_dir() -> str:
     return env or os.path.join(SERVICE_DIR, "teardown", ".index")
 
 
+# Roles the drum-sample index actually classifies (teardown/drummatch/roles.py). Kept as
+# a literal here so server import never depends on the teardown venv. Filtering by a role
+# outside this set can only return empty, so reject it with a 400 rather than a silent [].
+TEARDOWN_ROLES = {"kick", "snare", "hat", "clap", "perc", "other"}
+
+
 def _colorrack_hash() -> str:
     try:
         from colors import runtime as CR
@@ -674,14 +680,18 @@ class Handler(BaseHTTPRequestHandler):
             # deps (librosa/numpy, optionally CLAP/faiss) stay isolated. Synchronous;
             # a warm query is well under a second.
             input_wav = data.get("inputWav", "")
-            role = str(data.get("role", "") or "")
+            role = str(data.get("role", "") or "").strip().lower()
             try:
                 k = int(data.get("k", 5) or 5)
             except (TypeError, ValueError):
                 k = 5
+            k = max(1, min(k, 50))  # clamp: >=1, and cap the payload (k=-1 would dump the whole index)
             index_dir = data.get("index", "") or _teardown_index_dir()
             if not input_wav or not os.path.exists(input_wav):
                 self._send(400, {"ok": False, "error": "inputWav missing or not found"})
+                return
+            if role and role not in TEARDOWN_ROLES:
+                self._send(400, {"ok": False, "error": f"unknown role {role!r}; valid: {sorted(TEARDOWN_ROLES)}"})
                 return
             py = _teardown_py()
             if not os.path.isfile(py):

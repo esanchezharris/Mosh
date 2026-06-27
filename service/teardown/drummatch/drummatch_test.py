@@ -189,6 +189,10 @@ with tempfile.TemporaryDirectory() as td:
     check("match_into set matched_path", bool(sm.matched_path))
     check("match_into wrote alternates", len(sm.alternates) >= 1)
     check("matched recipe still round-trips", R.from_json(R.to_json(rec)) == rec)
+    # missing audio_ref file → graceful (status none), never crashes (the §0 invariant)
+    rec2 = R.Recipe(elements=[R.Element(element_id="g1", role="kick", audio_ref="/no/such/file.wav")])
+    dm.match_into(rec2, "g1")
+    check("match_into on a missing ref → none, no crash", rec2.elements[0].sample_match.status == R.SampleStatus.none)
 
 print(f"\n{'ALL PASS' if not fails else 'FAILURES: ' + ', '.join(fails)}  ({len(fails)} failure(s))")
 sys.exit(len(fails))
