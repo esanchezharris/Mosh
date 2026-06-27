@@ -56,7 +56,7 @@ def syl(word_or_line):
 
 
 # ── 1. complete() returns proposals for the fillable lines; skips the locked one ──
-res = core.complete(SPEC)
+res = core.complete(SPEC, backend="fake")
 check("complete ok", res.get("ok") is True)
 lines = {l["index"]: l for l in res.get("lines", [])}
 check("proposes for line 0 (fixed-end anchor)", 0 in lines and len(lines[0]["proposals"]) >= 1)
@@ -87,8 +87,8 @@ for idx in (1, 2):
     check(f"line {idx} top proposal reports rhymeOk", p.get("rhymeOk") is True)
 
 # ── 5. Determinism: identical spec -> identical proposals, 3x ─────────────────────
-a = core.complete(SPEC)
-b = core.complete(SPEC)
+a = core.complete(SPEC, backend="fake")
+b = core.complete(SPEC, backend="fake")
 check("complete is deterministic (run a == run b)",
       [ [pp["text"] for pp in l["proposals"]] for l in a["lines"] ]
       == [ [pp["text"] for pp in l["proposals"]] for l in b["lines"] ])
@@ -100,23 +100,23 @@ rate = passed / len(top_props)
 check(f"validator pass-rate >= 0.8 over the top proposals (got {rate:.2f})", rate >= 0.8)
 
 # ── 7. regenerate (a different seed) varies the proposal for one line ─────────────
-r0 = core.complete(SPEC, regen={2: 0})
-r1 = core.complete(SPEC, regen={2: 1})
+r0 = core.complete(SPEC, regen={2: 0}, backend="fake")
+r1 = core.complete(SPEC, regen={2: 1}, backend="fake")
 check("a different regen counter varies line 2's proposal",
       r0["lines"][[l["index"] for l in r0["lines"]].index(2)]["proposals"][0]["text"]
       != r1["lines"][[l["index"] for l in r1["lines"]].index(2)]["proposals"][0]["text"])
 
 # ── 8. fill_gap() returns just one line; suggest_next_line() the line after ───────
-fg = core.fill_gap(SPEC, 1)
+fg = core.fill_gap(SPEC, 1, backend="fake")
 check("fill_gap(1) returns exactly line 1", [l["index"] for l in fg["lines"]] == [1])
-sn = core.suggest_next_line(SPEC, after_index=0)
+sn = core.suggest_next_line(SPEC, after_index=0, backend="fake")
 check("suggest_next_line(after=0) returns line 1", [l["index"] for l in sn["lines"]] == [1])
 
 # ── 9. grid-inferred target when a line leaves syllableTarget at 0 ───────────────
 spec2 = {"grid": "1/8", "rhymeStrictness": "slant", "topic": "night",
          "lines": [{"index": 0, "role": "verse", "seedText": "", "text": "",
                     "syllableTarget": 0, "syllableTol": 2, "rhymeGroup": "", "locked": False}]}
-res2 = core.complete(spec2)
+res2 = core.complete(spec2, backend="fake")
 p2 = res2["lines"][0]["proposals"][0]
 check("grid 1/8 ⇒ inferred ~8-syllable target", abs(p2["syllables"] - 8) <= 2, p2["text"])
 
