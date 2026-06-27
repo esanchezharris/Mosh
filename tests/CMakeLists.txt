@@ -8,6 +8,7 @@ juce_add_console_app(MoshTests PRODUCT_NAME "MoshTests")
 
 target_sources(MoshTests PRIVATE
     test_sanity.cpp
+    test_moshfx_dsp.cpp
     test_renderlayer.cpp
     test_sections.cpp
     test_annotations.cpp
@@ -18,7 +19,10 @@ target_sources(MoshTests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/multiplayer/LockManager.cpp
     ${CMAKE_SOURCE_DIR}/src/remote/RemoteCompanionProtocol.cpp
     ${CMAKE_SOURCE_DIR}/src/remote/RemoteCompanionServer.cpp
-    ${CMAKE_SOURCE_DIR}/src/training/TrainerRegistry.cpp)
+    ${CMAKE_SOURCE_DIR}/src/training/TrainerRegistry.cpp
+    ${CMAKE_SOURCE_DIR}/src/plugins/moshfx/MoshAutoTuneDsp.cpp
+    ${CMAKE_SOURCE_DIR}/src/plugins/moshfx/MoshOTTDsp.cpp
+    ${CMAKE_SOURCE_DIR}/src/plugins/moshfx/MoshXFeedbackDsp.cpp)
 
 target_include_directories(MoshTests PRIVATE ${CMAKE_SOURCE_DIR}/src)
 

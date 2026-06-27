@@ -1,4 +1,5 @@
 #include "PluginHost.h"
+#include "plugins/moshfx/MoshFxPlugins.h"
 #include "plugins/spectral/MasterSpectralTapPlugin.h"
 #if MOSH_HAVE_ANIRA
  #include "plugins/transform/RaveInsertPlugin.h"
@@ -163,6 +164,9 @@ void PluginHost::initialise()
     // Register the master spectral tap (Moshi reactivity) — a pure-measure passthrough
     // appended to the master plugin list, drained at 30 Hz to feed Moshi's body.
     engine.getPluginManager().createBuiltInType<MasterSpectralTapPlugin>();
+    engine.getPluginManager().createBuiltInType<MoshAutoTunePlugin>();
+    engine.getPluginManager().createBuiltInType<MoshOTTPlugin>();
+    engine.getPluginManager().createBuiltInType<MoshXFeedbackPlugin>();
    #if MOSH_HAVE_ANIRA
     // Route C.2 — the real-time RAVE insert (only registered in the anira build).
     engine.getPluginManager().createBuiltInType<RaveInsertPlugin>();

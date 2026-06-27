@@ -139,6 +139,24 @@ export type RaveInsert = {
   latencySeconds: number;
 };
 
+export type MoshFxCut = {
+  frequencyHz: number;
+  score?: number;
+  depthDb?: number;
+};
+
+export type MoshFxReadout = {
+  kind: "autotune" | "ott" | "feedback";
+  inputHz?: number;
+  targetHz?: number;
+  correctionCents?: number;
+  confidence?: number;
+  amount?: number;
+  timeMs?: number;
+  candidates?: MoshFxCut[];
+  activeCuts?: MoshFxCut[];
+};
+
 export type Plugin = {
   index: number;
   name: string;
@@ -150,6 +168,7 @@ export type Plugin = {
   isInstrument: boolean;
   params: PluginParam[];
   rave?: RaveInsert;       // present iff this is a real-time RAVE insert (anira build)
+  moshFx?: MoshFxReadout;
 };
 
 export type AvailablePlugin = {

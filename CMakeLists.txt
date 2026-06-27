@@ -92,6 +92,13 @@ if (MOSH_BUILD_APP)
         src/plugins/hosting/PluginHost.cpp
         # Moshi reactivity — master-output spectral tap (pure measure)
         src/plugins/spectral/MasterSpectralTapPlugin.cpp
+        # Mosh-native FX suite — in-app Tracktion built-ins.
+        src/plugins/moshfx/MoshAutoTuneDsp.cpp
+        src/plugins/moshfx/MoshAutoTunePlugin.cpp
+        src/plugins/moshfx/MoshOTTDsp.cpp
+        src/plugins/moshfx/MoshOTTPlugin.cpp
+        src/plugins/moshfx/MoshXFeedbackDsp.cpp
+        src/plugins/moshfx/MoshXFeedbackPlugin.cpp
         # Route C.2 — real-time RAVE insert (gated; compiles to nothing without anira).
         # Torch lives ONLY in RaveEngine.cpp to isolate the LibTorch↔JUCE headers.
         src/plugins/transform/RaveEngine.cpp

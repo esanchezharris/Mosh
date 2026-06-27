@@ -855,17 +855,23 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         auto lb = cmd (ops, "list_builtins");
         check (ok (lb), "list_builtins ok");
         const int nB = lb["data"].getProperty ("plugins", var()).size();
-        check (nB >= 10, "built-in palette has the full catalog");
-        bool sawComp = false, sawSynth = false;
+        check (nB >= 13, "built-in palette has the full catalog plus Mosh FX");
+        bool sawComp = false, sawSynth = false, sawAutoTune = false, sawOTT = false, sawXFeedback = false;
         if (auto* arr = lb["data"].getProperty ("plugins", var()).getArray())
             for (auto& p : *arr)
             {
                 if (p.getProperty ("type", var()).toString() == "compressor") sawComp = true;
                 if (p.getProperty ("type", var()).toString() == "4osc"
                     && (bool) p.getProperty ("isInstrument", false)) sawSynth = true;
+                if (p.getProperty ("type", var()).toString() == "moshAutoTune") sawAutoTune = true;
+                if (p.getProperty ("type", var()).toString() == "moshOTT") sawOTT = true;
+                if (p.getProperty ("type", var()).toString() == "moshXFeedback") sawXFeedback = true;
             }
         check (sawComp, "catalog includes compressor (effect)");
         check (sawSynth, "catalog includes 4osc (instrument)");
+        check (sawAutoTune, "catalog includes Mosh AutoTune");
+        check (sawOTT, "catalog includes Mosh OTT");
+        check (sawXFeedback, "catalog includes Mosh X-FDBK");
 
         auto bt = cmd (ops, "create_track", args1 ("name", "Built-ins"))["data"].getProperty ("trackId", var()).toString();
 
@@ -894,9 +900,102 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                 hasBuiltinInst = (bool) p.getProperty ("isInstrument", false); }
         check (hasBuiltinInst, "built-in 4osc flagged as an instrument");
 
+        const char* moshFxTypes[] = { "moshAutoTune", "moshOTT", "moshXFeedback" };
+        for (auto* type : moshFxTypes)
+        {
+            const String typeId (type);
+            check (ok (cmd (ops, "load_builtin", objN ({{ "trackId", bt }, { "type", type }}))), String ("load_builtin (") + typeId + ") ok");
+            const int midx = builtinIndex (trackById (bt), type);
+            check (midx >= 0, typeId + " appears in the chain");
+            bool hasMoshCategory = false, hasParams = false, hasReadout = false;
+            { auto trk = trackById (bt);
+              if (auto* arr = trk.getProperty ("plugins", var()).getArray())
+                for (auto& p : *arr) if ((int) p.getProperty ("index", -1) == midx)
+                {
+                    hasMoshCategory = p.getProperty ("category", var()).toString() == "Mosh FX";
+                    hasParams = p.getProperty ("params", var()).size() >= 6;
+                    auto mfx = p.getProperty ("moshFx", var());
+                    if (typeId == "moshAutoTune")
+                        hasReadout = mfx.getProperty ("kind", var()).toString() == "autotune"
+                                     && mfx.hasProperty ("inputHz")
+                                     && mfx.hasProperty ("targetHz")
+                                     && mfx.hasProperty ("correctionCents")
+                                     && mfx.hasProperty ("confidence");
+                    else if (typeId == "moshOTT")
+                        hasReadout = mfx.getProperty ("kind", var()).toString() == "ott"
+                                     && mfx.hasProperty ("amount")
+                                     && mfx.hasProperty ("timeMs");
+                    else if (typeId == "moshXFeedback")
+                        hasReadout = mfx.getProperty ("kind", var()).toString() == "feedback"
+                                     && mfx.hasProperty ("candidates")
+                                     && mfx.hasProperty ("activeCuts");
+                } }
+            check (hasMoshCategory, typeId + " carries Mosh FX category");
+            check (hasParams, typeId + " exposes generic rack params");
+            check (hasReadout, typeId + " exposes additive moshFx readout");
+            if (midx >= 0)
+                check (ok (cmd (ops, "set_plugin_param", objN ({{ "trackId", bt }, { "index", midx }, { "paramIndex", 0 }, { "value", 0.55 }}))),
+                       String ("set_plugin_param on ") + typeId + " ok");
+        }
+
+        auto xfTrack = cmd (ops, "create_track", args1 ("name", "X-FDBK Readout"))["data"].getProperty ("trackId", var()).toString();
+        check (ok (cmd (ops, "add_test_tone_clip", objN ({{ "trackId", xfTrack }, { "seconds", 1.0 }, { "freq", 2600.0 }}))),
+               "X-FDBK readout tone created");
+        auto xfLoad = cmd (ops, "load_builtin", objN ({{ "trackId", xfTrack }, { "type", "moshXFeedback" }}));
+        const int xfIdx = (int) xfLoad["data"].getProperty ("index", -1);
+        check (ok (xfLoad), "X-FDBK readout plugin loaded");
+        check (ok (cmd (ops, "set_plugin_param", objN ({{ "trackId", xfTrack }, { "index", xfIdx }, { "paramIndex", 0 }, { "value", 0.85 }}))),
+               "X-FDBK readout sensitivity set");
+        check (ok (cmd (ops, "set_plugin_param", objN ({{ "trackId", xfTrack }, { "index", xfIdx }, { "paramIndex", 4 }, { "value", 1.0 }}))),
+               "X-FDBK readout auto-suppress enabled");
+        auto xfOut = File::getSpecialLocation (File::tempDirectory).getChildFile ("mosh-xfeedback-readout.wav");
+        xfOut.deleteFile();
+        check (ok (cmd (ops, "export_audio", objN ({{ "file", xfOut.getFullPathName() }, { "format", "wav" }, { "bitDepth", 24 }}))),
+               "X-FDBK readout export ok");
+        bool activeCutHasScore = false, activeCutHasDepth = false;
+        { auto trk = trackById (xfTrack);
+          if (auto* arr = trk.getProperty ("plugins", var()).getArray())
+            for (auto& p : *arr) if ((int) p.getProperty ("index", -1) == xfIdx)
+            {
+                auto cuts = p.getProperty ("moshFx", var()).getProperty ("activeCuts", var());
+                if (auto* ca = cuts.getArray(); ca != nullptr && ! ca->isEmpty())
+                {
+                    const auto first = ca->getReference (0);
+                    activeCutHasScore = (double) first.getProperty ("score", 0.0) > 0.0;
+                    activeCutHasDepth = (double) first.getProperty ("depthDb", 0.0) > 0.0;
+                }
+            } }
+        check (activeCutHasScore, "X-FDBK active cut readout carries its own score");
+        check (activeCutHasDepth, "X-FDBK active cut readout carries depth");
+
+        const int autoIdx = builtinIndex (trackById (bt), "moshAutoTune");
+        if (autoIdx >= 0)
+        {
+            check (ok (cmd (ops, "bypass_plugin", objN ({{ "trackId", bt }, { "index", autoIdx }, { "bypassed", true }}))),
+                   "bypass_plugin on Mosh AutoTune ok");
+            bool bypassed = false;
+            { auto trk = trackById (bt);
+              if (auto* arr = trk.getProperty ("plugins", var()).getArray())
+                for (auto& p : *arr) if ((int) p.getProperty ("index", -1) == autoIdx)
+                    bypassed = ! (bool) p.getProperty ("enabled", true); }
+            check (bypassed, "Mosh AutoTune bypass reflected in snapshot");
+            check (ok (cmd (ops, "undo")), "undo Mosh AutoTune bypass ok");
+        }
+
         // Persistence + validation.
         cmd (ops, "save"); cmd (ops, "reload");
         check (builtinIndex (trackById (bt), "compressor") >= 0, "built-in plugin persists across save/reload");
+        check (builtinIndex (trackById (bt), "moshAutoTune") >= 0, "Mosh AutoTune persists across save/reload");
+        check (builtinIndex (trackById (bt), "moshOTT") >= 0, "Mosh OTT persists across save/reload");
+        check (builtinIndex (trackById (bt), "moshXFeedback") >= 0, "Mosh X-FDBK persists across save/reload");
+        const int ottIdx = builtinIndex (trackById (bt), "moshOTT");
+        if (ottIdx >= 0)
+        {
+            check (ok (cmd (ops, "remove_plugin", objN ({{ "trackId", bt }, { "index", ottIdx }}))), "remove_plugin on Mosh OTT ok");
+            check (builtinIndex (trackById (bt), "moshOTT") < 0, "Mosh OTT removed from chain");
+            check (ok (cmd (ops, "undo")), "undo Mosh OTT remove ok");
+            check (builtinIndex (trackById (bt), "moshOTT") >= 0, "undo restores Mosh OTT");
+        }
         check (! ok (cmd (ops, "load_builtin", objN ({{ "trackId", bt }, { "type", "no_such_plugin" }}))), "load_builtin rejects unknown type");
         // The scratch "Built-ins" track is left in place: the only later count
         // check in this run is relative (tracksBefore+1), and absolute-count

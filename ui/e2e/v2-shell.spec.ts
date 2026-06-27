@@ -209,9 +209,10 @@ test("plugin picker: + Plugin opens the dock — collections, vendor filter, sea
   await expect(dock.locator(".v2-pb-listhead")).toContainText("Xfer");
   await expect(dock.getByTestId("v2-pb-row")).toHaveCount(1);
 
-  // search narrows within the current view
+  // search narrows within the current view (use a term unique to one plugin —
+  // bare "ott" now matches both Xfer OTT and the built-in Mosh OTT)
   await dock.locator('[data-collection="all"]').click();
-  await dock.getByTestId("v2-pb-search").fill("ott");
+  await dock.getByTestId("v2-pb-search").fill("mosh ott");
   await expect(dock.getByTestId("v2-pb-row")).toHaveCount(1);
   await expect(dock.getByTestId("v2-pb-row")).toContainText("OTT");
 

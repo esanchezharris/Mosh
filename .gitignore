@@ -86,6 +86,7 @@ verify-artifacts/
 
 # Local agent/runtime scratch
 .gstack/
+.omo/
 .refclone/
 
 # macOS

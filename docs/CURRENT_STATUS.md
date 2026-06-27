@@ -1,6 +1,6 @@
 # Mosh Current Status And Architecture Map
 
-Updated: 2026-06-21
+Updated: 2026-06-26
 
 This is the short handoff for the current `main`/`codex/docs` program seat in
 `/Users/emiliosanchez-harris/Documents/ClaudeMosh`. It points to the live docs
@@ -58,8 +58,9 @@ work is in-process and real-time safe; Tier-B generation is an async job through
   sends, meters, recording arm/monitoring, project lifecycle, import/export,
   plugin hosting, automation, render-layer management, iPhone companion, brain
   proxy, voice, 2-player multiplayer, DAW project import (RPP/ALS/FLP),
-  audio→MIDI transcription, and the type-beat LoRA trainer scaffold.
-- The current default selftest target is ≈893 command-surface checks on the local
+  audio→MIDI transcription, the type-beat LoRA trainer scaffold, and the first
+  Mosh-native FX built-ins (`moshAutoTune`, `moshOTT`, `moshXFeedback`).
+- The current default selftest target is 1046 command-surface checks on the local
   machine (gate-dependent — Serum-VST3 and SA3 gates add more). The hardening work
   fixed Serum VST3/AU ambiguity and selftest teardown crashes from arbitrary
   installed plugins by constraining harness-hosted plugins to a known-clean VST3
@@ -104,12 +105,12 @@ Use the local gate that matches the surface changed. For documentation-only
 changes, link/lint review is normally enough. For code merges, start with:
 
 ```sh
-cmake --build build
-APP=build/Mosh_artefacts/Debug/Mosh.app/Contents/MacOS/Mosh
+cmake --build build-macos-arm64
+APP=build-macos-arm64/Mosh_artefacts/Debug/Mosh.app/Contents/MacOS/Mosh
 MOSH_NO_AUDIO=1 "$APP" --selftest
 MOSH_NO_AUDIO=1 "$APP" --selftest-undo
-ctest --test-dir build --output-on-failure
-scripts/validate-command-log-contract.sh
+ctest --test-dir build-macos-arm64 --output-on-failure
+scripts/validate-command-log-contract.sh "$HOME/Library/Mosh/session-run-script/mosh-log.jsonl" 500
 ```
 
 Then add the matching real-surface proof:
