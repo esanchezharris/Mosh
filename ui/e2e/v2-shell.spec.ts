@@ -109,6 +109,23 @@ test("keyboard focus shows a visible focus ring (:focus-visible)", async ({ page
   expect(outline).toBe("solid");                // a control received the lime focus ring
 });
 
+test("hover-only plugin-dock favorite star reveals on keyboard focus (a11y)", async ({ page }) => {
+  await bootV2(page);
+  // open the plugin dock (same path the drawer test uses)
+  await page.getByTestId("v2-browser-pull").click();
+  await page.getByTestId("v2-browser-tab-plugins").click();
+  await expect(page.getByTestId("v2-plugin-dock")).toBeVisible();
+  // an unfavorited star is opacity:0 (revealed only on row hover) — focusing it must reveal it,
+  // else the global :focus-visible ring lands on an invisible glyph.
+  const star = page.locator(".v2-pb-star:not(.on)").first();
+  await expect(star).toHaveCount(1);
+  await star.focus();
+  await expect(star).toBeFocused();
+  await expect
+    .poll(() => star.evaluate((el) => getComputedStyle(el).opacity))
+    .toBe("1");
+});
+
 test("the track header is keyboard-focusable and Enter selects it (a11y)", async ({ page }) => {
   await bootV2(page);
   const head = page.getByTestId("v2-track-header").first();
