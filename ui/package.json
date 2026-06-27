@@ -20,7 +20,8 @@
     "gen-turns": "tsx scripts/genTurns.mts",
     "gepa": "tsx scripts/gepa.mts",
     "build-sft": "tsx scripts/buildSft.mts",
-    "eval-sft": "tsx scripts/evalSft.mts"
+    "eval-sft": "tsx scripts/evalSft.mts",
+    "drive-local": "tsx scripts/driveLocal.mts"
   },
   "dependencies": {
     "qrcode": "^1.5.4",

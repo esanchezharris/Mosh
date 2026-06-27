@@ -94,10 +94,13 @@ if (repliesPath) {
 
 const isReasoning = provider === "openai" && /^(gpt-5|gpt-6|o[0-9])/.test(model);
 let calls = 0;
+// 2500, not 800: note-population targets routinely exceed 800 completion tokens, and a
+// truncated reply is unparseable → scored as a (false) failure. Override with --max-tokens.
+const maxTok = Number(flag("max-tokens", "2500")) || 2500;
 const callBrain = async (messages: ChatMessage[]): Promise<string> => {
   calls++;
   const payload: Record<string, unknown> = { model, messages, response_format: { type: "json_object" } };
-  if (isReasoning) payload.max_completion_tokens = 800; else { payload.max_tokens = 800; payload.temperature = 0; }
+  if (isReasoning) payload.max_completion_tokens = maxTok; else { payload.max_tokens = maxTok; payload.temperature = 0; }
   const ctrl = new AbortController();
   const to = setTimeout(() => ctrl.abort(), 90_000);
   try {

@@ -124,7 +124,9 @@ export async function scoreExample(
   for (const c of cmds) {
     const verr = validateCommand(c.command, c.args ?? {});
     if (verr) { errors.push(`${c.command}: ${verr}`); continue; }
-    const res = await mockExecute<CommandResult>({ command: c.command, args: c.args ?? {} });
+    let res: CommandResult;
+    try { res = await mockExecute<CommandResult>({ command: c.command, args: c.args ?? {} }); }
+    catch (e) { errors.push(`${c.command}: threw ${String((e as Error)?.message ?? e)}`); continue; } // a command that throws in the mock (e.g. browser-only timers) = failed apply, never a crash
     if (res.ok) ok++; else errors.push(`${c.command}: ${res.error}`);
   }
   const cleanRate = ok / cmds.length;
@@ -168,7 +170,9 @@ export async function scoreReply(ex: EvalExample, content: string): Promise<Exam
   for (const c of cmds) {
     const verr = validateCommand(c.command, c.args ?? {});
     if (verr) { errors.push(`${c.command}: ${verr}`); continue; }
-    const res = await mockExecute<CommandResult>({ command: c.command, args: c.args ?? {} });
+    let res: CommandResult;
+    try { res = await mockExecute<CommandResult>({ command: c.command, args: c.args ?? {} }); }
+    catch (e) { errors.push(`${c.command}: threw ${String((e as Error)?.message ?? e)}`); continue; } // a command that throws in the mock (e.g. browser-only timers) = failed apply, never a crash
     if (res.ok) ok++; else errors.push(`${c.command}: ${res.error}`);
   }
   const recall = fairRecall(ex.goldCommandNames, cmds.map((c) => c.command));
