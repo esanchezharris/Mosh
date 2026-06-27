@@ -2,9 +2,10 @@
 
 A native **Apple-Silicon DAW** with neural processing woven into the same signal model as a
 first-class, non-destructive layer — not a bolted-on "AI mode." Import/record, arrange, host
-VST3/AU plugins, mix, and export, plus two neural tiers: real-time neural inserts and an offline
-generative "re-imagine" render layer with semantic controls. A voice character (**Moshi**) and
-2-player multiplayer ride on the same command spine.
+VST3/AU plugins, mix, and export, plus a generative tier — an offline "re-imagine" / timbre-
+transform render layer with semantic controls that works on any track (MIDI/drum clips auto-bounce
+to audio first), with an optional real-time RAVE neural insert behind a build gate. A voice
+character (**Moshi**) and 2-player multiplayer ride on the same command spine.
 
 > **macOS / Apple Silicon (arm64) is canonical.** A Windows + NVIDIA/CUDA build is an additive,
 > platform-guarded port (in-tree, built but **not yet verified on hardware**); no Linux path. The
@@ -15,7 +16,8 @@ generative "re-imagine" render layer with semantic controls. A voice character (
 Three pieces behind one seam (the `execute_command` + snapshot/events contract):
 
 - **Native engine** (`src/`, C++/JUCE 8 + Tracktion Engine) — the audio engine, the **MoshOps**
-  command spine (the single mutation path), real-time neural inserts, and plugin hosting.
+  command spine (the single mutation path), VST3/AU plugin hosting, and an optional gated
+  real-time RAVE neural insert (`-DMOSH_ENABLE_ANIRA`, off by default).
 - **WebView UI** (`ui/`, React + Vite) — the arrangement/mixer/drawers, a pure client of MoshOps.
 - **Generative service** (`service/`, Python + MLX) — the offline Tier-B "re-imagine" model
   (Stable Audio 3), reached as a job over HTTP; falls back to a deterministic FakeAdapter when the

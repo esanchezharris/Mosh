@@ -1,6 +1,6 @@
 # Mosh Current Status And Architecture Map
 
-Updated: 2026-06-26
+Updated: 2026-06-27
 
 This is the short handoff for the current `main`/`codex/docs` program seat in
 `/Users/emiliosanchez-harris/Documents/ClaudeMosh`. It points to the live docs
@@ -16,9 +16,10 @@ that matter and calls out what is current versus historical.
    posture, and deferred work.
 3. `docs/PROGRESS.md` is the detailed chronological status log. It is the best
    place to check the newest landed work and verification counts.
-4. `docs/FEATURE_AUDIT.md` is the feature coverage dashboard. Treat its early
-   "Generated 2026-06-09" headline as the original baseline; the progress-log
-   sections below it record subsequent waves and deltas.
+4. `docs/FEATURE_AUDIT.md` is the DAW-parity scoreboard, regenerated from a live
+   conformance run (`scripts/daw-conformance/`) against the real command surface
+   (134/152 in-scope eval rows pass). It supersedes the 2026-06-09 baseline audit,
+   now archived under `docs/archive/feature-audit-2026-06-09/`.
 5. `docs/archive/hardening/2026-06-12-pause-alignment.md` is a historical pause
    marker, not the latest status. It is still important for branch boundaries and
    old parked work.
@@ -42,9 +43,11 @@ React WebView UI / Moshi agent
     -> snapshot + mosh_event feed back to UI
 ```
 
-Heavy generative audio work stays out of the audio thread. Tier-A neural insert
-work is in-process and real-time safe; Tier-B generation is an async job through
-`src/generative` and `service/`.
+Heavy generative audio work stays out of the audio thread. There is now a single
+generative tier (Tier B): an async job through `src/generative` and `service/`
+(re-imagine + timbre transform, working on any track). The synthetic Tier-A neural
+insert was removed (2026-06-21); the only real-time neural path now is an optional
+RAVE insert gated behind `-DMOSH_ENABLE_ANIRA` (off in the default build).
 
 ## Current Status
 
@@ -59,12 +62,25 @@ work is in-process and real-time safe; Tier-B generation is an async job through
   plugin hosting, automation, render-layer management, iPhone companion, brain
   proxy, voice, 2-player multiplayer, DAW project import (RPP/ALS/FLP),
   audio→MIDI transcription, the type-beat LoRA trainer scaffold, and the first
-  Mosh-native FX built-ins (`moshAutoTune`, `moshOTT`, `moshXFeedback`).
-- The current default selftest target is 1046 command-surface checks on the local
-  machine (gate-dependent — Serum-VST3 and SA3 gates add more). The hardening work
-  fixed Serum VST3/AU ambiguity and selftest teardown crashes from arbitrary
-  installed plugins by constraining harness-hosted plugins to a known-clean VST3
-  allowlist.
+  Mosh-native FX built-ins (`moshAutoTune`, `moshOTT`, `moshXFeedback`). The
+  generative render layer now works on **any** track — MIDI/drum clips auto-bounce
+  to audio first (re-imagine + timbre transform behind one model-agnostic adapter).
+- **Landed 2026-06-21 → 06-27:** a from-scratch **v2 UI shell** is now the default
+  (the classic shell is preserved verbatim in `AppLegacy.tsx`, selectable via the
+  `uiShell` setting); the synthetic Tier-A neural insert was removed in favour of a
+  single generative tier plus a gated real-time RAVE insert; generative layers run
+  on any track; a **DAW-parity conformance gate** + regenerated `FEATURE_AUDIT.md`
+  scoreboard (134/152); the packaged app bundles a brain key so a Finder/Dock launch
+  always has a brain; a native Transport menu + deploy re-sign; iPhone-companion
+  controller + latency gates; and an autonomous deferred-work loop (`docs/auto-loop/`)
+  that cleared nine backlog items.
+- The current default selftest target is **1046 command-surface checks** on the local
+  machine, run 3× for determinism (gate-dependent — Serum-VST3 and SA3 gates add
+  more). The UI side gates on vitest (584) + Playwright e2e (92), and a DAW-parity
+  conformance run (`scripts/daw-conformance/`) replays a 152-invariant eval suite
+  through the real command surface (134/152 in-scope pass). The hardening work fixed
+  Serum VST3/AU ambiguity and selftest teardown crashes from arbitrary installed
+  plugins by constraining harness-hosted plugins to a known-clean VST3 allowlist.
 - The real local gate remains local, not hosted CI: build the app, run
   `Mosh --selftest`, run focused undo, and use app/manual gates for UI, audio,
   plugin-editor, iPhone, or hardware-sensitive work.
@@ -78,7 +94,7 @@ work is in-process and real-time safe; Tier-B generation is an async job through
 | Whole app map | `ARCHITECTURE.md` | `src/Main.cpp`, `ui/src/App.tsx` |
 | MoshOps command contract | `docs/02_MOSHOPS_CONTRACT.md` | `src/moshops/MoshOps.h`, `src/moshops/MoshOps.cpp` |
 | Engine/session/source graph | `01_ENGINE_STATE_AND_SOURCE_GRAPH.md` | `src/engine/MoshEngine.cpp`, `src/state/RenderLayer.h` |
-| Plugin and neural chain | `04_PLUGIN_CHAIN_AND_REALTIME_NEURAL.md` | `src/plugins/hosting/PluginHost.h`, `src/plugins/neural/NeuralInsertPlugin.h` |
+| Plugin & neural chain | `04_PLUGIN_CHAIN_AND_REALTIME_NEURAL.md` | `src/plugins/hosting/PluginHost.h`, `src/plugins/transform/RaveInsertPlugin.h` (gated, `MOSH_ENABLE_ANIRA`) |
 | Generative layer | `05_GENERATIVE_LAYER.md` | `src/generative/GenerativeJobManager.h`, `service/server.py` |
 | Build/run plan | `06_BUILD_TOOLING_AND_RUN_PLAN.md` | `CMakeLists.txt`, `cmake/Dependencies.cmake`, `run-mosh.sh` |
 | iPhone companion | `docs/IPHONE_COMPANION.md` | `src/remote/RemoteCompanionServer.h`, `ios/MoshCompanion/` |
@@ -137,5 +153,7 @@ Then add the matching real-surface proof:
   active.
 - Type-beat LoRA has a rights-cleared scaffold and fake backend plumbing; real
   on-device training and vector layering remain deferred.
-- The feature audit contains both the original baseline and later progress
-  deltas; do not read the first summary paragraph alone as current status.
+- The feature audit (`docs/FEATURE_AUDIT.md`) is now the regenerated DAW-parity
+  scoreboard (134/152 in-scope pass); the 17 gap rows (tracked as the G1–G14 backlog)
+  plus 1 hardware row are the remaining conventional-DAW gaps. The 2026-06-09 baseline
+  is archived under `docs/archive/feature-audit-2026-06-09/`.

@@ -57,8 +57,14 @@ Repo root, each with a status banner. `02` lives here in `docs/`; there is no st
   (`/submit`, `/colors`, `/transcribe`, `/sketch`) across Fake / Mac-SA3 / PC-CUDA adapters.
 - [`../supabase/README.md`](../supabase/README.md) — the cloud multiplayer relay
   (Postgres + Edge Function); local stdlib relay lives in `relay/`. Native side: `src/multiplayer/`.
-- [`FEATURE_AUDIT.md`](FEATURE_AUDIT.md) / [`FEATURE_AUDIT.json`](FEATURE_AUDIT.json) +
-  [`audit/`](audit/) — the 2026-06-09 capability/surface dashboard (historical baseline + deltas).
+- [`FEATURE_AUDIT.md`](FEATURE_AUDIT.md) — the **DAW-parity scoreboard**, regenerated from a live
+  conformance run (`scripts/daw-conformance/`) against the real command surface (134/152 in-scope
+  eval rows pass). Supersedes the 2026-06-09 baseline audit, now archived under
+  [`archive/feature-audit-2026-06-09/`](archive/feature-audit-2026-06-09/).
+- [`reality-pack/`](reality-pack/) — the versioned cross-DAW reality model (canonical DAW ontology,
+  152 conformance invariants, the eval suite) the scoreboard + conformance gate replay against.
+- [`auto-loop/`](auto-loop/) — the autonomous deferred-work loop's backlog + ledger
+  (`backlog.jsonl`, the G1–G14 parity gaps that drive it).
 
 ## Future roadmap (post-v0, not yet built)
 

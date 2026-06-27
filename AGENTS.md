@@ -2,12 +2,16 @@
 
 **Trunk:** `main` is the only development trunk (per
 `docs/archive/consolidation/2026-06-09-mac-canonical-baseline-adr.md`). It carries
-the full v0 DAW slice plus the post-v0 work merged through 2026-06-20: the wave
-line (266-feature conformance audit, `docs/FEATURE_AUDIT.md`, must-tier 82/82), the
-tracktion itemID patch (`patches/`), tempo ramps + audio warp, AU hosting, the iOS
-companion, **2-player multiplayer** (PR #74), **always-on voice** (PR #71), the DAW
-project-file importers (`ui/src/import/`), audio→MIDI (`/transcribe`), and the
-additive **Windows + NVIDIA/CUDA port** (commit `962a03f`, unverified on hardware).
+the full v0 DAW slice plus the post-v0 work merged through 2026-06-27: the DAW-parity
+conformance scoreboard (`docs/FEATURE_AUDIT.md`, regenerated from a live run — 134/152
+in-scope eval rows pass; the 2026-06-09 baseline is archived), the tracktion itemID
+patch (`patches/`), tempo ramps + audio warp, AU hosting, the iOS companion, **2-player
+multiplayer** (PR #74), **always-on voice** (PR #71), the DAW project-file importers
+(`ui/src/import/`), audio→MIDI (`/transcribe`), the from-scratch **v2 UI shell** (default;
+classic preserved in `AppLegacy.tsx`), **generative render layers on any track** (MIDI/drum
+auto-bounce), the single generative tier (the synthetic Tier-A neural insert was removed; the
+real-time RAVE insert is gated behind `MOSH_ENABLE_ANIRA`), and the additive **Windows +
+NVIDIA/CUDA port** (commit `962a03f`, unverified on hardware).
 For the live status read `docs/CURRENT_STATUS.md`.
 
 **Mission:** keep the DAW correct and verified — intensive testing, verification,
@@ -22,7 +26,7 @@ useful for old branch boundaries and parked work, not current status.
 ```sh
 cmake --build build
 APP=build/Mosh_artefacts/Debug/Mosh.app/Contents/MacOS/Mosh
-MOSH_NO_AUDIO=1 "$APP" --selftest        # ≈893 checks (gate-dependent), 0 failed, 0 JUCE assertions
+MOSH_NO_AUDIO=1 "$APP" --selftest        # 1032 checks (gate-dependent), 0 failed, 0 JUCE assertions
 MOSH_NO_AUDIO=1 "$APP" --selftest-undo   # focused undo battery
 ```
 Run it 3× for determinism and paste the tallies in the PR/commit — the LOCAL
