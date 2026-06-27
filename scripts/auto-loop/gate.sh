@@ -176,6 +176,12 @@ gate_native() {
   # infra failure → fail-closed (a human installs it) rather than a silent skip.
   run_step "verify_py" bash -c "python3 scripts/verify-hardware/verify.py --bin '$bin'"
 
+  # DAW-conformance — the gathered reality-pack eval suite (docs/reality-pack/) replayed
+  # through the real command surface. Fails ONLY on an in-scope regression (known gaps are
+  # tracked in the report, not failed). Reuses the run-script + WAV harness, so it needs the
+  # same freshly-built binary + numpy. A parity fix that closes a gap flips its row to pass.
+  run_step "daw_conformance" bash -c "python3 scripts/daw-conformance/conformance.py --bin '$bin'"
+
   # vitest too (a native PR may also move ui/).
   ensure_node_modules
   run_step "vitest" bash -c 'cd ui && npm test'
