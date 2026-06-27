@@ -1438,6 +1438,64 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         aiffFile.deleteFile();
     }
 
+    // --- G1: export range/section + delay-tail policy (inv 78, 81) ---
+    // Render a sub-range and a tail-extended window, then assert the reported render
+    // duration tracks the WINDOW (not the whole edit). Renders headless (no device).
+    section ("Export range / section + delay-tail policy (G1)");
+    {
+        check (ok (cmd (ops, "new_project")), "new_project (isolate range/tail export)");
+        auto rtt = cmd (ops, "create_track", args1 ("name", "RangeTone"))["data"].getProperty ("trackId", var()).toString();
+        // 6s of tone so a 0..2s sub-range is unambiguously shorter than the whole edit.
+        check (ok (cmd (ops, "add_test_tone_clip", objN ({{ "trackId", rtt }, { "seconds", 6.0 }, { "freq", 220.0 }}))),
+               "6s tone clip added");
+
+        auto fullDir = eng.sessionDir().getChildFile ("exports");
+        auto fullFile  = fullDir.getChildFile ("g1-full.wav");
+        auto rangeFile = fullDir.getChildFile ("g1-range.wav");
+        auto loopFile  = fullDir.getChildFile ("g1-loop.wav");
+        auto tailFile  = fullDir.getChildFile ("g1-tail.wav");
+
+        // Full export — baseline duration ~= edit length (>= ~6s).
+        auto expFull = cmd (ops, "export_audio", objN ({{ "file", fullFile.getFullPathName() }}));
+        check (ok (expFull), "export_audio full ok");
+        const double fullSecs = (double) expFull["data"].getProperty ("seconds", 0.0);
+        check (fullSecs > 5.0, "full export duration ~= whole edit (>5s)");
+
+        // Explicit custom sub-range [0, 2] — duration must be ~2s, well under the full.
+        auto expRange = cmd (ops, "export_audio", objN ({{ "file", rangeFile.getFullPathName() },
+                                                         { "range", "custom" }, { "start", 0.0 }, { "end", 2.0 }}));
+        check (ok (expRange), "export_audio custom sub-range ok");
+        const double rangeSecs = (double) expRange["data"].getProperty ("seconds", 0.0);
+        check (rangeSecs > 1.5 && rangeSecs < 3.0, "sub-range export duration tracks [0,2] (~2s)");
+        check (rangeSecs < fullSecs - 1.0, "sub-range export is shorter than the full export");
+        check ((double) expRange["data"].getProperty ("rangeEnd", 0.0) == 2.0, "export echoes rangeEnd=2.0");
+
+        // Loop-region export: set a [1, 3] loop, then range:"loop".
+        check (ok (cmd (ops, "set_transport", objN ({{ "loopStart", 1.0 }, { "loopEnd", 3.0 }}))), "set loop region [1,3]");
+        auto expLoop = cmd (ops, "export_audio", objN ({{ "file", loopFile.getFullPathName() }, { "range", "loop" }}));
+        check (ok (expLoop), "export_audio range:loop ok");
+        const double loopSecs = (double) expLoop["data"].getProperty ("seconds", 0.0);
+        check (loopSecs > 1.5 && loopSecs < 3.0, "loop-range export duration tracks the loop region (~2s)");
+
+        // Tail policy: same [0,2] range + a 2s tail must render ~4s (range + tail).
+        auto expTail = cmd (ops, "export_audio", objN ({{ "file", tailFile.getFullPathName() },
+                                                        { "range", "custom" }, { "start", 0.0 }, { "end", 2.0 },
+                                                        { "includeTail", true }, { "tailSeconds", 2.0 }}));
+        check (ok (expTail), "export_audio with tail ok");
+        const double tailSecs = (double) expTail["data"].getProperty ("seconds", 0.0);
+        check (tailSecs > rangeSecs + 1.0, "tail extends the rendered window past the range");
+        check ((bool) expTail["data"].getProperty ("tailIncluded", false), "export echoes tailIncluded=true");
+        check ((double) expTail["data"].getProperty ("tailSeconds", 0.0) == 2.0, "export echoes tailSeconds=2.0");
+
+        // Validation: an inverted explicit range is a hard error (no file).
+        auto expBadRange = cmd (ops, "export_audio", objN ({{ "file", rangeFile.getFullPathName() },
+                                                            { "range", "custom" }, { "start", 3.0 }, { "end", 1.0 }}));
+        check (! ok (expBadRange), "export_audio rejects an inverted range (end <= start)");
+
+        fullFile.deleteFile();  rangeFile.deleteFile();  loopFile.deleteFile();  tailFile.deleteFile();
+        check (ok (cmd (ops, "new_project")), "new_project (reset after range/tail export)");
+    }
+
     section ("Serum render compatibility (optional local plugin gate)");
     if (File ("/Library/Audio/Plug-Ins/VST3/Serum2.vst3").exists())
     {

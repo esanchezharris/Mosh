@@ -475,10 +475,37 @@ def fam_export_mixdown(ctx):
 
 
 def fam_export_range_tail(ctx):
-    # G1: export_audio has no range (loop/section) arg and no delay-tail policy — always
-    # renders {0, getLength()} over all tracks. Capability absent.
-    return verdict(GAP, "audio", [78, 81],
-                   {"gap": "G1", "note": "export has no range/section selection and no tail-inclusion policy."})
+    # G1: export_audio honors a render range (loop/section) and a delay-tail policy. Drives
+    # a loop-region export and a tail-extended export on the SAME 6s edit and asserts the
+    # rendered WAV durations track the requested window (not the whole edit). Flips this
+    # scenario GAP→PASS once the capability lands (inv 78, 81).
+    full = ARTDIR / "export_full.wav"
+    loop = ARTDIR / "export_loop.wav"
+    tail = ARTDIR / "export_loop_tail.wav"
+    cmds = [
+        {"command": "create_track", "args": {"name": "Rt"}, "capture": {"T": "trackId"}},
+        {"command": "add_test_tone_clip", "args": {"trackId": "${T}", "seconds": 6.0, "freq": 220.0}},
+        {"command": "export_audio", "args": {"file": str(full)}},                            # whole edit
+        {"command": "set_transport", "args": {"loopStart": 1.0, "loopEnd": 3.0}},
+        {"command": "export_audio", "args": {"file": str(loop), "range": "loop"}},           # loop region only
+        {"command": "export_audio", "args": {"file": str(tail), "range": "loop",
+                                             "includeTail": True, "tailSeconds": 2.0}},      # + delay tail
+    ]
+    results, snaps, proc = drive(cmds, "conf-export-range-tail")
+    if cmd_fails(results) or not (full.exists() and loop.exists() and tail.exists()):
+        return verdict(FAIL, "audio", [78, 81],
+                       _err(proc, {"failed": cmd_fails(results),
+                                   "exists": {"full": full.exists(), "loop": loop.exists(), "tail": tail.exists()}}))
+    d_full = verify.stats(full)["duration_s"]
+    d_loop = verify.stats(loop)["duration_s"]
+    d_tail = verify.stats(tail)["duration_s"]
+    ok = (d_full > 5.0                        # full export ~= whole edit
+          and 1.5 < d_loop < 3.0              # loop-region render ~2s
+          and d_loop < d_full - 1.0           # loop render is clearly shorter than full
+          and d_tail > d_loop + 1.0)          # tail extends the rendered window
+    return verdict(PASS if ok else FAIL, "audio", [78, 81],
+                   {"full_s": d_full, "loop_s": d_loop, "tail_s": d_tail,
+                    "note": "export honors loop-range selection + delay-tail policy (G1)."})
 
 
 def rt_ok(t):

@@ -432,6 +432,13 @@ export type ExportResult = {
   sampleRate: number;
   bytes: number;
   renderMode: string;
+  // G1 — resolved render window echo (range/section + delay-tail policy). Present when
+  // the export targeted a sub-range and/or extended the end for a tail.
+  rangeStart?: number;
+  rangeEnd?: number;
+  tailIncluded?: boolean;
+  tailSeconds?: number;
+  seconds?: number;
 };
 
 // get_command_log result (AGT-001): a read-only window over the canonical command

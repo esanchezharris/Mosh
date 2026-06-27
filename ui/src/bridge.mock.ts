@@ -695,7 +695,21 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       snapshot.session.timeSigDenominator = num(args.denominator, snapshot.session.timeSigDenominator);
       invalidate(); return ok(command);
     }
-    case "export_audio": return ok(command, { file: str(args.file) || "/mock/mixdown." + str(args.format, "wav"), format: str(args.format, "wav"), bitDepth: num(args.bitDepth, 24), sampleRate: num(args.sampleRate, SR), bytes: 794000, renderMode: "offline" });
+    case "export_audio": {
+      // G1: echo the resolved range/tail back like the native handler so the seam stays
+      // faithful (range:"loop" → the transport loop region; includeTail extends the end).
+      const loopReq = str(args.range) === "loop";
+      const rangeStart = loopReq ? snapshot.transport.loopStart : 0;
+      const rangeEndBase = loopReq ? snapshot.transport.loopEnd : 10;
+      const tail = Boolean(args.includeTail) ? Math.max(0, num(args.tailSeconds, 2)) : 0;
+      return ok(command, {
+        file: str(args.file) || "/mock/mixdown." + str(args.format, "wav"),
+        format: str(args.format, "wav"), bitDepth: num(args.bitDepth, 24), sampleRate: num(args.sampleRate, SR),
+        bytes: 794000, renderMode: "offline",
+        rangeStart, rangeEnd: rangeEndBase + tail, tailIncluded: tail > 0, tailSeconds: tail,
+        seconds: Math.max(0, rangeEndBase + tail - rangeStart),
+      });
+    }
     case "get_command_log": {
       const limit = Math.max(1, num(args.limit, 50));
       return ok(command, { entries: cmdLog.slice(-limit).reverse(), total: cmdLog.length });

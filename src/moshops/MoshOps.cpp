@@ -5228,6 +5228,50 @@ juce::var MoshOps::cmdExportAudio (const juce::var& args)
         renderModeReason = "requested fast render";
     }
 
+    // ── Render range / section + delay-tail policy (G1) ───────────────────────
+    // The window to render. Default = the whole edit [0, getLength()]. Callers may
+    // narrow it three ways:
+    //   • range:"loop"          — use the transport's current loop region.
+    //   • start / end (seconds) — an explicit window (either may be set; the other
+    //                             defaults to 0 / edit length).
+    // Plus a tail policy: includeTail extends the render END by tailSeconds (default
+    // 2s, clamped 0..30) so delay/reverb tails ring out past the window. Validation
+    // runs BEFORE the device teardown below so a bad range fails fast.
+    const double editLen = juce::jmax (0.0, edit.getLength().inSeconds());
+    const auto requestedRange = args.getProperty ("range", "full").toString().toLowerCase();
+    if (requestedRange != "full" && requestedRange != "loop" && requestedRange != "custom")
+        return errResult ("export_audio", "range must be 'full', 'loop', or 'custom'");
+
+    double rangeStart = 0.0;
+    double rangeEnd   = editLen;
+    const bool haveExplicit = args.hasProperty ("start") || args.hasProperty ("end");
+
+    if (requestedRange == "loop")
+    {
+        auto loop = edit.getTransport().getLoopRange();
+        rangeStart = loop.getStart().inSeconds();
+        rangeEnd   = loop.getEnd().inSeconds();
+        if (rangeEnd <= rangeStart + 1.0e-6)
+            return errResult ("export_audio", "range 'loop' requested but no loop region is set");
+    }
+    else if (haveExplicit)
+    {
+        rangeStart = (double) args.getProperty ("start", 0.0);
+        rangeEnd   = args.hasProperty ("end") ? (double) args.getProperty ("end", editLen) : editLen;
+    }
+
+    rangeStart = juce::jmax (0.0, rangeStart);
+    if (rangeEnd <= rangeStart + 1.0e-6)
+        return errResult ("export_audio", "export range end must be greater than start (start="
+                          + String (rangeStart, 3) + ", end=" + String (rangeEnd, 3) + ")");
+
+    double tailSeconds = 0.0;
+    const bool includeTail = (bool) args.getProperty ("includeTail", false);
+    if (includeTail)
+        tailSeconds = juce::jlimit (0.0, 30.0, args.hasProperty ("tailSeconds")
+                                                   ? (double) args.getProperty ("tailSeconds", 2.0) : 2.0);
+    const double renderEnd = rangeEnd + tailSeconds;
+
     // Render exclusivity (01 §5): detach the Edit from the device before an
     // offline/realtime export render (asserts otherwise). No-op when no device
     // is attached. Tear down our level-meter taps first (the master tap lives on
@@ -5239,7 +5283,8 @@ juce::var MoshOps::cmdExportAudio (const juce::var& args)
     edit.getTransport().freePlaybackContext();
     lastSeenContext = nullptr;             // old ctx freed; force master-meter re-attach to the next ctx
 
-    const double len = juce::jmax (0.1, edit.getLength().inSeconds());
+    // Rendered duration = the resolved window (incl. any tail), not the whole edit (G1).
+    const double len = juce::jmax (0.1, renderEnd - rangeStart);
 
     // Sample rate: honor a valid explicit request (>= 7000), else the stored
     // per-project setting (PRJ-008), else the device rate with the 44100 fallback.
@@ -5267,7 +5312,14 @@ juce::var MoshOps::cmdExportAudio (const juce::var& args)
     params.blockSizeForAudio = edit.engine.getDeviceManager().getBlockSize();
     if (params.blockSizeForAudio <= 0)
         params.blockSizeForAudio = 512;
-    params.time = { tracktion::TimePosition(), edit.getLength() };
+    // G1: render the resolved window [rangeStart, rangeEnd + tail]. Extending the END
+    // by the tail directly (rather than only via endAllowance) keeps the rendered
+    // duration deterministic — endAllowance stops early once the tail goes silent, so
+    // it can't be relied on to size the file. We ALSO set endAllowance so genuine
+    // delay/reverb tails on real content decay cleanly within that extended window.
+    params.time = { tracktion::TimePosition::fromSeconds (rangeStart),
+                    tracktion::TimePosition::fromSeconds (renderEnd) };
+    params.endAllowance = tracktion::TimeDuration::fromSeconds (tailSeconds);
     params.tracksToDo = te::toBitSet (te::getAllTracks (edit));
     params.usePlugins = true;
     params.useMasterPlugins = true;
@@ -5346,6 +5398,13 @@ juce::var MoshOps::cmdExportAudio (const juce::var& args)
     data->setProperty ("renderMode", renderMode);
     data->setProperty ("renderModeReason", renderModeReason);
     data->setProperty ("realTimeRender", params.realTimeRender);
+    // G1: echo the resolved render window + tail policy so the UI / conformance can
+    // assert what was actually rendered (not just request it).
+    data->setProperty ("range", requestedRange);
+    data->setProperty ("rangeStart", rangeStart);
+    data->setProperty ("rangeEnd", rangeEnd);
+    data->setProperty ("tailIncluded", includeTail && tailSeconds > 0.0);
+    data->setProperty ("tailSeconds", tailSeconds);
     return okResult ("export_audio", var (data));
 }
 

@@ -456,8 +456,54 @@ def check_midi_render(ctx):
                 "out_rms": out_s["rms"], "render_vs_bounce_rms": altered})
 
 
+def check_export_range_tail(ctx):
+    """G1 (inv 78, 81): export_audio honors a render range (loop/section) and a delay-tail
+    policy. Proven on REAL rendered audio — the bounced WAV's DURATION tracks the requested
+    window, not the whole edit:
+      A (full)  — a 6s tone exported whole → ~6s file.
+      B (range) — the SAME edit exported [0,2] (custom) → ~2s file, clearly shorter than A.
+      C (loop)  — set a [1,3] loop, export range:"loop" → ~2s file.
+      D (tail)  — [0,2] + a 2s tail → ~4s file (the tail extends the rendered window).
+    Engine-only (no service / no models); deterministic; joins the default offline set."""
+    SESSION = "verify-range-tail"
+    full = ART / "08a_export_full.wav"
+    rng = ART / "08b_export_range.wav"
+    loop = ART / "08c_export_loop.wav"
+    tail = ART / "08d_export_tail.wav"
+    cmds = [
+        {"command": "create_track", "args": {"name": "RangeTone"}, "capture": {"T": "trackId"}},
+        {"command": "add_test_tone_clip", "args": {"trackId": "${T}", "seconds": 6.0, "freq": 220.0}},
+        {"command": "export_audio", "args": {"file": str(full)}},                                              # A: full
+        {"command": "export_audio", "args": {"file": str(rng), "range": "custom", "start": 0.0, "end": 2.0}},  # B: sub-range
+        {"command": "set_transport", "args": {"loopStart": 1.0, "loopEnd": 3.0}},
+        {"command": "export_audio", "args": {"file": str(loop), "range": "loop"}},                             # C: loop region
+        {"command": "export_audio", "args": {"file": str(tail), "range": "custom", "start": 0.0, "end": 2.0,
+                                             "includeTail": True, "tailSeconds": 2.0}},                        # D: range + tail
+    ]
+    results, proc = run_script(ctx.bin, cmds, SESSION)
+    fails = failed_commands(results)
+    if fails or not (full.exists() and rng.exists() and loop.exists() and tail.exists()):
+        return row("Export range/section + tail (G1)", False,
+                   {"failed_commands": fails,
+                    "exists": {"full": full.exists(), "range": rng.exists(), "loop": loop.exists(), "tail": tail.exists()},
+                    "stderr": proc.stderr[-500:]})
+    d_full = stats(str(full))["duration_s"]
+    d_rng = stats(str(rng))["duration_s"]
+    d_loop = stats(str(loop))["duration_s"]
+    d_tail = stats(str(tail))["duration_s"]
+    ok = (d_full > 5.0                          # A: whole edit
+          and 1.5 < d_rng < 3.0                 # B: ~2s window
+          and d_rng < d_full - 1.0              # B is clearly shorter than A
+          and 1.5 < d_loop < 3.0                # C: loop region ~2s
+          and d_tail > d_rng + 1.0              # D: tail extends past the range
+          and stats(str(rng))["rms"] > 0.001)   # the sub-range is non-silent audio
+    return row("Export range/section + tail (G1)", ok,
+               {"full_s": d_full, "range_s": d_rng, "loop_s": d_loop, "tail_s": d_tail})
+
+
 OFFLINE_CHECKS = [check_makes_sound, check_drums, check_transform, check_midi_render, check_full_loop,
-                  check_relative_ref_export, check_bypass_layer, check_render_artifact_portability]
+                  check_relative_ref_export, check_bypass_layer, check_render_artifact_portability,
+                  check_export_range_tail]
 
 
 # ── main ────────────────────────────────────────────────────────────────────────
