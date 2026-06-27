@@ -145,6 +145,17 @@ function emptySession(): Snapshot {
 }
 
 let snapshot: Snapshot = seedSnapshot();
+
+// G3 — mock audio routing. The current device selection (so set_audio_device shows
+// up in the next list_audio_devices) and the enumerated wave inputs (so the
+// per-track input picker has real choices and set_track_input can stick).
+const mockAudioSel = { type: "CoreAudio", outputDevice: "MacBook Pro Speakers", inputDevice: "MacBook Pro Microphone" };
+const MOCK_WAVE_INPUTS = [
+  { deviceID: "in-1-2", name: "Input 1-2", enabled: true, isStereoPair: true },
+  { deviceID: "in-3-4", name: "Input 3-4", enabled: true, isStereoPair: true },
+  { deviceID: "in-5", name: "Input 5", enabled: false, isStereoPair: false },
+];
+
 const clone = (s: Snapshot): Snapshot => JSON.parse(JSON.stringify(s)) as Snapshot;
 const history: Snapshot[] = [];
 const future: Snapshot[] = [];
@@ -666,18 +677,41 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     case "list_builtins": return ok(command, { plugins: BUILTINS });
     case "set_master_pan": { pushUndo(); if (snapshot.master) snapshot.master.pan = num(args.pan); invalidate(); return ok(command); }
     case "enable_all_meters": case "enable_track_meter": case "disable_track_meter": return ok(command);
-    case "list_wave_inputs": return ok(command, { inputs: [] });
+    case "list_wave_inputs": return ok(command, { inputs: MOCK_WAVE_INPUTS, audioEnabled: true });
     case "list_track_outputs": return ok(command, { outputs: [], tracks: snapshot.tracks.map((t) => ({ id: t.id, name: t.name })), audioEnabled: true });
 
     // ── settings / export / command log (topbar utilities) ───────────────────
     case "list_audio_devices": return ok(command, {
-      types: [{ name: "CoreAudio", outputs: ["MacBook Pro Speakers", "External Headphones"], inputs: ["MacBook Pro Microphone"] }],
-      current: { type: "CoreAudio", outputDevice: "MacBook Pro Speakers", inputDevice: "MacBook Pro Microphone", sampleRate: SR, bufferSize: snapshot.session.bufferSize ?? 512 },
+      types: [{ name: "CoreAudio", outputs: ["MacBook Pro Speakers", "External Headphones"], inputs: ["MacBook Pro Microphone", "Scarlett 2i2"] }],
+      current: { ...mockAudioSel, sampleRate: SR, bufferSize: snapshot.session.bufferSize ?? 512 },
       sampleRates: [44100, 48000, 96000], bufferSizes: [128, 256, 512, 1024], defaultBufferSize: 512, audioEnabled: true,
     });
     case "set_buffer_size": { if (snapshot.session) snapshot.session.bufferSize = num(args.bufferSize, 512); invalidate(); return ok(command); }
     case "set_audio_threads": { if (snapshot.session) { snapshot.session.audioThreads = num(args.threads, 8); snapshot.session.audioThreadsAuto = false; } invalidate(); return ok(command); }
-    case "set_audio_device": case "set_project_settings": case "open_project": case "open_recent": case "save_as": return ok(command);
+    case "set_audio_device": {
+      // Machine preference (undoable:false on the backend) — reflect into the mock
+      // selection so the next list_audio_devices shows the new device.
+      if (typeof args.outputDevice === "string") mockAudioSel.outputDevice = args.outputDevice;
+      if (typeof args.inputDevice === "string") mockAudioSel.inputDevice = args.inputDevice;
+      if (typeof args.type === "string") mockAudioSel.type = args.type;
+      return ok(command);
+    }
+    case "set_track_input": {
+      // RTG-001 — a routing preference (undoable:false). Stamp the track's input
+      // field so the picker reflects the choice. Empty deviceID clears the input.
+      const t = snapshot.tracks.find((tr) => tr.id === str(args.trackId));
+      if (!t) return err(command, "no track");
+      const deviceID = str(args.deviceID);
+      if (deviceID) {
+        const wi = MOCK_WAVE_INPUTS.find((w) => w.deviceID === deviceID);
+        t.input = { deviceID, name: wi?.name };
+      } else {
+        delete t.input;
+      }
+      invalidate();
+      return ok(command);
+    }
+    case "set_project_settings": case "open_project": case "open_recent": case "save_as": return ok(command);
     // New project = a fresh empty edit (createEmptyEdit on the native side). Resets to a
     // blank session and clears undo history — you can't undo across a New, same as a DAW.
     case "new_project": {

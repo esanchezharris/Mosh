@@ -9,6 +9,7 @@
 //   • Project (new/save/open/recent) — existing file-management actions, kept as-is.
 // Everything else is UI-local and persisted to localStorage via useSettings.
 
+import { useEffect } from "react";
 import { useStore } from "../store";
 import { pickFiles, pickSaveFile } from "../bridge";
 import type { Snapshot } from "../types";
@@ -17,6 +18,13 @@ import { settingsByCategory, type SettingDef } from "./schema";
 import { TEMPLATES } from "./templates";
 import { eventToCombo } from "../interaction/keymap";
 import { isV2Active } from "../v2/shellFlag";
+import {
+  outputDeviceOptions,
+  inputDeviceOptions,
+  waveInputOptions,
+  currentTrackInput,
+  audioDevicePatch,
+} from "./routing";
 
 // ── one renderer per setting type ───────────────────────────────────────────
 function SettingControl({ def }: { def: SettingDef }) {
@@ -167,6 +175,80 @@ function EngineSettings({ snapshot }: { snapshot: Snapshot }) {
   );
 }
 
+// ── G3 — audio-device select + per-track input picker ───────────────────────
+// All view data comes from the read-only enumerations (list_audio_devices via
+// loadAudioDevices, list_wave_inputs via loadRouting); every change rides an
+// EXISTING MoshOps command (set_audio_device / set_track_input) and re-fetches.
+// No new mutation path, no audio concepts cross the seam — just option lists.
+function AudioRouting({ snapshot }: { snapshot: Snapshot }) {
+  const exec = useStore((s) => s.exec);
+  const refresh = useStore((s) => s.refresh);
+  const audioDevices = useStore((s) => s.audioDevices);
+  const waveInputs = useStore((s) => s.waveInputs);
+  const loadAudioDevices = useStore((s) => s.loadAudioDevices);
+  const loadRouting = useStore((s) => s.loadRouting);
+
+  // Lazy-load both enumerations when Settings opens (no-op when not native).
+  useEffect(() => { void loadAudioDevices(); void loadRouting(); }, [loadAudioDevices, loadRouting]);
+
+  // Re-enumerate after a device switch (the available output/input lists are
+  // type-dependent) and after an input change (a track's input field moves).
+  const setDevice = async (field: "output" | "input", value: string) => {
+    await exec("set_audio_device", audioDevicePatch(field, value));
+    await loadAudioDevices();
+    await refresh();
+  };
+  const setTrackInput = async (trackId: string, deviceID: string) => {
+    await exec("set_track_input", { trackId, deviceID });
+    await loadRouting();
+    await refresh();
+  };
+
+  const outs = outputDeviceOptions(audioDevices);
+  const ins = inputDeviceOptions(audioDevices);
+  const inputOpts = waveInputOptions(waveInputs);
+  // Group (submix) and return tracks have no hardware input — only real audio/drum
+  // tracks can be armed from an input device.
+  const tracks = snapshot.tracks.filter((t) => !t.isGroup && !t.isReturn);
+
+  return (
+    <div className="pop-group">
+      <div className="pop-label">Audio routing</div>
+
+      {audioDevices && !audioDevices.audioEnabled ? (
+        <div className="pop-note">No audio device in this session.</div>
+      ) : (
+        <>
+          <label className="pop-row"><span>Output device</span>
+            <select aria-label="Output device" value={audioDevices?.current.outputDevice ?? ""}
+                    onChange={(e) => void setDevice("output", e.target.value)}>
+              {outs.map((d) => <option key={d} value={d}>{d}</option>)}
+            </select>
+          </label>
+          <label className="pop-row"><span>Input device</span>
+            <select aria-label="Input device" value={audioDevices?.current.inputDevice ?? ""}
+                    onChange={(e) => void setDevice("input", e.target.value)}>
+              {ins.map((d) => <option key={d} value={d}>{d}</option>)}
+            </select>
+          </label>
+
+          <div className="pop-label">Track inputs</div>
+          {tracks.length === 0 ? (
+            <div className="pop-note">No tracks yet.</div>
+          ) : tracks.map((t) => (
+            <label className="pop-row" key={t.id}><span>{t.name}</span>
+              <select aria-label={`Input for ${t.name}`} value={currentTrackInput(t)}
+                      onChange={(e) => void setTrackInput(t.id, e.target.value)}>
+                {inputOpts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </label>
+          ))}
+        </>
+      )}
+    </div>
+  );
+}
+
 // ── existing Project file-management actions — unchanged ────────────────────
 function ProjectSettings({ snapshot }: { snapshot: Snapshot }) {
   const exec = useStore((st) => st.exec);
@@ -221,6 +303,7 @@ export function SettingsPanel({ snapshot }: { snapshot: Snapshot }) {
         </div>
       ))}
       <EngineSettings snapshot={snapshot} />
+      <AudioRouting snapshot={snapshot} />
       <ProjectSettings snapshot={snapshot} />
     </>
   );
