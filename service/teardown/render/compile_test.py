@@ -101,5 +101,49 @@ import json  # noqa: E402
 dumps = {json.dumps(compile_recipe(rec).to_dict(), sort_keys=True) for _ in range(3)}
 check("compile is deterministic x3", len(dumps) == 1)
 
+# ── §9 execute pure helpers (engine-free): MIDI round-trip + inline + yield ──────────
+import tempfile  # noqa: E402
+from teardown.render.execute import inline_midi, reconstruction_class_for, yield_actual  # noqa: E402
+from teardown.render.midi_read import read_midi  # noqa: E402
+from teardown.midi_from_screen.export import write_midi  # noqa: E402
+
+with tempfile.TemporaryDirectory() as td:
+    mid = os.path.join(td, "e.mid")
+    src_notes = [{"pitch": 60, "start": 0.0, "end": 1.0, "velocity": 100},
+                 {"pitch": 64, "start": 1.0, "end": 1.5, "velocity": 90},
+                 {"pitch": 67, "start": 2.0, "end": 4.0, "velocity": 110}]
+    write_midi(src_notes, mid, bpm=140)
+    rn = read_midi(mid)
+    check("midi_read recovers note count", len(rn) == 3, f"got {len(rn)}")
+    check("midi_read recovers pitches + order", [n["pitch"] for n in rn] == [60, 64, 67])
+    check("midi_read recovers start/length (beats)",
+          abs(rn[0]["start"]) < 1e-6 and abs(rn[2]["length"] - 2.0) < 1e-3,
+          str(rn[2]))
+
+    rec_midi = R.Recipe(elements=[
+        R.Element(element_id="lead", role="lead", label="Lead",
+                  midi=R.Midi(status="extracted", midi_ref=mid, note_count=3)),
+        R.Element(element_id="kick", role="kick", label="Kick",
+                  sample_match=R.SampleMatch(status="matched", matched_path="/x/k.wav", distance=0.1)),
+    ])
+    cmds = compile_recipe(rec_midi).commands
+    inlined, nres = inline_midi(cmds, rec_midi, asset_root=None)
+    check("inline_midi resolved one clip", nres == 1, f"resolved {nres}")
+    mc = next(c for c in inlined if c["command"] == "add_midi_clip")
+    check("inline_midi attached notes to the right clip", len(mc["args"].get("notes", [])) == 3)
+    check("inline_midi leaves non-midi commands untouched",
+          any(c["command"] == "import_clip" for c in inlined))
+
+# yield_actual is honest: silent render → 0 regardless of clean command application
+ok_results = [{"ok": True, "command": "create_track"}, {"ok": True, "command": "create_track"},
+              {"ok": True, "command": "import_clip"}, {"ok": True, "command": "add_midi_clip"}]
+ya_silent = yield_actual(rec_midi, ok_results, notes_resolved=1, nonsilent=False)
+ya_sound = yield_actual(rec_midi, ok_results, notes_resolved=1, nonsilent=True)
+check("yield_actual is zero on a silent render", ya_silent["overall"] == 0.0, str(ya_silent))
+check("yield_actual rewards a non-silent landed render", ya_sound["overall"] > 0.5, str(ya_sound))
+check("yield_actual midi tracks resolved notes", ya_sound["midi"] == 1.0, str(ya_sound))
+check("reconstruction_class downgrades with unresolved present",
+      reconstruction_class_for(rec_midi, ya_sound, [{"issue": "x"}]) in ("inferred", "partial"))
+
 print(f"\n{'ALL PASS' if not fails else 'FAILURES: ' + ', '.join(fails)}  ({len(fails)} failure(s))")
 sys.exit(len(fails))
