@@ -76,6 +76,37 @@ test("the agent toast appears on a command and self-dismisses", async ({ page })
   await expect(page.getByTestId("v2-change-toast")).toHaveCount(0, { timeout: 12_000 });
 });
 
+test("plugin browser: two-pane picker — collections, vendor filter, search, add", async ({ page }) => {
+  await bootV2(page);
+  await page.getByTestId("v2-track-header").first().click();
+  await page.getByTestId("v2-insp-tab-fx").click();
+  await page.locator('[data-testid="v2-insp-body"]').getByRole("button", { name: "+ Plugin" }).click();
+
+  const pb = page.getByTestId("v2-pb");
+  await expect(pb).toBeVisible();
+  // left rail collections: All + kind filters + a "Built-in" vendor group (no duplicate
+  // Instruments/Effects vendor rows — built-ins collapse under one maker).
+  await expect(page.getByTestId("v2-pb-collection")).not.toHaveCount(0);
+  await expect(pb.locator('[data-collection="all"]')).toContainText("All Plugins");
+  await expect(pb.locator('[data-collection="v:Built-in"]')).toContainText("Built-in");
+
+  // vendor filter narrows the list header + rows
+  await pb.locator('[data-collection="v:Xfer"]').click();
+  await expect(pb.locator(".v2-pb-listhead")).toContainText("Xfer");
+  await expect(page.getByTestId("v2-pb-row")).toHaveCount(1);
+
+  // search narrows within the current view
+  await pb.locator('[data-collection="all"]').click();
+  await page.getByTestId("v2-pb-search").fill("ott");
+  await expect(page.getByTestId("v2-pb-row")).toHaveCount(1);
+  await expect(page.getByTestId("v2-pb-row")).toContainText("OTT");
+
+  // adding an effect closes the browser and the plugin lands in the FX rack
+  await page.getByTestId("v2-pb-row").click();
+  await expect(pb).toHaveCount(0);
+  await expect(page.locator('[data-testid="v2-insp-body"]')).toContainText("OTT");
+});
+
 test("collaborators card exposes the camera toggle + invite", async ({ page }) => {
   await bootV2(page);
   await expect(page.getByTestId("v2-camera-toggle")).toBeVisible();
