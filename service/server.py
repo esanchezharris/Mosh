@@ -755,6 +755,25 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, lyr.analyze(spec))
             except Exception as e:  # noqa: BLE001
                 self._send(500, {"ok": False, "error": f"lyric analysis error: {e}"})
+        elif path == "/style_corpus":
+            # §7 style-RAG flywheel — the user-owned voice corpus (backend-only management).
+            # action: "add" (the artist's OWN lyrics) | "stats" (counts only) | "clear".
+            # In-process, deterministic; retrieval/biasing happens inside the gen loop.
+            try:
+                from lyrics import style_corpus
+                action = str(data.get("action", "stats"))
+                sc = style_corpus.StyleCorpus()
+                if action == "add":
+                    lines = [str(x) for x in (data.get("lines", []) or [])]
+                    added = sc.add_lines(lines, meta={"source": str(data.get("source", "user"))})
+                    self._send(200, {"ok": True, "added": added, **sc.stats()})
+                elif action == "clear":
+                    sc.clear()
+                    self._send(200, {"ok": True, "lines": 0})
+                else:
+                    self._send(200, sc.stats())
+            except Exception as e:  # noqa: BLE001
+                self._send(500, {"ok": False, "error": f"style corpus error: {e}"})
         elif path == "/training/submit" or path == "/training/jobs":
             if not TRAINING_ENABLED:
                 self._send(503, {"ok": False, "error": "lora trainer unavailable"})

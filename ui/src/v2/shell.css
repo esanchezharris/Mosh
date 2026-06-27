@@ -750,3 +750,15 @@
 .v2-flow-rhyme.st-anchor  { color: var(--v2-text); }
 .v2-flow-rhyme.st-none    { color: var(--v2-rec); border-color: rgba(255, 59, 92, 0.4); }
 .v2-flow-rhyme.st-free    { color: var(--v2-faint); }
+
+/* §7 style-RAG opt-in — "Sound like me": bias generation toward the artist's own voice. */
+.v2-lyric-stylebias {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 0 4px;
+  font-size: 11px;
+  color: var(--v2-dim);
+  cursor: pointer;
+}
+.v2-lyric-stylebias input { accent-color: var(--v2-accent); }

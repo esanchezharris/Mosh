@@ -18,6 +18,17 @@ TEST_CASE ("MOSH_LYRICSHEET builds with a LYRIC_LINES container + defaults (LYR-
     REQUIRE (LyricSheet::lines (v).getNumChildren() == 0);
 }
 
+TEST_CASE ("L1+§7 sheet constraints (styleBias) round-trip through XML", "[lyrics][rag]")
+{
+    auto v = LyricSheet::create ("ls-1", "1/16", "en");
+    // §7 style-RAG opt-in: a sheet-level bool set by set_lyric_constraint, undoable,
+    // serialized in the snapshot/edit. Absent ⇒ false (additive, no format bump).
+    REQUIRE_FALSE ((bool) v[ids::lyricStyleBias]);
+    v.setProperty (ids::lyricStyleBias, true, nullptr);
+    auto back = juce::ValueTree::fromXml (v.toXmlString());
+    REQUIRE ((bool) back[ids::lyricStyleBias] == true);
+}
+
 TEST_CASE ("MOSH_LYRICLINE carries the constraint spec + round-trips through XML", "[lyrics]")
 {
     auto line = LyricLine::create ("ln-1", 0, "hook");

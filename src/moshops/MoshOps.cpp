@@ -915,6 +915,7 @@ juce::var MoshOps::cmdSetLyricConstraint (const juce::var& args)
     if (args.hasProperty ("mood"))            sheet.setProperty (ids::lyricMood,            args.getProperty ("mood", var()), &undoManager());
     if (args.hasProperty ("explicit"))        sheet.setProperty (ids::lyricExplicit,        args.getProperty ("explicit", var()), &undoManager());
     if (args.hasProperty ("rhymeStrictness")) sheet.setProperty (ids::lyricRhymeStrictness, args.getProperty ("rhymeStrictness", var()), &undoManager());
+    if (args.hasProperty ("styleBias"))       sheet.setProperty (ids::lyricStyleBias,       (bool) args.getProperty ("styleBias", false), &undoManager());
     logLine ("set_lyric_constraint", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("set_lyric_constraint");
@@ -1022,6 +1023,7 @@ juce::var MoshOps::lyricSheetToVar (te::AudioTrack& t)
     o->setProperty ("mood",            sheet[ids::lyricMood].toString());
     o->setProperty ("explicit",        sheet[ids::lyricExplicit].toString());
     o->setProperty ("rhymeStrictness", sheet[ids::lyricRhymeStrictness].toString());
+    o->setProperty ("styleBias",       (bool) sheet[ids::lyricStyleBias]);
     o->setProperty ("specVersion",     (int) sheet[ids::lyricSpecVersion]);
 
     Array<var> lines;
@@ -1068,13 +1070,16 @@ juce::var MoshOps::lyricSpecForTrack (te::AudioTrack& t)
 {
     auto sheet = t.state.getChildWithName (ids::MOSH_LYRICSHEET);
     if (! sheet.isValid()) return {};
+    const bool styleBias = (bool) sheet[ids::lyricStyleBias];
     auto* o = new DynamicObject();
     o->setProperty ("grid",            sheet[ids::lyricGrid].toString());
     o->setProperty ("topic",           sheet[ids::lyricTopic].toString());
     o->setProperty ("mood",            sheet[ids::lyricMood].toString());
     o->setProperty ("explicit",        sheet[ids::lyricExplicit].toString());
     o->setProperty ("rhymeStrictness", sheet[ids::lyricRhymeStrictness].toString());
+    o->setProperty ("styleBias",       styleBias);
     Array<var> lines;
+    Array<var> styleCorpus;   // §7 — the artist's OWN finalized lines = the voice corpus
     auto container = mosh::LyricSheet::lines (sheet);
     for (int i = 0; i < container.getNumChildren(); ++i)
     {
@@ -1091,8 +1096,13 @@ juce::var MoshOps::lyricSpecForTrack (te::AudioTrack& t)
         lo->setProperty ("rhymeStrictness", l[ids::lyricRhymeStrictness].toString());
         lo->setProperty ("locked",          (bool) l[ids::lyricLocked]);
         lines.add (var (lo));
+        const auto finalized = l[ids::lyricText].toString();
+        if (styleBias && finalized.trim().isNotEmpty())
+            styleCorpus.add (finalized);   // user-owned only; passed inline (no persistence)
     }
     o->setProperty ("lines", lines);
+    if (styleBias)
+        o->setProperty ("styleCorpus", styleCorpus);
     return var (o);
 }
 
