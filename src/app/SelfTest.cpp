@@ -2980,6 +2980,12 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // call — keeps this hermetic (no teardown venv / service spawn in --selftest).
         check (! ok (cmd (ops, "find_similar_sample", objN ({{ "path", "/no/such/file.wav" }}))),
                "find_similar_sample errors on a missing file");
+        // teardown_analyze / teardown_render: missing required args error BEFORE any service
+        // call (hermetic — no service spawn).
+        check (! ok (cmd (ops, "teardown_analyze", objN ({}))),
+               "teardown_analyze errors with no videoId");
+        check (! ok (cmd (ops, "teardown_render", objN ({{ "recipePath", "/no/such/recipe.json" }}))),
+               "teardown_render errors on a missing recipe");
 
         browseDir.deleteRecursively();
         cmd (ops, "remove_track", args1 ("trackId", trkId));   // tidy up the probe track

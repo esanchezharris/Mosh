@@ -8,7 +8,7 @@ import { create } from "zustand";
 
 export type InspectorTab = "mix" | "fx" | "gen" | "midi" | "takes";
 export type SectionZoom = "8b" | "16b" | "full";
-export type BrowserTab = "sounds" | "plugins";
+export type BrowserTab = "sounds" | "plugins" | "teardown";
 
 interface ShellState {
   selectedClipId: string | null;   // clip-level selection for the contextual Inspector

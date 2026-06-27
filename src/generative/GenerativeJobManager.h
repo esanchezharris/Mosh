@@ -56,6 +56,16 @@ public:
         not built → 409). */
     juce::var findSimilarSamples (const juce::File& inputWav, const juce::String& role, int k);
 
+    /** §4 tutorial→Recipe skeleton (POST /teardown/recipe). LONG-running (download + frames
+        + transcript) — call off the message thread. Returns the cli summary var, or {} /
+        ok:false on failure (service down, teardown venv absent → 503). */
+    juce::var teardownAnalyze (const juce::String& videoId, double secStart, double secEnd);
+
+    /** §9 Recipe→render (POST /teardown/execute). SYNCHRONOUS-ish (a render is seconds) —
+        call off the message thread. Returns { ok, out_wav, yield_actual, ... }, or {} /
+        ok:false on failure. */
+    juce::var teardownRender (const juce::String& recipePath, const juce::String& outWav);
+
     juce::String serviceBuild() const { return svcBuild; }
 
 private:

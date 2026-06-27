@@ -8,6 +8,7 @@
 import { useShell } from "./shellState";
 import { SampleBrowser } from "../ui/SampleBrowser";
 import { PluginDock } from "./PluginBrowser";
+import { TeardownPanel } from "./TeardownPanel";
 
 export function LeftDrawer() {
   const open = useShell((s) => s.browserOpen);
@@ -27,11 +28,13 @@ export function LeftDrawer() {
                   data-testid="v2-browser-tab-sounds" onClick={() => openTab("sounds")}>Sounds</button>
                 <button role="tab" aria-selected={tab === "plugins"} className={tab === "plugins" ? "on" : ""}
                   data-testid="v2-browser-tab-plugins" onClick={() => openTab("plugins")}>Plugins</button>
+                <button role="tab" aria-selected={tab === "teardown"} className={tab === "teardown" ? "on" : ""}
+                  data-testid="v2-browser-tab-teardown" onClick={() => openTab("teardown")}>Teardown</button>
               </div>
               <button className="v2-drawer-close" data-testid="v2-browser-close" aria-label="Close browser" title="Close" onClick={() => setOpen(false)}>✕</button>
             </div>
             <div className="v2-drawer-body">
-              {tab === "sounds" ? <SampleBrowser /> : <PluginDock />}
+              {tab === "sounds" ? <SampleBrowser /> : tab === "plugins" ? <PluginDock /> : <TeardownPanel />}
             </div>
           </>
         )}

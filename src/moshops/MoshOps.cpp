@@ -541,6 +541,8 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "list_colors")       return cmdListColors (args);
     if (name == "list_transform_targets") return cmdListTransformTargets (args);
     if (name == "find_similar_sample") return cmdFindSimilarSample (args);
+    if (name == "teardown_analyze")   return cmdTeardownAnalyze (args);
+    if (name == "teardown_render")    return cmdTeardownRender (args);
    #if MOSH_HAVE_ANIRA
     if (name == "add_rave_insert")   return cmdAddRaveInsert (args);
     if (name == "set_rave_param")    return cmdSetRaveParam (args);
@@ -3229,6 +3231,62 @@ juce::var MoshOps::cmdFindSimilarSample (const juce::var& args)
     data->setProperty ("available", true);
     data->setProperty ("matches", result.getProperty ("matches", var (juce::Array<var>())));
     return okResult ("find_similar_sample", var (data));
+}
+
+juce::var MoshOps::cmdTeardownAnalyze (const juce::var& args)
+{
+    // §4: tear a tutorial down into a Recipe skeleton via the teardown service
+    // (POST /teardown/recipe). Read-only — no clip/transaction/log. LONG-running (download +
+    // transcript); the UI runs it off the message thread. Service/venv absent → graceful
+    // { available:false, reason } so the UI can hint at setup instead of erroring.
+    const auto vid = args.getProperty ("videoId", args.getProperty ("url", var())).toString();
+    if (vid.isEmpty()) return errResult ("teardown_analyze", "missing 'videoId'");
+    const double s0 = (double) args.getProperty ("sectionStart", -1.0);
+    const double s1 = (double) args.getProperty ("sectionEnd", -1.0);
+
+    auto result = jobManager.teardownAnalyze (vid, s0, s1);
+    auto* data = new DynamicObject();
+    if (! (bool) result.getProperty ("ok", false))
+    {
+        data->setProperty ("available", false);
+        data->setProperty ("reason", result.getProperty ("error", var()));
+        return okResult ("teardown_analyze", var (data));
+    }
+    data->setProperty ("available", true);
+    data->setProperty ("recipe", result.getProperty ("recipe", var()));        // recipe.json path
+    data->setProperty ("detected", result.getProperty ("detected", var()));
+    data->setProperty ("elements", result.getProperty ("elements", var()));
+    data->setProperty ("title", result.getProperty ("title", var()));
+    return okResult ("teardown_analyze", var (data));
+}
+
+juce::var MoshOps::cmdTeardownRender (const juce::var& args)
+{
+    // §9: compile a Recipe → MoshOps → render a reconstruction WAV via the teardown service
+    // (POST /teardown/execute). Read-only — returns the rendered wav path + measured yield;
+    // the UI imports it (import_clip) onto a track. A missing recipe path IS an error
+    // (caught before any service call → keeps --selftest hermetic). Service absent → graceful.
+    const auto recipePath = args.getProperty ("recipePath", var()).toString();
+    if (recipePath.isEmpty()) return errResult ("teardown_render", "missing 'recipePath'");
+    if (! juce::File (recipePath).existsAsFile())
+        return errResult ("teardown_render", "recipe not found: " + recipePath);
+    const auto outWav = args.getProperty ("out", var()).toString();
+
+    auto result = jobManager.teardownRender (recipePath, outWav);
+    auto* data = new DynamicObject();
+    data->setProperty ("recipePath", recipePath);
+    if (! (bool) result.getProperty ("ok", false))
+    {
+        data->setProperty ("available", false);
+        data->setProperty ("reason", result.getProperty ("error", var()));
+        return okResult ("teardown_render", var (data));
+    }
+    data->setProperty ("available", true);
+    data->setProperty ("outWav", result.getProperty ("out_wav", var()));
+    data->setProperty ("yield", result.getProperty ("yield_actual", var()));
+    data->setProperty ("reconstructionClass", result.getProperty ("reconstruction_class", var()));
+    data->setProperty ("nonsilent", result.getProperty ("nonsilent", var()));
+    return okResult ("teardown_render", var (data));
 }
 
 void MoshOps::stopAudition()

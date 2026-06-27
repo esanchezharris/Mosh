@@ -192,6 +192,8 @@ private:
     juce::var cmdTranscribeClip (const juce::var& args);  // audio->MIDI (Basic Pitch)
     juce::var cmdSketchBeatbox  (const juce::var& args);  // Sketch P0: beatbox->drum MoshOps
     juce::var cmdFindSimilarSample (const juce::var& args);  // §1 drum match via /teardown/match (read-only)
+    juce::var cmdTeardownAnalyze (const juce::var& args);    // §4 tutorial→Recipe via /teardown/recipe (read-only)
+    juce::var cmdTeardownRender (const juce::var& args);     // §9 Recipe→render via /teardown/execute (read-only)
     juce::var cmdAddNote        (const juce::var& args);
     juce::var cmdRemoveNote     (const juce::var& args);
     juce::var cmdSetNote        (const juce::var& args);

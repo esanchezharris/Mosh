@@ -57,6 +57,26 @@ test("left browser drawer: pull-tab opens it, tabs switch, close dismisses", asy
   await expect(page.getByTestId("v2-browser-tab-sounds")).toHaveCount(0);
 });
 
+test("teardown tab: analyze a tutorial → recipe summary → reconstruct", async ({ page }) => {
+  await bootV2(page);
+  await page.getByTestId("v2-browser-pull").click();
+  await page.getByTestId("v2-browser-tab-teardown").click();
+  const panel = page.getByTestId("v2-teardown-panel");
+  await expect(panel).toBeVisible();
+  // analyze is disabled until a url is entered
+  await expect(page.getByTestId("v2-teardown-analyze")).toBeDisabled();
+  await page.getByTestId("v2-teardown-url").fill("dQw4w9WgXcQ");
+  await page.getByTestId("v2-teardown-analyze").click();
+  // the mock returns a recipe summary (tempo 140, Serum)
+  const recipe = page.getByTestId("v2-teardown-recipe");
+  await expect(recipe).toBeVisible();
+  await expect(recipe).toContainText("140");
+  await expect(recipe).toContainText("Serum");
+  // reconstruct → the dev mock can't render → a graceful status (never a crash)
+  await page.getByTestId("v2-teardown-reconstruct").click();
+  await expect(page.getByTestId("v2-teardown-status")).toContainText(/render|service|reconstruction/i);
+});
+
 test("boots the v2 shell with topbar, tracks, composer and the always-on rail", async ({ page }) => {
   await bootV2(page);
   await expect(page.getByTestId("v2-topbar")).toBeVisible();

@@ -90,6 +90,8 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "load_plugin", desc: "Add a scanned VST3/AU plugin to a track (pluginId from list_plugins)", args: [S("trackId"), S("pluginId"), N("index", false, "chain position")] },
   { command: "set_plugin_param", desc: "Set a plugin parameter (0-1) by chain index + param index", args: [S("trackId"), N("index"), N("paramIndex"), N("value", true, "0-1")] },
   { command: "describe_plugin", desc: "Read a plugin's automatable parameters (index, name, value) — uncapped, for patch recovery/loading by name", args: [S("trackId"), N("index", false, "chain position"), N("limit", false, "max params to return (default 512)")] },
+  { command: "teardown_analyze", desc: "Tear a tutorial down into a Recipe skeleton (teardown service §4: download + frames + OCR + transcript). Long-running.", args: [S("videoId"), S("url", false, "alias for videoId"), N("sectionStart", false, "seconds"), N("sectionEnd", false, "seconds")] },
+  { command: "teardown_render", desc: "Render a teardown Recipe into a reconstruction WAV (service §9); import the returned outWav onto a track", args: [S("recipePath"), S("out", false, "output wav path")] },
   { command: "bypass_plugin", desc: "Bypass/enable a plugin in a track's chain", args: [S("trackId"), N("index"), B("bypassed")] },
   { command: "reorder_plugin", desc: "Move a plugin to a new chain position", args: [S("trackId"), N("index"), N("toIndex")] },
   { command: "open_plugin_editor", desc: "Pop out a plugin's native editor window", args: [S("trackId"), N("index")] },

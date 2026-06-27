@@ -220,4 +220,42 @@ juce::var GenerativeJobManager::findSimilarSamples (const juce::File& inputWav, 
     return {};
 }
 
+juce::var GenerativeJobManager::teardownAnalyze (const juce::String& videoId, double secStart, double secEnd)
+{
+    if (! ensureServiceRunning())
+        return {};
+    auto* body = new DynamicObject();
+    body->setProperty ("videoId", videoId);
+    if (secEnd > secStart)
+    {
+        juce::Array<var> sec; sec.add (secStart); sec.add (secEnd);
+        body->setProperty ("section", var (sec));
+    }
+    // §4 downloads + transcribes → minutes; the service caps it at 900s. Off the message thread.
+    URL url = URL (baseUrl + "/teardown/recipe").withPOSTData (JSON::toString (var (body)));
+    auto opts = URL::InputStreamOptions (URL::ParameterHandling::inPostData)
+                    .withConnectionTimeoutMs (905000)
+                    .withExtraHeaders ("Content-Type: application/json");
+    if (auto s = url.createInputStream (opts))
+        return JSON::parse (s->readEntireStreamAsString());
+    return {};
+}
+
+juce::var GenerativeJobManager::teardownRender (const juce::String& recipePath, const juce::String& outWav)
+{
+    if (! ensureServiceRunning())
+        return {};
+    auto* body = new DynamicObject();
+    body->setProperty ("recipePath", recipePath);
+    if (outWav.isNotEmpty()) body->setProperty ("out", outWav);
+    // §9 render is seconds; the service caps it at 300s.
+    URL url = URL (baseUrl + "/teardown/execute").withPOSTData (JSON::toString (var (body)));
+    auto opts = URL::InputStreamOptions (URL::ParameterHandling::inPostData)
+                    .withConnectionTimeoutMs (305000)
+                    .withExtraHeaders ("Content-Type: application/json");
+    if (auto s = url.createInputStream (opts))
+        return JSON::parse (s->readEntireStreamAsString());
+    return {};
+}
+
 } // namespace mosh
