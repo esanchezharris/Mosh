@@ -115,6 +115,54 @@ parse_selftest_tally() {
 # (already "0" on no match) and ignore the exit code instead.
 count_juce_asserts() { local c; c="$(grep -c 'JUCE Assertion' "$1" 2>/dev/null)"; printf '%s\n' "${c:-0}"; }
 
+# ── ui dependency freshness (the shared-node_modules drift trap) ──────────────────
+# new-worktree.sh SYMLINKS each worktree's ui/node_modules to a SHARED cache when the
+# lockfile matches at creation time. A later merged PR can then change ui/package-lock.json
+# out from under that shared dir, but a bare `[ -e node_modules ]` check still sees the
+# symlink as present → the gate skipped `npm ci` and ran against stale deps (a real false
+# gate-red: PR #157 added @storybook/react-vite, the shared cache went stale, and tsc failed
+# on the unrelated clean PR #168). Detect drift by hashing package-lock.json against a stamp
+# written after each successful install; the stamp lives INSIDE node_modules (gitignored, so
+# it never pollutes `git status`) and resolves through the symlink, so it is shared exactly
+# when node_modules is. `npm ci` clears node_modules, but we always re-stamp right after a
+# successful install, so the stamp is present whenever the deps are.
+DEPS_STAMP_NAME=".mosh-deps-stamp"
+
+# deps_lock_hash <file> — sha256 hex of a file, portable across macOS (shasum) and Linux
+# (sha256sum). Echoes the digest, or nothing if the file is missing / no hasher exists.
+deps_lock_hash() {
+  local f="$1"
+  [ -f "$f" ] || return 0
+  if command -v shasum >/dev/null 2>&1; then shasum -a 256 "$f" 2>/dev/null | awk '{print $1}'
+  elif command -v sha256sum >/dev/null 2>&1; then sha256sum "$f" 2>/dev/null | awk '{print $1}'
+  else cksum "$f" 2>/dev/null | awk '{print $1"-"$2}'; fi
+}
+
+# deps_need_install <ui-dir> — exit 0 (true) if `npm ci` should run for this ui dir, 1
+# (false) if the installed deps already satisfy ui/package-lock.json. Cheap: a hash compare,
+# no install. Works whether ui/node_modules is a real dir OR a symlink into the shared cache
+# (the stamp + lockfile both resolve through the symlink). With no lockfile it falls back to
+# the legacy "install only if node_modules is absent" behaviour.
+deps_need_install() {
+  local ui="$1"
+  local nm="$ui/node_modules" want
+  want="$(deps_lock_hash "$ui/package-lock.json")"
+  if [ -z "$want" ]; then
+    [ -e "$nm" ] && return 1 || return 0   # no lockfile: legacy absent-only check
+  fi
+  [ -e "$nm" ] || return 0                  # node_modules absent or a dangling symlink
+  [ "$(cat "$nm/$DEPS_STAMP_NAME" 2>/dev/null || true)" = "$want" ] && return 1 || return 0
+}
+
+# deps_write_stamp <ui-dir> — record the current lockfile hash so the next gate run can
+# detect drift. Call ONLY after a successful install. No-op if node_modules / the lockfile
+# is gone. Through a symlinked node_modules this stamps the SHARED cache for every worktree.
+deps_write_stamp() {
+  local ui="$1" nm="$1/node_modules" want
+  want="$(deps_lock_hash "$ui/package-lock.json")"
+  [ -n "$want" ] && [ -d "$nm" ] && printf '%s\n' "$want" > "$nm/$DEPS_STAMP_NAME" 2>/dev/null || true
+}
+
 # ── ledger ───────────────────────────────────────────────────────────────────────
 # Append a raw markdown block to the ledger (creates the dir if needed). The caller
 # composes the block; we only append so the ledger is strictly append-only.

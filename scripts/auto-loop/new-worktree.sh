@@ -35,6 +35,12 @@ fi
 
 # Speed up the cheap (TS) lane: reuse the main checkout's node_modules + Playwright
 # browser cache by symlink when the lockfile matches, so npm ci isn't needed per item.
+# NOTE: this symlink can go STALE — the shared cache reflects main's lockfile AT LINK TIME,
+# but a later merged PR may change ui/package-lock.json. gate.sh::ensure_node_modules detects
+# that drift (it hashes the lockfile against deps_write_stamp's stamp, which resolves through
+# this symlink) and reinstalls; we deliberately do NOT stamp here, because main's shared cache
+# is not guaranteed to actually match main's own lockfile — only the gate, after a real
+# `npm ci`, may declare the deps in-sync. See lib.sh deps_need_install / deps_write_stamp.
 if [ -d "$MAIN/ui/node_modules" ] && [ ! -e "$WT/ui/node_modules" ]; then
   if diff -q "$MAIN/ui/package-lock.json" "$WT/ui/package-lock.json" >/dev/null 2>&1; then
     ln -s "$MAIN/ui/node_modules" "$WT/ui/node_modules"

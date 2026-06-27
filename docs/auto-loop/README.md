@@ -87,11 +87,12 @@ edit its own rulebook or gate.** (`classify.sh` flags these as `excluded:true`.)
 
 | path | role |
 |------|------|
-| `scripts/auto-loop/lib.sh` | shared helpers (binary resolve, service/port cleanup, ledger) |
+| `scripts/auto-loop/lib.sh` | shared helpers (binary resolve, service/port cleanup, ledger, ui dep-drift detect) |
 | `scripts/auto-loop/classify.sh` | change-class + exclusion detector (fail-closed) → JSON |
 | `scripts/auto-loop/seed-cache.sh` | one-time: warm `.cpm-cache` + tracktion source → `~/.mosh-auto-loop/auto-loop.env` |
 | `scripts/auto-loop/new-worktree.sh` / `rm-worktree.sh` | isolated worktree lifecycle |
 | `scripts/auto-loop/gate.sh` | THE gate → machine-readable verdict JSON + exit code |
+| `scripts/auto-loop/deps-freshness-selftest.sh` | unit test for the ui dep-drift detector (the shared-`node_modules` symlink trap) |
 | `scripts/auto-loop/merge-one.sh` | merge-queue: `prepare` / `finalize` / `reject` |
 | `scripts/auto-loop/discover.sh` | backlog store (`backlog.jsonl`) — list/ready/add/set-status |
 | `docs/auto-loop/backlog.jsonl` | machine source of truth for WHAT (curated + discovered) |
