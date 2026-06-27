@@ -18,6 +18,7 @@ SUITE = [
     ("recipe contract (§0)", HERE / "recipe_test.py"),
     ("drum matcher (§1)", HERE / "drummatch" / "drummatch_test.py"),
     ("render-and-compare oracle (§6)", HERE / "oracle" / "oracle_test.py"),
+    ("render compiler (§9)", HERE / "render" / "compile_test.py"),
 ]
 
 fails: list[str] = []
