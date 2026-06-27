@@ -757,6 +757,78 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(500, {"ok": False, "error": f"index build failed: {tail or 'no output'}"})
                 return
             self._send(200 if payload.get("ok") else 500, payload)
+        elif path == "/teardown/execute":
+            # §9: run a Recipe → MoshOps → render. `recipe` may be inline JSON or a path.
+            # Synchronous (a render is seconds); the long §4 analyze below should move async.
+            py = _teardown_py()
+            if not os.path.isfile(py):
+                self._send(503, {"ok": False, "error": "teardown_unavailable (run setup-teardown.sh)"})
+                return
+            import tempfile
+            recipe_path = str(data.get("recipePath", "") or "")
+            if not recipe_path and isinstance(data.get("recipe"), dict):
+                fd, recipe_path = tempfile.mkstemp(suffix=".recipe.json")
+                with os.fdopen(fd, "w") as f:
+                    json.dump(data["recipe"], f)
+            if not recipe_path or not os.path.isfile(recipe_path):
+                self._send(400, {"ok": False, "error": "recipe (inline dict) or recipePath required"})
+                return
+            cli = os.path.join(SERVICE_DIR, "teardown", "render", "execute_cli.py")
+            args = [py, cli, "--recipe", recipe_path]
+            if data.get("out"):
+                args += ["--out", str(data["out"])]
+            if data.get("assetRoot"):
+                args += ["--asset-root", str(data["assetRoot"])]
+            try:
+                proc = subprocess.run(args, capture_output=True, text=True, timeout=300)
+            except subprocess.TimeoutExpired:
+                self._send(504, {"ok": False, "error": "recipe execute timed out"})
+                return
+            except OSError as e:
+                self._send(500, {"ok": False, "error": f"recipe execute failed to start: {e}"})
+                return
+            try:
+                payload = json.loads((proc.stdout or "").strip())
+            except (json.JSONDecodeError, ValueError):
+                self._send(500, {"ok": False, "error": f"recipe execute failed: "
+                                 f"{(proc.stderr or '').strip()[-400:] or 'no output'}"})
+                return
+            self._send(200 if payload.get("ok") else 500, payload)
+        elif path == "/teardown/recipe":
+            # §4: tear a tutorial down into a Recipe skeleton (download + frames + OCR +
+            # transcript). LONG-running; synchronous with a generous cap (a real UI should
+            # drive this via the async /submit job path — noted as the next rung).
+            py = _teardown_py()
+            if not os.path.isfile(py):
+                self._send(503, {"ok": False, "error": "teardown_unavailable (run setup-teardown.sh --with-video)"})
+                return
+            vid = str(data.get("videoId", "") or data.get("url", "") or "").strip()
+            out_dir = str(data.get("out", "") or _teardown_index_dir())
+            if not vid:
+                self._send(400, {"ok": False, "error": "videoId or url required"})
+                return
+            cli = os.path.join(SERVICE_DIR, "teardown", "video2recipe", "cli.py")
+            args = [py, cli, "--url", vid, "--out", out_dir]
+            sec = data.get("section")
+            if isinstance(sec, (list, tuple)) and len(sec) == 2:
+                args += ["--section", str(sec[0]), str(sec[1])]
+            if data.get("noTranscribe"):
+                args += ["--no-transcribe"]
+            try:
+                proc = subprocess.run(args, capture_output=True, text=True, timeout=900)
+            except subprocess.TimeoutExpired:
+                self._send(504, {"ok": False, "error": "teardown analyze timed out"})
+                return
+            except OSError as e:
+                self._send(500, {"ok": False, "error": f"teardown analyze failed to start: {e}"})
+                return
+            try:
+                payload = json.loads((proc.stdout or "").strip())
+            except (json.JSONDecodeError, ValueError):
+                self._send(500, {"ok": False, "error": f"teardown analyze failed: "
+                                 f"{(proc.stderr or '').strip()[-400:] or 'no output'}"})
+                return
+            self._send(200 if payload.get("ok") else 500, payload)
         elif path == "/training/submit" or path == "/training/jobs":
             if not TRAINING_ENABLED:
                 self._send(503, {"ok": False, "error": "lora trainer unavailable"})
