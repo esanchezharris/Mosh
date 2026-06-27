@@ -127,6 +127,23 @@ test("the rail inspector reveals Mix/FX/Gen for the selected track", async ({ pa
   await expect(page.locator('[data-testid="v2-insp-body"] [data-testid="generative"]')).toBeVisible();
 });
 
+test("inspector Mix tab: Mute/Solo are toggles (aria-pressed reflects state)", async ({ page }) => {
+  await bootV2(page);
+  await page.getByTestId("v2-track-header").first().click();
+  const inspector = page.getByTestId("v2-inspector");
+  await expect(inspector).toBeVisible(); // always-on rail; Mix is the default tab
+  // Matches the track-header M/S toggles: each carries aria-pressed against the same
+  // set_track_mute/set_track_solo command, off to start.
+  const mute = inspector.getByRole("button", { name: "Mute" });
+  const solo = inspector.getByRole("button", { name: "Solo" });
+  await expect(mute).toHaveAttribute("aria-pressed", "false");
+  await expect(solo).toHaveAttribute("aria-pressed", "false");
+  await mute.click();
+  await expect(mute).toHaveAttribute("aria-pressed", "true");
+  await solo.click();
+  await expect(solo).toHaveAttribute("aria-pressed", "true");
+});
+
 test("generative runs on a MIDI/drum track (any track, via the backend auto-bounce)", async ({ page }) => {
   await bootV2(page);
   // The seeded Drums track is a MIDI drum clip (no wave clip) — generative must still

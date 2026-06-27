@@ -74,8 +74,8 @@ function MixTab({ track }: { track: Track }) {
         <span className="v2-val">{Math.round((track.pan ?? 0) * 100)}</span>
       </label>
       <div className="v2-mix-btns">
-        <button className={track.mute ? "on" : ""} onClick={() => void exec("set_track_mute", { trackId: track.id, mute: !track.mute })}>Mute</button>
-        <button className={track.solo ? "on" : ""} onClick={() => void exec("set_track_solo", { trackId: track.id, solo: !track.solo })}>Solo</button>
+        <button className={track.mute ? "on" : ""} aria-pressed={!!track.mute} onClick={() => void exec("set_track_mute", { trackId: track.id, mute: !track.mute })}>Mute</button>
+        <button className={track.solo ? "on" : ""} aria-pressed={!!track.solo} onClick={() => void exec("set_track_solo", { trackId: track.id, solo: !track.solo })}>Solo</button>
       </div>
     </div>
   );
