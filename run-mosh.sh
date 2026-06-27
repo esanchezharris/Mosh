@@ -15,11 +15,28 @@
 #   ./run-mosh.sh smoke     non-interactive native brain round-trip; prints the reply
 #   ./run-mosh.sh build     (re)build the app, then launch the GUI
 #   ./run-mosh.sh deploy    (re)build, then install ONE canonical /Applications/Mosh.app
+#                               (ad-hoc signed, local — fast; the everyday path)
 #   ./run-mosh.sh deploy-anira  build the gated anira (real-time RAVE) target + install
 #                               it self-contained (LibTorch bundled) to /Applications
+#   ./run-mosh.sh release   build Release → Developer-ID sign + Hardened Runtime +
+#                               entitlements → notarize (Apple) → staple → DMG + zip,
+#                               written to ~/Desktop/Mosh-share/. The shareable artifact
+#                               friends can open by DOUBLE-CLICKING — no right-click /
+#                               `xattr` dance. Requires a "Developer ID Application"
+#                               cert + a one-time notary creds profile (see below).
 #
 # Env knobs: MOSH_BRAIN_ENV (override the dotenv path), MOSH_ENABLE_SA3 (default 1;
-#            set 0 to force FakeAdapter), MOSH_BRAIN_SMOKE_PROMPT (prompt for `smoke`).
+#            set 0 to force FakeAdapter), MOSH_BRAIN_SMOKE_PROMPT (prompt for `smoke`),
+#            MOSH_NOTARY_PROFILE (notarytool keychain profile, default "mosh-notary"),
+#            MOSH_RELEASE_DIR (release output dir, default ~/Desktop/Mosh-share).
+#
+# One-time setup for `release` (secrets stay in your keychain, never in the repo):
+#   1. Create the cert: Xcode ▸ Settings ▸ Accounts ▸ <Apple ID> ▸ Manage Certificates…
+#      ▸ + ▸ "Developer ID Application".  (An "Apple Development" cert can NOT notarize
+#      for direct distribution — this is a separate certificate you must create.)
+#   2. Store notary creds once (make an app-specific password at appleid.apple.com):
+#        xcrun notarytool store-credentials "mosh-notary" \
+#          --apple-id <you@example.com> --team-id <TEAMID> --password <app-specific-pw>
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -258,6 +275,87 @@ build_anira() {
 
 refresh_icon_cache() { touch "$1"; killall Finder 2>/dev/null || true; killall Dock 2>/dev/null || true; }
 
+# --- Developer-ID signing + notarization (for shareable, double-click-to-open builds) ---
+# The everyday `deploy` stays ad-hoc + local + fast. `release` produces a NOTARIZED,
+# stapled DMG (+ zip) that any friend opens by double-clicking — no Gatekeeper wall, no
+# right-click-Open, no `xattr`. Secrets never touch the repo or this script: the signing
+# identity lives in the keychain and notary creds live in a keychain profile.
+ENTITLEMENTS="$ROOT/cmake/Mosh.entitlements"
+NOTARY_PROFILE="${MOSH_NOTARY_PROFILE:-mosh-notary}"
+
+# Echo the SHA-1 of an installed "Developer ID Application" identity, or empty if none.
+# (An "Apple Development"/"Apple Distribution" cert is NOT accepted by notarization for
+# direct distribution — it must be a Developer ID Application cert.)
+dev_id_identity() {
+  security find-identity -v -p codesigning 2>/dev/null \
+    | awk '/Developer ID Application/ { print $2; exit }'
+}
+
+# Sign a bundle for distribution: Hardened Runtime (--options runtime) + secure timestamp,
+# signed INSIDE-OUT (nested Mach-O first, the app bundle last with entitlements). Apple
+# discourages --deep for distribution, so nested code is signed explicitly. In the default
+# build there is no nested Mach-O (JUCE links statically); the anira build bundles LibTorch
+# + libanira dylibs, which the find loop covers.
+sign_app_developer_id() {                       # $1 = app, $2 = identity sha
+  local DEST="$1" ID="$2" f
+  xattr -cr "$DEST" 2>/dev/null || true
+  while IFS= read -r f; do
+    codesign --force --options runtime --timestamp --sign "$ID" "$f"
+  done < <(find "$DEST/Contents" -type f \( -name '*.dylib' -o -name '*.so' \) 2>/dev/null)
+  while IFS= read -r f; do
+    codesign --force --options runtime --timestamp --sign "$ID" "$f"
+  done < <(find "$DEST/Contents" -type d -name '*.framework' 2>/dev/null)
+  # nested Mach-O *executables* (helper tools / scanners), if any. The default build has
+  # none (only Contents/MacOS/Mosh, sealed with the bundle below); this future-proofs the
+  # function against any helper a later build drops in — an unsigned nested Mach-O would
+  # fail notarization since we (correctly) avoid --deep for distribution.
+  while IFS= read -r f; do
+    [ "$f" = "$DEST/Contents/MacOS/Mosh" ] && continue
+    file "$f" 2>/dev/null | grep -q 'Mach-O' && \
+      codesign --force --options runtime --timestamp --sign "$ID" "$f"
+  done < <(find "$DEST/Contents/MacOS" "$DEST/Contents/Helpers" -type f 2>/dev/null)
+  codesign --force --options runtime --timestamp \
+           --entitlements "$ENTITLEMENTS" --sign "$ID" "$DEST"
+  sleep 1; xattr -cr "$DEST" 2>/dev/null || true
+  codesign --verify --deep --strict "$DEST"
+  echo "  signature: valid (Developer ID, Hardened Runtime + entitlements)"
+}
+
+# Upload to Apple's notary service, wait for the verdict, then staple the ticket so the
+# app validates OFFLINE on the friend's Mac. `--wait` blocks 1–5 min and exits nonzero
+# on rejection (→ set -e aborts); inspect a failure with
+#   xcrun notarytool log <submission-id> --keychain-profile "$NOTARY_PROFILE"
+notarize_bundle() {                             # $1 = .app or .dmg
+  local TARGET="$1" TMP="" SUBMIT="$1" rc=0
+  if [[ "$TARGET" == *.app ]]; then
+    TMP="$(mktemp -d)"                              # the .app must be zipped to submit
+    SUBMIT="$TMP/$(basename "$TARGET" .app).zip"
+    ditto -c -k --keepParent "$TARGET" "$SUBMIT"
+  fi
+  echo "  submitting to Apple notary (profile: $NOTARY_PROFILE) — 1–5 min…"
+  # Don't let set -e abort before cleanup: the zip embeds brain.env (the key), so it must
+  # never be left in /tmp on a rejection. Clean up on BOTH paths, then propagate failure.
+  xcrun notarytool submit "$SUBMIT" --keychain-profile "$NOTARY_PROFILE" --wait || rc=$?
+  [ -n "$TMP" ] && rm -rf "$TMP"
+  [ "$rc" -eq 0 ] || return "$rc"
+  echo "  stapling ticket…"
+  xcrun stapler staple "$TARGET"
+  xcrun stapler validate "$TARGET"
+}
+
+# Build a drag-to-Applications DMG from an app bundle.
+make_dmg() {                                     # $1 = app, $2 = output .dmg
+  local APP="$1" DMG="$2" STAGE rc=0
+  STAGE="$(mktemp -d)"
+  cp -R "$APP" "$STAGE/"
+  ln -s /Applications "$STAGE/Applications"       # the classic drag target
+  rm -f "$DMG"
+  # Stage holds a full .app copy (incl. brain.env); clean it even if hdiutil fails.
+  hdiutil create -volname "Mosh" -srcfolder "$STAGE" -ov -format UDZO "$DMG" >/dev/null || rc=$?
+  rm -rf "$STAGE"
+  return "$rc"
+}
+
 case "$MODE" in
   smoke|gui|build)
     [ "$MODE" = build ] && { build_app; MODE="gui"; }
@@ -301,5 +399,55 @@ case "$MODE" in
     echo "drop a real RAVE <target>.ts into ~/AI/rave-models — the '+ RAVE' rack button then hosts it live."
     ;;
 
-  *)     echo "usage: $0 [gui|smoke|build|deploy|deploy-anira]" >&2; exit 2 ;;
+  release)
+    # --- preflight: the two one-time prerequisites (fail with exact instructions) ---
+    ID="$(dev_id_identity)"
+    if [ -z "$ID" ]; then
+      echo "✗ No 'Developer ID Application' certificate in your keychain." >&2
+      echo "  Create it once: Xcode ▸ Settings ▸ Accounts ▸ <Apple ID> ▸ Manage Certificates…" >&2
+      echo "                  ▸ + ▸ 'Developer ID Application'." >&2
+      echo "  (An 'Apple Development' cert can't notarize for direct distribution.)" >&2
+      exit 1
+    fi
+    echo "signing identity: $(security find-identity -v -p codesigning | awk -v id="$ID" '$0 ~ id {sub(/^[ ]*[0-9]+\) [0-9A-F]+ /,""); print; exit}')"
+    if ! xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1; then
+      echo "✗ Notary credentials profile '$NOTARY_PROFILE' not found (or invalid)." >&2
+      echo "  Set it up once (make an app-specific password at appleid.apple.com first):" >&2
+      echo "    xcrun notarytool store-credentials \"$NOTARY_PROFILE\" \\" >&2
+      echo "      --apple-id <you@example.com> --team-id <TEAMID> --password <app-specific-pw>" >&2
+      exit 1
+    fi
+
+    # --- build Release, stage, bundle service + brain key, sign, notarize, DMG ---
+    build_app macos-arm64-release macos-arm64-release-app
+    APP="$(resolve_app)"
+    [ -n "$APP" ] || { echo "no built app to release" >&2; exit 1; }
+    OUTDIR="${MOSH_RELEASE_DIR:-$HOME/Desktop/Mosh-share}"
+    mkdir -p "$OUTDIR"
+    STAGED="$OUTDIR/Mosh.app"
+    install_app "$APP" "$STAGED"
+    bundle_service "$STAGED"
+    bundle_brain_key "$STAGED"            # the key is sealed INTO the notarized bundle (see note below)
+    echo "signing for distribution…"
+    sign_app_developer_id "$STAGED" "$ID"
+    echo "notarizing app…"
+    notarize_bundle "$STAGED"
+    DMG="$OUTDIR/Mosh.dmg"
+    echo "building DMG…"
+    make_dmg "$STAGED" "$DMG"
+    codesign --force --timestamp --sign "$ID" "$DMG"
+    echo "notarizing DMG…"
+    notarize_bundle "$DMG"
+    ZIP="$OUTDIR/Mosh.zip"; rm -f "$ZIP"; ditto -c -k --keepParent "$STAGED" "$ZIP"
+    echo
+    echo "✅ Notarized + stapled — friends can DOUBLE-CLICK to open (no right-click / xattr):"
+    echo "   DMG (drag-to-Applications): $DMG"
+    echo "   ZIP (AirDrop-friendly):     $ZIP"
+    spctl -a -t exec -vv "$STAGED" 2>&1 | sed 's/^/   gatekeeper: /'
+    echo "   NOTE: brain.env (your OpenAI key) is sealed inside the notarized bundle, so it"
+    echo "         was uploaded to Apple's notary service and is extractable by anyone you give"
+    echo "         the app to. Keep an OpenAI spend limit set and don't post it publicly."
+    ;;
+
+  *)     echo "usage: $0 [gui|smoke|build|deploy|deploy-anira|release]" >&2; exit 2 ;;
 esac
