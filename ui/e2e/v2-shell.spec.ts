@@ -77,6 +77,21 @@ test("transport play toggles", async ({ page }) => {
   await expect(transport).toHaveAttribute("data-playing", "false");
 });
 
+test("keyboard focus shows a visible focus ring (:focus-visible)", async ({ page }) => {
+  await bootV2(page);
+  await page.locator("body").click();           // pointer baseline, then switch to keyboard modality
+  let outline = "none";
+  for (let i = 0; i < 14; i++) {
+    await page.keyboard.press("Tab");           // keyboard focus → :focus-visible matches
+    outline = await page.evaluate(() => {
+      const el = document.activeElement as HTMLElement | null;
+      return el && el !== document.body ? getComputedStyle(el).outlineStyle : "none";
+    });
+    if (outline === "solid") break;
+  }
+  expect(outline).toBe("solid");                // a control received the lime focus ring
+});
+
 test("the rail inspector reveals Mix/FX/Gen for the selected track", async ({ page }) => {
   await bootV2(page);
   await page.getByTestId("v2-track-header").first().click();
