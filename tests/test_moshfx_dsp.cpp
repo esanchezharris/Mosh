@@ -169,7 +169,7 @@ TEST_CASE ("Mosh X-FDBK detects and optionally suppresses a narrowband squeal", 
     idle.prepare (kSampleRate);
     settings.autoSuppress = false;
     const auto idleState = idle.processBlock (disabled.data(), (int) disabled.size(), settings);
-    CHECK (idleState.activeCuts.empty());
+    CHECK (idleState.numActive == 0);
     CHECK (rmsDiff (input, disabled) < 1.0e-6);
 
     std::vector<float> suppressed = input;
@@ -177,14 +177,50 @@ TEST_CASE ("Mosh X-FDBK detects and optionally suppresses a narrowband squeal", 
     active.prepare (kSampleRate);
     settings.autoSuppress = true;
     const auto activeState = active.processBlock (suppressed.data(), (int) suppressed.size(), settings);
-    REQUIRE_FALSE (activeState.activeCuts.empty());
+    REQUIRE (activeState.numActive > 0);
     auto silence = std::vector<float> (2048, 0.0f);
     const auto releasedState = active.processBlock (silence.data(), (int) silence.size(), settings);
-    REQUIRE_FALSE (releasedState.activeCuts.empty());
-    CHECK (releasedState.activeCuts.front().depthDb < activeState.activeCuts.front().depthDb);
+    REQUIRE (releasedState.numActive > 0);
+    CHECK (releasedState.activeCuts[0].depthDb < activeState.activeCuts[0].depthDb);
 
     const auto before = mosh::moshfx::goertzelMagnitude (input.data(), (int) input.size(), kSampleRate, 2600.0);
     const auto after = mosh::moshfx::goertzelMagnitude (suppressed.data(), (int) suppressed.size(), kSampleRate, 2600.0);
     CHECK (after < before * 0.45);
     CHECK (peak (suppressed) <= 1.0);
+}
+
+TEST_CASE ("Mosh X-FDBK notch state persists across blocks (no per-block reset transient)", "[moshfx][xfeedback]")
+{
+    // A continuous squeal processed block-by-block. If the notch filter resets its
+    // state every block, the start of each block rings up from zero and leaks the
+    // tone for the filter's settling time — a periodic transient at the block rate.
+    // With persistent state, suppression is uniform across a block.
+    const int N = 1024;
+    const int blocks = 6;
+    auto full = noise (N * blocks);
+    auto squeal = sine (2600.0, N * blocks, 0.45f);
+    for (size_t i = 0; i < full.size(); ++i)
+        full[i] += squeal[i];
+
+    mosh::moshfx::XFeedbackSettings settings;
+    settings.sensitivity = 0.9f;
+    settings.maxCuts = 1;
+    settings.maxDepthDb = 24.0f;
+    settings.autoSuppress = true;
+
+    mosh::moshfx::XFeedbackCore core;
+    core.prepare (kSampleRate);
+
+    std::vector<float> out (full.begin(), full.end());
+    for (int b = 0; b < blocks; ++b)
+        core.processBlock (out.data() + (size_t) (b * N), N, settings);
+
+    // Pick a mid-stream block (notch fully converged by now on a correct impl).
+    const int base = 3 * N;
+    const auto headMag = mosh::moshfx::goertzelMagnitude (out.data() + (size_t) base, 192, kSampleRate, 2600.0);
+    const auto midMag = mosh::moshfx::goertzelMagnitude (out.data() + (size_t) (base + 512), 192, kSampleRate, 2600.0);
+
+    // Per-block reset leaks the tone across the head of the block while the notch
+    // re-converges; the middle is already suppressed. Persistent state keeps them level.
+    CHECK (headMag <= midMag * 2.5);
 }

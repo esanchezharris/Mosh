@@ -112,7 +112,7 @@ namespace
 
 MoshXFeedbackPlugin::MoshXFeedbackPlugin (te::PluginCreationInfo info) : te::Plugin (info)
 {
-    telemetryKey = makeTelemetryKey (state);
+    telemetryKey.store (makeTelemetryKey (state), std::memory_order_relaxed);
 
     auto* um = getUndoManager();
     sensitivityValue.referTo (state, idFbSensitivity, um, 0.65f);
@@ -183,8 +183,8 @@ void MoshXFeedbackPlugin::applyToBuffer (const te::PluginRenderContext& fc)
         if (ch != 0)
             continue;
 
-        const auto nc = jmin (4, (int) state.candidates.size());
-        const auto na = jmin (4, (int) state.activeCuts.size());
+        const auto nc = jmin (4, state.numCandidates);
+        const auto na = jmin (4, state.numActive);
         for (int i = 0; i < 4; ++i)
         {
             candidateHz[(size_t) i].store (i < nc ? state.candidates[(size_t) i].frequencyHz : 0.0);
@@ -195,8 +195,8 @@ void MoshXFeedbackPlugin::applyToBuffer (const te::PluginRenderContext& fc)
         }
         numCandidates.store (nc);
         numActive.store (na);
-        publishTelemetry (telemetryKey, candidateHz, candidateScore, activeHz, activeScore,
-                          activeDepth, nc, na);
+        publishTelemetry (telemetryKey.load (std::memory_order_relaxed), candidateHz, candidateScore,
+                          activeHz, activeScore, activeDepth, nc, na);
     }
 }
 
@@ -206,15 +206,16 @@ void MoshXFeedbackPlugin::restorePluginStateFromValueTree (const ValueTree& v)
         state.setProperty (idFbTelemetry, v.getProperty (idFbTelemetry), nullptr);
     te::copyPropertiesToCachedValues (v, sensitivityValue, maxCutsValue, maxDepthValue, releaseValue,
                                       autoSuppressValue, mixValue, outputValue);
-    telemetryKey = makeTelemetryKey (state);
+    telemetryKey.store (makeTelemetryKey (state), std::memory_order_relaxed);
     for (auto p : getAutomatableParameters())
         p->updateFromAttachedValue();
 }
 
 var MoshXFeedbackPlugin::describeMoshFx() const
 {
-    const auto* slot = telemetryKey != 0 ? &telemetrySlotFor (telemetryKey) : nullptr;
-    const auto useShared = slot != nullptr && slot->key.load (std::memory_order_acquire) == telemetryKey;
+    const auto key = telemetryKey.load (std::memory_order_relaxed);
+    const auto* slot = key != 0 ? &telemetrySlotFor (key) : nullptr;
+    const auto useShared = slot != nullptr && slot->key.load (std::memory_order_acquire) == key;
 
     auto* o = new DynamicObject();
     o->setProperty ("kind", "feedback");

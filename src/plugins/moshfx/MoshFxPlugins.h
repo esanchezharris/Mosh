@@ -112,7 +112,7 @@ private:
     std::array<std::atomic<float>, 4> activeDepth {};
     std::atomic<int> numCandidates { 0 };
     std::atomic<int> numActive { 0 };
-    std::uint64_t telemetryKey = 0;
+    std::atomic<std::uint64_t> telemetryKey { 0 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MoshXFeedbackPlugin)
 };

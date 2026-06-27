@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <vector>
 
 namespace mosh::moshfx
@@ -101,13 +102,28 @@ struct XFeedbackSettings
     float maxHz = 10000.0f;
 };
 
+// Fixed-capacity (max 4 cuts) so processBlock returns by value with no heap allocation.
 struct XFeedbackState
 {
-    std::vector<FeedbackCandidate> candidates;
-    std::vector<FeedbackCandidate> activeCuts;
+    std::array<FeedbackCandidate, 4> candidates {};
+    int numCandidates = 0;
+    std::array<FeedbackCandidate, 4> activeCuts {};
+    int numActive = 0;
+};
+
+// Persistent biquad-notch state so the filter is not re-zeroed every block.
+struct NotchState
+{
+    double x1 = 0.0, x2 = 0.0, y1 = 0.0, y2 = 0.0;
+    double frequencyHz = 0.0;
 };
 
 double goertzelMagnitude (const float* samples, int numSamples, double sampleRate, double frequencyHz);
+
+// RT-safe: writes up to maxOut candidates into out[] and returns the count. Allocation-free.
+int detectFeedbackCandidates (const float* samples, int numSamples, double sampleRate,
+                              const XFeedbackSettings& settings, FeedbackCandidate* out, int maxOut);
+// Convenience overload for off-audio-thread callers (preview readout, tests).
 std::vector<FeedbackCandidate> detectFeedbackCandidates (const float* samples, int numSamples,
                                                          double sampleRate, const XFeedbackSettings& settings);
 
@@ -120,7 +136,9 @@ public:
 
 private:
     double sampleRate = 48000.0;
-    std::vector<FeedbackCandidate> activeCuts;
+    std::array<FeedbackCandidate, 4> activeCuts {};
+    int numActiveCuts = 0;
+    std::array<NotchState, 4> notches {};
 };
 
 }
