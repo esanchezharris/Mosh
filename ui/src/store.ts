@@ -20,6 +20,9 @@ import type { SignalMessage } from "./webrtc/signal";
 // of its values (theme/uiScale/voiceOn/voiceVol) so existing consumers stay reactive
 // while the SettingsPanel and these mutators both write through the single source.
 import { useSettings } from "./settings/store";
+// Which shell is active — the v2 shell also surfaces collaborator video, so the
+// webrtc_signal gate must honor it (not just the legacy redesignShell flag).
+import { isV2Active } from "./v2/shellFlag";
 // MP-001 — multiplayer presence + the commit-on-move trigger (pure helpers).
 import {
   deriveActiveTrackId, computeSyncActions, pruneOfflineLocks,
@@ -343,9 +346,9 @@ export const useStore = create<State>((set, get) => ({
         else useVideo.getState().teardown();
       } else if (ev.type === "webrtc_signal") {
         // Inbound SDP/ICE from a peer (relayed point-to-point) → the video room. Video is
-        // a redesign-only feature, so a flag-off client must NOT silently negotiate /
-        // hold a peer connection it has no UI for (prime directive: flag-off == unchanged).
-        if (Boolean(useSettings.getState().get("redesignShell"))) {
+        // surfaced by the redesign AND the v2 shells; a shell with no video UI must NOT
+        // silently negotiate / hold a peer connection (prime directive: flag-off == unchanged).
+        if (Boolean(useSettings.getState().get("redesignShell")) || isV2Active()) {
           const p = ev.payload as { from?: string; payload?: SignalMessage };
           if (p?.from && p.payload) useVideo.getState().onSignal(p.from, p.payload);
         }

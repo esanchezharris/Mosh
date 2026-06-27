@@ -130,7 +130,7 @@ test("turning hands-free OFF releases the mic (aborts the recognizer)", async ({
 async function bootWithSetting(page: Page, key: string, value: boolean): Promise<void> {
   await page.addInitScript(([k, v]) => {
     window.localStorage.clear();
-    window.localStorage.setItem("mosh.settings", JSON.stringify({ version: 1, template: null, values: { [k]: v } }));
+    window.localStorage.setItem("mosh.settings", JSON.stringify({ version: 1, template: null, values: { [k]: v, uiShell: "classic" } }));
   }, [key, value] as [string, boolean]);
   await page.goto("/");
   await expect(page.getByTestId("app")).toBeVisible();

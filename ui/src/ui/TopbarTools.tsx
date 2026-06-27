@@ -102,7 +102,7 @@ function FileMenu({ snapshot }: { snapshot: Snapshot }) {
   );
 }
 
-function TrainingTool({ training }: { training: TrainingState | null }) {
+export function TrainingTool({ training }: { training: TrainingState | null }) {
   const exec = useStore((s) => s.exec);
   const refresh = useStore((s) => s.refresh);
   const [title, setTitle] = useState("");
@@ -302,7 +302,7 @@ function TrainingTool({ training }: { training: TrainingState | null }) {
 // Keyboard-shortcut help — the keyboard bindings now live in ONE place (the keymap
 // + useKeyboardShortcuts); the ruler/clip pointer gestures live in Arrange. Surfaced
 // here so they're discoverable (and mirrored by the File/Edit menus).
-function HelpTool() {
+export function HelpTool() {
   const SHORTCUTS: [string, string][] = [
     ["⌘N · ⌘O", "New · Open project"],
     ["⌘S · ⇧⌘S", "Save · Save As"],
@@ -339,7 +339,7 @@ function ExportTool({ audioEnabled }: { audioEnabled: boolean }) {
   );
 }
 
-function CommandLogTool() {
+export function CommandLogTool() {
   const exec = useStore((s) => s.exec);
   const [log, setLog] = useState<CommandLogData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -372,7 +372,7 @@ function CommandLogTool() {
 
 // MP-001 — 2-player session entry (the reserved B-5 slot). `on` lights when a
 // session is active so the topbar shows the live-collaboration state at a glance.
-function MultiplayerTool() {
+export function MultiplayerTool() {
   const active = useStore((s) => s.mp.active);
   const peerCount = useStore((s) => Object.keys(s.peers).length);
   return (
@@ -382,7 +382,7 @@ function MultiplayerTool() {
   );
 }
 
-function RemoteTool() {
+export function RemoteTool() {
   const remote = useStore((s) => s.remoteStatus);
   const start = useStore((s) => s.startRemotePairing);
   const stop = useStore((s) => s.stopRemote);

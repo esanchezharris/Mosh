@@ -16,6 +16,7 @@ import { useSettings } from "./store";
 import { settingsByCategory, type SettingDef } from "./schema";
 import { TEMPLATES } from "./templates";
 import { eventToCombo } from "../interaction/keymap";
+import { isV2Active } from "../v2/shellFlag";
 
 // ── one renderer per setting type ───────────────────────────────────────────
 function SettingControl({ def }: { def: SettingDef }) {
@@ -197,12 +198,22 @@ function ProjectSettings({ snapshot }: { snapshot: Snapshot }) {
   );
 }
 
+// The v2 shell is a single Mosh-native design with no skin/keymap/gesture/layout axis,
+// so those settings (+ the DAW template picker) are hidden there — they'd be inert
+// (effects pins data-skin=mosh) and confusing. Classic shows everything, unchanged.
+const V2_HIDDEN_CATEGORIES = new Set(["Layout", "Interaction", "Feel", "Keys"]);
+const v2HidesSetting = (category: string, id: string) =>
+  V2_HIDDEN_CATEGORIES.has(category) || id === "skin";
+
 export function SettingsPanel({ snapshot }: { snapshot: Snapshot }) {
-  const groups = settingsByCategory();
+  const v2 = isV2Active();
+  const groups = settingsByCategory()
+    .map((g) => ({ ...g, settings: v2 ? g.settings.filter((d) => !v2HidesSetting(g.category, d.id)) : g.settings }))
+    .filter((g) => g.settings.length > 0);
   return (
     <>
       <div className="pop-head">Settings</div>
-      <TemplatePicker />
+      {!v2 && <TemplatePicker />}
       {groups.map((g) => (
         <div className="pop-group" key={g.category}>
           <div className="pop-label">{g.category}</div>

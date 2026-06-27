@@ -23,7 +23,7 @@ export function Dock({ snapshot }: { snapshot: Snapshot }) {
   );
 }
 
-function Rack({ track }: { track: Track | null }) {
+export function Rack({ track }: { track: Track | null }) {
   const openBrowser = useStore((s) => s.openBrowser);
   const openAutomation = useStore((s) => s.openAutomation);
   const exec = useStore((s) => s.exec);

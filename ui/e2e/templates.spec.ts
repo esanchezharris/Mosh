@@ -85,6 +85,7 @@ test.describe("template applied", () => {
   // The template now restructures the dock: Ableton/FL bring the browser forward; Mosh
   // tucks it back to the minimal default. (Applied on switch only.)
   test("ableton/fl open the browser rail; mosh tucks it away", async ({ page }) => {
+    await newProject(page); // a genuine no-drum project (the seed now has a drum track)
     await expect(page.getByTestId("browser-expand")).toBeVisible(); // mosh default: browser collapsed
     await applyTemplate(page, "ableton");
     await expect(page.getByTestId("dock-left")).toBeVisible(); // browser opened
@@ -113,7 +114,15 @@ test.describe("dock restructure (redesign shell)", () => {
 });
 
 test("template choice persists across reload", async ({ page }) => {
-  // no localStorage-clearing init script here, so persistence is observable
+  // Templates (the skin system) are a classic-shell feature, so pin uiShell="classic"
+  // (v2 is the default post-cutover). MERGE rather than overwrite so the template this
+  // test sets via the UI survives the reload — that persistence is what we're asserting.
+  await page.addInitScript(() => {
+    const raw = window.localStorage.getItem("mosh.settings");
+    const cur = raw ? JSON.parse(raw) : { version: 2, template: null, values: {}, keyOverrides: {} };
+    cur.values = { ...(cur.values || {}), uiShell: "classic" };
+    window.localStorage.setItem("mosh.settings", JSON.stringify(cur));
+  });
   await page.goto("/");
   await expect(page.getByTestId("app")).toBeVisible();
   await page.locator('button[title="Settings"]').click();
