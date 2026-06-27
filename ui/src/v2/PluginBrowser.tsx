@@ -1,14 +1,16 @@
-// v2 plugin picker — ONE source of truth (usePluginPicker + PluginList), rendered two ways:
-//   • PluginBrowser — the wide MODAL ("+ Plugin"): a left collection rail + the list.
-//   • PluginDock    — the COMPACT dock (left browser, Plugins tab): the same collections as
-//                     a horizontal chip row + the same list. A 218px rail won't fit a 336px
-//                     dock, so the rail collapses to chips — same organization, narrow form.
-// Both share collections/grouping (pluginPicker) + the windowed list, so they can't drift.
-// Same command seam either way (load_builtin / load_plugin); the classic shell keeps its own.
+// v2 plugin picker — ONE surface. There is no plugin MODAL in v2: the left browser
+// drawer's Plugins tab IS the plugin browser, and "+ Plugin" (the FX rack) opens it via
+// shellState.openBrowserTab("plugins"). This file exports that compact dock plus the
+// shared picker internals it's built from:
+//   • usePluginPicker — collections/grouping (pluginPicker) + search + favorites + load.
+//   • PluginList      — the windowed, vendor-grouped list.
+//   • PluginDock      — the dock: collection CHIPS over the shared list (a 336px dock
+//                       can't fit a wide rail, so collections collapse to a chip row).
+// Same command seam as ever (load_builtin / load_plugin); the classic shell keeps its
+// own modal (ui/PluginBrowser.tsx) — untouched.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "../store";
-import { useEscapeToClose } from "../hooks/useEscapeToClose";
 import {
   builtinEntry, installedEntry, visibleRange,
   loadFavorites, toggleFavorite, loadPluginRecents, addPluginRecent,
@@ -125,7 +127,7 @@ function PluginList({ rows, favSet, activeLabel, emptyLabel, selectedTrackId, on
   );
 }
 
-// ── COMPACT dock variant — collections as a chip row, then the shared list. ──
+// ── The dock — collections as a chip row, then the shared list. The one v2 plugin surface. ──
 export function PluginDock() {
   const pk = usePluginPicker(); // no onLoaded → the dock stays open after adding (it's a dock)
   return (
@@ -149,74 +151,6 @@ export function PluginDock() {
         emptyLabel={pk.q ? `Nothing matches “${pk.q}”.` : "No plugins here yet."}
         selectedTrackId={pk.selectedTrackId} onLoad={pk.load} onToggleFav={pk.toggleFav}
         resetKey={`${pk.collection}:${pk.q}`} />
-    </div>
-  );
-}
-
-// ── WIDE modal variant — a left collection rail + the shared list. ──
-export function PluginBrowser() {
-  const open = useStore((s) => s.browserOpen);
-  const close = useStore((s) => s.closeBrowser);
-  const counts = useStore((s) => s.pluginCounts);
-  const plugins = useStore((s) => s.availablePlugins);
-  const rescan = useStore((s) => s.rescanPlugins);
-  const scanProgress = useStore((s) => s.scanProgress);
-  const pk = usePluginPicker(close);
-
-  useEscapeToClose(open, close);
-  if (!open) return null;
-
-  let prevGroup = "";
-  return (
-    <div className="v2-pb-backdrop" onClick={close} data-testid="plugin-browser">
-      <div className="v2-pb" role="dialog" aria-modal="true" aria-label="Add plugin" data-testid="v2-pb" onClick={(e) => e.stopPropagation()}>
-        <header className="v2-pb-head">
-          <span className="v2-pb-title">Add plugin</span>
-          <div className="v2-pb-search">
-            <span className="v2-pb-search-icon" aria-hidden>⌕</span>
-            <input autoFocus data-testid="v2-pb-search" placeholder="Search by name or vendor…" value={pk.q} onChange={(e) => pk.setQ(e.target.value)} />
-          </div>
-          <span className="v2-pb-count">{counts ? `${counts.vst3} VST3 · ${counts.au} AU` : `${plugins.length} installed`}</span>
-          <button className="v2-pb-rescan" disabled={!!scanProgress}
-            title="Re-scan installed VST3 plugins (out-of-process; hung plugins are quarantined)"
-            onClick={() => void rescan("vst3")}>{scanProgress ? "Scanning…" : "Rescan"}</button>
-          <button className="v2-pb-x" onClick={close} aria-label="Close">✕</button>
-        </header>
-
-        {scanProgress && (
-          <div className="v2-pb-scan" role="status" aria-live="polite">
-            Scanning {scanProgress.format}… out-of-process — hung plugins (e.g. WaveShell) are quarantined, not loaded.
-          </div>
-        )}
-        {!pk.selectedTrackId && <div className="v2-pb-warn" role="note">Select a track first, then pick a plugin to add.</div>}
-
-        <div className="v2-pb-body">
-          <nav className="v2-pb-rail" role="tablist" aria-label="Plugin collections">
-            {pk.collections.map((c) => {
-              const sep = prevGroup && prevGroup !== c.group; prevGroup = c.group;
-              return (
-                <div key={c.id} className={sep ? "v2-pb-railsep" : undefined}>
-                  <button
-                    role="tab" aria-selected={pk.collection === c.id}
-                    className={`v2-pb-coll${pk.collection === c.id ? " on" : ""} g-${c.group}`}
-                    data-testid="v2-pb-collection" data-collection={c.id}
-                    onClick={() => pk.setCollection(c.id)}
-                  >
-                    {railIcon(c.id) && <span className="v2-pb-coll-icon" aria-hidden>{railIcon(c.id)}</span>}
-                    <span className="v2-pb-coll-label">{c.label}</span>
-                    <span className="v2-pb-coll-count">{c.count}</span>
-                  </button>
-                </div>
-              );
-            })}
-          </nav>
-
-          <PluginList rows={pk.rows} favSet={pk.favSet} activeLabel={pk.activeLabel}
-            emptyLabel={pk.q ? `Nothing matches “${pk.q}”.` : "No plugins here yet."}
-            selectedTrackId={pk.selectedTrackId} onLoad={pk.load} onToggleFav={pk.toggleFav}
-            resetKey={`${pk.collection}:${pk.q}`} />
-        </div>
-      </div>
     </div>
   );
 }

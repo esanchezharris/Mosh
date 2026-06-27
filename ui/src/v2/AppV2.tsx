@@ -15,7 +15,6 @@ import { Composer } from "./Composer";
 import { LeftDrawer } from "./LeftDrawer";
 import { RightInspectorDrawer } from "./RightInspectorDrawer";
 import { useHasPeers } from "./usePresence";
-import { PluginBrowser } from "./PluginBrowser";
 import { PianoRoll } from "../ui/PianoRoll";
 import { AutomationPanel } from "../ui/AutomationPanel";
 import { DrumWindow } from "../ui/DrumWindow";
@@ -66,12 +65,12 @@ export function AppV2() {
       </div>
 
       {/* edge docks — pull-tabs ride the SCREEN edge (mounted at the shell, not the stage).
-          Left = browser (samples + plugins); right = the Inspector when solo. */}
+          Left = browser (samples + PLUGINS — "+ Plugin" routes here; there's no plugin
+          modal in v2, the dock is the one surface); right = the Inspector when solo. */}
       <LeftDrawer />
       {!hasPeers && <RightInspectorDrawer />}
 
       {/* floating / modal surfaces — opened via disclosure in later slices */}
-      <PluginBrowser />
       <PianoRoll />
       <AutomationPanel />
       <DrumWindow />

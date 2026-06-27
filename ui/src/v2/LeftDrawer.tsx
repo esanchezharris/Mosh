@@ -2,8 +2,8 @@
 // on a pull-tab. One surface for both halves of "what do I drop in?": SOUNDS (the file
 // browser → drag onto a lane / import) and PLUGINS (built-ins + scanned VST3/AU → load
 // onto the selected track). SOUNDS reuses SampleBrowser; PLUGINS hosts PluginDock — the
-// compact form of the same plugin picker the "+ Plugin" modal uses (shared collections +
-// list, just a chip row instead of a wide rail). Open/tab state is UI-local (shellState).
+// v2 plugin browser (there's no plugin modal in v2; the FX rack's "+ Plugin" opens this
+// drawer on the Plugins tab via openBrowserTab). Open/tab state is UI-local (shellState).
 
 import { useShell } from "./shellState";
 import { SampleBrowser } from "../ui/SampleBrowser";

@@ -139,37 +139,40 @@ test("the agent toast appears on a command and self-dismisses", async ({ page })
   await expect(page.getByTestId("v2-change-toast")).toHaveCount(0, { timeout: 12_000 });
 });
 
-test("plugin browser: two-pane picker — collections, vendor filter, search, add", async ({ page }) => {
+test("plugin picker: + Plugin opens the dock — collections, vendor filter, search, add", async ({ page }) => {
   await bootV2(page);
   await page.getByTestId("v2-track-header").first().click();
   await page.getByTestId("v2-inspector-pull").click(); // solo: open the right-edge inspector dock
   await expect(page.getByTestId("v2-inspector")).toBeVisible();
   await page.getByTestId("v2-insp-tab-fx").click();
+  // No plugin modal in v2: "+ Plugin" opens the LEFT browser drawer on the Plugins tab.
   await page.locator('[data-testid="v2-insp-body"]').getByRole("button", { name: "+ Plugin" }).click();
 
-  const pb = page.getByTestId("v2-pb");
-  await expect(pb).toBeVisible();
-  // left rail collections: All + kind filters + a "Built-in" vendor group (no duplicate
+  const dock = page.getByTestId("v2-plugin-dock");
+  await expect(dock).toBeVisible();
+  await expect(page.getByTestId("v2-browser-tab-plugins")).toHaveAttribute("aria-selected", "true");
+
+  // collection chips: All + kind filters + a "Built-in" vendor group (no duplicate
   // Instruments/Effects vendor rows — built-ins collapse under one maker).
-  await expect(page.getByTestId("v2-pb-collection")).not.toHaveCount(0);
-  await expect(pb.locator('[data-collection="all"]')).toContainText("All Plugins");
-  await expect(pb.locator('[data-collection="v:Built-in"]')).toContainText("Built-in");
+  await expect(dock.getByTestId("v2-pb-collection")).not.toHaveCount(0);
+  await expect(dock.locator('[data-collection="all"]')).toContainText("All Plugins");
+  await expect(dock.locator('[data-collection="v:Built-in"]')).toContainText("Built-in");
 
   // vendor filter narrows the list header + rows
-  await pb.locator('[data-collection="v:Xfer"]').click();
-  await expect(pb.locator(".v2-pb-listhead")).toContainText("Xfer");
-  await expect(page.getByTestId("v2-pb-row")).toHaveCount(1);
+  await dock.locator('[data-collection="v:Xfer"]').click();
+  await expect(dock.locator(".v2-pb-listhead")).toContainText("Xfer");
+  await expect(dock.getByTestId("v2-pb-row")).toHaveCount(1);
 
   // search narrows within the current view
-  await pb.locator('[data-collection="all"]').click();
-  await page.getByTestId("v2-pb-search").fill("ott");
-  await expect(page.getByTestId("v2-pb-row")).toHaveCount(1);
-  await expect(page.getByTestId("v2-pb-row")).toContainText("OTT");
+  await dock.locator('[data-collection="all"]').click();
+  await dock.getByTestId("v2-pb-search").fill("ott");
+  await expect(dock.getByTestId("v2-pb-row")).toHaveCount(1);
+  await expect(dock.getByTestId("v2-pb-row")).toContainText("OTT");
 
-  // adding an effect closes the browser and the plugin lands in the FX rack
-  await page.getByTestId("v2-pb-row").click();
-  await expect(pb).toHaveCount(0);
+  // adding an effect lands the plugin in the FX rack; the dock stays open (it's a dock, not a modal)
+  await dock.getByTestId("v2-pb-row").click();
   await expect(page.locator('[data-testid="v2-insp-body"]')).toContainText("OTT");
+  await expect(dock).toBeVisible();
 });
 
 test("with collaborators present, the right rail shows the agent + camera/invite + peer tile", async ({ page }) => {
