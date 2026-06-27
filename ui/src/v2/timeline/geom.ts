@@ -17,6 +17,16 @@ export function beatToSec(snap: Snapshot, beat: number): number {
   return beat * beatSeconds(meterFrom(snap.session));
 }
 
+/** Inverse of beatToSec — used by the ribbon to turn a pointer x (→ seconds) into beats. */
+export function secToBeat(snap: Snapshot, sec: number): number {
+  return sec / beatSeconds(meterFrom(snap.session));
+}
+
+/** Beats per bar for the snapshot's meter (the time-sig numerator). */
+export function beatsPerBar(snap: Snapshot): number {
+  return meterFrom(snap.session).num;
+}
+
 /** Total timeline length in seconds: project length, last clip end, last section end,
  *  with a small tail and a sane minimum so an empty session still shows a grid. */
 export function contentSeconds(snap: Snapshot): number {

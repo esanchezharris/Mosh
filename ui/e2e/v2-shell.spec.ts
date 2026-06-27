@@ -81,3 +81,77 @@ test("collaborators card exposes the camera toggle + invite", async ({ page }) =
   await expect(page.getByTestId("v2-camera-toggle")).toBeVisible();
   await expect(page.getByTestId("v2-invite")).toBeVisible();
 });
+
+test("section ribbon: '+' creates a section and opens it for rename", async ({ page }) => {
+  await bootV2(page);
+  await expect(page.getByTestId("v2-section")).toHaveCount(3); // Intro / Verse / Hook seed
+  await page.getByTestId("v2-section-add").click();
+  await expect(page.getByTestId("v2-section")).toHaveCount(4);
+  const input = page.getByTestId("v2-section-rename"); // auto-opens on the new section
+  await expect(input).toBeVisible();
+  await input.fill("Outro");
+  await input.press("Enter");
+  await expect(page.getByTestId("v2-section").last()).toContainText("Outro");
+});
+
+test("section ribbon: double-click renames an existing section", async ({ page }) => {
+  await bootV2(page);
+  const first = page.getByTestId("v2-section").first();
+  await expect(first).toContainText("Intro");
+  await first.dblclick();
+  const input = page.getByTestId("v2-section-rename");
+  await expect(input).toBeVisible();
+  await input.fill("Bridge");
+  await input.press("Enter");
+  await expect(page.getByTestId("v2-section").first()).toContainText("Bridge");
+});
+
+test("section ribbon: ✕ removes a section", async ({ page }) => {
+  await bootV2(page);
+  await expect(page.getByTestId("v2-section")).toHaveCount(3);
+  await page.getByTestId("v2-section").first().getByTestId("v2-section-remove").click();
+  await expect(page.getByTestId("v2-section")).toHaveCount(2);
+});
+
+test("section ribbon: a quick click across two sections seeks (does not spuriously rename)", async ({ page }) => {
+  await bootV2(page);
+  // Click Intro, then quickly Verse — a shared double-click timer must not treat two
+  // single-clicks on DIFFERENT sections as a double-click (which would open rename).
+  await page.getByTestId("v2-section").nth(0).click();
+  await page.getByTestId("v2-section").nth(1).click();
+  await expect(page.getByTestId("v2-section-rename")).toHaveCount(0);
+});
+
+test("section ribbon: ✕ removes without seeking the playhead", async ({ page }) => {
+  await bootV2(page);
+  await expect(page.getByTestId("v2-time")).toHaveText("1.1.1");
+  // Remove Hook (starts at beat 24) — the ✕ must not also fire a transport seek.
+  await page.getByTestId("v2-section").last().getByTestId("v2-section-remove").click();
+  await expect(page.getByTestId("v2-section")).toHaveCount(2);
+  await expect(page.getByTestId("v2-time")).toHaveText("1.1.1");
+});
+
+test("section ribbon: interacting inside the rename input never discards the draft", async ({ page }) => {
+  await bootV2(page);
+  await page.getByTestId("v2-section").first().dblclick();
+  const input = page.getByTestId("v2-section-rename");
+  await input.fill("WIP");
+  await input.dblclick(); // a double-click inside the input must not reset the draft
+  await expect(input).toHaveValue("WIP");
+});
+
+test("section ribbon: dragging a section body moves it (snapped to the bar)", async ({ page }) => {
+  await bootV2(page);
+  // Verse (2nd) so there's room to move right without clamping at 0.
+  const seg = page.getByTestId("v2-section").nth(1);
+  const before = await seg.getAttribute("data-start-beat");
+  const box = await seg.boundingBox();
+  if (!box) throw new Error("no section");
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 160, box.y + box.height / 2, { steps: 10 });
+  await page.mouse.up();
+  await expect
+    .poll(() => page.getByTestId("v2-section").nth(1).getAttribute("data-start-beat"))
+    .not.toBe(before);
+});

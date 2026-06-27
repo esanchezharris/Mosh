@@ -250,7 +250,30 @@
   color: var(--v2-dim); white-space: nowrap; overflow: hidden; cursor: pointer;
 }
 .v2-seg:hover { color: var(--v2-text); }
+.v2-seg.editing { color: var(--v2-text); cursor: text; background: var(--v2-surface-sunken); }
 .v2-seg-bar { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; opacity: 0.7; }
+.v2-seg-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* inline rename — borrows the ribbon's type so the swap is seamless */
+.v2-seg-input {
+  flex: 1 1 auto; min-width: 0; width: 100%; background: transparent; border: none; outline: none;
+  font: inherit; letter-spacing: inherit; text-transform: inherit; color: var(--v2-text); padding: 0;
+}
+/* remove ✕ — revealed on hover so the ribbon stays clean */
+.v2-seg-rm {
+  flex: 0 0 auto; margin-left: 6px; width: 16px; height: 16px; border-radius: 4px;
+  display: grid; place-items: center; font-size: 12px; line-height: 1; border: none; cursor: pointer;
+  background: transparent; color: var(--v2-faint); opacity: 0; transition: opacity 90ms linear, color 90ms linear;
+}
+.v2-seg:hover .v2-seg-rm { opacity: 1; }
+.v2-seg-rm:hover { color: var(--v2-accent); background: var(--v2-surface-2); }
+.v2-seg.editing .v2-seg-rm { display: none; }
+/* ghost "add section" chip, parked just after the last section (scrolls with content) */
+.v2-seg-add {
+  position: absolute; top: 0; bottom: 0; z-index: 2; width: 30px; display: grid; place-items: center;
+  border: none; border-left: 1px dashed var(--v2-line); background: transparent;
+  color: var(--v2-faint); font-size: 17px; line-height: 1; cursor: pointer; transition: color 90ms linear, background 90ms linear;
+}
+.v2-seg-add:hover { color: var(--v2-accent); background: var(--v2-surface-sunken); }
 
 /* bar ruler */
 .v2-ruler {
