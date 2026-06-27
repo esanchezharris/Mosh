@@ -76,6 +76,40 @@ test.describe("empty states", () => {
   });
 });
 
+test.describe("mixer — sends / returns / buses (G5)", () => {
+  test.beforeEach(async ({ page }) => {
+    await boot(page); // 3 seeded tracks
+    await page.getByTestId("view-toggle").getByRole("button", { name: "Mixer" }).click();
+    await expect(page.getByTestId("mixer")).toBeVisible();
+  });
+
+  test("+ Bus adds a return strip + a per-channel send; the send slider sets a level; remove tears it down", async ({ page }) => {
+    // no buses yet → no returns, no send controls on channels
+    await expect(page.getByTestId("return-strip")).toHaveCount(0);
+    await expect(page.getByTestId("send")).toHaveCount(0);
+
+    // + Bus → create_bus → a return strip appears and every channel gets a send control
+    await page.getByTestId("add-bus").click();
+    await expect(page.getByTestId("return-strip")).toHaveCount(1);
+    await expect(page.getByTestId("send").first()).toBeVisible();
+
+    // moving an inactive send's slider ADDS the send (add_send) → it becomes active
+    const send = page.getByTestId("send").first();
+    await expect(send).toHaveAttribute("data-active", "false");
+    await send.locator("input.send-level").fill("-6");
+    await expect(send).toHaveAttribute("data-active", "true");
+
+    // an active send shows a remove (×) → remove_send → back to inactive
+    await send.locator("button.send-rm").click();
+    await expect(send).toHaveAttribute("data-active", "false");
+
+    // removing the bus tears down the return strip + every send control
+    await page.getByTestId("return-strip").getByRole("button", { name: "×" }).click();
+    await expect(page.getByTestId("return-strip")).toHaveCount(0);
+    await expect(page.getByTestId("send")).toHaveCount(0);
+  });
+});
+
 test("the Arrange/Mixer toggle stays on-screen even when the topbar OVERFLOWS", async ({ page }) => {
   // Bug #2 only manifests when the topbar overflows its width — the trailing toggle
   // scrolls off the right under the hidden scrollbar. So the guard MUST run at an

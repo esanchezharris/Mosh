@@ -79,6 +79,12 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "set_master_volume", desc: "Set the master volume in dB", args: [N("db")] },
   { command: "set_master_pan", desc: "Set the master pan (-1 left … 1 right)", args: [N("pan")] },
 
+  // ── sends / returns / buses (aux FX routing) ──────────────────────────────
+  { command: "create_bus", desc: "Create an FX send bus (adds a return track, e.g. a Reverb/Delay return)", args: [S("name", false, "bus/return name")] },
+  { command: "add_send", desc: "Send a track to an FX bus at a level in dB (bus from snapshot.buses)", args: [S("trackId"), N("bus", true, "target bus number"), N("db", false, "send level dB, default 0")] },
+  { command: "set_send_level", desc: "Set a track's send level to a bus in dB", args: [S("trackId"), N("bus"), N("db")] },
+  { command: "remove_send", desc: "Remove a track's send to a bus", args: [S("trackId"), N("bus")] },
+
   // ── plugins ─────────────────────────────────────────────────────────────
   { command: "load_builtin", desc: "Add a built-in effect/instrument to a track (type from list_builtins)", args: [S("trackId"), N("index", false, "chain position"), S("type")] },
   { command: "set_track_type", desc: "Set a track's type — 'drum' loads the working sampler + drum kit so its MIDI notes are audible", args: [S("trackId"), S("type", true, '"audio" | "drum"')] },
@@ -175,6 +181,10 @@ export function describeCommand(command: string, args: Record<string, unknown>):
     case "set_track_solo": return a.solo ? `Soloed a track` : `Unsoloed a track`;
     case "set_master_volume": return `Set master volume to ${a.db} dB`;
     case "set_master_pan": return `Set master pan to ${a.pan}`;
+    case "create_bus": return `Created an FX bus${a.name ? ` "${a.name}"` : ""}`;
+    case "add_send": return `Added a send to bus ${a.bus}${a.db != null ? ` at ${a.db} dB` : ""}`;
+    case "set_send_level": return `Set a send level to ${a.db} dB`;
+    case "remove_send": return `Removed a send`;
     case "load_builtin": return `Added ${a.type}`;
     case "set_track_type": return a.type === "drum" ? `Made it a drum track` : `Made it an audio track`;
     case "load_drum_kit": return `Loaded the drum kit`;

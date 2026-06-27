@@ -30,6 +30,8 @@ let sectionSeq = 3; // seed uses sec-1..3
 const nextSectionId = () => "sec-" + ++sectionSeq;
 let annotationSeq = 1; // seed uses ann-1
 const nextAnnotationId = () => "ann-" + ++annotationSeq;
+let busSeq = -1; // bus numbers allocate 0,1,2…
+const nextBus = () => ++busSeq;
 
 function waveClip(name: string, start: number, length: number): Clip {
   return {
@@ -430,6 +432,54 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     case "set_track_pan":    { const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found"); pushUndo(); t.pan = num(args.pan); invalidate(); return ok(command); }
     case "set_track_mute":   { const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found"); pushUndo(); t.mute = Boolean(args.mute); invalidate(); return ok(command); }
     case "set_track_solo":   { const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found"); pushUndo(); t.solo = Boolean(args.solo); invalidate(); return ok(command); }
+
+    // ── sends / returns / buses (G5) — mirrors MoshOps cmdCreateBus/AddSend/… so the
+    // dev + e2e mixer is actually functional (returns + send sliders appear/persist). ──
+    case "create_bus": {
+      pushUndo();
+      const bus = nextBus();
+      const name = str(args.name) || `Bus ${bus + 1}`;
+      const ret: Track = {
+        id: nextTrackId(), index: snapshot.tracks.length, name, type: "audio",
+        isReturn: true, returnBus: bus, volumeDb: 0, pan: 0, mute: false, solo: false, clips: [], plugins: [],
+      };
+      snapshot.tracks.push(ret);
+      (snapshot.buses ??= []).push({ bus, name, trackId: ret.id });
+      invalidate();
+      return ok(command, { busNumber: bus, trackId: ret.id, name });
+    }
+    case "add_send": {
+      const t = findTrack(str(args.trackId)); if (!t) return err(command, "no track");
+      const bus = num(args.bus, -1);
+      if (!(snapshot.buses ?? []).some((b) => b.bus === bus)) return err(command, "no such bus");
+      if ((t.sends ?? []).some((s) => s.bus === bus)) return err(command, "send already exists");
+      pushUndo();
+      (t.sends ??= []).push({ bus, db: num(args.db, 0), mute: false });
+      invalidate();
+      return ok(command, { bus });
+    }
+    case "set_send_level": {
+      const t = findTrack(str(args.trackId)); if (!t) return err(command, "no track");
+      const s = (t.sends ?? []).find((x) => x.bus === num(args.bus, -1));
+      if (!s) return err(command, "no send to that bus");
+      pushUndo(); s.db = num(args.db, s.db); invalidate(); return ok(command);
+    }
+    case "remove_send": {
+      const t = findTrack(str(args.trackId)); if (!t) return err(command, "no track");
+      const bus = num(args.bus, -1);
+      if (!(t.sends ?? []).some((s) => s.bus === bus)) return err(command, "no send to that bus");
+      pushUndo(); t.sends = (t.sends ?? []).filter((s) => s.bus !== bus); invalidate(); return ok(command);
+    }
+    case "remove_bus": {
+      const bus = num(args.bus, -1);
+      if (!(snapshot.buses ?? []).some((b) => b.bus === bus)) return err(command, "no such bus");
+      pushUndo();
+      snapshot.buses = (snapshot.buses ?? []).filter((b) => b.bus !== bus);
+      snapshot.tracks = snapshot.tracks.filter((t) => !(t.isReturn && t.returnBus === bus));
+      for (const t of snapshot.tracks) if (t.sends) t.sends = t.sends.filter((s) => s.bus !== bus); // sweep orphans
+      invalidate();
+      return ok(command);
+    }
     case "create_section": {
       pushUndo();
       const start = num(args.startBeat, 0);
