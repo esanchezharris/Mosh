@@ -24,6 +24,7 @@ import { useStore, type Peaks } from "../store";
 import { tempoMapFrom, gridLines, meterAt, beatSeconds, snapStep } from "../time";
 import { DRUM_LANES, laneIndexForPitch } from "./drumGrid";
 import { commitClipDrag } from "./clipDrag";
+import { WARP_MODES, warpToggleArgs, warpModeArgs } from "./clipWarp";
 import { useDrumWindow } from "./dock/useFloatingWindow";
 import { deriveTakeLanes } from "./takeLanes";
 import { SAMPLE_DND_MIME, addRecentSample } from "./sampleBrowserUtil";
@@ -430,11 +431,12 @@ const TrackHeader = memo(function TrackHeader({ track, height }: { track: Track;
 type ExecFn = (command: string, args?: Record<string, unknown>) => Promise<unknown>;
 type DragKind = "move" | "trim-l" | "trim-r" | "time";
 
-// Right-click clip menu — currently just audio→MIDI (Basic Pitch). Cursor-positioned
-// via a portal (so it isn't clipped by the lane's overflow), dismissed on outside
-// pointerdown or Escape. Stops propagation so a click inside doesn't also close it.
-function ClipMenu({ clipId, x, y, exec, onClose }:
-  { clipId: string; x: number; y: number; exec: ExecFn; onClose: () => void }) {
+// Right-click clip menu (wave clips) — audio→MIDI (Basic Pitch) + audio warp
+// (auto-tempo time-stretch). Cursor-positioned via a portal (so it isn't clipped by
+// the lane's overflow), dismissed on outside pointerdown or Escape. Stops propagation
+// so a click inside doesn't also close it.
+function ClipMenu({ clip, x, y, exec, onClose }:
+  { clip: Clip; x: number; y: number; exec: ExecFn; onClose: () => void }) {
   useEffect(() => {
     const onDoc = () => onClose();
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
@@ -449,7 +451,9 @@ function ClipMenu({ clipId, x, y, exec, onClose }:
       window.removeEventListener("keydown", onKey);
     };
   }, [onClose]);
-  const run = (mode: "mono" | "poly") => { void exec("transcribe_clip", { clipId, mode }); onClose(); };
+  const run = (mode: "mono" | "poly") => { void exec("transcribe_clip", { clipId: clip.id, mode }); onClose(); };
+  const selectMode = WARP_MODES.some((m) => m.id.toLowerCase() === (clip.stretchMode ?? "").toLowerCase())
+    ? (clip.stretchMode ?? "") : "";
   return createPortal(
     <div className="clip-menu" role="menu" data-testid="clip-menu"
       style={{ left: x, top: y }} onPointerDown={(e) => e.stopPropagation()}>
@@ -460,6 +464,21 @@ function ClipMenu({ clipId, x, y, exec, onClose }:
       <button className="cm-item" role="menuitem" data-testid="cm-poly" onClick={() => run("poly")}>
         Polyphonic <span className="cm-sub">chords</span>
       </button>
+      <div className="cm-head">Warp</div>
+      <button className="cm-item" role="menuitemcheckbox" aria-checked={!!clip.autoTempo}
+        data-testid="cm-warp" data-warp-on={clip.autoTempo ? "true" : "false"}
+        onClick={() => { void exec("set_clip_warp", warpToggleArgs(clip)); onClose(); }}>
+        <span className="cm-check">{clip.autoTempo ? "✓" : ""}</span> Auto-tempo
+      </button>
+      {clip.autoTempo && (
+        <label className="cm-item cm-row" data-testid="cm-warp-mode" onPointerDown={(e) => e.stopPropagation()}>
+          <span className="cm-sub">Stretch</span>
+          <select value={selectMode}
+            onChange={(e) => { void exec("set_clip_warp", warpModeArgs(clip, e.target.value)); onClose(); }}>
+            {WARP_MODES.map((m) => <option key={m.id || "default"} value={m.id}>{m.label}</option>)}
+          </select>
+        </label>
+      )}
     </div>,
     document.body,
   );
@@ -616,7 +635,7 @@ function ClipBlock({
       onContextMenu={onClipContext}
     >
       {menuPos && (
-        <ClipMenu clipId={clip.id} x={menuPos.x} y={menuPos.y} exec={exec} onClose={() => setMenuPos(null)} />
+        <ClipMenu clip={clip} x={menuPos.x} y={menuPos.y} exec={exec} onClose={() => setMenuPos(null)} />
       )}
       {transcribing && <div className="clip-badge" data-testid="clip-transcribing">transcribing…</div>}
       <div className="label">

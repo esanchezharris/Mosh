@@ -22,6 +22,7 @@ import { getGestureTable } from "../../interaction/gestureTables";
 import { liveFeel } from "../../interaction/config";
 import { passedDragThreshold, isDoubleClick } from "../../interaction/feel";
 import { commitClipDrag, type DragPos } from "../../ui/clipDrag";
+import { WARP_MODES, clipIsWarpable, warpToggleArgs, warpModeArgs } from "../../ui/clipWarp";
 // Reuse the proven legacy canvas renderers so drum clips show a true fixed-lane step
 // grid + MIDI shows note blocks (identical to the classic shell), not sparse dots.
 import { ClipWave, ClipMidi, ClipDrumGrid, isDrumClip } from "../../ui/Arrange";
@@ -180,6 +181,35 @@ function ClipMenu({ clip, x, y, time, onClose }: { clip: Clip; x: number; y: num
       <button role="menuitem" onClick={() => run(() => void exec("duplicate_clip", { clipId: clip.id }))}>Duplicate</button>
       {clip.type === "wave" && (
         <button role="menuitem" onClick={() => run(() => void exec("transcribe_clip", { clipId: clip.id, mode: "mono" }))}>Convert to MIDI</button>
+      )}
+      {clipIsWarpable(clip) && (
+        <>
+          <div className="v2-clipmenu-sep" />
+          {/* Audio warp (auto-tempo time-stretch). Toggle re-anchors the clip in beats;
+              the mode select picks the stretch algorithm. Both go through the one
+              mutation path: exec("set_clip_warp", …). Snapshot autoTempo/stretchMode
+              drive the ✓ + select value. */}
+          <button
+            role="menuitemcheckbox"
+            aria-checked={!!clip.autoTempo}
+            data-testid="v2-cm-warp"
+            data-warp-on={clip.autoTempo ? "true" : "false"}
+            onClick={() => run(() => void exec("set_clip_warp", warpToggleArgs(clip)))}
+          >
+            <span className="v2-cm-check">{clip.autoTempo ? "✓" : ""}</span> Warp (auto-tempo)
+          </button>
+          {clip.autoTempo && (
+            <label className="v2-clipmenu-row" data-testid="v2-cm-warp-mode" onPointerDown={(e) => e.stopPropagation()}>
+              <span>Stretch</span>
+              <select
+                value={WARP_MODES.some((m) => m.id.toLowerCase() === (clip.stretchMode ?? "").toLowerCase()) ? (clip.stretchMode ?? "") : ""}
+                onChange={(e) => { void exec("set_clip_warp", warpModeArgs(clip, e.target.value)); onClose(); }}
+              >
+                {WARP_MODES.map((m) => <option key={m.id || "default"} value={m.id}>{m.label}</option>)}
+              </select>
+            </label>
+          )}
+        </>
       )}
       <div className="v2-clipmenu-sep" />
       <button role="menuitem" className="danger" onClick={() => run(() => void exec("remove_clip", { clipId: clip.id }))}>Remove</button>

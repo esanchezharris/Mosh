@@ -86,6 +86,38 @@ test("right-click → split increases the clip count", async ({ page }) => {
   await expect(page.getByTestId("v2-clip")).toHaveCount(before + 1);
 });
 
+test("right-click a wave clip → Warp toggle reveals the stretch-mode select (G9)", async ({ page }) => {
+  await bootV2(page);
+  // The seeded "Keys" track holds the only wave clip ("chords") — warp is wave-only.
+  const wave = page.locator('[data-testid="v2-clip"].wave').first();
+  await expect(wave).toBeVisible();
+  await wave.click({ button: "right" });
+  const menu = page.getByTestId("v2-clip-menu");
+  await expect(menu).toBeVisible();
+
+  // Warp starts off, no mode select shown.
+  const warp = menu.getByTestId("v2-cm-warp");
+  await expect(warp).toHaveAttribute("data-warp-on", "false");
+  await expect(page.getByTestId("v2-cm-warp-mode")).toHaveCount(0);
+
+  // Toggling warp on (re-open the menu — clicking an item closes it) shows the select.
+  await warp.click();
+  await wave.click({ button: "right" });
+  await expect(page.getByTestId("v2-cm-warp")).toHaveAttribute("data-warp-on", "true");
+  await expect(page.getByTestId("v2-cm-warp-mode")).toBeVisible();
+  await expect(page.getByTestId("v2-error")).toHaveCount(0);
+});
+
+test("Warp is offered only on wave clips, never on MIDI/drum (G9)", async ({ page }) => {
+  await bootV2(page);
+  // The first clip is the Drums MIDI clip — its context menu must NOT show Warp.
+  const midi = page.locator('[data-testid="v2-clip"]:not(.wave)').first();
+  await expect(midi).toBeVisible();
+  await midi.click({ button: "right" });
+  await expect(page.getByTestId("v2-clip-menu")).toBeVisible();
+  await expect(page.getByTestId("v2-cm-warp")).toHaveCount(0);
+});
+
 test("the agent toast appears on a command and self-dismisses", async ({ page }) => {
   await bootV2(page);
   await page.getByTestId("agent-input").fill("play");

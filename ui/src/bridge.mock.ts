@@ -540,6 +540,19 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     case "rename_clip": { const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found"); pushUndo(); f.clip.name = str(args.name, f.clip.name); invalidate(); return ok(command); }
     case "set_clip_mute": { const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found"); pushUndo(); f.clip.mute = Boolean(args.mute); invalidate(); return ok(command); }
     case "set_clip_gain": { const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found"); pushUndo(); f.clip.gainDb = num(args.gainDb); invalidate(); return ok(command); }
+    case "set_clip_warp": {
+      // Audio warp (auto-tempo time-stretch). Mirrors the backend: toggle autoTempo;
+      // when enabling, record the stretch mode (requested, else the vendored default).
+      const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found");
+      if (f.clip.type !== "wave") return err(command, "not an audio clip");
+      if (!("autoTempo" in args)) return err(command, "missing 'autoTempo'");
+      pushUndo();
+      const on = Boolean(args.autoTempo);
+      f.clip.autoTempo = on;
+      if (on) f.clip.stretchMode = str(args.mode) || "soundtouch";
+      invalidate();
+      return ok(command, { clipId: f.clip.id, autoTempo: f.clip.autoTempo, stretchMode: f.clip.stretchMode });
+    }
 
     // ── recording transport + take lanes (comp tree) ─────────────────────────
     // No audio I/O in the browser dev mock, so "recording" is simulated against

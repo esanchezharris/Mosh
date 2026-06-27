@@ -41,6 +41,7 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "rename_clip", desc: "Rename a clip", args: [S("clipId"), S("name")] },
   { command: "set_clip_gain", desc: "Set a clip's gain in dB", args: [S("clipId"), N("gainDb")] },
   { command: "set_clip_mute", desc: "Mute/unmute a clip", args: [S("clipId"), B("mute")] },
+  { command: "set_clip_warp", desc: "Warp a wave clip: toggle auto-tempo time-stretch (follows the tempo map) and pick the stretch mode", args: [S("clipId"), B("autoTempo"), S("mode", false, '"" = default | "soundtouch"')] },
 
   // ── embodied capture (Sketch, Phase 0) ───────────────────────────────────
   { command: "sketch_beatbox", desc: "Transduce a recorded beatbox WAV into an editable drum clip at a known BPM (kick/snare/hat on a 16th grid)", args: [S("file", true, "path to the beatbox WAV"), N("bpm", true, "known tempo"), N("bars", false, "loop length, 1-2 bars")] },
@@ -150,6 +151,7 @@ export function describeCommand(command: string, args: Record<string, unknown>):
     case "rename_clip": return `Renamed a clip to "${a.name}"`;
     case "set_clip_gain": return `Set clip gain to ${a.gainDb} dB`;
     case "set_clip_mute": return a.mute ? `Muted a clip` : `Unmuted a clip`;
+    case "set_clip_warp": return a.autoTempo ? `Turned on warp (auto-tempo)` : `Turned off warp`;
     case "sketch_beatbox": return `Turned a beatbox into a drum clip`;
     case "add_note": return `Added a note`;
     case "remove_note": return `Removed a note`;
