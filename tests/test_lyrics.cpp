@@ -79,6 +79,33 @@ TEST_CASE ("L2 transient proposals (JSON blob) + regen round-trip on a line", "[
     REQUIRE_FALSE (fresh.hasProperty (ids::lyricRegen));
 }
 
+TEST_CASE ("L1 transient analysis (JSON object blob) round-trips on a line", "[lyrics][l1]")
+{
+    auto line = LyricLine::create ("ln-1", 0, "verse");
+    line.setProperty (ids::lyricText, "lighting up the flame", nullptr);
+    // analyze_lyrics lands precise phonology as a JSON-OBJECT blob (non-undoable). It
+    // must survive serialization, and lyricSheetToVar parses it back to an object for
+    // the snapshot → flow visualizer.
+    line.setProperty (ids::lyricAnalysis,
+                      "{\"syllables\":5,\"target\":5,\"syllableOk\":true,\"endWord\":\"flame\","
+                      "\"rhymeGrade\":\"anchor\",\"rhymeOk\":true,\"stress\":\"XxXxX\","
+                      "\"words\":[{\"w\":\"flame\",\"syllables\":1,\"stress\":\"X\",\"inDict\":true}],"
+                      "\"complete\":true,\"analyzed\":\"text\"}",
+                      nullptr);
+
+    auto back = juce::ValueTree::fromXml (line.toXmlString());
+    auto parsed = juce::JSON::parse (back[ids::lyricAnalysis].toString());
+    REQUIRE (parsed.isObject());
+    REQUIRE ((int) parsed.getProperty ("syllables", juce::var()) == 5);
+    REQUIRE (parsed.getProperty ("rhymeGrade", juce::var()).toString() == "anchor");
+    REQUIRE ((bool) parsed.getProperty ("complete", false) == true);
+    REQUIRE (parsed.getProperty ("words", juce::var()).isArray());
+
+    // A fresh line has no analysis until analyze_lyrics runs (it's recomputable).
+    auto fresh = LyricLine::create ("ln-2", 1, "verse");
+    REQUIRE_FALSE (fresh.hasProperty (ids::lyricAnalysis));
+}
+
 TEST_CASE ("lineFingerprint is stable + sensitive to every constraint input", "[lyrics][cache]")
 {
     auto sheet = LyricSheet::create ("ls-3");

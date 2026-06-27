@@ -344,4 +344,23 @@ juce::var GenerativeJobManager::generateLyrics (const juce::String& mode, const 
     return {};
 }
 
+juce::var GenerativeJobManager::analyzeLyrics (const juce::var& spec)
+{
+    if (! ensureServiceRunning())
+        return {};
+
+    auto* body = new DynamicObject();
+    body->setProperty ("spec", spec);
+
+    // Fast + deterministic (phonology only, no LLM) — a short timeout keeps the precise
+    // flow-meter snappy. Off the message thread (mirrors transcribe()).
+    URL url = URL (baseUrl + "/analyze_lyrics").withPOSTData (JSON::toString (var (body)));
+    auto opts = URL::InputStreamOptions (URL::ParameterHandling::inPostData)
+                    .withConnectionTimeoutMs (15000)
+                    .withExtraHeaders ("Content-Type: application/json");
+    if (auto s = url.createInputStream (opts))
+        return JSON::parse (s->readEntireStreamAsString());
+    return {};
+}
+
 } // namespace mosh

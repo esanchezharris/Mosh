@@ -68,6 +68,14 @@ public:
     juce::var generateLyrics (const juce::String& mode, const juce::var& spec,
                               int lineIndex, int afterIndex, const juce::var& regen);
 
+    /** Precise per-line lyric ANALYSIS (POST /analyze_lyrics) — Finish-My-Song L1. Fast,
+        deterministic, no LLM (the dictionary phonology path for the flow visualizer).
+        SYNCHRONOUS — call on a BACKGROUND thread (mirrors transcribe()). `spec` is the
+        lyric-sheet constraint spec. Returns
+        { ok, lines:[{index, analysis:{syllables,target,stress,rhymeGrade,rhymeOk,words,...}}] },
+        or {} on failure (service down). */
+    juce::var analyzeLyrics (const juce::var& spec);
+
     juce::String serviceBuild() const { return svcBuild; }
 
 private:

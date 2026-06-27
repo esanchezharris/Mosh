@@ -142,6 +142,10 @@ namespace mosh::ids
     // status flows empty→seed→generating→proposed→accepted.
     MOSH_DECLARE_ID (lyricProposals)       // JSON array string of {text,score,syllables,passes,grade,endWord,...}
     MOSH_DECLARE_ID (lyricRegen)           // int — bumped by regenerate_lyric
+    // L1 — TRANSIENT, non-undoable: precise per-line phonology from analyze_lyrics, a
+    // JSON-object blob {syllables,target,stress,rhymeGrade,rhymeOk,words,...} → snapshot →
+    // the flow visualizer. Refreshed on demand; never persisted (recomputable).
+    MOSH_DECLARE_ID (lyricAnalysis)
 
     MOSH_DECLARE_ID (id)
     MOSH_DECLARE_ID (inputRef)
