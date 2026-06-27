@@ -134,7 +134,7 @@ export function PluginDock() {
     <div className="v2-pdock" data-testid="v2-plugin-dock">
       <div className="v2-pb-search v2-pdock-search">
         <span className="v2-pb-search-icon" aria-hidden>⌕</span>
-        <input data-testid="v2-pb-search" placeholder="Search by name or vendor…" value={pk.q} onChange={(e) => pk.setQ(e.target.value)} />
+        <input data-testid="v2-pb-search" aria-label="Search plugins" placeholder="Search by name or vendor…" value={pk.q} onChange={(e) => pk.setQ(e.target.value)} />
       </div>
       <div className="v2-pdock-chips" role="tablist" aria-label="Plugin collections">
         {pk.collections.map((c) => (
