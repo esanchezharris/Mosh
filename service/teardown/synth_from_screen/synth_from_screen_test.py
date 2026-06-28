@@ -234,13 +234,29 @@ check("vital profile uses white-pointer mode",
       load_profile("vital", 2342, 1436)["env1_sustain"].get("pointer") == "white")
 # reference_size in vital.json is 2342x1436; loading at the SAME size is identity
 ref = load_profile("vital", 2342, 1436)
-check("vital profile loads ENV + OSC 1/2/3 controls", len(ref) == 14 and "env1_sustain" in ref and "osc1_level" in ref and "osc3_pan" in ref)
+check("vital profile loads ENV + OSC 1/2/3 + filter knobs", len(ref) == 17 and "env1_sustain" in ref and "osc1_level" in ref and "osc3_pan" in ref and "filter_drive" in ref)
 check("identity load keeps reference coords", ref["env1_sustain"]["cx"] == 2106 and ref["env1_sustain"]["cy"] == 426)
 # loading at HALF size scales coords by ~0.5 (so one profile works at any capture res)
 half = load_profile("vital", 1171, 718)
 check("half-size load scales cx", abs(half["env1_sustain"]["cx"] - 1053) <= 1, str(half["env1_sustain"]["cx"]))
 check("half-size load scales cy", abs(half["env1_sustain"]["cy"] - 213) <= 1, str(half["env1_sustain"]["cy"]))
 check("half-size load scales radius", abs(half["env1_sustain"]["r"] - 15) <= 1, str(half["env1_sustain"]["r"]))
+
+# ── Vital filter DRIVE/MIX/KEY-TRK — read off a LIVE filter-ENABLED capture ────
+# Calibrated live (computer-use): enabled FILTER 1 and captured it at its defaults. The white
+# pointer must recover those known defaults — DRIVE 0 (min), MIX 1.0 (100% wet), KEY-TRK 0.5
+# (centre). (On Init the filter is OFF and these read unreliably, which is why a dedicated
+# filter-enabled fixture exists.)
+_vfilt = os.path.join(_HERE, "fixtures", "panels", "vital_filter_on.png")
+if os.path.isfile(_vfilt):
+    _fi = cv2.imread(_vfilt)
+    _fp = load_profile("vital", _fi.shape[1], _fi.shape[0], _fi)
+    _fr = read_patch(_fi, _fp)["params"]
+    check("vital filter DRIVE reads ~0 (min) on the enabled-filter default", _fr["filter_drive"] <= 0.12, str(_fr.get("filter_drive")))
+    check("vital filter MIX reads ~1.0 (100% wet default)", _fr["filter_mix"] >= 0.88, str(_fr.get("filter_mix")))
+    check("vital filter KEY-TRK reads ~0.5 (centre default)", 0.42 <= _fr["filter_keytrk"] <= 0.58, str(_fr.get("filter_keytrk")))
+else:
+    check("vital_filter_on.png fixture present", False, "missing fixture")
 
 # ── host-invariant calibration (logo landmark) ────────────────────────────────
 # The title bar is host chrome (Mosh ≠ Ableton ≠ standalone) that TRANSLATES the synth content
