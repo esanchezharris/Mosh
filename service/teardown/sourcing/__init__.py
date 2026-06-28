@@ -6,7 +6,9 @@ analysis cache, never a retained/redistributed corpus (posture.py). The pure cor
 gated on the dep, exactly like SA3/transform.
 """
 from .catalog import Catalog, VideoRow  # noqa: F401
-from .discover import VideoMeta, FakeSearcher, YtDlpSearcher, Searcher  # noqa: F401
+from .discover import (  # noqa: F401
+    VideoMeta, FakeSearcher, YtDlpSearcher, YouTubeDataApiSearcher, Searcher, default_searcher,
+)
 from .prescreen import prescreen  # noqa: F401
 from .score import predict_yield  # noqa: F401
 from .scout import Scout  # noqa: F401
