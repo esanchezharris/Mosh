@@ -89,11 +89,18 @@ with tempfile.TemporaryDirectory() as d:
     check("clean mode excludes profanity-tagged words", clean == {"drip"}, str(sorted(clean)))
     check("default (raw) includes everything", {e["word"] for e in pal.entries()} == {"drip", "money"})
 
-# ── 5. the open seed is non-empty + register-tagged ───────────────────────────────
+# ── 5. the open seed (generic + rage/underground register pack) ───────────────────
 seed = vocab.seed_words()
-check("seed has words", len(seed) >= 10)
+seed_words_set = {w for w, _ in seed}
+check("seed is substantial (generic + rage register pack)", len(seed) >= 120, str(len(seed)))
+check("seed is deduped", len(seed_words_set) == len(seed))
 check("seed entries are (word, register) with a known register",
       all(isinstance(w, str) and r in ("slang", "adlib", "profanity") for w, r in seed), str(seed[:3]))
+seed_regs = {r for _, r in seed}
+check("seed covers all three registers (slang/adlib/profanity)",
+      {"slang", "adlib", "profanity"} <= seed_regs, str(sorted(seed_regs)))
+check("rage register vocabulary present (e.g. rage, geeked, opps)",
+      {"rage", "geeked", "opps"} <= seed_words_set, str(sorted(seed_words_set)[:8]))
 
 # ── 6. stats are counts only (the backend-only safety wall) ───────────────────────
 with tempfile.TemporaryDirectory() as d:

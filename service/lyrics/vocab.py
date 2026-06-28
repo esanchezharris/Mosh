@@ -63,9 +63,15 @@ def _rhyme_family(phones: Optional[List[str]]) -> str:
 
 
 def seed_words() -> List[tuple]:
-    """The bundled open seed as deduped (word, register) pairs."""
+    """The bundled open seed as deduped (word, register) pairs — the small generic set PLUS
+    the rage/underground register pack (the Opium / Ken Carson / nettspend lane). First tag
+    wins on a duplicate word. Words are facts (a glossary), never lyrics."""
+    try:
+        from lyrics.seeds_rage import RAGE_WORDS
+    except Exception:  # noqa: BLE001
+        RAGE_WORDS = []
     seen, out = set(), []
-    for w, r in _SEED:
+    for w, r in (_SEED + list(RAGE_WORDS)):
         cw = _clean(w)
         if cw and cw not in seen:
             seen.add(cw)
