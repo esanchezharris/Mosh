@@ -31,6 +31,7 @@ SUITE = [
     ("flywheel + RL bridge (§11/§12)", HERE / "flywheel" / "flywheel_test.py"),
     ("MIDI-from-screen (§5)", HERE / "midi_from_screen" / "midi_from_screen_test.py"),
     ("GUI patch-reader (§5b)", HERE / "synth_from_screen" / "synth_from_screen_test.py"),
+    ("host-invariant calibration + embedded GUI (§5b)", HERE / "synth_from_screen" / "calib_test.py"),
     ("visual synth naming (§2)", HERE / "synth_from_screen" / "name_synths_test.py"),
     ("GUI FX-chain detector (§5b)", HERE / "synth_from_screen" / "fx_rack_test.py"),
     ("GUI per-effect FX-knob reader (§5b)", HERE / "synth_from_screen" / "fx_params_test.py"),
