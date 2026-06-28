@@ -135,7 +135,7 @@ def _serum_recipe():
 try:
     fs.synth_element_from_gui = _stub_build
     # both serum + serum1 fire confidently on the frame → ambiguous → must skip
-    pd.detect_active_tab = lambda img, key: ({"tab": "FX", "confidence": 0.9, "strength": 10.0}
+    pd.detect_active_tab = lambda img, key: ({"tab": "FX", "confidence": 0.9, "strength": 10.0, "host_invariant": True}
                                              if key in ("serum", "serum1") else {"tab": None})
     rec_amb = _serum_recipe()
     n_amb = enrich_synths_from_frames(rec_amb, [Frame(0.0, gray)])
@@ -143,7 +143,7 @@ try:
           n_amb == 0 and rec_amb.elements[0].synth_patch.status.value == "unknown", str(n_amb))
     # only one sibling fires → unambiguous → the (stubbed) read lands, proving the guard isn't
     # just blocking everything
-    pd.detect_active_tab = lambda img, key: ({"tab": "FX", "confidence": 0.9, "strength": 10.0}
+    pd.detect_active_tab = lambda img, key: ({"tab": "FX", "confidence": 0.9, "strength": 10.0, "host_invariant": True}
                                              if key == "serum" else {"tab": None})
     rec_one = _serum_recipe()
     n_one = enrich_synths_from_frames(rec_one, [Frame(0.0, gray)])

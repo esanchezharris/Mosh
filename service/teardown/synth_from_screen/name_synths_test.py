@@ -63,11 +63,11 @@ check("None/garbage frames tolerated → []", name_synths_in_frames([None, np.ze
 # ── uniqueness guard: a frame where TWO profiles fire → names nothing (no cross-fire mislabel) ──
 _orig = pd.detect_active_tab
 try:
-    pd.detect_active_tab = lambda img, key: ({"tab": "X", "confidence": 0.9, "strength": 9.0}
+    pd.detect_active_tab = lambda img, key: ({"tab": "X", "confidence": 0.9, "strength": 9.0, "host_invariant": True}
                                              if key in ("serum", "serum1") else {"tab": None})
     check("two profiles fire on a frame → that frame names nothing (uniqueness)",
           name_synths_in_frames([gray]) == [], str(name_synths_in_frames([gray])))
-    pd.detect_active_tab = lambda img, key: ({"tab": "X", "confidence": 0.9, "strength": 9.0}
+    pd.detect_active_tab = lambda img, key: ({"tab": "X", "confidence": 0.9, "strength": 9.0, "host_invariant": True}
                                              if key == "vital" else {"tab": None})
     check("exactly one profile fires → it is named", name_synths_in_frames([gray]) == ["Vital"],
           str(name_synths_in_frames([gray])))

@@ -144,7 +144,10 @@ def compute_calibration(data: dict, img) -> dict | None:
         sh2, sw2 = small.shape[:2]
         best = None  # (score, s_full, loc_small)
         for k in range(15):
-            s = base * (0.30 + 0.05 * k)             # full-res content scale
+            s = base * (0.40 + 0.04 * k)             # full-res content scale: 0.40..0.96 of frame
+            # floor at 0.40 — a real plugin window isn't <40% of the frame width; the lower scales
+            # only ever produced spurious tiny-template matches on busy real frames (a different
+            # synth's logo "matching" at s~0.16, score >0.78 → a cross-synth MISLABEL on real input).
             nw = int(round(tmpl.shape[1] * (s * ds) / tscale))
             nh = int(round(tmpl.shape[0] * (s * ds) / tscale))
             if nw < 6 or nh < 5 or nw > sw2 or nh > sh2:

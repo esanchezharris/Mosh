@@ -66,7 +66,10 @@ def name_synths_in_frames(images, *, min_conf: float = 0.6) -> list:
         fired: dict = {}
         for key in metas:
             r = detect_active_tab(img, key)
-            if r.get("tab") and float(r.get("confidence", 0.0) or 0.0) >= min_conf:
+            # require a LOGO-CONFIRMED calibration: a proportional-fallback tab read (logo not
+            # found) can land a confident-but-spurious tab on a DIFFERENT synth's GUI → a cross-synth
+            # mislabel. Naming demands the synth's own logo be located first.
+            if r.get("tab") and r.get("host_invariant") and float(r.get("confidence", 0.0) or 0.0) >= min_conf:
                 fired[key] = float(r["confidence"])
         if len(fired) == 1:                     # unambiguous on this frame
             disp = metas[next(iter(fired))]
@@ -99,6 +102,11 @@ def _load_tabs(synth: str, img: np.ndarray) -> dict | None:
         "x_max": cal.x(tabs.get("x_max", ref_w)),
         "anchors": {n: cal.x(x) for n, x in tabs["anchors"].items()},
         "min_count": tabs.get("min_count", 2),
+        # whether the calibration was LOGO-CONFIRMED (the synth's own logo was located) vs the
+        # proportional fallback. Naming/identification must only trust logo-confirmed reads — a
+        # proportional-fallback tab band can land on a saturated region of a DIFFERENT synth's GUI
+        # and read a confident-but-spurious tab (a cross-synth mislabel on real frames).
+        "host_invariant": cal.host_invariant,
     }
 
 
@@ -133,7 +141,8 @@ def detect_active_tab(img: np.ndarray, synth: str) -> dict:
     logo / preset area out; the saturation cutoff is adaptive (see _highlight_columns)."""
     cfg = _load_tabs(synth, img)
     if not cfg:
-        return {"tab": None, "confidence": 0.0, "peak_x": None}
+        return {"tab": None, "confidence": 0.0, "peak_x": None, "host_invariant": False}
+    hi = bool(cfg.get("host_invariant"))
     cols = _highlight_columns(img, cfg["band"], cfg["highlight"])
     x0 = max(0, cfg["x_min"])
     x1 = min(len(cols), cfg["x_max"]) if cfg["x_max"] > 0 else len(cols)
@@ -141,13 +150,14 @@ def detect_active_tab(img: np.ndarray, synth: str) -> dict:
     cols[x1:] = 0.0
     strength = float(cols.max())
     if strength < cfg["min_count"]:
-        return {"tab": None, "confidence": 0.0, "peak_x": None, "strength": 0.0}
+        return {"tab": None, "confidence": 0.0, "peak_x": None, "strength": 0.0, "host_invariant": hi}
     peak_x = int(np.argmax(cols))
     name, dist = min(((n, abs(peak_x - x)) for n, x in cfg["anchors"].items()), key=lambda t: t[1])
     xs = sorted(cfg["anchors"].values())
     spacing = min((b - a for a, b in zip(xs, xs[1:])), default=float(img.shape[1]))
     conf = max(0.0, min(1.0, 1.0 - (dist / (0.5 * spacing)))) if spacing > 0 else 0.0
-    return {"tab": name, "confidence": round(conf, 3), "peak_x": peak_x, "strength": strength}
+    return {"tab": name, "confidence": round(conf, 3), "peak_x": peak_x, "strength": strength,
+            "host_invariant": hi}
 
 
 def identify_synth(img: np.ndarray, candidates: list[str] | None = None) -> dict:

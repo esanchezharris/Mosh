@@ -137,7 +137,9 @@ def enrich_synths_from_frames(rec, frames, *, min_conf: float = 0.6) -> int:
             imgs[fi] = img
             for key in cands:
                 r = detect_active_tab(img, key)
-                if not r.get("tab"):
+                # require a LOGO-CONFIRMED calibration — a proportional-fallback tab read (the
+                # synth's logo wasn't located) can confidently mis-fire on another synth's GUI.
+                if not r.get("tab") or not r.get("host_invariant"):
                     continue
                 conf = float(r.get("confidence", 0.0) or 0.0)
                 stg = float(r.get("strength", 0.0) or 0.0)
