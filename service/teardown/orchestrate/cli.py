@@ -42,6 +42,8 @@ def main(argv=None):
     ap.add_argument("--index", default="", help="§1 sample index dir (for drum matching)")
     ap.add_argument("--section", nargs=2, type=float, metavar=("START", "END"), default=None)
     ap.add_argument("--no-extract", action="store_true")
+    ap.add_argument("--render", action="store_true",
+                    help="§9 EXECUTE the compiled recipe → render a WAV (needs the built binary)")
     ap.add_argument("--max-frames", type=int, default=24)
     ns = ap.parse_args(argv)
 
@@ -87,9 +89,20 @@ def main(argv=None):
         if matcher is not None:
             matcher.match_into(rec, element_id)
 
+    render_fn = None
+    if ns.render:
+        from teardown.render.execute import execute_recipe
+
+        def render_fn(rec):                      # §9 execute → real Edit + render; writes yield.actual
+            r = execute_recipe(rec, out_wav=str(out / f"{rec.source.video_id or 'recon'}.wav"),
+                               session_dir=str(out / ".render-sess"), timeout_s=600)
+            return {"nonsilent": r.nonsilent, "rms": round(r.audio_rms, 4), "yield": r.yield_actual,
+                    "out_wav": r.out_wav, "synths_loaded": r.synths_loaded,
+                    "synth_params_set": r.synth_params_set, "ran": r.ran, "error": r.error}
+
     orc = Orchestrator(policy=Policy(), checkpoint_dir=out / ".checkpoints",
                        skeleton_fn=skeleton, extract_fn=(None if ns.no_extract else extract),
-                       match_fn=match, compile_fn=compile_recipe)
+                       match_fn=match, compile_fn=compile_recipe, render_fn=render_fn)
     try:
         res = orc.teardown(ns.url)
         if res.status == "failed":
@@ -103,6 +116,7 @@ def main(argv=None):
             "stages": res.stages_done, "recipe": str(rdir / "recipe.json"),
             "elements": len(res.recipe.elements), "commands": len(res.commands),
             "unresolved": len(res.unresolved),
+            "render": res.render or None, "reward": res.reward or None,
         })
     except SystemExit:
         raise

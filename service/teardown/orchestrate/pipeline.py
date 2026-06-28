@@ -17,7 +17,7 @@ from .decisions import label_element, name_sections
 from .policy import Policy
 
 DRUM_ROLES = {"kick", "snare", "hat", "clap", "perc", "808"}
-STAGES = ("skeleton", "extract", "match", "compile")
+STAGES = ("skeleton", "extract", "match", "compile", "render", "score")
 
 
 class Stage(str, Enum):
@@ -25,6 +25,8 @@ class Stage(str, Enum):
     extract = "extract"
     match = "match"
     compile = "compile"
+    render = "render"
+    score = "score"
 
 
 @dataclass
@@ -35,6 +37,8 @@ class RunResult:
     status: str = "torn_down"        # torn_down | needs_review | failed
     stages_done: list = field(default_factory=list)
     completeness: float = 0.0
+    render: dict = field(default_factory=dict)   # §9 execute summary (nonsilent/rms/yield/out_wav)
+    reward: dict = field(default_factory=dict)   # §12 score of the reconstruction
     error: Optional[str] = None
 
 
@@ -61,13 +65,16 @@ def _completeness(rec: Recipe) -> float:
 class Orchestrator:
     def __init__(self, *, policy: Optional[Policy] = None, checkpoint_dir=None,
                  skeleton_fn: Callable, match_fn: Callable, compile_fn: Callable,
-                 extract_fn: Optional[Callable] = None) -> None:
+                 extract_fn: Optional[Callable] = None, render_fn: Optional[Callable] = None,
+                 reward_fn: Optional[Callable] = None) -> None:
         self.policy = policy or Policy()
         self.cp = Path(checkpoint_dir) if checkpoint_dir else None
         self._skeleton = skeleton_fn          # (video_ref) -> Recipe
         self._extract = extract_fn            # (recipe, video_ref) -> None  (adds drum elements); optional
         self._match = match_fn                # (recipe, element_id) -> None  (§1 match_into)
         self._compile = compile_fn            # (recipe) -> CompileResult-like (.commands, .unresolved)
+        self._render = render_fn              # (recipe) -> dict (§9 execute; writes yield.actual); optional
+        self._reward = reward_fn              # (recipe, render_out) -> dict (§12 score); optional
 
     # ── checkpointing ───────────────────────────────────────────────────────
     def _paths(self, video_ref: str):
@@ -127,11 +134,28 @@ class Orchestrator:
                 done.append("compile")
                 self._save(video_ref, rec, done)
 
+            # §9 execute — turn the compiled commands into a real Edit + render (writes the recipe's
+            # yield.actual + reconstruction_class). Optional/injected: no render_fn → stop at compile
+            # (the prior behaviour). Heavy (needs the binary), so it checkpoints separately.
+            render_out: dict = {}
+            if self._render is not None and "render" not in done:
+                render_out = self._render(rec) or {}
+                done.append("render")
+                self._save(video_ref, rec, done)
+
+            # §12 score — only when a render actually produced audio (nothing to score otherwise).
+            reward_out: dict = {}
+            if self._reward is not None and render_out.get("nonsilent") and "score" not in done:
+                reward_out = self._reward(rec, render_out) or {}
+                done.append("score")
+                self._save(video_ref, rec, done)
+
             comp = _completeness(rec)
             status = "torn_down" if comp >= self.policy.review_floor else "needs_review"
             return RunResult(recipe=rec, commands=list(getattr(compiled, "commands", [])),
                              unresolved=list(getattr(compiled, "unresolved", [])),
-                             status=status, stages_done=done, completeness=comp)
+                             status=status, stages_done=done, completeness=comp,
+                             render=render_out, reward=reward_out)
         except Exception as e:  # a stage failed → honest failed status, never a crash to the caller
             return RunResult(recipe=rec if rec is not None else Recipe(),
                              status="failed", error=f"{type(e).__name__}: {e}")

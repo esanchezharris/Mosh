@@ -80,6 +80,57 @@ with tempfile.TemporaryDirectory() as td:
     check("resume preserves the matched drum element",
           any(e.sample_match.status == R.SampleStatus.matched for e in res2.recipe.elements))
 
+# ── render + score stages (injected fakes; the REAL §9 execute / §12 reward are covered on the
+#    binary by teardown_e2e.py / system_smoke.py — here we prove the orchestrator RUNS them) ──
+def fake_render(rec):
+    rec.yield_.actual = R.YieldScores(overall=0.9, drums=0.9, arrangement=0.9)
+    rec.reconstruction_class = R.ReconstructionClass.inferred
+    return {"nonsilent": True, "rms": 0.2, "yield": {"overall": 0.9}, "out_wav": "/tmp/recon.wav"}
+
+
+def fake_reward(rec, render_out):
+    assert render_out.get("out_wav")            # the score stage receives the render summary
+    return {"pull": 0.6, "composite": 0.7}
+
+
+with tempfile.TemporaryDirectory() as td:
+    orc = Orchestrator(policy=Policy(), checkpoint_dir=td, skeleton_fn=fake_skeleton,
+                       extract_fn=fake_extract, match_fn=fake_match, compile_fn=compile_recipe,
+                       render_fn=fake_render, reward_fn=fake_reward)
+    res = orc.teardown("vidR")
+    check("render+score stages run when injected",
+          res.stages_done == ["skeleton", "extract", "match", "compile", "render", "score"],
+          str(res.stages_done))
+    check("RunResult.render populated (§9 executed)",
+          res.render.get("nonsilent") and res.render.get("out_wav"), str(res.render))
+    check("RunResult.reward populated (§12 scored)", res.reward.get("pull") is not None, str(res.reward))
+    check("render wrote yield.actual onto the recipe", res.recipe.yield_.actual.overall == 0.9)
+
+# ── score SKIPS when the render produced no audio (nothing to score) ──────────
+reward_calls: list = []
+
+
+def silent_render(rec):
+    return {"nonsilent": False, "rms": 0.0, "out_wav": "/tmp/s.wav"}
+
+
+def counting_reward(rec, render_out):
+    reward_calls.append(1)
+    return {"pull": 0.1}
+
+
+sr2 = Orchestrator(skeleton_fn=fake_skeleton, match_fn=fake_match, compile_fn=compile_recipe,
+                   render_fn=silent_render, reward_fn=counting_reward).teardown("vidS")
+check("silent render → score stage skipped (no reward call)",
+      "render" in sr2.stages_done and "score" not in sr2.stages_done and not reward_calls,
+      str(sr2.stages_done))
+
+# ── back-compat: no render_fn → the run stops at compile (prior behaviour) ────
+nr = Orchestrator(skeleton_fn=fake_skeleton, match_fn=fake_match, compile_fn=compile_recipe).teardown("vidN")
+check("no render_fn → stops at compile (no render/score stage)",
+      nr.stages_done == ["skeleton", "extract", "match", "compile"] and not nr.render and not nr.reward,
+      str(nr.stages_done))
+
 # ── gating: a sparse recipe → needs_review ───────────────────────────────────
 sparse = Orchestrator(policy=Policy(review_floor=0.35),
                       skeleton_fn=lambda v: R.Recipe(elements=[R.Element(element_id="x", role="other")]),
