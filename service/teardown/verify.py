@@ -31,6 +31,7 @@ SUITE = [
     ("GUI FX-chain detector (§5b)", HERE / "synth_from_screen" / "fx_rack_test.py"),
     ("GUI per-effect FX-knob reader (§5b)", HERE / "synth_from_screen" / "fx_params_test.py"),
     ("GUI matrix reader (§5b)", HERE / "synth_from_screen" / "matrix_test.py"),
+    ("GUI FX add-rack reader (§5b)", HERE / "synth_from_screen" / "fx_addrack_test.py"),
 ]
 
 fails: list[str] = []

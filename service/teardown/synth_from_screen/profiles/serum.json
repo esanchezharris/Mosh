@@ -27,6 +27,26 @@
     "destination": {"x0": 1760, "x1": 2020},
     "active_amount_eps": 0.06
   },
+  "fx_addrack": {
+    "_note": "FX tab — Serum 2's DYNAMIC add-rack (≠ Serum 1's / Vital's FIXED rack, which the fx_list block + detect_fx_chain handle). You press '+ FX' and pick from a menu (Bode/Chorus/Compressor/Convolve/Delay/Distortion/Equalizer/Filter/Flanger/Hyper-Dimension/Phaser/Reverb/…); chosen modules STACK top-to-bottom per BUS (MAIN/BUS 1/BUS 2), empty on Init. The compact LEFT chain LIST (one row per added module, in order, each = a colored accent bar + the effect NAME in clean caps, pitch row_h) is the read surface — far cleaner than the expanded module panels on the right; rows are contiguous from the top, so read_addrack stops at the first empty row. read_addrack reads ONE visible bus (which it NAMES from the orange active-tab highlight — see bus_tabs); the teardown pipeline captures each bus separately. NAMES are identified by template-matching the name strip against profiles/serum_fxnames/<effect>.png (canonical-size, resolution-normalized). The bank ships 12 effects — the full audible set (bode/chorus/compressor/convolve/delay/distortion/equalizer/filter/flanger/hyper_dimension[→'Hyper/Dimension' via display_names]/phaser/reverb). Threshold: correct real-row matches floor at ~0.90 while the WORST cross-effect collision (phaser×reverb, two 6-letter words) is 0.747, so match_min 0.82 sits in the gap — accepts every correct name, rejects every look-alike. An effect WITHOUT a template (the 4 rare routing utils — Splitter L/H, L/M/H, M/S, Utility — are a documented follow-up) degrades to name=null/status='unidentified' (still detected as PRESENT) rather than a confident-wrong guess. Pure CV, no OCR, no runtime binary. Add a template PNG (+ a display_names entry if the name has a slash/space) to extend, like adding a profile. PER-MODULE BYPASS detection is DEFERRED: the live session could not confirm Serum 2's OFF visual (clicking the row power glyph never greyed the module across repeated A/B captures), so on=true for every present module (in an add-rack a module's PRESENCE is the load-bearing signal — you remove rather than bypass). Calibrated LIVE via computer-use (Ableton-hosted Serum 2); coords in reference space, host-corrected by the logo landmark. Fixtures: serum2_fx_loaded.png (Chorus→Distortion→Reverb→Delay→Compressor, MAIN), serum2_fx_bus1_empty.png (empty, BUS 1), serum2_fx_bus2_empty.png (empty, BUS 2), serum2_fx_bus2_flanger.png (Flanger=unidentified, BUS 2), serum2_fx.png (empty, MAIN).",
+    "bus_tabs": {
+      "_note": "The active bus tab carries an ORANGE highlight; classify by snapping the orange centroid's reference-x to the nearest anchor. NB the tabs REFLOW — the active tab widens, so positions shift with selection — but the active (wide) tab's centre per bus is still well-separated (MAIN 133 / BUS 1 294 / BUS 2 452, each measured in its own active state; boundaries ~213/373), so nearest-anchor is robust.",
+      "band_y": [243, 262],
+      "x_min": 60, "x_max": 800,
+      "active_hue_max": 25, "active_sat_min": 120, "active_val_min": 120,
+      "anchors": {"MAIN": 133, "BUS 1": 294, "BUS 2": 452}
+    },
+    "chain": {
+      "row0_y": 361, "row_h": 60, "max_rows": 12,
+      "name": {"x0": 48, "x1": 380, "dy": 16, "canon_w": 300, "canon_h": 30},
+      "templates_dir": "serum_fxnames",
+      "display_names": {"hyper_dimension": "Hyper/Dimension"},
+      "present_text_min": 30,
+      "name_bright_min": 120,
+      "match_min": 0.82,
+      "bar": {"_reserved": "NOT yet consumed by read_addrack — the colored accent bar at this x (per-effect hue, S 71-189 / V high) is the candidate signal for FUTURE per-module bypass detection once the OFF visual is confirmed. Kept here as calibrated coords for that follow-up, not a current detection step.", "x": 27, "sat_min": 40, "val_min": 180}
+    }
+  },
   "controls": {
     "env1_attack":  {"type": "knob", "cx": 403, "cy": 1289, "r": 34, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
     "env1_hold":    {"type": "knob", "cx": 509, "cy": 1289, "r": 34, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},

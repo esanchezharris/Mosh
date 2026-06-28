@@ -34,7 +34,8 @@ entries," not "write a new reader" — except for the dynamic/tabular pages note
 | Page type | Where | Reader strategy | Status |
 |-----------|-------|-----------------|--------|
 | **Fixed knob grid** | OSC/filter/ENV/LFO on the main page; always-visible ENV column | fixed (cx,cy,r) per control in the profile, `pointer="white"` (Vital) / `"blue_tick"` (Serum) | **ENV + OSC + FILTER DONE** for all 3 synths (verified) |
-| **Dynamic FX rack** | Serum FX tab, Vital EFFECTS tab | `fx_rack.detect_fx_chain` reads **which effects are on + order** off the FIXED rack power-dot column (NOT the effect icon — that column shows the expanded panel, which STACKS by enabled-order and moves). `fx_params.read_fx_params` reads each enabled effect's **knobs**, computing its panel_top from the stack (base_y + Σ heights of enabled-before). | **chain-detect DONE** (Vital + Serum 1) + **per-effect KNOBS DONE v1** (Vital Chorus+Delay, stacking-proven). Other Vital effects + Serum 2's add-rack are follow-ups |
+| **Fixed FX rack** | Serum 1 FX tab, Vital EFFECTS tab | `fx_rack.detect_fx_chain` reads **which effects are on + order** off the FIXED rack power-dot column (NOT the effect icon — that column shows the expanded panel, which STACKS by enabled-order and moves). `fx_params.read_fx_params` reads each enabled effect's **knobs**, computing its panel_top from the stack (base_y + Σ heights of enabled-before). | **chain-detect DONE** (Vital + Serum 1) + **per-effect KNOBS DONE** (Vital — 7 effects, stacking-proven). Other Vital effect knobs are a follow-up |
+| **FX add-rack** | Serum 2 FX tab | `fx_addrack.read_addrack` — Serum 2 is a DYNAMIC "+ FX" add-rack (modules ADDED, not a fixed list), stacked per bus. Reads the LEFT chain list → ordered `[{name, on, confidence, status}]` for the VISIBLE bus + which bus is active (orange tab, reflow-robust, gated: no active tab → not an FX page → []). NAMES by template-match vs `profiles/serum_fxnames/*.png` (12-effect bank, no OCR); unknown effect → `unidentified` (still present, never a wrong guess). | **DONE** (live: all 12 audible effects identified in order across MAIN+BUS 2; empty buses → []; BUS 1/2/MAIN named under reflow). match_min 0.82 (correct ~0.90 vs worst look-alike 0.747). Per-module BYPASS deferred (OFF visual unconfirmed → on=true); 4 routing utils + bypass are follow-ups |
 | **Modulation matrix** | Serum MATRIX, Vital MATRIX | tabular: rows of source → (bipolar/stereo/morph) → amount → destination. `matrix.read_matrix` reads each OCCUPIED row's amount + best-effort OCR; an empty Init matrix returns [] (no hallucination) | **DONE** (Vital + **Serum 2**, the latter calibrated cross-host via the logo landmark); validated empty→[] (incl. under a title-bar shift) + synthetic populated; real-populated value calibration is a follow-up |
 | **Settings / menus** | Serum GLOBAL, Vital ADVANCED | toggles + dropdowns + a few knobs; OCR labels + `read_toggle`/`read_menu` | low priority |
 
@@ -88,9 +89,27 @@ skin (the bevel-highlight that forced the `blue_tick` reader).
   note below for why coords aren't shipped yet):
   - **FX** (`serum2_fx.png`): NOT a fixed 9-effect list (unlike Serum 1) — it's a **dynamic
     "+ FX" add-rack** with MAIN / BUS 1 / BUS 2 buses; you ADD effect modules (empty on Init).
-    So `fx_rack.detect_fx_chain` (fixed-list) does NOT apply to Serum 2 — it needs an
-    added-module reader (detect each inserted effect module + its bus). `serum.json` has no
-    fx_list (correct: detect_fx_chain returns []).
+    So `fx_rack.detect_fx_chain` (fixed-list) does NOT apply to Serum 2. ✅ **DONE** —
+    `fx_addrack.read_addrack` (serum.json `fx_addrack` block) reads the LEFT chain list →
+    ordered `[{name, on, confidence, status}]` for the visible bus + the active bus name (orange
+    tab; reflow-robust: the active tab WIDENS, so naming uses per-bus active-state x-anchors
+    MAIN 133 / BUS 1 294 / BUS 2 452, snapped from the LARGEST orange run). PAGE GATE: no active
+    bus tab → not an FX page → `[]` (a GLOBAL/MIX page would otherwise hallucinate rows from its
+    bright labels). NAMES by canonical-size template-match vs `profiles/serum_fxnames/*.png` —
+    the **12-effect audible bank** (bode/chorus/compressor/convolve/delay/distortion/equalizer/
+    filter/flanger/hyper_dimension/phaser/reverb), pure CV no OCR. Threshold: correct real-row
+    matches floor ~0.90, worst cross-effect look-alike (phaser×reverb) 0.747 → **match_min 0.82**
+    sits in the gap; an effect with no template (the 4 rare routing utils) → `unidentified` (still
+    present, never a wrong guess). ±2px vertical-offset tolerance on the match. Calibrated LIVE
+    (Ableton-hosted): MAIN = Chorus→Distortion→Reverb→Delay→Compressor (`serum2_fx_loaded.png`),
+    BUS 2 = Flanger→Bode→Convolve→Equalizer→Filter→Hyper/Dimension→Phaser (`serum2_fx_bus2_loaded.png`),
+    empty BUS 1/2 (`serum2_fx_bus{1,2}_empty.png`), empty MAIN (`serum2_fx.png`). Tests incl. a
+    LEAVE-ONE-OUT misID-ceiling guard (drop each effect's template → its real row must read
+    unidentified, never mis-named). Per-module **BYPASS deferred**: the live session could not
+    confirm Serum 2's OFF visual (clicking the row power glyph never greyed the module across A/B
+    captures), so `on=true` for every present module (in an add-rack, PRESENCE is the load-bearing
+    signal). Follow-ups: the 4 routing-util templates (Splitter L/H · L/M/H · M/S · Utility),
+    bypass detection, per-module knob values, reading all buses in one pass.
   - **MIX** (`serum2_mix.png`): per-source channel strips (SUB/OSC A/B/C/NOISE/FILTER 1/2/BUS),
     each a FILTER-routing dropdown + small BUS/PAN knobs + a **vertical FADER** + level meter.
     The faders are the main control → needs a vertical-slider reader (matrix.py has a *horizontal*
@@ -213,9 +232,7 @@ the pipeline should pass the known synth rather than rely on vision-guessing the
    alone-at-top). Building this uncovered + fixed **two** real `detect_fx_chain` bugs: (a) it sampled
    the moving panel column not the fixed rack power-dot (misread Delay-alone as Chorus); (b) the
    saturation-only on-test missed EQ's WHITE power dot (now on = saturated OR bright). Follow-ups:
-   EQ/Filter KNOBS (graph-heavy / per-band — EQ is detected on/off but its bands are §8-ish);
-   Serum 2's FX is a DIFFERENT shape (a dynamic "+FX" add-rack with bus assignment, empty on Init —
-   needs an added-module reader, not this fixed-rack model).
+   EQ/Filter KNOBS (graph-heavy / per-band — EQ is detected on/off but its bands are §8-ish).
 11. ~~**Vital filter DRIVE/MIX/KEY-TRK**~~ — **DONE** (calibrated LIVE: enabled FILTER 1, read
    defaults DRIVE 0 / MIX 1.0 / KEY-TRK 0.5 + a drag → 0.81 to prove tracking). vital.json + fixture
    vital_filter_on.png. Read only when the filter is enabled.
@@ -223,3 +240,19 @@ the pipeline should pass the known synth rather than rely on vision-guessing the
    LIVE: read_matrix []→[1 routing], OCR'd source, amount 0.50→0.79; rows=8 confirmed required, not
    conservative — 16 hallucinates from the bottom UI). Vital populated-matrix + raising Serum 2
    rows>8 (needs a scrolled/taller matrix capture) remain.
+13. ~~**Serum 2 FX add-rack reader**~~ — **DONE** (`fx_addrack.read_addrack`, calibrated LIVE):
+   Serum 2's FX is a DYNAMIC "+ FX" add-rack (modules ADDED, stacked per bus), NOT the fixed-rack
+   model. Reads the LEFT chain list → ordered `[{name, on, confidence, status}]` for the visible bus
+   + the active bus name. NAMES by canonical-size template-match vs `profiles/serum_fxnames/*.png` —
+   the **full 12-effect audible bank** (bode/chorus/compressor/convolve/delay/distortion/equalizer/
+   filter/flanger/hyper_dimension/phaser/reverb), pure CV no OCR; unknown effect (the 4 routing utils)
+   → `unidentified` (still present, never a wrong guess). Discovered the bus tabs REFLOW (active tab
+   widens) → bus naming uses per-bus active-state x-anchors (MAIN 133 / BUS 1 294 / BUS 2 452,
+   largest-orange-run). Discovered + fixed a real misID risk: PHASER×REVERB templates cross-match at
+   0.747 (two 6-letter words), so **match_min 0.82** (between the 0.90 correct-floor and the 0.747
+   look-alike ceiling) — caught by a LEAVE-ONE-OUT test (drop each template → its row must read
+   unidentified, never mis-named). Page-gated (no orange bus tab → []) so a GLOBAL/MIX page can't
+   fabricate rows. Validated on real fixtures (all 12 effects in order across MAIN + BUS 2; empty
+   buses []; 3 buses named under reflow; non-FX pages []). Per-module **BYPASS deferred** (OFF visual
+   unconfirmed → on=true for all present). Adversarial review: 11 findings, all addressed. Follow-ups:
+   the 4 routing-util templates, bypass detection, per-module knob values, reading all buses in one pass.
