@@ -2,6 +2,13 @@
   "synth": "Serum 2",
   "note": "Calibrated from a real Serum 2 editor, Init patch. ENV was captured via the Mosh host (Mosh --demo3 → screencapture the 'Serum 2' window); OSC A + FILTER were calibrated from a full-res Ableton-hosted capture and converted into this same Mosh-window reference space (the two windows differ only by a ~25px title-bar offset: same x, Mosh cy = Ableton cy + 25). Coords are in the reference_size pixel space; load_profile() scales them to the actual frame. Knobs read via the blue_tick reader: Serum marks each value with a saturated BLUE tick at the rim (robust on Serum 2's glossy skin, where the white-pointer read is dragged toward 0.5 by the bright top-bevel highlight; falls back to the white pointer on non-default skins). ENV 1 has no DELAY knob (unlike Vital): ATK/HOLD/DEC/SUS/REL.",
   "reference_size": [2380, 1544],
+  "landmark": {
+    "note": "SERUM 2 wordmark (top-left, on dark skin, just below the host title bar). Host-invariant calibration template-matches this to correct title-bar height differences between hosts (Mosh's window is ~26px taller than Ableton's at full res → every content-y is shifted). template/bbox are in the png's px (cut from serum_init.png at 0.6x ref); ref_xy = bbox[:2]/template_scale.",
+    "template": "serum.logo.png",
+    "template_scale": 0.6,
+    "bbox": [28, 50, 152, 50],
+    "min_score": 0.55
+  },
   "tabs": {
     "band": [95, 125],
     "highlight": "green",

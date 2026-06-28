@@ -155,7 +155,7 @@ def _check_one(name: str, cfg: dict) -> int:
         print(f"[{name}] SKIP  could not read frame {frame}")
         return 0
     h, w = img.shape[:2]
-    profile = load_profile(name, w, h)
+    profile = load_profile(name, w, h, img)  # img → host-invariant (logo-landmark) calibration
     out = read_patch(img, profile)
     adsr = {k: out["params"][k] for k in cfg["adsr"] if k in out["params"]}
     print(f"[{name}] frame {w}x{h}; profile ({len(profile)} controls)")

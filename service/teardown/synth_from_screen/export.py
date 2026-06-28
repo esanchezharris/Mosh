@@ -10,6 +10,7 @@ import os
 
 import numpy as np
 
+from .calib import axis_map
 from .controls import read_knob, read_menu, read_toggle
 
 PROFILE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "profiles")
@@ -21,28 +22,31 @@ def list_profiles() -> list[str]:
     return sorted(f[:-5] for f in os.listdir(PROFILE_DIR) if f.endswith(".json"))
 
 
-def load_profile(name: str, frame_w: int, frame_h: int) -> dict:
-    """Load a per-synth control map and SCALE its reference-space coords to the actual
-    frame size, so one calibrated profile works at any capture resolution. Returns the
-    {control_name: spec} dict read_patch consumes."""
+def load_profile(name: str, frame_w: int, frame_h: int, img=None) -> dict:
+    """Load a per-synth control map and map its reference-space coords onto the actual frame.
+
+    Pass the frame `img` to enable HOST-INVARIANT calibration: a logo-landmark template match
+    corrects for the host's title-bar height (Mosh vs Ableton vs standalone) so one profile reads
+    correctly regardless of how much chrome sits above the plugin. Without `img` (or if the
+    landmark isn't found) it falls back to the legacy proportional scaling — identical output when
+    the frame preserves the reference aspect. Returns the {control_name: spec} dict read_patch
+    consumes."""
     path = os.path.join(PROFILE_DIR, f"{name.lower()}.json")
     with open(path) as f:
         data = json.load(f)
-    ref_w, ref_h = data.get("reference_size", [frame_w, frame_h])
-    sx, sy = frame_w / float(ref_w), frame_h / float(ref_h)
-    s = (sx + sy) / 2.0
+    cal = axis_map(data, frame_w, frame_h, img)
     out: dict = {}
     for cname, spec in data.get("controls", {}).items():
         spec = dict(spec)
         if "cx" in spec:
-            spec["cx"] = int(round(spec["cx"] * sx))
+            spec["cx"] = cal.x(spec["cx"])
         if "cy" in spec:
-            spec["cy"] = int(round(spec["cy"] * sy))
+            spec["cy"] = cal.y(spec["cy"])
         if "r" in spec:
-            spec["r"] = int(round(spec["r"] * s))
+            spec["r"] = cal.length_i(spec["r"])
         if "bbox" in spec:
             x, y, w, h = spec["bbox"]
-            spec["bbox"] = [int(x * sx), int(y * sy), int(w * sx), int(h * sy)]
+            spec["bbox"] = [cal.x(x), cal.y(y), cal.w(w), cal.h(h)]
         out[cname] = spec
     return out
 

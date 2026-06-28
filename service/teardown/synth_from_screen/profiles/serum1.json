@@ -2,6 +2,13 @@
   "synth": "Serum",
   "note": "The ORIGINAL Serum (v1, distinct from Serum 2). Captured LIVE from the installed plugin hosted in Ableton Live (Mosh's in-process host crashes on Serum 1; Ableton hosts it fine and accepts tab clicks). Init patch, dark skin. 4 tabs (OSC/FX/MATRIX/GLOBAL — no MIX, vs Serum 2's 5); active tab marked by a BLUE dot. ENV 1 ADSR (ATTACK/HOLD/DECAY/SUSTAIN/RELEASE — no DELAY). Knobs read via the blue rim-tick reader (Serum marks each value with a saturated blue tick at the rim — robust across Serum 1 & 2; falls back to the white pointer on non-default skins). Coords in reference_size space; load_profile scales to any frame.",
   "reference_size": [1800, 1494],
+  "landmark": {
+    "note": "SERUM wordmark (top-left, on dark skin, below the host title bar). Host-invariant calibration template-matches this to make the profile portable across hosts (Mosh crashes on Serum 1 today, so all current fixtures are Ableton — but this future-proofs the profile). template/bbox in the png's px (cut from serum1_init.png at 0.5x ref); ref_xy = bbox[:2]/template_scale.",
+    "template": "serum1.logo.png",
+    "template_scale": 0.5,
+    "bbox": [12, 28, 138, 42],
+    "min_score": 0.55
+  },
   "tabs": {
     "band": [55, 100],
     "highlight": "saturated",

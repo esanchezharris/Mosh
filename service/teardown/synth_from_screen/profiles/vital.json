@@ -2,6 +2,13 @@
   "synth": "Vital",
   "note": "Calibrated from a real Vital standalone GUI capture (Init Preset). Coords are in the reference_size pixel space; load_profile() scales them to the actual frame. Vital draws a WHITE pointer line over a teal fill-arc; pointer=\"white\" reads the colourless pointer (bright + low-saturation) and ignores the arc, so absolute values are accurate (full SUSTAIN reads ~1.0). Extend by adding controls.",
   "reference_size": [2342, 1436],
+  "landmark": {
+    "note": "Vital V emblem (top-left, on dark skin, below the host title bar). Host-invariant calibration template-matches this to correct title-bar height differences between hosts. template/bbox in the png's px (cut from vital_init.png at 1.0x ref); ref_xy = bbox[:2]/template_scale.",
+    "template": "vital.logo.png",
+    "template_scale": 1.0,
+    "bbox": [70, 62, 115, 75],
+    "min_score": 0.55
+  },
   "tabs": {
     "band": [48, 90],
     "highlight": "saturated",

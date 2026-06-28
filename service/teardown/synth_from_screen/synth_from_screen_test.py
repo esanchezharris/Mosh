@@ -242,6 +242,54 @@ check("half-size load scales cx", abs(half["env1_sustain"]["cx"] - 1053) <= 1, s
 check("half-size load scales cy", abs(half["env1_sustain"]["cy"] - 213) <= 1, str(half["env1_sustain"]["cy"]))
 check("half-size load scales radius", abs(half["env1_sustain"]["r"] - 15) <= 1, str(half["env1_sustain"]["r"]))
 
+# ── host-invariant calibration (logo landmark) ────────────────────────────────
+# The title bar is host chrome (Mosh ≠ Ableton ≠ standalone) that TRANSLATES the synth content
+# rather than scaling it; proportional scaling smears that shift and mislabels knobs. The logo
+# template-match recovers a (scale, dy) so one profile reads correctly across hosts.
+from teardown.synth_from_screen.calib import axis_map, compute_calibration  # noqa: E402
+import json as _json  # noqa: E402
+
+_sd = _json.load(open(os.path.join(_HERE, "profiles", "serum.json")))
+# graceful: no image, grayscale, or unknown landmark → None (caller falls back to proportional)
+check("compute_calibration(None img) → None", compute_calibration(_sd, None) is None)
+check("compute_calibration(grayscale) → None",
+      compute_calibration(_sd, np.zeros((100, 100), np.uint8)) is None)
+check("compute_calibration(no landmark block) → None",
+      compute_calibration({"reference_size": [100, 100]}, np.zeros((50, 50, 3), np.uint8)) is None)
+# axis_map(img=None) is byte-for-byte the legacy proportional map (no regression for old callers)
+_capm = axis_map(_sd, 1190, 759, None)
+check("axis_map(img=None) is proportional (not host-invariant)", not _capm.host_invariant)
+check("axis_map(img=None) sx=frame_w/ref_w", abs(_capm.sx - 1190 / 2380.0) < 1e-9)
+
+_serum_fix = os.path.join(_HERE, "fixtures", "serum_init.png")
+if os.path.isfile(_serum_fix):
+    _img = cv2.imread(_serum_fix)
+    _h, _w = _img.shape[:2]
+    # on the REFERENCE-aspect frame the landmark lands where expected → dy≈0, identity read
+    _c = compute_calibration(_sd, _img)
+    check("logo landmark found on serum_init", _c is not None and _c["score"] >= 0.55, str(_c))
+    check("reference frame → dy≈0 (identity, no regression)", _c is not None and abs(_c["dy"]) <= 2.0, str(_c))
+    check("reference frame → dx≈0 (match sanity)", _c is not None and abs(_c["dx"]) <= 2.0, str(_c))
+
+    _base = read_patch(_img, load_profile("serum", _w, _h, _img))["params"]
+    _keys = ["env1_sustain", "env1_attack", "filter_cutoff", "filter_res", "filter_mix",
+             "oscA_pan", "oscA_level", "filter_drive"]
+    # simulate a SHORTER host title bar by dropping rows off the top (content shifts up). Host-
+    # invariant must recover the SAME knob values; proportional must drift (and be measurably worse).
+    for _crop in (20, 40):
+        _sim = _img[_crop:].copy()
+        _sh, _sw = _sim.shape[:2]
+        _hi = read_patch(_sim, load_profile("serum", _sw, _sh, _sim))["params"]      # host-invariant
+        _prop = read_patch(_sim, load_profile("serum", _sw, _sh, None))["params"]    # proportional
+        _ehi = max(abs(_hi[k] - _base[k]) for k in _keys)
+        _eprop = max(abs(_prop[k] - _base[k]) for k in _keys)
+        check(f"host-invariant recovers knobs across a {_crop}px title-bar shift (max|Δ|≤0.03)",
+              _ehi <= 0.03, f"max|Δ|={_ehi:.3f}")
+        check(f"host-invariant beats proportional under the {_crop}px shift",
+              _ehi < _eprop - 0.05, f"host-inv={_ehi:.3f} prop={_eprop:.3f}")
+else:
+    check("serum_init fixture present for host-invariant proof", False, "missing fixture")
+
 # ── tab/page detection (which page of the synth is shown) ─────────────────────
 from teardown.synth_from_screen.page_detect import detect_active_tab, identify_synth  # noqa: E402
 
