@@ -32,6 +32,9 @@ Phones = List[str]
 
 _STRESS_RE = re.compile(r"\d$")
 _VOWELS = "aeiouy"
+# An ARPAbet phone token: 1+ uppercase letters + an optional stress digit (e.g. "K", "EY1").
+# Used to filter g2p output, which interleaves spaces/punctuation between phones.
+_ARPABET_RE = re.compile(r"^[A-Z]+[0-2]?$")
 
 
 def _is_vowel(phone: str) -> bool:
@@ -151,19 +154,68 @@ def _real_lexicon() -> Dict[str, List[Phones]]:
 
 
 class Pronouncer:
-    """Word-level phonology over a lexicon, with a heuristic fallback for OOV words.
+    """Word-level phonology over a LAYERED lexicon, first hit wins (Bar IQ A):
 
-    `lexicon` is a mapping word(lowercase) -> list of pronunciations (each a phone
-    list). None loads the real cmudict if available (else an empty lexicon)."""
+        1. user lexicon  — words the producer added/corrected (their ear overrides all)
+        2. cmudict       — authoritative for standard English
+        3. g2p           — grapheme→phoneme, pronounces ANYTHING (slang/coined/NSFW) → ARPAbet
+        4. heuristic     — vowel-group fallback (only when phones can't be had at all)
 
-    def __init__(self, lexicon: Optional[Mapping[str, List[Phones]]] = None):
+    With g2p in the chain, `rhyme()` runs the real phoneme-based grade for almost any word
+    instead of a spelling guess — so slang rhymes are graded correctly and the generation
+    validator can verify them.
+
+    `lexicon` = word(lower) → [pronunciation, …] (None loads cmudict if available).
+    `user_lexicon` = word(lower) → a single phone list (overrides everything).
+    `g2p` = callable(word) → phone list | None. None ⇒ lazily load g2p_en on first OOV
+    (graceful: marks unavailable if it can't import — the heuristic then covers OOV). Pass a
+    callable that returns None to disable the g2p layer."""
+
+    def __init__(self, lexicon: Optional[Mapping[str, List[Phones]]] = None,
+                 user_lexicon: Optional[Mapping[str, Phones]] = None,
+                 g2p: Optional[Callable[[str], Optional[Phones]]] = None):
         self._lexicon: Mapping[str, List[Phones]] = (
             lexicon if lexicon is not None else _real_lexicon()
         )
+        self._user: Dict[str, Phones] = {k.lower(): list(v) for k, v in (user_lexicon or {}).items()}
+        self._g2p = g2p            # callable, or None ⇒ lazy-load g2p_en
+        self._g2p_tried = g2p is not None
+        self._g2p_cache: Dict[str, Optional[Phones]] = {}
+
+    def _g2p_phones(self, word: str) -> Optional[Phones]:
+        """Pronounce an OOV word via g2p (ARPAbet). Lazily loads g2p_en once; memoized
+        per word (deterministic); never raises — degrades to None so the heuristic covers it."""
+        if self._g2p is None and not self._g2p_tried:
+            self._g2p_tried = True
+            try:
+                from g2p_en import G2p  # type: ignore
+                self._g2p = G2p()
+            except Exception:  # noqa: BLE001 (absent/broken g2p_en → heuristic-only)
+                self._g2p = None
+                return None
+        if self._g2p is None:
+            return None
+        wl = word.lower()
+        if wl in self._g2p_cache:
+            cached = self._g2p_cache[wl]
+            return list(cached) if cached else None
+        try:
+            raw = self._g2p(word) or []
+            # g2p_en interleaves spaces/punctuation between phones — keep ARPAbet tokens only.
+            phones = [p for p in raw if _ARPABET_RE.match(p)]
+        except Exception:  # noqa: BLE001
+            phones = []
+        self._g2p_cache[wl] = phones or None
+        return list(phones) if phones else None
 
     def phones(self, word: str) -> Optional[Phones]:
-        prons = self._lexicon.get(word.lower())
-        return list(prons[0]) if prons else None
+        wl = word.lower()
+        if wl in self._user:
+            return list(self._user[wl])
+        prons = self._lexicon.get(wl)
+        if prons:
+            return list(prons[0])
+        return self._g2p_phones(word)
 
     def syllables(self, word: str) -> int:
         ph = self.phones(word)

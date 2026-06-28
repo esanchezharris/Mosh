@@ -123,5 +123,36 @@ if importlib.util.find_spec("pronouncing") is not None:
 else:
     skip("real pronouncing/cmudict path", "pronouncing not importable (run setup-phonology.sh)")
 
+# ── 9. LAYERED pronouncer (Bar IQ A): user-lexicon → cmudict → g2p → heuristic ─────
+# Injected fake g2p (deterministic) proves the LAYER logic without g2p_en installed.
+def fake_g2p(word):
+    return {
+        "skrrt": ["S", "K", "R", "AA1", "R", "T"],
+        "drip": ["D", "R", "IH1", "P"],
+        "whip": ["W", "IH1", "P"],
+    }.get(word.lower())
+
+
+lp = core.Pronouncer(lexicon=mini, user_lexicon={"flame": ["F", "L", "AA1", "M"]}, g2p=fake_g2p)
+check("user-lexicon OVERRIDES cmudict (flame → AA1, not cmudict EY1)",
+      lp.phones("flame") == ["F", "L", "AA1", "M"])
+check("cmudict still used when not overridden (name → EY1 M)", lp.phones("name") == ["N", "EY1", "M"])
+check("g2p fills an OOV word (skrrt → real phones, not None)", lp.phones("skrrt") == ["S", "K", "R", "AA1", "R", "T"])
+check("g2p OOV syllable count is phoneme-precise (skrrt → 1)", lp.syllables("skrrt") == 1)
+check("OOV-vs-OOV rhyme works via g2p (drip/whip → perfect)", lp.rhyme("drip", "whip", "perfect") is True)
+check("a word in NEITHER lexicon nor g2p → heuristic (no crash)", lp.syllables("zzqxj") >= 1)
+# precedence: a callable returning None disables the g2p layer (heuristic for OOV).
+lp_nog2p = core.Pronouncer(lexicon=mini, g2p=lambda w: None)
+check("g2p disabled ⇒ OOV phones None (heuristic syllables)", lp_nog2p.phones("skrrt") is None and lp_nog2p.syllables("skrrt") >= 1)
+
+# ── 10. BONUS: REAL g2p (g2p_en) — any slang word rhymes/scans (skipped if absent) ──
+if importlib.util.find_spec("g2p_en") is not None:
+    rg = core.Pronouncer()   # default: real cmudict + lazy-loaded g2p_en
+    check("real g2p: OOV 'skrrt' gets phones (not None)", rg.phones("skrrt") is not None)
+    check("real g2p: slang 'drip'/'whip' perfect-rhyme", rg.rhyme("drip", "whip", "perfect") is True)
+    check("real g2p: coined 'flexin' scans (>=2 syllables)", rg.syllables("flexin") >= 2)
+else:
+    skip("real g2p_en path", "g2p_en not importable (run setup-phonology.sh)")
+
 print(f"\n{'OK' if not fails else 'FAILED'}: {len(fails)} failure(s)")
 sys.exit(len(fails))
