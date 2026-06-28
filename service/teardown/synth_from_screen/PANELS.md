@@ -205,12 +205,15 @@ the pipeline should pass the known synth rather than rely on vision-guessing the
    DUPLICATE the already-profiled OSC-page LEVEL knobs; the unique part is per-channel bus/pan
    routing. Needs a new vertical-slider reader + 8-channel calibration (handle-vs-meter-vs-dB-tick
    disambiguation). No longer calibration-blocked. Pick up if bus/pan routing is needed.
-10. ~~**Per-effect FX knob reading**~~ — **DONE v1** (`fx_params.read_fx_params`, calibrated LIVE):
+10. ~~**Per-effect FX knob reading**~~ — **DONE** (`fx_params.read_fx_params`, calibrated LIVE):
    reads an enabled effect's knobs, modeling Vital's DYNAMIC panel STACK
-   (panel_top = base_y + Σ heights of enabled-before, in rack order). **Chorus + Delay** calibrated
-   + stacking-proven (Delay reads identically stacked-below-Chorus vs alone-at-top). Building this
-   ALSO uncovered + fixed a real `detect_fx_chain` bug (it sampled the moving panel column, not the
-   fixed rack power-dot — misread Delay-alone as Chorus). Follow-ups: the other 7 Vital effects;
+   (panel_top = base_y + Σ heights of enabled-before, in rack order). **7 Vital effects** calibrated
+   — Chorus, Delay, Compressor, Distortion, Flanger, Phaser, Reverb (all white-pointer, panel height
+   235, on a shared knob grid) — + stacking-proven (Delay reads identically stacked-below-Chorus vs
+   alone-at-top). Building this uncovered + fixed **two** real `detect_fx_chain` bugs: (a) it sampled
+   the moving panel column not the fixed rack power-dot (misread Delay-alone as Chorus); (b) the
+   saturation-only on-test missed EQ's WHITE power dot (now on = saturated OR bright). Follow-ups:
+   EQ/Filter KNOBS (graph-heavy / per-band — EQ is detected on/off but its bands are §8-ish);
    Serum 2's FX is a DIFFERENT shape (a dynamic "+FX" add-rack with bus assignment, empty on Init —
    needs an added-module reader, not this fixed-rack model).
 11. ~~**Vital filter DRIVE/MIX/KEY-TRK**~~ — **DONE** (calibrated LIVE: enabled FILTER 1, read
