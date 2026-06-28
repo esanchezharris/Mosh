@@ -117,6 +117,45 @@ TEST_CASE ("L1 transient analysis (JSON object blob) round-trips on a line", "[l
     REQUIRE_FALSE (fresh.hasProperty (ids::lyricAnalysis));
 }
 
+TEST_CASE ("Phase-2 skeleton lands lines `skeleton` + survives serialization (LYR-P2)", "[lyrics][skeleton]")
+{
+    // build_skeleton_from_clip lands a wordless, EDITABLE skeleton: every line `skeleton`
+    // (the human-in-the-loop grid gate; distinct from L2 `proposed`) with an all-gaps seed +
+    // a syllable target. The status must round-trip with the .tracktionedit (additive node).
+    auto sheet = LyricSheet::create ("ls-skel", "1/8");
+    auto container = LyricSheet::lines (sheet);
+    for (int i = 0; i < 2; ++i)
+    {
+        auto line = LyricLine::create (juce::String ("sk") + juce::String (i), i, "verse");
+        line.setProperty (ids::lyricSeedText, "___ ___ ___", nullptr);
+        line.setProperty (ids::lyricSyllableTarget, 3, nullptr);
+        line.setProperty (ids::lyricStress, "XxX", nullptr);
+        line.setProperty (ids::status, "skeleton", nullptr);
+        container.appendChild (line, nullptr);
+    }
+
+    auto back = juce::ValueTree::fromXml (sheet.toXmlString());
+    auto backLines = LyricSheet::lines (back);
+    REQUIRE (backLines.getNumChildren() == 2);
+    REQUIRE (backLines.getChild (0)[ids::status].toString() == "skeleton");
+    REQUIRE (backLines.getChild (0)[ids::lyricSeedText].toString() == "___ ___ ___");
+    REQUIRE ((int) backLines.getChild (1)[ids::lyricSyllableTarget] == 3);
+
+    // confirm_skeleton's effect: every `skeleton` line flips to `seed` (eligible for the
+    // generation loop); already-`seed`/other lines are untouched.
+    backLines.getChild (1).setProperty (ids::status, "seed", nullptr);   // pre-existing seed line
+    int flipped = 0;
+    for (int i = 0; i < backLines.getNumChildren(); ++i)
+        if (backLines.getChild (i)[ids::status].toString() == "skeleton")
+        {
+            backLines.getChild (i).setProperty (ids::status, "seed", nullptr);
+            ++flipped;
+        }
+    REQUIRE (flipped == 1);
+    for (int i = 0; i < backLines.getNumChildren(); ++i)
+        REQUIRE (backLines.getChild (i)[ids::status].toString() == "seed");
+}
+
 TEST_CASE ("lineFingerprint is stable + sensitive to every constraint input", "[lyrics][cache]")
 {
     auto sheet = LyricSheet::create ("ls-3");

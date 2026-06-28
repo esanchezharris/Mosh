@@ -314,6 +314,31 @@ juce::var GenerativeJobManager::mumbleSpec (const juce::var& notes, const juce::
     return {};
 }
 
+juce::var GenerativeJobManager::skeletonSpec (const juce::File& inputWav, double bpm,
+                                              int tsNum, int tsDen, const juce::String& grid)
+{
+    if (! ensureServiceRunning())
+        return {};
+
+    Array<var> ts; ts.add (tsNum > 0 ? tsNum : 4); ts.add (tsDen > 0 ? tsDen : 4);
+    auto* body = new DynamicObject();
+    body->setProperty ("inputWav", inputWav.getFullPathName());
+    body->setProperty ("bpm", bpm > 0 ? bpm : 120.0);
+    body->setProperty ("timeSig", var (ts));
+    body->setProperty ("grid", grid.isNotEmpty() ? grid : juce::String ("1/16"));
+
+    // The server orchestrates the whole chain (Basic-Pitch notes + optional FCPE F0, then the
+    // in-process bin) — the Basic-Pitch subprocess dominates, so give it transcribe's generous
+    // timeout. Blocks → the caller runs it off the message thread. Mirrors transcribe().
+    URL url = URL (baseUrl + "/skeleton_spec").withPOSTData (JSON::toString (var (body)));
+    auto opts = URL::InputStreamOptions (URL::ParameterHandling::inPostData)
+                    .withConnectionTimeoutMs (185000)
+                    .withExtraHeaders ("Content-Type: application/json");
+    if (auto s = url.createInputStream (opts))
+        return JSON::parse (s->readEntireStreamAsString());
+    return {};
+}
+
 juce::var GenerativeJobManager::sketchBeatbox (const juce::File& inputWav, double bpm, int bars)
 {
     if (! ensureServiceRunning())

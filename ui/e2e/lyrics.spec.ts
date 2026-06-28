@@ -204,3 +204,36 @@ test("accepting a proposal grows the 'in your voice' corpus count", async ({ pag
   await expect(page.getByTestId("lyric-corpus-count")).toContainText("in your voice");
   await expect(page.getByTestId("v2-error")).toHaveCount(0);
 });
+
+// ── Phase 2: the mumble->skeleton flow — right-click a hummed take → editable grid → confirm ──
+
+test("right-click a wave take → Build flow from this take → an editable grid → confirm", async ({ page }) => {
+  await bootV2(page);
+  await page.locator('[data-testid="v2-clip"][title="chords"]').click({ button: "right" });
+  await expect(page.getByTestId("v2-clip-menu")).toBeVisible();
+  await expect(page.getByTestId("clip-build-flow")).toBeVisible();
+  await page.getByTestId("clip-build-flow").click();
+  // The mock lands a WORDLESS `proposed` skeleton on the clip's OWN track. Open it.
+  await page.getByTestId("v2-track-header").nth(2).click();
+  await page.getByTestId("v2-insp-tab-lyrics").click();
+  await expect(page.getByTestId("lyric-panel")).toHaveAttribute("data-has-sheet", "true");
+  // The grid editor: a confirm bar + per-line editable syllable counts (no text input yet).
+  await expect(page.getByTestId("skeleton-confirm-bar")).toBeVisible();
+  await expect(page.getByTestId("skeleton-line-0")).toBeVisible();
+  const before = (await page.getByTestId("skel-count-0").textContent()) ?? "";
+  await page.getByTestId("skel-inc-0").click();   // nudge the syllable target up
+  await expect(page.getByTestId("skel-count-0")).not.toHaveText(before);
+  // Confirm the grid → lines flip proposed→seed (editor gone) and "Finish gaps" lights up.
+  await page.getByTestId("skeleton-confirm").click();
+  await expect(page.getByTestId("skeleton-confirm-bar")).toHaveCount(0);
+  await expect(page.getByTestId("skeleton-line-0")).toHaveCount(0);
+  await expect(page.getByTestId("lyric-finish")).toBeEnabled();
+  await expect(page.getByTestId("v2-error")).toHaveCount(0);
+});
+
+test("a MIDI clip does NOT offer 'Build flow from this take'", async ({ page }) => {
+  await bootV2(page);
+  await page.locator('[data-testid="v2-clip"][title="loop"]').click({ button: "right" });
+  await expect(page.getByTestId("v2-clip-menu")).toBeVisible();
+  await expect(page.getByTestId("clip-build-flow")).toHaveCount(0);
+});

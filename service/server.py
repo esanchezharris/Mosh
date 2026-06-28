@@ -97,6 +97,19 @@ def _sketch_available() -> bool:
     return os.path.isfile(_sketch_py())
 
 
+def _skeleton_py() -> str:
+    """The dedicated skeleton (FCPE) venv's python (set by setup-skeleton.sh via .skeleton.env
+    -> SKELETON_PY), else the conventional default path."""
+    env = os.environ.get("SKELETON_PY", "").strip()
+    return env or os.path.join(SERVICE_DIR, "skeleton", ".venv", "bin", "python")
+
+
+def _skeleton_available() -> bool:
+    """True when the skeleton (FCPE F0) venv exists (checked live). When ABSENT, /skeleton_spec
+    degrades to the Basic-Pitch note-onset path (f0=None) — #178-quality rhythm, never a 503."""
+    return os.path.isfile(_skeleton_py())
+
+
 def _phonology_py() -> str:
     """The dedicated phonology venv's python (set by setup-phonology.sh via
     .phonology.env -> PHONOLOGY_PY), else the conventional default path."""
@@ -546,6 +559,7 @@ class Handler(BaseHTTPRequestHandler):
                              "adapters": adapters, "transcribe": _transcribe_available(),
                              "sketch": _sketch_available(),
                              "whisper": _whisper_available(),
+                             "skeleton": _skeleton_available(),
                              "phonology": _phonology_available()})
         elif path == "/capabilities":
             adapters = [FAKE_ADAPTER, TRANSFORM_ADAPTER] + ([_sa3_descriptor()] if SA3_ENABLED else [])
@@ -757,6 +771,61 @@ class Handler(BaseHTTPRequestHandler):
                     topic=str(data.get("topic", "")), mood=str(data.get("mood", ""))))
             except Exception as e:  # noqa: BLE001
                 self._send(500, {"ok": False, "error": f"mumble spec error: {e}"})
+        elif path == "/skeleton_spec":
+            # Phase-2 mumble -> rhythmic SKELETON (roadmap §2): a hummed/mumbled take -> notes
+            # (+ optional F0) -> a WORDLESS, editable lyric LineSpec (syllable grid + stress; the
+            # Phase-1 engine fills the words). The binning runs IN-PROCESS + deterministic (stdlib
+            # skeleton.core, golden-covered); only the signal extraction is subprocessed.
+            # GRACEFUL DEGRADATION: the FCPE venv (notes + F0, finer nuclei) is an UPGRADE — when
+            # absent we reuse the Basic-Pitch /transcribe venv (notes only, f0=None) -> #178-quality
+            # rhythm with ZERO new install; both absent -> a clean no_melody_detected.
+            input_wav = data.get("inputWav", "")
+            if not input_wav or not os.path.exists(input_wav):
+                self._send(400, {"ok": False, "error": "inputWav missing or not found"})
+                return
+            try:
+                bpm = float(data.get("bpm", 120) or 120)
+            except (TypeError, ValueError):
+                bpm = 120.0
+            ts = data.get("timeSig", [4, 4]) or [4, 4]
+            grid = str(data.get("grid", "1/16") or "1/16")
+            # NOTES come from Basic Pitch (the robust onset detector) — the rhythm, always. The
+            # FCPE venv is the UPGRADE: it adds an F0 contour so a re-articulated sustained note
+            # splits into multiple syllable nuclei. Absent FCPE → f0=None → identity nuclei.
+            notes: list = []
+            bp_py = _basic_pitch_py()
+            if os.path.isfile(bp_py):
+                cli = os.path.join(SERVICE_DIR, "transcribe", "transcribe_cli.py")
+                try:
+                    proc = subprocess.run([bp_py, cli, input_wav, "mono"],
+                                          capture_output=True, text=True, timeout=180)
+                    bp = json.loads((proc.stdout or "").strip())
+                    if bp.get("ok"):
+                        notes = bp.get("notes", []) or []
+                except (subprocess.TimeoutExpired, OSError, json.JSONDecodeError, ValueError):
+                    pass
+            if not notes:
+                self._send(200, {"ok": False, "error": "no_melody_detected", "lines": []})
+                return
+            f0 = None
+            sk_py = _skeleton_py()
+            if os.path.isfile(sk_py):     # UPGRADE: FCPE F0 contour for sub-note nuclei splitting
+                cli = os.path.join(SERVICE_DIR, "skeleton", "skeleton_cli.py")
+                try:
+                    proc = subprocess.run([sk_py, cli, input_wav],
+                                          capture_output=True, text=True, timeout=185)
+                    payload = json.loads((proc.stdout or "").strip())
+                    if payload.get("ok"):
+                        f0 = payload.get("f0")
+                except (subprocess.TimeoutExpired, OSError, json.JSONDecodeError, ValueError):
+                    pass
+            try:
+                from skeleton import core as skel
+                self._send(200, skel.build_skeleton_spec(
+                    notes, f0=f0, bpm=bpm, time_sig=(int(ts[0]), int(ts[1])), grid=grid,
+                    topic=str(data.get("topic", "")), mood=str(data.get("mood", ""))))
+            except Exception as e:  # noqa: BLE001
+                self._send(500, {"ok": False, "error": f"skeleton spec error: {e}"})
         elif path == "/sketch":
             # Sketch Phase 0: beatbox WAV -> 3-class drum hits on a 16th grid, run as a
             # subprocess under the dedicated sketch venv so librosa's deps stay isolated.

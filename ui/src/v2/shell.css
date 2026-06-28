@@ -784,3 +784,14 @@
 }
 .v2-lyric-ghost-text:focus { outline: none; border-color: var(--v2-accent-soft); color: var(--v2-dim); }
 .v2-lyric-ghost-hint { font-size: 10px; color: var(--v2-faint); letter-spacing: 0.02em; white-space: nowrap; }
+
+/* Roadmap §2 — the mumble->skeleton grid editor: confirm the syllable grid from a hummed take. */
+.v2-skel-confirm {
+  display: flex; align-items: center; gap: 8px; justify-content: space-between;
+  margin: 4px 0 6px; padding: 6px 8px;
+  border: 1px dashed var(--v2-accent-soft); border-radius: var(--v2-radius-sm);
+  background: var(--v2-accent-soft); color: var(--v2-dim); font-size: 11px;
+}
+.v2-skel-grid { display: inline-flex; gap: 3px; align-items: center; flex: 0 1 auto; min-width: 0; overflow: hidden; }
+.v2-skel-pip { color: var(--v2-accent); font-size: 9px; line-height: 1; }
+.v2-skel-count { font-variant-numeric: tabular-nums; color: var(--v2-dim); font-size: 11px; white-space: nowrap; }

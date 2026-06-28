@@ -61,6 +61,15 @@ public:
     juce::var mumbleSpec (const juce::var& notes, const juce::var& words, double bpm,
                           int tsNum, int tsDen, double confThreshold);
 
+    /** Phase-2 mumble->skeleton spec (POST /skeleton_spec). A hummed/mumbled take → a WORDLESS,
+        editable lyric LineSpec (syllable grid + stress; every slot a ___ gap). The server
+        orchestrates Basic-Pitch onsets (+ optional FCPE F0 for sub-note nuclei) then bins
+        in-process. SYNCHRONOUS — call on a BACKGROUND thread (mirrors transcribe()). Returns
+        { ok, grid, source:"skeleton", editable, lines:[...] } or { ok:false,
+        error:"no_melody_detected" }; {} on a dead service. */
+    juce::var skeletonSpec (const juce::File& inputWav, double bpm, int tsNum, int tsDen,
+                            const juce::String& grid);
+
     /** Sketch Phase 0 — beatbox → drum hits via librosa (POST /sketch). SYNCHRONOUS —
         call on a BACKGROUND thread (model-free, but a subprocess + onset analysis is
         ~0.5-2s). Deterministic given (inputWav, bpm, bars). Returns

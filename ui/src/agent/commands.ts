@@ -114,6 +114,7 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "regenerate_lyric", desc: "Re-generate proposals for one lyric line with a fresh sample", args: [S("trackId"), N("lineIndex")] },
   { command: "accept_lyric_proposal", desc: "Accept a generated lyric proposal (commits its text into the line)", args: [S("trackId"), N("lineIndex"), N("proposalIndex", false, "default 0 = top-ranked")] },
   { command: "analyze_lyrics", desc: "Precise per-line phonology (syllables, stress contour, rhyme grade vs the group anchor) for the flow visualizer — no LLM", args: [S("trackId")] },
+  { command: "build_skeleton_from_clip", desc: "Turn a hummed/mumbled wave take into an editable rhythmic flow skeleton (syllable grid + stress, no words) on the clip's track — the producer confirms the grid, then 'Finish gaps' writes the words", args: [S("clipId"), S("grid", false), B("wait", false)] },
 ];
 
 export const AGENT_COMMAND_MAP = new Map(AGENT_COMMANDS.map((c) => [c.command, c]));

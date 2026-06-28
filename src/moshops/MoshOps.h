@@ -90,6 +90,13 @@ private:
     // Whisper (confidence-gated words) → a lyric sheet on the clip's track. Clip-scoped,
     // service-spawning, async on the snapshot rail (mirrors cmdTranscribeClip). UI-only.
     juce::var cmdBuildLyricsFromClip (const juce::var& args);
+    // LYR Phase 2 — audio "mumble take" (gibberish): right-click a hummed take → Basic Pitch
+    // (+ optional FCPE F0) → an editable WORDLESS skeleton (syllable grid + stress; lines land
+    // `proposed`). Clip-scoped, service-spawning, async (mirrors cmdBuildLyricsFromClip). UI-only.
+    juce::var cmdBuildSkeletonFromClip (const juce::var& args);
+    // LYR Phase 2 — confirm the proposed flow grid → flips each line `proposed`→`seed` so it's
+    // eligible for generation (the human-in-the-loop gate). Undoable; Track-scoped; agent-callable.
+    juce::var cmdConfirmSkeleton     (const juce::var& args);
     // ANN-001 — authored timeline annotations (MOSH_ANNOTATIONS tree; undoable +
     // multiplayer-broadcast). create self-broadcasts its resolved cross-peer id.
     juce::var cmdCreateAnnotation (const juce::var& args);
