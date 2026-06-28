@@ -101,6 +101,12 @@ SYNTHS = {
         fixture="serum_init.png", capture=capture_serum, env="SERUM",
         adsr=["env1_attack", "env1_hold", "env1_decay", "env1_sustain", "env1_release"],
         at_min=["env1_hold"], near_min=["env1_attack"]),
+    # Serum 1 (the original): captured from the installed plugin hosted in Ableton (Mosh's host
+    # crashes on it). No automated live-capture path — reads the committed fixture only.
+    "serum1": dict(
+        fixture="serum1_init.png", capture=lambda: None, env="SERUM1",
+        adsr=["env1_attack", "env1_hold", "env1_decay", "env1_sustain", "env1_release"],
+        at_min=["env1_hold"], near_min=["env1_attack"]),
 }
 
 

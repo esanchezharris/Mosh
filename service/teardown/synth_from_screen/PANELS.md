@@ -73,18 +73,29 @@ the right is visible on every tab** → the ADSR profile is robust regardless of
   stereo/table spread), VOICE (round-robin, note priority, tuning), OVERSAMPLING, DISPLAY.
 - Vital standalone **does** accept synthetic clicks → fully auto-navigable for live capture.
 
-## Serum 1  (NOT installed — reference study only)
+## Serum 1  (installed — LIVE captures via Ableton)
 
-The original Serum (lots of tutorials still use it). Lighter grey skin; **4 tabs: OSC · FX ·
-MATRIX · GLOBAL** (no MIX tab). Same white-pointer knobs (white line + blue tick).
-- **OSC**: OSC A + OSC B side-by-side, each with a wavetable display + UNISON/DETUNE/BLEND/
-  PHASE/RAND (top row) and WT POS/OFF/PAN/LEVEL (bottom row); SUB + NOISE; one filter; ENV +
-  LFO. Layout differs from Serum 2 (2 main oscillators vs 3, different positions).
+The original Serum (lots of tutorials still use it). **4 tabs: OSC · FX · MATRIX · GLOBAL**
+(no MIX tab, vs Serum 2's 5); active tab marked by a **blue** dot. Same white-pointer knobs.
+Captured live from the installed plugin **hosted in Ableton Live** — Mosh's in-process host
+*crashes* on Serum 1 (`com.xfer.serum.VST3`; a real hosting bug, not licensing), but Ableton
+hosts it fine **and accepts synthetic tab clicks** (unlike Mosh's hosted editor), so all four
+tabs were navigated + captured. The installed skin is **dark** (not the lighter grey of old
+web screenshots). `profiles/serum1.json` is calibrated: ENV 1 ADSR (ATTACK/HOLD/DECAY/SUSTAIN/
+RELEASE — no DELAY) reads absolutely (SUSTAIN 1.000) and all 4 tabs detect.
+- **OSC**: OSC A + OSC B (2 oscillators vs Serum 2's 3) + SUB + NOISE + one FILTER; ENV + LFO.
 - **FX**: dynamic rack (Hyper/Dimension, Distortion, Flanger, Phaser, Chorus, Delay,
   Compressor, Reverb, EQ, Filter) — same structure as Serum 2's FX.
 - **MATRIX / GLOBAL**: routing table / global settings.
-- ⚠️ A **real Serum 1 profile needs the plugin installed** (pixel coords differ from Serum 2
-  and from web reference images). Until then it's documented here, not profiled.
+- 💡 Ableton-as-host accepts clicks → the same route can capture **Serum 2's** non-default tabs
+  (FX/MIX/MATRIX/GLOBAL) that Mosh's editor blocked.
+
+## Synth identification
+
+`page_detect.detect_active_tab(img, synth)` (synth KNOWN — from §4's plugin-name OCR) is the
+load-bearing, reliable API (verified on all 9 real panels). `identify_synth(img)` (synth
+UNKNOWN) is **best-effort** — it can cross-match visually-similar plugins at low resolution, so
+the pipeline should pass the known synth rather than rely on vision-guessing the synth.
 
 ## Reproduction (how these were captured)
 
@@ -99,11 +110,13 @@ MATRIX · GLOBAL** (no MIX tab). Same white-pointer knobs (white line + blue tic
 ## Next rungs (in priority order)
 
 1. ~~**Tab/page detection**~~ — **DONE** (`page_detect.py`; see above).
-2. **OSC + FILTER profiles** for Serum 2 and Vital from the committed captures (fixed knobs,
-   white-pointer) — the highest-value still-buildable-now addition (filter cutoff/res/drive and
-   osc unison/detune are ubiquitous in tutorials).
-3. **Serum 1 profile** — now installed; capture its default page live (same hosted-editor route
-   as Serum 2), calibrate the ENV/OSC + the `tabs` block, FX/etc from references.
+2. ~~**Serum 1 profile**~~ — **DONE** (live via Ableton; ENV + tabs calibrated, verified).
+3. **OSC + FILTER profiles** for all three synths from the captures (fixed knobs, white-pointer)
+   — the highest-value still-buildable-now addition (filter cutoff/res/drive and osc
+   unison/detune are ubiquitous in tutorials). The white-pointer reader is verified on Serum's
+   OSC knobs; the careful part is correct knob↔label mapping (dense layout — do it methodically).
 4. **Rack-aware FX reader** (detect enabled-effect headers → read knobs relative to each) for
    the dynamic FX pages of all three synths.
 5. **Matrix table reader** (OCR routing rows).
+6. **Serum 2 non-default tabs** — re-capture via Ableton (accepts clicks) to calibrate FX/MIX/
+   MATRIX/GLOBAL the same way as Serum 1.

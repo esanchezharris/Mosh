@@ -77,24 +77,30 @@ def detect_active_tab(img: np.ndarray, synth: str) -> dict:
     x1 = min(len(cols), cfg["x_max"]) if cfg["x_max"] > 0 else len(cols)
     cols[:x0] = 0.0
     cols[x1:] = 0.0
-    if cols.max() < cfg["min_count"]:
-        return {"tab": None, "confidence": 0.0, "peak_x": None}
+    strength = float(cols.max())
+    if strength < cfg["min_count"]:
+        return {"tab": None, "confidence": 0.0, "peak_x": None, "strength": 0.0}
     peak_x = int(np.argmax(cols))
     name, dist = min(((n, abs(peak_x - x)) for n, x in cfg["anchors"].items()), key=lambda t: t[1])
     xs = sorted(cfg["anchors"].values())
     spacing = min((b - a for a, b in zip(xs, xs[1:])), default=float(img.shape[1]))
     conf = max(0.0, min(1.0, 1.0 - (dist / (0.5 * spacing)))) if spacing > 0 else 0.0
-    return {"tab": name, "confidence": round(conf, 3), "peak_x": peak_x}
+    return {"tab": name, "confidence": round(conf, 3), "peak_x": peak_x, "strength": strength}
 
 
 def identify_synth(img: np.ndarray, candidates: list[str] | None = None) -> dict:
-    """Best-effort: try each candidate profile's tab detection and return the synth whose
-    highlight is strongest + best-localized. {"synth", "tab", "confidence"}."""
+    """Best-effort: try each candidate profile's tab detection and return the synth whose active
+    indicator is both well-localized AND strongest. Ranking by strength×confidence (not distance
+    alone) disambiguates a wrong synth whose misaligned band catches a faint spurious peak near
+    one of its anchors. {"synth", "tab", "confidence"}."""
     if candidates is None:
         candidates = [f[:-5] for f in os.listdir(PROFILE_DIR) if f.endswith(".json")]
-    best = {"synth": None, "tab": None, "confidence": 0.0}
+    best = {"synth": None, "tab": None, "confidence": 0.0, "_score": 0.0}
     for synth in candidates:
         r = detect_active_tab(img, synth)
-        if r["tab"] and r["confidence"] > best["confidence"]:
-            best = {"synth": synth, "tab": r["tab"], "confidence": r["confidence"]}
-    return best
+        if not r["tab"]:
+            continue
+        score = r["confidence"] * r.get("strength", 0.0)
+        if score > best["_score"]:
+            best = {"synth": synth, "tab": r["tab"], "confidence": r["confidence"], "_score": score}
+    return {"synth": best["synth"], "tab": best["tab"], "confidence": best["confidence"]}
