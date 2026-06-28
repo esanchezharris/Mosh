@@ -269,12 +269,14 @@ def get_rhymes(word: str, strictness: str = "slant", max_n: int = 50,
     """Ranked rhyme result envelope. Used by the service /get_rhymes and the CLI."""
     p = pronouncer or Pronouncer()
     words = p.rhyme_search(word, strictness=strictness, max_n=max_n, syllables=syllables)
+    qphones = p.phones(word)
     return {
         "ok": True,
         "word": word,
         "strictness": strictness,
-        "inDict": p.phones(word) is not None,
+        "inDict": qphones is not None,
+        "queryPhones": qphones,   # lets the caller merge palette rhymes without re-pronouncing
         "candidates": [{"word": w, "syllables": p.syllables(w),
-                        "grade": rhyme_grade(p.phones(word) or [], p.phones(w) or [])}
+                        "grade": rhyme_grade(qphones or [], p.phones(w) or [])}
                        for w in words],
     }
