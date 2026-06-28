@@ -31,14 +31,28 @@ class Scout:
                     added += 1
         return added
 
-    def prescreen(self, batch: int = 200) -> int:
+    def prescreen(self, batch: int = 200, fetch_license: bool = False) -> int:
         """Score the discovered batch (metadata-only) → prescreen_score + yield.predicted;
-        keep tutorials, mark obvious non-matches `skipped`. Returns rows screened."""
+        keep tutorials, mark obvious non-matches `skipped`. Returns rows screened.
+
+        `fetch_license`: ytsearch metadata omits the license, so every discovered row reads
+        'unknown' and the CC rank-boost is inert. When True (and the searcher supports it), do a
+        per-row full extract to populate the real license BEFORE scoring, so CC sources actually
+        get preferred. Heavier (one fetch per row) → opt-in. Graceful: a failed/absent fetch
+        leaves 'unknown'."""
+        can_fetch = fetch_license and getattr(self.searcher, "available", False) \
+            and hasattr(self.searcher, "fetch_license")
         n = 0
         for row in self.cat.by_status("discovered")[:batch]:
             meta = VideoMeta.from_dict(row.metadata_json or {})
+            license = row.license
+            if can_fetch and license in (None, "", "unknown") and row.url:
+                fetched = self.searcher.fetch_license(row.url)
+                if fetched and fetched != "unknown":
+                    self.cat.set_license(row.video_id, fetched)
+                    license = fetched
             res = prescreen(meta)
-            y = predict_yield(res.signals, row.license)
+            y = predict_yield(res.signals, license)
             self.cat.set_screened(row.video_id, res.score, y, self.clock(), keep=res.keep)
             n += 1
         return n

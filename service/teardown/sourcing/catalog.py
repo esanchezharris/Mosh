@@ -96,6 +96,11 @@ class Catalog:
         )
         self.db.commit()
 
+    def set_license(self, video_id: str, license: str) -> None:
+        """Persist a license fetched after discovery (ytsearch metadata omits it)."""
+        self.db.execute("UPDATE videos SET license=? WHERE video_id=?", (license, video_id))
+        self.db.commit()
+
     def set_status(self, video_id: str, status: str) -> None:
         assert status in STATUSES, status
         self.db.execute("UPDATE videos SET status=? WHERE video_id=?", (status, video_id))

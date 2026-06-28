@@ -46,17 +46,28 @@ class VideoMeta:
 class Searcher(Protocol):
     def search(self, query: str, max_results: int) -> list[VideoMeta]: ...
 
+    def fetch_license(self, url: str) -> str:
+        """The real license for one video (search metadata omits it). 'creativeCommon' |
+        'youtube' | 'unknown'."""
+        ...
+
 
 class FakeSearcher:
-    """Deterministic in-memory searcher (tests/dev): canned metas keyed by query."""
+    """Deterministic in-memory searcher (tests/dev): canned metas keyed by query, optional
+    per-url licenses for the license-enrichment path."""
 
     available = True
 
-    def __init__(self, data: dict[str, list[VideoMeta]] | None = None) -> None:
+    def __init__(self, data: dict[str, list[VideoMeta]] | None = None,
+                 licenses: dict[str, str] | None = None) -> None:
         self.data = data or {}
+        self.licenses = licenses or {}
 
     def search(self, query: str, max_results: int) -> list[VideoMeta]:
         return list(self.data.get(query, []))[: max(0, max_results)]
+
+    def fetch_license(self, url: str) -> str:
+        return self.licenses.get(url, "unknown")
 
 
 def _meta_from_entry(e: dict) -> VideoMeta:
@@ -94,3 +105,17 @@ class YtDlpSearcher:
             info = ydl.extract_info(f"ytsearch{max(1, max_results)}:{query}", download=False)
         entries = (info or {}).get("entries") or []
         return [_meta_from_entry(e) for e in entries if e and e.get("id")]
+
+    def fetch_license(self, url: str) -> str:
+        """A full per-video extract to read the license (ytsearch metadata omits it). Heavier than
+        search (one watch-page fetch per video) → call only when CC-preference actually matters.
+        Graceful: any failure → 'unknown'."""
+        try:
+            import yt_dlp  # type: ignore
+            opts = {"quiet": True, "no_warnings": True, "skip_download": True,
+                    "noplaylist": True, "ignoreerrors": True}
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+            return map_license((info or {}).get("license"))
+        except Exception:
+            return "unknown"

@@ -83,6 +83,34 @@ y_cc = predict_yield(sig, "creativeCommon")
 y_yt = predict_yield(sig, "youtube")
 check("CC sources get an overall boost", y_cc["overall"] > y_yt["overall"], f"{y_cc['overall']} vs {y_yt['overall']}")
 
+# ── license enrichment: ytsearch omits license, so prescreen(fetch_license=True) fetches it →
+#    the CC rank-boost actually applies (a CC tutorial outranks an identical youtube-licensed one) ──
+with tempfile.TemporaryDirectory() as td:
+    mk = lambda vid: VideoMeta(video_id=vid, url=f"u/{vid}", license="unknown",
+                               title="how to make a trap beat from scratch in fl studio",
+                               channel="C", duration_s=600)
+    vcc, vyt = mk("cc1"), mk("yt1")
+    searcher = FakeSearcher({"q": [vcc, vyt]}, licenses={"u/cc1": "creativeCommon", "u/yt1": "youtube"})
+    catL = Catalog(str(Path(td) / "lic.db"))
+    Scout(catL, searcher).discover(["q"], 10)
+    # WITHOUT fetch: licenses stay 'unknown' (the inert state the live scrape surfaced)
+    Scout(catL, searcher).prescreen(fetch_license=False)
+    check("without fetch, discovered license stays 'unknown'",
+          all(v.license == "unknown" for v in catL.queue(10)))
+    # WITH fetch: real licenses populated + CC outranks the identical youtube tutorial
+    catL2 = Catalog(str(Path(td) / "lic2.db"))
+    Scout(catL2, searcher).discover(["q"], 10)
+    Scout(catL2, searcher).prescreen(fetch_license=True)
+    ranked = catL2.queue(10)                          # one call — queue() transitions rows to 'queued'
+    q = {v.video_id: v for v in ranked}
+    check("fetch_license populates the real license (cc1→creativeCommon, yt1→youtube)",
+          q["cc1"].license == "creativeCommon" and q["yt1"].license == "youtube",
+          f"{q['cc1'].license}/{q['yt1'].license}")
+    check("the CC tutorial now outranks the identical youtube-licensed one",
+          (q["cc1"].yield_overall or 0) > (q["yt1"].yield_overall or 0),
+          f"{q['cc1'].yield_overall} vs {q['yt1'].yield_overall}")
+    check("queue orders the CC tutorial first", ranked[0].video_id == "cc1")
+
 # ── license normalization (100% populated, never empty) ──────────────────────
 check("license maps CC string", map_license("Creative Commons Attribution license (reuse allowed)") == "creativeCommon")
 check("license maps absent → unknown", map_license(None) == "unknown")

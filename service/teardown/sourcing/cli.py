@@ -46,6 +46,11 @@ def main(argv=None):
     d = sub.add_parser("discover"); d.add_argument("--db", required=True)
     d.add_argument("--query", action="append", default=[]); d.add_argument("--max", type=int, default=10)
     p = sub.add_parser("prescreen"); p.add_argument("--db", required=True); p.add_argument("--batch", type=int, default=200)
+    p.add_argument("--fetch-license", action="store_true",
+                   help="per-video full extract to populate the license for the CC rank-boost. "
+                        "NOTE: yt-dlp returns NO license for YouTube (verified) → this is currently "
+                        "wasted cost on YT; real CC-preference needs the YouTube Data API. Kept for "
+                        "non-YT sources / a future Data-API searcher (the path is tested).")
     q = sub.add_parser("queue"); q.add_argument("--db", required=True); q.add_argument("--n", type=int, default=10)
     q.add_argument("--min-overall", type=float, default=0.0)
     c = sub.add_parser("counts"); c.add_argument("--db", required=True)
@@ -61,7 +66,9 @@ def main(argv=None):
             added = Scout(cat, searcher).discover(templates, ns.max)
             _emit({"ok": True, "added": added, "templates": templates, "counts": cat.counts()})
         elif ns.cmd == "prescreen":
-            n = Scout(cat).prescreen(ns.batch)
+            # license fetch is OPT-IN: yt-dlp returns no license for YouTube (verified live), so the
+            # per-video fetch is wasted cost there; the path stays for non-YT / a Data-API searcher.
+            n = Scout(cat, YtDlpSearcher()).prescreen(ns.batch, fetch_license=ns.fetch_license)
             _emit({"ok": True, "screened": n, "counts": cat.counts()})
         elif ns.cmd == "queue":
             picked = cat.queue(ns.n, ns.min_overall)
