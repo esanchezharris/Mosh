@@ -1,0 +1,18 @@
+{
+  "synth": "Serum",
+  "note": "The ORIGINAL Serum (v1, distinct from Serum 2). Captured LIVE from the installed plugin hosted in Ableton Live (Mosh's in-process host crashes on Serum 1; Ableton hosts it fine and accepts tab clicks). Init patch, dark skin. 4 tabs (OSC/FX/MATRIX/GLOBAL — no MIX, vs Serum 2's 5); active tab marked by a BLUE dot. ENV 1 ADSR (ATTACK/HOLD/DECAY/SUSTAIN/RELEASE — no DELAY). White-pointer knobs; the reader is skin-relative. Coords in reference_size space; load_profile scales to any frame.",
+  "reference_size": [1800, 1494],
+  "tabs": {
+    "band": [55, 100],
+    "highlight": "saturated",
+    "x_min": 350, "x_max": 820,
+    "anchors": {"OSC": 375, "FX": 505, "MATRIX": 640, "GLOBAL": 775}
+  },
+  "controls": {
+    "env1_attack":  {"type": "knob", "cx": 217, "cy": 1233, "r": 35, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]},
+    "env1_hold":    {"type": "knob", "cx": 317, "cy": 1233, "r": 35, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]},
+    "env1_decay":   {"type": "knob", "cx": 451, "cy": 1233, "r": 35, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]},
+    "env1_sustain": {"type": "knob", "cx": 551, "cy": 1233, "r": 35, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]},
+    "env1_release": {"type": "knob", "cx": 685, "cy": 1233, "r": 35, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]}
+  }
+}
