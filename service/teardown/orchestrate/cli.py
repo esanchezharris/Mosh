@@ -83,6 +83,14 @@ def main(argv=None):
                       file=sys.stderr)
         except Exception as e:
             print(f"[skeleton] piano-roll MIDI skipped: {type(e).__name__}: {e}", file=sys.stderr)
+        # §3: a metadata-only yield.predicted from the signals we have, so §9's yield.actual can be
+        # validated against it (over-prediction flagged, not hidden). Best-effort.
+        try:
+            from teardown.recipe import YieldScores
+            from teardown.sourcing.score import predicted_from_skeleton
+            rec.yield_.predicted = YieldScores(**predicted_from_skeleton(dl, meta))
+        except Exception as e:
+            print(f"[skeleton] yield.predicted skipped: {type(e).__name__}: {e}", file=sys.stderr)
         return rec
 
     def extract(rec, video_ref):
@@ -127,6 +135,25 @@ def main(argv=None):
         res = orc.teardown(ns.url)
         if res.status == "failed":
             _emit({"ok": False, "error": res.error}, 1)
+
+        # §3 validation: did the metadata prediction match what we actually recovered? Surface the
+        # delta honestly — an overconfident prediction (rosy source, weak reconstruction) becomes an
+        # Unresolved note on the recipe, never a silent pass.
+        yval = {}
+        try:
+            from teardown.recipe import Unresolved
+            from teardown.sourcing.score import validate_yield
+            yval = validate_yield(res.recipe.yield_.predicted, res.recipe.yield_.actual,
+                                  rendered=bool((res.render or {}).get("ran")))
+            if yval.get("overconfident"):
+                p, a = yval["predicted"]["overall"], yval["actual"]["overall"]
+                res.recipe.unresolved.append(Unresolved(
+                    issue=f"yield overconfident — predicted overall {p} but reconstruction delivered "
+                          f"{a} (Δ{yval['overall_delta']}); weakest axis '{yval['worst_field']}'",
+                    suggested_action="manual review: the source looked richer than the teardown recovered"))
+        except Exception as e:
+            print(f"[validate] yield check skipped: {type(e).__name__}: {e}", file=sys.stderr)
+
         rdir = out / res.recipe.source.video_id
         rdir.mkdir(parents=True, exist_ok=True)
         (rdir / "recipe.json").write_text(to_json(res.recipe))
@@ -137,6 +164,7 @@ def main(argv=None):
             "elements": len(res.recipe.elements), "commands": len(res.commands),
             "unresolved": len(res.unresolved),
             "render": res.render or None, "reward": res.reward or None,
+            "yield_validation": yval or None,
         })
     except SystemExit:
         raise
