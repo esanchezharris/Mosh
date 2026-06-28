@@ -6,3 +6,5 @@ knob-angle core is hermetically tested; per-synth profile calibration needs real
 """
 from .controls import read_knob, read_menu, read_toggle  # noqa: F401
 from .export import read_patch  # noqa: F401
+from .fx_rack import detect_fx_chain  # noqa: F401
+from .matrix import read_matrix  # noqa: F401

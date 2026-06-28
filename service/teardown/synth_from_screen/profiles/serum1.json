@@ -8,6 +8,15 @@
     "x_min": 350, "x_max": 820,
     "anchors": {"OSC": 375, "FX": 505, "MATRIX": 640, "GLOBAL": 775}
   },
+  "fx_list": {
+    "_note": "FX page only. Serum 1's effects RACK is a vertical list on the far left; each row has a small rounded-rect ENABLE toggle at its left, lit blue when on (Init: all off, S<=42 V<=56). Calibrated from serum1_fx.png (900x747, exactly half this reference): toggle column x=26, Hyper/Dimension row y=106, pitch 30 -> doubled to reference space. Fixed top->bottom rack order.",
+    "x_dot": 52,
+    "row0_y": 212,
+    "row_h": 60,
+    "on_sat_min": 80,
+    "on_val_min": 90,
+    "effects": ["Hyper/Dimension", "Distortion", "Flanger", "Phaser", "Chorus", "Compressor", "Delay", "Reverb", "EQ", "Filter"]
+  },
   "controls": {
     "env1_attack":  {"type": "knob", "cx": 217, "cy": 1233, "r": 35, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
     "env1_hold":    {"type": "knob", "cx": 317, "cy": 1233, "r": 35, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},

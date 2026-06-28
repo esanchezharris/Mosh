@@ -8,6 +8,26 @@
     "x_min": 110, "x_max": 720,
     "anchors": {"VOICE": 149, "EFFECTS": 312, "MATRIX": 475, "ADVANCED": 637}
   },
+  "matrix": {
+    "_note": "Calibrated from vital_matrix.png (Init Preset, MATRIX tab). Columns: # | SOURCE | BIPOLAR | STEREO | MORPH | AMOUNT | DESTINATION. The AMOUNT control is a horizontal bipolar slider whose CENTERED handle (value 0.5) means NO modulation; an init patch's one blank row (source/dest show '-') must read inactive -> read_matrix returns []. Coords are in reference_size space (2x the 1171x718 fixture); _load_matrix scales to the frame. Only the first (blank) row is calibratable from the empty fixture, but Vital matrix rows are uniform -- raise `rows` once a populated capture exists.",
+    "header_y": 168,
+    "row0_y": 224,
+    "row_h": 56,
+    "rows": 1,
+    "amount": {"type": "slider", "x0": 766, "x1": 1026, "neutral": 0.5},
+    "source": {"x0": 230, "x1": 460},
+    "destination": {"x0": 1028, "x1": 1270},
+    "active_amount_eps": 0.06
+  },
+  "fx_list": {
+    "_note": "EFFECTS page only. The effects RACK is the 2nd column (after MACRO 1-4); each row carries a coloured power dot at its top-left. Lit dots are purple/pink (S~100-120, V~255); off rows are grey (S<=44, V<=94). Calibrated from vital_effects.png (1171x718, exactly half this reference): dot column x=215, Chorus row y=85, pitch 58 -> doubled to reference space. Fixed top->bottom order is Vital's alphabetical rack.",
+    "x_dot": 430,
+    "row0_y": 170,
+    "row_h": 116,
+    "on_sat_min": 70,
+    "on_val_min": 130,
+    "effects": ["Chorus", "Compressor", "Delay", "Distortion", "Equalizer", "Filter", "Flanger", "Phaser", "Reverb"]
+  },
   "controls": {
     "env1_delay":   {"type": "knob", "cx": 1534, "cy": 426, "r": 30, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]},
     "env1_attack":  {"type": "knob", "cx": 1676, "cy": 426, "r": 30, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]},
@@ -19,7 +39,12 @@
     "osc1_level":   {"type": "knob", "cx": 262,  "cy": 255, "r": 30, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]},
     "osc1_pan":     {"type": "knob", "cx": 367,  "cy": 254, "r": 30, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]},
     "osc1_unison":  {"type": "knob", "cx": 1001, "cy": 268, "r": 30, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]},
-    "osc1_phase":   {"type": "knob", "cx": 1214, "cy": 251, "r": 30, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]}
+    "osc1_phase":   {"type": "knob", "cx": 1214, "cy": 251, "r": 30, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]},
+
+    "osc2_level":   {"type": "knob", "cx": 260,  "cy": 490, "r": 28, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]},
+    "osc2_pan":     {"type": "knob", "cx": 366,  "cy": 490, "r": 28, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]},
+    "osc3_level":   {"type": "knob", "cx": 260,  "cy": 722, "r": 28, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]},
+    "osc3_pan":     {"type": "knob", "cx": 366,  "cy": 722, "r": 28, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]}
   },
-  "_controls_note": "OSC 1 knobs (level/pan/unison/phase) calibrated from the Init Preset (OSC 1 enabled). The white-pointer reader records each knob's normalized POSITION [0,1] — the synth-specific position→display mapping (e.g. unison position 0.5 shows '20%') is non-linear, but recording position is reproduction-correct: re-setting the same position reproduces the patch. Vital's filter CUTOFF/RESONANCE are GRAPH-DRAG controls (X/Y on the response graph), NOT knobs, so the white-pointer reader can't read them — those are graphic params for §8. The filter module's only knobs are DRIVE/MIX/KEY-TRK (dim unless the filter is enabled)."
+  "_controls_note": "OSC 1/2/3 LEVEL/PAN (+ OSC 1 unison/phase) calibrated from the Init Preset. OSC 2/3 are DIM (off on Init) but the white pointer is read skin-relative, so their LEVEL/PAN read correctly anyway (the coords are valid when a tutorial has them on). The reader records each knob's normalized POSITION [0,1] — the synth-specific position→display mapping (e.g. unison position 0.5 shows '20%') is non-linear, but recording position is reproduction-correct. Vital's filter CUTOFF/RESONANCE are GRAPH-DRAG controls (X/Y on the response graph), NOT knobs, so the white-pointer reader can't read them — those are graphic params for §8. The filter module's only knobs are DRIVE/MIX/KEY-TRK (dim/ambiguous unless the filter is enabled — deferred)."
 }

@@ -103,7 +103,8 @@ SYNTHS = {
         at_min=["env1_delay", "env1_hold"], near_min=["env1_attack"],
         controls_expect={
             "osc1_pan": [0.42, 0.58], "osc1_unison": [0.42, 0.58], "osc1_phase": [0.42, 0.58],
-            "osc1_level": [0.60, 0.85]}),
+            "osc1_level": [0.60, 0.85], "osc2_pan": [0.42, 0.58], "osc3_pan": [0.42, 0.58],
+            "osc2_level": [0.60, 0.85], "osc3_level": [0.60, 0.85]}),
     "serum": dict(
         fixture="serum_init.png", capture=capture_serum, env="SERUM",
         adsr=["env1_attack", "env1_hold", "env1_decay", "env1_sustain", "env1_release"],

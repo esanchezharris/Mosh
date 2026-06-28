@@ -34,8 +34,8 @@ entries," not "write a new reader" — except for the dynamic/tabular pages note
 | Page type | Where | Reader strategy | Status |
 |-----------|-------|-----------------|--------|
 | **Fixed knob grid** | OSC/filter/ENV/LFO on the main page; always-visible ENV column | fixed (cx,cy,r) per control in the profile, `pointer="white"` (Vital) / `"blue_tick"` (Serum) | **ENV + OSC + FILTER DONE** for all 3 synths (verified) |
-| **Dynamic FX rack** | Serum FX tab, Vital EFFECTS tab | NOT fixed — knob positions shift with which effects are enabled + their order. Must (1) detect each enabled effect's header (label OCR + colour highlight), (2) read its knobs *relative* to that module's box | **needs a rack-aware reader** (next rung) |
-| **Modulation matrix** | Serum MATRIX, Vital MATRIX | tabular: rows of source → (bipolar/stereo/morph) → amount → destination. Read with OCR + the amount knob/field, not knob-angle CV | **needs a table reader** |
+| **Dynamic FX rack** | Serum FX tab, Vital EFFECTS tab | NOT fixed — knob positions shift with which effects are enabled + their order. `fx_rack.detect_fx_chain` reads **which effects are on + their order** off the rack list (power-dot colour, names from the profile's fixed order) | **chain-detect DONE** (Vital + Serum 1); per-effect *knob* reading still a next rung |
+| **Modulation matrix** | Serum MATRIX, Vital MATRIX | tabular: rows of source → (bipolar/stereo/morph) → amount → destination. `matrix.read_matrix` reads each OCCUPIED row's amount + best-effort OCR; an empty Init matrix returns [] (no hallucination) | **structural reader DONE** (Vital); validated on the empty matrix + synthetic populated; real-populated calibration is a follow-up |
 | **Settings / menus** | Serum GLOBAL, Vital ADVANCED | toggles + dropdowns + a few knobs; OCR labels + `read_toggle`/`read_menu` | low priority |
 
 A prerequisite for all of the above — **page/tab detection** — is **BUILT** (`page_detect.py`):
@@ -135,15 +135,21 @@ the pipeline should pass the known synth rather than rely on vision-guessing the
 
 ## Next rungs (in priority order)
 
-1. ~~**Tab/page detection**~~ — **DONE** (`page_detect.py`; see above).
+1. ~~**Tab/page detection**~~ — **DONE** (`page_detect.py`).
 2. ~~**Serum 1 profile**~~ — **DONE** (live via Ableton; ENV + tabs calibrated, verified).
-3. ~~**OSC + FILTER profiles** for all three synths~~ — **DONE** (ENV + OSC + FILTER on all
-   three; Serum via `blue_tick`, Vital via `white`; Vital's cutoff/res are graph-drag so only
-   its OSC knobs apply). Verified absolutely in `verify_synthgui.py` + 69 hermetic unit checks.
-4. **Rack-aware FX reader** (detect enabled-effect headers → read knobs relative to each) for
-   the dynamic FX pages of all three synths.
-5. **Matrix table reader** (OCR routing rows).
-6. **Serum 2 non-default tabs** — re-capture via Ableton (accepts clicks) to calibrate FX/MIX/
-   MATRIX/GLOBAL the same way as Serum 1. (The Ableton-host route is now proven for Serum 2.)
-7. **More oscillators/filters** — OSC B/C, Filter 2, SUB/NOISE level knobs (same readers, more
-   entries); Vital filter DRIVE/MIX/KEY-TRK (needs the filter enabled to read bright).
+3. ~~**OSC + FILTER profiles** for all three synths~~ — **DONE** (ENV + OSC + FILTER; Serum via
+   `blue_tick`, Vital via `white`; Vital's cutoff/res are graph-drag so only its OSC knobs apply).
+4. ~~**More oscillators**~~ — **DONE**: Serum 1 OSC B + SUB + NOISE; Serum 2 OSC B/C + NOISE;
+   Vital OSC 2/3 LEVEL/PAN (read skin-relative even when dim/off). Number-box controls (UNISON
+   voices, SUB OCTAVE, Serum-2 NOISE START/RAND) omitted.
+5. ~~**Rack-aware FX reader (chain detect)**~~ — **DONE** (`fx_rack.detect_fx_chain`): which
+   effects are on + order, for Vital + Serum 1. Per-effect *knob* reading (read each enabled
+   module's knobs via a per-effect-type sub-profile) is the remaining depth.
+6. ~~**Matrix table reader (structural)**~~ — **DONE** (`matrix.read_matrix`): per-row amount +
+   best-effort OCR, empty→[]. Calibrate against a REAL populated matrix (add routings via the GUI)
+   to confirm the active-row thresholds beyond the synthetic test.
+7. **Serum 2 non-default tabs** — tab *detection* is done; still to add: Serum 2 `fx_list`
+   (needs an FX-with-effects capture), the MIX-tab fixed-knob profile, a Serum `matrix` block.
+   The Ableton-host route (accepts clicks) is proven.
+8. **Vital filter DRIVE/MIX/KEY-TRK** — needs the filter ENABLED to read bright/unambiguous
+   (dim+off on Init reads unreliably). Same for per-effect FX knobs.

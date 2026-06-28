@@ -234,7 +234,7 @@ check("vital profile uses white-pointer mode",
       load_profile("vital", 2342, 1436)["env1_sustain"].get("pointer") == "white")
 # reference_size in vital.json is 2342x1436; loading at the SAME size is identity
 ref = load_profile("vital", 2342, 1436)
-check("vital profile loads ENV + OSC 1 controls", len(ref) == 10 and "env1_sustain" in ref and "osc1_level" in ref)
+check("vital profile loads ENV + OSC 1/2/3 controls", len(ref) == 14 and "env1_sustain" in ref and "osc1_level" in ref and "osc3_pan" in ref)
 check("identity load keeps reference coords", ref["env1_sustain"]["cx"] == 2106 and ref["env1_sustain"]["cy"] == 426)
 # loading at HALF size scales coords by ~0.5 (so one profile works at any capture res)
 half = load_profile("vital", 1171, 718)
