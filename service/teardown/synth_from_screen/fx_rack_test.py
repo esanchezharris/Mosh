@@ -67,6 +67,17 @@ if os.path.isfile(pdo):
 else:
     check("vital_delay_only.png fixture present", False, pdo)
 
+# ── REGRESSION: EQ lights its power dot WHITE (low-saturation), not the purple/pink of Chorus/Delay.
+# The saturation-only test (S>=70) missed it → EQ read off. Fix: on = saturated OR bright (V>=190).
+peq = os.path.join(PANELS, "vital_eq_only.png")
+if os.path.isfile(peq):
+    chain = detect_fx_chain(cv2.imread(peq), "vital")
+    on = {e["name"] for e in chain if e["on"]}
+    check("vital EQ-alone: white power dot still reads ON (saturated-OR-bright)",
+          on == {"Equalizer"}, str(on))
+else:
+    check("vital_eq_only.png fixture present", False, peq)
+
 # ── REAL fixture: Serum 1 FX page (Init = ALL OFF) ────────────────────────────
 # serum1_fx.png (900x747, FX tab). Fixed order (10). ENABLED: NONE (Init patch).
 SERUM1_ORDER = ["Hyper/Dimension", "Distortion", "Flanger", "Phaser", "Chorus",

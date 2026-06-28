@@ -60,6 +60,7 @@ def _load_fx_list(synth: str, img_bgr: np.ndarray) -> dict | None:
         "row_h": row_h,
         "on_sat_min": float(fx.get("on_sat_min", 70.0)),
         "on_val_min": float(fx.get("on_val_min", 90.0)),
+        "on_bright_min": float(fx.get("on_bright_min", 190.0)),
         # the indicator patch is a small fraction of the row pitch (kept tight so a neighbour row's
         # dot can't leak in); a floor keeps it ≥1px at tiny capture sizes.
         "patch": max(2, int(round(0.18 * row_h))),
@@ -68,11 +69,13 @@ def _load_fx_list(synth: str, img_bgr: np.ndarray) -> dict | None:
 
 
 def _indicator_lit(img_bgr: np.ndarray, cx: int, cy: int, patch: int,
-                   sat_min: float, val_min: float) -> bool:
-    """Is the power indicator at (cx, cy) lit? Sample a small patch, convert to HSV, and test
-    whether its BRIGHTEST-saturated pixels clear the lit cutoffs. A lit dot/toggle is a coloured
-    (high-S) and bright (high-V) blob; a greyed/off one is low-S, dim. We take the patch's max S
-    among its bright pixels (robust to the dot being only part of the patch / anti-aliased edges)."""
+                   sat_min: float, val_min: float, bright_min: float = 190.0) -> bool:
+    """Is the power indicator at (cx, cy) lit? Sample a small patch (HSV). A lit dot is EITHER a
+    saturated colour (purple/pink/blue: S≥sat_min & V≥val_min) OR a bright near-WHITE dot
+    (V≥bright_min — some effects, e.g. Vital's EQ, light their dot white, which has low S and would
+    be missed by the saturation test alone). An off dot is dim grey: mid V (~137), low S — it clears
+    neither clause. So `coloured OR white` reads every effect's on-state regardless of accent hue,
+    while the off grey stays off."""
     import cv2
 
     h, w = img_bgr.shape[:2]
@@ -83,7 +86,7 @@ def _indicator_lit(img_bgr: np.ndarray, cx: int, cy: int, patch: int,
     hsv = cv2.cvtColor(img_bgr[y0:y1, x0:x1], cv2.COLOR_BGR2HSV)
     S = hsv[..., 1].astype(np.float32)
     V = hsv[..., 2].astype(np.float32)
-    lit = (S >= sat_min) & (V >= val_min)
+    lit = ((S >= sat_min) & (V >= val_min)) | (V >= bright_min)
     # require a small cluster, not a single stray pixel, so JPEG/anti-alias speckle can't flip off→on.
     return int(lit.sum()) >= 3
 
@@ -105,6 +108,6 @@ def detect_fx_chain(img_bgr: np.ndarray, synth: str) -> list[dict]:
     for i, name in enumerate(cfg["effects"]):
         cy = int(round(cfg["row0_y"] + i * cfg["row_h"]))
         on = _indicator_lit(img_bgr, cfg["x_dot"], cy, cfg["patch"],
-                            cfg["on_sat_min"], cfg["on_val_min"])
+                            cfg["on_sat_min"], cfg["on_val_min"], cfg["on_bright_min"])
         out.append({"name": name, "on": bool(on)})
     return out
