@@ -102,10 +102,22 @@ if b2 is not None:
 else:
     check("serum2_fx_bus2_loaded.png fixture present", False)
 
+# ── REAL fixture: Utility (the one FLAT routing util, distinct name) on BUS 1 — the 13th bank
+#    effect. (Serum 2's 3 Splitters are NESTED band-split CONTAINERS, not flat modules, and their
+#    variants share a "SPLITTER " prefix → deliberately NOT in the bank; see PANELS.md.) ──
+ut = _img("serum2_fx_util.png")
+if ut is not None:
+    r = read_addrack(ut, "serum")
+    check("util: BUS 1 + [Utility identified]",
+          r.get("bus") == "BUS 1" and [m["name"] for m in r.get("chain", [])] == ["Utility"]
+          and r["chain"][0]["status"] == "identified", str(r))
+else:
+    check("serum2_fx_util.png fixture present", False)
+
 # ── honest degradation (LEAVE-ONE-OUT): drop each effect's template; its REAL row must read as
 #    present-but-unidentified — NEVER mis-named as another bank effect. This is the misID-ceiling
-#    guard on real rendered names (the 12-effect bank covers all audible FX; routing utils degrade
-#    the same way). Uses the public reader with a temporarily-reduced bank. ──
+#    guard on real rendered names (the 13-effect bank covers all audible FX + Utility). Uses the
+#    public reader with a temporarily-reduced bank. ──
 from teardown.synth_from_screen import fx_addrack as _M  # noqa: E402
 
 def _read_minus(img, drop_name):
@@ -119,14 +131,17 @@ def _read_minus(img, drop_name):
 if loaded is not None and b2 is not None:
     misnamed = []          # (dropped_effect, what_it_got_mislabeled_as)
     bad_degrade = []
-    for im, expect in [(loaded, ID), (b2, BUS2)]:
+    loo = [(loaded, ID), (b2, BUS2)]
+    if ut is not None:
+        loo.append((ut, ["Utility"]))
+    for im, expect in loo:
         for i, drop in enumerate(expect):
             tgt = _read_minus(im, drop)["chain"][i]   # the dropped effect's own row (rows are template-independent)
             if tgt["name"] is not None:
                 misnamed.append((drop, tgt["name"]))  # matched a DIFFERENT bank template ≥ match_min → misID
             if not (tgt["status"] == "unidentified" and tgt["on"] is True):
                 bad_degrade.append((drop, tgt["status"]))
-    check("leave-one-out: a dropped effect is NEVER mis-named as another bank effect (misID ceiling, all 12)",
+    check("leave-one-out: a dropped effect is NEVER mis-named as another bank effect (misID ceiling, all 13)",
           not misnamed, str(misnamed))
     check("leave-one-out: a dropped effect's row stays present + status='unidentified'",
           not bad_degrade, str(bad_degrade))
