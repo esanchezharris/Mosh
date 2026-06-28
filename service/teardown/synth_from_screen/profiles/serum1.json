@@ -29,7 +29,25 @@
     "filter_pan":   {"type": "knob", "cx": 1726, "cy": 598, "r": 35, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
     "filter_drive": {"type": "knob", "cx": 1546, "cy": 718, "r": 35, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
     "filter_fat":   {"type": "knob", "cx": 1636, "cy": 718, "r": 35, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
-    "filter_mix":   {"type": "knob", "cx": 1726, "cy": 718, "r": 35, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]}
+    "filter_mix":   {"type": "knob", "cx": 1726, "cy": 718, "r": 35, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+
+    "oscB_detune":  {"type": "knob", "cx": 1016, "cy": 598, "r": 32, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "oscB_blend":   {"type": "knob", "cx": 1106, "cy": 598, "r": 30, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "oscB_phase":   {"type": "knob", "cx": 1228, "cy": 598, "r": 30, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "oscB_rand":    {"type": "knob", "cx": 1318, "cy": 598, "r": 33, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "oscB_wtpos":   {"type": "knob", "cx": 924,  "cy": 718, "r": 36, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "oscB_warp":    {"type": "knob", "cx": 1076, "cy": 718, "r": 36, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "oscB_pan":     {"type": "knob", "cx": 1228, "cy": 718, "r": 36, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "oscB_level":   {"type": "knob", "cx": 1318, "cy": 718, "r": 36, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+
+    "sub_pan":      {"type": "knob", "cx": 154, "cy": 340, "r": 30, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "sub_level":    {"type": "knob", "cx": 244, "cy": 340, "r": 36, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+
+    "noise_phase":  {"type": "knob", "cx": 154, "cy": 598, "r": 35, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "noise_rand":   {"type": "knob", "cx": 244, "cy": 598, "r": 36, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "noise_pitch":  {"type": "knob", "cx": 64,  "cy": 718, "r": 36, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "noise_pan":    {"type": "knob", "cx": 154, "cy": 718, "r": 36, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "noise_level":  {"type": "knob", "cx": 244, "cy": 718, "r": 36, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]}
   },
-  "_controls_note": "OSC A + FILTER knobs calibrated from a full-res live Ableton capture (Init patch, OSC A enabled). UNISON is a number box (voices count), not a knob, so it's omitted. The blue_tick reader records each knob's normalized POSITION [0,1] from Serum's saturated blue rim-tick. Filter is a 2x3 grid: CUTOFF/RES/PAN over DRIVE/FAT/MIX."
+  "_controls_note": "ENV 1 + OSC A + OSC B + SUB + NOISE + FILTER, calibrated from a full-res live Ableton capture (Init patch). UNISON is a number box (voices count), not a knob — omitted; OCTAVE (SUB) is also a number box. OSC B mirrors OSC A's layout (x-shift +544). The blue_tick reader records each knob's normalized POSITION [0,1] from Serum's saturated blue rim-tick (read even when an osc/filter is dim/off — the tick draws regardless). Filter is a 2x3 grid: CUTOFF/RES/PAN over DRIVE/FAT/MIX. SUB: PAN/LEVEL. NOISE: PHASE/RAND/PITCH/PAN/LEVEL."
 }

@@ -111,7 +111,8 @@ SYNTHS = {
         controls_expect={
             "filter_cutoff": [0.42, 0.58], "filter_res": [0.0, 0.20], "filter_pan": [0.42, 0.58],
             "filter_drive": [0.0, 0.12], "filter_mix": [0.85, 1.0],
-            "oscA_pan": [0.42, 0.58], "oscA_wtpos": [0.0, 0.12], "oscA_level": [0.60, 0.90]}),
+            "oscA_pan": [0.42, 0.58], "oscA_wtpos": [0.0, 0.12], "oscA_level": [0.60, 0.90],
+            "oscB_pan": [0.42, 0.58], "oscC_pan": [0.42, 0.58], "noise_pan": [0.42, 0.58]}),
     # Serum 1 (the original): captured from the installed plugin hosted in Ableton (Mosh's host
     # crashes on it). No automated live-capture path — reads the committed fixture only.
     "serum1": dict(
@@ -122,7 +123,8 @@ SYNTHS = {
             "filter_cutoff": [0.42, 0.58], "filter_res": [0.0, 0.20], "filter_pan": [0.42, 0.58],
             "filter_drive": [0.0, 0.12], "filter_mix": [0.85, 1.0],
             "oscA_pan": [0.42, 0.58], "oscA_wtpos": [0.0, 0.12], "oscA_rand": [0.85, 1.0],
-            "oscA_level": [0.60, 0.90]}),
+            "oscA_level": [0.60, 0.90], "oscB_pan": [0.42, 0.58], "oscB_rand": [0.85, 1.0],
+            "sub_pan": [0.42, 0.58], "noise_pitch": [0.42, 0.58]}),
 }
 
 

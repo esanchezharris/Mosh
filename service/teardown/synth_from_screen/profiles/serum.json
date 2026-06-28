@@ -28,7 +28,28 @@
     "filter_pan":   {"type": "knob", "cx": 2265, "cy": 649, "r": 37, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
     "filter_drive": {"type": "knob", "cx": 2035, "cy": 759, "r": 36, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
     "filter_fat":   {"type": "knob", "cx": 2135, "cy": 759, "r": 36, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
-    "filter_mix":   {"type": "knob", "cx": 2263, "cy": 759, "r": 36, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]}
+    "filter_mix":   {"type": "knob", "cx": 2263, "cy": 759, "r": 36, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+
+    "oscB_wtpos":   {"type": "knob", "cx": 744,  "cy": 649, "r": 30, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "oscB_detune":  {"type": "knob", "cx": 978,  "cy": 649, "r": 30, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "oscB_blend":   {"type": "knob", "cx": 1068, "cy": 649, "r": 30, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "oscB_pan":     {"type": "knob", "cx": 1176, "cy": 649, "r": 30, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "oscB_warp1":   {"type": "knob", "cx": 744,  "cy": 759, "r": 30, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "oscB_warp2":   {"type": "knob", "cx": 1068, "cy": 759, "r": 30, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "oscB_level":   {"type": "knob", "cx": 1176, "cy": 759, "r": 30, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+
+    "oscC_wtpos":   {"type": "knob", "cx": 1284, "cy": 649, "r": 30, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "oscC_detune":  {"type": "knob", "cx": 1518, "cy": 649, "r": 30, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "oscC_blend":   {"type": "knob", "cx": 1608, "cy": 649, "r": 30, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "oscC_pan":     {"type": "knob", "cx": 1716, "cy": 649, "r": 30, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "oscC_warp1":   {"type": "knob", "cx": 1284, "cy": 759, "r": 30, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "oscC_warp2":   {"type": "knob", "cx": 1608, "cy": 759, "r": 30, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "oscC_level":   {"type": "knob", "cx": 1716, "cy": 759, "r": 30, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+
+    "noise_fine":   {"type": "knob", "cx": 1826, "cy": 649, "r": 32, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "noise_pan":    {"type": "knob", "cx": 1914, "cy": 649, "r": 30, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "noise_pitch":  {"type": "knob", "cx": 1826, "cy": 759, "r": 36, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "noise_level":  {"type": "knob", "cx": 1914, "cy": 759, "r": 36, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]}
   },
-  "_controls_note": "ENV 1 ADSR + OSC A + FILTER 1. UNISON is a number box (voices), not a knob; PHASE/RAND are tiny header value-displays — both omitted. OSC A has DUAL warp (warp1/warp2). Filter is a 2x3 knob grid (CUTOFF/RES/PAN over DRIVE/FAT/MIX) plus a vertical LEVEL slider (sliders aren't read by the knob reader). The blue_tick reader records each knob's normalized POSITION [0,1]."
+  "_controls_note": "ENV 1 ADSR + OSC A/B/C + NOISE + FILTER 1. OSC A/B/C are identical panels (x-pitch +540 per panel); each has WT POS, UNISON (number box, omitted), DETUNE, BLEND, PAN, DUAL warp (warp1/warp2), LEVEL. PHASE/RAND are tiny header value-displays (omitted). NOISE: FINE/PAN/PITCH/LEVEL (START/RAND are number boxes). Filter is a 2x3 knob grid (CUTOFF/RES/PAN over DRIVE/FAT/MIX) plus a vertical LEVEL slider (not a knob); FILTER 2 shares these same coords via the filter tab toggle. The blue_tick reader records each knob's normalized POSITION [0,1]."
 }
