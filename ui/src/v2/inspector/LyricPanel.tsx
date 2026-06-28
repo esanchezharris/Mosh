@@ -97,6 +97,14 @@ export function LyricPanel({ track }: { track: Track }) {
           onClick={() => void run("analyze_lyrics", {})}>Analyze flow</button>
       </div>
 
+      {sheet.lines.some((l) => l.status === "skeleton") && (
+        <div className="v2-skel-confirm" data-testid="skeleton-confirm-bar" role="status">
+          <span>From your take — confirm the syllable grid, then finish the words.</span>
+          <button className="v2-btn primary" data-testid="skeleton-confirm" disabled={busy}
+            onClick={() => void run("confirm_skeleton", {})}>✓ Confirm flow</button>
+        </div>
+      )}
+
       <ol className="v2-lyric-lines" data-testid="lyric-lines">
         {sheet.lines.map((line) => (
           <LyricLineRow key={line.index} trackId={track.id} line={line} grid={sheet.grid} busy={busy} run={run}
@@ -120,6 +128,35 @@ function LyricLineRow({ trackId, line, grid, busy, run, isGhost, onGhostDone }: 
   isGhost: boolean; onGhostDone: () => void;
 }) {
   const exec = useStore((s) => s.exec);
+
+  // ── Skeleton row (Phase-2 grid editor) ──────────────────────────────────────────────
+  // A line built from a hummed take lands `skeleton` (distinct from L2 `proposed` = "has
+  // proposals"): a wordless syllable grid the producer tunes (−/+ the count) before confirming.
+  // No text input — it's all gaps; confirm_skeleton flips it to `seed` so "Finish gaps" fills
+  // the words. (set_lyric_line preserves the `skeleton` status while editing.)
+  if (line.status === "skeleton") {
+    const target = line.syllableTarget > 0 ? line.syllableTarget : gridTarget(grid, 1);
+    const setTarget = (n: number) =>
+      exec("set_lyric_line", { trackId, lineIndex: line.index, syllableTarget: Math.max(1, n) });
+    return (
+      <li className="v2-lyric-line v2-skel-line" data-testid={`skeleton-line-${line.index}`} data-status="skeleton">
+        <span className="v2-lyric-role" data-role={line.role}>{line.role}</span>
+        <span className="v2-skel-grid" data-testid={`skel-grid-${line.index}`} aria-label={`${target} syllable slots`}>
+          {Array.from({ length: Math.min(target, 32) }).map((_, i) => (
+            <span key={i} className="v2-skel-pip" aria-hidden="true">•</span>
+          ))}
+        </span>
+        <span className="v2-skel-count" data-testid={`skel-count-${line.index}`}>{target} syl</span>
+        <button className="btn" data-testid={`skel-dec-${line.index}`} disabled={busy || target <= 1}
+          aria-label={`Fewer syllables, line ${line.index + 1}`} onClick={() => void setTarget(target - 1)}>−</button>
+        <button className="btn" data-testid={`skel-inc-${line.index}`} disabled={busy}
+          aria-label={`More syllables, line ${line.index + 1}`} onClick={() => void setTarget(target + 1)}>+</button>
+        <button className="btn x" data-testid={`lyric-rm-${line.index}`} title="remove line"
+          aria-label={`Remove line ${line.index + 1}`}
+          onClick={() => void exec("remove_lyric_line", { trackId, lineIndex: line.index })}>✕</button>
+      </li>
+    );
+  }
 
   // ── Inline ghost (the next-bar suggestion) ──────────────────────────────────────────
   // While this line is the active ghost AND its top proposal has landed AND nothing's been

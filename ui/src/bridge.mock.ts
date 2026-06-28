@@ -649,7 +649,9 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       if (args.rhymeStrictness != null) line.rhymeStrictness = str(args.rhymeStrictness, line.rhymeStrictness);
       if (args.locked != null) line.locked = Boolean(args.locked);
       if (args.sectionId != null) line.sectionId = str(args.sectionId, line.sectionId);
-      if (line.text || line.seedText) line.status = "seed";
+      // Content present → no longer "empty"; but a Phase-2 `skeleton` line keeps its status
+      // while the producer edits the grid (the +/- syllable stepper) — confirm_skeleton flips it.
+      if (line.status !== "skeleton" && (line.text || line.seedText)) line.status = "seed";
       invalidate(); return ok(command, { lineIndex: idx });
     }
     case "remove_lyric_line": {
@@ -1167,6 +1169,44 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
         invalidate();
       }, 400);
       return ok(command, { status: "started" });
+    }
+    case "build_skeleton_from_clip": {
+      // Phase-2 mumble->skeleton — gibberish (no words). Async like the native path: emit
+      // working, then land a deterministic WORDLESS sheet (all-gaps seeds, lines `proposed`)
+      // on the clip's OWN track. The Lyrics tab renders the grid editor (confirm_skeleton).
+      const f = findClip(str(args.clipId));
+      if (!f || f.clip.type !== "wave") return err(command, "no wave clip");
+      if (f.track.lyricSheet) return err(command, "track already has a lyric sheet");
+      const clipId = f.clip.id;
+      const trk = f.track;
+      emit("skeleton_status", { clipId, state: "working" });
+      window.setTimeout(() => {
+        pushUndo();
+        const mk = (index: number, target: number, rg: string, stress: string): LyricLine => ({
+          index, role: "verse", seedText: Array.from({ length: target }).fill("___").join(" "),
+          text: "", syllableTarget: target, syllableTol: 1, stress, rhymeGroup: rg,
+          rhymeStrictness: "", locked: false, sectionId: "", status: "skeleton",
+        });
+        trk.lyricSheet = {
+          id: `ls-${trk.id}`, grid: "1/8", language: "en", topic: "", mood: "",
+          explicit: "allow", rhymeStrictness: "slant", styleBias: false, specVersion: 1,
+          lines: [mk(0, 4, "A", "XxxX"), mk(1, 3, "B", "XxX")],
+        };
+        emit("skeleton_status", { clipId, state: "done", lineCount: 2 });
+        invalidate();
+      }, 400);
+      return ok(command, { status: "started" });
+    }
+    case "confirm_skeleton": {
+      // Flip every `proposed` line -> `seed` so the generation loop ("Finish gaps") fills it.
+      const t = findTrack(str(args.trackId));
+      if (!t) return err(command, "track not found");
+      if (!t.lyricSheet) return err(command, "track has no lyric sheet");
+      pushUndo();
+      let n = 0;
+      for (const l of t.lyricSheet.lines) if (l.status === "skeleton") { l.status = "seed"; n++; }
+      invalidate();
+      return ok(command, { confirmed: n });
     }
     case "sketch_beatbox": {
       // Sketch Phase 0 — beatbox WAV → drum MoshOps. Async like the native path:

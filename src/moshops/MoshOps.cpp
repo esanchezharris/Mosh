@@ -546,6 +546,8 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "analyze_lyrics")       return cmdAnalyzeLyrics (args);
     if (name == "get_lyric_corpus_stats") return cmdGetLyricCorpusStats (args);
     if (name == "build_lyrics_from_clip") return cmdBuildLyricsFromClip (args);
+    if (name == "build_skeleton_from_clip") return cmdBuildSkeletonFromClip (args);
+    if (name == "confirm_skeleton")     return cmdConfirmSkeleton (args);
     // Annotations broadcast over MP (shared collaborator comments). create self-broadcasts
     // its resolved cross-peer id; the rest address by that id via the generic wrapper.
     if (name == "create_annotation") return cmdCreateAnnotation (args);
@@ -957,8 +959,12 @@ juce::var MoshOps::cmdSetLyricLine (const juce::var& args)
     if (args.hasProperty ("locked"))          line.setProperty (ids::lyricLocked,          (bool) args.getProperty ("locked", false), &undoManager());
     if (args.hasProperty ("sectionId"))       line.setProperty (ids::lyricSectionId,       args.getProperty ("sectionId", var()), &undoManager());
     // A line carrying a seed/text is no longer "empty" (richer statuses arrive with the
-    // generation loop in L2).
-    if (line[ids::lyricText].toString().isNotEmpty() || line[ids::lyricSeedText].toString().isNotEmpty())
+    // generation loop in L2). EXCEPT a Phase-2 `skeleton` line: it carries an all-gaps seed
+    // but must stay `skeleton` while the producer edits the grid (the +/- syllable stepper
+    // goes through here) — confirm_skeleton does the skeleton→seed flip. (NOTE: `proposed` is
+    // L2's "has proposals" status — distinct — so it's NOT preserved here.)
+    if (line[ids::status].toString() != "skeleton"
+        && (line[ids::lyricText].toString().isNotEmpty() || line[ids::lyricSeedText].toString().isNotEmpty()))
         line.setProperty (ids::status, "seed", &undoManager());
 
     auto* data = new DynamicObject();
@@ -1472,6 +1478,141 @@ juce::var MoshOps::cmdBuildLyricsFromClip (const juce::var& args)
     auto* data = new DynamicObject();
     data->setProperty ("status", "started");
     return okResult ("build_lyrics_from_clip", var (data));
+}
+
+// LYR Phase 2 — audio "mumble take" (gibberish → rhythmic SKELETON). Mirrors
+// cmdBuildLyricsFromClip, but the take is WORDLESS: skeletonSpec returns an all-gaps spec
+// (syllable grid + stress) and each line lands `proposed` — the producer confirms the grid
+// (confirm_skeleton) before the Phase-1 engine fills the words. Clip-scoped, service-spawning.
+juce::var MoshOps::cmdBuildSkeletonFromClip (const juce::var& args)
+{
+    const auto clipId = args.getProperty ("clipId", var()).toString();
+    const auto grid = args.getProperty ("grid", "1/16").toString();
+
+    auto* w = dynamic_cast<te::WaveAudioClip*> (findClip (clipId));
+    if (w == nullptr) return errResult ("build_skeleton_from_clip", "no wave clip with that id");
+    const auto srcFile = w->getCurrentSourceFile();
+    if (! srcFile.existsAsFile()) return errResult ("build_skeleton_from_clip", "clip has no readable source audio");
+
+    auto* track = dynamic_cast<te::AudioTrack*> (w->getTrack());
+    if (track == nullptr) return errResult ("build_skeleton_from_clip", "clip is not on an audio track");
+    const auto trackId = track->itemID.toString();
+    if (track->state.getChildWithName (ids::MOSH_LYRICSHEET).isValid())
+        return errResult ("build_skeleton_from_clip", "track already has a lyric sheet");
+
+    auto& edit = eng.edit();
+    auto* tempo = edit.tempoSequence.getNumTempos() > 0 ? edit.tempoSequence.getTempo (0) : nullptr;
+    const double bpm = tempo != nullptr ? tempo->getBpm() : 120.0;
+    auto* tsig = edit.tempoSequence.getNumTimeSigs() > 0 ? edit.tempoSequence.getTimeSig (0) : nullptr;
+    const int tsNum = tsig != nullptr ? tsig->numerator.get() : 4;
+    const int tsDen = tsig != nullptr ? tsig->denominator.get() : 4;
+
+    // Land the skeleton as a MOSH_LYRICSHEET on the clip's OWN track in ONE undo txn, each line
+    // `proposed` (the human-in-the-loop grid the producer confirms). Always on the message thread.
+    auto land = [this, clipId, trackId] (const juce::var& spec) -> juce::var
+    {
+        auto* tt = findTrack (trackId);
+        if (tt == nullptr) return errResult ("build_skeleton_from_clip", "track gone");
+        if (tt->state.getChildWithName (ids::MOSH_LYRICSHEET).isValid())
+            return errResult ("build_skeleton_from_clip", "track already has a lyric sheet");
+
+        auto linesVar = spec.isObject() ? spec.getProperty ("lines", var()) : var();
+        if (! spec.isObject() || ! (bool) spec.getProperty ("ok", false) || ! linesVar.isArray() || linesVar.size() == 0)
+        {
+            const auto err = spec.isObject() ? spec.getProperty ("error", var()).toString() : juce::String();
+            const auto msg = err == "no_melody_detected" ? juce::String ("no melody detected in the take")
+                           : err.isNotEmpty() ? err : juce::String ("skeleton service unavailable (start the generative service)");
+            emit ("skeleton_status", [&] { auto* o = new DynamicObject();
+                o->setProperty ("clipId", clipId); o->setProperty ("state", "error");
+                o->setProperty ("error", msg); return var (o); }());
+            return errResult ("build_skeleton_from_clip", msg);
+        }
+
+        beginTxn ("build_skeleton_from_clip");
+        const auto sheetId = juce::Uuid().toString();
+        auto sheet = mosh::LyricSheet::create (sheetId, spec.getProperty ("grid", "1/16").toString());
+        if (spec.getProperty ("topic", var()).toString().isNotEmpty())
+            sheet.setProperty (ids::lyricTopic, spec.getProperty ("topic", var()), nullptr);
+        auto container = mosh::LyricSheet::lines (sheet);
+        for (auto& lv : *linesVar.getArray())
+        {
+            auto line = mosh::LyricLine::create (juce::Uuid().toString(),
+                                                 (int) lv.getProperty ("index", 0),
+                                                 lv.getProperty ("role", "verse").toString());
+            line.setProperty (ids::lyricSeedText,       lv.getProperty ("seedText", var()), nullptr);
+            line.setProperty (ids::lyricSyllableTarget, (int) lv.getProperty ("syllableTarget", 0), nullptr);
+            line.setProperty (ids::lyricSyllableTol,    (int) lv.getProperty ("syllableTol", 1), nullptr);
+            line.setProperty (ids::lyricStress,         lv.getProperty ("stress", var()), nullptr);
+            line.setProperty (ids::lyricRhymeGroup,     lv.getProperty ("rhymeGroup", var()), nullptr);
+            line.setProperty (ids::status,              "skeleton", nullptr);   // the grid-editor gate (distinct from L2 "proposed")
+            container.appendChild (line, nullptr);
+        }
+        tt->state.appendChild (sheet, &undoManager());
+
+        emit ("skeleton_status", [&] { auto* o = new DynamicObject();
+            o->setProperty ("clipId", clipId); o->setProperty ("state", "done");
+            o->setProperty ("lineCount", linesVar.size()); return var (o); }());
+        emitSnapshotInvalidated();
+
+        auto* d = new DynamicObject();
+        d->setProperty ("status", "done");
+        d->setProperty ("sheetId", sheetId);
+        d->setProperty ("trackId", trackId);
+        d->setProperty ("lineCount", linesVar.size());
+        return okResult ("build_skeleton_from_clip", var (d));
+    };
+
+    emit ("skeleton_status", [&] { auto* o = new DynamicObject();
+        o->setProperty ("clipId", clipId); o->setProperty ("state", "working"); return var (o); }());
+    logLine ("build_skeleton_from_clip", args, true, {}, false);
+
+    // The server orchestrates Basic-Pitch onsets (+ optional FCPE F0) then bins → one call.
+    // Absent any onset detector ⇒ a no_melody_detected spec so `land` surfaces a friendly error.
+    auto fetchSpec = [this, srcFile, bpm, tsNum, tsDen, grid] () -> juce::var
+    {
+        return jobManager.skeletonSpec (srcFile, bpm, tsNum, tsDen, grid);
+    };
+
+    if ((bool) args.getProperty ("wait", false))
+        return land (fetchSpec());
+
+    std::thread ([this, fetchSpec, land]
+    {
+        auto spec = fetchSpec();
+        juce::MessageManager::callAsync ([land, spec] { land (spec); });
+    }).detach();
+
+    auto* data = new DynamicObject();
+    data->setProperty ("status", "started");
+    return okResult ("build_skeleton_from_clip", var (data));
+}
+
+// LYR Phase 2 — confirm the proposed flow grid: flip each `proposed` line → `seed` so the
+// Phase-1 engine (complete_lyrics / fill_lyric_gap) will fill it. The human-in-the-loop gate.
+juce::var MoshOps::cmdConfirmSkeleton (const juce::var& args)
+{
+    const auto trackId = args.getProperty ("trackId", var()).toString();
+    auto* t = findTrack (trackId);
+    if (t == nullptr) return errResult ("confirm_skeleton", "no track: " + trackId);
+    auto sheet = t->state.getChildWithName (ids::MOSH_LYRICSHEET);
+    if (! sheet.isValid()) return errResult ("confirm_skeleton", "track has no lyric sheet");
+
+    beginTxn ("confirm_skeleton");
+    auto lines = mosh::LyricSheet::lines (sheet);
+    int n = 0;
+    for (int i = 0; i < lines.getNumChildren(); ++i)
+    {
+        auto line = lines.getChild (i);
+        if (line[ids::status].toString() == "skeleton")
+        {
+            line.setProperty (ids::status, "seed", &undoManager());
+            ++n;
+        }
+    }
+    logLine ("confirm_skeleton", args, true, {}, false);
+    emitSnapshotInvalidated();
+    auto* d = new DynamicObject(); d->setProperty ("confirmed", n);
+    return okResult ("confirm_skeleton", var (d));
 }
 
 // ── ANN-001: authored timeline annotations (mirror the sections CRUD; multiplayer-

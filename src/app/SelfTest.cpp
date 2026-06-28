@@ -5182,6 +5182,17 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (linesOf (trackId)[0].getProperty ("text", var()).toString() == "yeah I came back lit the flame",
                "line text persists across save/reload");
 
+        // confirm_skeleton (Phase-2 grid gate): with no `proposed` lines it's a clean no-op
+        // (confirmed:0). The proposed→seed flip itself is covered by test_lyrics.cpp (state) +
+        // the --run-script skeleton end-to-end — build_skeleton_from_clip spawns the service, so
+        // the full mumble→skeleton path is OUT of the hermetic selftest (mirrors build_lyrics).
+        {
+            auto cs = cmd (ops, "confirm_skeleton", objN ({ { "trackId", trackId } }));
+            check (ok (cs), "confirm_skeleton ok (no proposed lines)");
+            check ((int) cs.getProperty ("data", var()).getProperty ("confirmed", -1) == 0,
+                   "confirm_skeleton confirms 0 when nothing is proposed");
+        }
+
         // remove_lyric_line keeps indices dense.
         check (ok (cmd (ops, "remove_lyric_line", objN ({ { "trackId", trackId }, { "lineIndex", 0 } }))),
                "remove_lyric_line ok");
@@ -5192,6 +5203,8 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (! sheetOf (trackId).isObject(), "lyric sheet gone from snapshot after remove");
         check (! ok (cmd (ops, "set_lyric_line", objN ({ { "trackId", trackId }, { "lineIndex", 0 }, { "text", "ghost" } }))),
                "set_lyric_line on a sheetless track fails cleanly");
+        check (! ok (cmd (ops, "confirm_skeleton", objN ({ { "trackId", trackId } }))),
+               "confirm_skeleton on a sheetless track fails cleanly");
     }
 
     finishSection();

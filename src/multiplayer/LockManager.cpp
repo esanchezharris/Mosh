@@ -57,6 +57,8 @@ LockManager::Scope LockManager::classify (const juce::String& command)
         "cancel_lyric_job", "accept_lyric_proposal", "reject_lyric_proposal",
         // LYR-L1 — analysis lands a transient blob on one track's sheet.
         "analyze_lyrics",
+        // LYR Phase 2 — confirm the proposed flow grid (flips this track's lines proposed→seed).
+        "confirm_skeleton",
     };
 
     // Clip-scoped: mutate one clip (args carry a clipId). Key = the clip's track
@@ -67,6 +69,7 @@ LockManager::Scope LockManager::classify (const juce::String& command)
         "duplicate_clip", "add_note", "remove_note", "set_note", "quantize_notes",
         "transcribe_clip", "create_render_layer",
         "build_lyrics_from_clip",   // LYR Phase 3 — mumble take (lands a sheet on the clip's track)
+        "build_skeleton_from_clip", // LYR Phase 2 — gibberish skeleton (lands a sheet on the clip's track)
     };
 
     if (unguarded.count (command)) return Scope::Unguarded;
