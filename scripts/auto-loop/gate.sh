@@ -73,7 +73,11 @@ run_selftest_x3() {
     # (a false gate-red). unique_port skips any still-alive prior service.
     local sport; sport="$(unique_port)"
     kill_stray_services "$sport"
-    MOSH_SELFTEST_SESSION="$sess" MOSH_SERVICE_PORT="$sport" "$bin" --selftest >"$log" 2>&1
+    # -ApplePersistenceIgnoreState YES: a headless selftest must NEVER inherit AppKit's
+    # window-restoration / "reopen after crash" modal. After repeated crashes macOS shows
+    # NSPersistentUIRestorer's runModal during launch, which blocks a headless run forever
+    # (cost a 2h hang once). NSUserDefaults reads the flag from argv, suppressing it.
+    MOSH_SELFTEST_SESSION="$sess" MOSH_SERVICE_PORT="$sport" "$bin" --selftest -ApplePersistenceIgnoreState YES >"$log" 2>&1
     rc=$?
     kill_stray_services "$sport"; sleep 1   # let this run's service die before the next
     read n f < <(parse_selftest_tally "$log")
