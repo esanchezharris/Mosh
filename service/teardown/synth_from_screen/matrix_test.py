@@ -74,6 +74,29 @@ else:
     check("serum2_matrix.png fixture present", False, "fixture missing")
 
 
+# ── REAL POPULATED Serum 2 matrix — calibrated LIVE via computer-use ──────────────────────
+# Added one routing live (source "Mod Wheel", AMOUNT slider dragged off-centre to the right).
+# This is the validation the synthetic test can't give: the cell coords must read a REAL Serum 2
+# row — detect exactly the populated row (the other 7 stay empty → excluded), read the AMOUNT as
+# clearly off-neutral, and best-effort OCR the source. Proves []→[routing] on real data.
+spop = os.path.join(PANELS, "serum2_matrix_populated.png")
+if os.path.isfile(spop):
+    pim = cv2.imread(spop)
+    pout = read_matrix(pim, "serum")
+    check("populated Serum 2 matrix → exactly 1 routing (other rows excluded)", len(pout) == 1, str(pout))
+    if len(pout) == 1:
+        r = pout[0]
+        check("populated routing is row 0, active", r["row"] == 0 and r["active"], str(r))
+        check("populated AMOUNT reads clearly off-neutral (dragged right → >0.6)", r["amount"] > 0.6, str(r))
+        # OCR is best-effort (tesseract may be absent → ''); when present it should read the source
+        check("populated source is a string; if OCR'd, names the source",
+              isinstance(r["source"], str) and (r["source"] == "" or "wheel" in r["source"].lower()), str(r["source"]))
+    check("populated Serum 2 matrix read deterministic x3",
+          len({tuple(sorted((rr["row"], round(rr["amount"], 3)) for rr in read_matrix(pim, "serum"))) for _ in range(3)}) == 1)
+else:
+    check("serum2_matrix_populated.png fixture present", False, "fixture missing")
+
+
 # ── graceful degradation: never raise on bad inputs ─────────────────────────────────────
 blank = np.full((400, 400, 3), 20, np.uint8)
 check("unknown synth → []", read_matrix(blank, "nope") == [])
