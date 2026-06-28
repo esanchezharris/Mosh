@@ -95,6 +95,45 @@ def rhyme_grade(a: Sequence[str], b: Sequence[str]) -> str:
     return "none"
 
 
+# ── Rhyme CRAFT (Bar IQ C): multisyllabic depth + internal-rhyme detection ────────
+
+def vowels_of(phones: Sequence[str]) -> List[str]:
+    """The stress-stripped vowel sequence (the backbone of multisyllabic / assonant rhyme)."""
+    return [_strip_stress(p) for p in phones if _is_vowel(p)]
+
+
+def multisyllabic_depth(a: Sequence[str], b: Sequence[str]) -> int:
+    """How many TRAILING syllables rhyme = the length of the longest common suffix of the two
+    vowel sequences. depth 1 = a plain end-rhyme; depth >= 2 = a multisyllabic rhyme (what
+    separates skilled bars from nursery rhymes). Deterministic + symmetric."""
+    va, vb = vowels_of(a), vowels_of(b)
+    depth = 0
+    for x, y in zip(reversed(va), reversed(vb)):
+        if x != y:
+            break
+        depth += 1
+    return depth
+
+
+def internal_rhyme_pairs(words_phones: Sequence, strictness: str = "slant") -> List[tuple]:
+    """Rhyming word-index pairs WITHIN a line (a hallmark of skilled flow). Input: a sequence
+    of (word, phones); output: sorted (i, j) pairs (i<j) whose rimes rhyme at `strictness`,
+    excluding identical words. Deterministic."""
+    out = []
+    n = len(words_phones)
+    for i in range(n):
+        wi, pi = words_phones[i]
+        if not pi:
+            continue
+        for j in range(i + 1, n):
+            wj, pj = words_phones[j]
+            if not pj or str(wi).lower() == str(wj).lower():
+                continue
+            if _grade_passes(rhyme_grade(pi, pj), strictness):
+                out.append((i, j))
+    return out
+
+
 # ── Stdlib heuristic (used for OOV words and when no dictionary is present) ───────
 
 def heuristic_syllables(word: str) -> int:

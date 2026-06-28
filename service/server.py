@@ -140,29 +140,38 @@ def _pronounce_words(words: list) -> dict:
         return {w: None for w in words}
 
 
-def _merge_palette_rhymes(payload: dict) -> dict:
+def _merge_palette_rhymes(payload: dict, clean: bool = False) -> dict:
     """Augment a /get_rhymes result with rhyming words from the vocabulary palette (Bar IQ B)
     — so slang/coined words SURFACE as candidates, not just dictionary words. Uses the query
     phones the phonology core already returned (no re-pronounce). Palette hits are tagged
-    source='palette' + their register; deduped against the dictionary candidates."""
+    source='palette' + their register; deduped against the dictionary candidates. Bar IQ D:
+    `clean` excludes profanity-tagged palette words (raw is the default)."""
     try:
         qphones = payload.get("queryPhones")
         if not qphones:
             return payload
         from lyrics.vocab import VocabPalette
+        palette = VocabPalette()
         strict = payload.get("strictness", "slant")
-        have = {c.get("word") for c in payload.get("candidates", [])}
+        cands = payload.get("candidates", [])
+        # Bar IQ D — clean mode drops profanity wherever it appears (the palette is the
+        # profanity registry), so a profanity word that's ALSO in the dictionary is filtered too.
+        if clean:
+            banned = palette.register_words("profanity")
+            cands = [c for c in cands if c.get("word") not in banned]
+        have = {c.get("word") for c in cands}
         have.add(str(payload.get("word", "")).lower())
         extra = []
-        for h in VocabPalette().rhyme_search(qphones, strict, max_n=200):
+        excl = ["profanity"] if clean else None
+        for h in palette.rhyme_search(qphones, strict, max_n=200, exclude_registers=excl):
             if h["word"] not in have:
                 have.add(h["word"])
                 extra.append({"word": h["word"], "syllables": h["syllables"],
                               "grade": h["grade"], "source": "palette", "register": h.get("register", "")})
-        if extra:
+        if extra or clean:
             # palette words first (they're what makes it feel un-neutered), then the dict words
             payload = dict(payload)
-            payload["candidates"] = extra + payload.get("candidates", [])
+            payload["candidates"] = extra + cands
     except Exception:  # noqa: BLE001 (palette is additive; never break rhyme lookup)
         pass
     payload.pop("queryPhones", None)   # internal — don't leak to the client
@@ -797,6 +806,7 @@ class Handler(BaseHTTPRequestHandler):
             if not word:
                 self._send(400, {"ok": False, "error": "word missing"})
                 return
+            clean = bool(data.get("clean", False))   # Bar IQ D — raw by default; clean filters profanity
             strictness = data.get("strictness", "slant")
             if strictness not in ("perfect", "slant", "free"):
                 strictness = "slant"
@@ -831,13 +841,13 @@ class Handler(BaseHTTPRequestHandler):
                     self._send(500, {"ok": False, "error": f"rhyme lookup failed: {tail or 'no output'}"})
                     return
                 self._send(200 if payload.get("ok") else 500,
-                           _merge_palette_rhymes(payload) if payload.get("ok") else payload)
+                           _merge_palette_rhymes(payload, clean) if payload.get("ok") else payload)
             else:
                 try:
                     from phonology import core as _ph
                     payload = _ph.get_rhymes(word, strictness=strictness,
                                              max_n=max_n, syllables=syllables)
-                    self._send(200, _merge_palette_rhymes(payload))
+                    self._send(200, _merge_palette_rhymes(payload, clean))
                 except Exception as e:  # noqa: BLE001
                     self._send(500, {"ok": False, "error": f"phonology error: {e}"})
         elif path in ("/complete_lyrics", "/fill_lyric_gap", "/suggest_next_line"):

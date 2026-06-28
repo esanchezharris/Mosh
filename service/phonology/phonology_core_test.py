@@ -154,5 +154,26 @@ if importlib.util.find_spec("g2p_en") is not None:
 else:
     skip("real g2p_en path", "g2p_en not importable (run setup-phonology.sh)")
 
+# ── 11. Rhyme CRAFT (Bar IQ C): multisyllabic depth + internal-rhyme detection ────
+# multisyllabic depth = length of the longest common TRAILING vowel run (the essence of
+# multisyllabic / assonant rhyme). depth 1 = a plain end-rhyme; depth >= 2 = multisyllabic.
+city = ["S", "IH1", "T", "IY0"]; pity = ["P", "IH1", "T", "IY0"]
+make_it = ["M", "EY1", "K", "IH0", "T"]; take_it = ["T", "EY1", "K", "IH0", "T"]
+check("vowels_of(banana) == [AH, AE, AH]",
+      core.vowels_of(["B", "AH0", "N", "AE1", "N", "AH0"]) == ["AH", "AE", "AH"])
+check("multisyllabic depth: city/pity == 2 (IH, IY)", core.multisyllabic_depth(city, pity) == 2)
+check("multisyllabic depth: 'make it'/'take it' == 2 (EY, IH)", core.multisyllabic_depth(make_it, take_it) == 2)
+check("multisyllabic depth: cat/hat == 1 (single end vowel)", core.multisyllabic_depth(cat, hat) == 1)
+check("multisyllabic depth: cat/dog == 0 (no shared trailing vowel)", core.multisyllabic_depth(cat, dog) == 0)
+check("multisyllabic depth is symmetric", core.multisyllabic_depth(city, pity) == core.multisyllabic_depth(pity, city))
+
+# internal rhyme: rhyming word pairs WITHIN a line (a hallmark of skilled flow).
+line = [("money", ["M", "AH1", "N", "IY0"]), ("sunny", ["S", "AH1", "N", "IY0"]),
+        ("today", ["T", "AH0", "D", "EY1"])]
+pairs = core.internal_rhyme_pairs(line, "slant")
+check("internal_rhyme_pairs finds money~sunny (indices 0,1)", (0, 1) in pairs, str(pairs))
+check("internal_rhyme_pairs excludes the non-rhyming 'today'", (0, 2) not in pairs and (1, 2) not in pairs, str(pairs))
+check("internal_rhyme_pairs is deterministic", core.internal_rhyme_pairs(line, "slant") == pairs)
+
 print(f"\n{'OK' if not fails else 'FAILED'}: {len(fails)} failure(s)")
 sys.exit(len(fails))
