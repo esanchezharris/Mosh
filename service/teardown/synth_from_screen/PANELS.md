@@ -61,16 +61,34 @@ skin (the bevel-highlight that forced the `blue_tick` reader).
   via **Ableton** (the Mosh-host editor doesn't accept tab clicks) and converted into the
   Mosh-window reference space (the two windows differ only by a ~25px title-bar offset: same x,
   Mosh cy = Ableton cy + 25), so they verify against the committed Mosh-captured fixture.
-- **FX**: dynamic rack (Hyper/Dimension, Distortion, Flanger, Phaser, Chorus, Delay,
-  Compressor, Reverb, EQ, Filter). Each enabled effect shows its own knob set.
-- **MIX**: per-oscillator level/pan mixer (Serum-2-only tab).
-- **MATRIX**: mod-routing table. **GLOBAL**: global/voicing settings.
-- ⚠️ **Constraint:** Serum has no standalone, so it's hosted in Mosh — and the hosted VST3
-  editor does **not** accept synthetic tab clicks (both computer-use and raw CGEvent are
-  swallowed by the editor NSView; the default page captures fine because that's read-only).
-  So the **non-default Serum tabs can't be auto-navigated** for live calibration. Options:
-  the owner navigates to a tab manually and we screencapture it, or we calibrate from a
-  reference image (resolution-approximate until verified live).
+- **The non-default tabs were captured LIVE via Ableton** (its hosted editor accepts tab clicks;
+  the Mosh-hosted editor swallows them) and committed as fixtures (`serum2_{fx,mix,matrix,
+  global}.png`). Each is structurally DIFFERENT from Serum 1 / Vital and needs its own reader —
+  none is a clean fixed-knob grid, so no per-tab control profile was added (see the cross-host
+  note below for why coords aren't shipped yet):
+  - **FX** (`serum2_fx.png`): NOT a fixed 9-effect list (unlike Serum 1) — it's a **dynamic
+    "+ FX" add-rack** with MAIN / BUS 1 / BUS 2 buses; you ADD effect modules (empty on Init).
+    So `fx_rack.detect_fx_chain` (fixed-list) does NOT apply to Serum 2 — it needs an
+    added-module reader (detect each inserted effect module + its bus). `serum.json` has no
+    fx_list (correct: detect_fx_chain returns []).
+  - **MIX** (`serum2_mix.png`): per-source channel strips (SUB/OSC A/B/C/NOISE/FILTER 1/2/BUS),
+    each a FILTER-routing dropdown + small BUS/PAN knobs + a **vertical FADER** + level meter.
+    The faders are the main control → needs a vertical-slider reader (matrix.py has a *horizontal*
+    one). PAN knobs are readable but tiny.
+  - **MATRIX** (`serum2_matrix.png`): a clean routing TABLE — SOURCE | CRV | AMOUNT (horizontal
+    slider) | POL | DESTINATION | OUT | AUX SOURCE | INV, ~8 empty rows on Init. This is exactly
+    `matrix.read_matrix`'s shape (centered amount slider + "-" placeholder = neutral → []). It's
+    the best matrix fixture; adding a Serum 2 `matrix` block is the clean next step (blocked only
+    by the cross-host calibration note below).
+  - **GLOBAL** (`serum2_global.png`): global/voicing settings (toggles + dropdowns) — low value.
+- ⚠️ **Cross-host calibration nuance:** the Serum 2 OSC/filter coords are in the **Mosh** window
+  reference space (`reference_size [2380,1544]`); the Ableton-hosted window is `2380×1518` (a
+  ~1.7% shorter title bar → Mosh cy = Ableton cy + 25). The OSC/filter blocks verify against the
+  Mosh fixture, but a block measured from an Ableton capture (matrix/MIX) would be y-mis-scaled
+  ~1.7% when read from an Ableton-proportioned frame. The real fix is **host-invariant
+  calibration**: detect a GUI landmark (the tab strip) and offset all coords relative to it,
+  instead of assuming window-top. Until then, Serum 2 matrix/MIX blocks are deferred to avoid
+  shipping subtly-wrong coords.
 
 ## Vital  (installed — real captures, all tabs)
 
@@ -148,8 +166,15 @@ the pipeline should pass the known synth rather than rely on vision-guessing the
 6. ~~**Matrix table reader (structural)**~~ — **DONE** (`matrix.read_matrix`): per-row amount +
    best-effort OCR, empty→[]. Calibrate against a REAL populated matrix (add routings via the GUI)
    to confirm the active-row thresholds beyond the synthetic test.
-7. **Serum 2 non-default tabs** — tab *detection* is done; still to add: Serum 2 `fx_list`
-   (needs an FX-with-effects capture), the MIX-tab fixed-knob profile, a Serum `matrix` block.
-   The Ableton-host route (accepts clicks) is proven.
-8. **Vital filter DRIVE/MIX/KEY-TRK** — needs the filter ENABLED to read bright/unambiguous
-   (dim+off on Init reads unreliably). Same for per-effect FX knobs.
+7. ~~**Serum 2 non-default tabs — capture**~~ — **DONE**: FX/MIX/MATRIX/GLOBAL captured live via
+   Ableton + committed as fixtures + characterized (see the Serum 2 section). Each needs its own
+   reader: FX = added-module reader (dynamic +FX rack, not the fixed list); MIX = vertical-fader
+   reader; MATRIX = the existing `read_matrix` once a Serum 2 block is calibrated host-consistently.
+8. **Host-invariant calibration** (the unblocker for the above) — detect a GUI landmark (the tab
+   strip / a logo) and express control coords RELATIVE to it, so one profile works regardless of
+   the host's title-bar height (Mosh vs Ableton differ ~1.7%). This is the clean way to add the
+   Serum 2 matrix/MIX blocks (and to make every profile host-portable).
+9. **Per-effect FX knob reading** — for an enabled effect module, read its knobs via a
+   per-effect-type sub-profile (Vital EFFECTS expands modules inline; Serum 2 adds modules to a bus).
+10. **Vital filter DRIVE/MIX/KEY-TRK** — needs the filter ENABLED to read bright/unambiguous
+   (dim+off on Init reads unreliably).
