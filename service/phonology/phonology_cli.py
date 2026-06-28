@@ -6,6 +6,7 @@ envelope to stdout; any library noise goes to stderr so stdout carries ONLY JSON
 (mirrors transcribe_cli.py).
 
 Usage:  phonology_cli.py get_rhymes <word> <strictness> <max_n> [syllables]
+        phonology_cli.py pronounce <word> [<word> …]   # → {ok, phones:{word:[…]|null}}
 """
 import json
 import os
@@ -22,6 +23,13 @@ from phonology import core  # noqa: E402
 
 
 def main(argv) -> int:
+    # pronounce <word> … — phones for words via the venv's layered Pronouncer (real g2p for
+    # slang). Used by the vocabulary palette write path so palette entries store real phones.
+    if len(argv) >= 3 and argv[1] == "pronounce":
+        p = core.Pronouncer()  # cmudict + lazy g2p_en (present in this venv)
+        phones = {w: p.phones(w) for w in argv[2:]}
+        _OUT.write(json.dumps({"ok": True, "phones": phones}))
+        return 0
     if len(argv) < 3 or argv[1] != "get_rhymes":
         _OUT.write(json.dumps({"ok": False,
                                "error": "usage: get_rhymes <word> <strictness> <max_n> [syllables]"}))

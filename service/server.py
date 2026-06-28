@@ -114,6 +114,61 @@ def _phonology_available() -> bool:
     return importlib.util.find_spec("cmudict") is not None
 
 
+def _pronounce_words(words: list) -> dict:
+    """ARPAbet phones for `words` via the phonology venv (real g2p for slang) when present,
+    else in-process (cmudict/heuristic). Used by the vocabulary palette write path so palette
+    entries store real phones. Returns {word: [phones] | None}. Best-effort (never raises)."""
+    words = [w for w in words if w]
+    if not words:
+        return {}
+    py = _phonology_py()
+    if os.path.isfile(py):
+        cli = os.path.join(SERVICE_DIR, "phonology", "phonology_cli.py")
+        try:
+            proc = subprocess.run([py, cli, "pronounce", *words],
+                                  capture_output=True, text=True, timeout=120)
+            payload = json.loads((proc.stdout or "").strip())
+            if payload.get("ok"):
+                return payload.get("phones", {})
+        except Exception:  # noqa: BLE001 (fall through to in-process)
+            pass
+    try:
+        from phonology import core as _ph
+        p = _ph.Pronouncer()
+        return {w: p.phones(w) for w in words}
+    except Exception:  # noqa: BLE001
+        return {w: None for w in words}
+
+
+def _merge_palette_rhymes(payload: dict) -> dict:
+    """Augment a /get_rhymes result with rhyming words from the vocabulary palette (Bar IQ B)
+    — so slang/coined words SURFACE as candidates, not just dictionary words. Uses the query
+    phones the phonology core already returned (no re-pronounce). Palette hits are tagged
+    source='palette' + their register; deduped against the dictionary candidates."""
+    try:
+        qphones = payload.get("queryPhones")
+        if not qphones:
+            return payload
+        from lyrics.vocab import VocabPalette
+        strict = payload.get("strictness", "slant")
+        have = {c.get("word") for c in payload.get("candidates", [])}
+        have.add(str(payload.get("word", "")).lower())
+        extra = []
+        for h in VocabPalette().rhyme_search(qphones, strict, max_n=200):
+            if h["word"] not in have:
+                have.add(h["word"])
+                extra.append({"word": h["word"], "syllables": h["syllables"],
+                              "grade": h["grade"], "source": "palette", "register": h.get("register", "")})
+        if extra:
+            # palette words first (they're what makes it feel un-neutered), then the dict words
+            payload = dict(payload)
+            payload["candidates"] = extra + payload.get("candidates", [])
+    except Exception:  # noqa: BLE001 (palette is additive; never break rhyme lookup)
+        pass
+    payload.pop("queryPhones", None)   # internal — don't leak to the client
+    return payload
+
+
 def _colorrack_hash() -> str:
     try:
         from colors import runtime as CR
@@ -775,13 +830,14 @@ class Handler(BaseHTTPRequestHandler):
                     tail = (proc.stderr or "").strip()[-400:]
                     self._send(500, {"ok": False, "error": f"rhyme lookup failed: {tail or 'no output'}"})
                     return
-                self._send(200 if payload.get("ok") else 500, payload)
+                self._send(200 if payload.get("ok") else 500,
+                           _merge_palette_rhymes(payload) if payload.get("ok") else payload)
             else:
                 try:
                     from phonology import core as _ph
                     payload = _ph.get_rhymes(word, strictness=strictness,
                                              max_n=max_n, syllables=syllables)
-                    self._send(200, payload)
+                    self._send(200, _merge_palette_rhymes(payload))
                 except Exception as e:  # noqa: BLE001
                     self._send(500, {"ok": False, "error": f"phonology error: {e}"})
         elif path in ("/complete_lyrics", "/fill_lyric_gap", "/suggest_next_line"):
@@ -834,6 +890,16 @@ class Handler(BaseHTTPRequestHandler):
                 if action == "add":
                     lines = [str(x) for x in (data.get("lines", []) or [])]
                     added = sc.add_lines(lines, meta={"source": str(data.get("source", "user"))})
+                    # Bar IQ B — the flywheel ALSO feeds the vocabulary palette: harvest the
+                    # accepted lines' content words (pronounced via the venv so slang gets real
+                    # phones). Best-effort — never break the corpus add.
+                    try:
+                        from lyrics.vocab import VocabPalette
+                        from lyrics.style_corpus import _content_tokens
+                        toks = sorted({t for ln in lines for t in _content_tokens(ln)})
+                        VocabPalette().harvest_from_corpus(lines, phones_map=_pronounce_words(toks))
+                    except Exception:  # noqa: BLE001
+                        pass
                     self._send(200, {"ok": True, "added": added, **sc.stats()})
                 elif action == "clear":
                     sc.clear()
@@ -842,6 +908,38 @@ class Handler(BaseHTTPRequestHandler):
                     self._send(200, sc.stats())
             except Exception as e:  # noqa: BLE001
                 self._send(500, {"ok": False, "error": f"style corpus error: {e}"})
+        elif path == "/vocab":
+            # Bar IQ B — the vocabulary palette (backend-only). action: "add" (manual words +
+            # register) | "harvest" (content words from lines) | "seed" (load the bundled open
+            # seed) | "stats" (counts only). Words are pronounced via the phonology venv so
+            # slang gets real g2p phones. Copyright-clean: words + pronunciations, never lines.
+            try:
+                from lyrics.vocab import VocabPalette, seed_words
+                action = str(data.get("action", "stats"))
+                pal = VocabPalette()
+                if action == "add":
+                    words = [str(x) for x in (data.get("words", []) or [])]
+                    register = str(data.get("register", "slang"))
+                    added = pal.add_words(words, register=register, phones_map=_pronounce_words(words))
+                    self._send(200, {"ok": True, "added": added, **pal.stats()})
+                elif action == "harvest":
+                    lines = [str(x) for x in (data.get("lines", []) or [])]
+                    from lyrics.style_corpus import _content_tokens
+                    toks = sorted({t for ln in lines for t in _content_tokens(ln)})
+                    added = pal.harvest_from_corpus(lines, phones_map=_pronounce_words(toks))
+                    self._send(200, {"ok": True, "added": added, **pal.stats()})
+                elif action == "seed":
+                    by_reg: dict = {}
+                    for w, r in seed_words():
+                        by_reg.setdefault(r, []).append(w)
+                    total = 0
+                    for r, ws in by_reg.items():
+                        total += pal.add_words(ws, register=r, phones_map=_pronounce_words(ws))
+                    self._send(200, {"ok": True, "added": total, **pal.stats()})
+                else:
+                    self._send(200, pal.stats())
+            except Exception as e:  # noqa: BLE001
+                self._send(500, {"ok": False, "error": f"vocab error: {e}"})
         elif path == "/training/submit" or path == "/training/jobs":
             if not TRAINING_ENABLED:
                 self._send(503, {"ok": False, "error": "lora trainer unavailable"})
