@@ -21,6 +21,7 @@ SUITE = [
     ("render compiler (§9)", HERE / "render" / "compile_test.py"),
     ("GUI→Recipe synth element (§5b→§9)", HERE / "render" / "from_screen_test.py"),
     ("§4→§5b synth-GUI auto-wiring (skeleton enrich)", HERE / "render" / "enrich_from_screen_test.py"),
+    ("§4→§5 piano-roll→MIDI auto-wiring", HERE / "render" / "midi_from_frames_test.py"),
     ("sourcing (§3)", HERE / "sourcing" / "sourcing_test.py"),
     ("vision detectors (§2)", HERE / "vision" / "vision_test.py"),
     ("video→skeleton (§4)", HERE / "video2recipe" / "video2recipe_test.py"),

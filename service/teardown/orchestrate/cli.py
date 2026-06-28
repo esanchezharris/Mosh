@@ -73,6 +73,16 @@ def main(argv=None):
                 print(f"[skeleton] §5b read {n} synth GUI(s) from keyframes", file=sys.stderr)
         except Exception as e:
             print(f"[skeleton] synth-GUI enrich skipped: {type(e).__name__}: {e}", file=sys.stderr)
+        # §4→§5: read the piano-roll off the keyframes and attach its MIDI to the lead synth so it
+        # plays a part (conservative — no-ops rather than emit garbage). Best-effort.
+        try:
+            from teardown.render.from_screen import midi_from_frames
+            m = midi_from_frames(rec, frames, out_dir=str(out / "assets" / "midi"))
+            if m.get("attached"):
+                print(f"[skeleton] §5 attached {m['notes']} screen-read notes to {m['element_id']}",
+                      file=sys.stderr)
+        except Exception as e:
+            print(f"[skeleton] piano-roll MIDI skipped: {type(e).__name__}: {e}", file=sys.stderr)
         return rec
 
     def extract(rec, video_ref):

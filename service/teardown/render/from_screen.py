@@ -156,3 +156,121 @@ def enrich_synths_from_frames(rec, frames, *, min_conf: float = 0.6) -> int:
             el.synth_patch = read.synth_patch
             upgraded += 1
     return upgraded
+
+
+def _lead_synth_element(rec):
+    """The element a screen-read MIDI part should drive: a synth element that still has NO MIDI, or
+    the skeleton's bare 'piano-roll' midi placeholder; else None. Never returns an element that
+    already carries real MIDI — a rough screen read must not overwrite a better-sourced part
+    (e.g. a §7 'extracted' line). Only elements with midi.status 'unknown' are eligible."""
+    def unread(e):
+        return getattr(e.midi.status, "value", e.midi.status) == "unknown"
+    synths = [e for e in rec.elements if getattr(e, "synth_patch", None) and e.synth_patch.plugin
+              and e.synth_patch.plugin.name and unread(e)]
+    if synths:
+        return synths[0]
+    for e in rec.elements:                             # the skeleton's 'piano roll part' placeholder
+        if unread(e) and getattr(e.role, "value", e.role) == "other":
+            return e
+    return None
+
+
+def _is_fine_grid(crop, min_lanes: int = 12) -> bool:
+    """True if `crop` is a FINE semitone grid (a piano roll: many closely-spaced horizontal lane
+    lines) rather than a COARSE track grid (a DAW arrangement view, whose few tall rows + coloured
+    clips would otherwise be mis-read as bogus 'notes'). Counts distinct full-width horizontal lines;
+    a piano roll has dozens of semitone lanes, an arrangement only a handful of tracks."""
+    try:
+        import cv2
+        import numpy as np
+    except Exception:
+        return False
+    g = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if crop.ndim == 3 else crop
+    cw = g.shape[1]
+    if cw == 0:
+        return False
+    edges = cv2.Canny(g, 50, 150)
+    lines = cv2.HoughLinesP(edges, 1, np.pi / 180, threshold=80,
+                            minLineLength=int(cw * 0.5), maxLineGap=8)
+    if lines is None:
+        return False
+    ys = sorted(int((y1 + y2) / 2) for x1, y1, x2, y2 in lines[:, 0, :]
+                if abs(y2 - y1) <= 3 and abs(x2 - x1) > cw * 0.5)
+    uniq: list = []
+    for y in ys:                                        # dedup near-coincident lane lines
+        if not uniq or y - uniq[-1] > 2:
+            uniq.append(y)
+    return len(uniq) >= min_lanes
+
+
+def midi_from_frames(rec, frames, *, out_dir, bpm: Optional[float] = None,
+                     min_notes: int = 3, max_notes: int = 256) -> dict:
+    """Locate the piano-roll in the keyframes, read its notes (§5), and attach the resulting MIDI
+    to the lead synth element so the synth plays a part at §9 render (the §4→§5 seam).
+
+    Conservative + gated, but HONESTLY heuristic — it attaches only when a frame passes three
+    gates: (1) a roll region is localized (piano_roll_present bbox), (2) the cropped region is a
+    FINE semitone grid, not a coarse DAW-arrangement track grid (_is_fine_grid — the arrangement
+    view also has grid lines + coloured clips, so this is the load-bearing anti-garbage check),
+    and (3) the recovered notes are plausible (count in [min_notes, max_notes], sane pitches,
+    positive durations). It still can't guarantee a regular-grid arrangement is never mis-read,
+    so the attached part is marked status='partial', confidence 0.4 (NOT presented as high
+    confidence) and the recipe stays needs_review. Absolute pitch carries the roll's scroll offset
+    (detect_axes' top_midi is a default) — the RHYTHM is the reliable signal, not the octave.
+    No-ops gracefully (returns {'attached': False}) without cv2 / a roll / a target element.
+    Returns {attached, notes, midi_ref, element_id}.
+    """
+    try:
+        import os as _os
+
+        from teardown.midi_from_screen import detect_notes, write_midi
+        from teardown.midi_from_screen.axes import detect_axes
+        from teardown.vision.pianoroll import piano_roll_present
+    except Exception:
+        return {"attached": False}
+    if not frames:
+        return {"attached": False}
+
+    # the keyframe whose piano-roll is most confidently localized AND is a fine semitone grid
+    best = None  # (confidence, crop_image)
+    for fr in frames:
+        img = getattr(fr, "image", None)
+        if img is None or getattr(img, "ndim", 0) != 3 or getattr(img, "size", 0) == 0:
+            continue
+        pr = piano_roll_present(img)
+        if not (pr.get("present") and pr.get("bbox")):
+            continue
+        x, y, w, h = pr["bbox"]
+        crop = img[y:y + h, x:x + w]
+        if crop.size == 0 or not _is_fine_grid(crop):
+            continue
+        if best is None or pr.get("confidence", 0.0) > best[0]:
+            best = (pr.get("confidence", 0.0), crop)
+    if best is None:
+        return {"attached": False}
+
+    try:
+        axes = detect_axes(best[1])
+        notes = detect_notes(best[1], axes)
+    except Exception:
+        return {"attached": False}
+    notes = [n for n in notes if 12 <= n["pitch"] <= 120 and n["end"] > n["start"]]
+    if not (min_notes <= len(notes) <= max_notes):
+        return {"attached": False}
+
+    target = _lead_synth_element(rec)
+    if target is None:
+        return {"attached": False}
+
+    tempo = bpm
+    if tempo is None:
+        tv = getattr(rec.meta.tempo_bpm, "value", None)
+        tempo = float(tv) if tv else 140.0
+    _os.makedirs(out_dir, exist_ok=True)
+    mid = _os.path.join(out_dir, f"{target.element_id}_from_screen.mid")
+    try:
+        write_midi(notes, mid, bpm=tempo)
+    except Exception:
+        return {"attached": False}
+    target.midi = Midi(status="partial", midi_ref=mid, note_count=len(notes), confidence=0.4)
+    return {"attached": True, "notes": len(notes), "midi_ref": mid, "element_id": target.element_id}
