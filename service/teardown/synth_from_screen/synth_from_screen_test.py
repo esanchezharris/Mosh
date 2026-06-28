@@ -256,6 +256,26 @@ check("compute_calibration(grayscale) → None",
       compute_calibration(_sd, np.zeros((100, 100), np.uint8)) is None)
 check("compute_calibration(no landmark block) → None",
       compute_calibration({"reference_size": [100, 100]}, np.zeros((50, 50, 3), np.uint8)) is None)
+# "never raises" contract: a malformed-but-PRESENT landmark must DEGRADE to None, not crash
+# (profiles are hand-edited — a typo'd bbox/template_scale/reference_size must not break the read).
+_img3 = np.zeros((80, 80, 3), np.uint8)
+for _bad in (
+    {"reference_size": [100, 100], "landmark": {"template": "serum.logo.png", "bbox": [28], "template_scale": 0.6}},          # short bbox
+    {"reference_size": [100, 100], "landmark": {"template": "serum.logo.png", "bbox": [28, 50], "template_scale": "x"}},      # non-numeric scale
+    {"reference_size": [0, 100], "landmark": {"template": "serum.logo.png", "bbox": [28, 50], "template_scale": 0.6}},        # ref_w=0
+    {"reference_size": [100, 100], "landmark": {"template": "nope.png", "bbox": [28, 50], "template_scale": 0.6}},            # missing template
+):
+    try:
+        _r = compute_calibration(_bad, _img3)
+        check("compute_calibration degrades on malformed landmark (→None, no raise)", _r is None, str(_bad.get("landmark")))
+    except Exception as _e:  # noqa: BLE001
+        check("compute_calibration degrades on malformed landmark (→None, no raise)", False, f"RAISED {type(_e).__name__}: {_bad.get('landmark')}")
+# axis_map must likewise never raise on a malformed landmark (it feeds all four coord-loaders)
+try:
+    _am = axis_map({"reference_size": [100, 100], "landmark": {"template": "serum.logo.png", "bbox": [28]}}, 80, 80, _img3)
+    check("axis_map falls back to proportional on malformed landmark", not _am.host_invariant)
+except Exception as _e:  # noqa: BLE001
+    check("axis_map falls back to proportional on malformed landmark", False, f"RAISED {type(_e).__name__}")
 # axis_map(img=None) is byte-for-byte the legacy proportional map (no regression for old callers)
 _capm = axis_map(_sd, 1190, 759, None)
 check("axis_map(img=None) is proportional (not host-invariant)", not _capm.host_invariant)

@@ -71,47 +71,61 @@ def compute_calibration(data: dict, img) -> dict | None:
         return None
     try:
         import cv2
+
+        tpath = os.path.join(PROFILE_DIR, lm.get("template", ""))
+        if not os.path.isfile(tpath):
+            return None
+        tmpl = cv2.imread(tpath)
+        bbox = lm.get("bbox")
+        if tmpl is None or not bbox or len(bbox) < 2:
+            return None
+        ref = data.get("reference_size", [img.shape[1], img.shape[0]])
+        ref_w = float(ref[0])
+        tscale = float(lm.get("template_scale", 1.0)) or 1.0
+        bx, by = bbox[0], bbox[1]
+        ref_x, ref_y = bx / tscale, by / tscale      # logo top-left in reference px
+        fh, fw = img.shape[:2]
+        if ref_w <= 0:
+            return None
+        s = fw / ref_w
+        s_rel = s / tscale                           # resize the stored template to frame scale
+        nw, nh = max(1, int(round(tmpl.shape[1] * s_rel))), max(1, int(round(tmpl.shape[0] * s_rel)))
+        nt = cv2.resize(tmpl, (nw, nh), interpolation=cv2.INTER_AREA)
+        # the logo is top-left; search the top band + left portion (keeps a spurious right-side
+        # bright region from stealing the match, and is cheaper).
+        sh = max(nh + 1, int(0.30 * fh))
+        sw = max(nw + 1, int(0.55 * fw))
+        region = img[:sh, :sw]
+        if region.shape[0] < nh or region.shape[1] < nw:
+            return None
+        res = cv2.matchTemplate(region, nt, cv2.TM_CCOEFF_NORMED)
+        _, score, _, loc = cv2.minMaxLoc(res)
+        if score < float(lm.get("min_score", 0.55)):
+            return None
+        dx = loc[0] - ref_x * s
+        dy = loc[1] - ref_y * s
+        # the logo can only translate by the chrome delta: x has no chrome (|dx| tiny), y a modest
+        # title-bar difference. A large offset means a wrong match → reject, fall back to proportional.
+        if abs(dx) > 0.04 * fw or abs(dy) > 0.12 * fh:
+            return None
+        return {"s": s, "dx": float(dx), "dy": float(dy), "score": float(score)}
     except Exception:
+        # a malformed-but-PRESENT landmark (short/non-numeric bbox, bad template_scale, a zero or
+        # missing reference_size, any cv2 quirk) must DEGRADE to proportional, never crash — this
+        # is the "never raises" contract axis_map + the four coord-loaders rely on.
         return None
-    tpath = os.path.join(PROFILE_DIR, lm.get("template", ""))
-    if not os.path.isfile(tpath):
-        return None
-    tmpl = cv2.imread(tpath)
-    if tmpl is None or "bbox" not in lm:
-        return None
-    ref_w, ref_h = data.get("reference_size", [img.shape[1], img.shape[0]])
-    tscale = float(lm.get("template_scale", 1.0)) or 1.0
-    bx, by = lm["bbox"][0], lm["bbox"][1]
-    ref_x, ref_y = bx / tscale, by / tscale          # logo top-left in reference px
-    fh, fw = img.shape[:2]
-    s = fw / float(ref_w)
-    s_rel = s / tscale                               # resize the stored template to frame scale
-    nw, nh = max(1, int(round(tmpl.shape[1] * s_rel))), max(1, int(round(tmpl.shape[0] * s_rel)))
-    nt = cv2.resize(tmpl, (nw, nh), interpolation=cv2.INTER_AREA)
-    # the logo is top-left; search the top band + left portion (keeps a spurious right-side
-    # bright region from stealing the match, and is cheaper).
-    sh = max(nh + 1, int(0.30 * fh))
-    sw = max(nw + 1, int(0.55 * fw))
-    region = img[:sh, :sw]
-    if region.shape[0] < nh or region.shape[1] < nw:
-        return None
-    res = cv2.matchTemplate(region, nt, cv2.TM_CCOEFF_NORMED)
-    _, score, _, loc = cv2.minMaxLoc(res)
-    if score < float(lm.get("min_score", 0.55)):
-        return None
-    dx = loc[0] - ref_x * s
-    dy = loc[1] - ref_y * s
-    # the logo can only translate by the chrome delta: x has no chrome (|dx| tiny), y a modest
-    # title-bar difference. A large offset means a wrong match → reject, fall back to proportional.
-    if abs(dx) > 0.04 * fw or abs(dy) > 0.12 * fh:
-        return None
-    return {"s": s, "dx": float(dx), "dy": float(dy), "score": float(score)}
 
 
 def axis_map(data: dict, frame_w: int, frame_h: int, img=None) -> Calib:
     """The one entry point every coord-loader uses. With `img` and a usable landmark → a
     host-invariant Calib (uniform scale + logo offset); otherwise the legacy proportional Calib
-    (sx=frame_w/ref_w, sy=frame_h/ref_h), byte-for-byte the prior behaviour."""
+    (sx=frame_w/ref_w, sy=frame_h/ref_h).
+
+    Proportional-fallback parity: point + radius coords (.x/.y via int(round(·)), .length_i) are
+    byte-identical to the prior load_profile. bbox SPANS (.w/.h) now also round, where the old code
+    truncated them (int(w*sx)) — a deliberate change that makes spans consistent with the points
+    they sit beside (the legacy code rounded cx/cy but truncated bbox, a ≤1px internal
+    inconsistency). No bundled profile uses bbox controls, so this shifts nothing today."""
     ref_w, ref_h = data.get("reference_size", [frame_w, frame_h])
     sx, sy = frame_w / float(ref_w), frame_h / float(ref_h)
     if img is not None:
