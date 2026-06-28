@@ -27,10 +27,10 @@
     "active_amount_eps": 0.06
   },
   "fx_list": {
-    "_note": "EFFECTS page only. The effects RACK is the 2nd column (after MACRO 1-4); each row carries a coloured power dot at its top-left. Lit dots are purple/pink (S~100-120, V~255); off rows are grey (S<=44, V<=94). Calibrated from vital_effects.png (1171x718, exactly half this reference): dot column x=215, Chorus row y=85, pitch 58 -> doubled to reference space. Fixed top->bottom order is Vital's alphabetical rack.",
-    "x_dot": 430,
-    "row0_y": 170,
-    "row_h": 116,
+    "_note": "EFFECTS page only. The effects RACK is the FIXED vertical list (after MACRO 1-4); each row carries a power dot at its top-left — lit purple/pink (S~100-120, V~255) when on, grey (S~46) when off. ⚠️ x_dot MUST be the rack power-dot column (~160), NOT the effect icon (~430): the prior x_dot=430 read the effect's expanded PANEL content, which STACKS by enabled-order (a panel slides up into another effect's row slot when an earlier effect is off) → it misreported e.g. Delay-alone as Chorus. The power dot is FIXED per rack row and is the only reliable on/off signal. Calibrated LIVE across Chorus/Delay/both configs (computer-use): dot column x=160, Chorus row y=168, pitch 136 (reference space 2342x1436). Fixed top->bottom order is Vital's alphabetical rack.",
+    "x_dot": 160,
+    "row0_y": 168,
+    "row_h": 136,
     "on_sat_min": 70,
     "on_val_min": 130,
     "effects": ["Chorus", "Compressor", "Delay", "Distortion", "Equalizer", "Filter", "Flanger", "Phaser", "Reverb"]

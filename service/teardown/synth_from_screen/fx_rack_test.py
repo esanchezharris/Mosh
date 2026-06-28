@@ -54,6 +54,19 @@ if os.path.isfile(pv):
 else:
     check("vital_effects.png fixture present", False, pv)
 
+# ── REGRESSION: Delay-ALONE (Chorus off). The detector USED to misread this as "Chorus on" ──────
+# because it sampled x_dot=430 — the effect ICON / expanded PANEL column — and Vital's panels STACK
+# by enabled-order, so Delay's panel slid up into Chorus's row slot. The fix samples the FIXED rack
+# power-dot column (x_dot=160). Captured live (computer-use) with only Delay enabled.
+pdo = os.path.join(PANELS, "vital_delay_only.png")
+if os.path.isfile(pdo):
+    chain = detect_fx_chain(cv2.imread(pdo), "vital")
+    on = {e["name"] for e in chain if e["on"]}
+    check("vital Delay-alone: ONLY Delay on (not Chorus — the stacking-panel bug)",
+          on == {"Delay"}, str(on))
+else:
+    check("vital_delay_only.png fixture present", False, pdo)
+
 # ── REAL fixture: Serum 1 FX page (Init = ALL OFF) ────────────────────────────
 # serum1_fx.png (900x747, FX tab). Fixed order (10). ENABLED: NONE (Init patch).
 SERUM1_ORDER = ["Hyper/Dimension", "Distortion", "Flanger", "Phaser", "Chorus",
@@ -86,12 +99,13 @@ if os.path.isfile(pv):
 # geometry by writing a tiny synthetic frame and a matching ad-hoc profile in-memory is overkill;
 # we draw onto a blank frame at the VITAL reference dot positions, lighting a chosen subset.
 def make_synthetic_vital(lit_indices, w=1171, h=718):
-    """Blank frame with the Vital effects-rack dot column (ref/2 == fixture space): lit rows get a
-    bright saturated magenta dot, off rows a grey one — at the calibrated x=215, y=85, pitch=58."""
+    """Blank frame with the Vital effects-rack power-dot column (ref/2 == fixture space): lit rows
+    get a bright saturated magenta dot, off rows a grey one — at the calibrated power-dot column
+    x=80, y=84, pitch=68 (ref 160/168/136, halved)."""
     img = np.full((h, w, 3), 30, np.uint8)
-    x = 215
+    x = 80
     for i in range(9):
-        y = 85 + i * 58
+        y = 84 + i * 68
         col = (200, 40, 220) if i in lit_indices else (90, 90, 90)  # BGR magenta vs grey
         cv2.circle(img, (x, y), 8, col, -1)
     return img
