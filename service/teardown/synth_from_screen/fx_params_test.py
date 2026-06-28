@@ -70,6 +70,29 @@ if os.path.isfile(both) and os.path.isfile(alone):
 else:
     check("vital fx fixtures present (effects + delay_only)", False, "missing fixture")
 
+# ── more effects calibrated LIVE (Compressor/Distortion/Flanger/Phaser/Reverb) ─────────────
+# Each captured alone (panel at base_y); the reader must surface that effect's full knob set with
+# every value in range, plus a couple of known factory-default anchors.
+MORE = {
+    "Compressor": (["mix", "attack", "low", "band", "high", "release"], {"mix": (0.85, 1.0)}),
+    "Distortion": (["drive", "mix", "cutoff", "resonance", "blend"], {"mix": (0.85, 1.0), "blend": (0.0, 0.15)}),
+    "Flanger":    (["feedback", "mix", "offset", "center", "depth"], {"mix": (0.85, 1.0)}),
+    "Phaser":     (["feedback", "mix", "offset", "center", "depth"], {"mix": (0.85, 1.0)}),
+    "Reverb":     (["low_cut", "cutoff", "chorus_amount", "delay", "mix",
+                    "high_cut", "gain", "chorus_freq", "size", "time"], {"gain": (0.85, 1.0)}),
+}
+for eff, (knobs, anchors) in MORE.items():
+    fx = os.path.join(PANELS, f"vital_{eff.lower()}_only.png")
+    if not os.path.isfile(fx):
+        check(f"vital_{eff.lower()}_only.png fixture present", False, fx)
+        continue
+    r = read_fx_params(cv2.imread(fx), "vital")
+    p = r.get(eff, {}).get("params", {})
+    check(f"{eff}: detected + full knob set", set(r) == {eff} and set(p) == set(knobs), str(set(p)))
+    check(f"{eff}: all knob values in [0,1]", all(0.0 <= v <= 1.0 for v in p.values()), str(p))
+    for k, (lo, hi) in anchors.items():
+        check(f"{eff}.{k} default ~[{lo},{hi}]", k in p and lo <= p[k] <= hi, str(p.get(k)))
+
 # ── graceful degradation: never raise, never invent ───────────────────────────────────────
 blank = np.full((400, 400, 3), 20, np.uint8)
 check("unknown synth → {}", read_fx_params(blank, "nope") == {})

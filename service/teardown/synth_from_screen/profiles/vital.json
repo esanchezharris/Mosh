@@ -53,6 +53,47 @@
         "mix":      {"cx": 1248, "dy": 46,  "r": 28},
         "cutoff":   {"cx": 1106, "dy": 156, "r": 30},
         "spread":   {"cx": 1248, "dy": 156, "r": 28}
+      }},
+      "Compressor": {"height": 235, "knobs": {
+        "mix":     {"cx": 698,  "dy": 46,  "r": 32},
+        "attack":  {"cx": 1248, "dy": 46,  "r": 28},
+        "low":     {"cx": 508,  "dy": 156, "r": 32},
+        "band":    {"cx": 604,  "dy": 156, "r": 28},
+        "high":    {"cx": 700,  "dy": 156, "r": 32},
+        "release": {"cx": 1248, "dy": 156, "r": 28}
+      }},
+      "Distortion": {"height": 235, "knobs": {
+        "drive":     {"cx": 998,  "dy": 46,  "r": 28},
+        "mix":       {"cx": 1212, "dy": 46,  "r": 28},
+        "cutoff":    {"cx": 962,  "dy": 156, "r": 24},
+        "resonance": {"cx": 1104, "dy": 156, "r": 32},
+        "blend":     {"cx": 1248, "dy": 156, "r": 28}
+      }},
+      "Flanger": {"height": 235, "knobs": {
+        "feedback": {"cx": 1106, "dy": 46,  "r": 32},
+        "mix":      {"cx": 1248, "dy": 46,  "r": 28},
+        "offset":   {"cx": 568,  "dy": 156, "r": 28},
+        "center":   {"cx": 1106, "dy": 156, "r": 32},
+        "depth":    {"cx": 1248, "dy": 156, "r": 28}
+      }},
+      "Phaser": {"height": 235, "knobs": {
+        "feedback": {"cx": 1104, "dy": 46,  "r": 32},
+        "mix":      {"cx": 1248, "dy": 46,  "r": 28},
+        "offset":   {"cx": 568,  "dy": 156, "r": 28},
+        "center":   {"cx": 1104, "dy": 156, "r": 32},
+        "depth":    {"cx": 1248, "dy": 156, "r": 28}
+      }},
+      "Reverb": {"height": 235, "knobs": {
+        "low_cut":       {"cx": 524,  "dy": 46,  "r": 32},
+        "cutoff":        {"cx": 870,  "dy": 46,  "r": 28},
+        "chorus_amount": {"cx": 998,  "dy": 46,  "r": 32},
+        "delay":         {"cx": 1128, "dy": 46,  "r": 28},
+        "mix":           {"cx": 1256, "dy": 46,  "r": 32},
+        "high_cut":      {"cx": 524,  "dy": 156, "r": 32},
+        "gain":          {"cx": 870,  "dy": 156, "r": 28},
+        "chorus_freq":   {"cx": 998,  "dy": 156, "r": 32},
+        "size":          {"cx": 1128, "dy": 156, "r": 28},
+        "time":          {"cx": 1256, "dy": 156, "r": 32}
       }}
     }
   },
