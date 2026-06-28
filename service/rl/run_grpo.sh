@@ -21,6 +21,9 @@ ITERS="${ITERS:-60}"; PPS="${PPS:-4}"; GROUP="${GROUP:-6}"; TEMP="${TEMP:-1.0}"
 MAXNEW="${MAXNEW:-200}"; LR="${LR:-2e-6}"; BETA="${BETA:-0.04}"
 EVAL_EVERY="${EVAL_EVERY:-15}"; GATE_N="${GATE_N:-80}"; SEED="${SEED:-0}"
 FULL_GATE_N="${FULL_GATE_N:-300}"   # final DoD compare subsample (0=all 870)
+REWARD="${REWARD:-symbolic}"        # symbolic = Rung-1 clean-apply | audio = Rung-2 render→teardown Reward
+REWARD_MODE="${REWARD_MODE:-floor}" # floor (no torch) | musical (MERT head + exemplars); only when REWARD=audio
+MOSH_BIN="${MOSH_BIN:-/Applications/Mosh.app/Contents/MacOS/Mosh}"
 
 RL_DIR="service/sft/.rl-data/${RL_TAG}"
 OUT_DIR="service/sft/.adapters/${OUT_TAG}"
@@ -40,6 +43,13 @@ if [ ! -f "${RL_DIR}/rl_train.prompts.jsonl" ]; then
       --out "../${RL_DIR}" --per-shape 250 --seed "${SEED}" )
 else
   echo "▶ RL prompt data present → ${RL_DIR} (set RL_TAG to rebuild)"
+fi
+
+# ── 1b. Rung-2 audio reward wiring (render each rollout → teardown Reward) ────
+if [ "$REWARD" = "audio" ]; then
+  [ -f service/teardown/.teardown.env ] && source service/teardown/.teardown.env
+  export MOSH_RL_REWARD=audio MOSH_RL_REWARD_MODE="$REWARD_MODE" MOSH_BIN
+  echo "▶ Rung-2 audio reward (${REWARD_MODE}) — MOSH_BIN=${MOSH_BIN}  TEARDOWN_PY=${TEARDOWN_PY:-MISSING (run service/teardown/setup-teardown.sh)}"
 fi
 
 # ── 2. GRPO train (offline serving → correct tokenizer) ──────────────────────

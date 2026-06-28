@@ -53,6 +53,16 @@ REPO = Path(__file__).resolve().parents[2]
 UI = REPO / "ui"
 TSX = UI / "node_modules" / ".bin" / "tsx"
 
+# Reward seam (the prime directive: swap the reward WITHOUT touching the trainer). Both
+# scorer scripts read the SAME rollouts.jsonl and write the SAME {sampleId,reward,deferred}
+# lines — only the implementation differs. MOSH_RL_REWARD=audio → Rung-2 (render each
+# rollout to WAV, score with the teardown Reward); default → Rung-1 (symbolic clean-apply).
+SCORER_SCRIPT = (
+    "scripts/rl/scoreRolloutsAudio.mts"
+    if os.environ.get("MOSH_RL_REWARD") == "audio"
+    else "scripts/rl/scoreRollouts.mts"
+)
+
 
 def log(*a):
     print(*a, file=sys.stderr, flush=True)
@@ -105,7 +115,7 @@ def score_rollouts(eval_path: Path, rollouts, workdir: Path):
     opath = workdir / "rewards.jsonl"
     rpath.write_text("\n".join(json.dumps(r) for r in rollouts) + "\n")
     subprocess.run(
-        [str(TSX), "scripts/rl/scoreRollouts.mts", "--eval", str(eval_path), "--rollouts", str(rpath), "--out", str(opath)],
+        [str(TSX), SCORER_SCRIPT, "--eval", str(eval_path), "--rollouts", str(rpath), "--out", str(opath)],
         cwd=str(UI), check=True, stdout=subprocess.DEVNULL,
     )
     out = {}
@@ -190,7 +200,9 @@ def main():
     rl_eval_path = rl_dir / "rl_train.eval.jsonl"
     gate_eval_path = rl_dir / "gate.eval.jsonl"
 
-    log(f"▶ GRPO rung-1 — model={a.model} sft={sft_adapter}")
+    reward_kind = "audio (Rung-2: render→teardown Reward)" if os.environ.get("MOSH_RL_REWARD") == "audio" else "symbolic (Rung-1: clean-apply)"
+    log(f"▶ GRPO — model={a.model} sft={sft_adapter}")
+    log(f"  reward = {reward_kind}  [{SCORER_SCRIPT}]")
     log(f"  loading policy (trainable) + reference (frozen)…")
     policy, tok = build_model(a.model, str(sft_adapter), trainable=True)
     ref, _ = build_model(a.model, str(sft_adapter), trainable=False)
