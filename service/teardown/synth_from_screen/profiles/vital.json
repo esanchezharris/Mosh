@@ -35,6 +35,27 @@
     "on_val_min": 130,
     "effects": ["Chorus", "Compressor", "Delay", "Distortion", "Equalizer", "Filter", "Flanger", "Phaser", "Reverb"]
   },
+  "fx_modules": {
+    "_note": "Per-effect KNOB sub-profiles (rung 10), read by fx_params.read_fx_params. Vital's enabled effects show expanded panels that STACK by enabled-order, so a panel's y is dynamic: panel_top(E) = base_y + Σ height of enabled CALIBRATED effects before E in the fixed rack order. knob cx is absolute (panels share an x); knob dy is relative to that effect's panel_top. All white-pointer. Calibrated LIVE (computer-use) across Chorus-alone / Delay-alone / both — the both-config proved Delay's panel sits at base_y+235 (Chorus's height) and the delay-alone config proved it slides up to base_y. Only Chorus + Delay calibrated so far; an uncalibrated enabled effect before another blocks the latter's positioned read (reported position_unknown, never guessed).",
+    "base_y": 140,
+    "modules": {
+      "Chorus": {"height": 235, "knobs": {
+        "feedback": {"cx": 1106, "dy": 46,  "r": 32},
+        "mix":      {"cx": 1248, "dy": 46,  "r": 28},
+        "depth":    {"cx": 508,  "dy": 156, "r": 30},
+        "delay1":   {"cx": 604,  "dy": 156, "r": 28},
+        "delay2":   {"cx": 700,  "dy": 156, "r": 30},
+        "cutoff":   {"cx": 1106, "dy": 156, "r": 30},
+        "spread":   {"cx": 1248, "dy": 156, "r": 28}
+      }},
+      "Delay": {"height": 235, "knobs": {
+        "feedback": {"cx": 1106, "dy": 46,  "r": 32},
+        "mix":      {"cx": 1248, "dy": 46,  "r": 28},
+        "cutoff":   {"cx": 1106, "dy": 156, "r": 30},
+        "spread":   {"cx": 1248, "dy": 156, "r": 28}
+      }}
+    }
+  },
   "controls": {
     "env1_delay":   {"type": "knob", "cx": 1534, "cy": 426, "r": 30, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]},
     "env1_attack":  {"type": "knob", "cx": 1676, "cy": 426, "r": 30, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]},
