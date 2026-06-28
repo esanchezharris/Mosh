@@ -63,7 +63,17 @@ def main(argv=None):
         frames = segment.keyframes(dl["video_path"], every_s=3.0, max_frames=ns.max_frames)
         meta = ocrmod.scan_meta(frames)
         sections = segment.sections_from_cuts(segment.scene_cuts(dl["video_path"]), dl["duration_s"])
-        return assemble_skeleton(source=dl, meta_signals=meta, sections=sections)
+        rec = assemble_skeleton(source=dl, meta_signals=meta, sections=sections)
+        # §4→§5b: read the synth GUI off the keyframes so a named synth element gets real params
+        # (not just status 'unknown') and actually loads + plays at §9 render. Best-effort.
+        try:
+            from teardown.render.from_screen import enrich_synths_from_frames
+            n = enrich_synths_from_frames(rec, frames)
+            if n:
+                print(f"[skeleton] §5b read {n} synth GUI(s) from keyframes", file=sys.stderr)
+        except Exception as e:
+            print(f"[skeleton] synth-GUI enrich skipped: {type(e).__name__}: {e}", file=sys.stderr)
+        return rec
 
     def extract(rec, video_ref):
         import librosa
