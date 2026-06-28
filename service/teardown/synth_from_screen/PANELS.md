@@ -34,7 +34,7 @@ entries," not "write a new reader" — except for the dynamic/tabular pages note
 | Page type | Where | Reader strategy | Status |
 |-----------|-------|-----------------|--------|
 | **Fixed knob grid** | OSC/filter/ENV/LFO on the main page; always-visible ENV column | fixed (cx,cy,r) per control in the profile, `pointer="white"` (Vital) / `"blue_tick"` (Serum) | **ENV + OSC + FILTER DONE** for all 3 synths (verified) |
-| **Dynamic FX rack** | Serum FX tab, Vital EFFECTS tab | NOT fixed — knob positions shift with which effects are enabled + their order. `fx_rack.detect_fx_chain` reads **which effects are on + their order** off the rack list (power-dot colour, names from the profile's fixed order) | **chain-detect DONE** (Vital + Serum 1); per-effect *knob* reading still a next rung |
+| **Dynamic FX rack** | Serum FX tab, Vital EFFECTS tab | `fx_rack.detect_fx_chain` reads **which effects are on + order** off the FIXED rack power-dot column (NOT the effect icon — that column shows the expanded panel, which STACKS by enabled-order and moves). `fx_params.read_fx_params` reads each enabled effect's **knobs**, computing its panel_top from the stack (base_y + Σ heights of enabled-before). | **chain-detect DONE** (Vital + Serum 1) + **per-effect KNOBS DONE v1** (Vital Chorus+Delay, stacking-proven). Other Vital effects + Serum 2's add-rack are follow-ups |
 | **Modulation matrix** | Serum MATRIX, Vital MATRIX | tabular: rows of source → (bipolar/stereo/morph) → amount → destination. `matrix.read_matrix` reads each OCCUPIED row's amount + best-effort OCR; an empty Init matrix returns [] (no hallucination) | **DONE** (Vital + **Serum 2**, the latter calibrated cross-host via the logo landmark); validated empty→[] (incl. under a title-bar shift) + synthetic populated; real-populated value calibration is a follow-up |
 | **Settings / menus** | Serum GLOBAL, Vital ADVANCED | toggles + dropdowns + a few knobs; OCR labels + `read_toggle`/`read_menu` | low priority |
 
@@ -201,12 +201,22 @@ the pipeline should pass the known synth rather than rely on vision-guessing the
    (`export`/`page_detect`/`fx_rack`/`matrix`) route through it; graceful proportional fallback when
    no image/landmark. **Unblocked + landed:** the Serum 2 `matrix` block (empty→[] host-portably);
    fixed page-detect's green-only hue bug → all 5 Serum 2 tabs detect across Mosh+Ableton.
-9. **Serum 2 MIX vertical-fader reader** — the MIX tab's per-source channel strips use VERTICAL
-   faders (matrix.py has only a HORIZONTAL slider reader); needs a vertical-handle reader + a MIX
-   block. No longer calibration-blocked (host-invariant calibration is done).
-10. **Per-effect FX knob reading** — for an enabled effect module, read its knobs via a
-   per-effect-type sub-profile (Vital EFFECTS expands modules inline; Serum 2 adds modules to a bus).
-11. **Vital filter DRIVE/MIX/KEY-TRK** — needs the filter ENABLED to read bright/unambiguous
-   (dim+off on Init reads unreliably).
-12. **Populated-matrix value calibration** — add real routings via the GUI to a Serum 2 / Vital
-   matrix and confirm the per-row AMOUNT value scale + raise `rows` beyond the empty-validated count.
+9. **Serum 2 MIX vertical-fader reader** — DEFERRED (lower marginal value): the MIX faders largely
+   DUPLICATE the already-profiled OSC-page LEVEL knobs; the unique part is per-channel bus/pan
+   routing. Needs a new vertical-slider reader + 8-channel calibration (handle-vs-meter-vs-dB-tick
+   disambiguation). No longer calibration-blocked. Pick up if bus/pan routing is needed.
+10. ~~**Per-effect FX knob reading**~~ — **DONE v1** (`fx_params.read_fx_params`, calibrated LIVE):
+   reads an enabled effect's knobs, modeling Vital's DYNAMIC panel STACK
+   (panel_top = base_y + Σ heights of enabled-before, in rack order). **Chorus + Delay** calibrated
+   + stacking-proven (Delay reads identically stacked-below-Chorus vs alone-at-top). Building this
+   ALSO uncovered + fixed a real `detect_fx_chain` bug (it sampled the moving panel column, not the
+   fixed rack power-dot — misread Delay-alone as Chorus). Follow-ups: the other 7 Vital effects;
+   Serum 2's FX is a DIFFERENT shape (a dynamic "+FX" add-rack with bus assignment, empty on Init —
+   needs an added-module reader, not this fixed-rack model).
+11. ~~**Vital filter DRIVE/MIX/KEY-TRK**~~ — **DONE** (calibrated LIVE: enabled FILTER 1, read
+   defaults DRIVE 0 / MIX 1.0 / KEY-TRK 0.5 + a drag → 0.81 to prove tracking). vital.json + fixture
+   vital_filter_on.png. Read only when the filter is enabled.
+12. ~~**Populated-matrix value calibration**~~ — **DONE for Serum 2** (added a Mod-Wheel routing
+   LIVE: read_matrix []→[1 routing], OCR'd source, amount 0.50→0.79; rows=8 confirmed required, not
+   conservative — 16 hallucinates from the bottom UI). Vital populated-matrix + raising Serum 2
+   rows>8 (needs a scrolled/taller matrix capture) remain.
