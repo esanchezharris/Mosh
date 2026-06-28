@@ -43,6 +43,21 @@ public:
         ok is false / {} on failure (service down, venv absent → 503). */
     juce::var transcribe (const juce::File& inputWav, const juce::String& mode);
 
+    /** Word-level speech transcription via Whisper (POST /transcribe_words) — the lyric
+        "mumble take" word path. SYNCHRONOUS — call on a BACKGROUND thread. Returns
+        { ok, words:[{word,start,end,confidence}] } (times in SECONDS). When Whisper isn't
+        installed the service degrades to { ok:true, words:[] } (the rhythm sheet still
+        builds; never invented words). {} on a dead service. */
+    juce::var transcribeWords (const juce::File& inputWav);
+
+    /** Mumble-take spec builder (POST /mumble_spec) — Finish-My-Song Phase 3. Note onsets +
+        confidence-gated words → a lyric constraint spec (syllables/bar + stress + word
+        anchors/gaps). Fast + deterministic (in-process note/word math, no model). SYNCHRONOUS.
+        Returns { ok, grid, lines:[{index,role,seedText,syllableTarget,syllableTol,stress,
+        rhymeGroup}] } or { ok:false, error:"no_melody_detected" }; {} on a dead service. */
+    juce::var mumbleSpec (const juce::var& notes, const juce::var& words, double bpm,
+                          int tsNum, int tsDen, double confThreshold);
+
     /** Sketch Phase 0 — beatbox → drum hits via librosa (POST /sketch). SYNCHRONOUS —
         call on a BACKGROUND thread (model-free, but a subprocess + onset analysis is
         ~0.5-2s). Deterministic given (inputWav, bpm, bars). Returns
@@ -67,6 +82,28 @@ public:
         or {} on failure (service down). */
     juce::var generateLyrics (const juce::String& mode, const juce::var& spec,
                               int lineIndex, int afterIndex, const juce::var& regen);
+
+    /** Precise per-line lyric ANALYSIS (POST /analyze_lyrics) — Finish-My-Song L1. Fast,
+        deterministic, no LLM (the dictionary phonology path for the flow visualizer).
+        SYNCHRONOUS — call on a BACKGROUND thread (mirrors transcribe()). `spec` is the
+        lyric-sheet constraint spec. Returns
+        { ok, lines:[{index, analysis:{syllables,target,stress,rhymeGrade,rhymeOk,words,...}}] },
+        or {} on failure (service down). */
+    juce::var analyzeLyrics (const juce::var& spec);
+
+    /** §7 style-RAG flywheel — push finalized lyric line(s) into the PERSISTED cross-song
+        voice corpus (POST /style_corpus action:add). **NON-SPAWNING + best-effort**: probes
+        isHealthy() first and silently no-ops (returns -1) when the service is DOWN — it NEVER
+        calls ensureServiceRunning(), so it can be fired from `accept_lyric_proposal` without
+        spawning the service (keeps --selftest hermetic) and without blocking accept. Returns
+        the corpus line count after the add, or -1 if unreachable / failed. Swallows failures;
+        safe on a detached background thread. */
+    int styleCorpusAdd (const juce::StringArray& lines, const juce::String& source);
+
+    /** §7 — corpus size for a UI readout (POST /style_corpus action:stats). NON-SPAWNING
+        (isHealthy()-gated); returns -1 when the service is down. Counts only — never the
+        content (the backend-only safety wall). */
+    int styleCorpusStats();
 
     juce::String serviceBuild() const { return svcBuild; }
 

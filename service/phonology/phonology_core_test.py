@@ -123,5 +123,57 @@ if importlib.util.find_spec("pronouncing") is not None:
 else:
     skip("real pronouncing/cmudict path", "pronouncing not importable (run setup-phonology.sh)")
 
+# ── 9. LAYERED pronouncer (Bar IQ A): user-lexicon → cmudict → g2p → heuristic ─────
+# Injected fake g2p (deterministic) proves the LAYER logic without g2p_en installed.
+def fake_g2p(word):
+    return {
+        "skrrt": ["S", "K", "R", "AA1", "R", "T"],
+        "drip": ["D", "R", "IH1", "P"],
+        "whip": ["W", "IH1", "P"],
+    }.get(word.lower())
+
+
+lp = core.Pronouncer(lexicon=mini, user_lexicon={"flame": ["F", "L", "AA1", "M"]}, g2p=fake_g2p)
+check("user-lexicon OVERRIDES cmudict (flame → AA1, not cmudict EY1)",
+      lp.phones("flame") == ["F", "L", "AA1", "M"])
+check("cmudict still used when not overridden (name → EY1 M)", lp.phones("name") == ["N", "EY1", "M"])
+check("g2p fills an OOV word (skrrt → real phones, not None)", lp.phones("skrrt") == ["S", "K", "R", "AA1", "R", "T"])
+check("g2p OOV syllable count is phoneme-precise (skrrt → 1)", lp.syllables("skrrt") == 1)
+check("OOV-vs-OOV rhyme works via g2p (drip/whip → perfect)", lp.rhyme("drip", "whip", "perfect") is True)
+check("a word in NEITHER lexicon nor g2p → heuristic (no crash)", lp.syllables("zzqxj") >= 1)
+# precedence: a callable returning None disables the g2p layer (heuristic for OOV).
+lp_nog2p = core.Pronouncer(lexicon=mini, g2p=lambda w: None)
+check("g2p disabled ⇒ OOV phones None (heuristic syllables)", lp_nog2p.phones("skrrt") is None and lp_nog2p.syllables("skrrt") >= 1)
+
+# ── 10. BONUS: REAL g2p (g2p_en) — any slang word rhymes/scans (skipped if absent) ──
+if importlib.util.find_spec("g2p_en") is not None:
+    rg = core.Pronouncer()   # default: real cmudict + lazy-loaded g2p_en
+    check("real g2p: OOV 'skrrt' gets phones (not None)", rg.phones("skrrt") is not None)
+    check("real g2p: slang 'drip'/'whip' perfect-rhyme", rg.rhyme("drip", "whip", "perfect") is True)
+    check("real g2p: coined 'flexin' scans (>=2 syllables)", rg.syllables("flexin") >= 2)
+else:
+    skip("real g2p_en path", "g2p_en not importable (run setup-phonology.sh)")
+
+# ── 11. Rhyme CRAFT (Bar IQ C): multisyllabic depth + internal-rhyme detection ────
+# multisyllabic depth = length of the longest common TRAILING vowel run (the essence of
+# multisyllabic / assonant rhyme). depth 1 = a plain end-rhyme; depth >= 2 = multisyllabic.
+city = ["S", "IH1", "T", "IY0"]; pity = ["P", "IH1", "T", "IY0"]
+make_it = ["M", "EY1", "K", "IH0", "T"]; take_it = ["T", "EY1", "K", "IH0", "T"]
+check("vowels_of(banana) == [AH, AE, AH]",
+      core.vowels_of(["B", "AH0", "N", "AE1", "N", "AH0"]) == ["AH", "AE", "AH"])
+check("multisyllabic depth: city/pity == 2 (IH, IY)", core.multisyllabic_depth(city, pity) == 2)
+check("multisyllabic depth: 'make it'/'take it' == 2 (EY, IH)", core.multisyllabic_depth(make_it, take_it) == 2)
+check("multisyllabic depth: cat/hat == 1 (single end vowel)", core.multisyllabic_depth(cat, hat) == 1)
+check("multisyllabic depth: cat/dog == 0 (no shared trailing vowel)", core.multisyllabic_depth(cat, dog) == 0)
+check("multisyllabic depth is symmetric", core.multisyllabic_depth(city, pity) == core.multisyllabic_depth(pity, city))
+
+# internal rhyme: rhyming word pairs WITHIN a line (a hallmark of skilled flow).
+line = [("money", ["M", "AH1", "N", "IY0"]), ("sunny", ["S", "AH1", "N", "IY0"]),
+        ("today", ["T", "AH0", "D", "EY1"])]
+pairs = core.internal_rhyme_pairs(line, "slant")
+check("internal_rhyme_pairs finds money~sunny (indices 0,1)", (0, 1) in pairs, str(pairs))
+check("internal_rhyme_pairs excludes the non-rhyming 'today'", (0, 2) not in pairs and (1, 2) not in pairs, str(pairs))
+check("internal_rhyme_pairs is deterministic", core.internal_rhyme_pairs(line, "slant") == pairs)
+
 print(f"\n{'OK' if not fails else 'FAILED'}: {len(fails)} failure(s)")
 sys.exit(len(fails))

@@ -70,6 +70,19 @@ def _transcribe_available() -> bool:
     return os.path.isfile(_basic_pitch_py())
 
 
+def _whisper_py() -> str:
+    """The dedicated whisper venv's python (set by setup-whisper.sh via .whisper.env ->
+    WHISPER_PY), else the conventional default path."""
+    env = os.environ.get("WHISPER_PY", "").strip()
+    return env or os.path.join(SERVICE_DIR, "whisper", ".venv", "bin", "python")
+
+
+def _whisper_available() -> bool:
+    """True when the Whisper venv exists (checked live). When absent, /transcribe_words
+    degrades to EMPTY words (the mumble-take rhythm sheet still builds) — never a 503."""
+    return os.path.isfile(_whisper_py())
+
+
 def _sketch_py() -> str:
     """The dedicated sketch venv's python (set by setup-sketch.sh via .sketch.env ->
     SKETCH_PY), else the conventional default path."""
@@ -99,6 +112,70 @@ def _phonology_available() -> bool:
         return True
     import importlib.util
     return importlib.util.find_spec("cmudict") is not None
+
+
+def _pronounce_words(words: list) -> dict:
+    """ARPAbet phones for `words` via the phonology venv (real g2p for slang) when present,
+    else in-process (cmudict/heuristic). Used by the vocabulary palette write path so palette
+    entries store real phones. Returns {word: [phones] | None}. Best-effort (never raises)."""
+    words = [w for w in words if w]
+    if not words:
+        return {}
+    py = _phonology_py()
+    if os.path.isfile(py):
+        cli = os.path.join(SERVICE_DIR, "phonology", "phonology_cli.py")
+        try:
+            proc = subprocess.run([py, cli, "pronounce", *words],
+                                  capture_output=True, text=True, timeout=120)
+            payload = json.loads((proc.stdout or "").strip())
+            if payload.get("ok"):
+                return payload.get("phones", {})
+        except Exception:  # noqa: BLE001 (fall through to in-process)
+            pass
+    try:
+        from phonology import core as _ph
+        p = _ph.Pronouncer()
+        return {w: p.phones(w) for w in words}
+    except Exception:  # noqa: BLE001
+        return {w: None for w in words}
+
+
+def _merge_palette_rhymes(payload: dict, clean: bool = False) -> dict:
+    """Augment a /get_rhymes result with rhyming words from the vocabulary palette (Bar IQ B)
+    — so slang/coined words SURFACE as candidates, not just dictionary words. Uses the query
+    phones the phonology core already returned (no re-pronounce). Palette hits are tagged
+    source='palette' + their register; deduped against the dictionary candidates. Bar IQ D:
+    `clean` excludes profanity-tagged palette words (raw is the default)."""
+    try:
+        qphones = payload.get("queryPhones")
+        if not qphones:
+            return payload
+        from lyrics.vocab import VocabPalette
+        palette = VocabPalette()
+        strict = payload.get("strictness", "slant")
+        cands = payload.get("candidates", [])
+        # Bar IQ D — clean mode drops profanity wherever it appears (the palette is the
+        # profanity registry), so a profanity word that's ALSO in the dictionary is filtered too.
+        if clean:
+            banned = palette.register_words("profanity")
+            cands = [c for c in cands if c.get("word") not in banned]
+        have = {c.get("word") for c in cands}
+        have.add(str(payload.get("word", "")).lower())
+        extra = []
+        excl = ["profanity"] if clean else None
+        for h in palette.rhyme_search(qphones, strict, max_n=200, exclude_registers=excl):
+            if h["word"] not in have:
+                have.add(h["word"])
+                extra.append({"word": h["word"], "syllables": h["syllables"],
+                              "grade": h["grade"], "source": "palette", "register": h.get("register", "")})
+        if extra or clean:
+            # palette words first (they're what makes it feel un-neutered), then the dict words
+            payload = dict(payload)
+            payload["candidates"] = extra + cands
+    except Exception:  # noqa: BLE001 (palette is additive; never break rhyme lookup)
+        pass
+    payload.pop("queryPhones", None)   # internal — don't leak to the client
+    return payload
 
 
 def _colorrack_hash() -> str:
@@ -465,6 +542,7 @@ class Handler(BaseHTTPRequestHandler):
                              "uptime_s": round(time.time() - START_TIME, 1),
                              "adapters": adapters, "transcribe": _transcribe_available(),
                              "sketch": _sketch_available(),
+                             "whisper": _whisper_available(),
                              "phonology": _phonology_available()})
         elif path == "/capabilities":
             adapters = [FAKE_ADAPTER, TRANSFORM_ADAPTER] + ([_sa3_descriptor()] if SA3_ENABLED else [])
@@ -473,6 +551,7 @@ class Handler(BaseHTTPRequestHandler):
                              "transcribe": {"available": _transcribe_available(), "modes": ["mono", "poly"]},
                              "sketch": {"available": _sketch_available(), "vocab": ["kick", "snare", "hat"],
                                         "grid": "16th", "bars": [1, 2]},
+                             "whisper": {"available": _whisper_available()},
                              "service_build": SERVICE_BUILD})
         elif path == "/colors":
             try:
@@ -622,6 +701,59 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(500, {"ok": False, "error": f"transcription failed: {tail or 'no output'}"})
                 return
             self._send(200 if payload.get("ok") else 500, payload)
+        elif path == "/transcribe_words":
+            # Word-level speech transcription via Whisper (the mumble-take word path), run as
+            # a subprocess under the dedicated whisper venv. Returns words with per-word
+            # confidence (times in SECONDS). When the venv is ABSENT we degrade to EMPTY
+            # words (NOT a 503, NOT invented words): the mumble-take rhythm sheet still builds
+            # and every slot becomes a gap the loop fills — misrecognized lyrics would be
+            # worse than gaps.
+            input_wav = data.get("inputWav", "")
+            if not input_wav or not os.path.exists(input_wav):
+                self._send(400, {"ok": False, "error": "inputWav missing or not found"})
+                return
+            py = _whisper_py()
+            if not os.path.isfile(py):
+                self._send(200, {"ok": True, "words": [], "backend": "unavailable"})
+                return
+            cli = os.path.join(SERVICE_DIR, "whisper", "whisper_cli.py")
+            try:
+                proc = subprocess.run([py, cli, input_wav], capture_output=True, text=True, timeout=180)
+            except subprocess.TimeoutExpired:
+                self._send(504, {"ok": False, "error": "word transcription timed out"})
+                return
+            except OSError as e:
+                self._send(500, {"ok": False, "error": f"word transcription failed to start: {e}"})
+                return
+            wout = (proc.stdout or "").strip()
+            try:
+                payload = json.loads(wout)
+            except (json.JSONDecodeError, ValueError):
+                tail = (proc.stderr or "").strip()[-400:]
+                self._send(500, {"ok": False, "error": f"word transcription failed: {tail or 'no output'}"})
+                return
+            if payload.get("ok"):
+                payload.setdefault("backend", "whisper")
+            self._send(200 if payload.get("ok") else 500, payload)
+        elif path == "/mumble_spec":
+            # Mumble-take spec builder (Finish-My-Song Phase 3): note onsets + confidence-gated
+            # words → a lyric constraint spec (syllables/bar + stress + word anchors/gaps).
+            # IN-PROCESS + deterministic (stdlib note/word math). The native side already has
+            # the notes (Basic Pitch) + words (Whisper); this only does the binning.
+            try:
+                from lyrics import mumble
+                notes = data.get("notes", []) or []
+                words = data.get("words", []) or []
+                bpm = float(data.get("bpm", 120) or 120)
+                ts = data.get("timeSig", [4, 4]) or [4, 4]
+                conf = float(data.get("confThreshold", 0.6) or 0.6)
+                grid = str(data.get("grid", "1/16") or "1/16")
+                self._send(200, mumble.build_spec_from_take(
+                    notes, words, bpm, time_sig=(int(ts[0]), int(ts[1])),
+                    conf_threshold=conf, grid=grid,
+                    topic=str(data.get("topic", "")), mood=str(data.get("mood", ""))))
+            except Exception as e:  # noqa: BLE001
+                self._send(500, {"ok": False, "error": f"mumble spec error: {e}"})
         elif path == "/sketch":
             # Sketch Phase 0: beatbox WAV -> 3-class drum hits on a 16th grid, run as a
             # subprocess under the dedicated sketch venv so librosa's deps stay isolated.
@@ -674,6 +806,7 @@ class Handler(BaseHTTPRequestHandler):
             if not word:
                 self._send(400, {"ok": False, "error": "word missing"})
                 return
+            clean = bool(data.get("clean", False))   # Bar IQ D — raw by default; clean filters profanity
             strictness = data.get("strictness", "slant")
             if strictness not in ("perfect", "slant", "free"):
                 strictness = "slant"
@@ -707,13 +840,14 @@ class Handler(BaseHTTPRequestHandler):
                     tail = (proc.stderr or "").strip()[-400:]
                     self._send(500, {"ok": False, "error": f"rhyme lookup failed: {tail or 'no output'}"})
                     return
-                self._send(200 if payload.get("ok") else 500, payload)
+                self._send(200 if payload.get("ok") else 500,
+                           _merge_palette_rhymes(payload, clean) if payload.get("ok") else payload)
             else:
                 try:
                     from phonology import core as _ph
                     payload = _ph.get_rhymes(word, strictness=strictness,
                                              max_n=max_n, syllables=syllables)
-                    self._send(200, payload)
+                    self._send(200, _merge_palette_rhymes(payload, clean))
                 except Exception as e:  # noqa: BLE001
                     self._send(500, {"ok": False, "error": f"phonology error: {e}"})
         elif path in ("/complete_lyrics", "/fill_lyric_gap", "/suggest_next_line"):
@@ -742,6 +876,80 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, payload)
             except Exception as e:  # noqa: BLE001
                 self._send(500, {"ok": False, "error": f"lyric generation error: {e}"})
+        elif path == "/analyze_lyrics":
+            # Precise per-line phonology (Finish-My-Song L1): syllables, stress contour,
+            # rhyme grade vs the group anchor, per-word slots — the flow-visualizer feed.
+            # IN-PROCESS, deterministic, no LLM. Reuses the same gate as generation.
+            spec = data.get("spec", {})
+            if not isinstance(spec, dict) or not spec.get("lines"):
+                self._send(400, {"ok": False, "error": "spec.lines required"})
+                return
+            try:
+                from lyrics import core as lyr
+                self._send(200, lyr.analyze(spec))
+            except Exception as e:  # noqa: BLE001
+                self._send(500, {"ok": False, "error": f"lyric analysis error: {e}"})
+        elif path == "/style_corpus":
+            # §7 style-RAG flywheel — the user-owned voice corpus (backend-only management).
+            # action: "add" (the artist's OWN lyrics) | "stats" (counts only) | "clear".
+            # In-process, deterministic; retrieval/biasing happens inside the gen loop.
+            try:
+                from lyrics import style_corpus
+                action = str(data.get("action", "stats"))
+                sc = style_corpus.StyleCorpus()
+                if action == "add":
+                    lines = [str(x) for x in (data.get("lines", []) or [])]
+                    added = sc.add_lines(lines, meta={"source": str(data.get("source", "user"))})
+                    # Bar IQ B — the flywheel ALSO feeds the vocabulary palette: harvest the
+                    # accepted lines' content words (pronounced via the venv so slang gets real
+                    # phones). Best-effort — never break the corpus add.
+                    try:
+                        from lyrics.vocab import VocabPalette
+                        from lyrics.style_corpus import _content_tokens
+                        toks = sorted({t for ln in lines for t in _content_tokens(ln)})
+                        VocabPalette().harvest_from_corpus(lines, phones_map=_pronounce_words(toks))
+                    except Exception:  # noqa: BLE001
+                        pass
+                    self._send(200, {"ok": True, "added": added, **sc.stats()})
+                elif action == "clear":
+                    sc.clear()
+                    self._send(200, {"ok": True, "lines": 0})
+                else:
+                    self._send(200, sc.stats())
+            except Exception as e:  # noqa: BLE001
+                self._send(500, {"ok": False, "error": f"style corpus error: {e}"})
+        elif path == "/vocab":
+            # Bar IQ B — the vocabulary palette (backend-only). action: "add" (manual words +
+            # register) | "harvest" (content words from lines) | "seed" (load the bundled open
+            # seed) | "stats" (counts only). Words are pronounced via the phonology venv so
+            # slang gets real g2p phones. Copyright-clean: words + pronunciations, never lines.
+            try:
+                from lyrics.vocab import VocabPalette, seed_words
+                action = str(data.get("action", "stats"))
+                pal = VocabPalette()
+                if action == "add":
+                    words = [str(x) for x in (data.get("words", []) or [])]
+                    register = str(data.get("register", "slang"))
+                    added = pal.add_words(words, register=register, phones_map=_pronounce_words(words))
+                    self._send(200, {"ok": True, "added": added, **pal.stats()})
+                elif action == "harvest":
+                    lines = [str(x) for x in (data.get("lines", []) or [])]
+                    from lyrics.style_corpus import _content_tokens
+                    toks = sorted({t for ln in lines for t in _content_tokens(ln)})
+                    added = pal.harvest_from_corpus(lines, phones_map=_pronounce_words(toks))
+                    self._send(200, {"ok": True, "added": added, **pal.stats()})
+                elif action == "seed":
+                    by_reg: dict = {}
+                    for w, r in seed_words():
+                        by_reg.setdefault(r, []).append(w)
+                    total = 0
+                    for r, ws in by_reg.items():
+                        total += pal.add_words(ws, register=r, phones_map=_pronounce_words(ws))
+                    self._send(200, {"ok": True, "added": total, **pal.stats()})
+                else:
+                    self._send(200, pal.stats())
+            except Exception as e:  # noqa: BLE001
+                self._send(500, {"ok": False, "error": f"vocab error: {e}"})
         elif path == "/training/submit" or path == "/training/jobs":
             if not TRAINING_ENABLED:
                 self._send(503, {"ok": False, "error": "lora trainer unavailable"})

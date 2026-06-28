@@ -21,6 +21,7 @@ from typing import Dict, List, Optional
 
 import brain_client
 from phonology import core as phon
+from lyrics import style_corpus
 
 _P = phon.Pronouncer()  # real cmudict if importable, else a stdlib heuristic
 
@@ -172,11 +173,17 @@ def _evaluate(text: str, line: dict, spec: dict, anchor: Optional[str],
     passes = syl_ok and rhyme_ok and locked_ok
     grade = ("anchor" if fixed else
              (phon.rhyme_grade(_P.phones(end) or [], _P.phones(anchor) or []) if anchor else "free"))
+    # Bar IQ C — reward MULTISYLLABIC rhymes: how many trailing syllables of the end word
+    # rhyme with the anchor (depth 1 = a plain end-rhyme; 2+ = a skilled multi). The bonus
+    # makes the ranker PREFER deeper rhymes among otherwise-valid candidates.
+    depth = (phon.multisyllabic_depth(_P.phones(end) or [], _P.phones(anchor) or [])
+             if (anchor and end) else 0)
     score = (2 if passes else 0) + (1 if rhyme_ok else 0) + (1 if locked_ok else 0) \
-        + (1.0 - min(1.0, abs(nsyl - target) / max(1, target)))
+        + (1.0 - min(1.0, abs(nsyl - target) / max(1, target))) \
+        + 0.5 * max(0, depth - 1)
     return {"text": text, "endWord": end, "syllables": nsyl, "syllableOk": syl_ok,
             "rhymeOk": rhyme_ok, "lockedOk": locked_ok, "passes": passes,
-            "grade": grade, "score": round(score, 3)}
+            "grade": grade, "depth": depth, "score": round(score, 3)}
 
 
 def _rank(cands: List[dict], n: int = 3) -> List[dict]:
@@ -208,6 +215,31 @@ def _fake_propose_line(line: dict, spec: dict, anchor: Optional[str], regen: int
     return _rank(cands)
 
 
+# ── style-RAG (§7): retrieve the artist's own voice + guard against parroting it ──
+
+def _style_query(spec: dict) -> str:
+    """The 'voice' query: topic + mood + whatever's already written in the sheet."""
+    parts = [str(spec.get("topic", "")), str(spec.get("mood", ""))]
+    for l in spec.get("lines", []):
+        parts.append(str(l.get("text", "")))
+        parts.append(re.sub(r"_{2,}", " ", str(l.get("seedText", ""))))  # gaps → spaces
+    return " ".join(p for p in parts if p)
+
+
+def _style_corpus(spec: dict) -> List[dict]:
+    """The retrieval pool when style biasing is opted in (else empty → loop unchanged).
+    The persisted user corpus PLUS any inline lines the request carried (the track's own
+    accepted lyrics). Gated on spec['styleBias'] so the default path is byte-identical."""
+    if not spec.get("styleBias"):
+        return []
+    return style_corpus.load_corpus(spec.get("styleCorpus"))
+
+
+def _style_exemplars(spec: dict, k: int = 3) -> List[str]:
+    corpus = _style_corpus(spec)
+    return style_corpus.retrieve(corpus, _style_query(spec), k=k) if corpus else []
+
+
 # ── the LLM backend (L3): prompt → validate → re-prompt with the SPECIFIC failure ──
 
 def _build_messages(line: dict, spec: dict, anchor: Optional[str], target: int,
@@ -226,8 +258,21 @@ def _build_messages(line: dict, spec: dict, anchor: Optional[str], target: int,
         rules.append(f"Topic: {spec['topic']}.")
     if spec.get("mood"):
         rules.append(f"Mood: {spec['mood']}.")
+    # Bar IQ D — register. Raw is the DEFAULT (it's the artist's art): explicitly permit slang
+    # / ad-libs / explicit language so the model doesn't self-censor into something neutered.
+    # "clean" is the opt-in that sanitizes.
     if spec.get("explicit") == "clean":
         rules.append("Keep it clean — no profanity.")
+    else:
+        rules.append("Authentic register: slang, ad-libs, and explicit language are welcome — "
+                     "don't self-censor or sanitize.")
+    # Style-RAG (§7): bias toward the artist's OWN voice with retrieved exemplars, but
+    # forbid copying them verbatim — the model is steered by style, not by parroting.
+    exemplars = _style_exemplars(spec)
+    if exemplars:
+        rules.append("Write in THIS voice (the artist's own lines) — match the phrasing, "
+                     "imagery and vocabulary, but write NEW lines; do NOT copy them verbatim: "
+                     + " / ".join(f"\"{e}\"" for e in exemplars) + ".")
     sys = ("You are a skilled rap lyricist. Reply with ONLY a JSON object "
            '{"lines": ["...", "...", "..."]} of candidate lines. No commentary.')
     usr = " ".join(rules) + (f" Your previous attempt failed: {feedback} Fix it." if feedback else "")
@@ -264,14 +309,23 @@ def _failure_reason(d: dict, target: int, tol: int, anchor: Optional[str], stric
 
 def _llm_propose_line(line: dict, spec: dict, anchor: Optional[str], regen: int) -> List[dict]:
     target, tol, strict = _target(line, spec), int(line.get("syllableTol", 1) or 1), _strictness(line, spec)
+    corpus = _style_corpus(spec)   # non-empty only when style biasing is opted in
     cands: List[dict] = []
     feedback: Optional[str] = None
     for _ in range(3):  # budget the retries (re-prompt with the specific phonology failure)
         resp = brain_client.chat_json(_build_messages(line, spec, anchor, target, tol, strict, feedback))
         if not resp.get("ok"):
             break
-        fresh = [_evaluate(tx, line, spec, anchor, target, tol, strict)
-                 for tx in _parse_lines(resp.get("content", ""))]
+        raw = _parse_lines(resp.get("content", ""))
+        # Style-RAG novelty wall: drop lines that parrot a corpus exemplar verbatim — bias
+        # by style, not by copying. If that empties the batch, re-prompt for a fresh line.
+        if corpus:
+            kept = [t for t in raw if style_corpus.near_verbatim(t, corpus) is None]
+            if not kept and raw:
+                feedback = "that was almost word-for-word the reference — write a NEW line in the same voice."
+                continue
+            raw = kept
+        fresh = [_evaluate(tx, line, spec, anchor, target, tol, strict) for tx in raw]
         cands.extend(fresh)
         if sum(1 for c in cands if c["passes"]) >= 2:
             break
@@ -342,3 +396,93 @@ def fill_gap(spec: dict, line_index: int, regen: Optional[Dict[int, int]] = None
 def suggest_next_line(spec: dict, after_index: int, regen: Optional[Dict[int, int]] = None, backend: Optional[str] = None) -> dict:
     """Single-bar ghost suggestion — proposals for the line after `after_index`."""
     return _run(spec, indices=[int(after_index) + 1], regen=regen, backend=backend)
+
+
+# ── L1 — precise per-line ANALYSIS (the flow-visualizer feed; no LLM) ─────────────
+
+def _group_anchors(by_index: List[dict]) -> Dict[str, str]:
+    """The fixed (locked / finalized) end word that anchors each rhyme group — the same
+    pre-scan the generation loop uses, so analysis and generation agree on the target."""
+    anchors: Dict[str, str] = {}
+    for l in by_index:
+        g, fe = l.get("rhymeGroup") or "", _fixed_end_word(l)
+        if g and fe and g not in anchors:
+            anchors[g] = fe
+    return anchors
+
+
+def _analyze_line(line: dict, spec: dict, anchor: Optional[str]) -> dict:
+    """Precise phonology for one line: syllables, stress contour, per-word slots, the
+    rhyme grade vs the group anchor. Reuses _evaluate() so its pass marks are IDENTICAL
+    to what the generation gate would accept — the visualizer never disagrees with the
+    loop. Analyzes finalized text if present, else the seed's written words (gaps dropped)."""
+    target = _target(line, spec)
+    tol = int(line.get("syllableTol", 1) or 1)
+    strict = _strictness(line, spec)
+    txt = (line.get("text") or "").strip()
+    seed = line.get("seedText") or ""
+    has_gap = _has_gap(seed)
+    if txt:
+        content, analyzed = txt, "text"
+    elif seed.strip():
+        content, analyzed = " ".join(t["w"] for t in _tokens(seed) if not t["gap"]), "seed"
+    else:
+        content, analyzed = "", "empty"
+
+    base = _evaluate(content, line, spec, anchor, target, tol, strict)
+    base.pop("grade", None)   # _evaluate's grade is a generation shortcut (see below)
+    words = re.findall(r"[A-Za-z']+", content)
+    per_word = [{"w": w, "syllables": _P.syllables(w), "stress": _P.stress(w),
+                 "inDict": _P.phones(w) is not None} for w in words]
+    end = base["endWord"]
+
+    # Analysis-specific, anchor-aware rhyme grade. _evaluate() reports "anchor" for ANY
+    # line with a fixed end word (it won't grade a producer-locked line as a rhyme
+    # attempt) — right for generation, but analysis must say honestly whether a FINALIZED
+    # line actually rhymes with its group anchor. Only the line whose end == the anchor
+    # is the anchor; the rest are graded against it.
+    is_anchor = anchor is not None and end != "" and end.lower() == anchor.lower()
+    if is_anchor:
+        grade, rhyme_ok = "anchor", True
+    elif anchor and end:
+        grade = phon.rhyme_grade(_P.phones(end) or [], _P.phones(anchor) or [])
+        rhyme_ok = _P.rhyme(end, anchor, strict)
+    else:
+        grade, rhyme_ok = "free", True
+    base["rhymeOk"] = rhyme_ok
+    base["passes"] = bool(base["syllableOk"] and rhyme_ok and base["lockedOk"])
+
+    # Bar IQ C — rhyme CRAFT for the flow visualizer: how deep the end rhyme runs vs the
+    # anchor (multisyllabic) + which words rhyme internally (a hallmark of skilled flow).
+    rhyme_depth = (phon.multisyllabic_depth(_P.phones(end) or [], _P.phones(anchor) or [])
+                   if (anchor and end and not is_anchor) else 0)
+    internal = [[words[i], words[j]]
+                for i, j in phon.internal_rhyme_pairs([(w, _P.phones(w)) for w in words], strict)]
+
+    base.update({
+        "target": target, "tol": tol,
+        "rhymeGroup": line.get("rhymeGroup") or "",
+        "rhymeAnchor": anchor or "",
+        "rhymeGrade": grade,
+        "rhymeDepth": rhyme_depth,
+        "internalRhymes": internal,
+        "stress": "".join(pw["stress"] for pw in per_word),
+        "words": per_word,
+        "hasGap": has_gap,
+        "analyzed": analyzed,
+        "complete": analyzed == "text" and not has_gap,
+        "endInDict": bool(end) and _P.phones(end) is not None,
+    })
+    return base
+
+
+def analyze(spec: dict) -> dict:
+    """Precise per-line phonology for EVERY line in the sheet (locked + finalized too) —
+    the flow visualizer's feed. Deterministic, no LLM; the rhyme anchor per group matches
+    the generation loop's pre-scan."""
+    by_index = sorted(spec.get("lines", []), key=lambda l: int(l.get("index", 0)))
+    anchors = _group_anchors(by_index)
+    out = [{"index": l["index"],
+            "analysis": _analyze_line(l, spec, anchors.get(l.get("rhymeGroup") or ""))}
+           for l in by_index]
+    return {"ok": True, "lines": out}

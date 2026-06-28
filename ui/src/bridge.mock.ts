@@ -146,6 +146,7 @@ function emptySession(): Snapshot {
 }
 
 let snapshot: Snapshot = seedSnapshot();
+let mockCorpusLines = 0; // §7 — simulates the cross-song style corpus growing on accept
 const clone = (s: Snapshot): Snapshot => JSON.parse(JSON.stringify(s)) as Snapshot;
 const history: Snapshot[] = [];
 const future: Snapshot[] = [];
@@ -163,7 +164,7 @@ const cmdLog: { command: string; ok: boolean; undoable: boolean; ts: number }[] 
 const READONLY = new Set(["get_snapshot", "get_clip_peaks", "file_peaks", "audition_file", "stop_audition", "get_command_log", "list_plugins", "list_builtins", "list_colors", "list_audio_devices", "list_wave_inputs", "list_track_outputs", "list_takes", "list_training_sources", "training_job_status", "list_lora_adapters"]);
 const NON_UNDOABLE = new Set(["set_transport", "arm_track", "set_input_monitor", "undo", "redo", "save", "reload", "new_project", "render_layer", "open_plugin_editor", "set_plugin_param", "export_audio", "mark_take", "import_training_source", "approve_training_source", "build_training_corpus", "submit_training_job", "cancel_training_job", "import_lora_adapter", "activate_lora_adapter", "get_rhymes",
   "complete_lyrics", "fill_lyric_gap", "suggest_next_line", "regenerate_lyric",
-  "cancel_lyric_job", "reject_lyric_proposal"]);  // accept_lyric_proposal IS undoable
+  "cancel_lyric_job", "reject_lyric_proposal", "analyze_lyrics", "get_lyric_corpus_stats"]);  // accept_lyric_proposal IS undoable
 
 // LYR-001 — a tiny deterministic rhyme map so the rhyme tool returns something in
 // browser dev / e2e (the real path is the phonology service). Suffix fallback keeps
@@ -226,6 +227,44 @@ function mockProposals(line: LyricLine, sheet: LyricSheet) {
 }
 function mockFillable(l: LyricLine): boolean {
   return !l.locked && (!l.text.trim() || /_{2,}/.test(l.seedText));
+}
+// L1 — deterministic mock phonology analysis (the real path is the service). Mirrors the
+// shape of core.analyze: per-word slots, a per-line stress contour, the rhyme grade vs the
+// group anchor. Stress alternates (X x X …) — a plausible stand-in for the precise contour.
+function mockRhymeGrade(end: string, anchor: string): string {
+  if (!anchor || !end) return "free";
+  if (end.toLowerCase() === anchor.toLowerCase()) return "anchor";
+  const a = end.toLowerCase().replace(/[^a-z]/g, "");
+  const b = anchor.toLowerCase().replace(/[^a-z]/g, "");
+  if (a.slice(-2) === b.slice(-2)) return "perfect";
+  if (a.slice(-1) === b.slice(-1)) return "slant";
+  return "none";
+}
+function mockAnalysis(line: LyricLine, sheet: LyricSheet) {
+  const txt = (line.text || "").trim();
+  const seed = line.seedText || "";
+  const hasGap = /_{2,}/.test(seed);
+  const analyzed = txt ? "text" : seed.trim() ? "seed" : "empty";
+  const content = txt || (seed.split(/\s+/).filter((t) => t && !isGap(t)).join(" "));
+  const wordToks = content.split(/\s+/).filter(Boolean);
+  const words = wordToks.map((w) => {
+    const n = syllablesForWord(w);
+    return { w, syllables: n, stress: Array.from({ length: n }, (_, i) => (i === 0 ? "X" : "x")).join(""), inDict: true };
+  });
+  const syllables = words.reduce((s, x) => s + x.syllables, 0);
+  const target = line.syllableTarget > 0 ? line.syllableTarget : (sheet.grid === "1/4" ? 4 : sheet.grid === "1/8" ? 8 : 16);
+  const tol = line.syllableTol || 1;
+  const endWord = wordToks.length ? wordToks[wordToks.length - 1].replace(/[^A-Za-z']/g, "") : "";
+  const anchor = line.rhymeGroup ? mockGroupAnchor(sheet, line.rhymeGroup) : "";
+  const isAnchor = !!anchor && !!endWord && endWord.toLowerCase() === anchor.toLowerCase();
+  const grade = isAnchor ? "anchor" : mockRhymeGrade(endWord, anchor);
+  const rhymeOk = isAnchor || !anchor || !endWord || grade === "perfect" || grade === "slant";
+  return {
+    syllables, target, tol, syllableOk: Math.abs(syllables - target) <= tol, endWord,
+    rhymeGroup: line.rhymeGroup || "", rhymeAnchor: anchor, rhymeGrade: grade, rhymeOk,
+    stress: words.map((x) => x.stress).join(""), words, hasGap, analyzed,
+    complete: analyzed === "text" && !hasGap, endInDict: !!endWord,
+  };
 }
 function emit(type: string, payload?: unknown) {
   const ls = listeners.get("mosh_event");
@@ -561,6 +600,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
         mood: str(args.mood, ""),
         explicit: str(args.explicit, "allow"),
         rhymeStrictness: "slant",
+        styleBias: false,
         specVersion: 1,
         lines: [],
       };
@@ -583,6 +623,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       if (args.mood != null) s.mood = str(args.mood, s.mood);
       if (args.explicit != null) s.explicit = str(args.explicit, s.explicit);
       if (args.rhymeStrictness != null) s.rhymeStrictness = str(args.rhymeStrictness, s.rhymeStrictness);
+      if (args.styleBias != null) s.styleBias = !!args.styleBias;
       invalidate(); return ok(command);
     }
     case "set_lyric_line": {
@@ -670,9 +711,12 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       l.text = p.text;
       l.status = "accepted";
       delete l.proposals;
+      mockCorpusLines += 1; // §7 — auto-accumulate the accepted line into the voice corpus
       invalidate();
       return ok(command, { text: p.text });
     }
+    case "get_lyric_corpus_stats":
+      return ok(command, { lines: mockCorpusLines });
     case "reject_lyric_proposal": {
       const t = findTrack(str(args.trackId));
       const l = t?.lyricSheet?.lines.find((x) => x.index === num(args.lineIndex, -1));
@@ -681,6 +725,14 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       l.status = l.text || l.seedText ? "seed" : "empty";
       invalidate();
       return ok(command);
+    }
+    case "analyze_lyrics": {
+      const t = findTrack(str(args.trackId));
+      if (!t?.lyricSheet) return err(command, "track has no lyric sheet");
+      const sheet = t.lyricSheet;
+      sheet.lines.forEach((l) => { l.analysis = mockAnalysis(l, sheet); });
+      invalidate();
+      return ok(command, { status: "analyzed", lineCount: sheet.lines.length });
     }
 
     case "create_annotation": {
@@ -1086,6 +1138,36 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       }, 400);
       return ok(command, { status: "started" });
     }
+    case "build_lyrics_from_clip": {
+      // Mumble take (Phase 3) — async like the native path: emit working now, then after a
+      // simulated transcribe+analyze land a deterministic lyric sheet on the clip's OWN
+      // track (gapped seeds + one anchored word) + emit done. The Lyrics tab picks it up via
+      // the snapshot. No real audio analysis here; the mock drives the same command contract.
+      const f = findClip(str(args.clipId));
+      if (!f || f.clip.type !== "wave") return err(command, "no wave clip");
+      if (f.track.lyricSheet) return err(command, "track already has a lyric sheet");
+      const clipId = f.clip.id;
+      const trk = f.track;
+      emit("build_lyrics_status", { clipId, state: "working" });
+      window.setTimeout(() => {
+        pushUndo();
+        const mk = (index: number, seedText: string, rg: string, target: number, stress: string): LyricLine => ({
+          index, role: "verse", seedText, text: "", syllableTarget: target, syllableTol: 1,
+          stress, rhymeGroup: rg, rhymeStrictness: "", locked: false, sectionId: "", status: "seed",
+        });
+        trk.lyricSheet = {
+          id: `ls-${trk.id}`, grid: "1/16", language: "en", topic: "", mood: "",
+          explicit: "allow", rhymeStrictness: "slant", styleBias: false, specVersion: 1,
+          lines: [
+            mk(0, "___ ___ ___ fire", "A", 4, "XxxX"),
+            mk(1, "___ ___ ___", "B", 3, "XxX"),
+          ],
+        };
+        emit("build_lyrics_status", { clipId, state: "done", lineCount: 2 });
+        invalidate();
+      }, 400);
+      return ok(command, { status: "started" });
+    }
     case "sketch_beatbox": {
       // Sketch Phase 0 — beatbox WAV → drum MoshOps. Async like the native path:
       // emit working now, then after a simulated transduction set the tempo and land a
@@ -1379,6 +1461,7 @@ export function __resetMockForTests(): void {
   clipSeq = 100;
   trackSeq = 10;
   snapshot = seedSnapshot();
+  mockCorpusLines = 0;
   history.length = 0;
   future.length = 0;
   inBatch = false;

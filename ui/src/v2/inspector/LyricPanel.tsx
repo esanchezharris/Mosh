@@ -4,15 +4,28 @@
 //   L2: the generation loop — Finish gaps / fill a line / suggest the next, then review
 //       the ranked proposals (accept / reject / regenerate), constraint-checked by phonology.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useStore } from "../../store";
 import { countSyllables, gridTarget, flowStatus, parseSeed } from "../../lyrics/flowMeter";
-import type { Track, LyricLine, LyricProposal, RhymeCandidate } from "../../types";
+import type { Track, LyricLine, LyricProposal, RhymeCandidate, LyricAnalysis } from "../../types";
 
 export function LyricPanel({ track }: { track: Track }) {
   const exec = useStore((s) => s.exec);
   const sheet = track.lyricSheet;
   const [busy, setBusy] = useState(false);
+  // §7 — "it's learning my voice" cue: the cross-song corpus count (counts only; grows as
+  // accepted lines accumulate). Pulled on demand (never via the snapshot — that would spawn
+  // the service); -1/absent ⇒ service down ⇒ shown as nothing.
+  const [corpusLines, setCorpusLines] = useState<number | null>(null);
+  const acceptedCount = sheet?.lines.filter((l) => l.status === "accepted").length ?? 0;
+  useEffect(() => {
+    if (!sheet) return;
+    let alive = true;
+    void exec("get_lyric_corpus_stats", {}).then((r) => {
+      if (alive && r.ok) setCorpusLines((r.data as { lines?: number })?.lines ?? null);
+    });
+    return () => { alive = false; };
+  }, [exec, sheet?.id, acceptedCount]);
 
   if (!sheet) {
     return (
@@ -60,9 +73,22 @@ export function LyricPanel({ track }: { track: Track }) {
         aria-label="Topic" defaultValue={sheet.topic}
         onBlur={(e) => { if (e.target.value !== sheet.topic) void exec("set_lyric_constraint", { trackId: track.id, topic: e.target.value }); }} />
 
+      <label className="v2-lyric-stylebias" data-testid="lyric-stylebias" title="§7 — bias generation toward your own voice (this song's accepted lines + your accumulated corpus)">
+        <input type="checkbox" checked={!!sheet.styleBias} aria-label="Bias to my voice"
+          onChange={(e) => void exec("set_lyric_constraint", { trackId: track.id, styleBias: e.target.checked })} />
+        <span>Sound like me</span>
+        {corpusLines != null && corpusLines > 0 && (
+          <span className="v2-lyric-corpus" data-testid="lyric-corpus-count"
+            title="lines accumulated in your voice corpus — grows each time you accept a line">{corpusLines} in your voice</span>
+        )}
+      </label>
+
       <div className="v2-lyric-actions">
         <button className="v2-btn primary" data-testid="lyric-finish" disabled={busy || sheet.lines.length === 0}
           onClick={() => void run("complete_lyrics", {})}>{busy ? "…" : "✨ Finish gaps"}</button>
+        <button className="v2-btn" data-testid="lyric-analyze" disabled={busy || sheet.lines.length === 0}
+          title="Precise phonology — syllables, stress, rhyme (dictionary, no LLM)"
+          onClick={() => void run("analyze_lyrics", {})}>Analyze flow</button>
       </div>
 
       <ol className="v2-lyric-lines" data-testid="lyric-lines">
@@ -115,6 +141,7 @@ function LyricLineRow({ trackId, line, grid, busy, run }: {
         <button className="btn x" data-testid={`lyric-rm-${line.index}`} title="remove line" aria-label={`Remove line ${line.index + 1}`}
           onClick={() => void exec("remove_lyric_line", { trackId, lineIndex: line.index })}>✕</button>
       </div>
+      {line.analysis && <FlowViz index={line.index} a={line.analysis} />}
       {!!line.proposals?.length && (
         <div className="v2-lyric-proposals" data-testid={`lyric-proposals-${line.index}`} role="group" aria-label={`Proposals for line ${line.index + 1}`}>
           {line.proposals.map((p: LyricProposal, j) => (
@@ -136,6 +163,37 @@ function LyricLineRow({ trackId, line, grid, busy, run }: {
         </div>
       )}
     </li>
+  );
+}
+
+// L1 — the precise flow visualizer. Draws the dictionary stress contour as a row of
+// per-word dots (● stressed, · unstressed), the precise syllable count vs target, and the
+// rhyme grade vs the group anchor. Distinct from the live local meter (an instant
+// estimate) — this is the phonology service's exact read, so it can disagree and correct.
+function FlowViz({ index, a }: { index: number; a: LyricAnalysis }) {
+  return (
+    <div className="v2-flow-viz" data-testid={`flow-viz-${index}`}
+      data-analyzed={a.analyzed} data-complete={a.complete} data-syl-ok={a.syllableOk}>
+      <span className="v2-flow-stress" aria-label={`stress ${a.stress || "n/a"}`}>
+        {a.words.length === 0 ? <span className="v2-flow-empty">—</span> : a.words.map((w, i) => (
+          <span key={i} className="v2-flow-word" data-in-dict={w.inDict}
+            title={`${w.w} · ${w.syllables} syllable${w.syllables === 1 ? "" : "s"}${w.inDict ? "" : " (estimated)"}`}>
+            {Array.from(w.stress).map((s, j) => (
+              <span key={j} className={`v2-flow-dot${s === "X" ? " on" : ""}`} aria-hidden="true">{s === "X" ? "●" : "·"}</span>
+            ))}
+          </span>
+        ))}
+      </span>
+      <span className={`v2-flow-syl${a.syllableOk ? " ok" : " off"}`} data-testid={`flow-syl-${index}`}
+        title={`precise: ${a.syllables} syllables vs target ${a.target}±${a.tol}`}>{a.syllables}/{a.target}</span>
+      {a.rhymeGroup && (
+        <span className={`v2-flow-rhyme st-${a.rhymeGrade}`} data-testid={`flow-rhyme-${index}`} data-ok={a.rhymeOk}
+          title={a.rhymeAnchor && a.rhymeGrade !== "anchor" ? `${a.rhymeGrade} rhyme vs "${a.rhymeAnchor}"` : a.rhymeGrade}>
+          {a.rhymeGrade === "anchor" ? "⚓ anchor" : a.rhymeGrade}
+          {a.rhymeAnchor && a.rhymeGrade !== "anchor" ? ` →${a.rhymeAnchor}` : ""}
+        </span>
+      )}
+    </div>
   );
 }
 

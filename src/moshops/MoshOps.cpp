@@ -543,6 +543,9 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "cancel_lyric_job")     return cmdCancelLyricJob (args);
     if (name == "accept_lyric_proposal") return cmdAcceptLyricProposal (args);
     if (name == "reject_lyric_proposal") return cmdRejectLyricProposal (args);
+    if (name == "analyze_lyrics")       return cmdAnalyzeLyrics (args);
+    if (name == "get_lyric_corpus_stats") return cmdGetLyricCorpusStats (args);
+    if (name == "build_lyrics_from_clip") return cmdBuildLyricsFromClip (args);
     // Annotations broadcast over MP (shared collaborator comments). create self-broadcasts
     // its resolved cross-peer id; the rest address by that id via the generic wrapper.
     if (name == "create_annotation") return cmdCreateAnnotation (args);
@@ -914,6 +917,7 @@ juce::var MoshOps::cmdSetLyricConstraint (const juce::var& args)
     if (args.hasProperty ("mood"))            sheet.setProperty (ids::lyricMood,            args.getProperty ("mood", var()), &undoManager());
     if (args.hasProperty ("explicit"))        sheet.setProperty (ids::lyricExplicit,        args.getProperty ("explicit", var()), &undoManager());
     if (args.hasProperty ("rhymeStrictness")) sheet.setProperty (ids::lyricRhymeStrictness, args.getProperty ("rhymeStrictness", var()), &undoManager());
+    if (args.hasProperty ("styleBias"))       sheet.setProperty (ids::lyricStyleBias,       (bool) args.getProperty ("styleBias", false), &undoManager());
     logLine ("set_lyric_constraint", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("set_lyric_constraint");
@@ -1021,6 +1025,7 @@ juce::var MoshOps::lyricSheetToVar (te::AudioTrack& t)
     o->setProperty ("mood",            sheet[ids::lyricMood].toString());
     o->setProperty ("explicit",        sheet[ids::lyricExplicit].toString());
     o->setProperty ("rhymeStrictness", sheet[ids::lyricRhymeStrictness].toString());
+    o->setProperty ("styleBias",       (bool) sheet[ids::lyricStyleBias]);
     o->setProperty ("specVersion",     (int) sheet[ids::lyricSpecVersion]);
 
     Array<var> lines;
@@ -1049,6 +1054,12 @@ juce::var MoshOps::lyricSheetToVar (te::AudioTrack& t)
         }
         if (l.hasProperty (ids::lyricRegen))
             lo->setProperty ("regen", (int) l[ids::lyricRegen]);
+        // L1 — transient precise phonology (a JSON object; absent ⇒ not yet analysed).
+        if (l.hasProperty (ids::lyricAnalysis))
+        {
+            auto parsed = juce::JSON::parse (l[ids::lyricAnalysis].toString());
+            if (parsed.isObject()) lo->setProperty ("analysis", parsed);
+        }
         lines.add (var (lo));
     }
     o->setProperty ("lines", lines);
@@ -1061,13 +1072,16 @@ juce::var MoshOps::lyricSpecForTrack (te::AudioTrack& t)
 {
     auto sheet = t.state.getChildWithName (ids::MOSH_LYRICSHEET);
     if (! sheet.isValid()) return {};
+    const bool styleBias = (bool) sheet[ids::lyricStyleBias];
     auto* o = new DynamicObject();
     o->setProperty ("grid",            sheet[ids::lyricGrid].toString());
     o->setProperty ("topic",           sheet[ids::lyricTopic].toString());
     o->setProperty ("mood",            sheet[ids::lyricMood].toString());
     o->setProperty ("explicit",        sheet[ids::lyricExplicit].toString());
     o->setProperty ("rhymeStrictness", sheet[ids::lyricRhymeStrictness].toString());
+    o->setProperty ("styleBias",       styleBias);
     Array<var> lines;
+    Array<var> styleCorpus;   // §7 — the artist's OWN finalized lines = the voice corpus
     auto container = mosh::LyricSheet::lines (sheet);
     for (int i = 0; i < container.getNumChildren(); ++i)
     {
@@ -1084,8 +1098,13 @@ juce::var MoshOps::lyricSpecForTrack (te::AudioTrack& t)
         lo->setProperty ("rhymeStrictness", l[ids::lyricRhymeStrictness].toString());
         lo->setProperty ("locked",          (bool) l[ids::lyricLocked]);
         lines.add (var (lo));
+        const auto finalized = l[ids::lyricText].toString();
+        if (styleBias && finalized.trim().isNotEmpty())
+            styleCorpus.add (finalized);   // user-owned only; passed inline (no persistence)
     }
     o->setProperty ("lines", lines);
+    if (styleBias)
+        o->setProperty ("styleCorpus", styleCorpus);
     return var (o);
 }
 
@@ -1233,6 +1252,24 @@ juce::var MoshOps::cmdAcceptLyricProposal (const juce::var& args)
     node.removeProperty (ids::lyricProposals, nullptr);            // clear the ephemeral proposals
     logLine ("accept_lyric_proposal", args, true, {}, true);       // explicit TASTE label (positive)
     emitSnapshotInvalidated();
+
+    // §7 style-RAG flywheel — auto-accumulate the accepted line into the PERSISTED
+    // cross-song voice corpus so future songs sound more like the artist. Fire-and-forget
+    // on a detached thread: styleCorpusAdd is NON-SPAWNING (isHealthy-gated) + best-effort,
+    // so accept NEVER blocks/fails on it and a service-down state is a silent no-op (keeps
+    // --selftest hermetic). NON-undoable by design: undo pulls the text from the sheet but
+    // not the corpus — acceptable, the corpus is a "lines I liked" accumulation (add_lines
+    // dedups + the near-verbatim guard handles redundancy). Mirrors cmdAnalyzeLyrics's
+    // detached-thread idiom.
+    if (chosen.trim().isNotEmpty())
+    {
+        const juce::String line = chosen;
+        std::thread ([this, line]
+        {
+            jobManager.styleCorpusAdd (juce::StringArray { line }, "accept");
+        }).detach();
+    }
+
     auto* d = new DynamicObject(); d->setProperty ("text", chosen);
     return okResult ("accept_lyric_proposal", var (d));
 }
@@ -1253,6 +1290,188 @@ juce::var MoshOps::cmdRejectLyricProposal (const juce::var& args)
     logLine ("reject_lyric_proposal", args, true, {}, false);      // TASTE label (negative)
     emitSnapshotInvalidated();
     return okResult ("reject_lyric_proposal");
+}
+
+// LYR-L1 — precise per-line phonology for the flow visualizer. Service-backed (no LLM),
+// idempotent + read-only: the analysis is a recomputable JSON blob landed per line →
+// snapshot. NON-undoable; no epoch guard (landing a stale analysis is harmless — it just
+// re-marks the same content, and a missing line is skipped on re-lookup).
+juce::var MoshOps::cmdAnalyzeLyrics (const juce::var& args)
+{
+    const auto trackId = args.getProperty ("trackId", var()).toString();
+    auto* t = findTrack (trackId);
+    if (t == nullptr) return errResult ("analyze_lyrics", "no track: " + trackId);
+    if (! t->state.getChildWithName (ids::MOSH_LYRICSHEET).isValid())
+        return errResult ("analyze_lyrics", "track has no lyric sheet");
+
+    const auto spec = lyricSpecForTrack (*t);
+
+    auto land = [this, trackId] (const juce::var& result) -> juce::var
+    {
+        auto* tt = findTrack (trackId);
+        auto sheet = tt != nullptr ? tt->state.getChildWithName (ids::MOSH_LYRICSHEET) : juce::ValueTree();
+        if (! sheet.isValid()) return errResult ("analyze_lyrics", "lyric sheet gone");
+        if (! result.isObject() || ! (bool) result.getProperty ("ok", false))
+            return errResult ("analyze_lyrics", "lyric service unavailable (start the generative service)");
+        auto lines = mosh::LyricSheet::lines (sheet);
+        auto resLines = result.getProperty ("lines", var());
+        int n = 0;
+        if (resLines.isArray())
+            for (auto& rl : *resLines.getArray())
+            {
+                auto node = lines.getChildWithProperty (ids::lyricIndex, (int) rl.getProperty ("index", -1));
+                if (! node.isValid()) continue;
+                node.setProperty (ids::lyricAnalysis, juce::JSON::toString (rl.getProperty ("analysis", var())), nullptr);
+                ++n;
+            }
+        emitSnapshotInvalidated();
+        auto* d = new DynamicObject(); d->setProperty ("status", "analyzed"); d->setProperty ("lineCount", n);
+        return okResult ("analyze_lyrics", var (d));
+    };
+
+    logLine ("analyze_lyrics", args, true, {}, false);
+
+    if ((bool) args.getProperty ("wait", false))
+        return land (jobManager.analyzeLyrics (spec));
+
+    std::thread ([this, spec, land]
+    {
+        auto result = jobManager.analyzeLyrics (spec);
+        juce::MessageManager::callAsync ([land, result] { land (result); });
+    }).detach();
+
+    auto* d = new DynamicObject(); d->setProperty ("status", "analyzing");
+    return okResult ("analyze_lyrics", var (d));
+}
+
+// §7 — read-only corpus size ("N lines in your voice"). NON-SPAWNING (styleCorpusStats is
+// isHealthy-gated) → returns lines:-1 when the service is down (the UI shows nothing). Counts
+// only; the corpus content is never exposed (the backend-only safety wall).
+juce::var MoshOps::cmdGetLyricCorpusStats (const juce::var& args)
+{
+    const int lines = jobManager.styleCorpusStats();
+    auto* d = new DynamicObject(); d->setProperty ("lines", lines);
+    return okResult ("get_lyric_corpus_stats", var (d));
+}
+
+// LYR Phase 3 — audio "mumble take". A recorded vocal take → Basic Pitch note onsets (the
+// reliable RHYTHM) + Whisper confidence-gated words → a lyric constraint sheet on the clip's
+// OWN track, so the producer doesn't hand-type the flow; the L2/L3 loop fills the gaps.
+// Mirrors cmdTranscribeClip's async-on-the-snapshot-rail shape (clip-scoped, service-spawning).
+juce::var MoshOps::cmdBuildLyricsFromClip (const juce::var& args)
+{
+    const auto clipId = args.getProperty ("clipId", var()).toString();
+    const double confThreshold = (double) args.getProperty ("confThreshold", 0.6);
+
+    auto* w = dynamic_cast<te::WaveAudioClip*> (findClip (clipId));
+    if (w == nullptr) return errResult ("build_lyrics_from_clip", "no wave clip with that id");
+    const auto srcFile = w->getCurrentSourceFile();
+    if (! srcFile.existsAsFile()) return errResult ("build_lyrics_from_clip", "clip has no readable source audio");
+
+    auto* track = dynamic_cast<te::AudioTrack*> (w->getTrack());
+    if (track == nullptr) return errResult ("build_lyrics_from_clip", "clip is not on an audio track");
+    const auto trackId = track->itemID.toString();
+    if (track->state.getChildWithName (ids::MOSH_LYRICSHEET).isValid())
+        return errResult ("build_lyrics_from_clip", "track already has a lyric sheet");
+
+    auto& edit = eng.edit();
+    auto* tempo = edit.tempoSequence.getNumTempos() > 0 ? edit.tempoSequence.getTempo (0) : nullptr;
+    const double bpm = tempo != nullptr ? tempo->getBpm() : 120.0;
+    auto* tsig = edit.tempoSequence.getNumTimeSigs() > 0 ? edit.tempoSequence.getTimeSig (0) : nullptr;
+    const int tsNum = tsig != nullptr ? tsig->numerator.get() : 4;
+    const int tsDen = tsig != nullptr ? tsig->denominator.get() : 4;
+
+    // Land the built spec as a MOSH_LYRICSHEET on the clip's OWN track in ONE undo txn —
+    // written via the state helpers directly (re-invoking create/set sub-commands would make
+    // N undo steps + emit nested logs/events). Always on the message thread.
+    auto land = [this, clipId, trackId] (const juce::var& spec) -> juce::var
+    {
+        auto* tt = findTrack (trackId);
+        if (tt == nullptr) return errResult ("build_lyrics_from_clip", "track gone");
+        if (tt->state.getChildWithName (ids::MOSH_LYRICSHEET).isValid())
+            return errResult ("build_lyrics_from_clip", "track already has a lyric sheet");
+
+        auto linesVar = spec.isObject() ? spec.getProperty ("lines", var()) : var();
+        if (! spec.isObject() || ! (bool) spec.getProperty ("ok", false) || ! linesVar.isArray() || linesVar.size() == 0)
+        {
+            const auto err = spec.isObject() ? spec.getProperty ("error", var()).toString() : juce::String();
+            const auto msg = err == "no_melody_detected" ? juce::String ("no melody detected in the take")
+                           : err.isNotEmpty() ? err : juce::String ("lyric service unavailable (start the generative service)");
+            emit ("build_lyrics_status", [&] { auto* o = new DynamicObject();
+                o->setProperty ("clipId", clipId); o->setProperty ("state", "error");
+                o->setProperty ("error", msg); return var (o); }());
+            return errResult ("build_lyrics_from_clip", msg);
+        }
+
+        beginTxn ("build_lyrics_from_clip");
+        const auto sheetId = juce::Uuid().toString();
+        auto sheet = mosh::LyricSheet::create (sheetId, spec.getProperty ("grid", "1/16").toString());
+        if (spec.getProperty ("topic", var()).toString().isNotEmpty())
+            sheet.setProperty (ids::lyricTopic, spec.getProperty ("topic", var()), nullptr);
+        auto container = mosh::LyricSheet::lines (sheet);
+        for (auto& lv : *linesVar.getArray())
+        {
+            auto line = mosh::LyricLine::create (juce::Uuid().toString(),
+                                                 (int) lv.getProperty ("index", 0),
+                                                 lv.getProperty ("role", "verse").toString());
+            line.setProperty (ids::lyricSeedText,       lv.getProperty ("seedText", var()), nullptr);
+            line.setProperty (ids::lyricSyllableTarget, (int) lv.getProperty ("syllableTarget", 0), nullptr);
+            line.setProperty (ids::lyricSyllableTol,    (int) lv.getProperty ("syllableTol", 1), nullptr);
+            line.setProperty (ids::lyricStress,         lv.getProperty ("stress", var()), nullptr);
+            line.setProperty (ids::lyricRhymeGroup,     lv.getProperty ("rhymeGroup", var()), nullptr);
+            line.setProperty (ids::status,              "seed", nullptr);
+            container.appendChild (line, nullptr);
+        }
+        tt->state.appendChild (sheet, &undoManager());
+
+        emit ("build_lyrics_status", [&] { auto* o = new DynamicObject();
+            o->setProperty ("clipId", clipId); o->setProperty ("state", "done");
+            o->setProperty ("lineCount", linesVar.size()); return var (o); }());
+        emitSnapshotInvalidated();
+
+        auto* d = new DynamicObject();
+        d->setProperty ("status", "done");
+        d->setProperty ("sheetId", sheetId);
+        d->setProperty ("trackId", trackId);
+        d->setProperty ("lineCount", linesVar.size());
+        return okResult ("build_lyrics_from_clip", var (d));
+    };
+
+    emit ("build_lyrics_status", [&] { auto* o = new DynamicObject();
+        o->setProperty ("clipId", clipId); o->setProperty ("state", "working"); return var (o); }());
+    logLine ("build_lyrics_from_clip", args, true, {}, false);
+
+    // Off the message thread (or inline for wait:true): notes (Basic Pitch) → words (Whisper,
+    // possibly empty) → mumble_spec. Absent notes (dead service / no Basic Pitch) ⇒ a
+    // no_melody_detected spec so `land` surfaces a friendly error.
+    auto fetchSpec = [this, srcFile, bpm, tsNum, tsDen, confThreshold] () -> juce::var
+    {
+        auto notesRes = jobManager.transcribe (srcFile, "mono");
+        auto notes = notesRes.isObject() ? notesRes.getProperty ("notes", var()) : var();
+        if (! notesRes.isObject() || ! (bool) notesRes.getProperty ("ok", false) || ! notes.isArray() || notes.size() == 0)
+        {
+            auto* e = new DynamicObject(); e->setProperty ("ok", false);
+            e->setProperty ("error", "no_melody_detected"); e->setProperty ("lines", var (Array<var>{}));
+            return var (e);
+        }
+        auto wordsRes = jobManager.transcribeWords (srcFile);
+        auto words = wordsRes.isObject() ? wordsRes.getProperty ("words", var()) : var();
+        if (! words.isArray()) words = var (Array<var>{});
+        return jobManager.mumbleSpec (notes, words, bpm, tsNum, tsDen, confThreshold);
+    };
+
+    if ((bool) args.getProperty ("wait", false))
+        return land (fetchSpec());
+
+    std::thread ([this, fetchSpec, land]
+    {
+        auto spec = fetchSpec();
+        juce::MessageManager::callAsync ([land, spec] { land (spec); });
+    }).detach();
+
+    auto* data = new DynamicObject();
+    data->setProperty ("status", "started");
+    return okResult ("build_lyrics_from_clip", var (data));
 }
 
 // ── ANN-001: authored timeline annotations (mirror the sections CRUD; multiplayer-

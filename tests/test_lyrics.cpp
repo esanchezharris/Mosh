@@ -18,6 +18,17 @@ TEST_CASE ("MOSH_LYRICSHEET builds with a LYRIC_LINES container + defaults (LYR-
     REQUIRE (LyricSheet::lines (v).getNumChildren() == 0);
 }
 
+TEST_CASE ("L1+§7 sheet constraints (styleBias) round-trip through XML", "[lyrics][rag]")
+{
+    auto v = LyricSheet::create ("ls-1", "1/16", "en");
+    // §7 style-RAG opt-in: a sheet-level bool set by set_lyric_constraint, undoable,
+    // serialized in the snapshot/edit. Absent ⇒ false (additive, no format bump).
+    REQUIRE_FALSE ((bool) v[ids::lyricStyleBias]);
+    v.setProperty (ids::lyricStyleBias, true, nullptr);
+    auto back = juce::ValueTree::fromXml (v.toXmlString());
+    REQUIRE ((bool) back[ids::lyricStyleBias] == true);
+}
+
 TEST_CASE ("MOSH_LYRICLINE carries the constraint spec + round-trips through XML", "[lyrics]")
 {
     auto line = LyricLine::create ("ln-1", 0, "hook");
@@ -77,6 +88,33 @@ TEST_CASE ("L2 transient proposals (JSON blob) + regen round-trip on a line", "[
     auto fresh = LyricLine::create ("ln-2", 1, "verse");
     REQUIRE_FALSE (fresh.hasProperty (ids::lyricProposals));
     REQUIRE_FALSE (fresh.hasProperty (ids::lyricRegen));
+}
+
+TEST_CASE ("L1 transient analysis (JSON object blob) round-trips on a line", "[lyrics][l1]")
+{
+    auto line = LyricLine::create ("ln-1", 0, "verse");
+    line.setProperty (ids::lyricText, "lighting up the flame", nullptr);
+    // analyze_lyrics lands precise phonology as a JSON-OBJECT blob (non-undoable). It
+    // must survive serialization, and lyricSheetToVar parses it back to an object for
+    // the snapshot → flow visualizer.
+    line.setProperty (ids::lyricAnalysis,
+                      "{\"syllables\":5,\"target\":5,\"syllableOk\":true,\"endWord\":\"flame\","
+                      "\"rhymeGrade\":\"anchor\",\"rhymeOk\":true,\"stress\":\"XxXxX\","
+                      "\"words\":[{\"w\":\"flame\",\"syllables\":1,\"stress\":\"X\",\"inDict\":true}],"
+                      "\"complete\":true,\"analyzed\":\"text\"}",
+                      nullptr);
+
+    auto back = juce::ValueTree::fromXml (line.toXmlString());
+    auto parsed = juce::JSON::parse (back[ids::lyricAnalysis].toString());
+    REQUIRE (parsed.isObject());
+    REQUIRE ((int) parsed.getProperty ("syllables", juce::var()) == 5);
+    REQUIRE (parsed.getProperty ("rhymeGrade", juce::var()).toString() == "anchor");
+    REQUIRE ((bool) parsed.getProperty ("complete", false) == true);
+    REQUIRE (parsed.getProperty ("words", juce::var()).isArray());
+
+    // A fresh line has no analysis until analyze_lyrics runs (it's recomputable).
+    auto fresh = LyricLine::create ("ln-2", 1, "verse");
+    REQUIRE_FALSE (fresh.hasProperty (ids::lyricAnalysis));
 }
 
 TEST_CASE ("lineFingerprint is stable + sensitive to every constraint input", "[lyrics][cache]")

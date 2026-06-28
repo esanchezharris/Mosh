@@ -715,3 +715,59 @@
   outline: 2px solid var(--v2-accent);
   outline-offset: 2px;
 }
+
+/* ── Finish-My-Song · L1 flow visualizer (precise phonology read) ─────────────────
+   The dictionary stress contour as per-word dots (● stressed · unstressed), the precise
+   syllable count vs target, and the rhyme grade vs the group anchor. Sits under each
+   line's editor; distinct from the live local meter (an instant estimate). */
+.v2-flow-viz {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 3px 0 1px;
+  padding-left: 2px;
+  font-size: 11px;
+  color: var(--v2-dim);
+}
+.v2-flow-stress { display: inline-flex; gap: 7px; align-items: center; }
+.v2-flow-word { display: inline-flex; gap: 1px; }
+.v2-flow-word[data-in-dict="false"] { opacity: 0.55; } /* heuristic estimate, not the dict */
+.v2-flow-dot { color: var(--v2-faint); line-height: 1; font-size: 9px; }
+.v2-flow-dot.on { color: var(--v2-accent); } /* a stressed syllable */
+.v2-flow-empty { color: var(--v2-faint); }
+.v2-flow-syl { font-variant-numeric: tabular-nums; color: var(--v2-dim); }
+.v2-flow-syl.ok { color: var(--v2-accent); }
+.v2-flow-syl.off { color: var(--v2-rec); }
+.v2-flow-rhyme {
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--v2-line);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+}
+.v2-flow-rhyme.st-perfect { color: var(--v2-accent); border-color: var(--v2-accent-soft); }
+.v2-flow-rhyme.st-slant   { color: #ffd45c; }
+.v2-flow-rhyme.st-anchor  { color: var(--v2-text); }
+.v2-flow-rhyme.st-none    { color: var(--v2-rec); border-color: rgba(255, 59, 92, 0.4); }
+.v2-flow-rhyme.st-free    { color: var(--v2-faint); }
+
+/* §7 style-RAG opt-in — "Sound like me": bias generation toward the artist's own voice. */
+.v2-lyric-stylebias {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 0 4px;
+  font-size: 11px;
+  color: var(--v2-dim);
+  cursor: pointer;
+}
+.v2-lyric-stylebias input { accent-color: var(--v2-accent); }
+.v2-lyric-corpus {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--v2-accent-soft);
+  color: var(--v2-accent);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+}

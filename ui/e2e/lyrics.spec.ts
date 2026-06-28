@@ -112,3 +112,75 @@ test("suggest line appends a new line with proposals", async ({ page }) => {
   await expect(page.getByTestId("lyric-line-0")).toBeVisible();
   await expect(page.getByTestId("lyric-proposals-0")).toBeVisible();
 });
+
+// ── L1: the precise flow visualizer — Analyze flow → stress + rhyme grade per line ──
+
+test("Analyze flow draws precise per-line phonology (syllables + rhyme grade)", async ({ page }) => {
+  await bootV2(page);
+  await openLyrics(page);
+  await page.getByTestId("lyric-create").click();
+  await page.getByTestId("lyric-add-line").click();
+  await page.getByTestId("lyric-line-0").getByLabel("line 1", { exact: true }).fill("lighting up the flame");
+  await page.getByTestId("lyric-panel").getByText("Lyrics", { exact: true }).click(); // blur
+  // No visualizer before analysis…
+  await expect(page.getByTestId("flow-viz-0")).toHaveCount(0);
+  await page.getByTestId("lyric-analyze").click();
+  // …then the precise read appears: the syllable count and the visualizer row. The
+  // editor commits typed bars to the SEED (finalized text is set only on accept), so
+  // a typed line analyzes as "seed".
+  const viz = page.getByTestId("flow-viz-0");
+  await expect(viz).toBeVisible();
+  await expect(page.getByTestId("flow-syl-0")).toContainText("/16");
+  await expect(viz).toHaveAttribute("data-analyzed", "seed");
+  await expect(page.getByTestId("v2-error")).toHaveCount(0);
+});
+
+// ── §7: the "Sound like me" style-RAG opt-in toggles + persists ────────────────────
+
+test("the style-RAG 'Sound like me' opt-in toggles on", async ({ page }) => {
+  await bootV2(page);
+  await openLyrics(page);
+  await page.getByTestId("lyric-create").click();
+  const box = page.getByTestId("lyric-stylebias").getByRole("checkbox");
+  await expect(box).not.toBeChecked();
+  await box.check();
+  await expect(box).toBeChecked();
+  await expect(page.getByTestId("v2-error")).toHaveCount(0);
+});
+
+// ── Phase 3: the audio "mumble take" — right-click a vocal take → auto-build a sheet ──
+
+test("right-click a wave take → Build lyrics from this take → a sheet appears", async ({ page }) => {
+  await bootV2(page);
+  // The seed's only wave clip is "chords" (on track index 2); the menu item is wave-only.
+  await page.locator('[data-testid="v2-clip"][title="chords"]').click({ button: "right" });
+  await expect(page.getByTestId("v2-clip-menu")).toBeVisible();
+  await expect(page.getByTestId("clip-build-lyrics")).toBeVisible();
+  await page.getByTestId("clip-build-lyrics").click();
+  // The mock transcribes+analyzes, then lands a sheet on the clip's OWN track. Open it.
+  await page.getByTestId("v2-track-header").nth(2).click();
+  await page.getByTestId("v2-insp-tab-lyrics").click();
+  await expect(page.getByTestId("lyric-panel")).toHaveAttribute("data-has-sheet", "true");
+  await expect(page.getByTestId("lyric-lines").getByRole("listitem")).toHaveCount(2);
+  await expect(page.getByTestId("v2-error")).toHaveCount(0);
+});
+
+test("a MIDI clip does NOT offer 'Build lyrics from this take'", async ({ page }) => {
+  await bootV2(page);
+  await page.locator('[data-testid="v2-clip"][title="loop"]').click({ button: "right" });
+  await expect(page.getByTestId("v2-clip-menu")).toBeVisible();
+  await expect(page.getByTestId("clip-build-lyrics")).toHaveCount(0);
+});
+
+test("accepting a proposal grows the 'in your voice' corpus count", async ({ page }) => {
+  await bootV2(page);
+  await openLyrics(page);
+  await seedGappedLine(page);
+  // No corpus chip before any accept.
+  await expect(page.getByTestId("lyric-corpus-count")).toHaveCount(0);
+  await page.getByTestId("lyric-finish").click();
+  await page.getByTestId("lyric-accept-0-0").click();
+  // The accept auto-accumulates → the readout appears.
+  await expect(page.getByTestId("lyric-corpus-count")).toContainText("in your voice");
+  await expect(page.getByTestId("v2-error")).toHaveCount(0);
+});
