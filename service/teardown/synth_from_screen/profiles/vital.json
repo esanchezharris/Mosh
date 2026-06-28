@@ -119,5 +119,25 @@
     "filter_mix":    {"type": "knob", "cx": 552, "cy": 1278, "r": 32, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]},
     "filter_keytrk": {"type": "knob", "cx": 668, "cy": 1278, "r": 32, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]}
   },
+  "plugin_params": {
+    "_note": "Maps each §5b control NAME (the profile's read key) → the hosted plugin's ACTUAL param name (as Mosh's describe_plugin reports it, case-insensitive). §9 execute (render/execute.resolve_synths) maps synth_patch.params by name→index, so without this map a §5b read lands in `unresolved` ('param name not on plugin'). render/from_screen.synth_element_from_gui applies it so a GUI read actually drives set_plugin_param. Verified against Vital VST3 (905 params).",
+    "env1_delay": "envelope 1 delay",
+    "env1_attack": "envelope 1 attack",
+    "env1_hold": "envelope 1 hold",
+    "env1_decay": "envelope 1 decay",
+    "env1_sustain": "envelope 1 sustain",
+    "env1_release": "envelope 1 release",
+    "osc1_level": "oscillator 1 level",
+    "osc1_pan": "oscillator 1 pan",
+    "osc1_unison": "oscillator 1 unison voices",
+    "osc1_phase": "oscillator 1 phase",
+    "osc2_level": "oscillator 2 level",
+    "osc2_pan": "oscillator 2 pan",
+    "osc3_level": "oscillator 3 level",
+    "osc3_pan": "oscillator 3 pan",
+    "filter_drive": "filter 1 drive",
+    "filter_mix": "filter 1 mix",
+    "filter_keytrk": "filter 1 key track"
+  },
   "_controls_note": "OSC 1/2/3 LEVEL/PAN (+ OSC 1 unison/phase) calibrated from the Init Preset. OSC 2/3 are DIM (off on Init) but the white pointer is read skin-relative, so their LEVEL/PAN read correctly anyway (the coords are valid when a tutorial has them on). The reader records each knob's normalized POSITION [0,1] — the synth-specific position→display mapping (e.g. unison position 0.5 shows '20%') is non-linear, but recording position is reproduction-correct. Vital's filter CUTOFF/RESONANCE are GRAPH-DRAG controls (X/Y on the response graph), NOT knobs, so the white-pointer reader can't read them — those are graphic params for §8. FILTER 1's DRIVE/MIX/KEY-TRK ARE knobs (FILTER 1 = bottom-LEFT module; the FIL1/FIL2 labels there are serial-routing toggles, not the module identity); calibrated LIVE via computer-use (enabled FILTER 1, read defaults DRIVE 0 / MIX 1.0 / KEY-TRK 0.5, then a deliberate DRIVE drag → 0.81 to prove tracking) — they read ONLY when the filter is enabled (dim/off on Init reads unreliably). Fixture: vital_filter_on.png."
 }

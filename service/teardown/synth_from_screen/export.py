@@ -22,6 +22,19 @@ def list_profiles() -> list[str]:
     return sorted(f[:-5] for f in os.listdir(PROFILE_DIR) if f.endswith(".json"))
 
 
+def plugin_params(name: str) -> dict:
+    """The profile's `plugin_params` alias map: §5b control name → the hosted plugin's actual
+    param name (so a GUI read can drive set_plugin_param by name). {} if the profile has none
+    (then the raw control names are used, which §9 will flag as unresolved — honest). The `_note`
+    doc key is stripped."""
+    path = os.path.join(PROFILE_DIR, f"{name.lower()}.json")
+    if not os.path.isfile(path):
+        return {}
+    with open(path) as f:
+        data = json.load(f)
+    return {k: v for k, v in (data.get("plugin_params") or {}).items() if not k.startswith("_")}
+
+
 def load_profile(name: str, frame_w: int, frame_h: int, img=None) -> dict:
     """Load a per-synth control map and map its reference-space coords onto the actual frame.
 
