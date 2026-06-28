@@ -171,6 +171,18 @@ gate_native() {
   run_step "build_app"       cmake --build --preset macos-arm64-release-app   || return
   run_step "build_tests"     cmake --build --preset macos-arm64-release-tests || true
 
+  # Fail-closed: the built app bundle MUST carry NSSpeechRecognitionUsageDescription, or
+  # macOS TCC hard-crashes (SIGABRT) the instant the always-on voice calls SFSpeechRecognizer
+  # — a crash that has masqueraded as a plugin-host crash. The build injects it via the
+  # always-run MoshFixInfoPlist target; assert it independently so a future preset/target
+  # change can't silently re-ship a crashing bundle.
+  local _app_plist; _app_plist="$( find "$WT/build-macos-arm64-release" -path '*Mosh.app/Contents/Info.plist' 2>/dev/null | head -1 )"
+  if [ -n "$_app_plist" ] && /usr/bin/plutil -extract NSSpeechRecognitionUsageDescription raw "$_app_plist" >/dev/null 2>&1; then
+    emit_step "info_plist_tcc_keys" true "$(jq -nc --arg p "${_app_plist#$WT/}" '{plist:$p,key:"NSSpeechRecognitionUsageDescription present"}')"
+  else
+    emit_step "info_plist_tcc_keys" false "$(jq -nc --arg p "${_app_plist:-<not found>}" '{plist:$p,error:"NSSpeechRecognitionUsageDescription MISSING — bundle would TCC-crash on voice"}')"
+  fi
+
   # Catch2: prefer ctest; fall back to running the MoshTests binary directly.
   local catch_ok=true clog; clog="$(mktemp)"
   if ! ( cd "$WT" && ctest --test-dir build-macos-arm64-release --output-on-failure ) >"$clog" 2>&1; then

@@ -63,7 +63,8 @@
       "configurePreset": "macos-arm64-debug",
       "targets": [
         "Mosh",
-        "MoshStageUI"
+        "MoshStageUI",
+        "MoshFixInfoPlist"
       ]
     },
     {
@@ -88,7 +89,8 @@
       "configurePreset": "macos-arm64-release",
       "targets": [
         "Mosh",
-        "MoshStageUI"
+        "MoshStageUI",
+        "MoshFixInfoPlist"
       ]
     },
     {
