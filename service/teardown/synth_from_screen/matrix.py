@@ -39,14 +39,18 @@ import os
 
 import numpy as np
 
+from .calib import axis_map
 from .controls import read_knob
 
 PROFILE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "profiles")
 
 
-def _load_matrix(synth: str, frame_w: int, frame_h: int) -> dict | None:
-    """Load + scale a profile's `matrix` block to the actual frame size. None if the profile is
-    missing or has no matrix block (caller then returns [] — never raises)."""
+def _load_matrix(synth: str, img_bgr: np.ndarray) -> dict | None:
+    """Load + map a profile's `matrix` block onto the actual frame, HOST-INVARIANTLY (the table's
+    y is offset by the logo landmark so the rows line up regardless of the host's title-bar
+    height — essential for the Serum 2 matrix, calibrated from an Ableton capture but read from
+    any host). A grayscale frame degrades to proportional scaling (the logo match needs colour).
+    None if the profile is missing or has no matrix block (caller then returns [] — never raises)."""
     if not synth:
         return None
     path = os.path.join(PROFILE_DIR, f"{synth.lower()}.json")
@@ -57,28 +61,26 @@ def _load_matrix(synth: str, frame_w: int, frame_h: int) -> dict | None:
     mx = data.get("matrix")
     if not mx:
         return None
-    ref_w, ref_h = data.get("reference_size", [frame_w, frame_h])
-    sx, sy = frame_w / float(ref_w), frame_h / float(ref_h)
-    s = (sx + sy) / 2.0
+    cal = axis_map(data, img_bgr.shape[1], img_bgr.shape[0], img_bgr)
 
     def _cell(c: dict | None) -> dict | None:
         if not c:
             return None
         out = dict(c)
         if "x0" in out:
-            out["x0"] = int(round(out["x0"] * sx))
+            out["x0"] = cal.x(out["x0"])
         if "x1" in out:
-            out["x1"] = int(round(out["x1"] * sx))
+            out["x1"] = cal.x(out["x1"])
         if "cx" in out:
-            out["cx"] = int(round(out["cx"] * sx))
+            out["cx"] = cal.x(out["cx"])
         if "r" in out:
-            out["r"] = int(round(out["r"] * s))
+            out["r"] = cal.length_i(out["r"])
         return out
 
     return {
-        "header_y": int(round(mx.get("header_y", 0) * sy)),
-        "row0_y": int(round(mx.get("row0_y", 0) * sy)),
-        "row_h": max(1, int(round(mx.get("row_h", 1) * sy))),
+        "header_y": cal.y(mx.get("header_y", 0)),
+        "row0_y": cal.y(mx.get("row0_y", 0)),
+        "row_h": max(1, cal.h(mx.get("row_h", 1))),
         "rows": int(mx.get("rows", 0)),
         "amount": _cell(mx.get("amount")) or {},
         "source": _cell(mx.get("source")),
@@ -178,7 +180,7 @@ def read_matrix(img_bgr, synth) -> list[dict]:
     if img_bgr is None or not hasattr(img_bgr, "shape") or img_bgr.ndim < 2:
         return []
     h, w = img_bgr.shape[:2]
-    cfg = _load_matrix(synth, w, h)
+    cfg = _load_matrix(synth, img_bgr)
     if not cfg or cfg["rows"] <= 0:
         return []
 

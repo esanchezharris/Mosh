@@ -51,6 +51,29 @@ else:
     check("vital_matrix.png fixture present", False, "fixture missing")
 
 
+# ── REAL Serum 2 matrix (Ableton-hosted) — the host-invariant-calibration payoff ─────────
+# The Serum 2 matrix block is calibrated from an ABLETON capture but stored in the Mosh reference
+# space; host-invariant calibration (the logo landmark) bridges the title-bar offset. The empty
+# Init matrix must read [] — and CRUCIALLY must still read [] under a simulated host title-bar
+# shift (proportional scaling would slide the rows onto the saturated CRV/POL graphics and
+# hallucinate routings).
+smatrix = os.path.join(PANELS, "serum2_matrix.png")
+if os.path.isfile(smatrix):
+    sim = cv2.imread(smatrix)
+    check("empty Serum 2 matrix → [] (host-invariant, no hallucination)",
+          read_matrix(sim, "serum") == [], str(read_matrix(sim, "serum")))
+    check("Serum 2 matrix read deterministic x3",
+          all(read_matrix(sim, "serum") == [] for _ in range(3)))
+    # simulate a SHORTER host title bar (drop 20px): host-invariant must keep it empty (no
+    # drift-induced false routings); this is the whole point of the calibration.
+    check("Serum 2 matrix stays [] under a 20px title-bar shift (host-portable)",
+          read_matrix(sim[20:].copy(), "serum") == [], "drifted into a false routing")
+    g2 = cv2.cvtColor(sim, cv2.COLOR_BGR2GRAY)
+    check("grayscale Serum 2 matrix → [] (graceful, no crash)", read_matrix(g2, "serum") == [])
+else:
+    check("serum2_matrix.png fixture present", False, "fixture missing")
+
+
 # ── graceful degradation: never raise on bad inputs ─────────────────────────────────────
 blank = np.full((400, 400, 3), 20, np.uint8)
 check("unknown synth → []", read_matrix(blank, "nope") == [])

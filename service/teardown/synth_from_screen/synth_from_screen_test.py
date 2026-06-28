@@ -317,6 +317,11 @@ PANELS = os.path.join(_HERE, "fixtures", "panels")
 panel_cases = [("serum2_osc.png", "serum", "OSC"), ("vital_voice.png", "vital", "VOICE"),
                ("vital_effects.png", "vital", "EFFECTS"), ("vital_matrix.png", "vital", "MATRIX"),
                ("vital_advanced.png", "vital", "ADVANCED"),
+               # Serum 2's non-default tabs (Ableton-hosted): the BLUE/WHITE active-dot + shorter
+               # title-bar cases that the 'green'-only + proportional-scaled detector used to miss.
+               # Now host-invariant band + hue-agnostic 'bright' detection nails all five.
+               ("serum2_fx.png", "serum", "FX"), ("serum2_mix.png", "serum", "MIX"),
+               ("serum2_matrix.png", "serum", "MATRIX"), ("serum2_global.png", "serum", "GLOBAL"),
                # Serum 1 (the original) — all 4 tabs, captured live via Ableton
                ("serum1_osc.png", "serum1", "OSC"), ("serum1_fx.png", "serum1", "FX"),
                ("serum1_matrix.png", "serum1", "MATRIX"), ("serum1_global.png", "serum1", "GLOBAL")]

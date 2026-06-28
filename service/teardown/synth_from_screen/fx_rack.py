@@ -31,14 +31,17 @@ import os
 
 import numpy as np
 
+from .calib import axis_map
+
 PROFILE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "profiles")
 
 
-def _load_fx_list(synth: str, frame_w: int, frame_h: int) -> dict | None:
-    """Load + scale a profile's `fx_list` block to the actual frame size. None if the synth is
-    falsy (e.g. None — `identify_synth` returns {"synth": None} when it can't name the synth), the
-    profile is missing, or it has no fx_list. Mirrors page_detect._load_tabs / matrix._load_matrix:
-    positions scale by the frame ratio; the HSV S/V cutoffs are resolution-invariant (unscaled)."""
+def _load_fx_list(synth: str, img_bgr: np.ndarray) -> dict | None:
+    """Load + map a profile's `fx_list` block onto the actual frame, HOST-INVARIANTLY (the rack's
+    y is offset by the logo landmark so it lines up regardless of the host's title-bar height).
+    None if the synth is falsy (e.g. None — `identify_synth` returns {"synth": None} when it can't
+    name the synth), the profile is missing, or it has no fx_list. The HSV S/V cutoffs are
+    resolution-invariant (unscaled)."""
     if not synth:
         return None
     path = os.path.join(PROFILE_DIR, f"{synth.lower()}.json")
@@ -49,17 +52,17 @@ def _load_fx_list(synth: str, frame_w: int, frame_h: int) -> dict | None:
     fx = data.get("fx_list")
     if not fx or not fx.get("effects"):
         return None
-    ref_w, ref_h = data.get("reference_size", [frame_w, frame_h])
-    sx, sy = frame_w / float(ref_w), frame_h / float(ref_h)
+    cal = axis_map(data, img_bgr.shape[1], img_bgr.shape[0], img_bgr)
+    row_h = fx["row_h"] * cal.sy        # vertical row pitch (kept float for precise row stepping)
     return {
-        "x_dot": int(round(fx["x_dot"] * sx)),
-        "row0_y": int(round(fx["row0_y"] * sy)),
-        "row_h": fx["row_h"] * sy,
+        "x_dot": cal.x(fx["x_dot"]),
+        "row0_y": cal.y(fx["row0_y"]),
+        "row_h": row_h,
         "on_sat_min": float(fx.get("on_sat_min", 70.0)),
         "on_val_min": float(fx.get("on_val_min", 90.0)),
         # the indicator patch is a small fraction of the row pitch (kept tight so a neighbour row's
         # dot can't leak in); a floor keeps it ≥1px at tiny capture sizes.
-        "patch": max(2, int(round(0.18 * fx["row_h"] * sy))),
+        "patch": max(2, int(round(0.18 * row_h))),
         "effects": list(fx["effects"]),
     }
 
@@ -95,7 +98,7 @@ def detect_fx_chain(img_bgr: np.ndarray, synth: str) -> list[dict]:
     frame is not a 3-channel colour image (the lit/grey distinction needs colour)."""
     if img_bgr is None or img_bgr.ndim != 3 or img_bgr.shape[2] != 3:
         return []
-    cfg = _load_fx_list(synth, img_bgr.shape[1], img_bgr.shape[0])
+    cfg = _load_fx_list(synth, img_bgr)
     if not cfg:
         return []
     out: list[dict] = []

@@ -35,16 +35,36 @@ entries," not "write a new reader" — except for the dynamic/tabular pages note
 |-----------|-------|-----------------|--------|
 | **Fixed knob grid** | OSC/filter/ENV/LFO on the main page; always-visible ENV column | fixed (cx,cy,r) per control in the profile, `pointer="white"` (Vital) / `"blue_tick"` (Serum) | **ENV + OSC + FILTER DONE** for all 3 synths (verified) |
 | **Dynamic FX rack** | Serum FX tab, Vital EFFECTS tab | NOT fixed — knob positions shift with which effects are enabled + their order. `fx_rack.detect_fx_chain` reads **which effects are on + their order** off the rack list (power-dot colour, names from the profile's fixed order) | **chain-detect DONE** (Vital + Serum 1); per-effect *knob* reading still a next rung |
-| **Modulation matrix** | Serum MATRIX, Vital MATRIX | tabular: rows of source → (bipolar/stereo/morph) → amount → destination. `matrix.read_matrix` reads each OCCUPIED row's amount + best-effort OCR; an empty Init matrix returns [] (no hallucination) | **structural reader DONE** (Vital); validated on the empty matrix + synthetic populated; real-populated calibration is a follow-up |
+| **Modulation matrix** | Serum MATRIX, Vital MATRIX | tabular: rows of source → (bipolar/stereo/morph) → amount → destination. `matrix.read_matrix` reads each OCCUPIED row's amount + best-effort OCR; an empty Init matrix returns [] (no hallucination) | **DONE** (Vital + **Serum 2**, the latter calibrated cross-host via the logo landmark); validated empty→[] (incl. under a title-bar shift) + synthetic populated; real-populated value calibration is a follow-up |
 | **Settings / menus** | Serum GLOBAL, Vital ADVANCED | toggles + dropdowns + a few knobs; OCR labels + `read_toggle`/`read_menu` | low priority |
 
 A prerequisite for all of the above — **page/tab detection** — is **BUILT** (`page_detect.py`):
-`detect_active_tab(img, synth)` reads the active-tab indicator (Serum's green dot, Vital's
-coloured underline) from the tab strip and maps it to the nearest tab anchor; `identify_synth`
-picks the synth whose highlight is cleanest. Pure CV (no OCR), resolution-independent (the tab
-strip is declared in each profile's `"tabs"` block in reference-pixel space, scaled like the
-control coords), and verified 5/5 on the real committed panels (Serum OSC + all four Vital
-tabs) plus synthetic strips. Calibrated synths: Serum 2, Vital (Serum 1 once installed).
+`detect_active_tab(img, synth)` reads the active-tab indicator from the tab strip and maps it to
+the nearest tab anchor; `identify_synth` picks the synth whose highlight is cleanest. Pure CV (no
+OCR), resolution-independent + **host-invariant** (the tab strip is declared in each profile's
+`"tabs"` block in reference-pixel space, mapped onto the frame by the shared `calib` landmark —
+so the band lands on the dots row regardless of the host's title-bar height). The active-indicator
+detection is **hue+saturation AGNOSTIC** (`highlight: "bright"` for Serum): Serum's active-tab dot
+renders GREEN (Mosh/standalone), BLUE (Ableton), or WHITE (the MIX tab) — same plugin,
+host/page-dependent — so only *brightness* is invariant (the active dot is brighter than the dim
+grey inactive dots); Vital's saturated underline stays `"saturated"`. Verified on **all 13 real
+committed panels** — Serum 2's full five tabs across both Mosh and Ableton, Serum 1's four,
+Vital's four — plus synthetic strips.
+
+**Host-invariant calibration** (`calib.py`) is the load-bearing layer under every reader. The host
+title bar is chrome that TRANSLATES the synth content (Mosh's Serum window is ~26px taller than
+Ableton's at full res), so pure proportional scaling (`frame_h/ref_h`) smears that shift over the
+height and mislabels knobs near the top (e.g. a 40px title-bar delta drives filter_res 0.094→0.351,
+filter_drive 0.0→0.318 — a mislabel sets the WRONG param, worse than no profile). `calib` detects
+the synth's own **logo** (top-left, below the chrome, present on every page, accent/preset-invariant)
+via `cv2.matchTemplate` against a bundled `profiles/<synth>.logo.png`, and maps every control as
+`coord*s + (dx,dy)` relative to where the logo actually landed (width is chrome-free → `s =
+frame_w/ref_w`; the matched `dy` carries the title-bar offset; `dx≈0` gates match validity). All
+four loaders (`export.load_profile`, `page_detect`, `fx_rack`, `matrix`) route through it; pass the
+frame image to enable it, omit it for the byte-identical legacy proportional fallback (so it's a
+strict generalization — identical reads when the frame preserves the reference aspect, corrected
+reads only across hosts). Proof (hermetic): a simulated 20/40px title-bar shift on serum_init →
+host-invariant recovers knobs with max|Δ|=0.000 vs proportional 0.164/0.318.
 
 ## Serum 2  (installed — real captures)
 
@@ -76,19 +96,24 @@ skin (the bevel-highlight that forced the `blue_tick` reader).
     The faders are the main control → needs a vertical-slider reader (matrix.py has a *horizontal*
     one). PAN knobs are readable but tiny.
   - **MATRIX** (`serum2_matrix.png`): a clean routing TABLE — SOURCE | CRV | AMOUNT (horizontal
-    slider) | POL | DESTINATION | OUT | AUX SOURCE | INV, ~8 empty rows on Init. This is exactly
-    `matrix.read_matrix`'s shape (centered amount slider + "-" placeholder = neutral → []). It's
-    the best matrix fixture; adding a Serum 2 `matrix` block is the clean next step (blocked only
-    by the cross-host calibration note below).
+    slider) | POL | DESTINATION | OUT | AUX SOURCE | INV, 16 rows (8 cleanly visible in the
+    fixture), all empty on Init. **DONE in `profiles/serum.json` (`matrix` block):** calibrated
+    from this Ableton capture but stored in the Mosh reference space — **host-invariant calibration
+    bridges the title-bar offset** so the same coords read either host. The AMOUNT slider x0/x1 are
+    symmetric about the centered (neutral 0.5) handle so an Init row reads inactive; the source/dest
+    cells are deliberately narrow to EXCLUDE the saturated CRV curve thumbnails and the blue POL
+    arrow (which would otherwise read as 'occupied' and hallucinate a routing). Validated:
+    `read_matrix → []` on the empty Init matrix (no hallucination), AND still `[]` under a simulated
+    20px title-bar shift (proportional scaling would slide the rows onto the graphics → false rows).
+    Per-row AMOUNT *value scale* + rows>8 await a POPULATED Serum 2 matrix capture.
   - **GLOBAL** (`serum2_global.png`): global/voicing settings (toggles + dropdowns) — low value.
-- ⚠️ **Cross-host calibration nuance:** the Serum 2 OSC/filter coords are in the **Mosh** window
-  reference space (`reference_size [2380,1544]`); the Ableton-hosted window is `2380×1518` (a
-  ~1.7% shorter title bar → Mosh cy = Ableton cy + 25). The OSC/filter blocks verify against the
-  Mosh fixture, but a block measured from an Ableton capture (matrix/MIX) would be y-mis-scaled
-  ~1.7% when read from an Ableton-proportioned frame. The real fix is **host-invariant
-  calibration**: detect a GUI landmark (the tab strip) and offset all coords relative to it,
-  instead of assuming window-top. Until then, Serum 2 matrix/MIX blocks are deferred to avoid
-  shipping subtly-wrong coords.
+- ✅ **Cross-host calibration — SOLVED** (was the blocker for matrix/MIX). The Serum 2 OSC/filter/
+  matrix coords live in the **Mosh** window reference space (`reference_size [2380,1544]`); the
+  Ableton-hosted window is shorter (a ~1.7% shorter title bar). **Host-invariant calibration**
+  (`calib.py`, see above) now detects the SERUM 2 logo landmark and offsets all coords relative to
+  it, so a block measured from an Ableton capture reads correctly from BOTH hosts. This unblocked
+  the `matrix` block (done) and the MIX vertical-fader block (a remaining reader, not a calibration
+  blocker anymore).
 
 ## Vital  (installed — real captures, all tabs)
 
@@ -169,12 +194,19 @@ the pipeline should pass the known synth rather than rely on vision-guessing the
 7. ~~**Serum 2 non-default tabs — capture**~~ — **DONE**: FX/MIX/MATRIX/GLOBAL captured live via
    Ableton + committed as fixtures + characterized (see the Serum 2 section). Each needs its own
    reader: FX = added-module reader (dynamic +FX rack, not the fixed list); MIX = vertical-fader
-   reader; MATRIX = the existing `read_matrix` once a Serum 2 block is calibrated host-consistently.
-8. **Host-invariant calibration** (the unblocker for the above) — detect a GUI landmark (the tab
-   strip / a logo) and express control coords RELATIVE to it, so one profile works regardless of
-   the host's title-bar height (Mosh vs Ableton differ ~1.7%). This is the clean way to add the
-   Serum 2 matrix/MIX blocks (and to make every profile host-portable).
-9. **Per-effect FX knob reading** — for an enabled effect module, read its knobs via a
+   reader; MATRIX = the existing `read_matrix` (the Serum 2 `matrix` block is now calibrated — see 8).
+8. ~~**Host-invariant calibration**~~ — **DONE** (`calib.py`): a logo-landmark template match
+   offsets every control's coords relative to where the synth's own logo actually landed, so one
+   profile reads correctly regardless of the host's title-bar height. All four readers
+   (`export`/`page_detect`/`fx_rack`/`matrix`) route through it; graceful proportional fallback when
+   no image/landmark. **Unblocked + landed:** the Serum 2 `matrix` block (empty→[] host-portably);
+   fixed page-detect's green-only hue bug → all 5 Serum 2 tabs detect across Mosh+Ableton.
+9. **Serum 2 MIX vertical-fader reader** — the MIX tab's per-source channel strips use VERTICAL
+   faders (matrix.py has only a HORIZONTAL slider reader); needs a vertical-handle reader + a MIX
+   block. No longer calibration-blocked (host-invariant calibration is done).
+10. **Per-effect FX knob reading** — for an enabled effect module, read its knobs via a
    per-effect-type sub-profile (Vital EFFECTS expands modules inline; Serum 2 adds modules to a bus).
-10. **Vital filter DRIVE/MIX/KEY-TRK** — needs the filter ENABLED to read bright/unambiguous
+11. **Vital filter DRIVE/MIX/KEY-TRK** — needs the filter ENABLED to read bright/unambiguous
    (dim+off on Init reads unreliably).
+12. **Populated-matrix value calibration** — add real routings via the GUI to a Serum 2 / Vital
+   matrix and confirm the per-row AMOUNT value scale + raise `rows` beyond the empty-validated count.

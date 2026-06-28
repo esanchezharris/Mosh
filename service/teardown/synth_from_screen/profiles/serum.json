@@ -10,10 +10,22 @@
     "min_score": 0.55
   },
   "tabs": {
+    "_note": "highlight is 'bright' (hue+saturation AGNOSTIC): Serum's active-tab dot renders GREEN (Mosh/standalone), BLUE (Ableton), OR white (the MIX tab) — same plugin, host/page-dependent — so only BRIGHTNESS is invariant (the active dot is brighter than the dim grey inactive dots). The band y is host-corrected by the logo landmark, so 'bright' lands only on the dots row, not the matrix curve graphics / preset text elsewhere.",
     "band": [95, 125],
-    "highlight": "green",
+    "highlight": "bright",
     "x_min": 360, "x_max": 1010,
     "anchors": {"OSC": 395, "MIX": 533, "FX": 670, "MATRIX": 807, "GLOBAL": 944}
+  },
+  "matrix": {
+    "_note": "MATRIX tab. Calibrated from serum2_matrix.png (Ableton-hosted, 1190x759) but stored in THIS Mosh reference space (2380x1544) — host-invariant calibration (the logo landmark) corrects the Mosh↔Ableton title-bar offset, so the SAME coords read either host. Columns: SOURCE | CRV | AMOUNT(horizontal bipolar slider) | POL | DESTINATION | OUT | AUX SOURCE | INV | CRV | OUTPUT. amount x0/x1 are SYMMETRIC about the centered (neutral=0.5 → no modulation) handle so an Init row reads inactive; source/dest cells are deliberately narrow to EXCLUDE the saturated CRV curve thumbnails and the blue POL arrow (which would otherwise read as 'occupied' and hallucinate a routing). Only the empty Init matrix is validated (read_matrix → []); per-row AMOUNT value scale + rows>8 await a POPULATED Serum 2 matrix capture.",
+    "header_y": 181,
+    "row0_y": 299,
+    "row_h": 68,
+    "rows": 8,
+    "amount": {"type": "slider", "x0": 473, "x1": 853, "neutral": 0.5},
+    "source": {"x0": 80, "x1": 300},
+    "destination": {"x0": 1760, "x1": 2020},
+    "active_amount_eps": 0.06
   },
   "controls": {
     "env1_attack":  {"type": "knob", "cx": 403, "cy": 1289, "r": 34, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
