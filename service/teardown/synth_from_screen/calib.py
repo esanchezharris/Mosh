@@ -26,6 +26,14 @@ import os
 
 PROFILE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "profiles")
 
+# A structural template match (TM_CCOEFF_NORMED) is contrast/colour-invariant, so a small downscaled
+# logo template can "match" busy DAW chrome at 0.8+ on a frame that shows NO synth at all → a
+# cross-synth MISLABEL on real tutorials. Corroborate every accepted match with the actual COLOUR
+# appearance of the matched region (HSV 2-D hist correlation vs the template). Real logo regions
+# correlate ~1.0; spurious texture matches ~0.0 — measured on real DAW frames vs the captured
+# fixtures, a wide clean separator. This is what makes "never mislabel" hold on real input.
+APPEARANCE_MIN = 0.40
+
 
 class Calib:
     """An affine reference→frame map. `host_invariant=True` → uniform scale `s` + a logo-derived
@@ -107,12 +115,31 @@ def compute_calibration(data: dict, img) -> dict | None:
                 return None
             return cv2.resize(tmpl, (nw, nh), interpolation=cv2.INTER_AREA)
 
+        def _appearance_ok(s: float, loc) -> bool:
+            # the matched region must LOOK like the logo (colour), not just correlate structurally.
+            nw = int(round(tmpl.shape[1] * s / tscale))
+            nh = int(round(tmpl.shape[0] * s / tscale))
+            lx, ly = int(round(loc[0])), int(round(loc[1]))
+            if nw < 4 or nh < 4 or lx < 0 or ly < 0 or lx + nw > fw or ly + nh > fh:
+                return True  # can't crop (edge) → don't add a false reject; geometry gate handles it
+            region = img[ly:ly + nh, lx:lx + nw]
+            tre = cv2.resize(tmpl, (nw, nh), interpolation=cv2.INTER_AREA)
+
+            def _h(im):
+                h = cv2.calcHist([cv2.cvtColor(im, cv2.COLOR_BGR2HSV)], [0, 1], None,
+                                 [32, 32], [0, 180, 0, 256])
+                return cv2.normalize(h, h).flatten()
+
+            return cv2.compareHist(_h(region), _h(tre), cv2.HISTCMP_CORREL) >= APPEARANCE_MIN
+
         def _accept(score: float, s: float, loc) -> dict | None:
             dx, dy = loc[0] - ref_x * s, loc[1] - ref_y * s
             # geometric consistency: the whole content box at this scale+offset must fit in the
             # frame (a wrong scale/match would place content off-frame).
             m = 0.03 * max(fw, fh)
             if dx < -m or dy < -m or dx + ref_w * s > fw + m or dy + ref_h * s > fh + m:
+                return None
+            if not _appearance_ok(s, loc):   # colour corroboration — rejects structural-only matches
                 return None
             return {"s": s, "dx": float(dx), "dy": float(dy), "score": float(score)}
 

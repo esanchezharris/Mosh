@@ -100,6 +100,19 @@ check("rich-texture non-GUI frame (grid + colour blocks) → no spurious calib (
       compute_calibration(data, busy) is None and compute_calibration(json.load(
           open(os.path.join(_HERE, "profiles", "serum.json"))), busy) is None)
 
+# ── APPEARANCE GATE: structure-match-but-wrong-COLOUR → reject. The real-tutorial false positive
+# (caught by a live sweep): TM_CCOEFF_NORMED is colour/contrast-invariant, so a tiny downscaled logo
+# template structurally "matched" busy DAW chrome at 0.8+ on frames showing NO synth → a cross-synth
+# mislabel. The colour-hist corroboration kills it. Reproduced hermetically by HUE-ROTATING the
+# fixture: identical structure (TM still high) but wrong colours → must be rejected. ──────────────
+hsv = cv2.cvtColor(full, cv2.COLOR_BGR2HSV)
+hsv[..., 0] = (hsv[..., 0].astype(int) + 90) % 180
+hue_shifted = cv2.cvtColor(hsv.astype("uint8"), cv2.COLOR_HSV2BGR)
+check("original fixture still calibrates (appearance gate doesn't reject the true match)",
+      compute_calibration(data, full) is not None)
+check("hue-shifted fixture (structure matches, colour wrong) → REJECTED by the appearance gate",
+      compute_calibration(data, hue_shifted) is None)
+
 # ── determinism ──────────────────────────────────────────────────────────────────────────────
 fr = _embed(0.65)
 outs = [round(compute_calibration(data, fr)["s"], 4) for _ in range(3)]
