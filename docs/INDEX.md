@@ -42,6 +42,14 @@ Repo root, each with a status banner. `02` lives here in `docs/`; there is no st
   landscape (context, not build work).
 - [`../AGENTS.md`](../AGENTS.md) — the agent capability surface (commands Moshi can execute).
 
+### Finish My Song (lyric completion → mumble → own-voice)
+
+- [`FINISH_MY_SONG_LYRICS_SPEC.md`](FINISH_MY_SONG_LYRICS_SPEC.md) — the **"why"**: v1 scope (lyrics only).
+- [`FINISH_MY_SONG_LYRICS_BUILD_SPEC.md`](FINISH_MY_SONG_LYRICS_BUILD_SPEC.md) — the **"how"**: the
+  validator-loop architecture, component stack, command surface (supersedes the scoping spec on detail).
+- [`FINISH_MY_SONG_ROADMAP.md`](FINISH_MY_SONG_ROADMAP.md) — the full arc: Phase 1 (text) → Phase 2
+  (mumble→skeleton) → Phase 3 (own-voice render, parked).
+
 ## Engine & feature reference
 
 - [`ENGINE_API_NOTES.md`](ENGINE_API_NOTES.md) — Tracktion Engine API resolutions + the file-based

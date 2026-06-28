@@ -26,6 +26,13 @@ sys.path.insert(0, SERVICE)
 import brain_client  # noqa: E402
 from lyrics import core, style_corpus  # noqa: E402
 
+# Hermetic: pin the persistent corpus to a throwaway dir so this golden never reads the
+# machine's real ~/Library/Mosh/lyrics corpus. Without this, an "empty corpus" assertion
+# (the styleCorpus=[] fallback) is machine-state-dependent — it fails the moment the user
+# (or a service smoke) has accumulated any voice-corpus lines. Set before any StyleCorpus()/
+# _build_messages call (both read MOSH_LYRIC_CORPUS_DIR at call time).
+os.environ["MOSH_LYRIC_CORPUS_DIR"] = tempfile.mkdtemp(prefix="mosh-style-corpus-test-")
+
 fails = []
 
 

@@ -104,13 +104,33 @@ test("reject clears the proposals", async ({ page }) => {
   await expect(page.getByTestId("lyric-proposals-0")).toHaveCount(0);
 });
 
-test("suggest line appends a new line with proposals", async ({ page }) => {
+test("suggest line shows an inline ghost; Tab accepts it", async ({ page }) => {
   await bootV2(page);
   await openLyrics(page);
   await page.getByTestId("lyric-create").click();
   await page.getByTestId("lyric-suggest").click();
-  await expect(page.getByTestId("lyric-line-0")).toBeVisible();
-  await expect(page.getByTestId("lyric-proposals-0")).toBeVisible();
+  // The next-bar suggestion lands as a greyed inline ghost (NOT the full proposal block).
+  const ghost = page.getByTestId("ghost-line-0");
+  await expect(ghost).toBeVisible();
+  await expect(page.getByTestId("lyric-proposals-0")).toHaveCount(0);
+  // Tab accepts the ghost → it commits into the line and the ghost is gone.
+  await page.getByTestId("ghost-text-0").press("Tab");
+  await expect(page.getByTestId("lyric-line-0")).toHaveAttribute("data-status", "accepted");
+  await expect(page.getByTestId("ghost-line-0")).toHaveCount(0);
+  await expect(page.getByTestId("v2-error")).toHaveCount(0);
+});
+
+test("the inline ghost is dismissed with Esc (the line is removed)", async ({ page }) => {
+  await bootV2(page);
+  await openLyrics(page);
+  await page.getByTestId("lyric-create").click();
+  await page.getByTestId("lyric-suggest").click();
+  await expect(page.getByTestId("ghost-line-0")).toBeVisible();
+  // Esc dismisses → the greyed ghost vanishes and no committed line is left behind.
+  await page.getByTestId("ghost-text-0").press("Escape");
+  await expect(page.getByTestId("ghost-line-0")).toHaveCount(0);
+  await expect(page.getByTestId("lyric-lines").getByRole("listitem")).toHaveCount(0);
+  await expect(page.getByTestId("v2-error")).toHaveCount(0);
 });
 
 // ── L1: the precise flow visualizer — Analyze flow → stress + rhyme grade per line ──

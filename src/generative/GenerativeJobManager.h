@@ -19,7 +19,10 @@ public:
     /** Ensure the service is reachable: probe /health, spawning the bundled
         Python service (service/server.py) if needed. Returns true if healthy. */
     bool ensureServiceRunning();
-    bool isHealthy();
+    /** Probe GET /health. connectMs bounds the worst-case block on the CALLING thread when
+        the service is reachable-but-wedged (a dead service refuses immediately); pass a short
+        value on non-critical, message-thread paths (e.g. the corpus-stats readout). */
+    bool isHealthy (int connectMs = 3000);
 
     /** The available SA3 colours + their ASTD ceilings (GET /colors), for the UI. */
     juce::var listColors();
@@ -108,7 +111,7 @@ public:
     juce::String serviceBuild() const { return svcBuild; }
 
 private:
-    juce::var httpGet (const juce::String& path);
+    juce::var httpGet (const juce::String& path, int connectMs = 3000);
     juce::var httpPost (const juce::String& path, const juce::var& body);
 
     // C2 — reap an orphaned/wedged service (a crashed Mosh leaves a multi-GB MLX process

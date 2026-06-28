@@ -13,6 +13,10 @@ export function LyricPanel({ track }: { track: Track }) {
   const exec = useStore((s) => s.exec);
   const sheet = track.lyricSheet;
   const [busy, setBusy] = useState(false);
+  // The inline "ghost" next-bar suggestion: the index of the line currently shown as a
+  // greyed tab-to-accept ghost (vs the full proposal-review block). UI-local; cleared on
+  // accept / dismiss. (§7/§9 rung 2 — the engine command is the existing suggest_next_line.)
+  const [ghostIndex, setGhostIndex] = useState<number | null>(null);
   // §7 — "it's learning my voice" cue: the cross-song corpus count (counts only; grows as
   // accepted lines accumulate). Pulled on demand (never via the snapshot — that would spawn
   // the service); -1/absent ⇒ service down ⇒ shown as nothing.
@@ -41,13 +45,15 @@ export function LyricPanel({ track }: { track: Track }) {
     setBusy(true);
     try { await exec(cmd, { trackId: track.id, ...args }); } finally { setBusy(false); }
   };
-  // "Suggest the next line" = append an empty line, then fill it (the ghost-line flow).
+  // "Suggest the next line" = append an empty line, fill it, then surface its top proposal
+  // as an INLINE GHOST (greyed, tab-to-accept) rather than the full review block.
   const suggestNext = async () => {
     const next = sheet.lines.length;
     setBusy(true);
     try {
       await exec("set_lyric_line", { trackId: track.id, lineIndex: next, role: "verse", seedText: "" });
       await exec("suggest_next_line", { trackId: track.id, afterIndex: next - 1 });
+      setGhostIndex(next);
     } finally { setBusy(false); }
   };
 
@@ -93,7 +99,8 @@ export function LyricPanel({ track }: { track: Track }) {
 
       <ol className="v2-lyric-lines" data-testid="lyric-lines">
         {sheet.lines.map((line) => (
-          <LyricLineRow key={line.index} trackId={track.id} line={line} grid={sheet.grid} busy={busy} run={run} />
+          <LyricLineRow key={line.index} trackId={track.id} line={line} grid={sheet.grid} busy={busy} run={run}
+            isGhost={line.index === ghostIndex} onGhostDone={() => setGhostIndex(null)} />
         ))}
       </ol>
       <div className="v2-lyric-add">
@@ -107,11 +114,40 @@ export function LyricPanel({ track }: { track: Track }) {
   );
 }
 
-function LyricLineRow({ trackId, line, grid, busy, run }: {
+function LyricLineRow({ trackId, line, grid, busy, run, isGhost, onGhostDone }: {
   trackId: string; line: LyricLine; grid: string; busy: boolean;
   run: (cmd: string, args: Record<string, unknown>) => Promise<void>;
+  isGhost: boolean; onGhostDone: () => void;
 }) {
   const exec = useStore((s) => s.exec);
+
+  // ── Inline ghost (the next-bar suggestion) ──────────────────────────────────────────
+  // While this line is the active ghost AND its top proposal has landed AND nothing's been
+  // committed yet, render it as a greyed, focused one-liner: Tab accepts it, Esc throws it
+  // (and the throwaway line) away. Falls back to the normal row until the proposal arrives.
+  const ghostTop = line.proposals?.[0];
+  if (isGhost && ghostTop && !line.text.trim()) {
+    const acceptGhost = async () => { await exec("accept_lyric_proposal", { trackId, lineIndex: line.index, proposalIndex: 0 }); onGhostDone(); };
+    const dismissGhost = async () => {
+      await exec("reject_lyric_proposal", { trackId, lineIndex: line.index });
+      await exec("remove_lyric_line", { trackId, lineIndex: line.index });
+      onGhostDone();
+    };
+    return (
+      <li className="v2-lyric-line v2-lyric-ghost-line" data-testid={`ghost-line-${line.index}`} data-status="ghost">
+        <span className="v2-lyric-role" data-role={line.role}>{line.role}</span>
+        <input className="v2-lyric-text v2-lyric-ghost-text" data-testid={`ghost-text-${line.index}`}
+          readOnly autoFocus value={ghostTop.text}
+          aria-label={`Suggested next line: ${ghostTop.text}. Press Tab to accept or Escape to dismiss.`}
+          onKeyDown={(e) => {
+            if (e.key === "Tab") { e.preventDefault(); void acceptGhost(); }
+            else if (e.key === "Escape") { e.preventDefault(); void dismissGhost(); }
+          }} />
+        <span className="v2-lyric-ghost-hint" aria-hidden="true">⇥ accept · esc</span>
+      </li>
+    );
+  }
+
   const content = line.text || line.seedText;
   const count = countSyllables(content);
   const target = line.syllableTarget > 0 ? line.syllableTarget : gridTarget(grid, 1);
