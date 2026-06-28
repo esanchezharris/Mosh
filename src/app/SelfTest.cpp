@@ -2986,6 +2986,8 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                "teardown_analyze errors with no videoId");
         check (! ok (cmd (ops, "teardown_render", objN ({{ "recipePath", "/no/such/recipe.json" }}))),
                "teardown_render errors on a missing recipe");
+        check (! ok (cmd (ops, "teardown_orchestrate", objN ({}))),
+               "teardown_orchestrate errors with no videoId");
 
         browseDir.deleteRecursively();
         cmd (ops, "remove_track", args1 ("trackId", trkId));   // tidy up the probe track

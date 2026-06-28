@@ -159,7 +159,7 @@ const listeners = new Map<string, Set<Listener>>();
 
 // Mock command log (drives the CommandLog panel). Read-only commands don't log.
 const cmdLog: { command: string; ok: boolean; undoable: boolean; ts: number }[] = [];
-const READONLY = new Set(["get_snapshot", "get_clip_peaks", "file_peaks", "audition_file", "stop_audition", "get_command_log", "list_plugins", "list_builtins", "describe_plugin", "teardown_analyze", "teardown_render", "list_colors", "list_audio_devices", "list_wave_inputs", "list_track_outputs", "list_takes", "list_training_sources", "training_job_status", "list_lora_adapters"]);
+const READONLY = new Set(["get_snapshot", "get_clip_peaks", "file_peaks", "audition_file", "stop_audition", "get_command_log", "list_plugins", "list_builtins", "describe_plugin", "teardown_analyze", "teardown_render", "teardown_orchestrate", "list_colors", "list_audio_devices", "list_wave_inputs", "list_track_outputs", "list_takes", "list_training_sources", "training_job_status", "list_lora_adapters"]);
 const NON_UNDOABLE = new Set(["set_transport", "arm_track", "set_input_monitor", "undo", "redo", "save", "reload", "new_project", "render_layer", "open_plugin_editor", "set_plugin_param", "export_audio", "mark_take", "import_training_source", "approve_training_source", "build_training_corpus", "submit_training_job", "cancel_training_job", "import_lora_adapter", "activate_lora_adapter"]);
 function emit(type: string, payload?: unknown) {
   const ls = listeners.get("mosh_event");
@@ -766,6 +766,12 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       if (!str(args.recipePath)) return err(command, "missing 'recipePath'");
       return ok(command, { available: false, recipePath: str(args.recipePath),
         reason: "teardown render needs the local service + binary (dev mock)" });
+    }
+    case "teardown_orchestrate": {
+      // dev mock can't run the real conductor — return graceful unavailable (the UI hints at setup)
+      if (!str(args.videoId) && !str(args.url)) return err(command, "missing 'videoId'");
+      return ok(command, { available: false,
+        reason: "full teardown needs the local service + binary (dev mock)" });
     }
     case "open_plugin_editor": return ok(command);
 

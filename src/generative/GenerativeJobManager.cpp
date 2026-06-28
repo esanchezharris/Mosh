@@ -258,4 +258,27 @@ juce::var GenerativeJobManager::teardownRender (const juce::String& recipePath, 
     return {};
 }
 
+juce::var GenerativeJobManager::teardownOrchestrate (const juce::String& videoId, double secStart,
+                                                     double secEnd, bool render)
+{
+    if (! ensureServiceRunning())
+        return {};
+    auto* body = new DynamicObject();
+    body->setProperty ("videoId", videoId);
+    if (secEnd > secStart)
+    {
+        juce::Array<var> sec; sec.add (secStart); sec.add (secEnd);
+        body->setProperty ("section", var (sec));
+    }
+    body->setProperty ("render", render);
+    // §10 downloads + separates + renders → minutes; the service caps it at 1200s.
+    URL url = URL (baseUrl + "/teardown/teardown").withPOSTData (JSON::toString (var (body)));
+    auto opts = URL::InputStreamOptions (URL::ParameterHandling::inPostData)
+                    .withConnectionTimeoutMs (1205000)
+                    .withExtraHeaders ("Content-Type: application/json");
+    if (auto s = url.createInputStream (opts))
+        return JSON::parse (s->readEntireStreamAsString());
+    return {};
+}
+
 } // namespace mosh

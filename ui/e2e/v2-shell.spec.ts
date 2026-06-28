@@ -77,6 +77,18 @@ test("teardown tab: analyze a tutorial → recipe summary → reconstruct", asyn
   await expect(page.getByTestId("v2-teardown-status")).toContainText(/render|service|reconstruction/i);
 });
 
+test("teardown tab: full teardown button runs the conductor (graceful in dev mock)", async ({ page }) => {
+  await bootV2(page);
+  await page.getByTestId("v2-browser-pull").click();
+  await page.getByTestId("v2-browser-tab-teardown").click();
+  // the one-shot "Full teardown" button (§10 orchestrator) is gated on a url like analyze
+  await expect(page.getByTestId("v2-teardown-full")).toBeDisabled();
+  await page.getByTestId("v2-teardown-url").fill("dQw4w9WgXcQ");
+  await page.getByTestId("v2-teardown-full").click();
+  // dev mock returns available:false → a graceful service-setup hint, never a crash
+  await expect(page.getByTestId("v2-teardown-status")).toContainText(/teardown|service|setup/i);
+});
+
 test("boots the v2 shell with topbar, tracks, composer and the always-on rail", async ({ page }) => {
   await bootV2(page);
   await expect(page.getByTestId("v2-topbar")).toBeVisible();

@@ -794,6 +794,49 @@ class Handler(BaseHTTPRequestHandler):
                                  f"{(proc.stderr or '').strip()[-400:] or 'no output'}"})
                 return
             self._send(200 if payload.get("ok") else 500, payload)
+        elif path == "/teardown/teardown":
+            # §10: run the FULL conductor (skeleton→extract→match→compile→render→score) on one
+            # tutorial — the app-facing one-shot teardown. LONG-running (download + demucs + render);
+            # synchronous with a generous cap. Degrades gracefully (503) when the venv is absent.
+            py = _teardown_py()
+            if not os.path.isfile(py):
+                self._send(503, {"ok": False, "error": "teardown_unavailable (run setup-teardown.sh --with-video)"})
+                return
+            vid = str(data.get("videoId", "") or data.get("url", "") or "").strip()
+            out_dir = str(data.get("out", "") or os.path.join(SERVICE_DIR, "teardown", ".runs"))
+            if not vid:
+                self._send(400, {"ok": False, "error": "videoId or url required"})
+                return
+            cli = os.path.join(SERVICE_DIR, "teardown", "orchestrate", "cli.py")
+            args = [py, cli, "--url", vid, "--out", out_dir]
+            sec = data.get("section")
+            if isinstance(sec, (list, tuple)) and len(sec) == 2:
+                args += ["--section", str(sec[0]), str(sec[1])]
+            # use a built §1 drum index when one exists (caller override or the default) → drum match
+            index = str(data.get("index", "") or "")
+            if not index and os.path.isdir(_teardown_index_dir()):
+                index = _teardown_index_dir()
+            if index:
+                args += ["--index", index]
+            if data.get("noExtract"):
+                args += ["--no-extract"]
+            if data.get("render", True):
+                args += ["--render"]
+            try:
+                proc = subprocess.run(args, capture_output=True, text=True, timeout=1200)
+            except subprocess.TimeoutExpired:
+                self._send(504, {"ok": False, "error": "teardown timed out"})
+                return
+            except OSError as e:
+                self._send(500, {"ok": False, "error": f"teardown failed to start: {e}"})
+                return
+            try:
+                payload = json.loads((proc.stdout or "").strip())
+            except (json.JSONDecodeError, ValueError):
+                self._send(500, {"ok": False, "error": f"teardown failed: "
+                                 f"{(proc.stderr or '').strip()[-400:] or 'no output'}"})
+                return
+            self._send(200 if payload.get("ok") else 500, payload)
         elif path == "/teardown/recipe":
             # §4: tear a tutorial down into a Recipe skeleton (download + frames + OCR +
             # transcript). LONG-running; synchronous with a generous cap (a real UI should

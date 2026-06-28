@@ -194,6 +194,7 @@ private:
     juce::var cmdFindSimilarSample (const juce::var& args);  // §1 drum match via /teardown/match (read-only)
     juce::var cmdTeardownAnalyze (const juce::var& args);    // §4 tutorial→Recipe via /teardown/recipe (read-only)
     juce::var cmdTeardownRender (const juce::var& args);     // §9 Recipe→render via /teardown/execute (read-only)
+    juce::var cmdTeardownOrchestrate (const juce::var& args);// §10 full teardown via /teardown/teardown (read-only)
     juce::var cmdAddNote        (const juce::var& args);
     juce::var cmdRemoveNote     (const juce::var& args);
     juce::var cmdSetNote        (const juce::var& args);

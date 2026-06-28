@@ -17,7 +17,7 @@ export function TeardownPanel() {
   const exec = useStore((s) => s.exec);
   const selectedTrackId = useStore((s) => s.selectedTrackId);
   const [vid, setVid] = useState("");
-  const [busy, setBusy] = useState<"" | "analyze" | "render">("");
+  const [busy, setBusy] = useState<"" | "analyze" | "render" | "full">("");
   const [status, setStatus] = useState<string>("");
   const [detected, setDetected] = useState<Detected | null>(null);
   const [recipePath, setRecipePath] = useState<string>("");
@@ -39,6 +39,29 @@ export function TeardownPanel() {
     setRecipePath(String(d.recipe || ""));
     setTitle(String(d.title || ""));
     setStatus(`Analyzed — ${Number(d.elements || 0)} element(s) detected.`);
+  };
+
+  const fullTeardown = async () => {
+    const id = vid.trim();
+    if (!id) return;
+    setBusy("full"); setStatus("Full teardown… (download → extract → match → render, can take a few minutes)");
+    setDetected(null); setRecipePath("");
+    const r = await exec("teardown_orchestrate", { videoId: id });
+    const d = (r.ok && (r.data as Record<string, unknown>)) || {};
+    if (!r.ok || d.available === false) {
+      setBusy(""); setStatus(String((d as Record<string, unknown>).reason || "Teardown service unavailable — run service/teardown/setup-teardown.sh --with-video --with-extract"));
+      return;
+    }
+    const render = (d.render as Record<string, unknown>) || {};
+    const wav = String(render.out_wav || "");
+    if (wav) {
+      await exec("import_clip", { file: wav, trackId: selectedTrackId ?? undefined });
+      const yld = (render.yield as Record<string, number>) || {};
+      setStatus(`Teardown imported${selectedTrackId ? "" : " (new track)"} — ${Number(d.elements || 0)} element(s), yield ${yld.overall ?? "?"}, status ${d.status ?? "?"}.`);
+    } else {
+      setStatus(`Teardown ran (status ${d.status ?? "?"}) but produced no audio.`);
+    }
+    setBusy("");
   };
 
   const reconstruct = async () => {
@@ -73,9 +96,14 @@ export function TeardownPanel() {
           onKeyDown={(e) => { if (e.key === "Enter") void analyze(); }}
         />
       </label>
-      <button data-testid="v2-teardown-analyze" disabled={!vid.trim() || busy !== ""} onClick={() => void analyze()}>
-        {busy === "analyze" ? "Analyzing…" : "Analyze"}
-      </button>
+      <div className="v2-teardown-actions">
+        <button data-testid="v2-teardown-analyze" disabled={!vid.trim() || busy !== ""} onClick={() => void analyze()}>
+          {busy === "analyze" ? "Analyzing…" : "Analyze"}
+        </button>
+        <button data-testid="v2-teardown-full" disabled={!vid.trim() || busy !== ""} onClick={() => void fullTeardown()}>
+          {busy === "full" ? "Tearing down…" : "Full teardown"}
+        </button>
+      </div>
 
       {detected && (
         <div className="v2-teardown-recipe" data-testid="v2-teardown-recipe">

@@ -543,6 +543,7 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "find_similar_sample") return cmdFindSimilarSample (args);
     if (name == "teardown_analyze")   return cmdTeardownAnalyze (args);
     if (name == "teardown_render")    return cmdTeardownRender (args);
+    if (name == "teardown_orchestrate") return cmdTeardownOrchestrate (args);
    #if MOSH_HAVE_ANIRA
     if (name == "add_rave_insert")   return cmdAddRaveInsert (args);
     if (name == "set_rave_param")    return cmdSetRaveParam (args);
@@ -3287,6 +3288,38 @@ juce::var MoshOps::cmdTeardownRender (const juce::var& args)
     data->setProperty ("reconstructionClass", result.getProperty ("reconstruction_class", var()));
     data->setProperty ("nonsilent", result.getProperty ("nonsilent", var()));
     return okResult ("teardown_render", var (data));
+}
+
+juce::var MoshOps::cmdTeardownOrchestrate (const juce::var& args)
+{
+    // §10: run the FULL conductor (skeleton→extract→match→compile→render→score) on one tutorial
+    // via the teardown service (POST /teardown/teardown). Read-only — no clip/transaction/log;
+    // returns the recipe path + the render summary (out_wav the UI imports) + reward +
+    // yield_validation. LONG-running (download + demucs + render); the UI runs it off the message
+    // thread. A missing videoId IS an error (caught before any service call → keeps --selftest
+    // hermetic). Service/venv absent → graceful { available:false, reason }.
+    const auto vid = args.getProperty ("videoId", args.getProperty ("url", var())).toString();
+    if (vid.isEmpty()) return errResult ("teardown_orchestrate", "missing 'videoId'");
+    const double s0 = (double) args.getProperty ("sectionStart", -1.0);
+    const double s1 = (double) args.getProperty ("sectionEnd", -1.0);
+    const bool render = (bool) args.getProperty ("render", true);
+
+    auto result = jobManager.teardownOrchestrate (vid, s0, s1, render);
+    auto* data = new DynamicObject();
+    if (! (bool) result.getProperty ("ok", false))
+    {
+        data->setProperty ("available", false);
+        data->setProperty ("reason", result.getProperty ("error", var()));
+        return okResult ("teardown_orchestrate", var (data));
+    }
+    data->setProperty ("available", true);
+    data->setProperty ("status", result.getProperty ("status", var()));
+    data->setProperty ("recipe", result.getProperty ("recipe", var()));          // recipe.json path
+    data->setProperty ("elements", result.getProperty ("elements", var()));
+    data->setProperty ("render", result.getProperty ("render", var()));          // {out_wav, nonsilent, yield, synths_loaded, ...}
+    data->setProperty ("reward", result.getProperty ("reward", var()));
+    data->setProperty ("yieldValidation", result.getProperty ("yield_validation", var()));
+    return okResult ("teardown_orchestrate", var (data));
 }
 
 void MoshOps::stopAudition()

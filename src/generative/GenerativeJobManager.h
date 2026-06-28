@@ -66,6 +66,12 @@ public:
         ok:false on failure. */
     juce::var teardownRender (const juce::String& recipePath, const juce::String& outWav);
 
+    /** §10 full conductor (POST /teardown/teardown): skeleton→extract→match→compile→render→score
+        in one shot. LONG-running (download + demucs + render) — call off the message thread.
+        Returns the cli summary var { ok, status, recipe, render{out_wav,...}, reward,
+        yield_validation, ... }, or {} / ok:false on failure. */
+    juce::var teardownOrchestrate (const juce::String& videoId, double secStart, double secEnd, bool render);
+
     juce::String serviceBuild() const { return svcBuild; }
 
 private:
