@@ -161,6 +161,11 @@ if (MOSH_BUILD_APP)
         set_source_files_properties(src/voice/NativeSpeech.mm PROPERTIES COMPILE_FLAGS "-fobjc-arc")
         target_link_libraries(Mosh PRIVATE "-framework Speech" "-framework AVFoundation")
 
+        # Suppress AppKit's window-restoration / "reopen after crash" modal on headless
+        # CLI launches (see src/app/MacStateRestoration.h). Obj-C++ with ARC.
+        target_sources(Mosh PRIVATE src/app/MacStateRestoration.mm)
+        set_source_files_properties(src/app/MacStateRestoration.mm PROPERTIES COMPILE_FLAGS "-fobjc-arc")
+
         # Native WKWebView media-capture permission delegate (collaborator video
         # getUserMedia) — Obj-C++ with ARC; mirrors the NativeSpeech.mm pattern.
         target_sources(Mosh PRIVATE src/webview/WebViewCameraPermission.mm)
