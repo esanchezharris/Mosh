@@ -46,6 +46,10 @@ service/sketch/.sketch.env
 # PyFLP venv + machine-local FLP_PY (setup-flp.sh)
 service/flp/.venv/
 service/flp/.flp.env
+# Teardown (reward/Oracle) venv + machine-local TEARDOWN_PY (setup-teardown.sh)
+service/teardown/.venv/
+service/teardown/.teardown.env
+service/teardown/.index/
 # RAVE transform venv (torch, GBs) + machine-local TRANSFORM_PY/RAVE_MODEL_DIR (setup-transform.sh)
 service/transform/.venv/
 service/transform/.transform.env
