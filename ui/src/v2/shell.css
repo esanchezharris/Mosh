@@ -771,3 +771,16 @@
   font-size: 10px;
   letter-spacing: 0.02em;
 }
+
+/* §7/§9 — the inline ghost: a greyed next-bar suggestion, Tab to accept / Esc to dismiss. */
+.v2-lyric-ghost-line { opacity: 0.92; }
+.v2-lyric-ghost-text {
+  flex: 1 1 auto; min-width: 0;
+  font-style: italic;
+  color: var(--v2-faint);
+  background: transparent;
+  border: 1px dashed var(--v2-line);
+  border-radius: var(--v2-radius-sm);
+}
+.v2-lyric-ghost-text:focus { outline: none; border-color: var(--v2-accent-soft); color: var(--v2-dim); }
+.v2-lyric-ghost-hint { font-size: 10px; color: var(--v2-faint); letter-spacing: 0.02em; white-space: nowrap; }

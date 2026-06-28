@@ -172,8 +172,11 @@ def _merge_palette_rhymes(payload: dict, clean: bool = False) -> dict:
             # palette words first (they're what makes it feel un-neutered), then the dict words
             payload = dict(payload)
             payload["candidates"] = extra + cands
-    except Exception:  # noqa: BLE001 (palette is additive; never break rhyme lookup)
-        pass
+    except Exception as e:  # noqa: BLE001 (palette is additive; never break rhyme lookup)
+        # …but DON'T swallow silently: a broken phonology/vocab install (or a NameError in
+        # vocab.py) would otherwise degrade the rhyme tool to dict-only with no signal. Log
+        # to stderr so an operator running the service sees it (the documented Bar-IQ lesson).
+        sys.stderr.write(f"[service] palette rhyme merge skipped (additive, non-fatal): {e}\n")
     payload.pop("queryPhones", None)   # internal — don't leak to the client
     return payload
 
@@ -908,8 +911,8 @@ class Handler(BaseHTTPRequestHandler):
                         from lyrics.style_corpus import _content_tokens
                         toks = sorted({t for ln in lines for t in _content_tokens(ln)})
                         VocabPalette().harvest_from_corpus(lines, phones_map=_pronounce_words(toks))
-                    except Exception:  # noqa: BLE001
-                        pass
+                    except Exception as e:  # noqa: BLE001
+                        sys.stderr.write(f"[service] vocab harvest skipped (additive, non-fatal): {e}\n")
                     self._send(200, {"ok": True, "added": added, **sc.stats()})
                 elif action == "clear":
                     sc.clear()

@@ -122,11 +122,11 @@ void GenerativeJobManager::adoptPortFromHandshake()
     if (want != baseUrl) baseUrl = want;
 }
 
-juce::var GenerativeJobManager::httpGet (const juce::String& path)
+juce::var GenerativeJobManager::httpGet (const juce::String& path, int connectMs)
 {
     URL url (baseUrl + path);
     auto opts = URL::InputStreamOptions (URL::ParameterHandling::inAddress)
-                    .withConnectionTimeoutMs (3000);
+                    .withConnectionTimeoutMs (connectMs);
     if (auto s = url.createInputStream (opts))
         return JSON::parse (s->readEntireStreamAsString());
     return {};
@@ -143,9 +143,9 @@ juce::var GenerativeJobManager::httpPost (const juce::String& path, const juce::
     return {};
 }
 
-bool GenerativeJobManager::isHealthy()
+bool GenerativeJobManager::isHealthy (int connectMs)
 {
-    auto r = httpGet ("/health");
+    auto r = httpGet ("/health", connectMs);
     if ((bool) r.getProperty ("ok", false))
     {
         svcBuild = r.getProperty ("build", svcBuild).toString();
@@ -435,7 +435,9 @@ int GenerativeJobManager::styleCorpusAdd (const juce::StringArray& lines, const 
 
 int GenerativeJobManager::styleCorpusStats()
 {
-    if (! isHealthy())                                 // NON-SPAWNING (counts only)
+    // Quick health probe: this runs on the message thread (the corpus readout pulls on panel
+    // mount), so cap the worst-case block at ~0.8s if the service is wedged. NON-SPAWNING.
+    if (! isHealthy (800))                             // (counts only)
         return -1;
     auto* body = new DynamicObject();
     body->setProperty ("action", "stats");
