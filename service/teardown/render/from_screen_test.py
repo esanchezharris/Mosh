@@ -83,10 +83,37 @@ unknown_synth = synth_element_from_gui(cv2.imread(FIX) if os.path.isfile(FIX) el
 check("unknown synth profile → unknown, empty params (no crash)",
       unknown_synth.synth_patch.status.value == "unknown" and not unknown_synth.synth_patch.params)
 
+# ── SERUM 1 + SERUM 2 alias: the §5b read now drives a render too (plugin_params from describe_plugin) ──
+_FIXD = os.path.join(_HERE, "..", "synth_from_screen", "fixtures")
+for synth, fixname, disp, want in (("serum", "serum_init.png", "Serum 2", 34),
+                                   ("serum1", "serum1_init.png", "Serum", 32)):
+    alias = plugin_params(synth)
+    check(f"{synth} plugin_params has {want} mappings (filter_pan/fat omitted)",
+          len(alias) == want, str(len(alias)))
+    check(f"{synth} alias keys are §5b control names (env1_/oscA_/filter_)",
+          {"env1_sustain", "oscA_level", "filter_cutoff"} <= set(alias), str(sorted(alias)[:4]))
+    fpath = os.path.join(_FIXD, fixname)
+    if os.path.isfile(fpath):
+        el = synth_element_from_gui(fpath, synth)
+        params = el.synth_patch.params
+        check(f"{synth}: element built (plugin {disp}, params_visible)",
+              el.synth_patch.plugin.name == disp and el.synth_patch.status.value == "params_visible",
+              f"{el.synth_patch.plugin.name}/{el.synth_patch.status}")
+        check(f"{synth}: params keyed by REAL plugin names, not §5b control names",
+              all(k not in ("env1_sustain", "oscA_level", "filter_cutoff") for k in params)
+              and len(params) >= want - 4, str(sorted(params)[:3]))
+        check(f"{synth}: every param normalized [0,1]",
+              all(isinstance(v, (int, float)) and 0.0 <= v <= 1.0 for v in params.values()))
+    else:
+        check(f"{synth}: {fixname} fixture present", False, fpath)
+
 # ── determinism: identical params across 3 builds ───────────────────────────────────────────
 if os.path.isfile(FIX):
     outs = [synth_element_from_gui(FIX, "vital").synth_patch.params for _ in range(3)]
     check("from_screen deterministic x3", outs[0] == outs[1] == outs[2])
+    souts = [synth_element_from_gui(os.path.join(_FIXD, "serum_init.png"), "serum").synth_patch.params
+             for _ in range(3)] if os.path.isfile(os.path.join(_FIXD, "serum_init.png")) else [{}, {}, {}]
+    check("serum from_screen deterministic x3", souts[0] == souts[1] == souts[2])
 
 print(f"\n{'ALL PASS' if not fails else 'FAILURES: ' + ', '.join(fails)}  ({len(fails)} failure(s))")
 sys.exit(len(fails))
