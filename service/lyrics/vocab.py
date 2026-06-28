@@ -165,6 +165,11 @@ class VocabPalette:
         scored.sort(key=lambda t: (t[0], t[1], t[2]))
         return [t[3] for t in scored[:max_n]]
 
+    def register_words(self, register: str) -> set:
+        """The set of palette words tagged with `register` (e.g. 'profanity') — the registry
+        clean mode uses to filter candidates wherever they appear (palette OR dictionary)."""
+        return {e["word"] for e in self.entries() if e.get("register") == register}
+
     def stats(self) -> dict:
         """Counts only — never the content (the backend-only safety wall)."""
         rows = self.entries()

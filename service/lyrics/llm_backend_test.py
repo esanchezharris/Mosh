@@ -77,6 +77,13 @@ check("prompt carries the topic", "comeback" in usr, usr)
 check("feedback is appended when a prior attempt failed",
       "Fix it" in core._build_messages(LINE, SPEC, "flame", 8, 1, "slant", "too long.")[-1]["content"])
 
+# ── 3b. Register (Bar IQ D): raw is the DEFAULT (de-censored); clean is the opt-in ─
+check("default prompt PERMITS an authentic register (slang/explicit, no self-censor)",
+      "register" in usr.lower() and "self-censor" in usr.lower(), usr)
+clean_usr = core._build_messages(LINE, dict(SPEC, explicit="clean"), "flame", 8, 1, "slant", None)[-1]["content"]
+check("explicit=clean prompt says keep it clean (no profanity)", "no profanity" in clean_usr.lower(), clean_usr)
+check("default (raw) prompt does NOT say 'keep it clean'", "keep it clean" not in usr.lower())
+
 # ── 4. The response parser handles the JSON shapes + a newline fallback ──────────
 check("parses {\"lines\":[...]}", core._parse_lines('{"lines":["a b","c d"]}') == ["a b", "c d"])
 check("parses {\"line\":\"...\"}", core._parse_lines('{"line":"one line"}') == ["one line"])

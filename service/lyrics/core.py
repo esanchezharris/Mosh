@@ -173,11 +173,17 @@ def _evaluate(text: str, line: dict, spec: dict, anchor: Optional[str],
     passes = syl_ok and rhyme_ok and locked_ok
     grade = ("anchor" if fixed else
              (phon.rhyme_grade(_P.phones(end) or [], _P.phones(anchor) or []) if anchor else "free"))
+    # Bar IQ C — reward MULTISYLLABIC rhymes: how many trailing syllables of the end word
+    # rhyme with the anchor (depth 1 = a plain end-rhyme; 2+ = a skilled multi). The bonus
+    # makes the ranker PREFER deeper rhymes among otherwise-valid candidates.
+    depth = (phon.multisyllabic_depth(_P.phones(end) or [], _P.phones(anchor) or [])
+             if (anchor and end) else 0)
     score = (2 if passes else 0) + (1 if rhyme_ok else 0) + (1 if locked_ok else 0) \
-        + (1.0 - min(1.0, abs(nsyl - target) / max(1, target)))
+        + (1.0 - min(1.0, abs(nsyl - target) / max(1, target))) \
+        + 0.5 * max(0, depth - 1)
     return {"text": text, "endWord": end, "syllables": nsyl, "syllableOk": syl_ok,
             "rhymeOk": rhyme_ok, "lockedOk": locked_ok, "passes": passes,
-            "grade": grade, "score": round(score, 3)}
+            "grade": grade, "depth": depth, "score": round(score, 3)}
 
 
 def _rank(cands: List[dict], n: int = 3) -> List[dict]:
@@ -252,8 +258,14 @@ def _build_messages(line: dict, spec: dict, anchor: Optional[str], target: int,
         rules.append(f"Topic: {spec['topic']}.")
     if spec.get("mood"):
         rules.append(f"Mood: {spec['mood']}.")
+    # Bar IQ D — register. Raw is the DEFAULT (it's the artist's art): explicitly permit slang
+    # / ad-libs / explicit language so the model doesn't self-censor into something neutered.
+    # "clean" is the opt-in that sanitizes.
     if spec.get("explicit") == "clean":
         rules.append("Keep it clean — no profanity.")
+    else:
+        rules.append("Authentic register: slang, ad-libs, and explicit language are welcome — "
+                     "don't self-censor or sanitize.")
     # Style-RAG (§7): bias toward the artist's OWN voice with retrieved exemplars, but
     # forbid copying them verbatim — the model is steered by style, not by parroting.
     exemplars = _style_exemplars(spec)
@@ -440,11 +452,20 @@ def _analyze_line(line: dict, spec: dict, anchor: Optional[str]) -> dict:
     base["rhymeOk"] = rhyme_ok
     base["passes"] = bool(base["syllableOk"] and rhyme_ok and base["lockedOk"])
 
+    # Bar IQ C — rhyme CRAFT for the flow visualizer: how deep the end rhyme runs vs the
+    # anchor (multisyllabic) + which words rhyme internally (a hallmark of skilled flow).
+    rhyme_depth = (phon.multisyllabic_depth(_P.phones(end) or [], _P.phones(anchor) or [])
+                   if (anchor and end and not is_anchor) else 0)
+    internal = [[words[i], words[j]]
+                for i, j in phon.internal_rhyme_pairs([(w, _P.phones(w)) for w in words], strict)]
+
     base.update({
         "target": target, "tol": tol,
         "rhymeGroup": line.get("rhymeGroup") or "",
         "rhymeAnchor": anchor or "",
         "rhymeGrade": grade,
+        "rhymeDepth": rhyme_depth,
+        "internalRhymes": internal,
         "stress": "".join(pw["stress"] for pw in per_word),
         "words": per_word,
         "hasGap": has_gap,

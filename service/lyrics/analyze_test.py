@@ -119,5 +119,34 @@ try:
 finally:
     core._P = _saved
 
+# ── 8. Rhyme CRAFT in the analysis (Bar IQ C): multisyllabic depth + internal rhymes ─
+CRAFT = {
+    "stronger": [["S", "T", "R", "AO1", "NG", "ER0"]],
+    "longer":   [["L", "AO1", "NG", "ER0"]],            # multisyllabic rhyme w/ stronger (AO, ER)
+    "money":    [["M", "AH1", "N", "IY0"]],
+    "sunny":    [["S", "AH1", "N", "IY0"]],             # internal rhyme w/ money
+    "today":    [["T", "AH0", "D", "EY1"]],
+}
+_saved2 = core._P
+try:
+    core._P = phon.Pronouncer(CRAFT)
+    cres = core.analyze({
+        "grid": "1/16", "rhymeStrictness": "slant",
+        "lines": [
+            {"index": 0, "role": "hook", "text": "came back stronger", "seedText": "",
+             "syllableTarget": 3, "syllableTol": 1, "rhymeGroup": "A", "locked": False},
+            {"index": 1, "role": "verse", "text": "money sunny longer", "seedText": "",
+             "syllableTarget": 5, "syllableTol": 1, "rhymeGroup": "A", "locked": False},
+        ],
+    })
+    ca = by_index(cres)
+    check("multisyllabic rhyme DEPTH reported (longer vs stronger anchor == 2)",
+          ca[1]["rhymeDepth"] == 2, str(ca[1].get("rhymeDepth")))
+    check("anchor line has depth 0 (it IS the anchor)", ca[0]["rhymeDepth"] == 0)
+    check("internal rhymes detected within the line (money~sunny)",
+          ["money", "sunny"] in ca[1]["internalRhymes"], str(ca[1]["internalRhymes"]))
+finally:
+    core._P = _saved2
+
 print(f"\n{'OK' if not fails else 'FAILED'}: {len(fails)} failure(s)")
 sys.exit(len(fails))
