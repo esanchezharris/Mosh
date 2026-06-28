@@ -85,6 +85,21 @@ check("off-center embedded window found (translation-tolerant)",
 gray = np.full((900, 1400, 3), 40, np.uint8)
 check("non-GUI frame → no calibration (no false match)", compute_calibration(data, gray) is None)
 
+# a RICH-TEXTURE non-GUI frame (DAW-chrome-like: grid lines + coloured panels/blocks) must also
+# not produce a spurious slow-path match — the 0.78 gate's real adversary, not just flat gray.
+busy = np.full((1080, 1920, 3), 45, np.uint8)
+for gx in range(0, 1920, 24):
+    cv2.line(busy, (gx, 0), (gx, 1080), (70, 70, 70), 1)
+for gy in range(0, 1080, 18):
+    cv2.line(busy, (0, gy), (1920, gy), (60, 60, 60), 1)
+for (bx, by, bw, bh, c) in [(120, 80, 260, 60, (180, 90, 40)), (500, 300, 200, 90, (40, 160, 200)),
+                            (900, 150, 300, 70, (60, 200, 120)), (1300, 500, 240, 110, (200, 60, 180)),
+                            (200, 700, 180, 80, (120, 120, 220))]:
+    cv2.rectangle(busy, (bx, by), (bx + bw, by + bh), c, -1)
+check("rich-texture non-GUI frame (grid + colour blocks) → no spurious calib (0.78 gate holds)",
+      compute_calibration(data, busy) is None and compute_calibration(json.load(
+          open(os.path.join(_HERE, "profiles", "serum.json"))), busy) is None)
+
 # ── determinism ──────────────────────────────────────────────────────────────────────────────
 fr = _embed(0.65)
 outs = [round(compute_calibration(data, fr)["s"], 4) for _ in range(3)]

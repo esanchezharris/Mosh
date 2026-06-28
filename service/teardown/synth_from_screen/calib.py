@@ -176,7 +176,11 @@ def compute_calibration(data: dict, img) -> dict | None:
             if win.shape[0] >= nt_full.shape[0] and win.shape[1] >= nt_full.shape[1]:
                 res = cv2.matchTemplate(win, nt_full, cv2.TM_CCOEFF_NORMED)
                 _, score2, _, loc2 = cv2.minMaxLoc(res)
-                loc, score = (x0 + loc2[0], y0 + loc2[1]), float(score2)
+                # only take the refine result if it's at least as confident as the sweep gate —
+                # if the tight window clipped the logo, score2 collapses and loc2 points at noise;
+                # keeping the coarse loc/score then is correct (the sweep already cleared slow_min).
+                if score2 >= slow_min:
+                    loc, score = (x0 + loc2[0], y0 + loc2[1]), float(score2)
         return _accept(score, s, loc)
     except Exception:
         # a malformed-but-PRESENT landmark (short/non-numeric bbox, bad template_scale, a zero or
