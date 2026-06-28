@@ -14,12 +14,64 @@ from __future__ import annotations
 
 import json
 import os
+import re
 
 import numpy as np
 
 from .calib import axis_map
 
 PROFILE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "profiles")
+
+
+def norm_name(s: str) -> str:
+    """Normalize a synth name for matching (lowercase, alnum only)."""
+    return re.sub(r"[^a-z0-9]", "", (s or "").lower())
+
+
+def profile_metas() -> dict:
+    """{profile_key: display_name} for installed profiles that declare a DETECTABLE tab strip
+    (a `tabs.anchors` block) — only those can be located on a frame by detect_active_tab."""
+    metas: dict = {}
+    if not os.path.isdir(PROFILE_DIR):
+        return metas
+    for f in os.listdir(PROFILE_DIR):
+        if not f.endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(PROFILE_DIR, f)) as fh:
+                d = json.load(fh)
+        except Exception:
+            continue
+        if (d.get("tabs") or {}).get("anchors"):
+            key = f[:-5]
+            metas[key] = d.get("synth", key) or key
+    return metas
+
+
+def name_synths_in_frames(images, *, min_conf: float = 0.6) -> list:
+    """Display names of synths whose GUI is UNIQUELY + confidently detected across `images`
+    (BGR arrays) — the VISUAL complement to OCR plugin-name detection (§2), for when the
+    on-screen name is only a stylized logo tesseract can't read. Uniqueness-gated PER FRAME
+    (exactly one profile clears `min_conf` on a frame) so the blind Vital↔Serum cross-fire that
+    defeats identify_synth cannot mislabel here. (min_conf 0.6 is also where the cross-fire is
+    excluded — a Vital frame trips the Serum profile at ~0.56, so a lower gate would wrongly read
+    'ambiguous'.) Returns sorted display names."""
+    metas = profile_metas()
+    if not metas:
+        return []
+    found: dict = {}
+    for img in images:
+        if img is None or getattr(img, "ndim", 0) != 3 or getattr(img, "size", 0) == 0:
+            continue
+        fired: dict = {}
+        for key in metas:
+            r = detect_active_tab(img, key)
+            if r.get("tab") and float(r.get("confidence", 0.0) or 0.0) >= min_conf:
+                fired[key] = float(r["confidence"])
+        if len(fired) == 1:                     # unambiguous on this frame
+            disp = metas[next(iter(fired))]
+            found[disp] = max(found.get(disp, 0.0), next(iter(fired.values())))
+    return sorted(found)
 
 
 def _load_tabs(synth: str, img: np.ndarray) -> dict | None:

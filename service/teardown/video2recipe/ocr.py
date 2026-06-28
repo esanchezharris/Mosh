@@ -68,6 +68,15 @@ def scan_meta(frames) -> dict:
         if not pianoroll and piano_roll_present(fr.image)["present"]:
             pianoroll = True
 
+    # §2 visual complement to OCR: name synths whose GUI is on screen even when tesseract can't
+    # read the (stylized) logo — uniqueness-gated per frame so it can't mislabel (the blind
+    # Vital↔Serum cross-fire is excluded). Display names dedup against OCR's via the set.
+    try:
+        from ..synth_from_screen.page_detect import name_synths_in_frames
+        plugins.update(name_synths_in_frames([fr.image for fr in frames]))
+    except Exception:
+        pass
+
     tempo = max(tempo_votes, key=tempo_votes.get) if tempo_votes else None
     key = max(key_votes, key=key_votes.get) if key_votes else None
     daw = max(daw_votes, key=daw_votes.get) if daw_votes else "unknown"

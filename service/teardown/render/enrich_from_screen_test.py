@@ -26,8 +26,8 @@ if _SERVICE not in sys.path:
 import cv2  # noqa: E402
 
 from teardown import recipe as R  # noqa: E402
-from teardown.render.from_screen import (_candidate_profiles, _profile_metas,  # noqa: E402
-                                         enrich_synths_from_frames)
+from teardown.render.from_screen import (_candidate_profiles, enrich_synths_from_frames,  # noqa: E402
+                                         profile_metas)
 from teardown.vision.frames import Frame  # noqa: E402
 
 FIX = os.path.join(_HERE, "..", "synth_from_screen", "fixtures", "vital_init.png")
@@ -58,7 +58,7 @@ def _recipe():
 
 
 # ── candidate resolution (constrained, name-driven; never blind) ─────────────────────────────
-metas = _profile_metas()
+metas = profile_metas()
 check("installed profiles have detectable tab strips (vital present)", "vital" in metas, str(sorted(metas)))
 check("'Vital' resolves to the vital profile only", _candidate_profiles("Vital", metas) == ["vital"],
       str(_candidate_profiles("Vital", metas)))

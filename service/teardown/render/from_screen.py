@@ -13,12 +13,12 @@ from __future__ import annotations
 
 import json
 import os
-import re
 from typing import Optional
 
 from teardown.recipe import Element, Midi, Plugin, SynthPatch
 from teardown.synth_from_screen.export import (PROFILE_DIR, load_profile, plugin_params,
                                                read_patch)
+from teardown.synth_from_screen.page_detect import norm_name, profile_metas
 
 
 def _plugin_name(synth: str) -> str:
@@ -69,42 +69,18 @@ def synth_element_from_gui(img, synth: str, *, element_id: str = "lead", role: s
                    confidence=0.7)
 
 
-def _norm(s: str) -> str:
-    return re.sub(r"[^a-z0-9]", "", (s or "").lower())
-
-
-def _profile_metas() -> dict:
-    """{profile_key: display_name} for installed profiles that declare a DETECTABLE tab strip
-    (a `tabs.anchors` block) — only those can be located on a frame by page_detect."""
-    metas: dict = {}
-    if not os.path.isdir(PROFILE_DIR):
-        return metas
-    for f in os.listdir(PROFILE_DIR):
-        if not f.endswith(".json"):
-            continue
-        try:
-            with open(os.path.join(PROFILE_DIR, f)) as fh:
-                d = json.load(fh)
-        except Exception:
-            continue
-        if (d.get("tabs") or {}).get("anchors"):
-            key = f[:-5]
-            metas[key] = d.get("synth", key) or key
-    return metas
-
-
 def _candidate_profiles(ocr_name: str, metas: dict) -> list:
     """Profiles whose key OR display name relate to an OCR'd plugin name — the CONSTRAINED set we
     test a frame against. We never blind-identify (page_detect.identify_synth cross-fires Vital↔Serum
     and would mislabel); the §4 OCR already named the plugin, so we only ever read a frame with the
     profile(s) that name resolves to. 'Serum' → both serum/serum1 (detect_active_tab disambiguates;
     they don't cross-fire with each other), 'Vital' → vital only."""
-    o = _norm(ocr_name)
+    o = norm_name(ocr_name)
     out: list = []
     if not o:
         return out
     for key, disp in metas.items():
-        k, d = _norm(key), _norm(disp)
+        k, d = norm_name(key), norm_name(disp)
         if k and (k in o or o in k):
             out.append(key)
         elif d and (d in o or o in d):
@@ -135,7 +111,7 @@ def enrich_synths_from_frames(rec, frames, *, min_conf: float = 0.6) -> int:
         from teardown.synth_from_screen.page_detect import detect_active_tab
     except Exception:
         return 0
-    metas = _profile_metas()
+    metas = profile_metas()
     if not metas or not frames:
         return 0
 
@@ -156,7 +132,7 @@ def enrich_synths_from_frames(rec, frames, *, min_conf: float = 0.6) -> int:
         imgs: dict = {}          # frame_idx -> image
         for fi, fr in enumerate(frames):
             img = getattr(fr, "image", None)
-            if img is None or getattr(img, "ndim", 0) != 3:
+            if img is None or getattr(img, "ndim", 0) != 3 or getattr(img, "size", 0) == 0:
                 continue
             imgs[fi] = img
             for key in cands:
