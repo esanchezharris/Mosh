@@ -1,6 +1,6 @@
 {
   "synth": "Serum 2",
-  "note": "Calibrated from a real Serum 2 editor captured via the Mosh host (Mosh --demo3 → open_plugin_editor → screencapture the 'Serum 2' window), Init patch. Coords are in the reference_size pixel space (a retina capture); load_profile() scales them to the actual frame. Serum draws a WHITE pointer mark over a small blue arc; pointer=\"white\" reads the colourless pointer (bright + low-saturation) for accurate absolute values (full SUSTAIN reads ~1.0). ENV 1 has no DELAY knob (unlike Vital): ATK/HOLD/DEC/SUS/REL. Extend by adding controls.",
+  "note": "Calibrated from a real Serum 2 editor, Init patch. ENV was captured via the Mosh host (Mosh --demo3 → screencapture the 'Serum 2' window); OSC A + FILTER were calibrated from a full-res Ableton-hosted capture and converted into this same Mosh-window reference space (the two windows differ only by a ~25px title-bar offset: same x, Mosh cy = Ableton cy + 25). Coords are in the reference_size pixel space; load_profile() scales them to the actual frame. Knobs read via the blue_tick reader: Serum marks each value with a saturated BLUE tick at the rim (robust on Serum 2's glossy skin, where the white-pointer read is dragged toward 0.5 by the bright top-bevel highlight; falls back to the white pointer on non-default skins). ENV 1 has no DELAY knob (unlike Vital): ATK/HOLD/DEC/SUS/REL.",
   "reference_size": [2380, 1544],
   "tabs": {
     "band": [95, 125],
@@ -9,10 +9,26 @@
     "anchors": {"OSC": 395, "MIX": 533, "FX": 670, "MATRIX": 807, "GLOBAL": 944}
   },
   "controls": {
-    "env1_attack":  {"type": "knob", "cx": 403, "cy": 1289, "r": 34, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]},
-    "env1_hold":    {"type": "knob", "cx": 509, "cy": 1289, "r": 34, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]},
-    "env1_decay":   {"type": "knob", "cx": 615, "cy": 1289, "r": 34, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]},
-    "env1_sustain": {"type": "knob", "cx": 721, "cy": 1289, "r": 34, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]},
-    "env1_release": {"type": "knob", "cx": 827, "cy": 1289, "r": 34, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]}
-  }
+    "env1_attack":  {"type": "knob", "cx": 403, "cy": 1289, "r": 34, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "env1_hold":    {"type": "knob", "cx": 509, "cy": 1289, "r": 34, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "env1_decay":   {"type": "knob", "cx": 615, "cy": 1289, "r": 34, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "env1_sustain": {"type": "knob", "cx": 721, "cy": 1289, "r": 34, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "env1_release": {"type": "knob", "cx": 827, "cy": 1289, "r": 34, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+
+    "oscA_wtpos":   {"type": "knob", "cx": 204, "cy": 648, "r": 36, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "oscA_detune":  {"type": "knob", "cx": 438, "cy": 648, "r": 30, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "oscA_blend":   {"type": "knob", "cx": 528, "cy": 648, "r": 30, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "oscA_pan":     {"type": "knob", "cx": 636, "cy": 648, "r": 30, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "oscA_warp1":   {"type": "knob", "cx": 204, "cy": 758, "r": 30, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "oscA_warp2":   {"type": "knob", "cx": 528, "cy": 758, "r": 30, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "oscA_level":   {"type": "knob", "cx": 636, "cy": 758, "r": 30, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+
+    "filter_cutoff":{"type": "knob", "cx": 2035, "cy": 649, "r": 36, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "filter_res":   {"type": "knob", "cx": 2135, "cy": 649, "r": 36, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "filter_pan":   {"type": "knob", "cx": 2265, "cy": 649, "r": 37, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "filter_drive": {"type": "knob", "cx": 2035, "cy": 759, "r": 36, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "filter_fat":   {"type": "knob", "cx": 2135, "cy": 759, "r": 36, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "filter_mix":   {"type": "knob", "cx": 2263, "cy": 759, "r": 36, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]}
+  },
+  "_controls_note": "ENV 1 ADSR + OSC A + FILTER 1. UNISON is a number box (voices), not a knob; PHASE/RAND are tiny header value-displays — both omitted. OSC A has DUAL warp (warp1/warp2). Filter is a 2x3 knob grid (CUTOFF/RES/PAN over DRIVE/FAT/MIX) plus a vertical LEVEL slider (sliders aren't read by the knob reader). The blue_tick reader records each knob's normalized POSITION [0,1]."
 }

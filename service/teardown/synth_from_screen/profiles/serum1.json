@@ -1,6 +1,6 @@
 {
   "synth": "Serum",
-  "note": "The ORIGINAL Serum (v1, distinct from Serum 2). Captured LIVE from the installed plugin hosted in Ableton Live (Mosh's in-process host crashes on Serum 1; Ableton hosts it fine and accepts tab clicks). Init patch, dark skin. 4 tabs (OSC/FX/MATRIX/GLOBAL — no MIX, vs Serum 2's 5); active tab marked by a BLUE dot. ENV 1 ADSR (ATTACK/HOLD/DECAY/SUSTAIN/RELEASE — no DELAY). White-pointer knobs; the reader is skin-relative. Coords in reference_size space; load_profile scales to any frame.",
+  "note": "The ORIGINAL Serum (v1, distinct from Serum 2). Captured LIVE from the installed plugin hosted in Ableton Live (Mosh's in-process host crashes on Serum 1; Ableton hosts it fine and accepts tab clicks). Init patch, dark skin. 4 tabs (OSC/FX/MATRIX/GLOBAL — no MIX, vs Serum 2's 5); active tab marked by a BLUE dot. ENV 1 ADSR (ATTACK/HOLD/DECAY/SUSTAIN/RELEASE — no DELAY). Knobs read via the blue rim-tick reader (Serum marks each value with a saturated blue tick at the rim — robust across Serum 1 & 2; falls back to the white pointer on non-default skins). Coords in reference_size space; load_profile scales to any frame.",
   "reference_size": [1800, 1494],
   "tabs": {
     "band": [55, 100],
@@ -9,10 +9,27 @@
     "anchors": {"OSC": 375, "FX": 505, "MATRIX": 640, "GLOBAL": 775}
   },
   "controls": {
-    "env1_attack":  {"type": "knob", "cx": 217, "cy": 1233, "r": 35, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]},
-    "env1_hold":    {"type": "knob", "cx": 317, "cy": 1233, "r": 35, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]},
-    "env1_decay":   {"type": "knob", "cx": 451, "cy": 1233, "r": 35, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]},
-    "env1_sustain": {"type": "knob", "cx": 551, "cy": 1233, "r": 35, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]},
-    "env1_release": {"type": "knob", "cx": 685, "cy": 1233, "r": 35, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]}
-  }
+    "env1_attack":  {"type": "knob", "cx": 217, "cy": 1233, "r": 35, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "env1_hold":    {"type": "knob", "cx": 317, "cy": 1233, "r": 35, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "env1_decay":   {"type": "knob", "cx": 451, "cy": 1233, "r": 35, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "env1_sustain": {"type": "knob", "cx": 551, "cy": 1233, "r": 35, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "env1_release": {"type": "knob", "cx": 685, "cy": 1233, "r": 35, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+
+    "oscA_detune":  {"type": "knob", "cx": 470, "cy": 598, "r": 35, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "oscA_blend":   {"type": "knob", "cx": 560, "cy": 598, "r": 35, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "oscA_phase":   {"type": "knob", "cx": 684, "cy": 598, "r": 35, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "oscA_rand":    {"type": "knob", "cx": 774, "cy": 598, "r": 33, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "oscA_wtpos":   {"type": "knob", "cx": 380, "cy": 718, "r": 35, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "oscA_warp":    {"type": "knob", "cx": 532, "cy": 718, "r": 35, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "oscA_pan":     {"type": "knob", "cx": 684, "cy": 718, "r": 35, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "oscA_level":   {"type": "knob", "cx": 774, "cy": 718, "r": 35, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+
+    "filter_cutoff":{"type": "knob", "cx": 1546, "cy": 598, "r": 35, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "filter_res":   {"type": "knob", "cx": 1636, "cy": 598, "r": 35, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "filter_pan":   {"type": "knob", "cx": 1726, "cy": 598, "r": 35, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "filter_drive": {"type": "knob", "cx": 1546, "cy": 718, "r": 35, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "filter_fat":   {"type": "knob", "cx": 1636, "cy": 718, "r": 35, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]},
+    "filter_mix":   {"type": "knob", "cx": 1726, "cy": 718, "r": 35, "sweep_deg": 270.0, "pointer": "blue_tick", "range": [0.0, 1.0]}
+  },
+  "_controls_note": "OSC A + FILTER knobs calibrated from a full-res live Ableton capture (Init patch, OSC A enabled). UNISON is a number box (voices count), not a knob, so it's omitted. The blue_tick reader records each knob's normalized POSITION [0,1] from Serum's saturated blue rim-tick. Filter is a 2x3 grid: CUTOFF/RES/PAN over DRIVE/FAT/MIX."
 }

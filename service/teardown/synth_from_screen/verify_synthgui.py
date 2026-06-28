@@ -92,21 +92,37 @@ def capture_serum() -> str | None:
 
 
 # per-synth config: (fixture, capture fn, env prefix, ADSR keys in order, absolute expectations)
+# controls_expect: hand-labeled [lo, hi] bounds for OSC/FILTER knobs on the Init patch, read off
+# the VISIBLE pointer (pan/cutoff dead-centre → ~0.5; res/drive/wtpos at min → ~0; mix/rand at
+# max → ~1; level high-but-not-max). The reader must land inside these to pass — real proof the
+# OSC/filter coords + the blue_tick/white reader recover correct positions, not just the ENV row.
 SYNTHS = {
     "vital": dict(
         fixture="vital_init.png", capture=capture_vital, env="VITAL",
         adsr=["env1_delay", "env1_attack", "env1_hold", "env1_decay", "env1_sustain", "env1_release"],
-        at_min=["env1_delay", "env1_hold"], near_min=["env1_attack"]),
+        at_min=["env1_delay", "env1_hold"], near_min=["env1_attack"],
+        controls_expect={
+            "osc1_pan": [0.42, 0.58], "osc1_unison": [0.42, 0.58], "osc1_phase": [0.42, 0.58],
+            "osc1_level": [0.60, 0.85]}),
     "serum": dict(
         fixture="serum_init.png", capture=capture_serum, env="SERUM",
         adsr=["env1_attack", "env1_hold", "env1_decay", "env1_sustain", "env1_release"],
-        at_min=["env1_hold"], near_min=["env1_attack"]),
+        at_min=["env1_hold"], near_min=["env1_attack"],
+        controls_expect={
+            "filter_cutoff": [0.42, 0.58], "filter_res": [0.0, 0.20], "filter_pan": [0.42, 0.58],
+            "filter_drive": [0.0, 0.12], "filter_mix": [0.85, 1.0],
+            "oscA_pan": [0.42, 0.58], "oscA_wtpos": [0.0, 0.12], "oscA_level": [0.60, 0.90]}),
     # Serum 1 (the original): captured from the installed plugin hosted in Ableton (Mosh's host
     # crashes on it). No automated live-capture path — reads the committed fixture only.
     "serum1": dict(
         fixture="serum1_init.png", capture=lambda: None, env="SERUM1",
         adsr=["env1_attack", "env1_hold", "env1_decay", "env1_sustain", "env1_release"],
-        at_min=["env1_hold"], near_min=["env1_attack"]),
+        at_min=["env1_hold"], near_min=["env1_attack"],
+        controls_expect={
+            "filter_cutoff": [0.42, 0.58], "filter_res": [0.0, 0.20], "filter_pan": [0.42, 0.58],
+            "filter_drive": [0.0, 0.12], "filter_mix": [0.85, 1.0],
+            "oscA_pan": [0.42, 0.58], "oscA_wtpos": [0.0, 0.12], "oscA_rand": [0.85, 1.0],
+            "oscA_level": [0.60, 0.90]}),
 }
 
 
@@ -162,6 +178,19 @@ def _check_one(name: str, cfg: dict) -> int:
             fails.append(f"{k} should be near-min on the Init patch (got {adsr[k]:.3f})")
     if adsr and min(out["confidence"][k] for k in adsr) < 0.6:
         fails.append("white-pointer read confidence below 0.6 — pointer not cleanly isolated")
+
+    # OSC/FILTER knobs: assert each read lands inside its hand-labeled bound + reads confidently.
+    expect = cfg.get("controls_expect", {})
+    for k, (lo, hi) in expect.items():
+        if k not in out["params"]:
+            fails.append(f"{k} missing from the profile read")
+            continue
+        v = out["params"][k]
+        print(f"    {k:16s} = {v:.3f}  conf {out['confidence'][k]:.2f}  (expect [{lo},{hi}])")
+        if not (lo <= v <= hi):
+            fails.append(f"{k} read {v:.3f} outside hand-labeled [{lo},{hi}]")
+        if out["confidence"][k] < 0.6:
+            fails.append(f"{k} read confidence {out['confidence'][k]:.2f} below 0.6")
 
     if fails:
         print(f"[{name}] FAIL: " + "; ".join(fails))

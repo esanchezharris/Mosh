@@ -107,6 +107,57 @@ for tag, body, ptr in [("light body + white ptr", (180, 180, 180), (245, 245, 24
         rv = read_knob(cv2.cvtColor(im, cv2.COLOR_BGR2GRAY), 80, 80, 55, img_bgr=im, pointer="white")
         check(f"skin-relative read: {tag} v={v}", abs(rv["value"] - v) < 0.08, f"got {rv['value']}")
 
+# ── blue rim-tick mode (Serum 1 & 2) ─────────────────────────────────────────────
+# Serum marks a knob's value with a saturated BLUE tick at the rim. On Serum 2's GLOSSY skin a
+# bright top-bevel highlight is low-chroma like the white pointer, so the white read is dragged
+# toward ~0.5 on low-value knobs. The blue tick is high-chroma → it reads the value cleanly.
+def draw_glossy_tick_knob(value, sweep=270.0, bevel=True):
+    img = np.full((160, 160, 3), 25, np.uint8)
+    cx, cy, r = 80, 80, 55
+    cv2.circle(img, (cx, cy), r, (110, 110, 110), -1)          # glossy mid-grey body
+    if bevel:                                                  # bright top-edge bevel (the fooler)
+        for deg in np.arange(-45, 45, 1.0):
+            rad = math.radians(deg)
+            cv2.circle(img, (int(cx + math.sin(rad) * r * 0.9), int(cy - math.cos(rad) * r * 0.9)),
+                       2, (235, 235, 235), -1)
+        for deg in np.arange(-45, 45, 1.0):                    # inner top highlight too
+            rad = math.radians(deg)
+            cv2.circle(img, (int(cx + math.sin(rad) * r * 0.6), int(cy - math.cos(rad) * r * 0.6)),
+                       2, (225, 225, 225), -1)
+    a1 = -sweep / 2 + value * sweep
+    radv = math.radians(a1)
+    cv2.line(img, (cx, cy), (int(cx + math.sin(radv) * r * 0.8), int(cy - math.cos(radv) * r * 0.8)),
+             (235, 235, 235), 3)                               # white pointer
+    cv2.circle(img, (int(cx + math.sin(radv) * r * 1.0), int(cy - math.cos(radv) * r * 1.0)),
+               4, (230, 110, 30), -1)                          # saturated BLUE rim tick at the value
+    return img
+
+for v in [0.0, 0.25, 0.5, 0.75, 1.0]:
+    im = draw_glossy_tick_knob(v)
+    rv = read_knob(cv2.cvtColor(im, cv2.COLOR_BGR2GRAY), 80, 80, 55, img_bgr=im, pointer="blue_tick")
+    check(f"blue_tick value {v} recovered (±0.08)", abs(rv["value"] - v) < 0.08,
+          f"got {rv['value']} conf {rv['confidence']}")
+
+# the regression that motivated blue_tick: a LOW value on a glossy bevelled knob — white reads ~0.5,
+# blue_tick recovers the true low value.
+im_low = draw_glossy_tick_knob(0.1)
+g_low = cv2.cvtColor(im_low, cv2.COLOR_BGR2GRAY)
+white_low = read_knob(g_low, 80, 80, 55, img_bgr=im_low, pointer="white")["value"]
+tick_low = read_knob(g_low, 80, 80, 55, img_bgr=im_low, pointer="blue_tick")["value"]
+check("white read is fooled by the top-bevel highlight (reads high)", white_low > 0.25, f"white={white_low}")
+check("blue_tick recovers the true low value (~0.1)", tick_low < 0.2, f"tick={tick_low}")
+
+# fallback: blue_tick with NO blue tick present (non-default skin) → falls back to the white pointer.
+im_noblue = draw_glossy_tick_knob(0.7, bevel=False)
+# overwrite the blue tick with a colourless one so only the white pointer remains
+cv2.circle(im_noblue, (80, 80), 55, (110, 110, 110), -1)
+radv = math.radians(-135 + 0.7 * 270)
+cv2.line(im_noblue, (80, 80), (int(80 + math.sin(radv) * 55 * 0.8), int(80 - math.cos(radv) * 55 * 0.8)),
+         (240, 240, 240), 3)
+rv_fb = read_knob(cv2.cvtColor(im_noblue, cv2.COLOR_BGR2GRAY), 80, 80, 55, img_bgr=im_noblue, pointer="blue_tick")
+check("blue_tick falls back to white pointer when no tick (~0.7)", abs(rv_fb["value"] - 0.7) < 0.1,
+      f"got {rv_fb['value']}")
+
 # ── read_patch must not crash on a malformed control spec (missing geometry) ──────
 malformed = {
     "good": {"type": "knob", "cx": 60, "cy": 60, "r": 40, "range": [0.0, 1.0]},
@@ -169,17 +220,21 @@ check("vital profile is registered", "vital" in list_profiles(), str(list_profil
 check("serum profile is registered", "serum" in list_profiles(), str(list_profiles()))
 check("serum1 (original Serum) profile is registered", "serum1" in list_profiles(), str(list_profiles()))
 s1 = load_profile("serum1", 1800, 1494)
-check("serum1 profile loads 5 white-pointer ENV knobs (no delay)",
-      len(s1) == 5 and s1["env1_sustain"].get("pointer") == "white" and "env1_delay" not in s1, str(list(s1)))
-# both profiles use white-pointer ADSR knobs; serum's ENV1 has no delay (5 knobs vs vital's 6)
+# serum1 (original): ENV (5, no delay) + OSC A + FILTER, all blue_tick (Serum's rim-tick reader).
+check("serum1 profile: ENV (no delay) + OSC A + FILTER, blue_tick",
+      "env1_delay" not in s1 and s1["env1_sustain"].get("pointer") == "blue_tick"
+      and {"filter_cutoff", "filter_res", "oscA_level"} <= set(s1), str(list(s1)))
+# serum 2: ENV (no delay) + OSC A + FILTER, blue_tick (glossy skin needs the rim tick, not white).
 sp = load_profile("serum", 2380, 1544)
-check("serum profile loads 5 white-pointer knobs",
-      len(sp) == 5 and sp["env1_sustain"].get("pointer") == "white", str(list(sp)))
+check("serum 2 profile: ENV (no delay) + OSC A + FILTER, blue_tick",
+      "env1_delay" not in sp and sp["env1_sustain"].get("pointer") == "blue_tick"
+      and {"filter_cutoff", "filter_mix", "oscA_wtpos"} <= set(sp), str(list(sp)))
+# vital ADSR stays white-pointer (teal fill-arc + white line, no blue rim tick).
 check("vital profile uses white-pointer mode",
       load_profile("vital", 2342, 1436)["env1_sustain"].get("pointer") == "white")
 # reference_size in vital.json is 2342x1436; loading at the SAME size is identity
 ref = load_profile("vital", 2342, 1436)
-check("profile loads its controls", len(ref) == 6 and "env1_sustain" in ref)
+check("vital profile loads ENV + OSC 1 controls", len(ref) == 10 and "env1_sustain" in ref and "osc1_level" in ref)
 check("identity load keeps reference coords", ref["env1_sustain"]["cx"] == 2106 and ref["env1_sustain"]["cy"] == 426)
 # loading at HALF size scales coords by ~0.5 (so one profile works at any capture res)
 half = load_profile("vital", 1171, 718)

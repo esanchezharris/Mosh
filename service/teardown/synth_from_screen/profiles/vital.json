@@ -14,6 +14,12 @@
     "env1_hold":    {"type": "knob", "cx": 1820, "cy": 426, "r": 30, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]},
     "env1_decay":   {"type": "knob", "cx": 1964, "cy": 426, "r": 30, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]},
     "env1_sustain": {"type": "knob", "cx": 2106, "cy": 426, "r": 30, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]},
-    "env1_release": {"type": "knob", "cx": 2250, "cy": 426, "r": 30, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]}
-  }
+    "env1_release": {"type": "knob", "cx": 2250, "cy": 426, "r": 30, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]},
+
+    "osc1_level":   {"type": "knob", "cx": 262,  "cy": 255, "r": 30, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]},
+    "osc1_pan":     {"type": "knob", "cx": 367,  "cy": 254, "r": 30, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]},
+    "osc1_unison":  {"type": "knob", "cx": 1001, "cy": 268, "r": 30, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]},
+    "osc1_phase":   {"type": "knob", "cx": 1214, "cy": 251, "r": 30, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]}
+  },
+  "_controls_note": "OSC 1 knobs (level/pan/unison/phase) calibrated from the Init Preset (OSC 1 enabled). The white-pointer reader records each knob's normalized POSITION [0,1] — the synth-specific position→display mapping (e.g. unison position 0.5 shows '20%') is non-linear, but recording position is reproduction-correct: re-setting the same position reproduces the patch. Vital's filter CUTOFF/RESONANCE are GRAPH-DRAG controls (X/Y on the response graph), NOT knobs, so the white-pointer reader can't read them — those are graphic params for §8. The filter module's only knobs are DRIVE/MIX/KEY-TRK (dim unless the filter is enabled)."
 }

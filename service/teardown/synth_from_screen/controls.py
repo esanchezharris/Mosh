@@ -11,6 +11,14 @@ Indicator styles:
                            "white" mode isolates the colourless pointer from the coloured arc
                            by saturation, giving an ACCURATE absolute read. Needs the colour
                            frame (passed as img_bgr).
+  • "blue_tick" pointer  — Serum (1 AND 2) marks a knob's value with a small saturated BLUE
+                           tick at the RIM, at exactly the value angle. The white-pointer read
+                           is fragile on Serum 2's GLOSSY skin (a bright top-bevel highlight is
+                           low-chroma like the pointer, so its mass drags the centroid toward
+                           12-o'clock → low values misread ~0.5). The blue tick is the OPPOSITE
+                           (high chroma) and sits cleanly in a rim annulus, so it reads every
+                           Serum knob correctly. Falls back to the white path if no tick is
+                           found (e.g. a non-default Serum skin). Needs img_bgr.
 """
 from __future__ import annotations
 
@@ -23,6 +31,41 @@ def _angle_value(dx: float, dy: float, sweep_deg: float) -> float:
     phi = math.degrees(math.atan2(dx, -dy))               # clockwise from top: 0=up, +90=right
     half = sweep_deg / 2.0
     return min(1.0, max(0.0, (phi + half) / sweep_deg))
+
+
+def _read_rim_tick(img_bgr: np.ndarray, cx: int, cy: int, r: int, sweep_deg: float,
+                   inner: float = 0.55, outer: float = 1.12) -> dict | None:
+    """Serum's value indicator: a saturated BLUE tick at the rim. Isolate high-chroma blue in
+    the rim annulus and take its angular centroid → value. Returns None (caller falls back to
+    the white pointer) if too few blue pixels are found. The annulus is tight to this knob
+    (≤1.12r), so a neighbour's tick (≥~1.5r away) can't leak in."""
+    import cv2
+
+    h, w = img_bgr.shape[:2]
+    R = int(round(r * outer))
+    y0, y1 = max(0, cy - R), min(h, cy + R)
+    x0, x1 = max(0, cx - R), min(w, cx + R)
+    if y1 <= y0 or x1 <= x0:
+        return None
+    ys, xs = np.mgrid[y0:y1, x0:x1]
+    dx = (xs - cx).astype(np.float32)
+    dy = (ys - cy).astype(np.float32)
+    rr = dx * dx + dy * dy
+    annulus = (rr <= (outer * r) ** 2) & (rr >= (inner * r) ** 2)
+    hsv = cv2.cvtColor(img_bgr[y0:y1, x0:x1], cv2.COLOR_BGR2HSV).astype(np.float32)
+    H, S, V = hsv[..., 0], hsv[..., 1], hsv[..., 2]   # OpenCV hue 0–179; blue/cyan ≈ 95–135
+    tick = (H >= 95.0) & (H <= 135.0) & (S > 80.0) & (V > 90.0) & annulus
+    n = int(tick.sum())
+    if n < 4:
+        return None
+    wgt = np.where(tick, S, 0.0)
+    tot = float(wgt.sum()) or 1.0
+    mxr = float((dx * wgt).sum() / tot)
+    myr = float((dy * wgt).sum() / tot)
+    value = _angle_value(mxr, myr, sweep_deg)
+    # a clean tick is a small blob; a huge set means we caught the coloured fill-arc / chrome.
+    conf = 0.8 if 4 <= n <= 400 else 0.55
+    return {"value": round(value, 3), "confidence": conf}
 
 
 def read_knob(gray: np.ndarray, cx: int, cy: int, r: int, sweep_deg: float = 270.0,
@@ -44,11 +87,19 @@ def read_knob(gray: np.ndarray, cx: int, cy: int, r: int, sweep_deg: float = 270
     rr = dx * dx + dy * dy
     within = (rr <= r * r) & (rr > (0.30 * r) ** 2)        # exclude the hub
 
+    have_bgr = img_bgr is not None and img_bgr.ndim == 3 and img_bgr.shape[:2] == gray.shape[:2]
+    # Serum blue rim-tick mode: try the high-chroma rim tick first; if it isn't found (non-default
+    # skin), fall through to the white-pointer read on the same knob.
+    if pointer == "blue_tick" and have_bgr:
+        tick = _read_rim_tick(img_bgr, cx, cy, r, sweep_deg)
+        if tick is not None:
+            return tick
+        pointer = "white"
+
     # white mode needs a 3-channel colour frame whose geometry matches `gray` (so the bbox and
     # the `within` mask line up); anything else falls through to the grayscale path rather than
     # raising on a shape/channel mismatch.
-    white_ok = (pointer == "white" and img_bgr is not None and img_bgr.ndim == 3
-                and img_bgr.shape[:2] == gray.shape[:2])
+    white_ok = (pointer == "white" and have_bgr)
     if white_ok:
         sub = img_bgr[y0:y1, x0:x1].astype(np.float32)
         b, g, rc = sub[..., 0], sub[..., 1], sub[..., 2]
