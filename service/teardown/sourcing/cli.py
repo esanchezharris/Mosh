@@ -62,10 +62,10 @@ def main(argv=None):
                         "for the yt-dlp fallback (which is CC-blind on YouTube).")
     p = sub.add_parser("prescreen"); p.add_argument("--db", required=True); p.add_argument("--batch", type=int, default=200)
     p.add_argument("--fetch-license", action="store_true",
-                   help="per-video full extract to populate the license for the CC rank-boost. "
-                        "NOTE: yt-dlp returns NO license for YouTube (verified) → this is currently "
-                        "wasted cost on YT; real CC-preference needs the YouTube Data API. Kept for "
-                        "non-YT sources / a future Data-API searcher (the path is tested).")
+                   help="resolve the REAL license per still-'unknown' row (one watch-page scrape, or a "
+                        "Data-API videos.list call when keyed) so the CC rank-boost applies. CC-filtered "
+                        "discovery already labels every row, so this only matters for rows discovered "
+                        "without the CC filter. Heavier (one fetch/row) → opt-in.")
     q = sub.add_parser("queue"); q.add_argument("--db", required=True); q.add_argument("--n", type=int, default=10)
     q.add_argument("--min-overall", type=float, default=0.0)
     c = sub.add_parser("counts"); c.add_argument("--db", required=True)
@@ -74,11 +74,13 @@ def main(argv=None):
     try:
         cat = Catalog(ns.db)
         if ns.cmd == "discover":
-            # Prefer the Data-API searcher when a key is set (genuine, server-side CC filtering);
-            # else degrade to yt-dlp (CC-blind on YouTube). cc_filtered tells the caller which it got.
+            # Prefer the Data-API searcher when a key is set; else yt-dlp — which ALSO does genuine
+            # CC filtering with no key via YouTube's own &sp= results-page filter. cc_filtered/backend
+            # tell the caller which it got.
             searcher = default_searcher(cc_only=not ns.all_licenses)
-            cc_filtered = isinstance(searcher, YouTubeDataApiSearcher) and searcher.cc_only
-            backend = "youtube-data-api" if isinstance(searcher, YouTubeDataApiSearcher) else "yt-dlp"
+            cc_filtered = getattr(searcher, "cc_only", False)
+            backend = ("youtube-data-api" if isinstance(searcher, YouTubeDataApiSearcher)
+                       else "yt-dlp+cc-filter" if cc_filtered else "yt-dlp")
             if not getattr(searcher, "available", False):
                 _emit({"ok": False, "error": "sourcing_unavailable (set YOUTUBE_API_KEY for genuine "
                        "CC filtering, or pip install yt-dlp / run setup-teardown.sh --with-sourcing)"}, 1)

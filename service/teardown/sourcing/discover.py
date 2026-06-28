@@ -79,17 +79,19 @@ class FakeSearcher:
         return self.licenses.get(url, "unknown")
 
 
-def _meta_from_entry(e: dict) -> VideoMeta:
+def _meta_from_entry(e: dict, *, force_license: Optional[str] = None) -> VideoMeta:
     vid = e.get("id") or ""
     subs = e.get("subtitles") or {}
     autos = e.get("automatic_captions") or {}
     return VideoMeta(
         video_id=vid,
-        url=e.get("webpage_url") or (f"https://www.youtube.com/watch?v={vid}" if vid else ""),
+        url=e.get("webpage_url") or e.get("url") or (f"https://www.youtube.com/watch?v={vid}" if vid else ""),
         title=e.get("title") or "",
         channel=e.get("channel") or e.get("uploader") or "",
         duration_s=float(e.get("duration") or 0.0),
-        license=map_license(e.get("license")),
+        # CC-filtered results are known-CC by construction (YouTube filtered server-side) → label them
+        # directly so the rank-boost works with no per-row fetch; else normalize whatever yt-dlp gave.
+        license=force_license or map_license(e.get("license")),
         description=e.get("description") or "",
         tags=list(e.get("tags") or []),
         chapters=len(e.get("chapters") or []),
@@ -98,36 +100,95 @@ def _meta_from_entry(e: dict) -> VideoMeta:
 
 
 class YtDlpSearcher:
-    """Real searcher via yt-dlp `ytsearchN:`. Gated on the dep (absent → `available` False)."""
+    """Real searcher via yt-dlp — NO API key. Two modes:
+      • default: `ytsearchN:` keyword search (CC-blind — YouTube exposes no license to yt-dlp).
+      • `cc_only=True`: scrape YouTube's OWN search results page with the "Features: Creative Commons"
+        filter (`&sp=`), so YouTube filters to CC-licensed videos SERVER-SIDE. Every returned row is
+        known-CC by construction → labelled `creativeCommon` directly (no per-row fetch). This is
+        genuine CC filtering with no key (verified: CC-filtered query → all CC, unfiltered → none).
+
+    `fetch_license` is a no-key watch-page scrape for the CC marker (yt-dlp's parsed `license` is
+    None for YouTube, so the field-read can't work — the page can). The yt-dlp call + page fetch are
+    injectable (`extract=`/`page=`) so tests run with no network. Caveat: scraping is more fragile
+    than the Data API (the `sp` filter + page markup are undocumented and can change)."""
+
+    CC_SP = "EgIwAQ%3D%3D"  # YouTube search "Features → Creative Commons" filter (base64 protobuf)
+    # the EXACT license-row text YouTube renders for a CC video (verified live: present 1× on CC
+    # watch pages, 0× on standard ones). Matching THIS, not a bare "Creative Commons" substring,
+    # avoids a spoof where an uploader puts the phrase in the title/description. English: we force hl=en.
+    CC_LICENSE_ROW = "Creative Commons Attribution license (reuse allowed)"
+
+    def __init__(self, *, cc_only: bool = False,
+                 extract: Optional[Callable[[str, int], dict]] = None,
+                 page: Optional[Callable[[str], str]] = None) -> None:
+        self.cc_only = cc_only
+        self._extract = extract  # extract(target, max_results) -> info dict; default = yt-dlp
+        self._page = page        # page(url) -> html; default = urllib
 
     @property
     def available(self) -> bool:
+        if self._extract is not None:
+            return True
         import importlib.util
         return importlib.util.find_spec("yt_dlp") is not None
 
-    def search(self, query: str, max_results: int) -> list[VideoMeta]:
+    def _target(self, query: str, max_results: int) -> str:
+        if self.cc_only:
+            return ("https://www.youtube.com/results?search_query="
+                    + _urlparse.quote(query) + "&sp=" + self.CC_SP)
+        return f"ytsearch{max(1, max_results)}:{query}"
+
+    def _entries(self, target: str, max_results: int) -> list[dict]:
+        if self._extract is not None:
+            return (self._extract(target, max_results) or {}).get("entries") or []
         import yt_dlp  # type: ignore
-
-        opts = {"quiet": True, "no_warnings": True, "skip_download": True,
-                "noplaylist": True, "ignoreerrors": True}
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(f"ytsearch{max(1, max_results)}:{query}", download=False)
-        entries = (info or {}).get("entries") or []
-        return [_meta_from_entry(e) for e in entries if e and e.get("id")]
-
-    def fetch_license(self, url: str) -> str:
-        """A full per-video extract to read the license (ytsearch metadata omits it). Heavier than
-        search (one watch-page fetch per video) → call only when CC-preference actually matters.
-        Graceful: any failure → 'unknown'."""
-        try:
-            import yt_dlp  # type: ignore
+        if self.cc_only:  # results page → flat metadata (title/id), no per-video extract
+            opts = {"quiet": True, "no_warnings": True, "skip_download": True,
+                    "extract_flat": True, "playlistend": max(1, max_results)}
+        else:
             opts = {"quiet": True, "no_warnings": True, "skip_download": True,
                     "noplaylist": True, "ignoreerrors": True}
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                info = ydl.extract_info(url, download=False)
-            return map_license((info or {}).get("license"))
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(target, download=False)
+        return (info or {}).get("entries") or []
+
+    def search(self, query: str, max_results: int) -> list[VideoMeta]:
+        try:
+            entries = self._entries(self._target(query, max_results), max_results)
+        except Exception:
+            return []
+        force = "creativeCommon" if self.cc_only else None
+        # 11-char id guard drops channel/playlist/shelf rows the results page interleaves.
+        return [_meta_from_entry(e, force_license=force)
+                for e in entries if e and len(str(e.get("id") or "")) == 11][: max(1, max_results)]
+
+    def fetch_license(self, url: str) -> str:
+        """No-key real license: scrape the watch page for the CC license-ROW text (yt-dlp's parsed
+        license is None for YouTube). 'creativeCommon' only if that exact row is present, 'youtube'
+        for a normal page, 'unknown' on any fetch failure / non-YouTube url. One HTTP request per
+        video → opt-in at scale."""
+        try:
+            html = self._page(url) if self._page is not None else self._fetch_watch_page(url)
         except Exception:
             return "unknown"
+        if not html:
+            return "unknown"
+        return "creativeCommon" if self.CC_LICENSE_ROW in html else "youtube"
+
+    @staticmethod
+    def _fetch_watch_page(url: str) -> str:
+        # ALWAYS rebuild the canonical watch URL from the extracted id: host-locked to youtube.com
+        # (no SSRF — a non-YouTube url yields no id → no fetch) and well-formed (no '&' in the path
+        # for youtu.be/shorts inputs). Empty id → "" → caller returns 'unknown'.
+        vid = _video_id_from_url(url)
+        if not vid:
+            return ""
+        u = f"https://www.youtube.com/watch?v={vid}&hl=en&gl=US"
+        req = _urlrequest.Request(u, headers={  # consent cookie so the page isn't an interstitial
+            "User-Agent": "Mozilla/5.0", "Accept-Language": "en-US,en",
+            "Cookie": "CONSENT=YES+1; SOCS=CAI"})
+        with _urlrequest.urlopen(req, timeout=25) as r:  # nosec - canonical youtube watch page, read-only
+            return r.read().decode("utf-8", "ignore")
 
 
 # ── YouTube Data API v3 — genuine CC filtering ────────────────────────────────────────────────
@@ -296,7 +357,8 @@ class YouTubeDataApiSearcher:
 
 
 def default_searcher(*, cc_only: bool = True) -> "Searcher":
-    """Prefer the Data-API searcher when a key is configured (genuine CC filtering); else yt-dlp.
-    Returns the yt-dlp searcher when unkeyed so callers can still surface its `available` state."""
+    """Prefer the Data-API searcher when a key is configured (cleaner/verifiable CC filtering); else
+    the yt-dlp searcher — which ALSO does genuine CC filtering with no key via the `&sp=` results-page
+    filter (cc_only). So CC-preference works out of the box, keyed or not."""
     api = YouTubeDataApiSearcher(cc_only=cc_only)
-    return api if api.available else YtDlpSearcher()
+    return api if api.available else YtDlpSearcher(cc_only=cc_only)
