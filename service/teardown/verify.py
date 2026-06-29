@@ -35,6 +35,7 @@ SUITE = [
     ("GUI patch-reader (§5b)", HERE / "synth_from_screen" / "synth_from_screen_test.py"),
     ("host-invariant calibration + embedded GUI (§5b)", HERE / "synth_from_screen" / "calib_test.py"),
     ("visual synth naming (§2)", HERE / "synth_from_screen" / "name_synths_test.py"),
+    ("vision-LLM synth identify (§5b)", HERE / "synth_from_screen" / "llm_identify_test.py"),
     ("GUI FX-chain detector (§5b)", HERE / "synth_from_screen" / "fx_rack_test.py"),
     ("GUI per-effect FX-knob reader (§5b)", HERE / "synth_from_screen" / "fx_params_test.py"),
     ("GUI matrix reader (§5b)", HERE / "synth_from_screen" / "matrix_test.py"),

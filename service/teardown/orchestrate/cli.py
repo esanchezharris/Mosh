@@ -62,6 +62,21 @@ def main(argv=None):
         ctx["dl"] = dl
         frames = segment.keyframes(dl["video_path"], every_s=3.0, max_frames=ns.max_frames)
         meta = ocrmod.scan_meta(frames)
+        # §5b IDENTIFICATION via the vision LLM — the robust way to tell Serum 1 / Serum 2 / Vital
+        # apart and to name an UNKNOWN synth (+ its components), where logo/tab matching fails on
+        # occluded/inset/skinned real frames. Authoritative over OCR's plugin guesses WHEN it runs;
+        # gated on GEMINI_API_KEY (returns None with no key → keep the OCR/visual names). Best-effort.
+        try:
+            from teardown.synth_from_screen.llm_identify import identify_synths
+            llm = identify_synths(frames)
+            if llm is not None:                       # ran (key present): trust it over OCR guesses
+                meta = dict(meta)
+                meta["plugins"] = [s["name"] for s in llm]
+                meta["llm_synths"] = llm              # carries profile_key/known/components downstream
+                print(f"[skeleton] §5b LLM identified synth(s): "
+                      f"{[(s['name'], s['profile_key'], s['votes']) for s in llm]}", file=sys.stderr)
+        except Exception as e:
+            print(f"[skeleton] LLM synth-id skipped: {type(e).__name__}: {e}", file=sys.stderr)
         sections = segment.sections_from_cuts(segment.scene_cuts(dl["video_path"]), dl["duration_s"])
         rec = assemble_skeleton(source=dl, meta_signals=meta, sections=sections)
         # §4→§5b: read the synth GUI off the keyframes so a named synth element gets real params
