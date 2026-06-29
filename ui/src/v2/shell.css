@@ -15,7 +15,7 @@
   --v2-radius: 16px;
   --v2-radius-sm: 10px;
   --v2-gap: 14px;
-  --v2-rail-w: 312px;       /* the RIGHT dock when expanded (agent · inspector · collaborators) */
+  --v2-rail-w: 286px;       /* the RIGHT dock when expanded (agent · inspector · collaborators) */
   --v2-browser-w: 340px;    /* the LEFT dock when expanded (samples · plugins) */
   --v2-tab-w: 46px;         /* a collapsed dock — just its vertical pull-tab rail */
   --v2-stage-max: 1000px;   /* the centered work area cap (arrangement · nav · composer) */
@@ -309,9 +309,17 @@
   padding: 0 10px; border-right: 1px solid var(--v2-line); background: var(--v2-surface-2);
 }
 .v2-nav-clip { position: relative; flex: 1 1 auto; min-width: 0; overflow: hidden; }
-.v2-nav-track { position: absolute; inset: 0; will-change: transform; }
-/* the section ribbon fills the nav panel — the panel is its frame, so drop its own chrome */
-.v2-nav .v2-ribbon { height: 100%; background: transparent; border-bottom: none; }
+
+/* ── song navigator (overview minimap) — full song mapped to the strip; click to jump ── */
+.v2-songnav { position: relative; height: 100%; width: 100%; cursor: pointer; }
+.v2-songnav:hover { background: var(--v2-surface-sunken); }
+.v2-songnav-tick { position: absolute; top: 0; bottom: 0; display: flex; align-items: center; padding-left: 6px; border-left: 1px solid var(--v2-line); pointer-events: none; }
+.v2-songnav-tick:first-of-type { border-left: none; }
+.v2-songnav-bar { font-family: var(--font-mono); font-size: 10px; color: var(--v2-faint); }
+.v2-songnav-head { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--v2-playhead); box-shadow: 0 0 8px var(--v2-playhead); pointer-events: none; z-index: 2; }
+.v2-songnav-peer { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--peer-color, #ff69a8); pointer-events: none; opacity: 0.85; }
+.v2-songnav-peer-dot { position: absolute; top: 5px; left: 50%; transform: translateX(-50%); width: 6px; height: 6px; border-radius: 50%; background: var(--peer-color, #ff69a8); box-shadow: 0 0 6px var(--peer-color, #ff69a8); }
+.v2-songnav-peer.recording { opacity: 1; }
 
 /* ── timeline (sticky-header grid: ribbon + ruler stick top, headers stick left) ── */
 .v2-tl-scroll { position: absolute; inset: 0; overflow: auto; }
@@ -504,11 +512,13 @@
    Moshi sits DIRECTLY on the dark card (transparent mount — no light "egg" pod) like the concept. */
 .v2-mosh-stage { display: grid; place-items: center; padding: 8px 0 4px; }
 .v2-shell .v2-mosh-stage .moshi-dock { width: 100%; border-left: none; background: transparent; padding: 4px; }
-.v2-shell .v2-mosh-stage .moshi-mount { min-height: 188px; background: transparent; box-shadow: none; }
+.v2-shell .v2-mosh-stage .moshi-mount { min-height: 218px; background: transparent; box-shadow: none; }
 /* the reused Moshi dock carries classic --bone-dim status text → dark-on-dark in the v2 rail.
    Recolor its cap/state/mood to read on the dark card (mood word still lights up by state). */
 .v2-shell .v2-mosh-stage .moshi-state { color: var(--v2-dim); }
-.v2-shell .v2-mosh-stage .moshi-mute, .v2-shell .v2-mosh-stage .moshi-handsfree { color: var(--v2-dim); }
+.v2-shell .v2-mosh-stage .moshi-mute, .v2-shell .v2-mosh-stage .moshi-handsfree { color: var(--v2-dim); display: inline-flex; align-items: center; justify-content: center; }
+.v2-shell .v2-mosh-stage .moshi-mute:hover, .v2-shell .v2-mosh-stage .moshi-handsfree:hover { color: var(--v2-text); }
+.v2-shell .v2-mosh-stage .moshi-handsfree.on { color: var(--v2-accent); }
 .v2-shell .v2-mosh-card .moshi-mood { color: var(--v2-faint); }
 .v2-shell .v2-mosh-card .moshi-mood[data-mood="listen"] { color: var(--v2-accent); }
 .v2-shell .v2-mosh-card .moshi-mood[data-mood="rec"] { color: var(--v2-rec); }

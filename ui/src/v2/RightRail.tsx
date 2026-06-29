@@ -10,6 +10,7 @@ import { useStore } from "../store";
 import { useShell } from "./shellState";
 import { Moshi } from "../ui/Moshi";
 import { MoshMark } from "./MoshMark";
+import { IconCamera, IconCameraOff } from "../ui/icons";
 import { useVideo } from "../webrtc/useVideo";
 import { VideoTile } from "../ui/VideoTile";
 import { PresenceMeter } from "./PresenceMeter";
@@ -98,7 +99,7 @@ function CollaboratorsCard() {
         <span>Collaborators</span>
         <button className={`v2-cam${cameraOn ? " on" : ""}`} data-testid="v2-camera-toggle" aria-pressed={cameraOn}
           title={cameraOn ? "Turn camera off" : "Share your camera"} onClick={() => void toggleCamera()}>
-          {cameraOn ? "📹" : "📷"}
+          {cameraOn ? <IconCamera size={15} /> : <IconCameraOff size={15} />}
         </button>
       </div>
       <div className="v2-presence">
