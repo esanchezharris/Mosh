@@ -143,9 +143,37 @@ def main(argv=None):
                     "out_wav": r.out_wav, "synths_loaded": r.synths_loaded,
                     "synth_params_set": r.synth_params_set, "ran": r.ran, "error": r.error}
 
+    reward_fn = None
+    if ns.render:
+        def reward_fn(rec, render_out):          # §12 reward over the rendered audio — CLOSES the flywheel
+            wav = render_out.get("out_wav")
+            if not wav or not os.path.exists(wav):
+                return {}
+            try:
+                import soundfile as sf
+                y, sr = sf.read(wav, dtype="float32", always_2d=False)
+                if getattr(y, "ndim", 1) > 1:
+                    y = y.mean(axis=1)
+            except Exception as e:
+                return {"error": f"load: {type(e).__name__}: {e}"}
+            pull = None                          # the §11 trained head (MERT) — graceful if its venv is absent
+            try:
+                from teardown.flywheel.reward_encoder import TrainedRewardHead, get_encoder
+                pull = TrainedRewardHead(encoder=get_encoder()).pull
+            except Exception as e:
+                print(f"[score] pull head unavailable ({type(e).__name__}) → floor-only reward",
+                      file=sys.stderr)
+            from teardown.flywheel.reward import Reward
+            rw = Reward(pull=pull)
+            scores = rw.score_audio(y, sr)
+            out_d = {k: round(float(v), 4) for k, v in scores.items()}
+            out_d.update({"composite": rw.composite(scores), "has_pull": pull is not None,
+                          "version": rw.version})
+            return out_d
+
     orc = Orchestrator(policy=Policy(), checkpoint_dir=out / ".checkpoints",
                        skeleton_fn=skeleton, extract_fn=(None if ns.no_extract else extract),
-                       match_fn=match, compile_fn=compile_recipe, render_fn=render_fn)
+                       match_fn=match, compile_fn=compile_recipe, render_fn=render_fn, reward_fn=reward_fn)
     try:
         res = orc.teardown(ns.url)
         if res.status == "failed":
