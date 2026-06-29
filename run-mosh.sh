@@ -214,6 +214,17 @@ bundle_brain_key() {                            # $1 = installed app
 install_app() {                                 # $1 = source app, $2 = dest
   echo "deploying $1 -> $2"
   rm -rf "$2"; cp -R "$1" "$2"
+  # Fail-closed safety net: a bundle missing NSSpeechRecognitionUsageDescription
+  # TCC-CRASHES the moment the always-on voice starts. The build now injects it via
+  # an always-run target, but a stale/hand-built source bundle could still lack it —
+  # and that is EXACTLY how a crashing /Applications/Mosh.app once shipped (the copy
+  # path had no plist check). Re-inject + verify here, before signing, using the SAME
+  # single-source script the build uses. (Done before sign_app so the seal stays valid.)
+  if [ -f "$2/Contents/Info.plist" ]; then
+    cmake -DPLIST="$2/Contents/Info.plist" -P "$ROOT/cmake/InjectInfoPlistKeys.cmake" \
+      && echo "  Info.plist: speech/camera/bonjour usage keys present (TCC-safe)" \
+      || { echo "  FATAL: Info.plist usage-key injection failed — refusing to ship a TCC-crashing bundle" >&2; return 1; }
+  fi
 }
 
 sign_app() {

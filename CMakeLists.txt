@@ -161,6 +161,11 @@ if (MOSH_BUILD_APP)
         set_source_files_properties(src/voice/NativeSpeech.mm PROPERTIES COMPILE_FLAGS "-fobjc-arc")
         target_link_libraries(Mosh PRIVATE "-framework Speech" "-framework AVFoundation")
 
+        # Suppress AppKit's window-restoration / "reopen after crash" modal on headless
+        # CLI launches (see src/app/MacStateRestoration.h). Obj-C++ with ARC.
+        target_sources(Mosh PRIVATE src/app/MacStateRestoration.mm)
+        set_source_files_properties(src/app/MacStateRestoration.mm PROPERTIES COMPILE_FLAGS "-fobjc-arc")
+
         # Native WKWebView media-capture permission delegate (collaborator video
         # getUserMedia) — Obj-C++ with ARC; mirrors the NativeSpeech.mm pattern.
         target_sources(Mosh PRIVATE src/webview/WebViewCameraPermission.mm)
@@ -169,27 +174,36 @@ if (MOSH_BUILD_APP)
 
         # JUCE's PLIST_TO_MERGE is honoured ONLY by the Xcode generator; under the
         # Makefiles/Ninja generator this repo uses, those merged keys are silently
-        # dropped from the bundle Info.plist. Re-inject the ones we depend on after
-        # build — `plutil -replace` creates-if-absent and is idempotent on relink:
-        #   • NSSpeechRecognitionUsageDescription — mandatory, or SFSpeechRecognizer
-        #     authorization TCC-crashes the app (native voice).
+        # dropped from the bundle Info.plist. Re-inject the ones we depend on:
+        #   • NSSpeechRecognitionUsageDescription — MANDATORY, or SFSpeechRecognizer
+        #     authorization TCC-CRASHES the app the moment the always-on voice starts
+        #     (src/voice/NativeSpeech.mm). This has been misread as a plugin-host crash.
         #   • NSBonjourServices — or macOS 14+ won't advertise the iPhone-companion
         #     mDNS service (keep the type in sync with cmake/MoshRemoteInfo.plist).
+        #   • NSCameraUsageDescription — collaborator video tiles (getUserMedia).
         # (Built-in flags MICROPHONE_PERMISSION_* / LOCAL_NETWORK_PERMISSION_* DO
         #  survive — they go through a different path than PLIST_TO_MERGE.)
+        #
+        # The keys live in ONE place (cmake/InjectInfoPlistKeys.cmake). We run it TWICE
+        # for the SAME reason MoshStageUI exists (cmake/BuildUI.cmake): a POST_BUILD on
+        # the Mosh target ONLY fires when Mosh relinks, so up-to-date / UI-only / deploy
+        # builds would ship an UNPATCHED bundle (this is exactly how a TCC-crashing
+        # /Applications/Mosh.app shipped). MoshFixInfoPlist (ALL, always-run) is the
+        # backstop that closes that gap.
+        set(MOSH_INJECT_PLIST_SCRIPT "${CMAKE_SOURCE_DIR}/cmake/InjectInfoPlistKeys.cmake")
         add_custom_command(TARGET Mosh POST_BUILD
-            COMMAND /usr/bin/plutil -replace NSSpeechRecognitionUsageDescription
-                    -string "Mosh transcribes your voice so you can talk to Moshi, your in-app collaborator, instead of typing."
-                    "$<TARGET_BUNDLE_DIR:Mosh>/Contents/Info.plist"
-            COMMAND /usr/bin/plutil -replace NSBonjourServices -json "[\"_moshcompanion._tcp\"]"
-                    "$<TARGET_BUNDLE_DIR:Mosh>/Contents/Info.plist"
-            # Camera: collaborator video tiles (getUserMedia in the WebView surfaces the
-            # macOS permission dialog on first use). Camera is off by default in the UI.
-            COMMAND /usr/bin/plutil -replace NSCameraUsageDescription
-                    -string "Mosh shares your camera with the collaborators in your session, so you can see each other while you produce."
-                    "$<TARGET_BUNDLE_DIR:Mosh>/Contents/Info.plist"
+            COMMAND ${CMAKE_COMMAND}
+                    -DPLIST=$<TARGET_BUNDLE_DIR:Mosh>/Contents/Info.plist
+                    -P "${MOSH_INJECT_PLIST_SCRIPT}"
             COMMENT "Re-injecting Info.plist keys PLIST_TO_MERGE drops (speech + Bonjour + camera)"
             VERBATIM)
+        add_custom_target(MoshFixInfoPlist ALL
+            COMMAND ${CMAKE_COMMAND}
+                    -DPLIST=$<TARGET_BUNDLE_DIR:Mosh>/Contents/Info.plist
+                    -P "${MOSH_INJECT_PLIST_SCRIPT}"
+            COMMENT "Re-injecting Info.plist keys into the app (no-relink/deploy-safe backstop)"
+            VERBATIM)
+        add_dependencies(MoshFixInfoPlist Mosh)
 
         # DRM-001 — stage the bundled drum kits into the app Resources so the native
         # sampler (MoshOps::drumKitDir) can load them at runtime. run-mosh.sh `deploy`
