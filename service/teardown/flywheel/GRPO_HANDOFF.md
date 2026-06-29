@@ -154,7 +154,31 @@ service/sft/.venv/bin/python service/rl/grpo.py --rl-data service/sft/.rl-data/r
 TEARDOWN_PY service/rl/verify_audio_gradient.py --log <grpo.log> --work /private/tmp/rl-audio/_work/audio
 ```
 
-**Proven (smoke, real composite reward):** every rollout rendered (0→few fails), **reward μ 0.21 → 0.30
-climbing**, **signal 4/4 both steps** (every group has a real gradient), determinism from PCM-identical
-renders. Cost note: ~8 min/step with the real MuQ reward (≈20 rollouts/step; `score_audio_cli` reloads
-MuQ per step). Gate verifier: `service/rl/verify_audio_gradient.py` (in the trainer worktree).
+**Proven (smoke, real composite reward):** every rollout rendered (0→few fails), reward μ 0.21 → 0.30,
+signal in 8 groups, determinism from PCM-identical renders. Cost note: ~8 min/step with the real MuQ
+reward (≈20 rollouts/step; `score_audio_cli` reloads MuQ per step). Gate verifier:
+`service/rl/verify_audio_gradient.py` (in the trainer worktree).
+
+### ⚠ HONEST SCOPE — what this gradient IS and IS NOT (adversarial review, 2026-06-29)
+The gradient is **non-degenerate and real**, but it is **renderability-dominated, NOT yet a musical-taste
+gradient**. From the smoke's per-rollout decomposition: successful renders mostly score **identically**
+(e.g. all 0.437), so the within-group variance that drives GRPO is overwhelmingly **emit-a-renderable-
+program (reward 0) vs fail/defer (reward 0)** — only ~1 of 4 groups showed a genuine edit-quality margin
+(0.125 vs 0.502). Two structural causes:
+- **Pull contributes little to the reward *spread*.** `composite = clean·(0.5·pq/10 + 0.5·pull)`; the
+  learned musical `pull` varies only ~0.52–0.58 across rollouts, so cleanliness/Audiobox-`pq` + the
+  clean gate dominate the *variance*. The policy is pushed toward "render clean audio," not "match the
+  trap/lofi taste."
+- **Edit-on-top banks the seed floor.** The rollout = seed (non-silent) + the policy's edit; a no-op or
+  mildly-bad edit still collects the seed's ~0.29–0.44 → the policy can win by "not breaking it."
+
+So the smoke proves the *machinery* (a real gradient flows end-to-end) and the current scaled run is best
+read as a **stage-1 "learn to emit renderable programs" curriculum** — useful (the prior policy emitted
+degenerate programs) but not the musical-taste objective.
+
+**To get a real MUSICAL gradient (the principled fix — owner-gated, not yet built):** reward the **DELTA**
+— `composite(seed + edit) − composite(seed alone)` — so a no-op edit scores ~0 and only genuine
+improvement scores positive (render the seed-alone once per prompt, cache it). Optionally up-weight the
+pull and/or add replacement/transform edit templates so edits materially change the mix. The proper
+*validation* is NOT a 2-step training-μ delta (within noise) but a **held-out re-score**: run the trained
+adapter vs the SFT baseline on fixed prompts (greedy), render, and compare composite + the pull component.
