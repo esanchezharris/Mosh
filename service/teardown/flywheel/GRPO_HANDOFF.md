@@ -25,15 +25,24 @@ scalar    = reward.composite(scores)      # the [0,1] reward to maximize
   in-mix-timing, held-out-by-source, source-clustered CI, artifact-controlled
   (see `VERIFY_REAL.md` rows `11-keystone-v3/v4`).
 
-### ⚠ The clean-gate caveat (read this)
-`Reward.composite = clean·(0.5·pq/10 + 0.5·pull)`. The floor's **binary `clean`** (Audiobox PQ flags)
-**zeros the composite for sparse/drum-only renders** even when `pull` discriminates well. So:
-- For **full-arrangement** rollouts (the normal GRPO target) `clean→1` and the composite flows.
-- For **drum-loop / sparse** rollouts, read `scores["pull"]` (or the `components`) directly instead of
-  the gated composite, or soften the gate. The bridge always logs both so the trainer can choose.
+### The clean gate (now GRADED) + two honest caveats
+`Reward.composite = clean·(0.5·pq/10 + 0.5·pull)`. `clean` is now **GRADED [0,1]** (was binary): genuinely
+BROKEN audio (silence/clipping/empty) hard-gates to 0, but merely-imperfect audio degrades smoothly
+(each PQ flag costs 0.2, floored at 0.2) — so the validated `pull` is **no longer masked** on sparse/
+drum-only renders (a flagged-but-valid drum loop now flows, e.g. composite 0.56 instead of 0.0).
 
-Measured discrimination (pull): real good mix **1.00** > non-exemplar synth music **0.69** >
-sine/noise/silence **~0.52–0.57** — a real graded signal, not constant.
+**Caveat 1 — the floor can't reject noise.** Audiobox PQ rates white noise "clean" (~7.2), so the floor
+doesn't separate noise from music; only the `pull` does, and weakly in the sparse regime. Net composite:
+good real mix **0.89** > sparse good music **0.56** > white-noise **~0.51** > silence **0** — correct
+ordering, wide for full arrangements, thin in the sparse regime. (Fine in deployment: the policy emits
+musical PROGRAMS from PromptFeed, not white noise.)
+
+**Caveat 2 — exemplar coverage is narrow.** The pull is validated on ablation ORDERING (relative);
+as an ABSOLUTE reward it measures proximity to the **21 (trap/lofi) real-anchor exemplars**, so
+off-style good music (e.g. a house mix) scores as low as noise. This is **matched** to the trap/lofi
+tutorial scrape (the policy's rollouts are trap-ish), but to reward broader genres, rebuild
+`composite_reward.pt` with more diverse real anchors (more genres in `td-anchors-real`). Do **not** sharpen
+the pull distance to "fix" the noise gap — it amplifies this narrowness (off-style music drops below noise).
 
 ## 2. PromptFeed — the policy's prompt distribution
 

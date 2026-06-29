@@ -24,17 +24,27 @@ class Reward:
 
     def _floor(self, y: np.ndarray, sr: int) -> dict:
         """Production-quality floor — Audiobox PQ via service/quality_readout when available,
-        else a DSP-lite clip/silence guard."""
+        else a DSP-lite clip/silence guard.
+
+        `clean` is GRADED [0,1] (was binary 0/1): genuinely BROKEN audio (silence / clipping /
+        empty) HARD-gates to 0, but merely-imperfect audio degrades SMOOTHLY (each PQ flag costs
+        0.2, floored at 0.2) so a validated `pull` isn't masked on sparse/drum-only content — the
+        old binary flags→0 zeroed the composite for any flagged render even when the pull was strong."""
+        yy = np.asarray(y, dtype=np.float64)
+        peak = float(np.max(np.abs(yy))) if yy.size else 0.0
+        rms = float(np.sqrt(np.mean(yy ** 2))) if yy.size else 0.0
+        broken = (yy.size == 0) or (peak > 0.999) or (rms < 1e-4)
         try:
             import quality_readout as qr  # service/ is on sys.path
             r = qr.analyze_array(np.asarray(y, dtype=np.float32), sr)
-            return {"pq": float(r.get("pq", 0.0)), "clean": 0.0 if r.get("flags") else 1.0}
+            pq = float(r.get("pq", 0.0))
+            n_flags = len(r.get("flags") or [])
         except Exception:
-            yy = np.asarray(y, dtype=np.float64)
-            peak = float(np.max(np.abs(yy))) if yy.size else 0.0
-            rms = float(np.sqrt(np.mean(yy ** 2))) if yy.size else 0.0
-            broken = (peak > 0.999) or (rms < 1e-4)
-            return {"pq": 0.0 if broken else 6.0, "clean": 0.0 if broken else 1.0}
+            pq = 0.0 if broken else 6.0
+            n_flags = 0
+        if broken:
+            return {"pq": 0.0, "clean": 0.0}                      # hard gate: silence / clipping / empty
+        return {"pq": pq, "clean": round(max(0.2, 1.0 - 0.2 * n_flags), 4)}  # graded otherwise
 
     def score_audio(self, y, sr: int) -> dict[str, float]:
         yn = loudness_normalize(np.asarray(y, dtype=np.float32), sr, self.target_rms_dbfs)
