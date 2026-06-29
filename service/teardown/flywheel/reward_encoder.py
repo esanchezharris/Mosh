@@ -290,3 +290,61 @@ def get_encoder(prefer: Optional[str] = None):
         return MertEncoder()
     from teardown.drummatch.embed import EngineeredEmbedder
     return EngineeredEmbedder()
+
+
+COMPOSITE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "composite_reward.pt")
+
+
+class CompositeRewardHead:
+    """The VALIDATED §11 composite reward pull — drop-in for TrainedRewardHead (.pull / .add_exemplars
+    / .available). pull(audio) = α·(TIMBRE proximity to good exemplars in raw-MuQ space) + (1-α)·(TIMING
+    proximity in the learned φ-projection space). Beats raw CLAP on timbre + isolated-timing + in-mix-timing
+    (held-out-by-source, source-clustered CI, artifact-controlled — see VERIFY_REAL 11-keystone-v3/v4).
+    Loads `composite_reward.pt` (built by build_composite_reward.py): proj_state + ex_timbre + ex_timing."""
+
+    def __init__(self, path: str = COMPOSITE_PATH, encoder: Optional["MuQEncoder"] = None) -> None:
+        import torch
+        from teardown.flywheel.finetune_encoder import _make_proj
+        blob = torch.load(path, map_location="cpu", weights_only=False)
+        self.meta = blob["meta"]
+        self.alpha = float(self.meta.get("alpha", 0.5))
+        self.version = f"composite-{self.meta.get('encoder', 'muq')}-v1"
+        self.encoder = encoder or MuQEncoder()
+        self._ex_timbre = blob["ex_timbre"].numpy().astype(np.float64)   # (N, in_dim) raw-MuQ
+        self._ex_timing = blob["ex_timing"].numpy().astype(np.float64)   # (N, out_dim) learned timing
+        self._proj = _make_proj(int(self.meta["in_dim"]))                # 1024→256→128, on device
+        self._proj.load_state_dict(blob["proj_state"])
+        self._proj.eval()
+        self._exemplars = list(self._ex_timbre)                          # non-empty ⇒ has_pull gate passes
+
+    @staticmethod
+    def available(path: str = COMPOSITE_PATH) -> bool:
+        return MuQEncoder.available() and os.path.isfile(path)
+
+    def _project(self, v: np.ndarray) -> np.ndarray:
+        import torch
+        with torch.no_grad():
+            t = torch.tensor(v[None, :], dtype=torch.float32, device=_device())
+            return self._proj(t)[0].cpu().numpy().astype(np.float64)
+
+    def pull(self, audio, sr: int = 44100) -> float:
+        v = self.encoder.embed(audio, sr).astype(np.float64)             # (in_dim,) L2-normed
+        if v.shape[0] != self._ex_timbre.shape[1] or not np.all(np.isfinite(v)):
+            return 0.0                                                    # broken embedding → never NaN
+        d_t = float(np.min(np.sqrt(((self._ex_timbre - v) ** 2).sum(axis=1))))
+        pv = self._project(v.astype(np.float32))
+        d_g = float(np.min(np.sqrt(((self._ex_timing - pv) ** 2).sum(axis=1))))
+        if not (np.isfinite(d_t) and np.isfinite(d_g)):
+            return 0.0
+        return float(self.alpha / (1.0 + d_t) + (1.0 - self.alpha) / (1.0 + d_g))
+
+    def add_exemplars(self, audios) -> int:
+        """Extend the good-music exemplar set (timbre + timing spaces) at runtime."""
+        for a in audios:
+            au, sr = a if isinstance(a, tuple) else (a, 44100)
+            v = self.encoder.embed(au, sr).astype(np.float64)
+            if v.shape[0] == self._ex_timbre.shape[1] and np.all(np.isfinite(v)):
+                self._ex_timbre = np.vstack([self._ex_timbre, v])
+                self._ex_timing = np.vstack([self._ex_timing, self._project(v.astype(np.float32))])
+                self._exemplars.append(v)
+        return len(self._exemplars)

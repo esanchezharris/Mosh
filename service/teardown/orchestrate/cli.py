@@ -157,20 +157,27 @@ def main(argv=None):
                     y = y.mean(axis=1)
             except Exception as e:
                 return {"error": f"load: {type(e).__name__}: {e}"}
-            pull = None                          # the §11 trained head (MERT) — graceful if its venv is absent
+            pull = None                          # §11 pull — graceful if its venv/artifact is absent
+            pull_version = "reward-v0"
             try:
-                from teardown.flywheel.reward_encoder import TrainedRewardHead, get_encoder
-                head = TrainedRewardHead(encoder=get_encoder())
-                # the pull is INERT (constant 0.5) until exemplars are loaded — don't blend a fake
-                # signal into the composite, and don't claim has_pull. Floor-only until §11/§12 wires
-                # exemplars (the anchor corpus / PromptFeed handoff).
-                if getattr(head, "_exemplars", None):
-                    pull = head.pull
+                from teardown.flywheel.reward_encoder import (CompositeRewardHead,
+                                                              TrainedRewardHead, get_encoder)
+                if CompositeRewardHead.available():
+                    # ACTIVATED: the validated [raw-MuQ timbre]+[learned timing] composite, exemplars
+                    # baked into composite_reward.pt → pull is live (beats raw CLAP on all axes, verified).
+                    head = CompositeRewardHead()
+                    pull, pull_version = head.pull, head.version
+                else:
+                    # legacy diagonal head — INERT (constant 0.5) until exemplars load; don't blend a
+                    # fake signal or claim has_pull (floor-only).
+                    head = TrainedRewardHead(encoder=get_encoder())
+                    if getattr(head, "_exemplars", None):
+                        pull, pull_version = head.pull, head.version
             except Exception as e:
                 print(f"[score] pull head unavailable ({type(e).__name__}) → floor-only reward",
                       file=sys.stderr)
             from teardown.flywheel.reward import Reward
-            rw = Reward(pull=pull)
+            rw = Reward(pull=pull, version=pull_version)
             scores = rw.score_audio(y, sr)
             out_d = {k: round(float(v), 4) for k, v in scores.items()}
             out_d.update({"composite": rw.composite(scores), "has_pull": pull is not None,
