@@ -176,9 +176,25 @@ So the smoke proves the *machinery* (a real gradient flows end-to-end) and the c
 read as a **stage-1 "learn to emit renderable programs" curriculum** — useful (the prior policy emitted
 degenerate programs) but not the musical-taste objective.
 
-**To get a real MUSICAL gradient (the principled fix — owner-gated, not yet built):** reward the **DELTA**
-— `composite(seed + edit) − composite(seed alone)` — so a no-op edit scores ~0 and only genuine
-improvement scores positive (render the seed-alone once per prompt, cache it). Optionally up-weight the
-pull and/or add replacement/transform edit templates so edits materially change the mix. The proper
-*validation* is NOT a 2-step training-μ delta (within noise) but a **held-out re-score**: run the trained
-adapter vs the SFT baseline on fixed prompts (greedy), render, and compare composite + the pull component.
+**DELTA-reward — BUILT (trainer commit `e7b7c808`, env `MOSH_RL_REWARD_DELTA=1`):** reward =
+`composite(seed + edit) − composite(seed alone)` — banking the seed → ~0, improvement → +, breakage → −.
+`buildRenderProgram` emits the seed-alone program (cached, rendered once/prompt); `score_audio_cli --delta`
+subtracts it; the verifier is delta-aware.
+
+**What delta REVEALED (the honest finding — the bottleneck moved from the reward to the POLICY):** on a
+delta smoke, deltas were **mostly exactly 0** (the edit renders the same composite as the seed = a no-op),
+with occasional **negative** (the edit broke the seed); **no rollout produced a positive delta**. The reward
+is now correct, but **this single-edit SFT policy almost never makes an audible improvement** the reward can
+reward. Two compounding causes: (1) policy capability — "add a melody on a new track" needs create_track +
+add_midi_clip + *notes* (multi-step), which a single-command emitter rarely produces; (2) reward sensitivity
+— the achievable simple edits (a bare 4OSC tone / test-tone) don't sound trap/lofi, so they don't raise the
+trap-exemplar `pull` even when they DO add audio. The delta gate FAILS honestly (signal too sparse, no
+positives) — correctly refusing to call this a trainable musical gradient yet.
+
+**Realistic paths to a positive musical gradient (owner's call):** (a) a more capable policy (SFT on
+multi-step content building / few-shot exemplars / higher exploration) so improving edits get sampled and
+GRPO can reinforce them; (b) edits the reward CAN reward — load real instruments/drum-kit samples (VST3 /
+the bundled kit) so a successful edit sounds trap-like and lifts the pull; (c) build-from-scratch framing
+(policy's whole output = the music) — same policy-capability concern applies. Validation = **held-out
+re-score** of trained vs SFT baseline on fixed prompts (greedy), comparing composite + pull — NOT a
+training-μ delta.
