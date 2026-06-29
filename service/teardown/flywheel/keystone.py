@@ -62,27 +62,52 @@ def _load_stem(path: str) -> np.ndarray:
     return y.mean(axis=1).astype(np.float32)
 
 
-def build_triplets(anchors, pools: _Pools, per_pair: int = 1, seed: int = 0):
-    """Per anchor: ablate role pairs → (anchor_id, ref, near, far) audio triplets."""
+def _shift(onsets, dt: float):
+    return [max(0.0, t + dt) for t in onsets]
+
+
+def build_triplets(anchors, pools: _Pools, mode: str = "swap", per_pair: int = 1, seed: int = 0,
+                   dt_small: float = 0.03, dt_large: float = 0.12):
+    """Per anchor → (anchor_id, ref, near, far) triplets with a KNOWN ordering (near closer to ref).
+    mode='swap'  : timbral — replace a role's sample with a same-role neighbour (1-swap vs 2-swap).
+    mode='timing': MUSICAL — hold the timbre constant (re-derive each role's base sample
+                   deterministically) and perturb ONE role's ONSETS; small shift=near, large=far,
+                   both directions. Isolates the groove axis (the keystone's musical question)."""
     rng = np.random.default_rng(seed)
+    mix = AblationEngine(lambda s, r: s).mix
     trips = []
     for a in anchors:
         roles = [r for r in a.stems if a.onsets.get(r)]
         if len(roles) < 2:
             continue
         n = int(a.window_s * SR)
-        base = {r: _load_stem(a.stems[r]) for r in roles}
+        if mode == "timing":
+            base_samp = {}
+            for r in roles:
+                sp = pools.pick(r, f"{a.anchor_id}:{r}")          # SAME pick as project_anchors → base timbre
+                base_samp[r] = _load_sample(sp) if sp else np.zeros(int(0.4 * SR), np.float32)
+            base_stems = {r: render_stem(a.onsets[r], base_samp[r], n) for r in roles}
+            ref = mix(base_stems)
+            for r0 in roles:
+                for sign in (1.0, -1.0):
+                    near = dict(base_stems)
+                    near[r0] = render_stem(_shift(a.onsets[r0], sign * dt_small), base_samp[r0], n)
+                    far = dict(base_stems)
+                    far[r0] = render_stem(_shift(a.onsets[r0], sign * dt_large), base_samp[r0], n)
+                    trips.append((a.anchor_id, ref, mix(near), mix(far)))
+        else:
+            base = {r: _load_stem(a.stems[r]) for r in roles}
 
-        def swap(_stem, role, _a=a):
-            samp = pools.pick(role, f"{_a.anchor_id}:{role}:{int(rng.integers(1 << 30))}")
-            s = _load_sample(samp) if samp else np.zeros(int(0.4 * SR), np.float32)
-            return render_stem(_a.onsets[role], s, n)
+            def swap(_stem, role, _a=a):
+                samp = pools.pick(role, f"{_a.anchor_id}:{role}:{int(rng.integers(1 << 30))}")
+                s = _load_sample(samp) if samp else np.zeros(int(0.4 * SR), np.float32)
+                return render_stem(_a.onsets[role], s, n)
 
-        eng = AblationEngine(swap)
-        for r0, r1 in itertools.combinations(roles, 2):
-            for _k in range(per_pair):
-                t = eng.make_triplet(base, roles_to_swap=(r0, r1), sr=SR)
-                trips.append((a.anchor_id, t.ref, t.near, t.far))
+            eng = AblationEngine(swap)
+            for r0, r1 in itertools.combinations(roles, 2):
+                for _k in range(per_pair):
+                    t = eng.make_triplet(base, roles_to_swap=(r0, r1), sr=SR)
+                    trips.append((a.anchor_id, t.ref, t.near, t.far))
     return trips
 
 
@@ -94,6 +119,7 @@ def main(argv=None) -> int:
     store_dir = argv[0]
     per_pair = int(argv[1]) if len(argv) > 1 else 2
     n_splits = int(argv[2]) if len(argv) > 2 else 5
+    mode = argv[3] if len(argv) > 3 else "swap"
 
     store = AnchorStore(store_dir)
     anchors = store.gold()
@@ -104,8 +130,8 @@ def main(argv=None) -> int:
         return 1
 
     pools = _Pools()
-    trips = build_triplets(anchors, pools, per_pair=per_pair)
-    print(f"  built {len(trips)} ablation triplets from {len(anchors)} anchors", flush=True)
+    trips = build_triplets(anchors, pools, mode=mode, per_pair=per_pair)
+    print(f"  mode={mode!r}: built {len(trips)} ablation triplets from {len(anchors)} anchors", flush=True)
 
     # encoders
     from teardown.drummatch.embed import EngineeredEmbedder
@@ -154,7 +180,7 @@ def main(argv=None) -> int:
     def stat(xs):
         return (round(float(np.mean(xs)), 4), round(float(np.min(xs)), 4), round(float(np.max(xs)), 4)) if xs else (0, 0, 0)
 
-    print(f"\n  ── §11 KEYSTONE — held-out-BY-SOURCE ordering accuracy ({n_splits} splits) ──")
+    print(f"\n  ── §11 KEYSTONE [{mode}] — held-out-BY-SOURCE ordering accuracy ({n_splits} splits) ──")
     for k in ("clap_raw", "mert_raw", "mert_trained", "eng_raw"):
         m, lo, hi = stat(results[k])
         print(f"    {k:14} mean {m:.4f}  [{lo:.4f}–{hi:.4f}]")
