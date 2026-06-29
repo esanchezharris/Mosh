@@ -41,26 +41,47 @@ _REG_CACHE: Optional[Dict[str, dict]] = None
 _NL_MIN, _NL_MAX = 0.01, 0.5
 _NL_BASE = 0.40
 
-# The honest refusals (generative-only v1).
+# Honest refusals for things the generative model genuinely can't do.
 _SAY = {
-    "corrective": ("I can re-imagine or transform this part, but I can't repair the take "
-                   "itself — pitch/timing correction (AutoTune/EQ) is the tool for that."),
-    "vocal": ("I only generate instrumental textures — I can't create or fix vocals."),
-    "other": ("I can't do that with the generative model — try re-imagining or "
-              "transforming the part."),
+    "vocal": "I only generate instrumental textures — I can't create or fix vocals.",
+    "noise": "I can't clean up noise/hiss in a recording yet — that needs a restoration tool.",
+    "ambiguous": ("I can correct the TUNING (AutoTune), TIMING (quantize), TONE (EQ) or "
+                  "LEVELS (OTT) — which one? Or describe the sound you want and I'll re-imagine it."),
+    "other": "I can't do that with the generative model — try re-imagining or transforming the part.",
 }
 
 # ── keyword tables (the deterministic fake; also the LLM's fallback) ──────────────
 
-# Corrective intent → unsupported in v1 (route to AutoTune/EQ/OTT is a later rung).
-_CORRECTIVE = [
-    "fix the", "fix my", "fix this", "fix it", "fix that", "repair", "in tune",
-    "out of tune", "out-of-tune", "off-key", "off key", "off-pitch", "pitchy",
-    "tighten", "clean up", "clean it up", "clean up the", "quantize", "on the beat",
-    "off the beat", "fix timing", "fix the timing", "correct the", "tune it",
-    "tune the", "tune my", "retune", "autotune", "auto-tune", "pitch correct",
-    "pitch-correct", "de-noise", "denoise",
+# Corrective sub-types → the EXISTING tool that actually fixes the take (corrects it in
+# place, never a synthetic re-performance). Each: (triggers, subtype, tool [a load_builtin
+# type or "quantize_notes"], say). The caller (UI/agent) holds the track/clip context and
+# runs the tool; the compiler only classifies + names it.
+_CORRECTIVE_SUBTYPES = [
+    (["in tune", "out of tune", "out-of-tune", "off-key", "off key", "off-pitch", "pitchy",
+      "tune it", "tune the", "tune my", "retune", "autotune", "auto-tune", "pitch correct",
+      "pitch-correct", "fix the tuning", "fix the pitch", "fix my pitch", "intonation",
+      "flat notes", "sharp notes"],
+     "pitch", "moshAutoTune",
+     "That's a tuning issue — AutoTune corrects the pitch in place; it doesn't re-perform the take."),
+    (["tighten", "on the beat", "off the beat", "off-beat", "quantize", "fix the timing",
+      "fix timing", "loose timing", "sloppy timing", "timing is off", "lock it to the grid",
+      "line it up"],
+     "timing", "quantize_notes",
+     "That's a timing issue — quantize snaps the notes to the grid (MIDI clips); it doesn't re-perform the take."),
+    (["too muddy", "muddy", "too harsh", "harsh", "boomy", "boxy", "too thin", "tinny",
+      "fix the tone", "fix the eq", "honky"],
+     "tone", "eq",
+     "That's a tone issue — an EQ shapes it without re-performing the take."),
+    (["too quiet", "too loud", "uneven", "inconsistent level", "levels are", "level it",
+      "even it out", "even out the level", "compress the", "fix the dynamics", "dynamics are",
+      "jumpy levels", "level is all over"],
+     "dynamics", "moshOTT",
+     "Uneven levels — OTT (multiband compression) evens them out without re-performing."),
 ]
+_NOISE = ["clean up the recording", "de-noise", "denoise", "remove the noise", "remove noise",
+          "too noisy", "background hiss", "tape hiss", "background hum", "hum in the", "crackle",
+          "take out the noise", "get rid of the noise"]
+_GENERIC_FIX = ["fix ", "fix the", "fix my", "fix it", "fix this", "fix that", "repair", "correct the", "clean up"]
 _VOCAL = ["vocal", "vocals", "sing ", "singing", "sung", "singer", "a cappella",
           "acappella", "acapella", "add lyrics", "sung chorus", "voiceover", "rap verse"]
 
@@ -197,11 +218,23 @@ def _transform_target(low: str) -> str:
 
 # ── the deterministic FAKE backend ────────────────────────────────────────────────
 
+def _corrective_subtype(low: str) -> Optional[dict]:
+    for triggers, subtype, tool, say in _CORRECTIVE_SUBTYPES:
+        if any(t in low for t in triggers):
+            return {"subtype": subtype, "tool": tool, "say": say}
+    return None
+
+
 def _classify(low: str) -> Tuple[str, dict]:
-    if any(k in low for k in _CORRECTIVE):
-        return "unsupported", {"reason": "corrective"}
+    sub = _corrective_subtype(low)            # specific fix → the right corrective tool
+    if sub:
+        return "corrective", sub
+    if any(k in low for k in _NOISE):
+        return "unsupported", {"reason": "noise"}
     if any(k in low for k in _VOCAL):
         return "unsupported", {"reason": "vocal"}
+    if any(k in low for k in _GENERIC_FIX):   # a fix verb but no clear sub-type → offer the menu
+        return "corrective", {"subtype": "ambiguous", "tool": None, "say": _SAY["ambiguous"]}
     tgt = _transform_target(low)
     if tgt:
         return "transform", {"target": tgt}
@@ -253,6 +286,8 @@ def _fake_compile(instruction: str, intensity: Optional[int]) -> dict:
     seed = _seed_for(instruction)
     if mode == "unsupported":
         return {"mode": "unsupported", "reason": extra["reason"], "say": _SAY.get(extra["reason"], _SAY["other"])}
+    if mode == "corrective":
+        return {"mode": "corrective", "subtype": extra["subtype"], "tool": extra["tool"], "say": extra["say"]}
     if mode == "transform":
         return {"mode": "transform", "target": extra["target"], "strength": _strength_for(low, intensity),
                 "seed": seed, "prompt": "", "colors": [], "lab": False}
@@ -265,6 +300,8 @@ def _fake_compile(instruction: str, intensity: Optional[int]) -> dict:
 def _fake_reasoning(env: dict) -> str:
     if env["mode"] == "unsupported":
         return f"classified {env['reason']} — not a generative edit"
+    if env["mode"] == "corrective":
+        return f"corrective:{env['subtype']} → {env.get('tool') or 'clarify'}"
     if env["mode"] == "transform":
         return f"transform → {env['target']} @ strength {env['strength']:g}"
     cs = ", ".join(f"{c['name']}={c['value']:g}" for c in env.get("colors", [])) or "(no colours)"
@@ -299,6 +336,12 @@ def _validate(env: dict) -> dict:
     if mode == "unsupported":
         reason = str(env.get("reason") or "other")
         return {"mode": "unsupported", "reason": reason, "say": env.get("say") or _SAY.get(reason, _SAY["other"])}
+    if mode == "corrective":
+        subtype = str(env.get("subtype") or "ambiguous")
+        tool = env.get("tool")
+        tool = str(tool) if tool else None    # ambiguous → no single tool
+        return {"mode": "corrective", "subtype": subtype, "tool": tool,
+                "say": env.get("say") or _SAY["ambiguous"]}
     if mode == "transform":
         target = str(env.get("target") or "").strip()
         if not target:
@@ -341,9 +384,13 @@ def _build_messages(instruction: str, intensity: Optional[int], feedback: Option
         "Pick 0-3 colours from the palette; value 50 is neutral, <50 reverses the colour.\n"
         '  "transform" — turn the part into another INSTRUMENT timbre. Fields: '
         '{"mode":"transform","target":str,"strength":0-100}.\n'
-        '  "unsupported" — for a CORRECTIVE request (fix/tune/tighten/clean up — we would '
-        "re-perform, not repair) or a VOCAL request (we only make instrumental textures). "
-        'Fields: {"mode":"unsupported","reason":"corrective"|"vocal","say":str}.\n'
+        '  "corrective" — a tuning/timing/tone/dynamics FIX of the EXISTING take (correct it, '
+        "don't re-perform it). Route to the tool that fixes it: "
+        '{"mode":"corrective","subtype":"pitch"|"timing"|"tone"|"dynamics"|"ambiguous",'
+        '"tool":"moshAutoTune"|"quantize_notes"|"eq"|"moshOTT"|null,"say":str}. '
+        'Use subtype "ambiguous"/tool null when the fix is unclear.\n'
+        '  "unsupported" — a VOCAL request (we only make instrumental textures) or NOISE '
+        'removal we can\'t do: {"mode":"unsupported","reason":"vocal"|"noise","say":str}.\n'
         "Never invent knobs (no cfg, steps, or negative_prompt). Colour palette:\n"
         + _available_colors_doc())
     usr = f'Instruction: "{instruction}".'
@@ -423,6 +470,10 @@ def compile(instruction: str, intensity: Optional[int] = None,
     else:
         env = _validate(_fake_compile(instruction, intensity))
         reasoning, used = _fake_reasoning(env), "fake"
-    return {"ok": True, "backend": used, "mode": env["mode"], "reasoning": reasoning,
-            "envelope": None if env["mode"] == "unsupported" else env,
-            "say": env.get("say")}
+    render = env["mode"] in ("reimagine", "transform")
+    out = {"ok": True, "backend": used, "mode": env["mode"], "reasoning": reasoning,
+           "envelope": env if render else None, "say": env.get("say")}
+    if env["mode"] == "corrective":       # name the corrective tool the caller should run
+        out["subtype"] = env.get("subtype")
+        out["tool"] = env.get("tool")
+    return out

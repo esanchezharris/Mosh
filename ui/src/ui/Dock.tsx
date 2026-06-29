@@ -181,7 +181,7 @@ export function GenDrawer({ track, selectedClipId }: { track: Track; selectedCli
       <div className="gen-head"><span className="gen-title">⃝ GENERATIVE</span><span className="gen-clip">{rl?.mode === "transform" ? "transform" : sa3 ? "stable audio 3" : "fake"} · {clip.name}</span></div>
       {!rl ? (
         <>
-          <CompileBox clipId={clip.id} />
+          <CompileBox clipId={clip.id} trackId={track.id} />
           <div className="gen-create-row">
             <button className="btn rack-add" data-testid="gen-create"
               onClick={() => void exec("create_render_layer", { clipId: clip.id, adapter: sa3 ? "stable_audio3" : "fake", mode: "reimagine", modelVariant: sa3 ? "sa3-medium" : "" })}>+ Re-imagine</button>
@@ -197,25 +197,39 @@ export function GenDrawer({ track, selectedClipId }: { track: Track; selectedCli
 }
 
 // "Describe it…" — the prompt compiler entry point. The producer types a loose
-// instruction; compile_render classifies it (re-imagine / transform / unsupported) and
-// fills a validated render layer, so the chosen colours/target then appear in the rack
-// below (transparency). A corrective/vocal request is honestly declined with a message —
-// generative-only v1 never re-performs the take. Uses wait:true (the compile is a fast,
-// explicit lookup) so the verdict — including an "unsupported" say — comes straight back.
-function CompileBox({ clipId }: { clipId: string }) {
+// instruction; compile_render classifies it and either (a) fills a validated re-imagine/
+// transform layer, so the chosen colours/target appear in the rack below (transparency),
+// (b) names the CORRECTIVE tool that actually fixes the take — AutoTune/EQ/OTT/quantize —
+// offered as a one-click action (it corrects, it doesn't re-perform), or (c) honestly
+// declines a vocal/noise request. Uses wait:true (the compile is a fast, explicit lookup)
+// so the verdict — including the corrective tool + say — comes straight back.
+const TOOL_LABEL: Record<string, string> = {
+  moshAutoTune: "Add AutoTune", eq: "Add EQ", moshOTT: "Add OTT", quantize_notes: "Quantize notes",
+};
+
+function CompileBox({ clipId, trackId }: { clipId: string; trackId: string }) {
   const exec = useStore((s) => s.exec);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [say, setSay] = useState<string | null>(null);
+  const [fixTool, setFixTool] = useState<string | null>(null);
+  const reset = () => { setSay(null); setFixTool(null); };
   const submit = async () => {
     const instruction = text.trim();
     if (!instruction || busy) return;
-    setBusy(true); setSay(null);
+    setBusy(true); reset();
     const r = await exec("compile_render", { clipId, instruction, wait: true });
     setBusy(false);
-    const data = (r?.data ?? {}) as { mode?: string; say?: string };
-    if (data.mode === "unsupported") setSay(data.say ?? "I can't do that with the generative model.");
-    else setText("");   // applied — the rack now shows what it chose
+    const data = (r?.data ?? {}) as { mode?: string; say?: string; tool?: string | null };
+    if (data.mode === "corrective") { setSay(data.say ?? null); setFixTool(data.tool ?? null); }
+    else if (data.mode === "unsupported") setSay(data.say ?? "I can't do that with the generative model.");
+    else setText("");   // re-imagine / transform applied — the rack now shows what it chose
+  };
+  const applyFix = async () => {
+    if (!fixTool) return;
+    if (fixTool === "quantize_notes") await exec("quantize_notes", { clipId });
+    else await exec("load_builtin", { trackId, type: fixTool });
+    setText(""); reset();
   };
   return (
     <div className="gen-compile" data-testid="gen-compile">
@@ -223,12 +237,16 @@ function CompileBox({ clipId }: { clipId: string }) {
         <input className="gen-compile-input" data-testid="gen-compile-input" type="text"
           placeholder="describe it… e.g. make it lo-fi, or “as a violin”" value={text} disabled={busy}
           aria-label="Describe the generative edit"
-          onChange={(e) => { setText(e.target.value); if (say) setSay(null); }}
+          onChange={(e) => { setText(e.target.value); reset(); }}
           onKeyDown={(e) => { if (e.key === "Enter") void submit(); }} />
         <button className="btn rack-add" data-testid="gen-compile-go" disabled={busy || !text.trim()}
           onClick={() => void submit()}>{busy ? "…" : "✨ Compile"}</button>
       </div>
       {say && <div className="gen-compile-say" role="status" data-testid="gen-compile-say">{say}</div>}
+      {fixTool && (
+        <button className="btn rack-add gen-compile-fix" data-testid="gen-compile-fix"
+          onClick={() => void applyFix()}>{TOOL_LABEL[fixTool] ?? "Apply fix"}</button>
+      )}
     </div>
   );
 }

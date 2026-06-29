@@ -60,15 +60,40 @@ describe("mock compile_render (prompt compiler)", () => {
     expect((await clipById(clipId))?.renderLayer?.userKept).toBe(true);
   });
 
-  it("honest boundary: a corrective request is declined, NO layer is created", async () => {
+  it("corrective: a tuning fix routes to AutoTune, NO layer created (corrects, not re-perform)", async () => {
     const clipId = await waveClipId();
-    const r = await exec("compile_render", { clipId, instruction: "fix my guitar", wait: true });
+    const r = await exec("compile_render", { clipId, instruction: "fix the tuning", wait: true });
     expect(r.ok).toBe(true);
-    const d = r.data as { mode: string; say: string; envelope: unknown };
-    expect(d.mode).toBe("unsupported");
-    expect(d.say.toLowerCase()).toContain("repair");
+    const d = r.data as { mode: string; subtype: string; tool: string; say: string; envelope: unknown };
+    expect(d.mode).toBe("corrective");
+    expect(d.subtype).toBe("pitch");
+    expect(d.tool).toBe("moshAutoTune");
     expect(d.envelope).toBeNull();
     expect((await clipById(clipId))?.renderLayer).toBeUndefined();   // nothing re-performed
+  });
+
+  it("corrective routing covers timing/tone/dynamics", async () => {
+    const clipId = await waveClipId();
+    const cases: Array<[string, string, string]> = [
+      ["tighten the timing", "timing", "quantize_notes"],
+      ["it sounds too muddy", "tone", "eq"],
+      ["the levels are uneven", "dynamics", "moshOTT"],
+    ];
+    for (const [instr, subtype, tool] of cases) {
+      const d = (await exec("compile_render", { clipId, instruction: instr, wait: true })).data as { mode: string; subtype: string; tool: string };
+      expect(d.mode).toBe("corrective");
+      expect(d.subtype).toBe(subtype);
+      expect(d.tool).toBe(tool);
+    }
+  });
+
+  it("generic 'fix my guitar' ⇒ corrective ambiguous (menu, no single tool)", async () => {
+    const clipId = await waveClipId();
+    const d = (await exec("compile_render", { clipId, instruction: "fix my guitar", wait: true })).data as { mode: string; subtype: string; tool: string | null; say: string };
+    expect(d.mode).toBe("corrective");
+    expect(d.subtype).toBe("ambiguous");
+    expect(d.tool).toBeNull();
+    expect(d.say.toLowerCase()).toContain("autotune");
   });
 
   it("honest boundary: a vocal request is declined as instrumental-only", async () => {

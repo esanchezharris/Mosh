@@ -323,12 +323,24 @@ const err = (command: string, error: string): CommandResult => ({ ok: false, com
 // Minimal mirror of the Python prompt compiler (service/compiler/core.py) so the e2e +
 // vitest exercise the real UI without the native backend. Deterministic, generative-only:
 // classify reimagine | transform | unsupported and emit a validated envelope.
-function mockCompile(instruction: string): { mode: string; envelope?: Record<string, unknown>; say?: string; reasoning: string } {
+function mockCompile(instruction: string): { mode: string; envelope?: Record<string, unknown>; say?: string; subtype?: string; tool?: string | null; reasoning: string } {
   const low = instruction.toLowerCase().trim();
-  const corrective = ["fix ", "fix the", "fix my", "fix it", "in tune", "out of tune", "tighten", "clean up", "quantize", "autotune", "auto-tune", "tune it", "tune the", "tune my", "retune", "pitch correct"];
+  // Corrective sub-types → the existing tool that fixes it (mirrors _CORRECTIVE_SUBTYPES).
+  const correctiveSubtypes: Array<[string[], string, string, string]> = [
+    [["in tune", "out of tune", "off-key", "off key", "off-pitch", "pitchy", "tune it", "tune the", "tune my", "retune", "autotune", "auto-tune", "pitch correct", "fix the tuning", "fix the pitch", "intonation"], "pitch", "moshAutoTune", "That's a tuning issue — AutoTune corrects the pitch in place; it doesn't re-perform the take."],
+    [["tighten", "on the beat", "off the beat", "off-beat", "quantize", "fix the timing", "fix timing", "loose timing", "sloppy timing", "lock it to the grid"], "timing", "quantize_notes", "That's a timing issue — quantize snaps the notes to the grid (MIDI clips); it doesn't re-perform the take."],
+    [["too muddy", "muddy", "too harsh", "harsh", "boomy", "boxy", "too thin", "tinny", "fix the tone", "honky"], "tone", "eq", "That's a tone issue — an EQ shapes it without re-performing the take."],
+    [["too quiet", "too loud", "uneven", "inconsistent level", "levels are", "level it", "even it out", "compress the", "fix the dynamics", "dynamics are"], "dynamics", "moshOTT", "Uneven levels — OTT evens them out without re-performing."],
+  ];
+  for (const [trig, subtype, tool, say] of correctiveSubtypes) {
+    if (trig.some((t) => low.includes(t))) return { mode: "corrective", subtype, tool, say, reasoning: `corrective:${subtype}` };
+  }
+  const noise = ["clean up the recording", "de-noise", "denoise", "remove the noise", "remove noise", "too noisy", "hiss", "background hum", "crackle"];
+  if (noise.some((k) => low.includes(k))) return { mode: "unsupported", say: "I can't clean up noise/hiss in a recording yet — that needs a restoration tool.", reasoning: "classified noise" };
   const vocal = ["vocal", "vocals", "sing ", "singing", "sung", "singer", "add lyrics"];
-  if (corrective.some((k) => low.includes(k))) return { mode: "unsupported", say: "I can re-imagine or transform this part, but I can't repair the take itself — pitch/timing correction (AutoTune/EQ) is the tool for that.", reasoning: "classified corrective" };
   if (vocal.some((k) => low.includes(k))) return { mode: "unsupported", say: "I only generate instrumental textures — I can't create or fix vocals.", reasoning: "classified vocal" };
+  const genericFix = ["fix ", "fix the", "fix my", "fix it", "fix this", "repair", "correct the", "clean up"];
+  if (genericFix.some((k) => low.includes(k))) return { mode: "corrective", subtype: "ambiguous", tool: null, say: "I can correct the TUNING (AutoTune), TIMING (quantize), TONE (EQ) or LEVELS (OTT) — which one? Or describe the sound you want and I'll re-imagine it.", reasoning: "corrective:ambiguous" };
   const instruments = ["electric guitar", "guitar", "piano", "violin", "cello", "strings", "synth pad", "synth", "flute", "choir", "brass", "organ", "bells", "harp"];
   const cues = ["into a ", "into an ", "as a ", "as an ", "turn it into ", "make it a ", "sound like a ", "sounds like a "];
   const instr = instruments.find((i) => new RegExp(`\\b${i}\\b`).test(low));
@@ -1076,8 +1088,8 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     case "compile_render": {
       const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found");
       const r = mockCompile(str(args.instruction));
-      if (r.mode === "unsupported")   // honest boundary: mutate nothing, surface the say
-        return ok(command, { mode: "unsupported", backend: "fake", reasoning: r.reasoning, say: r.say, envelope: null });
+      if (r.mode !== "reimagine" && r.mode !== "transform")   // honest boundary: mutate nothing
+        return ok(command, { mode: r.mode, backend: "fake", reasoning: r.reasoning, say: r.say, envelope: null, subtype: r.subtype, tool: r.tool });
       pushUndo();
       const env = r.envelope!;
       f.clip.hasRenderLayer = true;

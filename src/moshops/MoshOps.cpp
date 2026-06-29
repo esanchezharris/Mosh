@@ -5058,15 +5058,21 @@ juce::var MoshOps::cmdCompileRender (const juce::var& args)
         const auto backendId = result.getProperty ("backend", "").toString();
         const auto say       = result.getProperty ("say", var()).toString();
 
-        if (mode == "unsupported")   // honest boundary — no mutation, generative-only v1
+        if (mode != "reimagine" && mode != "transform")
         {
+            // Non-render verdicts — the honest boundary. "corrective" names an EXISTING
+            // tool (moshAutoTune/eq/moshOTT/quantize_notes) the caller runs with its own
+            // track/clip context; "unsupported" (vocal/noise) declines. Either way we
+            // MUTATE NOTHING — generative-only v1 never silently re-performs the take.
             logLine ("compile_render", args, true, {}, false);
             emitSnapshotInvalidated();
             auto* d = new DynamicObject();
-            d->setProperty ("mode", "unsupported");
+            d->setProperty ("mode", mode);
             d->setProperty ("say", say);
             d->setProperty ("reasoning", reasoning);
             d->setProperty ("backend", backendId);
+            if (result.hasProperty ("subtype")) d->setProperty ("subtype", result.getProperty ("subtype", var()));
+            if (result.hasProperty ("tool"))    d->setProperty ("tool", result.getProperty ("tool", var()));
             return okResult ("compile_render", var (d));
         }
 

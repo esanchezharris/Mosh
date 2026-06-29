@@ -384,6 +384,29 @@ def check_compile_render(ctx):
     return row("Compile render (fake, generative-only)", ok, detail)
 
 
+def check_compile_corrective(ctx):
+    """L1.1 honest boundary: compile_render classifies a CORRECTIVE request, names the
+    corrective tool (AutoTune/etc.) the caller should run, and MUTATES NOTHING — no render
+    layer, no re-performed audio. Generative-only, fake-pinned, offline."""
+    SESSION = "verify-compile-corr"
+    cmds = [
+        {"command": "create_track", "args": {"name": "C"}, "capture": {"T": "trackId"}},
+        {"command": "add_test_tone_clip", "args": {"trackId": "${T}", "seconds": 1.0, "freq": 220.0}, "capture": {"C": "clipId"}},
+        {"command": "compile_render", "args": {"clipId": "${C}", "instruction": "fix the tuning, it's pitchy", "backend": "fake", "wait": True}},
+    ]
+    results, proc = run_script(ctx.bin, cmds, SESSION, extra_env={"MOSH_SERVICE_PORT": "8798"})
+    fails = failed_commands(results)
+    comp = next((r for r in results if r.get("command") == "compile_render"), None)
+    cdata = (comp or {}).get("data", {}) or {}
+    outputs = glob.glob(str(_mosh_session_base() / SESSION / "renders" / "*" / "output.wav"))
+    ok = (not fails and cdata.get("mode") == "corrective" and cdata.get("subtype") == "pitch"
+          and cdata.get("tool") == "moshAutoTune" and not outputs)   # named the tool, rendered nothing
+    return row("Compile corrective (honest boundary)", ok,
+               {"failed_commands": fails, "mode": cdata.get("mode"), "subtype": cdata.get("subtype"),
+                "tool": cdata.get("tool"), "rendered_outputs": len(outputs),
+                "stderr": proc.stderr[-300:] if not ok else ""})
+
+
 def check_full_loop(ctx):
     out = ART / "05_full_loop.wav"
     cmds = [
@@ -608,8 +631,9 @@ def check_midi_render(ctx):
                 "out_rms": out_s["rms"], "render_vs_bounce_rms": altered})
 
 
-OFFLINE_CHECKS = [check_makes_sound, check_drums, check_transform, check_compile_render, check_midi_render,
-                  check_full_loop, check_relative_ref_export, check_bypass_layer, check_render_artifact_portability]
+OFFLINE_CHECKS = [check_makes_sound, check_drums, check_transform, check_compile_render,
+                  check_compile_corrective, check_midi_render, check_full_loop,
+                  check_relative_ref_export, check_bypass_layer, check_render_artifact_portability]
 
 
 # ── main ────────────────────────────────────────────────────────────────────────

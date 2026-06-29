@@ -36,7 +36,35 @@ test("describe-it: a loose instruction compiles into a re-imagine layer", async 
   await expect(gen.getByTestId("gen-accept")).toBeEnabled();
 });
 
-test("honest boundary: a corrective request is declined, no layer created", async ({ page }) => {
+test("honest boundary: a tuning fix routes to AutoTune (one-click), no layer created", async ({ page }) => {
+  await newProject(page);
+  await addAudioTrack(page);
+  await selectTrack(page, 0);
+  await page.getByRole("button", { name: "+ Test Tone", exact: true }).click();
+
+  const gen = page.getByTestId("generative");
+  await gen.getByTestId("gen-compile-input").fill("fix the tuning, it's pitchy");
+  await gen.getByTestId("gen-compile-go").click();
+
+  // Honest redirect: it names the corrective tool (AutoTune) — corrects, doesn't re-perform.
+  const say = gen.getByTestId("gen-compile-say");
+  await expect(say).toBeVisible();
+  await expect(say).toContainText(/AutoTune/i);
+  const fix = gen.getByTestId("gen-compile-fix");
+  await expect(fix).toHaveText("Add AutoTune");
+  // No render layer was created (nothing re-performed).
+  await expect(gen.getByTestId("gen-create")).toBeVisible();
+  await expect(gen.getByTestId("gen-render")).toHaveCount(0);
+
+  // One click runs the corrective tool (load_builtin AutoTune) with no error; the
+  // affordance then resets (say + fix button clear).
+  await fix.click();
+  await expect(page.getByTestId("error")).toHaveCount(0);
+  await expect(gen.getByTestId("gen-compile-fix")).toHaveCount(0);
+  await expect(gen.getByTestId("gen-compile-say")).toHaveCount(0);
+});
+
+test("ambiguous 'fix my guitar' offers the corrective menu, no auto-action", async ({ page }) => {
   await newProject(page);
   await addAudioTrack(page);
   await selectTrack(page, 0);
@@ -46,11 +74,7 @@ test("honest boundary: a corrective request is declined, no layer created", asyn
   await gen.getByTestId("gen-compile-input").fill("fix my guitar");
   await gen.getByTestId("gen-compile-go").click();
 
-  // An honest "can't repair the take" message — and the create row is still shown
-  // (nothing was re-performed; no render layer exists).
-  const say = gen.getByTestId("gen-compile-say");
-  await expect(say).toBeVisible();
-  await expect(say).toContainText(/repair/i);
-  await expect(gen.getByTestId("gen-create")).toBeVisible();
+  await expect(gen.getByTestId("gen-compile-say")).toContainText(/AutoTune/i);
+  await expect(gen.getByTestId("gen-compile-fix")).toHaveCount(0);   // ambiguous → no single action
   await expect(gen.getByTestId("gen-render")).toHaveCount(0);
 });

@@ -67,15 +67,35 @@ check("transform strength in 0–100", 0 <= t["envelope"]["strength"] <= 100, st
 t2 = comp("turn it into a synth pad")
 check("'into a synth pad' ⇒ transform to synth pad", "synth pad" in t2["envelope"]["target"], t2["envelope"]["target"])
 
-# ── 5. honest boundary (generative-only v1): corrective + vocal ⇒ unsupported ─────
-fx = comp("fix my guitar")
-check("'fix my guitar' ⇒ unsupported", fx["mode"] == "unsupported", fx["reasoning"])
-check("corrective ⇒ null envelope (no silent re-perform)", fx["envelope"] is None)
-check("corrective ⇒ honest say", bool(fx["say"]) and "repair" in fx["say"].lower(), str(fx["say"]))
-check("'tighten the timing' ⇒ unsupported", comp("tighten the timing")["mode"] == "unsupported")
+# ── 5. honest boundary: corrective routes to the RIGHT existing tool (not a re-perform) ─
+for instr, sub, tool in [
+    ("fix the tuning", "pitch", "moshAutoTune"),
+    ("this take is pitchy", "pitch", "moshAutoTune"),
+    ("tighten the timing", "timing", "quantize_notes"),
+    ("quantize it to the grid", "timing", "quantize_notes"),
+    ("it sounds too muddy", "tone", "eq"),
+    ("the levels are uneven", "dynamics", "moshOTT"),
+]:
+    r = comp(instr)
+    check(f"[{instr}] ⇒ corrective", r["mode"] == "corrective", r["reasoning"])
+    check(f"[{instr}] ⇒ subtype {sub}", r.get("subtype") == sub, str(r.get("subtype")))
+    check(f"[{instr}] ⇒ routes to {tool}", r.get("tool") == tool, str(r.get("tool")))
+    check(f"[{instr}] ⇒ null envelope (corrects, doesn't re-perform)", r["envelope"] is None)
+    check(f"[{instr}] ⇒ honest say", bool(r["say"]))
+
+# generic 'fix' with no clear sub-type ⇒ corrective + ambiguous (offers the menu, no tool)
+amb = comp("fix my guitar")
+check("'fix my guitar' ⇒ corrective ambiguous", amb["mode"] == "corrective" and amb.get("subtype") == "ambiguous", str(amb))
+check("ambiguous ⇒ no single tool", amb.get("tool") is None)
+check("ambiguous say lists the options", "autotune" in (amb["say"] or "").lower())
+
+# vocals + noise ⇒ unsupported (genuinely out of generative capability)
 vc = comp("add a sung chorus")
 check("vocal request ⇒ unsupported", vc["mode"] == "unsupported", vc["reasoning"])
 check("vocal ⇒ instrumental-only say", "instrumental" in (vc["say"] or "").lower(), str(vc["say"]))
+nz = comp("clean up the recording, too much hiss")
+check("noise request ⇒ unsupported", nz["mode"] == "unsupported", nz["reasoning"])
+check("noise ⇒ honest say", any(k in (nz["say"] or "").lower() for k in ("noise", "hiss", "restoration")))
 
 # ── 6. R1 guard: ONLY SA3-honored keys; never cfg/steps/negative_prompt ───────────
 for instr in ["make it epic and futuristic", "make it darker", "as a piano",
