@@ -30,6 +30,7 @@ const outDir = flag("out");
 if (!outDir) { console.error("--out <dir> required"); process.exit(1); }
 const variants = Math.max(1, Number(flag("variants", "1")) || 1);
 const tierB = has("tier-b");
+const tierBOnly = has("tier-b-only");  // (c) build-from-scratch trial: empty-seed build tasks only
 
 type Note = { pitch: number; start: number; length: number; velocity: number };
 
@@ -136,7 +137,9 @@ function expand(tmpls: Tmpl[], reps: number): EvalExample[] {
   return out;
 }
 
-const rlTrain = [...expand(tierA, variants), ...(tierB ? expand(tierBTmpl, variants) : [])];
+const rlTrain = tierBOnly
+  ? expand(tierBTmpl, variants)
+  : [...expand(tierA, variants), ...(tierB ? expand(tierBTmpl, variants) : [])];
 const gate = expand(gateTmpl, 1);
 
 // ---- dump (reuse the buildRlPrompts.mts shape: prompts via buildExamplePrompt) -------------
@@ -156,11 +159,16 @@ await dumpPrompts(join(outDir, "gate.prompts.jsonl"), gate);
 
 const manifest = {
   builtBy: "buildRlAudioPrompts.mts",
-  strategy: "edit-on-top of a non-silent seed (trap/lofi); Tier-B build-from-scratch when --tier-b",
-  counts: { rlTrain: rlTrain.length, gate: gate.length, tierB: tierB ? tierBTmpl.length * variants : 0 },
-  variants, tierB,
+  strategy: tierBOnly
+    ? "Tier-B build-from-scratch ONLY (empty seed)"
+    : "edit-on-top of a non-silent seed (trap/lofi); + Tier-B build-from-scratch when --tier-b",
+  counts: { rlTrain: rlTrain.length, gate: gate.length, tierBOnly },
+  variants, tierB, tierBOnly,
 };
 writeFileSync(join(outDir, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
 
+const breakdown = tierBOnly
+  ? `tierB-only=${tierBTmpl.length * variants}`
+  : `tierA=${tierA.length * variants}${tierB ? ` + tierB=${tierBTmpl.length * variants}` : ""}`;
 console.log(`▶ build-rl-audio-prompts → ${resolve(outDir)}`);
-console.log(`  rl_train: ${rlTrain.length} (tierA=${tierA.length * variants}${tierB ? ` + tierB=${tierBTmpl.length * variants}` : ""}), gate: ${gate.length}, variants: ${variants}`);
+console.log(`  rl_train: ${rlTrain.length} (${breakdown}), gate: ${gate.length}, variants: ${variants}`);
