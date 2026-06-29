@@ -93,7 +93,8 @@ def _shift(onsets, dt: float):
 
 
 def build_triplets(anchors, pools: _Pools, mode: str = "swap", per_pair: int = 1, seed: int = 0,
-                   dt_small: float = 0.03, dt_large: float = 0.12):
+                   dt_small: float = 0.03, dt_large: float = 0.12, placebo: bool = False,
+                   max_sample_s: float = 0.0):
     """Per anchor → (anchor_id, ref, near, far) triplets with a KNOWN ordering (near closer to ref).
     mode='swap'  : timbral — replace a role's sample with a same-role neighbour (1-swap vs 2-swap).
     mode='timing': MUSICAL — hold the timbre constant (re-derive each role's base sample
@@ -140,6 +141,8 @@ def build_triplets(anchors, pools: _Pools, mode: str = "swap", per_pair: int = 1
             for r0 in roles:
                 sp = pools.pick(r0, f"{a.anchor_id}:{r0}")
                 samp = _load_sample(sp) if sp else np.zeros(int(0.4 * SR), np.float32)
+                if max_sample_s:                                # CONTROL: truncate so hits can't overlap
+                    samp = samp[:max(1, int(max_sample_s * SR))]  # at any shift → kills the peak-norm/overlap artifact
                 sd = len(samp) / SR
                 interior = [t for t in a.onsets[r0]
                             if t - dt_large >= 0.0 and (t + dt_large + sd) <= a.window_s]
@@ -149,7 +152,12 @@ def build_triplets(anchors, pools: _Pools, mode: str = "swap", per_pair: int = 1
                 ref_s = render_stem(a.onsets[r0], samp, n)
                 for sign in (1.0, -1.0):
                     near_s = render_stem(others + _shift(interior, sign * dt_small), samp, n)
-                    far_s = render_stem(others + _shift(interior, sign * dt_large), samp, n)
+                    # PLACEBO: far gets the SAME magnitude as near (opposite sign) → near/far are
+                    # symmetric about ref ⇒ NO true ordering. A genuine micro-timing model scores ~0.5
+                    # here; a model reading a non-timing artifact (sample identity / render fingerprint)
+                    # would deviate. The decisive artifact control for the synthetic→real claim.
+                    far_dt = -sign * dt_small if placebo else sign * dt_large
+                    far_s = render_stem(others + _shift(interior, far_dt), samp, n)
                     trips.append((a.anchor_id, ref_s, near_s, far_s))
         else:
             base = {r: _load_stem(a.stems[r]) for r in roles}
