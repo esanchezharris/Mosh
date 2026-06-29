@@ -35,6 +35,12 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 if str(REPO / "service") not in sys.path:
     sys.path.insert(0, str(REPO / "service"))
+# OPTIONAL: use the ACTIVATED composite reward (the sleepy-euler teardown with CompositeRewardHead
+# + composite_reward.pt). Its teardown.* must WIN on the path → insert FIRST. Env-gated, so without
+# MOSH_ACTIVATED_TEARDOWN this trainer's default behavior is byte-unchanged.
+_act = os.environ.get("MOSH_ACTIVATED_TEARDOWN")
+if _act and _act not in sys.path:
+    sys.path.insert(0, _act)
 
 
 def log(*a):
@@ -58,6 +64,17 @@ def build_reward(mode: str):
     back to floor with a loud warning (the run is then honestly floor-only)."""
     from teardown.flywheel.reward import Reward
     if mode == "musical":
+        # PREFER the ACTIVATED composite reward (raw-MuQ timbre + learned timing) when available —
+        # the validated head (beats raw CLAP on every axis). make_reward() is the §12 seam.
+        try:
+            from teardown.flywheel.grpo_bridge import make_reward
+            rw, info = make_reward()
+            if info.get("has_pull"):
+                log(f"  ✓ ACTIVATED composite reward: {info}")
+                return rw
+            log(f"  ⚠ composite pull inactive ({info}) → trying MERT head")
+        except Exception as e:
+            log(f"  ⚠ composite reward unavailable ({type(e).__name__}: {e}) → trying MERT head")
         try:
             from teardown.flywheel.reward_encoder import TrainedRewardHead
             if TrainedRewardHead.available():
