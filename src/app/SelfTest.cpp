@@ -978,6 +978,44 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (cmd (ops, "set_track_pan", objN ({{ "trackId", tid }, { "pan", 0.4 }}))), "set_track_pan ok");
         check (std::abs ((double) trackById (tid).getProperty ("pan", 0.0) - 0.4) < 0.02, "track pan reflects in snapshot");
 
+        // G14 — set_track_volume / pan (+ master) route through the UndoManager so undo
+        // restores the prior value (previously vp->setVolumeDb() bypassed it -> empty txn).
+        {
+            // Track volume: set -6 dB, undo restores 0 dB, redo re-applies -6 dB.
+            const double trackVolBefore = (double) trackById (tid).getProperty ("volumeDb", 999.0);
+            check (ok (cmd (ops, "set_track_volume", objN ({{ "trackId", tid }, { "db", -6.0 }}))), "G14: set_track_volume ok");
+            check (std::abs ((double) trackById (tid).getProperty ("volumeDb", 999.0) - (-6.0)) < 0.5, "G14: track volume applies (-6 dB)");
+            check (ok (cmd (ops, "undo")), "G14: undo set_track_volume ok");
+            check (std::abs ((double) trackById (tid).getProperty ("volumeDb", 999.0) - trackVolBefore) < 0.5, "G14: undo restores prior track volume");
+            check (ok (cmd (ops, "redo")), "G14: redo set_track_volume ok");
+            check (std::abs ((double) trackById (tid).getProperty ("volumeDb", 999.0) - (-6.0)) < 0.5, "G14: redo re-applies track volume (-6 dB)");
+            cmd (ops, "undo");   // leave the track fader where Wave 5 found it
+
+            // Track pan: undo restores the prior pan (0.4 set just above).
+            check (ok (cmd (ops, "set_track_pan", objN ({{ "trackId", tid }, { "pan", -0.7 }}))), "G14: set_track_pan ok");
+            check (std::abs ((double) trackById (tid).getProperty ("pan", 999.0) - (-0.7)) < 0.02, "G14: track pan applies (-0.7)");
+            check (ok (cmd (ops, "undo")), "G14: undo set_track_pan ok");
+            check (std::abs ((double) trackById (tid).getProperty ("pan", 999.0) - 0.4) < 0.02, "G14: undo restores prior track pan (0.4)");
+            check (ok (cmd (ops, "redo")), "G14: redo set_track_pan ok");
+            check (std::abs ((double) trackById (tid).getProperty ("pan", 999.0) - (-0.7)) < 0.02, "G14: redo re-applies track pan (-0.7)");
+
+            // Master volume: undo restores the prior master gain (-6 dB set above).
+            check (ok (cmd (ops, "set_master_volume", args1 ("db", -12.0))), "G14: set_master_volume ok");
+            check (std::abs ((double) master().getProperty ("volumeDb", 999.0) - (-12.0)) < 0.5, "G14: master volume applies (-12 dB)");
+            check (ok (cmd (ops, "undo")), "G14: undo set_master_volume ok");
+            check (std::abs ((double) master().getProperty ("volumeDb", 999.0) - (-6.0)) < 0.5, "G14: undo restores prior master volume (-6 dB)");
+            check (ok (cmd (ops, "redo")), "G14: redo set_master_volume ok");
+            check (std::abs ((double) master().getProperty ("volumeDb", 999.0) - (-12.0)) < 0.5, "G14: redo re-applies master volume (-12 dB)");
+
+            // Master pan: undo restores the prior master pan (-0.5 set above).
+            check (ok (cmd (ops, "set_master_pan", args1 ("pan", 0.3))), "G14: set_master_pan ok");
+            check (std::abs ((double) master().getProperty ("pan", 999.0) - 0.3) < 0.02, "G14: master pan applies (0.3)");
+            check (ok (cmd (ops, "undo")), "G14: undo set_master_pan ok");
+            check (std::abs ((double) master().getProperty ("pan", 999.0) - (-0.5)) < 0.02, "G14: undo restores prior master pan (-0.5)");
+            check (ok (cmd (ops, "redo")), "G14: redo set_master_pan ok");
+            check (std::abs ((double) master().getProperty ("pan", 999.0) - 0.3) < 0.02, "G14: redo re-applies master pan (0.3)");
+        }
+
         cmd (ops, "set_master_volume", args1 ("db", -3.0));   // restore a sane default
     }
 

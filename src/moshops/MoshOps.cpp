@@ -32,6 +32,43 @@ namespace
     // src/state (the RenderLayer node is an open ValueTree; an extra string property is
     // round-trip-safe through save/load and ignored by the fingerprint).
     const juce::Identifier kLandedClipId ("landedClipId");
+
+    // G14 — make a VolumeAndPanPlugin fader change UNDOABLE.
+    //
+    // vp->setVolumeDb()/setPan() route through the AutomatableParameter, whose
+    // ValueTree writeback uses a NULL UndoManager (AttachedFloatValue::handleAsyncUpdate
+    // -> CachedValue::setValue(.., nullptr)). So writing the fader inside a MoshOps
+    // transaction produced an EMPTY transaction — undo restored nothing even though the
+    // command logged undoable:true. A bare ValueTree write through the UndoManager would
+    // record the property change, but on undo Tracktion deliberately refreshes only the
+    // CachedValue and does NOT push the value back into the parameter's currentValue (the
+    // atomic getVolumeDb()/getPan() — and thus snapshot() — read). So the *setter* must
+    // run on both perform and undo. This UndoableAction does exactly that: it captures the
+    // prior value and replays the proper setter on perform/undo/redo, keeping the live
+    // parameter (and snapshot) in sync at every step. One undo system: it lives inside the
+    // edit's UndoManager transaction, grouped with the command's beginNewTransaction.
+    struct SetFaderValueAction final : public juce::UndoableAction
+    {
+        SetFaderValueAction (te::VolumeAndPanPlugin& p, bool panNotVol, float newValue)
+            : plugin (p), isPan (panNotVol), valueAfter (newValue),
+              valueBefore (panNotVol ? p.getPan() : p.getVolumeDb()) {}
+
+        bool perform() override     { apply (valueAfter);  return true; }
+        bool undo() override        { apply (valueBefore); return true; }
+        int  getSizeInUnits() override { return (int) sizeof (*this); }
+
+        void apply (float v)
+        {
+            if (isPan) plugin.setPan (v);
+            else       plugin.setVolumeDb (v);
+        }
+
+        te::VolumeAndPanPlugin& plugin;
+        const bool  isPan;
+        const float valueAfter;
+        const float valueBefore;
+    };
+
     // Tracktion's compiled-in built-in plugin palette (registered unconditionally
     // by PluginManager). These ship inside the engine — no scan, no third-party
     // dependency — so the FX palette and built-in instruments are pure surface
@@ -3454,7 +3491,8 @@ juce::var MoshOps::cmdSetTrackVolume (const juce::var& args)
     if (vp == nullptr) return errResult ("set_track_volume", "no track");
 
     beginTxn ("set_track_volume");
-    vp->setVolumeDb ((float) (double) args.getProperty ("db", 0.0));
+    // G14 — route the fader change through the UndoManager (setVolumeDb alone bypasses it).
+    undoManager().perform (new SetFaderValueAction (*vp, false, (float) (double) args.getProperty ("db", 0.0)));
     logLine ("set_track_volume", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("set_track_volume");
@@ -3468,7 +3506,9 @@ juce::var MoshOps::cmdSetTrackPan (const juce::var& args)
     if (vp == nullptr) return errResult ("set_track_pan", "no volume plugin");
 
     beginTxn ("set_track_pan");
-    vp->setPan (juce::jlimit (-1.0f, 1.0f, (float) (double) args.getProperty ("pan", 0.0)));
+    // G14 — route the pan change through the UndoManager (setPan alone bypasses it).
+    undoManager().perform (new SetFaderValueAction (*vp, true,
+        juce::jlimit (-1.0f, 1.0f, (float) (double) args.getProperty ("pan", 0.0))));
     logLine ("set_track_pan", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("set_track_pan");
@@ -3773,7 +3813,9 @@ juce::var MoshOps::cmdSetMasterVolume (const juce::var& args)
     auto mvp = eng.edit().getMasterVolumePlugin();
     if (mvp == nullptr) return errResult ("set_master_volume", "no master plugin");
     beginTxn ("set_master_volume");
-    mvp->setVolumeDb (juce::jlimit (-48.0f, 6.0f, (float) (double) args.getProperty ("db", 0.0)));
+    // G14 — route the master fader through the UndoManager (setVolumeDb alone bypasses it).
+    undoManager().perform (new SetFaderValueAction (*mvp, false,
+        juce::jlimit (-48.0f, 6.0f, (float) (double) args.getProperty ("db", 0.0))));
     logLine ("set_master_volume", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("set_master_volume");
@@ -3784,7 +3826,9 @@ juce::var MoshOps::cmdSetMasterPan (const juce::var& args)
     auto mvp = eng.edit().getMasterVolumePlugin();
     if (mvp == nullptr) return errResult ("set_master_pan", "no master plugin");
     beginTxn ("set_master_pan");
-    mvp->setPan (juce::jlimit (-1.0f, 1.0f, (float) (double) args.getProperty ("pan", 0.0)));
+    // G14 — route the master pan through the UndoManager (setPan alone bypasses it).
+    undoManager().perform (new SetFaderValueAction (*mvp, true,
+        juce::jlimit (-1.0f, 1.0f, (float) (double) args.getProperty ("pan", 0.0))));
     logLine ("set_master_pan", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("set_master_pan");
