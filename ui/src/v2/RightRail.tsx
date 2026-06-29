@@ -1,35 +1,56 @@
-// The right rail: the MOSH card (the live 3D character + a status line) and the
-// COLLABORATORS card (peers + invite). Moshi is reused verbatim — he self-wires from
-// the store, so the card just frames him. The status line narrates the agent's last
-// move (agentUtter.say) with a transport/render fallback ladder. Video tiles land in
-// the collaborators slice; this is presence + invite.
+// The right rail: the MOSH card (the minimized animated Moshi + a status line) and the
+// COLLABORATORS card (peers + invite). It's a symmetric push-dock — collapsed it's a
+// vertical pull-tab carrying a mini Moshi (so the character is always present), open it
+// expands its column. MoshBlob self-wires from the store (energy/state/voice), so the card
+// just frames him. The status line narrates the agent's last move (agentUtter.say) with a
+// transport/render fallback ladder. Video tiles land in the collaborators slice.
 
 import { useEffect } from "react";
 import { useStore } from "../store";
-import { Moshi } from "../ui/Moshi";
+import { useShell } from "./shellState";
+import { MoshBlob } from "./MoshBlob";
 import { useVideo } from "../webrtc/useVideo";
 import { VideoTile } from "../ui/VideoTile";
 import { PresenceMeter } from "./PresenceMeter";
 import { Inspector } from "./inspector/Inspector";
 
 export function RightRail() {
+  const open = useShell((s) => s.rightOpen);
+  const setOpen = useShell((s) => s.setRightOpen);
+  const toggle = useShell((s) => s.toggleRight);
+
   return (
-    <aside className="v2-rail" data-testid="v2-rail">
-      <MoshCard />
-      <Inspector />
-      <CollaboratorsCard />
-    </aside>
+    <div className={`v2-dock v2-dock-right${open ? " open" : ""}`} data-testid="v2-right-dock">
+      {open ? (
+        <aside className="v2-rail" data-testid="v2-rail">
+          <MoshCard onCollapse={() => setOpen(false)} />
+          <Inspector />
+          <CollaboratorsCard />
+        </aside>
+      ) : (
+        /* the pull-tab — a mini Moshi keeps the character present even when parked */
+        <button className="v2-dock-tab v2-dock-tab-mosh" data-testid="v2-right-pull" aria-expanded={false}
+          aria-label="Open agent panel" title="Mosh — agent · inspector · collaborators" onClick={toggle}>
+          <MoshBlob mini size={32} voice={false} />
+          <span className="v2-dock-tab-label">MOSH</span>
+        </button>
+      )}
+    </div>
   );
 }
 
-function MoshCard() {
+function MoshCard({ onCollapse }: { onCollapse: () => void }) {
   return (
     <section className="v2-card v2-mosh-card" data-testid="v2-mosh-card">
       <div className="v2-card-head">
         <span>Mosh</span>
-        <span className="v2-live"><span className="led" /> Live</span>
+        <span className="v2-mosh-head-r">
+          <span className="v2-live"><span className="led" /> Live</span>
+          <button className="v2-rail-collapse" data-testid="v2-rail-collapse" aria-label="Hide agent panel"
+            title="Hide" onClick={onCollapse}>⟩</button>
+        </span>
       </div>
-      <div className="v2-mosh-stage"><Moshi /></div>
+      <div className="v2-mosh-stage"><MoshBlob size={176} /></div>
       <MoshStatusLine />
     </section>
   );

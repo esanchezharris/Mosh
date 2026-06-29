@@ -1,7 +1,9 @@
-// The Mosh brand mark — a 5-petal Moshi flower with the "> <" face, authored inline so
-// it themes itself: the petals take the ground TEXT color (ink on cream / light on the
-// dark hero) and the face knocks out in the page GROUND color, so it reads in both
-// themes with zero assets. No raster, no network. Used in the topbar + the composer.
+// The Mosh brand mark — a tiny 5-petal Moshi flower with the "> <" squint + a lime singing
+// mouth, echoing the minimized MoshBlob in the rail. Authored inline so it themes itself:
+// the petals take the ground TEXT color (ink on cream / light on the dark hero), the eyes
+// knock out in the ground color, and the open mouth keeps the brand lime in both themes.
+// No raster, no network, no animation — the one animated mount is MoshBlob. Used in the
+// topbar + the composer.
 
 export function MoshMark({ size = 30, className }: { size?: number; className?: string }) {
   // 5 petal circles around the center (every 72°, starting at the top), overlapping into
@@ -28,18 +30,22 @@ export function MoshMark({ size = 30, className }: { size?: number; className?: 
         ))}
         <circle cx={16} cy={16} r={7} />
       </g>
-      {/* the "> <" eyes + grin, knocked out in the page (or panel) color */}
+      {/* the "> <" squint — knocked out in the page (or panel) color */}
       <g
         fill="none"
         stroke="var(--v2-mark-face, var(--v2-ground))"
-        strokeWidth={1.7}
+        strokeWidth={1.9}
         strokeLinecap="round"
         strokeLinejoin="round"
       >
-        <polyline points="12.4,13.4 14.7,15.4 12.4,17.4" />
-        <polyline points="19.6,13.4 17.3,15.4 19.6,17.4" />
-        <path d="M13 19.6 Q16 22 19 19.6" />
+        <polyline points="12.2,13.0 14.6,15.2 12.2,17.4" />
+        <polyline points="19.8,13.0 17.4,15.2 19.8,17.4" />
       </g>
+      {/* the open singing mouth — lime pop (matches MoshBlob), flat top + round bottom */}
+      <path
+        d="M13.4 18.6 L18.6 18.6 A2.6 2.6 0 0 1 13.4 18.6 Z"
+        fill="var(--v2-mark-mouth, var(--v2-accent))"
+      />
     </svg>
   );
 }

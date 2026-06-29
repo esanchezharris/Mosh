@@ -38,3 +38,27 @@ describe("v2 shellState — browser drawer", () => {
     expect(useShell.getState().browserTab).toBe("sounds");
   });
 });
+
+describe("v2 shellState — right dock (agent rail)", () => {
+  beforeEach(() => {
+    useShell.setState({ rightOpen: true });
+  });
+
+  it("defaults to open (the agent is present by default)", () => {
+    expect(useShell.getState().rightOpen).toBe(true);
+  });
+
+  it("toggleRight flips open/closed", () => {
+    useShell.getState().toggleRight();
+    expect(useShell.getState().rightOpen).toBe(false);
+    useShell.getState().toggleRight();
+    expect(useShell.getState().rightOpen).toBe(true);
+  });
+
+  it("setRightOpen sets the open state directly", () => {
+    useShell.getState().setRightOpen(false);
+    expect(useShell.getState().rightOpen).toBe(false);
+    useShell.getState().setRightOpen(true);
+    expect(useShell.getState().rightOpen).toBe(true);
+  });
+});

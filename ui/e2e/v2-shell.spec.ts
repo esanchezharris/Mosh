@@ -57,14 +57,30 @@ test("left browser drawer: pull-tab opens it, tabs switch, close dismisses", asy
   await expect(page.getByTestId("v2-browser-tab-sounds")).toHaveCount(0);
 });
 
+test("right agent dock: collapses to a mini-Moshi pull-tab and re-expands", async ({ page }) => {
+  await bootV2(page);
+  // open by default → the agent rail (with MoshBlob) is mounted
+  await expect(page.getByTestId("v2-rail")).toBeVisible();
+  await expect(page.locator('[data-testid="v2-mosh-card"]').getByTestId("v2-mosh")).toBeVisible();
+  // collapse → the rail unmounts, a pull-tab carrying a mini MoshBlob takes its place
+  await page.getByTestId("v2-rail-collapse").click();
+  await expect(page.getByTestId("v2-rail")).toHaveCount(0);
+  const pull = page.getByTestId("v2-right-pull");
+  await expect(pull).toBeVisible();
+  await expect(pull.getByTestId("v2-mosh")).toBeVisible(); // the character stays present, minimized
+  // re-expand
+  await pull.click();
+  await expect(page.getByTestId("v2-rail")).toBeVisible();
+});
+
 test("boots the v2 shell with topbar, tracks, composer and the always-on rail", async ({ page }) => {
   await bootV2(page);
   await expect(page.getByTestId("v2-topbar")).toBeVisible();
   await expect(page.getByTestId("v2-track-header")).toHaveCount(3);
   await expect(page.getByTestId("v2-composer")).toBeVisible();
-  // the agent lives "maximized" in the always-on right rail (its only live WebGL mount)
+  // the agent lives "maximized" in the right dock — the minimized animated MoshBlob (SVG)
   await expect(page.getByTestId("v2-rail")).toBeVisible();
-  await expect(page.locator('[data-testid="v2-mosh-card"] canvas')).toBeVisible();
+  await expect(page.locator('[data-testid="v2-mosh-card"]').getByTestId("v2-mosh")).toBeVisible();
 });
 
 test("the decorative glyph in the Mosh status live region is aria-hidden", async ({ page }) => {
@@ -288,7 +304,7 @@ test("with collaborators present, the right rail shows the agent + camera/invite
   await enterPeersMode(page);
   await expect(page.getByTestId("v2-rail")).toBeVisible();
   await expect(page.getByTestId("v2-mosh-card")).toBeVisible();
-  await expect(page.locator('[data-testid="v2-mosh-card"] canvas')).toBeVisible(); // Moshi GL in the rail
+  await expect(page.locator('[data-testid="v2-mosh-card"]').getByTestId("v2-mosh")).toBeVisible(); // MoshBlob in the rail
   await expect(page.getByTestId("v2-camera-toggle")).toBeVisible();
   await expect(page.getByTestId("v2-invite")).toBeVisible();
   await expect(page.getByTestId("v2-collab-peer")).toBeVisible(); // Ava
