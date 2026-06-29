@@ -112,7 +112,10 @@ def build_triplets(anchors, pools: _Pools, mode: str = "swap", per_pair: int = 1
             base_samp = {}
             for r in roles:
                 sp = pools.pick(r, f"{a.anchor_id}:{r}")          # SAME pick as project_anchors → base timbre
-                base_samp[r] = _load_sample(sp) if sp else np.zeros(int(0.4 * SR), np.float32)
+                s = _load_sample(sp) if sp else np.zeros(int(0.4 * SR), np.float32)
+                if max_sample_s:                                  # short samples → kill the within-role tail-overlap
+                    s = s[:max(1, int(max_sample_s * SR))]        # render artifact (leaves cross-role alignment, which is musical)
+                base_samp[r] = s
             base_stems = {r: render_stem(a.onsets[r], base_samp[r], n) for r in roles}
             ref = mix(base_stems)
             for r0 in roles:

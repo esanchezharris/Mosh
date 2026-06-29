@@ -250,12 +250,17 @@ def main(argv=None) -> int:
     from teardown.flywheel.reward_encoder import MertEncoder, MuQEncoder
     base_enc = {"muq": MuQEncoder, "mert": MertEncoder}[base]()
     print("  embedding raw CLAP + raw base (frozen) for baselines/projection…", flush=True)
+    from teardown.flywheel.keystone import GlobalStatEncoder
     clap_test = _emb_rows(ClapEmb(), test_trips)
     fit_rows = _emb_rows(base_enc, fit_trips)
     val_rows = _emb_rows(base_enc, val_trips)
     test_rows = _emb_rows(base_enc, test_trips)
     clap_raw = ordering_accuracy([e for _, e in clap_test])
     base_raw = ordering_accuracy([e for _, e in test_rows])
+    # gstat = trivial global-stat FLOOR on the real test (how much a non-musical detector gets).
+    # In-mix: gstat>0.5 is partly MUSICAL (element re-alignment changes the energy envelope); the
+    # honest bar is LoRA > CLAP AND LoRA ≫ gstat (captures structure beyond the trivial floor).
+    gstat_raw = ordering_accuracy([e for _, e in _emb_rows(GlobalStatEncoder(), test_trips)])
     d_in = fit_rows[0][1][0].shape[0]
 
     # rung-1: projection trained on synth-FIT, model-selected on synth-VAL, eval real-TEST
@@ -301,6 +306,7 @@ def main(argv=None) -> int:
     lora_lo, lora_hi = clustered_ci(lora_ok)
 
     print(f"\n  ── §11 FINE-TUNE RUNG 1+2 [{base}, {mode}] synthetic-TRAIN / real-TEST ({len(uniq)} test sources) ──")
+    print(f"    gstat floor (trivial)          {gstat_raw:.4f}")
     print(f"    raw CLAP                       {clap_raw:.4f}")
     print(f"    raw {base:24}  {base_raw:.4f}")
     print(f"    {base} φ-proj (rung 1)   test {proj_test:.4f}  (val {proj_val:.4f} / train {proj_train:.4f})")
