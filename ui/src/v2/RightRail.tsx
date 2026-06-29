@@ -1,14 +1,15 @@
-// The right rail: the MOSH card (the minimized animated Moshi + a status line) and the
+// The right rail: the MOSH card (the live WebGL character + a status line) and the
 // COLLABORATORS card (peers + invite). It's a symmetric push-dock — collapsed it's a
-// vertical pull-tab carrying a mini Moshi (so the character is always present), open it
-// expands its column. MoshBlob self-wires from the store (energy/state/voice), so the card
-// just frames him. The status line narrates the agent's last move (agentUtter.say) with a
-// transport/render fallback ladder. Video tiles land in the collaborators slice.
+// vertical pull-tab carrying the minimized Moshi mark (so the character is always present),
+// open it expands its column. Moshi self-wires from the store, so the card just frames him.
+// The status line narrates the agent's last move (agentUtter.say) with a transport/render
+// fallback ladder. Video tiles land in the collaborators slice.
 
 import { useEffect } from "react";
 import { useStore } from "../store";
 import { useShell } from "./shellState";
-import { MoshBlob } from "./MoshBlob";
+import { Moshi } from "../ui/Moshi";
+import { MoshMark } from "./MoshMark";
 import { useVideo } from "../webrtc/useVideo";
 import { VideoTile } from "../ui/VideoTile";
 import { PresenceMeter } from "./PresenceMeter";
@@ -28,10 +29,10 @@ export function RightRail() {
           <CollaboratorsCard />
         </aside>
       ) : (
-        /* the pull-tab — a mini Moshi keeps the character present even when parked */
+        /* the pull-tab — the minimized Moshi keeps the character present even when parked */
         <button className="v2-dock-tab v2-dock-tab-mosh" data-testid="v2-right-pull" aria-expanded={false}
           aria-label="Open agent panel" title="Mosh — agent · inspector · collaborators" onClick={toggle}>
-          <MoshBlob mini size={32} voice={false} />
+          <MoshMark size={30} />
           <span className="v2-dock-tab-label">MOSH</span>
         </button>
       )}
@@ -50,7 +51,7 @@ function MoshCard({ onCollapse }: { onCollapse: () => void }) {
             title="Hide" onClick={onCollapse}>⟩</button>
         </span>
       </div>
-      <div className="v2-mosh-stage"><MoshBlob size={176} /></div>
+      <div className="v2-mosh-stage"><Moshi /></div>
       <MoshStatusLine />
     </section>
   );

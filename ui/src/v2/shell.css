@@ -49,15 +49,6 @@
   --v2-shadow: 0 18px 50px rgba(0, 0, 0, 0.6);
   --v2-glow: 0 0 0 1px var(--v2-line), inset 0 1px 0 rgba(255, 255, 255, 0.03);
 
-  /* ── the minimized Moshi (MoshBlob) — pale glossy body on the dark hero, dark squint
-       eyes, lime singing mouth. The cream theme flips the body dark + eyes light. ── */
-  --v2-blob-1: #f5f5ef;             /* body gradient top (gloss) */
-  --v2-blob-2: #cfcfc6;             /* body gradient bottom */
-  --v2-blob-ink: #16160f;           /* the > < eyes + face strokes */
-  --v2-blob-hi: rgba(255, 255, 255, 0.55);
-  --v2-blob-mouth: var(--v2-accent);
-  --v2-blob-throat: #16160f;
-
   /* ── ground: the page the chrome floats on (logo, transport pill, time card, invite/⋯,
        avatars). In the dark hero the ground IS dark, so these alias the dark surfaces; the
        light/cream theme overrides them — page goes cream, panels stay dark. ── */
@@ -118,9 +109,6 @@
   --v2-ground-card: #fffdf6;
   --v2-ground-line: rgba(34, 26, 12, 0.14);
   --v2-ground-line-strong: rgba(34, 26, 12, 0.26);
-  /* NOTE: MoshBlob keeps the pale-glossy body in BOTH themes — it always sits on the dark
-     rail card (panels stay dark on cream), so the --v2-blob-* tokens are NOT overridden here.
-     (A dark blob would vanish into the dark card.) */
 }
 
 /* generic card surface */
@@ -512,26 +500,13 @@
   color: var(--v2-faint); font-size: 13px; line-height: 1; transition: color 120ms, border-color 120ms, background 120ms;
 }
 .v2-rail-collapse:hover { color: var(--v2-text); border-color: var(--v2-line); background: var(--v2-surface-sunken); }
-/* the agent is "maximized" — a tall, prominent stage at the top of the rail. MoshBlob sits
-   DIRECTLY on the dark card (transparent — no light "egg" pod) like the concept. */
-.v2-mosh-stage { display: grid; place-items: center; padding: 10px 0 6px; min-height: 188px; }
+/* the agent is "maximized" — a tall, prominent stage at the top of the rail. The live WebGL
+   Moshi sits DIRECTLY on the dark card (transparent mount — no light "egg" pod) like the concept. */
+.v2-mosh-stage { display: grid; place-items: center; padding: 8px 0 4px; }
+.v2-shell .v2-mosh-stage .moshi-dock { width: 100%; border-left: none; background: transparent; padding: 4px; }
+.v2-shell .v2-mosh-stage .moshi-mount { min-height: 188px; background: transparent; box-shadow: none; }
 .v2-mosh-status { display: flex; align-items: center; gap: 8px; padding: 4px 14px 0; color: var(--v2-dim); font-size: 12px; }
 .v2-mosh-status .wave { color: var(--v2-accent); }
-
-/* ── the minimized Moshi (MoshBlob) — SVG body whose face animates from CSS vars the rAF
-     in MoshBlob.tsx writes (eye/mouth scaleY, breathing bob/scale, gaze drift, rec glow). ── */
-.v2-blob { display: block; line-height: 0; filter: drop-shadow(0 8px 16px rgba(0, 0, 0, 0.35)); }
-.v2-blob svg { display: block; width: 100%; height: 100%; overflow: visible; }
-.v2-blob .v2-blob-all {
-  transform-box: fill-box; transform-origin: 50% 56%;
-  transform: translateY(calc(var(--mosh-bob, 0) * 1px)) scale(var(--mosh-scale, 1));
-}
-.v2-blob .v2-blob-face { transform: translate(calc(var(--mosh-gx, 0) * 1px), calc(var(--mosh-gy, 0) * 1px)); }
-.v2-blob .v2-blob-eyes { transform-box: fill-box; transform-origin: 50% 50%; transform: scaleY(var(--mosh-eye, 1)); }
-.v2-blob .v2-blob-mouth { transform-box: fill-box; transform-origin: 50% 0%; transform: scaleY(var(--mosh-mouth, 0.5)); }
-/* recording tints the gloss shadow red (var written by the rAF) */
-.v2-blob[data-state="rec"] { filter: drop-shadow(0 8px 16px rgba(0, 0, 0, 0.35)) drop-shadow(0 0 calc(10px * var(--mosh-rec, 0)) rgba(255, 59, 92, 0.75)); }
-.v2-blob.mini { filter: drop-shadow(0 2px 5px rgba(0, 0, 0, 0.3)); }
 
 /* contextual inspector */
 .v2-insp-tabs { display: flex; gap: 3px; padding: 8px 12px 0; flex-wrap: wrap; }
@@ -656,7 +631,8 @@
 .v2-dock-tab:hover { color: var(--v2-accent); border-color: var(--v2-accent); }
 .v2-dock-tab:focus-visible { outline: 2px solid var(--v2-accent); outline-offset: 2px; }
 .v2-dock-tab-label { writing-mode: vertical-rl; text-orientation: mixed; transform: rotate(180deg); font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; }
-.v2-dock-tab-mosh .v2-blob { width: 32px; height: 32px; }
+/* the agent tab carries the minimized Moshi — pale-bodied so it reads on the dark tab */
+.v2-dock-tab-mosh .v2-mark { --v2-mark-fill: var(--v2-text); --v2-mark-face: var(--v2-surface-2); }
 
 /* error + drop overlay (reuse legacy semantics, restyled) */
 .v2-errbar { margin: 0 14px; padding: 7px 14px; background: rgba(255, 71, 106, 0.14); color: #ffb3c1; border: 1px solid rgba(255, 71, 106, 0.4); border-radius: 10px; font-size: 12px; }

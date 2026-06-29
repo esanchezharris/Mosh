@@ -1,51 +1,48 @@
-// The Mosh brand mark — a tiny 5-petal Moshi flower with the "> <" squint + a lime singing
-// mouth, echoing the minimized MoshBlob in the rail. Authored inline so it themes itself:
-// the petals take the ground TEXT color (ink on cream / light on the dark hero), the eyes
-// knock out in the ground color, and the open mouth keeps the brand lime in both themes.
-// No raster, no network, no animation — the one animated mount is MoshBlob. Used in the
-// topbar + the composer.
+// The Mosh brand mark — the minimized Moshi: a glossy 5-petal splat with a "> <" squint
+// and a lime open singing mouth (the concept art). Authored inline so it themes itself via
+// overridable vars: the body takes --v2-mark-fill (defaults to the ground TEXT color so it
+// contrasts the page — a dark blob on cream, a pale blob on the dark hero), the eyes + throat
+// knock out in --v2-mark-face (the ground/panel color), and the mouth keeps the brand lime.
+// Static (the one animated mount is the WebGL Moshi in the rail). Used in the topbar top-left,
+// the composer prompt bar, and the collapsed agent-dock tab.
 
 export function MoshMark({ size = 30, className }: { size?: number; className?: string }) {
-  // 5 petal circles around the center (every 72°, starting at the top), overlapping into
-  // a rounded flower. Centers precomputed so the SVG is static markup.
-  const petals = [
-    [16, 9.5],
-    [22.18, 14.0],
-    [19.82, 21.26],
-    [12.18, 21.26],
-    [9.82, 14.0],
-  ] as const;
   return (
     <svg
       className={`v2-mark${className ? ` ${className}` : ""}`}
       width={size}
       height={size}
-      viewBox="0 0 32 32"
+      viewBox="-10 -10 140 140"
       role="img"
       aria-label="Mosh"
     >
-      <g fill="var(--v2-mark-fill, var(--v2-ground-text))">
-        {petals.map(([cx, cy], i) => (
-          <circle key={i} cx={cx} cy={cy} r={7} />
-        ))}
-        <circle cx={16} cy={16} r={7} />
-      </g>
+      {/* the 5-petal splat body (smooth quadratic lobes) */}
+      <path
+        d="M80 32.5 Q122.8 39.6 92.3 70.5 Q98.8 113.4 60 94 Q21.2 113.4 27.7 70.5 Q-2.8 39.6 40 32.5 Q60 -6 80 32.5 Z"
+        fill="var(--v2-mark-fill, var(--v2-ground-text))"
+      />
+      {/* soft gloss highlight */}
+      <path
+        d="M34 30 Q46 20 66 23"
+        fill="none"
+        stroke="var(--v2-mark-hi, rgba(255, 255, 255, 0.4))"
+        strokeWidth="3"
+        strokeLinecap="round"
+      />
       {/* the "> <" squint — knocked out in the page (or panel) color */}
       <g
         fill="none"
         stroke="var(--v2-mark-face, var(--v2-ground))"
-        strokeWidth={1.9}
+        strokeWidth="6.5"
         strokeLinecap="round"
         strokeLinejoin="round"
       >
-        <polyline points="12.2,13.0 14.6,15.2 12.2,17.4" />
-        <polyline points="19.8,13.0 17.4,15.2 19.8,17.4" />
+        <polyline points="50,52 57,58.5 50,65" />
+        <polyline points="70,52 63,58.5 70,65" />
       </g>
-      {/* the open singing mouth — lime pop (matches MoshBlob), flat top + round bottom */}
-      <path
-        d="M13.4 18.6 L18.6 18.6 A2.6 2.6 0 0 1 13.4 18.6 Z"
-        fill="var(--v2-mark-mouth, var(--v2-accent))"
-      />
+      {/* the open singing mouth — lime pop, flat top + round bottom, with a knocked-out throat */}
+      <path d="M47 72 L73 72 A13 13 0 0 1 47 72 Z" fill="var(--v2-mark-mouth, var(--v2-accent))" />
+      <ellipse cx="60" cy="83" rx="5.6" ry="4.4" fill="var(--v2-mark-face, var(--v2-ground))" />
     </svg>
   );
 }
