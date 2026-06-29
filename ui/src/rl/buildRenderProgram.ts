@@ -34,6 +34,11 @@ export type RunScriptLine = {
 export type RenderProgram = {
   /** native run-script lines: resolved startCommands + remapped reply + export_audio */
   lines: RunScriptLine[];
+  /** the SEED-alone program: resolved startCommands + export_audio, WITHOUT the policy's edit.
+   *  For delta-reward (composite(seed+edit) − composite(seed)) so banking the seed scores ~0 and
+   *  only a genuine improvement (or breakage) moves the reward. Identical across a prompt's rollouts
+   *  (same startCommands) → the scorer's program-fingerprint cache renders it once per prompt. */
+  seedLines: RunScriptLine[];
   /** true when the policy emitted no commands (the "acts-shy" failure → reward 0, no render) */
   deferred: boolean;
   /** non-fatal notes (unresolved id refs left verbatim) — surfaced in the reward feedback */
@@ -71,7 +76,7 @@ export async function buildRenderProgram(
   const reply = (parseReply(replyContent).commands ?? []).map(
     (c): BoundCommand => ({ command: c.command, args: c.args ?? {} }),
   );
-  if (reply.length === 0) return { lines: [], deferred: true, warnings: [] };
+  if (reply.length === 0) return { lines: [], seedLines: [], deferred: true, warnings: [] };
 
   // 1) replay startCommands through the mock exactly as the prompt was built → env: bind→mockId
   __resetMockForTests();
@@ -82,6 +87,10 @@ export async function buildRenderProgram(
 
   // 2) startCommands → native lines (bind→capture, $ref→${ref})
   const lines: RunScriptLine[] = ex.startCommands.map(startToLine);
+  // the seed-alone program (startCommands + export, no edit) for delta-reward; exports to a
+  // sibling .seed.wav. The program-fingerprint cache (export path stripped) renders it once/prompt.
+  const seedWav = outWav.replace(/\.wav$/i, ".seed.wav");
+  const seedLines: RunScriptLine[] = [...lines, { command: "export_audio", args: { file: seedWav, format } }];
 
   // 3) reply → native lines, remapping id-typed args that point at a startCommand-created id
   const warnings: string[] = [];
@@ -101,5 +110,5 @@ export async function buildRenderProgram(
   }
 
   lines.push({ command: "export_audio", args: { file: outWav, format } });
-  return { lines, deferred: false, warnings };
+  return { lines, seedLines, deferred: false, warnings };
 }

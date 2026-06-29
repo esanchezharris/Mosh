@@ -86,6 +86,9 @@ def musical_decomposition(work: str):
         rows = [json.loads(l) for l in open(p) if l.strip()]
     except Exception:
         return None
+    # delta-reward subtracts the seed (feedback starts with "delta"/"seed_"), so within-group SPREAD
+    # is itself edit-quality — there is no seed-banking floor to discount.
+    is_delta = any(str(r.get("feedback", "")).startswith(("delta", "seed_render_fail")) for r in rows)
     groups = collections.defaultdict(list)
     for r in rows:
         parts = str(r.get("sampleId", "")).split("_")
@@ -96,18 +99,22 @@ def musical_decomposition(work: str):
     musical = renderability = novar = 0
     detail = []
     for k, rewards in sorted(groups.items()):
-        pos = [x for x in rewards if x > 0]
-        pos_spread = (max(pos) - min(pos)) if len(pos) >= 2 else 0.0
         all_spread = (max(rewards) - min(rewards)) if rewards else 0.0
-        if pos_spread > MUSICAL_MARGIN:
-            musical += 1
-            tag = "MUSICAL"
-        elif all_spread > 1e-6:
-            renderability += 1
-            tag = "renderability-only"
+        if is_delta:
+            # every delta reward is (edit − seed); a within-group spread = the policy's edits differ in quality
+            if all_spread > MUSICAL_MARGIN:
+                musical += 1; tag = "MUSICAL(delta)"
+            else:
+                novar += 1; tag = "no-var"
         else:
-            novar += 1
-            tag = "no-var"
+            pos = [x for x in rewards if x > 0]
+            pos_spread = (max(pos) - min(pos)) if len(pos) >= 2 else 0.0
+            if pos_spread > MUSICAL_MARGIN:
+                musical += 1; tag = "MUSICAL"
+            elif all_spread > 1e-6:
+                renderability += 1; tag = "renderability-only"
+            else:
+                novar += 1; tag = "no-var"
         detail.append(f"    {'_'.join(k)}: {sorted(rewards)} → {tag}")
     return musical, renderability, novar, "\n".join(detail)
 

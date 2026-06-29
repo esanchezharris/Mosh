@@ -98,6 +98,9 @@ def main():
     ap.add_argument("--cache", default="", help="persistent fingerprint cache json (optional)")
     ap.add_argument("--range-s", type=float, default=10.0, help="render window seconds")
     ap.add_argument("--timeout-s", type=int, default=120)
+    ap.add_argument("--delta", action="store_true",
+                    help="reward = composite(seed+edit) − composite(seed); each item must carry seedProgram. "
+                         "Banking the seed → ~0; only a genuine improvement (or breakage) moves the reward.")
     a = ap.parse_args()
 
     from teardown.oracle.render import Oracle
@@ -115,38 +118,63 @@ def main():
         except Exception:
             cache = {}
 
-    items = [json.loads(l) for l in Path(a.batch).read_text().splitlines() if l.strip()]
-    out_lines = []
-    hits = renders = fails = 0
-    for it in items:
-        sid = it["sampleId"]
-        program = it["program"]
+    stats = {"renders": 0, "hits": 0, "fails": 0}
+
+    def score_program(program, session):
+        """Render+score one program → (composite|None, feedback). Uses the fingerprint cache (so an
+        identical program — e.g. a shared seed across a prompt's rollouts — renders once). None = render failed."""
         fp = program_fingerprint(program)
         if fp in cache:
-            hits += 1
+            stats["hits"] += 1
             c = cache[fp]
-            out_lines.append({"sampleId": sid, "reward": c["reward"], "deferred": False, "feedback": c.get("feedback", "cache")})
-            continue
-        # unique session per render so concurrent/serial rollouts never share engine state
-        os.environ["MOSH_SELFTEST_SESSION"] = f"rl_{sid}"
+            return c["reward"], c.get("feedback", "cache")
+        os.environ["MOSH_SELFTEST_SESSION"] = session  # unique session so rollouts never share engine state
         try:
-            y, sr = oracle.render([dict(c) for c in program], out_wav=it.get("wav"))
+            y, sr = oracle.render([dict(c) for c in program])  # program carries its own export_audio target
             scores = reward.score_audio(y, sr)
             r = reward.composite(scores)
-            renders += 1
-            fb = "ok " + ",".join(f"{k}={round(v,2)}" for k, v in scores.items())
+            stats["renders"] += 1
+            fb = "ok " + ",".join(f"{k}={round(v, 2)}" for k, v in scores.items())
             cache[fp] = {"reward": r, "feedback": fb}
-            out_lines.append({"sampleId": sid, "reward": r, "deferred": False, "feedback": fb})
+            return r, fb
         except Exception as e:
-            fails += 1
-            # render failure (a command in the rollout failed, or empty/broken WAV) = the policy
-            # acted but produced unrenderable audio → reward 0, NOT a deferral.
-            out_lines.append({"sampleId": sid, "reward": 0.0, "deferred": False, "feedback": f"render_fail: {str(e)[:160]}"})
+            stats["fails"] += 1
+            return None, f"render_fail: {str(e)[:140]}"
+
+    items = [json.loads(l) for l in Path(a.batch).read_text().splitlines() if l.strip()]
+    out_lines = []
+    for it in items:
+        sid = it["sampleId"]
+        full_r, full_fb = score_program(it["program"], f"rl_{sid}")
+        if not a.delta:
+            # absolute composite: a render failure (policy acted but produced no/broken audio) = reward 0.
+            out_lines.append({"sampleId": sid, "reward": full_r if full_r is not None else 0.0,
+                              "deferred": False, "feedback": full_fb})
+            continue
+        # delta = composite(seed+edit) − composite(seed): banking the seed → ~0, improvement → +, breakage → −
+        seed_prog = it.get("seedProgram")
+        if not seed_prog:
+            out_lines.append({"sampleId": sid, "reward": full_r if full_r is not None else 0.0,
+                              "deferred": False, "feedback": f"delta_no_seed → absolute; {full_fb}"})
+            continue
+        seed_r, seed_fb = score_program(seed_prog, f"rl_{sid}_seed")
+        if seed_r is None:
+            # the seed itself didn't render (broken startCommands) → delta undefined; fall back to absolute
+            out_lines.append({"sampleId": sid, "reward": full_r if full_r is not None else 0.0,
+                              "deferred": False, "feedback": f"seed_render_fail({seed_fb[:60]}) → absolute; {full_fb}"})
+        elif full_r is None:
+            # the EDIT broke a working seed (no/broken audio) → strong negative: 0 − seed
+            out_lines.append({"sampleId": sid, "reward": round(-seed_r, 4), "deferred": False,
+                              "feedback": f"delta edit-broke: 0−{round(seed_r,3)}; {full_fb}"})
+        else:
+            out_lines.append({"sampleId": sid, "reward": round(full_r - seed_r, 4), "deferred": False,
+                              "feedback": f"delta {round(full_r,3)}−{round(seed_r,3)}={round(full_r-seed_r,4)}"})
 
     Path(a.out).write_text("\n".join(json.dumps(o) for o in out_lines) + "\n")
     if cache_path:
         cache_path.write_text(json.dumps(cache))
-    log(f"  audio-reward: {len(items)} rollouts | {renders} rendered, {hits} cache-hit, {fails} render-fail → {a.out}")
+    log(f"  audio-reward{'(delta)' if a.delta else ''}: {len(items)} rollouts | "
+        f"{stats['renders']} rendered, {stats['hits']} cache-hit, {stats['fails']} render-fail → {a.out}")
 
 
 if __name__ == "__main__":

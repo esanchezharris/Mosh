@@ -55,7 +55,10 @@ mkdirSync(work, { recursive: true });
 
 type Reward = { sampleId: string; reward: number; deferred: boolean; feedback: string };
 const deferredOut: Reward[] = [];
-const batch: { sampleId: string; program: unknown[]; wav: string }[] = [];
+// delta-reward = composite(seed+edit) − composite(seed): pass the seed-alone program so the scorer
+// subtracts the seed's score (banking the seed → ~0). Env-gated; default = absolute composite.
+const delta = process.env.MOSH_RL_REWARD_DELTA === "1";
+const batch: { sampleId: string; program: unknown[]; wav: string; seedProgram?: unknown[] }[] = [];
 
 for (const r of rollouts) {
   const ex = byId.get(r.exId);
@@ -65,7 +68,7 @@ for (const r of rollouts) {
   if (prog.deferred) {
     deferredOut.push({ sampleId: r.sampleId, reward: 0, deferred: true, feedback: `DEFERRED on "${ex.utterance}"` });
   } else {
-    batch.push({ sampleId: r.sampleId, program: prog.lines, wav });
+    batch.push({ sampleId: r.sampleId, program: prog.lines, wav, ...(delta ? { seedProgram: prog.seedLines } : {}) });
   }
 }
 
@@ -78,7 +81,7 @@ if (batch.length > 0) {
   execFileSync(
     teardownPy(),
     [join(SERVICE, "rl", "score_audio_cli.py"), "--batch", batchPath, "--out", partialPath,
-      "--reward", mode, "--cache", join(work, "render_cache.json")],
+      "--reward", mode, "--cache", join(work, "render_cache.json"), ...(delta ? ["--delta"] : [])],
     { stdio: ["ignore", "inherit", "inherit"], env: { ...process.env, PYTHONPATH: SERVICE } },
   );
   for (const l of readFileSync(partialPath, "utf8").split("\n")) {

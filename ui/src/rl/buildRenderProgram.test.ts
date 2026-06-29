@@ -25,7 +25,21 @@ async function mockIdsFor(start: BoundCommand[]): Promise<Map<string, string>> {
 describe("buildRenderProgram", () => {
   it("defers (no render) on an empty reply", async () => {
     const r = await buildRenderProgram(ex([]), reply([]), OUT);
-    expect(r).toEqual({ lines: [], deferred: true, warnings: [] });
+    expect(r).toEqual({ lines: [], seedLines: [], deferred: true, warnings: [] });
+  });
+
+  it("emits seedLines = startCommands + export(.seed.wav), WITHOUT the edit (delta-reward baseline)", async () => {
+    const start: BoundCommand[] = [
+      { command: "create_track", args: { name: "Drums", type: "drum" }, bind: "t0" },
+      { command: "add_midi_clip", args: { trackId: "$t0", start: 0, notes: [{ pitch: 36, start: 0, length: 0.5, velocity: 120 }] }, bind: "c0" },
+    ];
+    const r = await buildRenderProgram(ex(start), reply([{ command: "set_track_volume", args: { trackId: "$t0", db: 2 } }]), OUT);
+    // seedLines: the two startCommands (translated) + an export to the sibling .seed.wav — NO reply command
+    expect(r.seedLines.map((l) => l.command)).toEqual(["create_track", "add_midi_clip", "export_audio"]);
+    expect(r.seedLines.at(-1)).toEqual({ command: "export_audio", args: { file: "/tmp/rl/o.seed.wav", format: "wav" } });
+    expect(r.seedLines.some((l) => l.command === "set_track_volume")).toBe(false);
+    // full lines DO include the edit, and the seed is a strict prefix (minus exports)
+    expect(r.lines.some((l) => l.command === "set_track_volume")).toBe(true);
   });
 
   it("translates startCommands: bind→capture, $ref→${ref}", async () => {
