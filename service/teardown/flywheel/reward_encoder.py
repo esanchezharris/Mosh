@@ -29,15 +29,49 @@ def _have_torch() -> bool:
         return False
 
 
+def _have_muq() -> bool:
+    try:
+        import muq  # noqa: F401
+        return _have_torch()
+    except Exception:
+        return False
+
+
+def _device() -> str:
+    import torch
+    return "mps" if torch.backends.mps.is_available() else (
+        "cuda" if torch.cuda.is_available() else "cpu")
+
+
 @functools.lru_cache(maxsize=2)
 def _load_mert(model_name: str = MERT_MODEL):
-    import torch
+    import torch  # noqa: F401
     from transformers import AutoModel
 
-    device = "mps" if torch.backends.mps.is_available() else (
-        "cuda" if torch.cuda.is_available() else "cpu")
+    device = _device()
     model = AutoModel.from_pretrained(model_name, trust_remote_code=True)
     model.eval().to(device)
+    return model, device
+
+
+MUQ_SSL_MODEL = "OpenMuQ/MuQ-large-msd-iter"
+MUQ_MULAN_MODEL = "OpenMuQ/MuQ-MuLan-large"
+MUQ_SR = 24000
+
+
+@functools.lru_cache(maxsize=2)
+def _load_muq(model_name: str = MUQ_SSL_MODEL):
+    from muq import MuQ
+    device = _device()
+    model = MuQ.from_pretrained(model_name).eval().to(device)
+    return model, device
+
+
+@functools.lru_cache(maxsize=2)
+def _load_mulan(model_name: str = MUQ_MULAN_MODEL):
+    from muq import MuQMuLan
+    device = _device()
+    model = MuQMuLan.from_pretrained(model_name).eval().to(device)
     return model, device
 
 
@@ -87,6 +121,108 @@ class MertEncoder:
             v = vec.detach().cpu().numpy().astype(np.float32)
         n = float(np.linalg.norm(v)) or 1.0
         return v / n
+
+    def embed_layers(self, audio, sr: int = 44100) -> np.ndarray:
+        """Per-layer pooled (mean over time), each L2-normalized → (L, H). For layer-selection
+        analysis (the mean-over-all-layers `embed` can be suboptimal — best layer varies)."""
+        import torch
+
+        if isinstance(audio, tuple):
+            audio, sr = audio
+        x = np.asarray(audio, dtype=np.float32)
+        if x.ndim > 1:
+            x = x.mean(axis=-1)
+        x = _resample(x, sr, MERT_SR)
+        peak = float(np.max(np.abs(x))) or 1.0
+        x = x / peak
+        model, device = _load_mert(self.model_name)
+        with torch.no_grad():
+            t = torch.from_numpy(x).float().unsqueeze(0).to(device)
+            out = model(t, output_hidden_states=True)
+            stacked = torch.stack(out.hidden_states, dim=0)      # (L, 1, T, H)
+            mat = stacked.mean(dim=2).squeeze(1).cpu().numpy().astype(np.float32)  # (L, H)
+        norms = np.linalg.norm(mat, axis=1, keepdims=True)
+        norms[norms == 0] = 1.0
+        return mat / norms
+
+
+class MuQEncoder:
+    """Frozen MuQ (music SSL, MuQ-large-msd-iter) → fixed embedding behind the same shape as MERT.
+    Mean over hidden-state layers + time by default; `embed_layers` exposes per-layer for selection."""
+
+    name = "muq"
+
+    def __init__(self, model_name: str = MUQ_SSL_MODEL, layer: str = "mean") -> None:
+        self.model_name = model_name
+        self.layer = layer
+        self.version = f"muq-large-{layer}-v1"
+
+    @staticmethod
+    def available() -> bool:
+        return _have_muq()
+
+    def _layers(self, audio, sr: int) -> np.ndarray:
+        """(L, H) per-layer time-pooled hidden states (un-normalized)."""
+        import torch
+
+        if isinstance(audio, tuple):
+            audio, sr = audio
+        x = np.asarray(audio, dtype=np.float32)
+        if x.ndim > 1:
+            x = x.mean(axis=-1)
+        x = _resample(x, sr, MUQ_SR)
+        peak = float(np.max(np.abs(x))) or 1.0
+        x = x / peak
+        model, device = _load_muq(self.model_name)
+        with torch.no_grad():
+            t = torch.from_numpy(x).float().unsqueeze(0).to(device)
+            out = model(t, output_hidden_states=True)
+            stacked = torch.stack(out.hidden_states, dim=0)      # (L, 1, T, H)
+            return stacked.mean(dim=2).squeeze(1).cpu().numpy().astype(np.float32)  # (L, H)
+
+    def embed(self, audio, sr: int = 44100) -> np.ndarray:
+        v = self._layers(audio, sr).mean(axis=0)                 # mean over layers → (H,)
+        n = float(np.linalg.norm(v)) or 1.0
+        return (v / n).astype(np.float32)
+
+    def embed_layers(self, audio, sr: int = 44100) -> np.ndarray:
+        mat = self._layers(audio, sr)
+        norms = np.linalg.norm(mat, axis=1, keepdims=True)
+        norms[norms == 0] = 1.0
+        return mat / norms
+
+
+class MuQMuLanEncoder:
+    """MuQ-MuLan audio tower (contrastive text↔audio — the direct CLAP analog, 512-d). The most
+    promising raw CLAP-challenger: its embedding space is contrastively organized like CLAP's."""
+
+    name = "muq-mulan"
+
+    def __init__(self, model_name: str = MUQ_MULAN_MODEL) -> None:
+        self.model_name = model_name
+        self.version = "muq-mulan-large-v1"
+
+    @staticmethod
+    def available() -> bool:
+        return _have_muq()
+
+    def embed(self, audio, sr: int = 44100) -> np.ndarray:
+        import torch
+
+        if isinstance(audio, tuple):
+            audio, sr = audio
+        x = np.asarray(audio, dtype=np.float32)
+        if x.ndim > 1:
+            x = x.mean(axis=-1)
+        x = _resample(x, sr, MUQ_SR)
+        peak = float(np.max(np.abs(x))) or 1.0
+        x = x / peak
+        model, device = _load_mulan(self.model_name)
+        with torch.no_grad():
+            t = torch.from_numpy(x).float().unsqueeze(0).to(device)
+            v = model(wavs=t)[0].cpu().numpy().astype(np.float32)  # (512,) audio embedding
+        n = float(np.linalg.norm(v)) or 1.0
+        return (v / n).astype(np.float32)
 
 
 HEAD_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "reward_head.json")
