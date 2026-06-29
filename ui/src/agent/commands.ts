@@ -105,7 +105,7 @@ export const AGENT_COMMANDS: AgentCommand[] = [
 
   // ── lyrics (Finish My Song) ───────────────────────────────────────────────
   { command: "create_lyric_sheet", desc: "Start a per-track lyric sheet for lyric completion (the vocal track)", args: [S("trackId"), S("grid", false, '"1/4"|"1/8"|"1/16" — bar subdivision for syllable inference'), S("language", false), S("topic", false), S("mood", false), S("explicit", false, '"allow"|"clean"|"mild"')] },
-  { command: "set_lyric_constraint", desc: "Set sheet-level lyric constraints (grid/topic/mood/explicit/default rhyme strictness)", args: [S("trackId"), S("grid", false), S("topic", false), S("mood", false), S("explicit", false), S("rhymeStrictness", false, '"perfect"|"slant"|"free"')] },
+  { command: "set_lyric_constraint", desc: "Set sheet-level lyric constraints (grid/topic/mood/explicit/default rhyme strictness/style bias)", args: [S("trackId"), S("grid", false), S("topic", false), S("mood", false), S("explicit", false), S("rhymeStrictness", false, '"perfect"|"slant"|"free"'), B("styleBias", false, "§7: bias generation toward the artist's own voice")] },
   { command: "set_lyric_line", desc: "Write/update one lyric line by index — text, role, seed (___ = gap), syllable target, rhyme group, lock", args: [S("trackId"), N("lineIndex"), S("text", false), S("role", false, '"verse"|"hook"|"bridge"|"adlib"'), S("seedText", false, "partial line; ___ marks a gap"), N("syllableTarget", false, "0 ⇒ infer from grid"), N("syllableTol", false), S("stress", false, "contour, e.g. xXxxxXxxx"), S("rhymeGroup", false, "lines sharing a group must rhyme"), S("rhymeStrictness", false), B("locked", false), S("sectionId", false)] },
   { command: "remove_lyric_line", desc: "Remove a lyric line by index (remaining lines re-index)", args: [S("trackId"), N("lineIndex")] },
   { command: "get_rhymes", desc: "Phonology rhyme search for a word (perfect/slant, phoneme-based), filterable by syllable count — no LLM", args: [S("word"), S("strictness", false, '"perfect"|"slant"|"free"'), N("syllables", false, "filter to this syllable count"), N("maxN", false)] },
@@ -114,6 +114,8 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "suggest_next_line", desc: "Suggest the next lyric line (a ghost line after the given index)", args: [S("trackId"), N("afterIndex")] },
   { command: "regenerate_lyric", desc: "Re-generate proposals for one lyric line with a fresh sample", args: [S("trackId"), N("lineIndex")] },
   { command: "accept_lyric_proposal", desc: "Accept a generated lyric proposal (commits its text into the line)", args: [S("trackId"), N("lineIndex"), N("proposalIndex", false, "default 0 = top-ranked")] },
+  { command: "analyze_lyrics", desc: "Precise per-line phonology (syllables, stress contour, rhyme grade vs the group anchor) for the flow visualizer — no LLM", args: [S("trackId")] },
+  { command: "build_skeleton_from_clip", desc: "Turn a hummed/mumbled wave take into an editable rhythmic flow skeleton (syllable grid + stress, no words) on the clip's track — the producer confirms the grid, then 'Finish gaps' writes the words", args: [S("clipId"), S("grid", false), B("wait", false)] },
 ];
 
 export const AGENT_COMMAND_MAP = new Map(AGENT_COMMANDS.map((c) => [c.command, c]));

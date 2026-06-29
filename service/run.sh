@@ -28,6 +28,14 @@ export PYTHONDONTWRITEBYTECODE="${PYTHONDONTWRITEBYTECODE:-1}"
 # sketch/setup-sketch.sh) exports SKETCH_PY. Absent → /sketch degrades gracefully to
 # 503 sketch_unavailable.
 [[ -f sketch/.sketch.env ]] && source ./sketch/.sketch.env
+# Whisper (word transcription for the lyric "mumble take") lives in its own venv;
+# .whisper.env (written by whisper/setup-whisper.sh) exports WHISPER_PY. Absent →
+# /transcribe_words degrades to empty words (the rhythm sheet still builds).
+[[ -f whisper/.whisper.env ]] && source ./whisper/.whisper.env
+# Skeleton (Phase-2 mumble->skeleton F0 via FCPE) lives in its own venv; .skeleton.env
+# (written by skeleton/setup-skeleton.sh) exports SKELETON_PY. Absent → /skeleton_spec
+# degrades to the Basic-Pitch note-onset rhythm (no F0).
+[[ -f skeleton/.skeleton.env ]] && source ./skeleton/.skeleton.env
 # Transform (RAVE timbre transfer, Route C) lives in its own venv; .transform.env
 # (written by transform/setup-transform.sh) exports TRANSFORM_PY + RAVE_MODEL_DIR.
 # Absent → the `transform` adapter falls back to the deterministic fake (Route B).

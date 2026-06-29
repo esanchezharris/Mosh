@@ -43,6 +43,12 @@ service/transcribe/.transcribe.env
 # Sketch (librosa) venv + machine-local SKETCH_PY (setup-sketch.sh)
 service/sketch/.venv/
 service/sketch/.sketch.env
+# Whisper word-ASR venv (torch, 100s of MB) + machine-local WHISPER_PY (setup-whisper.sh)
+service/whisper/.venv/
+service/whisper/.whisper.env
+# Phonology venv + machine-local PHONOLOGY_PY (setup-phonology.sh)
+service/phonology/.venv/
+service/phonology/.phonology.env
 # PyFLP venv + machine-local FLP_PY (setup-flp.sh)
 service/flp/.venv/
 service/flp/.flp.env

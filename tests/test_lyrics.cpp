@@ -18,6 +18,17 @@ TEST_CASE ("MOSH_LYRICSHEET builds with a LYRIC_LINES container + defaults (LYR-
     REQUIRE (LyricSheet::lines (v).getNumChildren() == 0);
 }
 
+TEST_CASE ("L1+§7 sheet constraints (styleBias) round-trip through XML", "[lyrics][rag]")
+{
+    auto v = LyricSheet::create ("ls-1", "1/16", "en");
+    // §7 style-RAG opt-in: a sheet-level bool set by set_lyric_constraint, undoable,
+    // serialized in the snapshot/edit. Absent ⇒ false (additive, no format bump).
+    REQUIRE_FALSE ((bool) v[ids::lyricStyleBias]);
+    v.setProperty (ids::lyricStyleBias, true, nullptr);
+    auto back = juce::ValueTree::fromXml (v.toXmlString());
+    REQUIRE ((bool) back[ids::lyricStyleBias] == true);
+}
+
 TEST_CASE ("MOSH_LYRICLINE carries the constraint spec + round-trips through XML", "[lyrics]")
 {
     auto line = LyricLine::create ("ln-1", 0, "hook");
@@ -77,6 +88,72 @@ TEST_CASE ("L2 transient proposals (JSON blob) + regen round-trip on a line", "[
     auto fresh = LyricLine::create ("ln-2", 1, "verse");
     REQUIRE_FALSE (fresh.hasProperty (ids::lyricProposals));
     REQUIRE_FALSE (fresh.hasProperty (ids::lyricRegen));
+}
+
+TEST_CASE ("L1 transient analysis (JSON object blob) round-trips on a line", "[lyrics][l1]")
+{
+    auto line = LyricLine::create ("ln-1", 0, "verse");
+    line.setProperty (ids::lyricText, "lighting up the flame", nullptr);
+    // analyze_lyrics lands precise phonology as a JSON-OBJECT blob (non-undoable). It
+    // must survive serialization, and lyricSheetToVar parses it back to an object for
+    // the snapshot → flow visualizer.
+    line.setProperty (ids::lyricAnalysis,
+                      "{\"syllables\":5,\"target\":5,\"syllableOk\":true,\"endWord\":\"flame\","
+                      "\"rhymeGrade\":\"anchor\",\"rhymeOk\":true,\"stress\":\"XxXxX\","
+                      "\"words\":[{\"w\":\"flame\",\"syllables\":1,\"stress\":\"X\",\"inDict\":true}],"
+                      "\"complete\":true,\"analyzed\":\"text\"}",
+                      nullptr);
+
+    auto back = juce::ValueTree::fromXml (line.toXmlString());
+    auto parsed = juce::JSON::parse (back[ids::lyricAnalysis].toString());
+    REQUIRE (parsed.isObject());
+    REQUIRE ((int) parsed.getProperty ("syllables", juce::var()) == 5);
+    REQUIRE (parsed.getProperty ("rhymeGrade", juce::var()).toString() == "anchor");
+    REQUIRE ((bool) parsed.getProperty ("complete", false) == true);
+    REQUIRE (parsed.getProperty ("words", juce::var()).isArray());
+
+    // A fresh line has no analysis until analyze_lyrics runs (it's recomputable).
+    auto fresh = LyricLine::create ("ln-2", 1, "verse");
+    REQUIRE_FALSE (fresh.hasProperty (ids::lyricAnalysis));
+}
+
+TEST_CASE ("Phase-2 skeleton lands lines `skeleton` + survives serialization (LYR-P2)", "[lyrics][skeleton]")
+{
+    // build_skeleton_from_clip lands a wordless, EDITABLE skeleton: every line `skeleton`
+    // (the human-in-the-loop grid gate; distinct from L2 `proposed`) with an all-gaps seed +
+    // a syllable target. The status must round-trip with the .tracktionedit (additive node).
+    auto sheet = LyricSheet::create ("ls-skel", "1/8");
+    auto container = LyricSheet::lines (sheet);
+    for (int i = 0; i < 2; ++i)
+    {
+        auto line = LyricLine::create (juce::String ("sk") + juce::String (i), i, "verse");
+        line.setProperty (ids::lyricSeedText, "___ ___ ___", nullptr);
+        line.setProperty (ids::lyricSyllableTarget, 3, nullptr);
+        line.setProperty (ids::lyricStress, "XxX", nullptr);
+        line.setProperty (ids::status, "skeleton", nullptr);
+        container.appendChild (line, nullptr);
+    }
+
+    auto back = juce::ValueTree::fromXml (sheet.toXmlString());
+    auto backLines = LyricSheet::lines (back);
+    REQUIRE (backLines.getNumChildren() == 2);
+    REQUIRE (backLines.getChild (0)[ids::status].toString() == "skeleton");
+    REQUIRE (backLines.getChild (0)[ids::lyricSeedText].toString() == "___ ___ ___");
+    REQUIRE ((int) backLines.getChild (1)[ids::lyricSyllableTarget] == 3);
+
+    // confirm_skeleton's effect: every `skeleton` line flips to `seed` (eligible for the
+    // generation loop); already-`seed`/other lines are untouched.
+    backLines.getChild (1).setProperty (ids::status, "seed", nullptr);   // pre-existing seed line
+    int flipped = 0;
+    for (int i = 0; i < backLines.getNumChildren(); ++i)
+        if (backLines.getChild (i)[ids::status].toString() == "skeleton")
+        {
+            backLines.getChild (i).setProperty (ids::status, "seed", nullptr);
+            ++flipped;
+        }
+    REQUIRE (flipped == 1);
+    for (int i = 0; i < backLines.getNumChildren(); ++i)
+        REQUIRE (backLines.getChild (i)[ids::status].toString() == "seed");
 }
 
 TEST_CASE ("lineFingerprint is stable + sensitive to every constraint input", "[lyrics][cache]")

@@ -19,7 +19,10 @@ public:
     /** Ensure the service is reachable: probe /health, spawning the bundled
         Python service (service/server.py) if needed. Returns true if healthy. */
     bool ensureServiceRunning();
-    bool isHealthy();
+    /** Probe GET /health. connectMs bounds the worst-case block on the CALLING thread when
+        the service is reachable-but-wedged (a dead service refuses immediately); pass a short
+        value on non-critical, message-thread paths (e.g. the corpus-stats readout). */
+    bool isHealthy (int connectMs = 3000);
 
     /** The available SA3 colours + their ASTD ceilings (GET /colors), for the UI. */
     juce::var listColors();
@@ -42,6 +45,30 @@ public:
         { ok, notes:[{pitch,start,end,velocity}] } (times in SECONDS), or a var whose
         ok is false / {} on failure (service down, venv absent → 503). */
     juce::var transcribe (const juce::File& inputWav, const juce::String& mode);
+
+    /** Word-level speech transcription via Whisper (POST /transcribe_words) — the lyric
+        "mumble take" word path. SYNCHRONOUS — call on a BACKGROUND thread. Returns
+        { ok, words:[{word,start,end,confidence}] } (times in SECONDS). When Whisper isn't
+        installed the service degrades to { ok:true, words:[] } (the rhythm sheet still
+        builds; never invented words). {} on a dead service. */
+    juce::var transcribeWords (const juce::File& inputWav);
+
+    /** Mumble-take spec builder (POST /mumble_spec) — Finish-My-Song Phase 3. Note onsets +
+        confidence-gated words → a lyric constraint spec (syllables/bar + stress + word
+        anchors/gaps). Fast + deterministic (in-process note/word math, no model). SYNCHRONOUS.
+        Returns { ok, grid, lines:[{index,role,seedText,syllableTarget,syllableTol,stress,
+        rhymeGroup}] } or { ok:false, error:"no_melody_detected" }; {} on a dead service. */
+    juce::var mumbleSpec (const juce::var& notes, const juce::var& words, double bpm,
+                          int tsNum, int tsDen, double confThreshold);
+
+    /** Phase-2 mumble->skeleton spec (POST /skeleton_spec). A hummed/mumbled take → a WORDLESS,
+        editable lyric LineSpec (syllable grid + stress; every slot a ___ gap). The server
+        orchestrates Basic-Pitch onsets (+ optional FCPE F0 for sub-note nuclei) then bins
+        in-process. SYNCHRONOUS — call on a BACKGROUND thread (mirrors transcribe()). Returns
+        { ok, grid, source:"skeleton", editable, lines:[...] } or { ok:false,
+        error:"no_melody_detected" }; {} on a dead service. */
+    juce::var skeletonSpec (const juce::File& inputWav, double bpm, int tsNum, int tsDen,
+                            const juce::String& grid);
 
     /** Sketch Phase 0 — beatbox → drum hits via librosa (POST /sketch). SYNCHRONOUS —
         call on a BACKGROUND thread (model-free, but a subprocess + onset analysis is
@@ -76,10 +103,32 @@ public:
     juce::var compileRender (const juce::String& instruction, int intensity,
                              const juce::String& backend);
 
+    /** Precise per-line lyric ANALYSIS (POST /analyze_lyrics) — Finish-My-Song L1. Fast,
+        deterministic, no LLM (the dictionary phonology path for the flow visualizer).
+        SYNCHRONOUS — call on a BACKGROUND thread (mirrors transcribe()). `spec` is the
+        lyric-sheet constraint spec. Returns
+        { ok, lines:[{index, analysis:{syllables,target,stress,rhymeGrade,rhymeOk,words,...}}] },
+        or {} on failure (service down). */
+    juce::var analyzeLyrics (const juce::var& spec);
+
+    /** §7 style-RAG flywheel — push finalized lyric line(s) into the PERSISTED cross-song
+        voice corpus (POST /style_corpus action:add). **NON-SPAWNING + best-effort**: probes
+        isHealthy() first and silently no-ops (returns -1) when the service is DOWN — it NEVER
+        calls ensureServiceRunning(), so it can be fired from `accept_lyric_proposal` without
+        spawning the service (keeps --selftest hermetic) and without blocking accept. Returns
+        the corpus line count after the add, or -1 if unreachable / failed. Swallows failures;
+        safe on a detached background thread. */
+    int styleCorpusAdd (const juce::StringArray& lines, const juce::String& source);
+
+    /** §7 — corpus size for a UI readout (POST /style_corpus action:stats). NON-SPAWNING
+        (isHealthy()-gated); returns -1 when the service is down. Counts only — never the
+        content (the backend-only safety wall). */
+    int styleCorpusStats();
+
     juce::String serviceBuild() const { return svcBuild; }
 
 private:
-    juce::var httpGet (const juce::String& path);
+    juce::var httpGet (const juce::String& path, int connectMs = 3000);
     juce::var httpPost (const juce::String& path, const juce::var& body);
 
     // C2 — reap an orphaned/wedged service (a crashed Mosh leaves a multi-GB MLX process

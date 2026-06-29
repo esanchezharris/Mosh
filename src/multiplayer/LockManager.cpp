@@ -20,7 +20,7 @@ LockManager::Scope LockManager::classify (const juce::String& command)
         "list_wave_inputs", "list_track_outputs", "list_takes", "list_colors",
         "list_directory", "list_training_sources", "list_lora_adapters",
         "get_clip_peaks", "file_peaks", "get_command_log", "audition_file",
-        "list_transform_targets", "get_rhymes",
+        "list_transform_targets", "get_rhymes", "get_lyric_corpus_stats",
         "stop_audition", "export_audio", "save", "reload", "save_as", "new_project",
         "open_project", "set_transport", "stop_recording", "undo", "redo",
         "mark_take", "batch_begin", "batch_end", "enable_track_meter", "disable_track_meter",
@@ -55,6 +55,10 @@ LockManager::Scope LockManager::classify (const juce::String& command)
         // LYR-L2 — generation + proposal review also target one track's sheet.
         "complete_lyrics", "fill_lyric_gap", "suggest_next_line", "regenerate_lyric",
         "cancel_lyric_job", "accept_lyric_proposal", "reject_lyric_proposal",
+        // LYR-L1 — analysis lands a transient blob on one track's sheet.
+        "analyze_lyrics",
+        // LYR Phase 2 — confirm the proposed flow grid (flips this track's lines proposed→seed).
+        "confirm_skeleton",
     };
 
     // Clip-scoped: mutate one clip (args carry a clipId). Key = the clip's track
@@ -64,6 +68,8 @@ LockManager::Scope LockManager::classify (const juce::String& command)
         "set_clip_mute", "set_clip_gain", "relink_clip", "set_clip_warp",
         "duplicate_clip", "add_note", "remove_note", "set_note", "quantize_notes",
         "transcribe_clip", "create_render_layer",
+        "build_lyrics_from_clip",   // LYR Phase 3 — mumble take (lands a sheet on the clip's track)
+        "build_skeleton_from_clip", // LYR Phase 2 — gibberish skeleton (lands a sheet on the clip's track)
     };
 
     if (unguarded.count (command)) return Scope::Unguarded;

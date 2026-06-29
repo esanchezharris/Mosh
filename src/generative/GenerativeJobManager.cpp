@@ -122,11 +122,11 @@ void GenerativeJobManager::adoptPortFromHandshake()
     if (want != baseUrl) baseUrl = want;
 }
 
-juce::var GenerativeJobManager::httpGet (const juce::String& path)
+juce::var GenerativeJobManager::httpGet (const juce::String& path, int connectMs)
 {
     URL url (baseUrl + path);
     auto opts = URL::InputStreamOptions (URL::ParameterHandling::inAddress)
-                    .withConnectionTimeoutMs (3000);
+                    .withConnectionTimeoutMs (connectMs);
     if (auto s = url.createInputStream (opts))
         return JSON::parse (s->readEntireStreamAsString());
     return {};
@@ -143,9 +143,9 @@ juce::var GenerativeJobManager::httpPost (const juce::String& path, const juce::
     return {};
 }
 
-bool GenerativeJobManager::isHealthy()
+bool GenerativeJobManager::isHealthy (int connectMs)
 {
-    auto r = httpGet ("/health");
+    auto r = httpGet ("/health", connectMs);
     if ((bool) r.getProperty ("ok", false))
     {
         svcBuild = r.getProperty ("build", svcBuild).toString();
@@ -271,6 +271,74 @@ juce::var GenerativeJobManager::transcribe (const juce::File& inputWav, const ju
     return {};
 }
 
+juce::var GenerativeJobManager::transcribeWords (const juce::File& inputWav)
+{
+    if (! ensureServiceRunning())
+        return {};
+
+    auto* body = new DynamicObject();
+    body->setProperty ("inputWav", inputWav.getFullPathName());
+
+    // Whisper loads a model in a subprocess (generous timeout; the service caps at 180s).
+    // Blocks → off the message thread. Mirrors transcribe(). Empty words when Whisper absent.
+    URL url = URL (baseUrl + "/transcribe_words").withPOSTData (JSON::toString (var (body)));
+    auto opts = URL::InputStreamOptions (URL::ParameterHandling::inPostData)
+                    .withConnectionTimeoutMs (185000)
+                    .withExtraHeaders ("Content-Type: application/json");
+    if (auto s = url.createInputStream (opts))
+        return JSON::parse (s->readEntireStreamAsString());
+    return {};
+}
+
+juce::var GenerativeJobManager::mumbleSpec (const juce::var& notes, const juce::var& words,
+                                            double bpm, int tsNum, int tsDen, double confThreshold)
+{
+    if (! ensureServiceRunning())
+        return {};
+
+    Array<var> ts; ts.add (tsNum > 0 ? tsNum : 4); ts.add (tsDen > 0 ? tsDen : 4);
+    auto* body = new DynamicObject();
+    body->setProperty ("notes", notes);
+    body->setProperty ("words", words);
+    body->setProperty ("bpm", bpm > 0 ? bpm : 120.0);
+    body->setProperty ("timeSig", var (ts));
+    body->setProperty ("confThreshold", confThreshold > 0 ? confThreshold : 0.6);
+
+    // In-process deterministic note/word math — fast; a short timeout. Off the message thread.
+    URL url = URL (baseUrl + "/mumble_spec").withPOSTData (JSON::toString (var (body)));
+    auto opts = URL::InputStreamOptions (URL::ParameterHandling::inPostData)
+                    .withConnectionTimeoutMs (30000)
+                    .withExtraHeaders ("Content-Type: application/json");
+    if (auto s = url.createInputStream (opts))
+        return JSON::parse (s->readEntireStreamAsString());
+    return {};
+}
+
+juce::var GenerativeJobManager::skeletonSpec (const juce::File& inputWav, double bpm,
+                                              int tsNum, int tsDen, const juce::String& grid)
+{
+    if (! ensureServiceRunning())
+        return {};
+
+    Array<var> ts; ts.add (tsNum > 0 ? tsNum : 4); ts.add (tsDen > 0 ? tsDen : 4);
+    auto* body = new DynamicObject();
+    body->setProperty ("inputWav", inputWav.getFullPathName());
+    body->setProperty ("bpm", bpm > 0 ? bpm : 120.0);
+    body->setProperty ("timeSig", var (ts));
+    body->setProperty ("grid", grid.isNotEmpty() ? grid : juce::String ("1/16"));
+
+    // The server orchestrates the whole chain (Basic-Pitch notes + optional FCPE F0, then the
+    // in-process bin) — the Basic-Pitch subprocess dominates, so give it transcribe's generous
+    // timeout. Blocks → the caller runs it off the message thread. Mirrors transcribe().
+    URL url = URL (baseUrl + "/skeleton_spec").withPOSTData (JSON::toString (var (body)));
+    auto opts = URL::InputStreamOptions (URL::ParameterHandling::inPostData)
+                    .withConnectionTimeoutMs (185000)
+                    .withExtraHeaders ("Content-Type: application/json");
+    if (auto s = url.createInputStream (opts))
+        return JSON::parse (s->readEntireStreamAsString());
+    return {};
+}
+
 juce::var GenerativeJobManager::sketchBeatbox (const juce::File& inputWav, double bpm, int bars)
 {
     if (! ensureServiceRunning())
@@ -364,6 +432,64 @@ juce::var GenerativeJobManager::compileRender (const juce::String& instruction, 
     if (auto s = url.createInputStream (opts))
         return JSON::parse (s->readEntireStreamAsString());
     return {};
+}
+
+juce::var GenerativeJobManager::analyzeLyrics (const juce::var& spec)
+{
+    if (! ensureServiceRunning())
+        return {};
+
+    auto* body = new DynamicObject();
+    body->setProperty ("spec", spec);
+
+    // Fast + deterministic (phonology only, no LLM) — a short timeout keeps the precise
+    // flow-meter snappy. Off the message thread (mirrors transcribe()).
+    URL url = URL (baseUrl + "/analyze_lyrics").withPOSTData (JSON::toString (var (body)));
+    auto opts = URL::InputStreamOptions (URL::ParameterHandling::inPostData)
+                    .withConnectionTimeoutMs (15000)
+                    .withExtraHeaders ("Content-Type: application/json");
+    if (auto s = url.createInputStream (opts))
+        return JSON::parse (s->readEntireStreamAsString());
+    return {};
+}
+
+int GenerativeJobManager::styleCorpusAdd (const juce::StringArray& lines, const juce::String& source)
+{
+    // NON-SPAWNING contract: only POST if the service is ALREADY up. isHealthy() pings
+    // /health and never spawns (only ensureServiceRunning does) — so when the service is
+    // down (e.g. during --selftest) this is a pure no-op. Do NOT route this through
+    // ensureServiceRunning or any spawn path.
+    if (lines.isEmpty() || ! isHealthy())
+        return -1;
+
+    Array<var> arr;
+    for (auto& l : lines)
+        if (l.trim().isNotEmpty())
+            arr.add (l);
+    if (arr.isEmpty())
+        return -1;
+
+    auto* body = new DynamicObject();
+    body->setProperty ("action", "add");
+    body->setProperty ("lines", arr);
+    body->setProperty ("source", source.isNotEmpty() ? source : juce::String ("accept"));
+
+    auto r = httpPost ("/style_corpus", var (body));   // 10s timeout; already healthy
+    if (! (bool) r.getProperty ("ok", false))
+        return -1;
+    return (int) r.getProperty ("lines", -1);          // post-add corpus total
+}
+
+int GenerativeJobManager::styleCorpusStats()
+{
+    // Quick health probe: this runs on the message thread (the corpus readout pulls on panel
+    // mount), so cap the worst-case block at ~0.8s if the service is wedged. NON-SPAWNING.
+    if (! isHealthy (800))                             // (counts only)
+        return -1;
+    auto* body = new DynamicObject();
+    body->setProperty ("action", "stats");
+    auto r = httpPost ("/style_corpus", var (body));
+    return (bool) r.getProperty ("ok", false) ? (int) r.getProperty ("lines", -1) : -1;
 }
 
 } // namespace mosh

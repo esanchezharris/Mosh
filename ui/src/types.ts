@@ -35,6 +35,26 @@ export type LyricProposal = {
   grade?: string;            // "perfect" | "slant" | "anchor" | "free" | "none"
   score?: number;
 };
+// L1 — precise per-line phonology from analyze_lyrics (dictionary path; the flow
+// visualizer's feed). Transient + recomputable; agrees with the generation gate.
+export type LyricWordSlot = { w: string; syllables: number; stress: string; inDict: boolean };
+export type LyricAnalysis = {
+  syllables: number;
+  target: number;
+  tol: number;
+  syllableOk: boolean;
+  endWord: string;
+  rhymeGroup: string;
+  rhymeAnchor: string;       // the group's anchor end word ("" = none)
+  rhymeGrade: "perfect" | "slant" | "none" | "anchor" | "free" | string;
+  rhymeOk: boolean;
+  stress: string;            // per-line contour, e.g. "XxxX" (X=stressed, x=unstressed)
+  words: LyricWordSlot[];    // per-word slots for the visualizer
+  hasGap: boolean;
+  analyzed: "text" | "seed" | "empty" | string;  // what content was analyzed
+  complete: boolean;         // finalized text, no remaining gaps
+  endInDict: boolean;        // end word found in the dictionary (confidence)
+};
 export type LyricLine = {
   index: number;
   role: "verse" | "hook" | "bridge" | "adlib" | string;
@@ -47,9 +67,10 @@ export type LyricLine = {
   rhymeStrictness: string;   // "perfect"|"slant"|"free" ("" ⇒ inherit sheet)
   locked: boolean;
   sectionId: string;
-  status: "empty" | "seed" | "generating" | "proposed" | "accepted" | "locked" | string;
+  status: "empty" | "seed" | "generating" | "proposed" | "accepted" | "locked" | "skeleton" | string;
   proposals?: LyricProposal[];  // L2 — transient ranked proposals (cleared on accept/reject)
   regen?: number;
+  analysis?: LyricAnalysis;     // L1 — precise phonology (from analyze_lyrics)
 };
 export type LyricSheet = {
   id: string;
@@ -59,6 +80,7 @@ export type LyricSheet = {
   mood: string;
   explicit: "allow" | "clean" | "mild" | string;
   rhymeStrictness: "perfect" | "slant" | "free" | string;
+  styleBias?: boolean;       // §7 style-RAG — bias generation toward the artist's own voice
   specVersion: number;
   lines: LyricLine[];
 };
