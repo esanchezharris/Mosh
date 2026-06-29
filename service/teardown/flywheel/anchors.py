@@ -16,8 +16,10 @@ class Anchor:
     reconstruction_audio: str
     recipe_path: str = ""
     stems: dict = field(default_factory=dict)        # role -> stem wav path
-    reconstruction_class: str = "partial"             # deterministic | inferred | partial
+    reconstruction_class: str = "partial"             # exact | deterministic | inferred | partial
     yield_overall: float = 0.0
+    onsets: dict = field(default_factory=dict)        # role -> [onset seconds within the window] (for §11 ablation re-render)
+    window_s: float = 0.0                             # stem window length (seconds)
 
 
 class AnchorStore:
@@ -41,6 +43,7 @@ class AnchorStore:
         return list(self._items)
 
     def gold(self) -> list[Anchor]:
-        """Only `deterministic` reconstructions are ground-truth positives (the escape from
-        the CLAP-bootstrapping circularity)."""
-        return [a for a in self._items if a.reconstruction_class == "deterministic"]
+        """Ground-truth positives only — the escape from the CLAP-bootstrapping circularity.
+        `exact` (project-file-sourced: groove is exact, zero screen-read loss) is the top gold tier;
+        `deterministic` (screen-read MIDI §5 + params §5b at high confidence) is the other."""
+        return [a for a in self._items if a.reconstruction_class in ("exact", "deterministic")]
