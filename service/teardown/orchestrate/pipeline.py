@@ -81,27 +81,30 @@ class Orchestrator:
         safe = re.sub(r"[^A-Za-z0-9_.-]", "_", video_ref)[-80:]
         return self.cp / f"{safe}.recipe.json", self.cp / f"{safe}.stages.json"
 
-    def _save(self, video_ref: str, rec: Recipe, done: list) -> None:
+    def _save(self, video_ref: str, rec: Recipe, done: list, render_out: Optional[dict] = None) -> None:
         if not self.cp:
             return
         self.cp.mkdir(parents=True, exist_ok=True)
         rp, sp = self._paths(video_ref)
         rp.write_text(to_json(rec))
-        sp.write_text(json.dumps({"stages_done": done}))
+        # persist render_out too, so a resumed run can still run the score stage (which gates on the
+        # render's nonsilent/out_wav) without re-running the heavy render.
+        sp.write_text(json.dumps({"stages_done": done, "render_out": render_out or {}}))
 
     def _load(self, video_ref: str):
         if not self.cp:
-            return None, []
+            return None, [], {}
         rp, sp = self._paths(video_ref)
         if rp.exists() and sp.exists():
-            return from_json(rp.read_text()), json.loads(sp.read_text()).get("stages_done", [])
-        return None, []
+            st = json.loads(sp.read_text())
+            return from_json(rp.read_text()), st.get("stages_done", []), st.get("render_out", {}) or {}
+        return None, [], {}
 
     # ── the staged run ──────────────────────────────────────────────────────
     def teardown(self, video_ref: str, resume: bool = True) -> RunResult:
         rec: Optional[Recipe] = None
         try:
-            rec, done = self._load(video_ref) if resume else (None, [])
+            rec, done, render_out = self._load(video_ref) if resume else (None, [], {})
 
             if rec is None or "skeleton" not in done:
                 rec = self._skeleton(video_ref)
@@ -137,18 +140,19 @@ class Orchestrator:
             # §9 execute — turn the compiled commands into a real Edit + render (writes the recipe's
             # yield.actual + reconstruction_class). Optional/injected: no render_fn → stop at compile
             # (the prior behaviour). Heavy (needs the binary), so it checkpoints separately.
-            render_out: dict = {}
             if self._render is not None and "render" not in done:
                 render_out = self._render(rec) or {}
                 done.append("render")
-                self._save(video_ref, rec, done)
+                self._save(video_ref, rec, done, render_out)
 
             # §12 score — only when a render actually produced audio (nothing to score otherwise).
+            # render_out is reloaded from the checkpoint on resume, so this fires even if 'render' was
+            # completed in a prior run (was permanently skipped before — reward never produced).
             reward_out: dict = {}
             if self._reward is not None and render_out.get("nonsilent") and "score" not in done:
                 reward_out = self._reward(rec, render_out) or {}
                 done.append("score")
-                self._save(video_ref, rec, done)
+                self._save(video_ref, rec, done, render_out)
 
             comp = _completeness(rec)
             status = "torn_down" if comp >= self.policy.review_floor else "needs_review"

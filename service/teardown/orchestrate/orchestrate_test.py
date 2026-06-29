@@ -125,6 +125,22 @@ check("silent render → score stage skipped (no reward call)",
       "render" in sr2.stages_done and "score" not in sr2.stages_done and not reward_calls,
       str(sr2.stages_done))
 
+# ── resume after a render-only run STILL runs score (render_out reloaded from the checkpoint) ──
+with tempfile.TemporaryDirectory() as td3:
+    common = dict(checkpoint_dir=td3, skeleton_fn=fake_skeleton, extract_fn=fake_extract,
+                  match_fn=fake_match, compile_fn=compile_recipe, render_fn=fake_render)
+    Orchestrator(**common).teardown("vidRR")                 # run 1: render, NO reward_fn → score never ran
+    got: dict = {}
+
+    def resume_reward(rec, render_out):
+        got["out_wav"] = render_out.get("out_wav")           # proves render_out survived the checkpoint
+        return {"pull": 0.5, "composite": 0.6}
+
+    res3 = Orchestrator(reward_fn=resume_reward, **common).teardown("vidRR", resume=True)
+    check("resume after render-only fires score from the checkpointed render_out (was skipped before)",
+          "score" in res3.stages_done and res3.reward.get("pull") == 0.5 and got.get("out_wav") == "/tmp/recon.wav",
+          str((res3.stages_done, res3.reward, got)))
+
 # ── back-compat: no render_fn → the run stops at compile (prior behaviour) ────
 nr = Orchestrator(skeleton_fn=fake_skeleton, match_fn=fake_match, compile_fn=compile_recipe).teardown("vidN")
 check("no render_fn → stops at compile (no render/score stage)",

@@ -90,6 +90,22 @@ try:
           identify_synths(frames(3), key="", call=None) is None)
     check("every call errors → None (could not run)",
           identify_synths(frames(3), call=(lambda b: (_ for _ in ()).throw(RuntimeError("net")))) is None)
+    check("calls succeed but ALL unparseable → None (could not run → caller keeps local naming, no OCR wipe)",
+          identify_synths(frames(4), call=canned(["not json at all", "<html>err</html>"])) is None)
+
+    # ── the floor is over SYNTH-BEARING frames, not all answered: a synth on few frames amid many
+    #    null frames still passes (was erased when the floor counted null frames) ──────────────────
+    fewshot = identify_synths(frames(8), call=canned([J("Vital")] * 2 + [J(None)] * 6), max_frames=20)
+    check("synth on 2 frames among 6 null → still identified (floor over synth-bearing frames)",
+          fewshot and fewshot[0]["profile_key"] == "vital", str(fewshot))
+
+    # ── Frame-like objects (the real call site passes vision Frame, not a bare ndarray) ──────────
+    class _Frame:
+        def __init__(self, im):
+            self.image = im
+    fr_objs = [_Frame(im) for im in frames(4)]
+    check("accepts Frame objects (reads .image) → identifies",
+          (identify_synths(fr_objs, call=canned([J("Vital")])) or [{}])[0].get("profile_key") == "vital")
 
     # ── determinism ────────────────────────────────────────────────────────────────────────────
     runs = {tuple((x["name"], x["profile_key"], x["votes"]) for x in

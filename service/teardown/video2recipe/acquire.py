@@ -14,7 +14,10 @@ from ..sourcing.posture import content_hash_file
 # 1080p, not 720p: a vision-LLM synth-ID (§5b llm_identify) confuses similar wavetable synths
 # (Vital↔Serum) at 720p but is reliable at ≥1080p, and the extra detail also helps OCR/piano-roll.
 # Tunable via MOSH_TEARDOWN_MAXH for scrape-at-scale bandwidth economy.
-MAX_HEIGHT = int(os.environ.get("MOSH_TEARDOWN_MAXH", "1080") or "1080")
+try:
+    MAX_HEIGHT = int(os.environ.get("MOSH_TEARDOWN_MAXH") or "1080")
+except ValueError:                # a malformed override must not crash the whole teardown at import
+    MAX_HEIGHT = 1080
 
 
 def available() -> bool:

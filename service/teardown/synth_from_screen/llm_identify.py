@@ -105,7 +105,8 @@ def identify_synths(frames, *, key: Optional[str] = None, model: Optional[str] =
 
     votes: Counter = Counter()
     rep: dict = {}      # normalized-key → a representative parsed response (for components/display)
-    answered = 0
+    answered = 0        # HTTP calls that returned text
+    parsed = 0          # responses that yielded a verdict (a 'name' field, incl. explicit null)
     for fr in frames:
         img = getattr(fr, "image", fr)
         b64 = _encode(img)
@@ -116,6 +117,9 @@ def identify_synths(frames, *, key: Optional[str] = None, model: Optional[str] =
         except Exception:
             continue
         answered += 1
+        if "name" not in r:           # garbage / unparseable — NOT a usable verdict
+            continue
+        parsed += 1
         name = (r.get("name") or "").strip()
         if not name or name.lower() in ("null", "none", "unknown"):
             continue
@@ -125,13 +129,17 @@ def identify_synths(frames, *, key: Optional[str] = None, model: Optional[str] =
         votes[norm] += 1
         rep.setdefault(norm, {"name": name, "resp": r})
 
-    if answered == 0:
-        return None  # every call failed (network/key) → treat as "could not run"
+    # could-not-run → None (caller keeps its local naming): no call succeeded, OR calls succeeded but
+    # NONE produced a parseable verdict (a transient model/format failure ≠ "this video has no synth").
+    if answered == 0 or parsed == 0:
+        return None
     if not votes:
-        return []    # ran, saw no synth
+        return []    # ran + parsed, genuinely saw no synth
 
-    # keep names with a real share of the frames (kills one-off misreads / a stray watermark guess)
-    floor = max(2, int(round(0.34 * answered)))
+    # keep names with a real share of the SYNTH-BEARING frames (not all answered — null/no-synth
+    # frames must not inflate the floor and erase a synth that's only on a few frames). The absolute
+    # min of 2 still rejects a true one-off misread / a stray watermark guess.
+    floor = max(2, int(round(0.34 * sum(votes.values()))))
     out = []
     for norm, n in votes.most_common():
         if n < floor:

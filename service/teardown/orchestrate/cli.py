@@ -72,7 +72,8 @@ def main(argv=None):
             if llm is not None:                       # ran (key present): trust it over OCR guesses
                 meta = dict(meta)
                 meta["plugins"] = [s["name"] for s in llm]
-                meta["llm_synths"] = llm              # carries profile_key/known/components downstream
+                meta["llm_synths"] = llm              # profile_key/known/components — recorded for a
+                #                                       future §8 substitute (unknown synths); not yet consumed
                 print(f"[skeleton] §5b LLM identified synth(s): "
                       f"{[(s['name'], s['profile_key'], s['votes']) for s in llm]}", file=sys.stderr)
         except Exception as e:
@@ -159,7 +160,12 @@ def main(argv=None):
             pull = None                          # the §11 trained head (MERT) — graceful if its venv is absent
             try:
                 from teardown.flywheel.reward_encoder import TrainedRewardHead, get_encoder
-                pull = TrainedRewardHead(encoder=get_encoder()).pull
+                head = TrainedRewardHead(encoder=get_encoder())
+                # the pull is INERT (constant 0.5) until exemplars are loaded — don't blend a fake
+                # signal into the composite, and don't claim has_pull. Floor-only until §11/§12 wires
+                # exemplars (the anchor corpus / PromptFeed handoff).
+                if getattr(head, "_exemplars", None):
+                    pull = head.pull
             except Exception as e:
                 print(f"[score] pull head unavailable ({type(e).__name__}) → floor-only reward",
                       file=sys.stderr)
