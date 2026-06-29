@@ -2,7 +2,7 @@
 // left and the generative DRAWER (Stage 5) on the right. Ported from the legacy
 // Rack/GenPanel into the ink+lime register — same command seam, same arg shapes.
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useStore } from "../store";
 import { useSettings } from "../settings/store";
 import type { Snapshot, Plugin, Track, Clip, RenderColor, RenderQA } from "../types";
@@ -180,15 +180,55 @@ export function GenDrawer({ track, selectedClipId }: { track: Track; selectedCli
     <div className="gen" data-testid="generative">
       <div className="gen-head"><span className="gen-title">⃝ GENERATIVE</span><span className="gen-clip">{rl?.mode === "transform" ? "transform" : sa3 ? "stable audio 3" : "fake"} · {clip.name}</span></div>
       {!rl ? (
-        <div className="gen-create-row">
-          <button className="btn rack-add" data-testid="gen-create"
-            onClick={() => void exec("create_render_layer", { clipId: clip.id, adapter: sa3 ? "stable_audio3" : "fake", mode: "reimagine", modelVariant: sa3 ? "sa3-medium" : "" })}>+ Re-imagine</button>
-          <button className="btn rack-add" data-testid="gen-create-transform"
-            onClick={() => void exec("create_render_layer", { clipId: clip.id, adapter: "transform", mode: "transform" })}>+ Transform</button>
-        </div>
+        <>
+          <CompileBox clipId={clip.id} />
+          <div className="gen-create-row">
+            <button className="btn rack-add" data-testid="gen-create"
+              onClick={() => void exec("create_render_layer", { clipId: clip.id, adapter: sa3 ? "stable_audio3" : "fake", mode: "reimagine", modelVariant: sa3 ? "sa3-medium" : "" })}>+ Re-imagine</button>
+            <button className="btn rack-add" data-testid="gen-create-transform"
+              onClick={() => void exec("create_render_layer", { clipId: clip.id, adapter: "transform", mode: "transform" })}>+ Transform</button>
+          </div>
+        </>
       ) : (
         <GenBody clip={clip} qa={qaByClip[clip.id]} />
       )}
+    </div>
+  );
+}
+
+// "Describe it…" — the prompt compiler entry point. The producer types a loose
+// instruction; compile_render classifies it (re-imagine / transform / unsupported) and
+// fills a validated render layer, so the chosen colours/target then appear in the rack
+// below (transparency). A corrective/vocal request is honestly declined with a message —
+// generative-only v1 never re-performs the take. Uses wait:true (the compile is a fast,
+// explicit lookup) so the verdict — including an "unsupported" say — comes straight back.
+function CompileBox({ clipId }: { clipId: string }) {
+  const exec = useStore((s) => s.exec);
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [say, setSay] = useState<string | null>(null);
+  const submit = async () => {
+    const instruction = text.trim();
+    if (!instruction || busy) return;
+    setBusy(true); setSay(null);
+    const r = await exec("compile_render", { clipId, instruction, wait: true });
+    setBusy(false);
+    const data = (r?.data ?? {}) as { mode?: string; say?: string };
+    if (data.mode === "unsupported") setSay(data.say ?? "I can't do that with the generative model.");
+    else setText("");   // applied — the rack now shows what it chose
+  };
+  return (
+    <div className="gen-compile" data-testid="gen-compile">
+      <div className="gen-compile-row">
+        <input className="gen-compile-input" data-testid="gen-compile-input" type="text"
+          placeholder="describe it… e.g. make it lo-fi, or “as a violin”" value={text} disabled={busy}
+          aria-label="Describe the generative edit"
+          onChange={(e) => { setText(e.target.value); if (say) setSay(null); }}
+          onKeyDown={(e) => { if (e.key === "Enter") void submit(); }} />
+        <button className="btn rack-add" data-testid="gen-compile-go" disabled={busy || !text.trim()}
+          onClick={() => void submit()}>{busy ? "…" : "✨ Compile"}</button>
+      </div>
+      {say && <div className="gen-compile-say" role="status" data-testid="gen-compile-say">{say}</div>}
     </div>
   );
 }

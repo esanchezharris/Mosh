@@ -320,6 +320,41 @@ function pushUndo() { if (inBatch) return; history.push(clone(snapshot)); future
 const ok = (command: string, data?: unknown): CommandResult => ({ ok: true, command, data });
 const err = (command: string, error: string): CommandResult => ({ ok: false, command, error });
 
+// Minimal mirror of the Python prompt compiler (service/compiler/core.py) so the e2e +
+// vitest exercise the real UI without the native backend. Deterministic, generative-only:
+// classify reimagine | transform | unsupported and emit a validated envelope.
+function mockCompile(instruction: string): { mode: string; envelope?: Record<string, unknown>; say?: string; reasoning: string } {
+  const low = instruction.toLowerCase().trim();
+  const corrective = ["fix ", "fix the", "fix my", "fix it", "in tune", "out of tune", "tighten", "clean up", "quantize", "autotune", "auto-tune", "tune it", "tune the", "tune my", "retune", "pitch correct"];
+  const vocal = ["vocal", "vocals", "sing ", "singing", "sung", "singer", "add lyrics"];
+  if (corrective.some((k) => low.includes(k))) return { mode: "unsupported", say: "I can re-imagine or transform this part, but I can't repair the take itself — pitch/timing correction (AutoTune/EQ) is the tool for that.", reasoning: "classified corrective" };
+  if (vocal.some((k) => low.includes(k))) return { mode: "unsupported", say: "I only generate instrumental textures — I can't create or fix vocals.", reasoning: "classified vocal" };
+  const instruments = ["electric guitar", "guitar", "piano", "violin", "cello", "strings", "synth pad", "synth", "flute", "choir", "brass", "organ", "bells", "harp"];
+  const cues = ["into a ", "into an ", "as a ", "as an ", "turn it into ", "make it a ", "sound like a ", "sounds like a "];
+  const instr = instruments.find((i) => new RegExp(`\\b${i}\\b`).test(low));
+  if (instr && cues.some((c) => low.includes(c))) {
+    return { mode: "transform", reasoning: `transform → ${instr}`, envelope: { mode: "transform", target: instr, strength: 65, seed: 1, prompt: "", colors: [], lab: false } };
+  }
+  const descriptors: Array<[string[], string, number]> = [
+    [["brighter", "brighten", "shiny", "crisp"], "brightness", 76],
+    [["darker", "dark", "moody", "muffled"], "brightness", 24],
+    [["gritty", "grit", "dirty", "lo-fi", "lofi", "raw", "crunch"], "grit", 72],
+    [["distort", "fuzz", "overdriv"], "distortion", 70],
+    [["epic", "cinematic", "huge", "dramatic"], "epic", 70],
+    [["futuristic", "synthetic", "digital", "robotic"], "futuristic", 70],
+    [["tense", "eerie", "ominous"], "tension", 70],
+    [["airy", "air", "spacious", "ethereal", "ambient"], "air", 70],
+  ];
+  const colors: Array<{ name: string; value: number }> = [];
+  for (const [trig, name, value] of descriptors) {
+    if (colors.length >= 3) break;
+    if (colors.some((c) => c.name === name)) continue;
+    if (trig.some((t) => low.includes(t))) colors.push({ name, value });
+  }
+  const prompt = (colors.map((c) => c.name).join(", ") + (instr ? ` ${instr}` : "")) || low;
+  return { mode: "reimagine", reasoning: `re-imagine: ${colors.map((c) => c.name).join(", ") || "(none)"}`, envelope: { mode: "reimagine", prompt, nl: 0.4, colors, lab: false, seed: 1 } };
+}
+
 function trainingState(): TrainingState {
   if (!snapshot.training) {
     snapshot.training = {
@@ -1038,6 +1073,23 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     case "bypass_layer": { const f = findClip(str(args.clipId)); if (f?.clip.renderLayer) { f.clip.renderLayer.status = Boolean(args.bypassed) ? "bypassed" : "ready"; invalidate(); } return ok(command); }
     case "cancel_render": { const f = findClip(str(args.clipId)); if (f?.clip.renderLayer) { f.clip.renderLayer.status = "dirty"; invalidate(); } return ok(command); }
     case "remove_render_layer": { const f = findClip(str(args.clipId)); if (f) { pushUndo(); f.clip.hasRenderLayer = false; delete f.clip.renderLayer; invalidate(); } return ok(command); }
+    case "compile_render": {
+      const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found");
+      const r = mockCompile(str(args.instruction));
+      if (r.mode === "unsupported")   // honest boundary: mutate nothing, surface the say
+        return ok(command, { mode: "unsupported", backend: "fake", reasoning: r.reasoning, say: r.say, envelope: null });
+      pushUndo();
+      const env = r.envelope!;
+      f.clip.hasRenderLayer = true;
+      f.clip.renderLayer = {
+        id: "rl-" + f.clip.id, status: "dirty", adapter: r.mode === "transform" ? "transform" : "fake",
+        mode: r.mode, seed: num(env.seed, 1), userKept: false, hasArtifact: false,
+        nl: num(env.nl, 0.4), colors: (env.colors as RenderLayer["colors"]) ?? [],
+        ...(r.mode === "transform" ? { target: str(env.target, ""), strength: num(env.strength, 65) } : {}),
+      };
+      invalidate();
+      return ok(command, { mode: r.mode, backend: "fake", reasoning: r.reasoning, envelope: env, say: null, layerId: f.clip.renderLayer.id });
+    }
 
     // ── MIDI clips + notes (piano-roll) ──────────────────────────────────────
     case "add_midi_clip": {

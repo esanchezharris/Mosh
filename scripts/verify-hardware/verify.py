@@ -343,6 +343,47 @@ def check_transform(ctx):
                 "final_export": str(out)})
 
 
+def check_compile_render(ctx):
+    """L1: the prompt compiler turns a loose instruction into a VALIDATED render envelope,
+    applies it to the clip's render layer (the SAME PARAMS set_render_param writes), and the
+    resulting render is non-silent + differs from the input. Generative-only, fake-pinned
+    (backend:"fake" forces the deterministic compiler), offline — no LLM, no SA3. Proves the
+    native compile_render → render_layer → WAV path end to end."""
+    SESSION = "verify-compile"
+    out = ART / "08_compile.wav"
+    cmds = [
+        {"command": "create_track", "args": {"name": "Comp"}, "capture": {"T": "trackId"}},
+        {"command": "add_test_tone_clip", "args": {"trackId": "${T}", "seconds": 2.0, "freq": 220.0}, "capture": {"C": "clipId"}},
+        # one command compiles "make it gritty and lo-fi" → a re-imagine envelope (grit colour
+        # + nl) and applies it to a fresh render layer (adapter defaults to fake here).
+        {"command": "compile_render", "args": {"clipId": "${C}", "instruction": "make it gritty and lo-fi", "backend": "fake", "wait": True}},
+        {"command": "render_layer", "args": {"clipId": "${C}", "wait": True}},
+        {"command": "accept_render", "args": {"clipId": "${C}"}},
+        {"command": "export_audio", "args": {"file": str(out)}},
+    ]
+    results, proc = run_script(ctx.bin, cmds, SESSION, extra_env={"MOSH_SERVICE_PORT": "8796"})
+    fails = failed_commands(results)
+    comp = next((r for r in results if r.get("command") == "compile_render"), None)
+    cdata = (comp or {}).get("data", {}) or {}
+    outputs = sorted(glob.glob(str(_mosh_session_base() / SESSION / "renders" / "*" / "output.wav")))
+    detail = {"failed_commands": fails, "compile": cdata}
+    if fails or not outputs:
+        detail["stderr"] = proc.stderr[-500:]
+        return row("Compile render (fake, generative-only)", False, detail)
+    xout = outputs[0]
+    xin = Path(xout).parent / "input.wav"
+    so = stats(xout)
+    differs = diff_rms(str(xin), xout) if xin.exists() else None
+    final = stats(out) if out.exists() else None
+    ok = (cdata.get("mode") == "reimagine" and cdata.get("backend") == "fake"
+          and so["rms"] > 0.001 and (differs is None or differs > 0.001)
+          and final and final["rms"] > 0.001)
+    detail.update({"wav": str(xout), **so, "diff_from_input_rms": differs,
+                   "mode": cdata.get("mode"), "backend": cdata.get("backend"),
+                   "reasoning": cdata.get("reasoning"), "final_export": str(out)})
+    return row("Compile render (fake, generative-only)", ok, detail)
+
+
 def check_full_loop(ctx):
     out = ART / "05_full_loop.wav"
     cmds = [
@@ -567,8 +608,8 @@ def check_midi_render(ctx):
                 "out_rms": out_s["rms"], "render_vs_bounce_rms": altered})
 
 
-OFFLINE_CHECKS = [check_makes_sound, check_drums, check_transform, check_midi_render, check_full_loop,
-                  check_relative_ref_export, check_bypass_layer, check_render_artifact_portability]
+OFFLINE_CHECKS = [check_makes_sound, check_drums, check_transform, check_compile_render, check_midi_render,
+                  check_full_loop, check_relative_ref_export, check_bypass_layer, check_render_artifact_portability]
 
 
 # ── main ────────────────────────────────────────────────────────────────────────

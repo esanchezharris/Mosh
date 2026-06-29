@@ -161,6 +161,7 @@ namespace mosh::ids
     MOSH_DECLARE_ID (status)           // empty | queued | rendering | ready | error | dirty
     MOSH_DECLARE_ID (createdBy)        // user | (future) monster
     MOSH_DECLARE_ID (userKept)
+    MOSH_DECLARE_ID (compiledEnvelope) // TRANSIENT: JSON of the last compile_render result (mode/backend/reasoning/say) — non-undoable, like lyricProposals
 
     // params child + colors
     MOSH_DECLARE_ID (PARAMS)

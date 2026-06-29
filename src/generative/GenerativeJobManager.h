@@ -68,6 +68,14 @@ public:
     juce::var generateLyrics (const juce::String& mode, const juce::var& spec,
                               int lineIndex, int afterIndex, const juce::var& regen);
 
+    /** Prompt compiler (POST /compile_render) — generative-only v1. Turns a loose
+        `instruction` into a VALIDATED render envelope. `intensity` < 0 ⇒ unset (let the
+        compiler infer); `backend` ∈ ""(auto)|"fake"|"llm". SYNCHRONOUS — call on a
+        BACKGROUND thread (mirrors transcribe()/generateLyrics). Returns
+        { ok, backend, mode, reasoning, envelope|null, say|null }, or {} on failure. */
+    juce::var compileRender (const juce::String& instruction, int intensity,
+                             const juce::String& backend);
+
     juce::String serviceBuild() const { return svcBuild; }
 
 private:

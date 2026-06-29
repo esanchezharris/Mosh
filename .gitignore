@@ -84,6 +84,7 @@ midi_rag_database.pkl
 test-results/
 mosh-*.png
 verify-artifacts/
+scripts/compiler-eval/artifacts/
 
 # Local agent/runtime scratch
 .gstack/
