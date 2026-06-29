@@ -54,6 +54,13 @@ PromptFeed serves guaranteed-renderable, teardown-seeded command sequences (from
 fixes the handoff's "mixing ops on empty tracks render to silence". Build it from real teardowns
 (`grpo_bridge.py --results ...`) or from any list of compiled programs.
 
+> ⚠️ **Do NOT use `seed_promptfeed` to build a GRPO prompt's `startCommands`.** It *flattens* a list of
+> programs into one loose command list that does not render as a coherent sequence, and the scrape's
+> thin compiled programs don't render to audio on their own anyway (the scrape's rewards came from
+> rendering the **full reconstructed recipe with stems**, not the stored program — they are NOT
+> program-reproducible). The activated audio-RL loop instead uses **whole-sequence, audio-bearing seed
+> templates** — see §7.
+
 ## 3. rewards.jsonl — reward-labelled rollouts (offline warm-start / logging)
 
 One JSON line per rollout:
@@ -102,3 +109,52 @@ copyrighted media) is the owner's cost/posture decision.
 "$TEARDOWN_PY" service/teardown/flywheel/build_composite_reward.py /tmp/td-anchors-synth /tmp/td-anchors-real
 # → service/teardown/flywheel/composite_reward.pt  (proj + ex_timbre + ex_timing + meta)
 ```
+
+## 7. The activated audio-RL loop (rl-audio-v1) — PROVEN
+
+The GRPO trainer (worktree `funny-mendel-aeca12`, branch `claude/funny-mendel-aeca12`) now gets a
+**real, non-degenerate audio-reward gradient** against the composite reward — **with ZERO change to the
+trainer's logic** (a new `--rl-data` prompt set + env only).
+
+**Why the first wiring got reward μ=0 (the diagnosis):** the policy's old prompts (`rl-v1`) were
+*single micro-edits* ("set the tempo to 142"). The policy correctly emits one command; `+export_audio`
+→ an **empty edit → no audio → reward 0**. And `grpo.py` zeros a whole group's advantage when reward
+**std < 1e-6** — an all-silent group gives literally **no gradient**. So the fix is the *prompt
+distribution*, not the reward or the renderer (the renderer is real: `Oracle.render` → `Mosh
+--run-script` → decode, hard-fails on empty WAV; no fake path).
+
+**The seed strategy (edit-on-top of a NON-SILENT base):** `ui/scripts/rl/buildRlAudioPrompts.mts`
+emits trap/lofi `EvalExample`s whose `startCommands` build a non-silent base (a drum pattern with
+inline `notes`, a `add_test_tone_clip`, or a melody) — so **every rollout renders** and the group gets
+reward *variance* (good edits > no-ops > broken edits) instead of an all-zero collapse. The edits are
+**content-changing only** (add a melody/drums/tone layer): the reward loudness-normalizes (the
+"can't-win-by-getting-louder" guard), so **volume/gain/mute edits are reward-INVARIANT** → they give
+zero within-group variance → they don't belong in this RL set. Tier-B (empty-seed "build a beat from
+scratch") is the curriculum graduation, mixed in via `--tier-b` once Tier-A converges.
+
+**A reward bug this surfaced + fixed:** `oracle/score.py:loudness_normalize` guarded clipping to peak
+≤ **1.0**, but the floor rejects peak > **0.999** as broken — so RMS-normalizing transient-heavy audio
+(drums, crest ≳ 10) landed at peak 1.0 → flagged "clipped/broken" → `clean=0` → **every legitimate
+non-silent render scored 0**. Fixed: guard to a ceiling of **0.99** (headroom). No-op for real-music
+mixes (crest < 9.9) and the existing test fixtures (crest 3.66) → validated pull/keystone unchanged;
+`verify.py` ALL GREEN.
+
+**Run it (env only — no trainer code change):**
+```bash
+cd <funny-mendel worktree>
+# 1) build the audio-bearing prompt set (Tier-A; add --tier-b --variants N to scale/curriculum)
+cd ui && npx tsx scripts/rl/buildRlAudioPrompts.mts --out ../service/sft/.rl-data/rl-audio-v1 --variants 3 && cd ..
+# 2) train against the ACTIVATED composite reward
+MOSH_RL_REWARD=audio  MOSH_RL_REWARD_MODE=musical \
+MOSH_ACTIVATED_TEARDOWN=<sleepy-euler>/service  TEARDOWN_PY=<sleepy-euler teardown venv> \
+MOSH_BIN=/Applications/Mosh.app/Contents/MacOS/Mosh \
+service/sft/.venv/bin/python service/rl/grpo.py --rl-data service/sft/.rl-data/rl-audio-v1 \
+  --sft-adapter service/sft/.adapters/v2 --out /private/tmp/rl-audio --smoke   # drop --smoke + add --iters N to scale
+# 3) gate (proves the gradient): reward μ>0 AND signal>0
+TEARDOWN_PY service/rl/verify_audio_gradient.py --log <grpo.log> --work /private/tmp/rl-audio/_work/audio
+```
+
+**Proven (smoke, real composite reward):** every rollout rendered (0→few fails), **reward μ 0.21 → 0.30
+climbing**, **signal 4/4 both steps** (every group has a real gradient), determinism from PCM-identical
+renders. Cost note: ~8 min/step with the real MuQ reward (≈20 rollouts/step; `score_audio_cli` reloads
+MuQ per step). Gate verifier: `service/rl/verify_audio_gradient.py` (in the trainer worktree).
