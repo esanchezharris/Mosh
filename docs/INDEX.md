@@ -76,6 +76,13 @@ Repo root, each with a status banner. `02` lives here in `docs/`; there is no st
 - [`auto-loop/`](auto-loop/) — the autonomous deferred-work loop's backlog + ledger
   (`backlog.jsonl`, the G1–G14 parity gaps that drive it).
 
+## Templates
+
+- [`templates/executive-loop-protocol.md`](templates/executive-loop-protocol.md) — the
+  conservative executive-loop protocol template: trunk-first fetch, low-risk squash-merge rules,
+  human-gated surfaces, duplicate-thread/PR guard, memory note format, and final reporting
+  checklist.
+
 ## Future roadmap (post-v0, not yet built)
 
 - [`plans/`](plans/) — the "wave" specs grounded in the pinned engine:
