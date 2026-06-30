@@ -126,7 +126,7 @@ async function reflect(directive: string, ev: Eval, variant: number): Promise<st
     `\nRewrite the directive to FIX these flaws and raise the score. Be specific and musical (e.g. exact velocity ranges, "make bar 2 differ", "never place a kick on beats 2 or 4"). ${variant % 2 ? "Be aggressive and rethink the approach." : "Refine the current directive."} Output ONLY the directive.`,
   ].join("\n");
   const raw = await reflectBrain([{ role: "system", content: sys }, { role: "user", content: user }], { json: false });
-  return raw.replace(/^```[a-z]*\n?/i, "").replace(/```$/i, "").trim().slice(0, 1200);
+  return raw.replace(/^```[a-z]*\n?/i, "").replace(/```$/i, "").trim().slice(0, 2000);  // 1200 cut directives mid-sentence
 }
 
 async function main() {
