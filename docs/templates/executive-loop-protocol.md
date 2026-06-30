@@ -68,4 +68,3 @@ Stop and escalate if the task requires:
 - Destructive cleanup
 - Hardware-only validation
 - Re-arming or invoking the loop workflow script
-
