@@ -93,10 +93,11 @@ export const AGENT_COMMANDS: AgentCommand[] = [
 
   // ── generative (Tier-B) ─────────────────────────────────────────────────
   { command: "create_render_layer", desc: "Attach a generative re-imagine layer to ANY clip — wave, MIDI or drum (MIDI/drum is auto-bounced to audio first), optionally scoped to a beat range, in seconds", args: [S("clipId"), S("adapter", false), N("regionStart", false, "scope start in seconds"), N("regionEnd", false, "scope end in seconds")] },
-  { command: "set_render_param", desc: "Set a render-layer parameter (prompt/noise/seed, or transform target/strength)", args: [S("clipId"), S("prompt", false), N("nl", false, "noise level 0-1"), N("seed", false), S("target", false, "transform target instrument or free-text"), N("strength", false, "transform strength 0-100")] },
+  { command: "set_render_param", desc: "Set a render-layer parameter (prompt/noise/seed, transform target/strength, or whole-clip coverage)", args: [S("clipId"), S("prompt", false), N("nl", false, "noise level 0-1"), N("seed", false), S("target", false, "transform target instrument or free-text"), N("strength", false, "transform strength 0-100"), S("coverage", false, '"auto"|"loop"|"stitch" — cover a long clip by tiling a cycle or stitching windows')] },
   { command: "render_layer", desc: "Run the generative render on a clip's layer", args: [S("clipId")] },
-  { command: "accept_render", desc: "Accept a finished render (lands it as a clip)", args: [S("clipId")] },
+  { command: "accept_render", desc: "Accept a finished render (MIDI/drum: lands it as a clip; wave clips auto-apply in place, so this is a no-op for them)", args: [S("clipId")] },
   { command: "reject_render", desc: "Reject a render", args: [S("clipId")] },
+  { command: "reset_render_layer", desc: "Restore a wave clip's ORIGINAL audio (undo the in-place re-imagine; the layer stays so you can re-render)", args: [S("clipId")] },
   { command: "bypass_layer", desc: "Bypass/enable a clip's render layer", args: [S("clipId"), B("bypassed")] },
   { command: "freeze_layer", desc: "Freeze a clip's render layer (commit the rendered audio)", args: [S("clipId")] },
   { command: "bounce_layer_to_clip", desc: "Bounce a render layer down to a plain clip", args: [S("clipId")] },

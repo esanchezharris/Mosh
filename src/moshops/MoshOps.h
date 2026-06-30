@@ -238,6 +238,7 @@ private:
     juce::var cmdCancelRender     (const juce::var& args);
     juce::var cmdAcceptRender     (const juce::var& args);
     juce::var cmdRejectRender     (const juce::var& args);
+    juce::var cmdResetRenderLayer (const juce::var& args);   // wave clips: restore the pre-render source (undo the in-place apply)
     juce::var cmdBypassLayer      (const juce::var& args);
     juce::var cmdFreezeLayer      (const juce::var& args);
     juce::var cmdBounceLayerToClip(const juce::var& args);
@@ -354,6 +355,12 @@ private:
     void            finalizeRender (const juce::String& clipId, const juce::File& outputWav,
                                     const juce::File& manifestFile, const juce::String& cacheKey,
                                     const juce::String& serviceError = {});
+    // Auto-apply a completed render to a WAVE clip in place (the clip's own audio/waveform
+    // becomes the render artifact — instant preview). Stores the original source once so
+    // reset_render_layer can restore it. Returns false for non-wave clips / missing artifact
+    // (caller falls back to the legacy lane-landing path). Message-thread only; undoable txn.
+    bool            applyRenderInPlace (const juce::String& clipId, juce::ValueTree node,
+                                        const juce::File& artifact, const juce::String& cacheKey);
 
     // ── helpers ──
     te::AudioTrack* createAudioTrack (const juce::String& name);

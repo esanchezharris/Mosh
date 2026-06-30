@@ -165,6 +165,9 @@ namespace mosh::ids
     MOSH_DECLARE_ID (cacheArtifact)
     MOSH_DECLARE_ID (status)           // empty | queued | rendering | ready | error | dirty
     MOSH_DECLARE_ID (renderError)      // last service error string when status=="error" (additive, optional)
+    MOSH_DECLARE_ID (originalSourceRef) // wave clips: the pre-render source path, stored once, so Reset can restore it (additive)
+    MOSH_DECLARE_ID (appliedInPlace)   // wave clips: true while the clip's source IS the render artifact (auto-apply) (additive)
+    MOSH_DECLARE_ID (coverage)         // whole-clip coverage: "auto" | "loop" (tile a cycle) | "stitch" (window+crossfade) (additive)
     MOSH_DECLARE_ID (createdBy)        // user | (future) monster
     MOSH_DECLARE_ID (userKept)
 

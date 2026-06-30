@@ -20,6 +20,9 @@ export type RenderLayer = {
   regionStart?: number;
   regionEnd?: number;
   error?: string;     // the service's reason, populated when status === "error"
+  appliedInPlace?: boolean;  // wave clips: the clip's own audio IS the render (instant in-place preview)
+  hasOriginal?: boolean;     // wave clips: a pre-render original is stored → Reset is available
+  coverage?: "auto" | "loop" | "stitch";  // whole-clip: how a clip longer than the model window is covered
 };
 
 // LYR-001 — Finish-My-Song lyric sheet (per-track), from MoshOps.lyricSheetToVar().

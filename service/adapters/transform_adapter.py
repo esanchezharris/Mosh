@@ -27,6 +27,7 @@ import wave
 # carries the same human-readable `reasoning` field the drawer renders (AL-006).
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # service/
 import quality_readout  # noqa: E402
+import coverage  # noqa: E402  (whole-clip tile/stitch orchestration)
 
 
 def _cli_path() -> str:
@@ -199,9 +200,15 @@ def _render_real(input_wav: str, output_wav: str, params: dict) -> dict:
     }
 
 
-def render(input_wav: str, output_wav: str, params: dict) -> dict:
+def _render_window(input_wav: str, output_wav: str, params: dict) -> dict:
     """Real RAVE timbre transfer when installed (setup-transform.sh + a .ts model),
     else the deterministic fake transform (Route B). Same manifest envelope either way."""
     if available():
         return _render_real(input_wav, output_wav, params)
     return _render_fake(input_wav, output_wav, params)
+
+
+def render(input_wav: str, output_wav: str, params: dict) -> dict:
+    """Whole-clip aware entry: transform has no length cap, so it processes the full input for
+    the default/stitch path and tiles one cycle for the loop path."""
+    return coverage.render(_render_window, input_wav, output_wav, params, coverage.WINDOW_UNCAPPED)

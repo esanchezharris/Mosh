@@ -676,6 +676,7 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "cancel_render")     return cmdCancelRender (args);
     if (name == "accept_render")     return cmdAcceptRender (args);
     if (name == "reject_render")     return cmdRejectRender (args);
+    if (name == "reset_render_layer") return cmdResetRenderLayer (args);
     if (name == "bypass_layer")      return cmdBypassLayer (args);
     if (name == "freeze_layer")      return cmdFreezeLayer (args);
     if (name == "bounce_layer_to_clip") return cmdBounceLayerToClip (args);
@@ -5433,6 +5434,7 @@ juce::var MoshOps::cmdSetRenderParam (const juce::var& args)
     if (args.hasProperty ("strength")) params.setProperty (ids::strength, args.getProperty ("strength", 65.0), &undoManager());  // Route B
     if (args.hasProperty ("seed"))   node.setProperty (ids::seed, args.getProperty ("seed", 0), &undoManager());
     if (args.hasProperty ("mode"))   node.setProperty (ids::mode, args.getProperty ("mode", "reimagine"), &undoManager());
+    if (args.hasProperty ("coverage")) node.setProperty (ids::coverage, args.getProperty ("coverage", "auto"), &undoManager());  // whole-clip: auto|loop|stitch
     if (args.hasProperty ("modelVariant")) node.setProperty (ids::modelVariant, args.getProperty ("modelVariant", ""), &undoManager());
     if (args.hasProperty ("lab"))    params.setProperty (juce::Identifier ("lab"), args.getProperty ("lab", false), &undoManager());
 
@@ -5614,6 +5616,20 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
 
     if (auto* wave = dynamic_cast<te::WaveAudioClip*> (clip))
     {
+        // Always re-imagine the PRISTINE original. Once a render is auto-applied in place
+        // (the clip's source becomes the artifact), staging getCurrentSourceFile() would
+        // re-imagine the previous render and compound it — so prefer originalSourceRef.
+        juce::File sourceForStaging = wave->getCurrentSourceFile();
+        if (const auto orig = node[ids::originalSourceRef].toString(); orig.isNotEmpty())
+        {
+            // originalSourceRef may be project-relative — resolve against the edit dir (a bare
+            // juce::File("audio/x.wav") would be CWD-relative and miss, then wrongly stage the
+            // already-applied artifact and compound the render).
+            juce::File of = juce::File::isAbsolutePath (orig) ? juce::File (orig)
+                            : eng.editFile().getParentDirectory().getChildFile (orig);
+            if (of.existsAsFile()) sourceForStaging = of;
+        }
+
         bool staged = false;
         if (subRegion)
         {
@@ -5622,7 +5638,7 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
             if (sliceable)
             {
                 const double off = cpos.getOffset().inSeconds();
-                staged = stageWavRegionAt44k (wave->getCurrentSourceFile(), rs - cs + off, re - cs + off, input);
+                staged = stageWavRegionAt44k (sourceForStaging, rs - cs + off, re - cs + off, input);
             }
             if (! staged)   // never fall back to the whole clip for a section request
                 return errResult ("render_layer", "section render needs an un-stretched, non-looping wave clip");
@@ -5632,12 +5648,12 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
             // Whole clip: stage the entire source at 44100/16-bit (was a raw copyFileTo, which
             // preserved a non-44100 rate the engine reader can't handle without ffmpeg).
             juce::AudioFormatManager fm; fm.registerBasicFormats();
-            std::unique_ptr<juce::AudioFormatReader> rd (fm.createReaderFor (wave->getCurrentSourceFile()));
+            std::unique_ptr<juce::AudioFormatReader> rd (fm.createReaderFor (sourceForStaging));
             const double srcLenSec = (rd != nullptr && rd->sampleRate > 0.0)
                 ? (double) rd->lengthInSamples / rd->sampleRate : 0.0;
             rd.reset();
             if (srcLenSec <= 0.0
-                || ! stageWavRegionAt44k (wave->getCurrentSourceFile(), 0.0, srcLenSec, input))
+                || ! stageWavRegionAt44k (sourceForStaging, 0.0, srcLenSec, input))
                 return errResult ("render_layer", "could not stage source region");
         }
     }
@@ -5669,7 +5685,11 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
     if (node[ids::cacheKey].toString() == fp
         && mosh::resolveCacheArtifact (node, eng.editFile().getParentDirectory()).existsAsFile())
     {
-        node.setProperty (ids::status, "ready", nullptr);
+        // Re-apply on HIT too (a wave clip Reset since the last render must re-swap to the
+        // cached artifact). applyRenderInPlace is a no-op repoint when already applied.
+        auto art = mosh::resolveCacheArtifact (node, eng.editFile().getParentDirectory());
+        if (! applyRenderInPlace (clipId, node, art, fp))
+            node.setProperty (ids::status, "ready", nullptr);
         emit ("layer_status", [&] { auto* o = new DynamicObject();
             o->setProperty ("clipId", clipId); o->setProperty ("layerId", node[ids::id]);
             o->setProperty ("status", "ready"); o->setProperty ("cache", "hit"); return var (o); }());
@@ -5700,6 +5720,28 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
         }
     p->setProperty ("colors", colors);
     p->setProperty ("lab", (bool) params.getProperty (juce::Identifier ("lab"), false));
+
+    // Whole-clip coverage (1b): tell the adapter the FULL target length + how to cover a clip
+    // longer than the model's single render window — tile one cycle ("loop") or window+crossfade
+    // ("stitch"). Fixes the "render came back short" 8s-cap bug. The staged input.wav IS the audio
+    // to cover, so its duration is the target. "auto" → loop a clip flagged looping, else stitch.
+    {
+        double inputDur = re - rs;
+        { juce::AudioFormatManager fm; fm.registerBasicFormats();
+          if (std::unique_ptr<juce::AudioFormatReader> rd (fm.createReaderFor (input));
+              rd != nullptr && rd->sampleRate > 0.0)
+              inputDur = (double) rd->lengthInSamples / rd->sampleRate; }
+        juce::String cov = node[ids::coverage].toString();
+        if (cov.isEmpty() || cov == "auto")
+        {
+            const bool looping = [&] { if (auto* w = dynamic_cast<te::WaveAudioClip*> (clip)) return w->isLooping(); return false; }();
+            cov = looping ? "loop" : "stitch";
+        }
+        p->setProperty ("duration_s", inputDur);
+        p->setProperty ("coverage", cov);
+        p->setProperty ("loop_seconds", inputDur);   // one cycle; the adapter clamps to its window
+        p->setProperty ("xfade_ms", 8.0);
+    }
 
     const auto jobId = jobManager.submitJob (node[ids::modelAdapter].toString(),
                                              input, output, manifest, var (p));
@@ -5803,9 +5845,17 @@ void MoshOps::finalizeRender (const juce::String& clipId, const juce::File& outp
     }
 
     node.setProperty (ids::renderError, "", nullptr);   // clear on success
-    node.setProperty (ids::cacheArtifact, outputWav.getFullPathName(), nullptr);
-    node.setProperty (ids::cacheKey, cacheKey, nullptr);
-    node.setProperty (ids::status, "ready", nullptr);
+
+    // Auto-apply in place for WAVE clips (the new default): the clip's own waveform swaps to
+    // the render result instantly — no accept step, no separate lane. Non-wave (MIDI/drum)
+    // clips fall back to the legacy lane path (accept_render) until Phase 2;
+    // applyRenderInPlace returns false for them and we keep the artifact for that path.
+    if (! applyRenderInPlace (clipId, node, outputWav, cacheKey))
+    {
+        node.setProperty (ids::cacheArtifact, outputWav.getFullPathName(), nullptr);
+        node.setProperty (ids::cacheKey, cacheKey, nullptr);
+        node.setProperty (ids::status, "ready", nullptr);
+    }
 
     var qa = manifestFile.existsAsFile() ? JSON::parse (manifestFile.loadFileAsString()) : var();
     emit ("layer_status", [&] { auto* o = new DynamicObject();
@@ -5813,6 +5863,76 @@ void MoshOps::finalizeRender (const juce::String& clipId, const juce::File& outp
         o->setProperty ("status", "ready"); o->setProperty ("cache", "miss");
         o->setProperty ("qa", qa); return var (o); }());
     emitSnapshotInvalidated();
+}
+
+bool MoshOps::applyRenderInPlace (const juce::String& clipId, juce::ValueTree node,
+                                  const juce::File& artifact, const juce::String& cacheKey)
+{
+    auto* wave = dynamic_cast<te::WaveAudioClip*> (findClip (clipId));
+    if (wave == nullptr || ! artifact.existsAsFile()) return false;   // non-wave → legacy lane path
+
+    // In-place apply replaces the WHOLE clip's source. A sub-region (section-scoped) render
+    // can't simply repoint the whole source, so those keep the legacy lane landing.
+    {
+        auto pos = wave->getPosition();
+        const double cs = pos.getStart().inSeconds(), ce = pos.getEnd().inSeconds();
+        const double rs = juce::jlimit (cs, ce, (double) node[ids::timeRangeStart]);
+        const double re = juce::jlimit (cs, ce, (double) node[ids::timeRangeEnd]);
+        if ((rs > cs + 1.0e-3) || (re < ce - 1.0e-3)) return false;   // sub-region → legacy path
+    }
+
+    // Durable per-render copy (a disposable artifact), named by the fingerprint so a re-render
+    // writes a NEW file instead of overwriting the one the clip currently plays/displays.
+    auto dest = eng.sessionDir().getChildFile ("audio")
+                    .getChildFile (node[ids::id].toString() + "-" + cacheKey.substring (0, 12))
+                    .withFileExtension ("wav");
+    dest.getParentDirectory().createDirectory();
+    if (dest != artifact && ! dest.existsAsFile() && ! artifact.copyFileTo (dest))
+        return false;
+
+    // Capture the ORIGINAL source ONCE (first apply: the clip's current source IS the original).
+    // Stored ABSOLUTE; cmdSaveAs's consolidateRenderArtifacts copies it into audio/renders/ and
+    // re-points it relative, so the saved project carries no absolute pool path AND "Reset to
+    // original" survives a Save-As + move.
+    if (node[ids::originalSourceRef].toString().isEmpty())
+        node.setProperty (ids::originalSourceRef, wave->getCurrentSourceFile().getFullPathName(), nullptr);
+
+    // The in-place swap is a regenerable PREVIEW, not an undo-history edit — Tracktion's
+    // SourceFileReference change isn't routed through the UndoManager. reset_render_layer is the
+    // way back; it persists across save/reload via originalSourceRef. (relative iff under the
+    // project dir, mirroring relink_clip.)
+    const bool local = dest.isAChildOf (eng.editFile().getParentDirectory());
+    mosh::repointWaveClipSource (*wave, dest, eng.editFile().getParentDirectory(), local);
+    node.setProperty (ids::appliedInPlace, true, nullptr);
+    // cacheArtifact stored ABSOLUTE; cmdSaveAs's consolidateRenderArtifacts copies it into
+    // audio/renders/ + re-points it relative (so the saved project carries no absolute pool path).
+    node.setProperty (ids::cacheArtifact, dest.getFullPathName(), nullptr);
+    node.setProperty (ids::cacheKey, cacheKey, nullptr);
+    node.setProperty (ids::status, "ready", nullptr);
+    return true;
+}
+
+juce::var MoshOps::cmdResetRenderLayer (const juce::var& args)
+{
+    const auto clipId = args.getProperty ("clipId", var()).toString();
+    auto* clip = findClip (clipId);
+    auto node = findRenderLayer (clipId);
+    if (clip == nullptr || ! node.isValid()) return errResult ("reset_render_layer", "no render layer");
+    auto* wave = dynamic_cast<te::WaveAudioClip*> (clip);
+    if (wave == nullptr) return errResult ("reset_render_layer", "not a wave clip");
+    const auto orig = node[ids::originalSourceRef].toString();
+    if (orig.isEmpty()) return errResult ("reset_render_layer", "no original source to restore");
+    juce::File of = juce::File::isAbsolutePath (orig) ? juce::File (orig)
+                    : eng.editFile().getParentDirectory().getChildFile (orig);
+    if (! of.existsAsFile()) return errResult ("reset_render_layer", "original source missing");
+
+    const bool local = of.isAChildOf (eng.editFile().getParentDirectory());
+    mosh::repointWaveClipSource (*wave, of, eng.editFile().getParentDirectory(), local);
+    node.setProperty (ids::appliedInPlace, false, nullptr);
+    node.setProperty (ids::status, "dirty", nullptr);   // re-imagine is available again
+    logLine ("reset_render_layer", args, true, {}, false);
+    emitSnapshotInvalidated();
+    return okResult ("reset_render_layer");
 }
 
 juce::var MoshOps::cmdListColors (const juce::var&)
@@ -5940,6 +6060,14 @@ juce::var MoshOps::cmdAcceptRender (const juce::var& args)
     auto* clip = findClip (clipId);
     auto node = findRenderLayer (clipId);
     if (clip == nullptr || ! node.isValid()) return errResult ("accept_render", "no render layer");
+    if (dynamic_cast<te::WaveAudioClip*> (clip) != nullptr && (bool) node[ids::appliedInPlace])
+    {
+        // Whole-clip wave renders AUTO-APPLY in place (no lane, no accept step). accept is a
+        // no-op for them — Reset restores the original. (Sub-region wave renders are NOT
+        // applied in place and still land via the lane path below.)
+        logLine ("accept_render", args, true, {}, false);
+        return okResult ("accept_render");
+    }
     // Resolve move-aware (AL-009): a Save-As'd project stores cacheArtifact relative.
     juce::File artifact = mosh::resolveCacheArtifact (node, eng.editFile().getParentDirectory());
     if (! artifact.existsAsFile()) return errResult ("accept_render", "nothing rendered to accept");
@@ -6024,8 +6152,28 @@ juce::var MoshOps::cmdBypassLayer (const juce::var& args)
     auto node = findRenderLayer (args.getProperty ("clipId", var()).toString());
     if (! node.isValid()) return errResult ("bypass_layer", "no render layer");
     const bool bypassed = (bool) args.getProperty ("bypassed", false);
+    const auto bypClipId = args.getProperty ("clipId", var()).toString();
     beginTxn ("bypass_layer");
     node.setProperty (ids::status, bypassed ? "bypassed" : "ready", &undoManager());
+
+    // Wave clips apply in place → bypass is an A/B: swap the source to the ORIGINAL when
+    // bypassed, back to the render artifact when enabled. (Non-wave clips use the landed-clip
+    // mute below.) The swap is the same regenerable-preview op as apply/reset.
+    if (auto* wave = dynamic_cast<te::WaveAudioClip*> (findClip (bypClipId)))
+    {
+        if (const auto origRef = node[ids::originalSourceRef].toString(); origRef.isNotEmpty())
+        {
+            const auto art = mosh::resolveCacheArtifact (node, eng.editFile().getParentDirectory()).getFullPathName();
+            const juce::String origAbs = juce::File::isAbsolutePath (origRef) ? origRef
+                : eng.editFile().getParentDirectory().getChildFile (origRef).getFullPathName();
+            const juce::String tgt = bypassed ? origAbs : art;
+            if (juce::File tf (tgt); tf.existsAsFile())
+            {
+                const bool local = tf.isAChildOf (eng.editFile().getParentDirectory());
+                mosh::repointWaveClipSource (*wave, tf, eng.editFile().getParentDirectory(), local);
+            }
+        }
+    }
 
     // AL-008 — re-route REAL audio, not just the status flag: mute the landed neural
     // clip when bypassed so the mix falls back to the original (pre-render) source, and
@@ -7521,6 +7669,9 @@ juce::var MoshOps::clipToVar (te::Clip& c)
         r->setProperty ("id", rl[ids::id]);
         r->setProperty ("status", rl[ids::status]);
         r->setProperty ("error", rl[ids::renderError]);   // "" unless status=="error"
+        r->setProperty ("appliedInPlace", (bool) rl[ids::appliedInPlace]);   // wave: the clip's source IS the render
+        r->setProperty ("hasOriginal", rl[ids::originalSourceRef].toString().isNotEmpty());   // Reset is available
+        r->setProperty ("coverage", rl[ids::coverage].toString().isNotEmpty() ? rl[ids::coverage] : var ("auto"));   // whole-clip strategy
         r->setProperty ("adapter", rl[ids::modelAdapter]);
         r->setProperty ("mode", rl[ids::mode]);
         r->setProperty ("seed", (int) rl[ids::seed]);
