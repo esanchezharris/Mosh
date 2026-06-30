@@ -29,6 +29,7 @@
 
 import { validateCommand } from "./commands";
 import type { AgentCommandCall } from "./executor";
+import type { BeatPalette } from "./palette";
 export type { AgentCommandCall } from "./executor";
 
 // ── note / spec types ─────────────────────────────────────────────────────────
@@ -120,8 +121,57 @@ export type BuildOpts = {
   maxRetries?: number; // re-prompts per slot before fallback (default 2)
   refineTempo?: boolean; // ask the model to pick the BPM within range (default true)
   extraSystem?: string; // an evolvable global directive appended to the note system prompt (GEPA optimizes this)
+  palette?: BeatPalette; // when present, put REAL sounds on every track (kit + melodic 808). Omitted → stock auto-load (back-compat).
+  productionSeed?: number; // deterministic sound-pick seed (default 0)
   log?: (m: string) => void;
 };
+
+// ── production plan (real sounds per track) ───────────────────────────────────
+// completeness is HARNESS-guaranteed (every triggered drum pad + the 808 get a real
+// one-shot); which exact sound is chosen is a deterministic palette pick now (the
+// taste/region-of-preference is learned later, #56). Drum-pad GM note → palette role.
+
+const PAD_ROLE: Record<number, string> = { 36: "kick", 38: "snare", 40: "snare", 39: "clap", 42: "hat", 44: "hat", 46: "hat", 49: "hat" };
+
+export type ProdPad = { note: number; path: string; role: string };
+export type TrackProduction =
+  | { kind: "drum"; pads: ProdPad[] }
+  | { kind: "melodic808"; note: number; path: string; rootNote: number | null }
+  | { kind: "none" };
+
+const isBassTrack = (track: TrackSpec): boolean => track.slots.some((s) => s.id === "bass");
+
+/** Decide the real sounds for a track from the palette (deterministic by seed). Drum →
+ *  a real one-shot per TRIGGERED pad; bass → a real 808 played melodically; else none. */
+export function planTrackProduction(track: TrackSpec, palette: BeatPalette, seed: number): TrackProduction {
+  if (track.kind === "drum") {
+    const pads: ProdPad[] = [];
+    for (const slot of track.slots) {
+      if (slot.role !== "drum" || slot.fixedPitch == null) continue;
+      const role = PAD_ROLE[slot.fixedPitch];
+      if (!role) continue;
+      const item = palette.pick(role, seed);
+      if (item) pads.push({ note: slot.fixedPitch, path: item.path, role });
+    }
+    return pads.length ? { kind: "drum", pads } : { kind: "none" };
+  }
+  if (isBassTrack(track)) {
+    const item = palette.pick("808", seed);
+    if (item) return { kind: "melodic808", note: item.rootNote ?? 36, path: item.path, rootNote: item.rootNote };
+  }
+  return { kind: "none" }; // melody/lead → 4OSC (the auto default); a real synth is a live-app load_plugin choice
+}
+
+/** Trim notes so none overlaps the next note-on — the engine's monophonic 808 must not
+ *  ring over itself ("make sure it doesn't overlap with itself"). Deterministic. */
+export function monophonicize(notes: Note[], gap = 0.02): Note[] {
+  const sorted = [...notes].sort((a, b) => a.start - b.start);
+  for (let i = 0; i < sorted.length - 1; i++) {
+    const maxLen = sorted[i + 1].start - sorted[i].start - gap;
+    if (maxLen > 0 && sorted[i].length > maxLen) sorted[i] = { ...sorted[i], length: maxLen };
+  }
+  return sorted;
+}
 
 // ── structured-output system prompt (music only — NOT the emote persona) ──────
 
@@ -305,12 +355,25 @@ export async function buildBeat(spec: BeatSpec, brain: BrainFn, sink: BeatSink, 
   const steps: SlotReport[] = [];
   let structuralError: string | undefined;
 
+  const prodSeed = opts.productionSeed ?? 0;
+
   for (const track of spec.tracks) {
     // 2. deterministic structure: track (instrument auto-loads) + one MIDI clip
     const tRes = await issue({ command: "create_track", args: { name: track.name, type: track.kind } });
     if (!tRes.ok || !tRes.id) { structuralError = `create_track "${track.name}" failed: ${tRes.error ?? "no id"}`; break; }
     const trackId = tRes.id;
     if (track.gainDb != null) await issue({ command: "set_track_volume", args: { trackId, db: track.gainDb } });
+
+    // 2b. PRODUCTION — put real sounds on the track. The 808 sampler must be assigned
+    // BEFORE add_midi_clip so the clip's default-instrument auto-load is a no-op (an
+    // instrument already present) — else 4OSC would double the 808.
+    const prod: TrackProduction = opts.palette ? planTrackProduction(track, opts.palette, prodSeed) : { kind: "none" };
+    if (prod.kind === "drum") {
+      for (const p of prod.pads) await issue({ command: "assign_sample", args: { trackId, note: p.note, file: p.path, name: p.role } });
+    } else if (prod.kind === "melodic808") {
+      await issue({ command: "assign_sample", args: { trackId, note: prod.note, file: prod.path, name: "808", mode: "melodic" } });
+    }
+
     const cRes = await issue({ command: "add_midi_clip", args: { trackId, start: 0, length: clipLengthSeconds(ctx) } });
     if (!cRes.ok || !cRes.id) { structuralError = `add_midi_clip on "${track.name}" failed: ${cRes.error ?? "no id"}`; break; }
     const clipId = cRes.id;
@@ -318,12 +381,14 @@ export async function buildBeat(spec: BeatSpec, brain: BrainFn, sink: BeatSink, 
     // 3. model fills each slot's note pattern (validated/retried/forced) → add_note
     for (const slot of track.slots) {
       const { notes, report } = await fillSlot(slot, ctx, brain, maxRetries, opts.extraSystem ?? "");
+      // a melodic 808 is monophonic — trim so notes never overlap themselves
+      const toApply = prod.kind === "melodic808" ? monophonicize(notes) : notes;
       let applied = 0;
-      for (const n of notes) {
+      for (const n of toApply) {
         const r = await issue({ command: "add_note", args: { clipId, pitch: n.pitch, start: n.start, length: n.length, velocity: n.velocity } });
         if (r.ok) applied++;
       }
-      log(`  ${track.name}/${slot.id}: ${applied} notes ${report.fallbackUsed ? "(FALLBACK)" : `(model, ${report.retries} retr)`}`);
+      log(`  ${track.name}/${slot.id}: ${applied} notes ${report.fallbackUsed ? "(FALLBACK)" : `(model, ${report.retries} retr)`}${prod.kind !== "none" ? ` [${prod.kind === "drum" ? `${prod.pads.length} real pads` : "real 808"}]` : ""}`);
       steps.push({ ...report, track: track.name, notesApplied: applied });
     }
   }

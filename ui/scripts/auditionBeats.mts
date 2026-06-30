@@ -10,13 +10,14 @@
 //   local:  AUDITION_PORT=8081 npm run tsx scripts/auditionBeats.mts -- --tag owner-v1
 //   floor:  npm run tsx scripts/auditionBeats.mts -- --no-model --tag fallback   (deterministic baseline)
 
-import { writeFileSync, mkdirSync, readFileSync } from "node:fs";
+import { writeFileSync, mkdirSync, readFileSync, existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { __resetMockForTests, mockExecute } from "../src/bridge.mock";
 import { buildBeat, type BeatSink, type BrainFn, type AgentCommandCall, type BuildResult } from "../src/agent/beatBuilder";
 import { BEAT_SPECS, beatSpecById } from "../src/agent/beatSpecs";
 import { OPTIMIZED_DIRECTIVE } from "../src/agent/beatDirective";
+import { makePalette, type BeatPalette } from "../src/agent/palette";
 import type { CommandResult } from "../src/types";
 
 type Line = { command: string; args: Record<string, unknown>; capture?: Record<string, string> };
@@ -42,6 +43,20 @@ const ENDPOINT = CLOUD
   ? "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
   : `http://127.0.0.1:${PORT}/v1/chat/completions`;
 const SPEC_IDS = (arg("specs", "") || BEAT_SPECS.map((s) => s.id).join(",")).split(",").map((s) => s.trim()).filter(Boolean);
+
+// --palette <dir>: put REAL sounds on every track (a real kit + a pitched 808) from the
+// vector palette (service/palette/build_palette.py output). Omitted → stock auto-load.
+const PALETTE_DIR = arg("palette", "");
+let PALETTE: BeatPalette | undefined;
+if (PALETTE_DIR) {
+  const mf = join(PALETTE_DIR, "manifest.json");
+  if (existsSync(mf)) {
+    PALETTE = makePalette(JSON.parse(readFileSync(mf, "utf8")));
+    console.log(`palette: ${PALETTE_DIR} (kicks ${PALETTE.size("kick")}, snares ${PALETTE.size("snare")}, hats ${PALETTE.size("hat")}, 808s ${PALETTE.size("808")})`);
+  } else {
+    console.log(`palette dir has no manifest.json (${mf}) — falling back to stock sounds`);
+  }
+}
 
 const isIdKey = (k: string) => /id$/i.test(k);
 const CREATES = new Set(["create_track", "add_midi_clip", "import_clip", "add_test_tone_clip", "duplicate_clip", "split_clip"]);
@@ -177,7 +192,7 @@ async function main() {
     const sink = new RecordingSink();
     let build: BuildResult;
     try {
-      build = await buildBeat(spec, brain, sink, { maxRetries: MAX_RETRIES, refineTempo: REFINE_TEMPO, extraSystem: DIRECTIVE, log: (m) => console.log(`    ${m}`) });
+      build = await buildBeat(spec, brain, sink, { maxRetries: MAX_RETRIES, refineTempo: REFINE_TEMPO, extraSystem: DIRECTIVE, palette: PALETTE, productionSeed: rep, log: (m) => console.log(`    ${m}`) });
     } catch (e) {
       console.log(`  ${tagId}: build threw ${(e as Error).message}`);
       continue;
