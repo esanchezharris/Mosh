@@ -10,7 +10,7 @@
 //
 //   AUDITION_CLOUD=1 npx tsx scripts/rl/buildValidityPack.mts --out ~/mosh-validity --per 2
 
-import { writeFileSync, mkdirSync } from "node:fs";
+import { writeFileSync, mkdirSync, statSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { __resetMockForTests, mockExecute } from "../../src/bridge.mock";
@@ -72,8 +72,8 @@ function renderRecipe(r: Recipe, wav: string, session: string): boolean {
   lines.push({ command: "export_audio", args: { file: wav, format: "wav", bitDepth: 16 } });
   const sf = wav.replace(/\.wav$/, ".script.jsonl");
   writeFileSync(sf, lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
-  const res = spawnSync(MOSH_BIN, ["--run-script"], { env: { ...process.env, MOSH_RUN_SCRIPT: sf, MOSH_SELFTEST_SESSION: session }, encoding: "utf8", timeout: 180000 });
-  return res.status === 0;
+  spawnSync(MOSH_BIN, ["--run-script"], { env: { ...process.env, MOSH_RUN_SCRIPT: sf, MOSH_SELFTEST_SESSION: session }, encoding: "utf8", timeout: 180000 });
+  try { return statSync(wav).size > 44 * 1024; } catch { return false; }  // Mosh can exit non-0 yet write the WAV → trust the file
 }
 
 async function main() {
