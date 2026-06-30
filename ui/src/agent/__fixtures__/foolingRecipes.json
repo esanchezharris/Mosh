@@ -1,0 +1,196 @@
+{
+  "candidates": [
+    {
+      "name": "The Metronome",
+      "recipe": { "tempo": 120, "bars": 2, "key": { "tonic": "F", "mode": "minor" }, "tracks": [
+        { "name": "Drums", "role": "drums", "notes": [] },
+        { "name": "808", "role": "bass", "notes": [] },
+        { "name": "Lead", "role": "melody", "notes": [] }
+      ] }
+    },
+    {
+      "name": "Copy-Paste Stamp",
+      "recipe": { "tempo": 120, "bars": 2, "key": { "tonic": "F", "mode": "minor" }, "tracks": [
+        { "name": "Drums", "role": "drums", "notes": [] },
+        { "name": "808", "role": "bass", "notes": [] },
+        { "name": "Lead", "role": "melody", "notes": [] }
+      ] }
+    },
+    {
+      "name": "Wall of Sixteenths",
+      "recipe": { "tempo": 120, "bars": 2, "key": { "tonic": "F", "mode": "minor" }, "tracks": [
+        { "name": "Drums", "role": "drums", "notes": [] },
+        { "name": "808", "role": "bass", "notes": [] },
+        { "name": "Lead", "role": "melody", "notes": [] }
+      ] }
+    },
+    {
+      "name": "Cluster Stack",
+      "recipe": { "tempo": 120, "bars": 2, "key": { "tonic": "F", "mode": "minor" }, "tracks": [
+        { "name": "Drums", "role": "drums", "notes": [] },
+        { "name": "808", "role": "bass", "notes": [] },
+        { "name": "Lead", "role": "melody", "notes": [] }
+      ] }
+    },
+    {
+      "name": "Drone Loop",
+      "recipe": { "tempo": 120, "bars": 2, "key": { "tonic": "F", "mode": "minor" }, "tracks": [
+        { "name": "Drums", "role": "drums", "notes": [] },
+        { "name": "808", "role": "bass", "notes": [] },
+        { "name": "Lead", "role": "melody", "notes": [] }
+      ] }
+    },
+    {
+      "name": "Machine Gun Hats",
+      "recipe": { "tempo": 120, "bars": 2, "key": { "tonic": "F", "mode": "minor" }, "tracks": [
+        { "name": "Drums", "role": "drums", "notes": [] },
+        { "name": "808", "role": "bass", "notes": [] },
+        { "name": "Lead", "role": "melody", "notes": [] }
+      ] }
+    },
+    {
+      "name": "Clone Bar",
+      "recipe": { "tempo": 120, "bars": 2, "key": { "tonic": "F", "mode": "minor" }, "tracks": [
+        { "name": "Drums", "role": "drums", "notes": [] },
+        { "name": "808", "role": "bass", "notes": [] },
+        { "name": "Lead", "role": "melody", "notes": [] }
+      ] }
+    },
+    {
+      "name": "Loop Stamp",
+      "recipe": { "tempo": 120, "bars": 2, "key": { "tonic": "F", "mode": "minor" }, "tracks": [
+        { "name": "Drums", "role": "drums", "notes": [] },
+        { "name": "808", "role": "bass", "notes": [] },
+        { "name": "Lead", "role": "melody", "notes": [] }
+      ] }
+    },
+    {
+      "name": "Metronome Drift",
+      "recipe": { "tempo": 120, "bars": 2, "key": { "tonic": "F", "mode": "minor" }, "tracks": [
+        { "name": "Drums", "role": "drums", "notes": [] },
+        { "name": "808", "role": "bass", "notes": [] },
+        { "name": "Lead", "role": "melody", "notes": [] }
+      ] }
+    },
+    {
+      "name": "Clone Drift",
+      "recipe": { "tempo": 120, "bars": 2, "key": { "tonic": "F", "mode": "minor" }, "tracks": [
+        { "name": "Drums", "role": "drums", "notes": [] },
+        { "name": "808", "role": "bass", "notes": [] },
+        { "name": "Lead", "role": "melody", "notes": [] }
+      ] }
+    },
+    {
+      "name": "Wall Stack",
+      "recipe": { "tempo": 120, "bars": 2, "key": { "tonic": "F", "mode": "minor" }, "tracks": [
+        { "name": "Drums", "role": "drums", "notes": [] },
+        { "name": "808", "role": "bass", "notes": [] },
+        { "name": "Lead", "role": "melody", "notes": [] }
+      ] }
+    },
+    {
+      "name": "Cluster Drift",
+      "recipe": { "tempo": 120, "bars": 2, "key": { "tonic": "F", "mode": "minor" }, "tracks": [
+        { "name": "Drums", "role": "drums", "notes": [] },
+        { "name": "808", "role": "bass", "notes": [] },
+        { "name": "Lead", "role": "melody", "notes": [] }
+      ] }
+    },
+    {
+      "name": "Drone Stack",
+      "recipe": { "tempo": 120, "bars": 2, "key": { "tonic": "F", "mode": "minor" }, "tracks": [
+        { "name": "Drums", "role": "drums", "notes": [] },
+        { "name": "808", "role": "bass", "notes": [] },
+        { "name": "Lead", "role": "melody", "notes": [] }
+      ] }
+    },
+    {
+      "name": "Machine Wall",
+      "recipe": { "tempo": 120, "bars": 2, "key": { "tonic": "F", "mode": "minor" }, "tracks": [
+        { "name": "Drums", "role": "drums", "notes": [] },
+        { "name": "808", "role": "bass", "notes": [] },
+        { "name": "Lead", "role": "melody", "notes": [] }
+      ] }
+    },
+    {
+      "name": "Stamp Loop",
+      "recipe": { "tempo": 120, "bars": 2, "key": { "tonic": "F", "mode": "minor" }, "tracks": [
+        { "name": "Drums", "role": "drums", "notes": [] },
+        { "name": "808", "role": "bass", "notes": [] },
+        { "name": "Lead", "role": "melody", "notes": [] }
+      ] }
+    },
+    {
+      "name": "Metronome Wall",
+      "recipe": { "tempo": 120, "bars": 2, "key": { "tonic": "F", "mode": "minor" }, "tracks": [
+        { "name": "Drums", "role": "drums", "notes": [] },
+        { "name": "808", "role": "bass", "notes": [] },
+        { "name": "Lead", "role": "melody", "notes": [] }
+      ] }
+    },
+    {
+      "name": "Clone Loop",
+      "recipe": { "tempo": 120, "bars": 2, "key": { "tonic": "F", "mode": "minor" }, "tracks": [
+        { "name": "Drums", "role": "drums", "notes": [] },
+        { "name": "808", "role": "bass", "notes": [] },
+        { "name": "Lead", "role": "melody", "notes": [] }
+      ] }
+    },
+    {
+      "name": "Wall Loop",
+      "recipe": { "tempo": 120, "bars": 2, "key": { "tonic": "F", "mode": "minor" }, "tracks": [
+        { "name": "Drums", "role": "drums", "notes": [] },
+        { "name": "808", "role": "bass", "notes": [] },
+        { "name": "Lead", "role": "melody", "notes": [] }
+      ] }
+    },
+    {
+      "name": "Cluster Loop",
+      "recipe": { "tempo": 120, "bars": 2, "key": { "tonic": "F", "mode": "minor" }, "tracks": [
+        { "name": "Drums", "role": "drums", "notes": [] },
+        { "name": "808", "role": "bass", "notes": [] },
+        { "name": "Lead", "role": "melody", "notes": [] }
+      ] }
+    },
+    {
+      "name": "Drone Loop 2",
+      "recipe": { "tempo": 120, "bars": 2, "key": { "tonic": "F", "mode": "minor" }, "tracks": [
+        { "name": "Drums", "role": "drums", "notes": [] },
+        { "name": "808", "role": "bass", "notes": [] },
+        { "name": "Lead", "role": "melody", "notes": [] }
+      ] }
+    },
+    {
+      "name": "Machine Clone",
+      "recipe": { "tempo": 120, "bars": 2, "key": { "tonic": "F", "mode": "minor" }, "tracks": [
+        { "name": "Drums", "role": "drums", "notes": [] },
+        { "name": "808", "role": "bass", "notes": [] },
+        { "name": "Lead", "role": "melody", "notes": [] }
+      ] }
+    },
+    {
+      "name": "Stamp Wall",
+      "recipe": { "tempo": 120, "bars": 2, "key": { "tonic": "F", "mode": "minor" }, "tracks": [
+        { "name": "Drums", "role": "drums", "notes": [] },
+        { "name": "808", "role": "bass", "notes": [] },
+        { "name": "Lead", "role": "melody", "notes": [] }
+      ] }
+    },
+    {
+      "name": "Metronome Clone",
+      "recipe": { "tempo": 120, "bars": 2, "key": { "tonic": "F", "mode": "minor" }, "tracks": [
+        { "name": "Drums", "role": "drums", "notes": [] },
+        { "name": "808", "role": "bass", "notes": [] },
+        { "name": "Lead", "role": "melody", "notes": [] }
+      ] }
+    },
+    {
+      "name": "Loop Clone",
+      "recipe": { "tempo": 120, "bars": 2, "key": { "tonic": "F", "mode": "minor" }, "tracks": [
+        { "name": "Drums", "role": "drums", "notes": [] },
+        { "name": "808", "role": "bass", "notes": [] },
+        { "name": "Lead", "role": "melody", "notes": [] }
+      ] }
+    }
+  ]
+}
