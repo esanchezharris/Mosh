@@ -31,16 +31,14 @@ cmd_list() {
   else _all; fi
 }
 
-# IDs of items that already have a MERGED PR (title "auto(AL-XXX): …"). This is the
-# DURABLE done-record — GitHub is the source of truth, so a fresh-worktree restart
-# never re-picks an already-merged item even if its local backlog status wasn't flipped.
-# Empty (no exclusions) if gh is unavailable/offline — the local `status` field still guards.
-_merged_ids() {
-  gh pr list --state merged --limit 300 --json title -q '.[].title' 2>/dev/null \
-    | grep -oE 'auto\(AL-[0-9]+\)' | grep -oE 'AL-[0-9]+' | sort -u
+_claimed_ids() {
+  {
+    gh pr list --state open --limit 300 --json title -q '.[].title' 2>/dev/null
+    gh pr list --state merged --limit 300 --json title -q '.[].title' 2>/dev/null
+  } | grep -oE 'auto\([^)]+\)' | sed -E 's/^auto\(([^)]+)\)$/\1/' | sort -u
 }
 cmd_ready() {
-  local done; done="$(_merged_ids)"
+  local done; done="$(_claimed_ids)"
   _all | jq -c --arg done "$done" '
     ($done | split("\n") | map(select(length>0))) as $d
     | map(select(.status=="ready" and ((.id) as $i | ($d | index($i)) | not)))
