@@ -47,7 +47,8 @@ function makeBrain(temp: number): BrainFn {
     const body: Record<string, unknown> = { messages, model: MODEL };
     if (PROVIDER === "openai") {
       headers["Authorization"] = `Bearer ${OPENAI_KEY}`;
-      if (REASONING) body.max_completion_tokens = 2048; else { body.max_tokens = 2048; body.temperature = temp; }  // gpt-5 family: no custom temp, max_completion_tokens
+      if (REASONING) { body.max_completion_tokens = 2048; body.reasoning_effort = process.env.OPENAI_REASONING_EFFORT || "low"; }  // gpt-5: no temp; low effort = fast/cheap structured gen
+      else { body.max_tokens = 2048; body.temperature = temp; }
     } else if (PROVIDER === "gemini") {
       headers["Authorization"] = `Bearer ${GKEY}`;
       body.max_tokens = 2048; body.temperature = temp;
