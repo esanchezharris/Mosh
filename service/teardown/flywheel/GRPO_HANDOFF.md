@@ -44,6 +44,35 @@ tutorial scrape (the policy's rollouts are trap-ish), but to reward broader genr
 `composite_reward.pt` with more diverse real anchors (more genres in `td-anchors-real`). Do **not** sharpen
 the pull distance to "fix" the noise gap — it amplifies this narrowness (off-style music drops below noise).
 
+## 1b. The RECIPE reward (the `MOSH_RL_REWARD=recipe` seam) — deterministic, no render, VALID
+
+The owner's reframe (2026-06-29): the agent's real output is a **recipe** (the symbolic command
+program / musical DNA — notes, pitches, grid, key, parts), not the rendered audio. Because we built
+the engine, grade the recipe with **rules** — no render, no GPU, no venv. This sidesteps the audio
+reward's fatal flaw: the rating probe found the §12 `pull` does **not** track owner taste (ρ≈0), so
+optimizing it is optimizing the wrong thing. The recipe verifier is a **valid** target instead.
+
+```python
+from teardown.flywheel.grpo_bridge import score_program_recipe
+# per policy rollout: the emitted MoshOps program (no WAV needed)
+scalar = score_program_recipe(program)["recipe_reward"]   # [0,1], the reward to maximize
+```
+
+- It is a faithful Python port of the **hardened** TS verifier (`ui/src/agent/recipeVerifier.ts`):
+  10 dims, with `dynamics·variation·contour` as **multiplicative gates** so a clean-but-robotic /
+  copy-paste / atonal beat can't win. Survived a 6-lens / **24-exploit red-team** (every Goodhart
+  attack scores <0.7). Parity vs the TS verifier is **pinned bit-for-bit** by `recipe_verifier_test.py`
+  (worst Δ 0.00 over all 25 reference recipes + dims) → the Python reward == the validated verifier.
+- **Valid + non-zero gradient, proven** (`recipe_verifier_test.py::test_program_reward_gradient`):
+  good `0.935` ≫ degraded `0.081` ≫ empty-skeleton `0.061` (spread 0.87). Contrast §7's `proveGradient`:
+  the beat-build fix restored the gradient, but its variance lived in the *invalid* audio `pull`. The
+  recipe reward keeps the gradient **and** makes the target valid.
+- `recipe_from_program(commands)` reconstructs the recipe from the rollout (run-script `capture`/`${var}`
+  refs or raw ids). `score_program_recipe` imports **zero audio deps** (numpy/oracle.score are lazy).
+- GEPA prompt-evolution already optimizes the beat-build directive against this same verifier
+  (`ui/scripts/optimizeBeatPrompts.mts`): held-out baseline `0.79` → optimized `0.97` (Δ+0.18, n=18/side).
+  The GRPO weight-training loop now has the matching reward via this seam.
+
 ## 2. PromptFeed — the policy's prompt distribution
 
 ```python

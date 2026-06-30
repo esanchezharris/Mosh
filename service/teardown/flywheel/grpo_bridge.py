@@ -32,12 +32,34 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from teardown.flywheel.reward import PromptFeed, Reward  # noqa: E402
+# NB: teardown.flywheel.reward (the AUDIO path) is imported lazily inside the functions that
+# need it — it pulls numpy/oracle.score, which the deterministic recipe reward does NOT need, so
+# the MOSH_RL_REWARD=recipe path runs with zero audio deps.
+from teardown.flywheel.recipe_verifier import recipe_from_program, verify_recipe  # noqa: E402
+
+# Which reward the trainer maximizes. "audio" = the §12 composite over a rendered WAV (the
+# original seam; pull validity is unproven — the probe found ρ≈0 vs owner taste). "recipe" =
+# the DETERMINISTIC verifier over the rollout's symbolic DNA — no render, no GPU, no venv, and
+# a VALID target (hardened: ranks good>bad, all 24 red-team exploits <0.7, parity-pinned to the
+# TS verifier). The owner's reframe (2026-06-29): grade the recipe (the parts), not the audio.
+REWARD_KIND = os.environ.get("MOSH_RL_REWARD", "audio").strip().lower()
+
+
+def score_program_recipe(program: list, key: dict | None = None, bars: int | None = None) -> dict:
+    """The RECIPE reward: reconstruct the recipe from a rollout's MoshOps program and grade its
+    musical DNA deterministically. Pure — no render, no audio deps. Returns {recipe_reward 0..1,
+    recipe_dims, recipe_reasons}. This is the `MOSH_RL_REWARD=recipe` scalar the trainer maximizes."""
+    recipe = recipe_from_program(program, bars=bars)
+    if key:
+        recipe["key"] = {"tonic": key.get("tonic", recipe["key"]["tonic"]), "mode": key.get("mode", recipe["key"]["mode"])}
+    v = verify_recipe(recipe)
+    return {"recipe_reward": v["total"], "recipe_dims": v["dims"], "recipe_reasons": v["reasons"]}
 
 
 def make_reward(prefer_composite: bool = True):
     """The ACTIVATED reward for the GRPO loop. Composite pull when the artifact+venv are present,
     else the floor-only Reward (never crashes the trainer). Returns (Reward, info_dict)."""
+    from teardown.flywheel.reward import Reward  # lazy: pulls numpy/oracle.score (audio path only)
     pull, version, kind = None, "reward-v0", "floor-only"
     if prefer_composite:
         try:
@@ -53,21 +75,33 @@ def make_reward(prefer_composite: bool = True):
 
 def reward_example(program: list, scores: dict, source: str = "", example_id: str = "") -> dict:
     """One reward-LABELLED rollout for rewards.jsonl. `program` = the §9-compiled MoshOps command
-    sequence (what the policy emits); `scores` = Reward.score_audio output (+ composite/has_pull)."""
+    sequence (what the policy emits); `scores` = Reward.score_audio output (+ composite/has_pull).
+
+    The maximized scalar `reward` switches on MOSH_RL_REWARD: in "recipe" mode it's the
+    deterministic verifier over the program's DNA (auto-scored here if not pre-supplied — needs
+    no audio venv); in "audio" mode it's the gated composite (legacy). Both are always logged."""
+    rr = scores.get("recipe_reward")
+    if REWARD_KIND == "recipe" and rr is None:             # auto-score the DNA from the program
+        rr = score_program_recipe(program).get("recipe_reward")
     comp = scores.get("composite")
-    if comp is None:                                       # allow passing raw score dicts
+    if comp is None and any(k in scores for k in ("clean", "pq", "pull")):  # raw audio score dict
         comp = round(float(scores.get("clean", 1.0)) *
                      (0.5 * min(1.0, scores.get("pq", 0.0) / 10.0) + 0.5 * scores.get("pull", 0.0)), 4)
+    reward = rr if (REWARD_KIND == "recipe" and rr is not None) else comp
     eid = example_id or hashlib.sha1((source + json.dumps(program, sort_keys=True)).encode()).hexdigest()[:16]
-    return {
+    out = {
         "id": eid,
         "program": program,                                # list[{command,args}] — the rollout
-        "reward": comp,                                    # the scalar the trainer maximizes (gated composite)
+        "reward": reward,                                  # the scalar the trainer maximizes
+        "reward_kind": REWARD_KIND,
         "components": {k: scores.get(k) for k in ("pq", "clean", "pull", "composite") if k in scores},
         "has_pull": bool(scores.get("has_pull", scores.get("pull") is not None)),
         "reward_version": scores.get("version", ""),
         "source": source,
     }
+    if rr is not None:
+        out["recipe_reward"] = rr
+    return out
 
 
 def append_rewards_jsonl(records: list, path: str) -> int:
@@ -78,8 +112,9 @@ def append_rewards_jsonl(records: list, path: str) -> int:
     return len(records)
 
 
-def seed_promptfeed(programs: list) -> PromptFeed:
+def seed_promptfeed(programs: list):
     """Flatten a list of §9-compiled command-programs into one renderable prompt distribution."""
+    from teardown.flywheel.reward import PromptFeed  # lazy (audio-lane dep)
     flat = [cmd for prog in programs for cmd in prog]
     return PromptFeed(flat)
 
@@ -113,8 +148,10 @@ def main(argv=None) -> int:
     ap.add_argument("--out", required=True, help="output dir for rewards.jsonl + promptfeed.json")
     ns = ap.parse_args(argv)
 
-    rw, info = make_reward()
-    print(f"  reward seam: {info}")
+    print(f"  MOSH_RL_REWARD={REWARD_KIND}")
+    if REWARD_KIND != "recipe":
+        rw, info = make_reward()
+        print(f"  audio reward seam: {info}")
     records, programs = [], []
     for rp in ns.results:
         try:
@@ -126,7 +163,8 @@ def main(argv=None) -> int:
         if prog:
             programs.append(prog)
         scores = res.get("reward") or res.get("scores") or {}
-        if prog and scores:
+        # recipe mode needs no audio scores — it grades the program's DNA directly
+        if prog and (scores or REWARD_KIND == "recipe"):
             records.append(reward_example(prog, scores, source=res.get("url", rp)))
     rj = os.path.join(ns.out, "rewards.jsonl")
     pf = os.path.join(ns.out, "promptfeed.json")
@@ -134,8 +172,12 @@ def main(argv=None) -> int:
     n_p = save_promptfeed(seed_promptfeed(programs), pf) if programs else 0
     print(f"  wrote {n_r} reward-labelled rollouts → {rj}")
     print(f"  wrote PromptFeed of {n_p} renderable commands → {pf}")
-    print(f"  EXTERNAL GRPO contract: `from teardown.flywheel.grpo_bridge import make_reward; rw,_=make_reward()` "
-          f"then per rollout WAV: `rw.composite(rw.score_audio(y, sr))`.")
+    if REWARD_KIND == "recipe":
+        print("  EXTERNAL GRPO contract (recipe): `from teardown.flywheel.grpo_bridge import score_program_recipe` "
+              "then per rollout: `score_program_recipe(program)['recipe_reward']` — deterministic, no render.")
+    else:
+        print("  EXTERNAL GRPO contract (audio): `from teardown.flywheel.grpo_bridge import make_reward; rw,_=make_reward()` "
+              "then per rollout WAV: `rw.composite(rw.score_audio(y, sr))`.")
     return 0
 
 
