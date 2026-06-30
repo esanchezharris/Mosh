@@ -109,6 +109,22 @@ describe("Arrange clip open routing", () => {
     expect(useStore.getState().editingClipId).toBeNull();
   });
 
+  it("opens a drum-like MIDI clip in the drum sequencer", () => {
+    const track: Track = {
+      id: "t-beat",
+      index: 0,
+      name: "Beat",
+      type: "audio",
+      clips: [clip("c-beat", [{ i: 0, pitch: 42, start: 0, length: 0.25, velocity: 110 }])],
+    };
+    act(() => root.render(React.createElement(Arrange, { snapshot: snapshotFor(track) })));
+
+    doubleClick(host.querySelector('[data-clip-id="c-beat"]')!);
+
+    expect(useDrumWindow.getState().clipId).toBe("c-beat");
+    expect(useStore.getState().editingClipId).toBeNull();
+  });
+
   it("keeps melodic MIDI clips in the piano roll", () => {
     const track: Track = {
       id: "t-keys",
