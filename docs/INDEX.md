@@ -57,6 +57,8 @@ Repo root, each with a status banner. `02` lives here in `docs/`; there is no st
 - [`IPHONE_COMPANION.md`](IPHONE_COMPANION.md) — the remote companion architecture + endpoints.
 - [`type-beat-trainer.md`](type-beat-trainer.md) — the LoRA type-beat trainer (scaffold + fake
   backend; real on-device training deferred).
+- [`REAL_RECIPES_SOURCE_SELECTION.md`](REAL_RECIPES_SOURCE_SELECTION.md) — Phase 0 tutorial/source
+  selection rubric for bootstrapping recipe-library material without committing media.
 - [`MOSHI_IMPORTERS.md`](MOSHI_IMPORTERS.md) — the DAW project-file importer (`.rpp`/`.als`/`.flp`
   → `moshIR` → MoshOps replay; code in `ui/src/import/`).
 - [`MOSHI_TRAJECTORY_FORMAT.md`](MOSHI_TRAJECTORY_FORMAT.md) — the agent-training tuple format +
