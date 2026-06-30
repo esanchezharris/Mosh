@@ -28,8 +28,10 @@ the repo. The committed artifact is metadata, a score, and an owner decision.
 ## Intake Fields
 
 Each candidate review should fill these fields. Use
-[`templates/recipe-source-candidate.md`](templates/recipe-source-candidate.md)
-for one source at a time.
+[`docs/templates/recipe-source-candidate.md`](docs/templates/recipe-source-candidate.md)
+for one source at a time. Validate cards with
+`python3 service/corpus/recipe_source_intake.py validate <card-or-dir>` and emit
+a safe review index with `python3 service/corpus/recipe_source_intake.py index <card-or-dir>`.
 
 | Field | Required | Notes |
 | --- | --- | --- |
