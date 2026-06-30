@@ -24,24 +24,32 @@ WINDOW_S = 10.0
 DUP = re.compile(r"\s*\(\d+\)$")
 
 
-def _dedup_diverse(n: int) -> list[Path]:
-    """Dedup '(1)/(2)' copies, keep real beats (≥18s), pick n evenly across the sorted set."""
-    seen, picks = {}, []
+def _dedup_all() -> list[Path]:
+    """All deduped ('(1)/(2)' collapsed) real beats (≥18s)."""
+    seen = {}
     for f in sorted(SRC.glob("*.wav")):
         base = DUP.sub("", f.stem).lower()
         if base in seen:
             continue
         try:
-            info = sf.info(str(f))
-            dur = info.frames / info.samplerate
+            dur = sf.info(str(f)).frames / sf.info(str(f)).samplerate
         except Exception:
             continue
-        if dur < 18.0 or dur > 600:
-            continue
-        seen[base] = f
-        picks.append(f)
+        if 18.0 <= dur <= 600:
+            seen[base] = f
+    return list(seen.values())
+
+
+def _dedup_diverse(n: int, seed: int = 0) -> list[Path]:
+    """Pick n beats. seed=0 → evenly strided (stable); seed>0 → a fresh shuffled subset."""
+    import random
+    picks = _dedup_all()
     if len(picks) <= n:
         return picks
+    if seed:
+        rng = random.Random(seed)
+        rng.shuffle(picks)
+        return picks[:n]
     step = len(picks) / n
     return [picks[int(i * step)] for i in range(n)]
 
@@ -61,13 +69,13 @@ def _best_window(y: np.ndarray, sr: int) -> np.ndarray:
     return y[best_i:best_i + w]
 
 
-def build_gold(n_target: int = 18) -> list[dict]:
+def build_gold(n_target: int = 18, seed: int = 0) -> list[dict]:
     if not SRC.is_dir():
         print(f"  [gold] {SRC} not found — no gold candidates")
         return []
     ASSET_DIR.mkdir(parents=True, exist_ok=True)
     out = []
-    for f in _dedup_diverse(n_target):
+    for f in _dedup_diverse(n_target, seed):
         try:
             y, sr = sf.read(str(f), always_2d=True, dtype="float32")
         except Exception:

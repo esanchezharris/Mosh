@@ -23,7 +23,7 @@ DEGRADES = [
 ]
 
 
-def build_degraded(n_target: int = 24) -> list[dict]:
+def build_degraded(n_target: int = 24, seed: int = 0) -> list[dict]:
     cat = S.catalog()
     kits = K.load_kits()
     e8 = K.eight08s()
@@ -48,9 +48,10 @@ def build_degraded(n_target: int = 24) -> list[dict]:
                           "intent": intent, "kind": "program", "program": prog,
                           "meta": {"bpm": mel["bpm"], "key": mel["key"], "kit": kitc["id"], "degrade": dl, "mel": mel["id"]}})
             i += 1
-            if len(cands) >= n_target:
-                return cands
-    return cands
+    if seed:
+        import random
+        random.Random(seed).shuffle(cands)
+    return cands[:n_target]
 
 
 if __name__ == "__main__":

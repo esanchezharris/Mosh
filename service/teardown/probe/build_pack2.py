@@ -88,11 +88,11 @@ def cross_source_pairs(by_intent: dict, rng) -> list[dict]:
     g, a, d = by_intent.get("gold", []), by_intent.get("auto", []), [v for k, v in by_intent.items() if k.startswith("deg")]
     d = [x for sub in d for x in sub]
     rng.shuffle(g); rng.shuffle(a); rng.shuffle(d)
-    for i in range(min(5, len(g), len(a))):
+    for i in range(min(4, len(g), len(a))):
         add(g[i], a[i], "gold vs auto")
-    for i in range(min(5, len(a), len(d))):
+    for i in range(min(4, len(a), len(d))):
         add(a[i], d[i], "auto vs degraded")
-    for i in range(min(4, len(g), len(d))):
+    for i in range(min(2, len(g), len(d))):
         add(g[-1 - i] if len(g) > i else None, d[-1 - i] if len(d) > i else None, "gold vs degraded")
     return pairs
 
@@ -101,12 +101,22 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default=os.path.expanduser("~/mosh-reward-probe"))
     ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--n-gold", type=int, default=12)
+    ap.add_argument("--n-auto", type=int, default=14)
+    ap.add_argument("--n-deg", type=int, default=12)
+    ap.add_argument("--fresh-seed", type=int, default=2, help=">0 → a fresh shuffled selection + new build id (busts cache + old ratings)")
     a = ap.parse_args()
     out = Path(a.out)
     clips = out / "clips"
+    # fresh pack: clear old clips so stale v(n-1) wavs can't linger at reused filenames
+    if clips.exists():
+        for old in clips.glob("*.wav"):
+            old.unlink()
     clips.mkdir(parents=True, exist_ok=True)
+    seed = a.fresh_seed
 
-    cands = gold.build_gold() + beats.build_auto() + degrade.build_degraded() + sa3_gen.build_sa3()
+    cands = (gold.build_gold(a.n_gold, seed) + beats.build_auto(a.n_auto, seed)
+             + degrade.build_degraded(a.n_deg, seed) + sa3_gen.build_sa3())
     if a.limit:
         cands = cands[: a.limit]
     from collections import Counter
@@ -156,8 +166,10 @@ def main():
     ab = cross_source_pairs(by_intent, random.Random(SHUFFLE_SEED + 1))
     (out / "AB_PAIRS.csv").write_text("pair,A,B,winner\n" + "".join(f"{k},{p['A']},{p['B']},\n" for k, p in enumerate(ab, 1)))
     (out / ".ab_public.json").write_text(json.dumps([{"pair": k, "A": p["A"], "B": p["B"]} for k, p in enumerate(ab, 1)], indent=1))
+    build_id = f"r{seed}-n{len(mapping)}"
+    (out / "build.json").write_text(json.dumps({"build_id": build_id, "fresh_seed": seed, "clips": len(mapping)}, indent=1))
     (out / ".mapping.json").write_text(json.dumps(
-        {"mapping": mapping, "ab_pairs": ab, "fails": fails, "reward_version": info.get("version")}, indent=1))
+        {"build_id": build_id, "mapping": mapping, "ab_pairs": ab, "fails": fails, "reward_version": info.get("version")}, indent=1))
     (out / "README.txt").write_text(
         "MOSH REWARD-VALIDITY PROBE v2 — blind rating pack\n"
         "==================================================\n\n"

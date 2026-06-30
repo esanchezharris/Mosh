@@ -132,29 +132,28 @@ def _beat_program(mel: dict, kit: dict, e808: dict, feel: str, *, drums_db, bass
 GAINS = dict(drums_db=-7.0, bass_db=-8.0, keys_db=-11.0)
 
 
-def build_auto(n_target: int = 30) -> list[dict]:
+def build_auto(n_target: int = 30, seed: int = 0) -> list[dict]:
     cat = S.catalog()
     kits = K.load_kits()
     e8 = K.eight08s()
     if not (cat and kits and e8):
         return []
     feels = ["trap", "boombap", "sparse"]
-    cands = []
-    i = 0
+    cands, i = [], 0
     for mi, mel in enumerate(cat):
         for v in range(3):  # 3 competent variants per melodic loop (different kit/feel)
-            if len(cands) >= n_target:
-                break
             kitc = kits[(mi + v) % len(kits)]
             e808 = e8[(mi + v) % len(e8)]
             feel = feels[v % len(feels)]
             prog = _beat_program(mel, kitc, e808, feel, seed=1000 + i, **GAINS)
-            cid = f"auto_{mel['id']}_{feel}"
-            cands.append({"cand_id": cid, "group": f"auto_{mel['id']}", "label": f"{feel}/{kitc['id']}",
+            cands.append({"cand_id": f"auto_{mel['id']}_{feel}", "group": f"auto_{mel['id']}", "label": f"{feel}/{kitc['id']}",
                           "intent": "auto", "kind": "program", "program": prog,
                           "meta": {"bpm": mel["bpm"], "key": mel["key"], "kit": kitc["id"], "feel": feel,
                                    "mel": mel["id"], "e808": e808["id"]}})
             i += 1
+    if seed:
+        import random
+        random.Random(seed).shuffle(cands)
     return cands[:n_target]
 
 

@@ -54,24 +54,35 @@ coherence), not volume. Rate fast, on instinct. Keyboard: focus a clip, press <b
 <section><h2>A/B — which sounds musically better?</h2><div id=abs></div></section>
 <textarea id=blob style="width:100%;height:120px;margin-top:12px;display:none;background:#1d1d24;color:#e8e8ea;border:1px solid #2a2a31;border-radius:6px"></textarea>
 <script>
-const CLIPS=__CLIPS__, PAIRS=__PAIRS__, KEY="moshprobe:"+location.pathname;
+const CLIPS=__CLIPS__, PAIRS=__PAIRS__, BUILD=__BUILD__;
+const KEY="moshprobe:"+BUILD;   // versioned per build → old ratings don't leak in
 let S=JSON.parse(localStorage.getItem(KEY)||'{"r":{},"n":{},"w":{}}');
 const save=()=>localStorage.setItem(KEY,JSON.stringify(S));
 const $=s=>document.querySelector(s);
 function counts(){$("#rc").textContent=Object.keys(S.r).length;$("#ac").textContent=Object.keys(S.w).length;}
-// single-playback toggle: clicking play ▶ starts (pausing any other), clicking again ⏸ pauses; resumes from position.
+// Bulletproof audio: fetch the whole WAV as a blob on first play (no HTTP Range dependency —
+// Python http.server / Safari otherwise refuse to stream <audio>), cache-busted by BUILD.
+function mkAudio(id){
+  const au=new Audio(); let loaded=false;
+  au._ensure=()=> loaded ? Promise.resolve()
+    : fetch("clips/"+id+".wav?v="+BUILD,{cache:"no-store"}).then(r=>r.blob())
+        .then(b=>{au.src=URL.createObjectURL(b);loaded=true;});
+  return au;
+}
 let CUR=null;
 function wirePlay(btn,au,label){
   au.onplay=()=>btn.textContent="⏸ "+label;
   au.onpause=()=>btn.textContent="▶ "+label;
   au.onended=()=>{au.currentTime=0;btn.textContent="▶ "+label;};
-  btn.onclick=()=>{ if(au.paused){ if(CUR&&CUR!==au)CUR.pause(); CUR=au; au.play(); } else au.pause(); };
+  btn.onclick=()=>{ if(au.paused){ if(CUR&&CUR!==au)CUR.pause(); CUR=au;
+      au._ensure().then(()=>au.play()).catch(e=>{btn.textContent="⚠ load err";console.error(id,e);}); }
+    else au.pause(); };
   return ()=>btn.onclick();  // toggle fn for keyboard
 }
 const clipsEl=$("#clips");
 CLIPS.forEach(id=>{
   const row=document.createElement("div");row.className="row"+(S.r[id]?" done":"");row.tabIndex=0;row.dataset.id=id;
-  const au=new Audio("clips/"+id+".wav");
+  const au=mkAudio(id);
   const rate=document.createElement("div");rate.className="rate";
   let html=`<span class=idx>${id}</span><button class=play>▶ play</button>`;
   row.innerHTML=html;
@@ -94,7 +105,7 @@ PAIRS.forEach(p=>{
   a.onclick=()=>{S.w[p.pair]="A";save();a.classList.add("sel");b.classList.remove("sel");d.classList.add("done");counts();};
   b.onclick=()=>{S.w[p.pair]="B";save();b.classList.add("sel");a.classList.remove("sel");d.classList.add("done");counts();};
   d.appendChild(a);d.appendChild(b);
-  d.querySelectorAll(".play").forEach(btn=>{const au=new Audio("clips/"+btn.dataset.f+".wav");wirePlay(btn,au,(btn.dataset.f===p.A?"A":"B")+" ("+btn.dataset.f+")");});
+  d.querySelectorAll(".play").forEach(btn=>{const au=mkAudio(btn.dataset.f);wirePlay(btn,au,(btn.dataset.f===p.A?"A":"B")+" ("+btn.dataset.f+")");});
   absEl.appendChild(d);
 });
 function ratingsCSV(){let o="index,rating,notes\n";CLIPS.forEach(id=>{const n=(S.n[id]||"").replace(/[,\n]/g," ");o+=`${id},${S.r[id]||""},${n}\n`;});return o;}
@@ -115,12 +126,15 @@ def main():
     pack = Path(a.pack).expanduser()
     clips = sorted(p.stem for p in (pack / "clips").glob("*.wav"))
     pairs = json.loads((pack / ".ab_public.json").read_text()) if (pack / ".ab_public.json").exists() else []
+    bf = pack / "build.json"
+    build = (json.loads(bf.read_text()).get("build_id") if bf.exists() else None) or f"n{len(clips)}"
     html = (HTML.replace("__CLIPS__", json.dumps(clips))
                 .replace("__PAIRS__", json.dumps(pairs))
+                .replace("__BUILD__", json.dumps(build))
                 .replace("__NCLIPS__", str(len(clips)))
                 .replace("__NPAIRS__", str(len(pairs))))
     (pack / "index.html").write_text(html)
-    print(f"wrote {pack/'index.html'} ({len(clips)} clips, {len(pairs)} A/B pairs)")
+    print(f"wrote {pack/'index.html'} ({len(clips)} clips, {len(pairs)} A/B pairs, build={build})")
 
 
 if __name__ == "__main__":
