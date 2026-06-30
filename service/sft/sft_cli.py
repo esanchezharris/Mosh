@@ -64,6 +64,8 @@ def run_train(a):
         "--fine-tune-type", "lora",
         "--adapter-path", out,
     ]
+    if getattr(a, "resume_adapter_file", ""):
+        cmd += ["--resume-adapter-file", os.path.abspath(a.resume_adapter_file)]  # continue-train an existing adapter
     if not a.no_grad_checkpoint:
         cmd += ["--grad-checkpoint"]  # trade compute for memory; drop it on a big-RAM Mac for ~2-3x speed
     if a.max_seq_length:
@@ -126,6 +128,7 @@ def main():
     # ~3-note pattern). 4096 fits the system prompt + a full pattern target.
     t.add_argument("--max-seq-length", type=int, default=4096)
     t.add_argument("--no-mask-prompt", action="store_true")
+    t.add_argument("--resume-adapter-file", default="", help="continue-train from an existing adapter .safetensors (e.g. v2/adapters.safetensors)")
     t.add_argument("--no-grad-checkpoint", action="store_true", help="disable gradient checkpointing (faster; needs more RAM)")
     t.set_defaults(fn=run_train)
 
