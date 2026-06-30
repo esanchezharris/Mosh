@@ -418,7 +418,7 @@ export async function buildBeat(spec: BeatSpec, brain: BrainFn, sink: BeatSink, 
 // sink, no mock, no shared state → safe to fan out. Roles map straight to the verifier's.
 
 export type RecipeRole = "drums" | "bass" | "melody";
-export type BuiltRecipeTrack = { name: string; role: RecipeRole; notes: Note[] };
+export type BuiltRecipeTrack = { name: string; role: RecipeRole; notes: Note[]; production?: TrackProduction };
 export type BuiltRecipe = {
   tempo: number; bars: number; key: { tonic: string; mode: string };
   tracks: BuiltRecipeTrack[]; modelSlots: number; totalSlots: number;
@@ -433,6 +433,7 @@ export async function buildRecipe(spec: BeatSpec, brain: BrainFn, opts: BuildOpt
   let modelSlots = 0, totalSlots = 0;
   for (const t of spec.tracks) {
     const role: RecipeRole = t.kind === "drum" ? "drums" : t.slots[0]?.id === "bass" ? "bass" : "melody";
+    const production = opts.palette ? planTrackProduction(t, opts.palette, opts.productionSeed ?? 0) : undefined;
     const notes: Note[] = [];
     for (const slot of t.slots) {
       const { notes: ns, report } = await fillSlot(slot, ctx, brain, maxRetries, opts.extraSystem ?? "");
@@ -440,7 +441,7 @@ export async function buildRecipe(spec: BeatSpec, brain: BrainFn, opts: BuildOpt
       totalSlots++;
       if (report.modelContributed) modelSlots++;
     }
-    tracks.push({ name: t.name, role, notes });
+    tracks.push({ name: t.name, role, notes, production });
   }
   return { tempo, bars: spec.bars, key: spec.key, tracks, modelSlots, totalSlots };
 }

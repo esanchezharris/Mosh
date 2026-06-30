@@ -9,21 +9,33 @@
 //
 //   AUDITION_CLOUD=1 npx tsx scripts/rl/buildBeatSft.mts --out ../service/sft/.sft-data/beat-v0 --per 24 --thr 0.9
 
-import { writeFileSync, mkdirSync } from "node:fs";
+import { writeFileSync, mkdirSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { __resetMockForTests, mockExecute, mockSnapshot } from "../../src/bridge.mock";
 import { buildSystemPrompt } from "../../src/agent/brainCore";
-import { buildRecipe, type BrainFn } from "../../src/agent/beatBuilder";
+import { buildRecipe, monophonicize, type BrainFn, type BuiltRecipe } from "../../src/agent/beatBuilder";
 import { BEAT_SPECS } from "../../src/agent/beatSpecs";
-import { verifyRecipe, type Recipe } from "../../src/agent/recipeVerifier";
+import { verifyRecipe, recipeFromProgram } from "../../src/agent/recipeVerifier";
+import { makePalette, type BeatPalette } from "../../src/agent/palette";
 import { OPTIMIZED_DIRECTIVE } from "../../src/agent/beatDirective";
 import type { Snapshot, CommandResult } from "../../src/types";
 
 const arg = (k: string, d = "") => { const i = process.argv.indexOf(`--${k}`); return i >= 0 && process.argv[i + 1] ? process.argv[i + 1] : d; };
 const OUT = arg("out", join(process.cwd(), "..", "service", "sft", ".sft-data", "beat-v0"));
 const PER = parseInt(arg("per", "24"), 10);     // attempts per genre
-const THR = parseFloat(arg("thr", "0.9"));      // keep beats scoring ≥ this on the verifier
+const THR = parseFloat(arg("thr", "0.9"));      // keep beats scoring ≥ this on the (production-aware) verifier
 const CONC = parseInt(arg("conc", "5"), 10);
+
+// --palette <dir>: distill PRODUCTION-bearing beats — every example assigns real sounds
+// (kit + melodic 808) so SFT teaches the model to emit production, not MIDI outlines. The
+// emitted program is scored by the production-aware verifier (recipeFromProgram), so the
+// kept corpus is real-sound beats. Omitted → MIDI-only corpus (legacy).
+const PALETTE_DIR = arg("palette", "");
+let PALETTE: BeatPalette | undefined;
+if (PALETTE_DIR && existsSync(join(PALETTE_DIR, "manifest.json"))) {
+  PALETTE = makePalette(JSON.parse(readFileSync(join(PALETTE_DIR, "manifest.json"), "utf8")));
+  console.log(`palette: ${PALETTE_DIR} (kicks ${PALETTE.size("kick")}, snares ${PALETTE.size("snare")}, hats ${PALETTE.size("hat")}, 808s ${PALETTE.size("808")})`);
+}
 
 // MULTI-TEACHER distillation. The teacher is a one-time, amortized cost (the student runs
 // forever, local + free), so distill from a MIX of strong models for diversity — different
@@ -64,28 +76,31 @@ const USER_TEMPLATES = [
   (g: string) => `build a ${g} groove — full beat, write the notes`,
   (g: string) => `I want a ${g} type beat`,
 ];
-const newId = (res: any): string | undefined => res?.data?.trackId ?? res?.trackId ?? res?.data?.clipId ?? res?.clipId ?? res?.data?.id ?? res?.id;
+type ProgLine = { command: string; args: Record<string, unknown>; capture?: Record<string, string> };
 
-/** Replay a built recipe into a fresh mock, capturing the engine's real ids → a self-consistent,
- *  executable MoshOps program (the SFT assistant target). */
-async function serialize(recipe: Recipe): Promise<{ command: string; args: Record<string, unknown> }[]> {
-  __resetMockForTests();
-  await mockExecute<CommandResult>({ command: "new_project", args: {} });
-  await mockExecute<CommandResult>({ command: "set_tempo", args: { bpm: recipe.tempo } });
-  const prog: { command: string; args: Record<string, unknown> }[] = [{ command: "set_tempo", args: { bpm: recipe.tempo } }];
-  for (const t of recipe.tracks) {
+/** Serialize a built recipe to a self-consistent, EXECUTABLE MoshOps run-script (capture vars
+ *  + ${var} refs — the shape the engine's --run-script AND recipeFromProgram both resolve).
+ *  Emits PRODUCTION commands (real kit + melodic 808) from the palette picks — the melodic 808
+ *  is assigned BEFORE the clip (so the engine doesn't double it with 4OSC) and the 808 bass MIDI
+ *  is monophonicized so it never overlaps itself. */
+function serialize(built: BuiltRecipe): ProgLine[] {
+  const prog: ProgLine[] = [{ command: "set_tempo", args: { bpm: built.tempo } }];
+  let v = 0;
+  for (const t of built.tracks) {
     if (!t.notes.length) continue;
-    const tr: any = await mockExecute<CommandResult>({ command: "create_track", args: { name: t.name, type: t.role === "drums" ? "drum" : "instrument" } });
-    const tid = newId(tr);
-    prog.push({ command: "create_track", args: { name: t.name, type: t.role === "drums" ? "drum" : "instrument" } });
+    const tv = `v${v++}`;
+    const type = t.role === "drums" ? "drum" : "audio";
+    prog.push({ command: "create_track", args: { name: t.name, type }, capture: { [tv]: "trackId" } });
+    const gainDb = t.role === "drums" ? -3 : t.role === "bass" ? -5 : -9;   // gain-staging (no clipping) + mix presence
+    prog.push({ command: "set_track_volume", args: { trackId: `\${${tv}}`, db: gainDb } });
+    const prod = t.production;
+    if (prod?.kind === "drum") for (const p of prod.pads) prog.push({ command: "assign_sample", args: { trackId: `\${${tv}}`, note: p.note, file: p.path, name: p.role } });
+    else if (prod?.kind === "melodic808") prog.push({ command: "assign_sample", args: { trackId: `\${${tv}}`, note: prod.note, file: prod.path, name: "808", mode: "melodic" } });
     const len = Math.max(...t.notes.map((n) => n.start + n.length));
-    const cl: any = await mockExecute<CommandResult>({ command: "add_midi_clip", args: { trackId: tid, start: 0, length: Math.ceil(len) } });
-    const cid = newId(cl);
-    prog.push({ command: "add_midi_clip", args: { trackId: tid, start: 0, length: Math.ceil(len) } });
-    for (const n of t.notes) {
-      await mockExecute<CommandResult>({ command: "add_note", args: { clipId: cid, pitch: n.pitch, start: n.start, length: n.length, velocity: n.velocity } });
-      prog.push({ command: "add_note", args: { clipId: cid, pitch: n.pitch, start: n.start, length: n.length, velocity: n.velocity } });
-    }
+    const cv = `v${v++}`;
+    prog.push({ command: "add_midi_clip", args: { trackId: `\${${tv}}`, start: 0, length: Math.ceil(len) }, capture: { [cv]: "clipId" } });
+    const notes = prod?.kind === "melodic808" ? monophonicize(t.notes) : t.notes;
+    for (const n of notes) prog.push({ command: "add_note", args: { clipId: `\${${cv}}`, pitch: n.pitch, start: n.start, length: n.length, velocity: n.velocity } });
   }
   return prog;
 }
@@ -109,9 +124,8 @@ async function main() {
   // generation concurrently, then serialize sequentially.
   const builts = await pool(jobs, CONC, async ({ spec, seed, teacher }) => {
     try {
-      const r = await buildRecipe(spec, makeBrain(0.7, teacher), { maxRetries: 1, refineTempo: false, extraSystem: OPTIMIZED_DIRECTIVE });
-      const recipe: Recipe = { tempo: r.tempo, key: r.key, bars: r.bars, tracks: r.tracks };
-      return { spec, seed, recipe, score: verifyRecipe(recipe).total, teacher: teacher.model };
+      const r = await buildRecipe(spec, makeBrain(0.7, teacher), { maxRetries: 1, refineTempo: false, extraSystem: OPTIMIZED_DIRECTIVE, palette: PALETTE, productionSeed: seed });
+      return { spec, seed, built: r, teacher: teacher.model };
     } catch { return null; }
   });
 
@@ -120,10 +134,13 @@ async function main() {
   const seen = new Set<string>();  // dedup near-identical beats (diversity is the whole point)
   for (const b of builts) {
     tried++;
-    if (!b || b.score < THR) continue;
-    const prog = await serialize(b.recipe);
+    if (!b) continue;
+    const prog = serialize(b.built);  // run-script-shaped; includes production commands when --palette
     if (prog.filter((c) => c.command === "add_note").length < 8) continue;  // require real note content
-    const sig = b.recipe.tracks.flatMap((t) => t.notes.map((n) => `${n.pitch}:${Math.round(n.start * 4)}:${n.velocity}`)).sort().join(",");
+    // score the EMITTED program (production-aware) — keeps real-sound beats, not stock outlines
+    const score = verifyRecipe(recipeFromProgram(prog)).total;
+    if (score < THR) continue;
+    const sig = b.built.tracks.flatMap((t) => t.notes.map((n) => `${n.pitch}:${Math.round(n.start * 4)}:${n.velocity}`)).sort().join(",");
     if (seen.has(sig)) continue;
     seen.add(sig);
     const user = USER_TEMPLATES[(examples.length) % USER_TEMPLATES.length](b.spec.id.replace(/_/g, " "));
@@ -131,7 +148,7 @@ async function main() {
     // keep training lines pure {messages} (mlx_lm schema); teacher mix tracked in the manifest
     examples.push(JSON.stringify({ messages: [{ role: "system", content: system }, { role: "user", content: user }, { role: "assistant", content: assistant }] }));
     perTeacher[b.teacher] = (perTeacher[b.teacher] ?? 0) + 1;
-    kept++; sumKept += b.score;
+    kept++; sumKept += score;
   }
 
   // shuffle-free deterministic split 80/10/10
