@@ -25,16 +25,35 @@ const GENRES = (arg("genres", "") || BEAT_SPECS.map((s) => s.id).join(",")).spli
 const OUT = arg("out", "/private/tmp/claude-501/beat-gepa");
 const CLOUD = process.argv.includes("--cloud") || process.env.AUDITION_CLOUD === "1";
 const PORT = process.env.AUDITION_PORT ?? "8081";
+// Provider-agnostic brain. GPT 5.4 mini (the owner's chosen brain) the moment an OPENAI_API_KEY
+// exists; else Gemini (the currently-keyed cloud brain); else the local mlx server. The whole
+// loop is brain-agnostic — dropping OPENAI_API_KEY into the env switches it to gpt-5.4-mini, no
+// code change. Override with MOSH_BRAIN_PROVIDER=openai|gemini.
+const OPENAI_KEY = process.env.OPENAI_API_KEY ?? "";
 const GKEY = process.env.GEMINI_API_KEY ?? "";
-const CLOUD_MODEL = process.env.MOSH_AGENT_MODEL ?? "gemini-2.5-flash";
-const ENDPOINT = CLOUD ? "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions" : `http://127.0.0.1:${PORT}/v1/chat/completions`;
+const PROVIDER = !CLOUD ? "local" : (process.env.MOSH_BRAIN_PROVIDER || (OPENAI_KEY ? "openai" : "gemini")).toLowerCase();
+const OPENAI_BASE = process.env.OPENAI_BASE_URL || "https://api.openai.com/v1";
+const MODEL = PROVIDER === "openai" ? (process.env.OPENAI_MODEL || "gpt-5.4-mini") : (process.env.MOSH_AGENT_MODEL || "gemini-2.5-flash");
+const REASONING = PROVIDER === "openai" && /^(gpt-5|gpt-6|o[0-9])/.test(MODEL);
+const ENDPOINT = PROVIDER === "openai" ? `${OPENAI_BASE}/chat/completions`
+  : PROVIDER === "gemini" ? "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+  : `http://127.0.0.1:${PORT}/v1/chat/completions`;
+console.log(`brain: provider=${PROVIDER}${PROVIDER !== "local" ? ` model=${MODEL}` : ""}`);
 
 // brain factory bound to a temperature (so concurrent builds don't race a shared temp)
 function makeBrain(temp: number): BrainFn {
   return async (messages, opts) => {
     const headers: Record<string, string> = { "Content-Type": "application/json" };
-    const body: Record<string, unknown> = { messages, max_tokens: 2048, temperature: temp };
-    if (CLOUD) { headers["Authorization"] = `Bearer ${GKEY}`; body.model = CLOUD_MODEL; body.extra_body = { google: { thinking_config: { thinking_budget: 0 } } }; if (opts.json) body.response_format = { type: "json_object" }; }
+    const body: Record<string, unknown> = { messages, model: MODEL };
+    if (PROVIDER === "openai") {
+      headers["Authorization"] = `Bearer ${OPENAI_KEY}`;
+      if (REASONING) body.max_completion_tokens = 2048; else { body.max_tokens = 2048; body.temperature = temp; }  // gpt-5 family: no custom temp, max_completion_tokens
+    } else if (PROVIDER === "gemini") {
+      headers["Authorization"] = `Bearer ${GKEY}`;
+      body.max_tokens = 2048; body.temperature = temp;
+      body.extra_body = { google: { thinking_config: { thinking_budget: 0 } } };
+    } else { body.max_tokens = 2048; body.temperature = temp; }  // local mlx server
+    if (opts.json) body.response_format = { type: "json_object" };
     const r = await fetch(ENDPOINT, { method: "POST", headers, body: JSON.stringify(body) });
     const j = await r.json();
     return j.choices?.[0]?.message?.content ?? "";

@@ -57,9 +57,12 @@ TSX = UI / "node_modules" / ".bin" / "tsx"
 # scorer scripts read the SAME rollouts.jsonl and write the SAME {sampleId,reward,deferred}
 # lines — only the implementation differs. MOSH_RL_REWARD=audio → Rung-2 (render each
 # rollout to WAV, score with the teardown Reward); default → Rung-1 (symbolic clean-apply).
+_REWARD = os.environ.get("MOSH_RL_REWARD", "").lower()
 SCORER_SCRIPT = (
-    "scripts/rl/scoreRolloutsAudio.mts"
-    if os.environ.get("MOSH_RL_REWARD") == "audio"
+    "scripts/rl/scoreRolloutsAudio.mts" if _REWARD == "audio"
+    # recipe = the deterministic verifier over the rollout's musical DNA (the owner's reframe:
+    # reward the recipe, not the audio — valid target, probe-proven the audio pull wasn't).
+    else "scripts/rl/scoreRolloutsRecipe.mts" if _REWARD == "recipe"
     else "scripts/rl/scoreRollouts.mts"
 )
 
@@ -200,7 +203,10 @@ def main():
     rl_eval_path = rl_dir / "rl_train.eval.jsonl"
     gate_eval_path = rl_dir / "gate.eval.jsonl"
 
-    reward_kind = "audio (Rung-2: render→teardown Reward)" if os.environ.get("MOSH_RL_REWARD") == "audio" else "symbolic (Rung-1: clean-apply)"
+    reward_kind = {
+        "audio": "audio (Rung-2: render→teardown Reward)",
+        "recipe": "recipe (Rung-1.5: deterministic verifier over musical DNA)",
+    }.get(_REWARD, "symbolic (Rung-1: clean-apply)")
     log(f"▶ GRPO — model={a.model} sft={sft_adapter}")
     log(f"  reward = {reward_kind}  [{SCORER_SCRIPT}]")
     log(f"  loading policy (trainable) + reference (frozen)…")
