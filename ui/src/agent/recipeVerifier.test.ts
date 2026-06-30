@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { verifyRecipe, recipeFromSnapshot, type Recipe, type VNote, type VTrack } from "./recipeVerifier";
+import { verifyRecipe, recipeFromSnapshot, type Recipe, type VNote, type VTrack, type VPad } from "./recipeVerifier";
 import fooling from "./__fixtures__/foolingRecipes.json";
 
 const nf = (pitch: number, start: number, length = 0.25, velocity = 100): VNote => ({ pitch, start, length, velocity });
@@ -55,10 +55,32 @@ describe("verifyRecipe — discrimination battery", () => {
   const G = verifyRecipe(great());
 
   it("a genuinely musical beat (dynamics + development + contour) scores high", () => {
-    expect(G.total).toBeGreaterThan(0.85);
+    // a great-MIDI beat with NO declared sounds is still an outline → the realness gate holds
+    // it at ~0.82 (neutral 0.7) rather than 1.0; the musical dims themselves are maxed.
+    expect(G.total).toBeGreaterThan(0.8);
     expect(G.dims.dynamics).toBeGreaterThan(0.8);
     expect(G.dims.variation).toBeGreaterThan(0.8);
     expect(G.dims.contour).toBeGreaterThan(0.8);
+  });
+
+  it("PRODUCTION: a real beat scores high, the SAME beat on stock sounds is crushed (realness gate)", () => {
+    const realPads = [{ note: 36, realness: "real" as const }, { note: 38, realness: "real" as const }, { note: 42, realness: "real" as const }];
+    const stockPads = [{ note: 36, realness: "stock" as const }, { note: 38, realness: "stock" as const }, { note: 42, realness: "stock" as const }];
+    const withProd = (pads: VPad[], instReal: boolean): Recipe => {
+      const r = great();
+      r.productionObserved = true;
+      r.tracks[0].production = { volumeDb: -3, pads };
+      r.tracks[1].production = { volumeDb: -5, instrument: { name: instReal ? "808" : "4osc", realness: instReal ? "real" : "default" } };
+      r.tracks[2].production = { volumeDb: -9, instrument: { name: instReal ? "Serum" : "4osc", realness: instReal ? "real" : "default" } };
+      return r;
+    };
+    const real = verifyRecipe(withProd(realPads, true));
+    const stock = verifyRecipe(withProd(stockPads, false));
+    expect(real.total).toBeGreaterThan(0.85);
+    expect(stock.total).toBeLessThan(0.6);
+    expect(real.total - stock.total).toBeGreaterThan(0.3);
+    expect(real.dims.realness).toBeGreaterThan(0.9);
+    expect(stock.dims.realness).toBeLessThan(0.1);
   });
 
   it("ranks the musical beat strictly above every degradation", () => {

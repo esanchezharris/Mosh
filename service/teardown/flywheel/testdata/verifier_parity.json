@@ -259,6 +259,314 @@
      }
     ]
    },
+   "total": 0.81855,
+   "dims": {
+    "parts": 1,
+    "drums": 1,
+    "grid": 1,
+    "key": 1,
+    "register": 1,
+    "dynamics": 1,
+    "variation": 1,
+    "contour": 1,
+    "density": 1,
+    "hygiene": 1,
+    "realness": 0.7,
+    "kit_coverage": 0.7,
+    "mix": 0.5
+   }
+  },
+  {
+   "name": "good_real",
+   "lens": "production",
+   "recipe": {
+    "tempo": 140,
+    "bars": 2,
+    "key": {
+     "tonic": "A",
+     "mode": "minor"
+    },
+    "tracks": [
+     {
+      "name": "Drums",
+      "role": "drums",
+      "notes": [
+       {
+        "pitch": 36,
+        "start": 0,
+        "length": 0.25,
+        "velocity": 118
+       },
+       {
+        "pitch": 36,
+        "start": 2.5,
+        "length": 0.25,
+        "velocity": 96
+       },
+       {
+        "pitch": 36,
+        "start": 4,
+        "length": 0.25,
+        "velocity": 120
+       },
+       {
+        "pitch": 36,
+        "start": 6.75,
+        "length": 0.25,
+        "velocity": 90
+       },
+       {
+        "pitch": 38,
+        "start": 1,
+        "length": 0.25,
+        "velocity": 110
+       },
+       {
+        "pitch": 38,
+        "start": 3,
+        "length": 0.25,
+        "velocity": 102
+       },
+       {
+        "pitch": 38,
+        "start": 5,
+        "length": 0.25,
+        "velocity": 112
+       },
+       {
+        "pitch": 38,
+        "start": 7,
+        "length": 0.25,
+        "velocity": 100
+       },
+       {
+        "pitch": 42,
+        "start": 0,
+        "length": 0.25,
+        "velocity": 80
+       },
+       {
+        "pitch": 42,
+        "start": 0.5,
+        "length": 0.25,
+        "velocity": 64
+       },
+       {
+        "pitch": 42,
+        "start": 1,
+        "length": 0.25,
+        "velocity": 92
+       },
+       {
+        "pitch": 42,
+        "start": 1.5,
+        "length": 0.25,
+        "velocity": 60
+       },
+       {
+        "pitch": 42,
+        "start": 2,
+        "length": 0.25,
+        "velocity": 84
+       },
+       {
+        "pitch": 42,
+        "start": 3,
+        "length": 0.25,
+        "velocity": 70
+       },
+       {
+        "pitch": 42,
+        "start": 4,
+        "length": 0.25,
+        "velocity": 88
+       },
+       {
+        "pitch": 42,
+        "start": 4.5,
+        "length": 0.25,
+        "velocity": 62
+       },
+       {
+        "pitch": 42,
+        "start": 5.5,
+        "length": 0.25,
+        "velocity": 90
+       },
+       {
+        "pitch": 42,
+        "start": 6,
+        "length": 0.25,
+        "velocity": 76
+       },
+       {
+        "pitch": 42,
+        "start": 7,
+        "length": 0.25,
+        "velocity": 86
+       },
+       {
+        "pitch": 42,
+        "start": 7.5,
+        "length": 0.25,
+        "velocity": 58
+       }
+      ],
+      "production": {
+       "volumeDb": -3,
+       "pads": [
+        {
+         "note": 36,
+         "realness": "real"
+        },
+        {
+         "note": 38,
+         "realness": "real"
+        },
+        {
+         "note": 42,
+         "realness": "real"
+        }
+       ]
+      }
+     },
+     {
+      "name": "808",
+      "role": "bass",
+      "notes": [
+       {
+        "pitch": 33,
+        "start": 0,
+        "length": 1,
+        "velocity": 110
+       },
+       {
+        "pitch": 33,
+        "start": 1.5,
+        "length": 0.5,
+        "velocity": 92
+       },
+       {
+        "pitch": 40,
+        "start": 3,
+        "length": 1,
+        "velocity": 104
+       },
+       {
+        "pitch": 36,
+        "start": 4,
+        "length": 1,
+        "velocity": 108
+       },
+       {
+        "pitch": 43,
+        "start": 5.5,
+        "length": 0.5,
+        "velocity": 88
+       },
+       {
+        "pitch": 38,
+        "start": 6.5,
+        "length": 1.5,
+        "velocity": 100
+       }
+      ],
+      "production": {
+       "volumeDb": -5,
+       "instrument": {
+        "name": "808",
+        "realness": "real"
+       }
+      }
+     },
+     {
+      "name": "Lead",
+      "role": "melody",
+      "notes": [
+       {
+        "pitch": 69,
+        "start": 0,
+        "length": 0.5,
+        "velocity": 100
+       },
+       {
+        "pitch": 72,
+        "start": 0.5,
+        "length": 0.5,
+        "velocity": 86
+       },
+       {
+        "pitch": 71,
+        "start": 1,
+        "length": 0.5,
+        "velocity": 94
+       },
+       {
+        "pitch": 76,
+        "start": 2,
+        "length": 1,
+        "velocity": 104
+       },
+       {
+        "pitch": 74,
+        "start": 3,
+        "length": 0.5,
+        "velocity": 90
+       },
+       {
+        "pitch": 72,
+        "start": 3.5,
+        "length": 0.5,
+        "velocity": 82
+       },
+       {
+        "pitch": 69,
+        "start": 4,
+        "length": 0.5,
+        "velocity": 98
+       },
+       {
+        "pitch": 67,
+        "start": 4.5,
+        "length": 0.5,
+        "velocity": 84
+       },
+       {
+        "pitch": 72,
+        "start": 5,
+        "length": 1,
+        "velocity": 96
+       },
+       {
+        "pitch": 76,
+        "start": 6,
+        "length": 0.5,
+        "velocity": 102
+       },
+       {
+        "pitch": 77,
+        "start": 6.5,
+        "length": 0.5,
+        "velocity": 88
+       },
+       {
+        "pitch": 74,
+        "start": 7,
+        "length": 1,
+        "velocity": 92
+       }
+      ],
+      "production": {
+       "volumeDb": -9,
+       "instrument": {
+        "name": "Serum",
+        "realness": "real"
+       }
+      }
+     }
+    ],
+    "productionObserved": true
+   },
    "total": 1,
    "dims": {
     "parts": 1,
@@ -270,7 +578,626 @@
     "variation": 1,
     "contour": 1,
     "density": 1,
-    "hygiene": 1
+    "hygiene": 1,
+    "realness": 1,
+    "kit_coverage": 1,
+    "mix": 1
+   }
+  },
+  {
+   "name": "good_stock",
+   "lens": "production",
+   "recipe": {
+    "tempo": 140,
+    "bars": 2,
+    "key": {
+     "tonic": "A",
+     "mode": "minor"
+    },
+    "tracks": [
+     {
+      "name": "Drums",
+      "role": "drums",
+      "notes": [
+       {
+        "pitch": 36,
+        "start": 0,
+        "length": 0.25,
+        "velocity": 118
+       },
+       {
+        "pitch": 36,
+        "start": 2.5,
+        "length": 0.25,
+        "velocity": 96
+       },
+       {
+        "pitch": 36,
+        "start": 4,
+        "length": 0.25,
+        "velocity": 120
+       },
+       {
+        "pitch": 36,
+        "start": 6.75,
+        "length": 0.25,
+        "velocity": 90
+       },
+       {
+        "pitch": 38,
+        "start": 1,
+        "length": 0.25,
+        "velocity": 110
+       },
+       {
+        "pitch": 38,
+        "start": 3,
+        "length": 0.25,
+        "velocity": 102
+       },
+       {
+        "pitch": 38,
+        "start": 5,
+        "length": 0.25,
+        "velocity": 112
+       },
+       {
+        "pitch": 38,
+        "start": 7,
+        "length": 0.25,
+        "velocity": 100
+       },
+       {
+        "pitch": 42,
+        "start": 0,
+        "length": 0.25,
+        "velocity": 80
+       },
+       {
+        "pitch": 42,
+        "start": 0.5,
+        "length": 0.25,
+        "velocity": 64
+       },
+       {
+        "pitch": 42,
+        "start": 1,
+        "length": 0.25,
+        "velocity": 92
+       },
+       {
+        "pitch": 42,
+        "start": 1.5,
+        "length": 0.25,
+        "velocity": 60
+       },
+       {
+        "pitch": 42,
+        "start": 2,
+        "length": 0.25,
+        "velocity": 84
+       },
+       {
+        "pitch": 42,
+        "start": 3,
+        "length": 0.25,
+        "velocity": 70
+       },
+       {
+        "pitch": 42,
+        "start": 4,
+        "length": 0.25,
+        "velocity": 88
+       },
+       {
+        "pitch": 42,
+        "start": 4.5,
+        "length": 0.25,
+        "velocity": 62
+       },
+       {
+        "pitch": 42,
+        "start": 5.5,
+        "length": 0.25,
+        "velocity": 90
+       },
+       {
+        "pitch": 42,
+        "start": 6,
+        "length": 0.25,
+        "velocity": 76
+       },
+       {
+        "pitch": 42,
+        "start": 7,
+        "length": 0.25,
+        "velocity": 86
+       },
+       {
+        "pitch": 42,
+        "start": 7.5,
+        "length": 0.25,
+        "velocity": 58
+       }
+      ],
+      "production": {
+       "volumeDb": -3,
+       "pads": [
+        {
+         "note": 36,
+         "realness": "stock"
+        },
+        {
+         "note": 38,
+         "realness": "stock"
+        },
+        {
+         "note": 42,
+         "realness": "stock"
+        }
+       ]
+      }
+     },
+     {
+      "name": "808",
+      "role": "bass",
+      "notes": [
+       {
+        "pitch": 33,
+        "start": 0,
+        "length": 1,
+        "velocity": 110
+       },
+       {
+        "pitch": 33,
+        "start": 1.5,
+        "length": 0.5,
+        "velocity": 92
+       },
+       {
+        "pitch": 40,
+        "start": 3,
+        "length": 1,
+        "velocity": 104
+       },
+       {
+        "pitch": 36,
+        "start": 4,
+        "length": 1,
+        "velocity": 108
+       },
+       {
+        "pitch": 43,
+        "start": 5.5,
+        "length": 0.5,
+        "velocity": 88
+       },
+       {
+        "pitch": 38,
+        "start": 6.5,
+        "length": 1.5,
+        "velocity": 100
+       }
+      ],
+      "production": {
+       "volumeDb": -5,
+       "instrument": {
+        "name": "4osc",
+        "realness": "default"
+       }
+      }
+     },
+     {
+      "name": "Lead",
+      "role": "melody",
+      "notes": [
+       {
+        "pitch": 69,
+        "start": 0,
+        "length": 0.5,
+        "velocity": 100
+       },
+       {
+        "pitch": 72,
+        "start": 0.5,
+        "length": 0.5,
+        "velocity": 86
+       },
+       {
+        "pitch": 71,
+        "start": 1,
+        "length": 0.5,
+        "velocity": 94
+       },
+       {
+        "pitch": 76,
+        "start": 2,
+        "length": 1,
+        "velocity": 104
+       },
+       {
+        "pitch": 74,
+        "start": 3,
+        "length": 0.5,
+        "velocity": 90
+       },
+       {
+        "pitch": 72,
+        "start": 3.5,
+        "length": 0.5,
+        "velocity": 82
+       },
+       {
+        "pitch": 69,
+        "start": 4,
+        "length": 0.5,
+        "velocity": 98
+       },
+       {
+        "pitch": 67,
+        "start": 4.5,
+        "length": 0.5,
+        "velocity": 84
+       },
+       {
+        "pitch": 72,
+        "start": 5,
+        "length": 1,
+        "velocity": 96
+       },
+       {
+        "pitch": 76,
+        "start": 6,
+        "length": 0.5,
+        "velocity": 102
+       },
+       {
+        "pitch": 77,
+        "start": 6.5,
+        "length": 0.5,
+        "velocity": 88
+       },
+       {
+        "pitch": 74,
+        "start": 7,
+        "length": 1,
+        "velocity": 92
+       }
+      ],
+      "production": {
+       "volumeDb": -9,
+       "instrument": {
+        "name": "4osc",
+        "realness": "default"
+       }
+      }
+     }
+    ],
+    "productionObserved": true
+   },
+   "total": 0.475,
+   "dims": {
+    "parts": 1,
+    "drums": 1,
+    "grid": 1,
+    "key": 1,
+    "register": 1,
+    "dynamics": 1,
+    "variation": 1,
+    "contour": 1,
+    "density": 1,
+    "hygiene": 1,
+    "realness": 0,
+    "kit_coverage": 1,
+    "mix": 1
+   }
+  },
+  {
+   "name": "partial_real",
+   "lens": "production",
+   "recipe": {
+    "tempo": 140,
+    "bars": 2,
+    "key": {
+     "tonic": "A",
+     "mode": "minor"
+    },
+    "tracks": [
+     {
+      "name": "Drums",
+      "role": "drums",
+      "notes": [
+       {
+        "pitch": 36,
+        "start": 0,
+        "length": 0.25,
+        "velocity": 118
+       },
+       {
+        "pitch": 36,
+        "start": 2.5,
+        "length": 0.25,
+        "velocity": 96
+       },
+       {
+        "pitch": 36,
+        "start": 4,
+        "length": 0.25,
+        "velocity": 120
+       },
+       {
+        "pitch": 36,
+        "start": 6.75,
+        "length": 0.25,
+        "velocity": 90
+       },
+       {
+        "pitch": 38,
+        "start": 1,
+        "length": 0.25,
+        "velocity": 110
+       },
+       {
+        "pitch": 38,
+        "start": 3,
+        "length": 0.25,
+        "velocity": 102
+       },
+       {
+        "pitch": 38,
+        "start": 5,
+        "length": 0.25,
+        "velocity": 112
+       },
+       {
+        "pitch": 38,
+        "start": 7,
+        "length": 0.25,
+        "velocity": 100
+       },
+       {
+        "pitch": 42,
+        "start": 0,
+        "length": 0.25,
+        "velocity": 80
+       },
+       {
+        "pitch": 42,
+        "start": 0.5,
+        "length": 0.25,
+        "velocity": 64
+       },
+       {
+        "pitch": 42,
+        "start": 1,
+        "length": 0.25,
+        "velocity": 92
+       },
+       {
+        "pitch": 42,
+        "start": 1.5,
+        "length": 0.25,
+        "velocity": 60
+       },
+       {
+        "pitch": 42,
+        "start": 2,
+        "length": 0.25,
+        "velocity": 84
+       },
+       {
+        "pitch": 42,
+        "start": 3,
+        "length": 0.25,
+        "velocity": 70
+       },
+       {
+        "pitch": 42,
+        "start": 4,
+        "length": 0.25,
+        "velocity": 88
+       },
+       {
+        "pitch": 42,
+        "start": 4.5,
+        "length": 0.25,
+        "velocity": 62
+       },
+       {
+        "pitch": 42,
+        "start": 5.5,
+        "length": 0.25,
+        "velocity": 90
+       },
+       {
+        "pitch": 42,
+        "start": 6,
+        "length": 0.25,
+        "velocity": 76
+       },
+       {
+        "pitch": 42,
+        "start": 7,
+        "length": 0.25,
+        "velocity": 86
+       },
+       {
+        "pitch": 42,
+        "start": 7.5,
+        "length": 0.25,
+        "velocity": 58
+       }
+      ],
+      "production": {
+       "volumeDb": -3,
+       "pads": [
+        {
+         "note": 36,
+         "realness": "real"
+        },
+        {
+         "note": 38,
+         "realness": "stock"
+        },
+        {
+         "note": 42,
+         "realness": "stock"
+        }
+       ]
+      }
+     },
+     {
+      "name": "808",
+      "role": "bass",
+      "notes": [
+       {
+        "pitch": 33,
+        "start": 0,
+        "length": 1,
+        "velocity": 110
+       },
+       {
+        "pitch": 33,
+        "start": 1.5,
+        "length": 0.5,
+        "velocity": 92
+       },
+       {
+        "pitch": 40,
+        "start": 3,
+        "length": 1,
+        "velocity": 104
+       },
+       {
+        "pitch": 36,
+        "start": 4,
+        "length": 1,
+        "velocity": 108
+       },
+       {
+        "pitch": 43,
+        "start": 5.5,
+        "length": 0.5,
+        "velocity": 88
+       },
+       {
+        "pitch": 38,
+        "start": 6.5,
+        "length": 1.5,
+        "velocity": 100
+       }
+      ],
+      "production": {
+       "volumeDb": -5,
+       "instrument": {
+        "name": "808",
+        "realness": "real"
+       }
+      }
+     },
+     {
+      "name": "Lead",
+      "role": "melody",
+      "notes": [
+       {
+        "pitch": 69,
+        "start": 0,
+        "length": 0.5,
+        "velocity": 100
+       },
+       {
+        "pitch": 72,
+        "start": 0.5,
+        "length": 0.5,
+        "velocity": 86
+       },
+       {
+        "pitch": 71,
+        "start": 1,
+        "length": 0.5,
+        "velocity": 94
+       },
+       {
+        "pitch": 76,
+        "start": 2,
+        "length": 1,
+        "velocity": 104
+       },
+       {
+        "pitch": 74,
+        "start": 3,
+        "length": 0.5,
+        "velocity": 90
+       },
+       {
+        "pitch": 72,
+        "start": 3.5,
+        "length": 0.5,
+        "velocity": 82
+       },
+       {
+        "pitch": 69,
+        "start": 4,
+        "length": 0.5,
+        "velocity": 98
+       },
+       {
+        "pitch": 67,
+        "start": 4.5,
+        "length": 0.5,
+        "velocity": 84
+       },
+       {
+        "pitch": 72,
+        "start": 5,
+        "length": 1,
+        "velocity": 96
+       },
+       {
+        "pitch": 76,
+        "start": 6,
+        "length": 0.5,
+        "velocity": 102
+       },
+       {
+        "pitch": 77,
+        "start": 6.5,
+        "length": 0.5,
+        "velocity": 88
+       },
+       {
+        "pitch": 74,
+        "start": 7,
+        "length": 1,
+        "velocity": 92
+       }
+      ],
+      "production": {
+       "volumeDb": -9,
+       "instrument": {
+        "name": "4osc",
+        "realness": "default"
+       }
+      }
+     }
+    ],
+    "productionObserved": true
+   },
+   "total": 0.679,
+   "dims": {
+    "parts": 1,
+    "drums": 1,
+    "grid": 1,
+    "key": 1,
+    "register": 1,
+    "dynamics": 1,
+    "variation": 1,
+    "contour": 1,
+    "density": 1,
+    "hygiene": 1,
+    "realness": 0.4,
+    "kit_coverage": 1,
+    "mix": 1
    }
   },
   {
@@ -616,7 +1543,7 @@
      }
     ]
    },
-   "total": 0.1815,
+   "total": 0.151513,
    "dims": {
     "parts": 1,
     "drums": 0.8,
@@ -627,7 +1554,10 @@
     "variation": 0,
     "contour": 1,
     "density": 1,
-    "hygiene": 1
+    "hygiene": 1,
+    "realness": 0.7,
+    "kit_coverage": 0.7,
+    "mix": 0.5
    }
   },
   {
@@ -901,7 +1831,7 @@
      }
     ]
    },
-   "total": 0.19,
+   "total": 0.157888,
    "dims": {
     "parts": 1,
     "drums": 1,
@@ -912,7 +1842,10 @@
     "variation": 0,
     "contour": 1,
     "density": 1,
-    "hygiene": 1
+    "hygiene": 1,
+    "realness": 0.7,
+    "kit_coverage": 0.7,
+    "mix": 0.5
    }
   },
   {
@@ -1402,7 +2335,7 @@
      }
     ]
    },
-   "total": 0.29475,
+   "total": 0.2448,
    "dims": {
     "parts": 1,
     "drums": 0.8,
@@ -1413,7 +2346,10 @@
     "variation": 0.5,
     "contour": 1,
     "density": 1,
-    "hygiene": 1
+    "hygiene": 1,
+    "realness": 0.7,
+    "kit_coverage": 0.7,
+    "mix": 0.5
    }
   },
   {
@@ -1735,7 +2671,7 @@
      }
     ]
    },
-   "total": 0.261,
+   "total": 0.216656,
    "dims": {
     "parts": 1,
     "drums": 0.9,
@@ -1746,7 +2682,10 @@
     "variation": 0.3333333333333333,
     "contour": 1,
     "density": 1,
-    "hygiene": 1
+    "hygiene": 1,
+    "realness": 0.7,
+    "kit_coverage": 0.7,
+    "mix": 0.5
    }
   },
   {
@@ -2740,7 +3679,7 @@
      }
     ]
    },
-   "total": 0.266667,
+   "total": 0.220906,
    "dims": {
     "parts": 1,
     "drums": 1,
@@ -2751,7 +3690,10 @@
     "variation": 0,
     "contour": 1,
     "density": 1,
-    "hygiene": 1
+    "hygiene": 1,
+    "realness": 0.7,
+    "kit_coverage": 0.7,
+    "mix": 0.5
    }
   },
   {
@@ -3553,7 +4495,7 @@
      }
     ]
    },
-   "total": 0.243911,
+   "total": 0.2023,
    "dims": {
     "parts": 1,
     "drums": 1,
@@ -3564,7 +4506,10 @@
     "variation": 0,
     "contour": 0.8666666666666667,
     "density": 1,
-    "hygiene": 1
+    "hygiene": 1,
+    "realness": 0.7,
+    "kit_coverage": 0.7,
+    "mix": 0.5
    }
   },
   {
@@ -3790,7 +4735,7 @@
      }
     ]
    },
-   "total": 0.243911,
+   "total": 0.2023,
    "dims": {
     "parts": 1,
     "drums": 1,
@@ -3801,7 +4746,10 @@
     "variation": 0,
     "contour": 0.8666666666666667,
     "density": 1,
-    "hygiene": 1
+    "hygiene": 1,
+    "realness": 0.7,
+    "kit_coverage": 0.7,
+    "mix": 0.5
    }
   },
   {
@@ -4507,7 +5455,7 @@
      }
     ]
    },
-   "total": 0.262889,
+   "total": 0.218072,
    "dims": {
     "parts": 1,
     "drums": 0.9333333333333332,
@@ -4518,7 +5466,10 @@
     "variation": 0,
     "contour": 1,
     "density": 1,
-    "hygiene": 1
+    "hygiene": 1,
+    "realness": 0.7,
+    "kit_coverage": 0.7,
+    "mix": 0.5
    }
   },
   {
@@ -5032,7 +5983,7 @@
      }
     ]
    },
-   "total": 0.231324,
+   "total": 0.193949,
    "dims": {
     "parts": 1,
     "drums": 0.5333333333333333,
@@ -5043,7 +5994,10 @@
     "variation": 0,
     "contour": 1,
     "density": 0.9019607843137255,
-    "hygiene": 1
+    "hygiene": 1,
+    "realness": 0.7,
+    "kit_coverage": 0.7,
+    "mix": 0.5
    }
   },
   {
@@ -5785,7 +6739,7 @@
      }
     ]
    },
-   "total": 0.249363,
+   "total": 0.208223,
    "dims": {
     "parts": 1,
     "drums": 1,
@@ -5796,7 +6750,10 @@
     "variation": 0,
     "contour": 0.9612903225806452,
     "density": 0.75,
-    "hygiene": 0.6
+    "hygiene": 0.6,
+    "realness": 0.7,
+    "kit_coverage": 0.7,
+    "mix": 0.5
    }
   },
   {
@@ -6106,7 +7063,7 @@
      }
     ]
    },
-   "total": 0.595467,
+   "total": 0.491678,
    "dims": {
     "parts": 1,
     "drums": 0.96,
@@ -6117,7 +7074,10 @@
     "variation": 1,
     "contour": 1,
     "density": 1,
-    "hygiene": 0.6
+    "hygiene": 0.6,
+    "realness": 0.7,
+    "kit_coverage": 0.7,
+    "mix": 0.5
    }
   },
   {
@@ -6703,7 +7663,7 @@
      }
     ]
    },
-   "total": 0.557176,
+   "total": 0.462256,
    "dims": {
     "parts": 1,
     "drums": 0.5333333333333333,
@@ -6714,7 +7674,10 @@
     "variation": 1,
     "contour": 1,
     "density": 0.9019607843137255,
-    "hygiene": 1
+    "hygiene": 1,
+    "realness": 0.7,
+    "kit_coverage": 0.7,
+    "mix": 0.5
    }
   },
   {
@@ -7072,7 +8035,7 @@
      }
     ]
    },
-   "total": 0.3296,
+   "total": 0.272567,
    "dims": {
     "parts": 1,
     "drums": 1,
@@ -7083,7 +8046,10 @@
     "variation": 1,
     "contour": 0.19999999999999998,
     "density": 1,
-    "hygiene": 1
+    "hygiene": 1,
+    "realness": 0.7,
+    "kit_coverage": 0.7,
+    "mix": 0.5
    }
   },
   {
@@ -7537,7 +8503,7 @@
      }
     ]
    },
-   "total": 0.450944,
+   "total": 0.37184,
    "dims": {
     "parts": 1,
     "drums": 1,
@@ -7548,7 +8514,10 @@
     "variation": 1,
     "contour": 0.5599999999999999,
     "density": 1,
-    "hygiene": 1
+    "hygiene": 1,
+    "realness": 0.7,
+    "kit_coverage": 0.7,
+    "mix": 0.5
    }
   },
   {
@@ -7906,7 +8875,7 @@
      }
     ]
    },
-   "total": 0.133783,
+   "total": 0.111788,
    "dims": {
     "parts": 1,
     "drums": 1,
@@ -7917,7 +8886,10 @@
     "variation": 0,
     "contour": 0.14999999999999997,
     "density": 1,
-    "hygiene": 1
+    "hygiene": 1,
+    "realness": 0.7,
+    "kit_coverage": 0.7,
+    "mix": 0.5
    }
   },
   {
@@ -8275,7 +9247,7 @@
      }
     ]
    },
-   "total": 0.409344,
+   "total": 0.337851,
    "dims": {
     "parts": 1,
     "drums": 1,
@@ -8286,7 +9258,10 @@
     "variation": 1,
     "contour": 0.43999999999999995,
     "density": 1,
-    "hygiene": 1
+    "hygiene": 1,
+    "realness": 0.7,
+    "kit_coverage": 0.7,
+    "mix": 0.5
    }
   },
   {
@@ -8488,7 +9463,7 @@
      }
     ]
    },
-   "total": 0.3852,
+   "total": 0.317857,
    "dims": {
     "parts": 1,
     "drums": 1,
@@ -8499,7 +9474,10 @@
     "variation": 1,
     "contour": 0.7999999999999998,
     "density": 1,
-    "hygiene": 1
+    "hygiene": 1,
+    "realness": 0.7,
+    "kit_coverage": 0.7,
+    "mix": 0.5
    }
   },
   {
@@ -8617,7 +9595,7 @@
      }
     ]
    },
-   "total": 0.3243,
+   "total": 0.268109,
    "dims": {
     "parts": 1,
     "drums": 1,
@@ -8628,7 +9606,10 @@
     "variation": 1,
     "contour": 0.5666666666666667,
     "density": 1,
-    "hygiene": 1
+    "hygiene": 1,
+    "realness": 0.7,
+    "kit_coverage": 0.7,
+    "mix": 0.5
    }
   },
   {
@@ -8830,7 +9811,7 @@
      }
     ]
    },
-   "total": 0.119509,
+   "total": 0.099969,
    "dims": {
     "parts": 1,
     "drums": 1,
@@ -8841,7 +9822,10 @@
     "variation": 0,
     "contour": 0.3916666666666666,
     "density": 1,
-    "hygiene": 1
+    "hygiene": 1,
+    "realness": 0.7,
+    "kit_coverage": 0.7,
+    "mix": 0.5
    }
   },
   {
@@ -9037,7 +10021,7 @@
      }
     ]
    },
-   "total": 0.193494,
+   "total": 0.160979,
    "dims": {
     "parts": 1,
     "drums": 1,
@@ -9048,7 +10032,10 @@
     "variation": 0.5,
     "contour": 0.3833333333333333,
     "density": 1,
-    "hygiene": 1
+    "hygiene": 1,
+    "realness": 0.7,
+    "kit_coverage": 0.7,
+    "mix": 0.5
    }
   },
   {
@@ -9634,7 +10621,7 @@
      }
     ]
    },
-   "total": 0.397882,
+   "total": 0.331108,
    "dims": {
     "parts": 1,
     "drums": 0.5333333333333333,
@@ -9645,7 +10632,10 @@
     "variation": 1,
     "contour": 1,
     "density": 0.9019607843137255,
-    "hygiene": 1
+    "hygiene": 1,
+    "realness": 0.7,
+    "kit_coverage": 0.7,
+    "mix": 0.5
    }
   },
   {
@@ -9991,7 +10981,7 @@
      }
     ]
    },
-   "total": 0.423,
+   "total": 0.349775,
    "dims": {
     "parts": 1,
     "drums": 0.8,
@@ -10002,7 +10992,10 @@
     "variation": 1,
     "contour": 1,
     "density": 1,
-    "hygiene": 1
+    "hygiene": 1,
+    "realness": 0.7,
+    "kit_coverage": 0.7,
+    "mix": 0.5
    }
   },
   {
@@ -10360,7 +11353,7 @@
      }
     ]
    },
-   "total": 0.19,
+   "total": 0.157888,
    "dims": {
     "parts": 1,
     "drums": 1,
@@ -10371,7 +11364,10 @@
     "variation": 0,
     "contour": 1,
     "density": 1,
-    "hygiene": 1
+    "hygiene": 1,
+    "realness": 0.7,
+    "kit_coverage": 0.7,
+    "mix": 0.5
    }
   },
   {
@@ -11149,7 +12145,7 @@
      }
     ]
    },
-   "total": 0.384667,
+   "total": 0.321328,
    "dims": {
     "parts": 1,
     "drums": 0.4,
@@ -11160,7 +12156,10 @@
     "variation": 1,
     "contour": 1,
     "density": 0.8266666666666667,
-    "hygiene": 1
+    "hygiene": 1,
+    "realness": 0.7,
+    "kit_coverage": 0.7,
+    "mix": 0.5
    }
   }
  ]

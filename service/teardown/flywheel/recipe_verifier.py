@@ -33,15 +33,39 @@ DRUM_RANGE = (35, 81)
 GRID = 0.25
 GRID_TOL = 0.06
 
-# weights sum to 1 — the three anti-gaming dims (dynamics/variation/contour) together carry as
-# much as the structural core, so a robotic/clone/atonal beat can't win.
+# PRODUCTION (owner reframe — "the recipe includes production") real-vs-stock classifier:
+# provenance only, NEVER taste. "stock" = the bundled mosh-kit (the only sounds the engine
+# auto-provides); "real" = any other path (the owner's musica/Splice library / an import).
+STOCK_KIT_DIRMARK = "drumkits/mosh-kit"
+STOCK_KIT_FILES = {"kick.wav", "snare.wav", "clap.wav", "hat_closed.wav", "hat_open.wav", "tom_low.wav", "tom_mid.wav", "crash.wav"}
+DEFAULT_INSTRUMENTS = {"4osc", "4OSC Synth", "sampler", "Sampler"}
+KIT_PAD_PITCHES = [36, 38, 39, 42, 46, 45, 47, 49]
+
+# weights sum to 1 — the three musical anti-gaming dims (dynamics/variation/contour) plus the
+# production realness GATE carry the conjunction; production COMPLETENESS (kit_coverage, mix)
+# adds modest weight. Musical dims still hold 0.89 of the base; realness's power is the gate.
 WEIGHTS = {
-    "parts": 0.1, "drums": 0.17, "grid": 0.09, "key": 0.13, "register": 0.05,
-    "dynamics": 0.12, "variation": 0.12, "contour": 0.12, "density": 0.05, "hygiene": 0.05,
+    "parts": 0.09, "drums": 0.15, "grid": 0.08, "key": 0.12, "register": 0.04,
+    "dynamics": 0.11, "variation": 0.11, "contour": 0.11, "density": 0.04, "hygiene": 0.04,
+    "realness": 0.05, "kit_coverage": 0.04, "mix": 0.02,
 }
 DIM_ORDER = list(WEIGHTS.keys())
-GATE_DIMS = ["dynamics", "variation", "contour"]
+GATE_DIMS = ["dynamics", "variation", "contour", "realness"]
 GATE_FLOOR = 0.5
+
+
+def classify_sample(path: str) -> str:
+    p = (path or "").replace("\\", "/")
+    base = p.rsplit("/", 1)[-1].lower()
+    if STOCK_KIT_DIRMARK in p:
+        return "stock"
+    if base in STOCK_KIT_FILES:
+        return "stock"
+    return "real"
+
+
+def classify_instrument(name: str) -> str:
+    return "default" if name in DEFAULT_INSTRUMENTS else "real"
 
 
 # JS Math.round rounds half toward +inf; Python round() is banker's. Mirror JS exactly so the
@@ -347,10 +371,115 @@ def _score_hygiene(r: dict, reasons: list[str]) -> float:
     return _clamp01(1 - penalty)
 
 
+# ── production dimensions (presence/realness only — never taste) ───────────────
+
+DRUM_CORES = [("kick", [36]), ("snare", [38, 40]), ("hat", [42, 44, 46])]
+
+
+def _played_pitches(t: dict) -> set:
+    return set(n["pitch"] for n in t.get("notes", []))
+
+
+def _pad_realness(prod: dict, note: int):
+    for p in prod.get("pads", []) or []:
+        if p["note"] == note:
+            return p["realness"]
+    return None
+
+
+def _has_drum_prod(t: dict) -> bool:
+    return bool(t.get("production", {}).get("pads"))
+
+
+def _has_voice_prod(t: dict) -> bool:
+    pr = t.get("production", {})
+    return bool(pr.get("instrument") or pr.get("pads") or pr.get("sampleRealness"))
+
+
+def _voice_is_real(t: dict) -> bool:
+    pr = t.get("production", {})
+    inst = pr.get("instrument") or {}
+    return (inst.get("realness") == "real" or pr.get("sampleRealness") == "real"
+            or any(p["realness"] == "real" for p in (pr.get("pads") or [])))
+
+
+def _score_realness(r: dict, reasons: list[str]) -> float:
+    observed = bool(r.get("productionObserved"))
+    units: list[float] = []
+    for t in r["tracks"]:
+        if not t.get("notes"):
+            continue
+        if t.get("role") == "drums":
+            if not _has_drum_prod(t) and not observed:
+                continue
+            for note in _played_pitches(t):
+                if note < DRUM_RANGE[0] or note > DRUM_RANGE[1]:
+                    continue
+                units.append(1.0 if _pad_realness(t.get("production", {}), note) == "real" else 0.0)
+        else:
+            if not _has_voice_prod(t) and not observed:
+                continue
+            units.append(1.0 if _voice_is_real(t) else 0.0)
+    if not units:
+        return 0.7
+    s = _mean(units)
+    if s < 0.5:
+        reasons.append("realness: stock/outline sounds — real one-shots/instruments not used")
+    return s
+
+
+def _score_kit_coverage(r: dict, reasons: list[str]) -> float:
+    observed = bool(r.get("productionObserved"))
+    checks: list[float] = []
+    for t in r["tracks"]:
+        if not t.get("notes"):
+            continue
+        role = t.get("role")
+        if role == "drums":
+            if not _has_drum_prod(t) and not observed:
+                continue
+            played = _played_pitches(t)
+            for _, notes in DRUM_CORES:
+                triggered = any(n in played for n in notes)
+                if not triggered:
+                    checks.append(0.5)
+                    continue
+                backed = any(_pad_realness(t.get("production", {}), n) is not None for n in notes)
+                checks.append(1.0 if backed else 0.0)
+        elif role == "bass":
+            if not _has_voice_prod(t) and not observed:
+                continue
+            checks.append(1.0 if _has_voice_prod(t) else 0.0)
+        elif role == "melody":
+            if not t.get("production", {}).get("instrument") and not observed:
+                continue
+            checks.append(1.0 if t.get("production", {}).get("instrument") else 0.0)
+    if not checks:
+        return 0.7
+    s = _mean(checks)
+    if s < 0.6:
+        reasons.append("kit_coverage: not every voice is sound-backed (incomplete production)")
+    return s
+
+
+def _score_mix(r: dict, reasons: list[str]) -> float:
+    voices = [t for t in r["tracks"] if t.get("notes")]
+    if not voices:
+        return 0.7
+    moved = []
+    for t in voices:
+        pr = t.get("production", {})
+        moved.append(1.0 if (abs(pr.get("volumeDb", 0.0)) > 0.01 or abs(pr.get("pan", 0.0)) > 0.01) else 0.0)
+    s = _clamp01(0.5 + 0.5 * _mean(moved))
+    if s <= 0.5:
+        reasons.append("mix: levels left at default (no mix moves)")
+    return s
+
+
 # ── aggregate ───────────────────────────────────────────────────────────────
 
 def verify_recipe(r: dict) -> dict:
-    """Grade a recipe's musical DNA deterministically. Pure. Mirror of verifyRecipe (TS)."""
+    """Grade a recipe's musical DNA + PRODUCTION deterministically. Pure. Mirror of verifyRecipe (TS)."""
     reasons: list[str] = []
     dims = {
         "parts": _score_parts(r, reasons),
@@ -363,6 +492,9 @@ def verify_recipe(r: dict) -> dict:
         "contour": _score_contour(r, reasons),
         "density": _score_density(r, reasons),
         "hygiene": _score_hygiene(r, reasons),
+        "realness": _score_realness(r, reasons),
+        "kit_coverage": _score_kit_coverage(r, reasons),
+        "mix": _score_mix(r, reasons),
     }
     base = 0.0
     for k in DIM_ORDER:
@@ -388,12 +520,42 @@ def _infer_role(name: str, ttype: str, notes: list[dict]) -> str:
     return "bass" if pitches[len(pitches) // 2] < 52 else "melody"
 
 
+def _normalize_production(tracks: list[dict]) -> None:
+    """A melodic track with notes but no recorded instrument still plays (engine auto-loads
+    4OSC) — mark it the bare default so realness counts it as stock, not unknown. Mirror of
+    normalizeProduction (TS). Mutates."""
+    for t in tracks:
+        pr = t.get("production")
+        if pr and pr.get("pads"):
+            pr["pads"] = sorted(pr["pads"], key=lambda p: p["note"])
+        if t.get("role") in ("melody", "bass") and t.get("notes") and not (pr and (pr.get("instrument") or pr.get("pads") or pr.get("sampleRealness"))):
+            t.setdefault("production", {})["instrument"] = {"name": "4osc", "realness": "default"}
+
+
 def recipe_from_snapshot(snap: dict, bars: int | None = None) -> dict:
-    """Build a Recipe from a mock/native snapshot (mirror of recipeFromSnapshot)."""
+    """Build a Recipe from a mock/native snapshot (mirror of recipeFromSnapshot). Production
+    populated from what the snapshot exposes (instrument plugins, wave source, mix); the
+    Sampler's drum pads are OPAQUE here, so drum-pad realness stays unobserved (neutral)."""
     tracks = []
     for t in snap.get("tracks", []):
         notes = [n for c in t.get("clips", []) for n in c.get("notes", [])]
-        tracks.append({"name": t.get("name", ""), "role": _infer_role(t.get("name", ""), t.get("type", ""), notes), "notes": notes})
+        role = _infer_role(t.get("name", ""), t.get("type", ""), notes)
+        prod: dict = {}
+        inst = next((p for p in t.get("plugins", []) if p.get("isInstrument") and p.get("name")), None)
+        if inst:
+            prod["instrument"] = {"name": inst["name"], "realness": classify_instrument(inst["name"])}
+        wave = [c.get("sourceFile") for c in t.get("clips", []) if c.get("sourceFile")]
+        if wave:
+            prod["sampleRealness"] = "real" if any(classify_sample(f) == "real" for f in wave) else "stock"
+        if isinstance(t.get("volumeDb"), (int, float)):
+            prod["volumeDb"] = float(t["volumeDb"])
+        if isinstance(t.get("pan"), (int, float)):
+            prod["pan"] = float(t["pan"])
+        track = {"name": t.get("name", ""), "role": role, "notes": notes}
+        if prod:
+            track["production"] = prod
+        tracks.append(track)
+    _normalize_production(tracks)
     max_beat = max([0.0] + [n["start"] + n["length"] for t in tracks for n in t["notes"]])
     sess = snap.get("session", {})
     key = sess.get("key", {}) or {}
@@ -464,14 +626,63 @@ def recipe_from_program(commands: list[dict], bars: int | None = None) -> dict:
                     })
                 except (KeyError, TypeError, ValueError):
                     pass
+        # ── PRODUCTION commands — the program path sees the real sound choices ──
+        elif cmd == "assign_sample":
+            tr = resolve(args.get("trackId"))
+            if tr is not None:
+                rn = classify_sample(str(args.get("file", "")))
+                if str(args.get("mode", "drum")) == "melodic":
+                    tr.setdefault("production", {})["instrument"] = {"name": str(args.get("name", "808")), "realness": rn}
+                else:
+                    try:
+                        tr.setdefault("_pads", {})[int(args.get("note", 60))] = rn
+                    except (TypeError, ValueError):
+                        pass
+        elif cmd == "load_drum_kit":
+            tr = resolve(args.get("trackId"))
+            if tr is not None:
+                pads = tr.setdefault("_pads", {})
+                for n in KIT_PAD_PITCHES:
+                    pads.setdefault(n, "stock")   # never clobber a real assign_sample
+        elif cmd == "load_plugin":
+            tr = resolve(args.get("trackId"))
+            if tr is not None:
+                nm = str(args.get("pluginId", args.get("name", "")))
+                tr.setdefault("production", {})["instrument"] = {"name": nm, "realness": classify_instrument(nm)}
+        elif cmd == "load_builtin":
+            tr = resolve(args.get("trackId"))
+            if tr is not None:
+                ty = str(args.get("type", ""))
+                tr.setdefault("production", {})["instrument"] = {"name": ty, "realness": classify_instrument(ty)}
+        elif cmd == "set_track_volume":
+            tr = resolve(args.get("trackId"))
+            if tr is not None:
+                try:
+                    tr.setdefault("production", {})["volumeDb"] = float(args.get("db", args.get("value", args.get("volumeDb", 0.0))))
+                except (TypeError, ValueError):
+                    pass
+        elif cmd == "set_track_pan":
+            tr = resolve(args.get("trackId"))
+            if tr is not None:
+                try:
+                    tr.setdefault("production", {})["pan"] = float(args.get("pan", 0.0))
+                except (TypeError, ValueError):
+                    pass
 
     for tr in tracks:
         tr["role"] = _infer_role(tr["name"], tr.pop("type", ""), tr["notes"])
+        pads = tr.pop("_pads", None)
+        if pads:
+            tr.setdefault("production", {})["pads"] = [{"note": n, "realness": pads[n]} for n in sorted(pads)]
+        if not tr.get("production"):
+            tr.pop("production", None)
+    _normalize_production(tracks)
     max_beat = max([0.0] + [n["start"] + n["length"] for t in tracks for n in t["notes"]])
     return {
         "tempo": tempo, "key": key,
         "bars": bars if bars is not None else max(1, math.ceil(max_beat / 4)),
         "tracks": tracks,
+        "productionObserved": True,
     }
 
 

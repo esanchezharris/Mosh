@@ -37,10 +37,39 @@ const GOOD: Recipe = {
   ],
 };
 
+// production-bearing variants of GOOD — exercise the realness GATE + completeness dims and
+// parity-lock the owner's property: a stock-sound OUTLINE scores low even with perfect MIDI,
+// a real production scores high. productionObserved=true (the command-program path).
+const clone = (r: Recipe): Recipe => JSON.parse(JSON.stringify(r)) as Recipe;
+function withProduction(base: Recipe, kind: "real" | "stock" | "partial"): Recipe {
+  const r = clone(base);
+  r.productionObserved = true;
+  for (const t of r.tracks) {
+    if (t.role === "drums") {
+      t.production = { volumeDb: -3, pads: [
+        { note: 36, realness: kind === "stock" ? "stock" : "real" },                 // kick real except all-stock
+        { note: 38, realness: kind === "real" ? "real" : "stock" },                  // snare real only in full-real
+        { note: 42, realness: kind === "real" ? "real" : "stock" },                  // hat   real only in full-real
+      ] };
+    } else if (t.role === "bass") {
+      t.production = { volumeDb: -5, instrument: { name: kind === "stock" ? "4osc" : "808", realness: kind === "stock" ? "default" : "real" } };
+    } else if (t.role === "melody") {
+      t.production = { volumeDb: -9, instrument: { name: kind === "real" ? "Serum" : "4osc", realness: kind === "real" ? "real" : "default" } };
+    }
+  }
+  return r;
+}
+const PROD_VARIANTS: { name: string; recipe: Recipe }[] = [
+  { name: "good_real", recipe: withProduction(GOOD, "real") },
+  { name: "good_stock", recipe: withProduction(GOOD, "stock") },
+  { name: "partial_real", recipe: withProduction(GOOD, "partial") },
+];
+
 const cands = (fooling as { candidates: { name: string; lens?: string; recipe: Recipe }[] }).candidates;
 const out: Record<string, unknown> = { good: verdictOf(GOOD) };
 function verdictOf(r: Recipe) { const v = verifyRecipe(r); return { total: v.total, dims: v.dims }; }
 const items: Record<string, unknown>[] = [{ name: "good", lens: "reference", recipe: GOOD, ...verdictOf(GOOD) }];
+for (const p of PROD_VARIANTS) items.push({ name: p.name, lens: "production", recipe: p.recipe, ...verdictOf(p.recipe) });
 for (const c of cands) items.push({ name: c.name, lens: c.lens ?? "?", recipe: c.recipe, ...verdictOf(c.recipe) });
 
 const path = process.argv[2] ?? "/private/tmp/claude-501/verifier-parity.json";

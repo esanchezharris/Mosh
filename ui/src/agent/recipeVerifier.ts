@@ -27,21 +27,61 @@ const DRUM_RANGE: [number, number] = [35, 81];
 
 export type VNote = { pitch: number; start: number; length: number; velocity: number };
 export type VRole = "drums" | "bass" | "melody" | "other";
-export type VTrack = { name: string; role: VRole; notes: VNote[] };
-export type Recipe = { tempo: number; key: { tonic: string; mode: string }; bars: number; tracks: VTrack[] };
+// PRODUCTION (the owner's reframe — "the recipe includes production"): which REAL sounds a
+// track uses. Provenance only (real-library vs bundled-stock vs bare-default), never taste —
+// "which kick is best" is learned from owner A/B picks (#56), never hard-coded here.
+export type SoundRealness = "real" | "stock" | "default" | "none";
+export type VPad = { note: number; realness: "real" | "stock" }; // a drum pad's assigned one-shot
+export type VProduction = {
+  instrument?: { name: string; realness: SoundRealness }; // melodic/bass hosting instrument (synth / melodic 808)
+  pads?: VPad[]; // drum pads with an assigned sample (note → real/stock)
+  sampleRealness?: SoundRealness; // a wave-clip voice's source classification
+  volumeDb?: number; // mix presence (off-default → the producer mixed)
+  pan?: number;
+};
+export type VTrack = { name: string; role: VRole; notes: VNote[]; production?: VProduction };
+// productionObserved: the recipe was built from a COMMAND PROGRAM (sounds are fully visible) —
+// a triggered voice with no real sound is then a real omission (an outline) and scored 0.
+// Absent/false (snapshot, where the Sampler is opaque; or musical-only test recipes) → a
+// voice with no production info is NEUTRAL (never falsely failed).
+export type Recipe = { tempo: number; key: { tonic: string; mode: string }; bars: number; tracks: VTrack[]; productionObserved?: boolean };
 
 export type DimScores = {
   parts: number; drums: number; grid: number; key: number; register: number;
   dynamics: number; variation: number; contour: number; density: number; hygiene: number;
+  realness: number; kit_coverage: number; mix: number;
 };
 export type Verdict = { total: number; dims: DimScores; reasons: string[] };
 
-// weights sum to 1 — the three anti-gaming dims (dynamics/variation/contour) together
-// carry as much as the structural core, so a robotic/clone/atonal beat can't win
+// weights sum to 1 — the three musical anti-gaming dims (dynamics/variation/contour) plus
+// the production realness gate carry the conjunction; production COMPLETENESS (kit_coverage,
+// mix) adds modest weight. Musical dims still hold 0.89 of the base; realness's real power is
+// the GATE (a stock-sound outline is multiplied down hard no matter how good the MIDI).
 const WEIGHTS: DimScores = {
-  parts: 0.1, drums: 0.17, grid: 0.09, key: 0.13, register: 0.05,
-  dynamics: 0.12, variation: 0.12, contour: 0.12, density: 0.05, hygiene: 0.05,
+  parts: 0.09, drums: 0.15, grid: 0.08, key: 0.12, register: 0.04,
+  dynamics: 0.11, variation: 0.11, contour: 0.11, density: 0.04, hygiene: 0.04,
+  realness: 0.05, kit_coverage: 0.04, mix: 0.02,
 };
+
+// ── production: real-vs-stock classifier (provenance, NEVER taste) ─────────────
+// "stock" = the bundled mosh-kit (the only sounds the engine auto-provides); "real" = any
+// other path (the owner's musica/Splice library, or an imported file). By exclusion of the
+// known stock set — never an allowlist of "good" sounds.
+const STOCK_KIT_DIRMARK = "drumkits/mosh-kit";
+const STOCK_KIT_FILES = new Set(["kick.wav", "snare.wav", "clap.wav", "hat_closed.wav", "hat_open.wav", "tom_low.wav", "tom_mid.wav", "crash.wav"]);
+const DEFAULT_INSTRUMENTS = new Set(["4osc", "4OSC Synth", "sampler", "Sampler"]); // bare auto-loaded built-ins
+const KIT_PAD_PITCHES = [36, 38, 39, 42, 46, 45, 47, 49]; // bundled kDefaultKit GM pitches
+
+export function classifySample(path: string): "real" | "stock" {
+  const p = (path || "").replace(/\\/g, "/");
+  const base = (p.split("/").pop() || "").toLowerCase();
+  if (p.includes(STOCK_KIT_DIRMARK)) return "stock";
+  if (STOCK_KIT_FILES.has(base)) return "stock";
+  return "real";
+}
+export function classifyInstrument(name: string): SoundRealness {
+  return DEFAULT_INSTRUMENTS.has(name) ? "default" : "real";
+}
 
 const scaleSet = (mode: string): Set<number> => new Set(mode.toLowerCase().startsWith("maj") ? MAJOR : MINOR);
 const tonicPc = (tonic: string): number => SEMITONE[tonic] ?? 9;
@@ -223,14 +263,94 @@ function scoreHygiene(r: Recipe, reasons: string[]): number {
   return clamp01(1 - penalty);
 }
 
+// ── production dimensions (presence/realness only — never taste) ───────────────
+
+const DRUM_CORES: [string, number[]][] = [["kick", [36]], ["snare", [38, 40]], ["hat", [42, 44, 46]]];
+const playedPitches = (t: VTrack): Set<number> => new Set(t.notes.map((n) => n.pitch));
+const padRealness = (prod: VProduction | undefined, note: number): "real" | "stock" | undefined => prod?.pads?.find((p) => p.note === note)?.realness;
+const hasDrumProd = (t: VTrack): boolean => !!(t.production?.pads && t.production.pads.length);
+const hasVoiceProd = (t: VTrack): boolean => !!(t.production && (t.production.instrument || (t.production.pads && t.production.pads.length) || t.production.sampleRealness));
+const voiceIsReal = (t: VTrack): boolean =>
+  t.production?.instrument?.realness === "real" ||
+  t.production?.sampleRealness === "real" ||
+  !!t.production?.pads?.some((p) => p.realness === "real");
+
+/** realness — the owner's complaint operationalized, a GATE. Fraction of TRIGGERED voices
+ *  backed by a REAL sound (a real one-shot per played drum pad; a real instrument/sample
+ *  for melodic). A stock/outline beat → ~0 → the gate crushes the total even with perfect
+ *  MIDI. Unobservable voices (snapshot, no `productionObserved`) are skipped (neutral). */
+function scoreRealness(r: Recipe, reasons: string[]): number {
+  const observed = !!r.productionObserved;
+  const units: number[] = [];
+  for (const t of r.tracks) {
+    if (!t.notes.length) continue;
+    if (t.role === "drums") {
+      if (!hasDrumProd(t) && !observed) continue; // Sampler opaque in the snapshot → neutral
+      for (const note of playedPitches(t)) {
+        if (note < DRUM_RANGE[0] || note > DRUM_RANGE[1]) continue;
+        units.push(padRealness(t.production, note) === "real" ? 1 : 0); // a TRIGGERED pad must be real
+      }
+    } else {
+      if (!hasVoiceProd(t) && !observed) continue;
+      units.push(voiceIsReal(t) ? 1 : 0);
+    }
+  }
+  if (!units.length) return 0.7;
+  const s = mean(units);
+  if (s < 0.5) reasons.push("realness: stock/outline sounds — real one-shots/instruments not used");
+  return s;
+}
+
+/** kit_coverage — completeness. Are the EXPECTED triggered voices sound-backed (kick+snare+
+ *  hat each have a one-shot, bass present, melody present)? Credits stock-OR-real (a complete
+ *  stock beat covers but is still crushed by realness). Never timbre/taste. */
+function scoreKitCoverage(r: Recipe, reasons: string[]): number {
+  const observed = !!r.productionObserved;
+  const checks: number[] = [];
+  for (const t of r.tracks) {
+    if (!t.notes.length) continue;
+    if (t.role === "drums") {
+      if (!hasDrumProd(t) && !observed) continue;
+      const played = playedPitches(t);
+      for (const [, notes] of DRUM_CORES) {
+        const triggered = notes.some((n) => played.has(n));
+        if (!triggered) { checks.push(0.5); continue; } // absent voice → neutral
+        const backed = notes.some((n) => padRealness(t.production, n) !== undefined); // has ANY sample
+        checks.push(backed ? 1 : 0);
+      }
+    } else if (t.role === "bass") {
+      if (!hasVoiceProd(t) && !observed) continue;
+      checks.push(hasVoiceProd(t) ? 1 : 0);
+    } else if (t.role === "melody") {
+      if (!t.production?.instrument && !observed) continue;
+      checks.push(t.production?.instrument ? 1 : 0);
+    }
+  }
+  if (!checks.length) return 0.7;
+  const s = mean(checks);
+  if (s < 0.6) reasons.push("kit_coverage: not every voice is sound-backed (incomplete production)");
+  return s;
+}
+
+/** mix — light completeness: did the producer touch levels/pan at all (off the engine
+ *  default)? Presence only — never a target value. 0.5 floor (untouched mix is fine). */
+function scoreMix(r: Recipe, reasons: string[]): number {
+  const voices = r.tracks.filter((t) => t.notes.length);
+  if (!voices.length) return 0.7;
+  const moved = voices.map((t) => (Math.abs(t.production?.volumeDb ?? 0) > 0.01 || Math.abs(t.production?.pan ?? 0) > 0.01) ? 1 : 0);
+  const s = clamp01(0.5 + 0.5 * mean(moved));
+  if (s <= 0.5) reasons.push("mix: levels left at default (no mix moves)");
+  return s;
+}
+
 // ── aggregate ───────────────────────────────────────────────────────────────
 
-// Musical quality is a CONJUNCTION, not a sum: a flat-velocity / copy-paste / atonal beat
-// is bad no matter how clean its structure. A weighted sum lets gaming trade 2 bad dims
-// against 8 good ones (a metronome still scored ~0.76). So gate the weighted base by the
-// three "must-have" musical dims — each near-zero multiplies the total down hard. floor
-// keeps a single soft dim from over-punishing while still crushing a true 0.
-const GATE_DIMS: (keyof DimScores)[] = ["dynamics", "variation", "contour"];
+// Quality is a CONJUNCTION, not a sum: a flat-velocity / copy-paste / atonal / STOCK-SOUND
+// beat is bad no matter how clean its structure. A weighted sum lets gaming trade bad dims
+// against good ones. So gate the weighted base by the three "must-have" musical dims PLUS
+// realness — each near-zero multiplies the total down hard. floor keeps a single soft dim
+// from over-punishing while still crushing a true 0 (an all-stock beat → realness≈0 → ~0.45).
+const GATE_DIMS: (keyof DimScores)[] = ["dynamics", "variation", "contour", "realness"];
 const GATE_FLOOR = 0.5;
 
 /** Grade a recipe's musical DNA deterministically. Pure. */
@@ -247,6 +367,9 @@ export function verifyRecipe(r: Recipe): Verdict {
     contour: scoreContour(r, reasons),
     density: scoreDensity(r, reasons),
     hygiene: scoreHygiene(r, reasons),
+    realness: scoreRealness(r, reasons),
+    kit_coverage: scoreKitCoverage(r, reasons),
+    mix: scoreMix(r, reasons),
   };
   const base = (Object.keys(WEIGHTS) as (keyof DimScores)[]).reduce((s, k) => s + WEIGHTS[k] * dims[k], 0);
   const gate = GATE_DIMS.reduce((g, k) => g * (GATE_FLOOR + (1 - GATE_FLOOR) * dims[k]), 1);
@@ -255,23 +378,50 @@ export function verifyRecipe(r: Recipe): Verdict {
 
 // ── snapshot → recipe (to score real beat-build output) ───────────────────────
 
-type SnapTrack = { name?: string; type?: string; clips?: { notes?: VNote[] }[] };
+type SnapPlugin = { name?: string; isInstrument?: boolean };
+type SnapTrack = { name?: string; type?: string; volumeDb?: number; pan?: number; plugins?: SnapPlugin[]; clips?: { notes?: VNote[]; sourceFile?: string }[] };
 type SnapLike = { session?: { tempo?: number; key?: { tonic?: string; mode?: string } }; tracks?: SnapTrack[] };
 
-function inferRole(t: SnapTrack, notes: VNote[]): VRole {
-  if ((t.type ?? "") === "drum") return "drums";
-  if (/808|bass|sub/i.test(t.name ?? "")) return "bass";
+function inferRoleFrom(name: string, type: string, notes: VNote[]): VRole {
+  if (type === "drum") return "drums";
+  if (/808|bass|sub/i.test(name)) return "bass";
   if (!notes.length) return "other";
   const pitches = notes.map((n) => n.pitch).sort((a, b) => a - b);
   return pitches[Math.floor(pitches.length / 2)] < 52 ? "bass" : "melody";
 }
 
-/** Build a Recipe from a mock/native snapshot so verifyRecipe can grade a generated beat. */
+/** A melodic track with notes but no recorded instrument still plays (the engine auto-loads
+ *  4OSC) — mark it the bare default so realness counts it as stock, not unknown. Mutates. */
+function normalizeProduction(tracks: VTrack[]): void {
+  for (const t of tracks) {
+    if (t.production?.pads) t.production.pads.sort((a, b) => a.note - b.note);
+    if ((t.role === "melody" || t.role === "bass") && t.notes.length && !(t.production?.instrument) && !(t.production?.pads?.length) && !(t.production?.sampleRealness)) {
+      t.production = { ...(t.production ?? {}), instrument: { name: "4osc", realness: "default" } };
+    }
+  }
+}
+
+/** Build a Recipe from a mock/native snapshot so verifyRecipe can grade a generated beat.
+ *  Production is populated from what the snapshot exposes (instrument plugins, wave source,
+ *  mix). The Sampler's per-pad drum samples are OPAQUE in the snapshot, so drum-pad realness
+ *  is left unobserved here (productionObserved=false → neutral); the command-program path is
+ *  the one that sees drum samples (recipeFromProgram). */
 export function recipeFromSnapshot(snap: SnapLike, bars?: number): Recipe {
   const tracks: VTrack[] = (snap.tracks ?? []).map((t) => {
     const notes: VNote[] = (t.clips ?? []).flatMap((c) => c.notes ?? []);
-    return { name: t.name ?? "", role: inferRole(t, notes), notes };
+    const role = inferRoleFrom(t.name ?? "", t.type ?? "", notes);
+    const prod: VProduction = {};
+    const inst = (t.plugins ?? []).find((p) => p.isInstrument && p.name);
+    if (inst?.name) prod.instrument = { name: inst.name, realness: classifyInstrument(inst.name) };
+    const wave = (t.clips ?? []).map((c) => c.sourceFile).filter((f): f is string => !!f);
+    if (wave.length) prod.sampleRealness = wave.some((f) => classifySample(f) === "real") ? "real" : "stock";
+    if (typeof t.volumeDb === "number") prod.volumeDb = t.volumeDb;
+    if (typeof t.pan === "number") prod.pan = t.pan;
+    const track: VTrack = { name: t.name ?? "", role, notes };
+    if (Object.keys(prod).length) track.production = prod;
+    return track;
   });
+  normalizeProduction(tracks);
   const maxBeat = Math.max(0, ...tracks.flatMap((t) => t.notes.map((n) => n.start + n.length)));
   return {
     tempo: snap.session?.tempo ?? 120,
@@ -279,4 +429,81 @@ export function recipeFromSnapshot(snap: SnapLike, bars?: number): Recipe {
     bars: bars ?? Math.max(1, Math.ceil(maxBeat / 4)),
     tracks,
   };
+}
+
+// ── command program → recipe (the TRAINING path: production fully observable) ──
+// Mirrors recipe_verifier.py recipe_from_program. Parses the beat-build program (note
+// commands + production commands) so the GRPO/SFT reward grades the symbolic DNA AND the
+// sound choices. productionObserved=true → a triggered voice with no real sound is scored 0.
+
+type ProgCmd = { command?: string; args?: Record<string, unknown>; capture?: Record<string, string> };
+
+export function recipeFromProgram(commands: ProgCmd[], bars?: number): Recipe {
+  let tempo = 120;
+  let key = { tonic: "C", mode: "minor" };
+  type TR = VTrack & { _type?: string; _pads?: Map<number, "real" | "stock"> };
+  const tracks: TR[] = [];
+  const varToTrack = new Map<string, TR>();
+  const idToTrack = new Map<string, TR>();
+  const resolve = (ref: unknown): TR | undefined => {
+    if (typeof ref !== "string") return undefined;
+    const v = ref.startsWith("${") && ref.endsWith("}") ? ref.slice(2, -1) : ref;
+    return varToTrack.get(v) ?? idToTrack.get(v) ?? varToTrack.get(ref) ?? idToTrack.get(ref);
+  };
+  const num = (x: unknown, d: number) => { const n = Number(x); return Number.isFinite(n) ? n : d; };
+  const prodOf = (t: TR): VProduction => (t.production ??= {});
+
+  for (const c of commands) {
+    const cmd = c.command;
+    const args = (c.args ?? {}) as Record<string, unknown>;
+    const cap = c.capture ?? {};
+    if (cmd === "set_tempo") tempo = num(args.bpm ?? args.tempo, tempo);
+    else if (cmd === "set_key") key = { tonic: String(args.tonic ?? key.tonic), mode: String(args.mode ?? key.mode) };
+    else if (cmd === "create_track" || cmd === "create_group") {
+      const tr: TR = { name: String(args.name ?? "track"), _type: String(args.type ?? ""), role: "other", notes: [], _pads: new Map() };
+      tracks.push(tr);
+      for (const [v, field] of Object.entries(cap)) if (field === "trackId" || field === "id") varToTrack.set(v, tr);
+      if (typeof args.id === "string") idToTrack.set(args.id, tr);
+    } else if (cmd === "add_midi_clip") {
+      const tr = resolve(args.trackId) ?? tracks[tracks.length - 1];
+      if (tr) for (const [v, field] of Object.entries(cap)) if (field === "clipId" || field === "id") varToTrack.set(v, tr);
+    } else if (cmd === "add_note") {
+      const tr = resolve(args.clipId) ?? resolve(args.trackId) ?? tracks[tracks.length - 1];
+      if (tr && args.pitch != null && args.start != null) tr.notes.push({ pitch: Math.trunc(num(args.pitch, 0)), start: num(args.start, 0), length: num(args.length, 0.25), velocity: Math.trunc(num(args.velocity, 100)) });
+    } else if (cmd === "assign_sample") {
+      const tr = resolve(args.trackId);
+      if (tr) {
+        const rn = classifySample(String(args.file ?? ""));
+        if (String(args.mode ?? "drum") === "melodic") prodOf(tr).instrument = { name: String(args.name ?? "808"), realness: rn };
+        else tr._pads!.set(Math.trunc(num(args.note, 60)), rn);
+      }
+    } else if (cmd === "load_drum_kit") {
+      const tr = resolve(args.trackId);
+      if (tr) for (const n of KIT_PAD_PITCHES) if (!tr._pads!.has(n)) tr._pads!.set(n, "stock");
+    } else if (cmd === "load_plugin") {
+      const tr = resolve(args.trackId);
+      if (tr) { const nm = String(args.pluginId ?? args.name ?? ""); prodOf(tr).instrument = { name: nm, realness: classifyInstrument(nm) }; }
+    } else if (cmd === "load_builtin") {
+      const tr = resolve(args.trackId);
+      if (tr) { const ty = String(args.type ?? ""); prodOf(tr).instrument = { name: ty, realness: classifyInstrument(ty) }; }
+    } else if (cmd === "set_track_volume") {
+      const tr = resolve(args.trackId);
+      if (tr) prodOf(tr).volumeDb = num(args.db ?? args.value ?? args.volumeDb, 0);
+    } else if (cmd === "set_track_pan") {
+      const tr = resolve(args.trackId);
+      if (tr) prodOf(tr).pan = num(args.pan, 0);
+    }
+  }
+
+  const finalTracks: VTrack[] = tracks.map((tr) => {
+    const role = inferRoleFrom(tr.name, tr._type ?? "", tr.notes);
+    const pads = tr._pads && tr._pads.size ? [...tr._pads.entries()].map(([note, realness]) => ({ note, realness })) : undefined;
+    const prod: VProduction | undefined = (tr.production || pads) ? { ...(tr.production ?? {}), ...(pads ? { pads } : {}) } : undefined;
+    const out: VTrack = { name: tr.name, role, notes: tr.notes };
+    if (prod) out.production = prod;
+    return out;
+  });
+  normalizeProduction(finalTracks);
+  const maxBeat = Math.max(0, ...finalTracks.flatMap((t) => t.notes.map((n) => n.start + n.length)));
+  return { tempo, key, bars: bars ?? Math.max(1, Math.ceil(maxBeat / 4)), tracks: finalTracks, productionObserved: true };
 }
