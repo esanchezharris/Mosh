@@ -1,0 +1,489 @@
+{
+  "recipe_id": "ec34e148-9006-40d1-98b2-680f68fb8c0a",
+  "schema_version": "2.0",
+  "source": {
+    "platform": "seed",
+    "video_id": "seed_drill",
+    "url": "",
+    "title": "Drill (canonical) — sliding 808 with glides, skippy kick",
+    "channel": "menacing",
+    "duration_s": 0.0,
+    "license": "unknown",
+    "retrieved_at": null,
+    "content_hash": null
+  },
+  "meta": {
+    "daw": {
+      "value": "seed",
+      "confidence": 0.0,
+      "evidence": []
+    },
+    "tempo_bpm": {
+      "value": 142,
+      "confidence": 1.0,
+      "evidence": []
+    },
+    "key": {
+      "value": "G minor",
+      "confidence": 1.0,
+      "evidence": []
+    },
+    "time_signature": {
+      "value": "4/4",
+      "confidence": 1.0,
+      "evidence": []
+    }
+  },
+  "arrangement": {
+    "sections": [
+      {
+        "name": "loop",
+        "start_s": 0.0,
+        "end_s": 3.380281690140845,
+        "confidence": 1.0
+      }
+    ]
+  },
+  "elements": [
+    {
+      "element_id": "kick",
+      "role": "kick",
+      "label": "Kick",
+      "audio_ref": null,
+      "midi": {
+        "status": "extracted",
+        "midi_ref": null,
+        "notes": [
+          {
+            "pitch": 36,
+            "start_beats": 0.0,
+            "duration_beats": 0.22,
+            "velocity": 116
+          },
+          {
+            "pitch": 36,
+            "start_beats": 0.75,
+            "duration_beats": 0.22,
+            "velocity": 116
+          },
+          {
+            "pitch": 36,
+            "start_beats": 3.0,
+            "duration_beats": 0.22,
+            "velocity": 116
+          },
+          {
+            "pitch": 36,
+            "start_beats": 4.0,
+            "duration_beats": 0.22,
+            "velocity": 116
+          },
+          {
+            "pitch": 36,
+            "start_beats": 4.75,
+            "duration_beats": 0.22,
+            "velocity": 116
+          },
+          {
+            "pitch": 36,
+            "start_beats": 7.0,
+            "duration_beats": 0.22,
+            "velocity": 116
+          }
+        ],
+        "note_count": 6,
+        "confidence": 0.0
+      },
+      "sample_match": {
+        "status": "none",
+        "matched_path": null,
+        "distance": 0.0,
+        "alternates": []
+      },
+      "synth_patch": {
+        "status": "unknown",
+        "plugin": {
+          "name": null,
+          "available_locally": false
+        },
+        "params": {},
+        "match": null,
+        "substitute": null
+      },
+      "onsets": [],
+      "motif": {
+        "bars": 4.0,
+        "onset_grid": "16th",
+        "density": 1.5,
+        "syncopation": 0.0,
+        "contour": [],
+        "register_band": "perc",
+        "harmonic_function": ""
+      },
+      "bass": null,
+      "evidence": [],
+      "confidence": 0.0
+    },
+    {
+      "element_id": "snare",
+      "role": "snare",
+      "label": "Snare",
+      "audio_ref": null,
+      "midi": {
+        "status": "extracted",
+        "midi_ref": null,
+        "notes": [
+          {
+            "pitch": 38,
+            "start_beats": 2.0,
+            "duration_beats": 0.22,
+            "velocity": 108
+          },
+          {
+            "pitch": 38,
+            "start_beats": 6.0,
+            "duration_beats": 0.22,
+            "velocity": 108
+          }
+        ],
+        "note_count": 2,
+        "confidence": 0.0
+      },
+      "sample_match": {
+        "status": "none",
+        "matched_path": null,
+        "distance": 0.0,
+        "alternates": []
+      },
+      "synth_patch": {
+        "status": "unknown",
+        "plugin": {
+          "name": null,
+          "available_locally": false
+        },
+        "params": {},
+        "match": null,
+        "substitute": null
+      },
+      "onsets": [],
+      "motif": {
+        "bars": 4.0,
+        "onset_grid": "16th",
+        "density": 0.5,
+        "syncopation": 0.0,
+        "contour": [],
+        "register_band": "perc",
+        "harmonic_function": ""
+      },
+      "bass": null,
+      "evidence": [],
+      "confidence": 0.0
+    },
+    {
+      "element_id": "hat",
+      "role": "hat",
+      "label": "Hat",
+      "audio_ref": null,
+      "midi": {
+        "status": "extracted",
+        "midi_ref": null,
+        "notes": [
+          {
+            "pitch": 42,
+            "start_beats": 0.0,
+            "duration_beats": 0.18,
+            "velocity": 72
+          },
+          {
+            "pitch": 42,
+            "start_beats": 0.5,
+            "duration_beats": 0.18,
+            "velocity": 72
+          },
+          {
+            "pitch": 42,
+            "start_beats": 1.0,
+            "duration_beats": 0.18,
+            "velocity": 72
+          },
+          {
+            "pitch": 42,
+            "start_beats": 1.5,
+            "duration_beats": 0.18,
+            "velocity": 72
+          },
+          {
+            "pitch": 42,
+            "start_beats": 2.0,
+            "duration_beats": 0.18,
+            "velocity": 72
+          },
+          {
+            "pitch": 42,
+            "start_beats": 2.5,
+            "duration_beats": 0.18,
+            "velocity": 72
+          },
+          {
+            "pitch": 42,
+            "start_beats": 3.0,
+            "duration_beats": 0.18,
+            "velocity": 72
+          },
+          {
+            "pitch": 42,
+            "start_beats": 3.5,
+            "duration_beats": 0.18,
+            "velocity": 72
+          },
+          {
+            "pitch": 42,
+            "start_beats": 4.0,
+            "duration_beats": 0.18,
+            "velocity": 72
+          },
+          {
+            "pitch": 42,
+            "start_beats": 4.5,
+            "duration_beats": 0.18,
+            "velocity": 72
+          },
+          {
+            "pitch": 42,
+            "start_beats": 5.0,
+            "duration_beats": 0.18,
+            "velocity": 72
+          },
+          {
+            "pitch": 42,
+            "start_beats": 5.5,
+            "duration_beats": 0.18,
+            "velocity": 72
+          },
+          {
+            "pitch": 42,
+            "start_beats": 6.0,
+            "duration_beats": 0.18,
+            "velocity": 72
+          },
+          {
+            "pitch": 42,
+            "start_beats": 6.5,
+            "duration_beats": 0.18,
+            "velocity": 72
+          },
+          {
+            "pitch": 42,
+            "start_beats": 7.0,
+            "duration_beats": 0.18,
+            "velocity": 72
+          },
+          {
+            "pitch": 42,
+            "start_beats": 7.5,
+            "duration_beats": 0.18,
+            "velocity": 72
+          }
+        ],
+        "note_count": 16,
+        "confidence": 0.0
+      },
+      "sample_match": {
+        "status": "none",
+        "matched_path": null,
+        "distance": 0.0,
+        "alternates": []
+      },
+      "synth_patch": {
+        "status": "unknown",
+        "plugin": {
+          "name": null,
+          "available_locally": false
+        },
+        "params": {},
+        "match": null,
+        "substitute": null
+      },
+      "onsets": [],
+      "motif": {
+        "bars": 4.0,
+        "onset_grid": "8th",
+        "density": 4.0,
+        "syncopation": 0.0,
+        "contour": [],
+        "register_band": "perc",
+        "harmonic_function": ""
+      },
+      "bass": null,
+      "evidence": [],
+      "confidence": 0.0
+    },
+    {
+      "element_id": "b808",
+      "role": "808",
+      "label": "808",
+      "audio_ref": null,
+      "midi": {
+        "status": "extracted",
+        "midi_ref": null,
+        "notes": [
+          {
+            "pitch": 31,
+            "start_beats": 0.0,
+            "duration_beats": 1.5,
+            "velocity": 114
+          },
+          {
+            "pitch": 27,
+            "start_beats": 1.75,
+            "duration_beats": 1.0,
+            "velocity": 100
+          },
+          {
+            "pitch": 29,
+            "start_beats": 3.0,
+            "duration_beats": 1.5,
+            "velocity": 108
+          },
+          {
+            "pitch": 26,
+            "start_beats": 4.5,
+            "duration_beats": 1.5,
+            "velocity": 110
+          },
+          {
+            "pitch": 31,
+            "start_beats": 6.0,
+            "duration_beats": 2.0,
+            "velocity": 112
+          }
+        ],
+        "note_count": 5,
+        "confidence": 0.0
+      },
+      "sample_match": {
+        "status": "none",
+        "matched_path": null,
+        "distance": 0.0,
+        "alternates": []
+      },
+      "synth_patch": {
+        "status": "unknown",
+        "plugin": {
+          "name": null,
+          "available_locally": false
+        },
+        "params": {},
+        "match": null,
+        "substitute": null
+      },
+      "onsets": [],
+      "motif": {
+        "bars": 4.0,
+        "onset_grid": "syncopated",
+        "density": 1.25,
+        "syncopation": 0.0,
+        "contour": [],
+        "register_band": "sub",
+        "harmonic_function": "root-following"
+      },
+      "bass": {
+        "sustain_ratio": 1.0,
+        "glides": [
+          0,
+          3
+        ],
+        "kick_alignment": 0.5,
+        "root_follows": true,
+        "root_element_id": "chords"
+      },
+      "evidence": [],
+      "confidence": 0.0
+    },
+    {
+      "element_id": "chords",
+      "role": "pad",
+      "label": "Chords",
+      "audio_ref": null,
+      "midi": {
+        "status": "extracted",
+        "midi_ref": null,
+        "notes": [
+          {
+            "pitch": 43,
+            "start_beats": 0.0,
+            "duration_beats": 2.0,
+            "velocity": 66
+          },
+          {
+            "pitch": 39,
+            "start_beats": 2.0,
+            "duration_beats": 2.0,
+            "velocity": 64
+          },
+          {
+            "pitch": 41,
+            "start_beats": 4.0,
+            "duration_beats": 2.0,
+            "velocity": 66
+          },
+          {
+            "pitch": 38,
+            "start_beats": 6.0,
+            "duration_beats": 2.0,
+            "velocity": 64
+          }
+        ],
+        "note_count": 4,
+        "confidence": 0.0
+      },
+      "sample_match": {
+        "status": "none",
+        "matched_path": null,
+        "distance": 0.0,
+        "alternates": []
+      },
+      "synth_patch": {
+        "status": "unknown",
+        "plugin": {
+          "name": null,
+          "available_locally": false
+        },
+        "params": {},
+        "match": null,
+        "substitute": null
+      },
+      "onsets": [],
+      "motif": {
+        "bars": 4.0,
+        "onset_grid": "whole",
+        "density": 0.0,
+        "syncopation": 0.0,
+        "contour": [],
+        "register_band": "mid",
+        "harmonic_function": "progression"
+      },
+      "bass": null,
+      "evidence": [],
+      "confidence": 0.0
+    }
+  ],
+  "unresolved": [],
+  "reconstruction_class": "deterministic",
+  "yield": {
+    "predicted": {
+      "drums": 0.0,
+      "midi": 0.0,
+      "synth": 0.0,
+      "arrangement": 0.0,
+      "overall": 0.0
+    },
+    "actual": {
+      "drums": 0.0,
+      "midi": 0.0,
+      "synth": 0.0,
+      "arrangement": 0.0,
+      "overall": 0.0
+    }
+  }
+}
