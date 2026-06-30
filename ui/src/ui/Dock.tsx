@@ -232,6 +232,9 @@ function GenBody({ clip, qa }: { clip: Clip; qa?: RenderQA }) {
       </>)}
       <div className="gen-status" role="status" aria-live="polite">
         <span className={`gen-badge st-${rl.status}`} data-testid="render-status">{rl.status}</span>
+        {rl.status === "error" && rl.error && (
+          <span className="gen-error" data-testid="render-error" title={rl.error}>{rl.error}</span>
+        )}
         <span className="gen-seed tc">seed {rl.seed}</span>
         <button className={`btn${labMode ? " on" : ""}`} title="Lab — unlock the ASTD clamp" aria-pressed={labMode} onClick={() => setLab(!labMode)}>{labMode ? "⚠ LAB" : "Lab"}</button>
       </div>

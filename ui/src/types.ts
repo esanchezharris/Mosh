@@ -19,6 +19,7 @@ export type RenderLayer = {
   // the clip; a whole-clip render's range equals the clip span.
   regionStart?: number;
   regionEnd?: number;
+  error?: string;     // the service's reason, populated when status === "error"
 };
 
 // LYR-001 — Finish-My-Song lyric sheet (per-track), from MoshOps.lyricSheetToVar().

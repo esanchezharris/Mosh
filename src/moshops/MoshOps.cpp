@@ -5317,12 +5317,20 @@ juce::String MoshOps::computeFingerprint (const juce::ValueTree& node, const juc
 }
 
 // Slice [srcStartSec, srcEndSec] of an audio file into destWav (raw, no FX) — the
-// staged input for a section-scoped render. Returns false (caller errors) if the
-// source can't be read or the range is degenerate, so a failed slice never silently
-// renders the wrong (whole-clip) audio for a section request.
-static bool stageWavRegion (const juce::File& sourceFile, double srcStartSec, double srcEndSec,
-                            const juce::File& destWav)
+// staged input for a render — ALWAYS written at 44100 Hz / 16-bit / stereo, which is
+// the rate the generative engine's reader handles natively (it otherwise shells out to
+// ffmpeg, fragile in the deployed app's spawned PATH). Resamples per channel with a
+// deterministic LagrangeInterpolator when the source rate differs; 44100/2 also matches
+// what computeFingerprint() claims. Pass [0, lengthInSeconds] for a whole clip. Returns
+// false (caller errors) if the source can't be read or the range is degenerate, so a
+// failed slice never silently renders the wrong audio.
+static bool stageWavRegionAt44k (const juce::File& sourceFile, double srcStartSec, double srcEndSec,
+                                 const juce::File& destWav)
 {
+    static constexpr double kStageSR   = 44100.0;
+    static constexpr int    kStageBits = 16;
+    static constexpr int    kStageCh   = 2;   // engine read_wav duplicates mono → stereo anyway
+
     if (srcEndSec <= srcStartSec) return false;
     juce::AudioFormatManager fm; fm.registerBasicFormats();
     std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (sourceFile));
@@ -5335,20 +5343,41 @@ static bool stageWavRegion (const juce::File& sourceFile, double srcStartSec, do
     const int numSamps = (int) (endSamp - startSamp);
     if (numSamps <= 0) return false;
 
-    const int numCh = (int) juce::jmax ((unsigned) 1, reader->numChannels);
-    juce::AudioBuffer<float> buf (numCh, numSamps);
-    if (! reader->read (&buf, 0, numSamps, startSamp, true, true)) return false;
+    const int srcNumCh = (int) juce::jmax ((unsigned) 1, reader->numChannels);
+    juce::AudioBuffer<float> srcBuf (srcNumCh, numSamps);
+    if (! reader->read (&srcBuf, 0, numSamps, startSamp, true, true)) return false;
+
+    const bool needResample = std::abs (sr - kStageSR) > 1.0e-6;
+    const double ratio = sr / kStageSR;   // > 1 downsamples (48k→44.1k)
+    // floor keeps outNum*ratio <= numSamps so the interpolator never reads past srcBuf
+    // (a sub-sample duration loss, inaudible). For a 44100 source ratio==1 → outNum==numSamps.
+    const int outNum = needResample
+        ? (int) std::floor ((double) numSamps * kStageSR / sr)
+        : numSamps;
+    if (outNum <= 0) return false;
+
+    juce::AudioBuffer<float> outBuf (kStageCh, outNum);
+    for (int ch = 0; ch < kStageCh; ++ch)
+    {
+        const int srcCh = juce::jmin (ch, srcNumCh - 1);   // mono → duplicate into L/R
+        if (needResample)
+        {
+            juce::LagrangeInterpolator interp;             // fresh per channel: zeroed history, deterministic
+            interp.process (ratio, srcBuf.getReadPointer (srcCh), outBuf.getWritePointer (ch), outNum);
+        }
+        else
+            outBuf.copyFrom (ch, 0, srcBuf, srcCh, 0, outNum);
+    }
 
     destWav.deleteFile();
     std::unique_ptr<juce::FileOutputStream> os (destWav.createOutputStream());
     if (os == nullptr) return false;
     juce::WavAudioFormat wav;
     std::unique_ptr<juce::AudioFormatWriter> writer (
-        wav.createWriterFor (os.get(), sr, (unsigned) numCh,
-                             juce::jmax (16, (int) reader->bitsPerSample), {}, 0));
+        wav.createWriterFor (os.get(), kStageSR, (unsigned) kStageCh, kStageBits, {}, 0));
     if (writer == nullptr) return false;
     os.release();   // the writer owns the stream now
-    const bool wrote = writer->writeFromAudioSampleBuffer (buf, 0, numSamps);
+    const bool wrote = writer->writeFromAudioSampleBuffer (outBuf, 0, outNum);
     writer.reset(); // flush + close before the caller reads the file back
     return wrote;
 }
@@ -5593,13 +5622,24 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
             if (sliceable)
             {
                 const double off = cpos.getOffset().inSeconds();
-                staged = stageWavRegion (wave->getCurrentSourceFile(), rs - cs + off, re - cs + off, input);
+                staged = stageWavRegionAt44k (wave->getCurrentSourceFile(), rs - cs + off, re - cs + off, input);
             }
             if (! staged)   // never fall back to the whole clip for a section request
                 return errResult ("render_layer", "section render needs an un-stretched, non-looping wave clip");
         }
-        if (! staged && ! wave->getCurrentSourceFile().copyFileTo (input))
-            return errResult ("render_layer", "could not stage source region");
+        if (! staged)
+        {
+            // Whole clip: stage the entire source at 44100/16-bit (was a raw copyFileTo, which
+            // preserved a non-44100 rate the engine reader can't handle without ffmpeg).
+            juce::AudioFormatManager fm; fm.registerBasicFormats();
+            std::unique_ptr<juce::AudioFormatReader> rd (fm.createReaderFor (wave->getCurrentSourceFile()));
+            const double srcLenSec = (rd != nullptr && rd->sampleRate > 0.0)
+                ? (double) rd->lengthInSamples / rd->sampleRate : 0.0;
+            rd.reset();
+            if (srcLenSec <= 0.0
+                || ! stageWavRegionAt44k (wave->getCurrentSourceFile(), 0.0, srcLenSec, input))
+                return errResult ("render_layer", "could not stage source region");
+        }
     }
     else
     {
@@ -5666,6 +5706,7 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
     if (jobId.isEmpty()) return errResult ("render_layer", "job submit failed");
 
     node.setProperty (ids::cacheKey, fp, nullptr);
+    node.setProperty (ids::renderError, "", nullptr);   // clear any stale error from a prior failed render
     node.setProperty (ids::status, "rendering", nullptr);
     emit ("layer_status", [&] { auto* o = new DynamicObject();
         o->setProperty ("clipId", clipId); o->setProperty ("layerId", node[ids::id]);
@@ -5682,10 +5723,12 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
         const int waitTimeoutMs = juce::jmax (1000, juce::SystemStats::getEnvironmentVariable (
             "MOSH_RENDER_WAIT_TIMEOUT_MS", defaultWaitMs).getIntValue());
         const int maxPolls = juce::jmax (1, waitTimeoutMs / 50);
+        juce::String lastErr;
         for (int i = 0; i < maxPolls; ++i)   // default ~120s; PC CUDA cold loads can opt into longer waits
         {
             auto st = jobManager.jobStatus (jobId);
             const auto status = st.getProperty ("status", var()).toString();
+            if (const auto err = st.getProperty ("error", var()).toString(); err.isNotEmpty()) lastErr = err;
             emit ("layer_render_progress", [&] { auto* o = new DynamicObject();
                 o->setProperty ("clipId", clipId); o->setProperty ("jobId", jobId);
                 o->setProperty ("progress", st.getProperty ("progress", 0.0)); return var (o); }());
@@ -5697,7 +5740,7 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
                 break;
             juce::Thread::sleep (50);
         }
-        finalizeRender (clipId, output, manifest, fp);
+        finalizeRender (clipId, output, manifest, fp, lastErr);
         logLine ("render_layer", args, true, {}, false);
         auto* d = new DynamicObject(); d->setProperty ("cache", "miss");
         d->setProperty ("status", node[ids::status]); d->setProperty ("jobId", jobId);
@@ -5708,11 +5751,13 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
     // message thread (service I/O off the message thread; tree on it).
     std::thread ([this, clipId, jobId, output, manifest, fp]
     {
+        juce::String lastErr;
         for (int i = 0; i < 1800; ++i)   // up to ~180s for a slow generative render
         {
             auto st = jobManager.jobStatus (jobId);
             const auto status = st.getProperty ("status", juce::var()).toString();
             const auto progress = st.getProperty ("progress", 0.0);
+            if (const auto err = st.getProperty ("error", juce::var()).toString(); err.isNotEmpty()) lastErr = err;
             juce::MessageManager::callAsync ([this, clipId, jobId, progress]
             {
                 emit ("layer_render_progress", [&] { auto* o = new juce::DynamicObject();
@@ -5724,9 +5769,9 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
                 break;
             juce::Thread::sleep (100);
         }
-        juce::MessageManager::callAsync ([this, clipId, output, manifest, fp]
+        juce::MessageManager::callAsync ([this, clipId, output, manifest, fp, lastErr]
         {
-            finalizeRender (clipId, output, manifest, fp);
+            finalizeRender (clipId, output, manifest, fp, lastErr);
         });
     }).detach();
 
@@ -5737,12 +5782,27 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
 }
 
 void MoshOps::finalizeRender (const juce::String& clipId, const juce::File& outputWav,
-                              const juce::File& manifestFile, const juce::String& cacheKey)
+                              const juce::File& manifestFile, const juce::String& cacheKey,
+                              const juce::String& serviceError)
 {
     auto node = findRenderLayer (clipId);
     if (! node.isValid()) return;
-    if (! outputWav.existsAsFile()) { node.setProperty (ids::status, "error", nullptr); emitSnapshotInvalidated(); return; }
+    if (! outputWav.existsAsFile())
+    {
+        // Surface the real reason (the service's exception, when we captured one) instead of a
+        // bare "error" badge — otherwise the only signal is a missing file.
+        const juce::String reason = serviceError.isNotEmpty() ? serviceError
+                                                              : juce::String ("render produced no output");
+        node.setProperty (ids::renderError, reason, nullptr);
+        node.setProperty (ids::status, "error", nullptr);
+        emit ("layer_status", [&] { auto* o = new DynamicObject();
+            o->setProperty ("clipId", clipId); o->setProperty ("layerId", node[ids::id]);
+            o->setProperty ("status", "error"); o->setProperty ("error", reason); return var (o); }());
+        emitSnapshotInvalidated();
+        return;
+    }
 
+    node.setProperty (ids::renderError, "", nullptr);   // clear on success
     node.setProperty (ids::cacheArtifact, outputWav.getFullPathName(), nullptr);
     node.setProperty (ids::cacheKey, cacheKey, nullptr);
     node.setProperty (ids::status, "ready", nullptr);
@@ -7460,6 +7520,7 @@ juce::var MoshOps::clipToVar (te::Clip& c)
         auto* r = new DynamicObject();
         r->setProperty ("id", rl[ids::id]);
         r->setProperty ("status", rl[ids::status]);
+        r->setProperty ("error", rl[ids::renderError]);   // "" unless status=="error"
         r->setProperty ("adapter", rl[ids::modelAdapter]);
         r->setProperty ("mode", rl[ids::mode]);
         r->setProperty ("seed", (int) rl[ids::seed]);

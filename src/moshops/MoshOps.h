@@ -352,7 +352,8 @@ private:
     juce::String    computeFingerprint (const juce::ValueTree& node, const juce::File& inputWav,
                                         const juce::String& upstreamOverride = {});
     void            finalizeRender (const juce::String& clipId, const juce::File& outputWav,
-                                    const juce::File& manifestFile, const juce::String& cacheKey);
+                                    const juce::File& manifestFile, const juce::String& cacheKey,
+                                    const juce::String& serviceError = {});
 
     // ── helpers ──
     te::AudioTrack* createAudioTrack (const juce::String& name);

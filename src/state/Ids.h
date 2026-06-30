@@ -164,6 +164,7 @@ namespace mosh::ids
     MOSH_DECLARE_ID (cacheKey)
     MOSH_DECLARE_ID (cacheArtifact)
     MOSH_DECLARE_ID (status)           // empty | queued | rendering | ready | error | dirty
+    MOSH_DECLARE_ID (renderError)      // last service error string when status=="error" (additive, optional)
     MOSH_DECLARE_ID (createdBy)        // user | (future) monster
     MOSH_DECLARE_ID (userKept)
 

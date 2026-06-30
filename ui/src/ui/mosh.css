@@ -689,6 +689,7 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 .gen-badge.st-ready { color: var(--on-accent); background: var(--lime); border-color: var(--lime); }
 .gen-badge.st-rendering, .gen-badge.st-queued { color: var(--on-accent); background: var(--warn); border-color: var(--warn); }
 .gen-badge.st-error { color: #fff; background: var(--rec); }
+.gen-error { font-size: 10px; color: var(--rec); flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gen-seed { font-size: 10px; color: var(--bone-dim); }
 .gen-qa { font-size: 11px; color: var(--lime); display: flex; flex-direction: column; gap: 3px; }
 .gen-qa-line { display: flex; gap: 8px; align-items: center; }
