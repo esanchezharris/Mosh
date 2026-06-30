@@ -59,6 +59,15 @@ let S=JSON.parse(localStorage.getItem(KEY)||'{"r":{},"n":{},"w":{}}');
 const save=()=>localStorage.setItem(KEY,JSON.stringify(S));
 const $=s=>document.querySelector(s);
 function counts(){$("#rc").textContent=Object.keys(S.r).length;$("#ac").textContent=Object.keys(S.w).length;}
+// single-playback toggle: clicking play ▶ starts (pausing any other), clicking again ⏸ pauses; resumes from position.
+let CUR=null;
+function wirePlay(btn,au,label){
+  au.onplay=()=>btn.textContent="⏸ "+label;
+  au.onpause=()=>btn.textContent="▶ "+label;
+  au.onended=()=>{au.currentTime=0;btn.textContent="▶ "+label;};
+  btn.onclick=()=>{ if(au.paused){ if(CUR&&CUR!==au)CUR.pause(); CUR=au; au.play(); } else au.pause(); };
+  return ()=>btn.onclick();  // toggle fn for keyboard
+}
 const clipsEl=$("#clips");
 CLIPS.forEach(id=>{
   const row=document.createElement("div");row.className="row"+(S.r[id]?" done":"");row.tabIndex=0;row.dataset.id=id;
@@ -66,14 +75,14 @@ CLIPS.forEach(id=>{
   const rate=document.createElement("div");rate.className="rate";
   let html=`<span class=idx>${id}</span><button class=play>▶ play</button>`;
   row.innerHTML=html;
+  const toggle=wirePlay(row.querySelector(".play"),au,"play");
   for(let k=1;k<=7;k++){const b=document.createElement("b");b.textContent=k;if(S.r[id]==k)b.classList.add("sel");
     b.onclick=()=>{S.r[id]=k;save();[...rate.children].forEach(c=>c.classList.remove("sel"));b.classList.add("sel");row.classList.add("done");counts();};
     rate.appendChild(b);}
   const nt=document.createElement("input");nt.className="notes";nt.placeholder="notes (optional)";nt.value=S.n[id]||"";
   nt.oninput=()=>{S.n[id]=nt.value;save();};
   row.appendChild(rate);row.appendChild(nt);
-  row.querySelector(".play").onclick=()=>{au.currentTime=0;au.play();};
-  row.addEventListener("keydown",e=>{if(e.key>="1"&&e.key<="7"){S.r[id]=+e.key;save();[...rate.children].forEach((c,i)=>c.classList.toggle("sel",i+1==+e.key));row.classList.add("done");counts();}else if(e.key===" "){e.preventDefault();au.currentTime=0;au.play();}});
+  row.addEventListener("keydown",e=>{if(e.key>="1"&&e.key<="7"){S.r[id]=+e.key;save();[...rate.children].forEach((c,i)=>c.classList.toggle("sel",i+1==+e.key));row.classList.add("done");counts();}else if(e.key===" "){e.preventDefault();toggle();}});
   clipsEl.appendChild(row);
 });
 const absEl=$("#abs");
@@ -85,7 +94,7 @@ PAIRS.forEach(p=>{
   a.onclick=()=>{S.w[p.pair]="A";save();a.classList.add("sel");b.classList.remove("sel");d.classList.add("done");counts();};
   b.onclick=()=>{S.w[p.pair]="B";save();b.classList.add("sel");a.classList.remove("sel");d.classList.add("done");counts();};
   d.appendChild(a);d.appendChild(b);
-  d.querySelectorAll(".play").forEach(btn=>{const au=new Audio("clips/"+btn.dataset.f+".wav");btn.onclick=()=>{au.currentTime=0;au.play();};});
+  d.querySelectorAll(".play").forEach(btn=>{const au=new Audio("clips/"+btn.dataset.f+".wav");wirePlay(btn,au,(btn.dataset.f===p.A?"A":"B")+" ("+btn.dataset.f+")");});
   absEl.appendChild(d);
 });
 function ratingsCSV(){let o="index,rating,notes\n";CLIPS.forEach(id=>{const n=(S.n[id]||"").replace(/[,\n]/g," ");o+=`${id},${S.r[id]||""},${n}\n`;});return o;}
