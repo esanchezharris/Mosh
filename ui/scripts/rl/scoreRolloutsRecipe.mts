@@ -38,6 +38,27 @@ function extractJson(s: string): string {
   return s.slice(i);
 }
 
+// Recover complete command objects from a possibly-truncated/malformed reply (e.g. the policy's
+// JSON got cut off at max_new_tokens mid-array). Scan inside "commands":[ … ] and collect each
+// balanced {…} that parses and has a `command` — the incomplete trailing object is dropped. This
+// keeps a near-complete beat from scoring 0 just because the wrapper JSON didn't close.
+function recoverCommands(s: string): { command: string; args: Record<string, unknown> }[] {
+  const ci = s.indexOf('"commands"');
+  const arr = ci >= 0 ? s.indexOf("[", ci) : -1;
+  if (arr < 0) return [];
+  const out: { command: string; args: Record<string, unknown> }[] = [];
+  let depth = 0, start = -1, inStr = false, esc = false;
+  for (let k = arr + 1; k < s.length; k++) {
+    const c = s[k];
+    if (inStr) { if (esc) esc = false; else if (c === "\\") esc = true; else if (c === '"') inStr = false; continue; }
+    if (c === '"') { inStr = true; continue; }
+    if (c === "{") { if (depth === 0) start = k; depth++; }
+    else if (c === "}") { depth--; if (depth === 0 && start >= 0) { try { const o = JSON.parse(s.slice(start, k + 1)); if (o && typeof o.command === "string") out.push(o); } catch { /* skip */ } start = -1; } }
+    else if (c === "]" && depth === 0) break;
+  }
+  return out;
+}
+
 const rollouts = readFileSync(rolloutsPath, "utf8").split("\n").filter((s) => s.trim()).map((l) => JSON.parse(l) as { exId: string; sampleId: string; content: string });
 
 const newId = (res: any): string | undefined => res?.data?.trackId ?? res?.trackId ?? res?.data?.clipId ?? res?.clipId ?? res?.data?.id ?? res?.id;
@@ -48,7 +69,8 @@ for (const r of rollouts) {
   try {
     __resetMockForTests();
     await mockExecute<CommandResult>({ command: "new_project", args: {} });
-    const cmds = parseReply(extractJson(r.content ?? "")).commands ?? [];
+    let cmds = parseReply(extractJson(r.content ?? "")).commands ?? [];
+    if (!cmds.length) cmds = recoverCommands(r.content ?? "");  // truncated/malformed JSON → recover complete commands
     deferred = cmds.length === 0;
     // Order-based id-remap: the policy can't know the engine's clip/track ids in a one-shot
     // reply, so a literal id guess makes add_note fail and no notes land (everything scores
