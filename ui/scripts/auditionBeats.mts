@@ -16,6 +16,7 @@ import { join } from "node:path";
 import { __resetMockForTests, mockExecute } from "../src/bridge.mock";
 import { buildBeat, type BeatSink, type BrainFn, type AgentCommandCall, type BuildResult } from "../src/agent/beatBuilder";
 import { BEAT_SPECS, beatSpecById } from "../src/agent/beatSpecs";
+import { OPTIMIZED_DIRECTIVE } from "../src/agent/beatDirective";
 import type { CommandResult } from "../src/types";
 
 type Line = { command: string; args: Record<string, unknown>; capture?: Record<string, string> };
@@ -33,6 +34,7 @@ const MOSH_BIN = process.env.MOSH_BIN ?? "/Applications/Mosh.app/Contents/MacOS/
 const CLOUD = has("cloud") || process.env.AUDITION_CLOUD === "1";
 const NO_MODEL = has("no-model"); // skip the brain entirely → pure deterministic fallback floor
 const REFINE_TEMPO = !has("no-refine-tempo");
+const DIRECTIVE = has("optimized") ? OPTIMIZED_DIRECTIVE : ""; // --optimized appends the GEPA-evolved directive
 const MAX_RETRIES = parseInt(arg("retries", "2"), 10);
 const GKEY = process.env.GEMINI_API_KEY ?? "";
 const CLOUD_MODEL = process.env.MOSH_AGENT_MODEL ?? "gemini-2.5-flash";
@@ -175,7 +177,7 @@ async function main() {
     const sink = new RecordingSink();
     let build: BuildResult;
     try {
-      build = await buildBeat(spec, brain, sink, { maxRetries: MAX_RETRIES, refineTempo: REFINE_TEMPO, log: (m) => console.log(`    ${m}`) });
+      build = await buildBeat(spec, brain, sink, { maxRetries: MAX_RETRIES, refineTempo: REFINE_TEMPO, extraSystem: DIRECTIVE, log: (m) => console.log(`    ${m}`) });
     } catch (e) {
       console.log(`  ${tagId}: build threw ${(e as Error).message}`);
       continue;

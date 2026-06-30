@@ -119,6 +119,7 @@ export type BrainFn = (
 export type BuildOpts = {
   maxRetries?: number; // re-prompts per slot before fallback (default 2)
   refineTempo?: boolean; // ask the model to pick the BPM within range (default true)
+  extraSystem?: string; // an evolvable global directive appended to the note system prompt (GEPA optimizes this)
   log?: (m: string) => void;
 };
 
@@ -244,12 +245,13 @@ async function chooseTempo(spec: BeatSpec, brain: BrainFn, maxRetries: number): 
 
 /** Drive one slot: prompt → parse → validate → retry → fallback. Returns the notes to
  *  apply plus an honest report of how they were obtained. */
-async function fillSlot(slot: Slot, ctx: BeatContext, brain: BrainFn, maxRetries: number): Promise<{ notes: Note[]; report: Omit<SlotReport, "track" | "notesApplied"> }> {
+async function fillSlot(slot: Slot, ctx: BeatContext, brain: BrainFn, maxRetries: number, extraSystem = ""): Promise<{ notes: Note[]; report: Omit<SlotReport, "track" | "notesApplied"> }> {
   const rejects: string[] = [];
   let retries = 0;
   const baseUser = slotUserPrompt(slot, ctx);
+  const system = extraSystem ? `${NOTE_SYSTEM}\n${extraSystem}` : NOTE_SYSTEM;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    const messages = [{ role: "system", content: NOTE_SYSTEM }, { role: "user", content: baseUser }];
+    const messages = [{ role: "system", content: system }, { role: "user", content: baseUser }];
     if (attempt > 0) {
       // corrective re-prompt: tell the model exactly why the last reply was rejected
       messages.push({ role: "assistant", content: "(rejected)" });
@@ -315,7 +317,7 @@ export async function buildBeat(spec: BeatSpec, brain: BrainFn, sink: BeatSink, 
 
     // 3. model fills each slot's note pattern (validated/retried/forced) → add_note
     for (const slot of track.slots) {
-      const { notes, report } = await fillSlot(slot, ctx, brain, maxRetries);
+      const { notes, report } = await fillSlot(slot, ctx, brain, maxRetries, opts.extraSystem ?? "");
       let applied = 0;
       for (const n of notes) {
         const r = await issue({ command: "add_note", args: { clipId, pitch: n.pitch, start: n.start, length: n.length, velocity: n.velocity } });
@@ -342,4 +344,38 @@ export async function buildBeat(spec: BeatSpec, brain: BrainFn, sink: BeatSink, 
     totalSlots,
     modelNotePct: totalSlots ? modelSlots / totalSlots : 0,
   };
+}
+
+// ── mock-free recipe build (for parallel verification / GEPA eval) ─────────────
+// buildBeat drives the global bridge.mock (singleton) for real ids → it is NOT safe to
+// run many concurrently. The verifier only needs the NOTE CONTENT, so buildRecipe drives
+// the same slot-filling (validate/retry/force) but assembles a plain Recipe directly — no
+// sink, no mock, no shared state → safe to fan out. Roles map straight to the verifier's.
+
+export type RecipeRole = "drums" | "bass" | "melody";
+export type BuiltRecipeTrack = { name: string; role: RecipeRole; notes: Note[] };
+export type BuiltRecipe = {
+  tempo: number; bars: number; key: { tonic: string; mode: string };
+  tracks: BuiltRecipeTrack[]; modelSlots: number; totalSlots: number;
+};
+
+export async function buildRecipe(spec: BeatSpec, brain: BrainFn, opts: BuildOpts = {}): Promise<BuiltRecipe> {
+  const maxRetries = opts.maxRetries ?? 1;
+  const beatsTotal = spec.bars * 4;
+  const tempo = opts.refineTempo === false ? spec.tempo : (await chooseTempo(spec, brain, maxRetries)).tempo;
+  const ctx: BeatContext = { spec, tempo, beatsTotal };
+  const tracks: BuiltRecipeTrack[] = [];
+  let modelSlots = 0, totalSlots = 0;
+  for (const t of spec.tracks) {
+    const role: RecipeRole = t.kind === "drum" ? "drums" : t.slots[0]?.id === "bass" ? "bass" : "melody";
+    const notes: Note[] = [];
+    for (const slot of t.slots) {
+      const { notes: ns, report } = await fillSlot(slot, ctx, brain, maxRetries, opts.extraSystem ?? "");
+      notes.push(...ns);
+      totalSlots++;
+      if (report.modelContributed) modelSlots++;
+    }
+    tracks.push({ name: t.name, role, notes });
+  }
+  return { tempo, bars: spec.bars, key: spec.key, tracks, modelSlots, totalSlots };
 }
