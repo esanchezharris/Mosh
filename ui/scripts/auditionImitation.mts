@@ -11,7 +11,7 @@
 //   serve a model:  HF_HUB_OFFLINE=1 python -m mlx_lm server --model <4bit> --adapter-path <ad> --port 8081
 //   then:           AUDITION_PORT=8081 npm run tsx scripts/auditionImitation.mts -- --tag owner-v1 --out ~/mosh-imitation-audition
 
-import { writeFileSync, mkdirSync } from "node:fs";
+import { writeFileSync, mkdirSync, readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { __resetMockForTests, mockExecute, mockSnapshot } from "../src/bridge.mock";
@@ -28,6 +28,31 @@ const TAG = arg("tag", "model");
 const OUT = arg("out", join(process.env.HOME!, "mosh-imitation-audition"));
 const PORT = process.env.AUDITION_PORT ?? "8081";
 const MOSH_BIN = process.env.MOSH_BIN ?? "/Applications/Mosh.app/Contents/MacOS/Mosh";
+// --cloud → drive the capable cloud brain (Gemini, OpenAI-compat endpoint) instead of a local mlx server.
+// --fewshot N → inject N of the owner's own note-pattern examples as in-context demos (style transfer).
+const CLOUD = process.argv.includes("--cloud");
+const GKEY = process.env.GEMINI_API_KEY ?? "";
+const CLOUD_MODEL = process.env.MOSH_AGENT_MODEL ?? "gemini-2.5-flash";
+const FEWSHOT = parseInt(arg("fewshot", "0"), 10) || 0;
+const FEWSHOT_DATA = process.env.FEWSHOT_DATA ?? join(process.cwd(), "..", "service", "sft", ".sft-data", "owner-imitation-v1", "train.jsonl");
+const ENDPOINT = CLOUD ? "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions" : `http://127.0.0.1:${PORT}/v1/chat/completions`;
+
+/** Owner note-pattern examples (assistant emits add_note) as (user,assistant) message pairs → few-shot style. */
+function loadFewshot(n: number): { role: string; content: string }[] {
+  if (!n) return [];
+  const out: { role: string; content: string }[] = [];
+  try {
+    for (const l of readFileSync(FEWSHOT_DATA, "utf8").trim().split("\n")) {
+      const ex = JSON.parse(l);
+      const u = ex.messages.find((m: any) => m.role === "user");
+      const a = ex.messages.find((m: any) => m.role === "assistant");
+      if (u && a && a.content.includes("add_note")) { out.push({ role: "user", content: u.content }, { role: "assistant", content: a.content }); }
+      if (out.length >= n * 2) break;
+    }
+  } catch { /* no few-shot */ }
+  return out;
+}
+const FEWSHOT_MSGS = loadFewshot(FEWSHOT);
 
 // build scripts: each a sequence of turn utterances that construct one beat
 // Turns are phrased to ELICIT NOTE PATTERNS (not just empty clips): the SFT taught note-writing as
@@ -40,15 +65,30 @@ const SCRIPTS: { id: string; turns: string[] }[] = [
   { id: "aggressive", turns: ["make a drum track and write an aggressive trap pattern with punchy kicks and snares", "add an 808 track and write a hard distorted-feel bassline", "add a lead track and write a tense melody"] },
 ];
 
+// Models prepend prose/emotes ("_chirp_", "<think>…</think>") before the JSON → parseReply misses it.
+// Extract the first balanced {…} object so the command JSON parses regardless of the preamble.
+function extractJson(s: string): string {
+  const i = s.indexOf("{");
+  if (i < 0) return s;
+  let depth = 0, inStr = false, esc = false;
+  for (let k = i; k < s.length; k++) {
+    const c = s[k];
+    if (inStr) { if (esc) esc = false; else if (c === "\\") esc = true; else if (c === '"') inStr = false; }
+    else if (c === '"') inStr = true;
+    else if (c === "{") depth++;
+    else if (c === "}") { if (--depth === 0) return s.slice(i, k + 1); }
+  }
+  return s.slice(i);
+}
+
 const isIdKey = (k: string) => /id$/i.test(k);
 const captureField = (cmd: string) => (cmd === "create_track" || cmd === "create_group" ? "trackId" : "clipId");
 
 async function callBrain(messages: { role: string; content: string }[]): Promise<string> {
-  const r = await fetch(`http://127.0.0.1:${PORT}/v1/chat/completions`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ messages, max_tokens: 600, temperature: 0.7 }),  // no model field → mlx_lm 404s on a mismatch
-  });
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const body: Record<string, unknown> = { messages, max_tokens: 800, temperature: 0.7 };
+  if (CLOUD) { headers["Authorization"] = `Bearer ${GKEY}`; body.model = CLOUD_MODEL; }  // local mlx 404s on a model field; cloud needs it
+  const r = await fetch(ENDPOINT, { method: "POST", headers, body: JSON.stringify(body) });
   const j = await r.json();
   return j.choices?.[0]?.message?.content ?? "";
 }
@@ -63,10 +103,10 @@ async function buildOne(turns: string[]): Promise<{ lines: Line[]; nCmds: number
 
   for (const utt of turns) {
     const snap = await mockSnapshot<Snapshot>();
-    const messages = [{ role: "system", content: systemPrompt(snap) }, ...history.slice(-6), { role: "user", content: utt }];
+    const messages = [{ role: "system", content: systemPrompt(snap) }, ...FEWSHOT_MSGS, ...history.slice(-6), { role: "user", content: utt }];
     let content = "";
     try { content = await callBrain(messages); } catch { content = ""; }
-    const cmds = parseReply(content).commands ?? [];
+    const cmds = parseReply(extractJson(content)).commands ?? [];
     if (cmds.length === 0) deferred++;
     for (const c of cmds) {
       const raw = { command: c.command, args: (c.args ?? {}) as Record<string, unknown> };
