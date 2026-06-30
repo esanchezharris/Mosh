@@ -135,9 +135,23 @@ class Arrangement(_Base):
     sections: list[Section] = Field(default_factory=list)
 
 
+class NoteEvent(_Base):
+    """One inline MIDI note — the musical *body* of an element (§0.1).
+
+    Absolute pitch + beat-relative timing so §9 emits `add_note` directly (no external
+    .mid round-trip) and the generator can transpose by an interval without re-parsing.
+    `midi_ref` stays on `Midi` as optional provenance; `notes` is the load-bearing data."""
+
+    pitch: int = Field(60, ge=0, le=127)
+    start_beats: float = Field(0.0, ge=0.0)
+    duration_beats: float = Field(0.25, gt=0.0)
+    velocity: int = Field(100, ge=1, le=127)
+
+
 class Midi(_Base):
     status: MidiStatus = MidiStatus.unknown
-    midi_ref: Optional[str] = None
+    midi_ref: Optional[str] = None  # optional provenance pointer to an external .mid
+    notes: list[NoteEvent] = Field(default_factory=list)  # §0.1 inline note events (the body)
     note_count: int = Field(0, ge=0)
     confidence: float = Field(0.0, ge=0.0, le=1.0)
 
@@ -186,6 +200,36 @@ class Evidence(_Base):
     ocr_text: Optional[str] = None
 
 
+class Motif(_Base):
+    """Derived per-element musical features (§0.1) — the retrieval/recombination handle.
+
+    Descriptive + transposable: §9 compiles the literal `Midi.notes`, while the generator
+    matches on these (so it picks a 'syncopated trap hat' vs a 'four-on-the-floor kick'
+    rather than an undifferentiated note stream). All optional; absent → not yet analyzed."""
+
+    bars: float = Field(0.0, ge=0.0)
+    onset_grid: str = ""  # dominant subdivision: "4th" / "8th" / "16th" / "triplet"
+    density: float = Field(0.0, ge=0.0)  # notes per bar
+    syncopation: float = Field(0.0, ge=0.0, le=1.0)  # off-beat onset ratio
+    contour: list[int] = Field(default_factory=list)  # sign of successive pitch deltas (-1/0/+1)
+    register_band: str = ""  # "sub" / "low" / "mid" / "high"
+    harmonic_function: str = ""  # e.g. "root-following" / "tonic-pedal" / "i-VI-III-VII"
+
+
+class Bass(_Base):
+    """The 808/bass sub-model (§0.1) — rhythm × pitch-function stored *separately* so a
+    bassline can never be authored as a hi-hat-like even grid (the panel's structural fix).
+
+    Present for `808`/`bass` roles. The grid lives in `Midi.notes` durations; this records
+    the relationships that make it a bass voice, not a pulse generator."""
+
+    sustain_ratio: float = Field(0.0, ge=0.0, le=1.0)  # mean note_dur / inter-onset interval
+    glides: list[int] = Field(default_factory=list)  # note indices that slide into the next
+    kick_alignment: float = Field(0.0, ge=0.0, le=1.0)  # fraction of bass onsets on kick hits
+    root_follows: bool = False  # pitch tracks the chord roots
+    root_element_id: Optional[str] = None  # the harmony element this bass follows
+
+
 class Element(_Base):
     element_id: str = Field(default_factory=lambda: str(uuid4()))
     role: Role = Role.other
@@ -198,6 +242,8 @@ class Element(_Base):
     # (back-compat). Non-empty → §9 sequences one clip per onset on ONE track, so a §7
     # drum-slice group reconstructs faithfully on the timeline instead of stacking at 0.
     onsets: list[float] = Field(default_factory=list)
+    motif: Optional[Motif] = None  # §0.1 derived musical features (retrieval handle)
+    bass: Optional[Bass] = None    # §0.1 set for 808/bass roles (rhythm × pitch-function)
     evidence: list[Evidence] = Field(default_factory=list)
     confidence: float = Field(0.0, ge=0.0, le=1.0)
 

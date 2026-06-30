@@ -32,6 +32,52 @@
       "title": "Arrangement",
       "type": "object"
     },
+    "Bass": {
+      "additionalProperties": false,
+      "description": "The 808/bass sub-model (\u00a70.1) \u2014 rhythm \u00d7 pitch-function stored *separately* so a\nbassline can never be authored as a hi-hat-like even grid (the panel's structural fix).\n\nPresent for `808`/`bass` roles. The grid lives in `Midi.notes` durations; this records\nthe relationships that make it a bass voice, not a pulse generator.",
+      "properties": {
+        "glides": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Glides",
+          "type": "array"
+        },
+        "kick_alignment": {
+          "default": 0.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Kick Alignment",
+          "type": "number"
+        },
+        "root_element_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Root Element Id"
+        },
+        "root_follows": {
+          "default": false,
+          "title": "Root Follows",
+          "type": "boolean"
+        },
+        "sustain_ratio": {
+          "default": 0.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Sustain Ratio",
+          "type": "number"
+        }
+      },
+      "title": "Bass",
+      "type": "object"
+    },
     "Element": {
       "additionalProperties": false,
       "properties": {
@@ -46,6 +92,17 @@
           ],
           "default": null,
           "title": "Audio Ref"
+        },
+        "bass": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Bass"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "confidence": {
           "default": 0.0,
@@ -72,6 +129,17 @@
         },
         "midi": {
           "$ref": "#/$defs/Midi"
+        },
+        "motif": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Motif"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "onsets": {
           "items": {
@@ -222,6 +290,13 @@
           "title": "Note Count",
           "type": "integer"
         },
+        "notes": {
+          "items": {
+            "$ref": "#/$defs/NoteEvent"
+          },
+          "title": "Notes",
+          "type": "array"
+        },
         "status": {
           "$ref": "#/$defs/MidiStatus",
           "default": "unknown"
@@ -239,6 +314,89 @@
       ],
       "title": "MidiStatus",
       "type": "string"
+    },
+    "Motif": {
+      "additionalProperties": false,
+      "description": "Derived per-element musical features (\u00a70.1) \u2014 the retrieval/recombination handle.\n\nDescriptive + transposable: \u00a79 compiles the literal `Midi.notes`, while the generator\nmatches on these (so it picks a 'syncopated trap hat' vs a 'four-on-the-floor kick'\nrather than an undifferentiated note stream). All optional; absent \u2192 not yet analyzed.",
+      "properties": {
+        "bars": {
+          "default": 0.0,
+          "minimum": 0.0,
+          "title": "Bars",
+          "type": "number"
+        },
+        "contour": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Contour",
+          "type": "array"
+        },
+        "density": {
+          "default": 0.0,
+          "minimum": 0.0,
+          "title": "Density",
+          "type": "number"
+        },
+        "harmonic_function": {
+          "default": "",
+          "title": "Harmonic Function",
+          "type": "string"
+        },
+        "onset_grid": {
+          "default": "",
+          "title": "Onset Grid",
+          "type": "string"
+        },
+        "register_band": {
+          "default": "",
+          "title": "Register Band",
+          "type": "string"
+        },
+        "syncopation": {
+          "default": 0.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Syncopation",
+          "type": "number"
+        }
+      },
+      "title": "Motif",
+      "type": "object"
+    },
+    "NoteEvent": {
+      "additionalProperties": false,
+      "description": "One inline MIDI note \u2014 the musical *body* of an element (\u00a70.1).\n\nAbsolute pitch + beat-relative timing so \u00a79 emits `add_note` directly (no external\n.mid round-trip) and the generator can transpose by an interval without re-parsing.\n`midi_ref` stays on `Midi` as optional provenance; `notes` is the load-bearing data.",
+      "properties": {
+        "duration_beats": {
+          "default": 0.25,
+          "exclusiveMinimum": 0.0,
+          "title": "Duration Beats",
+          "type": "number"
+        },
+        "pitch": {
+          "default": 60,
+          "maximum": 127,
+          "minimum": 0,
+          "title": "Pitch",
+          "type": "integer"
+        },
+        "start_beats": {
+          "default": 0.0,
+          "minimum": 0.0,
+          "title": "Start Beats",
+          "type": "number"
+        },
+        "velocity": {
+          "default": 100,
+          "maximum": 127,
+          "minimum": 1,
+          "title": "Velocity",
+          "type": "integer"
+        }
+      },
+      "title": "NoteEvent",
+      "type": "object"
     },
     "Plugin": {
       "additionalProperties": false,

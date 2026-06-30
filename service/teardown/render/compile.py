@@ -66,14 +66,72 @@ def _parse_time_sig(value: str) -> Optional[tuple[int, int]]:
         return None
 
 
-def _track_type(role: str, has_midi: bool) -> str:
-    # A MIDI-triggered drum element wants a drum track (audible default sampler); a placed
-    # audio one-shot or a melodic element is an audio track.
-    return "drum" if (has_midi and role in DRUM_ROLES) else "audio"
+MELODIC_BASS_ROLES = {"808", "bass"}
+
+
+def _is_melodic_bass(role: str, has_inline: bool) -> bool:
+    # An 808/bass element with an inline note phrase is a *pitched, MIDI-triggered* voice
+    # (repitched one-shot or synth), NOT a percussion pad — the whole point of the restart.
+    return role in MELODIC_BASS_ROLES and has_inline
+
+
+def _track_type(role: str, melodic_bass: bool, midi_driven: bool) -> str:
+    # melodic 808/bass + every non-drum role → audio (sampler/synth). A drum role is a DRUM
+    # track only when MIDI-triggered (a kit/pad); a drum sample placed as raw audio one-shots
+    # (no MIDI) is an audio track — preserves the §7 timeline-placement behavior.
+    if melodic_bass or role not in DRUM_ROLES:
+        return "audio"
+    return "drum" if midi_driven else "audio"
+
+
+def _notes_payload(notes) -> list[dict]:
+    """recipe NoteEvents → add_midi_clip inline-note dicts ({pitch,start,length,velocity},
+    beats) — the format cmdAddMidiClip / read_midi already speak."""
+    return [{"pitch": int(n.pitch), "start": round(float(n.start_beats), 6),
+             "length": round(float(n.duration_beats), 6), "velocity": int(n.velocity)}
+            for n in notes]
+
+
+def _clip_len_s(notes, tempo: Optional[float]) -> float:
+    """Clip container length in SECONDS, sized to hold the note phrase (notes are in beats;
+    the clip is placed/length-ed in seconds, matching the proven execute path)."""
+    if not notes:
+        return DEFAULT_CLIP_LEN_S
+    end_beats = max(float(n.start_beats) + float(n.duration_beats) for n in notes)
+    spb = 60.0 / (tempo or 120.0)
+    return max(1.0, round(end_beats * spb, 4))
+
+
+def _common_pitch(notes) -> int:
+    """The drum pad's note: the pitch the element's hits actually trigger (so assign_sample's
+    single-note pad matches the MIDI). Most-common, deterministic tie-break = lowest."""
+    counts: dict[int, int] = {}
+    for n in notes:
+        counts[int(n.pitch)] = counts.get(int(n.pitch), 0) + 1
+    return min(counts, key=lambda p: (-counts[p], p)) if counts else 36
+
+
+def _root_pitch(notes) -> int:
+    """The melodic sampler's root note: the lowest pitch in the phrase, so the bass sits in
+    register and higher notes repitch UP (avoids extreme down-pitch artifacts)."""
+    return min((int(n.pitch) for n in notes), default=36)
 
 
 def compile_recipe(recipe) -> CompileResult:
-    """Compile a §0 Recipe (recipe.Recipe) into commands + unresolved deferrals."""
+    """Compile a §0 Recipe (recipe.Recipe) into a full, inline MoshOps program + unresolved.
+
+    v2 (the real-recipes restart) emits the MUSICAL BODY inline: each element's
+    `midi.notes` become an `add_midi_clip` with an inline `notes` array (no external .mid
+    round-trip). Sound binding:
+      * drum role + matched sample + notes → assign_sample(mode="drum") then add_midi_clip
+      * 808/bass + notes → assign_sample(mode="melodic", root=lowest pitch) then add_midi_clip
+        (a real, repitched, MIDI-triggered bass — NOT a percussion pad)
+      * melodic synth element → add_midi_clip(notes); the plugin load/param map is still
+        resolved at execute (needs the engine).
+    assign_sample ALWAYS precedes add_midi_clip so the sampler is present and the clip's
+    default-instrument auto-load (4OSC / stock kit) is skipped — no doubled/duplicated voice.
+    Back-compat paths (matched sample + `onsets` but no inline notes → import_clip; `midi_ref`
+    only → deferred note parse) are preserved for §7 extraction recipes."""
     out = CompileResult()
     add, defer = out.commands.append, out.unresolved.append
 
@@ -99,17 +157,42 @@ def compile_recipe(recipe) -> CompileResult:
     for i, el in enumerate(recipe.elements):
         tvar = f"T{i}"
         role = el.role.value
-        has_midi = el.midi.status in ("extracted", "partial") and bool(el.midi.midi_ref)
+        notes = list(el.midi.notes)
+        has_inline = bool(notes)
+        has_ref_midi = el.midi.status in ("extracted", "partial") and bool(el.midi.midi_ref)
+        matched = el.sample_match.status == "matched" and bool(el.sample_match.matched_path)
+        melodic_bass = _is_melodic_bass(role, has_inline)
+        is_drum = role in DRUM_ROLES and not melodic_bass
+
         add({"command": "create_track",
-             "args": {"name": el.label or role, "type": _track_type(role, has_midi)},
+             "args": {"name": el.label or role,
+                      "type": _track_type(role, melodic_bass, has_inline or has_ref_midi)},
              "capture": {tvar: "trackId"}})
         tref = f"${{{tvar}}}"
         placed = False
 
-        # matched owned sample → place it as an audio clip (the one fully-clean content map).
-        # onsets present → one clip per fire time on this single track (faithful timeline,
-        # e.g. a §7 drum-slice group); empty → a single placement at 0 (back-compat).
-        if el.sample_match.status == "matched" and el.sample_match.matched_path:
+        if has_inline:
+            cvar = f"C{i}"
+            # bind the real sound BEFORE the clip (so the default-instrument auto-load is a no-op).
+            if matched and is_drum:
+                add({"command": "assign_sample",
+                     "args": {"trackId": tref, "note": _common_pitch(notes), "mode": "drum",
+                              "file": el.sample_match.matched_path}})
+            elif melodic_bass and matched:
+                add({"command": "assign_sample",
+                     "args": {"trackId": tref, "note": _root_pitch(notes), "mode": "melodic",
+                              "file": el.sample_match.matched_path}})
+            elif melodic_bass and not matched:
+                defer(_u("808/bass has notes but no matched sample — falls back to 4OSC",
+                         el.element_id, "match an 808 one-shot in the palette for a real sub"))
+            add({"command": "add_midi_clip",
+                 "args": {"trackId": tref, "start": 0, "length": _clip_len_s(notes, tempo),
+                          "name": el.label or role, "notes": _notes_payload(notes)},
+                 "capture": {cvar: "clipId"}})
+            placed = True
+
+        # back-compat: matched sample placed as audio one-shot(s) at onset times (§7 slices)
+        elif matched:
             onsets = list(el.onsets) if el.onsets else [0.0]
             for t in onsets:
                 add({"command": "import_clip",
@@ -117,17 +200,18 @@ def compile_recipe(recipe) -> CompileResult:
                               "startSeconds": round(float(t), 4)}})
             placed = True
 
-        # MIDI: emit the clip container now; the notes (in midi_ref) are parsed at execute
-        if has_midi:
+        # back-compat: only an external midi_ref → emit the container, defer note parse to execute
+        elif has_ref_midi:
             cvar = f"C{i}"
             add({"command": "add_midi_clip",
                  "args": {"trackId": tref, "start": 0, "length": DEFAULT_CLIP_LEN_S},
                  "capture": {cvar: "clipId"}})
             defer(_u(f"MIDI notes in {el.midi.midi_ref} not yet compiled",
-                     el.element_id, f"parse {el.midi.midi_ref} → add_note×N onto ${{{cvar}}}"))
+                     el.element_id, f"parse {el.midi.midi_ref} → notes on ${{{cvar}}}"))
             placed = True
 
-        # synth patch: loading + param mapping needs the engine (plugin id + param indices)
+        # synth patch: loading + param mapping needs the engine (plugin id + param indices).
+        # Applies to a melodic synth element (has inline notes + a named plugin).
         sp = el.synth_patch
         if sp.status in ("params_visible", "matched", "substituted") and sp.plugin.name:
             defer(_u(f"load synth '{sp.plugin.name}' + {len(sp.params)} param(s) on {tref}",

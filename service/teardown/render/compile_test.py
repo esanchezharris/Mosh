@@ -71,6 +71,63 @@ check("synth load+params deferred to execute", "load synth 'Serum'" in issues)
 check("MIDI notes deferred to execute", "MIDI notes in assets/midi/e2.mid" in issues)
 check("unresolved carries the element id", any(u["element_id"] == "lead1" for u in res.unresolved))
 
+# ── §0.1 inline notes + real sound binding (the restart's compile path) ──────
+ne = R.NoteEvent
+body = R.Recipe(
+    meta=R.Meta(tempo_bpm=R.MetaField(value=120)),  # 120bpm → 1 beat = 0.5s
+    elements=[
+        # a drum kick: inline rhythm + a matched real sample → drum track, assign_sample(drum)
+        R.Element(element_id="kick", role="kick", label="Kick",
+                  sample_match=R.SampleMatch(status="matched", matched_path="lib/k.wav", distance=0.1),
+                  midi=R.Midi(status="extracted", notes=[
+                      ne(pitch=36, start_beats=0.0, duration_beats=0.25, velocity=110),
+                      ne(pitch=36, start_beats=2.0, duration_beats=0.25, velocity=100)])),
+        # an 808: a sustained, syncopated phrase + a matched 808 → AUDIO track, assign_sample(melodic)
+        R.Element(element_id="b808", role="808", label="808",
+                  sample_match=R.SampleMatch(status="matched", matched_path="lib/808.wav", distance=0.1),
+                  midi=R.Midi(status="extracted", notes=[
+                      ne(pitch=29, start_beats=0.0, duration_beats=1.5, velocity=110),
+                      ne(pitch=36, start_beats=2.0, duration_beats=2.0, velocity=100)]),
+                  bass=R.Bass(sustain_ratio=0.8, root_follows=True)),
+    ],
+)
+bc = compile_recipe(body).commands
+
+
+def _idx(pred):
+    return next((i for i, c in enumerate(bc) if pred(c)), -1)
+
+
+kick_tt = next(c for c in bc if c["command"] == "create_track" and c["args"]["name"] == "Kick")
+b808_tt = next(c for c in bc if c["command"] == "create_track" and c["args"]["name"] == "808")
+check("drum element with inline notes → DRUM track", kick_tt["args"]["type"] == "drum")
+check("melodic 808 with inline notes → AUDIO track (not drum)", b808_tt["args"]["type"] == "audio")
+
+kick_as = _idx(lambda c: c["command"] == "assign_sample" and c["args"].get("mode") == "drum")
+kick_clip = _idx(lambda c: c["command"] == "add_midi_clip" and c["args"].get("name") == "Kick")
+check("drum: assign_sample(mode=drum) emitted", kick_as >= 0)
+check("drum: assign_sample precedes add_midi_clip (no default-kit double)", 0 <= kick_as < kick_clip)
+check("drum: pad note = the pitch the hits trigger (36)",
+      bc[kick_as]["args"]["note"] == 36 if kick_as >= 0 else False)
+
+b808_as = _idx(lambda c: c["command"] == "assign_sample" and c["args"].get("mode") == "melodic")
+b808_clip = _idx(lambda c: c["command"] == "add_midi_clip" and c["args"].get("name") == "808")
+check("808: assign_sample(mode=melodic) emitted", b808_as >= 0)
+check("808: melodic root = lowest pitch in the phrase (29)",
+      bc[b808_as]["args"]["note"] == 29 if b808_as >= 0 else False)
+check("808: assign_sample precedes add_midi_clip (the doubling gotcha)", 0 <= b808_as < b808_clip)
+clip808 = bc[b808_clip]
+check("808: notes inline on the clip (no external midi_ref round-trip)",
+      len(clip808["args"].get("notes", [])) == 2)
+check("808: a bass note SUSTAINS (length 1.5 beats, not a hi-hat stab)",
+      any(n["length"] >= 1.5 for n in clip808["args"]["notes"]))
+check("808: clip length sized to the phrase in seconds (≈ 4 beats @120 = 2.0s)",
+      abs(clip808["args"]["length"] - 2.0) < 1e-6, str(clip808["args"]["length"]))
+check("real-sound MIDI elements emit NO import_clip (they're triggered, not placed)",
+      not any(c["command"] == "import_clip" for c in bc))
+check("melodic 808 with a matched sample does NOT defer to 4OSC",
+      not any("4OSC" in u.get("issue", "") for u in compile_recipe(body).unresolved))
+
 # ── key / time-signature parsing ─────────────────────────────────────────────
 ckey = compile_recipe(R.Recipe(meta=R.Meta(key=R.MetaField(value="C"))))
 check("bare tonic defaults to major", {"command": "set_key", "args": {"tonic": "C", "mode": "major"}} in ckey.commands)

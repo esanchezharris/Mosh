@@ -119,6 +119,39 @@ check("free-form synth params survive round-trip", back.elements[0].synth_patch.
 check("nested evidence objects survive round-trip", back.elements[0].evidence[0].ocr_text == "140 BPM")
 check("enum field serializes to its string value", '"role": "808"' in s)
 
+# ── 5b. §0.1 musical body: inline notes + motif + bass round-trip & bounds ───
+body = R.Recipe(
+    recipe_id="fixed-id-0002",
+    meta=R.Meta(tempo_bpm=R.MetaField(value=140), key=R.MetaField(value="F minor")),
+    elements=[
+        R.Element(
+            element_id="b1", role="808", label="808 bass",
+            midi=R.Midi(status="extracted", note_count=3, notes=[
+                R.NoteEvent(pitch=29, start_beats=0.0, duration_beats=1.5, velocity=110),
+                R.NoteEvent(pitch=29, start_beats=2.0, duration_beats=1.0, velocity=96),
+                R.NoteEvent(pitch=36, start_beats=3.0, duration_beats=0.5, velocity=100),
+            ]),
+            motif=R.Motif(bars=1.0, onset_grid="8th", density=3.0, syncopation=0.33,
+                          contour=[0, 1], register_band="sub", harmonic_function="root-following"),
+            bass=R.Bass(sustain_ratio=0.75, glides=[0], kick_alignment=0.66, root_follows=True,
+                        root_element_id="chords1"),
+        ),
+    ],
+)
+bs = R.to_json(body)
+bback = R.from_json(bs)
+check("inline NoteEvents round-trip", bback == body)
+check("NoteEvent carries beat-relative timing + duration",
+      bback.elements[0].midi.notes[0].duration_beats == 1.5 and bback.elements[0].midi.notes[0].pitch == 29)
+check("Motif + Bass sub-models survive round-trip",
+      bback.elements[0].bass.root_follows is True and bback.elements[0].motif.harmonic_function == "root-following")
+check("a bass note can sustain >1 beat (not a hi-hat stab)", bback.elements[0].midi.notes[0].duration_beats > 1.0)
+check("NoteEvent pitch > 127 rejected", raises(lambda: R.NoteEvent(pitch=200)))
+check("NoteEvent zero duration rejected", raises(lambda: R.NoteEvent(duration_beats=0.0)))
+check("NoteEvent velocity 0 rejected", raises(lambda: R.NoteEvent(velocity=0)))
+check("Bass sustain_ratio > 1 rejected", raises(lambda: R.Bass(sustain_ratio=1.5)))
+check("element with no notes is still first-class (partial)", R.Element(role="lead").midi.notes == [])
+
 # ── 6. determinism (the repo's x3-stable bar) ────────────────────────────────
 schemas = {R.emit_schema_json() for _ in range(3)}
 check("emit_schema_json() is byte-stable x3", len(schemas) == 1)
