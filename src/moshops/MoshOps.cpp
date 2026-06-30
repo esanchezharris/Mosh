@@ -40,6 +40,15 @@ namespace
     // (vs the legacy lane, which never touches the source clip). File-local, round-trip-safe.
     const juce::Identifier kSourceMutedByLayer ("sourceMutedByLayer");
 
+    // Phase 3 — a one-shot lambda timer used for the per-clip reactive-render debounce. Calls fn ONCE
+    // after the delay (it stops itself first), so each reactiveTouch just restarts it (coalescing a
+    // burst of edits into a single re-render). Fires on the message thread (juce::Timer's thread).
+    struct LambdaTimer : public juce::Timer
+    {
+        std::function<void()> fn;
+        void timerCallback() override { stopTimer(); if (fn) fn(); }
+    };
+
     // G14 — make a VolumeAndPanPlugin fader change UNDOABLE.
     //
     // vp->setVolumeDb()/setPan() route through the AutomatableParameter, whose
@@ -3094,6 +3103,7 @@ juce::var MoshOps::cmdTrimClip (const juce::var& args)
                          tracktion::TimeDuration::fromSeconds (offset) });
     logLine ("trim_clip", args, true, {}, true);
     emitSnapshotInvalidated();
+    reactiveTouch (id);   // Phase 3 — a length/offset change re-bounces the source window
     return okResult ("trim_clip");
 }
 
@@ -4212,6 +4222,7 @@ juce::var MoshOps::cmdLoadBuiltin (const juce::var& args)
     data->setProperty ("isInstrument", spec->isInstrument);
     logLine ("load_builtin", args, true, {}, true);
     emitSnapshotInvalidated();
+    reactiveTouchTrack (args.getProperty ("trackId", var()).toString());   // Phase 3 — instrument/FX change → re-bounce
     return okResult ("load_builtin", var (data));
 }
 
@@ -4360,6 +4371,7 @@ juce::var MoshOps::cmdLoadPlugin (const juce::var& args)
         addExternalPluginMetadata (*data, *ext);
     logLine ("load_plugin", args, true, {}, true);
     emitSnapshotInvalidated();
+    reactiveTouchTrack (args.getProperty ("trackId", var()).toString());   // Phase 3 — FX change → re-bounce
     return okResult ("load_plugin", var (data));
 }
 
@@ -4374,6 +4386,7 @@ juce::var MoshOps::cmdRemovePlugin (const juce::var& args)
     plugin->deleteFromParent();
     logLine ("remove_plugin", args, true, {}, true);
     emitSnapshotInvalidated();
+    reactiveTouchTrack (args.getProperty ("trackId", var()).toString());   // Phase 3
     return okResult ("remove_plugin");
 }
 
@@ -4392,6 +4405,7 @@ juce::var MoshOps::cmdReorderPlugin (const juce::var& args)
     track->pluginList.insertPlugin (p, to, nullptr);
     logLine ("reorder_plugin", args, true, {}, true);
     emitSnapshotInvalidated();
+    reactiveTouchTrack (args.getProperty ("trackId", var()).toString());   // Phase 3
     return okResult ("reorder_plugin");
 }
 
@@ -4410,6 +4424,7 @@ juce::var MoshOps::cmdSetPluginParam (const juce::var& args)
     param->setParameter (param->valueRange.convertFrom0to1 (norm), juce::sendNotification);
     logLine ("set_plugin_param", args, true, {}, true);
     emitSnapshotInvalidated();
+    reactiveTouchTrack (args.getProperty ("trackId", var()).toString());   // Phase 3 — param change → re-bounce
     return okResult ("set_plugin_param");
 }
 
@@ -4423,6 +4438,7 @@ juce::var MoshOps::cmdBypassPlugin (const juce::var& args)
     plugin->setEnabled (! bypassed);          // enabled == not bypassed
     logLine ("bypass_plugin", args, true, {}, true);
     emitSnapshotInvalidated();
+    reactiveTouchTrack (args.getProperty ("trackId", var()).toString());   // Phase 3 — bypass changes the bounce
     return okResult ("bypass_plugin");
 }
 
@@ -5045,6 +5061,7 @@ juce::var MoshOps::cmdAddNote (const juce::var& args)
                                tracktion::BeatDuration::fromBeats (length), vel, 0, &undoManager());
     logLine ("add_note", args, true, {}, true);
     emitSnapshotInvalidated();
+    reactiveTouch (args.getProperty ("clipId", var()).toString());   // Phase 3 — auto-re-render the live hidden audio
     auto* data = new DynamicObject();
     data->setProperty ("noteCount", mc->getSequence().getNumNotes());
     return okResult ("add_note", var (data));
@@ -5062,6 +5079,7 @@ juce::var MoshOps::cmdRemoveNote (const juce::var& args)
     seq.removeNote (*seq.getNote (idx), &undoManager());
     logLine ("remove_note", args, true, {}, true);
     emitSnapshotInvalidated();
+    reactiveTouch (args.getProperty ("clipId", var()).toString());   // Phase 3
     return okResult ("remove_note");
 }
 
@@ -5089,6 +5107,7 @@ juce::var MoshOps::cmdSetNote (const juce::var& args)
 
     logLine ("set_note", args, true, {}, true);
     emitSnapshotInvalidated();
+    reactiveTouch (args.getProperty ("clipId", var()).toString());   // Phase 3
     return okResult ("set_note");
 }
 
@@ -5118,6 +5137,7 @@ juce::var MoshOps::cmdQuantizeNotes (const juce::var& args)
     }
     logLine ("quantize_notes", args, true, {}, true);
     emitSnapshotInvalidated();
+    reactiveTouch (args.getProperty ("clipId", var()).toString());   // Phase 3
     auto* data = new DynamicObject(); data->setProperty ("moved", moved);
     return okResult ("quantize_notes", var (data));
 }
@@ -5470,6 +5490,7 @@ juce::var MoshOps::cmdSetRenderParam (const juce::var& args)
     node.setProperty (ids::status, "dirty", nullptr);   // params changed → re-render
     logLine ("set_render_param", args, true, {}, true);
     emitSnapshotInvalidated();
+    reactiveTouch (args.getProperty ("clipId", var()).toString());   // Phase 3 — knob auto-apply (re-render in place)
     return okResult ("set_render_param");
 }
 
@@ -5599,6 +5620,10 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
     auto* clip = findClip (clipId);
     auto node = findRenderLayer (clipId);
     if (clip == nullptr || ! node.isValid()) return errResult ("render_layer", "no render layer");
+
+    // Phase 3 — snapshot the reactive epoch at submit; finalizeRender drops a result whose epoch the
+    // node has since moved past (a newer edit-touch superseded this render). -1 ⇒ never raced.
+    const int submitEpoch = (int) node[ids::reactiveEpoch];
 
     // Prepare the job dir + stage the render input as input.wav. Wave clips stage their
     // source audio (whole or a sliced sub-region); MIDI/drum (any non-wave) clips are
@@ -5805,7 +5830,7 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
                 break;
             juce::Thread::sleep (50);
         }
-        finalizeRender (clipId, output, manifest, fp, lastErr);
+        finalizeRender (clipId, output, manifest, fp, lastErr, submitEpoch);
         logLine ("render_layer", args, true, {}, false);
         auto* d = new DynamicObject(); d->setProperty ("cache", "miss");
         d->setProperty ("status", node[ids::status]); d->setProperty ("jobId", jobId);
@@ -5814,7 +5839,7 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
 
     // Async: poll on a background thread, marshal node updates + events to the
     // message thread (service I/O off the message thread; tree on it).
-    std::thread ([this, clipId, jobId, output, manifest, fp]
+    std::thread ([this, clipId, jobId, output, manifest, fp, submitEpoch]
     {
         juce::String lastErr;
         for (int i = 0; i < 1800; ++i)   // up to ~180s for a slow generative render
@@ -5834,9 +5859,9 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
                 break;
             juce::Thread::sleep (100);
         }
-        juce::MessageManager::callAsync ([this, clipId, output, manifest, fp, lastErr]
+        juce::MessageManager::callAsync ([this, clipId, output, manifest, fp, lastErr, submitEpoch]
         {
-            finalizeRender (clipId, output, manifest, fp, lastErr);
+            finalizeRender (clipId, output, manifest, fp, lastErr, submitEpoch);
         });
     }).detach();
 
@@ -5848,10 +5873,16 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
 
 void MoshOps::finalizeRender (const juce::String& clipId, const juce::File& outputWav,
                               const juce::File& manifestFile, const juce::String& cacheKey,
-                              const juce::String& serviceError)
+                              const juce::String& serviceError, int expectedEpoch)
 {
     auto node = findRenderLayer (clipId);
     if (! node.isValid()) return;
+
+    // Phase 3 — drop a SUPERSEDED reactive render: a newer edit-touch bumped reactiveEpoch after this
+    // job was submitted, so its (now-stale) output must not overwrite the live state. The newer touch's
+    // own debounced render is already coming. (expectedEpoch < 0 ⇒ a render that never raced.)
+    if (expectedEpoch >= 0 && (int) node[ids::reactiveEpoch] != expectedEpoch)
+        return;
     if (! outputWav.existsAsFile())
     {
         // Surface the real reason (the service's exception, when we captured one) instead of a
@@ -6052,6 +6083,64 @@ juce::var MoshOps::cmdResetRenderLayer (const juce::var& args)
     logLine ("reset_render_layer", args, true, {}, false);
     emitSnapshotInvalidated();
     return okResult ("reset_render_layer");
+}
+
+// ── Phase 3 — reactive auto-re-render ────────────────────────────────────────
+void MoshOps::reactiveTouch (const juce::String& clipId)
+{
+    // Hermetic-harness guard: a reactive render SPAWNS the generative service, so in headless runs
+    // (no audio device — --selftest / --run-script) it stays OFF unless a test explicitly opts in via
+    // MOSH_REACTIVE_DEBOUNCE_MS. Keeps --selftest deterministic + service-free; the real GUI (hasAudio)
+    // and the reactive verify check both arm it.
+    static const bool explicitDebounce =
+        juce::SystemStats::getEnvironmentVariable ("MOSH_REACTIVE_DEBOUNCE_MS", "").trim().isNotEmpty();
+    if (! eng.hasAudio() && ! explicitDebounce) return;
+
+    auto node = findRenderLayer (clipId);
+    if (! node.isValid()) return;
+    if (! (bool) node.getProperty (ids::reactive, true)) return;   // per-layer opt-out (default on)
+    // Only when a render is actually LIVE: a wave clip's source IS the render (appliedInPlace), or a
+    // MIDI/drum clip's hidden audio plays beneath it (kSourceMutedByLayer). A dormant layer (created
+    // but never rendered, or reset) is left alone — editing it shouldn't conjure a render.
+    if (! ((bool) node[ids::appliedInPlace] || (bool) node[kSourceMutedByLayer])) return;
+
+    // Bump the epoch so any in-flight render for this clip is dropped on finalize (superseded), then
+    // (re)start the debounce — a burst of edits collapses to ONE re-render after it settles.
+    node.setProperty (ids::reactiveEpoch, (int) node[ids::reactiveEpoch] + 1, nullptr);
+    const int ms = juce::jmax (1, juce::SystemStats::getEnvironmentVariable (
+        "MOSH_REACTIVE_DEBOUNCE_MS", "500").getIntValue());
+    auto& timer = reactiveTimers[clipId];
+    if (timer == nullptr)
+    {
+        auto t = std::make_unique<LambdaTimer>();
+        t->fn = [this, clipId] { reactiveFire (clipId); };
+        timer = std::move (t);
+    }
+    timer->startTimer (ms);
+}
+
+void MoshOps::reactiveTouchTrack (const juce::String& trackId)
+{
+    // An instrument/FX edit changes a MIDI clip's bounce (the stableSourceSig folds the track's
+    // plugins in) → re-touch every applied NON-wave clip on the track. Wave in-place renders stage
+    // the clip's own audio (independent of track FX), so they're not affected.
+    auto* track = findTrack (trackId);
+    if (track == nullptr) return;
+    for (auto* c : track->getClips())
+        if (c != nullptr && dynamic_cast<te::WaveAudioClip*> (c) == nullptr)
+            reactiveTouch (c->itemID.toString());
+}
+
+void MoshOps::reactiveFire (const juce::String& clipId)
+{
+    // The debounce elapsed — fire a background (wait:false) re-render. cmdRenderLayer re-stages the
+    // CURRENT source (post-edit), so an identical source HITs the cache (instant) and a changed one
+    // re-renders + hot-swaps. The result envelope is ignored (this is an internal regeneration).
+    if (! findRenderLayer (clipId).isValid()) return;   // layer removed since the touch
+    auto* o = new juce::DynamicObject();
+    o->setProperty ("clipId", clipId);
+    o->setProperty ("wait", false);
+    cmdRenderLayer (juce::var (o));
 }
 
 juce::var MoshOps::cmdListColors (const juce::var&)
@@ -8070,6 +8159,7 @@ juce::var MoshOps::cmdSetDrumLane (const juce::var& args)
     data->setProperty ("solo",  solo.contains (note));
     logLine ("set_drum_lane", args, true, {}, true);
     emitSnapshotInvalidated();
+    reactiveTouchTrack (args.getProperty ("trackId", var()).toString());   // Phase 3 — pad mute changes the bounce
     return okResult ("set_drum_lane", var (data));
 }
 

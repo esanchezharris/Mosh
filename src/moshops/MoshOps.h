@@ -354,7 +354,17 @@ private:
                                         const juce::String& upstreamOverride = {});
     void            finalizeRender (const juce::String& clipId, const juce::File& outputWav,
                                     const juce::File& manifestFile, const juce::String& cacheKey,
-                                    const juce::String& serviceError = {});
+                                    const juce::String& serviceError = {}, int expectedEpoch = -1);
+
+    // Phase 3 — reactive auto-re-render. reactiveTouch(clipId) bumps the layer's reactiveEpoch and
+    // (debounced) fires a background re-render when an applied render is live (wave in-place or MIDI
+    // beneath) and reactive is enabled; reactiveTouchTrack re-touches every applied clip on a track
+    // (an instrument/FX edit changes a MIDI bounce). Message-thread only.
+    void            reactiveTouch (const juce::String& clipId);
+    void            reactiveTouchTrack (const juce::String& trackId);
+    void            reactiveFire (const juce::String& clipId);
+    // Per-clip debounce timers (juce::Timer holds a LambdaTimer defined in the .cpp).
+    std::map<juce::String, std::unique_ptr<juce::Timer>> reactiveTimers;
     // Auto-apply a completed render to a WAVE clip in place (the clip's own audio/waveform
     // becomes the render artifact — instant preview). Stores the original source once so
     // reset_render_layer can restore it. Returns false for non-wave clips / missing artifact

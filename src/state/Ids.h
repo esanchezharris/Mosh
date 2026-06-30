@@ -175,6 +175,14 @@ namespace mosh::ids
     // track because a track's instrument synth overwrites the buffer (silencing any audio clip on
     // it), so the render lands on its own instrument-free track. Additive, round-trip-safe.
     MOSH_DECLARE_ID (moshHidden)
+    // Phase 3 (reactive auto-re-render): when an applied render layer is live (a wave clip's source
+    // IS the render, or a MIDI clip's hidden audio plays beneath it), editing the SOURCE — notes,
+    // trim, the track's instrument/FX, or a generative knob — debounce-fires a background re-render
+    // that HOT-SWAPS the result, so the producer never has to manually re-imagine. `reactive` is the
+    // per-layer opt-out (default ON, absent ⇒ true). `reactiveEpoch` is bumped on every edit-touch;
+    // finalizeRender drops a result whose epoch is stale (a newer edit superseded it). Both non-undoable.
+    MOSH_DECLARE_ID (reactive)
+    MOSH_DECLARE_ID (reactiveEpoch)
     MOSH_DECLARE_ID (createdBy)        // user | (future) monster
     MOSH_DECLARE_ID (userKept)
 

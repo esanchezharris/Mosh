@@ -637,8 +637,49 @@ def check_midi_reimagine_beneath(ctx):
                 "visible_tracks_before_after": [n_tracks(before), n_tracks(after)]})
 
 
+def check_reactive_rerender(ctx):
+    """Phase 3: with an applied render LIVE, editing the source auto-re-renders the hidden audio —
+    no manual re-imagine. Renders a MIDI beneath, then ADDS A NOTE and lets the per-clip debounce
+    fire (MOSH_REACTIVE_DEBOUNCE_MS=1 + a message-loop pump via __wait). Asserts a NEW render ran
+    automatically (a fresh durable audio file appears for the layer, keyed by the changed
+    stableSourceSig) AND the beneath model stays live (MIDI muted + reimagineActive). The reactive
+    path SPAWNS the service, so it's gated out of --selftest; here it runs on the fake transform."""
+    SESSION = "verify-reactive"
+    notes = [{"pitch": 60, "start": 0.0, "length": 0.5, "velocity": 100},
+             {"pitch": 64, "start": 0.5, "length": 0.5, "velocity": 100}]
+    cmds = [
+        {"command": "create_track", "args": {"name": "Reactive"}, "capture": {"T": "trackId"}},
+        {"command": "add_midi_clip", "args": {"trackId": "${T}", "length": 2.0, "notes": notes}, "capture": {"C": "clipId"}},
+        {"command": "create_render_layer", "args": {"clipId": "${C}", "adapter": "transform", "mode": "transform"}, "capture": {"L": "layerId"}},
+        {"command": "render_layer", "args": {"clipId": "${C}", "wait": True}},
+        {"command": "add_note", "args": {"clipId": "${C}", "pitch": 67, "start": 1.0, "length": 0.5, "velocity": 110}},
+        {"command": "__wait", "args": {"ms": 4000}},                                 # let the debounce + async render land
+        {"command": "__snapshot", "args": {"label": "after_reactive"}},
+    ]
+    results, proc = run_script(ctx.bin, cmds, SESSION,
+                               extra_env={"MOSH_SERVICE_PORT": "8801", "MOSH_ENABLE_TRANSFORM": "0",
+                                          "MOSH_REACTIVE_DEBOUNCE_MS": "1"})
+    fails = failed_commands(results)
+    layer_id = _data_field(results, "create_render_layer", "layerId")
+    audio_dir = _mosh_session_base() / SESSION / "audio"
+    files = sorted(glob.glob(str(audio_dir / f"{layer_id}-*.wav"))) if layer_id else []
+    snap = _snap_for(results, "after_reactive")
+    st = {}
+    for t in snap.get("tracks", []):
+        for c in t.get("clips", []):
+            if c.get("type") == "midi":
+                rl = c.get("renderLayer") or {}
+                st = {"mute": bool(c.get("mute")), "reimagineActive": bool(rl.get("reimagineActive")), "notes": len(c.get("notes", []))}
+    # The edit changes the stableSourceSig → the auto-render writes a SECOND durable file (the first
+    # render's still on disk). One file ⇒ no reactive render fired.
+    ok = (not fails and layer_id is not None and len(files) >= 2
+          and st.get("mute") is True and st.get("reimagineActive") is True and st.get("notes") == 3)
+    return row("Reactive auto-re-render on edit", ok,
+               {"layer_audio_files": len(files), "state_after_edit": st, "failed_commands": fails})
+
+
 OFFLINE_CHECKS = [check_makes_sound, check_drums, check_transform, check_midi_render,
-                  check_midi_reimagine_beneath, check_full_loop,
+                  check_midi_reimagine_beneath, check_reactive_rerender, check_full_loop,
                   check_relative_ref_export, check_bypass_layer, check_render_artifact_portability]
 
 
