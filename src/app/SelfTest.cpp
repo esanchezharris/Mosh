@@ -1639,6 +1639,16 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                                                         { "file", crash.getFullPathName() }, { "name", "Crash@60" }}));
             check (ok (as), "assign_sample maps a sample to a pad/note");
             check ((int) as["data"].getProperty ("sounds", 0) > 8, "assign_sample added a 9th pad");
+
+            // melodic mode: the SAME sample mapped as a pitched instrument across the
+            // keyboard, note-gated — "regular 808 functionality". Plumbing guard here;
+            // the 2-distinct-pitches AUDIO proof lives in the offline render harness.
+            auto asMel = cmd (ops, "assign_sample", objN ({{ "trackId", dt }, { "note", 36 },
+                                                           { "file", crash.getFullPathName() },
+                                                           { "name", "808@36" }, { "mode", "melodic" }}));
+            check (ok (asMel), "assign_sample mode:melodic lands (pitched 808/bass path)");
+            check (asMel["data"].getProperty ("mode", var()).toString() == "melodic",
+                   "assign_sample echoes melodic mode");
         }
 
         // load_drum_kit re-loads the 8 pads onto a track's sampler.

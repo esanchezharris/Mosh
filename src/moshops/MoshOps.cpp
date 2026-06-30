@@ -3477,6 +3477,7 @@ juce::var MoshOps::cmdAssignSample (const juce::var& args)
     if (track == nullptr) return errResult ("assign_sample", "no track");
 
     const int note = juce::jlimit (0, 127, (int) args.getProperty ("note", 60));
+    const auto mode = args.getProperty ("mode", "drum").toString();   // "drum" (default, one-shot pad) | "melodic" (pitched 808/bass)
     const auto path = args.getProperty ("file", var()).toString();
     juce::File f (path);
     if (path.isEmpty() || ! f.existsAsFile())
@@ -3503,8 +3504,21 @@ juce::var MoshOps::cmdAssignSample (const juce::var& args)
     const int idx = sampler->getNumSounds();
     const auto err = sampler->addSound (f.getFullPathName(), name, 0.0, 0.0 /*whole file*/, gain);
     if (err.isNotEmpty()) return errResult ("assign_sample", err);
-    sampler->setSoundParams (idx, note, note, note);
-    sampler->setSoundOpenEnded (idx, true);   // one-shot: a short note rings the whole sample
+    if (mode == "melodic")
+    {
+        // "Regular 808 functionality": ONE one-shot played across the WHOLE keyboard,
+        // repitched per MIDI note off `note` as the root (playback-rate resample — no
+        // time-stretch), and NOTE-GATED (openEnded=false) so the MIDI note length cuts
+        // the sample off (short note = short hit, long note = sustained 808). Monophonic
+        // self-non-overlap is the caller's job (author the bass MIDI non-overlapping).
+        sampler->setSoundParams (idx, note, 0, 127);
+        sampler->setSoundOpenEnded (idx, false);
+    }
+    else
+    {
+        sampler->setSoundParams (idx, note, note, note);
+        sampler->setSoundOpenEnded (idx, true);   // one-shot drum pad: a short note rings the whole sample
+    }
     applyDrumLaneGains (*track);               // keep a muted lane silent after a pad swap
     // The sampler loads its sample file on an AsyncUpdate (valueTreeChanged). Headless
     // there is no GUI dispatch between commands, so drain it now — the sound's audio
@@ -3518,6 +3532,7 @@ juce::var MoshOps::cmdAssignSample (const juce::var& args)
     data->setProperty ("index", track->pluginList.indexOf (sampler));
     data->setProperty ("note", note);
     data->setProperty ("name", name);
+    data->setProperty ("mode", mode);
     data->setProperty ("sounds", sampler->getNumSounds());
     logLine ("assign_sample", args, true, {}, true);
     emitSnapshotInvalidated();
