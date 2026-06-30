@@ -18,6 +18,7 @@ import {
   sliceProgramFull, renderExample, tupleToExample, huhExamples, snapshotForSetup,
   splitBySource, type RawExample, type RenderedExample,
 } from "../src/sft/buildDataset";
+import { Backtranslator, makeBrainChat, loadDotEnv } from "../src/sft/backtranslate";
 
 // Stream JSONL to disk in chunks — a single .map().join() over ~100k examples
 // (each carrying a ~10KB system prompt) overflows V8's max string length.
@@ -49,6 +50,13 @@ const maxPerFile = Number(flag("max", "1000"));
 const sampleN = Number(flag("sample", "0")) || Infinity;  // cap files processed
 const limitN = Number(flag("limit", "0")) || Infinity;    // cap rendered examples
 const maxNotes = Number(flag("max-notes", "0")) || undefined; // cap a populate target's note count (default 64 in the slicer) — align "short pattern" targets with the fair-metric floor
+// Back-translation: --backtranslate [budget] enables brain-synthesized natural
+// utterances (the chosen brain rewrites each distinct templated SHAPE once → reused
+// across the whole corpus). --bt-variants N = phrasings per shape. Cache persists to
+// <out>/bt_cache.json so re-runs never re-pay. Off unless the flag is present.
+const btEnabled = process.argv.includes("--backtranslate");
+const btBudget = Number(flag("backtranslate", "60")) || 60; // max brain calls (≈ distinct shapes)
+const btVariants = Number(flag("bt-variants", "3")) || 3;
 
 const EXT = /\.(rpp|als|flp|mid|midi)$/i;
 function findProjects(dir: string, out: string[] = []): string[] {
@@ -70,6 +78,27 @@ allFiles.sort((a, b) => hashStr(`${seed}:${a}`) - hashStr(`${seed}:${b}`));
 const files = allFiles.slice(0, sampleN);
 console.log(`  ${allFiles.length} project/MIDI file(s) found; processing ${files.length}${limitN < Infinity ? ` (cap ${limitN} examples)` : ""}\n`);
 
+// ── back-translation (the brain-unlocked step) ─────────────────────────────────
+// Synthesizes natural producer utterances for each distinct templated SHAPE once,
+// reused across the whole corpus. Persisted cache → re-runs never re-pay the brain.
+const btCachePath = join(outDir, "bt_cache.json");
+let bt: Backtranslator | null = null;
+let btCount = 0;
+if (btEnabled) {
+  const chat = makeBrainChat(loadDotEnv(process.cwd()));
+  if (!chat) {
+    console.warn("  ⚠ --backtranslate set but no brain key (ui/.env.local) — falling back to templated utterances only");
+  } else {
+    const cache = new Map<string, string[]>();
+    if (existsSync(btCachePath)) try { for (const [k, v] of Object.entries(JSON.parse(readFileSync(btCachePath, "utf8")))) cache.set(k, v as string[]); } catch { /* ignore */ }
+    bt = new Backtranslator(chat, {
+      variants: btVariants, budget: { calls: btBudget }, cache,
+      onShape: (s, t) => console.log(`  ↳ backtranslate "${s}" → ${t.length} phrasing(s)`),
+    });
+    console.log(`  back-translation ON (budget ${btBudget} brain calls, ${btVariants} variant(s)/shape${cache.size ? `, ${cache.size} cached shape(s)` : ""})`);
+  }
+}
+
 // ── importer slices → render, interleaved, capped at --limit ───────────────────
 const rendered: RenderedExample[] = [];
 const rawById = new Map<string, RawExample>();
@@ -85,12 +114,18 @@ for (const f of files) {
   for (const r of raws) {
     if (rendered.length >= limitN) break;
     const ex = await renderExample(r);
-    if (ex) { rendered.push(ex); rawById.set(r.id, r); contributed = true; }
+    if (!ex) continue; // only augment raws that themselves render cleanly
+    rendered.push(ex); rawById.set(r.id, r); contributed = true;
+    if (bt) for (const v of await bt.variantsFor(r)) {
+      if (rendered.length >= limitN) break;
+      const vex = await renderExample(v);
+      if (vex) { rendered.push(vex); rawById.set(v.id, v); btCount++; }
+    }
   }
   if (contributed) used.push(f);
   if (processed % 1000 === 0) console.log(`  …${processed}/${files.length} files, ${rendered.length} examples`);
 }
-console.log(`  rendered ${rendered.length} importer examples from ${used.length}/${processed} processed files`);
+console.log(`  rendered ${rendered.length} importer examples (${btCount} back-translated) from ${used.length}/${processed} processed files`);
 
 // ── tuples (train-only) ────────────────────────────────────────────────────────
 const tupleExamples: RenderedExample[] = [];
@@ -119,6 +154,8 @@ split.valid.push(...huh.slice(Math.ceil(huh.length * 0.8)));
 const evalRaws = split.test.map((e) => rawById.get(e.id)).filter((r): r is RawExample => !!r);
 
 mkdirSync(outDir, { recursive: true });
+// persist the back-translation cache (shape → natural phrasings) so re-runs reuse it
+if (bt) try { writeFileSync(btCachePath, JSON.stringify(Object.fromEntries(bt.cacheEntries()), null, 0)); } catch { /* non-fatal */ }
 const chatLine = (e: RenderedExample) => JSON.stringify({ messages: e.messages });
 writeRows(join(outDir, "train.jsonl"), split.train, chatLine);
 writeRows(join(outDir, "valid.jsonl"), split.valid, chatLine);
@@ -128,8 +165,9 @@ writeRows(join(outDir, "test.eval.jsonl"), evalRaws, (r) => JSON.stringify({ id:
 const datasetVersion = `sft-${createHash("sha256").update(`${corpora.join("|")}:${seed}:${trR}/${vaR}/${teR}:${sampleN}:${limitN}:${maxNotes ?? "all"}:${used.length}`).digest("hex").slice(0, 12)}`;
 const manifest = {
   datasetVersion, createdFrom: corpora,
-  counts: { train: split.train.length, valid: split.valid.length, test: split.test.length, evalSet: evalRaws.length, importer: rendered.length, tuples: tupleExamples.length, huh: huh.length },
+  counts: { train: split.train.length, valid: split.valid.length, test: split.test.length, evalSet: evalRaws.length, importer: rendered.length, backtranslated: btCount, tuples: tupleExamples.length, huh: huh.length },
   corpus: { filesFound: allFiles.length, filesProcessed: processed, filesUsed: used.length },
+  backtranslation: bt ? { enabled: true, brainCalls: bt.calls, shapes: bt.cacheEntries().length, variants: btVariants, examples: btCount } : { enabled: false },
   split: { ratios: [trR, vaR, teR], seed, sample: sampleN === Infinity ? "all" : sampleN, limit: limitN === Infinity ? "none" : limitN, maxNotes: maxNotes ?? "all" },
 };
 writeFileSync(join(outDir, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");

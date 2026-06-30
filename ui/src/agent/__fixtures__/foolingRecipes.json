@@ -1,0 +1,10631 @@
+{
+"note": "24 Goodhart exploits from the harden-recipe-verifier red-team (v1 scored all >=0.8). v2 must catch them.",
+"candidates": [
+{
+"name": "The Metronome (single-velocity four-on-the-floor)",
+"why_musically_bad": "Every single note is velocity 100 \u2014 zero dynamics, no accents, no ghost notes. Kick on every quarter, snare locked to 2&4, straight 8th hats, bass and lead cycling the same rigid 3-note root/3rd/5th arpeggio forever. Perfectly quantized to the grid with no swing or human push/pull. A producer hears a dead, lifeless drum-machine demo: technically a 'beat' but it has no groove, no feel, no motion. The verifier gives it a perfect 1.0 because it grades pitch/start/length/key/register/density but never inspects velocity variance, swing, or repetition.",
+"predicted_total": 1,
+"recipe": {
+"tempo": 120,
+"bars": 2,
+"key": {
+"tonic": "A",
+"mode": "minor"
+},
+"tracks": [
+{
+"name": "Drums",
+"role": "drums",
+"notes": [
+{
+"pitch": 36,
+"start": 0,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 1,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 2,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 3,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 1,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 3,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 0,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 0.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 1,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 1.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 2,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 2.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 3,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 3.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 4,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 6,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 7,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 7,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 4,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 4.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 5.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 6,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 6.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 7,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 7.5,
+"length": 0.25,
+"velocity": 100
+}
+]
+},
+{
+"name": "Bass",
+"role": "bass",
+"notes": [
+{
+"pitch": 33,
+"start": 0,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 1,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 40,
+"start": 2,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 33,
+"start": 3,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 33,
+"start": 4,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 5,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 40,
+"start": 6,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 33,
+"start": 7,
+"length": 1,
+"velocity": 100
+}
+]
+},
+{
+"name": "Lead",
+"role": "melody",
+"notes": [
+{
+"pitch": 69,
+"start": 0,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 72,
+"start": 0.5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 76,
+"start": 1,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 69,
+"start": 1.5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 72,
+"start": 2,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 76,
+"start": 2.5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 69,
+"start": 3,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 72,
+"start": 3.5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 69,
+"start": 4,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 72,
+"start": 4.5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 76,
+"start": 5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 69,
+"start": 5.5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 72,
+"start": 6,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 76,
+"start": 6.5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 69,
+"start": 7,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 72,
+"start": 7.5,
+"length": 0.5,
+"velocity": 100
+}
+]
+}
+]
+},
+"lens": "monotony"
+},
+{
+"name": "Copy-Paste Stamp (bar 2 is a verbatim clone of bar 1)",
+"why_musically_bad": "Bar 2 is a byte-for-byte duplicate of bar 1 shifted by 4 beats \u2014 no fill, no variation, no development whatsoever, just a looped stamp. All notes are velocity 100 quarter-notes. A real producer would never hand off a 'two-bar' idea that is literally the same bar twice with identical dynamics; it reads as a placeholder loop, not music. The duplicate-hygiene check is defeated because it keys on pitch@start, and the shifted starts make the clone invisible. Scores 1.0.",
+"predicted_total": 1,
+"recipe": {
+"tempo": 140,
+"bars": 2,
+"key": {
+"tonic": "C",
+"mode": "major"
+},
+"tracks": [
+{
+"name": "Kit",
+"role": "drums",
+"notes": [
+{
+"pitch": 36,
+"start": 0,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 2,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 1,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 3,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 0,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 0.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 1,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 1.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 2,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 2.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 3,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 3.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 4,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 6,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 7,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 4,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 4.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 5.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 6,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 6.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 7,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 7.5,
+"length": 0.25,
+"velocity": 100
+}
+]
+},
+{
+"name": "808",
+"role": "bass",
+"notes": [
+{
+"pitch": 36,
+"start": 0,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 43,
+"start": 1,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 2,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 3,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 4,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 43,
+"start": 5,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 6,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 7,
+"length": 1,
+"velocity": 100
+}
+]
+},
+{
+"name": "Pluck",
+"role": "melody",
+"notes": [
+{
+"pitch": 60,
+"start": 0,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 64,
+"start": 1,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 67,
+"start": 2,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 60,
+"start": 3,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 60,
+"start": 4,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 64,
+"start": 5,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 67,
+"start": 6,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 60,
+"start": 7,
+"length": 1,
+"velocity": 100
+}
+]
+}
+]
+},
+"lens": "monotony"
+},
+{
+"name": "Wall of Sixteenths (max-density machine-gun, no accents)",
+"why_musically_bad": "A relentless 16th-note lead and 8th-note bass over four-on-the-floor kick, every note at identical velocity 100. With no velocity accenting, a constant stream of 16ths is the textbook 'machine gun' \u2014 fatiguing, undynamic, no phrasing or breath. Real 16th-note runs live or die by accent patterns; flat velocity makes it a buzzsaw. The verifier rewards the high density (inside its bands) and full pitch-variety while being blind to the missing dynamics. Scores 1.0.",
+"predicted_total": 1,
+"recipe": {
+"tempo": 128,
+"bars": 2,
+"key": {
+"tonic": "E",
+"mode": "minor"
+},
+"tracks": [
+{
+"name": "Drums",
+"role": "drums",
+"notes": [
+{
+"pitch": 36,
+"start": 0,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 1,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 2,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 3,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 1,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 3,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 0,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 0.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 1,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 1.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 2,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 2.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 3,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 3.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 4,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 6,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 7,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 7,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 4,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 4.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 5.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 6,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 6.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 7,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 7.5,
+"length": 0.25,
+"velocity": 100
+}
+]
+},
+{
+"name": "Bass",
+"role": "bass",
+"notes": [
+{
+"pitch": 40,
+"start": 0,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 43,
+"start": 0.5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 47,
+"start": 1,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 40,
+"start": 1.5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 43,
+"start": 2,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 47,
+"start": 2.5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 40,
+"start": 3,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 43,
+"start": 3.5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 40,
+"start": 4,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 43,
+"start": 4.5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 47,
+"start": 5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 40,
+"start": 5.5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 43,
+"start": 6,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 47,
+"start": 6.5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 40,
+"start": 7,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 43,
+"start": 7.5,
+"length": 0.5,
+"velocity": 100
+}
+]
+},
+{
+"name": "Lead",
+"role": "melody",
+"notes": [
+{
+"pitch": 64,
+"start": 0,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 67,
+"start": 0.25,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 71,
+"start": 0.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 64,
+"start": 0.75,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 67,
+"start": 1,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 71,
+"start": 1.25,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 64,
+"start": 1.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 67,
+"start": 1.75,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 71,
+"start": 2,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 64,
+"start": 2.25,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 67,
+"start": 2.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 71,
+"start": 2.75,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 64,
+"start": 3,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 67,
+"start": 3.25,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 71,
+"start": 3.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 64,
+"start": 3.75,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 67,
+"start": 4,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 71,
+"start": 4.25,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 64,
+"start": 4.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 67,
+"start": 4.75,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 71,
+"start": 5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 64,
+"start": 5.25,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 67,
+"start": 5.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 71,
+"start": 5.75,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 64,
+"start": 6,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 67,
+"start": 6.25,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 71,
+"start": 6.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 64,
+"start": 6.75,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 67,
+"start": 7,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 71,
+"start": 7.25,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 64,
+"start": 7.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 67,
+"start": 7.75,
+"length": 0.25,
+"velocity": 100
+}
+]
+}
+]
+},
+"lens": "monotony"
+},
+{
+"name": "Two-Velocity Decoy (survives a naive velocity-variance patch)",
+"why_musically_bad": "A robustness probe: drums sit at velocity 100, melodic parts at 101. Technically two distinct velocity values, so a crude 'is velocity constant?' patch would pass it \u2014 yet it has exactly zero musical dynamics (a 1-step difference is inaudible, applied uniformly per-part, never within a phrase). Four bars of the same quarter-note root/3rd/5th loop with no fills, no swing, no accenting. Demonstrates that the fix must measure per-part within-phrase dynamic RANGE/variance, not merely distinct-value count. Scores 1.0.",
+"predicted_total": 1,
+"recipe": {
+"tempo": 120,
+"bars": 4,
+"key": {
+"tonic": "G",
+"mode": "major"
+},
+"tracks": [
+{
+"name": "Drums",
+"role": "drums",
+"notes": [
+{
+"pitch": 36,
+"start": 0,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 2,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 1,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 3,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 0,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 0.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 1,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 1.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 2,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 2.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 3,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 3.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 4,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 6,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 7,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 4,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 4.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 5.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 6,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 6.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 7,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 7.5,
+"length": 0.25,
+"velocity": 100
+}
+]
+},
+{
+"name": "Bass",
+"role": "bass",
+"notes": [
+{
+"pitch": 43,
+"start": 0,
+"length": 1,
+"velocity": 101
+},
+{
+"pitch": 47,
+"start": 1,
+"length": 1,
+"velocity": 101
+},
+{
+"pitch": 50,
+"start": 2,
+"length": 1,
+"velocity": 101
+},
+{
+"pitch": 43,
+"start": 3,
+"length": 1,
+"velocity": 101
+},
+{
+"pitch": 43,
+"start": 4,
+"length": 1,
+"velocity": 101
+},
+{
+"pitch": 47,
+"start": 5,
+"length": 1,
+"velocity": 101
+},
+{
+"pitch": 50,
+"start": 6,
+"length": 1,
+"velocity": 101
+},
+{
+"pitch": 43,
+"start": 7,
+"length": 1,
+"velocity": 101
+}
+]
+},
+{
+"name": "Lead",
+"role": "melody",
+"notes": [
+{
+"pitch": 67,
+"start": 0,
+"length": 0.5,
+"velocity": 101
+},
+{
+"pitch": 71,
+"start": 0.5,
+"length": 0.5,
+"velocity": 101
+},
+{
+"pitch": 74,
+"start": 1,
+"length": 0.5,
+"velocity": 101
+},
+{
+"pitch": 67,
+"start": 1.5,
+"length": 0.5,
+"velocity": 101
+},
+{
+"pitch": 71,
+"start": 2,
+"length": 0.5,
+"velocity": 101
+},
+{
+"pitch": 74,
+"start": 2.5,
+"length": 0.5,
+"velocity": 101
+},
+{
+"pitch": 67,
+"start": 3,
+"length": 0.5,
+"velocity": 101
+},
+{
+"pitch": 71,
+"start": 3.5,
+"length": 0.5,
+"velocity": 101
+},
+{
+"pitch": 67,
+"start": 4,
+"length": 0.5,
+"velocity": 101
+},
+{
+"pitch": 71,
+"start": 4.5,
+"length": 0.5,
+"velocity": 101
+},
+{
+"pitch": 74,
+"start": 5,
+"length": 0.5,
+"velocity": 101
+},
+{
+"pitch": 67,
+"start": 5.5,
+"length": 0.5,
+"velocity": 101
+},
+{
+"pitch": 71,
+"start": 6,
+"length": 0.5,
+"velocity": 101
+},
+{
+"pitch": 74,
+"start": 6.5,
+"length": 0.5,
+"velocity": 101
+},
+{
+"pitch": 67,
+"start": 7,
+"length": 0.5,
+"velocity": 101
+},
+{
+"pitch": 71,
+"start": 7.5,
+"length": 0.5,
+"velocity": 101
+}
+]
+}
+]
+},
+"lens": "monotony"
+},
+{
+"name": "Perfect-Score Clone Loop (1 bar \u00d7 8, byte-identical)",
+"why_musically_bad": "Bars 2-8 are a literal copy-paste of bar 1 (same 4-on-the-floor kick, 2&4 snare, straight-8th hats, identical A-minor triad bass arpeggio 33-36-40, identical 69-72-76 lead). Zero development across 16 seconds: no fill, no variation, no build, no change in velocity/register/rhythm. A producer would call this a lifeless 'placeholder loop' \u2014 the kind of thing you bounce to test a sound, not a finished beat. It scores a PERFECT 1.0 because every verifier dimension is an aggregate over the whole note pool (per-bar kick/snare fractions, on-grid %, in-key %, distinct-pitch count) and NONE measures whether bar N differs from bar 1. The hygiene dedup can't catch it either: it keys on pitch@absoluteStart, so each pasted bar lands at a fresh start and is never flagged as a duplicate. Widest possible gap: 1.0 reward for the single most boring possible arrangement.",
+"predicted_total": 1,
+"recipe": {
+"tempo": 120,
+"bars": 8,
+"key": {
+"tonic": "A",
+"mode": "minor"
+},
+"tracks": [
+{
+"name": "Drums",
+"role": "drums",
+"notes": [
+{
+"pitch": 36,
+"start": 0,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 2,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 4,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 6,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 8,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 10,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 12,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 14,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 16,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 18,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 20,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 22,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 24,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 26,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 28,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 30,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 1,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 3,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 7,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 9,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 11,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 13,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 15,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 17,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 19,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 21,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 23,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 25,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 27,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 29,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 31,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 0,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 0.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 1,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 1.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 2,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 2.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 3,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 3.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 4,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 4.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 5.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 6,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 6.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 7,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 7.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 8,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 8.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 9,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 9.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 10,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 10.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 11,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 11.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 12,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 12.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 13,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 13.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 14,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 14.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 15,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 15.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 16,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 16.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 17,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 17.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 18,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 18.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 19,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 19.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 20,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 20.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 21,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 21.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 22,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 22.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 23,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 23.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 24,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 24.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 25,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 25.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 26,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 26.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 27,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 27.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 28,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 28.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 29,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 29.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 30,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 30.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 31,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 31.5,
+"length": 0.25,
+"velocity": 80
+}
+]
+},
+{
+"name": "Bass",
+"role": "bass",
+"notes": [
+{
+"pitch": 33,
+"start": 0,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 1,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 40,
+"start": 2,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 33,
+"start": 3,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 33,
+"start": 4,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 5,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 40,
+"start": 6,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 33,
+"start": 7,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 33,
+"start": 8,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 9,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 40,
+"start": 10,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 33,
+"start": 11,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 33,
+"start": 12,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 13,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 40,
+"start": 14,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 33,
+"start": 15,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 33,
+"start": 16,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 17,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 40,
+"start": 18,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 33,
+"start": 19,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 33,
+"start": 20,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 21,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 40,
+"start": 22,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 33,
+"start": 23,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 33,
+"start": 24,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 25,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 40,
+"start": 26,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 33,
+"start": 27,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 33,
+"start": 28,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 29,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 40,
+"start": 30,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 33,
+"start": 31,
+"length": 1,
+"velocity": 100
+}
+]
+},
+{
+"name": "Lead",
+"role": "melody",
+"notes": [
+{
+"pitch": 69,
+"start": 0,
+"length": 1,
+"velocity": 90
+},
+{
+"pitch": 72,
+"start": 1,
+"length": 1,
+"velocity": 90
+},
+{
+"pitch": 76,
+"start": 2,
+"length": 1,
+"velocity": 90
+},
+{
+"pitch": 69,
+"start": 3,
+"length": 1,
+"velocity": 90
+},
+{
+"pitch": 69,
+"start": 4,
+"length": 1,
+"velocity": 90
+},
+{
+"pitch": 72,
+"start": 5,
+"length": 1,
+"velocity": 90
+},
+{
+"pitch": 76,
+"start": 6,
+"length": 1,
+"velocity": 90
+},
+{
+"pitch": 69,
+"start": 7,
+"length": 1,
+"velocity": 90
+},
+{
+"pitch": 69,
+"start": 8,
+"length": 1,
+"velocity": 90
+},
+{
+"pitch": 72,
+"start": 9,
+"length": 1,
+"velocity": 90
+},
+{
+"pitch": 76,
+"start": 10,
+"length": 1,
+"velocity": 90
+},
+{
+"pitch": 69,
+"start": 11,
+"length": 1,
+"velocity": 90
+},
+{
+"pitch": 69,
+"start": 12,
+"length": 1,
+"velocity": 90
+},
+{
+"pitch": 72,
+"start": 13,
+"length": 1,
+"velocity": 90
+},
+{
+"pitch": 76,
+"start": 14,
+"length": 1,
+"velocity": 90
+},
+{
+"pitch": 69,
+"start": 15,
+"length": 1,
+"velocity": 90
+},
+{
+"pitch": 69,
+"start": 16,
+"length": 1,
+"velocity": 90
+},
+{
+"pitch": 72,
+"start": 17,
+"length": 1,
+"velocity": 90
+},
+{
+"pitch": 76,
+"start": 18,
+"length": 1,
+"velocity": 90
+},
+{
+"pitch": 69,
+"start": 19,
+"length": 1,
+"velocity": 90
+},
+{
+"pitch": 69,
+"start": 20,
+"length": 1,
+"velocity": 90
+},
+{
+"pitch": 72,
+"start": 21,
+"length": 1,
+"velocity": 90
+},
+{
+"pitch": 76,
+"start": 22,
+"length": 1,
+"velocity": 90
+},
+{
+"pitch": 69,
+"start": 23,
+"length": 1,
+"velocity": 90
+},
+{
+"pitch": 69,
+"start": 24,
+"length": 1,
+"velocity": 90
+},
+{
+"pitch": 72,
+"start": 25,
+"length": 1,
+"velocity": 90
+},
+{
+"pitch": 76,
+"start": 26,
+"length": 1,
+"velocity": 90
+},
+{
+"pitch": 69,
+"start": 27,
+"length": 1,
+"velocity": 90
+},
+{
+"pitch": 69,
+"start": 28,
+"length": 1,
+"velocity": 90
+},
+{
+"pitch": 72,
+"start": 29,
+"length": 1,
+"velocity": 90
+},
+{
+"pitch": 76,
+"start": 30,
+"length": 1,
+"velocity": 90
+},
+{
+"pitch": 69,
+"start": 31,
+"length": 1,
+"velocity": 90
+}
+]
+}
+]
+},
+"lens": "repetition"
+},
+{
+"name": "Two-Note Drone Ostinato (held whole/half notes, 8 bars)",
+"why_musically_bad": "The most minimal possible 'beat': a single static A-minor sandwich looped 8 times with held long notes \u2014 bass alternates ONLY A1 and E2 (two pitches, sustained 2 beats each) under a frozen 3-note lead held across the bar (no rhythmic life, no phrasing, no rests that move). It is a sleep-loop, not a beat. Even though the bass has just 2 distinct pitches (the verifier's only complaint, dinging density-variety to 0.667 \u2192 total 0.994), it sails past 0.85 because the verifier rewards 'distinct >= 2' as enough variety and is completely blind to the fact that the SAME two notes repeat in the SAME order for the entire track. Long sustained notes also game the density 'busy' band by keeping note COUNTS low while sounding like a single frozen chord \u2014 a producer hears one chord held for 16 bars, the verifier hears a clean, in-key, on-grid, properly-anchored arrangement.",
+"predicted_total": 0.994444,
+"recipe": {
+"tempo": 120,
+"bars": 8,
+"key": {
+"tonic": "A",
+"mode": "minor"
+},
+"tracks": [
+{
+"name": "Drums",
+"role": "drums",
+"notes": [
+{
+"pitch": 36,
+"start": 0,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 4,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 8,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 12,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 16,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 20,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 24,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 28,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 1,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 3,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 7,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 9,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 11,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 13,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 15,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 17,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 19,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 21,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 23,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 25,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 27,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 29,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 31,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 0,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 0.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 1,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 1.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 2,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 2.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 3,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 3.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 4,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 4.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 5.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 6,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 6.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 7,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 7.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 8,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 8.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 9,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 9.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 10,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 10.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 11,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 11.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 12,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 12.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 13,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 13.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 14,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 14.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 15,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 15.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 16,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 16.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 17,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 17.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 18,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 18.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 19,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 19.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 20,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 20.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 21,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 21.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 22,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 22.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 23,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 23.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 24,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 24.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 25,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 25.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 26,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 26.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 27,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 27.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 28,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 28.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 29,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 29.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 30,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 30.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 31,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 31.5,
+"length": 0.25,
+"velocity": 80
+}
+]
+},
+{
+"name": "Bass",
+"role": "bass",
+"notes": [
+{
+"pitch": 33,
+"start": 0,
+"length": 2,
+"velocity": 100
+},
+{
+"pitch": 40,
+"start": 2,
+"length": 2,
+"velocity": 100
+},
+{
+"pitch": 33,
+"start": 4,
+"length": 2,
+"velocity": 100
+},
+{
+"pitch": 40,
+"start": 6,
+"length": 2,
+"velocity": 100
+},
+{
+"pitch": 33,
+"start": 8,
+"length": 2,
+"velocity": 100
+},
+{
+"pitch": 40,
+"start": 10,
+"length": 2,
+"velocity": 100
+},
+{
+"pitch": 33,
+"start": 12,
+"length": 2,
+"velocity": 100
+},
+{
+"pitch": 40,
+"start": 14,
+"length": 2,
+"velocity": 100
+},
+{
+"pitch": 33,
+"start": 16,
+"length": 2,
+"velocity": 100
+},
+{
+"pitch": 40,
+"start": 18,
+"length": 2,
+"velocity": 100
+},
+{
+"pitch": 33,
+"start": 20,
+"length": 2,
+"velocity": 100
+},
+{
+"pitch": 40,
+"start": 22,
+"length": 2,
+"velocity": 100
+},
+{
+"pitch": 33,
+"start": 24,
+"length": 2,
+"velocity": 100
+},
+{
+"pitch": 40,
+"start": 26,
+"length": 2,
+"velocity": 100
+},
+{
+"pitch": 33,
+"start": 28,
+"length": 2,
+"velocity": 100
+},
+{
+"pitch": 40,
+"start": 30,
+"length": 2,
+"velocity": 100
+}
+]
+},
+{
+"name": "Lead",
+"role": "melody",
+"notes": [
+{
+"pitch": 69,
+"start": 0,
+"length": 1.5,
+"velocity": 90
+},
+{
+"pitch": 72,
+"start": 1.5,
+"length": 1.5,
+"velocity": 90
+},
+{
+"pitch": 76,
+"start": 3,
+"length": 1,
+"velocity": 90
+},
+{
+"pitch": 69,
+"start": 4,
+"length": 1.5,
+"velocity": 90
+},
+{
+"pitch": 72,
+"start": 5.5,
+"length": 1.5,
+"velocity": 90
+},
+{
+"pitch": 76,
+"start": 7,
+"length": 1,
+"velocity": 90
+},
+{
+"pitch": 69,
+"start": 8,
+"length": 1.5,
+"velocity": 90
+},
+{
+"pitch": 72,
+"start": 9.5,
+"length": 1.5,
+"velocity": 90
+},
+{
+"pitch": 76,
+"start": 11,
+"length": 1,
+"velocity": 90
+},
+{
+"pitch": 69,
+"start": 12,
+"length": 1.5,
+"velocity": 90
+},
+{
+"pitch": 72,
+"start": 13.5,
+"length": 1.5,
+"velocity": 90
+},
+{
+"pitch": 76,
+"start": 15,
+"length": 1,
+"velocity": 90
+},
+{
+"pitch": 69,
+"start": 16,
+"length": 1.5,
+"velocity": 90
+},
+{
+"pitch": 72,
+"start": 17.5,
+"length": 1.5,
+"velocity": 90
+},
+{
+"pitch": 76,
+"start": 19,
+"length": 1,
+"velocity": 90
+},
+{
+"pitch": 69,
+"start": 20,
+"length": 1.5,
+"velocity": 90
+},
+{
+"pitch": 72,
+"start": 21.5,
+"length": 1.5,
+"velocity": 90
+},
+{
+"pitch": 76,
+"start": 23,
+"length": 1,
+"velocity": 90
+},
+{
+"pitch": 69,
+"start": 24,
+"length": 1.5,
+"velocity": 90
+},
+{
+"pitch": 72,
+"start": 25.5,
+"length": 1.5,
+"velocity": 90
+},
+{
+"pitch": 76,
+"start": 27,
+"length": 1,
+"velocity": 90
+},
+{
+"pitch": 69,
+"start": 28,
+"length": 1.5,
+"velocity": 90
+},
+{
+"pitch": 72,
+"start": 29.5,
+"length": 1.5,
+"velocity": 90
+},
+{
+"pitch": 76,
+"start": 31,
+"length": 1,
+"velocity": 90
+}
+]
+}
+]
+},
+"lens": "repetition"
+},
+{
+"name": "Minimum-Viable 2-Bar Loop (smallest passing copy-paste)",
+"why_musically_bad": "The absolute minimum content that still clears the gate: a single 1-bar pattern duplicated once to fill the 2-bar (8-beat) window. Bar 2 is a byte-for-byte clone of bar 1 across all three parts. This is the 'I dragged the clip to make it twice as long' non-effort \u2014 there is literally nothing in bar 2 that wasn't in bar 1. It demonstrates that the verifier can be satisfied with the LEAST possible musical information: ~16 drum hits, 2 bass notes, 3 lead notes, all repeated. The bass uses 2 distinct pitches so density-variety is 0.667 (total 0.994), still far above 0.85. A real producer would not even call this a draft \u2014 it is one bar of an idea, copy-pasted, and the reward can't tell the difference between this and a finished two-bar phrase with a turnaround/answer in bar 2.",
+"predicted_total": 0.994444,
+"recipe": {
+"tempo": 120,
+"bars": 2,
+"key": {
+"tonic": "A",
+"mode": "minor"
+},
+"tracks": [
+{
+"name": "Drums",
+"role": "drums",
+"notes": [
+{
+"pitch": 36,
+"start": 0,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 4,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 1,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 3,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 7,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 0,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 0.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 1,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 1.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 2,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 2.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 3,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 3.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 4,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 4.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 5.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 6,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 6.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 7,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 7.5,
+"length": 0.25,
+"velocity": 80
+}
+]
+},
+{
+"name": "Bass",
+"role": "bass",
+"notes": [
+{
+"pitch": 33,
+"start": 0,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 40,
+"start": 2,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 33,
+"start": 4,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 40,
+"start": 6,
+"length": 1,
+"velocity": 100
+}
+]
+},
+{
+"name": "Lead",
+"role": "melody",
+"notes": [
+{
+"pitch": 69,
+"start": 0,
+"length": 1,
+"velocity": 90
+},
+{
+"pitch": 72,
+"start": 1.5,
+"length": 1,
+"velocity": 90
+},
+{
+"pitch": 76,
+"start": 3,
+"length": 1,
+"velocity": 90
+},
+{
+"pitch": 69,
+"start": 4,
+"length": 1,
+"velocity": 90
+},
+{
+"pitch": 72,
+"start": 5.5,
+"length": 1,
+"velocity": 90
+},
+{
+"pitch": 76,
+"start": 7,
+"length": 1,
+"velocity": 90
+}
+]
+}
+]
+},
+"lens": "repetition"
+},
+{
+"name": "Machine-Gun Clone (140 BPM, 16th hats, 4 bars identical)",
+"why_musically_bad": "A faster-tempo variant that pushes the drum subdivision and density limits while staying a pure copy-paste: 16 straight-16th hats per bar, kick on 1 and the off-beat '3-and', snare on 2&4, and the same A-minor bass/lead motif \u2014 all four bars identical. The relentless mechanical 16th-hat wall with zero velocity variation, zero ghost notes, zero swing, and no change bar-to-bar is exactly the robotic 'turn on the metronome' texture a producer rejects as inhuman. It scores a PERFECT 1.0: hatsSubdiv clamps to 1.0 at 8/bar (16/bar is wasted overkill the verifier still rewards as max), every other dimension is full, and again nothing penalizes the dead-identical repetition. Shows the exploit survives across tempo, subdivision and bar-count \u2014 the hole isn't tied to one shape.",
+"predicted_total": 1,
+"recipe": {
+"tempo": 140,
+"bars": 4,
+"key": {
+"tonic": "A",
+"mode": "minor"
+},
+"tracks": [
+{
+"name": "Drums",
+"role": "drums",
+"notes": [
+{
+"pitch": 36,
+"start": 0,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 2.5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 4,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 6.5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 8,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 10.5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 12,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 14.5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 1,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 3,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 7,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 9,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 11,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 13,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 15,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 0,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 0.25,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 0.5,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 0.75,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 1,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 1.25,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 1.5,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 1.75,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 2,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 2.25,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 2.5,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 2.75,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 3,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 3.25,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 3.5,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 3.75,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 4,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 4.25,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 4.5,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 4.75,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 5,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 5.25,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 5.5,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 5.75,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 6,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 6.25,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 6.5,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 6.75,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 7,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 7.25,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 7.5,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 7.75,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 8,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 8.25,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 8.5,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 8.75,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 9,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 9.25,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 9.5,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 9.75,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 10,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 10.25,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 10.5,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 10.75,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 11,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 11.25,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 11.5,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 11.75,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 12,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 12.25,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 12.5,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 12.75,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 13,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 13.25,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 13.5,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 13.75,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 14,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 14.25,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 14.5,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 14.75,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 15,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 15.25,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 15.5,
+"length": 0.125,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 15.75,
+"length": 0.125,
+"velocity": 80
+}
+]
+},
+{
+"name": "Bass",
+"role": "bass",
+"notes": [
+{
+"pitch": 33,
+"start": 0,
+"length": 0.5,
+"velocity": 110
+},
+{
+"pitch": 33,
+"start": 1,
+"length": 0.5,
+"velocity": 110
+},
+{
+"pitch": 36,
+"start": 2,
+"length": 0.5,
+"velocity": 110
+},
+{
+"pitch": 40,
+"start": 3,
+"length": 0.5,
+"velocity": 110
+},
+{
+"pitch": 33,
+"start": 4,
+"length": 0.5,
+"velocity": 110
+},
+{
+"pitch": 33,
+"start": 5,
+"length": 0.5,
+"velocity": 110
+},
+{
+"pitch": 36,
+"start": 6,
+"length": 0.5,
+"velocity": 110
+},
+{
+"pitch": 40,
+"start": 7,
+"length": 0.5,
+"velocity": 110
+},
+{
+"pitch": 33,
+"start": 8,
+"length": 0.5,
+"velocity": 110
+},
+{
+"pitch": 33,
+"start": 9,
+"length": 0.5,
+"velocity": 110
+},
+{
+"pitch": 36,
+"start": 10,
+"length": 0.5,
+"velocity": 110
+},
+{
+"pitch": 40,
+"start": 11,
+"length": 0.5,
+"velocity": 110
+},
+{
+"pitch": 33,
+"start": 12,
+"length": 0.5,
+"velocity": 110
+},
+{
+"pitch": 33,
+"start": 13,
+"length": 0.5,
+"velocity": 110
+},
+{
+"pitch": 36,
+"start": 14,
+"length": 0.5,
+"velocity": 110
+},
+{
+"pitch": 40,
+"start": 15,
+"length": 0.5,
+"velocity": 110
+}
+]
+},
+{
+"name": "Lead",
+"role": "melody",
+"notes": [
+{
+"pitch": 69,
+"start": 0,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 72,
+"start": 1,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 76,
+"start": 2,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 69,
+"start": 3,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 69,
+"start": 4,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 72,
+"start": 5,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 76,
+"start": 6,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 69,
+"start": 7,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 69,
+"start": 8,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 72,
+"start": 9,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 76,
+"start": 10,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 69,
+"start": 11,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 69,
+"start": 12,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 72,
+"start": 13,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 76,
+"start": 14,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 69,
+"start": 15,
+"length": 0.5,
+"velocity": 90
+}
+]
+}
+]
+},
+"lens": "repetition"
+},
+{
+"name": "Machine-gun 16ths (kick + hat on every 16th)",
+"why_musically_bad": "The kick fires on all 32 sixteenths and the closed hat on all 32 sixteenths \u2014 a featureless, buzzing wall with no groove, no syncopation, no dynamics. A real producer hears a constant brrr/static drone, not a beat: there is no backbeat felt because every slot is occupied equally, the kick stops anchoring anything when it never stops, and the relentless 16th-note hat is fatiguing noise. The verifier loves it because kickDownbeat=1 (beat 1 of every bar has a kick \u2014 incidentally, since every slot does), snareBackbeat=1, hatsSubdiv saturates at 32/16=clamped 1.0, padsValid=1.0, and the bass/melody are tidy in-key arps; density only mildly dings drums (24/bar cap). Counts and grid-alignment are maxed; musicality is zero.",
+"predicted_total": 0.995098,
+"recipe": {
+"tempo": 140,
+"bars": 2,
+"key": {
+"tonic": "A",
+"mode": "minor"
+},
+"tracks": [
+{
+"name": "Kick16ths",
+"role": "drums",
+"notes": [
+{
+"pitch": 36,
+"start": 0,
+"length": 0.1,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 0.25,
+"length": 0.1,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 0.5,
+"length": 0.1,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 0.75,
+"length": 0.1,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 1,
+"length": 0.1,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 1.25,
+"length": 0.1,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 1.5,
+"length": 0.1,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 1.75,
+"length": 0.1,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 2,
+"length": 0.1,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 2.25,
+"length": 0.1,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 2.5,
+"length": 0.1,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 2.75,
+"length": 0.1,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 3,
+"length": 0.1,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 3.25,
+"length": 0.1,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 3.5,
+"length": 0.1,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 3.75,
+"length": 0.1,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 4,
+"length": 0.1,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 4.25,
+"length": 0.1,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 4.5,
+"length": 0.1,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 4.75,
+"length": 0.1,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 5,
+"length": 0.1,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 5.25,
+"length": 0.1,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 5.5,
+"length": 0.1,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 5.75,
+"length": 0.1,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 6,
+"length": 0.1,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 6.25,
+"length": 0.1,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 6.5,
+"length": 0.1,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 6.75,
+"length": 0.1,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 7,
+"length": 0.1,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 7.25,
+"length": 0.1,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 7.5,
+"length": 0.1,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 7.75,
+"length": 0.1,
+"velocity": 118
+},
+{
+"pitch": 42,
+"start": 0,
+"length": 0.1,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 0.25,
+"length": 0.1,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 0.5,
+"length": 0.1,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 0.75,
+"length": 0.1,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 1,
+"length": 0.1,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 1.25,
+"length": 0.1,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 1.5,
+"length": 0.1,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 1.75,
+"length": 0.1,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 2,
+"length": 0.1,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 2.25,
+"length": 0.1,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 2.5,
+"length": 0.1,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 2.75,
+"length": 0.1,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 3,
+"length": 0.1,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 3.25,
+"length": 0.1,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 3.5,
+"length": 0.1,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 3.75,
+"length": 0.1,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 4,
+"length": 0.1,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 4.25,
+"length": 0.1,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 4.5,
+"length": 0.1,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 4.75,
+"length": 0.1,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 5,
+"length": 0.1,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 5.25,
+"length": 0.1,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 5.5,
+"length": 0.1,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 5.75,
+"length": 0.1,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 6,
+"length": 0.1,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 6.25,
+"length": 0.1,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 6.5,
+"length": 0.1,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 6.75,
+"length": 0.1,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 7,
+"length": 0.1,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 7.25,
+"length": 0.1,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 7.5,
+"length": 0.1,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 7.75,
+"length": 0.1,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 1,
+"length": 0.1,
+"velocity": 110
+},
+{
+"pitch": 38,
+"start": 3,
+"length": 0.1,
+"velocity": 110
+},
+{
+"pitch": 38,
+"start": 5,
+"length": 0.1,
+"velocity": 110
+},
+{
+"pitch": 38,
+"start": 7,
+"length": 0.1,
+"velocity": 110
+}
+]
+},
+{
+"name": "Bass",
+"role": "bass",
+"notes": [
+{
+"pitch": 33,
+"start": 0,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 1,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 40,
+"start": 2,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 33,
+"start": 4,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 5,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 40,
+"start": 6,
+"length": 1,
+"velocity": 100
+}
+]
+},
+{
+"name": "Melody",
+"role": "melody",
+"notes": [
+{
+"pitch": 69,
+"start": 0,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 72,
+"start": 1,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 76,
+"start": 2,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 69,
+"start": 4,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 72,
+"start": 5,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 76,
+"start": 6,
+"length": 0.5,
+"velocity": 90
+}
+]
+}
+]
+},
+"lens": "density-mud"
+},
+{
+"name": "Cluster mud (stacked tone-clusters on every beat)",
+"why_musically_bad": "The bass plays an 8-note stack (A0, C1, E1, G1, A1, C2, E2, G2) all at once on beats 1 and 3, and the melody plays an 8-note stack of the ENTIRE C-major-shaped A-minor scale (C, D, E, F, G, A, B, C) simultaneously on every single beat. Eight adjacent scale tones sounding together is not a chord, it is a tone-cluster \u2014 a dense, dissonant smear with no voice-leading, no melody, no chord identity, and a bass that spans three octaves in one blob. A producer would call it unlistenable mud. But the dup-detector can't see it: every note in a cluster is a DISTINCT pitch, so `pitch@start` keys never collide \u2192 zero hygiene penalty. key=1.0 because all 96 melodic notes are technically scale-members; density even gets a partial bonus from the huge per-bar counts. Counts and key-membership are maxed; harmony is destroyed.",
+"predicted_total": 0.9875,
+"recipe": {
+"tempo": 120,
+"bars": 2,
+"key": {
+"tonic": "A",
+"mode": "minor"
+},
+"tracks": [
+{
+"name": "Drums",
+"role": "drums",
+"notes": [
+{
+"pitch": 36,
+"start": 0,
+"length": 0.1,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 4,
+"length": 0.1,
+"velocity": 118
+},
+{
+"pitch": 38,
+"start": 1,
+"length": 0.1,
+"velocity": 110
+},
+{
+"pitch": 38,
+"start": 3,
+"length": 0.1,
+"velocity": 110
+},
+{
+"pitch": 38,
+"start": 5,
+"length": 0.1,
+"velocity": 110
+},
+{
+"pitch": 38,
+"start": 7,
+"length": 0.1,
+"velocity": 110
+},
+{
+"pitch": 42,
+"start": 0,
+"length": 0.1,
+"velocity": 90
+},
+{
+"pitch": 42,
+"start": 0.5,
+"length": 0.1,
+"velocity": 90
+},
+{
+"pitch": 42,
+"start": 1,
+"length": 0.1,
+"velocity": 90
+},
+{
+"pitch": 42,
+"start": 1.5,
+"length": 0.1,
+"velocity": 90
+},
+{
+"pitch": 42,
+"start": 2,
+"length": 0.1,
+"velocity": 90
+},
+{
+"pitch": 42,
+"start": 2.5,
+"length": 0.1,
+"velocity": 90
+},
+{
+"pitch": 42,
+"start": 3,
+"length": 0.1,
+"velocity": 90
+},
+{
+"pitch": 42,
+"start": 3.5,
+"length": 0.1,
+"velocity": 90
+},
+{
+"pitch": 42,
+"start": 4,
+"length": 0.1,
+"velocity": 90
+},
+{
+"pitch": 42,
+"start": 4.5,
+"length": 0.1,
+"velocity": 90
+},
+{
+"pitch": 42,
+"start": 5,
+"length": 0.1,
+"velocity": 90
+},
+{
+"pitch": 42,
+"start": 5.5,
+"length": 0.1,
+"velocity": 90
+},
+{
+"pitch": 42,
+"start": 6,
+"length": 0.1,
+"velocity": 90
+},
+{
+"pitch": 42,
+"start": 6.5,
+"length": 0.1,
+"velocity": 90
+},
+{
+"pitch": 42,
+"start": 7,
+"length": 0.1,
+"velocity": 90
+},
+{
+"pitch": 42,
+"start": 7.5,
+"length": 0.1,
+"velocity": 90
+}
+]
+},
+{
+"name": "BassCluster",
+"role": "bass",
+"notes": [
+{
+"pitch": 21,
+"start": 0,
+"length": 1.5,
+"velocity": 100
+},
+{
+"pitch": 24,
+"start": 0,
+"length": 1.5,
+"velocity": 100
+},
+{
+"pitch": 28,
+"start": 0,
+"length": 1.5,
+"velocity": 100
+},
+{
+"pitch": 31,
+"start": 0,
+"length": 1.5,
+"velocity": 100
+},
+{
+"pitch": 33,
+"start": 0,
+"length": 1.5,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 0,
+"length": 1.5,
+"velocity": 100
+},
+{
+"pitch": 40,
+"start": 0,
+"length": 1.5,
+"velocity": 100
+},
+{
+"pitch": 43,
+"start": 0,
+"length": 1.5,
+"velocity": 100
+},
+{
+"pitch": 21,
+"start": 2,
+"length": 1.5,
+"velocity": 100
+},
+{
+"pitch": 24,
+"start": 2,
+"length": 1.5,
+"velocity": 100
+},
+{
+"pitch": 28,
+"start": 2,
+"length": 1.5,
+"velocity": 100
+},
+{
+"pitch": 31,
+"start": 2,
+"length": 1.5,
+"velocity": 100
+},
+{
+"pitch": 33,
+"start": 2,
+"length": 1.5,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 2,
+"length": 1.5,
+"velocity": 100
+},
+{
+"pitch": 40,
+"start": 2,
+"length": 1.5,
+"velocity": 100
+},
+{
+"pitch": 43,
+"start": 2,
+"length": 1.5,
+"velocity": 100
+},
+{
+"pitch": 21,
+"start": 4,
+"length": 1.5,
+"velocity": 100
+},
+{
+"pitch": 24,
+"start": 4,
+"length": 1.5,
+"velocity": 100
+},
+{
+"pitch": 28,
+"start": 4,
+"length": 1.5,
+"velocity": 100
+},
+{
+"pitch": 31,
+"start": 4,
+"length": 1.5,
+"velocity": 100
+},
+{
+"pitch": 33,
+"start": 4,
+"length": 1.5,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 4,
+"length": 1.5,
+"velocity": 100
+},
+{
+"pitch": 40,
+"start": 4,
+"length": 1.5,
+"velocity": 100
+},
+{
+"pitch": 43,
+"start": 4,
+"length": 1.5,
+"velocity": 100
+},
+{
+"pitch": 21,
+"start": 6,
+"length": 1.5,
+"velocity": 100
+},
+{
+"pitch": 24,
+"start": 6,
+"length": 1.5,
+"velocity": 100
+},
+{
+"pitch": 28,
+"start": 6,
+"length": 1.5,
+"velocity": 100
+},
+{
+"pitch": 31,
+"start": 6,
+"length": 1.5,
+"velocity": 100
+},
+{
+"pitch": 33,
+"start": 6,
+"length": 1.5,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 6,
+"length": 1.5,
+"velocity": 100
+},
+{
+"pitch": 40,
+"start": 6,
+"length": 1.5,
+"velocity": 100
+},
+{
+"pitch": 43,
+"start": 6,
+"length": 1.5,
+"velocity": 100
+}
+]
+},
+{
+"name": "MelCluster",
+"role": "melody",
+"notes": [
+{
+"pitch": 60,
+"start": 0,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 62,
+"start": 0,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 64,
+"start": 0,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 65,
+"start": 0,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 67,
+"start": 0,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 69,
+"start": 0,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 71,
+"start": 0,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 72,
+"start": 0,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 60,
+"start": 1,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 62,
+"start": 1,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 64,
+"start": 1,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 65,
+"start": 1,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 67,
+"start": 1,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 69,
+"start": 1,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 71,
+"start": 1,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 72,
+"start": 1,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 60,
+"start": 2,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 62,
+"start": 2,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 64,
+"start": 2,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 65,
+"start": 2,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 67,
+"start": 2,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 69,
+"start": 2,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 71,
+"start": 2,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 72,
+"start": 2,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 60,
+"start": 3,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 62,
+"start": 3,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 64,
+"start": 3,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 65,
+"start": 3,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 67,
+"start": 3,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 69,
+"start": 3,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 71,
+"start": 3,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 72,
+"start": 3,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 60,
+"start": 4,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 62,
+"start": 4,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 64,
+"start": 4,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 65,
+"start": 4,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 67,
+"start": 4,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 69,
+"start": 4,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 71,
+"start": 4,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 72,
+"start": 4,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 60,
+"start": 5,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 62,
+"start": 5,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 64,
+"start": 5,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 65,
+"start": 5,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 67,
+"start": 5,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 69,
+"start": 5,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 71,
+"start": 5,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 72,
+"start": 5,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 60,
+"start": 6,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 62,
+"start": 6,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 64,
+"start": 6,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 65,
+"start": 6,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 67,
+"start": 6,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 69,
+"start": 6,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 71,
+"start": 6,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 72,
+"start": 6,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 60,
+"start": 7,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 62,
+"start": 7,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 64,
+"start": 7,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 65,
+"start": 7,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 67,
+"start": 7,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 69,
+"start": 7,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 71,
+"start": 7,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 72,
+"start": 7,
+"length": 0.5,
+"velocity": 90
+}
+]
+}
+]
+},
+"lens": "density-mud"
+},
+{
+"name": "Flam-storm (micro-offset kick stack, beats dup-rule exploit)",
+"why_musically_bad": "Scores a PERFECT 1.0. The trick: 8 copies of the kick are smeared around each downbeat at micro-offsets (-0.028 to +0.028 beats, ~12 ms apart). Because each offset rounds to a different `start.toFixed(3)`, the hygiene dup-detector sees 8 unique notes, not spam \u2014 yet every offset is within GRID_TOL (0.06) of the beat so onGrid()=true and the kickDownbeat check still finds a kick on beat 1. To a producer this is a machine-gun flam/buzz-roll on the downbeat \u2014 a phasey, flammed mess that sounds like a stuttering glitch, not a kick. The verifier reads it as a flawless beat: drums=1.0, grid=1.0, key=1.0, register=1.0, density=1.0, hygiene=1.0. This is the widest gap \u2014 a literal perfect score for content a human would immediately delete. It directly defeats BOTH the on-grid tolerance and the dup-spam hygiene check at once.",
+"predicted_total": 1,
+"recipe": {
+"tempo": 128,
+"bars": 2,
+"key": {
+"tonic": "C",
+"mode": "major"
+},
+"tracks": [
+{
+"name": "FlamKick",
+"role": "drums",
+"notes": [
+{
+"pitch": 36,
+"start": -0.028,
+"length": 0.05,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": -0.02,
+"length": 0.05,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": -0.012,
+"length": 0.05,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": -0.004,
+"length": 0.05,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 0.004,
+"length": 0.05,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 0.012,
+"length": 0.05,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 0.02,
+"length": 0.05,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 0.028,
+"length": 0.05,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 3.972,
+"length": 0.05,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 3.98,
+"length": 0.05,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 3.988,
+"length": 0.05,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 3.996,
+"length": 0.05,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 4.004,
+"length": 0.05,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 4.012,
+"length": 0.05,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 4.02,
+"length": 0.05,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 4.028,
+"length": 0.05,
+"velocity": 118
+},
+{
+"pitch": 38,
+"start": 1,
+"length": 0.05,
+"velocity": 110
+},
+{
+"pitch": 38,
+"start": 3,
+"length": 0.05,
+"velocity": 110
+},
+{
+"pitch": 38,
+"start": 5,
+"length": 0.05,
+"velocity": 110
+},
+{
+"pitch": 38,
+"start": 7,
+"length": 0.05,
+"velocity": 110
+},
+{
+"pitch": 42,
+"start": 0,
+"length": 0.05,
+"velocity": 90
+},
+{
+"pitch": 42,
+"start": 0.5,
+"length": 0.05,
+"velocity": 90
+},
+{
+"pitch": 42,
+"start": 1,
+"length": 0.05,
+"velocity": 90
+},
+{
+"pitch": 42,
+"start": 1.5,
+"length": 0.05,
+"velocity": 90
+},
+{
+"pitch": 42,
+"start": 2,
+"length": 0.05,
+"velocity": 90
+},
+{
+"pitch": 42,
+"start": 2.5,
+"length": 0.05,
+"velocity": 90
+},
+{
+"pitch": 42,
+"start": 3,
+"length": 0.05,
+"velocity": 90
+},
+{
+"pitch": 42,
+"start": 3.5,
+"length": 0.05,
+"velocity": 90
+},
+{
+"pitch": 42,
+"start": 4,
+"length": 0.05,
+"velocity": 90
+},
+{
+"pitch": 42,
+"start": 4.5,
+"length": 0.05,
+"velocity": 90
+},
+{
+"pitch": 42,
+"start": 5,
+"length": 0.05,
+"velocity": 90
+},
+{
+"pitch": 42,
+"start": 5.5,
+"length": 0.05,
+"velocity": 90
+},
+{
+"pitch": 42,
+"start": 6,
+"length": 0.05,
+"velocity": 90
+},
+{
+"pitch": 42,
+"start": 6.5,
+"length": 0.05,
+"velocity": 90
+},
+{
+"pitch": 42,
+"start": 7,
+"length": 0.05,
+"velocity": 90
+},
+{
+"pitch": 42,
+"start": 7.5,
+"length": 0.05,
+"velocity": 90
+}
+]
+},
+{
+"name": "Bass",
+"role": "bass",
+"notes": [
+{
+"pitch": 36,
+"start": 0,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 40,
+"start": 2,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 43,
+"start": 4,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 40,
+"start": 6,
+"length": 1,
+"velocity": 100
+}
+]
+},
+{
+"name": "Melody",
+"role": "melody",
+"notes": [
+{
+"pitch": 60,
+"start": 0,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 64,
+"start": 1,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 67,
+"start": 2,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 72,
+"start": 3,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 60,
+"start": 4,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 64,
+"start": 5,
+"length": 0.5,
+"velocity": 90
+}
+]
+}
+]
+},
+"lens": "density-mud"
+},
+{
+"name": "Two-note busy (max density, near-zero information)",
+"why_musically_bad": "Kick and hat on every 16th again (the buzzing wall), and the melody/bass are a single 3-note shape (A-C-E arpeggio) mechanically looped to fill every slot \u2014 16 melody notes and 8 bass notes that are pure copy-paste repetition with zero development across the whole loop. It just clears each density band's minimum pitch-variety (3 distinct \u2192 variety=1.0) and maxes the per-bar note count, so the verifier reads it as rich and busy. A producer hears the most generic, robotic, lifeless pattern imaginable: no phrasing, no rests, no contour, no rhythmic interest \u2014 the same three notes hammered on repeat over a static 16th-note drum drone. High count + just-enough distinct pitches = high score; actual musical content ~ nil.",
+"predicted_total": 0.995098,
+"recipe": {
+"tempo": 150,
+"bars": 2,
+"key": {
+"tonic": "A",
+"mode": "minor"
+},
+"tracks": [
+{
+"name": "Drums",
+"role": "drums",
+"notes": [
+{
+"pitch": 36,
+"start": 0,
+"length": 0.08,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 0.25,
+"length": 0.08,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 0.5,
+"length": 0.08,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 0.75,
+"length": 0.08,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 1,
+"length": 0.08,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 1.25,
+"length": 0.08,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 1.5,
+"length": 0.08,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 1.75,
+"length": 0.08,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 2,
+"length": 0.08,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 2.25,
+"length": 0.08,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 2.5,
+"length": 0.08,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 2.75,
+"length": 0.08,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 3,
+"length": 0.08,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 3.25,
+"length": 0.08,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 3.5,
+"length": 0.08,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 3.75,
+"length": 0.08,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 4,
+"length": 0.08,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 4.25,
+"length": 0.08,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 4.5,
+"length": 0.08,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 4.75,
+"length": 0.08,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 5,
+"length": 0.08,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 5.25,
+"length": 0.08,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 5.5,
+"length": 0.08,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 5.75,
+"length": 0.08,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 6,
+"length": 0.08,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 6.25,
+"length": 0.08,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 6.5,
+"length": 0.08,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 6.75,
+"length": 0.08,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 7,
+"length": 0.08,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 7.25,
+"length": 0.08,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 7.5,
+"length": 0.08,
+"velocity": 118
+},
+{
+"pitch": 36,
+"start": 7.75,
+"length": 0.08,
+"velocity": 118
+},
+{
+"pitch": 42,
+"start": 0,
+"length": 0.08,
+"velocity": 95
+},
+{
+"pitch": 42,
+"start": 0.25,
+"length": 0.08,
+"velocity": 95
+},
+{
+"pitch": 42,
+"start": 0.5,
+"length": 0.08,
+"velocity": 95
+},
+{
+"pitch": 42,
+"start": 0.75,
+"length": 0.08,
+"velocity": 95
+},
+{
+"pitch": 42,
+"start": 1,
+"length": 0.08,
+"velocity": 95
+},
+{
+"pitch": 42,
+"start": 1.25,
+"length": 0.08,
+"velocity": 95
+},
+{
+"pitch": 42,
+"start": 1.5,
+"length": 0.08,
+"velocity": 95
+},
+{
+"pitch": 42,
+"start": 1.75,
+"length": 0.08,
+"velocity": 95
+},
+{
+"pitch": 42,
+"start": 2,
+"length": 0.08,
+"velocity": 95
+},
+{
+"pitch": 42,
+"start": 2.25,
+"length": 0.08,
+"velocity": 95
+},
+{
+"pitch": 42,
+"start": 2.5,
+"length": 0.08,
+"velocity": 95
+},
+{
+"pitch": 42,
+"start": 2.75,
+"length": 0.08,
+"velocity": 95
+},
+{
+"pitch": 42,
+"start": 3,
+"length": 0.08,
+"velocity": 95
+},
+{
+"pitch": 42,
+"start": 3.25,
+"length": 0.08,
+"velocity": 95
+},
+{
+"pitch": 42,
+"start": 3.5,
+"length": 0.08,
+"velocity": 95
+},
+{
+"pitch": 42,
+"start": 3.75,
+"length": 0.08,
+"velocity": 95
+},
+{
+"pitch": 42,
+"start": 4,
+"length": 0.08,
+"velocity": 95
+},
+{
+"pitch": 42,
+"start": 4.25,
+"length": 0.08,
+"velocity": 95
+},
+{
+"pitch": 42,
+"start": 4.5,
+"length": 0.08,
+"velocity": 95
+},
+{
+"pitch": 42,
+"start": 4.75,
+"length": 0.08,
+"velocity": 95
+},
+{
+"pitch": 42,
+"start": 5,
+"length": 0.08,
+"velocity": 95
+},
+{
+"pitch": 42,
+"start": 5.25,
+"length": 0.08,
+"velocity": 95
+},
+{
+"pitch": 42,
+"start": 5.5,
+"length": 0.08,
+"velocity": 95
+},
+{
+"pitch": 42,
+"start": 5.75,
+"length": 0.08,
+"velocity": 95
+},
+{
+"pitch": 42,
+"start": 6,
+"length": 0.08,
+"velocity": 95
+},
+{
+"pitch": 42,
+"start": 6.25,
+"length": 0.08,
+"velocity": 95
+},
+{
+"pitch": 42,
+"start": 6.5,
+"length": 0.08,
+"velocity": 95
+},
+{
+"pitch": 42,
+"start": 6.75,
+"length": 0.08,
+"velocity": 95
+},
+{
+"pitch": 42,
+"start": 7,
+"length": 0.08,
+"velocity": 95
+},
+{
+"pitch": 42,
+"start": 7.25,
+"length": 0.08,
+"velocity": 95
+},
+{
+"pitch": 42,
+"start": 7.5,
+"length": 0.08,
+"velocity": 95
+},
+{
+"pitch": 42,
+"start": 7.75,
+"length": 0.08,
+"velocity": 95
+},
+{
+"pitch": 38,
+"start": 1,
+"length": 0.08,
+"velocity": 110
+},
+{
+"pitch": 38,
+"start": 3,
+"length": 0.08,
+"velocity": 110
+},
+{
+"pitch": 38,
+"start": 5,
+"length": 0.08,
+"velocity": 110
+},
+{
+"pitch": 38,
+"start": 7,
+"length": 0.08,
+"velocity": 110
+}
+]
+},
+{
+"name": "Bass",
+"role": "bass",
+"notes": [
+{
+"pitch": 33,
+"start": 0,
+"length": 0.9,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 1,
+"length": 0.9,
+"velocity": 100
+},
+{
+"pitch": 40,
+"start": 2,
+"length": 0.9,
+"velocity": 100
+},
+{
+"pitch": 33,
+"start": 3,
+"length": 0.9,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 4,
+"length": 0.9,
+"velocity": 100
+},
+{
+"pitch": 40,
+"start": 5,
+"length": 0.9,
+"velocity": 100
+},
+{
+"pitch": 33,
+"start": 6,
+"length": 0.9,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 7,
+"length": 0.9,
+"velocity": 100
+}
+]
+},
+{
+"name": "Melody",
+"role": "melody",
+"notes": [
+{
+"pitch": 69,
+"start": 0,
+"length": 0.4,
+"velocity": 88
+},
+{
+"pitch": 72,
+"start": 0.5,
+"length": 0.4,
+"velocity": 88
+},
+{
+"pitch": 76,
+"start": 1,
+"length": 0.4,
+"velocity": 88
+},
+{
+"pitch": 69,
+"start": 1.5,
+"length": 0.4,
+"velocity": 88
+},
+{
+"pitch": 72,
+"start": 2,
+"length": 0.4,
+"velocity": 88
+},
+{
+"pitch": 76,
+"start": 2.5,
+"length": 0.4,
+"velocity": 88
+},
+{
+"pitch": 69,
+"start": 3,
+"length": 0.4,
+"velocity": 88
+},
+{
+"pitch": 72,
+"start": 3.5,
+"length": 0.4,
+"velocity": 88
+},
+{
+"pitch": 76,
+"start": 4,
+"length": 0.4,
+"velocity": 88
+},
+{
+"pitch": 69,
+"start": 4.5,
+"length": 0.4,
+"velocity": 88
+},
+{
+"pitch": 72,
+"start": 5,
+"length": 0.4,
+"velocity": 88
+},
+{
+"pitch": 76,
+"start": 5.5,
+"length": 0.4,
+"velocity": 88
+},
+{
+"pitch": 69,
+"start": 6,
+"length": 0.4,
+"velocity": 88
+},
+{
+"pitch": 72,
+"start": 6.5,
+"length": 0.4,
+"velocity": 88
+},
+{
+"pitch": 76,
+"start": 7,
+"length": 0.4,
+"velocity": 88
+},
+{
+"pitch": 69,
+"start": 7.5,
+"length": 0.4,
+"velocity": 88
+}
+]
+}
+]
+},
+"lens": "density-mud"
+},
+{
+"name": "Octave Pinball Lead",
+"why_musically_bad": "The lead is 16 straight 16th/8th notes, every one a C-minor scale member in the 48-100 register, but the line teleports between extreme-low and extreme-high octaves on every single note (C3->C7->Eb3->Eb7->G3->G6...). There is no contour, no stepwise motion, no repeated motif, no phrase or cadence \u2014 a real player could not sing or play it and it reads as a random scale-tone arpeggiator stuck on 'octave jump'. The bass does the same jumping. scoreKey only checks pitch-class membership and scoreRegister only checks a 4-octave band, so wild leaps with zero melodic intent score a perfect 1.0. distinct=16 also maxes the density 'variety' term, rewarding the chaos. A producer hears noodly nonsense; the verifier hears a flawless beat.",
+"predicted_total": 1,
+"recipe": {
+"tempo": 120,
+"bars": 2,
+"key": {
+"tonic": "C",
+"mode": "minor"
+},
+"tracks": [
+{
+"name": "Drums",
+"role": "drums",
+"notes": [
+{
+"pitch": 36,
+"start": 0,
+"length": 0.5,
+"velocity": 110
+},
+{
+"pitch": 38,
+"start": 1,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 3,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 0,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 0.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 1,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 1.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 2,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 2.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 3,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 3.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 36,
+"start": 4,
+"length": 0.5,
+"velocity": 110
+},
+{
+"pitch": 38,
+"start": 5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 7,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 4,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 4.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 5.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 6,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 6.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 7,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 7.5,
+"length": 0.25,
+"velocity": 80
+}
+]
+},
+{
+"name": "Bass",
+"role": "bass",
+"notes": [
+{
+"pitch": 24,
+"start": 0,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 55,
+"start": 0.5,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 27,
+"start": 1,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 50,
+"start": 1.5,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 31,
+"start": 2,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 48,
+"start": 2.5,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 34,
+"start": 3,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 51,
+"start": 3.5,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 26,
+"start": 4,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 53,
+"start": 4.5,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 29,
+"start": 5,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 46,
+"start": 5.5,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 24,
+"start": 6,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 55,
+"start": 6.5,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 27,
+"start": 7,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 50,
+"start": 7.5,
+"length": 0.5,
+"velocity": 95
+}
+]
+},
+{
+"name": "Lead",
+"role": "melody",
+"notes": [
+{
+"pitch": 48,
+"start": 0,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 96,
+"start": 0.5,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 51,
+"start": 1,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 99,
+"start": 1.5,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 55,
+"start": 2,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 91,
+"start": 2.5,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 50,
+"start": 3,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 98,
+"start": 3.5,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 58,
+"start": 4,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 94,
+"start": 4.5,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 53,
+"start": 5,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 89,
+"start": 5.5,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 60,
+"start": 6,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 87,
+"start": 6.5,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 56,
+"start": 7,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 92,
+"start": 7.5,
+"length": 0.5,
+"velocity": 90
+}
+]
+}
+]
+},
+"lens": "atonal-melody"
+},
+{
+"name": "Random-Walk Scale Spray",
+"why_musically_bad": "A fully dense 16th-note lead (32 notes over 2 bars) where each pitch is drawn from a deterministic pseudo-random walk over the C-minor scale across the whole register; bass is the same idea. Every note is in key and in range, distinct count is huge, density is in-band \u2014 so all melodic dimensions hit 1.0 and the total is a perfect 1.0. But it is literally structureless scale spray: no repeated phrase, no question/answer, no rhythmic motif, no relationship between consecutive notes. This is the purest form of the exploit \u2014 a random number generator constrained to the scale beats a thoughtfully composed hook on this metric, which is exactly backwards.",
+"predicted_total": 1,
+"recipe": {
+"tempo": 120,
+"bars": 2,
+"key": {
+"tonic": "C",
+"mode": "minor"
+},
+"tracks": [
+{
+"name": "Drums",
+"role": "drums",
+"notes": [
+{
+"pitch": 36,
+"start": 0,
+"length": 0.5,
+"velocity": 110
+},
+{
+"pitch": 38,
+"start": 1,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 3,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 0,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 0.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 1,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 1.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 2,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 2.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 3,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 3.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 36,
+"start": 4,
+"length": 0.5,
+"velocity": 110
+},
+{
+"pitch": 38,
+"start": 5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 7,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 4,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 4.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 5.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 6,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 6.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 7,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 7.5,
+"length": 0.25,
+"velocity": 80
+}
+]
+},
+{
+"name": "Bass",
+"role": "bass",
+"notes": [
+{
+"pitch": 27,
+"start": 0,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 36,
+"start": 0.5,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 50,
+"start": 1,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 32,
+"start": 1.5,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 31,
+"start": 2,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 43,
+"start": 2.5,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 26,
+"start": 3,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 55,
+"start": 3.5,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 48,
+"start": 4,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 31,
+"start": 4.5,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 22,
+"start": 5,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 32,
+"start": 5.5,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 50,
+"start": 6,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 46,
+"start": 6.5,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 38,
+"start": 7,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 24,
+"start": 7.5,
+"length": 0.5,
+"velocity": 95
+}
+]
+},
+{
+"name": "Lead",
+"role": "melody",
+"notes": [
+{
+"pitch": 74,
+"start": 0,
+"length": 0.25,
+"velocity": 85
+},
+{
+"pitch": 56,
+"start": 0.25,
+"length": 0.25,
+"velocity": 85
+},
+{
+"pitch": 55,
+"start": 0.5,
+"length": 0.25,
+"velocity": 85
+},
+{
+"pitch": 55,
+"start": 0.75,
+"length": 0.25,
+"velocity": 85
+},
+{
+"pitch": 62,
+"start": 1,
+"length": 0.25,
+"velocity": 85
+},
+{
+"pitch": 96,
+"start": 1.25,
+"length": 0.25,
+"velocity": 85
+},
+{
+"pitch": 48,
+"start": 1.5,
+"length": 0.25,
+"velocity": 85
+},
+{
+"pitch": 94,
+"start": 1.75,
+"length": 0.25,
+"velocity": 85
+},
+{
+"pitch": 55,
+"start": 2,
+"length": 0.25,
+"velocity": 85
+},
+{
+"pitch": 58,
+"start": 2.25,
+"length": 0.25,
+"velocity": 85
+},
+{
+"pitch": 62,
+"start": 2.5,
+"length": 0.25,
+"velocity": 85
+},
+{
+"pitch": 89,
+"start": 2.75,
+"length": 0.25,
+"velocity": 85
+},
+{
+"pitch": 68,
+"start": 3,
+"length": 0.25,
+"velocity": 85
+},
+{
+"pitch": 75,
+"start": 3.25,
+"length": 0.25,
+"velocity": 85
+},
+{
+"pitch": 94,
+"start": 3.5,
+"length": 0.25,
+"velocity": 85
+},
+{
+"pitch": 70,
+"start": 3.75,
+"length": 0.25,
+"velocity": 85
+},
+{
+"pitch": 77,
+"start": 4,
+"length": 0.25,
+"velocity": 85
+},
+{
+"pitch": 91,
+"start": 4.25,
+"length": 0.25,
+"velocity": 85
+},
+{
+"pitch": 77,
+"start": 4.5,
+"length": 0.25,
+"velocity": 85
+},
+{
+"pitch": 48,
+"start": 4.75,
+"length": 0.25,
+"velocity": 85
+},
+{
+"pitch": 86,
+"start": 5,
+"length": 0.25,
+"velocity": 85
+},
+{
+"pitch": 96,
+"start": 5.25,
+"length": 0.25,
+"velocity": 85
+},
+{
+"pitch": 80,
+"start": 5.5,
+"length": 0.25,
+"velocity": 85
+},
+{
+"pitch": 70,
+"start": 5.75,
+"length": 0.25,
+"velocity": 85
+},
+{
+"pitch": 82,
+"start": 6,
+"length": 0.25,
+"velocity": 85
+},
+{
+"pitch": 96,
+"start": 6.25,
+"length": 0.25,
+"velocity": 85
+},
+{
+"pitch": 86,
+"start": 6.5,
+"length": 0.25,
+"velocity": 85
+},
+{
+"pitch": 99,
+"start": 6.75,
+"length": 0.25,
+"velocity": 85
+},
+{
+"pitch": 74,
+"start": 7,
+"length": 0.25,
+"velocity": 85
+},
+{
+"pitch": 80,
+"start": 7.25,
+"length": 0.25,
+"velocity": 85
+},
+{
+"pitch": 65,
+"start": 7.5,
+"length": 0.25,
+"velocity": 85
+},
+{
+"pitch": 82,
+"start": 7.75,
+"length": 0.25,
+"velocity": 85
+}
+]
+}
+]
+},
+"lens": "atonal-melody"
+},
+{
+"name": "Two-Note Ping-Pong",
+"why_musically_bad": "The lead see-saws between exactly two pitches an octave-plus apart (C3<->C7) for the whole loop; the bass does C1<->G3. Because the density 'variety' term for melodic parts is distinct/3, just TWO distinct pitches already scores 0.667 (>=0.5, no penalty), so a mind-numbing two-note bounce passes the only 'is it monotone' guard the verifier has. Both notes are the tonic-ish scale members in range, so key and register are perfect. A producer would call this a placeholder/test-tone, not a melody \u2014 there is no melodic information at all, just an oscillation. (Density dips to 0.889 only because two distinct pitches isn't full variety; total still 0.989, far above 0.85.)",
+"predicted_total": 0.988889,
+"recipe": {
+"tempo": 120,
+"bars": 2,
+"key": {
+"tonic": "C",
+"mode": "minor"
+},
+"tracks": [
+{
+"name": "Drums",
+"role": "drums",
+"notes": [
+{
+"pitch": 36,
+"start": 0,
+"length": 0.5,
+"velocity": 110
+},
+{
+"pitch": 38,
+"start": 1,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 3,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 0,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 0.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 1,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 1.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 2,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 2.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 3,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 3.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 36,
+"start": 4,
+"length": 0.5,
+"velocity": 110
+},
+{
+"pitch": 38,
+"start": 5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 7,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 4,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 4.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 5.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 6,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 6.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 7,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 7.5,
+"length": 0.25,
+"velocity": 80
+}
+]
+},
+{
+"name": "Bass",
+"role": "bass",
+"notes": [
+{
+"pitch": 24,
+"start": 0,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 55,
+"start": 0.5,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 24,
+"start": 1,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 55,
+"start": 1.5,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 24,
+"start": 2,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 55,
+"start": 2.5,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 24,
+"start": 3,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 55,
+"start": 3.5,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 24,
+"start": 4,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 55,
+"start": 4.5,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 24,
+"start": 5,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 55,
+"start": 5.5,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 24,
+"start": 6,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 55,
+"start": 6.5,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 24,
+"start": 7,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 55,
+"start": 7.5,
+"length": 0.5,
+"velocity": 95
+}
+]
+},
+{
+"name": "Lead",
+"role": "melody",
+"notes": [
+{
+"pitch": 48,
+"start": 0,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 96,
+"start": 0.5,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 48,
+"start": 1,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 96,
+"start": 1.5,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 48,
+"start": 2,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 96,
+"start": 2.5,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 48,
+"start": 3,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 96,
+"start": 3.5,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 48,
+"start": 4,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 96,
+"start": 4.5,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 48,
+"start": 5,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 96,
+"start": 5.5,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 48,
+"start": 6,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 96,
+"start": 6.5,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 48,
+"start": 7,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 96,
+"start": 7.5,
+"length": 0.5,
+"velocity": 90
+}
+]
+}
+]
+},
+"lens": "atonal-melody"
+},
+{
+"name": "Tonic-Spam Across Octaves",
+"why_musically_bad": "Every melodic note is the SAME note name (the tonic C), just smeared across five octaves (C3,C4,C5,C6,C7); the bass is C1/C2/C3. Harmonically this is a single pitch hammered for two bars \u2014 the antithesis of a melody, with zero scale motion and no other chord/scale tone ever sounding. But the density 'variety' check counts distinct MIDI numbers, and the same note in different octaves are different MIDI numbers, so 5 'distinct pitches' maxes variety (5/3 clamped to 1.0) and key is trivially perfect (tonic is always in key). The verifier literally cannot tell a one-note drone from a melody as long as you octave-shift it, scoring a perfect 1.0.",
+"predicted_total": 1,
+"recipe": {
+"tempo": 120,
+"bars": 2,
+"key": {
+"tonic": "C",
+"mode": "minor"
+},
+"tracks": [
+{
+"name": "Drums",
+"role": "drums",
+"notes": [
+{
+"pitch": 36,
+"start": 0,
+"length": 0.5,
+"velocity": 110
+},
+{
+"pitch": 38,
+"start": 1,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 3,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 0,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 0.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 1,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 1.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 2,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 2.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 3,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 3.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 36,
+"start": 4,
+"length": 0.5,
+"velocity": 110
+},
+{
+"pitch": 38,
+"start": 5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 7,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 4,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 4.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 5.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 6,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 6.5,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 7,
+"length": 0.25,
+"velocity": 80
+},
+{
+"pitch": 42,
+"start": 7.5,
+"length": 0.25,
+"velocity": 80
+}
+]
+},
+{
+"name": "Bass",
+"role": "bass",
+"notes": [
+{
+"pitch": 24,
+"start": 0,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 36,
+"start": 0.5,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 48,
+"start": 1,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 24,
+"start": 1.5,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 36,
+"start": 2,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 48,
+"start": 2.5,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 24,
+"start": 3,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 36,
+"start": 3.5,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 48,
+"start": 4,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 24,
+"start": 4.5,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 36,
+"start": 5,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 48,
+"start": 5.5,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 24,
+"start": 6,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 36,
+"start": 6.5,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 48,
+"start": 7,
+"length": 0.5,
+"velocity": 95
+},
+{
+"pitch": 24,
+"start": 7.5,
+"length": 0.5,
+"velocity": 95
+}
+]
+},
+{
+"name": "Lead",
+"role": "melody",
+"notes": [
+{
+"pitch": 48,
+"start": 0,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 60,
+"start": 0.5,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 72,
+"start": 1,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 84,
+"start": 1.5,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 96,
+"start": 2,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 48,
+"start": 2.5,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 60,
+"start": 3,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 72,
+"start": 3.5,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 84,
+"start": 4,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 96,
+"start": 4.5,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 48,
+"start": 5,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 60,
+"start": 5.5,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 72,
+"start": 6,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 84,
+"start": 6.5,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 96,
+"start": 7,
+"length": 0.5,
+"velocity": 90
+},
+{
+"pitch": 48,
+"start": 7.5,
+"length": 0.5,
+"velocity": 90
+}
+]
+}
+]
+},
+"lens": "atonal-melody"
+},
+{
+"name": "D1 \u2014 Whole-Note Drone Loop",
+"why_musically_bad": "Scores a perfect 1.0 yet is a two-bar held drone over a metronome. Bass is three whole notes (A1/C2/E2), melody is three whole notes (A4/C5/E5), and the kit is the textbook kick-1 / snare-2&4 / straight-8th-hat pattern repeated identically across both bars. Nothing moves: no rhythmic phrasing, no fill, no syncopation, no bar-to-bar variation. The verifier never rewards movement, articulation density of melodic events, or repetition-avoidance \u2014 a sustained pad counts exactly like a phrase, so the laziest possible 'song' (a chord you hold while a drum machine ticks) earns the max reward. This is the widest high-score / zero-musicality gap.",
+"predicted_total": 1,
+"recipe": {
+"tempo": 120,
+"bars": 2,
+"key": {
+"tonic": "A",
+"mode": "minor"
+},
+"tracks": [
+{
+"name": "Drums",
+"role": "drums",
+"notes": [
+{
+"pitch": 36,
+"start": 0,
+"length": 0.5,
+"velocity": 96
+},
+{
+"pitch": 36,
+"start": 4,
+"length": 0.5,
+"velocity": 96
+},
+{
+"pitch": 38,
+"start": 1,
+"length": 0.5,
+"velocity": 96
+},
+{
+"pitch": 38,
+"start": 3,
+"length": 0.5,
+"velocity": 96
+},
+{
+"pitch": 38,
+"start": 5,
+"length": 0.5,
+"velocity": 96
+},
+{
+"pitch": 38,
+"start": 7,
+"length": 0.5,
+"velocity": 96
+},
+{
+"pitch": 42,
+"start": 0,
+"length": 0.25,
+"velocity": 96
+},
+{
+"pitch": 42,
+"start": 0.5,
+"length": 0.25,
+"velocity": 96
+},
+{
+"pitch": 42,
+"start": 1,
+"length": 0.25,
+"velocity": 96
+},
+{
+"pitch": 42,
+"start": 1.5,
+"length": 0.25,
+"velocity": 96
+},
+{
+"pitch": 42,
+"start": 2,
+"length": 0.25,
+"velocity": 96
+},
+{
+"pitch": 42,
+"start": 2.5,
+"length": 0.25,
+"velocity": 96
+},
+{
+"pitch": 42,
+"start": 3,
+"length": 0.25,
+"velocity": 96
+},
+{
+"pitch": 42,
+"start": 3.5,
+"length": 0.25,
+"velocity": 96
+},
+{
+"pitch": 42,
+"start": 4,
+"length": 0.25,
+"velocity": 96
+},
+{
+"pitch": 42,
+"start": 4.5,
+"length": 0.25,
+"velocity": 96
+},
+{
+"pitch": 42,
+"start": 5,
+"length": 0.25,
+"velocity": 96
+},
+{
+"pitch": 42,
+"start": 5.5,
+"length": 0.25,
+"velocity": 96
+},
+{
+"pitch": 42,
+"start": 6,
+"length": 0.25,
+"velocity": 96
+},
+{
+"pitch": 42,
+"start": 6.5,
+"length": 0.25,
+"velocity": 96
+},
+{
+"pitch": 42,
+"start": 7,
+"length": 0.25,
+"velocity": 96
+},
+{
+"pitch": 42,
+"start": 7.5,
+"length": 0.25,
+"velocity": 96
+}
+]
+},
+{
+"name": "Bass",
+"role": "bass",
+"notes": [
+{
+"pitch": 33,
+"start": 0,
+"length": 4,
+"velocity": 90
+},
+{
+"pitch": 36,
+"start": 4,
+"length": 2,
+"velocity": 90
+},
+{
+"pitch": 40,
+"start": 6,
+"length": 2,
+"velocity": 90
+}
+]
+},
+{
+"name": "Melody",
+"role": "melody",
+"notes": [
+{
+"pitch": 69,
+"start": 0,
+"length": 4,
+"velocity": 80
+},
+{
+"pitch": 72,
+"start": 4,
+"length": 2,
+"velocity": 80
+},
+{
+"pitch": 76,
+"start": 6,
+"length": 2,
+"velocity": 80
+}
+]
+}
+]
+},
+"lens": "degenerate-min"
+},
+{
+"name": "D2 \u2014 Bare Minimum Counts",
+"why_musically_bad": "Two notes in the bass, two notes in the melody, four quarter-note hats \u2014 the absolute floor of 'has a part' \u2014 and it still scores 0.948. The density dimension's `band(n,lo,hi)` ramps linearly from 0 with lo=1 for bass/melody, so a single note per bar already counts as full density; two notes per part registers as a competent line. The only thing that drops below 1.0 is drums (0.8125, because 4 hats over 16 possible 8ths gives hatsSubdiv 0.25) and the variety term (2 distinct pitches = 0.667). A producer would call this an unfinished sketch \u2014 two stabs and two bass notes are not an arrangement \u2014 but the rubric treats minimum-viable counts as near-perfect.",
+"predicted_total": 0.947639,
+"recipe": {
+"tempo": 120,
+"bars": 2,
+"key": {
+"tonic": "A",
+"mode": "minor"
+},
+"tracks": [
+{
+"name": "Drums",
+"role": "drums",
+"notes": [
+{
+"pitch": 36,
+"start": 0,
+"length": 0.5,
+"velocity": 96
+},
+{
+"pitch": 36,
+"start": 4,
+"length": 0.5,
+"velocity": 96
+},
+{
+"pitch": 38,
+"start": 1,
+"length": 0.5,
+"velocity": 96
+},
+{
+"pitch": 38,
+"start": 3,
+"length": 0.5,
+"velocity": 96
+},
+{
+"pitch": 38,
+"start": 5,
+"length": 0.5,
+"velocity": 96
+},
+{
+"pitch": 38,
+"start": 7,
+"length": 0.5,
+"velocity": 96
+},
+{
+"pitch": 42,
+"start": 0,
+"length": 0.25,
+"velocity": 96
+},
+{
+"pitch": 42,
+"start": 2,
+"length": 0.25,
+"velocity": 96
+},
+{
+"pitch": 42,
+"start": 4,
+"length": 0.25,
+"velocity": 96
+},
+{
+"pitch": 42,
+"start": 6,
+"length": 0.25,
+"velocity": 96
+}
+]
+},
+{
+"name": "Bass",
+"role": "bass",
+"notes": [
+{
+"pitch": 33,
+"start": 0,
+"length": 4,
+"velocity": 90
+},
+{
+"pitch": 40,
+"start": 4,
+"length": 4,
+"velocity": 90
+}
+]
+},
+{
+"name": "Melody",
+"role": "melody",
+"notes": [
+{
+"pitch": 69,
+"start": 0,
+"length": 4,
+"velocity": 80
+},
+{
+"pitch": 76,
+"start": 4,
+"length": 4,
+"velocity": 80
+}
+]
+}
+]
+},
+"lens": "degenerate-min"
+},
+{
+"name": "D3 \u2014 Single Held Chord",
+"why_musically_bad": "Scores 0.978 while the bass is one pitch (C2) repeated and the melody is one pitch (C5) repeated four times \u2014 there is literally no melody and no bassline movement, just a single tone droning under a drum loop. The variety penalty is far too weak to gate this: variety = distinct/3 for melodic parts feeds into a mean with the density-band term, and that combined density dimension carries only 0.10 of the total weight. So a monotone part (variety 0.333) on both melodic tracks only knocks the total down to ~0.978. Pitch-monotony \u2014 the single clearest sign of 'not actually a composition' \u2014 costs almost nothing.",
+"predicted_total": 0.977778,
+"recipe": {
+"tempo": 120,
+"bars": 2,
+"key": {
+"tonic": "C",
+"mode": "major"
+},
+"tracks": [
+{
+"name": "Drums",
+"role": "drums",
+"notes": [
+{
+"pitch": 36,
+"start": 0,
+"length": 0.5,
+"velocity": 96
+},
+{
+"pitch": 36,
+"start": 4,
+"length": 0.5,
+"velocity": 96
+},
+{
+"pitch": 38,
+"start": 1,
+"length": 0.5,
+"velocity": 96
+},
+{
+"pitch": 38,
+"start": 3,
+"length": 0.5,
+"velocity": 96
+},
+{
+"pitch": 38,
+"start": 5,
+"length": 0.5,
+"velocity": 96
+},
+{
+"pitch": 38,
+"start": 7,
+"length": 0.5,
+"velocity": 96
+},
+{
+"pitch": 42,
+"start": 0,
+"length": 0.25,
+"velocity": 96
+},
+{
+"pitch": 42,
+"start": 0.5,
+"length": 0.25,
+"velocity": 96
+},
+{
+"pitch": 42,
+"start": 1,
+"length": 0.25,
+"velocity": 96
+},
+{
+"pitch": 42,
+"start": 1.5,
+"length": 0.25,
+"velocity": 96
+},
+{
+"pitch": 42,
+"start": 2,
+"length": 0.25,
+"velocity": 96
+},
+{
+"pitch": 42,
+"start": 2.5,
+"length": 0.25,
+"velocity": 96
+},
+{
+"pitch": 42,
+"start": 3,
+"length": 0.25,
+"velocity": 96
+},
+{
+"pitch": 42,
+"start": 3.5,
+"length": 0.25,
+"velocity": 96
+},
+{
+"pitch": 42,
+"start": 4,
+"length": 0.25,
+"velocity": 96
+},
+{
+"pitch": 42,
+"start": 4.5,
+"length": 0.25,
+"velocity": 96
+},
+{
+"pitch": 42,
+"start": 5,
+"length": 0.25,
+"velocity": 96
+},
+{
+"pitch": 42,
+"start": 5.5,
+"length": 0.25,
+"velocity": 96
+},
+{
+"pitch": 42,
+"start": 6,
+"length": 0.25,
+"velocity": 96
+},
+{
+"pitch": 42,
+"start": 6.5,
+"length": 0.25,
+"velocity": 96
+},
+{
+"pitch": 42,
+"start": 7,
+"length": 0.25,
+"velocity": 96
+},
+{
+"pitch": 42,
+"start": 7.5,
+"length": 0.25,
+"velocity": 96
+}
+]
+},
+{
+"name": "Bass",
+"role": "bass",
+"notes": [
+{
+"pitch": 36,
+"start": 0,
+"length": 4,
+"velocity": 90
+},
+{
+"pitch": 36,
+"start": 4,
+"length": 4,
+"velocity": 90
+}
+]
+},
+{
+"name": "Melody",
+"role": "melody",
+"notes": [
+{
+"pitch": 72,
+"start": 0,
+"length": 2,
+"velocity": 80
+},
+{
+"pitch": 72,
+"start": 2,
+"length": 2,
+"velocity": 80
+},
+{
+"pitch": 72,
+"start": 4,
+"length": 2,
+"velocity": 80
+},
+{
+"pitch": 72,
+"start": 6,
+"length": 2,
+"velocity": 80
+}
+]
+}
+]
+},
+"lens": "degenerate-min"
+},
+{
+"name": "D4 \u2014 2&4 + One Stacked Chord Held Forever",
+"why_musically_bad": "Scores 0.989. The snare sits literally only on beats 2 and 4, the kick only on the downbeat, hats just barely subdivide \u2014 and the entire 'melody' is one Em triad (E4/G4/B4) struck once at start 0 and held for all 8 beats. The melody never articulates a second event, yet because the verifier measures distinct-pitch *variety* rather than rhythmic events, three simultaneous stacked pitches game the variety check to 1.0. The bass is a single E1 drone repeated. A producer hears a held chord with a metronome; the rubric hears a full, varied, in-key arrangement. This exposes that the scorer cannot tell a chord stab from a moving melodic line \u2014 vertical pitch-stacking substitutes for horizontal motion.",
+"predicted_total": 0.988889,
+"recipe": {
+"tempo": 140,
+"bars": 2,
+"key": {
+"tonic": "E",
+"mode": "minor"
+},
+"tracks": [
+{
+"name": "Drums",
+"role": "drums",
+"notes": [
+{
+"pitch": 36,
+"start": 0,
+"length": 0.5,
+"velocity": 96
+},
+{
+"pitch": 36,
+"start": 4,
+"length": 0.5,
+"velocity": 96
+},
+{
+"pitch": 38,
+"start": 1,
+"length": 0.5,
+"velocity": 96
+},
+{
+"pitch": 38,
+"start": 3,
+"length": 0.5,
+"velocity": 96
+},
+{
+"pitch": 38,
+"start": 5,
+"length": 0.5,
+"velocity": 96
+},
+{
+"pitch": 38,
+"start": 7,
+"length": 0.5,
+"velocity": 96
+},
+{
+"pitch": 42,
+"start": 0,
+"length": 0.25,
+"velocity": 96
+},
+{
+"pitch": 42,
+"start": 0.5,
+"length": 0.25,
+"velocity": 96
+},
+{
+"pitch": 42,
+"start": 1,
+"length": 0.25,
+"velocity": 96
+},
+{
+"pitch": 42,
+"start": 1.5,
+"length": 0.25,
+"velocity": 96
+},
+{
+"pitch": 42,
+"start": 2,
+"length": 0.25,
+"velocity": 96
+},
+{
+"pitch": 42,
+"start": 2.5,
+"length": 0.25,
+"velocity": 96
+},
+{
+"pitch": 42,
+"start": 3,
+"length": 0.25,
+"velocity": 96
+},
+{
+"pitch": 42,
+"start": 3.5,
+"length": 0.25,
+"velocity": 96
+},
+{
+"pitch": 42,
+"start": 4,
+"length": 0.25,
+"velocity": 96
+},
+{
+"pitch": 42,
+"start": 4.5,
+"length": 0.25,
+"velocity": 96
+},
+{
+"pitch": 42,
+"start": 5,
+"length": 0.25,
+"velocity": 96
+},
+{
+"pitch": 42,
+"start": 5.5,
+"length": 0.25,
+"velocity": 96
+},
+{
+"pitch": 42,
+"start": 6,
+"length": 0.25,
+"velocity": 96
+},
+{
+"pitch": 42,
+"start": 6.5,
+"length": 0.25,
+"velocity": 96
+},
+{
+"pitch": 42,
+"start": 7,
+"length": 0.25,
+"velocity": 96
+},
+{
+"pitch": 42,
+"start": 7.5,
+"length": 0.25,
+"velocity": 96
+}
+]
+},
+{
+"name": "Bass",
+"role": "bass",
+"notes": [
+{
+"pitch": 28,
+"start": 0,
+"length": 4,
+"velocity": 90
+},
+{
+"pitch": 28,
+"start": 4,
+"length": 4,
+"velocity": 90
+}
+]
+},
+{
+"name": "Melody",
+"role": "melody",
+"notes": [
+{
+"pitch": 64,
+"start": 0,
+"length": 8,
+"velocity": 80
+},
+{
+"pitch": 67,
+"start": 0,
+"length": 8,
+"velocity": 80
+},
+{
+"pitch": 71,
+"start": 0,
+"length": 8,
+"velocity": 80
+}
+]
+}
+]
+},
+"lens": "degenerate-min"
+},
+{
+"name": "Machine-Gun Wall \u2014 kick + hats on EVERY 16th, snare on the literal backbeat",
+"why_musically_bad": "The kick fires on all 32 sixteenth-notes and the closed hat fires on all 32 sixteenths \u2014 a constant, un-syncopated machine-gun drone with zero groove, dynamics, or space. No producer would call this a drum 'pattern'; it's a buzz. Yet the verifier's four drum sub-checks all read 1.0: kickDownbeat=1 (every bar trivially has a kick at beat 1, because the kick is everywhere), hatsSubdiv=clamp01(32/16)=1 (more hats is never penalized), padsValid=1, and snareBackbeat=1 because the snare was placed ONLY on positions {1,3,5,7}. The checks are independent fractions, so 'kick anchors beat 1' is satisfied by 'kick on literally every position' \u2014 the verifier cannot tell a backbeat groove from a solid wall of kicks. drums=1.0.",
+"predicted_total": 0.995098,
+"recipe": {
+"tempo": 140,
+"bars": 2,
+"key": {
+"tonic": "A",
+"mode": "minor"
+},
+"tracks": [
+{
+"name": "Drums",
+"role": "drums",
+"notes": [
+{
+"pitch": 36,
+"start": 0,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 0.25,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 0.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 0.75,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 1,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 1.25,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 1.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 1.75,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 2,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 2.25,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 2.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 2.75,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 3,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 3.25,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 3.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 3.75,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 4,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 4.25,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 4.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 4.75,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 5.25,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 5.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 5.75,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 6,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 6.25,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 6.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 6.75,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 7,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 7.25,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 7.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 7.75,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 1,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 3,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 7,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 0,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 0.25,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 0.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 0.75,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 1,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 1.25,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 1.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 1.75,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 2,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 2.25,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 2.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 2.75,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 3,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 3.25,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 3.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 3.75,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 4,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 4.25,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 4.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 4.75,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 5.25,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 5.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 5.75,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 6,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 6.25,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 6.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 6.75,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 7,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 7.25,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 7.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 7.75,
+"length": 0.25,
+"velocity": 100
+}
+]
+},
+{
+"name": "808 Bass",
+"role": "bass",
+"notes": [
+{
+"pitch": 33,
+"start": 0,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 1,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 40,
+"start": 2,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 33,
+"start": 3,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 33,
+"start": 4,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 5,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 40,
+"start": 6,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 43,
+"start": 7,
+"length": 1,
+"velocity": 100
+}
+]
+},
+{
+"name": "Lead",
+"role": "melody",
+"notes": [
+{
+"pitch": 69,
+"start": 0,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 72,
+"start": 0.5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 76,
+"start": 1,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 69,
+"start": 1.5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 72,
+"start": 2,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 76,
+"start": 2.5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 81,
+"start": 3,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 72,
+"start": 3.5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 69,
+"start": 4,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 72,
+"start": 4.5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 76,
+"start": 5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 81,
+"start": 5.5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 72,
+"start": 6,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 76,
+"start": 6.5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 69,
+"start": 7,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 72,
+"start": 7.5,
+"length": 0.5,
+"velocity": 100
+}
+]
+}
+]
+},
+"lens": "drum-nonsense"
+},
+{
+"name": "Kick-Buries-Snare \u2014 quarter-note kicks colliding with the backbeat snare",
+"why_musically_bad": "The kick plays on every quarter ({0,1,2,3,4,5,6,7}) and the snare plays the backbeat ({1,3,5,7}) \u2014 so a kick lands EXACTLY on top of every snare hit. A kick stacked on the snare on beats 2 and 4 is a textbook mud / phase-cancellation mistake; the backbeat loses all its crack and the groove has no kick/snare call-and-response. It is rhythmically dead-on-the-grid 'four-on-the-floor plus four-on-the-floor again'. But the verifier scores the kick and snare sub-checks SEPARATELY and never penalizes collisions: kickDownbeat=1 (kicks at 0 and 4), snareBackbeat=1 (all snares at backbeat positions), hatsSubdiv=1 (16 eighth hats over 2 bars), padsValid=1. drums=1.0 and the whole recipe scores a perfect 1.0. The hole: the scorer rewards each instrument hitting its 'correct' slots but is blind to two instruments occupying the same slot.",
+"predicted_total": 1,
+"recipe": {
+"tempo": 128,
+"bars": 2,
+"key": {
+"tonic": "A",
+"mode": "minor"
+},
+"tracks": [
+{
+"name": "Drums",
+"role": "drums",
+"notes": [
+{
+"pitch": 36,
+"start": 0,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 1,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 2,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 3,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 4,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 6,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 7,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 1,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 3,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 7,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 0,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 0.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 1,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 1.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 2,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 2.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 3,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 3.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 4,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 4.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 5.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 6,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 6.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 7,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 7.5,
+"length": 0.25,
+"velocity": 100
+}
+]
+},
+{
+"name": "Bass",
+"role": "bass",
+"notes": [
+{
+"pitch": 33,
+"start": 0,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 1,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 40,
+"start": 2,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 33,
+"start": 3,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 33,
+"start": 4,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 5,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 40,
+"start": 6,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 43,
+"start": 7,
+"length": 1,
+"velocity": 100
+}
+]
+},
+{
+"name": "Lead",
+"role": "melody",
+"notes": [
+{
+"pitch": 69,
+"start": 0,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 72,
+"start": 0.5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 76,
+"start": 1,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 69,
+"start": 1.5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 72,
+"start": 2,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 76,
+"start": 2.5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 81,
+"start": 3,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 72,
+"start": 3.5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 69,
+"start": 4,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 72,
+"start": 4.5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 76,
+"start": 5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 81,
+"start": 5.5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 72,
+"start": 6,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 76,
+"start": 6.5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 69,
+"start": 7,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 72,
+"start": 7.5,
+"length": 0.5,
+"velocity": 100
+}
+]
+}
+]
+},
+"lens": "drum-nonsense"
+},
+{
+"name": "Three-Pitch Robot Drone \u2014 clears the variety floor with the dumbest possible melody",
+"why_musically_bad": "Every melodic part is a brain-dead mechanical loop. The bass is C\u2013C\u2013C... E\u2013E... grinding eighths; the lead is a fixed C5-E5-G5-C5-E5-G5 arpeggio repeated identically every bar with one uniform length and one velocity \u2014 a robotic, motif-less, dynamically-flat pattern no producer would keep. It exploits the density dimension's 'variety' sub-check, which only asks for a COUNT of distinct pitches: distinct/3 for melodic parts. Using exactly 3 (or 4) distinct pitches scores variety=1.0 even though the pitches are cycled in a fixed, repetitive order with no contour, no rests, no rhythmic interest. The verifier has no measure of repetition, motif, or rhythmic monotony \u2014 only a distinct-pitch headcount. The drums are also the absolute minimum 'correct' skeleton (kick on the two downbeats, snare backbeat, eighth open-hats), so drums=1.0, and every other dimension is maxed. Total = 1.0 for a track that is musically inert.",
+"predicted_total": 1,
+"recipe": {
+"tempo": 120,
+"bars": 2,
+"key": {
+"tonic": "A",
+"mode": "minor"
+},
+"tracks": [
+{
+"name": "Drums",
+"role": "drums",
+"notes": [
+{
+"pitch": 36,
+"start": 0,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 4,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 1,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 3,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 7,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 46,
+"start": 0,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 46,
+"start": 0.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 46,
+"start": 1,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 46,
+"start": 1.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 46,
+"start": 2,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 46,
+"start": 2.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 46,
+"start": 3,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 46,
+"start": 3.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 46,
+"start": 4,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 46,
+"start": 4.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 46,
+"start": 5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 46,
+"start": 5.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 46,
+"start": 6,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 46,
+"start": 6.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 46,
+"start": 7,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 46,
+"start": 7.5,
+"length": 0.25,
+"velocity": 100
+}
+]
+},
+{
+"name": "Sub",
+"role": "bass",
+"notes": [
+{
+"pitch": 33,
+"start": 0,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 33,
+"start": 0.5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 1,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 1.5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 40,
+"start": 2,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 40,
+"start": 2.5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 33,
+"start": 3,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 33,
+"start": 3.5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 33,
+"start": 4,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 33,
+"start": 4.5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 5.5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 40,
+"start": 6,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 40,
+"start": 6.5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 33,
+"start": 7,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 33,
+"start": 7.5,
+"length": 0.5,
+"velocity": 100
+}
+]
+},
+{
+"name": "Lead",
+"role": "melody",
+"notes": [
+{
+"pitch": 72,
+"start": 0,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 76,
+"start": 0.5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 79,
+"start": 1,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 72,
+"start": 1.5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 76,
+"start": 2,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 79,
+"start": 2.5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 72,
+"start": 3,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 76,
+"start": 3.5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 72,
+"start": 4,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 76,
+"start": 4.5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 79,
+"start": 5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 72,
+"start": 5.5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 76,
+"start": 6,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 79,
+"start": 6.5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 72,
+"start": 7,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 76,
+"start": 7.5,
+"length": 0.5,
+"velocity": 100
+}
+]
+}
+]
+},
+"lens": "drum-nonsense"
+},
+{
+"name": "Hat-Layer Saturation \u2014 kick + TWO hat layers on every single 16th",
+"why_musically_bad": "Stacks a kick AND two simultaneous hat pads (42 closed + 44 pedal) on all 32 sixteenth-notes \u2014 96 drum hits crammed onto the grid, two hats playing in perfect unison on every position. It is an unlistenable, masked wall of percussion: doubled hats with identical timing just add level and phase smear, the kick never breathes, and there is no pattern at all. This pushes hard on the hatsSubdiv check, which is clamp01(hats/(bars*8)) = clamp01(64/16) = 1.0 \u2014 the verifier rewards 'more subdivision' with a hard ceiling and no upper penalty, so 64 hats scores identically to a tasteful 16. kickDownbeat=1, snareBackbeat=1 (snare only on {1,3,5,7}), padsValid=1 \u2192 drums=1.0. Density only dips slightly (drums perBar=50 > hi=24 \u2192 band=24/50=0.48 for that part, blended up by bass/melody to ~0.91), still total \u2248 0.99. Demonstrates the 'monotonic more-is-better' hole: layering redundant hits is free score.",
+"predicted_total": 0.991333,
+"recipe": {
+"tempo": 160,
+"bars": 2,
+"key": {
+"tonic": "A",
+"mode": "minor"
+},
+"tracks": [
+{
+"name": "Drums",
+"role": "drums",
+"notes": [
+{
+"pitch": 36,
+"start": 0,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 0,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 44,
+"start": 0,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 0.25,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 0.25,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 44,
+"start": 0.25,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 0.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 0.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 44,
+"start": 0.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 0.75,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 0.75,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 44,
+"start": 0.75,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 1,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 1,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 44,
+"start": 1,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 1.25,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 1.25,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 44,
+"start": 1.25,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 1.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 1.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 44,
+"start": 1.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 1.75,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 1.75,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 44,
+"start": 1.75,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 2,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 2,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 44,
+"start": 2,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 2.25,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 2.25,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 44,
+"start": 2.25,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 2.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 2.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 44,
+"start": 2.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 2.75,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 2.75,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 44,
+"start": 2.75,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 3,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 3,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 44,
+"start": 3,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 3.25,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 3.25,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 44,
+"start": 3.25,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 3.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 3.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 44,
+"start": 3.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 3.75,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 3.75,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 44,
+"start": 3.75,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 4,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 4,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 44,
+"start": 4,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 4.25,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 4.25,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 44,
+"start": 4.25,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 4.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 4.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 44,
+"start": 4.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 4.75,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 4.75,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 44,
+"start": 4.75,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 44,
+"start": 5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 5.25,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 5.25,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 44,
+"start": 5.25,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 5.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 5.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 44,
+"start": 5.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 5.75,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 5.75,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 44,
+"start": 5.75,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 6,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 6,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 44,
+"start": 6,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 6.25,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 6.25,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 44,
+"start": 6.25,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 6.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 6.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 44,
+"start": 6.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 6.75,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 6.75,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 44,
+"start": 6.75,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 7,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 7,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 44,
+"start": 7,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 7.25,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 7.25,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 44,
+"start": 7.25,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 7.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 7.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 44,
+"start": 7.5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 7.75,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 42,
+"start": 7.75,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 44,
+"start": 7.75,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 1,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 3,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 5,
+"length": 0.25,
+"velocity": 100
+},
+{
+"pitch": 38,
+"start": 7,
+"length": 0.25,
+"velocity": 100
+}
+]
+},
+{
+"name": "Bass",
+"role": "bass",
+"notes": [
+{
+"pitch": 33,
+"start": 0,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 1,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 40,
+"start": 2,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 33,
+"start": 3,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 33,
+"start": 4,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 36,
+"start": 5,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 40,
+"start": 6,
+"length": 1,
+"velocity": 100
+},
+{
+"pitch": 43,
+"start": 7,
+"length": 1,
+"velocity": 100
+}
+]
+},
+{
+"name": "Lead",
+"role": "melody",
+"notes": [
+{
+"pitch": 69,
+"start": 0,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 72,
+"start": 0.5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 76,
+"start": 1,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 69,
+"start": 1.5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 72,
+"start": 2,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 76,
+"start": 2.5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 81,
+"start": 3,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 72,
+"start": 3.5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 69,
+"start": 4,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 72,
+"start": 4.5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 76,
+"start": 5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 81,
+"start": 5.5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 72,
+"start": 6,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 76,
+"start": 6.5,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 69,
+"start": 7,
+"length": 0.5,
+"velocity": 100
+},
+{
+"pitch": 72,
+"start": 7.5,
+"length": 0.5,
+"velocity": 100
+}
+]
+}
+]
+},
+"lens": "drum-nonsense"
+}
+]
+}

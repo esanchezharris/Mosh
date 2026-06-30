@@ -33,4 +33,23 @@ describe("parseReply", () => {
     expect(r.intent).toBe("ACK_GOT_IT");
     expect(r.commands?.[0].command).toBe("create_track");
   });
+
+  it("recovers commands emitted in the catalog's function-call STRING form", () => {
+    // models sometimes mimic commandCatalogPrompt() instead of the object contract
+    const r = parseReply('{"intent":"ACK_GOT_IT","commands":["add_midi_clip(\\"17\\")"]}');
+    expect(r.commands).toEqual([{ command: "add_midi_clip", args: { trackId: "17" } }]);
+  });
+
+  it("maps positional args by name and coerces numeric/boolean types", () => {
+    const r = parseReply('{"intent":"ACK_GOT_IT","commands":["set_tempo(132)","set_track_mute(\\"3\\", true)"]}');
+    expect(r.commands).toEqual([
+      { command: "set_tempo", args: { bpm: 132 } },
+      { command: "set_track_mute", args: { trackId: "3", mute: true } },
+    ]);
+  });
+
+  it("drops unknown commands in string form but keeps valid object commands", () => {
+    const r = parseReply('{"intent":"ACK_GOT_IT","commands":["nope(1)",{"command":"set_tempo","args":{"bpm":90}}]}');
+    expect(r.commands).toEqual([{ command: "set_tempo", args: { bpm: 90 } }]);
+  });
 });
