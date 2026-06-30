@@ -361,9 +361,20 @@ private:
     // (caller falls back to the legacy lane-landing path). Message-thread only; undoable txn.
     bool            applyRenderInPlace (const juce::String& clipId, juce::ValueTree node,
                                         const juce::File& artifact, const juce::String& cacheKey);
+    // Phase 2 — auto-apply a completed render BENEATH a MIDI/drum clip: land a hidden, full-span
+    // looping audio clip on the SAME track and MUTE the source MIDI, so the producer hears the
+    // re-imagined audio in place while the editable MIDI stays beneath. A re-render HOT-SWAPS the
+    // hidden clip's source (no structural churn). Returns false for wave clips / sub-region renders
+    // / missing artifact (caller falls back to applyRenderInPlace or the legacy lane). Message-thread
+    // only; the first apply is one undoable txn (undo == reset_render_layer).
+    bool            applyRenderBeneathMidi (const juce::String& clipId, juce::ValueTree node,
+                                            const juce::File& artifact, const juce::String& cacheKey);
 
     // ── helpers ──
     te::AudioTrack* createAudioTrack (const juce::String& name);
+    // Phase 2 — the single shared, instrument-free, snapshot-excluded track that holds the drum/MIDI
+    // beneath-render audio (a synth on the source track would silence an audio clip there). Created once.
+    te::AudioTrack* findOrCreateHiddenRenderTrack();
     // Shared wave-file insertion path used by import_clip and import_clip_data.
     juce::var       importWaveFileToTrack (const juce::String& command,
                                            const juce::File& file,

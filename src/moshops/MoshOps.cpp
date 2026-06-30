@@ -33,6 +33,13 @@ namespace
     // round-trip-safe through save/load and ignored by the fingerprint).
     const juce::Identifier kLandedClipId ("landedClipId");
 
+    // Phase 2 — discriminates the drum/MIDI "hidden audio beneath the MIDI" model from the
+    // legacy "Neural Renders" lane landing. When true, the render-layer auto-applied beneath a
+    // MIDI/drum clip: kLandedClipId is the HIDDEN audio clip (on the SAME track) and the source
+    // MIDI clip was MUTED by us. Reset/remove use it to know to remove the hidden clip + un-mute
+    // (vs the legacy lane, which never touches the source clip). File-local, round-trip-safe.
+    const juce::Identifier kSourceMutedByLayer ("sourceMutedByLayer");
+
     // G14 — make a VolumeAndPanPlugin fader change UNDOABLE.
     //
     // vp->setVolumeDb()/setPan() route through the AutomatableParameter, whose
@@ -3114,6 +3121,13 @@ juce::var MoshOps::cmdRemoveClip (const juce::var& args)
     auto* clip = findClip (args.getProperty ("clipId", var()).toString());
     if (clip == nullptr) return errResult ("remove_clip", "no clip");
     beginTxn ("remove_clip");
+    // Phase 2 — if this MIDI/drum clip owns a hidden beneath-render, remove the hidden audio with it
+    // (else it's orphaned on the track). The source mute goes away with the clip itself.
+    if (auto node = clip->state.getChildWithName (ids::MOSH_RENDERLAYER);
+        node.isValid() && (bool) node[kSourceMutedByLayer])
+        if (auto hiddenId = node[kLandedClipId].toString(); hiddenId.isNotEmpty())
+            if (auto* hidden = findClip (hiddenId); hidden != nullptr && hidden != clip)
+                hidden->removeFromParent();
     clip->removeFromParent();
     logLine ("remove_clip", args, true, {}, true);
     emitSnapshotInvalidated();
@@ -5669,7 +5683,15 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
             + ":" + juce::String (rs - cs, 4)
             + ":" + juce::String (re - cs, 4)
             + ":" + juce::String (cpos.getOffset().inSeconds(), 4);
-        if (! bounceClipToWav (*clip, rs, re, input))
+        // Phase 2: when this clip already has a hidden beneath-render it is MUTED (the producer hears
+        // the hidden audio). bounceClipToWav must still capture the instrument output, so temporarily
+        // un-mute across the (already device-detached) offline render and restore. The net ValueTree
+        // change is zero — an undo of it is a no-op.
+        const bool wasMuted = clip->isMuted();
+        if (wasMuted) clip->setMuted (false);
+        const bool bounced = bounceClipToWav (*clip, rs, re, input);
+        if (wasMuted) clip->setMuted (true);
+        if (! bounced)
             return errResult ("render_layer", "could not bounce clip to audio (add an instrument, or the render failed)");
     }
 
@@ -5688,7 +5710,8 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
         // Re-apply on HIT too (a wave clip Reset since the last render must re-swap to the
         // cached artifact). applyRenderInPlace is a no-op repoint when already applied.
         auto art = mosh::resolveCacheArtifact (node, eng.editFile().getParentDirectory());
-        if (! applyRenderInPlace (clipId, node, art, fp))
+        if (! applyRenderInPlace (clipId, node, art, fp)
+            && ! applyRenderBeneathMidi (clipId, node, art, fp))
             node.setProperty (ids::status, "ready", nullptr);
         emit ("layer_status", [&] { auto* o = new DynamicObject();
             o->setProperty ("clipId", clipId); o->setProperty ("layerId", node[ids::id]);
@@ -5846,11 +5869,12 @@ void MoshOps::finalizeRender (const juce::String& clipId, const juce::File& outp
 
     node.setProperty (ids::renderError, "", nullptr);   // clear on success
 
-    // Auto-apply in place for WAVE clips (the new default): the clip's own waveform swaps to
-    // the render result instantly — no accept step, no separate lane. Non-wave (MIDI/drum)
-    // clips fall back to the legacy lane path (accept_render) until Phase 2;
-    // applyRenderInPlace returns false for them and we keep the artifact for that path.
-    if (! applyRenderInPlace (clipId, node, outputWav, cacheKey))
+    // Auto-apply the render (the new default): WAVE clips swap their own source in place; MIDI/drum
+    // clips land a HIDDEN looping audio clip beneath the now-muted MIDI (Phase 2). Either way it's an
+    // instant preview with no accept step. A sub-region render (or a clip with no track) falls through
+    // to the legacy "Neural Renders" lane (accept_render); the apply helpers return false for it.
+    if (! applyRenderInPlace (clipId, node, outputWav, cacheKey)
+        && ! applyRenderBeneathMidi (clipId, node, outputWav, cacheKey))
     {
         node.setProperty (ids::cacheArtifact, outputWav.getFullPathName(), nullptr);
         node.setProperty (ids::cacheKey, cacheKey, nullptr);
@@ -5912,14 +5936,109 @@ bool MoshOps::applyRenderInPlace (const juce::String& clipId, juce::ValueTree no
     return true;
 }
 
+bool MoshOps::applyRenderBeneathMidi (const juce::String& clipId, juce::ValueTree node,
+                                      const juce::File& artifact, const juce::String& cacheKey)
+{
+    auto* midi = findClip (clipId);
+    if (midi == nullptr || dynamic_cast<te::WaveAudioClip*> (midi) != nullptr) return false;   // wave → in-place path
+    if (! artifact.existsAsFile()) return false;
+
+    // Whole-clip only — a sub-region (section-scoped) MIDI render can't be the clip's "hidden self",
+    // so those keep the legacy lane landing.
+    {
+        auto pos = midi->getPosition();
+        const double cs = pos.getStart().inSeconds(), ce = pos.getEnd().inSeconds();
+        const double rs = juce::jlimit (cs, ce, (double) node[ids::timeRangeStart]);
+        const double re = juce::jlimit (cs, ce, (double) node[ids::timeRangeEnd]);
+        if ((rs > cs + 1.0e-3) || (re < ce - 1.0e-3)) return false;   // sub-region → legacy path
+    }
+
+    // Durable per-render copy (a disposable artifact), named by the fingerprint so a re-render writes
+    // a NEW file rather than overwriting the one the hidden clip currently plays.
+    auto dest = eng.sessionDir().getChildFile ("audio")
+                    .getChildFile (node[ids::id].toString() + "-" + cacheKey.substring (0, 12))
+                    .withFileExtension ("wav");
+    dest.getParentDirectory().createDirectory();
+    if (dest != artifact && ! dest.existsAsFile() && ! artifact.copyFileTo (dest))
+        return false;
+    const bool local = dest.isAChildOf (eng.editFile().getParentDirectory());
+
+    // RE-RENDER → HOT-SWAP: the hidden clip already exists, so just repoint its source (no structural
+    // edit, no undo churn). The MIDI stays muted; the producer hears the updated audio in place.
+    if (auto hiddenId = node[kLandedClipId].toString(); hiddenId.isNotEmpty())
+        if (auto* hidden = dynamic_cast<te::WaveAudioClip*> (findClip (hiddenId)))
+        {
+            mosh::repointWaveClipSource (*hidden, dest, eng.editFile().getParentDirectory(), local);
+            node.setProperty (ids::cacheArtifact, dest.getFullPathName(), nullptr);
+            node.setProperty (ids::cacheKey, cacheKey, nullptr);
+            node.setProperty (ids::status, "ready", nullptr);
+            return true;
+        }
+
+    // FIRST apply: land the hidden full-span audio on a dedicated HIDDEN, INSTRUMENT-FREE track (NOT
+    // the source track — its synth would overwrite the buffer and silence the clip) at the MIDI clip's
+    // edit position, and MUTE the source MIDI so the re-imagined audio is what plays. snapshot()
+    // excludes the hidden track, so the producer hears it but never sees it. One undoable unit — an undo
+    // of it is exactly reset_render_layer (hidden clip removed + MIDI un-muted). The hidden track/clip +
+    // the mute + the node markers persist with the .tracktionedit, so the model survives save/reload.
+    auto pos = midi->getPosition();
+    beginTxn ("apply_render_beneath");
+    auto* hiddenTrack = findOrCreateHiddenRenderTrack();
+    if (hiddenTrack == nullptr) return false;
+    auto landed = hiddenTrack->insertWaveClip ("mosh-render-" + midi->getName(), dest,
+        { { pos.getStart(), pos.getLength() }, {} }, false);
+    if (landed == nullptr) return false;
+    landed->state.setProperty (ids::moshHidden, true, &undoManager());
+    midi->setMuted (true);
+    node.setProperty (kLandedClipId, landed->itemID.toString(), &undoManager());
+    node.setProperty (kSourceMutedByLayer, true, &undoManager());
+    node.setProperty (ids::cacheArtifact, dest.getFullPathName(), nullptr);   // regenerable metadata → no undo
+    node.setProperty (ids::cacheKey, cacheKey, nullptr);
+    node.setProperty (ids::status, "ready", nullptr);
+    return true;
+}
+
+te::AudioTrack* MoshOps::findOrCreateHiddenRenderTrack()
+{
+    // The single shared, instrument-free, snapshot-excluded track that holds every drum/MIDI
+    // beneath-render clip (Phase 2). Found by its moshHidden flag (the name is cosmetic); created
+    // once and reused. NOT undo-created on purpose mismatch — it's created inside the caller's txn.
+    for (auto* t : te::getAudioTracks (eng.edit()))
+        if (t != nullptr && (bool) t->state.getProperty (ids::moshHidden, false))
+            return t;
+    auto* t = createAudioTrack ("re-imagined (hidden)");
+    if (t != nullptr)
+        t->state.setProperty (ids::moshHidden, true, &undoManager());
+    return t;
+}
+
 juce::var MoshOps::cmdResetRenderLayer (const juce::var& args)
 {
     const auto clipId = args.getProperty ("clipId", var()).toString();
     auto* clip = findClip (clipId);
     auto node = findRenderLayer (clipId);
     if (clip == nullptr || ! node.isValid()) return errResult ("reset_render_layer", "no render layer");
+
+    // Phase 2 — MIDI/drum beneath-model: remove the hidden audio clip and un-mute the source MIDI, so
+    // the producer is back to the live, editable instrument. Undoable (mirrors the apply txn).
+    if (dynamic_cast<te::WaveAudioClip*> (clip) == nullptr)
+    {
+        if (! (bool) node[kSourceMutedByLayer])
+            return errResult ("reset_render_layer", "nothing to reset");
+        beginTxn ("reset_render_layer");
+        if (auto hiddenId = node[kLandedClipId].toString(); hiddenId.isNotEmpty())
+            if (auto* hidden = findClip (hiddenId); hidden != nullptr && hidden != clip)
+                hidden->removeFromParent();
+        clip->setMuted (false);
+        node.setProperty (kLandedClipId, "", &undoManager());
+        node.setProperty (kSourceMutedByLayer, false, &undoManager());
+        node.setProperty (ids::status, "dirty", &undoManager());   // re-imagine is available again
+        logLine ("reset_render_layer", args, true, {}, false);
+        emitSnapshotInvalidated();
+        return okResult ("reset_render_layer");
+    }
+
     auto* wave = dynamic_cast<te::WaveAudioClip*> (clip);
-    if (wave == nullptr) return errResult ("reset_render_layer", "not a wave clip");
     const auto orig = node[ids::originalSourceRef].toString();
     if (orig.isEmpty()) return errResult ("reset_render_layer", "no original source to restore");
     juce::File of = juce::File::isAbsolutePath (orig) ? juce::File (orig)
@@ -6068,6 +6187,13 @@ juce::var MoshOps::cmdAcceptRender (const juce::var& args)
         logLine ("accept_render", args, true, {}, false);
         return okResult ("accept_render");
     }
+    if (dynamic_cast<te::WaveAudioClip*> (clip) == nullptr && (bool) node[kSourceMutedByLayer])
+    {
+        // Phase 2 — MIDI/drum auto-applies beneath the muted source. accept is a no-op (the hidden
+        // audio is already what plays); Reset un-mutes the MIDI and removes the hidden clip.
+        logLine ("accept_render", args, true, {}, false);
+        return okResult ("accept_render");
+    }
     // Resolve move-aware (AL-009): a Save-As'd project stores cacheArtifact relative.
     juce::File artifact = mosh::resolveCacheArtifact (node, eng.editFile().getParentDirectory());
     if (! artifact.existsAsFile()) return errResult ("accept_render", "nothing rendered to accept");
@@ -6175,10 +6301,17 @@ juce::var MoshOps::cmdBypassLayer (const juce::var& args)
         }
     }
 
-    // AL-008 — re-route REAL audio, not just the status flag: mute the landed neural
+    // Phase 2 — for the MIDI/drum beneath-model, bypass routes back to the LIVE instrument: un-mute
+    // the source MIDI when bypassed, re-mute it when enabled. (The landed-clip mute below mutes the
+    // hidden audio inversely, so exactly one of the two sounds at a time.)
+    if ((bool) node[kSourceMutedByLayer])
+        if (auto* src = findClip (bypClipId))
+            src->setMuted (! bypassed);
+
+    // AL-008 — re-route REAL audio, not just the status flag: mute the landed neural / hidden
     // clip when bypassed so the mix falls back to the original (pre-render) source, and
-    // un-mute it when re-enabled. Only meaningful once the layer was accepted (it has a
-    // landed clip); a bypass before accept is a pure status toggle (nothing to route).
+    // un-mute it when re-enabled. Only meaningful once the layer was accepted / auto-applied (it
+    // has a landed clip); a bypass before that is a pure status toggle (nothing to route).
     if (auto landedId = node[kLandedClipId].toString(); landedId.isNotEmpty())
         if (auto* landedClip = findClip (landedId))
             landedClip->setMuted (bypassed);
@@ -6231,6 +6364,15 @@ juce::var MoshOps::cmdRemoveRenderLayer (const juce::var& args)
     if (! node.isValid()) return errResult ("remove_render_layer", "clip has no render layer");
 
     beginTxn ("remove_render_layer");
+    // Phase 2 — a MIDI/drum beneath-render owns a HIDDEN audio clip + a MUTED source. Tear them down
+    // so removing the layer doesn't strand a hidden clip or leave the MIDI silently muted.
+    if ((bool) node[kSourceMutedByLayer])
+    {
+        if (auto hiddenId = node[kLandedClipId].toString(); hiddenId.isNotEmpty())
+            if (auto* hidden = findClip (hiddenId); hidden != nullptr && hidden != clip)
+                hidden->removeFromParent();
+        clip->setMuted (false);
+    }
     clip->state.removeChild (node, &undoManager());
     logLine ("remove_render_layer", args, true, {}, true);
     emitSnapshotInvalidated();
@@ -7300,7 +7442,7 @@ juce::var MoshOps::snapshot()
     Array<var> tracks;
     int index = 0;
     for (auto* t : te::getAudioTracks (edit))
-        if (t != nullptr)
+        if (t != nullptr && ! (bool) t->state.getProperty (ids::moshHidden, false))   // Phase 2 — hidden beneath-render track
             tracks.add (trackToVar (*t, index++));
 
     // MIX-008 — group (submix) tracks, appended AFTER the audio tracks so every
@@ -7605,6 +7747,10 @@ juce::var MoshOps::clipToVar (te::Clip& c)
     o->setProperty ("offset", pos.getOffset().inSeconds());
 
     o->setProperty ("mute", c.isMuted());
+    // Phase 2 — a HIDDEN beneath-render audio clip: the UI filters it out of the lanes (it's the
+    // audio the producer hears, not a clip to manage). Only present when set, to keep snapshots lean.
+    if ((bool) c.state.getProperty (ids::moshHidden, false))
+        o->setProperty ("hidden", true);
     if (auto* w = dynamic_cast<te::WaveAudioClip*> (&c))
     {
         o->setProperty ("type", "wave");
@@ -7670,7 +7816,13 @@ juce::var MoshOps::clipToVar (te::Clip& c)
         r->setProperty ("status", rl[ids::status]);
         r->setProperty ("error", rl[ids::renderError]);   // "" unless status=="error"
         r->setProperty ("appliedInPlace", (bool) rl[ids::appliedInPlace]);   // wave: the clip's source IS the render
-        r->setProperty ("hasOriginal", rl[ids::originalSourceRef].toString().isNotEmpty());   // Reset is available
+        r->setProperty ("hasOriginal", rl[ids::originalSourceRef].toString().isNotEmpty());   // wave: Reset is available
+        // Phase 2 — MIDI/drum beneath-model is live: the source is muted and a hidden audio clip plays.
+        // Drives the "re-imagine active" marker + the Reset button on a MIDI clip. Guarded on the hidden
+        // clip still existing so a removed/undone clip clears the marker.
+        r->setProperty ("reimagineActive", (bool) rl[kSourceMutedByLayer]
+            && rl[kLandedClipId].toString().isNotEmpty()
+            && findClip (rl[kLandedClipId].toString()) != nullptr);
         r->setProperty ("coverage", rl[ids::coverage].toString().isNotEmpty() ? rl[ids::coverage] : var ("auto"));   // whole-clip strategy
         r->setProperty ("adapter", rl[ids::modelAdapter]);
         r->setProperty ("mode", rl[ids::mode]);
@@ -7730,6 +7882,7 @@ juce::var MoshOps::controllerToVar()
             for (auto* clip : track->getClips())
                 if (auto* wave = dynamic_cast<te::WaveAudioClip*> (clip))
                 {
+                    if ((bool) wave->state.getProperty (ids::moshHidden, false)) continue;   // Phase 2 — not a take
                     const auto pos = wave->getPosition();
                     const double end = pos.getEnd().inSeconds();
                     if (latestWave == nullptr || end >= latestEnd)

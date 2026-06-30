@@ -1594,14 +1594,63 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         auto rb = cmd (ops, "render_layer", objN ({{ "clipId", mcid }, { "wait", true }}));
         check (rb["data"].getProperty ("cache", var()).toString() == "miss", "bypassing the instrument -> cache MISS (no stale render served)");
 
-        // Accept -> lands a clip on the "Neural Renders" lane (same as the wave path).
-        check (ok (cmd (ops, "accept_render", args1 ("clipId", mcid))), "accept_render (MIDI-sourced) ok");
-        bool mLane = false;
-        { auto snap = ops.snapshot();
-          if (auto* arr = snap["tracks"].getArray())
-            for (auto& t : *arr) if (t.getProperty ("name", var()).toString() == "Neural Renders")
-              if (auto* ca = t["clips"].getArray(); ca != nullptr && ca->size() > 0) mLane = true; }
-        check (mLane, "MIDI-sourced render landed on the Neural Renders lane");
+        // Phase 2 — a MIDI/drum re-imagine AUTO-APPLIES beneath the clip: the source MIDI is muted
+        // and a HIDDEN, instrument-free audio render plays in its place. The hidden track is EXCLUDED
+        // from the snapshot (the producer hears it but never sees it), so the structural proof that
+        // the render exists is `reimagineActive` (kSourceMutedByLayer + a live landed clip). No accept
+        // step, no "Neural Renders" lane, and no new VISIBLE track.
+        auto midiClipVar = [&] () -> var {
+            auto trk = trackById (mt);
+            if (auto* arr = trk.getProperty ("clips", var()).getArray())
+                for (auto& c : *arr) if (c.getProperty ("id", var()).toString() == mcid) return c;
+            return {};
+        };
+        auto reimagineActive = [&] () -> bool {
+            return (bool) midiClipVar().getProperty ("renderLayer", var()).getProperty ("reimagineActive", false);
+        };
+        auto visibleTracks = [&] () -> int {
+            auto snap = ops.snapshot();
+            auto* arr = snap["tracks"].getArray();
+            return arr != nullptr ? arr->size() : 0;
+        };
+        auto neuralLanesM = [&] () -> int {
+            int n = 0; auto snap = ops.snapshot();
+            if (auto* arr = snap["tracks"].getArray())
+                for (auto& t : *arr) if (t.getProperty ("name", var()).toString() == "Neural Renders"
+                                         || t.getProperty ("name", var()).toString().contains ("hidden")) ++n;
+            return n;
+        };
+        const int tracksBeforeApply = visibleTracks();
+        check ((bool) midiClipVar().getProperty ("mute", false), "MIDI source muted under the beneath-render");
+        check (reimagineActive(), "MIDI render is active beneath the clip (reimagineActive)");
+        check (neuralLanesM() == 0, "no VISIBLE 'Neural Renders'/hidden lane for a MIDI beneath-render");
+        check (visibleTracks() == tracksBeforeApply, "the hidden render track is excluded from the snapshot");
+
+        // accept_render is a no-op for the beneath model — no new lane, no extra visible track.
+        check (ok (cmd (ops, "accept_render", args1 ("clipId", mcid))), "accept_render (MIDI beneath) ok (no-op)");
+        check (neuralLanesM() == 0 && visibleTracks() == tracksBeforeApply, "accept created no lane and no visible track");
+
+        // bypass routes back to the LIVE instrument: the MIDI un-mutes (reimagineActive holds — the
+        // hidden clip still exists, just muted).
+        check (ok (cmd (ops, "bypass_layer", objN ({{ "clipId", mcid }, { "bypassed", true }}))), "bypass_layer (MIDI) ok");
+        check (! (bool) midiClipVar().getProperty ("mute", true), "bypass un-mutes the source MIDI");
+        cmd (ops, "bypass_layer", objN ({{ "clipId", mcid }, { "bypassed", false }}));
+        check ((bool) midiClipVar().getProperty ("mute", false), "un-bypass re-mutes the source MIDI");
+
+        // reset removes the hidden audio + un-mutes the MIDI (back to the editable instrument).
+        check (ok (cmd (ops, "reset_render_layer", args1 ("clipId", mcid))), "reset_render_layer (MIDI) ok");
+        check (! (bool) midiClipVar().getProperty ("mute", true), "reset un-muted the MIDI");
+        check (! reimagineActive(), "reset cleared reimagineActive (hidden clip gone)");
+
+        // re-render after reset re-applies beneath (cache HIT re-lands the hidden clip).
+        auto rRe = cmd (ops, "render_layer", objN ({{ "clipId", mcid }, { "wait", true }}));
+        check (ok (rRe), "re-render after reset (MIDI) ok");
+        check (reimagineActive() && (bool) midiClipVar().getProperty ("mute", false),
+               "re-render re-applied beneath (reimagineActive, MIDI muted)");
+
+        // remove_render_layer tears down the hidden clip + un-mutes (no strand).
+        check (ok (cmd (ops, "remove_render_layer", args1 ("clipId", mcid))), "remove_render_layer (MIDI) ok");
+        check (! (bool) midiClipVar().getProperty ("mute", true), "remove_render_layer un-muted the MIDI");
     }
 
     // ─── Section-scoped render (the agent "rework the hook" path) ───

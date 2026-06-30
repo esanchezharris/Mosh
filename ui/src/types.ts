@@ -23,6 +23,7 @@ export type RenderLayer = {
   appliedInPlace?: boolean;  // wave clips: the clip's own audio IS the render (instant in-place preview)
   hasOriginal?: boolean;     // wave clips: a pre-render original is stored → Reset is available
   coverage?: "auto" | "loop" | "stitch";  // whole-clip: how a clip longer than the model window is covered
+  reimagineActive?: boolean; // MIDI/drum clips: a hidden audio render plays beneath the muted MIDI → Reset is available
 };
 
 // LYR-001 — Finish-My-Song lyric sheet (per-track), from MoshOps.lyricSheetToVar().
@@ -142,6 +143,9 @@ export type Clip = {
   length: number;
   offset: number;
   mute?: boolean;
+  // Phase 2 — a HIDDEN beneath-render: the audio a MIDI/drum re-imagine produced, living on the
+  // same track beneath the muted source. Filtered out of the lanes (it's not a clip to manage).
+  hidden?: boolean;
   gainDb?: number;
   sourceFile?: string;
   sourceMissing?: boolean;   // gap 3 — source file absent on disk; offer relink

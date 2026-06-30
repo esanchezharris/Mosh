@@ -983,6 +983,8 @@ button.tbadge:hover { border-color: var(--lime); color: var(--lime); }
   padding: 1px 6px; border-radius: 999px; pointer-events: none; animation: mosh-pop-in 160ms ease-out;
 }
 .clip[data-transcribing="true"] { box-shadow: 0 0 0 1px var(--lime-dim) inset; }
+/* Phase 2 — a clip whose audio is a hidden re-imagined render beneath the muted MIDI. */
+.clip-badge.reimagine { background: linear-gradient(90deg, #b388ff, #7c4dff); color: #fff; }
 
 /* mount pop-in for the racks/strips/headers — they settle in rather than snapping */
 .pcard, .strip, .thead { animation: mosh-pop-in 160ms cubic-bezier(0.22, 1, 0.36, 1); }

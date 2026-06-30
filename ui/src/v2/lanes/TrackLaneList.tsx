@@ -132,7 +132,7 @@ export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; drag
               <Fragment key={t.id}>
                 <TrackLaneHeader track={t} />
                 <div className="v2-lane" data-track-id={t.id} data-testid="v2-lane" style={{ width: contentW, "--beat-px": `${beatPx}px` } as React.CSSProperties}>
-                  {t.clips.map((c) => (
+                  {t.clips.filter((c) => !c.hidden).map((c) => (
                     <ClipView key={c.id} clip={c} trackType={t.type} snapshot={snapshot} />
                   ))}
                 </div>

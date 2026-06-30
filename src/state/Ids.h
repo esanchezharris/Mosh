@@ -168,6 +168,13 @@ namespace mosh::ids
     MOSH_DECLARE_ID (originalSourceRef) // wave clips: the pre-render source path, stored once, so Reset can restore it (additive)
     MOSH_DECLARE_ID (appliedInPlace)   // wave clips: true while the clip's source IS the render artifact (auto-apply) (additive)
     MOSH_DECLARE_ID (coverage)         // whole-clip coverage: "auto" | "loop" (tile a cycle) | "stitch" (window+crossfade) (additive)
+    // Phase 2 (drum/MIDI re-imagine): marks the HIDDEN looping render that plays beneath a muted
+    // MIDI/drum clip. Set on BOTH the dedicated hidden audio TRACK's state (so snapshot() excludes
+    // the whole track — the producer hears it but never sees it; export uses the real edit, so it
+    // still plays) AND the landed clip's state (defensive UI filter). It can't live on the SOURCE
+    // track because a track's instrument synth overwrites the buffer (silencing any audio clip on
+    // it), so the render lands on its own instrument-free track. Additive, round-trip-safe.
+    MOSH_DECLARE_ID (moshHidden)
     MOSH_DECLARE_ID (createdBy)        // user | (future) monster
     MOSH_DECLARE_ID (userKept)
 
