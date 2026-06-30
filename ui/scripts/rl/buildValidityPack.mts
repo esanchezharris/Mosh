@@ -10,21 +10,31 @@
 //
 //   AUDITION_CLOUD=1 npx tsx scripts/rl/buildValidityPack.mts --out ~/mosh-validity --per 2
 
-import { writeFileSync, mkdirSync, statSync } from "node:fs";
+import { writeFileSync, mkdirSync, statSync, readFileSync, existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
-import { __resetMockForTests, mockExecute } from "../../src/bridge.mock";
-import { buildRecipe, type BrainFn, type Note } from "../../src/agent/beatBuilder";
+import { buildRecipe, monophonicize, type BrainFn, type BuiltRecipe } from "../../src/agent/beatBuilder";
 import { BEAT_SPECS } from "../../src/agent/beatSpecs";
-import { verifyRecipe, type Recipe } from "../../src/agent/recipeVerifier";
+import { verifyRecipe, recipeFromProgram } from "../../src/agent/recipeVerifier";
+import { makePalette, type BeatPalette } from "../../src/agent/palette";
 import { OPTIMIZED_DIRECTIVE } from "../../src/agent/beatDirective";
-import type { CommandResult } from "../../src/types";
 
 const arg = (k: string, d = "") => { const i = process.argv.indexOf(`--${k}`); return i >= 0 && process.argv[i + 1] ? process.argv[i + 1] : d; };
 const OUT = arg("out", join(process.env.HOME!, "mosh-validity"));
 const PER = parseInt(arg("per", "2"), 10);          // seeds per (genre, tier)
 const MOSH_BIN = process.env.MOSH_BIN ?? "/Applications/Mosh.app/Contents/MacOS/Mosh";
 const CONC = parseInt(arg("conc", "5"), 10);
+
+// --palette <dir>: render REAL beats (real kit + melodic 808) so the owner rates productions,
+// not stock outlines (the "hard to rank" fix). Production is held CONSTANT across a group's
+// arrangement-degradation tiers (so A/B isolates arrangement taste); each clip's sound picks are
+// logged for the #56 sound-taste model. Omitted → stock sounds (legacy).
+const PALETTE_DIR = arg("palette", "");
+let PALETTE: BeatPalette | undefined;
+if (PALETTE_DIR && existsSync(join(PALETTE_DIR, "manifest.json"))) {
+  PALETTE = makePalette(JSON.parse(readFileSync(join(PALETTE_DIR, "manifest.json"), "utf8")));
+  console.log(`palette: ${PALETTE_DIR} (kicks ${PALETTE.size("kick")}, 808s ${PALETTE.size("808")})`);
+}
 
 // provider-aware brain (GPT 5.4 mini when keyed) — mirrors the other rl scripts
 const OPENAI_KEY = process.env.OPENAI_API_KEY ?? "", GKEY = process.env.GEMINI_API_KEY ?? "";
@@ -44,12 +54,14 @@ function makeBrain(temp: number): BrainFn {
   };
 }
 
-const clone = (r: Recipe): Recipe => JSON.parse(JSON.stringify(r));
-// degradations are AUDIBLE but in-time/in-structure (test taste, not brokenness)
-function flattenVel(r: Recipe): Recipe { const c = clone(r); for (const t of c.tracks) for (const n of t.notes) n.velocity = 100; return c; }        // robotic
-function cloneBar2(r: Recipe): Recipe { const c = clone(r); for (const t of c.tracks) { const b1 = t.notes.filter((n) => n.start < 4); t.notes = [...b1, ...b1.map((n) => ({ ...n, start: n.start + 4 }))]; } return c; } // no development
+const clone = (r: BuiltRecipe): BuiltRecipe => JSON.parse(JSON.stringify(r));
+// degradations are AUDIBLE but in-time/in-structure (test taste, not brokenness). They touch
+// ONLY notes/velocity → the production picks ride along unchanged (sounds held constant).
+function flattenVel(r: BuiltRecipe): BuiltRecipe { const c = clone(r); for (const t of c.tracks) for (const n of t.notes) n.velocity = 100; return c; }        // robotic
+function cloneBar2(r: BuiltRecipe): BuiltRecipe { const c = clone(r); for (const t of c.tracks) { const b1 = t.notes.filter((n) => n.start < 4); t.notes = [...b1, ...b1.map((n) => ({ ...n, start: n.start + 4 }))]; } return c; } // no development
 
-type Cand = { id: string; genre: string; tier: string; recipe: Recipe; score: number };
+type Cand = { id: string; genre: string; tier: string; recipe: BuiltRecipe; lines: ProgLine[]; score: number };
+type ProgLine = { command: string; args: Record<string, unknown>; capture?: Record<string, string> };
 
 async function pool<T, R>(items: T[], limit: number, fn: (x: T, i: number) => Promise<R>): Promise<R[]> {
   const out: R[] = new Array(items.length); let next = 0;
@@ -57,23 +69,46 @@ async function pool<T, R>(items: T[], limit: number, fn: (x: T, i: number) => Pr
   return out;
 }
 
-/** recipe → native run-script lines (create_track/add_midi_clip/add_note with capture+${ref}) + export_audio */
-function renderRecipe(r: Recipe, wav: string, session: string): boolean {
-  const lines: any[] = [{ command: "set_tempo", args: { bpm: r.tempo } }];
+/** BuiltRecipe → run-script lines WITH production (real kit + melodic 808 + gain-staging) —
+ *  mirrors buildBeatSft.serialize so the rendered clip is a real beat, not a stock outline. */
+function buildLines(r: BuiltRecipe): ProgLine[] {
+  const lines: ProgLine[] = [{ command: "set_tempo", args: { bpm: r.tempo } }];
   let v = 0;
   for (const t of r.tracks) {
     if (!t.notes.length) continue;
-    const tv = `v${v++}`, cv = `v${v++}`;
+    const tv = `v${v++}`;
+    const type = t.role === "drums" ? "drum" : "audio";
+    lines.push({ command: "create_track", args: { name: t.name, type }, capture: { [tv]: "trackId" } });
+    lines.push({ command: "set_track_volume", args: { trackId: `\${${tv}}`, db: t.role === "drums" ? -3 : t.role === "bass" ? -5 : -9 } });
+    const prod = t.production;
+    if (prod?.kind === "drum") for (const p of prod.pads) lines.push({ command: "assign_sample", args: { trackId: `\${${tv}}`, note: p.note, file: p.path, name: p.role } });
+    else if (prod?.kind === "melodic808") lines.push({ command: "assign_sample", args: { trackId: `\${${tv}}`, note: prod.note, file: prod.path, name: "808", mode: "melodic" } });
     const len = Math.ceil(Math.max(...t.notes.map((n) => n.start + n.length)));
-    lines.push({ command: "create_track", args: { name: t.name, type: t.role === "drums" ? "drum" : "instrument" }, capture: { [tv]: "trackId" } });
+    const cv = `v${v++}`;
     lines.push({ command: "add_midi_clip", args: { trackId: `\${${tv}}`, start: 0, length: len }, capture: { [cv]: "clipId" } });
-    for (const n of t.notes) lines.push({ command: "add_note", args: { clipId: `\${${cv}}`, pitch: n.pitch, start: n.start, length: n.length, velocity: n.velocity } });
+    const notes = prod?.kind === "melodic808" ? monophonicize(t.notes) : t.notes;
+    for (const n of notes) lines.push({ command: "add_note", args: { clipId: `\${${cv}}`, pitch: n.pitch, start: n.start, length: n.length, velocity: n.velocity } });
   }
-  lines.push({ command: "export_audio", args: { file: wav, format: "wav", bitDepth: 16 } });
+  return lines;
+}
+
+function render(lines: ProgLine[], wav: string, session: string): boolean {
+  const all = [...lines, { command: "export_audio", args: { file: wav, format: "wav", bitDepth: 16 } }];
   const sf = wav.replace(/\.wav$/, ".script.jsonl");
-  writeFileSync(sf, lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
+  writeFileSync(sf, all.map((l) => JSON.stringify(l)).join("\n") + "\n");
   spawnSync(MOSH_BIN, ["--run-script"], { env: { ...process.env, MOSH_RUN_SCRIPT: sf, MOSH_SELFTEST_SESSION: session }, encoding: "utf8", timeout: 180000 });
   try { return statSync(wav).size > 44 * 1024; } catch { return false; }  // Mosh can exit non-0 yet write the WAV → trust the file
+}
+
+/** the sound picks a clip used (clip → real one-shots) — the #56 sound-taste log. */
+function soundPicks(r: BuiltRecipe): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const t of r.tracks) {
+    const p = t.production;
+    if (p?.kind === "drum") out[t.name] = p.pads.map((x) => ({ role: x.role, path: x.path }));
+    else if (p?.kind === "melodic808") out[t.name] = { role: "808", path: p.path };
+  }
+  return out;
 }
 
 async function main() {
@@ -82,19 +117,23 @@ async function main() {
   // generate base recipes (optimized + plain) per genre×seed, then derive degraded tiers from plain
   const jobs = BEAT_SPECS.flatMap((s) => Array.from({ length: PER }, (_, i) => ({ spec: s, seed: i })));
   const gens = await pool(jobs, CONC, async ({ spec, seed }) => {
-    const opt = await buildRecipe(spec, makeBrain(0.7), { maxRetries: 1, refineTempo: false, extraSystem: OPTIMIZED_DIRECTIVE });
-    const plain = await buildRecipe(spec, makeBrain(0.8), { maxRetries: 1, refineTempo: false });
-    const toR = (b: any): Recipe => ({ tempo: b.tempo, key: b.key, bars: b.bars, tracks: b.tracks });
-    return { spec, seed, opt: toR(opt), plain: toR(plain) };
+    // productionSeed=seed → opt + plain (and the derived flat/flat_clone) share the SAME real
+    // sounds within a genre×seed group, so the A/B pairs isolate ARRANGEMENT taste.
+    const opt = await buildRecipe(spec, makeBrain(0.7), { maxRetries: 1, refineTempo: false, extraSystem: OPTIMIZED_DIRECTIVE, palette: PALETTE, productionSeed: seed });
+    const plain = await buildRecipe(spec, makeBrain(0.8), { maxRetries: 1, refineTempo: false, palette: PALETTE, productionSeed: seed });
+    return { spec, seed, opt, plain };
   });
   for (const g of gens) {
-    const tiers: [string, Recipe][] = [
+    const tiers: [string, BuiltRecipe][] = [
       ["optimized", g.opt],
       ["plain", g.plain],
       ["flat", flattenVel(g.plain)],
       ["flat_clone", cloneBar2(flattenVel(g.plain))],
     ];
-    for (const [tier, recipe] of tiers) cands.push({ id: `${g.spec.id}_${g.seed}_${tier}`, genre: g.spec.id, tier, recipe, score: verifyRecipe(recipe).total });
+    for (const [tier, recipe] of tiers) {
+      const lines = buildLines(recipe);  // real-sound run-script
+      cands.push({ id: `${g.spec.id}_${g.seed}_${tier}`, genre: g.spec.id, tier, recipe, lines, score: verifyRecipe(recipeFromProgram(lines)).total });
+    }
   }
 
   // shuffle deterministically (no Math.random in this env) by score-hash so the pack is blind
@@ -105,9 +144,9 @@ async function main() {
   for (let i = 0; i < cands.length; i++) {
     const c = cands[i];
     const idx = String(i + 1).padStart(3, "0");
-    const rendered = renderRecipe(c.recipe, join(OUT, "clips", `${idx}.wav`), `validity_${idx}`);
+    const rendered = render(c.lines, join(OUT, "clips", `${idx}.wav`), `validity_${idx}`);
     if (rendered) ok++;
-    mapping.push({ index: idx, rendered, cand_id: c.id, genre: c.genre, tier: c.tier, verifier: +c.score.toFixed(4), dims: verifyRecipe(c.recipe).dims });
+    mapping.push({ index: idx, rendered, cand_id: c.id, genre: c.genre, tier: c.tier, verifier: +c.score.toFixed(4), dims: verifyRecipe(recipeFromProgram(c.lines)).dims, sound_picks: soundPicks(c.recipe) });
     console.log(`  ${idx} ${c.tier.padEnd(11)} verifier ${c.score.toFixed(3)} render ${rendered ? "OK" : "FAIL"}`);
   }
   writeFileSync(join(OUT, ".mapping.json"), JSON.stringify({ n: cands.length, mapping }, null, 1));
