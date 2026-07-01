@@ -28,7 +28,7 @@ the repo. The committed artifact is metadata, a score, and an owner decision.
 ## Intake Fields
 
 Each candidate review should fill these fields. Use
-[`docs/templates/recipe-source-candidate.md`](docs/templates/recipe-source-candidate.md)
+[`docs/templates/recipe-source-candidate.md`](templates/recipe-source-candidate.md)
 for one source at a time. Validate cards with
 `python3 service/corpus/recipe_source_intake.py validate <card-or-dir>` and emit
 a safe review index with `python3 service/corpus/recipe_source_intake.py index <card-or-dir>`.
@@ -87,6 +87,19 @@ local-handling score can veto the candidate even when the music is useful.
 8. Before using a new recipe for generation or reward work, run the matching
    Phase 0 checks from the real-recipes substrate when available: recipe schema,
    compile/render smoke, recombination provenance, and owner audition set.
+
+For a local MIDI-pack corpus, generate a safe promotion packet before moving
+recipes from `.cache/` into a tracked library or broader staged runtime:
+
+```bash
+service/teardown/.venv/bin/python scripts/verify-hardware/midi_corpus_promotion_packet.py \
+  --root .cache/mosh-teardown/midi-ingredients/2026-07-01-r7-curated \
+  --out .cache/mosh-teardown/midi-ingredients/2026-07-01-r7-curated/promotion-packet.json
+```
+
+The packet intentionally reports source path classes and role counts only, not
+raw MIDI paths or media. Treat `repo_promotion_safe_now:false` as expected until
+the owner source-policy decision and Gate C listening verdict are recorded.
 
 ## Local-Only Media Rules
 
