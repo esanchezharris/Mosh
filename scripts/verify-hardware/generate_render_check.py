@@ -9,6 +9,8 @@ pad), and that recombination actually pulled elements from MORE THAN ONE source 
 Needs the (gitignored) palette + the built binary; SKIPs cleanly otherwise.
 
     MOSH_BIN=build-macos-arm64/Mosh_artefacts/Debug/Mosh.app/Contents/MacOS/Mosh \
+    MOSH_RECIPE_LIBRARY=.cache/mosh-teardown/midi-ingredients/<run>/library \
+    MOSH_PALETTE_MANIFEST=/path/to/service/palette/palette/manifest.json \
         service/teardown/.venv/bin/python scripts/verify-hardware/generate_render_check.py
 """
 from __future__ import annotations
@@ -39,7 +41,9 @@ def main() -> int:
     binp = os.environ.get("MOSH_BIN", "").strip() or DEFAULT_BIN
     if not os.path.isfile(binp):
         _skip(f"no Mosh binary at {binp!r}")
-    palette = G.load_palette()
+    library_dir = os.environ.get("MOSH_RECIPE_LIBRARY", "").strip() or G.LIB_DIR
+    palette_manifest = os.environ.get("MOSH_PALETTE_MANIFEST", "").strip()
+    palette = G.load_palette(palette_manifest) if palette_manifest else G.load_palette()
     if not palette:
         _skip("no palette manifest (owner-private, gitignored)")
 
@@ -59,7 +63,7 @@ def main() -> int:
     multi_source_seen = False
     with tempfile.TemporaryDirectory(prefix="gen-render-") as td:
         for i, (req, seed) in enumerate(requests):
-            rec, prov = G.generate(req, seed=seed, palette=palette)
+            rec, prov = G.generate(req, library_dir=library_dir, seed=seed, palette=palette)
             prog = compile_recipe(rec).commands
             has_melodic_808 = any(c["command"] == "assign_sample" and c["args"].get("mode") == "melodic"
                                   for c in prog)

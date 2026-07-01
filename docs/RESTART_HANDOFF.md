@@ -91,10 +91,12 @@ $VENV service/recipes/seed_authoring.py          # → service/recipes/library/*
 # --- render proofs (need MOSH_BIN + the palette manifest) ---
 MOSH_BIN=$MOSH_BIN $VENV scripts/verify-hardware/recipe_render_check.py     # 808 SUSTAIN check
 MOSH_BIN=$MOSH_BIN $VENV scripts/verify-hardware/generate_render_check.py   # generated beats render + recombine
+MOSH_BIN=$MOSH_BIN MOSH_RECIPE_LIBRARY=.cache/mosh-teardown/midi-ingredients/<run>/library MOSH_PALETTE_MANIFEST=<manifest.json> $VENV scripts/verify-hardware/generate_render_check.py
 MOSH_BIN=$MOSH_BIN $VENV scripts/verify-hardware/render_audition.py ~/mosh-beats/restart  # audition set
 
 # --- generate one beat (CLI) ---
 $VENV service/recipes/generate.py --mood dark --tempo 140 --key "F minor" --seed 7 --emit recipe
+$VENV service/recipes/generate.py --library-dir .cache/mosh-teardown/midi-ingredients/<run>/library --palette-manifest <manifest.json> --mood dark --tempo 140 --key "F minor" --seed 7 --emit program
 
 # --- ingest local MIDI packs as generator-ready single-element ingredients ---
 $VENV service/teardown/cli.py ingest-midi --dir "<midi-pack>" --out .cache/mosh-teardown/midi-ingredients/<run>/<pack> --library-out .cache/mosh-teardown/midi-ingredients/<run>/library
