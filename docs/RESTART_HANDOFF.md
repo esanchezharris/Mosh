@@ -85,6 +85,13 @@ The current gitignored local ingredient run is
   by count, pitch, start, duration, and velocity, then checks minimum corpus size and
   required generator roles. Split drum ingredients are verified against the filtered source
   notes named by `source_role_filter`.
+- `scripts/verify-hardware/gate_a_midi_audit.py` writes a durable Gate-A-style JSON audit
+  for MIDI-native sources: exact source-MIDI note fidelity, minimum corpus size, role
+  coverage, generated render proof, melodic 808 assignment, cross-source recombination, and
+  absent render failures. The current audit artifact is
+  `.cache/mosh-teardown/midi-ingredients/2026-07-01-r2/gate-a-midi-audit.json`, with all
+  requirements passing. Source-audio A/B remains separate for tutorial-video mining; it is
+  not applicable to local `.mid` packs.
 - The refreshed MIDI-first scout catalog is
   `.cache/mosh-teardown/midi-ingredients/2026-07-01-r2/catalog-midi-first.sqlite`
   with 31 candidates: 1 ideal, 13 usable, 4 weak, 13 reject. Ideal/usable jobs were
@@ -156,6 +163,7 @@ $VENV service/teardown/cli.py ingest-midi --dir "<gm-drum-midi-pack>" --out .cac
 
 # --- Gate-A-equivalent check for local MIDI ingredient fidelity ---
 $VENV service/teardown/midi_corpus_gate.py --root .cache/mosh-teardown/midi-ingredients/<run> --min-recipes 30
+MOSH_BIN=$MOSH_BIN MOSH_PALETTE_MANIFEST=<manifest.json> $VENV scripts/verify-hardware/gate_a_midi_audit.py --root .cache/mosh-teardown/midi-ingredients/<run> --out .cache/mosh-teardown/midi-ingredients/<run>/gate-a-midi-audit.json
 
 # --- rescore the preserved scout catalog without mutating the checked-in copy ---
 $VENV service/teardown/cli.py rescore-catalog --catalog service/teardown/catalog.sqlite --out-catalog .cache/mosh-teardown/midi-ingredients/<run>/catalog-midi-first.sqlite
