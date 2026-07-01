@@ -32,6 +32,11 @@ def main() -> int:
     if not shutil.which("tesseract"):
         print("[SKIP] tesseract missing")
         return 0
+    try:
+        import PIL  # noqa: F401
+    except Exception:
+        print("[SKIP] Pillow missing")
+        return 0
     with tempfile.TemporaryDirectory() as tmp:
         frame = Path(tmp) / "serum-frame.jpg"
         _write_frame(frame)
