@@ -134,6 +134,63 @@ def cmd_queue(args: argparse.Namespace) -> int:
     return 0
 
 
+def _candidate_from_catalog_row(row: dict) -> TutorialCandidate:
+    evidence = json.loads(row.get("evidence_json") or "{}")
+    metadata = json.loads(row.get("metadata_json") or "{}")
+    return TutorialCandidate.from_mapping({
+        "video_id": row.get("video_id", ""),
+        "url": row.get("url", ""),
+        "title": row.get("title", ""),
+        "channel": row.get("channel", ""),
+        "duration_s": row.get("duration_s"),
+        "license": row.get("license", "unknown"),
+        "template_id": row.get("template_id", ""),
+        "probe": evidence.get("probe", {}) if isinstance(evidence, dict) else {},
+        "metadata": metadata if isinstance(metadata, dict) else {},
+    })
+
+
+def cmd_rescore_catalog(args: argparse.Namespace) -> int:
+    source = TutorialCatalog(args.catalog)
+    rows = source.list(limit=args.limit if args.limit else None)
+    scored = rank_tutorials(
+        [_candidate_from_catalog_row(row) for row in rows],
+        policy=ScoutPolicy(synth_policy=args.synth_policy),
+    )
+    old_by_id = {row["video_id"]: row for row in rows}
+    out_path = args.out_catalog or args.catalog
+    if args.out_catalog:
+        catalog_path = Path(args.catalog).expanduser().resolve()
+        output_path = Path(out_path).expanduser().resolve()
+        if output_path != catalog_path:
+            for stale_path in (Path(out_path), Path(f"{out_path}-wal"), Path(f"{out_path}-shm")):
+                if stale_path.exists():
+                    stale_path.unlink()
+    output_catalog = TutorialCatalog(out_path)
+    movement = []
+    for item in scored:
+        old = old_by_id.get(item.candidate.video_id, {})
+        output_catalog.upsert(item, discovered_at=old.get("discovered_at", ""), screened_at=old.get("screened_at", ""))
+        if old and (old.get("status") != item.decision or round(float(old.get("score", 0.0)), 4) != item.score):
+            movement.append({
+                "video_id": item.candidate.video_id,
+                "title": item.candidate.title,
+                "old_status": old.get("status"),
+                "new_status": item.decision,
+                "old_score": old.get("score"),
+                "new_score": item.score,
+            })
+    output = {
+        "catalog": args.catalog,
+        "out_catalog": out_path,
+        "summary": output_catalog.summary(),
+        "changed": movement,
+    }
+    json.dump(output, sys.stdout, indent=2, sort_keys=True)
+    sys.stdout.write("\n")
+    return 0
+
+
 def cmd_export_jobs(args: argparse.Namespace) -> int:
     catalog = TutorialCatalog(args.catalog)
     statuses = tuple(status.strip() for status in args.statuses.split(",") if status.strip())
@@ -154,7 +211,8 @@ def cmd_export_jobs(args: argparse.Namespace) -> int:
 def cmd_ingest_midi(args: argparse.Namespace) -> int:
     from teardown.midi_ingest import ingest_directory
 
-    output = ingest_directory(args.dir, args.out, bpm=args.bpm, key=args.key, limit=args.limit)
+    output = ingest_directory(args.dir, args.out, bpm=args.bpm, key=args.key,
+                              limit=args.limit, library_out=args.library_out)
     json.dump(output, sys.stdout, indent=2, sort_keys=True)
     sys.stdout.write("\n")
     return 0
@@ -205,6 +263,13 @@ def build_parser() -> argparse.ArgumentParser:
     queue_parser.add_argument("--limit", type=int, default=10)
     queue_parser.set_defaults(func=cmd_queue)
 
+    rescore_parser = subparsers.add_parser("rescore-catalog", help="rescore an existing tutorial catalog with the current ranker")
+    rescore_parser.add_argument("--catalog", default=str(_DEFAULT_CATALOG))
+    rescore_parser.add_argument("--out-catalog", default="")
+    rescore_parser.add_argument("--limit", type=int, default=0)
+    rescore_parser.add_argument("--synth-policy", default="hybrid", choices=["hybrid", "strict"])
+    rescore_parser.set_defaults(func=cmd_rescore_catalog)
+
     jobs_parser = subparsers.add_parser("export-jobs", help="export queued scout rows as teardown job JSONL")
     jobs_parser.add_argument("--catalog", default=str(_DEFAULT_CATALOG))
     jobs_parser.add_argument("--out", default=str(_DEFAULT_JOBS))
@@ -220,6 +285,7 @@ def build_parser() -> argparse.ArgumentParser:
     ingest_parser.add_argument("--bpm", type=float, default=140.0)
     ingest_parser.add_argument("--key", default="")
     ingest_parser.add_argument("--limit", type=int, default=0)
+    ingest_parser.add_argument("--library-out", default="", help="optional flat Recipe library directory for generator.load_library")
     ingest_parser.set_defaults(func=cmd_ingest_midi)
 
     return parser

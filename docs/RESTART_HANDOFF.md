@@ -46,9 +46,10 @@ execution drifted toward synth-patch cloning. Correct the loop this way:
 - **Stop deepening `synth_from_screen` for v1.** The critical path is notes + role +
   provenance + render fidelity.
 
-Mechanical follow-up now exists: `service/teardown/cli.py ingest-midi --dir <midi-pack> --out <recipes>`
+Mechanical follow-up now exists: `service/teardown/cli.py ingest-midi --dir <midi-pack> --out <recipes> --library-out <flat-library>`
 scans `.mid`/`.midi`, classifies a role, writes one single-element `recipe.json` per file,
-and keeps the musical body inline in `Midi.notes`.
+optionally writes a flat generator-ready library, and keeps the musical body inline in
+`Midi.notes`.
 
 ---
 
@@ -94,6 +95,12 @@ MOSH_BIN=$MOSH_BIN $VENV scripts/verify-hardware/render_audition.py ~/mosh-beats
 
 # --- generate one beat (CLI) ---
 $VENV service/recipes/generate.py --mood dark --tempo 140 --key "F minor" --seed 7 --emit recipe
+
+# --- ingest local MIDI packs as generator-ready single-element ingredients ---
+$VENV service/teardown/cli.py ingest-midi --dir "<midi-pack>" --out .cache/mosh-teardown/midi-ingredients/<run>/<pack> --library-out .cache/mosh-teardown/midi-ingredients/<run>/library
+
+# --- rescore the preserved scout catalog without mutating the checked-in copy ---
+$VENV service/teardown/cli.py rescore-catalog --catalog service/teardown/catalog.sqlite --out-catalog .cache/mosh-teardown/midi-ingredients/<run>/catalog-midi-first.sqlite
 
 # --- the scout pipeline (once #194 lands — see §5) ---
 $VENV service/teardown/cli.py queue --catalog service/teardown/catalog.sqlite --limit 10

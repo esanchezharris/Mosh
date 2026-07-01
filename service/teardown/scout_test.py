@@ -21,7 +21,7 @@ from teardown.scout import (
     load_template_bank,
     rank_tutorials,
 )
-from teardown.cli import _read_api_key_file
+from teardown.cli import _read_api_key_file, main as scout_cli_main
 
 
 def check(name: str, ok: bool, detail: str = "") -> None:
@@ -207,6 +207,15 @@ def main() -> int:
         check("job jsonl written", write_jobs(jobs_path, jobs) == 4 and jobs_path.exists(), str(jobs_path))
         summary = catalog.summary()
         check("catalog summary counts", summary["total"] == 5 and summary["by_status"].get("ideal", 0) == 1 and summary["by_status"].get("usable", 0) >= 3, json.dumps(summary, sort_keys=True))
+        rescored_path = Path(tmp) / "rescored.sqlite"
+        check("rescore-catalog exits 0",
+              scout_cli_main(["rescore-catalog", "--catalog", str(catalog_path), "--out-catalog", str(rescored_path)]) == 0)
+        rescored_summary = TutorialCatalog(rescored_path).summary()
+        check("rescore-catalog preserves row count", rescored_summary["total"] == 5, json.dumps(rescored_summary, sort_keys=True))
+        check("rescore-catalog rewrites out-catalog on rerun",
+              scout_cli_main(["rescore-catalog", "--catalog", str(catalog_path),
+                              "--out-catalog", str(rescored_path), "--limit", "1"]) == 0
+              and TutorialCatalog(rescored_path).summary()["total"] == 1)
         catalog.update_status("ideal-1", "reject")
         reprioritized = catalog.list(limit=4)
         first_reject = next(index for index, row in enumerate(reprioritized) if row["status"] == "reject")

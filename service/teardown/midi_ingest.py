@@ -39,7 +39,8 @@ def _sha256(path: Path) -> str:
 
 
 def _role_from_name(path: Path) -> R.Role | None:
-    name = path.stem.lower()
+    nearby = " ".join(part.lower() for part in (*path.parts[-4:-1], path.stem))
+    name = nearby
     if "808" in name or "sub" in name or "bass" in name:
         return R.Role.r808
     if "kick" in name:
@@ -50,7 +51,7 @@ def _role_from_name(path: Path) -> R.Role | None:
         return R.Role.clap
     if "hat" in name or "hihat" in name or "hi_hat" in name or "hi-hat" in name:
         return R.Role.hat
-    if "perc" in name or "rim" in name or "shaker" in name:
+    if "perc" in name or "rim" in name or "shaker" in name or "stomp" in name:
         return R.Role.perc
     if "chord" in name or "progression" in name or "pad" in name:
         return R.Role.pad
@@ -203,9 +204,18 @@ def recipe_from_midi(path: str | Path, *, bpm: float = 140.0, key: str = "") -> 
     )
 
 
-def ingest_directory(root: str | Path, out_dir: str | Path, *, bpm: float = 140.0, key: str = "", limit: int = 0) -> dict[str, Any]:
+def ingest_directory(
+    root: str | Path,
+    out_dir: str | Path,
+    *,
+    bpm: float = 140.0,
+    key: str = "",
+    limit: int = 0,
+    library_out: str | Path | None = None,
+) -> dict[str, Any]:
     root_path = Path(root)
     out_path = Path(out_dir)
+    library_path = Path(library_out) if library_out else None
     midi_files = sorted(path for path in root_path.rglob("*") if path.suffix.lower() in {".mid", ".midi"})
     if limit:
         midi_files = midi_files[:limit]
@@ -216,10 +226,18 @@ def ingest_directory(root: str | Path, out_dir: str | Path, *, bpm: float = 140.
         folder.mkdir(parents=True, exist_ok=True)
         recipe_json = folder / "recipe.json"
         recipe_json.write_text(R.to_json(rec) + "\n", encoding="utf-8")
+        library_recipe = ""
+        if library_path is not None:
+            library_path.mkdir(parents=True, exist_ok=True)
+            digest = (rec.source.content_hash or "")[:8]
+            library_recipe_path = library_path / f"{rec.recipe_id}_{digest}.json"
+            library_recipe_path.write_text(R.to_json(rec) + "\n", encoding="utf-8")
+            library_recipe = str(library_recipe_path)
         compiled = compile_recipe(rec)
         recipes.append({
             "input": str(midi_path),
             "recipe": str(recipe_json),
+            "library_recipe": library_recipe,
             "recipe_id": rec.recipe_id,
             "role": rec.elements[0].role.value if rec.elements else "other",
             "notes": rec.elements[0].midi.note_count if rec.elements else 0,

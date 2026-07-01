@@ -240,6 +240,10 @@ def _element(rec, role):
     return None
 
 
+def _drum_role_count(rec) -> int:
+    return sum(1 for e in rec.elements if e.role.value in DRUM_ROLES)
+
+
 def recombine(library: list, request: dict, rng: Rng, palette: dict) -> tuple:
     """Assemble a NEW recipe: drum-kit groove from one recipe, 808 from another, chords from a
     third, optional lead from a fourth — each transposed into one key, the 808 bound to the
@@ -252,13 +256,27 @@ def recombine(library: list, request: dict, rng: Rng, palette: dict) -> tuple:
 
     elements: list = []
 
-    # 1) DRUMS — take kick+snare+hat as a coherent SET from one recipe (groove stays intact).
     drum_src = _pick_recipe_with("kick", ranked, rng) or backbone
-    prov.sources["drums"] = drum_src.source.video_id
+    if _drum_role_count(drum_src) >= 2:
+        prov.sources["drums"] = drum_src.source.video_id
+    else:
+        prov.sources["drums"] = "per-role"
+    added_drums: set[str] = set()
     for role in ("kick", "snare", "hat", "clap", "perc"):
         e = _element(drum_src, role)
         if e:
             elements.append(_clone_element(e))  # drums are NOT transposed (GM pad pitches)
+            added_drums.add(role)
+    for role in ("kick", "snare", "hat", "clap", "perc"):
+        if role in added_drums:
+            continue
+        role_src = _pick_recipe_with(role, ranked, rng)
+        if role_src:
+            e = _element(role_src, role)
+            if e:
+                elements.append(_clone_element(e))
+                added_drums.add(role)
+                prov.sources[f"drums.{role}"] = role_src.source.video_id
 
     # 2) CHORDS — harmonic backbone (drives the 808). Pick a recipe with a pad/chords element.
     chord_src = _pick_recipe_with("pad", ranked, rng) or backbone
