@@ -89,7 +89,8 @@ The current gitignored local ingredient run is
   `.cache/mosh-teardown/midi-ingredients/2026-07-01-r2/catalog-midi-first.sqlite`
   with 31 candidates: 1 ideal, 13 usable, 4 weak, 13 reject. Ideal/usable jobs were
   exported to
-  `.cache/mosh-teardown/midi-ingredients/2026-07-01-r2/teardown_jobs-midi-first.jsonl`.
+  `.cache/mosh-teardown/midi-ingredients/2026-07-01-r2/teardown_jobs-midi-first.jsonl`
+  with 14 queued jobs.
 
 Known corpus caveat: the local corpus now covers every generator drum role, and the current
 render gate selected the new `snare` and `clap` ingredients in all three generated beats.
@@ -185,7 +186,7 @@ cd service/teardown && .venv/bin/python recipe.py --emit-schema > recipe.schema.
 
 ## 4. What's NEXT (priority order)
 
-1. **The REAL corpus (the true "start from knowing") — start here.** You already have real scouted data: `ClaudeMosh-moshfx/service/teardown/catalog.sqlite` (31 candidates) + `teardown_jobs.jsonl` (13 queued jobs). Once #194 lands, run the existing `video2recipe/` (FL Studio MIDI-from-screen is live) against those queued jobs → recipe → **Gate A**. Target ~30–50 trap/melodic-trap recipes to replace/expand the 5 hand-authored bootstrap seeds in `service/recipes/library/`.
+1. **The REAL corpus (the true "start from knowing") — start here.** You already have real scouted data: `ClaudeMosh-moshfx/service/teardown/catalog.sqlite` (31 candidates) + the MIDI-first rescore/export at `.cache/mosh-teardown/midi-ingredients/2026-07-01-r2/teardown_jobs-midi-first.jsonl` (14 queued ideal/usable jobs). Once #194 lands, run the existing `video2recipe/` (FL Studio MIDI-from-screen is live) against those queued jobs → recipe → **Gate A**. Target ~30–50 trap/melodic-trap recipes to replace/expand the 5 hand-authored bootstrap seeds in `service/recipes/library/`.
    - Each new recipe must pass **Gate A (fidelity)**: reconstruct → render → A/B vs. the source tutorial audio ("does it sound like that beat?"). Owner-ear — see the goal prompt in §7 for exactly how to get this signal without live Claude access this week.
 2. **Gate C (the verdict).** Blind A/B pack — retrieved-adapted vs. the old template vs. exact reconstruction, scored on "musically distinct" + "would keep" (reuse `ui/scripts/rl/buildValidityPack.mts` patterns).
 3. **Phase 2 — finish the live-agent product path.** The `generate_beat_recipe` command surface is wired in `codex/video2recipe-port`; remaining work is to route the natural-language beat intent away from the old template builder where needed, rebuild + redeploy so `/Applications/Mosh.app` has the command and melodic-808 engine changes, and prove Finder launch with the recipe runtime configured.
@@ -219,7 +220,7 @@ cd service/teardown && .venv/bin/python recipe.py --emit-schema > recipe.schema.
 >
 > **Do, in order:**
 > 1. Land #194 (resolve the `__init__.py` conflict with #190's merge — combine both export surfaces).
-> 2. Use the recovered real scout data (`ClaudeMosh-moshfx/service/teardown/{catalog.sqlite,teardown_jobs.jsonl}` — 31 candidates, 13 queued jobs) to mine ~30–50 real trap/melodic-trap recipes via `video2recipe/`, replacing/expanding the 5 hand-authored bootstrap seeds.
+> 2. Use the recovered real scout data (`ClaudeMosh-moshfx/service/teardown/catalog.sqlite` — 31 candidates — plus `.cache/mosh-teardown/midi-ingredients/2026-07-01-r2/teardown_jobs-midi-first.jsonl` — 14 queued ideal/usable jobs after MIDI-first rescore) to mine ~30–50 real trap/melodic-trap recipes via `video2recipe/`, replacing/expanding the 5 hand-authored bootstrap seeds.
 > 3. For each mined recipe, run **Gate A**: reconstruct → render → compare to the source tutorial audio. Since there's no live owner-in-the-loop this week, produce a scored self-assessment (does the reconstruction preserve tempo/key/the drum pattern/the 808 phrase — check programmatically wherever possible, e.g. onset/pitch overlap against what MIDI-from-screen extracted) and flag anything below a defensible bar rather than silently including it.
 > 4. Run **Gate C**: render a blind-labeled batch (retrieved-adapted vs. old template vs. exact reconstruction) to `~/mosh-beats/` for the owner to listen to when they're back — do not self-grade this one, it's an ear call.
 > 5. Wire the generator into the live agent (replace `beatBuilder`'s beat-generation path) behind the validity gate; rebuild the native app so `/Applications/Mosh.app` carries the melodic-808 engine change; redeploy.
