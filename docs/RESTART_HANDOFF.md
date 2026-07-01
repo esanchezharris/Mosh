@@ -49,7 +49,9 @@ execution drifted toward synth-patch cloning. Correct the loop this way:
 Mechanical follow-up now exists: `service/teardown/cli.py ingest-midi --dir <midi-pack> --out <recipes> --library-out <flat-library>`
 scans `.mid`/`.midi`, classifies a role, writes one single-element `recipe.json` per file,
 optionally writes a flat generator-ready library, and keeps the musical body inline in
-`Midi.notes`.
+`Midi.notes`. For full GM drum MIDI sources, pass `--split-drum-roles snare` or
+`--split-drum-roles kick,snare,hat`; the summary records `source_role_filter`, and the
+corpus gate verifies the recipe against only that role's source pitches.
 
 ### 0b. Live-agent bridge status (2026-07-01)
 
@@ -63,7 +65,7 @@ optionally writes a flat generator-ready library, and keeps the musical body inl
 - The UI agent catalog exposes `generate_beat_recipe`, the parser preserves object-form
   `capture`/`bind`, and the browser mock creates editable MIDI tracks for tests.
 - The debug app command surface has been driven through `Mosh --run-script` against the
-  local 52-recipe MIDI corpus: 19 generated commands applied, no unresolved refs, 6 editable
+  local 62-recipe MIDI corpus: 19 generated commands applied, no unresolved refs, 6 editable
   MIDI-bearing tracks, including the provenance-identified 808 source track.
 
 Do not claim installed-app completion from this alone. `/Applications/Mosh.app` still needs
@@ -76,22 +78,22 @@ proved.
 The current gitignored local ingredient run is
 `.cache/mosh-teardown/midi-ingredients/2026-07-01-r2/`.
 
-- 52 local MIDI ingredient recipes are present in `library/`.
-- All 52 validate against the recipe model and carry inline MIDI notes.
-- Role coverage: 26 `808`, 2 `clap`, 8 `hat`, 2 `kick`, 3 `perc`, 10 `pad`, 1 `lead`.
+- 62 local MIDI ingredient recipes are present in `library/`.
+- All 62 validate against the recipe model and carry inline MIDI notes.
+- Role coverage: 26 `808`, 2 `clap`, 8 `hat`, 2 `kick`, 1 `lead`, 10 `pad`, 3 `perc`, 10 `snare`.
 - `service/teardown/midi_corpus_gate.py` verifies each recipe against its source `.mid`
   by count, pitch, start, duration, and velocity, then checks minimum corpus size and
-  required generator roles.
+  required generator roles. Split drum ingredients are verified against the filtered source
+  notes named by `source_role_filter`.
 - The refreshed MIDI-first scout catalog is
   `.cache/mosh-teardown/midi-ingredients/2026-07-01-r2/catalog-midi-first.sqlite`
   with 31 candidates: 1 ideal, 13 usable, 4 weak, 13 reject. Ideal/usable jobs were
   exported to
   `.cache/mosh-teardown/midi-ingredients/2026-07-01-r2/teardown_jobs-midi-first.jsonl`.
 
-Known corpus caveat: there are no `snare` ingredients yet. This is not a blocker for the
-generator, but it is the next highest-value corpus gap to fill from local packs or
-owner-picked MIDI sources. The current render gate selected the new `clap` ingredients in
-all three generated beats.
+Known corpus caveat: the local corpus now covers every generator drum role, and the current
+render gate selected the new `snare` and `clap` ingredients in all three generated beats.
+The next corpus-quality step is stylistic curation, not missing role coverage.
 
 ---
 
@@ -149,6 +151,7 @@ MOSH_NO_AUDIO=1 MOSH_ENABLE_SA3=0 MOSH_SERVICE_PYTHON=$PWD/service/teardown/.ven
 
 # --- ingest local MIDI packs as generator-ready single-element ingredients ---
 $VENV service/teardown/cli.py ingest-midi --dir "<midi-pack>" --out .cache/mosh-teardown/midi-ingredients/<run>/<pack> --library-out .cache/mosh-teardown/midi-ingredients/<run>/library
+$VENV service/teardown/cli.py ingest-midi --dir "<gm-drum-midi-pack>" --out .cache/mosh-teardown/midi-ingredients/<run>/<pack>-snares --library-out .cache/mosh-teardown/midi-ingredients/<run>/library --split-drum-roles snare
 
 # --- Gate-A-equivalent check for local MIDI ingredient fidelity ---
 $VENV service/teardown/midi_corpus_gate.py --root .cache/mosh-teardown/midi-ingredients/<run> --min-recipes 30

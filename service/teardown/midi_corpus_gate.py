@@ -15,6 +15,13 @@ from teardown import recipe as R  # noqa: E402
 from teardown.render.compile import compile_recipe  # noqa: E402
 from teardown.render.midi_read import read_midi  # noqa: E402
 
+_DRUM_SPLIT_PITCHES = {
+    "kick": {35, 36},
+    "snare": {38, 40},
+    "clap": {39},
+    "hat": {42, 44, 46},
+}
+
 
 def _note_matches(src: dict[str, Any], got: R.NoteEvent) -> bool:
     return (
@@ -23,6 +30,14 @@ def _note_matches(src: dict[str, Any], got: R.NoteEvent) -> bool:
         and abs(float(src["length"]) - float(got.duration_beats)) <= 1e-6
         and int(src.get("velocity", 100)) == int(got.velocity)
     )
+
+
+def _source_notes_for_item(notes: list[dict[str, Any]], item: dict[str, Any]) -> list[dict[str, Any]]:
+    role_filter = str(item.get("source_role_filter") or "")
+    pitches = _DRUM_SPLIT_PITCHES.get(role_filter)
+    if not pitches:
+        return notes
+    return [note for note in notes if int(note["pitch"]) in pitches]
 
 
 def _summary_paths(root: Path) -> list[Path]:
@@ -69,7 +84,7 @@ def run_gate(root: Path, *, min_recipes: int) -> dict[str, Any]:
             try:
                 rec = R.from_json(recipe_path.read_text(encoding="utf-8"))
                 compiled = compile_recipe(rec)
-                source_notes = read_midi(input_path)
+                source_notes = _source_notes_for_item(read_midi(input_path), item)
             except Exception as e:  # noqa: BLE001
                 failures.append({"recipe": str(recipe_path), "error": str(e)})
                 continue
@@ -90,6 +105,7 @@ def run_gate(root: Path, *, min_recipes: int) -> dict[str, Any]:
                 failures.append({
                     "recipe": str(recipe_path),
                     "error": "source/recipe note count mismatch",
+                    "source_role_filter": item.get("source_role_filter", ""),
                     "source_notes": len(source_notes),
                     "recipe_notes": len(recipe_notes),
                 })
@@ -99,6 +115,7 @@ def run_gate(root: Path, *, min_recipes: int) -> dict[str, Any]:
                     failures.append({
                         "recipe": str(recipe_path),
                         "error": "source/recipe note mismatch",
+                        "source_role_filter": item.get("source_role_filter", ""),
                         "note_index": index,
                         "source": src_note,
                         "recipe": got_note.model_dump(),

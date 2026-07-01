@@ -24,6 +24,13 @@ _DRUM_PITCH_ROLES = {
     39: R.Role.clap,
 }
 
+_DRUM_SPLIT_PITCHES = {
+    R.Role.kick: {35, 36},
+    R.Role.snare: {38, 40},
+    R.Role.clap: {39},
+    R.Role.hat: {42, 44, 46},
+}
+
 
 def _safe_slug(value: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_")
@@ -58,6 +65,11 @@ def _role_from_name(path: Path) -> R.Role | None:
     if "lead" in name or "melody" in name or "melodic" in name or "pluck" in name or "arp" in name:
         return R.Role.lead
     return None
+
+
+def _looks_like_drum_source(path: Path) -> bool:
+    nearby = " ".join(part.lower() for part in (*path.parts[-4:-1], path.stem))
+    return any(word in nearby for word in ("drum", "groove", "kick", "snare", "clap", "hat", "perc"))
 
 
 def classify_role(path: Path, notes: list[dict[str, Any]]) -> R.Role:
@@ -165,12 +177,28 @@ def _note_events(notes: list[dict[str, Any]]) -> list[R.NoteEvent]:
     ]
 
 
-def recipe_from_midi(path: str | Path, *, bpm: float = 140.0, key: str = "") -> R.Recipe:
+def _notes_for_role(notes: list[dict[str, Any]], role: R.Role) -> list[dict[str, Any]]:
+    pitches = _DRUM_SPLIT_PITCHES.get(role)
+    if not pitches:
+        return []
+    return [note for note in notes if int(note["pitch"]) in pitches]
+
+
+def recipe_from_midi(
+    path: str | Path,
+    *,
+    bpm: float = 140.0,
+    key: str = "",
+    role_override: R.Role | None = None,
+    notes_override: list[dict[str, Any]] | None = None,
+    recipe_id_suffix: str = "",
+) -> R.Recipe:
     midi_path = Path(path)
-    notes = read_midi(midi_path)
-    role = classify_role(midi_path, notes)
+    notes = notes_override if notes_override is not None else read_midi(midi_path)
+    role = role_override or classify_role(midi_path, notes)
     events = _note_events(notes)
-    slug = _safe_slug(midi_path.stem)
+    slug = _safe_slug(f"{midi_path.stem}_{recipe_id_suffix}" if recipe_id_suffix else midi_path.stem)
+    label = f"{midi_path.stem} {role.value}" if recipe_id_suffix else midi_path.stem
     motif = R.Motif(
         bars=_bars(notes),
         onset_grid=_onset_grid(notes),
@@ -183,7 +211,7 @@ def recipe_from_midi(path: str | Path, *, bpm: float = 140.0, key: str = "") -> 
     element = R.Element(
         element_id=slug,
         role=role,
-        label=midi_path.stem,
+        label=label,
         midi=R.Midi(status=R.MidiStatus.extracted, notes=events, note_count=len(events), confidence=1.0),
         motif=motif,
         bass=_bass_model(notes) if role == R.Role.r808 else None,
@@ -212,6 +240,7 @@ def ingest_directory(
     key: str = "",
     limit: int = 0,
     library_out: str | Path | None = None,
+    split_drum_roles: tuple[R.Role, ...] = (),
 ) -> dict[str, Any]:
     root_path = Path(root)
     out_path = Path(out_dir)
@@ -221,29 +250,52 @@ def ingest_directory(
         midi_files = midi_files[:limit]
     recipes = []
     for index, midi_path in enumerate(midi_files):
-        rec = recipe_from_midi(midi_path, bpm=bpm, key=key)
-        folder = out_path / f"{index + 1:03d}_{rec.recipe_id}"
-        folder.mkdir(parents=True, exist_ok=True)
-        recipe_json = folder / "recipe.json"
-        recipe_json.write_text(R.to_json(rec) + "\n", encoding="utf-8")
-        library_recipe = ""
-        if library_path is not None:
-            library_path.mkdir(parents=True, exist_ok=True)
-            digest = (rec.source.content_hash or "")[:8]
-            library_recipe_path = library_path / f"{rec.recipe_id}_{digest}.json"
-            library_recipe_path.write_text(R.to_json(rec) + "\n", encoding="utf-8")
-            library_recipe = str(library_recipe_path)
-        compiled = compile_recipe(rec)
-        recipes.append({
-            "input": str(midi_path),
-            "recipe": str(recipe_json),
-            "library_recipe": library_recipe,
-            "recipe_id": rec.recipe_id,
-            "role": rec.elements[0].role.value if rec.elements else "other",
-            "notes": rec.elements[0].midi.note_count if rec.elements else 0,
-            "commands": len(compiled.commands),
-            "unresolved": len(compiled.unresolved),
-        })
+        source_notes = read_midi(midi_path)
+        if split_drum_roles:
+            if not _looks_like_drum_source(midi_path):
+                continue
+            recipe_specs = []
+            for role in split_drum_roles:
+                role_notes = _notes_for_role(source_notes, role)
+                if role_notes:
+                    recipe_specs.append((role, role_notes, role.value))
+        else:
+            recipe_specs = [(None, source_notes, "")]
+
+        for role, notes, suffix in recipe_specs:
+            rec = recipe_from_midi(
+                midi_path,
+                bpm=bpm,
+                key=key,
+                role_override=role,
+                notes_override=notes,
+                recipe_id_suffix=suffix,
+            )
+            folder = out_path / f"{len(recipes) + 1:03d}_{rec.recipe_id}"
+            folder.mkdir(parents=True, exist_ok=True)
+            recipe_json = folder / "recipe.json"
+            recipe_json.write_text(R.to_json(rec) + "\n", encoding="utf-8")
+            library_recipe = ""
+            if library_path is not None:
+                library_path.mkdir(parents=True, exist_ok=True)
+                digest = (rec.source.content_hash or "")[:8]
+                library_recipe_path = library_path / f"{rec.recipe_id}_{digest}.json"
+                library_recipe_path.write_text(R.to_json(rec) + "\n", encoding="utf-8")
+                library_recipe = str(library_recipe_path)
+            compiled = compile_recipe(rec)
+            item = {
+                "input": str(midi_path),
+                "recipe": str(recipe_json),
+                "library_recipe": library_recipe,
+                "recipe_id": rec.recipe_id,
+                "role": rec.elements[0].role.value if rec.elements else "other",
+                "notes": rec.elements[0].midi.note_count if rec.elements else 0,
+                "commands": len(compiled.commands),
+                "unresolved": len(compiled.unresolved),
+            }
+            if role is not None:
+                item["source_role_filter"] = role.value
+            recipes.append(item)
     summary = {"input_dir": str(root_path), "out_dir": str(out_path), "recipe_count": len(recipes), "recipes": recipes}
     out_path.mkdir(parents=True, exist_ok=True)
     (out_path / "summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
