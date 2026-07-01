@@ -71,6 +71,27 @@ the rebuilt app and the recipe runtime env/config (`MOSH_SERVICE_PYTHON`,
 `MOSH_RECIPE_LIBRARY`, `MOSH_PALETTE_MANIFEST`) before Finder launch can be considered
 proved.
 
+### 0c. Local MIDI corpus status (2026-07-01)
+
+The current gitignored local ingredient run is
+`.cache/mosh-teardown/midi-ingredients/2026-07-01-r2/`.
+
+- 50 local MIDI ingredient recipes are present in `library/`.
+- All 50 validate against the recipe model and carry inline MIDI notes.
+- Role coverage: 26 `808`, 8 `hat`, 2 `kick`, 3 `perc`, 10 `pad`, 1 `lead`.
+- `service/teardown/midi_corpus_gate.py` verifies each recipe against its source `.mid`
+  by count, pitch, start, duration, and velocity, then checks minimum corpus size and
+  required generator roles.
+- The refreshed MIDI-first scout catalog is
+  `.cache/mosh-teardown/midi-ingredients/2026-07-01-r2/catalog-midi-first.sqlite`
+  with 31 candidates: 1 ideal, 13 usable, 4 weak, 13 reject. Ideal/usable jobs were
+  exported to
+  `.cache/mosh-teardown/midi-ingredients/2026-07-01-r2/teardown_jobs-midi-first.jsonl`.
+
+Known corpus caveat: there are no `snare` or `clap` ingredients yet, so current generated
+drum beds lean on kick/hat/perc. This is not a blocker for the generator, but it is the next
+highest-value corpus gap to fill from local packs or owner-picked MIDI sources.
+
 ---
 
 ## 1. What's DONE — all verified, all on `main`
@@ -127,6 +148,9 @@ MOSH_NO_AUDIO=1 MOSH_ENABLE_SA3=0 MOSH_SERVICE_PYTHON=$PWD/service/teardown/.ven
 
 # --- ingest local MIDI packs as generator-ready single-element ingredients ---
 $VENV service/teardown/cli.py ingest-midi --dir "<midi-pack>" --out .cache/mosh-teardown/midi-ingredients/<run>/<pack> --library-out .cache/mosh-teardown/midi-ingredients/<run>/library
+
+# --- Gate-A-equivalent check for local MIDI ingredient fidelity ---
+$VENV service/teardown/midi_corpus_gate.py --root .cache/mosh-teardown/midi-ingredients/<run> --min-recipes 30
 
 # --- rescore the preserved scout catalog without mutating the checked-in copy ---
 $VENV service/teardown/cli.py rescore-catalog --catalog service/teardown/catalog.sqlite --out-catalog .cache/mosh-teardown/midi-ingredients/<run>/catalog-midi-first.sqlite
