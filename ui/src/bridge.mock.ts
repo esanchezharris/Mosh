@@ -1248,6 +1248,32 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       }, 400);
       return ok(command, { status: "started" });
     }
+    case "generate_beat_recipe": {
+      pushUndo();
+      const bpm = Math.max(20, num(args.tempo, snapshot.session.tempo || 140));
+      snapshot.session.tempo = bpm;
+      const mkTrack = (name: string, type: Track["type"], notes: Array<{ pitch: number; start: number; length: number; velocity: number }>) => {
+        const t: Track = {
+          id: nextTrackId(), index: snapshot.tracks.length, name,
+          type, volumeDb: 0, pan: 0, mute: false, solo: false, clips: [], plugins: [],
+        };
+        ensureInstrument(t, type === "drum");
+        t.clips.push({
+          id: nextClipId(), name, type: "midi", start: 0, length: 8, offset: 0, hasRenderLayer: false,
+          notes: notes.map((n, i) => ({ i, ...n })),
+        });
+        snapshot.tracks.push(t);
+        return { trackId: t.id, clipId: t.clips[0].id, noteCount: notes.length };
+      };
+      const made = [
+        mkTrack("Kick", "drum", [{ pitch: 36, start: 0, length: 0.25, velocity: 112 }, { pitch: 36, start: 2, length: 0.25, velocity: 106 }]),
+        mkTrack("Hat", "drum", [0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5].map((start) => ({ pitch: 42, start, length: 0.25, velocity: 78 }))),
+        mkTrack("808", "audio", [{ pitch: 29, start: 0, length: 1, velocity: 116 }, { pitch: 32, start: 2, length: 1, velocity: 110 }]),
+        mkTrack("Pad", "audio", [{ pitch: 53, start: 0, length: 2, velocity: 82 }, { pitch: 56, start: 2, length: 2, velocity: 82 }]),
+      ];
+      invalidate();
+      return ok(command, { status: "done", commandCount: made.length, appliedCount: made.length, tracks: made });
+    }
     case "remove_note": {
       const f = findClip(str(args.clipId)); if (!f?.clip.notes) return err(command, "not a midi clip");
       pushUndo(); f.clip.notes.splice(num(args.noteIndex), 1); reindexNotes(f.clip); invalidate(); return ok(command);

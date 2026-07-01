@@ -51,6 +51,26 @@ scans `.mid`/`.midi`, classifies a role, writes one single-element `recipe.json`
 optionally writes a flat generator-ready library, and keeps the musical body inline in
 `Midi.notes`.
 
+### 0b. Live-agent bridge status (2026-07-01)
+
+`codex/video2recipe-port` now has the restart wired through the app command surface:
+
+- `POST /generate_recipe` runs the retrieval/recombination generator from the service and
+  returns both a `Recipe` and its compiled MoshOps program.
+- Native MoshOps exposes `generate_beat_recipe`, calls the service, allowlists the generated
+  commands, resolves `capture`/`bind` refs, applies the program as one undoable batch, and
+  rolls back the batch on partial failure.
+- The UI agent catalog exposes `generate_beat_recipe`, the parser preserves object-form
+  `capture`/`bind`, and the browser mock creates editable MIDI tracks for tests.
+- The debug app command surface has been driven through `Mosh --run-script` against the
+  local 50-recipe MIDI corpus: 19 generated commands applied, no unresolved refs, 6 editable
+  MIDI-bearing tracks, including the provenance-identified 808 source track.
+
+Do not claim installed-app completion from this alone. `/Applications/Mosh.app` still needs
+the rebuilt app and the recipe runtime env/config (`MOSH_SERVICE_PYTHON`,
+`MOSH_RECIPE_LIBRARY`, `MOSH_PALETTE_MANIFEST`) before Finder launch can be considered
+proved.
+
 ---
 
 ## 1. What's DONE — all verified, all on `main`
@@ -98,6 +118,13 @@ MOSH_BIN=$MOSH_BIN $VENV scripts/verify-hardware/render_audition.py ~/mosh-beats
 $VENV service/recipes/generate.py --mood dark --tempo 140 --key "F minor" --seed 7 --emit recipe
 $VENV service/recipes/generate.py --library-dir .cache/mosh-teardown/midi-ingredients/<run>/library --palette-manifest <manifest.json> --mood dark --tempo 140 --key "F minor" --seed 7 --emit program
 
+# --- generate one beat through the native MoshOps command surface ---
+cat > /tmp/mosh-generate-recipe.jsonl <<'JSONL'
+{"command":"generate_beat_recipe","args":{"mood":"dark","tempo":140,"key":"F minor","seed":7,"libraryDir":".cache/mosh-teardown/midi-ingredients/<run>/library","paletteManifest":"<manifest.json>"}}
+{"command":"__snapshot","args":{"label":"after"}}
+JSONL
+MOSH_NO_AUDIO=1 MOSH_ENABLE_SA3=0 MOSH_SERVICE_PYTHON=$PWD/service/teardown/.venv/bin/python MOSH_RUN_SCRIPT=/tmp/mosh-generate-recipe.jsonl MOSH_RUN_SCRIPT_OUT=/tmp/mosh-generate-recipe.results.jsonl $MOSH_BIN --run-script
+
 # --- ingest local MIDI packs as generator-ready single-element ingredients ---
 $VENV service/teardown/cli.py ingest-midi --dir "<midi-pack>" --out .cache/mosh-teardown/midi-ingredients/<run>/<pack> --library-out .cache/mosh-teardown/midi-ingredients/<run>/library
 
@@ -123,7 +150,7 @@ cd service/teardown && .venv/bin/python recipe.py --emit-schema > recipe.schema.
 - **A drum role is a DRUM track only when MIDI-driven**; a drum sample placed as raw audio one-shots is an audio track (`_track_type`).
 - **Generator is deterministic** via an LCG seeded from `(request, seed)` — do **not** introduce `Math.random`/`Date`/`random` into it, or determinism (and the tests) break.
 - **Recipes store pure music, NO sample paths** (portable/committable). The generator binds palette samples by role at assembly time.
-- Run python via `service/teardown/.venv/bin/python` (pydantic v2, numpy, soundfile live there).
+- Run recipe Python via `service/teardown/.venv/bin/python` (pydantic v2, numpy, soundfile live there). For native service-spawned recipe generation, pass `MOSH_SERVICE_PYTHON=$PWD/service/teardown/.venv/bin/python`; `service/run.sh` now honors that before falling back to the SA3 venv or system Python.
 - **`docs/auto-loop/STOP` is gitignored by design** (machine-local kill switch, never committed — see `docs/auto-loop/.gitignore`). It currently exists on disk in the main checkout, `ClaudeMosh-moshfx`, and the `sleepy-euler-de0f10` worktree. If you create a NEW worktree, it starts WITHOUT the file — that's fine as long as you don't invoke the legacy `.claude/workflows/auto-loop.workflow.js` Workflow script (see §6). It is not wired to any cron/launchd/GitHub Action — only a direct `Workflow` tool invocation of that script reads it.
 
 ---
@@ -133,7 +160,7 @@ cd service/teardown && .venv/bin/python recipe.py --emit-schema > recipe.schema.
 1. **The REAL corpus (the true "start from knowing") — start here.** You already have real scouted data: `ClaudeMosh-moshfx/service/teardown/catalog.sqlite` (31 candidates) + `teardown_jobs.jsonl` (13 queued jobs). Once #194 lands, run the existing `video2recipe/` (FL Studio MIDI-from-screen is live) against those queued jobs → recipe → **Gate A**. Target ~30–50 trap/melodic-trap recipes to replace/expand the 5 hand-authored bootstrap seeds in `service/recipes/library/`.
    - Each new recipe must pass **Gate A (fidelity)**: reconstruct → render → A/B vs. the source tutorial audio ("does it sound like that beat?"). Owner-ear — see the goal prompt in §7 for exactly how to get this signal without live Claude access this week.
 2. **Gate C (the verdict).** Blind A/B pack — retrieved-adapted vs. the old template vs. exact reconstruction, scored on "musically distinct" + "would keep" (reuse `ui/scripts/rl/buildValidityPack.mts` patterns).
-3. **Phase 2 — wire the generator into the live agent** (replace `beatBuilder`'s beat path), behind the validity gate; rebuild + redeploy the engine so `/Applications/Mosh.app` has the melodic-808 change.
+3. **Phase 2 — finish the live-agent product path.** The `generate_beat_recipe` command surface is wired in `codex/video2recipe-port`; remaining work is to route the natural-language beat intent away from the old template builder where needed, rebuild + redeploy so `/Applications/Mosh.app` has the command and melodic-808 engine changes, and prove Finder launch with the recipe runtime configured.
 
 ---
 

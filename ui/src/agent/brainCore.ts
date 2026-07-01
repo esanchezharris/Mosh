@@ -82,7 +82,13 @@ function coerceArg(tok: string, type: "string" | "number" | "boolean"): unknown 
 function normalizeCommand(c: unknown): AgentCommandCall | null {
   if (c && typeof c === "object" && typeof (c as AgentCommandCall).command === "string") {
     const o = c as AgentCommandCall;
-    return { command: o.command, args: (o.args && typeof o.args === "object" ? o.args : {}) as Record<string, unknown> };
+    const out: AgentCommandCall = {
+      command: o.command,
+      args: (o.args && typeof o.args === "object" ? o.args : {}) as Record<string, unknown>,
+    };
+    if (o.capture && typeof o.capture === "object") out.capture = o.capture;
+    if (typeof o.bind === "string") out.bind = o.bind;
+    return out;
   }
   if (typeof c !== "string") return null;
   const m = c.match(/^\s*([a-zA-Z_]\w*)\s*(?:\(([\s\S]*)\))?\s*;?\s*$/);

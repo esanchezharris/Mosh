@@ -14,6 +14,8 @@ across Fake, Mac SA3, and future PC adapters.
 - `POST /cancel`
 - `POST /transcribe` — audio→MIDI (Basic Pitch); isolated venv, 503 if absent
 - `POST /sketch` — beatbox→drum hits (Sketch Phase 0); isolated venv, 503 if absent
+- `POST /generate_recipe` — real-recipe retrieval/recombination; returns a Recipe plus
+  its compiled MoshOps program for native `generate_beat_recipe`
 
 The canonical adapter id is `stable_audio3`. The dependency-free `fake` adapter is
 always available and is the default for PC gates unless real SA3 is explicitly
@@ -58,9 +60,25 @@ Configure it with:
 If the MLX model path is absent, the service advertises FakeAdapter only and the
 regular command-surface gates still run.
 
+## Recipe Generation Runtime
+
+Recipe generation imports the teardown/recipe stack, so launch the service with the
+teardown interpreter when driving `/generate_recipe` from native Mosh:
+
+```bash
+MOSH_SERVICE_PYTHON=$PWD/service/teardown/.venv/bin/python \
+MOSH_RECIPE_LIBRARY=.cache/mosh-teardown/midi-ingredients/<run>/library \
+MOSH_PALETTE_MANIFEST=<manifest.json> \
+service/run.sh
+```
+
+`service/run.sh` honors `MOSH_SERVICE_PYTHON` before auto-selecting the SA3 venv or
+system Python.
+
 ## PC Notes
 
-Windows gates launch the service through `python`/`py` instead of `run.sh`. Use
-`MOSH_SERVICE_PYTHON` to force a specific interpreter. CUDA SA3 compatibility must
+Windows gates launch the service through `python`/`py` instead of `run.sh`; macOS
+uses `run.sh`. Use `MOSH_SERVICE_PYTHON` to force a specific interpreter on either
+path. CUDA SA3 compatibility must
 remain behind the same `/submit` protocol and `stable_audio3` adapter id; it must
 not change the MoshOps commands, UI contract, JSONL schema, or replay fields.

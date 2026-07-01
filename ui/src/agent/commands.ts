@@ -93,6 +93,7 @@ export const AGENT_COMMANDS: AgentCommand[] = [
 
   // ── generative (Tier-B) ─────────────────────────────────────────────────
   { command: "create_render_layer", desc: "Attach a generative re-imagine layer to ANY clip — wave, MIDI or drum (MIDI/drum is auto-bounced to audio first), optionally scoped to a beat range, in seconds", args: [S("clipId"), S("adapter", false), N("regionStart", false, "scope start in seconds"), N("regionEnd", false, "scope end in seconds")] },
+  { command: "generate_beat_recipe", desc: "Generate an editable beat from the real recipe library and apply the resulting MoshOps as one undoable step", args: [S("mood", false), N("tempo", false), S("key", false), N("seed", false), B("lead", false)] },
   { command: "set_render_param", desc: "Set a render-layer parameter (prompt/noise/seed, or transform target/strength)", args: [S("clipId"), S("prompt", false), N("nl", false, "noise level 0-1"), N("seed", false), S("target", false, "transform target instrument or free-text"), N("strength", false, "transform strength 0-100")] },
   { command: "render_layer", desc: "Run the generative render on a clip's layer", args: [S("clipId")] },
   { command: "accept_render", desc: "Accept a finished render (lands it as a clip)", args: [S("clipId")] },
@@ -200,6 +201,7 @@ export function describeCommand(command: string, args: Record<string, unknown>):
     case "open_plugin_editor": return `Opened a plugin editor`;
     case "remove_plugin": return `Removed a plugin`;
     case "create_render_layer": return `Attached a generative layer`;
+    case "generate_beat_recipe": return `Generated a beat from recipes`;
     case "set_render_param": return `Set a render parameter`;
     case "render_layer": return `Started a render`;
     case "accept_render": return `Accepted a render`;

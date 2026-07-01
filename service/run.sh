@@ -55,8 +55,8 @@ export COLORRACK_DATA="${COLORRACK_DATA:-$(pwd)/colors/COLORRACK_DATA}"
 # SA3 is on by default; the carve runs under the MLX venv when present, else this
 # silently falls back to system python3 (FakeAdapter only). Set MOSH_ENABLE_SA3=0
 # to force FakeAdapter even when the venv exists.
-PY="python3"
-if [[ "${MOSH_ENABLE_SA3:-1}" == "1" && -x "$SA3_MLX_DIR/.venv/bin/python" ]]; then
+PY="${MOSH_SERVICE_PYTHON:-python3}"
+if [[ -z "${MOSH_SERVICE_PYTHON:-}" && "${MOSH_ENABLE_SA3:-1}" == "1" && -x "$SA3_MLX_DIR/.venv/bin/python" ]]; then
   PY="$SA3_MLX_DIR/.venv/bin/python"
 fi
 

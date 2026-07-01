@@ -25,4 +25,8 @@ describe("catalog — performer-mode commands exposed", () => {
     expect(validateCommand("set_current_take", { clipId: "c1" })).not.toBeNull();
     expect(validateCommand("keep_take", { clipId: "c1" })).toBeNull();
   });
+  it("generate_beat_recipe accepts optional taste fields", () => {
+    expect(validateCommand("generate_beat_recipe", { mood: "dark", tempo: 140, key: "F minor", seed: 7, lead: true })).toBeNull();
+    expect(validateCommand("generate_beat_recipe", { tempo: "140" })).not.toBeNull();
+  });
 });

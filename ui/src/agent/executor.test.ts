@@ -91,6 +91,18 @@ describe("agent command contract — catalog args must match the seam", () => {
     expect(cs.entries[0].error).toMatch(/unbound ref/);
   });
 
+  it("runs the recipe generator command through the agent path", async () => {
+    const before = snap().tracks.length;
+    const cs = await runAgentBatch("make a beat", [
+      { command: "generate_beat_recipe", args: { mood: "dark", tempo: 140, key: "F minor", seed: 7 } },
+    ]);
+
+    expect(cs.applied).toBe(1);
+    expect(cs.entries.every((e) => e.ok)).toBe(true);
+    expect(snap().tracks.length).toBeGreaterThan(before);
+    expect(snap().tracks.some((t) => t.name === "808" && t.clips.some((c) => c.type === "midi"))).toBe(true);
+  });
+
   it("emits batch_begin carrying turn_id + utterance + source (the Phase-0 turn marker)", async () => {
     const seen: { command: string; args: Record<string, unknown> }[] = [];
     const orig = useStore.getState().exec;

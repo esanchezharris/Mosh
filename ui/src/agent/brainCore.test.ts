@@ -52,4 +52,21 @@ describe("parseReply", () => {
     const r = parseReply('{"intent":"ACK_GOT_IT","commands":["nope(1)",{"command":"set_tempo","args":{"bpm":90}}]}');
     expect(r.commands).toEqual([{ command: "set_tempo", args: { bpm: 90 } }]);
   });
+
+  it("preserves capture metadata for recipe-shaped object programs", () => {
+    const r = parseReply(JSON.stringify({
+      intent: "ACK_GOT_IT",
+      commands: [
+        { command: "create_track", args: { name: "808" }, capture: { T0: "trackId" } },
+        { command: "add_midi_clip", args: { trackId: "${T0}", start: 0, length: 4 }, bind: "C0" },
+        { command: "add_note", args: { clipId: "${C0}", pitch: 36, start: 0, length: 1, velocity: 104 } },
+      ],
+    }));
+
+    expect(r.commands).toEqual([
+      { command: "create_track", args: { name: "808" }, capture: { T0: "trackId" } },
+      { command: "add_midi_clip", args: { trackId: "${T0}", start: 0, length: 4 }, bind: "C0" },
+      { command: "add_note", args: { clipId: "${C0}", pitch: 36, start: 0, length: 1, velocity: 104 } },
+    ]);
+  });
 });
