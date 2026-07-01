@@ -1,0 +1,140 @@
+{
+  "recipe_id": "clap_snap",
+  "schema_version": "2.0",
+  "source": {
+    "platform": "local-midi",
+    "video_id": "clap_snap",
+    "url": "",
+    "title": "clap snap",
+    "channel": "",
+    "duration_s": 0.0,
+    "license": "unknown",
+    "retrieved_at": null,
+    "content_hash": "1f7aaa0f93e32721c7f39bb4245b754aef12856aea93c644a485e78b9c358d6b"
+  },
+  "meta": {
+    "daw": {
+      "value": null,
+      "confidence": 0.0,
+      "evidence": []
+    },
+    "tempo_bpm": {
+      "value": 140,
+      "confidence": 0.75,
+      "evidence": [
+        "ingest-midi --bpm"
+      ]
+    },
+    "key": {
+      "value": null,
+      "confidence": 0.0,
+      "evidence": []
+    },
+    "time_signature": {
+      "value": "4/4",
+      "confidence": 0.6,
+      "evidence": []
+    }
+  },
+  "arrangement": {
+    "sections": [
+      {
+        "name": "loop",
+        "start_s": 0.0,
+        "end_s": 12.0,
+        "confidence": 0.5
+      }
+    ]
+  },
+  "elements": [
+    {
+      "element_id": "clap_snap",
+      "role": "clap",
+      "label": "clap snap",
+      "audio_ref": null,
+      "midi": {
+        "status": "extracted",
+        "midi_ref": null,
+        "notes": [
+          {
+            "pitch": 60,
+            "start_beats": 2.0,
+            "duration_beats": 0.010417,
+            "velocity": 100
+          },
+          {
+            "pitch": 60,
+            "start_beats": 10.0,
+            "duration_beats": 0.010417,
+            "velocity": 100
+          },
+          {
+            "pitch": 60,
+            "start_beats": 18.0,
+            "duration_beats": 0.010417,
+            "velocity": 100
+          },
+          {
+            "pitch": 60,
+            "start_beats": 26.0,
+            "duration_beats": 0.010417,
+            "velocity": 100
+          }
+        ],
+        "note_count": 4,
+        "confidence": 1.0
+      },
+      "sample_match": {
+        "status": "none",
+        "matched_path": null,
+        "distance": 0.0,
+        "alternates": []
+      },
+      "synth_patch": {
+        "status": "unknown",
+        "plugin": {
+          "name": null,
+          "available_locally": false
+        },
+        "params": {},
+        "match": null,
+        "substitute": null
+      },
+      "onsets": [],
+      "motif": {
+        "bars": 7.0,
+        "onset_grid": "whole",
+        "density": 0.5714,
+        "syncopation": 0.0,
+        "contour": [
+          0,
+          0,
+          0
+        ],
+        "register_band": "perc",
+        "harmonic_function": ""
+      },
+      "bass": null,
+      "evidence": [],
+      "confidence": 1.0
+    }
+  ],
+  "unresolved": [],
+  "reconstruction_class": "deterministic",
+  "yield": {
+    "predicted": {
+      "drums": 0.0,
+      "midi": 1.0,
+      "synth": 0.0,
+      "arrangement": 0.5,
+      "overall": 0.65
+    },
+    "actual": {
+      "drums": 0.0,
+      "midi": 0.0,
+      "synth": 0.0,
+      "arrangement": 0.0,
+      "overall": 0.0
+    }
+  }
+}

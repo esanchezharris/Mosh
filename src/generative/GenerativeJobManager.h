@@ -77,6 +77,8 @@ public:
         on failure (service down, venv absent → 503). */
     juce::var sketchBeatbox (const juce::File& inputWav, double bpm, int bars);
 
+    juce::var generateBeatRecipe (const juce::var& args);
+
     /** Phonology rhyme search (POST /get_rhymes) — Finish-My-Song rung 1. Fast +
         deterministic, no LLM. SYNCHRONOUS — call on a BACKGROUND thread (or accept a
         brief block on the message thread for an explicit on-demand lookup). Returns

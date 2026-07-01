@@ -26,6 +26,7 @@ import sys
 import threading
 import time
 import uuid
+from dataclasses import asdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 # On Windows a JUCE GUI parent may launch this service with stdout/stderr pipes
@@ -52,8 +53,27 @@ from training.trainer_job import train as train_lora  # noqa: E402
 SERVICE_VERSION = "0.3.0"
 START_TIME = time.time()
 SERVICE_DIR = os.path.dirname(os.path.abspath(__file__))
+REPO_DIR = os.path.dirname(SERVICE_DIR)
 SA3_ENABLED = os.environ.get("MOSH_ENABLE_SA3", "1") == "1" and stable_audio3_adapter.available()
 TRAINING_ENABLED = lora_trainer_adapter.available()
+
+
+def _resolve_path(path: str, *, directory: bool) -> str:
+    if not path:
+        return path
+    candidates = [path]
+    if not os.path.isabs(path):
+        candidates.extend([
+            os.path.join(REPO_DIR, path),
+            os.path.join(SERVICE_DIR, path),
+        ])
+    for candidate in candidates:
+        resolved = os.path.abspath(candidate)
+        if directory and os.path.isdir(resolved):
+            return resolved
+        if not directory and os.path.isfile(resolved):
+            return resolved
+    return path
 
 
 def _basic_pitch_py() -> str:
@@ -258,6 +278,55 @@ def _training_descriptor() -> dict:
         "packaging_mode": "python_service",
         "service_build": SERVICE_BUILD,
         "backend": lora_trainer_adapter.backend_name(),
+    }
+
+
+def _generate_recipe_payload(data: dict) -> dict:
+    from recipes import generate as gen  # noqa: PLC0415
+    from teardown import recipe as recipe_model  # noqa: PLC0415
+    from teardown.render.compile import compile_recipe  # noqa: PLC0415
+
+    request = data.get("request", {})
+    if not isinstance(request, dict):
+        request = {}
+    request = dict(request)
+    for key in ("mood", "genre", "key", "lead"):
+        if key in data:
+            request[key] = data[key]
+    if "tempo" in data:
+        request["tempo"] = data["tempo"]
+
+    try:
+        seed = int(data.get("seed", 0) or 0)
+    except (TypeError, ValueError):
+        seed = 0
+
+    library_dir = str(data.get("libraryDir", data.get("library_dir", "")) or "").strip()
+    if not library_dir:
+        library_dir = os.environ.get("MOSH_RECIPE_LIBRARY", "").strip() or gen.LIB_DIR
+    library_dir = _resolve_path(library_dir, directory=True)
+    if not os.path.isdir(library_dir):
+        raise RuntimeError(f"recipe library missing: {library_dir}")
+
+    palette_manifest = str(data.get("paletteManifest", data.get("palette_manifest", "")) or "").strip()
+    if not palette_manifest:
+        palette_manifest = os.environ.get("MOSH_PALETTE_MANIFEST", "").strip()
+    palette_manifest = _resolve_path(palette_manifest, directory=False)
+    palette = gen.load_palette(palette_manifest) if palette_manifest else None
+
+    rec, prov = gen.generate(request, library_dir=library_dir, seed=seed, palette=palette)
+    compiled = compile_recipe(rec).to_dict()
+    return {
+        "ok": True,
+        "recipeId": rec.recipe_id,
+        "request": request,
+        "libraryDir": library_dir,
+        "paletteManifest": palette_manifest,
+        "recipe": json.loads(recipe_model.to_json(rec)),
+        "program": compiled,
+        "provenance": asdict(prov),
+        "commandCount": len(compiled.get("commands", [])),
+        "unresolvedCount": len(compiled.get("unresolved", [])),
     }
 
 
@@ -869,6 +938,13 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(500, {"ok": False, "error": f"sketch failed: {tail or 'no output'}"})
                 return
             self._send(200 if payload.get("ok") else 500, payload)
+        elif path == "/generate_recipe":
+            try:
+                self._send(200, _generate_recipe_payload(data))
+            except RuntimeError as e:
+                self._send(400, {"ok": False, "error": str(e)})
+            except Exception as e:  # noqa: BLE001
+                self._send(500, {"ok": False, "error": f"recipe generation error: {e}"})
         elif path == "/get_rhymes":
             # Phonology rhyme search (Finish-My-Song rung 1). Fast + deterministic; no
             # LLM. Prefer the dedicated phonology venv (so the precise cmudict path works

@@ -11,6 +11,7 @@ GATE B (conditioning) — the agent must USE real recipes, not hallucinate aroun
 """
 import os
 import sys
+import tempfile
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _SERVICE = os.path.dirname(_HERE)
@@ -32,13 +33,22 @@ def check(name, cond, extra=""):
 
 LIB = G.LIB_DIR
 library = G.load_library(LIB)
+seed_library = [r for r in library if r.source.video_id.startswith("seed_")]
+promoted_ingredients = [r for r in library if r.source.platform == "local-midi"]
+library_roles = {e.role.value for r in library for e in r.elements}
 
 # ── library loads ────────────────────────────────────────────────────────────
 check("library has the seed recipes", len(library) >= 5, str(len(library)))
+check("library keeps the original full-beat seeds", len(seed_library) >= 5, str(len(seed_library)))
+check("library includes the promoted r7 ingredient corpus", len(promoted_ingredients) >= 48,
+      str(len(promoted_ingredients)))
+check("promoted/default library covers generator roles",
+      {"808", "kick", "snare", "hat", "pad", "lead"}.issubset(library_roles),
+      str(sorted(library_roles)))
 check("every library recipe carries inline notes",
       all(any(e.midi.notes for e in r.elements) for r in library))
-check("every library recipe has an 808 with the bass sub-model",
-      all(any(e.role.value == "808" and e.bass for e in r.elements) for r in library))
+check("every full-beat seed keeps an 808 with the bass sub-model",
+      all(any(e.role.value == "808" and e.bass for e in r.elements) for r in seed_library))
 
 # ── transposition ─────────────────────────────────────────────────────────────
 check("_interval picks the nearest shift (F→G = +2)", G._interval("F minor", "G minor") == 2)
@@ -122,6 +132,41 @@ for seed in range(12):
                 invented += 1
 check("GATE B(2): 0 invented rhythms across 12 recombinations (all descend from real motifs)",
       invented == 0, f"{invented}/{total} notes had a rhythm not in the library")
+
+with tempfile.TemporaryDirectory() as td:
+    def one(slug, role, note):
+        rec = R.Recipe(
+            recipe_id=slug,
+            source=R.Source(platform="test", video_id=slug),
+            meta=R.Meta(tempo_bpm=R.MetaField(value=140), key=R.MetaField(value="F minor")),
+            elements=[R.Element(
+                element_id=slug,
+                role=role,
+                label=role.value,
+                midi=R.Midi(status="extracted", note_count=1,
+                            notes=[R.NoteEvent(pitch=note, start_beats=0, duration_beats=1)]) )],
+            reconstruction_class="deterministic",
+        )
+        path = os.path.join(td, f"{slug}.json")
+        with open(path, "w") as f:
+            f.write(R.to_json(rec))
+
+    one("kick_ing", R.Role.kick, 36)
+    one("snare_ing", R.Role.snare, 38)
+    one("hat_ing", R.Role.hat, 42)
+    one("pad_ing", R.Role.pad, 48)
+    one("bass_ing", R.Role.r808, 29)
+    one("lead_ing", R.Role.lead, 72)
+    ingredient_rec, ingredient_prov = G.generate({"tempo": 140, "key": "F minor", "lead": True}, library_dir=td, seed=3, palette={})
+    ingredient_roles = {e.role.value for e in ingredient_rec.elements}
+    check("single-element library recombines independent drum roles",
+          {"kick", "snare", "hat"}.issubset(ingredient_roles), str(sorted(ingredient_roles)))
+    check("single-element library keeps melodic ingredient roles",
+          {"808", "pad"}.issubset(ingredient_roles), str(sorted(ingredient_roles)))
+    check("single-element provenance records per-role drum sources",
+          ingredient_prov.sources.get("drums") == "per-role"
+          and ingredient_prov.sources.get("drums.snare") == "snare_ing",
+          str(ingredient_prov.sources))
 
 # ── the recombined beat compiles to a runnable program (assign_sample+add_midi_clip) ──
 prog2 = compile_recipe(rec).commands

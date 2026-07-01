@@ -1,0 +1,258 @@
+{
+  "recipe_id": "eternxlkz_slay_bass_fm_130",
+  "schema_version": "2.0",
+  "source": {
+    "platform": "local-midi",
+    "video_id": "eternxlkz_slay_bass_fm_130",
+    "url": "",
+    "title": "Eternxlkz - SLAY! Bass - Fm - 130",
+    "channel": "",
+    "duration_s": 0.0,
+    "license": "unknown",
+    "retrieved_at": null,
+    "content_hash": "54ca828ea3da7d4320ed6ffbda1b0851067ee1a4acb93c57881bc2274ad07d57"
+  },
+  "meta": {
+    "daw": {
+      "value": null,
+      "confidence": 0.0,
+      "evidence": []
+    },
+    "tempo_bpm": {
+      "value": 140,
+      "confidence": 0.75,
+      "evidence": [
+        "ingest-midi --bpm"
+      ]
+    },
+    "key": {
+      "value": null,
+      "confidence": 0.0,
+      "evidence": []
+    },
+    "time_signature": {
+      "value": "4/4",
+      "confidence": 0.6,
+      "evidence": []
+    }
+  },
+  "arrangement": {
+    "sections": [
+      {
+        "name": "loop",
+        "start_s": 0.0,
+        "end_s": 6.857142857142857,
+        "confidence": 0.5
+      }
+    ]
+  },
+  "elements": [
+    {
+      "element_id": "eternxlkz_slay_bass_fm_130",
+      "role": "808",
+      "label": "Eternxlkz - SLAY! Bass - Fm - 130",
+      "audio_ref": null,
+      "midi": {
+        "status": "extracted",
+        "midi_ref": null,
+        "notes": [
+          {
+            "pitch": 61,
+            "start_beats": 0.0,
+            "duration_beats": 0.75,
+            "velocity": 100
+          },
+          {
+            "pitch": 61,
+            "start_beats": 0.75,
+            "duration_beats": 0.75,
+            "velocity": 100
+          },
+          {
+            "pitch": 61,
+            "start_beats": 1.5,
+            "duration_beats": 1.0,
+            "velocity": 100
+          },
+          {
+            "pitch": 60,
+            "start_beats": 2.5,
+            "duration_beats": 0.5,
+            "velocity": 100
+          },
+          {
+            "pitch": 60,
+            "start_beats": 3.0,
+            "duration_beats": 1.0,
+            "velocity": 100
+          },
+          {
+            "pitch": 65,
+            "start_beats": 4.0,
+            "duration_beats": 0.75,
+            "velocity": 100
+          },
+          {
+            "pitch": 65,
+            "start_beats": 4.75,
+            "duration_beats": 0.75,
+            "velocity": 100
+          },
+          {
+            "pitch": 65,
+            "start_beats": 5.5,
+            "duration_beats": 1.0,
+            "velocity": 100
+          },
+          {
+            "pitch": 60,
+            "start_beats": 6.5,
+            "duration_beats": 0.5,
+            "velocity": 100
+          },
+          {
+            "pitch": 60,
+            "start_beats": 7.0,
+            "duration_beats": 1.0,
+            "velocity": 100
+          },
+          {
+            "pitch": 61,
+            "start_beats": 8.0,
+            "duration_beats": 0.75,
+            "velocity": 100
+          },
+          {
+            "pitch": 61,
+            "start_beats": 8.75,
+            "duration_beats": 0.75,
+            "velocity": 100
+          },
+          {
+            "pitch": 61,
+            "start_beats": 9.5,
+            "duration_beats": 1.0,
+            "velocity": 100
+          },
+          {
+            "pitch": 60,
+            "start_beats": 10.5,
+            "duration_beats": 0.5,
+            "velocity": 100
+          },
+          {
+            "pitch": 60,
+            "start_beats": 11.0,
+            "duration_beats": 1.0,
+            "velocity": 100
+          },
+          {
+            "pitch": 65,
+            "start_beats": 12.0,
+            "duration_beats": 0.75,
+            "velocity": 100
+          },
+          {
+            "pitch": 65,
+            "start_beats": 12.75,
+            "duration_beats": 0.75,
+            "velocity": 100
+          },
+          {
+            "pitch": 65,
+            "start_beats": 13.5,
+            "duration_beats": 1.0,
+            "velocity": 100
+          },
+          {
+            "pitch": 60,
+            "start_beats": 14.5,
+            "duration_beats": 0.5,
+            "velocity": 100
+          },
+          {
+            "pitch": 60,
+            "start_beats": 15.0,
+            "duration_beats": 1.0,
+            "velocity": 100
+          }
+        ],
+        "note_count": 20,
+        "confidence": 1.0
+      },
+      "sample_match": {
+        "status": "none",
+        "matched_path": null,
+        "distance": 0.0,
+        "alternates": []
+      },
+      "synth_patch": {
+        "status": "unknown",
+        "plugin": {
+          "name": null,
+          "available_locally": false
+        },
+        "params": {},
+        "match": null,
+        "substitute": null
+      },
+      "onsets": [],
+      "motif": {
+        "bars": 4.0,
+        "onset_grid": "8th",
+        "density": 5.0,
+        "syncopation": 0.6,
+        "contour": [
+          0,
+          0,
+          -1,
+          0,
+          1,
+          0,
+          0,
+          -1,
+          0,
+          1,
+          0,
+          0,
+          -1,
+          0,
+          1,
+          0,
+          0,
+          -1,
+          0
+        ],
+        "register_band": "mid",
+        "harmonic_function": "root-candidate"
+      },
+      "bass": {
+        "sustain_ratio": 1.0,
+        "glides": [],
+        "kick_alignment": 0.0,
+        "root_follows": false,
+        "root_element_id": null
+      },
+      "evidence": [],
+      "confidence": 1.0
+    }
+  ],
+  "unresolved": [],
+  "reconstruction_class": "deterministic",
+  "yield": {
+    "predicted": {
+      "drums": 0.0,
+      "midi": 1.0,
+      "synth": 0.0,
+      "arrangement": 0.5,
+      "overall": 0.65
+    },
+    "actual": {
+      "drums": 0.0,
+      "midi": 0.0,
+      "synth": 0.0,
+      "arrangement": 0.0,
+      "overall": 0.0
+    }
+  }
+}

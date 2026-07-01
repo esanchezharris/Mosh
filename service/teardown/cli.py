@@ -147,6 +147,29 @@ def cmd_export_jobs(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_ingest_midi(args: argparse.Namespace) -> int:
+    from teardown.midi_ingest import ingest_directory
+    from teardown.recipe import Role
+
+    split_drum_roles = tuple(
+        Role(role.strip())
+        for role in args.split_drum_roles.split(",")
+        if role.strip()
+    )
+    output = ingest_directory(
+        args.dir,
+        args.out,
+        bpm=args.bpm,
+        key=args.key,
+        limit=args.limit,
+        library_out=args.library_out,
+        split_drum_roles=split_drum_roles,
+    )
+    json.dump(output, sys.stdout, indent=2, sort_keys=True)
+    sys.stdout.write("\n")
+    return 0
+
+
 def _read_api_key_file(path: str) -> str:
     if not path:
         return ""
@@ -200,6 +223,20 @@ def build_parser() -> argparse.ArgumentParser:
     jobs_parser.add_argument("--limit", type=int, default=0)
     jobs_parser.add_argument("--print-limit", type=int, default=5)
     jobs_parser.set_defaults(func=cmd_export_jobs)
+
+    ingest_parser = subparsers.add_parser("ingest-midi", help="ingest local MIDI files as single-element recipe ingredients")
+    ingest_parser.add_argument("--dir", required=True, help="directory containing .mid/.midi files")
+    ingest_parser.add_argument("--out", required=True, help="output directory for recipe.json files")
+    ingest_parser.add_argument("--bpm", type=float, default=140.0)
+    ingest_parser.add_argument("--key", default="")
+    ingest_parser.add_argument("--limit", type=int, default=0)
+    ingest_parser.add_argument("--library-out", default="", help="optional flat Recipe library directory for generator.load_library")
+    ingest_parser.add_argument(
+        "--split-drum-roles",
+        default="",
+        help="comma-separated GM drum roles to extract as separate ingredients, e.g. snare or kick,snare,hat",
+    )
+    ingest_parser.set_defaults(func=cmd_ingest_midi)
 
     return parser
 

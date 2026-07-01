@@ -1,0 +1,168 @@
+{
+  "recipe_id": "clap_midi",
+  "schema_version": "2.0",
+  "source": {
+    "platform": "local-midi",
+    "video_id": "clap_midi",
+    "url": "",
+    "title": "!clap midi",
+    "channel": "",
+    "duration_s": 0.0,
+    "license": "unknown",
+    "retrieved_at": null,
+    "content_hash": "19f1e0b575334848e2d0997449713c5ded846a1479e91b4be4fb9bd0998e6137"
+  },
+  "meta": {
+    "daw": {
+      "value": null,
+      "confidence": 0.0,
+      "evidence": []
+    },
+    "tempo_bpm": {
+      "value": 140,
+      "confidence": 0.75,
+      "evidence": [
+        "ingest-midi --bpm"
+      ]
+    },
+    "key": {
+      "value": null,
+      "confidence": 0.0,
+      "evidence": []
+    },
+    "time_signature": {
+      "value": "4/4",
+      "confidence": 0.6,
+      "evidence": []
+    }
+  },
+  "arrangement": {
+    "sections": [
+      {
+        "name": "loop",
+        "start_s": 0.0,
+        "end_s": 13.714285714285714,
+        "confidence": 0.5
+      }
+    ]
+  },
+  "elements": [
+    {
+      "element_id": "clap_midi",
+      "role": "clap",
+      "label": "!clap midi",
+      "audio_ref": null,
+      "midi": {
+        "status": "extracted",
+        "midi_ref": null,
+        "notes": [
+          {
+            "pitch": 60,
+            "start_beats": 2.0,
+            "duration_beats": 0.010417,
+            "velocity": 100
+          },
+          {
+            "pitch": 60,
+            "start_beats": 6.0,
+            "duration_beats": 0.010417,
+            "velocity": 100
+          },
+          {
+            "pitch": 60,
+            "start_beats": 10.0,
+            "duration_beats": 0.010417,
+            "velocity": 100
+          },
+          {
+            "pitch": 60,
+            "start_beats": 14.0,
+            "duration_beats": 0.010417,
+            "velocity": 100
+          },
+          {
+            "pitch": 60,
+            "start_beats": 18.0,
+            "duration_beats": 0.010417,
+            "velocity": 100
+          },
+          {
+            "pitch": 60,
+            "start_beats": 22.0,
+            "duration_beats": 0.010417,
+            "velocity": 100
+          },
+          {
+            "pitch": 60,
+            "start_beats": 26.0,
+            "duration_beats": 0.010417,
+            "velocity": 100
+          },
+          {
+            "pitch": 60,
+            "start_beats": 30.0,
+            "duration_beats": 0.010417,
+            "velocity": 100
+          }
+        ],
+        "note_count": 8,
+        "confidence": 1.0
+      },
+      "sample_match": {
+        "status": "none",
+        "matched_path": null,
+        "distance": 0.0,
+        "alternates": []
+      },
+      "synth_patch": {
+        "status": "unknown",
+        "plugin": {
+          "name": null,
+          "available_locally": false
+        },
+        "params": {},
+        "match": null,
+        "substitute": null
+      },
+      "onsets": [],
+      "motif": {
+        "bars": 8.0,
+        "onset_grid": "whole",
+        "density": 1.0,
+        "syncopation": 0.0,
+        "contour": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "register_band": "perc",
+        "harmonic_function": ""
+      },
+      "bass": null,
+      "evidence": [],
+      "confidence": 1.0
+    }
+  ],
+  "unresolved": [],
+  "reconstruction_class": "deterministic",
+  "yield": {
+    "predicted": {
+      "drums": 0.0,
+      "midi": 1.0,
+      "synth": 0.0,
+      "arrangement": 0.5,
+      "overall": 0.65
+    },
+    "actual": {
+      "drums": 0.0,
+      "midi": 0.0,
+      "synth": 0.0,
+      "arrangement": 0.0,
+      "overall": 0.0
+    }
+  }
+}
