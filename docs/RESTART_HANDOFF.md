@@ -123,6 +123,10 @@ Installed-app status as of the current local deployment pass:
   6 seed-library baselines, and 6 exact r7 source anchors in blind order. Listener-facing
   prompts are in `README.md`; `scripts/verify-hardware/gate_c_pack_check.py` verifies the
   pack and keeps `answer_key.json` unread until `scorecard.csv` is complete.
+- `scripts/verify-hardware/restart_status_check.py --allow-owner-blockers` now rolls the
+  STOP sentinel, Gate A audit, scout rescore/export, installed command proof, promotion
+  packet, and blind Gate C pack into one safe status check. It reports the current state as
+  repo-ready with owner blockers, not complete.
 - One installed selftest run reached 1147/1149 checks; the two failures were the existing
   Moshi brain provider-key expectations in the packaged-app section, not the recipe
   command path. Treat installed-app gate completion as still open.
@@ -234,6 +238,7 @@ MOSH_BIN=$MOSH_BIN MOSH_RECIPE_LIBRARY=.cache/mosh-teardown/midi-ingredients/<ru
 MOSH_BIN=$MOSH_BIN MOSH_RECIPE_LIBRARY=.cache/mosh-teardown/midi-ingredients/<run>/library MOSH_PALETTE_MANIFEST=<manifest.json> $VENV scripts/verify-hardware/render_audition.py ~/mosh-beats/<run>  # audition set
 MOSH_BIN=$MOSH_BIN MOSH_RECIPE_LIBRARY=.cache/mosh-teardown/midi-ingredients/<run>/library MOSH_PALETTE_MANIFEST=<manifest.json> $VENV scripts/verify-hardware/render_blind_gate_c.py ~/mosh-beats/<run>-gate-c-blind
 $VENV scripts/verify-hardware/gate_c_pack_check.py --pack ~/mosh-beats/<run>-gate-c-blind  # no --reveal until scorecard.csv is filled
+$VENV scripts/verify-hardware/restart_status_check.py --allow-owner-blockers --out .cache/mosh-teardown/midi-ingredients/<run>/restart-status.json
 MOSH_BIN=$MOSH_BIN $VENV scripts/verify-hardware/generate_command_check.py  # installed-app command surface + bundled/default runtime
 
 # --- generate one beat (CLI) ---
