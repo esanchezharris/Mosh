@@ -264,7 +264,12 @@ def _recoverable_piano_roll(frame: Path) -> bool:
         return False
     axes = detect_axes(crop)
     try:
-        return len(detect_notes(crop, axes)) > 0
+        notes = [
+            note for note in detect_notes(crop, axes)
+            if 12 <= int(note.get("pitch", -1)) <= 120
+            and float(note.get("end", 0.0)) > float(note.get("start", 0.0))
+        ]
+        return 3 <= len(notes) <= 256
     except Exception:
         return False
 

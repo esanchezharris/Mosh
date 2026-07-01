@@ -51,6 +51,10 @@ def main() -> int:
         _write_piano_roll_frame(roll)
         roll_probe = LocalFrameVerifier(roll).verify("local-roll", "unused", tmp, duration_s=600)
         check("recoverable piano roll is detected", roll_probe.piano_roll_visible, str(roll_probe))
+        noisy = Path(tmp) / "noisy-roll.jpg"
+        _write_noisy_roll_frame(noisy)
+        noisy_probe = LocalFrameVerifier(noisy).verify("local-noisy-roll", "unused", tmp, duration_s=600)
+        check("over-dense piano-roll-like grid is rejected", not noisy_probe.piano_roll_visible, str(noisy_probe))
         vital = HERE / "synth_from_screen" / "fixtures" / "vital_init.png"
         if vital.exists():
             vital_tmp = Path(tmp) / "vital_init.png"
@@ -91,6 +95,24 @@ def _write_piano_roll_frame(path: Path) -> None:
         y1 = oy + int(note_row * row_h)
         x1 = ox + int(start_beat * ppb)
         cv2.rectangle(image, (x1, y1), (x1 + length_beats * ppb - 2, y1 + row_h - 1), (0, 200, 0), -1)
+    cv2.imwrite(str(path), image)
+
+
+def _write_noisy_roll_frame(path: Path) -> None:
+    import cv2
+    import numpy as np
+
+    image = np.full((600, 800, 3), 28, np.uint8)
+    row_h, ppb = 8, 10
+    for row in range(image.shape[0] // row_h + 1):
+        cv2.line(image, (0, row * row_h), (image.shape[1], row * row_h), (58, 58, 58), 1)
+    for beat in range(image.shape[1] // ppb + 1):
+        cv2.line(image, (beat * ppb, 0), (beat * ppb, image.shape[0]), (78, 78, 78), 1)
+    for row in range(6, 70, 2):
+        for beat in range(2, 74, 3):
+            x1 = beat * ppb
+            y1 = row * row_h
+            cv2.rectangle(image, (x1, y1), (x1 + 7, y1 + row_h - 1), (0, 210, 0), -1)
     cv2.imwrite(str(path), image)
 
 
