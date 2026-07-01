@@ -1,0 +1,117 @@
+{
+  "version": 2,
+  "templates": [
+    {
+      "id": "serum-from-scratch",
+      "query": "Serum tutorial from scratch plugin chain",
+      "include": ["serum", "from scratch", "tutorial"],
+      "exclude": ["sample pack", "preset pack", "loop kit", "one shot", "full project file", "remake", "reaction", "shorts", "stream"],
+      "weight": 1.3,
+      "notes": "Prioritize clear Serum screens, parameter reads, and chain visibility."
+    },
+    {
+      "id": "serum-sound-design",
+      "query": "Serum sound design tutorial preset parameters plugin chain",
+      "include": ["serum", "sound design", "tutorial"],
+      "exclude": ["preset pack", "free presets", "sample pack", "shorts", "reaction", "livestream"],
+      "weight": 1.22,
+      "notes": "Targets readable oscillator/filter/envelope/LFO detail."
+    },
+    {
+      "id": "serum-preset-recreation",
+      "query": "Serum preset recreation tutorial from scratch",
+      "include": ["serum", "preset", "tutorial"],
+      "exclude": ["preset pack", "download", "giveaway", "shorts", "reaction"],
+      "weight": 1.1,
+      "notes": "Useful when preset parameters are shown instead of a full beat chain."
+    },
+    {
+      "id": "vital-from-scratch",
+      "query": "Vital tutorial from scratch plugin chain",
+      "include": ["vital", "from scratch", "tutorial"],
+      "exclude": ["sample pack", "preset pack", "loop kit", "one shot", "full project file", "remake", "reaction", "shorts", "stream"],
+      "weight": 1.25,
+      "notes": "Prioritize clear Vital screens, parameter reads, and chain visibility."
+    },
+    {
+      "id": "vital-sound-design",
+      "query": "Vital sound design tutorial preset parameters plugin chain",
+      "include": ["vital", "sound design", "tutorial"],
+      "exclude": ["preset pack", "free presets", "sample pack", "shorts", "reaction", "livestream"],
+      "weight": 1.17,
+      "notes": "Targets readable oscillator/filter/envelope/LFO detail."
+    },
+    {
+      "id": "vital-preset-recreation",
+      "query": "Vital preset recreation tutorial from scratch",
+      "include": ["vital", "preset", "tutorial"],
+      "exclude": ["preset pack", "download", "giveaway", "shorts", "reaction"],
+      "weight": 1.05,
+      "notes": "Useful when Vital patch state is shown in detail."
+    },
+    {
+      "id": "serum-vital-breakdown",
+      "query": "Serum Vital beat breakdown tutorial plugin chain",
+      "include": ["breakdown", "tutorial"],
+      "exclude": ["sample pack", "preset pack", "loop kit", "project file", "remake", "reaction", "shorts"],
+      "weight": 1.0,
+      "notes": "Broad query that still favors tutorials mentioning Serum or Vital."
+    },
+    {
+      "id": "fl-serum-chain",
+      "query": "FL Studio Serum from scratch mixer plugin chain tutorial",
+      "include": ["fl studio", "serum", "tutorial"],
+      "exclude": ["flp download", "project file", "sample pack", "preset pack", "remake", "shorts", "stream"],
+      "weight": 1.08,
+      "notes": "Targets FL mixer insert visibility and Serum state."
+    },
+    {
+      "id": "fl-vital-chain",
+      "query": "FL Studio Vital from scratch mixer plugin chain tutorial",
+      "include": ["fl studio", "vital", "tutorial"],
+      "exclude": ["flp download", "project file", "sample pack", "preset pack", "remake", "shorts", "stream"],
+      "weight": 1.03,
+      "notes": "Targets FL mixer insert visibility and Vital state."
+    },
+    {
+      "id": "ableton-serum-chain",
+      "query": "Ableton Serum from scratch device chain tutorial",
+      "include": ["ableton", "serum", "tutorial"],
+      "exclude": ["als download", "project file", "sample pack", "preset pack", "remake", "shorts", "stream"],
+      "weight": 1.05,
+      "notes": "Targets Ableton device-chain visibility."
+    },
+    {
+      "id": "ableton-vital-chain",
+      "query": "Ableton Vital from scratch device chain tutorial",
+      "include": ["ableton", "vital", "tutorial"],
+      "exclude": ["als download", "project file", "sample pack", "preset pack", "remake", "shorts", "stream"],
+      "weight": 1.0,
+      "notes": "Targets Ableton device-chain visibility."
+    },
+    {
+      "id": "logic-serum-chain",
+      "query": "Logic Pro Serum from scratch channel strip plugin chain tutorial",
+      "include": ["logic", "serum", "tutorial"],
+      "exclude": ["logic project", "project file", "sample pack", "preset pack", "remake", "shorts", "stream"],
+      "weight": 1.0,
+      "notes": "Targets Logic channel-strip plugin visibility."
+    },
+    {
+      "id": "logic-vital-chain",
+      "query": "Logic Pro Vital from scratch channel strip plugin chain tutorial",
+      "include": ["logic", "vital", "tutorial"],
+      "exclude": ["logic project", "project file", "sample pack", "preset pack", "remake", "shorts", "stream"],
+      "weight": 0.96,
+      "notes": "Targets Logic channel-strip plugin visibility."
+    },
+    {
+      "id": "visible-mixer-chain",
+      "query": "beat tutorial from scratch full mixer plugin chain serum vital",
+      "include": ["tutorial", "plugin chain"],
+      "exclude": ["sample pack", "preset pack", "loop kit", "one shot", "project file", "reaction", "shorts", "stream"],
+      "weight": 0.9,
+      "notes": "Fallback query when the full chain is more important than the synth name."
+    }
+  ]
+}

@@ -80,6 +80,11 @@ service/scripts/_sa3_e2e_out/
 !service/sketch/fixtures/*.wav
 mosh-sessions/
 service/jobs/
+service/teardown/.venv/
+service/teardown/*.sqlite
+service/teardown/*.sqlite-*
+service/teardown/teardown_jobs.jsonl
+service/teardown/checkpoints/
 _preserved_artifacts/
 assets/grit_demo/
 midi_data/
@@ -95,6 +100,7 @@ verify-artifacts/
 .gstack/
 .omo/
 .refclone/
+.cache/
 
 # macOS
 .DS_Store
