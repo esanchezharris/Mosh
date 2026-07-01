@@ -119,6 +119,32 @@ def main() -> int:
             ),
         ),
         TutorialCandidate(
+            video_id="midi-only-1",
+            url="https://www.youtube.com/watch?v=midi-only-1",
+            title="Dark trap melody tutorial piano roll from scratch",
+            channel="Tutor MIDI",
+            description="0:00 intro\n0:45 melody piano roll\n1:15 pattern",
+            duration_s=600,
+            tags=("trap", "melody", "tutorial", "piano roll"),
+            license="youtube",
+            template_id="trap-piano-roll-808",
+            chapters=("0:00 intro", "0:45 melody piano roll", "1:15 pattern"),
+            has_captions=True,
+            probe=TutorialProbe(
+                daw_visible=True,
+                piano_roll_visible=True,
+                synth_gui_visible=False,
+                plugin_chain_visible=False,
+                serum_visible=False,
+                vital_visible=False,
+                readable_preset=False,
+                readable_knobs=False,
+                visible_plugin_names=(),
+                extra_synths=(),
+                evidence=({"type": "frame", "note": "maximized piano roll"},),
+            ),
+        ),
+        TutorialCandidate(
             video_id="reject-1",
             url="https://www.youtube.com/watch?v=reject-1",
             title="Type beat cookup with Omnisphere",
@@ -151,6 +177,11 @@ def main() -> int:
     check("ideal candidate gets ideal label", scored[0].decision == "ideal", scored[0].decision)
     usable_decisions = {item.candidate.video_id: item.decision for item in scored}
     check("chain-backed candidate stays usable or ideal", usable_decisions["usable-1"] in {"ideal", "usable"}, usable_decisions["usable-1"])
+    check("MIDI-only piano-roll candidate is accepted as an ingredient", usable_decisions["midi-only-1"] in {"usable", "weak"}, usable_decisions["midi-only-1"])
+    midi_item = next(item for item in scored if item.candidate.video_id == "midi-only-1")
+    check("MIDI-only candidate does not require Serum/Vital",
+          "serum-or-vital:no" in midi_item.evidence_bundle and midi_item.yield_prediction.midi >= midi_item.yield_prediction.synth,
+          str((midi_item.evidence_bundle, midi_item.yield_prediction.as_dict())))
     check("synth-focused candidate is usable without chain", usable_decisions["synth-focus-1"] == "usable", usable_decisions["synth-focus-1"])
     check("reject candidate is rejected or weak", scored[-1].decision in {"weak", "reject"}, scored[-1].decision)
     check("serum/vital candidate outranks reject", scored[0].score > scored[-1].score, f"{scored[0].score} > {scored[-1].score}")
@@ -167,15 +198,15 @@ def main() -> int:
         for item in scored:
             catalog.upsert(item, discovered_at="2026-06-30T00:00:00Z", screened_at="2026-06-30T00:01:00Z")
         rows = catalog.list(limit=10)
-        check("catalog persisted rows", len(rows) == 4, str(rows))
+        check("catalog persisted rows", len(rows) == 5, str(rows))
         check("catalog top row matches score order", rows[0]["video_id"] == "ideal-1", rows[0]["video_id"])
         jobs = build_teardown_jobs(rows, checkpoint_root=Path(tmp) / "checkpoints")
-        check("job export keeps ideal and usable rows", len(jobs) == 3, json.dumps(jobs, sort_keys=True))
+        check("job export keeps ideal and usable rows", len(jobs) == 4, json.dumps(jobs, sort_keys=True))
         check("job export avoids recrawl", all(job["resume"]["requires_recrawl"] is False for job in jobs), json.dumps(jobs, sort_keys=True))
         jobs_path = Path(tmp) / "jobs.jsonl"
-        check("job jsonl written", write_jobs(jobs_path, jobs) == 3 and jobs_path.exists(), str(jobs_path))
+        check("job jsonl written", write_jobs(jobs_path, jobs) == 4 and jobs_path.exists(), str(jobs_path))
         summary = catalog.summary()
-        check("catalog summary counts", summary["total"] == 4 and summary["by_status"].get("ideal", 0) == 1 and summary["by_status"].get("usable", 0) == 2, json.dumps(summary, sort_keys=True))
+        check("catalog summary counts", summary["total"] == 5 and summary["by_status"].get("ideal", 0) == 1 and summary["by_status"].get("usable", 0) >= 3, json.dumps(summary, sort_keys=True))
         catalog.update_status("ideal-1", "reject")
         reprioritized = catalog.list(limit=4)
         first_reject = next(index for index, row in enumerate(reprioritized) if row["status"] == "reject")

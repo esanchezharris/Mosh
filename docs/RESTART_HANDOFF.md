@@ -22,6 +22,34 @@ generate beats by **retrieving + recombining real per-element motifs** from a li
 
 The owner listened to the first audition set and confirmed: **"the beats do sound like real beats now."** That's the directional green light — informal Gate C already leans positive.
 
+### 0a. Course correction after Claude alignment (2026-06-30)
+
+Do **not** restart the legacy Executive Loop or any cron/orchestrator automation. The current
+working model is one continuous Codex thread with `docs/auto-loop/STOP` present locally as
+the kill switch.
+
+Claude's audit of `codex/video2recipe-port` confirmed the architecture is sound but the
+execution drifted toward synth-patch cloning. Correct the loop this way:
+
+- **Accept MIDI-only sources as first-class ingredients.** A source does not need to be a
+  full beat. The generator recombines by role, so a melody-only file/video can become a
+  `lead` or `pad` ingredient, and an 808/bass file must be tagged as `808` so the current
+  recombiner can pull it.
+- **Do not lower Gate A.** If a mined recipe cannot be reconstructed/rendered with defensible
+  fidelity, exclude it. Fix sourcing and ingestion instead of weakening the fidelity bar.
+- **Use MIDI packs and owner-picked single-element URLs before more broad crawling.** Direct
+  `.mid` sources bypass screen OCR and should form the reliable backbone of the 30-50
+  ingredient corpus.
+- **Serum/Vital details are positive evidence, not acceptance blockers.** The v1 recipe
+  stores notes and role; timbre comes from the palette by role. Param-map misses should be
+  logged, but they do not block a MIDI-native ingredient.
+- **Stop deepening `synth_from_screen` for v1.** The critical path is notes + role +
+  provenance + render fidelity.
+
+Mechanical follow-up now exists: `service/teardown/cli.py ingest-midi --dir <midi-pack> --out <recipes>`
+scans `.mid`/`.midi`, classifies a role, writes one single-element `recipe.json` per file,
+and keeps the musical body inline in `Midi.notes`.
+
 ---
 
 ## 1. What's DONE — all verified, all on `main`

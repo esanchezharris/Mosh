@@ -382,12 +382,12 @@ def build_scout_system_prompt(policy: ScoutPolicy | None = None) -> str:
     )
     return "\n".join([
         "You are a tutorial scouting agent for DAW teardown.",
-        "Goal: find tutorials that expose the plugin chain and, when possible, readable Serum or Vital preset/parameter state.",
+        "Goal: find tutorials and MIDI-visible ingredients whose notes can become real per-element recipes.",
         "Discover tutorials via the YouTube Data API and rank them before any expensive teardown work.",
         "Prefer from-scratch tutorials with chapters, captions, and clear metadata.",
-        "Require visible plugin-chain evidence before ranking beat-production tutorials highly.",
-        "For synth-focused Serum/Vital tutorials, rank by visible synth GUI, readable preset names, and parameter detail instead.",
-        "Give the strongest positive weight to visible Serum/Vital screens, readable preset names, and readable knobs.",
+        "Prefer visible piano-roll/MIDI evidence for beat-production tutorials; plugin chain evidence is helpful but not required for MIDI-only ingredients.",
+        "For synth-focused Serum/Vital tutorials, rank by visible synth GUI, readable preset names, and parameter detail.",
+        "Treat visible Serum/Vital screens, readable preset names, and readable knobs as positive signals, not universal acceptance gates.",
         synth_clause,
         "Do not over-rank talking-head, sample-pack, preset-pack, remix, or ambiguous uploads.",
         "Keep discovery local-only and transient-cache based.",
@@ -484,6 +484,11 @@ class TutorialScorer:
         extra_synth_count = int(visual["extra_synth_count"])
         synth_focused = _is_synth_focused(candidate.search_text(), serum_or_vital)
         synth_focus_duration_ok = candidate.duration_s is None or candidate.duration_s >= 120
+        midi_ingredient = bool(
+            probe.piano_roll_visible
+            and not synth_focused
+            and (from_scratch or candidate.has_captions or candidate.chapters or meta["tutorial_hits"])
+        )
 
         drums = _clamp01(
             0.10
@@ -515,12 +520,13 @@ class TutorialScorer:
         )
 
         overall = _clamp01(
-            0.18 * drums
-            + 0.24 * midi
-            + 0.38 * synth
-            + 0.20 * arrangement
-            + 0.05 * meta["metadata_score"]
-            + 0.05 * visual["chain_score"]
+            0.16 * drums
+            + 0.34 * midi
+            + 0.28 * synth
+            + 0.14 * arrangement
+            + 0.04 * meta["metadata_score"]
+            + 0.04 * visual["chain_score"]
+            + (0.16 if midi_ingredient else 0.0)
         )
         confidence = _clamp01(
             0.18
@@ -536,6 +542,8 @@ class TutorialScorer:
 
         evidence_bundle = [
             f"focus:{'synth' if synth_focused else 'beat'}",
+            f"midi-ingredient:{'yes' if midi_ingredient else 'no'}",
+            f"piano-roll:{'visible' if probe.piano_roll_visible else 'missing'}",
             f"plugin-chain:{'visible' if chain_visible else 'missing'}",
             f"serum-or-vital:{'yes' if serum_or_vital else 'no'}",
             f"captions:{'yes' if candidate.has_captions else 'no'}",
@@ -556,14 +564,16 @@ class TutorialScorer:
                 synth = min(synth, 0.50)
 
         if (
-            overall >= 0.70
+            overall >= 0.62
             and chain_visible
             and serum_or_vital
             and probe.readable_preset
             and probe.readable_knobs
         ):
             decision = "ideal"
-        elif overall >= 0.55 and chain_visible and serum_or_vital:
+        elif midi_ingredient and midi >= 0.65 and confidence >= 0.45:
+            decision = "usable"
+        elif chain_visible and serum_or_vital and (overall >= 0.50 or (synth >= 0.55 and confidence >= 0.45)):
             decision = "usable"
         elif (
             synth_focused
@@ -576,6 +586,8 @@ class TutorialScorer:
         ):
             decision = "usable"
         elif overall >= self.policy.min_usability:
+            decision = "weak"
+        elif midi_ingredient and midi >= 0.55 and confidence >= 0.35:
             decision = "weak"
         else:
             decision = "reject"
@@ -624,8 +636,8 @@ def rank_tutorials(candidates: Iterable[TutorialCandidate], policy: ScoutPolicy 
         key=lambda item: (
             -item.score,
             -item.confidence,
-            -item.yield_prediction.synth,
             -item.yield_prediction.midi,
+            -item.yield_prediction.synth,
             item.candidate.video_id,
         )
     )
