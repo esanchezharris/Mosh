@@ -6,6 +6,8 @@ engine, and writes them + a README (provenance per beat) to an output dir. This 
 informal ear-check that precedes the formal Gate A/C.
 
     MOSH_BIN=build-macos-arm64/Mosh_artefacts/Debug/Mosh.app/Contents/MacOS/Mosh \
+    MOSH_RECIPE_LIBRARY=.cache/mosh-teardown/midi-ingredients/<run>/library \
+    MOSH_PALETTE_MANIFEST=/path/to/palette/manifest.json \
         service/teardown/.venv/bin/python scripts/verify-hardware/render_audition.py [OUT_DIR]
 """
 from __future__ import annotations
@@ -39,18 +41,21 @@ def main() -> int:
     if not os.path.isfile(binp):
         print(f"SKIP: no Mosh binary at {binp!r}")
         return 0
-    palette = G.load_palette()
+    library_dir = os.environ.get("MOSH_RECIPE_LIBRARY", "").strip() or G.LIB_DIR
+    palette_manifest = os.environ.get("MOSH_PALETTE_MANIFEST", "").strip()
+    palette = G.load_palette(palette_manifest) if palette_manifest else G.load_palette()
     if not palette:
         print("SKIP: no palette manifest (owner-private)")
         return 0
 
     out_dir = os.path.expanduser(sys.argv[1] if len(sys.argv) > 1 else "~/mosh-beats/restart")
     os.makedirs(out_dir, exist_ok=True)
-    lines = ["# Restart audition set — recombined from the seed recipe library",
-             "# (real motifs recombined + transposed + 808 bound to chords; bootstrap corpus)\n"]
+    lines = ["# Restart audition set — recombined from the selected recipe library",
+             f"# library: {library_dir}",
+             "# (real motifs recombined + transposed + 808 bound to chords; selected corpus)\n"]
     n_ok = 0
     for i, (req, seed) in enumerate(BEATS):
-        rec, prov = G.generate(req, seed=seed, palette=palette)
+        rec, prov = G.generate(req, library_dir=library_dir, seed=seed, palette=palette)
         name = f"{i+1:02d}_{req['mood']}_{int(req['tempo'])}_{req['key'].replace(' ', '').replace('#','s')}.wav"
         wav = os.path.join(out_dir, name)
         res = execute_recipe(rec, bin_path=binp, out_wav=wav,
