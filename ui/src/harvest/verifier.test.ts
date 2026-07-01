@@ -44,6 +44,28 @@ describe("verifier.replay", () => {
     expect(names).toContain("Pre"); // from the prefix
     expect(names).toContain("Post"); // from the verified sequence
   });
+
+  it("resolves native capture refs before replaying dependent commands", async () => {
+    const r = await replay([
+      { command: "create_track", args: { name: "Lead" }, capture: { T0: "trackId" } },
+      { command: "load_plugin", args: { trackId: "${T0}", pluginId: "vital", index: 0 } },
+      { command: "add_midi_clip", args: { trackId: "${T0}", start: 0, length: 4 }, capture: { C0: "clipId" } },
+      { command: "add_note", args: { clipId: "${C0}", pitch: 60, start: 0, length: 1, velocity: 100 } },
+    ]);
+    expect(r.cleanValidate).toBe(true);
+    expect(r.cleanApply).toBe(true);
+    expect(r.perCommand.every((p) => p.validate === "ok" && p.apply === "ok")).toBe(true);
+  });
+
+  it("fails cleanly on unbound native refs", async () => {
+    const r = await replay([
+      { command: "load_plugin", args: { trackId: "${MISSING}", pluginId: "vital", index: 0 } },
+    ]);
+    expect(r.cleanValidate).toBe(false);
+    expect(r.cleanApply).toBe(false);
+    expect(r.perCommand[0].validate).toMatch(/unbound ref/);
+    expect(r.perCommand[0].apply).toBe("skipped");
+  });
 });
 
 describe("verifier.snapshotDiff", () => {

@@ -139,9 +139,34 @@ def main(argv=None):
         def render_fn(rec):                      # §9 execute → real Edit + render; writes yield.actual
             r = execute_recipe(rec, out_wav=str(out / f"{rec.source.video_id or 'recon'}.wav"),
                                session_dir=str(out / ".render-sess"), timeout_s=600)
+            rdir = out / (rec.source.video_id or "recon")
+            rdir.mkdir(parents=True, exist_ok=True)
+            content_commands = [c for c in r.commands if c.get("command") != "export_audio"]
+            content_path = rdir / "content_commands.json"
+            content_path.write_text(json.dumps({
+                "phase": "execute_content",
+                "commands": content_commands,
+                "unresolved": r.unresolved,
+                "notes_resolved": r.notes_resolved,
+                "synths_loaded": r.synths_loaded,
+                "synth_params_set": r.synth_params_set,
+                "omitted_terminal_commands": ["export_audio"] if len(content_commands) != len(r.commands) else [],
+            }, indent=2))
+            executed_path = rdir / "execute_commands.json"
+            executed_path.write_text(json.dumps({
+                "phase": "execute",
+                "commands": r.commands,
+                "unresolved": r.unresolved,
+                "notes_resolved": r.notes_resolved,
+                "synths_loaded": r.synths_loaded,
+                "synth_params_set": r.synth_params_set,
+            }, indent=2))
             return {"nonsilent": r.nonsilent, "rms": round(r.audio_rms, 4), "yield": r.yield_actual,
                     "out_wav": r.out_wav, "synths_loaded": r.synths_loaded,
-                    "synth_params_set": r.synth_params_set, "ran": r.ran, "error": r.error}
+                    "synth_params_set": r.synth_params_set, "notes_resolved": r.notes_resolved,
+                    "command_count": len(content_commands), "execute_command_count": len(r.commands),
+                    "unresolved_count": len(r.unresolved), "commands_path": str(content_path),
+                    "execute_commands_path": str(executed_path), "ran": r.ran, "error": r.error}
 
     reward_fn = None
 
@@ -174,12 +199,27 @@ def main(argv=None):
         rdir = out / res.recipe.source.video_id
         rdir.mkdir(parents=True, exist_ok=True)
         (rdir / "recipe.json").write_text(to_json(res.recipe))
-        (rdir / "commands.json").write_text(json.dumps({"commands": res.commands, "unresolved": res.unresolved}, indent=2))
+        compiled_commands = {"phase": "compile", "commands": res.commands, "unresolved": res.unresolved}
+        commands_payload = compiled_commands
+        if ns.render and isinstance(res.render, dict):
+            executed_path = res.render.get("commands_path")
+            if executed_path:
+                try:
+                    commands_payload = json.loads(Path(executed_path).read_text())
+                    (rdir / "compiled_commands.json").write_text(json.dumps(compiled_commands, indent=2))
+                except Exception as e:
+                    print(f"[render] executed command artifact unavailable: {type(e).__name__}: {e}",
+                          file=sys.stderr)
+                    commands_payload = compiled_commands
+        (rdir / "commands.json").write_text(json.dumps(commands_payload, indent=2))
+        command_count = (res.render or {}).get("command_count", len(res.commands)) if ns.render else len(res.commands)
+        unresolved_count = ((res.render or {}).get("unresolved_count", len(res.unresolved))
+                            if ns.render else len(res.unresolved))
         _emit({
             "ok": True, "status": res.status, "completeness": res.completeness,
             "stages": res.stages_done, "recipe": str(rdir / "recipe.json"),
-            "elements": len(res.recipe.elements), "commands": len(res.commands),
-            "unresolved": len(res.unresolved),
+            "elements": len(res.recipe.elements), "commands": command_count,
+            "unresolved": unresolved_count,
             "render": res.render or None, "reward": res.reward or None,
             "yield_validation": yval or None,
         })

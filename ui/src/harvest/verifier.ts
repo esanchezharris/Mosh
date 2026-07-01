@@ -57,14 +57,58 @@ function validateCall(c: CommandCall): "ok" | string {
   return validateCommand(c.command, c.args ?? {}) ?? "ok";
 }
 
+function refName(value: string): string | null {
+  if (value.startsWith("${") && value.endsWith("}")) return value.slice(2, -1);
+  if (value.startsWith("$")) return value.slice(1);
+  return null;
+}
+
+function resolveArgs(args: Record<string, unknown>, env: Map<string, string>): {
+  args: Record<string, unknown>;
+  missing: string[];
+} {
+  const out: Record<string, unknown> = {};
+  const missing: string[] = [];
+  for (const [key, value] of Object.entries(args)) {
+    if (typeof value === "string") {
+      const ref = refName(value);
+      if (ref) {
+        const resolved = env.get(ref);
+        if (resolved === undefined) missing.push(value);
+        else out[key] = resolved;
+        continue;
+      }
+    }
+    out[key] = value;
+  }
+  return { args: out, missing };
+}
+
+function bindResult(c: CommandCall, res: CommandResult, env: Map<string, string>): void {
+  if (!res.ok) return;
+  const data = (res.data ?? {}) as Record<string, unknown>;
+  if (c.bind) {
+    const id = data.trackId ?? data.clipId ?? data.id;
+    if (typeof id === "string") env.set(c.bind, id);
+  }
+  for (const [name, field] of Object.entries(c.capture ?? {})) {
+    const id = data[field];
+    if (typeof id === "string") env.set(name, id);
+  }
+}
+
 /** Replay `commands` through a freshly-seeded mock backend and report the verdict. */
 export async function replay(commands: CommandCall[], opts: ReplayOptions = {}): Promise<ReplayResult> {
   __resetMockForTests();
+  const env = new Map<string, string>();
   // Trusted, unscored setup: applied as-is to seed state before the verified
   // sequence. It may legitimately include non-agent setup commands, so it is NOT
   // run through the agent allowlist and its results are not folded into the verdict.
   for (const c of opts.startCommands ?? []) {
-    await mockExecute<CommandResult>({ command: c.command, args: c.args ?? {} });
+    const resolved = resolveArgs(c.args ?? {}, env);
+    if (resolved.missing.length) continue;
+    const res = await mockExecute<CommandResult>({ command: c.command, args: resolved.args });
+    bindResult(c, res, env);
   }
 
   const perCommand: PerCommand[] = [];
@@ -73,16 +117,29 @@ export async function replay(commands: CommandCall[], opts: ReplayOptions = {}):
 
   for (let idx = 0; idx < commands.length; idx++) {
     const c = commands[idx];
-    const v = validateCall(c);
+    const resolved = resolveArgs(c.args ?? {}, env);
+    if (resolved.missing.length) {
+      cleanValidate = false;
+      cleanApply = false;
+      perCommand.push({
+        idx,
+        command: c.command,
+        validate: `unbound ref ${resolved.missing.join(", ")}`,
+        apply: "skipped",
+      });
+      continue;
+    }
+    const v = validateCall({ ...c, args: resolved.args });
     if (v !== "ok") {
       cleanValidate = false;
       cleanApply = false;
       perCommand.push({ idx, command: c.command, validate: v, apply: "skipped" });
       continue; // invalid commands never reach the seam (mirrors runAgentBatch)
     }
-    const res = await mockExecute<CommandResult>({ command: c.command, args: c.args ?? {} });
+    const res = await mockExecute<CommandResult>({ command: c.command, args: resolved.args });
     if (res.ok) {
       perCommand.push({ idx, command: c.command, validate: "ok", apply: "ok" });
+      bindResult(c, res, env);
     } else {
       cleanApply = false;
       perCommand.push({ idx, command: c.command, validate: "ok", apply: "error", error: res.error });

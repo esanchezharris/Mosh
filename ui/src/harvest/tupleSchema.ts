@@ -18,7 +18,12 @@ export const TUPLE_SCHEMA_VERSION = 1 as const;
 export type TrajectoryKind = "imitation";
 
 /** A single planned/executed command (the unit the model emits). */
-export type CommandCall = { command: string; args?: Record<string, unknown> };
+export type CommandCall = {
+  command: string;
+  args?: Record<string, unknown>;
+  bind?: string;
+  capture?: Record<string, string>;
+};
 
 /** Where a turn's utterance came from. Direct human manipulation is never a turn. */
 export type TurnSource = "brain_chat" | "voice" | "fastpath" | "unknown";
