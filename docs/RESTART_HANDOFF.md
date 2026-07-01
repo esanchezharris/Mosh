@@ -74,10 +74,32 @@ corpus gate verifies the recipe against only that role's source pitches.
   `paletteManifest` values against cwd, the repo root, and the service root before failing,
   so debug `--run-script` commands from the handoff are not brittle to the child service cwd.
 
-Do not claim installed-app completion from this alone. `/Applications/Mosh.app` still needs
-the rebuilt app and the recipe runtime env/config (`MOSH_SERVICE_PYTHON`,
-`MOSH_RECIPE_LIBRARY`, `MOSH_PALETTE_MANIFEST`) before Finder launch can be considered
-proved.
+Installed-app status as of the June 30, 2026 local deployment pass:
+
+- The previously installed app was preserved at
+  `~/Library/Mosh/preserved-apps/Mosh-20260630-221854.app` before redeploy; its binary
+  SHA-256 matched the archived preservation manifest.
+- `/Applications/Mosh.app` has been redeployed from `codex/video2recipe-port` after
+  `be07a1bb`; codesign verification passes, the bundled UI hash is
+  `f5ef21d3f917ba0f1eb0b56cad8544f32f55a12e094a91018b7b7f9c15b851f7`, and the bundled
+  `service/server.py` hash is `e75ab05b22dd6208b09b690a2a5ec2249b2e3af407ba9f1404dfcddb1673b690`.
+- Direct installed-binary proof passes when the recipe runtime is explicitly configured:
+  `/Applications/Mosh.app/Contents/MacOS/Mosh --run-script` with
+  `MOSH_SERVICE_SCRIPT=<repo>/service/server.py`,
+  `MOSH_SERVICE_PYTHON=<repo>/service/teardown/.venv/bin/python`, the r2 library, and the
+  palette manifest applied 23 generated commands with no unresolved refs and produced
+  7 editable MIDI-bearing tracks.
+- A LaunchServices-style `open -na /Applications/Mosh.app --args --run-script` proof did
+  not pass yet: the app inherited the run-script env and wrote results, but
+  `generate_beat_recipe` returned `recipe generation service unavailable`.
+- The deployed bundle's service currently contains `server.py`, adapters, colors, SA3,
+  scripts, training, transcribe, sketch, and transform, but **does not bundle**
+  `service/recipes`, `service/teardown`, or `service/palette`. That means a true
+  Finder/Dock proof still needs a deploy-bundling/runtime-config decision before it can
+  be called complete.
+- One installed selftest run reached 1147/1149 checks; the two failures were the existing
+  Moshi brain provider-key expectations in the packaged-app section, not the recipe
+  command path. Treat installed-app gate completion as still open.
 
 ### 0c. Local MIDI corpus status (2026-07-01)
 
@@ -203,7 +225,7 @@ cd service/teardown && .venv/bin/python recipe.py --emit-schema > recipe.schema.
 1. **The REAL corpus (the true "start from knowing") — start here.** You already have real scouted data: `ClaudeMosh-moshfx/service/teardown/catalog.sqlite` (31 candidates) + the MIDI-first rescore/export at `.cache/mosh-teardown/midi-ingredients/2026-07-01-r2/teardown_jobs-midi-first.jsonl` (14 queued ideal/usable jobs). Once #194 lands, run the existing `video2recipe/` (FL Studio MIDI-from-screen is live) against those queued jobs → recipe → **Gate A**. Target ~30–50 trap/melodic-trap recipes to replace/expand the 5 hand-authored bootstrap seeds in `service/recipes/library/`.
    - Each new recipe must pass **Gate A (fidelity)**: reconstruct → render → A/B vs. the source tutorial audio ("does it sound like that beat?"). Owner-ear — see the goal prompt in §7 for exactly how to get this signal without live Claude access this week.
 2. **Gate C (the verdict).** Blind A/B pack — retrieved-adapted vs. the old template vs. exact reconstruction, scored on "musically distinct" + "would keep" (reuse `ui/scripts/rl/buildValidityPack.mts` patterns).
-3. **Phase 2 — finish the live-agent product path.** The `generate_beat_recipe` command surface and natural-language beat route are wired in `codex/video2recipe-port`; remaining work is to rebuild + redeploy so `/Applications/Mosh.app` has the command and melodic-808 engine changes, then prove Finder launch with the recipe runtime configured.
+3. **Phase 2 — finish the live-agent product path.** The `generate_beat_recipe` command surface and natural-language beat route are wired in `codex/video2recipe-port`, and `/Applications/Mosh.app` has been rebuilt/redeployed from this branch. Remaining work is to make the Finder/Dock recipe runtime durable: either add a reviewed deploy-bundling path for the recipe runtime (`service/recipes`, selected `service/teardown` source, and non-secret palette config) or establish a launchd/env config that the app reliably inherits, then prove `open -na /Applications/Mosh.app --args --run-script` can generate a beat without falling back to repo-cwd assumptions. This crosses deploy/package policy, so do not treat direct binary-with-env proof as final Finder proof.
 
 ---
 
