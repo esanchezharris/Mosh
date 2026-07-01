@@ -63,6 +63,24 @@ def _read_results(path: Path, stdout: str) -> list[dict[str, Any]]:
     return rows
 
 
+def _run_commands(bin_path: Path, commands: list[dict[str, Any]], *, session: str, timeout: int) -> tuple[subprocess.CompletedProcess[str], list[dict[str, Any]]]:
+    with tempfile.TemporaryDirectory(prefix="mosh-generate-command-") as td:
+        tmp = Path(td)
+        script = tmp / "script.jsonl"
+        results_path = tmp / "results.jsonl"
+        script.write_text("\n".join(json.dumps(cmd, sort_keys=True) for cmd in commands) + "\n", encoding="utf-8")
+        env = _minimal_env(script, results_path, session)
+        proc = subprocess.run(
+            [str(bin_path), "--run-script"],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        rows = _read_results(results_path, proc.stdout)
+    return proc, rows
+
+
 def _row_data(row: dict[str, Any]) -> dict[str, Any]:
     data = row.get("data")
     return data if isinstance(data, dict) else row
@@ -117,6 +135,16 @@ def _safe_generate_summary(row: dict[str, Any], *, used_explicit_runtime_args: b
     }
 
 
+def _error_kind(row: dict[str, Any]) -> str:
+    data = _row_data(row)
+    raw = str(row.get("error") or data.get("error") or "")
+    if "recipe library missing" in raw:
+        return "recipe-library-missing"
+    if raw:
+        return "error"
+    return "none"
+
+
 def _check(condition: bool, label: str, failures: list[str], detail: str = "") -> None:
     status = "  ok   " if condition else "  FAIL "
     suffix = "" if condition or not detail else f"  [{detail}]"
@@ -139,6 +167,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--proof-out", default=str(DEFAULT_PROOF), help="safe compact JSONL proof path")
     parser.add_argument("--session", default="generate-command-check")
     parser.add_argument("--timeout", type=int, default=240)
+    parser.add_argument("--skip-failure-check", action="store_true", help="skip the missing-library no-side-effect check")
     args = parser.parse_args(argv)
 
     bin_path = Path(args.bin)
@@ -147,26 +176,13 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     request = _request(args)
-    commands = [
+    success_commands = [
         {"command": "generate_beat_recipe", "args": request},
         {"command": "__snapshot", "args": {"label": "after"}},
     ]
     used_explicit_runtime_args = bool(args.library_dir or args.palette_manifest)
 
-    with tempfile.TemporaryDirectory(prefix="mosh-generate-command-") as td:
-        tmp = Path(td)
-        script = tmp / "script.jsonl"
-        results_path = tmp / "results.jsonl"
-        script.write_text("\n".join(json.dumps(cmd, sort_keys=True) for cmd in commands) + "\n", encoding="utf-8")
-        env = _minimal_env(script, results_path, args.session)
-        proc = subprocess.run(
-            [str(bin_path), "--run-script"],
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=args.timeout,
-        )
-        rows = _read_results(results_path, proc.stdout)
+    proc, rows = _run_commands(bin_path, success_commands, session=f"{args.session}-success", timeout=args.timeout)
 
     generate_rows = [row for row in rows if row.get("command") == "generate_beat_recipe"]
     snapshot_rows = [row for row in rows if row.get("command") == "__snapshot"]
@@ -179,6 +195,7 @@ def main(argv: list[str] | None = None) -> int:
     safe_rows: list[dict[str, Any]] = []
     if generate_rows:
         gen_summary = _safe_generate_summary(generate_rows[0], used_explicit_runtime_args=used_explicit_runtime_args)
+        gen_summary["scenario"] = "success"
         safe_rows.append(gen_summary)
         unresolved = gen_summary.get("unresolved", [])
         sources = gen_summary.get("sources", {})
@@ -190,11 +207,49 @@ def main(argv: list[str] | None = None) -> int:
         _check("808" in sources, "provenance includes 808 source", failures)
         _check(len(distinct_sources) > 1, "provenance shows cross-source recombination", failures, str(sources))
     if snapshot_rows:
-        snap_summary = {"ok": bool(snapshot_rows[0].get("ok")), "command": "__snapshot", **_snapshot_summary(snapshot_rows[0])}
+        snap_summary = {"scenario": "success", "ok": bool(snapshot_rows[0].get("ok")), "command": "__snapshot", **_snapshot_summary(snapshot_rows[0])}
         safe_rows.append(snap_summary)
         _check(snap_summary["ok"], "snapshot returned ok", failures)
         _check(snap_summary["midiTrackCount"] >= args.min_midi_tracks, "snapshot has enough MIDI-bearing tracks", failures, str(snap_summary))
         _check(snap_summary["noteCount"] > 0, "snapshot contains MIDI notes", failures, str(snap_summary))
+
+    if not args.skip_failure_check:
+        missing_library = f"/tmp/mosh-missing-recipe-library-{os.getpid()}"
+        failure_request = dict(request)
+        failure_request["libraryDir"] = missing_library
+        failure_commands = [
+            {"command": "__snapshot", "args": {"label": "before_failure"}},
+            {"command": "generate_beat_recipe", "args": failure_request},
+            {"command": "__snapshot", "args": {"label": "after_failure"}},
+        ]
+        fail_proc, fail_rows = _run_commands(bin_path, failure_commands, session=f"{args.session}-failure", timeout=args.timeout)
+        fail_generate_rows = [row for row in fail_rows if row.get("command") == "generate_beat_recipe"]
+        fail_snapshot_rows = [row for row in fail_rows if row.get("command") == "__snapshot"]
+        _check(fail_proc.returncode != 0, "missing-library run-script failed as expected", failures, f"code={fail_proc.returncode}")
+        _check(len(fail_generate_rows) == 1, "one failed generate_beat_recipe result", failures, f"rows={len(fail_generate_rows)}")
+        _check(len(fail_snapshot_rows) == 2, "failure check has before/after snapshots", failures, f"rows={len(fail_snapshot_rows)}")
+        if fail_generate_rows:
+            err_kind = _error_kind(fail_generate_rows[0])
+            _check(not bool(fail_generate_rows[0].get("ok")), "missing-library generate_beat_recipe returned failure", failures)
+            _check(err_kind == "recipe-library-missing", "failure reason is missing recipe library", failures, err_kind)
+        else:
+            err_kind = "missing-result"
+        before_summary = _snapshot_summary(fail_snapshot_rows[0]) if len(fail_snapshot_rows) >= 1 else {}
+        after_summary = _snapshot_summary(fail_snapshot_rows[-1]) if len(fail_snapshot_rows) >= 2 else {}
+        no_side_effects = before_summary == after_summary and bool(before_summary)
+        _check(no_side_effects, "failed generation left snapshot counts unchanged", failures, f"before={before_summary} after={after_summary}")
+        safe_rows.append(
+            {
+                "scenario": "missing-library-failure",
+                "ok": err_kind == "recipe-library-missing" and no_side_effects,
+                "command": "generate_beat_recipe",
+                "errorKind": err_kind,
+                "usedExplicitRuntimeArgs": True,
+                "before": before_summary,
+                "after": after_summary,
+                "noSideEffects": no_side_effects,
+            }
+        )
 
     if args.proof_out:
         proof = Path(args.proof_out)
