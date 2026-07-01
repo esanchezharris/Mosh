@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import csv
 import hashlib
 import json
 import os
@@ -70,6 +71,16 @@ def main() -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     answer_key: list[dict[str, Any]] = []
+    score_rows: list[dict[str, Any]] = []
+    score_fields = [
+        "group",
+        "blind_label",
+        "file",
+        "prompt",
+        "musically_distinct_1_5",
+        "would_keep_1_5",
+        "notes",
+    ]
     readme_lines = [
         "# Gate C blind listening pack",
         "",
@@ -120,6 +131,17 @@ def main() -> int:
             status = "OK " if ok else "BAD"
             print(f"  {status} {filename} rms={res.audio_rms:.4f} variant={kind}")
             readme_lines.append(f"- `{filename}`")
+            score_rows.append(
+                {
+                    "group": f"{group_index:02d}",
+                    "blind_label": label,
+                    "file": filename,
+                    "prompt": prompt_label,
+                    "musically_distinct_1_5": "",
+                    "would_keep_1_5": "",
+                    "notes": "",
+                }
+            )
             answer_key.append(
                 {
                     "group": group_index,
@@ -141,6 +163,10 @@ def main() -> int:
 
     (out_dir / "README.md").write_text("\n".join(readme_lines) + "\n", encoding="utf-8")
     (out_dir / "answer_key.json").write_text(json.dumps(answer_key, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    with (out_dir / "scorecard.csv").open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=score_fields)
+        writer.writeheader()
+        writer.writerows(score_rows)
     print(f"\n{ok_count}/{total} rendered -> {out_dir}")
     return 0 if ok_count == total else 1
 
