@@ -1,0 +1,143 @@
+{
+  "synth": "Vital",
+  "note": "Calibrated from a real Vital standalone GUI capture (Init Preset). Coords are in the reference_size pixel space; load_profile() scales them to the actual frame. Vital draws a WHITE pointer line over a teal fill-arc; pointer=\"white\" reads the colourless pointer (bright + low-saturation) and ignores the arc, so absolute values are accurate (full SUSTAIN reads ~1.0). Extend by adding controls.",
+  "reference_size": [2342, 1436],
+  "landmark": {
+    "note": "Vital V emblem (top-left, on dark skin, below the host title bar). Host-invariant calibration template-matches this to correct title-bar height differences between hosts. template/bbox in the png's px (cut from vital_init.png at 1.0x ref); ref_xy = bbox[:2]/template_scale.",
+    "template": "vital.logo.png",
+    "template_scale": 1.0,
+    "bbox": [70, 62, 115, 75],
+    "min_score": 0.55
+  },
+  "tabs": {
+    "band": [48, 90],
+    "highlight": "saturated",
+    "x_min": 110, "x_max": 720,
+    "anchors": {"VOICE": 149, "EFFECTS": 312, "MATRIX": 475, "ADVANCED": 637}
+  },
+  "matrix": {
+    "_note": "Calibrated from vital_matrix.png (Init Preset, MATRIX tab). Columns: # | SOURCE | BIPOLAR | STEREO | MORPH | AMOUNT | DESTINATION. The AMOUNT control is a horizontal bipolar slider whose CENTERED handle (value 0.5) means NO modulation; an init patch's one blank row (source/dest show '-') must read inactive -> read_matrix returns []. Coords are in reference_size space (2x the 1171x718 fixture); _load_matrix scales to the frame. Only the first (blank) row is calibratable from the empty fixture, but Vital matrix rows are uniform -- raise `rows` once a populated capture exists.",
+    "header_y": 168,
+    "row0_y": 224,
+    "row_h": 56,
+    "rows": 1,
+    "amount": {"type": "slider", "x0": 766, "x1": 1026, "neutral": 0.5},
+    "source": {"x0": 230, "x1": 460},
+    "destination": {"x0": 1028, "x1": 1270},
+    "active_amount_eps": 0.06
+  },
+  "fx_list": {
+    "_note": "EFFECTS page only. The effects RACK is the FIXED vertical list (after MACRO 1-4); each row carries a power dot at its top-left — lit purple/pink (S~100-120, V~255) when on, grey (S~46) when off. ⚠️ x_dot MUST be the rack power-dot column (~160), NOT the effect icon (~430): the prior x_dot=430 read the effect's expanded PANEL content, which STACKS by enabled-order (a panel slides up into another effect's row slot when an earlier effect is off) → it misreported e.g. Delay-alone as Chorus. The power dot is FIXED per rack row and is the only reliable on/off signal. Calibrated LIVE across Chorus/Delay/both configs (computer-use): dot column x=160, Chorus row y=168, pitch 136 (reference space 2342x1436). Fixed top->bottom order is Vital's alphabetical rack.",
+    "x_dot": 160,
+    "row0_y": 168,
+    "row_h": 136,
+    "on_sat_min": 70,
+    "on_val_min": 130,
+    "effects": ["Chorus", "Compressor", "Delay", "Distortion", "Equalizer", "Filter", "Flanger", "Phaser", "Reverb"]
+  },
+  "fx_modules": {
+    "_note": "Per-effect KNOB sub-profiles (rung 10), read by fx_params.read_fx_params. Vital's enabled effects show expanded panels that STACK by enabled-order, so a panel's y is dynamic: panel_top(E) = base_y + Σ height of enabled CALIBRATED effects before E in the fixed rack order. knob cx is absolute (panels share an x); knob dy is relative to that effect's panel_top. All white-pointer. Calibrated LIVE (computer-use) across Chorus-alone / Delay-alone / both — the both-config proved Delay's panel sits at base_y+235 (Chorus's height) and the delay-alone config proved it slides up to base_y. Only Chorus + Delay calibrated so far; an uncalibrated enabled effect before another blocks the latter's positioned read (reported position_unknown, never guessed).",
+    "base_y": 140,
+    "modules": {
+      "Chorus": {"height": 235, "knobs": {
+        "feedback": {"cx": 1106, "dy": 46,  "r": 32},
+        "mix":      {"cx": 1248, "dy": 46,  "r": 28},
+        "depth":    {"cx": 508,  "dy": 156, "r": 30},
+        "delay1":   {"cx": 604,  "dy": 156, "r": 28},
+        "delay2":   {"cx": 700,  "dy": 156, "r": 30},
+        "cutoff":   {"cx": 1106, "dy": 156, "r": 30},
+        "spread":   {"cx": 1248, "dy": 156, "r": 28}
+      }},
+      "Delay": {"height": 235, "knobs": {
+        "feedback": {"cx": 1106, "dy": 46,  "r": 32},
+        "mix":      {"cx": 1248, "dy": 46,  "r": 28},
+        "cutoff":   {"cx": 1106, "dy": 156, "r": 30},
+        "spread":   {"cx": 1248, "dy": 156, "r": 28}
+      }},
+      "Compressor": {"height": 235, "knobs": {
+        "mix":     {"cx": 698,  "dy": 46,  "r": 32},
+        "attack":  {"cx": 1248, "dy": 46,  "r": 28},
+        "low":     {"cx": 508,  "dy": 156, "r": 32},
+        "band":    {"cx": 604,  "dy": 156, "r": 28},
+        "high":    {"cx": 700,  "dy": 156, "r": 32},
+        "release": {"cx": 1248, "dy": 156, "r": 28}
+      }},
+      "Distortion": {"height": 235, "knobs": {
+        "drive":     {"cx": 998,  "dy": 46,  "r": 28},
+        "mix":       {"cx": 1212, "dy": 46,  "r": 28},
+        "cutoff":    {"cx": 962,  "dy": 156, "r": 24},
+        "resonance": {"cx": 1104, "dy": 156, "r": 32},
+        "blend":     {"cx": 1248, "dy": 156, "r": 28}
+      }},
+      "Flanger": {"height": 235, "knobs": {
+        "feedback": {"cx": 1106, "dy": 46,  "r": 32},
+        "mix":      {"cx": 1248, "dy": 46,  "r": 28},
+        "offset":   {"cx": 568,  "dy": 156, "r": 28},
+        "center":   {"cx": 1106, "dy": 156, "r": 32},
+        "depth":    {"cx": 1248, "dy": 156, "r": 28}
+      }},
+      "Phaser": {"height": 235, "knobs": {
+        "feedback": {"cx": 1104, "dy": 46,  "r": 32},
+        "mix":      {"cx": 1248, "dy": 46,  "r": 28},
+        "offset":   {"cx": 568,  "dy": 156, "r": 28},
+        "center":   {"cx": 1104, "dy": 156, "r": 32},
+        "depth":    {"cx": 1248, "dy": 156, "r": 28}
+      }},
+      "Reverb": {"height": 235, "knobs": {
+        "low_cut":       {"cx": 524,  "dy": 46,  "r": 32},
+        "cutoff":        {"cx": 870,  "dy": 46,  "r": 28},
+        "chorus_amount": {"cx": 998,  "dy": 46,  "r": 32},
+        "delay":         {"cx": 1128, "dy": 46,  "r": 28},
+        "mix":           {"cx": 1256, "dy": 46,  "r": 32},
+        "high_cut":      {"cx": 524,  "dy": 156, "r": 32},
+        "gain":          {"cx": 870,  "dy": 156, "r": 28},
+        "chorus_freq":   {"cx": 998,  "dy": 156, "r": 32},
+        "size":          {"cx": 1128, "dy": 156, "r": 28},
+        "time":          {"cx": 1256, "dy": 156, "r": 32}
+      }}
+    }
+  },
+  "controls": {
+    "env1_delay":   {"type": "knob", "cx": 1534, "cy": 426, "r": 30, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]},
+    "env1_attack":  {"type": "knob", "cx": 1676, "cy": 426, "r": 30, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]},
+    "env1_hold":    {"type": "knob", "cx": 1820, "cy": 426, "r": 30, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]},
+    "env1_decay":   {"type": "knob", "cx": 1964, "cy": 426, "r": 30, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]},
+    "env1_sustain": {"type": "knob", "cx": 2106, "cy": 426, "r": 30, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]},
+    "env1_release": {"type": "knob", "cx": 2250, "cy": 426, "r": 30, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]},
+
+    "osc1_level":   {"type": "knob", "cx": 262,  "cy": 255, "r": 30, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]},
+    "osc1_pan":     {"type": "knob", "cx": 367,  "cy": 254, "r": 30, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]},
+    "osc1_unison":  {"type": "knob", "cx": 1001, "cy": 268, "r": 30, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]},
+    "osc1_phase":   {"type": "knob", "cx": 1214, "cy": 251, "r": 30, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]},
+
+    "osc2_level":   {"type": "knob", "cx": 260,  "cy": 490, "r": 28, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]},
+    "osc2_pan":     {"type": "knob", "cx": 366,  "cy": 490, "r": 28, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]},
+    "osc3_level":   {"type": "knob", "cx": 260,  "cy": 722, "r": 28, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]},
+    "osc3_pan":     {"type": "knob", "cx": 366,  "cy": 722, "r": 28, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]},
+
+    "filter_drive":  {"type": "knob", "cx": 434, "cy": 1278, "r": 32, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]},
+    "filter_mix":    {"type": "knob", "cx": 552, "cy": 1278, "r": 32, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]},
+    "filter_keytrk": {"type": "knob", "cx": 668, "cy": 1278, "r": 32, "sweep_deg": 270.0, "pointer": "white", "range": [0.0, 1.0]}
+  },
+  "plugin_params": {
+    "_note": "Maps each §5b control NAME (the profile's read key) → the hosted plugin's ACTUAL param name (as Mosh's describe_plugin reports it, case-insensitive). §9 execute (render/execute.resolve_synths) maps synth_patch.params by name→index, so without this map a §5b read lands in `unresolved` ('param name not on plugin'). render/from_screen.synth_element_from_gui applies it so a GUI read actually drives set_plugin_param. Verified against Vital VST3 (905 params).",
+    "env1_delay": "envelope 1 delay",
+    "env1_attack": "envelope 1 attack",
+    "env1_hold": "envelope 1 hold",
+    "env1_decay": "envelope 1 decay",
+    "env1_sustain": "envelope 1 sustain",
+    "env1_release": "envelope 1 release",
+    "osc1_level": "oscillator 1 level",
+    "osc1_pan": "oscillator 1 pan",
+    "osc1_unison": "oscillator 1 unison voices",
+    "osc1_phase": "oscillator 1 phase",
+    "osc2_level": "oscillator 2 level",
+    "osc2_pan": "oscillator 2 pan",
+    "osc3_level": "oscillator 3 level",
+    "osc3_pan": "oscillator 3 pan",
+    "filter_drive": "filter 1 drive",
+    "filter_mix": "filter 1 mix",
+    "filter_keytrk": "filter 1 key track"
+  },
+  "_controls_note": "OSC 1/2/3 LEVEL/PAN (+ OSC 1 unison/phase) calibrated from the Init Preset. OSC 2/3 are DIM (off on Init) but the white pointer is read skin-relative, so their LEVEL/PAN read correctly anyway (the coords are valid when a tutorial has them on). The reader records each knob's normalized POSITION [0,1] — the synth-specific position→display mapping (e.g. unison position 0.5 shows '20%') is non-linear, but recording position is reproduction-correct. Vital's filter CUTOFF/RESONANCE are GRAPH-DRAG controls (X/Y on the response graph), NOT knobs, so the white-pointer reader can't read them — those are graphic params for §8. FILTER 1's DRIVE/MIX/KEY-TRK ARE knobs (FILTER 1 = bottom-LEFT module; the FIL1/FIL2 labels there are serial-routing toggles, not the module identity); calibrated LIVE via computer-use (enabled FILTER 1, read defaults DRIVE 0 / MIX 1.0 / KEY-TRK 0.5, then a deliberate DRIVE drag → 0.81 to prove tracking) — they read ONLY when the filter is enabled (dim/off on Init reads unreliably). Fixture: vital_filter_on.png."
+}

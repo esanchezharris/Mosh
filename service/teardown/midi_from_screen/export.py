@@ -1,3 +1,6 @@
+"""Write detected notes (start/end in BEATS) to a Standard MIDI File — stdlib only (a
+minimal type-0 SMF writer), so §5 needs no MIDI dependency.
+"""
 from __future__ import annotations
 
 import struct
@@ -15,7 +18,7 @@ def _vlq(n: int) -> bytes:
 
 
 def write_midi(notes: list[dict], path, bpm: float = 140.0, ppq: int = 480) -> str:
-    events = []
+    events = []  # (tick, status, pitch, velocity)
     for nt in notes:
         s = int(round(float(nt["start"]) * ppq))
         e = max(int(round(float(nt["end"]) * ppq)), s + 1)
@@ -26,12 +29,12 @@ def write_midi(notes: list[dict], path, bpm: float = 140.0, ppq: int = 480) -> s
 
     trk = bytearray()
     mpqn = int(60_000_000 / max(1.0, bpm))
-    trk += _vlq(0) + b"\xff\x51\x03" + struct.pack(">I", mpqn)[1:]
+    trk += _vlq(0) + b"\xff\x51\x03" + struct.pack(">I", mpqn)[1:]   # set-tempo meta
     last = 0
     for tick, status, pitch, vel in events:
         trk += _vlq(tick - last) + bytes([status, pitch & 0x7F, vel & 0x7F])
         last = tick
-    trk += _vlq(0) + b"\xff\x2f\x00"
+    trk += _vlq(0) + b"\xff\x2f\x00"                                  # end of track
 
     data = b"MThd" + struct.pack(">IHHH", 6, 0, 1, ppq) + b"MTrk" + struct.pack(">I", len(trk)) + bytes(trk)
     Path(path).parent.mkdir(parents=True, exist_ok=True)
