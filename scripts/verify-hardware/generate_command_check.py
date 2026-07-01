@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import argparse
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 import subprocess
 import sys
 import tempfile
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -31,7 +33,7 @@ def _request(args: argparse.Namespace) -> dict[str, Any]:
     return request
 
 
-def _minimal_env(script: Path, results: Path, session: str) -> dict[str, str]:
+def _minimal_env(script: Path, results: Path, session: str, extra_env: dict[str, str] | None = None) -> dict[str, str]:
     keep = ("HOME", "USER", "LOGNAME", "TMPDIR", "PATH", "SHELL", "LANG", "LC_ALL", "__CF_USER_TEXT_ENCODING")
     env = {key: value for key in keep if (value := os.environ.get(key))}
     env.setdefault("PATH", "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin")
@@ -44,6 +46,8 @@ def _minimal_env(script: Path, results: Path, session: str) -> dict[str, str]:
             "MOSH_ENABLE_SA3": "0",
         }
     )
+    if extra_env:
+        env.update(extra_env)
     return env
 
 
@@ -63,13 +67,20 @@ def _read_results(path: Path, stdout: str) -> list[dict[str, Any]]:
     return rows
 
 
-def _run_commands(bin_path: Path, commands: list[dict[str, Any]], *, session: str, timeout: int) -> tuple[subprocess.CompletedProcess[str], list[dict[str, Any]]]:
+def _run_commands(
+    bin_path: Path,
+    commands: list[dict[str, Any]],
+    *,
+    session: str,
+    timeout: int,
+    extra_env: dict[str, str] | None = None,
+) -> tuple[subprocess.CompletedProcess[str], list[dict[str, Any]]]:
     with tempfile.TemporaryDirectory(prefix="mosh-generate-command-") as td:
         tmp = Path(td)
         script = tmp / "script.jsonl"
         results_path = tmp / "results.jsonl"
         script.write_text("\n".join(json.dumps(cmd, sort_keys=True) for cmd in commands) + "\n", encoding="utf-8")
-        env = _minimal_env(script, results_path, session)
+        env = _minimal_env(script, results_path, session, extra_env=extra_env)
         proc = subprocess.run(
             [str(bin_path), "--run-script"],
             env=env,
@@ -84,6 +95,77 @@ def _run_commands(bin_path: Path, commands: list[dict[str, Any]], *, session: st
 def _row_data(row: dict[str, Any]) -> dict[str, Any]:
     data = row.get("data")
     return data if isinstance(data, dict) else row
+
+
+def _partial_apply_program() -> dict[str, Any]:
+    return {
+        "ok": True,
+        "recipeId": "rollback_probe",
+        "program": {
+            "commands": [
+                {
+                    "command": "create_track",
+                    "args": {"name": "Rollback Probe", "type": "drum"},
+                    "capture": {"T0": "trackId"},
+                },
+                {
+                    "command": "assign_sample",
+                    "args": {
+                        "trackId": "${T0}",
+                        "note": 36,
+                        "mode": "drum",
+                        "file": "/tmp/mosh-rollback-probe-missing-sample.wav",
+                    },
+                },
+            ],
+            "unresolved": [],
+        },
+        "provenance": {"sources": {"rollback": "fake-service"}},
+    }
+
+
+class _FakeRecipeHandler(BaseHTTPRequestHandler):
+    server_version = "MoshRecipeFake/1"
+
+    def _send_json(self, status: int, payload: dict[str, Any]) -> None:
+        body = json.dumps(payload).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self) -> None:  # noqa: N802
+        if self.path == "/health":
+            self._send_json(200, {"ok": True, "build": "fake-recipe-rollback"})
+            return
+        self._send_json(404, {"ok": False, "error": "not-found"})
+
+    def do_POST(self) -> None:  # noqa: N802
+        if self.path == "/generate_recipe":
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            if length:
+                self.rfile.read(length)
+            self._send_json(200, _partial_apply_program())
+            return
+        self._send_json(404, {"ok": False, "error": "not-found"})
+
+    def log_message(self, fmt: str, *args: Any) -> None:
+        return
+
+
+class _FakeRecipeServer:
+    def __enter__(self) -> "_FakeRecipeServer":
+        self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), _FakeRecipeHandler)
+        self.port = int(self.httpd.server_address[1])
+        self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
+        self.thread.start()
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
+        self.httpd.shutdown()
+        self.httpd.server_close()
+        self.thread.join(timeout=2)
 
 
 def _snapshot_summary(snapshot: dict[str, Any]) -> dict[str, Any]:
@@ -140,6 +222,8 @@ def _error_kind(row: dict[str, Any]) -> str:
     raw = str(row.get("error") or data.get("error") or "")
     if "recipe library missing" in raw:
         return "recipe-library-missing"
+    if "assign_sample" in raw and "file not found" in raw:
+        return "assign-sample-file-missing"
     if raw:
         return "error"
     return "none"
@@ -168,6 +252,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--session", default="generate-command-check")
     parser.add_argument("--timeout", type=int, default=240)
     parser.add_argument("--skip-failure-check", action="store_true", help="skip the missing-library no-side-effect check")
+    parser.add_argument("--skip-rollback-check", action="store_true", help="skip the fake-service partial-apply rollback check")
     args = parser.parse_args(argv)
 
     bin_path = Path(args.bin)
@@ -248,6 +333,47 @@ def main(argv: list[str] | None = None) -> int:
                 "before": before_summary,
                 "after": after_summary,
                 "noSideEffects": no_side_effects,
+            }
+        )
+
+    if not args.skip_rollback_check:
+        rollback_commands = [
+            {"command": "__snapshot", "args": {"label": "before_rollback"}},
+            {"command": "generate_beat_recipe", "args": {"mood": "rollback", "tempo": 140, "key": "F minor", "seed": 1}},
+            {"command": "__snapshot", "args": {"label": "after_rollback"}},
+        ]
+        with _FakeRecipeServer() as fake:
+            rollback_proc, rollback_rows = _run_commands(
+                bin_path,
+                rollback_commands,
+                session=f"{args.session}-rollback",
+                timeout=args.timeout,
+                extra_env={"MOSH_SERVICE_HOST": "127.0.0.1", "MOSH_SERVICE_PORT": str(fake.port)},
+            )
+        rollback_generate_rows = [row for row in rollback_rows if row.get("command") == "generate_beat_recipe"]
+        rollback_snapshot_rows = [row for row in rollback_rows if row.get("command") == "__snapshot"]
+        _check(rollback_proc.returncode != 0, "partial-apply run-script failed as expected", failures, f"code={rollback_proc.returncode}")
+        _check(len(rollback_generate_rows) == 1, "one partial-apply generate_beat_recipe result", failures, f"rows={len(rollback_generate_rows)}")
+        _check(len(rollback_snapshot_rows) == 2, "partial-apply check has before/after snapshots", failures, f"rows={len(rollback_snapshot_rows)}")
+        if rollback_generate_rows:
+            rollback_error_kind = _error_kind(rollback_generate_rows[0])
+            _check(not bool(rollback_generate_rows[0].get("ok")), "partial-apply generate_beat_recipe returned failure", failures)
+            _check(rollback_error_kind == "assign-sample-file-missing", "partial-apply failure reached assign_sample", failures, rollback_error_kind)
+        else:
+            rollback_error_kind = "missing-result"
+        rollback_before = _snapshot_summary(rollback_snapshot_rows[0]) if len(rollback_snapshot_rows) >= 1 else {}
+        rollback_after = _snapshot_summary(rollback_snapshot_rows[-1]) if len(rollback_snapshot_rows) >= 2 else {}
+        rollback_no_side_effects = rollback_before == rollback_after and bool(rollback_before)
+        _check(rollback_no_side_effects, "partial-apply rollback restored snapshot counts", failures, f"before={rollback_before} after={rollback_after}")
+        safe_rows.append(
+            {
+                "scenario": "partial-apply-rollback",
+                "ok": rollback_error_kind == "assign-sample-file-missing" and rollback_no_side_effects,
+                "command": "generate_beat_recipe",
+                "errorKind": rollback_error_kind,
+                "before": rollback_before,
+                "after": rollback_after,
+                "noSideEffects": rollback_no_side_effects,
             }
         )
 

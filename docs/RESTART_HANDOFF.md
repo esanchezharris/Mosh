@@ -110,8 +110,10 @@ Installed-app status as of the current local deployment pass:
   uses r7 without repo-cwd assumptions. This proof is now repeatable with
   `scripts/verify-hardware/generate_command_check.py`; the latest run applied 25/25 commands
   with `usedExplicitRuntimeArgs:false`, 8 MIDI-bearing tracks, and 338 MIDI notes. The same
-  verifier also checks a missing-library failure path: `generate_beat_recipe` fails with
-  `recipe-library-missing` and the before/after snapshot counts stay unchanged. Compact local proof:
+  verifier also checks missing-library pre-apply failure and fake-service partial-apply
+  rollback: `generate_beat_recipe` fails with `recipe-library-missing` before mutation,
+  then fails on `assign_sample` after a generated `create_track`, and both before/after
+  snapshot counts stay unchanged. Compact local proof:
   `.cache/mosh-teardown/midi-ingredients/2026-07-01-r7-curated/default-runtime-generate-proof.jsonl`.
 - The r7 owner-listening pack is rendered at `~/mosh-beats/r7-curated/`: 6/6 WAVs rendered
   non-silent through `/Applications/Mosh.app`, with provenance written to
