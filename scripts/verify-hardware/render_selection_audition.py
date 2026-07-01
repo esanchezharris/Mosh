@@ -5,6 +5,7 @@ import argparse
 import csv
 import hashlib
 import json
+import math
 import os
 import shutil
 import sys
@@ -19,6 +20,12 @@ if str(SERVICE) not in sys.path:
 DEFAULT_BIN = REPO / "build-macos-arm64" / "Mosh_artefacts" / "Debug" / "Mosh.app" / "Contents" / "MacOS" / "Mosh"
 DEFAULT_OUT = Path("~/mosh-beats/r7-selection").expanduser()
 BASE_SEED_STEP = 97
+PRODUCTION_PROFILES = ("none", "r7-drop")
+R7_DROP_SECTIONS = (
+    ("intro", 0.0, 16.0, {"lead", "pad", "pluck", "fx"}),
+    ("drop", 16.0, 48.0, None),
+    ("outro", 48.0, 64.0, {"808", "bass", "kick", "snare", "hat", "clap", "perc", "pad", "pluck", "fx"}),
+)
 
 BEATS = [
     ({"mood": "dark", "tempo": 140, "key": "F minor"}, 3),
@@ -99,7 +106,128 @@ def _keep(raw: str) -> bool:
     return str(raw or "").strip().lower() in {"1", "true", "yes", "y", "keep", "x"}
 
 
-def render_pack(out_dir: Path, *, candidates_per_prompt: int, include_private_paths: bool = False) -> int:
+def _tempo(recipe: Any) -> float:
+    value = getattr(getattr(getattr(recipe, "meta", None), "tempo_bpm", None), "value", None)
+    try:
+        tempo = float(value)
+    except (TypeError, ValueError):
+        tempo = 120.0
+    return tempo if tempo > 0 else 120.0
+
+
+def _element_loop_beats(element: Any) -> float:
+    motif = getattr(element, "motif", None)
+    if motif and getattr(motif, "bars", 0):
+        return max(4.0, float(motif.bars) * 4.0)
+    notes = list(getattr(getattr(element, "midi", None), "notes", []) or [])
+    if not notes:
+        return 4.0
+    end = max(float(n.start_beats) + float(n.duration_beats) for n in notes)
+    return max(4.0, math.ceil(end / 4.0) * 4.0)
+
+
+def _loop_notes_into_section(notes: list[Any], *, loop_beats: float, start_beats: float, end_beats: float) -> list[Any]:
+    from teardown import recipe as R
+
+    arranged = []
+    offset = start_beats
+    while offset < end_beats - 1e-9:
+        for note in notes:
+            start = offset + float(note.start_beats)
+            if start < start_beats - 1e-9 or start >= end_beats - 1e-9:
+                continue
+            duration = min(float(note.duration_beats), end_beats - start)
+            if duration <= 0:
+                continue
+            arranged.append(
+                R.NoteEvent(
+                    pitch=int(note.pitch),
+                    start_beats=round(start, 6),
+                    duration_beats=round(duration, 6),
+                    velocity=int(note.velocity),
+                )
+            )
+        offset += loop_beats
+    arranged.sort(key=lambda note: (note.start_beats, note.pitch, note.duration_beats))
+    return arranged
+
+
+def apply_production_profile(recipe: Any, profile: str) -> Any:
+    if profile == "none":
+        return recipe
+    if profile != "r7-drop":
+        raise ValueError(f"unknown production profile: {profile}")
+
+    from teardown import recipe as R
+
+    out = R.Recipe.model_validate(recipe.model_dump())
+    out.recipe_id = f"{recipe.recipe_id}_r7_drop"
+    spb = 60.0 / _tempo(out)
+    out.arrangement = R.Arrangement(
+        sections=[
+            R.Section(name=name, start_s=round(start * spb, 6), end_s=round(end * spb, 6), confidence=1.0)
+            for name, start, end, _roles in R7_DROP_SECTIONS
+        ]
+    )
+    for element in out.elements:
+        original_notes = list(element.midi.notes)
+        role = element.role.value
+        loop_beats = _element_loop_beats(element)
+        arranged = []
+        for _name, start, end, roles in R7_DROP_SECTIONS:
+            if roles is not None and role not in roles:
+                continue
+            arranged.extend(
+                _loop_notes_into_section(
+                    original_notes,
+                    loop_beats=loop_beats,
+                    start_beats=start,
+                    end_beats=end,
+                )
+            )
+        element.midi.notes = arranged
+        element.midi.note_count = len(arranged)
+        if element.motif:
+            element.motif.bars = max(element.motif.bars, 16.0)
+    return out
+
+
+def compile_summary(recipe: Any) -> dict[str, Any]:
+    from teardown.render.compile import compile_recipe
+
+    compiled = compile_recipe(recipe)
+    roles = [element.role.value for element in recipe.elements]
+    role_note_counts: dict[str, int] = {}
+    for element in recipe.elements:
+        role = element.role.value
+        role_note_counts[role] = role_note_counts.get(role, 0) + len(element.midi.notes)
+    max_note_end = 0.0
+    for element in recipe.elements:
+        for note in element.midi.notes:
+            max_note_end = max(max_note_end, float(note.start_beats) + float(note.duration_beats))
+    return {
+        "command_count": len(compiled.commands),
+        "unresolved_count": len(compiled.unresolved),
+        "has_melodic_808": any(
+            command.get("command") == "assign_sample"
+            and (command.get("args") or {}).get("mode") == "melodic"
+            for command in compiled.commands
+        ),
+        "section_count": len(recipe.arrangement.sections),
+        "section_names": [section.name for section in recipe.arrangement.sections],
+        "role_note_counts": dict(sorted(role_note_counts.items())),
+        "roles": sorted(set(roles)),
+        "max_note_end_beats": round(max_note_end, 6),
+    }
+
+
+def render_pack(
+    out_dir: Path,
+    *,
+    candidates_per_prompt: int,
+    production_profile: str = "none",
+    include_private_paths: bool = False,
+) -> int:
     from recipes import generate as G
     from teardown.render.execute import execute_recipe
 
@@ -121,6 +249,7 @@ def render_pack(out_dir: Path, *, candidates_per_prompt: int, include_private_pa
         "# r7 generate-N selection pack",
         "",
         "This is a pre-Gate-C selection pass: score several candidates per prompt, then run `select` to copy the best few into `selected/`.",
+        f"Production profile: {production_profile}",
         f"Library: {_display_library(library_dir)}",
         f"Private paths included: {include_private_paths}",
         "",
@@ -141,8 +270,9 @@ def render_pack(out_dir: Path, *, candidates_per_prompt: int, include_private_pa
             )
             wav = out_dir / filename
             session_dir = out_dir / f".s{group_index:02d}_{label}"
+            render_rec = apply_production_profile(rec, production_profile)
             res = execute_recipe(
-                rec,
+                render_rec,
                 bin_path=str(binp),
                 out_wav=str(wav),
                 session_dir=str(session_dir),
@@ -176,10 +306,19 @@ def render_pack(out_dir: Path, *, candidates_per_prompt: int, include_private_pa
                     "file": filename,
                     "request": request,
                     "seed": seed,
-                    "recipe_id": rec.recipe_id,
+                    "source_recipe_id": rec.recipe_id,
+                    "recipe_id": render_rec.recipe_id,
+                    "production_profile": production_profile,
+                    "production": {
+                        "arrangement_sections": [
+                            {"name": section.name, "start_s": section.start_s, "end_s": section.end_s}
+                            for section in render_rec.arrangement.sections
+                        ],
+                    },
+                    "compile": compile_summary(render_rec),
                     "path_policy": {
                         "private_paths_included": include_private_paths,
-                        "redaction": "absolute paths are replaced with redacted:<name>:<sha12>",
+                        "redaction": "absolute paths are replaced with redacted:path:<sha12>",
                     },
                     "provenance": _jsonable_provenance(prov, include_private_paths=include_private_paths),
                     "render": {
@@ -287,6 +426,7 @@ def main(argv: list[str] | None = None) -> int:
     render.add_argument("out_dir", nargs="?", default=str(DEFAULT_OUT))
     render.add_argument("--candidates-per-prompt", type=int, default=4)
     render.add_argument("--include-private-paths", action="store_true", help="write local sample paths into manifests")
+    render.add_argument("--production-profile", choices=PRODUCTION_PROFILES, default="none")
     select = sub.add_parser("select", help="copy the best scored candidates into selected/")
     select.add_argument("out_dir", nargs="?", default=str(DEFAULT_OUT))
     select.add_argument("--selected-dir", default="")
@@ -300,6 +440,7 @@ def main(argv: list[str] | None = None) -> int:
         return render_pack(
             Path(args.out_dir).expanduser(),
             candidates_per_prompt=args.candidates_per_prompt,
+            production_profile=args.production_profile,
             include_private_paths=args.include_private_paths,
         )
     selected_dir = Path(args.selected_dir).expanduser() if args.selected_dir else None
