@@ -115,3 +115,7 @@ ios/MoshCompanion/build/
 # Bundled Moshi brain key — only ever lives in the deployed .app, never in git.
 brain.env
 **/brain.env
+
+# Vector sample palette artifact (owner-private library paths + resampled audio)
+service/palette/palette/
+service/teardown/probe/.assets/
