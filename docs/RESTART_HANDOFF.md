@@ -112,6 +112,10 @@ Installed-app status as of the current local deployment pass:
 - The r7 owner-listening pack is rendered at `~/mosh-beats/r7-curated/`: 6/6 WAVs rendered
   non-silent through `/Applications/Mosh.app`, with provenance written to
   `~/mosh-beats/r7-curated/README.md`.
+- The stricter blind Gate C pack is rendered at `~/mosh-beats/r7-gate-c-blind/`: 18/18
+  WAVs rendered non-silent through `/Applications/Mosh.app`, with 6 current r7 beats,
+  6 seed-library baselines, and 6 exact r7 source anchors in blind order. Listener-facing
+  prompts are in `README.md`; provenance and labels are in `answer_key.json`.
 - One installed selftest run reached 1147/1149 checks; the two failures were the existing
   Moshi brain provider-key expectations in the packaged-app section, not the recipe
   command path. Treat installed-app gate completion as still open.
@@ -166,9 +170,9 @@ is `.cache/mosh-teardown/midi-ingredients/2026-07-01-r7-curated/`.
   a corpus promotion, until source-fidelity review says the phrase is musically faithful.
 
 Known corpus caveat: the local corpus now covers every generator drum role, and r7-curated
-is inside the target 30-50 recipe band with passing MIDI-native Gate A and a rendered
-owner-listening pack. The next corpus-quality step is not more ingestion; it is the owner
-Gate C listening verdict plus an owner/source policy decision on whether any local
+is inside the target 30-50 recipe band with passing MIDI-native Gate A and rendered
+owner-listening/blind comparison packs. The next corpus-quality step is not more ingestion;
+it is the owner Gate C listening verdict plus an owner/source policy decision on whether any local
 MIDI-pack-derived recipes should move from ignored evidence into a staged runtime or
 tracked `service/recipes/library/` set.
 
@@ -217,6 +221,7 @@ MOSH_BIN=$MOSH_BIN $VENV scripts/verify-hardware/recipe_render_check.py     # 80
 MOSH_BIN=$MOSH_BIN $VENV scripts/verify-hardware/generate_render_check.py   # generated beats render + recombine
 MOSH_BIN=$MOSH_BIN MOSH_RECIPE_LIBRARY=.cache/mosh-teardown/midi-ingredients/<run>/library MOSH_PALETTE_MANIFEST=<manifest.json> $VENV scripts/verify-hardware/generate_render_check.py
 MOSH_BIN=$MOSH_BIN MOSH_RECIPE_LIBRARY=.cache/mosh-teardown/midi-ingredients/<run>/library MOSH_PALETTE_MANIFEST=<manifest.json> $VENV scripts/verify-hardware/render_audition.py ~/mosh-beats/<run>  # audition set
+MOSH_BIN=$MOSH_BIN MOSH_RECIPE_LIBRARY=.cache/mosh-teardown/midi-ingredients/<run>/library MOSH_PALETTE_MANIFEST=<manifest.json> $VENV scripts/verify-hardware/render_blind_gate_c.py ~/mosh-beats/<run>-gate-c-blind
 
 # --- generate one beat (CLI) ---
 $VENV service/recipes/generate.py --mood dark --tempo 140 --key "F minor" --seed 7 --emit recipe
@@ -269,7 +274,7 @@ cd service/teardown && .venv/bin/python recipe.py --emit-schema > recipe.schema.
 
 1. **The REAL corpus (the true "start from knowing") — use r7-curated now.** The local MIDI pack source pool has 122 Gate-A-audited ingredient recipes in r6, and the current role-balanced 30-50 candidate is the 48-recipe r7-curated corpus. The next mining input is the refreshed evidence-filtered scout export at `.cache/mosh-teardown/midi-ingredients/2026-07-01-r7-curated/teardown_jobs-midi-ingredients.jsonl` (1 usable MIDI-ingredient job). The unfiltered usable queue still has 14 jobs, but most are broad synth references; run `video2recipe/` only on jobs that can produce defensible MIDI/single-element recipe material. Do not deepen synth-parameter reconstruction just to pass the queue. Promote recipes to `service/recipes/library/` only after a source-policy decision and the relevant Gate A proof.
    - Each new recipe must pass **Gate A (fidelity)**: reconstruct → render → A/B vs. the source tutorial audio ("does it sound like that beat?"). Owner-ear — see the goal prompt in §7 for exactly how to get this signal without live Claude access this week.
-2. **Gate C (the verdict).** The r7 owner-listening pack is ready at `~/mosh-beats/r7-curated/`; the remaining Gate C verdict is the owner's ear call. For a stricter blind A/B pack, build retrieved-adapted vs. old template vs. exact reconstruction labels around the same r7 corpus (reuse `ui/scripts/rl/buildValidityPack.mts` patterns).
+2. **Gate C (the verdict).** The r7 owner-listening pack is ready at `~/mosh-beats/r7-curated/`, and the stricter blind comparison pack is ready at `~/mosh-beats/r7-gate-c-blind/`. The remaining Gate C verdict is the owner's ear call; score the blind files before opening `answer_key.json`.
 3. **Phase 2 — finish the live-agent product path.** The `generate_beat_recipe` command surface, natural-language beat route, installed melodic-808 engine, bundle runtime, and LaunchServices run-script proof are wired in `codex/video2recipe-port`. Remaining work is now corpus quality and product hardening: mine/curate Gate-A-passing recipes, keep the installed runtime deploy path documented, and run the installed app gate again after the corpus changes rather than re-debugging solved Finder/Dock runtime setup.
 
 ---
@@ -303,7 +308,7 @@ cd service/teardown && .venv/bin/python recipe.py --emit-schema > recipe.schema.
 > 1. Land #194 (resolve the `__init__.py` conflict with #190's merge — combine both export surfaces).
 > 2. Use the local r7-curated MIDI pack corpus (48 Gate-A-audited ingredients, selected from the 122-recipe r6 source pool) plus the refreshed evidence-filtered scout export (`.cache/mosh-teardown/midi-ingredients/2026-07-01-r7-curated/teardown_jobs-midi-ingredients.jsonl` — 1 usable MIDI-ingredient job) to continue mining or promote real trap/melodic-trap recipes. Prefer MIDI-visible single-element sources; do not treat missing Serum/Vital parameter recovery as a blocker for v1.
 > 3. For each mined recipe, run **Gate A**: reconstruct → render → compare to the source tutorial audio. Since there's no live owner-in-the-loop this week, produce a scored self-assessment (does the reconstruction preserve tempo/key/the drum pattern/the 808 phrase — check programmatically wherever possible, e.g. onset/pitch overlap against what MIDI-from-screen extracted) and flag anything below a defensible bar rather than silently including it.
-> 4. Run **Gate C**: the current r7 owner-listening batch is rendered at `~/mosh-beats/r7-curated/`; do not self-grade this one, it's an ear call. If stricter blind labels are needed, build retrieved-adapted vs. old template vs. exact reconstruction around the same r7 corpus.
+> 4. Run **Gate C**: the current r7 owner-listening batch is rendered at `~/mosh-beats/r7-curated/`, and the blind comparison pack is rendered at `~/mosh-beats/r7-gate-c-blind/`; do not self-grade this one, it's an ear call.
 > 5. Keep the live-agent path wired through `generate_beat_recipe`; after corpus changes, rebuild/redeploy only as needed and prove `/Applications/Mosh.app` still generates beats from the staged runtime without repo-cwd assumptions.
 >
 > **Success criteria:** the live Mosh app generates a requested beat (e.g. "dark trap, 140bpm") entirely via retrieval+recombination of real mined recipes, renders it, and the result is waiting for the owner to A/B against the current audition set — OR you've hit a genuine blocker (owner ear needed, a missing capability, an ambiguous design call) and stopped with a clearly written note of exactly what's blocking and why, rather than guessing past it.
