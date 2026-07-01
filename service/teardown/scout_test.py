@@ -177,7 +177,8 @@ def main() -> int:
     check("ideal candidate gets ideal label", scored[0].decision == "ideal", scored[0].decision)
     usable_decisions = {item.candidate.video_id: item.decision for item in scored}
     check("chain-backed candidate stays usable or ideal", usable_decisions["usable-1"] in {"ideal", "usable"}, usable_decisions["usable-1"])
-    check("MIDI-only piano-roll candidate is accepted as an ingredient", usable_decisions["midi-only-1"] in {"usable", "weak"}, usable_decisions["midi-only-1"])
+    check("MIDI-only piano-roll candidate is accepted as a high-priority ingredient",
+          usable_decisions["midi-only-1"] in {"ideal", "usable"}, usable_decisions["midi-only-1"])
     midi_item = next(item for item in scored if item.candidate.video_id == "midi-only-1")
     check("MIDI-only candidate does not require Serum/Vital",
           "serum-or-vital:no" in midi_item.evidence_bundle and midi_item.yield_prediction.midi >= midi_item.yield_prediction.synth,
@@ -206,7 +207,7 @@ def main() -> int:
         jobs_path = Path(tmp) / "jobs.jsonl"
         check("job jsonl written", write_jobs(jobs_path, jobs) == 4 and jobs_path.exists(), str(jobs_path))
         summary = catalog.summary()
-        check("catalog summary counts", summary["total"] == 5 and summary["by_status"].get("ideal", 0) == 1 and summary["by_status"].get("usable", 0) >= 3, json.dumps(summary, sort_keys=True))
+        check("catalog summary counts", summary["total"] == 5 and summary["by_status"].get("ideal", 0) >= 1 and summary["by_status"].get("usable", 0) >= 2, json.dumps(summary, sort_keys=True))
         rescored_path = Path(tmp) / "rescored.sqlite"
         check("rescore-catalog exits 0",
               scout_cli_main(["rescore-catalog", "--catalog", str(catalog_path), "--out-catalog", str(rescored_path)]) == 0)

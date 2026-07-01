@@ -81,6 +81,23 @@ _BEAT_FOCUS_HINTS = (
     "start to finish",
     "type beat",
 )
+_MIDI_INGREDIENT_HINTS = (
+    "808",
+    "arp",
+    "bass",
+    "chord",
+    "clap",
+    "drum",
+    "hat",
+    "lead",
+    "melody",
+    "pad",
+    "pattern",
+    "piano roll",
+    "pluck",
+    "progression",
+    "snare",
+)
 
 
 def _clamp01(value: float) -> float:
@@ -386,6 +403,7 @@ def build_scout_system_prompt(policy: ScoutPolicy | None = None) -> str:
         "Discover tutorials via the YouTube Data API and rank them before any expensive teardown work.",
         "Prefer from-scratch tutorials with chapters, captions, and clear metadata.",
         "Prefer visible piano-roll/MIDI evidence for beat-production tutorials; plugin chain evidence is helpful but not required for MIDI-only ingredients.",
+        "For v1, rank MIDI-visible single-element ingredients ahead of synth-parameter detail.",
         "For synth-focused Serum/Vital tutorials, rank by visible synth GUI, readable preset names, and parameter detail.",
         "Treat visible Serum/Vital screens, readable preset names, and readable knobs as positive signals, not universal acceptance gates.",
         synth_clause,
@@ -478,16 +496,17 @@ class TutorialScorer:
         visual = self._visual_signals(candidate)
         probe = candidate.probe
 
-        from_scratch = _contains_any(candidate.search_text(), _FROM_SCRATCH_HINTS)
+        text = candidate.search_text()
+        from_scratch = _contains_any(text, _FROM_SCRATCH_HINTS)
+        single_element_hint = _contains_any(text, _MIDI_INGREDIENT_HINTS)
         chain_visible = bool(probe.plugin_chain_visible)
         serum_or_vital = bool(probe.serum_visible or probe.vital_visible or meta["serum_hits"] or meta["vital_hits"])
         extra_synth_count = int(visual["extra_synth_count"])
-        synth_focused = _is_synth_focused(candidate.search_text(), serum_or_vital)
+        synth_focused = _is_synth_focused(text, serum_or_vital)
         synth_focus_duration_ok = candidate.duration_s is None or candidate.duration_s >= 120
         midi_ingredient = bool(
             probe.piano_roll_visible
-            and not synth_focused
-            and (from_scratch or candidate.has_captions or candidate.chapters or meta["tutorial_hits"])
+            and (from_scratch or candidate.has_captions or candidate.chapters or meta["tutorial_hits"] or single_element_hint)
         )
 
         drums = _clamp01(
@@ -501,6 +520,7 @@ class TutorialScorer:
             + (0.45 if probe.piano_roll_visible else 0.0)
             + (0.10 if candidate.has_captions else 0.0)
             + (0.05 if candidate.chapters else 0.0)
+            + (0.08 if midi_ingredient else 0.0)
         )
         synth = _clamp01(
             0.08
@@ -520,13 +540,13 @@ class TutorialScorer:
         )
 
         overall = _clamp01(
-            0.16 * drums
-            + 0.34 * midi
-            + 0.28 * synth
+            0.14 * drums
+            + 0.42 * midi
+            + 0.18 * synth
             + 0.14 * arrangement
             + 0.04 * meta["metadata_score"]
             + 0.04 * visual["chain_score"]
-            + (0.16 if midi_ingredient else 0.0)
+            + (0.14 if midi_ingredient else 0.0)
         )
         confidence = _clamp01(
             0.18
@@ -563,15 +583,17 @@ class TutorialScorer:
             if extra_synth_count:
                 synth = min(synth, 0.50)
 
-        if (
+        if midi_ingredient and midi >= 0.68 and confidence >= 0.45:
+            decision = "ideal"
+        elif midi_ingredient and midi >= 0.65 and confidence >= 0.45:
+            decision = "usable"
+        elif (
             overall >= 0.62
             and chain_visible
             and serum_or_vital
             and probe.readable_preset
             and probe.readable_knobs
         ):
-            decision = "ideal"
-        elif midi_ingredient and midi >= 0.65 and confidence >= 0.45:
             decision = "usable"
         elif chain_visible and serum_or_vital and (overall >= 0.50 or (synth >= 0.55 and confidence >= 0.45)):
             decision = "usable"
