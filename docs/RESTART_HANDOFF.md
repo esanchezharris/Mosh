@@ -63,7 +63,7 @@ optionally writes a flat generator-ready library, and keeps the musical body inl
 - The UI agent catalog exposes `generate_beat_recipe`, the parser preserves object-form
   `capture`/`bind`, and the browser mock creates editable MIDI tracks for tests.
 - The debug app command surface has been driven through `Mosh --run-script` against the
-  local 50-recipe MIDI corpus: 19 generated commands applied, no unresolved refs, 6 editable
+  local 52-recipe MIDI corpus: 19 generated commands applied, no unresolved refs, 6 editable
   MIDI-bearing tracks, including the provenance-identified 808 source track.
 
 Do not claim installed-app completion from this alone. `/Applications/Mosh.app` still needs
@@ -76,9 +76,9 @@ proved.
 The current gitignored local ingredient run is
 `.cache/mosh-teardown/midi-ingredients/2026-07-01-r2/`.
 
-- 50 local MIDI ingredient recipes are present in `library/`.
-- All 50 validate against the recipe model and carry inline MIDI notes.
-- Role coverage: 26 `808`, 8 `hat`, 2 `kick`, 3 `perc`, 10 `pad`, 1 `lead`.
+- 52 local MIDI ingredient recipes are present in `library/`.
+- All 52 validate against the recipe model and carry inline MIDI notes.
+- Role coverage: 26 `808`, 2 `clap`, 8 `hat`, 2 `kick`, 3 `perc`, 10 `pad`, 1 `lead`.
 - `service/teardown/midi_corpus_gate.py` verifies each recipe against its source `.mid`
   by count, pitch, start, duration, and velocity, then checks minimum corpus size and
   required generator roles.
@@ -88,9 +88,10 @@ The current gitignored local ingredient run is
   exported to
   `.cache/mosh-teardown/midi-ingredients/2026-07-01-r2/teardown_jobs-midi-first.jsonl`.
 
-Known corpus caveat: there are no `snare` or `clap` ingredients yet, so current generated
-drum beds lean on kick/hat/perc. This is not a blocker for the generator, but it is the next
-highest-value corpus gap to fill from local packs or owner-picked MIDI sources.
+Known corpus caveat: there are no `snare` ingredients yet. This is not a blocker for the
+generator, but it is the next highest-value corpus gap to fill from local packs or
+owner-picked MIDI sources. The current render gate selected the new `clap` ingredients in
+all three generated beats.
 
 ---
 
