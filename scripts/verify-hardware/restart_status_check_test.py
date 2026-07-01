@@ -78,7 +78,7 @@ def _write_gate_c_pack(root: Path, *, complete: bool) -> Path:
     return pack
 
 
-def _write_restart_root(root: Path) -> None:
+def _write_restart_root(root: Path, *, source_policy_blocked: bool = True) -> None:
     _write_json(
         root / "gate-a-midi-audit.json",
         {
@@ -110,10 +110,13 @@ def _write_restart_root(root: Path) -> None:
             },
             "promotion_readiness": {
                 "staged_runtime_safe": True,
-                "repo_promotion_safe_now": False,
+                "repo_promotion_safe_now": not source_policy_blocked,
+                "gate_c_ok": not source_policy_blocked,
+                "tracked_research_promotion_present": not source_policy_blocked,
+                "tracked_research_promotion_path_safe": True,
                 "tracked_source_path_risks": 0,
-                "owner_source_policy_required": True,
-                "owner_gate_c_required": True,
+                "owner_source_policy_required": source_policy_blocked,
+                "owner_gate_c_required": source_policy_blocked,
             },
         },
     )
@@ -208,6 +211,22 @@ def main() -> int:
                   "--stop", str(stop),
                   "--allow-owner-blockers",
               ]) == 0)
+
+        promoted_root = base / "promoted-r7"
+        _write_restart_root(promoted_root, source_policy_blocked=False)
+        complete_pack = _write_gate_c_pack(base / "complete", complete=True)
+        promoted_status = RESTART.build_status(promoted_root, gate_c_pack=complete_pack, stop_path=stop)
+        promoted_payload = json.dumps(promoted_status, sort_keys=True)
+        check("completed research promotion clears owner blockers",
+              promoted_status["complete"] and promoted_status["ownerBlockers"] == [],
+              promoted_payload)
+        check("completed research promotion surfaces tracked readiness",
+              promoted_status["promotion"]["repoPromotionSafeNow"]
+              and promoted_status["promotion"]["gateCOk"]
+              and promoted_status["promotion"]["trackedResearchPromotionPresent"],
+              promoted_payload)
+        check("CLI passes after research promotion and Gate C scoring",
+              _main_quiet(["--root", str(promoted_root), "--gate-c-pack", str(complete_pack), "--stop", str(stop)]) == 0)
 
         bad_root = base / "bad-r7"
         _write_restart_root(bad_root)

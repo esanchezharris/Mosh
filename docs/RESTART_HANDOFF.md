@@ -20,7 +20,7 @@ The owner said the generated beats "all sound the same… the 808 plays eighth-n
 **The approved pivot (full plan: [`docs/plans/2026-06-30-restart-real-recipes.md`](plans/2026-06-30-restart-real-recipes.md)):**
 generate beats by **retrieving + recombining real per-element motifs** from a library of real recipes (drums from one, 808 from another, chords from a third → transpose into one key → bind the 808 to the chord roots → real samples → render). **RL/reward is FROZEN** (not deleted). The rules verifier is **demoted to a validity gate** (no taste). v1 = trap/melodic-trap, MIDI-native only.
 
-The owner listened to the first audition set and confirmed: **"the beats do sound like real beats now."** That's the directional green light — informal Gate C already leans positive.
+The owner listened to the first audition set and confirmed: **"the beats do sound like real beats now."** The scored blind Gate C comparison now makes that directional result more concrete: `retrieved_adapted_r7` wins musical distinctness (4.17 average vs. 3.33 for the old seed baseline and 3.00 for the single-ingredient anchor) and owns the best single beat (`g06_A`, scored 5/5 for distinctness). It does **not** yet win readiness/keepability (2.17 vs. 2.83 for seeds), so the next frontier is production, arrangement, and selection, not another debate about whether retrieval/recombination is the right substrate.
 
 ### 0a. Course correction after Claude alignment (2026-06-30)
 
@@ -122,11 +122,20 @@ Installed-app status as of the current local deployment pass:
   WAVs rendered non-silent through `/Applications/Mosh.app`, with 6 current r7 beats,
   6 seed-library baselines, and 6 exact r7 source anchors in blind order. Listener-facing
   prompts are in `README.md`; `scripts/verify-hardware/gate_c_pack_check.py` verifies the
-  pack and keeps `answer_key.json` unread until `scorecard.csv` is complete.
-- `scripts/verify-hardware/restart_status_check.py --allow-owner-blockers` now rolls the
+  pack, and the owner scorecard has been completed/revealed. Verdict: r7 retrieval wins
+  musical distinctness and ceiling, but the seed baseline still feels more keepable as a
+  finished loop. Treat this as a substrate win plus a production/arrangement mandate.
+- The 48 r7 recipe JSONs have been promoted from the local cache into
+  `service/recipes/library/` as **tracked research-only recipe material**. They contain
+  musical facts, inline MIDI notes, and content hashes; they do not commit raw MIDI files,
+  WAVs, local media paths, palette paths, screenshots, transcripts, or other local evidence.
+  This clears the r7 source-policy blocker for research use. Public distribution or
+  packaged-media use remains a separate rights/packaging decision.
+- `scripts/verify-hardware/restart_status_check.py` now rolls the
   STOP sentinel, Gate A audit, scout rescore/export, installed command proof, promotion
-  packet, and blind Gate C pack into one safe status check. It reports the current state as
-  repo-ready with owner blockers, not complete.
+  packet, and blind Gate C pack into one safe status check. It reports the promoted r7
+  research corpus as complete only when the tracked JSONs are present/path-safe, Gate A is
+  passing, the installed default-runtime proof is passing, and Gate C is scored.
 - One installed selftest run reached 1147/1149 checks; the two failures were the existing
   Moshi brain provider-key expectations in the packaged-app section, not the recipe
   command path. Treat installed-app gate completion as still open.
@@ -162,8 +171,10 @@ is `.cache/mosh-teardown/midi-ingredients/2026-07-01-r7-curated/`.
   0.42534877, and 0.41594802. Source-audio A/B remains separate for tutorial-video mining;
   it is not applicable to local `.mid` packs.
 - `scripts/verify-hardware/midi_corpus_promotion_packet.py` writes a safe local promotion
-  packet with role/source-group counts, source path classes, Gate A status, and the owner
-  decisions still needed. It does not include raw MIDI paths or media. Current local packet:
+  packet with role/source-group counts, source path classes, Gate A status, Gate C scorecard
+  status, and tracked-library promotion status. For the current r7 research promotion, run
+  it with `--source-policy research-tracked`. It does not include raw MIDI paths or media.
+  Current local packet:
   `.cache/mosh-teardown/midi-ingredients/2026-07-01-r7-curated/promotion-packet.json`.
 - The latest MIDI-first scout catalog refresh is
   `.cache/mosh-teardown/midi-ingredients/2026-07-01-r7-curated/catalog-midi-first.sqlite`
@@ -185,11 +196,11 @@ is `.cache/mosh-teardown/midi-ingredients/2026-07-01-r7-curated/`.
   a corpus promotion, until source-fidelity review says the phrase is musically faithful.
 
 Known corpus caveat: the local corpus now covers every generator drum role, and r7-curated
-is inside the target 30-50 recipe band with passing MIDI-native Gate A and rendered
-owner-listening/blind comparison packs. The next corpus-quality step is not more ingestion;
-it is the owner Gate C listening verdict plus an owner/source policy decision on whether any local
-MIDI-pack-derived recipes should move from ignored evidence into a staged runtime or
-tracked `service/recipes/library/` set.
+is inside the target 30-50 recipe band with passing MIDI-native Gate A, rendered
+owner-listening/blind comparison packs, completed Gate C scoring, and tracked research
+promotion. The next corpus-quality step is not more generic ingestion; it is production and
+arrangement on top of the r7 substrate, plus a "generate N, keep best" audition pass before
+future owner packs to manage the variance Gate C exposed.
 
 ---
 
@@ -236,6 +247,8 @@ MOSH_BIN=$MOSH_BIN $VENV scripts/verify-hardware/recipe_render_check.py     # 80
 MOSH_BIN=$MOSH_BIN $VENV scripts/verify-hardware/generate_render_check.py   # generated beats render + recombine
 MOSH_BIN=$MOSH_BIN MOSH_RECIPE_LIBRARY=.cache/mosh-teardown/midi-ingredients/<run>/library MOSH_PALETTE_MANIFEST=<manifest.json> $VENV scripts/verify-hardware/generate_render_check.py
 MOSH_BIN=$MOSH_BIN MOSH_RECIPE_LIBRARY=.cache/mosh-teardown/midi-ingredients/<run>/library MOSH_PALETTE_MANIFEST=<manifest.json> $VENV scripts/verify-hardware/render_audition.py ~/mosh-beats/<run>  # audition set
+MOSH_BIN=$MOSH_BIN MOSH_RECIPE_LIBRARY=service/recipes/library MOSH_PALETTE_MANIFEST=<manifest.json> $VENV scripts/verify-hardware/render_selection_audition.py render ~/mosh-beats/<run>-selection --candidates-per-prompt 4
+$VENV scripts/verify-hardware/render_selection_audition.py select ~/mosh-beats/<run>-selection --top-k 1
 MOSH_BIN=$MOSH_BIN MOSH_RECIPE_LIBRARY=.cache/mosh-teardown/midi-ingredients/<run>/library MOSH_PALETTE_MANIFEST=<manifest.json> $VENV scripts/verify-hardware/render_blind_gate_c.py ~/mosh-beats/<run>-gate-c-blind
 $VENV scripts/verify-hardware/gate_c_pack_check.py --pack ~/mosh-beats/<run>-gate-c-blind  # no --reveal until scorecard.csv is filled
 $VENV scripts/verify-hardware/restart_status_check.py --allow-owner-blockers --out .cache/mosh-teardown/midi-ingredients/<run>/restart-status.json
@@ -259,6 +272,7 @@ $VENV service/teardown/cli.py ingest-midi --dir "<gm-drum-midi-pack>" --out .cac
 # --- Gate-A-equivalent check for local MIDI ingredient fidelity ---
 $VENV service/teardown/midi_corpus_gate.py --root .cache/mosh-teardown/midi-ingredients/<run> --min-recipes 30
 MOSH_BIN=$MOSH_BIN MOSH_PALETTE_MANIFEST=<manifest.json> $VENV scripts/verify-hardware/gate_a_midi_audit.py --root .cache/mosh-teardown/midi-ingredients/<run> --out .cache/mosh-teardown/midi-ingredients/<run>/gate-a-midi-audit.json
+$VENV scripts/verify-hardware/midi_corpus_promotion_packet.py --root .cache/mosh-teardown/midi-ingredients/<run> --source-policy research-tracked --out .cache/mosh-teardown/midi-ingredients/<run>/promotion-packet.json
 
 # --- rescore the preserved scout catalog without mutating the checked-in copy ---
 $VENV service/teardown/cli.py rescore-catalog --catalog service/teardown/catalog.sqlite --out-catalog .cache/mosh-teardown/midi-ingredients/<run>/catalog-midi-first.sqlite
@@ -290,10 +304,11 @@ cd service/teardown && .venv/bin/python recipe.py --emit-schema > recipe.schema.
 
 ## 4. What's NEXT (priority order)
 
-1. **The REAL corpus (the true "start from knowing") — use r7-curated now.** The local MIDI pack source pool has 122 Gate-A-audited ingredient recipes in r6, and the current role-balanced 30-50 candidate is the 48-recipe r7-curated corpus. The next mining input is the refreshed evidence-filtered scout export at `.cache/mosh-teardown/midi-ingredients/2026-07-01-r7-curated/teardown_jobs-midi-ingredients.jsonl` (1 usable MIDI-ingredient job). The unfiltered usable queue still has 14 jobs, but most are broad synth references; run `video2recipe/` only on jobs that can produce defensible MIDI/single-element recipe material. Do not deepen synth-parameter reconstruction just to pass the queue. Promote recipes to `service/recipes/library/` only after a source-policy decision, the relevant Gate A proof, and a safe promotion packet.
+1. **The REAL corpus (the true "start from knowing") — r7 is now the default tracked research substrate.** The local MIDI pack source pool has 122 Gate-A-audited ingredient recipes in r6, and the current role-balanced 30-50 corpus is the 48-recipe r7-curated promotion now copied into `service/recipes/library/` alongside the original seed recipes. The next mining input is the refreshed evidence-filtered scout export at `.cache/mosh-teardown/midi-ingredients/2026-07-01-r7-curated/teardown_jobs-midi-ingredients.jsonl` (1 usable MIDI-ingredient job). The unfiltered usable queue still has 14 jobs, but most are broad synth references; run `video2recipe/` only on jobs that can produce defensible MIDI/single-element recipe material. Do not deepen synth-parameter reconstruction just to pass the queue. Future recipe additions should stay MIDI-first and require the relevant Gate A proof, a safe promotion packet, and no tracked raw-media/path leakage.
    - Each new recipe must pass **Gate A (fidelity)**: reconstruct → render → A/B vs. the source tutorial audio ("does it sound like that beat?"). Owner-ear — see the goal prompt in §7 for exactly how to get this signal without live Claude access this week.
-2. **Gate C (the verdict).** The r7 owner-listening pack is ready at `~/mosh-beats/r7-curated/`, and the stricter blind comparison pack is ready at `~/mosh-beats/r7-gate-c-blind/`. The remaining Gate C verdict is the owner's ear call; fill `scorecard.csv` before opening `answer_key.json`. Use `scripts/verify-hardware/gate_c_pack_check.py --pack ~/mosh-beats/r7-gate-c-blind --allow-incomplete` to verify the pack without revealing labels, and only add `--reveal` after scoring is complete.
-3. **Phase 2 — finish the live-agent product path.** The `generate_beat_recipe` command surface, natural-language beat route, installed melodic-808 engine, bundle runtime, and LaunchServices run-script proof are wired in `codex/video2recipe-port`. Remaining work is now corpus quality and product hardening: mine/curate Gate-A-passing recipes, keep the installed runtime deploy path documented, and run the installed app gate again after the corpus changes rather than re-debugging solved Finder/Dock runtime setup.
+2. **Gate C (the verdict).** The r7 owner-listening pack is ready at `~/mosh-beats/r7-curated/`, and the stricter blind comparison pack is ready at `~/mosh-beats/r7-gate-c-blind/`. The scorecard is complete and the reveal validates the pivot directionally: r7 retrieval wins musical distinctness and owns the best beat, while keepability still needs production/arrangement. Use `scripts/verify-hardware/gate_c_pack_check.py --pack ~/mosh-beats/r7-gate-c-blind --reveal` to reproduce the safe summary after scoring.
+3. **Selection before future owner packs.** Gate C showed high variance: some r7 recombinations click hard, some are raw sketches. Before the next owner-facing batch, generate multiple candidates per prompt, promote only the best few into the audition pack, and record the selection criteria/provenance.
+4. **Phase 2 — finish the live-agent product path.** The `generate_beat_recipe` command surface, natural-language beat route, installed melodic-808 engine, bundle runtime, and LaunchServices run-script proof are wired in `codex/video2recipe-port`. Remaining work is now corpus quality and product hardening: mine/curate Gate-A-passing recipes, keep the installed runtime deploy path documented, and run the installed app gate again after the corpus changes rather than re-debugging solved Finder/Dock runtime setup.
 
 ---
 
@@ -327,9 +342,9 @@ cd service/teardown && .venv/bin/python recipe.py --emit-schema > recipe.schema.
 >
 > **Do, in order:**
 > 1. Treat #194 as landed: the tutorial-scout pipeline is merged to `main`, and `codex/video2recipe-port` already contains that surface.
-> 2. Use the local r7-curated MIDI pack corpus (48 Gate-A-audited ingredients, selected from the 122-recipe r6 source pool) plus the refreshed evidence-filtered scout export (`.cache/mosh-teardown/midi-ingredients/2026-07-01-r7-curated/teardown_jobs-midi-ingredients.jsonl` — 1 usable MIDI-ingredient job) to continue mining or promote real trap/melodic-trap recipes. Prefer MIDI-visible single-element sources; do not treat missing Serum/Vital parameter recovery as a blocker for v1. Before any tracked-library promotion, generate `promotion-packet.json` and keep raw MIDI paths/media out of git.
+> 2. Use the promoted r7-curated MIDI pack corpus (48 Gate-A-audited ingredients, selected from the 122-recipe r6 source pool and tracked in `service/recipes/library/` for research use) plus the refreshed evidence-filtered scout export (`.cache/mosh-teardown/midi-ingredients/2026-07-01-r7-curated/teardown_jobs-midi-ingredients.jsonl` — 1 usable MIDI-ingredient job) to continue mining real trap/melodic-trap ingredients. Prefer MIDI-visible single-element sources; do not treat missing Serum/Vital parameter recovery as a blocker for v1. Before future tracked-library promotions, generate `promotion-packet.json` with `--source-policy research-tracked` and keep raw MIDI paths/media out of git.
 > 3. For each mined recipe, run **Gate A**: reconstruct → render → compare to the source tutorial audio. Since there's no live owner-in-the-loop this week, produce a scored self-assessment (does the reconstruction preserve tempo/key/the drum pattern/the 808 phrase — check programmatically wherever possible, e.g. onset/pitch overlap against what MIDI-from-screen extracted) and flag anything below a defensible bar rather than silently including it.
-> 4. Run **Gate C**: the current r7 owner-listening batch is rendered at `~/mosh-beats/r7-curated/`, and the blind comparison pack is rendered at `~/mosh-beats/r7-gate-c-blind/`; fill `scorecard.csv` before opening `answer_key.json`. Do not self-grade this one, it's an ear call.
+> 4. Treat **Gate C** as directionally passed for the substrate: r7 wins musical distinctness and ceiling but loses keepability/readiness. Add production/arrangement and a generate-N-keep-best selection pass before the next owner-facing pack.
 > 5. Keep the live-agent path wired through `generate_beat_recipe`; after corpus changes, rebuild/redeploy only as needed and prove `/Applications/Mosh.app` still generates beats from the staged runtime without repo-cwd assumptions.
 >
 > **Success criteria:** the live Mosh app generates a requested beat (e.g. "dark trap, 140bpm") entirely via retrieval+recombination of real mined recipes, renders it, and the result is waiting for the owner to A/B against the current audition set — OR you've hit a genuine blocker (owner ear needed, a missing capability, an ambiguous design call) and stopped with a clearly written note of exactly what's blocking and why, rather than guessing past it.

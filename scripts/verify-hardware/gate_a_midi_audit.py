@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
 import sys
 import tempfile
 from pathlib import Path
@@ -16,12 +17,45 @@ if str(SERVICE) not in sys.path:
 
 DEFAULT_ROOT = REPO / ".cache" / "mosh-teardown" / "midi-ingredients" / "2026-07-01-r2"
 DEFAULT_BIN = REPO / "build-macos-arm64" / "Mosh_artefacts" / "Debug" / "Mosh.app" / "Contents" / "MacOS" / "Mosh"
+DEFAULT_RECIPE_ENV = Path("/Applications/Mosh.app/Contents/Resources/service/.recipe.env")
 
 REQUESTS = [
     ({"mood": "dark", "tempo": 140, "key": "F minor"}, 3),
     ({"mood": "emotional", "tempo": 146, "key": "C# minor"}, 5),
     ({"mood": "aggressive", "tempo": 150, "key": "D minor"}, 9),
 ]
+
+
+def _read_recipe_env(path: Path) -> dict[str, str]:
+    values: dict[str, str] = {}
+    if not path.is_file():
+        return values
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export "):].strip()
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        try:
+            parts = shlex.split(value)
+        except ValueError:
+            parts = []
+        parsed_value = parts[0] if parts else value.strip().strip('"').strip("'")
+        expanded = parsed_value
+        for env_key, env_value in {**os.environ, **values}.items():
+            expanded = expanded.replace(f"${env_key}", env_value).replace(f"${{{env_key}}}", env_value)
+        values[key.strip()] = expanded
+    return values
+
+
+def _default_palette_manifest() -> str:
+    explicit = os.environ.get("MOSH_PALETTE_MANIFEST", "").strip()
+    if explicit:
+        return explicit
+    return _read_recipe_env(DEFAULT_RECIPE_ENV).get("MOSH_PALETTE_MANIFEST", "")
 
 
 def _jsonable_provenance(prov: Any) -> dict[str, Any]:
@@ -157,7 +191,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root", default=str(DEFAULT_ROOT), help="midi ingredient run directory")
     parser.add_argument("--min-recipes", type=int, default=30)
     parser.add_argument("--bin", default=os.environ.get("MOSH_BIN", str(DEFAULT_BIN)))
-    parser.add_argument("--palette-manifest", default=os.environ.get("MOSH_PALETTE_MANIFEST", ""))
+    parser.add_argument("--palette-manifest", default=_default_palette_manifest())
     parser.add_argument("--out", default="", help="optional JSON report path")
     args = parser.parse_args(argv)
 

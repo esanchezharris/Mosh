@@ -1,0 +1,210 @@
+{
+  "recipe_id": "mst_snare_roll_1_midi",
+  "schema_version": "2.0",
+  "source": {
+    "platform": "local-midi",
+    "video_id": "mst_snare_roll_1_midi",
+    "url": "",
+    "title": "mst - snare roll 1 (midi)",
+    "channel": "",
+    "duration_s": 0.0,
+    "license": "unknown",
+    "retrieved_at": null,
+    "content_hash": "14f04859be82ae88a6a17c4180e927d8f3ec96fb2d578e634a77d86e50e4c470"
+  },
+  "meta": {
+    "daw": {
+      "value": null,
+      "confidence": 0.0,
+      "evidence": []
+    },
+    "tempo_bpm": {
+      "value": 140,
+      "confidence": 0.75,
+      "evidence": [
+        "ingest-midi --bpm"
+      ]
+    },
+    "key": {
+      "value": null,
+      "confidence": 0.0,
+      "evidence": []
+    },
+    "time_signature": {
+      "value": "4/4",
+      "confidence": 0.6,
+      "evidence": []
+    }
+  },
+  "arrangement": {
+    "sections": [
+      {
+        "name": "loop",
+        "start_s": 0.0,
+        "end_s": 13.714285714285714,
+        "confidence": 0.5
+      }
+    ]
+  },
+  "elements": [
+    {
+      "element_id": "mst_snare_roll_1_midi",
+      "role": "snare",
+      "label": "mst - snare roll 1 (midi)",
+      "audio_ref": null,
+      "midi": {
+        "status": "extracted",
+        "midi_ref": null,
+        "notes": [
+          {
+            "pitch": 60,
+            "start_beats": 29.0,
+            "duration_beats": 0.083333,
+            "velocity": 97
+          },
+          {
+            "pitch": 60,
+            "start_beats": 29.083333,
+            "duration_beats": 0.083333,
+            "velocity": 87
+          },
+          {
+            "pitch": 60,
+            "start_beats": 29.166667,
+            "duration_beats": 0.083333,
+            "velocity": 77
+          },
+          {
+            "pitch": 60,
+            "start_beats": 29.25,
+            "duration_beats": 0.083333,
+            "velocity": 68
+          },
+          {
+            "pitch": 60,
+            "start_beats": 29.333333,
+            "duration_beats": 0.083333,
+            "velocity": 58
+          },
+          {
+            "pitch": 60,
+            "start_beats": 29.416667,
+            "duration_beats": 0.083333,
+            "velocity": 48
+          },
+          {
+            "pitch": 60,
+            "start_beats": 29.5,
+            "duration_beats": 0.083333,
+            "velocity": 100
+          },
+          {
+            "pitch": 60,
+            "start_beats": 30.0,
+            "duration_beats": 0.083333,
+            "velocity": 100
+          },
+          {
+            "pitch": 60,
+            "start_beats": 30.333333,
+            "duration_beats": 0.083333,
+            "velocity": 100
+          },
+          {
+            "pitch": 60,
+            "start_beats": 30.625,
+            "duration_beats": 0.083333,
+            "velocity": 100
+          },
+          {
+            "pitch": 59,
+            "start_beats": 31.0,
+            "duration_beats": 0.083333,
+            "velocity": 100
+          },
+          {
+            "pitch": 58,
+            "start_beats": 31.333333,
+            "duration_beats": 0.083333,
+            "velocity": 100
+          },
+          {
+            "pitch": 58,
+            "start_beats": 31.416667,
+            "duration_beats": 0.083333,
+            "velocity": 100
+          },
+          {
+            "pitch": 57,
+            "start_beats": 31.666667,
+            "duration_beats": 0.083333,
+            "velocity": 100
+          }
+        ],
+        "note_count": 14,
+        "confidence": 1.0
+      },
+      "sample_match": {
+        "status": "none",
+        "matched_path": null,
+        "distance": 0.0,
+        "alternates": []
+      },
+      "synth_patch": {
+        "status": "unknown",
+        "plugin": {
+          "name": null,
+          "available_locally": false
+        },
+        "params": {},
+        "match": null,
+        "substitute": null
+      },
+      "onsets": [],
+      "motif": {
+        "bars": 8.0,
+        "onset_grid": "16th",
+        "density": 1.75,
+        "syncopation": 0.7857,
+        "contour": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          -1,
+          -1,
+          0,
+          -1
+        ],
+        "register_band": "perc",
+        "harmonic_function": ""
+      },
+      "bass": null,
+      "evidence": [],
+      "confidence": 1.0
+    }
+  ],
+  "unresolved": [],
+  "reconstruction_class": "deterministic",
+  "yield": {
+    "predicted": {
+      "drums": 0.0,
+      "midi": 1.0,
+      "synth": 0.0,
+      "arrangement": 0.5,
+      "overall": 0.65
+    },
+    "actual": {
+      "drums": 0.0,
+      "midi": 0.0,
+      "synth": 0.0,
+      "arrangement": 0.0,
+      "overall": 0.0
+    }
+  }
+}

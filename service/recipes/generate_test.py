@@ -33,13 +33,22 @@ def check(name, cond, extra=""):
 
 LIB = G.LIB_DIR
 library = G.load_library(LIB)
+seed_library = [r for r in library if r.source.video_id.startswith("seed_")]
+promoted_ingredients = [r for r in library if r.source.platform == "local-midi"]
+library_roles = {e.role.value for r in library for e in r.elements}
 
 # ── library loads ────────────────────────────────────────────────────────────
 check("library has the seed recipes", len(library) >= 5, str(len(library)))
+check("library keeps the original full-beat seeds", len(seed_library) >= 5, str(len(seed_library)))
+check("library includes the promoted r7 ingredient corpus", len(promoted_ingredients) >= 48,
+      str(len(promoted_ingredients)))
+check("promoted/default library covers generator roles",
+      {"808", "kick", "snare", "hat", "pad", "lead"}.issubset(library_roles),
+      str(sorted(library_roles)))
 check("every library recipe carries inline notes",
       all(any(e.midi.notes for e in r.elements) for r in library))
-check("every library recipe has an 808 with the bass sub-model",
-      all(any(e.role.value == "808" and e.bass for e in r.elements) for r in library))
+check("every full-beat seed keeps an 808 with the bass sub-model",
+      all(any(e.role.value == "808" and e.bass for e in r.elements) for r in seed_library))
 
 # ── transposition ─────────────────────────────────────────────────────────────
 check("_interval picks the nearest shift (F→G = +2)", G._interval("F minor", "G minor") == 2)

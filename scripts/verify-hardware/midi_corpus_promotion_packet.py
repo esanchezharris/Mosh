@@ -9,9 +9,25 @@ from pathlib import Path
 from typing import Any
 
 REPO = Path(__file__).resolve().parents[2]
+HERE = Path(__file__).resolve().parent
+if str(HERE) not in sys.path:
+    sys.path.insert(0, str(HERE))
+import gate_c_pack_check
+
 DEFAULT_ROOT = REPO / ".cache" / "mosh-teardown" / "midi-ingredients" / "2026-07-01-r7-curated"
+DEFAULT_TRACKED_LIBRARY = REPO / "service" / "recipes" / "library"
+DEFAULT_GATE_C_PACK = Path("~/mosh-beats/r7-gate-c-blind").expanduser()
 REQUIRED_GENERATOR_ROLES = ("808", "kick", "hat", "pad")
 DRUM_ROLES = ("kick", "snare", "hat", "clap", "perc")
+SOURCE_POLICY_CHOICES = ("owner-required", "research-tracked")
+TRACKED_LIBRARY_FORBIDDEN_MARKERS = (
+    ".mid",
+    ".midi",
+    ".wav",
+    "palette",
+    "manifest",
+    "answer_key",
+)
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -124,31 +140,122 @@ def _gate_a_status(root: Path, audit_path: Path | None) -> dict[str, Any]:
     }
 
 
-def build_packet(root: Path, *, audit_path: Path | None = None) -> dict[str, Any]:
+def _tracked_research_status(root: Path, tracked_library: Path) -> dict[str, Any]:
+    corpus_library = root / "library"
+    expected = sorted(corpus_library.glob("*.json"))
+    tracked_library = tracked_library.resolve()
+    missing = [path.name for path in expected if not (tracked_library / path.name).is_file()]
+    marker_hits: list[dict[str, str]] = []
+    forbidden_markers = list(TRACKED_LIBRARY_FORBIDDEN_MARKERS)
+    forbidden_markers.append(str(Path.home()))
+    forbidden_markers.append("/" + "Users/")
+    for path in expected:
+        tracked_path = tracked_library / path.name
+        if not tracked_path.is_file():
+            continue
+        text = tracked_path.read_text(encoding="utf-8")
+        for marker in forbidden_markers:
+            if marker in text:
+                marker_hits.append({"file": path.name, "marker": marker})
+                break
+    return {
+        "tracked_library": _display_path(tracked_library),
+        "expected_count": len(expected),
+        "promoted_count": len(expected) - len(missing),
+        "missing_count": len(missing),
+        "missing_sample": missing[:10],
+        "present": bool(expected) and not missing,
+        "tracked_files_path_safe": not marker_hits,
+        "forbidden_marker_hits": marker_hits[:25],
+    }
+
+
+def _gate_c_status(gate_c_pack: Path) -> dict[str, Any]:
+    status = gate_c_pack_check.build_status(gate_c_pack, reveal=False)
+    scorecard = status.get("scorecard") or {}
+    wavs = status.get("wavFiles") or {}
+    structural_errors = status.get("structuralErrors") or []
+    return {
+        "pack": status.get("pack"),
+        "blind_preserved": status.get("blindPreserved") is True,
+        "answerKeyRead": status.get("answerKeyRead") is True,
+        "scorecard_complete": scorecard.get("complete") is True,
+        "scorecard_rows": int(scorecard.get("rows") or 0),
+        "scorecard_filled_rows": int(scorecard.get("filledRows") or 0),
+        "scorecard_expected_rows": int(scorecard.get("expectedRows") or 0),
+        "invalid_score_count": len(scorecard.get("invalidScores") or []),
+        "group_error_count": len(scorecard.get("groupErrors") or []),
+        "wav_checked": int(wavs.get("checked") or 0),
+        "wav_bad_count": len(wavs.get("bad") or []),
+        "structural_error_count": len(structural_errors),
+    }
+
+
+def build_packet(
+    root: Path,
+    *,
+    audit_path: Path | None = None,
+    source_policy: str = "owner-required",
+    tracked_library: Path = DEFAULT_TRACKED_LIBRARY,
+    gate_c_pack: Path = DEFAULT_GATE_C_PACK,
+) -> dict[str, Any]:
     root = root.resolve()
     corpus = _read_corpus(root)
     gate_a = _gate_a_status(root, audit_path)
+    tracked_research = _tracked_research_status(root, tracked_library)
+    gate_c = _gate_c_status(gate_c_pack)
     counts = corpus["counts_by_role"]
     required_roles_present = all(int(counts.get(role, 0)) > 0 for role in REQUIRED_GENERATOR_ROLES)
     all_drum_roles_present = all(int(counts.get(role, 0)) > 0 for role in DRUM_ROLES)
     inside_target_size = 30 <= int(corpus["recipe_count"]) <= 50
     tracked_path_risks = int(corpus["source_path_classes"].get("repo-tracked-risk", 0))
     gate_a_ok = gate_a["ok"] is True
-    owner_source_policy_required = True
-    owner_gate_c_required = True
+    research_policy_active = source_policy == "research-tracked"
+    tracked_research_ready = (
+        tracked_research["present"] is True
+        and tracked_research["tracked_files_path_safe"] is True
+    )
+    gate_c_ok = (
+        gate_c["blind_preserved"] is True
+        and gate_c["answerKeyRead"] is False
+        and gate_c["scorecard_complete"] is True
+        and gate_c["invalid_score_count"] == 0
+        and gate_c["group_error_count"] == 0
+        and gate_c["wav_bad_count"] == 0
+        and gate_c["structural_error_count"] == 0
+    )
+    owner_source_policy_required = not (research_policy_active and tracked_research_ready)
+    owner_gate_c_required = not gate_c_ok
     repo_promotion_safe_now = (
         inside_target_size
         and required_roles_present
         and all_drum_roles_present
         and gate_a_ok
         and tracked_path_risks == 0
+        and tracked_research_ready
+        and gate_c_ok
         and not owner_source_policy_required
         and not owner_gate_c_required
     )
+    owner_decisions_needed: list[str] = []
+    if owner_source_policy_required:
+        owner_decisions_needed.append(
+            "Decide whether these local MIDI-pack-derived recipes may remain local-runtime-only, "
+            "be cited as private evidence, or be promoted into a tracked service/recipes/library set."
+        )
+    if owner_gate_c_required:
+        owner_decisions_needed.append(
+            "Score the blind Gate C pack before opening answer_key.json; use that verdict before publishing or broadening this corpus."
+        )
 
     return {
         "schema_version": 1,
         "root": _display_path(root),
+        "research_policy": {
+            "source_policy": source_policy,
+            "research_only": True,
+            "public_distribution_requires_separate_rights_decision": True,
+        },
         "safe_report": {
             "raw_source_paths_included": False,
             "raw_media_included": False,
@@ -156,21 +263,23 @@ def build_packet(root: Path, *, audit_path: Path | None = None) -> dict[str, Any
         },
         "corpus": corpus,
         "gate_a": gate_a,
+        "gate_c": gate_c,
+        "tracked_research_promotion": tracked_research,
         "promotion_readiness": {
             "inside_target_size_30_to_50": inside_target_size,
             "required_generator_roles_present": required_roles_present,
             "all_current_drum_roles_present": all_drum_roles_present,
             "gate_a_ok": gate_a_ok,
+            "gate_c_ok": gate_c_ok,
+            "tracked_research_promotion_present": tracked_research["present"],
+            "tracked_research_promotion_path_safe": tracked_research["tracked_files_path_safe"],
             "tracked_source_path_risks": tracked_path_risks,
             "owner_source_policy_required": owner_source_policy_required,
             "owner_gate_c_required": owner_gate_c_required,
             "staged_runtime_safe": inside_target_size and required_roles_present and all_drum_roles_present and gate_a_ok,
             "repo_promotion_safe_now": repo_promotion_safe_now,
         },
-        "owner_decisions_needed": [
-            "Decide whether these local MIDI-pack-derived recipes may remain local-runtime-only, be cited as private evidence, or be promoted into a tracked service/recipes/library set.",
-            "Score the blind Gate C pack before opening answer_key.json; use that verdict before publishing or broadening this corpus.",
-        ],
+        "owner_decisions_needed": owner_decisions_needed,
     }
 
 
@@ -178,12 +287,18 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Write a safe promotion packet for a local MIDI ingredient corpus")
     parser.add_argument("--root", default=str(DEFAULT_ROOT), help="midi ingredient run directory")
     parser.add_argument("--gate-audit", default="", help="optional gate-a-midi-audit.json path")
+    parser.add_argument("--source-policy", choices=SOURCE_POLICY_CHOICES, default="owner-required")
+    parser.add_argument("--tracked-library", default=str(DEFAULT_TRACKED_LIBRARY), help="tracked recipe library path")
+    parser.add_argument("--gate-c-pack", default=str(DEFAULT_GATE_C_PACK), help="Gate C blind pack directory")
     parser.add_argument("--out", default="", help="optional JSON output path")
     args = parser.parse_args(argv)
 
     packet = build_packet(
         Path(args.root),
         audit_path=Path(args.gate_audit) if args.gate_audit else None,
+        source_policy=args.source_policy,
+        tracked_library=Path(args.tracked_library),
+        gate_c_pack=Path(args.gate_c_pack),
     )
     payload = json.dumps(packet, indent=2, sort_keys=True) + "\n"
     if args.out:
@@ -192,6 +307,8 @@ def main(argv: list[str] | None = None) -> int:
         out.write_text(payload, encoding="utf-8")
     sys.stdout.write(payload)
     readiness = packet["promotion_readiness"]
+    if args.source_policy == "research-tracked":
+        return 0 if readiness["repo_promotion_safe_now"] else 1
     return 0 if readiness["staged_runtime_safe"] and not readiness["tracked_source_path_risks"] else 1
 
 

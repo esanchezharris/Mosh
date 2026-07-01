@@ -94,12 +94,15 @@ recipes from `.cache/` into a tracked library or broader staged runtime:
 ```bash
 service/teardown/.venv/bin/python scripts/verify-hardware/midi_corpus_promotion_packet.py \
   --root .cache/mosh-teardown/midi-ingredients/2026-07-01-r7-curated \
+  --source-policy research-tracked \
   --out .cache/mosh-teardown/midi-ingredients/2026-07-01-r7-curated/promotion-packet.json
 ```
 
 The packet intentionally reports source path classes and role counts only, not
-raw MIDI paths or media. Treat `repo_promotion_safe_now:false` as expected until
-the owner source-policy decision and Gate C listening verdict are recorded.
+raw MIDI paths or media. As of 2026-07-01, the owner has approved the r7 MIDI-derived
+recipe JSONs for tracked research-library promotion, and Gate C has been scored. This
+does not authorize raw MIDI/WAV redistribution or public packaged-media release; those
+still require a separate rights and packaging decision.
 
 ## Local-Only Media Rules
 
