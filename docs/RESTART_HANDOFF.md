@@ -121,8 +121,8 @@ Installed-app status as of the current local deployment pass:
 - The stricter blind Gate C pack is rendered at `~/mosh-beats/r7-gate-c-blind/`: 18/18
   WAVs rendered non-silent through `/Applications/Mosh.app`, with 6 current r7 beats,
   6 seed-library baselines, and 6 exact r7 source anchors in blind order. Listener-facing
-  prompts are in `README.md`; fill `scorecard.csv` before opening `answer_key.json`, which
-  carries provenance and hidden labels.
+  prompts are in `README.md`; `scripts/verify-hardware/gate_c_pack_check.py` verifies the
+  pack and keeps `answer_key.json` unread until `scorecard.csv` is complete.
 - One installed selftest run reached 1147/1149 checks; the two failures were the existing
   Moshi brain provider-key expectations in the packaged-app section, not the recipe
   command path. Treat installed-app gate completion as still open.
@@ -233,6 +233,7 @@ MOSH_BIN=$MOSH_BIN $VENV scripts/verify-hardware/generate_render_check.py   # ge
 MOSH_BIN=$MOSH_BIN MOSH_RECIPE_LIBRARY=.cache/mosh-teardown/midi-ingredients/<run>/library MOSH_PALETTE_MANIFEST=<manifest.json> $VENV scripts/verify-hardware/generate_render_check.py
 MOSH_BIN=$MOSH_BIN MOSH_RECIPE_LIBRARY=.cache/mosh-teardown/midi-ingredients/<run>/library MOSH_PALETTE_MANIFEST=<manifest.json> $VENV scripts/verify-hardware/render_audition.py ~/mosh-beats/<run>  # audition set
 MOSH_BIN=$MOSH_BIN MOSH_RECIPE_LIBRARY=.cache/mosh-teardown/midi-ingredients/<run>/library MOSH_PALETTE_MANIFEST=<manifest.json> $VENV scripts/verify-hardware/render_blind_gate_c.py ~/mosh-beats/<run>-gate-c-blind
+$VENV scripts/verify-hardware/gate_c_pack_check.py --pack ~/mosh-beats/<run>-gate-c-blind  # no --reveal until scorecard.csv is filled
 MOSH_BIN=$MOSH_BIN $VENV scripts/verify-hardware/generate_command_check.py  # installed-app command surface + bundled/default runtime
 
 # --- generate one beat (CLI) ---
@@ -286,7 +287,7 @@ cd service/teardown && .venv/bin/python recipe.py --emit-schema > recipe.schema.
 
 1. **The REAL corpus (the true "start from knowing") — use r7-curated now.** The local MIDI pack source pool has 122 Gate-A-audited ingredient recipes in r6, and the current role-balanced 30-50 candidate is the 48-recipe r7-curated corpus. The next mining input is the refreshed evidence-filtered scout export at `.cache/mosh-teardown/midi-ingredients/2026-07-01-r7-curated/teardown_jobs-midi-ingredients.jsonl` (1 usable MIDI-ingredient job). The unfiltered usable queue still has 14 jobs, but most are broad synth references; run `video2recipe/` only on jobs that can produce defensible MIDI/single-element recipe material. Do not deepen synth-parameter reconstruction just to pass the queue. Promote recipes to `service/recipes/library/` only after a source-policy decision, the relevant Gate A proof, and a safe promotion packet.
    - Each new recipe must pass **Gate A (fidelity)**: reconstruct → render → A/B vs. the source tutorial audio ("does it sound like that beat?"). Owner-ear — see the goal prompt in §7 for exactly how to get this signal without live Claude access this week.
-2. **Gate C (the verdict).** The r7 owner-listening pack is ready at `~/mosh-beats/r7-curated/`, and the stricter blind comparison pack is ready at `~/mosh-beats/r7-gate-c-blind/`. The remaining Gate C verdict is the owner's ear call; fill `scorecard.csv` before opening `answer_key.json`.
+2. **Gate C (the verdict).** The r7 owner-listening pack is ready at `~/mosh-beats/r7-curated/`, and the stricter blind comparison pack is ready at `~/mosh-beats/r7-gate-c-blind/`. The remaining Gate C verdict is the owner's ear call; fill `scorecard.csv` before opening `answer_key.json`. Use `scripts/verify-hardware/gate_c_pack_check.py --pack ~/mosh-beats/r7-gate-c-blind --allow-incomplete` to verify the pack without revealing labels, and only add `--reveal` after scoring is complete.
 3. **Phase 2 — finish the live-agent product path.** The `generate_beat_recipe` command surface, natural-language beat route, installed melodic-808 engine, bundle runtime, and LaunchServices run-script proof are wired in `codex/video2recipe-port`. Remaining work is now corpus quality and product hardening: mine/curate Gate-A-passing recipes, keep the installed runtime deploy path documented, and run the installed app gate again after the corpus changes rather than re-debugging solved Finder/Dock runtime setup.
 
 ---
