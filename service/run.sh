@@ -12,7 +12,16 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+if [[ -n "${MOSH_SERVICE_LOG:-}" ]]; then
+  mkdir -p "$(dirname "$MOSH_SERVICE_LOG")" 2>/dev/null || true
+  exec >> "$MOSH_SERVICE_LOG" 2>&1
+  printf '[run.sh] cwd=%s\n' "$PWD"
+fi
+
 REQUESTED_MOSH_ENABLE_SA3="${MOSH_ENABLE_SA3:-}"
+REQUESTED_MOSH_SERVICE_PYTHON="${MOSH_SERVICE_PYTHON:-}"
+REQUESTED_MOSH_RECIPE_LIBRARY="${MOSH_RECIPE_LIBRARY:-}"
+REQUESTED_MOSH_PALETTE_MANIFEST="${MOSH_PALETTE_MANIFEST:-}"
 export PYTHONDONTWRITEBYTECODE="${PYTHONDONTWRITEBYTECODE:-1}"
 
 # Persisted setup from setup-sa3.sh (resolved paths + MOSH_ENABLE_SA3). Optional —
@@ -40,6 +49,12 @@ export PYTHONDONTWRITEBYTECODE="${PYTHONDONTWRITEBYTECODE:-1}"
 # (written by transform/setup-transform.sh) exports TRANSFORM_PY + RAVE_MODEL_DIR.
 # Absent → the `transform` adapter falls back to the deterministic fake (Route B).
 [[ -f transform/.transform.env ]] && source ./transform/.transform.env
+# Recipe generation (real-recipe restart) needs the teardown interpreter and a
+# machine-local corpus path when launched from Finder/Dock. Explicit launch env wins.
+[[ -f .recipe.env ]] && source ./.recipe.env
+[[ -n "$REQUESTED_MOSH_SERVICE_PYTHON" ]] && export MOSH_SERVICE_PYTHON="$REQUESTED_MOSH_SERVICE_PYTHON"
+[[ -n "$REQUESTED_MOSH_RECIPE_LIBRARY" ]] && export MOSH_RECIPE_LIBRARY="$REQUESTED_MOSH_RECIPE_LIBRARY"
+[[ -n "$REQUESTED_MOSH_PALETTE_MANIFEST" ]] && export MOSH_PALETTE_MANIFEST="$REQUESTED_MOSH_PALETTE_MANIFEST"
 # Phase-4 SFT lane lives in its own mlx-lm venv; .sft.env (written by
 # sft/setup-sft.sh) exports SFT_PY for the trainer CLI. Absent → the SFT lane is
 # simply unavailable; the rest of the service is unaffected.
@@ -58,6 +73,11 @@ export COLORRACK_DATA="${COLORRACK_DATA:-$(pwd)/colors/COLORRACK_DATA}"
 PY="${MOSH_SERVICE_PYTHON:-python3}"
 if [[ -z "${MOSH_SERVICE_PYTHON:-}" && "${MOSH_ENABLE_SA3:-1}" == "1" && -x "$SA3_MLX_DIR/.venv/bin/python" ]]; then
   PY="$SA3_MLX_DIR/.venv/bin/python"
+fi
+
+if [[ -n "${MOSH_SERVICE_LOG:-}" ]]; then
+  printf '[run.sh] py=%s MOSH_SERVICE_PYTHON=%s MOSH_RECIPE_LIBRARY=%s MOSH_PALETTE_MANIFEST=%s\n' \
+    "$PY" "${MOSH_SERVICE_PYTHON:-}" "${MOSH_RECIPE_LIBRARY:-}" "${MOSH_PALETTE_MANIFEST:-}"
 fi
 
 exec "$PY" server.py "$@"

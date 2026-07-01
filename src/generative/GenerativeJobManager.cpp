@@ -205,7 +205,7 @@ bool GenerativeJobManager::ensureServiceRunning()
     if (started)
     {
         spawnedByUs = true;
-        for (int i = 0; i < 60; ++i)     // up to ~12s for warmup
+        for (int i = 0; i < 150; ++i)    // up to ~30s for warmup
         {
             Thread::sleep (200);
             adoptPortFromHandshake();     // C3 — switch to the actual bound port if it differs

@@ -75,6 +75,20 @@ service/run.sh
 `service/run.sh` honors `MOSH_SERVICE_PYTHON` before auto-selecting the SA3 venv or
 system Python.
 
+For Finder/Dock launches, stage the non-secret recipe runtime under
+`~/Library/Mosh/recipe-runtime/<run>` and put those machine-local settings in
+`service/.recipe.env` before running `./run-mosh.sh deploy`; deploy copies that
+file into `Contents/Resources/service/.recipe.env` so the bundled `run.sh` can
+find the interpreter and corpus without shell env inheritance:
+
+```bash
+MOSH_RECIPE_RUNTIME="$HOME/Library/Mosh/recipe-runtime/2026-07-01-r2"
+export MOSH_SERVICE_PYTHON="/opt/homebrew/opt/python@3.14/bin/python3.14"
+export PYTHONPATH="$MOSH_RECIPE_RUNTIME/python/site-packages${PYTHONPATH:+:$PYTHONPATH}"
+export MOSH_RECIPE_LIBRARY="$MOSH_RECIPE_RUNTIME/library"
+export MOSH_PALETTE_MANIFEST="$MOSH_RECIPE_RUNTIME/palette/manifest.json"
+```
+
 ## PC Notes
 
 Windows gates launch the service through `python`/`py` instead of `run.sh`; macOS

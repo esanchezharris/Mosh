@@ -164,12 +164,14 @@ fi
 bundle_service() {                              # $1 = installed app
   local DEST="$1" SVC="$1/Contents/Resources/service"
   echo "bundling service → ${SVC#$ROOT/}"
-  rm -rf "$SVC"; mkdir -p "$SVC/transcribe" "$SVC/sketch" "$SVC/transform"
+  rm -rf "$SVC"; mkdir -p "$SVC/transcribe" "$SVC/sketch" "$SVC/transform" "$SVC/teardown/render"
   cp "$ROOT/service/server.py" "$ROOT/service/run.sh" \
      "$ROOT/service/quality_readout.py" "$ROOT/service/setup-sa3.sh" "$SVC/" 2>/dev/null || true
-  for d in adapters colors sa3 scripts training; do
+  for d in adapters colors recipes sa3 scripts training; do
     [ -d "$ROOT/service/$d" ] && cp -R "$ROOT/service/$d" "$SVC/$d"
   done
+  cp "$ROOT/service/teardown/recipe.py" "$SVC/teardown/"
+  cp "$ROOT/service/teardown/render/compile.py" "$SVC/teardown/render/"
   cp "$ROOT/service/transcribe/transcribe_cli.py" \
      "$ROOT/service/transcribe/setup-transcribe.sh" "$SVC/transcribe/"
   cp "$ROOT/service/sketch/beatbox_cli.py" \
@@ -182,6 +184,7 @@ bundle_service() {                              # $1 = installed app
      "$ROOT/service/transform/setup-transform.sh" "$SVC/transform/" 2>/dev/null || true
   # Machine-local venv pointers (gitignored). Absent ones fall back to run.sh defaults.
   [ -f "$ROOT/service/.sa3.env" ] && cp "$ROOT/service/.sa3.env" "$SVC/.sa3.env"
+  [ -f "$ROOT/service/.recipe.env" ] && cp "$ROOT/service/.recipe.env" "$SVC/.recipe.env"
   [ -f "$ROOT/service/transcribe/.transcribe.env" ] && cp "$ROOT/service/transcribe/.transcribe.env" "$SVC/transcribe/.transcribe.env"
   [ -f "$ROOT/service/sketch/.sketch.env" ] && cp "$ROOT/service/sketch/.sketch.env" "$SVC/sketch/.sketch.env"
   [ -f "$ROOT/service/transform/.transform.env" ] && cp "$ROOT/service/transform/.transform.env" "$SVC/transform/.transform.env"
