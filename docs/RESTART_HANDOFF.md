@@ -2,8 +2,10 @@
 
 **For the next agent (Codex) picking up this work. Read this top-to-bottom first.**
 
-Branch: **`claude/production-reward`** (check it out — the work is here, not on `main`).
-Date handed off: 2026-06-30. Status: **Phase 0 built & render-proven; Phase 1 + the owner-ear gates are next.**
+Status as of **2026-06-30 (reconciliation pass)**: **Phase 0 is MERGED TO MAIN** (via #190). The
+tutorial-scout pipeline (§3 sourcing) has been recovered and is in review (#194). Work from
+**`main`** — do not use `claude/production-reward` (superseded) or any stale local checkout
+(see §5).
 
 ---
 
@@ -18,11 +20,11 @@ The owner said the generated beats "all sound the same… the 808 plays eighth-n
 **The approved pivot (full plan: [`docs/plans/2026-06-30-restart-real-recipes.md`](plans/2026-06-30-restart-real-recipes.md)):**
 generate beats by **retrieving + recombining real per-element motifs** from a library of real recipes (drums from one, 808 from another, chords from a third → transpose into one key → bind the 808 to the chord roots → real samples → render). **RL/reward is FROZEN** (not deleted). The rules verifier is **demoted to a validity gate** (no taste). v1 = trap/melodic-trap, MIDI-native only.
 
-The owner listened to the first audition set and confirmed: **"the beats do sound like real beats now."** That's the directional green light.
+The owner listened to the first audition set and confirmed: **"the beats do sound like real beats now."** That's the directional green light — informal Gate C already leans positive.
 
 ---
 
-## 1. What's DONE (Phase 0) — all verified
+## 1. What's DONE — all verified, all on `main`
 
 | Step | What | Where | Proof |
 |---|---|---|---|
@@ -31,8 +33,11 @@ The owner listened to the first audition set and confirmed: **"the beats do soun
 | **0.3** | 5 bootstrap trap/melodic-trap recipes (pure music, no sample paths) | `service/recipes/seed_authoring.py` → `service/recipes/library/*.json` | all schema-valid + render |
 | **0.5** | **Generator**: retrieve → recombine across recipes → transpose → `bind_808_to_chords` → bind palette samples → Recipe | `service/recipes/generate.py` (+ `generate_test.py`) | **Gate B PASS** |
 | **Gate B** | Conditioning: forced reconstruction ≥99% event-match; **0 invented rhythms across 12 recombinations** (every note descends from a real motif) | `generate_test.py` | PASS |
+| **#72** | `recipeVerifier` demoted to validity-only (no taste dims) | `ui/src/agent/recipeVerifier.ts` + `service/teardown/flywheel/recipe_verifier.py`, TS/Python parity | landed as part of #190 |
 
 **The two bugs are structurally fixed:** the 808 is a sustained, root-following bass (it *cannot* be a hi-hat grid — rhythm and pitch-function are stored separately); beats differ because they're recombined from *different real grooves*, not jittered inside one template.
+
+**Also recovered (2026-06-30, PR #194, in review):** a real, tested §3 tutorial-scouting pipeline (`scout.py`/`catalog.py`/`youtube.py`/`cli.py`/`jobs.py`) was found sitting **uncommitted** in a stale checkout — ranks/queues real YouTube beat tutorials by predicted recipe yield. It came with **real scouted data already in hand: 31 scored candidates, 13 queued teardown jobs** — copied to `ClaudeMosh-moshfx/service/teardown/{catalog.sqlite,teardown_jobs.jsonl}` (gitignored by design, not committed — see #194's description). This is the direct input for step 2 below; **use it before re-scouting from scratch.**
 
 ---
 
@@ -46,9 +51,10 @@ VENV=service/teardown/.venv/bin/python
 MOSH_BIN=build-macos-arm64/Mosh_artefacts/Debug/Mosh.app/Contents/MacOS/Mosh   # set this for renders
 
 # --- pure unit tests (no engine) ---
-$VENV service/teardown/recipe_test.py            # recipe contract + §0.1 musical body
-$VENV service/teardown/render/compile_test.py    # compiler golden incl. the 808 path
-$VENV service/recipes/generate_test.py           # generator units + GATE B
+$VENV service/teardown/recipe_test.py                     # recipe contract + §0.1 musical body
+$VENV service/teardown/render/compile_test.py             # compiler golden incl. the 808 path
+$VENV service/recipes/generate_test.py                    # generator units + GATE B
+$VENV service/teardown/flywheel/recipe_verifier_test.py   # validity-only verifier parity
 
 # --- (re)author the seed library ---
 $VENV service/recipes/seed_authoring.py          # → service/recipes/library/*.json
@@ -60,6 +66,9 @@ MOSH_BIN=$MOSH_BIN $VENV scripts/verify-hardware/render_audition.py ~/mosh-beats
 
 # --- generate one beat (CLI) ---
 $VENV service/recipes/generate.py --mood dark --tempo 140 --key "F minor" --seed 7 --emit recipe
+
+# --- the scout pipeline (once #194 lands — see §5) ---
+$VENV service/teardown/cli.py queue --catalog service/teardown/catalog.sqlite --limit 10
 ```
 
 **If `recipe.py` changes, regenerate the schema** (a test pins it byte-for-byte):
@@ -78,31 +87,57 @@ cd service/teardown && .venv/bin/python recipe.py --emit-schema > recipe.schema.
 - **Generator is deterministic** via an LCG seeded from `(request, seed)` — do **not** introduce `Math.random`/`Date`/`random` into it, or determinism (and the tests) break.
 - **Recipes store pure music, NO sample paths** (portable/committable). The generator binds palette samples by role at assembly time.
 - Run python via `service/teardown/.venv/bin/python` (pydantic v2, numpy, soundfile live there).
+- **`docs/auto-loop/STOP` is gitignored by design** (machine-local kill switch, never committed — see `docs/auto-loop/.gitignore`). It currently exists on disk in the main checkout, `ClaudeMosh-moshfx`, and the `sleepy-euler-de0f10` worktree. If you create a NEW worktree, it starts WITHOUT the file — that's fine as long as you don't invoke the legacy `.claude/workflows/auto-loop.workflow.js` Workflow script (see §6). It is not wired to any cron/launchd/GitHub Action — only a direct `Workflow` tool invocation of that script reads it.
 
 ---
 
 ## 4. What's NEXT (priority order)
 
-1. **#72 — demote `recipeVerifier` to a validity gate.** Strip the taste dims (velocity-variance, contour scoring, density targets) from `ui/src/agent/recipeVerifier.ts` + `service/teardown/flywheel/recipe_verifier.py`; keep only: in-key, on-grid (where intended), renderable, real-samples, **+ add an 808/bass plausibility check** (sustained durations, not hi-hat density). Keep TS↔Python parity. **Ban GEPA-against-the-verifier; the `MOSH_RL_REWARD=recipe` path stays FROZEN.** (Pure engineering — do this first.)
-2. **The REAL corpus (the true "start from knowing").** The 5 seed recipes are *transcriptions of canonical patterns*, NOT real mined tutorials. Replace/expand them with real ones — two routes:
-   - **Owner picks specific YouTube beat tutorials** (most faithful), tear down → hand-correct → `service/recipes/library/`.
-   - **Auto-mine** via the existing `service/teardown/video2recipe/` (FL Studio MIDI-from-screen is live) → recipe → **Gate A**. Target ~30–50 trap/melodic-trap recipes.
-   - Each new recipe must pass **Gate A (fidelity)**: reconstruct → render → A/B vs. the source tutorial audio ("does it sound like that beat?"). Owner-ear.
-3. **Gate C (the verdict).** Blind A/B pack — retrieved-adapted vs. the old template vs. exact reconstruction, scored on "musically distinct" + "would keep" (reuse `ui/scripts/rl/buildValidityPack.mts` patterns). Retrieved-adapted must decisively beat templates. Owner-ear. *(Informal Gate C already leans positive — the owner said the audition beats sound like real beats.)*
-4. **Phase 2 — wire the generator into the live agent** (replace `beatBuilder`'s beat path), behind the validity gate; rebuild + redeploy the engine so `/Applications/Mosh.app` has the melodic-808 change.
-
-Task tracking from the Claude session (for reference): 0.1/0.2/0.3/0.5/Gate-B = done; #72, Gate A (#69), Gate C (#71) = open.
+1. **The REAL corpus (the true "start from knowing") — start here.** You already have real scouted data: `ClaudeMosh-moshfx/service/teardown/catalog.sqlite` (31 candidates) + `teardown_jobs.jsonl` (13 queued jobs). Once #194 lands, run the existing `video2recipe/` (FL Studio MIDI-from-screen is live) against those queued jobs → recipe → **Gate A**. Target ~30–50 trap/melodic-trap recipes to replace/expand the 5 hand-authored bootstrap seeds in `service/recipes/library/`.
+   - Each new recipe must pass **Gate A (fidelity)**: reconstruct → render → A/B vs. the source tutorial audio ("does it sound like that beat?"). Owner-ear — see the goal prompt in §7 for exactly how to get this signal without live Claude access this week.
+2. **Gate C (the verdict).** Blind A/B pack — retrieved-adapted vs. the old template vs. exact reconstruction, scored on "musically distinct" + "would keep" (reuse `ui/scripts/rl/buildValidityPack.mts` patterns).
+3. **Phase 2 — wire the generator into the live agent** (replace `beatBuilder`'s beat path), behind the validity gate; rebuild + redeploy the engine so `/Applications/Mosh.app` has the melodic-808 change.
 
 ---
 
-## 5. Branch / PR situation
+## 5. Branch / PR / checkout situation (reconciled 2026-06-30)
 
-- **This branch (`claude/production-reward`) is the active line.** It descends from `claude/musing-herschel-c0501d` (= **PR #158**, "Phase-1: Recipe contract + drum matcher (WIP)") and supersedes it — the restart already advanced & proved the recipe-contract portion. **#158 should be closed as superseded** (this branch contains it + more).
-- This branch **conflicts with `main`** in 5 files unrelated to the restart (`service/server.py`, `src/generative/GenerativeJobManager.{cpp,h}`, `ui/src/bridge.mock.ts`, `ui/src/v2/shell.css`) and carries 88+ WIP commits incl. the *frozen* reward/RL work. **Do NOT blanket-merge to `main`.** When ready, cherry-pick / land the restart slice (the §0.1/0.2/0.5 files + `service/recipes/`) onto `main` deliberately, or rebase a clean restart-only branch.
-- The restart slice is small and mostly **additive**: `service/recipes/**`, `scripts/verify-hardware/{recipe_render_check,generate_render_check,render_audition}.py`, and additive edits to `service/teardown/recipe.py` + `render/compile.py` (+ their tests + `recipe.schema.json`).
+- **`main` is the single source of truth.** #190 (Phase 0: recipe body + compiler + generator + validity-only verifier) is **merged**. #186 (the messy `claude/production-reward` line it was ported from, 88+ commits, conflicting) is **closed as superseded**. #158 (the original teardown/recipe-contract WIP) is **closed as superseded**.
+- **#194 — `claude/tutorial-scout-recovery` — OPEN, needs review.** Recovers the §3 scout pipeline (see §1). It **will conflict with `service/teardown/__init__.py`** (both #190 and this PR add one) — trivial reconcile: combine the scout exports with the recipe-pipeline docstring. Land this next.
+- **#176 — Rung-2 GRPO/audio-reward host — OPEN, FROZEN.** Real, tested RL engineering that predates the restart decision. Commented to flag the freeze; **do not merge or run as the active path** without an explicit owner go-ahead. Not closed — may be revisited once a real generator + real preference data exist.
+- **Stale checkouts:** `/Users/emiliosanchez-harris/Documents/ClaudeMosh` (the main checkout) was 44 commits behind `main` and dirty across 3+ unrelated efforts (a phone-controller-latency-gate feature, stale lyrics-doc drafts, the scout pipeline, a DAW reality-pack). Everything was safety-net committed to `origin/codex/phone-controller-latency-gate` before triage — nothing was lost — but **do not keep working in that checkout.** Use a fresh worktree off updated `main`, or `ClaudeMosh-moshfx` (already on `main`, just `git pull`).
+  - The phone-controller-latency-gate work is real but orthogonal to this restart — it's preserved on its own branch; needs a separate owner decision on whether to continue it.
+  - The loose root docs (`FINISH_MY_SONG_*.md`, `mosh-teardown-reward-pipeline-FINAL.md`) and `mosh_daw_reality_pack.{zip,/}` are very likely stale/superseded scratch (the FINISH_MY_SONG ones are near-identical to already-landed `docs/` versions; the reality-pack looks absorbed into the already-committed `scripts/daw-conformance/`) — recommend deleting after a final glance, not yet done unilaterally.
 
 ---
 
-## 6. The panel's reasoning (so you don't relitigate it)
+## 6. Control model (decided 2026-06-30)
+
+**Run this as a single continuous thread, not the cron-based "Mosh Executive Loop."** The owner's explicit preference, and the reasoning holds up: the Executive Loop (a separate orchestrator polling every 10 minutes, spawning its own work items) is *how today's mess happened* — it and a live Claude session independently built the **same** Phase-0 restart in parallel (this handoff doc vs. #190), which is exactly the kind of duplicate/divergent effort a single-threaded owner of the goal avoids. PR/CI checks belong **inside** this thread's workflow (verify before claiming a step done), not as an external gate a separate system polls for.
+
+- The **legacy in-repo auto-loop** (`.claude/workflows/auto-loop.workflow.js`, a multi-agent Workflow-tool script) is not wired to any cron/launchd/CI trigger — it only runs if explicitly invoked. `docs/auto-loop/STOP` now exists locally as a kill switch (see §3) as a belt-and-suspenders measure; it is NOT meant to be committed.
+- The **Codex-app-level "Mosh Executive Loop"** cron (10-minute cadence, cwd `ClaudeMosh-moshfx`) was paused by the owner directly — outside this repo's tooling, so verify its state in the Codex app if you need to confirm.
+- If a narrower automated monitor is wanted later, scope it to **reporting** blocked/stale PRs only — never auto-spawning new work items or auto-merging — so it can't reintroduce parallel-duplicate effort.
+
+---
+
+## 7. The goal (hand this to Codex verbatim)
+
+> **Goal:** Finish the Mosh beat-generation agent (the real-recipes restart) or reach a real owner-blocking roadblock. Work as a single continuous thread — do not spawn a separate cron/orchestrator loop.
+>
+> **Do, in order:**
+> 1. Land #194 (resolve the `__init__.py` conflict with #190's merge — combine both export surfaces).
+> 2. Use the recovered real scout data (`ClaudeMosh-moshfx/service/teardown/{catalog.sqlite,teardown_jobs.jsonl}` — 31 candidates, 13 queued jobs) to mine ~30–50 real trap/melodic-trap recipes via `video2recipe/`, replacing/expanding the 5 hand-authored bootstrap seeds.
+> 3. For each mined recipe, run **Gate A**: reconstruct → render → compare to the source tutorial audio. Since there's no live owner-in-the-loop this week, produce a scored self-assessment (does the reconstruction preserve tempo/key/the drum pattern/the 808 phrase — check programmatically wherever possible, e.g. onset/pitch overlap against what MIDI-from-screen extracted) and flag anything below a defensible bar rather than silently including it.
+> 4. Run **Gate C**: render a blind-labeled batch (retrieved-adapted vs. old template vs. exact reconstruction) to `~/mosh-beats/` for the owner to listen to when they're back — do not self-grade this one, it's an ear call.
+> 5. Wire the generator into the live agent (replace `beatBuilder`'s beat-generation path) behind the validity gate; rebuild the native app so `/Applications/Mosh.app` carries the melodic-808 engine change; redeploy.
+>
+> **Success criteria:** the live Mosh app generates a requested beat (e.g. "dark trap, 140bpm") entirely via retrieval+recombination of real mined recipes, renders it, and the result is waiting for the owner to A/B against the current audition set — OR you've hit a genuine blocker (owner ear needed, a missing capability, an ambiguous design call) and stopped with a clearly written note of exactly what's blocking and why, rather than guessing past it.
+>
+> **Stop rules:** stop and report if you hit anything on the hard-exclusion list in `docs/auto-loop/LEDGER.md` (dependency pins, CMake, deploy scripts, relay/Supabase auth, `src/plugins/hosting/**`, `MoshEngine`/`src/state`, `CLAUDE.md`, specs `00`–`06`, `.github`); if a decision requires the owner's ear (Gate A/C verdicts) or taste; or if you're about to re-introduce a learned reward/RL loop as the active path (that's frozen — flag it instead of reviving it). Verify (run the tests, run the render checks) before claiming any step done — do not claim success without evidence.
+
+---
+
+## 8. The panel's reasoning (so you don't relitigate it)
 
 All four models converged: retrieval/imitation from real recipes is the primary move; freeze RL until there's a generator that already emits musical output **and** real owner preference labels; per-element/motif granularity (not whole-beat clone, not per-note guessing); the 808 must be stored as rhythm × pitch-function; mine MIDI-native tutorials only (sample-chop/boom-bap is ~60% unencodable → deferred); keep the rules verifier ONLY as a competence gate. The single biggest risk they named is **teardown fidelity** — if extraction is noisy, the "real recipes" are corrupted and you re-derive "sounds like guessing." That's why Gate A (fidelity vs. source) gates every mined recipe.
