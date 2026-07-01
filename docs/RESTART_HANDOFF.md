@@ -85,9 +85,10 @@ Installed-app status as of the current local deployment pass:
   `b5557bfcaf31308fb8afe02dceee008611e903b2e2ba376865adc9565dd2eb5c`.
 - The deployed bundle now includes the recipe runtime sources that were missing from
   the first pass: `service/recipes` plus the selected `service/teardown` compiler/model
-  files. The non-secret runtime is staged at
+  files. The original non-secret runtime remains preserved at
   `~/Library/Mosh/recipe-runtime/2026-07-01-r2/` with the Python deps, 62-recipe
-  library, palette manifest, and palette assets.
+  library, palette manifest, and palette assets; the current default runtime points at the
+  r7-curated copy below.
 - Direct installed-binary proof and LaunchServices-style
   `open -na /Applications/Mosh.app --args --run-script` proof both pass: the installed
   app applied 23 generated `generate_beat_recipe` commands with no unresolved refs and
@@ -101,6 +102,13 @@ Installed-app status as of the current local deployment pass:
   binary and private r2 palette manifest: `/Applications/Mosh.app --run-script` applied
   25/25 generated `generate_beat_recipe` commands, left `unresolved: []`, and the
   after-snapshot contained 8 MIDI-bearing tracks.
+- The local staged runtime has been advanced to
+  `~/Library/Mosh/recipe-runtime/2026-07-01-r7-curated/` and copied into the installed
+  bundle's `Contents/Resources/service/.recipe.env`. An `env -i` installed-binary proof
+  with no `libraryDir`/`paletteManifest` args applied 25/25 generated commands, left
+  `unresolved: []`, and produced 8 MIDI-bearing tracks, proving the bundled runtime fallback
+  uses r7 without repo-cwd assumptions. Compact local proof:
+  `.cache/mosh-teardown/midi-ingredients/2026-07-01-r7-curated/default-runtime-generate-proof.jsonl`.
 - The r7 owner-listening pack is rendered at `~/mosh-beats/r7-curated/`: 6/6 WAVs rendered
   non-silent through `/Applications/Mosh.app`, with provenance written to
   `~/mosh-beats/r7-curated/README.md`.
