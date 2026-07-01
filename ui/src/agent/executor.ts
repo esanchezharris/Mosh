@@ -7,7 +7,12 @@
 import { useStore } from "../store";
 import { validateCommand, describeCommand } from "./commands";
 
-export type AgentCommandCall = { command: string; args?: Record<string, unknown> };
+export type AgentCommandCall = {
+  command: string;
+  args?: Record<string, unknown>;
+  capture?: Record<string, string>;
+  bind?: string;
+};
 export type ChangeEntry = { summary: string; ok: boolean; error?: string };
 export type ChangeSet = { label: string; entries: ChangeEntry[]; applied: number };
 
@@ -36,6 +41,64 @@ export const DESTRUCTIVE_BLOCK_REASON =
   `Delete in smaller steps or use the editor directly.`;
 
 export type DestructiveScreen = { allowed: AgentCommandCall[]; blocked: AgentCommandCall[] };
+
+function refName(value: string): string | null {
+  if (value.startsWith("${") && value.endsWith("}")) return value.slice(2, -1);
+  return null;
+}
+
+function resolveValue(value: unknown, refs: Map<string, unknown>): { value: unknown; missing: string[] } {
+  if (typeof value === "string") {
+    const ref = refName(value);
+    if (ref) {
+      if (refs.has(ref)) return { value: refs.get(ref), missing: [] };
+      return { value, missing: [value] };
+    }
+    return { value, missing: [] };
+  }
+  if (Array.isArray(value)) {
+    const out: unknown[] = [];
+    const missing: string[] = [];
+    for (const item of value) {
+      const r = resolveValue(item, refs);
+      out.push(r.value);
+      missing.push(...r.missing);
+    }
+    return { value: out, missing };
+  }
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    const missing: string[] = [];
+    for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+      const r = resolveValue(item, refs);
+      out[key] = r.value;
+      missing.push(...r.missing);
+    }
+    return { value: out, missing };
+  }
+  return { value, missing: [] };
+}
+
+function resolveArgs(args: Record<string, unknown>, refs: Map<string, unknown>): {
+  args: Record<string, unknown>;
+  missing: string[];
+} {
+  const r = resolveValue(args, refs);
+  return { args: r.value as Record<string, unknown>, missing: r.missing };
+}
+
+function bindResult(call: AgentCommandCall, data: unknown, refs: Map<string, unknown>): void {
+  if (!data || typeof data !== "object") return;
+  const record = data as Record<string, unknown>;
+  if (call.bind) {
+    const id = record.trackId ?? record.clipId ?? record.id;
+    if (typeof id === "string") refs.set(call.bind, id);
+  }
+  for (const [name, field] of Object.entries(call.capture ?? {})) {
+    const value = record[field];
+    if (value !== undefined) refs.set(name, value);
+  }
+}
 
 /** Split a planned batch into runnable vs blocked. Under the limit, everything runs. Over
  *  it, the destructive calls are blocked and the constructive calls still run. Pure. */
@@ -73,35 +136,56 @@ export async function runAgentBatch(
 ): Promise<ChangeSet> {
   const { exec, refresh } = useStore.getState();
   const entries: ChangeEntry[] = [];
-  const valid: AgentCommandCall[] = [];
+  const candidates: AgentCommandCall[] = [];
 
   for (const c of calls) {
     const err = validateCommand(c.command, c.args ?? {});
     if (err) entries.push({ summary: c.command.replace(/_/g, " "), ok: false, error: err });
-    else valid.push(c);
+    else candidates.push(c);
   }
 
   // Safety: cap destructive commands per batch so a runaway tool-loop can't wipe a session.
-  const { allowed, blocked } = screenDestructive(valid);
+  const { allowed, blocked } = screenDestructive(candidates);
   for (const c of blocked) {
     entries.push({ summary: describeCommand(c.command, c.args ?? {}), ok: false, error: DESTRUCTIVE_BLOCK_REASON });
   }
 
-  if (allowed.length > 0) {
-    await exec("batch_begin", {
-      name: label, // still the undo-transaction label
-      turn_id: newTurnId(),
-      utterance: meta.utterance ?? label,
-      source: meta.source ?? "brain_chat",
-    });
-    for (const c of allowed) {
-      const res = await exec(c.command, c.args ?? {});
+  const refs = new Map<string, unknown>();
+  let batchOpen = false;
+  for (const c of allowed) {
+    const resolved = resolveArgs(c.args ?? {}, refs);
+    if (resolved.missing.length > 0) {
       entries.push({
         summary: describeCommand(c.command, c.args ?? {}),
-        ok: res.ok,
-        error: res.ok ? undefined : res.error,
+        ok: false,
+        error: `unbound ref ${resolved.missing.join(", ")}`,
+      });
+      continue;
+    }
+    const err = validateCommand(c.command, resolved.args);
+    if (err) {
+      entries.push({ summary: c.command.replace(/_/g, " "), ok: false, error: err });
+      continue;
+    }
+    if (!batchOpen) {
+      batchOpen = true;
+      await exec("batch_begin", {
+        name: label, // still the undo-transaction label
+        turn_id: newTurnId(),
+        utterance: meta.utterance ?? label,
+        source: meta.source ?? "brain_chat",
       });
     }
+    const res = await exec(c.command, resolved.args);
+    entries.push({
+      summary: describeCommand(c.command, resolved.args),
+      ok: res.ok,
+      error: res.ok ? undefined : res.error,
+    });
+    if (res.ok) bindResult(c, res.data, refs);
+  }
+
+  if (batchOpen) {
     await exec("batch_end", {});
     await refresh();
   }

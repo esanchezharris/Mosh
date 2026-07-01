@@ -64,6 +64,33 @@ describe("agent command contract — catalog args must match the seam", () => {
     expect(after.some((c) => Math.abs(c.start - splitAt) < 1e-6)).toBe(true);
   });
 
+  it("resolves capture refs across a compiled command program", async () => {
+    const cs = await runAgentBatch("recipe program", [
+      { command: "create_track", args: { name: "808", type: "audio" }, capture: { T0: "trackId" } },
+      {
+        command: "add_midi_clip",
+        args: { trackId: "${T0}", start: 0, length: 4 },
+        capture: { C0: "clipId" },
+      },
+      { command: "add_note", args: { clipId: "${C0}", pitch: 29, start: 0, length: 1.5, velocity: 112 } },
+    ]);
+
+    expect(cs.applied).toBe(3);
+    expect(cs.entries.every((e) => e.ok)).toBe(true);
+    const track = snap().tracks.find((t) => t.name === "808");
+    expect(track?.clips[0]?.notes?.some((n) => n.pitch === 29 && n.length === 1.5)).toBe(true);
+  });
+
+  it("fails cleanly when a compiled command program references a missing capture", async () => {
+    const cs = await runAgentBatch("bad recipe program", [
+      { command: "add_midi_clip", args: { trackId: "${MISSING}", start: 0, length: 4 } },
+    ]);
+
+    expect(cs.applied).toBe(0);
+    expect(cs.entries[0].ok).toBe(false);
+    expect(cs.entries[0].error).toMatch(/unbound ref/);
+  });
+
   it("emits batch_begin carrying turn_id + utterance + source (the Phase-0 turn marker)", async () => {
     const seen: { command: string; args: Record<string, unknown> }[] = [];
     const orig = useStore.getState().exec;
