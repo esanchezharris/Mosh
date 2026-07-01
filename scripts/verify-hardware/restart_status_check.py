@@ -113,6 +113,8 @@ def _promotion_status(root: Path) -> tuple[dict[str, Any], list[str], list[str]]
         failures.append("promotion packet reports tracked source path risks")
     if readiness.get("tracked_research_promotion_path_safe") is False:
         failures.append("promotion packet reports unsafe tracked research recipe markers")
+    if readiness.get("owner_source_policy_decision_present") is not True:
+        owner_blockers.append("source_policy")
     if safe_report.get("raw_media_included") is not False or safe_report.get("raw_source_paths_included") is not False:
         failures.append("promotion packet is not source-path/media safe")
     if readiness.get("owner_source_policy_required") is True:
@@ -126,6 +128,7 @@ def _promotion_status(root: Path) -> tuple[dict[str, Any], list[str], list[str]]
             "gateCOk": readiness.get("gate_c_ok") is True,
             "trackedResearchPromotionPresent": readiness.get("tracked_research_promotion_present") is True,
             "trackedResearchPromotionPathSafe": readiness.get("tracked_research_promotion_path_safe") is True,
+            "ownerSourcePolicyDecisionPresent": readiness.get("owner_source_policy_decision_present") is True,
             "trackedSourcePathRisks": int(readiness.get("tracked_source_path_risks") or 0),
             "ownerSourcePolicyRequired": readiness.get("owner_source_policy_required") is True,
             "ownerGateCRequired": readiness.get("owner_gate_c_required") is True,

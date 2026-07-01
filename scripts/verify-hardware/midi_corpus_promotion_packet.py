@@ -17,6 +17,7 @@ import gate_c_pack_check
 DEFAULT_ROOT = REPO / ".cache" / "mosh-teardown" / "midi-ingredients" / "2026-07-01-r7-curated"
 DEFAULT_TRACKED_LIBRARY = REPO / "service" / "recipes" / "library"
 DEFAULT_GATE_C_PACK = Path("~/mosh-beats/r7-gate-c-blind").expanduser()
+DEFAULT_OWNER_DECISION = REPO / "docs" / "research-policy" / "2026-07-01-r7-research-promotion.md"
 REQUIRED_GENERATOR_ROLES = ("808", "kick", "hat", "pad")
 DRUM_ROLES = ("kick", "snare", "hat", "clap", "perc")
 SOURCE_POLICY_CHOICES = ("owner-required", "research-tracked")
@@ -191,6 +192,35 @@ def _gate_c_status(gate_c_pack: Path) -> dict[str, Any]:
     }
 
 
+def _owner_decision_status(path: Path) -> dict[str, Any]:
+    resolved = path.expanduser().resolve()
+    exists = resolved.is_file()
+    inside_repo = False
+    in_cache = False
+    try:
+        rel = resolved.relative_to(REPO)
+        inside_repo = True
+        in_cache = bool(rel.parts and rel.parts[0] == ".cache")
+        display = str(rel)
+    except ValueError:
+        display = _display_path(resolved)
+    return {
+        "path": display,
+        "present": exists,
+        "inside_repo": inside_repo,
+        "outside_cache": not in_cache,
+        "durable": exists and inside_repo and not in_cache,
+    }
+
+
+def _owner_source_policy_required(source_policy: str, tracked_research_ready: bool, owner_decision: dict[str, Any]) -> bool:
+    return not (
+        source_policy == "research-tracked"
+        and tracked_research_ready
+        and owner_decision.get("durable") is True
+    )
+
+
 def build_packet(
     root: Path,
     *,
@@ -198,12 +228,14 @@ def build_packet(
     source_policy: str = "owner-required",
     tracked_library: Path = DEFAULT_TRACKED_LIBRARY,
     gate_c_pack: Path = DEFAULT_GATE_C_PACK,
+    owner_decision: Path = DEFAULT_OWNER_DECISION,
 ) -> dict[str, Any]:
     root = root.resolve()
     corpus = _read_corpus(root)
     gate_a = _gate_a_status(root, audit_path)
     tracked_research = _tracked_research_status(root, tracked_library)
     gate_c = _gate_c_status(gate_c_pack)
+    owner_decision_status = _owner_decision_status(owner_decision)
     counts = corpus["counts_by_role"]
     required_roles_present = all(int(counts.get(role, 0)) > 0 for role in REQUIRED_GENERATOR_ROLES)
     all_drum_roles_present = all(int(counts.get(role, 0)) > 0 for role in DRUM_ROLES)
@@ -224,7 +256,11 @@ def build_packet(
         and gate_c["wav_bad_count"] == 0
         and gate_c["structural_error_count"] == 0
     )
-    owner_source_policy_required = not (research_policy_active and tracked_research_ready)
+    owner_source_policy_required = _owner_source_policy_required(
+        source_policy,
+        tracked_research_ready,
+        owner_decision_status,
+    )
     owner_gate_c_required = not gate_c_ok
     repo_promotion_safe_now = (
         inside_target_size
@@ -255,6 +291,7 @@ def build_packet(
             "source_policy": source_policy,
             "research_only": True,
             "public_distribution_requires_separate_rights_decision": True,
+            "owner_decision": owner_decision_status,
         },
         "safe_report": {
             "raw_source_paths_included": False,
@@ -273,6 +310,7 @@ def build_packet(
             "gate_c_ok": gate_c_ok,
             "tracked_research_promotion_present": tracked_research["present"],
             "tracked_research_promotion_path_safe": tracked_research["tracked_files_path_safe"],
+            "owner_source_policy_decision_present": owner_decision_status["durable"],
             "tracked_source_path_risks": tracked_path_risks,
             "owner_source_policy_required": owner_source_policy_required,
             "owner_gate_c_required": owner_gate_c_required,
@@ -290,6 +328,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--source-policy", choices=SOURCE_POLICY_CHOICES, default="owner-required")
     parser.add_argument("--tracked-library", default=str(DEFAULT_TRACKED_LIBRARY), help="tracked recipe library path")
     parser.add_argument("--gate-c-pack", default=str(DEFAULT_GATE_C_PACK), help="Gate C blind pack directory")
+    parser.add_argument("--owner-decision", default=str(DEFAULT_OWNER_DECISION), help="tracked owner-decision artifact path")
     parser.add_argument("--out", default="", help="optional JSON output path")
     args = parser.parse_args(argv)
 
@@ -299,6 +338,7 @@ def main(argv: list[str] | None = None) -> int:
         source_policy=args.source_policy,
         tracked_library=Path(args.tracked_library),
         gate_c_pack=Path(args.gate_c_pack),
+        owner_decision=Path(args.owner_decision),
     )
     payload = json.dumps(packet, indent=2, sort_keys=True) + "\n"
     if args.out:

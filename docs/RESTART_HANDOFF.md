@@ -129,8 +129,11 @@ Installed-app status as of the current local deployment pass:
   `service/recipes/library/` as **tracked research-only recipe material**. They contain
   musical facts, inline MIDI notes, and content hashes; they do not commit raw MIDI files,
   WAVs, local media paths, palette paths, screenshots, transcripts, or other local evidence.
-  This clears the r7 source-policy blocker for research use. Public distribution or
-  packaged-media use remains a separate rights/packaging decision.
+  The tracked owner-decision artifact is
+  `docs/research-policy/2026-07-01-r7-research-promotion.md`; `research-tracked` promotion
+  packets must point at that artifact before the r7 source-policy blocker clears for
+  research use. Public distribution or packaged-media use remains a separate rights/packaging
+  decision.
 - `scripts/verify-hardware/restart_status_check.py` now rolls the
   STOP sentinel, Gate A audit, scout rescore/export, installed command proof, promotion
   packet, and blind Gate C pack into one safe status check. It reports the promoted r7
@@ -172,8 +175,10 @@ is `.cache/mosh-teardown/midi-ingredients/2026-07-01-r7-curated/`.
   it is not applicable to local `.mid` packs.
 - `scripts/verify-hardware/midi_corpus_promotion_packet.py` writes a safe local promotion
   packet with role/source-group counts, source path classes, Gate A status, Gate C scorecard
-  status, and tracked-library promotion status. For the current r7 research promotion, run
-  it with `--source-policy research-tracked`. It does not include raw MIDI paths or media.
+  status, tracked-library promotion status, and the durable owner-decision artifact. For the
+  current r7 research promotion, run it with `--source-policy research-tracked --owner-decision
+  docs/research-policy/2026-07-01-r7-research-promotion.md`. It does not include raw MIDI
+  paths or media.
   Current local packet:
   `.cache/mosh-teardown/midi-ingredients/2026-07-01-r7-curated/promotion-packet.json`.
 - The latest MIDI-first scout catalog refresh is
@@ -272,7 +277,7 @@ $VENV service/teardown/cli.py ingest-midi --dir "<gm-drum-midi-pack>" --out .cac
 # --- Gate-A-equivalent check for local MIDI ingredient fidelity ---
 $VENV service/teardown/midi_corpus_gate.py --root .cache/mosh-teardown/midi-ingredients/<run> --min-recipes 30
 MOSH_BIN=$MOSH_BIN MOSH_PALETTE_MANIFEST=<manifest.json> $VENV scripts/verify-hardware/gate_a_midi_audit.py --root .cache/mosh-teardown/midi-ingredients/<run> --out .cache/mosh-teardown/midi-ingredients/<run>/gate-a-midi-audit.json
-$VENV scripts/verify-hardware/midi_corpus_promotion_packet.py --root .cache/mosh-teardown/midi-ingredients/<run> --source-policy research-tracked --out .cache/mosh-teardown/midi-ingredients/<run>/promotion-packet.json
+$VENV scripts/verify-hardware/midi_corpus_promotion_packet.py --root .cache/mosh-teardown/midi-ingredients/<run> --source-policy research-tracked --owner-decision docs/research-policy/2026-07-01-r7-research-promotion.md --out .cache/mosh-teardown/midi-ingredients/<run>/promotion-packet.json
 
 # --- rescore the preserved scout catalog without mutating the checked-in copy ---
 $VENV service/teardown/cli.py rescore-catalog --catalog service/teardown/catalog.sqlite --out-catalog .cache/mosh-teardown/midi-ingredients/<run>/catalog-midi-first.sqlite

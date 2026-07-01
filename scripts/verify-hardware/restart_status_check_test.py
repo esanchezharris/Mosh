@@ -78,7 +78,14 @@ def _write_gate_c_pack(root: Path, *, complete: bool) -> Path:
     return pack
 
 
-def _write_restart_root(root: Path, *, source_policy_blocked: bool = True) -> None:
+def _write_restart_root(
+    root: Path,
+    *,
+    source_policy_blocked: bool = True,
+    owner_decision_present: bool | None = None,
+) -> None:
+    if owner_decision_present is None:
+        owner_decision_present = not source_policy_blocked
     _write_json(
         root / "gate-a-midi-audit.json",
         {
@@ -114,6 +121,7 @@ def _write_restart_root(root: Path, *, source_policy_blocked: bool = True) -> No
                 "gate_c_ok": not source_policy_blocked,
                 "tracked_research_promotion_present": not source_policy_blocked,
                 "tracked_research_promotion_path_safe": True,
+                "owner_source_policy_decision_present": owner_decision_present,
                 "tracked_source_path_risks": 0,
                 "owner_source_policy_required": source_policy_blocked,
                 "owner_gate_c_required": source_policy_blocked,
@@ -227,6 +235,14 @@ def main() -> int:
               promoted_payload)
         check("CLI passes after research promotion and Gate C scoring",
               _main_quiet(["--root", str(promoted_root), "--gate-c-pack", str(complete_pack), "--stop", str(stop)]) == 0)
+
+        missing_decision_root = base / "missing-decision-r7"
+        _write_restart_root(missing_decision_root, source_policy_blocked=False, owner_decision_present=False)
+        missing_decision_status = RESTART.build_status(missing_decision_root, gate_c_pack=complete_pack, stop_path=stop)
+        check("research promotion without owner-decision artifact stays blocked",
+              missing_decision_status["ownerBlockers"] == ["source_policy"]
+              and not missing_decision_status["complete"],
+              json.dumps(missing_decision_status, sort_keys=True))
 
         bad_root = base / "bad-r7"
         _write_restart_root(bad_root)

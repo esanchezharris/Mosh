@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import os
 import shutil
@@ -41,8 +42,34 @@ SCORE_FIELDS = [
 ]
 
 
-def _jsonable_provenance(prov: Any) -> dict[str, Any]:
-    return {
+def _redact_private_string(value: str) -> str:
+    text = str(value)
+    if text.startswith("~/") or "/Users/" in text or Path(text).is_absolute():
+        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
+        return f"redacted:path:{digest}"
+    return text
+
+
+def _redact_private_paths(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(k): _redact_private_paths(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_redact_private_paths(v) for v in value]
+    if isinstance(value, str):
+        return _redact_private_string(value)
+    return value
+
+
+def _display_library(path: Path) -> str:
+    resolved = path.expanduser().resolve()
+    try:
+        return str(resolved.relative_to(REPO))
+    except ValueError:
+        return _redact_private_string(str(resolved))
+
+
+def _jsonable_provenance(prov: Any, *, include_private_paths: bool = False) -> dict[str, Any]:
+    payload = {
         "backbone": prov.backbone,
         "sources": dict(prov.sources),
         "transpose": dict(prov.transpose),
@@ -50,6 +77,7 @@ def _jsonable_provenance(prov: Any) -> dict[str, Any]:
         "key": prov.key,
         "tempo": prov.tempo,
     }
+    return payload if include_private_paths else _redact_private_paths(payload)
 
 
 def _slug_key(key: str) -> str:
@@ -71,7 +99,7 @@ def _keep(raw: str) -> bool:
     return str(raw or "").strip().lower() in {"1", "true", "yes", "y", "keep", "x"}
 
 
-def render_pack(out_dir: Path, *, candidates_per_prompt: int) -> int:
+def render_pack(out_dir: Path, *, candidates_per_prompt: int, include_private_paths: bool = False) -> int:
     from recipes import generate as G
     from teardown.render.execute import execute_recipe
 
@@ -93,7 +121,8 @@ def render_pack(out_dir: Path, *, candidates_per_prompt: int) -> int:
         "# r7 generate-N selection pack",
         "",
         "This is a pre-Gate-C selection pass: score several candidates per prompt, then run `select` to copy the best few into `selected/`.",
-        f"Library: {library_dir}",
+        f"Library: {_display_library(library_dir)}",
+        f"Private paths included: {include_private_paths}",
         "",
     ]
 
@@ -148,7 +177,11 @@ def render_pack(out_dir: Path, *, candidates_per_prompt: int) -> int:
                     "request": request,
                     "seed": seed,
                     "recipe_id": rec.recipe_id,
-                    "provenance": _jsonable_provenance(prov),
+                    "path_policy": {
+                        "private_paths_included": include_private_paths,
+                        "redaction": "absolute paths are replaced with redacted:<name>:<sha12>",
+                    },
+                    "provenance": _jsonable_provenance(prov, include_private_paths=include_private_paths),
                     "render": {
                         "nonsilent": res.nonsilent,
                         "audio_rms": round(float(res.audio_rms), 8),
@@ -168,7 +201,13 @@ def render_pack(out_dir: Path, *, candidates_per_prompt: int) -> int:
     return 0 if ok_count == total else 1
 
 
-def select_pack(out_dir: Path, *, selected_dir: Path | None = None, top_k: int = 1) -> int:
+def select_pack(
+    out_dir: Path,
+    *,
+    selected_dir: Path | None = None,
+    top_k: int = 1,
+    include_private_paths: bool = False,
+) -> int:
     scorecard_path = out_dir / "scorecard.csv"
     manifest_path = out_dir / "selection_manifest.json"
     if not scorecard_path.is_file():
@@ -218,6 +257,8 @@ def select_pack(out_dir: Path, *, selected_dir: Path | None = None, top_k: int =
             return 1
         shutil.copy2(source, dest)
         item = dict(manifest_by_file.get(filename) or {})
+        if not include_private_paths:
+            item = _redact_private_paths(item)
         item["selection"] = {
             "musically_distinct_1_5": row.get("musically_distinct_1_5", ""),
             "would_keep_1_5": row.get("would_keep_1_5", ""),
@@ -245,20 +286,31 @@ def main(argv: list[str] | None = None) -> int:
     render = sub.add_parser("render", help="render multiple candidates per prompt")
     render.add_argument("out_dir", nargs="?", default=str(DEFAULT_OUT))
     render.add_argument("--candidates-per-prompt", type=int, default=4)
+    render.add_argument("--include-private-paths", action="store_true", help="write local sample paths into manifests")
     select = sub.add_parser("select", help="copy the best scored candidates into selected/")
     select.add_argument("out_dir", nargs="?", default=str(DEFAULT_OUT))
     select.add_argument("--selected-dir", default="")
     select.add_argument("--top-k", type=int, default=1)
+    select.add_argument("--include-private-paths", action="store_true", help="preserve local paths from source manifest")
     args = parser.parse_args(argv)
 
     if args.mode == "render":
         if args.candidates_per_prompt < 1 or args.candidates_per_prompt > 26:
             parser.error("--candidates-per-prompt must be between 1 and 26")
-        return render_pack(Path(args.out_dir).expanduser(), candidates_per_prompt=args.candidates_per_prompt)
+        return render_pack(
+            Path(args.out_dir).expanduser(),
+            candidates_per_prompt=args.candidates_per_prompt,
+            include_private_paths=args.include_private_paths,
+        )
     selected_dir = Path(args.selected_dir).expanduser() if args.selected_dir else None
     if args.top_k < 1:
         parser.error("--top-k must be >= 1")
-    return select_pack(Path(args.out_dir).expanduser(), selected_dir=selected_dir, top_k=args.top_k)
+    return select_pack(
+        Path(args.out_dir).expanduser(),
+        selected_dir=selected_dir,
+        top_k=args.top_k,
+        include_private_paths=args.include_private_paths,
+    )
 
 
 if __name__ == "__main__":
