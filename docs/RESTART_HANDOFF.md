@@ -107,7 +107,10 @@ Installed-app status as of the current local deployment pass:
   bundle's `Contents/Resources/service/.recipe.env`. An `env -i` installed-binary proof
   with no `libraryDir`/`paletteManifest` args applied 25/25 generated commands, left
   `unresolved: []`, and produced 8 MIDI-bearing tracks, proving the bundled runtime fallback
-  uses r7 without repo-cwd assumptions. Compact local proof:
+  uses r7 without repo-cwd assumptions. This proof is now repeatable with
+  `scripts/verify-hardware/generate_command_check.py`; the latest run applied 25/25 commands
+  with `usedExplicitRuntimeArgs:false`, 8 MIDI-bearing tracks, and 338 MIDI notes. Compact
+  local proof:
   `.cache/mosh-teardown/midi-ingredients/2026-07-01-r7-curated/default-runtime-generate-proof.jsonl`.
 - The r7 owner-listening pack is rendered at `~/mosh-beats/r7-curated/`: 6/6 WAVs rendered
   non-silent through `/Applications/Mosh.app`, with provenance written to
@@ -227,6 +230,7 @@ MOSH_BIN=$MOSH_BIN $VENV scripts/verify-hardware/generate_render_check.py   # ge
 MOSH_BIN=$MOSH_BIN MOSH_RECIPE_LIBRARY=.cache/mosh-teardown/midi-ingredients/<run>/library MOSH_PALETTE_MANIFEST=<manifest.json> $VENV scripts/verify-hardware/generate_render_check.py
 MOSH_BIN=$MOSH_BIN MOSH_RECIPE_LIBRARY=.cache/mosh-teardown/midi-ingredients/<run>/library MOSH_PALETTE_MANIFEST=<manifest.json> $VENV scripts/verify-hardware/render_audition.py ~/mosh-beats/<run>  # audition set
 MOSH_BIN=$MOSH_BIN MOSH_RECIPE_LIBRARY=.cache/mosh-teardown/midi-ingredients/<run>/library MOSH_PALETTE_MANIFEST=<manifest.json> $VENV scripts/verify-hardware/render_blind_gate_c.py ~/mosh-beats/<run>-gate-c-blind
+MOSH_BIN=$MOSH_BIN $VENV scripts/verify-hardware/generate_command_check.py  # installed-app command surface + bundled/default runtime
 
 # --- generate one beat (CLI) ---
 $VENV service/recipes/generate.py --mood dark --tempo 140 --key "F minor" --seed 7 --emit recipe
