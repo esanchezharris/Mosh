@@ -6,6 +6,7 @@ import tempfile
 _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
+_REPO = os.path.dirname(_HERE)
 
 from teardown import recipe as R  # noqa: E402
 from server import _generate_recipe_payload  # noqa: E402
@@ -58,6 +59,21 @@ with tempfile.TemporaryDirectory() as td:
     check("compiled program preserves capture refs", any(c.get("capture") for c in commands))
     check("compiled program has dependent ref args", any("${T" in str(c.get("args", {})) for c in commands))
     check("payload reports command count", payload["commandCount"] == len(commands))
+
+with tempfile.TemporaryDirectory(dir=_REPO) as td:
+    write_recipe(td, "kick_rel", R.Role.kick, 36)
+    write_recipe(td, "snare_rel", R.Role.snare, 38)
+    write_recipe(td, "hat_rel", R.Role.hat, 42)
+    write_recipe(td, "pad_rel", R.Role.pad, 48)
+    write_recipe(td, "bass_rel", R.Role.r808, 29)
+    rel = os.path.relpath(td, _REPO)
+    old_cwd = os.getcwd()
+    try:
+        os.chdir("/")
+        payload = _generate_recipe_payload({"libraryDir": rel, "tempo": 140, "key": "F minor", "seed": 1})
+    finally:
+        os.chdir(old_cwd)
+    check("repo-relative libraryDir resolves outside repo cwd", payload["ok"] is True and payload["libraryDir"] == td)
 
 print(f"\n{'ALL PASS' if not fails else 'FAILURES: ' + ', '.join(fails)}  ({len(fails)} failure(s))")
 sys.exit(len(fails))

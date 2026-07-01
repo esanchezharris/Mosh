@@ -25,6 +25,12 @@ describe("systemPrompt id quoting", () => {
   it("states that ids are strings in the rules", () => {
     expect(systemPrompt(snap).toLowerCase()).toContain("string id");
   });
+
+  it("routes beat creation through the real recipe command", () => {
+    const p = systemPrompt(snap);
+    expect(p).toContain("generate_beat_recipe");
+    expect(p).toContain("Do not hand-build beat tracks or notes");
+  });
 });
 
 describe("parseReply", () => {

@@ -44,6 +44,7 @@ export const DEFAULT_RULES = [
   "- Use the REAL ids from the session below for trackId/clipId. Never invent ids or commands.",
   '- trackId/clipId are STRING ids: match one from the session exactly and pass it as a JSON string, e.g. "trackId": "17" — never the bare number 17, and never with extra quote characters inside the value.',
   "- One request can produce several commands (they apply together as one undoable change).",
+  "- For requests to make, start, build, or generate a beat, use generate_beat_recipe. Do not hand-build beat tracks or notes.",
   "- To re-imagine PART of the song (e.g. \"rework the hook\"), scope a render to that SECTION: create_render_layer on the wave clip under the section with regionStart/regionEnd in SECONDS (beats × 60 ÷ tempo), then render_layer.",
   "- If the request is unclear or needs info you don't have, set intent HUH and ask in `say` — don't guess.",
   "- After making edits use intent ACK_GOT_IT (or DONE for a finishing flourish).",

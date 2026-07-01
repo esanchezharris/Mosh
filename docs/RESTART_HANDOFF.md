@@ -62,11 +62,17 @@ corpus gate verifies the recipe against only that role's source pitches.
 - Native MoshOps exposes `generate_beat_recipe`, calls the service, allowlists the generated
   commands, resolves `capture`/`bind` refs, applies the program as one undoable batch, and
   rolls back the batch on partial failure.
-- The UI agent catalog exposes `generate_beat_recipe`, the parser preserves object-form
-  `capture`/`bind`, and the browser mock creates editable MIDI tracks for tests.
+- The UI agent catalog exposes `generate_beat_recipe`, the brain prompt explicitly routes
+  make/start/build/generate-a-beat requests to it, the keyless mock brain emits the same
+  command for typed beat asks, the parser preserves object-form `capture`/`bind`, and the
+  browser mock creates editable MIDI tracks for tests.
 - The debug app command surface has been driven through `Mosh --run-script` against the
-  local 62-recipe MIDI corpus: 19 generated commands applied, no unresolved refs, 6 editable
-  MIDI-bearing tracks, including the provenance-identified 808 source track.
+  local 62-recipe MIDI corpus with a repo-relative `libraryDir`: 23 generated commands
+  applied, no unresolved refs, 7 editable MIDI-bearing tracks, including the
+  provenance-identified 808 source track (`simple`).
+- The service `/generate_recipe` endpoint now resolves relative `libraryDir` and
+  `paletteManifest` values against cwd, the repo root, and the service root before failing,
+  so debug `--run-script` commands from the handoff are not brittle to the child service cwd.
 
 Do not claim installed-app completion from this alone. `/Applications/Mosh.app` still needs
 the rebuilt app and the recipe runtime env/config (`MOSH_SERVICE_PYTHON`,
@@ -197,7 +203,7 @@ cd service/teardown && .venv/bin/python recipe.py --emit-schema > recipe.schema.
 1. **The REAL corpus (the true "start from knowing") — start here.** You already have real scouted data: `ClaudeMosh-moshfx/service/teardown/catalog.sqlite` (31 candidates) + the MIDI-first rescore/export at `.cache/mosh-teardown/midi-ingredients/2026-07-01-r2/teardown_jobs-midi-first.jsonl` (14 queued ideal/usable jobs). Once #194 lands, run the existing `video2recipe/` (FL Studio MIDI-from-screen is live) against those queued jobs → recipe → **Gate A**. Target ~30–50 trap/melodic-trap recipes to replace/expand the 5 hand-authored bootstrap seeds in `service/recipes/library/`.
    - Each new recipe must pass **Gate A (fidelity)**: reconstruct → render → A/B vs. the source tutorial audio ("does it sound like that beat?"). Owner-ear — see the goal prompt in §7 for exactly how to get this signal without live Claude access this week.
 2. **Gate C (the verdict).** Blind A/B pack — retrieved-adapted vs. the old template vs. exact reconstruction, scored on "musically distinct" + "would keep" (reuse `ui/scripts/rl/buildValidityPack.mts` patterns).
-3. **Phase 2 — finish the live-agent product path.** The `generate_beat_recipe` command surface is wired in `codex/video2recipe-port`; remaining work is to route the natural-language beat intent away from the old template builder where needed, rebuild + redeploy so `/Applications/Mosh.app` has the command and melodic-808 engine changes, and prove Finder launch with the recipe runtime configured.
+3. **Phase 2 — finish the live-agent product path.** The `generate_beat_recipe` command surface and natural-language beat route are wired in `codex/video2recipe-port`; remaining work is to rebuild + redeploy so `/Applications/Mosh.app` has the command and melodic-808 engine changes, then prove Finder launch with the recipe runtime configured.
 
 ---
 
