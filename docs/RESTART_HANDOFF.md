@@ -126,6 +126,12 @@ The current gitignored local ingredient run is
   `.cache/mosh-teardown/midi-ingredients/2026-07-01-r4/teardown_jobs-midi-ingredients.jsonl`
   with 1 queued MIDI-ingredient job; expand this only with defensible MIDI/single-element
   sources, not broad synth-patch reconstruction.
+- The filtered r4 job (`6s0MGYv4cWs`, "Massive Supersaws in 15 Seconds") has been driven
+  through `video2recipe` with installed-app rendering. Local evidence lives under
+  `.cache/mosh-teardown/midi-ingredients/2026-07-01-r4/video2recipe-run-v2/`: 93 parsed
+  screen-MIDI notes, a 20.2333s repaired clip length for a 40.4667-beat phrase, non-silent
+  render RMS 0.25, and status `needs_review`. Treat this as useful pipeline evidence, not
+  a corpus promotion, until source-fidelity review says the phrase is musically faithful.
 
 Known corpus caveat: the local corpus now covers every generator drum role, and the current
 render gate selected the new `snare` and `clap` ingredients in all three generated beats.

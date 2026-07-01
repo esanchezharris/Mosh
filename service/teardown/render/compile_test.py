@@ -208,6 +208,8 @@ with tempfile.TemporaryDirectory() as td:
     check("inline_midi resolved one clip", len(mids) == 1 and mids == ["lead"], f"resolved {mids}")
     mc = next(c for c in inlined if c["command"] == "add_midi_clip")
     check("inline_midi attached notes to the right clip", len(mc["args"].get("notes", [])) == 3)
+    check("inline_midi resizes clip length to the parsed phrase",
+          abs(mc["args"].get("length", 0) - 2.0) < 1e-6, str(mc["args"]))
     check("inline_midi leaves non-midi commands untouched",
           any(c["command"] == "import_clip" for c in inlined))
 

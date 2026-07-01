@@ -50,9 +50,26 @@ def _resolve_ref(midi_ref: str, asset_root: Optional[str]) -> Optional[str]:
     return midi_ref if os.path.isfile(midi_ref) else None
 
 
+def _tempo_value(recipe) -> float:
+    value = getattr(getattr(recipe, "meta", None), "tempo_bpm", None)
+    value = getattr(value, "value", None)
+    try:
+        return float(value) if value is not None else 120.0
+    except (TypeError, ValueError):
+        return 120.0
+
+
+def _clip_len_for_notes(notes: list[dict], tempo: float) -> float:
+    if not notes:
+        return 8.0
+    end_beats = max(float(n.get("start", 0.0)) + float(n.get("length", 0.0)) for n in notes)
+    return max(1.0, round(end_beats * (60.0 / max(1.0, tempo)), 4))
+
+
 def inline_midi(commands: list, recipe, asset_root: Optional[str] = None) -> tuple[list, int]:
     out = []
     resolved_ids: list = []
+    tempo = _tempo_value(recipe)
     for c in commands:
         c = dict(c)
         if c.get("command") == "add_midi_clip":
@@ -68,7 +85,8 @@ def inline_midi(commands: list, recipe, asset_root: Optional[str] = None) -> tup
                         except Exception:
                             notes = []
                         if notes:
-                            c["args"] = dict(c["args"], notes=notes)
+                            c["args"] = dict(c["args"], notes=notes,
+                                             length=_clip_len_for_notes(notes, tempo))
                             resolved_ids.append(recipe.elements[i].element_id)
         out.append(c)
     return out, resolved_ids
