@@ -145,6 +145,31 @@ def main() -> int:
             ),
         ),
         TutorialCandidate(
+            video_id="broad-synth-1",
+            url="https://www.youtube.com/watch?v=broad-synth-1",
+            title="How To Make Any Sound From Scratch in Serum",
+            channel="Warp Academy",
+            description="Serum sound design preset patch walkthrough",
+            duration_s=820,
+            tags=("serum", "sound design", "preset", "patch"),
+            license="youtube",
+            template_id="serum-preset-recreation",
+            chapters=(),
+            has_captions=False,
+            probe=TutorialProbe(
+                daw_visible=True,
+                piano_roll_visible=True,
+                synth_gui_visible=True,
+                plugin_chain_visible=True,
+                serum_visible=True,
+                readable_preset=True,
+                readable_knobs=True,
+                visible_plugin_names=("Serum",),
+                extra_synths=(),
+                evidence=({"type": "frame", "note": "visible synth patch and piano roll"},),
+            ),
+        ),
+        TutorialCandidate(
             video_id="reject-1",
             url="https://www.youtube.com/watch?v=reject-1",
             title="Type beat cookup with Omnisphere",
@@ -183,6 +208,12 @@ def main() -> int:
     check("MIDI-only candidate does not require Serum/Vital",
           "serum-or-vital:no" in midi_item.evidence_bundle and midi_item.yield_prediction.midi >= midi_item.yield_prediction.synth,
           str((midi_item.evidence_bundle, midi_item.yield_prediction.as_dict())))
+    broad_synth = next(item for item in scored if item.candidate.video_id == "broad-synth-1")
+    check("broad synth-patch row is not mislabeled as MIDI ingredient",
+          "focus:synth" in broad_synth.evidence_bundle and "midi-ingredient:no" in broad_synth.evidence_bundle,
+          str(broad_synth.evidence_bundle))
+    check("broad synth-patch row remains usable but not ideal",
+          broad_synth.decision == "usable", broad_synth.decision)
     check("synth-focused candidate is usable without chain", usable_decisions["synth-focus-1"] == "usable", usable_decisions["synth-focus-1"])
     check("reject candidate is rejected or weak", scored[-1].decision in {"weak", "reject"}, scored[-1].decision)
     check("serum/vital candidate outranks reject", scored[0].score > scored[-1].score, f"{scored[0].score} > {scored[-1].score}")
@@ -199,26 +230,37 @@ def main() -> int:
         for item in scored:
             catalog.upsert(item, discovered_at="2026-06-30T00:00:00Z", screened_at="2026-06-30T00:01:00Z")
         rows = catalog.list(limit=10)
-        check("catalog persisted rows", len(rows) == 5, str(rows))
+        check("catalog persisted rows", len(rows) == 6, str(rows))
         check("catalog top row matches score order", rows[0]["video_id"] == "ideal-1", rows[0]["video_id"])
         jobs = build_teardown_jobs(rows, checkpoint_root=Path(tmp) / "checkpoints")
-        check("job export keeps ideal and usable rows", len(jobs) == 4, json.dumps(jobs, sort_keys=True))
+        check("job export keeps ideal and usable rows", len(jobs) == 5, json.dumps(jobs, sort_keys=True))
+        midi_jobs = build_teardown_jobs(rows, checkpoint_root=Path(tmp) / "checkpoints",
+                                        required_evidence=("midi-ingredient:yes",))
+        check("job export can filter to MIDI ingredients",
+              {job["source"]["video_id"] for job in midi_jobs} == {"ideal-1", "midi-only-1"},
+              json.dumps(midi_jobs, sort_keys=True))
         check("job export avoids recrawl", all(job["resume"]["requires_recrawl"] is False for job in jobs), json.dumps(jobs, sort_keys=True))
         jobs_path = Path(tmp) / "jobs.jsonl"
-        check("job jsonl written", write_jobs(jobs_path, jobs) == 4 and jobs_path.exists(), str(jobs_path))
+        check("job jsonl written", write_jobs(jobs_path, jobs) == 5 and jobs_path.exists(), str(jobs_path))
+        midi_jobs_path = Path(tmp) / "midi-jobs.jsonl"
+        check("export-jobs CLI filters by required evidence",
+              scout_cli_main(["export-jobs", "--catalog", str(catalog_path), "--out", str(midi_jobs_path),
+                              "--checkpoint-root", str(Path(tmp) / "checkpoints"),
+                              "--require-evidence", "midi-ingredient:yes", "--print-limit", "0"]) == 0
+              and len([line for line in midi_jobs_path.read_text().splitlines() if line.strip()]) == 2)
         summary = catalog.summary()
-        check("catalog summary counts", summary["total"] == 5 and summary["by_status"].get("ideal", 0) >= 1 and summary["by_status"].get("usable", 0) >= 2, json.dumps(summary, sort_keys=True))
+        check("catalog summary counts", summary["total"] == 6 and summary["by_status"].get("ideal", 0) >= 1 and summary["by_status"].get("usable", 0) >= 3, json.dumps(summary, sort_keys=True))
         rescored_path = Path(tmp) / "rescored.sqlite"
         check("rescore-catalog exits 0",
               scout_cli_main(["rescore-catalog", "--catalog", str(catalog_path), "--out-catalog", str(rescored_path)]) == 0)
         rescored_summary = TutorialCatalog(rescored_path).summary()
-        check("rescore-catalog preserves row count", rescored_summary["total"] == 5, json.dumps(rescored_summary, sort_keys=True))
+        check("rescore-catalog preserves row count", rescored_summary["total"] == 6, json.dumps(rescored_summary, sort_keys=True))
         check("rescore-catalog rewrites out-catalog on rerun",
               scout_cli_main(["rescore-catalog", "--catalog", str(catalog_path),
                               "--out-catalog", str(rescored_path), "--limit", "1"]) == 0
               and TutorialCatalog(rescored_path).summary()["total"] == 1)
         catalog.update_status("ideal-1", "reject")
-        reprioritized = catalog.list(limit=4)
+        reprioritized = catalog.list(limit=10)
         first_reject = next(index for index, row in enumerate(reprioritized) if row["status"] == "reject")
         usable_indexes = [index for index, row in enumerate(reprioritized) if row["status"] == "usable"]
         check("catalog prioritizes queued statuses before rejects", usable_indexes and max(usable_indexes) < first_reject, json.dumps(reprioritized, sort_keys=True))

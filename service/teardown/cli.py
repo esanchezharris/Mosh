@@ -194,13 +194,23 @@ def cmd_rescore_catalog(args: argparse.Namespace) -> int:
 def cmd_export_jobs(args: argparse.Namespace) -> int:
     catalog = TutorialCatalog(args.catalog)
     statuses = tuple(status.strip() for status in args.statuses.split(",") if status.strip())
+    required_evidence = _split_csv(args.require_evidence)
+    excluded_evidence = _split_csv(args.exclude_evidence)
     rows = catalog.list(limit=args.limit if args.limit else None)
-    jobs = build_teardown_jobs(rows, checkpoint_root=args.checkpoint_root, statuses=statuses)
+    jobs = build_teardown_jobs(
+        rows,
+        checkpoint_root=args.checkpoint_root,
+        statuses=statuses,
+        required_evidence=required_evidence,
+        excluded_evidence=excluded_evidence,
+    )
     written = write_jobs(args.out, jobs)
     output = {
         "out": args.out,
         "written": written,
         "statuses": list(statuses),
+        "required_evidence": list(required_evidence),
+        "excluded_evidence": list(excluded_evidence),
         "jobs": jobs[: args.print_limit if args.print_limit else 0],
     }
     json.dump(output, sys.stdout, indent=2, sort_keys=True)
@@ -234,6 +244,10 @@ def _read_api_key_file(path: str) -> str:
     text = text.replace("{", " ").replace("}", " ").replace("\\", " ")
     match = re.search(r"AIza[0-9A-Za-z_-]{20,}", text)
     return match.group(0) if match else ""
+
+
+def _split_csv(value: str) -> tuple[str, ...]:
+    return tuple(item.strip() for item in value.split(",") if item.strip())
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -283,6 +297,10 @@ def build_parser() -> argparse.ArgumentParser:
     jobs_parser.add_argument("--out", default=str(_DEFAULT_JOBS))
     jobs_parser.add_argument("--checkpoint-root", default=str(_DEFAULT_CHECKPOINTS))
     jobs_parser.add_argument("--statuses", default="ideal,usable")
+    jobs_parser.add_argument("--require-evidence", default="",
+                             help="comma-separated evidence bundle tags all exported jobs must contain")
+    jobs_parser.add_argument("--exclude-evidence", default="",
+                             help="comma-separated evidence bundle tags exported jobs must not contain")
     jobs_parser.add_argument("--limit", type=int, default=0)
     jobs_parser.add_argument("--print-limit", type=int, default=5)
     jobs_parser.set_defaults(func=cmd_export_jobs)

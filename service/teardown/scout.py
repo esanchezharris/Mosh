@@ -63,6 +63,7 @@ _SYNTH_FOCUS_HINTS = (
     "absolute beginners",
     "beginner",
     "guide",
+    "synth",
     "sound design",
     "preset recreation",
     "preset",
@@ -83,20 +84,33 @@ _BEAT_FOCUS_HINTS = (
 )
 _MIDI_INGREDIENT_HINTS = (
     "808",
+    "808s",
     "arp",
     "bass",
+    "bassline",
     "chord",
+    "chords",
     "clap",
+    "claps",
     "drum",
+    "drums",
     "hat",
+    "hats",
+    "hi hat",
+    "hi-hat",
     "lead",
+    "leads",
     "melody",
+    "melodies",
     "pad",
+    "pads",
     "pattern",
+    "patterns",
     "piano roll",
     "pluck",
     "progression",
     "snare",
+    "snares",
 )
 
 
@@ -118,6 +132,13 @@ def _contains_any(text: str, phrases: Iterable[str]) -> bool:
 
 def _count_any(text: str, phrases: Iterable[str]) -> int:
     return sum(1 for phrase in phrases if phrase in text)
+
+
+def _contains_wordish_phrase(text: str, phrases: Iterable[str]) -> bool:
+    for phrase in phrases:
+        if re.search(rf"(?<![a-z0-9]){re.escape(phrase)}(?![a-z0-9])", text):
+            return True
+    return False
 
 
 def _extract_chapters(description: str) -> tuple[str, ...]:
@@ -498,15 +519,19 @@ class TutorialScorer:
 
         text = candidate.search_text()
         from_scratch = _contains_any(text, _FROM_SCRATCH_HINTS)
-        single_element_hint = _contains_any(text, _MIDI_INGREDIENT_HINTS)
+        single_element_hint = _contains_wordish_phrase(text, _MIDI_INGREDIENT_HINTS)
         chain_visible = bool(probe.plugin_chain_visible)
         serum_or_vital = bool(probe.serum_visible or probe.vital_visible or meta["serum_hits"] or meta["vital_hits"])
         extra_synth_count = int(visual["extra_synth_count"])
         synth_focused = _is_synth_focused(text, serum_or_vital)
         synth_focus_duration_ok = candidate.duration_s is None or candidate.duration_s >= 120
+        midi_context = bool(
+            (not synth_focused and (from_scratch or candidate.has_captions or candidate.chapters or meta["tutorial_hits"]))
+            or single_element_hint
+        )
         midi_ingredient = bool(
             probe.piano_roll_visible
-            and (from_scratch or candidate.has_captions or candidate.chapters or meta["tutorial_hits"] or single_element_hint)
+            and midi_context
         )
 
         drums = _clamp01(

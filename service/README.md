@@ -46,6 +46,8 @@ enabled.
 - `python3 service/teardown/cli.py export-jobs --catalog service/teardown/catalog.sqlite --out service/teardown/teardown_jobs.jsonl`
   writes resumable teardown jobs for `ideal` and `usable` rows without re-crawling
   YouTube.
+- Add `--require-evidence midi-ingredient:yes` when exporting the v1 corpus-mining
+  queue so broad synth-reference rows stay out of the recipe-ingest path.
 
 ## Mac SA3
 

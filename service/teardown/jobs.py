@@ -68,9 +68,23 @@ def build_teardown_jobs(
     rows: Iterable[Mapping[str, Any]],
     checkpoint_root: str | Path = "service/teardown/checkpoints",
     statuses: Iterable[str] = _JOB_STATUSES,
+    required_evidence: Iterable[str] = (),
+    excluded_evidence: Iterable[str] = (),
 ) -> list[dict[str, Any]]:
     allowed = {str(status) for status in statuses}
-    return [build_teardown_job(row, checkpoint_root) for row in rows if row.get("status") in allowed]
+    required = {str(item) for item in required_evidence if str(item)}
+    excluded = {str(item) for item in excluded_evidence if str(item)}
+    jobs = []
+    for row in rows:
+        if row.get("status") not in allowed:
+            continue
+        bundle = _evidence_bundle(row)
+        if required and not required.issubset(bundle):
+            continue
+        if excluded and excluded.intersection(bundle):
+            continue
+        jobs.append(build_teardown_job(row, checkpoint_root))
+    return jobs
 
 
 def write_jobs(path: str | Path, jobs: Iterable[Mapping[str, Any]]) -> int:
@@ -91,3 +105,13 @@ def _loads(value: Any, fallback: Any) -> Any:
         except json.JSONDecodeError:
             return fallback
     return fallback
+
+
+def _evidence_bundle(row: Mapping[str, Any]) -> set[str]:
+    evidence_payload = _loads(row.get("evidence_json"), {})
+    if not isinstance(evidence_payload, Mapping):
+        return set()
+    bundle = evidence_payload.get("bundle", [])
+    if not isinstance(bundle, list):
+        return set()
+    return {str(item) for item in bundle}
