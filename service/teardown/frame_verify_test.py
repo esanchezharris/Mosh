@@ -45,7 +45,18 @@ def main() -> int:
         check("ocr detects preset", probe.readable_preset, str(probe))
         check("ocr detects knobs", probe.readable_knobs, str(probe))
         check("ocr or cv detects chain", probe.plugin_chain_visible, str(probe))
+        check("non-roll synth/control frame does not claim piano-roll", not probe.piano_roll_visible, str(probe))
         check("frame evidence records ocr cv detector", any(item.get("detector") == "ocr_cv" for item in probe.evidence), str(probe.evidence))
+        roll = Path(tmp) / "piano-roll.jpg"
+        _write_piano_roll_frame(roll)
+        roll_probe = LocalFrameVerifier(roll).verify("local-roll", "unused", tmp, duration_s=600)
+        check("recoverable piano roll is detected", roll_probe.piano_roll_visible, str(roll_probe))
+        vital = HERE / "synth_from_screen" / "fixtures" / "vital_init.png"
+        if vital.exists():
+            vital_tmp = Path(tmp) / "vital_init.png"
+            shutil.copyfile(vital, vital_tmp)
+            vital_probe = LocalFrameVerifier(vital_tmp).verify("local-vital", "unused", tmp, duration_s=600)
+            check("Vital modulation grid does not claim piano-roll", not vital_probe.piano_roll_visible, str(vital_probe))
     print("ALL PASS")
     return 0
 
@@ -62,6 +73,25 @@ def _write_frame(path: Path) -> None:
     for x in range(760, 1240, 80):
         draw.rectangle((x, 80, x + 42, 640), outline="black", width=4)
     image.save(path)
+
+
+def _write_piano_roll_frame(path: Path) -> None:
+    import cv2
+    import numpy as np
+
+    image = np.full((600, 800, 3), 30, np.uint8)
+    ox, oy, width, height = 200, 150, 400, 200
+    row_h, ppb, top_midi = 8, 40, 72
+    for row in range(height // row_h + 1):
+        cv2.line(image, (ox, oy + row * row_h), (ox + width, oy + row * row_h), (60, 60, 60), 1)
+    for beat in range(width // ppb + 1):
+        cv2.line(image, (ox + beat * ppb, oy), (ox + beat * ppb, oy + height), (80, 80, 80), 1)
+    for pitch, start_beat, length_beats in [(60, 0, 2), (64, 2, 1), (67, 4, 2), (71, 6, 1)]:
+        note_row = top_midi - pitch
+        y1 = oy + int(note_row * row_h)
+        x1 = ox + int(start_beat * ppb)
+        cv2.rectangle(image, (x1, y1), (x1 + length_beats * ppb - 2, y1 + row_h - 1), (0, 200, 0), -1)
+    cv2.imwrite(str(path), image)
 
 
 def _font(size: int):

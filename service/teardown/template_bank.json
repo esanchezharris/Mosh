@@ -112,6 +112,38 @@
       "exclude": ["sample pack", "preset pack", "loop kit", "one shot", "project file", "reaction", "shorts", "stream"],
       "weight": 0.9,
       "notes": "Fallback query when the full chain is more important than the synth name."
+    },
+    {
+      "id": "trap-piano-roll-808",
+      "query": "FL Studio trap beat from scratch piano roll 808 melody tutorial",
+      "include": ["trap", "beat", "piano roll"],
+      "exclude": ["sample pack", "loop kit", "drum kit", "flp download", "project file", "remake", "reaction", "shorts", "stream"],
+      "weight": 1.2,
+      "notes": "Targets recoverable MIDI, 808, melody, and drum programming screens."
+    },
+    {
+      "id": "melodic-trap-chords-808",
+      "query": "melodic trap beat from scratch chords 808 piano roll tutorial",
+      "include": ["melodic", "trap", "808"],
+      "exclude": ["sample pack", "loop kit", "drum kit", "flp download", "project file", "remake", "reaction", "shorts", "stream"],
+      "weight": 1.16,
+      "notes": "Targets chord and 808 note data for melodic-trap reconstruction."
+    },
+    {
+      "id": "ableton-trap-midi-808",
+      "query": "Ableton trap beat from scratch MIDI 808 piano roll tutorial",
+      "include": ["ableton", "trap", "midi"],
+      "exclude": ["sample pack", "loop kit", "als download", "project file", "remake", "reaction", "shorts", "stream"],
+      "weight": 1.05,
+      "notes": "Targets Ableton MIDI clip and device-chain visibility for trap beats."
+    },
+    {
+      "id": "dark-trap-melody-drums",
+      "query": "dark trap beat tutorial from scratch melody drums 808 piano roll",
+      "include": ["dark", "trap", "beat"],
+      "exclude": ["sample pack", "loop kit", "drum kit", "flp download", "project file", "remake", "reaction", "shorts", "stream"],
+      "weight": 1.08,
+      "notes": "Targets complete dark-trap cookdowns with visible melody, drums, and 808 lanes."
     }
   ]
 }

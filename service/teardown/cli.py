@@ -21,7 +21,7 @@ from teardown.scout import (
     load_template_bank,
     rank_tutorials,
 )
-from teardown.youtube import YouTubeDataClient
+from teardown.youtube import YouTubeDataClient, YtDlpSearchClient
 
 
 _DEFAULT_CATALOG = Path("service/teardown/catalog.sqlite")
@@ -81,8 +81,12 @@ def cmd_discover(args: argparse.Namespace) -> int:
         templates = (selected,)
     api_key = args.api_key or _read_api_key_file(args.api_key_file)
     client = YouTubeDataClient(api_key=api_key)
+    backend = "youtube-data-api"
     if not client.available:
-        raise SystemExit("YOUTUBE_DATA_API_KEY or --api-key-file is required for discovery")
+        client = YtDlpSearchClient()
+        backend = "yt-dlp"
+    if not client.available:
+        raise SystemExit("YOUTUBE_DATA_API_KEY, --api-key-file, or yt-dlp is required for discovery")
     candidates: list[TutorialCandidate] = []
     verifier = FrameVerifier() if args.verify_frames else None
     for template in templates:
@@ -106,7 +110,7 @@ def cmd_discover(args: argparse.Namespace) -> int:
     for scored_candidate in scored:
         catalog.upsert(scored_candidate)
     rows = [item.as_record() for item in scored[: args.limit if args.limit else None]]
-    json.dump({"results": rows, "summary": catalog.summary()}, sys.stdout, indent=2, sort_keys=True)
+    json.dump({"backend": backend, "results": rows, "summary": catalog.summary()}, sys.stdout, indent=2, sort_keys=True)
     sys.stdout.write("\n")
     return 0
 

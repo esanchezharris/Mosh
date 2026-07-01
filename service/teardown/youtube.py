@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import urllib.parse
@@ -145,6 +146,102 @@ class YouTubeDataClient:
                 )
             )
         return enriched
+
+
+class YtDlpSearchClient:
+    def __init__(self, extractor: Callable[[str, int], Mapping[str, Any]] | None = None):
+        self.extractor = extractor
+
+    @property
+    def available(self) -> bool:
+        return self.extractor is not None or importlib.util.find_spec("yt_dlp") is not None
+
+    def _extract(self, target: str, max_results: int) -> Mapping[str, Any]:
+        if self.extractor is not None:
+            return self.extractor(target, max_results)
+        import yt_dlp
+
+        opts = {
+            "quiet": True,
+            "no_warnings": True,
+            "skip_download": True,
+            "noplaylist": True,
+            "ignoreerrors": True,
+        }
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            return ydl.extract_info(target, download=False) or {}
+
+    def discover(self, template: TutorialTemplate, *, max_results: int = 5) -> list[YouTubeSearchHit]:
+        if not self.available:
+            raise RuntimeError("yt-dlp is required for keyless discovery")
+        capped = max(1, min(int(max_results), 25))
+        payload = self._extract(f"ytsearch{capped}:{template.query}", capped)
+        entries = payload.get("entries") or []
+        hits = []
+        for entry in entries:
+            if not isinstance(entry, Mapping):
+                continue
+            hit = _hit_from_ytdlp_entry(entry)
+            if hit is not None:
+                hits.append(hit)
+            if len(hits) >= capped:
+                break
+        return hits
+
+
+def _hit_from_ytdlp_entry(entry: Mapping[str, Any]) -> YouTubeSearchHit | None:
+    raw_url = str(entry.get("webpage_url") or entry.get("url") or "")
+    video_id = str(entry.get("id") or _video_id_from_url(raw_url)).strip()
+    if len(video_id) != 11:
+        return None
+    url = raw_url if raw_url.startswith("http") else f"https://www.youtube.com/watch?v={video_id}"
+    return YouTubeSearchHit(
+        video_id=video_id,
+        title=str(entry.get("title") or ""),
+        description=str(entry.get("description") or ""),
+        channel=str(entry.get("channel") or entry.get("uploader") or ""),
+        url=url,
+        duration_s=_coerce_duration_s(entry.get("duration") or entry.get("duration_string")),
+        has_captions=bool(entry.get("subtitles") or entry.get("automatic_captions")),
+        license="unknown",
+        tags=tuple(str(tag).strip() for tag in entry.get("tags", []) if str(tag).strip()),
+    )
+
+
+def _video_id_from_url(value: str) -> str:
+    if not value:
+        return ""
+    if "://" not in value and "/" not in value and "?" not in value:
+        return value
+    parsed = urllib.parse.urlparse(value)
+    if parsed.netloc.endswith("youtu.be"):
+        return parsed.path.lstrip("/").split("/")[0]
+    if "youtube" in parsed.netloc:
+        query = urllib.parse.parse_qs(parsed.query)
+        if query.get("v"):
+            return query["v"][0]
+        parts = [part for part in parsed.path.split("/") if part]
+        if len(parts) >= 2 and parts[0] in {"shorts", "embed", "v"}:
+            return parts[1]
+    return ""
+
+
+def _coerce_duration_s(value: Any) -> int | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, (int, float)):
+        return int(value)
+    text = str(value).strip()
+    if text.startswith("PT"):
+        return _parse_iso8601_duration(text)
+    if ":" in text:
+        total = 0
+        for part in text.split(":"):
+            if not part.isdigit():
+                return None
+            total = total * 60 + int(part)
+        return total
+    return int(text) if text.isdigit() else None
 
 
 def _parse_iso8601_duration(value: str) -> int:

@@ -15,7 +15,7 @@ sys.path.insert(0, str(SERVICE))
 from teardown.catalog import TutorialCatalog
 from teardown.frame_verify import FrameVerifier
 from teardown.scout import ScoutPolicy, TutorialProbe, TutorialTemplate, rank_tutorials
-from teardown.youtube import YouTubeDataClient
+from teardown.youtube import YouTubeDataClient, YtDlpSearchClient
 
 
 def check(name: str, ok: bool, detail: str = "") -> None:
@@ -161,6 +161,27 @@ def main() -> int:
         rows = catalog.list(limit=3)
         check("catalog row order follows ranking", rows[0]["video_id"] == "ideal-serum", json.dumps(rows, sort_keys=True))
         check("catalog persisted all candidates", len(rows) == 3, str(len(rows)))
+
+        ytdlp = YtDlpSearchClient(extractor=lambda target, limit: {
+            "entries": [
+                {
+                    "id": "ytKeyless01",
+                    "title": "Dark trap beat from scratch FL Studio piano roll",
+                    "description": "808 melody chords piano roll",
+                    "uploader": "Beat Tutor",
+                    "webpage_url": "https://www.youtube.com/watch?v=ytKeyless01",
+                    "duration": 612,
+                    "tags": ["trap", "fl studio"],
+                },
+                {
+                    "id": "too-short",
+                    "title": "ignored",
+                },
+            ]
+        })
+        found = ytdlp.discover(TutorialTemplate(id="keyless", query="dark trap beat tutorial"), max_results=5)
+        check("yt-dlp keyless search returns valid video rows", len(found) == 1 and found[0].video_id == "ytKeyless01", str(found))
+        check("yt-dlp keyless search preserves duration/tags", found[0].duration_s == 612 and "trap" in found[0].tags, str(found[0]))
 
     print("ALL PASS")
     return 0

@@ -64,6 +64,7 @@ class FrameVerifier:
             frame_hits.append(text_hits)
             cv_hits.append(visual_hits)
             hits = _merge_hits(text_hits, visual_hits)
+            hits["piano_roll"] = bool(visual_hits.get("piano_roll"))
             entry: dict[str, Any] = {
                 "type": "frame",
                 "ref": str(frame),
@@ -84,6 +85,7 @@ class FrameVerifier:
 
         combined_text = _joined_text(metadata_text, " ".join(frame_texts), ())
         hits = _merge_hits(_text_hits(metadata_text), _text_hits(combined_text), *frame_hits, *cv_hits)
+        hits["piano_roll"] = any(bool(item.get("piano_roll")) for item in cv_hits)
         visible_plugins = []
         if hits["serum"]:
             visible_plugins.append("Serum")
@@ -110,7 +112,8 @@ class FrameVerifier:
         if not tesseract:
             return "", "tesseract missing"
         prepared = _prepare_ocr_image(frame)
-        cmd = [tesseract, str(prepared or frame), "stdout", "--psm", "6"]
+        image_path = (prepared or frame).resolve()
+        cmd = [tesseract, str(image_path), "stdout", "--psm", "6"]
         try:
             result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=self.timeout_s)
         except Exception as exc:
@@ -227,7 +230,7 @@ def _cv_hits(frame: Path) -> Mapping[str, bool]:
     center_panel = metrics["center_edge_density"] >= 0.070
     return {
         "daw": dense_ui and (side_panel or bottom_panel),
-        "piano_roll": dense_ui and metrics["horizontal_bias"] >= 0.020,
+        "piano_roll": _recoverable_piano_roll(frame),
         "chain": dense_ui and (side_panel or bottom_panel),
         "serum": False,
         "vital": False,
@@ -236,6 +239,34 @@ def _cv_hits(frame: Path) -> Mapping[str, bool]:
         "synth_gui": dense_ui and center_panel,
         "dense_ui": dense_ui,
     }
+
+
+def _recoverable_piano_roll(frame: Path) -> bool:
+    try:
+        import cv2
+
+        from teardown.midi_from_screen import detect_notes
+        from teardown.midi_from_screen.axes import detect_axes
+        from teardown.render.from_screen import _is_fine_grid
+        from teardown.vision.pianoroll import piano_roll_present
+    except Exception:
+        return False
+    img = cv2.imread(str(frame))
+    if img is None or getattr(img, "ndim", 0) != 3:
+        return False
+    pr = piano_roll_present(img)
+    bbox = pr.get("bbox")
+    if not (pr.get("present") and bbox):
+        return False
+    x, y, w, h = [int(v) for v in bbox]
+    crop = img[max(0, y): max(0, y + h), max(0, x): max(0, x + w)]
+    if crop.size == 0 or not _is_fine_grid(crop):
+        return False
+    axes = detect_axes(crop)
+    try:
+        return len(detect_notes(crop, axes)) > 0
+    except Exception:
+        return False
 
 
 def _image_metrics(frame: Path) -> dict[str, float]:
