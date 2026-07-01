@@ -100,6 +100,29 @@ with tempfile.TemporaryDirectory() as td:
     check("synth_patch left intact (only midi added)",
           el.synth_patch.status.value == "params_visible" and el.synth_patch.params, str(el.synth_patch))
 
+with tempfile.TemporaryDirectory() as td:
+    rec = _recipe_with_synth()
+    rec.elements.append(R.Element(element_id="midi_0", role="other", label="piano-roll part",
+                                  midi=R.Midi(status="unknown")))
+    rec.unresolved.append(R.Unresolved(issue="piano roll seen but not extracted", element_id="midi_0",
+                                       suggested_action="run §5 MIDI-from-screen on the located region"))
+    res = midi_from_frames(rec, [Frame(3.0, roll_frame)], out_dir=td)
+    ids = [e.element_id for e in rec.elements]
+    check("synth attach clears stale midi_0 placeholder", res.get("attached") and ids == ["synth_0"],
+          str(ids))
+    check("synth attach clears stale piano-roll unresolved",
+          not any(u.element_id == "midi_0" for u in rec.unresolved), str(rec.unresolved))
+
+with tempfile.TemporaryDirectory() as td:
+    rec = R.Recipe(elements=[R.Element(element_id="midi_0", role="other", label="piano-roll part",
+                                       midi=R.Midi(status="unknown"))],
+                   unresolved=[R.Unresolved(issue="piano roll seen but not extracted", element_id="midi_0",
+                                            suggested_action="run §5 MIDI-from-screen on the located region")])
+    res = midi_from_frames(rec, [Frame(3.0, roll_frame)], out_dir=td)
+    check("midi_0 target stays but clears stale unresolved",
+          res.get("attached") and [e.element_id for e in rec.elements] == ["midi_0"]
+          and not rec.unresolved, str((res, rec.unresolved)))
+
 def _arrangement_frame():
     """A DAW ARRANGEMENT view: a COARSE track grid (few tall rows) + coloured clip blocks. It has
     grid lines + saturated rectangles like a roll, so it must be rejected by the fine-grid gate —

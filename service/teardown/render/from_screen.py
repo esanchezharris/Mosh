@@ -177,6 +177,28 @@ def _lead_synth_element(rec):
     return None
 
 
+def _clear_screen_midi_placeholder(rec, target) -> None:
+    rec.unresolved = [
+        u for u in rec.unresolved
+        if not (getattr(u, "element_id", None) == "midi_0"
+                and str(getattr(u, "issue", "")).startswith("piano roll seen but not extracted"))
+    ]
+    if getattr(target, "element_id", "") == "midi_0":
+        return
+
+    def keep(el) -> bool:
+        if getattr(el, "element_id", "") != "midi_0":
+            return True
+        if getattr(el, "label", "") != "piano-roll part":
+            return True
+        midi_status = getattr(getattr(el, "midi", None), "status", None)
+        if getattr(midi_status, "value", midi_status) != "unknown":
+            return True
+        return bool(el.audio_ref or el.onsets or el.sample_match.matched_path or el.synth_patch.plugin.name)
+
+    rec.elements = [el for el in rec.elements if keep(el)]
+
+
 def _is_fine_grid(crop, min_lanes: int = 12) -> bool:
     """True if `crop` is a FINE semitone grid (a piano roll: many closely-spaced horizontal lane
     lines) rather than a COARSE track grid (a DAW arrangement view, whose few tall rows + coloured
@@ -275,4 +297,5 @@ def midi_from_frames(rec, frames, *, out_dir, bpm: Optional[float] = None,
     except Exception:
         return {"attached": False}
     target.midi = Midi(status="partial", midi_ref=mid, note_count=len(notes), confidence=0.4)
+    _clear_screen_midi_placeholder(rec, target)
     return {"attached": True, "notes": len(notes), "midi_ref": mid, "element_id": target.element_id}
