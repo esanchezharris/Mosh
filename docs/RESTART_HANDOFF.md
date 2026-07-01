@@ -206,7 +206,7 @@ tracked `service/recipes/library/` set.
 
 **The two bugs are structurally fixed:** the 808 is a sustained, root-following bass (it *cannot* be a hi-hat grid — rhythm and pitch-function are stored separately); beats differ because they're recombined from *different real grooves*, not jittered inside one template.
 
-**Also recovered (2026-06-30, PR #194, in review):** a real, tested §3 tutorial-scouting pipeline (`scout.py`/`catalog.py`/`youtube.py`/`cli.py`/`jobs.py`) was found sitting **uncommitted** in a stale checkout — ranks/queues real YouTube beat tutorials by predicted recipe yield. It came with **real scouted data already in hand: 31 scored candidates, 13 queued teardown jobs** — copied to `ClaudeMosh-moshfx/service/teardown/{catalog.sqlite,teardown_jobs.jsonl}` (gitignored by design, not committed — see #194's description). This is the direct input for step 2 below; **use it before re-scouting from scratch.**
+**Also recovered and merged (2026-06-30, #194):** a real, tested §3 tutorial-scouting pipeline (`scout.py`/`catalog.py`/`youtube.py`/`cli.py`/`jobs.py`) was found sitting **uncommitted** in a stale checkout — ranks/queues real YouTube beat tutorials by predicted recipe yield. It came with **real scouted data already in hand: 31 scored candidates, 13 queued teardown jobs** — copied to `ClaudeMosh-moshfx/service/teardown/{catalog.sqlite,teardown_jobs.jsonl}` (gitignored by design, not committed — see #194's description). This is the direct input for step 2 below; **use it before re-scouting from scratch.**
 
 ---
 
@@ -264,7 +264,7 @@ MOSH_BIN=$MOSH_BIN MOSH_PALETTE_MANIFEST=<manifest.json> $VENV scripts/verify-ha
 $VENV service/teardown/cli.py rescore-catalog --catalog service/teardown/catalog.sqlite --out-catalog .cache/mosh-teardown/midi-ingredients/<run>/catalog-midi-first.sqlite
 $VENV service/teardown/cli.py export-jobs --catalog .cache/mosh-teardown/midi-ingredients/<run>/catalog-midi-first.sqlite --out .cache/mosh-teardown/midi-ingredients/<run>/teardown_jobs-midi-ingredients.jsonl --checkpoint-root service/teardown/checkpoints --statuses ideal,usable --require-evidence midi-ingredient:yes
 
-# --- the scout pipeline (once #194 lands — see §5) ---
+# --- the scout pipeline ---
 $VENV service/teardown/cli.py queue --catalog service/teardown/catalog.sqlite --limit 10
 ```
 
@@ -300,7 +300,10 @@ cd service/teardown && .venv/bin/python recipe.py --emit-schema > recipe.schema.
 ## 5. Branch / PR / checkout situation (reconciled 2026-06-30)
 
 - **`main` is the single source of truth.** #190 (Phase 0: recipe body + compiler + generator + validity-only verifier) is **merged**. #186 (the messy `claude/production-reward` line it was ported from, 88+ commits, conflicting) is **closed as superseded**. #158 (the original teardown/recipe-contract WIP) is **closed as superseded**.
-- **#194 — `claude/tutorial-scout-recovery` — OPEN, needs review.** Recovers the §3 scout pipeline (see §1). It **will conflict with `service/teardown/__init__.py`** (both #190 and this PR add one) — trivial reconcile: combine the scout exports with the recipe-pipeline docstring. Land this next.
+- **#194 — tutorial scout recovery — MERGED.** The §3 scout pipeline is present in this
+  branch (`service/teardown/{scout,catalog,jobs,youtube}.py` plus tests), and the r7
+  MIDI-first rescore/export artifacts are already covered by
+  `scripts/verify-hardware/restart_status_check.py`.
 - **#176 — Rung-2 GRPO/audio-reward host — OPEN, FROZEN.** Real, tested RL engineering that predates the restart decision. Commented to flag the freeze; **do not merge or run as the active path** without an explicit owner go-ahead. Not closed — may be revisited once a real generator + real preference data exist.
 - **Stale checkouts:** `/Users/emiliosanchez-harris/Documents/ClaudeMosh` (the main checkout) was 44 commits behind `main` and dirty across 3+ unrelated efforts (a phone-controller-latency-gate feature, stale lyrics-doc drafts, the scout pipeline, a DAW reality-pack). Everything was safety-net committed to `origin/codex/phone-controller-latency-gate` before triage — nothing was lost — but **do not keep working in that checkout.** Use a fresh worktree off updated `main`, or `ClaudeMosh-moshfx` (already on `main`, just `git pull`).
   - The phone-controller-latency-gate work is real but orthogonal to this restart — it's preserved on its own branch; needs a separate owner decision on whether to continue it.
