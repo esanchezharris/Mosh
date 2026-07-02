@@ -93,9 +93,29 @@ block (kept out of production `DEFAULT_RULES` until the A/B is conclusive across
   name as a fallback resolver in `rename_section`/`move_section`, or teach harder in the prompt.
 - `rename_section` correctly errors on unknown ids (no silent-ok — verified).
 
-## Owner ears queue (unchanged, waiting)
+## Reward-validity verdict — the panel's #1 experiment, now DONE (owner blind-rated 2026-07-01)
 
-1. Rate the validity pack `~/mosh-validity` (45 min) — the panel's #1 experiment, still unrated.
+24 ratings + 12/18 A/B picks (6 pairs skipped — every skipped clip was a seed-0 candidate
+carrying a loop-start render artifact the owner called "that awful wacky noise"; odd indexes =
+seed 0 = all rated 1). Results:
+
+- Headline (all 24): ρ(verifier, rating) = **0.191**; A/B agreement **2/12** (verifier's pick
+  LOSES 10 of 12). Script verdict: **🔴 NOT valid — do not optimize the score.**
+- The honest cut — artifact-free clips only (n=12): ρ = **0.247** and per-tier mean ratings are
+  FLAT: flat 4.33 · flat_clone 4.33 · plain 4.67 · optimized 4.67. A 0.38→0.85 verifier-score
+  range buys +0.34 rating points on a 7-point scale. **On clean audio the owner cannot hear the
+  verifier's tiers.** The full-pack tier-ordering agreement was mostly the artifact halving.
+- Owner caveats recorded: skipped artifact pairs; low confidence on sound-alike pairs (visible
+  as a B-position bias in the picks — 9/12 B).
+- Standing decision DATA-CONFIRMED: the recipeVerifier stays a validity/competence gate;
+  GEPA-against-it stays banned; no learned or rules score is an optimization target for taste.
+- **New bug for the generation lane:** the render harness stamps a loop-start artifact on seed-0
+  candidates (every `*_0_*` clip). Whatever Gate C pack shares that render path needs checking —
+  added to the r8 spec.
+
+## Owner ears queue
+
+1. ~~Rate the validity pack~~ ✅ DONE — verdict above; raw CSVs archived.
 2. Blind 10-ask corrective session (pre-registered gate for the scaffolded brain).
 3. Corrective before/after renders in `~/mosh-bench-artifacts/` (2 pairs so far).
 4. Gate C r8 re-run when the generation thread lands the corpus fix (`docs/plans/r8-corpus-spec.md`).

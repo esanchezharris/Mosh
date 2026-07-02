@@ -43,3 +43,13 @@ is equally inert. Fixing this is the cheapest credible shot at moving would_keep
 - Any learned reward / RL — frozen (PR #176).
 - Slot-fill generation tooling — being built on the training-program side; will consume the r8
   library as its structure source when both land.
+
+## Addendum (2026-07-01, from the rated validity pack)
+
+6. **Loop-start render artifact on seed-0 candidates.** The owner skipped every A/B containing a
+   seed-0 clip ("awful wacky noise at the beginning of each loop"); all `*_0_*` renders carry it,
+   seed-1 renders don't. Find and fix in the shared render path (`buildValidityPack`-style
+   render harness) and CHECK whether any Gate C pack arm shared it before trusting those scores.
+7. **Validity verdict context for r8:** on artifact-free clips the owner's ratings are flat
+   across verifier tiers (4.33 vs 4.67 of 7) — corpus/musical-substance improvements, not
+   verifier-score improvements, are what can move would_keep.
