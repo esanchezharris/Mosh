@@ -117,6 +117,13 @@ def _root_pitch(notes) -> int:
     return min((int(n.pitch) for n in notes), default=36)
 
 
+def _center_pitch(notes) -> int:
+    """A melodic (non-bass) sampler's root: the phrase's median pitch, so chords/melodies
+    repitch modestly in both directions instead of stretching far from one extreme."""
+    ps = sorted(int(n.pitch) for n in notes)
+    return ps[len(ps) // 2] if ps else 60
+
+
 def compile_recipe(recipe) -> CompileResult:
     """Compile a §0 Recipe (recipe.Recipe) into a full, inline MoshOps program + unresolved.
 
@@ -185,6 +192,16 @@ def compile_recipe(recipe) -> CompileResult:
             elif melodic_bass and not matched:
                 defer(_u("808/bass has notes but no matched sample — falls back to 4OSC",
                          el.element_id, "match an 808 one-shot in the palette for a real sub"))
+            elif matched:
+                # melodic non-bass (pad/lead/pluck): the SAME repitched-sampler path as the
+                # 808, rooted at the phrase's center so chords repitch modestly both ways —
+                # real sound instead of the stock 4OSC sine patch (2026-07 fix).
+                add({"command": "assign_sample",
+                     "args": {"trackId": tref, "note": _center_pitch(notes), "mode": "melodic",
+                              "file": el.sample_match.matched_path}})
+            elif role in ("pad", "lead", "pluck"):
+                defer(_u("melodic element has no bound sample — plays the stock synth patch",
+                         el.element_id, "bind a palette 'melodic' one-shot"))
             add({"command": "add_midi_clip",
                  "args": {"trackId": tref, "start": 0, "length": _clip_len_s(notes, tempo),
                           "name": el.label or role, "notes": _notes_payload(notes)},
