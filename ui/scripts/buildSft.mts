@@ -45,7 +45,7 @@ const tuplesPath = flag("tuples");
 const outDir = flag("out") || join(resolve(process.cwd(), ".."), "service", "training", "gepa", "generated", "sft");
 const [trR, vaR, teR] = (flag("split", "80/10/10") as string).split("/").map(Number);
 const seed = Number(flag("seed", "1"));
-const huhFrac = Number(flag("huh", "0.05"));
+const huhFrac = Number(flag("huh", "0.015")); // was 0.05 — the 5% defer slice over-generalized into deferring on plain imperatives (2026-07 audit)
 const maxPerFile = Number(flag("max", "1000"));
 const sampleN = Number(flag("sample", "0")) || Infinity;  // cap files processed
 const limitN = Number(flag("limit", "0")) || Infinity;    // cap rendered examples
@@ -157,9 +157,15 @@ mkdirSync(outDir, { recursive: true });
 // persist the back-translation cache (shape → natural phrasings) so re-runs reuse it
 if (bt) try { writeFileSync(btCachePath, JSON.stringify(Object.fromEntries(bt.cacheEntries()), null, 0)); } catch { /* non-fatal */ }
 const chatLine = (e: RenderedExample) => JSON.stringify({ messages: e.messages });
+const metaLine = (e: RenderedExample) => JSON.stringify({ id: e.id, sourceId: e.sourceId });
 writeRows(join(outDir, "train.jsonl"), split.train, chatLine);
 writeRows(join(outDir, "valid.jsonl"), split.valid, chatLine);
 writeRows(join(outDir, "test.jsonl"), split.test, chatLine);
+// Sidecar metadata (line-aligned with the chat files) so downstream curation can
+// key rows by source — e.g. leakage checks against a frozen eval set (2026-07 audit).
+writeRows(join(outDir, "train.meta.jsonl"), split.train, metaLine);
+writeRows(join(outDir, "valid.meta.jsonl"), split.valid, metaLine);
+writeRows(join(outDir, "test.meta.jsonl"), split.test, metaLine);
 writeRows(join(outDir, "test.eval.jsonl"), evalRaws, (r) => JSON.stringify({ id: r.id, utterance: r.utterance, startCommands: r.startCommands, goldCommandNames: r.goldCommandNames }));
 
 const datasetVersion = `sft-${createHash("sha256").update(`${corpora.join("|")}:${seed}:${trR}/${vaR}/${teR}:${sampleN}:${limitN}:${maxNotes ?? "all"}:${used.length}`).digest("hex").slice(0, 12)}`;

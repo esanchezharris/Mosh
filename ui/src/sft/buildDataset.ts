@@ -35,12 +35,37 @@ export type RawExample = {
 
 export type SliceOptions = { maxStart?: number; max?: number; maxNotes?: number };
 
+// Utterances must be FAITHFUL to the gold args. The v2 corpus paired relative
+// phrasings ("turn it up a little") with the project's ABSOLUTE volume (mostly
+// db:0) — an unlearnable mapping that zeroed the whole mixer category on eval
+// (2026-07 training audit). Absolute gold ⇒ absolute utterance; relative
+// phrasings come from relativeMixerExamples() below, whose gold really is
+// current ± delta.
 const MIXER: Record<string, (name: string, args: Record<string, unknown>) => string> = {
-  set_track_volume: (n, a) => `turn the "${n}" track ${Number(a.db) >= 0 ? "up" : "down"} a little`,
-  set_track_pan: (n, a) => `pan the "${n}" track to the ${Number(a.pan) >= 0 ? "right" : "left"}`,
+  set_track_volume: (n, a) => {
+    const db = Number(a.db);
+    return db === 0 ? `set the "${n}" track back to 0 dB` : `set the "${n}" track volume to ${db} dB`;
+  },
+  set_track_pan: (n, a) => {
+    const p = Number(a.pan);
+    return p === 0 ? `center the "${n}" track` : `pan the "${n}" track ${Math.round(Math.abs(p) * 100)}% ${p >= 0 ? "right" : "left"}`;
+  },
   set_track_mute: (n) => `mute the "${n}" track`,
   set_track_solo: (n) => `solo the "${n}" track`,
 };
+
+// Relative-move vocabulary with a FIXED, learnable convention: touch/hair = 2 dB,
+// bit/little = 3 dB, explicit "by N dB" = N. Deterministic rotation, no RNG.
+const RELATIVE_MOVES: Array<{ phrase: (n: string) => string; delta: number }> = [
+  { phrase: (n) => `turn the "${n}" track up a touch`, delta: 2 },
+  { phrase: (n) => `turn the "${n}" track up a bit`, delta: 3 },
+  { phrase: (n) => `give the "${n}" track a little more level`, delta: 3 },
+  { phrase: (n) => `boost the "${n}" track by 6 dB`, delta: 6 },
+  { phrase: (n) => `bring the "${n}" track down a touch`, delta: -2 },
+  { phrase: (n) => `pull the "${n}" track down a bit`, delta: -3 },
+  { phrase: (n) => `back the "${n}" track off a little`, delta: -3 },
+  { phrase: (n) => `bring the "${n}" track down by 4 dB`, delta: -4 },
+];
 
 /**
  * Cut an importer program into gradeable SFT tasks, emitting the FULL target
@@ -56,6 +81,7 @@ export function sliceProgramFull(program: ImportProgram, sourceId: string, opts:
   const out: RawExample[] = [];
 
   const trackName = new Map<string, string>();
+  const relativeSeen = new Set<string>();
   for (const c of cmds) if (c.command === "create_track" && c.bind) trackName.set(c.bind, String(c.args.name ?? "track"));
   const nameOf = (arg: unknown) => trackName.get(typeof arg === "string" ? arg.replace(/^\$/, "") : "") ?? "track";
 
@@ -77,7 +103,20 @@ export function sliceProgramFull(program: ImportProgram, sourceId: string, opts:
     if (c.command === "set_tempo") push(`set the tempo to ${c.args.bpm}`, i, [c]);
     else if (c.command === "set_key") push(`set the key to ${c.args.tonic} ${c.args.mode}`, i, [c]);
     else if (c.command === "set_time_signature") push(`change to ${c.args.numerator}/${c.args.denominator} time`, i, [c]);
-    else if (MIXER[c.command]) push(MIXER[c.command](nameOf(c.args.trackId), c.args), i, [c]);
+    else if (MIXER[c.command]) {
+      push(MIXER[c.command](nameOf(c.args.trackId), c.args), i, [c]);
+      // TRUE relative task: the setup includes this absolute set (current level is
+      // known = c.args.db), the gold is current + delta per the fixed convention.
+      if (c.command === "set_track_volume" && !relativeSeen.has(String(c.args.trackId))) {
+        relativeSeen.add(String(c.args.trackId));
+        const mv = RELATIVE_MOVES[out.length % RELATIVE_MOVES.length];
+        const cur = Number(c.args.db);
+        if (Number.isFinite(cur))
+          push(mv.phrase(nameOf(c.args.trackId)), i + 1, [
+            { command: "set_track_volume", args: { trackId: c.args.trackId, db: cur + mv.delta } },
+          ]);
+      }
+    }
     else if (c.command === "add_midi_clip") {
       const name = nameOf(c.args.trackId);
       push(`add a MIDI clip to the "${name}" track`, i, [c]);

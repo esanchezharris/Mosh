@@ -1,0 +1,164 @@
+{
+  "recipe_id": "owner_keepmesafe_horror_bass_beno_808",
+  "schema_version": "2.0",
+  "source": {
+    "platform": "owner-catalog",
+    "video_id": "owner_keepmesafe_horror_bass_beno_808",
+    "url": "",
+    "title": "65_keepmesafe",
+    "channel": "",
+    "duration_s": 0.0,
+    "license": "owner",
+    "retrieved_at": null,
+    "content_hash": "f063cfc870c80249d23eebbf877a420b04561dca973c4a035b7896090e51ef92"
+  },
+  "meta": {
+    "daw": {
+      "value": "flstudio",
+      "confidence": 0.95,
+      "evidence": [
+        "importer format"
+      ]
+    },
+    "tempo_bpm": {
+      "value": 150,
+      "confidence": 0.95,
+      "evidence": [
+        "project file tempo"
+      ]
+    },
+    "key": {
+      "value": "C minor",
+      "confidence": 0.75,
+      "evidence": [
+        "pitch-class inference (Krumhansl)"
+      ]
+    },
+    "time_signature": {
+      "value": "4/4",
+      "confidence": 0.6,
+      "evidence": []
+    }
+  },
+  "arrangement": {
+    "sections": [
+      {
+        "name": "loop",
+        "start_s": 0.0,
+        "end_s": 6.4,
+        "confidence": 0.5
+      }
+    ]
+  },
+  "elements": [
+    {
+      "element_id": "owner_keepmesafe_horror_bass_beno_808",
+      "role": "808",
+      "label": "keepmesafe · horror bass beno (808)",
+      "audio_ref": null,
+      "midi": {
+        "status": "extracted",
+        "midi_ref": null,
+        "notes": [
+          {
+            "pitch": 60,
+            "start_beats": 0.0,
+            "duration_beats": 3.0,
+            "velocity": 127
+          },
+          {
+            "pitch": 63,
+            "start_beats": 3.0,
+            "duration_beats": 2.0,
+            "velocity": 127
+          },
+          {
+            "pitch": 67,
+            "start_beats": 5.0,
+            "duration_beats": 3.0,
+            "velocity": 127
+          },
+          {
+            "pitch": 60,
+            "start_beats": 8.0,
+            "duration_beats": 3.0,
+            "velocity": 127
+          },
+          {
+            "pitch": 63,
+            "start_beats": 11.0,
+            "duration_beats": 2.0,
+            "velocity": 127
+          },
+          {
+            "pitch": 67,
+            "start_beats": 13.0,
+            "duration_beats": 3.0,
+            "velocity": 127
+          }
+        ],
+        "note_count": 6,
+        "confidence": 1.0
+      },
+      "sample_match": {
+        "status": "none",
+        "matched_path": null,
+        "distance": 0.0,
+        "alternates": []
+      },
+      "synth_patch": {
+        "status": "unknown",
+        "plugin": {
+          "name": null,
+          "available_locally": false
+        },
+        "params": {},
+        "match": null,
+        "substitute": null
+      },
+      "onsets": [],
+      "motif": {
+        "bars": 4.0,
+        "onset_grid": "half",
+        "density": 1.5,
+        "syncopation": 0.0,
+        "contour": [
+          1,
+          1,
+          -1,
+          1,
+          1
+        ],
+        "register_band": "mid",
+        "harmonic_function": "root-candidate"
+      },
+      "bass": {
+        "sustain_ratio": 1.0,
+        "glides": [],
+        "kick_alignment": 0.0,
+        "root_follows": false,
+        "root_element_id": null
+      },
+      "evidence": [],
+      "confidence": 0.9
+    }
+  ],
+  "unresolved": [],
+  "reconstruction_class": "deterministic",
+  "yield": {
+    "predicted": {
+      "drums": 0.0,
+      "midi": 1.0,
+      "synth": 0.0,
+      "arrangement": 0.5,
+      "overall": 0.7
+    },
+    "actual": {
+      "drums": 0.0,
+      "midi": 0.0,
+      "synth": 0.0,
+      "arrangement": 0.0,
+      "overall": 0.0
+    }
+  }
+}

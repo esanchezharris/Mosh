@@ -1,0 +1,172 @@
+{
+  "recipe_id": "owner_wedontmissthedead_cust_whattheytoldmeaboutyoumademethinkofyouevery_hat",
+  "schema_version": "2.0",
+  "source": {
+    "platform": "owner-catalog",
+    "video_id": "owner_wedontmissthedead_cust_whattheytoldmeaboutyoumademethinkofyouevery_hat",
+    "url": "",
+    "title": "38_wedontmissthedead",
+    "channel": "",
+    "duration_s": 0.0,
+    "license": "owner",
+    "retrieved_at": null,
+    "content_hash": "c3b98e516f801ed0b57e596191e8c04a9c2262347dcaca7210c375f52408b1e5"
+  },
+  "meta": {
+    "daw": {
+      "value": "flstudio",
+      "confidence": 0.95,
+      "evidence": [
+        "importer format"
+      ]
+    },
+    "tempo_bpm": {
+      "value": 152,
+      "confidence": 0.95,
+      "evidence": [
+        "project file tempo"
+      ]
+    },
+    "key": {
+      "value": "C minor",
+      "confidence": 0.553,
+      "evidence": [
+        "pitch-class inference (Krumhansl)"
+      ]
+    },
+    "time_signature": {
+      "value": "4/4",
+      "confidence": 0.6,
+      "evidence": []
+    }
+  },
+  "arrangement": {
+    "sections": [
+      {
+        "name": "loop",
+        "start_s": 0.0,
+        "end_s": 3.1578947368421053,
+        "confidence": 0.5
+      }
+    ]
+  },
+  "elements": [
+    {
+      "element_id": "owner_wedontmissthedead_cust_whattheytoldmeaboutyoumademethinkofyouevery_hat",
+      "role": "hat",
+      "label": "wedontmissthedead · cust whattheytoldmeaboutyoumademethinkofyoueverytimeiwanttolove beno (hat)",
+      "audio_ref": null,
+      "midi": {
+        "status": "extracted",
+        "midi_ref": null,
+        "notes": [
+          {
+            "pitch": 48,
+            "start_beats": 0.0,
+            "duration_beats": 2.0,
+            "velocity": 100
+          },
+          {
+            "pitch": 43,
+            "start_beats": 0.0,
+            "duration_beats": 2.75,
+            "velocity": 100
+          },
+          {
+            "pitch": 46,
+            "start_beats": 1.25,
+            "duration_beats": 2.75,
+            "velocity": 100
+          },
+          {
+            "pitch": 53,
+            "start_beats": 2.0,
+            "duration_beats": 3.0,
+            "velocity": 100
+          },
+          {
+            "pitch": 39,
+            "start_beats": 3.0,
+            "duration_beats": 3.0,
+            "velocity": 100
+          },
+          {
+            "pitch": 41,
+            "start_beats": 4.0,
+            "duration_beats": 3.0,
+            "velocity": 100
+          },
+          {
+            "pitch": 46,
+            "start_beats": 5.0,
+            "duration_beats": 3.0,
+            "velocity": 100
+          },
+          {
+            "pitch": 36,
+            "start_beats": 6.0,
+            "duration_beats": 2.0,
+            "velocity": 100
+          }
+        ],
+        "note_count": 8,
+        "confidence": 1.0
+      },
+      "sample_match": {
+        "status": "none",
+        "matched_path": null,
+        "distance": 0.0,
+        "alternates": []
+      },
+      "synth_patch": {
+        "status": "unknown",
+        "plugin": {
+          "name": null,
+          "available_locally": false
+        },
+        "params": {},
+        "match": null,
+        "substitute": null
+      },
+      "onsets": [],
+      "motif": {
+        "bars": 2.0,
+        "onset_grid": "4th",
+        "density": 4.0,
+        "syncopation": 0.125,
+        "contour": [
+          1,
+          -1,
+          1,
+          -1,
+          1,
+          1,
+          -1
+        ],
+        "register_band": "perc",
+        "harmonic_function": ""
+      },
+      "bass": null,
+      "evidence": [],
+      "confidence": 0.9
+    }
+  ],
+  "unresolved": [],
+  "reconstruction_class": "deterministic",
+  "yield": {
+    "predicted": {
+      "drums": 0.0,
+      "midi": 1.0,
+      "synth": 0.0,
+      "arrangement": 0.5,
+      "overall": 0.7
+    },
+    "actual": {
+      "drums": 0.0,
+      "midi": 0.0,
+      "synth": 0.0,
+      "arrangement": 0.0,
+      "overall": 0.0
+    }
+  }
+}

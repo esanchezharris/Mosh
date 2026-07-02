@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.1",
   "type": "module",
-  "description": "Mosh arrangement UI — React/Vite in a JUCE 8 WebView. Swappable frontend (03).",
+  "description": "Mosh arrangement UI \u2014 React/Vite in a JUCE 8 WebView. Swappable frontend (03).",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
@@ -23,7 +23,9 @@
     "gepa": "tsx scripts/gepa.mts",
     "build-sft": "tsx scripts/buildSft.mts",
     "eval-sft": "tsx scripts/evalSft.mts",
-    "drive-local": "tsx scripts/driveLocal.mts"
+    "drive-local": "tsx scripts/driveLocal.mts",
+    "turn-factory": "tsx scripts/turnFactory.mts",
+    "moshi-bench": "tsx scripts/moshiBench.mts"
   },
   "dependencies": {
     "qrcode": "^1.5.4",

@@ -37,8 +37,13 @@ library = G.load_library(LIB)
 check("library has the seed recipes", len(library) >= 5, str(len(library)))
 check("every library recipe carries inline notes",
       all(any(e.midi.notes for e in r.elements) for r in library))
-check("every library recipe has an 808 with the bass sub-model",
-      all(any(e.role.value == "808" and e.bass for e in r.elements) for r in library))
+# Ingredient recipes (owner-catalog/pack, single-element) are first-class library
+# members — the safety property is "an 808 element is never bass-model-less", NOT
+# "every recipe contains an 808" (2026-07 r8 lane).
+check("every 808 element in the library carries the bass sub-model",
+      all(e.bass for r in library for e in r.elements if e.role.value in ("808", "bass")))
+check("full-beat seed recipes still present (multi-element with an 808)",
+      any(len(r.elements) > 3 and any(e.role.value == "808" for e in r.elements) for r in library))
 
 # ── transposition ─────────────────────────────────────────────────────────────
 check("_interval picks the nearest shift (F→G = +2)", G._interval("F minor", "G minor") == 2)

@@ -201,6 +201,7 @@
       "enum": [
         "youtube",
         "creativeCommon",
+        "owner",
         "unknown"
       ],
       "title": "License",

@@ -45,6 +45,7 @@ ASSET_SUBDIRS = ("stems", "midi", "shots")
 class License(str, Enum):
     youtube = "youtube"
     creative_common = "creativeCommon"
+    owner = "owner"  # the producer's own works — rights-clean by definition (2026-07 r8 lane)
     unknown = "unknown"
 
 

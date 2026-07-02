@@ -1,0 +1,165 @@
+{
+  "recipe_id": "owner_wedontmissthedead_cust_partyloverr_beno_lead",
+  "schema_version": "2.0",
+  "source": {
+    "platform": "owner-catalog",
+    "video_id": "owner_wedontmissthedead_cust_partyloverr_beno_lead",
+    "url": "",
+    "title": "38_wedontmissthedead",
+    "channel": "",
+    "duration_s": 0.0,
+    "license": "owner",
+    "retrieved_at": null,
+    "content_hash": "c3b98e516f801ed0b57e596191e8c04a9c2262347dcaca7210c375f52408b1e5"
+  },
+  "meta": {
+    "daw": {
+      "value": "flstudio",
+      "confidence": 0.95,
+      "evidence": [
+        "importer format"
+      ]
+    },
+    "tempo_bpm": {
+      "value": 152,
+      "confidence": 0.95,
+      "evidence": [
+        "project file tempo"
+      ]
+    },
+    "key": {
+      "value": "C minor",
+      "confidence": 0.553,
+      "evidence": [
+        "pitch-class inference (Krumhansl)"
+      ]
+    },
+    "time_signature": {
+      "value": "4/4",
+      "confidence": 0.6,
+      "evidence": []
+    }
+  },
+  "arrangement": {
+    "sections": [
+      {
+        "name": "loop",
+        "start_s": 0.0,
+        "end_s": 3.1578947368421053,
+        "confidence": 0.5
+      }
+    ]
+  },
+  "elements": [
+    {
+      "element_id": "owner_wedontmissthedead_cust_partyloverr_beno_lead",
+      "role": "lead",
+      "label": "wedontmissthedead · cust partyloverr beno (lead)",
+      "audio_ref": null,
+      "midi": {
+        "status": "extracted",
+        "midi_ref": null,
+        "notes": [
+          {
+            "pitch": 53,
+            "start_beats": 0.0,
+            "duration_beats": 1.5,
+            "velocity": 100
+          },
+          {
+            "pitch": 54,
+            "start_beats": 1.5,
+            "duration_beats": 1.5,
+            "velocity": 100
+          },
+          {
+            "pitch": 48,
+            "start_beats": 3.0,
+            "duration_beats": 2.0,
+            "velocity": 100
+          },
+          {
+            "pitch": 47,
+            "start_beats": 4.5,
+            "duration_beats": 1.5,
+            "velocity": 100
+          },
+          {
+            "pitch": 47,
+            "start_beats": 6.0,
+            "duration_beats": 0.5,
+            "velocity": 100
+          },
+          {
+            "pitch": 47,
+            "start_beats": 6.5,
+            "duration_beats": 1.0,
+            "velocity": 100
+          },
+          {
+            "pitch": 47,
+            "start_beats": 7.5,
+            "duration_beats": 0.5,
+            "velocity": 100
+          }
+        ],
+        "note_count": 7,
+        "confidence": 1.0
+      },
+      "sample_match": {
+        "status": "none",
+        "matched_path": null,
+        "distance": 0.0,
+        "alternates": []
+      },
+      "synth_patch": {
+        "status": "unknown",
+        "plugin": {
+          "name": null,
+          "available_locally": false
+        },
+        "params": {},
+        "match": null,
+        "substitute": null
+      },
+      "onsets": [],
+      "motif": {
+        "bars": 2.0,
+        "onset_grid": "8th",
+        "density": 3.5,
+        "syncopation": 0.5714,
+        "contour": [
+          1,
+          -1,
+          -1,
+          0,
+          0,
+          0
+        ],
+        "register_band": "low",
+        "harmonic_function": ""
+      },
+      "bass": null,
+      "evidence": [],
+      "confidence": 0.9
+    }
+  ],
+  "unresolved": [],
+  "reconstruction_class": "deterministic",
+  "yield": {
+    "predicted": {
+      "drums": 0.0,
+      "midi": 1.0,
+      "synth": 0.0,
+      "arrangement": 0.5,
+      "overall": 0.7
+    },
+    "actual": {
+      "drums": 0.0,
+      "midi": 0.0,
+      "synth": 0.0,
+      "arrangement": 0.0,
+      "overall": 0.0
+    }
+  }
+}

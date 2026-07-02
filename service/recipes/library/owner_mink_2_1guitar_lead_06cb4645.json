@@ -1,0 +1,144 @@
+{
+  "recipe_id": "owner_mink_2_1guitar_lead",
+  "schema_version": "2.0",
+  "source": {
+    "platform": "owner-catalog",
+    "video_id": "owner_mink_2_1guitar_lead",
+    "url": "",
+    "title": "49_mink_2",
+    "channel": "",
+    "duration_s": 0.0,
+    "license": "owner",
+    "retrieved_at": null,
+    "content_hash": "06cb4645babcb05762b50bccbbce41e47e5f45cfb52c60d6bc6c14a0283ebae8"
+  },
+  "meta": {
+    "daw": {
+      "value": "flstudio",
+      "confidence": 0.95,
+      "evidence": [
+        "importer format"
+      ]
+    },
+    "tempo_bpm": {
+      "value": 155,
+      "confidence": 0.95,
+      "evidence": [
+        "project file tempo"
+      ]
+    },
+    "key": {
+      "value": "B minor",
+      "confidence": 0.75,
+      "evidence": [
+        "pitch-class inference (Krumhansl)"
+      ]
+    },
+    "time_signature": {
+      "value": "4/4",
+      "confidence": 0.6,
+      "evidence": []
+    }
+  },
+  "arrangement": {
+    "sections": [
+      {
+        "name": "loop",
+        "start_s": 0.0,
+        "end_s": 6.193548387096774,
+        "confidence": 0.5
+      }
+    ]
+  },
+  "elements": [
+    {
+      "element_id": "owner_mink_2_1guitar_lead",
+      "role": "lead",
+      "label": "mink_2 · 1guitar (lead)",
+      "audio_ref": null,
+      "midi": {
+        "status": "extracted",
+        "midi_ref": null,
+        "notes": [
+          {
+            "pitch": 62,
+            "start_beats": 0.0,
+            "duration_beats": 3.25,
+            "velocity": 127
+          },
+          {
+            "pitch": 64,
+            "start_beats": 3.0,
+            "duration_beats": 5.0,
+            "velocity": 127
+          },
+          {
+            "pitch": 67,
+            "start_beats": 8.0,
+            "duration_beats": 5.0,
+            "velocity": 127
+          },
+          {
+            "pitch": 66,
+            "start_beats": 11.0,
+            "duration_beats": 5.0,
+            "velocity": 127
+          }
+        ],
+        "note_count": 4,
+        "confidence": 1.0
+      },
+      "sample_match": {
+        "status": "none",
+        "matched_path": null,
+        "distance": 0.0,
+        "alternates": []
+      },
+      "synth_patch": {
+        "status": "unknown",
+        "plugin": {
+          "name": null,
+          "available_locally": false
+        },
+        "params": {},
+        "match": null,
+        "substitute": null
+      },
+      "onsets": [],
+      "motif": {
+        "bars": 4.0,
+        "onset_grid": "whole",
+        "density": 1.0,
+        "syncopation": 0.0,
+        "contour": [
+          1,
+          1,
+          -1
+        ],
+        "register_band": "mid",
+        "harmonic_function": ""
+      },
+      "bass": null,
+      "evidence": [],
+      "confidence": 0.9
+    }
+  ],
+  "unresolved": [],
+  "reconstruction_class": "deterministic",
+  "yield": {
+    "predicted": {
+      "drums": 0.0,
+      "midi": 1.0,
+      "synth": 0.0,
+      "arrangement": 0.5,
+      "overall": 0.7
+    },
+    "actual": {
+      "drums": 0.0,
+      "midi": 0.0,
+      "synth": 0.0,
+      "arrangement": 0.0,
+      "overall": 0.0
+    }
+  }
+}
