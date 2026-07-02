@@ -1,0 +1,544 @@
+{
+  "recipe_id": "pack_bay_area_essentials_2_94_free_throw_flatstheflounder_lead",
+  "schema_version": "2.0",
+  "source": {
+    "platform": "midi-pack",
+    "video_id": "pack_bay_area_essentials_2_94_free_throw_flatstheflounder_lead",
+    "url": "",
+    "title": "!BAY AREA ESSENTIALS 2/94_free_throw @flatstheflounder.mid",
+    "channel": "",
+    "duration_s": 0.0,
+    "license": "licensedPack",
+    "retrieved_at": null,
+    "content_hash": "32dd6f92e613037d8f3c8d1f5b999882bf33402143f439a98f9ec2c10690a301"
+  },
+  "meta": {
+    "daw": {
+      "value": null,
+      "confidence": 0.0,
+      "evidence": []
+    },
+    "tempo_bpm": {
+      "value": 94,
+      "confidence": 0.9,
+      "evidence": [
+        "SMF meta"
+      ]
+    },
+    "key": {
+      "value": "E minor",
+      "confidence": 0.75,
+      "evidence": [
+        "pitch-class inference (Krumhansl)"
+      ]
+    },
+    "time_signature": {
+      "value": "4/4",
+      "confidence": 0.6,
+      "evidence": []
+    }
+  },
+  "arrangement": {
+    "sections": [
+      {
+        "name": "loop",
+        "start_s": 0.0,
+        "end_s": 20.425531914893618,
+        "confidence": 0.5
+      }
+    ]
+  },
+  "elements": [
+    {
+      "element_id": "pack_bay_area_essentials_2_94_free_throw_flatstheflounder_lead",
+      "role": "lead",
+      "label": "!BAY AREA ESSENTIALS 2 · 94_free_throw @flatstheflounder (lead)",
+      "audio_ref": null,
+      "midi": {
+        "status": "extracted",
+        "midi_ref": null,
+        "notes": [
+          {
+            "pitch": 45,
+            "start_beats": 0.0,
+            "duration_beats": 6.0,
+            "velocity": 87
+          },
+          {
+            "pitch": 76,
+            "start_beats": 0.0,
+            "duration_beats": 0.5,
+            "velocity": 99
+          },
+          {
+            "pitch": 48,
+            "start_beats": 0.0625,
+            "duration_beats": 5.96875,
+            "velocity": 86
+          },
+          {
+            "pitch": 52,
+            "start_beats": 0.135417,
+            "duration_beats": 5.9375,
+            "velocity": 85
+          },
+          {
+            "pitch": 55,
+            "start_beats": 0.208333,
+            "duration_beats": 5.895833,
+            "velocity": 84
+          },
+          {
+            "pitch": 59,
+            "start_beats": 0.28125,
+            "duration_beats": 5.854167,
+            "velocity": 83
+          },
+          {
+            "pitch": 71,
+            "start_beats": 1.0,
+            "duration_beats": 0.5,
+            "velocity": 99
+          },
+          {
+            "pitch": 69,
+            "start_beats": 2.0,
+            "duration_beats": 0.5,
+            "velocity": 99
+          },
+          {
+            "pitch": 71,
+            "start_beats": 3.0,
+            "duration_beats": 0.5,
+            "velocity": 99
+          },
+          {
+            "pitch": 45,
+            "start_beats": 6.0,
+            "duration_beats": 2.0,
+            "velocity": 87
+          },
+          {
+            "pitch": 79,
+            "start_beats": 6.0,
+            "duration_beats": 0.5,
+            "velocity": 99
+          },
+          {
+            "pitch": 48,
+            "start_beats": 6.0625,
+            "duration_beats": 1.96875,
+            "velocity": 86
+          },
+          {
+            "pitch": 52,
+            "start_beats": 6.135417,
+            "duration_beats": 1.9375,
+            "velocity": 85
+          },
+          {
+            "pitch": 55,
+            "start_beats": 6.208333,
+            "duration_beats": 1.895833,
+            "velocity": 84
+          },
+          {
+            "pitch": 67,
+            "start_beats": 6.28125,
+            "duration_beats": 1.854167,
+            "velocity": 83
+          },
+          {
+            "pitch": 78,
+            "start_beats": 7.0,
+            "duration_beats": 0.5,
+            "velocity": 99
+          },
+          {
+            "pitch": 40,
+            "start_beats": 8.0,
+            "duration_beats": 6.0,
+            "velocity": 87
+          },
+          {
+            "pitch": 76,
+            "start_beats": 8.0,
+            "duration_beats": 0.5,
+            "velocity": 99
+          },
+          {
+            "pitch": 43,
+            "start_beats": 8.0625,
+            "duration_beats": 5.96875,
+            "velocity": 86
+          },
+          {
+            "pitch": 47,
+            "start_beats": 8.135417,
+            "duration_beats": 5.9375,
+            "velocity": 85
+          },
+          {
+            "pitch": 50,
+            "start_beats": 8.208333,
+            "duration_beats": 5.895833,
+            "velocity": 84
+          },
+          {
+            "pitch": 54,
+            "start_beats": 8.28125,
+            "duration_beats": 5.854167,
+            "velocity": 83
+          },
+          {
+            "pitch": 57,
+            "start_beats": 8.354167,
+            "duration_beats": 5.854167,
+            "velocity": 83
+          },
+          {
+            "pitch": 71,
+            "start_beats": 9.0,
+            "duration_beats": 0.5,
+            "velocity": 99
+          },
+          {
+            "pitch": 69,
+            "start_beats": 10.0,
+            "duration_beats": 0.5,
+            "velocity": 99
+          },
+          {
+            "pitch": 71,
+            "start_beats": 11.0,
+            "duration_beats": 0.5,
+            "velocity": 99
+          },
+          {
+            "pitch": 40,
+            "start_beats": 14.0,
+            "duration_beats": 2.0,
+            "velocity": 87
+          },
+          {
+            "pitch": 79,
+            "start_beats": 14.0,
+            "duration_beats": 0.5,
+            "velocity": 99
+          },
+          {
+            "pitch": 43,
+            "start_beats": 14.0625,
+            "duration_beats": 1.9375,
+            "velocity": 86
+          },
+          {
+            "pitch": 47,
+            "start_beats": 14.135417,
+            "duration_beats": 1.864583,
+            "velocity": 85
+          },
+          {
+            "pitch": 50,
+            "start_beats": 14.208333,
+            "duration_beats": 1.791667,
+            "velocity": 84
+          },
+          {
+            "pitch": 54,
+            "start_beats": 14.28125,
+            "duration_beats": 1.71875,
+            "velocity": 83
+          },
+          {
+            "pitch": 78,
+            "start_beats": 15.0,
+            "duration_beats": 0.5,
+            "velocity": 99
+          },
+          {
+            "pitch": 45,
+            "start_beats": 16.0,
+            "duration_beats": 6.0,
+            "velocity": 87
+          },
+          {
+            "pitch": 76,
+            "start_beats": 16.0,
+            "duration_beats": 0.5,
+            "velocity": 99
+          },
+          {
+            "pitch": 48,
+            "start_beats": 16.0625,
+            "duration_beats": 5.96875,
+            "velocity": 86
+          },
+          {
+            "pitch": 52,
+            "start_beats": 16.135417,
+            "duration_beats": 5.9375,
+            "velocity": 85
+          },
+          {
+            "pitch": 55,
+            "start_beats": 16.208333,
+            "duration_beats": 5.895833,
+            "velocity": 84
+          },
+          {
+            "pitch": 59,
+            "start_beats": 16.28125,
+            "duration_beats": 5.854167,
+            "velocity": 83
+          },
+          {
+            "pitch": 71,
+            "start_beats": 17.0,
+            "duration_beats": 0.5,
+            "velocity": 99
+          },
+          {
+            "pitch": 69,
+            "start_beats": 18.0,
+            "duration_beats": 0.5,
+            "velocity": 99
+          },
+          {
+            "pitch": 71,
+            "start_beats": 19.0,
+            "duration_beats": 0.5,
+            "velocity": 99
+          },
+          {
+            "pitch": 45,
+            "start_beats": 22.0,
+            "duration_beats": 2.0,
+            "velocity": 87
+          },
+          {
+            "pitch": 79,
+            "start_beats": 22.0,
+            "duration_beats": 0.5,
+            "velocity": 99
+          },
+          {
+            "pitch": 48,
+            "start_beats": 22.0625,
+            "duration_beats": 1.96875,
+            "velocity": 86
+          },
+          {
+            "pitch": 52,
+            "start_beats": 22.135417,
+            "duration_beats": 1.9375,
+            "velocity": 85
+          },
+          {
+            "pitch": 55,
+            "start_beats": 22.208333,
+            "duration_beats": 1.895833,
+            "velocity": 84
+          },
+          {
+            "pitch": 67,
+            "start_beats": 22.28125,
+            "duration_beats": 1.854167,
+            "velocity": 83
+          },
+          {
+            "pitch": 78,
+            "start_beats": 23.0,
+            "duration_beats": 0.5,
+            "velocity": 99
+          },
+          {
+            "pitch": 40,
+            "start_beats": 24.0,
+            "duration_beats": 6.0,
+            "velocity": 87
+          },
+          {
+            "pitch": 76,
+            "start_beats": 24.0,
+            "duration_beats": 0.5,
+            "velocity": 99
+          },
+          {
+            "pitch": 43,
+            "start_beats": 24.0625,
+            "duration_beats": 5.96875,
+            "velocity": 86
+          },
+          {
+            "pitch": 47,
+            "start_beats": 24.135417,
+            "duration_beats": 5.9375,
+            "velocity": 85
+          },
+          {
+            "pitch": 50,
+            "start_beats": 24.208333,
+            "duration_beats": 5.895833,
+            "velocity": 84
+          },
+          {
+            "pitch": 54,
+            "start_beats": 24.28125,
+            "duration_beats": 5.854167,
+            "velocity": 83
+          },
+          {
+            "pitch": 57,
+            "start_beats": 24.354167,
+            "duration_beats": 5.854167,
+            "velocity": 83
+          },
+          {
+            "pitch": 71,
+            "start_beats": 25.0,
+            "duration_beats": 0.5,
+            "velocity": 99
+          },
+          {
+            "pitch": 69,
+            "start_beats": 26.0,
+            "duration_beats": 0.5,
+            "velocity": 99
+          },
+          {
+            "pitch": 71,
+            "start_beats": 27.0,
+            "duration_beats": 0.5,
+            "velocity": 99
+          },
+          {
+            "pitch": 40,
+            "start_beats": 30.0,
+            "duration_beats": 2.0,
+            "velocity": 87
+          },
+          {
+            "pitch": 79,
+            "start_beats": 30.0,
+            "duration_beats": 0.5,
+            "velocity": 99
+          },
+          {
+            "pitch": 43,
+            "start_beats": 30.0625,
+            "duration_beats": 1.9375,
+            "velocity": 86
+          },
+          {
+            "pitch": 47,
+            "start_beats": 30.135417,
+            "duration_beats": 1.864583,
+            "velocity": 85
+          },
+          {
+            "pitch": 50,
+            "start_beats": 30.208333,
+            "duration_beats": 1.791667,
+            "velocity": 84
+          },
+          {
+            "pitch": 54,
+            "start_beats": 30.28125,
+            "duration_beats": 1.71875,
+            "velocity": 83
+          },
+          {
+            "pitch": 78,
+            "start_beats": 31.0,
+            "duration_beats": 0.5,
+            "velocity": 99
+          }
+        ],
+        "note_count": 66,
+        "confidence": 1.0
+      },
+      "sample_match": {
+        "status": "none",
+        "matched_path": null,
+        "distance": 0.0,
+        "alternates": [],
+        "root_note": null
+      },
+      "synth_patch": {
+        "status": "unknown",
+        "plugin": {
+          "name": null,
+          "available_locally": false
+        },
+        "params": {},
+        "match": null,
+        "substitute": null
+      },
+      "onsets": [],
+      "motif": {
+        "bars": 8.0,
+        "onset_grid": "16th",
+        "density": 8.25,
+        "syncopation": 0.5152,
+        "contour": [
+          1,
+          -1,
+          1,
+          1,
+          1,
+          1,
+          -1,
+          1,
+          -1,
+          1,
+          -1,
+          1,
+          1,
+          1,
+          1,
+          -1,
+          1,
+          -1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          -1,
+          1,
+          -1,
+          1,
+          -1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "register_band": "low",
+        "harmonic_function": ""
+      },
+      "bass": null,
+      "evidence": [],
+      "confidence": 0.9
+    }
+  ],
+  "unresolved": [],
+  "reconstruction_class": "deterministic",
+  "yield": {
+    "predicted": {
+      "drums": 0.0,
+      "midi": 1.0,
+      "synth": 0.0,
+      "arrangement": 0.4,
+      "overall": 0.6
+    },
+    "actual": {
+      "drums": 0.0,
+      "midi": 0.0,
+      "synth": 0.0,
+      "arrangement": 0.0,
+      "overall": 0.0
+    }
+  }
+}

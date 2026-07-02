@@ -253,7 +253,8 @@ def _measure(out: Path) -> tuple[float, bool]:
 def execute_recipe(recipe, bin_path: Optional[str] = None, out_wav: Optional[str] = None,
                    asset_root: Optional[str] = None, session_dir: Optional[str] = None,
                    timeout_s: int = 300, write_back: bool = True,
-                   resolve_synth_patches: bool = True) -> ExecuteResult:
+                   resolve_synth_patches: bool = True,
+                   pre_export_commands: Optional[list] = None) -> ExecuteResult:
     binp = _bin(bin_path)
     cr = compile_recipe(recipe)
     cmds, midi_resolved_ids = inline_midi(list(cr.commands), recipe, asset_root)
@@ -280,7 +281,8 @@ def execute_recipe(recipe, bin_path: Optional[str] = None, out_wav: Optional[str
     residual = [u for u in cr.unresolved if u.get("element_id") not in handled] + synth_unres
     res.unresolved = residual
 
-    cmds = cmds + [{"command": "export_audio", "args": {"file": str(out)}}]
+    # mix-stage overrides (auto-balance volume deltas, stem-solo mutes) run last-before-export
+    cmds = cmds + list(pre_export_commands or []) + [{"command": "export_audio", "args": {"file": str(out)}}]
     res.commands = cmds
 
     script = work / "rollout.jsonl"

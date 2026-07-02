@@ -134,6 +134,61 @@ def element_bars(el) -> float:
 
 
 # ───────────────────────────── transposition ─────────────────────────────────
+_KRUM_MAJ = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88]
+_KRUM_MIN = [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17]
+_PC_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+
+
+def _element_key(el, fallback: str) -> str:
+    """The element's key measured from ITS OWN notes (duration-weighted Krumhansl over
+    pitch classes) — recipe-level source keys are inferred per PROJECT and unreliable
+    per element (2026-07 factory smoke: 5/6 candidates failed the chroma key gate because
+    transposition trusted the label). Falls back to the recipe key on thin/ambiguous
+    material."""
+    import math as _m
+    notes = el.midi.notes if el and el.midi.notes else []
+    if len(notes) < 6:
+        return fallback
+    hist = [0.0] * 12
+    for n in notes:
+        hist[int(n.pitch) % 12] += float(n.duration_beats)
+    if sum(hist) <= 0:
+        return fallback
+    mh = sum(hist) / 12
+
+    def corr(profile, rot):
+        p = profile[-rot:] + profile[:-rot]
+        mp = sum(p) / 12
+        num = sum((p[i] - mp) * (hist[i] - mh) for i in range(12))
+        den = _m.sqrt(sum((x - mp) ** 2 for x in p) * sum((x - mh) ** 2 for x in hist))
+        return num / den if den else 0.0
+
+    score, key = max([(corr(_KRUM_MIN, r), f"{_PC_NAMES[r]} minor") for r in range(12)]
+                     + [(corr(_KRUM_MAJ, r), f"{_PC_NAMES[r]} major") for r in range(12)],
+                     key=lambda t: t[0])
+    return key if score > 0.5 else fallback
+
+
+def conform_to_key(el, req_key: str):
+    """Fold out-of-scale pitches into the requested key's scale (nearest scale tone,
+    flatten-first). Transposition maps the TONIC but not the MODE — an F-major source
+    motif requested as F minor stays major and blows the chroma key gate (factory smoke:
+    rank ~6). Rhythm/octaves untouched; a semitone fold to the parallel scale is the
+    standard producer move. Mutates + returns."""
+    pc_root, mode = _key_pc_mode(req_key)
+    if pc_root is None or not (el and el.midi.notes):
+        return el
+    scale = {0, 2, 3, 5, 7, 8, 10} if mode == "minor" else {0, 2, 4, 5, 7, 9, 11}
+    for n in el.midi.notes:
+        rel = (int(n.pitch) - pc_root) % 12
+        if rel not in scale:
+            for d in (1, -1, 2, -2):  # prefer flattening
+                if (rel - d) % 12 in scale:
+                    n.pitch = max(0, min(127, int(n.pitch) - d))
+                    break
+    return el
+
+
 def _interval(src_key: str, req_key: str) -> int:
     """Nearest semitone shift mapping src tonic → req tonic, in [-6, 6]."""
     sp, _ = _key_pc_mode(src_key)
@@ -323,8 +378,9 @@ def recombine(library: list, request: dict, rng: Rng, palette: dict) -> tuple:
     chord_el = _element(chord_src, "pad")
     if chord_el:
         c = _clone_element(chord_el)
-        sem = _interval(chord_src.meta.key.value, req_key)
+        sem = _interval(_element_key(chord_el, chord_src.meta.key.value), req_key)
         transpose_element(c, sem)
+        conform_to_key(c, req_key)
         prov.sources["chords"] = chord_src.source.video_id
         prov.transpose["chords"] = sem
         elements.append(c)
@@ -334,8 +390,9 @@ def recombine(library: list, request: dict, rng: Rng, palette: dict) -> tuple:
     bass_el = _element(bass_src, "808")
     if bass_el:
         b = _clone_element(bass_el)
-        sem = _interval(bass_src.meta.key.value, req_key)
+        sem = _interval(_element_key(bass_el, bass_src.meta.key.value), req_key)
         transpose_element(b, sem)
+        conform_to_key(b, req_key)  # binding then snaps to (already-conformed) chord roots
         prov.sources["808"] = bass_src.source.video_id
         prov.transpose["808"] = sem
         chord_now = next((e for e in elements if e.role.value == "pad"), None)
@@ -349,9 +406,11 @@ def recombine(library: list, request: dict, rng: Rng, palette: dict) -> tuple:
     if want_lead:
         lead_src = _pick_recipe_with("lead", ranked, rng)
         if lead_src:
-            le = _clone_element(_element(lead_src, "lead"))
-            sem = _interval(lead_src.meta.key.value, req_key)
+            lead_el = _element(lead_src, "lead")
+            le = _clone_element(lead_el)
+            sem = _interval(_element_key(lead_el, lead_src.meta.key.value), req_key)
             transpose_element(le, sem)
+            conform_to_key(le, req_key)
             prov.sources["lead"] = lead_src.source.video_id
             prov.transpose["lead"] = sem
             elements.append(le)
@@ -403,9 +462,12 @@ def recombine(library: list, request: dict, rng: Rng, palette: dict) -> tuple:
 
 
 def generate(request: dict, library_dir: str = LIB_DIR, seed: int = 0,
-             palette: Optional[dict] = None) -> tuple:
-    """Top entry: request (genre/tempo/key/mood/lead) → (assembled Recipe, Provenance)."""
-    library = load_library(library_dir)
+             palette: Optional[dict] = None, library: Optional[list] = None) -> tuple:
+    """Top entry: request (genre/tempo/key/mood/lead) → (assembled Recipe, Provenance).
+    Pass a pre-loaded `library` for batch runs — hermetic to concurrent library writes
+    (a factory run died mid-batch when an ingester grew the library under it) and skips
+    re-reading hundreds of files per candidate."""
+    library = library if library is not None else load_library(library_dir)
     if not library:
         raise RuntimeError(f"empty recipe library at {library_dir} (run seed_authoring.py)")
     pal = palette if palette is not None else load_palette()
