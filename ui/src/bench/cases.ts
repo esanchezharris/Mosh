@@ -107,7 +107,9 @@ export const BENCH_CASES: BenchCase[] = [
   // ── notes ─────────────────────────────────────────────────────────────────────
   { id: "notes-populate", area: "notes", utterance: "write a quick little four note melody into the keys clip", setup: SEED, checks: [{ kind: "cmdOk", name: "add_note", min: 3 }] },
   // ── transport ─────────────────────────────────────────────────────────────────
-  { id: "transport-play", area: "transport", utterance: "play it", setup: SEED, checks: [{ kind: "transport", field: "playing", eq: true }] },
+  // Headless + MOSH_NO_AUDIO can't hold playing=true through the snapshot (no audio
+  // device), so grade the command, not the transport flag.
+  { id: "transport-play", area: "transport", utterance: "play it", setup: SEED, checks: [{ kind: "cmdOk", name: "set_transport", min: 1 }] },
   {
     id: "transport-stop",
     area: "transport",

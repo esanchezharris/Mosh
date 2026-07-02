@@ -21,7 +21,7 @@ export const WORKED_EXAMPLES = [
   '- "jump to bar 5" → seconds = (bar−1) × beatsPerBar × 60 ÷ tempo = 4×4×60÷120 = 8 → {"intent":"ACK_GOT_IT","commands":[{"command":"set_transport","args":{"position":8}}]}',
   '- "move the drum clip to bar 3" → start = 2×4×60÷120 = 4 → {"intent":"ACK_GOT_IT","commands":[{"command":"move_clip","args":{"clipId":"12","start":4}}]}',
   '- "tighten the drum clip to 2 seconds" → trim_clip needs BOTH start and length → {"intent":"ACK_GOT_IT","commands":[{"command":"trim_clip","args":{"clipId":"12","start":0,"length":2}}]}',
-  '- "rename the Intro section to Cold Open" → use the section\'s id (never its name) → {"intent":"ACK_GOT_IT","commands":[{"command":"rename_section","args":{"sectionId":"s1","name":"Cold Open"}}]}',
+  '- "rename the Intro section to Cold Open" → sections are listed as `<id> "<name>" beats a-b`; the FIRST token (often a long hex string) is the id — copy it exactly, NEVER pass the name → {"intent":"ACK_GOT_IT","commands":[{"command":"rename_section","args":{"sectionId":"s1","name":"Cold Open"}}]}',
   '- "bring the drums down a bit" → subtract ~3 dB from the CURRENT volumeDb shown in the session (0 → −3) → {"intent":"ACK_GOT_IT","commands":[{"command":"set_track_volume","args":{"trackId":"7","db":-3}}]}',
   '- "unsolo everything and set the drums to −6" → one command per soloed track plus the volume → {"intent":"ACK_GOT_IT","commands":[{"command":"set_track_solo","args":{"trackId":"7","solo":false}},{"command":"set_track_volume","args":{"trackId":"7","db":-6}}]}',
   '- "double the drums: another tone right after the first" → add it now, reposition next turn once its id is visible → {"intent":"ACK_GOT_IT","commands":[{"command":"add_test_tone_clip","args":{"trackId":"7","seconds":4}}]}',

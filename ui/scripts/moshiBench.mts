@@ -17,6 +17,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { buildSystemPrompt, DEFAULT_RULES, parseReply } from "../src/agent/brainCore";
+import { RULES_WITH_EXAMPLES } from "../src/agent/fewshot";
 import { validateCommand } from "../src/agent/commands";
 import { BENCH_CASES, type BenchCase, type Check, type Cmd } from "../src/bench/cases";
 import type { Snapshot } from "../src/types";
@@ -29,6 +30,10 @@ const TAG = argFlag("tag", cfg.model.replace(/[^a-zA-Z0-9.-]/g, "_"))!;
 const OUT_DIR = argFlag("out-dir", join(process.cwd(), "..", "docs", "bench"))!;
 const RENDER = !process.argv.includes("--no-render");
 const CASE_FILTER = (argFlag("cases", "all") || "all").split(",");
+// --rules examples → append the worked-example bank (the +30pp-lever A/B arm).
+const RULES = argFlag("rules") === "examples" ? RULES_WITH_EXAMPLES : DEFAULT_RULES;
+// --repair → allow ONE error-driven repair turn (observable signals only).
+const REPAIR = process.argv.includes("--repair");
 const ART_DIR = join(homedir(), "mosh-bench-artifacts", TAG);
 mkdirSync(OUT_DIR, { recursive: true });
 
@@ -138,7 +143,7 @@ const DESTRUCTIVE = /^(remove|delete|clear)_/;
 async function runCase(c: BenchCase, usage: BrainUsage) {
   const session = `bench-${TAG}-${c.id}`.slice(0, 60);
   const { snap: before } = snapshotAt(BIN, c.setup, session);
-  const system = buildSystemPrompt(DEFAULT_RULES, before);
+  const system = buildSystemPrompt(RULES, before);
   let content = "", ms = 0, brainError: string | undefined;
   try {
     ({ content, ms } = await callBrain(cfg, [
@@ -156,10 +161,12 @@ async function runCase(c: BenchCase, usage: BrainUsage) {
 
   let after = before;
   let cmdResults: Array<{ command: string; ok: boolean; error?: string }> = [];
+  let repaired = false;
+  let executedCmds = allowed.map((x) => ({ command: x.command, args: x.args ?? {} }));
   if (allowed.length > 0) {
     const bracket: Cmd[] = [
       { command: "batch_begin", args: { name: `bench: ${c.id}`, turn_id: `bench-${c.id}`, utterance: c.utterance, source: "brain_chat" } },
-      ...allowed.map((x) => ({ command: x.command, args: x.args ?? {} })),
+      ...executedCmds,
       { command: "batch_end", args: {} },
     ];
     const out = snapshotAt(BIN, [...c.setup, ...bracket], session);
@@ -170,6 +177,46 @@ async function runCase(c: BenchCase, usage: BrainUsage) {
       ok: slice[i] ? (slice[i] as any).ok !== false : false,
       error: slice[i] && typeof (slice[i] as any).error === "string" ? ((slice[i] as any).error as string) : undefined,
     }));
+
+    // --repair: ONE observable-signal repair turn — the model sees its own command
+    // errors + the fresh REAL snapshot (never the gold checks) and gets one shot to
+    // fix. The measured pattern (validated retries) that took beat-building 0/9→9/9.
+    if (REPAIR && cmdResults.some((r) => !r.ok)) {
+      const errs = cmdResults.filter((r) => !r.ok).map((r) => `${r.command}: ${r.error ?? "failed"}`).join("; ");
+      try {
+        const { content: fixContent } = await callBrain(cfg, [
+          { role: "system", content: system },
+          { role: "user", content: c.utterance },
+          { role: "assistant", content },
+          { role: "user", content: `Some of those commands failed: ${errs}. Reply with ONLY the corrected commands (same JSON contract).` },
+        ], usage);
+        const fixReply = parseReply(fixContent);
+        const fixCmds = (fixReply.commands ?? []).filter((x) => !validateCommand(x.command, x.args ?? {}));
+        if (fixCmds.length > 0) {
+          repaired = true;
+          const keep = executedCmds.filter((_, i) => cmdResults[i]?.ok);
+          const fixes = fixCmds.map((x) => ({ command: x.command, args: x.args ?? {} }));
+          const bracket2: Cmd[] = [
+            { command: "batch_begin", args: { name: `bench-fix: ${c.id}`, turn_id: `bench-${c.id}-fix`, utterance: c.utterance, source: "brain_chat" } },
+            ...keep,
+            ...fixes,
+            { command: "batch_end", args: {} },
+          ];
+          const out2 = snapshotAt(BIN, [...c.setup, ...bracket2], `${session}-fix`);
+          after = out2.snap;
+          const slice2 = out2.results.slice(c.setup.length + 1, c.setup.length + 1 + keep.length + fixes.length);
+          const all2 = [...keep, ...fixes];
+          cmdResults = all2.map((x, i) => ({
+            command: x.command,
+            ok: slice2[i] ? (slice2[i] as any).ok !== false : false,
+            error: slice2[i] && typeof (slice2[i] as any).error === "string" ? ((slice2[i] as any).error as string) : undefined,
+          }));
+          executedCmds = all2;
+        }
+      } catch {
+        /* repair call failed — keep first-shot results */
+      }
+    }
   }
 
   const checks = c.checks.map((k) => grade(k, before, after, cmdResults));
@@ -196,7 +243,8 @@ async function runCase(c: BenchCase, usage: BrainUsage) {
     area: c.area,
     utterance: c.utterance,
     pass,
-    commands: allowed.map((x) => x.command),
+    repaired,
+    commands: executedCmds.map((x) => x.command),
     invalidCount,
     appliedClean,
     deferred: allowed.length === 0,
