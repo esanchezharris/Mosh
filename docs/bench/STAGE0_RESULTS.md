@@ -186,3 +186,45 @@ validation-errors on `type:"midi"` — the gap is prompt-side.
 0.875/0.714/0.218/0.558 ranking; scrape note extraction byte-exact (12/12 sampled); tempos
 verified against the owner's own folder labels (55/56); the validity-pack math exactly; Gate B
 ×3; the +lever result (now +31.4pp, bitwise stable).
+
+---
+
+## Owner-DNA audition round 1 → 808 register fix (2026-07-02)
+
+**Owner blind ratings (v1 set, `~/mosh-beats/owner-dna/v1/RATINGS-2026-07-02.csv`):** 3/2/2/4/3/3,
+**mean 2.83/5** — exactly the old Gate-C `would_keep` bar — with ONE unanimous defect: **"808 too
+high" on all six.** (Beat 04 "fire" at ★4; 06's "chill" mood confirmed; 04's "emotional" label
+questioned; 05 "messy".)
+
+**Measured root cause (3-agent evidence pass):** 808 medians MIDI 54.5–65 vs the 24–38 sub window —
+**0/50 notes in-window**; dominant low peaks 97–220 Hz (should be 32–73 Hz); the melodic sampler
+(root 36) repitched bass one-shots +24–29 st. Upstream: `flp_cli.py` never reads the FL channel
+sampler root (C5 = raw 60 convention), so the whole owner scrape's 808/bass elements import ~2
+octaves high in absolute pitch (element medians center 60.75, 2.6% in-window, vs hand-authored
+seeds at 29, 80%) — and no downstream stage ever chose an absolute register.
+
+**Fix (PR: 808 register normalization):** `normalize_808_register` in `service/recipes/generate.py` —
+whole-octave fold of the 808/bass phrase so its median lands in MIDI 24–38, applied in `recombine`
+after chord binding and before palette binding (pitch classes + contour preserved; nearest-root
+sample pick now searches the sub register; `reconstruct` untouched — Gate B(1) stays exact). Plus
+`sub_gate` in `scripts/verify-hardware/render_audition.py`: dominant 20–300 Hz peak in [32,73] Hz
+AND E(20–60)/E(20–250) ≥ 0.50 AND low-centroid ≤ 90 Hz (Welch 65536/Hann/50%), calibrated so all
+six v1 renders FAIL.
+
+**Re-render (same requests/seeds, full key+clip+sub gate):**
+
+| beat | v1 subRatio | v1 lowCentroid | v2 subRatio | v2 lowCentroid | v2 gate |
+|---|---|---|---|---|---|
+| 01 | 0.079 | 144.5 Hz | 0.859 | 54.4 Hz | PASS (peak 41.7 Hz) |
+| 02 | 0.421 | 79.8 Hz | 0.729 | 57.1 Hz | PASS (34.3 Hz) |
+| 03 | 0.147 | 154.0 Hz | 0.586 | 59.8 Hz | flagged: peak 25.6 Hz — BELOW the 32 Hz floor (too deep now) |
+| 04 | 0.093 | 120.7 Hz | 0.883 | 63.3 Hz | PASS (45.1 Hz) |
+| 05 | 0.041 | 144.1 Hz | 0.758 | 84.9 Hz | PASS (39.7 Hz) |
+| 06 | 0.090 | 179.7 Hz | 0.828 | 50.6 Hz | flagged: peak 26.2 Hz — deep |
+
+Engine-session ground truth: every v2 beat has exactly ONE melodic track in the sub window (the
+808, medians 25.5–34, sampler roots 27/33) — v1 had zero. A/B listening room at
+`~/mosh-beats/index.html` (v1-with-ratings vs v2, served 127.0.0.1:8188); owner re-rating measures
+the delta vs the 2.83 baseline. Backlog seeded in `docs/plans/r8-corpus-spec.md` items 8–12
+(FL channel-root at import, per-element key verify, mood tags, density/"messy", octave-drop
+sections).

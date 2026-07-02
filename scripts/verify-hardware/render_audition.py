@@ -31,6 +31,50 @@ BEATS = [
 ]
 
 
+def sub_gate(wav: str) -> tuple[bool, dict]:
+    """808-register gate (2026-07 audition: the owner rated ALL SIX beats "808 too high" —
+    medians MIDI 54.5–65 instead of the 24–38 sub window; dominant low peaks 97–220 Hz).
+    PASS requires ALL THREE, calibrated so the whole known-bad v1 set FAILS:
+      1. dominant 20–300 Hz spectral peak in [32, 73] Hz (an 808 fundamental, C1–D2);
+      2. E(20–60) / E(20–250) ≥ 0.50 — sub-dominated low end, brightness-independent;
+      3. 20–300 Hz spectral centroid ≤ 90 Hz (backstop: a lone kick thump can't mask
+         a still-high bass line).
+    Fixed measurement recipe so thresholds transfer: mono mixdown, Welch PSD,
+    65536-pt Hann, 50% overlap. Returns (ok, metrics)."""
+    import numpy as np
+    import soundfile as sf
+    x, sr = sf.read(wav)
+    if getattr(x, "ndim", 1) > 1:
+        x = x.mean(axis=1)
+    n = 65536
+    while n > 2048 and n > len(x):
+        n //= 2
+    win = np.hanning(n)
+    psd = np.zeros(n // 2 + 1)
+    count = 0
+    for start in range(0, len(x) - n + 1, n // 2):
+        psd += np.abs(np.fft.rfft(x[start:start + n] * win)) ** 2
+        count += 1
+    if count == 0:
+        seg = np.zeros(n)
+        seg[: len(x)] = x
+        psd, count = np.abs(np.fft.rfft(seg * win)) ** 2, 1
+    psd /= count
+    freqs = np.fft.rfftfreq(n, 1 / sr)
+
+    def band(lo, hi):
+        m = (freqs >= lo) & (freqs < hi)
+        return float(psd[m].sum())
+
+    ratio = band(20, 60) / (band(20, 250) + 1e-20)
+    low = (freqs >= 20) & (freqs <= 300)
+    peak_hz = float(freqs[low][int(np.argmax(psd[low]))])
+    centroid = float((freqs[low] * psd[low]).sum() / (psd[low].sum() + 1e-20))
+    ok = (32.0 <= peak_hz <= 73.0) and ratio >= 0.50 and centroid <= 90.0
+    return ok, {"peakHz": round(peak_hz, 1), "subRatio": round(ratio, 3),
+                "lowCentroid": round(centroid, 1)}
+
+
 def main() -> int:
     from recipes import generate as G
     from teardown.render.execute import execute_recipe
@@ -84,7 +128,7 @@ def main() -> int:
     for i, (req, seed) in enumerate(BEATS):
         name = f"{i+1:02d}_{req['mood']}_{int(req['tempo'])}_{req['key'].replace(' ', '').replace('#','s')}.wav"
         wav = os.path.join(out_dir, name)
-        best = None  # (rank, clip, seed, prov, res)
+        best = None  # (rank, sub_bad, clip, seed, prov, res, sub_m)
         for attempt in range(4):
             try_seed = seed + attempt * 13
             rec, prov = G.generate(req, seed=try_seed, palette=palette)
@@ -94,18 +138,22 @@ def main() -> int:
             if not (res.nonsilent and res.error is None):
                 continue
             rank, clip = render_gate(wav, req["key"])
-            if best is None or (rank, clip) < (best[0], best[1]):
-                best = (rank, clip, try_seed, prov, res)
-            if rank <= 2 and clip < 0.005:
+            sub_ok, sub_m = sub_gate(wav)
+            key3 = (rank, 0 if sub_ok else 1, clip)
+            if best is None or key3 < (best[0], best[1], best[2]):
+                best = (rank, key3[1], clip, try_seed, prov, res, sub_m)
+            if rank <= 2 and clip < 0.005 and sub_ok:
                 break
-            print(f"  gate: {name} seed={try_seed} keyRank={rank} clip={clip:.1%} — retrying")
+            print(f"  gate: {name} seed={try_seed} keyRank={rank} clip={clip:.1%} "
+                  f"sub={'ok' if sub_ok else sub_m} — retrying")
         if best is None:
             print(f"  BAD {name} (no render survived)")
             continue
-        rank, clip, used_seed, prov, res = best
-        if (rank > 2 or clip >= 0.005):
+        rank, sub_bad, clip, used_seed, prov, res, sub_m = best
+        if rank > 2 or clip >= 0.005 or sub_bad:
             # keep the best attempt but say so loudly — never silently ship a failed gate
-            print(f"  ⚠ {name} ships BELOW the render gate (keyRank={rank}, clip={clip:.1%})")
+            print(f"  ⚠ {name} ships BELOW the render gate (keyRank={rank}, clip={clip:.1%}, "
+                  f"sub={sub_m})")
         if used_seed != seed:
             rec, prov = G.generate(req, seed=used_seed, palette=palette)
             res = execute_recipe(rec, bin_path=binp, out_wav=wav,
@@ -114,9 +162,10 @@ def main() -> int:
         status = "OK "
         n_ok += 1
         src = " + ".join(f"{k}:{v}" for k, v in prov.sources.items())
-        print(f"  {status} {name}  rms={res.audio_rms:.4f}  [{src}]")
+        print(f"  {status} {name}  rms={res.audio_rms:.4f}  sub={sub_m}  [{src}]")
         lines.append(f"- **{name}** — {req['mood']} {int(req['tempo'])}bpm {req['key']}  \n"
-                     f"  sources: {prov.sources}  transpose: {prov.transpose}")
+                     f"  sources: {prov.sources}  transpose: {prov.transpose}  \n"
+                     f"  gate: keyRank={rank} clip={clip:.2%} sub={'PASS' if not sub_bad else 'FAIL'} {sub_m}")
     with open(os.path.join(out_dir, "README.md"), "w") as f:
         f.write("\n".join(lines) + "\n")
     print(f"\n{n_ok}/{len(BEATS)} rendered → {out_dir}")
