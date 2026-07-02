@@ -1,0 +1,166 @@
+{
+  "recipe_id": "owner_dontlie_oh_for_chickens_beno_lead",
+  "schema_version": "2.0",
+  "source": {
+    "platform": "owner-catalog",
+    "video_id": "owner_dontlie_oh_for_chickens_beno_lead",
+    "url": "",
+    "title": "45_dontlie",
+    "channel": "",
+    "duration_s": 0.0,
+    "license": "owner",
+    "retrieved_at": null,
+    "content_hash": "f8921ce58acee767dbe1da4801abe2126d3c0f2743be919cb0ead8253ea9c0c6"
+  },
+  "meta": {
+    "daw": {
+      "value": "flstudio",
+      "confidence": 0.95,
+      "evidence": [
+        "importer format"
+      ]
+    },
+    "tempo_bpm": {
+      "value": 159,
+      "confidence": 0.95,
+      "evidence": [
+        "project file tempo"
+      ]
+    },
+    "key": {
+      "value": "F# minor",
+      "confidence": 0.603,
+      "evidence": [
+        "pitch-class inference (Krumhansl)"
+      ]
+    },
+    "time_signature": {
+      "value": "4/4",
+      "confidence": 0.6,
+      "evidence": []
+    }
+  },
+  "arrangement": {
+    "sections": [
+      {
+        "name": "loop",
+        "start_s": 0.0,
+        "end_s": 3.018867924528302,
+        "confidence": 0.5
+      }
+    ]
+  },
+  "elements": [
+    {
+      "element_id": "owner_dontlie_oh_for_chickens_beno_lead",
+      "role": "lead",
+      "label": "dontlie · oh for chickens beno (lead)",
+      "audio_ref": null,
+      "midi": {
+        "status": "extracted",
+        "midi_ref": null,
+        "notes": [
+          {
+            "pitch": 60,
+            "start_beats": 0.5,
+            "duration_beats": 0.25,
+            "velocity": 100
+          },
+          {
+            "pitch": 60,
+            "start_beats": 1.5,
+            "duration_beats": 0.25,
+            "velocity": 100
+          },
+          {
+            "pitch": 60,
+            "start_beats": 4.5,
+            "duration_beats": 0.25,
+            "velocity": 100
+          },
+          {
+            "pitch": 60,
+            "start_beats": 5.5,
+            "duration_beats": 0.25,
+            "velocity": 100
+          },
+          {
+            "pitch": 60,
+            "start_beats": 6.0,
+            "duration_beats": 0.25,
+            "velocity": 100
+          },
+          {
+            "pitch": 60,
+            "start_beats": 7.0,
+            "duration_beats": 0.25,
+            "velocity": 100
+          },
+          {
+            "pitch": 60,
+            "start_beats": 7.5,
+            "duration_beats": 0.25,
+            "velocity": 100
+          }
+        ],
+        "note_count": 7,
+        "confidence": 1.0
+      },
+      "sample_match": {
+        "status": "none",
+        "matched_path": null,
+        "distance": 0.0,
+        "alternates": [],
+        "root_note": null
+      },
+      "synth_patch": {
+        "status": "unknown",
+        "plugin": {
+          "name": null,
+          "available_locally": false
+        },
+        "params": {},
+        "match": null,
+        "substitute": null
+      },
+      "onsets": [],
+      "motif": {
+        "bars": 2.0,
+        "onset_grid": "8th",
+        "density": 3.5,
+        "syncopation": 0.7143,
+        "contour": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "register_band": "mid",
+        "harmonic_function": ""
+      },
+      "bass": null,
+      "evidence": [],
+      "confidence": 0.9
+    }
+  ],
+  "unresolved": [],
+  "reconstruction_class": "deterministic",
+  "yield": {
+    "predicted": {
+      "drums": 0.0,
+      "midi": 1.0,
+      "synth": 0.0,
+      "arrangement": 0.5,
+      "overall": 0.7
+    },
+    "actual": {
+      "drums": 0.0,
+      "midi": 0.0,
+      "synth": 0.0,
+      "arrangement": 0.0,
+      "overall": 0.0
+    }
+  }
+}

@@ -479,6 +479,20 @@
           "default": null,
           "title": "Matched Path"
         },
+        "root_note": {
+          "anyOf": [
+            {
+              "maximum": 127,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Root Note"
+        },
         "status": {
           "$ref": "#/$defs/SampleStatus",
           "default": "none"

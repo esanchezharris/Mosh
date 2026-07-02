@@ -57,6 +57,10 @@ expected_commands = [
     {"command": "create_track", "args": {"name": "Lead", "type": "audio"}, "capture": {"T1": "trackId"}},
     {"command": "create_track", "args": {"name": "808", "type": "drum"}, "capture": {"T2": "trackId"}},
     {"command": "add_midi_clip", "args": {"trackId": "${T2}", "start": 0, "length": 8.0}, "capture": {"C2": "clipId"}},
+    # mix stage: static per-track headroom trim (2026-07 clipping audit)
+    {"command": "set_track_volume", "args": {"trackId": "${T0}", "db": -4.5}},
+    {"command": "set_track_volume", "args": {"trackId": "${T1}", "db": -4.5}},
+    {"command": "set_track_volume", "args": {"trackId": "${T2}", "db": -4.5}},
 ]
 check("golden command list matches exactly", res.commands == expected_commands,
       f"got {len(res.commands)} cmds")

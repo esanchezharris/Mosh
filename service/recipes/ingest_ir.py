@@ -47,10 +47,17 @@ _NAME_ROLES = [
 
 
 def role_for(track_name: str, notes: list[dict]) -> R.Role:
+    # TOKEN match, never substring — 'hat' inside 'that'/'hate' shipped 15 melodies as
+    # hi-hats (2026-07 audit). Tokens split on non-alphanumerics; compound keys collapse.
     name = track_name.lower()
+    tokens = set(re.split(r"[^a-z0-9#]+", name))
+    tokens.discard("")
+    joined = name.replace(" ", "").replace("-", "").replace("_", "")
     for keys, role in _NAME_ROLES:
-        if any(k in name for k in keys):
-            return role
+        for k in keys:
+            flat = k.replace("_", "").replace("-", "")
+            if k in tokens or (len(flat) > 4 and flat in joined and flat not in ("melodic",)):
+                return role
     pitches = [int(n["pitch"]) for n in notes]
     if not pitches:
         return R.Role.other
@@ -164,13 +171,27 @@ def recipes_from_ir(ir_path: Path, min_notes: int, max_elements: int) -> list[R.
     else:
         key_evidence = ["pitch-class inference (Krumhansl)"] if key_val else []
 
+    # Rank tracks so scarce roles survive the per-project cap: 808/bass first, then
+    # drums, then harmonic/melodic — the audit found first-N-in-track-order dropped ALL
+    # drum DNA (31 projects lost their only 808; library had zero kick/snare recipes).
+    def _track_priority(t):
+        notes_all = [n for c in t["clips"] for n in (c.get("notes") or [])]
+        r = role_for(t.get("name") or "", notes_all) if notes_all else R.Role.other
+        order = {R.Role.r808: 0, R.Role.bass: 0, R.Role.kick: 1, R.Role.snare: 1,
+                 R.Role.clap: 1, R.Role.hat: 2, R.Role.perc: 2, R.Role.pad: 3, R.Role.lead: 4}
+        return (order.get(r, 5), -len(notes_all))
+
     out: list[R.Recipe] = []
-    for t in session["tracks"]:
+    for t in sorted(session["tracks"], key=_track_priority):
         # dedupe repeated pattern placements → distinct patterns, keep the densest
         patterns: dict[str, tuple[int, list[dict]]] = {}
+        name_l = (t.get("name") or "").lower()
+        drum_named = any(k in re.split(r"[^a-z0-9#]+", name_l) for k in
+                         ("kick", "snare", "clap", "hat", "hihat", "perc", "rim", "shaker"))
+        floor = 2 if drum_named else min_notes  # 2-hit snare/clap patterns are real trap DNA
         for c in t["clips"]:
             notes = c.get("notes") or []
-            if len(notes) < min_notes:
+            if len(notes) < floor:
                 continue
             sig = hashlib.sha1(json.dumps(sorted([(n["pitch"], n["start"], n["length"]) for n in notes]), sort_keys=True).encode()).hexdigest()
             cnt, _ = patterns.get(sig, (0, notes))
@@ -230,7 +251,7 @@ def main() -> int:
     ap.add_argument("--library", required=True)
     ap.add_argument("--limit", type=int, default=0, help="cap total recipes")
     ap.add_argument("--min-notes", type=int, default=4)
-    ap.add_argument("--max-elements", type=int, default=6, help="per project")
+    ap.add_argument("--max-elements", type=int, default=10, help="per project (role-priority ranked)")
     a = ap.parse_args()
 
     lib = Path(a.library)
@@ -238,6 +259,7 @@ def main() -> int:
     total = 0
     by_role: dict[str, int] = {}
     summary = []
+    seen_content: set[str] = set()  # cross-project dedupe: multi-save FLPs ship identical elements
     for ir_path in sorted(Path(a.ir_dir).glob("*.json")):
         try:
             recs = recipes_from_ir(ir_path, a.min_notes, a.max_elements)
@@ -247,6 +269,12 @@ def main() -> int:
         for rec in recs:
             if a.limit and total >= a.limit:
                 break
+            el0 = rec.elements[0]
+            sig = hashlib.sha1((el0.role.value + "|" + "|".join(
+                f"{n.pitch},{n.start_beats},{n.duration_beats}" for n in el0.midi.notes)).encode()).hexdigest()
+            if sig in seen_content:
+                continue  # a re-save of the same project (audit: 'ok' ingested 4x)
+            seen_content.add(sig)
             digest = (rec.source.content_hash or "")[:8]
             (lib / f"{rec.recipe_id}_{digest}.json").write_text(R.to_json(rec) + "\n")
             total += 1
