@@ -1,0 +1,290 @@
+{
+  "recipe_id": "pack_k4l_bruhotb_stash_kit_2k_k4l_c_pentatonic_minor_pad",
+  "schema_version": "2.0",
+  "source": {
+    "platform": "midi-pack",
+    "video_id": "pack_k4l_bruhotb_stash_kit_2k_k4l_c_pentatonic_minor_pad",
+    "url": "",
+    "title": "(K4L) ! @bruhotb Stash Kit 2k24/(K4L) C - Pentatonic Minor.mid",
+    "channel": "",
+    "duration_s": 0.0,
+    "license": "licensedPack",
+    "retrieved_at": null,
+    "content_hash": "e244ae47e6f90ed1e313540d3e398810e1db5ab361883ac00dec15c221742b83"
+  },
+  "meta": {
+    "daw": {
+      "value": null,
+      "confidence": 0.0,
+      "evidence": []
+    },
+    "tempo_bpm": {
+      "value": 130,
+      "confidence": 0.9,
+      "evidence": [
+        "SMF meta"
+      ]
+    },
+    "key": {
+      "value": "D# major",
+      "confidence": 0.75,
+      "evidence": [
+        "pitch-class inference (Krumhansl)"
+      ]
+    },
+    "time_signature": {
+      "value": "4/4",
+      "confidence": 0.6,
+      "evidence": []
+    }
+  },
+  "arrangement": {
+    "sections": [
+      {
+        "name": "loop",
+        "start_s": 0.0,
+        "end_s": 7.384615384615385,
+        "confidence": 0.5
+      }
+    ]
+  },
+  "elements": [
+    {
+      "element_id": "pack_k4l_bruhotb_stash_kit_2k_k4l_c_pentatonic_minor_pad",
+      "role": "pad",
+      "label": "(K4L) ! @bruhotb Stash · (K4L) C - Pentatonic Minor (pad)",
+      "audio_ref": null,
+      "midi": {
+        "status": "extracted",
+        "midi_ref": null,
+        "notes": [
+          {
+            "pitch": 48,
+            "start_beats": 0.0,
+            "duration_beats": 16.0,
+            "velocity": 127
+          },
+          {
+            "pitch": 51,
+            "start_beats": 0.0,
+            "duration_beats": 16.0,
+            "velocity": 127
+          },
+          {
+            "pitch": 53,
+            "start_beats": 0.0,
+            "duration_beats": 16.0,
+            "velocity": 127
+          },
+          {
+            "pitch": 55,
+            "start_beats": 0.0,
+            "duration_beats": 16.0,
+            "velocity": 127
+          },
+          {
+            "pitch": 58,
+            "start_beats": 0.0,
+            "duration_beats": 16.0,
+            "velocity": 127
+          },
+          {
+            "pitch": 60,
+            "start_beats": 0.0,
+            "duration_beats": 16.0,
+            "velocity": 127
+          },
+          {
+            "pitch": 63,
+            "start_beats": 0.0,
+            "duration_beats": 16.0,
+            "velocity": 127
+          },
+          {
+            "pitch": 65,
+            "start_beats": 0.0,
+            "duration_beats": 16.0,
+            "velocity": 127
+          },
+          {
+            "pitch": 67,
+            "start_beats": 0.0,
+            "duration_beats": 16.0,
+            "velocity": 127
+          },
+          {
+            "pitch": 70,
+            "start_beats": 0.0,
+            "duration_beats": 16.0,
+            "velocity": 127
+          },
+          {
+            "pitch": 72,
+            "start_beats": 0.0,
+            "duration_beats": 16.0,
+            "velocity": 127
+          },
+          {
+            "pitch": 75,
+            "start_beats": 0.0,
+            "duration_beats": 16.0,
+            "velocity": 127
+          },
+          {
+            "pitch": 77,
+            "start_beats": 0.0,
+            "duration_beats": 16.0,
+            "velocity": 127
+          },
+          {
+            "pitch": 79,
+            "start_beats": 0.0,
+            "duration_beats": 16.0,
+            "velocity": 127
+          },
+          {
+            "pitch": 82,
+            "start_beats": 0.0,
+            "duration_beats": 16.0,
+            "velocity": 127
+          },
+          {
+            "pitch": 84,
+            "start_beats": 0.0,
+            "duration_beats": 16.0,
+            "velocity": 127
+          },
+          {
+            "pitch": 87,
+            "start_beats": 0.0,
+            "duration_beats": 16.0,
+            "velocity": 127
+          },
+          {
+            "pitch": 89,
+            "start_beats": 0.0,
+            "duration_beats": 16.0,
+            "velocity": 127
+          },
+          {
+            "pitch": 91,
+            "start_beats": 0.0,
+            "duration_beats": 16.0,
+            "velocity": 127
+          },
+          {
+            "pitch": 94,
+            "start_beats": 0.0,
+            "duration_beats": 16.0,
+            "velocity": 127
+          },
+          {
+            "pitch": 96,
+            "start_beats": 0.0,
+            "duration_beats": 16.0,
+            "velocity": 127
+          },
+          {
+            "pitch": 99,
+            "start_beats": 0.0,
+            "duration_beats": 16.0,
+            "velocity": 127
+          },
+          {
+            "pitch": 101,
+            "start_beats": 0.0,
+            "duration_beats": 16.0,
+            "velocity": 127
+          },
+          {
+            "pitch": 103,
+            "start_beats": 0.0,
+            "duration_beats": 16.0,
+            "velocity": 127
+          },
+          {
+            "pitch": 106,
+            "start_beats": 0.0,
+            "duration_beats": 16.0,
+            "velocity": 127
+          }
+        ],
+        "note_count": 25,
+        "confidence": 1.0
+      },
+      "sample_match": {
+        "status": "none",
+        "matched_path": null,
+        "distance": 0.0,
+        "alternates": [],
+        "root_note": null
+      },
+      "synth_patch": {
+        "status": "unknown",
+        "plugin": {
+          "name": null,
+          "available_locally": false
+        },
+        "params": {},
+        "match": null,
+        "substitute": null
+      },
+      "onsets": [],
+      "motif": {
+        "bars": 4.0,
+        "onset_grid": "single",
+        "density": 6.25,
+        "syncopation": 0.0,
+        "contour": [
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "register_band": "high",
+        "harmonic_function": "progression"
+      },
+      "bass": null,
+      "evidence": [],
+      "confidence": 0.9
+    }
+  ],
+  "unresolved": [],
+  "reconstruction_class": "deterministic",
+  "yield": {
+    "predicted": {
+      "drums": 0.0,
+      "midi": 1.0,
+      "synth": 0.0,
+      "arrangement": 0.4,
+      "overall": 0.6
+    },
+    "actual": {
+      "drums": 0.0,
+      "midi": 0.0,
+      "synth": 0.0,
+      "arrangement": 0.0,
+      "overall": 0.0
+    }
+  }
+}

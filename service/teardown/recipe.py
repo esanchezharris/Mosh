@@ -46,6 +46,7 @@ class License(str, Enum):
     youtube = "youtube"
     creative_common = "creativeCommon"
     owner = "owner"  # the producer's own works — rights-clean by definition (2026-07 r8 lane)
+    licensed_pack = "licensedPack"  # purchased/royalty-free packs, owner-confirmed 2026-07-02
     unknown = "unknown"
 
 

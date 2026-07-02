@@ -1,0 +1,239 @@
+{
+  "recipe_id": "pack_bay_area_essentials_2_baby_stone_gorillas_stomps_perc",
+  "schema_version": "2.0",
+  "source": {
+    "platform": "midi-pack",
+    "video_id": "pack_bay_area_essentials_2_baby_stone_gorillas_stomps_perc",
+    "url": "",
+    "title": "!BAY AREA ESSENTIALS 2/Baby Stone Gorillas Stomps.mid",
+    "channel": "",
+    "duration_s": 0.0,
+    "license": "licensedPack",
+    "retrieved_at": null,
+    "content_hash": "d877f00926af50090d0d0a878580e806d9c97ed75bfb3f193c15a2d308c4a2dd"
+  },
+  "meta": {
+    "daw": {
+      "value": null,
+      "confidence": 0.0,
+      "evidence": []
+    },
+    "tempo_bpm": {
+      "value": 94,
+      "confidence": 0.9,
+      "evidence": [
+        "SMF meta"
+      ]
+    },
+    "key": {
+      "value": null,
+      "confidence": 0.0,
+      "evidence": []
+    },
+    "time_signature": {
+      "value": "4/4",
+      "confidence": 0.6,
+      "evidence": []
+    }
+  },
+  "arrangement": {
+    "sections": [
+      {
+        "name": "loop",
+        "start_s": 0.0,
+        "end_s": 20.425531914893618,
+        "confidence": 0.5
+      }
+    ]
+  },
+  "elements": [
+    {
+      "element_id": "pack_bay_area_essentials_2_baby_stone_gorillas_stomps_perc",
+      "role": "perc",
+      "label": "!BAY AREA ESSENTIALS 2 · Baby Stone Gorillas Stomps (perc)",
+      "audio_ref": null,
+      "midi": {
+        "status": "extracted",
+        "midi_ref": null,
+        "notes": [
+          {
+            "pitch": 60,
+            "start_beats": 0.0,
+            "duration_beats": 0.010417,
+            "velocity": 107
+          },
+          {
+            "pitch": 60,
+            "start_beats": 3.5,
+            "duration_beats": 0.010417,
+            "velocity": 104
+          },
+          {
+            "pitch": 60,
+            "start_beats": 4.0,
+            "duration_beats": 0.010417,
+            "velocity": 110
+          },
+          {
+            "pitch": 60,
+            "start_beats": 5.5,
+            "duration_beats": 0.010417,
+            "velocity": 104
+          },
+          {
+            "pitch": 60,
+            "start_beats": 8.0,
+            "duration_beats": 0.010417,
+            "velocity": 106
+          },
+          {
+            "pitch": 60,
+            "start_beats": 11.5,
+            "duration_beats": 0.010417,
+            "velocity": 108
+          },
+          {
+            "pitch": 60,
+            "start_beats": 12.0,
+            "duration_beats": 0.010417,
+            "velocity": 111
+          },
+          {
+            "pitch": 60,
+            "start_beats": 14.0,
+            "duration_beats": 0.010417,
+            "velocity": 106
+          },
+          {
+            "pitch": 60,
+            "start_beats": 15.0,
+            "duration_beats": 0.010417,
+            "velocity": 109
+          },
+          {
+            "pitch": 60,
+            "start_beats": 16.0,
+            "duration_beats": 0.010417,
+            "velocity": 107
+          },
+          {
+            "pitch": 60,
+            "start_beats": 19.5,
+            "duration_beats": 0.010417,
+            "velocity": 104
+          },
+          {
+            "pitch": 60,
+            "start_beats": 20.0,
+            "duration_beats": 0.010417,
+            "velocity": 110
+          },
+          {
+            "pitch": 60,
+            "start_beats": 21.5,
+            "duration_beats": 0.010417,
+            "velocity": 104
+          },
+          {
+            "pitch": 60,
+            "start_beats": 24.0,
+            "duration_beats": 0.010417,
+            "velocity": 106
+          },
+          {
+            "pitch": 60,
+            "start_beats": 27.5,
+            "duration_beats": 0.010417,
+            "velocity": 108
+          },
+          {
+            "pitch": 60,
+            "start_beats": 28.0,
+            "duration_beats": 0.010417,
+            "velocity": 111
+          },
+          {
+            "pitch": 60,
+            "start_beats": 30.0,
+            "duration_beats": 0.010417,
+            "velocity": 106
+          },
+          {
+            "pitch": 60,
+            "start_beats": 31.0,
+            "duration_beats": 0.010417,
+            "velocity": 109
+          }
+        ],
+        "note_count": 18,
+        "confidence": 1.0
+      },
+      "sample_match": {
+        "status": "none",
+        "matched_path": null,
+        "distance": 0.0,
+        "alternates": [],
+        "root_note": null
+      },
+      "synth_patch": {
+        "status": "unknown",
+        "plugin": {
+          "name": null,
+          "available_locally": false
+        },
+        "params": {},
+        "match": null,
+        "substitute": null
+      },
+      "onsets": [],
+      "motif": {
+        "bars": 8.0,
+        "onset_grid": "8th",
+        "density": 2.25,
+        "syncopation": 0.3333,
+        "contour": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "register_band": "perc",
+        "harmonic_function": ""
+      },
+      "bass": null,
+      "evidence": [],
+      "confidence": 0.9
+    }
+  ],
+  "unresolved": [],
+  "reconstruction_class": "deterministic",
+  "yield": {
+    "predicted": {
+      "drums": 0.0,
+      "midi": 1.0,
+      "synth": 0.0,
+      "arrangement": 0.4,
+      "overall": 0.6
+    },
+    "actual": {
+      "drums": 0.0,
+      "midi": 0.0,
+      "synth": 0.0,
+      "arrangement": 0.0,
+      "overall": 0.0
+    }
+  }
+}

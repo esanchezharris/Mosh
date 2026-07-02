@@ -1,0 +1,3358 @@
+{
+ "stats": {
+  "written": 370,
+  "dup": 31,
+  "refused": 0,
+  "error": 2,
+  "keyDisagree": 13
+ },
+ "byRole": {
+  "clap": 4,
+  "lead": 56,
+  "pad": 296,
+  "808": 3,
+  "perc": 5,
+  "hat": 4,
+  "snare": 2
+ },
+ "items": [
+  {
+   "file": "!clap midi.mid",
+   "recipe": "pack_bay_area_essentials_2_clap_midi_clap",
+   "role": "clap",
+   "notes": 8,
+   "tempo": 140,
+   "key": null,
+   "keyConf": 0.0
+  },
+  {
+   "file": "!halftime.mid",
+   "recipe": "pack_bay_area_essentials_2_halftime_lead",
+   "role": "lead",
+   "notes": 8,
+   "tempo": 101,
+   "key": "C major",
+   "keyConf": 0.684
+  },
+  {
+   "file": "86_not_the_same @flatstheflounder.mid",
+   "recipe": "pack_bay_area_essentials_2_86_not_the_same_flatstheflounder_pad",
+   "role": "pad",
+   "notes": 76,
+   "tempo": 86,
+   "key": "C# minor",
+   "keyConf": 0.75
+  },
+  {
+   "file": "88_popout @flatstheflounder.mid",
+   "recipe": "pack_bay_area_essentials_2_88_popout_flatstheflounder_pad",
+   "role": "pad",
+   "notes": 54,
+   "tempo": 88,
+   "key": "B minor",
+   "keyConf": 0.693
+  },
+  {
+   "file": "88_safe_house @flatstheflounder.mid",
+   "recipe": "pack_bay_area_essentials_2_88_safe_house_flatstheflounder_808",
+   "role": "808",
+   "notes": 34,
+   "tempo": 88,
+   "key": "A# minor",
+   "keyConf": 0.75
+  },
+  {
+   "file": "90_against_the_odds @flatstheflounder.mid",
+   "recipe": "pack_bay_area_essentials_2_90_against_the_odds_flatstheflounder_pad",
+   "role": "pad",
+   "notes": 56,
+   "tempo": 90,
+   "key": "D minor",
+   "keyConf": 0.75
+  },
+  {
+   "file": "90_aint_trippin @flatstheflounder.mid",
+   "recipe": "pack_bay_area_essentials_2_90_aint_trippin_flatstheflounder_lead",
+   "role": "lead",
+   "notes": 58,
+   "tempo": 90,
+   "key": "B minor",
+   "keyConf": 0.75
+  },
+  {
+   "file": "90_apologies @flatstheflounder.mid",
+   "recipe": "pack_bay_area_essentials_2_90_apologies_flatstheflounder_pad",
+   "role": "pad",
+   "notes": 68,
+   "tempo": 90,
+   "key": "C minor",
+   "keyConf": 0.75
+  },
+  {
+   "file": "90_deposits @flatstheflounder.mid",
+   "recipe": "pack_bay_area_essentials_2_90_deposits_flatstheflounder_lead",
+   "role": "lead",
+   "notes": 34,
+   "tempo": 90,
+   "key": "A minor",
+   "keyConf": 0.75
+  },
+  {
+   "file": "90_dollars_in_the_air @flatstheflounder.mid",
+   "recipe": "pack_bay_area_essentials_2_90_dollars_in_the_air_flatstheflounder_pad",
+   "role": "pad",
+   "notes": 112,
+   "tempo": 90,
+   "key": "E minor",
+   "keyConf": 0.732
+  },
+  {
+   "file": "90_los_santos @flatstheflounder.mid",
+   "recipe": "pack_bay_area_essentials_2_90_los_santos_flatstheflounder_lead",
+   "role": "lead",
+   "notes": 52,
+   "tempo": 90,
+   "key": "C minor",
+   "keyConf": 0.75
+  },
+  {
+   "file": "90_room_service @flatstheflounder.mid",
+   "recipe": "pack_bay_area_essentials_2_90_room_service_flatstheflounder_pad",
+   "role": "pad",
+   "notes": 48,
+   "tempo": 90,
+   "key": "B minor",
+   "keyConf": 0.75
+  },
+  {
+   "file": "92_break_bread @flatstheflounder.mid",
+   "recipe": "pack_bay_area_essentials_2_92_break_bread_flatstheflounder_pad",
+   "role": "pad",
+   "notes": 42,
+   "tempo": 92,
+   "key": "D# minor",
+   "keyConf": 0.662
+  },
+  {
+   "file": "92_flu_game @flatstheflounder.mid",
+   "recipe": "pack_bay_area_essentials_2_92_flu_game_flatstheflounder_lead",
+   "role": "lead",
+   "notes": 46,
+   "tempo": 92,
+   "key": "G minor",
+   "keyConf": 0.75
+  },
+  {
+   "file": "92_good_day @flatstheflounder.mid",
+   "recipe": "pack_bay_area_essentials_2_92_good_day_flatstheflounder_pad",
+   "role": "pad",
+   "notes": 56,
+   "tempo": 92,
+   "key": "A# minor",
+   "keyConf": 0.75
+  },
+  {
+   "file": "92_greenlight @flatstheflounder.mid",
+   "recipe": "pack_bay_area_essentials_2_92_greenlight_flatstheflounder_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 92,
+   "key": "G minor",
+   "keyConf": 0.75
+  },
+  {
+   "file": "92_money_counter @flatstheflounder.mid",
+   "recipe": "pack_bay_area_essentials_2_92_money_counter_flatstheflounder_pad",
+   "role": "pad",
+   "notes": 32,
+   "tempo": 92,
+   "key": "B minor",
+   "keyConf": 0.75
+  },
+  {
+   "file": "92_smoke_sesh @flatstheflounder.mid",
+   "recipe": "pack_bay_area_essentials_2_92_smoke_sesh_flatstheflounder_lead",
+   "role": "lead",
+   "notes": 76,
+   "tempo": 92,
+   "key": "E minor",
+   "keyConf": 0.75
+  },
+  {
+   "file": "92_stay_smooth @flatstheflounder.mid",
+   "recipe": "pack_bay_area_essentials_2_92_stay_smooth_flatstheflounder_lead",
+   "role": "lead",
+   "notes": 40,
+   "tempo": 92,
+   "key": "C# minor",
+   "keyConf": 0.75
+  },
+  {
+   "file": "92_switch_lanes @flatstheflounder.mid",
+   "recipe": "pack_bay_area_essentials_2_92_switch_lanes_flatstheflounder_lead",
+   "role": "lead",
+   "notes": 34,
+   "tempo": 92,
+   "key": "C# minor",
+   "keyConf": 0.75
+  },
+  {
+   "file": "94_free_throw @flatstheflounder.mid",
+   "recipe": "pack_bay_area_essentials_2_94_free_throw_flatstheflounder_lead",
+   "role": "lead",
+   "notes": 66,
+   "tempo": 94,
+   "key": "E minor",
+   "keyConf": 0.75
+  },
+  {
+   "file": "94_game_winner @flatstheflounder.mid",
+   "recipe": "pack_bay_area_essentials_2_94_game_winner_flatstheflounder_pad",
+   "role": "pad",
+   "notes": 50,
+   "tempo": 94,
+   "key": "E minor",
+   "keyConf": 0.75
+  },
+  {
+   "file": "94_plays_to_make @flatstheflounder.mid",
+   "recipe": "pack_bay_area_essentials_2_94_plays_to_make_flatstheflounder_pad",
+   "role": "pad",
+   "notes": 42,
+   "tempo": 94,
+   "key": "F minor",
+   "keyConf": 0.75
+  },
+  {
+   "file": "94_shoreline_on_the_low @flatstheflounder.mid",
+   "recipe": "pack_bay_area_essentials_2_94_shoreline_on_the_low_flatstheflounder_lead",
+   "role": "lead",
+   "notes": 70,
+   "tempo": 94,
+   "key": "G# minor",
+   "keyConf": 0.74
+  },
+  {
+   "file": "94_spin_out @flatstheflounder.mid",
+   "recipe": "pack_bay_area_essentials_2_94_spin_out_flatstheflounder_pad",
+   "role": "pad",
+   "notes": 62,
+   "tempo": 94,
+   "key": "A# minor",
+   "keyConf": 0.75
+  },
+  {
+   "file": "94_still_organic @flatstheflounder.mid",
+   "recipe": "pack_bay_area_essentials_2_94_still_organic_flatstheflounder_lead",
+   "role": "lead",
+   "notes": 62,
+   "tempo": 94,
+   "key": "F# minor",
+   "keyConf": 0.75
+  },
+  {
+   "file": "95_bad_habits @flatsthefounder.mid",
+   "recipe": "pack_bay_area_essentials_2_95_bad_habits_flatsthefounder_808",
+   "role": "808",
+   "notes": 81,
+   "tempo": 95,
+   "key": "A minor",
+   "keyConf": 0.75
+  },
+  {
+   "file": "88_name_on_a_cloud_bassline.mid",
+   "recipe": "pack_bay_area_essentials_2_88_name_on_a_cloud_bassline_lead",
+   "role": "lead",
+   "notes": 36,
+   "tempo": 88,
+   "key": "F# minor",
+   "keyConf": 0.666
+  },
+  {
+   "file": "92_good_day_bassline.mid",
+   "recipe": "pack_bay_area_essentials_2_92_good_day_bassline_lead",
+   "role": "lead",
+   "notes": 30,
+   "tempo": 92,
+   "key": "D# major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "92_smoke_sesh_bassline.mid",
+   "recipe": "pack_bay_area_essentials_2_92_smoke_sesh_bassline_lead",
+   "role": "lead",
+   "notes": 36,
+   "tempo": 92,
+   "key": "E minor",
+   "keyConf": 0.749
+  },
+  {
+   "file": "92_smoothies_on_the_coast_bassline.mid",
+   "recipe": "pack_bay_area_essentials_2_92_smoothies_on_the_coast_bassline_perc",
+   "role": "perc",
+   "notes": 34,
+   "tempo": 92,
+   "key": null,
+   "keyConf": 0.0
+  },
+  {
+   "file": "92_stay_smooth_larry_june_bassline.mid",
+   "recipe": "pack_bay_area_essentials_2_92_stay_smooth_larry_june_bassline_lead",
+   "role": "lead",
+   "notes": 42,
+   "tempo": 92,
+   "key": "F# major",
+   "keyConf": 0.739
+  },
+  {
+   "file": "94_free_throw_bassline.mid",
+   "recipe": "pack_bay_area_essentials_2_94_free_throw_bassline_perc",
+   "role": "perc",
+   "notes": 22,
+   "tempo": 94,
+   "key": null,
+   "keyConf": 0.0
+  },
+  {
+   "file": "97_past_that_bassline.mid",
+   "recipe": "pack_bay_area_essentials_2_97_past_that_bassline_perc",
+   "role": "perc",
+   "notes": 17,
+   "tempo": 97,
+   "key": null,
+   "keyConf": 0.0
+  },
+  {
+   "file": "Ambient Chords.mid",
+   "recipe": "pack_bay_area_essentials_2_ambient_chords_pad",
+   "role": "pad",
+   "notes": 46,
+   "tempo": 90,
+   "key": "G# minor",
+   "keyConf": 0.75
+  },
+  {
+   "file": "Larry June Chords.mid",
+   "recipe": "pack_bay_area_essentials_2_larry_june_chords_pad",
+   "role": "pad",
+   "notes": 26,
+   "tempo": 84,
+   "key": "E minor",
+   "keyConf": 0.75
+  },
+  {
+   "file": "Sacramento Chords #1.mid",
+   "recipe": "pack_bay_area_essentials_2_sacramento_chords_1_pad",
+   "role": "pad",
+   "notes": 40,
+   "tempo": 88,
+   "key": "D# minor",
+   "keyConf": 0.75
+  },
+  {
+   "file": "Young Slo be Chords #1.mid",
+   "recipe": "pack_bay_area_essentials_2_young_slo_be_chords_1_pad",
+   "role": "pad",
+   "notes": 40,
+   "tempo": 85,
+   "key": "E minor",
+   "keyConf": 0.75
+  },
+  {
+   "file": "92_Westside_Webb_Hi_Hats.mid",
+   "recipe": "pack_bay_area_essentials_2_92_westside_webb_hi_hats_hat",
+   "role": "hat",
+   "notes": 88,
+   "tempo": 92,
+   "key": null,
+   "keyConf": 0.0
+  },
+  {
+   "file": "94_West_Coast_Hi_Hats.mid",
+   "recipe": "pack_bay_area_essentials_2_94_west_coast_hi_hats_hat",
+   "role": "hat",
+   "notes": 64,
+   "tempo": 94,
+   "key": null,
+   "keyConf": 0.0
+  },
+  {
+   "file": "Bay Area Hats with rolls.mid",
+   "recipe": "pack_bay_area_essentials_2_bay_area_hats_with_rolls_lead",
+   "role": "lead",
+   "notes": 82,
+   "tempo": 90,
+   "key": "C minor",
+   "keyConf": 0.75
+  },
+  {
+   "file": "Bay Area Hi Hats (Favs).mid",
+   "recipe": "pack_bay_area_essentials_2_bay_area_hi_hats_favs_hat",
+   "role": "hat",
+   "notes": 102,
+   "tempo": 90,
+   "key": null,
+   "keyConf": 0.0
+  },
+  {
+   "file": "West Coast Simple Hats.mid",
+   "recipe": "pack_bay_area_essentials_2_west_coast_simple_hats_lead",
+   "role": "lead",
+   "notes": 24,
+   "tempo": 94,
+   "key": "C major",
+   "keyConf": 0.684
+  },
+  {
+   "file": "West_Coast_Hats.mid",
+   "recipe": "pack_bay_area_essentials_2_west_coast_hats_lead",
+   "role": "lead",
+   "notes": 78,
+   "tempo": 86,
+   "key": "A# major",
+   "keyConf": 0.683
+  },
+  {
+   "file": "92_Westside_Webb_Kicks.mid",
+   "recipe": "pack_bay_area_essentials_2_92_westside_webb_kicks_lead",
+   "role": "lead",
+   "notes": 26,
+   "tempo": 92,
+   "key": "B major",
+   "keyConf": 0.684
+  },
+  {
+   "file": "BEST KICKS EVER (BAY AREA).mid",
+   "recipe": "pack_bay_area_essentials_2_best_kicks_ever_bay_area_lead",
+   "role": "lead",
+   "notes": 44,
+   "tempo": 90,
+   "key": "A# major",
+   "keyConf": 0.613
+  },
+  {
+   "file": "Hook Open Hats (Larry June).mid",
+   "recipe": "pack_bay_area_essentials_2_hook_open_hats_larry_june_lead",
+   "role": "lead",
+   "notes": 20,
+   "tempo": 92,
+   "key": "C major",
+   "keyConf": 0.684
+  },
+  {
+   "file": "West Coast Open Hats.mid",
+   "recipe": "pack_bay_area_essentials_2_west_coast_open_hats_lead",
+   "role": "lead",
+   "notes": 8,
+   "tempo": 94,
+   "key": "C major",
+   "keyConf": 0.684
+  },
+  {
+   "file": "Baby Stone Gorillas Stomps.mid",
+   "recipe": "pack_bay_area_essentials_2_baby_stone_gorillas_stomps_perc",
+   "role": "perc",
+   "notes": 18,
+   "tempo": 94,
+   "key": null,
+   "keyConf": 0.0
+  },
+  {
+   "file": "Bay Area Rims.mid",
+   "recipe": "pack_bay_area_essentials_2_bay_area_rims_lead",
+   "role": "lead",
+   "notes": 8,
+   "tempo": 94,
+   "key": "C major",
+   "keyConf": 0.684
+  },
+  {
+   "file": "West Coast Stomps.mid",
+   "recipe": "pack_bay_area_essentials_2_west_coast_stomps_perc",
+   "role": "perc",
+   "notes": 8,
+   "tempo": 94,
+   "key": null,
+   "keyConf": 0.0
+  },
+  {
+   "file": "(K4L) A Major.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_a_major_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 151,
+   "key": "A major",
+   "keyConf": 0.8
+  },
+  {
+   "file": "(K4L) A Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_a_minor_pad",
+   "role": "pad",
+   "notes": 42,
+   "tempo": 151,
+   "key": "C major",
+   "keyConf": 0.6
+  },
+  {
+   "file": "(K4L) A# Major.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_a_major_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 151,
+   "key": "A# major",
+   "keyConf": 0.8
+  },
+  {
+   "file": "(K4L) A# Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_a_minor_pad",
+   "role": "pad",
+   "notes": 42,
+   "tempo": 151,
+   "key": "C# major",
+   "keyConf": 0.6
+  },
+  {
+   "file": "(K4L) B Major.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_b_major_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 151,
+   "key": "B major",
+   "keyConf": 0.8
+  },
+  {
+   "file": "(K4L) B Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_b_minor_pad",
+   "role": "pad",
+   "notes": 42,
+   "tempo": 151,
+   "key": "D major",
+   "keyConf": 0.6
+  },
+  {
+   "file": "(K4L) C Major.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_c_major_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 151,
+   "key": "C major",
+   "keyConf": 0.8
+  },
+  {
+   "file": "(K4L) C Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_c_minor_pad",
+   "role": "pad",
+   "notes": 42,
+   "tempo": 151,
+   "key": "D# major",
+   "keyConf": 0.6
+  },
+  {
+   "file": "(K4L) C# Major.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_c_major_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 151,
+   "key": "C# major",
+   "keyConf": 0.8
+  },
+  {
+   "file": "(K4L) C# Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_c_minor_pad",
+   "role": "pad",
+   "notes": 42,
+   "tempo": 151,
+   "key": "E major",
+   "keyConf": 0.6
+  },
+  {
+   "file": "(K4L) D Major.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_d_major_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 151,
+   "key": "D major",
+   "keyConf": 0.8
+  },
+  {
+   "file": "(K4L) D Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_d_minor_pad",
+   "role": "pad",
+   "notes": 42,
+   "tempo": 151,
+   "key": "F major",
+   "keyConf": 0.6
+  },
+  {
+   "file": "(K4L) D# Major.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_d_major_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 151,
+   "key": "D# major",
+   "keyConf": 0.8
+  },
+  {
+   "file": "(K4L) D# Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_d_minor_pad",
+   "role": "pad",
+   "notes": 42,
+   "tempo": 151,
+   "key": "F# major",
+   "keyConf": 0.6
+  },
+  {
+   "file": "(K4L) E Major.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_e_major_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 151,
+   "key": "E major",
+   "keyConf": 0.8
+  },
+  {
+   "file": "(K4L) E Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_e_minor_pad",
+   "role": "pad",
+   "notes": 42,
+   "tempo": 151,
+   "key": "G major",
+   "keyConf": 0.6
+  },
+  {
+   "file": "(K4L) F Major.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_f_major_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 151,
+   "key": "F major",
+   "keyConf": 0.8
+  },
+  {
+   "file": "(K4L) F Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_f_minor_pad",
+   "role": "pad",
+   "notes": 42,
+   "tempo": 151,
+   "key": "G# major",
+   "keyConf": 0.6
+  },
+  {
+   "file": "(K4L) F# Major.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_f_major_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 151,
+   "key": "F# major",
+   "keyConf": 0.8
+  },
+  {
+   "file": "(K4L) F# Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_f_minor_pad",
+   "role": "pad",
+   "notes": 42,
+   "tempo": 151,
+   "key": "A major",
+   "keyConf": 0.6
+  },
+  {
+   "file": "(K4L) G Major.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_g_major_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 151,
+   "key": "G major",
+   "keyConf": 0.8
+  },
+  {
+   "file": "(K4L) G Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_g_minor_pad",
+   "role": "pad",
+   "notes": 42,
+   "tempo": 151,
+   "key": "A# major",
+   "keyConf": 0.6
+  },
+  {
+   "file": "(K4L) G# Major.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_g_major_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 151,
+   "key": "G# major",
+   "keyConf": 0.8
+  },
+  {
+   "file": "(K4L) G# Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_g_minor_pad",
+   "role": "pad",
+   "notes": 42,
+   "tempo": 151,
+   "key": "B major",
+   "keyConf": 0.6
+  },
+  {
+   "file": "(K4L) A - Arabic.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_a_arabic_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 130,
+   "key": "D minor",
+   "keyConf": 0.542
+  },
+  {
+   "file": "(K4L) A - Blues.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_a_blues_pad",
+   "role": "pad",
+   "notes": 25,
+   "tempo": 130,
+   "key": "A minor",
+   "keyConf": 0.587
+  },
+  {
+   "file": "(K4L) A - Diatonic.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_a_diatonic_pad",
+   "role": "pad",
+   "notes": 26,
+   "tempo": 130,
+   "key": "A major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) A - Diminished.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_a_diminished_pad",
+   "role": "pad",
+   "notes": 48,
+   "tempo": 130,
+   "key": null,
+   "keyConf": 0.0
+  },
+  {
+   "file": "(K4L) A - Dominant Bebop.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_a_dominant_bebop_pad",
+   "role": "pad",
+   "notes": 40,
+   "tempo": 130,
+   "key": "D major",
+   "keyConf": 0.656
+  },
+  {
+   "file": "(K4L) A - Dorian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_a_dorian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "G major",
+   "keyConf": 0.731
+  },
+  {
+   "file": "(K4L) A - Enigmatic.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_a_enigmatic_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 130,
+   "key": "D# major",
+   "keyConf": 0.525
+  },
+  {
+   "file": "(K4L) A - Harmonic Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_a_harmonic_minor_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "A minor",
+   "keyConf": 0.739
+  },
+  {
+   "file": "(K4L) A - Ionian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_a_ionian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "A major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) A - Japanese Insen.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_a_japanese_insen_pad",
+   "role": "pad",
+   "notes": 25,
+   "tempo": 130,
+   "key": "G minor",
+   "keyConf": 0.604
+  },
+  {
+   "file": "(K4L) A - Locrian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_a_locrian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "A# major",
+   "keyConf": 0.716
+  },
+  {
+   "file": "(K4L) A - Lydian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_a_lydian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "E major",
+   "keyConf": 0.747
+  },
+  {
+   "file": "(K4L) A - Major Bebop.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_a_major_bebop_pad",
+   "role": "pad",
+   "notes": 40,
+   "tempo": 130,
+   "key": "F# minor",
+   "keyConf": 0.662
+  },
+  {
+   "file": "(K4L) A - Melodic Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_a_melodic_minor_lead",
+   "role": "lead",
+   "notes": 36,
+   "tempo": 130,
+   "key": "A minor",
+   "keyConf": 0.556
+  },
+  {
+   "file": "(K4L) A - Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_a_minor_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "A minor",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) A - Mixolydian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_a_mixolydian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "D major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) A - Neapolitan Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_a_neapolitan_minor_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 130,
+   "key": "F major",
+   "keyConf": 0.603
+  },
+  {
+   "file": "(K4L) A - Neapolitan.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_a_neapolitan_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 130,
+   "key": null,
+   "keyConf": 0.0
+  },
+  {
+   "file": "(K4L) A - Pentatonic Blues.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_a_pentatonic_blues_pad",
+   "role": "pad",
+   "notes": 31,
+   "tempo": 130,
+   "key": "C major",
+   "keyConf": 0.576
+  },
+  {
+   "file": "(K4L) A - Pentatonic Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_a_pentatonic_minor_pad",
+   "role": "pad",
+   "notes": 25,
+   "tempo": 130,
+   "key": "C major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) A - Phrygian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_a_phrygian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "F major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) A - Whole Tone.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_a_whole_tone_pad",
+   "role": "pad",
+   "notes": 30,
+   "tempo": 130,
+   "key": null,
+   "keyConf": 0.0
+  },
+  {
+   "file": "(K4L) A# - Arabic.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_a_arabic_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 130,
+   "key": "D# minor",
+   "keyConf": 0.542
+  },
+  {
+   "file": "(K4L) A# - Blues.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_a_blues_pad",
+   "role": "pad",
+   "notes": 25,
+   "tempo": 130,
+   "key": "A# minor",
+   "keyConf": 0.587
+  },
+  {
+   "file": "(K4L) A# - Diatonic.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_a_diatonic_pad",
+   "role": "pad",
+   "notes": 26,
+   "tempo": 130,
+   "key": "A# major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) A# - Diminished.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_a_diminished_pad",
+   "role": "pad",
+   "notes": 48,
+   "tempo": 130,
+   "key": null,
+   "keyConf": 0.0
+  },
+  {
+   "file": "(K4L) A# - Dominant Bebop.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_a_dominant_bebop_pad",
+   "role": "pad",
+   "notes": 40,
+   "tempo": 130,
+   "key": "D# major",
+   "keyConf": 0.656
+  },
+  {
+   "file": "(K4L) A# - Dorian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_a_dorian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "G# major",
+   "keyConf": 0.731
+  },
+  {
+   "file": "(K4L) A# - Enigmatic.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_a_enigmatic_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 130,
+   "key": "E major",
+   "keyConf": 0.525
+  },
+  {
+   "file": "(K4L) A# - Harmonic Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_a_harmonic_minor_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "A# minor",
+   "keyConf": 0.739
+  },
+  {
+   "file": "(K4L) A# - Ionian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_a_ionian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "A# major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) A# - Japanese Insen.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_a_japanese_insen_pad",
+   "role": "pad",
+   "notes": 25,
+   "tempo": 130,
+   "key": "G# minor",
+   "keyConf": 0.604
+  },
+  {
+   "file": "(K4L) A# - Lydian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_a_lydian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "F major",
+   "keyConf": 0.747
+  },
+  {
+   "file": "(K4L) A# - Major Bebop.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_a_major_bebop_pad",
+   "role": "pad",
+   "notes": 40,
+   "tempo": 130,
+   "key": "G minor",
+   "keyConf": 0.662
+  },
+  {
+   "file": "(K4L) A# - Melodic Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_a_melodic_minor_lead",
+   "role": "lead",
+   "notes": 36,
+   "tempo": 130,
+   "key": "A# minor",
+   "keyConf": 0.556
+  },
+  {
+   "file": "(K4L) A# - Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_a_minor_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "A# minor",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) A# - Mixolydian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_a_mixolydian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "D# major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) A# - Neapolitan Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_a_neapolitan_minor_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 130,
+   "key": "F# major",
+   "keyConf": 0.603
+  },
+  {
+   "file": "(K4L) A# - Neapolitan.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_a_neapolitan_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 130,
+   "key": null,
+   "keyConf": 0.0
+  },
+  {
+   "file": "(K4L) A# - Pentatonic Blues.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_a_pentatonic_blues_pad",
+   "role": "pad",
+   "notes": 31,
+   "tempo": 130,
+   "key": "C# major",
+   "keyConf": 0.576
+  },
+  {
+   "file": "(K4L) A# - Pentatonic Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_a_pentatonic_minor_pad",
+   "role": "pad",
+   "notes": 25,
+   "tempo": 130,
+   "key": "C# major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) A# - Phrygian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_a_phrygian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "F# major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) A# - Whole Tone.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_a_whole_tone_pad",
+   "role": "pad",
+   "notes": 30,
+   "tempo": 130,
+   "key": null,
+   "keyConf": 0.0
+  },
+  {
+   "file": "(K4L) B - Arabic.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_b_arabic_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 130,
+   "key": "E minor",
+   "keyConf": 0.542
+  },
+  {
+   "file": "(K4L) B - Blues.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_b_blues_pad",
+   "role": "pad",
+   "notes": 25,
+   "tempo": 130,
+   "key": "B minor",
+   "keyConf": 0.587
+  },
+  {
+   "file": "(K4L) B - Diatonic.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_b_diatonic_pad",
+   "role": "pad",
+   "notes": 26,
+   "tempo": 130,
+   "key": "B major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) B - Diminished.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_b_diminished_pad",
+   "role": "pad",
+   "notes": 48,
+   "tempo": 130,
+   "key": null,
+   "keyConf": 0.0
+  },
+  {
+   "file": "(K4L) B - Dominant Bebop.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_b_dominant_bebop_pad",
+   "role": "pad",
+   "notes": 40,
+   "tempo": 130,
+   "key": "E major",
+   "keyConf": 0.656
+  },
+  {
+   "file": "(K4L) B - Dorian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_b_dorian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "A major",
+   "keyConf": 0.731
+  },
+  {
+   "file": "(K4L) B - Enigmatic.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_b_enigmatic_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 130,
+   "key": "F major",
+   "keyConf": 0.525
+  },
+  {
+   "file": "(K4L) B - Harmonic Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_b_harmonic_minor_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "B minor",
+   "keyConf": 0.739
+  },
+  {
+   "file": "(K4L) B - Ionian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_b_ionian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "B major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) B - Japanese Insen.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_b_japanese_insen_pad",
+   "role": "pad",
+   "notes": 25,
+   "tempo": 130,
+   "key": "A minor",
+   "keyConf": 0.604
+  },
+  {
+   "file": "(K4L) B - Lydian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_b_lydian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "F# major",
+   "keyConf": 0.747
+  },
+  {
+   "file": "(K4L) B - Major Bebop.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_b_major_bebop_pad",
+   "role": "pad",
+   "notes": 40,
+   "tempo": 130,
+   "key": "G# minor",
+   "keyConf": 0.662
+  },
+  {
+   "file": "(K4L) B - Melodic Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_b_melodic_minor_lead",
+   "role": "lead",
+   "notes": 36,
+   "tempo": 130,
+   "key": "B minor",
+   "keyConf": 0.556
+  },
+  {
+   "file": "(K4L) B - Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_b_minor_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "B minor",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) B - Mixolydian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_b_mixolydian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "E major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) B - Neapolitan Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_b_neapolitan_minor_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 130,
+   "key": "G major",
+   "keyConf": 0.603
+  },
+  {
+   "file": "(K4L) B - Neapolitan.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_b_neapolitan_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 130,
+   "key": null,
+   "keyConf": 0.0
+  },
+  {
+   "file": "(K4L) B - Pentatonic Blues.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_b_pentatonic_blues_pad",
+   "role": "pad",
+   "notes": 31,
+   "tempo": 130,
+   "key": "D major",
+   "keyConf": 0.576
+  },
+  {
+   "file": "(K4L) B - Pentatonic Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_b_pentatonic_minor_pad",
+   "role": "pad",
+   "notes": 25,
+   "tempo": 130,
+   "key": "D major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) B - Phrygian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_b_phrygian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "G major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) B - Whole Tone.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_b_whole_tone_pad",
+   "role": "pad",
+   "notes": 30,
+   "tempo": 130,
+   "key": null,
+   "keyConf": 0.0
+  },
+  {
+   "file": "(K4L) C - Arabic.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_c_arabic_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 130,
+   "key": "F minor",
+   "keyConf": 0.542
+  },
+  {
+   "file": "(K4L) C - Blues.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_c_blues_pad",
+   "role": "pad",
+   "notes": 25,
+   "tempo": 130,
+   "key": "C minor",
+   "keyConf": 0.587
+  },
+  {
+   "file": "(K4L) C - Diatonic.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_c_diatonic_pad",
+   "role": "pad",
+   "notes": 26,
+   "tempo": 130,
+   "key": "C major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) C - Diminished.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_c_diminished_pad",
+   "role": "pad",
+   "notes": 48,
+   "tempo": 130,
+   "key": null,
+   "keyConf": 0.0
+  },
+  {
+   "file": "(K4L) C - Dominant Bebop.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_c_dominant_bebop_pad",
+   "role": "pad",
+   "notes": 40,
+   "tempo": 130,
+   "key": "F major",
+   "keyConf": 0.656
+  },
+  {
+   "file": "(K4L) C - Dorian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_c_dorian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "A# major",
+   "keyConf": 0.731
+  },
+  {
+   "file": "(K4L) C - Enigmatic.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_c_enigmatic_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 130,
+   "key": "F# major",
+   "keyConf": 0.525
+  },
+  {
+   "file": "(K4L) C - Harmonic Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_c_harmonic_minor_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "C minor",
+   "keyConf": 0.739
+  },
+  {
+   "file": "(K4L) C - Ionian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_c_ionian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "C major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) C - Japanese Insen.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_c_japanese_insen_pad",
+   "role": "pad",
+   "notes": 25,
+   "tempo": 130,
+   "key": "A# minor",
+   "keyConf": 0.604
+  },
+  {
+   "file": "(K4L) C - Lydian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_c_lydian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "G major",
+   "keyConf": 0.747
+  },
+  {
+   "file": "(K4L) C - Major Bebop.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_c_major_bebop_pad",
+   "role": "pad",
+   "notes": 40,
+   "tempo": 130,
+   "key": "A minor",
+   "keyConf": 0.662
+  },
+  {
+   "file": "(K4L) C - Melodic Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_c_melodic_minor_lead",
+   "role": "lead",
+   "notes": 36,
+   "tempo": 130,
+   "key": "C minor",
+   "keyConf": 0.556
+  },
+  {
+   "file": "(K4L) C - Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_c_minor_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "C minor",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) C - Mixolydian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_c_mixolydian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "F major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) C - Neapolitan Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_c_neapolitan_minor_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 130,
+   "key": "G# major",
+   "keyConf": 0.603
+  },
+  {
+   "file": "(K4L) C - Neapolitan.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_c_neapolitan_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 130,
+   "key": null,
+   "keyConf": 0.0
+  },
+  {
+   "file": "(K4L) C - Pentatonic Blues.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_c_pentatonic_blues_pad",
+   "role": "pad",
+   "notes": 31,
+   "tempo": 130,
+   "key": "D# major",
+   "keyConf": 0.576
+  },
+  {
+   "file": "(K4L) C - Pentatonic Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_c_pentatonic_minor_pad",
+   "role": "pad",
+   "notes": 25,
+   "tempo": 130,
+   "key": "D# major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) C - Phrygian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_c_phrygian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "G# major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) C - Whole Tone.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_c_whole_tone_pad",
+   "role": "pad",
+   "notes": 30,
+   "tempo": 130,
+   "key": null,
+   "keyConf": 0.0
+  },
+  {
+   "file": "(K4L) C# - Arabic.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_c_arabic_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 130,
+   "key": "F# minor",
+   "keyConf": 0.542
+  },
+  {
+   "file": "(K4L) C# - Blues.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_c_blues_pad",
+   "role": "pad",
+   "notes": 25,
+   "tempo": 130,
+   "key": "C# minor",
+   "keyConf": 0.587
+  },
+  {
+   "file": "(K4L) C# - Diatonic.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_c_diatonic_pad",
+   "role": "pad",
+   "notes": 26,
+   "tempo": 130,
+   "key": "C# major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) C# - Diminished.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_c_diminished_pad",
+   "role": "pad",
+   "notes": 48,
+   "tempo": 130,
+   "key": null,
+   "keyConf": 0.0
+  },
+  {
+   "file": "(K4L) C# - Dominant Bebop.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_c_dominant_bebop_pad",
+   "role": "pad",
+   "notes": 40,
+   "tempo": 130,
+   "key": "F# major",
+   "keyConf": 0.656
+  },
+  {
+   "file": "(K4L) C# - Dorian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_c_dorian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "B major",
+   "keyConf": 0.731
+  },
+  {
+   "file": "(K4L) C# - Enigmatic.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_c_enigmatic_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 130,
+   "key": "G major",
+   "keyConf": 0.525
+  },
+  {
+   "file": "(K4L) C# - Harmonic Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_c_harmonic_minor_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "C# minor",
+   "keyConf": 0.739
+  },
+  {
+   "file": "(K4L) C# - Ionian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_c_ionian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "C# major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) C# - Japanese Insen.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_c_japanese_insen_pad",
+   "role": "pad",
+   "notes": 25,
+   "tempo": 130,
+   "key": "B minor",
+   "keyConf": 0.604
+  },
+  {
+   "file": "(K4L) C# - Lydian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_c_lydian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "G# major",
+   "keyConf": 0.747
+  },
+  {
+   "file": "(K4L) C# - Major Bebop.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_c_major_bebop_pad",
+   "role": "pad",
+   "notes": 40,
+   "tempo": 130,
+   "key": "A# minor",
+   "keyConf": 0.662
+  },
+  {
+   "file": "(K4L) C# - Melodic Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_c_melodic_minor_lead",
+   "role": "lead",
+   "notes": 36,
+   "tempo": 130,
+   "key": "C# minor",
+   "keyConf": 0.556
+  },
+  {
+   "file": "(K4L) C# - Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_c_minor_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "C# minor",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) C# - Mixolydian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_c_mixolydian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "F# major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) C# - Neapolitan Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_c_neapolitan_minor_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 130,
+   "key": "A major",
+   "keyConf": 0.603
+  },
+  {
+   "file": "(K4L) C# - Neapolitan.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_c_neapolitan_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 130,
+   "key": null,
+   "keyConf": 0.0
+  },
+  {
+   "file": "(K4L) C# - Pentatonic Blues.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_c_pentatonic_blues_pad",
+   "role": "pad",
+   "notes": 31,
+   "tempo": 130,
+   "key": "E major",
+   "keyConf": 0.576
+  },
+  {
+   "file": "(K4L) C# - Pentatonic Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_c_pentatonic_minor_pad",
+   "role": "pad",
+   "notes": 25,
+   "tempo": 130,
+   "key": "E major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) C# - Phrygian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_c_phrygian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "A major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) C# - Whole Tone.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_c_whole_tone_pad",
+   "role": "pad",
+   "notes": 30,
+   "tempo": 130,
+   "key": null,
+   "keyConf": 0.0
+  },
+  {
+   "file": "(K4L) D - Arabic.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_d_arabic_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 130,
+   "key": "G minor",
+   "keyConf": 0.542
+  },
+  {
+   "file": "(K4L) D - Blues.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_d_blues_pad",
+   "role": "pad",
+   "notes": 25,
+   "tempo": 130,
+   "key": "D minor",
+   "keyConf": 0.587
+  },
+  {
+   "file": "(K4L) D - Diatonic.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_d_diatonic_pad",
+   "role": "pad",
+   "notes": 26,
+   "tempo": 130,
+   "key": "D major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) D - Diminished.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_d_diminished_pad",
+   "role": "pad",
+   "notes": 48,
+   "tempo": 130,
+   "key": null,
+   "keyConf": 0.0
+  },
+  {
+   "file": "(K4L) D - Dominant Bebop.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_d_dominant_bebop_pad",
+   "role": "pad",
+   "notes": 40,
+   "tempo": 130,
+   "key": "G major",
+   "keyConf": 0.656
+  },
+  {
+   "file": "(K4L) D - Dorian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_d_dorian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "C major",
+   "keyConf": 0.731
+  },
+  {
+   "file": "(K4L) D - Enigmatic.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_d_enigmatic_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 130,
+   "key": "G# major",
+   "keyConf": 0.525
+  },
+  {
+   "file": "(K4L) D - Harmonic Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_d_harmonic_minor_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "D minor",
+   "keyConf": 0.739
+  },
+  {
+   "file": "(K4L) D - Ionian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_d_ionian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "D major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) D - Japanese Insen.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_d_japanese_insen_pad",
+   "role": "pad",
+   "notes": 25,
+   "tempo": 130,
+   "key": "C minor",
+   "keyConf": 0.604
+  },
+  {
+   "file": "(K4L) D - Lydian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_d_lydian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "A major",
+   "keyConf": 0.747
+  },
+  {
+   "file": "(K4L) D - Major Bebop.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_d_major_bebop_pad",
+   "role": "pad",
+   "notes": 40,
+   "tempo": 130,
+   "key": "B minor",
+   "keyConf": 0.662
+  },
+  {
+   "file": "(K4L) D - Melodic Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_d_melodic_minor_lead",
+   "role": "lead",
+   "notes": 36,
+   "tempo": 130,
+   "key": "D minor",
+   "keyConf": 0.556
+  },
+  {
+   "file": "(K4L) D - Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_d_minor_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "D minor",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) D - Mixolydian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_d_mixolydian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "G major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) D - Neapolitan Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_d_neapolitan_minor_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 130,
+   "key": "A# major",
+   "keyConf": 0.603
+  },
+  {
+   "file": "(K4L) D - Neapolitan.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_d_neapolitan_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 130,
+   "key": null,
+   "keyConf": 0.0
+  },
+  {
+   "file": "(K4L) D - Pentatonic Blues.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_d_pentatonic_blues_pad",
+   "role": "pad",
+   "notes": 31,
+   "tempo": 130,
+   "key": "F major",
+   "keyConf": 0.576
+  },
+  {
+   "file": "(K4L) D - Pentatonic Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_d_pentatonic_minor_pad",
+   "role": "pad",
+   "notes": 25,
+   "tempo": 130,
+   "key": "F major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) D - Phrygian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_d_phrygian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "A# major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) D - Whole Tone.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_d_whole_tone_pad",
+   "role": "pad",
+   "notes": 30,
+   "tempo": 130,
+   "key": null,
+   "keyConf": 0.0
+  },
+  {
+   "file": "(K4L) D# - Arabic.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_d_arabic_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 130,
+   "key": "G# minor",
+   "keyConf": 0.542
+  },
+  {
+   "file": "(K4L) D# - Blues.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_d_blues_pad",
+   "role": "pad",
+   "notes": 25,
+   "tempo": 130,
+   "key": "D# minor",
+   "keyConf": 0.587
+  },
+  {
+   "file": "(K4L) D# - Diatonic.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_d_diatonic_pad",
+   "role": "pad",
+   "notes": 26,
+   "tempo": 130,
+   "key": "D# major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) D# - Diminished.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_d_diminished_pad",
+   "role": "pad",
+   "notes": 48,
+   "tempo": 130,
+   "key": null,
+   "keyConf": 0.0
+  },
+  {
+   "file": "(K4L) D# - Dominant Bebop.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_d_dominant_bebop_pad",
+   "role": "pad",
+   "notes": 40,
+   "tempo": 130,
+   "key": "G# major",
+   "keyConf": 0.656
+  },
+  {
+   "file": "(K4L) D# - Dorian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_d_dorian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "C# major",
+   "keyConf": 0.731
+  },
+  {
+   "file": "(K4L) D# - Enigmatic.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_d_enigmatic_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 130,
+   "key": "A major",
+   "keyConf": 0.525
+  },
+  {
+   "file": "(K4L) D# - Harmonic Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_d_harmonic_minor_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "D# minor",
+   "keyConf": 0.739
+  },
+  {
+   "file": "(K4L) D# - Ionian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_d_ionian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "D# major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) D# - Japanese Insen.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_d_japanese_insen_pad",
+   "role": "pad",
+   "notes": 25,
+   "tempo": 130,
+   "key": "C# minor",
+   "keyConf": 0.604
+  },
+  {
+   "file": "(K4L) D# - Lydian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_d_lydian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "A# major",
+   "keyConf": 0.747
+  },
+  {
+   "file": "(K4L) D# - Major Bebop.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_d_major_bebop_pad",
+   "role": "pad",
+   "notes": 40,
+   "tempo": 130,
+   "key": "C minor",
+   "keyConf": 0.662
+  },
+  {
+   "file": "(K4L) D# - Melodic Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_d_melodic_minor_lead",
+   "role": "lead",
+   "notes": 36,
+   "tempo": 130,
+   "key": "D# minor",
+   "keyConf": 0.556
+  },
+  {
+   "file": "(K4L) D# - Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_d_minor_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "D# minor",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) D# - Mixolydian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_d_mixolydian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "G# major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) D# - Neapolitan Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_d_neapolitan_minor_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 130,
+   "key": "B major",
+   "keyConf": 0.603
+  },
+  {
+   "file": "(K4L) D# - Neapolitan.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_d_neapolitan_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 130,
+   "key": null,
+   "keyConf": 0.0
+  },
+  {
+   "file": "(K4L) D# - Pentatonic Blues.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_d_pentatonic_blues_pad",
+   "role": "pad",
+   "notes": 31,
+   "tempo": 130,
+   "key": "F# major",
+   "keyConf": 0.576
+  },
+  {
+   "file": "(K4L) D# - Pentatonic Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_d_pentatonic_minor_pad",
+   "role": "pad",
+   "notes": 25,
+   "tempo": 130,
+   "key": "F# major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) D# - Phrygian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_d_phrygian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "B major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) D# - Whole Tone.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_d_whole_tone_pad",
+   "role": "pad",
+   "notes": 30,
+   "tempo": 130,
+   "key": null,
+   "keyConf": 0.0
+  },
+  {
+   "file": "(K4L) E - Arabic.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_e_arabic_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 130,
+   "key": "A minor",
+   "keyConf": 0.542
+  },
+  {
+   "file": "(K4L) E - Blues.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_e_blues_pad",
+   "role": "pad",
+   "notes": 25,
+   "tempo": 130,
+   "key": "E minor",
+   "keyConf": 0.587
+  },
+  {
+   "file": "(K4L) E - Diatonic.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_e_diatonic_pad",
+   "role": "pad",
+   "notes": 26,
+   "tempo": 130,
+   "key": "E major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) E - Diminished.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_e_diminished_pad",
+   "role": "pad",
+   "notes": 48,
+   "tempo": 130,
+   "key": null,
+   "keyConf": 0.0
+  },
+  {
+   "file": "(K4L) E - Dominant Bebop.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_e_dominant_bebop_pad",
+   "role": "pad",
+   "notes": 40,
+   "tempo": 130,
+   "key": "A major",
+   "keyConf": 0.656
+  },
+  {
+   "file": "(K4L) E - Dorian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_e_dorian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "D major",
+   "keyConf": 0.731
+  },
+  {
+   "file": "(K4L) E - Enigmatic.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_e_enigmatic_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 130,
+   "key": "A# major",
+   "keyConf": 0.525
+  },
+  {
+   "file": "(K4L) E - Harmonic Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_e_harmonic_minor_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "E minor",
+   "keyConf": 0.739
+  },
+  {
+   "file": "(K4L) E - Ionian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_e_ionian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "E major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) E - Japanese Insen.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_e_japanese_insen_pad",
+   "role": "pad",
+   "notes": 25,
+   "tempo": 130,
+   "key": "D minor",
+   "keyConf": 0.604
+  },
+  {
+   "file": "(K4L) E - Lydian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_e_lydian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "B major",
+   "keyConf": 0.747
+  },
+  {
+   "file": "(K4L) E - Major Bebop.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_e_major_bebop_pad",
+   "role": "pad",
+   "notes": 40,
+   "tempo": 130,
+   "key": "C# minor",
+   "keyConf": 0.662
+  },
+  {
+   "file": "(K4L) E - Melodic Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_e_melodic_minor_lead",
+   "role": "lead",
+   "notes": 36,
+   "tempo": 130,
+   "key": "E minor",
+   "keyConf": 0.556
+  },
+  {
+   "file": "(K4L) E - Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_e_minor_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "E minor",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) E - Mixolydian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_e_mixolydian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "A major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) E - Neapolitan Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_e_neapolitan_minor_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 130,
+   "key": "C major",
+   "keyConf": 0.603
+  },
+  {
+   "file": "(K4L) E - Neapolitan.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_e_neapolitan_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 130,
+   "key": null,
+   "keyConf": 0.0
+  },
+  {
+   "file": "(K4L) E - Pentatonic Blues.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_e_pentatonic_blues_pad",
+   "role": "pad",
+   "notes": 31,
+   "tempo": 130,
+   "key": "G major",
+   "keyConf": 0.576
+  },
+  {
+   "file": "(K4L) E - Pentatonic Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_e_pentatonic_minor_pad",
+   "role": "pad",
+   "notes": 25,
+   "tempo": 130,
+   "key": "G major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) E - Phrygian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_e_phrygian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "C major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) E - Whole Tone.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_e_whole_tone_pad",
+   "role": "pad",
+   "notes": 30,
+   "tempo": 130,
+   "key": null,
+   "keyConf": 0.0
+  },
+  {
+   "file": "(K4L) F - Arabic.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_f_arabic_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 130,
+   "key": "A# minor",
+   "keyConf": 0.542
+  },
+  {
+   "file": "(K4L) F - Blues.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_f_blues_pad",
+   "role": "pad",
+   "notes": 25,
+   "tempo": 130,
+   "key": "F minor",
+   "keyConf": 0.587
+  },
+  {
+   "file": "(K4L) F - Diatonic.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_f_diatonic_pad",
+   "role": "pad",
+   "notes": 26,
+   "tempo": 130,
+   "key": "F major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) F - Diminished.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_f_diminished_pad",
+   "role": "pad",
+   "notes": 48,
+   "tempo": 130,
+   "key": null,
+   "keyConf": 0.0
+  },
+  {
+   "file": "(K4L) F - Dominant Bebop.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_f_dominant_bebop_pad",
+   "role": "pad",
+   "notes": 40,
+   "tempo": 130,
+   "key": "A# major",
+   "keyConf": 0.656
+  },
+  {
+   "file": "(K4L) F - Dorian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_f_dorian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "D# major",
+   "keyConf": 0.731
+  },
+  {
+   "file": "(K4L) F - Enigmatic.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_f_enigmatic_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 130,
+   "key": "B major",
+   "keyConf": 0.525
+  },
+  {
+   "file": "(K4L) F - Harmonic Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_f_harmonic_minor_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "F minor",
+   "keyConf": 0.739
+  },
+  {
+   "file": "(K4L) F - Ionian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_f_ionian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "F major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) F - Japanese Insen.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_f_japanese_insen_pad",
+   "role": "pad",
+   "notes": 25,
+   "tempo": 130,
+   "key": "D# minor",
+   "keyConf": 0.604
+  },
+  {
+   "file": "(K4L) F - Lydian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_f_lydian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "C major",
+   "keyConf": 0.747
+  },
+  {
+   "file": "(K4L) F - Major Bebop.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_f_major_bebop_pad",
+   "role": "pad",
+   "notes": 40,
+   "tempo": 130,
+   "key": "D minor",
+   "keyConf": 0.662
+  },
+  {
+   "file": "(K4L) F - Melodic Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_f_melodic_minor_lead",
+   "role": "lead",
+   "notes": 36,
+   "tempo": 130,
+   "key": "F minor",
+   "keyConf": 0.556
+  },
+  {
+   "file": "(K4L) F - Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_f_minor_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "F minor",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) F - Mixolydian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_f_mixolydian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "A# major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) F - Neapolitan Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_f_neapolitan_minor_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 130,
+   "key": "C# major",
+   "keyConf": 0.603
+  },
+  {
+   "file": "(K4L) F - Neapolitan.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_f_neapolitan_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 130,
+   "key": null,
+   "keyConf": 0.0
+  },
+  {
+   "file": "(K4L) F - Pentatonic Blues.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_f_pentatonic_blues_pad",
+   "role": "pad",
+   "notes": 31,
+   "tempo": 130,
+   "key": "G# major",
+   "keyConf": 0.576
+  },
+  {
+   "file": "(K4L) F - Pentatonic Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_f_pentatonic_minor_pad",
+   "role": "pad",
+   "notes": 25,
+   "tempo": 130,
+   "key": "G# major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) F - Phrygian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_f_phrygian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "C# major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) F - Whole Tone.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_f_whole_tone_pad",
+   "role": "pad",
+   "notes": 30,
+   "tempo": 130,
+   "key": null,
+   "keyConf": 0.0
+  },
+  {
+   "file": "(K4L) F# - Arabic.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_f_arabic_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 130,
+   "key": "B minor",
+   "keyConf": 0.542
+  },
+  {
+   "file": "(K4L) F# - Blues.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_f_blues_pad",
+   "role": "pad",
+   "notes": 25,
+   "tempo": 130,
+   "key": "F# minor",
+   "keyConf": 0.587
+  },
+  {
+   "file": "(K4L) F# - Diatonic.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_f_diatonic_pad",
+   "role": "pad",
+   "notes": 26,
+   "tempo": 130,
+   "key": "F# major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) F# - Diminished.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_f_diminished_pad",
+   "role": "pad",
+   "notes": 48,
+   "tempo": 130,
+   "key": null,
+   "keyConf": 0.0
+  },
+  {
+   "file": "(K4L) F# - Dominant Bebop.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_f_dominant_bebop_pad",
+   "role": "pad",
+   "notes": 40,
+   "tempo": 130,
+   "key": "B major",
+   "keyConf": 0.656
+  },
+  {
+   "file": "(K4L) F# - Dorian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_f_dorian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "E major",
+   "keyConf": 0.731
+  },
+  {
+   "file": "(K4L) F# - Enigmatic.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_f_enigmatic_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 130,
+   "key": "C major",
+   "keyConf": 0.525
+  },
+  {
+   "file": "(K4L) F# - Harmonic Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_f_harmonic_minor_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "F# minor",
+   "keyConf": 0.739
+  },
+  {
+   "file": "(K4L) F# - Ionian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_f_ionian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "F# major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) F# - Japanese Insen.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_f_japanese_insen_pad",
+   "role": "pad",
+   "notes": 25,
+   "tempo": 130,
+   "key": "E minor",
+   "keyConf": 0.604
+  },
+  {
+   "file": "(K4L) F# - Lydian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_f_lydian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "C# major",
+   "keyConf": 0.747
+  },
+  {
+   "file": "(K4L) F# - Major Bebop.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_f_major_bebop_pad",
+   "role": "pad",
+   "notes": 40,
+   "tempo": 130,
+   "key": "D# minor",
+   "keyConf": 0.662
+  },
+  {
+   "file": "(K4L) F# - Melodic Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_f_melodic_minor_lead",
+   "role": "lead",
+   "notes": 36,
+   "tempo": 130,
+   "key": "F# minor",
+   "keyConf": 0.556
+  },
+  {
+   "file": "(K4L) F# - Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_f_minor_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "F# minor",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) F# - Mixolydian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_f_mixolydian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "B major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) F# - Neapolitan Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_f_neapolitan_minor_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 130,
+   "key": "D major",
+   "keyConf": 0.603
+  },
+  {
+   "file": "(K4L) F# - Neapolitan.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_f_neapolitan_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 130,
+   "key": null,
+   "keyConf": 0.0
+  },
+  {
+   "file": "(K4L) F# - Pentatonic Blues.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_f_pentatonic_blues_pad",
+   "role": "pad",
+   "notes": 31,
+   "tempo": 130,
+   "key": "A major",
+   "keyConf": 0.576
+  },
+  {
+   "file": "(K4L) F# - Pentatonic Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_f_pentatonic_minor_pad",
+   "role": "pad",
+   "notes": 25,
+   "tempo": 130,
+   "key": "A major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) F# - Phrygian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_f_phrygian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "D major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) F# - Whole Tone.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_f_whole_tone_pad",
+   "role": "pad",
+   "notes": 30,
+   "tempo": 130,
+   "key": null,
+   "keyConf": 0.0
+  },
+  {
+   "file": "(K4L) G - Arabic.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_g_arabic_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 130,
+   "key": "C minor",
+   "keyConf": 0.542
+  },
+  {
+   "file": "(K4L) G - Blues.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_g_blues_pad",
+   "role": "pad",
+   "notes": 25,
+   "tempo": 130,
+   "key": "G minor",
+   "keyConf": 0.587
+  },
+  {
+   "file": "(K4L) G - Diatonic.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_g_diatonic_pad",
+   "role": "pad",
+   "notes": 26,
+   "tempo": 130,
+   "key": "G major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) G - Diminished.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_g_diminished_pad",
+   "role": "pad",
+   "notes": 48,
+   "tempo": 130,
+   "key": null,
+   "keyConf": 0.0
+  },
+  {
+   "file": "(K4L) G - Dominant Bebop.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_g_dominant_bebop_pad",
+   "role": "pad",
+   "notes": 40,
+   "tempo": 130,
+   "key": "C major",
+   "keyConf": 0.656
+  },
+  {
+   "file": "(K4L) G - Dorian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_g_dorian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "F major",
+   "keyConf": 0.731
+  },
+  {
+   "file": "(K4L) G - Enigmatic.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_g_enigmatic_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 130,
+   "key": "C# major",
+   "keyConf": 0.525
+  },
+  {
+   "file": "(K4L) G - Harmonic Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_g_harmonic_minor_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "G minor",
+   "keyConf": 0.739
+  },
+  {
+   "file": "(K4L) G - Ionian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_g_ionian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "G major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) G - Japanese Insen.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_g_japanese_insen_pad",
+   "role": "pad",
+   "notes": 25,
+   "tempo": 130,
+   "key": "F minor",
+   "keyConf": 0.604
+  },
+  {
+   "file": "(K4L) G - Lydian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_g_lydian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "D major",
+   "keyConf": 0.747
+  },
+  {
+   "file": "(K4L) G - Major Bebop.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_g_major_bebop_pad",
+   "role": "pad",
+   "notes": 40,
+   "tempo": 130,
+   "key": "E minor",
+   "keyConf": 0.662
+  },
+  {
+   "file": "(K4L) G - Melodic Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_g_melodic_minor_lead",
+   "role": "lead",
+   "notes": 36,
+   "tempo": 130,
+   "key": "G minor",
+   "keyConf": 0.556
+  },
+  {
+   "file": "(K4L) G - Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_g_minor_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "G minor",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) G - Mixolydian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_g_mixolydian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "C major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) G - Neapolitan Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_g_neapolitan_minor_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 130,
+   "key": "D# major",
+   "keyConf": 0.603
+  },
+  {
+   "file": "(K4L) G - Neapolitan.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_g_neapolitan_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 130,
+   "key": null,
+   "keyConf": 0.0
+  },
+  {
+   "file": "(K4L) G - Pentatonic Blues.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_g_pentatonic_blues_pad",
+   "role": "pad",
+   "notes": 31,
+   "tempo": 130,
+   "key": "A# major",
+   "keyConf": 0.576
+  },
+  {
+   "file": "(K4L) G - Pentatonic Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_g_pentatonic_minor_pad",
+   "role": "pad",
+   "notes": 25,
+   "tempo": 130,
+   "key": "A# major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) G - Phrygian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_g_phrygian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "D# major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) G - Whole Tone.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_g_whole_tone_pad",
+   "role": "pad",
+   "notes": 30,
+   "tempo": 130,
+   "key": null,
+   "keyConf": 0.0
+  },
+  {
+   "file": "(K4L) G# - Arabic.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_g_arabic_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 130,
+   "key": "C# minor",
+   "keyConf": 0.542
+  },
+  {
+   "file": "(K4L) G# - Blues.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_g_blues_pad",
+   "role": "pad",
+   "notes": 25,
+   "tempo": 130,
+   "key": "G# minor",
+   "keyConf": 0.587
+  },
+  {
+   "file": "(K4L) G# - Diatonic.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_g_diatonic_pad",
+   "role": "pad",
+   "notes": 26,
+   "tempo": 130,
+   "key": "G# major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) G# - Diminished.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_g_diminished_pad",
+   "role": "pad",
+   "notes": 48,
+   "tempo": 130,
+   "key": null,
+   "keyConf": 0.0
+  },
+  {
+   "file": "(K4L) G# - Dominant Bebop.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_g_dominant_bebop_pad",
+   "role": "pad",
+   "notes": 40,
+   "tempo": 130,
+   "key": "C# major",
+   "keyConf": 0.656
+  },
+  {
+   "file": "(K4L) G# - Dorian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_g_dorian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "F# major",
+   "keyConf": 0.731
+  },
+  {
+   "file": "(K4L) G# - Enigmatic.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_g_enigmatic_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 130,
+   "key": "D major",
+   "keyConf": 0.525
+  },
+  {
+   "file": "(K4L) G# - Harmonic Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_g_harmonic_minor_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "G# minor",
+   "keyConf": 0.739
+  },
+  {
+   "file": "(K4L) G# - Ionian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_g_ionian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "G# major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) G# - Japanese Insen.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_g_japanese_insen_pad",
+   "role": "pad",
+   "notes": 25,
+   "tempo": 130,
+   "key": "F# minor",
+   "keyConf": 0.604
+  },
+  {
+   "file": "(K4L) G# - Lydian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_g_lydian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "D# major",
+   "keyConf": 0.747
+  },
+  {
+   "file": "(K4L) G# - Major Bebop.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_g_major_bebop_pad",
+   "role": "pad",
+   "notes": 40,
+   "tempo": 130,
+   "key": "F minor",
+   "keyConf": 0.662
+  },
+  {
+   "file": "(K4L) G# - Melodic Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_g_melodic_minor_lead",
+   "role": "lead",
+   "notes": 36,
+   "tempo": 130,
+   "key": "G# minor",
+   "keyConf": 0.556
+  },
+  {
+   "file": "(K4L) G# - Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_g_minor_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "G# minor",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) G# - Mixolydian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_g_mixolydian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "C# major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) G# - Neapolitan Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_g_neapolitan_minor_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 130,
+   "key": "E major",
+   "keyConf": 0.603
+  },
+  {
+   "file": "(K4L) G# - Neapolitan.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_g_neapolitan_pad",
+   "role": "pad",
+   "notes": 35,
+   "tempo": 130,
+   "key": null,
+   "keyConf": 0.0
+  },
+  {
+   "file": "(K4L) G# - Pentatonic Blues.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_g_pentatonic_blues_pad",
+   "role": "pad",
+   "notes": 31,
+   "tempo": 130,
+   "key": "B major",
+   "keyConf": 0.576
+  },
+  {
+   "file": "(K4L) G# - Pentatonic Minor.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_g_pentatonic_minor_pad",
+   "role": "pad",
+   "notes": 25,
+   "tempo": 130,
+   "key": "B major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) G# - Phrygian.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_g_phrygian_pad",
+   "role": "pad",
+   "notes": 36,
+   "tempo": 130,
+   "key": "E major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "(K4L) G# - Whole Tone.mid",
+   "recipe": "pack_k4l_bruhotb_stash_kit_2k_k4l_g_whole_tone_pad",
+   "role": "pad",
+   "notes": 30,
+   "tempo": 130,
+   "key": null,
+   "keyConf": 0.0
+  },
+  {
+   "file": "808 (Char).mid",
+   "recipe": "pack_drive_download_20260506t_808_char_808",
+   "role": "808",
+   "notes": 6,
+   "tempo": 100,
+   "key": null,
+   "keyConf": 0.0
+  },
+  {
+   "file": "beat.mid",
+   "recipe": "pack_drive_download_20260506t_beat_lead",
+   "role": "lead",
+   "notes": 10,
+   "tempo": 155,
+   "key": "D# major",
+   "keyConf": 0.655
+  },
+  {
+   "file": "cool.mid",
+   "recipe": "pack_drive_download_20260506t_cool_lead",
+   "role": "lead",
+   "notes": 16,
+   "tempo": 152,
+   "key": "C major",
+   "keyConf": 0.613
+  },
+  {
+   "file": "creek.mid",
+   "recipe": "pack_drive_download_20260506t_creek_lead",
+   "role": "lead",
+   "notes": 10,
+   "tempo": 150,
+   "key": "C minor",
+   "keyConf": 0.75
+  },
+  {
+   "file": "fun.mid",
+   "recipe": "pack_drive_download_20260506t_fun_lead",
+   "role": "lead",
+   "notes": 16,
+   "tempo": 130,
+   "key": "D major",
+   "keyConf": 0.637
+  },
+  {
+   "file": "ganja.mid",
+   "recipe": "pack_drive_download_20260506t_ganja_lead",
+   "role": "lead",
+   "notes": 8,
+   "tempo": 130,
+   "key": "B major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "haribo.mid",
+   "recipe": "pack_drive_download_20260506t_haribo_lead",
+   "role": "lead",
+   "notes": 13,
+   "tempo": 155,
+   "key": "A# minor",
+   "keyConf": 0.695
+  },
+  {
+   "file": "high.mid",
+   "recipe": "pack_drive_download_20260506t_high_lead",
+   "role": "lead",
+   "notes": 12,
+   "tempo": 155,
+   "key": "B minor",
+   "keyConf": 0.75
+  },
+  {
+   "file": "hoes.mid",
+   "recipe": "pack_drive_download_20260506t_hoes_lead",
+   "role": "lead",
+   "notes": 9,
+   "tempo": 130,
+   "key": "C# major",
+   "keyConf": 0.677
+  },
+  {
+   "file": "jack.mid",
+   "recipe": "pack_drive_download_20260506t_jack_lead",
+   "role": "lead",
+   "notes": 16,
+   "tempo": 152,
+   "key": "C major",
+   "keyConf": 0.649
+  },
+  {
+   "file": "jiggle.mid",
+   "recipe": "pack_drive_download_20260506t_jiggle_lead",
+   "role": "lead",
+   "notes": 17,
+   "tempo": 152,
+   "key": "C major",
+   "keyConf": 0.664
+  },
+  {
+   "file": "later.mid",
+   "recipe": "pack_drive_download_20260506t_later_lead",
+   "role": "lead",
+   "notes": 12,
+   "tempo": 152,
+   "key": "C major",
+   "keyConf": 0.75
+  },
+  {
+   "file": "monster.mid",
+   "recipe": "pack_drive_download_20260506t_monster_lead",
+   "role": "lead",
+   "notes": 6,
+   "tempo": 155,
+   "key": null,
+   "keyConf": 0.0
+  },
+  {
+   "file": "quick.mid",
+   "recipe": "pack_drive_download_20260506t_quick_lead",
+   "role": "lead",
+   "notes": 7,
+   "tempo": 152,
+   "key": null,
+   "keyConf": 0.0
+  },
+  {
+   "file": "simple.mid",
+   "recipe": "pack_drive_download_20260506t_simple_lead",
+   "role": "lead",
+   "notes": 11,
+   "tempo": 152,
+   "key": "C major",
+   "keyConf": 0.661
+  },
+  {
+   "file": "tony.mid",
+   "recipe": "pack_drive_download_20260506t_tony_lead",
+   "role": "lead",
+   "notes": 16,
+   "tempo": 155,
+   "key": "D minor",
+   "keyConf": 0.542
+  },
+  {
+   "file": "undertale.mid",
+   "recipe": "pack_drive_download_20260506t_undertale_lead",
+   "role": "lead",
+   "notes": 10,
+   "tempo": 155,
+   "key": "B minor",
+   "keyConf": 0.652
+  },
+  {
+   "file": "untitled.mid",
+   "recipe": "pack_drive_download_20260506t_untitled_lead",
+   "role": "lead",
+   "notes": 10,
+   "tempo": 160,
+   "key": "C minor",
+   "keyConf": 0.59
+  },
+  {
+   "file": "wtf.mid",
+   "recipe": "pack_drive_download_20260506t_wtf_lead",
+   "role": "lead",
+   "notes": 17,
+   "tempo": 155,
+   "key": null,
+   "keyConf": 0.0
+  },
+  {
+   "file": "@akhd clap pattern 1.mid",
+   "recipe": "pack_drive_download_20260506t_akhd_clap_pattern_1_clap",
+   "role": "clap",
+   "notes": 8,
+   "tempo": 146,
+   "key": null,
+   "keyConf": 0.0
+  },
+  {
+   "file": "@akhd clap pattern 4.mid",
+   "error": "not a SMF (missing MThd)"
+  },
+  {
+   "file": "@akhd clap pattern 5.mid",
+   "recipe": "pack_drive_download_20260506t_akhd_clap_pattern_5_clap",
+   "role": "clap",
+   "notes": 8,
+   "tempo": 148,
+   "key": null,
+   "keyConf": 0.0
+  },
+  {
+   "file": "@akhd classic clap pattern.mid",
+   "recipe": "pack_drive_download_20260506t_akhd_classic_clap_pattern_clap",
+   "role": "clap",
+   "notes": 4,
+   "tempo": 156,
+   "key": null,
+   "keyConf": 0.0
+  },
+  {
+   "file": "@akhd delay.mid",
+   "recipe": "pack_drive_download_20260506t_akhd_delay_lead",
+   "role": "lead",
+   "notes": 24,
+   "tempo": 156,
+   "key": "C major",
+   "keyConf": 0.684
+  },
+  {
+   "file": "@akhd norah hihat.mid",
+   "recipe": "pack_drive_download_20260506t_akhd_norah_hihat_hat",
+   "role": "hat",
+   "notes": 120,
+   "tempo": 140,
+   "key": null,
+   "keyConf": 0.0
+  },
+  {
+   "file": "@akhd typical perc40.mid",
+   "recipe": "pack_drive_download_20260506t_akhd_typical_perc40_lead",
+   "role": "lead",
+   "notes": 25,
+   "tempo": 156,
+   "key": "C major",
+   "keyConf": 0.684
+  },
+  {
+   "file": "@akhd typical tdf.mid",
+   "recipe": "pack_drive_download_20260506t_akhd_typical_tdf_lead",
+   "role": "lead",
+   "notes": 31,
+   "tempo": 156,
+   "key": "C major",
+   "keyConf": 0.684
+  },
+  {
+   "file": "@akhd snare pattern 1.mid",
+   "error": "not a SMF (missing MThd)"
+  },
+  {
+   "file": "@akhd snare pattern 3.mid",
+   "recipe": "pack_drive_download_20260506t_akhd_snare_pattern_3_snare",
+   "role": "snare",
+   "notes": 4,
+   "tempo": 151,
+   "key": null,
+   "keyConf": 0.0
+  },
+  {
+   "file": "@akhd snare roll.mid",
+   "recipe": "pack_drive_download_20260506t_akhd_snare_roll_snare",
+   "role": "snare",
+   "notes": 4,
+   "tempo": 148,
+   "key": null,
+   "keyConf": 0.0
+  },
+  {
+   "file": "(K4L) [BONUS] Chord Midi -  Sorcerer 66 BPM @mafiosaucedup.mid",
+   "recipe": "pack_drive_download_20260506t_k4l_bonus_chord_midi_sorcerer_66_bpm_maf_pad",
+   "role": "pad",
+   "notes": 52,
+   "tempo": 66,
+   "key": "D minor",
+   "keyConf": 0.744
+  },
+  {
+   "file": "(K4L) [BONUS] Chord Midi - Big Bag [Dm].mid",
+   "recipe": "pack_drive_download_20260506t_k4l_bonus_chord_midi_big_bag_dm_pad",
+   "role": "pad",
+   "notes": 18,
+   "tempo": 140,
+   "key": "D minor",
+   "keyConf": 0.8
+  },
+  {
+   "file": "(K4L) [BONUS] Chord Midi - Crows [Em].mid",
+   "recipe": "pack_drive_download_20260506t_k4l_bonus_chord_midi_crows_em_pad",
+   "role": "pad",
+   "notes": 16,
+   "tempo": 140,
+   "key": "E minor",
+   "keyConf": 0.8
+  },
+  {
+   "file": "(K4L) [BONUS] Chord Midi - Dread [Am].mid",
+   "recipe": "pack_drive_download_20260506t_k4l_bonus_chord_midi_dread_am_pad",
+   "role": "pad",
+   "notes": 16,
+   "tempo": 140,
+   "key": "A minor",
+   "keyConf": 0.8
+  },
+  {
+   "file": "(K4L) [BONUS] Chord Midi - Emotional [G#m].mid",
+   "recipe": "pack_drive_download_20260506t_k4l_bonus_chord_midi_emotional_g_m_pad",
+   "role": "pad",
+   "notes": 17,
+   "tempo": 140,
+   "key": "G# minor",
+   "keyConf": 0.8
+  },
+  {
+   "file": "(K4L) [BONUS] Chord Midi - Galaxy [Dm].mid",
+   "recipe": "pack_drive_download_20260506t_k4l_bonus_chord_midi_galaxy_dm_pad",
+   "role": "pad",
+   "notes": 161,
+   "tempo": 130,
+   "key": "D minor",
+   "keyConf": 0.8
+  },
+  {
+   "file": "(K4L) [BONUS] Chord Midi - Harmonic Dark [Am].mid",
+   "recipe": "pack_drive_download_20260506t_k4l_bonus_chord_midi_harmonic_dark_am_pad",
+   "role": "pad",
+   "notes": 16,
+   "tempo": 140,
+   "key": "A minor",
+   "keyConf": 0.8
+  },
+  {
+   "file": "(K4L) [BONUS] Chord Midi - Holy Ghost [Am].mid",
+   "recipe": "pack_drive_download_20260506t_k4l_bonus_chord_midi_holy_ghost_am_pad",
+   "role": "pad",
+   "notes": 17,
+   "tempo": 140,
+   "key": "A minor",
+   "keyConf": 0.8
+  },
+  {
+   "file": "(K4L) [BONUS] Chord Midi - Hot Swap [Em].mid",
+   "recipe": "pack_drive_download_20260506t_k4l_bonus_chord_midi_hot_swap_em_pad",
+   "role": "pad",
+   "notes": 16,
+   "tempo": 140,
+   "key": "E minor",
+   "keyConf": 0.8
+  },
+  {
+   "file": "(K4L) [BONUS] Chord Midi - Simple Sad [C#m].mid",
+   "recipe": "pack_drive_download_20260506t_k4l_bonus_chord_midi_simple_sad_c_m_pad",
+   "role": "pad",
+   "notes": 9,
+   "tempo": 140,
+   "key": "B minor",
+   "keyConf": 0.6
+  },
+  {
+   "file": "(K4L) [BONUS] Chord Midi - Simple [Em].mid",
+   "recipe": "pack_drive_download_20260506t_k4l_bonus_chord_midi_simple_em_pad",
+   "role": "pad",
+   "notes": 8,
+   "tempo": 140,
+   "key": "E minor",
+   "keyConf": 0.8
+  },
+  {
+   "file": "(K4L) [BONUS] Chord Midi - The Blues [Em].mid",
+   "recipe": "pack_drive_download_20260506t_k4l_bonus_chord_midi_the_blues_em_pad",
+   "role": "pad",
+   "notes": 53,
+   "tempo": 80,
+   "key": "E minor",
+   "keyConf": 0.8
+  },
+  {
+   "file": "(K4L) [BONUS] Chord Midi - The Time [Bm].mid",
+   "recipe": "pack_drive_download_20260506t_k4l_bonus_chord_midi_the_time_bm_pad",
+   "role": "pad",
+   "notes": 29,
+   "tempo": 77,
+   "key": "B minor",
+   "keyConf": 0.8
+  },
+  {
+   "file": "(K4L) [BONUS] Chord Midi - Trap Worthy [C#m].mid",
+   "recipe": "pack_drive_download_20260506t_k4l_bonus_chord_midi_trap_worthy_c_m_pad",
+   "role": "pad",
+   "notes": 17,
+   "tempo": 140,
+   "key": "C# minor",
+   "keyConf": 0.8
+  }
+ ]
+}

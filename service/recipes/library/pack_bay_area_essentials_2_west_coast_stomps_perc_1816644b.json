@@ -1,0 +1,169 @@
+{
+  "recipe_id": "pack_bay_area_essentials_2_west_coast_stomps_perc",
+  "schema_version": "2.0",
+  "source": {
+    "platform": "midi-pack",
+    "video_id": "pack_bay_area_essentials_2_west_coast_stomps_perc",
+    "url": "",
+    "title": "!BAY AREA ESSENTIALS 2/West Coast Stomps.mid",
+    "channel": "",
+    "duration_s": 0.0,
+    "license": "licensedPack",
+    "retrieved_at": null,
+    "content_hash": "1816644b0b05fd56152e8db48f1d9eb1d5245a48aa07b62241913609f865ada2"
+  },
+  "meta": {
+    "daw": {
+      "value": null,
+      "confidence": 0.0,
+      "evidence": []
+    },
+    "tempo_bpm": {
+      "value": 94,
+      "confidence": 0.9,
+      "evidence": [
+        "SMF meta"
+      ]
+    },
+    "key": {
+      "value": null,
+      "confidence": 0.0,
+      "evidence": []
+    },
+    "time_signature": {
+      "value": "4/4",
+      "confidence": 0.6,
+      "evidence": []
+    }
+  },
+  "arrangement": {
+    "sections": [
+      {
+        "name": "loop",
+        "start_s": 0.0,
+        "end_s": 17.872340425531913,
+        "confidence": 0.5
+      }
+    ]
+  },
+  "elements": [
+    {
+      "element_id": "pack_bay_area_essentials_2_west_coast_stomps_perc",
+      "role": "perc",
+      "label": "!BAY AREA ESSENTIALS 2 · West Coast Stomps (perc)",
+      "audio_ref": null,
+      "midi": {
+        "status": "extracted",
+        "midi_ref": null,
+        "notes": [
+          {
+            "pitch": 60,
+            "start_beats": 0.0,
+            "duration_beats": 0.010417,
+            "velocity": 107
+          },
+          {
+            "pitch": 60,
+            "start_beats": 1.5,
+            "duration_beats": 0.010417,
+            "velocity": 98
+          },
+          {
+            "pitch": 60,
+            "start_beats": 8.0,
+            "duration_beats": 0.010417,
+            "velocity": 107
+          },
+          {
+            "pitch": 60,
+            "start_beats": 9.5,
+            "duration_beats": 0.010417,
+            "velocity": 100
+          },
+          {
+            "pitch": 60,
+            "start_beats": 16.0,
+            "duration_beats": 0.010417,
+            "velocity": 107
+          },
+          {
+            "pitch": 60,
+            "start_beats": 17.5,
+            "duration_beats": 0.010417,
+            "velocity": 98
+          },
+          {
+            "pitch": 60,
+            "start_beats": 24.0,
+            "duration_beats": 0.010417,
+            "velocity": 107
+          },
+          {
+            "pitch": 60,
+            "start_beats": 25.5,
+            "duration_beats": 0.010417,
+            "velocity": 100
+          }
+        ],
+        "note_count": 8,
+        "confidence": 1.0
+      },
+      "sample_match": {
+        "status": "none",
+        "matched_path": null,
+        "distance": 0.0,
+        "alternates": [],
+        "root_note": null
+      },
+      "synth_patch": {
+        "status": "unknown",
+        "plugin": {
+          "name": null,
+          "available_locally": false
+        },
+        "params": {},
+        "match": null,
+        "substitute": null
+      },
+      "onsets": [],
+      "motif": {
+        "bars": 7.0,
+        "onset_grid": "half",
+        "density": 1.1429,
+        "syncopation": 0.5,
+        "contour": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "register_band": "perc",
+        "harmonic_function": ""
+      },
+      "bass": null,
+      "evidence": [],
+      "confidence": 0.9
+    }
+  ],
+  "unresolved": [],
+  "reconstruction_class": "deterministic",
+  "yield": {
+    "predicted": {
+      "drums": 0.0,
+      "midi": 1.0,
+      "synth": 0.0,
+      "arrangement": 0.4,
+      "overall": 0.6
+    },
+    "actual": {
+      "drums": 0.0,
+      "midi": 0.0,
+      "synth": 0.0,
+      "arrangement": 0.0,
+      "overall": 0.0
+    }
+  }
+}

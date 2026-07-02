@@ -264,6 +264,29 @@ check("binding prefers measured-root samples over nearer unverified labels",
       all("_measured" in e.sample_match.matched_path for e in mbound) and len(mbound) > 0,
       str([(e.role.value, e.sample_match.matched_path) for e in mbound]))
 
+# ── mode conformance (factory smoke: major-mode sources requested as minor rank ~6) ──
+cm = R.Element(role="pad", midi=R.Midi(notes=[
+    R.NoteEvent(pitch=60, start_beats=0.0, duration_beats=1.0),   # C  (in C minor)
+    R.NoteEvent(pitch=64, start_beats=1.0, duration_beats=1.0),   # E  → Eb
+    R.NoteEvent(pitch=69, start_beats=2.0, duration_beats=1.0),   # A  → Ab
+    R.NoteEvent(pitch=71, start_beats=3.0, duration_beats=1.0),   # B  → Bb
+]))
+G.conform_to_key(cm, "C minor")
+check("conform folds a C-major arpeggio into C minor (E→Eb, A→Ab, B→Bb)",
+      [n.pitch for n in cm.midi.notes] == [60, 63, 68, 70],
+      str([n.pitch for n in cm.midi.notes]))
+scale_fail = []
+for seed in range(8):
+    g_k, _ = G.generate({"mood": "dark", "tempo": 140, "key": "F minor"}, seed=seed, palette={})
+    fscale = {(5 + d) % 12 for d in (0, 2, 3, 5, 7, 8, 10)}
+    for e in g_k.elements:
+        if e.role.value in ("pad", "lead", "808", "bass", "pluck"):
+            bad = [n.pitch for n in e.midi.notes if n.pitch % 12 not in fscale]
+            if bad:
+                scale_fail.append((seed, e.role.value, bad[:4]))
+check("every melodic note lands in the requested scale across 8 seeds", not scale_fail,
+      str(scale_fail))
+
 # ── arrangement tiling (round-3 audition: "trails off towards the end, parts drop out") ──
 # Every v3 beat had its 2-bar seed drum motifs placed ONCE under 4-bar pads/808s — drums
 # quit halfway. Compile must tile each element's pattern to the arrangement length.
