@@ -61,7 +61,11 @@ def main() -> int:
             if f:
                 row["features"] = {k: f.get(k) for k in
                                    ("request", "seed", "backbone", "sources", "samples",
-                                    "density", "gate", "balance", "axes", "rmsDb") if f.get(k) is not None}
+                                    "density", "gate", "balance", "axes", "rmsDb",
+                                    "fx", "priors", "priorsHash", "filters", "drumRoles",
+                                    "distinct", "subOverlap", "tailEnergyDb",
+                                    "audibility808", "measuredKey", "form")
+                                   if f.get(k) is not None}
             rows.append(row)
     with open(OUT, "w") as f:
         for r in rows:
