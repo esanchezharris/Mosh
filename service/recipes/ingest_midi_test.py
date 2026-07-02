@@ -72,6 +72,13 @@ def main() -> int:
                       for e in rec2.elements for n in e.midi.notes}
             check("ingested phrase keeps its distinct onsets", len(starts) == 6, str(starts))
 
+        # grid refusal (pack-003 "out-of-time" class): gridless spacing → refused
+        drift = os.path.join(td, "C - drifty pad 140bpm.mid")
+        write_smf(drift, [(round(i * 0.37, 6), pitches[i % 6], 0.3) for i in range(12)])
+        rec3, reason3 = ingest_file(Path(drift), pack="testpack")
+        check("wrong-tempo (off-grid) file is REFUSED at ingest", rec3 is None, str(reason3))
+        check("grid-refusal reason names the class", "off-grid" in (reason3 or ""), str(reason3))
+
     print(f"\n{'ALL PASS' if not fails else 'FAILURES: ' + ', '.join(fails)}  ({len(fails)} failure(s))")
     return len(fails)
 

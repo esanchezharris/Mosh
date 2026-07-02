@@ -102,7 +102,7 @@
           },
           {
             "pitch": 90,
-            "start_beats": 2.041667,
+            "start_beats": 2.0,
             "duration_beats": 5.0,
             "velocity": 106
           },
@@ -264,7 +264,7 @@
           },
           {
             "pitch": 90,
-            "start_beats": 18.041667,
+            "start_beats": 18.0,
             "duration_beats": 5.0,
             "velocity": 111
           },

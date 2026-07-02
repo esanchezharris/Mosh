@@ -72,19 +72,19 @@
           },
           {
             "pitch": 52,
-            "start_beats": 0.010417,
+            "start_beats": 0.0,
             "duration_beats": 5.96875,
             "velocity": 115
           },
           {
             "pitch": 56,
-            "start_beats": 0.020833,
+            "start_beats": 0.0,
             "duration_beats": 5.9375,
             "velocity": 114
           },
           {
             "pitch": 61,
-            "start_beats": 0.041667,
+            "start_beats": 0.0,
             "duration_beats": 5.895833,
             "velocity": 113
           },
@@ -138,13 +138,13 @@
           },
           {
             "pitch": 52,
-            "start_beats": 6.010417,
+            "start_beats": 6.0,
             "duration_beats": 1.96875,
             "velocity": 115
           },
           {
             "pitch": 56,
-            "start_beats": 6.020833,
+            "start_beats": 6.0,
             "duration_beats": 1.9375,
             "velocity": 114
           },
@@ -174,19 +174,19 @@
           },
           {
             "pitch": 47,
-            "start_beats": 8.010417,
+            "start_beats": 8.0,
             "duration_beats": 5.96875,
             "velocity": 115
           },
           {
             "pitch": 51,
-            "start_beats": 8.020833,
+            "start_beats": 8.0,
             "duration_beats": 5.9375,
             "velocity": 114
           },
           {
             "pitch": 58,
-            "start_beats": 8.041667,
+            "start_beats": 8.0,
             "duration_beats": 5.895833,
             "velocity": 113
           },
@@ -240,19 +240,19 @@
           },
           {
             "pitch": 47,
-            "start_beats": 14.010417,
+            "start_beats": 14.0,
             "duration_beats": 1.96875,
             "velocity": 115
           },
           {
             "pitch": 51,
-            "start_beats": 14.020833,
+            "start_beats": 14.0,
             "duration_beats": 1.9375,
             "velocity": 114
           },
           {
             "pitch": 56,
-            "start_beats": 14.041667,
+            "start_beats": 14.0,
             "duration_beats": 1.895833,
             "velocity": 113
           },
@@ -282,19 +282,19 @@
           },
           {
             "pitch": 52,
-            "start_beats": 16.010417,
+            "start_beats": 16.0,
             "duration_beats": 5.96875,
             "velocity": 115
           },
           {
             "pitch": 56,
-            "start_beats": 16.020833,
+            "start_beats": 16.0,
             "duration_beats": 5.9375,
             "velocity": 114
           },
           {
             "pitch": 61,
-            "start_beats": 16.041667,
+            "start_beats": 16.0,
             "duration_beats": 5.895833,
             "velocity": 113
           },
@@ -348,13 +348,13 @@
           },
           {
             "pitch": 52,
-            "start_beats": 22.010417,
+            "start_beats": 22.0,
             "duration_beats": 1.96875,
             "velocity": 115
           },
           {
             "pitch": 56,
-            "start_beats": 22.020833,
+            "start_beats": 22.0,
             "duration_beats": 1.9375,
             "velocity": 114
           },
@@ -384,19 +384,19 @@
           },
           {
             "pitch": 47,
-            "start_beats": 24.010417,
+            "start_beats": 24.0,
             "duration_beats": 5.96875,
             "velocity": 115
           },
           {
             "pitch": 51,
-            "start_beats": 24.020833,
+            "start_beats": 24.0,
             "duration_beats": 5.9375,
             "velocity": 114
           },
           {
             "pitch": 58,
-            "start_beats": 24.041667,
+            "start_beats": 24.0,
             "duration_beats": 5.895833,
             "velocity": 113
           },
@@ -450,19 +450,19 @@
           },
           {
             "pitch": 47,
-            "start_beats": 30.010417,
+            "start_beats": 30.0,
             "duration_beats": 1.96875,
             "velocity": 115
           },
           {
             "pitch": 51,
-            "start_beats": 30.020833,
+            "start_beats": 30.0,
             "duration_beats": 1.9375,
             "velocity": 114
           },
           {
             "pitch": 56,
-            "start_beats": 30.041667,
+            "start_beats": 30.0,
             "duration_beats": 1.895833,
             "velocity": 113
           },
@@ -502,7 +502,7 @@
       "onsets": [],
       "motif": {
         "bars": 8.0,
-        "onset_grid": "16th",
+        "onset_grid": "8th",
         "density": 8.75,
         "syncopation": 0.2286,
         "contour": [

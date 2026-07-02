@@ -92,31 +92,31 @@
           },
           {
             "pitch": 71,
-            "start_beats": 7.958333,
+            "start_beats": 8.0,
             "duration_beats": 2.958333,
             "velocity": 64
           },
           {
             "pitch": 73,
-            "start_beats": 9.958333,
+            "start_beats": 10.0,
             "duration_beats": 2.958333,
             "velocity": 64
           },
           {
             "pitch": 78,
-            "start_beats": 10.958333,
+            "start_beats": 11.0,
             "duration_beats": 2.958333,
             "velocity": 64
           },
           {
             "pitch": 73,
-            "start_beats": 12.958333,
+            "start_beats": 13.0,
             "duration_beats": 2.958333,
             "velocity": 64
           },
           {
             "pitch": 71,
-            "start_beats": 15.208333,
+            "start_beats": 15.25,
             "duration_beats": 0.708333,
             "velocity": 64
           }
@@ -128,7 +128,8 @@
         "status": "none",
         "matched_path": null,
         "distance": 0.0,
-        "alternates": []
+        "alternates": [],
+        "root_note": null
       },
       "synth_patch": {
         "status": "unknown",

@@ -120,6 +120,18 @@ def ingest_file(path: Path, pack: str):
         bass=_bass(notes) if role in (R.Role.r808, R.Role.bass) else None,
         confidence=0.9,
     )
+    # grid-truth at the door (pack-003 "out-of-time" class) — mirrors ingest_ir/repair.
+    from recipes.generate import _element_grid_step, grid_fraction, snap_notes
+    _step = _element_grid_step(element.midi.notes)
+    for _ in range(8):
+        if snap_notes(element, step=_step) == 0:
+            break
+    if grid_fraction(element) < 0.8:
+        return None, f"off-grid after snap ({grid_fraction(element):.2f}) — wrong-tempo, refused"
+    _nd = [{"start": float(n.start_beats), "length": float(n.duration_beats),
+            "pitch": int(n.pitch)} for n in element.midi.notes]
+    element.motif.onset_grid = _onset_grid(_nd)
+    element.motif.syncopation = _syncopation(_nd)
     rec = R.Recipe(
         recipe_id=rid,
         source=R.Source(platform="midi-pack", video_id=rid, title=f"{pack}/{path.name}",
