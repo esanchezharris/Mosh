@@ -73,6 +73,31 @@ def tail_energy_db(wav: str, tempo: float) -> float:
     return round(20.0 * (math.log10(max(trms, 1e-9)) - math.log10(max(rms, 1e-9))), 2)
 
 
+def section_metrics(wav: str, sections) -> list:
+    """Per-section band metrics (formed beats): slice the WAV at the arrangement's
+    section boundaries — advisory rows for the ledger, never a gate this pack."""
+    import tempfile
+
+    import soundfile as sf
+    from teardown.render.balance import band_metrics
+    out = []
+    try:
+        x, sr = sf.read(wav)
+    except Exception:
+        return out
+    for s in sections:
+        a, b = int(float(s.start_s) * sr), int(float(s.end_s) * sr)
+        seg = x[a:min(b, len(x))]
+        if len(seg) < sr // 10:
+            continue
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tf:
+            sf.write(tf.name, seg, sr)
+            m = band_metrics(tf.name)
+        os.unlink(tf.name)
+        out.append({"name": s.name, **{k: m[k] for k in ("rmsDb", "subRatio")}})
+    return out
+
+
 def audiobox_axes(paths: list) -> dict:
     """path → {PQ,CE,CU,PC} via the judges venv sidecar; {} when the venv is absent
     (owner-gated install) — the factory never blocks on it.
@@ -306,7 +331,7 @@ def process_candidate(rec, prov, req: dict, seed: int, cid: str, wav: str,
            # regenerate with the OLD generator whose Provenance predates these fields.
            "filters": getattr(prov, "filters", {}), "drumRoles": getattr(prov, "drum_roles", []),
            "distinct": getattr(prov, "distinct", {}), "subOverlap": getattr(prov, "sub_overlap", {}),
-           "priors": getattr(prov, "priors", {})}
+           "priors": getattr(prov, "priors", {}), "form": getattr(prov, "form", {})}
     if not (res.nonsilent and res.error is None):
         row["verdict"] = "reject:render"
         return row
@@ -332,6 +357,9 @@ def process_candidate(rec, prov, req: dict, seed: int, cid: str, wav: str,
     sub_ok, sub_m = sub_gate(wav)
     row["gate"] = {"keyRank": rank, "clip": round(clip, 5), **sub_m, "rawRmsDb": raw_rms}
     row["tailEnergyDb"] = tail_energy_db(wav, req["tempo"])
+    secs = getattr(getattr(rec, "arrangement", None), "sections", None) or []
+    if len(secs) > 1:
+        row["sections"] = section_metrics(wav, secs)  # ADVISORY only (never a gate)
     # 808-audibility ADVISORY (log this pack, promote next on calibration): the
     # solo stem is gain-corrected to the shipped offset (stem_rms_adjusted).
     gap = (round(raw_rms - bal["soloRmsAdjDb"], 2)
@@ -451,8 +479,11 @@ def main() -> int:
         cid = (f"{(req.get('style') or req['mood'])[:4]}_{int(req['tempo'])}_"
                f"{req['key'].replace(' ', '').replace('#', 's')}_s{seed}")
         wav = os.path.join(cand_dir, cid + ".wav")
+        # pack-004: alternate loop/form by grid index — per-beat attribution (the
+        # 'form' feature + card badge) beats a separate formed pack for speed of signal
+        form = G.FORM_AABA32 if n % 2 == 0 else None
         rec, prov = G.generate(req, seed=seed, palette=palette, library=library,
-                               priors=priors)
+                               priors=priors, form=form)
         row = process_candidate(rec, prov, req, seed, cid, wav,
                                 os.path.join(cand_dir, ".w" + cid), binp)
         row["priorsHash"] = priors_hash
@@ -476,7 +507,17 @@ def main() -> int:
     print(f"\ngate: {len(passed)}/{len(rows)} PASS")
     if not passed:
         return 1
-    picks = select_pack(passed, args.pack_size)
+    # half formed / half loops, each independently diversity-capped, so the owner's
+    # chips adjudicate whether forms raise the keep-rate
+    formed = [r for r in passed if r.get("form")]
+    loops = [r for r in passed if not r.get("form")]
+    half = args.pack_size // 2
+    picks = select_pack(formed, half) + select_pack(loops, args.pack_size - half)
+    if len(picks) < args.pack_size:   # one side ran short — backfill from the other
+        pool = [r for r in passed if not any(p is r for p in picks)]
+        picks += select_pack(pool, args.pack_size - len(picks))
+    print(f"pack split: {sum(1 for p in picks if p.get('form'))} formed / "
+          f"{sum(1 for p in picks if not p.get('form'))} loops")
     for i, c in enumerate(picks):
         r = c["request"]
         c["pack_file"] = (f"{i+1:02d}_{r['mood']}_{int(r['tempo'])}_"

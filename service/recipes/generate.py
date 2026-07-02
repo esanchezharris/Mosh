@@ -608,6 +608,100 @@ def _filter_drum_rms(pool: list, min_keep: int = 3) -> list:
     return kept if len(kept) >= min_keep else pool
 
 
+# ───────────────────────────── song form (v0) ─────────────────────────────────
+# A A′ B A, owner-chosen shape (~32 bars from an 8-bar loop). Variation is ONLY
+# cloning + THINNING (removing notes) + whole-section octave shifts — no invented
+# rhythm, so Gate B(2) descent holds by construction (checked modulo loopBeats).
+FORM_AABA32 = {
+    "name": "AABA32",
+    "sections": [
+        {"name": "A",  "ops": {}},
+        {"name": "A2", "ops": {"thin": {"roles": ["kick", "snare", "clap"],
+                                        "where": "tail", "nbars": [2, 4]}}},
+        {"name": "B",  "ops": {"mute": ["lead"], "octave": {"808": "auto"}}},
+        {"name": "A3", "ops": {}},
+    ],
+}
+
+
+def _b_octave_shift(min_pitch: int) -> int:
+    """Direction-conditional whole-section 808 shift for the B flip. −12 (the owner's
+    literal octave-DROP idea) only when every post-drop fundamental stays ≥ MIDI 21
+    (27.5 Hz — the established audibility floor; post-normalize library 808 minimums
+    sit at p25=24/med=29, so a blanket −12 would land 16–26 Hz: below the 25–80 Hz
+    sub band AND below hearing — the known 'can't even rlly hear 808' kill class).
+    Otherwise flip UP an octave — the audible register flip on every system. Direction
+    is logged so the next pack's chips adjudicate which flip the owner likes."""
+    return -12 if min_pitch - 12 >= SUB_LO - 3 else 12
+
+
+def apply_form(elements: list, plan: dict, rng: Rng, prov: "Provenance") -> None:
+    """Expand the loop into the plan's sections at generate time — zero compile/schema
+    change. Every element first tiles to the LOOP length (compile's own helpers = one
+    source of truth), then sections clone at whole-loop offsets, so every element ends
+    exactly at the arrangement end and compile._tile_notes passes notes through
+    verbatim (the provable no-op). Must run BEFORE palette binding and AFTER
+    normalize_808_register — the audibility-floor loop would silently undo a B-drop
+    if it ran later. Mutates elements + prov (recipe.arrangement is set by recombine
+    from prov.form after assembly)."""
+    from teardown.render.compile import _tile_notes, _whole_bars
+
+    note_bearing = [e for e in elements if e.midi.notes]
+    if not note_bearing:
+        return
+    # _whole_bars returns BEATS rounded up to whole bars (not a bar count)
+    loop_beats = max(_whole_bars(max(float(n.start_beats) + float(n.duration_beats)
+                                     for n in e.midi.notes))
+                     for e in note_bearing)
+    thin_spec = next((s["ops"].get("thin") for s in plan["sections"]
+                      if s["ops"].get("thin")), None)
+    thin_bars = rng.choice(list(range(thin_spec["nbars"][0], thin_spec["nbars"][1] + 1))) \
+        if thin_spec else 0
+    b_shift = 0
+    for el in note_bearing:
+        base = _tile_notes(list(el.midi.notes), loop_beats)
+        out = []
+        for si, sec in enumerate(plan["sections"]):
+            ops = sec["ops"]
+            off = si * loop_beats
+            if el.role.value in (ops.get("mute") or []):
+                continue
+            notes = base
+            octv = (ops.get("octave") or {}).get(el.role.value)
+            shift = 0
+            if octv == "auto":
+                shift = _b_octave_shift(min(int(n.pitch) for n in base))
+                b_shift = shift
+            thin = ops.get("thin")
+            for n in notes:
+                s = float(n.start_beats)
+                if (thin and el.role.value in thin["roles"]
+                        and s >= loop_beats - thin_bars * BEATS_PER_BAR):
+                    continue        # the drums drop out for the section's tail bars
+                out.append(R.NoteEvent(pitch=max(0, min(127, int(n.pitch) + shift)),
+                                       start_beats=round(off + s, 6),
+                                       duration_beats=n.duration_beats,
+                                       velocity=n.velocity))
+        el.midi.notes = out
+        el.midi.note_count = len(out)
+    prov.form = {"plan": plan["name"], "loopBeats": loop_beats, "thinBars": thin_bars,
+                 "b808Shift": b_shift,
+                 "sections": [s["name"] for s in plan["sections"]],
+                 "muted": sorted({r for s in plan["sections"]
+                                  for r in (s["ops"].get("mute") or [])})}
+
+
+def _form_arrangement(prov: "Provenance") -> "R.Arrangement":
+    """Section spans (seconds) from the applied form — the factory slices the WAV at
+    these boundaries for per-section ADVISORY metrics (never a gate this pack)."""
+    spb = 60.0 / max(1.0, float(prov.tempo or 140))
+    lb = prov.form["loopBeats"]
+    return R.Arrangement(sections=[
+        R.Section(name=nm, start_s=round(i * lb * spb, 4),
+                  end_s=round((i + 1) * lb * spb, 4), confidence=1.0)
+        for i, nm in enumerate(prov.form["sections"])])
+
+
 # ───────────────────────────── recombination ─────────────────────────────────
 @dataclass
 class Provenance:
@@ -620,6 +714,7 @@ class Provenance:
     filters: dict = field(default_factory=dict)    # filter name → fire count (calibration!)
     priors: dict = field(default_factory=dict)     # group → applied owner keep/kill prior
     style: str = ""                                # resolved style name ("" = vanilla)
+    form: dict = field(default_factory=dict)       # section plan applied ({} = plain loop)
     drum_roles: list = field(default_factory=list)  # bound drum roles (FEATURE, never a gate)
     distinct: dict = field(default_factory=dict)   # melodic role → distinct pitch count
     sub_overlap: dict = field(default_factory=dict)  # kick subTailMs × 808 subShare (logged)
@@ -689,7 +784,7 @@ def _fill_missing_drums(elements: list, ranked: list, rng: Rng, prov: Provenance
 
 
 def recombine(library: list, request: dict, rng: Rng, palette: dict,
-              priors: Optional[dict] = None) -> tuple:
+              priors: Optional[dict] = None, form: Optional[dict] = None) -> tuple:
     """Assemble a NEW recipe: drum-kit groove from one recipe, 808 from another, chords from a
     third, optional lead from a fourth — each transposed into one key, the 808 bound to the
     chords, and a palette sample bound per drum/808 role. `request["style"]` resolves an
@@ -797,6 +892,12 @@ def recombine(library: list, request: dict, rng: Rng, palette: dict,
             else:
                 prov.fired("leadVarietyDropPostConform")
 
+    # 4.5) SONG FORM (owner-chosen A A′ B A): expand the loop into sections BEFORE
+    #      palette binding (phrase medians stay in-window) and AFTER the 808 normalize
+    #      (whose audibility floor would undo a B-drop if it ran later).
+    if form:
+        apply_form(elements, form, rng, prov)
+
     # 5) bind a palette one-shot per role (real sounds); none → compiler falls back.
     #    pads/leads/plucks draw from the palette's 'melodic' bucket so melodies play a real
     #    repitched one-shot instead of the stock 4OSC sine patch (2026-07 "sine waves" fix).
@@ -880,24 +981,30 @@ def recombine(library: list, request: dict, rng: Rng, palette: dict,
         elements=elements,
         reconstruction_class="inferred",
     )
+    if prov.form:
+        out.arrangement = _form_arrangement(prov)
     return out, prov
 
 
 def generate(request: dict, library_dir: str = LIB_DIR, seed: int = 0,
              palette: Optional[dict] = None, library: Optional[list] = None,
-             priors: Optional[dict] = None) -> tuple:
+             priors: Optional[dict] = None, form: Optional[dict] = None) -> tuple:
     """Top entry: request (genre/tempo/key/mood/lead) → (assembled Recipe, Provenance).
     Pass a pre-loaded `library` for batch runs — hermetic to concurrent library writes
     (a factory run died mid-batch when an ingester grew the library under it) and skips
     re-reading hundreds of files per candidate. `priors` (owner keep/kill nudges) are
     OPT-IN — None means none, so generation is hermetic by default; the factory/CLI
-    pass load_priors() explicitly and snapshot the file per run."""
+    pass load_priors() explicitly and snapshot the file per run.
+
+    `form` is a KWARG, not a request key: _seed_int(request, seed) is unchanged, so a
+    formed beat and its formless sibling share the IDENTICAL loop (free A/Bs, and the
+    future cheap-balance-on-the-loop optimization)."""
     library = library if library is not None else load_library(library_dir)
     if not library:
         raise RuntimeError(f"empty recipe library at {library_dir} (run seed_authoring.py)")
     pal = palette if palette is not None else load_palette()
     rng = Rng(_seed_int(request, seed))
-    return recombine(library, request, rng, pal, priors=priors)
+    return recombine(library, request, rng, pal, priors=priors, form=form)
 
 
 def reconstruct(library_dir: str, recipe_id: str, palette: Optional[dict] = None):

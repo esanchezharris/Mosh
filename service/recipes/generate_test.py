@@ -663,6 +663,108 @@ cmin = _mini_rec("cminrec", [R.Element(role="pad", midi=R.Midi(notes=[
 check("measured_key_of reads a C-minor recipe as C minor",
       G.measured_key_of(cmin) == "C minor", G.measured_key_of(cmin))
 
+# ── song-form v0: A A′ B A (~4× the loop), owner-chosen shape ──────────────────
+check("_b_octave_shift drops only when the drop stays audible (min 33 → −12)",
+      G._b_octave_shift(33) == -12)
+check("_b_octave_shift flips UP when a drop would go subsonic (min 32 → +12)",
+      G._b_octave_shift(32) == 12)
+
+req_f = {"mood": "dark", "tempo": 140, "key": "F minor"}
+g_loop, _p_loop = G.generate(req_f, seed=11, palette={})
+g_loop2, _ = G.generate(req_f, seed=11, palette={})
+check("form=None stays byte-identical to today", R.to_json(g_loop) == R.to_json(g_loop2))
+g_form, p_form = G.generate(req_f, seed=11, palette={}, form=G.FORM_AABA32)
+g_form2, _ = G.generate(req_f, seed=11, palette={}, form=G.FORM_AABA32)
+check("form generation is deterministic", R.to_json(g_form) == R.to_json(g_form2))
+lb = p_form.form["loopBeats"]
+check("form spans 4 loop-length sections",
+      len(g_form.arrangement.sections) == 4
+      and abs(g_form.arrangement.sections[-1].end_s - 4 * lb * (60.0 / 140)) < 0.01,
+      str([(s.name, s.start_s, s.end_s) for s in g_form.arrangement.sections]))
+check("element count/roles unchanged by form (balance map validity)",
+      [e.role.value for e in g_form.elements] == [e.role.value for e in g_loop.elements])
+
+
+def _sec_notes(el, si, lb):
+    return {(int(n.pitch), round(float(n.start_beats) - si * lb, 4),
+             round(float(n.duration_beats), 4))
+            for n in el.midi.notes if si * lb <= float(n.start_beats) < (si + 1) * lb}
+
+
+a3_bad, a2_bad, b_lead, b_shift_bad, tail_bad = [], [], [], [], []
+for el in g_form.elements:
+    a, a2, b, a3 = (_sec_notes(el, i, lb) for i in range(4))
+    role = el.role.value
+    if a3 != a:
+        a3_bad.append(role)
+    if role in ("kick", "snare", "clap"):
+        if not a2 <= a:
+            a2_bad.append(role)
+    elif role == "lead":
+        if b:
+            b_lead.append(role)
+    elif role == "808":
+        want = {(max(0, min(127, p + p_form.form["b808Shift"])), s, d) for p, s, d in a}
+        if b != want:
+            b_shift_bad.append((role, p_form.form["b808Shift"]))
+    if role not in p_form.form["muted"]:
+        last_bar = {n for n in a3 if n[1] >= lb - 4.0}
+        src_last = {n for n in a if n[1] >= lb - 4.0}
+        if src_last and not last_bar:
+            tail_bad.append(role)
+check("A3 is an EXACT clone of A (tailEnergy fixed by construction)", not a3_bad, str(a3_bad))
+check("A2 drums are a strict subset of A (thinned tail)", not a2_bad, str(a2_bad))
+check("the lead is silent in B", not b_lead)
+check("B 808 = A 808 shifted a whole octave (pcs preserved, direction per rule)",
+      not b_shift_bad, str(b_shift_bad))
+check("every non-muted role still sounds in the final bar", not tail_bad, str(tail_bad))
+check("provenance logs the form (plan/loopBeats/thinBars/b808Shift)",
+      p_form.form["plan"] == "AABA32" and p_form.form["thinBars"] in (2, 3, 4)
+      and p_form.form["b808Shift"] in (-12, 12, 0), str(p_form.form))
+
+# compile no-op: a pre-formed recipe passes through _tile_notes verbatim
+prog_f = compile_recipe(g_form).commands
+emitted_f = sum(len(c["args"].get("notes", [])) for c in prog_f
+                if c["command"] == "add_midi_clip")
+check("compile is a NO-OP on a formed recipe (notes pass through verbatim)",
+      emitted_f == sum(len(e.midi.notes) for e in g_form.elements),
+      f"{emitted_f} vs {sum(len(e.midi.notes) for e in g_form.elements)}")
+
+# Gate B(2), form edition: every formed rhythm descends from a library motif
+# (checked modulo the loop against the library tiled to the loop length)
+_tiled_cache = {}
+def _lib_rhythms_tiled(lbeats):
+    if lbeats not in _tiled_cache:
+        from teardown.render.compile import _tile_notes as _tn
+        s = set()
+        for r in library:
+            for e in r.elements:
+                if not e.midi.notes:
+                    continue
+                for n in _tn(list(e.midi.notes), lbeats):
+                    s.add((e.role.value, round(float(n.start_beats), 4),
+                           round(float(n.duration_beats), 4)))
+        _tiled_cache[lbeats] = s
+    return _tiled_cache[lbeats]
+
+
+form_invented = 0
+form_total = 0
+for seed in range(4):
+    g_fb, p_fb = G.generate(req_f, seed=seed, palette={}, form=G.FORM_AABA32)
+    if not p_fb.form:
+        continue
+    ref = _lib_rhythms_tiled(p_fb.form["loopBeats"])
+    for e in g_fb.elements:
+        for n in e.midi.notes:
+            form_total += 1
+            key_t = (e.role.value, round(float(n.start_beats) % p_fb.form["loopBeats"], 4),
+                     round(float(n.duration_beats), 4))
+            if key_t not in ref:
+                form_invented += 1
+check("GATE B(2) form edition: 0 invented rhythms modulo the loop (4 seeds)",
+      form_invented == 0, f"{form_invented}/{form_total}")
+
 # Determinism with the new code paths: same (request, seed, palette) → identical output.
 g_a, p_a = G.generate({"mood": "chill", "tempo": 132, "key": "A minor"}, seed=9, palette=FAKE_PAL)
 g_b, p_b = G.generate({"mood": "chill", "tempo": 132, "key": "A minor"}, seed=9, palette=FAKE_PAL)
