@@ -73,9 +73,17 @@ block (kept out of production `DEFAULT_RULES` until the A/B is conclusive across
 - **v3-final: 7,444 train / 1,911 valid** — volume 827 rows (v2-equivalent had the broken 708),
   pan 358, populate/clip capped 2,500 each, 38 factory tuples. Known gaps: only 5 defer rows
   survived dedupe; .flp files skipped (PyFLP venv not set up here — 500 files of future coverage).
-- **v3-final LoRA training** (500 iters, mask-prompt, 16 layers, sft_run.json carries config +
-  dataset hash). Gate: beat BASE 0.714 on the frozen 300 under the same pinned stack, else the
-  local lane ships the BASE model + prompt work.
+- **v3-final LoRA trained clean** (500 iters, lr 1e-5, max-seq 3000, no NaN: train loss 0.213 /
+  val 0.252; sft_run.json carries config + dataset sha).
+- **v3 VERDICT (pre-committed gate): 0.558 < base 0.714 ⇒ the fine-tune does NOT ship.** The
+  local lane ships BASE + prompt work. Diagnostic split: v3 beat base exactly where the fixed
+  data aimed — populate 0.309 vs 0.246, add_midi_clip 1.000 vs 0.971, volume 0.188 vs 0.062 —
+  but crashed set_tempo 0.421 vs 0.947 and timesig 0.482 vs 0.750 (77 deferrals; dedupe had
+  crushed those classes to 111 rows and format drift returned on simple asks). Two fine-tunes
+  (v2 −0.50, v3 −0.16) both degraded the base: template-shape corpora keep teaching format
+  quirks that break instruction-following. Weight-training resumes only after the corpus has
+  real phrasing diversity at scale (turn factory + organic harvest + owner dictation), exactly
+  the audit's data-before-training ordering.
 - **⚠️ NaN trap found (first attempt diverged, all checkpoints garbage `!!!!`):** the production
   system prompt is ~2,400 TOKENS, and 2,876/7,444 v3 rows exceeded max-seq 2560 (longest 2,914)
   — `--mask-prompt` + truncation into the completion leaves ~zero loss tokens → NaN from iter
