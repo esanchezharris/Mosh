@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -50,49 +51,103 @@ def density_features(rec) -> dict:
     return out
 
 
+def tail_energy_db(wav: str, tempo: float) -> float:
+    """Last-bar RMS relative to whole-mix RMS (dB). Logged FEATURE for the 'ends-weird'
+    chip (r3 note: 'composition kind of trails off towards the end') — not a gate until
+    a pack of chip evidence confirms the threshold."""
+    import numpy as np
+    import soundfile as sf
+    x, sr = sf.read(wav)
+    if getattr(x, "ndim", 1) > 1:
+        x = x.mean(axis=1)
+    if len(x) == 0:
+        return 0.0
+    bar = int(sr * 4.0 * 60.0 / max(tempo, 1.0))
+    tail = x[-bar:] if len(x) > bar else x
+    rms = float(np.sqrt(np.mean(np.asarray(x, dtype=np.float64) ** 2)))
+    trms = float(np.sqrt(np.mean(np.asarray(tail, dtype=np.float64) ** 2)))
+    return round(20.0 * (math.log10(max(trms, 1e-9)) - math.log10(max(rms, 1e-9))), 2)
+
+
 def audiobox_axes(paths: list) -> dict:
     """path → {PQ,CE,CU,PC} via the judges venv sidecar; {} when the venv is absent
-    (owner-gated install) — the factory never blocks on it."""
-    if not (paths and os.path.isfile(JUDGES_PY)):
+    (owner-gated install) — the factory never blocks on it.
+
+    The sidecar protocol emits TWO @@MOSH@@ lines: {"ready": true} on model load,
+    THEN the path-keyed payload. Pack-001's axes were silently lost by taking the
+    first line (the handshake) — skip it, merge every payload, and report loudly."""
+    if not paths:
+        return {}
+    if not os.path.isfile(JUDGES_PY):
+        print(f"  (audiobox axes skipped: judges venv absent at {JUDGES_PY})", file=sys.stderr)
         return {}
     sidecar = os.path.join(SERVICE, "sa3", "judge_sidecar.py")
     if not os.path.isfile(sidecar):
+        print(f"  (audiobox axes skipped: sidecar missing at {sidecar})", file=sys.stderr)
         return {}
+    axes: dict = {}
     try:
         proc = subprocess.run([JUDGES_PY, sidecar], input=json.dumps({"paths": paths}),
                               capture_output=True, text=True, timeout=120 + 10 * len(paths))
         for line in proc.stdout.splitlines():
-            if line.startswith("@@MOSH@@"):
-                return json.loads(line[len("@@MOSH@@"):])
+            if not line.startswith("@@MOSH@@"):
+                continue
+            payload = json.loads(line[len("@@MOSH@@"):])
+            if payload.get("ready"):
+                continue                        # the load handshake, not a result
+            if "error" in payload and len(payload) == 1:
+                print(f"  (audiobox axes error: {payload['error']})", file=sys.stderr)
+                continue
+            axes.update({k: v for k, v in payload.items() if isinstance(v, dict)})
     except Exception as e:  # noqa: BLE001 — advisory metadata only, never fatal
         print(f"  (audiobox axes skipped: {e})", file=sys.stderr)
-    return {}
+    print(f"  audiobox axes attached: {len(axes)}/{len(paths)}", file=sys.stderr)
+    return axes
 
 
 def select_pack(passed: list, pack_size: int) -> list:
     """Deterministic diverse selection: best-gated first, capped per (drums, backbone)
-    pairing and per mood so the pack spans the library instead of one groove."""
+    pairing, per mood, AND per individual sample (≤2 pack beats may share any one
+    sample hash — pack-001 shipped one pad sample in 7/14 beats and the owner's note
+    was 'getting tired of this sound effect'). When caps leave the pack short, they
+    relax in a DECLARED order (mood → combo → sample LAST) and each relaxation is
+    logged loudly — the old backfill silently ignored every cap."""
     ranked = sorted(passed, key=lambda c: (c["gate"]["keyRank"], -c["gate"]["subRatio"], c["id"]))
     per_mood_cap = max(2, (pack_size + len(MOODS_TEMPO) - 1) // len(MOODS_TEMPO))
+    picks: list = []
     combo_seen: dict = {}
     mood_seen: dict = {}
-    picks = []
-    for c in ranked:
+    sample_seen: dict = {}
+
+    def try_add(c, caps: set) -> bool:
         combo = (c["sources"].get("drums"), c["backbone"])
         mood = c["request"]["mood"]
-        if combo_seen.get(combo, 0) >= 2 or mood_seen.get(mood, 0) >= per_mood_cap:
-            continue
+        samples = set((c.get("samples") or {}).values())
+        if "mood" in caps and mood_seen.get(mood, 0) >= per_mood_cap:
+            return False
+        if "combo" in caps and combo_seen.get(combo, 0) >= 2:
+            return False
+        if "sample" in caps and any(sample_seen.get(s, 0) >= 2 for s in samples):
+            return False
         picks.append(c)
         combo_seen[combo] = combo_seen.get(combo, 0) + 1
         mood_seen[mood] = mood_seen.get(mood, 0) + 1
+        for s in samples:
+            sample_seen[s] = sample_seen.get(s, 0) + 1
+        return True
+
+    all_caps = {"mood", "combo", "sample"}
+    for caps in (all_caps, {"combo", "sample"}, {"sample"}, set()):
+        for c in ranked:
+            if len(picks) >= pack_size:
+                break
+            if any(p is c for p in picks):
+                continue
+            if try_add(c, caps) and caps != all_caps:
+                print(f"  select_pack: relaxed {sorted(all_caps - caps)} to seat {c['id']}",
+                      file=sys.stderr)
         if len(picks) >= pack_size:
             break
-    # backfill if diversity caps left the pack short
-    for c in ranked:
-        if len(picks) >= pack_size:
-            break
-        if c not in picks:
-            picks.append(c)
     return picks
 
 
@@ -101,13 +156,21 @@ def build_pack_page(out_dir: str, picks: list) -> str:
     for i, c in enumerate(picks):
         r = c["request"]
         srcs = " · ".join(f"<b>{k}</b> {str(v)[:38]}" for k, v in c["sources"].items())
+        rep = c.get("reprise") or {}
+        rep_badge = (f'<span class="badge b-rep">REPRISE of {rep["of"]}</span>' if rep else "")
+        rep_block = ""
+        if rep:
+            rep_block = (f'<div class="src" style="margin-top:6px">{rep.get("note", "same composition, new mix")} — '
+                         f'<b>{rep["of"]} original for comparison:</b></div>'
+                         f'<audio controls preload="metadata" src="{rep["old_file"]}"></audio>'
+                         f'<div class="src">did the new mix move it? rate the NEW render above.</div>')
         cards.append(f"""
   <div class="beat" data-f="{c['pack_file']}">
     <div class="row1"><span class="name">{i+1:02d} · {r['mood']} · {int(r['tempo'])} bpm · {r['key']}
       <span class="badge b-ok">key rank {c['gate']['keyRank']}</span>
-      <span class="badge b-ok">sub {c['gate']['subRatio']:.2f}</span></span></div>
+      <span class="badge b-ok">sub {c['gate']['subRatio']:.2f}</span>{rep_badge}</span></div>
     <audio controls preload="metadata" src="{c['pack_file']}"></audio>
-    <div class="src">{srcs}</div>
+    <div class="src">{srcs}</div>{rep_block}
     <div class="rate">
       <span class="kk"><button data-k="keep">KEEP</button><button data-k="kill">KILL</button></span>
       <span class="chips">{''.join(f'<button data-c="{ch}">{ch}</button>' for ch in
@@ -137,6 +200,7 @@ _PAGE_TMPL = """<!DOCTYPE html>
   .name { font-weight:600; font-size:15px; }
   .badge { display:inline-block; font-size:11px; font-weight:600; padding:2px 8px; border-radius:20px; margin-left:6px; }
   .b-ok { background:rgba(111,224,168,.14); color:var(--ok); border:1px solid rgba(111,224,168,.4); }
+  .b-rep { background:rgba(255,210,63,.14); color:var(--accent); border:1px solid rgba(255,210,63,.4); }
   audio { width:100%; margin:10px 0 8px; height:36px; }
   .src { color:var(--dim); font-size:11.5px; line-height:1.65; } .src b { color:var(--ink); }
   .rate { display:flex; gap:10px; align-items:center; margin-top:10px; flex-wrap:wrap; }
@@ -199,10 +263,69 @@ document.getElementById("csvBtn").onclick = () => {
 </script></body></html>"""
 
 
+def process_candidate(rec, prov, req: dict, seed: int, cid: str, wav: str,
+                      work_dir: str, binp: str) -> dict:
+    """Render → balance → RAW clip measure → normalize → gain-invariant gates →
+    audibility. One shared path so factory candidates and pack reprises are gated
+    identically. Returns the full feature row (with verdict)."""
+    from teardown.render.balance import (BASS_AUDIBILITY_MAX_GAP_DB as BASS_GAP_DB,
+                                         MIX_RMS_FLOOR_DB, balance_render, normalize_wav)
+    from render_audition import render_gate_standalone, sub_gate
+
+    bal = balance_render(rec, binp, wav, work_dir, timeout_s=180)
+    res = bal["res"]
+    row = {"id": cid, "file": wav, "request": req, "seed": seed,
+           "backbone": prov.backbone, "sources": prov.sources, "transpose": prov.transpose,
+           "samples": {k: os.path.basename(v) for k, v in prov.samples.items()},
+           "density": density_features(rec), "rmsDb": bal["metrics"].get("rmsDb"),
+           "balance": {"iters": bal["iters"], "offsets": {str(k): v for k, v in bal["offsets"].items()},
+                       "soloSub": bal["soloSub"], "soloRmsDb": bal.get("soloRmsDb"),
+                       "soloRmsAdjDb": bal.get("soloRmsAdjDb")},
+           # calibration features from generation (filters fired, fills, variety);
+           # drumRoles is a FEATURE, never a gate — pack-001 keeps 01 ("no drums")
+           # and 11 ("no hi-hats") are the standing counterexamples. getattr: reprises
+           # regenerate with the OLD generator whose Provenance predates these fields.
+           "filters": getattr(prov, "filters", {}), "drumRoles": getattr(prov, "drum_roles", []),
+           "distinct": getattr(prov, "distinct", {}), "subOverlap": getattr(prov, "sub_overlap", {})}
+    if not (res.nonsilent and res.error is None):
+        row["verdict"] = "reject:render"
+        return row
+    # ORDER IS LOAD-BEARING: clipFrac comes from the RAW render (bal metrics);
+    # after normalize_wav, |x| ≥ 0.999 is unreachable and the clip gate would go
+    # permanently blind. All post-normalize gates are gain-invariant (ratio/argmax).
+    raw_rms = bal["metrics"].get("rmsDb")
+    clip = bal["metrics"].get("clipFrac", 0.0)
+    row["normGainDb"] = normalize_wav(wav)
+    rank, _ = render_gate_standalone(wav, req["key"])
+    sub_ok, sub_m = sub_gate(wav)
+    row["gate"] = {"keyRank": rank, "clip": round(clip, 5), **sub_m, "rawRmsDb": raw_rms}
+    row["tailEnergyDb"] = tail_energy_db(wav, req["tempo"])
+    # 808-audibility ADVISORY (log this pack, promote next on calibration): the
+    # solo stem is gain-corrected to the shipped offset (stem_rms_adjusted).
+    gap = (round(raw_rms - bal["soloRmsAdjDb"], 2)
+           if raw_rms is not None and bal.get("soloRmsAdjDb") is not None else None)
+    row["audibility808"] = {"gapDb": gap,
+                            "advisory": bool(gap is not None and gap > BASS_GAP_DB)}
+    # Key/mode is enforced in MIDI space by construction (conform_to_key +
+    # measured sampler roots ⇒ heard == written). Chroma tonal-center ranking is
+    # ambiguous on drum-heavy loops (calibration: scale-mass and rank both fail to
+    # separate known-good from known-bad), so the render-side key check is only a
+    # SMEAR TRIPWIRE for regressions (stale-binary/root-drift class ranks 9–23);
+    # exact rank ships as a feature and the pack's "key" chip lets the owner rule.
+    # The RMS floor is a hard gate calibrated on pack-001: beat 01 ("808
+    # inaudible", −23.5 dB) fails; every other pack beat (≥ −15.4) passes.
+    quiet = raw_rms is not None and raw_rms < MIX_RMS_FLOOR_DB
+    if rank <= 8 and clip < 0.005 and sub_ok and not quiet:
+        row["verdict"] = "pass"
+    else:
+        row["verdict"] = ("reject:key" if rank > 8 else
+                          "reject:clip" if clip >= 0.005 else
+                          "reject:sub" if not sub_ok else "reject:quiet")
+    return row
+
+
 def main() -> int:
     from recipes import generate as G
-    from teardown.render.balance import balance_render
-    from render_audition import render_gate_standalone, sub_gate
 
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default=os.path.expanduser("~/mosh-beats/pack-001"))
@@ -233,31 +356,8 @@ def main() -> int:
         cid = f"{req['mood'][:4]}_{int(req['tempo'])}_{req['key'].replace(' ', '').replace('#', 's')}_s{seed}"
         wav = os.path.join(cand_dir, cid + ".wav")
         rec, prov = G.generate(req, seed=seed, palette=palette, library=library)
-        bal = balance_render(rec, binp, wav, os.path.join(cand_dir, ".w" + cid), timeout_s=180)
-        res = bal["res"]
-        row = {"id": cid, "file": wav, "request": req, "seed": seed,
-               "backbone": prov.backbone, "sources": prov.sources, "transpose": prov.transpose,
-               "samples": {k: os.path.basename(v) for k, v in prov.samples.items()},
-               "density": density_features(rec), "rmsDb": bal["metrics"].get("rmsDb"),
-               "balance": {"iters": bal["iters"], "offsets": {str(k): v for k, v in bal["offsets"].items()},
-                           "soloSub": bal["soloSub"]}}
-        if not (res.nonsilent and res.error is None):
-            row["verdict"] = "reject:render"
-        else:
-            rank, clip = render_gate_standalone(wav, req["key"])
-            sub_ok, sub_m = sub_gate(wav)
-            row["gate"] = {"keyRank": rank, "clip": round(clip, 5), **sub_m}
-            # Key/mode is enforced in MIDI space by construction (conform_to_key +
-            # measured sampler roots ⇒ heard == written). Chroma tonal-center ranking is
-            # ambiguous on drum-heavy loops (calibration: scale-mass and rank both fail to
-            # separate known-good from known-bad), so the render-side key check is only a
-            # SMEAR TRIPWIRE for regressions (stale-binary/root-drift class ranks 9–23);
-            # exact rank ships as a feature and the pack's "key" chip lets the owner rule.
-            if rank <= 8 and clip < 0.005 and sub_ok:
-                row["verdict"] = "pass"
-            else:
-                row["verdict"] = ("reject:key" if rank > 8 else
-                                  "reject:clip" if clip >= 0.005 else "reject:sub")
+        row = process_candidate(rec, prov, req, seed, cid, wav,
+                                os.path.join(cand_dir, ".w" + cid), binp)
         rows.append(row)
         print(f"  [{n+1}/{len(grid)}] {cid}: {row['verdict']}"
               + (f" (sub {row['gate']['subRatio']})" if "gate" in row else ""))
