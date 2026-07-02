@@ -109,8 +109,15 @@ def load_palette(manifest: str = PALETTE_MANIFEST) -> dict:
         role = (it.get("role_guess") or it.get("role") or "").lower()
         path = it.get("path")
         if role and path and os.path.isfile(path):
-            by_role.setdefault(role, []).append({"path": path, "root_note": it.get("root_note"),
-                                                 "root_source": it.get("root_source")})
+            entry = {"path": path, "root_note": it.get("root_note"),
+                     "root_source": it.get("root_source")}
+            # sample-truth metadata (measure_palette_samples.py) — optional by design:
+            # every downstream filter treats an absent field as "allowed" so a
+            # pre-measure-pass manifest keeps working unchanged.
+            for k in ("decayMs", "subShare", "subTailMs", "rmsDb", "openHat"):
+                if k in it:
+                    entry[k] = it[k]
+            by_role.setdefault(role, []).append(entry)
         elif role and path:
             missing += 1
     if missing:
@@ -322,6 +329,80 @@ def _role_pool(library: list, roles: set) -> list:
     return [(r, e) for r in library for e in r.elements if e.role.value in roles]
 
 
+# ─────────────────────── composition floors + binding filters ─────────────────
+# Pack-001 audition rules (2026-07-02). ONLY owner-dictated rules are hard here;
+# everything else is a pool PREFERENCE that keeps the unfiltered pool when metadata
+# is absent or survivors run thin (a stacked hard filter can silently empty the pool).
+
+HAT_CLOSED_DECAY_MS = 250.0   # calibrated from the live palette (measure pass dry-run):
+#   named-CLOSED hats all decay <150 ms (median 50); named-OPEN median 340 ms; and at
+#   dense trap spacing (~200 ms between hits at 8/bar, 140 BPM) a hat ringing past
+#   ~250 ms overlaps the next hit — which is exactly the beat-04 kill.
+OPEN_HAT_MAX_NOTES_PER_BAR = 1.0   # owner rule: open hats ≤ ~1 per 4 beats (1/bar in 4/4)
+DRUM_RMS_FLOOR_DB = -30.0     # beat-14 "snare too quiet": drop near-silent drum one-shots
+KICK_SUB_TAIL_MAX_MS = 250.0  # beat-05 "multiple 808s": a kick whose 25–80 Hz tail rings
+#   past ~250 ms occupies most of the inter-hit window and reads as a second 808
+SUB808_MIN_SHARE = 0.5        # prefer genuinely sub-rooted 808 samples (beat-01 class)
+
+
+def _notes_per_bar(el) -> float:
+    if not (el and el.midi.notes):
+        return 0.0
+    end = max(float(n.start_beats) + float(n.duration_beats) for n in el.midi.notes)
+    return len(el.midi.notes) / max(1.0, end / BEATS_PER_BAR)
+
+
+def _distinct_ok(el, min_pitches: int = 3, min_pcs: int = 2) -> bool:
+    """Melodic-variety floor (beat-03 kill: 'it was like one note'): a lead needs ≥3
+    distinct pitches AND ≥2 pitch classes (an octave-jumping single-pc line still reads
+    as one note). Pads are exempt by design — drones are legitimate texture."""
+    if not (el and el.midi.notes):
+        return False
+    pitches = {int(n.pitch) for n in el.midi.notes}
+    return len(pitches) >= min_pitches and len({p % 12 for p in pitches}) >= min_pcs
+
+
+def distinct_pitches(el) -> int:
+    return len({int(n.pitch) for n in el.midi.notes}) if el and el.midi.notes else 0
+
+
+def _filter_hat_pool(pool: list, notes_per_bar: float, min_keep: int = 3) -> list:
+    """Dense hat patterns must bind a CLOSED hat: not open-named AND decay ≤ threshold.
+    Names certify open only (84 open-named vs 4 closed-named of 357 hats), so measured
+    decay is the primary discriminator. Sparse patterns (≤1/bar) may bind anything."""
+    if notes_per_bar <= OPEN_HAT_MAX_NOTES_PER_BAR:
+        return pool
+    kept = [p for p in pool
+            if not p.get("openHat")
+            and (p.get("decayMs") is None or p["decayMs"] <= HAT_CLOSED_DECAY_MS)]
+    return kept if len(kept) >= min_keep else pool
+
+
+def _filter_808_pool(pool: list, min_keep: int = 8) -> list:
+    """Prefer 808 samples whose low end is genuinely sub-rooted."""
+    kept = [p for p in pool
+            if p.get("subShare") is None or p["subShare"] >= SUB808_MIN_SHARE]
+    return kept if len(kept) >= min_keep else pool
+
+
+def _filter_kick_pool(pool: list, bound_808: Optional[dict], min_keep: int = 5) -> list:
+    """When the bound 808 is sub-heavy, avoid kicks with a long sub tail (they stack
+    into a phantom second 808 — the beat-05 kill). No 808 bound → no constraint."""
+    if not bound_808 or (bound_808.get("subShare") or 0.0) < 0.6:
+        return pool
+    kept = [p for p in pool
+            if p.get("subTailMs") is None or p["subTailMs"] <= KICK_SUB_TAIL_MAX_MS]
+    return kept if len(kept) >= min_keep else pool
+
+
+def _filter_drum_rms(pool: list, min_keep: int = 3) -> list:
+    """Drop near-silent drum one-shots (beat-14 'snare too quiet' — cheaper than any
+    stem render: the level defect lives in the sample)."""
+    kept = [p for p in pool
+            if p.get("rmsDb") is None or p["rmsDb"] >= DRUM_RMS_FLOOR_DB]
+    return kept if len(kept) >= min_keep else pool
+
+
 # ───────────────────────────── recombination ─────────────────────────────────
 @dataclass
 class Provenance:
@@ -331,14 +412,24 @@ class Provenance:
     samples: dict = field(default_factory=dict)    # role → bound sample path
     key: str = ""
     tempo: float = 0.0
+    filters: dict = field(default_factory=dict)    # filter name → fire count (calibration!)
+    drum_roles: list = field(default_factory=list)  # bound drum roles (FEATURE, never a gate)
+    distinct: dict = field(default_factory=dict)   # melodic role → distinct pitch count
+    sub_overlap: dict = field(default_factory=dict)  # kick subTailMs × 808 subShare (logged)
+
+    def fired(self, name: str):
+        self.filters[name] = self.filters.get(name, 0) + 1
 
 
 def _clone_element(el):
     return R.Element.model_validate(el.model_dump())
 
 
-def _pick_recipe_with(role: str, ranked: list, rng: Rng):
-    cands = [r for r in ranked if any(e.role.value == role for e in r.elements)]
+def _pick_recipe_with(role: str, ranked: list, rng: Rng, pred=None):
+    """Pick a recipe carrying `role`; optional pred pre-filters the candidate ELEMENTS
+    (e.g. the melodic-variety floor) so a doomed pick never has to be repaired later."""
+    cands = [r for r in ranked
+             if any(e.role.value == role and (pred is None or pred(e)) for e in r.elements)]
     if not cands:
         return None
     # bias toward the better-ranked half, but allow any (cross-recipe diversity)
@@ -346,11 +437,36 @@ def _pick_recipe_with(role: str, ranked: list, rng: Rng):
     return rng.choice(top if rng.chance(0.7) else cands)
 
 
-def _element(rec, role):
+def _element(rec, role, pred=None):
     for e in rec.elements:
-        if e.role.value == role:
+        if e.role.value == role and (pred is None or pred(e)):
             return e
     return None
+
+
+REQUIRED_DRUM_GROUPS = (("kick",), ("snare", "clap"), ("hat",))
+
+
+def _fill_missing_drums(elements: list, ranked: list, rng: Rng, prov: Provenance):
+    """Complete a partial drum kit from per-role pools. NOT a completeness GATE and not
+    a re-pick: pack-001 keeps 01 ('no drums') and 11 ('no hi-hats') prove partial kits
+    can be keeps, and only 5 of 930 library recipes carry a full kick+snare+hat kit —
+    a re-pick would collapse every beat onto those 5 grooves. Filling only ADDS missing
+    role-groups (the picked groove is preserved), and each fill is provenance-tagged so
+    the next pack's defect chips can adjudicate the distribution shift."""
+    have = {e.role.value for e in elements}
+    for group in REQUIRED_DRUM_GROUPS:
+        if have & set(group):
+            continue
+        pool = [(r, e) for r, e in _role_pool(ranked, set(group)) if e.midi.notes]
+        if not pool:
+            continue
+        top = pool[: max(1, len(pool) // 2 + 1)]
+        r, e = rng.choice(top if rng.chance(0.7) else pool)
+        el = _clone_element(e)
+        elements.append(el)
+        prov.sources[f"drums_fill_{el.role.value}"] = r.source.video_id
+        prov.fired(f"drumFill_{el.role.value}")
 
 
 def recombine(library: list, request: dict, rng: Rng, palette: dict) -> tuple:
@@ -370,13 +486,15 @@ def recombine(library: list, request: dict, rng: Rng, palette: dict) -> tuple:
     prov.sources["drums"] = drum_src.source.video_id
     for role in ("kick", "snare", "hat", "clap", "perc"):
         e = _element(drum_src, role)
-        if e:
+        if e and e.midi.notes:  # a notes-less element would compile as a bare one-shot drop
             elements.append(_clone_element(e))  # drums are NOT transposed (GM pad pitches)
+    # complete a partial kit from per-role pools (a FILL, never a gate — see the helper)
+    _fill_missing_drums(elements, ranked, rng, prov)
 
     # 2) CHORDS — harmonic backbone (drives the 808). Pick a recipe with a pad/chords element.
     chord_src = _pick_recipe_with("pad", ranked, rng) or backbone
     chord_el = _element(chord_src, "pad")
-    if chord_el:
+    if chord_el and chord_el.midi.notes:
         c = _clone_element(chord_el)
         sem = _interval(_element_key(chord_el, chord_src.meta.key.value), req_key)
         transpose_element(c, sem)
@@ -388,7 +506,7 @@ def recombine(library: list, request: dict, rng: Rng, palette: dict) -> tuple:
     # 3) 808 — from a (possibly different) recipe; transpose, then BIND to the chord roots.
     bass_src = _pick_recipe_with("808", ranked, rng) or backbone
     bass_el = _element(bass_src, "808")
-    if bass_el:
+    if bass_el and bass_el.midi.notes:
         b = _clone_element(bass_el)
         sem = _interval(_element_key(bass_el, bass_src.meta.key.value), req_key)
         transpose_element(b, sem)
@@ -402,18 +520,27 @@ def recombine(library: list, request: dict, rng: Rng, palette: dict) -> tuple:
         elements.append(b)
 
     # 4) LEAD — optional; include if the request asks for melody or by seeded choice.
+    #    Variety floor (beat-03 kill "it was like one note"): pre-filter the candidate
+    #    pool — 98/296 library leads have <3 distinct pitches (90 have exactly 1);
+    #    transposition preserves distinct counts so filtering raw elements is safe.
     want_lead = request.get("lead", True) and rng.chance(0.7)
     if want_lead:
-        lead_src = _pick_recipe_with("lead", ranked, rng)
+        lead_src = _pick_recipe_with("lead", ranked, rng, pred=_distinct_ok)
         if lead_src:
-            lead_el = _element(lead_src, "lead")
+            lead_el = _element(lead_src, "lead", pred=_distinct_ok)
             le = _clone_element(lead_el)
             sem = _interval(_element_key(lead_el, lead_src.meta.key.value), req_key)
             transpose_element(le, sem)
             conform_to_key(le, req_key)
-            prov.sources["lead"] = lead_src.source.video_id
-            prov.transpose["lead"] = sem
-            elements.append(le)
+            # re-verify AFTER conform: folding to the parallel scale can merge two
+            # source pitches onto one tone. A degraded lead is dropped, not shipped —
+            # the lead is optional by design.
+            if _distinct_ok(le):
+                prov.sources["lead"] = lead_src.source.video_id
+                prov.transpose["lead"] = sem
+                elements.append(le)
+            else:
+                prov.fired("leadVarietyDropPostConform")
 
     # 5) bind a palette one-shot per role (real sounds); none → compiler falls back.
     #    pads/leads/plucks draw from the palette's 'melodic' bucket so melodies play a real
@@ -422,12 +549,37 @@ def recombine(library: list, request: dict, rng: Rng, palette: dict) -> tuple:
     #    whose manifest root_note is NEAREST the phrase's center (small repitch stretch) and
     #    carry root_note on the match — the compiler MUST root the sampler at the sample's
     #    true pitch or every note renders off by the delta (measured −5..+5 st per element).
-    for e in elements:
+    #    KICK BINDS LAST: the beat-05 pairing rule ("multiple 808s" = a long-sub-tail
+    #    kick stacking with the 808) needs to know which 808 sample was chosen first.
+    bound_808: Optional[dict] = None
+    for e in sorted(elements, key=lambda el: el.role.value == "kick"):
         role = e.role.value
+        if not e.midi.notes:
+            continue
         pool = (palette.get(role)
                 or (palette.get("808") if role == "808" else None)
                 or (palette.get("melodic") if role in ("pad", "lead", "pluck") else None))
         if pool:
+            before = len(pool)
+            if role in DRUM_ROLES:
+                pool = _filter_drum_rms(pool)
+                if len(pool) != before:
+                    prov.fired("drumRmsFloor")
+            if role == "hat":
+                n0 = len(pool)
+                pool = _filter_hat_pool(pool, _notes_per_bar(e))
+                if len(pool) != n0:
+                    prov.fired("hatClosedOnly")
+            if role == "kick":
+                n0 = len(pool)
+                pool = _filter_kick_pool(pool, bound_808)
+                if len(pool) != n0:
+                    prov.fired("kickSubTail")
+            if role == "808":
+                n0 = len(pool)
+                pool = _filter_808_pool(pool)
+                if len(pool) != n0:
+                    prov.fired("sub808Pool")
             pitched = role in ("808", "bass", "pad", "lead", "pluck")
             rooted = [p for p in pool if p.get("root_note") is not None] if pitched else []
             if pitched and rooted:
@@ -439,13 +591,26 @@ def recombine(library: list, request: dict, rng: Rng, palette: dict) -> tuple:
                 pitches = sorted(int(n.pitch) for n in e.midi.notes) or [48]
                 center = pitches[len(pitches) // 2]
                 best = min(abs(int(p["root_note"]) - center) for p in search)
-                cands = [p for p in search if abs(int(p["root_note"]) - center) == best]
+                # ±2 st window then seeded pick (not exact-tie only): a deterministic
+                # nearest-root funnel put ONE pad sample in 7/14 pack-001 beats; a ±2 st
+                # repitch-stretch difference is inaudible, the diversity is not.
+                cands = [p for p in search if abs(int(p["root_note"]) - center) <= best + 2]
                 pick = cands[rng._next() % len(cands)]
             else:
                 pick = pool[rng._next() % len(pool)]
+            if role == "808":
+                bound_808 = pick
             e.sample_match = R.SampleMatch(status="matched", matched_path=pick["path"], distance=0.05,
                                            root_note=pick.get("root_note"))
             prov.samples[role] = pick["path"]
+            if role == "kick" and bound_808 is not None:
+                # logged FEATURE, not a gate: awaiting a second pack of chip evidence
+                prov.sub_overlap = {"kickSubTailMs": pick.get("subTailMs"),
+                                    "sub808Share": bound_808.get("subShare")}
+
+    prov.drum_roles = sorted({e.role.value for e in elements if e.role.value in DRUM_ROLES})
+    prov.distinct = {e.role.value: distinct_pitches(e)
+                     for e in elements if e.role.value in ("pad", "lead", "pluck", "808")}
 
     out = R.Recipe(
         recipe_id=f"gen_{rng.s}",  # deterministic from (request, seed) — no uuid4 nondeterminism

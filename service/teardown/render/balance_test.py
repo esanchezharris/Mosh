@@ -70,6 +70,60 @@ solo = B._solo_cmds(4, 6)
 check("solo mutes every other track", len(solo) == 5 and
       all(c["args"]["mute"] and c["args"]["trackId"] != "${T4}" for c in solo), str(solo))
 
+# ── pack-001 audition round (2026-07-02): audibility + clip-guard fixes ──────
+# clip guard: melodic-only, floored, terminates (the old all-track −3 cut collapsed
+# pack-001 beat 01 to −23.5 dB RMS — it cut the 808 it had just boosted)
+g1 = B.clip_guard_offsets({4: 0.0, 3: -4.5}, ROLES)
+check("clip guard cuts melodics only (pad/lead), never bass",
+      g1[3] == -7.5 and g1[5] == -7.5 and g1[4] == 0.0, str(g1))
+check("clip guard never touches drum indices", all(i not in g1 for i in (0, 1, 2)), str(g1))
+gf = {3: -18.0, 5: -18.0}
+check("clip guard floors at −18 and reports exhaustion as None",
+      B.clip_guard_offsets(gf, ROLES) is None)
+
+# deficit-proportional melodic duck: big deficit ducks 3× (a 55-notes/bar pad can't be
+# out-ducked at −1.5/iter inside MAX_ITERS)
+offs_big = B.compute_offsets({"subRatio": 0.10}, None, ROLES)
+check("big deficit ducks melodics −4.5", offs_big[3] == B.HEADROOM_TRIM_DB - 4.5, str(offs_big))
+offs_small = B.compute_offsets({"subRatio": 0.45}, None, ROLES)
+check("small deficit ducks melodics −1.5", offs_small[3] == B.HEADROOM_TRIM_DB - 1.5,
+      str(offs_small))
+
+# stem gain correction is exact: stem at default trims, mix at balanced offset
+check("stem_rms_adjusted applies (final − HEADROOM) exactly",
+      B.stem_rms_adjusted(-30.0, B.HEADROOM_TRIM_DB + 9.0) == -21.0)
+check("stem_rms_adjusted is identity at default trims",
+      B.stem_rms_adjusted(-30.0, B.HEADROOM_TRIM_DB) == -30.0)
+
+# normalize_wav: peak lands at −1 dBFS and every RATIO metric is gain-invariant
+try:
+    import numpy as np
+    import soundfile as sf
+    sr_n = 44100
+    t_n = np.arange(sr_n * 2) / sr_n
+    with tempfile.TemporaryDirectory() as td:
+        pn = os.path.join(td, "norm.wav")
+        quiet = 0.25 * np.sin(2 * math.pi * 40 * t_n) + 0.05 * np.sin(2 * math.pi * 1000 * t_n)
+        sf.write(pn, quiet, sr_n)
+        before = B.band_metrics(pn)
+        gain = B.normalize_wav(pn)
+        after = B.band_metrics(pn)
+        x_pk, _ = sf.read(pn)
+        peak_after = float(np.abs(x_pk).max())
+    check("normalize_wav boosts a quiet file (positive gain)", gain > 8.0, str(gain))
+    check("normalized peak sits at −1 dBFS (≈0.891)", abs(peak_after - 0.891) < 0.01,
+          str(peak_after))
+    check("rmsDb shifts by exactly the reported gain",
+          abs(after["rmsDb"] - (before["rmsDb"] + gain)) < 0.1,
+          f"{before['rmsDb']} + {gain} vs {after['rmsDb']}")
+    check("subRatio is gain-invariant through normalize",
+          abs(after["subRatio"] - before["subRatio"]) < 0.005,
+          f"{before['subRatio']} vs {after['subRatio']}")
+    check("peakHz is gain-invariant through normalize",
+          abs(after["peakHz"] - before["peakHz"]) < 1.0)
+except ImportError:
+    print("  skip normalize_wav (numpy/soundfile absent)")
+
 # band_metrics on synthetic audio: pure 40 Hz → sub-dominated; pure 1 kHz → subRatio ~0
 try:
     import numpy as np

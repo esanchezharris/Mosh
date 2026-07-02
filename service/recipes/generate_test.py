@@ -326,5 +326,134 @@ starts = sorted(n["start"] for n in kick_notes)
 check("a 1-bar kick tiles to 4 copies under a 4-bar pad (starts at 0,3 + k*4)",
       starts == [0.0, 3.0, 4.0, 7.0, 8.0, 11.0, 12.0, 15.0], str(starts))
 
+# ── pack-001 audition round (2026-07-02): composition floors + binding filters ──
+# Melodic-variety floor (beat-03 kill "it was like one note")
+mono16 = R.Element(role="lead", midi=R.Midi(notes=[
+    R.NoteEvent(pitch=60, start_beats=i * 0.25, duration_beats=0.25) for i in range(16)]))
+check("variety floor rejects a 16-note ONE-pitch line", not G._distinct_ok(mono16))
+octaves = R.Element(role="lead", midi=R.Midi(notes=[
+    R.NoteEvent(pitch=p, start_beats=i * 1.0, duration_beats=0.5)
+    for i, p in enumerate((48, 60, 72))]))
+check("variety floor rejects an octave-jumping single-pitch-class line",
+      not G._distinct_ok(octaves))
+triad = R.Element(role="lead", midi=R.Midi(notes=[
+    R.NoteEvent(pitch=p, start_beats=i * 1.0, duration_beats=0.5)
+    for i, p in enumerate((60, 63, 67))]))
+check("variety floor accepts a 3-pitch line", G._distinct_ok(triad))
+
+# 12-seed property sweep: one-808 invariant, non-empty notes, drum completeness (via
+# FILL — never a gate: pack-001 keeps 01 'no drums' / 11 'no hi-hats' are the standing
+# counterexamples against gating), lead variety, features recorded.
+multi_808, empty_el, incomplete, thin_lead, missing_feat = [], [], [], [], []
+for seed in range(12):
+    g_f, p_f = G.generate({"mood": "dark", "tempo": 140, "key": "F minor"},
+                          seed=seed, palette={})
+    n808 = sum(1 for e in g_f.elements if e.role.value in ("808", "bass"))
+    if n808 > 1:
+        multi_808.append(seed)
+    if any(not e.midi.notes for e in g_f.elements):
+        empty_el.append(seed)
+    have = {e.role.value for e in g_f.elements}
+    for group in G.REQUIRED_DRUM_GROUPS:
+        if not (have & set(group)):
+            incomplete.append((seed, group))
+    for e in g_f.elements:
+        if e.role.value == "lead" and not G._distinct_ok(e):
+            thin_lead.append(seed)
+    if p_f.drum_roles != sorted(have & G.DRUM_ROLES) or "808" not in p_f.distinct and n808:
+        missing_feat.append(seed)
+check("exactly ≤1 808/bass element across 12 seeds", not multi_808, str(multi_808))
+check("no notes-less element ships across 12 seeds", not empty_el, str(empty_el))
+check("drum FILL completes kick+(snare|clap)+hat across 12 seeds", not incomplete,
+      str(incomplete))
+check("every shipped lead passes the variety floor across 12 seeds", not thin_lead,
+      str(thin_lead))
+check("provenance records drumRoles + distinct-pitch features", not missing_feat,
+      str(missing_feat))
+
+# Drum fill provenance on a minimal synthetic library: kick-only drum source + a donor.
+def _mini(vid, mood, els):
+    return R.Recipe(recipe_id=vid, source=R.Source(platform="test", video_id=vid,
+                                                   title=vid, channel=mood),
+                    meta=R.Meta(tempo_bpm=R.MetaField(value=140.0, confidence=1.0),
+                                key=R.MetaField(value="F minor", confidence=1.0),
+                                time_signature=R.MetaField(value="4/4", confidence=1.0)),
+                    elements=els, reconstruction_class="deterministic")
+def _n(p, s, d=0.25):
+    return R.NoteEvent(pitch=p, start_beats=s, duration_beats=d)
+kick_only = _mini("kickonly", "dark",
+                  [R.Element(role="kick", midi=R.Midi(notes=[_n(36, 0.0), _n(36, 2.0)]))])
+donor = _mini("donor", "dark",
+              [R.Element(role="snare", midi=R.Midi(notes=[_n(38, 1.0), _n(38, 3.0)])),
+               R.Element(role="hat", midi=R.Midi(notes=[_n(42, i * 0.5) for i in range(8)]))])
+rec_fill, prov_fill = G.recombine([kick_only, donor], {"mood": "dark", "tempo": 140,
+                                                       "key": "F minor"}, G.Rng(3), {})
+fill_roles = {e.role.value for e in rec_fill.elements}
+check("kick-only drum source gets snare+hat FILLED from the donor",
+      {"kick", "snare", "hat"} <= fill_roles, str(sorted(fill_roles)))
+check("fills are provenance-tagged drums_fill_<role>",
+      {"drums_fill_snare", "drums_fill_hat"} <= set(prov_fill.sources),
+      str(sorted(prov_fill.sources)))
+
+# Binding-filter units (all permissive on missing metadata / thin survivors)
+closed3 = [{"path": f"/tmp/hc{i}.wav", "decayMs": 100.0 + i * 20} for i in range(3)]
+opens = [{"path": "/tmp/ho1.wav", "decayMs": 700.0, "openHat": True},
+         {"path": "/tmp/ho2.wav", "decayMs": 500.0}]
+check("dense hat pattern binds CLOSED-only (decay ≤250, not open-named)",
+      G._filter_hat_pool(closed3 + opens, 8.0) == closed3)
+check("sparse hat pattern (≤1/bar) may bind anything",
+      G._filter_hat_pool(closed3 + opens, 1.0) == closed3 + opens)
+check("hat filter is permissive when survivors run thin",
+      G._filter_hat_pool([closed3[0], opens[0]], 8.0) == [closed3[0], opens[0]])
+check("hat filter is permissive on metadata-free pools",
+      G._filter_hat_pool([{"path": "/tmp/x.wav"}] * 4, 8.0) == [{"path": "/tmp/x.wav"}] * 4)
+p808 = ([{"path": f"/tmp/8s{i}.wav", "subShare": 0.8} for i in range(8)]
+        + [{"path": f"/tmp/8w{i}.wav", "subShare": 0.2} for i in range(4)])
+check("808 pool prefers sub-rooted samples when ≥8 survive",
+      all(p["subShare"] >= 0.5 for p in G._filter_808_pool(p808)))
+check("808 pool filter is permissive when survivors would run thin",
+      G._filter_808_pool(p808[:7] + p808[8:]) == p808[:7] + p808[8:])
+kicks6 = ([{"path": f"/tmp/kt{i}.wav", "subTailMs": 80.0} for i in range(5)]
+          + [{"path": "/tmp/klong.wav", "subTailMs": 600.0}])
+sub8 = {"path": "/tmp/8.wav", "subShare": 0.9}
+check("sub-heavy 808 excludes long-sub-tail kicks (beat-05 'multiple 808s')",
+      G._filter_kick_pool(kicks6, sub8) == kicks6[:5])
+check("kick filter inactive when the 808 is not sub-heavy",
+      G._filter_kick_pool(kicks6, {"path": "/tmp/8.wav", "subShare": 0.3}) == kicks6)
+check("kick filter inactive when no 808 is bound", G._filter_kick_pool(kicks6, None) == kicks6)
+drums4 = [{"path": "/tmp/d1.wav", "rmsDb": -12.0}, {"path": "/tmp/d2.wav", "rmsDb": -20.0},
+          {"path": "/tmp/d3.wav", "rmsDb": -45.0}, {"path": "/tmp/d4.wav"}]
+check("drum pool drops near-silent one-shots (beat-14 'snare too quiet')",
+      G._filter_drum_rms(drums4) == [drums4[0], drums4[1], drums4[3]])
+
+# End-to-end: dense library hats bind closed samples from a metadata-rich palette,
+# and the filter fire is recorded for calibration.
+HAT_PAL = {"kick": [{"path": "/tmp/hp_k.wav"}], "snare": [{"path": "/tmp/hp_s.wav"}],
+           "clap": [{"path": "/tmp/hp_c.wav"}],
+           "hat": closed3 + [{"path": "/tmp/hp_o1.wav", "decayMs": 700.0, "openHat": True},
+                             {"path": "/tmp/hp_o2.wav", "decayMs": 600.0, "openHat": True}],
+           "808": [{"path": "/tmp/hp_8.wav", "root_note": 24}],
+           "melodic": [{"path": "/tmp/hp_m.wav", "root_note": 48}]}
+open_bound = []
+fired_any = False
+for seed in range(6):
+    g_h, p_h = G.generate({"mood": "dark", "tempo": 140, "key": "F minor"},
+                          seed=seed, palette=HAT_PAL)
+    hat_el = next((e for e in g_h.elements if e.role.value == "hat"), None)
+    if hat_el is not None and hat_el.sample_match.status.value == "matched":
+        if G._notes_per_bar(hat_el) > G.OPEN_HAT_MAX_NOTES_PER_BAR:
+            if "hp_o" in hat_el.sample_match.matched_path:
+                open_bound.append(seed)
+            fired_any = fired_any or p_h.filters.get("hatClosedOnly", 0) > 0
+check("dense hats never bind an open/long sample end-to-end (6 seeds)", not open_bound,
+      str(open_bound))
+check("hatClosedOnly filter fires are recorded in provenance", fired_any)
+
+# Determinism with the new code paths: same (request, seed, palette) → identical output.
+g_a, p_a = G.generate({"mood": "chill", "tempo": 132, "key": "A minor"}, seed=9, palette=FAKE_PAL)
+g_b, p_b = G.generate({"mood": "chill", "tempo": 132, "key": "A minor"}, seed=9, palette=FAKE_PAL)
+check("generation is deterministic through fills + filters",
+      R.to_json(g_a) == R.to_json(g_b) and p_a == p_b)
+
 print(f"\n{'ALL PASS' if not fails else 'FAILURES: ' + ', '.join(fails)}  ({len(fails)} failure(s))")
 sys.exit(len(fails))
