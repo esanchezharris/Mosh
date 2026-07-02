@@ -66,6 +66,12 @@ def ingest_file(path: Path, pack: str):
     notes = read_midi(path)
     if not (4 <= len(notes) <= 2000):
         return None, f"note-count {len(notes)}"
+    # chord/scale REFERENCE dumps (every note at one instant, e.g. "MIDI Scales
+    # Reference" folders) are not phrases — they carry no rhythm to copy, and one as a
+    # pad source is an every-bar chord blast (pack-002 audition: "all the notes hitting
+    # at once on the downbeat"; 277 of them poisoned the r8 ingest).
+    if len(notes) >= 6 and len({round(n["start"], 4) for n in notes}) < 2:
+        return None, "no rhythm (single-instant chord/scale reference) — refused"
     meta = read_midi_meta(path)
     name = path.stem
 

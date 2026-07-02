@@ -41,6 +41,34 @@ REPRISE_PRIORITY = ["02_", "01_", "11_"]
 N_REPRISES = 2
 
 
+REPRISE_MIN_RESIDUAL_DB = -40.0  # gain-aligned residual quieter than this = the new
+# pipeline was a NO-OP for this beat — do NOT spend the owner's ears on it. Lesson from
+# pack-002: both reprises measured −131/−127 dB residual (bit-identical beyond a flat
+# −1 dB normalize) and the owner's note was "sounds identical? making me skeptical".
+
+
+def gain_aligned_residual_db(old_wav: str, new_wav: str) -> float:
+    """How different are two renders BEYOND a pure gain change? Fits the best scalar
+    gain g minimizing |a − g·b| and returns the residual level relative to the signal
+    (dB). Bit-identical-modulo-gain ⇒ ≈ −130; audibly different mixes ⇒ > −30."""
+    import math
+
+    import numpy as np
+    import soundfile as sf
+    a, _ = sf.read(old_wav)
+    b, _ = sf.read(new_wav)
+    if getattr(a, "ndim", 1) > 1:
+        a = a.mean(axis=1)
+    if getattr(b, "ndim", 1) > 1:
+        b = b.mean(axis=1)
+    n = min(len(a), len(b))
+    a, b = a[:n].astype("float64"), b[:n].astype("float64")
+    g = float((a * b).sum() / ((b * b).sum() + 1e-12))
+    sig = math.sqrt(float((a ** 2).mean())) + 1e-12
+    res = math.sqrt(float(((a - g * b) ** 2).mean()))
+    return round(20.0 * math.log10(max(res, 1e-12) / sig), 1)
+
+
 def load_old_generate(commit: str, scratch: str):
     """The generator as it was for pack-001 — composition identity needs the old code."""
     src = subprocess.run(["git", "-C", REPO, "show", f"{commit}:service/recipes/generate.py"],
@@ -56,7 +84,7 @@ def load_old_generate(commit: str, scratch: str):
 
 
 def make_reprises(out_dir: str, binp: str, old_commit: str, scratch: str,
-                  start_index: int) -> list:
+                  start_index: int, n_reprises: int = N_REPRISES) -> list:
     old_G = load_old_generate(old_commit, scratch)
     pack1 = json.load(open(os.path.join(PACK1, "pack.json")))
     by_prefix = {e["pack_file"][:3]: e for e in pack1}
@@ -69,7 +97,7 @@ def make_reprises(out_dir: str, binp: str, old_commit: str, scratch: str,
 
     entries = []
     for prefix in REPRISE_PRIORITY:
-        if len(entries) >= N_REPRISES:
+        if len(entries) >= n_reprises:
             break
         src_entry = by_prefix.get(prefix)
         if not src_entry:
@@ -89,11 +117,20 @@ def make_reprises(out_dir: str, binp: str, old_commit: str, scratch: str,
                                    os.path.join(cand_dir, ".w" + cid), binp)
         row["repriseSource"] = {"pack": "pack-001", "file": src_entry["pack_file"],
                                 "identicalComposition": identical}
+        old_path = os.path.join(PACK1, src_entry["pack_file"])
+        if os.path.isfile(old_path) and os.path.isfile(wav):
+            row["repriseResidualDb"] = gain_aligned_residual_db(old_path, wav)
         with open(os.path.join(out_dir, "candidates.jsonl"), "a") as f:
             f.write(json.dumps(row) + "\n")
         if row["verdict"] != "pass":
             print(f"  reprise {cid}: {row['verdict']} — mix alone can't save it "
                   f"(the machine agrees with the ear); trying the next candidate",
+                  file=sys.stderr)
+            continue
+        if row.get("repriseResidualDb", 0.0) < REPRISE_MIN_RESIDUAL_DB:
+            print(f"  reprise {cid}: pipeline NO-OP for this beat (residual "
+                  f"{row['repriseResidualDb']} dB = gain-only change) — not spending "
+                  f"the owner's ears on an inaudible A/B; trying the next candidate",
                   file=sys.stderr)
             continue
         old_name = src_entry["pack_file"]
@@ -120,6 +157,11 @@ def main(argv=None) -> int:
     ap.add_argument("--pack-size", type=int, default=12)
     ap.add_argument("--skip-factory", action="store_true",
                     help="reuse an existing pack.json from a prior factory run")
+    ap.add_argument("--reprises", type=int, default=N_REPRISES,
+                    help="reprise slots (0 = none). Reprises only make sense when the "
+                         "MIX pipeline changed and the composition can be regenerated "
+                         "identically — a generation/library change makes them drifted "
+                         "new beats wearing a 'reprise' badge.")
     args = ap.parse_args(argv)
     out_dir = os.path.expanduser(args.out)
     binp = os.environ.get("MOSH_BIN", "").strip() or BF.DEFAULT_BIN
@@ -134,7 +176,10 @@ def main(argv=None) -> int:
     picks = json.load(open(os.path.join(out_dir, "pack.json")))
     picks = [p for p in picks if not p.get("reprise")]  # idempotent re-run
 
-    reprises = make_reprises(out_dir, binp, args.old_commit, scratch, len(picks))
+    reprises = []
+    if args.reprises > 0:
+        reprises = make_reprises(out_dir, binp, args.old_commit, scratch, len(picks),
+                                 n_reprises=args.reprises)
     picks += reprises
     with open(os.path.join(out_dir, "pack.json"), "w") as f:
         json.dump(picks, f, indent=1)

@@ -352,6 +352,21 @@ def _notes_per_bar(el) -> float:
     return len(el.midi.notes) / max(1.0, end / BEATS_PER_BAR)
 
 
+def _has_rhythm(el) -> bool:
+    """Reject chord/scale REFERENCE dumps (pack-002 audition: 'all the notes hitting at
+    once on the downbeat'). 277 pack-ingested 'MIDI Scales Reference' files carry every
+    note at start 0.0 — 35–48-note stacks with NO rhythm to copy, which violates the
+    system's premise (every note descends from a real motif's rhythm). Rule calibrated
+    on the library: ≥6 notes all at ONE instant = reference dump (the only borderline,
+    a 26-note/4-start chord progression, stays legal). 1-note drones and 2-hit kicks
+    are untouched."""
+    if not (el and el.midi.notes):
+        return False
+    if len(el.midi.notes) < 6:
+        return True
+    return len({round(float(n.start_beats), 4) for n in el.midi.notes}) >= 2
+
+
 def _distinct_ok(el, min_pitches: int = 3, min_pcs: int = 2) -> bool:
     """Melodic-variety floor (beat-03 kill: 'it was like one note'): a lead needs ≥3
     distinct pitches AND ≥2 pitch classes (an octave-jumping single-pc line still reads
@@ -458,7 +473,8 @@ def _fill_missing_drums(elements: list, ranked: list, rng: Rng, prov: Provenance
     for group in REQUIRED_DRUM_GROUPS:
         if have & set(group):
             continue
-        pool = [(r, e) for r, e in _role_pool(ranked, set(group)) if e.midi.notes]
+        pool = [(r, e) for r, e in _role_pool(ranked, set(group))
+                if e.midi.notes and _has_rhythm(e)]
         if not pool:
             continue
         top = pool[: max(1, len(pool) // 2 + 1)]
@@ -492,8 +508,8 @@ def recombine(library: list, request: dict, rng: Rng, palette: dict) -> tuple:
     _fill_missing_drums(elements, ranked, rng, prov)
 
     # 2) CHORDS — harmonic backbone (drives the 808). Pick a recipe with a pad/chords element.
-    chord_src = _pick_recipe_with("pad", ranked, rng) or backbone
-    chord_el = _element(chord_src, "pad")
+    chord_src = _pick_recipe_with("pad", ranked, rng, pred=_has_rhythm) or backbone
+    chord_el = _element(chord_src, "pad", pred=_has_rhythm)
     if chord_el and chord_el.midi.notes:
         c = _clone_element(chord_el)
         sem = _interval(_element_key(chord_el, chord_src.meta.key.value), req_key)
@@ -504,8 +520,8 @@ def recombine(library: list, request: dict, rng: Rng, palette: dict) -> tuple:
         elements.append(c)
 
     # 3) 808 — from a (possibly different) recipe; transpose, then BIND to the chord roots.
-    bass_src = _pick_recipe_with("808", ranked, rng) or backbone
-    bass_el = _element(bass_src, "808")
+    bass_src = _pick_recipe_with("808", ranked, rng, pred=_has_rhythm) or backbone
+    bass_el = _element(bass_src, "808", pred=_has_rhythm)
     if bass_el and bass_el.midi.notes:
         b = _clone_element(bass_el)
         sem = _interval(_element_key(bass_el, bass_src.meta.key.value), req_key)
@@ -525,9 +541,12 @@ def recombine(library: list, request: dict, rng: Rng, palette: dict) -> tuple:
     #    transposition preserves distinct counts so filtering raw elements is safe.
     want_lead = request.get("lead", True) and rng.chance(0.7)
     if want_lead:
-        lead_src = _pick_recipe_with("lead", ranked, rng, pred=_distinct_ok)
+        # variety AND rhythm: a scale-reference stack has plenty of distinct pitches
+        # but zero rhythm (pack-002 beat 05's lead was exactly that)
+        lead_ok = lambda e: _distinct_ok(e) and _has_rhythm(e)  # noqa: E731
+        lead_src = _pick_recipe_with("lead", ranked, rng, pred=lead_ok)
         if lead_src:
-            lead_el = _element(lead_src, "lead", pred=_distinct_ok)
+            lead_el = _element(lead_src, "lead", pred=lead_ok)
             le = _clone_element(lead_el)
             sem = _interval(_element_key(lead_el, lead_src.meta.key.value), req_key)
             transpose_element(le, sem)
