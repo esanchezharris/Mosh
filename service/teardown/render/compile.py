@@ -19,6 +19,7 @@ from typing import Any, Optional
 
 DRUM_ROLES = {"kick", "snare", "hat", "clap", "perc", "808"}
 DEFAULT_CLIP_LEN_S = 8.0
+HEADROOM_TRIM_DB = -4.5  # per-track static trim (mix stage) — see compile_recipe
 
 
 @dataclass
@@ -117,6 +118,15 @@ def _root_pitch(notes) -> int:
     return min((int(n.pitch) for n in notes), default=36)
 
 
+def _sampler_root(el, notes, fallback) -> int:
+    """The sampler's `note` must be the SAMPLE'S true pitch (match.root_note) — the engine
+    treats `note` as the pitch at which the file plays as-is, so MIDI repitches relative to
+    it. A phrase-derived root only when the match carries no root (then rendered pitch is
+    off by sample-vs-root delta — flagged unresolved upstream; 2026-07 out-of-key audit)."""
+    rn = getattr(el.sample_match, "root_note", None)
+    return int(rn) if rn is not None else fallback(notes)
+
+
 def _center_pitch(notes) -> int:
     """A melodic (non-bass) sampler's root: the phrase's median pitch, so chords/melodies
     repitch modestly in both directions instead of stretching far from one extreme."""
@@ -187,17 +197,16 @@ def compile_recipe(recipe) -> CompileResult:
                               "file": el.sample_match.matched_path}})
             elif melodic_bass and matched:
                 add({"command": "assign_sample",
-                     "args": {"trackId": tref, "note": _root_pitch(notes), "mode": "melodic",
+                     "args": {"trackId": tref, "note": _sampler_root(el, notes, _root_pitch), "mode": "melodic",
                               "file": el.sample_match.matched_path}})
             elif melodic_bass and not matched:
                 defer(_u("808/bass has notes but no matched sample — falls back to 4OSC",
                          el.element_id, "match an 808 one-shot in the palette for a real sub"))
             elif matched:
                 # melodic non-bass (pad/lead/pluck): the SAME repitched-sampler path as the
-                # 808, rooted at the phrase's center so chords repitch modestly both ways —
-                # real sound instead of the stock 4OSC sine patch (2026-07 fix).
+                # 808 — real sound instead of the stock 4OSC sine patch (2026-07 fix).
                 add({"command": "assign_sample",
-                     "args": {"trackId": tref, "note": _center_pitch(notes), "mode": "melodic",
+                     "args": {"trackId": tref, "note": _sampler_root(el, notes, _center_pitch), "mode": "melodic",
                               "file": el.sample_match.matched_path}})
             elif role in ("pad", "lead", "pluck"):
                 defer(_u("melodic element has no bound sample — plays the stock synth patch",
@@ -242,5 +251,12 @@ def compile_recipe(recipe) -> CompileResult:
             # and the Tier-B fallback above.
             defer(_u("element has no compilable content", el.element_id,
                      "fill sample_match / midi / synth_patch"))
+
+    # ── mix stage: static headroom trim ──────────────────────────────────────────
+    # Full-scale one-shots stacked across 4-6 tracks clip the master hard (audit measured
+    # 7.4% clipped samples on a 6-track render). A flat −4.5 dB per track buys ~the same
+    # headroom a producer's first gain-staging pass would; deterministic, undo-friendly.
+    for i, el in enumerate(recipe.elements):
+        add({"command": "set_track_volume", "args": {"trackId": f"${{T{i}}}", "db": HEADROOM_TRIM_DB}})
 
     return out

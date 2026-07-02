@@ -136,5 +136,47 @@ check("recombined 808 compiles to a MELODIC sampler (not a drum pad)",
       or not prov.samples.get("808"),  # only if a palette 808 was bound
       "no melodic assign for 808")
 
+# ── pitch-correct sample binding (2026-07 out-of-key audit regression) ────────
+# A synthetic palette with KNOWN root_notes: binding must (a) pick the root nearest the
+# phrase center for pitched roles, (b) carry root_note on the SampleMatch, and (c) compile
+# must root the melodic sampler at THE SAMPLE'S pitch — never a phrase-derived guess.
+FAKE_PAL = {
+    "kick": [{"path": "/tmp/pal_k.wav"}], "snare": [{"path": "/tmp/pal_s.wav"}],
+    "hat": [{"path": "/tmp/pal_h.wav"}], "clap": [{"path": "/tmp/pal_c.wav"}],
+    "808": [{"path": "/tmp/pal_8a.wav", "root_note": 24},
+            {"path": "/tmp/pal_8b.wav", "root_note": 36},
+            {"path": "/tmp/pal_8c.wav", "root_note": 50}],
+    "melodic": [{"path": "/tmp/pal_m1.wav", "root_note": 48},
+                {"path": "/tmp/pal_m2.wav", "root_note": 65},
+                {"path": "/tmp/pal_m3.wav", "root_note": 84}],
+}
+rec_p, prov_p = G.generate({"mood": "dark", "tempo": 140, "key": "F minor"}, seed=5, palette=FAKE_PAL)
+pitched_roles = {"808", "bass", "pad", "lead", "pluck"}
+bound = [e for e in rec_p.elements if e.role.value in pitched_roles
+         and e.sample_match.status.value == "matched"]
+check("pitched bindings exist in the pitch-test generation", len(bound) > 0, str(len(bound)))
+check("every pitched binding carries the sample's root_note",
+      all(e.sample_match.root_note is not None for e in bound),
+      str([(e.role.value, e.sample_match.root_note) for e in bound]))
+def _center(e):
+    ps = sorted(int(n.pitch) for n in e.midi.notes) or [48]
+    return ps[len(ps) // 2]
+def _pool(e):
+    return FAKE_PAL["808"] if e.role.value in ("808", "bass") else FAKE_PAL["melodic"]
+check("binding picks the root NEAREST the phrase center",
+      all(abs(int(e.sample_match.root_note) - _center(e))
+          == min(abs(int(p["root_note"]) - _center(e)) for p in _pool(e)) for e in bound),
+      str([(e.role.value, e.sample_match.root_note, _center(e)) for e in bound]))
+prog_p = compile_recipe(rec_p).commands
+roots = {c["args"]["file"]: c["args"]["note"] for c in prog_p
+         if c["command"] == "assign_sample" and c["args"].get("mode") == "melodic"}
+check("compiled melodic sampler roots == the bound samples' true root_note",
+      all(roots.get(e.sample_match.matched_path) == int(e.sample_match.root_note) for e in bound
+          if e.sample_match.matched_path in roots) and len(roots) > 0,
+      str(roots))
+check("melodic non-bass elements (pad/lead) DO get a sampler when matched (the sine-fix branch)",
+      all(e.sample_match.matched_path in roots for e in bound if e.role.value in ("pad", "lead", "pluck")),
+      str([(e.role.value, e.sample_match.matched_path in roots) for e in bound]))
+
 print(f"\n{'ALL PASS' if not fails else 'FAILURES: ' + ', '.join(fails)}  ({len(fails)} failure(s))")
 sys.exit(len(fails))

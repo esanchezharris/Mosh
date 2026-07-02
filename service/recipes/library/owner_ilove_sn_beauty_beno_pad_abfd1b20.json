@@ -1,0 +1,384 @@
+{
+  "recipe_id": "owner_ilove_sn_beauty_beno_pad",
+  "schema_version": "2.0",
+  "source": {
+    "platform": "owner-catalog",
+    "video_id": "owner_ilove_sn_beauty_beno_pad",
+    "url": "",
+    "title": "17_ilove",
+    "channel": "",
+    "duration_s": 0.0,
+    "license": "owner",
+    "retrieved_at": null,
+    "content_hash": "abfd1b207c84b4daf0af531cec9501926ec2e924e7bb5d481db81b101e5705a4"
+  },
+  "meta": {
+    "daw": {
+      "value": "flstudio",
+      "confidence": 0.95,
+      "evidence": [
+        "importer format"
+      ]
+    },
+    "tempo_bpm": {
+      "value": 145,
+      "confidence": 0.95,
+      "evidence": [
+        "project file tempo"
+      ]
+    },
+    "key": {
+      "value": "F# major",
+      "confidence": 0.75,
+      "evidence": [
+        "pitch-class inference (Krumhansl)"
+      ]
+    },
+    "time_signature": {
+      "value": "4/4",
+      "confidence": 0.6,
+      "evidence": []
+    }
+  },
+  "arrangement": {
+    "sections": [
+      {
+        "name": "loop",
+        "start_s": 0.0,
+        "end_s": 6.620689655172414,
+        "confidence": 0.5
+      }
+    ]
+  },
+  "elements": [
+    {
+      "element_id": "owner_ilove_sn_beauty_beno_pad",
+      "role": "pad",
+      "label": "ilove · sn beauty beno (pad)",
+      "audio_ref": null,
+      "midi": {
+        "status": "extracted",
+        "midi_ref": null,
+        "notes": [
+          {
+            "pitch": 61,
+            "start_beats": 1.0,
+            "duration_beats": 0.5,
+            "velocity": 127
+          },
+          {
+            "pitch": 63,
+            "start_beats": 1.5,
+            "duration_beats": 0.5,
+            "velocity": 127
+          },
+          {
+            "pitch": 66,
+            "start_beats": 3.5,
+            "duration_beats": 0.5,
+            "velocity": 127
+          },
+          {
+            "pitch": 66,
+            "start_beats": 4.5,
+            "duration_beats": 0.5,
+            "velocity": 127
+          },
+          {
+            "pitch": 63,
+            "start_beats": 9.75,
+            "duration_beats": 0.25,
+            "velocity": 97
+          },
+          {
+            "pitch": 63,
+            "start_beats": 10.0,
+            "duration_beats": 0.25,
+            "velocity": 98
+          },
+          {
+            "pitch": 63,
+            "start_beats": 10.25,
+            "duration_beats": 0.25,
+            "velocity": 98
+          },
+          {
+            "pitch": 61,
+            "start_beats": 10.5,
+            "duration_beats": 0.25,
+            "velocity": 98
+          },
+          {
+            "pitch": 61,
+            "start_beats": 10.75,
+            "duration_beats": 0.25,
+            "velocity": 91
+          },
+          {
+            "pitch": 61,
+            "start_beats": 11.0,
+            "duration_beats": 0.25,
+            "velocity": 91
+          },
+          {
+            "pitch": 61,
+            "start_beats": 11.25,
+            "duration_beats": 0.25,
+            "velocity": 91
+          },
+          {
+            "pitch": 57,
+            "start_beats": 11.25,
+            "duration_beats": 0.25,
+            "velocity": 91
+          },
+          {
+            "pitch": 61,
+            "start_beats": 11.5,
+            "duration_beats": 0.25,
+            "velocity": 91
+          },
+          {
+            "pitch": 60,
+            "start_beats": 11.5,
+            "duration_beats": 0.25,
+            "velocity": 91
+          },
+          {
+            "pitch": 57,
+            "start_beats": 11.5,
+            "duration_beats": 0.25,
+            "velocity": 91
+          },
+          {
+            "pitch": 60,
+            "start_beats": 11.75,
+            "duration_beats": 0.25,
+            "velocity": 88
+          },
+          {
+            "pitch": 56,
+            "start_beats": 11.75,
+            "duration_beats": 0.25,
+            "velocity": 88
+          },
+          {
+            "pitch": 56,
+            "start_beats": 12.0,
+            "duration_beats": 0.25,
+            "velocity": 86
+          },
+          {
+            "pitch": 56,
+            "start_beats": 12.25,
+            "duration_beats": 0.25,
+            "velocity": 83
+          },
+          {
+            "pitch": 57,
+            "start_beats": 12.75,
+            "duration_beats": 0.25,
+            "velocity": 81
+          },
+          {
+            "pitch": 61,
+            "start_beats": 12.75,
+            "duration_beats": 0.25,
+            "velocity": 81
+          },
+          {
+            "pitch": 79,
+            "start_beats": 13.0,
+            "duration_beats": 0.25,
+            "velocity": 88
+          },
+          {
+            "pitch": 62,
+            "start_beats": 13.0,
+            "duration_beats": 0.25,
+            "velocity": 88
+          },
+          {
+            "pitch": 79,
+            "start_beats": 13.25,
+            "duration_beats": 0.25,
+            "velocity": 99
+          },
+          {
+            "pitch": 62,
+            "start_beats": 13.25,
+            "duration_beats": 0.25,
+            "velocity": 99
+          },
+          {
+            "pitch": 79,
+            "start_beats": 13.5,
+            "duration_beats": 0.25,
+            "velocity": 113
+          },
+          {
+            "pitch": 64,
+            "start_beats": 13.5,
+            "duration_beats": 0.25,
+            "velocity": 113
+          },
+          {
+            "pitch": 79,
+            "start_beats": 13.75,
+            "duration_beats": 0.25,
+            "velocity": 113
+          },
+          {
+            "pitch": 64,
+            "start_beats": 13.75,
+            "duration_beats": 0.25,
+            "velocity": 113
+          },
+          {
+            "pitch": 79,
+            "start_beats": 14.0,
+            "duration_beats": 0.25,
+            "velocity": 113
+          },
+          {
+            "pitch": 79,
+            "start_beats": 14.25,
+            "duration_beats": 0.25,
+            "velocity": 115
+          },
+          {
+            "pitch": 79,
+            "start_beats": 14.5,
+            "duration_beats": 0.25,
+            "velocity": 117
+          },
+          {
+            "pitch": 79,
+            "start_beats": 14.75,
+            "duration_beats": 0.25,
+            "velocity": 121
+          },
+          {
+            "pitch": 63,
+            "start_beats": 14.75,
+            "duration_beats": 0.25,
+            "velocity": 121
+          },
+          {
+            "pitch": 79,
+            "start_beats": 15.0,
+            "duration_beats": 0.25,
+            "velocity": 122
+          },
+          {
+            "pitch": 63,
+            "start_beats": 15.0,
+            "duration_beats": 0.25,
+            "velocity": 122
+          },
+          {
+            "pitch": 79,
+            "start_beats": 15.25,
+            "duration_beats": 0.25,
+            "velocity": 121
+          },
+          {
+            "pitch": 79,
+            "start_beats": 15.5,
+            "duration_beats": 0.25,
+            "velocity": 126
+          },
+          {
+            "pitch": 79,
+            "start_beats": 15.75,
+            "duration_beats": 0.25,
+            "velocity": 127
+          }
+        ],
+        "note_count": 39,
+        "confidence": 1.0
+      },
+      "sample_match": {
+        "status": "none",
+        "matched_path": null,
+        "distance": 0.0,
+        "alternates": [],
+        "root_note": null
+      },
+      "synth_patch": {
+        "status": "unknown",
+        "plugin": {
+          "name": null,
+          "available_locally": false
+        },
+        "params": {},
+        "match": null,
+        "substitute": null
+      },
+      "onsets": [],
+      "motif": {
+        "bars": 4.0,
+        "onset_grid": "16th",
+        "density": 9.75,
+        "syncopation": 0.7692,
+        "contour": [
+          1,
+          1,
+          0,
+          -1,
+          0,
+          0,
+          -1,
+          0,
+          0,
+          -1,
+          1,
+          -1,
+          1,
+          1,
+          -1,
+          1,
+          -1,
+          0,
+          1,
+          1,
+          1,
+          1,
+          -1,
+          1,
+          -1,
+          1,
+          -1,
+          1,
+          0,
+          0,
+          0,
+          -1
+        ],
+        "register_band": "mid",
+        "harmonic_function": "progression"
+      },
+      "bass": null,
+      "evidence": [],
+      "confidence": 0.9
+    }
+  ],
+  "unresolved": [],
+  "reconstruction_class": "deterministic",
+  "yield": {
+    "predicted": {
+      "drums": 0.0,
+      "midi": 1.0,
+      "synth": 0.0,
+      "arrangement": 0.5,
+      "overall": 0.7
+    },
+    "actual": {
+      "drums": 0.0,
+      "midi": 0.0,
+      "synth": 0.0,
+      "arrangement": 0.0,
+      "overall": 0.0
+    }
+  }
+}

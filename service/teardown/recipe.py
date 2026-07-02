@@ -167,6 +167,10 @@ class SampleMatch(_Base):
     matched_path: Optional[str] = None
     distance: float = Field(0.0, ge=0.0)
     alternates: list[Alternate] = Field(default_factory=list)
+    #: The matched one-shot's TRUE pitch (MIDI). The melodic sampler's `note` must be
+    #: this — not a phrase-derived guess — or every rendered note is off by the
+    #: sample-vs-root delta (the 2026-07 out-of-key audit finding: −5..+5 st per element).
+    root_note: Optional[int] = Field(None, ge=0, le=127)
 
 
 class Plugin(_Base):

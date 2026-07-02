@@ -135,6 +135,10 @@ function grade(check: Check, before: Snapshot, after: Snapshot, cmdResults: Arra
       return n >= check.min ? pass(`${check.name} ×${n}`) : fail(`${check.name} ×${n} < ${check.min}`);
     }
     case "defer":
+      // A defer passes only on a GENUINE deferral — a parseable reply that chose to emit
+      // zero commands. Invalid-only output (the model TRIED to act and failed validation)
+      // and brain errors are failures, not deferrals (2026-07 audit: vacuous-pass hole
+      // inflated local-base by one case).
       return cmdResults.length === 0 ? pass("deferred") : fail(`emitted ${cmdResults.length} command(s) on a defer case`);
   }
 }
@@ -222,7 +226,8 @@ async function runCase(c: BenchCase, usage: BrainUsage) {
   const checks = c.checks.map((k) => grade(k, before, after, cmdResults));
   const appliedClean = cmdResults.every((r) => r.ok);
   const isDefer = c.checks.some((k) => k.kind === "defer");
-  const pass = checks.every((r) => r.pass) && (isDefer || (allowed.length > 0 && appliedClean));
+  const genuineDefer = isDefer && !brainError && invalidCount === 0;
+  const pass = checks.every((r) => r.pass) && (isDefer ? genuineDefer : allowed.length > 0 && appliedClean);
 
   // paired audio for the owner's ears
   let renders: string[] = [];

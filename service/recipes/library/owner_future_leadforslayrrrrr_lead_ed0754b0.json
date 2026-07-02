@@ -332,7 +332,8 @@
         "status": "none",
         "matched_path": null,
         "distance": 0.0,
-        "alternates": []
+        "alternates": [],
+        "root_note": null
       },
       "synth_patch": {
         "status": "unknown",

@@ -69,6 +69,10 @@ def _seed_int(request: dict, seed: int) -> int:
 def load_library(lib_dir: str = LIB_DIR) -> list:
     out = []
     for p in sorted(glob.glob(os.path.join(lib_dir, "*.json"))):
+        # macOS/iCloud sync-conflict copies ("x 2.json") double-load recipes and bias
+        # retrieval — seen in three checkouts now (2026-07 audit). Never load them.
+        if os.path.basename(p).split(".")[0].endswith(" 2"):
+            continue
         out.append(R.from_json(open(p).read()))
     return out
 
@@ -93,11 +97,21 @@ def load_palette(manifest: str = PALETTE_MANIFEST) -> dict:
     items = json.load(open(manifest))
     items = items["items"] if isinstance(items, dict) and "items" in items else items
     by_role: dict[str, list] = {}
+    missing = 0
     for it in items:
         role = (it.get("role_guess") or it.get("role") or "").lower()
         path = it.get("path")
         if role and path and os.path.isfile(path):
             by_role.setdefault(role, []).append({"path": path, "root_note": it.get("root_note")})
+        elif role and path:
+            missing += 1
+    if missing:
+        # LOUD, never silent: dropped one-shots regress renders to the stock synth — the
+        # owner-audible "sine waves" failure (2026-07 audit: the whole palette lived in a
+        # disposable worktree; a cleanup would have silently reverted everything).
+        print(f"⚠ palette: {missing} manifest one-shot(s) MISSING on disk (renders degrade "
+              f"toward the stock synth) — re-run build_palette or fix asset paths: {manifest}",
+              file=sys.stderr)
     return by_role
 
 
@@ -300,14 +314,28 @@ def recombine(library: list, request: dict, rng: Rng, palette: dict) -> tuple:
     # 5) bind a palette one-shot per role (real sounds); none → compiler falls back.
     #    pads/leads/plucks draw from the palette's 'melodic' bucket so melodies play a real
     #    repitched one-shot instead of the stock 4OSC sine patch (2026-07 "sine waves" fix).
+    #    PITCH CORRECTNESS (2026-07 out-of-key audit): for pitched roles, pick the one-shot
+    #    whose manifest root_note is NEAREST the phrase's center (small repitch stretch) and
+    #    carry root_note on the match — the compiler MUST root the sampler at the sample's
+    #    true pitch or every note renders off by the delta (measured −5..+5 st per element).
     for e in elements:
         role = e.role.value
         pool = (palette.get(role)
                 or (palette.get("808") if role == "808" else None)
                 or (palette.get("melodic") if role in ("pad", "lead", "pluck") else None))
         if pool:
-            pick = pool[rng._next() % len(pool)]
-            e.sample_match = R.SampleMatch(status="matched", matched_path=pick["path"], distance=0.05)
+            pitched = role in ("808", "bass", "pad", "lead", "pluck")
+            rooted = [p for p in pool if p.get("root_note") is not None] if pitched else []
+            if pitched and rooted:
+                pitches = sorted(int(n.pitch) for n in e.midi.notes) or [48]
+                center = pitches[len(pitches) // 2]
+                best = min(abs(int(p["root_note"]) - center) for p in rooted)
+                cands = [p for p in rooted if abs(int(p["root_note"]) - center) == best]
+                pick = cands[rng._next() % len(cands)]
+            else:
+                pick = pool[rng._next() % len(pool)]
+            e.sample_match = R.SampleMatch(status="matched", matched_path=pick["path"], distance=0.05,
+                                           root_note=pick.get("root_note"))
             prov.samples[role] = pick["path"]
 
     out = R.Recipe(

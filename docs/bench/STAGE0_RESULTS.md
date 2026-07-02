@@ -134,3 +134,55 @@ seed 0 = all rated 1). Results:
 2. Blind 10-ask corrective session (pre-registered gate for the scaffolded brain).
 3. Corrective before/after renders in `~/mosh-bench-artifacts/` (2 pairs so far).
 4. Gate C r8 re-run when the generation thread lands the corpus fix (`docs/plans/r8-corpus-spec.md`).
+
+## Post-audit corrections (2026-07-02 — owner-triggered hostile audit of this whole pass)
+
+The owner caught the sine-wave miss and ordered a full self-audit (4 adversarial auditors over
+both merged PRs + every claimed number, plus reproducibility re-runs). Verdict: the substrate
+claims held; several verifications were BLUNT-INSTRUMENT class; one shipped artifact was
+musically wrong. Everything below is fixed on this branch.
+
+**Found broken → fixed:**
+- **Out-of-key renders (critical):** melodic one-shots were bound without knowing their pitch —
+  sampler roots off by −5..+5 st PER ELEMENT within one beat. Fix: `SampleMatch.root_note`
+  (schema + tests), binding picks the palette sample nearest the phrase center, compiler roots
+  the sampler at the SAMPLE'S true pitch. Regression-tested (the audit proved the previous fix
+  had zero test coverage).
+- **Hard clipping (5/6 renders, up to 7.4% samples):** compile's mix stage now applies a −4.5 dB
+  per-track headroom trim (golden updated). Post-fix: 0.0% clipped.
+- **RENDER GATE:** audition renders now must pass a chroma key-match (requested key in top-3 of
+  24) + <0.5% clipping, with seed-retry and LOUD below-gate labeling — the audio itself is
+  checked, not just command success. Residual off-key = wrong inferred source keys in owner
+  recipes (r8 item: per-element key verification).
+- **Vacuous defer grading:** invalid-only output and brain errors counted as "correct deferrals."
+  Honest local-base = **18/35 (51.4%)**, so the worked-examples lever is **+31.4pp** (not +28.6).
+  Fixed in moshiBench. Both local arms are bitwise reproducible across runs (0 case flips).
+- **Stale-binary trap:** `findBin` preferred a fixed path order (a pre-#190 worktree build that
+  silently ignored `mode:"melodic"`); now prefers the NEWEST binary and honors `--bin` strictly.
+- **Scrape roles:** 'hat' substring-matched inside "that/hate" (15 melodies shipped as hi-hats);
+  the per-project cap dropped HALF the catalog including ALL drum DNA (zero kick/snare recipes —
+  generated drums came only from seeds). Fixed: token-boundary roles, role-priority ranked cap
+  (808/drums survive first), 2-note floor for drum-named tracks, cross-project content dedupe.
+  **Library v2: 384 recipes incl. real owner drums (60×808, 3 kick, 7 snare, 3 clap, 9 hat)** —
+  the gated audition now builds beats on the owner's OWN kicks.
+- **Palette fragility:** all 2,469 one-shots lived in a disposable worktree; a cleanup would have
+  silently reverted every render to sine. Relocated to `~/Library/Mosh/palette-v1/`;
+  `load_palette` now loud-fails on missing assets; `load_library` ignores macOS/iCloud
+  " 2.json" sync-conflict copies (three checkouts infested — likely iCloud Documents sync).
+- **The corrective ears-packs were sine mixes BY DESIGN** (test-tone bench seeds) — RETRACTED
+  from the owner's queue; rebuild on recipe-generated sessions is queued.
+- **My own verification instrument was invalid:** the ">5kHz = 11–33% vs sine <2%" claim cannot
+  separate the old sine set from the fixed set (hats dominate >5kHz in both). Replaced by
+  spectral-flatness + narrow-peak-share + envelope CV (tone detection) and the chroma render gate.
+
+**Corrected stats:** validity A/B position bias 10/12 B (was "9/12"); seed-0 clips 10/12 rated 1
+(one 2, one 3 — was "all 1"); 34 factory tuples survived curation (38 harvested); corrective
+pilot = 16 distinct pairs (fader clamps at +6 dB, its `degradedDb` metadata was wrong above that).
+**Two engine follow-ups were misreported:** loop REGIONS already exist in `cmdSetTransport`
+(loopStart/loopEnd) — the gap is agent-catalog exposure, not engine work; `create_track` already
+validation-errors on `type:"midi"` — the gap is prompt-side.
+
+**What survived the audit intact:** all bench scores recounted from rows; the frozen-eval
+0.875/0.714/0.218/0.558 ranking; scrape note extraction byte-exact (12/12 sampled); tempos
+verified against the owner's own folder labels (55/56); the validity-pack math exactly; Gate B
+×3; the +lever result (now +31.4pp, bitwise stable).

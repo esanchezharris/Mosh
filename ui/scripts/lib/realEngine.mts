@@ -7,7 +7,7 @@
 // so cumulative-prefix replay is sound. The read-only `__snapshot` directive
 // returns the same ops.snapshot() the WebView sees.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -39,14 +39,20 @@ export function argFlag(n: string, d?: string): string | undefined {
 }
 
 export function findBin(explicit?: string): string {
+  if (explicit) {
+    if (existsSync(explicit)) return explicit;
+    throw new Error(`Mosh binary not found at --bin ${explicit}`);
+  }
+  // NEWEST binary wins (2026-07 audit: a stale worktree build silently ignored
+  // assign_sample mode:"melodic" and shipped sine renders — path priority is a trap).
   const cand = [
-    explicit,
     resolve(process.cwd(), "../build-macos-arm64-release/Mosh_artefacts/Release/Mosh.app/Contents/MacOS/Mosh"),
     resolve(process.cwd(), "../build-macos-arm64/Mosh_artefacts/Debug/Mosh.app/Contents/MacOS/Mosh"),
     "/Applications/Mosh.app/Contents/MacOS/Mosh",
-  ].filter(Boolean) as string[];
-  for (const c of cand) if (existsSync(c)) return c;
-  throw new Error("Mosh binary not found — pass --bin");
+  ].filter((c) => existsSync(c));
+  if (cand.length === 0) throw new Error("Mosh binary not found — pass --bin");
+  cand.sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs);
+  return cand[0];
 }
 
 const WORK = join(tmpdir(), `mosh-real-engine-${process.pid}`);
