@@ -146,21 +146,18 @@ _KRUM_MIN = [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3
 _PC_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 
 
-def _element_key(el, fallback: str) -> str:
-    """The element's key measured from ITS OWN notes (duration-weighted Krumhansl over
-    pitch classes) — recipe-level source keys are inferred per PROJECT and unreliable
-    per element (2026-07 factory smoke: 5/6 candidates failed the chroma key gate because
-    transposition trusted the label). Falls back to the recipe key on thin/ambiguous
-    material."""
+def _krumhansl_key(notes) -> tuple:
+    """(key string, correlation score) from a note list via duration-weighted Krumhansl —
+    ("", 0.0) on thin/silent material. The shared core of _element_key and
+    measured_key_of."""
     import math as _m
-    notes = el.midi.notes if el and el.midi.notes else []
     if len(notes) < 6:
-        return fallback
+        return "", 0.0
     hist = [0.0] * 12
     for n in notes:
         hist[int(n.pitch) % 12] += float(n.duration_beats)
     if sum(hist) <= 0:
-        return fallback
+        return "", 0.0
     mh = sum(hist) / 12
 
     def corr(profile, rot):
@@ -173,7 +170,30 @@ def _element_key(el, fallback: str) -> str:
     score, key = max([(corr(_KRUM_MIN, r), f"{_PC_NAMES[r]} minor") for r in range(12)]
                      + [(corr(_KRUM_MAJ, r), f"{_PC_NAMES[r]} major") for r in range(12)],
                      key=lambda t: t[0])
+    return key, score
+
+
+def _element_key(el, fallback: str) -> str:
+    """The element's key measured from ITS OWN notes (duration-weighted Krumhansl over
+    pitch classes) — recipe-level source keys are inferred per PROJECT and unreliable
+    per element (2026-07 factory smoke: 5/6 candidates failed the chroma key gate because
+    transposition trusted the label). Falls back to the recipe key on thin/ambiguous
+    material."""
+    notes = el.midi.notes if el and el.midi.notes else []
+    key, score = _krumhansl_key(notes)
     return key if score > 0.5 else fallback
+
+
+def measured_key_of(rec) -> str:
+    """The RECIPE's key measured from its melodic content (pad+lead+808 notes pooled).
+    Used by the factory's key tripwire when a style skips conform_to_key ('disrespectful'
+    = deliberately weird key): the tripwire's job is heard==written render-smear
+    catching, so the reference must be what was WRITTEN, not what was requested.
+    "" on thin/ambiguous content (the factory falls back to the requested key)."""
+    notes = [n for e in rec.elements if e.role.value in ("pad", "lead", "808", "bass")
+             for n in e.midi.notes]
+    key, score = _krumhansl_key(notes)
+    return key if score > 0.5 else ""
 
 
 def conform_to_key(el, req_key: str):
@@ -501,6 +521,42 @@ def _rhythm_grid_ok(el) -> bool:
     return _has_rhythm(el) and _grid_ok(el)
 
 
+# ───────────────────────── styles (owner vocabulary, v0) ──────────────────────
+# DATA not code: styles.json carries four generic knobs (retrieval bias, groove
+# constraint, key policy, lead policy). The owner's encyclopedic vocabulary (the
+# FX-KB pipeline) drops in later as JSON — no new code paths per style.
+STYLES_PATH = os.path.join(_HERE, "styles.json")
+
+
+def load_styles(path: str = STYLES_PATH) -> dict:
+    """{style name: spec} — {} when absent (permissive-on-missing, the house invariant)."""
+    if not os.path.isfile(path):
+        return {}
+    doc = json.load(open(path))
+    return {k: v for k, v in doc.items() if not k.startswith("_")}
+
+
+def _groove_ok(el, spec: dict) -> bool:
+    """Generic groove checker: the fraction of bars containing an onset within tol of
+    EVERY beatsInBar entry must reach minBarFrac. club-swag ('clap on 2 and 4') =
+    beatsInBar [1.0, 3.0]."""
+    if not (el and el.midi.notes):
+        return False
+    beats = spec.get("beatsInBar", [])
+    tol = float(spec.get("tol", 0.1))
+    min_frac = float(spec.get("minBarFrac", 0.75))
+    if not beats:
+        return True
+    end = max(float(n.start_beats) for n in el.midi.notes)
+    n_bars = max(1, int(end // BEATS_PER_BAR) + 1)
+    starts = [float(n.start_beats) for n in el.midi.notes]
+    hit_bars = 0
+    for b in range(n_bars):
+        if all(any(abs(s - (b * BEATS_PER_BAR + t)) <= tol for s in starts) for t in beats):
+            hit_bars += 1
+    return hit_bars / n_bars >= min_frac
+
+
 def _distinct_ok(el, min_pitches: int = 3, min_pcs: int = 2) -> bool:
     """Melodic-variety floor (beat-03 kill: 'it was like one note'): a lead needs ≥3
     distinct pitches AND ≥2 pitch classes (an octave-jumping single-pc line still reads
@@ -563,6 +619,7 @@ class Provenance:
     tempo: float = 0.0
     filters: dict = field(default_factory=dict)    # filter name → fire count (calibration!)
     priors: dict = field(default_factory=dict)     # group → applied owner keep/kill prior
+    style: str = ""                                # resolved style name ("" = vanilla)
     drum_roles: list = field(default_factory=list)  # bound drum roles (FEATURE, never a gate)
     distinct: dict = field(default_factory=dict)   # melodic role → distinct pitch count
     sub_overlap: dict = field(default_factory=dict)  # kick subTailMs × 808 subShare (logged)
@@ -597,19 +654,30 @@ def _element(rec, role, pred=None):
 REQUIRED_DRUM_GROUPS = (("kick",), ("snare", "clap"), ("hat",))
 
 
-def _fill_missing_drums(elements: list, ranked: list, rng: Rng, prov: Provenance):
+def _fill_missing_drums(elements: list, ranked: list, rng: Rng, prov: Provenance,
+                        groove: Optional[dict] = None):
     """Complete a partial drum kit from per-role pools. NOT a completeness GATE and not
     a re-pick: pack-001 keeps 01 ('no drums') and 11 ('no hi-hats') prove partial kits
     can be keeps, and only 5 of 930 library recipes carry a full kick+snare+hat kit —
     a re-pick would collapse every beat onto those 5 grooves. Filling only ADDS missing
     role-groups (the picked groove is preserved), and each fill is provenance-tagged so
-    the next pack's defect chips can adjudicate the distribution shift."""
+    the next pack's defect chips can adjudicate the distribution shift.
+
+    `groove` (style knob): the matching role-group's pool is groove-filtered HARD, with
+    a loud relax when it empties (only ~5 library snare/claps hit 2&4 today — the relax
+    path is the honest one)."""
     have = {e.role.value for e in elements}
     for group in REQUIRED_DRUM_GROUPS:
         if have & set(group):
             continue
         pool = [(r, e) for r, e in _role_pool(ranked, set(group))
                 if e.midi.notes and _has_rhythm(e) and _grid_ok(e)]
+        if groove and set(groove.get("roles", [])) & set(group):
+            grooved = [(r, e) for r, e in pool if _groove_ok(e, groove)]
+            if grooved:
+                pool = grooved
+            else:
+                prov.fired("styleGrooveRelaxed")
         if not pool:
             continue
         top = pool[: max(1, len(pool) // 2 + 1)]
@@ -624,12 +692,29 @@ def recombine(library: list, request: dict, rng: Rng, palette: dict,
               priors: Optional[dict] = None) -> tuple:
     """Assemble a NEW recipe: drum-kit groove from one recipe, 808 from another, chords from a
     third, optional lead from a fourth — each transposed into one key, the 808 bound to the
-    chords, and a palette sample bound per drum/808 role."""
-    ranked = retrieve(library, request, rng, priors)
+    chords, and a palette sample bound per drum/808 role. `request["style"]` resolves an
+    owner-vocabulary style (styles.json): four data knobs — retrieval bias, groove
+    constraint, key policy, lead policy. Unknown/absent style ⇒ vanilla."""
+    style_name = (request.get("style") or "").lower()
+    style = load_styles().get(style_name) or {}
+    eff_req = request
+    if style.get("retrieval"):
+        # inject the style's mood/tempo into a COPY for scoring only — the existing
+        # mood prior does the work (no parallel retrieval mechanism)
+        eff_req = dict(request)
+        rb = style["retrieval"]
+        if not eff_req.get("mood") and rb.get("mood"):
+            eff_req["mood"] = rb["mood"]
+        if not eff_req.get("tempo") and rb.get("tempoRange"):
+            eff_req["tempo"] = sum(rb["tempoRange"]) / 2.0
+    conform = (style.get("key") or {}).get("conform", True)
+    groove = style.get("groove")
+    ranked = retrieve(library, eff_req, rng, priors)
     backbone = ranked[0]
-    req_key = request.get("key") or backbone.meta.key.value
-    req_tempo = float(request.get("tempo") or backbone.meta.tempo_bpm.value or 140)
-    prov = Provenance(backbone=backbone.source.video_id, key=req_key, tempo=req_tempo)
+    req_key = eff_req.get("key") or backbone.meta.key.value
+    req_tempo = float(eff_req.get("tempo") or backbone.meta.tempo_bpm.value or 140)
+    prov = Provenance(backbone=backbone.source.video_id, key=req_key, tempo=req_tempo,
+                      style=style_name if style else "")
 
     elements: list = []
 
@@ -640,8 +725,16 @@ def recombine(library: list, request: dict, rng: Rng, palette: dict,
         e = _element(drum_src, role)
         if e and e.midi.notes:  # a notes-less element would compile as a bare one-shot drop
             elements.append(_clone_element(e))  # drums are NOT transposed (GM pad pitches)
+    if groove:
+        # style groove (club-swag "clap on 2 and 4"): the source's own snare/clap must
+        # hit the pattern or it's dropped — the FILL below replaces it from the
+        # groove-filtered pool
+        for e in list(elements):
+            if e.role.value in set(groove.get("roles", [])) and not _groove_ok(e, groove):
+                elements.remove(e)
+                prov.fired("styleGrooveDrop")
     # complete a partial kit from per-role pools (a FILL, never a gate — see the helper)
-    _fill_missing_drums(elements, ranked, rng, prov)
+    _fill_missing_drums(elements, ranked, rng, prov, groove=groove)
 
     # 2) CHORDS — harmonic backbone (drives the 808). Pick a recipe with a pad/chords element.
     chord_src = _pick_recipe_with("pad", ranked, rng, pred=_rhythm_grid_ok) or backbone
@@ -650,7 +743,8 @@ def recombine(library: list, request: dict, rng: Rng, palette: dict,
         c = _clone_element(chord_el)
         sem = _interval(_element_key(chord_el, chord_src.meta.key.value), req_key)
         transpose_element(c, sem)
-        conform_to_key(c, req_key)
+        if conform:  # style key policy: 'disrespectful' keeps the weird notes on purpose
+            conform_to_key(c, req_key)
         prov.sources["chords"] = chord_src.source.video_id
         prov.transpose["chords"] = sem
         elements.append(c)
@@ -662,7 +756,8 @@ def recombine(library: list, request: dict, rng: Rng, palette: dict,
         b = _clone_element(bass_el)
         sem = _interval(_element_key(bass_el, bass_src.meta.key.value), req_key)
         transpose_element(b, sem)
-        conform_to_key(b, req_key)  # binding then snaps to (already-conformed) chord roots
+        if conform:
+            conform_to_key(b, req_key)  # binding then snaps to (already-conformed) chord roots
         prov.sources["808"] = bass_src.source.video_id
         prov.transpose["808"] = sem
         chord_now = next((e for e in elements if e.role.value == "pad"), None)
@@ -675,7 +770,10 @@ def recombine(library: list, request: dict, rng: Rng, palette: dict,
     #    Variety floor (beat-03 kill "it was like one note"): pre-filter the candidate
     #    pool — 98/296 library leads have <3 distinct pitches (90 have exactly 1);
     #    transposition preserves distinct counts so filtering raw elements is safe.
-    want_lead = request.get("lead", True) and rng.chance(0.7)
+    lead_policy = style.get("lead")
+    want_lead = (True if lead_policy == "require"
+                 else False if lead_policy == "forbid"
+                 else request.get("lead", True) and rng.chance(0.7))
     if want_lead:
         # variety AND rhythm AND grid: a scale-reference stack has plenty of distinct
         # pitches but zero rhythm (pack-002 beat 05's lead); an off-grid lead is the
@@ -687,7 +785,8 @@ def recombine(library: list, request: dict, rng: Rng, palette: dict,
             le = _clone_element(lead_el)
             sem = _interval(_element_key(lead_el, lead_src.meta.key.value), req_key)
             transpose_element(le, sem)
-            conform_to_key(le, req_key)
+            if conform:
+                conform_to_key(le, req_key)
             # re-verify AFTER conform: folding to the parallel scale can merge two
             # source pitches onto one tone. A degraded lead is dropped, not shipped —
             # the lead is optional by design.

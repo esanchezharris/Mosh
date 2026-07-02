@@ -593,6 +593,76 @@ check("worst-prior source still generates when alone (nudge, never a ban)",
 check("provenance records applied priors per group",
       prov_ban.priors.get("chords") == -1.0, str(prov_ban.priors))
 
+# ── styles v0 (owner vocabulary: club-swag / disrespectful / melodic-heartfelt / dark-menacing) ──
+check("missing styles file → {} (permissive)", G.load_styles("/nonexistent/styles.json") == {})
+check("styles.json loads the 4 owner styles (comment keys dropped)",
+      set(G.load_styles()) == {"club-swag", "disrespectful", "melodic-heartfelt",
+                               "dark-menacing"}, str(set(G.load_styles())))
+g_unk, p_unk = G.generate({"style": "no-such-style", "mood": "dark", "tempo": 140,
+                           "key": "F minor"}, seed=3, palette={})
+check("unknown style generates vanilla (no crash, drums+808 present)",
+      any(e.role.value == "kick" for e in g_unk.elements) and p_unk.style == "")
+
+# _groove_ok unit: clap on 2&4 = onsets at beats 1.0 and 3.0 of each bar
+spec24 = {"roles": ["snare", "clap"], "beatsInBar": [1.0, 3.0], "tol": 0.1, "minBarFrac": 0.75}
+clap24 = R.Element(role="clap", midi=R.Midi(notes=[
+    R.NoteEvent(pitch=39, start_beats=b * 4.0 + t, duration_beats=0.25)
+    for b in range(4) for t in (1.0, 3.0)]))
+check("2&4 clap passes the groove check", G._groove_ok(clap24, spec24))
+clap_off = R.Element(role="clap", midi=R.Midi(notes=[
+    R.NoteEvent(pitch=39, start_beats=b * 4.0 + t, duration_beats=0.25)
+    for b in range(4) for t in (0.5, 2.5)]))
+check("off-pattern clap fails the groove check", not G._groove_ok(clap_off, spec24))
+clap_edge = R.Element(role="clap", midi=R.Midi(notes=[
+    R.NoteEvent(pitch=39, start_beats=b * 4.0 + t, duration_beats=0.25)
+    for b in range(4) for t in (1.09, 3.0)]))
+check("groove tol boundary (±0.1) accepts a 1.09 hit", G._groove_ok(clap_edge, spec24))
+
+# club-swag e2e over the real library: bound snare/clap is 2&4 OR the relax fired loudly
+cs_bad = []
+cs_bound_24 = 0
+for s in range(6):
+    g_cs, p_cs = G.generate({"style": "club-swag", "tempo": 132, "key": "C# minor"},
+                            seed=s, palette={})
+    sc = [e for e in g_cs.elements if e.role.value in ("snare", "clap")]
+    relaxed = p_cs.filters.get("styleGrooveRelaxed", 0) > 0
+    if sc and all(G._groove_ok(e, spec24) for e in sc):
+        cs_bound_24 += 1
+    elif not relaxed and sc:
+        cs_bad.append(s)
+check("club-swag: every bound snare/clap is 2&4 or the relax fired loudly (6 seeds)",
+      not cs_bad, str(cs_bad))
+check("club-swag: at least one seed binds a genuine 2&4 backbeat", cs_bound_24 >= 1,
+      str(cs_bound_24))
+
+# disrespectful: conform_to_key is skipped — out-of-scale notes survive on purpose
+weird_pad = _mini_rec("weirdpad", [R.Element(role="pad", midi=R.Midi(notes=[
+    R.NoteEvent(pitch=p, start_beats=float(i), duration_beats=1.0)
+    for i, p in enumerate((60, 61, 66, 63, 71, 61, 66, 60))]))])  # F-minor-hostile pcs
+rec_dis, prov_dis = G.recombine([weird_pad], {"style": "disrespectful", "tempo": 152,
+                                              "key": "F minor"}, G.Rng(4), {})
+dis_pad = next(e for e in rec_dis.elements if e.role.value == "pad")
+fmin_pcs = {(5 + d) % 12 for d in (0, 2, 3, 5, 7, 8, 10)}
+check("disrespectful keeps out-of-scale pitches (conform skipped)",
+      any(int(n.pitch) % 12 not in fmin_pcs for n in dis_pad.midi.notes),
+      str(sorted({int(n.pitch) % 12 for n in dis_pad.midi.notes})))
+check("provenance records the resolved style", prov_dis.style == "disrespectful")
+
+# melodic-heartfelt: the lead is REQUIRED, not a 70% coin flip
+mh_missing = [s for s in range(6)
+              if not any(e.role.value == "lead" for e in
+                         G.generate({"style": "melodic-heartfelt", "tempo": 148,
+                                     "key": "A minor"}, seed=s, palette={})[0].elements)]
+check("melodic-heartfelt always ships a lead (6 seeds)", not mh_missing, str(mh_missing))
+
+# measured_key_of: a C-minor recipe measures C minor (the tripwire reference for
+# conform:false styles)
+cmin = _mini_rec("cminrec", [R.Element(role="pad", midi=R.Midi(notes=[
+    R.NoteEvent(pitch=p, start_beats=float(i) * 0.5, duration_beats=0.5)
+    for i, p in enumerate((60, 63, 67, 60, 65, 63, 67, 58, 60, 63, 67, 55))]))])
+check("measured_key_of reads a C-minor recipe as C minor",
+      G.measured_key_of(cmin) == "C minor", G.measured_key_of(cmin))
+
 # Determinism with the new code paths: same (request, seed, palette) → identical output.
 g_a, p_a = G.generate({"mood": "chill", "tempo": 132, "key": "A minor"}, seed=9, palette=FAKE_PAL)
 g_b, p_b = G.generate({"mood": "chill", "tempo": 132, "key": "A minor"}, seed=9, palette=FAKE_PAL)

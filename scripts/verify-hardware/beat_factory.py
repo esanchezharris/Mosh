@@ -29,14 +29,18 @@ for p in (SERVICE, os.path.dirname(os.path.abspath(__file__))):
 
 DEFAULT_BIN = "/Applications/Mosh.app/Contents/MacOS/Mosh"
 MOODS_TEMPO = {"dark": 140, "emotional": 148, "aggressive": 152, "chill": 132}
+# Owner-named style vocabulary (styles.json) drives the grid; each style maps to a
+# retrieval mood + tempo. Cards show the style so the owner's chips catch mismatch.
+STYLES_TEMPO = {"club-swag": ("chill", 132), "disrespectful": ("aggressive", 152),
+                "melodic-heartfelt": ("emotional", 148), "dark-menacing": ("dark", 140)}
 KEYS = ["F minor", "G minor", "A minor", "C# minor", "D minor", "E minor"]
 SEEDS = [1, 2, 3]
 JUDGES_PY = os.path.expanduser("~/AI/judges_venv/bin/python")
 
 
 def requests_grid(smoke: bool = False):
-    reqs = [({"mood": m, "tempo": t, "key": k}, s)
-            for m, t in MOODS_TEMPO.items() for k in KEYS for s in SEEDS]
+    reqs = [({"style": s, "mood": m, "tempo": t, "key": k}, seed)
+            for s, (m, t) in STYLES_TEMPO.items() for k in KEYS for seed in SEEDS]
     return reqs[:6] if smoke else reqs
 
 
@@ -166,7 +170,7 @@ def build_pack_page(out_dir: str, picks: list) -> str:
                          f'<div class="src">did the new mix move it? rate the NEW render above.</div>')
         cards.append(f"""
   <div class="beat" data-f="{c['pack_file']}">
-    <div class="row1"><span class="name">{i+1:02d} · {r['mood']} · {int(r['tempo'])} bpm · {r['key']}
+    <div class="row1"><span class="name">{i+1:02d} · {r.get('style') or r['mood']} · {int(r['tempo'])} bpm · {r['key']}
       <span class="badge b-ok">key rank {c['gate']['keyRank']}</span>
       <span class="badge b-ok">sub {c['gate']['subRatio']:.2f}</span>{rep_badge}</span></div>
     <audio controls preload="metadata" src="{c['pack_file']}"></audio>
@@ -174,7 +178,7 @@ def build_pack_page(out_dir: str, picks: list) -> str:
     <div class="rate">
       <span class="kk"><button data-k="keep">KEEP</button><button data-k="kill">KILL</button></span>
       <span class="chips">{''.join(f'<button data-c="{ch}">{ch}</button>' for ch in
-                            ('808', 'drums', 'mix', 'key', 'boring', 'messy', 'ends-weird'))}</span>
+                            ('808', 'drums', 'mix', 'key', 'boring', 'messy', 'ends-weird', 'style'))}</span>
       <span class="stars"><button>★</button><button>★</button><button>★</button><button>★</button><button>★</button></span>
       <input type="text" placeholder="notes (optional)">
     </div>
@@ -297,7 +301,19 @@ def process_candidate(rec, prov, req: dict, seed: int, cid: str, wav: str,
     raw_rms = bal["metrics"].get("rmsDb")
     clip = bal["metrics"].get("clipFrac", 0.0)
     row["normGainDb"] = normalize_wav(wav)
-    rank, _ = render_gate_standalone(wav, req["key"])
+    # Style key policy: when conform_to_key was deliberately SKIPPED ('disrespectful' =
+    # weird key on purpose), the tripwire must gate against the recipe's MEASURED key —
+    # heard==written smear-catching is preserved; only the reference key changes
+    # (otherwise every disrespectful candidate dies reject:key by design).
+    from recipes import generate as G
+    want_key = req["key"]
+    style_spec = G.load_styles().get((req.get("style") or "").lower()) or {}
+    if not (style_spec.get("key") or {}).get("conform", True):
+        mk = G.measured_key_of(rec)
+        row["measuredKey"] = mk or "(ambiguous)"
+        if mk:
+            want_key = mk
+    rank, _ = render_gate_standalone(wav, want_key)
     sub_ok, sub_m = sub_gate(wav)
     row["gate"] = {"keyRank": rank, "clip": round(clip, 5), **sub_m, "rawRmsDb": raw_rms}
     row["tailEnergyDb"] = tail_energy_db(wav, req["tempo"])
@@ -364,7 +380,8 @@ def main() -> int:
     print(f"factory: {len(grid)} candidates → {out_dir}")
     rows = []
     for n, (req, seed) in enumerate(grid):
-        cid = f"{req['mood'][:4]}_{int(req['tempo'])}_{req['key'].replace(' ', '').replace('#', 's')}_s{seed}"
+        cid = (f"{(req.get('style') or req['mood'])[:4]}_{int(req['tempo'])}_"
+               f"{req['key'].replace(' ', '').replace('#', 's')}_s{seed}")
         wav = os.path.join(cand_dir, cid + ".wav")
         rec, prov = G.generate(req, seed=seed, palette=palette, library=library,
                                priors=priors)
