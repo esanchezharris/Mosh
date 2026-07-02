@@ -1,0 +1,88 @@
+{
+  "tag": "smoke",
+  "model": "gpt-5.4-mini",
+  "bin": "/Users/emiliosanchez-harris/Documents/ClaudeMosh/.claude/worktrees/vigilant-robinson-a5b2c2/build-macos-arm64-release/Mosh_artefacts/Release/Mosh.app/Contents/MacOS/Mosh",
+  "ranAt": "2026-07-02T00:00:01.816Z",
+  "score": 1,
+  "passed": 3,
+  "total": 3,
+  "byArea": {
+    "session": {
+      "pass": 1,
+      "total": 1
+    },
+    "mixer": {
+      "pass": 1,
+      "total": 1
+    },
+    "defer": {
+      "pass": 1,
+      "total": 1
+    }
+  },
+  "usage": {
+    "promptTokens": 7147,
+    "completionTokens": 96,
+    "calls": 3
+  },
+  "rows": [
+    {
+      "id": "tempo-plain",
+      "area": "session",
+      "utterance": "set the tempo to 128",
+      "pass": true,
+      "commands": [
+        "set_tempo"
+      ],
+      "invalidCount": 0,
+      "appliedClean": true,
+      "deferred": false,
+      "brainMs": 1041,
+      "checks": [
+        {
+          "pass": true,
+          "note": "tempo 128"
+        }
+      ],
+      "renders": []
+    },
+    {
+      "id": "vol-down-relative",
+      "area": "mixer",
+      "utterance": "the Drums are too loud, bring them down",
+      "pass": true,
+      "commands": [
+        "set_track_volume"
+      ],
+      "invalidCount": 0,
+      "appliedClean": true,
+      "deferred": false,
+      "brainMs": 764,
+      "checks": [
+        {
+          "pass": true,
+          "note": "volumeDb moved down 6.0"
+        }
+      ],
+      "renders": []
+    },
+    {
+      "id": "defer-ambiguous",
+      "area": "defer",
+      "utterance": "make that louder",
+      "pass": true,
+      "commands": [],
+      "invalidCount": 0,
+      "appliedClean": true,
+      "deferred": true,
+      "brainMs": 1048,
+      "checks": [
+        {
+          "pass": true,
+          "note": "deferred"
+        }
+      ],
+      "renders": []
+    }
+  ]
+}

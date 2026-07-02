@@ -24,7 +24,8 @@
     "build-sft": "tsx scripts/buildSft.mts",
     "eval-sft": "tsx scripts/evalSft.mts",
     "drive-local": "tsx scripts/driveLocal.mts",
-    "turn-factory": "tsx scripts/turnFactory.mts"
+    "turn-factory": "tsx scripts/turnFactory.mts",
+    "moshi-bench": "tsx scripts/moshiBench.mts"
   },
   "dependencies": {
     "qrcode": "^1.5.4",
