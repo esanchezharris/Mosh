@@ -299,7 +299,22 @@ def normalize_808_register(el, lo: int = SUB_LO, hi: int = SUB_HI):
 
 
 # ───────────────────────────── retrieval ─────────────────────────────────────
-def score_recipe(rec, request: dict) -> float:
+# Owner keep/kill priors (built by merge_labels.py from the label ledger). Same
+# resolution precedent as the palette manifest: env override → durable home path → {}.
+PRIORS_PATH = (os.environ.get("MOSH_SOURCE_PRIORS")
+               or os.path.expanduser("~/mosh-beats/labels/source_priors.json"))
+
+
+def load_priors(path: str = PRIORS_PATH) -> dict:
+    """{source video_id: prior in [-1, 1]} — {} when absent (permissive-on-missing).
+    NOT loaded by default in generate(): hermetic-by-default, the factory/CLI opt in."""
+    if not os.path.isfile(path):
+        return {}
+    doc = json.load(open(path))
+    return {k: float(v.get("prior", 0.0)) for k, v in (doc.get("priors") or {}).items()}
+
+
+def score_recipe(rec, request: dict, priors: Optional[dict] = None) -> float:
     s = 0.0
     mood = (request.get("mood") or "").lower()
     if mood and _mood_of(rec) == mood:
@@ -314,12 +329,17 @@ def score_recipe(rec, request: dict) -> float:
         _, smode = _key_pc_mode(rec.meta.key.value)
         if rmode == smode:
             s += 0.5
+    # owner keep/kill prior: ±1.0 max vs mood's +3.0 — a nudge inside a band, never a
+    # ban (every recipe stays eligible, same posture as the mood scorer above)
+    if priors:
+        s += priors.get(rec.source.video_id, 0.0)
     return s
 
 
-def retrieve(library: list, request: dict, rng: Rng) -> list:
+def retrieve(library: list, request: dict, rng: Rng, priors: Optional[dict] = None) -> list:
     """Rank the library by request fit; a tiny seeded jitter breaks ties for diversity."""
-    scored = [(score_recipe(r, request) + (rng._next() % 100) / 1000.0, r) for r in library]
+    scored = [(score_recipe(r, request, priors) + (rng._next() % 100) / 1000.0, r)
+              for r in library]
     scored.sort(key=lambda x: -x[0])
     return [r for _, r in scored]
 
@@ -542,6 +562,7 @@ class Provenance:
     key: str = ""
     tempo: float = 0.0
     filters: dict = field(default_factory=dict)    # filter name → fire count (calibration!)
+    priors: dict = field(default_factory=dict)     # group → applied owner keep/kill prior
     drum_roles: list = field(default_factory=list)  # bound drum roles (FEATURE, never a gate)
     distinct: dict = field(default_factory=dict)   # melodic role → distinct pitch count
     sub_overlap: dict = field(default_factory=dict)  # kick subTailMs × 808 subShare (logged)
@@ -599,11 +620,12 @@ def _fill_missing_drums(elements: list, ranked: list, rng: Rng, prov: Provenance
         prov.fired(f"drumFill_{el.role.value}")
 
 
-def recombine(library: list, request: dict, rng: Rng, palette: dict) -> tuple:
+def recombine(library: list, request: dict, rng: Rng, palette: dict,
+              priors: Optional[dict] = None) -> tuple:
     """Assemble a NEW recipe: drum-kit groove from one recipe, 808 from another, chords from a
     third, optional lead from a fourth — each transposed into one key, the 808 bound to the
     chords, and a palette sample bound per drum/808 role."""
-    ranked = retrieve(library, request, rng)
+    ranked = retrieve(library, request, rng, priors)
     backbone = ranked[0]
     req_key = request.get("key") or backbone.meta.key.value
     req_tempo = float(request.get("tempo") or backbone.meta.tempo_bpm.value or 140)
@@ -745,6 +767,8 @@ def recombine(library: list, request: dict, rng: Rng, palette: dict) -> tuple:
     prov.drum_roles = sorted({e.role.value for e in elements if e.role.value in DRUM_ROLES})
     prov.distinct = {e.role.value: distinct_pitches(e)
                      for e in elements if e.role.value in ("pad", "lead", "pluck", "808")}
+    if priors:
+        prov.priors = {g: priors[vid] for g, vid in prov.sources.items() if vid in priors}
 
     out = R.Recipe(
         recipe_id=f"gen_{rng.s}",  # deterministic from (request, seed) — no uuid4 nondeterminism
@@ -761,17 +785,20 @@ def recombine(library: list, request: dict, rng: Rng, palette: dict) -> tuple:
 
 
 def generate(request: dict, library_dir: str = LIB_DIR, seed: int = 0,
-             palette: Optional[dict] = None, library: Optional[list] = None) -> tuple:
+             palette: Optional[dict] = None, library: Optional[list] = None,
+             priors: Optional[dict] = None) -> tuple:
     """Top entry: request (genre/tempo/key/mood/lead) → (assembled Recipe, Provenance).
     Pass a pre-loaded `library` for batch runs — hermetic to concurrent library writes
     (a factory run died mid-batch when an ingester grew the library under it) and skips
-    re-reading hundreds of files per candidate."""
+    re-reading hundreds of files per candidate. `priors` (owner keep/kill nudges) are
+    OPT-IN — None means none, so generation is hermetic by default; the factory/CLI
+    pass load_priors() explicitly and snapshot the file per run."""
     library = library if library is not None else load_library(library_dir)
     if not library:
         raise RuntimeError(f"empty recipe library at {library_dir} (run seed_authoring.py)")
     pal = palette if palette is not None else load_palette()
     rng = Rng(_seed_int(request, seed))
-    return recombine(library, request, rng, pal)
+    return recombine(library, request, rng, pal, priors=priors)
 
 
 def reconstruct(library_dir: str, recipe_id: str, palette: Optional[dict] = None):
