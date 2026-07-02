@@ -73,9 +73,15 @@ block (kept out of production `DEFAULT_RULES` until the A/B is conclusive across
 - **v3-final: 7,444 train / 1,911 valid** — volume 827 rows (v2-equivalent had the broken 708),
   pan 358, populate/clip capped 2,500 each, 38 factory tuples. Known gaps: only 5 defer rows
   survived dedupe; .flp files skipped (PyFLP venv not set up here — 500 files of future coverage).
-- **v3-final LoRA training in flight** (500 iters, mask-prompt, 16 layers — sft_run.json will
-  carry the config + dataset hash). Gate: beat BASE 0.714 on the frozen 300 under the same
-  pinned stack, else the local lane ships the BASE model + prompt work.
+- **v3-final LoRA training** (500 iters, mask-prompt, 16 layers, sft_run.json carries config +
+  dataset hash). Gate: beat BASE 0.714 on the frozen 300 under the same pinned stack, else the
+  local lane ships the BASE model + prompt work.
+- **⚠️ NaN trap found (first attempt diverged, all checkpoints garbage `!!!!`):** the production
+  system prompt is ~2,400 TOKENS, and 2,876/7,444 v3 rows exceeded max-seq 2560 (longest 2,914)
+  — `--mask-prompt` + truncation into the completion leaves ~zero loss tokens → NaN from iter
+  ~100. v2 dodged it only because its snapshots were smaller. Retrained at max-seq 3000 +
+  lr 1e-5. RULE: preflight token lengths vs max-seq before any mlx LoRA run (token-accurate,
+  with the real tokenizer — a chars/token heuristic mis-filters catastrophically).
 
 ## Engine/catalog findings for the follow-up list
 
