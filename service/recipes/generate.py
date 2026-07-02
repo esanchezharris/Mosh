@@ -352,6 +352,115 @@ def _notes_per_bar(el) -> float:
     return len(el.midi.notes) / max(1.0, end / BEATS_PER_BAR)
 
 
+# ─────────────────────────── grid-lock (pack-003 beat 12) ─────────────────────
+# "out-of-time elements... make sure that everything is locked to the grid": ~21% of
+# owner-catalog transcriptions carry off-grid timing (wrong-BPM transcription class;
+# worst element 20% on-grid). Policy (owner-ratified): SNAP within a tight tolerance,
+# EXCLUDE the unsalvageable, and NEVER snap intentional swing.
+GRID_TOL = 0.06        # beats (25.7 ms @140) — inside is transcription noise, beyond is intent
+GRID_FLOOR = 0.8       # post-snap on-grid fraction below this ⇒ wrong-tempo class, excluded
+SWING_MAX = 0.12       # a consistent off-grid offset up to this is groove, not error
+SWING_MAD = 0.02       # ...but only when the offsets cluster tightly (median abs deviation)
+_GRID_STEPS = (0.25, 1.0 / 3.0)   # 1/16 grid and 1/12 triplet grid
+
+
+def _grid_residual(start: float, step: float) -> float:
+    g = round(start / step) * step
+    return start - g
+
+
+def _element_grid_step(notes) -> float:
+    """The grid (straight 1/16 vs triplet 1/12) that fits the element best. Per-element
+    choice, never a union: the two grids interleave within 0.083 beats, so union-snapping
+    would pull a straight 0.30 note onto the 0.333 triplet line."""
+    best_step, best_frac = _GRID_STEPS[0], -1.0
+    for step in _GRID_STEPS:
+        frac = sum(1 for n in notes if abs(_grid_residual(float(n.start_beats), step)) <= GRID_TOL) / len(notes)
+        if frac > best_frac:
+            best_step, best_frac = step, frac
+    return best_step
+
+
+def _swing_offset(residuals: list, starts: list, step: float) -> Optional[float]:
+    """A tight cluster of consistent off-grid residuals AT A CONSISTENT METRIC POSITION
+    = intentional swing. Returns the median offset, or None. Detected swing is PRESERVED
+    (counted on-grid, never snapped).
+
+    The metric-position test is load-bearing: a wrong-tempo drift's post-snap survivors
+    also form a tight offset cluster, but they scatter across beat positions (and land
+    on downbeats) — real swing delays ONE position class (e.g. every off-8th) and never
+    the downbeat."""
+    off = [(r, s) for r, s in zip(residuals, starts) if abs(r) > 0.02]
+    if len(off) < 3:
+        return None
+    off_r = sorted(r for r, _ in off)
+    m = off_r[len(off_r) // 2]
+    if not (0.0 < abs(m) <= SWING_MAX):
+        return None
+    mad = sorted(abs(r - m) for r, _ in off)[len(off) // 2]
+    if mad > SWING_MAD:
+        return None
+    per_beat = 4 if abs(step - 0.25) < 1e-9 else 3
+    classes = [round((s - r) / step) % per_beat for r, s in off]
+    top = max(set(classes), key=classes.count)
+    if top == 0 or classes.count(top) / len(classes) < 0.8:
+        return None
+    return m
+
+
+def snap_notes(el, tol: float = GRID_TOL, step: Optional[float] = None) -> int:
+    """Snap note STARTS to the element's chosen grid when within tol; swung notes and
+    durations are untouched (durations have no owner chip and zero-length risk). Mutates;
+    returns the snapped count. Used by the library repair + ingest, NOT per-generation
+    (generation relies on the repaired library so Gate B rhythm identity holds).
+
+    Pass an explicit `step` when iterating to a fixed point: a ~50/50 straight/triplet
+    element's argmax grid choice can flip after a snap pass and oscillate forever —
+    pin the grid once, and repeated passes are monotone (notes only ever land ON grid)."""
+    if not (el and el.midi.notes):
+        return 0
+    if step is None:
+        step = _element_grid_step(el.midi.notes)
+    starts = [float(n.start_beats) for n in el.midi.notes]
+    residuals = [_grid_residual(s, step) for s in starts]
+    swing = _swing_offset(residuals, starts, step)
+    snapped = 0
+    for n, r in zip(el.midi.notes, residuals):
+        if abs(r) <= 1e-6:
+            continue                     # already on grid (1/3 lines never hit 0.0 exactly)
+        if swing is not None and abs(r - swing) <= tol:
+            continue                     # groove — leave it alone
+        if abs(r) <= tol:
+            new = round(float(n.start_beats) - r, 6)
+            if new != float(n.start_beats):
+                n.start_beats = new
+                snapped += 1
+    return snapped
+
+
+def grid_fraction(el, tol: float = GRID_TOL) -> float:
+    """Fraction of notes on the element's chosen grid (exactly, within tol, or within tol
+    of the detected swing offset). The exclusion floor reads this POST-snap."""
+    if not (el and el.midi.notes):
+        return 0.0
+    step = _element_grid_step(el.midi.notes)
+    starts = [float(n.start_beats) for n in el.midi.notes]
+    residuals = [_grid_residual(s, step) for s in starts]
+    swing = _swing_offset(residuals, starts, step)
+    ok = 0
+    for r in residuals:
+        if abs(r) <= tol or (swing is not None and abs(r - swing) <= tol):
+            ok += 1
+    return ok / len(residuals)
+
+
+def _grid_ok(el) -> bool:
+    """Exclusion floor for the wrong-tempo transcription class. Library-calibrated:
+    97 elements fail (52 pad, 35 lead, 9 hat, 1 perc — ZERO 808/kick/snare/clap), so
+    the drum and bass pools are never starved by this pred."""
+    return grid_fraction(el) >= GRID_FLOOR
+
+
 def _has_rhythm(el) -> bool:
     """Reject chord/scale REFERENCE dumps (pack-002 audition: 'all the notes hitting at
     once on the downbeat'). 277 pack-ingested 'MIDI Scales Reference' files carry every
@@ -365,6 +474,11 @@ def _has_rhythm(el) -> bool:
     if len(el.midi.notes) < 6:
         return True
     return len({round(float(n.start_beats), 4) for n in el.midi.notes}) >= 2
+
+
+def _rhythm_grid_ok(el) -> bool:
+    """The standard melodic-element pred: has a real rhythm AND is grid-locked."""
+    return _has_rhythm(el) and _grid_ok(el)
 
 
 def _distinct_ok(el, min_pitches: int = 3, min_pcs: int = 2) -> bool:
@@ -474,7 +588,7 @@ def _fill_missing_drums(elements: list, ranked: list, rng: Rng, prov: Provenance
         if have & set(group):
             continue
         pool = [(r, e) for r, e in _role_pool(ranked, set(group))
-                if e.midi.notes and _has_rhythm(e)]
+                if e.midi.notes and _has_rhythm(e) and _grid_ok(e)]
         if not pool:
             continue
         top = pool[: max(1, len(pool) // 2 + 1)]
@@ -498,7 +612,7 @@ def recombine(library: list, request: dict, rng: Rng, palette: dict) -> tuple:
     elements: list = []
 
     # 1) DRUMS — take kick+snare+hat as a coherent SET from one recipe (groove stays intact).
-    drum_src = _pick_recipe_with("kick", ranked, rng) or backbone
+    drum_src = _pick_recipe_with("kick", ranked, rng, pred=_grid_ok) or backbone
     prov.sources["drums"] = drum_src.source.video_id
     for role in ("kick", "snare", "hat", "clap", "perc"):
         e = _element(drum_src, role)
@@ -508,8 +622,8 @@ def recombine(library: list, request: dict, rng: Rng, palette: dict) -> tuple:
     _fill_missing_drums(elements, ranked, rng, prov)
 
     # 2) CHORDS — harmonic backbone (drives the 808). Pick a recipe with a pad/chords element.
-    chord_src = _pick_recipe_with("pad", ranked, rng, pred=_has_rhythm) or backbone
-    chord_el = _element(chord_src, "pad", pred=_has_rhythm)
+    chord_src = _pick_recipe_with("pad", ranked, rng, pred=_rhythm_grid_ok) or backbone
+    chord_el = _element(chord_src, "pad", pred=_rhythm_grid_ok)
     if chord_el and chord_el.midi.notes:
         c = _clone_element(chord_el)
         sem = _interval(_element_key(chord_el, chord_src.meta.key.value), req_key)
@@ -520,8 +634,8 @@ def recombine(library: list, request: dict, rng: Rng, palette: dict) -> tuple:
         elements.append(c)
 
     # 3) 808 — from a (possibly different) recipe; transpose, then BIND to the chord roots.
-    bass_src = _pick_recipe_with("808", ranked, rng, pred=_has_rhythm) or backbone
-    bass_el = _element(bass_src, "808", pred=_has_rhythm)
+    bass_src = _pick_recipe_with("808", ranked, rng, pred=_rhythm_grid_ok) or backbone
+    bass_el = _element(bass_src, "808", pred=_rhythm_grid_ok)
     if bass_el and bass_el.midi.notes:
         b = _clone_element(bass_el)
         sem = _interval(_element_key(bass_el, bass_src.meta.key.value), req_key)
@@ -541,9 +655,10 @@ def recombine(library: list, request: dict, rng: Rng, palette: dict) -> tuple:
     #    transposition preserves distinct counts so filtering raw elements is safe.
     want_lead = request.get("lead", True) and rng.chance(0.7)
     if want_lead:
-        # variety AND rhythm: a scale-reference stack has plenty of distinct pitches
-        # but zero rhythm (pack-002 beat 05's lead was exactly that)
-        lead_ok = lambda e: _distinct_ok(e) and _has_rhythm(e)  # noqa: E731
+        # variety AND rhythm AND grid: a scale-reference stack has plenty of distinct
+        # pitches but zero rhythm (pack-002 beat 05's lead); an off-grid lead is the
+        # pack-003 beat-12 "out-of-time" class
+        lead_ok = lambda e: _distinct_ok(e) and _rhythm_grid_ok(e)  # noqa: E731
         lead_src = _pick_recipe_with("lead", ranked, rng, pred=lead_ok)
         if lead_src:
             lead_el = _element(lead_src, "lead", pred=lead_ok)

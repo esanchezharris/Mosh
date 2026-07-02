@@ -498,6 +498,74 @@ check("dense hats never bind an open/long sample end-to-end (6 seeds)", not open
       str(open_bound))
 check("hatClosedOnly filter fires are recorded in provenance", fired_any)
 
+# ── grid-lock (pack-003 beat 12 "out-of-time / lock to the grid") ─────────────
+def _mk(role, starts, dur=0.25, pitch=None):
+    return R.Element(role=role, midi=R.Midi(notes=[
+        R.NoteEvent(pitch=(pitch or 60) + (i % 3), start_beats=s, duration_beats=dur)
+        for i, s in enumerate(starts)]))
+
+near16 = _mk("lead", [0.0, 0.27, 0.52, 0.74, 1.0, 1.26, 1.49, 1.75])
+snapped_n = G.snap_notes(near16)
+check("near-16th starts snap onto the grid",
+      snapped_n >= 5 and all(abs(G._grid_residual(float(n.start_beats), 0.25)) <= 1e-6
+                             for n in near16.midi.notes),
+      str([float(n.start_beats) for n in near16.midi.notes]))
+check("durations are never touched by snapping",
+      all(float(n.duration_beats) == 0.25 for n in near16.midi.notes))
+
+trip = _mk("lead", [0.0, 0.35, 0.65, 1.0, 1.32, 1.68, 2.0, 2.34])
+G.snap_notes(trip)
+check("triplet-dominant element snaps to the 1/3 grid",
+      all(abs(G._grid_residual(float(n.start_beats), 1.0 / 3.0)) <= 1e-6
+          for n in trip.midi.notes),
+      str([round(float(n.start_beats), 3) for n in trip.midi.notes]))
+
+straight30 = _mk("lead", [0.0, 0.30, 0.5, 0.75, 1.0, 1.3, 1.5, 1.75])
+G.snap_notes(straight30)
+check("a straight element's 0.30 note snaps to 0.25, NEVER the 0.333 triplet line",
+      float(straight30.midi.notes[1].start_beats) == 0.25,
+      str(float(straight30.midi.notes[1].start_beats)))
+
+swung = _mk("hat", [0.0, 0.58, 1.0, 1.58, 2.0, 2.58, 3.0, 3.58])
+before_sw = [float(n.start_beats) for n in swung.midi.notes]
+G.snap_notes(swung)
+check("consistent swing (+0.08 off-beats) is NEVER snapped",
+      [float(n.start_beats) for n in swung.midi.notes] == before_sw)
+check("a swung element passes the floor via the swing rescue",
+      G._grid_ok(swung), f"{G.grid_fraction(swung):.2f}")
+
+wrongtempo = _mk("pad", [round(i * 0.37, 6) for i in range(12)])
+G.snap_notes(wrongtempo)
+check("wrong-tempo transcription (scattered residuals) fails the floor",
+      not G._grid_ok(wrongtempo), f"{G.grid_fraction(wrongtempo):.2f}")
+# a drifting element's post-snap survivors cluster like swing but scatter across beat
+# positions — the metric-position rule must refuse them (this is why it exists)
+drift_srv = [G._grid_residual(float(n.start_beats), 0.25) for n in wrongtempo.midi.notes]
+check("fake-swing (drift survivors) is rejected by the metric-position rule",
+      G._swing_offset(drift_srv, [float(n.start_beats) for n in wrongtempo.midi.notes],
+                      0.25) is None)
+
+lib_offgrid = [(r.source.video_id, e.role.value) for r in library for e in r.elements
+               if e.midi.notes and not G._grid_ok(e)]
+check("library carries ZERO below-floor elements post grid-repair", not lib_offgrid,
+      str(lib_offgrid[:3]))
+
+offgrid_pad = _mini_rec("offgridpad", [R.Element(role="pad", midi=R.Midi(notes=[
+    R.NoteEvent(pitch=60 + (i % 4), start_beats=round(i * 1.337, 6), duration_beats=1.0)
+    for i in range(12)]))])
+ongrid_pad = _mini_rec("ongridpad", [R.Element(role="pad", midi=R.Midi(notes=[
+    R.NoteEvent(pitch=60 + (i % 3), start_beats=float(i) * 0.5, duration_beats=0.5)
+    for i in range(8)]))])
+offgrid_picked = []
+for s in range(8):
+    rec_gk, _ = G.recombine([offgrid_pad, ongrid_pad], {"mood": "dark", "tempo": 140,
+                                                        "key": "F minor"}, G.Rng(s + 1), {})
+    pad_gk = next((e for e in rec_gk.elements if e.role.value == "pad"), None)
+    if pad_gk is not None and not G._grid_ok(pad_gk):
+        offgrid_picked.append(s)
+check("chord source NEVER binds a below-floor off-grid pad (8 seeds)", not offgrid_picked,
+      str(offgrid_picked))
+
 # Determinism with the new code paths: same (request, seed, palette) → identical output.
 g_a, p_a = G.generate({"mood": "chill", "tempo": 132, "key": "A minor"}, seed=9, palette=FAKE_PAL)
 g_b, p_b = G.generate({"mood": "chill", "tempo": 132, "key": "A minor"}, seed=9, palette=FAKE_PAL)

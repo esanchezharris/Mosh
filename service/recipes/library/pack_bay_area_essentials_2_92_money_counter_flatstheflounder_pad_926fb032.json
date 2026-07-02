@@ -144,7 +144,7 @@
           },
           {
             "pitch": 78,
-            "start_beats": 8.052083,
+            "start_beats": 8.0,
             "duration_beats": 5.0,
             "velocity": 100
           },
@@ -240,7 +240,7 @@
           },
           {
             "pitch": 78,
-            "start_beats": 24.052083,
+            "start_beats": 24.0,
             "duration_beats": 5.0,
             "velocity": 100
           },
@@ -276,7 +276,7 @@
         "bars": 8.0,
         "onset_grid": "16th",
         "density": 4.0,
-        "syncopation": 0.125,
+        "syncopation": 0.0625,
         "contour": [
           1,
           1,

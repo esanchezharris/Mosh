@@ -225,6 +225,22 @@ def recipes_from_ir(ir_path: Path, min_notes: int, max_elements: int) -> list[R.
             bass=_bass(notes) if role in (R.Role.r808, R.Role.bass) else None,
             confidence=0.9,
         )
+        # grid-truth at the door (pack-003 "out-of-time" class): snap to the element's
+        # own best grid (swing preserved), refuse the wrong-tempo transcriptions the
+        # snap can't save — same posture as repair_grid.py over the existing library.
+        from recipes.generate import _element_grid_step, grid_fraction, snap_notes
+        _step = _element_grid_step(element.midi.notes)
+        for _ in range(8):
+            if snap_notes(element, step=_step) == 0:
+                break
+        if grid_fraction(element) < 0.8:
+            print(f"  refused {rid}: off-grid after snap ({grid_fraction(element):.2f}) — "
+                  f"wrong-tempo transcription", file=sys.stderr)
+            continue
+        nd = [{"start": float(n.start_beats), "length": float(n.duration_beats),
+               "pitch": int(n.pitch)} for n in element.midi.notes]
+        element.motif.onset_grid = _onset_grid(nd)
+        element.motif.syncopation = _syncopation(nd)
         rec = R.Recipe(
             recipe_id=rid,
             source=R.Source(platform="owner-catalog", video_id=rid, title=ir_path.stem, license=R.License.owner, content_hash=src_hash),
