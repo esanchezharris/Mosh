@@ -286,7 +286,8 @@ def process_candidate(rec, prov, req: dict, seed: int, cid: str, wav: str,
            # and 11 ("no hi-hats") are the standing counterexamples. getattr: reprises
            # regenerate with the OLD generator whose Provenance predates these fields.
            "filters": getattr(prov, "filters", {}), "drumRoles": getattr(prov, "drum_roles", []),
-           "distinct": getattr(prov, "distinct", {}), "subOverlap": getattr(prov, "sub_overlap", {})}
+           "distinct": getattr(prov, "distinct", {}), "subOverlap": getattr(prov, "sub_overlap", {}),
+           "priors": getattr(prov, "priors", {})}
     if not (res.nonsilent and res.error is None):
         row["verdict"] = "reject:render"
         return row
@@ -349,15 +350,27 @@ def main() -> int:
     os.makedirs(cand_dir, exist_ok=True)
     ledger = os.path.join(out_dir, "candidates.jsonl")
 
+    # owner keep/kill priors: loaded ONCE + snapshotted into the run dir, so a mid-run
+    # merge_labels regeneration can never change a live run's retrieval (hermeticity)
+    priors = G.load_priors()
+    priors_hash = ""
+    if priors and os.path.isfile(G.PRIORS_PATH):
+        import hashlib
+        priors_hash = hashlib.sha1(open(G.PRIORS_PATH, "rb").read()).hexdigest()[:12]
+        shutil.copy2(G.PRIORS_PATH, os.path.join(out_dir, "source_priors.snapshot.json"))
+    print(f"priors: {len(priors)} sources (hash {priors_hash or 'none'})")
+
     grid = requests_grid(args.smoke)
     print(f"factory: {len(grid)} candidates → {out_dir}")
     rows = []
     for n, (req, seed) in enumerate(grid):
         cid = f"{req['mood'][:4]}_{int(req['tempo'])}_{req['key'].replace(' ', '').replace('#', 's')}_s{seed}"
         wav = os.path.join(cand_dir, cid + ".wav")
-        rec, prov = G.generate(req, seed=seed, palette=palette, library=library)
+        rec, prov = G.generate(req, seed=seed, palette=palette, library=library,
+                               priors=priors)
         row = process_candidate(rec, prov, req, seed, cid, wav,
                                 os.path.join(cand_dir, ".w" + cid), binp)
+        row["priorsHash"] = priors_hash
         rows.append(row)
         print(f"  [{n+1}/{len(grid)}] {cid}: {row['verdict']}"
               + (f" (sub {row['gate']['subRatio']})" if "gate" in row else ""))

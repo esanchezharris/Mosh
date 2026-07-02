@@ -566,6 +566,33 @@ for s in range(8):
 check("chord source NEVER binds a below-floor off-grid pad (8 seeds)", not offgrid_picked,
       str(offgrid_picked))
 
+# ── source priors (owner keep/kill → retrieval nudges) ────────────────────────
+check("no priors file → empty dict (permissive-on-missing)",
+      G.load_priors("/nonexistent/priors.json") == {})
+check("priors=None and priors={} generate byte-identically (hermetic default)",
+      R.to_json(G.generate({"mood": "dark", "tempo": 140, "key": "F minor"}, seed=7,
+                           palette={})[0])
+      == R.to_json(G.generate({"mood": "dark", "tempo": 140, "key": "F minor"}, seed=7,
+                              palette={}, priors={})[0]))
+# a prior deterministically reorders retrieval between two otherwise-equal recipes
+pr_a = _mini_rec("prior_a", [R.Element(role="pad", midi=R.Midi(notes=[
+    R.NoteEvent(pitch=60 + (i % 3), start_beats=float(i) * 0.5, duration_beats=0.5)
+    for i in range(8)]))])
+pr_b = _mini_rec("prior_b", [R.Element(role="pad", midi=R.Midi(notes=[
+    R.NoteEvent(pitch=62 + (i % 3), start_beats=float(i) * 0.5, duration_beats=0.5)
+    for i in range(8)]))])
+req_pr = {"mood": "dark", "tempo": 140, "key": "F minor"}
+rank_up = G.retrieve([pr_a, pr_b], req_pr, G.Rng(1), priors={"prior_b": 1.0})
+rank_dn = G.retrieve([pr_a, pr_b], req_pr, G.Rng(1), priors={"prior_b": -1.0})
+check("a ±1 prior flips a two-recipe ranking deterministically",
+      rank_up[0].source.video_id == "prior_b" and rank_dn[0].source.video_id == "prior_a")
+# never a ban: the worst-prior source is still retrievable/usable when it's all there is
+rec_ban, prov_ban = G.recombine([pr_b], req_pr, G.Rng(2), {}, priors={"prior_b": -1.0})
+check("worst-prior source still generates when alone (nudge, never a ban)",
+      any(e.role.value == "pad" for e in rec_ban.elements))
+check("provenance records applied priors per group",
+      prov_ban.priors.get("chords") == -1.0, str(prov_ban.priors))
+
 # Determinism with the new code paths: same (request, seed, palette) → identical output.
 g_a, p_a = G.generate({"mood": "chill", "tempo": 132, "key": "A minor"}, seed=9, palette=FAKE_PAL)
 g_b, p_b = G.generate({"mood": "chill", "tempo": 132, "key": "A minor"}, seed=9, palette=FAKE_PAL)

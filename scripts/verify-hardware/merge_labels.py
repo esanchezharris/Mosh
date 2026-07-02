@@ -66,7 +66,39 @@ def main() -> int:
     for r in rows:
         kinds[r["kind"]] = kinds.get(r["kind"], 0) + 1
     print(f"labels ledger: {len(rows)} rows → {OUT}  ({kinds})")
+    priors = build_source_priors(rows)
+    pfile = OUT.parent / "source_priors.json"
+    with open(pfile, "w") as f:
+        json.dump({"version": 1, "rows": len(rows), "priors": priors}, f, indent=1)
+    print(f"source priors: {len(priors)} sources (n≥3) → {pfile}")
     return 0
+
+
+def build_source_priors(rows: list) -> dict:
+    """Per-source keep-rate prior from the pack keep/kill rows — the gentle retrieval
+    nudge (±1.0 vs the mood scorer's +3.0: reorders within a band, never bans). A beat
+    using a source in ANY group counts once. Laplace-smoothed, emitted only at n≥3
+    (pack-003 forensics: seed_dark_trap backbone 1/7, lofi_trap drums 0/3,
+    melodic_trap 5/5 — stark records worth a nudge, not a rule)."""
+    per: dict = {}
+    for r in rows:
+        if r.get("kind") != "keep" or r.get("value") not in ("keep", "kill"):
+            continue
+        feats = r.get("features") or {}
+        srcs = set((feats.get("sources") or {}).values())
+        if feats.get("backbone"):
+            srcs.add(feats["backbone"])
+        for s in srcs:
+            st = per.setdefault(s, {"n": 0, "keeps": 0})
+            st["n"] += 1
+            st["keeps"] += 1 if r["value"] == "keep" else 0
+    out = {}
+    for s, st in sorted(per.items()):
+        if st["n"] < 3:
+            continue
+        prior = max(-1.0, min(1.0, 2.0 * ((st["keeps"] + 1) / (st["n"] + 2) - 0.5)))
+        out[s] = {"n": st["n"], "keeps": st["keeps"], "prior": round(prior, 4)}
+    return out
 
 
 if __name__ == "__main__":
