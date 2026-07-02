@@ -264,5 +264,44 @@ check("binding prefers measured-root samples over nearer unverified labels",
       all("_measured" in e.sample_match.matched_path for e in mbound) and len(mbound) > 0,
       str([(e.role.value, e.sample_match.matched_path) for e in mbound]))
 
+# ── arrangement tiling (round-3 audition: "trails off towards the end, parts drop out") ──
+# Every v3 beat had its 2-bar seed drum motifs placed ONCE under 4-bar pads/808s — drums
+# quit halfway. Compile must tile each element's pattern to the arrangement length.
+tile_fail = []
+for seed in range(6):
+    g_t, _ = G.generate({"mood": "dark", "tempo": 140, "key": "F minor"}, seed=seed, palette={})
+    prog_t = compile_recipe(g_t).commands
+    clip_ends = {}
+    for c in prog_t:
+        if c["command"] == "add_midi_clip":
+            ns = c["args"].get("notes", [])
+            if ns:
+                clip_ends[c["args"]["trackId"]] = max(n["start"] + n["length"] for n in ns)
+    if clip_ends:
+        arr = max(clip_ends.values())
+        for tid, e in clip_ends.items():
+            if arr - e > 4.0 + 0.5:  # nothing may stop more than a bar early
+                tile_fail.append((seed, tid, round(e, 2), round(arr, 2)))
+check("no element stops more than a bar before the arrangement end (6 seeds)",
+      not tile_fail, str(tile_fail))
+# Tiling preserves the pattern: the second copy is the first copy shifted by whole bars.
+el_t = R.Element(role="kick", midi=R.Midi(notes=[
+    R.NoteEvent(pitch=36, start_beats=0.0, duration_beats=0.25),
+    R.NoteEvent(pitch=36, start_beats=3.0, duration_beats=0.25),
+]))
+pad_t = R.Element(role="pad", midi=R.Midi(notes=[
+    R.NoteEvent(pitch=60, start_beats=0.0, duration_beats=16.0)]))
+rec_t = R.Recipe(recipe_id="tile_t", source=R.Source(platform="test", video_id="tile_t", title="t"),
+                 meta=R.Meta(tempo_bpm=R.MetaField(value=140.0, confidence=1.0),
+                             key=R.MetaField(value="F minor", confidence=1.0),
+                             time_signature=R.MetaField(value="4/4", confidence=1.0)),
+                 elements=[el_t, pad_t], reconstruction_class="inferred")
+prog_tt = compile_recipe(rec_t).commands
+kick_notes = next(c["args"]["notes"] for c in prog_tt
+                  if c["command"] == "add_midi_clip" and len(c["args"]["notes"]) > 2)
+starts = sorted(n["start"] for n in kick_notes)
+check("a 1-bar kick tiles to 4 copies under a 4-bar pad (starts at 0,3 + k*4)",
+      starts == [0.0, 3.0, 4.0, 7.0, 8.0, 11.0, 12.0, 15.0], str(starts))
+
 print(f"\n{'ALL PASS' if not fails else 'FAILURES: ' + ', '.join(fails)}  ({len(fails)} failure(s))")
 sys.exit(len(fails))

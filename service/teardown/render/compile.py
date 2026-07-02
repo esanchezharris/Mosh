@@ -14,6 +14,7 @@ v1 compiles only the UNAMBIGUOUS mappings and records everything engine-dependen
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -91,6 +92,44 @@ def _notes_payload(notes) -> list[dict]:
     return [{"pitch": int(n.pitch), "start": round(float(n.start_beats), 6),
              "length": round(float(n.duration_beats), 6), "velocity": int(n.velocity)}
             for n in notes]
+
+
+_BAR_BEATS = 4.0          # 4/4 — every current recipe; revisit with time-sig support
+_BAR_TOL = 0.25           # a note ending a hair past the bar line doesn't add a bar
+
+
+def _whole_bars(end_beats: float) -> float:
+    """end-of-phrase → whole-bar length (≥1 bar, small tolerance for sloppy tails)."""
+    return max(_BAR_BEATS, math.ceil((end_beats - _BAR_TOL) / _BAR_BEATS) * _BAR_BEATS)
+
+
+def _arrangement_beats(recipe) -> Optional[float]:
+    """The recipe's arrangement length = the LONGEST element's phrase in whole bars."""
+    ends = [max(float(n.start_beats) + float(n.duration_beats) for n in el.midi.notes)
+            for el in recipe.elements if el.midi.notes]
+    return _whole_bars(max(ends)) if ends else None
+
+
+def _tile_notes(notes, target_beats: Optional[float]):
+    """Loop an element's pattern out to the arrangement length (owner audition round 3:
+    'the composition kind of trails off towards the end like parts drop out' — 2-bar seed
+    drum motifs were placed ONCE under 4-bar pads/808s, so the drums quit halfway in every
+    beat). The pattern repeats at its own whole-bar length; copies keep the phrase's
+    internal timing; a copy's note is dropped only if it would START past the target."""
+    if not notes or not target_beats:
+        return notes
+    pattern = _whole_bars(max(float(n.start_beats) + float(n.duration_beats) for n in notes))
+    if pattern >= target_beats:
+        return notes
+    out = []
+    k = 0
+    while k * pattern < target_beats - 1e-6:
+        off = k * pattern
+        for n in notes:
+            if off + float(n.start_beats) < target_beats - 1e-6:
+                out.append(n.model_copy(update={"start_beats": off + float(n.start_beats)}))
+        k += 1
+    return out
 
 
 def _clip_len_s(notes, tempo: Optional[float]) -> float:
@@ -171,10 +210,11 @@ def compile_recipe(recipe) -> CompileResult:
             defer(_u(f"unparseable time signature {m.time_signature.value!r}", None, "set sig manually"))
 
     # ── elements ────────────────────────────────────────────────────────────────
+    arr_beats = _arrangement_beats(recipe)
     for i, el in enumerate(recipe.elements):
         tvar = f"T{i}"
         role = el.role.value
-        notes = list(el.midi.notes)
+        notes = _tile_notes(list(el.midi.notes), arr_beats)
         has_inline = bool(notes)
         has_ref_midi = el.midi.status in ("extracted", "partial") and bool(el.midi.midi_ref)
         matched = el.sample_match.status == "matched" and bool(el.sample_match.matched_path)

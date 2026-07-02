@@ -273,3 +273,31 @@ measured pitch (808s at F1/G#1/A#1 = 34–39 Hz written == heard); renders notic
 (RMS 0.20–0.26 vs v2's 0.09–0.20); gate 4/6 PASS, 03 (sub 11%) + 05 (sub 2%) ship loudly
 flagged bass-light — element-balance, the next lever, alongside r8 item 11 density. A/B room
 round 2 vs round 3 served; owner rates by PREFERENCE now (scale-drift-proof).
+
+## Audition round 3 → arrangement tiling (2026-07-02)
+
+**Owner round-3 A/B preference (`~/mosh-beats/owner-dna-v3/RATINGS-R3-AB-2026-07-02.csv`):
+r3 wins 4, ties 1, loses 1** — the pitch-truth pass validated by preference, immune to the
+star-scale drift. Beat 01: "WOOOO this is fucking sick wtf it's messy but I'm liking it" — the
+first excited owner reaction of the program. His fix request: "the composition kind of trails
+off towards the end like parts drop out."
+
+**Measured cause (v3 rollouts):** in EVERY beat the seed drum motifs (2-bar patterns, 8 beats)
+were placed ONCE under 4-bar (16-beat) pads/808s — kick/snare/hat stop 8–10 beats before the
+arrangement ends; occasional 8-beat pads/leads did the same. Nothing ever looped an element to
+the arrangement length.
+
+**Fix:** compile-time tiling (`service/teardown/render/compile.py`): `_arrangement_beats` =
+longest element's phrase in whole bars; `_tile_notes` repeats each element's pattern at its own
+whole-bar length out to the arrangement (internal timing preserved; 0.25-beat bar tolerance so
+sloppy tails don't add a phantom bar). Recipe notes untouched (Gate B(2) rhythm-descent checks
+the recipe, not the program); Gate B(1) reconstruction coverage unaffected (tiling only adds
+copies). Regression tests: no element may stop >1 bar early across 6 seeds + an exact-tile
+unit check (42 checks ×3 deterministic; compile/recipe goldens PASS).
+
+**v4 renders:** worst early-end across all 6 beats = 2.28 beats (= the kick pattern's own final
+rest inside its last loop copy — musical spacing, not dropout; v3 had 8–10 beat holes). Beats
+01/02/04/05 keep their EXACT r3 compositions (pure pinned A/B on the fix — including the beat-01
+"sick" take, now full-length); 06's drums came back to the kit his r2 preference favored. Gate:
+4/6 PASS; 03 (sub 27%) + 05 (sub 2.7%) still ship flagged bass-light — **element balance is the
+standing next lever**, with the 06 drum-kit preference + "messy"/snare-density notes.
