@@ -31,7 +31,14 @@ if _SERVICE not in sys.path:
 from teardown import recipe as R  # noqa: E402
 
 LIB_DIR = os.path.join(_HERE, "library")
-PALETTE_MANIFEST = os.path.join(_SERVICE, "palette", "palette", "manifest.json")
+# Canonical palette manifest = the DURABLE home copy (worktree copies go stale: the
+# 2026-07 pitch-truth pass corrected ~/Library/Mosh/palette-v1/manifest.json while a
+# gitignored repo-local duplicate silently kept serving the old labels — renders were
+# byte-identical to pre-fix). Env override first, then home, then the repo-local file.
+_PALETTE_HOME = os.path.expanduser("~/Library/Mosh/palette-v1/manifest.json")
+_PALETTE_REPO = os.path.join(_SERVICE, "palette", "palette", "manifest.json")
+PALETTE_MANIFEST = (os.environ.get("MOSH_PALETTE_MANIFEST")
+                    or (_PALETTE_HOME if os.path.isfile(_PALETTE_HOME) else _PALETTE_REPO))
 DRUM_ROLES = {"kick", "snare", "hat", "clap", "perc"}
 MELODIC_ROLES = {"808", "bass", "lead", "pad", "pluck"}  # transposed; drums are not
 BEATS_PER_BAR = 4.0
@@ -102,7 +109,8 @@ def load_palette(manifest: str = PALETTE_MANIFEST) -> dict:
         role = (it.get("role_guess") or it.get("role") or "").lower()
         path = it.get("path")
         if role and path and os.path.isfile(path):
-            by_role.setdefault(role, []).append({"path": path, "root_note": it.get("root_note")})
+            by_role.setdefault(role, []).append({"path": path, "root_note": it.get("root_note"),
+                                                 "root_source": it.get("root_source")})
         elif role and path:
             missing += 1
     if missing:
@@ -217,6 +225,14 @@ def normalize_808_register(el, lo: int = SUB_LO, hi: int = SUB_HI):
     if shift:
         for n in el.midi.notes:
             n.pitch = max(0, min(127, n.pitch + shift))
+    # Audibility floor: outlier notes far below the window are inaudible-sub on most
+    # systems (v2 audition beat 03 carried notes at MIDI 16 ≈ 20.6 Hz — "can't even
+    # rlly hear 808"). Fold extreme outliers up an octave; the small contour break on
+    # a >15 st-deep outlier beats an inaudible bass note (usually transcription noise).
+    floor = lo - 3
+    for n in el.midi.notes:
+        while n.pitch < floor:
+            n.pitch += 12
     return el
 
 
@@ -356,10 +372,15 @@ def recombine(library: list, request: dict, rng: Rng, palette: dict) -> tuple:
             pitched = role in ("808", "bass", "pad", "lead", "pluck")
             rooted = [p for p in pool if p.get("root_note") is not None] if pitched else []
             if pitched and rooted:
+                # Prefer pitch-VERIFIED samples: the 2026-07 pitch-truth pass found 277/304
+                # inferred root labels wrong (235 by ≥1 octave) — a nearest-root pick against
+                # an unverified label lands the element in a random octave.
+                measured = [p for p in rooted if p.get("root_source") == "measured"]
+                search = measured or rooted
                 pitches = sorted(int(n.pitch) for n in e.midi.notes) or [48]
                 center = pitches[len(pitches) // 2]
-                best = min(abs(int(p["root_note"]) - center) for p in rooted)
-                cands = [p for p in rooted if abs(int(p["root_note"]) - center) == best]
+                best = min(abs(int(p["root_note"]) - center) for p in search)
+                cands = [p for p in search if abs(int(p["root_note"]) - center) == best]
                 pick = cands[rng._next() % len(cands)]
             else:
                 pick = pool[rng._next() % len(pool)]
