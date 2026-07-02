@@ -162,6 +162,10 @@ def build_pack_page(out_dir: str, picks: list) -> str:
         srcs = " · ".join(f"<b>{k}</b> {str(v)[:38]}" for k, v in c["sources"].items())
         rep = c.get("reprise") or {}
         rep_badge = (f'<span class="badge b-rep">REPRISE of {rep["of"]}</span>' if rep else "")
+        if (c.get("fx") or {}).get("applied"):
+            rep_badge += '<span class="badge b-rep">FX</span>'
+        if c.get("form"):
+            rep_badge += f'<span class="badge b-rep">FORM {c["form"].get("plan", "")}</span>'
         rep_block = ""
         if rep:
             rep_block = (f'<div class="src" style="margin-top:6px">{rep.get("note", "same composition, new mix")} — '
@@ -345,11 +349,64 @@ def process_candidate(rec, prov, req: dict, seed: int, cid: str, wav: str,
     quiet = raw_rms is not None and raw_rms < MIX_RMS_FLOOR_DB
     if rank <= 8 and clip < 0.005 and sub_ok and not quiet:
         row["verdict"] = "pass"
+        _apply_fx_stage(rec, row, req, wav, work_dir, binp, want_key)
     else:
         row["verdict"] = ("reject:key" if rank > 8 else
                           "reject:clip" if clip >= 0.005 else
                           "reject:sub" if not sub_ok else "reject:quiet")
     return row
+
+
+def _apply_fx_stage(rec, row: dict, req: dict, wav: str, work_dir: str, binp: str,
+                    want_key: str):
+    """Mix-polish v0: render the PASSING candidate once more with the native FX chains
+    (drum OTT + 808 density comp) and ship the fx version ONLY when (a) the change is
+    audible (gain-aligned residual > −40 dB — the pack-002 'sounds identical?' lesson)
+    and (b) every gate re-passes on the fx render. Anything else ships dry with a loud
+    reason. All params were round-trip-probed (fx_probe.py) before any pack render."""
+    from teardown.render.balance import (MIX_RMS_FLOOR_DB, _volume_cmds, band_metrics,
+                                         gain_aligned_residual_db, normalize_wav)
+    from teardown.render.execute import execute_recipe
+    from teardown.render.fx import fx_chain_commands
+    from render_audition import render_gate_standalone, sub_gate
+
+    roles = [e.role.value for e in rec.elements]
+    fx_cmds, applied, params = fx_chain_commands(roles)
+    if not applied:
+        row["fx"] = {"applied": False, "reason": "no-applicable-chain"}
+        return
+    offsets = {int(k): v for k, v in (row.get("balance", {}).get("offsets") or {}).items()}
+    fx_wav = wav.replace(".wav", ".fx.wav")
+    res = execute_recipe(rec, bin_path=binp, out_wav=fx_wav, session_dir=work_dir + ".fx",
+                         timeout_s=180, write_back=False, resolve_synth_patches=False,
+                         pre_export_commands=_volume_cmds(offsets) + fx_cmds)
+    if not (res.nonsilent and res.error is None and os.path.isfile(fx_wav)):
+        row["fx"] = {"applied": False, "reason": f"fx-render-failed:{res.error}"}
+        print(f"  fx: render failed for {row['id']} — shipping dry", file=sys.stderr)
+        return
+    fx_metrics = band_metrics(fx_wav)                 # RAW first (clip gate blindness)
+    residual = gain_aligned_residual_db(wav, fx_wav)  # gain-invariant: dry is normalized
+    fx_gain = normalize_wav(fx_wav)
+    fx_rank, _ = render_gate_standalone(fx_wav, want_key)
+    fx_sub_ok, _ = sub_gate(fx_wav)
+    gates_ok = (fx_rank <= 8 and fx_metrics.get("clipFrac", 0.0) < 0.005 and fx_sub_ok
+                and fx_metrics.get("rmsDb", 0.0) >= MIX_RMS_FLOOR_DB)
+    if residual <= -40.0:
+        row["fx"] = {"applied": False, "chain": applied, "residualDb": residual,
+                     "reason": "residual-noop"}
+        os.remove(fx_wav)
+        return
+    if not gates_ok:
+        row["fx"] = {"applied": False, "chain": applied, "residualDb": residual,
+                     "reason": f"gates-failed:rank{fx_rank}:clip{fx_metrics.get('clipFrac')}"
+                               f":sub{fx_sub_ok}"}
+        print(f"  fx: gates failed on fx render for {row['id']} — shipping dry",
+              file=sys.stderr)
+        os.remove(fx_wav)
+        return
+    os.replace(fx_wav, wav)      # the fx render IS the candidate now
+    row["fx"] = {"applied": True, "chain": applied, "residualDb": residual,
+                 "params": params, "normGainDb": fx_gain}
 
 
 def main() -> int:

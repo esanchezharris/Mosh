@@ -47,26 +47,9 @@ REPRISE_MIN_RESIDUAL_DB = -40.0  # gain-aligned residual quieter than this = the
 # −1 dB normalize) and the owner's note was "sounds identical? making me skeptical".
 
 
-def gain_aligned_residual_db(old_wav: str, new_wav: str) -> float:
-    """How different are two renders BEYOND a pure gain change? Fits the best scalar
-    gain g minimizing |a − g·b| and returns the residual level relative to the signal
-    (dB). Bit-identical-modulo-gain ⇒ ≈ −130; audibly different mixes ⇒ > −30."""
-    import math
-
-    import numpy as np
-    import soundfile as sf
-    a, _ = sf.read(old_wav)
-    b, _ = sf.read(new_wav)
-    if getattr(a, "ndim", 1) > 1:
-        a = a.mean(axis=1)
-    if getattr(b, "ndim", 1) > 1:
-        b = b.mean(axis=1)
-    n = min(len(a), len(b))
-    a, b = a[:n].astype("float64"), b[:n].astype("float64")
-    g = float((a * b).sum() / ((b * b).sum() + 1e-12))
-    sig = math.sqrt(float((a ** 2).mean())) + 1e-12
-    res = math.sqrt(float(((a - g * b) ** 2).mean()))
-    return round(20.0 * math.log10(max(res, 1e-12) / sig), 1)
+# moved to teardown.render.balance (the audio-metrics home) — reprises AND the fx
+# delta gate both use it; thin re-export keeps existing imports working
+from teardown.render.balance import gain_aligned_residual_db  # noqa: E402,F401
 
 
 def load_old_generate(commit: str, scratch: str):
