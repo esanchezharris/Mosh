@@ -228,3 +228,48 @@ Engine-session ground truth: every v2 beat has exactly ONE melodic track in the 
 the delta vs the 2.83 baseline. Backlog seeded in `docs/plans/r8-corpus-spec.md` items 8–12
 (FL channel-root at import, per-element key verify, mood tags, density/"messy", octave-drop
 sections).
+
+## Audition round 2 → pitch-truth pass (2026-07-02)
+
+**Owner v2 ratings (`~/mosh-beats/owner-dna/RATINGS-V2-2026-07-02.csv`):** 2/3/3/1/2/2, raw mean
+2.17 — **with an explicit owner recalibration: "these all sound better than last round, I was
+giving them star rankings based on [an absolute] 5-star beat" scale.** So v1 2.83 vs v2 2.17 is
+NOT comparable (scale drift); the notes are the signal: 02 "cool" (clean win); 01 "still too
+high — we clearly need to label our individual 808s with their note and octave"; 03 "can't even
+rlly hear 808" (the deep flag, audible); 06 "doing too much with the snare"; 04 ★1 after gate
+retries re-rolled his ★4 "fire" composition (methodology lesson: A/B must pin composition).
+
+**The owner's diagnosis was right, at scale.** Pitch-truth pass (`service/recipes/
+measure_palette_pitch.py`, autocorr f0 cross-checked vs low-band spectral peak, post-attack
+window): of 396 pitched palette one-shots, **320 measurable; 294 root_note labels WRONG, 253 by
+an octave class** (histogram dominated by −12×162, −11×39, +36×26, +24×11 — heard octave was
+effectively random per element). Beat-01 v2 concretely: its 808 label was exact (D#1) but its
+PAD was labeled 36 vs measured C4/60 (+24) — the "high" percept. Measurement adversarially
+verified before writing: independent HPS re-measurement agreed 13/14 within 1 st; synthetic
+ground truth 3/3 (incl. an 808-style pitch-drop attack); the two failure modes found (near-tie
+autocorr → fails safe to UNMEASURABLE; >400 Hz melodic fundamentals) were adopted as fixes
+(role-aware search band to 1 kHz for melodics; melodic-family 'medium' confidence demoted to
+inferred). Manifest corrected in place with backup (`manifest.pre-pitch-20260702.json`), audit
+trail per item (`root_note_inferred`, `root_label`, `root_source`, `root_confidence`).
+
+**Generator changes:** binding now prefers `root_source:"measured"` samples over nearer
+unverified labels; `normalize_808_register` gained an audibility floor (outlier notes below
+lo−3 fold up an octave — v2 beat 03 shipped MIDI 16 ≈ 20.6 Hz). generate_test 38 checks ×3
+deterministic. v3 render + A/B room queued for the owner; **rating methodology switched to
+side-by-side preference to kill scale drift.**
+
+**Round-3 outcome + one near-miss.** First v3 render came back **byte-identical to v2** — the
+corrected manifest wasn't being read: `generate.load_palette()` defaulted to a **gitignored
+repo-local duplicate** (`service/palette/palette/manifest.json`) while the corrections went to
+the canonical `~/Library/Mosh/palette-v1/manifest.json` (same 2469 items, stale labels). Fixed:
+`PALETTE_MANIFEST` resolves env `MOSH_PALETTE_MANIFEST` → home copy → repo file, in that order
+(the same class of bug as the stale-binary sine incident: a shadow copy silently serving old
+data — always A/B the OUTPUT, which is exactly how this was caught). Adversarial verification
+round 2 also contributed a structural guard now in the tool: 'medium'-confidence results must
+show direct spectral energy at the candidate f0 (kills confident subharmonic errors); melodic
+family searches to 1 kHz and only writes at 'high'. Final manifest: **291 high + 28 guarded-medium
+measured, 77 left inferred** (backup kept). Real v3: every bound element plays at its sample's
+measured pitch (808s at F1/G#1/A#1 = 34–39 Hz written == heard); renders noticeably fuller
+(RMS 0.20–0.26 vs v2's 0.09–0.20); gate 4/6 PASS, 03 (sub 11%) + 05 (sub 2%) ship loudly
+flagged bass-light — element-balance, the next lever, alongside r8 item 11 density. A/B room
+round 2 vs round 3 served; owner rates by PREFERENCE now (scale-drift-proof).

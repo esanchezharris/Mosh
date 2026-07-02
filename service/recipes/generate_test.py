@@ -183,8 +183,9 @@ check("melodic non-bass elements (pad/lead) DO get a sampler when matched (the s
 # window by whole octaves — median lands in [SUB_LO, SUB_HI], pitch classes and
 # contour (pairwise intervals) unchanged.
 hi_el = R.Element(role="808", bass=R.Bass(), midi=R.Midi(notes=[
+    # folded min stays above the audibility floor (lo-3), so contour is fully preserved
     R.NoteEvent(pitch=63, start_beats=0.0, duration_beats=1.0),
-    R.NoteEvent(pitch=56, start_beats=1.0, duration_beats=1.0),
+    R.NoteEvent(pitch=58, start_beats=1.0, duration_beats=1.0),
     R.NoteEvent(pitch=70, start_beats=2.0, duration_beats=1.0),
 ]))
 before = [n.pitch for n in hi_el.midi.notes]
@@ -229,6 +230,39 @@ check("normalized 808 binds a sub-rooted palette sample (root ≤ 36)",
       all(int(e.sample_match.root_note) <= 36 for e in b808 if e.sample_match.root_note is not None)
       and len(b808) > 0,
       str([(e.role.value, e.sample_match.root_note) for e in b808]))
+
+# ── pitch-truth round 2 (v2 audition): audibility floor + measured-preferred binding ──
+# Outlier notes far below the window fold UP (beat 03 shipped MIDI 16 ≈ 20.6 Hz — inaudible).
+out_el = R.Element(role="808", bass=R.Bass(), midi=R.Midi(notes=[
+    R.NoteEvent(pitch=16, start_beats=0.0, duration_beats=1.0),   # extreme outlier
+    R.NoteEvent(pitch=28, start_beats=1.0, duration_beats=1.0),
+    R.NoteEvent(pitch=30, start_beats=2.0, duration_beats=1.0),
+]))
+G.normalize_808_register(out_el)
+check("audibility floor folds extreme low outliers up (no note below lo-3)",
+      all(n.pitch >= G.SUB_LO - 3 for n in out_el.midi.notes),
+      str([n.pitch for n in out_el.midi.notes]))
+check("audibility floor leaves in-window notes alone",
+      [n.pitch for n in out_el.midi.notes][1:] == [28, 30],
+      str([n.pitch for n in out_el.midi.notes]))
+
+# Binding prefers pitch-VERIFIED (root_source:"measured") samples over unverified labels,
+# even when an unverified root is nearer the phrase center (277/304 inferred labels were
+# wrong, 235 by ≥1 octave — nearest-to-a-lie is still a lie).
+MIXED_PAL = {
+    "kick": [{"path": "/tmp/mx_k.wav"}], "snare": [{"path": "/tmp/mx_s.wav"}],
+    "hat": [{"path": "/tmp/mx_h.wav"}], "clap": [{"path": "/tmp/mx_c.wav"}],
+    "808": [{"path": "/tmp/mx_8_inferred.wav", "root_note": 30},                        # nearer, unverified
+            {"path": "/tmp/mx_8_measured.wav", "root_note": 24, "root_source": "measured"}],
+    "melodic": [{"path": "/tmp/mx_m_inferred.wav", "root_note": 60},
+                {"path": "/tmp/mx_m_measured.wav", "root_note": 48, "root_source": "measured"}],
+}
+rec_m, _ = G.generate({"mood": "dark", "tempo": 140, "key": "F minor"}, seed=5, palette=MIXED_PAL)
+mbound = [e for e in rec_m.elements if e.role.value in ("808", "bass", "pad", "lead", "pluck")
+          and e.sample_match.status.value == "matched"]
+check("binding prefers measured-root samples over nearer unverified labels",
+      all("_measured" in e.sample_match.matched_path for e in mbound) and len(mbound) > 0,
+      str([(e.role.value, e.sample_match.matched_path) for e in mbound]))
 
 print(f"\n{'ALL PASS' if not fails else 'FAILURES: ' + ', '.join(fails)}  ({len(fails)} failure(s))")
 sys.exit(len(fails))
