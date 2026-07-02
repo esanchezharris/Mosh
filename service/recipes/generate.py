@@ -297,10 +297,14 @@ def recombine(library: list, request: dict, rng: Rng, palette: dict) -> tuple:
             prov.transpose["lead"] = sem
             elements.append(le)
 
-    # 5) bind a palette one-shot per drum/808 role (real sounds); none → compiler falls back.
+    # 5) bind a palette one-shot per role (real sounds); none → compiler falls back.
+    #    pads/leads/plucks draw from the palette's 'melodic' bucket so melodies play a real
+    #    repitched one-shot instead of the stock 4OSC sine patch (2026-07 "sine waves" fix).
     for e in elements:
         role = e.role.value
-        pool = palette.get(role) or (palette.get("808") if role == "808" else None)
+        pool = (palette.get(role)
+                or (palette.get("808") if role == "808" else None)
+                or (palette.get("melodic") if role in ("pad", "lead", "pluck") else None))
         if pool:
             pick = pool[rng._next() % len(pool)]
             e.sample_match = R.SampleMatch(status="matched", matched_path=pick["path"], distance=0.05)
