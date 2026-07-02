@@ -42,6 +42,8 @@ before/after WAVs to `~/mosh-bench-artifacts/` for the owner's ears.
 |---|---|---|
 | cloud gpt-5.4-mini, plain rules | **31/35 = 88.6%** | fails: fx-ott, fx-autotune (deferred — catalog never names builtin types), section-rename (passed section NAME as id — real ids are 32-hex), transport-play (headless grading artifact, case fixed) |
 | cloud + worked-examples block | **32/35 = 91.4%** | both fx cases FLIPPED to pass (one composed load_builtin + set_plugin_param); tempo-slang deferred once (new); section-rename still fails |
+| cloud + one-shot repair turn | 30/35 = 85.7% | neutral-to-noise on the cloud column: its failures are DEFERRALS, which repair can't touch (repair fires on failed commands — the local column is its real target) |
+| cloud plain, run 2 (variance) | **31/35 = 88.6%** | headline identical; 1 model-side case flip (transport-seek) ⇒ single-run noise ≈ ±1 case (±2.9%); persistent failures = section-rename, fx-ott, fx-autotune — exactly the examples-block targets |
 
 The worked-example lever transfers to command emission. `ui/src/agent/fewshot.ts` holds the
 block (kept out of production `DEFAULT_RULES` until the A/B is conclusive across both columns).

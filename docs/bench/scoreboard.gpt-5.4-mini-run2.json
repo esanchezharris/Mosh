@@ -1,0 +1,815 @@
+{
+  "tag": "gpt-5.4-mini-run2",
+  "model": "gpt-5.4-mini",
+  "bin": "/Users/emiliosanchez-harris/Documents/ClaudeMosh/.claude/worktrees/vigilant-robinson-a5b2c2/build-macos-arm64-release/Mosh_artefacts/Release/Mosh.app/Contents/MacOS/Mosh",
+  "ranAt": "2026-07-02T01:20:02.563Z",
+  "score": 0.8857142857142857,
+  "passed": 31,
+  "total": 35,
+  "byArea": {
+    "session": {
+      "pass": 5,
+      "total": 5
+    },
+    "tracks": {
+      "pass": 4,
+      "total": 4
+    },
+    "mixer": {
+      "pass": 8,
+      "total": 8
+    },
+    "clips": {
+      "pass": 4,
+      "total": 4
+    },
+    "notes": {
+      "pass": 1,
+      "total": 1
+    },
+    "transport": {
+      "pass": 3,
+      "total": 4
+    },
+    "sections": {
+      "pass": 1,
+      "total": 2
+    },
+    "fx": {
+      "pass": 0,
+      "total": 2
+    },
+    "defer": {
+      "pass": 3,
+      "total": 3
+    },
+    "corrective": {
+      "pass": 2,
+      "total": 2
+    }
+  },
+  "usage": {
+    "promptTokens": 83436,
+    "completionTokens": 1501,
+    "calls": 35
+  },
+  "rows": [
+    {
+      "id": "tempo-plain",
+      "area": "session",
+      "utterance": "set the tempo to 128",
+      "pass": true,
+      "repaired": false,
+      "commands": [
+        "set_tempo"
+      ],
+      "invalidCount": 0,
+      "appliedClean": true,
+      "deferred": false,
+      "brainMs": 1553,
+      "checks": [
+        {
+          "pass": true,
+          "note": "tempo 128"
+        }
+      ],
+      "renders": []
+    },
+    {
+      "id": "tempo-slang",
+      "area": "session",
+      "utterance": "this needs to sit at like 140, trap tempo",
+      "pass": true,
+      "repaired": false,
+      "commands": [
+        "set_tempo"
+      ],
+      "invalidCount": 0,
+      "appliedClean": true,
+      "deferred": false,
+      "brainMs": 1026,
+      "checks": [
+        {
+          "pass": true,
+          "note": "tempo 140"
+        }
+      ],
+      "renders": []
+    },
+    {
+      "id": "tempo-relative",
+      "area": "session",
+      "utterance": "bump the tempo up a little",
+      "pass": true,
+      "repaired": false,
+      "commands": [
+        "set_tempo"
+      ],
+      "invalidCount": 0,
+      "appliedClean": true,
+      "deferred": false,
+      "brainMs": 820,
+      "checks": [
+        {
+          "pass": true,
+          "note": "tempo 126"
+        }
+      ],
+      "renders": []
+    },
+    {
+      "id": "timesig",
+      "area": "session",
+      "utterance": "switch us to 3/4 time",
+      "pass": true,
+      "repaired": false,
+      "commands": [
+        "set_time_signature"
+      ],
+      "invalidCount": 0,
+      "appliedClean": true,
+      "deferred": false,
+      "brainMs": 864,
+      "checks": [
+        {
+          "pass": true,
+          "note": "3/4"
+        }
+      ],
+      "renders": []
+    },
+    {
+      "id": "undo-tempo",
+      "area": "session",
+      "utterance": "undo that last change",
+      "pass": true,
+      "repaired": false,
+      "commands": [
+        "undo"
+      ],
+      "invalidCount": 0,
+      "appliedClean": true,
+      "deferred": false,
+      "brainMs": 1009,
+      "checks": [
+        {
+          "pass": true,
+          "note": "tempo 120"
+        }
+      ],
+      "renders": []
+    },
+    {
+      "id": "track-create",
+      "area": "tracks",
+      "utterance": "make me a new track called Guitar",
+      "pass": true,
+      "repaired": false,
+      "commands": [
+        "create_track"
+      ],
+      "invalidCount": 0,
+      "appliedClean": true,
+      "deferred": false,
+      "brainMs": 1070,
+      "checks": [
+        {
+          "pass": true,
+          "note": "\"Guitar\" exists"
+        },
+        {
+          "pass": true,
+          "note": "Δtracks 1"
+        }
+      ],
+      "renders": []
+    },
+    {
+      "id": "track-create-drum",
+      "area": "tracks",
+      "utterance": "add a drum track for my hats",
+      "pass": true,
+      "repaired": false,
+      "commands": [
+        "create_track"
+      ],
+      "invalidCount": 0,
+      "appliedClean": true,
+      "deferred": false,
+      "brainMs": 912,
+      "checks": [
+        {
+          "pass": true,
+          "note": "Δtracks 1"
+        }
+      ],
+      "renders": []
+    },
+    {
+      "id": "track-rename",
+      "area": "tracks",
+      "utterance": "rename the Keys track to Piano",
+      "pass": true,
+      "repaired": false,
+      "commands": [
+        "rename_track"
+      ],
+      "invalidCount": 0,
+      "appliedClean": true,
+      "deferred": false,
+      "brainMs": 861,
+      "checks": [
+        {
+          "pass": true,
+          "note": "\"Piano\" exists"
+        },
+        {
+          "pass": true,
+          "note": "\"Keys\" absent"
+        }
+      ],
+      "renders": []
+    },
+    {
+      "id": "track-remove",
+      "area": "tracks",
+      "utterance": "get rid of the Vocal track",
+      "pass": true,
+      "repaired": false,
+      "commands": [
+        "remove_track"
+      ],
+      "invalidCount": 0,
+      "appliedClean": true,
+      "deferred": false,
+      "brainMs": 997,
+      "checks": [
+        {
+          "pass": true,
+          "note": "\"Vocal\" absent"
+        },
+        {
+          "pass": true,
+          "note": "Δtracks -1"
+        }
+      ],
+      "renders": []
+    },
+    {
+      "id": "vol-down-relative",
+      "area": "mixer",
+      "utterance": "the Drums are too loud, bring them down",
+      "pass": true,
+      "repaired": false,
+      "commands": [
+        "set_track_volume"
+      ],
+      "invalidCount": 0,
+      "appliedClean": true,
+      "deferred": false,
+      "brainMs": 1052,
+      "checks": [
+        {
+          "pass": true,
+          "note": "volumeDb moved down 6.0"
+        }
+      ],
+      "renders": []
+    },
+    {
+      "id": "vol-up-relative",
+      "area": "mixer",
+      "utterance": "I can barely hear the 808, turn it up",
+      "pass": true,
+      "repaired": false,
+      "commands": [
+        "set_track_volume"
+      ],
+      "invalidCount": 0,
+      "appliedClean": true,
+      "deferred": false,
+      "brainMs": 803,
+      "checks": [
+        {
+          "pass": true,
+          "note": "volumeDb moved up 6.0"
+        }
+      ],
+      "renders": []
+    },
+    {
+      "id": "vol-absolute",
+      "area": "mixer",
+      "utterance": "set the Keys to -6 dB",
+      "pass": true,
+      "repaired": false,
+      "commands": [
+        "set_track_volume"
+      ],
+      "invalidCount": 0,
+      "appliedClean": true,
+      "deferred": false,
+      "brainMs": 1295,
+      "checks": [
+        {
+          "pass": true,
+          "note": "volumeDb=-6.000000476837158"
+        }
+      ],
+      "renders": []
+    },
+    {
+      "id": "pan-hard-left",
+      "area": "mixer",
+      "utterance": "pan the Keys hard left",
+      "pass": true,
+      "repaired": false,
+      "commands": [
+        "set_track_pan"
+      ],
+      "invalidCount": 0,
+      "appliedClean": true,
+      "deferred": false,
+      "brainMs": 1567,
+      "checks": [
+        {
+          "pass": true,
+          "note": "pan=-1"
+        }
+      ],
+      "renders": []
+    },
+    {
+      "id": "pan-recenter",
+      "area": "mixer",
+      "utterance": "bring the keys back toward the center",
+      "pass": true,
+      "repaired": false,
+      "commands": [
+        "set_track_pan"
+      ],
+      "invalidCount": 0,
+      "appliedClean": true,
+      "deferred": false,
+      "brainMs": 733,
+      "checks": [
+        {
+          "pass": true,
+          "note": "pan=0"
+        }
+      ],
+      "renders": []
+    },
+    {
+      "id": "mute",
+      "area": "mixer",
+      "utterance": "mute the vocal",
+      "pass": true,
+      "repaired": false,
+      "commands": [
+        "set_track_mute"
+      ],
+      "invalidCount": 0,
+      "appliedClean": true,
+      "deferred": false,
+      "brainMs": 1014,
+      "checks": [
+        {
+          "pass": true,
+          "note": "mute=true"
+        }
+      ],
+      "renders": []
+    },
+    {
+      "id": "solo",
+      "area": "mixer",
+      "utterance": "solo the drums for me",
+      "pass": true,
+      "repaired": false,
+      "commands": [
+        "set_track_solo"
+      ],
+      "invalidCount": 0,
+      "appliedClean": true,
+      "deferred": false,
+      "brainMs": 920,
+      "checks": [
+        {
+          "pass": true,
+          "note": "solo=true"
+        }
+      ],
+      "renders": []
+    },
+    {
+      "id": "unmute-all",
+      "area": "mixer",
+      "utterance": "unmute everything",
+      "pass": true,
+      "repaired": false,
+      "commands": [
+        "set_track_mute",
+        "set_track_mute"
+      ],
+      "invalidCount": 0,
+      "appliedClean": true,
+      "deferred": false,
+      "brainMs": 854,
+      "checks": [
+        {
+          "pass": true,
+          "note": "mute=false"
+        },
+        {
+          "pass": true,
+          "note": "mute=false"
+        }
+      ],
+      "renders": []
+    },
+    {
+      "id": "clip-add-midi",
+      "area": "clips",
+      "utterance": "add a midi clip on the Keys track",
+      "pass": true,
+      "repaired": false,
+      "commands": [
+        "add_midi_clip"
+      ],
+      "invalidCount": 0,
+      "appliedClean": true,
+      "deferred": false,
+      "brainMs": 1156,
+      "checks": [
+        {
+          "pass": true,
+          "note": "Δclips 1"
+        }
+      ],
+      "renders": []
+    },
+    {
+      "id": "clip-add-tone",
+      "area": "clips",
+      "utterance": "drop a test tone on the Vocal track",
+      "pass": true,
+      "repaired": false,
+      "commands": [
+        "add_test_tone_clip"
+      ],
+      "invalidCount": 0,
+      "appliedClean": true,
+      "deferred": false,
+      "brainMs": 1882,
+      "checks": [
+        {
+          "pass": true,
+          "note": "Δclips 1"
+        }
+      ],
+      "renders": []
+    },
+    {
+      "id": "clip-move",
+      "area": "clips",
+      "utterance": "move the drum clip so it starts at bar 3",
+      "pass": true,
+      "repaired": false,
+      "commands": [
+        "move_clip"
+      ],
+      "invalidCount": 0,
+      "appliedClean": true,
+      "deferred": false,
+      "brainMs": 1026,
+      "checks": [
+        {
+          "pass": true,
+          "note": "start 4s"
+        }
+      ],
+      "renders": []
+    },
+    {
+      "id": "clip-split",
+      "area": "clips",
+      "utterance": "split the 808 clip down the middle",
+      "pass": true,
+      "repaired": false,
+      "commands": [
+        "split_clip"
+      ],
+      "invalidCount": 0,
+      "appliedClean": true,
+      "deferred": false,
+      "brainMs": 967,
+      "checks": [
+        {
+          "pass": true,
+          "note": "Δclips 1"
+        }
+      ],
+      "renders": []
+    },
+    {
+      "id": "notes-populate",
+      "area": "notes",
+      "utterance": "write a quick little four note melody into the keys clip",
+      "pass": true,
+      "repaired": false,
+      "commands": [
+        "add_note",
+        "add_note",
+        "add_note",
+        "add_note"
+      ],
+      "invalidCount": 0,
+      "appliedClean": true,
+      "deferred": false,
+      "brainMs": 1353,
+      "checks": [
+        {
+          "pass": true,
+          "note": "add_note ×4"
+        }
+      ],
+      "renders": []
+    },
+    {
+      "id": "transport-play",
+      "area": "transport",
+      "utterance": "play it",
+      "pass": true,
+      "repaired": false,
+      "commands": [
+        "set_transport"
+      ],
+      "invalidCount": 0,
+      "appliedClean": true,
+      "deferred": false,
+      "brainMs": 960,
+      "checks": [
+        {
+          "pass": true,
+          "note": "set_transport ×1"
+        }
+      ],
+      "renders": []
+    },
+    {
+      "id": "transport-stop",
+      "area": "transport",
+      "utterance": "stop playback",
+      "pass": true,
+      "repaired": false,
+      "commands": [
+        "set_transport"
+      ],
+      "invalidCount": 0,
+      "appliedClean": true,
+      "deferred": false,
+      "brainMs": 826,
+      "checks": [
+        {
+          "pass": true,
+          "note": "playing=false"
+        }
+      ],
+      "renders": []
+    },
+    {
+      "id": "transport-seek",
+      "area": "transport",
+      "utterance": "jump to bar 5",
+      "pass": false,
+      "repaired": false,
+      "commands": [
+        "set_transport"
+      ],
+      "invalidCount": 0,
+      "appliedClean": true,
+      "deferred": false,
+      "brainMs": 1152,
+      "checks": [
+        {
+          "pass": false,
+          "note": "pos 16s ∉ [7.5,8.5]"
+        }
+      ],
+      "renders": []
+    },
+    {
+      "id": "transport-loop-on",
+      "area": "transport",
+      "utterance": "turn looping on",
+      "pass": true,
+      "repaired": false,
+      "commands": [
+        "set_transport"
+      ],
+      "invalidCount": 0,
+      "appliedClean": true,
+      "deferred": false,
+      "brainMs": 1043,
+      "checks": [
+        {
+          "pass": true,
+          "note": "looping=true"
+        }
+      ],
+      "renders": []
+    },
+    {
+      "id": "section-create",
+      "area": "sections",
+      "utterance": "mark beats 0 to 16 as the Intro",
+      "pass": true,
+      "repaired": false,
+      "commands": [
+        "create_section"
+      ],
+      "invalidCount": 0,
+      "appliedClean": true,
+      "deferred": false,
+      "brainMs": 983,
+      "checks": [
+        {
+          "pass": true,
+          "note": "section \"Intro\" ok"
+        }
+      ],
+      "renders": []
+    },
+    {
+      "id": "section-rename",
+      "area": "sections",
+      "utterance": "rename the Intro section to Cold Open",
+      "pass": false,
+      "repaired": false,
+      "commands": [
+        "rename_section"
+      ],
+      "invalidCount": 0,
+      "appliedClean": false,
+      "deferred": false,
+      "brainMs": 1739,
+      "checks": [
+        {
+          "pass": false,
+          "note": "section \"Cold Open\" missing (have: Intro)"
+        },
+        {
+          "pass": false,
+          "note": "section \"Intro\" unexpectedly exists"
+        }
+      ],
+      "renders": []
+    },
+    {
+      "id": "fx-ott",
+      "area": "fx",
+      "utterance": "slap some OTT style compression on the Drums",
+      "pass": false,
+      "repaired": false,
+      "commands": [],
+      "invalidCount": 0,
+      "appliedClean": true,
+      "deferred": true,
+      "brainMs": 1071,
+      "checks": [
+        {
+          "pass": false,
+          "note": "plugin ~\"ott\" missing"
+        }
+      ],
+      "renders": []
+    },
+    {
+      "id": "fx-autotune",
+      "area": "fx",
+      "utterance": "put autotune on the vocal",
+      "pass": false,
+      "repaired": false,
+      "commands": [],
+      "invalidCount": 0,
+      "appliedClean": true,
+      "deferred": true,
+      "brainMs": 936,
+      "checks": [
+        {
+          "pass": false,
+          "note": "plugin ~\"tune\" missing"
+        }
+      ],
+      "renders": []
+    },
+    {
+      "id": "defer-ambiguous",
+      "area": "defer",
+      "utterance": "make that louder",
+      "pass": true,
+      "repaired": false,
+      "commands": [],
+      "invalidCount": 0,
+      "appliedClean": true,
+      "deferred": true,
+      "brainMs": 1125,
+      "checks": [
+        {
+          "pass": true,
+          "note": "deferred"
+        }
+      ],
+      "renders": []
+    },
+    {
+      "id": "defer-vague",
+      "area": "defer",
+      "utterance": "make it sound better",
+      "pass": true,
+      "repaired": false,
+      "commands": [],
+      "invalidCount": 0,
+      "appliedClean": true,
+      "deferred": true,
+      "brainMs": 992,
+      "checks": [
+        {
+          "pass": true,
+          "note": "deferred"
+        }
+      ],
+      "renders": []
+    },
+    {
+      "id": "defer-impossible",
+      "area": "defer",
+      "utterance": "email this beat to my label",
+      "pass": true,
+      "repaired": false,
+      "commands": [],
+      "invalidCount": 0,
+      "appliedClean": true,
+      "deferred": true,
+      "brainMs": 1023,
+      "checks": [
+        {
+          "pass": true,
+          "note": "deferred"
+        }
+      ],
+      "renders": []
+    },
+    {
+      "id": "corr-drums-drowning",
+      "area": "corrective",
+      "utterance": "the drums are drowning everything, fix the balance",
+      "pass": true,
+      "repaired": false,
+      "commands": [
+        "set_track_volume",
+        "set_track_volume",
+        "set_track_volume",
+        "set_track_volume"
+      ],
+      "invalidCount": 0,
+      "appliedClean": true,
+      "deferred": false,
+      "brainMs": 1351,
+      "checks": [
+        {
+          "pass": true,
+          "note": "volumeDb moved down 6.0"
+        }
+      ],
+      "renders": []
+    },
+    {
+      "id": "corr-808-lost",
+      "area": "corrective",
+      "utterance": "the 808 is getting completely lost, sort it out",
+      "pass": true,
+      "repaired": false,
+      "commands": [
+        "set_track_volume",
+        "set_track_pan",
+        "set_track_mute",
+        "set_track_solo",
+        "set_track_volume",
+        "set_track_volume"
+      ],
+      "invalidCount": 0,
+      "appliedClean": true,
+      "deferred": false,
+      "brainMs": 1676,
+      "checks": [
+        {
+          "pass": true,
+          "note": "volumeDb moved up 6.0"
+        }
+      ],
+      "renders": []
+    }
+  ]
+}
