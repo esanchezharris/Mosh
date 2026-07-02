@@ -64,5 +64,27 @@ check("shared sample capped at 2 when alternatives exist", hot == 2 and len(pick
 check("selection is deterministic", [p["id"] for p in select_pack(pool, 4)]
       == [p["id"] for p in picks4])
 
+# ── pack page: topPick replaces stars (owner: stars collapsed to all-3s) ──────
+import tempfile
+
+from beat_factory import build_pack_page
+
+with tempfile.TemporaryDirectory() as td:
+    picks_pg = [{"id": f"c{i}", "pack_file": f"{i:02d}_x.wav",
+                 "request": {"style": "club-swag", "mood": "chill", "tempo": 132,
+                             "key": "A minor"},
+                 "sources": {"drums": "d"}, "samples": {},
+                 "gate": {"keyRank": 0, "subRatio": 0.7}} for i in range(3)]
+    page_path = build_pack_page(td, picks_pg)
+    html = open(page_path).read()
+check("stars are GONE from the pack page", ".stars" not in html and "★</button>" not in html)
+check("every card carries exactly one TOP PICK button",
+      html.count('data-k="top"') == 3)
+check("CSV export carries the top column (no stars)",
+      '"top"' in html and '"stars"' not in html)
+check("export blocks until verdicts + top pick are set",
+      "KEEP or KILL every beat first" in html and "Pick exactly ONE" in html)
+check("cards show the style name", "club-swag" in html)
+
 print(f"\n{'ALL PASS' if not fails else 'FAILURES: ' + ', '.join(fails)}  ({len(fails)} failure(s))")
 sys.exit(len(fails))
