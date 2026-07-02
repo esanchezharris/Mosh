@@ -192,6 +192,34 @@ def bind_808_to_chords(bass_el, chord_el):
     return bass_el
 
 
+# ─────────────────────── 808 register normalization ──────────────────────────
+SUB_LO, SUB_HI = 24, 38  # canonical 808 sub window, C1–D2 (fundamental ~32–73 Hz)
+
+
+def normalize_808_register(el, lo: int = SUB_LO, hi: int = SUB_HI):
+    """Fold the whole 808/bass phrase by whole octaves (k*12) so its MEDIAN pitch lands
+    in [lo, hi]. Whole-phrase shift: contour and pitch classes are preserved exactly, so
+    chord-root binding stays correct and the nearest-root sample pick then searches in
+    the sub register. Needed because owner-catalog 808 motifs import ~2 octaves high
+    (FL piano-roll 808 patterns sit near C5 against a sub-rooted channel the importer
+    never sees) and nothing downstream ever chose an absolute register — the 2026-07
+    audition rated all six beats "808 too high" (medians MIDI 54.5–65, 0/50 notes in
+    window). Mutates + returns."""
+    if not (el and el.midi.notes):
+        return el
+    pitches = sorted(int(n.pitch) for n in el.midi.notes)
+    med = pitches[len(pitches) // 2]
+    shift = 0
+    while med + shift > hi:   # window spans ≥12 semitones, so a fold never overshoots it
+        shift -= 12
+    while med + shift < lo:
+        shift += 12
+    if shift:
+        for n in el.midi.notes:
+            n.pitch = max(0, min(127, n.pitch + shift))
+    return el
+
+
 # ───────────────────────────── retrieval ─────────────────────────────────────
 def score_recipe(rec, request: dict) -> float:
     s = 0.0
@@ -297,6 +325,7 @@ def recombine(library: list, request: dict, rng: Rng, palette: dict) -> tuple:
         chord_now = next((e for e in elements if e.role.value == "pad"), None)
         if chord_now:
             bind_808_to_chords(b, chord_now)
+        normalize_808_register(b)  # AFTER binding (pc-safe), BEFORE the sample bind below
         elements.append(b)
 
     # 4) LEAD — optional; include if the request asks for melody or by seeded choice.

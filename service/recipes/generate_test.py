@@ -178,5 +178,57 @@ check("melodic non-bass elements (pad/lead) DO get a sampler when matched (the s
       all(e.sample_match.matched_path in roots for e in bound if e.role.value in ("pad", "lead", "pluck")),
       str([(e.role.value, e.sample_match.matched_path in roots) for e in bound]))
 
+# ── 808 register normalization (2026-07 audition regression: "808 too high" ×6) ──
+# Unit: a phrase written 2 octaves high (the FL-import register) folds into the sub
+# window by whole octaves — median lands in [SUB_LO, SUB_HI], pitch classes and
+# contour (pairwise intervals) unchanged.
+hi_el = R.Element(role="808", bass=R.Bass(), midi=R.Midi(notes=[
+    R.NoteEvent(pitch=63, start_beats=0.0, duration_beats=1.0),
+    R.NoteEvent(pitch=56, start_beats=1.0, duration_beats=1.0),
+    R.NoteEvent(pitch=70, start_beats=2.0, duration_beats=1.0),
+]))
+before = [n.pitch for n in hi_el.midi.notes]
+G.normalize_808_register(hi_el)
+after = [n.pitch for n in hi_el.midi.notes]
+med = sorted(after)[len(after) // 2]
+check("normalize folds a high 808 median into the sub window", G.SUB_LO <= med <= G.SUB_HI, str(med))
+check("normalize preserves pitch classes (chord binding intact)",
+      all(a % 12 == b % 12 for a, b in zip(after, before)), str(after))
+check("normalize preserves contour (whole-phrase shift, no per-note folds)",
+      [a - after[0] for a in after] == [b - before[0] for b in before], str(after))
+lo_el = R.Element(role="808", bass=R.Bass(), midi=R.Midi(notes=[
+    R.NoteEvent(pitch=10, start_beats=0.0, duration_beats=1.0)]))
+G.normalize_808_register(lo_el)
+check("normalize folds a too-LOW 808 up into the window",
+      G.SUB_LO <= lo_el.midi.notes[0].pitch <= G.SUB_HI, str(lo_el.midi.notes[0].pitch))
+in_el = R.Element(role="808", bass=R.Bass(), midi=R.Midi(notes=[
+    R.NoteEvent(pitch=29, start_beats=0.0, duration_beats=1.0)]))
+G.normalize_808_register(in_el)
+check("normalize is a no-op inside the window (seed recipes untouched)",
+      in_el.midi.notes[0].pitch == 29, str(in_el.midi.notes[0].pitch))
+
+# Property: every recombined beat's 808 median sits in the sub window (this is the
+# audition defect — all six shipped beats had medians MIDI 54.5–65, 0/50 notes inside).
+bad_medians = []
+for seed in range(12):
+    g, _ = G.generate({"mood": "dark", "tempo": 140, "key": "F minor"}, seed=seed, palette={})
+    for e in g.elements:
+        if e.role.value in ("808", "bass") and e.midi.notes:
+            ps = sorted(int(n.pitch) for n in e.midi.notes)
+            m = ps[len(ps) // 2]
+            if not (G.SUB_LO <= m <= G.SUB_HI):
+                bad_medians.append((seed, m))
+check("every recombined 808 median in [24,38] across 12 seeds", not bad_medians, str(bad_medians))
+
+# And the sample bind now happens in the NEW register: with FAKE_PAL (roots 24/36/50),
+# a normalized 808 must bind a sub-rooted sample (24 or 36), never the 50-root.
+rec_r, _ = G.generate({"mood": "dark", "tempo": 140, "key": "F minor"}, seed=5, palette=FAKE_PAL)
+b808 = [e for e in rec_r.elements if e.role.value in ("808", "bass")
+        and e.sample_match.status.value == "matched"]
+check("normalized 808 binds a sub-rooted palette sample (root ≤ 36)",
+      all(int(e.sample_match.root_note) <= 36 for e in b808 if e.sample_match.root_note is not None)
+      and len(b808) > 0,
+      str([(e.role.value, e.sample_match.root_note) for e in b808]))
+
 print(f"\n{'ALL PASS' if not fails else 'FAILURES: ' + ', '.join(fails)}  ({len(fails)} failure(s))")
 sys.exit(len(fails))

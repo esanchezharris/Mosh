@@ -53,3 +53,27 @@ is equally inert. Fixing this is the cheapest credible shot at moving would_keep
 7. **Validity verdict context for r8:** on artifact-free clips the owner's ratings are flat
    across verifier tiers (4.33 vs 4.67 of 7) — corpus/musical-substance improvements, not
    verifier-score improvements, are what can move would_keep.
+
+## Addendum (2026-07-02, from the rated owner-DNA audition)
+
+8. **FL channel-root capture at import — the upstream register fix.** The owner rated ALL SIX
+   owner-DNA beats "808 too high" (mean 2.83/5). Measured: 808 medians MIDI 54.5–65 vs the
+   24–38 sub window, 0/50 notes inside; library-wide the owner scrape's 808/bass element
+   medians center on 60.75 (2.6% in-window) vs the hand-authored seeds' 29 (80%). Root cause:
+   `service/flp/flp_cli.py` never reads the FL channel sampler root (FL default C5 = raw 60),
+   so sub-sounding piano-roll patterns import as C4–C5 absolute pitches and
+   `motif.register_band` is computed from the wrong frame. r8's importer pass should emit the
+   channel root/keyboard transposition from PyFLP into the IR and rebase note pitches (or at
+   least store the root so generation can). The generation-time octave fold
+   (`normalize_808_register`, landed 2026-07-02) makes existing data correct at assembly time,
+   so this is data-quality debt, not a blocker.
+9. **Per-element key verification** (carried from the audition): recipes' inferred source keys
+   remain unreliable — chroma-verify per element at re-ingestion, not just per project.
+10. **Mood-tag reliability (2 data points):** 06 "chill" CONFIRMED verbatim; 04 "emotional"
+    rejected by the owner ("fire, but… idk if I would say it's 'emotional'"). Re-tagging wants
+    more ratings before acting; keep collecting from listening-room CSVs.
+11. **Element density / collision control:** beat 05 rated "messy but aggressive". No fix
+    landed; candidate lever = per-role density budget or onset-collision thinning at assembly.
+12. **Arrangement contrast (owner idea):** "a section where it [the 808] drops an octave" —
+    section-level register/energy contrast as a future assembly feature. The default-low
+    register fix (item 8 + normalize_808_register) supersedes the immediate need.

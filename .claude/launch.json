@@ -12,6 +12,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev", "--prefix", "ui"],
       "port": 5173
+    },
+    {
+      "name": "listening-room",
+      "runtimeExecutable": "/bin/sh",
+      "runtimeArgs": ["-c", "cd /Users/emiliosanchez-harris/mosh-beats && exec /usr/bin/python3 -m http.server 8188 --bind 127.0.0.1"],
+      "port": 8188
     }
   ]
 }
