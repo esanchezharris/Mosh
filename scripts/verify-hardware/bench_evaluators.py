@@ -115,6 +115,19 @@ def permutation_report(signal_values: dict, pos_idx: list):
     return {s: (obs[s], ge[s] / total, max_ge[s] / total) for s in names}, exact
 
 
+def critical_auc(n: int, n_pos: int, alpha: float = 0.05) -> tuple:
+    """Smallest AUC clearing one-sided alpha under the exact permutation null."""
+    relabels, _ = exact_relabelings(n, n_pos)
+    ranks = _ranks(list(range(n)))
+    aucs = sorted(auc_from_ranks(ranks, list(c)) for c in relabels)
+    total = len(aucs)
+    for a in sorted(set(aucs)):
+        p = sum(1 for x in aucs if x >= a - 1e-12) / total
+        if p <= alpha:
+            return round(a, 3), round(p, 4)
+    return 1.0, 1.0 / total
+
+
 def hanley_mcneil_ci(auc, n_pos, n_neg):
     if math.isnan(auc):
         return (float("nan"), float("nan"))
@@ -200,7 +213,9 @@ def load_rows():
 
 
 def pack_rows(rows):
-    return [r for r in rows if r["kind"] == "keep"]
+    # value must be a real verdict: unrated cards (e.g. the pack-002 reprises the owner
+    # skipped) come through as "" and would otherwise silently count as kills.
+    return [r for r in rows if r["kind"] == "keep" and r.get("value") in ("keep", "kill")]
 
 
 def wav_path_for(row):
@@ -404,14 +419,15 @@ def main(argv=None) -> int:
       f"`~/mosh-beats/labels/labels.jsonl` — regenerate, don't hand-edit. "
       f"Packs included: {', '.join(packs)} (n={len(prs)}: {n_pos} keep / {n_neg} kill).*")
     w("")
-    w("**This is a cumulative protocol, not a verdict.** At n=14 (7/7) only AUC ≥ 0.776 "
-      "clears one-sided α=0.05 (exact permutation over C(14,7)=3,432 relabelings); an "
-      "evaluator sitting exactly at the pre-registered adoption bar (AUC 0.65) is "
-      "indistinguishable from a coin flip here (p≈0.19). Verdicts below are limited to "
+    crit, crit_p = critical_auc(len(prs), n_pos)
+    w(f"**This is a cumulative protocol, not a verdict.** At the current n={len(prs)} "
+      f"({n_pos}/{n_neg}) only AUC ≥ {crit} clears one-sided α=0.05 (exact permutation, "
+      f"p={crit_p}). Verdicts below are limited to "
       "`prioritize` / `deprioritize` / `insufficient`. The adoption decision "
-      "(AUC ≥ 0.65 held-out, per MUSIC_EVAL_RESEARCH.md) fires only under "
-      "leave-one-pack-out once ≥2 rated packs exist. Power: at a true AUC of 0.70, "
-      "~3 packs (~44 labels) give 80% power at one-sided 0.05; at a true 0.65, ~6–7 packs.")
+      "(AUC ≥ 0.65 held-out, per MUSIC_EVAL_RESEARCH.md) fires only with ≥2 rated packs "
+      "and per-pack replication (fixed signals: per-pack AUCs in the note column must "
+      "agree in direction). Power: at a true AUC of 0.70, ~3 packs (~44 labels) give "
+      "80% power at one-sided 0.05; at a true 0.65, ~6–7 packs.")
     w("")
     w("**Pre-registered directions** (set before pack-002; future packs are one-sided "
       "confirmatory tests): every signal HIGHER on keeps; every signal LOWER on "
@@ -427,11 +443,27 @@ def main(argv=None) -> int:
              "clapContrast": "CLAP pos−neg anchor contrast",
              "clapKeptCentroid": "CLAP cos to kept-set centroid (LOO)",
              "rmsDb": "raw mix loudness (baseline)"}
+    # per-pack AUCs (signals are FIXED, not fitted, so per-pack splits are honest
+    # replication checks — a signal that flips direction across packs is noise)
+    per_pack = {}
+    for pk in packs:
+        idx = [i for i, r in enumerate(prs) if r["round"] == pk]
+        ppos = [i for i in idx if prs[i]["value"] == "keep"]
+        if not ppos or len(ppos) == len(idx):
+            continue
+        for s, vs in signals.items():
+            if vs is None:
+                continue
+            sub = [vs[i] for i in idx]
+            sub_pos = [j for j, i in enumerate(idx) if i in ppos]
+            per_pack.setdefault(s, {})[pk] = auc_from_ranks(_ranks(sub), sub_pos)
     for s in SIGNALS:
         if s in report:
             auc, p, pc = report[s]
             ci = hanley_mcneil_ci(auc, n_pos, n_neg)
-            w(fmt_row(s, auc, p, pc, ci, verdict(auc, p), notes.get(s, "")))
+            pp = " · ".join(f"{pk[-3:]}:{v:.2f}" for pk, v in per_pack.get(s, {}).items())
+            note = notes.get(s, "") + (f" — per-pack {pp}" if pp else "")
+            w(fmt_row(s, auc, p, pc, ci, verdict(auc, p), note))
         else:
             w(f"| {s} | — | — | — | — | unavailable | {notes.get(s, '')} |")
     w("")

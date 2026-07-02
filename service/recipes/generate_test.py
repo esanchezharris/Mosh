@@ -341,6 +341,55 @@ triad = R.Element(role="lead", midi=R.Midi(notes=[
     for i, p in enumerate((60, 63, 67))]))
 check("variety floor accepts a 3-pitch line", G._distinct_ok(triad))
 
+# Rhythm guard (pack-002 kill notes + "all the notes hitting at once on the downbeat"):
+# 277 pack-ingested scale-reference MIDIs carried EVERY note at start 0.0.
+stack48 = R.Element(role="pad", midi=R.Midi(notes=[
+    R.NoteEvent(pitch=46 + i, start_beats=0.0, duration_beats=4.0) for i in range(48)]))
+check("rhythm guard rejects a 48-note single-instant stack", not G._has_rhythm(stack48))
+check("rhythm guard passes a scale stack through the VARIETY floor (why both exist)",
+      G._distinct_ok(stack48))  # plenty of pitches — variety alone can't catch it
+prog4 = R.Element(role="pad", midi=R.Midi(notes=[
+    R.NoteEvent(pitch=60 + (i % 6), start_beats=float(i // 6), duration_beats=1.0)
+    for i in range(24)]))
+check("rhythm guard passes a 4-chord/6-voice progression", G._has_rhythm(prog4))
+drone1 = R.Element(role="pad", midi=R.Midi(notes=[
+    R.NoteEvent(pitch=48, start_beats=0.0, duration_beats=16.0)]))
+check("rhythm guard passes a 1-note drone", G._has_rhythm(drone1))
+kick2 = R.Element(role="kick", midi=R.Midi(notes=[
+    R.NoteEvent(pitch=36, start_beats=0.0, duration_beats=0.25),
+    R.NoteEvent(pitch=36, start_beats=2.0, duration_beats=0.25)]))
+check("rhythm guard passes a 2-hit kick", G._has_rhythm(kick2))
+# library hygiene: the prune removed every reference dump; the guard keeps them out
+lib_stacks = [(r.source.video_id, e.role.value) for r in library for e in r.elements
+              if len(e.midi.notes) >= 6
+              and len({round(float(n.start_beats), 4) for n in e.midi.notes}) < 2]
+check("library carries ZERO single-instant reference elements", not lib_stacks,
+      str(lib_stacks[:3]))
+# end-to-end: a stack pad in the pool is never picked as the chord source
+stack_rec = _mini2 = None  # placeholder to keep names local
+def _mini_rec(vid, els):
+    return R.Recipe(recipe_id=vid, source=R.Source(platform="test", video_id=vid,
+                                                   title=vid, channel="dark"),
+                    meta=R.Meta(tempo_bpm=R.MetaField(value=140.0, confidence=1.0),
+                                key=R.MetaField(value="F minor", confidence=1.0),
+                                time_signature=R.MetaField(value="4/4", confidence=1.0)),
+                    elements=els, reconstruction_class="deterministic")
+stack_rec = _mini_rec("stackpad", [R.Element(role="pad", midi=R.Midi(notes=[
+    R.NoteEvent(pitch=46 + i, start_beats=0.0, duration_beats=4.0) for i in range(35)]))])
+real_rec = _mini_rec("realpad", [R.Element(role="pad", midi=R.Midi(notes=[
+    R.NoteEvent(pitch=60 + (i % 3), start_beats=float(i), duration_beats=1.0)
+    for i in range(8)]))])
+stack_picked = []
+for s in range(8):
+    rec_g, _ = G.recombine([stack_rec, real_rec], {"mood": "dark", "tempo": 140,
+                                                   "key": "F minor"}, G.Rng(s + 1), {})
+    pad_el = next((e for e in rec_g.elements if e.role.value == "pad"), None)
+    if pad_el is not None and len({round(float(n.start_beats), 4)
+                                   for n in pad_el.midi.notes}) < 2 and len(pad_el.midi.notes) >= 6:
+        stack_picked.append(s)
+check("chord source NEVER binds a single-instant stack (8 seeds)", not stack_picked,
+      str(stack_picked))
+
 # 12-seed property sweep: one-808 invariant, non-empty notes, drum completeness (via
 # FILL — never a gate: pack-001 keeps 01 'no drums' / 11 'no hi-hats' are the standing
 # counterexamples against gating), lead variety, features recorded.
