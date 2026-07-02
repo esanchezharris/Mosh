@@ -45,8 +45,15 @@ before/after WAVs to `~/mosh-bench-artifacts/` for the owner's ears.
 | cloud + one-shot repair turn | 30/35 = 85.7% | neutral-to-noise on the cloud column: its failures are DEFERRALS, which repair can't touch (repair fires on failed commands — the local column is its real target) |
 | cloud plain, run 2 (variance) | **31/35 = 88.6%** | headline identical; 1 model-side case flip (transport-seek) ⇒ single-run noise ≈ ±1 case (±2.9%); persistent failures = section-rename, fx-ott, fx-autotune — exactly the examples-block targets |
 
-The worked-example lever transfers to command emission. `ui/src/agent/fewshot.ts` holds the
-block (kept out of production `DEFAULT_RULES` until the A/B is conclusive across both columns).
+| **local base Qwen3-4B, plain** | **19/35 = 54.3%** | the untrained 4B on the production prompt |
+| **local base + worked-examples** | **29/35 = 82.9%** | **+28.6 points — the +30pp lever transferred exactly as the knowledge-flywheel A/B predicted (weak +30pp / strong +12pp).** The shipping local config: BASE + examples, ~6 pts behind cloud, zero training |
+
+**Bottom line of the whole run:** scaffolding beats weights at this stage. Both fine-tunes
+degraded their base (v2 −0.50, v3 −0.16 on the frozen eval) while a static worked-examples
+block bought +28.6 bench points on the same untrained model. `ui/src/agent/fewshot.ts` holds
+the block (production adoption of RULES_WITH_EXAMPLES for the brain prompt is now justified by
+both columns — cloud +2.8, local +28.6 — and is queued as a follow-up PR since it changes the
+shipped prompt).
 
 ## Flywheel + turn factory
 
