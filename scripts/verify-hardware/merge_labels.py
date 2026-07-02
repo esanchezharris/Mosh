@@ -52,7 +52,11 @@ def main() -> int:
         for r in csv.DictReader(open(path)):
             row = {"round": pack, "file": r.get("file"), "kind": "keep",
                    "value": r.get("verdict"), "chips": (r.get("chips") or "").split("+") if r.get("chips") else [],
-                   "stars": r.get("stars") or None, "notes": (r.get("notes") or "").strip()}
+                   "stars": r.get("stars") or None,
+                   # pack-004+: the forced 'which would you open in the DAW' choice —
+                   # the strongest single label per pack (topPick > keep > kill)
+                   "topPick": r.get("top") == "1",
+                   "notes": (r.get("notes") or "").strip()}
             f = feats.get(r.get("file"))
             if f:
                 row["features"] = {k: f.get(k) for k in

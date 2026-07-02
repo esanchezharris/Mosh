@@ -486,6 +486,31 @@ def main(argv=None) -> int:
             w(f"| {chip} | {nflag} | {best[0]} | {best[1][0]:.3f} | "
               f"{best[1][1]:.3f} | {best[1][2]:.3f} |")
 
+    # ---- top-1 agreement (the forced 'open it in the DAW' pick — strongest label)
+    top_tally: dict = {}
+    for pk in packs:
+        idx = [i for i, r in enumerate(prs) if r["round"] == pk]
+        owner_top = next((prs[i]["file"] for i in idx if prs[i].get("topPick")), None)
+        if not owner_top:
+            continue
+        for s, vs in signals.items():
+            if vs is None:
+                continue
+            best_i = max(idx, key=lambda i: vs[i])
+            t = top_tally.setdefault(s, [0, 0])
+            t[1] += 1
+            t[0] += 1 if prs[best_i]["file"] == owner_top else 0
+    if top_tally:
+        w("")
+        w("## Top-pick agreement (running tally — does the signal's argmax match the "
+          "owner's forced 'open it in the DAW' pick? no p-theater at n=packs)")
+        w("")
+        w("| signal | agreements |")
+        w("|---|---|")
+        for s in SIGNALS:
+            if s in top_tally:
+                w(f"| {s} | {top_tally[s][0]}/{top_tally[s][1]} |")
+
     w("")
     w("## Transfer checks (secondary — different task/pipeline, NEVER pooled)")
     w("")
