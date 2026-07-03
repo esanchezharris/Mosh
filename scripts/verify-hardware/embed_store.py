@@ -15,7 +15,15 @@ Runs UNDER THE JUDGES VENV (laion_clap + muq installed there):
 
 Store layout: ~/mosh-beats/labels/embeddings/index.jsonl — one row per beat:
 {"sha": …, "path": last-seen path, "clap": [512 floats], "muq": [... floats]|null}
-MuQ is best-effort (advisory-never-fatal, like the axes attach).
+(+ optional "source"/"chunks" on corpus rows). MuQ is best-effort
+(advisory-never-fatal, like the axes attach).
+
+TASTE CORPUS (the Long Pass data unlock): `--corpus [~/mosh-taste]` walks the
+owner's drop folders with per-dir provenance — own/ = his finished beats,
+refs/ = tracks he loves (embed-only), samples/ = loop-length library subset —
+windows long files into 30 s mean-pooled embeddings, and keeps an authoritative
+manifest at ~/mosh-beats/labels/corpus.jsonl. Incremental + idempotent
+(content-SHA; same-content new-path gets a cheap alias row).
 """
 from __future__ import annotations
 
@@ -28,8 +36,18 @@ import sys
 from pathlib import Path
 
 BEATS = Path(os.path.expanduser("~/mosh-beats"))
-STORE = BEATS / "labels" / "embeddings" / "index.jsonl"
+# env overrides (priors pattern) — hermetic tests + the re-exec inherits them
+STORE = Path(os.environ.get("MOSH_EMBED_STORE")
+             or BEATS / "labels" / "embeddings" / "index.jsonl")
+CORPUS_MANIFEST = Path(os.environ.get("MOSH_CORPUS_MANIFEST")
+                       or BEATS / "labels" / "corpus.jsonl")
+TASTE = Path(os.path.expanduser("~/mosh-taste"))
 JUDGES_PY = os.path.expanduser("~/AI/judges_venv/bin/python")
+
+AUDIO_EXT = {".wav", ".mp3", ".m4a", ".aif", ".aiff", ".flac", ".ogg"}
+CORPUS_WINDOW_S = 30.0     # long files embed as mean-pooled 30 s windows
+SAMPLE_MIN_S, SAMPLE_MAX_S = 3.0, 60.0   # samples/: loops only — one-shots carry
+SAMPLE_CAP = 500                          # near-zero info and would swamp the PCA
 
 
 def load_store() -> dict:
@@ -98,6 +116,158 @@ def alias_known(paths: list) -> list:
     return todo
 
 
+def corpus_items(root: Path = TASTE) -> list:
+    """(path, source) for every audio file in the drop folders. Deterministic walk;
+    samples/ is capped (loops carry the info; the cap keeps one-shot dumps from
+    swamping the map). iCloud ' 2' dupes skipped, dot-dirs included (refs/.fetch)."""
+    out = []
+    for sub, src in (("own", "own"), ("refs", "ref"), ("samples", "sample")):
+        d = root / sub
+        if not d.is_dir():
+            continue
+        files = sorted(p for p in d.rglob("*")
+                       if p.is_file() and p.suffix.lower() in AUDIO_EXT
+                       and " 2" not in p.name)
+        if src == "sample":
+            files = files[:SAMPLE_CAP]
+        out += [(str(p), src) for p in files]
+    return out
+
+
+def corpus_manifest_rows() -> list:
+    if not CORPUS_MANIFEST.is_file():
+        return []
+    return [json.loads(l) for l in CORPUS_MANIFEST.read_text().splitlines() if l.strip()]
+
+
+def _append_jsonl(path: Path, row: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a") as f:
+        f.write(json.dumps(row) + "\n")
+
+
+def run_corpus(root: Path = TASTE) -> int:
+    """Incremental corpus pass: alias what's content-known, embed what isn't,
+    manifest everything. Safe to run any time (corpus is data, not frozen code)."""
+    from datetime import date
+    items = corpus_items(root)
+    if not items:
+        print(f"corpus: nothing under {root} (drop audio into own/ refs/ samples/)")
+        return 0
+    seen = {r["path"] for r in corpus_manifest_rows()}
+    new = [(p, s) for p, s in items if p not in seen]
+    if not new:
+        print(f"corpus: manifest current ({len(items)} items, nothing new)")
+        return 0
+    store = load_store()
+    need = []
+    n_alias = 0
+    for p, src in new:
+        sha = content_sha(p)
+        row = store.get(sha)
+        if row:
+            _append_jsonl(STORE, {**row, "path": p, "source": src})
+            _append_jsonl(CORPUS_MANIFEST,
+                          {"sha": sha, "path": p, "source": src,
+                           "addedAt": date.today().isoformat(),
+                           "durationS": row.get("durationS"),
+                           "chunks": row.get("chunks")})
+            n_alias += 1
+        else:
+            need.append((p, src, sha))
+    if n_alias:
+        print(f"corpus: +{n_alias} alias rows (content already embedded)")
+    if not need:
+        return 0
+    try:
+        import laion_clap  # noqa: F401
+    except ImportError:
+        if not os.path.isfile(JUDGES_PY):
+            print(f"judges venv missing at {JUDGES_PY} — cannot embed", file=sys.stderr)
+            return 1
+        return subprocess.run([JUDGES_PY, os.path.abspath(__file__),
+                               "--corpus", str(root)]).returncode
+    return _embed_corpus_under_venv(need)
+
+
+def _embed_corpus_under_venv(items: list) -> int:
+    """items = [(path, source, sha)]; must run under the judges venv. Long files
+    embed as mean-pooled CORPUS_WINDOW_S windows (both views); samples outside the
+    loop-length band are skipped (manifested with skip reason so re-runs stay
+    incremental)."""
+    import numpy as np
+    from datetime import date
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
+        os.path.dirname(os.path.abspath(__file__)))), "service"))
+    from teardown.drummatch.embed import ClapEmbedder, load_audio
+
+    clap = ClapEmbedder()
+    muq_model = None
+    try:
+        from muq import MuQ
+        import torch  # noqa: F401
+        muq_model = MuQ.from_pretrained("OpenMuQ/MuQ-large-msd-iter").to("cpu").eval()
+    except Exception as e:  # noqa: BLE001
+        print(f"  (muq unavailable: {str(e)[:120]} — CLAP-only)", file=sys.stderr)
+
+    def _pool(y, sr, fn):
+        win = int(CORPUS_WINDOW_S * sr)
+        if len(y) <= int(win * 1.2):
+            return fn(y), 1
+        vecs = []
+        for st in range(0, len(y), win):
+            seg = y[st:st + win]
+            if len(seg) >= sr * 3:
+                vecs.append(fn(seg))
+        return np.mean(vecs, axis=0), len(vecs)
+
+    def _muq_of(seg, sr):
+        import torch
+        import librosa
+        y24 = librosa.resample(seg, orig_sr=sr, target_sr=24000)
+        with torch.no_grad():
+            out = muq_model(torch.from_numpy(y24).unsqueeze(0),
+                            output_hidden_states=False)
+        return out.last_hidden_state.mean(dim=1).squeeze(0).numpy()
+
+    n = 0
+    for path, src, sha in items:
+        try:
+            la = load_audio(path)
+        except Exception as e:  # noqa: BLE001
+            print(f"  skip {path}: {e}", file=sys.stderr)
+            _append_jsonl(CORPUS_MANIFEST, {"sha": sha, "path": path, "source": src,
+                                            "addedAt": date.today().isoformat(),
+                                            "skipped": str(e)[:80]})
+            continue
+        dur = round(len(la.y) / float(la.sr), 2)
+        if src == "sample" and not (SAMPLE_MIN_S <= dur <= SAMPLE_MAX_S):
+            _append_jsonl(CORPUS_MANIFEST, {"sha": sha, "path": path, "source": src,
+                                            "addedAt": date.today().isoformat(),
+                                            "durationS": dur,
+                                            "skipped": "outside loop-length band"})
+            continue
+        cvec, chunks = _pool(la.y, la.sr, lambda seg: clap.embed(seg, la.sr))
+        row = {"sha": sha, "path": path, "source": src, "chunks": chunks,
+               "durationS": dur,
+               "clap": [round(float(v), 6) for v in cvec], "muq": None}
+        if muq_model is not None:
+            try:
+                mvec, _ = _pool(la.y, la.sr, lambda seg: _muq_of(seg, la.sr))
+                row["muq"] = [round(float(v), 6) for v in mvec]
+            except Exception as e:  # noqa: BLE001
+                print(f"  (muq failed on {os.path.basename(path)}: {str(e)[:80]})",
+                      file=sys.stderr)
+        _append_jsonl(STORE, row)
+        _append_jsonl(CORPUS_MANIFEST, {"sha": sha, "path": path, "source": src,
+                                        "addedAt": date.today().isoformat(),
+                                        "durationS": dur, "chunks": chunks})
+        n += 1
+        print(f"  embedded [{src}] {os.path.basename(path)} ({dur}s, {chunks} win)")
+    print(f"corpus: +{n} embedded → {STORE}")
+    return 0
+
+
 def _embed_under_venv(paths: list) -> int:
     """Embed the given paths (must run under the judges venv)."""
     import numpy as np  # noqa: F401
@@ -159,12 +329,16 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--wavs", nargs="*", default=[])
     ap.add_argument("--backfill", action="store_true")
+    ap.add_argument("--corpus", nargs="?", const=str(TASTE), default=None,
+                    help="walk the taste drop folders (default ~/mosh-taste)")
     args = ap.parse_args(argv)
+    if args.corpus:
+        return run_corpus(Path(os.path.expanduser(args.corpus)))
     paths = list(args.wavs)
     if args.backfill:
         paths += rated_wavs()
     if not paths:
-        print("nothing to embed (pass --wavs or --backfill)")
+        print("nothing to embed (pass --wavs, --backfill or --corpus)")
         return 0
     paths = alias_known(list(dict.fromkeys(paths)))
     if not paths:
