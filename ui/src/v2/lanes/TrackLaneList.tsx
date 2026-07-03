@@ -13,7 +13,7 @@ import { SectionRibbon } from "../timeline/SectionRibbon";
 import { BarRuler } from "../timeline/BarRuler";
 import { Playhead } from "../timeline/Playhead";
 import { ClipView } from "./ClipView";
-import { meterOf, contentSeconds, HEAD_W } from "../timeline/geom";
+import { meterOf, contentSeconds, headW } from "../timeline/geom";
 
 const TYPE_ICON: Record<string, string> = { drum: "▦", audio: "≈", group: "▤" };
 
@@ -41,10 +41,11 @@ export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; drag
 
   // Fit the timeline so N bars span the visible content width (8b / 16b / Full).
   const fit = useCallback((zoom: SectionZoom) => {
-    const w = scrollRef.current?.clientWidth ?? 0;
+    const el = scrollRef.current;
+    const w = el?.clientWidth ?? 0;
     if (w <= 0) return;
     const bars = zoom === "8b" ? 8 : zoom === "16b" ? 16 : totalBars;
-    setPxPerSec((w - HEAD_W) / Math.max(1, bars * barLen)); // store clamps 20..400
+    setPxPerSec((w - headW(el)) / Math.max(1, bars * barLen)); // store clamps 20..400
   }, [totalBars, barLen, setPxPerSec]);
 
   useEffect(() => { fit(sectionZoom); }, [sectionZoom, fit]);
