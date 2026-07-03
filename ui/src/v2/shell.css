@@ -12,6 +12,7 @@
   --v2-lane-h: 64px;
   --v2-ribbon-h: 40px;
   --v2-ruler-h: 24px;
+  --v2-topbar-h: 64px;   /* header row height — tokenized so it's reservable (PR-2.7) */
   --v2-radius: 16px;
   --v2-radius-sm: 10px;
   --v2-gap: 14px;
@@ -42,6 +43,34 @@
   --v2-rec: #ff3b5c;
   --v2-shadow: 0 18px 50px rgba(0, 0, 0, 0.6);
   --v2-glow: 0 0 0 1px var(--v2-line), inset 0 1px 0 rgba(255, 255, 255, 0.03);
+
+  /* ── type scale (PR-2.3) — role-named; values = the de-facto size clusters so adoption is a no-op ── */
+  --v2-fs-2xs: 9px;
+  --v2-fs-xs: 10px;
+  --v2-fs-sm: 11px;
+  --v2-fs-base: 13px;
+  --v2-fs-md: 15px;
+  --v2-fs-lg: 17px;
+  --v2-fs-xl: 20px;
+  --v2-fs-display: 40px;
+  --v2-tracking-caps: 0.14em;   /* the recurring uppercase-label treatment */
+
+  /* ── spacing scale (PR-2.3) — 8-step; stray 5/7/9px round to neighbours at adoption ── */
+  --v2-space-1: 2px;
+  --v2-space-2: 4px;
+  --v2-space-3: 6px;
+  --v2-space-4: 8px;
+  --v2-space-5: 10px;
+  --v2-space-6: 12px;
+  --v2-space-7: 16px;
+  --v2-space-8: 24px;
+
+  /* ── radius scale (PR-2.3). Legacy --v2-radius (16) / --v2-radius-sm (10) kept as-is;
+       the de-facto 7/9/11px live on until PR-2.6 handles them as documented normalisations. ── */
+  --v2-radius-xs: 4px;
+  --v2-radius-md: 8px;
+  --v2-radius-lg: 12px;
+  --v2-radius-pill: 999px;
 
   /* ── ground: the page the chrome floats on (logo, transport pill, time card, invite/⋯,
        avatars). In the dark hero the ground IS dark, so these alias the dark surfaces; the
@@ -112,7 +141,7 @@
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
   gap: 14px;
-  height: 64px;
+  height: var(--v2-topbar-h);
   padding: 0 4px;
   margin: 12px 14px 0;
 }
