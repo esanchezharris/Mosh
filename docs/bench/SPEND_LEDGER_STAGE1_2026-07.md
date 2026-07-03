@@ -11,5 +11,8 @@ after WP-4 calibration (bulk projection; projection > remaining−reserve ⇒ HA
 | # | date | WP | tool + args | calls | tok in | tok out | est. $ | cum. $ |
 |---|------|----|-------------|-------|--------|---------|--------|--------|
 | 1 | 2026-07-03 | WP-0 | synthesize --commands set_track_volume --per 2 (smoke) | 3 | 5,041 | 108 | 0.005 | 0.005 |
+| 2 | 2026-07-03 | WP-2 | build-sft s1-bt real BT (5 shapes × 3 styles) | 15 | ~15k | ~4k | 0.02 | 0.03 |
+| 3 | 2026-07-03 | WP-4 | synthesize cal-01 (10 track/mixer cmds × 8) | 90 | 194,227 | 3,981 | 0.14 | 0.17 |
+| 4 | 2026-07-03 | WP-4 | synthesize cal-02..08 (64 cmds × 8, calibration) | 576 | 1,245,485 | 30,245 | 0.86 | 1.03 |
 
 Allocation: WP-0 $0.10 · WP-2 $40 · WP-4 $5+$35 · WP-5 $10 · WP-6 $50 (gate-dependent) · WP-7 $15 · WP-10 $10 · reserve ~$35.
