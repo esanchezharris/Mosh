@@ -45,3 +45,15 @@ The latent-space pass: persistent CLAP+MuQ embedding store, taste ranker v1
 (LOPO 0.52 vs the 0.65 bar → ADVISORY mode, predictions on cards only),
 more-like-your-top-pick slots, style tags re-grounded in the owner's confirmed
 exemplars (multi-tag), 808-always-in-key under disrespectful, this journal.
+
+## pack-006
+Era-1 begins (the Long Pass): the generation pipeline is PHYSICALLY FROZEN for
+packs 006–009 (git worktree + pinned priors/strikes/ranker) so labels finally
+accumulate on one stable distribution. Rode in with the era-0 dictated fixes:
+musical section endings (kick-only final-bar thin + divisor tiling — the
+"drums trail off" fix), the melody wrong-note fix (parallel-major carve-out +
+two-strike source exclusion), the taste-corpus drop folders (~/mosh-taste),
+listening-room v2 (idea/mix split verdict + star chips), ranker v2 (corpus
+similarity features, prequential reporting), and ratings-triggered next-pack
+builds. Rating drill unchanged: KEEP/KILL + chips + ONE top pick — plus
+idea/mix taps when they diverge.
