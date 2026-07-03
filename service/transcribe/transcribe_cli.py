@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Audio -> MIDI note transcription via Spotify Basic Pitch (Apache-2.0).
 
-Runs UNDER the dedicated transcribe venv (service/transcribe/.venv), invoked by
+Runs UNDER the dedicated transcribe venv (~/Library/Mosh/venvs/transcribe), invoked by
 service/server.py's /transcribe endpoint as a subprocess, so Basic Pitch's deps
 (CoreML/numpy/librosa) never touch the service interpreter. Emits a JSON note list
 to stdout (times in SECONDS; the native side converts to beats):

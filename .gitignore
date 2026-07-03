@@ -46,6 +46,9 @@ service/sketch/.sketch.env
 # Whisper word-ASR venv (torch, 100s of MB) + machine-local WHISPER_PY (setup-whisper.sh)
 service/whisper/.venv/
 service/whisper/.whisper.env
+# Skeleton (FCPE F0) venv + machine-local SKELETON_PY (setup-skeleton.sh)
+service/skeleton/.venv/
+service/skeleton/.skeleton.env
 # Phonology venv + machine-local PHONOLOGY_PY (setup-phonology.sh)
 service/phonology/.venv/
 service/phonology/.phonology.env
