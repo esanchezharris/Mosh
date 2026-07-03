@@ -38,9 +38,14 @@ SEEDS = [1, 2, 3]
 JUDGES_PY = os.path.expanduser("~/AI/judges_venv/bin/python")
 
 
-def requests_grid(smoke: bool = False):
+def requests_grid(smoke: bool = False, seed_base: int = 0):
+    """seed_base shifts the 3 seeds per candidate cell — under an era FREEZE the code
+    and data are pinned, so without a per-pack base every pack of the era would be
+    byte-identical. make_pack derives it from the pack number (deterministic per
+    pack, distinct across packs); 0 keeps the historical [1, 2, 3]."""
+    seeds = [s + seed_base for s in SEEDS]
     reqs = [({"style": s, "mood": m, "tempo": t, "key": k}, seed)
-            for s, (m, t) in STYLES_TEMPO.items() for k in KEYS for seed in SEEDS]
+            for s, (m, t) in STYLES_TEMPO.items() for k in KEYS for seed in seeds]
     return reqs[:6] if smoke else reqs
 
 
@@ -223,7 +228,8 @@ def build_pack_page(out_dir: str, picks: list) -> str:
       <input type="text" placeholder="notes (optional)">
     </div>
   </div>""")
-    html = _PAGE_TMPL.replace("@CARDS@", "".join(cards)).replace("@N@", str(len(picks)))
+    html = (_PAGE_TMPL.replace("@CARDS@", "".join(cards)).replace("@N@", str(len(picks)))
+            .replace("@PACK@", os.path.basename(os.path.normpath(out_dir))))
     path = os.path.join(out_dir, "index.html")
     with open(path, "w") as f:
         f.write(html)
@@ -336,7 +342,7 @@ document.getElementById("csvBtn").onclick = () => {
   const csv = rows.map(r => r.map(x => `"${x}"`).join(",")).join("\\n");
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([csv], {type: "text/csv"}));
-  a.download = "TASTE-PACK-RATINGS.csv"; a.click();
+  a.download = "TASTE-PACK-RATINGS-@PACK@.csv"; a.click();
 };
 </script></body></html>"""
 
@@ -493,6 +499,8 @@ def main() -> int:
     ap.add_argument("--out", default=os.path.expanduser("~/mosh-beats/pack-001"))
     ap.add_argument("--pack-size", type=int, default=14)
     ap.add_argument("--smoke", action="store_true")
+    ap.add_argument("--seed-base", type=int, default=0,
+                    help="per-pack seed shift (era packs; see requests_grid)")
     args = ap.parse_args()
 
     binp = os.environ.get("MOSH_BIN", "").strip() or DEFAULT_BIN
@@ -530,7 +538,7 @@ def main() -> int:
     print(f"strikes: {sum(len(v) for v in strikes.values())} sources"
           f" (hash {strikes_hash or 'none'})")
 
-    grid = requests_grid(args.smoke)
+    grid = requests_grid(args.smoke, args.seed_base)
     print(f"factory: {len(grid)} candidates → {out_dir}")
     rows = []
     for n, (req, seed) in enumerate(grid):
