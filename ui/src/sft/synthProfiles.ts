@@ -99,15 +99,56 @@ export const SETUP_PROFILES: Record<string, SynthCmd[]> = {
 
 export const TRAINING_PROFILE_NAMES = ["basic", "rich", "renders", "rendered", "proposals"] as const;
 
+// Profile-aware STATE hints (bulk round-2, 2026-07-03): several families defer
+// because the prerequisite entity (render layer, lyric proposals) is invisible
+// in the serving snapshot — but a user who just ran a render KNOWS it exists and
+// says so. The hint makes the invented request carry that context explicitly
+// ("accept the render on the Bass clip"), which is grounded-by-user-statement —
+// the same philosophy as the real file paths. Only emitted when the SETUP
+// profile actually provides the state (else the apply would fail).
+const STATE_HINTS: Record<string, Partial<Record<string, string>>> = {
+  rendered: {
+    accept_render: "The clip on the Bass track has a COMPLETED re-imagine render waiting for review — requests react to it.",
+    reject_render: "The clip on the Bass track has a COMPLETED re-imagine render waiting for review — requests react to it.",
+    bounce_layer_to_clip: "The clip on the Bass track has a completed render layer on it — requests commit/bounce it.",
+    freeze_layer: "The clip on the Bass track has a completed render layer on it.",
+  },
+  renders: {
+    set_render_param: "The clip on the Bass track has a re-imagine layer on it — requests tweak its character/prompt/seed.",
+    bypass_layer: "The clip on the Bass track has a re-imagine layer on it — requests toggle hearing the original vs the render.",
+    remove_render_layer: "The clip on the Bass track has a re-imagine layer on it.",
+    render_layer: "The clip on the Bass track has a re-imagine layer ready to run.",
+  },
+  proposals: {
+    accept_lyric_proposal: "The Vocal track's lyric sheet has AI-proposed lines waiting on line 1 — requests pick/accept one.",
+  },
+  rich: {
+    set_lyric_line: "The Vocal track has a lyric sheet: line 1 is written, line 2 is a gap line (___ placeholders).",
+    fill_lyric_gap: "The Vocal track has a lyric sheet: line 1 is written, line 2 is a gap line (___ placeholders).",
+    remove_lyric_line: "The Vocal track has a lyric sheet with 2 lines.",
+    suggest_next_line: "The Vocal track has a lyric sheet with 2 lines.",
+    regenerate_lyric: "The Vocal track has a lyric sheet with 2 lines.",
+    analyze_lyrics: "The Vocal track has a lyric sheet with 2 lines.",
+    complete_lyrics: "The Vocal track has a lyric sheet with a gap line to finish.",
+  },
+};
+
 // Per-command task-gen hints. These shape the INVENTED USER REQUESTS only (the
 // task-gen call) — they never reach the answering model or the kept row, so
 // there is no leakage into training beyond a realistic user request.
-export function taskgenHint(command: string, assets: { loop: string; kick: string; beatbox: string }): string | undefined {
+export function taskgenHint(command: string, assets: { loop: string; kick: string; beatbox: string }, setup?: string): string | undefined {
+  const state = setup ? STATE_HINTS[setup]?.[command] : undefined;
+  const base = baseHint(command, assets);
+  if (state && base) return `${state} ${base}`;
+  return state ?? base;
+}
+
+function baseHint(command: string, assets: { loop: string; kick: string; beatbox: string }): string | undefined {
   switch (command) {
     case "import_clip":
       return `The user's audio files on disk (these really exist — use these exact paths): ${assets.loop}, ${assets.kick}.`;
     case "assign_sample":
-      return `The user's audio files on disk (these really exist — use these exact paths): ${assets.kick}, ${assets.loop}. Requests map a file onto a drum pad / sampler note.`;
+      return `The user's audio files on disk (these really exist — use these exact paths): ${assets.kick}, ${assets.loop}. Requests map a file onto a NUMBERED drum pad / MIDI note (users say "pad 36", "note 38" — never note names like C1).`;
     case "sketch_beatbox":
       return `The user recorded a beatbox take at ${assets.beatbox} (this file really exists — use this exact path), around 90 BPM.`;
     case "load_builtin":
