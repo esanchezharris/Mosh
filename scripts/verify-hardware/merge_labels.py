@@ -48,6 +48,19 @@ def pack_sources():
     return out
 
 
+def pair_sources():
+    """Pairwise bonus-round CSVs (schema pre-registered era-0; UI ships boundary-2):
+    pack-*/PAIRS*.csv with columns file_a,file_b,winner → kind='packpair' rows.
+    CONSUMER CONTRACT: everything that counts keep/kill (bench, ranker, journal
+    stats) filters kind=='keep' — packpair rows are ordinal data for the ranker's
+    pairwise loss only."""
+    out = []
+    for d in sorted(BEATS.glob("pack-*")):
+        for c in sorted(d.glob("PAIRS*.csv")):
+            out.append((d.name, c))
+    return out
+
+
 def main() -> int:
     OUT.parent.mkdir(parents=True, exist_ok=True)
     annotations = load_annotations()
@@ -66,13 +79,27 @@ def main() -> int:
         if pj.is_file():
             feats = {c.get("pack_file"): c for c in json.load(open(pj))}
         for r in csv.DictReader(open(path)):
+            raw_chips = (r.get("chips") or "").split("+") if r.get("chips") else []
             row = {"round": pack, "file": r.get("file"), "kind": "keep",
-                   "value": r.get("verdict"), "chips": (r.get("chips") or "").split("+") if r.get("chips") else [],
+                   "value": r.get("verdict"),
+                   # CSV v2 (era-0): a chip prefixed '*' is a STAR — "this element is
+                   # why I kept it" — split out so bench chip-AUCs keep their DEFECT
+                   # semantics. No historical CSV contains '*' (verified), so old
+                   # ledgers stay byte-identical.
+                   "chips": [c for c in raw_chips if not c.startswith("*")],
                    "stars": r.get("stars") or None,
                    # pack-004+: the forced 'which would you open in the DAW' choice —
                    # the strongest single label per pack (topPick > keep > kill)
                    "topPick": r.get("top") == "1",
                    "notes": (r.get("notes") or "").strip()}
+            star = [c[1:] for c in raw_chips if c.startswith("*")]
+            if star:
+                row["starChips"] = star
+            # CSV v2: idea/mix split verdict — empty means "inherits the verdict",
+            # so only explicit divergence lands in the ledger.
+            for k in ("idea", "mix"):
+                if r.get(k):
+                    row[k] = r[k]
             late = annotations.get((pack, r.get("file")))
             if late:
                 row["lateNotes"] = late
@@ -89,6 +116,12 @@ def main() -> int:
                                     "sectionTailOnsets", "strikesHash")
                                    if f.get(k) is not None}
             rows.append(row)
+    for pack, path in pair_sources():
+        for r in csv.DictReader(open(path)):
+            if r.get("file_a") and r.get("file_b"):
+                rows.append({"round": pack, "kind": "packpair",
+                             "fileA": r["file_a"], "fileB": r["file_b"],
+                             "winner": r.get("winner") or ""})
     with open(OUT, "w") as f:
         for r in rows:
             f.write(json.dumps(r) + "\n")

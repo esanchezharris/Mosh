@@ -48,8 +48,16 @@ def load_changelog() -> dict:
     return {k: "\n".join(v).strip() for k, v in out.items()}
 
 
-def rounds_from_ledger() -> list:
+def rounds_from_ledger() -> tuple:
+    """(rounds, pairCounts). packpair rows are ORDINAL ranker data — they carry no
+    verdict, so they must never enter the per-beat listing or the keep-rate stats
+    (a truthy 'winner' would silently count as a kept beat). Summarized per round."""
     rows = [json.loads(l) for l in LEDGER.read_text().splitlines() if l.strip()]
+    pair_counts: dict = {}
+    for r in rows:
+        if r.get("kind") == "packpair":
+            pair_counts[r["round"]] = pair_counts.get(r["round"], 0) + 1
+    rows = [r for r in rows if r.get("kind") != "packpair"]
     order: list = []
     by_round: dict = {}
     for r in rows:
@@ -58,7 +66,7 @@ def rounds_from_ledger() -> list:
             by_round[rd] = []
             order.append(rd)
         by_round[rd].append(r)
-    return [(rd, by_round[rd]) for rd in order]
+    return [(rd, by_round[rd]) for rd in order], pair_counts
 
 
 def _beat_dir(rd: str) -> str:
@@ -71,7 +79,7 @@ def _round_title(rd: str) -> str:
 
 def build() -> None:
     changelog = load_changelog()
-    rounds = rounds_from_ledger()
+    rounds, pair_counts = rounds_from_ledger()
     h = ["<meta charset='utf-8'><title>Mosh Training Journal</title><style>",
          "body{background:#101014;color:#e8e6df;font:14px/1.6 -apple-system,sans-serif;"
          "max-width:900px;margin:0 auto;padding:24px 16px 80px}",
@@ -104,6 +112,8 @@ def build() -> None:
             vals = [int(r["value"]) for r in rated if str(r.get("value", "")).isdigit()]
             stat = f"stars: {vals}"
         title = _round_title(rd)
+        if pair_counts.get(rd):
+            stat += f" · {pair_counts[rd]} pairwise picks"
         h.append(f"<h2>{html.escape(title)}</h2><div class='meta'>{stat}</div>")
         md += [f"## {title}", "", f"- **{stat}**"]
         if rd in changelog:
@@ -120,6 +130,12 @@ def build() -> None:
             h.append(f"<audio controls preload='none' src='{html.escape(src)}'></audio>")
             if r.get("chips"):
                 h.append(f"<div class='meta'>chips: {', '.join(r['chips'])}</div>")
+            if r.get("starChips"):
+                h.append("<div class='meta' style='color:#6fe0a8'>starred: "
+                         f"{', '.join(r['starChips'])}</div>")
+            im = [f"{k}: {r[k]}" for k in ("idea", "mix") if r.get(k)]
+            if im:
+                h.append(f"<div class='meta'>{' · '.join(im)}</div>")
             if r.get("notes"):
                 h.append(f"<div class='note'>“{html.escape(r['notes'])}”</div>")
             for ln in r.get("lateNotes", []):

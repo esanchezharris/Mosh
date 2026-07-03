@@ -219,6 +219,7 @@ def build_pack_page(out_dir: str, picks: list) -> str:
         <button class="top" data-k="top">★ TOP PICK</button></span>
       <span class="chips">{''.join(f'<button data-c="{ch}">{ch}</button>' for ch in
                             ('808', 'drums', 'mix', 'key', 'boring', 'messy', 'ends-weird', 'style'))}</span>
+      <span class="im"><button data-i="idea">idea ·</button><button data-i="mix">mix ·</button></span>
       <input type="text" placeholder="notes (optional)">
     </div>
   </div>""")
@@ -253,6 +254,11 @@ _PAGE_TMPL = """<!DOCTYPE html>
   .kk button[data-k=kill].on { background:rgba(255,107,107,.14); color:var(--bad); border-color:rgba(255,107,107,.5); }
   .kk button.top.on { background:rgba(255,210,63,.22); color:var(--accent); border-color:var(--accent); }
   .chips button.on { background:rgba(255,210,63,.15); color:var(--accent); border-color:rgba(255,210,63,.5); }
+  .chips button.star { background:rgba(111,224,168,.16); color:var(--ok); border-color:rgba(111,224,168,.5); }
+  .im button { background:#101018; color:var(--dim); border:1px solid var(--edge);
+    border-radius:6px; padding:6px 10px; font-size:12px; font-weight:600; cursor:pointer; margin-right:4px; }
+  .im button.good { background:rgba(111,224,168,.16); color:var(--ok); border-color:rgba(111,224,168,.5); }
+  .im button.bad { background:rgba(255,107,107,.14); color:var(--bad); border-color:rgba(255,107,107,.5); }
   .rate input[type=text] { flex:1; min-width:140px; background:#101018; color:var(--ink);
     border:1px solid var(--edge); border-radius:6px; padding:6px 10px; font-size:13px; }
   .actions { margin-top:20px; display:flex; gap:10px; } #saved { color:var(--ok); font-size:12.5px; align-self:center; }
@@ -263,7 +269,9 @@ _PAGE_TMPL = """<!DOCTYPE html>
 <h1>Taste Pack — @N@ beats, ~10 minutes</h1>
 <div class="sub">Every clip already passed the machine gates (key · clipping · sub register · balance) — you're rating <b>taste</b>, not defects.
 KEEP or KILL each one (required); tap defect chips on kills (optional but gold); and pick exactly <b>ONE ★ TOP PICK</b>:
-which beat would you actually open in the DAW and finish? The CSV won't export until every card has a verdict and a top pick is set.</div>
+which beat would you actually open in the DAW and finish? The CSV won't export until every card has a verdict and a top pick is set.
+<br>New: when your verdict and the WHY diverge ("idea cool, mix way off"), tap <b>idea</b> / <b>mix</b> (· → ✓ → ✗ → ·) —
+they default to your verdict, so only tap on divergence. And tapping a chip TWICE turns it green = "this element is why I kept it".</div>
 <div id="beats">@CARDS@</div>
 <div class="actions">
   <button id="csvBtn">Download ratings CSV</button>
@@ -280,11 +288,16 @@ let paintAll = [];
 document.querySelectorAll(".beat").forEach(card => {
   const f = card.dataset.f, kk = [...card.querySelectorAll(".kk button")],
         chips = [...card.querySelectorAll(".chips button")],
+        im = [...card.querySelectorAll(".im button")],
         notes = card.querySelector("input[type=text]");
   const paint = () => { const st = state[f] || {};
     kk.forEach(b => b.classList.toggle("on",
       b.dataset.k === "top" ? state.__top === f : st.verdict === b.dataset.k));
-    chips.forEach(b => b.classList.toggle("on", (st.chips || []).includes(b.dataset.c))); };
+    chips.forEach(b => { b.classList.toggle("on", (st.chips || []).includes(b.dataset.c));
+      b.classList.toggle("star", (st.starChips || []).includes(b.dataset.c)); });
+    im.forEach(b => { const v = st[b.dataset.i] || "";
+      b.textContent = b.dataset.i + " " + (v === "good" ? "✓" : v === "bad" ? "✗" : "·");
+      b.classList.toggle("good", v === "good"); b.classList.toggle("bad", v === "bad"); }); };
   paintAll.push(paint);
   kk.forEach(b => b.onclick = () => {
     if (b.dataset.k === "top") {                 // exactly ONE top pick, globally
@@ -292,8 +305,17 @@ document.querySelectorAll(".beat").forEach(card => {
       save(); paintAll.forEach(p => p()); return;
     }
     state[f] = state[f] || {}; state[f].verdict = b.dataset.k; save(); paint(); });
-  chips.forEach(b => b.onclick = () => { state[f] = state[f] || {}; const c = new Set(state[f].chips || []);
-    c.has(b.dataset.c) ? c.delete(b.dataset.c) : c.add(b.dataset.c); state[f].chips = [...c]; save(); paint(); });
+  // chips cycle off → defect (yellow) → STAR (green: "this element is why I kept it") → off
+  chips.forEach(b => b.onclick = () => { state[f] = state[f] || {};
+    const c = new Set(state[f].chips || []), s = new Set(state[f].starChips || []), ch = b.dataset.c;
+    if (c.has(ch)) { c.delete(ch); s.add(ch); }
+    else if (s.has(ch)) { s.delete(ch); }
+    else { c.add(ch); }
+    state[f].chips = [...c]; state[f].starChips = [...s]; save(); paint(); });
+  // idea/mix split verdict: inherit (·) → good → bad → inherit
+  im.forEach(b => b.onclick = () => { state[f] = state[f] || {}; const k = b.dataset.i;
+    state[f][k] = state[f][k] === "good" ? "bad" : state[f][k] === "bad" ? "" : "good";
+    save(); paint(); });
   notes.value = (state[f] || {}).notes || "";
   notes.onchange = () => { state[f] = state[f] || {}; state[f].notes = notes.value; save(); };
   paint();
@@ -305,10 +327,12 @@ document.getElementById("csvBtn").onclick = () => {
   if (missing.length) { alert("KEEP or KILL every beat first — missing: " + missing.join(", ")); return; }
   if (!state.__top || !files.includes(state.__top)) {
     alert("Pick exactly ONE ★ TOP PICK — which beat would you open in the DAW and finish?"); return; }
-  const rows = [["file","verdict","chips","top","notes"]];
+  const rows = [["file","verdict","chips","top","notes","idea","mix"]];
   files.forEach(f => { const st = state[f] || {};
-    rows.push([f, st.verdict ?? "", (st.chips || []).join("+"),
-               state.__top === f ? "1" : "", (st.notes ?? "").replace(/"/g, "'")]); });
+    const chipsCol = [...(st.chips || []), ...(st.starChips || []).map(c => "*" + c)].join("+");
+    rows.push([f, st.verdict ?? "", chipsCol,
+               state.__top === f ? "1" : "", (st.notes ?? "").replace(/"/g, "'"),
+               st.idea ?? "", st.mix ?? ""]); });
   const csv = rows.map(r => r.map(x => `"${x}"`).join(",")).join("\\n");
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([csv], {type: "text/csv"}));
