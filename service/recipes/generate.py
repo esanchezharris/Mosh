@@ -851,13 +851,20 @@ def recombine(library: list, request: dict, rng: Rng, palette: dict,
         b = _clone_element(bass_el)
         sem = _interval(_element_key(bass_el, bass_src.meta.key.value), req_key)
         transpose_element(b, sem)
-        if conform:
-            conform_to_key(b, req_key)  # binding then snaps to (already-conformed) chord roots
+        conform_to_key(b, req_key)  # the 808 ALWAYS conforms (see below)
         prov.sources["808"] = bass_src.source.video_id
         prov.transpose["808"] = sem
         chord_now = next((e for e in elements if e.role.value == "pad"), None)
         if chord_now:
             bind_808_to_chords(b, chord_now)
+        if not conform:
+            # OWNER RULE (pack-004 beat 02): "the wrong note is usually a note the 808
+            # plays — weird notes belong in the melody, the 808 must stay in key."
+            # Under conform:false the pad keeps its out-of-scale notes ON PURPOSE, and
+            # bind_808_to_chords just snapped the 808 onto those weird roots — so fold
+            # the 808 back into the requested scale AFTER binding.
+            conform_to_key(b, req_key)
+            prov.fired("bass808PostBindConform")
         normalize_808_register(b)  # AFTER binding (pc-safe), BEFORE the sample bind below
         elements.append(b)
 

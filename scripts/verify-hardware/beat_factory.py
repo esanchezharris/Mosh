@@ -191,6 +191,16 @@ def build_pack_page(out_dir: str, picks: list) -> str:
             rep_badge += '<span class="badge b-rep">FX</span>'
         if c.get("form"):
             rep_badge += f'<span class="badge b-rep">FORM {c["form"].get("plan", "")}</span>'
+        if c.get("moreLike"):
+            rep_badge += '<span class="badge b-rep">MORE LIKE YOUR TOP PICK</span>'
+        if c.get("soundsLike"):
+            rep_badge += (f'<span class="badge b-ok">sounds like: '
+                          f'{", ".join(c["soundsLike"])}</span>')
+        if c.get("predictedKeep") is not None:
+            rep_badge += (f'<span class="badge b-ok">ranker {int(c["predictedKeep"] * 100)}%'
+                          f' (advisory)</span>')
+        if (c.get("filters") or {}).get("styleGrooveRelaxed"):
+            rep_badge += '<span class="badge b-rep">no-backbeat</span>'
         rep_block = ""
         if rep:
             rep_block = (f'<div class="src" style="margin-top:6px">{rep.get("note", "same composition, new mix")} — '
@@ -499,6 +509,20 @@ def main() -> int:
         if ax:
             r["axes"] = ax
 
+    # latent lanes (ALL advisory-safe): persist embeddings for passing candidates, then
+    # attach predictedKeep (ranker is ADVISORY until LOPO ≥ 0.65 — current: 0.52 MuQ),
+    # similarity to the owner's top pick, and sounds-like tags from HIS exemplars.
+    try:
+        import latent_lanes as LL
+        passing_r = [r for r in rendered if r["verdict"] == "pass"]
+        LL.embed_candidates([r["file"] for r in passing_r])
+        LL.annotate_rows(passing_r)
+        print(f"  latent lanes: {sum(1 for r in passing_r if 'predictedKeep' in r)}"
+              f"/{len(passing_r)} scored (mode: "
+              f"{passing_r[0].get('rankerMode', '?') if passing_r else '?'})")
+    except Exception as e:  # noqa: BLE001 — advisory, never fatal
+        print(f"  (latent lanes skipped: {e})", file=sys.stderr)
+
     with open(ledger, "a") as f:
         for r in rows:
             f.write(json.dumps(r) + "\n")
@@ -507,12 +531,20 @@ def main() -> int:
     print(f"\ngate: {len(passed)}/{len(rows)} PASS")
     if not passed:
         return 1
-    # half formed / half loops, each independently diversity-capped, so the owner's
-    # chips adjudicate whether forms raise the keep-rate
-    formed = [r for r in passed if r.get("form")]
-    loops = [r for r in passed if not r.get("form")]
-    half = args.pack_size // 2
-    picks = select_pack(formed, half) + select_pack(loops, args.pack_size - half)
+    # more-like-top-pick lane (owner-chosen: 3-4 slots chase pack-004 #14 "I love it")
+    by_sim = sorted([r for r in passed if r.get("simTopPick") is not None],
+                    key=lambda r: -r["simTopPick"])[:4]
+    for r in by_sim:
+        r["moreLike"] = True
+    if by_sim:
+        print(f"  more-like-top-pick: {[(r['id'], r['simTopPick']) for r in by_sim]}")
+    # half formed / half loops among the REST, each independently diversity-capped
+    rest = [r for r in passed if not r.get("moreLike")]
+    formed = [r for r in rest if r.get("form")]
+    loops = [r for r in rest if not r.get("form")]
+    remaining = args.pack_size - len(by_sim)
+    half = remaining // 2
+    picks = by_sim + select_pack(formed, half) + select_pack(loops, remaining - half)
     if len(picks) < args.pack_size:   # one side ran short — backfill from the other
         pool = [r for r in passed if not any(p is r for p in picks)]
         picks += select_pack(pool, args.pack_size - len(picks))

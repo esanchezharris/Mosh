@@ -635,17 +635,30 @@ check("club-swag: every bound snare/clap is 2&4 or the relax fired loudly (6 see
 check("club-swag: at least one seed binds a genuine 2&4 backbeat", cs_bound_24 >= 1,
       str(cs_bound_24))
 
-# disrespectful: conform_to_key is skipped — out-of-scale notes survive on purpose
+# disrespectful: conform_to_key is skipped for the MELODY — out-of-scale notes survive
+# on purpose. But the 808 ALWAYS stays in key (owner rule, pack-004 beat 02: "the wrong
+# note is usually a note the 808 plays… the 808 must be in key"), even though binding
+# snaps it to the pad's weird roots — hence the post-bind fold.
 weird_pad = _mini_rec("weirdpad", [R.Element(role="pad", midi=R.Midi(notes=[
     R.NoteEvent(pitch=p, start_beats=float(i), duration_beats=1.0)
     for i, p in enumerate((60, 61, 66, 63, 71, 61, 66, 60))]))])  # F-minor-hostile pcs
-rec_dis, prov_dis = G.recombine([weird_pad], {"style": "disrespectful", "tempo": 152,
-                                              "key": "F minor"}, G.Rng(4), {})
+weird_808 = _mini_rec("weird808", [R.Element(role="808", bass=R.Bass(), midi=R.Midi(notes=[
+    R.NoteEvent(pitch=p, start_beats=float(i) * 2.0, duration_beats=1.5)
+    for i, p in enumerate((37, 42, 35, 40))]))])
+rec_dis, prov_dis = G.recombine([weird_pad, weird_808],
+                                {"style": "disrespectful", "tempo": 152,
+                                 "key": "F minor"}, G.Rng(4), {})
 dis_pad = next(e for e in rec_dis.elements if e.role.value == "pad")
 fmin_pcs = {(5 + d) % 12 for d in (0, 2, 3, 5, 7, 8, 10)}
 check("disrespectful keeps out-of-scale pitches (conform skipped)",
       any(int(n.pitch) % 12 not in fmin_pcs for n in dis_pad.midi.notes),
       str(sorted({int(n.pitch) % 12 for n in dis_pad.midi.notes})))
+dis_808 = next((e for e in rec_dis.elements if e.role.value == "808"), None)
+check("…but the 808 ALWAYS lands in the requested scale (post-bind fold, owner rule)",
+      dis_808 is not None and all(int(n.pitch) % 12 in fmin_pcs for n in dis_808.midi.notes),
+      str(sorted({int(n.pitch) % 12 for n in dis_808.midi.notes}) if dis_808 else "no 808"))
+check("post-bind conform fire is recorded",
+      prov_dis.filters.get("bass808PostBindConform", 0) >= 1, str(prov_dis.filters))
 check("provenance records the resolved style", prov_dis.style == "disrespectful")
 
 # melodic-heartfelt: the lead is REQUIRED, not a 70% coin flip

@@ -24,6 +24,21 @@ SOURCES = [
 ]
 
 
+def load_annotations() -> dict:
+    """(round, file) → [late notes] from labels/annotations.jsonl — the owner's
+    after-the-CSV thoughts (e.g. pack-004 #14: 'I love it, but it isn't exactly dark
+    or menacing'). Merged into ledger rows as lateNotes; the journal shows them."""
+    path = BEATS / "labels" / "annotations.jsonl"
+    out: dict = {}
+    if path.is_file():
+        for line in path.read_text().splitlines():
+            if not line.strip():
+                continue
+            a = json.loads(line)
+            out.setdefault((a.get("round"), a.get("file")), []).append(a.get("note", ""))
+    return out
+
+
 def pack_sources():
     """Any TASTE-PACK CSV dropped beside a pack dir: pack-*/RATINGS*.csv → keep/kill rows."""
     out = []
@@ -35,6 +50,7 @@ def pack_sources():
 
 def main() -> int:
     OUT.parent.mkdir(parents=True, exist_ok=True)
+    annotations = load_annotations()
     rows = []
     for rnd, path, kind, col, extras in SOURCES:
         if not path.is_file():
@@ -57,6 +73,9 @@ def main() -> int:
                    # the strongest single label per pack (topPick > keep > kill)
                    "topPick": r.get("top") == "1",
                    "notes": (r.get("notes") or "").strip()}
+            late = annotations.get((pack, r.get("file")))
+            if late:
+                row["lateNotes"] = late
             f = feats.get(r.get("file"))
             if f:
                 row["features"] = {k: f.get(k) for k in
@@ -64,7 +83,8 @@ def main() -> int:
                                     "density", "gate", "balance", "axes", "rmsDb",
                                     "fx", "priors", "priorsHash", "filters", "drumRoles",
                                     "distinct", "subOverlap", "tailEnergyDb",
-                                    "audibility808", "measuredKey", "form")
+                                    "audibility808", "measuredKey", "form", "predictedKeep",
+                                    "simTopPick", "soundsLike", "moreLike", "rankerMode")
                                    if f.get(k) is not None}
             rows.append(row)
     with open(OUT, "w") as f:
