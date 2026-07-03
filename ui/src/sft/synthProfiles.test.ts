@@ -48,4 +48,11 @@ describe("taskgenHint", () => {
   it("non-hinted commands get undefined", () => {
     expect(taskgenHint("set_tempo", assets)).toBeUndefined();
   });
+  it("state hints fire only when the SETUP profile provides the state", () => {
+    expect(taskgenHint("accept_render", assets, "rendered")).toContain("COMPLETED re-imagine render");
+    expect(taskgenHint("accept_render", assets, "rich")).toBeUndefined();
+    expect(taskgenHint("accept_render", assets)).toBeUndefined();
+    expect(taskgenHint("fill_lyric_gap", assets, "rich")).toContain("gap line");
+    expect(taskgenHint("accept_lyric_proposal", assets, "proposals")).toContain("AI-proposed lines");
+  });
 });

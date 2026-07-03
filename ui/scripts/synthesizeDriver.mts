@@ -145,7 +145,7 @@ async function main() {
       // ── normal coverage mode (§P2) ─────────────────────────────────────
       let requests: string[] = [];
       try {
-        const hint = taskgenHint(target, assets);
+        const hint = taskgenHint(target, assets, setupName);
         const gen = await callBrain(cfg, [
           { role: "system", content: TASKGEN_SYS },
           { role: "user", content: `${sessionBrief}\n\nCommand spec: ${spec}${hint ? `\n\nContext: ${hint}` : ""}\n\nWrite ${per} distinct requests.` },
