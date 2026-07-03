@@ -19,23 +19,31 @@ import numpy as np
 BEATS = Path(os.path.expanduser("~/mosh-beats"))
 STORE = BEATS / "labels" / "embeddings" / "index.jsonl"
 LEDGER = BEATS / "labels" / "labels.jsonl"
-TOP_PICK = ("pack-004", "14_dark_140_Fminor.wav")   # owner: "I love it"
 CENTROID_MIN_COS = 0.45                              # multi-tag threshold (calibrate)
 
 # style exemplars = beats HE confirmed (notes/chips), not our requested tags.
 # dark-menacing: his dark keeps MINUS the ones he flagged "not dark" (p3-06/11/14
-# stayed unflagged; p4-03 "close to happy", p4-07 kill, p4-14 "not exactly dark" excluded).
+# stayed unflagged; p4-03 "close to happy", p4-07 kill, p4-14 "not exactly dark" excluded;
+# p5-04/12 clean dark keeps). melodic-heartfelt: p4-11 + p5-11 are BOTH his "ACTUALLY
+# melodic heartfelt" confirmations. poppy-funky: p5-10 "more like poppy funky" — a
+# single-exemplar seed so the tag can start appearing on cards; the generation style
+# lands at the era-1 boundary.
 STYLE_EXEMPLARS = {
     "melodic-heartfelt": [("pack-004", "11_emotional_148_Aminor.wav"),
-                          ("pack-004", "05_emotional_148_Gminor.wav")],
+                          ("pack-004", "05_emotional_148_Gminor.wav"),
+                          ("pack-005", "11_emotional_148_Aminor.wav")],
     "club-swag": [("pack-003", "02_chill_132_Csminor.wav"),
                   ("pack-004", "01_chill_132_Csminor.wav")],
     "disrespectful": [("pack-003", "03_aggressive_152_Csminor.wav"),
-                      ("pack-004", "06_aggressive_152_Dminor.wav")],
+                      ("pack-004", "06_aggressive_152_Dminor.wav"),
+                      ("pack-005", "07_aggressive_152_Dminor.wav")],
     "dark-menacing": [("pack-003", "06_dark_140_Csminor.wav"),
                       ("pack-003", "11_dark_140_Aminor.wav"),
                       ("pack-003", "14_dark_140_Csminor.wav"),
-                      ("pack-004", "12_dark_140_Csminor.wav")],
+                      ("pack-004", "12_dark_140_Csminor.wav"),
+                      ("pack-005", "04_dark_140_Eminor.wav"),
+                      ("pack-005", "12_dark_140_Csminor.wav")],
+    "poppy-funky": [("pack-005", "10_emotional_148_Dminor.wav")],
 }
 
 
@@ -66,9 +74,21 @@ def embed_candidates(paths: list) -> None:
         print(f"  (candidate embedding skipped: {e})", file=sys.stderr)
 
 
-def top_pick_vec(store: dict):
-    p = str(BEATS / TOP_PICK[0] / TOP_PICK[1])
-    return store.get(p)
+def top_picks(store: dict) -> list:
+    """All owner topPicks from the ledger, chronological, as (round, file, vec).
+    The most recent pick anchors the more-like lane; the full list serves
+    nearest-pick reporting. Picks without an embedding are dropped."""
+    picks = []
+    if LEDGER.is_file():
+        for line in LEDGER.read_text().splitlines():
+            if not line.strip():
+                continue
+            r = json.loads(line)
+            if r.get("topPick"):
+                v = store.get(str(BEATS / r["round"] / r["file"]))
+                if v is not None:
+                    picks.append((r["round"], r["file"], v))
+    return picks
 
 
 def style_centroids(store: dict) -> dict:
@@ -83,7 +103,8 @@ def style_centroids(store: dict) -> dict:
 def annotate_rows(rows: list, view: str = "muq") -> None:
     """Attach predictedKeep (advisory), simTopPick, soundsLike to passing rows in place."""
     store = load_store(view)
-    tp = top_pick_vec(store)
+    picks = top_picks(store)
+    anchor = picks[-1] if picks else None
     cents = style_centroids(store)
     model = {}
     try:
@@ -96,8 +117,12 @@ def annotate_rows(rows: list, view: str = "muq") -> None:
         vec = store.get(r["file"])
         if vec is None:
             continue
-        if tp is not None:
-            r["simTopPick"] = round(_cos(vec, tp), 4)
+        if anchor is not None:
+            r["simTopPick"] = round(_cos(vec, anchor[2]), 4)
+            r["topPickAnchor"] = f"{anchor[0]}/{anchor[1]}"
+            best = max(picks, key=lambda t: _cos(vec, t[2]))
+            r["nearestTopPick"] = f"{best[0]}/{best[1]}"
+            r["simNearestTopPick"] = round(_cos(vec, best[2]), 4)
         tags = sorted([(round(_cos(vec, c), 3), s) for s, c in cents.items()
                        if _cos(vec, c) >= CENTROID_MIN_COS], reverse=True)
         r["soundsLike"] = [s for _, s in tags[:3]]

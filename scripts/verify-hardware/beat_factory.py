@@ -370,6 +370,21 @@ def process_candidate(rec, prov, req: dict, seed: int, cid: str, wav: str,
     secs = getattr(getattr(rec, "arrangement", None), "sections", None) or []
     if len(secs) > 1:
         row["sections"] = section_metrics(wav, secs)  # ADVISORY only (never a gate)
+        # per-role onsets in the FINAL BAR of each section (MIDI-space, cheap) — the
+        # S1 "ends-weird" adjudication feature: next pack's chips grade the fix.
+        form = getattr(prov, "form", {}) or {}
+        lb = form.get("loopBeats")
+        if lb:
+            tails = {}
+            for el in rec.elements:
+                if el.role.value in ("kick", "snare", "clap", "hat", "perc"):
+                    per = []
+                    for si in range(len(form.get("sections") or [])):
+                        hi, lo = (si + 1) * lb, (si + 1) * lb - 4.0
+                        per.append(sum(1 for n in el.midi.notes
+                                       if lo <= float(n.start_beats) < hi))
+                    tails[el.role.value] = per
+            row["sectionTailOnsets"] = tails
     # 808-audibility ADVISORY (log this pack, promote next on calibration): the
     # solo stem is gain-corrected to the shipped offset (stem_rms_adjusted).
     gap = (round(raw_rms - bal["soloRmsAdjDb"], 2)

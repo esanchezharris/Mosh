@@ -110,15 +110,34 @@ def _arrangement_beats(recipe) -> Optional[float]:
     return _whole_bars(max(ends)) if ends else None
 
 
+def _tile_period(pattern_beats: float, target_beats: float) -> float:
+    """Tiling period: the smallest whole-bar length ≥ the phrase that DIVIDES the
+    target with ≥2 repetitions, so every cycle is identical and the final bars sound
+    like every other cycle (owner pack-005, dictated: 'drum sounds trail off before
+    the pattern loops' — a non-dividing phrase, e.g. 3 bars under 8, used to end in a
+    mid-phrase truncated stub). No divisor ≤ target/2 → the phrase's own length
+    (status-quo truncation, still better than a mostly-silent single placement)."""
+    p = pattern_beats
+    while p <= target_beats / 2 + 1e-6:
+        ratio = target_beats / p
+        if abs(ratio - round(ratio)) < 1e-6:
+            return p
+        p += _BAR_BEATS
+    return pattern_beats
+
+
 def _tile_notes(notes, target_beats: Optional[float]):
     """Loop an element's pattern out to the arrangement length (owner audition round 3:
     'the composition kind of trails off towards the end like parts drop out' — 2-bar seed
     drum motifs were placed ONCE under 4-bar pads/808s, so the drums quit halfway in every
-    beat). The pattern repeats at its own whole-bar length; copies keep the phrase's
-    internal timing; a copy's note is dropped only if it would START past the target."""
+    beat). The pattern repeats at a whole-bar period that divides the target (see
+    _tile_period); copies keep the phrase's internal timing; a copy's note is dropped
+    only if it would START past the target."""
     if not notes or not target_beats:
         return notes
-    pattern = _whole_bars(max(float(n.start_beats) + float(n.duration_beats) for n in notes))
+    pattern = _tile_period(
+        _whole_bars(max(float(n.start_beats) + float(n.duration_beats) for n in notes)),
+        target_beats)
     if pattern >= target_beats:
         return notes
     out = []

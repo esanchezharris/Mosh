@@ -160,3 +160,28 @@ scrape pilot (NO-GO on its strict audit). 10/14 kept — and the top pick: "I lo
 - `13_aggressive_152_Csminor.wav` kill
 - `14_dark_140_Fminor.wav` keep — ★ TOP PICK · (later) TOP PICK — owner: 'I love it, but it isn't exactly dark or menacing.' Wants more like this.
 
+## Taste Pack 005
+
+- **10/14 kept (71%)**
+
+What changed before this round:
+
+The latent-space pass: persistent CLAP+MuQ embedding store, taste ranker v1
+(LOPO 0.52 vs the 0.65 bar → ADVISORY mode, predictions on cards only),
+more-like-your-top-pick slots, style tags re-grounded in the owner's confirmed
+exemplars (multi-tag), 808-always-in-key under disrespectful, this journal.
+- `01_dark_140_Aminor.wav` keep
+- `02_dark_140_Eminor.wav` kill — “The drums give it kind of a club/dance flavor too”
+- `03_aggressive_152_Fminor.wav` keep — ★ TOP PICK · “mix is way off but idea is cool”
+- `04_dark_140_Eminor.wav` keep
+- `05_aggressive_152_Fminor.wav` keep — “still the wrong note in the melody I don't like”
+- `06_chill_132_Dminor.wav` keep — “I am noticing a trend now where the drum sounds seemed to trail off before the pattern loops. Let's fix that.”
+- `07_aggressive_152_Dminor.wav` keep
+- `08_emotional_148_Aminor.wav` kill
+- `09_chill_132_Aminor.wav` kill
+- `10_emotional_148_Dminor.wav` keep — “more like poppy funky”
+- `11_emotional_148_Aminor.wav` keep — “This beat is ACTUALLY melodic heartfelt”
+- `12_dark_140_Csminor.wav` keep
+- `13_aggressive_152_Csminor.wav` keep
+- `14_chill_132_Csminor.wav` kill
+

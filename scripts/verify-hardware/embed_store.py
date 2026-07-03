@@ -70,6 +70,34 @@ def rated_wavs() -> list:
     return sorted(set(out))
 
 
+def alias_known(paths: list) -> list:
+    """Paths whose CONTENT is already stored under another path (e.g. a shipped pack
+    WAV whose candidate render was embedded at build time) get a cheap ALIAS row —
+    same sha and vectors, new path — so path-keyed readers (taste_ranker.load_embeddings,
+    latent_lanes.load_store) resolve them without re-embedding. Returns the paths that
+    still need a real embed. Needs no model → runs outside the judges venv."""
+    if not STORE.is_file():
+        return paths
+    store = load_store()
+    known_paths = {json.loads(l)["path"] for l in STORE.read_text().splitlines()
+                   if l.strip()}
+    todo, n = [], 0
+    with open(STORE, "a") as f:
+        for p in paths:
+            if p in known_paths:
+                continue
+            sha = content_sha(p)
+            row = store.get(sha)
+            if row:
+                f.write(json.dumps({**row, "path": p}) + "\n")
+                n += 1
+            else:
+                todo.append(p)
+    if n:
+        print(f"embed store: +{n} alias rows (same content, new path)")
+    return todo
+
+
 def _embed_under_venv(paths: list) -> int:
     """Embed the given paths (must run under the judges venv)."""
     import numpy as np  # noqa: F401
@@ -137,6 +165,10 @@ def main(argv=None) -> int:
         paths += rated_wavs()
     if not paths:
         print("nothing to embed (pass --wavs or --backfill)")
+        return 0
+    paths = alias_known(list(dict.fromkeys(paths)))
+    if not paths:
+        print("embed store: nothing new (idempotent)")
         return 0
     # re-exec under the judges venv when needed (laion_clap lives there)
     try:

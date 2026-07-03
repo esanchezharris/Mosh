@@ -612,12 +612,18 @@ def _filter_drum_rms(pool: list, min_keep: int = 3) -> list:
 # A A′ B A, owner-chosen shape (~32 bars from an 8-bar loop). Variation is ONLY
 # cloning + THINNING (removing notes) + whole-section octave shifts — no invented
 # rhythm, so Gate B(2) descent holds by construction (checked modulo loopBeats).
+# v2 (owner pack-005, dictated: "drum sounds seemed to trail off before the pattern
+# loops. Let's fix that."): A2's tail-thin dropped kick+snare+clap for 2-4 bars — with
+# a 4-bar loop that could silence EVERY backbeat in the section. Now: kick only, final
+# bar only — the standard turnaround (snare/clap backbeat + hats keep time; dropping
+# clap would also kill club-swag's dictated 2&4). nbars [1,1] keeps the rng draw so
+# the seed stream is unchanged elsewhere.
 FORM_AABA32 = {
-    "name": "AABA32",
+    "name": "AABA32v2",
     "sections": [
         {"name": "A",  "ops": {}},
-        {"name": "A2", "ops": {"thin": {"roles": ["kick", "snare", "clap"],
-                                        "where": "tail", "nbars": [2, 4]}}},
+        {"name": "A2", "ops": {"thin": {"roles": ["kick"],
+                                        "where": "tail", "nbars": [1, 1]}}},
         {"name": "B",  "ops": {"mute": ["lead"], "octave": {"808": "auto"}}},
         {"name": "A3", "ops": {}},
     ],

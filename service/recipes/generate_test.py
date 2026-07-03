@@ -326,6 +326,30 @@ starts = sorted(n["start"] for n in kick_notes)
 check("a 1-bar kick tiles to 4 copies under a 4-bar pad (starts at 0,3 + k*4)",
       starts == [0.0, 3.0, 4.0, 7.0, 8.0, 11.0, 12.0, 15.0], str(starts))
 
+# ── tile period divides the target (pack-005 dictated: "drum sounds trail off before
+# the pattern loops") — a 3-bar phrase under an 8-bar target used to tile at 3 bars
+# and end in a mid-phrase truncated stub; now it tiles at 4 bars (2 identical cycles).
+from teardown.render.compile import _tile_notes as _tn_unit, _tile_period as _tp_unit
+check("_tile_period: 3-bar phrase under 8 bars → 4-bar period (divides, ≥2 reps)",
+      _tp_unit(12.0, 32.0) == 16.0)
+check("_tile_period: dividing phrases keep their own period (1/2/4-bar no-ops)",
+      (_tp_unit(4.0, 32.0), _tp_unit(8.0, 32.0), _tp_unit(16.0, 32.0)) == (4.0, 8.0, 16.0))
+check("_tile_period: no divisor ≤ target/2 → status-quo phrase length (5 under 8)",
+      _tp_unit(20.0, 32.0) == 20.0)
+hat3 = [R.NoteEvent(pitch=42, start_beats=float(b), duration_beats=0.25)
+        for b in range(12)]  # a 3-bar hat, hits every beat
+tiled3 = _tn_unit(hat3, 32.0)
+bars_with_hits = {int(float(n.start_beats) // 4.0) for n in tiled3}
+check("a 3-bar hat under 8 bars tiles as identical 4-bar cycles (rest bar is "
+      "SYMMETRIC — never a trailing mid-phrase stub)",
+      bars_with_hits == {0, 1, 2, 4, 5, 6},  # bar 3 & 7 rest — SAME gap each cycle
+      str(sorted(bars_with_hits)))
+check("3-bar-under-8 tiling is cycle-symmetric (second half == first half shifted)",
+      sorted((round(float(n.start_beats) - 16.0, 4), int(n.pitch)) for n in tiled3
+             if float(n.start_beats) >= 16.0)
+      == sorted((round(float(n.start_beats), 4), int(n.pitch)) for n in tiled3
+                if float(n.start_beats) < 16.0))
+
 # ── pack-001 audition round (2026-07-02): composition floors + binding filters ──
 # Melodic-variety floor (beat-03 kill "it was like one note")
 mono16 = R.Element(role="lead", midi=R.Midi(notes=[
@@ -704,15 +728,19 @@ def _sec_notes(el, si, lb):
             for n in el.midi.notes if si * lb <= float(n.start_beats) < (si + 1) * lb}
 
 
-a3_bad, a2_bad, b_lead, b_shift_bad, tail_bad = [], [], [], [], []
+a3_bad, a2_bad, backbeat_bad, b_lead, b_shift_bad, tail_bad = [], [], [], [], [], []
 for el in g_form.elements:
     a, a2, b, a3 = (_sec_notes(el, i, lb) for i in range(4))
     role = el.role.value
     if a3 != a:
         a3_bad.append(role)
-    if role in ("kick", "snare", "clap"):
-        if not a2 <= a:
+    if role == "kick":
+        # v2: the ONLY thinning left — kick drops out for A2's final bar (turnaround)
+        if a2 != {n for n in a if n[1] < lb - 4.0}:
             a2_bad.append(role)
+    elif role in ("snare", "clap"):
+        if a2 != a:  # v2 dictated: the backbeat is NEVER thinned
+            backbeat_bad.append(role)
     elif role == "lead":
         if b:
             b_lead.append(role)
@@ -720,19 +748,27 @@ for el in g_form.elements:
         want = {(max(0, min(127, p + p_form.form["b808Shift"])), s, d) for p, s, d in a}
         if b != want:
             b_shift_bad.append((role, p_form.form["b808Shift"]))
+    # v2 dictated golden (owner: "drum sounds trail off before the pattern loops —
+    # let's fix that"): every non-muted role that sounds in A's final bar sounds in
+    # the final bar of EVERY section — except kick in A2, the deliberate turnaround.
     if role not in p_form.form["muted"]:
-        last_bar = {n for n in a3 if n[1] >= lb - 4.0}
-        src_last = {n for n in a if n[1] >= lb - 4.0}
-        if src_last and not last_bar:
-            tail_bad.append(role)
+        src_last = {n[1:] for n in a if n[1] >= lb - 4.0}
+        if src_last:
+            secs = ((2, b), (3, a3)) if role == "kick" else ((1, a2), (2, b), (3, a3))
+            for si, sec in secs:
+                if not {n for n in sec if n[1] >= lb - 4.0}:
+                    tail_bad.append((role, si))
 check("A3 is an EXACT clone of A (tailEnergy fixed by construction)", not a3_bad, str(a3_bad))
-check("A2 drums are a strict subset of A (thinned tail)", not a2_bad, str(a2_bad))
+check("A2 thins ONLY the kick and ONLY the final bar (v2)", not a2_bad, str(a2_bad))
+check("A2 backbeat (snare/clap) is untouched by thinning (v2 dictated)",
+      not backbeat_bad, str(backbeat_bad))
 check("the lead is silent in B", not b_lead)
 check("B 808 = A 808 shifted a whole octave (pcs preserved, direction per rule)",
       not b_shift_bad, str(b_shift_bad))
-check("every non-muted role still sounds in the final bar", not tail_bad, str(tail_bad))
+check("every non-muted role sounds in the final bar of EVERY section (kick: B/A3)",
+      not tail_bad, str(tail_bad))
 check("provenance logs the form (plan/loopBeats/thinBars/b808Shift)",
-      p_form.form["plan"] == "AABA32" and p_form.form["thinBars"] in (2, 3, 4)
+      p_form.form["plan"] == "AABA32v2" and p_form.form["thinBars"] == 1
       and p_form.form["b808Shift"] in (-12, 12, 0), str(p_form.form))
 
 # compile no-op: a pre-formed recipe passes through _tile_notes verbatim
