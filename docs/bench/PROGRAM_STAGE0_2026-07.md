@@ -45,7 +45,7 @@ Serving-setup validation this session: base-4B plain re-run on the same frozen
 subsample = **0.710** (vs recorded 0.714 — single-run noise), so the arms below
 are comparable to the recorded ledger.
 
-## S0.3 — ⛳ Substrate gate: few-shot A3B vs 4B (frozen 300, same rules) — RESULTS PENDING ARM COMPLETION
+## S0.3 — ⛳ Substrate gate: few-shot A3B vs 4B (frozen 300, same rules) ✅ GATE FIRES → A3B
 
 Pre-registered before the run (adoption-day plan): the comparison is
 **A3B few-shot vs base-4B few-shot**, both `--n 300 --rules examples` on
@@ -54,14 +54,25 @@ Pre-registered before the run (adoption-day plan): the comparison is
 Few-shot = `RULES_WITH_EXAMPLES` via the new `eval-sft --rules examples` flag
 (byte-identical to the Moshi-Bench lever).
 
-| arm | clean-apply | deferrals |
-|---|---|---|
-| base-4B plain (anchor) | **0.710** | 35 |
-| base-4B few-shot | **0.717** | 8 |
-| A3B few-shot (18 GB abliterated, lab-only) | *(pending)* | |
+| arm | clean-apply | deferrals | serving config |
+|---|---|---|---|
+| base-4B plain (anchor) | **0.710** | 35 | pinned id, temp 0 |
+| base-4B few-shot | **0.717** | 8 | pinned id, temp 0 |
+| **A3B few-shot (18 GB abliterated, lab-only)** | **0.826** | **0** | pinned by PATH, temp 0, `--no-think` (`chat_template_kwargs.enable_thinking=false` — the checkpoint is a thinking model; the 4B-Instruct arms have no thinking to disable, prompts byte-identical across arms) |
 
-Gate: A3B(few-shot) ≥ 4B(few-shot) → Stage-2 substrate = clean Apache-2.0
-Qwen3-30B-A3B; else stay Qwen3-4B. *(Decision recorded below when the arm lands.)*
+**⛳ GATE READING: A3B few-shot 0.826 ≥ 4B few-shot 0.717 (and ≥ the spec's
+literal "tuned-4B 0.6192-class" comparator, real value 0.558) → the Stage-2
+substrate is clean Apache-2.0 Qwen3-30B-A3B.** +10.9 points over the best 4B
+few-shot arm, zero deferrals, and within 4.9 points of the cloud brain's 0.875 —
+before any fine-tune. Reference ladder on this frozen subsample now reads:
+cloud 0.875 > **A3B few-shot 0.826** > 4B few-shot 0.717 > 4B plain 0.710/0.714
+> v3-final 0.558 > v2 0.218.
+
+Consequences: Stage 2 fetches the CLEAN Apache-2.0 Qwen3-30B-A3B checkpoint
+(the abliterated copy was measurement-only and per spec §8 is now
+quarantine/delete-eligible — owner call); LoRA on 30B-A3B under 64 GB is the
+"tight-but-plausible" case flagged in [GT §D16], so Stage-2 planning should
+budget a fallback to the CUDA box if MLX LoRA memory doesn't close.
 
 Serving-trap incident (recorded for the provenance rule): the first A3B arm was
 caught evaluating the **4B base** — `mlx_lm.server --model <path>` also lists the
