@@ -83,7 +83,8 @@ def main() -> int:
                                     "density", "gate", "balance", "axes", "rmsDb",
                                     "fx", "priors", "priorsHash", "filters", "drumRoles",
                                     "distinct", "subOverlap", "tailEnergyDb",
-                                    "audibility808", "measuredKey", "form")
+                                    "audibility808", "measuredKey", "form", "predictedKeep",
+                                    "simTopPick", "soundsLike", "moreLike", "rankerMode")
                                    if f.get(k) is not None}
             rows.append(row)
     with open(OUT, "w") as f:
