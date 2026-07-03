@@ -74,7 +74,7 @@ now this), so the identity probe is permanent harness behavior.
 Disposition of the abliterated checkpoint after measurement (spec §8): flagged,
 left in place pending the owner's quarantine/delete call — it never ships.
 
-## S0.4 — Probe-v2: the honest grounded baseline — RESULTS PENDING ARM COMPLETION
+## S0.4 — Probe-v2: the honest grounded baseline ✅
 
 The v1 probe (10/8/5-of-23) is now **diagnosed as a harness artifact in full**:
 its prompts said `tracks: (none)`, its intents referenced training-set track
@@ -90,7 +90,27 @@ entities resolved via single-invocation `${VAR}` captures). Two arms:
 **grounded-30** (24 groundable intents + 6 negatives where deferring is correct)
 and **prior-30** (the v1 intents verbatim — negative-handling at scale).
 
-*(v3-final and base-4B+examples results land below when the MLX arms finish.)*
+Results (reports in `~/mosh-bench-artifacts/policy-probe-v2/`):
+
+| model (arm) | grounded: clean | negatives: defer-ok | wrong-defer | failure classes |
+|---|---|---|---|---|
+| base-4B + examples (the shipping config) | **23/24** | **6/6** | 0 | 1 invented-file (sketch intent → `sketch_beatbox` with a made-up WAV) |
+| fused v3-final (plain rules) | 19/24 | 6/6 | 4 | 1 validation |
+| — prior-30 replay, both models | 1/1 groundable | ~14–15/29 | ~14–15 | few stale-id/apply-error/invented-file |
+
+Readings:
+- **The v1 probe's headline failure modes were harness artifacts.** With the
+  serving prompt carrying the live snapshot, stale-session-ids drop to ZERO on
+  grounded intents for both models (v1 claimed ×16).
+- **The honest grounded clean-apply baseline for the shipping local config is
+  ~96%** (23/24) with perfect negative handling on this set.
+- v3-final's misses are NOT grounding: all four wrong-defers are the documented
+  mode-interpolation pathology — *claims the edit, emits no command* ("Tempo now
+  150 BPM! 🎵"). The honest harness reproduces exactly the defect class that
+  failed its ship gate.
+- The prior-30 replay (intents referencing absent tracks) shows the real
+  remaining gap for BOTH models: ~half the time they act on some other track
+  instead of deferring — precisely the Stage-1.4 grounding-negatives data need.
 
 ## S0.5 — CUDA box: PENDING (owner)
 
