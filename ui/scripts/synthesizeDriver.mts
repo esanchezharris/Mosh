@@ -82,14 +82,30 @@ async function main() {
   const sessionBrief = system.slice(system.indexOf("Current session:"));
 
   const cfg = brainConfigFromEnv(env, argFlag("model"));
+  // ── RFT split-provider (program §5 Stage-2.2): task-gen stays on the cloud
+  // brain; ANSWERS go to a local mlx_lm server (base + round-N adapter) when
+  // --answer-base is given. The answer model is pinned by PATH and verified
+  // with a one-token identity probe before any sampling (permanent-harness
+  // rule — the /v1/models data[0] trap has fired three times).
+  const answerBase = argFlag("answer-base");
+  const answerNoThink = process.argv.includes("--answer-no-think");
+  let answerCfg = cfg;
+  if (answerBase) {
+    const answerModel = argFlag("answer-model");
+    if (!answerModel) throw new Error("--answer-base requires --answer-model <served model PATH>");
+    answerCfg = { base: answerBase, key: argFlag("answer-key", "local")!, model: answerModel };
+    const probe = await callBrain(answerCfg, [{ role: "user", content: 'Reply with the word "json": {}' }], undefined, { noThink: answerNoThink });
+    if (!probe.content.length) throw new Error(`identity probe FAILED against ${answerBase} for ${answerModel}`);
+    console.log(`answer endpoint: ${answerBase} model=${answerModel} (identity probe ok, ${probe.ms}ms)`);
+  }
   const usage: BrainUsage = { promptTokens: 0, completionTokens: 0, calls: 0 };
-  const report: Record<string, unknown> = { model: cfg.model, out: outPath, setup: setupName, negatives, twins, perCommand: {} };
+  const report: Record<string, unknown> = { model: cfg.model, answerModel: answerCfg.model, answerBase: answerCfg.base, out: outPath, setup: setupName, negatives, twins, perCommand: {} };
   let kept = 0;
 
   // Answer one request through the serving prompt and grade it; append + return
   // true iff clean-apply and on-target.
   async function answerAndKeep(target: string, request: string): Promise<{ outcome: string; classes: string[] }> {
-    const { content } = await callBrain(cfg, [{ role: "system", content: system }, { role: "user", content: request }], usage);
+    const { content } = await callBrain(answerCfg, [{ role: "system", content: system }, { role: "user", content: request }], usage, { noThink: answerNoThink });
     const reply = parseReply(content);
     const cmds = reply.commands ?? [];
     if (!cmds.length) return { outcome: "deferred", classes: [] };
