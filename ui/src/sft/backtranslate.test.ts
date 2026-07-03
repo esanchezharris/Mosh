@@ -117,4 +117,32 @@ describe("Backtranslator", () => {
     const extras = await bt.variantsFor(raw("set the tempo to 88"));
     expect(extras.map((e) => e.utterance)).toEqual(["make it 88"]);
   });
+
+  it("style axis: one brain call per style, merged + deduped, budget counts calls", async () => {
+    const prompts: string[] = [];
+    const byStyle: Record<string, string[]> = {
+      terse: ["make it {0}", "{0} bpm go"],
+      verbose: ["could you please set the tempo to {0}?", "make it {0}"], // one dup across styles
+    };
+    const chat: BrainChat = async (messages) => {
+      const u = messages[1].content;
+      prompts.push(u);
+      const key = u.includes("terse") ? "terse" : "verbose";
+      return JSON.stringify({ instructions: byStyle[key] });
+    };
+    const budget = { calls: 10 };
+    const bt = new Backtranslator(chat, { variants: 2, styles: ["terse style", "verbose style"], budget });
+    const extras = await bt.variantsFor(raw("set the tempo to 132"));
+    expect(bt.calls).toBe(2);                       // one call per style
+    expect(budget.calls).toBe(8);
+    expect(prompts[0]).toContain("Voice: terse style");
+    expect(prompts[1]).toContain("Voice: verbose style");
+    // merged across styles, cross-style duplicate dropped
+    expect(extras.map((e) => e.utterance)).toEqual([
+      "make it 132", "132 bpm go", "could you please set the tempo to 132?",
+    ]);
+    // cached as ONE aggregate entry — the second slice of the shape costs zero calls
+    await bt.variantsFor(raw("set the tempo to 90"));
+    expect(bt.calls).toBe(2);
+  });
 });
