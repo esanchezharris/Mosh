@@ -260,6 +260,329 @@ def build_signals(prs, emb):
     return {s: (vs if all(v is not None for v in vs) else None) for s, vs in sig.items()}
 
 
+# ------------------------------------------------ reward re-benchmark (program §4.4)
+#
+# Scores the legacy reward artifacts + the current taste ranker against the two
+# OWNER-rated validity sets — the 2026-07 training program's "highest-information
+# hour" (docs/plans/MOSHI_TRAINING_PROGRAM_2026-07.md §4.4).
+#
+# PRE-REGISTERED (stated before computing, per the program's gate discipline):
+#   • primary metric = Spearman ρ vs the raw owner ratings, one-sided permutation p
+#     with the direction HIGHER-on-better for every scorer (rmsDb included, as the
+#     dumb-baseline; a negative ρ simply fails its one-sided test);
+#   • AUC is OMITTED — neither RATINGS.csv carries a native keep/kill column, so
+#     any binarization would be post-hoc;
+#   • the two sets use different scales (1–6 vs 1–7) and are NEVER pooled.
+
+VALIDITY_SETS = [
+    ("validity-24", os.path.expanduser("~/mosh-validity")),
+    ("probe-38", os.path.expanduser("~/mosh-reward-probe")),
+]
+REWARD_DOC = os.path.join(REPO, "docs", "bench", "REWARD_BENCH_2026-07.md")
+REWARD_JSON = os.path.join(BEATS, "labels", "reward-bench-2026-07.json")
+VALIDITY_STORE = os.path.join(BEATS, "labels", "embeddings", "validity-store.jsonl")
+SIDECAR_PY = os.path.join(REPO, "service", "sa3", "judge_sidecar.py")
+EMBED_STORE_PY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "embed_store.py")
+VALIDITY_SIGNALS = ["composite", "PQ", "CE", "CU", "PC",
+                    "clapPos", "clapContrast", "clapKeepCentroid", "ranker", "rmsDb"]
+VALIDITY_NOTES = {
+    "composite": "GRPO reward as implemented (clean × pq_dsp; pull→pq fallback active)",
+    "PQ": "Audiobox production quality", "CE": "Audiobox enjoyment",
+    "CU": "Audiobox usefulness", "PC": "Audiobox complexity",
+    "clapPos": "CLAP cos to trap-beat anchors",
+    "clapContrast": "CLAP pos−neg anchor contrast",
+    "clapKeepCentroid": "CLAP cos to the owner's kept-pack centroid",
+    "ranker": "taste_ranker.score_candidate (production path; symbolic imputed)",
+    "rmsDb": "raw mix loudness (baseline)",
+}
+
+
+def qr_scores_main(req_path: str, out_path: str) -> int:
+    """Judges-venv sub-mode: composite reward + rmsDb per clip. The composite is the
+    frozen GRPO Reward reproduced faithfully — loudness_normalize verbatim from the
+    frozen branch (6c0c0f2b service/teardown/oracle/score.py), floor = service/
+    quality_readout.analyze_array (the pq the loop actually ran on), aggregation
+    Reward.composite = clean × (0.5·pq + 0.5·pull) with pull→pq (the MuQ probe
+    checkpoint is unrecoverable) ⇒ clean × pq/10."""
+    import numpy as np
+    import soundfile as sf
+    sys.path.insert(0, os.path.join(REPO, "service"))
+    import quality_readout as qr
+
+    res = {}
+    for w in json.load(open(req_path))["wavs"]:
+        x, sr = sf.read(w, always_2d=True, dtype="float64")
+        mono = x.mean(axis=1)
+        rms = float(np.sqrt(np.mean(mono ** 2))) if mono.size else 0.0
+        rms_db = 20.0 * math.log10(max(rms, 1e-12))
+        y = mono.astype(np.float32)
+        if rms >= 1e-9:                       # loudness_normalize(y, sr, -20.0), verbatim
+            y = y * ((10.0 ** (-20.0 / 20.0)) / rms)
+            peak = float(np.max(np.abs(y)))
+            if peak > 1.0:
+                y = y / peak
+        r = qr.analyze_array(y.astype("float64"), sr)
+        pq01 = max(0.0, min(1.0, float(r.get("pq", 0.0)) / 10.0))
+        clean = 0.0 if r.get("flags") else 1.0
+        res[w] = {"composite": round(clean * pq01, 4), "clean": clean,
+                  "pqDsp": round(float(r.get("pq", 0.0)), 3),
+                  "flags": [str(f) for f in (r.get("flags") or [])],
+                  "rmsDb": round(rms_db, 2)}
+    json.dump(res, open(out_path, "w"), indent=1)
+    return 0
+
+
+def load_validity_rows(root: str) -> list:
+    """[(index, rating, wav_path)] from RATINGS.csv + clips/."""
+    import csv
+    rows = []
+    with open(os.path.join(root, "RATINGS.csv")) as f:
+        for r in csv.DictReader(f):
+            wav = os.path.join(root, "clips", f"{r['index']}.wav")
+            if r.get("rating", "").strip() and os.path.isfile(wav):
+                rows.append((r["index"], float(r["rating"]), wav))
+    return rows
+
+
+def audiobox_axes(paths: list) -> dict:
+    """{path: {PQ,CE,CU,PC}} via one judge-sidecar batch (communicate+timeout — the
+    sidecar exits on stdin EOF, so this can't hang past the deadline)."""
+    if not os.path.isfile(JUDGES_PY):
+        print("  (Audiobox skipped: judges venv absent)", file=sys.stderr)
+        return {}
+    proc = subprocess.run([JUDGES_PY, SIDECAR_PY],
+                          input=json.dumps({"paths": paths}) + "\n",
+                          capture_output=True, text=True, timeout=1800, cwd=REPO)
+    payloads = [json.loads(l[len("@@MOSH@@"):]) for l in proc.stdout.splitlines()
+                if l.startswith("@@MOSH@@")]
+    for p in payloads:
+        if p and "ready" not in p and "error" not in p:
+            print(f"  Audiobox axes: {len(p)}/{len(paths)} clips", file=sys.stderr)
+            return p
+    print(f"  (Audiobox failed: {proc.stderr.strip()[-300:]})", file=sys.stderr)
+    return {}
+
+
+def validity_bench() -> int:
+    sets = {name: load_validity_rows(root) for name, root in VALIDITY_SETS
+            if os.path.isdir(root)}
+    sets = {k: v for k, v in sets.items() if v}
+    if not sets:
+        print("no validity sets found", file=sys.stderr)
+        return 1
+    all_wavs = sorted({w for rows in sets.values() for _, _, w in rows})
+    print(f"validity clips: {sum(len(v) for v in sets.values())} "
+          f"({', '.join(f'{k}:{len(v)}' for k, v in sets.items())})", file=sys.stderr)
+
+    # 1) composite + rmsDb under the judges venv (numpy+soundfile+quality_readout)
+    with tempfile.TemporaryDirectory() as td:
+        req, out = os.path.join(td, "req.json"), os.path.join(td, "qr.json")
+        json.dump({"wavs": all_wavs}, open(req, "w"))
+        proc = subprocess.run([JUDGES_PY, os.path.abspath(__file__),
+                               "--qr-scores", req, out],
+                              capture_output=True, text=True, timeout=1200)
+        if proc.returncode != 0:
+            print(f"  (composite scoring failed: {proc.stderr[-400:]})", file=sys.stderr)
+            qr_scores = {}
+        else:
+            qr_scores = json.load(open(out))
+    print(f"  composite scored: {len(qr_scores)}/{len(all_wavs)}", file=sys.stderr)
+
+    # 2) Audiobox axes (one sidecar batch)
+    axes = audiobox_axes(all_wavs)
+
+    # 3) CLAP: validity clips + the owner's kept-pack beats in ONE embed call so the
+    #    audio/text spaces are identical. Embeddings are PINNED in a bench-local cache
+    #    (embed-store philosophy: embed once, persist) — CLAP inference on the GPU
+    #    jitters ρ by ~±0.03 run-to-run otherwise; with the cache, re-runs are
+    #    byte-identical. The cache key is the input set; a new keep changes it.
+    keep_wavs = sorted({wav_path_for(r) for r in pack_rows(load_rows())
+                        if r["value"] == "keep" and os.path.isfile(wav_path_for(r))})
+    cache_path = os.path.join(os.path.dirname(VALIDITY_STORE), "validity-clap-cache.json")
+    cache_key = ",".join(all_wavs + keep_wavs + CLAP_POS + CLAP_NEG)
+    emb = {}
+    if os.path.isfile(cache_path):
+        cached = json.load(open(cache_path))
+        if cached.get("key") == cache_key:
+            emb = cached["emb"]
+            print("  CLAP: cache hit (pinned embeddings)", file=sys.stderr)
+    if not emb:
+        emb = clap_embeddings(all_wavs + keep_wavs, CLAP_POS + CLAP_NEG)
+        if emb:
+            json.dump({"key": cache_key, "emb": emb}, open(cache_path, "w"))
+    audio, text = emb.get("audio", {}), emb.get("text", {})
+    pos_vecs = [text[t] for t in CLAP_POS if t in text]
+    neg_vecs = [text[t] for t in CLAP_NEG if t in text]
+    keep_vecs = [audio[w] for w in keep_wavs if w in audio]
+    keep_cen = ([sum(v[i] for v in keep_vecs) / len(keep_vecs)
+                 for i in range(len(keep_vecs[0]))] if keep_vecs else None)
+
+    # 4) MuQ embeddings (ranker view) → a bench-local store; the shared store is
+    #    never written (validity clips are not pack candidates)
+    env = dict(os.environ, MOSH_EMBED_STORE=VALIDITY_STORE)
+    proc = subprocess.run([JUDGES_PY, EMBED_STORE_PY, "--wavs"] + all_wavs,
+                          env=env, capture_output=True, text=True, timeout=2400)
+    if proc.returncode != 0:
+        print(f"  (embed_store failed: {proc.stderr[-300:]})", file=sys.stderr)
+    vstore = {}
+    if os.path.isfile(VALIDITY_STORE):
+        for line in open(VALIDITY_STORE):
+            if line.strip():
+                r = json.loads(line)
+                vstore[r["path"]] = r
+
+    # 5) ranker (production score_candidate; model frozen on disk)
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import taste_ranker as tr
+    model = tr.load_model()
+    view = model.get("view", "muq")
+
+    def signal_values(rows):
+        sig = {s: [] for s in VALIDITY_SIGNALS}
+        for _, _, w in rows:
+            q = qr_scores.get(w) or {}
+            sig["composite"].append(q.get("composite"))
+            sig["rmsDb"].append(q.get("rmsDb"))
+            ax = axes.get(w) or {}
+            for a in ("PQ", "CE", "CU", "PC"):
+                sig[a].append(ax.get(a))
+            e = audio.get(w)
+            if e and pos_vecs and neg_vecs:
+                cp = sum(_cos(e, v) for v in pos_vecs) / len(pos_vecs)
+                cn = sum(_cos(e, v) for v in neg_vecs) / len(neg_vecs)
+                sig["clapPos"].append(cp)
+                sig["clapContrast"].append(cp - cn)
+            else:
+                sig["clapPos"].append(None)
+                sig["clapContrast"].append(None)
+            sig["clapKeepCentroid"].append(_cos(e, keep_cen) if e and keep_cen else None)
+            row = vstore.get(w) or {}
+            vec = row.get(view) or row.get("clap")
+            if model and vec and ax:
+                sig["ranker"].append(tr.score_candidate(
+                    model, vec, ax, {"rmsDb": q.get("rmsDb")}))
+            else:
+                sig["ranker"].append(None)
+        return sig
+
+    results, raw = {}, {}
+    for name, rows in sets.items():
+        ratings = [r for _, r, _ in rows]
+        sig = signal_values(rows)
+        per = {}
+        for s in VALIDITY_SIGNALS:
+            pairs = [(v, y) for v, y in zip(sig[s], ratings) if v is not None]
+            if len(pairs) >= 8:
+                rho, p = spearman_perm_p([a for a, _ in pairs], [b for _, b in pairs])
+                per[s] = {"n": len(pairs), "rho": round(rho, 4), "p": round(p, 4)}
+            else:
+                per[s] = {"n": len(pairs), "rho": None, "p": None}
+        results[name] = per
+        raw[name] = [{"index": i, "rating": r, "wav": os.path.basename(w),
+                      **{s: sig[s][k] for s in VALIDITY_SIGNALS}}
+                     for k, (i, r, w) in enumerate(rows)]
+
+    # ------------------------------------------------------------ write outputs
+    lines = []
+    w = lines.append
+    w("# Reward re-benchmark (2026-07) — every legacy scorer vs the owner's ears")
+    w("")
+    w("*Generated by `scripts/verify-hardware/bench_evaluators.py --validity` — "
+      "regenerate, don't hand-edit. Program: "
+      "`docs/plans/MOSHI_TRAINING_PROGRAM_2026-07.md` §4.4.*")
+    w("")
+    w("## Pre-registration (stated before results)")
+    w("")
+    w("- **Primary metric: Spearman ρ** vs the raw owner ratings; one-sided seeded "
+      "permutation p (20k), direction **higher-on-better for every scorer** "
+      "(rmsDb included as the dumb baseline — a negative ρ fails its one-sided test).")
+    w("- **AUC omitted**: neither RATINGS.csv carries a native keep/kill column; any "
+      "binarization would be post-hoc.")
+    w("- Sets use different scales (1–6 vs 1–7) and are **never pooled**.")
+    w("- **Standing bar (program §3):** no model is used as a scorer again without "
+      "beating the current ranker on these sets.")
+    w("")
+    w("## Sets")
+    w("")
+    w("| set | n rated | scale | what it is |")
+    w("|---|---|---|---|")
+    w(f"| validity-24 | {len(sets.get('validity-24', []))} | 1–6 | "
+      "`~/mosh-validity` — the audit-era validity pack, owner-rated 2026-07-02 |")
+    w(f"| probe-38 | {len(sets.get('probe-38', []))} | 1–7 | "
+      "`~/mosh-reward-probe` — the reward-probe clips, owner-rated 2026-06-30 |")
+    w("")
+    for name in results:
+        w(f"## Scoreboard — {name}")
+        w("")
+        w("| scorer | n | Spearman ρ | perm p (1-sided) | note |")
+        w("|---|---|---|---|---|")
+        for s in VALIDITY_SIGNALS:
+            r = results[name][s]
+            if r["rho"] is None:
+                w(f"| {s} | {r['n']} | — | — | {VALIDITY_NOTES[s]} (unavailable) |")
+            else:
+                w(f"| {s} | {r['n']} | {r['rho']:.3f} | {r['p']:.3f} | "
+                  f"{VALIDITY_NOTES[s]} |")
+        w("")
+    w("## Not computable / by record")
+    w("")
+    w("- **LoRA-MuQ pull probe — BY RECORD ONLY.** The probe checkpoint lived only on "
+      "the frozen GRPO branch and was never committed; unrecoverable. Recorded numbers "
+      "stand: iso-timing ρ 0.897, **validity ρ −0.129** (anti-correlated) — "
+      "`docs/plans/moshi-training-audit-2026-07.md`. In the composite above its `pull` "
+      "term therefore falls back to pq, exactly as `Reward.composite` implements.")
+    w("- **CLAP → owner-corpus centroid — could-not-compute.** `~/mosh-taste/own` is "
+      "still empty (no bounces dropped yet); the kept-pack centroid row above is the "
+      "available owner-taste anchor. The owner ask stands.")
+    w("")
+    w("## Provenance")
+    w("")
+    w("- composite: `Reward.composite`/`score_audio` reproduced verbatim from the frozen "
+      "branch (commit `6c0c0f2b`, `service/teardown/flywheel/reward.py` + "
+      "`oracle/score.py::loudness_normalize`); floor pq = `service/quality_readout` "
+      "(the DSP pq the loop actually ran); clean = no-flags.")
+    w("- Audiobox axes: `service/sa3/judge_sidecar.py` under `~/AI/judges_venv` "
+      "(one batch, deterministic).")
+    w("- CLAP: `clap_score.py` (judges venv), same audio/text space for anchors, "
+      "clips, and the kept-pack centroid.")
+    w("- ranker: `taste_ranker.score_candidate` with the frozen on-disk model "
+      f"(view={view}, mode={model.get('mode')}, n={model.get('n')}); axes real, "
+      "rmsDb measured, remaining symbolic features at their production defaults; "
+      "corpus features = keep-centroid only (own/ref corpus empty) — identical to "
+      "how shipped packs are scored.")
+    w("- MuQ embeddings for the ranker go to a bench-local store "
+      "(`validity-store.jsonl`); the shared pack store is never written.")
+    w("- Determinism: composite/Audiobox/ranker/rmsDb are bit-identical across runs; "
+      "CLAP embeddings are PINNED in `validity-clap-cache.json` (before pinning, GPU "
+      "inference jittered the CLAP ρ by ~±0.03 run-to-run — signs and significance "
+      "categories unchanged). With the cache, re-runs reproduce byte-identically.")
+    w("")
+    w("## Verdict")
+    w("")
+    ranked = {}
+    for name, per in results.items():
+        avail = [(s, per[s]["rho"]) for s in VALIDITY_SIGNALS if per[s]["rho"] is not None]
+        avail.sort(key=lambda kv: -kv[1])
+        ranked[name] = avail
+        top = ", ".join(f"{s} {v:+.3f}" for s, v in avail[:3])
+        rk = per.get("ranker", {}).get("rho")
+        beat = [s for s, v in avail if rk is not None and v > rk and s != "ranker"]
+        w(f"- **{name}**: top signals {top}. Scorers above the ranker "
+          f"(ρ {rk if rk is not None else '—'}): {', '.join(beat) if beat else 'none'}.")
+    w("")
+    w("*Interpretation discipline: at n=24/38 these are ranking reads, not adoption "
+      "decisions — the adoption bar for any scorer remains beating the ranker on BOTH "
+      "sets plus the pack-side prequential ≥0.65 (RANKER_PROMOTION.md). A composite "
+      "ρ near 0 CONFIRMS the audit's retirement verdict; it is not retested later.*")
+    os.makedirs(os.path.dirname(REWARD_DOC), exist_ok=True)
+    open(REWARD_DOC, "w").write("\n".join(lines) + "\n")
+    json.dump({"results": results, "raw": raw,
+               "model": {"view": view, "mode": model.get("mode"), "n": model.get("n")}},
+              open(REWARD_JSON, "w"), indent=1)
+    print(f"reward bench → {REWARD_DOC}\njson → {REWARD_JSON}")
+    return 0
+
+
 # ---------------------------------------------------------------- self-check
 
 def selfcheck():
@@ -297,10 +620,18 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--no-clap", action="store_true")
     ap.add_argument("--selfcheck", action="store_true")
+    ap.add_argument("--validity", action="store_true",
+                    help="reward re-benchmark vs the owner-rated validity sets (§4.4)")
+    ap.add_argument("--qr-scores", nargs=2, metavar=("REQ", "OUT"),
+                    help="(internal) judges-venv sub-mode: composite+rmsDb per clip")
     args = ap.parse_args(argv)
     if args.selfcheck:
         selfcheck()
         return 0
+    if args.qr_scores:
+        return qr_scores_main(args.qr_scores[0], args.qr_scores[1])
+    if args.validity:
+        return validity_bench()
 
     rows = load_rows()
     prs = pack_rows(rows)

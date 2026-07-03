@@ -67,6 +67,24 @@ const RELATIVE_MOVES: Array<{ phrase: (n: string) => string; delta: number }> = 
   { phrase: (n) => `bring the "${n}" track down by 4 dB`, delta: -4 },
 ];
 
+// Sibling coverage for the same relative-instruction class (program Stage 1.2):
+// pan convention touch = 10%, bit/little = 15%, explicit "by N%" = N; tempo
+// convention touch = 2 BPM, bit/little = 5, explicit "by N" = N. Emitted only
+// when the target stays in range — clamping would teach a wrong delta.
+const RELATIVE_PAN_MOVES: Array<{ phrase: (n: string) => string; delta: number }> = [
+  { phrase: (n) => `nudge the "${n}" track a touch left`, delta: -0.1 },
+  { phrase: (n) => `push the "${n}" track a bit right`, delta: 0.15 },
+  { phrase: (n) => `ease the "${n}" track a little left`, delta: -0.15 },
+  { phrase: (n) => `pan the "${n}" track right by 25%`, delta: 0.25 },
+];
+const RELATIVE_TEMPO_MOVES: Array<{ phrase: () => string; delta: number }> = [
+  { phrase: () => "bring the tempo up a touch", delta: 2 },
+  { phrase: () => "speed it up a bit", delta: 5 },
+  { phrase: () => "slow it down a little", delta: -5 },
+  { phrase: () => "push the tempo up by 10", delta: 10 },
+  { phrase: () => "pull the tempo down a touch", delta: -2 },
+];
+
 /**
  * Cut an importer program into gradeable SFT tasks, emitting the FULL target
  * command slice (every add_note with its args) — unlike gepa/sliceProgram which
@@ -98,9 +116,23 @@ export function sliceProgramFull(program: ImportProgram, sourceId: string, opts:
     });
   };
 
+  let tempoRelSeen = false;
+  const panRelSeen = new Set<string>();
   for (let i = 0; i < cmds.length && out.length < max; i++) {
     const c = cmds[i];
-    if (c.command === "set_tempo") push(`set the tempo to ${c.args.bpm}`, i, [c]);
+    if (c.command === "set_tempo") {
+      push(`set the tempo to ${c.args.bpm}`, i, [c]);
+      // TRUE relative tempo task (sibling of the volume convention): the setup
+      // includes this absolute set, gold = current + delta.
+      const cur = Number(c.args.bpm);
+      if (!tempoRelSeen && Number.isFinite(cur)) {
+        tempoRelSeen = true;
+        const mv = RELATIVE_TEMPO_MOVES[out.length % RELATIVE_TEMPO_MOVES.length];
+        const target = cur + mv.delta;
+        if (target >= 40 && target <= 300)
+          push(mv.phrase(), i + 1, [{ command: "set_tempo", args: { bpm: target } }]);
+      }
+    }
     else if (c.command === "set_key") push(`set the key to ${c.args.tonic} ${c.args.mode}`, i, [c]);
     else if (c.command === "set_time_signature") push(`change to ${c.args.numerator}/${c.args.denominator} time`, i, [c]);
     else if (MIXER[c.command]) {
@@ -114,6 +146,17 @@ export function sliceProgramFull(program: ImportProgram, sourceId: string, opts:
         if (Number.isFinite(cur))
           push(mv.phrase(nameOf(c.args.trackId)), i + 1, [
             { command: "set_track_volume", args: { trackId: c.args.trackId, db: cur + mv.delta } },
+          ]);
+      }
+      // TRUE relative pan task (same class): gold = current + delta, in [-1, 1].
+      if (c.command === "set_track_pan" && !panRelSeen.has(String(c.args.trackId))) {
+        panRelSeen.add(String(c.args.trackId));
+        const mv = RELATIVE_PAN_MOVES[out.length % RELATIVE_PAN_MOVES.length];
+        const cur = Number(c.args.pan);
+        const target = Math.round((cur + mv.delta) * 100) / 100;
+        if (Number.isFinite(cur) && Math.abs(target) <= 1)
+          push(mv.phrase(nameOf(c.args.trackId)), i + 1, [
+            { command: "set_track_pan", args: { trackId: c.args.trackId, pan: target } },
           ]);
       }
     }
