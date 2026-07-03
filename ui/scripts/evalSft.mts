@@ -101,9 +101,15 @@ let calls = 0;
 // 2500, not 800: note-population targets routinely exceed 800 completion tokens, and a
 // truncated reply is unparseable → scored as a (false) failure. Override with --max-tokens.
 const maxTok = Number(flag("max-tokens", "2500")) || 2500;
+// --no-think: disable a local thinking-model's reasoning via the chat template
+// (mlx_lm.server forwards chat_template_kwargs; keeps the PROMPT byte-identical
+// across arms, unlike a /no_think soft switch). Local-server-only — cloud APIs
+// reject unknown fields, hence flag-gated.
+const noThink = process.argv.includes("--no-think");
 const callBrain = async (messages: ChatMessage[]): Promise<string> => {
   calls++;
   const payload: Record<string, unknown> = { model, messages, response_format: { type: "json_object" } };
+  if (noThink) payload.chat_template_kwargs = { enable_thinking: false };
   if (isReasoning) payload.max_completion_tokens = maxTok; else { payload.max_tokens = maxTok; payload.temperature = 0; }
   const ctrl = new AbortController();
   const to = setTimeout(() => ctrl.abort(), 90_000);
