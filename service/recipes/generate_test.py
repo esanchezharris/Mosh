@@ -700,6 +700,96 @@ cmin = _mini_rec("cminrec", [R.Element(role="pad", midi=R.Midi(notes=[
 check("measured_key_of reads a C-minor recipe as C minor",
       G.measured_key_of(cmin) == "C minor", G.measured_key_of(cmin))
 
+# ── S2: melody wrong-note (pack-004 #02 + pack-005 #05 "STILL the wrong note in the
+# melody" — the same intrinsically-F-major lead recurred under F-minor requests) ──
+def _lead_el(pitches, dur=0.5):
+    return R.Element(role="lead", midi=R.Midi(notes=[
+        R.NoteEvent(pitch=p, start_beats=float(i) * dur, duration_beats=dur)
+        for i, p in enumerate(pitches)]))
+
+
+el_fmaj = _lead_el((65, 69, 72, 65, 70, 74, 72, 69, 65, 76, 72, 69, 65, 77, 76, 74, 72, 65))
+el_abmaj = _lead_el((68, 72, 75, 68, 73, 77, 75, 72, 68, 80, 75, 72, 68, 68))
+el_fmin = _lead_el((65, 68, 72, 65, 70, 73, 72, 68, 65, 75, 72, 68, 65, 65))
+el_cmaj = _lead_el((60, 64, 67, 60, 65, 69, 67, 64, 60, 71, 67, 64, 60, 72, 71, 69, 67, 60))
+check("parallel_major_clash: F-major line under F minor = the kill class",
+      G.parallel_major_clash(el_fmaj, "F minor"))
+check("parallel_major_clash: Ab major (RELATIVE) under F minor stays licensed",
+      not G.parallel_major_clash(el_abmaj, "F minor"))
+check("parallel_major_clash: an F-minor line never clashes",
+      not G.parallel_major_clash(el_fmin, "F minor"))
+check("parallel_major_clash is transposition-aware (C major + shift 5 → F-major clash)",
+      G.parallel_major_clash(el_cmaj, "F minor", shift=5)
+      and not G.parallel_major_clash(el_cmaj, "F minor"))
+check("out_of_scale_mass: in-scale line = 0.0, major-mode line > fold threshold",
+      G.out_of_scale_mass(el_fmin, "F minor") == 0.0
+      and G.out_of_scale_mass(el_fmaj, "F minor") > 0.35,
+      str(G.out_of_scale_mass(el_fmaj, "F minor")))
+
+# e2e — disrespectful keeps chromatic weirdness but never ships the parallel-major
+# lead when an alternative exists (deterministic pool filter, not a coin-flip re-pick)
+rec_maj = _mini_rec("s2_lead_maj", [_lead_el((65, 69, 72, 65, 70, 74, 72, 69, 65, 76,
+                                              72, 69, 65, 77, 76, 74, 72, 65))])
+rec_min = _mini_rec("s2_lead_min", [_lead_el((65, 68, 72, 65, 70, 73, 72, 68, 65, 75,
+                                              72, 68, 65, 65))])
+req_s2 = {"style": "disrespectful", "tempo": 152, "key": "F minor", "lead": True}
+s2_shipped, s2_maj = 0, []
+for s in range(8):
+    g_s2, p_s2 = G.recombine([rec_maj, rec_min], req_s2, G.Rng(s), {})
+    lsrc = p_s2.sources.get("lead")
+    if lsrc:
+        s2_shipped += 1
+        if lsrc == "s2_lead_maj":
+            s2_maj.append(s)
+check("disrespectful NEVER ships the parallel-major lead when an alternative exists",
+      s2_shipped >= 3 and not s2_maj, f"shipped={s2_shipped} maj_seeds={s2_maj}")
+# nudge-never-ban: the clashing lead is all there is → it still ships, flag fired
+g_only, p_only = G.recombine([rec_maj], {"style": "melodic-heartfelt", "tempo": 148,
+                                         "key": "F minor"}, G.Rng(3), {})
+check("a clashing lead still ships when it's all there is (relax fired, never a ban)",
+      p_only.sources.get("lead") == "s2_lead_maj"
+      and p_only.filters.get("leadModeFilteredRelaxed", 0) >= 1,
+      str(p_only.filters))
+
+# two-strike exclusion: a struck source leaves the pool; struck-everything relaxes
+rec_min2 = _mini_rec("s2_lead_min2", [_lead_el((69, 72, 76, 69, 74, 77, 76, 72, 69, 79,
+                                                76, 72, 69, 69))])  # A-minor-ish line
+req_st = {"style": "melodic-heartfelt", "tempo": 148, "key": "A minor"}
+st_bad = []
+for s in range(6):
+    g_st, p_st = G.recombine([rec_min, rec_min2], req_st, G.Rng(s), {},
+                             strikes={"lead": {"s2_lead_min2": 2}})
+    if p_st.sources.get("lead") == "s2_lead_min2":
+        st_bad.append(s)
+check("a two-strike lead source is excluded when an alternative exists (6 seeds)",
+      not st_bad, str(st_bad))
+g_st2, p_st2 = G.recombine([rec_min2], req_st, G.Rng(1), {},
+                           strikes={"lead": {"s2_lead_min2": 2}})
+check("all-struck pool relaxes instead of emptying (nudge, never a ban)",
+      p_st2.sources.get("lead") == "s2_lead_min2"
+      and p_st2.filters.get("leadKeyTwoStrikeRelaxed", 0) >= 1, str(p_st2.filters))
+check("strikes=None and strikes={} generate byte-identically (hermetic default)",
+      R.to_json(G.generate({"mood": "dark", "tempo": 140, "key": "F minor"}, seed=7,
+                           palette={})[0])
+      == R.to_json(G.generate({"mood": "dark", "tempo": 140, "key": "F minor"}, seed=7,
+                              palette={}, strikes={})[0]))
+
+# regression-lock (red-prove by deleting the conform fold in the lead branch):
+# every shipped lead under every CONFORM style lands in the requested scale
+amin_pcs = {(9 + d) % 12 for d in (0, 2, 3, 5, 7, 8, 10)}
+lock_bad = []
+for st_name, st_key in (("melodic-heartfelt", "A minor"), ("dark-menacing", "A minor"),
+                        ("club-swag", "A minor"), ("", "A minor")):
+    for s in range(6):
+        g_lk, p_lk = G.generate({"style": st_name, "mood": "dark", "tempo": 140,
+                                 "key": st_key, "lead": True}, seed=s, palette={})
+        for e in g_lk.elements:
+            if e.role.value == "lead" and any(int(n.pitch) % 12 not in amin_pcs
+                                              for n in e.midi.notes):
+                lock_bad.append((st_name or "vanilla", s))
+check("every shipped lead under every conform style lands in the requested scale "
+      "(4 styles × 6 seeds)", not lock_bad, str(lock_bad))
+
 # ── song-form v0: A A′ B A (~4× the loop), owner-chosen shape ──────────────────
 check("_b_octave_shift drops only when the drop stays audible (min 33 → −12)",
       G._b_octave_shift(33) == -12)

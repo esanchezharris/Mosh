@@ -216,6 +216,45 @@ def conform_to_key(el, req_key: str):
     return el
 
 
+def out_of_scale_mass(el, req_key: str, shift: int = 0) -> float:
+    """Duration-weighted fraction of note mass OUTSIDE req_key's scale — 0.0 on
+    empty/unparseable. `shift` evaluates the element AS IF transposed by that many
+    semitones (no clone needed). The conform-style lead-pick signal (S2):
+    conform_to_key folds every stray semitone, but folding an element with HEAVY
+    out-of-scale mass (an intrinsically-major motif under a minor request) mangles
+    its contour — the leadVarietyDropPostConform failure class — so prefer a pick
+    that already fits."""
+    pc_root, mode = _key_pc_mode(req_key)
+    if pc_root is None or not (el and el.midi.notes):
+        return 0.0
+    scale = {0, 2, 3, 5, 7, 8, 10} if mode == "minor" else {0, 2, 4, 5, 7, 9, 11}
+    tot = out = 0.0
+    for n in el.midi.notes:
+        d = float(n.duration_beats)
+        tot += d
+        if (int(n.pitch) + shift - pc_root) % 12 not in scale:
+            out += d
+    return out / tot if tot > 0 else 0.0
+
+
+def parallel_major_clash(el, req_key: str, shift: int = 0) -> bool:
+    """True iff the element's OWN measured key (Krumhansl, confident), evaluated as
+    if transposed by `shift`, is the MAJOR mode on the SAME TONIC as a minor
+    req_key — the confirmed 'wrong note' kill class (pack-004 #02 / pack-005 #05:
+    the same F-major lead under F-minor requests, both key-chipped: "still the
+    wrong note in the melody I don't like"). The relative major (Ab major under
+    F minor) and off-tonic chromatic weirdness stay LICENSED — the owner likes
+    those under 'disrespectful' (pack-003 #03 "kind of cool")."""
+    rp, rmode = _key_pc_mode(req_key)
+    if rp is None or rmode != "minor" or not (el and el.midi.notes):
+        return False
+    k, score = _krumhansl_key(el.midi.notes)
+    if score <= 0.5 or not k.endswith("major"):
+        return False
+    ep, _ = _key_pc_mode(k)
+    return ep is not None and (ep + shift) % 12 == rp
+
+
 def _interval(src_key: str, req_key: str) -> int:
     """Nearest semitone shift mapping src tonic → req tonic, in [-6, 6]."""
     sp, _ = _key_pc_mode(src_key)
@@ -332,6 +371,21 @@ def load_priors(path: str = PRIORS_PATH) -> dict:
         return {}
     doc = json.load(open(path))
     return {k: float(v.get("prior", 0.0)) for k, v in (doc.get("priors") or {}).items()}
+
+
+# Two-strike key exclusions (built by merge_labels.py from key-chipped ratings).
+STRIKES_PATH = (os.environ.get("MOSH_ELEMENT_STRIKES")
+                or os.path.expanduser("~/mosh-beats/labels/element_strikes.json"))
+
+
+def load_strikes(path: str = STRIKES_PATH) -> dict:
+    """{group: {source video_id: strike count}} for sources in ≥2 key-chipped rated
+    beats — {} when absent (permissive-on-missing). NOT loaded by default in
+    generate(): hermetic-by-default, the factory/CLI opt in (priors pattern)."""
+    if not os.path.isfile(path):
+        return {}
+    doc = json.load(open(path))
+    return doc.get("strikes") or {}
 
 
 def score_recipe(rec, request: dict, priors: Optional[dict] = None) -> float:
@@ -790,7 +844,8 @@ def _fill_missing_drums(elements: list, ranked: list, rng: Rng, prov: Provenance
 
 
 def recombine(library: list, request: dict, rng: Rng, palette: dict,
-              priors: Optional[dict] = None, form: Optional[dict] = None) -> tuple:
+              priors: Optional[dict] = None, form: Optional[dict] = None,
+              strikes: Optional[dict] = None) -> tuple:
     """Assemble a NEW recipe: drum-kit groove from one recipe, 808 from another, chords from a
     third, optional lead from a fourth — each transposed into one key, the 808 bound to the
     chords, and a palette sample bound per drum/808 role. `request["style"]` resolves an
@@ -887,7 +942,45 @@ def recombine(library: list, request: dict, rng: Rng, palette: dict,
         # pitches but zero rhythm (pack-002 beat 05's lead); an off-grid lead is the
         # pack-003 beat-12 "out-of-time" class
         lead_ok = lambda e: _distinct_ok(e) and _rhythm_grid_ok(e)  # noqa: E731
-        lead_src = _pick_recipe_with("lead", ranked, rng, pred=lead_ok)
+        # S2 — two deterministic POOL preferences, each relaxing rather than emptying
+        # (nudge-never-ban house invariant), so the pick itself keeps its exact rng
+        # draw count (seed churn confined to affected cells).
+        #   Layer 1 — two-strike exclusion (owner, pack-005 #05 "STILL the wrong note
+        #   in the melody": the same lead recipe drew key chips in two packs).
+        #   Layer 2 — mode fit, evaluated post-transpose without cloning: under
+        #   conform, heavy out-of-scale mass means the fold would mangle the contour;
+        #   under conform:false (disrespectful) the melody stays FREE except the one
+        #   confirmed kill class — the parallel-major clash.
+        struck = set((strikes or {}).get("lead") or {})
+
+        def _lead_fit(rec) -> bool:
+            el0 = _element(rec, "lead", pred=lead_ok)
+            if el0 is None:
+                return True
+            sem0 = _interval(_element_key(el0, rec.meta.key.value), req_key)
+            if conform:
+                return out_of_scale_mass(el0, req_key, shift=sem0) <= 0.35
+            return not parallel_major_clash(el0, req_key, shift=sem0)
+
+        def _has_lead(pool) -> bool:
+            return any(any(e.role.value == "lead" and lead_ok(e) for e in r.elements)
+                       for r in pool)
+
+        lead_pool = ranked
+        for fname, keep in (("leadKeyTwoStrike",
+                             lambda r: r.source.video_id not in struck),
+                            ("leadModeFiltered" if conform
+                             else "leadParallelMajorFiltered", _lead_fit)):
+            if fname == "leadKeyTwoStrike" and not struck:
+                continue
+            kept = [r for r in lead_pool if keep(r)]
+            if _has_lead(kept):
+                if len(kept) < len(lead_pool):
+                    prov.fired(fname)
+                lead_pool = kept
+            else:
+                prov.fired(fname + "Relaxed")
+        lead_src = _pick_recipe_with("lead", lead_pool, rng, pred=lead_ok)
         if lead_src:
             lead_el = _element(lead_src, "lead", pred=lead_ok)
             le = _clone_element(lead_el)
@@ -1001,13 +1094,15 @@ def recombine(library: list, request: dict, rng: Rng, palette: dict,
 
 def generate(request: dict, library_dir: str = LIB_DIR, seed: int = 0,
              palette: Optional[dict] = None, library: Optional[list] = None,
-             priors: Optional[dict] = None, form: Optional[dict] = None) -> tuple:
+             priors: Optional[dict] = None, form: Optional[dict] = None,
+             strikes: Optional[dict] = None) -> tuple:
     """Top entry: request (genre/tempo/key/mood/lead) → (assembled Recipe, Provenance).
     Pass a pre-loaded `library` for batch runs — hermetic to concurrent library writes
     (a factory run died mid-batch when an ingester grew the library under it) and skips
-    re-reading hundreds of files per candidate. `priors` (owner keep/kill nudges) are
-    OPT-IN — None means none, so generation is hermetic by default; the factory/CLI
-    pass load_priors() explicitly and snapshot the file per run.
+    re-reading hundreds of files per candidate. `priors` (owner keep/kill nudges) and
+    `strikes` (two-strike key exclusions) are OPT-IN — None means none, so generation
+    is hermetic by default; the factory/CLI pass load_priors()/load_strikes()
+    explicitly and snapshot the files per run.
 
     `form` is a KWARG, not a request key: _seed_int(request, seed) is unchanged, so a
     formed beat and its formless sibling share the IDENTICAL loop (free A/Bs, and the
@@ -1017,7 +1112,8 @@ def generate(request: dict, library_dir: str = LIB_DIR, seed: int = 0,
         raise RuntimeError(f"empty recipe library at {library_dir} (run seed_authoring.py)")
     pal = palette if palette is not None else load_palette()
     rng = Rng(_seed_int(request, seed))
-    return recombine(library, request, rng, pal, priors=priors, form=form)
+    return recombine(library, request, rng, pal, priors=priors, form=form,
+                     strikes=strikes)
 
 
 def reconstruct(library_dir: str, recipe_id: str, palette: Optional[dict] = None):

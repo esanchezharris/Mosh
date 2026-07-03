@@ -86,7 +86,7 @@ def main() -> int:
                                     "audibility808", "measuredKey", "form", "predictedKeep",
                                     "simTopPick", "soundsLike", "moreLike", "rankerMode",
                                     "topPickAnchor", "nearestTopPick", "simNearestTopPick",
-                                    "sectionTailOnsets")
+                                    "sectionTailOnsets", "strikesHash")
                                    if f.get(k) is not None}
             rows.append(row)
     with open(OUT, "w") as f:
@@ -101,7 +101,33 @@ def main() -> int:
     with open(pfile, "w") as f:
         json.dump({"version": 1, "rows": len(rows), "priors": priors}, f, indent=1)
     print(f"source priors: {len(priors)} sources (n≥3) → {pfile}")
+    strikes = build_element_strikes(rows)
+    sfile = OUT.parent / "element_strikes.json"
+    with open(sfile, "w") as f:
+        json.dump({"version": 1, "rows": len(rows), "strikes": strikes}, f, indent=1)
+    print(f"element strikes: {sum(len(v) for v in strikes.values())} sources (≥2 key-chip"
+          f" strikes) → {sfile}")
     return 0
+
+
+def build_element_strikes(rows: list) -> dict:
+    """Per-(group, source) counts of KEY-CHIPPED rated beats → sources with ≥2
+    strikes, by group. The S2 recurrence damper (owner, pack-005 #05: "STILL the
+    wrong note in the melody" — the same lead recipe drew key chips in two packs):
+    generate.py's lead pick excludes struck sources (relaxing rather than emptying).
+    Counts CHIPS not kills — both confirmed offenders were keeps-with-key-chip; the
+    chip is the owner flagging the defect regardless of verdict. Beat-level labels
+    can't attribute WHICH element earned the chip, which is exactly why this is a
+    per-group pool nudge and never a global ban."""
+    per: dict = {}
+    for r in rows:
+        if r.get("kind") != "keep" or "key" not in (r.get("chips") or []):
+            continue
+        for group, src in ((r.get("features") or {}).get("sources") or {}).items():
+            per.setdefault(group, {})
+            per[group][src] = per[group].get(src, 0) + 1
+    return {g: {s: n for s, n in srcs.items() if n >= 2}
+            for g, srcs in per.items() if any(n >= 2 for n in srcs.values())}
 
 
 def build_source_priors(rows: list) -> dict:

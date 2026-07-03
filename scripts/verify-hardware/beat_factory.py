@@ -496,6 +496,15 @@ def main() -> int:
         priors_hash = hashlib.sha1(open(G.PRIORS_PATH, "rb").read()).hexdigest()[:12]
         shutil.copy2(G.PRIORS_PATH, os.path.join(out_dir, "source_priors.snapshot.json"))
     print(f"priors: {len(priors)} sources (hash {priors_hash or 'none'})")
+    # two-strike key exclusions: same hermeticity contract as the priors snapshot
+    strikes = G.load_strikes()
+    strikes_hash = ""
+    if strikes and os.path.isfile(G.STRIKES_PATH):
+        import hashlib
+        strikes_hash = hashlib.sha1(open(G.STRIKES_PATH, "rb").read()).hexdigest()[:12]
+        shutil.copy2(G.STRIKES_PATH, os.path.join(out_dir, "element_strikes.snapshot.json"))
+    print(f"strikes: {sum(len(v) for v in strikes.values())} sources"
+          f" (hash {strikes_hash or 'none'})")
 
     grid = requests_grid(args.smoke)
     print(f"factory: {len(grid)} candidates → {out_dir}")
@@ -508,10 +517,11 @@ def main() -> int:
         # 'form' feature + card badge) beats a separate formed pack for speed of signal
         form = G.FORM_AABA32 if n % 2 == 0 else None
         rec, prov = G.generate(req, seed=seed, palette=palette, library=library,
-                               priors=priors, form=form)
+                               priors=priors, form=form, strikes=strikes)
         row = process_candidate(rec, prov, req, seed, cid, wav,
                                 os.path.join(cand_dir, ".w" + cid), binp)
         row["priorsHash"] = priors_hash
+        row["strikesHash"] = strikes_hash
         rows.append(row)
         print(f"  [{n+1}/{len(grid)}] {cid}: {row['verdict']}"
               + (f" (sub {row['gate']['subRatio']})" if "gate" in row else ""))
