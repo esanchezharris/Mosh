@@ -22,6 +22,9 @@ import struct
 import sys
 import wave
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # service/
+from audio_io import write_wav  # noqa: E402
+
 # Route library noise to stderr; keep the real stdout for our single JSON line.
 _OUT = sys.stdout
 sys.stdout = sys.stderr
@@ -53,15 +56,6 @@ def _read_wav(path):
         cnt = len(raw) // 2
         samples = [v / 32768.0 for v in struct.unpack("<%dh" % cnt, raw)] if cnt else []
     return samples, ch, sr
-
-
-def _write_wav(path, interleaved, ch, sr):
-    clamped = [int(max(-32768, min(32767, round(s * 32767.0)))) for s in interleaved]
-    body = struct.pack("<%dh" % len(clamped), *clamped) if clamped else b""
-    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-    with wave.open(path, "wb") as w:
-        w.setnchannels(ch); w.setsampwidth(2); w.setframerate(sr)
-        w.writeframes(body)
 
 
 def main() -> "None":
@@ -98,7 +92,7 @@ def main() -> "None":
 
     samples, in_ch, in_sr = _read_wav(in_wav)
     if not samples:
-        _write_wav(out_wav, [], in_ch, in_sr)
+        write_wav(out_wav, [], in_ch, in_sr)
         _OUT.write(json.dumps({"ok": True, "model": os.path.basename(cand)[:-3], "backend": "rave", "sr": in_sr}))
         return
 
@@ -131,7 +125,7 @@ def main() -> "None":
     for s in mono_out:
         for _ in range(in_ch):
             interleaved.append(s)
-    _write_wav(out_wav, interleaved, in_ch, in_sr)
+    write_wav(out_wav, interleaved, in_ch, in_sr)
 
     _OUT.write(json.dumps({"ok": True, "model": os.path.basename(cand)[:-3],
                            "backend": "rave", "sr": in_sr}))

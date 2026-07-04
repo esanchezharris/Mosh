@@ -22,13 +22,13 @@ from __future__ import annotations
 import json
 import math
 import os
-import struct
 import subprocess
 import sys
 import wave
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # service/
 import quality_readout  # noqa: E402
+from audio_io import write_wav  # noqa: E402
 from soulx import score as soulx_score  # noqa: E402
 
 SR = 44100
@@ -128,13 +128,7 @@ def _render_fake(output_wav: str, clip: dict) -> None:
             phase += 2.0 * math.pi * hz_at(rel) / SR
             env = min(1.0, (i - s0) / fade, (s1 - i) / fade)
             out[i] += AMP * env * math.sin(phase)
-    os.makedirs(os.path.dirname(os.path.abspath(output_wav)), exist_ok=True)
-    with wave.open(output_wav, "wb") as w:
-        w.setnchannels(1)
-        w.setsampwidth(2)
-        w.setframerate(SR)
-        w.writeframes(b"".join(struct.pack("<h", max(-32767, min(32767, int(v * 32767))))
-                               for v in out))
+    write_wav(output_wav, out, 1, SR)
 
 
 def _render_real(output_wav: str, score_json: str) -> None:

@@ -18,6 +18,7 @@ import wave
 # so the stub's manifest surfaces the same "reasoning" field the drawer renders (AL-006).
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # service/
 import quality_readout  # noqa: E402
+from audio_io import write_wav  # noqa: E402
 import coverage  # noqa: E402  (whole-clip tile/stitch orchestration)
 
 
@@ -82,17 +83,7 @@ def _render_window(input_wav: str, output_wav: str, params: dict) -> dict:
 
     out = _transform_samples(samples, n_channels, seed, nl, drive)
 
-    # Encode back to 16-bit PCM and write. Ensure the destination directory exists
-    # so a render into a not-yet-created path is a clean success, not an unhandled
-    # FileNotFoundError surfaced to the native client as a cryptic job error.
-    clamped = [int(max(-32768, min(32767, round(s * 32767.0)))) for s in out]
-    body = struct.pack("<%dh" % len(clamped), *clamped)
-    os.makedirs(os.path.dirname(os.path.abspath(output_wav)), exist_ok=True)
-    with wave.open(output_wav, "wb") as w:
-        w.setnchannels(n_channels)
-        w.setsampwidth(2)
-        w.setframerate(framerate)
-        w.writeframes(body)
+    write_wav(output_wav, out, n_channels, framerate)
 
     # A QA readout (judge-panel stand-in, 05 §7): the stub reports a plausible
     # production-quality score vs the source so the UI can show degradation.
