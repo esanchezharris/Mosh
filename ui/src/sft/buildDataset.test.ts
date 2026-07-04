@@ -34,6 +34,48 @@ describe("sliceProgramFull", () => {
     expect(pop.targetCommands[0].args.pitch).toBe(36);
     expect(pop.targetCommands[1].args.pitch).toBe(38);
   });
+
+  it("emits TRUE relative tempo/pan siblings (setup carries the absolute; gold = current ± fixed delta)", () => {
+    const prog: ImportProgram = {
+      commands: [
+        { command: "set_tempo", args: { bpm: 90 } },
+        { command: "create_track", args: { name: "Keys" }, bind: "t0" },
+        { command: "set_track_pan", args: { trackId: "$t0", pan: 0.2 } },
+      ],
+      unmappable: [],
+    };
+    const raws = sliceProgramFull(prog, "p");
+    // tempo: the absolute set_tempo slice + ONE relative task whose gold is 90 ± delta
+    const tempoRel = raws.filter((r) => r.goldCommandNames.join(",") === "set_tempo"
+      && r.startCommands.some((c) => c.command === "set_tempo"));
+    expect(tempoRel).toHaveLength(1);
+    const bpm = Number(tempoRel[0].targetCommands[0].args.bpm);
+    expect(bpm).not.toBe(90); // a real delta, never the unlearnable current-value pairing
+    expect([92, 95, 85, 100, 88]).toContain(bpm); // the fixed convention deltas off 90
+    // pan: the relative sibling stays in [-1, 1] and moves off the current 0.2
+    const panRel = raws.filter((r) => r.goldCommandNames.join(",") === "set_track_pan"
+      && r.startCommands.some((c) => c.command === "set_track_pan"));
+    expect(panRel).toHaveLength(1);
+    const pan = Number(panRel[0].targetCommands[0].args.pan);
+    expect(pan).not.toBe(0.2);
+    expect(Math.abs(pan)).toBeLessThanOrEqual(1);
+    expect([0.1, 0.35, 0.05, 0.45]).toContain(pan); // 0.2 ± the fixed convention deltas
+  });
+
+  it("skips a relative task whose target would leave the legal range (never teach a clamped delta)", () => {
+    const prog: ImportProgram = {
+      commands: [
+        { command: "create_track", args: { name: "Keys" }, bind: "t0" },
+        { command: "set_track_pan", args: { trackId: "$t0", pan: 0.9 } },
+      ],
+      unmappable: [],
+    };
+    // rotation at this point selects a positive delta that would exceed 1.0 → skipped
+    const raws = sliceProgramFull(prog, "p");
+    const panRel = raws.filter((r) => r.goldCommandNames.join(",") === "set_track_pan"
+      && r.startCommands.some((c) => c.command === "set_track_pan"));
+    for (const r of panRel) expect(Math.abs(Number(r.targetCommands[0].args.pan))).toBeLessThanOrEqual(1);
+  });
 });
 
 describe("renderExample", () => {

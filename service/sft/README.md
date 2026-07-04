@@ -20,7 +20,7 @@ Standalone lane (like `ui/src/gepa/`), **not** wired into the audio-LoRA scaffol
 
 ## 1. Setup (one-time)
 ```bash
-service/sft/setup-sft.sh          # creates service/sft/.venv (mlx-lm), writes .sft.env
+service/sft/setup-sft.sh          # creates ~/Library/Mosh/venvs/sft (mlx-lm), writes .sft.env
 source service/sft/.sft.env       # exports SFT_PY
 ```
 

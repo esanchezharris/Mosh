@@ -14,42 +14,44 @@ interface ShellState {
   selectedClipId: string | null;   // clip-level selection for the contextual Inspector
   inspectorTab: InspectorTab;
   inspectorOpen: boolean;
-  railCollapsed: boolean;
   sectionZoom: SectionZoom;
   activityOpen: boolean;
-  browserOpen: boolean;            // left browser drawer (sounds + plugins), pull-tab toggled
+  browserOpen: boolean;            // LEFT push-dock (sounds + plugins), pull-tab toggled
   browserTab: BrowserTab;
+  rightOpen: boolean;              // RIGHT push-dock (agent · inspector · collaborators); default open
 
   setSelectedClip: (id: string | null) => void;
   setInspectorTab: (t: InspectorTab) => void;
   setInspectorOpen: (b: boolean) => void;
-  setRailCollapsed: (b: boolean) => void;
   setSectionZoom: (z: SectionZoom) => void;
   setActivityOpen: (b: boolean) => void;
   setBrowserOpen: (b: boolean) => void;
   toggleBrowser: () => void;
   openBrowserTab: (t: BrowserTab) => void;  // open the drawer ON a tab (used by "+ plugin")
+  setRightOpen: (b: boolean) => void;
+  toggleRight: () => void;
 }
 
 export const useShell = create<ShellState>((set) => ({
   selectedClipId: null,
   inspectorTab: "mix",
   inspectorOpen: false,
-  railCollapsed: false,
   sectionZoom: "16b",
   activityOpen: false,
   browserOpen: false,
   browserTab: "sounds",
+  rightOpen: true,
 
   // Selecting a clip opens the inspector; deselecting leaves it as-is (the user can
   // pin/close it explicitly). Track selection is NOT here — route it through useStore.
   setSelectedClip: (id) => set(id ? { selectedClipId: id, inspectorOpen: true } : { selectedClipId: null }),
   setInspectorTab: (t) => set({ inspectorTab: t }),
   setInspectorOpen: (b) => set({ inspectorOpen: b }),
-  setRailCollapsed: (b) => set({ railCollapsed: b }),
   setSectionZoom: (z) => set({ sectionZoom: z }),
   setActivityOpen: (b) => set({ activityOpen: b }),
   setBrowserOpen: (b) => set({ browserOpen: b }),
   toggleBrowser: () => set((s) => ({ browserOpen: !s.browserOpen })),
   openBrowserTab: (t) => set({ browserOpen: true, browserTab: t }),
+  setRightOpen: (b) => set({ rightOpen: b }),
+  toggleRight: () => set((s) => ({ rightOpen: !s.rightOpen })),
 }));

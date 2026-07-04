@@ -18,7 +18,7 @@ import {
   sliceProgramFull, renderExample, tupleToExample, huhExamples, snapshotForSetup,
   splitBySource, type RawExample, type RenderedExample,
 } from "../src/sft/buildDataset";
-import { Backtranslator, makeBrainChat, loadDotEnv } from "../src/sft/backtranslate";
+import { Backtranslator, BT_STYLES, makeBrainChat, loadDotEnv } from "../src/sft/backtranslate";
 
 // Stream JSONL to disk in chunks — a single .map().join() over ~100k examples
 // (each carrying a ~10KB system prompt) overflows V8's max string length.
@@ -45,7 +45,7 @@ const tuplesPath = flag("tuples");
 const outDir = flag("out") || join(resolve(process.cwd(), ".."), "service", "training", "gepa", "generated", "sft");
 const [trR, vaR, teR] = (flag("split", "80/10/10") as string).split("/").map(Number);
 const seed = Number(flag("seed", "1"));
-const huhFrac = Number(flag("huh", "0.05"));
+const huhFrac = Number(flag("huh", "0.015")); // was 0.05 — the 5% defer slice over-generalized into deferring on plain imperatives (2026-07 audit)
 const maxPerFile = Number(flag("max", "1000"));
 const sampleN = Number(flag("sample", "0")) || Infinity;  // cap files processed
 const limitN = Number(flag("limit", "0")) || Infinity;    // cap rendered examples
@@ -57,6 +57,9 @@ const maxNotes = Number(flag("max-notes", "0")) || undefined; // cap a populate 
 const btEnabled = process.argv.includes("--backtranslate");
 const btBudget = Number(flag("backtranslate", "60")) || 60; // max brain calls (≈ distinct shapes)
 const btVariants = Number(flag("bt-variants", "3")) || 3;
+// --bt-styles → one call per style per shape (terse↔verbose axis; program Stage 1.1).
+// Budget then counts CALLS (shapes × styles), so size --backtranslate accordingly.
+const btStyles = process.argv.includes("--bt-styles");
 
 const EXT = /\.(rpp|als|flp|mid|midi)$/i;
 function findProjects(dir: string, out: string[] = []): string[] {
@@ -92,7 +95,7 @@ if (btEnabled) {
     const cache = new Map<string, string[]>();
     if (existsSync(btCachePath)) try { for (const [k, v] of Object.entries(JSON.parse(readFileSync(btCachePath, "utf8")))) cache.set(k, v as string[]); } catch { /* ignore */ }
     bt = new Backtranslator(chat, {
-      variants: btVariants, budget: { calls: btBudget }, cache,
+      variants: btVariants, styles: btStyles ? BT_STYLES : undefined, budget: { calls: btBudget }, cache,
       onShape: (s, t) => console.log(`  ↳ backtranslate "${s}" → ${t.length} phrasing(s)`),
     });
     console.log(`  back-translation ON (budget ${btBudget} brain calls, ${btVariants} variant(s)/shape${cache.size ? `, ${cache.size} cached shape(s)` : ""})`);
@@ -157,9 +160,15 @@ mkdirSync(outDir, { recursive: true });
 // persist the back-translation cache (shape → natural phrasings) so re-runs reuse it
 if (bt) try { writeFileSync(btCachePath, JSON.stringify(Object.fromEntries(bt.cacheEntries()), null, 0)); } catch { /* non-fatal */ }
 const chatLine = (e: RenderedExample) => JSON.stringify({ messages: e.messages });
+const metaLine = (e: RenderedExample) => JSON.stringify({ id: e.id, sourceId: e.sourceId });
 writeRows(join(outDir, "train.jsonl"), split.train, chatLine);
 writeRows(join(outDir, "valid.jsonl"), split.valid, chatLine);
 writeRows(join(outDir, "test.jsonl"), split.test, chatLine);
+// Sidecar metadata (line-aligned with the chat files) so downstream curation can
+// key rows by source — e.g. leakage checks against a frozen eval set (2026-07 audit).
+writeRows(join(outDir, "train.meta.jsonl"), split.train, metaLine);
+writeRows(join(outDir, "valid.meta.jsonl"), split.valid, metaLine);
+writeRows(join(outDir, "test.meta.jsonl"), split.test, metaLine);
 writeRows(join(outDir, "test.eval.jsonl"), evalRaws, (r) => JSON.stringify({ id: r.id, utterance: r.utterance, startCommands: r.startCommands, goldCommandNames: r.goldCommandNames }));
 
 const datasetVersion = `sft-${createHash("sha256").update(`${corpora.join("|")}:${seed}:${trR}/${vaR}/${teR}:${sampleN}:${limitN}:${maxNotes ?? "all"}:${used.length}`).digest("hex").slice(0, 12)}`;
@@ -167,7 +176,7 @@ const manifest = {
   datasetVersion, createdFrom: corpora,
   counts: { train: split.train.length, valid: split.valid.length, test: split.test.length, evalSet: evalRaws.length, importer: rendered.length, backtranslated: btCount, tuples: tupleExamples.length, huh: huh.length },
   corpus: { filesFound: allFiles.length, filesProcessed: processed, filesUsed: used.length },
-  backtranslation: bt ? { enabled: true, brainCalls: bt.calls, shapes: bt.cacheEntries().length, variants: btVariants, examples: btCount } : { enabled: false },
+  backtranslation: bt ? { enabled: true, brainCalls: bt.calls, shapes: bt.cacheEntries().length, variants: btVariants, styles: btStyles ? BT_STYLES.length : 0, examples: btCount } : { enabled: false },
   split: { ratios: [trR, vaR, teR], seed, sample: sampleN === Infinity ? "all" : sampleN, limit: limitN === Infinity ? "none" : limitN, maxNotes: maxNotes ?? "all" },
 };
 writeFileSync(join(outDir, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");

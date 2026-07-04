@@ -156,6 +156,45 @@ TEST_CASE ("Phase-2 skeleton lands lines `skeleton` + survives serialization (LY
         REQUIRE (backLines.getChild (i)[ids::status].toString() == "seed");
 }
 
+TEST_CASE ("Phase-3 lyricScore (render-ready score blob) persists on a skeleton line", "[lyrics][skeleton][score]")
+{
+    // Stage 1 (kill-shot B GO 2026-07-04): build_skeleton_from_clip lands the take's
+    // articulation groups as a per-line JSON blob — melisma slots carry per-note segments.
+    // PERSISTED (unlike the transient proposals/analysis blobs): it is the Phase-3 render
+    // skeleton the SoulX adapter will author its target score from.
+    auto line = LyricLine::create ("sc-1", 0, "verse");
+    line.setProperty (ids::status, "skeleton", nullptr);
+    line.setProperty (ids::lyricScore,
+                      "{\"v\":1,\"algo\":\"v3\",\"bar\":0,\"bpm\":120.0,\"timeSig\":[4,4],"
+                      "\"grid\":\"1/8\",\"clamped\":false,\"slots\":[{\"start\":0.0,\"end\":1.0,"
+                      "\"velocity\":100.0,\"kind\":\"attack\",\"segments\":[{\"start\":0.0,"
+                      "\"end\":0.5,\"pitch\":57},{\"start\":0.5,\"end\":1.0,\"pitch\":60}]}]}",
+                      nullptr);
+
+    auto back = juce::ValueTree::fromXml (line.toXmlString());
+    auto parsed = juce::JSON::parse (back[ids::lyricScore].toString());
+    REQUIRE (parsed.isObject());
+    REQUIRE ((int) parsed.getProperty ("v", juce::var (0)) == 1);
+    REQUIRE (parsed.getProperty ("algo", juce::var()).toString() == "v3");
+    auto slots = parsed.getProperty ("slots", juce::var());
+    REQUIRE (slots.isArray());
+    auto segs = slots[0].getProperty ("segments", juce::var());
+    REQUIRE (segs.isArray());
+    REQUIRE (segs.size() == 2);
+    REQUIRE ((int) segs[1].getProperty ("pitch", juce::var (0)) == 60);
+
+    // A fresh line has no score (only build_skeleton_from_clip lands one).
+    REQUIRE_FALSE (LyricLine::create ("sc-2", 1, "verse").hasProperty (ids::lyricScore));
+
+    // The score is NOT a generation constraint: the line fingerprint must ignore it
+    // (attaching the blob cannot dirty cached lyric proposals).
+    auto sheet = LyricSheet::create ("ls-sc");
+    auto l2 = LyricLine::create ("sc-3", 0, "verse");
+    const auto before = LyricSheet::lineFingerprint (sheet, l2, "ctx", "build");
+    l2.setProperty (ids::lyricScore, "{\"v\":1}", nullptr);
+    REQUIRE (LyricSheet::lineFingerprint (sheet, l2, "ctx", "build") == before);
+}
+
 TEST_CASE ("lineFingerprint is stable + sensitive to every constraint input", "[lyrics][cache]")
 {
     auto sheet = LyricSheet::create ("ls-3");

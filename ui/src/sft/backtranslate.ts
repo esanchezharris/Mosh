@@ -76,7 +76,16 @@ const SYS =
   "terse, some chatty. Do NOT mention software commands, JSON, or APIs. Respond ONLY as " +
   '{"instructions": ["...", "..."]} — a JSON object with a string array.';
 
-export function buildShapePrompt(shape: string, n: number): ChatMessage[] {
+// Style axis for real diversity at scale (program Stage 1.1: "style-varied, terse
+// producer-speak ↔ verbose beginner"). One brain call per style per shape; the
+// default (no styles) keeps the original single-call behavior.
+export const BT_STYLES = [
+  "terse producer slang — clipped, lowercase, studio shorthand, no pleasantries",
+  "plain everyday phrasing — neutral and direct",
+  "verbose beginner — polite full sentences, may hedge or over-explain",
+];
+
+export function buildShapePrompt(shape: string, n: number, style?: string): ChatMessage[] {
   return [
     { role: "system", content: SYS },
     {
@@ -84,6 +93,7 @@ export function buildShapePrompt(shape: string, n: number): ChatMessage[] {
       content:
         `Mechanical instruction: "${shape}"\n` +
         `Write ${n} distinct, natural producer phrasings of the SAME request. ` +
+        (style ? `Voice: ${style}. ` : "") +
         `Keep the placeholders ${[...placeholderSet(shape)].map((i) => `{${i}}`).join(", ") || "(none)"} verbatim.`,
     },
   ];
@@ -106,7 +116,8 @@ export function parseInstructions(content: string): string[] {
 
 // ── the back-translator ──────────────────────────────────────────────────────────
 export type BacktranslateOpts = {
-  variants?: number;                 // natural utterances per shape (default 3)
+  variants?: number;                 // natural utterances per shape (default 3; per STYLE when styles set)
+  styles?: string[];                 // one brain call per style per shape (e.g. BT_STYLES)
   budget?: { calls: number };        // mutable remaining brain-call budget (shared)
   cache?: Map<string, string[]>;     // shape → validated templates (re-run idempotency)
   onShape?: (shape: string, templates: string[]) => void; // progress hook
@@ -115,6 +126,7 @@ export type BacktranslateOpts = {
 export class Backtranslator {
   private chat: BrainChat;
   private variants: number;
+  private styles: string[] | undefined;
   private budget: { calls: number };
   private cache: Map<string, string[]>;
   private onShape?: (s: string, t: string[]) => void;
@@ -123,6 +135,7 @@ export class Backtranslator {
   constructor(chat: BrainChat, opts: BacktranslateOpts = {}) {
     this.chat = chat;
     this.variants = opts.variants ?? 3;
+    this.styles = opts.styles;
     this.budget = opts.budget ?? { calls: Infinity };
     this.cache = opts.cache ?? new Map();
     this.onShape = opts.onShape;
@@ -131,23 +144,27 @@ export class Backtranslator {
   /** Snapshot the shape→templates cache (for persistence across runs). */
   cacheEntries(): [string, string[]][] { return [...this.cache]; }
 
-  /** Natural templates for one shape (cached; one brain call, budget-gated). */
+  /** Natural templates for one shape (cached; budget-gated — one brain call per
+   *  style when a style axis is set, else one call total). */
   async templatesFor(shape: string): Promise<string[]> {
     const hit = this.cache.get(shape);
     if (hit) return hit;
-    if (this.budget.calls <= 0) return [];
-    this.budget.calls--;
-    this.calls++;
-    let templates: string[] = [];
-    try {
-      const reply = await this.chat(buildShapePrompt(shape, this.variants));
-      const seen = new Set<string>();
-      for (const t of parseInstructions(reply)) {
-        const tt = t.trim();
-        if (validateTemplate(tt, shape) && !seen.has(tt.toLowerCase())) { seen.add(tt.toLowerCase()); templates.push(tt); }
-        if (templates.length >= this.variants) break;
-      }
-    } catch { templates = []; }
+    const templates: string[] = [];
+    const seen = new Set<string>();
+    for (const style of this.styles ?? [undefined as string | undefined]) {
+      if (this.budget.calls <= 0) break;
+      this.budget.calls--;
+      this.calls++;
+      try {
+        const reply = await this.chat(buildShapePrompt(shape, this.variants, style));
+        let kept = 0;
+        for (const t of parseInstructions(reply)) {
+          const tt = t.trim();
+          if (validateTemplate(tt, shape) && !seen.has(tt.toLowerCase())) { seen.add(tt.toLowerCase()); templates.push(tt); kept++; }
+          if (kept >= this.variants) break;
+        }
+      } catch { /* a dud style call contributes nothing; others still count */ }
+    }
     this.cache.set(shape, templates); // cache even [] so a dud shape isn't retried
     this.onShape?.(shape, templates);
     return templates;

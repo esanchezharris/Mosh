@@ -1,0 +1,15 @@
+[
+  {
+    "index": "score1-flame_0_13000",
+    "language": "English",
+    "time": [
+      0,
+      13000
+    ],
+    "duration": "0.50 0.25 0.50 0.25 0.75 0.25 0.25 0.25 0.50 0.50 0.25 0.25 0.25 2.00 0.50 0.25 0.50 0.25 0.75 0.25 0.25 0.25 0.50 0.25 1.50 0.50 0.50",
+    "text": "<SP> they counted me out <SP> but I came back <SP> to the flame <SP> they counted me out <SP> still I hold the flame flame <SP>",
+    "phoneme": "<SP> en_DH-EY1 en_K-AW1-N-T-IH0-D en_M-IY1 en_AW1-T <SP> en_B-AH1-T en_AY1 en_K-EY1-M en_B-AE1-K <SP> en_T-UW1 en_DH-AH0 en_F-L-EY1-M <SP> en_DH-EY1 en_K-AW1-N-T-IH0-D en_M-IY1 en_AW1-T <SP> en_S-T-IH1-L en_AY1 en_HH-OW1-L-D en_DH-AH0 en_F-L-EY1-M en_F-L-EY1-M <SP>",
+    "note_pitch": "0 45 47 45 43 0 43 45 47 48 0 47 45 43 0 45 47 48 50 0 48 47 45 43 45 43 0",
+    "note_type": "1 2 2 2 2 1 2 2 2 2 1 2 2 2 1 2 2 2 2 1 2 2 2 2 2 3 1"
+  }
+]

@@ -167,7 +167,10 @@ bundle_service() {                              # $1 = installed app
   rm -rf "$SVC"; mkdir -p "$SVC/transcribe" "$SVC/sketch" "$SVC/transform"
   cp "$ROOT/service/server.py" "$ROOT/service/run.sh" \
      "$ROOT/service/quality_readout.py" "$ROOT/service/setup-sa3.sh" "$SVC/" 2>/dev/null || true
-  for d in adapters colors sa3 scripts training; do
+  # FMS service modules ride whole-dir (imported in-process by server.py / the adapters;
+  # venvs live OUTSIDE the tree at ~/Library/Mosh/venvs since #218, and the machine-local
+  # .env pointers inside these dirs are exactly what the deployed run.sh needs).
+  for d in adapters colors sa3 scripts training lyrics phonology skeleton whisper soulx; do
     [ -d "$ROOT/service/$d" ] && cp -R "$ROOT/service/$d" "$SVC/$d"
   done
   cp "$ROOT/service/transcribe/transcribe_cli.py" \

@@ -112,6 +112,7 @@ function seedSnapshot(): Snapshot {
     session: {
       sampleRate: SR, tempo: 120, timeSigNumerator: 4, timeSigDenominator: 4,
       raveAvailable: true,   // Route C.2 — exercise the "+ RAVE" affordance in dev/e2e
+      singVoiceEnrolled: false,  // FMS Phase-3 — dev/e2e exercise the not-enrolled copy
       metronome: false, length: 16, editFile: "/mock/session.mosh",
       audioEnabled: true, bitDepth: 24, bufferSize: 512,
       availableCores: 8, audioThreads: 8, audioThreadsAuto: true,
@@ -1077,6 +1078,8 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     }
     case "render_layer": {
       const f = findClip(str(args.clipId)); if (!f?.clip.renderLayer) return err(command, "no render layer");
+      if (f.clip.renderLayer.mode === "sing" && !f.track.lyricSheet)
+        return err(command, "sing needs a lyric sheet on the clip's track (build a flow from a take first)");
       f.clip.renderLayer.status = "ready"; f.clip.renderLayer.hasArtifact = true;
       // Wave clips auto-apply in place: the render becomes the clip's audio + Reset becomes available.
       if (f.clip.type === "wave") { f.clip.renderLayer.appliedInPlace = true; f.clip.renderLayer.hasOriginal = true; }
@@ -1205,6 +1208,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
           index, role: "verse", seedText: Array.from({ length: target }).fill("___").join(" "),
           text: "", syllableTarget: target, syllableTol: 1, stress, rhymeGroup: rg,
           rhymeStrictness: "", locked: false, sectionId: "", status: "skeleton",
+          hasScore: true,   // Stage 1 lands the take's lyricScore with each skeleton line
         });
         trk.lyricSheet = {
           id: `ls-${trk.id}`, grid: "1/8", language: "en", topic: "", mood: "",

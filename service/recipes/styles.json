@@ -1,0 +1,21 @@
+{
+  "_comment": "Owner-named style vocabulary v0 (2026-07-02, pack-003 question round). DATA not code: the generator interprets four generic knobs (retrieval / groove / key / lead), so the future encyclopedic vocabulary (FX-KB pipeline) drops in as JSON. Owner quotes: club-swag = 'club/swag type beat direction with the clap on 2 and 4'; disrespectful = 'key is kind of weird but that's kind of cool and aggressive/disrespectful sounding'.",
+  "club-swag": {
+    "retrieval": {"mood": "chill", "tempoRange": [128, 148]},
+    "groove": {"roles": ["snare", "clap"], "beatsInBar": [1.0, 3.0], "tol": 0.1, "minBarFrac": 0.75},
+    "key": {"conform": true}
+  },
+  "disrespectful": {
+    "retrieval": {"mood": "aggressive"},
+    "key": {"conform": false}
+  },
+  "melodic-heartfelt": {
+    "retrieval": {"mood": "emotional"},
+    "lead": "require",
+    "key": {"conform": true}
+  },
+  "dark-menacing": {
+    "retrieval": {"mood": "dark"},
+    "key": {"conform": true}
+  }
+}

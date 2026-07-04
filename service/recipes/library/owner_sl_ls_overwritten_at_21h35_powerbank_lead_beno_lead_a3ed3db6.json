@@ -1,0 +1,187 @@
+{
+  "recipe_id": "owner_sl_ls_overwritten_at_21h35_powerbank_lead_beno_lead",
+  "schema_version": "2.0",
+  "source": {
+    "platform": "owner-catalog",
+    "video_id": "owner_sl_ls_overwritten_at_21h35_powerbank_lead_beno_lead",
+    "url": "",
+    "title": "13_sl_ls_overwritten_at_21h35_",
+    "channel": "",
+    "duration_s": 0.0,
+    "license": "owner",
+    "retrieved_at": null,
+    "content_hash": "a3ed3db6c0df9f862f9888dbdcf95206762f770f8763cbe1f7eeddd169e78465"
+  },
+  "meta": {
+    "daw": {
+      "value": "flstudio",
+      "confidence": 0.95,
+      "evidence": [
+        "importer format"
+      ]
+    },
+    "tempo_bpm": {
+      "value": 144,
+      "confidence": 0.95,
+      "evidence": [
+        "project file tempo"
+      ]
+    },
+    "key": {
+      "value": "F major",
+      "confidence": 0.75,
+      "evidence": [
+        "pitch-class inference (Krumhansl)"
+      ]
+    },
+    "time_signature": {
+      "value": "4/4",
+      "confidence": 0.6,
+      "evidence": []
+    }
+  },
+  "arrangement": {
+    "sections": [
+      {
+        "name": "loop",
+        "start_s": 0.0,
+        "end_s": 3.3333333333333335,
+        "confidence": 0.5
+      }
+    ]
+  },
+  "elements": [
+    {
+      "element_id": "owner_sl_ls_overwritten_at_21h35_powerbank_lead_beno_lead",
+      "role": "lead",
+      "label": "sl_ls_overwritten_at_21h35 · powerbank lead beno (lead)",
+      "audio_ref": null,
+      "midi": {
+        "status": "extracted",
+        "midi_ref": null,
+        "notes": [
+          {
+            "pitch": 69,
+            "start_beats": 0.0,
+            "duration_beats": 3.0,
+            "velocity": 127
+          },
+          {
+            "pitch": 60,
+            "start_beats": 0.0,
+            "duration_beats": 1.0,
+            "velocity": 127
+          },
+          {
+            "pitch": 65,
+            "start_beats": 1.0,
+            "duration_beats": 1.0,
+            "velocity": 127
+          },
+          {
+            "pitch": 67,
+            "start_beats": 1.5,
+            "duration_beats": 1.0,
+            "velocity": 127
+          },
+          {
+            "pitch": 60,
+            "start_beats": 2.0,
+            "duration_beats": 3.0,
+            "velocity": 127
+          },
+          {
+            "pitch": 62,
+            "start_beats": 3.0,
+            "duration_beats": 3.0,
+            "velocity": 127
+          },
+          {
+            "pitch": 57,
+            "start_beats": 5.0,
+            "duration_beats": 3.0,
+            "velocity": 127
+          },
+          {
+            "pitch": 67,
+            "start_beats": 6.0,
+            "duration_beats": 2.0,
+            "velocity": 127
+          },
+          {
+            "pitch": 65,
+            "start_beats": 7.0,
+            "duration_beats": 1.0,
+            "velocity": 127
+          },
+          {
+            "pitch": 62,
+            "start_beats": 7.5,
+            "duration_beats": 0.5,
+            "velocity": 127
+          }
+        ],
+        "note_count": 10,
+        "confidence": 1.0
+      },
+      "sample_match": {
+        "status": "none",
+        "matched_path": null,
+        "distance": 0.0,
+        "alternates": [],
+        "root_note": null
+      },
+      "synth_patch": {
+        "status": "unknown",
+        "plugin": {
+          "name": null,
+          "available_locally": false
+        },
+        "params": {},
+        "match": null,
+        "substitute": null
+      },
+      "onsets": [],
+      "motif": {
+        "bars": 2.0,
+        "onset_grid": "8th",
+        "density": 5.0,
+        "syncopation": 0.2,
+        "contour": [
+          1,
+          -1,
+          1,
+          -1,
+          1,
+          -1,
+          1,
+          -1,
+          -1
+        ],
+        "register_band": "mid",
+        "harmonic_function": ""
+      },
+      "bass": null,
+      "evidence": [],
+      "confidence": 0.9
+    }
+  ],
+  "unresolved": [],
+  "reconstruction_class": "deterministic",
+  "yield": {
+    "predicted": {
+      "drums": 0.0,
+      "midi": 1.0,
+      "synth": 0.0,
+      "arrangement": 0.5,
+      "overall": 0.7
+    },
+    "actual": {
+      "drums": 0.0,
+      "midi": 0.0,
+      "synth": 0.0,
+      "arrangement": 0.0,
+      "overall": 0.0
+    }
+  }
+}

@@ -1,0 +1,201 @@
+{
+  "recipe_id": "owner_okaywait_serato_sample_perc",
+  "schema_version": "2.0",
+  "source": {
+    "platform": "owner-catalog",
+    "video_id": "owner_okaywait_serato_sample_perc",
+    "url": "",
+    "title": "39_okaywait",
+    "channel": "",
+    "duration_s": 0.0,
+    "license": "owner",
+    "retrieved_at": null,
+    "content_hash": "07d7150a1bb4eac5fae1b3c527e93708fd2bdb178ee95907fd21990f96f8c70b"
+  },
+  "meta": {
+    "daw": {
+      "value": "flstudio",
+      "confidence": 0.95,
+      "evidence": [
+        "importer format"
+      ]
+    },
+    "tempo_bpm": {
+      "value": 152,
+      "confidence": 0.95,
+      "evidence": [
+        "project file tempo"
+      ]
+    },
+    "key": {
+      "value": "F minor",
+      "confidence": 0.75,
+      "evidence": [
+        "pitch-class inference (Krumhansl)"
+      ]
+    },
+    "time_signature": {
+      "value": "4/4",
+      "confidence": 0.6,
+      "evidence": []
+    }
+  },
+  "arrangement": {
+    "sections": [
+      {
+        "name": "loop",
+        "start_s": 0.0,
+        "end_s": 3.1578947368421053,
+        "confidence": 0.5
+      }
+    ]
+  },
+  "elements": [
+    {
+      "element_id": "owner_okaywait_serato_sample_perc",
+      "role": "perc",
+      "label": "okaywait · Serato Sample (perc)",
+      "audio_ref": null,
+      "midi": {
+        "status": "extracted",
+        "midi_ref": null,
+        "notes": [
+          {
+            "pitch": 36,
+            "start_beats": 0.0,
+            "duration_beats": 1.0,
+            "velocity": 107
+          },
+          {
+            "pitch": 38,
+            "start_beats": 1.0,
+            "duration_beats": 2.0,
+            "velocity": 110
+          },
+          {
+            "pitch": 40,
+            "start_beats": 3.0,
+            "duration_beats": 0.25,
+            "velocity": 111
+          },
+          {
+            "pitch": 38,
+            "start_beats": 3.25,
+            "duration_beats": 0.25,
+            "velocity": 111
+          },
+          {
+            "pitch": 39,
+            "start_beats": 3.5,
+            "duration_beats": 0.5,
+            "velocity": 112
+          },
+          {
+            "pitch": 39,
+            "start_beats": 4.0,
+            "duration_beats": 0.5,
+            "velocity": 112
+          },
+          {
+            "pitch": 38,
+            "start_beats": 4.5,
+            "duration_beats": 0.5,
+            "velocity": 113
+          },
+          {
+            "pitch": 37,
+            "start_beats": 5.0,
+            "duration_beats": 0.5,
+            "velocity": 114
+          },
+          {
+            "pitch": 37,
+            "start_beats": 5.5,
+            "duration_beats": 0.5,
+            "velocity": 114
+          },
+          {
+            "pitch": 37,
+            "start_beats": 6.0,
+            "duration_beats": 0.5,
+            "velocity": 114
+          },
+          {
+            "pitch": 36,
+            "start_beats": 6.5,
+            "duration_beats": 0.5,
+            "velocity": 114
+          },
+          {
+            "pitch": 36,
+            "start_beats": 7.0,
+            "duration_beats": 1.0,
+            "velocity": 114
+          }
+        ],
+        "note_count": 12,
+        "confidence": 1.0
+      },
+      "sample_match": {
+        "status": "none",
+        "matched_path": null,
+        "distance": 0.0,
+        "alternates": [],
+        "root_note": null
+      },
+      "synth_patch": {
+        "status": "unknown",
+        "plugin": {
+          "name": null,
+          "available_locally": false
+        },
+        "params": {},
+        "match": null,
+        "substitute": null
+      },
+      "onsets": [],
+      "motif": {
+        "bars": 2.0,
+        "onset_grid": "16th",
+        "density": 6.0,
+        "syncopation": 0.4167,
+        "contour": [
+          1,
+          1,
+          -1,
+          1,
+          0,
+          -1,
+          -1,
+          0,
+          0,
+          -1,
+          0
+        ],
+        "register_band": "perc",
+        "harmonic_function": ""
+      },
+      "bass": null,
+      "evidence": [],
+      "confidence": 0.9
+    }
+  ],
+  "unresolved": [],
+  "reconstruction_class": "deterministic",
+  "yield": {
+    "predicted": {
+      "drums": 0.0,
+      "midi": 1.0,
+      "synth": 0.0,
+      "arrangement": 0.5,
+      "overall": 0.7
+    },
+    "actual": {
+      "drums": 0.0,
+      "midi": 0.0,
+      "synth": 0.0,
+      "arrangement": 0.0,
+      "overall": 0.0
+    }
+  }
+}

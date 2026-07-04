@@ -10,7 +10,6 @@ import { useSettings } from "../settings/store";
 import { tempoMapFrom, secondsToBBSMap, meterFrom, barSeconds } from "../time";
 import { TONICS, MODES, DEFAULT_KEY } from "../musicalKey";
 import { TrainingTool, CommandLogTool, RemoteTool, MultiplayerTool, HelpTool } from "../ui/TopbarTools";
-import { MoshMark } from "./MoshMark";
 import type { Snapshot } from "../types";
 
 function projectName(editFile: string): string {
@@ -36,7 +35,6 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
   return (
     <header className="v2-topbar" data-testid="v2-topbar">
       <div className="v2-brand">
-        <MoshMark size={30} />
         <div className="v2-proj">
           <span className="v2-proj-name" title={snapshot.session.editFile}>{projectName(snapshot.session.editFile)}</span>
           <div className="v2-proj-meta">

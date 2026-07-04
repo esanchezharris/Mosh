@@ -57,12 +57,29 @@ test("left browser drawer: pull-tab opens it, tabs switch, close dismisses", asy
   await expect(page.getByTestId("v2-browser-tab-sounds")).toHaveCount(0);
 });
 
+test("right agent dock: collapses to a Moshi pull-tab and re-expands", async ({ page }) => {
+  await bootV2(page);
+  // open by default → the agent rail (the live WebGL Moshi) is mounted
+  await expect(page.getByTestId("v2-rail")).toBeVisible();
+  await expect(page.locator('[data-testid="v2-mosh-card"] canvas')).toBeVisible();
+  // collapse → the rail unmounts, a pull-tab carrying the minimized Moshi mark takes its place
+  await page.getByTestId("v2-rail-collapse").click();
+  await expect(page.getByTestId("v2-rail")).toHaveCount(0);
+  const pull = page.getByTestId("v2-right-pull");
+  await expect(pull).toBeVisible();
+  await expect(pull.locator("svg.v2-mark")).toBeVisible(); // the minimized Moshi stays present
+  // re-expand → the maximized agent (canvas) is back
+  await pull.click();
+  await expect(page.getByTestId("v2-rail")).toBeVisible();
+  await expect(page.locator('[data-testid="v2-mosh-card"] canvas')).toBeVisible();
+});
+
 test("boots the v2 shell with topbar, tracks, composer and the always-on rail", async ({ page }) => {
   await bootV2(page);
   await expect(page.getByTestId("v2-topbar")).toBeVisible();
   await expect(page.getByTestId("v2-track-header")).toHaveCount(3);
   await expect(page.getByTestId("v2-composer")).toBeVisible();
-  // the agent lives "maximized" in the always-on right rail (its only live WebGL mount)
+  // the agent lives "maximized" in the right dock — the live WebGL Moshi
   await expect(page.getByTestId("v2-rail")).toBeVisible();
   await expect(page.locator('[data-testid="v2-mosh-card"] canvas')).toBeVisible();
 });
@@ -311,85 +328,17 @@ test("the right rail is always present; peers add collaborator tiles", async ({ 
   await expect(page.getByTestId("v2-collab-peer")).toBeVisible();
 });
 
-test("section ribbon: '+' creates a section and opens it for rename", async ({ page }) => {
+test("song navigator: shows bar numbers and click jumps the playhead", async ({ page }) => {
   await bootV2(page);
-  await expect(page.getByTestId("v2-section")).toHaveCount(3); // Intro / Verse / Hook seed
-  await page.getByTestId("v2-section-add").click();
-  await expect(page.getByTestId("v2-section")).toHaveCount(4);
-  const input = page.getByTestId("v2-section-rename"); // auto-opens on the new section
-  await expect(input).toBeVisible();
-  await input.fill("Outro");
-  await input.press("Enter");
-  await expect(page.getByTestId("v2-section").last()).toContainText("Outro");
-});
-
-test("section ribbon: double-click renames an existing section", async ({ page }) => {
-  await bootV2(page);
-  const first = page.getByTestId("v2-section").first();
-  await expect(first).toContainText("Intro");
-  await first.dblclick();
-  const input = page.getByTestId("v2-section-rename");
-  await expect(input).toBeVisible();
-  await input.fill("Bridge");
-  await input.press("Enter");
-  await expect(page.getByTestId("v2-section").first()).toContainText("Bridge");
-});
-
-test("section ribbon: ✕ removes a section", async ({ page }) => {
-  await bootV2(page);
-  await expect(page.getByTestId("v2-section")).toHaveCount(3);
-  await page.getByTestId("v2-section").first().getByTestId("v2-section-remove").click();
-  await expect(page.getByTestId("v2-section")).toHaveCount(2);
-});
-
-test("section ribbon: the icon-only +/× buttons carry an accessible name (a11y)", async ({ page }) => {
-  await bootV2(page);
-  // The glyphs alone ("+"/"×") are meaningless to a screen reader — both must expose
-  // an aria-label, matching the topbar/overflow/drawer-close icon-button convention.
-  await expect(page.getByTestId("v2-section-add")).toHaveAttribute("aria-label", "Add section");
-  await expect(page.getByTestId("v2-section").first().getByTestId("v2-section-remove"))
-    .toHaveAttribute("aria-label", "Remove section");
-});
-
-test("section ribbon: a quick click across two sections seeks (does not spuriously rename)", async ({ page }) => {
-  await bootV2(page);
-  // Click Intro, then quickly Verse — a shared double-click timer must not treat two
-  // single-clicks on DIFFERENT sections as a double-click (which would open rename).
-  await page.getByTestId("v2-section").nth(0).click();
-  await page.getByTestId("v2-section").nth(1).click();
-  await expect(page.getByTestId("v2-section-rename")).toHaveCount(0);
-});
-
-test("section ribbon: ✕ removes without seeking the playhead", async ({ page }) => {
-  await bootV2(page);
+  const nav = page.getByTestId("v2-songnav");
+  await expect(nav).toBeVisible();
+  // bar-number ticks across the whole song; the first one is bar 1
+  await expect(nav.locator(".v2-songnav-bar").first()).toHaveText("1");
+  await expect(await nav.locator(".v2-songnav-bar").count()).toBeGreaterThan(1);
+  // clicking partway across jumps the transport (time readout leaves 1.1.1)
   await expect(page.getByTestId("v2-time")).toHaveText("1.1.1");
-  // Remove Hook (starts at beat 24) — the ✕ must not also fire a transport seek.
-  await page.getByTestId("v2-section").last().getByTestId("v2-section-remove").click();
-  await expect(page.getByTestId("v2-section")).toHaveCount(2);
-  await expect(page.getByTestId("v2-time")).toHaveText("1.1.1");
-});
-
-test("section ribbon: interacting inside the rename input never discards the draft", async ({ page }) => {
-  await bootV2(page);
-  await page.getByTestId("v2-section").first().dblclick();
-  const input = page.getByTestId("v2-section-rename");
-  await input.fill("WIP");
-  await input.dblclick(); // a double-click inside the input must not reset the draft
-  await expect(input).toHaveValue("WIP");
-});
-
-test("section ribbon: dragging a section body moves it (snapped to the bar)", async ({ page }) => {
-  await bootV2(page);
-  // Verse (2nd) so there's room to move right without clamping at 0.
-  const seg = page.getByTestId("v2-section").nth(1);
-  const before = await seg.getAttribute("data-start-beat");
-  const box = await seg.boundingBox();
-  if (!box) throw new Error("no section");
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(box.x + box.width / 2 + 160, box.y + box.height / 2, { steps: 10 });
-  await page.mouse.up();
-  await expect
-    .poll(() => page.getByTestId("v2-section").nth(1).getAttribute("data-start-beat"))
-    .not.toBe(before);
+  const box = await nav.boundingBox();
+  if (!box) throw new Error("no songnav");
+  await page.mouse.click(box.x + box.width * 0.5, box.y + box.height / 2);
+  await expect.poll(() => page.getByTestId("v2-time").textContent()).not.toBe("1.1.1");
 });

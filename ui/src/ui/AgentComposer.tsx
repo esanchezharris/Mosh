@@ -12,6 +12,7 @@ import { handleFast } from "../agent/performer";
 import { resolveSectionRework, planSectionRework } from "../agent/sectionScope";
 import { createVoiceInput, createContinuousVoiceInput, isVoiceSupported, type VoiceInput } from "../agent/voiceInput";
 import { createHandsFree, type HandsFree } from "../agent/handsFree";
+import { IconMic } from "./icons";
 
 // Hands-free always-on listening. Owns the lifetime of the CONTINUOUS recognizer:
 // engages when the `handsFreeOn` toggle is true (and the tab is visible), disengages
@@ -225,7 +226,9 @@ export function AgentComposer() {
           onPointerUp={() => voiceRef.current?.stop()}
           onPointerCancel={() => voiceRef.current?.stop()}
         >
-          <span aria-hidden="true">{listening ? "●" : "🎤"}</span>
+          {listening
+            ? <span aria-hidden="true" style={{ width: 9, height: 9, borderRadius: "50%", background: "currentColor" }} />
+            : <IconMic size={16} />}
         </button>
         <input
           data-testid="agent-input"

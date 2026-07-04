@@ -1,9 +1,11 @@
-// The left BROWSER drawer — an FL/Ableton-style dock that slides in from the left edge
-// on a pull-tab. One surface for both halves of "what do I drop in?": SOUNDS (the file
-// browser → drag onto a lane / import) and PLUGINS (built-ins + scanned VST3/AU → load
-// onto the selected track). SOUNDS reuses SampleBrowser; PLUGINS hosts PluginDock — the
-// v2 plugin browser (there's no plugin modal in v2; the FX rack's "+ Plugin" opens this
-// drawer on the Plugins tab via openBrowserTab). Open/tab state is UI-local (shellState).
+// The left BROWSER dock — a push-dock that lives in its OWN grid column at the left edge.
+// Collapsed, it's just a vertical pull-tab; open, it expands its column to a panel (so it
+// pushes the centered arrangement rather than covering it). One surface for both halves of
+// "what do I drop in?": SOUNDS (the file browser → drag onto a lane / import) and PLUGINS
+// (built-ins + scanned VST3/AU → load onto the selected track). SOUNDS reuses SampleBrowser;
+// PLUGINS hosts PluginDock — the v2 plugin browser (there's no plugin modal in v2; the FX
+// rack's "+ Plugin" opens this dock on the Plugins tab via openBrowserTab). Open/tab state
+// is UI-local (shellState) and drives the column width via data-left-open on the shell.
 
 import { useShell } from "./shellState";
 import { SampleBrowser } from "../ui/SampleBrowser";
@@ -17,30 +19,29 @@ export function LeftDrawer() {
   const setOpen = useShell((s) => s.setBrowserOpen);
 
   return (
-    <div className={`v2-drawer${open ? " open" : ""}`} data-testid="v2-browser-drawer">
-      <div className="v2-drawer-panel" role="region" aria-label="Browser" aria-hidden={!open}>
-        {open && (
-          <>
-            <div className="v2-drawer-head">
-              <div className="v2-drawer-tabs" role="tablist" aria-label="Browser sections">
-                <button role="tab" aria-selected={tab === "sounds"} className={tab === "sounds" ? "on" : ""}
-                  data-testid="v2-browser-tab-sounds" onClick={() => openTab("sounds")}>Sounds</button>
-                <button role="tab" aria-selected={tab === "plugins"} className={tab === "plugins" ? "on" : ""}
-                  data-testid="v2-browser-tab-plugins" onClick={() => openTab("plugins")}>Plugins</button>
-              </div>
-              <button className="v2-drawer-close" data-testid="v2-browser-close" aria-label="Close browser" title="Close" onClick={() => setOpen(false)}>✕</button>
+    <div className={`v2-dock v2-dock-left${open ? " open" : ""}`} data-testid="v2-browser-drawer">
+      {open ? (
+        <div className="v2-dock-panel" role="region" aria-label="Browser">
+          <div className="v2-dock-head">
+            <div className="v2-dock-tabs" role="tablist" aria-label="Browser sections">
+              <button role="tab" aria-selected={tab === "sounds"} className={tab === "sounds" ? "on" : ""}
+                data-testid="v2-browser-tab-sounds" onClick={() => openTab("sounds")}>Sounds</button>
+              <button role="tab" aria-selected={tab === "plugins"} className={tab === "plugins" ? "on" : ""}
+                data-testid="v2-browser-tab-plugins" onClick={() => openTab("plugins")}>Plugins</button>
             </div>
-            <div className="v2-drawer-body">
-              {tab === "sounds" ? <SampleBrowser /> : <PluginDock />}
-            </div>
-          </>
-        )}
-      </div>
-      {/* the pull-tab — the only chrome visible when the drawer is parked off-screen */}
-      <button className="v2-drawer-tab" data-testid="v2-browser-pull" aria-expanded={open}
-        aria-label={open ? "Close browser" : "Open browser"} title="Browser — samples & plugins" onClick={toggle}>
-        <span className="v2-drawer-tab-label">BROWSER</span>
-      </button>
+            <button className="v2-dock-close" data-testid="v2-browser-close" aria-label="Close browser" title="Close" onClick={() => setOpen(false)}>✕</button>
+          </div>
+          <div className="v2-dock-body">
+            {tab === "sounds" ? <SampleBrowser /> : <PluginDock />}
+          </div>
+        </div>
+      ) : (
+        /* the pull-tab — the only chrome visible when the dock is parked */
+        <button className="v2-dock-tab" data-testid="v2-browser-pull" aria-expanded={false}
+          aria-label="Open browser" title="Browser — samples & plugins" onClick={toggle}>
+          <span className="v2-dock-tab-label">BROWSER</span>
+        </button>
+      )}
     </div>
   );
 }

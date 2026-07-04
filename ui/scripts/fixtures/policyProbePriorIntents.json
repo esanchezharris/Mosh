@@ -1,0 +1,122 @@
+[
+ {
+  "user": "set the tempo to 205",
+  "groundable": true
+ },
+ {
+  "user": "write a short pattern into the clip on the \"MT-PowerDrumKit\" track",
+  "groundable": false
+ },
+ {
+  "user": "Push the 4 track to the middle.",
+  "groundable": false
+ },
+ {
+  "user": "Push the 12 track to the middle.",
+  "groundable": false
+ },
+ {
+  "user": "Push the 20 track to the middle.",
+  "groundable": false
+ },
+ {
+  "user": "Push the 28 track to the middle.",
+  "groundable": false
+ },
+ {
+  "user": "Can you put a MIDI clip on the Piano track?",
+  "groundable": false
+ },
+ {
+  "user": "Can you put a MIDI clip on the Acc Bass track?",
+  "groundable": false
+ },
+ {
+  "user": "Can you put a MIDI clip on the (D)Vai ficar na saudade                                    , Benito de Paula track?",
+  "groundable": false
+ },
+ {
+  "user": "Can you put a MIDI clip on the Piste 1 track?",
+  "groundable": false
+ },
+ {
+  "user": "Can you put a MIDI clip on the Acoustic Grand Piano track?",
+  "groundable": false
+ },
+ {
+  "user": "Can you put a MIDI clip on the Vocal track?",
+  "groundable": false
+ },
+ {
+  "user": "Sketch a short pattern in the clip on the Guitar I track.",
+  "groundable": false
+ },
+ {
+  "user": "Sketch a short pattern in the clip on the Piano track.",
+  "groundable": false
+ },
+ {
+  "user": "Sketch a short pattern in the clip on the Track 1 track.",
+  "groundable": false
+ },
+ {
+  "user": "Can you put a MIDI clip on the Synth track?",
+  "groundable": false
+ },
+ {
+  "user": "Can you put a MIDI clip on the 'My Love Is Your Love' track?",
+  "groundable": false
+ },
+ {
+  "user": "Can you put a MIDI clip on the M�lodie track?",
+  "groundable": false
+ },
+ {
+  "user": "Sketch a short pattern in the clip on the Drums track.",
+  "groundable": false
+ },
+ {
+  "user": "Sketch a short pattern in the clip on the Track 1 track.",
+  "groundable": false
+ },
+ {
+  "user": "Sketch a short pattern in the clip on the And track.",
+  "groundable": false
+ },
+ {
+  "user": "Sketch a short pattern in the clip on the Flute track.",
+  "groundable": false
+ },
+ {
+  "user": "Sketch a short pattern in the clip on the JOINME track.",
+  "groundable": false
+ },
+ {
+  "user": "Sketch a short pattern in the clip on the Piano track.",
+  "groundable": false
+ },
+ {
+  "user": "Sketch a short pattern in the clip on the Bass    (BB) track.",
+  "groundable": false
+ },
+ {
+  "user": "Can you put a MIDI clip on the Bonnet Trimmed With Blue track?",
+  "groundable": false
+ },
+ {
+  "user": "Sketch a short pattern in the clip on the Track 1 track.",
+  "groundable": false
+ },
+ {
+  "user": "Sketch a short pattern in the clip on the My Lover's Gone track.",
+  "groundable": false
+ },
+ {
+  "user": "Sketch a short pattern in the clip on the Jochen Miller - Brace Yourself track.",
+  "groundable": false
+ },
+ {
+  "user": "Sketch a short pattern in the clip on the Melody track.",
+  "groundable": false
+ }
+]

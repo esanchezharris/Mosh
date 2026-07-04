@@ -1,0 +1,15 @@
+[
+  {
+    "index": "score3-gold_0_10000",
+    "language": "English",
+    "time": [
+      0,
+      10000
+    ],
+    "duration": "0.25 0.25 0.25 0.50 0.25 0.25 1.00 0.25 0.25 0.25 0.50 0.25 0.25 1.50 0.50 0.25 0.25 0.50 0.25 0.25 0.25 1.25 0.50",
+    "text": "<SP> late night pressure turns to gold <SP> late night pressure turns to gold <SP> cold nights taught me how to hold <SP>",
+    "phoneme": "<SP> en_L-EY1-T en_N-AY1-T en_P-R-EH1-SH-ER0 en_T-ER1-N-Z en_T-UW1 en_G-OW1-L-D <SP> en_L-EY1-T en_N-AY1-T en_P-R-EH1-SH-ER0 en_T-ER1-N-Z en_T-UW1 en_G-OW1-L-D <SP> en_K-OW1-L-D en_N-AY1-T-S en_T-AO1-T en_M-IY1 en_HH-AW1 en_T-UW1 en_HH-OW1-L-D <SP>",
+    "note_pitch": "0 45 47 48 47 45 43 0 45 47 48 50 48 47 0 43 45 47 48 47 45 43 0",
+    "note_type": "1 2 2 2 2 2 2 1 2 2 2 2 2 2 1 2 2 2 2 2 2 2 1"
+  }
+]

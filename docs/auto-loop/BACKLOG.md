@@ -60,6 +60,8 @@ Seeded from the gathered reality-pack conformance pass. Source of truth for stat
 scoreboard `docs/FEATURE_AUDIT.md` (regenerated from `scripts/daw-conformance/conformance.py`).
 Each `G*` row in `backlog.jsonl` maps to a reality-model invariant + an eval-suite area; the
 native gate runs `conformance.py`, so closing a gap flips its scenario from `gap` → `pass`.
+The ready picker suppresses any matching open or merged `auto(G*)` PR title, so claimed
+G-series items stay out of rotation until their local backlog status changes.
 
 Leverage order: stranded-backend UI wiring first (G5/G6/G8/G9/G3 — cheap), then native
 absences (G14 gain-undo, G1 export range/tail, G7 stems, G4 clip inspector+fades, G2
