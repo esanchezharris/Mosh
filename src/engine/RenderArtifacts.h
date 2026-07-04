@@ -82,22 +82,30 @@ inline void consolidateRenderArtifacts (juce::ValueTree editState,
             auto child = node.getChild (i);
             if (child.hasType (ids::MOSH_RENDERLAYER))
             {
-                auto src = resolveCacheArtifact (child, editParentDir);
-                if (src.existsAsFile() && ! src.isAChildOf (editParentDir))
+                // Consolidate a stored ref (cacheArtifact OR the in-place originalSourceRef) into
+                // audio/renders/ + re-point it relative, so the saved project carries no absolute
+                // session-pool path and BOTH the render and "Reset to original" survive a move.
+                auto consolidate = [&] (const juce::Identifier& prop, const juce::String& suffix)
                 {
-                    rendersDir.createDirectory();
-                    auto dest = rendersDir.getChildFile (child[ids::id].toString() + ".wav");
-                    // De-dupe by name+size: keep an identical existing copy; otherwise refresh.
-                    if (! (dest.existsAsFile() && dest.getSize() == src.getSize()))
+                    auto src = resolveCacheArtifact (child[prop].toString(), editParentDir);
+                    if (src.existsAsFile() && ! src.isAChildOf (editParentDir))
                     {
-                        dest.deleteFile();
-                        src.copyFileTo (dest);
+                        rendersDir.createDirectory();
+                        auto dest = rendersDir.getChildFile (child[ids::id].toString() + suffix + ".wav");
+                        // De-dupe by name+size: keep an identical existing copy; otherwise refresh.
+                        if (! (dest.existsAsFile() && dest.getSize() == src.getSize()))
+                        {
+                            dest.deleteFile();
+                            src.copyFileTo (dest);
+                        }
+                        if (dest.existsAsFile())
+                            child.setProperty (prop,
+                                dest.getRelativePathFrom (editParentDir).replaceCharacter ('\\', '/'),
+                                nullptr);   // portable relative ref (no undo — Save-As persistence)
                     }
-                    if (dest.existsAsFile())
-                        child.setProperty (ids::cacheArtifact,
-                            dest.getRelativePathFrom (editParentDir).replaceCharacter ('\\', '/'),
-                            nullptr);   // portable relative ref (no undo — Save-As persistence)
-                }
+                };
+                consolidate (ids::cacheArtifact, "");
+                consolidate (ids::originalSourceRef, "-original");
             }
             visit (child);
         }

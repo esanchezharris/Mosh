@@ -1438,37 +1438,8 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         auto r3 = cmd (ops, "render_layer", objN ({{ "clipId", gcid }, { "wait", true }}));
         check (r3["data"].getProperty ("cache", var()).toString() == "miss", "param change -> dirty -> re-render (cache MISS)");
 
-        // Accept -> lands as a new clip on the "Neural Renders" lane.
-        const int tracksBefore = tracks (ops);
-        check (ok (cmd (ops, "accept_render", args1 ("clipId", gcid))), "accept_render ok");
-        check (tracks (ops) == tracksBefore + 1, "accept landed a new clip on a neural lane");
-        bool laneHasClip = false;
-        String acceptedSource;
-        { auto snap = ops.snapshot();
-          if (auto* arr = snap["tracks"].getArray())
-            for (auto& t : *arr) if (t.getProperty ("name", var()).toString() == "Neural Renders")
-            {
-                laneHasClip = trackClips (t) >= 1;
-                if (laneHasClip) acceptedSource = t["clips"][0].getProperty ("sourceFile", var()).toString();
-            } }
-        check (laneHasClip, "neural lane carries the accepted render");
-        // accept_render must land a clip pointing at a real, non-empty file — the
-        // copy of the render artifact is now checked, so a failed copy can never
-        // leave a broken clip in the (saved) project.
-        check (File (acceptedSource).existsAsFile() && File (acceptedSource).getSize() > 44,
-               "accepted clip's source file exists and is non-empty (no broken clip)");
-
-        // JSONL records accept/reject as TASTE LABELS (05 §9).
-        auto renderLogText = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
-        check (renderLogText.contains ("accept_render"), "JSONL records accept_render (taste label)");
-        cmd (ops, "reject_render", args1 ("clipId", gcid));
-        renderLogText = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
-        check (renderLogText.contains ("reject_render"), "JSONL records reject_render (taste label)");
-
-        // --- NRL-004: render-layer management (bypass / freeze / bounce / remove) ---
+        // --- NRL-004: render-layer management (in-place apply / reset / bypass / freeze / remove) ---
         section ("NRL-004: render-layer management");
-        // Resolve the clip's render-layer var off the gen track by clipId (bind the
-        // snapshot to a local so the array doesn't dangle).
         auto layerOf = [&] (const String& cid) -> var {
             auto trk = trackById (gt);
             if (auto* arr = trk.getProperty ("clips", var()).getArray())
@@ -1478,48 +1449,51 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             return {};
         };
         auto layerStatus = [&] (const String& cid) { return layerOf (cid).getProperty ("status", var()).toString(); };
-
-        // reject_render kept the layer (it is NOT a remove — the #1 trap).
-        check ((bool) trackById (gt).getProperty ("clips", var())[0].getProperty ("hasRenderLayer", false)
-                   || layerOf (gcid).isObject(),
-               "reject_render did NOT remove the layer (still present)");
-        check (layerStatus (gcid) == "dirty", "reject_render set status=dirty (re-roll, not remove)");
-
-        // bypass_layer toggles status ready<->bypassed AND re-routes the real audio
-        // (AL-008): the accepted render landed a clip on the "Neural Renders" lane, and
-        // bypassing must MUTE that clip so the mix falls back to the original source —
-        // not merely flip a status flag. Read the lane clip's mute state from the snapshot.
-        auto neuralClipMuted = [&] () -> bool {
-            auto snap = ops.snapshot();
+        auto neuralLanes = [&] () -> int {
+            int n = 0; auto snap = ops.snapshot();
             if (auto* arr = snap["tracks"].getArray())
-                for (auto& t : *arr)
-                    if (t.getProperty ("name", var()).toString() == "Neural Renders")
-                        if (auto* cs = t.getProperty ("clips", var()).getArray())
-                            for (auto& c : *cs)
-                                return (bool) c.getProperty ("mute", false);   // single landed clip
-            return false;
+                for (auto& t : *arr) if (t.getProperty ("name", var()).toString() == "Neural Renders") ++n;
+            return n;
         };
-        check (! neuralClipMuted(), "before bypass the landed neural clip plays (un-muted)");
+
+        // ── In-place auto-apply (the NEW default for WAVE clips) ──
+        // The render already AUTO-APPLIED in place: the clip's own source became the artifact.
+        // There is no accept step and no "Neural Renders" lane for wave clips.
+        check ((bool) layerOf (gcid).getProperty ("appliedInPlace", false),
+               "wave render AUTO-APPLIES in place (no accept step)");
+        check ((bool) layerOf (gcid).getProperty ("hasOriginal", false),
+               "in-place apply stored the original source (Reset available)");
+
+        // accept_render is a no-op for wave clips and creates NO lane.
+        const int tracksBefore = tracks (ops);
+        check (ok (cmd (ops, "accept_render", args1 ("clipId", gcid))), "accept_render ok (no-op for wave)");
+        check (tracks (ops) == tracksBefore, "wave accept creates NO new track");
+        check (neuralLanes() == 0, "no 'Neural Renders' lane for an in-place wave render");
+
+        // reset_render_layer restores the ORIGINAL; the layer STAYS (re-imagine available again).
+        check (ok (cmd (ops, "reset_render_layer", args1 ("clipId", gcid))), "reset_render_layer ok");
+        check (! (bool) layerOf (gcid).getProperty ("appliedInPlace", true), "reset cleared appliedInPlace");
+        check (layerStatus (gcid) == "dirty", "reset -> status dirty (re-imagine again)");
+        check ((bool) layerOf (gcid).getProperty ("hasOriginal", false), "reset keeps the original lineage (Reset still available)");
+
+        // Re-render after reset HITs the cache and RE-APPLIES in place.
+        auto rRe = cmd (ops, "render_layer", objN ({{ "clipId", gcid }, { "wait", true }}));
+        check (ok (rRe), "re-render after reset ok");
+        check ((bool) layerOf (gcid).getProperty ("appliedInPlace", false), "re-render re-applies in place");
+
+        // bypass_layer toggles status ready<->bypassed (the wave A/B swaps the source to the
+        // original when bypassed; here we round-trip the status flag).
         check (ok (cmd (ops, "bypass_layer", objN ({{ "clipId", gcid }, { "bypassed", true }}))), "bypass_layer ok");
         check (layerStatus (gcid) == "bypassed", "bypass_layer{true} -> status bypassed");
-        check (neuralClipMuted(), "bypass_layer{true} MUTES the landed neural clip (real audio re-route, not just a flag)");
         cmd (ops, "bypass_layer", objN ({{ "clipId", gcid }, { "bypassed", false }}));
         check (layerStatus (gcid) == "ready", "bypass_layer{false} -> status ready");
-        check (! neuralClipMuted(), "bypass_layer{false} un-mutes the landed neural clip (render audible again)");
 
-        // Re-render so a cached artifact exists for freeze/bounce (cache HIT path).
+        // Re-render so a cached artifact exists for freeze (cache HIT path).
         cmd (ops, "render_layer", objN ({{ "clipId", gcid }, { "wait", true }}));
 
         // freeze_layer requires a cached artifact -> status frozen.
         check (ok (cmd (ops, "freeze_layer", args1 ("clipId", gcid))), "freeze_layer ok (artifact present)");
         check (layerStatus (gcid) == "frozen", "freeze_layer -> status frozen");
-
-        // bounce_layer_to_clip = accept + finalize: lands a clip on the neural lane.
-        cmd (ops, "render_layer", objN ({{ "clipId", gcid }, { "wait", true }}));   // refresh artifact (frozen status doesn't gate render)
-        const int tracksBeforeBounce = tracks (ops);
-        check (ok (cmd (ops, "bounce_layer_to_clip", args1 ("clipId", gcid))), "bounce_layer_to_clip ok");
-        check (layerStatus (gcid) == "bounced", "bounce_layer_to_clip -> status bounced");
-        check (tracks (ops) >= tracksBeforeBounce, "bounce landed audio on the neural lane (no track lost)");
 
         // freeze on a layer with NO artifact errors (gate the button on hasArtifact).
         auto gt2 = cmd (ops, "create_track", args1 ("name", "Gen2"))["data"].getProperty ("trackId", var()).toString();
@@ -1588,17 +1562,18 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         auto r4 = cmd (ops, "render_layer", objN ({{ "clipId", xcid }, { "wait", true }}));
         check (r4["data"].getProperty ("cache", var()).toString() == "miss", "changing transform strength -> cache MISS");
 
-        // Accept -> appends a clip to the existing "Neural Renders" lane (reuses the SA3 landing).
-        check (ok (cmd (ops, "accept_render", args1 ("clipId", xcid))), "accept_render (transform) ok");
-        bool xLaneHasClip = false; String xAcceptedSource;
-        { auto snap = ops.snapshot();
-          if (auto* arr = snap["tracks"].getArray())
-            for (auto& t : *arr) if (t.getProperty ("name", var()).toString() == "Neural Renders")
-              if (auto* ca = t["clips"].getArray(); ca != nullptr && ca->size() > 0)
-              { xLaneHasClip = true; xAcceptedSource = ca->getLast().getProperty ("sourceFile", var()).toString(); } }
-        check (xLaneHasClip, "transform accept landed a clip on the Neural Renders lane");
-        check (File (xAcceptedSource).existsAsFile() && File (xAcceptedSource).getSize() > 44,
-               "accepted transform clip points at a real non-empty file");
+        // A whole-clip transform on a WAVE clip auto-applies in place too (same as re-imagine).
+        auto xLayer = [&] () -> var {
+            auto trk = trackById (xt);
+            if (auto* arr = trk.getProperty ("clips", var()).getArray())
+                for (auto& c : *arr) if (c.getProperty ("id", var()).toString() == xcid)
+                    return c.getProperty ("renderLayer", var());
+            return {};
+        };
+        check ((bool) xLayer().getProperty ("appliedInPlace", false), "wave transform AUTO-APPLIES in place");
+        check ((bool) xLayer().getProperty ("hasOriginal", false), "transform stored the original (Reset available)");
+        check (ok (cmd (ops, "reset_render_layer", args1 ("clipId", xcid))), "reset after transform ok");
+        check (! (bool) xLayer().getProperty ("appliedInPlace", true), "reset cleared the applied transform");
     }
 
     // ─── NRL-MIDI: generative on a MIDI clip (auto-bounce → audio → model) ───
@@ -1681,14 +1656,63 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         auto rb = cmd (ops, "render_layer", objN ({{ "clipId", mcid }, { "wait", true }}));
         check (rb["data"].getProperty ("cache", var()).toString() == "miss", "bypassing the instrument -> cache MISS (no stale render served)");
 
-        // Accept -> lands a clip on the "Neural Renders" lane (same as the wave path).
-        check (ok (cmd (ops, "accept_render", args1 ("clipId", mcid))), "accept_render (MIDI-sourced) ok");
-        bool mLane = false;
-        { auto snap = ops.snapshot();
-          if (auto* arr = snap["tracks"].getArray())
-            for (auto& t : *arr) if (t.getProperty ("name", var()).toString() == "Neural Renders")
-              if (auto* ca = t["clips"].getArray(); ca != nullptr && ca->size() > 0) mLane = true; }
-        check (mLane, "MIDI-sourced render landed on the Neural Renders lane");
+        // Phase 2 — a MIDI/drum re-imagine AUTO-APPLIES beneath the clip: the source MIDI is muted
+        // and a HIDDEN, instrument-free audio render plays in its place. The hidden track is EXCLUDED
+        // from the snapshot (the producer hears it but never sees it), so the structural proof that
+        // the render exists is `reimagineActive` (kSourceMutedByLayer + a live landed clip). No accept
+        // step, no "Neural Renders" lane, and no new VISIBLE track.
+        auto midiClipVar = [&] () -> var {
+            auto trk = trackById (mt);
+            if (auto* arr = trk.getProperty ("clips", var()).getArray())
+                for (auto& c : *arr) if (c.getProperty ("id", var()).toString() == mcid) return c;
+            return {};
+        };
+        auto reimagineActive = [&] () -> bool {
+            return (bool) midiClipVar().getProperty ("renderLayer", var()).getProperty ("reimagineActive", false);
+        };
+        auto visibleTracks = [&] () -> int {
+            auto snap = ops.snapshot();
+            auto* arr = snap["tracks"].getArray();
+            return arr != nullptr ? arr->size() : 0;
+        };
+        auto neuralLanesM = [&] () -> int {
+            int n = 0; auto snap = ops.snapshot();
+            if (auto* arr = snap["tracks"].getArray())
+                for (auto& t : *arr) if (t.getProperty ("name", var()).toString() == "Neural Renders"
+                                         || t.getProperty ("name", var()).toString().contains ("hidden")) ++n;
+            return n;
+        };
+        const int tracksBeforeApply = visibleTracks();
+        check ((bool) midiClipVar().getProperty ("mute", false), "MIDI source muted under the beneath-render");
+        check (reimagineActive(), "MIDI render is active beneath the clip (reimagineActive)");
+        check (neuralLanesM() == 0, "no VISIBLE 'Neural Renders'/hidden lane for a MIDI beneath-render");
+        check (visibleTracks() == tracksBeforeApply, "the hidden render track is excluded from the snapshot");
+
+        // accept_render is a no-op for the beneath model — no new lane, no extra visible track.
+        check (ok (cmd (ops, "accept_render", args1 ("clipId", mcid))), "accept_render (MIDI beneath) ok (no-op)");
+        check (neuralLanesM() == 0 && visibleTracks() == tracksBeforeApply, "accept created no lane and no visible track");
+
+        // bypass routes back to the LIVE instrument: the MIDI un-mutes (reimagineActive holds — the
+        // hidden clip still exists, just muted).
+        check (ok (cmd (ops, "bypass_layer", objN ({{ "clipId", mcid }, { "bypassed", true }}))), "bypass_layer (MIDI) ok");
+        check (! (bool) midiClipVar().getProperty ("mute", true), "bypass un-mutes the source MIDI");
+        cmd (ops, "bypass_layer", objN ({{ "clipId", mcid }, { "bypassed", false }}));
+        check ((bool) midiClipVar().getProperty ("mute", false), "un-bypass re-mutes the source MIDI");
+
+        // reset removes the hidden audio + un-mutes the MIDI (back to the editable instrument).
+        check (ok (cmd (ops, "reset_render_layer", args1 ("clipId", mcid))), "reset_render_layer (MIDI) ok");
+        check (! (bool) midiClipVar().getProperty ("mute", true), "reset un-muted the MIDI");
+        check (! reimagineActive(), "reset cleared reimagineActive (hidden clip gone)");
+
+        // re-render after reset re-applies beneath (cache HIT re-lands the hidden clip).
+        auto rRe = cmd (ops, "render_layer", objN ({{ "clipId", mcid }, { "wait", true }}));
+        check (ok (rRe), "re-render after reset (MIDI) ok");
+        check (reimagineActive() && (bool) midiClipVar().getProperty ("mute", false),
+               "re-render re-applied beneath (reimagineActive, MIDI muted)");
+
+        // remove_render_layer tears down the hidden clip + un-mutes (no strand).
+        check (ok (cmd (ops, "remove_render_layer", args1 ("clipId", mcid))), "remove_render_layer (MIDI) ok");
+        check (! (bool) midiClipVar().getProperty ("mute", true), "remove_render_layer un-muted the MIDI");
     }
 
     // ─── Section-scoped render (the agent "rework the hook" path) ───
@@ -3176,10 +3200,11 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (movedHasArtifact, "moved project's render artifact resolves to the co-located copy (portable)");
         check (ok (cmd (ops, "freeze_layer", args1 ("clipId", mcid))),
                "freeze_layer succeeds on the moved project (artifact survived the move)");
+        // The in-place render survived the move: accept is a no-op for the wave clip (no lane),
+        // and the layer is still applied in place (the clip plays the consolidated render).
         const int tracksBeforeAccept = tracks (ops);
-        check (ok (cmd (ops, "accept_render", args1 ("clipId", mcid))),
-               "accept_render succeeds on the moved project (lands the consolidated artifact)");
-        check (tracks (ops) == tracksBeforeAccept + 1, "accept landed a new clip on the neural lane from the moved artifact");
+        check (ok (cmd (ops, "accept_render", args1 ("clipId", mcid))), "accept_render ok on the moved project (no-op for wave)");
+        check (tracks (ops) == tracksBeforeAccept, "wave accept creates no lane on the moved project");
 
         // teardown — restore the session edit for later sections.
         check (ok (cmd (ops, "open_project", args1 ("file", sessionEdit.getFullPathName()))), "restored the session edit (AL-009 teardown)");

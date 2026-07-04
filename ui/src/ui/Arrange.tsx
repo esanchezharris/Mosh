@@ -318,7 +318,7 @@ export function Arrange({ snapshot }: { snapshot: Snapshot }) {
             <div key={t.id} className="lane" data-testid="lane" data-track-id={t.id}
               onDragOver={allowSampleDrop} onDrop={onSampleDrop(t.id)}
               style={{ position: "absolute", top: rows[i].top, left: 0, right: 0, height: rows[i].height }}>
-              {t.clips.map((c) => (
+              {t.clips.filter((c) => !c.hidden).map((c) => (
                 <ClipBlock key={c.id} clip={c} track={t} selected={selection.has(c.id)}
                   tool={tool} snapTime={snapWithFeel} secToPx={secToPx} pxToSec={pxToSec}
                   bs={beatSeconds(meterAt(map, c.start))}
@@ -624,6 +624,10 @@ function ClipBlock({
         <ClipMenu clipId={clip.id} x={menuPos.x} y={menuPos.y} exec={exec} onClose={() => setMenuPos(null)} />
       )}
       {transcribing && <div className="clip-badge" data-testid="clip-transcribing">transcribing…</div>}
+      {clip.renderLayer?.reimagineActive && (
+        <div className="clip-badge reimagine" data-testid="clip-reimagine"
+          title="A re-imagined audio render is playing beneath this clip; the MIDI is muted but still editable. Reset in the generative drawer to restore it.">✨ re-imagined</div>
+      )}
       <div className="label">
         {clip.name}
         {clip.sourceMissing && (

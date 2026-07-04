@@ -18,6 +18,13 @@ import wave
 # so the stub's manifest surfaces the same "reasoning" field the drawer renders (AL-006).
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # service/
 import quality_readout  # noqa: E402
+import coverage  # noqa: E402  (whole-clip tile/stitch orchestration)
+
+
+def render(input_wav: str, output_wav: str, params: dict) -> dict:
+    """Whole-clip aware entry: the fake has no length cap, so it renders the full input in one
+    window for the default/stitch path and tiles one cycle for the loop path."""
+    return coverage.render(_render_window, input_wav, output_wav, params, coverage.WINDOW_UNCAPPED)
 
 
 def _transform_samples(samples, n_channels, seed, nl, drive):
@@ -38,8 +45,8 @@ def _transform_samples(samples, n_channels, seed, nl, drive):
     return out
 
 
-def render(input_wav: str, output_wav: str, params: dict) -> dict:
-    """Read input_wav, apply the deterministic transform, write output_wav.
+def _render_window(input_wav: str, output_wav: str, params: dict) -> dict:
+    """Read input_wav, apply the deterministic transform, write output_wav (ONE window).
     Returns an output manifest dict (production-quality readout etc.)."""
     seed = int(params.get("seed", 0))
     nl = float(params.get("nl", 0.4))

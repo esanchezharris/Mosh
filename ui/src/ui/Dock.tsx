@@ -237,7 +237,22 @@ function GenBody({ clip, track, qa }: { clip: Clip; track: Track; qa?: RenderQA 
       </>)}
       <div className="gen-status" role="status" aria-live="polite">
         <span className={`gen-badge st-${rl.status}`} data-testid="render-status">{rl.status}</span>
-        <span className="gen-seed tc">seed {rl.seed}</span>
+        {rl.status === "error" && rl.error && (
+          <span className="gen-error" data-testid="render-error" title={rl.error}>{rl.error}</span>
+        )}
+        {/* seed + coverage are no-ops for soulx (supports_seed:false, coverage unread) but both
+            sit in the fingerprint — showing them for sing invites a pointless full re-render
+            (real backend: a ~900s SSH round-trip) for zero output change. */}
+        {!isSing && <span className="gen-seed tc">seed {rl.seed}</span>}
+        {!isSing && (
+        <select className="gen-cov" data-testid="gen-coverage"
+          title="Whole-clip coverage — auto, loop (tile one cycle, in time), or stitch (window + crossfade the whole clip)"
+          value={rl.coverage ?? "auto"} onChange={(e) => void exec("set_render_param", { clipId: clip.id, coverage: e.target.value })}>
+          <option value="auto">auto</option>
+          <option value="loop">loop</option>
+          <option value="stitch">stitch</option>
+        </select>
+        )}
         <button className={`btn${labMode ? " on" : ""}`} title="Lab — unlock the ASTD clamp" aria-pressed={labMode} onClick={() => setLab(!labMode)}>{labMode ? "⚠ LAB" : "Lab"}</button>
       </div>
       {rendering && (
@@ -258,11 +273,33 @@ function GenBody({ clip, track, qa }: { clip: Clip; track: Track; qa?: RenderQA 
         </div>
       )}
       <div className="gen-actions">
-        <button className="btn" data-testid="gen-render" onClick={() => void exec("render_layer", { clipId: clip.id })}>{rl.hasArtifact ? "Re-render" : "Render"}</button>
+        {isSing ? (
+          // Sing keeps the legacy auditionable flow (mirrors the C++ finalizeRender gate): the
+          // guide vocal never replaces the recorded take in place — render, listen, then Accept
+          // lands it (or Reject drops it).
+          <>
+            <button className="btn" data-testid="gen-render" onClick={() => void exec("render_layer", { clipId: clip.id })}>{rl.hasArtifact ? "Re-render" : "Render"}</button>
+            <button className="btn" disabled={!rl.hasArtifact} data-testid="gen-accept" onClick={async () => { const r = await exec("accept_render", { clipId: clip.id }); if (r.ok) bumpCelebrate(); }}>Accept</button>
+            <button className="btn" disabled={!rl.hasArtifact} onClick={() => void exec("reject_render", { clipId: clip.id })}>Reject</button>
+          </>
+        ) : clip.type === "wave" ? (
+          // Wave clips auto-apply in place — the waveform swaps to the result instantly.
+          // No accept/reject; Reset restores the original.
+          <>
+            <button className="btn" data-testid="gen-render" onClick={() => void exec("render_layer", { clipId: clip.id })}>Re-imagine</button>
+            <button className="btn" data-testid="gen-reset" disabled={!rl.hasOriginal} title="Restore the original audio" onClick={() => void exec("reset_render_layer", { clipId: clip.id })}>Reset</button>
+          </>
+        ) : (
+          // MIDI/drum: the render lands as HIDDEN audio beneath the muted MIDI (Phase 2) — instant,
+          // and the MIDI stays editable underneath. No accept step; Reset un-mutes the MIDI and drops
+          // the hidden audio.
+          <>
+            <button className="btn" data-testid="gen-render" onClick={() => { void exec("render_layer", { clipId: clip.id }); if (!rl.reimagineActive) bumpCelebrate(); }}>Re-imagine</button>
+            <button className="btn" data-testid="gen-reset" disabled={!rl.reimagineActive} title="Un-mute the MIDI and drop the hidden re-imagined audio" onClick={() => void exec("reset_render_layer", { clipId: clip.id })}>Reset</button>
+          </>
+        )}
         {rendering && <button className="btn" onClick={() => void exec("cancel_render", { clipId: clip.id })}>Cancel</button>}
-        <button className="btn" disabled={!rl.hasArtifact} data-testid="gen-accept" onClick={async () => { const r = await exec("accept_render", { clipId: clip.id }); if (r.ok) bumpCelebrate(); }}>Accept</button>
-        <button className="btn" disabled={!rl.hasArtifact} onClick={() => void exec("reject_render", { clipId: clip.id })}>Reject</button>
-        <button className="btn" title="new take" onClick={() => void exec("set_render_param", { clipId: clip.id, seed: Number(rl.seed) + 1 })}>⟳ seed</button>
+        {!isSing && <button className="btn" title="new take" onClick={() => void exec("set_render_param", { clipId: clip.id, seed: Number(rl.seed) + 1 })}>⟳ seed</button>}
         <button className="btn x" title="remove layer" onClick={() => void exec("remove_render_layer", { clipId: clip.id })}>✕</button>
       </div>
     </div>

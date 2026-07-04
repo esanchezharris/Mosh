@@ -195,10 +195,11 @@ test("inspector Mix tab: Mute/Solo are toggles (aria-pressed reflects state)", a
   await expect(solo).toHaveAttribute("aria-pressed", "true");
 });
 
-test("generative runs on a MIDI/drum track (any track, via the backend auto-bounce)", async ({ page }) => {
+test("generative runs on a MIDI/drum track (auto-bounce → hidden audio beneath, Phase 2)", async ({ page }) => {
   await bootV2(page);
-  // The seeded Drums track is a MIDI drum clip (no wave clip) — generative must still
-  // offer create/render/accept (the native backend auto-bounces it to audio first).
+  // The seeded Drums track is a MIDI drum clip (no wave clip) — generative still offers
+  // create/render (the native backend auto-bounces it to audio first), and the result lands
+  // as HIDDEN audio beneath the muted MIDI: Reset, never Accept.
   await page.getByTestId("v2-track-header").first().click();
   await expect(page.getByTestId("v2-inspector")).toBeVisible(); // always-on rail
   await page.getByTestId("v2-insp-tab-gen").click();
@@ -208,9 +209,12 @@ test("generative runs on a MIDI/drum track (any track, via the backend auto-boun
   await gen.getByTestId("gen-create").click();
   await gen.getByTestId("gen-render").click();
   await expect(gen.getByTestId("render-status")).toHaveText("ready");
-  const accept = gen.getByTestId("gen-accept");
-  await expect(accept).toBeEnabled();
-  await accept.click();
+  // MIDI/drum uses the beneath-model: Reset enabled, no Accept.
+  await expect(gen.getByTestId("gen-accept")).toHaveCount(0);
+  const reset = gen.getByTestId("gen-reset");
+  await expect(reset).toBeEnabled();
+  await reset.click();
+  await expect(gen.getByTestId("render-status")).toHaveText("dirty");
   await expect(page.getByTestId("v2-error")).toHaveCount(0);
 });
 

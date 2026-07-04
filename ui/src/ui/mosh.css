@@ -689,6 +689,7 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 .gen-badge.st-ready { color: var(--on-accent); background: var(--lime); border-color: var(--lime); }
 .gen-badge.st-rendering, .gen-badge.st-queued { color: var(--on-accent); background: var(--warn); border-color: var(--warn); }
 .gen-badge.st-error { color: #fff; background: var(--rec); }
+.gen-error { font-size: 10px; color: var(--rec); flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gen-seed { font-size: 10px; color: var(--bone-dim); }
 .gen-qa { font-size: 11px; color: var(--lime); display: flex; flex-direction: column; gap: 3px; }
 .gen-qa-line { display: flex; gap: 8px; align-items: center; }
@@ -982,6 +983,8 @@ button.tbadge:hover { border-color: var(--lime); color: var(--lime); }
   padding: 1px 6px; border-radius: 999px; pointer-events: none; animation: mosh-pop-in 160ms ease-out;
 }
 .clip[data-transcribing="true"] { box-shadow: 0 0 0 1px var(--lime-dim) inset; }
+/* Phase 2 — a clip whose audio is a hidden re-imagined render beneath the muted MIDI. */
+.clip-badge.reimagine { background: linear-gradient(90deg, #b388ff, #7c4dff); color: #fff; }
 
 /* mount pop-in for the racks/strips/headers — they settle in rather than snapping */
 .pcard, .strip, .thead { animation: mosh-pop-in 160ms cubic-bezier(0.22, 1, 0.36, 1); }
