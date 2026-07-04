@@ -216,7 +216,7 @@
   box-shadow: 0 0 22px var(--v2-accent-soft);
 }
 .v2-tbtn.play { background: var(--v2-accent); color: var(--v2-accent-ink); border-color: transparent; }
-.v2-tbtn.rec[data-on="true"] { color: var(--v2-rec); border-color: var(--v2-rec); box-shadow: 0 0 18px rgba(255, 71, 106, 0.3); }
+.v2-tbtn.rec[data-on="true"] { color: var(--v2-rec); border-color: var(--v2-rec); box-shadow: 0 0 18px color-mix(in srgb, var(--status-danger-glow) 30%, transparent); }
 .v2-tbtn .dot { width: 11px; height: 11px; border-radius: 50%; background: currentColor; }
 
 .v2-readout {
@@ -503,7 +503,7 @@
   color: var(--v2-text); font: inherit; font-size: 13px; padding: 8px 10px; border-radius: 7px; cursor: pointer;
 }
 .v2-clipmenu button:hover { background: var(--v2-accent-soft); }
-.v2-clipmenu button.danger:hover { background: rgba(255, 59, 92, 0.16); color: #ffb3c1; }
+.v2-clipmenu button.danger:hover { background: color-mix(in srgb, var(--status-danger) 16%, transparent); color: var(--status-danger-text); }
 .v2-clipmenu-sep { height: 1px; background: var(--v2-line); margin: 4px 4px; }
 .v2-clip.wave { background: var(--v2-clip-wave); }
 .v2-clip.midi { background: rgba(26, 26, 28, 0.66); border-color: rgba(255, 255, 255, 0.16); }
@@ -761,7 +761,7 @@
 .v2-shell .v2-dock-body .modal-list { max-height: none !important; overflow: auto; }
 
 /* error + drop overlay (reuse legacy semantics, restyled) */
-.v2-errbar { margin: 0 14px; padding: 7px 14px; background: rgba(255, 71, 106, 0.14); color: #ffb3c1; border: 1px solid rgba(255, 71, 106, 0.4); border-radius: 10px; font-size: 12px; }
+.v2-errbar { margin: 0 14px; padding: 7px 14px; background: color-mix(in srgb, var(--status-danger-glow) 14%, transparent); color: var(--status-danger-text); border: 1px solid color-mix(in srgb, var(--status-danger-glow) 40%, transparent); border-radius: 10px; font-size: 12px; }
 .v2-drop { position: absolute; inset: 0; z-index: 80; display: grid; place-items: center; background: rgba(5, 8, 20, 0.7); color: var(--v2-accent); font-size: 16px; border: 2px dashed var(--v2-accent); border-radius: var(--v2-radius); }
 
 /* agent-change toast — self-dismissing, with an Undo grace window (hover to pause) */
@@ -773,7 +773,7 @@
   animation: v2-toast-in 240ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 .v2-toast.out { animation: v2-toast-out 240ms ease forwards; }
-.v2-toast.err { border-color: rgba(255, 59, 92, 0.45); }
+.v2-toast.err { border-color: color-mix(in srgb, var(--status-danger) 45%, transparent); }
 .v2-toast-dot { color: var(--v2-accent); }
 .v2-toast.err .v2-toast-dot { color: var(--v2-rec); }
 .v2-toast-text { color: var(--v2-dim); max-width: 320px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -907,7 +907,7 @@
 .v2-flow-rhyme.st-perfect { color: var(--v2-accent); border-color: var(--v2-accent-soft); }
 .v2-flow-rhyme.st-slant   { color: #ffd45c; }
 .v2-flow-rhyme.st-anchor  { color: var(--v2-text); }
-.v2-flow-rhyme.st-none    { color: var(--v2-rec); border-color: rgba(255, 59, 92, 0.4); }
+.v2-flow-rhyme.st-none    { color: var(--v2-rec); border-color: color-mix(in srgb, var(--status-danger) 40%, transparent); }
 .v2-flow-rhyme.st-free    { color: var(--v2-faint); }
 
 /* §7 style-RAG opt-in — "Sound like me": bias generation toward the artist's own voice. */
