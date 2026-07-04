@@ -15,3 +15,5 @@ dist
 /e2e-artifacts
 /test-results
 /playwright/.cache
+# playwright visual gate — commit the baselines under visual/, ignore run output
+/visual-results

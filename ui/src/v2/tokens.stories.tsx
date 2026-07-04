@@ -27,7 +27,7 @@ function useResolved(names: string[]) {
     const out: Record<string, string> = {};
     for (const n of names) out[n] = cs.getPropertyValue(n).trim();
     setVals(out);
-  });
+  }, [names]); // names are module-level constants → runs once per mount (no render loop)
   return { ref, vals };
 }
 
