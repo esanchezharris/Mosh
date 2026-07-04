@@ -1,45 +1,64 @@
-// The Mosh brand mark — a 5-petal Moshi flower with the "> <" face, authored inline so
-// it themes itself: the petals take the ground TEXT color (ink on cream / light on the
-// dark hero) and the face knocks out in the page GROUND color, so it reads in both
-// themes with zero assets. No raster, no network. Used in the topbar + the composer.
+// The Mosh brand mark — the minimized Moshi: a puffy 5-petal splat with a "> <" squint and
+// a rounded lime singing mouth (the concept art). Authored inline so it themes itself via
+// overridable vars: the body takes --v2-mark-fill (defaults to the ground TEXT color so it
+// contrasts the page — a dark blob on cream, a pale blob on the dark hero), a soft sticker
+// rim sits behind it, the eyes knock out in --v2-mark-face (the ground/panel color), and the
+// mouth keeps the brand lime with a dark throat. Static (the one animated mount is the WebGL
+// Moshi in the rail). Used in the topbar top-left, the composer prompt bar, and the agent tab.
+//
+// The body silhouette is the union of overlapping circles (puffy, round lobes) — both the rim
+// and the fill are drawn as that union so there are no internal seams.
 
 export function MoshMark({ size = 30, className }: { size?: number; className?: string }) {
-  // 5 petal circles around the center (every 72°, starting at the top), overlapping into
-  // a rounded flower. Centers precomputed so the SVG is static markup.
-  const petals = [
-    [16, 9.5],
-    [22.18, 14.0],
-    [19.82, 21.26],
-    [12.18, 21.26],
-    [9.82, 14.0],
+  // 5 lobe circles around the center (every 72°, starting at the top) + a center circle.
+  const lobes = [
+    [50, 30],
+    [69.0, 43.8],
+    [61.8, 66.2],
+    [38.2, 66.2],
+    [31.0, 43.8],
   ] as const;
   return (
     <svg
       className={`v2-mark${className ? ` ${className}` : ""}`}
       width={size}
       height={size}
-      viewBox="0 0 32 32"
+      viewBox="0 0 100 100"
       role="img"
       aria-label="Mosh"
     >
-      <g fill="var(--v2-mark-fill, var(--v2-ground-text))">
-        {petals.map(([cx, cy], i) => (
-          <circle key={i} cx={cx} cy={cy} r={7} />
-        ))}
-        <circle cx={16} cy={16} r={7} />
+      {/* soft outline rim (sticker edge) — the same union, slightly larger, behind the body */}
+      <g fill="var(--v2-mark-rim, rgba(248, 245, 236, 0.85))">
+        {lobes.map(([cx, cy], i) => <circle key={i} cx={cx} cy={cy} r={24.5} />)}
+        <circle cx={50} cy={50} r={25.5} />
       </g>
-      {/* the "> <" eyes + grin, knocked out in the page (or panel) color */}
+      {/* body — union of circles = a puffy 5-petal flower */}
+      <g fill="var(--v2-mark-fill, var(--v2-ground-text))">
+        {lobes.map(([cx, cy], i) => <circle key={i} cx={cx} cy={cy} r={22} />)}
+        <circle cx={50} cy={50} r={23} />
+      </g>
+      {/* gloss highlights */}
+      <g fill="none" stroke="var(--v2-mark-hi, rgba(255, 255, 255, 0.32))" strokeWidth="2.2" strokeLinecap="round">
+        <path d="M30 34 Q40 26 54 28" />
+        <path d="M27 50 Q30 60 38 64" />
+      </g>
+      {/* the "> <" squint — knocked out in the page (or panel) color */}
       <g
         fill="none"
         stroke="var(--v2-mark-face, var(--v2-ground))"
-        strokeWidth={1.7}
+        strokeWidth="5.2"
         strokeLinecap="round"
         strokeLinejoin="round"
       >
-        <polyline points="12.4,13.4 14.7,15.4 12.4,17.4" />
-        <polyline points="19.6,13.4 17.3,15.4 19.6,17.4" />
-        <path d="M13 19.6 Q16 22 19 19.6" />
+        <polyline points="37,41 45,47.5 37,54" />
+        <polyline points="63,41 55,47.5 63,54" />
       </g>
+      {/* the rounded lime singing mouth + a dark throat */}
+      <path
+        d="M41 58 Q50 56.3 59 58 Q60.6 66.4 53.5 70.8 Q50 72.8 46.5 70.8 Q39.4 66.4 41 58 Z"
+        fill="var(--v2-mark-mouth, var(--v2-accent))"
+      />
+      <ellipse cx="50" cy="65.5" rx="4" ry="5" fill="var(--v2-mark-throat, var(--v2-accent-ink))" />
     </svg>
   );
 }
