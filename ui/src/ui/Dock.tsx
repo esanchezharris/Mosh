@@ -240,7 +240,11 @@ function GenBody({ clip, track, qa }: { clip: Clip; track: Track; qa?: RenderQA 
         {rl.status === "error" && rl.error && (
           <span className="gen-error" data-testid="render-error" title={rl.error}>{rl.error}</span>
         )}
-        <span className="gen-seed tc">seed {rl.seed}</span>
+        {/* seed + coverage are no-ops for soulx (supports_seed:false, coverage unread) but both
+            sit in the fingerprint — showing them for sing invites a pointless full re-render
+            (real backend: a ~900s SSH round-trip) for zero output change. */}
+        {!isSing && <span className="gen-seed tc">seed {rl.seed}</span>}
+        {!isSing && (
         <select className="gen-cov" data-testid="gen-coverage"
           title="Whole-clip coverage — auto, loop (tile one cycle, in time), or stitch (window + crossfade the whole clip)"
           value={rl.coverage ?? "auto"} onChange={(e) => void exec("set_render_param", { clipId: clip.id, coverage: e.target.value })}>
@@ -248,6 +252,7 @@ function GenBody({ clip, track, qa }: { clip: Clip; track: Track; qa?: RenderQA 
           <option value="loop">loop</option>
           <option value="stitch">stitch</option>
         </select>
+        )}
         <button className={`btn${labMode ? " on" : ""}`} title="Lab — unlock the ASTD clamp" aria-pressed={labMode} onClick={() => setLab(!labMode)}>{labMode ? "⚠ LAB" : "Lab"}</button>
       </div>
       {rendering && (
@@ -294,7 +299,7 @@ function GenBody({ clip, track, qa }: { clip: Clip; track: Track; qa?: RenderQA 
           </>
         )}
         {rendering && <button className="btn" onClick={() => void exec("cancel_render", { clipId: clip.id })}>Cancel</button>}
-        <button className="btn" title="new take" onClick={() => void exec("set_render_param", { clipId: clip.id, seed: Number(rl.seed) + 1 })}>⟳ seed</button>
+        {!isSing && <button className="btn" title="new take" onClick={() => void exec("set_render_param", { clipId: clip.id, seed: Number(rl.seed) + 1 })}>⟳ seed</button>}
         <button className="btn x" title="remove layer" onClick={() => void exec("remove_render_layer", { clipId: clip.id })}>✕</button>
       </div>
     </div>
