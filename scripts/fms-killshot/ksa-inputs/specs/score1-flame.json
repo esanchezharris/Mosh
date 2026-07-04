@@ -1,0 +1,131 @@
+{
+ "name": "score1-flame",
+ "bpm": 120,
+ "language": "English",
+ "events": [
+  {
+   "rest": 1.0
+  },
+  {
+   "word": "they",
+   "pitch": 45,
+   "beats": 0.5
+  },
+  {
+   "word": "counted",
+   "pitch": 47,
+   "beats": 1.0
+  },
+  {
+   "word": "me",
+   "pitch": 45,
+   "beats": 0.5
+  },
+  {
+   "word": "out",
+   "pitch": 43,
+   "beats": 1.5
+  },
+  {
+   "rest": 0.5
+  },
+  {
+   "word": "but",
+   "pitch": 43,
+   "beats": 0.5
+  },
+  {
+   "word": "I",
+   "pitch": 45,
+   "beats": 0.5
+  },
+  {
+   "word": "came",
+   "pitch": 47,
+   "beats": 1.0
+  },
+  {
+   "word": "back",
+   "pitch": 48,
+   "beats": 1.0
+  },
+  {
+   "rest": 0.5
+  },
+  {
+   "word": "to",
+   "pitch": 47,
+   "beats": 0.5
+  },
+  {
+   "word": "the",
+   "pitch": 45,
+   "beats": 0.5
+  },
+  {
+   "word": "flame",
+   "pitch": 43,
+   "beats": 4.0
+  },
+  {
+   "rest": 1.0
+  },
+  {
+   "word": "they",
+   "pitch": 45,
+   "beats": 0.5
+  },
+  {
+   "word": "counted",
+   "pitch": 47,
+   "beats": 1.0
+  },
+  {
+   "word": "me",
+   "pitch": 48,
+   "beats": 0.5
+  },
+  {
+   "word": "out",
+   "pitch": 50,
+   "beats": 1.5
+  },
+  {
+   "rest": 0.5
+  },
+  {
+   "word": "still",
+   "pitch": 48,
+   "beats": 0.5
+  },
+  {
+   "word": "I",
+   "pitch": 47,
+   "beats": 0.5
+  },
+  {
+   "word": "hold",
+   "pitch": 45,
+   "beats": 1.0
+  },
+  {
+   "word": "the",
+   "pitch": 43,
+   "beats": 0.5
+  },
+  {
+   "word": "flame",
+   "pitch": 45,
+   "beats": 3.0
+  },
+  {
+   "word": "flame",
+   "pitch": 43,
+   "beats": 1.0,
+   "cont": true
+  },
+  {
+   "rest": 1.0
+  }
+ ]
+}
