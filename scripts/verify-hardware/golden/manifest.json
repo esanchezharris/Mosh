@@ -28,12 +28,12 @@
     },
     "transform_fake": {
       "kind": "checksum",
-      "pcm_sha256": "eda1ae831b609b3ad362502934787d21397e95d4c56d2c7024532dc0c15a99f3",
+      "pcm_sha256": "132196cb3c98071b097fab1430bc8ae42b4175d419d722f8f71c5796ef90df8a",
       "features": {
         "frames": 88200,
-        "peak": 0.60427,
-        "rms": 0.44007,
-        "centroid_hz": 240.6
+        "peak": 0.42734,
+        "rms": 0.31549,
+        "centroid_hz": 250.8
       }
     },
     "full_loop": {

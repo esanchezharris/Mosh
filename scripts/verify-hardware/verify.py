@@ -343,6 +343,70 @@ def check_transform(ctx):
                 "final_export": str(out)})
 
 
+def check_compile_render(ctx):
+    """L1: the prompt compiler turns a loose instruction into a VALIDATED render envelope,
+    applies it to the clip's render layer (the SAME PARAMS set_render_param writes), and the
+    resulting render is non-silent + differs from the input. Generative-only, fake-pinned
+    (backend:"fake" forces the deterministic compiler), offline — no LLM, no SA3. Proves the
+    native compile_render → render_layer → WAV path end to end."""
+    SESSION = "verify-compile"
+    out = ART / "08_compile.wav"
+    cmds = [
+        {"command": "create_track", "args": {"name": "Comp"}, "capture": {"T": "trackId"}},
+        {"command": "add_test_tone_clip", "args": {"trackId": "${T}", "seconds": 2.0, "freq": 220.0}, "capture": {"C": "clipId"}},
+        # one command compiles "make it gritty and lo-fi" → a re-imagine envelope (grit colour
+        # + nl) and applies it to a fresh render layer (adapter defaults to fake here).
+        {"command": "compile_render", "args": {"clipId": "${C}", "instruction": "make it gritty and lo-fi", "backend": "fake", "wait": True}},
+        {"command": "render_layer", "args": {"clipId": "${C}", "wait": True}},
+        {"command": "accept_render", "args": {"clipId": "${C}"}},
+        {"command": "export_audio", "args": {"file": str(out)}},
+    ]
+    results, proc = run_script(ctx.bin, cmds, SESSION, extra_env={"MOSH_SERVICE_PORT": "8796"})
+    fails = failed_commands(results)
+    comp = next((r for r in results if r.get("command") == "compile_render"), None)
+    cdata = (comp or {}).get("data", {}) or {}
+    outputs = sorted(glob.glob(str(_mosh_session_base() / SESSION / "renders" / "*" / "output.wav")))
+    detail = {"failed_commands": fails, "compile": cdata}
+    if fails or not outputs:
+        detail["stderr"] = proc.stderr[-500:]
+        return row("Compile render (fake, generative-only)", False, detail)
+    xout = outputs[0]
+    xin = Path(xout).parent / "input.wav"
+    so = stats(xout)
+    differs = diff_rms(str(xin), xout) if xin.exists() else None
+    final = stats(out) if out.exists() else None
+    ok = (cdata.get("mode") == "reimagine" and cdata.get("backend") == "fake"
+          and so["rms"] > 0.001 and (differs is None or differs > 0.001)
+          and final and final["rms"] > 0.001)
+    detail.update({"wav": str(xout), **so, "diff_from_input_rms": differs,
+                   "mode": cdata.get("mode"), "backend": cdata.get("backend"),
+                   "reasoning": cdata.get("reasoning"), "final_export": str(out)})
+    return row("Compile render (fake, generative-only)", ok, detail)
+
+
+def check_compile_corrective(ctx):
+    """L1.1 honest boundary: compile_render classifies a CORRECTIVE request, names the
+    corrective tool (AutoTune/etc.) the caller should run, and MUTATES NOTHING — no render
+    layer, no re-performed audio. Generative-only, fake-pinned, offline."""
+    SESSION = "verify-compile-corr"
+    cmds = [
+        {"command": "create_track", "args": {"name": "C"}, "capture": {"T": "trackId"}},
+        {"command": "add_test_tone_clip", "args": {"trackId": "${T}", "seconds": 1.0, "freq": 220.0}, "capture": {"C": "clipId"}},
+        {"command": "compile_render", "args": {"clipId": "${C}", "instruction": "fix the tuning, it's pitchy", "backend": "fake", "wait": True}},
+    ]
+    results, proc = run_script(ctx.bin, cmds, SESSION, extra_env={"MOSH_SERVICE_PORT": "8798"})
+    fails = failed_commands(results)
+    comp = next((r for r in results if r.get("command") == "compile_render"), None)
+    cdata = (comp or {}).get("data", {}) or {}
+    outputs = glob.glob(str(_mosh_session_base() / SESSION / "renders" / "*" / "output.wav"))
+    ok = (not fails and cdata.get("mode") == "corrective" and cdata.get("subtype") == "pitch"
+          and cdata.get("tool") == "moshAutoTune" and not outputs)   # named the tool, rendered nothing
+    return row("Compile corrective (honest boundary)", ok,
+               {"failed_commands": fails, "mode": cdata.get("mode"), "subtype": cdata.get("subtype"),
+                "tool": cdata.get("tool"), "rendered_outputs": len(outputs),
+                "stderr": proc.stderr[-300:] if not ok else ""})
+
+
 def check_full_loop(ctx):
     out = ART / "05_full_loop.wav"
     cmds = [
@@ -567,7 +631,120 @@ def check_midi_render(ctx):
                 "out_rms": out_s["rms"], "render_vs_bounce_rms": altered})
 
 
-OFFLINE_CHECKS = [check_makes_sound, check_drums, check_transform, check_midi_render, check_full_loop,
+def _snap_for(results, label):
+    for r in results:
+        if r.get("command") == "__snapshot" and r.get("label") == label:
+            return r.get("data") or {}
+    return {}
+
+
+def check_midi_reimagine_beneath(ctx):
+    """Phase 2: re-imagining a MIDI clip RE-ROUTES the mix — a HIDDEN, instrument-free audio render
+    plays beneath the now-muted MIDI, and Reset restores the bare instrument. The 4OSC synth bounce
+    isn't bit-deterministic across exports, so this anchors on what IS deterministic — non-silence +
+    the snapshot STATE — rather than fragile sample diffs:
+      B (re-imagined) — export with the layer active. MUST be non-silent: the same-track design (a
+                        synth on the source track overwrites the buffer) produced SILENCE here; the
+                        dedicated hidden-track fix produces real audio. The snapshot at this point
+                        shows the MIDI muted + reimagineActive + NO extra visible track (the hidden
+                        render track is excluded from the snapshot).
+      C (reset)       — export after reset. The hidden audio is gone, the live (non-silent) MIDI synth
+                        plays again; the snapshot shows the MIDI un-muted + reimagineActive cleared.
+    Offline + deterministic-enough (4OSC + fake transform, MOSH_ENABLE_TRANSFORM=0)."""
+    SESSION = "verify-midi-beneath"
+    reimagined = ART / "09b_midi_reimagined.wav"
+    reset_wav = ART / "09c_midi_reset.wav"
+    notes = [{"pitch": 60 + i * 2, "start": i * 0.5, "length": 0.5, "velocity": 100} for i in range(4)]
+    cmds = [
+        {"command": "create_track", "args": {"name": "MidiBeneath"}, "capture": {"T": "trackId"}},
+        {"command": "add_midi_clip", "args": {"trackId": "${T}", "length": 2.0, "notes": notes}, "capture": {"C": "clipId"}},
+        {"command": "__snapshot", "args": {"label": "before"}},
+        {"command": "create_render_layer", "args": {"clipId": "${C}", "adapter": "transform", "mode": "transform"}},
+        {"command": "set_render_param", "args": {"clipId": "${C}", "target": "flute", "strength": 80, "seed": 1}},
+        {"command": "render_layer", "args": {"clipId": "${C}", "wait": True}},                           # auto-applies beneath
+        {"command": "__snapshot", "args": {"label": "after_render"}},
+        {"command": "export_audio", "args": {"file": str(reimagined)}},                                  # B: hidden audio plays
+        {"command": "reset_render_layer", "args": {"clipId": "${C}"}},
+        {"command": "__snapshot", "args": {"label": "after_reset"}},
+        {"command": "export_audio", "args": {"file": str(reset_wav)}},                                   # C: back to bare MIDI
+    ]
+    results, proc = run_script(ctx.bin, cmds, SESSION,
+                               extra_env={"MOSH_SERVICE_PORT": "8796", "MOSH_ENABLE_TRANSFORM": "0"})
+    fails = failed_commands(results)
+    if fails or not (reimagined.exists() and reset_wav.exists()):
+        return row("MIDI re-imagine beneath", False,
+                   {"failed_commands": fails,
+                    "exists": {"reimagined": reimagined.exists(), "reset": reset_wav.exists()},
+                    "stderr": proc.stderr[-500:]})
+
+    def clip_state(snap):
+        for t in snap.get("tracks", []):
+            for c in t.get("clips", []):
+                if c.get("type") == "midi":
+                    rl = c.get("renderLayer") or {}
+                    return {"mute": bool(c.get("mute")), "reimagineActive": bool(rl.get("reimagineActive"))}
+        return {}
+    def n_tracks(snap):
+        return len(snap.get("tracks", []))
+
+    before, after, post_reset = _snap_for(results, "before"), _snap_for(results, "after_render"), _snap_for(results, "after_reset")
+    b_rms = stats(str(reimagined))["rms"]   # the hidden render must PLAY (same-track design → silence)
+    c_rms = stats(str(reset_wav))["rms"]    # the live synth is back after reset
+    st_after, st_reset = clip_state(after), clip_state(post_reset)
+    ok = (b_rms > 0.01 and c_rms > 0.01                                              # both non-silent
+          and st_after.get("mute") is True and st_after.get("reimagineActive") is True   # muted + active under the render
+          and n_tracks(after) == n_tracks(before)                                   # the hidden render track is snapshot-excluded
+          and st_reset.get("mute") is False and st_reset.get("reimagineActive") is False)  # reset restored the editable MIDI
+    return row("MIDI re-imagine beneath", ok,
+               {"reimagined_rms": b_rms, "reset_rms": c_rms,
+                "state_after_render": st_after, "state_after_reset": st_reset,
+                "visible_tracks_before_after": [n_tracks(before), n_tracks(after)]})
+
+
+def check_reactive_rerender(ctx):
+    """Phase 3: with an applied render LIVE, editing the source auto-re-renders the hidden audio —
+    no manual re-imagine. Renders a MIDI beneath, then ADDS A NOTE and lets the per-clip debounce
+    fire (MOSH_REACTIVE_DEBOUNCE_MS=1 + a message-loop pump via __wait). Asserts a NEW render ran
+    automatically (a fresh durable audio file appears for the layer, keyed by the changed
+    stableSourceSig) AND the beneath model stays live (MIDI muted + reimagineActive). The reactive
+    path SPAWNS the service, so it's gated out of --selftest; here it runs on the fake transform."""
+    SESSION = "verify-reactive"
+    notes = [{"pitch": 60, "start": 0.0, "length": 0.5, "velocity": 100},
+             {"pitch": 64, "start": 0.5, "length": 0.5, "velocity": 100}]
+    cmds = [
+        {"command": "create_track", "args": {"name": "Reactive"}, "capture": {"T": "trackId"}},
+        {"command": "add_midi_clip", "args": {"trackId": "${T}", "length": 2.0, "notes": notes}, "capture": {"C": "clipId"}},
+        {"command": "create_render_layer", "args": {"clipId": "${C}", "adapter": "transform", "mode": "transform"}, "capture": {"L": "layerId"}},
+        {"command": "render_layer", "args": {"clipId": "${C}", "wait": True}},
+        {"command": "add_note", "args": {"clipId": "${C}", "pitch": 67, "start": 1.0, "length": 0.5, "velocity": 110}},
+        {"command": "__wait", "args": {"ms": 4000}},                                 # let the debounce + async render land
+        {"command": "__snapshot", "args": {"label": "after_reactive"}},
+    ]
+    results, proc = run_script(ctx.bin, cmds, SESSION,
+                               extra_env={"MOSH_SERVICE_PORT": "8801", "MOSH_ENABLE_TRANSFORM": "0",
+                                          "MOSH_REACTIVE_DEBOUNCE_MS": "1"})
+    fails = failed_commands(results)
+    layer_id = _data_field(results, "create_render_layer", "layerId")
+    audio_dir = _mosh_session_base() / SESSION / "audio"
+    files = sorted(glob.glob(str(audio_dir / f"{layer_id}-*.wav"))) if layer_id else []
+    snap = _snap_for(results, "after_reactive")
+    st = {}
+    for t in snap.get("tracks", []):
+        for c in t.get("clips", []):
+            if c.get("type") == "midi":
+                rl = c.get("renderLayer") or {}
+                st = {"mute": bool(c.get("mute")), "reimagineActive": bool(rl.get("reimagineActive")), "notes": len(c.get("notes", []))}
+    # The edit changes the stableSourceSig → the auto-render writes a SECOND durable file (the first
+    # render's still on disk). One file ⇒ no reactive render fired.
+    ok = (not fails and layer_id is not None and len(files) >= 2
+          and st.get("mute") is True and st.get("reimagineActive") is True and st.get("notes") == 3)
+    return row("Reactive auto-re-render on edit", ok,
+               {"layer_audio_files": len(files), "state_after_edit": st, "failed_commands": fails})
+
+
+OFFLINE_CHECKS = [check_makes_sound, check_drums, check_transform, check_compile_render,
+                  check_compile_corrective, check_midi_render,
+                  check_midi_reimagine_beneath, check_reactive_rerender, check_full_loop,
                   check_relative_ref_export, check_bypass_layer, check_render_artifact_portability]
 
 

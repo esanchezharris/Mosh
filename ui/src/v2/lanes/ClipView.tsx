@@ -156,6 +156,10 @@ export function ClipView({ clip, trackType, snapshot }: { clip: Clip; trackType:
         ? <ClipDrumGrid notes={clip.notes} width={width} bs={bs} secToPx={secToPx} />
         : <ClipMidi notes={clip.notes} width={width} bs={bs} secToPx={secToPx} />)}
       <span className="v2-clip-label">{clip.name}</span>
+      {clip.renderLayer?.reimagineActive && (
+        <span className="v2-clip-badge reimagine" data-testid="v2-clip-reimagine"
+          title="A re-imagined render is playing beneath this clip; the MIDI is muted but still editable. Reset in the generative drawer to restore it.">✨</span>
+      )}
       {/* edge cursor affordance — pointerdown bubbles up to the clip handler, which
           classifies the edge by position (move tool trims). */}
       <div className="v2-trim l" style={{ width: edgeGrab }} />

@@ -15,7 +15,13 @@
   --v2-radius: 16px;
   --v2-radius-sm: 10px;
   --v2-gap: 14px;
-  --v2-rail-w: 312px;   /* the always-on right rail (agent · collaborators · inspector) */
+  --v2-rail-w: 286px;       /* the RIGHT dock when expanded (agent · inspector · collaborators) */
+  --v2-browser-w: 340px;    /* the LEFT dock when expanded (samples · plugins) */
+  --v2-tab-w: 46px;         /* a collapsed dock — just its vertical pull-tab rail */
+  --v2-stage-max: 1000px;   /* the centered work area cap (arrangement · nav · composer) */
+  /* live dock widths — flipped by data-left-open / data-right-open on .v2-shell (below) */
+  --v2-left-w: var(--v2-tab-w);
+  --v2-right-w: var(--v2-rail-w);
 
   /* ── dark hero — near-black ink + lime, matching the classic shell. Minimal blue:
        surfaces are neutral warm-black, the only saturated color is the lime accent;
@@ -62,6 +68,13 @@
   font-family: var(--font-body);
   overflow: hidden;
 }
+
+/* dock open-state → live column widths (the .v2-body grid reads these). Collapsed = a thin
+   pull-tab rail; open = the panel width. Symmetric on both flanks. */
+.v2-shell[data-left-open="true"]  { --v2-left-w: var(--v2-browser-w); }
+.v2-shell[data-left-open="false"] { --v2-left-w: var(--v2-tab-w); }
+.v2-shell[data-right-open="true"]  { --v2-right-w: var(--v2-rail-w); }
+.v2-shell[data-right-open="false"] { --v2-right-w: var(--v2-tab-w); }
 
 /* ── light "cream" — warm paper page, DARK content panels, bright lime. The concept
      look (and the v2 default). The PAGE ground is light but every panel stays dark, so we
@@ -248,11 +261,16 @@
 /* ─────────────────────────────── BODY ────────────────────────────────────── */
 .v2-body {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) var(--v2-rail-w);  /* center + always-on rail */
+  /* symmetric push-docks: [ left | center | right ]. The flanks' widths track the dock
+     open-state vars, so opening a dock fills its OWN gutter and pushes the center — it
+     never overlaps the (capped, centered) work area. */
+  grid-template-columns: var(--v2-left-w) minmax(0, 1fr) var(--v2-right-w);
   gap: 18px;
   padding: 16px 22px 18px;   /* generous cream margins — panels float on the page */
   min-height: 0;
+  transition: grid-template-columns 240ms cubic-bezier(0.22, 1, 0.36, 1);
 }
+@media (prefers-reduced-motion: reduce) { .v2-body { transition: none; } }
 .v2-main {
   display: grid;
   grid-template-rows: auto 1fr auto;  /* navigator · arrangement · composer */
@@ -261,6 +279,9 @@
 }
 .v2-stage {
   position: relative;
+  /* a SMALL centered work area: capped width + centered in the flexible middle column, so
+     comfortable margins show on both sides and the docks slide into them. */
+  width: 100%; max-width: var(--v2-stage-max); justify-self: center;
   background: var(--v2-surface);
   border: 1px solid var(--v2-line);
   border-radius: var(--v2-radius);
@@ -275,9 +296,11 @@
 }
 
 /* ── section navigator — its OWN panel above the arrangement (concept-style separation,
-     a cream gap shows between it and the dark timeline). Shares the timeline x-axis. ── */
+     a cream gap shows between it and the dark timeline). Shares the timeline x-axis, so it
+     MUST cap + center identically to the stage or the ribbon/ruler fall out of alignment. ── */
 .v2-nav {
   display: flex; align-items: stretch; height: var(--v2-ribbon-h);
+  width: 100%; max-width: var(--v2-stage-max); justify-self: center;
   background: var(--v2-surface); border: 1px solid var(--v2-line);
   border-radius: var(--v2-radius-sm); box-shadow: var(--v2-glow); overflow: hidden;
 }
@@ -286,9 +309,17 @@
   padding: 0 10px; border-right: 1px solid var(--v2-line); background: var(--v2-surface-2);
 }
 .v2-nav-clip { position: relative; flex: 1 1 auto; min-width: 0; overflow: hidden; }
-.v2-nav-track { position: absolute; inset: 0; will-change: transform; }
-/* the section ribbon fills the nav panel — the panel is its frame, so drop its own chrome */
-.v2-nav .v2-ribbon { height: 100%; background: transparent; border-bottom: none; }
+
+/* ── song navigator (overview minimap) — full song mapped to the strip; click to jump ── */
+.v2-songnav { position: relative; height: 100%; width: 100%; cursor: pointer; }
+.v2-songnav:hover { background: var(--v2-surface-sunken); }
+.v2-songnav-tick { position: absolute; top: 0; bottom: 0; display: flex; align-items: center; padding-left: 6px; border-left: 1px solid var(--v2-line); pointer-events: none; }
+.v2-songnav-tick:first-of-type { border-left: none; }
+.v2-songnav-bar { font-family: var(--font-mono); font-size: 10px; color: var(--v2-faint); }
+.v2-songnav-head { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--v2-playhead); box-shadow: 0 0 8px var(--v2-playhead); pointer-events: none; z-index: 2; }
+.v2-songnav-peer { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--peer-color, #ff69a8); pointer-events: none; opacity: 0.85; }
+.v2-songnav-peer-dot { position: absolute; top: 5px; left: 50%; transform: translateX(-50%); width: 6px; height: 6px; border-radius: 50%; background: var(--peer-color, #ff69a8); box-shadow: 0 0 6px var(--peer-color, #ff69a8); }
+.v2-songnav-peer.recording { opacity: 1; }
 
 /* ── timeline (sticky-header grid: ribbon + ruler stick top, headers stick left) ── */
 .v2-tl-scroll { position: absolute; inset: 0; overflow: auto; }
@@ -432,6 +463,8 @@
 .v2-clip.midi { background: rgba(26, 26, 28, 0.66); border-color: rgba(255, 255, 255, 0.16); }
 .v2-clip.drum { background: rgba(24, 24, 26, 0.6); border-color: rgba(204, 255, 54, 0.3); }
 .v2-clip-label { position: absolute; left: 8px; top: 5px; font-size: 10px; color: rgba(255, 255, 255, 0.92); text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5); pointer-events: none; }
+/* Phase 2 — a re-imagined render plays beneath this (muted) MIDI clip. */
+.v2-clip-badge.reimagine { position: absolute; right: 5px; top: 4px; font-size: 11px; line-height: 1; pointer-events: none; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5)); }
 .v2-clip canvas { display: block; width: 100%; height: 100%; }
 
 /* playhead overlay */
@@ -469,11 +502,29 @@
 .v2-live .led { width: 7px; height: 7px; border-radius: 50%; background: var(--v2-accent); box-shadow: 0 0 8px var(--v2-accent); }
 
 .v2-mosh-card { padding-bottom: 12px; }
-/* the agent is "maximized" — a tall, prominent stage at the top of the rail. Moshi sits
-   DIRECTLY on the dark card (transparent mount — no light "egg" pod) like the concept. */
+/* the head carries Live + a collapse control on the right */
+.v2-mosh-head-r { display: inline-flex; align-items: center; gap: 8px; }
+.v2-rail-collapse {
+  appearance: none; background: transparent; border: 1px solid transparent; cursor: pointer;
+  width: 22px; height: 22px; border-radius: 7px; display: grid; place-items: center;
+  color: var(--v2-faint); font-size: 13px; line-height: 1; transition: color 120ms, border-color 120ms, background 120ms;
+}
+.v2-rail-collapse:hover { color: var(--v2-text); border-color: var(--v2-line); background: var(--v2-surface-sunken); }
+/* the agent is "maximized" — a tall, prominent stage at the top of the rail. The live WebGL
+   Moshi sits DIRECTLY on the dark card (transparent mount — no light "egg" pod) like the concept. */
 .v2-mosh-stage { display: grid; place-items: center; padding: 8px 0 4px; }
 .v2-shell .v2-mosh-stage .moshi-dock { width: 100%; border-left: none; background: transparent; padding: 4px; }
-.v2-shell .v2-mosh-stage .moshi-mount { min-height: 188px; background: transparent; box-shadow: none; }
+.v2-shell .v2-mosh-stage .moshi-mount { min-height: 218px; background: transparent; box-shadow: none; }
+/* the reused Moshi dock carries classic --bone-dim status text → dark-on-dark in the v2 rail.
+   Recolor its cap/state/mood to read on the dark card (mood word still lights up by state). */
+.v2-shell .v2-mosh-stage .moshi-state { color: var(--v2-dim); }
+.v2-shell .v2-mosh-stage .moshi-mute, .v2-shell .v2-mosh-stage .moshi-handsfree { color: var(--v2-dim); display: inline-flex; align-items: center; justify-content: center; }
+.v2-shell .v2-mosh-stage .moshi-mute:hover, .v2-shell .v2-mosh-stage .moshi-handsfree:hover { color: var(--v2-text); }
+.v2-shell .v2-mosh-stage .moshi-handsfree.on { color: var(--v2-accent); }
+.v2-shell .v2-mosh-card .moshi-mood { color: var(--v2-faint); }
+.v2-shell .v2-mosh-card .moshi-mood[data-mood="listen"] { color: var(--v2-accent); }
+.v2-shell .v2-mosh-card .moshi-mood[data-mood="rec"] { color: var(--v2-rec); }
+.v2-shell .v2-mosh-card .moshi-mood[data-mood="work"] { color: #ffcf6a; }
 .v2-mosh-status { display: flex; align-items: center; gap: 8px; padding: 4px 14px 0; color: var(--v2-dim); font-size: 12px; }
 .v2-mosh-status .wave { color: var(--v2-accent); }
 
@@ -506,6 +557,20 @@
 /* reused classic Rack/GenDrawer flow full-width inside the narrow rail */
 .v2-insp-body .rack, .v2-insp-body .gen { width: 100%; min-width: 0; }
 .v2-insp-body .rack-chain { flex-wrap: wrap; }
+/* the reused Rack/GenDrawer ship classic light .btn pills — restyle them to the dark card
+   (mirrors the browser-dock buttons). Action buttons (+ Plugin / + RAVE / Re-imagine …)
+   become subtle sunken pills; primaries take the lime. */
+.v2-shell .v2-insp-body .btn {
+  appearance: none; font: inherit; font-size: 12px; padding: 6px 11px; border-radius: 8px; cursor: pointer;
+  background: var(--v2-surface-sunken); border: 1px solid var(--v2-line); color: var(--v2-dim);
+  transition: color 120ms, border-color 120ms, background 120ms;
+}
+.v2-shell .v2-insp-body .btn:hover:not(:disabled) { color: var(--v2-text); border-color: var(--v2-accent); }
+.v2-shell .v2-insp-body .btn:disabled { opacity: 0.38; cursor: default; }
+.v2-shell .v2-insp-body .btn.primary { background: var(--v2-accent); color: var(--v2-accent-ink); border-color: transparent; font-weight: 700; }
+.v2-shell .v2-insp-body .btn.primary:hover:not(:disabled) { color: var(--v2-accent-ink); filter: brightness(1.06); }
+.v2-insp-body .rack-empty { color: var(--v2-faint); font-size: 12px; padding: 8px 2px; }
+.v2-insp-body .pg-label, .v2-insp-body .gen-head, .v2-insp-body .rack-head { color: var(--v2-dim); }
 
 .v2-presence { display: flex; flex-direction: column; gap: 10px; padding: 10px 12px 12px; }
 .v2-cam { appearance: none; background: var(--v2-surface-sunken); border: 1px solid var(--v2-line); border-radius: 8px; padding: 3px 8px; font-size: 13px; line-height: 1; cursor: pointer; color: var(--v2-dim); }
@@ -539,7 +604,7 @@
 
 /* ─────────────────────────────── COMPOSER ────────────────────────────────── */
 .v2-composer {
-  position: relative; z-index: 31;   /* above the browser overlay (z-index:30) → never covered */
+  position: relative;
   justify-self: center; width: min(860px, 100%);   /* narrow + centered under the arrangement
      (grid items ignore margin:auto — center via justify-self) */
   display: flex; align-items: center; gap: 10px; padding: 7px 10px;
@@ -548,7 +613,7 @@
 }
 /* Moshi face at the composer's left (the concept's personality cue). The composer is a
    dark panel, so the mark flips to light petals + dark face regardless of theme. */
-.v2-composer-face { flex: 0 0 auto; --v2-mark-fill: var(--v2-text); --v2-mark-face: var(--v2-surface); }
+.v2-composer-face { flex: 0 0 auto; --v2-mark-fill: var(--v2-text); --v2-mark-face: var(--v2-surface); --v2-mark-rim: rgba(0, 0, 0, 0.28); }
 .v2-composer .spark { flex: 0 0 auto; width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: var(--v2-accent-soft); color: var(--v2-accent); font-size: 16px; }
 .v2-composer-plus { flex: 0 0 auto; position: relative; }
 .v2-shell .v2-composer-plus .fo-trigger {
@@ -559,47 +624,95 @@
 /* The reused AgentComposer renders its own input/form; let it fill the bar. */
 .v2-composer .v2-composer-host { flex: 1 1 auto; min-width: 0; }
 
-/* ─────────────────────────── LEFT BROWSER DRAWER ─────────────────────────── */
-/* An FL/Ableton-style dock that slides in on a pull-tab. Mounted at the SHELL so the tab
-   rides the screen edge; CONFINED to the nav+arrangement band — it ends above the prompt
-   bar (bottom clearance) AND the bar sits at a higher z-index, so it never covers Moshi. */
-.v2-drawer {
-  position: absolute; top: 92px; bottom: 96px; left: 0; width: 336px; z-index: 30; display: flex;
-  transform: translateX(-336px);
-  transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-.v2-drawer.open { transform: translateX(0); }
-@media (prefers-reduced-motion: reduce) { .v2-drawer { transition: none; } }
-.v2-drawer-panel {
+/* ───────────────────────────── SIDE PUSH-DOCKS ──────────────────────────── */
+/* Symmetric collapsible docks, each in its OWN grid column (left = browser, right = agent
+   rail). Collapsed → a thin vertical pull-tab; open → a full panel that fills its column.
+   Because each dock owns its gutter, opening one PUSHES the centered work area and never
+   overlaps it. Width animates via the .v2-body grid-template-columns transition. */
+.v2-dock { position: relative; display: flex; min-width: 0; min-height: 0; }
+
+/* the panel (open state) — fills the dock column */
+.v2-dock-panel {
   flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; overflow: hidden;
-  background: var(--v2-surface-2); border-right: 1px solid var(--v2-line-strong); box-shadow: var(--v2-shadow);
-  opacity: 0; transition: opacity 160ms linear;
+  background: var(--v2-surface-2); border: 1px solid var(--v2-line-strong);
+  border-radius: var(--v2-radius); box-shadow: var(--v2-shadow);
 }
-.v2-drawer.open .v2-drawer-panel { opacity: 1; }
-.v2-drawer-head { display: flex; align-items: center; gap: 8px; padding: 12px 12px 0; }
-.v2-drawer-tabs { display: flex; gap: 4px; flex: 1 1 auto; }
-.v2-drawer-tabs button {
+.v2-dock-head { display: flex; align-items: center; gap: 8px; padding: 12px 12px 0; }
+.v2-dock-tabs { display: flex; gap: 4px; flex: 1 1 auto; }
+.v2-dock-tabs button {
   font: inherit; font-size: 12px; padding: 6px 14px; border-radius: 9px; cursor: pointer;
   background: var(--v2-surface-sunken); border: 1px solid var(--v2-line); color: var(--v2-dim);
 }
-.v2-drawer-tabs button.on { background: var(--v2-accent); color: var(--v2-accent-ink); border-color: transparent; font-weight: 700; }
-.v2-drawer-close {
+.v2-dock-tabs button.on { background: var(--v2-accent); color: var(--v2-accent-ink); border-color: transparent; font-weight: 700; }
+.v2-dock-close {
   flex: 0 0 auto; width: 26px; height: 26px; border-radius: 7px; cursor: pointer; font-size: 12px;
   background: var(--v2-surface-sunken); border: 1px solid var(--v2-line); color: var(--v2-dim);
 }
-.v2-drawer-close:hover { color: var(--v2-text); border-color: var(--v2-line-strong); }
-.v2-drawer-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: auto; padding: 8px 12px 12px; }
-.v2-drawer-body .modal-list { flex: 1 1 auto; min-height: 0; }
-/* the pull-tab — rides the drawer's right edge, so it's the lone bit showing when parked */
-.v2-drawer-tab {
-  position: absolute; left: 100%; top: 22px; display: flex; align-items: center; justify-content: center;
-  width: 28px; padding: 13px 0; cursor: pointer; color: var(--v2-dim);
-  background: var(--v2-surface-2); border: 1px solid var(--v2-line-strong); border-left: none;
-  border-radius: 0 11px 11px 0; box-shadow: 6px 0 18px rgba(0, 0, 0, 0.28);
+.v2-dock-close:hover { color: var(--v2-text); border-color: var(--v2-line-strong); }
+.v2-dock-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: auto; padding: 8px 12px 12px; }
+.v2-dock-body .modal-list { flex: 1 1 auto; min-height: 0; }
+/* the right dock frames the agent rail; the rail fills the column */
+.v2-dock-right .v2-rail { flex: 1 1 auto; min-width: 0; }
+
+/* the pull-tab (collapsed state) — fills the thin rail; vertical label, symmetric per side */
+.v2-dock-tab {
+  flex: 1 1 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+  cursor: pointer; color: var(--v2-dim); padding: 16px 0;
+  background: var(--v2-surface-2); border: 1px solid var(--v2-line-strong);
+  border-radius: var(--v2-radius); box-shadow: var(--v2-glow);
+  transition: color 140ms, border-color 140ms, background 140ms;
 }
-.v2-drawer-tab:hover { color: var(--v2-accent); }
-.v2-drawer.open .v2-drawer-tab { color: var(--v2-accent); }
-.v2-drawer-tab-label { writing-mode: vertical-rl; text-orientation: mixed; transform: rotate(180deg); font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; }
+.v2-dock-tab:hover { color: var(--v2-accent); border-color: var(--v2-accent); }
+.v2-dock-tab:focus-visible { outline: 2px solid var(--v2-accent); outline-offset: 2px; }
+.v2-dock-tab-label { writing-mode: vertical-rl; text-orientation: mixed; transform: rotate(180deg); font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; }
+/* the agent tab carries the minimized Moshi — pale-bodied so it reads on the dark tab */
+.v2-dock-tab-mosh .v2-mark { --v2-mark-fill: var(--v2-text); --v2-mark-face: var(--v2-surface-2); --v2-mark-rim: rgba(0, 0, 0, 0.28); }
+
+/* ── browser dock contents — the reused SampleBrowser (Sounds) ships classic light form
+     controls that clash with the dark dock; restyle them to the v2 surface language here.
+     (The Plugins tab uses its own .v2-pb-* classes and is untouched.) ── */
+.v2-dock-body .pop-head { font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--v2-dim); margin: 2px 0 9px; }
+.v2-dock-body .pop-row { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; }
+.v2-dock-body .pop-note { flex: 1 1 auto; min-width: 0; font-size: 11px; color: var(--v2-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; }
+.v2-shell .v2-dock-body .btn {
+  appearance: none; font: inherit; font-size: 12px; padding: 5px 11px; border-radius: 8px; cursor: pointer; flex: 0 0 auto;
+  background: var(--v2-surface-sunken); border: 1px solid var(--v2-line); color: var(--v2-dim);
+  transition: color 120ms, border-color 120ms, background 120ms;
+}
+.v2-shell .v2-dock-body .btn:hover:not(:disabled) { color: var(--v2-text); border-color: var(--v2-line-strong); }
+.v2-shell .v2-dock-body .btn:disabled { opacity: 0.38; cursor: default; }
+.v2-shell .v2-dock-body .sb-search {
+  width: 100%; box-sizing: border-box; font: inherit; font-size: 13px; padding: 8px 12px; margin-bottom: 12px;
+  background: var(--v2-surface-sunken); border: 1px solid var(--v2-line); border-radius: 10px; color: var(--v2-text);
+  transition: border-color 120ms;
+}
+.v2-shell .v2-dock-body .sb-search::placeholder { color: var(--v2-faint); }
+.v2-shell .v2-dock-body .sb-search:focus { outline: none; border-color: var(--v2-accent); }
+.v2-dock-body .plugin-group { margin-bottom: 12px; }
+.v2-dock-body .pg-label { font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--v2-faint); margin: 4px 2px 6px; }
+.v2-shell .v2-dock-body .plugin-row {
+  display: flex; align-items: center; gap: 8px; width: 100%; box-sizing: border-box;
+  padding: 7px 9px; margin: 0 0 4px; border-radius: 9px; text-align: left; cursor: pointer;
+  background: var(--v2-surface-sunken); border: 1px solid var(--v2-line); color: var(--v2-text); font: inherit; font-size: 12px;
+  transition: border-color 120ms, background 120ms;
+}
+.v2-shell .v2-dock-body .plugin-row:hover { border-color: var(--v2-line-strong); background: var(--v2-surface-2); }
+.v2-dock-body .plugin-row .pr-name { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v2-dock-body .pr-folder { color: var(--v2-accent); font-size: 10px; margin-right: 2px; }
+.v2-shell .v2-dock-body .cb-import {
+  flex: 0 0 auto; padding: 4px 10px; font-size: 11px; border-radius: 7px; opacity: 0; transition: opacity 110ms, background 120ms, color 120ms;
+  background: var(--v2-accent-soft); border: 1px solid transparent; color: var(--v2-accent);
+}
+.v2-dock-body .plugin-row:hover .cb-import, .v2-dock-body .cb-import:focus-visible { opacity: 1; }
+.v2-shell .v2-dock-body .cb-import:hover { background: var(--v2-accent); color: var(--v2-accent-ink); }
+.v2-shell .v2-dock-body .sb-audition {
+  flex: 0 0 auto; width: 22px; height: 22px; display: grid; place-items: center; border-radius: 6px; cursor: pointer; font-size: 9px;
+  background: var(--v2-surface-2); border: 1px solid var(--v2-line); color: var(--v2-dim); padding: 0;
+}
+.v2-shell .v2-dock-body .sb-audition:hover, .v2-shell .v2-dock-body .sb-audition[aria-pressed="true"] { color: var(--v2-accent); border-color: var(--v2-accent); }
+.v2-dock-body .sb-thumb { flex: 0 0 auto; color: var(--v2-accent); opacity: 0.85; }
+.v2-dock-body .rack-empty { color: var(--v2-faint); font-size: 12px; padding: 10px 2px; }
+.v2-shell .v2-dock-body .modal-list { max-height: none !important; overflow: auto; }
 
 /* error + drop overlay (reuse legacy semantics, restyled) */
 .v2-errbar { margin: 0 14px; padding: 7px 14px; background: rgba(255, 71, 106, 0.14); color: #ffb3c1; border: 1px solid rgba(255, 71, 106, 0.4); border-radius: 10px; font-size: 12px; }

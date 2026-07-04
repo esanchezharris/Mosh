@@ -600,7 +600,8 @@ class Handler(BaseHTTPRequestHandler):
                              "sketch": _sketch_available(),
                              "whisper": _whisper_available(),
                              "skeleton": _skeleton_available(),
-                             "phonology": _phonology_available()})
+                             "phonology": _phonology_available(),
+                             "compiler": True})
         elif path == "/capabilities":
             adapters = [FAKE_ADAPTER, TRANSFORM_ADAPTER, SOULX_ADAPTER] + ([_sa3_descriptor()] if SA3_ENABLED else [])
             training = [_training_descriptor()] if TRAINING_ENABLED else []
@@ -1031,6 +1032,27 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, payload)
             except Exception as e:  # noqa: BLE001
                 self._send(500, {"ok": False, "error": f"lyric generation error: {e}"})
+        elif path == "/compile_render":
+            # Prompt compiler (generative-only v1): a loose instruction → a VALIDATED
+            # Stable-Audio render envelope (prompt + nl + colours + lab + seed, or a
+            # transform target+strength). Runs IN-PROCESS (stdlib + colors.json); the
+            # FAKE backend is deterministic, the real LLM (brain_client) swaps in behind
+            # the same seam. The native side applies the envelope via set_render_param.
+            instruction = str(data.get("instruction", "")).strip()
+            if not instruction:
+                self._send(400, {"ok": False, "error": "instruction required"})
+                return
+            intensity = data.get("intensity", None)
+            try:
+                intensity = int(intensity) if intensity not in (None, "") else None
+            except (TypeError, ValueError):
+                intensity = None
+            backend = data.get("backend") if data.get("backend") in ("fake", "llm") else None
+            try:
+                from compiler import core as comp
+                self._send(200, comp.compile(instruction, intensity=intensity, backend=backend))
+            except Exception as e:  # noqa: BLE001
+                self._send(500, {"ok": False, "error": f"compile error: {e}"})
         elif path == "/analyze_lyrics":
             # Precise per-line phonology (Finish-My-Song L1): syllables, stress contour,
             # rhyme grade vs the group anchor, per-word slots — the flow-visualizer feed.

@@ -73,3 +73,29 @@ TEST_CASE ("full cache fingerprint is sensitive to route/variant/seed (05 §5)",
         REQUIRE (RenderLayer::fingerprint (v, "upstreamHashAAA", "120bpm/Cmaj", 44100, 2, "svc-1") != base);
     }
 }
+
+TEST_CASE ("compile_render's transient compiledEnvelope round-trips + does NOT touch the cache key",
+           "[stage5][compiler]")
+{
+    auto v = RenderLayer::create ("rl-1", "clip-42", 0.0, 4.0, "fake");
+    const auto base = RenderLayer::fingerprint (v, "up", "120/Cmaj", 44100, 2, "svc-1");
+
+    // The compiler result lands as a JSON-string blob on the node — non-undoable, like
+    // lyricProposals — so the UI can show what it chose / surface an honest refusal.
+    const juce::String blob =
+        R"({"ok":true,"backend":"fake","mode":"reimagine","reasoning":"lo-fi -> grit",)"
+        R"("envelope":{"mode":"reimagine","prompt":"lo-fi, gritty","nl":0.42,)"
+        R"("colors":[{"name":"grit","value":72}],"lab":false,"seed":7},"say":null})";
+    v.setProperty (ids::compiledEnvelope, blob, nullptr);
+
+    auto back = RenderLayer::roundTripViaXml (v);
+    REQUIRE (back.hasProperty (ids::compiledEnvelope));
+    auto parsed = juce::JSON::parse (back[ids::compiledEnvelope].toString());
+    REQUIRE (parsed.getProperty ("mode", "").toString() == "reimagine");
+    REQUIRE (parsed.getProperty ("envelope", juce::var())
+                   .getProperty ("prompt", "").toString() == "lo-fi, gritty");
+
+    // R2: the transient blob is NOT a cache input — the compiled params flow through
+    // PARAMS (already keyed), so stamping the blob must leave the fingerprint unchanged.
+    REQUIRE (RenderLayer::fingerprint (v, "up", "120/Cmaj", 44100, 2, "svc-1") == base);
+}

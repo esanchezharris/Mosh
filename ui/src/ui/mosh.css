@@ -689,6 +689,7 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 .gen-badge.st-ready { color: var(--on-accent); background: var(--lime); border-color: var(--lime); }
 .gen-badge.st-rendering, .gen-badge.st-queued { color: var(--on-accent); background: var(--warn); border-color: var(--warn); }
 .gen-badge.st-error { color: #fff; background: var(--rec); }
+.gen-error { font-size: 10px; color: var(--rec); flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gen-seed { font-size: 10px; color: var(--bone-dim); }
 .gen-qa { font-size: 11px; color: var(--lime); display: flex; flex-direction: column; gap: 3px; }
 .gen-qa-line { display: flex; gap: 8px; align-items: center; }
@@ -698,6 +699,12 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 .gen-actions { display: flex; flex-wrap: wrap; gap: 5px; }
 .gen-actions .btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .color-add { font-size: 11px; }
+/* Prompt compiler — the "describe it…" entry point above the create row. */
+.gen-compile { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; }
+.gen-compile-row { display: flex; gap: 6px; align-items: stretch; }
+.gen-compile-input { flex: 1 1 auto; min-width: 0; background: var(--ink); color: var(--bone); border: 1px solid var(--ink-line); border-radius: 5px; padding: 3px 7px; font: inherit; font-size: 11px; }
+.gen-compile-input:disabled { opacity: 0.5; }
+.gen-compile-say { font-size: 11px; line-height: 1.35; color: var(--bone); opacity: 0.85; padding: 4px 7px; border-left: 2px solid var(--ink-line); }
 /* Route B — transform create row + control surface. */
 .gen-create-row { display: flex; gap: 8px; flex-wrap: wrap; }
 .xform-controls { display: flex; flex-direction: column; gap: 4px; }
@@ -982,6 +989,8 @@ button.tbadge:hover { border-color: var(--lime); color: var(--lime); }
   padding: 1px 6px; border-radius: 999px; pointer-events: none; animation: mosh-pop-in 160ms ease-out;
 }
 .clip[data-transcribing="true"] { box-shadow: 0 0 0 1px var(--lime-dim) inset; }
+/* Phase 2 — a clip whose audio is a hidden re-imagined render beneath the muted MIDI. */
+.clip-badge.reimagine { background: linear-gradient(90deg, #b388ff, #7c4dff); color: #fff; }
 
 /* mount pop-in for the racks/strips/headers — they settle in rather than snapping */
 .pcard, .strip, .thead { animation: mosh-pop-in 160ms cubic-bezier(0.22, 1, 0.36, 1); }

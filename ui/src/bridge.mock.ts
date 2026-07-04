@@ -163,7 +163,7 @@ const listeners = new Map<string, Set<Listener>>();
 // Mock command log (drives the CommandLog panel). Read-only commands don't log.
 const cmdLog: { command: string; ok: boolean; undoable: boolean; ts: number }[] = [];
 const READONLY = new Set(["get_snapshot", "get_clip_peaks", "file_peaks", "audition_file", "stop_audition", "get_command_log", "list_plugins", "list_builtins", "list_colors", "list_audio_devices", "list_wave_inputs", "list_track_outputs", "list_takes", "list_training_sources", "training_job_status", "list_lora_adapters"]);
-const NON_UNDOABLE = new Set(["set_transport", "arm_track", "set_input_monitor", "undo", "redo", "save", "reload", "new_project", "render_layer", "open_plugin_editor", "set_plugin_param", "export_audio", "mark_take", "import_training_source", "approve_training_source", "build_training_corpus", "submit_training_job", "cancel_training_job", "import_lora_adapter", "activate_lora_adapter", "get_rhymes",
+const NON_UNDOABLE = new Set(["set_transport", "arm_track", "set_input_monitor", "undo", "redo", "save", "reload", "new_project", "render_layer", "reset_render_layer", "open_plugin_editor", "set_plugin_param", "export_audio", "mark_take", "import_training_source", "approve_training_source", "build_training_corpus", "submit_training_job", "cancel_training_job", "import_lora_adapter", "activate_lora_adapter", "get_rhymes",
   "complete_lyrics", "fill_lyric_gap", "suggest_next_line", "regenerate_lyric",
   "cancel_lyric_job", "reject_lyric_proposal", "analyze_lyrics", "get_lyric_corpus_stats"]);  // accept_lyric_proposal IS undoable
 
@@ -359,6 +359,53 @@ function pushUndo() { if (inBatch) return; history.push(clone(snapshot)); future
 
 const ok = (command: string, data?: unknown): CommandResult => ({ ok: true, command, data });
 const err = (command: string, error: string): CommandResult => ({ ok: false, command, error });
+
+// Minimal mirror of the Python prompt compiler (service/compiler/core.py) so the e2e +
+// vitest exercise the real UI without the native backend. Deterministic, generative-only:
+// classify reimagine | transform | unsupported and emit a validated envelope.
+function mockCompile(instruction: string): { mode: string; envelope?: Record<string, unknown>; say?: string; subtype?: string; tool?: string | null; reasoning: string } {
+  const low = instruction.toLowerCase().trim();
+  // Corrective sub-types → the existing tool that fixes it (mirrors _CORRECTIVE_SUBTYPES).
+  const correctiveSubtypes: Array<[string[], string, string, string]> = [
+    [["in tune", "out of tune", "off-key", "off key", "off-pitch", "pitchy", "tune it", "tune the", "tune my", "retune", "autotune", "auto-tune", "pitch correct", "fix the tuning", "fix the pitch", "intonation"], "pitch", "moshAutoTune", "That's a tuning issue — AutoTune corrects the pitch in place; it doesn't re-perform the take."],
+    [["tighten", "on the beat", "off the beat", "off-beat", "quantize", "fix the timing", "fix timing", "loose timing", "sloppy timing", "lock it to the grid"], "timing", "quantize_notes", "That's a timing issue — quantize snaps the notes to the grid (MIDI clips); it doesn't re-perform the take."],
+    [["too muddy", "muddy", "too harsh", "harsh", "boomy", "boxy", "too thin", "tinny", "fix the tone", "honky"], "tone", "eq", "That's a tone issue — an EQ shapes it without re-performing the take."],
+    [["too quiet", "too loud", "uneven", "inconsistent level", "levels are", "level it", "even it out", "compress the", "fix the dynamics", "dynamics are"], "dynamics", "moshOTT", "Uneven levels — OTT evens them out without re-performing."],
+  ];
+  for (const [trig, subtype, tool, say] of correctiveSubtypes) {
+    if (trig.some((t) => low.includes(t))) return { mode: "corrective", subtype, tool, say, reasoning: `corrective:${subtype}` };
+  }
+  const noise = ["clean up the recording", "de-noise", "denoise", "remove the noise", "remove noise", "too noisy", "hiss", "background hum", "crackle"];
+  if (noise.some((k) => low.includes(k))) return { mode: "unsupported", say: "I can't clean up noise/hiss in a recording yet — that needs a restoration tool.", reasoning: "classified noise" };
+  const vocal = ["vocal", "vocals", "sing ", "singing", "sung", "singer", "add lyrics"];
+  if (vocal.some((k) => low.includes(k))) return { mode: "unsupported", say: "I only generate instrumental textures — I can't create or fix vocals.", reasoning: "classified vocal" };
+  const genericFix = ["fix ", "fix the", "fix my", "fix it", "fix this", "repair", "correct the", "clean up"];
+  if (genericFix.some((k) => low.includes(k))) return { mode: "corrective", subtype: "ambiguous", tool: null, say: "I can correct the TUNING (AutoTune), TIMING (quantize), TONE (EQ) or LEVELS (OTT) — which one? Or describe the sound you want and I'll re-imagine it.", reasoning: "corrective:ambiguous" };
+  const instruments = ["electric guitar", "guitar", "piano", "violin", "cello", "strings", "synth pad", "synth", "flute", "choir", "brass", "organ", "bells", "harp"];
+  const cues = ["into a ", "into an ", "as a ", "as an ", "turn it into ", "make it a ", "sound like a ", "sounds like a "];
+  const instr = instruments.find((i) => new RegExp(`\\b${i}\\b`).test(low));
+  if (instr && cues.some((c) => low.includes(c))) {
+    return { mode: "transform", reasoning: `transform → ${instr}`, envelope: { mode: "transform", target: instr, strength: 65, seed: 1, prompt: "", colors: [], lab: false } };
+  }
+  const descriptors: Array<[string[], string, number]> = [
+    [["brighter", "brighten", "shiny", "crisp"], "brightness", 76],
+    [["darker", "dark", "moody", "muffled"], "brightness", 24],
+    [["gritty", "grit", "dirty", "lo-fi", "lofi", "raw", "crunch"], "grit", 72],
+    [["distort", "fuzz", "overdriv"], "distortion", 70],
+    [["epic", "cinematic", "huge", "dramatic"], "epic", 70],
+    [["futuristic", "synthetic", "digital", "robotic"], "futuristic", 70],
+    [["tense", "eerie", "ominous"], "tension", 70],
+    [["airy", "air", "spacious", "ethereal", "ambient"], "air", 70],
+  ];
+  const colors: Array<{ name: string; value: number }> = [];
+  for (const [trig, name, value] of descriptors) {
+    if (colors.length >= 3) break;
+    if (colors.some((c) => c.name === name)) continue;
+    if (trig.some((t) => low.includes(t))) colors.push({ name, value });
+  }
+  const prompt = (colors.map((c) => c.name).join(", ") + (instr ? ` ${instr}` : "")) || low;
+  return { mode: "reimagine", reasoning: `re-imagine: ${colors.map((c) => c.name).join(", ") || "(none)"}`, envelope: { mode: "reimagine", prompt, nl: 0.4, colors, lab: false, seed: 1 } };
+}
 
 function trainingState(): TrainingState {
   if (!snapshot.training) {
@@ -1081,8 +1128,30 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       if (f.clip.renderLayer.mode === "sing" && !f.track.lyricSheet)
         return err(command, "sing needs a lyric sheet on the clip's track (build a flow from a take first)");
       f.clip.renderLayer.status = "ready"; f.clip.renderLayer.hasArtifact = true;
+      // SING never auto-applies (mirrors MoshOps::finalizeRender): the guide vocal lands as an
+      // auditionable artifact for the legacy accept/reject flow — it must not replace the take.
+      if (f.clip.renderLayer.mode === "sing") { /* ready + hasArtifact only */ }
+      // Wave clips auto-apply in place: the render becomes the clip's audio + Reset becomes available.
+      else if (f.clip.type === "wave") { f.clip.renderLayer.appliedInPlace = true; f.clip.renderLayer.hasOriginal = true; }
+      else {
+        // MIDI/drum (Phase 2): the render lands as HIDDEN audio on a dedicated, snapshot-EXCLUDED
+        // track (a synth on the source track would silence it), so the UI never sees a hidden clip —
+        // it just sees the MIDI muted + the reimagineActive marker (+ Reset).
+        f.clip.mute = true;
+        f.clip.renderLayer.reimagineActive = true;
+      }
       emit("layer_status", { clipId: f.clip.id, qa: { pq: 5.1, pq_base: 5.66, flags: ["quality_degraded"], adapter: f.clip.renderLayer.adapter, reasoning: "Fair production quality (5.1/10); fair enjoyment; flagged: quality_degraded." } });
       invalidate(); return ok(command);
+    }
+    case "reset_render_layer": {
+      const f = findClip(str(args.clipId)); if (!f?.clip.renderLayer) return err(command, "no render layer");
+      if (f.clip.type === "wave") { f.clip.renderLayer.appliedInPlace = false; }
+      else {
+        // MIDI/drum: drop the hidden audio (on its excluded track), un-mute the source, clear the marker.
+        f.clip.mute = false;
+        f.clip.renderLayer.reimagineActive = false;
+      }
+      f.clip.renderLayer.status = "dirty"; invalidate(); return ok(command);
     }
     case "accept_render": case "freeze_layer": case "bounce_layer_to_clip": {
       const f = findClip(str(args.clipId)); if (!f?.clip.renderLayer) return err(command, "no render layer");
@@ -1095,6 +1164,23 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     case "bypass_layer": { const f = findClip(str(args.clipId)); if (f?.clip.renderLayer) { f.clip.renderLayer.status = Boolean(args.bypassed) ? "bypassed" : "ready"; invalidate(); } return ok(command); }
     case "cancel_render": { const f = findClip(str(args.clipId)); if (f?.clip.renderLayer) { f.clip.renderLayer.status = "dirty"; invalidate(); } return ok(command); }
     case "remove_render_layer": { const f = findClip(str(args.clipId)); if (f) { pushUndo(); f.clip.hasRenderLayer = false; delete f.clip.renderLayer; invalidate(); } return ok(command); }
+    case "compile_render": {
+      const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found");
+      const r = mockCompile(str(args.instruction));
+      if (r.mode !== "reimagine" && r.mode !== "transform")   // honest boundary: mutate nothing
+        return ok(command, { mode: r.mode, backend: "fake", reasoning: r.reasoning, say: r.say, envelope: null, subtype: r.subtype, tool: r.tool });
+      pushUndo();
+      const env = r.envelope!;
+      f.clip.hasRenderLayer = true;
+      f.clip.renderLayer = {
+        id: "rl-" + f.clip.id, status: "dirty", adapter: r.mode === "transform" ? "transform" : "fake",
+        mode: r.mode, seed: num(env.seed, 1), userKept: false, hasArtifact: false,
+        nl: num(env.nl, 0.4), colors: (env.colors as RenderLayer["colors"]) ?? [],
+        ...(r.mode === "transform" ? { target: str(env.target, ""), strength: num(env.strength, 65) } : {}),
+      };
+      invalidate();
+      return ok(command, { mode: r.mode, backend: "fake", reasoning: r.reasoning, envelope: env, say: null, layerId: f.clip.renderLayer.id });
+    }
 
     // ── MIDI clips + notes (piano-roll) ──────────────────────────────────────
     case "add_midi_clip": {

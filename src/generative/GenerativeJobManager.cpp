@@ -413,6 +413,28 @@ juce::var GenerativeJobManager::generateLyrics (const juce::String& mode, const 
     return {};
 }
 
+juce::var GenerativeJobManager::compileRender (const juce::String& instruction, int intensity,
+                                               const juce::String& backend)
+{
+    if (! ensureServiceRunning())
+        return {};
+
+    auto* body = new DynamicObject();
+    body->setProperty ("instruction", instruction);
+    if (intensity >= 0)            body->setProperty ("intensity", intensity);
+    if (backend.isNotEmpty())      body->setProperty ("backend", backend);   // "fake"|"llm" override
+
+    // Fake backend is instant; a real LLM (L3) takes a couple of seconds — generous
+    // timeout, and the caller runs this off the message thread (mirrors generateLyrics()).
+    URL url = URL (baseUrl + "/compile_render").withPOSTData (JSON::toString (var (body)));
+    auto opts = URL::InputStreamOptions (URL::ParameterHandling::inPostData)
+                    .withConnectionTimeoutMs (120000)
+                    .withExtraHeaders ("Content-Type: application/json");
+    if (auto s = url.createInputStream (opts))
+        return JSON::parse (s->readEntireStreamAsString());
+    return {};
+}
+
 juce::var GenerativeJobManager::analyzeLyrics (const juce::var& spec)
 {
     if (! ensureServiceRunning())
