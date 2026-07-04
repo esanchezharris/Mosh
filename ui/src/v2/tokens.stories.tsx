@@ -16,6 +16,7 @@ const COLOR_TOKENS = [
 const SPACE_TOKENS = ["--v2-space-1", "--v2-space-2", "--v2-space-3", "--v2-space-4", "--v2-space-5", "--v2-space-6", "--v2-space-7", "--v2-space-8"];
 const RADIUS_TOKENS = ["--v2-radius-xs", "--v2-radius-sm", "--v2-radius-md", "--v2-radius", "--v2-radius-lg", "--v2-radius-pill"];
 const FS_TOKENS = ["--v2-fs-2xs", "--v2-fs-xs", "--v2-fs-sm", "--v2-fs-base", "--v2-fs-md", "--v2-fs-lg", "--v2-fs-xl", "--v2-fs-display"];
+const ROLE_TOKENS = ["--accent", "--accent-ink", "--accent-soft", "--status-rec", "--status-danger", "--status-danger-glow", "--status-danger-text", "--status-ok", "--status-warn", "--status-off"];
 
 function useResolved(names: string[]) {
   const ref = useRef<HTMLDivElement>(null);
@@ -57,6 +58,7 @@ function TokenSheet() {
   const spaces = useResolved(SPACE_TOKENS);
   const radii = useResolved(RADIUS_TOKENS);
   const fonts = useResolved(FS_TOKENS);
+  const roles = useResolved(ROLE_TOKENS);
   return (
     <div style={{ padding: 32, background: "var(--v2-bg)", minHeight: "100vh", color: "var(--v2-text)", fontFamily: "var(--font-body)" }}>
       <h2 style={{ fontFamily: "var(--font-display)", margin: "0 0 4px" }}>v2 token sheet</h2>
@@ -69,6 +71,15 @@ function TokenSheet() {
               <Row key={n}>
                 <span style={{ width: 40, height: 24, borderRadius: 6, border: "1px solid var(--v2-line-strong)", background: `var(${n})` }} />
                 <Label name={n} value={colors.vals[n]} />
+              </Row>
+            ))}
+          </div>
+          <h3 style={{ fontFamily: "var(--font-display)", color: "var(--v2-text)", fontSize: 15, textTransform: "uppercase", letterSpacing: "var(--v2-tracking-caps, 0.14em)", margin: "24px 0 8px" }}>Semantic roles</h3>
+          <div ref={roles.ref}>
+            {ROLE_TOKENS.map((n) => (
+              <Row key={n}>
+                <span style={{ width: 40, height: 24, borderRadius: 6, border: "1px solid var(--v2-line-strong)", background: `var(${n})` }} />
+                <Label name={n} value={roles.vals[n]} />
               </Row>
             ))}
           </div>

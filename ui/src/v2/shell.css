@@ -72,6 +72,23 @@
   --v2-radius-lg: 12px;
   --v2-radius-pill: 999px;
 
+  /* ── semantic role aliases (PR-2.4) — Option-A: v2 maps roles onto its own palette; a
+       future 4-skin bridge remaps these per [data-skin] with zero consumer edits. Accent
+       roles reference the theme-aware --v2-* tokens (so they track dark↔light for free);
+       status values are exact literals (verified against consumers, NOT derived — e.g.
+       --status-danger-text is #ffb3c1, which is NOT any color-mix of --v2-rec). The two
+       reds are kept DISTINCT (--v2-rec vs --status-danger-glow) rather than collapsed. ── */
+  --accent: var(--v2-accent);
+  --accent-ink: var(--v2-accent-ink);
+  --accent-soft: var(--v2-accent-soft);
+  --status-rec: var(--v2-rec);
+  --status-danger: var(--v2-rec);
+  --status-danger-glow: rgb(255, 71, 106);   /* the 2nd red (rec-arm glow, errbar) — not --v2-rec */
+  --status-danger-text: #ffb3c1;             /* exact; NOT a mix of --v2-rec */
+  --status-ok: #3fe06a;
+  --status-warn: #ffd45c;
+  --status-off: var(--v2-faint);
+
   /* ── ground: the page the chrome floats on (logo, transport pill, time card, invite/⋯,
        avatars). In the dark hero the ground IS dark, so these alias the dark surfaces; the
        light/cream theme overrides them — page goes cream, panels stay dark. ── */
