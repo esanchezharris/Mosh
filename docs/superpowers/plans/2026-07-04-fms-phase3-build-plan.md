@@ -23,8 +23,8 @@ Exactly the transform-mode precedent: **zero new MoshOps commands.**
 
 ## Stage 3 — GPU brokering
 
-- **v0 recommendation: batch spin-up per render** — the adapter shells out to the proven `runpod_ksa.sh` shape (provision → render → pull → **terminate**; ~90 s overhead; ≈$0.05–0.15/render; voice data destroyed with the pod). Explicit in-app "render in the cloud" consent; nothing leaves the machine otherwise.
-- Alternatives (revisit triggers): persistent endpoint (if render volume makes spin-up latency annoying); owner's PC (if offline matters); **mlx-community SoulX ports** (if vetted, collapses the remote dependency entirely — the roadmap §5 trigger).
+- **v0 DECIDED (owner, 2026-07-04): the owner's PC** (the Windows + NVIDIA box, over SSH on the local network). Beats the batch-RunPod recommendation on every axis that matters here: voice data NEVER leaves his own hardware (the strongest privacy posture — no cloud consent wall needed), $0/render, and the envs persist so there is no ~90 s spin-up. The adapter seam is identical either way (shell out to a remote runner, pull the WAV back): `remote/runpod_ksa.sh`'s render step is re-targeted at a fixed host, minus provision/terminate; the PC env comes from the already-written `KSA_RUNBOOK_WINDOWS.md` setup.
+- Fallbacks (revisit triggers): **batch RunPod spin-up** (the KS-A-proven shape — if the PC is off/away and a render is wanted NOW; keeps the explicit cloud-consent wall); persistent endpoint (only if volume ever justifies it); **mlx-community SoulX ports** (if vetted, collapses the remote dependency entirely — the roadmap §5 trigger).
 
 ## Parked follow-ups (labeled, not lost)
 
