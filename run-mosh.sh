@@ -166,7 +166,8 @@ bundle_service() {                              # $1 = installed app
   echo "bundling service → ${SVC#$ROOT/}"
   rm -rf "$SVC"; mkdir -p "$SVC/transcribe" "$SVC/sketch" "$SVC/transform"
   cp "$ROOT/service/server.py" "$ROOT/service/run.sh" \
-     "$ROOT/service/quality_readout.py" "$ROOT/service/setup-sa3.sh" "$SVC/" 2>/dev/null || true
+     "$ROOT/service/quality_readout.py" "$ROOT/service/audio_io.py" \
+     "$ROOT/service/setup-sa3.sh" "$SVC/" 2>/dev/null || true
   # FMS service modules ride whole-dir (imported in-process by server.py / the adapters;
   # venvs live OUTSIDE the tree at ~/Library/Mosh/venvs since #218, and the machine-local
   # .env pointers inside these dirs are exactly what the deployed run.sh needs).

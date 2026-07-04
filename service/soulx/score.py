@@ -56,9 +56,18 @@ def _phoneme(word: str, syl: int) -> str:
     return "en_" + "-".join(str(p) for p in phones)
 
 
+def _display_and_phoneme(word: str):
+    """Singable form of a token: `___` gaps become the placeholder "la"; returns
+    (display, en_-phoneme) with the AH1-per-syllable fallback for unknown words."""
+    display = "la" if word.strip("_") == "" else word
+    syl = max(1, _pron().syllables(_clean(display)) or 1)
+    return display, _phoneme(display, syl)
+
+
 def _word_units(words: List[str], slots: List[dict]):
-    """Allocate slots to words per the v0 policy -> [(word, [slot, ...]), ...] or, for
-    the squeeze tail, [(word, None), ...] units that share the final slot."""
+    """Allocate slots to words per the v0 policy -> [(word, [slot, ...]), ...]; when
+    words outnumber slots the final unit is ([word, ...], [last_slot]) — the surplus
+    words as a LIST sharing the one remaining slot (the squeeze tail)."""
     n = len(slots)
     if len(words) > n:
         units = [(words[i], [slots[i]]) for i in range(n - 1)]
@@ -101,9 +110,7 @@ def author_score(lines: List[dict], language: str = "English", name: str = "mosh
 
     def emit_word(word: str, segs: List[dict]) -> None:
         nonlocal n_words
-        display = "la" if word.strip("_") == "" else word
-        syl = max(1, _pron().syllables(_clean(display)) or 1)
-        phon = _phoneme(display, syl)
+        display, phon = _display_and_phoneme(word)
         for j, s in enumerate(segs):
             emit(display, phon, int(s.get("pitch", 69)), 2 if j == 0 else 3,
                  float(s["end"]) - float(s["start"]))
@@ -125,9 +132,8 @@ def author_score(lines: List[dict], language: str = "English", name: str = "mosh
                 pitch = int(unit_slots[0]["segments"][0].get("pitch", 69)) \
                     if unit_slots[0].get("segments") else 69
                 for w in unit_word:
-                    display = "la" if w.strip("_") == "" else w
-                    syl = max(1, _pron().syllables(_clean(display)) or 1)
-                    emit(display, _phoneme(display, syl), pitch, 2, span)
+                    display, phon = _display_and_phoneme(w)
+                    emit(display, phon, pitch, 2, span)
                     n_words += 1
             else:
                 # Flatten the allocated slots' segments, legato-bridging intra-word

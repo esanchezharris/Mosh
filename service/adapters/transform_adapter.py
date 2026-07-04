@@ -27,6 +27,7 @@ import wave
 # carries the same human-readable `reasoning` field the drawer renders (AL-006).
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # service/
 import quality_readout  # noqa: E402
+from audio_io import write_wav  # noqa: E402
 
 
 def _cli_path() -> str:
@@ -92,17 +93,6 @@ def _read_wav_floats(path: str):
     return samples, n_channels, framerate, n_frames
 
 
-def _write_wav_16(path: str, out, n_channels: int, framerate: int) -> None:
-    clamped = [int(max(-32768, min(32767, round(s * 32767.0)))) for s in out]
-    body = struct.pack("<%dh" % len(clamped), *clamped) if clamped else b""
-    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-    with wave.open(path, "wb") as w:
-        w.setnchannels(n_channels)
-        w.setsampwidth(2)
-        w.setframerate(framerate)
-        w.writeframes(body)
-
-
 def _transform_samples(samples, n_channels, target: str, strength: float, seed: int):
     """Per-target deterministic re-colour, wet-mixed by `strength` (0..1).
     A one-pole tilt (dark/bright by target parity) + saturation. Silence in → silence
@@ -135,7 +125,7 @@ def _render_fake(input_wav: str, output_wav: str, params: dict) -> dict:
 
     samples, n_channels, framerate, n_frames = _read_wav_floats(input_wav)
     out = _transform_samples(samples, n_channels, target, strength, seed)
-    _write_wav_16(output_wav, out, n_channels, framerate)
+    write_wav(output_wav, out, n_channels, framerate)
 
     # QA readout (judge-panel stand-in): the stub reports a plausible production-quality
     # score that dips with heavier strength so the UI can show degradation.
