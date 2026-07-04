@@ -30,10 +30,11 @@ test("describe-it: a loose instruction compiles into a re-imagine layer", async 
   await expect(gen.getByTestId("render-status")).toHaveText("dirty");
   await expect(page.getByTestId("error")).toHaveCount(0);
 
-  // …and it renders + accepts like any layer.
+  // …and it renders like any re-imagine layer: post-#185 a wave clip AUTO-APPLIES in place
+  // (no accept step) and Reset (restore the original) becomes available.
   await gen.getByTestId("gen-render").click();
   await expect(gen.getByTestId("render-status")).toHaveText("ready");
-  await expect(gen.getByTestId("gen-accept")).toBeEnabled();
+  await expect(gen.getByTestId("gen-reset")).toBeEnabled();
 });
 
 test("honest boundary: a tuning fix routes to AutoTune (one-click), no layer created", async ({ page }) => {
