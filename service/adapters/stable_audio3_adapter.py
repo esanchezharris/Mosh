@@ -63,6 +63,8 @@ def render(input_wav: str, output_wav: str, params: dict) -> dict:
             raise
         raise RuntimeError("stable_audio3 unavailable (no MLX or Windows CUDA backend found)")
 
+    import coverage   # whole-clip tile/stitch (service/ is on sys.path from the insert above)
+
     output_wav = os.path.abspath(output_wav)
     os.makedirs(os.path.dirname(output_wav), exist_ok=True)   # clean success on a fresh dest dir
     input_wav = os.path.abspath(input_wav) if input_wav else input_wav
@@ -74,34 +76,37 @@ def render(input_wav: str, output_wav: str, params: dict) -> dict:
     steers = CR.resolve_steers(colors, lab=lab)             # validated / clamped / composed
 
     eng = E.get_engine()                                    # singleton; first call loads the model
-
-    # mode: re-imagine when we have a source + an init-noise-level, else generate.
     has_src = bool(input_wav) and os.path.exists(input_wav)
-    nl = params.get("nl", None)
-    init_status = "n/a"
-    if has_src and nl is not None:
-        nl = float(nl)
-        if nl < NL_MIN:
-            raise ValueError(f"nl={nl} below {NL_MIN}: degenerate (no audible change)")
-        nl = min(nl, NL_MAX_RECOGNIZABLE)
-        init_lat, init_status = init_cache.get_or_encode(eng, input_wav)
-        eng.reimagine(prompt, seed, init_lat, init_noise_level=nl,
-                      steers=steers, out_wav=output_wav)
-        mode = "audio_to_audio"
-    else:
-        eng.generate(prompt, seed, steers=steers, out_wav=output_wav)
-        mode = "text_to_audio"
 
-    sr, ch, nframes = _wav_meta(output_wav)
-    manifest = {
-        "ok": True, "adapter": "stable_audio3", "mode": mode,
-        "duration_s": round(nframes / float(sr), 3),
-        "sample_rate": sr, "channels": ch,
-        "seconds_pinned": eng.SECONDS,
-        "init_cache": init_status,
-        "steers": [{"layer": L, "alpha": round(a, 4)} for (L, a, _v) in steers],
-        "pq": None, "pq_base": None, "flags": [],
-    }
-    # Best-effort QA (judges venv); never fails the render.
+    def _render_window(in_wav, out_wav, p):
+        # ONE SA3 window (<= eng.SECONDS). Re-imagine when this window has a source + nl, else
+        # generate. The coverage orchestrator slices a long clip into windows / one loop cycle.
+        win_src = bool(in_wav) and os.path.exists(in_wav)
+        nl = p.get("nl", None)
+        init_status = "n/a"
+        if win_src and nl is not None:
+            nlv = float(nl)
+            if nlv < NL_MIN:
+                raise ValueError(f"nl={nlv} below {NL_MIN}: degenerate (no audible change)")
+            nlv = min(nlv, NL_MAX_RECOGNIZABLE)
+            init_lat, init_status = init_cache.get_or_encode(eng, in_wav)
+            eng.reimagine(prompt, seed, init_lat, init_noise_level=nlv, steers=steers, out_wav=out_wav)
+            mode = "audio_to_audio"
+        else:
+            eng.generate(prompt, seed, steers=steers, out_wav=out_wav)
+            mode = "text_to_audio"
+        sr, ch, nframes = _wav_meta(out_wav)
+        return {
+            "ok": True, "adapter": "stable_audio3", "mode": mode,
+            "duration_s": round(nframes / float(sr), 3),
+            "sample_rate": sr, "channels": ch,
+            "seconds_pinned": eng.SECONDS,
+            "init_cache": init_status,
+            "steers": [{"layer": L, "alpha": round(a, 4)} for (L, a, _v) in steers],
+            "pq": None, "pq_base": None, "flags": [],
+        }
+
+    manifest = coverage.render(_render_window, input_wav, output_wav, params, float(eng.SECONDS))
+    # Best-effort QA on the FINAL (tiled/stitched) output (judges venv); never fails the render.
     qa.augment_manifest(manifest, output_wav, source_wav=input_wav if has_src else None)
     return manifest

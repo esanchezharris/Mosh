@@ -178,7 +178,7 @@ export function GenDrawer({ track, selectedClipId }: { track: Track; selectedCli
 
   return (
     <div className="gen" data-testid="generative">
-      <div className="gen-head"><span className="gen-title">⃝ GENERATIVE</span><span className="gen-clip">{rl?.mode === "transform" ? "transform" : sa3 ? "stable audio 3" : "fake"} · {clip.name}</span></div>
+      <div className="gen-head"><span className="gen-title">⃝ GENERATIVE</span><span className="gen-clip">{rl?.mode === "sing" ? "sing" : rl?.mode === "transform" ? "transform" : sa3 ? "stable audio 3" : "fake"} · {clip.name}</span></div>
       {!rl ? (
         <>
           <CompileBox clipId={clip.id} trackId={track.id} />
@@ -187,10 +187,14 @@ export function GenDrawer({ track, selectedClipId }: { track: Track; selectedCli
               onClick={() => void exec("create_render_layer", { clipId: clip.id, adapter: sa3 ? "stable_audio3" : "fake", mode: "reimagine", modelVariant: sa3 ? "sa3-medium" : "" })}>+ Re-imagine</button>
             <button className="btn rack-add" data-testid="gen-create-transform"
               onClick={() => void exec("create_render_layer", { clipId: clip.id, adapter: "transform", mode: "transform" })}>+ Transform</button>
+            {track.lyricSheet && (
+              <button className="btn rack-add" data-testid="gen-create-sing"
+                onClick={() => void exec("create_render_layer", { clipId: clip.id, adapter: "soulx", mode: "sing" })}>+ Sing</button>
+            )}
           </div>
         </>
       ) : (
-        <GenBody clip={clip} qa={qaByClip[clip.id]} />
+        <GenBody clip={clip} track={track} qa={qaByClip[clip.id]} />
       )}
     </div>
   );
@@ -251,7 +255,7 @@ function CompileBox({ clipId, trackId }: { clipId: string; trackId: string }) {
   );
 }
 
-function GenBody({ clip, qa }: { clip: Clip; qa?: RenderQA }) {
+function GenBody({ clip, track, qa }: { clip: Clip; track: Track; qa?: RenderQA }) {
   const qaView = qaReadoutView(qa);
   const exec = useStore((s) => s.exec);
   const colorsAvail = useStore((s) => s.availableColors);
@@ -266,10 +270,11 @@ function GenBody({ clip, qa }: { clip: Clip; qa?: RenderQA }) {
   const blockedBy = (name: string) => (colorsAvail.find((c) => c.name === name)?.no_stack_with ?? []).some((n) => active.some((a) => a.name === n));
   const addable = colorsAvail.filter((c) => !active.some((a) => a.name === c.name) && !blockedBy(c.name));
   const isTransform = rl.mode === "transform";
+  const isSing = rl.mode === "sing";
 
   return (
     <div className="gen-body" data-render-status={rl.status}>
-      {isTransform ? <TransformControls clip={clip} /> : (<>
+      {isSing ? <SingControls track={track} /> : isTransform ? <TransformControls clip={clip} /> : (<>
       {active.map((c) => {
         const meta = colorsAvail.find((m) => m.name === c.name);
         return (
@@ -290,7 +295,22 @@ function GenBody({ clip, qa }: { clip: Clip; qa?: RenderQA }) {
       </>)}
       <div className="gen-status" role="status" aria-live="polite">
         <span className={`gen-badge st-${rl.status}`} data-testid="render-status">{rl.status}</span>
-        <span className="gen-seed tc">seed {rl.seed}</span>
+        {rl.status === "error" && rl.error && (
+          <span className="gen-error" data-testid="render-error" title={rl.error}>{rl.error}</span>
+        )}
+        {/* seed + coverage are no-ops for soulx (supports_seed:false, coverage unread) but both
+            sit in the fingerprint — showing them for sing invites a pointless full re-render
+            (real backend: a ~900s SSH round-trip) for zero output change. */}
+        {!isSing && <span className="gen-seed tc">seed {rl.seed}</span>}
+        {!isSing && (
+        <select className="gen-cov" data-testid="gen-coverage"
+          title="Whole-clip coverage — auto, loop (tile one cycle, in time), or stitch (window + crossfade the whole clip)"
+          value={rl.coverage ?? "auto"} onChange={(e) => void exec("set_render_param", { clipId: clip.id, coverage: e.target.value })}>
+          <option value="auto">auto</option>
+          <option value="loop">loop</option>
+          <option value="stitch">stitch</option>
+        </select>
+        )}
         <button className={`btn${labMode ? " on" : ""}`} title="Lab — unlock the ASTD clamp" aria-pressed={labMode} onClick={() => setLab(!labMode)}>{labMode ? "⚠ LAB" : "Lab"}</button>
       </div>
       {rendering && (
@@ -311,13 +331,62 @@ function GenBody({ clip, qa }: { clip: Clip; qa?: RenderQA }) {
         </div>
       )}
       <div className="gen-actions">
-        <button className="btn" data-testid="gen-render" onClick={() => void exec("render_layer", { clipId: clip.id })}>{rl.hasArtifact ? "Re-render" : "Render"}</button>
+        {isSing ? (
+          // Sing keeps the legacy auditionable flow (mirrors the C++ finalizeRender gate): the
+          // guide vocal never replaces the recorded take in place — render, listen, then Accept
+          // lands it (or Reject drops it).
+          <>
+            <button className="btn" data-testid="gen-render" onClick={() => void exec("render_layer", { clipId: clip.id })}>{rl.hasArtifact ? "Re-render" : "Render"}</button>
+            <button className="btn" disabled={!rl.hasArtifact} data-testid="gen-accept" onClick={async () => { const r = await exec("accept_render", { clipId: clip.id }); if (r.ok) bumpCelebrate(); }}>Accept</button>
+            <button className="btn" disabled={!rl.hasArtifact} onClick={() => void exec("reject_render", { clipId: clip.id })}>Reject</button>
+          </>
+        ) : clip.type === "wave" ? (
+          // Wave clips auto-apply in place — the waveform swaps to the result instantly.
+          // No accept/reject; Reset restores the original.
+          <>
+            <button className="btn" data-testid="gen-render" onClick={() => void exec("render_layer", { clipId: clip.id })}>Re-imagine</button>
+            <button className="btn" data-testid="gen-reset" disabled={!rl.hasOriginal} title="Restore the original audio" onClick={() => void exec("reset_render_layer", { clipId: clip.id })}>Reset</button>
+          </>
+        ) : (
+          // MIDI/drum: the render lands as HIDDEN audio beneath the muted MIDI (Phase 2) — instant,
+          // and the MIDI stays editable underneath. No accept step; Reset un-mutes the MIDI and drops
+          // the hidden audio.
+          <>
+            <button className="btn" data-testid="gen-render" onClick={() => { void exec("render_layer", { clipId: clip.id }); if (!rl.reimagineActive) bumpCelebrate(); }}>Re-imagine</button>
+            <button className="btn" data-testid="gen-reset" disabled={!rl.reimagineActive} title="Un-mute the MIDI and drop the hidden re-imagined audio" onClick={() => void exec("reset_render_layer", { clipId: clip.id })}>Reset</button>
+          </>
+        )}
         {rendering && <button className="btn" onClick={() => void exec("cancel_render", { clipId: clip.id })}>Cancel</button>}
-        <button className="btn" disabled={!rl.hasArtifact} data-testid="gen-accept" onClick={async () => { const r = await exec("accept_render", { clipId: clip.id }); if (r.ok) bumpCelebrate(); }}>Accept</button>
-        <button className="btn" disabled={!rl.hasArtifact} onClick={() => void exec("reject_render", { clipId: clip.id })}>Reject</button>
-        <button className="btn" title="new take" onClick={() => void exec("set_render_param", { clipId: clip.id, seed: Number(rl.seed) + 1 })}>⟳ seed</button>
+        {!isSing && <button className="btn" title="new take" onClick={() => void exec("set_render_param", { clipId: clip.id, seed: Number(rl.seed) + 1 })}>⟳ seed</button>}
         <button className="btn x" title="remove layer" onClick={() => void exec("remove_render_layer", { clipId: clip.id })}>✕</button>
       </div>
+    </div>
+  );
+}
+
+// FMS Phase-3 — the sing control surface: renders the track's lyric sheet in the
+// producer's own voice (fake legato-beep guide until the real backend is enrolled +
+// configured). Read-only status here — the sheet is edited in the Lyrics tab; render/
+// accept/seed ride the shared chrome below.
+function SingControls({ track }: { track: Track }) {
+  const voiceEnrolled = useStore((s) => s.snapshot?.session?.singVoiceEnrolled ?? false);
+  const lines = track.lyricSheet?.lines ?? [];
+  const flowed = lines.filter((l) => l.hasScore).length;
+  return (
+    <div className="sing-controls">
+      <label className="nparam">
+        <span className="nlabel">flow</span>
+        <span className="tc" data-testid="sing-flow">{flowed}/{lines.length} lines carry your take's flow</span>
+      </label>
+      <label className="nparam">
+        <span className="nlabel">voice</span>
+        <span className="tc" data-testid="sing-voice">
+          {voiceEnrolled ? "enrolled — locked to your voice only" : "not enrolled — renders a guide melody (beeps)"}
+        </span>
+      </label>
+      {flowed === 0 && (
+        <span className="rack-empty">No flow yet — use “Build flow from this take” on the vocal clip first.</span>
+      )}
     </div>
   );
 }

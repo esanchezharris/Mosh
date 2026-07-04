@@ -46,6 +46,9 @@ service/sketch/.sketch.env
 # Whisper word-ASR venv (torch, 100s of MB) + machine-local WHISPER_PY (setup-whisper.sh)
 service/whisper/.venv/
 service/whisper/.whisper.env
+# Skeleton (FCPE F0) venv + machine-local SKELETON_PY (setup-skeleton.sh)
+service/skeleton/.venv/
+service/skeleton/.skeleton.env
 # Phonology venv + machine-local PHONOLOGY_PY (setup-phonology.sh)
 service/phonology/.venv/
 service/phonology/.phonology.env
@@ -80,6 +83,11 @@ service/scripts/_sa3_e2e_out/
 !service/sketch/fixtures/*.wav
 mosh-sessions/
 service/jobs/
+service/teardown/.venv/
+service/teardown/*.sqlite
+service/teardown/*.sqlite-*
+service/teardown/teardown_jobs.jsonl
+service/teardown/checkpoints/
 _preserved_artifacts/
 assets/grit_demo/
 midi_data/
@@ -96,6 +104,7 @@ scripts/compiler-eval/artifacts/
 .gstack/
 .omo/
 .refclone/
+.cache/
 
 # macOS
 .DS_Store
@@ -116,3 +125,7 @@ ios/MoshCompanion/build/
 # Bundled Moshi brain key — only ever lives in the deployed .app, never in git.
 brain.env
 **/brain.env
+
+# Vector sample palette artifact (owner-private library paths + resampled audio)
+service/palette/palette/
+service/teardown/probe/.assets/

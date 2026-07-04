@@ -1,0 +1,152 @@
+{
+  "recipe_id": "owner_milliondollarche_snare_use_for_min_beno_snare",
+  "schema_version": "2.0",
+  "source": {
+    "platform": "owner-catalog",
+    "video_id": "owner_milliondollarche_snare_use_for_min_beno_snare",
+    "url": "",
+    "title": "37_milliondollarche",
+    "channel": "",
+    "duration_s": 0.0,
+    "license": "owner",
+    "retrieved_at": null,
+    "content_hash": "c2d12d1298997c25a7d3e880e015b5f49e1ec0ebf70e2f210587376170016e9a"
+  },
+  "meta": {
+    "daw": {
+      "value": "flstudio",
+      "confidence": 0.95,
+      "evidence": [
+        "importer format"
+      ]
+    },
+    "tempo_bpm": {
+      "value": 152,
+      "confidence": 0.95,
+      "evidence": [
+        "project file tempo"
+      ]
+    },
+    "key": {
+      "value": "A major",
+      "confidence": 0.75,
+      "evidence": [
+        "pitch-class inference (Krumhansl)"
+      ]
+    },
+    "time_signature": {
+      "value": "4/4",
+      "confidence": 0.6,
+      "evidence": []
+    }
+  },
+  "arrangement": {
+    "sections": [
+      {
+        "name": "loop",
+        "start_s": 0.0,
+        "end_s": 3.1578947368421053,
+        "confidence": 0.5
+      }
+    ]
+  },
+  "elements": [
+    {
+      "element_id": "owner_milliondollarche_snare_use_for_min_beno_snare",
+      "role": "snare",
+      "label": "milliondollarche · snare use for min beno (snare)",
+      "audio_ref": null,
+      "midi": {
+        "status": "extracted",
+        "midi_ref": null,
+        "notes": [
+          {
+            "pitch": 60,
+            "start_beats": 4.5,
+            "duration_beats": 0.25,
+            "velocity": 100
+          },
+          {
+            "pitch": 60,
+            "start_beats": 5.5,
+            "duration_beats": 0.25,
+            "velocity": 100
+          },
+          {
+            "pitch": 60,
+            "start_beats": 6.5,
+            "duration_beats": 0.25,
+            "velocity": 100
+          },
+          {
+            "pitch": 60,
+            "start_beats": 7.0,
+            "duration_beats": 0.25,
+            "velocity": 100
+          },
+          {
+            "pitch": 60,
+            "start_beats": 7.5,
+            "duration_beats": 0.25,
+            "velocity": 100
+          }
+        ],
+        "note_count": 5,
+        "confidence": 1.0
+      },
+      "sample_match": {
+        "status": "none",
+        "matched_path": null,
+        "distance": 0.0,
+        "alternates": [],
+        "root_note": null
+      },
+      "synth_patch": {
+        "status": "unknown",
+        "plugin": {
+          "name": null,
+          "available_locally": false
+        },
+        "params": {},
+        "match": null,
+        "substitute": null
+      },
+      "onsets": [],
+      "motif": {
+        "bars": 2.0,
+        "onset_grid": "8th",
+        "density": 2.5,
+        "syncopation": 0.8,
+        "contour": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "register_band": "perc",
+        "harmonic_function": ""
+      },
+      "bass": null,
+      "evidence": [],
+      "confidence": 0.9
+    }
+  ],
+  "unresolved": [],
+  "reconstruction_class": "deterministic",
+  "yield": {
+    "predicted": {
+      "drums": 0.0,
+      "midi": 1.0,
+      "synth": 0.0,
+      "arrangement": 0.5,
+      "overall": 0.7
+    },
+    "actual": {
+      "drums": 0.0,
+      "midi": 0.0,
+      "synth": 0.0,
+      "arrangement": 0.0,
+      "overall": 0.0
+    }
+  }
+}

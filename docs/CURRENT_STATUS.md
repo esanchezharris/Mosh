@@ -8,6 +8,10 @@ that matter and calls out what is current versus historical.
 
 ## Start Here
 
+0. `docs/resumption/2026-06-30-clean-resumption-map.md` is the current restart map
+   for resuming after the Claude usage cutoff. It records the clean trunk baseline,
+   dirty-work preservation lanes, open PR order, installed-app preservation policy,
+   and why the autonomous loop must not be re-armed until backlog drift is fixed.
 1. `ARCHITECTURE.md` is the current architecture on-ramp. It explains the native
    macOS app shape: JUCE/Tracktion engine, React WebView UI, MoshOps seam,
    plugin/neural layers, Python generative service, brain/voice, and iPhone

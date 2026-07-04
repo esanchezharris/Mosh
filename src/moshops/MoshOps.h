@@ -239,6 +239,7 @@ private:
     juce::var cmdCancelRender     (const juce::var& args);
     juce::var cmdAcceptRender     (const juce::var& args);
     juce::var cmdRejectRender     (const juce::var& args);
+    juce::var cmdResetRenderLayer (const juce::var& args);   // wave clips: restore the pre-render source (undo the in-place apply)
     juce::var cmdBypassLayer      (const juce::var& args);
     juce::var cmdFreezeLayer      (const juce::var& args);
     juce::var cmdBounceLayerToClip(const juce::var& args);
@@ -354,10 +355,38 @@ private:
     juce::String    computeFingerprint (const juce::ValueTree& node, const juce::File& inputWav,
                                         const juce::String& upstreamOverride = {});
     void            finalizeRender (const juce::String& clipId, const juce::File& outputWav,
-                                    const juce::File& manifestFile, const juce::String& cacheKey);
+                                    const juce::File& manifestFile, const juce::String& cacheKey,
+                                    const juce::String& serviceError = {}, int expectedEpoch = -1);
+
+    // Phase 3 — reactive auto-re-render. reactiveTouch(clipId) bumps the layer's reactiveEpoch and
+    // (debounced) fires a background re-render when an applied render is live (wave in-place or MIDI
+    // beneath) and reactive is enabled; reactiveTouchTrack re-touches every applied clip on a track
+    // (an instrument/FX edit changes a MIDI bounce). Message-thread only.
+    void            reactiveTouch (const juce::String& clipId);
+    void            reactiveTouchTrack (const juce::String& trackId);
+    void            reactiveFire (const juce::String& clipId);
+    // Per-clip debounce timers (juce::Timer holds a LambdaTimer defined in the .cpp).
+    std::map<juce::String, std::unique_ptr<juce::Timer>> reactiveTimers;
+    // Auto-apply a completed render to a WAVE clip in place (the clip's own audio/waveform
+    // becomes the render artifact — instant preview). Stores the original source once so
+    // reset_render_layer can restore it. Returns false for non-wave clips / missing artifact
+    // (caller falls back to the legacy lane-landing path). Message-thread only; undoable txn.
+    bool            applyRenderInPlace (const juce::String& clipId, juce::ValueTree node,
+                                        const juce::File& artifact, const juce::String& cacheKey);
+    // Phase 2 — auto-apply a completed render BENEATH a MIDI/drum clip: land a hidden, full-span
+    // looping audio clip on the SAME track and MUTE the source MIDI, so the producer hears the
+    // re-imagined audio in place while the editable MIDI stays beneath. A re-render HOT-SWAPS the
+    // hidden clip's source (no structural churn). Returns false for wave clips / sub-region renders
+    // / missing artifact (caller falls back to applyRenderInPlace or the legacy lane). Message-thread
+    // only; the first apply is one undoable txn (undo == reset_render_layer).
+    bool            applyRenderBeneathMidi (const juce::String& clipId, juce::ValueTree node,
+                                            const juce::File& artifact, const juce::String& cacheKey);
 
     // ── helpers ──
     te::AudioTrack* createAudioTrack (const juce::String& name);
+    // Phase 2 — the single shared, instrument-free, snapshot-excluded track that holds the drum/MIDI
+    // beneath-render audio (a synth on the source track would silence an audio clip there). Created once.
+    te::AudioTrack* findOrCreateHiddenRenderTrack();
     // Shared wave-file insertion path used by import_clip and import_clip_data.
     juce::var       importWaveFileToTrack (const juce::String& command,
                                            const juce::File& file,

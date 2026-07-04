@@ -40,6 +40,7 @@ struct RenderLayer
         v.setProperty (ids::cacheKey, "", nullptr);
         v.setProperty (ids::cacheArtifact, "", nullptr);
         v.setProperty (ids::status, "empty", nullptr);
+        v.setProperty (ids::coverage, "auto", nullptr);   // whole-clip coverage strategy
         v.setProperty (ids::createdBy, "user", nullptr);
         v.setProperty (ids::userKept, false, nullptr);
 
@@ -90,6 +91,7 @@ struct RenderLayer
             v[ids::adapterVersion].toString(),
             v[ids::modelVariant].toString(),       // size/decoder — part of key
             v[ids::mode].toString(),               // transform route — part of key
+            v[ids::coverage].toString(),           // whole-clip coverage (tile/stitch) — part of key
             params[ids::prompt].toString(),
             params[ids::target].toString(),        // Route B transform target — part of key
             params[ids::strength].toString(),      // Route B transform strength — part of key

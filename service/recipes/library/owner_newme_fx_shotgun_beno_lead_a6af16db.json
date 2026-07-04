@@ -1,0 +1,159 @@
+{
+  "recipe_id": "owner_newme_fx_shotgun_beno_lead",
+  "schema_version": "2.0",
+  "source": {
+    "platform": "owner-catalog",
+    "video_id": "owner_newme_fx_shotgun_beno_lead",
+    "url": "",
+    "title": "40_newme",
+    "channel": "",
+    "duration_s": 0.0,
+    "license": "owner",
+    "retrieved_at": null,
+    "content_hash": "a6af16db2c9b7c0d7241ee59bdb3c9a190783e135ce6a1d4a6e49efa64307bc8"
+  },
+  "meta": {
+    "daw": {
+      "value": "flstudio",
+      "confidence": 0.95,
+      "evidence": [
+        "importer format"
+      ]
+    },
+    "tempo_bpm": {
+      "value": 153,
+      "confidence": 0.95,
+      "evidence": [
+        "project file tempo"
+      ]
+    },
+    "key": {
+      "value": "C major",
+      "confidence": 0.513,
+      "evidence": [
+        "pitch-class inference (Krumhansl)"
+      ]
+    },
+    "time_signature": {
+      "value": "4/4",
+      "confidence": 0.6,
+      "evidence": []
+    }
+  },
+  "arrangement": {
+    "sections": [
+      {
+        "name": "loop",
+        "start_s": 0.0,
+        "end_s": 3.1372549019607843,
+        "confidence": 0.5
+      }
+    ]
+  },
+  "elements": [
+    {
+      "element_id": "owner_newme_fx_shotgun_beno_lead",
+      "role": "lead",
+      "label": "newme · fx shotgun beno (lead)",
+      "audio_ref": null,
+      "midi": {
+        "status": "extracted",
+        "midi_ref": null,
+        "notes": [
+          {
+            "pitch": 60,
+            "start_beats": 0.0,
+            "duration_beats": 0.25,
+            "velocity": 100
+          },
+          {
+            "pitch": 60,
+            "start_beats": 1.0,
+            "duration_beats": 0.25,
+            "velocity": 100
+          },
+          {
+            "pitch": 60,
+            "start_beats": 3.0,
+            "duration_beats": 0.25,
+            "velocity": 100
+          },
+          {
+            "pitch": 60,
+            "start_beats": 5.0,
+            "duration_beats": 0.25,
+            "velocity": 100
+          },
+          {
+            "pitch": 60,
+            "start_beats": 7.0,
+            "duration_beats": 0.25,
+            "velocity": 100
+          },
+          {
+            "pitch": 60,
+            "start_beats": 7.5,
+            "duration_beats": 0.25,
+            "velocity": 100
+          }
+        ],
+        "note_count": 6,
+        "confidence": 1.0
+      },
+      "sample_match": {
+        "status": "none",
+        "matched_path": null,
+        "distance": 0.0,
+        "alternates": [],
+        "root_note": null
+      },
+      "synth_patch": {
+        "status": "unknown",
+        "plugin": {
+          "name": null,
+          "available_locally": false
+        },
+        "params": {},
+        "match": null,
+        "substitute": null
+      },
+      "onsets": [],
+      "motif": {
+        "bars": 2.0,
+        "onset_grid": "8th",
+        "density": 3.0,
+        "syncopation": 0.1667,
+        "contour": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "register_band": "mid",
+        "harmonic_function": ""
+      },
+      "bass": null,
+      "evidence": [],
+      "confidence": 0.9
+    }
+  ],
+  "unresolved": [],
+  "reconstruction_class": "deterministic",
+  "yield": {
+    "predicted": {
+      "drums": 0.0,
+      "midi": 1.0,
+      "synth": 0.0,
+      "arrangement": 0.5,
+      "overall": 0.7
+    },
+    "actual": {
+      "drums": 0.0,
+      "midi": 0.0,
+      "synth": 0.0,
+      "arrangement": 0.0,
+      "overall": 0.0
+    }
+  }
+}

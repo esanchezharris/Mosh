@@ -32,6 +32,59 @@ namespace
     // src/state (the RenderLayer node is an open ValueTree; an extra string property is
     // round-trip-safe through save/load and ignored by the fingerprint).
     const juce::Identifier kLandedClipId ("landedClipId");
+
+    // Phase 2 — discriminates the drum/MIDI "hidden audio beneath the MIDI" model from the
+    // legacy "Neural Renders" lane landing. When true, the render-layer auto-applied beneath a
+    // MIDI/drum clip: kLandedClipId is the HIDDEN audio clip (on the SAME track) and the source
+    // MIDI clip was MUTED by us. Reset/remove use it to know to remove the hidden clip + un-mute
+    // (vs the legacy lane, which never touches the source clip). File-local, round-trip-safe.
+    const juce::Identifier kSourceMutedByLayer ("sourceMutedByLayer");
+
+    // Phase 3 — a one-shot lambda timer used for the per-clip reactive-render debounce. Calls fn ONCE
+    // after the delay (it stops itself first), so each reactiveTouch just restarts it (coalescing a
+    // burst of edits into a single re-render). Fires on the message thread (juce::Timer's thread).
+    struct LambdaTimer : public juce::Timer
+    {
+        std::function<void()> fn;
+        void timerCallback() override { stopTimer(); if (fn) fn(); }
+    };
+
+    // G14 — make a VolumeAndPanPlugin fader change UNDOABLE.
+    //
+    // vp->setVolumeDb()/setPan() route through the AutomatableParameter, whose
+    // ValueTree writeback uses a NULL UndoManager (AttachedFloatValue::handleAsyncUpdate
+    // -> CachedValue::setValue(.., nullptr)). So writing the fader inside a MoshOps
+    // transaction produced an EMPTY transaction — undo restored nothing even though the
+    // command logged undoable:true. A bare ValueTree write through the UndoManager would
+    // record the property change, but on undo Tracktion deliberately refreshes only the
+    // CachedValue and does NOT push the value back into the parameter's currentValue (the
+    // atomic getVolumeDb()/getPan() — and thus snapshot() — read). So the *setter* must
+    // run on both perform and undo. This UndoableAction does exactly that: it captures the
+    // prior value and replays the proper setter on perform/undo/redo, keeping the live
+    // parameter (and snapshot) in sync at every step. One undo system: it lives inside the
+    // edit's UndoManager transaction, grouped with the command's beginNewTransaction.
+    struct SetFaderValueAction final : public juce::UndoableAction
+    {
+        SetFaderValueAction (te::VolumeAndPanPlugin& p, bool panNotVol, float newValue)
+            : plugin (p), isPan (panNotVol), valueAfter (newValue),
+              valueBefore (panNotVol ? p.getPan() : p.getVolumeDb()) {}
+
+        bool perform() override     { apply (valueAfter);  return true; }
+        bool undo() override        { apply (valueBefore); return true; }
+        int  getSizeInUnits() override { return (int) sizeof (*this); }
+
+        void apply (float v)
+        {
+            if (isPan) plugin.setPan (v);
+            else       plugin.setVolumeDb (v);
+        }
+
+        te::VolumeAndPanPlugin& plugin;
+        const bool  isPan;
+        const float valueAfter;
+        const float valueBefore;
+    };
+
     // Tracktion's compiled-in built-in plugin palette (registered unconditionally
     // by PluginManager). These ship inside the engine — no scan, no third-party
     // dependency — so the FX palette and built-in instruments are pure surface
@@ -640,6 +693,7 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "cancel_render")     return cmdCancelRender (args);
     if (name == "accept_render")     return cmdAcceptRender (args);
     if (name == "reject_render")     return cmdRejectRender (args);
+    if (name == "reset_render_layer") return cmdResetRenderLayer (args);
     if (name == "bypass_layer")      return cmdBypassLayer (args);
     if (name == "freeze_layer")      return cmdFreezeLayer (args);
     if (name == "bounce_layer_to_clip") return cmdBounceLayerToClip (args);
@@ -1061,6 +1115,9 @@ juce::var MoshOps::lyricSheetToVar (te::AudioTrack& t)
         }
         if (l.hasProperty (ids::lyricRegen))
             lo->setProperty ("regen", (int) l[ids::lyricRegen]);
+        // FMS Phase-3 — a BOOLEAN only (the blob itself stays out of the snapshot): the
+        // sing drawer shows how many lines carry a flow from the take.
+        lo->setProperty ("hasScore", l.hasProperty (ids::lyricScore));
         // L1 — transient precise phonology (a JSON object; absent ⇒ not yet analysed).
         if (l.hasProperty (ids::lyricAnalysis))
         {
@@ -1535,6 +1592,8 @@ juce::var MoshOps::cmdBuildSkeletonFromClip (const juce::var& args)
         if (spec.getProperty ("topic", var()).toString().isNotEmpty())
             sheet.setProperty (ids::lyricTopic, spec.getProperty ("topic", var()), nullptr);
         auto container = mosh::LyricSheet::lines (sheet);
+        const auto scoresVar = spec.getProperty ("lineScores", var());  // Stage 1: aligned 1:1 with lines
+        int li = 0;
         for (auto& lv : *linesVar.getArray())
         {
             auto line = mosh::LyricLine::create (juce::Uuid().toString(),
@@ -1546,6 +1605,12 @@ juce::var MoshOps::cmdBuildSkeletonFromClip (const juce::var& args)
             line.setProperty (ids::lyricStress,         lv.getProperty ("stress", var()), nullptr);
             line.setProperty (ids::lyricRhymeGroup,     lv.getProperty ("rhymeGroup", var()), nullptr);
             line.setProperty (ids::status,              "skeleton", nullptr);   // the grid-editor gate (distinct from L2 "proposed")
+            // Phase-3 Stage 1: persist the render-ready score blob (articulation slots +
+            // melisma segments) with its line — the Stage-2 SoulX adapter authors the
+            // target score from this. Absent from older/degraded specs ⇒ simply no blob.
+            if (scoresVar.isArray() && li < scoresVar.size() && scoresVar[li].isObject())
+                line.setProperty (ids::lyricScore, juce::JSON::toString (scoresVar[li], true), nullptr);
+            ++li;
             container.appendChild (line, nullptr);
         }
         tt->state.appendChild (sheet, &undoManager());
@@ -3050,6 +3115,7 @@ juce::var MoshOps::cmdTrimClip (const juce::var& args)
                          tracktion::TimeDuration::fromSeconds (offset) });
     logLine ("trim_clip", args, true, {}, true);
     emitSnapshotInvalidated();
+    reactiveTouch (id);   // Phase 3 — a length/offset change re-bounces the source window
     return okResult ("trim_clip");
 }
 
@@ -3077,6 +3143,13 @@ juce::var MoshOps::cmdRemoveClip (const juce::var& args)
     auto* clip = findClip (args.getProperty ("clipId", var()).toString());
     if (clip == nullptr) return errResult ("remove_clip", "no clip");
     beginTxn ("remove_clip");
+    // Phase 2 — if this MIDI/drum clip owns a hidden beneath-render, remove the hidden audio with it
+    // (else it's orphaned on the track). The source mute goes away with the clip itself.
+    if (auto node = clip->state.getChildWithName (ids::MOSH_RENDERLAYER);
+        node.isValid() && (bool) node[kSourceMutedByLayer])
+        if (auto hiddenId = node[kLandedClipId].toString(); hiddenId.isNotEmpty())
+            if (auto* hidden = findClip (hiddenId); hidden != nullptr && hidden != clip)
+                hidden->removeFromParent();
     clip->removeFromParent();
     logLine ("remove_clip", args, true, {}, true);
     emitSnapshotInvalidated();
@@ -3455,7 +3528,8 @@ juce::var MoshOps::cmdSetTrackVolume (const juce::var& args)
     if (vp == nullptr) return errResult ("set_track_volume", "no track");
 
     beginTxn ("set_track_volume");
-    vp->setVolumeDb ((float) (double) args.getProperty ("db", 0.0));
+    // G14 — route the fader change through the UndoManager (setVolumeDb alone bypasses it).
+    undoManager().perform (new SetFaderValueAction (*vp, false, (float) (double) args.getProperty ("db", 0.0)));
     logLine ("set_track_volume", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("set_track_volume");
@@ -3469,7 +3543,9 @@ juce::var MoshOps::cmdSetTrackPan (const juce::var& args)
     if (vp == nullptr) return errResult ("set_track_pan", "no volume plugin");
 
     beginTxn ("set_track_pan");
-    vp->setPan (juce::jlimit (-1.0f, 1.0f, (float) (double) args.getProperty ("pan", 0.0)));
+    // G14 — route the pan change through the UndoManager (setPan alone bypasses it).
+    undoManager().perform (new SetFaderValueAction (*vp, true,
+        juce::jlimit (-1.0f, 1.0f, (float) (double) args.getProperty ("pan", 0.0))));
     logLine ("set_track_pan", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("set_track_pan");
@@ -3774,7 +3850,9 @@ juce::var MoshOps::cmdSetMasterVolume (const juce::var& args)
     auto mvp = eng.edit().getMasterVolumePlugin();
     if (mvp == nullptr) return errResult ("set_master_volume", "no master plugin");
     beginTxn ("set_master_volume");
-    mvp->setVolumeDb (juce::jlimit (-48.0f, 6.0f, (float) (double) args.getProperty ("db", 0.0)));
+    // G14 — route the master fader through the UndoManager (setVolumeDb alone bypasses it).
+    undoManager().perform (new SetFaderValueAction (*mvp, false,
+        juce::jlimit (-48.0f, 6.0f, (float) (double) args.getProperty ("db", 0.0))));
     logLine ("set_master_volume", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("set_master_volume");
@@ -3785,7 +3863,9 @@ juce::var MoshOps::cmdSetMasterPan (const juce::var& args)
     auto mvp = eng.edit().getMasterVolumePlugin();
     if (mvp == nullptr) return errResult ("set_master_pan", "no master plugin");
     beginTxn ("set_master_pan");
-    mvp->setPan (juce::jlimit (-1.0f, 1.0f, (float) (double) args.getProperty ("pan", 0.0)));
+    // G14 — route the master pan through the UndoManager (setPan alone bypasses it).
+    undoManager().perform (new SetFaderValueAction (*mvp, true,
+        juce::jlimit (-1.0f, 1.0f, (float) (double) args.getProperty ("pan", 0.0))));
     logLine ("set_master_pan", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("set_master_pan");
@@ -4154,6 +4234,7 @@ juce::var MoshOps::cmdLoadBuiltin (const juce::var& args)
     data->setProperty ("isInstrument", spec->isInstrument);
     logLine ("load_builtin", args, true, {}, true);
     emitSnapshotInvalidated();
+    reactiveTouchTrack (args.getProperty ("trackId", var()).toString());   // Phase 3 — instrument/FX change → re-bounce
     return okResult ("load_builtin", var (data));
 }
 
@@ -4223,6 +4304,7 @@ juce::var MoshOps::cmdAssignSample (const juce::var& args)
     if (track == nullptr) return errResult ("assign_sample", "no track");
 
     const int note = juce::jlimit (0, 127, (int) args.getProperty ("note", 60));
+    const auto mode = args.getProperty ("mode", "drum").toString();   // "drum" (default, one-shot pad) | "melodic" (pitched 808/bass)
     const auto path = args.getProperty ("file", var()).toString();
     juce::File f (path);
     if (path.isEmpty() || ! f.existsAsFile())
@@ -4249,8 +4331,21 @@ juce::var MoshOps::cmdAssignSample (const juce::var& args)
     const int idx = sampler->getNumSounds();
     const auto err = sampler->addSound (f.getFullPathName(), name, 0.0, 0.0 /*whole file*/, gain);
     if (err.isNotEmpty()) return errResult ("assign_sample", err);
-    sampler->setSoundParams (idx, note, note, note);
-    sampler->setSoundOpenEnded (idx, true);   // one-shot: a short note rings the whole sample
+    if (mode == "melodic")
+    {
+        // "Regular 808 functionality": ONE one-shot played across the WHOLE keyboard,
+        // repitched per MIDI note off `note` as the root (playback-rate resample — no
+        // time-stretch), and NOTE-GATED (openEnded=false) so the MIDI note length cuts
+        // the sample off (short note = short hit, long note = sustained 808). Monophonic
+        // self-non-overlap is the caller's job (author the bass MIDI non-overlapping).
+        sampler->setSoundParams (idx, note, 0, 127);
+        sampler->setSoundOpenEnded (idx, false);
+    }
+    else
+    {
+        sampler->setSoundParams (idx, note, note, note);
+        sampler->setSoundOpenEnded (idx, true);   // one-shot drum pad: a short note rings the whole sample
+    }
     applyDrumLaneGains (*track);               // keep a muted lane silent after a pad swap
     // The sampler loads its sample file on an AsyncUpdate (valueTreeChanged). Headless
     // there is no GUI dispatch between commands, so drain it now — the sound's audio
@@ -4264,6 +4359,7 @@ juce::var MoshOps::cmdAssignSample (const juce::var& args)
     data->setProperty ("index", track->pluginList.indexOf (sampler));
     data->setProperty ("note", note);
     data->setProperty ("name", name);
+    data->setProperty ("mode", mode);
     data->setProperty ("sounds", sampler->getNumSounds());
     logLine ("assign_sample", args, true, {}, true);
     emitSnapshotInvalidated();
@@ -4302,6 +4398,7 @@ juce::var MoshOps::cmdLoadPlugin (const juce::var& args)
         addExternalPluginMetadata (*data, *ext);
     logLine ("load_plugin", args, true, {}, true);
     emitSnapshotInvalidated();
+    reactiveTouchTrack (args.getProperty ("trackId", var()).toString());   // Phase 3 — FX change → re-bounce
     return okResult ("load_plugin", var (data));
 }
 
@@ -4316,6 +4413,7 @@ juce::var MoshOps::cmdRemovePlugin (const juce::var& args)
     plugin->deleteFromParent();
     logLine ("remove_plugin", args, true, {}, true);
     emitSnapshotInvalidated();
+    reactiveTouchTrack (args.getProperty ("trackId", var()).toString());   // Phase 3
     return okResult ("remove_plugin");
 }
 
@@ -4334,6 +4432,7 @@ juce::var MoshOps::cmdReorderPlugin (const juce::var& args)
     track->pluginList.insertPlugin (p, to, nullptr);
     logLine ("reorder_plugin", args, true, {}, true);
     emitSnapshotInvalidated();
+    reactiveTouchTrack (args.getProperty ("trackId", var()).toString());   // Phase 3
     return okResult ("reorder_plugin");
 }
 
@@ -4352,6 +4451,7 @@ juce::var MoshOps::cmdSetPluginParam (const juce::var& args)
     param->setParameter (param->valueRange.convertFrom0to1 (norm), juce::sendNotification);
     logLine ("set_plugin_param", args, true, {}, true);
     emitSnapshotInvalidated();
+    reactiveTouchTrack (args.getProperty ("trackId", var()).toString());   // Phase 3 — param change → re-bounce
     return okResult ("set_plugin_param");
 }
 
@@ -4365,6 +4465,7 @@ juce::var MoshOps::cmdBypassPlugin (const juce::var& args)
     plugin->setEnabled (! bypassed);          // enabled == not bypassed
     logLine ("bypass_plugin", args, true, {}, true);
     emitSnapshotInvalidated();
+    reactiveTouchTrack (args.getProperty ("trackId", var()).toString());   // Phase 3 — bypass changes the bounce
     return okResult ("bypass_plugin");
 }
 
@@ -4987,6 +5088,7 @@ juce::var MoshOps::cmdAddNote (const juce::var& args)
                                tracktion::BeatDuration::fromBeats (length), vel, 0, &undoManager());
     logLine ("add_note", args, true, {}, true);
     emitSnapshotInvalidated();
+    reactiveTouch (args.getProperty ("clipId", var()).toString());   // Phase 3 — auto-re-render the live hidden audio
     auto* data = new DynamicObject();
     data->setProperty ("noteCount", mc->getSequence().getNumNotes());
     return okResult ("add_note", var (data));
@@ -5004,6 +5106,7 @@ juce::var MoshOps::cmdRemoveNote (const juce::var& args)
     seq.removeNote (*seq.getNote (idx), &undoManager());
     logLine ("remove_note", args, true, {}, true);
     emitSnapshotInvalidated();
+    reactiveTouch (args.getProperty ("clipId", var()).toString());   // Phase 3
     return okResult ("remove_note");
 }
 
@@ -5031,6 +5134,7 @@ juce::var MoshOps::cmdSetNote (const juce::var& args)
 
     logLine ("set_note", args, true, {}, true);
     emitSnapshotInvalidated();
+    reactiveTouch (args.getProperty ("clipId", var()).toString());   // Phase 3
     return okResult ("set_note");
 }
 
@@ -5060,6 +5164,7 @@ juce::var MoshOps::cmdQuantizeNotes (const juce::var& args)
     }
     logLine ("quantize_notes", args, true, {}, true);
     emitSnapshotInvalidated();
+    reactiveTouch (args.getProperty ("clipId", var()).toString());   // Phase 3
     auto* data = new DynamicObject(); data->setProperty ("moved", moved);
     return okResult ("quantize_notes", var (data));
 }
@@ -5274,12 +5379,20 @@ juce::String MoshOps::computeFingerprint (const juce::ValueTree& node, const juc
 }
 
 // Slice [srcStartSec, srcEndSec] of an audio file into destWav (raw, no FX) — the
-// staged input for a section-scoped render. Returns false (caller errors) if the
-// source can't be read or the range is degenerate, so a failed slice never silently
-// renders the wrong (whole-clip) audio for a section request.
-static bool stageWavRegion (const juce::File& sourceFile, double srcStartSec, double srcEndSec,
-                            const juce::File& destWav)
+// staged input for a render — ALWAYS written at 44100 Hz / 16-bit / stereo, which is
+// the rate the generative engine's reader handles natively (it otherwise shells out to
+// ffmpeg, fragile in the deployed app's spawned PATH). Resamples per channel with a
+// deterministic LagrangeInterpolator when the source rate differs; 44100/2 also matches
+// what computeFingerprint() claims. Pass [0, lengthInSeconds] for a whole clip. Returns
+// false (caller errors) if the source can't be read or the range is degenerate, so a
+// failed slice never silently renders the wrong audio.
+static bool stageWavRegionAt44k (const juce::File& sourceFile, double srcStartSec, double srcEndSec,
+                                 const juce::File& destWav)
 {
+    static constexpr double kStageSR   = 44100.0;
+    static constexpr int    kStageBits = 16;
+    static constexpr int    kStageCh   = 2;   // engine read_wav duplicates mono → stereo anyway
+
     if (srcEndSec <= srcStartSec) return false;
     juce::AudioFormatManager fm; fm.registerBasicFormats();
     std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (sourceFile));
@@ -5292,20 +5405,41 @@ static bool stageWavRegion (const juce::File& sourceFile, double srcStartSec, do
     const int numSamps = (int) (endSamp - startSamp);
     if (numSamps <= 0) return false;
 
-    const int numCh = (int) juce::jmax ((unsigned) 1, reader->numChannels);
-    juce::AudioBuffer<float> buf (numCh, numSamps);
-    if (! reader->read (&buf, 0, numSamps, startSamp, true, true)) return false;
+    const int srcNumCh = (int) juce::jmax ((unsigned) 1, reader->numChannels);
+    juce::AudioBuffer<float> srcBuf (srcNumCh, numSamps);
+    if (! reader->read (&srcBuf, 0, numSamps, startSamp, true, true)) return false;
+
+    const bool needResample = std::abs (sr - kStageSR) > 1.0e-6;
+    const double ratio = sr / kStageSR;   // > 1 downsamples (48k→44.1k)
+    // floor keeps outNum*ratio <= numSamps so the interpolator never reads past srcBuf
+    // (a sub-sample duration loss, inaudible). For a 44100 source ratio==1 → outNum==numSamps.
+    const int outNum = needResample
+        ? (int) std::floor ((double) numSamps * kStageSR / sr)
+        : numSamps;
+    if (outNum <= 0) return false;
+
+    juce::AudioBuffer<float> outBuf (kStageCh, outNum);
+    for (int ch = 0; ch < kStageCh; ++ch)
+    {
+        const int srcCh = juce::jmin (ch, srcNumCh - 1);   // mono → duplicate into L/R
+        if (needResample)
+        {
+            juce::LagrangeInterpolator interp;             // fresh per channel: zeroed history, deterministic
+            interp.process (ratio, srcBuf.getReadPointer (srcCh), outBuf.getWritePointer (ch), outNum);
+        }
+        else
+            outBuf.copyFrom (ch, 0, srcBuf, srcCh, 0, outNum);
+    }
 
     destWav.deleteFile();
     std::unique_ptr<juce::FileOutputStream> os (destWav.createOutputStream());
     if (os == nullptr) return false;
     juce::WavAudioFormat wav;
     std::unique_ptr<juce::AudioFormatWriter> writer (
-        wav.createWriterFor (os.get(), sr, (unsigned) numCh,
-                             juce::jmax (16, (int) reader->bitsPerSample), {}, 0));
+        wav.createWriterFor (os.get(), kStageSR, (unsigned) kStageCh, kStageBits, {}, 0));
     if (writer == nullptr) return false;
     os.release();   // the writer owns the stream now
-    const bool wrote = writer->writeFromAudioSampleBuffer (buf, 0, numSamps);
+    const bool wrote = writer->writeFromAudioSampleBuffer (outBuf, 0, outNum);
     writer.reset(); // flush + close before the caller reads the file back
     return wrote;
 }
@@ -5361,6 +5495,7 @@ juce::var MoshOps::cmdSetRenderParam (const juce::var& args)
     if (args.hasProperty ("strength")) params.setProperty (ids::strength, args.getProperty ("strength", 65.0), &undoManager());  // Route B
     if (args.hasProperty ("seed"))   node.setProperty (ids::seed, args.getProperty ("seed", 0), &undoManager());
     if (args.hasProperty ("mode"))   node.setProperty (ids::mode, args.getProperty ("mode", "reimagine"), &undoManager());
+    if (args.hasProperty ("coverage")) node.setProperty (ids::coverage, args.getProperty ("coverage", "auto"), &undoManager());  // whole-clip: auto|loop|stitch
     if (args.hasProperty ("modelVariant")) node.setProperty (ids::modelVariant, args.getProperty ("modelVariant", ""), &undoManager());
     if (args.hasProperty ("lab"))    params.setProperty (juce::Identifier ("lab"), args.getProperty ("lab", false), &undoManager());
 
@@ -5382,6 +5517,7 @@ juce::var MoshOps::cmdSetRenderParam (const juce::var& args)
     node.setProperty (ids::status, "dirty", nullptr);   // params changed → re-render
     logLine ("set_render_param", args, true, {}, true);
     emitSnapshotInvalidated();
+    reactiveTouch (args.getProperty ("clipId", var()).toString());   // Phase 3 — knob auto-apply (re-render in place)
     return okResult ("set_render_param");
 }
 
@@ -5656,6 +5792,22 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
     auto node = findRenderLayer (clipId);
     if (clip == nullptr || ! node.isValid()) return errResult ("render_layer", "no render layer");
 
+    // Sing precondition FIRST — before any staging work. A sheet-less sing render on a
+    // MIDI/drum clip would otherwise pay a full instrument bounce before erroring (the
+    // sheet can vanish between create_render_layer and render_layer via remove_lyric_sheet).
+    if (node[ids::mode].toString() == "sing")
+    {
+        auto* singTrack = dynamic_cast<te::AudioTrack*> (clip->getTrack());
+        const auto sheet = singTrack != nullptr ? singTrack->state.getChildWithName (ids::MOSH_LYRICSHEET)
+                                                : juce::ValueTree();
+        if (! sheet.isValid())
+            return errResult ("render_layer", "sing needs a lyric sheet on the clip's track (build a flow from a take first)");
+    }
+
+    // Phase 3 — snapshot the reactive epoch at submit; finalizeRender drops a result whose epoch the
+    // node has since moved past (a newer edit-touch superseded this render). -1 ⇒ never raced.
+    const int submitEpoch = (int) node[ids::reactiveEpoch];
+
     // Prepare the job dir + stage the render input as input.wav. Wave clips stage their
     // source audio (whole or a sliced sub-region); MIDI/drum (any non-wave) clips are
     // auto-BOUNCED to audio first (their instrument output) so the audio→audio generative
@@ -5686,6 +5838,20 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
 
     if (auto* wave = dynamic_cast<te::WaveAudioClip*> (clip))
     {
+        // Always re-imagine the PRISTINE original. Once a render is auto-applied in place
+        // (the clip's source becomes the artifact), staging getCurrentSourceFile() would
+        // re-imagine the previous render and compound it — so prefer originalSourceRef.
+        juce::File sourceForStaging = wave->getCurrentSourceFile();
+        if (const auto orig = node[ids::originalSourceRef].toString(); orig.isNotEmpty())
+        {
+            // originalSourceRef may be project-relative — resolve against the edit dir (a bare
+            // juce::File("audio/x.wav") would be CWD-relative and miss, then wrongly stage the
+            // already-applied artifact and compound the render).
+            juce::File of = juce::File::isAbsolutePath (orig) ? juce::File (orig)
+                            : eng.editFile().getParentDirectory().getChildFile (orig);
+            if (of.existsAsFile()) sourceForStaging = of;
+        }
+
         bool staged = false;
         if (subRegion)
         {
@@ -5694,13 +5860,24 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
             if (sliceable)
             {
                 const double off = cpos.getOffset().inSeconds();
-                staged = stageWavRegion (wave->getCurrentSourceFile(), rs - cs + off, re - cs + off, input);
+                staged = stageWavRegionAt44k (sourceForStaging, rs - cs + off, re - cs + off, input);
             }
             if (! staged)   // never fall back to the whole clip for a section request
                 return errResult ("render_layer", "section render needs an un-stretched, non-looping wave clip");
         }
-        if (! staged && ! wave->getCurrentSourceFile().copyFileTo (input))
-            return errResult ("render_layer", "could not stage source region");
+        if (! staged)
+        {
+            // Whole clip: stage the entire source at 44100/16-bit (was a raw copyFileTo, which
+            // preserved a non-44100 rate the engine reader can't handle without ffmpeg).
+            juce::AudioFormatManager fm; fm.registerBasicFormats();
+            std::unique_ptr<juce::AudioFormatReader> rd (fm.createReaderFor (sourceForStaging));
+            const double srcLenSec = (rd != nullptr && rd->sampleRate > 0.0)
+                ? (double) rd->lengthInSamples / rd->sampleRate : 0.0;
+            rd.reset();
+            if (srcLenSec <= 0.0
+                || ! stageWavRegionAt44k (sourceForStaging, 0.0, srcLenSec, input))
+                return errResult ("render_layer", "could not stage source region");
+        }
     }
     else
     {
@@ -5714,8 +5891,56 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
             + ":" + juce::String (rs - cs, 4)
             + ":" + juce::String (re - cs, 4)
             + ":" + juce::String (cpos.getOffset().inSeconds(), 4);
-        if (! bounceClipToWav (*clip, rs, re, input))
+        // Phase 2: when this clip already has a hidden beneath-render it is MUTED (the producer hears
+        // the hidden audio). bounceClipToWav must still capture the instrument output, so temporarily
+        // un-mute across the (already device-detached) offline render and restore. The net ValueTree
+        // change is zero — an undo of it is a no-op.
+        const bool wasMuted = clip->isMuted();
+        if (wasMuted) clip->setMuted (false);
+        const bool bounced = bounceClipToWav (*clip, rs, re, input);
+        if (wasMuted) clip->setMuted (true);
+        if (! bounced)
             return errResult ("render_layer", "could not bounce clip to audio (add an instrument, or the render failed)");
+    }
+
+    // FMS Phase-3 sing mode: the render is a function of the lyric SHEET (words +
+    // Stage-1 `lyricScore` flow), not just the staged audio. Gather the clip's track's
+    // lines into the job params and fold their hash into the upstream key, so a lyric
+    // or flow edit is a cache MISS (while the staged-audio/source hash stays in the key).
+    juce::var singLines;
+    if (node[ids::mode].toString() == "sing")
+    {
+        auto* singTrack = dynamic_cast<te::AudioTrack*> (clip->getTrack());
+        auto sheet = singTrack != nullptr ? singTrack->state.getChildWithName (ids::MOSH_LYRICSHEET)
+                                          : juce::ValueTree();
+        if (! sheet.isValid())
+            return errResult ("render_layer", "sing needs a lyric sheet on the clip's track (build a flow from a take first)");
+        Array<var> arr;
+        auto lines = mosh::LyricSheet::lines (sheet);
+        for (int i = 0; i < lines.getNumChildren(); ++i)
+        {
+            auto l = lines.getChild (i);
+            auto* lo = new DynamicObject();
+            const auto text = l[ids::lyricText].toString().isNotEmpty()
+                                  ? l[ids::lyricText].toString()
+                                  : l[ids::lyricSeedText].toString();
+            lo->setProperty ("text", text);
+            if (l.hasProperty (ids::lyricScore))
+            {
+                // Guard the parse like the file's other transient JSON blobs (lyricProposals,
+                // lyricAnalysis) — a corrupt persisted blob must be excluded, not sent as null.
+                const auto parsed = juce::JSON::parse (l[ids::lyricScore].toString());
+                if (parsed.isObject())
+                    lo->setProperty ("score", parsed);
+            }
+            arr.add (var (lo));
+        }
+        singLines = var (arr);
+        const auto singJson = juce::JSON::toString (singLines, true);
+        const auto singSig = juce::MD5 (singJson.toRawUTF8(), (size_t) singJson.getNumBytesAsUTF8()).toHexString();
+        upstreamOverride = (upstreamOverride.isNotEmpty() ? upstreamOverride
+                                                          : juce::MD5 (input).toHexString())
+                           + ":sing:" + singSig;
     }
 
     // Ensure the service first so its build/version is part of EVERY fingerprint
@@ -5730,7 +5955,15 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
     if (node[ids::cacheKey].toString() == fp
         && mosh::resolveCacheArtifact (node, eng.editFile().getParentDirectory()).existsAsFile())
     {
-        node.setProperty (ids::status, "ready", nullptr);
+        // Re-apply on HIT too (a wave clip Reset since the last render must re-swap to the
+        // cached artifact). applyRenderInPlace is a no-op repoint when already applied.
+        // SING never auto-applies (same gate as finalizeRender — the guide vocal stays
+        // an auditionable artifact, it must not replace the recorded take in place).
+        auto art = mosh::resolveCacheArtifact (node, eng.editFile().getParentDirectory());
+        if (node[ids::mode].toString() == "sing"
+            || (! applyRenderInPlace (clipId, node, art, fp)
+                && ! applyRenderBeneathMidi (clipId, node, art, fp)))
+            node.setProperty (ids::status, "ready", nullptr);
         emit ("layer_status", [&] { auto* o = new DynamicObject();
             o->setProperty ("clipId", clipId); o->setProperty ("layerId", node[ids::id]);
             o->setProperty ("status", "ready"); o->setProperty ("cache", "hit"); return var (o); }());
@@ -5761,12 +5994,37 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
         }
     p->setProperty ("colors", colors);
     p->setProperty ("lab", (bool) params.getProperty (juce::Identifier ("lab"), false));
+    if (! singLines.isVoid())
+        p->setProperty ("lines", singLines);   // sing: sheet text + lyricScore flow per line
+
+    // Whole-clip coverage (1b): tell the adapter the FULL target length + how to cover a clip
+    // longer than the model's single render window — tile one cycle ("loop") or window+crossfade
+    // ("stitch"). Fixes the "render came back short" 8s-cap bug. The staged input.wav IS the audio
+    // to cover, so its duration is the target. "auto" → loop a clip flagged looping, else stitch.
+    {
+        double inputDur = re - rs;
+        { juce::AudioFormatManager fm; fm.registerBasicFormats();
+          if (std::unique_ptr<juce::AudioFormatReader> rd (fm.createReaderFor (input));
+              rd != nullptr && rd->sampleRate > 0.0)
+              inputDur = (double) rd->lengthInSamples / rd->sampleRate; }
+        juce::String cov = node[ids::coverage].toString();
+        if (cov.isEmpty() || cov == "auto")
+        {
+            const bool looping = [&] { if (auto* w = dynamic_cast<te::WaveAudioClip*> (clip)) return w->isLooping(); return false; }();
+            cov = looping ? "loop" : "stitch";
+        }
+        p->setProperty ("duration_s", inputDur);
+        p->setProperty ("coverage", cov);
+        p->setProperty ("loop_seconds", inputDur);   // one cycle; the adapter clamps to its window
+        p->setProperty ("xfade_ms", 8.0);
+    }
 
     const auto jobId = jobManager.submitJob (node[ids::modelAdapter].toString(),
                                              input, output, manifest, var (p));
     if (jobId.isEmpty()) return errResult ("render_layer", "job submit failed");
 
     node.setProperty (ids::cacheKey, fp, nullptr);
+    node.setProperty (ids::renderError, "", nullptr);   // clear any stale error from a prior failed render
     node.setProperty (ids::status, "rendering", nullptr);
     emit ("layer_status", [&] { auto* o = new DynamicObject();
         o->setProperty ("clipId", clipId); o->setProperty ("layerId", node[ids::id]);
@@ -5779,14 +6037,21 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
     if (wait)
     {
         const auto adapter = node[ids::modelAdapter].toString();
-        const auto defaultWaitMs = (adapter == "stable_audio3" || adapter == "sa3") ? "360000" : "120000";
+        // soulx's REAL backend is an SSH round-trip budgeted at up to 900s
+        // (MOSH_SOULX_TIMEOUT_S) — the poll must outlast it or a slow render
+        // reads as a false timeout. The fake path finishes in <1s regardless.
+        const auto defaultWaitMs = (adapter == "stable_audio3" || adapter == "sa3") ? "360000"
+                                 : (adapter == "soulx")                             ? "960000"
+                                                                                    : "120000";
         const int waitTimeoutMs = juce::jmax (1000, juce::SystemStats::getEnvironmentVariable (
             "MOSH_RENDER_WAIT_TIMEOUT_MS", defaultWaitMs).getIntValue());
         const int maxPolls = juce::jmax (1, waitTimeoutMs / 50);
+        juce::String lastErr;
         for (int i = 0; i < maxPolls; ++i)   // default ~120s; PC CUDA cold loads can opt into longer waits
         {
             auto st = jobManager.jobStatus (jobId);
             const auto status = st.getProperty ("status", var()).toString();
+            if (const auto err = st.getProperty ("error", var()).toString(); err.isNotEmpty()) lastErr = err;
             emit ("layer_render_progress", [&] { auto* o = new DynamicObject();
                 o->setProperty ("clipId", clipId); o->setProperty ("jobId", jobId);
                 o->setProperty ("progress", st.getProperty ("progress", 0.0)); return var (o); }());
@@ -5798,7 +6063,7 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
                 break;
             juce::Thread::sleep (50);
         }
-        finalizeRender (clipId, output, manifest, fp);
+        finalizeRender (clipId, output, manifest, fp, lastErr, submitEpoch);
         logLine ("render_layer", args, true, {}, false);
         auto* d = new DynamicObject(); d->setProperty ("cache", "miss");
         d->setProperty ("status", node[ids::status]); d->setProperty ("jobId", jobId);
@@ -5807,13 +6072,18 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
 
     // Async: poll on a background thread, marshal node updates + events to the
     // message thread (service I/O off the message thread; tree on it).
-    std::thread ([this, clipId, jobId, output, manifest, fp]
+    // soulx's real SSH backend runs up to 900s — poll long enough that a legitimate
+    // slow render isn't abandoned as a false 'error' while the job completes unseen.
+    const int asyncPolls = node[ids::modelAdapter].toString() == "soulx" ? 9600 : 1800;
+    std::thread ([this, clipId, jobId, output, manifest, fp, asyncPolls, submitEpoch]
     {
-        for (int i = 0; i < 1800; ++i)   // up to ~180s for a slow generative render
+        juce::String lastErr;
+        for (int i = 0; i < asyncPolls; ++i)   // 100ms ticks: ~180s default, ~960s soulx
         {
             auto st = jobManager.jobStatus (jobId);
             const auto status = st.getProperty ("status", juce::var()).toString();
             const auto progress = st.getProperty ("progress", 0.0);
+            if (const auto err = st.getProperty ("error", juce::var()).toString(); err.isNotEmpty()) lastErr = err;
             juce::MessageManager::callAsync ([this, clipId, jobId, progress]
             {
                 emit ("layer_render_progress", [&] { auto* o = new juce::DynamicObject();
@@ -5825,9 +6095,9 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
                 break;
             juce::Thread::sleep (100);
         }
-        juce::MessageManager::callAsync ([this, clipId, output, manifest, fp]
+        juce::MessageManager::callAsync ([this, clipId, output, manifest, fp, lastErr, submitEpoch]
         {
-            finalizeRender (clipId, output, manifest, fp);
+            finalizeRender (clipId, output, manifest, fp, lastErr, submitEpoch);
         });
     }).detach();
 
@@ -5838,15 +6108,49 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
 }
 
 void MoshOps::finalizeRender (const juce::String& clipId, const juce::File& outputWav,
-                              const juce::File& manifestFile, const juce::String& cacheKey)
+                              const juce::File& manifestFile, const juce::String& cacheKey,
+                              const juce::String& serviceError, int expectedEpoch)
 {
     auto node = findRenderLayer (clipId);
     if (! node.isValid()) return;
-    if (! outputWav.existsAsFile()) { node.setProperty (ids::status, "error", nullptr); emitSnapshotInvalidated(); return; }
 
-    node.setProperty (ids::cacheArtifact, outputWav.getFullPathName(), nullptr);
-    node.setProperty (ids::cacheKey, cacheKey, nullptr);
-    node.setProperty (ids::status, "ready", nullptr);
+    // Phase 3 — drop a SUPERSEDED reactive render: a newer edit-touch bumped reactiveEpoch after this
+    // job was submitted, so its (now-stale) output must not overwrite the live state. The newer touch's
+    // own debounced render is already coming. (expectedEpoch < 0 ⇒ a render that never raced.)
+    if (expectedEpoch >= 0 && (int) node[ids::reactiveEpoch] != expectedEpoch)
+        return;
+    if (! outputWav.existsAsFile())
+    {
+        // Surface the real reason (the service's exception, when we captured one) instead of a
+        // bare "error" badge — otherwise the only signal is a missing file.
+        const juce::String reason = serviceError.isNotEmpty() ? serviceError
+                                                              : juce::String ("render produced no output");
+        node.setProperty (ids::renderError, reason, nullptr);
+        node.setProperty (ids::status, "error", nullptr);
+        emit ("layer_status", [&] { auto* o = new DynamicObject();
+            o->setProperty ("clipId", clipId); o->setProperty ("layerId", node[ids::id]);
+            o->setProperty ("status", "error"); o->setProperty ("error", reason); return var (o); }());
+        emitSnapshotInvalidated();
+        return;
+    }
+
+    node.setProperty (ids::renderError, "", nullptr);   // clear on success
+
+    // Auto-apply the render (the new default): WAVE clips swap their own source in place; MIDI/drum
+    // clips land a HIDDEN looping audio clip beneath the now-muted MIDI (Phase 2). Either way it's an
+    // instant preview with no accept step. A sub-region render (or a clip with no track) falls through
+    // to the legacy "Neural Renders" lane (accept_render); the apply helpers return false for it.
+    // SING keeps the legacy auditionable landing: the guide vocal must never replace the producer's
+    // recorded take in place (and must not arm the reactive loop — a casual edit would fire a
+    // multi-minute SSH render). imagine/transform are what the in-place model was built for.
+    const bool autoApply = node[ids::mode].toString() != "sing";
+    if (! (autoApply && (applyRenderInPlace (clipId, node, outputWav, cacheKey)
+                         || applyRenderBeneathMidi (clipId, node, outputWav, cacheKey))))
+    {
+        node.setProperty (ids::cacheArtifact, outputWav.getFullPathName(), nullptr);
+        node.setProperty (ids::cacheKey, cacheKey, nullptr);
+        node.setProperty (ids::status, "ready", nullptr);
+    }
 
     var qa = manifestFile.existsAsFile() ? JSON::parse (manifestFile.loadFileAsString()) : var();
     emit ("layer_status", [&] { auto* o = new DynamicObject();
@@ -5854,6 +6158,229 @@ void MoshOps::finalizeRender (const juce::String& clipId, const juce::File& outp
         o->setProperty ("status", "ready"); o->setProperty ("cache", "miss");
         o->setProperty ("qa", qa); return var (o); }());
     emitSnapshotInvalidated();
+}
+
+bool MoshOps::applyRenderInPlace (const juce::String& clipId, juce::ValueTree node,
+                                  const juce::File& artifact, const juce::String& cacheKey)
+{
+    auto* wave = dynamic_cast<te::WaveAudioClip*> (findClip (clipId));
+    if (wave == nullptr || ! artifact.existsAsFile()) return false;   // non-wave → legacy lane path
+
+    // In-place apply replaces the WHOLE clip's source. A sub-region (section-scoped) render
+    // can't simply repoint the whole source, so those keep the legacy lane landing.
+    {
+        auto pos = wave->getPosition();
+        const double cs = pos.getStart().inSeconds(), ce = pos.getEnd().inSeconds();
+        const double rs = juce::jlimit (cs, ce, (double) node[ids::timeRangeStart]);
+        const double re = juce::jlimit (cs, ce, (double) node[ids::timeRangeEnd]);
+        if ((rs > cs + 1.0e-3) || (re < ce - 1.0e-3)) return false;   // sub-region → legacy path
+    }
+
+    // Durable per-render copy (a disposable artifact), named by the fingerprint so a re-render
+    // writes a NEW file instead of overwriting the one the clip currently plays/displays.
+    auto dest = eng.sessionDir().getChildFile ("audio")
+                    .getChildFile (node[ids::id].toString() + "-" + cacheKey.substring (0, 12))
+                    .withFileExtension ("wav");
+    dest.getParentDirectory().createDirectory();
+    if (dest != artifact && ! dest.existsAsFile() && ! artifact.copyFileTo (dest))
+        return false;
+
+    // Capture the ORIGINAL source ONCE (first apply: the clip's current source IS the original).
+    // Stored ABSOLUTE; cmdSaveAs's consolidateRenderArtifacts copies it into audio/renders/ and
+    // re-points it relative, so the saved project carries no absolute pool path AND "Reset to
+    // original" survives a Save-As + move.
+    if (node[ids::originalSourceRef].toString().isEmpty())
+        node.setProperty (ids::originalSourceRef, wave->getCurrentSourceFile().getFullPathName(), nullptr);
+
+    // The in-place swap is a regenerable PREVIEW, not an undo-history edit — Tracktion's
+    // SourceFileReference change isn't routed through the UndoManager. reset_render_layer is the
+    // way back; it persists across save/reload via originalSourceRef. (relative iff under the
+    // project dir, mirroring relink_clip.)
+    const bool local = dest.isAChildOf (eng.editFile().getParentDirectory());
+    mosh::repointWaveClipSource (*wave, dest, eng.editFile().getParentDirectory(), local);
+    node.setProperty (ids::appliedInPlace, true, nullptr);
+    // cacheArtifact stored ABSOLUTE; cmdSaveAs's consolidateRenderArtifacts copies it into
+    // audio/renders/ + re-points it relative (so the saved project carries no absolute pool path).
+    node.setProperty (ids::cacheArtifact, dest.getFullPathName(), nullptr);
+    node.setProperty (ids::cacheKey, cacheKey, nullptr);
+    node.setProperty (ids::status, "ready", nullptr);
+    return true;
+}
+
+bool MoshOps::applyRenderBeneathMidi (const juce::String& clipId, juce::ValueTree node,
+                                      const juce::File& artifact, const juce::String& cacheKey)
+{
+    auto* midi = findClip (clipId);
+    if (midi == nullptr || dynamic_cast<te::WaveAudioClip*> (midi) != nullptr) return false;   // wave → in-place path
+    if (! artifact.existsAsFile()) return false;
+
+    // Whole-clip only — a sub-region (section-scoped) MIDI render can't be the clip's "hidden self",
+    // so those keep the legacy lane landing.
+    {
+        auto pos = midi->getPosition();
+        const double cs = pos.getStart().inSeconds(), ce = pos.getEnd().inSeconds();
+        const double rs = juce::jlimit (cs, ce, (double) node[ids::timeRangeStart]);
+        const double re = juce::jlimit (cs, ce, (double) node[ids::timeRangeEnd]);
+        if ((rs > cs + 1.0e-3) || (re < ce - 1.0e-3)) return false;   // sub-region → legacy path
+    }
+
+    // Durable per-render copy (a disposable artifact), named by the fingerprint so a re-render writes
+    // a NEW file rather than overwriting the one the hidden clip currently plays.
+    auto dest = eng.sessionDir().getChildFile ("audio")
+                    .getChildFile (node[ids::id].toString() + "-" + cacheKey.substring (0, 12))
+                    .withFileExtension ("wav");
+    dest.getParentDirectory().createDirectory();
+    if (dest != artifact && ! dest.existsAsFile() && ! artifact.copyFileTo (dest))
+        return false;
+    const bool local = dest.isAChildOf (eng.editFile().getParentDirectory());
+
+    // RE-RENDER → HOT-SWAP: the hidden clip already exists, so just repoint its source (no structural
+    // edit, no undo churn). The MIDI stays muted; the producer hears the updated audio in place.
+    if (auto hiddenId = node[kLandedClipId].toString(); hiddenId.isNotEmpty())
+        if (auto* hidden = dynamic_cast<te::WaveAudioClip*> (findClip (hiddenId)))
+        {
+            mosh::repointWaveClipSource (*hidden, dest, eng.editFile().getParentDirectory(), local);
+            node.setProperty (ids::cacheArtifact, dest.getFullPathName(), nullptr);
+            node.setProperty (ids::cacheKey, cacheKey, nullptr);
+            node.setProperty (ids::status, "ready", nullptr);
+            return true;
+        }
+
+    // FIRST apply: land the hidden full-span audio on a dedicated HIDDEN, INSTRUMENT-FREE track (NOT
+    // the source track — its synth would overwrite the buffer and silence the clip) at the MIDI clip's
+    // edit position, and MUTE the source MIDI so the re-imagined audio is what plays. snapshot()
+    // excludes the hidden track, so the producer hears it but never sees it. One undoable unit — an undo
+    // of it is exactly reset_render_layer (hidden clip removed + MIDI un-muted). The hidden track/clip +
+    // the mute + the node markers persist with the .tracktionedit, so the model survives save/reload.
+    auto pos = midi->getPosition();
+    beginTxn ("apply_render_beneath");
+    auto* hiddenTrack = findOrCreateHiddenRenderTrack();
+    if (hiddenTrack == nullptr) return false;
+    auto landed = hiddenTrack->insertWaveClip ("mosh-render-" + midi->getName(), dest,
+        { { pos.getStart(), pos.getLength() }, {} }, false);
+    if (landed == nullptr) return false;
+    landed->state.setProperty (ids::moshHidden, true, &undoManager());
+    midi->setMuted (true);
+    node.setProperty (kLandedClipId, landed->itemID.toString(), &undoManager());
+    node.setProperty (kSourceMutedByLayer, true, &undoManager());
+    node.setProperty (ids::cacheArtifact, dest.getFullPathName(), nullptr);   // regenerable metadata → no undo
+    node.setProperty (ids::cacheKey, cacheKey, nullptr);
+    node.setProperty (ids::status, "ready", nullptr);
+    return true;
+}
+
+te::AudioTrack* MoshOps::findOrCreateHiddenRenderTrack()
+{
+    // The single shared, instrument-free, snapshot-excluded track that holds every drum/MIDI
+    // beneath-render clip (Phase 2). Found by its moshHidden flag (the name is cosmetic); created
+    // once and reused. NOT undo-created on purpose mismatch — it's created inside the caller's txn.
+    for (auto* t : te::getAudioTracks (eng.edit()))
+        if (t != nullptr && (bool) t->state.getProperty (ids::moshHidden, false))
+            return t;
+    auto* t = createAudioTrack ("re-imagined (hidden)");
+    if (t != nullptr)
+        t->state.setProperty (ids::moshHidden, true, &undoManager());
+    return t;
+}
+
+juce::var MoshOps::cmdResetRenderLayer (const juce::var& args)
+{
+    const auto clipId = args.getProperty ("clipId", var()).toString();
+    auto* clip = findClip (clipId);
+    auto node = findRenderLayer (clipId);
+    if (clip == nullptr || ! node.isValid()) return errResult ("reset_render_layer", "no render layer");
+
+    // Phase 2 — MIDI/drum beneath-model: remove the hidden audio clip and un-mute the source MIDI, so
+    // the producer is back to the live, editable instrument. Undoable (mirrors the apply txn).
+    if (dynamic_cast<te::WaveAudioClip*> (clip) == nullptr)
+    {
+        if (! (bool) node[kSourceMutedByLayer])
+            return errResult ("reset_render_layer", "nothing to reset");
+        beginTxn ("reset_render_layer");
+        if (auto hiddenId = node[kLandedClipId].toString(); hiddenId.isNotEmpty())
+            if (auto* hidden = findClip (hiddenId); hidden != nullptr && hidden != clip)
+                hidden->removeFromParent();
+        clip->setMuted (false);
+        node.setProperty (kLandedClipId, "", &undoManager());
+        node.setProperty (kSourceMutedByLayer, false, &undoManager());
+        node.setProperty (ids::status, "dirty", &undoManager());   // re-imagine is available again
+        logLine ("reset_render_layer", args, true, {}, false);
+        emitSnapshotInvalidated();
+        return okResult ("reset_render_layer");
+    }
+
+    auto* wave = dynamic_cast<te::WaveAudioClip*> (clip);
+    const auto orig = node[ids::originalSourceRef].toString();
+    if (orig.isEmpty()) return errResult ("reset_render_layer", "no original source to restore");
+    juce::File of = juce::File::isAbsolutePath (orig) ? juce::File (orig)
+                    : eng.editFile().getParentDirectory().getChildFile (orig);
+    if (! of.existsAsFile()) return errResult ("reset_render_layer", "original source missing");
+
+    const bool local = of.isAChildOf (eng.editFile().getParentDirectory());
+    mosh::repointWaveClipSource (*wave, of, eng.editFile().getParentDirectory(), local);
+    node.setProperty (ids::appliedInPlace, false, nullptr);
+    node.setProperty (ids::status, "dirty", nullptr);   // re-imagine is available again
+    logLine ("reset_render_layer", args, true, {}, false);
+    emitSnapshotInvalidated();
+    return okResult ("reset_render_layer");
+}
+
+// ── Phase 3 — reactive auto-re-render ────────────────────────────────────────
+void MoshOps::reactiveTouch (const juce::String& clipId)
+{
+    // Hermetic-harness guard: a reactive render SPAWNS the generative service, so in headless runs
+    // (no audio device — --selftest / --run-script) it stays OFF unless a test explicitly opts in via
+    // MOSH_REACTIVE_DEBOUNCE_MS. Keeps --selftest deterministic + service-free; the real GUI (hasAudio)
+    // and the reactive verify check both arm it.
+    static const bool explicitDebounce =
+        juce::SystemStats::getEnvironmentVariable ("MOSH_REACTIVE_DEBOUNCE_MS", "").trim().isNotEmpty();
+    if (! eng.hasAudio() && ! explicitDebounce) return;
+
+    auto node = findRenderLayer (clipId);
+    if (! node.isValid()) return;
+    if (! (bool) node.getProperty (ids::reactive, true)) return;   // per-layer opt-out (default on)
+    // Only when a render is actually LIVE: a wave clip's source IS the render (appliedInPlace), or a
+    // MIDI/drum clip's hidden audio plays beneath it (kSourceMutedByLayer). A dormant layer (created
+    // but never rendered, or reset) is left alone — editing it shouldn't conjure a render.
+    if (! ((bool) node[ids::appliedInPlace] || (bool) node[kSourceMutedByLayer])) return;
+
+    // Bump the epoch so any in-flight render for this clip is dropped on finalize (superseded), then
+    // (re)start the debounce — a burst of edits collapses to ONE re-render after it settles.
+    node.setProperty (ids::reactiveEpoch, (int) node[ids::reactiveEpoch] + 1, nullptr);
+    const int ms = juce::jmax (1, juce::SystemStats::getEnvironmentVariable (
+        "MOSH_REACTIVE_DEBOUNCE_MS", "500").getIntValue());
+    auto& timer = reactiveTimers[clipId];
+    if (timer == nullptr)
+    {
+        auto t = std::make_unique<LambdaTimer>();
+        t->fn = [this, clipId] { reactiveFire (clipId); };
+        timer = std::move (t);
+    }
+    timer->startTimer (ms);
+}
+
+void MoshOps::reactiveTouchTrack (const juce::String& trackId)
+{
+    // An instrument/FX edit changes a MIDI clip's bounce (the stableSourceSig folds the track's
+    // plugins in) → re-touch every applied NON-wave clip on the track. Wave in-place renders stage
+    // the clip's own audio (independent of track FX), so they're not affected.
+    auto* track = findTrack (trackId);
+    if (track == nullptr) return;
+    for (auto* c : track->getClips())
+        if (c != nullptr && dynamic_cast<te::WaveAudioClip*> (c) == nullptr)
+            reactiveTouch (c->itemID.toString());
+}
+
+void MoshOps::reactiveFire (const juce::String& clipId)
+{
+    // The debounce elapsed — fire a background (wait:false) re-render. cmdRenderLayer re-stages the
+    // CURRENT source (post-edit), so an identical source HITs the cache (instant) and a changed one
+    // re-renders + hot-swaps. The result envelope is ignored (this is an internal regeneration).
+    if (! findRenderLayer (clipId).isValid()) return;   // layer removed since the touch
+    auto* o = new juce::DynamicObject();
+    o->setProperty ("clipId", clipId);
+    o->setProperty ("wait", false);
+    cmdRenderLayer (juce::var (o));
 }
 
 juce::var MoshOps::cmdListColors (const juce::var&)
@@ -5981,6 +6508,21 @@ juce::var MoshOps::cmdAcceptRender (const juce::var& args)
     auto* clip = findClip (clipId);
     auto node = findRenderLayer (clipId);
     if (clip == nullptr || ! node.isValid()) return errResult ("accept_render", "no render layer");
+    if (dynamic_cast<te::WaveAudioClip*> (clip) != nullptr && (bool) node[ids::appliedInPlace])
+    {
+        // Whole-clip wave renders AUTO-APPLY in place (no lane, no accept step). accept is a
+        // no-op for them — Reset restores the original. (Sub-region wave renders are NOT
+        // applied in place and still land via the lane path below.)
+        logLine ("accept_render", args, true, {}, false);
+        return okResult ("accept_render");
+    }
+    if (dynamic_cast<te::WaveAudioClip*> (clip) == nullptr && (bool) node[kSourceMutedByLayer])
+    {
+        // Phase 2 — MIDI/drum auto-applies beneath the muted source. accept is a no-op (the hidden
+        // audio is already what plays); Reset un-mutes the MIDI and removes the hidden clip.
+        logLine ("accept_render", args, true, {}, false);
+        return okResult ("accept_render");
+    }
     // Resolve move-aware (AL-009): a Save-As'd project stores cacheArtifact relative.
     juce::File artifact = mosh::resolveCacheArtifact (node, eng.editFile().getParentDirectory());
     if (! artifact.existsAsFile()) return errResult ("accept_render", "nothing rendered to accept");
@@ -6065,13 +6607,40 @@ juce::var MoshOps::cmdBypassLayer (const juce::var& args)
     auto node = findRenderLayer (args.getProperty ("clipId", var()).toString());
     if (! node.isValid()) return errResult ("bypass_layer", "no render layer");
     const bool bypassed = (bool) args.getProperty ("bypassed", false);
+    const auto bypClipId = args.getProperty ("clipId", var()).toString();
     beginTxn ("bypass_layer");
     node.setProperty (ids::status, bypassed ? "bypassed" : "ready", &undoManager());
 
-    // AL-008 — re-route REAL audio, not just the status flag: mute the landed neural
+    // Wave clips apply in place → bypass is an A/B: swap the source to the ORIGINAL when
+    // bypassed, back to the render artifact when enabled. (Non-wave clips use the landed-clip
+    // mute below.) The swap is the same regenerable-preview op as apply/reset.
+    if (auto* wave = dynamic_cast<te::WaveAudioClip*> (findClip (bypClipId)))
+    {
+        if (const auto origRef = node[ids::originalSourceRef].toString(); origRef.isNotEmpty())
+        {
+            const auto art = mosh::resolveCacheArtifact (node, eng.editFile().getParentDirectory()).getFullPathName();
+            const juce::String origAbs = juce::File::isAbsolutePath (origRef) ? origRef
+                : eng.editFile().getParentDirectory().getChildFile (origRef).getFullPathName();
+            const juce::String tgt = bypassed ? origAbs : art;
+            if (juce::File tf (tgt); tf.existsAsFile())
+            {
+                const bool local = tf.isAChildOf (eng.editFile().getParentDirectory());
+                mosh::repointWaveClipSource (*wave, tf, eng.editFile().getParentDirectory(), local);
+            }
+        }
+    }
+
+    // Phase 2 — for the MIDI/drum beneath-model, bypass routes back to the LIVE instrument: un-mute
+    // the source MIDI when bypassed, re-mute it when enabled. (The landed-clip mute below mutes the
+    // hidden audio inversely, so exactly one of the two sounds at a time.)
+    if ((bool) node[kSourceMutedByLayer])
+        if (auto* src = findClip (bypClipId))
+            src->setMuted (! bypassed);
+
+    // AL-008 — re-route REAL audio, not just the status flag: mute the landed neural / hidden
     // clip when bypassed so the mix falls back to the original (pre-render) source, and
-    // un-mute it when re-enabled. Only meaningful once the layer was accepted (it has a
-    // landed clip); a bypass before accept is a pure status toggle (nothing to route).
+    // un-mute it when re-enabled. Only meaningful once the layer was accepted / auto-applied (it
+    // has a landed clip); a bypass before that is a pure status toggle (nothing to route).
     if (auto landedId = node[kLandedClipId].toString(); landedId.isNotEmpty())
         if (auto* landedClip = findClip (landedId))
             landedClip->setMuted (bypassed);
@@ -6124,6 +6693,15 @@ juce::var MoshOps::cmdRemoveRenderLayer (const juce::var& args)
     if (! node.isValid()) return errResult ("remove_render_layer", "clip has no render layer");
 
     beginTxn ("remove_render_layer");
+    // Phase 2 — a MIDI/drum beneath-render owns a HIDDEN audio clip + a MUTED source. Tear them down
+    // so removing the layer doesn't strand a hidden clip or leave the MIDI silently muted.
+    if ((bool) node[kSourceMutedByLayer])
+    {
+        if (auto hiddenId = node[kLandedClipId].toString(); hiddenId.isNotEmpty())
+            if (auto* hidden = findClip (hiddenId); hidden != nullptr && hidden != clip)
+                hidden->removeFromParent();
+        clip->setMuted (false);
+    }
     clip->state.removeChild (node, &undoManager());
     logLine ("remove_render_layer", args, true, {}, true);
     emitSnapshotInvalidated();
@@ -7022,6 +7600,18 @@ juce::var MoshOps::snapshot()
    #else
     session->setProperty ("raveAvailable", false);
    #endif
+    // FMS Phase-3 sing: the locked-to-self enrollment state (ONE voice per install,
+    // ~/Library/Mosh/voice). The fake beep backend renders without it; the UI copy
+    // tells the producer whether the REAL own-voice backend has a reference yet.
+    {
+        const auto voiceDir = juce::File (juce::SystemStats::getEnvironmentVariable (
+            "MOSH_VOICE_DIR", juce::File::getSpecialLocation (juce::File::userHomeDirectory)
+                                  .getChildFile ("Library/Mosh/voice").getFullPathName()));
+        session->setProperty ("singVoiceEnrolled",
+                              voiceDir.getChildFile ("reference.wav").existsAsFile()
+                                  || voiceDir.getChildFile ("reference-30s.wav").existsAsFile()
+                                  || voiceDir.getChildFile ("reference-10s.wav").existsAsFile());
+    }
     session->setProperty ("sampleRate", eng.engine().getDeviceManager().getSampleRate());
     session->setProperty ("tempo", edit.tempoSequence.getBpmAt (tracktion::TimePosition()));
     if (auto* ts = edit.tempoSequence.getTimeSig (0))
@@ -7193,7 +7783,7 @@ juce::var MoshOps::snapshot()
     Array<var> tracks;
     int index = 0;
     for (auto* t : te::getAudioTracks (edit))
-        if (t != nullptr)
+        if (t != nullptr && ! (bool) t->state.getProperty (ids::moshHidden, false))   // Phase 2 — hidden beneath-render track
             tracks.add (trackToVar (*t, index++));
 
     // MIX-008 — group (submix) tracks, appended AFTER the audio tracks so every
@@ -7498,6 +8088,10 @@ juce::var MoshOps::clipToVar (te::Clip& c)
     o->setProperty ("offset", pos.getOffset().inSeconds());
 
     o->setProperty ("mute", c.isMuted());
+    // Phase 2 — a HIDDEN beneath-render audio clip: the UI filters it out of the lanes (it's the
+    // audio the producer hears, not a clip to manage). Only present when set, to keep snapshots lean.
+    if ((bool) c.state.getProperty (ids::moshHidden, false))
+        o->setProperty ("hidden", true);
     if (auto* w = dynamic_cast<te::WaveAudioClip*> (&c))
     {
         o->setProperty ("type", "wave");
@@ -7561,6 +8155,16 @@ juce::var MoshOps::clipToVar (te::Clip& c)
         auto* r = new DynamicObject();
         r->setProperty ("id", rl[ids::id]);
         r->setProperty ("status", rl[ids::status]);
+        r->setProperty ("error", rl[ids::renderError]);   // "" unless status=="error"
+        r->setProperty ("appliedInPlace", (bool) rl[ids::appliedInPlace]);   // wave: the clip's source IS the render
+        r->setProperty ("hasOriginal", rl[ids::originalSourceRef].toString().isNotEmpty());   // wave: Reset is available
+        // Phase 2 — MIDI/drum beneath-model is live: the source is muted and a hidden audio clip plays.
+        // Drives the "re-imagine active" marker + the Reset button on a MIDI clip. Guarded on the hidden
+        // clip still existing so a removed/undone clip clears the marker.
+        r->setProperty ("reimagineActive", (bool) rl[kSourceMutedByLayer]
+            && rl[kLandedClipId].toString().isNotEmpty()
+            && findClip (rl[kLandedClipId].toString()) != nullptr);
+        r->setProperty ("coverage", rl[ids::coverage].toString().isNotEmpty() ? rl[ids::coverage] : var ("auto"));   // whole-clip strategy
         r->setProperty ("adapter", rl[ids::modelAdapter]);
         r->setProperty ("mode", rl[ids::mode]);
         r->setProperty ("seed", (int) rl[ids::seed]);
@@ -7624,6 +8228,7 @@ juce::var MoshOps::controllerToVar()
             for (auto* clip : track->getClips())
                 if (auto* wave = dynamic_cast<te::WaveAudioClip*> (clip))
                 {
+                    if ((bool) wave->state.getProperty (ids::moshHidden, false)) continue;   // Phase 2 — not a take
                     const auto pos = wave->getPosition();
                     const double end = pos.getEnd().inSeconds();
                     if (latestWave == nullptr || end >= latestEnd)
@@ -7811,6 +8416,7 @@ juce::var MoshOps::cmdSetDrumLane (const juce::var& args)
     data->setProperty ("solo",  solo.contains (note));
     logLine ("set_drum_lane", args, true, {}, true);
     emitSnapshotInvalidated();
+    reactiveTouchTrack (args.getProperty ("trackId", var()).toString());   // Phase 3 — pad mute changes the bounce
     return okResult ("set_drum_lane", var (data));
 }
 

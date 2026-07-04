@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """REAL Tier-B timbre transfer via a RAVE TorchScript model.
 
-Runs UNDER the dedicated transform venv (service/transform/.venv), invoked by
+Runs UNDER the dedicated transform venv (~/Library/Mosh/venvs/transform), invoked by
 service/adapters/transform_adapter.py as a subprocess so torch never touches the
 service interpreter. Loads RAVE_MODEL_DIR/<target>.ts, runs encode→decode timbre
 transfer, wet-mixes by `strength`, writes output.wav. Emits ONE JSON line to stdout

@@ -237,3 +237,41 @@ test("a MIDI clip does NOT offer 'Build flow from this take'", async ({ page }) 
   await expect(page.getByTestId("v2-clip-menu")).toBeVisible();
   await expect(page.getByTestId("clip-build-flow")).toHaveCount(0);
 });
+
+// ── Phase 3 Stage 2: sing mode — the sheet + take flow render in the generative drawer ──
+
+test("sing mode: build a flow → + Sing → guide render → accept", async ({ page }) => {
+  await bootV2(page);
+  await page.locator('[data-testid="v2-clip"][title="chords"]').click({ button: "right" });
+  await page.getByTestId("clip-build-flow").click();
+  await page.getByTestId("v2-track-header").nth(2).click();
+  await page.getByTestId("v2-insp-tab-lyrics").click();
+  await expect(page.getByTestId("lyric-panel")).toHaveAttribute("data-has-sheet", "true");
+
+  // The Gen tab offers "+ Sing" only once the track carries a lyric sheet.
+  await page.getByTestId("v2-insp-tab-gen").click();
+  const gen = page.getByTestId("generative");
+  const singBtn = gen.getByTestId("gen-create-sing");
+  await expect(singBtn).toBeVisible();
+  await singBtn.click();
+
+  // SingControls: flow coverage from the take + the locked-to-self enrollment copy.
+  await expect(gen.getByTestId("sing-flow")).toContainText("2/2");
+  await expect(gen.getByTestId("sing-voice")).toContainText("not enrolled");
+
+  await gen.getByTestId("gen-render").click();
+  await expect(gen.getByTestId("render-status")).toHaveText("ready");
+  const accept = gen.getByTestId("gen-accept");
+  await expect(accept).toBeEnabled();
+  await accept.click();
+  await expect(page.getByTestId("v2-error")).toHaveCount(0);
+});
+
+test("sing without a sheet is not offered (+ Sing hidden)", async ({ page }) => {
+  await bootV2(page);
+  await page.getByTestId("v2-track-header").nth(0).click();
+  await page.getByTestId("v2-insp-tab-gen").click();
+  const gen = page.getByTestId("generative");
+  await expect(gen.getByTestId("gen-create")).toBeVisible();
+  await expect(gen.getByTestId("gen-create-sing")).toHaveCount(0);
+});

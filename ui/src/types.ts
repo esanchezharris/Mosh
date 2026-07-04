@@ -19,6 +19,11 @@ export type RenderLayer = {
   // the clip; a whole-clip render's range equals the clip span.
   regionStart?: number;
   regionEnd?: number;
+  error?: string;     // the service's reason, populated when status === "error"
+  appliedInPlace?: boolean;  // wave clips: the clip's own audio IS the render (instant in-place preview)
+  hasOriginal?: boolean;     // wave clips: a pre-render original is stored → Reset is available
+  coverage?: "auto" | "loop" | "stitch";  // whole-clip: how a clip longer than the model window is covered
+  reimagineActive?: boolean; // MIDI/drum clips: a hidden audio render plays beneath the muted MIDI → Reset is available
 };
 
 // LYR-001 — Finish-My-Song lyric sheet (per-track), from MoshOps.lyricSheetToVar().
@@ -71,6 +76,7 @@ export type LyricLine = {
   proposals?: LyricProposal[];  // L2 — transient ranked proposals (cleared on accept/reject)
   regen?: number;
   analysis?: LyricAnalysis;     // L1 — precise phonology (from analyze_lyrics)
+  hasScore?: boolean;           // FMS Phase-3 — line carries a persisted lyricScore (take flow)
 };
 export type LyricSheet = {
   id: string;
@@ -138,6 +144,9 @@ export type Clip = {
   length: number;
   offset: number;
   mute?: boolean;
+  // Phase 2 — a HIDDEN beneath-render: the audio a MIDI/drum re-imagine produced, living on the
+  // same track beneath the muted source. Filtered out of the lanes (it's not a clip to manage).
+  hidden?: boolean;
   gainDb?: number;
   sourceFile?: string;
   sourceMissing?: boolean;   // gap 3 — source file absent on disk; offer relink
@@ -464,6 +473,7 @@ export type Snapshot = {
     timeSigDenominator?: number;
     metronome?: boolean;
     raveAvailable?: boolean;   // Route C.2 — anira build hosts the real-time RAVE insert
+    singVoiceEnrolled?: boolean;  // FMS Phase-3 — ~/Library/Mosh/voice reference exists (locked-to-self)
     // Musical key (set_key command writes it; always defaulted on the backend).
     key: SessionKey;
     length?: number;

@@ -19,6 +19,32 @@ The canonical adapter id is `stable_audio3`. The dependency-free `fake` adapter 
 always available and is the default for PC gates unless real SA3 is explicitly
 enabled.
 
+## Tutorial scouting
+
+- `service/teardown/` contains the instruction-first tutorial scouting workflow
+  used to rank beat tutorials before teardown work starts.
+- `python3 service/teardown/scout_test.py` runs the deterministic smoke for the
+  prompt, scorer, and SQLite catalog.
+- `python3 service/teardown/discovery_smoke_test.py` runs mocked YouTube discovery
+  through enrichment, ranking, and catalog persistence without a real key.
+- `python3 service/teardown/cli.py prompt` prints the agent instructions.
+- `python3 service/teardown/cli.py score --input candidates.json --catalog service/teardown/catalog.sqlite`
+  scores manual/no-key candidate JSON.
+- `python3 service/teardown/cli.py discover --api-key-file "/path/to/youtube_api_key.txt" --template-id serum-from-scratch --max-results 2 --limit 10 --catalog service/teardown/catalog.sqlite`
+  queries the YouTube Data API, scores returned tutorials, and persists them to
+  the scout catalog. The key is read at runtime and is not written to the catalog
+  or command output.
+- Add `--verify-frames` to sample transient local frames under
+  `.cache/mosh-teardown/frames/` using `yt-dlp` and `ffmpeg` when available.
+  Frame verification runs OCR/CV over sampled images with local `tesseract` and
+  Pillow when present, then falls back to metadata-only evidence if those tools
+  are unavailable.
+- `python3 service/teardown/cli.py queue --catalog service/teardown/catalog.sqlite --limit 10`
+  prints the current ranked queue.
+- `python3 service/teardown/cli.py export-jobs --catalog service/teardown/catalog.sqlite --out service/teardown/teardown_jobs.jsonl`
+  writes resumable teardown jobs for `ideal` and `usable` rows without re-crawling
+  YouTube.
+
 ## Mac SA3
 
 The Mac baseline uses the carved MLX implementation under `service/sa3/`.

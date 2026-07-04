@@ -5,6 +5,7 @@
 // via progressive disclosure (inspector / right-click) in later slices.
 
 import { useStore } from "../store";
+import { useShell } from "./shellState";
 import { isNative } from "../bridge";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { useFileDrop } from "../hooks/useFileDrop";
@@ -23,6 +24,8 @@ import "./shell.css";
 export function AppV2() {
   const snapshot = useStore((s) => s.snapshot);
   const lastError = useStore((s) => s.lastError);
+  const leftOpen = useShell((s) => s.browserOpen);  // LEFT push-dock (browser)
+  const rightOpen = useShell((s) => s.rightOpen);   // RIGHT push-dock (agent rail)
 
   useKeyboardShortcuts(); // the single keyboard layer + native-menu bridge
   const dragging = useFileDrop(); // drag-and-drop audio import (bytes over the bridge)
@@ -40,14 +43,19 @@ export function AppV2() {
   }
 
   return (
-    <div className="v2-shell" data-testid="v2-shell">
+    <div className="v2-shell" data-testid="v2-shell"
+      data-left-open={leftOpen} data-right-open={rightOpen}>
       {snapshot && <TopBar snapshot={snapshot} />}
       {lastError && <div className="v2-errbar" role="alert" data-testid="v2-error">⚠ {lastError}</div>}
       <RecoveryNotice />
 
-      {/* compact 3-zone body: a center column (section-nav · arrangement · prompt bar)
-          and an ALWAYS-ON right rail (maximized agent · collaborators · inspector). */}
+      {/* symmetric push-docks frame a SMALL, CENTERED work area. Both flanks are collapsible
+          pull-tab docks that occupy their OWN gutter — opening one fills its side and pushes,
+          it never covers the (capped, centered) arrangement. LEFT = browser (samples +
+          plugins); CENTER = section-nav · arrangement · composer; RIGHT = agent rail
+          (maximized Moshi · inspector · collaborators). */}
       <div className="v2-body">
+        <LeftDrawer />
         <div className="v2-main">
           {snapshot
             ? <TrackLaneList snapshot={snapshot} dragging={dragging} />
@@ -61,11 +69,6 @@ export function AppV2() {
         </div>
         <RightRail />
       </div>
-
-      {/* left browser — a CONFINED pull-tab overlay: its tab rides the screen edge and the
-          panel ends above the prompt bar, so it never covers the agent (samples + PLUGINS;
-          "+ Plugin" opens it on the Plugins tab — the one plugin surface, no modal). */}
-      <LeftDrawer />
 
       {/* floating / modal surfaces — opened via disclosure */}
       <PianoRoll />

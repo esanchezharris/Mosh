@@ -9,11 +9,11 @@ import { useStore } from "../../store";
 import { useShell, type SectionZoom } from "../shellState";
 import { beatSeconds, barSeconds } from "../../time";
 import type { Snapshot, Track } from "../../types";
-import { SectionRibbon } from "../timeline/SectionRibbon";
+import { SongNav } from "../timeline/SongNav";
 import { BarRuler } from "../timeline/BarRuler";
 import { Playhead } from "../timeline/Playhead";
 import { ClipView } from "./ClipView";
-import { meterOf, contentSeconds, HEAD_W } from "../timeline/geom";
+import { meterOf, contentSeconds, headW } from "../timeline/geom";
 
 const TYPE_ICON: Record<string, string> = { drum: "▦", audio: "≈", group: "▤" };
 
@@ -24,14 +24,16 @@ export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; drag
   const sectionZoom = useShell((s) => s.sectionZoom);
   const setSectionZoom = useShell((s) => s.setSectionZoom);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const navTrackRef = useRef<HTMLDivElement>(null);
-  // The section navigator is now its OWN panel above the arrangement (concept-style
-  // separation). It shares the timeline's x-axis but is a separate scroll context, so
-  // translate its track to track the arrangement's scrollLeft and stay bar-aligned.
-  const syncNav = useCallback(() => {
-    const sl = scrollRef.current?.scrollLeft ?? 0;
-    if (navTrackRef.current) navTrackRef.current.style.transform = `translateX(${-sl}px)`;
-  }, []);
+  // The navigator is a whole-song OVERVIEW (SongNav) — clicking it seeks and brings that
+  // spot into view in the (zoomed) timeline below. Not synced to the timeline's scroll.
+  const scrubTo = useCallback((sec: number) => {
+    void exec("set_transport", { position: sec });
+    const el = scrollRef.current;
+    if (el) {
+      const pps = useStore.getState().pxPerSec;
+      el.scrollLeft = Math.max(0, sec * pps - el.clientWidth / 2 + headW());
+    }
+  }, [exec]);
 
   const tracks = snapshot.tracks.filter((t) => !t.isGroup);
   const contentW = contentSeconds(snapshot) * pxPerSec;
@@ -44,7 +46,7 @@ export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; drag
     const w = scrollRef.current?.clientWidth ?? 0;
     if (w <= 0) return;
     const bars = zoom === "8b" ? 8 : zoom === "16b" ? 16 : totalBars;
-    setPxPerSec((w - HEAD_W) / Math.max(1, bars * barLen)); // store clamps 20..400
+    setPxPerSec((w - headW()) / Math.max(1, bars * barLen)); // store clamps 20..400
   }, [totalBars, barLen, setPxPerSec]);
 
   useEffect(() => { fit(sectionZoom); }, [sectionZoom, fit]);
@@ -55,8 +57,6 @@ export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; drag
     ro.observe(el);
     return () => ro.disconnect();
   }, [fit]);
-  // Re-align the navigator after a zoom (pxPerSec change resizes the content width).
-  useEffect(() => { syncNav(); }, [pxPerSec, syncNav]);
 
   // Shell reactivity (#10): each lane glows with its OWN live audio level while playing,
   // in concert with Moshi (who reacts to the master spectrum). Driven imperatively from
@@ -103,18 +103,16 @@ export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; drag
 
   return (
     <>
-      {/* SECTION NAVIGATOR — its own panel above the arrangement (separated, concept-style).
-          Shares the timeline x-axis; the inner track is translated to follow the scroll. */}
+      {/* SONG NAVIGATOR — a whole-song overview above the arrangement: bar numbers + click to
+          jump anywhere + collaborator markers. Independent of the timeline's zoom/scroll. */}
       <div className="v2-nav" data-testid="v2-navigator">
         <div className="v2-nav-gutter"><ZoomToggle value={sectionZoom} onChange={setSectionZoom} /></div>
         <div className="v2-nav-clip">
-          <div className="v2-nav-track" ref={navTrackRef} style={{ width: contentW }}>
-            <SectionRibbon snapshot={snapshot} width={contentW} />
-          </div>
+          <SongNav snapshot={snapshot} onScrub={scrubTo} />
         </div>
       </div>
 
-      {/* ARRANGEMENT — the dark timeline: detail ruler + lanes (no section ribbon now). The
+      {/* ARRANGEMENT — the dark timeline: detail ruler + lanes. The
           panel SHRINK-WRAPS to its content (ruler + N lanes + one trailing add-track row) so
           sparse sessions show cream below it; once the tracks would overflow the available
           height it caps there and scrolls internally (the prompt bar stays put). */}
@@ -122,7 +120,7 @@ export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; drag
         className="v2-stage"
         style={{ "--v2-stage-h": `calc(var(--v2-ruler-h) + ${tracks.length + 1} * (var(--v2-lane-h) + 1px) + 16px)` } as React.CSSProperties}
       >
-        <div className="v2-tl-scroll" ref={scrollRef} data-testid="v2-timeline" onScroll={syncNav}>
+        <div className="v2-tl-scroll" ref={scrollRef} data-testid="v2-timeline">
           <div className="v2-tl">
             {/* ruler row (now the top row) */}
             <div className="v2-corner v2-corner-ruler" />
@@ -132,7 +130,7 @@ export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; drag
               <Fragment key={t.id}>
                 <TrackLaneHeader track={t} />
                 <div className="v2-lane" data-track-id={t.id} data-testid="v2-lane" style={{ width: contentW, "--beat-px": `${beatPx}px` } as React.CSSProperties}>
-                  {t.clips.map((c) => (
+                  {t.clips.filter((c) => !c.hidden).map((c) => (
                     <ClipView key={c.id} clip={c} trackType={t.type} snapshot={snapshot} />
                   ))}
                 </div>

@@ -49,7 +49,9 @@ def _max_zero_run(sig):
 
 def check_rave_insert(ctx, ART, run_script, stats, diff_rms, failed_commands):
     name = "RAVE insert offline render (Route C.2)"
-    py = os.environ.get("TRANSFORM_PY") or str(REPO / "service/transform/.venv/bin/python")
+    conventional = os.path.expanduser("~/Library/Mosh/venvs/transform/bin/python")
+    py = os.environ.get("TRANSFORM_PY") or (
+        conventional if os.path.isfile(conventional) else str(REPO / "service/transform/.venv/bin/python"))
     if not os.path.exists(py):
         return {"check": name, "pass": True,
                 "detail": {"skipped": "transform venv absent — run service/transform/setup-transform.sh"}}

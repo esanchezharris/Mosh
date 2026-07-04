@@ -112,6 +112,7 @@ function seedSnapshot(): Snapshot {
     session: {
       sampleRate: SR, tempo: 120, timeSigNumerator: 4, timeSigDenominator: 4,
       raveAvailable: true,   // Route C.2 — exercise the "+ RAVE" affordance in dev/e2e
+      singVoiceEnrolled: false,  // FMS Phase-3 — dev/e2e exercise the not-enrolled copy
       metronome: false, length: 16, editFile: "/mock/session.mosh",
       audioEnabled: true, bitDepth: 24, bufferSize: 512,
       availableCores: 8, audioThreads: 8, audioThreadsAuto: true,
@@ -162,7 +163,7 @@ const listeners = new Map<string, Set<Listener>>();
 // Mock command log (drives the CommandLog panel). Read-only commands don't log.
 const cmdLog: { command: string; ok: boolean; undoable: boolean; ts: number }[] = [];
 const READONLY = new Set(["get_snapshot", "get_clip_peaks", "file_peaks", "audition_file", "stop_audition", "get_command_log", "list_plugins", "list_builtins", "list_colors", "list_audio_devices", "list_wave_inputs", "list_track_outputs", "list_takes", "list_training_sources", "training_job_status", "list_lora_adapters"]);
-const NON_UNDOABLE = new Set(["set_transport", "arm_track", "set_input_monitor", "undo", "redo", "save", "reload", "new_project", "render_layer", "open_plugin_editor", "set_plugin_param", "export_audio", "mark_take", "import_training_source", "approve_training_source", "build_training_corpus", "submit_training_job", "cancel_training_job", "import_lora_adapter", "activate_lora_adapter", "get_rhymes",
+const NON_UNDOABLE = new Set(["set_transport", "arm_track", "set_input_monitor", "undo", "redo", "save", "reload", "new_project", "render_layer", "reset_render_layer", "open_plugin_editor", "set_plugin_param", "export_audio", "mark_take", "import_training_source", "approve_training_source", "build_training_corpus", "submit_training_job", "cancel_training_job", "import_lora_adapter", "activate_lora_adapter", "get_rhymes",
   "complete_lyrics", "fill_lyric_gap", "suggest_next_line", "regenerate_lyric",
   "cancel_lyric_job", "reject_lyric_proposal", "analyze_lyrics", "get_lyric_corpus_stats"]);  // accept_lyric_proposal IS undoable
 
@@ -1124,9 +1125,33 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     }
     case "render_layer": {
       const f = findClip(str(args.clipId)); if (!f?.clip.renderLayer) return err(command, "no render layer");
+      if (f.clip.renderLayer.mode === "sing" && !f.track.lyricSheet)
+        return err(command, "sing needs a lyric sheet on the clip's track (build a flow from a take first)");
       f.clip.renderLayer.status = "ready"; f.clip.renderLayer.hasArtifact = true;
+      // SING never auto-applies (mirrors MoshOps::finalizeRender): the guide vocal lands as an
+      // auditionable artifact for the legacy accept/reject flow — it must not replace the take.
+      if (f.clip.renderLayer.mode === "sing") { /* ready + hasArtifact only */ }
+      // Wave clips auto-apply in place: the render becomes the clip's audio + Reset becomes available.
+      else if (f.clip.type === "wave") { f.clip.renderLayer.appliedInPlace = true; f.clip.renderLayer.hasOriginal = true; }
+      else {
+        // MIDI/drum (Phase 2): the render lands as HIDDEN audio on a dedicated, snapshot-EXCLUDED
+        // track (a synth on the source track would silence it), so the UI never sees a hidden clip —
+        // it just sees the MIDI muted + the reimagineActive marker (+ Reset).
+        f.clip.mute = true;
+        f.clip.renderLayer.reimagineActive = true;
+      }
       emit("layer_status", { clipId: f.clip.id, qa: { pq: 5.1, pq_base: 5.66, flags: ["quality_degraded"], adapter: f.clip.renderLayer.adapter, reasoning: "Fair production quality (5.1/10); fair enjoyment; flagged: quality_degraded." } });
       invalidate(); return ok(command);
+    }
+    case "reset_render_layer": {
+      const f = findClip(str(args.clipId)); if (!f?.clip.renderLayer) return err(command, "no render layer");
+      if (f.clip.type === "wave") { f.clip.renderLayer.appliedInPlace = false; }
+      else {
+        // MIDI/drum: drop the hidden audio (on its excluded track), un-mute the source, clear the marker.
+        f.clip.mute = false;
+        f.clip.renderLayer.reimagineActive = false;
+      }
+      f.clip.renderLayer.status = "dirty"; invalidate(); return ok(command);
     }
     case "accept_render": case "freeze_layer": case "bounce_layer_to_clip": {
       const f = findClip(str(args.clipId)); if (!f?.clip.renderLayer) return err(command, "no render layer");
@@ -1250,6 +1275,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
           index, role: "verse", seedText: Array.from({ length: target }).fill("___").join(" "),
           text: "", syllableTarget: target, syllableTol: 1, stress, rhymeGroup: rg,
           rhymeStrictness: "", locked: false, sectionId: "", status: "skeleton",
+          hasScore: true,   // Stage 1 lands the take's lyricScore with each skeleton line
         });
         trk.lyricSheet = {
           id: `ls-${trk.id}`, grid: "1/8", language: "en", topic: "", mood: "",

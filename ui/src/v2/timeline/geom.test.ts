@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { beatToSec, secToBeat, beatsPerBar, contentSeconds } from "./geom";
 import type { Snapshot } from "../../types";
 
@@ -35,5 +35,55 @@ describe("timeline geom", () => {
     const s = snap({}, { sections: [{ id: "x", name: "Outro", startBeat: 0, endBeat: 200 }] });
     // 200 beats * 0.5s = 100s, plus tail, so well past the 32s floor.
     expect(contentSeconds(s)).toBeGreaterThanOrEqual(100);
+  });
+});
+
+// headW() reads the live --v2-head-w token so JS overlays can't drift from the CSS
+// grid (the 212-vs-168 playhead-offset bug). Module-level cache → fresh import per test.
+describe("headW", () => {
+  afterEach(() => {
+    document.body.innerHTML = "";
+    vi.restoreAllMocks();
+    vi.resetModules();
+  });
+
+  const mount = () => {
+    const el = document.createElement("div");
+    el.className = "v2-shell";
+    document.body.appendChild(el);
+    return el;
+  };
+  const mockToken = (val: string) =>
+    vi.spyOn(window, "getComputedStyle").mockReturnValue({
+      getPropertyValue: (p: string) => (p === "--v2-head-w" ? val : ""),
+    } as unknown as CSSStyleDeclaration);
+
+  it("falls back to the shell.css value (168) when no .v2-shell is mounted", async () => {
+    const { headW } = await import("./geom");
+    expect(headW()).toBe(168);
+  });
+
+  it("reads --v2-head-w from the mounted shell", async () => {
+    mount();
+    mockToken("240px");
+    const { headW } = await import("./geom");
+    expect(headW()).toBe(240);
+  });
+
+  it("caches a successful read (token is static per session)", async () => {
+    mount();
+    const spy = mockToken("240px");
+    const { headW } = await import("./geom");
+    expect(headW()).toBe(240);
+    spy.mockReturnValue({ getPropertyValue: () => "999px" } as unknown as CSSStyleDeclaration);
+    expect(headW()).toBe(240);
+  });
+
+  it("does NOT cache the fallback — a later read picks up the real token", async () => {
+    const { headW } = await import("./geom");
+    expect(headW()).toBe(168); // pre-mount render
+    mount();
+    mockToken("240px");
+    expect(headW()).toBe(240);
   });
 });

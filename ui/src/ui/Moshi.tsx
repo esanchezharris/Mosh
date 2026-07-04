@@ -11,6 +11,7 @@ import { useSettings } from "../settings/store";
 import { useIsV2 } from "../v2/shellFlag";
 import { DEFAULT_KEY } from "../musicalKey";
 import { AgentComposer } from "./AgentComposer";
+import { IconListen, IconSpeaker, IconSpeakerMute } from "./icons";
 import "../vendor/moshi.js";
 import "../vendor/voice.js";
 
@@ -326,10 +327,10 @@ export function Moshi() {
           data-testid="moshi-handsfree" aria-pressed={handsFreeOn}
           title={handsFreeOn ? "Hands-free listening on — tap to turn off" : "Hands-free listening off — tap for always-on voice"}
           aria-label={handsFreeOn ? "Turn off hands-free listening" : "Turn on hands-free listening"}
-          onClick={() => setHandsFree(!handsFreeOn)}>👂</button>
+          onClick={() => setHandsFree(!handsFreeOn)}><IconListen size={15} /></button>
         <button className="moshi-mute" data-testid="moshi-mute" aria-pressed={!voiceOn}
           title={voiceOn ? "Mute Moshi" : "Unmute Moshi"} aria-label={voiceOn ? "Mute Moshi" : "Unmute Moshi"}
-          onClick={() => toggleVoice()}>{voiceOn ? "🔊" : "🔇"}</button>
+          onClick={() => toggleVoice()}>{voiceOn ? <IconSpeaker size={15} /> : <IconSpeakerMute size={15} />}</button>
         <span className="moshi-handsfree-status" role="status" aria-live="polite" data-testid="handsfree-status">
           {handsFreeOn ? "hands-free on" : ""}
         </span>

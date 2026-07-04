@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """REAL on-device F0 contour for the Phase-2 mumble->skeleton path, via FCPE.
 
-Runs UNDER the dedicated skeleton venv (service/skeleton/.venv), invoked by server.py's
+Runs UNDER the dedicated skeleton venv (~/Library/Mosh/venvs/skeleton), invoked by server.py's
 /skeleton_spec as a subprocess so torch/FCPE never touch the service interpreter. Reads the
 take's audio (stdlib `wave`, so we depend only on torch + torchfcpe — NOT torchaudio's file
 backend), runs FCPE pitch tracking, and emits ONE JSON line to stdout (all model chatter is

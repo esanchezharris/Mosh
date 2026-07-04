@@ -104,7 +104,7 @@ export function SampleBrowser() {
       <div className="modal-list" data-testid="content-browser" style={{ maxHeight: 240 }}>
         {dirs.length > 0 && (
           <div className="plugin-group"><div className="pg-label">Folders</div>
-            {dirs.map((d) => <button key={d.path} className="plugin-row" onClick={() => void navigate(d.path)}><span className="pr-name">🗀 {d.name}</span></button>)}
+            {dirs.map((d) => <button key={d.path} className="plugin-row" onClick={() => void navigate(d.path)}><span className="pr-name"><span className="pr-folder" aria-hidden>▸</span> {d.name}</span></button>)}
           </div>
         )}
         {files.length > 0 && (

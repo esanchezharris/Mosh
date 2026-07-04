@@ -147,6 +147,13 @@ namespace mosh::ids
     // JSON-object blob {syllables,target,stress,rhymeGrade,rhymeOk,words,...} → snapshot →
     // the flow visualizer. Refreshed on demand; never persisted (recomputable).
     MOSH_DECLARE_ID (lyricAnalysis)
+    // Phase-3 Stage 1 — PERSISTED render-ready score from the take (kill-shot B GO): the
+    // line's bar of articulation slots, melisma segments underneath (per-note pitch/time),
+    // a JSON-object blob {v,algo,bar,bpm,timeSig,grid,slots:[{start,end,kind,segments}]}
+    // landed by build_skeleton_from_clip. NOT a generation constraint — excluded from
+    // lineFingerprint; grid edits leave it untouched (it is the take's truth; the Stage-2
+    // score author reconciles text vs slots). Additive optional ⇒ no format bump.
+    MOSH_DECLARE_ID (lyricScore)
 
     MOSH_DECLARE_ID (id)
     MOSH_DECLARE_ID (inputRef)
@@ -164,6 +171,25 @@ namespace mosh::ids
     MOSH_DECLARE_ID (cacheKey)
     MOSH_DECLARE_ID (cacheArtifact)
     MOSH_DECLARE_ID (status)           // empty | queued | rendering | ready | error | dirty
+    MOSH_DECLARE_ID (renderError)      // last service error string when status=="error" (additive, optional)
+    MOSH_DECLARE_ID (originalSourceRef) // wave clips: the pre-render source path, stored once, so Reset can restore it (additive)
+    MOSH_DECLARE_ID (appliedInPlace)   // wave clips: true while the clip's source IS the render artifact (auto-apply) (additive)
+    MOSH_DECLARE_ID (coverage)         // whole-clip coverage: "auto" | "loop" (tile a cycle) | "stitch" (window+crossfade) (additive)
+    // Phase 2 (drum/MIDI re-imagine): marks the HIDDEN looping render that plays beneath a muted
+    // MIDI/drum clip. Set on BOTH the dedicated hidden audio TRACK's state (so snapshot() excludes
+    // the whole track — the producer hears it but never sees it; export uses the real edit, so it
+    // still plays) AND the landed clip's state (defensive UI filter). It can't live on the SOURCE
+    // track because a track's instrument synth overwrites the buffer (silencing any audio clip on
+    // it), so the render lands on its own instrument-free track. Additive, round-trip-safe.
+    MOSH_DECLARE_ID (moshHidden)
+    // Phase 3 (reactive auto-re-render): when an applied render layer is live (a wave clip's source
+    // IS the render, or a MIDI clip's hidden audio plays beneath it), editing the SOURCE — notes,
+    // trim, the track's instrument/FX, or a generative knob — debounce-fires a background re-render
+    // that HOT-SWAPS the result, so the producer never has to manually re-imagine. `reactive` is the
+    // per-layer opt-out (default ON, absent ⇒ true). `reactiveEpoch` is bumped on every edit-touch;
+    // finalizeRender drops a result whose epoch is stale (a newer edit superseded it). Both non-undoable.
+    MOSH_DECLARE_ID (reactive)
+    MOSH_DECLARE_ID (reactiveEpoch)
     MOSH_DECLARE_ID (createdBy)        // user | (future) monster
     MOSH_DECLARE_ID (userKept)
     MOSH_DECLARE_ID (compiledEnvelope) // TRANSIENT: JSON of the last compile_render result (mode/backend/reasoning/say) — non-undoable, like lyricProposals

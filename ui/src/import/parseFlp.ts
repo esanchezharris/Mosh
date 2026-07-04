@@ -1,7 +1,7 @@
 // FL Studio .flp → MoshIR, via the PyFLP carve (service/flp/).
 //
 // .flp is binary; PyFLP parses it but only on Python ≤3.10, so it lives in a
-// dedicated venv (service/flp/.venv) built by service/flp/setup-flp.sh. This
+// dedicated venv (~/Library/Mosh/venvs/flp) built by service/flp/setup-flp.sh. This
 // frontend shells out to service/flp/flp_cli.py (which emits a MoshIR-shaped
 // session as JSON) and wraps the result into an ImportIR — the same shape the
 // RPP/ALS parsers produce, fed to the same emitter/verifier.
