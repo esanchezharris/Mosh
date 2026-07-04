@@ -60,9 +60,10 @@ Re-sing the finished sheet in the artist's voice. The voice research is decisive
 
 | Decision | Systems | Why |
 |---|---|---|
-| **FORK** (open, commercial-safe weights) | **YingMusic-Singer-Plus** (MIT) · **SoulX-Singer** (Apache-2.0) | The only melody-from-audio own-voice renderers with released, commercially-usable weights. Feed: target lyrics + the mumble's F0/melody clip + an artist timbre reference. |
-| **AVOID as shipping components** | Vevo2 / Vevo1.5 (CC-BY-NC-ND — non-commercial *and* no-derivatives) · Seed-VC (GPL-3.0 copyleft) | Best research quality, but the *weights* licenses are unusable in a closed product. Prototype/benchmark only. **Verify the weights license, not just the code** — Amphion ships MIT code with NC-ND weights. |
-| **SCRATCH mock** | ACE-Step 1.5 (Apache-2.0, runs on Mac) | Instant generic-voice render for "is this line worth finishing?" while the real CUDA job runs. |
+| **FORK** (open, commercial-safe weights) | **SoulX-Singer** (Apache-2.0, weights license re-verified 2026-07-02) · *(demoted)* **YingMusic-Singer-Plus** | SoulX: score/melody-conditioned zero-shot SVS + a transcription-free SVC variant; ~12 GB VRAM; 24 kHz mono; known risks = English WER 0.151 vs zh 0.065, sustained-note re-articulation (issue #37), melody mode unreliable (#33) → score mode. **YingMusic-Plus licensing CORRECTED 2026-07-02: NOT MIT** — weights CC-BY-4.0 *except the VAE under the Stability AI Community License* (SA3-class encumbrance); the original YingMusic weights are CC-BY-**NC**. Plus also wants a *sung melody clip*, not a score — a mumble-native shape, but a different pipeline. |
+| **AVOID as shipping components** | Vevo2 / Vevo1.5 (CC-BY-NC-ND — non-commercial *and* no-derivatives) · Seed-VC (GPL-3.0 copyleft) | Best research quality, but the *weights* licenses are unusable in a closed product. Prototype/benchmark only. **Verify the weights license, not just the code** — Amphion ships MIT code with NC-ND weights (and "MIT" YingMusic proved the same lesson). |
+| **SVC fallback (shippable)** | **RVC** (MIT code + MIT bases: lj1995 HF repo incl. ContentVec-variant hubert; VCTK data; verified 2026-07-02) | Own-timbre conversion pass over any generic vocal (SoulX base voice, ACE-Step, or the owner's take); ~10 min clean voice to train a personal clone. |
+| **SCRATCH mock** | ACE-Step 1.5 (**MIT**, corrected from "Apache-2.0" 2026-07-02; MLX on Mac) | Instant generic-voice render for "is this line worth finishing?" while the real CUDA job runs. Melody control is cover/reference-audio only (no score). |
 | **Closed benchmark** | Seed-Music (ByteDance) | Proves the capability (lyric-edit-preserving-melody + 10s zero-shot SVC); no public weights/API. A quality bar, not a component. |
 
 - **Data needs:** zero-shot 10–30s reference; per-artist clone 10–60 min clean vocals.
@@ -70,6 +71,7 @@ Re-sing the finished sheet in the artist's voice. The voice research is decisive
 - **Where it runs:** **PC-CUDA Tier-B adapter** — these models are CUDA-first; no CoreML/MLX ports exist yet. Fits the existing PC-CUDA service adapter; the Mac stays the host.
 - **Consent/rights wall (non-negotiable when this ships):** locked-to-self + watermarked. Someone *will* try to upload Drake.
 - **Phased:** 3A zero-shot audition-quality → 3B per-artist fine-tune refinement pass (SoulX-Singer-SVC / RVC-style).
+- **Kill-shots (pre-registered 2026-07-02, run before any pipeline code):** [`2026-07-02-fms-killshot-a-verdict.md`](superpowers/specs/2026-07-02-fms-killshot-a-verdict.md) (SoulX English + own-voice on the CUDA box) · [`2026-07-02-fms-killshot-b-verdict.md`](superpowers/specs/2026-07-02-fms-killshot-b-verdict.md) (skeleton quality on real mumble takes; harness `scripts/fms-killshot/`).
 
 ---
 

@@ -1,0 +1,114 @@
+{
+ "name": "score3-gold",
+ "bpm": 120,
+ "language": "English",
+ "events": [
+  {
+   "rest": 0.5
+  },
+  {
+   "word": "late",
+   "pitch": 45,
+   "beats": 0.5
+  },
+  {
+   "word": "night",
+   "pitch": 47,
+   "beats": 0.5
+  },
+  {
+   "word": "pressure",
+   "pitch": 48,
+   "beats": 1.0
+  },
+  {
+   "word": "turns",
+   "pitch": 47,
+   "beats": 0.5
+  },
+  {
+   "word": "to",
+   "pitch": 45,
+   "beats": 0.5
+  },
+  {
+   "word": "gold",
+   "pitch": 43,
+   "beats": 2.0
+  },
+  {
+   "rest": 0.5
+  },
+  {
+   "word": "late",
+   "pitch": 45,
+   "beats": 0.5
+  },
+  {
+   "word": "night",
+   "pitch": 47,
+   "beats": 0.5
+  },
+  {
+   "word": "pressure",
+   "pitch": 48,
+   "beats": 1.0
+  },
+  {
+   "word": "turns",
+   "pitch": 50,
+   "beats": 0.5
+  },
+  {
+   "word": "to",
+   "pitch": 48,
+   "beats": 0.5
+  },
+  {
+   "word": "gold",
+   "pitch": 47,
+   "beats": 3.0
+  },
+  {
+   "rest": 1.0
+  },
+  {
+   "word": "cold",
+   "pitch": 43,
+   "beats": 0.5
+  },
+  {
+   "word": "nights",
+   "pitch": 45,
+   "beats": 0.5
+  },
+  {
+   "word": "taught",
+   "pitch": 47,
+   "beats": 1.0
+  },
+  {
+   "word": "me",
+   "pitch": 48,
+   "beats": 0.5
+  },
+  {
+   "word": "how",
+   "pitch": 47,
+   "beats": 0.5
+  },
+  {
+   "word": "to",
+   "pitch": 45,
+   "beats": 0.5
+  },
+  {
+   "word": "hold",
+   "pitch": 43,
+   "beats": 2.5
+  },
+  {
+   "rest": 1.0
+  }
+ ]
+}
