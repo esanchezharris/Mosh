@@ -867,8 +867,11 @@ class Handler(BaseHTTPRequestHandler):
                                 c = str(w.get("word", "")).strip(" .,!?'\"-").lower()
                                 if not any(ch.isalpha() for ch in c):
                                     continue
-                                ws.append({"start": float(w["start"]), "end": float(w["end"]),
-                                           "syl": pron.syllables(c) or 1})
+                                try:  # one malformed word must not discard the rest
+                                    ws.append({"start": float(w["start"]), "end": float(w["end"]),
+                                               "syl": pron.syllables(c) or 1})
+                                except (KeyError, TypeError, ValueError):
+                                    continue
                             words = ws or None
                     except Exception as e:  # noqa: BLE001 — ASR is an upgrade, never a breaker
                         print(f"[skeleton_spec] ASR budget skipped: {e}", file=sys.stderr)
