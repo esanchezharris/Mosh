@@ -31,7 +31,7 @@ export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; drag
     const el = scrollRef.current;
     if (el) {
       const pps = useStore.getState().pxPerSec;
-      el.scrollLeft = Math.max(0, sec * pps - el.clientWidth / 2 + HEAD_W);
+      el.scrollLeft = Math.max(0, sec * pps - el.clientWidth / 2 + headW());
     }
   }, [exec]);
 
