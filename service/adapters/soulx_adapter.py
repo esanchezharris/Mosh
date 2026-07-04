@@ -182,16 +182,26 @@ def render(input_wav: str, output_wav: str, params: dict) -> dict:
         _render_fake(output_wav, clip)
 
     dur = authored.get("duration_s", 0.0)
+    probe_ok = True
     try:
         with wave.open(output_wav, "rb") as w:
             sr, ch, nf = w.getframerate(), w.getnchannels(), w.getnframes()
             dur = round(nf / float(sr), 3) if sr else dur
+            probe_ok = nf > 0
     except Exception:  # noqa: BLE001
         sr, ch = SR, 1
+        probe_ok = False
     pq = 0.55 if not real else 0.8         # honest stub: beeps are a placeholder, not a vocal
     flags = [] if real else ["placeholder_vocal"]
+    if not probe_ok:
+        # An unreadable/empty output (e.g. a partial scp pull) must not present as a
+        # healthy render — the owner's accept/reject gate needs the honesty signal.
+        pq = min(pq, 0.2)
+        flags = [*flags, "output_unverified"]
     return {
-        "ok": True, "adapter": "soulx", "backend": backend_name(), "mode": "sing",
+        # backend label from the SAME gate evaluation that picked the code path —
+        # backend_name() would re-evaluate available() (TOCTOU vs mid-render env changes).
+        "ok": True, "adapter": "soulx", "backend": "soulx-pc" if real else "fake-sing", "mode": "sing",
         "events": authored["events"], "words": authored["words"], "rests": authored["rests"],
         "linesUsed": authored["linesUsed"], "linesSkipped": authored["linesSkipped"],
         "voiceEnrolled": bool(voice_ref_path()),

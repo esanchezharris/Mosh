@@ -5581,6 +5581,18 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
     auto node = findRenderLayer (clipId);
     if (clip == nullptr || ! node.isValid()) return errResult ("render_layer", "no render layer");
 
+    // Sing precondition FIRST — before any staging work. A sheet-less sing render on a
+    // MIDI/drum clip would otherwise pay a full instrument bounce before erroring (the
+    // sheet can vanish between create_render_layer and render_layer via remove_lyric_sheet).
+    if (node[ids::mode].toString() == "sing")
+    {
+        auto* singTrack = dynamic_cast<te::AudioTrack*> (clip->getTrack());
+        const auto sheet = singTrack != nullptr ? singTrack->state.getChildWithName (ids::MOSH_LYRICSHEET)
+                                                : juce::ValueTree();
+        if (! sheet.isValid())
+            return errResult ("render_layer", "sing needs a lyric sheet on the clip's track (build a flow from a take first)");
+    }
+
     // Prepare the job dir + stage the render input as input.wav. Wave clips stage their
     // source audio (whole or a sliced sub-region); MIDI/drum (any non-wave) clips are
     // auto-BOUNCED to audio first (their instrument output) so the audio→audio generative
@@ -5666,7 +5678,13 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
                                   : l[ids::lyricSeedText].toString();
             lo->setProperty ("text", text);
             if (l.hasProperty (ids::lyricScore))
-                lo->setProperty ("score", juce::JSON::parse (l[ids::lyricScore].toString()));
+            {
+                // Guard the parse like the file's other transient JSON blobs (lyricProposals,
+                // lyricAnalysis) — a corrupt persisted blob must be excluded, not sent as null.
+                const auto parsed = juce::JSON::parse (l[ids::lyricScore].toString());
+                if (parsed.isObject())
+                    lo->setProperty ("score", parsed);
+            }
             arr.add (var (lo));
         }
         singLines = var (arr);
@@ -5740,7 +5758,12 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
     if (wait)
     {
         const auto adapter = node[ids::modelAdapter].toString();
-        const auto defaultWaitMs = (adapter == "stable_audio3" || adapter == "sa3") ? "360000" : "120000";
+        // soulx's REAL backend is an SSH round-trip budgeted at up to 900s
+        // (MOSH_SOULX_TIMEOUT_S) — the poll must outlast it or a slow render
+        // reads as a false timeout. The fake path finishes in <1s regardless.
+        const auto defaultWaitMs = (adapter == "stable_audio3" || adapter == "sa3") ? "360000"
+                                 : (adapter == "soulx")                             ? "960000"
+                                                                                    : "120000";
         const int waitTimeoutMs = juce::jmax (1000, juce::SystemStats::getEnvironmentVariable (
             "MOSH_RENDER_WAIT_TIMEOUT_MS", defaultWaitMs).getIntValue());
         const int maxPolls = juce::jmax (1, waitTimeoutMs / 50);
@@ -5768,9 +5791,12 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
 
     // Async: poll on a background thread, marshal node updates + events to the
     // message thread (service I/O off the message thread; tree on it).
-    std::thread ([this, clipId, jobId, output, manifest, fp]
+    // soulx's real SSH backend runs up to 900s — poll long enough that a legitimate
+    // slow render isn't abandoned as a false 'error' while the job completes unseen.
+    const int asyncPolls = node[ids::modelAdapter].toString() == "soulx" ? 9600 : 1800;
+    std::thread ([this, clipId, jobId, output, manifest, fp, asyncPolls]
     {
-        for (int i = 0; i < 1800; ++i)   // up to ~180s for a slow generative render
+        for (int i = 0; i < asyncPolls; ++i)   // 100ms ticks: ~180s default, ~960s soulx
         {
             auto st = jobManager.jobStatus (jobId);
             const auto status = st.getProperty ("status", juce::var()).toString();

@@ -34,6 +34,13 @@ fi
 JOB="sing-$$-$(python3 -c 'import time; print(int(time.time()))')"
 SSHOPTS=(-o BatchMode=yes -o ConnectTimeout=10)
 
+# Voice hygiene on FAILURE paths too: any graceful exit (set -e abort, scp/ssh
+# failure) still removes the remote job dir so the copied reference never
+# accumulates. (A SIGKILL of this script — e.g. the adapter's hard timeout —
+# skips traps; the next successful render's cleanup is the backstop there.)
+cleanup_remote() { ssh "${SSHOPTS[@]}" "$HOST" "rm -rf \$HOME/$RDIR/jobs/$JOB" 2>/dev/null || true; }
+trap cleanup_remote EXIT
+
 ssh "${SSHOPTS[@]}" "$HOST" "mkdir -p \$HOME/$RDIR/jobs/$JOB"
 scp -q "${SSHOPTS[@]}" "$SCORE"   "$HOST:$RDIR/jobs/$JOB/target.json"
 scp -q "${SSHOPTS[@]}" "$REF"     "$HOST:$RDIR/jobs/$JOB/prompt.wav"
@@ -53,7 +60,7 @@ PYTHONPATH=. "\$HOME/$RDIR/env/bin/python" -m cli.inference --device cuda \
   --save_dir "\$HOME/$RDIR/jobs/$JOB/out"
 EOF
 
-# Pull the (single) rendered clip back, then remove the remote job dir (voice hygiene).
+# Pull the (single) rendered clip back; the EXIT trap removes the remote job dir
+# (voice hygiene) on success AND failure paths alike.
 scp -q "${SSHOPTS[@]}" "$HOST:$RDIR/jobs/$JOB/out/*.wav" "$OUT"
-ssh "${SSHOPTS[@]}" "$HOST" "rm -rf \$HOME/$RDIR/jobs/$JOB"
 [[ -s "$OUT" ]] || { echo "render pulled but output is empty" >&2; exit 1; }

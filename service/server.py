@@ -252,11 +252,13 @@ TRANSFORM_ADAPTER = {
 SOULX_ADAPTER = {
     "id": "soulx", "version": "0.0.1",
     "generation_modes": ["sing"],
-    "conditioning_inputs": ["lines", "voice_ref", "seed"],
+    "conditioning_inputs": ["lines", "voice_ref"],
     "duration_limits": {"min": 0.1, "max": 600.0},
     "sample_rates": [44100], "channel_modes": ["mono"],
     "runtime_requirements": ["cpu"], "packaging_mode": "python_service",
-    "supports_seed": True, "supports_semantic_controls": False,
+    # sing is a deterministic score-driven render — there is no seed axis; the
+    # adapter never reads params["seed"] (a seed bump = cache MISS, identical audio).
+    "supports_seed": False, "supports_semantic_controls": False,
     "service_build": SERVICE_BUILD,
 }
 
@@ -372,7 +374,14 @@ def _run_job(job_id: str) -> None:
         job["status"] = "rendering"
         adapter_id = job.get("adapter", "fake")
     try:
-        if adapter_id in ("fake", "transform", "soulx"):
+        soulx_real = False
+        if adapter_id == "soulx":
+            try:
+                from adapters import soulx_adapter as _sx
+                soulx_real = _sx.available()
+            except Exception:  # noqa: BLE001 — import failure degrades to fake anyway
+                soulx_real = False
+        if adapter_id in ("fake", "transform") or (adapter_id == "soulx" and not soulx_real):
             # Stepped progress for the cheap stub (debounced renders are slow IRL).
             for step in range(1, 6):
                 with _lock:
