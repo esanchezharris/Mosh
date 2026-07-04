@@ -268,7 +268,16 @@ function GenBody({ clip, track, qa }: { clip: Clip; track: Track; qa?: RenderQA 
         </div>
       )}
       <div className="gen-actions">
-        {clip.type === "wave" ? (
+        {isSing ? (
+          // Sing keeps the legacy auditionable flow (mirrors the C++ finalizeRender gate): the
+          // guide vocal never replaces the recorded take in place — render, listen, then Accept
+          // lands it (or Reject drops it).
+          <>
+            <button className="btn" data-testid="gen-render" onClick={() => void exec("render_layer", { clipId: clip.id })}>{rl.hasArtifact ? "Re-render" : "Render"}</button>
+            <button className="btn" disabled={!rl.hasArtifact} data-testid="gen-accept" onClick={async () => { const r = await exec("accept_render", { clipId: clip.id }); if (r.ok) bumpCelebrate(); }}>Accept</button>
+            <button className="btn" disabled={!rl.hasArtifact} onClick={() => void exec("reject_render", { clipId: clip.id })}>Reject</button>
+          </>
+        ) : clip.type === "wave" ? (
           // Wave clips auto-apply in place — the waveform swaps to the result instantly.
           // No accept/reject; Reset restores the original.
           <>

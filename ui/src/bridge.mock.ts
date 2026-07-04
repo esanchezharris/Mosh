@@ -1081,8 +1081,11 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       if (f.clip.renderLayer.mode === "sing" && !f.track.lyricSheet)
         return err(command, "sing needs a lyric sheet on the clip's track (build a flow from a take first)");
       f.clip.renderLayer.status = "ready"; f.clip.renderLayer.hasArtifact = true;
+      // SING never auto-applies (mirrors MoshOps::finalizeRender): the guide vocal lands as an
+      // auditionable artifact for the legacy accept/reject flow — it must not replace the take.
+      if (f.clip.renderLayer.mode === "sing") { /* ready + hasArtifact only */ }
       // Wave clips auto-apply in place: the render becomes the clip's audio + Reset becomes available.
-      if (f.clip.type === "wave") { f.clip.renderLayer.appliedInPlace = true; f.clip.renderLayer.hasOriginal = true; }
+      else if (f.clip.type === "wave") { f.clip.renderLayer.appliedInPlace = true; f.clip.renderLayer.hasOriginal = true; }
       else {
         // MIDI/drum (Phase 2): the render lands as HIDDEN audio on a dedicated, snapshot-EXCLUDED
         // track (a synth on the source track would silence it), so the UI never sees a hidden clip —

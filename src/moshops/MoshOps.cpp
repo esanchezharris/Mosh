@@ -5812,9 +5812,12 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
     {
         // Re-apply on HIT too (a wave clip Reset since the last render must re-swap to the
         // cached artifact). applyRenderInPlace is a no-op repoint when already applied.
+        // SING never auto-applies (same gate as finalizeRender — the guide vocal stays
+        // an auditionable artifact, it must not replace the recorded take in place).
         auto art = mosh::resolveCacheArtifact (node, eng.editFile().getParentDirectory());
-        if (! applyRenderInPlace (clipId, node, art, fp)
-            && ! applyRenderBeneathMidi (clipId, node, art, fp))
+        if (node[ids::mode].toString() == "sing"
+            || (! applyRenderInPlace (clipId, node, art, fp)
+                && ! applyRenderBeneathMidi (clipId, node, art, fp)))
             node.setProperty (ids::status, "ready", nullptr);
         emit ("layer_status", [&] { auto* o = new DynamicObject();
             o->setProperty ("clipId", clipId); o->setProperty ("layerId", node[ids::id]);
