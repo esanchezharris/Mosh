@@ -1097,6 +1097,9 @@ juce::var MoshOps::lyricSheetToVar (te::AudioTrack& t)
         }
         if (l.hasProperty (ids::lyricRegen))
             lo->setProperty ("regen", (int) l[ids::lyricRegen]);
+        // FMS Phase-3 — a BOOLEAN only (the blob itself stays out of the snapshot): the
+        // sing drawer shows how many lines carry a flow from the take.
+        lo->setProperty ("hasScore", l.hasProperty (ids::lyricScore));
         // L1 — transient precise phonology (a JSON object; absent ⇒ not yet analysed).
         if (l.hasProperty (ids::lyricAnalysis))
         {
@@ -5640,6 +5643,40 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
             return errResult ("render_layer", "could not bounce clip to audio (add an instrument, or the render failed)");
     }
 
+    // FMS Phase-3 sing mode: the render is a function of the lyric SHEET (words +
+    // Stage-1 `lyricScore` flow), not just the staged audio. Gather the clip's track's
+    // lines into the job params and fold their hash into the upstream key, so a lyric
+    // or flow edit is a cache MISS (while the staged-audio/source hash stays in the key).
+    juce::var singLines;
+    if (node[ids::mode].toString() == "sing")
+    {
+        auto* singTrack = dynamic_cast<te::AudioTrack*> (clip->getTrack());
+        auto sheet = singTrack != nullptr ? singTrack->state.getChildWithName (ids::MOSH_LYRICSHEET)
+                                          : juce::ValueTree();
+        if (! sheet.isValid())
+            return errResult ("render_layer", "sing needs a lyric sheet on the clip's track (build a flow from a take first)");
+        Array<var> arr;
+        auto lines = mosh::LyricSheet::lines (sheet);
+        for (int i = 0; i < lines.getNumChildren(); ++i)
+        {
+            auto l = lines.getChild (i);
+            auto* lo = new DynamicObject();
+            const auto text = l[ids::lyricText].toString().isNotEmpty()
+                                  ? l[ids::lyricText].toString()
+                                  : l[ids::lyricSeedText].toString();
+            lo->setProperty ("text", text);
+            if (l.hasProperty (ids::lyricScore))
+                lo->setProperty ("score", juce::JSON::parse (l[ids::lyricScore].toString()));
+            arr.add (var (lo));
+        }
+        singLines = var (arr);
+        const auto singJson = juce::JSON::toString (singLines, true);
+        const auto singSig = juce::MD5 (singJson.toRawUTF8(), (size_t) singJson.getNumBytesAsUTF8()).toHexString();
+        upstreamOverride = (upstreamOverride.isNotEmpty() ? upstreamOverride
+                                                          : juce::MD5 (input).toHexString())
+                           + ":sing:" + singSig;
+    }
+
     // Ensure the service first so its build/version is part of EVERY fingerprint
     // (else the first render hashes an empty build and the cache never hits).
     if (! jobManager.ensureServiceRunning())
@@ -5683,6 +5720,8 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
         }
     p->setProperty ("colors", colors);
     p->setProperty ("lab", (bool) params.getProperty (juce::Identifier ("lab"), false));
+    if (! singLines.isVoid())
+        p->setProperty ("lines", singLines);   // sing: sheet text + lyricScore flow per line
 
     const auto jobId = jobManager.submitJob (node[ids::modelAdapter].toString(),
                                              input, output, manifest, var (p));
@@ -6944,6 +6983,18 @@ juce::var MoshOps::snapshot()
    #else
     session->setProperty ("raveAvailable", false);
    #endif
+    // FMS Phase-3 sing: the locked-to-self enrollment state (ONE voice per install,
+    // ~/Library/Mosh/voice). The fake beep backend renders without it; the UI copy
+    // tells the producer whether the REAL own-voice backend has a reference yet.
+    {
+        const auto voiceDir = juce::File (juce::SystemStats::getEnvironmentVariable (
+            "MOSH_VOICE_DIR", juce::File::getSpecialLocation (juce::File::userHomeDirectory)
+                                  .getChildFile ("Library/Mosh/voice").getFullPathName()));
+        session->setProperty ("singVoiceEnrolled",
+                              voiceDir.getChildFile ("reference.wav").existsAsFile()
+                                  || voiceDir.getChildFile ("reference-30s.wav").existsAsFile()
+                                  || voiceDir.getChildFile ("reference-10s.wav").existsAsFile());
+    }
     session->setProperty ("sampleRate", eng.engine().getDeviceManager().getSampleRate());
     session->setProperty ("tempo", edit.tempoSequence.getBpmAt (tracktion::TimePosition()));
     if (auto* ts = edit.tempoSequence.getTimeSig (0))
