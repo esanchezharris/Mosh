@@ -246,6 +246,22 @@ TRANSFORM_ADAPTER = {
     "service_build": SERVICE_BUILD,
 }
 
+# FMS Phase 3 — the sing tier (own-voice render of the lyric sheet + take flow). Same
+# job protocol; the fake legato-beep score renderer ships, the real SoulX-Singer PC/SSH
+# backend swaps in behind it (adapters/soulx_adapter.py).
+SOULX_ADAPTER = {
+    "id": "soulx", "version": "0.0.1",
+    "generation_modes": ["sing"],
+    "conditioning_inputs": ["lines", "voice_ref"],
+    "duration_limits": {"min": 0.1, "max": 600.0},
+    "sample_rates": [44100], "channel_modes": ["mono"],
+    "runtime_requirements": ["cpu"], "packaging_mode": "python_service",
+    # sing is a deterministic score-driven render — there is no seed axis; the
+    # adapter never reads params["seed"] (a seed bump = cache MISS, identical audio).
+    "supports_seed": False, "supports_semantic_controls": False,
+    "service_build": SERVICE_BUILD,
+}
+
 
 def _sa3_descriptor() -> dict:
     return {
@@ -341,6 +357,11 @@ def _adapter_for(adapter_id: str):
         # deterministic fake transform (mirrors stable_audio3 → fake_adapter).
         from adapters import transform_adapter as ad
         return ad
+    if adapter_id == "soulx":
+        # FMS Phase-3 sing mode: fake legato-beep score renderer; the real SoulX-Singer
+        # PC/SSH backend swaps in when configured (MOSH_SOULX_SSH_HOST + enrolled voice).
+        from adapters import soulx_adapter as ad
+        return ad
     return fake_adapter
 
 
@@ -353,7 +374,14 @@ def _run_job(job_id: str) -> None:
         job["status"] = "rendering"
         adapter_id = job.get("adapter", "fake")
     try:
-        if adapter_id in ("fake", "transform"):
+        soulx_real = False
+        if adapter_id == "soulx":
+            try:
+                from adapters import soulx_adapter as _sx
+                soulx_real = _sx.available()
+            except Exception:  # noqa: BLE001 — import failure degrades to fake anyway
+                soulx_real = False
+        if adapter_id in ("fake", "transform") or (adapter_id == "soulx" and not soulx_real):
             # Stepped progress for the cheap stub (debounced renders are slow IRL).
             for step in range(1, 6):
                 with _lock:
@@ -564,7 +592,7 @@ class Handler(BaseHTTPRequestHandler):
                     query[k] = v
 
         if path == "/health":
-            adapters = ["fake", "transform"] + (["stable_audio3"] if SA3_ENABLED else [])
+            adapters = ["fake", "transform", "soulx"] + (["stable_audio3"] if SA3_ENABLED else [])
             self._send(200, {"ok": True, "service": "mosh-generative",
                              "version": SERVICE_VERSION, "build": SERVICE_BUILD,
                              "uptime_s": round(time.time() - START_TIME, 1),
@@ -574,7 +602,7 @@ class Handler(BaseHTTPRequestHandler):
                              "skeleton": _skeleton_available(),
                              "phonology": _phonology_available()})
         elif path == "/capabilities":
-            adapters = [FAKE_ADAPTER, TRANSFORM_ADAPTER] + ([_sa3_descriptor()] if SA3_ENABLED else [])
+            adapters = [FAKE_ADAPTER, TRANSFORM_ADAPTER, SOULX_ADAPTER] + ([_sa3_descriptor()] if SA3_ENABLED else [])
             training = [_training_descriptor()] if TRAINING_ENABLED else []
             self._send(200, {"ok": True, "adapters": adapters, "training": training,
                              "transcribe": {"available": _transcribe_available(), "modes": ["mono", "poly"]},

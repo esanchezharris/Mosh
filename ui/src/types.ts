@@ -71,6 +71,7 @@ export type LyricLine = {
   proposals?: LyricProposal[];  // L2 — transient ranked proposals (cleared on accept/reject)
   regen?: number;
   analysis?: LyricAnalysis;     // L1 — precise phonology (from analyze_lyrics)
+  hasScore?: boolean;           // FMS Phase-3 — line carries a persisted lyricScore (take flow)
 };
 export type LyricSheet = {
   id: string;
@@ -464,6 +465,7 @@ export type Snapshot = {
     timeSigDenominator?: number;
     metronome?: boolean;
     raveAvailable?: boolean;   // Route C.2 — anira build hosts the real-time RAVE insert
+    singVoiceEnrolled?: boolean;  // FMS Phase-3 — ~/Library/Mosh/voice reference exists (locked-to-self)
     // Musical key (set_key command writes it; always defaulted on the backend).
     key: SessionKey;
     length?: number;

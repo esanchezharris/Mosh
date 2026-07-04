@@ -1097,6 +1097,9 @@ juce::var MoshOps::lyricSheetToVar (te::AudioTrack& t)
         }
         if (l.hasProperty (ids::lyricRegen))
             lo->setProperty ("regen", (int) l[ids::lyricRegen]);
+        // FMS Phase-3 — a BOOLEAN only (the blob itself stays out of the snapshot): the
+        // sing drawer shows how many lines carry a flow from the take.
+        lo->setProperty ("hasScore", l.hasProperty (ids::lyricScore));
         // L1 — transient precise phonology (a JSON object; absent ⇒ not yet analysed).
         if (l.hasProperty (ids::lyricAnalysis))
         {
@@ -5578,6 +5581,18 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
     auto node = findRenderLayer (clipId);
     if (clip == nullptr || ! node.isValid()) return errResult ("render_layer", "no render layer");
 
+    // Sing precondition FIRST — before any staging work. A sheet-less sing render on a
+    // MIDI/drum clip would otherwise pay a full instrument bounce before erroring (the
+    // sheet can vanish between create_render_layer and render_layer via remove_lyric_sheet).
+    if (node[ids::mode].toString() == "sing")
+    {
+        auto* singTrack = dynamic_cast<te::AudioTrack*> (clip->getTrack());
+        const auto sheet = singTrack != nullptr ? singTrack->state.getChildWithName (ids::MOSH_LYRICSHEET)
+                                                : juce::ValueTree();
+        if (! sheet.isValid())
+            return errResult ("render_layer", "sing needs a lyric sheet on the clip's track (build a flow from a take first)");
+    }
+
     // Prepare the job dir + stage the render input as input.wav. Wave clips stage their
     // source audio (whole or a sliced sub-region); MIDI/drum (any non-wave) clips are
     // auto-BOUNCED to audio first (their instrument output) so the audio→audio generative
@@ -5640,6 +5655,46 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
             return errResult ("render_layer", "could not bounce clip to audio (add an instrument, or the render failed)");
     }
 
+    // FMS Phase-3 sing mode: the render is a function of the lyric SHEET (words +
+    // Stage-1 `lyricScore` flow), not just the staged audio. Gather the clip's track's
+    // lines into the job params and fold their hash into the upstream key, so a lyric
+    // or flow edit is a cache MISS (while the staged-audio/source hash stays in the key).
+    juce::var singLines;
+    if (node[ids::mode].toString() == "sing")
+    {
+        auto* singTrack = dynamic_cast<te::AudioTrack*> (clip->getTrack());
+        auto sheet = singTrack != nullptr ? singTrack->state.getChildWithName (ids::MOSH_LYRICSHEET)
+                                          : juce::ValueTree();
+        if (! sheet.isValid())
+            return errResult ("render_layer", "sing needs a lyric sheet on the clip's track (build a flow from a take first)");
+        Array<var> arr;
+        auto lines = mosh::LyricSheet::lines (sheet);
+        for (int i = 0; i < lines.getNumChildren(); ++i)
+        {
+            auto l = lines.getChild (i);
+            auto* lo = new DynamicObject();
+            const auto text = l[ids::lyricText].toString().isNotEmpty()
+                                  ? l[ids::lyricText].toString()
+                                  : l[ids::lyricSeedText].toString();
+            lo->setProperty ("text", text);
+            if (l.hasProperty (ids::lyricScore))
+            {
+                // Guard the parse like the file's other transient JSON blobs (lyricProposals,
+                // lyricAnalysis) — a corrupt persisted blob must be excluded, not sent as null.
+                const auto parsed = juce::JSON::parse (l[ids::lyricScore].toString());
+                if (parsed.isObject())
+                    lo->setProperty ("score", parsed);
+            }
+            arr.add (var (lo));
+        }
+        singLines = var (arr);
+        const auto singJson = juce::JSON::toString (singLines, true);
+        const auto singSig = juce::MD5 (singJson.toRawUTF8(), (size_t) singJson.getNumBytesAsUTF8()).toHexString();
+        upstreamOverride = (upstreamOverride.isNotEmpty() ? upstreamOverride
+                                                          : juce::MD5 (input).toHexString())
+                           + ":sing:" + singSig;
+    }
+
     // Ensure the service first so its build/version is part of EVERY fingerprint
     // (else the first render hashes an empty build and the cache never hits).
     if (! jobManager.ensureServiceRunning())
@@ -5683,6 +5738,8 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
         }
     p->setProperty ("colors", colors);
     p->setProperty ("lab", (bool) params.getProperty (juce::Identifier ("lab"), false));
+    if (! singLines.isVoid())
+        p->setProperty ("lines", singLines);   // sing: sheet text + lyricScore flow per line
 
     const auto jobId = jobManager.submitJob (node[ids::modelAdapter].toString(),
                                              input, output, manifest, var (p));
@@ -5701,7 +5758,12 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
     if (wait)
     {
         const auto adapter = node[ids::modelAdapter].toString();
-        const auto defaultWaitMs = (adapter == "stable_audio3" || adapter == "sa3") ? "360000" : "120000";
+        // soulx's REAL backend is an SSH round-trip budgeted at up to 900s
+        // (MOSH_SOULX_TIMEOUT_S) — the poll must outlast it or a slow render
+        // reads as a false timeout. The fake path finishes in <1s regardless.
+        const auto defaultWaitMs = (adapter == "stable_audio3" || adapter == "sa3") ? "360000"
+                                 : (adapter == "soulx")                             ? "960000"
+                                                                                    : "120000";
         const int waitTimeoutMs = juce::jmax (1000, juce::SystemStats::getEnvironmentVariable (
             "MOSH_RENDER_WAIT_TIMEOUT_MS", defaultWaitMs).getIntValue());
         const int maxPolls = juce::jmax (1, waitTimeoutMs / 50);
@@ -5729,9 +5791,12 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
 
     // Async: poll on a background thread, marshal node updates + events to the
     // message thread (service I/O off the message thread; tree on it).
-    std::thread ([this, clipId, jobId, output, manifest, fp]
+    // soulx's real SSH backend runs up to 900s — poll long enough that a legitimate
+    // slow render isn't abandoned as a false 'error' while the job completes unseen.
+    const int asyncPolls = node[ids::modelAdapter].toString() == "soulx" ? 9600 : 1800;
+    std::thread ([this, clipId, jobId, output, manifest, fp, asyncPolls]
     {
-        for (int i = 0; i < 1800; ++i)   // up to ~180s for a slow generative render
+        for (int i = 0; i < asyncPolls; ++i)   // 100ms ticks: ~180s default, ~960s soulx
         {
             auto st = jobManager.jobStatus (jobId);
             const auto status = st.getProperty ("status", juce::var()).toString();
@@ -6944,6 +7009,18 @@ juce::var MoshOps::snapshot()
    #else
     session->setProperty ("raveAvailable", false);
    #endif
+    // FMS Phase-3 sing: the locked-to-self enrollment state (ONE voice per install,
+    // ~/Library/Mosh/voice). The fake beep backend renders without it; the UI copy
+    // tells the producer whether the REAL own-voice backend has a reference yet.
+    {
+        const auto voiceDir = juce::File (juce::SystemStats::getEnvironmentVariable (
+            "MOSH_VOICE_DIR", juce::File::getSpecialLocation (juce::File::userHomeDirectory)
+                                  .getChildFile ("Library/Mosh/voice").getFullPathName()));
+        session->setProperty ("singVoiceEnrolled",
+                              voiceDir.getChildFile ("reference.wav").existsAsFile()
+                                  || voiceDir.getChildFile ("reference-30s.wav").existsAsFile()
+                                  || voiceDir.getChildFile ("reference-10s.wav").existsAsFile());
+    }
     session->setProperty ("sampleRate", eng.engine().getDeviceManager().getSampleRate());
     session->setProperty ("tempo", edit.tempoSequence.getBpmAt (tracktion::TimePosition()));
     if (auto* ts = edit.tempoSequence.getTimeSig (0))
