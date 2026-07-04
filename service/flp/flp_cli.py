@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """FL Studio .flp -> MoshIR JSON, via PyFLP (MIT).
 
-Runs UNDER the dedicated flp venv (service/flp/.venv, Python 3.10 — PyFLP breaks on
+Runs UNDER the dedicated flp venv (~/Library/Mosh/venvs/flp, Python 3.10 — PyFLP breaks on
 3.11+), invoked by the importer frontend (ui/src/import/parseFlp.ts) as a subprocess.
 Emits a MoshIR-shaped session to stdout that the TS side wraps into an ImportIR and
 feeds the same emitter/verifier the RPP/ALS parsers use:

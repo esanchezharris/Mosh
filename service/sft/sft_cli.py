@@ -12,7 +12,7 @@ service carve-out convention):
 (train.jsonl / valid.jsonl) and records service/sft/.adapters/<x>/sft_run.json
 (resolved args + base model + mlx-lm version + dataset manifest hash + timestamp)
 so a run is reproducible. mlx-lm is Apple-Silicon only; this CLI must run under the
-service/sft/.venv interpreter (see setup-sft.sh)."""
+dedicated sft venv (~/Library/Mosh/venvs/sft) interpreter (see setup-sft.sh)."""
 import argparse
 import hashlib
 import json

@@ -6,7 +6,7 @@ dispatch — produces non-silent audio that differs from its input. To avoid dep
 on a flaky pretrained-model download, it builds a small SYNTHETIC scripted model with
 the same encode/decode shape RAVE exports; if you have a real <target>.ts in
 RAVE_MODEL_DIR you can point the adapter at it the same way. Skips cleanly (counts as
-pass) when service/transform/.venv is absent — run service/transform/setup-transform.sh.
+pass) when the transform venv is absent — run service/transform/setup-transform.sh.
 
 Lazily imported by verify.py so the offline checks never depend on torch.
 """
@@ -56,7 +56,9 @@ def _read_ints(path):
 
 
 def check_rave(ctx=None):
-    py = os.environ.get("TRANSFORM_PY") or str(REPO / "service/transform/.venv/bin/python")
+    conventional = os.path.expanduser("~/Library/Mosh/venvs/transform/bin/python")
+    py = os.environ.get("TRANSFORM_PY") or (
+        conventional if os.path.isfile(conventional) else str(REPO / "service/transform/.venv/bin/python"))
     if not os.path.exists(py):
         return {"check": "RAVE transform (real path)", "pass": True,
                 "detail": {"skipped": "transform venv absent — run service/transform/setup-transform.sh"}}

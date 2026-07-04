@@ -56,11 +56,27 @@ SA3_ENABLED = os.environ.get("MOSH_ENABLE_SA3", "1") == "1" and stable_audio3_ad
 TRAINING_ENABLED = lora_trainer_adapter.available()
 
 
+def _venv_py(env_var: str, name: str) -> str:
+    """Interpreter for a per-feature venv: the .env-sourced override first (the single
+    source of truth, written by the feature's setup-*.sh), then the conventional
+    ~/Library/Mosh/venvs/<name> (venvs live OUTSIDE the iCloud-synced repo tree —
+    in-tree .venvs got files silently evicted by iCloud), then the legacy in-tree
+    service/<name>/.venv."""
+    env = os.environ.get(env_var, "").strip()
+    if env:
+        return env
+    venvs_root = os.environ.get("MOSH_VENVS_DIR", "").strip() or os.path.join(
+        os.path.expanduser("~"), "Library", "Mosh", "venvs")
+    conventional = os.path.join(venvs_root, name, "bin", "python")
+    if os.path.isfile(conventional):
+        return conventional
+    return os.path.join(SERVICE_DIR, name, ".venv", "bin", "python")
+
+
 def _basic_pitch_py() -> str:
     """The dedicated transcribe venv's python (set by setup-transcribe.sh via
     .transcribe.env -> BASIC_PITCH_PY), else the conventional default path."""
-    env = os.environ.get("BASIC_PITCH_PY", "").strip()
-    return env or os.path.join(SERVICE_DIR, "transcribe", ".venv", "bin", "python")
+    return _venv_py("BASIC_PITCH_PY", "transcribe")
 
 
 def _transcribe_available() -> bool:
@@ -73,8 +89,7 @@ def _transcribe_available() -> bool:
 def _whisper_py() -> str:
     """The dedicated whisper venv's python (set by setup-whisper.sh via .whisper.env ->
     WHISPER_PY), else the conventional default path."""
-    env = os.environ.get("WHISPER_PY", "").strip()
-    return env or os.path.join(SERVICE_DIR, "whisper", ".venv", "bin", "python")
+    return _venv_py("WHISPER_PY", "whisper")
 
 
 def _whisper_available() -> bool:
@@ -86,8 +101,7 @@ def _whisper_available() -> bool:
 def _sketch_py() -> str:
     """The dedicated sketch venv's python (set by setup-sketch.sh via .sketch.env ->
     SKETCH_PY), else the conventional default path."""
-    env = os.environ.get("SKETCH_PY", "").strip()
-    return env or os.path.join(SERVICE_DIR, "sketch", ".venv", "bin", "python")
+    return _venv_py("SKETCH_PY", "sketch")
 
 
 def _sketch_available() -> bool:
@@ -100,8 +114,7 @@ def _sketch_available() -> bool:
 def _skeleton_py() -> str:
     """The dedicated skeleton (FCPE) venv's python (set by setup-skeleton.sh via .skeleton.env
     -> SKELETON_PY), else the conventional default path."""
-    env = os.environ.get("SKELETON_PY", "").strip()
-    return env or os.path.join(SERVICE_DIR, "skeleton", ".venv", "bin", "python")
+    return _venv_py("SKELETON_PY", "skeleton")
 
 
 def _skeleton_available() -> bool:
@@ -113,8 +126,7 @@ def _skeleton_available() -> bool:
 def _phonology_py() -> str:
     """The dedicated phonology venv's python (set by setup-phonology.sh via
     .phonology.env -> PHONOLOGY_PY), else the conventional default path."""
-    env = os.environ.get("PHONOLOGY_PY", "").strip()
-    return env or os.path.join(SERVICE_DIR, "phonology", ".venv", "bin", "python")
+    return _venv_py("PHONOLOGY_PY", "phonology")
 
 
 def _phonology_available() -> bool:
