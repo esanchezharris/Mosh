@@ -8,7 +8,7 @@
 
 .v2-shell {
   /* ── geometry — concept-compact: small lanes/headers, airy cream margins ── */
-  --v2-head-w: 168px;
+  --v2-head-w: 168px; /* read at runtime by timeline/geom.ts headW(); its fallback mirrors this */
   --v2-lane-h: 64px;
   --v2-ribbon-h: 40px;
   --v2-ruler-h: 24px;

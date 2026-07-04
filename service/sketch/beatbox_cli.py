@@ -4,7 +4,7 @@
 The narrowest proof of the embodied-capture wedge: a recorded beatbox + a KNOWN
 tempo becomes a recognisable drum pattern. This CLI is the deterministic transduction
 layer (the native side turns the hits into MoshOps). Runs UNDER the dedicated sketch
-venv (service/sketch/.venv), invoked by service/server.py's /sketch endpoint as a
+venv (~/Library/Mosh/venvs/sketch), invoked by service/server.py's /sketch endpoint as a
 subprocess, so librosa's deps (numpy/scipy/numba/soundfile) never touch the service
 interpreter.
 

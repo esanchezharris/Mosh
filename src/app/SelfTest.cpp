@@ -477,6 +477,9 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // RAVE backend if models are present and break. Mirrors how SA3 stays fake here. The
     // real transform path is covered separately by scripts/verify-hardware/verify.py --rave.
     mosh::setEnvVar ("MOSH_ENABLE_TRANSFORM", "0");
+    // Same pin for the FMS sing adapter: a machine with MOSH_SOULX_SSH_HOST + an enrolled
+    // voice configured must still run the deterministic fake legato-beep backend here.
+    mosh::setEnvVar ("MOSH_ENABLE_SOULX", "0");
     if (SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SA3", "0") != "1")
         mosh::setEnvVar ("MOSH_ENABLE_SA3", "0");
     std::cerr << "\n===== Mosh Stage 1 command-surface harness =====\n";
@@ -978,6 +981,44 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (cmd (ops, "set_track_pan", objN ({{ "trackId", tid }, { "pan", 0.4 }}))), "set_track_pan ok");
         check (std::abs ((double) trackById (tid).getProperty ("pan", 0.0) - 0.4) < 0.02, "track pan reflects in snapshot");
 
+        // G14 — set_track_volume / pan (+ master) route through the UndoManager so undo
+        // restores the prior value (previously vp->setVolumeDb() bypassed it -> empty txn).
+        {
+            // Track volume: set -6 dB, undo restores 0 dB, redo re-applies -6 dB.
+            const double trackVolBefore = (double) trackById (tid).getProperty ("volumeDb", 999.0);
+            check (ok (cmd (ops, "set_track_volume", objN ({{ "trackId", tid }, { "db", -6.0 }}))), "G14: set_track_volume ok");
+            check (std::abs ((double) trackById (tid).getProperty ("volumeDb", 999.0) - (-6.0)) < 0.5, "G14: track volume applies (-6 dB)");
+            check (ok (cmd (ops, "undo")), "G14: undo set_track_volume ok");
+            check (std::abs ((double) trackById (tid).getProperty ("volumeDb", 999.0) - trackVolBefore) < 0.5, "G14: undo restores prior track volume");
+            check (ok (cmd (ops, "redo")), "G14: redo set_track_volume ok");
+            check (std::abs ((double) trackById (tid).getProperty ("volumeDb", 999.0) - (-6.0)) < 0.5, "G14: redo re-applies track volume (-6 dB)");
+            cmd (ops, "undo");   // leave the track fader where Wave 5 found it
+
+            // Track pan: undo restores the prior pan (0.4 set just above).
+            check (ok (cmd (ops, "set_track_pan", objN ({{ "trackId", tid }, { "pan", -0.7 }}))), "G14: set_track_pan ok");
+            check (std::abs ((double) trackById (tid).getProperty ("pan", 999.0) - (-0.7)) < 0.02, "G14: track pan applies (-0.7)");
+            check (ok (cmd (ops, "undo")), "G14: undo set_track_pan ok");
+            check (std::abs ((double) trackById (tid).getProperty ("pan", 999.0) - 0.4) < 0.02, "G14: undo restores prior track pan (0.4)");
+            check (ok (cmd (ops, "redo")), "G14: redo set_track_pan ok");
+            check (std::abs ((double) trackById (tid).getProperty ("pan", 999.0) - (-0.7)) < 0.02, "G14: redo re-applies track pan (-0.7)");
+
+            // Master volume: undo restores the prior master gain (-6 dB set above).
+            check (ok (cmd (ops, "set_master_volume", args1 ("db", -12.0))), "G14: set_master_volume ok");
+            check (std::abs ((double) master().getProperty ("volumeDb", 999.0) - (-12.0)) < 0.5, "G14: master volume applies (-12 dB)");
+            check (ok (cmd (ops, "undo")), "G14: undo set_master_volume ok");
+            check (std::abs ((double) master().getProperty ("volumeDb", 999.0) - (-6.0)) < 0.5, "G14: undo restores prior master volume (-6 dB)");
+            check (ok (cmd (ops, "redo")), "G14: redo set_master_volume ok");
+            check (std::abs ((double) master().getProperty ("volumeDb", 999.0) - (-12.0)) < 0.5, "G14: redo re-applies master volume (-12 dB)");
+
+            // Master pan: undo restores the prior master pan (-0.5 set above).
+            check (ok (cmd (ops, "set_master_pan", args1 ("pan", 0.3))), "G14: set_master_pan ok");
+            check (std::abs ((double) master().getProperty ("pan", 999.0) - 0.3) < 0.02, "G14: master pan applies (0.3)");
+            check (ok (cmd (ops, "undo")), "G14: undo set_master_pan ok");
+            check (std::abs ((double) master().getProperty ("pan", 999.0) - (-0.5)) < 0.02, "G14: undo restores prior master pan (-0.5)");
+            check (ok (cmd (ops, "redo")), "G14: redo set_master_pan ok");
+            check (std::abs ((double) master().getProperty ("pan", 999.0) - 0.3) < 0.02, "G14: redo re-applies master pan (0.3)");
+        }
+
         cmd (ops, "set_master_volume", args1 ("db", -3.0));   // restore a sane default
     }
 
@@ -1300,6 +1341,65 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         }
         else
             check (ready, "audio attached -> latencyContextReady=true (graph prepared)");
+    }
+
+    // ─── FMS Phase-3 Stage 2: sing mode (SoulX adapter, fake legato-beep backend) ───
+    section ("FMS Stage 2: sing mode (soulx, fake backend)");
+    {
+        auto vt = cmd (ops, "create_track", args1 ("name", "Vocal"))["data"].getProperty ("trackId", var()).toString();
+        auto vtone = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", vt }, { "seconds", 2.0 }, { "freq", 220.0 }}));
+        const auto vcid = vtone["data"].getProperty ("clipId", var()).toString();
+
+        // No sheet yet → a clear error BEFORE any service/job work (never a silent render).
+        check (ok (cmd (ops, "create_render_layer", objN ({{ "clipId", vcid }, { "adapter", "soulx" }, { "mode", "sing" }}))),
+               "create_render_layer mode:sing ok");
+        auto rNoSheet = cmd (ops, "render_layer", objN ({{ "clipId", vcid }, { "wait", true }}));
+        check (! ok (rNoSheet), "sing without a lyric sheet errors (no silent render)");
+
+        // Sheet + a line via commands; the Stage-1 lyricScore fixture is planted directly
+        // (its landing command, build_skeleton_from_clip, needs the Basic-Pitch venv —
+        // machine-dependent — while the RENDER path under test stays command-only).
+        check (ok (cmd (ops, "create_lyric_sheet", args1 ("trackId", vt))), "create_lyric_sheet ok");
+        check (ok (cmd (ops, "set_lyric_line", objN ({{ "trackId", vt }, { "lineIndex", 0 }, { "text", "hold the flame" }}))),
+               "set_lyric_line ok");
+        const juce::String scoreBlob =
+            R"({"v":1,"algo":"v3","bar":0,"bpm":120.0,"timeSig":[4,4],"grid":"1/16","clamped":false,)"
+            R"("slots":[{"start":0.0,"end":0.5,"velocity":90,"kind":"attack","segments":[{"start":0.0,"end":0.5,"pitch":57}]},)"
+            R"({"start":0.5,"end":1.0,"velocity":90,"kind":"gap","segments":[{"start":0.5,"end":1.0,"pitch":59}]},)"
+            R"({"start":1.0,"end":2.0,"velocity":90,"kind":"gap","segments":[{"start":1.0,"end":1.5,"pitch":60},{"start":1.5,"end":2.0,"pitch":64}]}]})";
+        bool planted = false;
+        for (auto* t : te::getAudioTracks (eng.edit()))
+            if (t->itemID.toString() == vt)
+                if (auto sheet = t->state.getChildWithName (mosh::ids::MOSH_LYRICSHEET); sheet.isValid())
+                {
+                    auto lines = sheet.getChildWithName (mosh::ids::LYRIC_LINES);
+                    if (lines.getNumChildren() > 0)
+                    {
+                        lines.getChild (0).setProperty (mosh::ids::lyricScore, scoreBlob, nullptr);
+                        planted = true;
+                    }
+                }
+        check (planted, "lyricScore fixture planted on the line");
+
+        // Full loop: render (fake sing) → HIT on identical re-render → lyric edit = MISS.
+        auto s1 = cmd (ops, "render_layer", objN ({{ "clipId", vcid }, { "wait", true }}));
+        check (ok (s1), "sing render ok (fake legato-beep backend)");
+        check (s1["data"].getProperty ("cache", var()).toString() == "miss", "first sing render is a cache MISS");
+        check (s1["data"].getProperty ("status", var()).toString() == "ready", "sing render completed -> ready");
+        // The authored SoulX target score is a durable job artifact next to the output.
+        bool scoreArtifact = false;
+        { auto renders = eng.sessionDir().getChildFile ("renders");
+          for (auto& d : renders.findChildFiles (File::findDirectories, false))
+              if (d.getChildFile ("target_score.json").existsAsFile())
+                  scoreArtifact = true; }
+        check (scoreArtifact, "target_score.json authored next to the render output");
+
+        auto s2 = cmd (ops, "render_layer", objN ({{ "clipId", vcid }, { "wait", true }}));
+        check (s2["data"].getProperty ("cache", var()).toString() == "hit", "identical sing re-render is a cache HIT");
+
+        cmd (ops, "set_lyric_line", objN ({{ "trackId", vt }, { "lineIndex", 0 }, { "text", "hold the cold gold flame" }}));
+        auto s3 = cmd (ops, "render_layer", objN ({{ "clipId", vcid }, { "wait", true }}));
+        check (s3["data"].getProperty ("cache", var()).toString() == "miss", "lyric edit changes the sing fingerprint (cache MISS)");
     }
 
     // ─── Stage 5: Tier-B generative layer (FakeAdapter) ───
@@ -1953,6 +2053,16 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                                                         { "file", crash.getFullPathName() }, { "name", "Crash@60" }}));
             check (ok (as), "assign_sample maps a sample to a pad/note");
             check ((int) as["data"].getProperty ("sounds", 0) > 8, "assign_sample added a 9th pad");
+
+            // melodic mode: the SAME sample mapped as a pitched instrument across the
+            // keyboard, note-gated — "regular 808 functionality". Plumbing guard here;
+            // the 2-distinct-pitches AUDIO proof lives in the offline render harness.
+            auto asMel = cmd (ops, "assign_sample", objN ({{ "trackId", dt }, { "note", 36 },
+                                                           { "file", crash.getFullPathName() },
+                                                           { "name", "808@36" }, { "mode", "melodic" }}));
+            check (ok (asMel), "assign_sample mode:melodic lands (pitched 808/bass path)");
+            check (asMel["data"].getProperty ("mode", var()).toString() == "melodic",
+                   "assign_sample echoes melodic mode");
         }
 
         // load_drum_kit re-loads the 8 pads onto a track's sampler.

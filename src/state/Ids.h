@@ -147,6 +147,13 @@ namespace mosh::ids
     // JSON-object blob {syllables,target,stress,rhymeGrade,rhymeOk,words,...} → snapshot →
     // the flow visualizer. Refreshed on demand; never persisted (recomputable).
     MOSH_DECLARE_ID (lyricAnalysis)
+    // Phase-3 Stage 1 — PERSISTED render-ready score from the take (kill-shot B GO): the
+    // line's bar of articulation slots, melisma segments underneath (per-note pitch/time),
+    // a JSON-object blob {v,algo,bar,bpm,timeSig,grid,slots:[{start,end,kind,segments}]}
+    // landed by build_skeleton_from_clip. NOT a generation constraint — excluded from
+    // lineFingerprint; grid edits leave it untouched (it is the take's truth; the Stage-2
+    // score author reconciles text vs slots). Additive optional ⇒ no format bump.
+    MOSH_DECLARE_ID (lyricScore)
 
     MOSH_DECLARE_ID (id)
     MOSH_DECLARE_ID (inputRef)

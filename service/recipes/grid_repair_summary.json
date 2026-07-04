@@ -1,0 +1,94 @@
+{
+ "recipes": 556,
+ "snapped_notes": 1612,
+ "elements_snapped": 23,
+ "deleted_recipes": [
+  "owner_amb_fl_keys_pad",
+  "owner_imisspain_fl_keys_pad",
+  "owner_imisspain_you_never_behave_human_like_beno_pad",
+  "owner_imisspain_younevertrustedthepeopleyousaidyouloved_beno_pad",
+  "owner_keepmesafe_sympatic_bell_beno_lead",
+  "owner_leg_fl_keys_2_pad",
+  "owner_leg_fl_keys_pad",
+  "owner_leg_insanesynth_bleed_beno_lead",
+  "owner_leg_love_you_like_she_said_beno_pad",
+  "owner_legi_sympatic_bell_beno_lead",
+  "owner_slayr_ouuuuusoudn_beno_lead",
+  "pack_bay_area_essentials_2_94_game_winner_flatstheflounder_pad",
+  "pack_bay_area_essentials_2_94_still_organic_flatstheflounder_lead",
+  "pack_drive_download_20260506t_k4l_bonus_chord_midi_the_time_bm_pad"
+ ],
+ "removed_elements": [
+  {
+   "recipe": "owner_amb_fl_keys_pad",
+   "role": "pad",
+   "gridFraction": 0.782
+  },
+  {
+   "recipe": "owner_imisspain_fl_keys_pad",
+   "role": "pad",
+   "gridFraction": 0.683
+  },
+  {
+   "recipe": "owner_imisspain_you_never_behave_human_like_beno_pad",
+   "role": "pad",
+   "gridFraction": 0.683
+  },
+  {
+   "recipe": "owner_imisspain_younevertrustedthepeopleyousaidyouloved_beno_pad",
+   "role": "pad",
+   "gridFraction": 0.683
+  },
+  {
+   "recipe": "owner_keepmesafe_sympatic_bell_beno_lead",
+   "role": "lead",
+   "gridFraction": 0.771
+  },
+  {
+   "recipe": "owner_leg_fl_keys_2_pad",
+   "role": "pad",
+   "gridFraction": 0.685
+  },
+  {
+   "recipe": "owner_leg_fl_keys_pad",
+   "role": "pad",
+   "gridFraction": 0.685
+  },
+  {
+   "recipe": "owner_leg_insanesynth_bleed_beno_lead",
+   "role": "lead",
+   "gridFraction": 0.685
+  },
+  {
+   "recipe": "owner_leg_love_you_like_she_said_beno_pad",
+   "role": "pad",
+   "gridFraction": 0.685
+  },
+  {
+   "recipe": "owner_legi_sympatic_bell_beno_lead",
+   "role": "lead",
+   "gridFraction": 0.782
+  },
+  {
+   "recipe": "owner_slayr_ouuuuusoudn_beno_lead",
+   "role": "lead",
+   "gridFraction": 0.741
+  },
+  {
+   "recipe": "pack_bay_area_essentials_2_94_game_winner_flatstheflounder_pad",
+   "role": "pad",
+   "gridFraction": 0.68
+  },
+  {
+   "recipe": "pack_bay_area_essentials_2_94_still_organic_flatstheflounder_lead",
+   "role": "lead",
+   "gridFraction": 0.645
+  },
+  {
+   "recipe": "pack_drive_download_20260506t_k4l_bonus_chord_midi_the_time_bm_pad",
+   "role": "pad",
+   "gridFraction": 0.793
+  }
+ ],
+ "rewritten": 23
+}

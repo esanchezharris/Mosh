@@ -1,0 +1,151 @@
+#!/usr/bin/env python3
+"""Golden tests for the SoulX target-score author (FMS Phase-3 Stage 2, fake-first).
+
+`author_score` turns accepted lyric lines + their per-line `lyricScore` blobs (landed by
+Stage 1's build_skeleton_from_clip) into the SoulX-Singer target-score JSON — the exact
+shape the KS-A grid renders validated (scripts/fms-killshot/score_author.py): per-event
+`text` / `phoneme` (en_-prefixed dash-joined ARPAbet) / `note_pitch` (MIDI, 0 = rest) /
+`note_type` (1 rest, 2 word, 3 continuation) / `duration` (seconds).
+
+Pure stdlib + the phonology core (cmudict/g2p when importable, heuristic fallback —
+never crashes on gibberish). Deterministic: 3x identical output.
+
+Run:  python3 service/soulx/soulx_score_test.py     (exit 0 = all pass)
+"""
+import os
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+SERVICE = os.path.dirname(HERE)
+sys.path.insert(0, SERVICE)
+
+from soulx import score as sx  # noqa: E402
+
+fails = []
+
+
+def check(name, ok, detail=""):
+    print(f"[{'PASS' if ok else 'FAIL'}] {name}" + (f" — {detail}" if detail else ""))
+    if not ok:
+        fails.append(name)
+
+
+def SLOT(a, b, *pitches):
+    segs, n = [], len(pitches)
+    for i, p in enumerate(pitches):
+        segs.append({"start": a + (b - a) * i / n, "end": a + (b - a) * (i + 1) / n, "pitch": p})
+    return {"start": a, "end": b, "velocity": 90, "kind": "gap", "segments": segs}
+
+
+def LINE(text, slots, bar=0):
+    return {"text": text, "score": {"v": 1, "algo": "v3", "bar": bar, "bpm": 120.0,
+                                    "timeSig": [4, 4], "grid": "1/16", "clamped": False,
+                                    "slots": slots}}
+
+
+def toks(clip, key):
+    return clip[key].split()
+
+
+# ── 1. Exact fit: 3 one-syllable words over 3 single-segment slots ─────────────────────
+r = sx.author_score([LINE("hold the flame", [SLOT(0.5, 1.0, 57), SLOT(1.0, 1.5, 59), SLOT(1.5, 2.0, 60)])])
+check("author ok with one clip", r.get("ok") and len(r.get("score", [])) == 1, str(r.get("error")))
+clip = r["score"][0]
+check("leading gap from t=0 becomes an <SP> rest (take-aligned timeline)",
+      toks(clip, "text")[0] == "<SP>" and toks(clip, "note_type")[0] == "1"
+      and toks(clip, "note_pitch")[0] == "0" and abs(float(toks(clip, "duration")[0]) - 0.5) < 0.011,
+      f"{toks(clip, 'text')[:2]} {toks(clip, 'duration')[:2]}")
+check("3 word events, type 2, take pitches",
+      toks(clip, "text")[1:] == ["hold", "the", "flame"]
+      and toks(clip, "note_type")[1:] == ["2", "2", "2"]
+      and toks(clip, "note_pitch")[1:] == ["57", "59", "60"], str(clip["text"]))
+check("word durations are the slot spans", all(abs(float(d) - 0.5) < 0.011 for d in toks(clip, "duration")[1:]),
+      str(clip["duration"]))
+check("phonemes are en_-prefixed dash-joined ARPAbet",
+      all(p.startswith("en_") and "-" in p or p == "<SP>" for p in toks(clip, "phoneme")),
+      str(clip["phoneme"]))
+check("time covers the full span in ms", clip["time"][0] == 0 and abs(clip["time"][1] - 2000) <= 20,
+      str(clip["time"]))
+
+# ── 2. Melisma slot: 2 segments -> type 2 + type 3 continuation, same word ─────────────
+r = sx.author_score([LINE("flame", [SLOT(0.0, 1.0, 57, 60)])])
+clip = r["score"][0]
+check("melisma: word then continuation", toks(clip, "note_type") == ["2", "3"]
+      and toks(clip, "text") == ["flame", "flame"]
+      and toks(clip, "note_pitch") == ["57", "60"], f"{clip['text']} {clip['note_type']}")
+check("melisma keeps the word's phoneme on the continuation",
+      toks(clip, "phoneme")[0] == toks(clip, "phoneme")[1], str(clip["phoneme"]))
+
+# ── 3. Multi-syllable word consumes its syllable count of slots (continuations) ────────
+r = sx.author_score([LINE("forever gold",
+                          [SLOT(0.0, 0.5, 57), SLOT(0.5, 1.0, 59), SLOT(1.0, 1.5, 60), SLOT(1.5, 2.0, 62)])])
+clip = r["score"][0]
+check("'forever' (3 syl) takes 3 slots: type 2 + two type 3; 'gold' takes the 4th",
+      toks(clip, "text") == ["forever", "forever", "forever", "gold"]
+      and toks(clip, "note_type") == ["2", "3", "3", "2"]
+      and toks(clip, "note_pitch") == ["57", "59", "60", "62"],
+      f"{clip['text']} {clip['note_type']}")
+
+# ── 4. Squeeze: more word-syllables than slots -> words share the last slot evenly ─────
+r = sx.author_score([LINE("hold the flame", [SLOT(0.0, 0.5, 57), SLOT(0.5, 1.1, 60)])])
+clip = r["score"][0]
+check("squeeze: every word still sung (3 type-2 events over 2 slots)",
+      toks(clip, "text") == ["hold", "the", "flame"] and toks(clip, "note_type") == ["2", "2", "2"],
+      f"{clip['text']} {clip['note_type']}")
+check("squeeze: the shared slot splits evenly",
+      abs(float(toks(clip, "duration")[1]) - 0.3) < 0.011 and abs(float(toks(clip, "duration")[2]) - 0.3) < 0.011,
+      str(clip["duration"]))
+
+# ── 5. Leftover slots become a held continuation of the last word (never dropped) ──────
+r = sx.author_score([LINE("flame", [SLOT(0.0, 0.5, 57), SLOT(0.5, 1.0, 59), SLOT(1.0, 1.5, 60)])])
+clip = r["score"][0]
+check("hold: 1 word over 3 slots = type 2 + type 3 + type 3",
+      toks(clip, "text") == ["flame", "flame", "flame"] and toks(clip, "note_type") == ["2", "3", "3"],
+      f"{clip['text']} {clip['note_type']}")
+
+# ── 6. Inter-slot gaps become <SP> rests ────────────────────────────────────────────────
+r = sx.author_score([LINE("hold flame", [SLOT(0.0, 0.4, 57), SLOT(1.0, 1.4, 60)])])
+clip = r["score"][0]
+check("a 0.6s gap between slots is an <SP> rest",
+      toks(clip, "text") == ["hold", "<SP>", "flame"] and toks(clip, "note_type")[1] == "1"
+      and abs(float(toks(clip, "duration")[1]) - 0.6) < 0.011, f"{clip['text']} {clip['duration']}")
+
+# ── 7. Gap slots (___) render as the 'la' placeholder; gibberish never crashes ─────────
+r = sx.author_score([LINE("hold ___ zzzqx", [SLOT(0.0, 0.5, 57), SLOT(0.5, 1.0, 59), SLOT(1.0, 1.5, 60)])])
+clip = r["score"][0]
+check("___ gap slot sings 'la' (placeholder vocalization, never an invented word)",
+      toks(clip, "text")[1] == "la", str(clip["text"]))
+check("gibberish word gets fallback phones (no crash, still en_ ARPAbet)",
+      toks(clip, "phoneme")[2].startswith("en_"), str(clip["phoneme"]))
+
+# ── 8. Lines without a score are skipped + reported (never invented) ───────────────────
+r = sx.author_score([LINE("hold the flame", [SLOT(0.0, 0.5, 57), SLOT(0.5, 1.0, 59), SLOT(1.0, 1.5, 60)]),
+                     {"text": "typed later, no take flow", "score": None}])
+check("scoreless line skipped + counted", r["ok"] and r["linesUsed"] == 1 and r["linesSkipped"] == 1,
+      f"used={r.get('linesUsed')} skipped={r.get('linesSkipped')}")
+
+# ── 9. Empty / all-scoreless input -> clean error ───────────────────────────────────────
+r = sx.author_score([{"text": "no flow", "score": None}])
+check("no scored lines -> ok:false no_score", (not r.get("ok")) and r.get("error") == "no_scored_lines", str(r))
+check("empty lines -> ok:false", not sx.author_score([]).get("ok"))
+
+# ── 10. Determinism: 3x identical serialization ────────────────────────────────────────
+import hashlib
+import json
+
+LINES = [LINE("they counted me out still I hold the flame",
+              [SLOT(0.5 + 0.25 * i, 0.75 + 0.25 * i, 55 + (i % 5)) for i in range(9)]),
+         LINE("cold nights taught me how to hold",
+              [SLOT(4.0 + 0.3 * i, 4.25 + 0.3 * i, 53 + (i % 4), *([58] if i == 2 else [])) for i in range(7)],
+              bar=2)]
+digs = {hashlib.sha256(json.dumps(sx.author_score(LINES), sort_keys=True).encode()).hexdigest()
+        for _ in range(3)}
+check("3x deterministic", len(digs) == 1)
+r = sx.author_score(LINES)
+check("two lines flow into one clip with rests between", r["ok"] and len(r["score"]) == 1
+      and r["score"][0]["text"].count("<SP>") >= 2, str(r["score"][0]["text"] if r.get("ok") else r))
+
+if fails:
+    print(f"\nFAILED: {len(fails)} failure(s): {fails}")
+    sys.exit(1)
+print("\nOK: 0 failure(s)")

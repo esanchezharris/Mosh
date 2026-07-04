@@ -1,6 +1,7 @@
 #include <juce_gui_extra/juce_gui_extra.h>
 #include <tracktion_engine/tracktion_engine.h>
 #include "app/MainWindow.h"
+#include "app/MacStateRestoration.h"
 #include "app/MenuController.h"
 #include "app/SelfTest.h"
 #include "engine/MoshEngine.h"
@@ -136,6 +137,13 @@ public:
             if (const auto s = juce::SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SESSION", {});
                 s.trim().isNotEmpty())
                 freshSessionName = s.trim();
+
+        // Any non-interactive CLI launch (no one to dismiss a dialog) must suppress
+        // AppKit's window-restoration "reopen after crash" modal BEFORE the engine ctor
+        // pumps the run loop — otherwise a repeated-crash history makes NSPersistentUIRestorer
+        // block the run forever (see MacStateRestoration.h). No-op off macOS.
+        if (noAudio || liveAudio || demoGui)
+            disableAppKitStateRestoration();
 
         // Headless: no audio device, and an isolated cold session so the harness is
         // idempotent (it saves/reloads itself) and never touches the GUI session.

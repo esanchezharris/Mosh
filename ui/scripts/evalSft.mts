@@ -14,6 +14,7 @@ import { readFileSync, existsSync, writeFileSync, openSync, writeSync, closeSync
 import { resolve, dirname, join } from "node:path";
 import { evaluate, buildExamplePrompt, scoreReply } from "../src/gepa/metric";
 import { DEFAULT_RULES } from "../src/agent/brainCore";
+import { RULES_WITH_EXAMPLES } from "../src/agent/fewshot";
 import type { EvalExample } from "../src/gepa/evalset";
 import type { ChatMessage } from "../src/harvest/genTurns";
 
@@ -49,6 +50,9 @@ if (!cfg) { console.error(`Unknown provider "${provider}"`); process.exit(1); }
 const model = flag("model") || cfg.model;
 const key = env[cfg.keyVar] || "local"; // local mlx server needs no real key
 const tag = flag("tag", "eval") as string;
+// --rules examples → append the worked-example bank (mirrors moshiBench's flag; the
+// few-shot arm of the substrate gate evals through the same prompt as the bench lever).
+const RULES = flag("rules") === "examples" ? RULES_WITH_EXAMPLES : DEFAULT_RULES;
 const evalPath = flag("eval");
 if (!evalPath || !existsSync(evalPath)) { console.error(`--eval <test.eval.jsonl> required (got ${evalPath})`); process.exit(1); }
 
@@ -68,7 +72,7 @@ if (nCap > 0 && examples.length > nCap) {
 const dumpPath = flag("dump");
 if (dumpPath) {
   const fd = openSync(dumpPath, "w");
-  for (const ex of examples) writeSync(fd, JSON.stringify({ id: ex.id, messages: await buildExamplePrompt(DEFAULT_RULES, ex) }) + "\n");
+  for (const ex of examples) writeSync(fd, JSON.stringify({ id: ex.id, messages: await buildExamplePrompt(RULES, ex) }) + "\n");
   closeSync(fd);
   console.log(`dumped ${examples.length} prompts → ${dumpPath}`);
   process.exit(0);
@@ -97,9 +101,15 @@ let calls = 0;
 // 2500, not 800: note-population targets routinely exceed 800 completion tokens, and a
 // truncated reply is unparseable → scored as a (false) failure. Override with --max-tokens.
 const maxTok = Number(flag("max-tokens", "2500")) || 2500;
+// --no-think: disable a local thinking-model's reasoning via the chat template
+// (mlx_lm.server forwards chat_template_kwargs; keeps the PROMPT byte-identical
+// across arms, unlike a /no_think soft switch). Local-server-only — cloud APIs
+// reject unknown fields, hence flag-gated.
+const noThink = process.argv.includes("--no-think");
 const callBrain = async (messages: ChatMessage[]): Promise<string> => {
   calls++;
   const payload: Record<string, unknown> = { model, messages, response_format: { type: "json_object" } };
+  if (noThink) payload.chat_template_kwargs = { enable_thinking: false };
   if (isReasoning) payload.max_completion_tokens = maxTok; else { payload.max_tokens = maxTok; payload.temperature = 0; }
   const ctrl = new AbortController();
   const to = setTimeout(() => ctrl.abort(), 90_000);
@@ -120,7 +130,7 @@ const callBrain = async (messages: ChatMessage[]): Promise<string> => {
 console.log(`▶ eval-sft [${tag}] — provider=${provider} model=${model} base=${cfg.url}`);
 console.log(`  ${examples.length} eval task(s) from ${evalPath}\n`);
 
-const report = await evaluate(DEFAULT_RULES, examples, callBrain);
+const report = await evaluate(RULES, examples, callBrain);
 const out = { tag, provider, model, baseUrl: cfg.url, examples: examples.length, cleanApply: report.mean, deferrals: report.deferrals, calls, perExample: report.perExample };
 const outPath = join(dirname(evalPath), `eval_results.${tag}.json`);
 writeFileSync(outPath, JSON.stringify(out, null, 2) + "\n");

@@ -56,11 +56,27 @@ SA3_ENABLED = os.environ.get("MOSH_ENABLE_SA3", "1") == "1" and stable_audio3_ad
 TRAINING_ENABLED = lora_trainer_adapter.available()
 
 
+def _venv_py(env_var: str, name: str) -> str:
+    """Interpreter for a per-feature venv: the .env-sourced override first (the single
+    source of truth, written by the feature's setup-*.sh), then the conventional
+    ~/Library/Mosh/venvs/<name> (venvs live OUTSIDE the iCloud-synced repo tree —
+    in-tree .venvs got files silently evicted by iCloud), then the legacy in-tree
+    service/<name>/.venv."""
+    env = os.environ.get(env_var, "").strip()
+    if env:
+        return env
+    venvs_root = os.environ.get("MOSH_VENVS_DIR", "").strip() or os.path.join(
+        os.path.expanduser("~"), "Library", "Mosh", "venvs")
+    conventional = os.path.join(venvs_root, name, "bin", "python")
+    if os.path.isfile(conventional):
+        return conventional
+    return os.path.join(SERVICE_DIR, name, ".venv", "bin", "python")
+
+
 def _basic_pitch_py() -> str:
     """The dedicated transcribe venv's python (set by setup-transcribe.sh via
     .transcribe.env -> BASIC_PITCH_PY), else the conventional default path."""
-    env = os.environ.get("BASIC_PITCH_PY", "").strip()
-    return env or os.path.join(SERVICE_DIR, "transcribe", ".venv", "bin", "python")
+    return _venv_py("BASIC_PITCH_PY", "transcribe")
 
 
 def _transcribe_available() -> bool:
@@ -73,8 +89,7 @@ def _transcribe_available() -> bool:
 def _whisper_py() -> str:
     """The dedicated whisper venv's python (set by setup-whisper.sh via .whisper.env ->
     WHISPER_PY), else the conventional default path."""
-    env = os.environ.get("WHISPER_PY", "").strip()
-    return env or os.path.join(SERVICE_DIR, "whisper", ".venv", "bin", "python")
+    return _venv_py("WHISPER_PY", "whisper")
 
 
 def _whisper_available() -> bool:
@@ -86,8 +101,7 @@ def _whisper_available() -> bool:
 def _sketch_py() -> str:
     """The dedicated sketch venv's python (set by setup-sketch.sh via .sketch.env ->
     SKETCH_PY), else the conventional default path."""
-    env = os.environ.get("SKETCH_PY", "").strip()
-    return env or os.path.join(SERVICE_DIR, "sketch", ".venv", "bin", "python")
+    return _venv_py("SKETCH_PY", "sketch")
 
 
 def _sketch_available() -> bool:
@@ -100,8 +114,7 @@ def _sketch_available() -> bool:
 def _skeleton_py() -> str:
     """The dedicated skeleton (FCPE) venv's python (set by setup-skeleton.sh via .skeleton.env
     -> SKELETON_PY), else the conventional default path."""
-    env = os.environ.get("SKELETON_PY", "").strip()
-    return env or os.path.join(SERVICE_DIR, "skeleton", ".venv", "bin", "python")
+    return _venv_py("SKELETON_PY", "skeleton")
 
 
 def _skeleton_available() -> bool:
@@ -113,8 +126,7 @@ def _skeleton_available() -> bool:
 def _phonology_py() -> str:
     """The dedicated phonology venv's python (set by setup-phonology.sh via
     .phonology.env -> PHONOLOGY_PY), else the conventional default path."""
-    env = os.environ.get("PHONOLOGY_PY", "").strip()
-    return env or os.path.join(SERVICE_DIR, "phonology", ".venv", "bin", "python")
+    return _venv_py("PHONOLOGY_PY", "phonology")
 
 
 def _phonology_available() -> bool:
@@ -234,6 +246,22 @@ TRANSFORM_ADAPTER = {
     "service_build": SERVICE_BUILD,
 }
 
+# FMS Phase 3 — the sing tier (own-voice render of the lyric sheet + take flow). Same
+# job protocol; the fake legato-beep score renderer ships, the real SoulX-Singer PC/SSH
+# backend swaps in behind it (adapters/soulx_adapter.py).
+SOULX_ADAPTER = {
+    "id": "soulx", "version": "0.0.1",
+    "generation_modes": ["sing"],
+    "conditioning_inputs": ["lines", "voice_ref"],
+    "duration_limits": {"min": 0.1, "max": 600.0},
+    "sample_rates": [44100], "channel_modes": ["mono"],
+    "runtime_requirements": ["cpu"], "packaging_mode": "python_service",
+    # sing is a deterministic score-driven render — there is no seed axis; the
+    # adapter never reads params["seed"] (a seed bump = cache MISS, identical audio).
+    "supports_seed": False, "supports_semantic_controls": False,
+    "service_build": SERVICE_BUILD,
+}
+
 
 def _sa3_descriptor() -> dict:
     return {
@@ -329,6 +357,11 @@ def _adapter_for(adapter_id: str):
         # deterministic fake transform (mirrors stable_audio3 → fake_adapter).
         from adapters import transform_adapter as ad
         return ad
+    if adapter_id == "soulx":
+        # FMS Phase-3 sing mode: fake legato-beep score renderer; the real SoulX-Singer
+        # PC/SSH backend swaps in when configured (MOSH_SOULX_SSH_HOST + enrolled voice).
+        from adapters import soulx_adapter as ad
+        return ad
     return fake_adapter
 
 
@@ -341,7 +374,14 @@ def _run_job(job_id: str) -> None:
         job["status"] = "rendering"
         adapter_id = job.get("adapter", "fake")
     try:
-        if adapter_id in ("fake", "transform"):
+        soulx_real = False
+        if adapter_id == "soulx":
+            try:
+                from adapters import soulx_adapter as _sx
+                soulx_real = _sx.available()
+            except Exception:  # noqa: BLE001 — import failure degrades to fake anyway
+                soulx_real = False
+        if adapter_id in ("fake", "transform") or (adapter_id == "soulx" and not soulx_real):
             # Stepped progress for the cheap stub (debounced renders are slow IRL).
             for step in range(1, 6):
                 with _lock:
@@ -552,7 +592,7 @@ class Handler(BaseHTTPRequestHandler):
                     query[k] = v
 
         if path == "/health":
-            adapters = ["fake", "transform"] + (["stable_audio3"] if SA3_ENABLED else [])
+            adapters = ["fake", "transform", "soulx"] + (["stable_audio3"] if SA3_ENABLED else [])
             self._send(200, {"ok": True, "service": "mosh-generative",
                              "version": SERVICE_VERSION, "build": SERVICE_BUILD,
                              "uptime_s": round(time.time() - START_TIME, 1),
@@ -562,7 +602,7 @@ class Handler(BaseHTTPRequestHandler):
                              "skeleton": _skeleton_available(),
                              "phonology": _phonology_available()})
         elif path == "/capabilities":
-            adapters = [FAKE_ADAPTER, TRANSFORM_ADAPTER] + ([_sa3_descriptor()] if SA3_ENABLED else [])
+            adapters = [FAKE_ADAPTER, TRANSFORM_ADAPTER, SOULX_ADAPTER] + ([_sa3_descriptor()] if SA3_ENABLED else [])
             training = [_training_descriptor()] if TRAINING_ENABLED else []
             self._send(200, {"ok": True, "adapters": adapters, "training": training,
                              "transcribe": {"available": _transcribe_available(), "modes": ["mono", "poly"]},
@@ -819,11 +859,54 @@ class Handler(BaseHTTPRequestHandler):
                         f0 = payload.get("f0")
                 except (subprocess.TimeoutExpired, OSError, json.JSONDecodeError, ValueError):
                     pass
+            # Stage-1 upgrade (kill-shot B GO 2026-07-04): an in-process energy envelope turns
+            # the v1 nuclei into evidence-pruned, melisma-grouped v3 slots; generous ASR words
+            # (whisper venv present) add v4 per-phrase syllable budgets. Every rung DEGRADES:
+            # non-PCM/unreadable audio -> env=None -> today's v1 lines byte-identical (the
+            # fmt-tag==1 guard in read_pcm_mono keeps that ladder deterministic across
+            # interpreters — afconvert's WAVE_EXTENSIBLE reads on 3.12+ but not 3.11).
             try:
                 from skeleton import core as skel
+                env = None
+                try:
+                    pcm = skel.read_pcm_mono(input_wav)
+                    if pcm and pcm[0]:
+                        env = skel.energy_envelope(pcm[0], pcm[1]) or None  # [] (sub-window take) -> v1 floor
+                except Exception as e:  # noqa: BLE001 — the envelope is an upgrade, never a breaker
+                    env = None
+                    print(f"[skeleton_spec] envelope skipped: {e}", file=sys.stderr)
+                words = None
+                wh_py = _whisper_py()
+                if env and bool(data.get("asr", True)) and os.path.isfile(wh_py):
+                    # v4 "ASR counts, DSP times": GENEROUS decode (model `small`, the KS-B
+                    # validated config); words consumed UNGATED as counts+timestamps only,
+                    # never as lyrics (the 0.6-confidence lyric-anchor gate lives in
+                    # /mumble_spec and is untouched).
+                    cli = os.path.join(SERVICE_DIR, "whisper", "whisper_cli.py")
+                    try:
+                        proc = subprocess.run([wh_py, cli, input_wav, "small"],
+                                              capture_output=True, text=True, timeout=180)
+                        payload = json.loads((proc.stdout or "").strip())
+                        if payload.get("ok"):
+                            from phonology import core as ph
+                            pron = ph.Pronouncer()
+                            ws = []
+                            for w in payload.get("words", []) or []:
+                                c = str(w.get("word", "")).strip(" .,!?'\"-").lower()
+                                if not any(ch.isalpha() for ch in c):
+                                    continue
+                                try:  # one malformed word must not discard the rest
+                                    ws.append({"start": float(w["start"]), "end": float(w["end"]),
+                                               "syl": pron.syllables(c) or 1})
+                                except (KeyError, TypeError, ValueError):
+                                    continue
+                            words = ws or None
+                    except Exception as e:  # noqa: BLE001 — ASR is an upgrade, never a breaker
+                        print(f"[skeleton_spec] ASR budget skipped: {e}", file=sys.stderr)
                 self._send(200, skel.build_skeleton_spec(
                     notes, f0=f0, bpm=bpm, time_sig=(int(ts[0]), int(ts[1])), grid=grid,
-                    topic=str(data.get("topic", "")), mood=str(data.get("mood", ""))))
+                    topic=str(data.get("topic", "")), mood=str(data.get("mood", "")),
+                    env=env, words=words))
             except Exception as e:  # noqa: BLE001
                 self._send(500, {"ok": False, "error": f"skeleton spec error: {e}"})
         elif path == "/sketch":

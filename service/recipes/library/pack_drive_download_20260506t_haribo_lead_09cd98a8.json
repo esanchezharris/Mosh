@@ -1,0 +1,206 @@
+{
+  "recipe_id": "pack_drive_download_20260506t_haribo_lead",
+  "schema_version": "2.0",
+  "source": {
+    "platform": "midi-pack",
+    "video_id": "pack_drive_download_20260506t_haribo_lead",
+    "url": "",
+    "title": "drive-download-20260506T122351Z-3-001/haribo.mid",
+    "channel": "",
+    "duration_s": 0.0,
+    "license": "licensedPack",
+    "retrieved_at": null,
+    "content_hash": "09cd98a8badc5a58e779fcbd7b65649a9b89dd3b88bbe250116108e762fb0c3c"
+  },
+  "meta": {
+    "daw": {
+      "value": null,
+      "confidence": 0.0,
+      "evidence": []
+    },
+    "tempo_bpm": {
+      "value": 155,
+      "confidence": 0.9,
+      "evidence": [
+        "SMF meta"
+      ]
+    },
+    "key": {
+      "value": "A# minor",
+      "confidence": 0.695,
+      "evidence": [
+        "pitch-class inference (Krumhansl)"
+      ]
+    },
+    "time_signature": {
+      "value": "4/4",
+      "confidence": 0.6,
+      "evidence": []
+    }
+  },
+  "arrangement": {
+    "sections": [
+      {
+        "name": "loop",
+        "start_s": 0.0,
+        "end_s": 6.193548387096774,
+        "confidence": 0.5
+      }
+    ]
+  },
+  "elements": [
+    {
+      "element_id": "pack_drive_download_20260506t_haribo_lead",
+      "role": "lead",
+      "label": "drive-download-2026050 · haribo (lead)",
+      "audio_ref": null,
+      "midi": {
+        "status": "extracted",
+        "midi_ref": null,
+        "notes": [
+          {
+            "pitch": 61,
+            "start_beats": 0.0,
+            "duration_beats": 1.5,
+            "velocity": 100
+          },
+          {
+            "pitch": 61,
+            "start_beats": 1.5,
+            "duration_beats": 2.5,
+            "velocity": 100
+          },
+          {
+            "pitch": 63,
+            "start_beats": 4.0,
+            "duration_beats": 1.5,
+            "velocity": 100
+          },
+          {
+            "pitch": 63,
+            "start_beats": 5.5,
+            "duration_beats": 1.5,
+            "velocity": 100
+          },
+          {
+            "pitch": 58,
+            "start_beats": 7.0,
+            "duration_beats": 1.0,
+            "velocity": 100
+          },
+          {
+            "pitch": 58,
+            "start_beats": 8.0,
+            "duration_beats": 0.5,
+            "velocity": 100
+          },
+          {
+            "pitch": 58,
+            "start_beats": 8.5,
+            "duration_beats": 0.5,
+            "velocity": 100
+          },
+          {
+            "pitch": 58,
+            "start_beats": 9.0,
+            "duration_beats": 1.0,
+            "velocity": 100
+          },
+          {
+            "pitch": 60,
+            "start_beats": 10.0,
+            "duration_beats": 2.0,
+            "velocity": 100
+          },
+          {
+            "pitch": 62,
+            "start_beats": 12.0,
+            "duration_beats": 1.0,
+            "velocity": 100
+          },
+          {
+            "pitch": 62,
+            "start_beats": 13.0,
+            "duration_beats": 0.5,
+            "velocity": 100
+          },
+          {
+            "pitch": 58,
+            "start_beats": 13.5,
+            "duration_beats": 1.5,
+            "velocity": 100
+          },
+          {
+            "pitch": 56,
+            "start_beats": 15.0,
+            "duration_beats": 1.0,
+            "velocity": 100
+          }
+        ],
+        "note_count": 13,
+        "confidence": 1.0
+      },
+      "sample_match": {
+        "status": "none",
+        "matched_path": null,
+        "distance": 0.0,
+        "alternates": [],
+        "root_note": null
+      },
+      "synth_patch": {
+        "status": "unknown",
+        "plugin": {
+          "name": null,
+          "available_locally": false
+        },
+        "params": {},
+        "match": null,
+        "substitute": null
+      },
+      "onsets": [],
+      "motif": {
+        "bars": 4.0,
+        "onset_grid": "8th",
+        "density": 3.25,
+        "syncopation": 0.3077,
+        "contour": [
+          0,
+          1,
+          0,
+          -1,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0,
+          -1,
+          -1
+        ],
+        "register_band": "mid",
+        "harmonic_function": ""
+      },
+      "bass": null,
+      "evidence": [],
+      "confidence": 0.9
+    }
+  ],
+  "unresolved": [],
+  "reconstruction_class": "deterministic",
+  "yield": {
+    "predicted": {
+      "drums": 0.0,
+      "midi": 1.0,
+      "synth": 0.0,
+      "arrangement": 0.4,
+      "overall": 0.6
+    },
+    "actual": {
+      "drums": 0.0,
+      "midi": 0.0,
+      "synth": 0.0,
+      "arrangement": 0.0,
+      "overall": 0.0
+    }
+  }
+}

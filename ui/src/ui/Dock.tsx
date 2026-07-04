@@ -178,22 +178,26 @@ export function GenDrawer({ track, selectedClipId }: { track: Track; selectedCli
 
   return (
     <div className="gen" data-testid="generative">
-      <div className="gen-head"><span className="gen-title">⃝ GENERATIVE</span><span className="gen-clip">{rl?.mode === "transform" ? "transform" : sa3 ? "stable audio 3" : "fake"} · {clip.name}</span></div>
+      <div className="gen-head"><span className="gen-title">⃝ GENERATIVE</span><span className="gen-clip">{rl?.mode === "sing" ? "sing" : rl?.mode === "transform" ? "transform" : sa3 ? "stable audio 3" : "fake"} · {clip.name}</span></div>
       {!rl ? (
         <div className="gen-create-row">
           <button className="btn rack-add" data-testid="gen-create"
             onClick={() => void exec("create_render_layer", { clipId: clip.id, adapter: sa3 ? "stable_audio3" : "fake", mode: "reimagine", modelVariant: sa3 ? "sa3-medium" : "" })}>+ Re-imagine</button>
           <button className="btn rack-add" data-testid="gen-create-transform"
             onClick={() => void exec("create_render_layer", { clipId: clip.id, adapter: "transform", mode: "transform" })}>+ Transform</button>
+          {track.lyricSheet && (
+            <button className="btn rack-add" data-testid="gen-create-sing"
+              onClick={() => void exec("create_render_layer", { clipId: clip.id, adapter: "soulx", mode: "sing" })}>+ Sing</button>
+          )}
         </div>
       ) : (
-        <GenBody clip={clip} qa={qaByClip[clip.id]} />
+        <GenBody clip={clip} track={track} qa={qaByClip[clip.id]} />
       )}
     </div>
   );
 }
 
-function GenBody({ clip, qa }: { clip: Clip; qa?: RenderQA }) {
+function GenBody({ clip, track, qa }: { clip: Clip; track: Track; qa?: RenderQA }) {
   const qaView = qaReadoutView(qa);
   const exec = useStore((s) => s.exec);
   const colorsAvail = useStore((s) => s.availableColors);
@@ -208,10 +212,11 @@ function GenBody({ clip, qa }: { clip: Clip; qa?: RenderQA }) {
   const blockedBy = (name: string) => (colorsAvail.find((c) => c.name === name)?.no_stack_with ?? []).some((n) => active.some((a) => a.name === n));
   const addable = colorsAvail.filter((c) => !active.some((a) => a.name === c.name) && !blockedBy(c.name));
   const isTransform = rl.mode === "transform";
+  const isSing = rl.mode === "sing";
 
   return (
     <div className="gen-body" data-render-status={rl.status}>
-      {isTransform ? <TransformControls clip={clip} /> : (<>
+      {isSing ? <SingControls track={track} /> : isTransform ? <TransformControls clip={clip} /> : (<>
       {active.map((c) => {
         const meta = colorsAvail.find((m) => m.name === c.name);
         return (
@@ -260,6 +265,33 @@ function GenBody({ clip, qa }: { clip: Clip; qa?: RenderQA }) {
         <button className="btn" title="new take" onClick={() => void exec("set_render_param", { clipId: clip.id, seed: Number(rl.seed) + 1 })}>⟳ seed</button>
         <button className="btn x" title="remove layer" onClick={() => void exec("remove_render_layer", { clipId: clip.id })}>✕</button>
       </div>
+    </div>
+  );
+}
+
+// FMS Phase-3 — the sing control surface: renders the track's lyric sheet in the
+// producer's own voice (fake legato-beep guide until the real backend is enrolled +
+// configured). Read-only status here — the sheet is edited in the Lyrics tab; render/
+// accept/seed ride the shared chrome below.
+function SingControls({ track }: { track: Track }) {
+  const voiceEnrolled = useStore((s) => s.snapshot?.session?.singVoiceEnrolled ?? false);
+  const lines = track.lyricSheet?.lines ?? [];
+  const flowed = lines.filter((l) => l.hasScore).length;
+  return (
+    <div className="sing-controls">
+      <label className="nparam">
+        <span className="nlabel">flow</span>
+        <span className="tc" data-testid="sing-flow">{flowed}/{lines.length} lines carry your take's flow</span>
+      </label>
+      <label className="nparam">
+        <span className="nlabel">voice</span>
+        <span className="tc" data-testid="sing-voice">
+          {voiceEnrolled ? "enrolled — locked to your voice only" : "not enrolled — renders a guide melody (beeps)"}
+        </span>
+      </label>
+      {flowed === 0 && (
+        <span className="rack-empty">No flow yet — use “Build flow from this take” on the vocal clip first.</span>
+      )}
     </div>
   );
 }

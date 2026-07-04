@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Word-level speech transcription via OpenAI Whisper (MIT).
 
-Runs UNDER the dedicated whisper venv (service/whisper/.venv), invoked by
+Runs UNDER the dedicated whisper venv (~/Library/Mosh/venvs/whisper), invoked by
 service/server.py's /transcribe_words endpoint as a subprocess, so Whisper's deps
 (torch/numba/tiktoken) never touch the service interpreter. Emits a JSON word list to
 stdout (times in SECONDS, with per-word confidence — the "mumble take" flow keeps only

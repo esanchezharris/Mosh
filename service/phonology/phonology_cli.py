@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Phonology CLI — runs the deterministic phonology core (core.py) under the
-dedicated phonology venv (service/phonology/.venv), invoked by server.py's
+dedicated phonology venv (~/Library/Mosh/venvs/phonology), invoked by server.py's
 /get_rhymes when the service interpreter lacks cmudict. Emits a JSON result
 envelope to stdout; any library noise goes to stderr so stdout carries ONLY JSON
 (mirrors transcribe_cli.py).

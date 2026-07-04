@@ -81,7 +81,10 @@ else echo "  fused model exists — skip"; fi
 
 # ── 5. serve + 6. eval (finetuned local vs cloud baseline) ───────────────────────
 say "5/6 serve fused model on :$PORT"
-"$SFT_PY" -m mlx_lm server --model "$FUSED" --port "$PORT" >/tmp/mlx_server.log 2>&1 &
+# HF_HUB_OFFLINE=1 pins the LOCAL model+tokenizer — without it mlx_lm.server can
+# online-resolve a similarly-named HF repo and silently use ITS chat template,
+# inflating eval scores (the documented false-0.89 artifact).
+HF_HUB_OFFLINE=1 "$SFT_PY" -m mlx_lm server --model "$FUSED" --port "$PORT" >/tmp/mlx_server.log 2>&1 &
 SERVER_PID=$!
 trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
 until curl -s "http://127.0.0.1:$PORT/v1/models" >/dev/null 2>&1; do sleep 1; done

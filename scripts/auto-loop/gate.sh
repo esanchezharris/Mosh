@@ -73,7 +73,11 @@ run_selftest_x3() {
     # (a false gate-red). unique_port skips any still-alive prior service.
     local sport; sport="$(unique_port)"
     kill_stray_services "$sport"
-    MOSH_SELFTEST_SESSION="$sess" MOSH_SERVICE_PORT="$sport" "$bin" --selftest >"$log" 2>&1
+    # -ApplePersistenceIgnoreState YES: a headless selftest must NEVER inherit AppKit's
+    # window-restoration / "reopen after crash" modal. After repeated crashes macOS shows
+    # NSPersistentUIRestorer's runModal during launch, which blocks a headless run forever
+    # (cost a 2h hang once). NSUserDefaults reads the flag from argv, suppressing it.
+    MOSH_SELFTEST_SESSION="$sess" MOSH_SERVICE_PORT="$sport" "$bin" --selftest -ApplePersistenceIgnoreState YES >"$log" 2>&1
     rc=$?
     kill_stray_services "$sport"; sleep 1   # let this run's service die before the next
     read n f < <(parse_selftest_tally "$log")
@@ -170,6 +174,18 @@ gate_native() {
   run_step "cmake_configure" cmake --preset macos-arm64-release ${cfgflags[@]+"${cfgflags[@]}"} || return
   run_step "build_app"       cmake --build --preset macos-arm64-release-app   || return
   run_step "build_tests"     cmake --build --preset macos-arm64-release-tests || true
+
+  # Fail-closed: the built app bundle MUST carry NSSpeechRecognitionUsageDescription, or
+  # macOS TCC hard-crashes (SIGABRT) the instant the always-on voice calls SFSpeechRecognizer
+  # — a crash that has masqueraded as a plugin-host crash. The build injects it via the
+  # always-run MoshFixInfoPlist target; assert it independently so a future preset/target
+  # change can't silently re-ship a crashing bundle.
+  local _app_plist; _app_plist="$( find "$WT/build-macos-arm64-release" -path '*Mosh.app/Contents/Info.plist' 2>/dev/null | head -1 )"
+  if [ -n "$_app_plist" ] && /usr/bin/plutil -extract NSSpeechRecognitionUsageDescription raw "$_app_plist" >/dev/null 2>&1; then
+    emit_step "info_plist_tcc_keys" true "$(jq -nc --arg p "${_app_plist#$WT/}" '{plist:$p,key:"NSSpeechRecognitionUsageDescription present"}')"
+  else
+    emit_step "info_plist_tcc_keys" false "$(jq -nc --arg p "${_app_plist:-<not found>}" '{plist:$p,error:"NSSpeechRecognitionUsageDescription MISSING — bundle would TCC-crash on voice"}')"
+  fi
 
   # Catch2: prefer ctest; fall back to running the MoshTests binary directly.
   local catch_ok=true clog; clog="$(mktemp)"
