@@ -1,0 +1,15 @@
+[
+  {
+    "index": "score2-tone_0_10500",
+    "language": "English",
+    "time": [
+      0,
+      10500
+    ],
+    "duration": "0.50 0.50 0.50 0.50 0.25 0.25 0.50 0.25 1.00 0.50 0.50 0.50 0.50 0.50 0.50 0.25 0.25 0.50 0.25 1.50 0.50",
+    "text": "<SP> cold lights flicker while I chase the tone tone tone <SP> cold lights flicker while I chase the tone <SP>",
+    "phoneme": "<SP> en_K-OW1-L-D en_L-AY1-T-S en_F-L-IH1-K-ER0 en_W-AY1-L en_AY1 en_CH-EY1-S en_DH-AH0 en_T-OW1-N en_T-OW1-N en_T-OW1-N <SP> en_K-OW1-L-D en_L-AY1-T-S en_F-L-IH1-K-ER0 en_W-AY1-L en_AY1 en_CH-EY1-S en_DH-AH0 en_T-OW1-N <SP>",
+    "note_pitch": "0 43 45 47 48 47 45 43 45 47 43 0 48 47 45 43 45 47 48 50 0",
+    "note_type": "1 2 2 2 2 2 2 2 2 3 3 1 2 2 2 2 2 2 2 2 1"
+  }
+]
