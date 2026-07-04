@@ -231,6 +231,7 @@ private:
     juce::var cmdCreateRenderLayer (const juce::var& args);
     juce::var cmdSetRenderParam   (const juce::var& args);
     juce::var cmdRenderLayer      (const juce::var& args);
+    juce::var cmdCompileRender     (const juce::var& args);  // loose instruction → validated render envelope (generative-only v1)
     // Render a single clip's instrument output (its track, over [startSec,endSec]) to a
     // WAV — the auto-bounce that lets generative render layers run on MIDI/drum clips
     // (the model is audio→audio). Offline, synchronous, mirrors cmdExportAudio's render.
@@ -340,6 +341,7 @@ private:
                                   const juce::String& trackId, int lineIndex, int afterIndex,
                                   const juce::var& args);
     int lyricGenEpoch_ = 0;  // bumped by cancel_lyric_job; a stale async land is skipped
+    int compileEpoch_  = 0;  // compile_render: a superseding compile skips an earlier stale async land
 
     // KEY-001 — the default musical key surfaced in the snapshot before any set_key
     // (A/minor — matches the voice's neutral A4 tonic + SCALES.minor in voice.js).

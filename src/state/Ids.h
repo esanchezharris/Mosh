@@ -192,6 +192,7 @@ namespace mosh::ids
     MOSH_DECLARE_ID (reactiveEpoch)
     MOSH_DECLARE_ID (createdBy)        // user | (future) monster
     MOSH_DECLARE_ID (userKept)
+    MOSH_DECLARE_ID (compiledEnvelope) // TRANSIENT: JSON of the last compile_render result (mode/backend/reasoning/say) — non-undoable, like lyricProposals
 
     // params child + colors
     MOSH_DECLARE_ID (PARAMS)

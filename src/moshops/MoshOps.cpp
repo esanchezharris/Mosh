@@ -689,6 +689,7 @@ juce::var MoshOps::execute (const juce::var& command)
     if (name == "create_render_layer") return cmdCreateRenderLayer (args);
     if (name == "set_render_param")  return cmdSetRenderParam (args);
     if (name == "render_layer")      return cmdRenderLayer (args);
+    if (name == "compile_render")    return cmdCompileRender (args);
     if (name == "cancel_render")     return cmdCancelRender (args);
     if (name == "accept_render")     return cmdAcceptRender (args);
     if (name == "reject_render")     return cmdRejectRender (args);
@@ -5520,6 +5521,150 @@ juce::var MoshOps::cmdSetRenderParam (const juce::var& args)
     return okResult ("set_render_param");
 }
 
+// compile_render (generative-only v1): a loose instruction → a VALIDATED render envelope,
+// applied to the clip's render layer through the SAME PARAMS writes set_render_param uses
+// (undoable). Mirrors runLyricGeneration's async land (inline for wait:true; off-thread +
+// callAsync, epoch-guarded, for the GUI). The compiler service classifies reimagine vs
+// transform vs unsupported; an "unsupported" verdict (corrective/vocal) mutates NOTHING and
+// surfaces the honest `say` — we never silently re-perform the take. The compiled envelope
+// flows through the existing PARAMS, so the render-cache fingerprint already covers it (no
+// new key field). A transient `compiledEnvelope` blob (non-undoable, like lyricProposals)
+// carries the mode/backend/reasoning to the UI.
+juce::var MoshOps::cmdCompileRender (const juce::var& args)
+{
+    const auto clipId      = args.getProperty ("clipId", var()).toString();
+    const auto instruction = args.getProperty ("instruction", var()).toString();
+    const int  intensity   = (int) args.getProperty ("intensity", -1);
+    const auto backend     = args.getProperty ("backend", var()).toString();   // ""(auto)|"fake"|"llm"
+    const bool autoRender  = (bool) args.getProperty ("autoRender", false);
+    const bool wait        = (bool) args.getProperty ("wait", false);
+
+    if (instruction.trim().isEmpty()) return errResult ("compile_render", "instruction required");
+    if (findClip (clipId) == nullptr) return errResult ("compile_render", "no clip: " + clipId);
+
+    auto land = [this, clipId, autoRender, wait, args] (const juce::var& result) -> juce::var
+    {
+        auto* c = findClip (clipId);
+        if (c == nullptr) return errResult ("compile_render", "clip gone");
+        if (! result.isObject() || ! (bool) result.getProperty ("ok", false))
+            return errResult ("compile_render", "compiler service unavailable (start the generative service)");
+
+        const auto mode      = result.getProperty ("mode", "").toString();
+        const auto reasoning = result.getProperty ("reasoning", "").toString();
+        const auto backendId = result.getProperty ("backend", "").toString();
+        const auto say       = result.getProperty ("say", var()).toString();
+
+        if (mode != "reimagine" && mode != "transform")
+        {
+            // Non-render verdicts — the honest boundary. "corrective" names an EXISTING
+            // tool (moshAutoTune/eq/moshOTT/quantize_notes) the caller runs with its own
+            // track/clip context; "unsupported" (vocal/noise) declines. Either way we
+            // MUTATE NOTHING — generative-only v1 never silently re-performs the take.
+            logLine ("compile_render", args, true, {}, false);
+            emitSnapshotInvalidated();
+            auto* d = new DynamicObject();
+            d->setProperty ("mode", mode);
+            d->setProperty ("say", say);
+            d->setProperty ("reasoning", reasoning);
+            d->setProperty ("backend", backendId);
+            if (result.hasProperty ("subtype")) d->setProperty ("subtype", result.getProperty ("subtype", var()));
+            if (result.hasProperty ("tool"))    d->setProperty ("tool", result.getProperty ("tool", var()));
+            return okResult ("compile_render", var (d));
+        }
+
+        auto env = result.getProperty ("envelope", var());
+        if (! env.isObject()) return errResult ("compile_render", "compiler returned no envelope");
+
+        beginTxn ("compile_render");
+        auto node = findRenderLayer (clipId);
+        if (! node.isValid())
+        {
+            auto pos = c->getPosition();
+            const juce::String adapter =
+                mode == "transform" ? juce::String ("transform")
+                : (args.getProperty ("adapter", var()).toString().isNotEmpty()
+                       ? args.getProperty ("adapter", "").toString()
+                       : juce::String ("fake"));
+            node = RenderLayer::create ("rl-" + juce::String (juce::Time::getCurrentTime().toMilliseconds()),
+                                        clipId, pos.getStart().inSeconds(), pos.getEnd().inSeconds(), adapter);
+            node.setProperty (ids::mode, mode, nullptr);
+            if (args.hasProperty ("modelVariant")) node.setProperty (ids::modelVariant, args.getProperty ("modelVariant", ""), nullptr);
+            c->state.appendChild (node, &undoManager());
+        }
+        else
+            node.setProperty (ids::mode, mode, &undoManager());
+
+        auto params = node.getChildWithName (ids::PARAMS);
+        if (mode == "reimagine")
+        {
+            params.setProperty (ids::prompt, env.getProperty ("prompt", ""), &undoManager());
+            params.setProperty (ids::nl,     env.getProperty ("nl", 0.4),    &undoManager());
+            params.setProperty (juce::Identifier ("lab"), env.getProperty ("lab", false), &undoManager());
+            auto colors = params.getChildWithName (ids::COLORS);
+            colors.removeAllChildren (&undoManager());
+            if (auto* arr = env.getProperty ("colors", var()).getArray())
+                for (int i = 0; i < juce::jmin (3, arr->size()); ++i)
+                {
+                    auto& cc = arr->getReference (i);
+                    juce::ValueTree col (ids::COLOR);
+                    col.setProperty (ids::name,  cc.getProperty ("name", ""), nullptr);
+                    col.setProperty (ids::value, cc.getProperty ("value", 0), nullptr);
+                    colors.appendChild (col, &undoManager());
+                }
+        }
+        else // transform
+        {
+            params.setProperty (ids::target,   env.getProperty ("target", ""),     &undoManager());
+            params.setProperty (ids::strength, env.getProperty ("strength", 65.0), &undoManager());
+        }
+        node.setProperty (ids::seed, env.getProperty ("seed", 0), &undoManager());
+        node.setProperty (ids::status, "dirty", nullptr);
+        node.setProperty (ids::compiledEnvelope, juce::JSON::toString (result), nullptr);  // transient
+
+        logLine ("compile_render", args, true, {}, true);
+        emitSnapshotInvalidated();
+
+        var renderRes;
+        if (autoRender)   // convenience: kick the render immediately after compiling
+        {
+            auto* ra = new DynamicObject();
+            ra->setProperty ("clipId", clipId);
+            ra->setProperty ("wait", wait);
+            renderRes = cmdRenderLayer (var (ra));
+        }
+
+        auto* d = new DynamicObject();
+        d->setProperty ("mode", mode);
+        d->setProperty ("backend", backendId);
+        d->setProperty ("reasoning", reasoning);
+        d->setProperty ("envelope", env);   // the validated envelope (UI display + eval/preference data)
+        d->setProperty ("layerId", node[ids::id].toString());
+        if (! renderRes.isVoid()) d->setProperty ("render", renderRes);
+        return okResult ("compile_render", var (d));
+    };
+
+    // Synchronous (harness / agent): block on the compile + land inline.
+    if (wait)
+        return land (jobManager.compileRender (instruction, intensity, backend));
+
+    // Async (GUI): compile off the message thread; land via callAsync, skipping if a later
+    // compile superseded this one.
+    const int epoch = ++compileEpoch_;
+    std::thread ([this, instruction, intensity, backend, land, epoch]
+    {
+        auto result = jobManager.compileRender (instruction, intensity, backend);
+        juce::MessageManager::callAsync ([this, land, result, epoch]
+        {
+            if (epoch != compileEpoch_) return;
+            land (result);
+        });
+    }).detach();
+
+    auto* d = new DynamicObject();
+    d->setProperty ("status", "compiling");
+    return okResult ("compile_render", var (d));
+}
+
 // A stable, deterministic signature of a clip's GENERATIVE SOURCE — its MIDI note content
 // plus the owning track's instrument + insert-FX names and param VALUES. Used as the
 // render-cache upstream hash for non-wave clips, whose bounced audio isn't bit-stable.
@@ -8033,6 +8178,7 @@ juce::var MoshOps::clipToVar (te::Clip& c)
         {
             r->setProperty ("prompt", params[ids::prompt]);
             r->setProperty ("nl", (double) params[ids::nl]);
+            r->setProperty ("lab", (bool) params.getProperty (juce::Identifier ("lab"), false));
             r->setProperty ("target", params[ids::target]);        // Route B transform target
             r->setProperty ("strength", (double) params[ids::strength]); // Route B transform strength
             Array<var> colors;
@@ -8046,6 +8192,10 @@ juce::var MoshOps::clipToVar (te::Clip& c)
                 }
             r->setProperty ("colors", colors);
         }
+        // The last compile_render verdict (transient) — lets the UI show what it chose +
+        // surface an "unsupported" honest message. Parsed back from the JSON blob.
+        if (rl.hasProperty (ids::compiledEnvelope))
+            r->setProperty ("compiled", juce::JSON::parse (rl[ids::compiledEnvelope].toString()));
         o->setProperty ("renderLayer", var (r));
     }
     return var (o);

@@ -2,7 +2,7 @@
 // left and the generative DRAWER (Stage 5) on the right. Ported from the legacy
 // Rack/GenPanel into the ink+lime register — same command seam, same arg shapes.
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useStore } from "../store";
 import { useSettings } from "../settings/store";
 import type { Snapshot, Plugin, Track, Clip, RenderColor, RenderQA } from "../types";
@@ -180,18 +180,76 @@ export function GenDrawer({ track, selectedClipId }: { track: Track; selectedCli
     <div className="gen" data-testid="generative">
       <div className="gen-head"><span className="gen-title">⃝ GENERATIVE</span><span className="gen-clip">{rl?.mode === "sing" ? "sing" : rl?.mode === "transform" ? "transform" : sa3 ? "stable audio 3" : "fake"} · {clip.name}</span></div>
       {!rl ? (
-        <div className="gen-create-row">
-          <button className="btn rack-add" data-testid="gen-create"
-            onClick={() => void exec("create_render_layer", { clipId: clip.id, adapter: sa3 ? "stable_audio3" : "fake", mode: "reimagine", modelVariant: sa3 ? "sa3-medium" : "" })}>+ Re-imagine</button>
-          <button className="btn rack-add" data-testid="gen-create-transform"
-            onClick={() => void exec("create_render_layer", { clipId: clip.id, adapter: "transform", mode: "transform" })}>+ Transform</button>
-          {track.lyricSheet && (
-            <button className="btn rack-add" data-testid="gen-create-sing"
-              onClick={() => void exec("create_render_layer", { clipId: clip.id, adapter: "soulx", mode: "sing" })}>+ Sing</button>
-          )}
-        </div>
+        <>
+          <CompileBox clipId={clip.id} trackId={track.id} />
+          <div className="gen-create-row">
+            <button className="btn rack-add" data-testid="gen-create"
+              onClick={() => void exec("create_render_layer", { clipId: clip.id, adapter: sa3 ? "stable_audio3" : "fake", mode: "reimagine", modelVariant: sa3 ? "sa3-medium" : "" })}>+ Re-imagine</button>
+            <button className="btn rack-add" data-testid="gen-create-transform"
+              onClick={() => void exec("create_render_layer", { clipId: clip.id, adapter: "transform", mode: "transform" })}>+ Transform</button>
+            {track.lyricSheet && (
+              <button className="btn rack-add" data-testid="gen-create-sing"
+                onClick={() => void exec("create_render_layer", { clipId: clip.id, adapter: "soulx", mode: "sing" })}>+ Sing</button>
+            )}
+          </div>
+        </>
       ) : (
         <GenBody clip={clip} track={track} qa={qaByClip[clip.id]} />
+      )}
+    </div>
+  );
+}
+
+// "Describe it…" — the prompt compiler entry point. The producer types a loose
+// instruction; compile_render classifies it and either (a) fills a validated re-imagine/
+// transform layer, so the chosen colours/target appear in the rack below (transparency),
+// (b) names the CORRECTIVE tool that actually fixes the take — AutoTune/EQ/OTT/quantize —
+// offered as a one-click action (it corrects, it doesn't re-perform), or (c) honestly
+// declines a vocal/noise request. Uses wait:true (the compile is a fast, explicit lookup)
+// so the verdict — including the corrective tool + say — comes straight back.
+const TOOL_LABEL: Record<string, string> = {
+  moshAutoTune: "Add AutoTune", eq: "Add EQ", moshOTT: "Add OTT", quantize_notes: "Quantize notes",
+};
+
+function CompileBox({ clipId, trackId }: { clipId: string; trackId: string }) {
+  const exec = useStore((s) => s.exec);
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [say, setSay] = useState<string | null>(null);
+  const [fixTool, setFixTool] = useState<string | null>(null);
+  const reset = () => { setSay(null); setFixTool(null); };
+  const submit = async () => {
+    const instruction = text.trim();
+    if (!instruction || busy) return;
+    setBusy(true); reset();
+    const r = await exec("compile_render", { clipId, instruction, wait: true });
+    setBusy(false);
+    const data = (r?.data ?? {}) as { mode?: string; say?: string; tool?: string | null };
+    if (data.mode === "corrective") { setSay(data.say ?? null); setFixTool(data.tool ?? null); }
+    else if (data.mode === "unsupported") setSay(data.say ?? "I can't do that with the generative model.");
+    else setText("");   // re-imagine / transform applied — the rack now shows what it chose
+  };
+  const applyFix = async () => {
+    if (!fixTool) return;
+    if (fixTool === "quantize_notes") await exec("quantize_notes", { clipId });
+    else await exec("load_builtin", { trackId, type: fixTool });
+    setText(""); reset();
+  };
+  return (
+    <div className="gen-compile" data-testid="gen-compile">
+      <div className="gen-compile-row">
+        <input className="gen-compile-input" data-testid="gen-compile-input" type="text"
+          placeholder="describe it… e.g. make it lo-fi, or “as a violin”" value={text} disabled={busy}
+          aria-label="Describe the generative edit"
+          onChange={(e) => { setText(e.target.value); reset(); }}
+          onKeyDown={(e) => { if (e.key === "Enter") void submit(); }} />
+        <button className="btn rack-add" data-testid="gen-compile-go" disabled={busy || !text.trim()}
+          onClick={() => void submit()}>{busy ? "…" : "✨ Compile"}</button>
+      </div>
+      {say && <div className="gen-compile-say" role="status" data-testid="gen-compile-say">{say}</div>}
+      {fixTool && (
+        <button className="btn rack-add gen-compile-fix" data-testid="gen-compile-fix"
+          onClick={() => void applyFix()}>{TOOL_LABEL[fixTool] ?? "Apply fix"}</button>
       )}
     </div>
   );
