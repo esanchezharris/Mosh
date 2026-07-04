@@ -438,7 +438,9 @@ def main() -> int:
         for _ in range(max(1, args.runs)):
             notes, f0 = _fetch_models(wav, bp_py, sk_py)
             f0_last = f0
-            words = _asr_words(wav, f"{args.out}-words.json", args.whisper_model) \
+            in_stem = os.path.splitext(os.path.basename(args.input))[0]
+            words = _asr_words(wav, f"{args.out}-words-{in_stem}-{args.whisper_model}.json",
+                               args.whisper_model) \
                 if "v4" in algos else []
             derive = {"v1": lambda: _derive_v1(notes, f0, args.bpm, ts, args.grid),
                       "v2": lambda: _derive_v2(mono, sr, notes, f0, args.bpm, ts, args.grid),

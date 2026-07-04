@@ -9,8 +9,9 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-HANDOFF_DEFAULT="/private/tmp/claude-501/-Users-emiliosanchez-harris-Documents-ClaudeMosh--claude-worktrees-elated-kalam-308b76/5c64bfb9-7512-47d4-8059-8a7e626bc9c8/scratchpad/fms-ksa-handoff"
-HANDOFF="${HANDOFF_DEFAULT}"
+# No baked-in default: the handoff dir is session-specific. Pass --handoff DIR
+# (or set KSA_HANDOFF); it must contain scores/ and refs/own-{10s,30s}.wav.
+HANDOFF="${KSA_HANDOFF:-}"
 PORT=22; KEY=""; STAGE="all"
 HOSTSPEC="${1:?usage: run_ksa_remote.sh user@host [-p PORT] [-i KEYFILE] [--handoff DIR] [--stage ...]}"
 shift
@@ -27,7 +28,9 @@ SSH=(ssh -p "$PORT" -o StrictHostKeyChecking=accept-new)
 [[ -n "$KEY" ]] && SSH+=(-i "$KEY")
 RS=(rsync -az --info=stats1 -e "${SSH[*]}")
 
-[[ -d "$HANDOFF/scores" && -f "$HANDOFF/refs/own-30s.wav" ]] || { echo "handoff dir incomplete: $HANDOFF"; exit 1; }
+[[ -n "$HANDOFF" ]] || { echo "no handoff dir: pass --handoff DIR (or set KSA_HANDOFF)"; exit 2; }
+[[ -d "$HANDOFF/scores" && -f "$HANDOFF/refs/own-30s.wav" && -f "$HANDOFF/refs/own-10s.wav" ]] \
+  || { echo "handoff dir incomplete: $HANDOFF (needs scores/ + refs/own-10s.wav + refs/own-30s.wav)"; exit 1; }
 
 echo "== 0/4 remote prerequisites (rsync — RunPod images ship without it)"
 "${SSH[@]}" "$HOSTSPEC" "mkdir -p ksa/handoff; command -v rsync >/dev/null || (apt-get update -qq && apt-get install -y -qq rsync git curl)"

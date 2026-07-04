@@ -79,7 +79,7 @@ Re-sing the finished sheet in the artist's voice. The voice research is decisive
 
 | Build | Fork | Wait / avoid |
 |---|---|---|
-| The mumble→skeleton front-end (Phase 2) + the lyric-constraint engine (Phase 1) — **the moat; nothing off-the-shelf does this** | The render model (Phase 3) via MIT/Apache weights (YingMusic-Singer-Plus / SoulX-Singer) | NC-ND / GPL weights (Vevo2, Seed-VC) as shipping deps; closed APIs as core deps |
+| The mumble→skeleton front-end (Phase 2) + the lyric-constraint engine (Phase 1) — **the moat; nothing off-the-shelf does this** | The render model (Phase 3) via commercial-safe weights: **SoulX-Singer (Apache-2.0)**; YingMusic-Singer-Plus demoted — **NOT MIT** (CC-BY-4.0 + Stability-Community-License VAE, see §3) | NC-ND / GPL weights (Vevo2, Seed-VC) as shipping deps; closed APIs as core deps |
 
 ---
 

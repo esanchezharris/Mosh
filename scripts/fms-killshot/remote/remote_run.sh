@@ -138,6 +138,7 @@ render() {
   say "render grid …"
   "$PY" "$HANDOFF/tools/render_grid.py" --soulx "$SOULX" --handoff "$HANDOFF" \
     --out "$OUT/renders" 2>&1 | tee "$LOG/render.log"
+  [[ "${PIPESTATUS[0]}" -eq 0 ]] || die "render_grid failed (logs/render.log)"
   # SVC bonus probe (cli.inference_svc — needs F0 .npy for prompt AND target, per
   # example/infer_svc.sh; the preprocess pipeline emits them, midi_transcribe=False)
   if [[ -f "$HANDOFF/refs/svc-target.wav" && ! -d "$OUT/svc-probe" ]]; then

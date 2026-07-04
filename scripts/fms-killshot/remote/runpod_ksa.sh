@@ -34,17 +34,18 @@ create() {
   local pub
   pub=$(cat "$HOME/.ssh/id_ed25519.pub")
   local body
-  body=$(python3 - "$pub" <<'EOF'
-import json, sys
+  body=$(KSA_NAME="$NAME" KSA_IMAGE="$IMAGE" KSA_GPUS="$GPUS" KSA_DISK="$DISK" KSA_CLOUD="$CLOUD" \
+    python3 - "$pub" <<'EOF'
+import json, os, sys
 print(json.dumps({
-  "name": "mosh-ksa",
-  "imageName": "runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04",
-  "gpuTypeIds": ["NVIDIA GeForce RTX 4090", "NVIDIA RTX A5000", "NVIDIA L40S"],
+  "name": os.environ["KSA_NAME"],
+  "imageName": os.environ["KSA_IMAGE"],
+  "gpuTypeIds": json.loads(os.environ["KSA_GPUS"]),
   "gpuCount": 1,
-  "containerDiskInGb": 60,
+  "containerDiskInGb": int(os.environ["KSA_DISK"]),
   "volumeInGb": 0,
   "ports": ["22/tcp"],
-  "cloudType": __import__("os").environ.get("KSA_CLOUD", "SECURE"),
+  "cloudType": os.environ.get("KSA_CLOUD", "SECURE"),
   "env": {"PUBLIC_KEY": sys.argv[1]},
 }))
 EOF
@@ -79,20 +80,36 @@ print(f"{ip} {port}" if ip and port else "")')
 
 terminate() {
   local id; id=$(pod_id)
-  api DELETE "/pods/$id" >/dev/null && rm -f "$STATE" && echo "pod $id terminated (billing stopped, voice data gone)"
+  api DELETE "/pods/$id" >/dev/null
+  # curl exits 0 on HTTP 4xx/5xx — confirm the pod is actually gone before
+  # dropping local state and claiming billing stopped / voice data destroyed.
+  local gone=""
+  for i in $(seq 1 6); do
+    gone=$(api GET "/pods/$id" 2>/dev/null | python3 -c '
+import json, sys
+try: print("" if json.load(sys.stdin).get("id") else "gone")
+except Exception: print("gone")' 2>/dev/null || echo gone)
+    [[ -n "$gone" ]] && break
+    sleep 5
+  done
+  [[ -n "$gone" ]] || { echo "terminate NOT confirmed — pod $id may still be RUNNING+BILLING (check the RunPod console); keeping $STATE for retry" >&2; exit 1; }
+  rm -f "$STATE" && echo "pod $id terminated (billing stopped, voice data gone)"
 }
 
 up() {
+  # validate the handoff BEFORE renting a pod (run_ksa_remote.sh needs it)
+  [[ -n "${KSA_HANDOFF:-}" && -d "$KSA_HANDOFF/scores" ]] || { echo "set KSA_HANDOFF to the handoff dir (scores/ + refs/own-{10s,30s}.wav) before 'up'" >&2; exit 2; }
   [[ -f "$STATE" ]] || create
   echo "waiting for SSH endpoint …"
-  read -r IP PORT <<< "$(ssh_endpoint)"
+  read -r IP PORT <<< "$(ssh_endpoint)" || true
+  [[ -n "${IP:-}" && -n "${PORT:-}" ]] || { echo "no SSH endpoint — pod left up (it BILLS until '$0 terminate')" >&2; exit 1; }
   echo "ssh root@$IP -p $PORT"
   # first boot: give sshd/key-injection a moment
   for i in $(seq 1 12); do
     ssh -p "$PORT" -o StrictHostKeyChecking=accept-new -o ConnectTimeout=8 "root@$IP" true 2>/dev/null && break
     sleep 10
   done
-  if "$HERE/run_ksa_remote.sh" "root@$IP" -p "$PORT"; then
+  if "$HERE/run_ksa_remote.sh" "root@$IP" -p "$PORT" --handoff "$KSA_HANDOFF"; then
     echo "SUCCESS — terminating pod."
     terminate
   else
@@ -104,7 +121,9 @@ up() {
 case "${1:-}" in
   create) create ;;
   status) status ;;
-  ssh) read -r IP PORT <<< "$(ssh_endpoint)"; echo "ssh root@$IP -p $PORT" ;;
+  ssh) read -r IP PORT <<< "$(ssh_endpoint)" || true
+       [[ -n "${IP:-}" && -n "${PORT:-}" ]] || { echo "no SSH endpoint" >&2; exit 1; }
+       echo "ssh root@$IP -p $PORT" ;;
   terminate) terminate ;;
   list) api GET /pods | python3 -m json.tool | sed -n '1,60p' ;;
   up) up ;;
