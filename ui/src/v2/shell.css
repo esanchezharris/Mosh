@@ -456,9 +456,9 @@
 /* Shell reactivity (#10): --lvl (0..1, set imperatively from per-track levels) drives a
    lime glow on the track icon + a faint inner glow on the lane, so each track lights up
    with its own audio while playing — alongside Moshi reacting to the master spectrum. */
-.v2-lhead .v2-licon { box-shadow: 0 0 calc(var(--lvl, 0) * 22px) rgba(204, 255, 54, calc(var(--lvl, 0) * 0.9)); }
+.v2-lhead .v2-licon { box-shadow: 0 0 calc(var(--lvl, 0) * 22px) color-mix(in srgb, var(--accent) calc(var(--lvl, 0) * 90%), transparent); }
 .v2-lane { transition: box-shadow 90ms linear; }
-.v2-lane[data-track-id] { box-shadow: inset 2px 0 0 rgba(204, 255, 54, calc(var(--lvl, 0) * 0.85)), inset 0 0 38px rgba(204, 255, 54, calc(var(--lvl, 0) * 0.13)); }
+.v2-lane[data-track-id] { box-shadow: inset 2px 0 0 color-mix(in srgb, var(--accent) calc(var(--lvl, 0) * 85%), transparent), inset 0 0 38px color-mix(in srgb, var(--accent) calc(var(--lvl, 0) * 13%), transparent); }
 @media (prefers-reduced-motion: reduce) {
   .v2-lhead .v2-licon, .v2-lane[data-track-id] { box-shadow: none; transition: none; }
 }
@@ -507,7 +507,7 @@
 .v2-clipmenu-sep { height: 1px; background: var(--v2-line); margin: 4px 4px; }
 .v2-clip.wave { background: var(--v2-clip-wave); }
 .v2-clip.midi { background: rgba(26, 26, 28, 0.66); border-color: rgba(255, 255, 255, 0.16); }
-.v2-clip.drum { background: rgba(24, 24, 26, 0.6); border-color: rgba(204, 255, 54, 0.3); }
+.v2-clip.drum { background: rgba(24, 24, 26, 0.6); border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
 .v2-clip-label { position: absolute; left: 8px; top: 5px; font-size: 10px; color: rgba(255, 255, 255, 0.92); text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5); pointer-events: none; }
 /* Phase 2 — a re-imagined render plays beneath this (muted) MIDI clip. */
 .v2-clip-badge.reimagine { position: absolute; right: 5px; top: 4px; font-size: 11px; line-height: 1; pointer-events: none; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5)); }
@@ -801,7 +801,7 @@
      which is the only consumer of these rules now. ───────────────────────────────── */
 .v2-pb-search { flex: 1 1 auto; display: flex; align-items: center; gap: 8px; min-width: 0;
   background: var(--v2-surface-sunken); border: 1px solid var(--v2-line); border-radius: 9px; padding: 0 10px; height: 32px; }
-.v2-pb-search:focus-within { border-color: rgba(204, 255, 54, 0.55); }
+.v2-pb-search:focus-within { border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
 .v2-pb-search-icon { color: var(--v2-faint); font-size: 14px; }
 .v2-pb-search input { flex: 1 1 auto; min-width: 0; background: transparent; border: none; outline: none; color: var(--v2-text); font: inherit; font-size: 13px; }
 
