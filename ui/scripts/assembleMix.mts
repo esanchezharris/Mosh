@@ -19,13 +19,19 @@ import { createHash } from "node:crypto";
 import { appendFileSync, copyFileSync, createReadStream, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
-import { isPopulateClassRow, rowCommandNames, seededSample, type ChatRow } from "../src/sft/mixAssembly";
+import { isHuhRow, isPopulateClassRow, oversampleRare, rowCommandNames, seededSample, type ChatRow } from "../src/sft/mixAssembly";
 import { argFlag } from "./lib/realEngine.mts";
 
 const base = resolve(argFlag("base") ?? join("..", "service", "sft", ".sft-data", "s1-bt"));
 const synthDir = resolve(argFlag("synth") ?? join("..", "service", "sft", ".sft-data", "synth"));
 const outDir = resolve(argFlag("out") ?? join("..", "service", "sft", ".sft-data", "s2-mix"));
 const cap = Number(argFlag("cap", "2000"));
+// Post-dedupe HUH cap (defensive; r1's real HUH level was ~1.1% post-dedupe).
+const huhCap = Number(argFlag("huh-cap", "900"));
+// r1 exit-gate lesson: rare commands (undo 53 rows) collapse to degenerate JSON
+// against 61k-row gravity — oversample rows of any command below the threshold.
+const osBelow = Number(argFlag("oversample-below", "100"));
+const osFactor = Number(argFlag("oversample-factor", "4"));
 const seed = Number(argFlag("seed", "1"));
 
 mkdirSync(outDir, { recursive: true });
@@ -34,6 +40,7 @@ writeFileSync(trainPath, "");
 
 const seen = new Set<string>();
 const populateLines: string[] = [];
+const huhLines: string[] = [];
 const perCommand: Record<string, number> = {};
 const sources: Record<string, number> = {};
 let input = 0, deduped = 0, written = 0;
@@ -57,6 +64,7 @@ async function ingest(path: string, label: string): Promise<void> {
     seen.add(h);
     const row = JSON.parse(line) as ChatRow;
     if (isPopulateClassRow(row)) { populateLines.push(line); continue; }
+    if (isHuhRow(row)) { huhLines.push(line); continue; }
     countRow(row);
     buffer.push(line);
     written++;
@@ -71,8 +79,35 @@ for (const f of readdirSync(synthDir).filter((f) => f.endsWith(".jsonl") && !f.s
 }
 
 const keptPopulate = seededSample(populateLines, cap, seed);
-for (const line of keptPopulate) { countRow(JSON.parse(line) as ChatRow); buffer.push(line); written++; }
+const keptHuh = seededSample(huhLines, huhCap, seed + 1);
+for (const line of [...keptHuh, ...keptPopulate]) { countRow(JSON.parse(line) as ChatRow); buffer.push(line); written++; }
 flush();
+
+// oversample rare commands over the FULL post-cap output (streamed back in)
+let boosted: Record<string, number> = {};
+if (osFactor > 1) {
+  const all: ChatRow[] = [];
+  const rl2 = createInterface({ input: createReadStream(trainPath), crlfDelay: Infinity });
+  const lines: string[] = [];
+  for await (const line of rl2) { if (line.trim()) { lines.push(line); all.push(JSON.parse(line) as ChatRow); } }
+  const res = oversampleRare(all, osBelow, osFactor);
+  boosted = res.boosted;
+  const extraLines: string[] = [];
+  // extras reference row objects; re-serialize via index mapping (same order as `all`)
+  let k = 0;
+  for (let i = 0; i < all.length; i++) {
+    const names = new Set(rowCommandNames(all[i]));
+    const rare = Object.keys(boosted);
+    if (![...names].some((n) => rare.includes(n))) continue;
+    for (let c = 1; c < osFactor; c++) extraLines.push(lines[i]);
+    k++;
+  }
+  if (extraLines.length) {
+    appendFileSync(trainPath, extraLines.join("\n") + "\n");
+    for (const line of extraLines) { countRow(JSON.parse(line) as ChatRow); written++; }
+  }
+  console.log(`oversampled ${k} rare-command rows ×${osFactor} (+${extraLines.length} rows) across ${Object.keys(boosted).length} commands`);
+}
 
 copyFileSync(join(base, "valid.jsonl"), join(outDir, "valid.jsonl"));
 
@@ -84,11 +119,11 @@ const fileSha = (p: string) => {
   return h.digest("hex");
 };
 const manifest = {
-  base, synthDir, populateCap: cap, seed, sources,
-  stats: { input, deduped, populateSeen: populateLines.length, populateKept: keptPopulate.length, output: written, perCommand },
+  base, synthDir, populateCap: cap, huhCap, oversample: { below: osBelow, factor: osFactor, boosted }, seed, sources,
+  stats: { input, deduped, populateSeen: populateLines.length, populateKept: keptPopulate.length, huhSeen: huhLines.length, huhKept: keptHuh.length, output: written, perCommand },
   sha256: { "train.jsonl": fileSha(trainPath), "valid.jsonl": fileSha(join(outDir, "valid.jsonl")) },
 };
 writeFileSync(join(outDir, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
-console.log(`mix: ${input} in → ${written} out (deduped ${deduped}, populate ${populateLines.length}→${keptPopulate.length})`);
+console.log(`mix: ${input} in → ${written} out (deduped ${deduped}, populate ${populateLines.length}→${keptPopulate.length}, huh ${huhLines.length}→${keptHuh.length})`);
 console.log(`commands covered: ${Object.keys(perCommand).length}`);
 console.log(`→ ${trainPath}`);

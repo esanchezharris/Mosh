@@ -43,6 +43,10 @@ const RICH: SynthCmd[] = [
   { command: "create_lyric_sheet", args: { trackId: "${TVOCAL}", topic: "comeback", mood: "defiant" } },
   { command: "set_lyric_line", args: { trackId: "${TVOCAL}", lineIndex: 0, text: "counted out but I came back louder" } },
   { command: "set_lyric_line", args: { trackId: "${TVOCAL}", lineIndex: 1, seedText: "___ ___ in the cold night ___" } },
+  // r1 exit-gate lesson: every training clip started at 0, so split/trim math
+  // never generalized to offset clips (the eval clip starts at beat 4). An
+  // APPENDED offset clip keeps the prefix-superset golden intact.
+  { command: "add_midi_clip", args: { trackId: "${TVOCAL}", start: 6, length: 4 }, capture: { CVOX: "clipId" } },
 ];
 
 // Render-layer state without running a render (set_render_param, bypass_layer,
