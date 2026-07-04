@@ -1,0 +1,108 @@
+{
+ "name": "score2-tone",
+ "bpm": 120,
+ "language": "English",
+ "events": [
+  {
+   "rest": 1.0
+  },
+  {
+   "word": "cold",
+   "pitch": 43,
+   "beats": 1.0
+  },
+  {
+   "word": "lights",
+   "pitch": 45,
+   "beats": 1.0
+  },
+  {
+   "word": "flicker",
+   "pitch": 47,
+   "beats": 1.0
+  },
+  {
+   "word": "while",
+   "pitch": 48,
+   "beats": 0.5
+  },
+  {
+   "word": "I",
+   "pitch": 47,
+   "beats": 0.5
+  },
+  {
+   "word": "chase",
+   "pitch": 45,
+   "beats": 1.0
+  },
+  {
+   "word": "the",
+   "pitch": 43,
+   "beats": 0.5
+  },
+  {
+   "word": "tone",
+   "pitch": 45,
+   "beats": 2.0
+  },
+  {
+   "word": "tone",
+   "pitch": 47,
+   "beats": 1.0,
+   "cont": true
+  },
+  {
+   "word": "tone",
+   "pitch": 43,
+   "beats": 1.0,
+   "cont": true
+  },
+  {
+   "rest": 1.0
+  },
+  {
+   "word": "cold",
+   "pitch": 48,
+   "beats": 1.0
+  },
+  {
+   "word": "lights",
+   "pitch": 47,
+   "beats": 1.0
+  },
+  {
+   "word": "flicker",
+   "pitch": 45,
+   "beats": 1.0
+  },
+  {
+   "word": "while",
+   "pitch": 43,
+   "beats": 0.5
+  },
+  {
+   "word": "I",
+   "pitch": 45,
+   "beats": 0.5
+  },
+  {
+   "word": "chase",
+   "pitch": 47,
+   "beats": 1.0
+  },
+  {
+   "word": "the",
+   "pitch": 48,
+   "beats": 0.5
+  },
+  {
+   "word": "tone",
+   "pitch": 50,
+   "beats": 3.0
+  },
+  {
+   "rest": 1.0
+  }
+ ]
+}

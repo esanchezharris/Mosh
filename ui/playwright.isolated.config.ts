@@ -1,8 +1,11 @@
 import { defineConfig, devices } from "@playwright/test";
 
-// Throwaway ISOLATED e2e config (not used by CI): identical to playwright.config.ts but
-// on port 5191 with strictPort, for machines where a CONCURRENT session's dev server owns
+// Throwaway ISOLATED e2e config (not used by CI): a hand-copy of playwright.config.ts on
+// port 5191 with strictPort, for machines where a CONCURRENT session's dev server owns
 // :5173 with a different bundle (the documented false-fail trap — do NOT kill that server).
+// Deliberate deviations from the base config: retries hardcoded 0 (never CI-conditional),
+// reuseExistingServer false (always a fresh strict-port vite), no workers override.
+// Edits to playwright.config.ts do NOT propagate here — re-sync manually when it changes.
 // MUST keep the camera fake-media flags or 2 collaborator-video tests false-fail.
 
 export default defineConfig({

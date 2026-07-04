@@ -327,12 +327,13 @@ juce::var GenerativeJobManager::skeletonSpec (const juce::File& inputWav, double
     body->setProperty ("timeSig", var (ts));
     body->setProperty ("grid", grid.isNotEmpty() ? grid : juce::String ("1/16"));
 
-    // The server orchestrates the whole chain (Basic-Pitch notes + optional FCPE F0, then the
-    // in-process bin) — the Basic-Pitch subprocess dominates, so give it transcribe's generous
-    // timeout. Blocks → the caller runs it off the message thread. Mirrors transcribe().
+    // The server orchestrates the whole chain (Basic-Pitch notes + optional FCPE F0 + optional
+    // whisper word budgets, then the in-process bin) — up to THREE sequential subprocesses with
+    // ~180 s budgets each, so the client timeout must cover their sum or a legitimately slow
+    // chain reads as "service unavailable". Blocks → the caller runs it off the message thread.
     URL url = URL (baseUrl + "/skeleton_spec").withPOSTData (JSON::toString (var (body)));
     auto opts = URL::InputStreamOptions (URL::ParameterHandling::inPostData)
-                    .withConnectionTimeoutMs (185000)
+                    .withConnectionTimeoutMs (560000)
                     .withExtraHeaders ("Content-Type: application/json");
     if (auto s = url.createInputStream (opts))
         return JSON::parse (s->readEntireStreamAsString());
