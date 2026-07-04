@@ -1571,6 +1571,8 @@ juce::var MoshOps::cmdBuildSkeletonFromClip (const juce::var& args)
         if (spec.getProperty ("topic", var()).toString().isNotEmpty())
             sheet.setProperty (ids::lyricTopic, spec.getProperty ("topic", var()), nullptr);
         auto container = mosh::LyricSheet::lines (sheet);
+        const auto scoresVar = spec.getProperty ("lineScores", var());  // Stage 1: aligned 1:1 with lines
+        int li = 0;
         for (auto& lv : *linesVar.getArray())
         {
             auto line = mosh::LyricLine::create (juce::Uuid().toString(),
@@ -1582,6 +1584,12 @@ juce::var MoshOps::cmdBuildSkeletonFromClip (const juce::var& args)
             line.setProperty (ids::lyricStress,         lv.getProperty ("stress", var()), nullptr);
             line.setProperty (ids::lyricRhymeGroup,     lv.getProperty ("rhymeGroup", var()), nullptr);
             line.setProperty (ids::status,              "skeleton", nullptr);   // the grid-editor gate (distinct from L2 "proposed")
+            // Phase-3 Stage 1: persist the render-ready score blob (articulation slots +
+            // melisma segments) with its line — the Stage-2 SoulX adapter authors the
+            // target score from this. Absent from older/degraded specs ⇒ simply no blob.
+            if (scoresVar.isArray() && li < scoresVar.size() && scoresVar[li].isObject())
+                line.setProperty (ids::lyricScore, juce::JSON::toString (scoresVar[li], true), nullptr);
+            ++li;
             container.appendChild (line, nullptr);
         }
         tt->state.appendChild (sheet, &undoManager());

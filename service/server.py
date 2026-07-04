@@ -831,11 +831,51 @@ class Handler(BaseHTTPRequestHandler):
                         f0 = payload.get("f0")
                 except (subprocess.TimeoutExpired, OSError, json.JSONDecodeError, ValueError):
                     pass
+            # Stage-1 upgrade (kill-shot B GO 2026-07-04): an in-process energy envelope turns
+            # the v1 nuclei into evidence-pruned, melisma-grouped v3 slots; generous ASR words
+            # (whisper venv present) add v4 per-phrase syllable budgets. Every rung DEGRADES:
+            # non-PCM/unreadable audio -> env=None -> today's v1 lines byte-identical (the
+            # fmt-tag==1 guard in read_pcm_mono keeps that ladder deterministic across
+            # interpreters — afconvert's WAVE_EXTENSIBLE reads on 3.12+ but not 3.11).
             try:
                 from skeleton import core as skel
+                env = None
+                try:
+                    pcm = skel.read_pcm_mono(input_wav)
+                    if pcm and pcm[0]:
+                        env = skel.energy_envelope(pcm[0], pcm[1]) or None  # [] (sub-window take) -> v1 floor
+                except Exception as e:  # noqa: BLE001 — the envelope is an upgrade, never a breaker
+                    env = None
+                    print(f"[skeleton_spec] envelope skipped: {e}", file=sys.stderr)
+                words = None
+                wh_py = _whisper_py()
+                if env and bool(data.get("asr", True)) and os.path.isfile(wh_py):
+                    # v4 "ASR counts, DSP times": GENEROUS decode (model `small`, the KS-B
+                    # validated config); words consumed UNGATED as counts+timestamps only,
+                    # never as lyrics (the 0.6-confidence lyric-anchor gate lives in
+                    # /mumble_spec and is untouched).
+                    cli = os.path.join(SERVICE_DIR, "whisper", "whisper_cli.py")
+                    try:
+                        proc = subprocess.run([wh_py, cli, input_wav, "small"],
+                                              capture_output=True, text=True, timeout=180)
+                        payload = json.loads((proc.stdout or "").strip())
+                        if payload.get("ok"):
+                            from phonology import core as ph
+                            pron = ph.Pronouncer()
+                            ws = []
+                            for w in payload.get("words", []) or []:
+                                c = str(w.get("word", "")).strip(" .,!?'\"-").lower()
+                                if not any(ch.isalpha() for ch in c):
+                                    continue
+                                ws.append({"start": float(w["start"]), "end": float(w["end"]),
+                                           "syl": pron.syllables(c) or 1})
+                            words = ws or None
+                    except Exception as e:  # noqa: BLE001 — ASR is an upgrade, never a breaker
+                        print(f"[skeleton_spec] ASR budget skipped: {e}", file=sys.stderr)
                 self._send(200, skel.build_skeleton_spec(
                     notes, f0=f0, bpm=bpm, time_sig=(int(ts[0]), int(ts[1])), grid=grid,
-                    topic=str(data.get("topic", "")), mood=str(data.get("mood", ""))))
+                    topic=str(data.get("topic", "")), mood=str(data.get("mood", "")),
+                    env=env, words=words))
             except Exception as e:  # noqa: BLE001
                 self._send(500, {"ok": False, "error": f"skeleton spec error: {e}"})
         elif path == "/sketch":
