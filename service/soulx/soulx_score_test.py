@@ -129,6 +129,27 @@ r = sx.author_score([{"text": "no flow", "score": None}])
 check("no scored lines -> ok:false no_score", (not r.get("ok")) and r.get("error") == "no_scored_lines", str(r))
 check("empty lines -> ok:false", not sx.author_score([]).get("ok"))
 
+# ── 9b. Duration-chain precision: cumulative drift stays sub-millisecond ───────────────
+# The score's timeline is reconstructed by SUMMING duration tokens (fake renderer AND the
+# real model). 2dp formatting drifted real takes' onsets up to 33 ms (owner ear-caught,
+# 2026-07-04) — a third of a 16th at 134 BPM. Pin: over ~120 awkward-duration slots, the
+# reconstructed final onset lands within 1 ms of the take's true time.
+_drift_slots = [SLOT(0.31 + i * (1.0 / 3.0), 0.31 + i * (1.0 / 3.0) + 0.2107, 57)
+                for i in range(120)]
+_r = sx.author_score([LINE("la", _drift_slots)])
+_clip = _r["score"][0]
+_durs = [float(d) for d in _clip["duration"].split()]
+_types = [int(t) for t in _clip["note_type"].split()]
+_t, _last_onset = 0.0, None
+for _d, _nt in zip(_durs, _types):
+    if _nt in (2, 3):
+        _last_onset = _t
+    _t += _d
+_true_last = _drift_slots[-1]["start"]
+check("duration chain: last onset within 1ms of the take's true time",
+      _last_onset is not None and abs(_last_onset - _true_last) < 0.001,
+      f"drift={( _last_onset - _true_last) * 1000:.2f}ms over {len(_durs)} events")
+
 # ── 10. Determinism: 3x identical serialization ────────────────────────────────────────
 import hashlib
 import json
