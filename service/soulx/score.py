@@ -142,12 +142,24 @@ def author_score(lines: List[dict], language: str = "English", name: str = "mosh
                 emit_word(unit_word, segs)
             cursor = max(cursor, u_end)
 
-    total_ms = round(sum(dur_t) * 1000)
+    # Duration formatting with ERROR DIFFUSION: the timeline is reconstructed by SUMMING
+    # these tokens (fake renderer and real model alike), so per-token rounding must not
+    # accumulate — the SoulX example's plain 2dp drifted real-take onsets up to ~33 ms
+    # (owner ear-caught 2026-07-04), and even 4dp drifts ~4 ms when durations share a
+    # rounding direction. Quantizing each token as (true cumulative − emitted cumulative)
+    # keeps the CHAIN within 0.05 ms of the take's grid for any score length.
+    qdur, acc_true, acc_emit = [], 0.0, 0.0
+    for d in dur_t:
+        acc_true += d
+        q = max(0.0, round(acc_true - acc_emit, 4))
+        qdur.append(q)
+        acc_emit += q
+    total_ms = round(acc_emit * 1000)
     clip = {
         "index": f"{name}_0_{total_ms}",
         "language": language,
         "time": [0, total_ms],
-        "duration": " ".join(f"{d:.2f}" for d in dur_t),
+        "duration": " ".join(f"{q:.4f}" for q in qdur),
         "text": " ".join(text_t),
         "phoneme": " ".join(phon_t),
         "note_pitch": " ".join(str(p) for p in pitch_t),
