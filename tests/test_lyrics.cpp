@@ -195,6 +195,50 @@ TEST_CASE ("Phase-3 lyricScore (render-ready score blob) persists on a skeleton 
     REQUIRE (LyricSheet::lineFingerprint (sheet, l2, "ctx", "build") == before);
 }
 
+TEST_CASE ("extraction provenance (lyricOrigin + lyricHeard) persists and stays out of the fingerprint", "[lyrics][extract]")
+{
+    // Pipeline correction 2026-07-04: a line the producer REALLY sang lands verbatim
+    // (text + gapless seed + origin "sung") with everything ASR heard persisted beside
+    // it. Both must survive the .tracktionedit round-trip; neither is a generation
+    // constraint, so the line fingerprint must ignore them.
+    auto line = LyricLine::create ("ex-1", 0, "verse");
+    line.setProperty (ids::lyricText, "hold the flame", nullptr);
+    line.setProperty (ids::lyricSeedText, "hold the flame", nullptr);
+    line.setProperty (ids::status, "seed", nullptr);
+    line.setProperty (ids::lyricOrigin, "sung", nullptr);
+    line.setProperty (ids::lyricHeard,
+                      "{\"v\":1,\"bar\":0,\"words\":[{\"word\":\"hold\",\"start\":0.1,"
+                      "\"end\":0.45,\"conf\":0.9,\"syl\":1,\"slot\":0,\"kept\":true,"
+                      "\"label\":\"real\",\"tier\":\"t1\"},{\"word\":\"da\",\"start\":0.6,"
+                      "\"end\":0.9,\"conf\":0.41,\"syl\":1,\"slot\":1,\"kept\":false,"
+                      "\"label\":\"mumble\",\"tier\":\"t1\"}]}",
+                      nullptr);
+
+    auto back = juce::ValueTree::fromXml (line.toXmlString());
+    REQUIRE (back[ids::lyricOrigin].toString() == "sung");
+    auto parsed = juce::JSON::parse (back[ids::lyricHeard].toString());
+    REQUIRE (parsed.isObject());
+    auto words = parsed.getProperty ("words", juce::var());
+    REQUIRE (words.isArray());
+    REQUIRE (words.size() == 2);
+    // rejected words persist too (kept=false) — raw ASR is never discarded
+    REQUIRE ((bool) words[1].getProperty ("kept", true) == false);
+    REQUIRE (words[0].getProperty ("word", juce::var()).toString() == "hold");
+
+    // fingerprint exclusion: provenance + heard blob cannot dirty cached proposals
+    auto sheet = LyricSheet::create ("ls-ex");
+    auto l2 = LyricLine::create ("ex-2", 0, "verse");
+    const auto before = LyricSheet::lineFingerprint (sheet, l2, "ctx", "build");
+    l2.setProperty (ids::lyricOrigin, "partial", nullptr);
+    l2.setProperty (ids::lyricHeard, "{\"v\":1}", nullptr);
+    REQUIRE (LyricSheet::lineFingerprint (sheet, l2, "ctx", "build") == before);
+
+    // a fresh line carries neither (legacy/typed lines stay unmarked)
+    auto fresh = LyricLine::create ("ex-3", 1, "verse");
+    REQUIRE_FALSE (fresh.hasProperty (ids::lyricOrigin));
+    REQUIRE_FALSE (fresh.hasProperty (ids::lyricHeard));
+}
+
 TEST_CASE ("lineFingerprint is stable + sensitive to every constraint input", "[lyrics][cache]")
 {
     auto sheet = LyricSheet::create ("ls-3");
