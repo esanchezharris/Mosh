@@ -236,6 +236,59 @@ def silence_energy(env_a, env_b) -> dict:
             "take_in_render_silence_pct": round(100.0 * a_in_r_sil / open_a, 1)}
 
 
+def score_events(clip: dict):
+    """Score chain -> [(start_s, dur_s, midi_pitch, note_type), ...] absolute-timed
+    sung events (types 2/3; rests excluded). Times come from the 4dp error-diffused
+    duration chain, so they are take-aligned by construction."""
+    durs = [float(d) for d in clip["duration"].split()]
+    pitches = [int(p) for p in clip["note_pitch"].split()]
+    types = [int(t) for t in clip["note_type"].split()]
+    out, t = [], 0.0
+    for d, p, nt in zip(durs, pitches, types):
+        if nt in (2, 3) and p > 0 and d > 0:
+            out.append((round(t, 4), round(d, 4), p, nt))
+        t += d
+    return out
+
+
+def score_conformance(clip: dict, f0, onsets=None, tol_s: float = 0.05,
+                      lag_s: float = 0.0) -> dict:
+    """Does an audio signal SING WHAT THE SCORE SAYS? One function, two attribution
+    rows: fed the TAKE's F0/onsets it measures score-authoring error ("was the score's
+    melody even right about the take?"); fed the RENDER's it measures the model's
+    conformance ("did SoulX sing what it was told?").
+
+    Per sung event: the F0 median over its (lag-shifted) span vs its `note_pitch` ->
+    Δ semitones. Reports median |Δ|, % within 0.5/1.0 st, and (when onsets are given)
+    onset agreement of word-event starts vs the observed onsets."""
+    events = score_events(clip)
+    per = []
+    f0_pts = sorted(({"t": float(p["t"]), "hz": float(p.get("hz", 0) or 0)}
+                     for p in f0 or [] if float(p.get("hz", 0) or 0) > 0),
+                    key=lambda p: p["t"])
+    for (t, d, pitch, nt) in events:
+        a, b = t + lag_s, t + d + lag_s
+        hz = [p["hz"] for p in f0_pts if a <= p["t"] < b]
+        if not hz:
+            continue
+        hz.sort()
+        med = hz[len(hz) // 2]
+        d_st = 12.0 * math.log2(med / (440.0 * (2.0 ** ((pitch - 69) / 12.0))))
+        per.append({"t": t, "pitch": pitch, "type": nt, "d_st": round(d_st, 2)})
+    ds = sorted(abs(e["d_st"]) for e in per)
+    out = {"events": len(events), "voiced_events": len(per),
+           "pitch_abs_median_st": round(ds[len(ds) // 2], 2) if ds else None,
+           "pitch_within_half_st": round(sum(1 for d in ds if d <= 0.5) / len(ds), 3) if ds else None,
+           "pitch_within_1_st": round(sum(1 for d in ds if d <= 1.0) / len(ds), 3) if ds else None}
+    if onsets is not None:
+        # lag_s maps score time -> observed time (observed = score + lag), and
+        # onset_agreement shifts its b-list by -lag_s, bringing observed onsets back
+        # onto the score timeline — so the sign passes straight through.
+        word_starts = [t for (t, d, p, nt) in events if nt == 2]
+        out["onsets"] = onset_agreement(word_starts, onsets, tol_s=tol_s, lag_s=lag_s)
+    return out
+
+
 def word_match(score_words, asr_words) -> dict:
     """Did the render sing the score's words? Sequence similarity + bag coverage."""
     import difflib
@@ -377,6 +430,28 @@ def _selftest_once() -> str:
     assert wm["seq_ratio"] == 1.0 and wm["bag_coverage"] == 1.0, wm
     wm2 = word_match(["hold", "the", "flame"], ["stay", "up"])
     assert wm2["bag_coverage"] == 0.0, wm2
+
+    # score_conformance: an F0 that sings EXACTLY the score's notes -> 0 st error,
+    # perfect within-half; a contour a whole step sharp on one event shows up per-event.
+    sc_clip = {"duration": "0.50 0.5000 0.5000 0.5000", "note_pitch": "0 57 60 62",
+               "note_type": "1 2 2 3", "text": "<SP> hold flame flame"}
+    def midi_hz_(p):
+        return 440.0 * (2.0 ** ((p - 69) / 12.0))
+    f0_exact = ([{"t": 0.5 + i * 0.01, "hz": midi_hz_(57)} for i in range(50)]
+                + [{"t": 1.0 + i * 0.01, "hz": midi_hz_(60)} for i in range(50)]
+                + [{"t": 1.5 + i * 0.01, "hz": midi_hz_(62)} for i in range(50)])
+    conf = score_conformance(sc_clip, f0_exact, onsets=[0.5, 1.0])
+    assert conf["pitch_abs_median_st"] == 0.0 and conf["pitch_within_half_st"] == 1.0, conf
+    assert conf["onsets"]["f1"] == 1.0, conf["onsets"]
+    f0_sharp = ([{"t": 0.5 + i * 0.01, "hz": midi_hz_(59)} for i in range(50)]   # +2 st on event 1
+                + [{"t": 1.0 + i * 0.01, "hz": midi_hz_(60)} for i in range(50)]
+                + [{"t": 1.5 + i * 0.01, "hz": midi_hz_(62)} for i in range(50)])
+    conf2 = score_conformance(sc_clip, f0_sharp)
+    assert conf2["pitch_within_half_st"] == round(2 / 3, 3), conf2
+    # a lagged signal is forgiven when the lag is passed in
+    f0_late = [{"t": p["t"] + 0.12, "hz": p["hz"]} for p in f0_exact]
+    conf3 = score_conformance(sc_clip, f0_late, onsets=[0.62, 1.12], lag_s=0.12)
+    assert conf3["pitch_abs_median_st"] == 0.0 and conf3["onsets"]["f1"] == 1.0, conf3
 
     rep = analyze(sig, sr, shifted, sr, fa, fa, clip)
     return json.dumps(rep, sort_keys=True)
