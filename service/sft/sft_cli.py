@@ -64,6 +64,11 @@ def run_train(a):
         "--fine-tune-type", "lora",
         "--adapter-path", out,
     ]
+    resume = getattr(a, "resume_adapter_file", None)
+    if resume:
+        # Resume from a saved adapter checkpoint (e.g. after a machine relocation).
+        # mlx_lm continues LoRA training; optimizer moments reset at the seam.
+        cmd += ["--resume-adapter-file", os.path.abspath(resume)]
     if not a.no_grad_checkpoint:
         cmd += ["--grad-checkpoint"]  # trade compute for memory; drop it on a big-RAM Mac for ~2-3x speed
     if a.max_seq_length:
@@ -127,6 +132,7 @@ def main():
     t.add_argument("--max-seq-length", type=int, default=4096)
     t.add_argument("--no-mask-prompt", action="store_true")
     t.add_argument("--no-grad-checkpoint", action="store_true", help="disable gradient checkpointing (faster; needs more RAM)")
+    t.add_argument("--resume-adapter-file", default=None, help="resume LoRA training from a saved adapter checkpoint")
     t.set_defaults(fn=run_train)
 
     f = sub.add_parser("fuse")
