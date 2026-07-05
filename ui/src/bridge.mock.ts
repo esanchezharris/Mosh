@@ -1283,13 +1283,22 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
           text: "", syllableTarget: target, syllableTol: 1, stress, rhymeGroup: rg,
           rhymeStrictness: "", locked: false, sectionId: "", status: "skeleton",
           hasScore: true,   // Stage 1 lands the take's lyricScore with each skeleton line
+          hasHeard: false,
         });
+        // Extraction parity: one line the take REALLY sang lands verbatim (native sets
+        // text + gapless seed + status "seed" + origin "sung" — the loop skips it).
+        const sung: LyricLine = {
+          index: 2, role: "verse", seedText: "hold the flame", text: "hold the flame",
+          syllableTarget: 3, syllableTol: 1, stress: "XxX", rhymeGroup: "A",
+          rhymeStrictness: "", locked: false, sectionId: "", status: "seed",
+          hasScore: true, hasHeard: true, origin: "sung",
+        };
         trk.lyricSheet = {
           id: `ls-${trk.id}`, grid: "1/8", language: "en", topic: "", mood: "",
           explicit: "allow", rhymeStrictness: "slant", styleBias: false, specVersion: 1,
-          lines: [mk(0, 4, "A", "XxxX"), mk(1, 3, "B", "XxX")],
+          lines: [mk(0, 4, "A", "XxxX"), mk(1, 3, "B", "XxX"), sung],
         };
-        emit("skeleton_status", { clipId, state: "done", lineCount: 2 });
+        emit("skeleton_status", { clipId, state: "done", lineCount: 3 });
         invalidate();
       }, 400);
       return ok(command, { status: "started" });

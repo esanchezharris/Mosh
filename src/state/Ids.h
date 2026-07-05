@@ -154,6 +154,19 @@ namespace mosh::ids
     // lineFingerprint; grid edits leave it untouched (it is the take's truth; the Stage-2
     // score author reconciles text vs slots). Additive optional ⇒ no format bump.
     MOSH_DECLARE_ID (lyricScore)
+    // Pipeline correction 2026-07-04 — lyric PROVENANCE, honest by construction:
+    //   "sung"      the producer really sang this line; text is VERBATIM his (extraction)
+    //   "partial"   some heard words anchor the line; gaps regenerate
+    //   "mixed"     accepted a proposal that kept heard words
+    //   "generated" accepted a proposal with no heard words
+    //   "edited"    a hand edit touched a sung line (never claim it verbatim-his again)
+    // Absent ⇒ legacy/typed. Additive optional ⇒ no format bump.
+    MOSH_DECLARE_ID (lyricOrigin)
+    // Everything ASR HEARD in the take for this line — kept AND rejected words with
+    // times/confidence/slot hints ({v,bar,words:[{word,start,end,conf,syl,slot,kept,
+    // label,tier}]}). PERSISTED like lyricScore (future splice boundaries + correction
+    // seeds); take truth, NOT a generation constraint — excluded from lineFingerprint.
+    MOSH_DECLARE_ID (lyricHeard)
 
     MOSH_DECLARE_ID (id)
     MOSH_DECLARE_ID (inputRef)

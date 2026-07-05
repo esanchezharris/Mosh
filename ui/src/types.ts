@@ -77,6 +77,8 @@ export type LyricLine = {
   regen?: number;
   analysis?: LyricAnalysis;     // L1 — precise phonology (from analyze_lyrics)
   hasScore?: boolean;           // FMS Phase-3 — line carries a persisted lyricScore (take flow)
+  origin?: string;              // extraction provenance: sung|partial|mixed|generated|edited
+  hasHeard?: boolean;           // line carries a persisted lyricHeard blob (raw ASR words)
 };
 export type LyricSheet = {
   id: string;
