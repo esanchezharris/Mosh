@@ -391,19 +391,25 @@ def _line_scores(groups: List[dict], bpm: float, time_sig, grid: str, algo: str)
 def build_skeleton_spec(notes: List[dict], f0: Optional[List[dict]] = None, bpm: float = 120.0,
                         time_sig=(4, 4), grid: str = "1/16", topic: str = "", mood: str = "",
                         env: Optional[List[float]] = None,
-                        words: Optional[List[dict]] = None) -> dict:
-    """Notes (+ optional F0 / envelope / ASR words) -> a wordless, editable `LineSpec`.
+                        words: Optional[List[dict]] = None,
+                        extract_lyrics: bool = False,
+                        extract_use_llm: bool = True) -> dict:
+    """Notes (+ optional F0 / envelope / ASR words) -> an editable `LineSpec`.
 
-    Reuses `lyrics.mumble.build_spec_from_take` for the bar binning / stress / spec shape
-    (words forced EMPTY -> all `___` gaps), then stamps the skeleton provenance and the
-    per-line render-ready `lineScores`.
+    Reuses `lyrics.mumble.build_spec_from_take` for the bar binning / stress / spec shape,
+    then stamps the skeleton provenance and the per-line render-ready `lineScores`.
 
     Degradation ladder (each rung strictly additive, never breaking):
-      env=None            -> v1: today's behavior, lines byte-identical (safety floor)
-      env                 -> v3: evidence pruner + melisma grouping (KS-B GO)
-      env + words         -> v4: + per-phrase ASR syllable budgets (KS-B GO)
+      env=None                    -> v1: today's behavior, lines byte-identical (floor)
+      env                         -> v3: evidence pruner + melisma grouping (KS-B GO)
+      env + words                 -> v4: + per-phrase ASR syllable budgets (KS-B GO)
+      env + words + extract_lyrics -> + LYRIC EXTRACTION (pipeline correction 2026-07-04):
+        his real words are detected and PRESERVED — fully-real covered lines land
+        verbatim (`text` + origin "sung"), partly-real lines keep heard words as seed
+        anchors (origin "partial"), mumble stays all-gaps. Raw heard words persist per
+        line in `lineHeard` (nothing discarded — future splice boundaries + seeds).
     `words` without `env` is ignored (v4 folds by evidence kind, which only the pruner
-    assigns — that combination was never measured)."""
+    assigns — that combination was never measured); extraction requires words+env too."""
     nuclei, pitches = _nuclei_with_pitch(notes, f0)
 
     if env:
@@ -413,8 +419,20 @@ def build_skeleton_spec(notes: List[dict], f0: Optional[List[dict]] = None, bpm:
         if words:
             groups, asr_stats = fuse_asr_budget(groups, words, bpm)
             algo = "v4"
-        spec = mumble.build_spec_from_take(groups, [], bpm, time_sig=time_sig, grid=grid,
-                                           topic=topic, mood=mood)
+
+        extraction = None
+        if words and extract_lyrics:
+            from lyrics import extract as lyric_extract
+            extraction = lyric_extract.extract(words, groups, bpm, time_sig=time_sig,
+                                               grid=grid, use_llm=extract_use_llm)
+
+        # Anchoring reuses the PROVEN nearest-free-slot machinery in mumble verbatim:
+        # the extraction tiers already decided which words qualify, so the confidence
+        # threshold is 0.0 (pass exactly those). No extraction -> today's wordless call.
+        anchor_words = extraction["kept"] if extraction else []
+        spec = mumble.build_spec_from_take(groups, anchor_words, bpm, time_sig=time_sig,
+                                           conf_threshold=0.0 if anchor_words else 0.6,
+                                           grid=grid, topic=topic, mood=mood)
         if spec.get("ok"):
             spec["source"] = "skeleton"
             spec["editable"] = True
@@ -424,6 +442,22 @@ def build_skeleton_spec(notes: List[dict], f0: Optional[List[dict]] = None, bpm:
                     "melisma_groups": sum(1 for g in groups if len(g["segments"]) > 1)}
             if asr_stats is not None:
                 info["asr"] = asr_stats
+            if extraction is not None:
+                # Lines and extraction verdicts align through the SAME _bin_bars order.
+                spb = mumble._sec_per_bar(bpm, time_sig)
+                bars = [b for b, _ in mumble._bin_bars(groups, spb)]
+                heard = []
+                for i, (line, bar) in enumerate(zip(spec["lines"], bars)):
+                    text = extraction["line_text"].get(bar)
+                    origin = extraction["line_origin"].get(bar)
+                    if text:
+                        line["text"] = text
+                        line["origin"] = "sung"
+                    elif origin == "partial":
+                        line["origin"] = "partial"
+                    heard.append(extraction["line_heard"].get(bar))
+                spec["lineHeard"] = heard
+                info["extraction"] = extraction["stats"]
             spec["skeleton"] = info
         return spec
 

@@ -242,6 +242,51 @@ sk_short = core.build_skeleton_spec(DUET, f0=None, bpm=120.0, time_sig=(4, 4), g
 check("empty envelope -> v1 floor", sk_short.get("skeleton", {}).get("algo") == "v1",
       str(sk_short.get("skeleton")))
 
+# ── 14. Lyric EXTRACTION rung (pipeline correction 2026-07-04): his words survive ──────
+# bar 0 = three confident real words on three slots -> verbatim sung line;
+# bar 1 = filler mumble -> today's wordless gaps. Tier 1 only (hermetic).
+X_NOTES = [{"start": 0.1, "end": 0.5, "velocity": 100, "pitch": 57},
+           {"start": 0.6, "end": 1.0, "velocity": 95, "pitch": 59},
+           {"start": 1.1, "end": 1.5, "velocity": 90, "pitch": 60},
+           {"start": 2.2, "end": 2.6, "velocity": 85, "pitch": 57},
+           {"start": 2.8, "end": 3.2, "velocity": 80, "pitch": 59}]
+X_ENV = [0.5] * 400
+X_WORDS = [{"word": "hold", "start": 0.10, "end": 0.45, "confidence": 0.9, "syl": 1},
+           {"word": "the", "start": 0.60, "end": 0.95, "confidence": 0.88, "syl": 1},
+           {"word": "flame", "start": 1.10, "end": 1.50, "confidence": 0.95, "syl": 1},
+           {"word": "la", "start": 2.20, "end": 2.55, "confidence": 0.35, "syl": 1},
+           {"word": "mmm", "start": 2.80, "end": 3.10, "confidence": 0.25, "syl": 1}]
+skx = core.build_skeleton_spec(X_NOTES, f0=None, bpm=120.0, time_sig=(4, 4), grid="1/8",
+                               env=X_ENV, words=X_WORDS,
+                               extract_lyrics=True, extract_use_llm=False)
+lx = skx.get("lines", [{}, {}])
+check("extraction: real covered line lands VERBATIM (text + origin sung)",
+      lx[0].get("text") == "hold the flame" and lx[0].get("origin") == "sung",
+      str((lx[0].get("text"), lx[0].get("origin"))))
+check("extraction: anchored seedText carries his words (mumble machinery reused)",
+      lx[0].get("seedText") == "hold the flame", str(lx[0].get("seedText")))
+check("extraction: filler bar stays wordless (no text/origin — today's behavior)",
+      not lx[1].get("text") and "origin" not in lx[1], str(lx[1].get("seedText")))
+check("extraction: lineHeard aligned 1:1 (filler words persisted, kept=false)",
+      len(skx.get("lineHeard", [])) == 2
+      and all(not w["kept"] for w in skx["lineHeard"][1]["words"]),
+      str(skx.get("lineHeard", [None, None])[1]))
+check("extraction: stats in skeleton provenance",
+      skx.get("skeleton", {}).get("extraction", {}).get("sung_lines") == 1,
+      str(skx.get("skeleton", {}).get("extraction")))
+
+# The non-extraction call is BYTE-IDENTICAL to the pre-correction path (regression pin).
+skx_off = core.build_skeleton_spec(X_NOTES, f0=None, bpm=120.0, time_sig=(4, 4), grid="1/8",
+                                   env=X_ENV, words=X_WORDS)
+check("no-extraction call: no text/origin/lineHeard leaks in",
+      "lineHeard" not in skx_off and not any(l.get("text") or l.get("origin")
+                                             for l in skx_off.get("lines", [])),
+      str(sorted(skx_off.keys())))
+check("no-extraction seedTexts stay ALL-GAPS (pre-correction behavior pinned)",
+      all(s.replace("_", "").replace(" ", "") == "" and "_" in s
+          for s in (l.get("seedText", "") for l in skx_off["lines"])),
+      str([l.get("seedText") for l in skx_off["lines"]]))
+
 if fails:
     print(f"\nFAILED: {len(fails)} failure(s): {fails}")
     sys.exit(1)
