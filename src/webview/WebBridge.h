@@ -41,6 +41,15 @@ public:
     void setRemoteStopHandler (RemoteHandler h) { remoteStopHandler = std::move (h); }
     void setRemoteStatusProvider (RemoteStatusProvider p) { remoteStatusProvider = std::move (p); }
 
+    /** WP-11 best-of-n relays: UI → generative service, via native (the WebView
+        cannot reach the service port itself). Same layering as brain_chat — brain
+        traffic is UI-domain, NOT a MoshOps command. Both run on a launched thread
+        (the escalation blocks up to ~60 s). Unbound ⇒ the native fns return
+        { ok:false } and the UI keeps its single-shot reply. */
+    using ServiceRelay = std::function<juce::var (const juce::var& payload)>;
+    void setEscalateHandler (ServiceRelay h)    { escalateHandler = std::move (h); }
+    void setArchivePairHandler (ServiceRelay h) { archivePairHandler = std::move (h); }
+
     /** Build the JUCE WebBrowserComponent Options with native integration,
         the resource provider (serving the staged UI bundle), and the native
         functions. Called by WebViewShell. */
@@ -73,6 +82,8 @@ private:
     RemoteHandler     remoteStartHandler;
     RemoteHandler     remoteStopHandler;
     RemoteStatusProvider remoteStatusProvider;
+    ServiceRelay      escalateHandler;
+    ServiceRelay      archivePairHandler;
     juce::WebBrowserComponent* webView = nullptr;
     bool browserReadyForEvents = false;
 

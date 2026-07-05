@@ -126,6 +126,22 @@ export async function brainChat(messages: BrainMessage[], provider?: string): Pr
   return { content: String(j.content ?? "") };
 }
 
+// WP-11 best-of-n relays (native-only — the WebView reaches the generative service
+// through the app, never directly; same layering as brain_chat). In dev/mock there
+// is no service to escalate to: escalateCandidates throws (the hook degrades to the
+// single-shot reply) and archivePair no-ops.
+export async function escalateCandidates(payload: unknown): Promise<unknown> {
+  if (realNative()) {
+    const r = (await native("escalate_candidates")(payload)) as { ok?: boolean; error?: string };
+    if (r && r.ok === false) throw new Error(r.error ? String(r.error) : "escalation unavailable");
+    return r;
+  }
+  throw new Error("escalate_candidates: native only");
+}
+export async function archivePair(row: unknown): Promise<void> {
+  if (realNative()) await native("archive_pair")(row);
+}
+
 // Native speech-to-text (packaged app). The browser Web Speech API covers the Vite
 // dev path; WKWebView lacks it, so there we drive macOS Speech via these wrappers.
 // Transcripts arrive on the "voice_event" channel (subscribe with onEvent). All are

@@ -4,10 +4,18 @@
 // is unreachable (no keys yet), it falls back to a tiny demo mock so the loop still
 // works in the preview. The pure prompt + parse logic lives in brainCore.ts (so the
 // offline benchmark can score the exact prompt without pulling the bridge/window).
+//
+// WP-11 best-of-n (flag `bestOfNServing`, default OFF): after the single-shot reply
+// parses, taste-classified command batches escalate through the native relay (the
+// service draws + ranks more candidates; any failure keeps the single-shot reply),
+// and corrective batches get ONE validator-retry re-prompt carrying the exact
+// validation failure. Living HERE means both shells + the voice path inherit it.
 
-import { brainChat } from "../bridge";
+import { archivePair, brainChat, escalateCandidates } from "../bridge";
 import { mockBrainReply } from "./brainMock";
 import { systemPrompt, parseReply, type BrainReply } from "./brainCore";
+import { maybeEscalate, maybeValidatorRetry } from "./bestOfN";
+import { useSettings } from "../settings/store";
 import type { Snapshot } from "../types";
 
 // Re-export the reply type so importers keep a single brain entry point (the pure
@@ -15,6 +23,8 @@ import type { Snapshot } from "../types";
 export type { BrainReply } from "./brainCore";
 
 export type Brain = { send: (text: string) => Promise<BrainReply>; clear: () => void };
+
+const bestOfNOn = (): boolean => useSettings.getState().get("bestOfNServing") === true;
 
 export function createBrain(getSnapshot: () => Snapshot | null): Brain {
   const history: { role: string; content: string }[] = [];
@@ -25,8 +35,38 @@ export function createBrain(getSnapshot: () => Snapshot | null): Brain {
       const messages = [{ role: "system", content: systemPrompt(snap) }, ...history.slice(-8)];
       try {
         const { content } = await brainChat(messages);
-        history.push({ role: "assistant", content });
-        return parseReply(content);
+        const reply = parseReply(content);
+
+        // Best-of-n augmentation (flag-gated). It must NEVER discard the valid
+        // single-shot reply: its own inner failures return null, and this guard
+        // catches anything that escapes (e.g. manifest/catalog build) so a
+        // best-of-n error can't fall through to the demo mock below.
+        let chosen = reply;
+        let replaced = false;
+        try {
+          const esc = await maybeEscalate(text, reply, snap, messages, {
+            enabled: bestOfNOn, escalate: escalateCandidates,
+          });
+          if (esc) { chosen = esc.reply; replaced = true; }
+          else {
+            // Validator-retry (corrective ops) — one re-prompt with the exact failure.
+            const retried = await maybeValidatorRetry(text, reply, messages, {
+              enabled: bestOfNOn, chat: brainChat, parse: parseReply, archive: archivePair,
+            });
+            if (retried) { chosen = retried; replaced = true; }
+          }
+        } catch { /* keep the single-shot reply — never degrade to the mock */ }
+
+        // History: the raw content normally; when best-of-n REPLACED the reply,
+        // record what actually executed so turn N+1's "that" / "same again"
+        // refers to the real edits, not the discarded single-shot draft.
+        history.push({
+          role: "assistant",
+          content: replaced
+            ? JSON.stringify({ intent: chosen.intent, say: chosen.say, commands: chosen.commands })
+            : content,
+        });
+        return chosen;
       } catch {
         // proxy unreachable / no key yet → demo mock so the loop still works
         return mockBrainReply(text, snap);

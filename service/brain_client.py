@@ -104,10 +104,12 @@ def _is_reasoning(model: str) -> bool:
 
 
 def chat_json(messages: List[dict], requested: str = "", max_tokens: int = 800,
-              timeout: int = 60) -> dict:
+              timeout: int = 60, temperature: Optional[float] = None) -> dict:
     """POST an OpenAI-compatible chat (json_object response, capped tokens). Returns
     { ok, content, provider, model } or { ok:false, error }. Reasoning models use
-    max_completion_tokens + no temperature (mirrors BrainProxy)."""
+    max_completion_tokens + no temperature (mirrors BrainProxy). `temperature`
+    overrides the 0.6 default on the non-reasoning path only (best-of-n exploratory
+    draws); reasoning providers ignore sampling params — callers record that."""
     p = resolve(requested)
     if not _complete(p):
         return {"ok": False, "error": "no brain provider configured "
@@ -118,7 +120,7 @@ def chat_json(messages: List[dict], requested: str = "", max_tokens: int = 800,
         payload["max_completion_tokens"] = max_tokens
     else:
         payload["max_tokens"] = max_tokens
-        payload["temperature"] = 0.6
+        payload["temperature"] = 0.6 if temperature is None else float(temperature)
     req = urllib.request.Request(
         p["url"].rstrip("/") + "/chat/completions",
         data=json.dumps(payload).encode("utf-8"),

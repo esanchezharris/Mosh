@@ -601,7 +601,8 @@ class Handler(BaseHTTPRequestHandler):
                              "whisper": _whisper_available(),
                              "skeleton": _skeleton_available(),
                              "phonology": _phonology_available(),
-                             "compiler": True})
+                             "compiler": True,
+                             "bestofn": True})
         elif path == "/capabilities":
             adapters = [FAKE_ADAPTER, TRANSFORM_ADAPTER, SOULX_ADAPTER] + ([_sa3_descriptor()] if SA3_ENABLED else [])
             training = [_training_descriptor()] if TRAINING_ENABLED else []
@@ -1066,6 +1067,32 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, lyr.analyze(spec))
             except Exception as e:  # noqa: BLE001
                 self._send(500, {"ok": False, "error": f"lyric analysis error: {e}"})
+        elif path == "/escalate_candidates":
+            # WP-11 best-of-n serving (escalate-only — the UI already holds its
+            # single-shot reply as candidate #0 and re-executes it on degraded/error,
+            # so failure here never costs an extra cloud call). Draws n-1 more
+            # candidates via brain_client (parallel, budgeted), scores them against
+            # the POSTED id-manifest + catalog (verifiable checks), ranks, and
+            # archives the chosen/rejected set as DPO fuel. MOSH_ENABLE_BESTOFN=0
+            # pins the deterministic fake backend.
+            try:
+                from bestofn import runtime as bofn
+                if not isinstance(data.get("first"), dict):
+                    self._send(400, {"ok": False, "error": "first (single-shot reply) required"})
+                    return
+                self._send(200, bofn.escalate(data))
+            except Exception as e:  # noqa: BLE001
+                self._send(500, {"ok": False, "error": f"escalate error: {e}"})
+        elif path == "/archive_pair":
+            # WP-11 — corrective validator-retry pairs (failed original vs corrected
+            # retry) ride the same best-effort DPO appender. Never fatal by contract.
+            try:
+                from bestofn import runtime as bofn
+                row = dict(data)
+                row["source"] = str(row.get("source") or "corrective-retry")
+                self._send(200, {"ok": True, "archived": bofn.archive_append(row)})
+            except Exception as e:  # noqa: BLE001
+                self._send(500, {"ok": False, "error": f"archive error: {e}"})
         elif path == "/style_corpus":
             # §7 style-RAG flywheel — the user-owned voice corpus (backend-only management).
             # action: "add" (the artist's OWN lyrics) | "stats" (counts only) | "clear".
