@@ -56,6 +56,35 @@ def _pitch_from_f0(f0, a: float, b: float, default: int = 69) -> int:
     return int(round(69 + 12 * math.log2(m / 440.0)))
 
 
+def clamp_span_to_voicing(start: float, end: float, env, hop_s: float, floor: float,
+                          min_note: float = 0.08, min_sil_s: float = 0.15) -> float:
+    """Trim a note's end so it does not SUSTAIN past where the take goes silent (the owner's
+    rule: a long sustained note where the original is quiet is a bug — the last word held too
+    long, a held note bleeding through a breath). The note ends at the FIRST sustained silence
+    (≥ min_sil_s) after its voicing onset — NOT the last voiced frame, so an over-extended span
+    that crosses a rest INTO the next word's voicing is still trimmed at the rest. `env` = the
+    take's per-frame energy. No env, or the span outside env coverage, → unchanged."""
+    if not env:
+        return end
+    i0 = max(0, int(start / hop_s))
+    i1 = min(len(env), int(round(end / hop_s)))
+    if i1 <= i0:
+        return end
+    min_sil = max(1, int(round(min_sil_s / hop_s)))
+    voiced_start = next((j for j in range(i0, i1) if env[j] >= floor), None)
+    if voiced_start is None:                 # covered but never voiced → minimal note
+        return start + min_note
+    sil_run = 0
+    for j in range(voiced_start, i1):
+        if env[j] < floor:
+            sil_run += 1
+            if sil_run >= min_sil:           # sustained silence began (j - min_sil + 1)
+                return max(start + min_note, min(end, (j - min_sil + 1) * hop_s))
+        else:
+            sil_run = 0
+    return end                               # no sustained silence → genuinely held
+
+
 def slots_for_word(start: float, end: float, syl: int, f0=None) -> List[dict]:
     """Split a word's audio span [start, end] into `syl` contiguous syllable slots (min 1),
     each pitched from the take's own F0 median over its window (the validated repitch lever).
@@ -73,14 +102,17 @@ def slots_for_word(start: float, end: float, syl: int, f0=None) -> List[dict]:
 
 
 def lines_from_aligned(aligned_words, line_word_counts, f0=None, bpm: float = 120.0,
-                       grid: str = "1/16", algo: str = "align", bridge_gap_s: float = 0.35) -> List[dict]:
+                       grid: str = "1/16", algo: str = "align", bridge_gap_s: float = 0.35,
+                       take_env=None, env_hop_s: float = 0.01, sil_floor=None) -> List[dict]:
     """Aligned words (from align_words) + per-line word counts → score-author `lines`.
 
     Each word gets its phonology syllable count of slots, timed within its OWN aligned span
     (so a held note is one slot, not over-segmented). LEGATO BRIDGING: a small inter-word gap
     is the sustain the CTC aligner leaves unattributed on singing, so the note is extended to
-    the next word's onset; a gap ≥ bridge_gap_s is a genuine pause and stays a rest. The
-    result feeds score.author_score unchanged — the alignment-driven replacement for the
+    the next word's onset; a gap ≥ bridge_gap_s is a genuine pause and stays a rest. When a
+    take energy envelope is supplied, each note's END is CLAMPED to the take's voicing so no
+    note sustains into take-silence (the last-word-held-too-long / held-through-a-breath bug).
+    The result feeds score.author_score unchanged — the alignment-driven replacement for the
     skeleton's `lineScores`."""
     from phonology import core as ph
     pr = ph.Pronouncer()
@@ -88,6 +120,10 @@ def lines_from_aligned(aligned_words, line_word_counts, f0=None, bpm: float = 12
     def _syl(w: str) -> int:
         c = "".join(ch for ch in w.lower() if ch.isalpha() or ch == "'")
         return max(1, pr.syllables(c) or 1)
+
+    floor = None
+    if take_env:
+        floor = sil_floor if sil_floor is not None else 0.15 * max(take_env)
 
     lines, pos = [], 0
     for bar, n in enumerate(line_word_counts):
@@ -102,6 +138,8 @@ def lines_from_aligned(aligned_words, line_word_counts, f0=None, bpm: float = 12
                 nxt = float(group[i + 1]["start"])
                 if 0.0 <= nxt - end < bridge_gap_s:   # legato: absorb the unattributed sustain
                     end = nxt
+            if floor is not None:                     # trim a note that sustains into take-silence
+                end = clamp_span_to_voicing(start, end, take_env, env_hop_s, floor)
             words.append(w["word"])
             slots.extend(slots_for_word(start, end, _syl(w["word"]), f0=f0))
         lines.append({"text": " ".join(words),

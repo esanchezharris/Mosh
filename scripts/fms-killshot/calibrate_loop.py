@@ -255,7 +255,8 @@ def main() -> int:
                 used += len(take)
         aligned = skalign.align_words(excerpt, flat)
         if aligned:
-            alines = skalign.lines_from_aligned(aligned, line_counts, f0=f0, bpm=args.bpm, grid=args.grid)
+            alines = skalign.lines_from_aligned(aligned, line_counts, f0=f0, bpm=args.bpm,
+                                                grid=args.grid, take_env=env, env_hop_s=0.01)
             ra = sx.author_score(alines, name="calibrate")
             if ra.get("ok"):
                 clip_a = ra["score"][0]
