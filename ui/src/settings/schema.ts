@@ -132,6 +132,15 @@ export const SETTINGS: SettingDef[] = [
     help: "Fallback for audio inputs that can’t be shared: while a take is recording, stop listening for commands and resume when the take ends. Leave off to keep barge-in (saying “stop” / “keep that” mid-take).",
   },
   {
+    id: "bestOfNServing",
+    type: "bool",
+    default: false,
+    scope: "app",
+    category: "Moshi",
+    label: "Best-of-N (experimental)",
+    help: "For creative asks (notes, re-imagine settings, arrangement), Moshi drafts several candidate plans in the cloud and picks the best-scoring one — slower on those turns. Chosen-vs-rejected drafts (your request text + the proposed edits) are saved locally to ~/Library/Mosh/dpo-pairs to improve Moshi.",
+  },
+  {
     id: "layout",
     type: "enum",
     default: "mosh",

@@ -103,6 +103,21 @@ public:
     juce::var compileRender (const juce::String& instruction, int intensity,
                              const juce::String& backend);
 
+    /** WP-11 best-of-n escalation (POST /escalate_candidates). Forwards the UI-built
+        escalation request (messages/catalog/manifest/first) VERBATIM — the service
+        draws n−1 more candidates from the cloud brain, scores + ranks + archives.
+        SYNCHRONOUS + slow (route budget ≤45 s) — call on a BACKGROUND thread (the
+        WebBridge relay launches one). ensureServiceRunning is correct here: the user
+        opted in via the bestOfNServing setting. Returns the service JSON, or {} on
+        failure (the caller degrades to the single-shot reply it already holds). */
+    juce::var escalateCandidates (const juce::var& payload);
+
+    /** WP-11 — corrective validator-retry pair → the DPO archive (POST /archive_pair).
+        NON-SPAWNING + best-effort (isHealthy()-gated, mirrors styleCorpusAdd): a
+        service-down state is a silent no-op (returns false). Fire from a background
+        thread; never worth blocking a user turn for. */
+    bool archivePair (const juce::var& row);
+
     /** Precise per-line lyric ANALYSIS (POST /analyze_lyrics) — Finish-My-Song L1. Fast,
         deterministic, no LLM (the dictionary phonology path for the flow visualizer).
         SYNCHRONOUS — call on a BACKGROUND thread (mirrors transcribe()). `spec` is the

@@ -413,6 +413,37 @@ juce::var GenerativeJobManager::generateLyrics (const juce::String& mode, const 
     return {};
 }
 
+juce::var GenerativeJobManager::escalateCandidates (const juce::var& payload)
+{
+    if (! ensureServiceRunning())
+        return {};
+
+    // The service's route budget is 45s; 60s here leaves headroom without letting a
+    // wedged service hang the relay thread forever. Blocks → background thread only.
+    URL url = URL (baseUrl + "/escalate_candidates").withPOSTData (JSON::toString (payload));
+    auto opts = URL::InputStreamOptions (URL::ParameterHandling::inPostData)
+                    .withConnectionTimeoutMs (60000)
+                    .withExtraHeaders ("Content-Type: application/json");
+    if (auto s = url.createInputStream (opts))
+        return JSON::parse (s->readEntireStreamAsString());
+    return {};
+}
+
+bool GenerativeJobManager::archivePair (const juce::var& row)
+{
+    if (! isHealthy())
+        return false;
+
+    URL url = URL (baseUrl + "/archive_pair").withPOSTData (JSON::toString (row));
+    auto opts = URL::InputStreamOptions (URL::ParameterHandling::inPostData)
+                    .withConnectionTimeoutMs (5000)
+                    .withExtraHeaders ("Content-Type: application/json");
+    if (auto s = url.createInputStream (opts))
+        return static_cast<bool> (JSON::parse (s->readEntireStreamAsString())
+                                      .getProperty ("archived", false));
+    return false;
+}
+
 juce::var GenerativeJobManager::compileRender (const juce::String& instruction, int intensity,
                                                const juce::String& backend)
 {

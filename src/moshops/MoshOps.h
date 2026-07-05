@@ -54,6 +54,12 @@ public:
         NOT used by the normal command surface (that goes through cmdRescanPlugins). */
     PluginHost& pluginHostForScan() { return pluginHost; }
 
+    /** WP-11 best-of-n relays (NOT commands — brain traffic is UI-domain, no engine
+        mutation, no undo, no JSONL command log; same layering as brain_chat). The
+        WebBridge relay calls these on a background thread. */
+    juce::var escalateCandidates (const juce::var& payload) { return jobManager.escalateCandidates (payload); }
+    bool archiveDpoPair (const juce::var& row)              { return jobManager.archivePair (row); }
+
 private:
     // ── command handlers ──
     juce::var cmdCreateTrack    (const juce::var& args);

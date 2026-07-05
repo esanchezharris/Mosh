@@ -181,6 +181,59 @@ juce::WebBrowserComponent::Options WebBridge::buildOptions()
                     juce::MessageManager::callAsync ([completion, result]() mutable { completion (result); });
                 });
             })
+        // WP-11 best-of-n relays (UI → generative service via native — the WebView
+        // cannot reach the service port). Threaded like brain_chat: the escalation
+        // blocks up to ~60s in GenerativeJobManager, so it must never run on the
+        // message thread. Unbound handler ⇒ { ok:false } and the UI keeps its
+        // single-shot reply (graceful degrade, zero extra cloud calls).
+        .withNativeFunction (
+            juce::Identifier ("escalate_candidates"),
+            [this] (const juce::Array<juce::var>& args,
+                    juce::WebBrowserComponent::NativeFunctionCompletion completion)
+            {
+                const auto payload = args.size() > 0 ? args[0] : juce::var();
+                if (escalateHandler == nullptr)
+                {
+                    auto* err = new juce::DynamicObject();
+                    err->setProperty ("ok", false);
+                    err->setProperty ("error", "escalation relay not bound");
+                    completion (juce::var (err));
+                    return;
+                }
+                auto handler = escalateHandler;
+                juce::Thread::launch ([handler, payload, completion]() mutable
+                {
+                    auto result = handler (payload);
+                    if (! result.isObject())
+                    {
+                        auto* err = new juce::DynamicObject();
+                        err->setProperty ("ok", false);
+                        err->setProperty ("error", "escalation service unreachable");
+                        result = juce::var (err);
+                    }
+                    juce::MessageManager::callAsync ([completion, result]() mutable { completion (result); });
+                });
+            })
+        .withNativeFunction (
+            juce::Identifier ("archive_pair"),
+            [this] (const juce::Array<juce::var>& args,
+                    juce::WebBrowserComponent::NativeFunctionCompletion completion)
+            {
+                const auto row = args.size() > 0 ? args[0] : juce::var();
+                if (archivePairHandler == nullptr)
+                {
+                    auto* err = new juce::DynamicObject();
+                    err->setProperty ("ok", false);
+                    completion (juce::var (err));
+                    return;
+                }
+                auto handler = archivePairHandler;
+                juce::Thread::launch ([handler, row, completion]() mutable
+                {
+                    auto result = handler (row);
+                    juce::MessageManager::callAsync ([completion, result]() mutable { completion (result); });
+                });
+            })
         // Native speech-to-text (packaged-app voice). isSupported() does NOT imply
         // permission — that is requested on the first voice_start. Transcripts flow
         // to the UI on the dedicated `voice_event` channel.

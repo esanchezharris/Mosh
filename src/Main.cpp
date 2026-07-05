@@ -261,6 +261,16 @@ public:
         bridge.setRemoteStartHandler ([this] (const juce::var& args) { return remoteServer->startPairing (args); });
         bridge.setRemoteStopHandler  ([this] (const juce::var&) { return remoteServer->stopServer(); });
         bridge.setRemoteStatusProvider ([this] { return remoteServer->status(); });
+        // WP-11 best-of-n relays (brain traffic is UI-domain — same layering as
+        // brain_chat, NOT MoshOps commands; the bridge runs these off-thread).
+        bridge.setEscalateHandler ([this] (const juce::var& p) { return moshOps->escalateCandidates (p); });
+        bridge.setArchivePairHandler ([this] (const juce::var& r)
+        {
+            auto* o = new juce::DynamicObject();
+            o->setProperty ("ok", true);
+            o->setProperty ("archived", moshOps->archiveDpoPair (r));
+            return juce::var (o);
+        });
 
         // Native macOS menu bar (File + Edit). It only forwards intents to the WebView
         // over the bridge event channel — the UI's runAction dispatcher turns each into
