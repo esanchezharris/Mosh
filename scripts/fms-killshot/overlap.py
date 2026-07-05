@@ -70,6 +70,10 @@ def _pctl(sv, p):
 def _gate_thresholds(env):
     sv = sorted(env)
     th_hi = max(4.0 * _pctl(sv, 5), 0.15 * _pctl(sv, 95))
+    if th_hi <= 0.0:
+        # Degenerate (silent) signal: a zero threshold would read EVERY frame as open
+        # (>= 0) and invert the leakage verdicts — treat silence as all-CLOSED instead.
+        return float("inf"), float("inf")
     return th_hi, 0.5 * th_hi
 
 
@@ -92,27 +96,35 @@ def onset_times(env, hop_s: float = HOP_S, min_sep_s: float = 0.06):
 
 
 def onset_agreement(a, b, tol_s: float = 0.05, lag_s: float = 0.0) -> dict:
-    """Greedy nearest-match of render onsets b (shifted by -lag_s) against take onsets a."""
+    """OPTIMAL one-to-one matching of render onsets b (shifted by -lag_s) against take
+    onsets a. Both lists are time-sorted, so the maximum matching is non-crossing —
+    an LCS-style DP (greedy nearest-match understates F1; review find)."""
     b_adj = [t - lag_s for t in b]
-    used = [False] * len(a)
-    matched, dts = 0, []
-    for t in b_adj:
-        best_i, best_d = -1, tol_s + 1
-        for i, ta in enumerate(a):
-            if used[i]:
-                continue
-            d = abs(ta - t)
-            if d < best_d:
-                best_i, best_d = i, d
-        if best_i >= 0 and best_d <= tol_s:
-            used[best_i] = True
-            matched += 1
-            dts.append(best_d)
-    precision = matched / len(b) if b else 0.0
-    recall = matched / len(a) if a else 0.0
+    n, m = len(a), len(b_adj)
+    dp = [[0] * (m + 1) for _ in range(n + 1)]
+    for i in range(1, n + 1):
+        for j in range(1, m + 1):
+            hit = 1 if abs(a[i - 1] - b_adj[j - 1]) <= tol_s else 0
+            dp[i][j] = max(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1] + hit)
+    matched = dp[n][m]
+    # traceback for the matched |dt| distribution
+    dts, i, j = [], n, m
+    while i > 0 and j > 0:
+        hit = 1 if abs(a[i - 1] - b_adj[j - 1]) <= tol_s else 0
+        if dp[i][j] == dp[i - 1][j - 1] + hit and hit:
+            dts.append(abs(a[i - 1] - b_adj[j - 1]))
+            i, j = i - 1, j - 1
+        elif dp[i][j] == dp[i - 1][j]:
+            i -= 1
+        elif dp[i][j] == dp[i][j - 1]:
+            j -= 1
+        else:
+            i, j = i - 1, j - 1
+    precision = matched / m if m else 0.0
+    recall = matched / n if n else 0.0
     f1 = 2 * precision * recall / (precision + recall) if precision + recall > 0 else 0.0
     dts.sort()
-    return {"take_onsets": len(a), "render_onsets": len(b), "matched": matched,
+    return {"take_onsets": n, "render_onsets": m, "matched": matched,
             "precision": round(precision, 3), "recall": round(recall, 3), "f1": round(f1, 3),
             "median_abs_dt_ms": round(1000 * dts[len(dts) // 2], 1) if dts else None,
             "tol_ms": round(tol_s * 1000)}
@@ -127,11 +139,15 @@ def global_lag(env_a, env_b, hop_s: float = HOP_S, max_lag_s: float = 0.5) -> fl
     ma, mb = sum(a) / n, sum(b) / n
     a = [x - ma for x in a]
     b = [x - mb for x in b]
+    if all(x == 0.0 for x in a) or all(x == 0.0 for x in b):
+        return 0.0               # flat/silent window: no correlation evidence — no lag
     max_k = min(n - 1, int(max_lag_s / hop_s))
     best_k, best_r = 0, -1e18
-    for k in range(-max_k, max_k + 1):
+    # Nearest-zero lags first with STRICT improvement, so correlation ties (quasi-flat
+    # windows) resolve to 0 instead of the extreme lag (review find).
+    for k in sorted(range(-max_k, max_k + 1), key=abs):
         s = 0.0
-        if k >= 0:                       # render late: compare a[i] with b[i-k]
+        if k >= 0:                       # compare a[i] with b[i-k]
             for i in range(k, n):
                 s += a[i] * b[i - k]
         else:
@@ -223,8 +239,14 @@ def silence_energy(env_a, env_b) -> dict:
 def word_match(score_words, asr_words) -> dict:
     """Did the render sing the score's words? Sequence similarity + bag coverage."""
     import difflib
-    sw = [w.lower().strip(".,!?'\"-’") for w in score_words if any(c.isalpha() for c in w)]
-    aw = [w.lower().strip(".,!?'\"-’") for w in asr_words if any(c.isalpha() for c in w)]
+
+    def _norm(w):
+        # Whisper emits U+2019 apostrophes; scores carry ASCII — normalize INTERNAL
+        # punctuation variants too, not just edges (review find).
+        return w.lower().replace("’", "'").replace("-", "").strip(".,!?'\"")
+
+    sw = [_norm(w) for w in score_words if any(c.isalpha() for c in w)]
+    aw = [_norm(w) for w in asr_words if any(c.isalpha() for c in w)]
     ratio = difflib.SequenceMatcher(a=sw, b=aw).ratio() if sw and aw else 0.0
     bag = sum(1 for w in set(sw) if w in set(aw)) / len(set(sw)) if sw else 0.0
     return {"score_words": len(sw), "render_words": len(aw),
@@ -335,6 +357,14 @@ def _selftest_once() -> str:
     leaky[lo:lo + len(gap_tone)] = gap_tone
     leak = silence_energy(env, skcore.energy_envelope(leaky, sr))
     assert leak["render_in_take_silence_pct"] > 0, leak
+    # degenerate gate: an all-silent take must read all-CLOSED (not all-open — the
+    # inverted verdict a zero threshold produced; review fix)
+    env_silent = skcore.energy_envelope([0.0] * len(sig), sr)
+    leak2 = silence_energy(env_silent, env)
+    assert leak2["render_in_take_silence_pct"] == 100.0 \
+        and leak2["take_in_render_silence_pct"] == 0.0, leak2
+    # flat window: cross-correlation ties resolve to lag 0, never the extreme (review fix)
+    assert global_lag(env_silent, env) == 0.0
 
     # phrase windows from a score chain: two phrases split at the 0.5 s rest
     clip = {"duration": "0.10 0.30 0.50 0.30 0.10", "note_type": "1 2 1 2 1",
@@ -371,27 +401,34 @@ def main() -> int:
     os.makedirs(args.out, exist_ok=True)
 
     with tempfile.TemporaryDirectory() as td:
-        orig, sr_o, orig_wav = _read_mono(args.original, td)
-        rend, sr_r, rend_wav = _read_mono(args.render, os.path.join(td, "") or td)
-
-        f0_o = f0_r = None
-        if not args.no_f0:
-            sk_py = diagnose._venv_python("skeleton/.skeleton.env", "SKELETON_PY")
-            if sk_py:
-                cli = os.path.join(REPO, "service/skeleton/skeleton_cli.py")
-                ra = diagnose._run_json(sk_py, cli, orig_wav)
-                rb = diagnose._run_json(sk_py, cli, rend_wav)
-                f0_o = ra.get("f0") if ra.get("ok") else None
-                f0_r = rb.get("f0") if rb.get("ok") else None
+        # SEPARATE decode dirs: diagnose._to_wav always writes <dir>/input-decoded.wav,
+        # so two non-PCM inputs sharing one dir would silently analyze the same audio
+        # twice (review find — identity metrics on different files).
+        td_o = os.path.join(td, "orig")
+        td_r = os.path.join(td, "rend")
+        os.makedirs(td_o)
+        os.makedirs(td_r)
+        orig, sr_o, orig_wav = _read_mono(args.original, td_o)
+        rend, sr_r, rend_wav = _read_mono(args.render, td_r)
 
         score_clip = None
         if args.score:
             doc = json.load(open(args.score))
             score_clip = doc[0] if isinstance(doc, list) else doc
 
+        sk_py = None if args.no_f0 else diagnose._venv_python("skeleton/.skeleton.env", "SKELETON_PY")
+        cli = os.path.join(REPO, "service/skeleton/skeleton_cli.py")
         digests = []
         report = None
+        f0_o = f0_r = None
+        # --runs N re-runs the MODEL subprocesses too (diagnose.py's semantics —
+        # a determinism flag over cached inputs would be tautological; review find).
         for _ in range(max(1, args.runs)):
+            if sk_py:
+                ra = diagnose._run_json(sk_py, cli, orig_wav)
+                rb = diagnose._run_json(sk_py, cli, rend_wav)
+                f0_o = ra.get("f0") if ra.get("ok") else None
+                f0_r = rb.get("f0") if rb.get("ok") else None
             report = analyze(orig, sr_o, rend, sr_r, f0_o, f0_r, score_clip)
             digests.append(hashlib.sha256(json.dumps(report, sort_keys=True).encode()).hexdigest())
         report["deterministic"] = len(set(digests)) == 1

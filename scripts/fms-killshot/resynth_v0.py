@@ -127,8 +127,15 @@ def phase_score(args) -> int:
     print(f"   filled {filled} lines (backend={gen.get('backend', '?')})")
     print_sheet(spec)
     print("2) author 4dp score …", flush=True)
+    scores = spec.get("lineScores") or []
+    if len(spec["lines"]) != len(scores):
+        # The sheet crossed a HUMAN edit checkpoint — a deleted/reordered line would
+        # silently mis-pair lyrics with another bar's melody (review find). Fail loud.
+        print(f"FATAL: sheet edited out of sync — {len(spec['lines'])} lines vs "
+              f"{len(scores)} lineScores (edit text only, never add/remove lines)", file=sys.stderr)
+        return 1
     lines = [{"text": ln.get("text") or ln.get("seedText", ""), "score": sc}
-             for ln, sc in zip(spec["lines"], spec.get("lineScores") or [])]
+             for ln, sc in zip(spec["lines"], scores)]
     r = sx.author_score(lines, name="resynth-v0")
     if not r.get("ok"):
         print(f"FATAL: {r.get('error')}", file=sys.stderr)

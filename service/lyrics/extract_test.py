@@ -110,10 +110,30 @@ check("heard blobs keep EVERYTHING incl. rejected fillers, with slot hints",
 check("stats honest", r["stats"]["sung_lines"] == 1 and r["stats"]["partial_lines"] == 1
       and r["stats"]["kept"] == 4, str(r["stats"]))
 
-# words beyond the last surviving bar are counted, never silently dropped
+# A word past the last bar of an UNTRUNCATED take rides the nearest bar unanchored
+# (review fix: "blobs persist EVERYTHING heard"); only real MAX_BARS truncation drops.
 r2 = ex.extract(WORDS + [W("ghost", 99.0, 99.4, 0.9)], GROUPS, bpm=120.0, use_llm=False)
-check("word past the last bar -> dropped_after_max_bars", r2["stats"]["dropped_after_max_bars"] == 1,
+check("tail word on an untruncated take -> unanchored, NOT dropped",
+      r2["stats"]["dropped_after_max_bars"] == 0 and r2["stats"]["unanchored_words"] == 1,
       str(r2["stats"]))
+check("...and it persists in the nearest bar's heard blob (kept=false)",
+      any(w["word"] == "ghost" and not w["kept"] for w in r2["line_heard"][2]["words"]),
+      str(r2["line_heard"].get(2)))
+
+# one real word ringed by fillers is PARTIAL, not mumble (fillers can't dilute; review fix)
+ringed = [W("la", 0.0, 0.2, 0.3), W("da", 0.25, 0.4, 0.3), W("flame", 0.45, 0.8, 0.95),
+          W("na", 0.85, 1.0, 0.3), W("mmm", 1.05, 1.2, 0.3)]
+check("one credible word among four fillers -> partial (the word anchors)",
+      ex.classify_phrase(ringed, []) == "partial")
+
+# coverage is in SYLLABLES (review fix): 4 words / 5 syllables cover a 5-slot bar
+FIVE = [G(0.1 + 0.35 * i, 0.4 + 0.35 * i) for i in range(5)]
+r5 = ex.extract([W("hold", 0.10, 0.40, 0.9), W("the", 0.45, 0.75, 0.9),
+                 W("flame", 0.80, 1.10, 0.95), W("tonight", 1.15, 1.85, 0.92, syl=2)],
+                FIVE, bpm=120.0, use_llm=False)
+check("multisyllabic word covers its slots -> line still lands verbatim SUNG",
+      r5["line_origin"][0] == "sung" and r5["line_text"][0] == "hold the flame tonight",
+      str((r5["line_origin"].get(0), r5["line_text"].get(0))))
 
 # ── 5. Tier-2 honesty wall (mocked brain_client) ────────────────────────────────────────
 def _mock_brain(reply: dict):
@@ -123,11 +143,12 @@ def _mock_brain(reply: dict):
         "ok": True, "content": json.dumps(reply)}
     return m
 
-# valid promotion: the judge may re-label poppinshit partial -> real (it reads true)
+# valid promotion: the judge may re-label poppinshit partial -> real (it reads true).
+# Groups mirror the words 1:1 (no melisma overlap) so the walls have nothing to strip.
+POPPIN_GROUPS = [G(w["start"], w["end"]) for w in POPPIN]
 sys.modules["brain_client"] = _mock_brain(
     {"phrases": [{"i": 0, "label": "real", "keep": list(range(len(POPPIN)))}]})
-rp = ex.extract(POPPIN, [G(0.0 + 0.5 * i, 0.3 + 0.5 * i) for i in range(13)], bpm=30.0,
-                use_llm=True)
+rp = ex.extract(POPPIN, POPPIN_GROUPS, bpm=30.0, use_llm=True)
 check("tier-2 judge can PROMOTE a sensible phrase to real (owner's 'reason over it')",
       rp["stats"]["tier"] == "t2" and rp["stats"]["sung_lines"] >= 1, str(rp["stats"]))
 
@@ -143,6 +164,37 @@ check("honesty wall: out-of-range keep index -> tier-1 verbatim fallback",
 sys.modules["brain_client"] = _mock_brain({"phrases": [{"i": 0, "label": "improved", "keep": []}]})
 rm = ex.extract(POPPIN, [G(0.0, 0.3)], bpm=30.0, use_llm=True)
 check("honesty wall: unknown label -> tier-1 fallback", rm["stats"]["tier"] == "t1")
+
+# A valid-but-PARTIAL judge reply must not un-keep uncovered phrases (review fix):
+# empty phrases list -> tier t2 but every tier-1 keep survives.
+t1_baseline = ex.extract(WORDS, GROUPS, bpm=120.0, use_llm=False)
+sys.modules["brain_client"] = _mock_brain({"phrases": []})
+rp2 = ex.extract(WORDS, GROUPS, bpm=120.0, use_llm=True)
+check("t2 with an EMPTY reply preserves every tier-1 keep (his words never drop silently)",
+      rp2["stats"]["tier"] == "t2"
+      and sorted(w["word"] for w in rp2["kept"]) == sorted(w["word"] for w in t1_baseline["kept"]),
+      str([w["word"] for w in rp2["kept"]]))
+
+# a real/partial verdict with an empty keep list is incoherent -> tier-1 keep set applies
+sys.modules["brain_client"] = _mock_brain({"phrases": [{"i": 0, "label": "real"}]})
+rp3 = ex.extract(WORDS, GROUPS, bpm=120.0, use_llm=True)
+check("t2 'real' with missing keep falls back to the phrase's tier-1 keeps",
+      sorted(w["word"] for w in rp3["kept"] if w["label"] == "real")
+      == ["flame", "hold", "the"], str([w["word"] for w in rp3["kept"]]))
+
+# ABSOLUTE WALLS on judge keeps (review fix): the hallucination floor holds however
+# true the phrase reads — strawberry @ 1.3e-5 can never be kept, and its excision
+# demotes the phrase from real so the bar can't land verbatim with a dreamt word.
+hallu = [W("going", 0.0, 0.4, 0.9, syl=2), W("down", 0.45, 0.8, 0.95),
+         W("strawberry", 0.85, 2.5, 0.000013, syl=3)]
+sys.modules["brain_client"] = _mock_brain(
+    {"phrases": [{"i": 0, "label": "real", "keep": [0, 1, 2]}]})
+rh = ex.extract(hallu, [G(0.2 * i, 0.15 + 0.2 * i) for i in range(13)], bpm=30.0, use_llm=True)
+kept_h = [w["word"] for w in rh["kept"]]
+check("judge cannot waive the hallucination floor (strawberry stays dead)",
+      "strawberry" not in kept_h and "going" in kept_h, str(kept_h))
+check("excising a dreamt word demotes the phrase real->partial (no verbatim hole)",
+      all(w["label"] == "partial" for w in rh["kept"]), str(rh["kept"][:2]))
 sys.modules.pop("brain_client", None)
 
 # ── 6. 3x determinism (tier 1) ──────────────────────────────────────────────────────────

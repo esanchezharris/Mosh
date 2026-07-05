@@ -12,6 +12,11 @@ LOG="$WORKDIR/logs"
 mkdir -p "$OUT" "$LOG"
 say() { echo "[sing $(date +%H:%M:%S)] $*"; }
 die() { echo "[sing] FATAL: $*" >&2; touch "$WORKDIR/FAILED"; exit 1; }
+# Fresh-run hygiene: stale sentinels from a prior attempt must not lie (review find).
+rm -f "$WORKDIR/DONE" "$WORKDIR/FAILED"
+# Renders are keyed to the SCORE CONTENT so a revised target_score.json re-renders
+# even when a prior render for this ref exists (stale-input-blind skip, review find).
+SCORE_SIG="$(sha256sum "$HANDOFF/scores/target_score.json" 2>/dev/null | cut -d' ' -f1 || echo none)"
 
 [[ -f "$HANDOFF/scores/target_score.json" ]] || die "no target score"
 [[ -f "$HANDOFF/refs/own-30s.wav" && -f "$HANDOFF/refs/own-30s.json" ]] || die "refs incomplete"
@@ -68,7 +73,7 @@ fi
 
 # ── render: the owner's score, both references ──
 for ref in own-30s own-10s; do
-  if [[ ! -f "$OUT/renders/$ref/done" ]]; then
+  if [[ "$(cat "$OUT/renders/$ref/done" 2>/dev/null)" != "$SCORE_SIG" ]]; then
     say "rendering with $ref reference …"
     mkdir -p "$OUT/renders/$ref"
     ( cd "$SOULX" && PYTHONPATH="$SOULX" "$PY" -m cli.inference --device cuda \
@@ -80,7 +85,7 @@ for ref in own-30s own-10s; do
         --phoneset_path soulxsinger/utils/phoneme/phone_set.json \
         --control score --auto_shift --pitch_shift 0 --fp16 \
         --save_dir "$OUT/renders/$ref" ) >"$LOG/render-$ref.log" 2>&1 || die "render $ref failed (logs/render-$ref.log)"
-    touch "$OUT/renders/$ref/done"
+    echo "$SCORE_SIG" > "$OUT/renders/$ref/done"
   fi
 done
 

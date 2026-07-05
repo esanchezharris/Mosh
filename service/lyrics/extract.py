@@ -115,7 +115,10 @@ def classify_phrase(phrase: List[dict], groups: List[dict]) -> str:
         return "mumble"
     cred = [w for w in words if credible(w)]
     content = [w for w in words if not is_filler(w.get("word", ""))]
-    if not content or len(cred) / len(words) <= MUMBLE_MAX_FRACTION:
+    # Fillers must not DILUTE the mumble test (review find): one real word ringed by
+    # la-la's is a PARTIAL line (the word anchors), not mumble — content words are the
+    # denominator for "is anything real here", all words for "is it mostly real".
+    if not content or len(cred) / len(content) <= MUMBLE_MAX_FRACTION:
         return "mumble"
     label = "partial"
     if len(cred) / len(words) >= REAL_MIN_FRACTION and len(content) >= REAL_MIN_CONTENT:
@@ -141,9 +144,15 @@ _JUDGE_PROMPT = (
 )
 
 
-def _judge_tier2(phrases: List[List[dict]], labels: List[str]) -> Optional[List[Tuple[str, set]]]:
+def _judge_tier2(phrases: List[List[dict]], labels: List[str],
+                 t1_verdicts: List[Tuple[str, set]]) -> Optional[List[Tuple[str, set]]]:
     """LLM re-labeling with the honesty wall. Returns [(label, keep_indices)] aligned
-    with phrases, or None on any failure/violation (caller keeps tier 1)."""
+    with phrases, or None on any failure/violation (caller keeps tier 1).
+
+    Verdicts are SEEDED from tier 1 (review find): a valid-but-partial judge reply —
+    omitted phrases, or a real/partial entry with an empty keep list — must NEVER
+    silently un-keep the producer's words; every uncovered/incoherent phrase retains
+    its full tier-1 verdict (label AND keep set)."""
     try:
         import brain_client
         if not brain_client.available():
@@ -161,7 +170,7 @@ def _judge_tier2(phrases: List[List[dict]], labels: List[str]) -> Optional[List[
         if not resp.get("ok"):
             return None
         res = json.loads(resp.get("content", "") or "{}")
-        out: List[Tuple[str, set]] = [(labels[i], set()) for i in range(len(phrases))]
+        out: List[Tuple[str, set]] = list(t1_verdicts)
         for v in (res or {}).get("phrases", []):
             i = int(v.get("i", -1))
             if not (0 <= i < len(phrases)):
@@ -175,6 +184,10 @@ def _judge_tier2(phrases: List[List[dict]], labels: List[str]) -> Optional[List[
                 if not (0 <= j < len(phrases[i])):
                     return None          # honesty wall: index outside the heard words
                 keep.add(j)
+            # A real/partial verdict keeping ZERO words is incoherent — fall back to the
+            # phrase's tier-1 keep set rather than dropping his words (keep-bias).
+            if label != "mumble" and not keep:
+                keep = set(t1_verdicts[i][1])
             out[i] = (label, keep)
         return out
     except Exception as e:  # noqa: BLE001 — judge is an upgrade, never a breaker
@@ -200,11 +213,27 @@ def extract(words: List[dict], groups: List[dict], bpm: float, time_sig=(4, 4),
 
     phrases = group_phrases(words)
     t1_labels = [classify_phrase(p, groups or []) for p in phrases]
-    verdicts = _judge_tier2(phrases, t1_labels) if use_llm else None
+    t1_verdicts: List[Tuple[str, set]] = [
+        (lab, {j for j, w in enumerate(p) if credible(w)})
+        for lab, p in zip(t1_labels, phrases)]
+    verdicts = _judge_tier2(phrases, t1_labels, t1_verdicts) if use_llm else None
     tier = "t2" if verdicts is not None else "t1"
     if verdicts is None:
-        verdicts = [(lab, {j for j, w in enumerate(p) if credible(w)})
-                    for lab, p in zip(t1_labels, phrases)]
+        verdicts = t1_verdicts
+    else:
+        # ABSOLUTE WALLS the judge cannot waive (review finds): the hallucination floor
+        # (CONF_FLOOR — "strawberry" @ 1e-5 stays dead however true it reads) and the
+        # melisma-decode guard apply to ITS keeps too; excising a word from a "real"
+        # phrase demotes it to "partial" so the bar can't land verbatim with a hole.
+        walled: List[Tuple[str, set]] = []
+        for (label, keep), phrase in zip(verdicts, phrases):
+            keep2 = {j for j in keep
+                     if float(phrase[j].get("confidence", 0) or 0) >= CONF_FLOOR
+                     and not _melisma_suspect(phrase[j], groups or [])}
+            if label == "real" and keep2 != set(keep):
+                label = "partial"
+            walled.append((label, keep2))
+        verdicts = walled
 
     enriched: List[dict] = []
     for (label, keep), phrase in zip(verdicts, phrases):
@@ -215,11 +244,15 @@ def extract(words: List[dict], groups: List[dict], bpm: float, time_sig=(4, 4),
     # bar assignment + slot hint (nearest group start within the bar; blob aid only)
     heard: dict = {}
     dropped_tail = unanchored = 0
+    # Words past the last surviving bar are DROPPED only when MAX_BARS really truncated
+    # the take (review find) — otherwise they ride the nearest bar's blob unanchored
+    # ("blobs persist EVERYTHING heard" is the contract).
+    truncated = len(binned) >= mumble.MAX_BARS
     for w in enriched:
         bar = int(float(w.get("start", 0.0)) // spb) if spb > 0 else 0
         if bar not in surviving:
             near = min(surviving, key=lambda b: abs(b - bar), default=None)
-            if near is None or (binned and bar > max(surviving)):
+            if near is None or (truncated and surviving and bar > max(surviving)):
                 dropped_tail += 1
                 continue
             unanchored += 1
@@ -247,7 +280,10 @@ def extract(words: List[dict], groups: List[dict], bpm: float, time_sig=(4, 4),
             line_origin[bar] = None
             continue
         all_real = all(x["label"] == "real" for x in kept_ws)
-        covers = len(kept_ws) >= len(slots_by_bar[bar])
+        # Coverage is in SYLLABLES, not words (review find): slots are per-syllable
+        # articulations, so "hold the flame tonight" (4 words, 5 syllables) covers a
+        # 5-slot bar. Word-count comparison starved every multisyllabic sung line.
+        covers = sum(max(1, int(x.get("syl") or 1)) for x in kept_ws) >= len(slots_by_bar[bar])
         if all_real and covers:
             line_text[bar] = " ".join(x["word"] for x in
                                       sorted(kept_ws, key=lambda x: x["start"]))
