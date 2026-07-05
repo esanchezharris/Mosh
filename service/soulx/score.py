@@ -56,6 +56,36 @@ def _phoneme(word: str, syl: int) -> str:
     return "en_" + "-".join(str(p) for p in phones)
 
 
+def _held_vowel(group: List[str]) -> str:
+    """The sustained-vowel phone of a syllable group (the last vowel, else the last phone).
+    Sung on a HELD continuation slot so the model sustains the note instead of re-attacking."""
+    vowels = [p for p in group if p and p[-1].isdigit()]
+    return vowels[-1] if vowels else (group[-1] if group else "AH1")
+
+
+def _slot_phonemes(word: str, n_slots: int) -> List[str]:
+    """Distribute a word's phones across its `n_slots` note slots so a multi-slot word
+    PROGRESSES instead of re-articulating the whole word on every slot (the sung-render
+    re-attack bug the owner heard: "down down", "gonna gonna").
+
+    - n_slots >= syllables: one syllable's phones per slot, then the bare vowel HELD on the
+      leftover slots (a sustained note, no re-attack).
+    - n_slots  < syllables: the surplus syllables fold onto the LAST slot (nothing dropped).
+    The first slot's phoneme carries the word's onset (note_type 2); continuations are the
+    remaining syllables / the held vowel (note_type 3)."""
+    phones = _pron().phones(_clean(word))
+    if not phones:
+        phones = ["AH1"] * max(1, _pron().syllables(_clean(word)) or 1)
+    groups = ph.syllabify_phones(phones) or [list(phones)]
+    n_syl = len(groups)
+    if n_slots >= n_syl:
+        held = _held_vowel(groups[-1])
+        per_slot = list(groups) + [[held]] * (n_slots - n_syl)
+    else:
+        per_slot = groups[:n_slots - 1] + [[p for g in groups[n_slots - 1:] for p in g]]
+    return ["en_" + "-".join(str(p) for p in g) for g in per_slot]
+
+
 def _display_and_phoneme(word: str):
     """Singable form of a token: `___` gaps become the placeholder "la"; returns
     (display, en_-phoneme) with the AH1-per-syllable fallback for unknown words."""
@@ -110,9 +140,10 @@ def author_score(lines: List[dict], language: str = "English", name: str = "mosh
 
     def emit_word(word: str, segs: List[dict]) -> None:
         nonlocal n_words
-        display, phon = _display_and_phoneme(word)
+        display = "la" if word.strip("_") == "" else word
+        slot_phons = _slot_phonemes(display, len(segs))
         for j, s in enumerate(segs):
-            emit(display, phon, int(s.get("pitch", 69)), 2 if j == 0 else 3,
+            emit(display, slot_phons[j], int(s.get("pitch", 69)), 2 if j == 0 else 3,
                  float(s["end"]) - float(s["start"]))
         n_words += 1
 

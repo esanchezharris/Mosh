@@ -73,8 +73,11 @@ clip = r["score"][0]
 check("melisma: word then continuation", toks(clip, "note_type") == ["2", "3"]
       and toks(clip, "text") == ["flame", "flame"]
       and toks(clip, "note_pitch") == ["57", "60"], f"{clip['text']} {clip['note_type']}")
-check("melisma keeps the word's phoneme on the continuation",
-      toks(clip, "phoneme")[0] == toks(clip, "phoneme")[1], str(clip["phoneme"]))
+# FMS sung-render fix: a held 1-syllable continuation SUSTAINS the bare vowel (onset stripped)
+# instead of re-emitting the full onset-carrying phoneme — the real SoulX model re-ATTACKS on
+# a repeated onset ("down-down"); a bare vowel makes it hold the note.
+check("melisma continuation sustains the bare vowel, not a re-articulation",
+      toks(clip, "phoneme") == ["en_F-L-EY1-M", "en_EY1"], str(clip["phoneme"]))
 
 # ── 3. Multi-syllable word consumes its syllable count of slots (continuations) ────────
 r = sx.author_score([LINE("forever gold",
@@ -85,6 +88,10 @@ check("'forever' (3 syl) takes 3 slots: type 2 + two type 3; 'gold' takes the 4t
       and toks(clip, "note_type") == ["2", "3", "3", "2"]
       and toks(clip, "note_pitch") == ["57", "59", "60", "62"],
       f"{clip['text']} {clip['note_type']}")
+# FMS fix: a multi-syllable word PROGRESSES through its syllable phonemes across its slots
+# (for-EV-er), it does NOT re-articulate the whole word on each slot.
+check("multi-syllable word distributes its syllable phonemes across the slots",
+      toks(clip, "phoneme")[:3] == ["en_F-ER0", "en_EH1", "en_V-ER0"], str(clip["phoneme"]))
 
 # ── 4. Squeeze: more word-syllables than slots -> words share the last slot evenly ─────
 r = sx.author_score([LINE("hold the flame", [SLOT(0.0, 0.5, 57), SLOT(0.5, 1.1, 60)])])
@@ -102,6 +109,18 @@ clip = r["score"][0]
 check("hold: 1 word over 3 slots = type 2 + type 3 + type 3",
       toks(clip, "text") == ["flame", "flame", "flame"] and toks(clip, "note_type") == ["2", "3", "3"],
       f"{clip['text']} {clip['note_type']}")
+# FMS fix: a 1-syllable word held over N slots = the word once, then the bare vowel sustained
+# on every continuation (no re-attack). This is the exact "down down down" defect the owner heard.
+check("held 1-syllable word: onset once, then vowel sustained on each continuation",
+      toks(clip, "phoneme") == ["en_F-L-EY1-M", "en_EY1", "en_EY1"], str(clip["phoneme"]))
+
+# ── 5b. FMS re-attack fix on a REAL multi-syllable word: 'gonna' over 2 slots = gon→na ──
+# (the owner heard "gonna gonna" — the whole word re-articulated. Correct is the syllables.)
+r = sx.author_score([LINE("gonna", [SLOT(0.0, 1.0, 50, 50)])])
+clip = r["score"][0]
+check("'gonna' over 2 slots progresses gon→na (no whole-word re-articulation)",
+      toks(clip, "phoneme") == ["en_G-AA1", "en_N-AH0"] and toks(clip, "note_type") == ["2", "3"],
+      str(clip["phoneme"]))
 
 # ── 6. Inter-slot gaps become <SP> rests ────────────────────────────────────────────────
 r = sx.author_score([LINE("hold flame", [SLOT(0.0, 0.4, 57), SLOT(1.0, 1.4, 60)])])
