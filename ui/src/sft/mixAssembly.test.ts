@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assembleMix, contentHash, isPopulateClassRow, oversampleRare, rowCommandNames, type ChatRow } from "./mixAssembly";
+import { assembleMix, contentHash, isPopulateClassRow, oversampleRare, rebalanceSelect, rowCommandNames, type ChatRow, type MixRowMeta } from "./mixAssembly";
 
 function row(user: string, commands: Array<{ command: string; args?: object }>): ChatRow {
   return {
@@ -76,6 +76,60 @@ describe("assembleMix", () => {
   });
   it("contentHash differs on any message change", () => {
     expect(contentHash(row("a", [{ command: "save" }]))).not.toBe(contentHash(row("b", [{ command: "save" }])));
+  });
+});
+
+describe("rebalanceSelect (§P7 exposure amendment)", () => {
+  const cmd = (names: string[]): MixRowMeta => ({ commands: names, huh: false });
+  const neg: MixRowMeta = { commands: [], huh: true, negative: true };
+  const gen: MixRowMeta = { commands: [], huh: true };
+
+  it("caps head commands, keeps the tail whole, deterministic by seed", () => {
+    const rows = [
+      ...Array.from({ length: 10 }, () => cmd(["add_midi_clip"])),
+      ...Array.from({ length: 3 }, () => cmd(["undo"])),
+    ];
+    const r1 = rebalanceSelect(rows, { capPerCommand: 5, negCap: 0, genericHuhCap: 0, seed: 1 });
+    const r2 = rebalanceSelect(rows, { capPerCommand: 5, negCap: 0, genericHuhCap: 0, seed: 1 });
+    const r3 = rebalanceSelect(rows, { capPerCommand: 5, negCap: 0, genericHuhCap: 0, seed: 7 });
+    expect(r1.stats.perCommand).toEqual({ add_midi_clip: 5, undo: 3 });
+    expect(r1.keep).toEqual(r2.keep);                      // same seed → identical mask
+    expect(r1.keep).not.toEqual(r3.keep);                  // different seed → different sample
+    expect(r1.keep.length).toBe(rows.length);
+  });
+
+  it("keeps a multi-command row when ANY of its commands is under cap", () => {
+    // 5 pure-A rows fill A's cap; the [A,B] row must still be kept for B's sake.
+    const rows = [...Array.from({ length: 5 }, () => cmd(["a"])), cmd(["a", "b"])];
+    const { keep, stats } = rebalanceSelect(rows, { capPerCommand: 5, negCap: 0, genericHuhCap: 0, seed: 1 });
+    expect(keep[5]).toBe(true);
+    expect(stats.perCommand.b).toBe(1);
+    // A ends at cap or cap+1 depending on visit order — coverage beats the cap,
+    // and the overflow is bounded by the multi-command row itself.
+    expect([5, 6]).toContain(stats.perCommand.a);
+  });
+
+  it("does NOT dedupe — intentional oversample duplicates survive under cap", () => {
+    const rows = [cmd(["undo"]), cmd(["undo"]), cmd(["undo"])];
+    const { stats } = rebalanceSelect(rows, { capPerCommand: 10, negCap: 0, genericHuhCap: 0, seed: 1 });
+    expect(stats.perCommand.undo).toBe(3);
+  });
+
+  it("HUH policy: negatives fill negCap first, generic capped separately", () => {
+    const rows = [...Array.from({ length: 8 }, () => ({ ...neg })), ...Array.from({ length: 6 }, () => ({ ...gen }))];
+    const r1 = rebalanceSelect(rows, { capPerCommand: 100, negCap: 4, genericHuhCap: 2, seed: 1 });
+    const r2 = rebalanceSelect(rows, { capPerCommand: 100, negCap: 4, genericHuhCap: 2, seed: 1 });
+    expect(r1.stats.huhNegKept).toBe(4);
+    expect(r1.stats.huhGenericKept).toBe(2);
+    expect(r1.stats.kept).toBe(6);
+    expect(r1.keep).toEqual(r2.keep);
+  });
+
+  it("rows with no commands and not HUH are kept unconditionally", () => {
+    const other: MixRowMeta = { commands: [], huh: false };
+    const { keep, stats } = rebalanceSelect([other, cmd(["save"])], { capPerCommand: 1, negCap: 0, genericHuhCap: 0, seed: 1 });
+    expect(keep).toEqual([true, true]);
+    expect(stats.otherKept).toBe(1);
   });
 });
 

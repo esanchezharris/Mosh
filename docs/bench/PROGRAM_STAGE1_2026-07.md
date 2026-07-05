@@ -170,3 +170,95 @@ not transfer.
 | **RUN VERDICT (for the owner)** | 🏁 2026-07-04 | The Stage-2 checkpoint (`a3b-r2`, fused copy retained) **beats the cloud brain on the frozen comparator (0.907–0.914 vs 0.875)**, holds 45/49 measurable per-command floors, and exceeds the §B grounded-positive gate (91.9% ≥ 85%). It fails the letter of the exit gate on 4 commands with fully-diagnosed causes: 2 structural (`set_render_param` un-synthesizable at acceptance 0; `split_clip` offset-math needs broader session variety), 2 exposure-bound (`undo`/`redo` — recipe iters, above). §B negative-defer (8/20 vs cloud 15/20) needs negatives at meaningful mix share (~340 rows ≈ 0.5% was too small at 3.4% sampling). **Owner decisions for the next cycle: (a) bless a recipe amendment (iters ≥ 1 epoch equivalent, or epoch-based training) and re-register the gate; (b) or accept-with-exceptions for best-of-n serving experiments (cloud stays the serving default per invariants either way); (c) RFT rounds are moot until a passed checkpoint exists (⛳ unchanged).** |
 
 *(run record closes here; next cycle opens a new §R block)*
+
+---
+
+## Cycle 2 (2026-07-04) — §P7 recipe amendment + gate re-registration
+
+**Owner decision (2026-07-04, verbatim): "Recipe amendment + re-registration then keep working"** — option (a)
+of the Cycle-1 RUN VERDICT. This section is written and merged BEFORE the r3 run
+launches; nothing below moves after any r3 reading.
+
+### P7.1 — Root cause being amended (measured, Cycle 1)
+
+Batch 1 × 2400 iters saw ~3.4% of the 69,610-row v2 mix. The reason a full epoch
+was infeasible is **mix shape, not model cost**: 3 head commands owned 80.6% of
+the rows (`add_midi_clip` 35,168 · `set_tempo` 11,682 · `set_time_signature`
+9,268; every other command ≤316). One epoch of v2 at the measured 17.1 s/iter
+(r2: 41,127.5 s / 2400 iters) ≈ 14 days. The amendment removes the head skew so
+epoch-scale exposure fits a ~3-day window.
+
+### P7.2 — Amended mix: s2-mix-v3 (built, deterministic, auditable)
+
+Derived from s2-mix-v2 (`train.jsonl` sha `b15dc2f10f7f730a…`) by
+`rebalanceSelect` (`ui/src/sft/mixAssembly.ts`, golden-tested; I/O wrapper
+`ui/scripts/rebalanceMix.mts`), params `cap-per-command 400 · neg-cap 200 ·
+generic-huh-cap 50 · seed 1`:
+
+- **Flat per-command cap 400** over a seeded shuffle, greedy keep-if-any-command-
+  under-cap (multi-command rows may overflow a cap — coverage beats the cap).
+  **NO dedupe**: v2 is already deduped; its ×4 rare-row oversample duplicates are
+  intentional repetition and survive.
+- **HUH re-cap 250 rows = 1.97%** (proven-safe band), **grounding negatives
+  first**: 200 of the 232 negative rows present (exact line-hash match against
+  `synth/negs-*.jsonl`) + 50 of 440 generic vague-request HUH. This is the §B
+  negative-defer fix: at epoch exposure each kept negative is actually seen,
+  while the defer *fraction* stays far from the known-bad ~5%.
+- Result: **train 12,674 rows / 68 commands** (head 3 + add_note at 400 each;
+  the four Cycle-1 floor-missers keep every row they have — `undo` 236 ·
+  `redo` 236 · `split_clip` 272 · `set_render_param` 112 — ≈30× the exposure
+  they got in r2), valid 1,650. A3B-tokenizer length filter at 4096: **0
+  dropped** (v3 ⊂ already-filtered v2, belt re-run anyway).
+- shas: train `e5e067cceaee945ad89b5d6439416debd23c19f4f7caa835643383b2e62c9af2`,
+  valid `9047ab96fd7e8f7f…` (full manifest in `s2-mix-v3/manifest.json`).
+
+### P7.3 — Amended recipe (r3): epoch-sized by selection rule
+
+Unchanged from r1/r2: clean A3B base by PATH, LoRA `--num-layers 16`,
+`--lr 1e-5`, mask-prompt ON, grad-checkpoint ON, `--max-seq-length 4096`,
+train **from base** (fresh adapter `a3b-r3`), fuse → shard-4 ≠-base weight
+check → differential probe → serve fused, ONE mlx proc, temp-0 evals.
+
+Changed — batch and iters are fixed by this rule, with constants filled from
+**measured pace smokes run before launch** (12–25-iter trains on the v3 mix at
+batch 1/2/4; the smokes double as the NaN + `<think>`-artifact pre-check):
+
+- **batch** = argmax measured rows/sec over {1, 2, 4} (ties → smaller batch,
+  closer to the r1/r2 recipe; peak-mem must stay ≤ 50 GB of 64 GB);
+- **E (epochs over the 12,674-row mix)** = the largest of {1.0, 1.5, 2.0} whose
+  projected wall-clock at measured pace is ≤ 78 h;
+- **iters = ceil(E × 12,674 / batch)**.
+
+The chosen constants are recorded in the §R2 launch row BEFORE training starts
+and never adjusted afterward. Exposure consequence: every training row gets ≥E
+looks (r2 gave rare rows ~7 total across 64 oversampled commands).
+
+### P7.4 — Re-registered exit gate (thresholds verbatim, ONE clean read)
+
+Identical to the Cycle-1 gate, including the recorded §A instrument amendments
+(45 id-bearing items excluded as builder defects; 2 mock-broken commands
+unmeasurable; floors read on valid items over the 49 measurable commands):
+
+1. aggregate §A+§C ≥ **0.75**;
+2. per-command floor ≥ **0.5** on the 49 measurable commands (valid items);
+3. §B grounded clean-apply ≥ **85%** (negative-defer tracked, not a leg).
+
+**One clean read. NO retry exists in this cycle: any miss ⇒ HALT-and-report.**
+Known weakest measurable: `set_render_param` (112 rows, synthesis acceptance 0 —
+no top-up possible); it is NOT exempted — if it stays <0.5 the gate reads as a
+miss and the owner decides again with that number on the table.
+
+### P7.5 — Concurrency + budget
+
+r3 is $0 cloud (all local). While it trains, work continues on **WP-11
+(best-of-n serving skeleton — cloud `brain_client`, flag-gated, full native
+gate)**, which needs no local mlx serving; the ONE-mlx-proc rule bars any local
+serving/eval until r3 finishes. Cloud spend cap unchanged ($200, $11.36 used).
+
+## §R2 — Cycle-2 readings
+
+| step | status | artifact |
+|------|--------|----------|
+| s2-mix-v3 build | ✅ 2026-07-04 | 69,610 → **12,674** train rows (recount-verified: 68 cmds, head 400 each, HUH 250 = 1.97% [200 neg + 50 generic], floor-missers keep all rows); valid 21,542 → 1,650; length filter 0-dropped; goldens 14/14 + typecheck. |
+
+*(launch row with measured pace + chosen batch/E/iters lands here before the run starts)*
