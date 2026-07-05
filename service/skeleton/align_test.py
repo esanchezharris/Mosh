@@ -118,5 +118,36 @@ clip = sx.author_score(lines_h, name="t")["score"][0]
 check("held 'down' renders as ONE onset, no re-articulation",
       clip["text"].split() == ["down"] and clip["note_type"].split() == ["2"], str(clip["text"]))
 
+# ── 6. clamp_span_to_voicing: a note must not sustain past where the TAKE goes silent ────
+# (the owner's rule: a long sustained note where the original is silent = a bug — the last
+# word held too long, a held note bleeding through a breath. env = per-frame take energy.)
+env = [1.0, 1.0, 1.0, 0.0, 0.0, 0.0]        # voiced 0.0-0.3s, silent 0.3-0.6s (hop 0.1s)
+check("trailing take-silence trims the note end",
+      abs(align.clamp_span_to_voicing(0.0, 0.6, env, 0.1, floor=0.2) - 0.3) < 0.051,
+      str(align.clamp_span_to_voicing(0.0, 0.6, env, 0.1, floor=0.2)))
+env2 = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]        # fully voiced
+check("a fully-voiced span is unchanged",
+      abs(align.clamp_span_to_voicing(0.0, 0.6, env2, 0.1, floor=0.2) - 0.6) < 0.051)
+check("no env → span unchanged (graceful)",
+      align.clamp_span_to_voicing(0.0, 0.6, None, 0.1, floor=0.2) == 0.6)
+# the mid-phrase held-note bug: an over-extended span crosses a silence INTO the next word's
+# voicing — must end at the FIRST sustained silence after onset, not the last voiced frame.
+env_mid = [1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0]   # voiced, silent 0.3-0.6, voiced again
+check("note ends at the FIRST sustained silence, not the trailing voicing",
+      abs(align.clamp_span_to_voicing(0.0, 0.9, env_mid, 0.1, floor=0.2) - 0.3) < 0.051,
+      str(align.clamp_span_to_voicing(0.0, 0.9, env_mid, 0.1, floor=0.2)))
+env3 = [0.0, 0.0, 0.0]                        # all silent within the span
+check("all-silent span keeps a minimum note (never zero-length)",
+      align.clamp_span_to_voicing(1.0, 1.4, env3, 0.1, floor=0.2, min_note=0.08) >= 1.0 + 0.079)
+
+# lines_from_aligned trims the LAST word to voicing when a take env is supplied
+aligned_hold = [{"word": "down", "start": 0.0, "end": 0.3, "score": 0.5},
+                {"word": "sticks", "start": 0.3, "end": 2.0, "score": 0.5}]   # aligner over-extends the last word
+take_env = [1.0]*8 + [0.0]*12                 # voiced 0-0.8s, silent after (hop 0.1s)
+lines_v = align.lines_from_aligned(aligned_hold, [2], bpm=91.0, take_env=take_env, env_hop_s=0.1)
+last_end = lines_v[0]["score"]["slots"][-1]["end"]
+check("last word clamped to take voicing (2.0s → ~0.8s, no over-hold)",
+      last_end < 1.0, f"last slot end {last_end}")
+
 print(f"\n{'OK' if not fails else 'FAILED'}: {len(fails)} failure(s)")
 sys.exit(len(fails))
