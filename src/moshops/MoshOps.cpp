@@ -995,7 +995,22 @@ juce::var MoshOps::cmdSetLyricLine (const juce::var& args)
         line.setProperty (ids::lyricText, args.getProperty ("text", var()), &undoManager());
     }
     if (args.hasProperty ("role"))            line.setProperty (ids::lyricRole,            args.getProperty ("role", var()), &undoManager());
-    if (args.hasProperty ("seedText"))        line.setProperty (ids::lyricSeedText,        args.getProperty ("seedText", var()), &undoManager());
+    if (args.hasProperty ("seedText"))
+    {
+        // The LyricPanel editor commits hand edits as seedText (review find): on a line
+        // whose text is already finalized (sung/accepted), a differing seed edit IS the
+        // new effective lyric — mirror it into lyricText so the edit takes effect, and
+        // demote a verbatim-"sung" line to "edited" (never claim it verbatim-his again).
+        const auto newSeed = args.getProperty ("seedText", var()).toString();
+        if (line[ids::lyricText].toString().isNotEmpty()
+            && newSeed != line[ids::lyricText].toString())
+        {
+            if (line[ids::lyricOrigin].toString() == "sung")
+                line.setProperty (ids::lyricOrigin, "edited", &undoManager());
+            line.setProperty (ids::lyricText, newSeed, &undoManager());
+        }
+        line.setProperty (ids::lyricSeedText, args.getProperty ("seedText", var()), &undoManager());
+    }
     if (args.hasProperty ("syllableTarget"))  line.setProperty (ids::lyricSyllableTarget,  (int) args.getProperty ("syllableTarget", 0), &undoManager());
     if (args.hasProperty ("syllableTol"))     line.setProperty (ids::lyricSyllableTol,     (int) args.getProperty ("syllableTol", 1), &undoManager());
     if (args.hasProperty ("stress"))          line.setProperty (ids::lyricStress,          args.getProperty ("stress", var()), &undoManager());
@@ -1309,17 +1324,26 @@ juce::var MoshOps::cmdAcceptLyricProposal (const juce::var& args)
     node.setProperty (ids::lyricText, chosen, &undoManager());     // the COMMIT (undoable)
     node.setProperty (ids::status, "accepted", &undoManager());
     node.removeProperty (ids::lyricProposals, nullptr);            // clear the ephemeral proposals
-    // Provenance (honest by construction): a generated line that grew around HEARD
-    // anchors is "mixed"; one with no heard words is "generated". A verbatim "sung"
-    // line never reaches here (not fillable — the loop skips it).
+    // Provenance (honest by construction): "mixed" only when a heard-kept word actually
+    // SURVIVES in the accepted text (review find: the blob alone proves what the take
+    // said, not what this proposal kept — a regenerated line that dropped his anchors
+    // must land "generated").
     {
         bool heardKept = false;
         if (node.hasProperty (ids::lyricHeard))
         {
+            auto tokens = juce::StringArray::fromTokens (chosen.toLowerCase(), " \t", {});
+            for (auto& t : tokens)
+                t = t.trimCharactersAtStart (".,!?'\"-").trimCharactersAtEnd (".,!?'\"-");
             auto hb = juce::JSON::parse (node[ids::lyricHeard].toString());
             if (auto* ws = hb.getProperty ("words", var()).getArray())
                 for (auto& w : *ws)
-                    if ((bool) w.getProperty ("kept", false)) { heardKept = true; break; }
+                    if ((bool) w.getProperty ("kept", false)
+                        && tokens.contains (w.getProperty ("word", var()).toString()
+                                                .toLowerCase()
+                                                .trimCharactersAtStart (".,!?'\"-")
+                                                .trimCharactersAtEnd (".,!?'\"-")))
+                    { heardKept = true; break; }
         }
         node.setProperty (ids::lyricOrigin, heardKept ? "mixed" : "generated", &undoManager());
     }

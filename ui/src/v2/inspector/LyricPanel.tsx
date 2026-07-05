@@ -223,7 +223,14 @@ function LyricLineRow({ trackId, line, grid, busy, run, isGhost, onGhostDone }: 
         )}
         <input className="v2-lyric-text" aria-label={`line ${line.index + 1}`}
           key={content} defaultValue={content} placeholder="type bars, ___ for a gap"
-          onBlur={(e) => { if (e.target.value !== content) void exec("set_lyric_line", { trackId, lineIndex: line.index, seedText: e.target.value }); }} />
+          onBlur={(e) => {
+            if (e.target.value === content) return;
+            // A finalized line (accepted/sung) edits its TEXT — the backend mirrors and
+            // demotes "sung" → "edited"; a seed-stage line keeps committing to the seed.
+            void exec("set_lyric_line", line.text.trim()
+              ? { trackId, lineIndex: line.index, text: e.target.value, seedText: e.target.value }
+              : { trackId, lineIndex: line.index, seedText: e.target.value });
+          }} />
         <span className={`v2-flow-meter st-${state}`} data-testid={`flow-${line.index}`}
           title={`${count} syllables vs ~${target} (${grid})${gaps ? `, ${gaps} gap(s)` : ""}`}>
           {count}/{target}{gaps ? ` ·${gaps}_` : ""}
