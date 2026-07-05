@@ -37,7 +37,19 @@ sys.path.insert(0, HERE)
 import diagnose                      # noqa: E402
 import overlap as ov                 # noqa: E402
 from skeleton import core as skcore  # noqa: E402
+from skeleton import align as skalign  # noqa: E402
 from phonology import core as ph     # noqa: E402
+
+
+def truth_lines(path: str):
+    """Known lyrics -> list of per-line word lists (lead vocal only)."""
+    out = []
+    for line in open(path):
+        s = line.strip()
+        if not s or s.startswith("#") or s.startswith("("):
+            continue
+        out.append([w.strip(".,!?\"") for w in s.split() if w.strip(".,!?\"")])
+    return out
 
 
 def slice_excerpt(src: str, t0: float, t1: float, dst: str) -> str:
@@ -101,6 +113,9 @@ def main() -> int:
     ap.add_argument("--grid", default="1/16")
     ap.add_argument("--out", required=True)
     ap.add_argument("--no-llm", action="store_true")
+    ap.add_argument("--align", action="store_true",
+                    help="also forced-align the known words to the take and emit "
+                         "target_score_aligned.json (the over-segmentation root fix)")
     ap.add_argument("--whisper-model", default="small")
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
@@ -221,6 +236,44 @@ def main() -> int:
         print(f"\nREPITCHED score (segment-median F0 -> note_pitch; {repitched} events changed):")
         print(f"  pitch |Δ| median {conf_re['pitch_abs_median_st']} st | within 0.5st "
               f"{conf_re['pitch_within_half_st']} | within 1st {conf_re['pitch_within_1_st']}")
+
+    # ── the ROOT input-side fix: FORCED-ALIGN the known words to the take ──────────────
+    # Instead of draping truth words over the blind (over-segmented) skeleton slots, align
+    # each known word to its own audio span (MMS_FA), then emit exactly its syllable count
+    # of slots. A held note becomes ONE slot -> ONE clean onset, killing the "down down"
+    # re-articulation at the source. Writes target_score_aligned.json for the render.
+    if args.align and skalign.available():
+        tl = truth_lines(args.truth)
+        flat, line_counts, used = [], [], 0
+        for lw in tl:                                    # take whole lines until the excerpt's word budget
+            if used >= consumed:
+                break
+            take = lw[:max(0, consumed - used)]
+            if take:
+                flat += take
+                line_counts.append(len(take))
+                used += len(take)
+        aligned = skalign.align_words(excerpt, flat)
+        if aligned:
+            alines = skalign.lines_from_aligned(aligned, line_counts, f0=f0, bpm=args.bpm, grid=args.grid)
+            ra = sx.author_score(alines, name="calibrate")
+            if ra.get("ok"):
+                clip_a = ra["score"][0]
+                json.dump(ra["score"], open(os.path.join(args.out, "target_score_aligned.json"), "w"), indent=1)
+                conf_a = ov.score_conformance(clip_a, f0 or [])
+                report["aligned"] = {"words_aligned": len(aligned), "events": ra["events"],
+                                     "word_events": ra["words"], "score_vs_take": conf_a,
+                                     "spans": [{"w": a["word"], "s": round(a["start"], 2),
+                                                "e": round(a["end"], 2)} for a in aligned]}
+                print(f"\nALIGNED score ({len(aligned)} words forced-aligned to the take):")
+                print(f"  events={ra['events']} word_events={ra['words']} "
+                      f"pitch |Δ| median {conf_a['pitch_abs_median_st']}st | "
+                      f"within 0.5st {conf_a['pitch_within_half_st']}")
+                print(f"  -> {args.out}/target_score_aligned.json")
+        else:
+            print("\nALIGNED: forced alignment returned nothing (skipped)")
+    elif args.align:
+        print("\nALIGNED: forced-alignment stack unavailable (torch/torchaudio/uroman) — skipped")
 
     json.dump(report, open(os.path.join(args.out, "calibration-report.json"), "w"), indent=1)
     print(f"\nreport -> {args.out}/calibration-report.json")
