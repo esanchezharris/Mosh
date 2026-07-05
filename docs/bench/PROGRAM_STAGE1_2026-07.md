@@ -224,9 +224,16 @@ Changed — batch and iters are fixed by this rule, with constants filled from
 batch 1/2/4; the smokes double as the NaN + `<think>`-artifact pre-check):
 
 - **batch** = argmax measured rows/sec over {1, 2, 4} (ties → smaller batch,
-  closer to the r1/r2 recipe; peak-mem must stay ≤ 50 GB of 64 GB);
+  closer to the r1/r2 recipe; peak-mem must stay ≤ 50 GB of 64 GB) — **with an
+  lr-coupling clause added pre-launch, after the smokes read but before any
+  training** (amendment inside the open PR, recorded transparently): because lr
+  is pinned at the r1/r2-proven 1e-5 and is NOT scaled with batch, batch > 1
+  cuts optimizer steps per epoch by the batch factor — the exact under-imprint
+  class this cycle repairs. Batch > 1 therefore requires a ≥ 25% measured
+  throughput edge; below that, batch stays 1;
 - **E (epochs over the 12,674-row mix)** = the largest of {1.0, 1.5, 2.0} whose
-  projected wall-clock at measured pace is ≤ 78 h;
+  projected wall-clock at measured pace is ≤ 78 h (projection includes the
+  measured validation overhead ≈ +0.9 s/iter — wall-clock means wall-clock);
 - **iters = ceil(E × 12,674 / batch)**.
 
 The chosen constants are recorded in the §R2 launch row BEFORE training starts
@@ -260,5 +267,7 @@ serving/eval until r3 finishes. Cloud spend cap unchanged ($200, $11.36 used).
 | step | status | artifact |
 |------|--------|----------|
 | s2-mix-v3 build | ✅ 2026-07-04 | 69,610 → **12,674** train rows (recount-verified: 68 cmds, head 400 each, HUH 250 = 1.97% [200 neg + 50 generic], floor-missers keep all rows); valid 21,542 → 1,650; length filter 0-dropped; goldens 14/14 + typecheck. |
+| Pace smokes (pre-launch) | ✅ 2026-07-04 | v3 mix, seq 4096, grad-checkpoint, last-full-window readings: **b1 16.1 s/iter (0.062 rows/s, peak 23.2 GB) · b2 32.3 s/iter (0.062, 27.1 GB) · b4 58.8 s/iter (0.068, 35.4 GB)** — throughput is compute-bound-flat; b4's edge is 9.7% < the 25% lr-coupling bar. Initial val pass 176.9 s → val overhead ≈ +0.9 s/iter at the 200-iter cadence. NaN pre-check: all three smokes finite-loss throughout (b1 loss 1.42→0.03 over 25 iters). `<think>`-artifact check carried over from the r1 investigation on the identical base+stack (template-injected empty block, parseReply-safe). |
+| **r3 LAUNCH (constants fixed pre-run)** | ▶ 2026-07-04 | **batch 1 · E = 1.0 · iters = 12,674 · lr 1e-5 · layers 16 · seq 4096 · mask-prompt · grad-checkpoint · from base → `.adapters/a3b-r3`** — per the P7.3 rule: batch 1 (b4 edge below the lr-coupling bar), E=1.0 (E=1.5 projects 89.8 h > 78 h at blended 17.0 s/iter), projected **≈ 59.8 h**. Every training row gets ≥1 look; oversampled rare rows get 4; the four Cycle-1 floor-missers get 112–272 looks vs r2's ~7. nohup-detached (survives the session); log `.adapters/a3b-r3.train.log`. |
 
-*(launch row with measured pace + chosen batch/E/iters lands here before the run starts)*
+*(gate read lands here on completion — ONE clean read per P7.4)*
