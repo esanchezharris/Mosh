@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>scan me</title>
+<style>
+  body { background: #0d0e11; color: #e8e6df; font-family: ui-monospace, Menlo, monospace;
+         min-height: 100vh; margin: 0; display: flex; flex-direction: column;
+         align-items: center; justify-content: center; gap: 28px; }
+  #qr { background: #fff; padding: 18px; border-radius: 12px; }
+  #url { font-size: 30px; letter-spacing: 1px; }
+  p { color: #6f7480; max-width: 520px; text-align: center; line-height: 1.5; }
+</style>
+</head>
+<body>
+  <div id="qr"></div>
+  <div id="url">…</div>
+  <p>Point the iPhone camera here (same Wi-Fi as this Mac) — or just type the URL into Safari.</p>
+<script>
+  fetch("/url").then(r => r.json()).then(j => {
+    document.getElementById("url").textContent = j.url;
+    // QR via CDN (this page runs on the Mac, which has internet); URL fallback above works regardless
+    const s = document.createElement("script");
+    s.src = "https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js";
+    s.onload = () => {
+      const q = qrcode(0, "M");
+      q.addData(j.url);
+      q.make();
+      document.getElementById("qr").innerHTML = q.createSvgTag({ cellSize: 9, margin: 0 });
+    };
+    s.onerror = () => { document.getElementById("qr").textContent = "(offline: type the URL)"; };
+    document.head.appendChild(s);
+  });
+</script>
+</body>
+</html>
