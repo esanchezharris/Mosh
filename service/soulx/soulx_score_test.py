@@ -122,6 +122,14 @@ check("'gonna' over 2 slots progresses gon→na (no whole-word re-articulation)"
       toks(clip, "phoneme") == ["en_G-AA1", "en_N-AH0"] and toks(clip, "note_type") == ["2", "3"],
       str(clip["phoneme"]))
 
+# ── 5c. No BARE-SCHWA slot: a word-initial unstressed vowel (again = AH0-G-EH1-N) must not
+# get its own naked-vowel note (SoulX garbles a consonant-less "uh") — it borrows the next
+# syllable's onset consonant so every slot has substance. ("again" → "ag"/"ain")
+r = sx.author_score([LINE("again", [SLOT(0.0, 1.0, 50, 50)])])
+clip = r["score"][0]
+check("'again' borrows the onset so slot 1 isn't a bare schwa",
+      toks(clip, "phoneme") == ["en_AH0-G", "en_EH1-N"], str(clip["phoneme"]))
+
 # ── 6. Inter-slot gaps become <SP> rests ────────────────────────────────────────────────
 r = sx.author_score([LINE("hold flame", [SLOT(0.0, 0.4, 57), SLOT(1.0, 1.4, 60)])])
 clip = r["score"][0]
