@@ -63,6 +63,20 @@ def _held_vowel(group: List[str]) -> str:
     return vowels[-1] if vowels else (group[-1] if group else "AH1")
 
 
+def _merge_bare_vowel_onsets(groups: List[List[str]]) -> List[List[str]]:
+    """A non-final syllable that is a single BARE vowel (e.g. the 'a-' in a-gain) gives SoulX
+    a consonant-less "uh" to sing, which it garbles. Borrow the NEXT syllable's leading
+    consonant so every slot has substance ('a'|'gain' → 'ag'|'ain'). The next group keeps its
+    vowel (only a leading consonant moves), so no group is emptied."""
+    g = [list(x) for x in groups]
+    for i in range(len(g) - 1):
+        # only an UNSTRESSED bare vowel (schwa, stress digit 0) is the problem; a stressed
+        # vowel (1/2) SoulX sings fine on its own.
+        if len(g[i]) == 1 and g[i][0][-1:] == "0" and g[i + 1] and not g[i + 1][0][-1:].isdigit():
+            g[i].append(g[i + 1].pop(0))
+    return g
+
+
 def _slot_phonemes(word: str, n_slots: int) -> List[str]:
     """Distribute a word's phones across its `n_slots` note slots so a multi-slot word
     PROGRESSES instead of re-articulating the whole word on every slot (the sung-render
@@ -76,7 +90,7 @@ def _slot_phonemes(word: str, n_slots: int) -> List[str]:
     phones = _pron().phones(_clean(word))
     if not phones:
         phones = ["AH1"] * max(1, _pron().syllables(_clean(word)) or 1)
-    groups = ph.syllabify_phones(phones) or [list(phones)]
+    groups = _merge_bare_vowel_onsets(ph.syllabify_phones(phones) or [list(phones)])
     n_syl = len(groups)
     if n_slots >= n_syl:
         held = _held_vowel(groups[-1])
