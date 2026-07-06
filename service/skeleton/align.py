@@ -101,9 +101,33 @@ def slots_for_word(start: float, end: float, syl: int, f0=None) -> List[dict]:
     return slots
 
 
+def enforce_min_durations(durs, mins):
+    """Raise each below-minimum note to its minimum, taking the deficit PROPORTIONALLY from the
+    notes that have surplus (so a crammed word becomes singable while the phrase's TOTAL span —
+    and the anchored notes around it — stay put). If the phrase can't fit the minimums even by
+    flattening the surplus, it EXTENDS (each note gets its min). Pure; deterministic."""
+    durs = [float(d) for d in durs]
+    mins = [float(m) for m in mins]
+    total = sum(durs)
+    if sum(mins) >= total:                    # can't fit even flattened → phrase extends
+        return list(mins)
+    deficit = sum(max(0.0, m - d) for d, m in zip(durs, mins))
+    surplus_total = sum(d - m for d, m in zip(durs, mins) if d > m)
+    out = []
+    for d, m in zip(durs, mins):
+        if d < m:
+            out.append(m)
+        elif d > m and surplus_total > 0:
+            out.append(d - (d - m) * deficit / surplus_total)
+        else:
+            out.append(d)
+    return out
+
+
 def lines_from_aligned(aligned_words, line_word_counts, f0=None, bpm: float = 120.0,
                        grid: str = "1/16", algo: str = "align", bridge_gap_s: float = 0.35,
-                       take_env=None, env_hop_s: float = 0.01, sil_floor=None) -> List[dict]:
+                       take_env=None, env_hop_s: float = 0.01, sil_floor=None,
+                       min_syl_dur: float = 0.14) -> List[dict]:
     """Aligned words (from align_words) + per-line word counts → score-author `lines`.
 
     Each word gets its phonology syllable count of slots, timed within its OWN aligned span
@@ -131,7 +155,8 @@ def lines_from_aligned(aligned_words, line_word_counts, f0=None, bpm: float = 12
         pos += int(n)
         if not group:
             continue
-        slots, words = [], []
+        # 1) per-word [word, start, end] after legato bridge + voicing clamp
+        spans = []
         for i, w in enumerate(group):
             start, end = float(w["start"]), float(w["end"])
             if i + 1 < len(group):
@@ -140,8 +165,32 @@ def lines_from_aligned(aligned_words, line_word_counts, f0=None, bpm: float = 12
                     end = nxt
             if floor is not None:                     # trim a note that sustains into take-silence
                 end = clamp_span_to_voicing(start, end, take_env, env_hop_s, floor)
-            words.append(w["word"])
-            slots.extend(slots_for_word(start, end, _syl(w["word"]), f0=f0))
+            spans.append([w["word"], start, max(end, start + 0.01)])
+
+        # 2) enforce a minimum articulation time within each contiguous PHRASE-run: a crammed
+        #    word (the take's fast mumble the CTC aligner captured ~0.1s) is unsingable and SoulX
+        #    garbles it — raise it to min_syl_dur × syllables, taking the time from the run's long
+        #    words so the run span (and the anchored down-lines) don't move. A gap breaks the run.
+        i = 0
+        while i < len(spans):
+            j = i
+            while j + 1 < len(spans) and spans[j + 1][1] - spans[j][2] <= 0.02:
+                j += 1
+            run = spans[i:j + 1]
+            new = enforce_min_durations([s[2] - s[1] for s in run],
+                                        [min_syl_dur * _syl(s[0]) for s in run])
+            t = run[0][1]
+            for k in range(len(run)):
+                run[k][1] = t
+                run[k][2] = t + new[k]
+                t = run[k][2]
+            i = j + 1
+
+        # 3) slot each word from its (redistributed) span
+        slots, words = [], []
+        for word, start, end in spans:
+            words.append(word)
+            slots.extend(slots_for_word(start, end, _syl(word), f0=f0))
         lines.append({"text": " ".join(words),
                       "score": {"v": 1, "algo": algo, "bar": bar, "bpm": bpm,
                                 "timeSig": [4, 4], "grid": grid, "clamped": False, "slots": slots}})

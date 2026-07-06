@@ -149,5 +149,23 @@ last_end = lines_v[0]["score"]["slots"][-1]["end"]
 check("last word clamped to take voicing (2.0s → ~0.8s, no over-hold)",
       last_end < 1.0, f"last slot end {last_end}")
 
+# ── 7. enforce_min_durations: crammed words get a singable minimum, total time preserved ──
+# (the owner's take mumbles the "gonna...again" bridges ~0.1s/word; SoulX can't articulate
+# that fast → garble. Raise each below-min word to its min, taking proportionally from the
+# long words in the SAME phrase so the phrase's total span — and the anchored down-lines — are
+# unchanged.)
+out = align.enforce_min_durations([1.10, 0.10, 0.40], [0.10, 0.26, 0.13])
+check("crammed word raised to its minimum", abs(out[1] - 0.26) < 1e-6, str(out))
+check("total time preserved (phrase span unchanged)", abs(sum(out) - 1.60) < 1e-6, str(out))
+check("the deficit is taken from the surplus words, the longest absorbing most",
+      out[0] < 1.10 and (1.10 - out[0]) > (0.40 - out[2]) and out[2] >= 0.13 - 1e-6, str(out))
+already = align.enforce_min_durations([0.60, 0.60, 0.60], [0.13, 0.13, 0.13])
+check("all-adequate durations are unchanged", already == [0.60, 0.60, 0.60], str(already))
+tight = align.enforce_min_durations([0.10, 0.10], [0.26, 0.26])
+check("if the phrase can't fit the minimums it EXTENDS (each ≥ min)",
+      all(d >= 0.26 - 1e-6 for d in tight), str(tight))
+check("enforce_min_durations is deterministic",
+      align.enforce_min_durations([1.10, 0.10, 0.40], [0.10, 0.26, 0.13]) == out)
+
 print(f"\n{'OK' if not fails else 'FAILED'}: {len(fails)} failure(s)")
 sys.exit(len(fails))
