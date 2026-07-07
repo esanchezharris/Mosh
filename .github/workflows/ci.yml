@@ -1,0 +1,188 @@
+name: CI
+
+# Continuous integration for Mosh (FIT-009).
+#
+# Reuses the SAME verification gate the owner runs by hand on the Mac —
+# scripts/auto-loop/gate.sh — so CI can never drift from local truth. Two lanes:
+#
+#   cheap-gate  (fast, ~10 min)  typecheck + vitest + e2e + touched-py tests.
+#                                This is the intended REQUIRED status check.
+#   native-gate (slow, heavy)    cmake build + Catch2 + `Mosh --selftest ×3
+#                                deterministic` + verify.py --gate + DAW conformance.
+#                                Best-effort here; promote to required once stable.
+#
+# Real-model paths (SA3, SoulX/SSH, RAVE, whisper, basic-pitch) are owner-gated and
+# stay OFF in CI — the native selftest already pins MOSH_ENABLE_SA3=0 / _TRANSFORM=0
+# etc., so this runs the hermetic default only.
+#
+# NOTE: .github/** is on the auto-loop hard-exclusion list, so this file is
+# human-maintained and never flows through the autonomous loop.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# One in-flight run per ref; a new push cancels the previous (saves macOS minutes).
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ── Cheap lane: no native build. The required check. ────────────────────────
+  cheap-gate:
+    name: cheap gate (typecheck · vitest · e2e · py)
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so the gate's `git diff <base>...HEAD` (used by the
+          # touched-python-tests step) resolves a real merge-base.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Ensure jq (gate emits JSON)
+        run: jq --version >/dev/null 2>&1 || brew install jq
+
+      - name: Install UI deps
+        working-directory: ui
+        run: npm ci
+
+      - name: Install Playwright browser (chromium)
+        working-directory: ui
+        run: npx playwright install chromium
+
+      - name: Stamp installed deps
+        # Tell the gate its deps are already fresh (matches lib.sh deps_write_stamp)
+        # so gate_cheap's ensure_node_modules skips a redundant `npm ci`.
+        run: shasum -a 256 ui/package-lock.json | awk '{print $1}' > ui/node_modules/.mosh-deps-stamp
+
+      - name: Run cheap gate
+        run: |
+          set -o pipefail
+          base_ref="${{ github.base_ref || 'main' }}"
+          # Make origin/<base> resolvable for the gate's diff-based steps.
+          git fetch --no-tags origin "$base_ref:refs/remotes/origin/$base_ref" || true
+          ./scripts/auto-loop/gate.sh cheap "$PWD" "origin/$base_ref" | tee gate-cheap.json
+          # gate.sh exits non-zero on a red lane; propagate it (pipefail keeps the code).
+
+      - name: Gate summary
+        if: always()
+        run: |
+          [ -f gate-cheap.json ] || { echo "no gate output"; exit 0; }
+          {
+            echo "### Cheap gate — \`$(jq -r '.pass' gate-cheap.json)\`"
+            echo ""
+            echo "| step | result |"
+            echo "|------|:------:|"
+            jq -r '.steps[] | "| \(.name) | \(if .ok then "✅" else "❌" end) |"' gate-cheap.json
+          } >> "$GITHUB_STEP_SUMMARY"
+          # Echo failing step logs to the job log for quick triage.
+          jq -r '.steps[] | select(.ok|not) | "\n=== FAILED: \(.name) ===\n\(.detail.log // .detail)"' gate-cheap.json || true
+
+  # ── Native lane: full compiled gate. Heavy — promote to required once green. ─
+  native-gate:
+    name: native gate (build · Catch2 · selftest ×3 · verify.py · conformance)
+    runs-on: macos-14
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Toolchain (ninja, jq) + numpy
+        run: |
+          jq --version >/dev/null 2>&1 || brew install jq
+          command -v ninja >/dev/null 2>&1 || brew install ninja
+          python3 -m pip install --upgrade pip numpy
+
+      - name: Rewrite SSH submodule URLs to HTTPS
+        # tracktion_engine's JUCE submodule is pinned via a git@github.com: URL; the
+        # recursive FetchContent fetch has no SSH key on the runner. This rewrite lets
+        # it clone over HTTPS (documented in cmake/Dependencies.cmake).
+        run: git config --global url."https://github.com/".insteadOf "git@github.com:"
+
+      - name: Restore CPM package cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/cpm-cache
+          key: cpm-${{ runner.os }}-${{ hashFiles('cmake/Dependencies.cmake') }}
+          restore-keys: cpm-${{ runner.os }}-
+
+      - name: Restore FetchContent deps (tracktion_engine + JUCE, patched)
+        # Poison-resistant: restore-only here, and a matching save runs at the end
+        # ONLY when the clone is complete (see the guarded save step below).
+        uses: actions/cache/restore@v4
+        with:
+          path: build-macos-arm64-release/_deps
+          key: fc-${{ runner.os }}-${{ hashFiles('cmake/Dependencies.cmake', 'patches/**', 'CMakePresets.json') }}
+
+      - name: Install UI deps
+        working-directory: ui
+        run: npm ci
+
+      - name: Run native gate
+        env:
+          MOSH_AUTOLOOP_HOME: ${{ runner.temp }}/mosh-autoloop
+        run: |
+          set -o pipefail
+          # gate_native passes -DCPM_SOURCE_CACHE=$AL_CPM_CACHE when set.
+          export AL_CPM_CACHE="${{ runner.temp }}/cpm-cache"
+          mkdir -p "$AL_CPM_CACHE"
+          base_ref="${{ github.base_ref || 'main' }}"
+          git fetch --no-tags origin "$base_ref:refs/remotes/origin/$base_ref" || true
+          ./scripts/auto-loop/gate.sh native "$PWD" "origin/$base_ref" | tee gate-native.json
+
+      - name: Check FetchContent clone completeness
+        if: always()
+        id: fc
+        run: |
+          # Only worth caching once the recursive JUCE submodule is fully present.
+          if [ -d build-macos-arm64-release/_deps/tracktion_engine-src/modules/juce/modules ]; then
+            echo "complete=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "complete=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Save FetchContent deps cache
+        if: always() && steps.fc.outputs.complete == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: build-macos-arm64-release/_deps
+          key: fc-${{ runner.os }}-${{ hashFiles('cmake/Dependencies.cmake', 'patches/**', 'CMakePresets.json') }}
+
+      - name: Gate summary
+        if: always()
+        run: |
+          [ -f gate-native.json ] || { echo "no gate output"; exit 0; }
+          {
+            echo "### Native gate — \`$(jq -r '.pass' gate-native.json)\`"
+            echo ""
+            echo "selftest checks (×3): \`$(jq -rc '.selftest' gate-native.json)\`  ·  failed: \`$(jq -r '.selftest_failed' gate-native.json)\`  ·  asserts: \`$(jq -r '.asserts' gate-native.json)\`"
+            echo ""
+            echo "| step | result |"
+            echo "|------|:------:|"
+            jq -r '.steps[] | "| \(.name) | \(if .ok then "✅" else "❌" end) |"' gate-native.json
+          } >> "$GITHUB_STEP_SUMMARY"
+          jq -r '.steps[] | select(.ok|not) | "\n=== FAILED: \(.name) ===\n\(.detail.log // .detail)"' gate-native.json || true
