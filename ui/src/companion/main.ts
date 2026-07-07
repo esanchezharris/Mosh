@@ -41,22 +41,46 @@ function bannerState(s: Snap | null): "REC" | "PLAY" | "PAUSED" {
 }
 
 // ---------- pad ----------
-function renderPad() {
+// Tiles are created ONCE and reused; reordering moves the same DOM nodes so a FLIP
+// animation can slide them to their new slots (iOS icon-rearrange feel).
+function ensureTiles() {
   const grid = $("#pad");
-  grid.innerHTML = "";
-  grid.classList.toggle("editing", editing);
-  for (const id of layout.order) {
+  for (const id of L.TILES) {
+    if (grid.querySelector(`.tile[data-id="${id}"]`)) continue;
     const m = BTN_META[id];
     const tile = el("button", `tile ${m.cls}`) as HTMLButtonElement;
     tile.dataset.id = id;
-    tile.style.gridColumn = `span ${L.SPAN[id]}`;
     tile.innerHTML = `<span class="lbl">${m.label}</span>${m.sub ? `<span class="sub">${m.sub}</span>` : ""}`;
     tile.addEventListener("click", () => {
-      if (!editing) void press(id);
+      if (!editing) void press(id as Button);
     });
     attachTileDrag(tile, id);
     grid.appendChild(tile);
   }
+}
+
+function renderPad() {
+  ensureTiles();
+  $("#pad").classList.toggle("editing", editing);
+  applyOrder(false);
+}
+
+/** Order the existing tiles per layout.order; when `animate`, FLIP them to new slots. */
+function applyOrder(animate: boolean) {
+  const grid = $("#pad");
+  const tiles = Array.from(grid.querySelectorAll<HTMLElement>(".tile"));
+  const first = new Map<string, DOMRect>();
+  if (animate) for (const t of tiles) first.set(t.dataset.id!, t.getBoundingClientRect());
+
+  for (const id of layout.order) {
+    const t = grid.querySelector<HTMLElement>(`.tile[data-id="${id}"]`);
+    if (t) {
+      t.style.gridColumn = `span ${L.SPAN[id]}`;
+      grid.appendChild(t); // re-append in order → grid reflows
+    }
+  }
+
+  if (animate) playFlip(tiles, first, dragEl); // the lifted tile follows the finger, not the grid
 }
 
 async function press(id: Button) {
@@ -100,42 +124,95 @@ function seekTo(frac: number) {
   void net.runPlan(seekPlan(sec)).catch(() => {});
 }
 
-// ---------- drag-to-rearrange (P1: functional reorder; iOS FLIP polish in P2) ----------
+// ---------- iOS-style drag-to-rearrange (FLIP reflow) ----------
+let dragEl: HTMLElement | null = null;
 let lpTimer: number | undefined;
+
+// Animate `tiles` from their captured `first` rects to their current slots (FLIP).
+function playFlip(tiles: HTMLElement[], first: Map<string, DOMRect>, skip?: HTMLElement | null) {
+  requestAnimationFrame(() => {
+    for (const t of tiles) {
+      if (t === skip) continue;
+      const f = first.get(t.dataset.id!);
+      if (!f) continue;
+      const l = t.getBoundingClientRect();
+      const dx = f.left - l.left;
+      const dy = f.top - l.top;
+      if (!dx && !dy) continue;
+      t.style.transition = "none";
+      t.style.transform = `translate(${dx}px,${dy}px)`;
+      requestAnimationFrame(() => {
+        t.style.transition = "transform .2s cubic-bezier(.2,.7,.3,1)";
+        t.style.transform = "";
+      });
+    }
+  });
+}
+
 function attachTileDrag(tile: HTMLButtonElement, id: Button) {
   tile.addEventListener("pointerdown", (e) => {
     if (!editing) {
-      lpTimer = window.setTimeout(() => setEditing(true), 500);
+      lpTimer = window.setTimeout(() => setEditing(true), 500); // long-press → edit mode
       const clear = () => window.clearTimeout(lpTimer);
       tile.addEventListener("pointerup", clear, { once: true });
       tile.addEventListener("pointermove", clear, { once: true });
       return;
     }
     e.preventDefault();
-    tile.setPointerCapture(e.pointerId);
+    try {
+      tile.setPointerCapture(e.pointerId);
+    } catch {
+      /* not an active pointer (e.g. synthetic events) — drag still works */
+    }
+    dragEl = tile;
+    const rect = tile.getBoundingClientRect();
+    const grabX = e.clientX - rect.left;
+    const grabY = e.clientY - rect.top;
+
+    // Lift the tile out of the grid (position:fixed) so the others reflow into the gap.
     tile.classList.add("dragging");
+    Object.assign(tile.style, {
+      position: "fixed",
+      width: `${rect.width}px`,
+      height: `${rect.height}px`,
+      left: `${rect.left}px`,
+      top: `${rect.top}px`,
+      zIndex: "20",
+    });
+    applyOrder(true); // remaining tiles slide to fill the gap
+
     const move = (ev: PointerEvent) => {
-      const over = document
+      tile.style.left = `${ev.clientX - grabX}px`;
+      tile.style.top = `${ev.clientY - grabY}px`;
+      const under = document
         .elementsFromPoint(ev.clientX, ev.clientY)
-        .find((n) => n instanceof HTMLElement && n.dataset.id && n.dataset.id !== id) as HTMLElement | undefined;
-      if (over?.dataset.id) {
-        const toIndex = layout.order.indexOf(over.dataset.id as Button);
-        if (toIndex >= 0 && layout.order.indexOf(id) !== toIndex) {
+        .find((n) => n instanceof HTMLElement && n.dataset.id && n !== tile) as HTMLElement | undefined;
+      if (under?.dataset.id) {
+        const toIndex = layout.order.indexOf(under.dataset.id as Button);
+        if (toIndex >= 0 && toIndex !== layout.order.indexOf(id)) {
           layout = { ...layout, order: L.moveInOrder(layout.order, id, toIndex) };
-          renderPad();
-          const again = $(`.tile[data-id="${id}"]`) as HTMLButtonElement | null;
-          again?.classList.add("dragging");
-          again?.setPointerCapture(ev.pointerId);
+          applyOrder(true); // reflow the others under the finger
         }
       }
     };
+
     const up = () => {
       tile.removeEventListener("pointermove", move);
-      $(`.tile[data-id="${id}"]`)?.classList.remove("dragging");
+      const grid = $("#pad");
+      const tiles = Array.from(grid.querySelectorAll<HTMLElement>(".tile"));
+      const first = new Map<string, DOMRect>();
+      for (const t of tiles) first.set(t.dataset.id!, t.getBoundingClientRect());
+      // Drop the tile back into the flow; FLIP everyone from `first` to final slots.
+      tile.classList.remove("dragging");
+      Object.assign(tile.style, { position: "", width: "", height: "", left: "", top: "", zIndex: "" });
+      dragEl = null;
+      playFlip(tiles, first);
       L.save(localStorage, layout);
     };
+
     tile.addEventListener("pointermove", move);
     tile.addEventListener("pointerup", up, { once: true });
+    tile.addEventListener("pointercancel", up, { once: true });
   });
 }
 
@@ -197,7 +274,11 @@ function buildDom() {
   bar.addEventListener("pointerdown", (e) => {
     if (editing) return;
     draggingNav = true;
-    bar.setPointerCapture(e.pointerId);
+    try {
+      bar.setPointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
     const f = navFrac(e.clientX);
     $("#playhead").style.left = `${f * 100}%`;
     seekTo(f);

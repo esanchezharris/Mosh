@@ -92,9 +92,8 @@ body.editing #editBtn { border-color: var(--lime); color: var(--lime); }
 .tile.stop { background: var(--stop); }
 .tile:active { filter: brightness(1.2); }
 body:not(.editing) .tile:active { transform: scale(0.985); }
-body.editing .tile { outline: 2px dashed rgba(255,255,255,0.45); outline-offset: -4px; animation: wiggle 0.3s ease-in-out infinite alternate; }
-body.editing .tile.dragging { animation: none; opacity: 0.85; transform: scale(1.04); z-index: 5; }
-@keyframes wiggle { from { transform: rotate(-0.5deg); } to { transform: rotate(0.5deg); } }
+body.editing .tile { outline: 2px dashed rgba(255,255,255,0.45); outline-offset: -4px; }
+body.editing .tile.dragging { opacity: 0.92; box-shadow: 0 12px 28px rgba(0,0,0,0.5); }
 
 #editbar { flex: 0 0 auto; display: none; gap: 8px; align-items: center; }
 body.editing #editbar { display: flex; }
