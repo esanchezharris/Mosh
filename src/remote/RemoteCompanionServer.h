@@ -57,6 +57,7 @@ private:
     static void writeTextResponse (juce::StreamingSocket& socket, int statusCode,
                                    const juce::String& contentType, const juce::String& body);
     static juce::String webCompanionHtml();
+    static juce::String legacyWebCompanionHtml(); // inline fallback when the built page isn't staged
     static juce::var ok (juce::var data = {});
     static juce::var err (const juce::String& message);
     static juce::var toVar (const RemotePairingInfo& info, bool includeSecrets = true);

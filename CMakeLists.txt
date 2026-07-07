@@ -233,6 +233,8 @@ if (MOSH_BUILD_APP)
     # ── UI bundle (Vite) ─────────────────────────────────────────────────────
     if (MOSH_BUILD_UI)
         include(cmake/BuildUI.cmake)
+        # Phone companion controller page (served by RemoteCompanionServer at /web).
+        include(cmake/BuildCompanion.cmake)
     endif()
 endif()
 
