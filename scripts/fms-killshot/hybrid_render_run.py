@@ -101,6 +101,8 @@ def main() -> int:
     ap.add_argument("--out", required=True)
     ap.add_argument("--t-start", type=float, default=0.0, help="window start in the take (seconds)")
     ap.add_argument("--dur", type=float, default=14.0, help="window duration (seconds) to render")
+    ap.add_argument("--mode", choices=("score", "melody"), default="score",
+                    help="SVS control for the rewritten words (score = intelligible; melody garbles)")
     ap.add_argument("--n-steps", type=int, default=32)
     ap.add_argument("--cfg", type=float, default=3.0)
     a = ap.parse_args()
@@ -127,11 +129,11 @@ def main() -> int:
     print(f"   {md['rewritten']} rewritten lines, {md['events']} events, {md['n_frames']} f0 frames, "
           f"clip {md['score'][0]['time']}")
 
-    print("4) render melody-mode (control=melody)", flush=True)
+    print(f"4) render {a.mode}-mode (rewritten words in his voice, clean prompt)", flush=True)
     mel_dir = os.path.join(a.out, "melody")
     os.makedirs(mel_dir, exist_ok=True)
     r = subprocess.run([VENV_PY, os.path.join(BRIDGE, "scripts/inference_mlx_bridge.py"),
-                        "--model", MODEL, "--component", "svs", "--control", "melody", "--device", "mps",
+                        "--model", MODEL, "--component", "svs", "--control", a.mode, "--device", "mps",
                         "--prompt_wav_path", a.ref, "--prompt_metadata_path", a.ref_meta,
                         "--target_metadata_path", mt, "--phoneset_path", PHONESET,
                         "--n_steps", str(a.n_steps), "--cfg", str(a.cfg), "--pitch_shift", "0",
