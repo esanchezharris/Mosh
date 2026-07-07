@@ -27,6 +27,7 @@ import sys
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SERVICE = os.path.join(REPO, "service")
 RUN_MOSH = os.path.join(REPO, "run-mosh.sh")
+RUN_MOSH_PS1 = os.path.join(REPO, "run-mosh.ps1")
 
 fails = []
 
@@ -55,6 +56,24 @@ def _bundled(body: str):
     for m in re.finditer(r"for d in ([^;]+); do", body):
         dirs.update(m.group(1).split())
     return files, dirs
+
+
+def _ps1_whitelist():
+    """(top-level .py stems, whitelisted dir names) the Windows packager ships.
+
+    run-mosh.ps1's Copy-ServiceBundle bundles the SAME service subtree as bundle_service,
+    but hand-maintained separately — this parses its `$topFiles`/`$dirs` arrays so the two
+    whitelists can be asserted identical (drift = a route that 500s in the packaged Windows
+    app only). `.sh`/`.ps1` entries (run.sh vs run.ps1, setup-sa3.sh) are excluded — only the
+    top-level `.py` stems + dir set are compared."""
+    src = open(RUN_MOSH_PS1, encoding="utf-8").read()
+
+    def _array(var: str):
+        m = re.search(re.escape(var) + r"\s*=\s*@\((.*?)\)", src, re.S)
+        return re.findall(r'"([^"]+)"', m.group(1)) if m else []
+
+    files = {t[:-3] for t in _array("$topFiles") if t.endswith(".py")}
+    return files, set(_array("$dirs"))
 
 
 def _top_level_modules() -> set:
@@ -108,6 +127,22 @@ for py in _bundled_py_files(bundled_files, bundled_dirs):
 
 detail = "; ".join(f"{m} <- {sorted(set(v))}" for m, v in sorted(missing.items())) or "none"
 check("every top-level module imported by bundled code is bundled", not missing, detail)
+
+# The Windows packager (run-mosh.ps1) must ship the SAME service subtree, or the packaged
+# Windows app 500s where the packaged mac app works. Assert the two whitelists are identical.
+if os.path.isfile(RUN_MOSH_PS1):
+    ps1_files, ps1_dirs = _ps1_whitelist()
+    check("run-mosh.ps1 exposes a parseable Copy-ServiceBundle whitelist",
+          bool(ps1_files) and bool(ps1_dirs),
+          f"files={sorted(ps1_files)} dirs={sorted(ps1_dirs)}")
+    check("run-mosh.ps1 top-level .py whitelist == run-mosh.sh",
+          ps1_files == bundled_files,
+          f"ps1-only={sorted(ps1_files - bundled_files)} sh-only={sorted(bundled_files - ps1_files)}")
+    check("run-mosh.ps1 dir whitelist == run-mosh.sh",
+          ps1_dirs == bundled_dirs,
+          f"ps1-only={sorted(ps1_dirs - bundled_dirs)} sh-only={sorted(bundled_dirs - ps1_dirs)}")
+else:
+    check("run-mosh.ps1 exists (Windows packaging whitelist mirror)", False, "run-mosh.ps1 missing")
 
 print(f"\n{len(fails)} failures")
 sys.exit(1 if fails else 0)

@@ -19,7 +19,9 @@ from __future__ import annotations
 import hashlib
 import itertools
 import json
+import ntpath
 import os
+import posixpath
 import queue
 import subprocess
 import sys
@@ -56,21 +58,43 @@ SA3_ENABLED = os.environ.get("MOSH_ENABLE_SA3", "1") == "1" and stable_audio3_ad
 TRAINING_ENABLED = lora_trainer_adapter.available()
 
 
+def venv_python(base_dir: str, is_windows: bool) -> str:
+    """Interpreter path inside a venv rooted at base_dir. Windows venvs put python at
+    Scripts\\python.exe; POSIX at bin/python. Host-agnostic (uses the explicit path
+    module, not the ambient os.path) so BOTH branches are unit-testable on any host —
+    see service/scripts/venv_python_path_test.py."""
+    p = ntpath if is_windows else posixpath
+    return (p.join(base_dir, "Scripts", "python.exe") if is_windows
+            else p.join(base_dir, "bin", "python"))
+
+
+def _venvs_root() -> str:
+    """Root dir holding per-feature venvs. Explicit MOSH_VENVS_DIR wins; else the
+    per-platform convention OUTSIDE the repo tree (macOS: ~/Library/Mosh/venvs;
+    Windows: %LOCALAPPDATA%\\Mosh\\venvs)."""
+    explicit = os.environ.get("MOSH_VENVS_DIR", "").strip()
+    if explicit:
+        return explicit
+    if os.name == "nt":
+        base = os.environ.get("LOCALAPPDATA", "").strip() or os.path.expanduser("~")
+        return os.path.join(base, "Mosh", "venvs")
+    return os.path.join(os.path.expanduser("~"), "Library", "Mosh", "venvs")
+
+
 def _venv_py(env_var: str, name: str) -> str:
     """Interpreter for a per-feature venv: the .env-sourced override first (the single
-    source of truth, written by the feature's setup-*.sh), then the conventional
-    ~/Library/Mosh/venvs/<name> (venvs live OUTSIDE the iCloud-synced repo tree —
-    in-tree .venvs got files silently evicted by iCloud), then the legacy in-tree
-    service/<name>/.venv."""
+    source of truth, written by the feature's setup script), then the conventional
+    per-platform venvs root (venvs live OUTSIDE the iCloud-synced repo tree — in-tree
+    .venvs got files silently evicted by iCloud), then the legacy in-tree
+    service/<name>/.venv. POSIX venvs use bin/python; Windows venvs Scripts\\python.exe."""
     env = os.environ.get(env_var, "").strip()
     if env:
         return env
-    venvs_root = os.environ.get("MOSH_VENVS_DIR", "").strip() or os.path.join(
-        os.path.expanduser("~"), "Library", "Mosh", "venvs")
-    conventional = os.path.join(venvs_root, name, "bin", "python")
+    is_windows = os.name == "nt"
+    conventional = venv_python(os.path.join(_venvs_root(), name), is_windows)
     if os.path.isfile(conventional):
         return conventional
-    return os.path.join(SERVICE_DIR, name, ".venv", "bin", "python")
+    return venv_python(os.path.join(SERVICE_DIR, name, ".venv"), is_windows)
 
 
 def _basic_pitch_py() -> str:
