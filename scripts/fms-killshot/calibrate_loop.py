@@ -116,6 +116,9 @@ def main() -> int:
     ap.add_argument("--align", action="store_true",
                     help="also forced-align the known words to the take and emit "
                          "target_score_aligned.json (the over-segmentation root fix)")
+    ap.add_argument("--min-syl-dur", type=float, default=0.14,
+                    help="minimum singable seconds/syllable; 0 = LOCK onsets exactly to the "
+                         "take (no redistribution), 0.14 = stretch crammed words to be singable")
     ap.add_argument("--whisper-model", default="small")
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
@@ -256,7 +259,8 @@ def main() -> int:
         aligned = skalign.align_words(excerpt, flat)
         if aligned:
             alines = skalign.lines_from_aligned(aligned, line_counts, f0=f0, bpm=args.bpm,
-                                                grid=args.grid, take_env=env, env_hop_s=0.01)
+                                                grid=args.grid, take_env=env, env_hop_s=0.01,
+                                                min_syl_dur=args.min_syl_dur)
             ra = sx.author_score(alines, name="calibrate")
             if ra.get("ok"):
                 clip_a = ra["score"][0]
