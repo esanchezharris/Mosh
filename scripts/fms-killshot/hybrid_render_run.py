@@ -46,16 +46,41 @@ def extract_f0_hz(wav: str) -> list:
         return np.load(out).astype(float).reshape(-1).tolist()
 
 
-def slice_wav(src: str, dst: str, t1: float, sr_out: int = 24000) -> str:
+def slice_wav(src: str, dst: str, t0: float, t1: float, sr_out: int = 24000) -> str:
     a, sr = sf.read(src)
     if a.ndim > 1:
         a = a.mean(axis=1)
-    a = a[: int(t1 * sr)]
+    a = a[int(t0 * sr): int(t1 * sr)]
     if sr != sr_out:
         n = int(len(a) * sr_out / sr)
         a = np.interp(np.linspace(0, len(a), n, endpoint=False), np.arange(len(a)), a)
     sf.write(dst, a, sr_out)
     return dst
+
+
+def window_sheet(sheet: dict, t0: float, t1: float) -> dict:
+    """Keep lines whose lineScore overlaps [t0,t1] and shift every slot/segment time by -t0,
+    so the sheet's timeline matches a slice cut at t0 (author + F0 + overlay all stay aligned)."""
+    import copy
+    lines, scores = [], []
+    for ln, sc in zip(sheet.get("lines", []), sheet.get("lineScores", [])):
+        slots = (sc or {}).get("slots") or []
+        if not slots:
+            continue
+        a0 = min(float(x["start"]) for x in slots)
+        b0 = max(float(x["end"]) for x in slots)
+        if a0 < t0 or b0 > t1:          # keep only lines FULLY inside the window
+            continue
+        nsc = copy.deepcopy(sc)
+        for s in nsc["slots"]:
+            s["start"] = float(s["start"]) - t0
+            s["end"] = float(s["end"]) - t0
+            for seg in s.get("segments", []):
+                seg["start"] = float(seg["start"]) - t0
+                seg["end"] = float(seg["end"]) - t0
+        lines.append(ln)
+        scores.append(nsc)
+    return {**sheet, "lines": lines, "lineScores": scores}
 
 
 def _load_mono(path: str):
@@ -69,20 +94,23 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--sheet", required=True)
     ap.add_argument("--take", required=True)
-    ap.add_argument("--ref", required=True)
-    ap.add_argument("--ref-meta", required=True)
+    ap.add_argument("--ref", required=True, help="melody-mode prompt wav (needs its .json)")
+    ap.add_argument("--ref-meta", required=True, help="melody-mode prompt metadata (.json with f0)")
+    ap.add_argument("--svc-ref", default="", help="SVC voice reference (defaults to --ref); a clean "
+                    "self-slice of the take makes the final sound like HIM")
     ap.add_argument("--out", required=True)
-    ap.add_argument("--slice", type=float, default=14.0, help="seconds of the take to render")
-    ap.add_argument("--t-end", type=float, default=13.0, help="only rewritten lines starting before this")
+    ap.add_argument("--t-start", type=float, default=0.0, help="window start in the take (seconds)")
+    ap.add_argument("--dur", type=float, default=14.0, help="window duration (seconds) to render")
     ap.add_argument("--n-steps", type=int, default=32)
     ap.add_argument("--cfg", type=float, default=3.0)
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
-    sheet = json.load(open(a.sheet))
+    t0, t1 = a.t_start, a.t_start + a.dur
+    sheet = window_sheet(json.load(open(a.sheet)), t0, t1)
     env = dict(os.environ, PYTHONPATH=BRIDGE, PYTORCH_ENABLE_MPS_FALLBACK="1")
 
-    print(f"1) slice take -> {a.slice}s @ 24k", flush=True)
-    slice_path = slice_wav(a.take, os.path.join(a.out, "take_slice.wav"), a.slice)
+    print(f"1) slice take -> [{t0}, {t1}]s @ 24k", flush=True)
+    slice_path = slice_wav(a.take, os.path.join(a.out, "take_slice.wav"), t0, t1)
 
     print("2) RMVPE F0 (50fps) of the slice", flush=True)
     take_f0 = extract_f0_hz(slice_path)
@@ -90,7 +118,7 @@ def main() -> int:
           f"{np.median([x for x in take_f0 if x>0]) if any(x>0 for x in take_f0) else 0:.0f}Hz")
 
     print("3) author melody-mode metadata (rewritten lines, his F0)", flush=True)
-    md = rh.author_melody_metadata(sheet, take_f0, fps=50, t_end=a.t_end, name="hybrid")
+    md = rh.author_melody_metadata(sheet, take_f0, fps=50, t_end=a.dur, name="hybrid")
     if not md.get("ok"):
         print(f"FATAL author: {md.get('error')}", file=sys.stderr)
         return 1
@@ -113,30 +141,33 @@ def main() -> int:
         return 1
     melody_wav = os.path.join(mel_dir, "generated.wav")
 
-    print("5) render SVC over the slice (clear/sung spans)", flush=True)
-    svc_wav = os.path.join(a.out, "svc.wav")
-    r = subprocess.run([VENV_PY, os.path.join(HERE, "svc_render.py"), "--guide", slice_path,
-                        "--ref", a.ref, "--out", svc_wav, "--n_steps", str(a.n_steps), "--cfg", str(a.cfg)],
+    print("5) build composite guide (his take + new-word melody spliced at rewrite spans)", flush=True)
+    take_s, sr = _load_mono(slice_path)
+    mel, _ = _load_mono(melody_wav)
+    if len(mel) < len(take_s):
+        mel = np.concatenate([mel, np.zeros(len(take_s) - len(mel))])
+    else:
+        mel = mel[: len(take_s)]
+    spans = [(s, e) for (s, e) in rh.rewrite_spans(sheet) if s < a.dur]
+    # Blend fix: rather than overlay two DIFFERENT-character renders (SVC vs melody), splice
+    # the melody (new words on his F0) INTO his take, then run ONE SVC pass over the whole
+    # thing below — so clear and rewritten spans come out as the same voice (no jarring seam).
+    composite = np.array(rh.overlay(take_s.tolist(), mel.tolist(), spans, sr, xfade_ms=25))
+    composite = composite / max(1e-6, np.abs(composite).max()) * 0.95
+    composite_wav = os.path.join(a.out, "composite_guide.wav")
+    sf.write(composite_wav, composite, sr)
+
+    print("6) SVC over the composite -> one uniform voice (blend fix)", flush=True)
+    svc_ref = a.svc_ref or a.ref     # a clean self-slice makes the final sound like HIM
+    final = os.path.join(a.out, "hybrid.wav")
+    r = subprocess.run([VENV_PY, os.path.join(HERE, "svc_render.py"), "--guide", composite_wav,
+                        "--ref", svc_ref, "--out", final, "--n_steps", str(a.n_steps), "--cfg", str(a.cfg)],
                        env=env)
     if r.returncode != 0:
         print("FATAL: SVC render failed", file=sys.stderr)
         return 1
-
-    print("6) overlay (SVC + melody by rewrite span)", flush=True)
-    svc, sr = _load_mono(svc_wav)
-    mel, _ = _load_mono(melody_wav)
-    if len(mel) < len(svc):
-        mel = np.concatenate([mel, np.zeros(len(svc) - len(mel))])
-    else:
-        mel = mel[: len(svc)]
-    spans = [(s, e) for (s, e) in rh.rewrite_spans(sheet) if s < a.t_end]
-    out = np.array(rh.overlay(svc.tolist(), mel.tolist(), spans, sr, xfade_ms=25))
-    out = out / max(1e-6, np.abs(out).max()) * 0.95
-    final = os.path.join(a.out, "hybrid.wav")
-    sf.write(final, out, sr)
-    print(f"done -> {final}  ({len(out)/sr:.1f}s @ {sr}Hz, {len(spans)} rewritten spans: "
-          f"{[(round(s,1),round(e,1)) for s,e in spans]})")
-    print(f"   SVC-only: {svc_wav}   melody-only: {melody_wav}")
+    print(f"done -> {final}  ({len(spans)} rewritten spans: {[(round(s,1),round(e,1)) for s,e in spans]})")
+    print(f"   composite guide (pre-SVC): {composite_wav}   melody-only: {melody_wav}   svc-ref: {svc_ref}")
     return 0
 
 
