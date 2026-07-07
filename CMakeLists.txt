@@ -249,6 +249,25 @@ if (MOSH_BUILD_APP)
                     "$<TARGET_FILE_DIR:Mosh>/drumkits"
             COMMENT "Staging drum kits next to the Mosh executable"
             VERBATIM)
+
+        # Windows: stage the MSVC runtime redistributable DLLs (vcruntime140*, msvcp140)
+        # next to Mosh.exe so a zipped self-contained build (run-mosh.ps1 -Package copies
+        # the exe-adjacent DLLs) runs on a machine without the VC++ redistributable
+        # installed. SKIP the module's own install() rule — we only want the resolved list.
+        # macOS/Linux are unaffected (WIN32/MSVC false → this block is not emitted). CUDA
+        # DLLs are NOT staged here: they live in the Python CUDA venv (torch wheels).
+        if (WIN32 AND MSVC)
+            set(CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS_SKIP TRUE)
+            include(InstallRequiredSystemLibraries)
+            if (CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS)
+                add_custom_command(TARGET Mosh POST_BUILD
+                    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                            ${CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS}
+                            "$<TARGET_FILE_DIR:Mosh>"
+                    COMMENT "Staging MSVC runtime DLLs next to the Mosh executable"
+                    VERBATIM)
+            endif()
+        endif()
     endif()
 
     # ── UI bundle (Vite) ─────────────────────────────────────────────────────

@@ -16,11 +16,21 @@ namespace
         static const StringPairArray cfg = []
         {
             StringPairArray m;
+           #if JUCE_WINDOWS
+            // Flat layout (Windows): brain.env sits directly next to Mosh.exe, written
+            // by `run-mosh.ps1 -Package` (mirrors GenerativeJobManager's flat service/
+            // lookup + BuildUI.cmake's MOSH_UI_STAGE_DIR APPLE/else fork).
+            const auto f = File::getSpecialLocation (File::currentExecutableFile)
+                               .getParentDirectory()       // <exe dir>
+                               .getChildFile ("brain.env");
+           #else
+            // macOS bundle layout: Contents/MacOS/Mosh → up to Contents → Resources/brain.env.
             const auto f = File::getSpecialLocation (File::currentExecutableFile)
                                .getParentDirectory()       // Contents/MacOS
                                .getParentDirectory()       // Contents
                                .getChildFile ("Resources")
                                .getChildFile ("brain.env");
+           #endif
             if (f.existsAsFile())
             {
                 StringArray lines;
