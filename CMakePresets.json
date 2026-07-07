@@ -54,6 +54,32 @@
         "MOSH_BUILD_UI": "ON",
         "MOSH_BUILD_PLUGIN_FIXTURES": "ON"
       }
+    },
+    {
+      "name": "linux-x64-debug",
+      "displayName": "Linux x64 Debug (exploratory spike)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build-linux-x64",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "MOSH_BUILD_APP": "ON",
+        "MOSH_BUILD_TESTS": "ON",
+        "MOSH_BUILD_UI": "ON",
+        "MOSH_BUILD_PLUGIN_FIXTURES": "ON"
+      }
+    },
+    {
+      "name": "linux-x64-release",
+      "displayName": "Linux x64 Release (exploratory spike)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build-linux-x64-release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "MOSH_BUILD_APP": "ON",
+        "MOSH_BUILD_TESTS": "ON",
+        "MOSH_BUILD_UI": "ON",
+        "MOSH_BUILD_PLUGIN_FIXTURES": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -155,6 +181,40 @@
       "configuration": "Release",
       "targets": [
         "MoshTestTonePlugin_VST3"
+      ]
+    },
+    {
+      "name": "linux-x64-tests",
+      "displayName": "Build Linux x64 headless tests (MoshTests)",
+      "configurePreset": "linux-x64-debug",
+      "targets": [
+        "MoshTests"
+      ]
+    },
+    {
+      "name": "linux-x64-app",
+      "displayName": "Build Linux x64 app (needs WebKitGTK + ALSA + node)",
+      "configurePreset": "linux-x64-debug",
+      "targets": [
+        "Mosh",
+        "MoshStageUI"
+      ]
+    },
+    {
+      "name": "linux-x64-release-tests",
+      "displayName": "Build Linux x64 headless tests (Release)",
+      "configurePreset": "linux-x64-release",
+      "targets": [
+        "MoshTests"
+      ]
+    },
+    {
+      "name": "linux-x64-release-app",
+      "displayName": "Build Linux x64 app (Release; needs WebKitGTK + ALSA + node)",
+      "configurePreset": "linux-x64-release",
+      "targets": [
+        "Mosh",
+        "MoshStageUI"
       ]
     }
   ]
