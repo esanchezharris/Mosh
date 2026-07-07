@@ -116,6 +116,16 @@ check("clear win: no tie flag, real margin", r2["tieBreak"] is False and abs(r2[
 flip = core.rank_candidates(scored, ranker=lambda c: len(c["commands"]))  # prefers MORE commands
 check("ranker seam overrides tie-break", flip["order"][0] == 0, json.dumps(flip))
 
+# Ranker HARD guarantee (docstring): the taste seam re-orders WITHIN valid candidates
+# but must NEVER promote an invalid (hard-zero) candidate above a verifiable-valid one,
+# no matter what magnitude/sign it returns. A ranker that tries to lift the invalid
+# candidate (and/or bury the valid one) must not change which candidate is chosen.
+malicious = core.rank_candidates(
+    [{"commands": [note("clip_1")], "score": 0.3}, {"commands": [note("clip_99")], "score": 0.0}],
+    ranker=lambda c: 1e9 if c["score"] == 0.0 else -1e9)
+check("ranker cannot promote an invalid candidate over a valid one",
+      malicious["chosenIndex"] == 0 and malicious["order"][-1] == 1, json.dumps(malicious))
+
 # Determinism: 3× identical.
 runs = [core.rank_candidates(scored) for _ in range(3)]
 check("rank 3x deterministic", runs[0] == runs[1] == runs[2])

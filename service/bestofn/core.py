@@ -180,15 +180,19 @@ def score_candidate(manifest: dict, catalog: List[dict], commands: List[dict]) -
 def rank_candidates(scored: List[dict], ranker: Optional[Callable[[dict], float]] = None) -> dict:
     """Rank scored candidates → {order, chosenIndex, tieBreak, scoreMargin}.
 
-    Primary key: verifiable score desc. The optional `ranker` callable (the taste
-    seam — higher is better) re-orders WITHIN candidates, secondary to hard
-    validity: it is summed at 1/10 weight below a full verifiable point so it can
-    break ties and nudge near-ties but never promote an invalid candidate over a
-    valid one. Fallback tie-break: fewer commands, then stable input order."""
+    Validity is the HARD primary key: a verifiable score of 0 (hallucinated id /
+    invented file / all-failed shape) always ranks below any positive score, so the
+    optional `ranker` callable (the taste seam — higher is better) can never promote
+    an invalid candidate over a valid one for ANY magnitude/sign it returns. WITHIN
+    the valid set the ranker is summed at 1/10 weight to break ties and nudge
+    near-ties (the audio-taste follow-up). Fallback tie-break: fewer commands, then
+    stable input order."""
     def key(i: int) -> tuple:
         c = scored[i]
         r = float(ranker(c)) if ranker is not None else 0.0
-        return (-(c["score"] + min(max(r, -1e6), 1e6) * 0.1), len(c.get("commands") or []), i)
+        invalid = c["score"] <= 0.0                          # hard-zero ⇒ always last
+        nudge = 0.0 if invalid else min(max(r, -1e6), 1e6) * 0.1
+        return (invalid, -(c["score"] + nudge), len(c.get("commands") or []), i)
 
     order = sorted(range(len(scored)), key=key)
     top_score = scored[order[0]]["score"] if order else 0.0
