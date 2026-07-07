@@ -123,20 +123,16 @@ jobs:
         # it clone over HTTPS (documented in cmake/Dependencies.cmake).
         run: git config --global url."https://github.com/".insteadOf "git@github.com:"
 
-      - name: Restore CPM package cache
-        uses: actions/cache@v4
-        with:
-          path: ${{ runner.temp }}/cpm-cache
-          key: cpm-${{ runner.os }}-${{ hashFiles('cmake/Dependencies.cmake') }}
-          restore-keys: cpm-${{ runner.os }}-
-
-      - name: Restore FetchContent deps (tracktion_engine + JUCE, patched)
-        # Poison-resistant: restore-only here, and a matching save runs at the end
-        # ONLY when the clone is complete (see the guarded save step below).
+      - name: Restore dep cache (CPM packages + patched tracktion/JUCE source)
+        # CMakeLists.txt pins CPM_SOURCE_CACHE=<repo>/.cpm-cache and
+        # FETCHCONTENT_BASE_DIR=<repo>/.cpm-cache/_fc, so this ONE dir holds every
+        # fetched source (Catch2 + tracktion_engine + its recursive JUCE submodule,
+        # already patched). Restore-only here; a poison-resistant save runs at the end
+        # (only when the recursive JUCE checkout is complete).
         uses: actions/cache/restore@v4
         with:
-          path: build-macos-arm64-release/_deps
-          key: fc-${{ runner.os }}-${{ hashFiles('cmake/Dependencies.cmake', 'patches/**', 'CMakePresets.json') }}
+          path: .cpm-cache
+          key: deps-${{ runner.os }}-${{ hashFiles('cmake/Dependencies.cmake', 'cmake/CPM.cmake', 'patches/**') }}
 
       - name: Install UI deps
         working-directory: ui
@@ -147,30 +143,30 @@ jobs:
           MOSH_AUTOLOOP_HOME: ${{ runner.temp }}/mosh-autoloop
         run: |
           set -o pipefail
-          # gate_native passes -DCPM_SOURCE_CACHE=$AL_CPM_CACHE when set.
-          export AL_CPM_CACHE="${{ runner.temp }}/cpm-cache"
-          mkdir -p "$AL_CPM_CACHE"
+          # Leave CPM_SOURCE_CACHE / FETCHCONTENT_BASE_DIR at the CMakeLists defaults
+          # (<repo>/.cpm-cache[/_fc]) so the cached dir above is exactly what the build reads.
           base_ref="${{ github.base_ref || 'main' }}"
           git fetch --no-tags origin "$base_ref:refs/remotes/origin/$base_ref" || true
           ./scripts/auto-loop/gate.sh native "$PWD" "origin/$base_ref" | tee gate-native.json
 
-      - name: Check FetchContent clone completeness
+      - name: Check tracktion/JUCE clone completeness
         if: always()
         id: fc
         run: |
-          # Only worth caching once the recursive JUCE submodule is fully present.
-          if [ -d build-macos-arm64-release/_deps/tracktion_engine-src/modules/juce/modules ]; then
+          # Only cache once the recursive JUCE submodule is fully checked out, so a
+          # half-populated clone from an interrupted run can never poison the cache.
+          if [ -d .cpm-cache/_fc/tracktion_engine-src/modules/juce/modules ]; then
             echo "complete=true" >> "$GITHUB_OUTPUT"
           else
             echo "complete=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Save FetchContent deps cache
+      - name: Save dep cache
         if: always() && steps.fc.outputs.complete == 'true'
         uses: actions/cache/save@v4
         with:
-          path: build-macos-arm64-release/_deps
-          key: fc-${{ runner.os }}-${{ hashFiles('cmake/Dependencies.cmake', 'patches/**', 'CMakePresets.json') }}
+          path: .cpm-cache
+          key: deps-${{ runner.os }}-${{ hashFiles('cmake/Dependencies.cmake', 'cmake/CPM.cmake', 'patches/**') }}
 
       - name: Gate summary
         if: always()
