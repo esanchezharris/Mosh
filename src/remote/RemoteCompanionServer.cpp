@@ -470,6 +470,25 @@ void RemoteCompanionServer::writeTextResponse (juce::StreamingSocket& socket,
 
 juce::String RemoteCompanionServer::webCompanionHtml()
 {
+    // Prefer the built DAWN-style controller page staged into the bundle by cmake/BuildCompanion.cmake
+    // (ui/companion → Contents/Resources/companion/index.html), mirroring how WebBridge serves the UI.
+    // Falls back to the inline page below when the build isn't staged (dev, or a bare build).
+    auto appFile = juce::File::getSpecialLocation (juce::File::currentApplicationFile);
+    auto staged = appFile.getChildFile ("Contents/Resources/companion/index.html"); // macOS bundle
+    if (! staged.existsAsFile())
+        staged = juce::File::getSpecialLocation (juce::File::currentExecutableFile)
+                     .getParentDirectory().getChildFile ("companion/index.html");     // Windows/flat
+    if (staged.existsAsFile())
+    {
+        const auto html = staged.loadFileAsString();
+        if (html.isNotEmpty())
+            return html;
+    }
+    return legacyWebCompanionHtml();
+}
+
+juce::String RemoteCompanionServer::legacyWebCompanionHtml()
+{
     return R"HTML(<!doctype html>
 <html lang="en">
 <head>
