@@ -17,6 +17,7 @@ import glob
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import wave
@@ -742,10 +743,61 @@ def check_reactive_rerender(ctx):
                {"layer_audio_files": len(files), "state_after_edit": st, "failed_commands": fails})
 
 
+def check_crash_recovery(ctx):
+    """A3: full JSONL-replay crash recovery. Run 1 saves a track (Alpha), then makes UNSAVED
+    edits (track Beta + a clip on Beta) and __crash-es. Run 2 (same kept session) detects the
+    unclean exit, replays the recovery-journal tail with id-rebinding (Beta gets a fresh
+    engine id; the clip's reference to the old id must rebind), and the lost work comes back.
+    Asserts: before-recover the saved state has 1 track; after-recover it has 2, and the
+    recovered Beta carries its clip (proves the value-based id-rebinding worked)."""
+    SESSION = "verify-recovery"
+    base = _mosh_session_base() / SESSION
+    if base.exists():
+        shutil.rmtree(base, ignore_errors=True)
+    keep = {"MOSH_RUNSCRIPT_KEEP_SESSION": "1"}
+
+    run1 = [
+        {"command": "create_track", "args": {"name": "Alpha"}, "capture": {"A": "trackId"}},
+        {"command": "save", "args": {}},                                              # Alpha persisted; journal truncated
+        {"command": "create_track", "args": {"name": "Beta"}, "capture": {"B": "trackId"}},  # UNSAVED tail begins
+        {"command": "add_test_tone_clip", "args": {"trackId": "${B}", "seconds": 1.0, "freq": 220.0}},
+        {"command": "__crash", "args": {}},                                            # sentinel set, no save
+    ]
+    run_script(ctx.bin, run1, SESSION, extra_env=keep, timeout=120)
+
+    run2 = [
+        {"command": "__snapshot", "args": {"label": "before"}},   # saved state (Alpha only)
+        {"command": "recover_session", "args": {}},               # replay the crashed tail
+        {"command": "__snapshot", "args": {"label": "after"}},    # Alpha + recovered Beta(+clip)
+    ]
+    results, proc = run_script(ctx.bin, run2, SESSION, extra_env=keep, timeout=120)
+
+    before = after = beta_clips = None
+    recovered, available = 0, False
+    for r in results:
+        if r.get("command") == "__snapshot":
+            tracks = r.get("data", {}).get("tracks", [])
+            if r.get("label") == "before":
+                before = len(tracks)
+                available = bool(r.get("data", {}).get("session", {}).get("recoveryAvailable"))
+            elif r.get("label") == "after":
+                after = len(tracks)
+                beta = next((t for t in tracks if t.get("name") == "Beta"), None)
+                beta_clips = len(beta.get("clips", [])) if beta else 0
+        if r.get("command") == "recover_session":
+            recovered = r.get("data", {}).get("recovered", 0)
+
+    ok = (before == 1 and available and after == 2 and beta_clips == 1 and recovered >= 2)
+    return row("Crash recovery (JSONL replay)", ok,
+               {"before_tracks": before, "recoveryAvailable": available, "after_tracks": after,
+                "recovered_cmds": recovered, "beta_clips": beta_clips, "stderr": proc.stderr[-300:] if not ok else ""})
+
+
 OFFLINE_CHECKS = [check_makes_sound, check_drums, check_transform, check_compile_render,
                   check_compile_corrective, check_midi_render,
                   check_midi_reimagine_beneath, check_reactive_rerender, check_full_loop,
-                  check_relative_ref_export, check_bypass_layer, check_render_artifact_portability]
+                  check_relative_ref_export, check_bypass_layer, check_render_artifact_portability,
+                  check_crash_recovery]
 
 
 # ── main ────────────────────────────────────────────────────────────────────────

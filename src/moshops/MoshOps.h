@@ -43,7 +43,8 @@ public:
         The live poll path keeps this in sync; the guard in execute() reads it. */
     LockManager& lockManager() { return lockManager_; }
 
-    /** The single entry point — bound to the WebView's execute_command. */
+    /** The single entry point — bound to the WebView's execute_command. Thin wrapper around
+        executeImpl that also feeds the A3 crash-recovery journal. */
     juce::var execute (const juce::var& command);
 
     /** Full session snapshot — bound to the WebView's get_snapshot. */
@@ -470,6 +471,10 @@ private:
 
     void  emit (const juce::String& type, juce::var payload = {});
     void  emitSnapshotInvalidated();
+    // Scoped invalidation: a provably track-local mutation (mixer volume/pan/mute, plugin
+    // param) emits snapshot_invalidated carrying JUST that track's var, so the UI patches one
+    // track instead of re-pulling the whole snapshot (measured 330 ms / 3.7 MiB at 100 tracks).
+    void  emitTrackPatch (te::AudioTrack& track);
     void  logLine (const juce::String& command, const juce::var& args,
                    bool ok, const juce::String& error, bool undoable);
 
@@ -514,6 +519,20 @@ private:
     bool applyingRemote_ = false;      // MP-001 — true while applying a peer's structural op
     juce::int64 seq = 0;
     juce::File  logFile;
+    // A3 — crash-recovery journal. A dedicated append-only file holding only the REPLAYABLE
+    // arrangement commands since the last save (truncated by MoshEngine::save). On an unclean
+    // startup MoshOps reads it into pendingRecovery_ (so save-truncation can't race recovery);
+    // recover_session replays those with id-rebinding. replayingRecovery_ guards re-journaling.
+    juce::File        recoveryJournalFile;
+    juce::StringArray pendingRecovery_;
+    bool              replayingRecovery_ = false;
+    juce::var executeImpl (const juce::var& command);   // the dispatch; execute() wraps + journals
+    void  initRecoveryJournal();
+    bool  isReplayableCommand (const juce::String& name) const;
+    void  appendRecoveryJournal (const juce::String& name, const juce::var& args, const juce::var& result);
+    juce::var  substituteRecoveryIds (const juce::var& args, const juce::HashMap<juce::String, juce::String>& idMap);
+    juce::var  cmdRecoverSession (const juce::var& args);
+    juce::var  cmdDiscardRecovery (const juce::var& args);
     bool        wasPlaying = false;
     bool        inBatch    = false;   // true between batch_begin / batch_end (agent batch = one undo step)
     double      lastPresenceBroadcastMs = 0.0;

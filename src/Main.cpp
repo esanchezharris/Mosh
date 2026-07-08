@@ -147,8 +147,15 @@ public:
 
         // Headless: no audio device, and an isolated cold session so the harness is
         // idempotent (it saves/reloads itself) and never touches the GUI session.
+        // A3: MOSH_RUNSCRIPT_KEEP_SESSION=1 opts a run-script out of the cold-session wipe so a
+        // crash-recovery test can stage state in run 1 and recover it in run 2 (same dir).
+        // REQUIRES an explicit MOSH_SELFTEST_SESSION (an isolated leaf) so a non-wiping run can
+        // never land on — and clobber — the owner's GUI "session" dir.
+        const bool keepSession = runScript
+            && juce::SystemStats::getEnvironmentVariable ("MOSH_RUNSCRIPT_KEEP_SESSION", {}).trim() == "1"
+            && juce::SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SESSION", {}).trim().isNotEmpty();
         engine  = std::make_unique<MoshEngine> ((! noAudio) || liveAudio,
-                                                /*freshSession=*/ noAudio || liveAudio || demoGui,
+                                                /*freshSession=*/ (noAudio || liveAudio || demoGui) && ! keepSession,
                                                 freshSessionName);
         moshOps = std::make_unique<MoshOps> (*engine);
         remoteServer = std::make_unique<RemoteCompanionServer> (

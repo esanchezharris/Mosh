@@ -57,9 +57,12 @@ MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession, const juce::Str
     // The harness gets an isolated "session-selftest" dir so it can't be polluted
     // by (or clobber) a real GUI session — see freshSession below. Established BEFORE
     // the device init so PRE-001 can restore the persisted device setup from it.
-    const auto sessionLeaf = freshSession
-                             ? (freshSessionName.isNotEmpty() ? freshSessionName : juce::String ("session-selftest"))
-                             : juce::String ("session");
+    // An explicit freshSessionName ALWAYS isolates the dir — even when not wiping (A3's
+    // KEEP_SESSION recovery test). Only fall back to the GUI "session" leaf when no isolated
+    // name was given. (Decoupling the leaf from freshSession; the GUI passes no name, so it is
+    // unaffected.) Without this, a non-wiping headless run would clobber the owner's session.
+    const auto sessionLeaf = freshSessionName.isNotEmpty() ? freshSessionName
+                             : (freshSession ? juce::String ("session-selftest") : juce::String ("session"));
     session = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
                   .getChildFile ("Mosh")
                   .getChildFile (sessionLeaf);
@@ -350,7 +353,15 @@ bool MoshEngine::save()
 
     stampFormatVersion();                  // PRJ-FMT — always current on disk
     const bool ok = te::EditFileOperations (edit()).save (false, true, false);
-    if (ok) dirty = false;                 // on-disk now matches in-memory (gap 1)
+    if (ok)
+    {
+        dirty = false;                     // on-disk now matches in-memory (gap 1)
+        // A3 — the saved Edit now supersedes the crash-recovery journal's unsaved tail, so
+        // clear it. Every save path funnels here, so this is the single truncation point.
+        // (MoshOps reads the journal into memory at startup BEFORE any save, so this never
+        // races recovery.) A render/replay is in progress ⇒ recover_session truncates AFTER.
+        session.getChildFile ("recovery-journal.jsonl").deleteFile();
+    }
     return ok;
 }
 
