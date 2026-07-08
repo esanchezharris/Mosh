@@ -271,6 +271,10 @@ function GenBody({ clip, track, qa }: { clip: Clip; track: Track; qa?: RenderQA 
   const addable = colorsAvail.filter((c) => !active.some((a) => a.name === c.name) && !blockedBy(c.name));
   const isTransform = rl.mode === "transform";
   const isSing = rl.mode === "sing";
+  // Sing renders only the lines that carry the take's flow (lyricScore); a sheet with
+  // NONE is rejected outright by the backend (no_scored_lines) — don't offer the render.
+  const singFlowed = isSing ? (track.lyricSheet?.lines ?? []).filter((l) => l.hasScore).length : 0;
+  const singBlocked = isSing && singFlowed === 0;
 
   return (
     <div className="gen-body" data-render-status={rl.status}>
@@ -336,7 +340,9 @@ function GenBody({ clip, track, qa }: { clip: Clip; track: Track; qa?: RenderQA 
           // guide vocal never replaces the recorded take in place — render, listen, then Accept
           // lands it (or Reject drops it).
           <>
-            <button className="btn" data-testid="gen-render" onClick={() => void exec("render_layer", { clipId: clip.id })}>{rl.hasArtifact ? "Re-render" : "Render"}</button>
+            <button className="btn" data-testid="gen-render" disabled={singBlocked}
+              title={singBlocked ? "no flow yet — build a flow from a take first" : undefined}
+              onClick={() => void exec("render_layer", { clipId: clip.id })}>{rl.hasArtifact ? "Re-render" : "Render"}</button>
             <button className="btn" disabled={!rl.hasArtifact} data-testid="gen-accept" onClick={async () => { const r = await exec("accept_render", { clipId: clip.id }); if (r.ok) bumpCelebrate(); }}>Accept</button>
             <button className="btn" disabled={!rl.hasArtifact} onClick={() => void exec("reject_render", { clipId: clip.id })}>Reject</button>
           </>
@@ -386,6 +392,13 @@ function SingControls({ track }: { track: Track }) {
       </label>
       {flowed === 0 && (
         <span className="rack-empty">No flow yet — use “Build flow from this take” on the vocal clip first.</span>
+      )}
+      {flowed > 0 && flowed < lines.length && (
+        // Mirrors the score author's honest skip: typed-later lines have no take flow,
+        // so the render leaves them out rather than inventing timing.
+        <span className="rack-empty" data-testid="sing-skip-hint">
+          {lines.length - flowed} line{lines.length - flowed === 1 ? "" : "s"} without take flow will be skipped — rebuild the flow to sing them.
+        </span>
       )}
     </div>
   );

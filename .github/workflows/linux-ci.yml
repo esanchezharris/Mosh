@@ -1,0 +1,124 @@
+# Linux build spike (FIT-011) — the piece that actually COMPILES Mosh on real Linux.
+# The macOS dev box can't build for Linux, so CI is the proof. Two stages share one
+# tracktion/JUCE fetch (FETCHCONTENT_BASE_DIR is pinned to .cpm-cache/_fc in
+# CMakeLists.txt, independent of the build dir):
+#   1. Headless MoshTests — the REQUIRED gate. Configures with the app OFF, so it needs
+#      no WebKitGTK/ALSA/node and can't be blocked by a GUI-dep snag.
+#   2. Full GUI app — INFORMATIONAL (continue-on-error). Surfaces exactly how far the
+#      WebKitGTK + ALSA + JUCE-Linux-VST3 app gets without red-failing the spike.
+# See docs/2026-07-07-linux-build-spike.md.
+name: linux-ci
+
+on:
+  push:
+    branches: [main, "claude/**"]
+    paths:
+      - "CMakeLists.txt"
+      - "CMakePresets.json"
+      - "cmake/**"
+      - "src/**"
+      - "tests/**"
+      - "service/**"
+      - "ui/**"
+      - "run-linux.sh"
+      - ".github/workflows/linux-ci.yml"
+  pull_request:
+    paths:
+      - "CMakeLists.txt"
+      - "CMakePresets.json"
+      - "cmake/**"
+      - "src/**"
+      - "tests/**"
+      - "service/**"
+      - "ui/**"
+      - "run-linux.sh"
+      - ".github/workflows/linux-ci.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: linux-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux-x64:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      # tracktion_engine pulls JUCE as a recursive submodule over SSH — rewrite to
+      # HTTPS so the FetchContent clone works with no SSH keys (cmake/Dependencies.cmake).
+      - name: Rewrite git SSH -> HTTPS (for the JUCE submodule)
+        run: git config --global url."https://github.com/".insteadOf "git@github.com:"
+
+      # Full system-dep set. The headless gate uses only build-essential/cmake/ninja;
+      # webkit/gtk/alsa/x11/freetype are for stage 2 (the full app). node is preinstalled
+      # on ubuntu-latest (the Vite bundle build for the app).
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential cmake ninja-build pkg-config \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libasound2-dev libfreetype6-dev \
+            libx11-dev libxext-dev libxinerama-dev libxrandr-dev libxcursor-dev \
+            libxcomposite-dev libcurl4-openssl-dev
+          cmake --version && ninja --version && node --version
+
+      # Best-effort cache of the tracktion/JUCE FetchContent tree (shared by both stages).
+      - name: Cache CPM/FetchContent
+        uses: actions/cache@v4
+        with:
+          path: .cpm-cache
+          key: cpm-${{ runner.os }}-${{ hashFiles('cmake/Dependencies.cmake', 'cmake/CPM.cmake', 'CMakeLists.txt') }}
+          restore-keys: |
+            cpm-${{ runner.os }}-
+
+      # ── Stage 1 (REQUIRED): headless MoshTests ────────────────────────────────
+      # App/UI OFF so this configures with only build-essential/cmake/ninja present.
+      - name: Configure (headless MoshTests)
+        run: |
+          cmake --preset linux-x64-debug \
+            -B build-linux-headless \
+            -DMOSH_BUILD_APP=OFF -DMOSH_BUILD_UI=OFF -DMOSH_BUILD_PLUGIN_FIXTURES=OFF
+
+      - name: Build MoshTests
+        run: cmake --build build-linux-headless --target MoshTests
+
+      - name: Run MoshTests (ctest)
+        run: ctest --test-dir build-linux-headless -R MoshTests --output-on-failure
+
+      # ── Stage 1b (REQUIRED): the cross-platform Python service imports/boots ──
+      # No build step — prove the service is import-clean and answers /health on Linux
+      # under the stdlib FakeAdapter (MOSH_ENABLE_SA3=0). Uses runner python3 only.
+      - name: Smoke the generative service (FakeAdapter)
+        run: |
+          # Import-clean check (top-level imports must be stdlib-only on a bare box).
+          python3 -c "import sys; sys.path.insert(0,'service'); import server; print('server import OK', server.SERVICE_VERSION)"
+          # Boot it, learn the actually-bound port from the portfile, hit /health.
+          PORTFILE="$(mktemp)"
+          MOSH_ENABLE_SA3=0 MOSH_SERVICE_PORTFILE="$PORTFILE" python3 service/server.py &
+          SVC_PID=$!
+          HEALTHY=""
+          for i in $(seq 1 30); do
+            PORT="$(cat "$PORTFILE" 2>/dev/null || true)"
+            if [ -n "$PORT" ] && curl -sf "http://127.0.0.1:$PORT/health" >/dev/null 2>&1; then
+              echo "service /health OK on port $PORT"; HEALTHY=1; break
+            fi
+            sleep 1
+          done
+          kill "$SVC_PID" 2>/dev/null || true
+          test -n "$HEALTHY" || { echo "service did not become healthy"; exit 1; }
+
+      # ── Stage 2 (INFORMATIONAL): the full GUI app ─────────────────────────────
+      # WebKitGTK webview + ALSA audio + JUCE Linux VST3 hosting + the Vite bundle.
+      # continue-on-error so a Linux-only snag (webkit 4.0-vs-4.1, a JUCE quirk) is
+      # SURFACED in the logs without failing the spike's required headless gate.
+      - name: Configure (full app)
+        id: configure_app
+        continue-on-error: true
+        run: cmake --preset linux-x64-debug -B build-linux-full
+
+      - name: Build Mosh app (exploratory)
+        if: steps.configure_app.outcome == 'success'
+        continue-on-error: true
+        run: cmake --build build-linux-full --target Mosh

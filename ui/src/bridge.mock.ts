@@ -1125,8 +1125,15 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     }
     case "render_layer": {
       const f = findClip(str(args.clipId)); if (!f?.clip.renderLayer) return err(command, "no render layer");
-      if (f.clip.renderLayer.mode === "sing" && !f.track.lyricSheet)
-        return err(command, "sing needs a lyric sheet on the clip's track (build a flow from a take first)");
+      if (f.clip.renderLayer.mode === "sing") {
+        if (!f.track.lyricSheet)
+          return err(command, "sing needs a lyric sheet on the clip's track (build a flow from a take first)");
+        // Real-backend parity (service/soulx/score.py author_score): lines without a
+        // lyricScore blob are SKIPPED — timing is never invented — and a sheet where NO
+        // line carries one (typed-later lines) is rejected as no_scored_lines.
+        if (!f.track.lyricSheet.lines.some((l) => l.hasScore))
+          return err(command, "no scored lines to sing — build a flow from a take first (build_skeleton_from_clip), then accept/write the words");
+      }
       f.clip.renderLayer.status = "ready"; f.clip.renderLayer.hasArtifact = true;
       // SING never auto-applies (mirrors MoshOps::finalizeRender): the guide vocal lands as an
       // auditionable artifact for the legacy accept/reject flow — it must not replace the take.

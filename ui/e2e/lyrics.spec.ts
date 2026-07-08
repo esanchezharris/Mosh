@@ -275,3 +275,41 @@ test("sing without a sheet is not offered (+ Sing hidden)", async ({ page }) => 
   await expect(gen.getByTestId("gen-create")).toBeVisible();
   await expect(gen.getByTestId("gen-create-sing")).toHaveCount(0);
 });
+
+test("sing on a typed sheet (no take flow): 0-coverage copy + Render disabled", async ({ page }) => {
+  // A hand-written sheet has no lyricScore blobs — the real backend rejects the render
+  // outright (no_scored_lines), so the UI must not offer a guaranteed-doomed Render.
+  await bootV2(page);
+  await page.getByTestId("v2-track-header").nth(2).click();      // Keys — owns the "chords" wave clip
+  await page.getByTestId("v2-insp-tab-lyrics").click();
+  await page.getByTestId("lyric-create").click();
+  await page.getByTestId("lyric-add-line").click();
+
+  await page.getByTestId("v2-insp-tab-gen").click();
+  const gen = page.getByTestId("generative");
+  await gen.getByTestId("gen-create-sing").click();
+  await expect(gen.getByTestId("sing-flow")).toContainText("0/1");
+  await expect(gen.getByText("No flow yet")).toBeVisible();
+  await expect(gen.getByTestId("gen-render")).toBeDisabled();
+});
+
+test("sing partial flow: a hand-added line shows as skipped, scored lines still render", async ({ page }) => {
+  // Mirrors the real score author: unscored lines are SKIPPED (never invented timing),
+  // the rest sing — coverage reads 2/3 and the skip hint names the one left out.
+  await bootV2(page);
+  await page.locator('[data-testid="v2-clip"][title="chords"]').click({ button: "right" });
+  await page.getByTestId("clip-build-flow").click();
+  await page.getByTestId("v2-track-header").nth(2).click();
+  await page.getByTestId("v2-insp-tab-lyrics").click();
+  await expect(page.getByTestId("lyric-panel")).toHaveAttribute("data-has-sheet", "true");
+  await page.getByTestId("lyric-add-line").click();              // typed-later line — no take flow
+
+  await page.getByTestId("v2-insp-tab-gen").click();
+  const gen = page.getByTestId("generative");
+  await gen.getByTestId("gen-create-sing").click();
+  await expect(gen.getByTestId("sing-flow")).toContainText("2/3");
+  await expect(gen.getByTestId("sing-skip-hint")).toContainText("1 line");
+  await gen.getByTestId("gen-render").click();
+  await expect(gen.getByTestId("render-status")).toHaveText("ready");
+  await expect(page.getByTestId("v2-error")).toHaveCount(0);
+});

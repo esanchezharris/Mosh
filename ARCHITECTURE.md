@@ -120,15 +120,18 @@ One codebase, platform-guarded. JUCE + Tracktion + the whole MoshOps/snapshot/ev
 | Concern | macOS (canonical) | Windows (NVIDIA/CUDA) |
 |---|---|---|
 | Build | `cmake --preset macos-arm64-{debug,release}` (Ninja) → `Mosh.app` | `cmake --preset windows-x64-{debug,release}` (VS 17 2022) → `Mosh.exe` |
-| Layout | `.app` bundle; UI at `Contents/Resources/ui` | flat: `ui/` + `drumkits/` staged next to `Mosh.exe`; `service/` via `MOSH_SERVICE_SCRIPT` |
+| Layout | `.app` bundle; UI at `Contents/Resources/ui` | flat: `ui/` + `drumkits/` next to `Mosh.exe`; `run-mosh.ps1 -Package` also stages `service/` + `brain.env` as siblings (BrainProxy + GenerativeJobManager read the flat layout) |
 | WebView | WKWebView | **WebView2** (Edge Chromium; `NEEDS_WEBVIEW2`/`JUCE_USE_WIN_WEBVIEW2=1`) |
 | Audio | CoreAudio (JUCE auto) | WASAPI (JUCE auto; ASIO deferred) |
 | Plugins | VST3 + AudioUnit | **VST3 only** (`MOSH_PLUGINHOST_AU=0`) |
 | Generative tier | Stable Audio 3 via **MLX** (`sa3/engine.py`) | Stable Audio 3 via **PyTorch/CUDA** (`adapters/stable_audio3_cuda.py`) — auto-selected by `stable_audio3_adapter` when MLX is absent; `MOSH_SERVICE_PYTHON` → CUDA venv, `MOSH_SA3_MODEL_DIR` → weights |
-| Voice / menu / iPhone-companion | SFSpeechRecognizer / macOS menu bar / Bonjour | **stubbed/skipped** (`NativeSpeech_stub.cpp`; deferred) |
-| Run / verify | `run-mosh.sh` | `run-mosh.ps1`, `service/setup-sa3-cuda.ps1`, `scripts/verify-pc-build.ps1` |
+| Per-feature venvs | `setup-*.sh` → `~/Library/Mosh/venvs/<f>/bin/python` | `setup-feature-venv.ps1` → `%LOCALAPPDATA%\Mosh\venvs\<f>\Scripts\python.exe` (transcribe/whisper/phonology/skeleton) |
+| Voice / menu / companion | SFSpeechRecognizer · macOS menu bar · Bonjour mDNS | native STT **stubbed** (`NativeSpeech_stub.cpp`; browser Web Speech works) · menu renders **in-window** (JUCE) · companion pairs via **manual QR/URL** (mDNS discovery macOS-only) |
+| Run / verify / package | `run-mosh.sh` (+ `deploy`) | `run-mosh.ps1` (+ `-Package`), `service/setup-sa3-cuda.ps1`, `service/setup-feature-venv.ps1`, `scripts/verify-pc-build.ps1` |
 
 The generative adapter contract (`available()`/`backend_name()`/`render(input_wav, output_wav, params) → manifest`) is identical across MLX, CUDA, and the FakeAdapter — the service dispatches MLX-if-present-else-CUDA-else-Fake, so the manifest only differs by its `backend` field.
+
+**Windows specifics:** [`docs/WINDOWS_PARITY.md`](docs/WINDOWS_PARITY.md) is the per-feature decision record (what gets a Windows path now vs. stays macOS-only vs. is asymmetric — SoulX sing, the SFT box, companion mDNS); [`docs/WINDOWS_RUNBOOK.md`](docs/WINDOWS_RUNBOOK.md) is the build → smoke → verify → package command sequence.
 
 - **Build:** CMake (JUCE 8 + Tracktion via submodule, pinned in `cmake/Dependencies.cmake`). Neural/SA3 deps are fetch-gated behind `-DMOSH_ENABLE_RTNEURAL=ON` / `-DMOSH_ENABLE_ANIRA=ON`.
 

@@ -19,7 +19,7 @@ namespace
 
     struct XFeedbackTelemetrySlot
     {
-        std::atomic<uint64_t> key { 0 };
+        std::atomic<std::uint64_t> key { 0 };
         std::array<std::atomic<double>, 4> candidateHz {};
         std::array<std::atomic<float>, 4> candidateScore {};
         std::array<std::atomic<double>, 4> activeHz {};
@@ -35,19 +35,19 @@ namespace
         return slots;
     }
 
-    uint64_t makeTelemetryKey (ValueTree& state)
+    std::uint64_t makeTelemetryKey (ValueTree& state)
     {
         if (! state.hasProperty (idFbTelemetry))
             state.setProperty (idFbTelemetry, Uuid().toString(), nullptr);
 
-        auto hash = (uint64_t) state.getProperty (idFbTelemetry).toString().hashCode64();
+        auto hash = (std::uint64_t) state.getProperty (idFbTelemetry).toString().hashCode64();
         return hash != 0 ? hash : 1;
     }
 
-    XFeedbackTelemetrySlot& telemetrySlotFor (uint64_t key)
+    XFeedbackTelemetrySlot& telemetrySlotFor (std::uint64_t key)
     {
         auto& slots = telemetrySlots();
-        return slots[(size_t) (key % (uint64_t) slots.size())];
+        return slots[(size_t) (key % (std::uint64_t) slots.size())];
     }
 
     moshfx::XFeedbackSettings xFeedbackSettings (float sensitivity, float maxCuts, float maxDepth,
@@ -83,7 +83,7 @@ namespace
         return var (arr);
     }
 
-    void publishTelemetry (uint64_t key,
+    void publishTelemetry (std::uint64_t key,
                            const std::array<std::atomic<double>, 4>& candidateHz,
                            const std::array<std::atomic<float>, 4>& candidateScore,
                            const std::array<std::atomic<double>, 4>& activeHz,

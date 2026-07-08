@@ -4,7 +4,10 @@ cmake_minimum_required(VERSION 3.24)
 # Mosh - native hybrid DAW (standalone JUCE 8 app, NOT a plugin).
 # macOS / Apple Silicon remains canonical (MLX generative backend); Windows +
 # NVIDIA/CUDA is an additive portability layer (every platform fork is guarded so
-# the macOS path is behaviour-equivalent). No Linux build path is exercised yet.
+# the macOS path is behaviour-equivalent). Linux (x86_64) is an EXPLORATORY spike:
+# the headless MoshTests target + the cross-platform Python service build; the full
+# GUI app (WebKitGTK webview + ALSA audio + JUCE Linux VST3 hosting) is CI-tracked
+# but not yet a supported target. See docs/2026-07-07-linux-build-spike.md.
 # ─────────────────────────────────────────────────────────────────────────────
 project(Mosh VERSION 0.0.1 LANGUAGES C CXX)
 
@@ -25,19 +28,28 @@ option(MOSH_BUILD_APP "Build the standalone JUCE app" ON)
 option(MOSH_BUILD_UI "Build the React/Vite UI bundle as part of CMake" ON)
 option(MOSH_BUILD_TESTS "Build the Catch2 + command-surface test target" ON)
 option(MOSH_BUILD_PLUGIN_FIXTURES "Build deterministic in-repo VST3 fixtures for plugin-host smoke tests" OFF)
+# Linux audio backend: ALSA is JUCE's Linux default and is always on. JACK is opt-in
+# (needs libjack-dev); it is additive — the ALSA path is unchanged when this is OFF.
+option(MOSH_ENABLE_JACK "Also enable the JACK audio backend on Linux (needs libjack-dev)" OFF)
 
 include(cmake/CPM.cmake)
 include(cmake/Dependencies.cmake)
 
 # Platform capability flags. AU plug-in hosting is a macOS-only format; on Windows
 # the JUCE WebView is backed by WebView2 (Edge Chromium) rather than the legacy
-# control, so the React UI renders identically to the macOS WKWebView.
+# control, so the React UI renders identically to the macOS WKWebView. On Linux the
+# WebView is backed by WebKitGTK (JUCE's Linux JUCE_WEB_BROWSER path) — no WebView2,
+# no AU. VST3 hosting (JUCE_PLUGINHOST_VST3, set unconditionally below) is portable.
 if (APPLE)
     set(MOSH_PLUGINHOST_AU 1)
     set(MOSH_USE_WIN_WEBVIEW2 0)
 elseif (WIN32)
     set(MOSH_PLUGINHOST_AU 0)
     set(MOSH_USE_WIN_WEBVIEW2 1)
+elseif (UNIX AND NOT APPLE)
+    # Linux: WebView = WebKitGTK, audio = ALSA (+ optional JACK), no AU/WebView2.
+    set(MOSH_PLUGINHOST_AU 0)
+    set(MOSH_USE_WIN_WEBVIEW2 0)
 else()
     set(MOSH_PLUGINHOST_AU 0)
     set(MOSH_USE_WIN_WEBVIEW2 0)
@@ -140,6 +152,15 @@ if (MOSH_BUILD_APP)
         # nothing (no global operator new override) → Release binary byte-unaffected.
         $<$<CONFIG:Debug>:MOSH_RT_GUARD=1>)
 
+    # ── Linux audio backend (juce_audio_devices) ─────────────────────────────
+    # ALSA is JUCE's Linux default and is present on every distro; JACK is opt-in
+    # via MOSH_ENABLE_JACK (needs libjack-dev). No effect on macOS/Windows.
+    if (UNIX AND NOT APPLE)
+        target_compile_definitions(Mosh PRIVATE
+            JUCE_ALSA=1
+            JUCE_JACK=$<BOOL:${MOSH_ENABLE_JACK}>)
+    endif()
+
     target_link_libraries(Mosh PRIVATE
         tracktion::tracktion_engine
         juce::juce_gui_extra
@@ -228,11 +249,32 @@ if (MOSH_BUILD_APP)
                     "$<TARGET_FILE_DIR:Mosh>/drumkits"
             COMMENT "Staging drum kits next to the Mosh executable"
             VERBATIM)
+
+        # Windows: stage the MSVC runtime redistributable DLLs (vcruntime140*, msvcp140)
+        # next to Mosh.exe so a zipped self-contained build (run-mosh.ps1 -Package copies
+        # the exe-adjacent DLLs) runs on a machine without the VC++ redistributable
+        # installed. SKIP the module's own install() rule — we only want the resolved list.
+        # macOS/Linux are unaffected (WIN32/MSVC false → this block is not emitted). CUDA
+        # DLLs are NOT staged here: they live in the Python CUDA venv (torch wheels).
+        if (WIN32 AND MSVC)
+            set(CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS_SKIP TRUE)
+            include(InstallRequiredSystemLibraries)
+            if (CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS)
+                add_custom_command(TARGET Mosh POST_BUILD
+                    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                            ${CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS}
+                            "$<TARGET_FILE_DIR:Mosh>"
+                    COMMENT "Staging MSVC runtime DLLs next to the Mosh executable"
+                    VERBATIM)
+            endif()
+        endif()
     endif()
 
     # ── UI bundle (Vite) ─────────────────────────────────────────────────────
     if (MOSH_BUILD_UI)
         include(cmake/BuildUI.cmake)
+        # Phone companion controller page (served by RemoteCompanionServer at /web).
+        include(cmake/BuildCompanion.cmake)
     endif()
 endif()
 
