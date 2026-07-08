@@ -90,6 +90,14 @@ def _load_mono(path: str):
     return a.astype(float), sr
 
 
+def _load_take_native(path: str, t0: float, t1: float):
+    """His RAW take window [t0,t1] at its NATIVE sample rate — the kept parts stay full quality."""
+    a, sr = sf.read(path)
+    if a.ndim > 1:
+        a = a.mean(axis=1)
+    return a[int(t0 * sr):int(t1 * sr)].astype(float), sr
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--sheet", required=True)
@@ -143,33 +151,29 @@ def main() -> int:
         return 1
     melody_wav = os.path.join(mel_dir, "generated.wav")
 
-    print("5) build composite guide (his take + new-word melody spliced at rewrite spans)", flush=True)
-    take_s, sr = _load_mono(slice_path)
-    mel, _ = _load_mono(melody_wav)
-    if len(mel) < len(take_s):
-        mel = np.concatenate([mel, np.zeros(len(take_s) - len(mel))])
+    print("5) splice score-mode fixes into his RAW take (level-matched, native sr, NO SVC)", flush=True)
+    # Keep-raw + splice-fixes: SVC drifts words, so we do NOT voice-convert. His real audio is
+    # kept verbatim for the parts he nailed; only the rewrite spans get the score-mode synth,
+    # level-matched to his volume and crossfaded at the rests (render_hybrid.splice_matched).
+    raw, sr_raw = _load_take_native(a.take, t0, t1)     # his real performance, full quality
+    mel, sr_mel = _load_mono(melody_wav)                # 24k score-synth of the new words
+    if sr_mel != sr_raw:                                # upsample the synth to the take's rate
+        k = int(len(mel) * sr_raw / sr_mel)
+        mel = np.interp(np.linspace(0, len(mel), k, endpoint=False), np.arange(len(mel)), mel)
+    if len(mel) < len(raw):
+        mel = np.concatenate([mel, np.zeros(len(raw) - len(mel))])
     else:
-        mel = mel[: len(take_s)]
+        mel = mel[: len(raw)]
     spans = [(s, e) for (s, e) in rh.rewrite_spans(sheet) if s < a.dur]
-    # Blend fix: rather than overlay two DIFFERENT-character renders (SVC vs melody), splice
-    # the melody (new words on his F0) INTO his take, then run ONE SVC pass over the whole
-    # thing below — so clear and rewritten spans come out as the same voice (no jarring seam).
-    composite = np.array(rh.overlay(take_s.tolist(), mel.tolist(), spans, sr, xfade_ms=25))
-    composite = composite / max(1e-6, np.abs(composite).max()) * 0.95
-    composite_wav = os.path.join(a.out, "composite_guide.wav")
-    sf.write(composite_wav, composite, sr)
-
-    print("6) SVC over the composite -> one uniform voice (blend fix)", flush=True)
-    svc_ref = a.svc_ref or a.ref     # a clean self-slice makes the final sound like HIM
+    spliced = np.array(rh.splice_matched(raw.tolist(), mel.tolist(), spans, sr_raw, xfade_ms=25, match=True))
+    peak = float(np.abs(spliced).max())
+    if peak > 0.99:                                     # keep his native levels; only tame if clipping
+        spliced = spliced / peak * 0.97
     final = os.path.join(a.out, "hybrid.wav")
-    r = subprocess.run([VENV_PY, os.path.join(HERE, "svc_render.py"), "--guide", composite_wav,
-                        "--ref", svc_ref, "--out", final, "--n_steps", str(a.n_steps), "--cfg", str(a.cfg)],
-                       env=env)
-    if r.returncode != 0:
-        print("FATAL: SVC render failed", file=sys.stderr)
-        return 1
-    print(f"done -> {final}  ({len(spans)} rewritten spans: {[(round(s,1),round(e,1)) for s,e in spans]})")
-    print(f"   composite guide (pre-SVC): {composite_wav}   melody-only: {melody_wav}   svc-ref: {svc_ref}")
+    sf.write(final, spliced, sr_raw)
+    print(f"done -> {final}  ({len(spliced)/sr_raw:.1f}s @ {sr_raw}Hz; his raw take kept, "
+          f"{len(spans)} fix spans spliced: {[(round(s,1),round(e,1)) for s,e in spans]})")
+    print(f"   score fixes (spliced spans only): {melody_wav}")
     return 0
 
 

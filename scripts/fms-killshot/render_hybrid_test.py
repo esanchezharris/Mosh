@@ -93,6 +93,27 @@ check("well outside the span → SVC", abs(out[100] - 1000.0) < 1e-6 and abs(out
 check("fade-in midpoint blends svc→melody", abs(out[295] - (0.5 * 1000.0 + 0.5 * -400.0)) < 60.0, str(out[295]))
 check("overlay length matches svc", len(out) == len(svc), str(len(out)))
 
+# ── 7. splice_matched: keep-raw + splice synth fixes (level-match + crossfade, NO SVC) ─
+import math
+sr = 100
+raw = [1000.0] * 1000        # his RAW take (loud, kept untouched outside spans)
+synth = [0.0] * 1000
+for k in range(300, 450):    # a synth "fix" at [3.0,4.5], quieter than the take
+    synth[k] = -400.0
+# match=False: pure splice — inside=synth, outside=raw (his real audio untouched)
+o = rh.splice_matched(raw, synth, [(3.0, 4.5)], sr, xfade_ms=100, match=False)
+check("splice: inside span → synth fix", abs(o[380] - (-400.0)) < 1e-6, str(o[380]))
+check("splice: outside span → his raw take untouched", abs(o[100] - 1000.0) < 1e-6 and abs(o[700] - 1000.0) < 1e-6, f"{o[100]},{o[700]}")
+check("splice length matches the raw take", len(o) == len(raw))
+# match=True: the quiet synth span is scaled so its RMS matches the take's level there (1000)
+om = rh.splice_matched(raw, synth, [(3.0, 4.5)], sr, xfade_ms=100, match=True)
+seg = om[310:440]            # inside the span, away from the crossfade edges
+rms = math.sqrt(sum(x * x for x in seg) / len(seg))
+check("level-match: synth span RMS ≈ the take's level (1000, not 400)", abs(rms - 1000.0) < 50.0, f"rms={rms:.0f}")
+check("level-match raised the quiet synth (|val|~1000)", abs(abs(om[380]) - 1000.0) < 50.0, str(om[380]))
+d2 = {tuple(rh.splice_matched(raw, synth, [(3.0, 4.5)], sr, match=True)) for _ in range(3)}
+check("splice_matched 3x deterministic", len(d2) == 1)
+
 # ── 6. Determinism: 3x identical authored clip ─────────────────────────────────────────
 import hashlib
 import json

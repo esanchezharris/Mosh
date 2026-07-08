@@ -18,6 +18,7 @@ extraction that feed this are owner-gated and live in the render driver.
 """
 from __future__ import annotations
 
+import math
 from typing import List, Optional, Tuple
 
 
@@ -99,4 +100,45 @@ def overlay(svc, melody, spans: List[Tuple[float, float]], sr: int, xfade_ms: fl
         for k in range(max(0, i1), min(i1 + xf, n, mlen)):        # fade out: melody -> svc
             a = (k - i1) / xf
             out[k] = (1 - a) * float(melody[k]) + a * float(svc[k])
+    return out
+
+
+def _rms(xs) -> float:
+    return math.sqrt(sum(float(x) * x for x in xs) / len(xs)) if xs else 0.0
+
+
+def splice_matched(base, insert, spans: List[Tuple[float, float]], sr: int,
+                   xfade_ms: float = 30, match: bool = True, max_gain: float = 8.0) -> List[float]:
+    """Keep-raw + splice-fixes (the owner's chosen architecture — NO global voice conversion).
+
+    `base` is his RAW take, kept UNTOUCHED everywhere except the rewrite spans; `insert` is the
+    score-mode synth of the new words (positioned at absolute time, silent outside its spans).
+    Inside each span the synth replaces the mumble, level-matched to the take's RMS there (so a
+    fix sits at his volume, not louder/quieter) and equal-power crossfaded at the rest edges so
+    the real→synth boundary doesn't click. The kept audio is his real performance, verbatim."""
+    out = [float(x) for x in base]
+    n = len(out)
+    ilen = len(insert)
+    xf = max(1, int(xfade_ms / 1000 * sr))
+    for s, e in spans:
+        i0, i1 = int(s * sr), int(e * sr)
+        a0, a1 = max(0, i0), min(i1, n, ilen)
+        if a1 <= a0:
+            continue
+        g = 1.0
+        if match:
+            b_rms = _rms([base[k] for k in range(a0, a1)])
+            i_rms = _rms([insert[k] for k in range(a0, a1)])
+            if i_rms > 1e-6:
+                g = min(max_gain, b_rms / i_rms)
+        for k in range(a0, a1):
+            out[k] = insert[k] * g
+        for k in range(max(0, i0 - xf), a0):                       # equal-power fade in: raw -> synth
+            t = (k - (i0 - xf)) / xf
+            iv = insert[k] * g if k < ilen else 0.0
+            out[k] = math.cos(t * math.pi / 2) * base[k] + math.sin(t * math.pi / 2) * iv
+        for k in range(a1, min(i1 + xf, n)):                       # equal-power fade out: synth -> raw
+            t = (k - i1) / xf
+            iv = insert[k] * g if k < ilen else 0.0
+            out[k] = math.cos(t * math.pi / 2) * iv + math.sin(t * math.pi / 2) * base[k]
     return out
