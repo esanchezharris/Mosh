@@ -72,7 +72,7 @@ def main():
     env = skcore.energy_envelope(pcm[0], pcm[1])
 
     units = tp.units_from_lyric(LYRIC)
-    tpl = tp.build_template(units, aligned, notes, f0, env, hop_s=0.01, bpm=BPM)
+    tpl = tp.build_template(units, aligned, f0=f0, env=env, bpm=BPM, subdiv=4)   # notes no longer used (count = words)
     real = sum(1 for s in tpl if s["origin"] == "real")
     print(f"template: {len(tpl)} syllables ({real} real, {len(tpl)-real} gap); "
           f"strong {sum(1 for s in tpl if s['stress']=='strong')}")
