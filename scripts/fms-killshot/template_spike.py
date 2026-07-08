@@ -65,17 +65,16 @@ def main():
     take = take.astype(np.float32)
     dur = len(take) / sr
 
-    aligned = json.load(open(os.path.join(OUT, "aligned-realwords.json")))
+    whisper = json.load(open(os.path.join(OUT, "take-whisper.json")))
     f0 = json.load(open(os.path.join(OUT, "take-f0.json")))
-    notes = json.load(open(os.path.join(OUT, "take-notes.json")))
     pcm = skcore.read_pcm_mono(TAKE)
     env = skcore.energy_envelope(pcm[0], pcm[1])
 
-    units = tp.units_from_lyric(LYRIC)
-    tpl = tp.build_template(units, aligned, f0=f0, env=env, bpm=BPM, subdiv=4)   # notes no longer used (count = words)
+    # ASR-driven template (owner's ask): Whisper word timestamps → count + placement, grid-snapped.
+    tpl, phase = tp.build_template_from_words(whisper, bpm=BPM, subdiv=4, f0=f0, conf_floor=0.5)
     real = sum(1 for s in tpl if s["origin"] == "real")
-    print(f"template: {len(tpl)} syllables ({real} real, {len(tpl)-real} gap); "
-          f"strong {sum(1 for s in tpl if s['stress']=='strong')}")
+    print(f"template (whisper-driven): {len(tpl)} syllables ({real} clear, {len(tpl)-real} low-conf); "
+          f"grid phase {phase*1000:.0f}ms; strong {sum(1 for s in tpl if s['stress']=='strong')}")
     json.dump(tpl, open(os.path.join(OUT, "template.json"), "w"), indent=1)
 
     # ── click track: one click per syllable (strong = brighter/louder) ──
@@ -85,12 +84,15 @@ def main():
     for s in tpl:
         _place(clicks, sr, s["onset"], strong_c if s["stress"] == "strong" else weak_c)
 
-    # beat-grid metronome (134 bpm; downbeats accented) — the tempo reference
+    # beat-grid metronome — PHASE-LOCKED to his vocal (fixes "vocal ahead of the click")
     beat_c_strong = _click(sr, 2000, 0.4)
     beat_c_weak = _click(sr, 1300, 0.22)
     beats = np.zeros(len(take), np.float32)
-    for b in tp.beat_positions(BPM, dur):
-        _place(beats, sr, b["t"], beat_c_strong if b["strong"] else beat_c_weak)
+    bd = tp.beat_dur(BPM)
+    k = 0
+    while phase + k * bd <= dur:
+        _place(beats, sr, phase + k * bd, beat_c_strong if k % 4 == 0 else beat_c_weak)
+        k += 1
 
     def norm(x, p=0.9):
         m = float(np.abs(x).max())
@@ -102,11 +104,11 @@ def main():
     sf.write(os.path.join(LISTEN, "tpl-take+beatgrid.wav"), norm(take_n + beats), sr)
     print("staged: tpl-take+clicks.wav, tpl-clicks-solo.wav, tpl-take+beatgrid.wav")
 
-    _write_html(tpl, env, dur)
+    _write_html(tpl, env, dur, phase)
     return 0
 
 
-def _write_html(tpl, env, dur):
+def _write_html(tpl, env, dur, phase=0.0):
     W, H = 1600, 220
     # energy waveform (downsampled to W bars)
     n = len(env) or 1
@@ -117,11 +119,14 @@ def _write_html(tpl, env, dur):
         hi = max(lo + 1, int((x + 1) / W * n))
         v = max(env[lo:hi]) / peak if hi <= n else 0.0
         bars.append(f'<rect x="{x}" y="{H-int(v*(H-30))}" width="1" height="{int(v*(H-30))}" fill="#2a3550"/>')
-    # beat grid (faint)
+    # beat grid (faint) — phase-locked to his vocal
     grid = []
-    for b in tp.beat_positions(BPM, dur):
-        gx = b["t"] / dur * W
-        grid.append(f'<line x1="{gx:.1f}" y1="0" x2="{gx:.1f}" y2="{H}" stroke="{"#3a3f52" if b["strong"] else "#22252f"}" stroke-width="1"/>')
+    bd = tp.beat_dur(BPM)
+    k = 0
+    while phase + k * bd <= dur:
+        gx = (phase + k * bd) / dur * W
+        grid.append(f'<line x1="{gx:.1f}" y1="0" x2="{gx:.1f}" y2="{H}" stroke="{"#3a3f52" if k % 4 == 0 else "#22252f"}" stroke-width="1"/>')
+        k += 1
     # syllable markers (real=green, gap=orange; strong taller)
     marks = []
     for s in tpl:

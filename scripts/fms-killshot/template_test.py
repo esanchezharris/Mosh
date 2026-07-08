@@ -82,10 +82,26 @@ check("gap of 4 stars → exactly 4 gap syllables", sum(1 for s in tpl3 if s["or
       str([s["origin"] for s in tpl3]))
 
 
-# ── 4. determinism ─────────────────────────────────────────────────────────────────────
+# ── 4. ASR/Whisper-driven path: timed words → count + placement, confidence → origin ────
+words = [{"word": "hello", "start": 0.0, "end": 1.0, "confidence": 0.9},   # clear → real
+         {"word": "world", "start": 2.0, "end": 2.4, "confidence": 0.2}]   # low conf → gap
+wt, phase = tp.build_template_from_words(words, bpm=120.0, subdiv=4, f0=f0, conf_floor=0.5)
+check("word path: count from words (hello=2 + world=1 = 3)", len(wt) == 3, str(len(wt)))
+check("word path: confidence separates clear (real) from mumble (gap)",
+      [s["origin"] for s in wt] == ["real", "real", "gap"], str([s["origin"] for s in wt]))
+check("word path: onsets grid-snapped + monotonic", all(b["k"] > a["k"] for a, b in zip(wt, wt[1:])))
+check("word path: returns a grid phase for the metronome", isinstance(phase, float))
+check("anchors_from_words honors conf_floor",
+      [a["origin"] for a in tp.anchors_from_words(words, conf_floor=0.5)] == ["real", "real", "gap"])
+
+
+# ── 5. determinism ─────────────────────────────────────────────────────────────────────
 digs = {hashlib.sha256(json.dumps(tp.build_template(units, aligned, f0=f0, env=env, bpm=120.0),
                                   sort_keys=True).encode()).hexdigest() for _ in range(3)}
 check("build_template 3× deterministic", len(digs) == 1, str(len(digs)))
+digs2 = {hashlib.sha256(json.dumps(tp.build_template_from_words(words, bpm=120.0, f0=f0)[0],
+                                   sort_keys=True).encode()).hexdigest() for _ in range(3)}
+check("build_template_from_words 3× deterministic", len(digs2) == 1, str(len(digs2)))
 
 
 if fails:

@@ -128,20 +128,35 @@ def syllable_anchors(units: List[dict], aligned: List[dict]) -> List[dict]:
     return out
 
 
-def build_template(units: List[dict], aligned: List[dict], f0=None, env=None,
-                   bpm: float = 120.0, subdiv: int = 4, hop_s: float = 0.01, sig=(4, 4)) -> List[dict]:
-    """Structured per-syllable template: exact word-derived count, grid-snapped onsets.
+def anchors_from_words(words: List[dict], conf_floor: float = 0.5) -> List[dict]:
+    """Whisper (or any) timed words → the exact syllable sequence with rough anchor times.
+    Count comes from the WORDS (phonology), timing from each word's [start,end], and each
+    syllable's origin is `real` when the word was heard confidently, `gap` when it wasn't
+    (Whisper's own confidence separates his clear lyrics from the mumbles)."""
+    out: List[dict] = []
+    for w in words or []:
+        word = str(w.get("word", "")).strip()
+        s, e = float(w.get("start", 0.0)), float(w.get("end", 0.0))
+        if e <= s:
+            e = s + 0.1
+        n = _syllables(word)
+        origin = "real" if float(w.get("confidence", 0.0) or 0.0) >= conf_floor else "gap"
+        for k in range(n):
+            out.append({"anchor": s + (e - s) * k / n, "origin": origin, "word": word})
+    out.sort(key=lambda x: x["anchor"])
+    return out
 
-    `units` = the take's word/gap sequence ({"word": str} | {"gap": n}); `aligned` = forced-aligned
-    real words [{word,start,end,...}] for rough timing. Onsets snap to the `subdiv`-per-beat grid,
-    monotonic (min one grid step apart), durations run to the next syllable. Deterministic."""
-    anchors = syllable_anchors(units, aligned)
+
+def snap_anchors_to_grid(anchors: List[dict], bpm: float, subdiv: int = 4, f0=None,
+                         sig=(4, 4), phase: Optional[float] = None) -> List[dict]:
+    """Snap ordered syllable anchors to the `subdiv`-per-beat grid — monotonic (min one step
+    apart), durations to the next syllable, pitch from F0, stress on-beat, beat on strong-beat."""
     if not anchors:
         return []
     step = grid_step(bpm, subdiv)
-    phase = calibrate_phase([a["anchor"] for a in anchors if a["origin"] == "real"], step)
-
-    # snap each anchor to a grid index, strictly increasing (min one step apart)
+    if phase is None:
+        cal = [a["anchor"] for a in anchors if a.get("origin") == "real"] or [a["anchor"] for a in anchors]
+        phase = calibrate_phase(cal, step)
     ks: List[int] = []
     last = -1
     for a in anchors:
@@ -150,24 +165,37 @@ def build_template(units: List[dict], aligned: List[dict], f0=None, env=None,
             k = last + 1
         ks.append(k)
         last = k
-
-    beats_per_bar = max(1, sig[0]) * subdiv        # grid slots per bar
+    beats_per_bar = max(1, sig[0]) * subdiv
     out: List[dict] = []
     for i, (a, k) in enumerate(zip(anchors, ks)):
         onset = phase + k * step
-        nxt_onset = phase + ks[i + 1] * step if i + 1 < len(ks) else onset + step
-        dur = max(step, nxt_onset - onset)
+        nxt = phase + ks[i + 1] * step if i + 1 < len(ks) else onset + step
+        dur = max(step, nxt - onset)
         pitch = int(align._pitch_from_f0(f0, onset, onset + dur)) if f0 else 69
-        pos = k % beats_per_bar                     # grid position within the bar
-        on_beat = (k % subdiv) == 0                 # lands on a quarter-note beat
-        strong_beat = pos in (0, 2 * subdiv)        # downbeat or beat 3
-        out.append({
-            "i": i, "k": k, "onset": round(onset, 4), "dur": round(dur, 4), "pitch": pitch,
-            "origin": a["origin"], "word": a["word"],
-            "stress": "strong" if on_beat else "weak",
-            "beat": "strong" if strong_beat else "weak",
-        })
+        pos = k % beats_per_bar
+        out.append({"i": i, "k": k, "onset": round(onset, 4), "dur": round(dur, 4), "pitch": pitch,
+                    "origin": a["origin"], "word": a["word"],
+                    "stress": "strong" if (k % subdiv) == 0 else "weak",
+                    "beat": "strong" if pos in (0, 2 * subdiv) else "weak"})
     return out
+
+
+def build_template(units: List[dict], aligned: List[dict], f0=None, env=None,
+                   bpm: float = 120.0, subdiv: int = 4, hop_s: float = 0.01, sig=(4, 4)) -> List[dict]:
+    """Structured per-syllable template from his lyric `units` ({"word"} | {"gap": n}) + the
+    forced-aligned real words `aligned` (rough timing). Exact word-derived count, grid-snapped."""
+    return snap_anchors_to_grid(syllable_anchors(units, aligned), bpm, subdiv, f0, sig)
+
+
+def build_template_from_words(words: List[dict], bpm: float = 120.0, subdiv: int = 4,
+                              f0=None, env=None, conf_floor: float = 0.5, sig=(4, 4)):
+    """The ASR-driven template (owner's ask): Whisper timed words → grid-snapped syllables.
+    Returns (template, grid_phase) so the caller can phase a metronome to his vocal."""
+    anchors = anchors_from_words(words, conf_floor)
+    step = grid_step(bpm, subdiv)
+    cal = [a["anchor"] for a in anchors if a["origin"] == "real"] or [a["anchor"] for a in anchors]
+    phase = calibrate_phase(cal, step)
+    return snap_anchors_to_grid(anchors, bpm, subdiv, f0, sig, phase), phase
 
 
 def units_from_lyric(lines: List[str]) -> List[dict]:
