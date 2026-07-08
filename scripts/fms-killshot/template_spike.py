@@ -65,15 +65,19 @@ def main():
     take = take.astype(np.float32)
     dur = len(take) / sr
 
-    whisper = json.load(open(os.path.join(OUT, "take-whisper.json")))
+    aligned = json.load(open(os.path.join(OUT, "aligned-realwords.json")))   # forced-aligned real words
+    transients = json.load(open(os.path.join(OUT, "take-onsets.json")))      # librosa acoustic onsets
     f0 = json.load(open(os.path.join(OUT, "take-f0.json")))
     pcm = skcore.read_pcm_mono(TAKE)
     env = skcore.energy_envelope(pcm[0], pcm[1])
 
-    # ASR-driven template (owner's ask): Whisper word timestamps → count + placement, grid-snapped.
-    tpl, phase = tp.build_template_from_words(whisper, bpm=BPM, subdiv=4, f0=f0, conf_floor=0.5)
+    # VALIDATED recipe: count from his words, onset from forced-align REFINED to the nearest transient
+    # (~15ms), wordless mumble syllables grid-placed between the words.
+    units = tp.units_from_lyric(LYRIC)
+    tpl = tp.build_template_wordsfirst(units, aligned, transients=transients, f0=f0, bpm=BPM, subdiv=4)
     real = sum(1 for s in tpl if s["origin"] == "real")
-    print(f"template (whisper-driven): {len(tpl)} syllables ({real} clear, {len(tpl)-real} low-conf); "
+    phase = tp.calibrate_phase([s["onset"] for s in tpl if s["origin"] == "real"], tp.grid_step(BPM, 4))
+    print(f"template (words-first + transient-refine): {len(tpl)} syllables ({real} real, {len(tpl)-real} gap); "
           f"grid phase {phase*1000:.0f}ms; strong {sum(1 for s in tpl if s['stress']=='strong')}")
     json.dump(tpl, open(os.path.join(OUT, "template.json"), "w"), indent=1)
 

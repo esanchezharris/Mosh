@@ -95,6 +95,26 @@ check("anchors_from_words honors conf_floor",
       [a["origin"] for a in tp.anchors_from_words(words, conf_floor=0.5)] == ["real", "real", "gap"])
 
 
+# ── 4b. the VALIDATED recipe: words-first onsets, transient-refined, gaps gridded ───────
+check("refine_to_transients: snaps to a nearby transient, keeps if none in window",
+      tp.refine_to_transients([1.0, 2.0], [1.02, 2.5], window=0.05) == [1.02, 2.0],
+      str(tp.refine_to_transients([1.0, 2.0], [1.02, 2.5], window=0.05)))
+wf_units = tp.units_from_lyric(["go * * home"])
+wf_aligned = [{"word": "go", "start": 0.0, "end": 0.4}, {"word": "home", "start": 2.0, "end": 2.4}]
+wf = tp.build_template_wordsfirst(wf_units, wf_aligned, transients=[0.05, 2.03], bpm=120.0)
+check("words-first: 2 real + 2 gap = 4 syllables", len(wf) == 4, str(len(wf)))
+check("words-first: origins real,gap,gap,real", [s["origin"] for s in wf] == ["real", "gap", "gap", "real"],
+      str([s["origin"] for s in wf]))
+check("words-first: REAL onsets refined to transients (0.05, 2.03), kept EXACT not grid-snapped",
+      abs(wf[0]["onset"] - 0.05) < 1e-6 and abs(wf[3]["onset"] - 2.03) < 1e-6, str([s["onset"] for s in wf]))
+check("words-first: gap syllables placed BETWEEN the words (not snapped to transients)",
+      0.4 < wf[1]["onset"] < 2.0 and 0.4 < wf[2]["onset"] < 2.0, str([wf[1]["onset"], wf[2]["onset"]]))
+check("words-first: strictly increasing onsets", all(b["onset"] > a["onset"] for a, b in zip(wf, wf[1:])))
+dwf = {hashlib.sha256(json.dumps(tp.build_template_wordsfirst(wf_units, wf_aligned, transients=[0.05, 2.03], bpm=120.0),
+                                 sort_keys=True).encode()).hexdigest() for _ in range(3)}
+check("build_template_wordsfirst 3× deterministic", len(dwf) == 1)
+
+
 # ── 5. determinism ─────────────────────────────────────────────────────────────────────
 digs = {hashlib.sha256(json.dumps(tp.build_template(units, aligned, f0=f0, env=env, bpm=120.0),
                                   sort_keys=True).encode()).hexdigest() for _ in range(3)}

@@ -187,6 +187,83 @@ def build_template(units: List[dict], aligned: List[dict], f0=None, env=None,
     return snap_anchors_to_grid(syllable_anchors(units, aligned), bpm, subdiv, f0, sig)
 
 
+# ── the VALIDATED recipe: words-first onsets, transient-refined, gaps gridded ──────────────
+# (Stage-0 validation on known truth: count from WORDS, timing from forced-align refined to the
+#  nearest acoustic transient — ~15ms precise; grid only structures the wordless mumble gaps.)
+
+def refine_to_transients(onsets: List[float], transients: List[float], window: float = 0.06) -> List[float]:
+    """Snap each onset to its nearest detected transient within ±window (the ~15ms precision the
+    validation showed is available); an onset with no transient in range is left as-is. Pure."""
+    ts = sorted(transients or [])
+    if not ts:
+        return list(onsets)
+    out = []
+    for o in onsets:
+        near = [t for t in ts if abs(t - o) <= window]
+        out.append(round(min(near, key=lambda t: abs(t - o)), 4) if near else o)
+    return out
+
+
+def build_template_wordsfirst(units: List[dict], aligned: List[dict], transients=None, f0=None,
+                              bpm: float = 120.0, subdiv: int = 4, sig=(4, 4),
+                              refine_window: float = 0.06) -> List[dict]:
+    """The validated template: real-word syllables keep their forced-aligned onset REFINED to the
+    nearest transient (exact, not grid-snapped — his feel); wordless mumble syllables are grid-
+    placed between the bracketing words. Count is word-derived. Stress/beat are labelled against the
+    tempo grid. `transients` = acoustic onsets (librosa); omit to keep the raw forced-align times."""
+    step = grid_step(bpm, subdiv)
+    anchors: List[dict] = []
+    ptr = 0
+    prev_end = 0.0
+    for ui, u in enumerate(units):
+        if "word" in u:
+            a = aligned[ptr] if ptr < len(aligned) else None
+            ptr += 1
+            if a is None:
+                continue
+            s, e = float(a["start"]), float(a["end"])
+            for sl in align.slots_for_word(s, e, _syllables(u["word"])):
+                anchors.append({"onset": float(sl["start"]), "origin": "real", "word": u["word"]})
+            prev_end = e
+        else:
+            n = int(u.get("gap", 1))
+            nxt = None
+            for v in units[ui + 1:]:
+                if "word" in v and ptr < len(aligned):
+                    nxt = float(aligned[ptr]["start"])
+                    break
+            hi = max(nxt if nxt is not None else prev_end + n * 0.25, prev_end + 0.05)
+            for k in range(n):
+                anchors.append({"onset": prev_end + (hi - prev_end) * (k + 0.5) / n, "origin": "gap", "word": None})
+            prev_end = hi
+    # refine only the REAL onsets to the acoustic transients
+    if transients:
+        refined = iter(refine_to_transients([a["onset"] for a in anchors if a["origin"] == "real"],
+                                            transients, refine_window))
+        for a in anchors:
+            if a["origin"] == "real":
+                a["onset"] = next(refined)
+    anchors.sort(key=lambda x: x["onset"])
+    for i in range(1, len(anchors)):                          # keep strictly increasing
+        if anchors[i]["onset"] <= anchors[i - 1]["onset"]:
+            anchors[i]["onset"] = anchors[i - 1]["onset"] + 0.01
+    phase = calibrate_phase([a["onset"] for a in anchors if a["origin"] == "real"]
+                            or [a["onset"] for a in anchors], step)
+    beats_per_bar = max(1, sig[0]) * subdiv
+    out: List[dict] = []
+    for i, a in enumerate(anchors):
+        onset = a["onset"]
+        nxt = anchors[i + 1]["onset"] if i + 1 < len(anchors) else onset + step
+        dur = max(0.06, nxt - onset)
+        pitch = int(align._pitch_from_f0(f0, onset, onset + dur)) if f0 else 69
+        k = round((onset - phase) / step)
+        out.append({"i": i, "onset": round(onset, 4), "dur": round(dur, 4), "pitch": pitch,
+                    "origin": a["origin"], "word": a["word"],
+                    "stress": "strong" if k % subdiv == 0 else "weak",
+                    "beat": "strong" if (k % beats_per_bar) in (0, 2 * subdiv) else "weak"})
+    return out
+
+
 def build_template_from_words(words: List[dict], bpm: float = 120.0, subdiv: int = 4,
                               f0=None, env=None, conf_floor: float = 0.5, sig=(4, 4)):
     """The ASR-driven template (owner's ask): Whisper timed words → grid-snapped syllables.
