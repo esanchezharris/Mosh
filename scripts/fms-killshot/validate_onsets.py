@@ -30,10 +30,12 @@ import overlap
 from skeleton import align, core as skcore
 from phonology import core as ph
 
-CAL = "/Users/emiliosanchez-harris/mosh-fms-ksb/calibrate"
-GT = "/Users/emiliosanchez-harris/mosh-fms-ksb/calibrate-onsets"
 LISTEN = "/Users/emiliosanchez-harris/mosh-fms-ksb/resing-dominio/listen"
-EXC = os.path.join(CAL, "excerpt.wav")
+# args: [excerpt_wav] [gt_dir] [tag] [title] — default = the "I'm Going Down" calibrate excerpt
+EXC = os.path.abspath(sys.argv[1]) if len(sys.argv) > 1 else "/Users/emiliosanchez-harris/mosh-fms-ksb/calibrate/excerpt.wav"
+GT = os.path.abspath(sys.argv[2]) if len(sys.argv) > 2 else "/Users/emiliosanchez-harris/mosh-fms-ksb/calibrate-onsets"
+TAG = sys.argv[3] if len(sys.argv) > 3 else "cal"
+TITLE = sys.argv[4] if len(sys.argv) > 4 else '"I\'m Going Down"'
 _pron = ph.Pronouncer()
 
 
@@ -108,10 +110,10 @@ def main():
 
     # click tracks over the excerpt for the owner's ear
     tn = _norm(take, 0.8)
-    sf.write(os.path.join(LISTEN, "val-gt-words.wav"), _norm(tn + _clicks(take, sr, word_gt, 1900, 0.55)), sr)
-    sf.write(os.path.join(LISTEN, "val-librosa.wav"), _norm(tn + _clicks(take, sr, librosa_on, 1400, 0.5)), sr)
-    sf.write(os.path.join(LISTEN, "val-energy.wav"), _norm(tn + _clicks(take, sr, energy_on, 1100, 0.5)), sr)
-    print("\nstaged: val-gt-words.wav (forced-align truth), val-librosa.wav, val-energy.wav")
+    sf.write(os.path.join(LISTEN, f"val-{TAG}-gt.wav"), _norm(tn + _clicks(take, sr, word_gt, 1900, 0.55)), sr)
+    sf.write(os.path.join(LISTEN, f"val-{TAG}-librosa.wav"), _norm(tn + _clicks(take, sr, librosa_on, 1400, 0.5)), sr)
+    sf.write(os.path.join(LISTEN, f"val-{TAG}-energy.wav"), _norm(tn + _clicks(take, sr, energy_on, 1100, 0.5)), sr)
+    print(f"\nstaged: val-{TAG}-gt.wav (forced-align truth), val-{TAG}-librosa.wav, val-{TAG}-energy.wav")
     _html(results, len(word_gt), len(syl_gt), len(librosa_on), len(energy_on))
     json.dump({"word_gt": word_gt, "syl_gt": syl_gt, "librosa": librosa_on, "energy": energy_on,
                "results": results}, open(os.path.join(GT, "validation.json"), "w"), indent=1)
@@ -124,22 +126,22 @@ def _html(results, nw, ns, nl, ne):
         return f"<tr><td>{d}</td><td>{r}</td><td><b>{x['f1']}</b></td><td>{x['precision']}</td><td>{x['recall']}</td><td>{x['median_abs_dt_ms']}</td></tr>"
     rows = "".join(row(d, r) for d in ("librosa", "energy-gate") for r in ("word-GT", "syllable-GT"))
     html = f"""<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Onset validation on known truth</title><style>:root{{color-scheme:dark}}
+<title>Onset validation — {TITLE}</title><style>:root{{color-scheme:dark}}
  body{{margin:0;font:15px/1.5 -apple-system,system-ui,sans-serif;background:#0e0f13;color:#e7e9ee}}
  .wrap{{max-width:680px;margin:0 auto;padding:34px 18px 80px}} h1{{font-size:21px;margin:0 0 4px}}
  .sub{{color:#8b90a0;font-size:13px;margin:0 0 20px}} .card{{background:#16181f;border:1px solid #23262f;border-radius:14px;padding:15px 17px;margin:0 0 13px}}
  .card.hot{{border-color:#2f5233}} .card h2{{font-size:15px;margin:0 0 3px}} .card p{{color:#8b90a0;font-size:12.5px;margin:0 0 10px}} audio{{width:100%}}
  table{{width:100%;border-collapse:collapse;font-size:13px}} td,th{{text-align:left;padding:5px 8px;border-bottom:1px solid #23262f}} th{{color:#8b90a0}}</style>
 </head><body><div class="wrap">
-<h1>Onset validation — "I'm Going Down" (known truth)</h1>
-<p class="sub">Does automatic transient detection find the syllables where we KNOW they are? Ground truth = your known lyrics forced-aligned ({nw} words / {ns} syllables). Detectors: librosa {nl}, energy-gate {ne}. F1 ≥ 0.8 = trusted.</p>
+<h1>Onset validation — {TITLE} (known truth)</h1>
+<p class="sub">Does automatic transient detection find the syllables where we KNOW they are? Ground truth = the known lyrics forced-aligned ({nw} words / {ns} syllables). Detectors: librosa {nl}, energy-gate {ne}. F1 ≥ 0.8 = trusted.</p>
 <div class="card"><table><tr><th>detector</th><th>vs</th><th>F1</th><th>prec</th><th>rec</th><th>med Δms</th></tr>{rows}</table></div>
-<div class="card hot"><h2>Ground truth · forced-aligned words</h2><p>Clicks where the known words start. Do these land on your syllables?</p><audio controls preload="metadata" src="val-gt-words.wav"></audio></div>
-<div class="card hot"><h2>librosa transients</h2><p>The automatic detector.</p><audio controls preload="metadata" src="val-librosa.wav"></audio></div>
-<div class="card"><h2>energy-gate</h2><audio controls preload="metadata" src="val-energy.wav"></audio></div>
+<div class="card hot"><h2>Ground truth · forced-aligned words</h2><p>Clicks where the known words start. Do these land on the syllables?</p><audio controls preload="metadata" src="val-{TAG}-gt.wav"></audio></div>
+<div class="card hot"><h2>librosa transients</h2><p>The automatic detector.</p><audio controls preload="metadata" src="val-{TAG}-librosa.wav"></audio></div>
+<div class="card"><h2>energy-gate</h2><audio controls preload="metadata" src="val-{TAG}-energy.wav"></audio></div>
 </div></body></html>"""
-    open(os.path.join(LISTEN, "validate.html"), "w").write(html)
-    print(f"viz -> {LISTEN}/validate.html")
+    open(os.path.join(LISTEN, f"validate-{TAG}.html"), "w").write(html)
+    print(f"viz -> {LISTEN}/validate-{TAG}.html")
 
 
 if __name__ == "__main__":
