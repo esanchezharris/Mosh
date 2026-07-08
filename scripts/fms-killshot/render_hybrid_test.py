@@ -114,6 +114,16 @@ check("level-match raised the quiet synth (|val|~1000)", abs(abs(om[380]) - 1000
 d2 = {tuple(rh.splice_matched(raw, synth, [(3.0, 4.5)], sr, match=True)) for _ in range(3)}
 check("splice_matched 3x deterministic", len(d2) == 1)
 
+# ── 8. gate_to_take: NO audio where the raw take is silent (owner's rule) ──────────────
+sr = 100
+take = [1.0] * 300 + [0.0] * 300 + [1.0] * 400   # loud | SILENT | loud
+sig = [0.5] * 1000                                # a synth that (buggily) plays through the silence
+g = rh.gate_to_take(sig, take, sr)
+check("gate keeps audio where the take is loud", abs(g[120] - 0.5) < 0.08 and abs(g[850] - 0.5) < 0.08, f"{g[120]:.2f},{g[850]:.2f}")
+check("gate SILENCES where the take is silent", abs(g[450]) < 0.03, f"{g[450]:.3f}")
+check("gate length matches signal", len(g) == 1000)
+check("gate is deterministic", rh.gate_to_take(sig, take, sr) == rh.gate_to_take(sig, take, sr))
+
 # ── 6. Determinism: 3x identical authored clip ─────────────────────────────────────────
 import hashlib
 import json

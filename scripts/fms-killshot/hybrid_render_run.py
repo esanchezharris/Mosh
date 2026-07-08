@@ -166,6 +166,9 @@ def main() -> int:
         mel = mel[: len(raw)]
     spans = [(s, e) for (s, e) in rh.rewrite_spans(sheet) if s < a.dur]
     spliced = np.array(rh.splice_matched(raw.tolist(), mel.tolist(), spans, sr_raw, xfade_ms=25, match=True))
+    # Silence-match (owner's rule): no audio where the raw take is silent — kills score-synth
+    # bleed in the gaps where he wasn't singing, so the output's silences match his take.
+    spliced = np.array(rh.gate_to_take(spliced.tolist(), raw.tolist(), sr_raw))
     peak = float(np.abs(spliced).max())
     if peak > 0.99:                                     # keep his native levels; only tame if clipping
         spliced = spliced / peak * 0.97

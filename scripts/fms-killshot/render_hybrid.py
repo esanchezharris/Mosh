@@ -107,6 +107,32 @@ def _rms(xs) -> float:
     return math.sqrt(sum(float(x) * x for x in xs) / len(xs)) if xs else 0.0
 
 
+def gate_to_take(signal, take, sr: int, thresh_ratio: float = 0.03,
+                 env_ms: float = 25, smooth_ms: float = 12) -> List[float]:
+    """Silence-match (owner's rule: NO audio where the raw take is silent). Follows the take's
+    envelope — a moving-average of |take|, thresholded vs its own peak, one-pole smoothed to
+    avoid clicks — and multiplies it into `signal`. This kills score-synth bleed in the gaps
+    where he wasn't singing; kept regions (== the take, above the floor) pass through."""
+    n = min(len(signal), len(take))
+    w = max(1, int(env_ms / 1000 * sr))
+    env = [0.0] * n
+    acc = 0.0
+    for i in range(n):
+        acc += abs(float(take[i]))
+        if i >= w:
+            acc -= abs(float(take[i - w]))
+        env[i] = acc / min(i + 1, w)
+    thr = thresh_ratio * max(max(env) if env else 0.0, 1e-9)
+    coef = math.exp(-1.0 / max(1, int(smooth_ms / 1000 * sr)))
+    out = [0.0] * n
+    v = 0.0
+    for i in range(n):
+        target = 1.0 if env[i] > thr else 0.0
+        v = target + coef * (v - target)          # one-pole toward the binary gate
+        out[i] = float(signal[i]) * v
+    return out
+
+
 def splice_matched(base, insert, spans: List[Tuple[float, float]], sr: int,
                    xfade_ms: float = 30, match: bool = True, max_gain: float = 8.0) -> List[float]:
     """Keep-raw + splice-fixes (the owner's chosen architecture — NO global voice conversion).
