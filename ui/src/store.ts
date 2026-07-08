@@ -10,6 +10,7 @@ import type {
   PluginCounts,
 } from "./types";
 import { versionBannerError } from "./types";
+import { isTrackPatch, applyTrackPatch } from "./snapshotPatch";
 import type { RemoteStatus } from "./bridge";
 import { type SnapDiv, snapTimeMap, tempoMapFrom } from "./time";
 import type { ChangeSet } from "./agent/executor";
@@ -296,7 +297,13 @@ export const useStore = create<State>((set, get) => ({
     onEvent("mosh_event", (raw) => {
       const ev = raw as MoshEvent;
       if (ev.type === "snapshot_invalidated") {
-        void get().refresh();
+        // Scoped patch: splice one changed track in place, skipping the full O(project) re-pull.
+        if (isTrackPatch(ev.payload)) {
+          const snap = get().snapshot;
+          const patched = snap ? applyTrackPatch(snap, ev.payload) : null;
+          if (patched) { set({ snapshot: patched }); return; }
+        }
+        void get().refresh();   // full invalidation (or a scoped target not in the snapshot → resync)
       } else if (ev.type === "transport") {
         // Targeted set — does NOT touch the snapshot (so the tree doesn't churn).
         set({ transport: ev.payload as Transport });

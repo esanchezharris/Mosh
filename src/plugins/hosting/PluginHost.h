@@ -23,11 +23,10 @@ public:
         full blind scan; bundles without VST3 moduleinfo use the slow scan only
         when MOSH_SCAN_SLOW_VST3=1 is set.
         AU cataloging is an opt-in (MOSH_SCAN_AU=1) experimental feature.
-        WARNING: a misbehaving AudioUnit can hang the UI during scan -- JUCE
-        marshals component instantiation to the message thread and there is NO
-        per-component timeout; a HANG requires a forced app restart.  Only
-        CRASHes are recovered on the next launch via the dead-mans-pedal/blocklist.
-        VST3 (the primary format) is always scanned and safe.
+        D2: the cold-start AU sweep now runs OUT-OF-PROCESS with the same stall
+        watchdog rescan() uses, so a HANGING AudioUnit is killed (~25 s) instead of
+        freezing first launch; a CRASH is still recovered next launch via the
+        dead-mans-pedal/blocklist. VST3 (the primary format) is always scanned + safe.
         NOTE: only one Mosh process should scan AUs at a time -- the dead-mans-pedal
         file is shared under ~/Library/Application Support/Mosh/ and is not
         multi-process-safe.  INS-002 / INS-005. */
