@@ -126,6 +126,54 @@ func walk(_ el: AXUIElement) {
 walk(root)
 '''
 
+AX_PRESS_HELPER = r'''
+import ApplicationServices
+import AppKit
+
+let target = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "Mosh"
+let roleNeed = CommandLine.arguments.count > 2 ? CommandLine.arguments[2] : ""
+let textNeed = CommandLine.arguments.count > 3 ? CommandLine.arguments[3] : ""
+let apps: [NSRunningApplication]
+if let pid = Int32(target) {
+    apps = NSWorkspace.shared.runningApplications.filter { $0.processIdentifier == pid }
+} else {
+    apps = NSWorkspace.shared.runningApplications.filter { $0.localizedName == target }
+}
+guard let app = apps.first else { exit(2) }
+let root = AXUIElementCreateApplication(app.processIdentifier)
+
+func attr(_ el: AXUIElement, _ name: String) -> AnyObject? {
+    var value: AnyObject?
+    let err = AXUIElementCopyAttributeValue(el, name as CFString, &value)
+    return err == .success ? value : nil
+}
+
+func text(_ el: AXUIElement) -> String {
+    let fields = [
+        attr(el, kAXTitleAttribute) as? String ?? "",
+        attr(el, kAXDescriptionAttribute) as? String ?? "",
+        attr(el, kAXHelpAttribute) as? String ?? "",
+        String(describing: attr(el, kAXValueAttribute) ?? "" as AnyObject)
+    ]
+    return fields.joined(separator: " ")
+}
+
+var pressed = false
+func walk(_ el: AXUIElement) {
+    if pressed { return }
+    let role = attr(el, kAXRoleAttribute) as? String ?? ""
+    if (roleNeed.isEmpty || role == roleNeed) && text(el).contains(textNeed) {
+        pressed = AXUIElementPerformAction(el, kAXPressAction as CFString) == .success
+        return
+    }
+    let children = attr(el, kAXChildrenAttribute) as? [AXUIElement] ?? []
+    for child in children { walk(child) }
+}
+
+walk(root)
+exit(pressed ? 0 : 1)
+'''
+
 
 def run(cmd: list[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
     return subprocess.run(cmd, text=True, capture_output=True, check=check)
@@ -266,6 +314,7 @@ def launch(args: list[str]) -> int:
         "--stdout", str(log),
         "--stderr", str(log),
         "--env", f"MOSH_SELFTEST_SESSION={SESSION_NAME}",
+        "--env", "MOSH_NO_AUDIO=1",
         str(APP_BUNDLE),
         "--args", *args,
     ])
@@ -283,7 +332,6 @@ def launch(args: list[str]) -> int:
 
 def activate() -> None:
     if CURRENT_PID is not None:
-        run(["open", str(APP_BUNDLE)], check=False)
         swift = (
             "import AppKit; "
             f"if let app = NSRunningApplication(processIdentifier: pid_t({CURRENT_PID})) "
@@ -403,6 +451,14 @@ def ax_helper_path() -> Path:
     return path
 
 
+def ax_press_helper_path() -> Path:
+    EVID.mkdir(parents=True, exist_ok=True)
+    path = EVID / "axpress.swift"
+    if not path.exists() or path.read_text(encoding="utf-8") != AX_PRESS_HELPER:
+        path.write_text(AX_PRESS_HELPER, encoding="utf-8")
+    return path
+
+
 def ax_rows() -> list[dict]:
     proc = run(["swift", str(ax_helper_path()), str(CURRENT_PID) if CURRENT_PID is not None else "Mosh"])
     (EVID / "last-ax.tsv").write_text(proc.stdout, encoding="utf-8")
@@ -475,7 +531,7 @@ def ax_button(label: str, timeout: float = 12.0) -> dict:
     deadline = time.time() + timeout
     while time.time() < deadline:
         for row in ax_rows():
-            if row["role"] not in {"AXButton", "AXCheckBox"}:
+            if row["role"] not in {"AXButton", "AXCheckBox", "AXPopUpButton"}:
                 continue
             if not (row["x"] >= 0 and row["y"] >= 0 and row["w"] > 0 and row["h"] > 0):
                 continue
@@ -484,6 +540,33 @@ def ax_button(label: str, timeout: float = 12.0) -> dict:
                 return row
         time.sleep(0.2)
     raise RuntimeError(f"AX button not found: {label!r}")
+
+
+def click_theme_toggle() -> str:
+    try:
+        button = ax_find_contains("AXButton", "Toggle theme", timeout=2.0)
+        text = ax_text(button)
+        click_ax(button)
+        return text
+    except RuntimeError:
+        pass
+
+    overflow = ax_button("More tools", timeout=8.0)
+    if overflow["role"] == "AXPopUpButton":
+        press_ax(overflow)
+    else:
+        click_ax(overflow)
+    button = wait_for_ax(
+        lambda row: row["role"] in {"AXButton", "AXMenuItem"}
+        and ("Light mode" in ax_text(row) or "Dark mode" in ax_text(row)),
+        detail="v2 overflow theme toggle",
+    )
+    text = ax_text(button)
+    if button["role"] == "AXMenuItem":
+        press_ax(button)
+    else:
+        click_ax(button)
+    return text
 
 
 def mouse_click_xy(x: float, y: float) -> None:
@@ -533,14 +616,54 @@ def mouse_drag_xy(x1: float, y1: float, x2: float, y2: float) -> None:
 
 
 def set_toolbar_zoom(fraction: float) -> None:
+    zoom_label = "8b" if fraction >= 0.75 else "16b" if fraction >= 0.35 else "Full"
+    try:
+        row = wait_for_ax(
+            lambda r: r["role"] in {"AXButton", "AXCheckBox"}
+            and r["title"] == zoom_label
+            and 130 < r["y"] < 220
+            and r["w"] > 0
+            and r["h"] > 0,
+            timeout=2.0,
+            detail=f"v2 {zoom_label} zoom control",
+        )
+        if row.get("value") != "1":
+            press_ax(row)
+            wait_for_ax(
+                lambda r: r["role"] in {"AXButton", "AXCheckBox"}
+                and r["title"] == zoom_label
+                and r.get("value") == "1",
+                timeout=4.0,
+                detail=f"selected v2 {zoom_label} zoom control",
+            )
+        time.sleep(0.35)
+        return
+    except RuntimeError:
+        pass
+
     row = wait_for_ax(
-        lambda r: r["role"] == "AXSlider" and r["y"] < 180 and "Volume" not in ax_text(r),
+        lambda r: r["role"] == "AXSlider"
+        and r["y"] < 180
+        and "Zoom" in ax_text(r)
+        and "Song position" not in ax_text(r)
+        and "Volume" not in ax_text(r),
         timeout=8.0,
         detail="toolbar Zoom slider",
     )
     frac = max(0.0, min(1.0, fraction))
     y = row["y"] + row["h"] / 2.0
     mouse_drag_xy(row["x"] + row["w"] / 2.0, y, row["x"] + row["w"] * frac, y)
+
+
+def selected_v2_zoom() -> str | None:
+    for row in ax_rows():
+        if row["role"] in {"AXButton", "AXCheckBox"} and row["title"] in {"8b", "16b", "Full"} and row.get("value") == "1":
+            return row["title"]
+    return None
+
+
+def is_v2_shell() -> bool:
+    return selected_v2_zoom() is not None
 
 
 def key_cmd_z(*, shift: bool = False) -> None:
@@ -562,6 +685,25 @@ def key_cmd_z(*, shift: bool = False) -> None:
 
 def click_ax(row: dict) -> None:
     mouse_click_xy(row["x"] + row["w"] / 2.0, row["y"] + row["h"] / 2.0)
+
+
+def press_ax(row: dict) -> None:
+    label = str(row.get("title") or row.get("desc") or row.get("help") or row.get("value") or "")
+    proc = run([
+        "swift", str(ax_press_helper_path()),
+        str(CURRENT_PID) if CURRENT_PID is not None else "Mosh",
+        str(row.get("role", "")),
+        label,
+    ], check=False)
+    if proc.returncode != 0:
+        raise RuntimeError(f"AX press failed: role={row.get('role')!r} label={label!r}")
+
+
+def press_or_click_ax(row: dict) -> None:
+    try:
+        press_ax(row)
+    except RuntimeError:
+        click_ax(row)
 
 
 def wait_for_ax(
@@ -1005,6 +1147,65 @@ def run_piano_roll(results: dict, win: dict) -> None:
     )
 
 
+def select_v2_inspector_tab(label: str) -> dict:
+    tab = wait_for_ax(
+        lambda row: row["role"] == "AXRadioButton" and row["title"] == label,
+        timeout=8.0,
+        detail=f"v2 inspector {label} tab",
+    )
+    press_or_click_ax(tab)
+    return wait_for_ax(
+        lambda row: row["role"] == "AXRadioButton" and row["title"] == label and row.get("value") == "1",
+        timeout=4.0,
+        detail=f"selected v2 inspector {label} tab",
+    )
+
+
+def run_v2_shell_smoke(results: dict, win: dict) -> None:
+    zoom_state = selected_v2_zoom()
+    assert_condition(
+        results,
+        "demo6_v2_zoom_minus",
+        zoom_state == "Full",
+        f"v2 zoom selected={zoom_state}",
+    )
+
+    tabs_seen: list[str] = []
+    before_tabs = capture(win, "demo6-v2-00-before-tabs")
+    for tab in ("FX", "Gen", "Lyrics", "Mix"):
+        select_v2_inspector_tab(tab)
+        tabs_seen.append(tab)
+    after_tabs = capture(win, "demo6-v2-01-after-tabs")
+    assert_condition(
+        results,
+        "demo6_v2_inspector_tabs",
+        tabs_seen == ["FX", "Gen", "Lyrics", "Mix"],
+        f"selected inspector tabs {tabs_seen}; diff={mean_abs_diff(before_tabs, after_tabs, full_box(before_tabs)):.2f}",
+    )
+
+    before_browser = capture(win, "demo6-v2-02-before-browser")
+    press_or_click_ax(ax_button("Open browser"))
+    close_browser = wait_for_ax(
+        lambda row: row["role"] == "AXButton" and row["title"] == "Close browser",
+        timeout=8.0,
+        detail="v2 browser drawer close button",
+    )
+    open_browser = capture(win, "demo6-v2-03-browser-open")
+    browser_diff = mean_abs_diff(before_browser, open_browser, full_box(before_browser))
+    assert_condition(
+        results,
+        "demo6_v2_browser_drawer",
+        browser_diff > 0.1 and close_browser["title"] == "Close browser",
+        f"browser drawer opened; image diff={browser_diff:.2f}",
+    )
+    press_or_click_ax(close_browser)
+    wait_for_ax(
+        lambda row: row["role"] == "AXButton" and row["title"] == "Open browser",
+        timeout=8.0,
+        detail="v2 browser drawer pull tab",
+    )
+
+
 def run_demo6(results: dict) -> None:
     ensure_service(results)
     pid = launch(["--demo6"])
@@ -1032,26 +1233,51 @@ def run_demo6(results: dict) -> None:
 
     dismiss_permission_prompts()
     before_theme = capture(win, "demo6-03-before-theme")
-    theme_button = ax_find_contains("AXButton", "Toggle theme")
-    theme_text_before = ax_text(theme_button)
-    click_ax(theme_button)
+    theme_text_before = click_theme_toggle()
     time.sleep(0.5)
-    theme_text_after = ax_text(ax_find_contains("AXButton", "Toggle theme"))
     after_theme = capture(win, "demo6-04-after-theme")
     theme_diff = mean_abs_diff(before_theme, after_theme, full_box(before_theme))
     assert_condition(
         results,
         "demo6_theme_click",
         theme_diff > 1.0,
-        f"theme AX {theme_text_before!r}->{theme_text_after!r}; image diff={theme_diff:.2f}",
+        f"theme AX {theme_text_before!r}; image diff={theme_diff:.2f}",
     )
 
     set_toolbar_zoom(1.0)
     zoomed = capture(win, "demo6-05-zoom-plus")
+    zoom_state = selected_v2_zoom()
     zoom_diff = mean_abs_diff(after_theme, zoomed, full_box(after_theme))
-    assert_condition(results, "demo6_zoom_plus", zoom_diff > 1.0, f"zoom diff={zoom_diff:.2f}")
+    assert_condition(
+        results,
+        "demo6_zoom_plus",
+        (zoom_state == "8b" and zoom_diff > 0.1) or zoom_diff > 1.0,
+        f"zoom selected={zoom_state}; image diff={zoom_diff:.2f}",
+    )
     set_toolbar_zoom(0.2)
     capture(win, "demo6-06-zoom-minus")
+
+    if is_v2_shell():
+        run_v2_shell_smoke(results, win)
+        before_add = capture(win, "demo6-v2-04-before-add-track")
+        marker = command_log_marker()
+        press_or_click_ax(ax_button("Add track"))
+        create_count = wait_for_command_count("create_track", marker, 1)
+        wait_for_ax(
+            lambda row: row["role"] == "AXCheckBox" and "Select track Audio" in ax_text(row),
+            timeout=8.0,
+            detail="new v2 Audio track header",
+        )
+        after_add = capture(win, "demo6-v2-05-after-add-track")
+        add_diff = mean_abs_diff(before_add, after_add, full_box(before_add))
+        assert_condition(
+            results,
+            "demo6_v2_add_track",
+            create_count == 1 and add_diff > 0.1,
+            f"one create_track from Add track; image diff={add_diff:.2f}",
+        )
+        kill_mosh()
+        return
 
     click_ax(ax_button("Split"))
     split = capture(win, "demo6-07-split-mode")

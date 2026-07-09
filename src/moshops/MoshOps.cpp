@@ -7210,38 +7210,34 @@ juce::var MoshOps::cmdGetCommandLog (const juce::var& args)
 
     if (file.existsAsFile())
     {
-        if (auto stream = file.createInputStream())
+        juce::StringArray recentLines;
+        for (auto& rawLine : juce::StringArray::fromLines (file.loadFileAsString()))
         {
-            juce::StringArray recentLines;
+            const auto line = rawLine.trim();
+            if (! looksLikeCommandLogRecord (line))
+                continue;
 
-            while (! stream->isExhausted())
-            {
-                const auto line = stream->readNextLine().trim();
-                if (! looksLikeCommandLogRecord (line))
-                    continue;
+            ++total;
+            recentLines.add (line);
+            if (recentLines.size() > limit)
+                recentLines.remove (0);
+        }
 
-                ++total;
-                recentLines.add (line);
-                if (recentLines.size() > limit)
-                    recentLines.remove (0);
-            }
+        for (auto& line : recentLines)
+        {
+            var parsed;
+            if (JSON::parse (line, parsed).failed() || ! parsed.isObject())
+                continue;
 
-            for (auto& line : recentLines)
-            {
-                var parsed;
-                if (JSON::parse (line, parsed).failed() || ! parsed.isObject())
-                    continue;
-
-                auto* o = new DynamicObject();
-                o->setProperty ("ts",       parsed.getProperty ("ts", var()));
-                o->setProperty ("seq",      parsed.getProperty ("seq", var()));
-                o->setProperty ("command",  parsed.getProperty ("command", var()));
-                o->setProperty ("ok",       (bool) parsed.getProperty ("ok", false));
-                o->setProperty ("undoable", (bool) parsed.getProperty ("undoable", false));
-                if (parsed.hasProperty ("error"))
-                    o->setProperty ("error", parsed.getProperty ("error", var()));
-                entries.add (var (o));
-            }
+            auto* o = new DynamicObject();
+            o->setProperty ("ts",       parsed.getProperty ("ts", var()));
+            o->setProperty ("seq",      parsed.getProperty ("seq", var()));
+            o->setProperty ("command",  parsed.getProperty ("command", var()));
+            o->setProperty ("ok",       (bool) parsed.getProperty ("ok", false));
+            o->setProperty ("undoable", (bool) parsed.getProperty ("undoable", false));
+            if (parsed.hasProperty ("error"))
+                o->setProperty ("error", parsed.getProperty ("error", var()));
+            entries.add (var (o));
         }
     }
 
