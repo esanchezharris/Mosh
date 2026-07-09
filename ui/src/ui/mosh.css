@@ -876,8 +876,37 @@ button.tbadge:hover { border-color: var(--lime); color: var(--lime); }
 .floatwin-resize:hover { background: linear-gradient(135deg, transparent 50%, var(--lime-dim) 50%); }
 
 /* sample browser filter input */
+.sb-browser { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.sb-browser .pop-head { min-width: 0; justify-content: flex-start; }
+.dock-left .sb-browser { padding: 12px 10px; }
+.sb-heading { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.sb-title { display: block; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--bone-dim); }
+.sb-subtitle { display: block; font-size: 12px; line-height: 1.35; color: var(--bone); }
+.sb-location { flex-direction: column; align-items: flex-start; justify-content: flex-start; }
+.sb-location-copy { display: flex; flex-direction: column; gap: 2px; width: 100%; min-width: 0; }
+.sb-location-label, .sb-search-label { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--bone-dim); }
+.sb-path { width: 100%; max-width: 100%; word-break: break-word; white-space: normal; }
+.sb-search-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .sb-search { width: 100%; box-sizing: border-box; margin: 6px 0; padding: 5px 8px; background: var(--ink); border: 1px solid var(--ink-line); color: var(--bone); border-radius: 6px; font-size: 12px; }
 .sb-search:focus { outline: none; border-color: var(--lime-dim); }
+.sb-list { max-height: 240px; }
+.dock-left .sb-list { max-height: none; padding: 0 0 6px; }
+.sb-section { margin: 0; display: flex; flex-direction: column; gap: 6px; }
+.sb-section .pg-label { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0; }
+.sb-section-count { flex: 0 0 auto; color: var(--bone-dim); opacity: 0.72; font-size: 10px; letter-spacing: 0.08em; }
+.sb-browser .plugin-row {
+  width: 100%; display: flex; align-items: center; gap: 8px; min-width: 0;
+  padding: 8px 10px; border-radius: 8px; background: var(--ink); border: 1px solid var(--ink-line); color: var(--bone);
+}
+.sb-browser button.plugin-row { cursor: pointer; text-align: left; }
+.sb-browser button.plugin-row:hover, .sb-browser .cb-file:hover { border-color: var(--lime-dim); }
+.sb-browser .cb-file { justify-content: flex-start; gap: 8px; }
+.sb-browser .cb-file .cb-import { margin-left: auto; }
+.sb-row-icon { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 18px; color: var(--lime); }
+.sb-row-copy { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.sb-row-title { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sb-row-meta { display: block; font-size: 10px; color: var(--bone-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sb-row-affordance { flex: 0 0 auto; color: var(--bone-dim); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; }
 .sb-audition { flex: 0 0 auto; width: 22px; height: 20px; padding: 0; background: transparent; border: 1px solid var(--ink-line); color: var(--bone-dim); border-radius: 5px; font-size: 9px; cursor: pointer; }
 .sb-audition:hover { border-color: var(--lime-dim); color: var(--bone); }
 .sb-audition[aria-pressed="true"] { background: var(--lime); border-color: var(--lime); color: var(--on-accent); }

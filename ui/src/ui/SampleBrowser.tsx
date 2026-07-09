@@ -105,10 +105,10 @@ export function SampleBrowser() {
         </button>
         <div className="sb-location-copy">
           <span className="sb-location-label">Current folder</span>
-          <span className="pop-note" title={listing?.path}>{listing?.path ?? "Loading sounds..."}</span>
+          <span className="pop-note sb-path" title={listing?.path}>{listing?.path ?? "Loading sounds..."}</span>
         </div>
       </div>
-      <label className="sb-search-field" style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <label className="sb-search-field">
         <span className="sb-search-label">Search sounds</span>
         <input
           className="sb-search"
@@ -138,7 +138,7 @@ export function SampleBrowser() {
           ))}
         </section>
       )}
-      <div className="modal-list" data-testid="content-browser" style={{ maxHeight: 240 }}>
+      <div className="modal-list sb-list" data-testid="content-browser">
         {dirs.length > 0 && (
           <section className="plugin-group sb-section" aria-label="Folders">
             <div className="pg-label">
