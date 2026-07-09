@@ -13,12 +13,15 @@ import type { Snapshot } from "../types";
 import { SampleBrowser } from "./SampleBrowser";
 import { SettingsPanel } from "../settings/SettingsPanel";
 import { ExportControls } from "./ExportControls";
+import { IconChevronLeft, IconFolder, IconPlus, IconSettings } from "./icons";
 
 function FoPanel({ title, onBack, children }: { title: string; onBack: () => void; children: React.ReactNode }) {
   return (
     <>
       <div className="pop-head fo-sub-head">
-        <button className="btn icon fo-back" aria-label="Back" title="Back" onClick={onBack}>‹</button>
+        <button className="btn icon fo-back" aria-label="Back" title="Back" onClick={onBack}>
+          <IconChevronLeft size={14} />
+        </button>
         <span>{title}</span>
       </div>
       <div className="fo-sub-body">{children}</div>
@@ -52,7 +55,7 @@ export function FileOptions({ snapshot }: { snapshot: Snapshot }) {
     <div className="file-options" ref={ref}>
       <button className="btn fo-trigger" data-testid="file-options" title="File · options · export"
         aria-label="File, options, and export" aria-expanded={open} aria-haspopup="menu" onClick={() => setOpen((v) => !v)}>
-        <span aria-hidden="true">＋</span>
+        <IconPlus size={16} />
       </button>
       {open && (
         <div className="pop fo-pop" role="dialog" aria-label="File and options">
@@ -86,10 +89,16 @@ export function FileOptions({ snapshot }: { snapshot: Snapshot }) {
               </div>
               <ExportControls audioEnabled={audioEnabled} />
               <div className="pop-actions fo-options">
-                <button className="btn" data-testid="fo-settings" onClick={() => setPanel("settings")}>⚙ Settings</button>
-                <button className="btn" data-testid="fo-samples" onClick={() => setPanel("samples")}>🗀 Samples</button>
+                <button className="btn fo-action" data-testid="fo-settings" onClick={() => setPanel("settings")}>
+                  <IconSettings size={14} />
+                  <span>Settings</span>
+                </button>
+                <button className="btn fo-action" data-testid="fo-samples" onClick={() => setPanel("samples")}>
+                  <IconFolder size={14} />
+                  <span>Samples</span>
+                </button>
               </div>
-              {s.dirty ? <div className="pop-note">• unsaved changes (auto-saved)</div> : null}
+              {s.dirty ? <div className="pop-note">Unsaved changes auto-save locally.</div> : null}
             </>
           )}
         </div>

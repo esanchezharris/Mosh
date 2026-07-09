@@ -16,11 +16,15 @@ import {
   loadFavorites, toggleFavorite, loadPluginRecents, addPluginRecent,
   type PluginEntry,
 } from "../ui/pluginBrowserUtil";
-import { buildCollections, rowsForCollection, type CollectionId } from "./pluginPicker";
+import { buildCollections, rowsForCollection, type CollectionGroup, type CollectionId } from "./pluginPicker";
 
 const ROW_H = 48; // uniform row/header height — drives the windowing math
-const railIcon = (id: CollectionId) =>
-  (id === "fav" ? "★" : id === "recent" ? "↻" : id === "inst" ? "♪" : id === "fx" ? "∿" : id === "all" ? "▦" : "");
+const collectionGroupOrder: CollectionGroup[] = ["top", "kind", "vendor"];
+const collectionGroupLabel: Record<CollectionGroup, string> = {
+  top: "Browse",
+  kind: "Type",
+  vendor: "Maker",
+};
 
 type Rows = ReturnType<typeof rowsForCollection>;
 
@@ -91,7 +95,15 @@ function PluginList({ rows, favSet, activeLabel, emptyLabel, selectedTrackId, on
   const { start, end } = visibleRange(scrollTop, viewportH, ROW_H, rows.length);
   return (
     <div className="v2-pb-list" ref={listRef} onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)} data-testid="v2-pb-list">
-      <div className="v2-pb-listhead">{activeLabel} <span>{rows.filter((r) => r.kind === "plugin").length}</span></div>
+      <div className="v2-pb-listhead">
+        <div className="v2-pb-listhead-copy" style={{ display: "flex", flex: "1 1 auto", flexDirection: "column", minWidth: 0, gap: 2 }}>
+          <strong className="v2-pb-listhead-label">{activeLabel}</strong>
+          <span className="v2-pb-listhead-note">
+            {selectedTrackId ? "Load onto the selected track." : "Select a track to load a plugin."}
+          </span>
+        </div>
+        <span className="v2-pb-listhead-count">{rows.filter((r) => r.kind === "plugin").length} results</span>
+      </div>
       {rows.length === 0 ? (
         <div className="v2-pb-empty">{emptyLabel}</div>
       ) : (
@@ -102,22 +114,38 @@ function PluginList({ rows, favSet, activeLabel, emptyLabel, selectedTrackId, on
             if (row.kind === "header")
               return (
                 <div key={row.key} className="v2-pb-group" style={style}>
-                  {row.label}<span className="v2-pb-group-count">{row.count}</span>
+                  <span className="v2-pb-group-label">{row.label}</span>
+                  <span className="v2-pb-group-count">{row.count}</span>
                 </div>
               );
             const e = row.entry;
             const fav = favSet.has(e.uid);
             return (
               <div key={row.key} className="v2-pb-row" style={style}>
-                <button className="v2-pb-add" data-testid="v2-pb-row" onClick={() => onLoad(e)} disabled={!selectedTrackId} title={selectedTrackId ? `Add ${e.name}` : "Select a track first"}>
+                <button
+                  className="v2-pb-add"
+                  data-testid="v2-pb-row"
+                  onClick={() => onLoad(e)}
+                  disabled={!selectedTrackId}
+                  title={selectedTrackId ? `Add ${e.name}` : "Select a track first"}
+                >
                   <span className={`v2-pb-kind ${e.isInstrument ? "inst" : "fx"}`}>{e.isInstrument ? "INST" : "FX"}</span>
-                  <span className="v2-pb-name">{e.name}</span>
-                  <span className="v2-pb-meta">{e.meta}</span>
+                  <span className="v2-pb-copy" style={{ display: "flex", flex: "1 1 auto", flexDirection: "column", minWidth: 0, gap: 2 }}>
+                    <span className="v2-pb-name">{e.name}</span>
+                    <span className="v2-pb-meta">{e.meta}</span>
+                  </span>
+                  <span className="v2-pb-action-label">{selectedTrackId ? "Load" : "Track first"}</span>
                 </button>
-                <button className={`v2-pb-star${fav ? " on" : ""}`} aria-pressed={fav}
+                <button
+                  className={`v2-pb-star${fav ? " on" : ""}`}
+                  style={{ width: fav ? 52 : 44 }}
+                  aria-pressed={fav}
                   title={fav ? "Remove from favorites" : "Add to favorites"}
                   aria-label={fav ? `Unfavorite ${e.name}` : `Favorite ${e.name}`}
-                  onClick={() => onToggleFav(e.uid)}>{fav ? "★" : "☆"}</button>
+                  onClick={() => onToggleFav(e.uid)}
+                >
+                  <span className="v2-pb-star-label">{fav ? "Saved" : "Save"}</span>
+                </button>
               </div>
             );
           })}
@@ -130,25 +158,56 @@ function PluginList({ rows, favSet, activeLabel, emptyLabel, selectedTrackId, on
 // ── The dock — collections as a chip row, then the shared list. The one v2 plugin surface. ──
 export function PluginDock() {
   const pk = usePluginPicker(); // no onLoaded → the dock stays open after adding (it's a dock)
+  const collectionSections = useMemo(
+    () =>
+      collectionGroupOrder
+        .map((group) => ({ group, items: pk.collections.filter((c) => c.group === group) }))
+        .filter((section) => section.items.length > 0),
+    [pk.collections],
+  );
+
   return (
     <div className="v2-pdock" data-testid="v2-plugin-dock">
-      <div className="v2-pb-search v2-pdock-search">
-        <span className="v2-pb-search-icon" aria-hidden>⌕</span>
-        <input data-testid="v2-pb-search" aria-label="Search plugins" placeholder="Search by name or vendor…" value={pk.q} onChange={(e) => pk.setQ(e.target.value)} />
+      <div className="v2-pdock-intro">
+        <div className="v2-pdock-copy">
+          <strong className="v2-pdock-title">Plugins</strong>
+          <span className="v2-pdock-subtitle">Search collections and load onto the selected track.</span>
+        </div>
+        <span className="v2-pdock-selected">{pk.selectedTrackId ? "Track ready" : "Select a track first"}</span>
       </div>
+      <label className="v2-pb-search v2-pdock-search">
+        <span className="v2-pb-search-label">Search</span>
+        <input
+          data-testid="v2-pb-search"
+          aria-label="Search plugins"
+          placeholder="Search by name or vendor..."
+          value={pk.q}
+          onChange={(e) => pk.setQ(e.target.value)}
+        />
+      </label>
       <div className="v2-pdock-chips" role="tablist" aria-label="Plugin collections">
-        {pk.collections.map((c) => (
-          <button key={c.id} role="tab" aria-selected={pk.collection === c.id}
-            className={`v2-pdock-chip${pk.collection === c.id ? " on" : ""}`}
-            data-testid="v2-pb-collection" data-collection={c.id} onClick={() => pk.setCollection(c.id)}>
-            {railIcon(c.id) && <span aria-hidden>{railIcon(c.id)}</span>}
-            <span className="v2-pdock-chip-label">{c.label}</span>
-            <span className="v2-pdock-chip-count">{c.count}</span>
-          </button>
+        {collectionSections.map((section) => (
+          <div key={section.group} className="v2-pdock-chip-group" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span className="v2-pdock-chip-group-label">{collectionGroupLabel[section.group]}</span>
+            {section.items.map((c) => (
+              <button
+                key={c.id}
+                role="tab"
+                aria-selected={pk.collection === c.id}
+                className={`v2-pdock-chip${pk.collection === c.id ? " on" : ""}`}
+                data-testid="v2-pb-collection"
+                data-collection={c.id}
+                onClick={() => pk.setCollection(c.id)}
+              >
+                <span className="v2-pdock-chip-label">{c.label}</span>
+                <span className="v2-pdock-chip-count">{c.count}</span>
+              </button>
+            ))}
+          </div>
         ))}
       </div>
       <PluginList rows={pk.rows} favSet={pk.favSet} activeLabel={pk.activeLabel}
-        emptyLabel={pk.q ? `Nothing matches “${pk.q}”.` : "No plugins here yet."}
+        emptyLabel={pk.q ? `Nothing matches "${pk.q}".` : "No plugins here yet."}
         selectedTrackId={pk.selectedTrackId} onLoad={pk.load} onToggleFav={pk.toggleFav}
         resetKey={`${pk.collection}:${pk.q}`} />
     </div>

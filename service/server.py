@@ -1213,7 +1213,12 @@ class Handler(BaseHTTPRequestHandler):
             self._send(404, {"ok": False, "error": f"unknown path: {path}"})
 
     def log_message(self, fmt: str, *args) -> None:
-        sys.stderr.write("[service] " + (fmt % args) + "\n")
+        if os.environ.get("MOSH_SERVICE_LOG_HTTP", "0") != "1":
+            return
+        try:
+            sys.stderr.write("[service] " + (fmt % args) + "\n")
+        except OSError:
+            pass
 
 
 def _write_quietly(path: str, text: str) -> None:

@@ -48,7 +48,7 @@ test("left browser drawer: pull-tab opens it, tabs switch, close dismisses", asy
   await page.getByTestId("v2-browser-tab-plugins").click();
   const dock = page.getByTestId("v2-plugin-dock");
   await expect(dock).toBeVisible();
-  await expect(dock.getByPlaceholder("Search by name or vendor…")).toBeVisible();
+  await expect(dock.getByTestId("v2-pb-search")).toBeVisible();
   await expect(dock.getByTestId("v2-pb-collection").first()).toBeVisible(); // collection chips
   await expect(dock.getByTestId("v2-pb-row").first()).toBeVisible();        // plugin rows
   await expect(page.getByTestId("v2-browser-drawer").getByTestId("content-browser")).toHaveCount(0);
@@ -101,6 +101,37 @@ test("the topbar overflow menu exposes its items as role=menuitem (a11y)", async
   await expect(page.getByRole("menuitem")).toHaveCount(6);
 });
 
+test("top-right primary controls stay visible and secondary tools move into overflow", async ({ page }) => {
+  for (const width of [1440, 820]) {
+    await page.setViewportSize({ width, height: 900 });
+    await bootV2(page);
+    const viewport = page.viewportSize();
+    if (!viewport) throw new Error("missing viewport");
+
+    const controls = [
+      page.locator(".v2-pill").first(),
+      page.getByTestId("v2-share"),
+      page.getByTestId("v2-overflow"),
+    ];
+    for (const control of controls) {
+      await expect(control).toBeVisible();
+      const box = await control.boundingBox();
+      if (!box) throw new Error("missing control bounds");
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(viewport.width + 1);
+    }
+  }
+
+  await expect(page.getByTestId("v2-tools")).toHaveCount(0);
+  await page.getByTestId("v2-overflow").click();
+  await expect(page.getByTestId("v2-overflow-tools")).toBeVisible();
+  await expect(page.getByTestId("v2-tool-multiplayer")).toBeVisible();
+  await expect(page.getByTestId("v2-tool-training")).toBeVisible();
+  await expect(page.getByTestId("v2-tool-command-log")).toBeVisible();
+  await expect(page.getByTestId("v2-tool-remote")).toBeVisible();
+  await expect(page.getByTestId("v2-tool-help")).toBeVisible();
+});
+
 test("transport play toggles", async ({ page }) => {
   await bootV2(page);
   const transport = page.getByTestId("v2-transport");
@@ -141,6 +172,17 @@ test("hover-only plugin-dock favorite star reveals on keyboard focus (a11y)", as
   await expect
     .poll(() => star.evaluate((el) => getComputedStyle(el).opacity))
     .toBe("1");
+});
+
+test("sample browser keeps import actions keyboard reachable", async ({ page }) => {
+  await bootV2(page);
+  await page.getByTestId("v2-browser-pull").click();
+  const row = page.getByTestId("sample-row").first();
+  await expect(row).toBeVisible();
+  const importButton = row.getByRole("button", { name: "Import" });
+  await importButton.focus();
+  await expect(importButton).toBeFocused();
+  await expect.poll(() => importButton.evaluate((el) => getComputedStyle(el).opacity)).toBe("1");
 });
 
 test("the track header is keyboard-focusable and Enter selects it (a11y)", async ({ page }) => {
@@ -319,12 +361,16 @@ test("the right rail is always present; peers add collaborator tiles", async ({ 
   await bootV2(page);
   // the rail is always on — even alone (the collaborators card shows just the invite cue)
   await expect(page.getByTestId("v2-rail")).toBeVisible();
+  await expect(page.getByTestId("v2-collab-empty")).toBeVisible();
   await expect(page.getByTestId("v2-invite")).toBeVisible();
+  await expect(page.getByTestId("v2-camera-toggle")).toHaveCount(0);
   await expect(page.getByTestId("v2-collab-peer")).toHaveCount(0);
   // the agent never rides the prompt bar anymore (it's maximized in the rail)
   await expect(page.getByTestId("v2-composer-agent")).toHaveCount(0);
   // a collaborator joins → their tile appears in the same rail
   await enterPeersMode(page);
+  await expect(page.getByTestId("v2-collab-empty")).toHaveCount(0);
+  await expect(page.getByTestId("v2-camera-toggle")).toBeVisible();
   await expect(page.getByTestId("v2-collab-peer")).toBeVisible();
 });
 
