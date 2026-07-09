@@ -112,8 +112,8 @@ function CollaboratorsCard() {
           <div className="v2-collab-empty" data-testid="v2-collab-empty">
             <div className="v2-collab-empty-icon" aria-hidden><IconUsers size={18} /></div>
             <div className="v2-collab-empty-copy">
-              <strong>Start a shared session when you need it.</strong>
-              <span>Camera stays off until you explicitly join or share collaboration.</span>
+              <strong>Share when you need a second seat.</strong>
+              <span>Camera stays off until you explicitly join collaboration.</span>
             </div>
             <button className="v2-invite" data-testid="v2-invite" onClick={() => { if (!mp.active) void mpCreate(); }}>
               <IconUsers size={15} />

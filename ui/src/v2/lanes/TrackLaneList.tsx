@@ -14,8 +14,9 @@ import { BarRuler } from "../timeline/BarRuler";
 import { Playhead } from "../timeline/Playhead";
 import { ClipView } from "./ClipView";
 import { meterOf, contentSeconds, headW } from "../timeline/geom";
+import { IconDrum, IconLayers, IconPlus, IconWaveform } from "../../ui/icons";
 
-const TYPE_ICON: Record<string, string> = { drum: "▦", audio: "≈", group: "▤" };
+const TYPE_LABEL: Record<string, string> = { drum: "Drum", audio: "Audio", group: "Group" };
 
 export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; dragging?: boolean }) {
   const pxPerSec = useStore((s) => s.pxPerSec);
@@ -144,8 +145,8 @@ export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; drag
               title="Add a track (or drop an audio file below)"
               onClick={() => void exec("create_track", { name: "Audio" })}
             >
-              <span className="v2-licon">＋</span>
-              <span className="v2-lname">New track</span>
+              <span className="v2-licon" aria-hidden="true"><IconPlus size={16} /></span>
+              <span className="v2-lname">Add track</span>
             </button>
             <div className="v2-lane v2-lane-add" style={{ width: contentW }} aria-hidden />
             <Playhead />
@@ -178,6 +179,7 @@ function TrackLaneHeader({ track }: { track: Track }) {
   const setSelectedTrack = useStore((s) => s.setSelectedTrack);
   const instrument = track.plugins?.find((p) => p.isInstrument)?.name;
   const preset = instrument ?? (track.type === "drum" ? "Drums" : "Audio");
+  const typeLabel = TYPE_LABEL[track.type] ?? "Track";
   const sel = selectedTrackId === track.id;
 
   return (
@@ -194,23 +196,34 @@ function TrackLaneHeader({ track }: { track: Track }) {
       data-testid="v2-track-header"
       data-track-id={track.id}
     >
-      <span className="v2-licon">{TYPE_ICON[track.type] ?? "≈"}</span>
+      <span className="v2-licon" aria-hidden="true"><TrackTypeIcon type={track.type} /></span>
       <span className="v2-lmeta">
-        <span className="v2-lname">{track.name}</span>
+        <span className="v2-lrow">
+          <span className="v2-lname">{track.name}</span>
+          <span className="v2-ltype">{typeLabel}</span>
+        </span>
         <span className="v2-lpreset">{preset}</span>
       </span>
       <span className="v2-ms">
         <button
           className={`m${track.mute ? " on" : ""}`}
+          aria-label="Mute"
           aria-pressed={!!track.mute} title="Mute"
           onClick={(e) => { e.stopPropagation(); void exec("set_track_mute", { trackId: track.id, mute: !track.mute }); }}
         >M</button>
         <button
           className={`s${track.solo ? " on" : ""}`}
+          aria-label="Solo"
           aria-pressed={!!track.solo} title="Solo"
           onClick={(e) => { e.stopPropagation(); void exec("set_track_solo", { trackId: track.id, solo: !track.solo }); }}
         >S</button>
       </span>
     </div>
   );
+}
+
+function TrackTypeIcon({ type }: { type: string }) {
+  if (type === "drum") return <IconDrum size={16} />;
+  if (type === "audio") return <IconWaveform size={16} />;
+  return <IconLayers size={16} />;
 }

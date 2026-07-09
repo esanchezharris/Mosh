@@ -89,6 +89,27 @@ export function IconFolder(p: IconProps) {
   );
 }
 
+export function IconDrum(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <rect x="4.5" y="5" width="6" height="6" rx="1.4" />
+      <rect x="13.5" y="5" width="6" height="6" rx="1.4" />
+      <rect x="4.5" y="13" width="6" height="6" rx="1.4" />
+      <rect x="13.5" y="13" width="6" height="6" rx="1.4" />
+    </Svg>
+  );
+}
+
+export function IconLayers(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M12 4.5l8 4.2-8 4.2-8-4.2z" />
+      <path d="M5.5 12.2L12 15.8l6.5-3.6" opacity="0.78" />
+      <path d="M5.5 15.6L12 19.2l6.5-3.6" opacity="0.55" />
+    </Svg>
+  );
+}
+
 export function IconSettings(p: IconProps) {
   return (
     <Svg {...p}>

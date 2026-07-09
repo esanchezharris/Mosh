@@ -145,7 +145,7 @@ function FileMenu({ snapshot }: { snapshot: Snapshot }) {
   const run = (id: ActionId, opts?: { file?: string; index?: number }) =>
     void runAction(id, { store: useStore.getState(), pickFiles, pickSaveFile }, opts);
   return (
-    <Pop label="File" title="File menu" className="menu-pop">
+    <Pop label="File" title="File menu" ariaLabel="File" className="menu-pop">
       {(close) => (
         <div className="menu-list" role="menu" data-testid="file-menu">
           {FILE_MENU.map((m) => (
