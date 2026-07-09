@@ -398,7 +398,7 @@ case "$MODE" in
 
   deploy)
     build_app macos-arm64-release macos-arm64-release-app
-    APP="$(resolve_app)"
+    APP="$(find "$ROOT/build-macos-arm64-release" -maxdepth 4 -name 'Mosh.app' -type d 2>/dev/null | sort | tail -n 1)"
     [ -n "$APP" ] || { echo "no built app to deploy" >&2; exit 1; }
     DEST="/Applications/Mosh.app"
     install_app "$APP" "$DEST"
