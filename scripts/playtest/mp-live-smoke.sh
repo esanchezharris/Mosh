@@ -116,7 +116,9 @@ fi
 
 # ── verdict ─────────────────────────────────────────────────────────────────────
 STEM_OK=0
-[ -n "$A_HASH" ] && find "$BDIR" -name "$A_HASH.*" -type f >/dev/null 2>&1 && STEM_OK=1
+if [ -n "$A_HASH" ] && [ -n "$(find "$BDIR" -name "$A_HASH.*" -type f -print -quit 2>/dev/null)" ]; then
+  STEM_OK=1
+fi
 echo
 echo "RESULT:"
 if [ "$STEM_OK" = 1 ] && [ "$DRUMS" = 1 ] && [ "$TONE" = 1 ]; then
@@ -124,7 +126,7 @@ if [ "$STEM_OK" = 1 ] && [ "$DRUMS" = 1 ] && [ "$TONE" = 1 ]; then
   exit 0
 elif [ "$STEM_OK" = 1 ]; then
   echo "  PARTIAL — B downloaded A's audio stem (blob round-trip OK), but the saved edit did not show both track names (DRUMS=$DRUMS TONE=$TONE)."
-  exit 0
+  exit 1
 else
   echo "  FAIL — B did not receive A's audio stem; sync did not deliver across processes."
   exit 1
