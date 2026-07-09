@@ -293,3 +293,4 @@ Registered 2026-07-07 **before any Cycle-3 training**. P7's one-retry allowance 
 | Cycle-3 step | status | notes |
 |---|---|---|
 | v4 mix + corrective batches | ✅ 2026-07-07 | offset #238 (155) + render-routing (60) engine-validated; v4 = 12,889, sha `2dbcb6fd…` |
+| r5 prep candidate | documented 2026-07-09 | Non-MLX prep remains documented only on PR #262 while r4 runs: `s2-mix-v5-prep` = v4 train/valid copy + 15 assist rows in train only + evaluator sidecar metadata; restart decision remains `continue-r4`; tooling/data are not landed in this docs-only carve. See [R5 training decision note](R5_TRAINING_DECISION_2026-07-09.md). |
