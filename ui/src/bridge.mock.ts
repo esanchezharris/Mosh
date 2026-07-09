@@ -159,6 +159,9 @@ const MOCK_WAVE_INPUTS = [
   { deviceID: "in-5", name: "Input 5", enabled: false, isStereoPair: false },
 ];
 const clone = (s: Snapshot): Snapshot => JSON.parse(JSON.stringify(s)) as Snapshot;
+function scheduleMock(callback: () => void, delayMs: number) {
+  globalThis.setTimeout(callback, delayMs);
+}
 const history: Snapshot[] = [];
 const future: Snapshot[] = [];
 // Agent batch grouping (mirrors the backend batch_begin/batch_end): while a batch
@@ -1251,7 +1254,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       const mode = str(args.mode, "mono");
       const src = f.clip;
       emit("transcribe_status", { clipId: src.id, state: "working", mode });
-      window.setTimeout(() => {
+      scheduleMock(() => {
         pushUndo();
         const pitches = mode === "poly" ? [60, 64, 67] : [62, 64, 65, 67];
         const t: Track = {
@@ -1280,7 +1283,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       const clipId = f.clip.id;
       const trk = f.track;
       emit("build_lyrics_status", { clipId, state: "working" });
-      window.setTimeout(() => {
+      scheduleMock(() => {
         pushUndo();
         const mk = (index: number, seedText: string, rg: string, target: number, stress: string): LyricLine => ({
           index, role: "verse", seedText, text: "", syllableTarget: target, syllableTol: 1,
@@ -1309,7 +1312,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       const clipId = f.clip.id;
       const trk = f.track;
       emit("skeleton_status", { clipId, state: "working" });
-      window.setTimeout(() => {
+      scheduleMock(() => {
         pushUndo();
         const mk = (index: number, target: number, rg: string, stress: string): LyricLine => ({
           index, role: "verse", seedText: Array.from({ length: target }).fill("___").join(" "),
@@ -1349,7 +1352,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       const bpm = num(args.bpm, 120);
       const bars = num(args.bars, 1) >= 2 ? 2 : 1;
       emit("sketch_status", { file, state: "working", bpm, bars });
-      window.setTimeout(() => {
+      scheduleMock(() => {
         pushUndo();
         snapshot.session.tempo = Math.max(20, bpm);
         // role → GM pitch (mirrors kDefaultKit: kick 36, snare 38, closed hat 42).
