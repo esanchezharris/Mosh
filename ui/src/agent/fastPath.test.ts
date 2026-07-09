@@ -73,6 +73,39 @@ describe("matchFastPath — state-aware track ops (mute/solo by name)", () => {
     expect(cmds(a).map((c) => [c.command, c.args!.trackId])).toEqual([["set_track_solo", "1"], ["set_track_solo", "2"]]);
   });
 
+  it("falls through when fuzzy track matching ties across multiple candidates", () => {
+    const ambiguousCtx = () => ({
+      mode: "idle" as const,
+      tempo: 120,
+      timeSigNum: 4,
+      tracks: [
+        { id: "1", name: "Vocal Lead" },
+        { id: "2", name: "Vocal Bus" },
+        { id: "3", name: "Drums" },
+      ],
+    });
+    expect(matchFastPath("solo the vocal", ambiguousCtx())).toBeNull();
+  });
+
+  it("clears stale solos on non-target tracks before soloing the targets", () => {
+    const soloCtx = () => ({
+      mode: "idle" as const,
+      tempo: 120,
+      timeSigNum: 4,
+      tracks: [
+        { id: "1", name: "Drums", solo: false },
+        { id: "2", name: "Bass", solo: false },
+        { id: "3", name: "Melody", solo: true },
+      ],
+    });
+    const a = matchFastPath("solo the drums and bass", soloCtx());
+    expect(cmds(a).map((c) => [c.command, c.args!.trackId, c.args!.solo])).toEqual([
+      ["set_track_solo", "3", false],
+      ["set_track_solo", "1", true],
+      ["set_track_solo", "2", true],
+    ]);
+  });
+
   it("'mute the vocals' mutes the fuzzy-matched track", () => {
     expect(muted(matchFastPath("mute the vocals", tctx()))).toEqual(["4"]);
   });

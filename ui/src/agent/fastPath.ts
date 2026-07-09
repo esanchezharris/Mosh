@@ -78,12 +78,19 @@ function matchTrackByName(name: string, tracks: TrackLite[]): TrackLite | null {
   const n = name.trim();
   if (!n) return null;
   let best: { t: TrackLite; s: number } | null = null;
+  let tied = false;
   for (const t of tracks) {
     const tn = t.name.toLowerCase();
     const s = tn === n ? 1 : tn.includes(n) || n.includes(tn) ? 0.9 : tokenSetScore(n, tn);
-    if (s >= 0.8 && (!best || s > best.s)) best = { t, s };
+    if (s < 0.8) continue;
+    if (!best || s > best.s) {
+      best = { t, s };
+      tied = false;
+      continue;
+    }
+    if (s === best.s) tied = true;
   }
-  return best ? best.t : null;
+  return best && !tied ? best.t : null;
 }
 
 function resolveAll(names: string[], tracks: TrackLite[]): TrackLite[] | null {
@@ -121,9 +128,16 @@ function matchTrackOp(norm: string, ctx: FastCtx): FastAction | null {
   if (m) {
     const targets = resolveAll(parseTrackNames(m[1]), tracks);
     if (!targets) return null;
+    const targetIds = new Set(targets.map((t) => t.id));
+    const clearOthers = tracks
+      .filter((t) => t.solo && !targetIds.has(t.id))
+      .map((t) => ({ command: "set_track_solo", args: { trackId: t.id, solo: false } }));
     return {
       kind: "commands",
-      commands: targets.map((t) => ({ command: "set_track_solo", args: { trackId: t.id, solo: true } })),
+      commands: [
+        ...clearOthers,
+        ...targets.map((t) => ({ command: "set_track_solo", args: { trackId: t.id, solo: true } })),
+      ],
       intent: "ACK_GOT_IT",
       say: "soloed",
     };
