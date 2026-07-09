@@ -1,0 +1,272 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-07-09T11:10:20Z",
+  "mode": "live",
+  "cwd": "/Users/emiliosanchez-harris/Documents/ClaudeMosh",
+  "trunk": {
+    "remote": "origin",
+    "branch": "main",
+    "localStatus": "main...origin/main [ahead 3, behind 2]"
+  },
+  "stopSentinel": {
+    "path": "docs/auto-loop/STOP",
+    "present": true,
+    "effect": "Old auto-loop rearm and unsupervised duplicate work remain stopped; no new worktree or Codex thread was created."
+  },
+  "dirtyWorktree": {
+    "hasUnrelatedWork": true,
+    "summary": [
+      "Root checkout remains dirty with unrelated docs/auto-loop, docs/resumption, service/sft, UI companion, scripts/demo-loop, and docs/demo-loop work.",
+      "Root main was fetched but not pulled because it is dirty and locally ahead 3, behind 2.",
+      "The PR #260 worktree at /Users/emiliosanchez-harris/Documents/ClaudeMosh-al011-lock-classifier is clean on codex/al-011-lock-classifier-drift."
+    ]
+  },
+  "truthSources": [
+    "git fetch --prune origin",
+    "git status --short --branch in root and PR #260 worktree",
+    "git rev-parse HEAD and origin/main",
+    "git log --oneline --decorate -5 origin/main",
+    "gh pr list --state open --limit 40 --json number,title,url,headRefName,headRefOid,baseRefName,createdAt,updatedAt,isDraft,mergeable",
+    "gh pr view 260 --json headRefOid,isDraft,mergeable,reviewDecision,statusCheckRollup",
+    "Codex list_threads query for ClaudeMosh",
+    "docs/auto-loop/backlog.jsonl",
+    "docs/auto-loop/STOP",
+    "PR #260 local gate logs from the AL-011 worktree",
+    "Direct DNS probes for tpvkqaqydafpgockzchm.supabase.co using system resolver and 1.1.1.1"
+  ],
+  "threads": [
+    {
+      "threadId": "019f4595-32ae-7e91-a8d6-67b7c09c7df1",
+      "hostId": "local",
+      "title": "Automate multiplayer demo loop",
+      "status": "active",
+      "role": "coordinator",
+      "nextAction": "Continue as the canonical multiplayer demo coordinator; no duplicate coordinator was created."
+    },
+    {
+      "threadId": "019f44a0-4a44-7481-974d-1678aa11fe65",
+      "hostId": "local",
+      "title": "Review open PRs and branches",
+      "status": "active",
+      "role": "canonical-input",
+      "nextAction": "Keep as PR and branch inventory input; do not archive during this pass."
+    },
+    {
+      "threadId": "019f4684-c8e7-7450-b008-e78aa477f3d1",
+      "hostId": "local",
+      "title": "Review and merge PRs",
+      "status": "active",
+      "role": "canonical-input",
+      "nextAction": "Use only as review context; the coordinator did not merge any PR in this pass."
+    },
+    {
+      "threadId": "019f467a-e118-7f10-8a28-de308c6ed830",
+      "hostId": "local",
+      "title": "Optimize codebase with subagents",
+      "status": "systemError",
+      "role": "duplicate-candidate",
+      "nextAction": "Do not continue for the multiplayer demo loop; broad cleanup is outside the bounded multiplayer-core queue."
+    },
+    {
+      "threadId": "019f4487-d04b-7e02-ac62-d544fcfc5eeb",
+      "hostId": "local",
+      "title": "Monitor training job",
+      "status": "idle",
+      "role": "non-core",
+      "nextAction": "Leave separate from multiplayer demo coordination."
+    },
+    {
+      "threadId": "019f463c-0a6e-7810-b511-7ee4b333458a",
+      "hostId": "local",
+      "title": "Verify controller in iOS simulator",
+      "status": "active",
+      "role": "non-core",
+      "nextAction": "Leave separate from multiplayer demo coordination unless it becomes installed-app demo blocking."
+    },
+    {
+      "threadId": "019f4679-3346-7860-8bca-1db31585c38c",
+      "hostId": "local",
+      "title": "FMS/resing workflow",
+      "status": "active",
+      "role": "non-core",
+      "nextAction": "Leave separate from multiplayer demo coordination."
+    }
+  ],
+  "prs": [
+    {
+      "number": 260,
+      "title": "Cover multiplayer lock-classifier drift",
+      "url": "https://github.com/zeke431/ClaudeMosh/pull/260",
+      "head": "codex/al-011-lock-classifier-drift @ 90e397feca985359c5f79e27619b942dbf7dc4a8",
+      "base": "main",
+      "createdAt": "2026-07-09T07:51:16Z",
+      "isDraft": true,
+      "mergeable": "MERGEABLE",
+      "classification": "human-gated",
+      "riskTier": "human-gated",
+      "demoRelevance": "Multiplayer-core AL-011 lock correctness coverage plus native dependency patches needed to clear gate assertions.",
+      "nextAction": "Keep draft. VST3 and UndoManager assertion signatures are fixed locally, but full native gate is not clean because selftest run 3 stalls in render-service health and ctest still fails the trainer import smoke; true cloud installed-app proof is blocked by relay DNS."
+    },
+    {
+      "number": 258,
+      "title": "Restore r7 audition profile on current main",
+      "url": "https://github.com/zeke431/ClaudeMosh/pull/258",
+      "head": "codex/r7-audition-recut @ c74c60f41405ee03e6497597e824e8155db4ceb1",
+      "base": "main",
+      "createdAt": "2026-07-09T06:32:14Z",
+      "isDraft": true,
+      "mergeable": "MERGEABLE",
+      "classification": "parked",
+      "riskTier": "parked",
+      "demoRelevance": "Non-core r7 audition lane.",
+      "nextAction": "Do not let this block the multiplayer demo queue."
+    },
+    {
+      "number": 257,
+      "title": "Polish AppV2 shell wave 1 and wave 2",
+      "url": "https://github.com/zeke431/ClaudeMosh/pull/257",
+      "head": "codex/v2-wave1-ui-polish @ 48701b2dd877a9be8b85747d3985680acfab5b5b",
+      "base": "main",
+      "createdAt": "2026-07-09T06:25:40Z",
+      "isDraft": false,
+      "mergeable": "MERGEABLE",
+      "classification": "parked",
+      "riskTier": "parked",
+      "demoRelevance": "UI polish, not a blocker for multiplayer-core queue.",
+      "nextAction": "Review separately through UI gates; no multiplayer coordinator action."
+    },
+    {
+      "number": 256,
+      "title": "Prepare r5 data bridge while r4 runs",
+      "url": "https://github.com/zeke431/ClaudeMosh/pull/256",
+      "head": "codex/r5-prep-bridge @ ead31942a0750ab0ea41897c987100cfe9b579f4",
+      "base": "main",
+      "createdAt": "2026-07-09T06:20:19Z",
+      "isDraft": false,
+      "mergeable": "MERGEABLE",
+      "classification": "parked",
+      "riskTier": "parked",
+      "demoRelevance": "Training lane, non-core for multiplayer demo.",
+      "nextAction": "Do not let this block the multiplayer demo queue."
+    },
+    {
+      "number": 255,
+      "title": "Design-system Phase 2 re-cut - token cleanup + visual gate",
+      "url": "https://github.com/zeke431/ClaudeMosh/pull/255",
+      "head": "codex/pr224-recut-visual-gate @ eb4949d7d93f465ac0a64384a30c32ba9877ee8f",
+      "base": "main",
+      "createdAt": "2026-07-09T06:16:15Z",
+      "isDraft": true,
+      "mergeable": "MERGEABLE",
+      "classification": "parked",
+      "riskTier": "parked",
+      "demoRelevance": "Design-system lane, non-core for multiplayer demo.",
+      "nextAction": "Park unless a demo-facing UI blocker is identified."
+    },
+    {
+      "number": 233,
+      "title": "feat(fms): pipeline correction - extract real lyrics from mumbles, correct only nonsense, overlap-verify every render",
+      "url": "https://github.com/zeke431/ClaudeMosh/pull/233",
+      "head": "claude/fms-extraction @ de75a56d0fec3e382955bac7060961d92e72f977",
+      "base": "main",
+      "createdAt": "2026-07-05T02:27:29Z",
+      "isDraft": false,
+      "mergeable": "MERGEABLE",
+      "classification": "parked",
+      "riskTier": "parked",
+      "demoRelevance": "FMS lane, non-core for multiplayer demo.",
+      "nextAction": "Leave parked for the multiplayer coordinator unless it becomes a demo dependency."
+    },
+    {
+      "number": 197,
+      "title": "Promote r7 research recipe corpus",
+      "url": "https://github.com/zeke431/ClaudeMosh/pull/197",
+      "head": "codex/r7-research-promotion-clean @ 2f00a3a8562a82219b2d0133979392e7e600d017",
+      "base": "main",
+      "createdAt": "2026-07-01T21:35:51Z",
+      "isDraft": false,
+      "mergeable": "CONFLICTING",
+      "classification": "parked",
+      "riskTier": "parked",
+      "demoRelevance": "Non-core and conflicting.",
+      "nextAction": "Do not touch in the multiplayer demo loop."
+    },
+    {
+      "number": 176,
+      "title": "feat(rl): on-device GRPO - Rung-1 harness + Rung-2 audio-reward host",
+      "url": "https://github.com/zeke431/ClaudeMosh/pull/176",
+      "head": "claude/funny-mendel-aeca12 @ 6c0c0f2b16cdc56d73545fd23a88be9e3eb555fc",
+      "base": "main",
+      "createdAt": "2026-06-28T02:37:12Z",
+      "isDraft": false,
+      "mergeable": "CONFLICTING",
+      "classification": "parked",
+      "riskTier": "parked",
+      "demoRelevance": "RL lane, non-core and conflicting.",
+      "nextAction": "Do not touch in the multiplayer demo loop."
+    }
+  ],
+  "backlog": [
+    {
+      "id": "AL-020",
+      "title": "Fail mp-live-smoke on PARTIAL",
+      "status": "merged",
+      "riskTier": "auto-eligible",
+      "queueRank": 1,
+      "requiredGate": "Focused shell regression for PASS/FAIL/PARTIAL plus live smoke against a blob-capable relay.",
+      "nextAction": "Use merged script from origin/main for future relay and installed-app proof runs."
+    },
+    {
+      "id": "AL-011",
+      "title": "Cover multiplayer lock-classifier drift",
+      "status": "draft-pr-open-human-gated",
+      "riskTier": "human-gated",
+      "queueRank": 2,
+      "requiredGate": "Native build, repeated selftest, focused multiplayer proof, relay/live smoke, installed-app proof, and human approval.",
+      "nextAction": "Keep PR #260 draft until the remaining render-service/training gate failures are resolved or explicitly owner-cleared and cloud relay proof is restored or explicitly waived."
+    },
+    {
+      "id": "AL-010",
+      "title": "Route live multiplayer commits through the MoshOps seam",
+      "status": "blocked-by-pr-260-human-gate",
+      "riskTier": "human-gated",
+      "queueRank": 3,
+      "requiredGate": "Native build, selftest x3, focused multiplayer proof, relay/live smoke, installed-app demo proof, and human approval.",
+      "nextAction": "Do not start until PR #260 is merged or explicitly cleared by the owner despite remaining human-gate findings."
+    }
+  ],
+  "decisions": [
+    {
+      "decision": "PR_260_UNDOMANAGER_ASSERTIONS_FIXED",
+      "reason": "Fader, pan, and group-volume undo replay now bypass nested Tracktion/JUCE UndoManager writes through a durable Tracktion dependency patch and MoshOps replay path."
+    },
+    {
+      "decision": "PR_260_STAYS_DRAFT_HUMAN_GATED",
+      "reason": "The diff touches native/runtime dependency behavior and the remaining full gate is not clean: full selftest run 3 stalls in local render-service health and ctest still fails the trainer import smoke."
+    },
+    {
+      "decision": "CLOUD_RELAY_PROOF_BLOCKED_BY_DNS",
+      "reason": "The baked Supabase relay hostname tpvkqaqydafpgockzchm.supabase.co returns resolver error locally and NXDOMAIN from 1.1.1.1, so /Applications/Mosh.app true cloud mp-live-smoke was not run."
+    },
+    {
+      "decision": "AL_010_IDLE",
+      "reason": "Starting AL-010 would add native multiplayer runtime work while PR #260 is still draft/human-gated and cloud installed-app proof is unavailable."
+    }
+  ],
+  "actionsTaken": [
+    "Investigated remaining UndoManager.cpp:128 assertions in PR #260 and isolated them to fader, pan, and group-volume undo replay through Tracktion public setters.",
+    "Patched PR #260 with patches/0003-tracktion-parameter-set-without-nested-undo.patch and routed MoshOps fader undo replay through setParameterWithoutUndo.",
+    "Validated PR #260 local fixtures after the fix: track volume, fader/pan, and group-volume logs all returned rc=0 with zero assertion lines.",
+    "Validated PR #260 focused gates after the fix: build passed, selftest-undo passed 18/18 with zero assertions, focused multiplayer tests passed 93 assertions in 20 test cases.",
+    "Ran full native gate evidence for PR #260: selftest runs 1 and 2 passed 1186/1186 with zero assertions; run 3 and bounded replacement stalled in local render-service health; ctest still fails the trainer import smoke.",
+    "Rebased PR #260 onto origin/main, amended final commit 90e397feca985359c5f79e27619b942dbf7dc4a8, and force-pushed with lease.",
+    "Posted PR #260 evidence and decision comment https://github.com/zeke431/ClaudeMosh/pull/260#issuecomment-4924425727.",
+    "Probed Supabase relay DNS using system resolver and 1.1.1.1; hostname remains unresolved, so true cloud installed-app smoke was blocked.",
+    "Classified open PRs and Codex threads for the multiplayer demo queue.",
+    "Did not move PR #260 out of draft.",
+    "Did not merge any PR.",
+    "Did not start AL-010.",
+    "Did not archive, create, or continue Codex threads.",
+    "Did not rearm the old auto-loop workflow."
+  ]
+}
