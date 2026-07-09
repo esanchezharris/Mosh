@@ -28,6 +28,7 @@ TEST_CASE ("classify: single-track mutations are track-scoped", "[multiplayer][l
     REQUIRE (LockManager::classify ("set_plugin_param") == Scope::Track);
     REQUIRE (LockManager::classify ("reorder_plugin")   == Scope::Track);
     REQUIRE (LockManager::classify ("add_midi_clip")    == Scope::Track);
+    REQUIRE (LockManager::classify ("paste_clip")       == Scope::Track);
 }
 
 TEST_CASE ("classify: clip mutations are clip-scoped", "[multiplayer][lock]")
@@ -37,6 +38,23 @@ TEST_CASE ("classify: clip mutations are clip-scoped", "[multiplayer][lock]")
     REQUIRE (LockManager::classify ("split_clip")     == Scope::Clip);
     REQUIRE (LockManager::classify ("add_note")       == Scope::Clip);
     REQUIRE (LockManager::classify ("set_clip_gain")  == Scope::Clip);
+}
+
+TEST_CASE ("classify: render-layer mutations are clip-scoped", "[multiplayer][lock]")
+{
+    REQUIRE (LockManager::classify ("add_render_layer")      == Scope::Clip);
+    REQUIRE (LockManager::classify ("create_render_layer")   == Scope::Clip);
+    REQUIRE (LockManager::classify ("set_render_param")      == Scope::Clip);
+    REQUIRE (LockManager::classify ("compile_render")        == Scope::Clip);
+    REQUIRE (LockManager::classify ("render_layer")          == Scope::Clip);
+    REQUIRE (LockManager::classify ("cancel_render")         == Scope::Clip);
+    REQUIRE (LockManager::classify ("accept_render")         == Scope::Clip);
+    REQUIRE (LockManager::classify ("reject_render")         == Scope::Clip);
+    REQUIRE (LockManager::classify ("reset_render_layer")    == Scope::Clip);
+    REQUIRE (LockManager::classify ("bypass_layer")          == Scope::Clip);
+    REQUIRE (LockManager::classify ("freeze_layer")          == Scope::Clip);
+    REQUIRE (LockManager::classify ("bounce_layer_to_clip")  == Scope::Clip);
+    REQUIRE (LockManager::classify ("remove_render_layer")   == Scope::Clip);
 }
 
 TEST_CASE ("classify: structural ops + unknown commands fail closed to session-global", "[multiplayer][lock]")
