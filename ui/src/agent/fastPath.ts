@@ -11,7 +11,8 @@ export type FastAction =
   | { kind: "stopRecord"; intent: string; say?: string }
   | { kind: "keepTake"; intent: string; say?: string }
   | { kind: "navTake"; delta: 1 | -1; intent: string; say?: string };
-export type FastCtx = { mode: Mode; tempo: number; timeSigNum: number };
+export type TrackLite = { id: string; name: string; mute?: boolean; solo?: boolean };
+export type FastCtx = { mode: Mode; tempo: number; timeSigNum: number; tracks?: TrackLite[] };
 
 const THRESHOLD = 0.78;
 const FILLER = /\b(uh+|um+|like|okay|ok|please|alright|just|so|hey|moshi)\b/g;
@@ -65,9 +66,90 @@ const RULES: Rule[] = [
   { aliases: ["save", "save it", "save the project"], modes: ["idle", "reviewing"], build: () => cmd("save", {}, "DONE", "saved") },
 ];
 
+function parseTrackNames(s: string): string[] {
+  return s
+    .replace(/\b(tracks?|channels?)\b/g, " ")
+    .split(/\s+and\s+|\s*,\s*|\s*&\s*|\s+plus\s+/)
+    .map((x) => x.replace(/^the\s+/, "").trim())
+    .filter(Boolean);
+}
+
+function matchTrackByName(name: string, tracks: TrackLite[]): TrackLite | null {
+  const n = name.trim();
+  if (!n) return null;
+  let best: { t: TrackLite; s: number } | null = null;
+  for (const t of tracks) {
+    const tn = t.name.toLowerCase();
+    const s = tn === n ? 1 : tn.includes(n) || n.includes(tn) ? 0.9 : tokenSetScore(n, tn);
+    if (s >= 0.8 && (!best || s > best.s)) best = { t, s };
+  }
+  return best ? best.t : null;
+}
+
+function resolveAll(names: string[], tracks: TrackLite[]): TrackLite[] | null {
+  const out = names.map((n) => matchTrackByName(n, tracks));
+  return out.some((t) => !t) || out.length === 0 ? null : (out as TrackLite[]);
+}
+
+function matchTrackOp(norm: string, ctx: FastCtx): FastAction | null {
+  const tracks = ctx.tracks;
+  if (!tracks || tracks.length === 0 || ctx.mode === "recording") return null;
+
+  let m = norm.match(/^(?:mute|kill|drop|cut)\s+(?:everything|all|it all|the rest|everything else)\s+(?:but|except|apart from|other than|besides)\s+(.+)$/);
+  if (m) {
+    const keep = resolveAll(parseTrackNames(m[1]), tracks);
+    if (!keep) return null;
+    const keepIds = new Set(keep.map((t) => t.id));
+    const commands = tracks
+      .filter((t) => !keepIds.has(t.id))
+      .map((t) => ({ command: "set_track_mute", args: { trackId: t.id, mute: true } }));
+    return commands.length ? { kind: "commands", commands, intent: "ACK_GOT_IT", say: "muted" } : null;
+  }
+
+  m = norm.match(/^(mute|unmute)\s+(?:everything|all|it all|all tracks)$/);
+  if (m) {
+    const mute = m[1] === "mute";
+    return {
+      kind: "commands",
+      commands: tracks.map((t) => ({ command: "set_track_mute", args: { trackId: t.id, mute } })),
+      intent: "ACK_GOT_IT",
+      say: mute ? "muted" : "unmuted",
+    };
+  }
+
+  m = norm.match(/^(?:solo|isolate)\s+(.+)$/);
+  if (m) {
+    const targets = resolveAll(parseTrackNames(m[1]), tracks);
+    if (!targets) return null;
+    return {
+      kind: "commands",
+      commands: targets.map((t) => ({ command: "set_track_solo", args: { trackId: t.id, solo: true } })),
+      intent: "ACK_GOT_IT",
+      say: "soloed",
+    };
+  }
+
+  m = norm.match(/^(mute|unmute)\s+(.+)$/);
+  if (m) {
+    const targets = resolveAll(parseTrackNames(m[2]), tracks);
+    if (!targets) return null;
+    const mute = m[1] === "mute";
+    return {
+      kind: "commands",
+      commands: targets.map((t) => ({ command: "set_track_mute", args: { trackId: t.id, mute } })),
+      intent: "ACK_GOT_IT",
+      say: mute ? "muted" : "unmuted",
+    };
+  }
+
+  return null;
+}
+
 export function matchFastPath(text: string, ctx: FastCtx): FastAction | null {
   const norm = normalize(text);
   if (!norm) return null;
+  const trackOp = matchTrackOp(norm, ctx);
+  if (trackOp) return trackOp;
   const uTokens = norm.split(" ");
   let best: { score: number; len: number; rule: Rule } | null = null;
   for (const rule of RULES) {

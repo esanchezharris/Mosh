@@ -48,3 +48,42 @@ describe("matchFastPath — parametrized + safety", () => {
     expect(matchFastPath("make the bass warmer", ctx())).toBeNull();
   });
 });
+
+describe("matchFastPath — state-aware track ops (mute/solo by name)", () => {
+  const T = [
+    { id: "1", name: "Drums" },
+    { id: "2", name: "Bass" },
+    { id: "3", name: "Melody" },
+    { id: "4", name: "Vocal" },
+  ];
+  const tctx = (mode: "idle" | "recording" | "reviewing" = "idle") => ({ mode, tempo: 120, timeSigNum: 4, tracks: T });
+  const muted = (a: ReturnType<typeof matchFastPath>) =>
+    cmds(a).filter((c) => c.command === "set_track_mute" && c.args!.mute === true).map((c) => c.args!.trackId).sort();
+
+  it("'mute everything but the drums and bass' mutes only the complement", () => {
+    expect(muted(matchFastPath("mute everything but the drums and bass", tctx()))).toEqual(["3", "4"]);
+  });
+
+  it("handles 'except' and a single keep-track", () => {
+    expect(muted(matchFastPath("mute everything except the drums", tctx()))).toEqual(["2", "3", "4"]);
+  });
+
+  it("'solo the drums and bass' solos exactly those tracks", () => {
+    const a = matchFastPath("solo the drums and bass", tctx());
+    expect(cmds(a).map((c) => [c.command, c.args!.trackId])).toEqual([["set_track_solo", "1"], ["set_track_solo", "2"]]);
+  });
+
+  it("'mute the vocals' mutes the fuzzy-matched track", () => {
+    expect(muted(matchFastPath("mute the vocals", tctx()))).toEqual(["4"]);
+  });
+
+  it("falls through when a named track does not exist", () => {
+    expect(matchFastPath("mute everything but the piano", tctx())).toBeNull();
+    expect(matchFastPath("solo the strings", tctx())).toBeNull();
+  });
+
+  it("does not fire without a track list or while recording", () => {
+    expect(matchFastPath("mute everything but the drums and bass", ctx())).toBeNull();
+    expect(matchFastPath("solo the drums", tctx("recording"))).toBeNull();
+  });
+});

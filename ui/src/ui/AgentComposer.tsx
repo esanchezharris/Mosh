@@ -37,6 +37,7 @@ function useHandsFree(onUnknown: (text: string) => void): { pauseForPushToTalk: 
           mode: s.currentMode(),
           tempo: s.snapshot?.session?.tempo ?? 120,
           timeSigNum: s.snapshot?.session?.timeSigNumerator ?? 4,
+          tracks: (s.snapshot?.tracks ?? []).map((t) => ({ id: t.id, name: t.name, mute: t.mute, solo: t.solo })),
         };
       },
       isBusy: () => useStore.getState().agentBusy,
@@ -158,6 +159,7 @@ export function AgentComposer() {
         mode: st.currentMode(),
         tempo: st.snapshot?.session?.tempo ?? 120,
         timeSigNum: st.snapshot?.session?.timeSigNumerator ?? 4,
+        tracks: (st.snapshot?.tracks ?? []).map((t) => ({ id: t.id, name: t.name, mute: t.mute, solo: t.solo })),
       });
       if (fast) {
         await handleFast(fast, {
