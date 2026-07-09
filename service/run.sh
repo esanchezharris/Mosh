@@ -39,7 +39,20 @@ export PYTHONDONTWRITEBYTECODE="${PYTHONDONTWRITEBYTECODE:-1}"
 # Transform (RAVE timbre transfer, Route C) lives in its own venv; .transform.env
 # (written by transform/setup-transform.sh) exports TRANSFORM_PY + RAVE_MODEL_DIR.
 # Absent → the `transform` adapter falls back to the deterministic fake (Route B).
-[[ -f transform/.transform.env ]] && source ./transform/.transform.env
+TRANSFORM_ENVFILE="${MOSH_TRANSFORM_ENVFILE:-$HOME/Library/Mosh/transform/transform.env}"
+[[ -f "$TRANSFORM_ENVFILE" ]] && source "$TRANSFORM_ENVFILE"
+[[ -z "${TRANSFORM_PY:-}" && -f transform/.transform.env ]] && source ./transform/.transform.env
+transform_ready=0
+if [[ -x "${TRANSFORM_PY:-}" && -n "${RAVE_MODEL_DIR:-}" ]]; then
+  if [[ -n "$(find "$RAVE_MODEL_DIR" -maxdepth 1 -name '*.ts' -print -quit 2>/dev/null)" ]]; then
+    transform_ready=1
+  fi
+fi
+if [[ "$transform_ready" == "0" && -x transform/setup-transform.sh ]]; then
+  ./transform/setup-transform.sh >/dev/null 2>&1 || true
+  [[ -f "$TRANSFORM_ENVFILE" ]] && source "$TRANSFORM_ENVFILE"
+  [[ -z "${TRANSFORM_PY:-}" && -f transform/.transform.env ]] && source ./transform/.transform.env
+fi
 # Phase-4 SFT lane lives in its own mlx-lm venv; .sft.env (written by
 # sft/setup-sft.sh) exports SFT_PY for the trainer CLI. Absent → the SFT lane is
 # simply unavailable; the rest of the service is unaffected.
