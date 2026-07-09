@@ -9,10 +9,10 @@ real words. Consequently every ambiguity here degrades toward KEEPING his words
 (as anchors), never toward discarding them.
 
 Two tiers ("generous decode, then REASON over it" — the owner's validated ASR posture):
-  Tier 1 (deterministic, stdlib + phonology): filler/dictionary/confidence heuristics,
+  Tier 1 (deterministic, stdlib + phonology): filler/syllable/confidence heuristics,
     thresholds tuned on the four cached real-take fixtures. Raw confidence alone is
     PROVABLY insufficient (fixture: filler "da" @ 0.41 vs real "bomb" @ 0.13 vs
-    hallucinated "strawberry" @ 1e-5 — hence the filler set, the dict check, and the
+    hallucinated "strawberry" @ 1e-5 — hence the filler set, the syllable-aware gate, and the
     absolute hallucination floor).
   Tier 2 (optional LLM judge via brain_client, same real→fake posture as generation):
     re-labels PHRASES by whether they make sense as lyrics; it may promote/demote and
@@ -76,7 +76,7 @@ def is_filler(word: str) -> bool:
 
 
 def credible(w: dict) -> bool:
-    """Tier-1 word credibility (not filler + in-dict + confidence shape)."""
+    """Tier-1 word credibility (not filler + confidence shape + syllable support)."""
     c = _clean(w.get("word", ""))
     conf = float(w.get("confidence", 0) or 0)
     if not c or is_filler(c) or conf < CONF_FLOOR:
