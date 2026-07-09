@@ -266,6 +266,8 @@ private:
     juce::var cmdListAudioDevices (const juce::var& args);   // read-only (no log/transaction)
     juce::var cmdListMidiInputs   (const juce::var& args);   // read-only MIDI-input enumeration (CTL-001)
     juce::var cmdGetCommandLog    (const juce::var& args);   // read-only (reads mosh-log.jsonl; NOT logged)
+    void invalidateCommandLogCache();
+    void refreshCommandLogCacheIfNeeded (const juce::File& file);
     juce::var cmdSetAudioDevice   (const juce::var& args);   // machine preference (undoable:false)
     juce::var cmdSetBufferSize    (const juce::var& args);   // thin wrapper over set_audio_device
     juce::var cmdSetAudioThreads  (const juce::var& args);   // PRF-001 multicore pref (undoable:false)
@@ -519,6 +521,12 @@ private:
     bool applyingRemote_ = false;      // MP-001 — true while applying a peer's structural op
     juce::int64 seq = 0;
     juce::File  logFile;
+    juce::CriticalSection commandLogCacheLock_;
+    juce::Array<juce::var> commandLogRecentEntries_;
+    juce::int64            commandLogTotal_ = 0;
+    juce::int64            commandLogBytes_ = -1;
+    juce::String           commandLogPath_;
+    bool                   commandLogCachePrimed_ = false;
     // A3 — crash-recovery journal. A dedicated append-only file holding only the REPLAYABLE
     // arrangement commands since the last save (truncated by MoshEngine::save). On an unclean
     // startup MoshOps reads it into pendingRecovery_ (so save-truncation can't race recovery);

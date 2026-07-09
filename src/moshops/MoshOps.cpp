@@ -266,6 +266,8 @@ namespace
         return {};
     }
 
+    constexpr int kCommandLogInspectorMaxEntries = 500;
+
     bool looksLikeCommandLogRecord (const juce::String& line)
     {
         const auto t = line.trim();
@@ -277,6 +279,22 @@ namespace
                && t.contains ("\"ok\"")
                && t.contains ("\"undoable\"");
     }
+
+    juce::var makeCommandLogInspectorEntry (const juce::var& parsed)
+    {
+        if (! parsed.isObject())
+            return {};
+
+        auto* o = new juce::DynamicObject();
+        o->setProperty ("ts",       parsed.getProperty ("ts", juce::var()));
+        o->setProperty ("seq",      parsed.getProperty ("seq", juce::var()));
+        o->setProperty ("command",  parsed.getProperty ("command", juce::var()));
+        o->setProperty ("ok",       (bool) parsed.getProperty ("ok", false));
+        o->setProperty ("undoable", (bool) parsed.getProperty ("undoable", false));
+        if (parsed.hasProperty ("error"))
+            o->setProperty ("error", parsed.getProperty ("error", juce::var()));
+        return juce::var (o);
+    }
 }
 
 MoshOps::MoshOps (MoshEngine& engineToUse)
@@ -284,6 +302,7 @@ MoshOps::MoshOps (MoshEngine& engineToUse)
       trainerRegistry (engineToUse.sessionDir())
 {
     logFile = eng.sessionDir().getChildFile ("mosh-log.jsonl");
+    invalidateCommandLogCache();
     initRecoveryJournal();                    // A3 — read a crashed tail into memory, then start fresh
     pluginHost.initialise();                 // formats + curated VST3 scan
     previewFormats.registerBasicFormats();   // audition (file preview) reader formats
@@ -330,6 +349,59 @@ MoshOps::~MoshOps()
     unregisterAllMeterClients();
     if (previewWired) adm().removeAudioCallback (&previewPlayer);   // stop audio-thread access first
     stopAudition();
+}
+
+void MoshOps::invalidateCommandLogCache()
+{
+    const juce::ScopedLock sl (commandLogCacheLock_);
+    commandLogRecentEntries_.clearQuick();
+    commandLogTotal_ = 0;
+    commandLogBytes_ = -1;
+    commandLogPath_.clear();
+    commandLogCachePrimed_ = false;
+}
+
+void MoshOps::refreshCommandLogCacheIfNeeded (const juce::File& file)
+{
+    const auto filePath = file.getFullPathName();
+    const auto fileBytes = file.existsAsFile() ? file.getSize() : 0;
+    const juce::ScopedLock sl (commandLogCacheLock_);
+
+    if (commandLogCachePrimed_ && commandLogPath_ == filePath && commandLogBytes_ == fileBytes)
+        return;
+
+    commandLogRecentEntries_.clearQuick();
+    commandLogTotal_ = 0;
+    commandLogBytes_ = fileBytes;
+    commandLogPath_ = filePath;
+    commandLogCachePrimed_ = true;
+
+    if (! file.existsAsFile())
+        return;
+
+    if (auto stream = file.createInputStream())
+    {
+        while (! stream->isExhausted())
+        {
+            const auto line = stream->readNextLine().trim();
+            if (! looksLikeCommandLogRecord (line))
+                continue;
+
+            ++commandLogTotal_;
+
+            juce::var parsed;
+            if (juce::JSON::parse (line, parsed).failed())
+                continue;
+
+            auto entry = makeCommandLogInspectorEntry (parsed);
+            if (! entry.isObject())
+                continue;
+
+            commandLogRecentEntries_.add (entry);
+            if (commandLogRecentEntries_.size() > kCommandLogInspectorMaxEntries)
+                commandLogRecentEntries_.remove (0);
+        }
+    }
 }
 
 // ── Metering helpers (Wave 9) ────────────────────────────────────────────────
@@ -3136,6 +3208,7 @@ juce::var MoshOps::cmdReload (const juce::var& args)
         return errResult ("reload", refusal);
     }
     logFile = eng.sessionDir().getChildFile ("mosh-log.jsonl");
+    invalidateCommandLogCache();
     logLine ("reload", args, true, {}, false);
     emitSnapshotInvalidated();
     return okResult ("reload");
@@ -7320,60 +7393,28 @@ juce::var MoshOps::cmdGetCommandLog (const juce::var& args)
     // Modelled on cmdListAudioDevices / cmdListPlugins: returns okResult directly.
     int limit = (int) args.getProperty ("limit", 50);
     if (limit <= 0) limit = 50;
-    if (limit > 500) limit = 500;                    // clamp to a sane max
+    if (limit > kCommandLogInspectorMaxEntries) limit = kCommandLogInspectorMaxEntries;
 
     const auto file = eng.sessionDir().getChildFile ("mosh-log.jsonl");
+    refreshCommandLogCacheIfNeeded (file);
 
-    Array<var> entries;
-    int total = 0;
-
-    if (file.existsAsFile())
-    {
-        if (auto stream = file.createInputStream())
-        {
-            juce::StringArray recentLines;
-
-            while (! stream->isExhausted())
-            {
-                const auto line = stream->readNextLine().trim();
-                if (! looksLikeCommandLogRecord (line))
-                    continue;
-
-                ++total;
-                recentLines.add (line);
-                if (recentLines.size() > limit)
-                    recentLines.remove (0);
-            }
-
-            for (auto& line : recentLines)
-            {
-                var parsed;
-                if (JSON::parse (line, parsed).failed() || ! parsed.isObject())
-                    continue;
-
-                auto* o = new DynamicObject();
-                o->setProperty ("ts",       parsed.getProperty ("ts", var()));
-                o->setProperty ("seq",      parsed.getProperty ("seq", var()));
-                o->setProperty ("command",  parsed.getProperty ("command", var()));
-                o->setProperty ("ok",       (bool) parsed.getProperty ("ok", false));
-                o->setProperty ("undoable", (bool) parsed.getProperty ("undoable", false));
-                if (parsed.hasProperty ("error"))
-                    o->setProperty ("error", parsed.getProperty ("error", var()));
-                entries.add (var (o));
-            }
-        }
-    }
-
-    // Most-recent-first, limited to the last `limit` entries.
     Array<var> recent;
-    for (int i = entries.size() - 1; i >= 0 && recent.size() < limit; --i)
-        recent.add (entries.getReference (i));
+    int total = 0;
+    double logBytes = 0.0;
+    {
+        const juce::ScopedLock sl (commandLogCacheLock_);
+        total = (int) commandLogTotal_;
+        logBytes = (double) juce::jmax<juce::int64> (commandLogBytes_, 0);
+
+        for (int i = commandLogRecentEntries_.size() - 1; i >= 0 && recent.size() < limit; --i)
+            recent.add (commandLogRecentEntries_.getReference (i));
+    }
 
     auto* data = new DynamicObject();
     data->setProperty ("entries", recent);
     data->setProperty ("total", total);
     data->setProperty ("limit", limit);
-    data->setProperty ("logBytes", file.existsAsFile() ? (double) file.getSize() : 0.0);
+    data->setProperty ("logBytes", logBytes);
     return okResult ("get_command_log", var (data));
 }
 
@@ -7527,6 +7568,7 @@ juce::var MoshOps::cmdNewProject (const juce::var& args)
     eng.newProject (file);                 // stops transport + frees ctx before swap, re-points retriever
     lastSeenContext = nullptr;             // old ctx freed; force master-meter re-attach to the new ctx
     logFile = eng.sessionDir().getChildFile ("mosh-log.jsonl");
+    invalidateCommandLogCache();
     logLine ("new_project", args, true, {}, false);   // replaces the Edit — not undoable
     emitSnapshotInvalidated();
 
@@ -7551,6 +7593,7 @@ juce::var MoshOps::openProjectFile (const File& file, const juce::var& args, con
     }
     lastSeenContext = nullptr;             // old ctx freed; force master-meter re-attach to the new ctx
     logFile = eng.sessionDir().getChildFile ("mosh-log.jsonl");
+    invalidateCommandLogCache();
     logLine (commandName, args, true, {}, false);  // replaces the Edit — not undoable
     emitSnapshotInvalidated();
 
@@ -8680,7 +8723,35 @@ void MoshOps::logLine (const juce::String& command, const juce::var& args,
     o->setProperty ("ok", ok);
     if (error.isNotEmpty()) o->setProperty ("error", error);
     o->setProperty ("undoable", undoable);
-    logFile.appendText (JSON::toString (var (o), true) + "\n");
+    const auto record = var (o);
+    const auto line = JSON::toString (record, true);
+    const auto filePath = logFile.getFullPathName();
+    const auto fileBytesBefore = logFile.existsAsFile() ? logFile.getSize() : 0;
+    logFile.appendText (line + "\n");
+    const auto fileBytesAfter = logFile.existsAsFile() ? logFile.getSize() : 0;
+
+    const juce::ScopedLock sl (commandLogCacheLock_);
+    if (commandLogCachePrimed_ && commandLogPath_ == filePath && commandLogBytes_ == fileBytesBefore)
+    {
+        ++commandLogTotal_;
+
+        auto entry = makeCommandLogInspectorEntry (record);
+        if (entry.isObject())
+        {
+            commandLogRecentEntries_.add (entry);
+            if (commandLogRecentEntries_.size() > kCommandLogInspectorMaxEntries)
+                commandLogRecentEntries_.remove (0);
+        }
+
+        commandLogBytes_ = fileBytesAfter;
+        return;
+    }
+
+    commandLogRecentEntries_.clearQuick();
+    commandLogTotal_ = 0;
+    commandLogBytes_ = -1;
+    commandLogPath_.clear();
+    commandLogCachePrimed_ = false;
 }
 
 // ── A3 — crash-recovery journal ───────────────────────────────────────────────
