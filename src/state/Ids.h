@@ -140,7 +140,7 @@ namespace mosh::ids
     // as a JSON-string blob (the service result's per-line proposals array), plus a
     // regen counter that varies the LLM/fake sample. accept copies the chosen
     // proposal's text into lyricText (undoable) and clears these; reject just clears.
-    // status flows empty→seed→generating→proposed→accepted.
+    // status flows empty→seed→generating→proposed→asserted.
     MOSH_DECLARE_ID (lyricProposals)       // JSON array string of {text,score,syllables,passes,grade,endWord,...}
     MOSH_DECLARE_ID (lyricRegen)           // int — bumped by regenerate_lyric
     // L1 — TRANSIENT, non-undoable: precise per-line phonology from analyze_lyrics, a

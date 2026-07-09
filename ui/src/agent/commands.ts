@@ -115,6 +115,7 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "suggest_next_line", desc: "Suggest the next lyric line (a ghost line after the given index)", args: [S("trackId"), N("afterIndex")] },
   { command: "regenerate_lyric", desc: "Re-generate proposals for one lyric line with a fresh sample", args: [S("trackId"), N("lineIndex")] },
   { command: "accept_lyric_proposal", desc: "Accept a generated lyric proposal (commits its text into the line)", args: [S("trackId"), N("lineIndex"), N("proposalIndex", false, "default 0 = top-ranked")] },
+  { command: "assert_lyric_line", desc: "Assert final words for one lyric line before sing render", args: [S("trackId"), N("lineIndex"), S("text", false)] },
   { command: "analyze_lyrics", desc: "Precise per-line phonology (syllables, stress contour, rhyme grade vs the group anchor) for the flow visualizer — no LLM", args: [S("trackId")] },
   { command: "build_skeleton_from_clip", desc: "Turn a hummed/mumbled wave take into an editable rhythmic flow skeleton (syllable grid + stress, no words) on the clip's track — the producer confirms the grid, then 'Finish gaps' writes the words", args: [S("clipId"), S("grid", false), B("wait", false)] },
 ];

@@ -271,10 +271,8 @@ function GenBody({ clip, track, qa }: { clip: Clip; track: Track; qa?: RenderQA 
   const addable = colorsAvail.filter((c) => !active.some((a) => a.name === c.name) && !blockedBy(c.name));
   const isTransform = rl.mode === "transform";
   const isSing = rl.mode === "sing";
-  // Sing renders only the lines that carry the take's flow (lyricScore); a sheet with
-  // NONE is rejected outright by the backend (no_scored_lines) — don't offer the render.
-  const singFlowed = isSing ? (track.lyricSheet?.lines ?? []).filter((l) => l.hasScore).length : 0;
-  const singBlocked = isSing && singFlowed === 0;
+  const singable = isSing ? (track.lyricSheet?.lines ?? []).filter((l) => l.singable).length : 0;
+  const singBlocked = isSing && singable === 0;
 
   return (
     <div className="gen-body" data-render-status={rl.status}>
@@ -341,7 +339,7 @@ function GenBody({ clip, track, qa }: { clip: Clip; track: Track; qa?: RenderQA 
           // lands it (or Reject drops it).
           <>
             <button className="btn" data-testid="gen-render" disabled={singBlocked}
-              title={singBlocked ? "no flow yet — build a flow from a take first" : undefined}
+              title={singBlocked ? "assert words on a flowed lyric line first" : undefined}
               onClick={() => void exec("render_layer", { clipId: clip.id })}>{rl.hasArtifact ? "Re-render" : "Render"}</button>
             <button className="btn" disabled={!rl.hasArtifact} data-testid="gen-accept" onClick={async () => { const r = await exec("accept_render", { clipId: clip.id }); if (r.ok) bumpCelebrate(); }}>Accept</button>
             <button className="btn" disabled={!rl.hasArtifact} onClick={() => void exec("reject_render", { clipId: clip.id })}>Reject</button>
@@ -378,11 +376,16 @@ function SingControls({ track }: { track: Track }) {
   const voiceEnrolled = useStore((s) => s.snapshot?.session?.singVoiceEnrolled ?? false);
   const lines = track.lyricSheet?.lines ?? [];
   const flowed = lines.filter((l) => l.hasScore).length;
+  const singable = lines.filter((l) => l.singable).length;
   return (
     <div className="sing-controls">
       <label className="nparam">
         <span className="nlabel">flow</span>
         <span className="tc" data-testid="sing-flow">{flowed}/{lines.length} lines carry your take's flow</span>
+      </label>
+      <label className="nparam">
+        <span className="nlabel">asserted flow</span>
+        <span className="tc" data-testid="sing-asserted">{singable}/{lines.length} lines have asserted words and flow</span>
       </label>
       <label className="nparam">
         <span className="nlabel">voice</span>
@@ -392,6 +395,9 @@ function SingControls({ track }: { track: Track }) {
       </label>
       {flowed === 0 && (
         <span className="rack-empty">No flow yet — use “Build flow from this take” on the vocal clip first.</span>
+      )}
+      {flowed > 0 && singable === 0 && (
+        <span className="rack-empty">Flow is ready. Assert the words in Lyrics before rendering.</span>
       )}
       {flowed > 0 && flowed < lines.length && (
         // Mirrors the score author's honest skip: typed-later lines have no take flow,

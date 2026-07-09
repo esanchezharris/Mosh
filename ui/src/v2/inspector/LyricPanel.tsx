@@ -21,7 +21,7 @@ export function LyricPanel({ track }: { track: Track }) {
   // accepted lines accumulate). Pulled on demand (never via the snapshot — that would spawn
   // the service); -1/absent ⇒ service down ⇒ shown as nothing.
   const [corpusLines, setCorpusLines] = useState<number | null>(null);
-  const acceptedCount = sheet?.lines.filter((l) => l.status === "accepted").length ?? 0;
+  const acceptedCount = sheet?.lines.filter((l) => l.status === "accepted" || l.status === "asserted").length ?? 0;
   useEffect(() => {
     if (!sheet) return;
     let alive = true;
@@ -191,6 +191,7 @@ function LyricLineRow({ trackId, line, grid, busy, run, isGhost, onGhostDone }: 
   const state = flowStatus(count, target, line.syllableTol || 1);
   const gaps = parseSeed(line.seedText).gaps;
   const fillable = !line.locked && (!line.text.trim() || gaps > 0);
+  const canAssert = Boolean(content.trim() && !content.includes("___") && /[A-Za-z0-9]/.test(content));
 
   return (
     <li className="v2-lyric-line" data-testid={`lyric-line-${line.index}`} data-flow={state} data-status={line.status}>
@@ -207,6 +208,14 @@ function LyricLineRow({ trackId, line, grid, busy, run, isGhost, onGhostDone }: 
         {fillable && !line.proposals?.length && (
           <button className="btn" data-testid={`lyric-fill-${line.index}`} disabled={busy} title="fill this line"
             onClick={() => void run("fill_lyric_gap", { lineIndex: line.index })}>✨</button>
+        )}
+        {canAssert && !line.asserted && (
+          <button className="btn" data-testid={`lyric-assert-${line.index}`} disabled={busy}
+            title="assert these words for sing render"
+            onClick={() => void exec("assert_lyric_line", { trackId, lineIndex: line.index, text: content })}>Assert</button>
+        )}
+        {line.asserted && (
+          <span className="v2-lyric-rgroup" data-testid={`lyric-asserted-${line.index}`}>asserted</span>
         )}
         <button className={`btn${line.locked ? " on" : ""}`} data-testid={`lyric-lock-${line.index}`}
           title="lock this line" aria-label={`${line.locked ? "Unlock" : "Lock"} line ${line.index + 1}`} aria-pressed={line.locked}

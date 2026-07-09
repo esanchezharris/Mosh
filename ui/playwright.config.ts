@@ -1,5 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
+const preview = process.env.MOSH_E2E_PREVIEW === "1";
+
 // E2E harness — drives the REAL React WebView UI in a headless Chromium against the
 // Vite dev server. In dev, bridge.ts wires in the in-memory mock backend
 // (bridge.mock.ts, MOCK_ENABLED = import.meta.env.DEV), which speaks the same
@@ -20,7 +22,7 @@ export default defineConfig({
   timeout: 30_000,
   expect: { timeout: 7_000 },
   use: {
-    baseURL: "http://localhost:5173",
+    baseURL: "http://127.0.0.1:5173",
     viewport: { width: 1440, height: 900 },
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
@@ -37,9 +39,11 @@ export default defineConfig({
     },
   }],
   webServer: {
-    command: "npm run dev",
-    url: "http://localhost:5173",
-    reuseExistingServer: !process.env.CI,
+    command: preview
+      ? "VITE_MOSH_E2E_MOCK=1 npm run build && npm exec vite -- preview --host 127.0.0.1 --port 5173"
+      : "npm run dev -- --host 127.0.0.1",
+    url: "http://127.0.0.1:5173",
+    reuseExistingServer: !process.env.CI && !preview,
     timeout: 120_000,
     stdout: "ignore",
     stderr: "pipe",

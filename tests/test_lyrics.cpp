@@ -195,6 +195,18 @@ TEST_CASE ("Phase-3 lyricScore (render-ready score blob) persists on a skeleton 
     REQUIRE (LyricSheet::lineFingerprint (sheet, l2, "ctx", "build") == before);
 }
 
+TEST_CASE ("asserted lyric lines persist as renderable words separate from take flow", "[lyrics][asserted]")
+{
+    auto line = LyricLine::create ("as-1", 0, "verse");
+    line.setProperty (ids::lyricText, "hold the flame", nullptr);
+    line.setProperty (ids::status, "asserted", nullptr);
+
+    auto back = juce::ValueTree::fromXml (line.toXmlString());
+    REQUIRE (back[ids::status].toString() == "asserted");
+    REQUIRE (back[ids::lyricText].toString() == "hold the flame");
+    REQUIRE_FALSE (back.hasProperty (ids::lyricScore));
+}
+
 TEST_CASE ("lineFingerprint is stable + sensitive to every constraint input", "[lyrics][cache]")
 {
     auto sheet = LyricSheet::create ("ls-3");

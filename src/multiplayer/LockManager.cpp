@@ -54,7 +54,7 @@ LockManager::Scope LockManager::classify (const juce::String& command)
         "set_lyric_line", "remove_lyric_line",
         // LYR-L2 — generation + proposal review also target one track's sheet.
         "complete_lyrics", "fill_lyric_gap", "suggest_next_line", "regenerate_lyric",
-        "cancel_lyric_job", "accept_lyric_proposal", "reject_lyric_proposal",
+        "cancel_lyric_job", "accept_lyric_proposal", "assert_lyric_line", "reject_lyric_proposal",
         // LYR-L1 — analysis lands a transient blob on one track's sheet.
         "analyze_lyrics",
         // LYR Phase 2 — confirm the proposed flow grid (flips this track's lines proposed→seed).
