@@ -52,8 +52,15 @@ jobs:
           cache: npm
           cache-dependency-path: ui/package-lock.json
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
       - name: Ensure jq (gate emits JSON)
         run: jq --version >/dev/null 2>&1 || brew install jq
+
+      - name: Install Python test deps
+        run: python3 -m pip install --upgrade pip numpy "pydantic>=2,<3" pytest soundfile
 
       - name: Install UI deps
         working-directory: ui

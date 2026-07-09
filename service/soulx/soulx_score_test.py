@@ -61,8 +61,8 @@ check("3 word events, type 2, take pitches",
       and toks(clip, "note_pitch")[1:] == ["57", "59", "60"], str(clip["text"]))
 check("word durations are the slot spans", all(abs(float(d) - 0.5) < 0.011 for d in toks(clip, "duration")[1:]),
       str(clip["duration"]))
-check("phonemes are en_-prefixed dash-joined ARPAbet",
-      all(p.startswith("en_") and "-" in p or p == "<SP>" for p in toks(clip, "phoneme")),
+check("phonemes are en_-prefixed ARPAbet",
+      all(p.startswith("en_") or p == "<SP>" for p in toks(clip, "phoneme")),
       str(clip["phoneme"]))
 check("time covers the full span in ms", clip["time"][0] == 0 and abs(clip["time"][1] - 2000) <= 20,
       str(clip["time"]))

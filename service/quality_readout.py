@@ -25,9 +25,12 @@ from __future__ import annotations
 # the SA3 venv, ever calls it).
 try:
     import numpy as np
-    import soundfile as sf
 except ImportError:  # pragma: no cover - exercised only in the minimal FakeAdapter environment
     np = None
+
+try:
+    import soundfile as sf
+except ImportError:
     sf = None
 
 EPS = 1e-12
@@ -107,6 +110,8 @@ def analyze_wav(path: str) -> dict:
 def analyze_array(x, sr: int) -> dict:
     """Same as analyze_wav but on an in-memory array [n, ch] (or [n]) — lets callers
     score a source region (pq_base) without a temp file."""
+    if np is None:
+        raise RuntimeError("quality_readout.analyze_array needs numpy")
     x = np.asarray(x, dtype="float64")
     if x.ndim == 1:
         x = x[:, None]
