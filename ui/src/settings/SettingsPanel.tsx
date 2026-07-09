@@ -13,6 +13,7 @@ import { useEffect } from "react";
 import { useStore } from "../store";
 import { pickFiles, pickSaveFile } from "../bridge";
 import type { Snapshot } from "../types";
+import { runAction, type ActionCtx } from "../menuActions";
 import { useSettings } from "./store";
 import { settingsByCategory, type SettingDef } from "./schema";
 import { TEMPLATES } from "./templates";
@@ -251,17 +252,17 @@ function AudioRouting({ snapshot }: { snapshot: Snapshot }) {
 
 // ── existing Project file-management actions — unchanged ────────────────────
 function ProjectSettings({ snapshot }: { snapshot: Snapshot }) {
-  const exec = useStore((st) => st.exec);
-  const refresh = useStore((st) => st.refresh);
+  const store = useStore();
+  const ctx: ActionCtx = { store, pickFiles, pickSaveFile };
   const s = snapshot.session;
   return (
     <div className="pop-group">
       <div className="pop-label">Project{s.dirty ? <span className="pop-note" title="Unsaved changes (auto-saved)"> • unsaved</span> : null}</div>
       <div className="pop-actions">
-        <button className="btn" onClick={() => void exec("new_project", {}).then(() => refresh())}>New</button>
-        <button className="btn" onClick={() => void exec("save", {})}>Save</button>
-        <button className="btn" onClick={async () => { const r = await pickSaveFile({ title: "Save project as" }); if (r.ok && r.file) void exec("save_as", { file: r.file }).then(() => refresh()); }}>Save As…</button>
-        <button className="btn" onClick={async () => { const r = await pickFiles({ title: "Open project" }); if (r.ok && r.files[0]) void exec("open_project", { file: r.files[0] }).then(() => refresh()); }}>Open…</button>
+        <button className="btn" onClick={() => void runAction("new_project", ctx)}>New</button>
+        <button className="btn" onClick={() => void runAction("save", ctx)}>Save</button>
+        <button className="btn" onClick={() => void runAction("save_as", ctx)}>Save As…</button>
+        <button className="btn" onClick={() => void runAction("open_project", ctx)}>Open…</button>
       </div>
       {(s.recentProjects?.length ?? 0) > 0 && (
         <>
@@ -269,7 +270,7 @@ function ProjectSettings({ snapshot }: { snapshot: Snapshot }) {
           <div className="modal-list" data-testid="recent-projects" style={{ maxHeight: 160 }}>
             {s.recentProjects!.slice(0, 8).map((p, i) => (
               <button key={p.path} className="plugin-row" title={p.path} disabled={p.path === s.editFile}
-                      onClick={() => void exec("open_recent", { index: i }).then(() => refresh())}>
+                      onClick={() => void runAction("open_recent", ctx, { index: i })}>
                 <span className="pr-name">{p.path === s.editFile ? "● " : ""}{p.name}</span>
               </button>
             ))}

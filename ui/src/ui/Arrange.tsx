@@ -19,8 +19,9 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { pickFiles } from "../bridge";
+import { pickFiles, pickSaveFile } from "../bridge";
 import { useStore, type Peaks } from "../store";
+import { runAction, type ActionCtx } from "../menuActions";
 import { tempoMapFrom, gridLines, meterAt, beatSeconds, snapStep } from "../time";
 import { DRUM_LANES, laneIndexForPitch } from "./drumGrid";
 import { commitClipDrag } from "./clipDrag";
@@ -72,6 +73,7 @@ export function Arrange({ snapshot }: { snapshot: Snapshot }) {
   const clearSelection = useStore((s) => s.clearSelection);
   const exec = useStore((s) => s.exec);
   const refresh = useStore((s) => s.refresh);
+  const actionCtx = useMemo<ActionCtx>(() => ({ store: useStore.getState(), pickFiles, pickSaveFile }), []);
   const tool = useStore((s) => s.tool);
   const snapTime = useStore((s) => s.snapTime);
   const timeRange = useStore((s) => s.timeRange);
@@ -168,14 +170,14 @@ export function Arrange({ snapshot }: { snapshot: Snapshot }) {
       loopAnchor.current = sec;
       capturePointer(e.currentTarget, e.pointerId);
     } else if (click === EA.SEEK) {
-      void exec("set_transport", { position: snapWithFeel(sec) });
+      void runAction("seek", actionCtx, { position: snapWithFeel(sec) });
     }
   };
   const onRulerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (loopAnchor.current == null || e.buttons === 0) return; // buttons===0 → stray hover after a lost/cancelled capture
     const sec = Math.max(0, pxToSec(contentX(e.clientX, e.currentTarget)));
     const a = Math.min(loopAnchor.current, sec), b = Math.max(loopAnchor.current, sec);
-    void exec("set_transport", { loop: true, loopStart: a, loopEnd: b });
+    void runAction("loop_region", actionCtx, { loopStart: a, loopEnd: b });
   };
   const onRulerUp = () => { loopAnchor.current = null; };
 

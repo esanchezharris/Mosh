@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { runAction, type ActionCtx, type ActionStore } from "./menuActions";
+import type { Snapshot } from "./types";
 
 // A fake store that records exec() calls and method invocations, so we can assert
 // each action fires the right MoshOps command — the contract the menus rely on.
@@ -130,6 +131,40 @@ describe("runAction — Edit", () => {
     ]);
     expect(store.clearSelection).toHaveBeenCalled();
   });
+
+  it("duplicate duplicates every selected clip through the dispatcher", async () => {
+    const { ctx, execCalls } = makeCtx({}, { selection: new Set(["c1", "c2"]) });
+    await runAction("duplicate", ctx);
+    expect(execCalls).toEqual([
+      { command: "duplicate_clip", args: { clipId: "c1" } },
+      { command: "duplicate_clip", args: { clipId: "c2" } },
+    ]);
+  });
+
+  it("group derives track ids from the current snapshot selection", async () => {
+    const snapshot = {
+      tracks: [
+        { id: "t1", name: "Drums", type: "wave", clips: [{ id: "c1" }] },
+        { id: "t2", name: "Bass", type: "wave", clips: [{ id: "c2" }] },
+        { id: "g1", name: "Group", type: "group", isGroup: true, clips: [{ id: "c3" }] },
+      ],
+    } as Snapshot;
+    const { ctx, execCalls } = makeCtx({}, { selection: new Set(["c1", "c3"]), snapshot });
+    await runAction("group", ctx);
+    expect(execCalls).toEqual([{ command: "create_group_track", args: { trackIds: ["t1"] } }]);
+  });
+
+  it("split only splits selected clips that contain the dispatch position", async () => {
+    const snapshot = {
+      tracks: [
+        { id: "t1", name: "Drums", type: "wave", clips: [{ id: "inside", start: 1, length: 4 }] },
+        { id: "t2", name: "Bass", type: "wave", clips: [{ id: "outside", start: 8, length: 2 }] },
+      ],
+    } as Snapshot;
+    const { ctx, execCalls } = makeCtx({}, { selection: new Set(["inside", "outside"]), snapshot });
+    await runAction("split", ctx, { position: 2.5 });
+    expect(execCalls).toEqual([{ command: "split_clip", args: { clipId: "inside", time: 2.5 } }]);
+  });
 });
 
 describe("runAction — transport", () => {
@@ -137,5 +172,40 @@ describe("runAction — transport", () => {
     const { ctx, execCalls } = makeCtx();
     await runAction("play_pause", ctx);
     expect(execCalls).toContainEqual({ command: "set_transport", args: { action: "toggle" } });
+  });
+
+  it("record, to_start, and to_end preserve their transport command payloads", async () => {
+    const { ctx, execCalls } = makeCtx();
+    await runAction("record", ctx);
+    await runAction("to_start", ctx);
+    await runAction("to_end", ctx);
+    expect(execCalls).toEqual([
+      { command: "set_transport", args: { action: "record" } },
+      { command: "set_transport", args: { action: "to_start" } },
+      { command: "set_transport", args: { action: "to_end" } },
+    ]);
+  });
+
+  it("seek and loop_region route through set_transport with caller-supplied timing", async () => {
+    const { ctx, execCalls } = makeCtx();
+    await runAction("seek", ctx, { position: 12.25 });
+    await runAction("loop_region", ctx, { loopStart: 4, loopEnd: 8 });
+    expect(execCalls).toEqual([
+      { command: "set_transport", args: { position: 12.25 } },
+      { command: "set_transport", args: { loop: true, loopStart: 4, loopEnd: 8 } },
+    ]);
+  });
+
+  it("tool actions remain UI-local setter calls", async () => {
+    const setTool = vi.fn();
+    const { ctx, execCalls } = makeCtx({}, { setTool });
+    await runAction("tool_move", ctx);
+    await runAction("tool_split", ctx);
+    await runAction("tool_range", ctx);
+    expect(setTool).toHaveBeenCalledTimes(3);
+    expect(setTool).toHaveBeenNthCalledWith(1, "move");
+    expect(setTool).toHaveBeenNthCalledWith(2, "split");
+    expect(setTool).toHaveBeenNthCalledWith(3, "range");
+    expect(execCalls).toEqual([]);
   });
 });

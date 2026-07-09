@@ -131,4 +131,30 @@ describe("useKeyboardShortcuts", () => {
 
     expect(execCalls).toContainEqual({ command: "remove_clip", args: { clipId: "clip-1" } });
   });
+
+  it("routes the record shortcut through the shared dispatcher", () => {
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "r", bubbles: true, cancelable: true }));
+    });
+
+    expect(execCalls).toContainEqual({ command: "set_transport", args: { action: "record" } });
+  });
+
+  it("routes duplicate through the shared dispatcher even when native menus own menu-safe shortcuts", () => {
+    vi.mocked(nativeMenuPresent).mockReturnValue(true);
+    useStore.setState({ selection: new Set(["clip-1"]) });
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "d", metaKey: true, bubbles: true, cancelable: true }));
+    });
+
+    expect(execCalls).toContainEqual({ command: "duplicate_clip", args: { clipId: "clip-1" } });
+  });
 });

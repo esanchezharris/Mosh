@@ -6,6 +6,7 @@
 // pick_save_file) — they only resolve a path; the mutation is still a command.
 
 import type { ActionId } from "./keymap";
+import type { Snapshot } from "./types";
 
 export type { ActionId };
 
@@ -19,7 +20,10 @@ export interface ActionStore {
   pasteClipboard: () => Promise<void>;
   clearSelection: () => void;
   selection: Set<string>;
-  transport: { playing: boolean };
+  transport: { playing: boolean; position?: number };
+  snapshot?: Snapshot | null;
+  clipboard?: unknown;
+  setTool?: (tool: "move" | "split" | "range") => void;
   // open clip-editor modals — Delete is suppressed on the arrangement while either
   // is set (the editor owns Delete then). Optional so test fakes can omit them.
   editingClipId?: string | null;
@@ -43,7 +47,11 @@ function formatForFile(path: string): "wav" | "aiff" | "flac" {
 /** Dispatch a logical action. `opts.file` lets `open_project` open a known path without
  *  popping the picker; `opts.index` selects which entry `open_recent` reopens (0 = newest).
  *  Returns a promise so callers can await structural changes. */
-export async function runAction(id: ActionId, ctx: ActionCtx, opts: { file?: string; index?: number } = {}): Promise<void> {
+export async function runAction(
+  id: ActionId,
+  ctx: ActionCtx,
+  opts: { file?: string; index?: number; position?: number; loopStart?: number; loopEnd?: number } = {},
+): Promise<void> {
   const { store } = ctx;
   switch (id) {
     case "new_project":
@@ -122,6 +130,54 @@ export async function runAction(id: ActionId, ctx: ActionCtx, opts: { file?: str
 
     case "play_pause":
       await store.exec("set_transport", { action: "toggle" });
+      return;
+    case "record":
+      await store.exec("set_transport", { action: "record" });
+      return;
+    case "to_start":
+      await store.exec("set_transport", { action: "to_start" });
+      return;
+    case "to_end":
+      await store.exec("set_transport", { action: "to_end" });
+      return;
+
+    case "duplicate":
+      for (const clipId of [...store.selection]) await store.exec("duplicate_clip", { clipId });
+      return;
+
+    case "group": {
+      const sel = new Set(store.selection);
+      const trackIds = store.snapshot?.tracks
+        .filter((t) => !t.isGroup && t.clips.some((c) => sel.has(c.id)))
+        .map((t) => t.id) ?? [];
+      if (trackIds.length) await store.exec("create_group_track", { trackIds });
+      return;
+    }
+
+    case "split": {
+      const pos = opts.position ?? store.transport.position ?? 0;
+      for (const t of store.snapshot?.tracks ?? [])
+        for (const c of t.clips)
+          if (store.selection.has(c.id) && c.start < pos && pos < c.start + c.length)
+            await store.exec("split_clip", { clipId: c.id, time: pos });
+      return;
+    }
+
+    case "tool_move":
+      store.setTool?.("move");
+      return;
+    case "tool_split":
+      store.setTool?.("split");
+      return;
+    case "tool_range":
+      store.setTool?.("range");
+      return;
+
+    case "seek":
+      await store.exec("set_transport", { position: opts.position ?? 0 });
+      return;
+    case "loop_region":
+      await store.exec("set_transport", { loop: true, loopStart: opts.loopStart ?? 0, loopEnd: opts.loopEnd ?? 0 });
       return;
   }
 }
