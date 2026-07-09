@@ -32,13 +32,20 @@ nohup ./watchdog-r4.sh > /tmp/watchdog-r4.log 2>&1 & disown
 ```
 (`watchdog-r4.sh` refuses if an mlx proc is already running, so double-launch is safe.)
 
-### Optional: auto-resume on boot (survive reboots without lifting a finger)
-Install a LaunchAgent (removable any time with `launchctl bootout`):
+### Auto-resume on boot — INSTALLED (LaunchAgent `com.mosh.r4-watchdog`)
+A LaunchAgent is installed at `~/Library/LaunchAgents/com.mosh.r4-watchdog.plist`
+(RunAtLoad, no KeepAlive). On every boot/login it runs `boot-resume-r4.sh`, which:
+- **no-ops** if a watchdog / training proc is already alive (no duplicate GPU jobs),
+- **resumes** the watchdog from the last checkpoint if the run is incomplete and dead,
+- **self-removes** (bootout + deletes its own plist) once `.done` ≥ 12,889.
+
+So a reboot needs zero manual action — it auto-resumes on login. Nothing to do.
+Remove it manually any time:
 ```sh
-# writes ~/Library/LaunchAgents/com.mosh.r4-watchdog.plist, RunAtLoad only (no KeepAlive
-# → won't loop after the run completes). Ask before doing this — it's a login-item.
+launchctl bootout "gui/$(id -u)/com.mosh.r4-watchdog"
+rm -f ~/Library/LaunchAgents/com.mosh.r4-watchdog.plist
 ```
-(Not installed by default — the manual one-liner above is usually enough.)
+Boot-resume log: `/tmp/watchdog-r4-boot.log` (+ `/tmp/com.mosh.r4-watchdog.{out,err}`).
 
 ## When training COMPLETES (`.done` = 12889, watchdog logs "COMPLETE")
 Run the gate read. It's the **same procedure as `service/sft/GATE_READ_r3.md`**, with
