@@ -1,0 +1,147 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-07-09T09:44:51Z",
+  "mode": "live",
+  "cwd": "/Users/emiliosanchez-harris/Documents/ClaudeMosh",
+  "trunk": {
+    "remote": "origin",
+    "branch": "main",
+    "localStatus": "main...origin/main [ahead 3, behind 1]"
+  },
+  "stopSentinel": {
+    "path": "docs/auto-loop/STOP",
+    "present": true,
+    "effect": "Old auto-loop rearm and unsupervised duplicate work remain stopped; AL-010 was not started because its prerequisites remain unresolved."
+  },
+  "dirtyWorktree": {
+    "hasUnrelatedWork": true,
+    "summary": [
+      "Root checkout still has unrelated dirty work in docs/auto-loop, docs/resumption, service/sft, and demo-loop files.",
+      "Root main was fetched but not pulled because it is dirty and locally ahead 3, behind 1.",
+      "A clean detached origin/main worktree was created at /Users/emiliosanchez-harris/Documents/ClaudeMosh-main-origin-current."
+    ]
+  },
+  "truthSources": [
+    "git fetch origin main",
+    "git status --short --branch",
+    "gh pr view 259 --json number,state,headRefOid,isDraft,mergeable,url",
+    "gh pr view 260 --json number,state,headRefOid,isDraft,mergeable,url",
+    "Direct DNS probe for tpvkqaqydafpgockzchm.supabase.co",
+    "Temporary local blob relay direct PUT/GET probe on http://127.0.0.1:8782",
+    "PR #259 mp-live-smoke with current release binary against blob-capable relay",
+    "PR #260 native gate logs in /tmp/al011-native-gate-20260709-023908",
+    "PR #260 mp-live-smoke with debug app against blob-capable relay",
+    "git worktree status for /Users/emiliosanchez-harris/Documents/ClaudeMosh-main-origin-current",
+    "docs/auto-loop/STOP"
+  ],
+  "threads": [
+    {
+      "threadId": "019f4595-32ae-7e91-a8d6-67b7c09c7df1",
+      "hostId": "local",
+      "title": "Automate multiplayer demo loop",
+      "status": "active",
+      "role": "coordinator",
+      "nextAction": "Continue as the canonical coordinator thread."
+    },
+    {
+      "threadId": "019f44a0-4a44-7481-974d-1678aa11fe65",
+      "hostId": "local",
+      "title": "Review open PRs and branches",
+      "status": "idle/unread",
+      "role": "canonical-input",
+      "nextAction": "Use as PR and stale-branch triage evidence; do not create a duplicate review thread."
+    }
+  ],
+  "prs": [
+    {
+      "number": 259,
+      "title": "Fail mp-live-smoke on partial sync",
+      "url": "https://github.com/zeke431/ClaudeMosh/pull/259",
+      "head": "codex/al-020-mp-live-smoke-partial",
+      "base": "main",
+      "createdAt": "2026-07-09T07:19:13Z",
+      "isDraft": false,
+      "mergeable": "MERGEABLE",
+      "classification": "merge-candidate",
+      "riskTier": "auto-eligible",
+      "demoRelevance": "Multiplayer-core AL-020 verification-signal fix.",
+      "nextAction": "Review for merge if local blob-compatible relay proof is accepted as sufficient despite Supabase DNS being unavailable from this machine."
+    },
+    {
+      "number": 260,
+      "title": "Cover multiplayer lock-classifier drift",
+      "url": "https://github.com/zeke431/ClaudeMosh/pull/260",
+      "head": "codex/al-011-lock-classifier-drift",
+      "base": "main",
+      "createdAt": "2026-07-09T07:51:16Z",
+      "isDraft": true,
+      "mergeable": "MERGEABLE",
+      "classification": "human-gated",
+      "riskTier": "human-gated",
+      "demoRelevance": "Multiplayer-core AL-011 lock correctness coverage and classifier update.",
+      "nextAction": "Keep draft until human review accepts the existing JUCE leak/assertion signal and unresolved cloud/installed-app proof."
+    }
+  ],
+  "backlog": [
+    {
+      "id": "AL-020",
+      "title": "Fail mp-live-smoke on PARTIAL",
+      "status": "pr-open-blob-relay-pass",
+      "riskTier": "auto-eligible",
+      "queueRank": 1,
+      "requiredGate": "Focused shell regression for PASS/FAIL/PARTIAL plus live smoke against a blob-capable relay.",
+      "nextAction": "Decide whether PR #259 can merge with local blob-compatible relay proof while Supabase DNS remains unavailable."
+    },
+    {
+      "id": "AL-011",
+      "title": "Cover multiplayer lock-classifier drift",
+      "status": "draft-pr-open-human-gated",
+      "riskTier": "human-gated",
+      "queueRank": 2,
+      "requiredGate": "Native build, repeated selftest, focused multiplayer proof, relay/live smoke, installed-app proof, and human approval.",
+      "nextAction": "Review PR #260 human-gate evidence; decide whether JUCE leaks/cloud DNS/installed-app gaps block merge."
+    },
+    {
+      "id": "AL-010",
+      "title": "Route live multiplayer commits through the MoshOps seam",
+      "status": "blocked-by-pr-260-human-gate",
+      "riskTier": "human-gated",
+      "queueRank": 3,
+      "requiredGate": "Native build, selftest x3, focused multiplayer proof, relay/live smoke, installed-app demo proof, and human approval.",
+      "nextAction": "Do not start until PR #259/#260 gate decisions are resolved."
+    }
+  ],
+  "decisions": [
+    {
+      "decision": "PR_259_BLOB_RELAY_PASS",
+      "reason": "A temporary blob-compatible local relay proved PASS for the PR #259 smoke path; Supabase cloud DNS remains unavailable locally."
+    },
+    {
+      "decision": "PR_260_KEEP_DRAFT",
+      "reason": "Native and multiplayer gates passed, but selftest still emits JUCE leak/assertion noise and cloud/installed-app proof remains unverified."
+    },
+    {
+      "decision": "ROOT_MAIN_RECONCILED_WITH_SEPARATE_WORKTREE",
+      "reason": "Dirty root main was not pulled; a detached clean origin/main worktree was created at PR #254 merge commit e044755d."
+    },
+    {
+      "decision": "AL_010_IDLE",
+      "reason": "The explicit precondition to start AL-010 was not met because PR #260 remains human-gated."
+    }
+  ],
+  "actionsTaken": [
+    "Probed Supabase relay DNS and confirmed it still fails from this machine.",
+    "Started a temporary local blob-capable relay on http://127.0.0.1:8782.",
+    "Probed blob PUT/GET contract directly against the temporary relay.",
+    "Ran PR #259 mp-live-smoke against the temporary blob-capable relay and current release binary; result PASS.",
+    "Posted PR #259 blob-relay PASS evidence.",
+    "Ran PR #260 focused multiplayer tests, ctest, app build, selftest x3, selftest-undo, MOSH_SELFTEST_MP=1, and two-process mp-live-smoke.",
+    "Reviewed PR #260 JUCE assertion/leak and command-log timing evidence.",
+    "Posted PR #260 human-gate evidence.",
+    "Fetched origin/main and created /Users/emiliosanchez-harris/Documents/ClaudeMosh-main-origin-current at origin/main.",
+    "Did not pull, stash, reset, or merge through the dirty root checkout.",
+    "Did not start AL-010 because prerequisites are unresolved.",
+    "Did not archive or create Codex threads.",
+    "Did not rearm the old auto-loop workflow."
+  ]
+}

@@ -1,0 +1,240 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-07-09T06:44:48Z",
+  "mode": "dry-run",
+  "cwd": "/Users/emiliosanchez-harris/Documents/ClaudeMosh",
+  "trunk": {
+    "remote": "origin",
+    "branch": "main",
+    "localStatus": "main...origin/main [ahead 3]"
+  },
+  "stopSentinel": {
+    "path": "docs/auto-loop/STOP",
+    "present": true,
+    "effect": "No merge, thread creation, or old auto-loop rearm action allowed from this pass."
+  },
+  "dirtyWorktree": {
+    "hasUnrelatedWork": true,
+    "summary": [
+      "Modified docs/auto-loop/BACKLOG.md and docs/auto-loop/backlog.jsonl from prior queue triage.",
+      "Modified docs/resumption/2026-06-30-clean-resumption-map.md and untracked dated resumption notes.",
+      "Modified and untracked service/sft files from an unrelated training lane."
+    ]
+  },
+  "truthSources": [
+    "git fetch --prune origin",
+    "git status --short --branch",
+    "gh pr list --state open --limit 50 --json number,title,headRefName,baseRefName,isDraft,mergeable,reviewDecision,createdAt,updatedAt,url",
+    "docs/auto-loop/backlog.jsonl",
+    "docs/auto-loop/STOP",
+    "Codex list_threads query=ClaudeMosh limit=30"
+  ],
+  "threads": [
+    {
+      "threadId": "019f4595-32ae-7e91-a8d6-67b7c09c7df1",
+      "hostId": "local",
+      "title": "Automate multiplayer demo loop",
+      "status": "active",
+      "role": "coordinator",
+      "nextAction": "Continue as the canonical coordinator thread."
+    },
+    {
+      "threadId": "019f44a0-4a44-7481-974d-1678aa11fe65",
+      "hostId": "local",
+      "title": "Review open PRs and branches",
+      "status": "active",
+      "role": "canonical-input",
+      "nextAction": "Use as queue-triage evidence; do not create a duplicate PR-review thread."
+    },
+    {
+      "threadId": "019f4487-d04b-7e02-ac62-d544fcfc5eeb",
+      "hostId": "local",
+      "title": "Monitor training job",
+      "status": "active",
+      "role": "non-core",
+      "nextAction": "Leave separate; training monitor is outside multiplayer-core scope."
+    },
+    {
+      "threadId": "019f4486-d66d-7610-a6e3-ad517d1cb9ce",
+      "hostId": "local",
+      "title": "songfinisher",
+      "status": "idle",
+      "role": "non-core",
+      "nextAction": "Leave separate; FMS lane is outside multiplayer-core scope."
+    },
+    {
+      "threadId": "019f44a0-29c6-7753-b1c4-025d51b0a409",
+      "hostId": "local",
+      "title": "Refine UI aesthetics",
+      "status": "idle",
+      "role": "non-core",
+      "nextAction": "Leave separate; broad UI polish is not the coordinator's first queue."
+    }
+  ],
+  "prs": [
+    {
+      "number": 258,
+      "title": "Restore r7 audition profile on current main",
+      "url": "https://github.com/zeke431/ClaudeMosh/pull/258",
+      "head": "codex/r7-audition-recut",
+      "base": "main",
+      "createdAt": "2026-07-09T06:32:14Z",
+      "isDraft": true,
+      "mergeable": "MERGEABLE",
+      "classification": "draft",
+      "riskTier": "parked",
+      "demoRelevance": "Non-core r7 audition lane.",
+      "nextAction": "Do not spawn coordinator work."
+    },
+    {
+      "number": 257,
+      "title": "Polish AppV2 shell wave 1 and wave 2",
+      "url": "https://github.com/zeke431/ClaudeMosh/pull/257",
+      "head": "codex/v2-wave1-ui-polish",
+      "base": "main",
+      "createdAt": "2026-07-09T06:25:40Z",
+      "isDraft": false,
+      "mergeable": "MERGEABLE",
+      "classification": "parked",
+      "riskTier": "parked",
+      "demoRelevance": "Useful UI polish, but not multiplayer-core.",
+      "nextAction": "Leave to UI lane unless it blocks multiplayer demo readiness."
+    },
+    {
+      "number": 256,
+      "title": "Prepare r5 data bridge while r4 runs",
+      "url": "https://github.com/zeke431/ClaudeMosh/pull/256",
+      "head": "codex/r5-prep-bridge",
+      "base": "main",
+      "createdAt": "2026-07-09T06:20:19Z",
+      "isDraft": false,
+      "mergeable": "MERGEABLE",
+      "classification": "parked",
+      "riskTier": "parked",
+      "demoRelevance": "Training lane, not multiplayer-core.",
+      "nextAction": "Do not merge or continue from this coordinator."
+    },
+    {
+      "number": 255,
+      "title": "Design-system Phase 2 re-cut - token cleanup + visual gate",
+      "url": "https://github.com/zeke431/ClaudeMosh/pull/255",
+      "head": "codex/pr224-recut-visual-gate",
+      "base": "main",
+      "createdAt": "2026-07-09T06:16:15Z",
+      "isDraft": true,
+      "mergeable": "MERGEABLE",
+      "classification": "draft",
+      "riskTier": "parked",
+      "demoRelevance": "Design-system lane, not multiplayer-core.",
+      "nextAction": "Leave draft outside coordinator queue."
+    },
+    {
+      "number": 254,
+      "title": "Rescue June 27 demo-gap UI slices (G2a/G3/G6 + drum sequencer)",
+      "url": "https://github.com/zeke431/ClaudeMosh/pull/254",
+      "head": "codex/june27-salvage-wave1",
+      "base": "main",
+      "createdAt": "2026-07-09T06:15:59Z",
+      "isDraft": true,
+      "mergeable": "MERGEABLE",
+      "classification": "needs-gate",
+      "riskTier": "needs-local-gate",
+      "demoRelevance": "Demo-adjacent UI salvage, but not multiplayer-core.",
+      "nextAction": "Keep draft; revisit after AL-020/AL-011/AL-010 advance."
+    },
+    {
+      "number": 233,
+      "title": "feat(fms): pipeline correction - extract real lyrics from mumbles, correct only nonsense, overlap-verify every render",
+      "url": "https://github.com/zeke431/ClaudeMosh/pull/233",
+      "head": "claude/fms-extraction",
+      "base": "main",
+      "createdAt": "2026-07-05T02:27:29Z",
+      "isDraft": false,
+      "mergeable": "MERGEABLE",
+      "classification": "parked",
+      "riskTier": "parked",
+      "demoRelevance": "FMS lane, not multiplayer-core.",
+      "nextAction": "Do not route through this coordinator."
+    },
+    {
+      "number": 197,
+      "title": "Promote r7 research recipe corpus",
+      "url": "https://github.com/zeke431/ClaudeMosh/pull/197",
+      "head": "codex/r7-research-promotion-clean",
+      "base": "main",
+      "createdAt": "2026-07-01T21:35:51Z",
+      "isDraft": false,
+      "mergeable": "CONFLICTING",
+      "classification": "human-gated",
+      "riskTier": "human-gated",
+      "demoRelevance": "Research/corpus lane; source material only for demo coordinator.",
+      "nextAction": "Park until explicitly resumed outside multiplayer demo loop."
+    },
+    {
+      "number": 176,
+      "title": "feat(rl): on-device GRPO - Rung-1 harness + Rung-2 audio-reward host (policy <-> teardown Reward)",
+      "url": "https://github.com/zeke431/ClaudeMosh/pull/176",
+      "head": "claude/funny-mendel-aeca12",
+      "base": "main",
+      "createdAt": "2026-06-28T02:37:12Z",
+      "isDraft": false,
+      "mergeable": "CONFLICTING",
+      "classification": "human-gated",
+      "riskTier": "human-gated",
+      "demoRelevance": "Large RL/reward stack; source material only.",
+      "nextAction": "Park."
+    }
+  ],
+  "backlog": [
+    {
+      "id": "AL-020",
+      "title": "Fail mp-live-smoke on PARTIAL",
+      "status": "ready",
+      "riskTier": "auto-eligible",
+      "queueRank": 1,
+      "requiredGate": "Focused shell regression for PASS/FAIL/PARTIAL plus cheap gate.",
+      "nextAction": "Start first in a fresh branch/worktree; no runtime code required."
+    },
+    {
+      "id": "AL-011",
+      "title": "Cover multiplayer lock-classifier drift",
+      "status": "ready",
+      "riskTier": "human-gated",
+      "queueRank": 2,
+      "requiredGate": "Native tests plus full native gate before human merge approval.",
+      "nextAction": "Prepare only after AL-020; do not auto-merge."
+    },
+    {
+      "id": "AL-010",
+      "title": "Route live multiplayer commits through the MoshOps seam",
+      "status": "ready",
+      "riskTier": "human-gated",
+      "queueRank": 3,
+      "requiredGate": "Native build, selftest x3, focused multiplayer proof, and human approval.",
+      "nextAction": "Prepare only after AL-011; do not auto-merge."
+    }
+  ],
+  "decisions": [
+    {
+      "decision": "IDLE",
+      "reason": "Dry-run pass wrote coordinator artifacts and found the next safe work item, but did not create threads or merge because STOP is present and the root checkout is dirty."
+    },
+    {
+      "decision": "NEXT_AL_020",
+      "reason": "AL-020 is a cheap verification-signal fix and the first multiplayer-core queue item."
+    },
+    {
+      "decision": "PARK_NON_CORE_PRS",
+      "reason": "All open PRs are non-core, draft, conflicting, or human-gated for this coordinator."
+    }
+  ],
+  "actionsTaken": [
+    "Fetched origin with prune.",
+    "Listed open PRs.",
+    "Listed ClaudeMosh Codex threads.",
+    "Read multiplayer-core backlog entries.",
+    "Created docs/demo-loop runbook, schema, ledger, and dry-run snapshot.",
+    "Did not archive or create threads.",
+    "Did not edit, merge, close, mark ready, or label any PR."
+  ]
+}

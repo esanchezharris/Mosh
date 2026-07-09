@@ -1,0 +1,171 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zeke431/ClaudeMosh/docs/demo-loop/state.schema.json",
+  "title": "Mosh multiplayer demo coordinator pass state",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "generatedAt",
+    "mode",
+    "cwd",
+    "trunk",
+    "stopSentinel",
+    "dirtyWorktree",
+    "truthSources",
+    "threads",
+    "prs",
+    "backlog",
+    "decisions",
+    "actionsTaken"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1
+    },
+    "generatedAt": {
+      "type": "string",
+      "description": "ISO-8601 timestamp for the coordinator pass."
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["dry-run", "live"]
+    },
+    "cwd": {
+      "type": "string"
+    },
+    "trunk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["remote", "branch", "localStatus"],
+      "properties": {
+        "remote": { "type": "string" },
+        "branch": { "type": "string" },
+        "localStatus": { "type": "string" }
+      }
+    },
+    "stopSentinel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "present", "effect"],
+      "properties": {
+        "path": { "type": "string" },
+        "present": { "type": "boolean" },
+        "effect": { "type": "string" }
+      }
+    },
+    "dirtyWorktree": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hasUnrelatedWork", "summary"],
+      "properties": {
+        "hasUnrelatedWork": { "type": "boolean" },
+        "summary": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "truthSources": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "threads": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["threadId", "hostId", "title", "status", "role", "nextAction"],
+        "properties": {
+          "threadId": { "type": "string" },
+          "hostId": { "type": "string" },
+          "title": { "type": "string" },
+          "status": { "type": "string" },
+          "role": {
+            "type": "string",
+            "enum": ["coordinator", "canonical-input", "non-core", "duplicate-candidate", "parked"]
+          },
+          "nextAction": { "type": "string" }
+        }
+      }
+    },
+    "prs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "number",
+          "title",
+          "url",
+          "head",
+          "base",
+          "createdAt",
+          "isDraft",
+          "mergeable",
+          "classification",
+          "riskTier",
+          "demoRelevance",
+          "nextAction"
+        ],
+        "properties": {
+          "number": { "type": "integer" },
+          "title": { "type": "string" },
+          "url": { "type": "string" },
+          "head": { "type": "string" },
+          "base": { "type": "string" },
+          "createdAt": { "type": "string" },
+          "isDraft": { "type": "boolean" },
+          "mergeable": { "type": "string" },
+          "classification": {
+            "type": "string",
+            "enum": ["merge-candidate", "needs-gate", "draft", "parked", "human-gated"]
+          },
+          "riskTier": {
+            "type": "string",
+            "enum": ["auto-eligible", "needs-local-gate", "human-gated", "parked"]
+          },
+          "demoRelevance": { "type": "string" },
+          "nextAction": { "type": "string" }
+        }
+      }
+    },
+    "backlog": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "title", "status", "riskTier", "queueRank", "requiredGate", "nextAction"],
+        "properties": {
+          "id": { "type": "string" },
+          "title": { "type": "string" },
+          "status": { "type": "string" },
+          "riskTier": {
+            "type": "string",
+            "enum": ["auto-eligible", "needs-local-gate", "human-gated", "parked"]
+          },
+          "queueRank": { "type": "integer" },
+          "requiredGate": { "type": "string" },
+          "nextAction": { "type": "string" }
+        }
+      }
+    },
+    "decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["decision", "reason"],
+        "properties": {
+          "decision": { "type": "string" },
+          "reason": { "type": "string" }
+        }
+      }
+    },
+    "actionsTaken": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}

@@ -1,0 +1,272 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-07-09T07:23:46Z",
+  "mode": "live",
+  "cwd": "/Users/emiliosanchez-harris/Documents/ClaudeMosh",
+  "trunk": {
+    "remote": "origin",
+    "branch": "main",
+    "localStatus": "main...origin/main [ahead 3]"
+  },
+  "stopSentinel": {
+    "path": "docs/auto-loop/STOP",
+    "present": true,
+    "effect": "No merge, thread creation, or old auto-loop rearm action allowed from this pass."
+  },
+  "dirtyWorktree": {
+    "hasUnrelatedWork": true,
+    "summary": [
+      "Root checkout still has unrelated dirty work in docs/auto-loop, docs/resumption, and service/sft.",
+      "Coordinator edits stayed under docs/demo-loop and scripts/demo-loop.",
+      "AL-020, PR #254 review, and AL-011 setup each used separate worktrees."
+    ]
+  },
+  "truthSources": [
+    "git fetch --prune origin",
+    "gh pr list --state open --limit 60 --json number,title,headRefName,baseRefName,isDraft,mergeable,reviewDecision,createdAt,updatedAt,url",
+    "gh pr view 254 --json number,title,isDraft,mergeable,headRefName,baseRefName,url,files,commits",
+    "gh pr view 259 --json number,title,url,isDraft,mergeable,headRefName,baseRefName,commits,files",
+    "docs/auto-loop/STOP",
+    "Codex list_threads query=ClaudeMosh limit=30",
+    "AL-020 PR worktree status and fixture/live-smoke artifacts",
+    "PR #254 review worktree focused UI gates",
+    "AL-011 worktree status and first-pass file read"
+  ],
+  "threads": [
+    {
+      "threadId": "019f4595-32ae-7e91-a8d6-67b7c09c7df1",
+      "hostId": "local",
+      "title": "Automate multiplayer demo loop",
+      "status": "active",
+      "role": "coordinator",
+      "nextAction": "Continue as the canonical coordinator thread."
+    },
+    {
+      "threadId": "019f44a0-4a44-7481-974d-1678aa11fe65",
+      "hostId": "local",
+      "title": "Review open PRs and branches",
+      "status": "idle/unread",
+      "role": "canonical-input",
+      "nextAction": "Use as PR and stale-branch triage evidence; do not create a duplicate review thread."
+    },
+    {
+      "threadId": "019f4487-d04b-7e02-ac62-d544fcfc5eeb",
+      "hostId": "local",
+      "title": "Monitor training job",
+      "status": "idle/unread",
+      "role": "non-core",
+      "nextAction": "Leave separate; training monitor is outside multiplayer-core scope."
+    },
+    {
+      "threadId": "019f4492-f998-75d0-a124-88b7de6ca18e",
+      "hostId": "local",
+      "title": "Bridge musical eval into training",
+      "status": "idle",
+      "role": "non-core",
+      "nextAction": "Leave separate; training/eval bridge is outside the multiplayer demo coordinator."
+    },
+    {
+      "threadId": "019f4486-d66d-7610-a6e3-ad517d1cb9ce",
+      "hostId": "local",
+      "title": "songfinisher",
+      "status": "idle",
+      "role": "non-core",
+      "nextAction": "Leave separate; FMS lane is outside multiplayer-core scope."
+    },
+    {
+      "threadId": "019f44a0-29c6-7753-b1c4-025d51b0a409",
+      "hostId": "local",
+      "title": "Refine UI aesthetics",
+      "status": "idle",
+      "role": "non-core",
+      "nextAction": "Leave separate; broad UI polish is not the coordinator's first queue."
+    }
+  ],
+  "prs": [
+    {
+      "number": 259,
+      "title": "Fail mp-live-smoke on partial sync",
+      "url": "https://github.com/zeke431/ClaudeMosh/pull/259",
+      "head": "codex/al-020-mp-live-smoke-partial",
+      "base": "main",
+      "createdAt": "2026-07-09T07:19:13Z",
+      "isDraft": false,
+      "mergeable": "MERGEABLE",
+      "classification": "needs-gate",
+      "riskTier": "auto-eligible",
+      "demoRelevance": "Multiplayer-core AL-020 verification-signal fix.",
+      "nextAction": "Review PR. Real live smoke is currently blocked before room-code creation by relay reachability: could not reach the relay (MOSH_RELAY_URL). Evidence comment: https://github.com/zeke431/ClaudeMosh/pull/259#issuecomment-4922654186. STOP prevents auto-merge."
+    },
+    {
+      "number": 258,
+      "title": "Restore r7 audition profile on current main",
+      "url": "https://github.com/zeke431/ClaudeMosh/pull/258",
+      "head": "codex/r7-audition-recut",
+      "base": "main",
+      "createdAt": "2026-07-09T06:32:14Z",
+      "isDraft": true,
+      "mergeable": "MERGEABLE",
+      "classification": "draft",
+      "riskTier": "parked",
+      "demoRelevance": "Non-core r7 audition lane.",
+      "nextAction": "Do not spawn coordinator work."
+    },
+    {
+      "number": 257,
+      "title": "Polish AppV2 shell wave 1 and wave 2",
+      "url": "https://github.com/zeke431/ClaudeMosh/pull/257",
+      "head": "codex/v2-wave1-ui-polish",
+      "base": "main",
+      "createdAt": "2026-07-09T06:25:40Z",
+      "isDraft": false,
+      "mergeable": "MERGEABLE",
+      "classification": "parked",
+      "riskTier": "parked",
+      "demoRelevance": "Useful UI polish, but not multiplayer-core.",
+      "nextAction": "Leave to UI lane unless it blocks multiplayer demo readiness."
+    },
+    {
+      "number": 256,
+      "title": "Prepare r5 data bridge while r4 runs",
+      "url": "https://github.com/zeke431/ClaudeMosh/pull/256",
+      "head": "codex/r5-prep-bridge",
+      "base": "main",
+      "createdAt": "2026-07-09T06:20:19Z",
+      "isDraft": false,
+      "mergeable": "MERGEABLE",
+      "classification": "parked",
+      "riskTier": "parked",
+      "demoRelevance": "Training lane, not multiplayer-core.",
+      "nextAction": "Do not merge or continue from this coordinator."
+    },
+    {
+      "number": 255,
+      "title": "Design-system Phase 2 re-cut - token cleanup + visual gate",
+      "url": "https://github.com/zeke431/ClaudeMosh/pull/255",
+      "head": "codex/pr224-recut-visual-gate",
+      "base": "main",
+      "createdAt": "2026-07-09T06:16:15Z",
+      "isDraft": true,
+      "mergeable": "MERGEABLE",
+      "classification": "draft",
+      "riskTier": "parked",
+      "demoRelevance": "Design-system lane, not multiplayer-core.",
+      "nextAction": "Leave draft outside coordinator queue."
+    },
+    {
+      "number": 254,
+      "title": "Rescue June 27 demo-gap UI slices (G2a/G3/G6 + drum sequencer)",
+      "url": "https://github.com/zeke431/ClaudeMosh/pull/254",
+      "head": "codex/june27-salvage-wave1",
+      "base": "main",
+      "createdAt": "2026-07-09T06:15:59Z",
+      "isDraft": false,
+      "mergeable": "MERGEABLE",
+      "classification": "merge-candidate",
+      "riskTier": "auto-eligible",
+      "demoRelevance": "Demo-adjacent UI salvage; not multiplayer-core.",
+      "nextAction": "Ready for normal review after focused gates. Do not auto-merge from this multiplayer coordinator."
+    },
+    {
+      "number": 233,
+      "title": "feat(fms): pipeline correction - extract real lyrics from mumbles, correct only nonsense, overlap-verify every render",
+      "url": "https://github.com/zeke431/ClaudeMosh/pull/233",
+      "head": "claude/fms-extraction",
+      "base": "main",
+      "createdAt": "2026-07-05T02:27:29Z",
+      "isDraft": false,
+      "mergeable": "MERGEABLE",
+      "classification": "parked",
+      "riskTier": "parked",
+      "demoRelevance": "FMS lane, not multiplayer-core.",
+      "nextAction": "Do not route through this coordinator."
+    },
+    {
+      "number": 197,
+      "title": "Promote r7 research recipe corpus",
+      "url": "https://github.com/zeke431/ClaudeMosh/pull/197",
+      "head": "codex/r7-research-promotion-clean",
+      "base": "main",
+      "createdAt": "2026-07-01T21:35:51Z",
+      "isDraft": false,
+      "mergeable": "CONFLICTING",
+      "classification": "human-gated",
+      "riskTier": "human-gated",
+      "demoRelevance": "Research/corpus lane; source material only for demo coordinator.",
+      "nextAction": "Park until explicitly resumed outside multiplayer demo loop."
+    },
+    {
+      "number": 176,
+      "title": "feat(rl): on-device GRPO - Rung-1 harness + Rung-2 audio-reward host (policy <-> teardown Reward)",
+      "url": "https://github.com/zeke431/ClaudeMosh/pull/176",
+      "head": "claude/funny-mendel-aeca12",
+      "base": "main",
+      "createdAt": "2026-06-28T02:37:12Z",
+      "isDraft": false,
+      "mergeable": "CONFLICTING",
+      "classification": "human-gated",
+      "riskTier": "human-gated",
+      "demoRelevance": "Large RL/reward stack; source material only.",
+      "nextAction": "Park."
+    }
+  ],
+  "backlog": [
+    {
+      "id": "AL-020",
+      "title": "Fail mp-live-smoke on PARTIAL",
+      "status": "pr-open",
+      "riskTier": "auto-eligible",
+      "queueRank": 1,
+      "requiredGate": "Focused shell regression for PASS/FAIL/PARTIAL plus real relay smoke when relay is reachable.",
+      "nextAction": "Review PR #259. Fix relay reachability or provide MOSH_RELAY_URL before using live smoke as merge evidence."
+    },
+    {
+      "id": "AL-011",
+      "title": "Cover multiplayer lock-classifier drift",
+      "status": "worktree-started",
+      "riskTier": "human-gated",
+      "queueRank": 2,
+      "requiredGate": "Native tests plus full native gate before human merge approval.",
+      "nextAction": "Implement in /Users/emiliosanchez-harris/Documents/ClaudeMosh-al011-lock-classifier. Do not auto-merge."
+    },
+    {
+      "id": "AL-010",
+      "title": "Route live multiplayer commits through the MoshOps seam",
+      "status": "ready",
+      "riskTier": "human-gated",
+      "queueRank": 3,
+      "requiredGate": "Native build, selftest x3, focused multiplayer proof, relay/live smoke, installed-app demo proof, and human approval.",
+      "nextAction": "Prepare only after AL-011; do not auto-merge."
+    }
+  ],
+  "decisions": [
+    {
+      "decision": "PR_259_OPENED",
+      "reason": "AL-020 branch was pushed and PR #259 opened with fixture verdict evidence."
+    },
+    {
+      "decision": "REAL_SMOKE_RELAY_BLOCKED",
+      "reason": "The real smoke exited 1 before room-code creation because mp_create_session could not reach the relay (MOSH_RELAY_URL)."
+    },
+    {
+      "decision": "PR_254_READY_FOR_REVIEW",
+      "reason": "Focused UI gates passed and the branch is UI-only demo-adjacent work; it was marked ready for review but not merged by the coordinator."
+    },
+    {
+      "decision": "AL_011_WORKTREE_STARTED",
+      "reason": "Fresh human-gated AL-011 worktree was created from origin/main after AL-020 had an open PR."
+    }
+  ],
+  "actionsTaken": [
+    "Pushed codex/al-020-mp-live-smoke-partial.",
+    "Opened PR #259.",
+    "Ran real mp-live-smoke against the current release binary and recorded relay reachability failure.",
+    "Posted PR #259 live-smoke blocker evidence.",
+    "Ran PR #254 focused typecheck, Vitest, Playwright, and diff whitespace gates.",
+    "Marked PR #254 ready for review and posted gate evidence.",
+    "Created /Users/emiliosanchez-harris/Documents/ClaudeMosh-al011-lock-classifier on codex/al-011-lock-classifier-drift.",
+    "Did not merge any PR.",
+    "Did not archive or create Codex threads.",
+    "Did not rearm the old auto-loop workflow."
+  ]
+}
