@@ -6226,10 +6226,31 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
         const int waitTimeoutMs = juce::jmax (1000, juce::SystemStats::getEnvironmentVariable (
             "MOSH_RENDER_WAIT_TIMEOUT_MS", defaultWaitMs).getIntValue());
         const int maxPolls = juce::jmax (1, waitTimeoutMs / 50);
+        const int statusConnectMs = adapter == "soulx" ? 350 : 1000;
+        const int healthConnectMs = 250;
+        const int maxSilentStatusPolls = adapter == "soulx" ? 3 : 5;
+        int silentStatusPolls = 0;
         juce::String lastErr;
         for (int i = 0; i < maxPolls; ++i)   // default ~120s; PC CUDA cold loads can opt into longer waits
         {
-            auto st = jobManager.jobStatus (jobId);
+            auto st = jobManager.jobStatus (jobId, statusConnectMs);
+            const bool statusReachable = st.isObject();
+            if (! statusReachable)
+            {
+                ++silentStatusPolls;
+                if (output.existsAsFile() && manifest.existsAsFile())
+                    break;
+                if (silentStatusPolls >= maxSilentStatusPolls && ! jobManager.isHealthy (healthConnectMs))
+                {
+                    lastErr = "generative service stopped answering /status and /health while waiting for "
+                              + adapter + " render " + jobId;
+                    break;
+                }
+                juce::Thread::sleep (50);
+                continue;
+            }
+
+            silentStatusPolls = 0;
             const auto status = st.getProperty ("status", var()).toString();
             if (const auto err = st.getProperty ("error", var()).toString(); err.isNotEmpty()) lastErr = err;
             emit ("layer_render_progress", [&] { auto* o = new DynamicObject();
@@ -6255,12 +6276,34 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
     // soulx's real SSH backend runs up to 900s — poll long enough that a legitimate
     // slow render isn't abandoned as a false 'error' while the job completes unseen.
     const int asyncPolls = node[ids::modelAdapter].toString() == "soulx" ? 9600 : 1800;
-    std::thread ([this, clipId, jobId, output, manifest, fp, asyncPolls, submitEpoch]
+    const auto asyncAdapter = node[ids::modelAdapter].toString();
+    std::thread ([this, clipId, jobId, output, manifest, fp, asyncPolls, submitEpoch, asyncAdapter]
     {
+        const int statusConnectMs = asyncAdapter == "soulx" ? 350 : 1000;
+        const int healthConnectMs = 250;
+        const int maxSilentStatusPolls = asyncAdapter == "soulx" ? 3 : 5;
+        int silentStatusPolls = 0;
         juce::String lastErr;
         for (int i = 0; i < asyncPolls; ++i)   // 100ms ticks: ~180s default, ~960s soulx
         {
-            auto st = jobManager.jobStatus (jobId);
+            auto st = jobManager.jobStatus (jobId, statusConnectMs);
+            const bool statusReachable = st.isObject();
+            if (! statusReachable)
+            {
+                ++silentStatusPolls;
+                if (output.existsAsFile() && manifest.existsAsFile())
+                    break;
+                if (silentStatusPolls >= maxSilentStatusPolls && ! jobManager.isHealthy (healthConnectMs))
+                {
+                    lastErr = "generative service stopped answering /status and /health while waiting for "
+                              + asyncAdapter + " render " + jobId;
+                    break;
+                }
+                juce::Thread::sleep (100);
+                continue;
+            }
+
+            silentStatusPolls = 0;
             const auto status = st.getProperty ("status", juce::var()).toString();
             const auto progress = st.getProperty ("progress", 0.0);
             if (const auto err = st.getProperty ("error", juce::var()).toString(); err.isNotEmpty()) lastErr = err;
