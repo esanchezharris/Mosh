@@ -54,4 +54,4 @@ export type Snap = {
   controller?: ControllerState;
 };
 
-export type Button = "record" | "keep" | "again" | "hear" | "stop";
+export type Button = "record" | "keep" | "again" | "hear" | "marker" | "stop";

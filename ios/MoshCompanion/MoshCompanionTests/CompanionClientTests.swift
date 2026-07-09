@@ -293,6 +293,28 @@ final class CompanionClientTests: XCTestCase {
         XCTAssertTrue(client.commands.allSatisfy { $0.args["issuedAtPhoneMs"] is Double })
     }
 
+    func testPutMeInSendsRecordWithPhoneMetadataAndSelectedTrack() async {
+        let client = MockCompanionClient()
+        client.snapshotValue = MoshSnapshot(
+            tracks: [
+                MoshTrack(id: "track-1", index: 0, name: "Vox", clips: [])
+            ],
+            transport: MoshTransport(playing: false, recording: false, position: 0, looping: false)
+        )
+        let store = CompanionStore(client: client)
+
+        await store.refresh()
+        await store.runPutMeIn()
+
+        XCTAssertEqual(client.commands.map(\.command), ["set_transport"])
+        XCTAssertEqual(client.commands[0].args["action"] as? String, "record")
+        XCTAssertEqual(client.commands[0].args["trackId"] as? String, "track-1")
+        XCTAssertEqual(client.commands[0].args["source"] as? String, "phone_controller")
+        XCTAssertEqual(client.commands[0].args["controllerEvent"] as? String, "PUT_ME_IN")
+        XCTAssertTrue(client.commands[0].args["issuedAtPhoneMs"] is Double)
+        XCTAssertEqual(store.receipts.first, "Put me in")
+    }
+
     func testOfflineControllerEventIsSuppressed() async {
         let client = MockCompanionClient()
         let store = CompanionStore(client: client)

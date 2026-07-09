@@ -64,6 +64,19 @@ describe("planFor", () => {
     ]);
   });
 
+  it("marker flags the current position and active clip", () => {
+    const s = snap({
+      transport: { playing: false, recording: false, position: 9.25 },
+      controller: { take: { exists: true, clipId: "c9" } },
+    });
+    expect(planFor("marker", s).cmds).toEqual([
+      {
+        command: "mark_take",
+        args: { clipId: "c9", position: 9.25, source: "phone_controller", controllerLabel: "flagged" },
+      },
+    ]);
+  });
+
   it("stop stops the transport", () => {
     expect(planFor("stop", snap()).cmds).toEqual([
       { command: "set_transport", args: { action: "stop", source: "phone_controller" } },

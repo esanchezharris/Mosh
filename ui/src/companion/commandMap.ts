@@ -68,6 +68,21 @@ export function planFor(button: Button, snap: Snap | null): Plan {
         ],
       };
 
+    case "marker":
+      return {
+        cmds: [
+          {
+            command: "mark_take",
+            args: {
+              ...(take?.clipId ? { clipId: take.clipId } : {}),
+              position: transport?.position ?? 0,
+              source: SRC,
+              controllerLabel: "flagged",
+            },
+          },
+        ],
+      };
+
     case "stop": // STOP — stop the transport (lands the take if recording)
       return { cmds: [{ command: "set_transport", args: { action: "stop", source: SRC } }] };
   }

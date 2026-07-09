@@ -5,12 +5,11 @@
 
 import type { Button } from "./types";
 
-export const TILES: Button[] = ["record", "keep", "again", "hear", "stop"];
+export const TILES: Button[] = ["keep", "again", "hear", "marker", "record", "stop"];
 
-// Column span in a 2-col grid. PUT ME IN is the big one (full width).
-export const SPAN: Record<Button, number> = { record: 2, keep: 1, again: 1, hear: 1, stop: 1 };
+export const SPAN: Record<Button, number> = { record: 1, keep: 1, again: 1, hear: 1, marker: 1, stop: 1 };
 
-export const DEFAULT_ORDER: Button[] = ["record", "keep", "again", "hear", "stop"];
+export const DEFAULT_ORDER: Button[] = ["keep", "again", "hear", "marker", "record", "stop"];
 
 export type Layout = { order: Button[]; navPos: "top" | "bottom" };
 

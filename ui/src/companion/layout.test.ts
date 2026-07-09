@@ -7,9 +7,10 @@ describe("sanitizeOrder", () => {
     expect(sanitizeOrder(["stop", "bogus", "stop", "keep"])).toEqual([
       "stop",
       "keep",
-      "record",
       "again",
       "hear",
+      "marker",
+      "record",
     ]);
   });
   it("returns the full default set for junk input", () => {
@@ -19,13 +20,13 @@ describe("sanitizeOrder", () => {
 });
 
 describe("moveInOrder", () => {
-  const base: Button[] = ["record", "keep", "again", "hear", "stop"];
+  const base: Button[] = ["keep", "again", "hear", "marker", "record", "stop"];
   it("moves a tile to a new index (reflow)", () => {
-    expect(moveInOrder(base, "stop", 0)).toEqual(["stop", "record", "keep", "again", "hear"]);
-    expect(moveInOrder(base, "record", 2)).toEqual(["keep", "again", "record", "hear", "stop"]);
+    expect(moveInOrder(base, "stop", 0)).toEqual(["stop", "keep", "again", "hear", "marker", "record"]);
+    expect(moveInOrder(base, "record", 2)).toEqual(["keep", "again", "record", "hear", "marker", "stop"]);
   });
   it("clamps the target index and is a no-op for unknown ids", () => {
-    expect(moveInOrder(base, "keep", 99)).toEqual(["record", "again", "hear", "stop", "keep"]);
+    expect(moveInOrder(base, "keep", 99)).toEqual(["again", "hear", "marker", "record", "stop", "keep"]);
     expect(moveInOrder(base, "zzz" as Button, 0)).toEqual(base);
   });
   it("does not mutate the input", () => {
@@ -40,12 +41,12 @@ describe("parse / serialize", () => {
     expect(parse(null)).toEqual({ order: DEFAULT_ORDER, navPos: "bottom" });
   });
   it("round-trips through serialize", () => {
-    const layout = { order: ["stop", "record", "keep", "again", "hear"] as Button[], navPos: "top" as const };
+    const layout = { order: ["stop", "record", "keep", "again", "hear", "marker"] as Button[], navPos: "top" as const };
     expect(parse(serialize(layout))).toEqual(layout);
   });
   it("sanitizes a partial/corrupt stored order", () => {
     expect(parse('{"order":["stop","junk"],"navPos":"top"}')).toEqual({
-      order: ["stop", "record", "keep", "again", "hear"],
+      order: ["stop", "keep", "again", "hear", "marker", "record"],
       navPos: "top",
     });
     expect(parse("{not json")).toEqual({ order: DEFAULT_ORDER, navPos: "bottom" });
@@ -61,7 +62,7 @@ describe("load / save", () => {
         mem[k] = v;
       },
     };
-    save(storage, { order: ["hear", "record", "keep", "again", "stop"], navPos: "top" });
-    expect(load(storage)).toEqual({ order: ["hear", "record", "keep", "again", "stop"], navPos: "top" });
+    save(storage, { order: ["hear", "record", "keep", "again", "marker", "stop"], navPos: "top" });
+    expect(load(storage)).toEqual({ order: ["hear", "record", "keep", "again", "marker", "stop"], navPos: "top" });
   });
 });
