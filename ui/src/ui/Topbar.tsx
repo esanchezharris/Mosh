@@ -48,7 +48,7 @@ export function Topbar({ snapshot }: { snapshot: Snapshot }) {
 
         <div className="read">
           <span className="pos tc" data-testid="position">{bbs}</span>
-          <span className="bpm tc">{Math.round(snapshot.session.tempo)} BPM · {snapshot.session.timeSigNumerator ?? 4}/{snapshot.session.timeSigDenominator ?? 4}</span>
+          <TempoMeterControl snapshot={snapshot} />
         </div>
 
         <div className="master-meter" title="Master output level">
@@ -64,6 +64,45 @@ export function Topbar({ snapshot }: { snapshot: Snapshot }) {
       <TopbarTools snapshot={snapshot} />
       <ViewToggle />
     </header>
+  );
+}
+
+// Editable tempo + time-signature + a metronome toggle, sitting by the timecode.
+// Pure command surface: each edit is a set_tempo / set_time_signature, and the
+// metronome button is a set_metronome — all through store.exec, no engine concepts.
+// The uncontrolled number inputs re-sync from the snapshot via a value-keyed remount
+// (so undo/redo and remote edits reflow into the field).
+function TempoMeterControl({ snapshot }: { snapshot: Snapshot }) {
+  const exec = useStore((s) => s.exec);
+  const bpm = Math.round(snapshot.session.tempo);
+  const num = snapshot.session.timeSigNumerator ?? 4;
+  const den = snapshot.session.timeSigDenominator ?? 4;
+  const metronome = Boolean(snapshot.session.metronome);
+  const blurOnEnter = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+  };
+  return (
+    <div className="tempo-ctl tc" data-testid="tempo-control">
+      <input className="btn ghost tempo-bpm" type="number" aria-label="Tempo" min={20} max={300}
+        key={`bpm-${bpm}`} defaultValue={bpm} title="Tempo (BPM)"
+        onBlur={(e) => void exec("set_tempo", { bpm: Number(e.target.value) })}
+        onKeyDown={blurOnEnter} />
+      <span className="tempo-unit">BPM</span>
+      <span className="tempo-sig">
+        <input className="btn ghost tempo-num" type="number" aria-label="Time signature numerator" min={1} max={32}
+          key={`ts-num-${num}`} defaultValue={num} title="Time signature numerator"
+          onBlur={(e) => void exec("set_time_signature", { numerator: Number(e.target.value), denominator: den })}
+          onKeyDown={blurOnEnter} />
+        <span className="tempo-slash">/</span>
+        <input className="btn ghost tempo-den" type="number" aria-label="Time signature denominator" min={1} max={32}
+          key={`ts-den-${den}`} defaultValue={den} title="Time signature denominator"
+          onBlur={(e) => void exec("set_time_signature", { numerator: num, denominator: Number(e.target.value) })}
+          onKeyDown={blurOnEnter} />
+      </span>
+      <button className={`btn icon metronome${metronome ? " on" : ""}`} aria-label="Metronome" aria-pressed={metronome}
+        data-state={metronome ? "on" : "off"} title="Metronome click"
+        onClick={() => void exec("set_metronome", { enabled: !metronome })}>♩</button>
+    </div>
   );
 }
 

@@ -149,6 +149,10 @@
 .v2-chip-num { width: 52px; text-align: center; -moz-appearance: textfield; }
 .v2-chip-num::-webkit-outer-spin-button, .v2-chip-num::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .v2-chip-sel { background: var(--v2-ground-card); }
+.v2-timesig { display: inline-flex; align-items: center; gap: 2px; }
+.v2-timesig .v2-chip-num { width: 34px; }
+.v2-timesig-slash { color: var(--v2-ground-dim); opacity: 0.7; }
+.v2-chip-toggle[data-on="true"] { color: var(--v2-accent, #b6ff3c); border-color: var(--v2-accent, #b6ff3c); }
 
 /* the transport is a dark floating PILL; the readout is a light time CARD — both on cream */
 .v2-transport {
