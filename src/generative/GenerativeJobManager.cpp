@@ -238,9 +238,9 @@ juce::String GenerativeJobManager::submitJob (const juce::String& adapter,
     return r.getProperty ("jobId", var()).toString();
 }
 
-juce::var GenerativeJobManager::jobStatus (const juce::String& jobId)
+juce::var GenerativeJobManager::jobStatus (const juce::String& jobId, int connectMs)
 {
-    return httpGet ("/status?jobId=" + jobId);
+    return httpGet ("/status?jobId=" + jobId, connectMs);
 }
 
 void GenerativeJobManager::cancelJob (const juce::String& jobId)
