@@ -12,7 +12,7 @@ import { handleFast } from "../agent/performer";
 import { resolveSectionRework, planSectionRework } from "../agent/sectionScope";
 import { createVoiceInput, createContinuousVoiceInput, isVoiceSupported, type VoiceInput } from "../agent/voiceInput";
 import { createHandsFree, type HandsFree } from "../agent/handsFree";
-import { IconMic } from "./icons";
+import { IconArrowUp, IconMic } from "./icons";
 
 // Hands-free always-on listening. Owns the lifetime of the CONTINUOUS recognizer:
 // engages when the `handsFreeOn` toggle is true (and the tab is visible), disengages
@@ -239,7 +239,7 @@ export function AgentComposer() {
           onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
         />
         <button className="agent-send" data-testid="agent-send" disabled={agentBusy || !input.trim()} onClick={submit} aria-label="Send to Moshi">
-          <span aria-hidden="true">↑</span>
+          <IconArrowUp size={13} />
         </button>
       </div>
     </div>

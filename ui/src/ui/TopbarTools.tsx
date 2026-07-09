@@ -16,9 +16,37 @@ import { SettingsPanel } from "../settings/SettingsPanel";
 import { MultiplayerPanel } from "./MultiplayerPanel";
 import { ExportControls } from "./ExportControls";
 import { deriveTrainingJob } from "./trainingJobView";
+import {
+  IconCheck,
+  IconDownload,
+  IconFolder,
+  IconMoon,
+  IconRefresh,
+  IconSettings,
+  IconSun,
+  IconX,
+} from "./icons";
 
 // Small popover anchored under its trigger; closes on outside click / Esc.
-function Pop({ label, title, on, className, children }: { label: string; title: string; on?: boolean; className?: string; children: (close: () => void) => React.ReactNode }) {
+function Pop({
+  label,
+  title,
+  on,
+  className,
+  buttonClassName,
+  ariaLabel,
+  testId,
+  children,
+}: {
+  label: React.ReactNode;
+  title: string;
+  on?: boolean;
+  className?: string;
+  buttonClassName?: string;
+  ariaLabel?: string;
+  testId?: string;
+  children: (close: () => void) => React.ReactNode;
+}) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -30,9 +58,45 @@ function Pop({ label, title, on, className, children }: { label: string; title: 
   }, [open]);
   return (
     <div className={`pop-wrap${className ? " " + className : ""}`} ref={ref}>
-      <button className={`btn${open || on ? " on" : ""}`} title={title} aria-expanded={open} onClick={() => setOpen((v) => !v)}>{label}</button>
+      <button
+        type="button"
+        className={`btn${buttonClassName ? ` ${buttonClassName}` : ""}${open || on ? " on" : ""}`}
+        title={title}
+        aria-label={ariaLabel ?? title}
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        data-testid={testId}
+        onClick={() => setOpen((v) => !v)}
+      >
+        {label}
+      </button>
       {open && <div className="pop" role="dialog">{children(() => setOpen(false))}</div>}
     </div>
+  );
+}
+
+type ToolChromeProps = {
+  label?: React.ReactNode;
+  title?: string;
+  className?: string;
+  ariaLabel?: string;
+  testId?: string;
+};
+
+function ToolTrigger({
+  icon,
+  label,
+  compact = true,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  compact?: boolean;
+}) {
+  return (
+    <span className={`tool-trigger${compact ? " compact" : ""}`}>
+      <span className="tool-trigger-icon" aria-hidden="true">{icon}</span>
+      {!compact && <span className="tool-trigger-copy">{label}</span>}
+    </span>
   );
 }
 
@@ -45,15 +109,27 @@ export function TopbarTools({ snapshot }: { snapshot: Snapshot }) {
     <div className="topbar-tools">
       {/* In the redesign the File menu + Export move into the bottom-left "+" control. */}
       {!redesign && <FileMenu snapshot={snapshot} />}
-      <Pop label="🗀" title="Browse audio samples">{() => <SampleBrowser />}</Pop>
-      <Pop label="⚙" title="Settings" className="settings-pop">{() => <SettingsPanel snapshot={snapshot} />}</Pop>
+      <Pop label={<ToolTrigger icon={<IconFolder size={15} />} label="Browse audio samples" />} title="Browse audio samples" buttonClassName="icon">
+        {() => <SampleBrowser />}
+      </Pop>
+      <Pop label={<ToolTrigger icon={<IconSettings size={15} />} label="Settings" />} title="Settings" className="settings-pop" buttonClassName="icon">
+        {() => <SettingsPanel snapshot={snapshot} />}
+      </Pop>
       {!redesign && <ExportTool audioEnabled={audioEnabled} />}
       <TrainingTool training={snapshot.training ?? null} />
       <CommandLogTool />
       <RemoteTool />
       <MultiplayerTool />
       <HelpTool />
-      <button className="btn icon" title="Toggle theme" aria-label="Toggle light/dark theme" onClick={toggleTheme}>{theme === "dark" ? "☾" : "☀"}</button>
+      <button
+        type="button"
+        className="btn icon"
+        title="Toggle theme"
+        aria-label="Toggle light/dark theme"
+        onClick={toggleTheme}
+      >
+        {theme === "dark" ? <IconSun size={15} /> : <IconMoon size={15} />}
+      </button>
     </div>
   );
 }
@@ -69,7 +145,7 @@ function FileMenu({ snapshot }: { snapshot: Snapshot }) {
   const run = (id: ActionId, opts?: { file?: string; index?: number }) =>
     void runAction(id, { store: useStore.getState(), pickFiles, pickSaveFile }, opts);
   return (
-    <Pop label="File" title="File menu" className="menu-pop">
+    <Pop label="File" title="File menu" ariaLabel="File" className="menu-pop">
       {(close) => (
         <div className="menu-list" role="menu" data-testid="file-menu">
           {FILE_MENU.map((m) => (
@@ -102,7 +178,14 @@ function FileMenu({ snapshot }: { snapshot: Snapshot }) {
   );
 }
 
-export function TrainingTool({ training }: { training: TrainingState | null }) {
+export function TrainingTool({
+  training,
+  label,
+  title: buttonTitle,
+  className,
+  ariaLabel,
+  testId,
+}: { training: TrainingState | null } & ToolChromeProps) {
   const exec = useStore((s) => s.exec);
   const refresh = useStore((s) => s.refresh);
   const [title, setTitle] = useState("");
@@ -195,7 +278,13 @@ export function TrainingTool({ training }: { training: TrainingState | null }) {
   };
 
   return (
-    <Pop label="LoRA" title="Type-beat training" className="training-pop">
+    <Pop
+      label={label ?? "LoRA"}
+      title={buttonTitle ?? "Type-beat training"}
+      className={`training-pop${className ? ` ${className}` : ""}`}
+      ariaLabel={ariaLabel ?? "Type-beat training"}
+      testId={testId}
+    >
       {() => (
         <>
           <div className="pop-head">Type-Beat Training</div>
@@ -302,7 +391,7 @@ export function TrainingTool({ training }: { training: TrainingState | null }) {
 // Keyboard-shortcut help — the keyboard bindings now live in ONE place (the keymap
 // + useKeyboardShortcuts); the ruler/clip pointer gestures live in Arrange. Surfaced
 // here so they're discoverable (and mirrored by the File/Edit menus).
-export function HelpTool() {
+export function HelpTool({ label, title, className, ariaLabel, testId }: ToolChromeProps = {}) {
   const SHORTCUTS: [string, string][] = [
     ["⌘N · ⌘O", "New · Open project"],
     ["⌘S · ⇧⌘S", "Save · Save As"],
@@ -315,7 +404,13 @@ export function HelpTool() {
     ["Click ruler", "Seek · ⇧-drag sets the loop"],
   ];
   return (
-    <Pop label="?" title="Keyboard shortcuts" className="help-pop">
+    <Pop
+      label={label ?? "?"}
+      title={title ?? "Keyboard shortcuts"}
+      className={`help-pop${className ? ` ${className}` : ""}`}
+      ariaLabel={ariaLabel ?? "Keyboard shortcuts"}
+      testId={testId}
+    >
       {() => (
         <>
           <div className="pop-head">Shortcuts</div>
@@ -333,31 +428,41 @@ export function HelpTool() {
 
 function ExportTool({ audioEnabled }: { audioEnabled: boolean }) {
   return (
-    <Pop label="⤓" title={audioEnabled ? "Export the mix" : "No audio device — export disabled"}>
+    <Pop
+      label={<ToolTrigger icon={<IconDownload size={15} />} label="Export the mix" />}
+      title={audioEnabled ? "Export the mix" : "No audio device — export disabled"}
+      buttonClassName="icon"
+    >
       {() => <ExportControls audioEnabled={audioEnabled} />}
     </Pop>
   );
 }
 
-export function CommandLogTool() {
+export function CommandLogTool({ label, title, className, ariaLabel, testId }: ToolChromeProps = {}) {
   const exec = useStore((s) => s.exec);
   const [log, setLog] = useState<CommandLogData | null>(null);
   const [loading, setLoading] = useState(false);
   const load = async () => { setLoading(true); const r = await exec("get_command_log", { limit: 50 }); if (r.ok && r.data) setLog(r.data as CommandLogData); setLoading(false); };
   const entries = log?.entries ?? [];
   return (
-    <Pop label="☰" title="Command log">
+    <Pop
+      label={label ?? "☰"}
+      title={title ?? "Command log"}
+      className={className}
+      ariaLabel={ariaLabel ?? "Command log"}
+      testId={testId}
+    >
       {() => {
         if (!log && !loading) void load();
         return (
           <>
-            <div className="pop-head">Command log <button className="btn icon" title="Refresh" onClick={() => void load()}>↻</button></div>
+            <div className="pop-head">Command log <button className="btn icon" title="Refresh" aria-label="Refresh command log" onClick={() => void load()}><IconRefresh size={14} /></button></div>
             <div className="pop-note">{loading ? "Loading…" : `${entries.length} of ${log?.total ?? 0} · newest first`}</div>
             <div className="cmdlog-list" data-testid="command-log">
               {entries.length === 0 && !loading ? <div className="rack-empty">no commands yet</div> :
                 entries.map((e, i) => (
                   <div className={`cmdlog-row${e.ok ? "" : " err"}`} key={i}>
-                    <span className={`cmdlog-dot${e.ok ? " ok" : " err"}`}>{e.ok ? "●" : "✕"}</span>
+                    <span className={`cmdlog-dot${e.ok ? " ok" : " err"}`}>{e.ok ? <IconCheck size={12} /> : <IconX size={12} />}</span>
                     <span className="cmdlog-name tc" title={e.error ?? e.command}>{e.command}</span>
                     {e.undoable && <span className="cmdlog-badge">undo</span>}
                   </div>
@@ -372,17 +477,24 @@ export function CommandLogTool() {
 
 // MP-001 — 2-player session entry (the reserved B-5 slot). `on` lights when a
 // session is active so the topbar shows the live-collaboration state at a glance.
-export function MultiplayerTool() {
+export function MultiplayerTool({ label, title, className, ariaLabel, testId }: ToolChromeProps = {}) {
   const active = useStore((s) => s.mp.active);
   const peerCount = useStore((s) => Object.keys(s.peers).length);
   return (
-    <Pop label={active ? `Live · ${peerCount}` : "Multiplayer"} title="2-player session" on={active} className="mp-pop">
+    <Pop
+      label={label ?? (active ? `Live · ${peerCount}` : "Multiplayer")}
+      title={title ?? "2-player session"}
+      on={active}
+      className={`mp-pop${className ? ` ${className}` : ""}`}
+      ariaLabel={ariaLabel ?? (active ? `Multiplayer active with ${peerCount} peers` : "Open multiplayer tools")}
+      testId={testId}
+    >
       {() => <MultiplayerPanel />}
     </Pop>
   );
 }
 
-export function RemoteTool() {
+export function RemoteTool({ label, title, className, ariaLabel, testId }: ToolChromeProps = {}) {
   const remote = useStore((s) => s.remoteStatus);
   const start = useStore((s) => s.startRemotePairing);
   const stop = useStore((s) => s.stopRemote);
@@ -390,7 +502,14 @@ export function RemoteTool() {
   const pairing = remote?.pairing;
   const running = remote?.running ?? false;
   return (
-    <Pop label="iPhone" title="Pair iPhone companion" on={running} className="remote-pop">
+    <Pop
+      label={label ?? "iPhone"}
+      title={title ?? "Pair iPhone companion"}
+      on={running}
+      className={`remote-pop${className ? ` ${className}` : ""}`}
+      ariaLabel={ariaLabel ?? "Pair iPhone companion"}
+      testId={testId}
+    >
       {() => (
         <>
           <div className="pop-head">iPhone Companion</div>
