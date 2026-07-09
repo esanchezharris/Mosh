@@ -64,6 +64,7 @@ service/sft/.sft.env
 service/sft/.sft-data/
 service/sft/.adapters/
 service/sft/.fused/
+service/sft/.artifacts/
 service/__pycache__/
 **/__pycache__/
 *.pyc

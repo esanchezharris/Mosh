@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Minimal OpenAI-compatible server (stdlib http + transformers) for serving a
-fine-tuned LoRA adapter — the no-vllm fallback for the cloud SFT eval.
+fine-tuned LoRA adapter for the cloud SFT eval.
 
 vllm pins torch hard (it dragged a Vast.ai box to torch 2.11/cu130 and broke the
 CUDA runtime), so for just running the eval (~150 sequential calls) this serves the
