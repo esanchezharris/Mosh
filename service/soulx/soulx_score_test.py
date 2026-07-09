@@ -37,10 +37,11 @@ def SLOT(a, b, *pitches):
     return {"start": a, "end": b, "velocity": 90, "kind": "gap", "segments": segs}
 
 
-def LINE(text, slots, bar=0):
-    return {"text": text, "score": {"v": 1, "algo": "v3", "bar": bar, "bpm": 120.0,
-                                    "timeSig": [4, 4], "grid": "1/16", "clamped": False,
-                                    "slots": slots}}
+def LINE(text, slots, bar=0, asserted=True):
+    return {"text": text, "asserted": asserted,
+            "score": {"v": 1, "algo": "v3", "bar": bar, "bpm": 120.0,
+                      "timeSig": [4, 4], "grid": "1/16", "clamped": False,
+                      "slots": slots}}
 
 
 def toks(clip, key):
@@ -61,8 +62,8 @@ check("3 word events, type 2, take pitches",
       and toks(clip, "note_pitch")[1:] == ["57", "59", "60"], str(clip["text"]))
 check("word durations are the slot spans", all(abs(float(d) - 0.5) < 0.011 for d in toks(clip, "duration")[1:]),
       str(clip["duration"]))
-check("phonemes are en_-prefixed dash-joined ARPAbet",
-      all(p.startswith("en_") and "-" in p or p == "<SP>" for p in toks(clip, "phoneme")),
+check("phonemes are en_-prefixed ARPAbet",
+      all(p.startswith("en_") or p == "<SP>" for p in toks(clip, "phoneme")),
       str(clip["phoneme"]))
 check("time covers the full span in ms", clip["time"][0] == 0 and abs(clip["time"][1] - 2000) <= 20,
       str(clip["time"]))
@@ -110,13 +111,13 @@ check("a 0.6s gap between slots is an <SP> rest",
       toks(clip, "text") == ["hold", "<SP>", "flame"] and toks(clip, "note_type")[1] == "1"
       and abs(float(toks(clip, "duration")[1]) - 0.6) < 0.011, f"{clip['text']} {clip['duration']}")
 
-# ── 7. Gap slots (___) render as the 'la' placeholder; gibberish never crashes ─────────
 r = sx.author_score([LINE("hold ___ zzzqx", [SLOT(0.0, 0.5, 57), SLOT(0.5, 1.0, 59), SLOT(1.0, 1.5, 60)])])
+check("___ gap line is skipped, never rendered as placeholder words",
+      (not r.get("ok")) and r.get("error") == "no_asserted_scored_lines", str(r))
+r = sx.author_score([LINE("hold zzzqx", [SLOT(0.0, 0.5, 57), SLOT(0.5, 1.0, 60)])])
 clip = r["score"][0]
-check("___ gap slot sings 'la' (placeholder vocalization, never an invented word)",
-      toks(clip, "text")[1] == "la", str(clip["text"]))
 check("gibberish word gets fallback phones (no crash, still en_ ARPAbet)",
-      toks(clip, "phoneme")[2].startswith("en_"), str(clip["phoneme"]))
+      toks(clip, "phoneme")[1].startswith("en_"), str(clip["phoneme"]))
 
 # ── 8. Lines without a score are skipped + reported (never invented) ───────────────────
 r = sx.author_score([LINE("hold the flame", [SLOT(0.0, 0.5, 57), SLOT(0.5, 1.0, 59), SLOT(1.0, 1.5, 60)]),
@@ -125,8 +126,8 @@ check("scoreless line skipped + counted", r["ok"] and r["linesUsed"] == 1 and r[
       f"used={r.get('linesUsed')} skipped={r.get('linesSkipped')}")
 
 # ── 9. Empty / all-scoreless input -> clean error ───────────────────────────────────────
-r = sx.author_score([{"text": "no flow", "score": None}])
-check("no scored lines -> ok:false no_score", (not r.get("ok")) and r.get("error") == "no_scored_lines", str(r))
+r = sx.author_score([{"text": "no flow", "asserted": True, "score": None}])
+check("no scored lines -> ok:false no asserted score", (not r.get("ok")) and r.get("error") == "no_asserted_scored_lines", str(r))
 check("empty lines -> ok:false", not sx.author_score([]).get("ok"))
 
 # ── 9b. Duration-chain precision: cumulative drift stays sub-millisecond ───────────────

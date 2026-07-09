@@ -72,11 +72,13 @@ export type LyricLine = {
   rhymeStrictness: string;   // "perfect"|"slant"|"free" ("" ⇒ inherit sheet)
   locked: boolean;
   sectionId: string;
-  status: "empty" | "seed" | "generating" | "proposed" | "accepted" | "locked" | "skeleton" | string;
+  status: "empty" | "seed" | "generating" | "proposed" | "accepted" | "asserted" | "locked" | "skeleton" | string;
   proposals?: LyricProposal[];  // L2 — transient ranked proposals (cleared on accept/reject)
   regen?: number;
   analysis?: LyricAnalysis;     // L1 — precise phonology (from analyze_lyrics)
   hasScore?: boolean;           // FMS Phase-3 — line carries a persisted lyricScore (take flow)
+  asserted?: boolean;
+  singable?: boolean;
 };
 export type LyricSheet = {
   id: string;

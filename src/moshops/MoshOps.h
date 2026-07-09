@@ -86,6 +86,7 @@ private:
     juce::var cmdRegenerateLyric    (const juce::var& args);
     juce::var cmdCancelLyricJob     (const juce::var& args);
     juce::var cmdAcceptLyricProposal (const juce::var& args);  // undoable (commits chosen text) + taste label
+    juce::var cmdAssertLyricLine     (const juce::var& args);
     juce::var cmdRejectLyricProposal (const juce::var& args);  // clears proposals + taste label
     // LYR-L1 — precise per-line phonology (service; not undoable), analysis lands on the
     // line as a transient JSON blob → snapshot → the flow visualizer.

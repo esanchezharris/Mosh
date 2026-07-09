@@ -33,7 +33,7 @@ describe("mock sing render layer (FMS Phase-3)", () => {
     expect(String(r.error)).toContain("lyric sheet");
   });
 
-  it("skeleton flow marks lines hasScore; sing renders once the sheet exists", async () => {
+  it("skeleton flow needs asserted words before sing renders", async () => {
     const s = await snap();
     const track = s.tracks.find((t) => t.clips.some((c) => c.type === "wave"))!;
     const clipId = track.clips.find((c) => c.type === "wave")!.id;
@@ -43,37 +43,44 @@ describe("mock sing render layer (FMS Phase-3)", () => {
     const t2 = (await snap()).tracks.find((t) => t.id === track.id)!;
     expect(t2.lyricSheet).toBeTruthy();
     expect(t2.lyricSheet!.lines.every((l) => l.hasScore)).toBe(true);
+    expect(t2.lyricSheet!.lines.some((l) => l.singable)).toBe(false);
 
     expect((await exec("create_render_layer", { clipId, adapter: "soulx", mode: "sing" })).ok).toBe(true);
-    await exec("render_layer", { clipId });
+    const flowOnly = await exec("render_layer", { clipId });
+    expect(flowOnly.ok).toBe(false);
+    expect(String(flowOnly.error)).toContain("asserted words");
+
+    expect((await exec("confirm_skeleton", { trackId: track.id })).ok).toBe(true);
+    expect((await exec("complete_lyrics", { trackId: track.id })).ok).toBe(true);
+    expect((await exec("accept_lyric_proposal", { trackId: track.id, lineIndex: 0, proposalIndex: 0 })).ok).toBe(true);
+    expect((await exec("render_layer", { clipId })).ok).toBe(true);
     const rl = (await clipById(clipId))?.renderLayer;
     expect(rl?.status).toBe("ready");
     expect(rl?.hasArtifact).toBe(true);
     expect((await exec("accept_render", { clipId })).ok).toBe(true);
   });
 
-  it("a typed sheet has no take flow — sing render rejects like the real no_scored_lines", async () => {
-    // service/soulx/score.py author_score(): lines without a score blob are SKIPPED;
-    // ALL lines unscored => {"ok": false, "error": "no_scored_lines"} and the adapter
-    // raises — a typed-later sheet must not present as a healthy render.
+  it("a typed sheet has no take flow, so assertion alone is still not singable", async () => {
     const s = await snap();
     const track = s.tracks.find((t) => t.clips.some((c) => c.type === "wave"))!;
     const clipId = track.clips.find((c) => c.type === "wave")!.id;
     expect((await exec("create_lyric_sheet", { trackId: track.id })).ok).toBe(true);
-    expect((await exec("set_lyric_line", { trackId: track.id, lineIndex: 0, seedText: "typed by hand no take" })).ok).toBe(true);
+    expect((await exec("set_lyric_line", { trackId: track.id, lineIndex: 0, text: "typed by hand no take" })).ok).toBe(true);
+    expect((await exec("assert_lyric_line", { trackId: track.id, lineIndex: 0 })).ok).toBe(true);
     const t2 = (await snap()).tracks.find((t) => t.id === track.id)!;
     expect(t2.lyricSheet!.lines.some((l) => l.hasScore)).toBe(false);
+    expect(t2.lyricSheet!.lines.some((l) => l.singable)).toBe(false);
 
     expect((await exec("create_render_layer", { clipId, adapter: "soulx", mode: "sing" })).ok).toBe(true);
     const r = await exec("render_layer", { clipId });
     expect(r.ok).toBe(false);
-    expect(String(r.error)).toContain("no scored lines");
+    expect(String(r.error)).toContain("asserted words");
     const rl = (await clipById(clipId))?.renderLayer;
     expect(rl?.status).not.toBe("ready");
     expect(rl?.hasArtifact).toBeFalsy();
   });
 
-  it("partial coverage: a hand-added line carries no score, but the scored lines still sing", async () => {
+  it("partial coverage: asserted scored lines sing while a hand-added line is skipped", async () => {
     // The real backend SKIPS unscored lines and renders the rest (linesUsed/linesSkipped)
     // — the rejection must only fire at ZERO coverage, never at a mix.
     const s = await snap();
@@ -81,9 +88,14 @@ describe("mock sing render layer (FMS Phase-3)", () => {
     const clipId = track.clips.find((c) => c.type === "wave")!.id;
     await exec("build_skeleton_from_clip", { clipId });
     await new Promise((r) => setTimeout(r, 500));
+    expect((await exec("confirm_skeleton", { trackId: track.id })).ok).toBe(true);
+    expect((await exec("complete_lyrics", { trackId: track.id })).ok).toBe(true);
+    expect((await exec("accept_lyric_proposal", { trackId: track.id, lineIndex: 0, proposalIndex: 0 })).ok).toBe(true);
+    expect((await exec("accept_lyric_proposal", { trackId: track.id, lineIndex: 1, proposalIndex: 0 })).ok).toBe(true);
     expect((await exec("set_lyric_line", { trackId: track.id, lineIndex: 2, seedText: "typed later" })).ok).toBe(true);
     const lines = (await snap()).tracks.find((t) => t.id === track.id)!.lyricSheet!.lines;
     expect(lines.map((l) => Boolean(l.hasScore))).toEqual([true, true, false]);
+    expect(lines.map((l) => Boolean(l.singable))).toEqual([true, true, false]);
 
     expect((await exec("create_render_layer", { clipId, adapter: "soulx", mode: "sing" })).ok).toBe(true);
     expect((await exec("render_layer", { clipId })).ok).toBe(true);

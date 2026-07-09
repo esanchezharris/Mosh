@@ -345,6 +345,14 @@ function stopPlayback() {
 
 const num = (v: unknown, d = 0): number => (typeof v === "number" && isFinite(v) ? v : d);
 const str = (v: unknown, d = ""): string => (typeof v === "string" ? v : d);
+const completeLyricText = (text: string): boolean => {
+  const t = text.trim();
+  return Boolean(t && !t.includes("___") && /[\p{L}\p{N}]/u.test(t));
+};
+const refreshSingable = (line: LyricLine): void => {
+  line.asserted = line.status === "asserted" && completeLyricText(line.text);
+  line.singable = Boolean(line.hasScore && line.asserted);
+};
 function findClip(clipId: string): { track: Track; clip: Clip } | null {
   for (const track of snapshot.tracks)
     for (const clip of track.clips) if (clip.id === clipId) return { track, clip };
@@ -709,7 +717,8 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       if (args.sectionId != null) line.sectionId = str(args.sectionId, line.sectionId);
       // Content present → no longer "empty"; but a Phase-2 `skeleton` line keeps its status
       // while the producer edits the grid (the +/- syllable stepper) — confirm_skeleton flips it.
-      if (line.status !== "skeleton" && (line.text || line.seedText)) line.status = "seed";
+      if ((args.text != null || args.seedText != null) && line.status !== "skeleton" && (line.text || line.seedText)) line.status = "seed";
+      refreshSingable(line);
       invalidate(); return ok(command, { lineIndex: idx });
     }
     case "remove_lyric_line": {
@@ -769,11 +778,26 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       if (!p) return err(command, "no proposal at that index");
       pushUndo();
       l.text = p.text;
-      l.status = "accepted";
+      l.status = "asserted";
       delete l.proposals;
+      refreshSingable(l);
       mockCorpusLines += 1; // §7 — auto-accumulate the accepted line into the voice corpus
       invalidate();
       return ok(command, { text: p.text });
+    }
+    case "assert_lyric_line": {
+      const t = findTrack(str(args.trackId));
+      const l = t?.lyricSheet?.lines.find((x) => x.index === num(args.lineIndex, -1));
+      if (!l) return err(command, "no line at index");
+      const text = args.text != null ? str(args.text) : l.text;
+      if (!completeLyricText(text)) return err(command, "line needs complete words before it can be asserted");
+      pushUndo();
+      l.text = text.trim();
+      l.status = "asserted";
+      delete l.proposals;
+      refreshSingable(l);
+      invalidate();
+      return ok(command, { text: l.text });
     }
     case "get_lyric_corpus_stats":
       return ok(command, { lines: mockCorpusLines });
@@ -1161,11 +1185,8 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       if (f.clip.renderLayer.mode === "sing") {
         if (!f.track.lyricSheet)
           return err(command, "sing needs a lyric sheet on the clip's track (build a flow from a take first)");
-        // Real-backend parity (service/soulx/score.py author_score): lines without a
-        // lyricScore blob are SKIPPED — timing is never invented — and a sheet where NO
-        // line carries one (typed-later lines) is rejected as no_scored_lines.
-        if (!f.track.lyricSheet.lines.some((l) => l.hasScore))
-          return err(command, "no scored lines to sing — build a flow from a take first (build_skeleton_from_clip), then accept/write the words");
+        if (!f.track.lyricSheet.lines.some((l) => l.singable))
+          return err(command, "no asserted words to sing — assert the lyric line first");
       }
       f.clip.renderLayer.status = "ready"; f.clip.renderLayer.hasArtifact = true;
       // SING never auto-applies (mirrors MoshOps::finalizeRender): the guide vocal lands as an
@@ -1315,7 +1336,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
           index, role: "verse", seedText: Array.from({ length: target }).fill("___").join(" "),
           text: "", syllableTarget: target, syllableTol: 1, stress, rhymeGroup: rg,
           rhymeStrictness: "", locked: false, sectionId: "", status: "skeleton",
-          hasScore: true,   // Stage 1 lands the take's lyricScore with each skeleton line
+          hasScore: true, asserted: false, singable: false,
         });
         trk.lyricSheet = {
           id: `ls-${trk.id}`, grid: "1/8", language: "en", topic: "", mood: "",

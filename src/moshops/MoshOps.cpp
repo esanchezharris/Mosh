@@ -40,6 +40,24 @@ namespace
     // (vs the legacy lane, which never touches the source clip). File-local, round-trip-safe.
     const juce::Identifier kSourceMutedByLayer ("sourceMutedByLayer");
 
+    bool lyricTextIsCompleteForSing (const juce::String& text)
+    {
+        const auto t = text.trim();
+        if (t.isEmpty() || t.contains ("___"))
+            return false;
+        for (auto p = t.getCharPointer(); ! p.isEmpty(); ++p)
+            if (juce::CharacterFunctions::isLetterOrDigit (*p))
+                return true;
+        return false;
+    }
+
+    bool lyricLineIsAssertedForSing (const juce::ValueTree& line)
+    {
+        return line.hasProperty (ids::lyricScore)
+            && line[ids::status].toString() == "asserted"
+            && lyricTextIsCompleteForSing (line[ids::lyricText].toString());
+    }
+
     // Phase 3 — a one-shot lambda timer used for the per-clip reactive-render debounce. Calls fn ONCE
     // after the delay (it stops itself first), so each reactiveTouch just restarts it (coalescing a
     // burst of edits into a single re-render). Fires on the message thread (juce::Timer's thread).
@@ -606,6 +624,7 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "regenerate_lyric")     return cmdRegenerateLyric (args);
     if (name == "cancel_lyric_job")     return cmdCancelLyricJob (args);
     if (name == "accept_lyric_proposal") return cmdAcceptLyricProposal (args);
+    if (name == "assert_lyric_line")    return cmdAssertLyricLine (args);
     if (name == "reject_lyric_proposal") return cmdRejectLyricProposal (args);
     if (name == "analyze_lyrics")       return cmdAnalyzeLyrics (args);
     if (name == "get_lyric_corpus_stats") return cmdGetLyricCorpusStats (args);
@@ -1031,7 +1050,9 @@ juce::var MoshOps::cmdSetLyricLine (const juce::var& args)
     // but must stay `skeleton` while the producer edits the grid (the +/- syllable stepper
     // goes through here) — confirm_skeleton does the skeleton→seed flip. (NOTE: `proposed` is
     // L2's "has proposals" status — distinct — so it's NOT preserved here.)
-    if (line[ids::status].toString() != "skeleton"
+    const bool contentEdited = args.hasProperty ("text") || args.hasProperty ("seedText");
+    if (contentEdited
+        && line[ids::status].toString() != "skeleton"
         && (line[ids::lyricText].toString().isNotEmpty() || line[ids::lyricSeedText].toString().isNotEmpty()))
         line.setProperty (ids::status, "seed", &undoManager());
 
@@ -1120,6 +1141,10 @@ juce::var MoshOps::lyricSheetToVar (te::AudioTrack& t)
         lo->setProperty ("locked",          (bool) l[ids::lyricLocked]);
         lo->setProperty ("sectionId",       l[ids::lyricSectionId].toString());
         lo->setProperty ("status",          l[ids::status].toString());
+        const bool asserted = l[ids::status].toString() == "asserted"
+                              && lyricTextIsCompleteForSing (l[ids::lyricText].toString());
+        lo->setProperty ("asserted", asserted);
+        lo->setProperty ("singable", lyricLineIsAssertedForSing (l));
         // L2 — transient ranked proposals (a JSON blob; absent ⇒ none) + regen counter.
         if (l.hasProperty (ids::lyricProposals))
         {
@@ -1322,11 +1347,13 @@ juce::var MoshOps::cmdAcceptLyricProposal (const juce::var& args)
     if (! props.isArray() || proposalIndex < 0 || proposalIndex >= props.size())
         return errResult ("accept_lyric_proposal", "no proposal at that index");
     const auto chosen = props[proposalIndex].getProperty ("text", var()).toString();
+    if (! lyricTextIsCompleteForSing (chosen))
+        return errResult ("accept_lyric_proposal", "proposal has unresolved words");
 
     beginTxn ("accept_lyric_proposal");
     node.setProperty (ids::lyricText, chosen, &undoManager());     // the COMMIT (undoable)
-    node.setProperty (ids::status, "accepted", &undoManager());
-    node.removeProperty (ids::lyricProposals, nullptr);            // clear the ephemeral proposals
+    node.setProperty (ids::status, "asserted", &undoManager());
+    node.removeProperty (ids::lyricProposals, &undoManager());     // clear the ephemeral proposals
     logLine ("accept_lyric_proposal", args, true, {}, true);       // explicit TASTE label (positive)
     emitSnapshotInvalidated();
 
@@ -1349,6 +1376,34 @@ juce::var MoshOps::cmdAcceptLyricProposal (const juce::var& args)
 
     auto* d = new DynamicObject(); d->setProperty ("text", chosen);
     return okResult ("accept_lyric_proposal", var (d));
+}
+
+juce::var MoshOps::cmdAssertLyricLine (const juce::var& args)
+{
+    const auto trackId = args.getProperty ("trackId", var()).toString();
+    const int lineIndex = (int) args.getProperty ("lineIndex", -1);
+    auto* t = findTrack (trackId);
+    if (t == nullptr) return errResult ("assert_lyric_line", "no track: " + trackId);
+    auto sheet = t->state.getChildWithName (ids::MOSH_LYRICSHEET);
+    if (! sheet.isValid()) return errResult ("assert_lyric_line", "track has no lyric sheet");
+    auto node = mosh::LyricSheet::lines (sheet).getChildWithProperty (ids::lyricIndex, lineIndex);
+    if (! node.isValid()) return errResult ("assert_lyric_line", "no line at index " + juce::String (lineIndex));
+
+    const auto assertedText = args.hasProperty ("text")
+        ? args.getProperty ("text", var()).toString()
+        : node[ids::lyricText].toString();
+    if (! lyricTextIsCompleteForSing (assertedText))
+        return errResult ("assert_lyric_line", "line needs complete words before it can be asserted");
+
+    beginTxn ("assert_lyric_line");
+    node.setProperty (ids::lyricText, assertedText.trim(), &undoManager());
+    node.setProperty (ids::status, "asserted", &undoManager());
+    node.removeProperty (ids::lyricProposals, &undoManager());
+    logLine ("assert_lyric_line", args, true, {}, true);
+    emitSnapshotInvalidated();
+
+    auto* d = new DynamicObject(); d->setProperty ("text", assertedText.trim());
+    return okResult ("assert_lyric_line", var (d));
 }
 
 juce::var MoshOps::cmdRejectLyricProposal (const juce::var& args)
@@ -5821,6 +5876,14 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
                                                 : juce::ValueTree();
         if (! sheet.isValid())
             return errResult ("render_layer", "sing needs a lyric sheet on the clip's track (build a flow from a take first)");
+
+        auto lines = mosh::LyricSheet::lines (sheet);
+        int singableLines = 0;
+        for (int i = 0; i < lines.getNumChildren(); ++i)
+            if (lyricLineIsAssertedForSing (lines.getChild (i)))
+                ++singableLines;
+        if (singableLines == 0)
+            return errResult ("render_layer", "no asserted words to sing - assert the lyric line first");
     }
 
     // Phase 3 — snapshot the reactive epoch at submit; finalizeRender drops a result whose epoch the
@@ -5939,21 +6002,21 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
         for (int i = 0; i < lines.getNumChildren(); ++i)
         {
             auto l = lines.getChild (i);
+            if (! lyricLineIsAssertedForSing (l))
+                continue;
+
+            const auto parsed = juce::JSON::parse (l[ids::lyricScore].toString());
+            if (! parsed.isObject())
+                continue;
+
             auto* lo = new DynamicObject();
-            const auto text = l[ids::lyricText].toString().isNotEmpty()
-                                  ? l[ids::lyricText].toString()
-                                  : l[ids::lyricSeedText].toString();
-            lo->setProperty ("text", text);
-            if (l.hasProperty (ids::lyricScore))
-            {
-                // Guard the parse like the file's other transient JSON blobs (lyricProposals,
-                // lyricAnalysis) — a corrupt persisted blob must be excluded, not sent as null.
-                const auto parsed = juce::JSON::parse (l[ids::lyricScore].toString());
-                if (parsed.isObject())
-                    lo->setProperty ("score", parsed);
-            }
+            lo->setProperty ("text", l[ids::lyricText].toString());
+            lo->setProperty ("score", parsed);
+            lo->setProperty ("asserted", true);
             arr.add (var (lo));
         }
+        if (arr.isEmpty())
+            return errResult ("render_layer", "no asserted words to sing - assert the lyric line first");
         singLines = var (arr);
         const auto singJson = juce::JSON::toString (singLines, true);
         const auto singSig = juce::MD5 (singJson.toRawUTF8(), (size_t) singJson.getNumBytesAsUTF8()).toHexString();
