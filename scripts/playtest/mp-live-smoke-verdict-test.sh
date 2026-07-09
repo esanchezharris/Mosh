@@ -19,7 +19,11 @@ mkdir -p "$(dirname "$out")" "$HOME/Library/Mosh/$session/by-hash" "$HOME/Librar
 
 if [[ "$session" == *mpA* ]]; then
   printf '{"command":"mp_create_session","ok":true,"data":{"code":"ROOM42"}}\n'
-  printf '{"command":"mp_commit_track","ok":true,"data":{"audioRefs":[{"hash":"stemhash"}]}}\n' > "$out"
+  if [ "$mode" = "pass_no_a_out" ]; then
+    printf '{"command":"mp_commit_track","ok":true,"data":{"audioRefs":[{"hash":"stemhash"}]}}\n'
+  else
+    printf '{"command":"mp_commit_track","ok":true,"data":{"audioRefs":[{"hash":"stemhash"}]}}\n' > "$out"
+  fi
   sleep 60
   exit 0
 fi
@@ -27,7 +31,7 @@ fi
 printf '{"command":"mp_join_session","ok":true}\n{"command":"save","ok":true}\n' > "$out"
 
 case "$mode" in
-  pass)
+  pass|pass_no_a_out)
     printf 'stem\n' > "$HOME/Library/Mosh/$session/by-hash/stemhash.wav"
     printf '<TRACK name="SmokeDrums"/>\n<TRACK name="SmokeTone"/>\n' > "$HOME/Library/Mosh/$session/edit/smoke.tracktionedit"
     ;;
@@ -69,6 +73,7 @@ run_case() {
 }
 
 run_case pass 0 "PASS"
+run_case pass_no_a_out 0 "PASS"
 run_case partial 1 "PARTIAL"
 run_case fail 1 "FAIL"
 
