@@ -125,3 +125,74 @@ The corpus derives arrangements/note data from third-party projects → **intern
 cold-start**. Do not redistribute fine-tuned weights without a rights review
 (arrangement-as-derivative-work is unresolved). Escalation trigger before any
 non-local / RunPod training on scraped projects.
+
+## Assist-feature demonstrations (fold into the NEXT dataset build)
+
+`assist_demonstrations.jsonl` contains 15 engine-verified AI-assisted micro asks:
+producer commands like "double the melody up an octave", "swing the hats",
+"high-pass the melody", "compress the bass", and "mute everything but the drums
+and bass". They are rendered by `ui/scripts/build_assist_sft.mts` in the same
+`{messages:[system,user,assistant]}` chat-JSONL shape as the normal SFT corpus:
+system = `buildSystemPrompt(DEFAULT_RULES, fixtureSnapshot)`, user = the ask,
+assistant = the verified `{intent, commands}` reply.
+
+Regenerate without touching a running training dataset:
+
+```bash
+cd ui
+npx tsx scripts/build_assist_sft.mts
+```
+
+For r5, include them through `assembleMix.mts` so they are train-only and recorded
+in the manifest:
+
+```bash
+cd ui
+npx tsx scripts/assembleMix.mts \
+  --base ../service/sft/.sft-data/<base> \
+  --synth ../service/sft/.sft-data/synth \
+  --assist ../service/sft/assist_demonstrations.jsonl \
+  --out ../service/sft/.sft-data/s2-mix-v5
+```
+
+Do not append these rows to `s2-mix-v4` or any dataset an active job is training
+on. The current r4 run is frozen and protected by `service/sft/monitor-r4.sh`.
+
+## R5 prep while r4 runs
+
+Use these scripts to prepare a candidate `s2-mix-v5-prep` dataset without
+starting another MLX job or mutating the detached r4 runtime files.
+
+First audit the live r4 target:
+
+```bash
+cd service/sft
+python3 audit_r4_target.py --out .sft-data/s2-mix-v5-prep/r4_target_audit.json
+```
+
+The audit verifies the monitor command still targets `s2-mix-v4`, train/valid
+counts are `12889/1650`, and the v4 train file contains the 155
+`offset-coords.jsonl` rows plus the 60 `render-routing.jsonl` rows. It
+intentionally treats empty stale `r4-renderparam.jsonl` as non-source material.
+
+Then build the local r5 candidate:
+
+```bash
+cd service/sft
+python3 prepare_r5_prep.py
+```
+
+`prepare_r5_prep.py` copies r4 `train.jsonl` and `valid.jsonl` into
+`.sft-data/s2-mix-v5-prep`, appends the 15 assist demonstrations to train only,
+runs `filter_by_length.py` on that prep directory only, and writes
+`.sft-data/s2-mix-v5-prep/manifest.json` with source paths, row counts, hashes,
+the r4 monitor snapshot, restart policy, and the evaluator sidecar path.
+
+The sidecar is built by `build_evaluator_sidecar.py`. It reads existing local
+label or bench JSONL sources only, includes ranker/Audiobox/CLAP fields only
+when those fields already exist in the source rows, and writes Gemini as
+disabled. It does not call Gemini, Audiobox, CLAP, SA3, MLX, or any fused model.
+
+Restart policy remains explicit: keep r4 running unless `audit_r4_target.py`
+proves the current target is wrong or incomplete. Assist rows, sidecar metadata,
+and the existence of an r5 idea are not restart reasons.
