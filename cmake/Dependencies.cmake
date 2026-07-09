@@ -22,7 +22,8 @@ set(TE_ADD_EXAMPLES OFF CACHE BOOL "" FORCE)
 # patches against the new revision.
 set(MOSH_TRACKTION_PATCHES
     "${CMAKE_CURRENT_LIST_DIR}/../patches/0001-tracktion-createNewItemID-scan-all-caches.patch"
-    "${CMAKE_CURRENT_LIST_DIR}/../patches/0002-juce-headless-vst3-adopt-description-scan-host.patch")
+    "${CMAKE_CURRENT_LIST_DIR}/../patches/0002-juce-headless-vst3-adopt-description-scan-host.patch"
+    "${CMAKE_CURRENT_LIST_DIR}/../patches/0003-tracktion-parameter-set-without-nested-undo.patch")
 FetchContent_Declare(tracktion_engine
     GIT_REPOSITORY      https://github.com/Tracktion/tracktion_engine.git
     GIT_TAG             2877b621f2fbee564d0696a616b86bf8ba8c8ab0

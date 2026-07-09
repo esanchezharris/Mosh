@@ -58,11 +58,10 @@ namespace
     // command logged undoable:true. A bare ValueTree write through the UndoManager would
     // record the property change, but on undo Tracktion deliberately refreshes only the
     // CachedValue and does NOT push the value back into the parameter's currentValue (the
-    // atomic getVolumeDb()/getPan() — and thus snapshot() — read). So the *setter* must
-    // run on both perform and undo. This UndoableAction does exactly that: it captures the
-    // prior value and replays the proper setter on perform/undo/redo, keeping the live
-    // parameter (and snapshot) in sync at every step. One undo system: it lives inside the
-    // edit's UndoManager transaction, grouped with the command's beginNewTransaction.
+    // atomic getVolumeDb()/getPan() — and thus snapshot() — read). So the parameter must
+    // be replayed on perform/undo/redo, but without nesting another UndoManager action
+    // while JUCE is already inside this UndoableAction. Tracktion's Mosh patch exposes
+    // setParameterWithoutUndo for that replay path.
     struct SetFaderValueAction final : public juce::UndoableAction
     {
         SetFaderValueAction (te::VolumeAndPanPlugin& p, bool panNotVol, float newValue)
@@ -75,8 +74,20 @@ namespace
 
         void apply (float v)
         {
-            if (isPan) plugin.setPan (v);
-            else       plugin.setVolumeDb (v);
+            if (isPan)
+            {
+                if (v >= -0.005f && v <= 0.005f)
+                    v = 0.0f;
+
+                plugin.panParam->setParameterWithoutUndo (juce::jlimit (-1.0f, 1.0f, v),
+                                                          juce::sendNotification);
+            }
+            else
+            {
+                plugin.volParam->setParameterWithoutUndo (juce::jlimit (0.0f, 1.0f,
+                                                                         te::decibelsToVolumeFaderPosition (v)),
+                                                          juce::sendNotification);
+            }
         }
 
         te::VolumeAndPanPlugin& plugin;
