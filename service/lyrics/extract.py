@@ -81,8 +81,6 @@ def credible(w: dict) -> bool:
     conf = float(w.get("confidence", 0) or 0)
     if not c or is_filler(c) or conf < CONF_FLOOR:
         return False
-    if _pron().phones(c) is None:
-        return False
     syl = int(w.get("syl") or _pron().syllables(c) or 1)
     return conf >= CONF_HI or (conf >= CONF_LO and syl >= 2)
 
