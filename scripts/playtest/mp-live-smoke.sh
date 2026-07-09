@@ -22,7 +22,11 @@ SESS_A="session-pp-mpA-$$"; SESS_B="session-pp-mpB-$$"
 for s in "$SESS_A" "$SESS_B"; do rm -rf "$HOME/Library/Mosh/$s" "$HOME/Library/Mosh/${s}-undo"; done
 
 echo "binary: $BIN"
-echo "relay : (baked cloud default — no MOSH_RELAY_URL set)"
+if [ -n "${MOSH_RELAY_URL:-}" ]; then
+  echo "relay : $MOSH_RELAY_URL"
+else
+  echo "relay : (baked cloud default — no MOSH_RELAY_URL set)"
+fi
 
 # ── Process A: create session, build content, commit, then stay online ──────────
 cat > "$ART/a.jsonl" <<'EOF'
@@ -87,15 +91,18 @@ echo "=== B command results ==="; cat "$ART/b.out" 2>/dev/null
 BDIR="$HOME/Library/Mosh/$SESS_B"
 
 # A's uploaded stem hash (from A's tone-track commit).
-A_HASH="$(python3 - "$ART/a.out" <<'PY'
-import sys, json
-for line in open(sys.argv[1]):
-    line=line.strip()
-    if not line: continue
-    try: o=json.loads(line)
-    except Exception: continue
-    for r in (o.get("data",{}).get("audioRefs") or []):
-        if r.get("hash"): print(r["hash"]); raise SystemExit
+A_HASH="$(python3 - "$ART/a.out" "$ART/a.stdout" <<'PY'
+import json, os, sys
+for path in sys.argv[1:]:
+    if not os.path.exists(path):
+        continue
+    for line in open(path):
+        line=line.strip()
+        if not line: continue
+        try: o=json.loads(line)
+        except Exception: continue
+        for r in (o.get("data",{}).get("audioRefs") or []):
+            if r.get("hash"): print(r["hash"]); raise SystemExit
 PY
 )"
 echo "A uploaded stem hash: ${A_HASH:-<none>}"
@@ -116,7 +123,9 @@ fi
 
 # ── verdict ─────────────────────────────────────────────────────────────────────
 STEM_OK=0
-[ -n "$A_HASH" ] && find "$BDIR" -name "$A_HASH.*" -type f >/dev/null 2>&1 && STEM_OK=1
+if [ -n "$A_HASH" ] && [ -n "$(find "$BDIR" -name "$A_HASH.*" -type f -print -quit 2>/dev/null)" ]; then
+  STEM_OK=1
+fi
 echo
 echo "RESULT:"
 if [ "$STEM_OK" = 1 ] && [ "$DRUMS" = 1 ] && [ "$TONE" = 1 ]; then
@@ -124,7 +133,7 @@ if [ "$STEM_OK" = 1 ] && [ "$DRUMS" = 1 ] && [ "$TONE" = 1 ]; then
   exit 0
 elif [ "$STEM_OK" = 1 ]; then
   echo "  PARTIAL — B downloaded A's audio stem (blob round-trip OK), but the saved edit did not show both track names (DRUMS=$DRUMS TONE=$TONE)."
-  exit 0
+  exit 1
 else
   echo "  FAIL — B did not receive A's audio stem; sync did not deliver across processes."
   exit 1
