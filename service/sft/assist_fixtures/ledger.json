@@ -1,0 +1,685 @@
+{
+  "pass": 15,
+  "total": 15,
+  "rows": [
+    {
+      "key": "midi_octave_double",
+      "cluster": "MIDI",
+      "ask": "double the melody up an octave",
+      "ok": true,
+      "commands": [
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "${MEL_C}",
+            "pitch": 72,
+            "start": 0.0,
+            "length": 1,
+            "velocity": 100
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "${MEL_C}",
+            "pitch": 76,
+            "start": 1.0,
+            "length": 1,
+            "velocity": 100
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "${MEL_C}",
+            "pitch": 79,
+            "start": 2.0,
+            "length": 1,
+            "velocity": 100
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "${MEL_C}",
+            "pitch": 84,
+            "start": 3.0,
+            "length": 1,
+            "velocity": 100
+          }
+        }
+      ],
+      "detail": {
+        "clean_apply": true,
+        "before_pitches": [
+          60,
+          64,
+          67,
+          72
+        ],
+        "after_pitches": [
+          60,
+          64,
+          67,
+          72,
+          72,
+          76,
+          79,
+          84
+        ],
+        "expected": [
+          60,
+          64,
+          67,
+          72,
+          72,
+          76,
+          79,
+          84
+        ]
+      }
+    },
+    {
+      "key": "midi_transpose_down",
+      "cluster": "MIDI",
+      "ask": "transpose the melody down a fifth",
+      "ok": true,
+      "commands": [
+        {
+          "command": "set_note",
+          "args": {
+            "clipId": "${MEL_C}",
+            "noteIndex": 0,
+            "pitch": 53
+          }
+        },
+        {
+          "command": "set_note",
+          "args": {
+            "clipId": "${MEL_C}",
+            "noteIndex": 1,
+            "pitch": 57
+          }
+        },
+        {
+          "command": "set_note",
+          "args": {
+            "clipId": "${MEL_C}",
+            "noteIndex": 2,
+            "pitch": 60
+          }
+        },
+        {
+          "command": "set_note",
+          "args": {
+            "clipId": "${MEL_C}",
+            "noteIndex": 3,
+            "pitch": 65
+          }
+        }
+      ],
+      "detail": {
+        "clean_apply": true,
+        "after": [
+          53,
+          57,
+          60,
+          65
+        ],
+        "want": [
+          53,
+          57,
+          60,
+          65
+        ]
+      }
+    },
+    {
+      "key": "midi_harmonize",
+      "cluster": "MIDI",
+      "ask": "harmonize the melody with thirds and fifths",
+      "ok": true,
+      "commands": [
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "${MEL_C}",
+            "pitch": 64,
+            "start": 0.0,
+            "length": 1,
+            "velocity": 85
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "${MEL_C}",
+            "pitch": 67,
+            "start": 0.0,
+            "length": 1,
+            "velocity": 85
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "${MEL_C}",
+            "pitch": 68,
+            "start": 1.0,
+            "length": 1,
+            "velocity": 85
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "${MEL_C}",
+            "pitch": 71,
+            "start": 1.0,
+            "length": 1,
+            "velocity": 85
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "${MEL_C}",
+            "pitch": 71,
+            "start": 2.0,
+            "length": 1,
+            "velocity": 85
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "${MEL_C}",
+            "pitch": 74,
+            "start": 2.0,
+            "length": 1,
+            "velocity": 85
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "${MEL_C}",
+            "pitch": 76,
+            "start": 3.0,
+            "length": 1,
+            "velocity": 85
+          }
+        },
+        {
+          "command": "add_note",
+          "args": {
+            "clipId": "${MEL_C}",
+            "pitch": 79,
+            "start": 3.0,
+            "length": 1,
+            "velocity": 85
+          }
+        }
+      ],
+      "detail": {
+        "clean_apply": true,
+        "after_count": 12,
+        "want_count": 12
+      }
+    },
+    {
+      "key": "midi_crescendo",
+      "cluster": "MIDI",
+      "ask": "make the melody crescendo",
+      "ok": true,
+      "commands": [
+        {
+          "command": "set_note",
+          "args": {
+            "clipId": "${MEL_C}",
+            "noteIndex": 0,
+            "velocity": 55
+          }
+        },
+        {
+          "command": "set_note",
+          "args": {
+            "clipId": "${MEL_C}",
+            "noteIndex": 1,
+            "velocity": 79
+          }
+        },
+        {
+          "command": "set_note",
+          "args": {
+            "clipId": "${MEL_C}",
+            "noteIndex": 2,
+            "velocity": 103
+          }
+        },
+        {
+          "command": "set_note",
+          "args": {
+            "clipId": "${MEL_C}",
+            "noteIndex": 3,
+            "velocity": 127
+          }
+        }
+      ],
+      "detail": {
+        "clean_apply": true,
+        "velocities": [
+          55,
+          79,
+          103,
+          127
+        ]
+      }
+    },
+    {
+      "key": "groove_swing_hats",
+      "cluster": "Groove",
+      "ask": "swing the hats around 55%",
+      "ok": true,
+      "commands": [
+        {
+          "command": "set_note",
+          "args": {
+            "clipId": "${DRUM_C}",
+            "noteIndex": 2,
+            "start": 0.62
+          }
+        },
+        {
+          "command": "set_note",
+          "args": {
+            "clipId": "${DRUM_C}",
+            "noteIndex": 5,
+            "start": 1.62
+          }
+        },
+        {
+          "command": "set_note",
+          "args": {
+            "clipId": "${DRUM_C}",
+            "noteIndex": 8,
+            "start": 2.62
+          }
+        },
+        {
+          "command": "set_note",
+          "args": {
+            "clipId": "${DRUM_C}",
+            "noteIndex": 11,
+            "start": 3.62
+          }
+        }
+      ],
+      "detail": {
+        "clean_apply": true,
+        "hats_before": [
+          0.0,
+          0.5,
+          1.0,
+          1.5,
+          2.0,
+          2.5,
+          3.0,
+          3.5
+        ],
+        "hats_after": [
+          0.0,
+          0.62,
+          1.0,
+          1.62,
+          2.0,
+          2.62,
+          3.0,
+          3.62
+        ],
+        "onbeat_ok": true,
+        "offbeat_ok": true,
+        "kick_snare_same": true
+      }
+    },
+    {
+      "key": "groove_humanize",
+      "cluster": "Groove",
+      "ask": "humanize the hats",
+      "ok": true,
+      "commands": [
+        {
+          "command": "set_note",
+          "args": {
+            "clipId": "${DRUM_C}",
+            "noteIndex": 1,
+            "start": 0.0
+          }
+        },
+        {
+          "command": "set_note",
+          "args": {
+            "clipId": "${DRUM_C}",
+            "noteIndex": 2,
+            "start": 0.515
+          }
+        },
+        {
+          "command": "set_note",
+          "args": {
+            "clipId": "${DRUM_C}",
+            "noteIndex": 4,
+            "start": 0.992
+          }
+        },
+        {
+          "command": "set_note",
+          "args": {
+            "clipId": "${DRUM_C}",
+            "noteIndex": 5,
+            "start": 1.515
+          }
+        },
+        {
+          "command": "set_note",
+          "args": {
+            "clipId": "${DRUM_C}",
+            "noteIndex": 7,
+            "start": 1.992
+          }
+        },
+        {
+          "command": "set_note",
+          "args": {
+            "clipId": "${DRUM_C}",
+            "noteIndex": 8,
+            "start": 2.515
+          }
+        },
+        {
+          "command": "set_note",
+          "args": {
+            "clipId": "${DRUM_C}",
+            "noteIndex": 10,
+            "start": 2.992
+          }
+        },
+        {
+          "command": "set_note",
+          "args": {
+            "clipId": "${DRUM_C}",
+            "noteIndex": 11,
+            "start": 3.515
+          }
+        }
+      ],
+      "detail": {
+        "clean_apply": true,
+        "hats_after": [
+          0.0,
+          0.515,
+          0.992,
+          1.515,
+          1.992,
+          2.515,
+          2.992,
+          3.515
+        ]
+      }
+    },
+    {
+      "key": "mix_reverb_duck",
+      "cluster": "Mixing",
+      "ask": "add reverb to the vocal and bring it down 3 dB",
+      "ok": true,
+      "commands": [
+        {
+          "command": "load_builtin",
+          "args": {
+            "trackId": "${VOX_T}",
+            "type": "reverb"
+          }
+        },
+        {
+          "command": "set_track_volume",
+          "args": {
+            "trackId": "${VOX_T}",
+            "db": -3
+          }
+        }
+      ],
+      "detail": {
+        "clean_apply": true,
+        "vocal_plugins": [
+          "reverb",
+          "volume"
+        ],
+        "vocal_volumeDb": -3.000000476837158
+      }
+    },
+    {
+      "key": "mix_highpass_melody",
+      "cluster": "Mixing",
+      "ask": "high-pass the melody",
+      "ok": true,
+      "commands": [
+        {
+          "command": "load_builtin",
+          "args": {
+            "trackId": "${MEL_T}",
+            "type": "4bandEq"
+          }
+        },
+        {
+          "command": "set_plugin_param",
+          "args": {
+            "trackId": "${MEL_T}",
+            "index": 1,
+            "paramIndex": 1,
+            "value": 0.12
+          }
+        },
+        {
+          "command": "set_plugin_param",
+          "args": {
+            "trackId": "${MEL_T}",
+            "index": 1,
+            "paramIndex": 0,
+            "value": 0.35
+          }
+        }
+      ],
+      "detail": {
+        "clean_apply": true,
+        "melody_eq_lowshelf_gain": 0.120000004768372,
+        "melody_eq_lowshelf_freq": 0.349999994039536
+      }
+    },
+    {
+      "key": "mix_compress_bass",
+      "cluster": "Mixing",
+      "ask": "compress the bass",
+      "ok": true,
+      "commands": [
+        {
+          "command": "load_builtin",
+          "args": {
+            "trackId": "${BASS_T}",
+            "type": "compressor"
+          }
+        },
+        {
+          "command": "set_plugin_param",
+          "args": {
+            "trackId": "${BASS_T}",
+            "index": 1,
+            "paramIndex": 0,
+            "value": 0.32
+          }
+        },
+        {
+          "command": "set_plugin_param",
+          "args": {
+            "trackId": "${BASS_T}",
+            "index": 1,
+            "paramIndex": 1,
+            "value": 0.72
+          }
+        },
+        {
+          "command": "set_plugin_param",
+          "args": {
+            "trackId": "${BASS_T}",
+            "index": 1,
+            "paramIndex": 3,
+            "value": 0.28
+          }
+        }
+      ],
+      "detail": {
+        "clean_apply": true,
+        "bass_comp_threshold": 0.319999992847443,
+        "bass_comp_ratio": 0.720000028610229
+      }
+    },
+    {
+      "key": "mix_brighten",
+      "cluster": "Mixing",
+      "ask": "brighten the melody",
+      "ok": true,
+      "commands": [
+        {
+          "command": "load_builtin",
+          "args": {
+            "trackId": "${MEL_T}",
+            "type": "4bandEq"
+          }
+        },
+        {
+          "command": "set_plugin_param",
+          "args": {
+            "trackId": "${MEL_T}",
+            "index": 1,
+            "paramIndex": 10,
+            "value": 0.72
+          }
+        }
+      ],
+      "detail": {
+        "clean_apply": true,
+        "melody_eq_highshelf_gain": 0.720000028610229
+      }
+    },
+    {
+      "key": "mix_pan_left",
+      "cluster": "Mixing",
+      "ask": "pan the melody a bit to the left",
+      "ok": true,
+      "commands": [
+        {
+          "command": "set_track_pan",
+          "args": {
+            "trackId": "${MEL_T}",
+            "pan": -0.5
+          }
+        }
+      ],
+      "detail": {
+        "clean_apply": true,
+        "melody_pan": -0.5
+      }
+    },
+    {
+      "key": "structure_mute_but",
+      "cluster": "Structure",
+      "ask": "mute everything but the drums and bass",
+      "ok": true,
+      "commands": [
+        {
+          "command": "set_track_mute",
+          "args": {
+            "trackId": "${MEL_T}",
+            "mute": true
+          }
+        },
+        {
+          "command": "set_track_mute",
+          "args": {
+            "trackId": "${VOX_T}",
+            "mute": true
+          }
+        }
+      ],
+      "detail": {
+        "clean_apply": true,
+        "mute": {
+          "Drums": false,
+          "Bass": false,
+          "Melody": true,
+          "Vocal": true
+        }
+      }
+    },
+    {
+      "key": "structure_solo_drums",
+      "cluster": "Structure",
+      "ask": "solo the drums",
+      "ok": true,
+      "commands": [
+        {
+          "command": "set_track_solo",
+          "args": {
+            "trackId": "${DRUM_T}",
+            "solo": true
+          }
+        }
+      ],
+      "detail": {
+        "clean_apply": true,
+        "drums_solo": true
+      }
+    },
+    {
+      "key": "structure_rename",
+      "cluster": "Structure",
+      "ask": "rename the melody track to Lead",
+      "ok": true,
+      "commands": [
+        {
+          "command": "rename_track",
+          "args": {
+            "trackId": "${MEL_T}",
+            "name": "Lead"
+          }
+        }
+      ],
+      "detail": {
+        "clean_apply": true,
+        "track_names": [
+          "Drums",
+          "Bass",
+          "Lead",
+          "Vocal"
+        ]
+      }
+    },
+    {
+      "key": "transport_tempo90",
+      "cluster": "Transport",
+      "ask": "set the tempo to 90",
+      "ok": true,
+      "commands": [
+        {
+          "command": "set_tempo",
+          "args": {
+            "bpm": 90
+          }
+        }
+      ],
+      "detail": {
+        "clean_apply": true,
+        "tempo": 90.0
+      }
+    }
+  ]
+}
