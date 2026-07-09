@@ -8,6 +8,7 @@ import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
 import type { DirListing } from "../types";
 import { filterEntries, loadRecents, addRecentSample, SAMPLE_DND_MIME } from "./sampleBrowserUtil";
+import { IconArrowUp, IconFolder, IconWaveform } from "./icons";
 
 const baseName = (p: string) => p.split("/").pop() ?? p;
 
@@ -73,8 +74,16 @@ export function SampleBrowser() {
     e.dataTransfer.effectAllowed = "copy";
   };
   const auditionBtn = (path: string) => (
-    <button className="sb-audition" onClick={toggleAudition(path)} aria-pressed={auditioning === path}
-      aria-label={auditioning === path ? "Stop preview" : "Audition"} title="Audition">{auditioning === path ? "⏸" : "▶"}</button>
+    <button
+      className="sb-audition"
+      style={{ width: auditioning === path ? 40 : 34 }}
+      onClick={toggleAudition(path)}
+      aria-pressed={auditioning === path}
+      aria-label={auditioning === path ? "Stop preview" : "Audition sample"}
+      title={auditioning === path ? "Stop preview" : "Audition sample"}
+    >
+      <span className="sb-audition-label">{auditioning === path ? "Stop" : "Cue"}</span>
+    </button>
   );
 
   const entries = filterEntries(listing?.entries ?? [], query);
@@ -82,46 +91,102 @@ export function SampleBrowser() {
   const files = entries.filter((e) => !e.isDir);
 
   return (
-    <>
-      <div className="pop-head">Samples</div>
-      <div className="pop-row">
-        <button className="btn" disabled={!listing?.parent} onClick={() => void navigate(listing?.parent ?? undefined)}>↑ Up</button>
-        <span className="pop-note" title={listing?.path}>{listing?.path ?? "…"}</span>
+    <div className="sb-browser">
+      <div className="pop-head">
+        <div className="sb-heading">
+          <span className="sb-title">Sounds</span>
+          <span className="sb-subtitle">Browse folders, recent imports, and audio files.</span>
+        </div>
       </div>
-      <input className="sb-search" type="search" placeholder="Filter samples…" aria-label="Filter samples"
-        value={query} onChange={(e) => setQuery(e.target.value)} />
+      <div className="pop-row sb-location">
+        <button className="btn" disabled={!listing?.parent} onClick={() => void navigate(listing?.parent ?? undefined)}>
+          <IconArrowUp size={14} />
+          <span>Up</span>
+        </button>
+        <div className="sb-location-copy">
+          <span className="sb-location-label">Current folder</span>
+          <span className="pop-note" title={listing?.path}>{listing?.path ?? "Loading sounds..."}</span>
+        </div>
+      </div>
+      <label className="sb-search-field" style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        <span className="sb-search-label">Search sounds</span>
+        <input
+          className="sb-search"
+          type="search"
+          placeholder="Filter samples by name..."
+          aria-label="Filter samples"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+      </label>
       {recents.length > 0 && query === "" && (
-        <div className="plugin-group"><div className="pg-label">Recent</div>
+        <section className="plugin-group sb-section" aria-label="Recent imports">
+          <div className="pg-label">
+            <span>Recent imports</span>
+            <span className="sb-section-count">{Math.min(recents.length, 6)}</span>
+          </div>
           {recents.slice(0, 6).map((p) => (
             <div key={p} className="plugin-row cb-file" draggable onDragStart={onDragStart(p)} title={p}>
               {auditionBtn(p)}
-              <span className="pr-name">↩ {baseName(p)}</span>
+              <span className="sb-row-icon" aria-hidden><IconWaveform size={14} /></span>
+              <div className="pr-name sb-row-copy">
+                <span className="sb-row-title">{baseName(p)}</span>
+                <span className="sb-row-meta">{p}</span>
+              </div>
               <button className="btn cb-import" onClick={() => void onImport(p)}>Import</button>
             </div>
           ))}
-        </div>
+        </section>
       )}
       <div className="modal-list" data-testid="content-browser" style={{ maxHeight: 240 }}>
         {dirs.length > 0 && (
-          <div className="plugin-group"><div className="pg-label">Folders</div>
-            {dirs.map((d) => <button key={d.path} className="plugin-row" onClick={() => void navigate(d.path)}><span className="pr-name"><span className="pr-folder" aria-hidden>▸</span> {d.name}</span></button>)}
-          </div>
+          <section className="plugin-group sb-section" aria-label="Folders">
+            <div className="pg-label">
+              <span>Folders</span>
+              <span className="sb-section-count">{dirs.length}</span>
+            </div>
+            {dirs.map((d) => (
+              <button key={d.path} className="plugin-row" onClick={() => void navigate(d.path)} title={d.path}>
+                <span className="sb-row-icon" aria-hidden><IconFolder size={14} /></span>
+                <div className="pr-name sb-row-copy">
+                  <span className="sb-row-title">{d.name}</span>
+                  <span className="sb-row-meta">{d.path}</span>
+                </div>
+                <span className="pr-folder sb-row-affordance" aria-hidden="true">Open</span>
+              </button>
+            ))}
+          </section>
         )}
         {files.length > 0 && (
-          <div className="plugin-group"><div className="pg-label">Audio files</div>
+          <section className="plugin-group sb-section" aria-label="Audio files">
+            <div className="pg-label">
+              <span>Audio files</span>
+              <span className="sb-section-count">{files.length}</span>
+            </div>
             {files.map((f) => (
-              <div key={f.path} className="plugin-row cb-file" data-testid="sample-row" draggable onDragStart={onDragStart(f.path)}
-                title="Drag onto a track, or Import">
+              <div
+                key={f.path}
+                className="plugin-row cb-file"
+                data-testid="sample-row"
+                draggable
+                onDragStart={onDragStart(f.path)}
+                title="Drag onto a track, or import it directly."
+              >
                 {auditionBtn(f.path)}
                 <SampleThumb path={f.path} />
-                <span className="pr-name">{f.name}</span>
+                <div className="pr-name sb-row-copy">
+                  <span className="sb-row-title">{f.name}</span>
+                  <span className="sb-row-meta">{f.path}</span>
+                </div>
                 <button className="btn cb-import" onClick={() => void onImport(f.path)}>Import</button>
               </div>
             ))}
-          </div>
+          </section>
         )}
-        {listing && entries.length === 0 && <div className="rack-empty">{query ? "no matches" : "empty"}</div>}
+        {listing && entries.length === 0 && (
+          <div className="rack-empty">{query ? "No sounds match this search." : "This folder is empty."}</div>
+        )}
       </div>
-    </>
+    </div>
   );
 }

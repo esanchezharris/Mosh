@@ -10,7 +10,7 @@ import { useStore } from "../store";
 import { useShell } from "./shellState";
 import { Moshi } from "../ui/Moshi";
 import { MoshMark } from "./MoshMark";
-import { IconCamera, IconCameraOff } from "../ui/icons";
+import { IconCamera, IconCameraOff, IconChevronLeft, IconSpark, IconUsers } from "../ui/icons";
 import { useVideo } from "../webrtc/useVideo";
 import { VideoTile } from "../ui/VideoTile";
 import { PresenceMeter } from "./PresenceMeter";
@@ -49,7 +49,7 @@ function MoshCard({ onCollapse }: { onCollapse: () => void }) {
         <span className="v2-mosh-head-r">
           <span className="v2-live"><span className="led" /> Live</span>
           <button className="v2-rail-collapse" data-testid="v2-rail-collapse" aria-label="Hide agent panel"
-            title="Hide" onClick={onCollapse}>⟩</button>
+            title="Hide" onClick={onCollapse}><IconChevronLeft size={14} /></button>
         </span>
       </div>
       <div className="v2-mosh-stage"><Moshi /></div>
@@ -66,7 +66,7 @@ function MoshStatusLine() {
   const text = say || (recording ? "recording…" : rendering ? "rendering…" : playing ? "listening" : "ready when you are");
   return (
     <div className="v2-mosh-status" role="status" aria-live="polite" data-testid="v2-mosh-status">
-      <span className="wave" aria-hidden>⩘</span>
+      <span className="wave" aria-hidden><IconSpark size={13} /></span>
       <span>{text}</span>
     </div>
   );
@@ -83,6 +83,7 @@ function CollaboratorsCard() {
   const setHidden = useVideo((s) => s.setHidden);
   const teardown = useVideo((s) => s.teardown);
   const others = mp.active ? Object.entries(peers).filter(([id]) => id !== mp.selfPeer) : Object.entries(peers);
+  const collaborationActive = mp.active || cameraOn || !!localStream || others.length > 0;
 
   // Release the camera on unmount + when the WebView is hidden (the light must not
   // stay on behind an invisible window) — mirrors the legacy Participants rail.
@@ -94,43 +95,67 @@ function CollaboratorsCard() {
   }, [setHidden]);
 
   return (
-    <section className="v2-card" data-testid="v2-collaborators">
+    <section className="v2-card v2-collab-card" data-testid="v2-collaborators" data-active={collaborationActive ? "true" : "false"}>
       <div className="v2-card-head">
         <span>Collaborators</span>
-        <button className={`v2-cam${cameraOn ? " on" : ""}`} data-testid="v2-camera-toggle" aria-pressed={cameraOn}
-          title={cameraOn ? "Turn camera off" : "Share your camera"} onClick={() => void toggleCamera()}>
-          {cameraOn ? <IconCamera size={15} /> : <IconCameraOff size={15} />}
-        </button>
+        {collaborationActive ? (
+          <button className={`v2-cam${cameraOn ? " on" : ""}`} data-testid="v2-camera-toggle" aria-pressed={cameraOn}
+            title={cameraOn ? "Turn camera off" : "Share your camera"} onClick={() => void toggleCamera()}>
+            {cameraOn ? <IconCamera size={15} /> : <IconCameraOff size={15} />}
+          </button>
+        ) : (
+          <span className="v2-collab-kicker">Invite when ready</span>
+        )}
       </div>
       <div className="v2-presence">
-        {cameraOn && localStream && (
-          <div className="v2-pcard" data-testid="v2-collab-self">
-            <VideoTile stream={localStream} muted label="Your camera" />
-            <div className="v2-pcard-meta">
-              <span className="dot" />
-              <span className="nm">You</span>
+        {!collaborationActive ? (
+          <div className="v2-collab-empty" data-testid="v2-collab-empty">
+            <div className="v2-collab-empty-icon" aria-hidden><IconUsers size={18} /></div>
+            <div className="v2-collab-empty-copy">
+              <strong>Start a shared session when you need it.</strong>
+              <span>Camera stays off until you explicitly join or share collaboration.</span>
             </div>
+            <button className="v2-invite" data-testid="v2-invite" onClick={() => { if (!mp.active) void mpCreate(); }}>
+              <IconUsers size={15} />
+              <span>Invite collaborator</span>
+            </button>
           </div>
-        )}
-        {others.map(([id, p]) => {
-          const stream = remoteStreams[id];
-          const offline = p.online === false;
-          return (
-            <div className="v2-pcard" key={id} data-testid="v2-collab-peer" data-cam={stream ? "on" : "off"}>
-              {stream
-                ? <VideoTile stream={stream} label={`${p.name}'s camera`} />
-                : <span className="v2-pcard-av" style={{ background: p.color }}>{(p.name || "?").charAt(0).toUpperCase()}</span>}
-              <div className="v2-pcard-meta">
-                <span className={`dot${offline ? " off" : ""}`} />
-                <span className="nm" title={p.name}>{p.name}</span>
-                {stream && <PresenceMeter stream={stream} />}
+        ) : (
+          <>
+            {cameraOn && localStream && (
+              <div className="v2-pcard" data-testid="v2-collab-self">
+                <VideoTile stream={localStream} muted label="Your camera" />
+                <div className="v2-pcard-meta">
+                  <span className="dot" />
+                  <span className="nm">You</span>
+                </div>
               </div>
+            )}
+            {others.map(([id, p]) => {
+              const stream = remoteStreams[id];
+              const offline = p.online === false;
+              return (
+                <div className="v2-pcard" key={id} data-testid="v2-collab-peer" data-cam={stream ? "on" : "off"}>
+                  {stream
+                    ? <VideoTile stream={stream} label={`${p.name}'s camera`} />
+                    : <span className="v2-pcard-av" style={{ background: p.color }}>{(p.name || "?").charAt(0).toUpperCase()}</span>}
+                  <div className="v2-pcard-meta">
+                    <span className={`dot${offline ? " off" : ""}`} />
+                    <span className="nm" title={p.name}>{p.name}</span>
+                    {stream && <PresenceMeter stream={stream} />}
+                  </div>
+                </div>
+              );
+            })}
+            <div className="v2-collab-actions">
+              <button className="v2-invite" data-testid="v2-invite" onClick={() => { if (!mp.active) void mpCreate(); }}>
+                <IconUsers size={15} />
+                <span>{mp.active ? "Share session" : "Invite collaborator"}</span>
+              </button>
+              {!cameraOn && <span className="v2-collab-hint">Camera stays off until you decide to share it.</span>}
             </div>
-          );
-        })}
-        <button className="v2-invite" data-testid="v2-invite" onClick={() => { if (!mp.active) void mpCreate(); }}>
-          ＋ Invite collaborator
-        </button>
+          </>
+        )}
       </div>
     </section>
   );
